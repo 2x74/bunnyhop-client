@@ -63,6 +63,16 @@ function cleanText(value, max = 80) {
 
 export const PRESENCE_KINDS = Object.freeze(['menu', 'playing', 'paused', 'results', 'replay']);
 export const PRESENCE_MODES = Object.freeze(['solo', 'multiplayer', 'practice', 'replay']);
+export const BUNNYHOP_LOGO_URL = 'https://bunnyhop.lol/icons/icon-512.png';
+
+// Only public, first-party map thumbnails may leave the renderer through RPC.
+// Reject other paths, arbitrary query parameters, credentials, and local URLs.
+function mapArtwork(value) {
+  if (typeof value !== 'string' || value.length > 256) return null;
+  if (!/^(?:https:\/\/bunnyhop\.lol)?\/thumbs\/[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.(?:webp|png|jpe?g)(?:\?v=[a-fA-F0-9]{1,64})?$/.test(value)) return null;
+  const url = new URL(value, 'https://bunnyhop.lol').href;
+  return url.length <= 256 ? url : null;
+}
 
 /** Renderer data fills only public map/style labels; URLs and room identifiers are ignored. */
 export function buildPresenceActivity(raw = {}, settings = {}) {
@@ -73,6 +83,7 @@ export function buildPresenceActivity(raw = {}, settings = {}) {
   const mode = PRESENCE_MODES.includes(raw.mode) ? raw.mode : 'solo';
   const named = settings.discordShowMap === true && !settings.privacyMode;
   const map = named && typeof raw.mapName === 'string' ? cleanText(raw.mapName, 64) : '';
+  const artwork = named && kind !== 'menu' && map ? mapArtwork(raw.mapImage) : null;
   const details = {
     menu: 'In the menu',
     playing: map ? `Hopping on ${map}` : 'Bunnyhopping',
@@ -90,6 +101,15 @@ export function buildPresenceActivity(raw = {}, settings = {}) {
     type: 0,
     details,
     state,
+    assets: artwork ? {
+      large_image: artwork,
+      large_text: map,
+      small_image: BUNNYHOP_LOGO_URL,
+      small_text: 'Bunnyhop',
+    } : {
+      large_image: BUNNYHOP_LOGO_URL,
+      large_text: 'Bunnyhop',
+    },
     timestamps: { start: startedAt },
     buttons: [{ label: 'Play Bunnyhop', url: 'https://bunnyhop.lol' }],
     instance: false,

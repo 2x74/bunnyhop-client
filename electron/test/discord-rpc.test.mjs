@@ -10,6 +10,7 @@ import {
   DiscordFrameDecoder,
   DiscordPresence,
   DiscordRpcClient,
+  BUNNYHOP_LOGO_URL,
   buildPresenceActivity,
   discordSocketCandidates,
   encodeDiscordFrame,
@@ -67,6 +68,42 @@ test('Discord socket candidates stay on local IPC paths', () => {
   assert.ok(linux.includes('/run/user/1000/discord-ipc-0'));
 });
 
+test('map artwork uses public thumbnails with a logo badge, and privacy removes every map asset', () => {
+  const raw = { kind: 'playing', mapName: 'Castle', mapImage: '/thumbs/bhop_castle.card.webp?v=abcdef1234' };
+  const options = { discordShowMap: true };
+  const logo = { large_image: BUNNYHOP_LOGO_URL, large_text: 'Bunnyhop' };
+  for (const kind of ['playing', 'paused', 'results', 'replay']) {
+    assert.deepEqual(buildPresenceActivity({ ...raw, kind }, options).assets, {
+      large_image: `https://bunnyhop.lol${raw.mapImage}`, large_text: 'Castle',
+      small_image: BUNNYHOP_LOGO_URL, small_text: 'Bunnyhop',
+    });
+  }
+  assert.deepEqual(buildPresenceActivity({ ...raw, mapImage: `https://bunnyhop.lol${raw.mapImage}` }, options).assets,
+    buildPresenceActivity(raw, options).assets);
+  for (const activity of [
+    buildPresenceActivity(raw, { discordShowMap: false }),
+    buildPresenceActivity(raw, { ...options, privacyMode: true }),
+    buildPresenceActivity({ ...raw, kind: 'menu' }, options),
+    buildPresenceActivity({ ...raw, mapImage: null }, options),
+    buildPresenceActivity({ ...raw, mapName: '' }, options),
+  ]) assert.deepEqual(activity.assets, logo);
+});
+
+test('untrusted artwork cannot send local paths, foreign hosts, or sensitive URLs to Discord', () => {
+  for (const mapImage of [
+    'file:///tmp/map.png', 'data:image/png;base64,abc', 'https://evil.example/map.png',
+    '//evil.example/map.png', 'https://bunnyhop.lol.evil.example/thumbs/map.png',
+    'https://user:password@bunnyhop.lol/thumbs/map.png', 'http://bunnyhop.lol/thumbs/map.png',
+    'https://bunnyhop.lol:8443/thumbs/map.png', '/api/account.png', '/thumbs/../secret.png',
+    '/thumbs/%2e%2e/secret.png', '/thumbs/map.svg', '/thumbs/map.png?token=secret',
+    '/thumbs/map.png?v=abcdef&token=secret', '/thumbs/map.png#secret',
+    '/thumbs/map.png\n', `/thumbs/${'a'.repeat(260)}.png`, {}, [],
+  ]) {
+    const activity = buildPresenceActivity({ kind: 'playing', mapName: 'Map', mapImage }, { discordShowMap: true });
+    assert.deepEqual(activity.assets, { large_image: BUNNYHOP_LOGO_URL, large_text: 'Bunnyhop' });
+  }
+});
+
 test('Discord client sends only handshake and presence commands after READY', async () => {
   const socket = new MockDiscordSocket();
   const client = new DiscordRpcClient('123456789012345678', {
@@ -83,7 +120,7 @@ test('Discord client sends only handshake and presence commands after READY', as
   assert.equal(handshake.op, 0);
   assert.deepEqual(handshake.payload, { v: 1, client_id: '123456789012345678' });
 
-  client.setActivity(buildPresenceActivity({ kind: 'playing', mapName: 'Castle' }, {
+  client.setActivity(buildPresenceActivity({ kind: 'playing', mapName: 'Castle', mapImage: '/thumbs/castle.card.webp' }, {
     discordShowMap: true,
     privacyMode: false,
   }));
@@ -94,6 +131,8 @@ test('Discord client sends only handshake and presence commands after READY', as
   const activity = new DiscordFrameDecoder().push(socket.writes[1])[0];
   assert.equal(activity.payload.cmd, 'SET_ACTIVITY');
   assert.equal(activity.payload.args.activity.details, 'Hopping on Castle');
+  assert.equal(activity.payload.args.activity.assets.large_image, 'https://bunnyhop.lol/thumbs/castle.card.webp');
+  assert.equal(activity.payload.args.activity.assets.small_image, BUNNYHOP_LOGO_URL);
   assert.deepEqual(activity.payload.args.activity.buttons, [
     { label: 'Play Bunnyhop', url: 'https://bunnyhop.lol' },
   ]);

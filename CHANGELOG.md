@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added Discord map artwork with a Bunnyhop logo badge and privacy-aware logo fallback.
+
 - Adapted the dedicated Electron shell to Bunnyhop and retained browser-native game input.
 - Added Bunnyhop settings, display/rendering profiles, local diagnostics, screenshot export, and a bounded run-summary vault.
 - Added optional PB screenshots tied to the matching visible result card.
