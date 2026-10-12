@@ -1,10 +1,31 @@
-<p align="center"><img src="assets/icon-512.png" width="96" alt="Bunnyhop"></p>
+<p align="center">
+  <img src="assets/readme-banner.svg" alt="Bunnyhop Desktop — Find your flow" width="100%">
+</p>
+
+<p align="center">
+  <a href="https://bunnyhop.lol"><strong>Play Bunnyhop ↗</strong></a> &nbsp; · &nbsp;
+  <a href="#run-from-source">Get started</a> &nbsp; · &nbsp;
+  <a href="docs/releases.md">Build locally</a> &nbsp; · &nbsp;
+  <a href="https://github.com/8tp/bunnyhop-client/issues">Report a bug</a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Electron-44-ffb432?style=flat-square&amp;labelColor=181b21" alt="Electron 44">
+  <img src="https://img.shields.io/badge/macOS_·_Windows_·_Linux-desktop-ffb432?style=flat-square&amp;labelColor=181b21" alt="Targets macOS, Windows and Linux">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-ffb432?style=flat-square&amp;labelColor=181b21" alt="MIT license"></a>
+</p>
 
 # Bunnyhop Client
 
-A dedicated Electron desktop client for [bunnyhop.lol](https://bunnyhop.lol). The game runs in a sandboxed Chromium window and uses its existing browser mouse input, simulation, replay format, and server verification.
+A dedicated desktop home for [bunnyhop.lol](https://bunnyhop.lol). Keep your game in its own window, share your activity on Discord, and keep a local record of your runs.
 
-This is a source project. The intended `8tp/bunnyhop-client` GitHub repository has not been created, and there are no published or signed releases. The workflows in this checkout describe future builds; they are not download links. No input latency improvement has been measured.
+**This repository contains only the Electron client.** The game loads from the live website. Game source, maps, physics, server code, and the website integration worktree are maintained separately and are not included here. The client preserves the game's browser input and replay behavior; there is no native input sidecar.
+
+| Make it yours | Keep your best | Stay connected |
+| --- | --- | --- |
+| Display profiles, fullscreen, and native settings | Local run history, screenshots, and optional PB captures | Opt-in Discord Rich Presence and Bunnyhop deep links |
+
+> **Development preview** · No published releases yet. macOS ARM64 has been built and smoke-tested; Windows and Linux still need native validation. Game-aware features require the matching website hooks. GitHub Actions is disabled; builds and checks run locally.
 
 ## Run from source
 
@@ -65,9 +86,7 @@ Build output is in `dist/electron`. Development builds are unsigned and do not c
 CSC_IDENTITY_AUTO_DISCOVERY=false npm run electron:dist -- --mac --arm64 -c.mac.identity=null -c.mac.notarize=false --publish never
 ```
 
-The CI workflow is configured to build unsigned macOS ARM64, Windows x64, and Linux x64 packages, with smoke tests on hosted desktops or Linux Xvfb. Windows/Linux builds and hosted CI have not been run from this checkout. These are developer artifacts, not releases. Do not distribute them as signed builds.
-
-Only a signed release build carrying the release stamp and an explicit publisher configuration checks for updates. Windows and macOS verify update signatures; Linux updates are manual. Release signing, notarization, metadata, and publication requirements are in [release setup](docs/releases.md). Nothing is published by the workflows in this checkout.
+Only a signed release build carrying the release stamp and an explicit publisher configuration checks for updates. Windows and macOS verify update signatures; Linux updates are manual. Release signing, notarization, metadata, and publication requirements are in [release setup](docs/releases.md). There are no active GitHub workflows or automatic publications.
 
 ## Contribute or report an issue
 

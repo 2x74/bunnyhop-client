@@ -9,3 +9,11 @@ dist/
 .env
 
 release-builder.json
+
+# Local credentials, player data, and game/build artifacts
+.env.*
+*.mobileprovision
+*.keystore
+*.bhr
+client-settings.json
+vault/

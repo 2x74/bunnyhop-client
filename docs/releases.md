@@ -1,43 +1,48 @@
-# Release setup
+# Local builds & future releases
 
-No repository, signing credentials, published release, or updater feed has been established for this project. The intended remote is `8tp/bunnyhop-client`. These instructions describe the preparation needed before a release can exist.
+The client repository is [8tp/bunnyhop-client](https://github.com/8tp/bunnyhop-client). GitHub Actions is disabled and no workflow files are installed. There are no published releases or configured signing credentials. All current checks and builds run on your machine.
 
-## Developer CI
+## Build locally
 
-`.github/workflows/ci.yml` runs npm install, syntax checks, tests, source smoke, native packaging, and packaged smoke on macOS ARM64, Windows x64, and Linux x64. Packages are explicitly unsigned. macOS notarization is disabled; Windows executable resource editing remains enabled while signing is disabled. Artifact names start with `UNSIGNED-DEV-` and expire after 14 days.
+Use Node.js 22 or newer on the target operating system:
 
-The runner labels follow the [GitHub-hosted runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners): `macos-15` is ARM64, `windows-2025` is x64, and `ubuntu-24.04` is x64. Linux smoke tests run under Xvfb. Fixture smoke checks startup, sandboxed preloads, and the bundled settings window; it does not prove live OAuth, game-hook deployment, Discord desktop compatibility, or performance.
+```sh
+npm ci
+npm run verify
+npm run electron:smoke
+npm run electron:pack
+npm run electron:packaged-smoke
+npm run electron:dist -- --publish never
+```
 
-## Owner setup
+Electron smoke tests require a graphical desktop. Linux needs Electron's runtime libraries and a display, or Xvfb. Build output goes to `dist/electron`, which is excluded from Git. Never commit installers, certificates, user profiles, or game source.
 
-1. Create the intended repository and push the reviewed source. Preserve the existing MIT license attribution.
-2. Create the `signed-release` Actions environment. Configure required reviewers and restrict deployment to reviewed release tags. Limit who can create or move release tags. The workflow never runs on pull requests and refuses a different repository.
-3. Supply the relevant environment secrets below. A platform with missing secrets fails instead of falling back to unsigned release packaging. A manual run can select one platform; a tag push attempts all three.
-4. Confirm the package version, then create an exact `vMAJOR.MINOR.PATCH` tag. The workflow checks the tag against `package.json` and checks out that tag, including on manual dispatch. Review the source at that tag before allowing signing.
+For an unsigned macOS ARM64 developer package:
 
-| Platform | Environment secrets | Meaning |
-| --- | --- | --- |
-| Windows x64 | `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD`, `WINDOWS_PUBLISHER_NAME` | Supported Electron Builder PFX signing material and password; publisher common name must exactly match the certificate. |
-| macOS ARM64 | `MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD` | Developer ID Application certificate/private key export accepted by Electron Builder, and its password. |
-| macOS notarization | `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | Apple account, app-specific password, and team with notarization access. This workflow uses this authentication method, not an invented API key. |
-| Linux x64 | `LINUX_GPG_PRIVATE_KEY`, `LINUX_GPG_PASSPHRASE`, `LINUX_GPG_FINGERPRINT` | Armored owner-held signing key, passphrase, and full 40-character fingerprint. Publish the public key and fingerprint through an independently trusted channel. |
+```sh
+CSC_IDENTITY_AUTO_DISCOVERY=false npm run electron:dist -- --mac --arm64 -c.mac.identity=null -c.mac.notarize=false --publish never
+```
 
-`*_CSC_LINK` can contain a base64-encoded certificate export supported by the installed builder. These credentials must actually permit signing. A certificate requiring a hardware token or cloud signing service needs a separately reviewed signing integration; this workflow does not pretend to support one.
+macOS ARM64 was built and smoke-tested during implementation. Windows and Linux require native build and interactive testing. Developer packages are unsigned or ad hoc signed, are not notarized releases, and never check for updates. macOS may request Keychain access again when an ad hoc signature changes. Automated smoke launchers use disposable profiles and a mock keychain.
 
-## Signed build gates
+## When releases are ready
 
-`.github/workflows/release.yml` produces review artifacts only. It has read-only repository permissions and every builder invocation uses `--publish never`. Running it does not create a GitHub Release or upload updater files.
+Automation can be added later. Re-enabling Actions and adding a workflow should be an explicit maintainer decision. The scripts in `.github/scripts/` are inert helpers retained for that future work; they do not schedule jobs, publish artifacts, or access GitHub on their own.
 
-The generated `release-builder.json` extends the normal builder configuration. It adds the `bunnyhopReleaseBuild` package stamp and the explicit GitHub publisher metadata for the intended repository. Windows uses `win.signtoolOptions.publisherName`, executable signing, and update signature verification; macOS requires signing and notarization. This matches the pinned Electron Builder 26.15.3 API. The normal developer configuration has `publish: []` and no release stamp.
+Before preparing a release:
 
-After packaging, the workflow verifies Windows Authenticode signatures and publisher identity, or verifies the macOS app signature, stapled notarization, and Gatekeeper assessment. Linux packages, metadata, and checksums receive detached GPG signatures that are verified locally. All platforms produce `SHA256SUMS`. Checksums detect corruption; authenticate them through a trusted signature or authenticated release channel.
+1. Review the source revision and set the package version. The release tag must match `vMAJOR.MINOR.PATCH` exactly.
+2. Configure signing outside Git: Developer ID and Apple notarization credentials for macOS, a supported code-signing certificate and exact publisher identity for Windows, and an owner-held GPG signing key for Linux artifacts.
+3. Review `.github/scripts/release-config.mjs` and `verify-release.mjs`. The configuration helper requires the owner repository, matching tag, platform, and signing environment values. It adds an explicit GitHub publisher configuration and the `bunnyhopReleaseBuild` stamp. Default development configuration has no stamp and uses `publish: []`.
+4. Package with publication disabled. Verify platform signatures, notarization where applicable, and checksums on the actual target machines. Keep private keys and credential values out of logs and reports.
+5. Test the live game, sign-in, Discord presence and reconnect, input, fullscreen, replay import/export, deep links, settings relaunch, and correct PB screenshot correlation. Confirm the matching website hooks are deployed.
 
-A missing certificate, missing notarization credentials, failed signature verification, or failed smoke test prevents the artifact-upload step. The workflows and signing gates have not yet been exercised in GitHub Actions or with owner signing credentials.
+Do not label developer packages as signed releases. Release-preparation helpers have not been validated with production signing credentials.
 
-## Review and publication
+## Manual publication
 
-Before publishing anything, download the `SIGNED-REVIEW-*` artifacts, verify signatures on native machines, and test the actual live game, Discord reconnect, OAuth, `.bhr` import/export, deep links, and settings relaunch behavior. Check that the matching web hooks are deployed. Confirm that PB captures attach only to the correct result.
+Once the repository is public and the builds are reviewed, create a release for the reviewed tag and upload the installers, exact generated updater metadata (`latest*.yml`), referenced `.blockmap` files, checksums, and applicable detached signatures. Keep generated filenames intact and identify supported platforms. Publish the Linux public key and fingerprint through a trusted channel.
 
-Publication is a separate owner action after review. Upload installers/archives together with the exact generated updater metadata (`latest*.yml`) and referenced `.blockmap` files to a release for the same tag in the intended repository. Keep the generated filenames unchanged. Upload checksums and Linux detached signatures, and state which platforms are included. Do not publish unsigned CI packages or relabel them as signed artifacts.
+A private repository is not a public updater feed. Do not embed a GitHub token in the client to work around private release access.
 
-Only stamped signed Windows/macOS builds use the configured updater feed. The shell also checks that publisher configuration is present; development packages never check. Linux automatic updating is disabled and requires manually downloaded, verified packages. Test the update path between two genuinely signed versions before describing automatic updates as validated.
+Only stamped signed Windows/macOS builds with publisher configuration check for updates. Linux updates are manual. Validate an update between two genuinely signed versions before calling the update path production-ready. Nothing in this repository currently publishes releases automatically.

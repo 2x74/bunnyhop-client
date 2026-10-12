@@ -37,5 +37,13 @@
   "allowScripts": {
     "electron@44.0.0": true,
     "esbuild@0.28.2": true
+  },
+  "homepage": "https://bunnyhop.lol",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/8tp/bunnyhop-client.git"
+  },
+  "bugs": {
+    "url": "https://github.com/8tp/bunnyhop-client/issues"
   }
 }

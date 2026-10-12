@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
-// This workflow only builds artifacts. It never calls a publishing command.
+// This helper only prepares build configuration. It never calls a publishing command.
 const platform = process.env.RELEASE_PLATFORM;
 if (!['mac', 'win', 'linux'].includes(platform)) throw new Error('Unknown release platform');
 if (process.env.GITHUB_REPOSITORY !== '8tp/bunnyhop-client') throw new Error('Release builds require the owner repository');
