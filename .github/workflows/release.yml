@@ -1,0 +1,113 @@
+name: Signed release artifacts (no publication)
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing vMAJOR.MINOR.PATCH tag matching package.json
+        required: true
+        type: string
+      platform:
+        description: Platform with configured signing credentials
+        required: true
+        default: all
+        type: choice
+        options: [all, mac, win, linux]
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  signed:
+    if: github.repository == '8tp/bunnyhop-client'
+    environment: signed-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            platform: mac
+            architecture: ARM64
+            builder: --mac --arm64
+          - os: windows-2025
+            platform: win
+            architecture: X64
+            builder: --win --x64
+          - os: ubuntu-24.04
+            platform: linux
+            architecture: X64
+            builder: --linux --x64
+    runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_PLATFORM: ${{ matrix.platform }}
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      BUNNYHOP_DISABLE_UPDATES: '1'
+      CSC_LINK: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_LINK || matrix.platform == 'win' && secrets.WIN_CSC_LINK || '' }}
+      CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_KEY_PASSWORD || matrix.platform == 'win' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
+      WINDOWS_PUBLISHER_NAME: ${{ matrix.platform == 'win' && secrets.WINDOWS_PUBLISHER_NAME || '' }}
+      APPLE_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_ID || '' }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+      APPLE_TEAM_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
+      LINUX_GPG_PRIVATE_KEY: ${{ matrix.platform == 'linux' && secrets.LINUX_GPG_PRIVATE_KEY || '' }}
+      LINUX_GPG_PASSPHRASE: ${{ matrix.platform == 'linux' && secrets.LINUX_GPG_PASSPHRASE || '' }}
+      LINUX_GPG_FINGERPRINT: ${{ matrix.platform == 'linux' && secrets.LINUX_GPG_FINGERPRINT || '' }}
+    steps:
+      - name: Check selected platform
+        id: select
+        shell: bash
+        env:
+          SELECTED: ${{ github.event.inputs.platform || 'all' }}
+        run: |
+          if [[ "$SELECTED" == all || "$SELECTED" == "$RELEASE_PLATFORM" ]]; then
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.select.outputs.enabled == 'true'
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        if: steps.select.outputs.enabled == 'true'
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Check exact tag and signing prerequisites
+        if: steps.select.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          node .github/scripts/release-config.mjs
+      - run: npm ci
+        if: steps.select.outputs.enabled == 'true'
+      - run: npm run verify
+        if: steps.select.outputs.enabled == 'true'
+      - name: Build signed packages without publishing
+        if: steps.select.outputs.enabled == 'true'
+        run: npx electron-builder --config release-builder.json ${{ matrix.builder }} --publish never
+      - name: Packaged smoke (desktop)
+        if: steps.select.outputs.enabled == 'true' && runner.os != 'Linux'
+        run: npm run electron:packaged-smoke
+      - name: Packaged smoke (Xvfb)
+        if: steps.select.outputs.enabled == 'true' && runner.os == 'Linux'
+        run: xvfb-run -a npm run electron:packaged-smoke
+      - name: Verify signing and generate checksums
+        if: steps.select.outputs.enabled == 'true'
+        run: node .github/scripts/verify-release.mjs
+      - uses: actions/upload-artifact@v4
+        if: steps.select.outputs.enabled == 'true'
+        with:
+          name: SIGNED-REVIEW-${{ matrix.platform }}-${{ matrix.architecture }}-${{ env.RELEASE_TAG }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            dist/electron/*.dmg
+            dist/electron/*.zip
+            dist/electron/*.exe
+            dist/electron/*.AppImage
+            dist/electron/*.deb
+            dist/electron/*.yml
+            dist/electron/*.blockmap
+            dist/electron/*.asc
+            dist/electron/SHA256SUMS

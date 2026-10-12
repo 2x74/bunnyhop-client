@@ -1,0 +1,23 @@
+name: Bug report
+description: Report a reproducible client problem.
+body:
+  - type: markdown
+    attributes:
+      value: "For vulnerabilities, follow SECURITY.md privately. Remove personal data from reports and screenshots."
+  - type: input
+    id: environment
+    attributes:
+      label: Client revision and operating system
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps, expected result, and actual result
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Reviewed diagnostics and relevant logs
+      description: Export diagnostics from F10, remove private details, and attach them if useful.

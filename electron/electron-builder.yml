@@ -1,0 +1,62 @@
+appId: lol.bunnyhop.client
+productName: Bunnyhop
+protocols:
+  - name: Bunnyhop links
+    schemes: [bunnyhop]
+copyright: Copyright © 2026 Aeperion
+directories:
+  output: dist/electron
+  buildResources: assets
+files:
+  - electron/main.mjs
+  - electron/coalesced-writer.mjs
+  - electron/branding.mjs
+  - electron/diagnostics.mjs
+  - electron/discord-rpc.mjs
+  - electron/run-vault.mjs
+  - electron/security.mjs
+  - electron/game-preload.cjs
+  - electron/settings-preload.cjs
+  - electron/settings/**
+  - electron/policy.mjs
+  - electron/settings.mjs
+  - electron/window-state.mjs
+  - package.json
+asar: true
+afterPack: electron/after-pack.cjs
+
+mac:
+  icon: assets/icon.icns
+  category: public.app-category.games
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: electron/entitlements.mac.plist
+  entitlementsInherit: electron/entitlements.mac.plist
+  notarize: true
+  target:
+    - dmg
+    - zip
+
+win:
+  icon: assets/icon.ico
+  target:
+    - nsis
+    - portable
+  verifyUpdateCodeSignature: true
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+
+linux:
+  icon: assets/icon-512.png
+  category: Game
+  executableName: bunnyhop
+  executableArgs: []
+  syncDesktopName: true
+  target:
+    - AppImage
+    - deb
+
+publish: []

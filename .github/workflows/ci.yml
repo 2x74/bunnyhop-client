@@ -1,0 +1,64 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            platform: macOS-ARM64
+            builder: --mac --arm64 -c.mac.identity=null -c.mac.notarize=false
+          - os: windows-2025
+            platform: Windows-X64
+            builder: --win --x64 -c.win.signExecutable=false
+          - os: ubuntu-24.04
+            platform: Linux-X64
+            builder: --linux --x64
+    runs-on: ${{ matrix.os }}
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      BUNNYHOP_DISABLE_UPDATES: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - name: Source smoke (desktop)
+        if: runner.os != 'Linux'
+        run: npm run electron:smoke
+      - name: Source smoke (Xvfb)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run electron:smoke
+      - name: Build unsigned developer packages
+        run: npm run electron:dist -- ${{ matrix.builder }} --publish never
+      - name: Packaged smoke (desktop)
+        if: runner.os != 'Linux'
+        run: npm run electron:packaged-smoke
+      - name: Packaged smoke (Xvfb)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run electron:packaged-smoke
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UNSIGNED-DEV-${{ matrix.platform }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            dist/electron/*.dmg
+            dist/electron/*.zip
+            dist/electron/*.exe
+            dist/electron/*.AppImage
+            dist/electron/*.deb
