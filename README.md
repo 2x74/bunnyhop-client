@@ -56,6 +56,12 @@ Client settings live in `Bunnyhop/client-settings.json` under Application Suppor
 
 Rendering and display changes show a relaunch prompt. CLI options such as `--windowed`, `--fullscreen`, `--kiosk`, `--uncap`, `--no-uncap`, `--gpu-tweaks`, and `--no-gpu-tweaks` apply to that launch without being saved.
 
+## Permanent content cache
+
+Maps you load and their downloaded shared textures, models, and sounds are saved under `content-cache` in the Electron user-data directory (`~/Library/Application Support/Bunnyhop` on macOS). Matching SHA-256 content is read from disk on later loads, including after a restart. Changed map hashes get fresh entries; shared files are stored once. The map index and mutable content manifests still use normal network/cache behavior. This does not enable fully offline play.
+
+Caching requires the matching website hooks. It happens only as content is requested, with no bulk downloads or automatic eviction. Files above 512 MiB are not persisted, and writes stop when they would leave less than 512 MiB free. Cache failures fall back to normal downloads; corrupt entries are discarded. To reclaim space, quit the client and delete its `content-cache` directory. Cached files are verified before saving and reading.
+
 ## Deep links
 
 Packaged installations support these forms:

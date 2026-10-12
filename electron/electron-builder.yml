@@ -9,6 +9,7 @@ directories:
   buildResources: assets
 files:
   - electron/main.mjs
+  - electron/content-cache.mjs
   - electron/coalesced-writer.mjs
   - electron/branding.mjs
   - electron/diagnostics.mjs

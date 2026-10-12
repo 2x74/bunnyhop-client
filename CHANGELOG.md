@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added permanent, hash-verified map and shared-content caching with local reads across restarts.
+- Fixed Discord artwork forwarding through the sandbox preload.
+
 - Added Discord map artwork with a Bunnyhop logo badge and privacy-aware logo fallback.
 
 - Adapted the dedicated Electron shell to Bunnyhop and retained browser-native game input.

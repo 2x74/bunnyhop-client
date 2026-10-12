@@ -34,6 +34,7 @@ import {
   resolveLaunchSettings,
   saveSettings,
 } from './settings.mjs';
+import { ContentCache } from './content-cache.mjs';
 import { coalescedWriter } from './coalesced-writer.mjs';
 import { restoreWindowBounds, settingsAfterWindowClose, settingsAfterFullscreenAction } from './window-state.mjs';
 import { chooseDisplay, collectDiagnostics, publicDisplays } from './diagnostics.mjs';
@@ -60,6 +61,7 @@ const vaultRoot = path.join(path.dirname(settingsFile), 'vault');
 const captureVault = path.join(vaultRoot, 'captures');
 const reportVault = path.join(vaultRoot, 'reports');
 const runVault = new RunVault(vaultRoot);
+const contentCache = new ContentCache(path.join(app.getPath('userData'), 'content-cache'));
 /* The web app's page ground (index.html theme-color, --ground in its
    tokens), so a window never flashes a different black before the first
    paint. The settings sheet is drawn on the same ground. */
@@ -274,6 +276,11 @@ function createGameWindow() {
           if (window.bunnyhopClient?.version !== 1) throw new Error('missing game bridge');
           const settings=await window.bunnyhopClient.getSettings();
           if (settings.discordRichPresence !== false) throw new Error('unexpected public settings');
+          const cacheBytes = new Uint8Array([1,2,3]);
+          const cacheHash = '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81';
+          if (!await window.bunnyhopClient.cacheContent(cacheHash, cacheBytes)) throw new Error('cache write failed');
+          const cacheHit = await window.bunnyhopClient.getCachedContent(cacheHash);
+          if (cacheHit?.length !== 3 || cacheHit[2] !== 3) throw new Error('cache IPC read failed');
           window.bunnyhopClient.setPresence({kind:'results',mapId:'bhop_smoke',mapName:'Smoke',mode:'solo'});
           const run=await window.bunnyhopClient.saveRunSummary({mapId:'bhop_smoke',mapName:'Smoke',timeMs:1234,ticks:158,tickRate:128,personalBest:true,verified:false,mode:'solo'});
           if (!run.saved || !run.id) throw new Error('vault archive failed');
@@ -289,6 +296,8 @@ function createGameWindow() {
           await win.loadURL('about:blank');
           const refused=await win.webContents.executeJavaScript(`window.bunnyhopClient.getSettings().then(()=>false,()=>true)`);
           if (!refused) throw new Error('untrusted origin gained IPC');
+          const cacheRefused = await win.webContents.executeJavaScript(`window.bunnyhopClient.getCachedContent('a'.repeat(64)).then(()=>false,()=>true)`);
+          if (!cacheRefused) throw new Error('untrusted origin gained cache access');
         }
         const settings = createSettingsWindow();
         settings.webContents.once('dom-ready', async () => {
@@ -669,6 +678,8 @@ function installIpc() {
   });
   ipcMain.handle('client:fullscreen', (event, value) => { requireGameSender(event); if (typeof value !== 'boolean') throw new Error('invalid fullscreen'); setGameFullscreen(value); return gameWindow.isFullScreen(); });
   ipcMain.handle('client:open-settings', (event) => { requireGameSender(event); createSettingsWindow(); });
+  ipcMain.handle('client:cache-get', (event, hash) => { requireGameSender(event); return contentCache.get(hash); });
+  ipcMain.handle('client:cache-put', (event, hash, bytes) => { requireGameSender(event); return contentCache.put(hash, bytes); });
   ipcMain.handle('client:public-settings', (event) => { requireGameSender(event); return publicClientSettings(); });
   ipcMain.on('client:presence', (event, raw) => {
     try { requireGameSender(event); queuePresence(raw); } catch (error) { console.warn('[client] presence refused', error.message); }
