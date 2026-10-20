@@ -1,11 +1,26 @@
 # Security policy
 
-There are no published releases or established response-time commitments yet. Reports should identify the source revision and operating system.
+This repository distributes early native client previews. Reports should identify
+the release version, native build ID from its JSON report, operating system and
+source revision. There is no established response-time commitment.
 
-No verified private vulnerability-reporting channel has been established. Arrange a private channel with the maintainer before sending details, and keep them out of public issues. The package's noreply email is not a verified security inbox. If private vulnerability reporting is enabled when the repository becomes public, its advisory form can become the preferred route. A working private contact is required before public distribution.
+No verified private vulnerability-reporting channel has been established.
+Arrange a private channel with a maintainer before sending sensitive details;
+do not post tokens, cookies, exploit details or account data in public issues.
+The package's noreply email is not a security inbox.
 
-Useful reports include renderer sandbox escapes, IPC sender-validation failures, unsafe navigation or downloads, local vault path escapes, credential disclosure, and update/signing bypasses. The Electron shell trusts only the game origins and its bundled settings page for their respective native operations. Discord access is local and presence-only.
+Relevant native-client issues include unsafe map/content parsing, memory safety,
+web-menu bridge validation, navigation or authentication-origin escapes, replay
+and cache path traversal, credential disclosure, and package identity failures.
+The native client uses web technology for menus and accounts; gameplay, input,
+rendering and simulation run outside the web view. Game score-verification
+issues should be reported privately to the game's maintainers.
 
-For reproduction, include the affected revision, steps, observed impact, and a minimal proof when safe. Remove tokens, cookies, account details, and private screenshots. Game score-verification issues should be reported privately to the game's maintainers.
+For reproduction, include the affected revision, steps, observed impact and a
+minimal proof when safe. Remove personal data from logs and screenshots.
 
-Development builds never check for updates. Signed release builds must pass the gates in [release setup](docs/releases.md); unsigned artifacts must remain labelled developer builds.
+Native previews are unsigned on Windows and ad-hoc sealed on macOS; they are
+not notarized releases. They do not have an automatic updater. Check download
+hashes against the release's checksum files. See [release setup](docs/releases.md)
+for packaging and validation. The legacy Electron implementation at the
+repository root has separate sandbox, IPC and update-signing behavior.

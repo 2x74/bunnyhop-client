@@ -1,31 +1,63 @@
-# UNINSTALLED template. The repository disables automation; keep this file here unless policy changes.
-# If explicitly enabled later, install at .github/workflows/native-packages.yml after review.
-# Manual build artifacts only: no deployment, release publishing, active-build registration or score submission.
-name: Native desktop packages
+# Reference copy of .github/workflows/native-release.yml; edit both together.
+# Native-only release archives. Artifacts are reviewed and attached to a release separately.
+# No release publication, production writes, credentials or automatic update activation.
+name: Native release builds
 on:
+  push:
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       version:
-        description: Package version (unsigned/ad-hoc by default)
-        default: 0.1.0
+        description: Native package version without v (for example 0.0.1)
+        default: 0.0.1
         required: true
+        type: string
+permissions:
+  contents: read
 concurrency:
-  group: bunnyhop-native-packages
+  group: native-release-${{ github.ref }}-${{ inputs.version }}
   cancel-in-progress: false
 defaults:
   run:
     working-directory: native
 jobs:
+  version:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: .
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Validate exact native release version
+        id: version
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [ "$EVENT" = push ]; then version="${TAG#v}"; else version="$INPUT_VERSION"; fi
+          if ! [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo 'Expected an exact numeric semantic version, such as 0.0.1' >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
   resources:
+    needs: version
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.3
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: bun install --frozen-lockfile
-      - run: bun apps/native/build-menu.ts
+      - run: bunx playwright install --with-deps chromium
+      - run: bun run wasm
+      - run: bun run check
       - run: bun apps/native/src/export-viewmodels.ts
       - run: bun apps/native/src/export-presentation.ts
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -37,10 +69,13 @@ jobs:
             native/target/native-menu/menu-manifest.json
           if-no-files-found: error
   windows:
-    needs: resources
+    needs: [version, resources]
+    timeout-minutes: 90
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.3
@@ -53,7 +88,7 @@ jobs:
           path: native/target
       - shell: pwsh
         env:
-          PACKAGE_VERSION: ${{ inputs.version }}
+          PACKAGE_VERSION: ${{ needs.version.outputs.version }}
         run: ./apps/native/packaging/windows/build.ps1 -Version $env:PACKAGE_VERSION
       - shell: pwsh
         run: |
@@ -61,48 +96,69 @@ jobs:
           bun apps/native/packaging/release-check.ts --package $package.FullName
           & (Join-Path $package.FullName 'bunnyhop-native.exe') --help
           if ($LASTEXITCODE -ne 0) { throw 'Packaged executable failed DLL/runtime startup' }
+      - run: bun apps/native/packaging/checksums.ts --package-dir target/native-packages
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: bunnyhop-windows-x64
           path: |
             native/target/native-packages/*.zip
             native/target/native-packages/*.json
+            native/target/native-packages/SHA256SUMS
           if-no-files-found: error
+          retention-days: 30
   macos:
-    needs: resources
+    needs: [version, resources]
+    timeout-minutes: 45
     runs-on: macos-15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.3
       - run: rustup toolchain install 1.99.1 --profile minimal && rustup override set 1.99.1
-      - run: brew install sdl3 ninja cmake ffmpeg
+      - run: brew install sdl3 ninja cmake
       - run: bun install --frozen-lockfile
-      - run: bun apps/native/build.ts
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: native-resources
+          path: native/target
+      - run: test "$(uname -m)" = arm64
+      - run: bun apps/native/build.ts --prebuilt-resources
+      - run: ctest --test-dir apps/native/build --output-on-failure
       - run: cargo test -p bunnyhop-native-bridge --locked && bun test apps/native/packaging
       - env:
-          PACKAGE_VERSION: ${{ inputs.version }}
+          PACKAGE_VERSION: ${{ needs.version.outputs.version }}
         run: bun apps/native/package.ts --skip-build --version "$PACKAGE_VERSION"
+      - env:
+          PACKAGE_VERSION: ${{ needs.version.outputs.version }}
+        run: bun apps/native/packaging/release-check.ts --package "target/native-packages/bunnyhop-native-$PACKAGE_VERSION-darwin-arm64"
+      - run: bun apps/native/packaging/checksums.ts --package-dir target/native-packages
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: bunnyhop-macos
+          name: bunnyhop-macos-arm64
           path: |
             native/target/native-packages/*.zip
             native/target/native-packages/*.json
+            native/target/native-packages/SHA256SUMS
           if-no-files-found: error
+          retention-days: 30
   linux:
-    needs: resources
+    needs: [version, resources]
+    timeout-minutes: 90
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.3
       - run: rustup toolchain install 1.99.1 --profile minimal && rustup override set 1.99.1
       - run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build g++ pkg-config ffmpeg libcurl4-openssl-dev zlib1g-dev libwebkit2gtk-4.1-dev libgtk-3-dev libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libwayland-dev libxkbcommon-dev wayland-protocols libdbus-1-dev libibus-1.0-dev libasound2-dev libpulse-dev xvfb xauth
+          sudo apt-get install -y cmake ninja-build g++ pkg-config libcurl4-openssl-dev zlib1g-dev libwebkit2gtk-4.1-dev libgtk-3-dev libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libwayland-dev libxkbcommon-dev wayland-protocols libdbus-1-dev libibus-1.0-dev libasound2-dev libpulse-dev xvfb xauth
       - run: |
           git clone --filter=blob:none --no-checkout https://github.com/libsdl-org/SDL.git "$RUNNER_TEMP/SDL"
           git -C "$RUNNER_TEMP/SDL" checkout --detach 829a65d769d935c4852f8159e964312c0957260a
@@ -110,22 +166,32 @@ jobs:
           cmake --build "$RUNNER_TEMP/SDL-build" --parallel
           cmake --install "$RUNNER_TEMP/SDL-build"
       - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: native-resources
+          path: native/target
       - env:
           CMAKE_PREFIX_PATH: ${{ runner.temp }}/SDL-install
           LD_LIBRARY_PATH: ${{ runner.temp }}/SDL-install/lib
         run: |
-          bun apps/native/build.ts
+          bun apps/native/build.ts --prebuilt-resources
           ctest --test-dir apps/native/build --output-on-failure
           cargo test -p bunnyhop-native-bridge --locked
           bun test apps/native/packaging
       - env:
-          PACKAGE_VERSION: ${{ inputs.version }}
+          PACKAGE_VERSION: ${{ needs.version.outputs.version }}
           LD_LIBRARY_PATH: ${{ runner.temp }}/SDL-install/lib
         run: bun apps/native/package.ts --skip-build --version "$PACKAGE_VERSION" --licenses "$RUNNER_TEMP/SDL-install/share/licenses"
+      - env:
+          PACKAGE_VERSION: ${{ needs.version.outputs.version }}
+        run: bun apps/native/packaging/release-check.ts --package "target/native-packages/bunnyhop-native-$PACKAGE_VERSION-linux-x64"
+      - run: bun apps/native/packaging/checksums.ts --package-dir target/native-packages
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: bunnyhop-linux
+          name: bunnyhop-linux-x64
           path: |
             native/target/native-packages/*.tar.gz
             native/target/native-packages/*.json
+            native/target/native-packages/SHA256SUMS
           if-no-files-found: error
+          retention-days: 30

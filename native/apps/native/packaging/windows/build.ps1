@@ -1,5 +1,5 @@
 # MSVC x64 build/package. All dependency sources are pinned; no credentials are required.
-param([string]$Version = '0.1.0')
+param([string]$Version = '0.0.1')
 $ErrorActionPreference = 'Stop'
 $root = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..\..'))
 Set-Location $root

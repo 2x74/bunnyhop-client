@@ -5,10 +5,10 @@ Manual unsigned releases are the default, matching the existing Electron distrib
 Run the following from the `native/` directory of this repository:
 
 ```sh
-bun apps/native/package.ts --version 0.1.0
+bun apps/native/package.ts --version 0.0.1
 # When the native executable/menu/assets were already built:
-bun apps/native/package.ts --skip-build --version 0.1.0
-bun apps/native/packaging/release-check.ts --package target/native-packages/bunnyhop-native-0.1.0-darwin-arm64
+bun apps/native/package.ts --skip-build --version 0.0.1
+bun apps/native/packaging/release-check.ts --package target/native-packages/bunnyhop-native-0.0.1-darwin-arm64
 bun test apps/native/packaging
 ```
 
@@ -19,9 +19,9 @@ macOS `.app` contains the native executable, recursively copied non-system dylib
 To optionally use already configured credentials (never pass passwords/private keys in chat):
 
 ```sh
-bun apps/native/package.ts --version 0.1.0 --identity 'Developer ID Application: Existing Name (TEAM)' --notary-profile existing-keychain-profile
+bun apps/native/package.ts --version 0.0.1 --identity 'Developer ID Application: Existing Name (TEAM)' --notary-profile existing-keychain-profile
 # Strict platform signing is opt-in, never required for the default unsigned release:
-bun apps/native/package.ts --version 0.1.0 --require-platform-signing --identity EXISTING_IDENTITY --notary-profile EXISTING_PROFILE
+bun apps/native/package.ts --version 0.0.1 --require-platform-signing --identity EXISTING_IDENTITY --notary-profile EXISTING_PROFILE
 ```
 
 Downloaded unsigned apps may require the normal macOS user approval in Privacy & Security. The packager does not remove quarantine or disable Gatekeeper.
@@ -30,9 +30,9 @@ Windows MSVC x64 build/package:
 
 ```powershell
 bun install --frozen-lockfile
-./apps/native/packaging/windows/build.ps1 -Version 0.1.0
+./apps/native/packaging/windows/build.ps1 -Version 0.0.1
 # Or package an existing build, passing its dynamic-library and notice directories:
-bun apps/native/package.ts --skip-build --version 0.1.0 --dependencies target/native-deps/vcpkg/installed/x64-windows/bin --licenses target/native-deps/vcpkg/installed/x64-windows/share
+bun apps/native/package.ts --skip-build --version 0.0.1 --dependencies target/native-deps/vcpkg/installed/x64-windows/bin --licenses target/native-deps/vcpkg/installed/x64-windows/share
 ```
 
 When complete prebuilt resources exist, the Windows script calls `build.ts --prebuilt-resources`, avoiding exporter/ffmpeg dependencies in the Windows CI job. A source build requires ffmpeg on PATH.
@@ -43,7 +43,20 @@ Optional Windows Authenticode uses an already configured certificate-store thumb
 
 Linux archives include the executable, resources, SDL/HTTP/compression libraries where dynamically linked, a local launcher, and `RUNTIME.txt`. The OS supplies glibc, display/GPU drivers, GTK and WebKitGTK 4.1. `linux-dependencies.txt` documents runtime installation; use the distribution/architecture used to build the archive. Use the Linux tester handoff below for physical input/GPU checks.
 
-`workflows/native-packages.yml` is an **uninstalled** manually dispatched GitHub CI template. This repository disables automation; keeping the template under this directory preserves that policy. If automation is explicitly approved later, review it before copying to `.github/workflows/native-packages.yml`. It uses pinned official GitHub actions, runs build commands from `native/`, and prefixes artifact paths with `native/`. It builds workflow artifacts only and never publishes releases or uploads to production.
+`.github/workflows/native-release.yml` (repository root) runs **Native release builds** when an exact numeric `vMAJOR.MINOR.PATCH` tag is pushed or through manual dispatch with a `version` input (default `0.0.1`). All jobs have read-only repository access. One resource build is reused by macOS arm64, Linux x64 and Windows x64 native builds; each platform runs tests, package resource/signature checks, and writes `SHA256SUMS`. Canonical WASM is downloaded only after its pinned hash is verified, used for identity/offline tests, and excluded from release archives. No Electron build runs. The reference workflow under `workflows/native-packages.yml` mirrors the installed workflow.
+
+The workflow produces Actions artifacts named `bunnyhop-macos-arm64`, `bunnyhop-linux-x64` and `bunnyhop-windows-x64`; it **does not publish releases** or overwrite existing release assets. A maintainer reviews successful jobs, downloads the corresponding artifacts, verifies their checksums, and explicitly attaches archives/reports to the existing native prerelease. Keep each platform artifact in its own directory because each has its own `SHA256SUMS`. From the repository root:
+
+```sh
+gh workflow run native-release.yml --repo 2x74/bunnyhop-client --ref main -f version=0.0.1
+gh run list --repo 2x74/bunnyhop-client --workflow native-release.yml
+gh run download RUN_ID --repo 2x74/bunnyhop-client -n bunnyhop-windows-x64 -D artifacts/windows
+(cd artifacts/windows && shasum -a 256 -c SHA256SUMS)
+# Only after review; no --clobber, so existing verified assets remain intact:
+gh release upload v0.0.1 artifacts/windows/*.zip artifacts/windows/*.json --repo 2x74/bunnyhop-client
+```
+
+Pushing the release tag already starts a run; manual dispatch is for an intentional rebuild, not a second required step. The existing verified local macOS asset is retained when attaching Linux/Windows results. Platform builds are targets until their hosted jobs pass; packaging CI does not establish physical input/GPU correctness.
 
 # Optional signed-download groundwork
 

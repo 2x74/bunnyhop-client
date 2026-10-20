@@ -1,127 +1,116 @@
-<p align="center">
-  <img src="assets/readme-banner.svg" alt="Bunnyhop Desktop — Find your flow" width="100%">
-</p>
+# Bunnyhop Native
 
-<p align="center">
-  <a href="https://bunnyhop.lol"><strong>Play Bunnyhop ↗</strong></a> &nbsp; · &nbsp;
-  <a href="#run-from-source">Get started</a> &nbsp; · &nbsp;
-  <a href="docs/releases.md">Build locally</a> &nbsp; · &nbsp;
-  <a href="https://github.com/8tp/bunnyhop-client/issues">Report a bug</a>
-</p>
+A native desktop fork of [bunnyhop.lol](https://bunnyhop.lol), maintained in
+[2x74/bunnyhop-client](https://github.com/2x74/bunnyhop-client).
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Electron-44-ffb432?style=flat-square&amp;labelColor=181b21" alt="Electron 44">
-  <img src="https://img.shields.io/badge/macOS_·_Windows_·_Linux-desktop-ffb432?style=flat-square&amp;labelColor=181b21" alt="Targets macOS, Windows and Linux">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-ffb432?style=flat-square&amp;labelColor=181b21" alt="MIT license"></a>
-</p>
+**v0.0.1 is an unsigned preview.** Get available packages and their checksums from
+[Releases](https://github.com/2x74/bunnyhop-client/releases). macOS ARM64 has been
+built and smoke-tested. Linux x64 and Windows x64 are automated build targets;
+automation alone does not establish interactive gameplay or physical input
+validation. Check each release's notes for the artifacts and checks that actually
+completed.
 
-# Bunnyhop Client
+## Native gameplay, shared game rules
 
-A dedicated desktop home for [bunnyhop.lol](https://bunnyhop.lol). Keep your game in its own window, share your activity on Discord, and keep a local record of your runs.
+C++20 and SDL3 own the window, relative mouse input, simulation scheduling and
+OpenGL rendering. The shared Rust core supplies movement, collision, timer rules
+and replay data through a C ABI. Gameplay does not run inside Chromium or a web
+game canvas.
 
-The existing Electron client loads the live website. A separate experimental
-[native client](native/apps/native/README.md) now lives in `native/`: C++/SDL3 owns
-gameplay, OpenGL rendering and relative mouse input, with the shared Rust physics
-core. Web technology is used only for menus, accounts and network services.
-The native project includes the client source needed to build it; server code,
-deployment configuration, credentials, downloaded maps and player data are not
-included.
+The embedded web view is for menus, account sign-in, map browsing, leaderboards
+and network services. It reuses the website UI while refusing the web game entry
+point, Three renderer and live JavaScript simulation. macOS uses WKWebView,
+Linux uses WebKitGTK, and Windows uses WebView2. The native client has no
+Electron dependency.
 
-| Make it yours | Keep your best | Stay connected |
-| --- | --- | --- |
-| Display profiles, fullscreen, and native settings | Local run history, screenshots, and optional PB captures | Opt-in Discord Rich Presence and Bunnyhop deep links |
+Native features include eight movement styles, persistent settings and binds,
+local BHR recording/playback, ghosts, tutorial coaching, native HUD/audio,
+cosmetics, and multiplayer room pose rendering. See the
+[native guide](native/apps/native/README.md) for the detailed scope and remaining
+parity work.
 
-> **Development preview** · No published releases yet. macOS ARM64 has been built and smoke-tested; Windows and Linux still need native validation. Game-aware features require the matching website hooks. GitHub Actions is disabled; builds and checks run locally.
+## Play
 
-## Run from source
+Download the archive for your platform from
+[Releases](https://github.com/2x74/bunnyhop-client/releases), verify its SHA-256
+against the accompanying package report, extract it, and launch Bunnyhop.
+macOS packages are ad-hoc signed, without Developer ID or notarization. Windows
+packages are unsigned. Expect the platform's usual first-launch warnings; these
+packages do not provide a signed automatic update channel. See
+[release and installation notes](docs/releases.md).
 
-For the native client, see its [build and testing instructions](native/apps/native/README.md).
-It requires Bun, CMake/Ninja, a C++20 compiler, Rust, SDL3, libcurl/zlib and ffmpeg.
-Builds and unsigned packages can be prepared independently of Electron:
+Choose a map from **Play**. WASD moves, Space or the mouse wheel jumps, Ctrl ducks,
+E uses, R restarts, Escape opens the menu, and F10 exits. Sensitivity, separate
+vertical sensitivity, FOV, frame/audio settings and key bindings are available in
+the menu. Downloaded maps and shared content are checked against SHA-256 hashes
+and cached locally.
+
+Sign in through the native menu to use your Bunnyhop account. The app keeps its
+own session; it does not import another browser's cookies. Replays are saved
+locally before upload. Ranked upload requires an exact, unexpired server
+allowlist entry for the executable/menu/assets and canonical verifier identity.
+The server still verifies every submitted replay. A source build or an unknown,
+stale or expired release keeps its replay locally; installing this preview does
+not itself enable ranked scores.
+
+## Build from source
+
+Install Bun, CMake 3.24+, Ninja, a C++20 compiler, the pinned Rust toolchain,
+SDL3, libcurl/zlib development libraries and ffmpeg. Linux menus also need GTK3
+and WebKitGTK 4.1 >= 2.40; Windows needs the WebView2 runtime. Full platform
+instructions are in the [native guide](native/apps/native/README.md).
 
 ```sh
 cd native
 bun install --frozen-lockfile
 bun run build
 bun run check
-bun run package
+apps/native/build/bunnyhop-native
 ```
 
-The native client remains a development preview. Windows execution, physical
-Linux input/performance checks and a human verified-score run remain release
-checks. No latency/FPS advantage is claimed from correctness tests. Packaging
-uses the same unsigned distribution policy as Electron; macOS is ad-hoc sealed,
-without requiring Developer ID or notarization.
-
-For Electron:
-
-Use Node.js 22 or newer and npm on macOS, Windows, or Linux:
+The first build downloads a pinned public WASM verifier and checks its SHA-256.
+It is cached for later offline builds and is not committed or included in native
+release archives. Build outputs, downloaded maps, content caches and local replays stay
+out of Git.
 
 ```sh
-npm ci
-npm run verify
-npm start
+# Load a specific hosted map, or a BSP you already have.
+apps/native/build/bunnyhop-native --online-map bhop_eazy
+apps/native/build/bunnyhop-native --map /path/to/map.bsp --no-menu
+
+# Create an unsigned/ad-hoc package on the target OS.
+bun run package --version 0.0.1
 ```
 
-Electron needs a graphical desktop. Linux additionally needs the normal Electron runtime libraries. The client loads the live website; native integration requires the corresponding web hooks to be deployed. Without those hooks, the game still runs, but presence and completed-run archives will not receive game state.
+## Preview limits
 
-On macOS, repeated unsigned developer builds may trigger a “Bunnyhop Safe Storage” login-keychain prompt because their signatures change. Signed releases require a consistent Developer ID identity. Automated smoke launchers use disposable profiles and a mock keychain; they never need your login password. Normal app launches retain secure credential storage.
+A human native sign-in/finish/verified-score flow still needs end-to-end
+confirmation. Physical Linux input and Wayland behavior require testing on a
+real desktop; headless checks cannot establish them. Windows runtime and
+interactive validation must be reported separately from compilation. Correctness
+tests establish no FPS or latency advantage.
 
-## Features
+Website parity remains incomplete: full profile-card editing,
+supporter/gauntlet flows, complete third-person animation blending, animated
+accessories, full audio mixing/music and in-app updates remain follow-up work.
+Ghost/trail cosmetic choices can sync to the account, but those effects are not
+yet drawn natively. Long replay seeking can briefly stall the UI. See the native
+guide for recording limits and verification details.
 
-- F10 opens client settings; `npm start -- --settings` opens them at launch.
-- F9 saves a screenshot through a file dialog. F11 toggles fullscreen outside kiosk mode.
-- Competitive, balanced, compatibility, and custom settings control fullscreen/kiosk/windowed mode, display selection, frame limiting, GPU options, device scaling, and Windows process priority. Balanced is the default; frame uncapping and GPU tweaks are optional.
-- Settings include local diagnostics and JSON support-report export. Diagnostics describe the detected environment, not measured input latency.
-- The local run vault stores bounded completed-run summaries. Optional PB screenshots wait for a matching result-card signal from the game and are cancelled when the result is left.
-- Opt-in Discord Rich Presence connects to Discord desktop over local IPC, retries when Discord starts late or restarts, and uses Bunnyhop application ID `1556467060916224040`. Map display has its own switch. Public map thumbnails appear with a small Bunnyhop logo badge; menus, missing or unsupported thumbnails, and hidden maps use the logo alone. Privacy mode disables presence; no room identifier, join secret, or arbitrary renderer URL is sent. Artwork is limited to the public Bunnyhop logo and validated first-party thumbnail paths. The button points to `https://bunnyhop.lol`.
-- Game-generated `.bhr` replay, image, JSON, text, CSV, and video downloads use a save dialog. Replay import/export stays in the game's browser UI; `.bhr` has no OS file association.
-- Packaged builds register `bunnyhop://` links for maps, servers, and replays.
+## Contribute
 
-Client settings live in `Bunnyhop/client-settings.json` under Application Support on macOS or AppData/Roaming on Windows, and in `~/.config/bunnyhop/client-settings.json` on Linux (respecting `XDG_CONFIG_HOME`). The sibling `vault` directory holds summaries, captures, support reports, and `status.json`, a small local activity file. F10 can open that directory. Vault data stays on this machine; game accounts and run submissions retain the website's normal network behavior.
+Read [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Report reproducible bugs at
+[2x74/bunnyhop-client/issues](https://github.com/2x74/bunnyhop-client/issues), with
+the package version, OS/architecture and steps. Review logs and replay files for
+personal information before sharing them.
 
-Rendering and display changes show a relaunch prompt. CLI options such as `--windowed`, `--fullscreen`, `--kiosk`, `--uncap`, `--no-uncap`, `--gpu-tweaks`, and `--no-gpu-tweaks` apply to that launch without being saved.
+The older Electron shell remains in `electron/`, with its npm scripts at the
+repository root. It loads the live website and is separate from native
+`bun` commands. Its
+[original documentation](https://github.com/2x74/bunnyhop-client/blob/321e746/README.md)
+is retained in repository history; native v0.0.1 releases use the native path.
 
-## Permanent content cache
-
-Maps you load and their downloaded shared textures, models, and sounds are saved under `content-cache` in the Electron user-data directory (`~/Library/Application Support/Bunnyhop` on macOS). Matching SHA-256 content is read from disk on later loads, including after a restart. Changed map hashes get fresh entries; shared files are stored once. The map index and mutable content manifests still use normal network/cache behavior. This does not enable fully offline play.
-
-Caching requires the matching website hooks. It happens only as content is requested, with no bulk downloads or automatic eviction. Files above 512 MiB are not persisted, and writes stop when they would leave less than 512 MiB free. Cache failures fall back to normal downloads; corrupt entries are discarded. To reclaim space, quit the client and delete its `content-cache` directory. Cached files are verified before saving and reading.
-
-## Deep links
-
-Packaged installations support these forms:
-
-```text
-bunnyhop://map/bhop_example
-bunnyhop://server/public-room-id
-bunnyhop://replay/run-id
-bunnyhop://open?url=https%3A%2F%2Fbunnyhop.lol%2F
-```
-
-Identifiers are validated. The `open` form accepts only a Bunnyhop HTTPS origin. Opening a link navigates the main game window and can interrupt a run. Protocol registration depends on the OS and installation format; source runs do not register it.
-
-## Build and verify
-
-```sh
-npm run check                 # JavaScript syntax and source checks
-npm test                      # Node tests, including fake Discord IPC
-npm run electron:smoke        # Sandboxed window/preload fixture smoke
-npm run electron:pack         # Unpacked native application
-npm run electron:packaged-smoke
-npm run electron:dist         # Native installer/archive formats
-```
-
-Build output is in `dist/electron`. Development builds are unsigned and do not check for updates. On macOS, an unsigned developer build can be made with:
-
-```sh
-CSC_IDENTITY_AUTO_DISCOVERY=false npm run electron:dist -- --mac --arm64 -c.mac.identity=null -c.mac.notarize=false --publish never
-```
-
-Only a signed release build carrying the release stamp and an explicit publisher configuration checks for updates. Windows and macOS verify update signatures; Linux updates are manual. Release signing, notarization, metadata, and publication requirements are in [release setup](docs/releases.md). There are no active GitHub workflows or automatic publications.
-
-## Contribute or report an issue
-
-Read [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Include the OS, client version, reproduction steps, and a reviewed F10 support report for bugs. Remove personal data before sharing reports or screenshots.
-
-The client is [MIT licensed](LICENSE), retaining the original Aeperion attribution. See [CHANGELOG.md](CHANGELOG.md) for this adaptation's scope.
+The project retains the original Aeperion attribution under the
+[MIT license](LICENSE). Native packages include dependency and Source-related
+notices. See [CHANGELOG.md](CHANGELOG.md) and [release setup](docs/releases.md).

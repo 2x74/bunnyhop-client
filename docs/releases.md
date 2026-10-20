@@ -1,48 +1,124 @@
-# Local builds & future releases
+# Native releases
 
-The client repository is [8tp/bunnyhop-client](https://github.com/8tp/bunnyhop-client). GitHub Actions is disabled and no workflow files are installed. There are no published releases or configured signing credentials. All current checks and builds run on your machine.
+Native releases are published in
+[2x74/bunnyhop-client](https://github.com/2x74/bunnyhop-client/releases).
+The first release is **v0.0.1**, an unsigned preview. The legacy Electron project
+and its root npm version are separate from the native package version.
 
-## Build locally
+## Preview policy and platform status
 
-Use Node.js 22 or newer on the target operating system:
+macOS ARM64 has been built and smoke-tested. Linux x64 and Windows x64 have
+native build automation; their packages should be attached only after their own
+jobs and package checks pass. CI checks do not establish physical mouse input,
+Wayland behavior, interactive account/login flows or gameplay performance. Each
+release must identify the checks actually completed and the remaining limits.
+
+The default macOS package is ad-hoc signed, without Developer ID or notarization.
+Windows and Linux archives are unsigned. SHA-256 checksums detect changes to the
+published files; they do not replace a publisher signature. No active update
+signing keys are configured. Updates are manual; the optional native update
+manifest tooling is not an in-app automatic updater.
+
+A release archive's existence does not admit ranked scores. Ranked submission
+still requires an exact, unexpired server allowlist entry for the packaged native
+build and canonical WASM identity. The server re-simulates submitted replays and
+applies its normal integrity checks. Unknown/local/stale releases keep recordings
+on disk.
+
+## Download and launch
+
+1. Choose the archive matching your OS and architecture from
+   [Releases](https://github.com/2x74/bunnyhop-client/releases).
+2. Compare its SHA-256 with `SHA256SUMS` and the accompanying package JSON report.
+   On macOS use `shasum -a 256 ARCHIVE`; on Linux use `sha256sum ARCHIVE`; on
+   Windows use `Get-FileHash ARCHIVE -Algorithm SHA256` in PowerShell.
+3. Extract the archive before launching. On macOS move `Bunnyhop.app` to a chosen
+   application folder. Use the normal Finder **Open** flow if macOS asks you to
+   confirm an unnotarized app. Windows includes optional installation scripts and
+   needs the WebView2 runtime for menus. Linux's launcher uses the bundled native
+   libraries; GTK3/WebKitGTK and the other listed system dependencies remain
+   required. Read `DEPENDENCIES.txt` in the Linux package.
+
+The preview is not notarized or Authenticode signed. Do not disable system
+security globally to run it. Check the release source and checksums before
+accepting a first-launch prompt.
+
+## Build and package locally
+
+Install the dependencies in the [native guide](../native/apps/native/README.md),
+then run on the target OS and architecture:
 
 ```sh
-npm ci
-npm run verify
-npm run electron:smoke
-npm run electron:pack
-npm run electron:packaged-smoke
-npm run electron:dist -- --publish never
+cd native
+bun install --frozen-lockfile
+bun run build
+bun run check
+ctest --test-dir apps/native/build --output-on-failure
+cargo test -p bunnyhop-native-bridge --locked
+bun test ./apps/native/packaging
+bun run package --version 0.0.1
 ```
 
-Electron smoke tests require a graphical desktop. Linux needs Electron's runtime libraries and a display, or Xvfb. Build output goes to `dist/electron`, which is excluded from Git. Never commit installers, certificates, user profiles, or game source.
+The first build downloads the pinned public canonical WASM verifier and checks
+its SHA-256. `bun run wasm` prepares this ignored cache separately. Once cached,
+the verifier can be reused offline; a missing or changed asset fails the build
+with recovery instructions. Rust uses the repository's pinned toolchain.
 
-For an unsigned macOS ARM64 developer package:
+Outputs live in `native/target/native-packages/`: an unpacked stage, `.zip`
+(macOS/Windows) or `.tar.gz` (Linux), and a JSON report with the archive hash,
+platform, signing state and native build identity. Generated assets, downloaded
+maps, local replays and packages must remain outside Git.
+
+Run the package checker against the stage path printed by the packager:
 
 ```sh
-CSC_IDENTITY_AUTO_DISCOVERY=false npm run electron:dist -- --mac --arm64 -c.mac.identity=null -c.mac.notarize=false --publish never
+bun apps/native/packaging/release-check.ts \
+  --package target/native-packages/bunnyhop-native-0.0.1-darwin-arm64
 ```
 
-macOS ARM64 was built and smoke-tested during implementation. Windows and Linux require native build and interactive testing. Developer packages are unsigned or ad hoc signed, are not notarized releases, and never check for updates. macOS may request Keychain access again when an ad hoc signature changes. Automated smoke launchers use disposable profiles and a mock keychain.
+Substitute the actual platform path. Package checks validate integrity and
+closure; an interactive smoke test remains a separate action that opens windows.
+Do not describe a compile-only or headless run as physical desktop testing.
 
-## When releases are ready
+## Release workflow
 
-Automation can be added later. Re-enabling Actions and adding a workflow should be an explicit maintainer decision. The scripts in `.github/scripts/` are inert helpers retained for that future work; they do not schedule jobs, publish artifacts, or access GitHub on their own.
+[Native release builds](https://github.com/2x74/bunnyhop-client/actions/workflows/native-release.yml)
+is installed at `.github/workflows/native-release.yml`. It runs for `v*` tag
+pushes and manual dispatch with a `version` input (default `0.0.1`). Versions are
+validated as exact numeric `MAJOR.MINOR.PATCH`; use the matching `v0.0.1` tag for
+this release.
 
-Before preparing a release:
+The workflow builds native resources, then macOS ARM64, Linux x64 and Windows
+x64 packages. Platform artifact names are `bunnyhop-macos-arm64`,
+`bunnyhop-linux-x64` and `bunnyhop-windows-x64`. They contain the platform archive,
+package JSON report and `SHA256SUMS`. `native-resources` is an intermediate build
+artifact. Inspect each job's result before treating that platform as available.
 
-1. Review the source revision and set the package version. The release tag must match `vMAJOR.MINOR.PATCH` exactly.
-2. Configure signing outside Git: Developer ID and Apple notarization credentials for macOS, a supported code-signing certificate and exact publisher identity for Windows, and an owner-held GPG signing key for Linux artifacts.
-3. Review `.github/scripts/release-config.mjs` and `verify-release.mjs`. The configuration helper requires the owner repository, matching tag, platform, and signing environment values. It adds an explicit GitHub publisher configuration and the `bunnyhopReleaseBuild` stamp. Default development configuration has no stamp and uses `publish: []`.
-4. Package with publication disabled. Verify platform signatures, notarization where applicable, and checksums on the actual target machines. Keep private keys and credential values out of logs and reports.
-5. Test the live game, sign-in, Discord presence and reconnect, input, fullscreen, replay import/export, deep links, settings relaunch, and correct PB screenshot correlation. Confirm the matching website hooks are deployed.
+The workflow uploads Actions artifacts only. It does not publish GitHub
+Releases, register ranked builds, submit scores, configure update keys or deploy
+server changes. A maintainer publishes the reviewed preview explicitly:
 
-Do not label developer packages as signed releases. Release-preparation helpers have not been validated with production signing credentials.
+1. Review and merge the release source, version and dependency/license notices.
+2. Push the matching reviewed tag, or dispatch the workflow for the reviewed ref.
+3. Review successful platform checks and download their artifacts. Compare
+   archive hashes with the package reports and verify the release source/ref.
+   Reject packages containing credentials, account data or build-machine paths.
+4. Create the GitHub prerelease for the tag and attach only verified packages,
+   reports and checksums. A locally verified macOS preview may be published first;
+   attach Linux/Windows only after those platform checks pass.
+5. Record the actual validation and unresolved limits in the release notes.
+   Adding a later platform must not replace an existing archive silently.
 
-## Manual publication
+Optional Developer ID/notarization or Windows signing configuration must remain
+outside Git. Signing is not required for this explicitly unsigned preview, and
+no private update key is needed to distribute it manually.
 
-Once the repository is public and the builds are reviewed, create a release for the reviewed tag and upload the installers, exact generated updater metadata (`latest*.yml`), referenced `.blockmap` files, checksums, and applicable detached signatures. Keep generated filenames intact and identify supported platforms. Publish the Linux public key and fingerprint through a trusted channel.
+## Legacy Electron builds
 
-A private repository is not a public updater feed. Do not embed a GitHub token in the client to work around private release access.
-
-Only stamped signed Windows/macOS builds with publisher configuration check for updates. Linux updates are manual. Validate an update between two genuinely signed versions before calling the update path production-ready. Nothing in this repository currently publishes releases automatically.
+The retained Electron shell uses `npm ci`, `npm run verify`,
+`npm run electron:pack` and `npm run electron:dist -- --publish never` at the
+repository root. Its older updater/release helpers are separate from the native
+workflow. See the
+[original Electron documentation](https://github.com/2x74/bunnyhop-client/blob/321e746/README.md)
+for its development and integration behavior. Native v0.0.1 does not publish
+Electron installers or enable the Electron update channel.

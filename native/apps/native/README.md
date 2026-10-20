@@ -1,6 +1,6 @@
-# Native client
+# Native client — v0.0.1 preview
 
-The game is the original C++20/SDL3/OpenGL client, linked to the shared Rust
+This fork's primary client is C++20/SDL3/OpenGL, linked to the shared Rust
 simulation through a C ABI. Input, simulation ticks, rendering, timer rules,
 command recording, replay encoding and heartbeat hashes run natively.
 
@@ -11,7 +11,12 @@ the live simulation. macOS embeds WKWebView above the SDL view. Linux uses a
 separate WebKitGTK menu window in the same application; the SDL game window
 retains its native renderer and input. Windows uses WebView2 for menus and a
 separate authentication view, with SDL still owning gameplay. There is no Electron dependency in this
-client. The existing Electron client remains at the repository root.
+client. The legacy Electron client remains at the repository root.
+
+macOS ARM64 has been built and smoke-tested. Linux x64 and Windows x64 are
+automated build targets, with execution and physical input validation reported
+separately in the [release notes](https://github.com/2x74/bunnyhop-client/releases).
+See the repository [release process](../../../docs/releases.md).
 
 ## Build and play
 
@@ -93,15 +98,17 @@ replays can briefly stall the UI.
 
 ## Unsigned test releases
 
-Distribution follows the Electron client's unsigned policy. macOS bundles are
+The v0.0.1 preview is distributed from
+[2x74/bunnyhop-client Releases](https://github.com/2x74/bunnyhop-client/releases)
+under an unsigned preview policy. macOS bundles are
 ad-hoc sealed (`codesign --sign -`), without Developer ID or notarization.
 Windows packages are unsigned unless signing is explicitly configured.
 Signing credentials are not a prerequisite for the default package command:
 
 ```sh
-bun apps/native/package.ts --version 0.1.0
+bun run package --version 0.0.1
 bun apps/native/packaging/release-check.ts \
-  --package target/native-packages/bunnyhop-native-0.1.0-darwin-arm64
+  --package target/native-packages/bunnyhop-native-0.0.1-darwin-arm64
 ```
 
 Use the actual stage path printed by the packager for `--package`. It produces a
@@ -183,7 +190,7 @@ end-to-end confirmation. The other developer owns physical Linux input/performan
 testing; headless Linux results cannot establish Wayland mouse behavior.
 No FPS or latency improvement is established by correctness smoke tests.
 
-`2x74/movengine` was reviewed as a native input/BSP-rendering reference; this
+The external movengine project was reviewed as a native input/BSP-rendering reference; this
 prototype does not copy its GPL-3.0 code. Preserve repository and vendored
 Source-related notices. The vendored JSON header is nlohmann/json 3.12.0 under
 its included MIT license.
