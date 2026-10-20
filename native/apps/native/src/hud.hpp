@@ -1,0 +1,103 @@
+#pragma once
+#include "renderer.hpp"
+#include <array>
+#include <cstdio>
+
+namespace {
+class NativeHud {
+    Gl &gl;
+    GLuint program=0,vao=0,vbo=0,atlas=0;
+    std::vector<float> vertices;
+    float scale=1;
+    using Color=std::array<float,4>;
+    const Color cream{.94f,.91f,.86f,1},amber{1,.71f,.24f,1},dim{.75f,.75f,.77f,1};
+    void quad(float x,float y,float w,float h,float u,float v,float uw,float vh,Color c) {
+        const float points[6][4]={{x,y,u,v},{x+w,y,u+uw,v},{x+w,y+h,u+uw,v+vh},
+            {x,y,u,v},{x+w,y+h,u+uw,v+vh},{x,y+h,u,v+vh}};
+        for(const auto &p:points)vertices.insert(vertices.end(),{p[0]*scale,p[1]*scale,p[2],p[3],c[0],c[1],c[2],c[3]});
+    }
+    void rect(float x,float y,float w,float h,Color c) {quad(x,y,w,h,-2,-2,0,0,c);}
+    void text(float x,float y,const std::string &value,float size,Color color,bool center=false) {
+        // The small atlas is ASCII. Fold common UI punctuation and emit one
+        // fallback per unsupported code point, not one per UTF-8 byte.
+        std::string glyphs;
+        for(size_t i=0;i<value.size();){
+            const auto c=uint8_t(value[i]);
+            if(c<128){glyphs+=c>=32?char(c):' ';++i;continue;}
+            if(value.compare(i,2,"\xC2\xB7")==0){glyphs+='|';i+=2;continue;}
+            if(value.compare(i,3,"\xE2\x80\x94")==0||value.compare(i,3,"\xE2\x80\x93")==0){glyphs+='-';i+=3;continue;}
+            glyphs+='?';++i;while(i<value.size()&&(uint8_t(value[i])&0xc0)==0x80)++i;
+        }
+        const float advance=size*.6f;
+        if(center)x-=glyphs.size()*advance*.5f;
+        for(unsigned char ch:glyphs) {
+            if(ch<32||ch>126)ch='?';
+            const int index=ch-32;
+            quad(x+1,y+1,size,size*1.3f,(index%16)*40.f/640,(index/16)*52.f/312,40.f/640,52.f/312,{0,0,0,.85f});
+            quad(x,y,size,size*1.3f,(index%16)*40.f/640,(index/16)*52.f/312,40.f/640,52.f/312,color);
+            x+=advance;
+        }
+    }
+public:
+    NativeHud(Gl &g,const std::filesystem::path &assets):gl(g) {
+        std::ifstream f(assets/"hud.rgba",std::ios::binary);
+        std::vector<uint8_t> data{std::istreambuf_iterator<char>(f),{}};
+        if(data.size()!=640*312*4)throw std::runtime_error("Native HUD atlas is absent; build presentation assets");
+        program=link_program(gl,R"(#version 330 core
+layout(location=0)in vec2 pos;layout(location=1)in vec2 coord;layout(location=2)in vec4 tint;
+uniform vec3 viewport;out vec2 uv;out vec4 ink;
+void main(){uv=coord;ink=tint;gl_Position=vec4(pos.x/viewport.x*2.-1.,1.-pos.y/viewport.y*2.,0,1);})",
+R"(#version 330 core
+in vec2 uv;in vec4 ink;uniform sampler2D font;out vec4 color;
+void main(){color=vec4(ink.rgb,ink.a*(uv.x<0.?1.:texture(font,uv).a));})");
+        gl.GenVertexArrays(1,&vao);gl.BindVertexArray(vao);gl.GenBuffers(1,&vbo);gl.BindBuffer(GL_ARRAY_BUFFER,vbo);
+        gl.EnableVertexAttribArray(0);gl.VertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,8*sizeof(float),nullptr);
+        gl.EnableVertexAttribArray(1);gl.VertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,8*sizeof(float),reinterpret_cast<void*>(2*sizeof(float)));
+        gl.EnableVertexAttribArray(2);gl.VertexAttribPointer(2,4,GL_FLOAT,GL_FALSE,8*sizeof(float),reinterpret_cast<void*>(4*sizeof(float)));
+        gl.GenTextures(1,&atlas);gl.BindTexture(GL_TEXTURE_2D,atlas);
+        gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+        gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        gl.TexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,640,312,0,GL_RGBA,GL_UNSIGNED_BYTE,data.data());
+    }
+    ~NativeHud(){gl.DeleteTextures(1,&atlas);gl.DeleteBuffers(1,&vbo);gl.DeleteVertexArrays(1,&vao);gl.DeleteProgram(program);}
+    void draw(int width,int height,const BhSnapshot &s,const BhRunState &run,const BhCmd &cmd,
+              const std::string &map,const std::string &style,const std::string &notice,
+              double fps,bool visible,bool crosshair,bool playback,const BhWeaponReport &weapon) {
+        if(width<=0||height<=0||(!visible&&!crosshair))return;
+        vertices.clear();scale=std::max(.6f,float(height)/900.f);
+        const float w=width/scale,h=height/scale;
+        if(crosshair) {
+            const float x=w/2,y=h/2;
+            rect(x-9,y-1,6,2,cream);rect(x+3,y-1,6,2,cream);
+            rect(x-1,y-9,2,6,cream);rect(x-1,y+3,2,6,cream);
+        }
+        if(visible) {
+            text(26,18,map,17,cream);text(26,42,style+(run.track?" / BONUS "+std::to_string(run.track):""),14,amber);
+            char buf[160];std::snprintf(buf,sizeof(buf),"%.0f FPS",fps);text(w-135,20,buf,14,dim);
+            const double t=run.seconds;
+            std::snprintf(buf,sizeof(buf),"%02u:%06.3f",unsigned(t)/60,std::fmod(t,60));
+            text(w/2,h-154,buf,34,run.status==2?amber:cream,true);
+            std::snprintf(buf,sizeof(buf),"%.0f u/s",std::hypot(s.player.velocity[0],s.player.velocity[1]));
+            text(w/2,h-105,buf,25,cream,true);
+            std::snprintf(buf,sizeof(buf),"%u jumps  %u strafes  %.1f%% sync",run.jumps,run.strafes,run.sync_percent);
+            text(w/2,h-68,buf,13,dim,true);
+            if(run.status==0)text(w/2,h-186,run.in_start?"IN START":"READY",13,amber,true);
+            if(run.status==2)text(w/2,h-186,"FINISHED",15,amber,true);
+            const std::array<std::pair<const char*,uint32_t>,6> keys={{{"W",native::forward},{"A",native::left},{"S",native::back},{"D",native::right},{"JUMP",native::jump},{"DUCK",native::duck}}};
+            float x=26;for(const auto &[label,bit]:keys){float size=std::string(label).size()>1?54:28;
+                rect(x,h-65,size,27,(cmd.buttons&bit)?Color{1,.71f,.24f,.85f}:Color{.05f,.05f,.07f,.6f});
+                text(x+5,h-63,label,14,(cmd.buttons&bit)?Color{.08f,.07f,.06f,1}:dim);x+=size+4;}
+            std::snprintf(buf,sizeof(buf),"HP %.0f  AMMO %u/%u",s.health,weapon.clip,weapon.clip_size);
+            text(w-275,h-62,buf,14,cream);
+            if(!notice.empty())text(w/2,70,notice.substr(0,100),15,amber,true);
+            if(playback)text(w/2,22,"REPLAY - ESC FOR PLAYBACK CONTROLS",14,amber,true);
+        }
+        gl.Disable(GL_DEPTH_TEST);gl.DepthMask(GL_FALSE);gl.Disable(GL_CULL_FACE);gl.Enable(GL_BLEND);gl.BlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+        gl.UseProgram(program);const float viewport[3]={float(width),float(height),0};
+        gl.Uniform3fv(gl.GetUniformLocation(program,"viewport"),1,viewport);gl.Uniform1i(gl.GetUniformLocation(program,"font"),0);
+        gl.ActiveTexture(GL_TEXTURE0);gl.BindTexture(GL_TEXTURE_2D,atlas);gl.BindVertexArray(vao);gl.BindBuffer(GL_ARRAY_BUFFER,vbo);
+        gl.BufferData(GL_ARRAY_BUFFER,vertices.size()*sizeof(float),vertices.data(),GL_STREAM_DRAW);gl.DrawArrays(GL_TRIANGLES,0,GLsizei(vertices.size()/8));
+        gl.DepthMask(GL_TRUE);gl.Enable(GL_DEPTH_TEST);
+    }
+};
+}

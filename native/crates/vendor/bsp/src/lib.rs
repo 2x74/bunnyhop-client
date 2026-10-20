@@ -1,0 +1,1118 @@
+use std::{
+    fmt,
+    io::{Cursor, Read},
+    ops::Range,
+    sync::Arc,
+};
+
+use rayon::prelude::*;
+
+mod game_lump;
+mod pak;
+mod records;
+
+pub use game_lump::*;
+pub use pak::{Pak, PakEntry, PakEntryClassification};
+pub use records::*;
+
+pub const HEADER_BYTES: usize = 1_036;
+pub const LUMP_COUNT: usize = 64;
+const PARALLEL_LZMA_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Profile {
+    Source2013V20,
+    /// bunnyhop patch: CS:GO maps (container version 21). The lumps this crate decodes have the
+    /// same record layouts as Source 2013 (faces v1, leaves v1, 176-byte displacement info, 8-byte
+    /// brush sides); the static prop game lump differs (`sprp` v10 is CS:GO's 76-byte record, v11
+    /// adds a uniform scale), so `parse_static_props` selects those layouts from this profile.
+    CsgoV21,
+}
+
+impl Profile {
+    /// bunnyhop patch: the profile for a BSP header's container version (19/20: Source 2013,
+    /// 21: CS:GO). Other versions get `Source2013V20`, which `parse` then rejects.
+    pub fn for_source(source: &[u8]) -> Self {
+        match source
+            .get(4..8)
+            .map(|v| i32::from_le_bytes(v.try_into().expect("4 bytes")))
+        {
+            Some(21) => Self::CsgoV21,
+            _ => Self::Source2013V20,
+        }
+    }
+
+    const fn version(self) -> i32 {
+        match self {
+            Self::Source2013V20 => 20,
+            Self::CsgoV21 => 21,
+        }
+    }
+
+    /// bunnyhop patch: the Source 2013 engine (MINBSPVERSION 19, BSPVERSION 20) loads both v19
+    /// and v20 maps. The lump layouts this crate decodes are identical between the two; the
+    /// differences (v19 maps are never LZMA-compressed, older leaf/static-prop lump versions)
+    /// are already handled per lump version.
+    const fn accepts(self, version: i32) -> bool {
+        match self {
+            Self::Source2013V20 => version == 19 || version == 20,
+            Self::CsgoV21 => version == 21,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Limits {
+    pub max_input_bytes: usize,
+    pub max_encoded_bytes: usize,
+    pub max_total_decoded_bytes: usize,
+    pub max_decoded_bytes_per_lump: usize,
+    pub max_compression_ratio: usize,
+    pub max_records_per_lump: usize,
+    pub max_pak_entries: usize,
+    pub max_decoded_pak_bytes: usize,
+    pub max_decoded_bytes_per_pak_entry: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            max_input_bytes: 512 * 1024 * 1024,
+            max_encoded_bytes: 512 * 1024 * 1024,
+            max_total_decoded_bytes: 1024 * 1024 * 1024,
+            max_decoded_bytes_per_lump: 512 * 1024 * 1024,
+            max_compression_ratio: 1_024,
+            max_records_per_lump: 16 * 1024 * 1024,
+            max_pak_entries: 65_535,
+            max_decoded_pak_bytes: 512 * 1024 * 1024,
+            max_decoded_bytes_per_pak_entry: 256 * 1024 * 1024,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Compression {
+    pub decoded_size: usize,
+    pub encoded_payload_size: usize,
+    pub properties: [u8; 5],
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Lump {
+    pub index: usize,
+    pub version: i32,
+    pub raw_fourth_field: [u8; 4],
+    pub encoded_range: Range<usize>,
+    pub alignment_residue: usize,
+    pub overlaps: Vec<usize>,
+    pub compression: Option<Compression>,
+    pub coverage: LumpCoverage,
+    pub records: LumpData,
+    pub pak: Option<Pak>,
+    decoded: Option<Vec<u8>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LumpCoverage {
+    Handled,
+    IntentionallyInert,
+    Unsupported,
+    Unknown,
+}
+
+impl Lump {
+    pub fn bytes<'a>(&'a self, bsp: &'a Bsp) -> &'a [u8] {
+        self.decoded
+            .as_deref()
+            .unwrap_or(&bsp.source[self.encoded_range.clone()])
+    }
+
+    pub fn encoded_bytes<'a>(&self, bsp: &'a Bsp) -> &'a [u8] {
+        &bsp.source[self.encoded_range.clone()]
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Bsp {
+    pub profile: Profile,
+    pub container_version: i32,
+    pub map_revision: i32,
+    pub lumps: Vec<Lump>,
+    source: Arc<[u8]>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PhysicsModel<'source> {
+    pub model_index: usize,
+    pub collision: &'source [u8],
+    pub keydata: &'source [u8],
+    pub solid_count: usize,
+}
+
+impl Bsp {
+    pub fn source_bytes(&self) -> &[u8] {
+        &self.source
+    }
+
+    pub fn lump(&self, index: usize) -> Option<&Lump> {
+        self.lumps.get(index)
+    }
+
+    pub fn release_lump_payload(&mut self, index: usize) -> bool {
+        let Some(lump) = self.lumps.get_mut(index) else {
+            return false;
+        };
+        lump.records = LumpData::Opaque;
+        lump.pak = None;
+        lump.decoded = Some(Vec::new());
+        true
+    }
+
+    pub fn physics_models(
+        &self,
+        maximum_models: usize,
+    ) -> Result<Vec<PhysicsModel<'_>>, ParseError> {
+        let bytes = self.lumps[29].bytes(self);
+        if bytes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut models = Vec::new();
+        let mut offset = 0_usize;
+        loop {
+            let Some(header) = bytes.get(offset..offset.saturating_add(16)) else {
+                return Err(failure(
+                    ErrorCode::InvalidRecord,
+                    Some(29),
+                    offset..offset.saturating_add(16),
+                    None,
+                    None,
+                ));
+            };
+            let model = i32::from_le_bytes(header[0..4].try_into().expect("model field"));
+            let collision = i32::from_le_bytes(header[4..8].try_into().expect("collision field"));
+            let keydata = i32::from_le_bytes(header[8..12].try_into().expect("keydata field"));
+            let solids = i32::from_le_bytes(header[12..16].try_into().expect("solid field"));
+            offset += 16;
+            if model == -1 && collision == -1 {
+                if keydata != 0 || solids != 0 || offset != bytes.len() {
+                    return Err(failure(
+                        ErrorCode::InvalidRecord,
+                        Some(29),
+                        offset - 16..bytes.len(),
+                        None,
+                        None,
+                    ));
+                }
+                return Ok(models);
+            }
+            let (Ok(model_index), Ok(collision_size), Ok(keydata_size), Ok(solid_count)) = (
+                usize::try_from(model),
+                usize::try_from(collision),
+                usize::try_from(keydata),
+                usize::try_from(solids),
+            ) else {
+                return Err(failure(
+                    ErrorCode::InvalidRecord,
+                    Some(29),
+                    offset - 16..offset,
+                    None,
+                    None,
+                ));
+            };
+            if collision_size == 0 || keydata_size == 0 || solid_count == 0 {
+                return Err(failure(
+                    ErrorCode::InvalidRecord,
+                    Some(29),
+                    offset - 16..offset,
+                    None,
+                    None,
+                ));
+            }
+            if models.len() == maximum_models {
+                return Err(failure(
+                    ErrorCode::RecordBudget,
+                    Some(29),
+                    offset - 16..offset,
+                    Some(models.len() + 1),
+                    Some(maximum_models),
+                ));
+            }
+            if models
+                .iter()
+                .any(|prior: &PhysicsModel<'_>| prior.model_index == model_index)
+            {
+                return Err(failure(
+                    ErrorCode::InvalidRecord,
+                    Some(29),
+                    offset - 16..offset,
+                    Some(model_index),
+                    None,
+                ));
+            }
+            let Some(collision_end) = offset.checked_add(collision_size) else {
+                return Err(failure(
+                    ErrorCode::RangeOverflow,
+                    Some(29),
+                    offset..offset,
+                    None,
+                    None,
+                ));
+            };
+            let Some(keydata_end) = collision_end.checked_add(keydata_size) else {
+                return Err(failure(
+                    ErrorCode::RangeOverflow,
+                    Some(29),
+                    collision_end..collision_end,
+                    None,
+                    None,
+                ));
+            };
+            let (Some(collision), Some(keydata)) = (
+                bytes.get(offset..collision_end),
+                bytes.get(collision_end..keydata_end),
+            ) else {
+                return Err(failure(
+                    ErrorCode::TruncatedRange,
+                    Some(29),
+                    offset..keydata_end,
+                    Some(keydata_end),
+                    Some(bytes.len()),
+                ));
+            };
+            models.push(PhysicsModel {
+                model_index,
+                collision,
+                keydata,
+                solid_count,
+            });
+            offset = keydata_end;
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ErrorCode {
+    InputLimit,
+    TruncatedHeader,
+    InvalidIdentifier,
+    ProfileVersionMismatch,
+    NegativeRange,
+    RangeOverflow,
+    TruncatedRange,
+    EncodedBudget,
+    InvalidCompression,
+    DecodedBudget,
+    CompressionRatio,
+    DecompressionFailed,
+    UnsupportedLumpVersion,
+    InvalidRecord,
+    RecordBudget,
+    InvalidPak,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ParseError {
+    pub code: ErrorCode,
+    pub lump: Option<usize>,
+    pub range: Range<usize>,
+    pub declared: Option<usize>,
+    pub limit: Option<usize>,
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            output,
+            "{:?} at {}..{}",
+            self.code, self.range.start, self.range.end
+        )
+    }
+}
+
+impl std::error::Error for ParseError {}
+
+pub fn parse(source: &[u8], profile: Profile, limits: Limits) -> Result<Bsp, ParseError> {
+    if source.len() > limits.max_input_bytes {
+        return Err(failure(
+            ErrorCode::InputLimit,
+            None,
+            source.len()..source.len(),
+            Some(source.len()),
+            Some(limits.max_input_bytes),
+        ));
+    }
+    if source.len() < HEADER_BYTES {
+        return Err(failure(
+            ErrorCode::TruncatedHeader,
+            None,
+            source.len()..HEADER_BYTES,
+            Some(source.len()),
+            Some(HEADER_BYTES),
+        ));
+    }
+    if &source[..4] != b"VBSP" {
+        return Err(failure(
+            ErrorCode::InvalidIdentifier,
+            None,
+            0..4,
+            None,
+            None,
+        ));
+    }
+    let container_version = i32_at(source, 4);
+    if !profile.accepts(container_version) {
+        return Err(failure(
+            ErrorCode::ProfileVersionMismatch,
+            None,
+            4..8,
+            Some(container_version.unsigned_abs() as usize),
+            Some(profile.version() as usize),
+        ));
+    }
+
+    let mut encoded_total = 0_usize;
+    let mut lumps = Vec::with_capacity(LUMP_COUNT);
+    for index in 0..LUMP_COUNT {
+        let header = 8 + index * 16;
+        let offset = i32_at(source, header);
+        let length = i32_at(source, header + 4);
+        if offset < 0 || length < 0 {
+            return Err(failure(
+                ErrorCode::NegativeRange,
+                Some(index),
+                header..header + 8,
+                None,
+                None,
+            ));
+        }
+        let start = offset as usize;
+        let length = length as usize;
+        let Some(end) = start.checked_add(length) else {
+            return Err(failure(
+                ErrorCode::RangeOverflow,
+                Some(index),
+                header..header + 8,
+                Some(length),
+                None,
+            ));
+        };
+        if end > source.len() {
+            return Err(failure(
+                ErrorCode::TruncatedRange,
+                Some(index),
+                start..end,
+                Some(end),
+                Some(source.len()),
+            ));
+        }
+        encoded_total = encoded_total.checked_add(length).ok_or_else(|| {
+            failure(
+                ErrorCode::EncodedBudget,
+                Some(index),
+                start..end,
+                None,
+                Some(limits.max_encoded_bytes),
+            )
+        })?;
+        if encoded_total > limits.max_encoded_bytes {
+            return Err(failure(
+                ErrorCode::EncodedBudget,
+                Some(index),
+                start..end,
+                Some(encoded_total),
+                Some(limits.max_encoded_bytes),
+            ));
+        }
+        lumps.push(Lump {
+            index,
+            version: i32_at(source, header + 8),
+            raw_fourth_field: source[header + 12..header + 16]
+                .try_into()
+                .expect("fixed range"),
+            encoded_range: start..end,
+            alignment_residue: start % 4,
+            overlaps: Vec::new(),
+            compression: None,
+            coverage: LumpCoverage::IntentionallyInert,
+            records: LumpData::Opaque,
+            pak: None,
+            decoded: None,
+        });
+    }
+
+    for left in 0..LUMP_COUNT {
+        if lumps[left].encoded_range.is_empty() {
+            continue;
+        }
+        for right in left + 1..LUMP_COUNT {
+            if ranges_overlap(&lumps[left].encoded_range, &lumps[right].encoded_range) {
+                lumps[left].overlaps.push(right);
+                lumps[right].overlaps.push(left);
+            }
+        }
+    }
+
+    let compressed = lumps
+        .iter()
+        .enumerate()
+        .filter_map(|(position, lump)| {
+            let declared = u32::from_le_bytes(lump.raw_fourth_field) as usize;
+            (!lump.encoded_range.is_empty() && declared != 0).then_some((position, declared))
+        })
+        .collect::<Vec<_>>();
+    let mut total_decoded = 0_usize;
+    let mut next = 0;
+    while next < compressed.len() {
+        let budget = limits
+            .max_total_decoded_bytes
+            .saturating_sub(total_decoded)
+            .clamp(1, PARALLEL_LZMA_BYTES);
+        let mut batch_end = next;
+        let mut batch_bytes = 0_usize;
+        while batch_end < compressed.len() {
+            let declared = compressed[batch_end].1;
+            if batch_end > next && batch_bytes.saturating_add(declared) > budget {
+                break;
+            }
+            batch_bytes = batch_bytes.saturating_add(declared);
+            batch_end += 1;
+            if batch_bytes >= budget {
+                break;
+            }
+        }
+        let results = compressed[next..batch_end]
+            .par_iter()
+            .map(|&(position, declared)| {
+                let lump = &lumps[position];
+                decode_lzma(
+                    &source[lump.encoded_range.clone()],
+                    declared,
+                    lump.index,
+                    limits,
+                )
+            })
+            .collect::<Vec<_>>();
+        for (&(position, _), result) in compressed[next..batch_end].iter().zip(results) {
+            let lump = &mut lumps[position];
+            let (compression, decoded) = result?;
+            total_decoded = total_decoded.checked_add(decoded.len()).ok_or_else(|| {
+                failure(
+                    ErrorCode::DecodedBudget,
+                    Some(lump.index),
+                    lump.encoded_range.clone(),
+                    None,
+                    Some(limits.max_total_decoded_bytes),
+                )
+            })?;
+            if total_decoded > limits.max_total_decoded_bytes {
+                return Err(failure(
+                    ErrorCode::DecodedBudget,
+                    Some(lump.index),
+                    lump.encoded_range.clone(),
+                    Some(total_decoded),
+                    Some(limits.max_total_decoded_bytes),
+                ));
+            }
+            lump.compression = Some(compression);
+            lump.decoded = Some(decoded);
+        }
+        next = batch_end;
+    }
+
+    for lump in &mut lumps {
+        let bytes = lump
+            .decoded
+            .as_deref()
+            .unwrap_or(&source[lump.encoded_range.clone()]);
+        // bunnyhop patch: CS:GO lighting lumps aren't an array of 4-byte samples. After each face's
+        // RGBE samples, CS:GO's VRAD stores one more byte per luxel, so face light offsets (and the
+        // lump length) aren't multiples of 4. Keep the bytes raw (`Lump::bytes`); callers read a
+        // face's samples at its byte offset (`csgo_light_samples`).
+        lump.records = if profile == Profile::CsgoV21
+            && matches!(lump.index, records::LIGHTING | records::LIGHTING_HDR)
+        {
+            LumpData::Opaque
+        } else {
+            records::parse_lump(lump.index, lump.version, bytes, limits.max_records_per_lump)?
+        };
+        lump.coverage = if bytes.is_empty() {
+            LumpCoverage::IntentionallyInert
+        } else if !records::is_implemented(lump.index) {
+            LumpCoverage::Unknown
+        } else if !records::version_supported(lump.index, lump.version) {
+            LumpCoverage::Unsupported
+        } else {
+            LumpCoverage::Handled
+        };
+        if lump.index == records::PAKFILE
+            && !bytes.is_empty()
+            && lump.coverage == LumpCoverage::Handled
+        {
+            // bunnyhop patch: an unreadable pakfile (non-standard zip headers written by some map
+            // tools) no longer fails the whole map; the map loads without the decoded pak and
+            // callers can still read the raw lump bytes.
+            lump.pak = pak::parse(
+                bytes,
+                lump.index,
+                limits.max_pak_entries,
+                limits.max_decoded_bytes_per_pak_entry,
+                limits.max_decoded_pak_bytes,
+                limits.max_compression_ratio,
+            )
+            .ok();
+        }
+    }
+
+    Ok(Bsp {
+        profile,
+        container_version,
+        map_revision: i32_at(source, 1_032),
+        lumps,
+        source: Arc::from(source),
+    })
+}
+
+/// bunnyhop patch: `count` RGBE samples of a CS:GO (v21) lighting lump starting at byte `offset`
+/// (a face's `light_offset`, which needn't be 4-aligned there). `None` past the end of the lump.
+pub fn csgo_light_samples(
+    lighting: &[u8],
+    offset: usize,
+    count: usize,
+) -> Option<Vec<LightSample>> {
+    let end = count.checked_mul(4)?.checked_add(offset)?;
+    Some(
+        lighting
+            .get(offset..end)?
+            .chunks_exact(4)
+            .map(|s| LightSample {
+                red: s[0],
+                green: s[1],
+                blue: s[2],
+                exponent: s[3] as i8,
+            })
+            .collect(),
+    )
+}
+
+pub fn decode_source_lzma_member(
+    encoded: &[u8],
+    decoded_size: usize,
+    limits: Limits,
+) -> Result<Vec<u8>, ParseError> {
+    decode_lzma(encoded, decoded_size, 35, limits).map(|(_, decoded)| decoded)
+}
+
+fn decode_lzma(
+    encoded: &[u8],
+    declared: usize,
+    index: usize,
+    limits: Limits,
+) -> Result<(Compression, Vec<u8>), ParseError> {
+    let range = 8 + index * 16 + 12..8 + index * 16 + 16;
+    if declared > limits.max_decoded_bytes_per_lump {
+        return Err(failure(
+            ErrorCode::DecodedBudget,
+            Some(index),
+            range,
+            Some(declared),
+            Some(limits.max_decoded_bytes_per_lump),
+        ));
+    }
+    if encoded.len() < 17 || &encoded[..4] != b"LZMA" {
+        return Err(failure(
+            ErrorCode::InvalidCompression,
+            Some(index),
+            range,
+            None,
+            None,
+        ));
+    }
+    let header_decoded = u32_at(encoded, 4) as usize;
+    let payload_size = u32_at(encoded, 8) as usize;
+    if header_decoded != declared || payload_size != encoded.len() - 17 {
+        return Err(failure(
+            ErrorCode::InvalidCompression,
+            Some(index),
+            range,
+            Some(header_decoded),
+            Some(declared),
+        ));
+    }
+    if payload_size == 0 || declared > payload_size.saturating_mul(limits.max_compression_ratio) {
+        return Err(failure(
+            ErrorCode::CompressionRatio,
+            Some(index),
+            range,
+            Some(declared),
+            Some(payload_size.saturating_mul(limits.max_compression_ratio)),
+        ));
+    }
+    let properties: [u8; 5] = encoded[12..17].try_into().expect("fixed range");
+    let dictionary = u32::from_le_bytes(properties[1..5].try_into().expect("LZMA dictionary"));
+    let decoder = lzma_rust2::LzmaReader::new_with_props(
+        Cursor::new(&encoded[17..]),
+        declared as u64,
+        properties[0],
+        dictionary,
+        None,
+    )
+    .map_err(|_| {
+        failure(
+            ErrorCode::DecompressionFailed,
+            Some(index),
+            range.clone(),
+            None,
+            None,
+        )
+    })?;
+    let mut decoded = Vec::with_capacity(declared);
+    decoder
+        .take((declared as u64).saturating_add(1))
+        .read_to_end(&mut decoded)
+        .map_err(|_| {
+            failure(
+                ErrorCode::DecompressionFailed,
+                Some(index),
+                range.clone(),
+                None,
+                None,
+            )
+        })?;
+    if decoded.len() != declared {
+        return Err(failure(
+            ErrorCode::DecompressionFailed,
+            Some(index),
+            range,
+            Some(decoded.len()),
+            Some(declared),
+        ));
+    }
+    Ok((
+        Compression {
+            decoded_size: declared,
+            encoded_payload_size: payload_size,
+            properties,
+        },
+        decoded,
+    ))
+}
+
+fn ranges_overlap(left: &Range<usize>, right: &Range<usize>) -> bool {
+    !left.is_empty() && !right.is_empty() && left.start < right.end && right.start < left.end
+}
+
+fn i32_at(bytes: &[u8], offset: usize) -> i32 {
+    i32::from_le_bytes(
+        bytes[offset..offset + 4]
+            .try_into()
+            .expect("validated BSP range"),
+    )
+}
+
+fn u32_at(bytes: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes(
+        bytes[offset..offset + 4]
+            .try_into()
+            .expect("validated BSP range"),
+    )
+}
+
+pub(crate) fn failure(
+    code: ErrorCode,
+    lump: Option<usize>,
+    range: Range<usize>,
+    declared: Option<usize>,
+    limit: Option<usize>,
+) -> ParseError {
+    ParseError {
+        code,
+        lump,
+        range,
+        declared,
+        limit,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_bsp() -> Vec<u8> {
+        let mut bytes = vec![0; HEADER_BYTES];
+        bytes[..4].copy_from_slice(b"VBSP");
+        bytes[4..8].copy_from_slice(&20_i32.to_le_bytes());
+        bytes[1_032..].copy_from_slice(&7_i32.to_le_bytes());
+        bytes
+    }
+
+    fn set_lump(
+        bytes: &mut [u8],
+        index: usize,
+        offset: i32,
+        length: i32,
+        version: i32,
+        fourth: i32,
+    ) {
+        let header = 8 + index * 16;
+        bytes[header..header + 4].copy_from_slice(&offset.to_le_bytes());
+        bytes[header + 4..header + 8].copy_from_slice(&length.to_le_bytes());
+        bytes[header + 8..header + 12].copy_from_slice(&version.to_le_bytes());
+        bytes[header + 12..header + 16].copy_from_slice(&fourth.to_le_bytes());
+    }
+
+    #[test]
+    fn parses_all_descriptors_revision_zero_lengths_and_unaligned_ranges() {
+        let mut bytes = empty_bsp();
+        bytes.extend_from_slice(b"abc");
+        set_lump(&mut bytes, 0, HEADER_BYTES as i32, 3, 4, 0);
+        set_lump(&mut bytes, 1, 17, 0, 9, 123);
+        let bsp = parse(&bytes, Profile::Source2013V20, Limits::default()).unwrap();
+        assert_eq!(bsp.lumps.len(), LUMP_COUNT);
+        assert_eq!(bsp.map_revision, 7);
+        assert_eq!(bsp.lumps[0].version, 4);
+        assert_eq!(bsp.lumps[0].bytes(&bsp), b"abc");
+        assert_eq!(bsp.lumps[1].encoded_range, 17..17);
+        assert_eq!(bsp.lumps[1].raw_fourth_field, 123_i32.to_le_bytes());
+        assert_eq!(bsp.source_bytes(), bytes);
+    }
+
+    #[test]
+    fn retains_partial_and_exact_overlaps() {
+        let mut bytes = empty_bsp();
+        bytes.extend_from_slice(b"abcdefgh");
+        set_lump(&mut bytes, 61, HEADER_BYTES as i32, 4, 0, 0);
+        set_lump(&mut bytes, 62, (HEADER_BYTES + 2) as i32, 4, 0, 0);
+        set_lump(&mut bytes, 63, HEADER_BYTES as i32, 4, 0, 0);
+        let bsp = parse(&bytes, Profile::Source2013V20, Limits::default()).unwrap();
+        assert_eq!(bsp.lumps[61].overlaps, vec![62, 63]);
+        assert_eq!(bsp.lumps[62].overlaps, vec![61, 63]);
+        assert_eq!(bsp.lumps[63].overlaps, vec![61, 62]);
+    }
+
+    #[test]
+    fn released_lump_discards_decoded_records_without_changing_authored_source() {
+        let mut bytes = empty_bsp();
+        bytes.extend_from_slice(&[12, 34, 56, 78]);
+        set_lump(&mut bytes, 8, HEADER_BYTES as i32, 4, 1, 0);
+        let mut bsp = parse(&bytes, Profile::Source2013V20, Limits::default()).unwrap();
+        assert!(matches!(bsp.lumps[8].records, LumpData::Lighting(_)));
+        assert!(bsp.release_lump_payload(8));
+        assert!(matches!(bsp.lumps[8].records, LumpData::Opaque));
+        assert!(bsp.lumps[8].bytes(&bsp).is_empty());
+        assert_eq!(bsp.lumps[8].encoded_bytes(&bsp), &[12, 34, 56, 78]);
+        assert_eq!(bsp.source_bytes(), bytes);
+        assert!(!bsp.release_lump_payload(LUMP_COUNT));
+    }
+
+    #[test]
+    fn frames_ordered_physics_models_without_decoding_collision_payloads() {
+        let mut bytes = empty_bsp();
+        let start = bytes.len();
+        for (model, collision, keydata, solids) in [
+            (0_i32, b"first".as_slice(), b"a\0".as_slice(), 2_i32),
+            (9_i32, b"next".as_slice(), b"bbb\0".as_slice(), 1_i32),
+        ] {
+            bytes.extend_from_slice(&model.to_le_bytes());
+            bytes.extend_from_slice(&(collision.len() as i32).to_le_bytes());
+            bytes.extend_from_slice(&(keydata.len() as i32).to_le_bytes());
+            bytes.extend_from_slice(&solids.to_le_bytes());
+            bytes.extend_from_slice(collision);
+            bytes.extend_from_slice(keydata);
+        }
+        for value in [-1_i32, -1, 0, 0] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        let length = bytes.len() - start;
+        set_lump(&mut bytes, 29, start as i32, length as i32, 0, 0);
+        let bsp = parse(&bytes, Profile::Source2013V20, Limits::default()).unwrap();
+        let models = bsp.physics_models(2).unwrap();
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].model_index, 0);
+        assert_eq!(models[0].collision, b"first");
+        assert_eq!(models[0].keydata, b"a\0");
+        assert_eq!(models[0].solid_count, 2);
+        assert_eq!(models[1].model_index, 9);
+        assert_eq!(models[1].collision, b"next");
+        assert_eq!(
+            bsp.physics_models(1).unwrap_err().code,
+            ErrorCode::RecordBudget
+        );
+    }
+
+    #[test]
+    fn physics_model_framing_rejects_duplicates_truncation_and_invalid_terminator() {
+        let make = |payload: Vec<u8>| {
+            let mut bytes = empty_bsp();
+            let start = bytes.len();
+            bytes.extend_from_slice(&payload);
+            set_lump(&mut bytes, 29, start as i32, payload.len() as i32, 0, 0);
+            parse(&bytes, Profile::Source2013V20, Limits::default()).unwrap()
+        };
+        let mut duplicate = Vec::new();
+        for _ in 0..2 {
+            for value in [4_i32, 1, 1, 1] {
+                duplicate.extend_from_slice(&value.to_le_bytes());
+            }
+            duplicate.extend_from_slice(b"x\0");
+        }
+        assert_eq!(
+            make(duplicate).physics_models(4).unwrap_err().code,
+            ErrorCode::InvalidRecord
+        );
+        let mut truncated = Vec::new();
+        for value in [0_i32, 8, 1, 1] {
+            truncated.extend_from_slice(&value.to_le_bytes());
+        }
+        truncated.push(0);
+        assert_eq!(
+            make(truncated).physics_models(4).unwrap_err().code,
+            ErrorCode::TruncatedRange
+        );
+        let mut terminal = Vec::new();
+        for value in [-1_i32, -1, 0, 1] {
+            terminal.extend_from_slice(&value.to_le_bytes());
+        }
+        assert_eq!(
+            make(terminal).physics_models(4).unwrap_err().code,
+            ErrorCode::InvalidRecord
+        );
+    }
+
+    #[test]
+    fn decodes_declared_source_lzma() {
+        let payload = b"bounded compressed lump";
+        let mut alone = Vec::new();
+        lzma_rs::lzma_compress(&mut Cursor::new(payload), &mut alone).unwrap();
+        let mut encoded = b"LZMA".to_vec();
+        encoded.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        encoded.extend_from_slice(&((alone.len() - 13) as u32).to_le_bytes());
+        encoded.extend_from_slice(&alone[..5]);
+        encoded.extend_from_slice(&alone[13..]);
+        let mut bytes = empty_bsp();
+        let offset = bytes.len();
+        bytes.extend_from_slice(&encoded);
+        set_lump(
+            &mut bytes,
+            4,
+            offset as i32,
+            encoded.len() as i32,
+            2,
+            payload.len() as i32,
+        );
+        let bsp = parse(&bytes, Profile::Source2013V20, Limits::default()).unwrap();
+        assert_eq!(bsp.lumps[4].bytes(&bsp), payload);
+        assert_eq!(bsp.lumps[4].encoded_bytes(&bsp), encoded);
+    }
+
+    #[test]
+    fn parallel_source_lumps_retain_exact_order_bytes_and_budget_failures() {
+        let encode = |payload: &[u8]| {
+            let mut alone = Vec::new();
+            lzma_rs::lzma_compress(&mut Cursor::new(payload), &mut alone).unwrap();
+            let mut encoded = b"LZMA".to_vec();
+            encoded.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+            encoded.extend_from_slice(&((alone.len() - 13) as u32).to_le_bytes());
+            encoded.extend_from_slice(&alone[..5]);
+            encoded.extend_from_slice(&alone[13..]);
+            encoded
+        };
+        let first = vec![0x31; 4_096];
+        let second = vec![0x72; 8_192];
+        let mut bytes = empty_bsp();
+        for (index, payload) in [(61, &first), (62, &second)] {
+            let encoded = encode(payload);
+            let offset = bytes.len();
+            bytes.extend_from_slice(&encoded);
+            set_lump(
+                &mut bytes,
+                index,
+                offset as i32,
+                encoded.len() as i32,
+                0,
+                payload.len() as i32,
+            );
+        }
+
+        let parsed = parse(&bytes, Profile::Source2013V20, Limits::default()).unwrap();
+        assert_eq!(parsed.lumps[61].bytes(&parsed), first);
+        assert_eq!(parsed.lumps[62].bytes(&parsed), second);
+
+        let limited = parse(
+            &bytes,
+            Profile::Source2013V20,
+            Limits {
+                max_total_decoded_bytes: first.len() + second.len() - 1,
+                ..Limits::default()
+            },
+        )
+        .unwrap_err();
+        assert_eq!(limited.code, ErrorCode::DecodedBudget);
+        assert_eq!(limited.lump, Some(62));
+
+        let mut malformed = bytes;
+        for index in [61, 62] {
+            let offset = i32_at(&malformed, 8 + index * 16) as usize;
+            malformed[offset + 12] = 0xff;
+        }
+        let failure = parse(&malformed, Profile::Source2013V20, Limits::default()).unwrap_err();
+        assert_eq!(failure.code, ErrorCode::DecompressionFailed);
+        assert_eq!(failure.lump, Some(61));
+    }
+
+    #[test]
+    fn rejects_header_profile_range_and_budget_failures() {
+        let mut wrong = empty_bsp();
+        wrong[..4].copy_from_slice(b"XXXX");
+        assert_eq!(
+            parse(&wrong, Profile::Source2013V20, Limits::default())
+                .unwrap_err()
+                .code,
+            ErrorCode::InvalidIdentifier
+        );
+        assert_eq!(
+            parse(
+                &empty_bsp()[..100],
+                Profile::Source2013V20,
+                Limits::default()
+            )
+            .unwrap_err()
+            .code,
+            ErrorCode::TruncatedHeader
+        );
+
+        let mut version = empty_bsp();
+        version[4..8].copy_from_slice(&19_i32.to_le_bytes());
+        assert_eq!(
+            parse(&version, Profile::Source2013V20, Limits::default())
+                .unwrap()
+                .container_version,
+            19
+        );
+        for unsupported in [18_i32, 21] {
+            version[4..8].copy_from_slice(&unsupported.to_le_bytes());
+            assert_eq!(
+                parse(&version, Profile::Source2013V20, Limits::default())
+                    .unwrap_err()
+                    .code,
+                ErrorCode::ProfileVersionMismatch
+            );
+        }
+
+        let mut negative = empty_bsp();
+        set_lump(&mut negative, 0, -1, 1, 0, 0);
+        assert_eq!(
+            parse(&negative, Profile::Source2013V20, Limits::default())
+                .unwrap_err()
+                .code,
+            ErrorCode::NegativeRange
+        );
+
+        let mut truncated = empty_bsp();
+        set_lump(&mut truncated, 0, HEADER_BYTES as i32, 1, 0, 0);
+        assert_eq!(
+            parse(&truncated, Profile::Source2013V20, Limits::default())
+                .unwrap_err()
+                .code,
+            ErrorCode::TruncatedRange
+        );
+
+        let limits = Limits {
+            max_input_bytes: 10,
+            ..Limits::default()
+        };
+        assert_eq!(
+            parse(&empty_bsp(), Profile::Source2013V20, limits)
+                .unwrap_err()
+                .code,
+            ErrorCode::InputLimit
+        );
+    }
+
+    #[test]
+    fn csgo_profile_accepts_only_v21_and_is_selected_from_the_header() {
+        let mut bytes = empty_bsp();
+        assert_eq!(Profile::for_source(&bytes), Profile::Source2013V20);
+        assert_eq!(
+            parse(&bytes, Profile::CsgoV21, Limits::default())
+                .unwrap_err()
+                .code,
+            ErrorCode::ProfileVersionMismatch
+        );
+        bytes[4..8].copy_from_slice(&21_i32.to_le_bytes());
+        assert_eq!(Profile::for_source(&bytes), Profile::CsgoV21);
+        let bsp = parse(&bytes, Profile::for_source(&bytes), Limits::default()).unwrap();
+        assert_eq!((bsp.profile, bsp.container_version), (Profile::CsgoV21, 21));
+        for other in [19_i32, 20, 22] {
+            bytes[4..8].copy_from_slice(&other.to_le_bytes());
+            assert_eq!(Profile::for_source(&bytes), Profile::Source2013V20);
+            assert_eq!(
+                parse(&bytes, Profile::CsgoV21, Limits::default())
+                    .unwrap_err()
+                    .code,
+                ErrorCode::ProfileVersionMismatch
+            );
+        }
+        assert_eq!(Profile::for_source(&bytes[..4]), Profile::Source2013V20);
+    }
+
+    #[test]
+    fn csgo_lighting_stays_raw_and_reads_unaligned_face_samples() {
+        // 2 samples + 1 trailing byte: not a multiple of 4.
+        let lighting = [1_u8, 2, 3, 0xfe, 4, 5, 6, 7, 9];
+        let mut bytes = empty_bsp();
+        let offset = bytes.len();
+        bytes.extend_from_slice(&lighting);
+        set_lump(
+            &mut bytes,
+            records::LIGHTING,
+            offset as i32,
+            lighting.len() as i32,
+            1,
+            0,
+        );
+        assert_eq!(
+            parse(&bytes, Profile::Source2013V20, Limits::default())
+                .unwrap_err()
+                .code,
+            ErrorCode::InvalidRecord
+        );
+        bytes[4..8].copy_from_slice(&21_i32.to_le_bytes());
+        let bsp = parse(&bytes, Profile::CsgoV21, Limits::default()).unwrap();
+        let lump = bsp.lump(records::LIGHTING).unwrap();
+        assert_eq!(lump.records, LumpData::Opaque);
+        assert_eq!(lump.bytes(&bsp), lighting);
+        let samples = csgo_light_samples(lump.bytes(&bsp), 1, 2).unwrap();
+        assert_eq!(
+            samples,
+            [
+                LightSample {
+                    red: 2,
+                    green: 3,
+                    blue: 0xfe,
+                    exponent: 4
+                },
+                LightSample {
+                    red: 5,
+                    green: 6,
+                    blue: 7,
+                    exponent: 9
+                },
+            ]
+        );
+        assert_eq!(csgo_light_samples(lump.bytes(&bsp), 2, 2), None);
+    }
+
+    #[test]
+    fn rejects_declared_compression_mismatches_before_decoding() {
+        let mut bytes = empty_bsp();
+        let offset = bytes.len();
+        bytes.extend_from_slice(b"not lzma");
+        set_lump(&mut bytes, 0, offset as i32, 8, 0, 100);
+        assert_eq!(
+            parse(&bytes, Profile::Source2013V20, Limits::default())
+                .unwrap_err()
+                .code,
+            ErrorCode::InvalidCompression
+        );
+    }
+}

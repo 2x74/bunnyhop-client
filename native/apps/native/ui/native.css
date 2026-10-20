@@ -1,0 +1,82 @@
+html, body { background: transparent; }
+body.native-menu { height: 100dvh; background: linear-gradient(115deg,rgba(12,12,15,.98),rgba(12,12,15,.91)); }
+.native-shell { height: 100%; box-sizing: border-box; display: flex; flex-direction: column; padding: clamp(1.1rem,3.7vw,4rem); gap: 1.2rem; }
+.native-top { display: flex; align-items: center; justify-content: space-between; gap: 2rem; min-height: 3rem; }
+.native-top > .wordmark { opacity: .72; }
+#native-menu { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+.native-home { width: 100%; display: grid; grid-template-columns: minmax(20rem,1fr) minmax(20rem,1fr); gap: 4rem; align-items: center; }
+.native-home-actions { display: flex; flex-direction: column; align-items: stretch; }
+.native-home-actions .home-item { width: 100%; }
+.native-home .wordmark-xl { font-size: clamp(2.4rem,5vw,4.3rem); }
+/* Native pause/menu controls must be painted as soon as the overlay opens.
+   The web title screen's delayed entrance can stay transparent while a host
+   loading-state update replaces the screen or WKWebView takes a snapshot. */
+.native-menu .native-home .home-menu > *,
+.native-menu .native-home .wordmark-xl .wm-text,
+.native-menu .native-home .wordmark-xl .logo-mark circle { animation:none; transform:none; }
+.native-menu .native-home .wordmark-xl .logo-mark path { animation:none; stroke-dashoffset:0; }
+#native-finish-result:empty { display: none; }
+.native-finish { margin-top:1.25rem; padding:.55rem 0 .55rem 1rem; border-left:3px solid var(--amber); }
+.native-finish-label { margin:0 0 .2rem; color:var(--amber); font-size:var(--fs-sm); font-weight:var(--w-head); text-transform:uppercase; letter-spacing:.08em; }
+.native-finish-time { font-size:2.7rem; line-height:1.1; font-variant-numeric:tabular-nums; }
+.native-finish-stats { margin:.35rem 0 0; font-size:var(--fs-sm); }
+.native-home-left:has(.native-finish) .home-menu { margin-top:1rem; }
+.native-current { justify-self: stretch; max-width: 39rem; }
+.native-current > h1 { font-size: clamp(2rem,4vw,4rem); letter-spacing: -.04em; line-height: 1.02; margin-bottom: 1rem; }
+.native-current-art { width: 100%; aspect-ratio: 16/9; border-radius: var(--r-3); overflow: hidden; }
+.native-current h2 { margin: 1rem 0 .4rem; }
+.native-controls { line-height: 1.8; max-width: 34rem; }
+.native-maps { display: flex; flex-direction: column; height: 100%; max-height: 100%; box-sizing: border-box; }
+.native-maps > .map-browser { flex: 1; min-height: 0; }
+.native-settings, .native-profile { width: min(48rem,100%); }
+.native-settings h3 { margin-top: 1.5rem; }
+.native-sensitivity { width: 7rem; }
+.native-setting-result { min-height: 1.5rem; }
+#native-status, #native-notice { margin: 0; min-height: 1.2rem; font-size: var(--fs-sm); }
+#native-status[data-kind="error"] { color: var(--loss); }
+#native-notice:empty, #native-status:empty { display: none; }
+.native-footer { display: flex; align-items: center; gap: 1rem; color: var(--faint); font-size: var(--fs-xs); }
+.native-footer > span:first-child { margin-right: auto; }
+.native-account-section { display: flex; flex-direction: column; align-items: stretch; gap: .6rem; }
+.native-account-section h3 { margin: .4rem 0; font-size: 1rem; }
+.native-identity { display: flex; align-items: center; gap: 1rem; }
+.native-identity .avatar { width: 3rem; height: 3rem; font-size: 1.2rem; }
+.native-identity p { margin: .3rem 0 0; }
+.native-account-note { margin: 0; }
+/* Staff actions remain in the staff application. */
+.native-menu .rb-admin { display: none; }
+.native-style-row { display:flex;align-items:center;gap:1rem;margin-top:1rem; }
+.native-settings,.native-replay-screen { display:flex;flex-direction:column;max-height:100%;min-height:0; }
+.native-settings-body,.native-replays { overflow:auto;min-height:0;padding-right:.5rem; }
+.native-settings-body .set-row { gap:1rem;min-height:2.7rem; }
+.native-settings-body input[type=number] { width:8rem; }
+.native-bind-buttons,.native-toolbar,.native-playback { display:flex;align-items:center;gap:.6rem;flex-wrap:wrap; }
+.native-replay-screen { width:min(82rem,100%); }
+.native-replay-row { display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem 0;border-bottom:1px solid var(--line); }
+.native-replay-row p { margin:.4rem 0 0; }
+.native-replay-list { margin-top:1rem; }
+.native-playback { padding:1rem 0; }
+.native-playback input[type=range] { flex:1;min-width:10rem; }
+.native-ghost-toggle { display:flex;align-items:center;gap:.4rem; }
+@media(max-width: 800px) { .native-home { grid-template-columns: 1fr; gap: 1rem; } .native-current { display: none; } .native-top > .wordmark { display: none; } .native-top { justify-content: flex-end; } .native-shell { padding: 1rem; } }
+
+.native-home-actions { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.2rem .8rem; }
+.native-home-actions .home-item { min-height:3rem; }
+.native-home-left { min-height:0;max-height:100%;overflow:auto;padding-right:.5rem; }
+.native-home .home-brand { margin-bottom:.7rem; }
+.native-room-screen,.native-servers,.native-stats,.native-ranks,.native-profile,.native-tutorial-screen,.native-loadout { display:flex;flex-direction:column;max-height:100%;min-height:0; }
+.native-room,.native-servers>.servers,.native-profile-body,.native-tutorial,.native-cosmetics,.native-stats>.stats { overflow:auto;min-height:0; }
+.native-room-columns { display:grid;grid-template-columns:minmax(12rem,1fr) minmax(18rem,2fr);gap:1.5rem;margin-top:1rem; }
+.native-room-player { display:flex;align-items:center;gap:.6rem;min-height:2.8rem; }
+.native-room-player small { margin-left:auto; }
+.native-room-chat { height:18rem;overflow:auto;border:1px solid var(--line);padding:.7rem; }
+.native-room-chat p { margin:.2rem 0;white-space:pre-wrap;overflow-wrap:anywhere; }
+.native-room-chat-form { display:flex;gap:.6rem;margin-top:.6rem; }
+.native-room-chat-form input { flex:1;min-width:0; }
+.native-room-vote { display:flex;gap:.5rem;align-items:center;flex-wrap:wrap; }
+.native-loadout,.native-tutorial-screen { width:min(76rem,100%); }
+.native-cosmetic-items { display:grid;grid-template-columns:repeat(auto-fill,minmax(10rem,1fr));gap:.7rem;margin-top:1rem; }
+.native-cosmetic-card { display:flex;flex-direction:column;align-items:flex-start;gap:.5rem;padding:1rem;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-2);text-align:left; }
+.native-cosmetic-card[aria-pressed=true] { border-color:var(--amber); }
+.native-cosmetic-swatch { width:100%;height:2.5rem;border-radius:var(--r-1); }
+@media(max-width:800px) { .native-room-columns{grid-template-columns:1fr;} }

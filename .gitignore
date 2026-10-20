@@ -17,3 +17,11 @@ release-builder.json
 *.bhr
 client-settings.json
 vault/
+
+# Native client build/download/test outputs; source and lockfiles are kept.
+native/target/
+native/apps/native/build/
+native/content-cache/
+native/artifacts/
+native/maps/*.bsp
+native/.cargo/credentials*

@@ -1,0 +1,97 @@
+/* Account panel, name field, email sign-in (ui/account-*.ts). Uses the design tokens from style.css only. */
+
+dialog.acct-dialog {
+  color: var(--text); background: var(--panel-solid); border: 1px solid var(--line-2); border-radius: var(--radius-lg, var(--radius));
+  box-shadow: var(--shadow); padding: 0; max-height: min(92vh, 52rem); overflow: auto;
+}
+dialog.acct-dialog::backdrop { background: var(--scrim); }
+dialog.acct-dialog { width: min(34rem, 94vw); }
+dialog[open].acct-dialog { animation: acct-in 0.16s ease-out; }
+@keyframes acct-in { from { opacity: 0; transform: translateY(0.6rem) scale(0.985); } }
+@media (prefers-reduced-motion: reduce) { dialog[open].acct-dialog { animation: none; } }
+
+.acct-head { display: flex; align-items: center; justify-content: space-between; padding: 0.9rem 1.2rem 0.4rem; position: sticky; top: 0; background: var(--panel-solid); z-index: 1; }
+.acct-head h2 { margin: 0; font-size: 1.2rem; }
+.acct-close { background: none; border: 0; color: var(--dim); font-size: 1.5rem; line-height: 1; cursor: pointer; padding: 0.2rem 0.4rem; border-radius: var(--radius-sm); }
+.acct-close:hover { color: var(--text); background: var(--raise-2); }
+.acct-body { padding: 0.2rem 1.2rem 1.2rem; display: flex; flex-direction: column; gap: 0.4rem; }
+/* Your name plate: the in-game name tag (a dot in your colourway, the name in its colour, your marks), edited in place. */
+.acct-who { display: flex; align-items: flex-start; gap: 0.9rem; padding: 0.7rem 0 0.9rem; }
+.acct-who > .avatar { flex: none; width: 3rem; height: 3rem; font-size: 1.25rem; margin-top: 0.1rem; }
+.acct-who-main { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; flex: 1; }
+.acct-plate { display: flex; align-items: center; gap: 0.5rem; max-width: 100%; box-sizing: border-box; padding: 0.25rem 0.3rem 0.25rem 0.85rem; border-radius: var(--r-round); background: rgba(11, 13, 18, 0.62); box-shadow: inset 0 0 0 1px var(--ink-4); transition: box-shadow var(--t-step); }
+.acct-plate:hover { box-shadow: inset 0 0 0 1px var(--line-2); }
+.acct-plate:focus-within { box-shadow: inset 0 0 0 1px var(--amber); }
+.acct-plate-dot { flex: none; width: 0.62rem; height: 0.62rem; border-radius: 50%; background: var(--dot); }
+.acct-plate-flag:empty, .acct-plate-marks:empty { display: none; }
+.acct-plate-marks { display: inline-flex; }
+.acct-plate .nf-row { flex: 1; min-width: 0; gap: 0.2rem; }
+.acct-plate .nf-input { background: transparent; border: 0; border-radius: 0; padding: 0.15em 2.9em 0.15em 0.05em; font-size: 1.35rem; font-weight: 700; box-shadow: none; }
+.acct-plate .nf-input:focus { box-shadow: none; }
+.acct-plate:not(:focus-within) .nf-count { opacity: 0; }
+.acct-plate .nf-dice { background: transparent; border: 0; border-radius: var(--r-round); padding: 0.35em; color: var(--cream-2); }
+.acct-plate .nf-dice:hover { color: var(--text); background: var(--raise-2); }
+.acct-who .nf-msg { padding-left: 0.9rem; min-height: 0; }
+.acct-who .nf-msg:empty { display: none; }
+.acct-who-status { padding-left: 0.9rem; color: var(--cream-3); font-size: var(--fs-xs); }
+.acct-sec { border-top: 1px solid var(--line); padding: 0.85rem 0 0.4rem; display: flex; flex-direction: column; gap: 0.55rem; }
+.acct-sec h3 { margin: 0; font-size: var(--fs-sm); font-weight: 700; color: var(--text); }
+.acct-note { margin: 0; font-size: 0.85rem; line-height: 1.45; }
+.acct-actions { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.acct-method { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 0.75rem; padding: 0.55rem 0.7rem; border-radius: var(--radius-sm); background: var(--raise); border: 1px solid var(--line); }
+.acct-minfo { display: flex; flex-direction: column; min-width: 0; }
+.acct-minfo small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-icon { display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 0.5rem; background: var(--raise-2); }
+.acct-icon.discord { color: #fff; background: var(--discord); }
+.acct-icon.email { color: var(--accent); }
+.acct-unlink:disabled { opacity: 0.45; }
+.acct-toggle { display: flex; align-items: center; gap: 0.6rem; font-size: 0.88rem; color: var(--dim); cursor: pointer; }
+/* Discord avatar opt-in, under the Discord row: switch, the picture it would use, what it does. */
+.acct-avatar { padding: 0.15rem 0.7rem; }
+.acct-avatar b { color: var(--text); font-weight: 600; }
+.acct-avatar .acct-minfo small { white-space: normal; }
+.acct-avatar .avatar { width: 1.75rem; height: 1.75rem; }
+.acct-avatar:has(input:disabled) { cursor: default; }
+/* The foot: replay the intro on the left, the held sign-out buttons on the right. */
+.acct-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.4rem; padding-top: 0.8rem; border-top: 1px solid var(--line); }
+.acct-foot .link-btn { padding-left: 0; }
+.acct-foot-gap { flex: 1; }
+
+.btn.save-progress { font-size: 0.85rem; padding: 0.4em 0.8em; border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--accent); }
+.btn.save-progress:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+
+/* name field */
+.name-field { display: flex; flex-direction: column; gap: 0.35rem; }
+.nf-label { font-size: 0.85rem; color: var(--dim); }
+.nf-row { display: flex; gap: 0.45rem; }
+.nf-box { position: relative; flex: 1; display: flex; }
+.nf-input, .es-input, .es-code {
+  flex: 1; min-width: 0; background: rgba(0, 0, 0, 0.35); border: 1px solid var(--line-2); border-radius: var(--radius-sm);
+  padding: 0.6em 0.75em; color: var(--text); font-size: 1rem;
+}
+.nf-input { font-size: 1.15rem; font-weight: 600; padding-right: 3.6em; }
+.nf-input:focus, .es-input:focus, .es-code:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+.nf-input[aria-invalid="true"] { border-color: var(--loss); }
+.nf-count { position: absolute; right: 0.7em; top: 50%; transform: translateY(-50%); font-size: 0.72rem; color: var(--faint); font-variant-numeric: tabular-nums; pointer-events: none; }
+.nf-count.over { color: var(--loss); }
+.nf-dice { padding: 0.5em 0.7em; }
+.nf-dice:hover svg { transform: rotate(-18deg); }
+.nf-dice svg { transition: transform 0.15s; display: block; }
+.nf-msg, .es-msg { margin: 0; min-height: 1.25em; font-size: 0.85rem; color: var(--dim); }
+.nf-msg[data-kind="err"], .es-msg[data-kind="err"] { color: var(--loss); }
+.nf-msg[data-kind="ok"] { color: var(--gain); }
+.nf-msg[data-kind="warn"] { color: var(--accent); }
+
+/* email sign-in */
+.email-signin { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.3rem 0 0.2rem; }
+.es-form { display: flex; flex-direction: column; gap: 0.45rem; }
+.es-sub { margin: 0; font-size: 0.88rem; }
+.es-row { display: flex; gap: 0.45rem; }
+.es-code { font-family: var(--mono); font-size: 1.4rem; letter-spacing: 0.35em; text-align: center; max-width: 11rem; }
+.es-links { display: flex; gap: 0.4rem; margin: 0; }
+.es-dev { margin: 0; font-size: 0.8rem; color: var(--accent); }
+
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* The community Discord server under the Discord method (ui/account-panel.ts): one line and a button, no box. */
+.acct-support-link { margin-left: auto; color: var(--dim); font-size: var(--fs-sm); }
+.acct-support-link:hover { color: var(--text); }

@@ -1,0 +1,908 @@
+{
+  "sfx": {
+    "jump": {
+      "variants": 3,
+      "durations": [
+        0.17,
+        0.268,
+        0.134
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "land_soft": {
+      "variants": 3,
+      "durations": [
+        0.139,
+        0.232,
+        0.217
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "land_hard": {
+      "variants": 3,
+      "durations": [
+        0.261,
+        0.17,
+        0.229
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "step_concrete": {
+      "variants": 4,
+      "durations": [
+        0.15,
+        0.14,
+        0.121,
+        0.228
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "step_metal": {
+      "variants": 4,
+      "durations": [
+        0.167,
+        0.166,
+        0.159,
+        0.19
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "step_wood": {
+      "variants": 4,
+      "durations": [
+        0.153,
+        0.157,
+        0.121,
+        0.135
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "step_grass": {
+      "variants": 4,
+      "durations": [
+        0.362,
+        0.353,
+        0.281,
+        0.226
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "step_tile": {
+      "variants": 4,
+      "durations": [
+        0.101,
+        0.134,
+        0.144,
+        0.162
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "step_water": {
+      "variants": 4,
+      "durations": [
+        0.407,
+        0.296,
+        0.399,
+        0.445
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "wind": {
+      "variants": 1,
+      "durations": [
+        9.7
+      ],
+      "loop": true,
+      "loopStart": 0.1,
+      "loopEnd": 9.6
+    },
+    "wind_high": {
+      "variants": 1,
+      "durations": [
+        5.7
+      ],
+      "loop": true,
+      "loopStart": 0.1,
+      "loopEnd": 5.6
+    },
+    "teleport": {
+      "variants": 2,
+      "durations": [
+        0.549,
+        0.5
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "boost": {
+      "variants": 2,
+      "durations": [
+        0.549,
+        0.551
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "water_enter": {
+      "variants": 2,
+      "durations": [
+        0.783,
+        0.928
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "water_exit": {
+      "variants": 1,
+      "durations": [
+        0.944
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "swim": {
+      "variants": 3,
+      "durations": [
+        0.345,
+        0.359,
+        0.215
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "start_beep": {
+      "variants": 1,
+      "durations": [
+        0.115
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "split": {
+      "variants": 1,
+      "durations": [
+        0.515
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "finish": {
+      "variants": 1,
+      "durations": [
+        0.743
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "finish_pb": {
+      "variants": 1,
+      "durations": [
+        1.568
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "finish_wr": {
+      "variants": 1,
+      "durations": [
+        2.498
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "rank_up": {
+      "variants": 1,
+      "durations": [
+        0.843
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "achievement": {
+      "variants": 1,
+      "durations": [
+        0.924
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "level_up": {
+      "variants": 1,
+      "durations": [
+        0.931
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "ui_hover": {
+      "variants": 1,
+      "durations": [
+        0.042
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "ui_click": {
+      "variants": 1,
+      "durations": [
+        0.076
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "ui_confirm": {
+      "variants": 1,
+      "durations": [
+        0.4
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "ui_back": {
+      "variants": 1,
+      "durations": [
+        0.12
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "ui_toggle": {
+      "variants": 1,
+      "durations": [
+        0.072
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "ui_error": {
+      "variants": 1,
+      "durations": [
+        0.093
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "ui_card": {
+      "variants": 1,
+      "durations": [
+        0.182
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "countdown_tick": {
+      "variants": 1,
+      "durations": [
+        0.25
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "countdown_go": {
+      "variants": 1,
+      "durations": [
+        0.539
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "toast_pop": {
+      "variants": 1,
+      "durations": [
+        0.1
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "count_tick": {
+      "variants": 1,
+      "durations": [
+        0.06
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "stamp": {
+      "variants": 1,
+      "durations": [
+        0.15
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "bunny_boing": {
+      "variants": 1,
+      "durations": [
+        0.445
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "shine": {
+      "variants": 1,
+      "durations": [
+        0.85
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "chat": {
+      "variants": 1,
+      "durations": [
+        0.25
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "player_join": {
+      "variants": 1,
+      "durations": [
+        0.698
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "vote_open": {
+      "variants": 1,
+      "durations": [
+        0.632
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "vote_tick": {
+      "variants": 1,
+      "durations": [
+        0.054
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "map_change": {
+      "variants": 1,
+      "durations": [
+        0.654
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "carrot_swing": {
+      "variants": 3,
+      "durations": [
+        0.166,
+        0.163,
+        0.158
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "carrot_stab": {
+      "variants": 2,
+      "durations": [
+        0.373,
+        0.218
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "carrot_draw": {
+      "variants": 1,
+      "durations": [
+        0.542
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "impact_metal": {
+      "variants": 2,
+      "durations": [
+        0.349,
+        0.45
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "impact_wood": {
+      "variants": 3,
+      "durations": [
+        0.101,
+        0.125,
+        0.137
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "impact_concrete": {
+      "variants": 2,
+      "durations": [
+        0.288,
+        0.315
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "impact_dirt": {
+      "variants": 1,
+      "durations": [
+        0.107
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "impact_tile": {
+      "variants": 2,
+      "durations": [
+        0.45,
+        0.45
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "shot_pistol": {
+      "variants": 2,
+      "durations": [
+        0.561,
+        0.495
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "shot_sniper": {
+      "variants": 2,
+      "durations": [
+        0.986,
+        0.685
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_draw": {
+      "variants": 1,
+      "durations": [
+        0.372
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_thumper_fire": {
+      "variants": 2,
+      "durations": [
+        0.5,
+        0.5
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_cottontail_fire": {
+      "variants": 2,
+      "durations": [
+        0.5,
+        0.5
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_jackrabbit_fire": {
+      "variants": 2,
+      "durations": [
+        0.577,
+        0.574
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_broadfork_fire": {
+      "variants": 2,
+      "durations": [
+        0.39,
+        0.432
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_hedgerow_fire": {
+      "variants": 2,
+      "durations": [
+        0.536,
+        0.428
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_seeddrill_fire": {
+      "variants": 3,
+      "durations": [
+        0.3,
+        0.3,
+        0.3
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_pump": {
+      "variants": 1,
+      "durations": [
+        0.344
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_shell_in": {
+      "variants": 2,
+      "durations": [
+        0.138,
+        0.27
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_mag_out": {
+      "variants": 1,
+      "durations": [
+        0.134
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_mag_in": {
+      "variants": 1,
+      "durations": [
+        0.118
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_slide": {
+      "variants": 1,
+      "durations": [
+        0.261
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_bolt": {
+      "variants": 1,
+      "durations": [
+        0.408
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_pod_out": {
+      "variants": 1,
+      "durations": [
+        0.363
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_pod_in": {
+      "variants": 1,
+      "durations": [
+        0.229
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_dry": {
+      "variants": 2,
+      "durations": [
+        0.141,
+        0.146
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_pickup": {
+      "variants": 1,
+      "durations": [
+        0.375
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_mode": {
+      "variants": 1,
+      "durations": [
+        0.076
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_cottontail_silenced": {
+      "variants": 2,
+      "durations": [
+        0.45,
+        0.45
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_silencer_twist": {
+      "variants": 3,
+      "durations": [
+        0.245,
+        0.259,
+        0.099
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_silencer_seat": {
+      "variants": 1,
+      "durations": [
+        0.348
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_silencer_crack": {
+      "variants": 1,
+      "durations": [
+        0.245
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_silencer_off": {
+      "variants": 1,
+      "durations": [
+        0.213
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "ui_press": {
+      "variants": 1,
+      "durations": [
+        0.056
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "ui_land": {
+      "variants": 1,
+      "durations": [
+        0.102
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "ui_switch": {
+      "variants": 1,
+      "durations": [
+        0.057
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "ui_open": {
+      "variants": 1,
+      "durations": [
+        0.18
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "ui_close": {
+      "variants": 1,
+      "durations": [
+        0.18
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    }
+  },
+  "music": [
+    {
+      "id": "menu-drift",
+      "title": "Drift (menu)",
+      "role": "menu",
+      "duration": 113.4,
+      "bpm": 85,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    },
+    {
+      "id": "game-airstrafe",
+      "title": "Airstrafe",
+      "role": "game",
+      "duration": 128.31,
+      "bpm": 174,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    },
+    {
+      "id": "game-prestrafe",
+      "title": "Prestrafe",
+      "role": "game",
+      "duration": 127.11,
+      "bpm": 126,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    },
+    {
+      "id": "game-sync",
+      "title": "Sync",
+      "role": "game",
+      "duration": 127.9,
+      "bpm": 140,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    },
+    {
+      "id": "game-longjump",
+      "title": "Long Jump",
+      "role": "game",
+      "duration": 127.19,
+      "bpm": 118,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    },
+    {
+      "id": "game-gain",
+      "title": "Gain",
+      "role": "game",
+      "duration": 127.36,
+      "bpm": 172,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    },
+    {
+      "id": "game-scroll",
+      "title": "Scroll",
+      "role": "game",
+      "duration": 128.93,
+      "bpm": 132,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    },
+    {
+      "id": "game-wishdir",
+      "title": "Wishdir",
+      "role": "game",
+      "duration": 129.98,
+      "bpm": 171.4,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    },
+    {
+      "id": "game-hop",
+      "title": "Hop",
+      "role": "game",
+      "duration": 127.65,
+      "bpm": 170,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    },
+    {
+      "id": "game-skybox",
+      "title": "Skybox",
+      "role": "game",
+      "duration": 127.24,
+      "bpm": 88,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    },
+    {
+      "id": "game-lerp",
+      "title": "Lerp",
+      "role": "game",
+      "duration": 125.64,
+      "bpm": 80,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    }
+  ],
+  "credits": [
+    "Sound effects: original, generated with ElevenLabs Sound Effects for bunnyhop.lol",
+    "Music: original, generated with ElevenLabs Music for bunnyhop.lol"
+  ],
+  "omittedOptionalCues": {
+    "ids": [
+      "announcer_godlike",
+      "announcer_holyshit",
+      "announcer_perfect"
+    ],
+    "reason": "Omitted from the public native distribution because sample distribution permission is unresolved."
+  }
+}

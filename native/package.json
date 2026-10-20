@@ -1,0 +1,26 @@
+{
+  "name": "bunnyhop-native-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun apps/native/build.ts",
+    "menu": "bun apps/native/build-menu.ts",
+    "presentation": "bun apps/native/src/export-presentation.ts",
+    "models": "bun apps/native/src/export-viewmodels.ts",
+    "typecheck": "bun apps/native/typecheck.ts",
+    "test": "bun test ./apps/native/ui/cosmetics.test.ts ./apps/native/ui/menu-state.test.ts ./apps/native/ui/native-features.test.ts ./apps/native/ui/room-service.test.ts ./apps/native/ui/run-service.test.ts",
+    "check": "bun run menu && bun run typecheck && bun run test",
+    "package": "bun run wasm && bun apps/native/package.ts",
+    "wasm": "bun apps/native/ensure-wasm.ts"
+  },
+  "devDependencies": {
+    "@resvg/resvg-wasm": "2.6.2",
+    "@types/bun": "1.4.3",
+    "@types/three": "0.186.0",
+    "flag-icons": "7.5.0",
+    "playwright": "1.63.0",
+    "three": "0.186.1",
+    "typescript": "7.0.2"
+  }
+}
