@@ -11,6 +11,11 @@ on:
         default: 0.0.1
         required: true
         type: string
+      platform:
+        description: Platform to build (all for a complete release)
+        type: choice
+        default: all
+        options: [all, windows, linux, macos]
 permissions:
   contents: read
 concurrency:
@@ -68,6 +73,7 @@ jobs:
             native/target/native-menu/menu-manifest.json
           if-no-files-found: error
   windows:
+    if: github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'windows'
     needs: [version, resources]
     timeout-minutes: 90
     runs-on: windows-2022
@@ -106,6 +112,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
   macos:
+    if: github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'macos'
     needs: [version, resources]
     timeout-minutes: 45
     runs-on: macos-15
@@ -144,6 +151,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
   linux:
+    if: github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'linux'
     needs: [version, resources]
     timeout-minutes: 90
     runs-on: ubuntu-24.04

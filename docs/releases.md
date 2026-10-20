@@ -84,7 +84,8 @@ Do not describe a compile-only or headless run as physical desktop testing.
 
 [Native release builds](https://github.com/2x74/bunnyhop-client/actions/workflows/native-release.yml)
 is installed at `.github/workflows/native-release.yml`. It runs for `v*` tag
-pushes and manual dispatch with a `version` input (default `0.0.1`). Versions are
+pushes and manual dispatch with a `version` input (default `0.0.1`) and a
+`platform` selector (`all`, `windows`, `linux`, or `macos`). Versions are
 validated as exact numeric `MAJOR.MINOR.PATCH`; use the matching `v0.0.1` tag for
 this release.
 
