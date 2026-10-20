@@ -1,0 +1,28 @@
+import { h } from "../../web/src/ui/dom";
+import { isExtend } from "../../web/src/net/protocol";
+import { copyLobbyInvite } from "../../web/src/net/lobby";
+import { state } from "./bridge";
+import { styleLabel } from "../../web/src/styles";
+import type { NativeRoomService } from "./room-service";
+
+export function roomPanel(service:NativeRoomService,profile:(id:string)=>void,notice:(message:string)=>void):HTMLElement {
+  const race=h("section.native-room-race");
+  const root=h("div.native-room"),header=h("div.native-room-head"),players=h("div.native-room-roster"),chat=h("div.native-room-chat",{role:"log","aria-label":"Room chat"}),vote=h("div.native-room-vote"),form=h("form.native-room-chat-form"),input=h("input",{type:"text",maxlength:128,"aria-label":"Room message",placeholder:"Say something or enter a !command"}),nominate=h("select",{"aria-label":"Nominate map"});
+  form.append(input,h("button.btn",{type:"submit"},"Send"));form.addEventListener("submit",event=>{event.preventDefault();if(input.value.trim()&&service.command({t:"chat",text:input.value.trim()}))input.value="";else notice("The room is not connected.");});
+  const invite=h("button.btn",{type:"button",onclick:()=>{if(service.view.id)void copyLobbyInvite(service.view.id).then(ok=>notice(ok?"Invite link copied.":"Could not copy invite link."));}},"Copy lobby invite");
+  const leave=h("button.btn",{type:"button",onclick:()=>service.leave()},"Leave room");
+  const rtv=h("button.btn",{type:"button",onclick:()=>service.command({t:"rtv"})},"Rock the vote");
+  const submitNomination=h("button.btn",{type:"button",onclick:()=>service.command({t:"nominate",map:nominate.value})},"Nominate");
+  root.append(header,h("div.native-toolbar",null,leave,invite,rtv,nominate,submitNomination),race,vote,h("div.native-room-columns",null,players,h("section",null,chat,form)));
+  let rosterKey="",chatKey="",poolKey="",voteKey="",raceKey="";
+  const refresh=()=>{
+    const view=service.view;invite.hidden=!view.room?.private;header.replaceChildren(h("h3",null,view.room?.name??"Room"),h("p.dim",null,`${view.status}${view.map?` · ${view.map}`:""}${view.detail?` · ${view.detail}`:""}`));input.disabled=view.status!=="open";rtv.disabled=submitNomination.disabled=view.status!=="open";
+    rtv.textContent=`Rock the vote${view.rtv.needed?` (${view.rtv.count}/${view.rtv.needed})`:""}`;
+    const rk=JSON.stringify(view.players);if(rk!==rosterKey){rosterKey=rk;players.replaceChildren(h("h3",null,`Players (${view.players.length})`),...view.players.map(player=>h("div.native-room-player",null,h("button.link-btn",{type:"button",onclick:()=>profile(player.id)},player.name),h("small.dim",null,styleLabel(player.style)),player.slot===view.you?h("span.dim",null,"You"):h("button.btn",{type:"button",onclick:()=>service.command({t:"spec",target:player.slot})},"Spectate"),player.slot===view.you?null:h("button.btn",{type:"button",onclick:()=>service.command({t:"chat",text:`/race #${player.slot} ${state.style} ${state.track}`})},"Race"))),h("button.btn",{type:"button",onclick:()=>service.command({t:"spec",target:null})},"Stop spectating"));}
+    const raceState=JSON.stringify(view.race);if(raceState!==raceKey){raceKey=raceState;const r=view.race;race.replaceChildren(...(r?[h("h3",null,`Race: ${r.a.name} vs ${r.b.name}`),h("p.dim",null,`${r.state} · ${styleLabel(r.style)}${r.track?` · Bonus ${r.track}`:""}${r.outcome?` · ${r.outcome}`:""}`),...(r.state==="challenge"&&r.you==="b"?[h("button.btn",{type:"button",onclick:()=>service.command({t:"chat",text:"/accept"})},"Accept"),h("button.btn",{type:"button",onclick:()=>service.command({t:"chat",text:"/decline"})},"Decline")]:[]),...(["countdown","live"].includes(r.state)?[h("button.btn",{type:"button",onclick:()=>service.command({t:"chat",text:"/forfeit"})},"Forfeit")]:[])]:[]));}
+    const ck=JSON.stringify(view.chat);if(ck!==chatKey){chatKey=ck;const near=chat.scrollTop+chat.clientHeight>=chat.scrollHeight-30;chat.replaceChildren(...view.chat.map(line=>h("p",null,line.name?h("b",null,`${line.name}: `):null,line.text)));if(near)chat.scrollTop=chat.scrollHeight;}
+    const pk=JSON.stringify(view.pool);if(pk!==poolKey){poolKey=pk;nominate.replaceChildren(...view.pool.map(map=>h("option",{value:map.name},map.name)));}
+    const vk=JSON.stringify(view.vote);if(vk!==voteKey){voteKey=vk;vote.replaceChildren(...(view.vote?[h("h3",null,"Map vote"),...view.vote.options.map((option,index)=>h("button.btn",{type:"button",onclick:()=>service.command({t:"vote",option:index})},`${isExtend(option)?`Extend ${option.minutes} minutes`:option.map} · ${view.vote!.counts[index]??0}`))]:[]));}
+  };
+  const off=service.subscribe(()=>{if(root.isConnected)refresh();else off();});refresh();return root;
+}

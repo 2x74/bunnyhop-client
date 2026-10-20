@@ -1,0 +1,131 @@
+# UNINSTALLED template. The repository disables automation; keep this file here unless policy changes.
+# If explicitly enabled later, install at .github/workflows/native-packages.yml after review.
+# Manual build artifacts only: no deployment, release publishing, active-build registration or score submission.
+name: Native desktop packages
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Package version (unsigned/ad-hoc by default)
+        default: 0.1.0
+        required: true
+concurrency:
+  group: bunnyhop-native-packages
+  cancel-in-progress: false
+defaults:
+  run:
+    working-directory: native
+jobs:
+  resources:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: bun install --frozen-lockfile
+      - run: bun apps/native/build-menu.ts
+      - run: bun apps/native/src/export-viewmodels.ts
+      - run: bun apps/native/src/export-presentation.ts
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-resources
+          path: |
+            native/target/native-assets
+            native/target/native-menu/menu.html
+            native/target/native-menu/menu-manifest.json
+          if-no-files-found: error
+  windows:
+    needs: resources
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+      - run: rustup toolchain install 1.99.1 --profile minimal
+      - run: rustup override set 1.99.1
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: native-resources
+          path: native/target
+      - shell: pwsh
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: ./apps/native/packaging/windows/build.ps1 -Version $env:PACKAGE_VERSION
+      - shell: pwsh
+        run: |
+          $package = Get-ChildItem target/native-packages -Directory | Select-Object -First 1
+          bun apps/native/packaging/release-check.ts --package $package.FullName
+          & (Join-Path $package.FullName 'bunnyhop-native.exe') --help
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged executable failed DLL/runtime startup' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bunnyhop-windows-x64
+          path: |
+            native/target/native-packages/*.zip
+            native/target/native-packages/*.json
+          if-no-files-found: error
+  macos:
+    needs: resources
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+      - run: rustup toolchain install 1.99.1 --profile minimal && rustup override set 1.99.1
+      - run: brew install sdl3 ninja cmake ffmpeg
+      - run: bun install --frozen-lockfile
+      - run: bun apps/native/build.ts
+      - run: cargo test -p bunnyhop-native-bridge --locked && bun test apps/native/packaging
+      - env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: bun apps/native/package.ts --skip-build --version "$PACKAGE_VERSION"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bunnyhop-macos
+          path: |
+            native/target/native-packages/*.zip
+            native/target/native-packages/*.json
+          if-no-files-found: error
+  linux:
+    needs: resources
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+      - run: rustup toolchain install 1.99.1 --profile minimal && rustup override set 1.99.1
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ pkg-config ffmpeg libcurl4-openssl-dev zlib1g-dev libwebkit2gtk-4.1-dev libgtk-3-dev libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libwayland-dev libxkbcommon-dev wayland-protocols libdbus-1-dev libibus-1.0-dev libasound2-dev libpulse-dev xvfb xauth
+      - run: |
+          git clone --filter=blob:none --no-checkout https://github.com/libsdl-org/SDL.git "$RUNNER_TEMP/SDL"
+          git -C "$RUNNER_TEMP/SDL" checkout --detach 829a65d769d935c4852f8159e964312c0957260a
+          cmake -S "$RUNNER_TEMP/SDL" -B "$RUNNER_TEMP/SDL-build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/SDL-install" -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST_LIBRARY=OFF
+          cmake --build "$RUNNER_TEMP/SDL-build" --parallel
+          cmake --install "$RUNNER_TEMP/SDL-build"
+      - run: bun install --frozen-lockfile
+      - env:
+          CMAKE_PREFIX_PATH: ${{ runner.temp }}/SDL-install
+          LD_LIBRARY_PATH: ${{ runner.temp }}/SDL-install/lib
+        run: |
+          bun apps/native/build.ts
+          ctest --test-dir apps/native/build --output-on-failure
+          cargo test -p bunnyhop-native-bridge --locked
+          bun test apps/native/packaging
+      - env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+          LD_LIBRARY_PATH: ${{ runner.temp }}/SDL-install/lib
+        run: bun apps/native/package.ts --skip-build --version "$PACKAGE_VERSION" --licenses "$RUNNER_TEMP/SDL-install/share/licenses"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bunnyhop-linux
+          path: |
+            native/target/native-packages/*.tar.gz
+            native/target/native-packages/*.json
+          if-no-files-found: error

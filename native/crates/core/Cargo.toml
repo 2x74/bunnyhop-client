@@ -1,0 +1,24 @@
+[package]
+name = "bunnyhop-core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[features]
+native-web = ["native-wasm-math", "dep:bunnyhop-native-web-macros"]
+native-wasm-math = ["playsrc-collision/native-wasm-math", "playsrc-movement/native-wasm-math"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+bunnyhop-native-web-macros = { path = "../native-web/macros", optional = true }
+playsrc-bsp = { path = "../vendor/bsp" }
+playsrc-collision = { path = "../vendor/collision" }
+playsrc-movement = { path = "../vendor/movement" }
+playsrc-phy = { path = "../vendor/phy" }
+playsrc-vtf = { path = "../vendor/vtf" }
+playsrc-vpk = { path = "../vendor/vpk", default-features = false }
+crc32fast = "1.5.0"
+# Same version/features as playsrc-bsp: decodes LZMA (method 14) pakfile entries (bspzip -repack).
+zip = { version = "8.6.0", default-features = false, features = ["lzma"] }

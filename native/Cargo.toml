@@ -1,0 +1,16 @@
+[workspace]
+members = ["crates/core", "crates/native-bridge", "crates/native-web/macros", "crates/vendor/*"]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[profile.wasm]
+inherits = "release"
+panic = "abort"

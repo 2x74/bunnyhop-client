@@ -1,0 +1,20 @@
+[package]
+name = "playsrc-collision"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[features]
+replay-reference = []
+native-wasm-math = ["dep:libm"]
+
+[dependencies]
+playsrc-bsp = { path = "../bsp" }
+playsrc-phy = { path = "../phy" }
+sha2 = "0.11"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+libm = { version = "=0.2.16", optional = true }
+
+[lib]
+path = "src/lib.rs"

@@ -1,0 +1,80 @@
+/* Staff / Verified / Creator / Booster / Supporter marks after a name (ui/marks.ts) and profile link chips. Sized in em so they
+   follow the name. */
+.nm-marks { display: inline-flex; align-items: center; gap: 0.22em; flex: none; vertical-align: -0.12em; line-height: 1; }
+.nm-staff, .nm-verified, .nm-booster, .nm-supporter, .nm-creator .nm-icon { display: inline-flex; width: 0.95em; height: 0.95em; flex: none; }
+.nm-staff svg, .nm-verified svg, .nm-booster svg, .nm-supporter svg, .nm-creator svg { width: 100%; height: 100%; display: block; }
+.nm-verified { filter: drop-shadow(0 0 0.18em rgba(59, 158, 255, 0.35)); }
+.nm-booster { filter: drop-shadow(0 0 0.18em rgba(224, 92, 243, 0.35)); }
+.nm-staff.developer { filter: drop-shadow(0 0 0.18em rgba(255, 194, 61, 0.35)); }
+.nm-staff.admin { filter: drop-shadow(0 0 0.18em rgba(121, 210, 255, 0.35)); }
+.nm-staff.moderator { filter: drop-shadow(0 0 0.18em rgba(127, 224, 176, 0.35)); }
+.nm-creator { display: inline-flex; align-items: center; gap: 0.25em; }
+.nm-creator .nm-icon { width: 1em; height: 1em; }
+.nm-creator.labelled { padding: 0.12em 0.45em 0.12em 0.3em; border-radius: 0.4em; background: rgba(255, 255, 255, 0.07); }
+.nm-creator .nm-label { font-size: 0.8em; font-weight: 750; color: var(--dim); }
+
+/* Profile links: quiet chips under the profile actions. */
+.lk-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.lk-chip { display: inline-flex; align-items: center; gap: 0.4rem; max-width: 100%; padding: 0.28rem 0.6rem 0.28rem 0.45rem; border: 1px solid var(--line); border-radius: 999px; background: var(--raise); color: var(--text); font-size: var(--fs-sm); font-weight: 600; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: background var(--t-fast), border-color var(--t-fast); }
+.lk-chip:hover, .lk-chip:focus-visible { background: var(--raise-2); border-color: var(--line-2); outline: none; }
+.lk-chip > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.lk-icon { display: inline-flex; width: 1.05em; height: 1.05em; flex: none; color: var(--text); }
+.lk-icon svg { width: 100%; height: 100%; display: block; }
+
+/* Supporter name effects (creators.ts NAME_EFFECTS, marks.ts nameAttrs). --nm-c is the name colour, --nm-c2 the
+   gradient's second (a paler shade of the first unless picked).
+   - glow: one soft shadow, tight enough to stay inside the name's box (names clip their overflow for the ellipsis).
+   - paint: the two colours run through the letters (background-clip; no halo, a shadow behind clipped text muddies).
+   - sparkle ("Shine"): the name's own colour with a bright white shine that crosses it in ~1 s, then rests.
+   Doubled classes so the name elements' own `background: none` (board buttons) can't undo them. CSS only, so long
+   boards cost nothing per frame. Under prefers-reduced-motion nothing moves: Shine is the plain colour (its shine
+   rests off the name). A stored "shimmer" reads as paint (creators.ts nameEffectOf). */
+.nm-fx { --nm-c2: color-mix(in oklab, var(--nm-c) 45%, #ffffff); }
+.nm-fx.nm-fx-glow { text-shadow: 0 0 4px color-mix(in oklab, var(--nm-c) 45%, transparent); }
+.nm-fx.nm-fx-paint, .nm-fx.nm-fx-sparkle {
+  background: linear-gradient(100deg, var(--nm-c) 0%, var(--nm-c2) 50%, var(--nm-c) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  text-shadow: none;
+}
+.nm-fx.nm-fx-sparkle {
+  /* The shine is 2.5x the name's width: 120% -> -20% carries it in from the left and out past the right. */
+  background:
+    linear-gradient(100deg, transparent 40%, rgba(255, 255, 255, 0.95) 50%, transparent 60%) 120% 0 / 250% 100% no-repeat,
+    linear-gradient(var(--nm-c), var(--nm-c));
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: nm-sweep 3.4s linear infinite;
+}
+@keyframes nm-sweep {
+  0% { background-position: 120% 0, 0 0; }
+  30%, 100% { background-position: -20% 0, 0 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nm-fx.nm-fx-sparkle { animation: none; }
+}
+/* Potato: the endless shine repaints every frame on software GL; the plain colour instead. */
+body.potato .nm-fx.nm-fx-sparkle { animation: none; }
+
+.nm-gifter { display:inline-flex; width:.95em; height:.95em; flex-shrink:0; background:transparent; filter:none; box-shadow:none; }
+.nm-gifter svg { width:100%; height:100%; overflow:visible; }
+/* Gold: a glint sweeps across the gift every few seconds. Prism: its colours flow through it. Both are a layer over
+   the icon, cut to the gift's shape (player/tag.ts draws the same on the in-game tags). */
+.nm-gifter.animated { position:relative; }
+.nm-gifter.animated::after { content:""; position:absolute; inset:0; pointer-events:none;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20d%3D%22M12%208C8.8%208%204.5%207.4%204.5%204.4c0-4.1%205.4-4.5%207.5.2%202.1-4.7%207.5-4.3%207.5-.2%200%203-4.3%203.6-7.5%203.6ZM10.3%205.9C9.1%203.4%206.5%203.3%206.5%204.4c0%20.7%201.4%201.3%203.8%201.5Zm3.4%200c2.4-.2%203.8-.8%203.8-1.5%200-1.1-2.6-1-3.8%201.5Z%22%2F%3E%3Cpath%20d%3D%22M3%207h8v5H3zm10%200h8v5h-8zM4%2014h7v7H5a1%201%200%200%201-1-1zm9%200h7v6a1%201%200%200%201-1%201h-6z%22%2F%3E%3C%2Fsvg%3E") center/contain no-repeat; mask:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20d%3D%22M12%208C8.8%208%204.5%207.4%204.5%204.4c0-4.1%205.4-4.5%207.5.2%202.1-4.7%207.5-4.3%207.5-.2%200%203-4.3%203.6-7.5%203.6ZM10.3%205.9C9.1%203.4%206.5%203.3%206.5%204.4c0%20.7%201.4%201.3%203.8%201.5Zm3.4%200c2.4-.2%203.8-.8%203.8-1.5%200-1.1-2.6-1-3.8%201.5Z%22%2F%3E%3Cpath%20d%3D%22M3%207h8v5H3zm10%200h8v5h-8zM4%2014h7v7H5a1%201%200%200%201-1-1zm9%200h7v6a1%201%200%200%201-1%201h-6z%22%2F%3E%3C%2Fsvg%3E") center/contain no-repeat; }
+.nm-gifter.gifter-gold.animated::after { background:linear-gradient(115deg, transparent 38%, rgba(255,248,214,.95) 50%, transparent 62%) 100% 0/300% 100% no-repeat; animation:gift-glint 3.2s ease-in-out infinite; }
+.nm-gifter.gifter-prism.animated::after { background:linear-gradient(90deg, var(--gift-a), var(--gift-b), var(--gift-c), var(--gift-a)) 0 0/200% 100%; animation:gift-flow 4s linear infinite; }
+@keyframes gift-glint { 0% {background-position:100% 0} 35%,100% {background-position:0 0} }
+@keyframes gift-flow { from {background-position:100% 0} to {background-position:0 0} }
+/* Special badges (creators.ts SPECIAL_BADGES): an icon like the gift; gold ones get Gold Gifter's glint, cut to the
+   badge's own shape (--mask, set by ui/marks.ts). */
+.nm-special { display:inline-flex; width:.95em; height:.95em; flex-shrink:0; position:relative; }
+.nm-special svg { width:100%; height:100%; overflow:visible; }
+.nm-special.gold::after { content:""; position:absolute; inset:0; pointer-events:none; -webkit-mask:var(--mask) center/contain no-repeat; mask:var(--mask) center/contain no-repeat;
+  background:linear-gradient(115deg, transparent 38%, rgba(255,248,214,.95) 50%, transparent 62%) 100% 0/300% 100% no-repeat; animation:gift-glint 3.2s ease-in-out infinite; }
+@media (prefers-reduced-motion:reduce) { .nm-special.gold::after { display:none } }
+@media (prefers-reduced-motion:reduce) { .nm-gifter.animated::after {animation:none} .nm-gifter.gifter-gold.animated::after {display:none} }
+

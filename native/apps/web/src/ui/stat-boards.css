@@ -1,0 +1,14 @@
+/* Player leaderboards (ui/stat-boards.ts): the boards as plain text tabs, over the shared board table (boards.css). */
+.sb-tabs { display: flex; flex-wrap: wrap; gap: 0.2rem; margin-bottom: var(--sp-3); }
+.sb-tab { padding: 0.4rem 0.75rem; border: 0; border-radius: var(--radius-sm); background: none; color: var(--dim); font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer; }
+.sb-tab:hover { color: var(--text); background: var(--raise); }
+.sb-tab.on { color: var(--text); background: var(--raise-2); box-shadow: inset 0 -2px 0 var(--accent); }
+.sb-tab:focus-visible { outline: none; box-shadow: var(--ring); }
+.sb-top { min-height: 6rem; }
+.sb-top[aria-busy] { opacity: 0.6; transition: opacity var(--t-med); }
+.sb-you { margin: var(--sp-3) 0 0; color: var(--dim); font-size: var(--fs-sm); }
+.sb-you b { color: var(--text); }
+/* In the dialog's toolbar the tabs sit beside the search. */
+.rb-dialog .sb-tabs { margin: 0; }
+.sb-hard { font-variant-numeric: tabular-nums; }
+.sb-hard b { font-weight: 800; }

@@ -1,0 +1,12 @@
+Bunnyhop native client
+
+Native simulation: the same Rust bunnyhop-core and vendored playsrc crates as the web game.
+Menus/account: the operating-system WebKit / Microsoft WebView2 runtime, never a web game renderer.
+SDL3: Copyright (C) 1997-2026 Sam Lantinga and contributors, zlib license (https://libsdl.org/license.php).
+Microsoft WebView2 SDK/runtime: Microsoft license terms (https://www.nuget.org/packages/Microsoft.Web.WebView2).
+Other bundled dependency notices must accompany release artifacts; see release-check.ts.
+Audio credits and source metadata are retained in resources/native-assets/audio.json.
+Map BSPs and Source model meshes/textures are not bundled; the native client fetches authorized hosted content.
+The generated bunny/viewmodel rigs retain structural bind-pose data (bone names, hierarchy, positions and quaternions) extracted from Valve CS:S models/player/ct_urban.mdl and models/weapons/v_knife_t.mdl. Source data provenance is also recorded in the source skeleton.json files; Valve owns the referenced models and trademarks. Original procedural bunny geometry/animation is separate from that skeleton data.
+
+Menu name moderation incorporates the English LDNOOBW list, copyright Shutterstock, Inc. and LDNOOBW contributors, licensed CC BY 4.0: https://creativecommons.org/licenses/by/4.0/ . Source: https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words , commit 5faf2ba42d7b1c0977169ec3611df25a3c08eb13. List entries are unchanged; the client applies its own matching rules and exceptions. The license text is included in licenses/LDNOOBW-CC-BY-4.0.txt.

@@ -1,0 +1,31 @@
+/* Server browser (ui/servers.ts): the base table is net/net.css; this is the AIRTIME pass. The row is the button: its
+   Join label is quiet until the row is hovered or focused, then it's the one amber thing. No boxes. */
+.srv-table th { font-family: var(--font-text); font-size: var(--fs-xs); font-weight: 600; color: var(--cream-3); }
+.srv-table td { border-top-color: var(--ink-3); }
+.srv-table tr.srv-row:hover td, .srv-table tr.srv-row:focus-within td { background: var(--ink-2); }
+.srv-name small { font-family: var(--font-text); }
+.srv-join { min-width: 5.2rem; padding: 0.42em 0.9em 0.42em calc(0.9em + var(--lean) * 0.6); border: 0; border-radius: 0; background: transparent; color: var(--cream-3); font-weight: 750; font-size: var(--fs-md); cursor: pointer; clip-path: polygon(var(--lean) 0, 100% 0, 100% 100%, 0 100%); transition: background var(--t-step) var(--ease-glide), color var(--t-step) var(--ease-glide), box-shadow var(--t-tick); }
+.srv-join::after { content: " ›"; }
+.srv-row:hover .srv-join:not(:disabled), .srv-join:focus-visible { background: var(--amber); color: var(--amber-ink); box-shadow: inset 0 -3px 0 var(--amber-deep); outline: none; }
+.srv-join:active:not(:disabled) { box-shadow: inset 0 -1px 0 var(--amber-deep); }
+.srv-join:disabled { cursor: default; color: var(--cream-3); opacity: 0.6; }
+.srv-join:disabled::after { content: ""; }
+.srv-bar i { transform-origin: left center; }
+.srv-table tbody.fresh .srv-bar i { animation: srv-bar-in 0.4s 0.12s var(--ease-glide) both; }
+@keyframes srv-bar-in { from { transform: scaleX(0); } }
+.srv-row.skeleton td { border-top-color: var(--ink-3); }
+.srv-row.skeleton .srv-name b, .srv-row.skeleton .srv-name small { width: 12rem; border-radius: var(--r-1); background: var(--ink-2); animation: mb-pulse 1.4s ease-in-out infinite; }
+.srv-row.skeleton .srv-name small { width: 16rem; margin-top: 0.3rem; }
+.srv-row.skeleton { cursor: default; pointer-events: none; }
+.srv-status { margin: 0.8rem 0.6rem; }
+/* Private lobby: one row of words and the invite field, no box. */
+.srv-lobby { margin: 1.4rem 0 0; padding: 0; border: 0; gap: 0.4rem; }
+.srv-lobby-row { display: flex; align-items: center; gap: 1.2rem; flex-wrap: wrap; padding: 0 0.6rem; }
+.srv-lobby-create { padding: 0.4rem 0; border: 0; background: none; color: var(--amber); font-weight: 700; font-size: var(--fs-md); cursor: pointer; }
+.srv-lobby-create:hover, .srv-lobby-create:focus-visible { color: var(--amber-hi); text-decoration: underline; text-underline-offset: 0.25em; outline: none; }
+.srv-lobby-create:disabled { color: var(--cream-3); cursor: default; text-decoration: none; }
+.srv-lobby .srv-lobby-code { flex: 0 1 20rem; min-width: 12rem; }
+.srv-lobby-msg { padding: 0 0.6rem; font-family: var(--font-text); }
+.srv-foot { margin-top: 1.6rem; padding: 0 0.6rem; justify-content: flex-start; }
+.srv-solo { padding-left: 0; color: var(--cream-2); }
+@media (prefers-reduced-motion: reduce) { .srv-table tbody.fresh .srv-bar i { animation: none; } }

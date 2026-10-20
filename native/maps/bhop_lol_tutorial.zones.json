@@ -1,0 +1,113 @@
+{
+  "map": "bhop_lol_tutorial",
+  "zones": [
+    {
+      "kind": "start",
+      "mins": [
+        -14272,
+        -14080,
+        0
+      ],
+      "maxs": [
+        -14016,
+        -13824,
+        128
+      ]
+    },
+    {
+      "kind": "stage",
+      "index": 2,
+      "mins": [
+        -11136,
+        -13184,
+        0
+      ],
+      "maxs": [
+        -10880,
+        -12928,
+        128
+      ]
+    },
+    {
+      "kind": "stage",
+      "index": 3,
+      "mins": [
+        -14272,
+        -10496,
+        0
+      ],
+      "maxs": [
+        -14016,
+        -10240,
+        128
+      ]
+    },
+    {
+      "kind": "stage",
+      "index": 4,
+      "mins": [
+        -3808,
+        -14080,
+        0
+      ],
+      "maxs": [
+        -3552,
+        -13824,
+        128
+      ]
+    },
+    {
+      "kind": "end",
+      "mins": [
+        -1024,
+        -11520,
+        0
+      ],
+      "maxs": [
+        0,
+        -11264,
+        128
+      ]
+    },
+    {
+      "kind": "start",
+      "track": 1,
+      "mins": [
+        -4096,
+        -14336,
+        0
+      ],
+      "maxs": [
+        -3840,
+        -13568,
+        128
+      ]
+    },
+    {
+      "kind": "end",
+      "track": 1,
+      "mins": [
+        -1024,
+        -11520,
+        0
+      ],
+      "maxs": [
+        0,
+        -11264,
+        128
+      ]
+    }
+  ],
+  "provenance": {
+    "source": "tutorial",
+    "generator": "tools/tutorial/build.ts",
+    "note": "Main track: the whole tutorial (start in lesson 1, stage 2-6 at each lesson's start, end of the final course). Bonus 1: the final course on its own.",
+    "validation": {
+      "status": "ok",
+      "bspSha256": "fbe8288d819e75cc208e58fbf7d1fa32dc693f0ca3388e40dd49b581afcb0f02",
+      "bspSha1": "6f9122d8f380740e7750f6c164c31accea1b0b9b",
+      "spawnInStart": true,
+      "issues": []
+    }
+  }
+}

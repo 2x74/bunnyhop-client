@@ -1,0 +1,97 @@
+/* Stats (ui/stats-screen.ts): numbers on the screen itself, no boxes; the body scrolls inside the screen. */
+.panel-stats { display: flex; flex-direction: column; max-height: calc(100vh - 7.5vh); }
+.panel-stats .screen-head .pf-tabs-host { align-self: flex-end; }
+.st-body { flex: 1; min-height: 0; overflow: hidden auto; overscroll-behavior: contain; padding: var(--sp-2) var(--sp-2) var(--sp-2) 0; scrollbar-gutter: stable; }
+.st-page { display: flex; flex-direction: column; gap: 2.2rem; padding-top: var(--sp-4); }
+.st-empty { margin: 0; color: var(--dim); font-size: var(--fs-sm); }
+.st-error { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-8) 0; }
+
+/* Who you are, and the way to your profile. */
+.st-who { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4); }
+.st-who-name { font-size: 2rem; font-weight: 850; letter-spacing: -0.025em; line-height: 1.1; color: var(--text); }
+.st-who-meta { display: flex; flex-wrap: wrap; gap: 0.2rem 1rem; margin: 0.35rem 0 0; color: var(--dim); font-weight: 600; }
+
+/* A row of numbers: value over label. */
+.st-figs { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: var(--sp-6) var(--sp-4); }
+.st-figs > div { display: flex; flex-direction: column-reverse; gap: 0.2rem; min-width: 0; }
+.st-figs dd { margin: 0; font-size: var(--fs-2xl); font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.st-figs dt { color: var(--dim); font-size: var(--fs-sm); }
+.st-figs.sm dd { font-size: var(--fs-xl); }
+.st-page > .st-figs.sm { margin-top: -0.8rem; }
+
+.st-h { margin: 0 0 var(--sp-3); font-size: var(--fs-md); font-weight: 700; }
+.st-h-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-4); }
+.st-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-8); }
+.st-cols.three { grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+.st-block { min-width: 0; }
+
+/* Plain rows: name, a quiet detail, the number that matters. */
+.st-rows { display: flex; flex-direction: column; }
+.st-row { box-sizing: border-box; display: flex; align-items: center; gap: var(--sp-3); min-height: 2.3rem; padding: 0.45rem 0.5rem; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text); font: inherit; font-size: var(--fs-sm); text-align: left; }
+.st-row { border-bottom: 1px solid var(--ink-3); border-radius: 0; }
+.st-row-main { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-row-main small { margin-left: 0.5rem; color: var(--faint); font-size: var(--fs-xs); }
+.st-row-dim { color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.st-row b { min-width: 2.5rem; text-align: right; font-variant-numeric: tabular-nums; }
+.st-time { font-weight: 700; }
+.st-link { cursor: pointer; }
+.st-link:hover { background: var(--raise-2); }
+.st-link:hover .st-row-main { text-decoration: underline; text-underline-offset: 0.2em; }
+.st-link:focus-visible { outline: none; box-shadow: var(--ring); }
+
+/* The last 30 days: one bar a day, 2px apart, rounded at the top. */
+.st-days { margin: 0; }
+.st-days-bars { height: 4.5rem; display: flex; align-items: flex-end; gap: 2px; border-bottom: 1px solid var(--line); }
+.st-days-bars span { flex: 1; height: max(2px, calc(var(--v) * 100%)); border-radius: 3px 3px 0 0; background: var(--accent); opacity: 0.85; }
+.st-days-bars span.zero { background: var(--raise-2); opacity: 1; }
+.st-days-bars span:hover { opacity: 1; background: var(--accent-hi); }
+.st-axis { display: flex; justify-content: space-between; gap: var(--sp-4); padding-top: 0.35rem; color: var(--faint); font-size: var(--fs-xs); }
+
+/* Online now, beside the last 24 hours. */
+.st-online { display: grid; grid-template-columns: minmax(12rem, 16rem) minmax(0, 1fr); gap: var(--sp-8); align-items: end; }
+.st-now-n { font-size: clamp(3.5rem, 7vw, 5.5rem); font-weight: 850; letter-spacing: -0.05em; line-height: 0.95; font-variant-numeric: tabular-nums; }
+.st-now-label { margin: 0.3rem 0 0; font-weight: 700; }
+.st-now-peaks { margin: var(--sp-3) 0 0; display: flex; flex-direction: column; gap: 0.15rem; color: var(--dim); font-size: var(--fs-sm); }
+.st-now-peaks b { color: var(--text); font-variant-numeric: tabular-nums; }
+.st-online-chart { margin: 0; min-width: 0; }
+.st-plot { position: relative; height: 8.5rem; border-bottom: 1px solid var(--line); cursor: crosshair; }
+.st-plot svg { display: block; width: 100%; height: 100%; }
+.st-plot-max { position: absolute; top: 0; left: 0; color: var(--faint); font-size: var(--fs-xs); pointer-events: none; }
+.st-cursor { position: absolute; inset: 0; pointer-events: none; }
+.st-cursor[hidden] { display: none; }
+.st-cursor::before { content: ""; position: absolute; top: 0; bottom: 0; left: var(--x); width: 1px; background: var(--line-2); }
+.st-cursor-dot { position: absolute; left: var(--x); top: var(--y); width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--panel-solid); }
+.st-cursor-tip { position: absolute; left: var(--x); top: 0; transform: translate(0.5rem, -0.2rem); padding: 0.2rem 0.45rem; border-radius: var(--radius-sm); background: var(--panel-solid); border: 1px solid var(--line-2); font-size: var(--fs-xs); white-space: nowrap; }
+.st-cursor.left .st-cursor-tip { transform: translate(calc(-100% - 0.5rem), -0.2rem); }
+
+/* The profile's overview (ui/profile.ts): the same pieces, a little tighter. */
+.st-player { display: flex; flex-direction: column; gap: var(--sp-6); }
+
+@media (max-width: 52rem) {
+  .st-online, .st-cols { grid-template-columns: minmax(0, 1fr); gap: var(--sp-6); }
+  .st-who { align-items: flex-start; flex-direction: column; }
+}
+
+/* Loading: bars the size of what's coming. */
+.st-skeleton .sk { display: block; border-radius: var(--r-1); }
+.st-sk-fig { display: flex; flex-direction: column; gap: 0.45rem; }
+.st-sk-num { width: 5.5rem; height: 2rem; }
+.st-sk-label { width: 7rem; height: 0.8rem; }
+.st-sk-who { display: flex; flex-direction: column; gap: 0.5rem; }
+.st-sk-name { width: 16rem; height: 2.2rem; }
+.st-sk-chart { width: 100%; height: 4.5rem; }
+.st-player .st-skeleton { padding-top: 0; }
+
+/* Nothing finished yet: the name, one sentence, Play. */
+.st-fresh { align-items: flex-start; gap: var(--sp-4); }
+.st-fresh-line { margin: 0; color: var(--cream-2); font-family: var(--font-text); }
+
+/* A tab's panel lands when it's switched to; the online chart's line draws itself in on the first paint, then the area
+   under it fades up. Transform / opacity / stroke-dashoffset only. */
+.st-body > .st-in { animation: vt-drop var(--t-air) var(--ease-land) both; }
+.st-first .st-line { stroke-dasharray: 1; stroke-dashoffset: 1; animation: st-draw 0.7s 0.1s var(--ease-glide) forwards; }
+.st-first .st-area { opacity: 0; animation: st-fade 0.4s 0.7s ease-out forwards; }
+@keyframes st-draw { to { stroke-dashoffset: 0; } }
+@keyframes st-fade { to { opacity: 1; } }
+body.potato .st-body > .st-in, body.potato .st-first .st-line, body.potato .st-first .st-area { animation: none; stroke-dashoffset: 0; opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .st-body > .st-in, .st-first .st-line, .st-first .st-area { animation: none; stroke-dashoffset: 0; opacity: 1; } }

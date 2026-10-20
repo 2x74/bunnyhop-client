@@ -1,0 +1,172 @@
+/* The map list (ui/maps.ts, ui/map-board.ts, tutorial/learn.ts). Same language as Settings: one toolbar row,
+   raised strips 2 px apart with no borders, sentence-case quiet labels, one amber for "selected" and "yours", tier
+   colours as text. The panel for the selected map is a fill, not a card in a card. */
+
+.panel-maps { display: flex; flex-direction: column; height: calc(100vh - 7.5vh); }
+/* Keep several map rows usable when wrapped controls exceed a short viewport. The menu scrolls. */
+.panel-maps { min-height: 32rem; }
+.map-browser { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+
+/* ---- toolbar */
+.mb-bar { display: flex; align-items: center; gap: var(--sp-2) var(--sp-5); flex-wrap: wrap; }
+.mb-search { position: relative; flex: 1 1 20rem; min-width: 0; display: flex; align-items: center; }
+.mb-q { width: 100%; box-sizing: border-box; padding: 0.55rem 7rem 0.55rem 2.3rem; font-size: var(--fs-md); border-radius: var(--radius-sm); outline: none; }
+.mb-q::placeholder { color: var(--faint); }
+.mb-q::-webkit-search-cancel-button { -webkit-appearance: none; display: none; }
+.mb-q-icon { position: absolute; left: 0.8rem; color: var(--faint); font-size: 1.1rem; pointer-events: none; transition: color var(--t-fast); }
+.mb-search:focus-within .mb-q-icon { color: var(--accent); }
+.mb-q-count { position: absolute; right: 2.5rem; font-size: var(--fs-xs); color: var(--dim); font-variant-numeric: tabular-nums; pointer-events: none; white-space: nowrap; }
+.mb-q-kbd { position: absolute; right: 0.7rem; opacity: 0.7; pointer-events: none; }
+.mb-search:focus-within .mb-q-kbd { display: none; }
+.mb-search:focus-within .mb-q-count { right: 0.8rem; }
+.mb-field { display: inline-flex; align-items: center; gap: 0.55rem; font-size: var(--fs-sm); color: var(--dim); font-weight: 600; }
+.mb-tiers .mb-tier { min-width: 2rem; padding: 0.3rem 0.55rem; font-variant-numeric: tabular-nums; }
+.mb-tiers .mb-tier[class*=" t"] { color: var(--tc); }
+.mb-tiers .mb-tier.on { background: var(--raise-3); color: var(--text); }
+.mb-tiers .mb-tier.on[class*=" t"] { background: color-mix(in srgb, var(--tc) 26%, transparent); color: var(--text); }
+/* Set, sort and style: text menus at the end of the one toolbar row (no boxes; the chevron says it's a menu). */
+.mb-menus { display: flex; align-items: center; gap: 0.2rem 1.4rem; margin-left: auto; flex-wrap: wrap; }
+.mb-menus select { field-sizing: content; max-width: 14rem; padding: 0.4rem 1.3rem 0.4rem 0; border: 0; border-radius: 0; background-color: transparent; background-position: right 0 center; color: var(--cream-2); font-weight: 650; font-size: var(--fs-sm); }
+.mb-menus select:hover { background-color: transparent; color: #fff; }
+.mb-menus select:focus-visible { box-shadow: 0 2px 0 var(--amber); }
+.mb-menus .mb-stylesel { color: var(--cream); }
+/* The way to the gauntlets: a word like the menus beside it, with a chevron. */
+.mb-gauntlets { display: inline-flex; align-items: center; gap: 0.1rem; padding: 0.4rem 0; color: var(--cream-2); font-weight: 650; }
+.mb-gauntlets:hover { color: #fff; text-decoration: none; }
+
+/* ---- list + panel */
+.mb-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(24rem, 30rem); gap: var(--sp-6); }
+.mb-col { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.mb-head, .mb-row { display: grid; grid-template-columns: 5.4rem minmax(0, 1fr) 2.4rem 6.6rem 5.6rem; align-items: center; column-gap: var(--sp-4); }
+.mb-head { padding: 0 1.3rem 0.4rem 0.5rem; font-size: var(--fs-xs); font-weight: 600; color: var(--faint); }
+.mb-head > :first-child { grid-column: 1 / 3; }
+.mb-head .mb-c-pb, .mb-head .mb-c-wr { text-align: right; color: inherit; font-size: inherit; }
+.mb-list { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 2px; overflow: hidden auto; overscroll-behavior: contain; padding-right: 0.4rem; scrollbar-gutter: stable; outline: none; }
+.mb-row { position: relative; flex: none; padding: 0.4rem 0.9rem 0.4rem 0.45rem; background: var(--raise); cursor: pointer; user-select: none; transition: background var(--t-fast); content-visibility: auto; contain-intrinsic-size: auto 3.85rem; }
+.mb-list > .mb-row:first-child, .mb-row.pinned + .mb-row { border-top-left-radius: var(--radius-sm); border-top-right-radius: var(--radius-sm); }
+.mb-list > .mb-row:last-child { border-bottom-left-radius: var(--radius-sm); border-bottom-right-radius: var(--radius-sm); }
+.mb-row.pinned { margin-bottom: var(--sp-3); border-radius: var(--radius-sm); }
+.mb-row:hover { background: var(--raise-2); }
+.mb-row[aria-selected="true"] { background: var(--raise-3); }
+.mb-row::before { content: ""; position: absolute; left: 0; top: 20%; bottom: 20%; width: 3px; border-radius: 2px; background: var(--accent); transform: scaleY(0); transition: transform var(--t-med) var(--ease); }
+.mb-row[aria-selected="true"]::before { transform: scaleY(1); }
+.mb-row:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
+.mb-thumb { width: 100%; aspect-ratio: 16 / 9; border-radius: 0.3rem; }
+/* The selected row's picture leans in a little inside its mask. */
+.mb-thumb img { transition: transform var(--t-step) var(--ease-glide), opacity 0.35s; }
+.mb-row[aria-selected="true"] .mb-thumb img.full { transform: scale(1.06); }
+.mb-thumb::after { display: none; }
+.mb-thumb .card-initials { font-size: 1rem; }
+.mb-name { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; line-height: 1.25; }
+.mb-name b, .mb-name small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mb-name b { min-width: 0; font-size: var(--fs-md); font-weight: 650; }
+/* the star after the name: shown on the row under the pointer, the selected row, and wherever it's on */
+.mb-title { display: flex; align-items: center; gap: 0.3rem; min-width: 0; }
+.mb-star { flex: none; display: inline-flex; padding: 0.1rem; margin: -0.1rem 0; border: 0; background: none; color: var(--faint); font-size: 0.95rem; cursor: pointer; opacity: 0; transition: opacity var(--t-fast), color var(--t-fast); }
+.mb-row:hover .mb-star, .mb-row[aria-selected="true"] .mb-star, .mb-star.on { opacity: 1; }
+.mb-star:hover { color: var(--text); }
+.mb-star.on, .mbd-star.on { color: var(--accent); }
+.mb-star .icon, .mbd-star .icon { stroke-linejoin: round; }
+.mb-star.on .icon, .mbd-star.on .icon { fill: currentColor; }
+.mb-name small { font-size: var(--fs-xs); color: var(--dim); }
+.mb-row .mb-c-tier { font-size: var(--fs-sm); font-weight: 750; color: var(--tc, var(--tier-x)); }
+.mb-c-pb, .mb-c-wr { text-align: right; white-space: nowrap; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.mb-c-pb b { color: var(--accent); font-weight: 700; }
+.mb-c-wr { color: var(--dim); }
+.mb-c-pb small, .mb-c-wr small { font-size: var(--fs-xs); color: var(--faint); }
+.mb-wr-mark { margin-right: 0.4rem; font-size: var(--fs-2xs); font-weight: 800; color: #ffd45e; }
+.mb-row.skeleton { height: 3.85rem; box-sizing: border-box; cursor: default; animation: mb-pulse 1.4s ease-in-out infinite; }
+@keyframes mb-pulse { 50% { opacity: 0.55; } }
+.mb-empty { margin: var(--sp-6) 0; text-align: center; color: var(--dim); }
+
+/* the tutorial's picture: the logo's hop arcs on a warm dark plate */
+.tut-art { background: radial-gradient(120% 140% at 15% 100%, rgba(255, 180, 58, 0.24), transparent 60%), linear-gradient(160deg, #2a2117, #14161d 70%); }
+.tut-art::after { display: none; }
+.tut-art svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.tut-trail { fill: none; stroke: var(--accent); stroke-width: 2.2; stroke-linecap: round; stroke-dasharray: 0.1 5.5; }
+.tut-dot { fill: #fff; filter: drop-shadow(0 0 3px rgba(255, 180, 58, 0.9)); }
+
+/* ---- the selected map's panel */
+.mb-detail-wrap { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.mb-detail { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-radius: var(--r-3); background: var(--panel); }
+.mbd-inner { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Switching maps: the last picture fades out over the new one (ui/maps.ts fadeOut). */
+.mbd-inner > .mbd-art-old { position: absolute; top: 0; left: 0; right: 0; z-index: 1; pointer-events: none; animation: mbd-art-out 0.14s ease-out forwards; }
+@keyframes mbd-art-out { to { opacity: 0; } }
+@media (prefers-reduced-motion: no-preference) { .mbd-inner:not(.skeleton) .mbd-main { animation: mbd-in 0.18s var(--ease) both; } }
+@keyframes mbd-in { from { opacity: 0; transform: translateY(4px); } }
+.mbd-inner > .mbd-art { flex: none; aspect-ratio: 16 / 7.5; }
+/* (The tutorial's picture is a drawing, not a map: a strip, so its lessons and board get the room.) */
+.mbd-tut > .mbd-art { aspect-ratio: 16 / 4.5; }
+.mbd-inner > .mbd-art::after { background: linear-gradient(180deg, transparent 70%, rgba(0, 0, 0, 0.35)); }
+.mbd-inner.skeleton { animation: mb-pulse 1.4s ease-in-out infinite; }
+.mbd-main { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-4); padding: var(--sp-4) var(--sp-5) var(--sp-5); }
+.mbd-title h3 { margin: 0; font-size: var(--fs-xl); font-weight: 750; letter-spacing: -0.01em; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mbd-meta { margin: 0.25rem 0 0; display: flex; flex-wrap: wrap; gap: 0.15rem 1.1rem; font-size: var(--fs-sm); color: var(--dim); line-height: 1.4; }
+.mbd-tier { font-weight: 650; color: var(--tc, var(--tier-x)); }
+
+.mbd-board { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.mbd-head { display: flex; align-items: baseline; gap: 0.75rem; min-width: 0; }
+.mbd-head h4 { margin: 0; font-size: var(--fs-md); font-weight: 700; }
+.mbd-count { font-size: var(--fs-sm); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.mbd-full { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 0.15rem; padding: 0; color: var(--dim); font-weight: 650; }
+.mbd-full:hover { color: var(--text); text-decoration: none; }
+.mbd-full .icon { transition: transform var(--t-fast) var(--ease); }
+.mbd-full:hover .icon { transform: translateX(2px); }
+.mbd-body { flex: 1 1 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.mbd-table { font-size: var(--fs-sm); }
+.mbd-table td { height: 2.15rem; padding: 0 0.6rem; background: rgba(255, 255, 255, 0.035); }
+.mbd-table td.rb-rank { width: 2rem; padding-right: 0.2rem; }
+.mbd-table .rb-av { width: 1.3rem; height: 1.3rem; }
+.mbd-time { white-space: nowrap; }
+.mbd-time b { font-weight: 700; }
+.mbd-time small { margin-left: 0.55rem; font-size: var(--fs-xs); color: var(--faint); }
+.mbd-table tr.me td { background: rgba(255, 180, 58, 0.1); }
+.mbd-table tr.me td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.mbd-table tr.me .rb-name { color: var(--accent); }
+.mbd-table tfoot tr td { border-top: 0.45rem solid transparent; background-clip: padding-box; }
+.mbd-table tr.rb-skel td { background: rgba(255, 255, 255, 0.03); }
+.mbd-state { display: flex; flex-direction: column; gap: 0.3rem; padding: var(--sp-4); border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.2); font-size: var(--fs-sm); color: var(--dim); line-height: 1.45; }
+.mbd-state b { display: inline-flex; align-items: center; gap: 0.5rem; font-size: var(--fs-md); color: var(--text); }
+.mbd-state.unranked b::before, .mbd-state.offline b::before { content: ""; width: 7px; height: 7px; border-radius: 2px; background: var(--faint); }
+.mbd-state.error b { color: var(--loss); }
+.mbd-local { margin: var(--sp-2) 0 0; font-size: var(--fs-sm); color: var(--dim); }
+.mbd-local b { color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; }
+.mbd-actions { flex: none; display: flex; align-items: center; gap: var(--sp-2); }
+.mbd-play { flex: 1; justify-content: center; padding: 0.7em 1em; font-size: var(--fs-lg); }
+.mbd-share { flex: none; }
+.mbd-star { flex: none; padding-inline: 0.7em; color: var(--dim); }
+.mbd-star .icon { width: 1.2em; height: 1.2em; }
+.mbd-star:hover { color: var(--text); }
+.mbd-star.on:hover { color: var(--accent-hi); }
+
+/* the tutorial's panel */
+.tut-hide { flex: none; color: var(--faint); }
+.tut-hide:hover { color: var(--text); }
+
+/* ---- short screens (1280×720): a shorter picture, the board keeps its rows */
+@media (max-height: 820px) {
+  .mbd-inner > .mbd-art { aspect-ratio: 16 / 6; }
+  .mbd-tut > .mbd-art { aspect-ratio: 16 / 3.5; }
+  .mbd-main { gap: var(--sp-3); padding: var(--sp-3) var(--sp-4) var(--sp-4); }
+}
+
+/* ---- narrow (phones, small windows): the list alone; a picked map opens its panel over it */
+@media (max-width: 52rem) {
+  .panel-maps .screen-head { margin-bottom: var(--sp-3); }
+  .mb-bar { gap: var(--sp-2) var(--sp-3); }
+  .mb-search { flex-basis: 100%; }
+  .mb-menus { margin-left: 0; }
+  .mb-body { grid-template-columns: minmax(0, 1fr); }
+  .mb-head, .mb-row { grid-template-columns: 4.4rem minmax(0, 1fr) 2rem 5.2rem; column-gap: var(--sp-3); }
+  .mb-head { padding-right: 0.9rem; }
+  .mb-c-wr { display: none; }
+  .mb-row { padding-right: 0.7rem; }
+  .mb-detail-wrap { display: none; }
+  .map-browser.show-detail .mb-detail-wrap { display: flex; position: absolute; inset: 0; z-index: 3; background: var(--panel-solid); overflow: hidden auto; overscroll-behavior: contain; }
+  .mb-detail { flex: none; overflow: visible; }
+  .mbd-inner { flex: none; }
+  .mbd-main { flex: none; }
+  .mbd-board { flex: none; }
+  .mbd-body { flex: none; overflow: visible; }
+}

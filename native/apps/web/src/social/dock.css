@@ -1,0 +1,210 @@
+/* The friends dock (social/dock.ts): two quiet buttons bottom right, a panel above them. */
+.fdock {
+  /* Left of the speaker button (audio/audio.css #audio-btn: 0.9rem in, 2.3rem wide), on its line. */
+  position: fixed; right: calc(0.9rem + 2.3rem + 0.45rem); bottom: 0.9rem; z-index: calc(var(--z-overlay) + 1);
+  display: flex; flex-direction: column; align-items: flex-end; gap: 0.5rem; pointer-events: none;
+}
+.fdock[hidden] { display: none; }
+.fdock > * { pointer-events: auto; }
+.fd-bar { display: flex; gap: 0.4rem; }
+.fd-btn {
+  position: relative; display: inline-flex; align-items: center; gap: 0.45rem; height: 2.3rem; padding: 0 0.85rem;
+  border: 0; border-radius: var(--radius); background: var(--ink-1); color: var(--dim);
+  font: inherit; font-size: var(--fs-sm); font-weight: 650; cursor: pointer;
+  box-shadow: 0 0.4rem 1.4rem rgba(0, 0, 0, 0.35);
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.fd-btn:hover, .fd-btn.on { color: var(--text); background: var(--ink-3); }
+.fd-btn:focus-visible { outline: none; box-shadow: var(--ring); }
+.fd-btn small { color: var(--gain); font-weight: 600; font-size: var(--fs-xs); }
+.fd-bell { width: 2.3rem; padding: 0; justify-content: center; }
+.fd-badge {
+  min-width: 1.05rem; height: 1.05rem; padding: 0 0.28rem; box-sizing: border-box; border-radius: 0.55rem;
+  background: var(--accent); color: var(--accent-ink); font-size: 0.66rem; font-weight: 800; line-height: 1.05rem; text-align: center;
+}
+.fd-bell .fd-badge { position: absolute; top: -0.3rem; right: -0.3rem; }
+/* Staff: their shield, to the admin panel. Square like the bell; the shield keeps its role colour. */
+.fd-staff { width: 2.3rem; padding: 0; justify-content: center; }
+.fd-staff .fd-shield { width: 1.15rem; height: 1.15rem; transition: transform var(--t-fast); }
+.fd-staff:hover .fd-shield { transform: translateY(-1px) scale(1.06); }
+.fd-staff .fd-badge { position: absolute; top: -0.3rem; right: -0.3rem; }
+
+.fd-panel {
+  width: min(23rem, calc(100vw - 5rem)); max-height: min(34rem, calc(100vh - 6rem)); display: flex; flex-direction: column;
+  border-radius: var(--radius-lg); background: var(--ink-1); box-shadow: var(--shadow); overflow: hidden;
+  animation: fd-in 0.18s var(--ease);
+}
+.fd-panel[hidden] { display: none; }
+@keyframes fd-in { from { opacity: 0; transform: translateY(6px); } }
+@media (prefers-reduced-motion: reduce) { .fd-panel { animation: none; } }
+
+.fd-head { display: flex; align-items: baseline; gap: 0.6rem; padding: 0.85rem 0.9rem 0.5rem 1rem; }
+.fd-head h3 { margin: 0; font-size: var(--fs-md); }
+.fd-head small { color: var(--gain); font-size: var(--fs-xs); font-weight: 600; }
+.fd-x { margin-left: auto; align-self: center; display: grid; place-items: center; width: 1.7rem; height: 1.7rem; border: 0; border-radius: var(--radius-sm); background: none; color: var(--faint); cursor: pointer; }
+.fd-x:hover { color: var(--text); background: var(--raise); }
+
+.fd-list { list-style: none; margin: 0; padding: 0 0.4rem; }
+.fd-scroll, .fd-notes { overflow-y: auto; min-height: 0; flex: 1 1 auto; scrollbar-width: thin; }
+.fd-found { max-height: 12rem; overflow-y: auto; }
+.fd-row { border-radius: var(--radius-sm); display: flex; align-items: center; }
+.fd-main {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 0.65rem; padding: 0.45rem 0.55rem;
+  border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+  text-decoration: none;
+}
+.fd-main:hover { background: var(--raise); }
+/* Every person is a link to their profile: the name brightens and underlines under the pointer or keyboard focus. */
+.fd-main .fd-name b, .fd-note .fd-txt b { text-underline-offset: 0.18em; text-decoration-thickness: 1px; }
+.fd-main:hover .fd-name b, .fd-main:focus-visible .fd-name b, .fd-main:hover .fd-txt > span > b, .fd-main:focus-visible .fd-txt > span > b { color: #fff; text-decoration-line: underline; }
+.fd-main.fd-static { cursor: default; }
+.fd-main.fd-static:hover { background: none; }
+.fd-main:focus-visible { outline: none; box-shadow: var(--ring); }
+.fd-avw { position: relative; flex: none; display: grid; }
+.fd-av { width: 1.75rem; height: 1.75rem; border-radius: 50%; object-fit: cover; display: grid; place-items: center; font-size: var(--fs-xs); font-weight: 800; color: #fff; background: hsl(var(--hue, 220) 45% 34%); }
+.fd-chathead .fd-av, .fd-note .fd-av { width: 1.5rem; height: 1.5rem; }
+.fd-dot { position: absolute; right: -1px; bottom: -1px; width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--faint); box-shadow: 0 0 0 2px rgba(13, 15, 21, 1); }
+.fd-row.on .fd-dot { background: var(--gain); }
+.fd-row.fr:not(.on) .fd-av { opacity: 0.6; }
+.fd-txt { min-width: 0; display: flex; flex-direction: column; gap: 0.05rem; flex: 1 1 auto; }
+.fd-txt small { color: var(--faint); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fd-row.on .fd-txt small { color: var(--dim); }
+.fd-name { display: inline-flex; align-items: center; gap: 0.3rem; min-width: 0; font-size: var(--fs-sm); }
+.fd-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fd-count { flex: none; min-width: 1.15rem; height: 1.15rem; padding: 0 0.3rem; box-sizing: border-box; border-radius: 0.6rem; background: var(--accent); color: var(--accent-ink); font-size: 0.68rem; font-weight: 800; line-height: 1.15rem; text-align: center; }
+/* A row's one action, its "more" menu, the follow button. Quiet ink buttons; amber text where it moves you somewhere
+   (Join) or makes a friend (Follow / Follow back). */
+.fd-row > .btn { flex: none; }
+.fd-act, .fd-follow { margin-left: 0.25rem; background: var(--ink-3); border: 0; color: var(--cream); font-weight: 650; }
+.fd-act:hover, .fd-follow:hover { background: var(--ink-4); }
+.fd-act.go, .fd-follow.want { color: var(--amber); }
+.fd-follow { min-width: 5.6rem; }
+.fd-follow.is-on { background: none; color: var(--cream-2); box-shadow: inset 0 0 0 1px var(--ink-4); }
+.fd-follow.is-on:hover, .fd-follow.is-on:focus-visible { color: var(--loss); background: none; box-shadow: inset 0 0 0 1px var(--loss); }
+.fd-act .fd-count { margin-left: 0.15rem; }
+.fd-more-btn { flex: none; display: grid; place-items: center; width: 1.9rem; height: 1.9rem; margin: 0 0.2rem 0 0.15rem; border: 0; border-radius: var(--r-2); background: none; color: var(--cream-3); cursor: pointer; }
+.fd-more-btn:hover, .fd-more-btn.menu-on { color: var(--cream); background: var(--ink-3); }
+.fd-more-btn:focus-visible { outline: none; box-shadow: var(--ring); }
+.fd-dots { display: grid; }
+.fd-dots svg { width: 1rem; height: 1rem; fill: currentColor; }
+.fd-you { flex: none; margin: 0 0.6rem; color: var(--cream-3); font-size: var(--fs-xs); }
+.fd-sec { padding: 0.15rem 0 0.4rem; }
+.fd-sec h4 { margin: 0; padding: 0.35rem 1rem 0.2rem; color: var(--cream-2); font-size: var(--fs-xs); font-weight: 650; }
+.fd-all { margin: 0 0 0 2.9rem; font-size: var(--fs-xs); }
+.fd-back-sec + .fd-friend-list, .fd-back-sec + .fd-teach { box-shadow: 0 -1px 0 var(--ink-3); margin-top: 0.2rem; padding-top: 0.3rem; }
+.fd-head small.fd-hidden { color: var(--cream-3); }
+.fd-n { font-variant-numeric: tabular-nums; }
+.fd-empty { margin: 0; padding: 0.9rem 1rem 1.1rem; color: var(--faint); font-size: var(--fs-sm); list-style: none; }
+.fd-signin { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; color: var(--dim); }
+.fd-teach { color: var(--cream-2); line-height: 1.45; }
+
+.fd-finder { position: relative; margin: 0 0.9rem 0.45rem; }
+.fd-search-i { position: absolute; left: 0.65rem; top: 0.62rem; color: var(--faint); display: grid; }
+.fd-search { width: 100%; box-sizing: border-box; padding: 0.5rem 0.7rem 0.5rem 2rem; border: 0; border-radius: var(--radius-sm); background: var(--raise); color: var(--text); font: inherit; font-size: var(--fs-sm); }
+.fd-search:focus { outline: none; background: var(--raise-2); }
+.fd-found { padding: 0.25rem 0 0; }
+.fd-found:empty { display: none; }
+.fd-found.busy { opacity: 0.55; transition: opacity var(--t-fast); }
+
+.fd-more { padding: 0 0.4rem; }
+.fd-more summary { padding: 0.55rem 0.6rem; color: var(--dim); font-size: var(--fs-xs); font-weight: 650; cursor: pointer; list-style-position: inside; }
+.fd-more summary:hover { color: var(--text); }
+.fd-more .fd-list { padding: 0; }
+.fd-hide { display: flex; align-items: center; gap: 0.6rem; margin-top: auto; padding: 0.7rem 1rem 0.85rem; color: var(--dim); font-size: var(--fs-sm); cursor: pointer; }
+
+.fd-tabs { display: flex; gap: 0.2rem; padding: 0 0.9rem 0.45rem; }
+.fd-tabs button { border: 0; background: none; color: var(--faint); font: inherit; font-size: var(--fs-xs); font-weight: 650; padding: 0.3rem 0.5rem; border-radius: var(--radius-sm); cursor: pointer; }
+.fd-tabs button:hover { color: var(--text); }
+.fd-tabs button.on { color: var(--text); background: var(--raise-2); }
+.fd-note { display: flex; align-items: center; gap: 0.4rem; padding: 0.1rem 0.4rem 0.1rem 0; border-radius: var(--radius-sm); }
+.fd-note .fd-txt > span { font-size: var(--fs-sm); color: var(--dim); }
+.fd-note .fd-txt b { color: var(--text); }
+.fd-note.new { background: var(--accent-soft); }
+.fd-note > .btn, .fd-note > .dim { flex: none; }
+.fd-note > .dim { font-size: var(--fs-xs); }
+
+.fd-chathead { display: flex; align-items: center; gap: 0.3rem; padding: 0.55rem 0.9rem 0.5rem 0.5rem; box-shadow: 0 1px 0 var(--line); }
+.fd-chathead .fd-who { padding: 0.3rem 0.5rem; }
+.fd-back { border: 0; background: none; color: var(--dim); font-size: 1.4rem; line-height: 1; width: 1.8rem; height: 1.8rem; border-radius: var(--radius-sm); cursor: pointer; }
+.fd-back:hover { color: var(--text); background: var(--raise); }
+.fd-msgs { list-style: none; margin: 0; padding: 0.7rem 0.9rem; display: flex; flex-direction: column; gap: 0.3rem; overflow-y: auto; flex: 1 1 auto; min-height: 9rem; scrollbar-width: thin; }
+.fd-msg { align-self: flex-start; max-width: 82%; padding: 0.4rem 0.65rem; border-radius: 0.8rem 0.8rem 0.8rem 0.25rem; background: var(--raise-2); font-size: var(--fs-sm); line-height: 1.35; overflow-wrap: anywhere; }
+.fd-msg.mine { align-self: flex-end; border-radius: 0.8rem 0.8rem 0.25rem 0.8rem; background: rgba(255, 180, 58, 0.18); }
+.fd-msgs .fd-empty { align-self: center; padding: 1.5rem 0; }
+.fd-card { display: inline-flex; align-items: center; gap: 0.4rem; }
+.fd-card .link-btn { padding: 0 0.2rem; color: var(--accent); }
+.fd-compose { padding: 0.55rem 0.7rem 0.7rem; }
+.fd-say { width: 100%; box-sizing: border-box; padding: 0.55rem 0.75rem; border: 0; border-radius: var(--radius-sm); background: var(--raise); color: var(--text); font: inherit; font-size: var(--fs-sm); }
+.fd-say:focus { outline: none; background: var(--raise-2); }
+.fd-say:disabled { opacity: 0.6; }
+
+/* Drop-down menus (social/menu.ts): profile actions, a friend row's "more". Solid ink, one shadow, the drop. */
+.sm-menu {
+  position: fixed; z-index: calc(var(--z-overlay) + 5); min-width: 11rem; max-width: 18rem; padding: 0.3rem;
+  border-radius: var(--r-3); background: var(--ink-2); box-shadow: 0 18px 40px -16px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--ink-4);
+  animation: sm-drop var(--t-step) var(--ease-glide);
+}
+.sm-menu.up { animation-name: sm-rise; }
+@keyframes sm-drop { from { opacity: 0; transform: translateY(-0.3rem); } }
+@keyframes sm-rise { from { opacity: 0; transform: translateY(0.3rem); } }
+@media (prefers-reduced-motion: reduce) { .sm-menu { animation: none; } }
+body.potato .sm-menu { animation: none; }
+.sm-item {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; width: 100%; padding: 0.5rem 0.7rem;
+  border: 0; border-radius: var(--r-2); background: none; color: var(--cream); font: inherit; font-size: var(--fs-sm); font-weight: 600; text-align: left; cursor: pointer;
+}
+.sm-item small { color: var(--cream-3); font-weight: 500; font-variant-numeric: tabular-nums; }
+.sm-item:hover, .sm-item:focus-visible { outline: none; background: var(--ink-3); color: #fff; }
+.sm-item.bad { color: var(--loss); }
+.sm-item:disabled { color: var(--cream-3); cursor: default; background: none; }
+.sm-note { margin: 0; padding: 0.4rem 0.7rem 0.45rem; color: var(--cream-2); font-size: var(--fs-xs); }
+.sm-note + .sm-item { margin-top: 0.1rem; }
+
+/* A profile's followers / following / friends (social/people.ts): the dock's panel look, floating under the numbers. */
+.pp-panel {
+  position: fixed; z-index: calc(var(--z-overlay) + 4); width: min(23rem, calc(100vw - 1rem)); display: flex; flex-direction: column;
+  border-radius: var(--r-3); background: var(--ink-1); box-shadow: 0 18px 40px -16px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--ink-3); overflow: hidden;
+  animation: sm-drop var(--t-air) var(--ease-glide);
+}
+@media (prefers-reduced-motion: reduce) { .pp-panel { animation: none; } }
+body.potato .pp-panel { animation: none; }
+.pp-head { display: flex; align-items: center; gap: 0.2rem; padding: 0.45rem 0.5rem 0 0.55rem; box-shadow: inset 0 -1px 0 var(--ink-3); }
+.pp-tabs { display: flex; gap: 0.1rem; flex: 1; min-width: 0; }
+.pp-tab {
+  position: relative; padding: 0.5rem 0.55rem 0.6rem; border: 0; border-radius: var(--r-2) var(--r-2) 0 0; background: none;
+  color: var(--cream-2); font: inherit; font-size: var(--fs-sm); white-space: nowrap; cursor: pointer;
+}
+.pp-tab b { color: var(--cream); font-weight: 750; font-variant-numeric: tabular-nums; }
+.pp-tab:hover { color: var(--cream); }
+.pp-tab.on { background: var(--ink-3); color: #fff; box-shadow: inset 0 -2px 0 var(--amber); }
+.pp-tab:focus-visible { outline: none; box-shadow: var(--ring); }
+.pp-list { overflow-y: auto; min-height: 0; flex: 1 1 auto; padding: 0.35rem 0.4rem 0.45rem; scrollbar-width: thin; }
+.pp-more { padding: 0.5rem 0.6rem 0.6rem; font-size: var(--fs-xs); }
+
+/* Friends' messages in the game's chat log (social/state.ts). */
+.chat-friend { color: #9fd3ff; font-weight: 700; }
+
+@media (max-width: 40rem) {
+  .fd-friends > span, .fd-friends > small { display: none; }
+  .fd-friends { width: 2.3rem; padding: 0; justify-content: center; }
+}
+
+/* A follow landing (social/land.ts): the seal stamped on the pressed button's corner, above every panel. */
+.fl-seal {
+  position: fixed; z-index: calc(var(--z-overlay) + 9); width: 1.15rem; height: 1.15rem; display: grid; place-items: center;
+  border-radius: 50%; background: var(--amber); color: var(--amber-ink); pointer-events: none;
+  box-shadow: 0 0 0 2px var(--ink-1), 0 4px 10px -4px rgba(0, 0, 0, 0.6);
+}
+.fl-seal svg { width: 0.78rem; height: 0.78rem; stroke-width: 2.4; }
+.fl-seal.following { background: var(--cream); color: var(--ink-0); }
+/* Just pressed: stays in its new word (no red "Unfollow") until the pointer leaves. */
+.fd-follow.is-on.cool:hover { color: var(--cream-2); box-shadow: inset 0 0 0 1px var(--ink-4); }
+/* A new friend landing in the list: an amber wash that fades (opacity of a layer, not a colour transition). */
+.fd-row.fresh { position: relative; }
+.fd-row.fresh::before {
+  content: ""; position: absolute; inset: 0; border-radius: var(--radius-sm); background: var(--amber-wash); pointer-events: none;
+  animation: fd-fresh 1.6s 0.3s var(--ease-glide) both;
+}
+@keyframes fd-fresh { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .fd-row.fresh::before { animation-duration: 0.01s; animation-delay: 1.2s; } }
+body.potato .fd-row.fresh::before { animation-duration: 0.01s; animation-delay: 1.2s; }

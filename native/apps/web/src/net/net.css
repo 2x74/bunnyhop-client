@@ -1,0 +1,153 @@
+/* Multiplayer HUD (net/hud.ts): chat (a movable HUD element), Tab scoreboard, numbered menu, banner, spectator line,
+   !race (net/race.ts). Same palette and HUD face as style.css / hud/hud.css. Sizes scale with --hs. */
+
+/* ------------------------------------------------------------------ chat (layout element "chat") */
+#hud .hud-el[data-el="chat"] { white-space: normal; }
+.hud-chat { width: 27em; font-size: 0.82em; line-height: 1.35; }
+.hud-chat .chat-demo { display: none; }
+#hud.editing .hud-chat .chat-demo { display: block; }
+#hud.editing .hud-chat :is(.chat-lines, .chat-form, .chat-hint) { display: none; }
+.chat-lines { display: flex; flex-direction: column; justify-content: flex-end; gap: 0.12em; max-height: 11.5em; overflow: hidden; }
+.chat-line { padding: 0.06em 0.4em; border-radius: 0.3em; overflow-wrap: anywhere; transition: opacity 0.6s ease; text-shadow: 0 0 2px rgba(0, 0, 0, 0.95), 0 1px 3px rgba(0, 0, 0, 0.9); }
+/* New lines slide in from the left and settle (compositor only; one short animation per line). */
+@media (prefers-reduced-motion: no-preference) { .chat-line { animation: chat-in 0.3s cubic-bezier(0.2, 1.4, 0.4, 1); } }
+@keyframes chat-in { from { opacity: 0; transform: translateX(-0.6em); } }
+.chat-line.old { opacity: 0; }
+/* Faded lines keep their name effects still (they'd repaint every frame unseen). */
+.chat-line.old :is(.nm-fx, .nm-gifter, .nm-special), .chat-line.old :is(.nm-gifter, .nm-special)::after { animation: none; }
+.chat-line .chat-name { font-weight: 700; }
+.chat-line.server { color: #ffd59a; }
+.chat-line.admin { color: #ff9a8a; }
+.chat-line.private { color: #b8c4d8; font-style: italic; }
+.chat-line.local { color: #9fd0ff; }
+.chat-line.announce { font-weight: 650; background: rgba(0, 0, 0, 0.35); box-shadow: inset 2px 0 0 var(--tone, var(--accent)); }
+.chat-line.tone-wr { --tone: #ffd45e; } .chat-line.tone-sr { --tone: #ff9d2e; } .chat-line.tone-top10 { --tone: var(--ghost); } .chat-line.tone-pb { --tone: var(--gain); }
+.chat-line.tone-wr { color: #ffd45e; } .chat-line.tone-sr { color: #ff9d2e; } .chat-line.tone-top10 { color: #7fd1ff; } .chat-line.tone-pb { color: var(--gain); }
+.chat-sys { opacity: 0.92; }
+.chat-tag { display: inline-block; margin-right: 0.35em; padding: 0 0.35em; border-radius: 0.25em; font-size: 0.78em; font-weight: 750; letter-spacing: 0.02em; color: var(--rc, #d6dceb); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rc, #d6dceb) 50%, transparent); background: rgba(0, 0, 0, 0.35); text-shadow: none; vertical-align: 0.06em; }
+.chat-tag.admin { --rc: #ff6b5b; }
+/* Staff show the shield after their name (ui/marks.ts), as on the boards and profiles: no role tag before it. */
+/* Open: history visible on a panel, input below. */
+/* Open: the cursor is free (free-cursor.ts), so the log takes the wheel and scrolls back. Bottom-aligned by the first
+   line's auto margin, not flex-end: lines overflowing a flex-end box at the top can't be scrolled to. */
+.hud-chat.chat-open .chat-lines { max-height: 16em; overflow-y: auto; justify-content: flex-start; pointer-events: auto; background: rgba(10, 12, 16, 0.55); border-radius: 0.45em; padding: 0.3em 0; }
+.hud-chat.chat-open .chat-lines > :first-child { margin-top: auto; }
+.hud-chat.chat-open .chat-line.old { opacity: 0.85; }
+.chat-form { display: flex; align-items: center; gap: 0.4em; margin-top: 0.3em; padding: 0.25em 0.45em; background: rgba(10, 12, 16, 0.8); border: 1px solid var(--accent); border-radius: 0.4em; pointer-events: auto; }
+.chat-prompt { color: var(--accent); font-weight: 700; }
+.chat-input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: #fff; font: inherit; }
+.chat-hint { margin-top: 0.2em; padding: 0.1em 0.5em; color: var(--dim); background: rgba(10, 12, 16, 0.55); border-radius: 0.4em; white-space: pre-wrap; }
+/* Typing shows the chat even with the Chat element turned off (Settings → HUD). */
+#hud .hud-el.off:has(.chat-open) { display: block; }
+
+/* ------------------------------------------------------------------ numbered menu (votes, spectate, nominate) */
+#mp-menu { left: 1.2rem; top: 50%; transform: translateY(-50%); min-width: 17rem; max-width: 26rem; font-size: calc(0.92rem * var(--hs, 1)); padding: 0.7em 0.9em; background: rgba(10, 12, 16, 0.78); border: 1px solid rgba(255, 255, 255, 0.1); border-left: 3px solid var(--accent); border-radius: 0.5em; text-shadow: none; }
+.mm-title { font-weight: 800; color: var(--accent); margin-bottom: 0.45em; }
+.mm-item { display: flex; align-items: baseline; gap: 0.5em; padding: 0.12em 0.2em; border-radius: 0.3em; }
+.mm-item.sel { background: rgba(255, 180, 58, 0.18); }
+.mm-item.off { opacity: 0.4; }
+.mm-item.exit { margin-top: 0.35em; color: var(--dim); }
+.mm-key { color: var(--accent); font-weight: 800; font-family: var(--mono); min-width: 1.4em; }
+.mm-label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mm-detail { color: var(--dim); font-variant-numeric: tabular-nums; font-size: 0.88em; white-space: nowrap; }
+.mm-footer { margin-top: 0.45em; color: var(--dim); font-size: 0.85em; }
+
+/* Above the default chat spot (bottom-left, growing upwards): centred at 50% the vote menu covered the chat lines. */
+#mp-menu { top: 40%; }
+
+/* ------------------------------------------------------------------ scoreboard (hold Tab) */
+#mp-scoreboard { left: 50%; top: 12vh; transform: translateX(-50%); width: min(52rem, 92vw); max-height: 76vh; overflow: auto; font-size: calc(0.9rem * var(--hs, 1)); padding: 1em 1.2em; background: rgba(10, 12, 16, 0.86); border: 1px solid var(--line-2); border-radius: var(--radius); box-shadow: var(--shadow); text-shadow: none; }
+.sb-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1em; flex-wrap: wrap; padding-bottom: 0.6em; border-bottom: 1px solid var(--line); margin-bottom: 0.4em; }
+.sb-room b { font-size: 1.1em; }
+.sb-map { display: flex; align-items: baseline; gap: 0.4em; }
+.sb-map .badge { position: relative; top: -0.1em; }
+.sb-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.sb-table th { text-align: left; font-size: 0.8em; color: var(--faint); font-weight: 700; padding: 0.35em 0.5em; }
+.sb-table td { padding: 0.32em 0.5em; border-top: 1px solid rgba(255, 255, 255, 0.05); white-space: nowrap; }
+.sb-table tr.you td { background: rgba(255, 180, 58, 0.08); }
+.sb-table tr.you td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.sb-pos { color: var(--faint); width: 1.8em; }
+.sb-name { display: flex; align-items: center; gap: 0.15em; max-width: 22rem; }
+.sb-pname { overflow: hidden; text-overflow: ellipsis; font-weight: 650; }
+.sb-dot { display: inline-block; width: 0.55em; height: 0.55em; border-radius: 50%; margin-right: 0.45em; flex: none; }
+.sb-style { color: var(--dim); }
+.sb-time.running { color: #fff; }
+.sb-time.finished { color: var(--gain); }
+.sb-time.idle { color: var(--faint); }
+.sb-pb { color: var(--accent); }
+.sb-ping { color: var(--dim); text-align: right; }
+.sb-table th:last-child { text-align: right; }
+.sb-spec { margin-top: 0.6em; font-size: 0.9em; }
+.sb-hint { margin-top: 0.7em; font-size: 0.8em; }
+
+/* ------------------------------------------------------------------ banner, race, spectator line */
+/* Lasting room states (next map loading, disconnected, server full, the race's opponent): a band across the top
+   third, fading out at both ends, title in the HUD face over a short tone bar. It hops in (net/hud.ts Banner). */
+#mp-banner { --tc: var(--cream); left: 50%; top: 9vh; translate: -50% 0; min-width: 26em; text-align: center; padding: 0.6em 5em 0.7em; font-size: calc(1rem * var(--hs, 1)); text-shadow: var(--shadow-text); background: linear-gradient(90deg, transparent, var(--scrim) 22%, var(--scrim) 78%, transparent); white-space: nowrap; }
+#mp-banner .bn-main { display: inline-block; position: relative; padding-bottom: 0.18em; font-size: 1.45em; font-weight: 850; font-stretch: 105%; letter-spacing: -0.01em; color: var(--tc); }
+#mp-banner .bn-main::after { content: ""; position: absolute; left: 50%; bottom: -0.1em; width: 2.2em; height: 3px; translate: -50% 0; background: var(--tc); }
+#mp-banner .bn-sub { margin-top: 0.35em; color: var(--cream-2); font-weight: 600; }
+#mp-banner.tone-change { --tc: var(--amber); }
+#mp-banner.tone-wr { --tc: var(--wr); }
+#mp-banner.tone-sr { --tc: var(--carrot); }
+/* !race (net/race.ts): 3, 2, 1 stamp in at crosshair height; GO is gold and blows outward. */
+#mp-count { left: 50%; top: 50%; translate: -50% -115%; font-size: calc(5.5rem * var(--hs, 1)); font-weight: 850; font-stretch: 90%; line-height: 1; color: #fff; text-shadow: var(--shadow-text); pointer-events: none; }
+#mp-count.go { color: var(--wr); }
+/* The race line while racing: plain HUD text at the top (no panel), the clock in tenths. */
+#mp-race { left: 50%; top: 3.2vh; transform: translateX(-50%); display: flex; align-items: baseline; gap: 1.2em; font-size: calc(0.95rem * var(--hs, 1)); font-weight: 650; text-shadow: var(--shadow-text); white-space: nowrap; }
+#mp-race .rc-clock { min-width: 4.6em; text-align: center; font-size: 1.25em; font-weight: 800; font-stretch: 90%; font-variant-numeric: tabular-nums; }
+#mp-race .rc-side { font-variant-numeric: tabular-nums; }
+/* The result: both times stacked, the winner's on top, one line under them. */
+#mp-race.result { top: 4vh; flex-direction: column; align-items: center; gap: 0.1em; }
+#mp-race .rc-row { display: flex; align-items: baseline; gap: 0.7em; color: rgba(255, 255, 255, 0.7); }
+#mp-race .rc-row .rc-t { font-size: 1.5em; font-weight: 800; font-stretch: 90%; font-variant-numeric: tabular-nums; }
+#mp-race .rc-row.top { color: #fff; }
+#mp-race .rc-row.top .rc-t { font-size: 2.3em; }
+#mp-race.won .rc-row.top .rc-t { color: var(--gain); }
+#mp-race .rc-verdict { display: inline-block; margin-top: 0.25em; font-size: 1.15em; font-weight: 850; }
+#mp-race.won .rc-verdict { color: var(--gain); }
+/* The race result sits where the end-of-run result goes; that one steps down under it. */
+#hud.race-result #hud-endcard { top: 24vh; }
+/* Spectating: one line, "Watching hopper"; their speed and timer show in your HUD (hud.ts setSpectated). */
+#mp-specbar { left: 50%; bottom: 2.2rem; transform: translateX(-50%); font-size: calc(1rem * var(--hs, 1)); font-weight: 650; text-shadow: var(--shadow-text); white-space: nowrap; }
+#mp-specbar b { font-weight: 800; }
+/* Spectating: your own run's readouts would mislead; the speed and timer stay and show the watched player's. */
+body.mp-spectating #hud .hud-el:not([data-el="chat"]):not([data-el="map"]):not([data-el="fps"]):not([data-el="speed"]):not([data-el="timer"]) { visibility: hidden; }
+body.mp-spectating #hud-endcard { display: none; }
+body.menu-open #mp-menu, body.menu-open #mp-scoreboard, body.menu-open #mp-specbar, body.menu-open #mp-race, body.menu-open #mp-count { display: none; }
+
+/* ------------------------------------------------------------------ server browser (ui/servers.ts) */
+.servers { display: flex; flex-direction: column; gap: 0.8rem; }
+.srv-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.srv-table th { text-align: left; font-size: 0.78rem; color: var(--faint); font-weight: 700; padding: 0.4rem 0.6rem; }
+.srv-table td { padding: 0.65rem 0.6rem; border-top: 1px solid var(--line); vertical-align: middle; }
+.srv-table tr.srv-row { cursor: pointer; }
+.srv-table tr.srv-row:hover td, .srv-table tr.srv-row:focus-within td { background: var(--raise); }
+.srv-table tr.srv-row.offline { opacity: 0.5; cursor: default; }
+.srv-name b { display: block; font-size: 1.02rem; }
+.srv-name small { color: var(--dim); }
+.srv-map { display: flex; align-items: center; gap: 0.5rem; }
+.srv-map .srv-mapname { font-weight: 650; }
+.srv-players { min-width: 7rem; }
+.srv-bar { display: block; height: 0.3rem; margin-top: 0.3rem; border-radius: 1rem; background: var(--raise-2); overflow: hidden; }
+.srv-bar i { display: block; height: 100%; background: var(--gain); border-radius: inherit; }
+.srv-bar.full i { background: var(--loss); }
+.srv-ping.good { color: var(--gain); } .srv-ping.ok { color: #ffd84d; } .srv-ping.bad { color: var(--loss); }
+.srv-actions { text-align: right; white-space: nowrap; }
+.srv-foot { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.srv-empty { padding: 1.4rem; text-align: center; color: var(--dim); }
+/* Private lobby (ui/servers.ts lobbyBlock): create yours, or paste a friend's invite. */
+.srv-lobby { display: flex; flex-direction: column; gap: 0.5rem; margin: 0.9rem 0; padding: 0.7rem 0.9rem; border-radius: var(--radius-sm); border: 1px solid var(--line-2); }
+.srv-lobby-head { display: flex; flex-direction: column; gap: 0.1rem; }
+.srv-lobby-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+.srv-lobby-code { flex: 1 1 12rem; min-width: 10rem; padding: 0.45rem 0.6rem; font: inherit; }
+.srv-here { margin-left: 0.4rem; }
+.sb-name .sb-host { margin-left: 0.4em; padding: 0 0.35em; border-radius: 3px; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent); border: 1px solid currentColor; }
+/* Pause menu: room block */
+.menu-room { display: flex; flex-direction: column; gap: 0.15rem; padding: 0.55rem 0.9rem; border-radius: var(--radius-sm); background: rgba(255, 180, 58, 0.08); border: 1px solid rgba(255, 180, 58, 0.25); }
+.menu-room b { color: var(--accent); }
+.menu-room small { color: var(--dim); }
+/* Verified / Creator marks (ui/marks.ts) after a name in chat and on the scoreboard. */
+.sb-name .nm-marks { margin-left: 0.35em; }
+.chat-line .nm-marks { font-size: 0.92em; }
+.chat-link { color: var(--accent-hi, #ffc35f); text-decoration: underline; text-underline-offset: 2px; pointer-events: auto; }

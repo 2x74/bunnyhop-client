@@ -1,0 +1,672 @@
+import { DEFAULT_MOUSE_DPI } from "../mouse-settings";
+// Client preferences (localStorage, applied live). Nothing here feeds the simulation's physics:
+// tick rate / airaccelerate / autohop are fixed per style (styles.ts, picked in the menus or with the cycleStyle
+// key) and recorded in replays.
+
+import { DEFAULT_BINDS } from "../binds";
+import { CLASSIC, DEFAULT_KEYS, HUD_ELEMENTS, type HudLayout, type KeysPrefs } from "../hud/layout";
+import { VIEWMODEL_POS, VIEWMODEL_POS_V1, VIEWMODEL_REV } from "../viewmodel/defaults";
+import { DEFAULT_SSJ, type SsjPrefs } from "../ssj/stats";
+import { DEFAULT_TRIGGER_PREFS, type TriggerPrefs } from "../triggers/volumes";
+
+export type Action =
+  | "forward"
+  | "back"
+  | "left"
+  | "right"
+  | "jump"
+  | "duck"
+  | "use"
+  | "restart"
+  | "restartBonus"
+  | "restartMain"
+  // Start point (start-point.ts): where R / B / M put you in that track's start zone.
+  | "setStart"
+  | "clearStart"
+  | "cycleStyle"
+  // Leave for the main menu from the game (leave-confirm.ts: asks once during a timed run). Unbound by default.
+  | "mainMenu"
+  | "hudEditor"
+  | "thirdPerson"
+  | "attack"
+  | "attack2"
+  | "inspect"
+  | "viewmodel"
+  | "flashlight"
+  | "keysOverlay"
+  | "hideUi"
+  | "mute"
+  | "nextTrack"
+  // Practice mode (practice-mode/): the toggle, then tools that only work while it's on.
+  | "practice"
+  | "noclip"
+  | "cpSave"
+  | "cpTeleport"
+  | "cpPrev"
+  | "cpNext"
+  | "turnLeft"
+  | "turnRight"
+  // Weapons (binds.ts WEAPON_ACTIONS): slot requests, drop and reload for the guns some maps hand out (physics v5).
+  | "slot1"
+  | "slot2"
+  | "slot3"
+  | "lastWeapon"
+  | "nextWeapon"
+  | "prevWeapon"
+  | "drop"
+  | "reload"
+  // Weapon commands (weapon-commands.ts, physics v7): !usp, !glock and the !guns menu.
+  | "giveUsp"
+  | "giveGlock"
+  | "gunMenu";
+export type MenuBackground = "live" | "still" | "off";
+/** Shape of the 3D view while playing: the screen's own, or a fixed aspect ratio (Settings → Graphics → Aspect ratio). */
+export type AspectRatio = "native" | "4:3" | "5:4" | "16:10" | "16:9";
+/** A fixed aspect ratio fills the screen stretched (CS's "4:3 stretched") or sits between black bars. */
+export type AspectFit = "stretch" | "bars";
+export type HiddenKeeps = "speedKeys" | "nothing";
+/** Player model: the bunnyhop.lol bunny (default), the classic runner, or the original CS:S models (team + skin below). */
+export type PlayerModelChoice = "bunny" | "runner" | "css";
+export type CssTeam = "ct" | "t";
+export type CtSkin = "ct_urban" | "ct_gsg9" | "ct_sas" | "ct_gign";
+export type TSkin = "t_phoenix" | "t_leet" | "t_arctic" | "t_guerilla";
+export type CrosshairStyle = "cross" | "cross-dot" | "dot" | "t" | "circle" | "none";
+export type ViewmodelHand = "right" | "left";
+
+/** Music: always (menu track in menus, the playlist in game), only in menus (home + pause), or off. */
+export type MusicMode = "always" | "menus" | "off";
+
+/** Sound options (apps/web/src/audio). Bus levels multiply the master `volume`. */
+export type AnnouncerLine = "off" | "perfect" | "godlike" | "holyshit";
+export interface AnnouncerPrefs {
+  enabled: boolean; finish: boolean; movement: boolean; local: boolean; server: boolean;
+  volume: number; pb: AnnouncerLine; wr: AnnouncerLine; speed: AnnouncerLine; highSpeed: AnnouncerLine; streak: AnnouncerLine;
+  speedThreshold: number; highSpeedThreshold: number; streakThreshold: number;
+}
+export interface AudioPrefs {
+  announcer: AnnouncerPrefs;
+  perfHud: boolean;
+  perfectIndicator: boolean;
+  perfectTick: boolean;
+  music: number;
+  sfx: number;
+  ui: number;
+  ambience: number;
+  /** Global mute (the mute key / speaker buttons). */
+  muted: boolean;
+  /** Per-bus mutes. */
+  mute: { music: boolean; sfx: boolean; ui: boolean; ambience: boolean };
+  musicMode: MusicMode;
+  shuffle: boolean;
+  /** Use the original CS:S footstep / landing / water / knife sounds when the hosted CS:S content has them. */
+  classic: boolean;
+  footsteps: boolean;
+  /** Wind that rises with speed. */
+  wind: boolean;
+  /** Other players in rooms (positional). */
+  others: boolean;
+  /** Race ghosts (positional, quiet). */
+  ghosts: boolean;
+  /** Silence everything while the tab is in the background. */
+  muteInBackground: boolean;
+}
+
+export interface Prefs {
+  /** CS:S `sensitivity` (degrees per count = sensitivity * m_yaw). */
+  sensitivity: number;
+  verticalSensitivityEnabled: boolean;
+  verticalSensitivity: number;
+  /** Mouse DPI, only used to show cm/360. */
+  dpi: number;
+  /** The player explicitly supplied DPI; never publish the calculator default as measured DPI. */
+  dpiConfirmed: boolean;
+  /** Keep your DPI off your profile (Settings → Mouse & view → Show DPI on profile). */
+  dpiHidden: boolean;
+  invertY: boolean;
+  /** Pointer lock with unadjustedMovement (raw input) where the browser supports it. */
+  rawInput: boolean;
+  /** Drop lone impossible mouse reports (browser pointer-lock jumps) and the first event after locking (mouse-filter.ts). */
+  spikeFilter: boolean;
+  /** Input diagnostics overlay: event rate, deltas, dropped spikes, frame times (input-debug.ts; also ?inputdebug=1). */
+  inputStats: boolean;
+  /** CS:S `fov_desired`: horizontal FOV at 4:3; wider screens get more (Hor+). */
+  fov: number;
+  crosshair: {
+    style: CrosshairStyle;
+    color: string;
+    /** Arm length, CSS px. */
+    size: number;
+    thickness: number;
+    gap: number;
+    outline: boolean;
+    alpha: number;
+  };
+  hud: {
+    speedColors: boolean;
+    /** Each jump's speed gain floats off the speed readout ("+14"). */
+    gainTicks: boolean;
+    /** A soft edge glow that grows with speed from 600 u/s (off by default; never on potato). */
+    edgeGlow: boolean;
+    strafeTrainer: { color: string; hints: boolean };
+    /** Overall HUD size multiplier (on top of each element's own scale). */
+    scale: number;
+    /** Per-element visibility, position (9-grid anchor + viewport-fraction offset) and scale. */
+    layout: HudLayout;
+    /** Keys overlay look (its size is layout.keys.s). */
+    keys: KeysPrefs;
+    /** Hide UI in game (ui/hide-ui.ts; the Hide UI key flips it): playing and spectating show just the game. */
+    hidden: boolean;
+    /** What a hidden UI keeps, in game and in replays: the speed and keys overlay, or nothing. */
+    hiddenKeeps: HiddenKeeps;
+    /** Jump stats (!ssj, ssj/): the chat line, which jumps it reports and its fields. The HUD element is layout.jumpStats. */
+    ssj: SsjPrefs;
+  };
+  /** Master volume (0..1). The per-bus levels and the rest of the sound options are in `audio`. */
+  volume: number;
+  audio: AudioPrefs;
+  /** Master switch for race ghosts (see `ghost` for sources and look). */
+  showGhost: boolean;
+  ghost: {
+    /** Sources raced at once (each per track): your PB, the server WR, a loaded replay / leaderboard run. */
+    pb: boolean;
+    wr: boolean;
+    custom: boolean;
+    opacity: number;
+    /** Fading path of the last few seconds. */
+    trail: boolean;
+    /** Fade a ghost out when the camera is inside / right next to it. */
+    nearFade: boolean;
+    /** Name / time / live delta tag above each ghost. */
+    tag: boolean;
+  };
+  /** Floating name tags over other players (rooms) and ghosts (player/tag.ts). */
+  tags: {
+    /** Off (default): a tag only shows while its player / ghost is in line of sight (CS:S style: no names through walls). */
+    throughWalls: boolean;
+    /** Name tags over other players in rooms (ghosts have their own: ghost.tag). */
+    players: boolean;
+  };
+  showZones: boolean;
+  showPlayerGlow: boolean;
+  /** A supporter's own glow on their first-person hands and knife (0.0.21; the glow panel's "In first person"). */
+  firstPersonGlow: boolean;
+  /** Trigger and clip overlays (!showtriggers, !showclips, the !triggers menu; triggers/). Drawn only, never part of a run. */
+  triggers: TriggerPrefs;
+  /**
+   * Player models (replays, third person, other players, ghosts, menu background). The bunny animates with the CS:S
+   * animations when the hosted CS:S content is available (procedurally until then); the CS:S models need that content
+   * and fall back to the bunny without it. The bunny's colourway is a cosmetic (player/cosmetics.ts).
+   */
+  models: {
+    player: PlayerModelChoice;
+    /** Ghosts: "same" as players, or their own choice. */
+    ghost: PlayerModelChoice | "same";
+    /** CS:S team and skin per team, for the "css" choice. */
+    team: CssTeam;
+    ct: CtSkin;
+    t: TSkin;
+  };
+  graphics: {
+    /**
+     * Render resolution as a fraction of the screen's (its pixel ratio capped at 2x, 1x in Potato mode): 0.25 to 2,
+     * above 1 supersamples.
+     */
+    resolutionScale: number;
+    /** MSAA on the game's canvas. From the next page load (a WebGL context can't change it). */
+    antialias: boolean;
+    /** The 3D view's aspect ratio while playing (`gameView`). */
+    aspect: AspectRatio;
+    aspectFit: AspectFit;
+    /** Upscale a lowered resolution with sharp pixels instead of smoothing (CSS image-rendering: pixelated). */
+    pixelated: boolean;
+    anisotropy: number;
+    /** Main-menu background: a live 3D map flythrough, a still frame of it, or a plain gradient. */
+    menuBackground: MenuBackground;
+    /**
+     * Go fullscreen when clicking into the game (play-lock.ts). In Chromium it also takes the keyboard (Keyboard Lock),
+     * so Ctrl+W can't close the tab mid-run and Esc pauses without leaving fullscreen.
+     */
+    fullscreen: boolean;
+    /**
+     * Potato graphics (potato.ts): flat colours instead of textures, plain water and sky, no 3D skybox or sprite
+     * trails, no HiDPI. Live.
+     */
+    potato: boolean;
+    /** Session-only camera light; always starts off on a fresh page/map. */
+    flashlight: boolean;
+    /**
+     * FPS limit while playing (frame-loop.ts; 0 = none). Applies with or without `uncapped`: below the display's refresh
+     * rate it skips frames. 1000 by default, as Aimperion: past ~1000 the loop redraws an unchanged view and the churn
+     * costs latency.
+     */
+    fpsLimit: number;
+    /** Exceed monitor FPS: an uncapped frame loop while playing instead of requestAnimationFrame (frame-loop.ts). */
+    uncapped: boolean;
+    /**
+     * Low-latency canvas: a desynchronized WebGL context, so frames past the refresh rate reach the screen (Chromium on
+     * Windows and ChromeOS). From the next page load (a context can't change it).
+     */
+    lowLatency: boolean;
+    /** FPS limit in menus and while paused (0 = the same as playing). */
+    menuFps: number;
+  };
+  /**
+   * First-person viewmodel (apps/web/src/viewmodel/): the bunny's gloved hands with the carrot blade, CS:S knife style.
+   * Cosmetic only (mouse swings never reach the simulation).
+   */
+  viewmodel: {
+    show: boolean;
+    /** CS:S `viewmodel_fov` (horizontal at 4:3, Hor+ like fov_desired; CS:S 54). */
+    fov: number;
+    /** Bob amount (cl_bob style walk bob, landing dip, breathing): 0 = off, 1 = CS:S. */
+    bob: number;
+    /** Sway amount (viewmodel lag on mouse movement, strafe tilt): 0 = off, 1 = CS:S. */
+    sway: number;
+    /** cl_righthand. */
+    hand: ViewmodelHand;
+    /**
+     * CS:GO viewmodel_offset_x / _y / _z, Source units in view space: x right, y forward, z up (0 = the CS:S pose).
+     * x mirrors with the hand (positive is always outward, away from the screen centre).
+     */
+    x: number;
+    y: number;
+    z: number;
+    /**
+     * Revision of the default framing these values were saved under (VIEWMODEL_REV): migrateViewmodel moves players
+     * who never changed it to the current default once (v0.0.6: lower and smaller), and leaves custom ones alone.
+     */
+    rev: number;
+  };
+  binds: Record<Action, string[]>;
+  /** Practice mode (practice-mode/): a checkpoint teleport keeps the speed you saved it with (bhoptimer does), or stops you. */
+  practice: { keepVelocity: boolean };
+  /** Restart keys (R / B / M) need a short hold (restart-hold.ts HOLD_MS) so a stray press can't end a run (restart-guard.ts). */
+  holdRestart: boolean;
+  /**
+   * How `binds` name mouse buttons: MOUSE_NAMES = Source's (Mouse2 right, Mouse3 middle; binds.ts mouseCode). Absent in
+   * prefs saved before 0.0.12, whose Mouse2 / Mouse3 were the DOM's middle / right (migrateMouseNames).
+   */
+  mouseNames: number;
+  /** One-time addition of the F4 bonus alias to untouched legacy defaults. */
+  bonusBindRevision: number;
+}
+
+export const ACTIONS: { id: Action; label: string }[] = [
+  { id: "forward", label: "Forward" },
+  { id: "back", label: "Back" },
+  { id: "left", label: "Strafe left" },
+  { id: "right", label: "Strafe right" },
+  { id: "jump", label: "Jump" },
+  { id: "duck", label: "Duck" },
+  { id: "use", label: "Use (doors, buttons)" },
+  { id: "restart", label: "Restart run" },
+  { id: "restartBonus", label: "Bonus (next bonus)" },
+  { id: "restartMain", label: "Main track" },
+  { id: "setStart", label: "Set start point" },
+  { id: "clearStart", label: "Clear start point" },
+  { id: "cycleStyle", label: "Switch style" },
+  { id: "mainMenu", label: "Main menu" },
+  { id: "hudEditor", label: "Edit HUD layout" },
+  { id: "thirdPerson", label: "Third person (practice)" },
+  { id: "attack", label: "Slash (carrot)" },
+  { id: "attack2", label: "Stab (carrot)" },
+  { id: "inspect", label: "Inspect carrot" },
+  { id: "viewmodel", label: "Show / hide viewmodel" },
+  { id: "flashlight", label: "Flashlight" },
+  { id: "keysOverlay", label: "Show / hide keys overlay" },
+  { id: "hideUi", label: "Hide UI" },
+  { id: "mute", label: "Mute sound" },
+  { id: "nextTrack", label: "Next music track" },
+  { id: "practice", label: "Practice mode" },
+  { id: "noclip", label: "Noclip" },
+  { id: "cpSave", label: "Save checkpoint" },
+  { id: "cpTeleport", label: "Teleport to checkpoint" },
+  { id: "cpPrev", label: "Previous checkpoint" },
+  { id: "cpNext", label: "Next checkpoint" },
+  { id: "turnLeft", label: "Turn left (+left)" },
+  { id: "turnRight", label: "Turn right (+right)" },
+  { id: "slot1", label: "Primary weapon" },
+  { id: "slot2", label: "Pistol" },
+  { id: "slot3", label: "Knife" },
+  { id: "lastWeapon", label: "Last weapon" },
+  { id: "nextWeapon", label: "Next weapon" },
+  { id: "prevWeapon", label: "Previous weapon" },
+  { id: "drop", label: "Drop weapon" },
+  { id: "reload", label: "Reload" },
+  { id: "giveUsp", label: "Get the USP (!usp)" },
+  { id: "giveGlock", label: "Get the Glock (!glock)" },
+  { id: "gunMenu", label: "Guns menu (!guns)" },
+];
+
+/** Default viewmodel framing (viewmodel/defaults.ts, a leaf module: no import cycle through the settings sections). */
+export { VIEWMODEL_POS, VIEWMODEL_REV };
+
+/** Prefs.mouseNames: mouse binds use Source's button names (binds.ts mouseCode; 0.0.12). */
+export const MOUSE_NAMES = 2;
+
+export const DEFAULT_PREFS: Prefs = {
+  sensitivity: 2,
+  verticalSensitivityEnabled: false,
+  verticalSensitivity: 2,
+  dpi: DEFAULT_MOUSE_DPI,
+  dpiConfirmed: false,
+  dpiHidden: false,
+  invertY: false,
+  rawInput: true,
+  spikeFilter: true,
+  inputStats: false,
+  fov: 90,
+  crosshair: { style: "cross", color: "#4dff6a", size: 6, thickness: 2, gap: 4, outline: true, alpha: 1 },
+  hud: { speedColors: true, gainTicks: true, edgeGlow: false, strafeTrainer: { color: "#ffffff", hints: false }, scale: 1, layout: CLASSIC, keys: DEFAULT_KEYS, hidden: false, hiddenKeeps: "speedKeys", ssj: DEFAULT_SSJ },
+  volume: 0.8,
+  audio: {
+    announcer: { enabled: false, finish: true, movement: true, local: true, server: true, volume: 0.8, pb: "perfect", wr: "godlike", speed: "godlike", highSpeed: "holyshit", streak: "perfect", speedThreshold: 1500, highSpeedThreshold: 2500, streakThreshold: 3 },
+    perfHud: true, perfectIndicator: true, perfectTick: false,
+    music: 0.5,
+    sfx: 0.8,
+    ui: 0.6,
+    ambience: 0.7,
+    muted: false,
+    mute: { music: false, sfx: false, ui: false, ambience: false },
+    musicMode: "always",
+    shuffle: true,
+    classic: false,
+    footsteps: true,
+    wind: true,
+    others: true,
+    ghosts: false,
+    muteInBackground: true,
+  },
+  showGhost: true,
+  ghost: { pb: true, wr: true, custom: true, opacity: 0.55, trail: true, nearFade: true, tag: true },
+  tags: { throughWalls: false, players: true },
+  showZones: true,
+  triggers: DEFAULT_TRIGGER_PREFS,
+  showPlayerGlow: true,
+  firstPersonGlow: true,
+  models: { player: "bunny", ghost: "same", team: "ct", ct: "ct_urban", t: "t_leet" },
+  graphics: { resolutionScale: 1, antialias: true, aspect: "native", aspectFit: "stretch", pixelated: false, anisotropy: 8, menuBackground: "live", fullscreen: true, potato: false, flashlight: false, fpsLimit: 1000, uncapped: false, lowLatency: false, menuFps: 0 },
+  viewmodel: { show: true, ...VIEWMODEL_POS, bob: 1, sway: 1, hand: "right", rev: VIEWMODEL_REV },
+  binds: DEFAULT_BINDS,
+  practice: { keepVelocity: true },
+  holdRestart: false,
+  mouseNames: MOUSE_NAMES,
+  bonusBindRevision: 1,
+};
+
+/** The key prefs are stored under (one JSON object, the shape of Prefs). */
+export const PREFS_KEY = "bunnyhop:settings";
+const KEY = PREFS_KEY;
+
+function merge<T>(base: T, over: unknown): T {
+  if (typeof base !== "object" || base === null || Array.isArray(base)) {
+    if (Array.isArray(base)) return (Array.isArray(over) && over.every((x) => typeof x === "string") ? over : base) as T;
+    return (typeof over === typeof base ? over : base) as T;
+  }
+  const out: Record<string, unknown> = {};
+  const o = (typeof over === "object" && over !== null ? over : {}) as Record<string, unknown>;
+  for (const k of Object.keys(base)) out[k] = merge((base as Record<string, unknown>)[k], o[k]);
+  return out as T;
+}
+
+const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
+
+function migrate(raw: Record<string, unknown>): Record<string, unknown> {
+  if (typeof raw.verticalSensitivity !== "number" || !Number.isFinite(raw.verticalSensitivity)) delete raw.verticalSensitivity;
+  else raw.verticalSensitivity = Math.max(0.01, Math.min(100, raw.verticalSensitivity));
+  migrateAntialias(raw);
+  migrateModels(raw);
+  migrateMouseNames(raw);
+  migrateBonusBind(raw);
+  migrateBinds(raw);
+  migrateViewmodel(raw);
+  return migrateHud(raw);
+}
+
+/**
+ * Viewmodel framing saved before v0.0.6 (no `rev`): if the player never changed it (FOV and offsets all at the old
+ * defaults, or absent) it moves to the new default (VIEWMODEL_POS); any change of theirs keeps all four as they are.
+ * Either way it's marked current, so choosing 54 / 0 / 0 / 0 again later sticks.
+ */
+function migrateViewmodel(raw: Record<string, unknown>): void {
+  const v = raw?.viewmodel as Record<string, unknown> | undefined;
+  if (!v || typeof v !== "object" || Array.isArray(v) || typeof v.rev === "number") return;
+  const old = VIEWMODEL_POS_V1 as Record<string, number>;
+  if (Object.keys(old).every((k) => v[k] === undefined || v[k] === old[k])) Object.assign(v, VIEWMODEL_POS);
+  v.rev = VIEWMODEL_REV;
+}
+
+/**
+ * Before 0.0.22 Potato mode also turned antialiasing off (there was no setting for it): a player who had Potato on keeps
+ * it off.
+ */
+function migrateAntialias(raw: Record<string, unknown>): void {
+  const g = raw?.graphics as Record<string, unknown> | undefined;
+  if (g && typeof g === "object" && g.potato === true && g.antialias === undefined) g.antialias = false;
+}
+
+/** Brings stored / imported prefs of any earlier shape up to the current one (in place; settings-io.ts imports). */
+export const migratePrefs = migrate;
+
+/**
+ * Binds saved before 0.0.12 named mouse buttons `Mouse${MouseEvent.button + 1}`: Mouse2 was the middle button, Mouse3
+ * right-click. A Mouse3 the player bound (right-click) becomes Mouse2 and a bound middle button Mouse3, so their binds
+ * stay on the same buttons. The one exception is the default stab / silencer bind (attack2 = Mouse2, which was meant to
+ * be right-click like in CS:S): it stays Mouse2, now right-click, unless the player gave right-click to something else.
+ */
+function migrateMouseNames(raw: Record<string, unknown>): void {
+  if (!raw || typeof raw !== "object" || raw.mouseNames === MOUSE_NAMES) return;
+  // No saved binds: the defaults (already Source's names) fill them in.
+  const b = raw.binds as Record<string, unknown> | undefined;
+  if (!b || typeof b !== "object") return;
+  const lists = Object.entries(b).filter((e): e is [string, string[]] => Array.isArray(e[1]));
+  const rightBound = lists.some(([, v]) => v.includes("Mouse3"));
+  for (const [a, v] of lists)
+    b[a] = v.map((c) => (c === "Mouse3" ? "Mouse2" : c === "Mouse2" ? (a === "attack2" && !rightBound ? "Mouse2" : "Mouse3") : c));
+  raw.mouseNames = MOUSE_NAMES;
+}
+
+/** Add F4 once only to the old default; customized binds and keys in use remain untouched. */
+function migrateBonusBind(raw: Record<string, unknown>): void {
+  if (raw.bonusBindRevision === 1) return;
+  const b = raw.binds as Record<string, unknown> | undefined;
+  // Without saved bindings, merge supplies both the new default and its revision.
+  if (!b || typeof b !== "object" || Array.isArray(b)) return;
+  const bonus = b.restartBonus;
+  const used = Object.values(b).some((v) => Array.isArray(v) && v.includes("F4"));
+  if (Array.isArray(bonus) && bonus.length === 1 && bonus[0] === "KeyB" && !used) b.restartBonus = ["KeyB", "F4"];
+  raw.bonusBindRevision = 1;
+}
+
+/** Bind actions that no longer exist (dropped from saved binds before new defaults are handed out). */
+const REMOVED_ACTIONS = ["zoneEditor"];
+
+/**
+ * Actions added after a player saved their binds (e.g. the viewmodel's slash / stab / inspect / toggle) get their
+ * default keys, minus any key the player already uses for something else (their binds keep priority).
+ */
+function migrateBinds(raw: Record<string, unknown>): void {
+  const b = raw?.binds as Record<string, unknown> | undefined;
+  if (!b || typeof b !== "object") return;
+  // Removed actions free their keys first (0.0.10: the zone editor's Z, now a dev tool, goes to practice noclip).
+  for (const a of REMOVED_ACTIONS) delete b[a];
+  const used = new Set<string>();
+  for (const v of Object.values(b)) if (Array.isArray(v)) for (const c of v) if (typeof c === "string") used.add(c);
+  for (const [a, codes] of Object.entries(DEFAULT_BINDS)) if (!(a in b)) b[a] = codes.filter((c) => !used.has(c));
+}
+
+/**
+ * Retired player / ghost overrides migrate to the bunny. Appearance now comes from each player's loadout.
+ * Keep the old team fields only for importing older preference files and the developer model viewer.
+ */
+function migrateModels(raw: Record<string, unknown>): void {
+  const m = raw?.models as Record<string, unknown> | undefined;
+  if (!m || typeof m !== "object") return;
+  if (m.player === "ct" || m.player === "t") m.team = m.player;
+  if (["ct", "t", "runner", "css"].includes(String(m.player))) m.player = "bunny";
+  if (["ct", "t", "runner", "css", "bunny"].includes(String(m.ghost))) m.ghost = "same";
+}
+
+/** Pre-layout prefs stored HUD visibility as hud.speed / hud.timer / ... booleans. */
+function migrateHud(raw: Record<string, unknown>): Record<string, unknown> {
+  const hud = raw?.hud as Record<string, unknown> | undefined;
+  if (!hud || typeof hud !== "object" || hud.layout) return raw;
+  const old: Record<string, string> = { speed: "speed", timer: "timer", split: "split", stats: "stats", keys: "keys", mapLine: "map", fps: "fps" };
+  const layout = clone(CLASSIC) as Record<string, { on: boolean }>;
+  for (const [k, id] of Object.entries(old)) if (typeof hud[k] === "boolean" && HUD_ELEMENTS.some((e) => e.id === id)) layout[id].on = hud[k] as boolean;
+  hud.layout = layout;
+  return raw;
+}
+
+function load(): Prefs {
+  try {
+    const raw = localStorage.getItem(KEY);
+    const p = raw ? merge(DEFAULT_PREFS, migrate(JSON.parse(raw))) : clone(DEFAULT_PREFS);
+    p.graphics.flashlight = false;
+    return p;
+  } catch {
+    return clone(DEFAULT_PREFS);
+  }
+}
+
+type Listener = (p: Prefs) => void;
+
+class PrefStore {
+  private p = load();
+  private listeners = new Set<Listener>();
+
+  get(): Prefs {
+    return this.defaults ?? this.p;
+  }
+
+  private defaults: Prefs | null = null;
+  /** What `read` returns with every pref at its default (a slider's default notch, without a table of defaults). */
+  atDefaults<T>(read: () => T): T {
+    const prev = this.defaults;
+    this.defaults = DEFAULT_PREFS;
+    try {
+      return read();
+    } catch {
+      return NaN as T;
+    } finally {
+      this.defaults = prev;
+    }
+  }
+
+  update(fn: (p: Prefs) => void): void {
+    fn(this.p);
+    try {
+      localStorage.setItem(KEY, JSON.stringify(this.p));
+    } catch {
+      /* private mode / quota: still applied for this session */
+    }
+    for (const l of this.listeners) l(this.p);
+  }
+
+  reset(section?: keyof Prefs): void {
+    this.update((p) => {
+      if (section) (p as unknown as Record<string, unknown>)[section] = clone(DEFAULT_PREFS[section]);
+      else Object.assign(p, clone(DEFAULT_PREFS));
+    });
+  }
+
+  /** Calls fn now and on every change. Returns an unsubscribe function. */
+  watch(fn: Listener): () => void {
+    this.listeners.add(fn);
+    fn(this.p);
+    return () => this.listeners.delete(fn);
+  }
+}
+
+export const prefs = new PrefStore();
+
+/** Human label for a bind code ("KeyW" -> "W", "MouseWheel" -> "Wheel"). */
+export function keyLabel(code: string): string {
+  const special: Record<string, string> = {
+    Space: "Space",
+    ControlLeft: "L-Ctrl",
+    ControlRight: "R-Ctrl",
+    ShiftLeft: "L-Shift",
+    ShiftRight: "R-Shift",
+    AltLeft: "L-Alt",
+    AltRight: "R-Alt",
+    MetaLeft: "L-Meta",
+    MetaRight: "R-Meta",
+    MouseWheel: "Wheel ↕",
+    MWheelUp: "Wheel ↑",
+    MWheelDown: "Wheel ↓",
+    Mouse1: "Mouse 1",
+    Mouse2: "Mouse 2",
+    Mouse3: "Mouse 3",
+    Mouse4: "Mouse 4",
+    Mouse5: "Mouse 5",
+    ArrowUp: "↑",
+    ArrowDown: "↓",
+    ArrowLeft: "←",
+    ArrowRight: "→",
+    Backquote: "`",
+    CapsLock: "Caps",
+    Tab: "Tab",
+  };
+  if (special[code]) return special[code];
+  if (code.startsWith("Key")) return code.slice(3);
+  if (code.startsWith("Digit")) return code.slice(5);
+  if (code.startsWith("Numpad")) return "Num " + code.slice(6);
+  return code;
+}
+
+/** The game's render pixel ratio: the screen's (capped at 2x, 1x in potato mode) times the resolution scale. */
+export function gamePixelRatio(g: Prefs["graphics"]): number {
+  return Math.min(devicePixelRatio, g.potato ? 1 : 2) * g.resolutionScale;
+}
+
+/** Graphics presets (Settings → Graphics → Quality): the settings that cost the most GPU time on slow machines. */
+export type GraphicsPreset = "lowest" | "low" | "medium" | "high";
+type PresetKeys = "potato" | "antialias" | "anisotropy" | "resolutionScale";
+export const GRAPHICS_PRESETS: Record<GraphicsPreset, Pick<Prefs["graphics"], PresetKeys>> = {
+  lowest: { potato: true, antialias: false, anisotropy: 1, resolutionScale: 0.5 },
+  low: { potato: true, antialias: false, anisotropy: 1, resolutionScale: 1 },
+  medium: { potato: false, antialias: false, anisotropy: 4, resolutionScale: 1 },
+  high: { potato: false, antialias: true, anisotropy: 8, resolutionScale: 1 },
+};
+export const PRESET_ORDER: GraphicsPreset[] = ["lowest", "low", "medium", "high"];
+
+/** The preset these graphics settings match, or null (custom). */
+export function graphicsPreset(g: Prefs["graphics"]): GraphicsPreset | null {
+  return PRESET_ORDER.find((k) => (Object.keys(GRAPHICS_PRESETS[k]) as PresetKeys[]).every((f) => g[f] === GRAPHICS_PRESETS[k][f])) ?? null;
+}
+
+export function applyGraphicsPreset(g: Prefs["graphics"], preset: GraphicsPreset): void {
+  Object.assign(g, GRAPHICS_PRESETS[preset]);
+}
+
+const ASPECTS: Record<Exclude<AspectRatio, "native">, number> = { "4:3": 4 / 3, "5:4": 5 / 4, "16:10": 16 / 10, "16:9": 16 / 9 };
+
+/**
+ * The game view on a `vw`×`vh` (CSS px) window: the canvas's CSS box (centred), its drawing buffer in device pixels and
+ * the camera's aspect ratio. Native: the whole window. A fixed aspect ratio stretched: the whole window, drawn at that
+ * ratio (the buffer is as tall as the window and as wide as the ratio makes it, so 4:3 on a 16:9 screen also draws a
+ * quarter fewer pixels) and stretched to fill it, like CS's 4:3 stretched. With black bars: the largest box of that
+ * ratio, centred.
+ */
+export function gameView(g: Prefs["graphics"], vw: number, vh: number): { cssW: number; cssH: number; bufW: number; bufH: number; aspect: number } {
+  const pr = gamePixelRatio(g);
+  const a = g.aspect === "native" ? 0 : ASPECTS[g.aspect] ?? 0;
+  if (!a || vw <= 0 || vh <= 0) return { cssW: vw, cssH: vh, bufW: Math.max(1, Math.round(vw * pr)), bufH: Math.max(1, Math.round(vh * pr)), aspect: vw / Math.max(1, vh) };
+  if (g.aspectFit === "stretch") return { cssW: vw, cssH: vh, bufW: Math.max(1, Math.round(vh * a * pr)), bufH: Math.max(1, Math.round(vh * pr)), aspect: a };
+  const cssW = Math.min(vw, vh * a);
+  const cssH = cssW / a;
+  return { cssW, cssH, bufW: Math.max(1, Math.round(cssW * pr)), bufH: Math.max(1, Math.round(cssH * pr)), aspect: a };
+}
+
+/** Vertical FOV (degrees) for a CS:S fov_desired (horizontal at 4:3). Source is Hor+. */
+export function verticalFov(fovDesired: number): number {
+  const half = (fovDesired * Math.PI) / 360;
+  return (2 * Math.atan(Math.tan(half) * 0.75) * 180) / Math.PI;
+}
+
+/** Horizontal FOV actually seen at a given aspect ratio. */
+export function horizontalFovAt(fovDesired: number, aspect: number): number {
+  const v = (verticalFov(fovDesired) * Math.PI) / 360;
+  return (2 * Math.atan(Math.tan(v) * aspect) * 180) / Math.PI;
+}

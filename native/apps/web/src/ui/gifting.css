@@ -1,0 +1,47 @@
+dialog.gift-dialog { width: min(30rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow-y: auto; }
+.gift-dialog .acct-head { align-items: flex-start; padding: 1.25rem 1.25rem .85rem; }
+.gift-heading { display: flex; flex-direction: column; gap: .55rem; }
+.gift-dialog h2 { display: flex; align-items: center; gap: .5rem; }
+.gift-balance { align-self: flex-start; color: var(--accent); font-size: var(--fs-sm); font-weight: 600; }
+.gift-dialog .acct-body { display: flex; flex-direction: column; gap: 1rem; padding: 0 1.25rem 1.25rem; }
+.gift-dialog p { margin: 0; }
+.gift-controls { display: flex; flex-direction: column; gap: .9rem; border: 0; margin: 0; padding: 0; min-width: 0; }
+.gift-scope { font-size: var(--fs-sm); line-height: 1.5; }
+.gift-quantity { display: flex; align-items: center; justify-content: space-between; gap: .6rem; font-size: var(--fs-sm); font-weight: 600; }
+.gift-review { padding: .85rem 1rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--raise); }
+.gift-summary { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.gift-summary > span { min-width: 0; overflow-wrap: anywhere; color: var(--dim); }
+.gift-summary strong { color: var(--text); }
+.gift-cost { white-space: nowrap; color: var(--accent); }
+.gift-review > strong + p, .gift-review > p + strong { display: block; margin-top: .5rem; }
+.gift-status { font-size: var(--fs-sm); line-height: 1.5; }
+.gift-status:empty { display: none; }
+.sp-gifts { display: flex; flex-direction: column; gap: .6rem; }
+.sp-gifts-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.sp-gifts-top .gift-credit-amount { font-size: var(--fs-xl); font-weight: 800; letter-spacing: -0.01em; }
+.sp-gifts .gift-wallet-note { margin: 0; font-size: var(--fs-sm); color: var(--dim); }
+.sp-gifts [hidden] { display: none; }
+.gift-dialog [hidden] { display: none !important; }
+
+.gift-credit-coin { display: inline-block; width: 1.3em; height: 1.3em; flex: 0 0 auto; vertical-align: -.25em; }
+.gift-credit-coin svg { display: block; width: 100%; height: 100%; }
+.gift-credit-amount, .gift-balance, .gift-cost { display: inline-flex; align-items: center; gap: .35em; }
+.gift-tier-track { width: 100%; display: flex; flex-direction: column; gap: .35rem; margin-bottom: .3rem; }
+.gift-tier-track[hidden] { display: none; }
+.gift-tier-progress { appearance: none; display: block; width: 100%; height: .35rem; border: 0; border-radius: 1rem; overflow: hidden; background: var(--raise-2, #ffffff18); color: var(--accent); }
+.gift-tier-progress::-webkit-progress-bar { background: var(--raise-2, #ffffff18); border-radius: 1rem; }
+.gift-tier-progress::-webkit-progress-value { background: var(--accent); border-radius: 1rem; }
+.gift-tier-progress::-moz-progress-bar { background: var(--accent); border-radius: 1rem; }
+.gift-tier-goal { color: var(--dim); font-size: var(--fs-xs); }
+
+/* Who gets it: a row of plain choices; how many: − n +. */
+.gift-modes { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.gift-mode { padding: 0.45rem 0.8rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: none; color: var(--dim); font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gift-mode:hover { color: var(--text); border-color: var(--line-2); }
+.gift-mode.on { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
+.gift-mode:focus-visible { outline: none; box-shadow: var(--ring); }
+.gift-stepper { display: inline-flex; align-items: center; gap: 0.3rem; }
+.gift-stepper .btn { width: 2.4rem; height: 2.4rem; padding: 0; font-size: 1.1rem; }
+.gift-dialog input.gift-count { width: 3.6rem; text-align: center; font-variant-numeric: tabular-nums; -moz-appearance: textfield; }
+.gift-dialog input.gift-count::-webkit-inner-spin-button, .gift-dialog input.gift-count::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.gift-modes.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }

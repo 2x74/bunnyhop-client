@@ -19,7 +19,13 @@
 
 A dedicated desktop home for [bunnyhop.lol](https://bunnyhop.lol). Keep your game in its own window, share your activity on Discord, and keep a local record of your runs.
 
-**This repository contains only the Electron client.** The game loads from the live website. Game source, maps, physics, server code, and the website integration worktree are maintained separately and are not included here. The client preserves the game's browser input and replay behavior; there is no native input sidecar.
+The existing Electron client loads the live website. A separate experimental
+[native client](native/apps/native/README.md) now lives in `native/`: C++/SDL3 owns
+gameplay, OpenGL rendering and relative mouse input, with the shared Rust physics
+core. Web technology is used only for menus, accounts and network services.
+The native project includes the client source needed to build it; server code,
+deployment configuration, credentials, downloaded maps and player data are not
+included.
 
 | Make it yours | Keep your best | Stay connected |
 | --- | --- | --- |
@@ -28,6 +34,26 @@ A dedicated desktop home for [bunnyhop.lol](https://bunnyhop.lol). Keep your gam
 > **Development preview** · No published releases yet. macOS ARM64 has been built and smoke-tested; Windows and Linux still need native validation. Game-aware features require the matching website hooks. GitHub Actions is disabled; builds and checks run locally.
 
 ## Run from source
+
+For the native client, see its [build and testing instructions](native/apps/native/README.md).
+It requires Bun, CMake/Ninja, a C++20 compiler, Rust, SDL3, libcurl/zlib and ffmpeg.
+Builds and unsigned packages can be prepared independently of Electron:
+
+```sh
+cd native
+bun install --frozen-lockfile
+bun run build
+bun run check
+bun run package
+```
+
+The native client remains a development preview. Windows execution, physical
+Linux input/performance checks and a human verified-score run remain release
+checks. No latency/FPS advantage is claimed from correctness tests. Packaging
+uses the same unsigned distribution policy as Electron; macOS is ad-hoc sealed,
+without requiring Developer ID or notarization.
+
+For Electron:
 
 Use Node.js 22 or newer and npm on macOS, Windows, or Linux:
 

@@ -1,0 +1,198 @@
+/* Paged boards: the rank board (ui/ranks.ts) and per-map leaderboards (ui/leaderboard.ts), both on ui/board-pager.ts.
+   Same language as the settings page: rows are raised strips 2 px apart (no rules, no boxes), sentence-case column
+   heads, tabular numerals, one accent for "you". Row height is fixed (--rb-row) because the pager sizes pages from it. */
+
+.rb { --rb-row: 2.3rem; container: rb / inline-size; display: flex; flex-direction: column; gap: var(--sp-3); height: 100%; min-height: 0; min-width: 0; }
+
+/* ---- toolbar: switches left, search + jump right */
+.rb-bar { display: flex; align-items: center; gap: var(--sp-2) var(--sp-3); flex-wrap: wrap; min-width: 0; }
+.rb-controls { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; min-width: 0; }
+.rb-controls .seg button { padding: 0.32rem 0.75rem; }
+.rb-only { font-size: var(--fs-sm); color: var(--dim); }
+.rb-tools { display: flex; align-items: center; gap: var(--sp-2); margin-left: auto; }
+.rb-search { position: relative; display: flex; align-items: center; width: clamp(10.5rem, 17vw, 15rem); }
+.rb-q { width: 100%; box-sizing: border-box; padding: 0.4rem 1.9rem 0.4rem 2.05rem; font-size: var(--fs-sm); border: 1px solid var(--line); border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.32); color: var(--text); transition: border-color var(--t-fast), box-shadow var(--t-fast); }
+.rb-q::placeholder { color: var(--faint); }
+.rb-q::-webkit-search-cancel-button { -webkit-appearance: none; display: none; }
+.rb-q:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255, 180, 58, 0.16); }
+.rb-q-icon { position: absolute; left: 0.68rem; display: flex; color: var(--faint); pointer-events: none; transition: color var(--t-fast); }
+.rb-search:focus-within .rb-q-icon { color: var(--accent); }
+.rb-q-kbd { position: absolute; right: 0.55rem; opacity: 0.7; pointer-events: none; }
+.rb-search:focus-within .rb-q-kbd { display: none; }
+.rb-sugg { position: absolute; top: calc(100% + 0.3rem); right: 0; z-index: 6; box-sizing: border-box; width: max(100%, 19rem); margin: 0; padding: 0.25rem; list-style: none; background: #1b1f28; border: 1px solid var(--line-2); border-radius: var(--radius-sm); box-shadow: 0 0.8rem 2rem rgba(0, 0, 0, 0.5); }
+.rb-sugg li { display: grid; grid-template-columns: 3.1rem minmax(0, 1fr) auto; align-items: center; gap: 0.5rem; padding: 0.4rem 0.55rem; border-radius: calc(var(--radius-sm) - 2px); font-size: var(--fs-sm); cursor: pointer; }
+.rb-sugg li.on, .rb-sugg li[role="option"]:hover { background: var(--raise-2); }
+.rb-s-rank { color: var(--faint); font-variant-numeric: tabular-nums; }
+.rb-s-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.rb-s-val { color: var(--dim); font-variant-numeric: tabular-nums; }
+.rb-sugg li.rb-s-none, .rb-sugg li.rb-s-more { display: block; color: var(--faint); font-size: var(--fs-xs); cursor: default; }
+.rb-jump { gap: 0.4rem; }
+.rb-jump-rank { color: var(--accent); font-variant-numeric: tabular-nums; }
+
+/* ---- meta line */
+.rb-meta { display: flex; align-items: baseline; gap: 0.35rem 0.9rem; flex-wrap: wrap; min-height: 1.35em; color: var(--dim); font-size: var(--fs-sm); }
+.rb-meta b { color: var(--text); font-weight: 650; }
+.rb-meta .link-btn { padding: 0; font-size: inherit; color: var(--dim); }
+.rb-meta .link-btn:hover { color: var(--text); }
+.rb-meta-end { margin-left: auto; color: var(--faint); }
+
+/* ---- the table */
+/* flex-basis 0: the frame takes the space it is given and never grows with its rows (pages are sized from it). */
+.rb-frame { flex: 1 1 0; min-height: 0; overflow: hidden; }
+.rb-frame.tight { overflow: hidden auto; }
+.rb-table { width: 100%; border-collapse: separate; border-spacing: 0 2px; margin-top: -2px; font-size: var(--fs-md); font-variant-numeric: tabular-nums; }
+.rb-table th { padding: 0 0.7rem 0.25rem; font-size: var(--fs-xs); font-weight: 600; color: var(--faint); text-align: left; white-space: nowrap; }
+.rb-table td { height: var(--rb-row); box-sizing: border-box; padding: 0 0.7rem; background: var(--raise); white-space: nowrap; transition: background var(--t-fast); }
+.rb-table tr > td:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.rb-table tr > td:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.rb-table tr.rb-row:hover td { background: var(--raise-2); }
+.rb-table .num { text-align: right; }
+.rb-table .dim { color: var(--dim); }
+.rb-table .faint { color: var(--faint); }
+.rb-table th.rb-rank, .rb-table td.rb-rank { width: 2.6rem; padding-right: 0.4rem; text-align: right; }
+td.rb-rank { color: var(--dim); font-weight: 700; }
+td.rb-player { width: 100%; max-width: 0; }
+/* One line: the avatar, the name (ellipsis when it alone is too long), then the quiet suffix only if it fits whole
+   (otherwise it wraps onto a second line that is clipped away, rather than showing a cut-off fragment). */
+.rb-pwrap { display: flex; flex-wrap: wrap; align-items: center; align-content: flex-start; column-gap: 0.55rem; row-gap: 1rem; min-width: 0; height: 1.5rem; overflow: hidden; }
+.rb-av { display: grid; place-items: center; flex: none; width: 1.45rem; height: 1.45rem; border-radius: 50%; object-fit: cover; background: hsl(var(--hue, 220) 22% 30%); color: hsl(var(--hue, 220) 60% 86%); font-size: 0.7rem; font-weight: 800; }
+/* (At most the room after the avatar: a name wider than that wrapped onto the clipped line and the row showed none.) */
+.rb-name { flex: 0 1 auto; min-width: 0; max-width: calc(100% - 2rem); padding: 0; border: 0; background: none; color: var(--text); font: inherit; font-weight: 620; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.rb-name:hover { text-decoration: underline; text-underline-offset: 0.2em; }
+.rb-pwrap:has(.country-flag) .rb-name { max-width: calc(100% - 4rem); }
+.rb-name:focus-visible { outline: none; border-radius: 2px; box-shadow: 0 0 0 2px var(--accent); }
+.rb-sub { flex: none; white-space: nowrap; color: var(--faint); font-size: var(--fs-xs); }
+.rb-strong { font-weight: 700; color: var(--text); }
+.rb-gap { color: var(--faint); font-size: var(--fs-sm); }
+.rb-wr { color: #ffd45e; font-size: var(--fs-xs); font-weight: 700; }
+.rb-group { display: inline-flex; align-items: center; gap: 0.45rem; color: var(--rank, var(--dim)); font-weight: 620; font-size: var(--fs-sm); }
+.rb-group::before { content: ""; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: currentColor; flex: none; }
+.rb-acts { width: 1%; text-align: right; }
+.rb-acts .link-btn { padding: 0.15em 0.45em; font-size: var(--fs-sm); color: var(--faint); }
+.rb-acts .link-btn:hover, .rb-row:hover .rb-acts .link-btn, .rb-row:focus-within .rb-acts .link-btn { color: var(--text); }
+
+/* top three: the rank numeral in gold / silver / bronze */
+tr.top1 td.rb-rank { color: var(--wr); }
+tr.top2 td.rb-rank { color: #d6dceb; }
+tr.top3 td.rb-rank { color: #e3a26c; }
+
+/* The rank board (ui/ranks.ts): every row carries its rank colour as a 3px edge (Legend and Grandmaster scan as a
+   stripe), the top three stand a third taller with big numerals (the board keeps a row of room for them: spare: 1),
+   points are the loud column, and below 1500 px Title, Records and Top 10 step aside. */
+.ranks .rb-table td:first-child { box-shadow: inset 3px 0 0 var(--rank, transparent); }
+.ranks .rb-table tr.me td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.ranks .rb-rows tr.top1 td, .ranks .rb-rows tr.top2 td, .ranks .rb-rows tr.top3 td { height: calc(var(--rb-row) * 1.35); }
+.ranks tr.top1 td.rb-rank, .ranks tr.top2 td.rb-rank, .ranks tr.top3 td.rb-rank { font-size: 1.6rem; font-weight: 850; line-height: 1; }
+.ranks tr.top1 .rb-name, .ranks tr.top2 .rb-name, .ranks tr.top3 .rb-name { font-size: var(--fs-lg); font-weight: 700; }
+.ranks td.rk-pts { font-size: var(--fs-lg); font-weight: 800; }
+@media (max-width: 1500px) { .ranks .rk-wide { display: none; } }
+
+/* pinned rows: the WR above every page, your row below */
+.rb-pins tr td { background: rgba(255, 212, 94, 0.06); }
+.rb-pins tr.rb-row:hover td { background: rgba(255, 212, 94, 0.1); }
+.rb-table tr.me td { background: rgba(255, 180, 58, 0.1); }
+.rb-table tr.me:hover td { background: rgba(255, 180, 58, 0.15); }
+.rb-table tr.me td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.rb-table tr.me .rb-name { color: var(--accent-hi); }
+.rb-you-row td { background: rgba(255, 180, 58, 0.1); }
+.rb-you tr.rb-you-row td { border-top: 0; }
+tr.rb-you-note td { background: none; color: var(--faint); font-size: var(--fs-sm); padding-left: 0.7rem; }
+tr.rb-you-note b { color: var(--dim); font-weight: 650; }
+tr.rb-you-note .link-btn { padding: 0; font-size: inherit; color: var(--accent); }
+@media (prefers-reduced-motion: no-preference) {
+  .rb-table tr.found td { animation: rb-found 1.6s var(--ease); }
+  .rb-rows.slide-l { animation: rb-slide-l 0.22s var(--ease); }
+  .rb-rows.slide-r { animation: rb-slide-r 0.22s var(--ease); }
+}
+.rb-table tr.found td { background: rgba(255, 180, 58, 0.16); }
+@keyframes rb-found { 0%, 30% { background: rgba(255, 180, 58, 0.34); } }
+@keyframes rb-slide-l { from { opacity: 0.4; transform: translateX(10px); } }
+@keyframes rb-slide-r { from { opacity: 0.4; transform: translateX(-10px); } }
+
+/* skeleton rows (same height as real rows, so nothing jumps when data lands) */
+tr.rb-skel td { background: var(--raise); }
+.rb-sk { display: block; height: 0.62rem; width: 70%; border-radius: 0.3rem; background: rgba(255, 255, 255, 0.07); }
+tr.rb-skel td:first-child .rb-sk { width: 1.4rem; margin-left: auto; }
+tr.rb-skel td:nth-child(2) .rb-sk { width: min(13rem, 60%); }
+tr.rb-skel:nth-child(3n) td:nth-child(2) .rb-sk { width: min(9rem, 45%); }
+tr.rb-skel:nth-child(3n + 1) td:nth-child(2) .rb-sk { width: min(11rem, 52%); }
+@media (prefers-reduced-motion: no-preference) {
+  .rb-sk { background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.11) 50%, rgba(255, 255, 255, 0.05) 100%) 0 0 / 300% 100%; animation: rb-shimmer 1.2s linear infinite; }
+}
+@keyframes rb-shimmer { from { background-position: 100% 0; } to { background-position: -200% 0; } }
+
+/* empty / error states: quiet text in the table's place, no box */
+tr.rb-state-row td { height: auto; background: none; }
+.rb-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.35rem; min-height: 9rem; text-align: center; color: var(--dim); white-space: normal; }
+.rb-state strong { color: var(--text); font-size: var(--fs-lg); }
+.rb-state.error strong { color: var(--loss); }
+
+/* ---- footer: range · pages · keys */
+.rb-foot { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: var(--sp-3); min-height: 2.1rem; }
+.rb-range { color: var(--dim); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rb-pager { display: flex; align-items: center; gap: 2px; }
+.rb-pg { display: inline-grid; place-items: center; min-width: 2.1rem; height: 2.1rem; padding: 0 0.45rem; box-sizing: border-box; border: 0; border-radius: var(--radius-sm); background: none; color: var(--dim); font-size: var(--fs-sm); font-weight: 650; font-variant-numeric: tabular-nums; cursor: pointer; transition: background var(--t-fast), color var(--t-fast); }
+.rb-pg:hover:not(:disabled) { background: var(--raise-2); color: var(--text); }
+.rb-pg.on { background: var(--ink-3); color: #fff; box-shadow: inset 0 -2px 0 var(--amber); }
+.rb-pg:disabled { opacity: 0.3; cursor: default; }
+.rb-pg:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
+.rb-pg.edge { min-width: 1.9rem; padding: 0; }
+.rb-chev { display: inline-flex; }
+.rb-chev .icon + .icon { margin-left: -0.55em; }
+.rb-chev.flip { transform: scaleX(-1); }
+.rb-ell { min-width: 1.4rem; text-align: center; color: var(--faint); }
+.rb-keys { justify-self: end; display: inline-flex; align-items: center; gap: 0.3rem; color: var(--faint); font-size: var(--fs-xs); white-space: nowrap; }
+.rb-keys .link-btn { padding: 0; font-size: var(--fs-sm); color: var(--cream-2); }
+.rb-keys .link-btn:hover { color: #fff; }
+
+/* ---- narrow boards (the pause panel on small windows): drop the least useful columns */
+.rb-frame { container: rbframe / inline-size; }
+@container rbframe (max-width: 46rem) {
+  .rb-table .rb-opt { display: none; }
+}
+@container rbframe (max-width: 36rem) {
+  .rb-table .rb-opt2 { display: none; }
+}
+/* Phones: rank, player and time only (the gap and Watch / Race need the room; playing needs a desktop anyway). */
+@container rbframe (max-width: 26rem) {
+  .rb-table .rb-opt3 { display: none; }
+}
+@container rb (max-width: 52rem) {
+  .rb-keys { display: none; }
+  .rb-foot { grid-template-columns: auto 1fr; }
+  .rb-pager { justify-self: end; }
+}
+
+/* ---- the rank board screen and the map board dialog fill a fixed-height panel, so pages fit the window */
+.panel-ranks { display: flex; flex-direction: column; height: calc(100vh - 7.5vh); }
+.panel-ranks .screen-head { margin-bottom: var(--sp-3); }
+.panel-ranks > .ranks { flex: 1; min-height: 0; }
+.pp-body > .leaderboard { height: 100%; }
+/* Narrow windows stack the pause menu (no fixed height): give the board one. */
+@media (max-width: 52rem) { .pp-body > .leaderboard { height: min(34rem, 72vh); } }
+
+dialog.acct-dialog.rb-dialog { width: min(66rem, 94vw); height: min(48rem, 90vh); max-height: none; overflow: hidden; }
+dialog.acct-dialog.rb-dialog[open] { display: flex; flex-direction: column; }
+.rb-dialog .acct-head h2 { display: flex; align-items: baseline; gap: 0.6rem; }
+.rb-dialog .acct-head h2 small { color: var(--dim); font-size: var(--fs-sm); font-weight: 500; }
+.rb-dialog-body { flex: 1; min-height: 0; padding: 0.3rem 1.2rem 1rem; }
+.rb-dialog-body > .leaderboard { height: 100%; }
+
+/* "How points work" (ranks) */
+.rk-how-body { display: flex; flex-direction: column; gap: 0.7rem; color: var(--dim); font-size: var(--fs-sm); line-height: 1.5; }
+.rk-how-body ul { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.rk-how-body b { color: var(--text); }
+.rk-how-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; }
+.rk-how-groups > div { display: flex; justify-content: space-between; gap: 0.6rem; padding: 0.42rem 0.7rem; background: var(--raise); }
+.rk-how-groups > div:first-child { border-top-left-radius: var(--radius-sm); }
+.rk-how-groups > div:nth-child(2) { border-top-right-radius: var(--radius-sm); }
+.rk-how-groups > div:nth-last-child(2) { border-bottom-left-radius: var(--radius-sm); }
+.rk-how-groups > div:last-child { border-bottom-right-radius: var(--radius-sm); }
+.rk-how-groups small { color: var(--faint); }
+
+/* map browser preview: the way into the map's full board (a cell of the stats grid) */
+/* No rows (empty board, error): the column heads would only float over nothing. */
+.rb-table.is-empty thead { visibility: hidden; }
+
+/* Perf is a scroll timing statistic; keep other style boards compact. */
+.leaderboard:not(.show-perf) .lb-perf { display: none; }
