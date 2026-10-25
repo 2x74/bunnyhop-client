@@ -1,0 +1,2 @@
+# The OST verifier compares this source manifest byte-for-byte with shared resources.
+/native/apps/native/assets/music/manifest.json text eol=lf
