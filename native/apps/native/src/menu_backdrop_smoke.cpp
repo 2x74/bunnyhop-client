@@ -39,6 +39,12 @@ int main(int argc, char **argv) {
         // A pending load gives way to a new request without blocking.
         backdrop.request("cancelled");
         if (!backdrop.request("smoke") || backdrop.request("smoke")) throw std::runtime_error("request de-duplication");
+        // A gameplay download interrupts the loading tour; when it fails, the same tour resumes once.
+        if (backdrop.resume()) throw std::runtime_error("resumed a tour nothing interrupted");
+        if (!backdrop.cancel_loading() || backdrop.status() != MenuBackdrop::Status::idle || !backdrop.map().empty())
+            throw std::runtime_error("gameplay download did not interrupt the tour");
+        if (!backdrop.resume() || backdrop.status() != MenuBackdrop::Status::loading || backdrop.map() != "smoke" || backdrop.resume())
+            throw std::runtime_error("interrupted tour did not resume exactly once");
         // Held back while a gameplay download would own the cache.
         for (int i = 0; i < 100; ++i) { backdrop.poll(false); std::this_thread::sleep_for(std::chrono::milliseconds(2)); }
         if (backdrop.status() != MenuBackdrop::Status::loading) throw std::runtime_error("backdrop built during a gameplay download");

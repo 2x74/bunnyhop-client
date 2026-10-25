@@ -1,0 +1,5 @@
+#pragma once
+// Exact official assets/icon-512.png bytes, checked by CMake before embedding.
+namespace native {
+inline constexpr unsigned char app_icon_png[] = {@BUNNYHOP_ICON_BYTES@};
+}

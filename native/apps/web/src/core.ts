@@ -213,6 +213,10 @@ export const PROP_TRANSFORM_KEY = 1 << 20;
  *   open (research/SYNTHETIC-DOOR-1025.md). Same version: DanZay's VScript objective gates, emulated natively on the maps in
  *   map_fixes.rs NONLINEAR_OBJECTIVES (crates/core/src/game/vscript.rs): bhop_cooksassistant's kitchen doors need its 4
  *   ingredients (research/COOKSASSISTANT-1025.md). Every other map is unchanged.
+ * - v17: v16 + RNGFix parity (jason-e/rngfix, the plugin ranked CS:S bhop servers run; research/RNGFIX-1025.md): landing
+ *   on or jumping into an uphill slope keeps the speed (RNGFix uphill), downhill boosts as RNGFix computes them, edge
+ *   bugs still let the player jump, landing on a thin trigger always touches it, and a teleport touched in the same tick
+ *   as a collision or landing keeps the speed (telehop). Slopes and ledges no longer depend on the sub-tick phase.
  */
 export const PHYSICS_V1 = 1;
 /** Weapon commands and the USP silencer (research/WEAPONS.md). */
@@ -235,8 +239,10 @@ export const PHYSICS_V14 = 14;
 export const PHYSICS_V15 = 15;
 /** Player outputs and filter tests on bhop_synthetic_fix, bhop_wonderland, bhop_lego3 (their item gates open); bhop_cooksassistant's VScript ingredient gates. */
 export const PHYSICS_V16 = 16;
+/** RNGFix parity: uphill / downhill inclines, edge bugs, trigger jumping and telehops as on RNGFix servers. */
+export const PHYSICS_V17 = 17;
 /** The physics version new runs are played and recorded with. */
-export const PHYSICS_VERSION = 16;
+export const PHYSICS_VERSION = 17;
 /** Versions this code knows (the wasm build must support them too, see Core.setSettings). */
 export const isPhysicsVersion = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= PHYSICS_V1 && (v as number) <= PHYSICS_VERSION;
 

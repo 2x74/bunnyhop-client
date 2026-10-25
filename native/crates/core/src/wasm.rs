@@ -573,7 +573,8 @@ pub extern "C" fn restart_point() -> usize {
 
 /// Optional movement rules as bit flags (all 0 = vanilla CS:S; see research/MOVEMENT_AUDIT.md):
 /// bit0 downhill landing fix, bit1 uphill landing fix, bit2 rampbug fix, bit3 telehop fix,
-/// bit4 DISABLE per-material surface properties. Resets the map.
+/// bit4 DISABLE per-material surface properties. Resets the map. Physics v17 runs RNGFix's versions of the downhill,
+/// uphill and telehop fixes itself (bit3 is ignored there; bit1's slide-stop variant stays available on top).
 #[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
 pub extern "C" fn set_movement_rules(flags: u32) {
     with(|c| {

@@ -41,10 +41,11 @@ const TICKET_NAME: Record<string, string> = {
   idea: "idea",
   other: "feedback",
   application: "moderator application",
+  report: "player report",
 };
 
 // Plain symbols, drawn in the text colour (no emoji; U+FE0E asks for the text form where a symbol has both).
-const GLYPH: Record<string, string> = { bug: "!", physics: "⤴", map: "⊞", tier: "⊞", multiplayer: "◎", idea: "✦", other: "✎\uFE0E", announcement: "✦", update: "✦", event: "⚑\uFE0E", maintenance: "⚙\uFE0E", support: "✉\uFE0E", system: "✉\uFE0E", warning: "!" };
+const GLYPH: Record<string, string> = { bug: "!", physics: "⤴", map: "⊞", tier: "⊞", report: "⚑\uFE0E", multiplayer: "◎", idea: "✦", other: "✎\uFE0E", announcement: "✦", update: "✦", event: "⚑\uFE0E", maintenance: "⚙\uFE0E", support: "✉\uFE0E", system: "✉\uFE0E", warning: "!" };
 
 const SENDER = { staff: "bunnyhop.lol staff", system: "bunnyhop.lol", you: "You" } as const;
 
@@ -98,8 +99,13 @@ function rowOf(t: InboxThread): Row {
   };
 }
 
-const statusChip = (status: string) => {
-  const [label, hint] = TICKET_STATUS[status] ?? [status, ""];
+/** A player report never says how it ended ("Fixed" would read as a verdict): closed is closed. */
+const REPORT_CLOSED: [string, string] = ["Closed", "Staff have looked at it."];
+const ticketStatus = (status: string, category?: string | null): [string, string] =>
+  category === "report" && (status === "resolved" || status === "wontfix") ? REPORT_CLOSED : (TICKET_STATUS[status] ?? [status, ""]);
+
+const statusChip = (status: string, category?: string | null) => {
+  const [label, hint] = ticketStatus(status, category);
   return h(`span.ib-status.is-${status}`, { title: hint }, label);
 };
 
@@ -184,7 +190,7 @@ export function showInbox(): void {
             "span.ib-side",
             null,
             h("span.ib-when", null, ago(r.at, now)),
-            r.thread.type === "ticket" ? statusChip(r.thread.status) : null,
+            r.thread.type === "ticket" ? statusChip(r.thread.status, r.thread.category) : null,
             r.unread.length ? h("span.ib-dot", { role: "img", "aria-label": "Unread" }) : null,
           ),
         ),
@@ -238,14 +244,14 @@ export function showInbox(): void {
     back.hidden = false;
     title.textContent = r.subject;
     if (t.type === "ticket") {
-      const [label] = TICKET_STATUS[t.status] ?? [t.status];
+      const [label, hint] = ticketStatus(t.status, t.category);
       letter.replaceChildren(
         h(
           "section.ib-quote",
           null,
-          h("div.ib-quote-head", null, h("b", null, "You wrote"), h("span.dim", null, ago(t.created_at, now)), statusChip(t.status)),
+          h("div.ib-quote-head", null, h("b", null, "You wrote"), h("span.dim", null, ago(t.created_at, now)), statusChip(t.status, t.category)),
           h("p.ib-body", null, t.message),
-          h("small.dim.ib-status-hint", null, `Status: ${label}. ${(TICKET_STATUS[t.status] ?? ["", ""])[1]}`),
+          h("small.dim.ib-status-hint", null, `Status: ${label}. ${hint}`),
         ),
         ...(t.replies.length
           ? t.replies.map((x) =>

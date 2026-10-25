@@ -8,9 +8,11 @@
 // - Profile links: any player may set a channel / handle per platform. Only the handle is stored; the URL is always
 //   built here from an allowlisted domain, so a link can never point anywhere else. Hidden unless the player turns
 //   "show on my profile" on (off by default).
-// - Staff: a small shield before the other marks. Developer (gold, the owner only: OWNER_ID), Admin (sky), Moderator
-//   (mint). The owner shows Developer alone, not Developer + Admin. Follows the role (apps/api/src/roles.ts), which
-//   staff can't hide: players should always know who can act on them. Public data is the badge only, never permissions.
+// - Staff: a small shield before the other marks. Owner (gold, a crown; the owner only: OWNER_ID), Admin (sky),
+//   Moderator (mint). The owner shows Owner alone, not Owner + Admin. Follows the role (apps/api/src/roles.ts), which
+//   staff can't hide (players should always know who can act on them), with one exception: a moderator who also holds
+//   Contributor may wear it in the shield's place (owner's call, 2026-10-25). Public data is the badge only, never
+//   permissions.
 // - Supporter: a small badge (SUPPORTER_BADGE) for players who supported bunnyhop.lol (an admin's grant; payments come later:
 //   users.supporter_since, apps/api/src/supporters.ts). Permanent; the player can hide it like the booster gem.
 // - Name colour and effect: supporters may pick one of NAME_COLORS for their name on boards, ranks, records, chat, the
@@ -18,7 +20,8 @@
 //   to a second colour, that gradient drifting, or a bright shine sweeping across the name). Off (plain white)
 //   unless picked. Like the badge, both only show while the player is a supporter (gated on write and on every read).
 // - Special badges (users.special_badges, 0.0.21): staff-granted for events (SPECIAL_BADGES). The first: Clipper, for
-//   taking part in the clip campaign, and a gold Creator mark per platform for its top creator.
+//   taking part in the clip campaign, and a gold Creator mark per platform for its top creator. Contributor (2026-10-25):
+//   worked on the game or the client; no permissions (the Discord role of the same name sits between Admin and Moderator).
 // Marks are server-authoritative: they come from the API / the room, never from the client.
 // Order after a name (unless the player picks their own, Edit card → Badges): staff, Verified, Creator, Server
 // Booster, Supporter, special badges.
@@ -95,10 +98,13 @@ export const nameEffectOf = (v: unknown): NameEffect | null => (v === "shimmer" 
 /** The CSS colour of a name colour id (null for none or anything unknown, so a stray value never reaches a style). */
 export const nameColorHex = (v: unknown): string | null => (isNameColor(v) ? NAME_COLORS.find((c) => c.id === v)!.hex : null);
 
-/** The staff badge a name carries: the owner's is Developer; admins and moderators show their role. */
+/**
+ * The staff badge a name carries: the owner's is Owner; admins and moderators show their role. The owner's id stays
+ * "developer" (it was labelled Developer until 2026-10-25; API payloads and older clients carry the id).
+ */
 export type StaffBadge = "developer" | "admin" | "moderator";
 export const STAFF_BADGES: readonly StaffBadge[] = ["developer", "admin", "moderator"];
-export const STAFF_LABEL: Record<StaffBadge, string> = { developer: "Developer", admin: "Admin", moderator: "Moderator" };
+export const STAFF_LABEL: Record<StaffBadge, string> = { developer: "Owner", admin: "Admin", moderator: "Moderator" };
 export const isStaffBadge = (v: unknown): v is StaffBadge => typeof v === "string" && (STAFF_BADGES as readonly string[]).includes(v);
 export function staffBadgeOf(role: StaffRole | null | undefined): StaffBadge | null {
   return role === "owner" ? "developer" : role === "admin" ? "admin" : role === "moderator" ? "moderator" : null;
@@ -258,23 +264,23 @@ export const badgeSvg = (layers: readonly BadgeLayer[]) =>
 export const SUPPORTER_SVG = badgeSvg(SUPPORTER_LAYERS);
 /**
  * Staff: a shield in the role's colour (the chat tags' gold / sky / mint) with dark ink, the Verified check's height.
- * Moderator: one chevron. Admin: two. Developer: a code bracket pair. Our own drawing. The canvas name tags draw the same
- * primitives (player/tag.ts).
+ * Moderator: one chevron. Admin: two. Owner: a crown (filled; until 2026-10-25 a code bracket pair). Our own drawing.
+ * The canvas name tags draw the same primitives (player/tag.ts).
  */
 export const STAFF_SHIELD = "M12 1.4 20.8 4.6v6.6c0 5.4-3.7 9.6-8.8 11.3-5.1-1.7-8.8-5.9-8.8-11.3V4.6z";
 export const STAFF_INK = "#0b0d12";
 export const STAFF_COLOR: Record<StaffBadge, string> = { developer: "#ffc23d", admin: "#79d2ff", moderator: "#7fe0b0" };
-/** Stroked paths drawn on the shield (round caps and joins). */
-export const STAFF_STROKES: Record<StaffBadge, { d: string; width: number }[]> = {
+/** Paths drawn on the shield in ink: stroked (round caps and joins), and also filled when `fill` is set. */
+export const STAFF_STROKES: Record<StaffBadge, { d: string; width: number; fill?: boolean }[]> = {
   moderator: [{ d: "M7.6 14 12 9.8l4.4 4.2", width: 2.6 }],
   admin: [{ d: "M7.6 11.2 12 7.2l4.4 4", width: 2.4 }, { d: "M7.6 16.2 12 12.2l4.4 4", width: 2.4 }],
-  developer: [{ d: "M9.2 7.9 5.9 11.8l3.3 3.9M14.8 7.9l3.3 3.9-3.3 3.9", width: 2.3 }, { d: "M13 7.6l-2 8.4", width: 1.9 }],
+  developer: [{ d: "M6.9 15.4 6.4 8.4l3 2.6L12 6.6l2.6 4.4 3-2.6-.5 7z", width: 1, fill: true }],
 };
 export const STAFF_SVG: Record<StaffBadge, string> = Object.fromEntries(
   STAFF_BADGES.map((b) => [
     b,
     `<path d="${STAFF_SHIELD}" fill="${STAFF_COLOR[b]}"/>` +
-      STAFF_STROKES[b].map((s) => `<path d="${s.d}" fill="none" stroke="${STAFF_INK}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round"/>`).join(""),
+      STAFF_STROKES[b].map((s) => `<path d="${s.d}" fill="${s.fill ? STAFF_INK : "none"}" stroke="${STAFF_INK}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round"/>`).join(""),
   ]),
 ) as Record<StaffBadge, string>;
 export const CREATOR_SVG: Record<CreatorKind, string> = {
@@ -329,9 +335,21 @@ export const GAUNTLET_CLASSIC_SVG =
   `${goldFill("gc-oct")}<path d="M8.1 1.4h7.8l5.7 5.7v7.8l-5.7 5.7H8.1l-5.7-5.7V7.1z" fill="url(#gc-oct)"/>` +
   `<path d="M8.7 3h6.6l4.7 4.7v6.6L15.3 19H8.7L4 14.3V7.7z" fill="none" stroke="${GOLD_INK}" stroke-width=".8" opacity=".5"/>${engraved("20", 15.6, 10.5, GOLD_INK)}`;
 
+/**
+ * Contributor: worked on the game or the client (staff-granted, no permissions). A wrench across a teal disc, the jaw
+ * open to the top right. Teal sits clear of the Moderator mint, the Admin sky and the Verified blue. A moderator who
+ * holds it may wear it in the shield's place (equippedNameBadges).
+ */
+export const CONTRIBUTOR_TEAL = "#3fd4c6";
+const CONTRIBUTOR_INK = "#0e1428";
+export const CONTRIBUTOR_SVG =
+  `<circle cx="12" cy="12" r="11" fill="${CONTRIBUTOR_TEAL}"/><path d="M6.9 17.1 12.6 11.4" stroke="${CONTRIBUTOR_INK}" stroke-width="4" stroke-linecap="round"/>` +
+  `<circle cx="14.9" cy="9.1" r="4.9" fill="${CONTRIBUTOR_INK}"/><path d="M14.9 9.1 17.3 3.4 20.6 6.7z" fill="${CONTRIBUTOR_TEAL}"/>`;
+
 /** earned: awarded by play (never staff-granted). quiet: worn only when the player picks it (a common mark). */
 export const SPECIAL_BADGES: Record<string, { name: string; svg: string; gold?: boolean; earned?: boolean; quiet?: boolean }> = {
   clipper: { name: "Clipper", svg: CLIPPER_SVG },
+  contributor: { name: "Contributor", svg: CONTRIBUTOR_SVG },
   gauntlet: { name: "Gauntlet clear", svg: GAUNTLET_SVG, earned: true, quiet: true },
   "weekly-winner": { name: "Weekly gauntlet winner", svg: WEEKLY_WINNER_SVG, earned: true },
   "gauntlet-classic": { name: "Bunny Hop Map Gauntlet", svg: GAUNTLET_CLASSIC_SVG, gold: true, earned: true },
@@ -500,5 +518,13 @@ export function equippedNameBadges(m: PlayerMarks): string[] {
   const picked = m.nameBadges?.filter(owned);
   const selected = picked && (picked.length || !m.nameBadges!.length) ? picked : legacy;
   const ids = [...new Set(selected.map((id) => (id === "gifter" || id.startsWith("gifter-") ? tier!.id : id)))];
+  // A moderator who picked Contributor wears it in the shield's place (wearsContributorForStaff).
+  if (wearsContributorForStaff(m)) return ["contributor", ...ids.filter((id) => id !== "staff" && id !== "contributor").slice(0, 2)];
   return [...(m.staff ? ["staff"] : []), ...ids.filter((id) => id !== "staff").slice(0, m.staff ? 2 : 3)];
 }
+/**
+ * Staff who may wear Contributor instead of their shield: moderators (Contributor ranks above them on Discord; admins
+ * and the owner always show theirs). They swap by picking Contributor among their name badges.
+ */
+export const mayWearContributorForStaff = (m: Pick<PlayerMarks, "staff" | "special">) => m.staff === "moderator" && !!m.special?.includes("contributor");
+export const wearsContributorForStaff = (m: PlayerMarks) => mayWearContributorForStaff(m) && !!m.nameBadges?.includes("contributor");

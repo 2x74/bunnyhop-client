@@ -57,7 +57,7 @@ export function adminLink(userId: string, cls = "staff-lens", label = "Open in a
 const WAITING_EVERY_MS = 3 * 60_000;
 
 /**
- * The dock's staff button: hidden for players. For staff, their own shield (Developer, Admin or Moderator) with the
+ * The dock's staff button: hidden for players. For staff, their own shield (Owner, Admin or Moderator) with the
  * count of what waits in the panel's Queue. refresh() re-reads the count (the dock calls it when a menu opens).
  */
 export function staffButton(): { el: HTMLButtonElement; refresh: () => void } {

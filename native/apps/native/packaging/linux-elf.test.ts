@@ -5,6 +5,8 @@ import {tmpdir} from "node:os";
 import {basename, join, resolve} from "node:path";
 import {bundleLinuxDependencies, linuxLoaderEnvironment, verifyLinuxPackage} from "./linux-elf";
 import {makeManifest} from "../package";
+import {CANONICAL_PHYSICS, CANONICAL_TIMER_RULES} from "../ensure-wasm";
+import {packageBranding} from "./branding";
 
 const linuxTest = test.skipIf(process.platform !== "linux");
 function run(args: string[], env = linuxLoaderEnvironment()) {
@@ -45,11 +47,12 @@ function fixture() {
 
 function releaseResources(stage: string, exe: string) {
   const resources = join(stage, "share/bunnyhop-native");
-  for (const name of ["menu.html", "native-assets/viewmodels.json", "native-assets/viewmodels.bin.z", "native-assets/audio.json", "native-assets/tutorial.json", "native-assets/hud.rgba", "licenses/SDL3.txt", "licenses/LDNOOBW-CC-BY-4.0.txt", "licenses/JetBrainsMono-OFL.txt", "licenses/LeagueGothic-OFL.txt", "licenses/LICENSE-playsrc", "licenses/LICENSE.source-sdk-2013", "licenses/thirdpartylegalnotices.txt", "licenses/NOTICE-playsrc.md", "licenses/SOURCE-SDK-NOTICES.md", "licenses/rust-dependencies.json"]) {
+  for (const name of ["menu.html", "native-assets/viewmodels.json", "native-assets/viewmodels.bin.z", "native-assets/audio.json", "native-assets/tutorial.json", "native-assets/hud.rgba", "licenses/SDL3.txt", "licenses/dr_libs.txt", "licenses/stb.txt", "licenses/LDNOOBW-CC-BY-4.0.txt", "licenses/JetBrainsMono-OFL.txt", "licenses/LeagueGothic-OFL.txt", "licenses/LICENSE-playsrc", "licenses/LICENSE.source-sdk-2013", "licenses/thirdpartylegalnotices.txt", "licenses/NOTICE-playsrc.md", "licenses/SOURCE-SDK-NOTICES.md", "licenses/rust-dependencies.json"]) {
     const path = join(resources, name); mkdirSync(resolve(path, ".."), {recursive: true}); writeFileSync(path, "local fixture");
   }
-  const wasm = Buffer.from("local fixture"), wasmHash = createHash("sha256").update(wasm).digest("hex");
-  const manifest = makeManifest(exe, resources, "linux", process.arch, wasm, {wasm: `bunnyhop-web/${wasmHash.slice(0, 12)}`});
+  packageBranding(resources, stage, "linux");
+  const wasm = readFileSync(resolve(import.meta.dir, "../../web/src/wasm/bunnyhop_core.wasm")), wasmHash = createHash("sha256").update(wasm).digest("hex");
+  const manifest = makeManifest(exe, resources, "linux", process.arch, wasm, {wasm: `bunnyhop-web/${wasmHash.slice(0, 12)}`, physics: CANONICAL_PHYSICS, rules: CANONICAL_TIMER_RULES});
   writeFileSync(join(resources, "native-manifest.json"), JSON.stringify(manifest));
   return manifest;
 }

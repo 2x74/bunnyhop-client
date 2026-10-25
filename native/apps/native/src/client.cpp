@@ -10,6 +10,7 @@
 #include "strafe_trainer.hpp"
 #include "audio.hpp"
 #include "client_util.hpp"
+#include "app_identity.hpp"
 #include "room_state.hpp"
 #include "room_modes.hpp"
 #include "tutorial.hpp"
@@ -19,6 +20,7 @@
 #endif
 #include "../packaging/executable_identity.hpp"
 #include "../packaging/assets_identity.hpp"
+#include "../packaging/release_identity.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
 #include <algorithm>
@@ -162,6 +164,7 @@ int run(const Options &opt) {
     native::Input input; input.set_sensitivity(opt.sensitivity);
     SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE,"0"); SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SPEED_SCALE,"1");
     SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_WARP_MOTION,"0");
+    SDL_SetAppMetadata(native::app_name,nullptr,native::app_id);
     if (!SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(std::string("SDL initialization failed: ")+SDL_GetError());
     struct SdlCleanup { ~SdlCleanup(){ SDL_Quit(); } } cleanup;
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION,3); SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION,3);
@@ -172,8 +175,9 @@ int run(const Options &opt) {
     SDL_WindowFlags flags=SDL_WINDOW_OPENGL|SDL_WINDOW_RESIZABLE|SDL_WINDOW_HIGH_PIXEL_DENSITY;
     if(opt.hidden) flags|=SDL_WINDOW_HIDDEN;
     using WindowPtr=std::unique_ptr<SDL_Window,decltype(&SDL_DestroyWindow)>;
-    WindowPtr window(SDL_CreateWindow("Bunnyhop Native",1280,720,flags),&SDL_DestroyWindow);
+    WindowPtr window(SDL_CreateWindow(native::app_name,1280,720,flags),&SDL_DestroyWindow);
     if(!window) throw std::runtime_error(std::string("Creating SDL window failed: ")+SDL_GetError());
+    if(!native::set_app_icon(window.get()))std::cerr<<"Could not set native app icon: "<<SDL_GetError()<<'\n';
     SDL_GLContext context=SDL_GL_CreateContext(window.get());
     if(!context) throw std::runtime_error(std::string("Creating OpenGL 3.3 core context failed: ")+SDL_GetError());
     struct ContextCleanup { SDL_GLContext ctx; ~ContextCleanup(){SDL_GL_DestroyContext(ctx);} } context_cleanup{context};
@@ -269,9 +273,8 @@ int run(const Options &opt) {
         try {
             const auto manifest=nlohmann::json::parse(read_text(manifest_path));
             const auto executable=executable_path();
-            if(manifest.value("binarySha256",std::string())==file_hash(executable,manifest.value("binaryHashMode",std::string("sha256"))) &&
-               manifest.value("menuSha256",std::string())==file_hash(menu_path)&&(!manifest.contains("assetsSha256")||manifest.at("assetsSha256")==native::assets_identity_hash(assets))) identity=manifest;
-            else std::cerr<<"Native release manifest is stale; replays remain local. Rebuild with bun apps/native/build.ts\n";
+            native::verify_release_identity(manifest,file_hash(executable,native::release_hash_mode()),file_hash(menu_path),native::assets_identity_hash(assets));
+            identity=manifest;
         } catch(const std::exception &e) {std::cerr<<"Native release manifest: "<<e.what()<<"; replays remain local\n";}
     }
     // Jump stats (!ssj). Display only — it reads the same pre-state, command and
@@ -542,6 +545,9 @@ int run(const Options &opt) {
         while(SDL_PollEvent(&event)) {
             switch(event.type) {
                 case SDL_EVENT_QUIT: running=false; break;
+                case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+                    if(event.window.windowID==SDL_GetWindowID(window.get()))running=false;
+                    break;
                 case SDL_EVENT_WINDOW_FOCUS_LOST: focused=false; show_menu(true); break;
                 case SDL_EVENT_WINDOW_FOCUS_GAINED: focused=true;if(resume_wanted&&(!menu||!menu->visible())) capture(true);break;
                 case SDL_EVENT_KEY_DOWN:
@@ -673,7 +679,11 @@ int run(const Options &opt) {
         }
         if(download.valid() && download.wait_for(std::chrono::seconds(0))==std::future_status::ready) {
             try {auto result=download.get();load_map(result.bsp.string(),result.content_root.string(),result.id,result.detail);}
-            catch(const std::exception &e) {error=e.what();std::cerr<<error<<'\n';if(!menu||opt.frames)throw;}
+            catch(const std::exception &e) {
+                error=e.what();std::cerr<<error<<'\n';if(!menu||opt.frames)throw;
+                // Back on the home screen: restart the tour this download interrupted.
+                if(backdrop&&!core&&backdrop->resume()){backdrop_shown.clear();backdrop_failed.clear();backdrop_cut=false;backdrop_source.clear();}
+            }
             {std::lock_guard lock(progress_mutex);loading.clear();}
             if(tutorial&&!tutorial_stopped&&error.empty()&&pending_replay.empty()){const auto lesson=pending_tutorial.empty()?"jump":pending_tutorial;try{start_tutorial(lesson,pending_tutorial_demo);}catch(const std::exception &e){error=e.what();}pending_tutorial.clear();pending_tutorial_demo=false;}
             if(!pending_replay.empty()&&error.empty()) {auto path=pending_replay,action=pending_action;pending_replay.clear();try{open_replay(path,action);}catch(const std::exception &e){error=e.what();}}
@@ -985,7 +995,7 @@ int run(const Options &opt) {
         if(!opt.menu_smoke.empty() && now-started>std::chrono::seconds(90)) throw std::runtime_error("Native menu smoke timed out (ready="+std::to_string(menu_ready)+", backdrop="+(backdrop?backdrop->state(backdrop_source).dump():std::string("none"))+", shown="+backdrop_shown+", requested="+std::to_string(smoke_requested)+", snapshot="+std::to_string(smoke_snapshot)+"): "+error);
         const double elapsed=std::chrono::duration<double>(now-title_time).count();
         if(elapsed>=.5) {
-            display_fps=title_frames/elapsed;char title[320]; std::snprintf(title,sizeof(title),"Bunnyhop native | %s | %.0f FPS | %.1f u/s | %.2fs | %s | Esc menu | R restart",map_id.c_str(),title_frames/elapsed,std::hypot(curr.velocity[0],curr.velocity[1]),run_state.seconds,captured?"SDL raw input":"paused");
+            display_fps=title_frames/elapsed;char title[320]; std::snprintf(title,sizeof(title),"%s | %s | %.0f FPS | %.1f u/s | %.2fs | %s | Esc menu | R restart",native::app_name,map_id.c_str(),title_frames/elapsed,std::hypot(curr.velocity[0],curr.velocity[1]),run_state.seconds,captured?"SDL raw input":"paused");
             SDL_SetWindowTitle(window.get(),title); title_time=now; title_frames=0;
         }
         if(opt.frames&&renderer&&(curr.tick>=opt.frames||(playback&&playback_paused&&curr.tick>=playback_info.value("totalTicks",0u)))) running=false;
@@ -1026,7 +1036,7 @@ int main(int argc,char **argv) {
         return run(opt);
     } catch(const std::exception &error) {
         std::cerr << "Bunnyhop native: " << error.what() << '\n';
-        if(interactive_errors) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"Bunnyhop native",error.what(),nullptr);
+        if(interactive_errors) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,native::app_name,error.what(),nullptr);
         return 1;
     }
 }

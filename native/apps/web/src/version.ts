@@ -45,7 +45,7 @@
    two words, and VERSION stays below 0.1.0 while STAGE is alpha.
    ============================================================ */
 
-export const VERSION = "0.0.26";
+export const VERSION = "0.0.27";
 
 /** Release stage, printed after the number ("v0.0.4 alpha"). */
 export const STAGE = "alpha";
@@ -67,8 +67,8 @@ export interface ChangelogEntry {
 
 /** Notes for the next release, unpublished until promoted into CHANGELOG. */
 export const UPCOMING: ChangelogEntry = {
-  version: "0.0.27",
-  date: "2026-10-24",
+  version: "0.0.28",
+  date: "2026-10-25",
   kind: "minor",
   title: "Next update",
   notes: [],
@@ -76,6 +76,24 @@ export const UPCOMING: ChangelogEntry = {
 
 /** Newest first. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+  version: "0.0.27",
+  date: "2026-10-25",
+  kind: "minor",
+  title: "RNGFix slopes, practice like CS:S and HUD scale",
+  notes: [
+    "Slopes work like on RNGFix servers. Jumping into an uphill slope used to lose your speed at random, depending on where in the tick you met it. Now you always land and launch off it, on bhop_null_fix, bhop_letour, bhop_lego2 and every other map. Downhill boosts also count a booster or conveyor pushing you. Thanks to GothQueen for the side-by-side video.",
+    "Also from RNGFix: landing on the very edge of a block always lets you jump, thin boosters and teleports always trigger when you land on them, and a teleport on the same tick you hit a wall or land keeps your speed. Older replays keep their original physics.",
+    "Checkpoints and noclip now work in any solo run, like on CS:S servers. Type !cp for the checkpoint menu. A teleport or noclip turns the run into practice: the timer turns yellow and keeps going, and a restart gives you a real run again.",
+    "During a timed run, the teleport and noclip keys only work while the !cp menu is open, so a stray key can't cost you a run. Saving a checkpoint always works and never affects the run. !save saves one from chat.",
+    "A small yellow Practice shows under the crosshair whenever your run won't count. Turn it off in Settings → HUD → Show on screen, or move it with Edit layout (F2).",
+    "HUD scale in Settings → HUD now goes from 50% to 175%, and the whole HUD grows together instead of piling up in the middle. The F2 layout editor has the same slider.",
+    "Report a player from their profile (⋯ → Report), from the replay viewer, or with !report in chat. Pick Cheating or Chat or name and add a note if you want. Your Inbox says Closed once staff have looked at it.",
+    "Post a bunnyhop.lol replay link in #general, #clips or #supporters on Discord and the bot replies with a video of the run. Runs up to a minute render on their own. For runs up to 5 minutes, the bot offers an Export video button to whoever posted the link.",
+    "New Contributor badge, a teal wrench, for players who help build the game. The owner's badge is now a crown.",
+    "Sharing a bunnyhop.lol link shows a new preview picture.",
+  ],
+  },
   {
   version: "0.0.26",
   date: "2026-10-24",

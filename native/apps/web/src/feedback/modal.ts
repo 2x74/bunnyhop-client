@@ -10,6 +10,10 @@ import { SIGN_IN_HELP } from "../ui/account-copy";
 // "Attach screenshot" grabs the game canvas right after the game rendered a frame (no preserveDrawingBuffer needed),
 // downscaled to <= 1280 px wide and encoded as a JPEG of at most ~300 KB.
 //
+// "Report a player" (category "report", apps/api src/player-reports.ts): opened on a player (a profile's ⋯, the replay
+// viewer with their run, !report in a room) or from the list, where it asks for their name. Two words to pick why
+// (Cheating, Chat or name); what they write is optional. Needs a session like the application (a guest's is fine).
+//
 // "Moderator application" is a category with its own questions instead of the message box (Discord username, filled in
 // from a linked Discord account; timezone and play hours; why; experience), each optional. It sends no game info or
 // screenshot; the server writes the message from the answers, ties it to the account and takes one a week. Guests can
@@ -21,7 +25,7 @@ import { modal } from "../ui/account-panel";
 import { h } from "../ui/dom";
 import { prefs } from "../ui/settings";
 import { currentRoom } from "../net/presence";
-import { gameInfo, lastSubmittedRun, recentErrors, type FeedbackCategory, type FeedbackOpen } from "./state";
+import { gameInfo, lastSubmittedRun, recentErrors, type FeedbackCategory, type FeedbackOpen, type ReportTarget } from "./state";
 import "./feedback.css";
 import { backdropFrame } from "../ui/backdrop";
 import { landIn, mascot } from "../notify";
@@ -35,12 +39,14 @@ import { mapArt } from "../ui/thumbs";
 import { styleLabel } from "../styles";
 import { tierLabel, tierName, TIERS } from "../tiers";
 import { mapTier } from "../ui/maps";
+import { formatTime } from "../timer";
 
 const PLACEHOLDER: Record<FeedbackCategory, string> = {
   bug: "What happened, and what did you expect? Steps to make it happen again help a lot.",
   physics: "What felt off? e.g. lost speed landing on a ramp, a jump that works in CS:S but not here.",
   map: "Which part of the map? e.g. the end zone can't be reached, a missing texture, a stuck spot.",
   tier: "Why? Optional. e.g. one stage is much harder than the rest.",
+  report: "Anything staff should look at? Optional. e.g. the jumps after 0:40.",
   multiplayer: "What went wrong in the server? e.g. lag, chat, a player, map votes.",
   idea: "What would make bunnyhop.lol better for you?",
   other: "Tell us anything.",
@@ -60,6 +66,12 @@ const APPLY_LEAD = "Moderators keep the servers and chat friendly. Every questio
 export const MESSAGE_MIN = 10;
 export const MESSAGE_MAX = 2000;
 export const CONTACT_MAX = 120;
+/** apps/api src/player-reports.ts REPORT_NOTE_MAX. */
+const REPORT_NOTE_MAX = 500;
+const REASONS: { id: "cheating" | "chat"; title: string; hint: string; placeholder: string }[] = [
+  { id: "cheating", title: "Cheating", hint: "Scripts, macros, TAS", placeholder: PLACEHOLDER.report },
+  { id: "chat", title: "Chat or name", hint: "Abuse in chat, or an offensive name", placeholder: "What did they say? Optional." },
+];
 const SHOT_MAX_BYTES = 300 * 1024;
 const SHOT_MAX_WIDTH = 1280;
 
@@ -204,6 +216,7 @@ const KINDS: { id: Exclude<FeedbackCategory, "application">; title: string; head
   { id: "map", title: "A map problem", head: "Map problem", mood: "thinking" },
   { id: "tier", title: "Wrong map tier", head: "Map tier", mood: "thinking" },
   { id: "multiplayer", title: "Multiplayer", head: "Multiplayer", mood: "cheer" },
+  { id: "report", title: "Report a player", head: "Report a player", mood: "surprised" },
   { id: "idea", title: "An idea", head: "Share an idea", mood: "proud" },
   { id: "other", title: "Something else", head: "Send feedback", mood: "idle" },
 ];
@@ -238,14 +251,15 @@ function whereWords(g: Record<string, unknown>): string | null {
 export function showFeedback(o: FeedbackOpen = {}): void {
   if (current) {
     // Already open: switch it to the asked-for kind (e.g. "apply" while writing a bug report).
-    if (o.category) (current as HTMLDialogElement & { pick?: (c: FeedbackCategory) => void }).pick?.(o.category);
+    if (o.category) (current as HTMLDialogElement & { pick?: (c: FeedbackCategory, r?: ReportTarget) => void }).pick?.(o.category, o.report);
     return;
   }
   const fps = fpsSampler();
   let shotUrl: string | null = null;
   const d = modal("acct-dialog fb-dialog", "Send feedback", () => {
     current = null;
-    if (!sent && (text.value.trim() || contact.value.trim()) && category !== "application") draft = { category, text: text.value, contact: contact.value };
+    // (A report is about one player: it isn't kept for next time.)
+    if (!sent && (text.value.trim() || contact.value.trim()) && category !== "application" && category !== "report") draft = { category, text: text.value, contact: contact.value };
     fps.stop();
     if (shotUrl) URL.revokeObjectURL(shotUrl);
     o.onClose?.();
@@ -302,7 +316,8 @@ export function showFeedback(o: FeedbackOpen = {}): void {
   const count = h("small.fb-count", { "aria-live": "polite" });
   const updateCount = () => {
     const n = [...text.value.trim()].length;
-    count.textContent = n > 0 && n < MESSAGE_MIN && category !== "tier" ? `${MESSAGE_MIN - n} more character${MESSAGE_MIN - n === 1 ? "" : "s"}` : n > MESSAGE_MAX - 200 ? `${MESSAGE_MAX - [...text.value].length} left` : "";
+    const max = category === "report" ? REPORT_NOTE_MAX : MESSAGE_MAX;
+    count.textContent = n > 0 && n < MESSAGE_MIN && category !== "tier" && category !== "report" ? `${MESSAGE_MIN - n} more character${MESSAGE_MIN - n === 1 ? "" : "s"}` : n > max - 200 ? `${max - [...text.value].length} left` : "";
   };
   text.addEventListener("input", () => {
     updateCount();
@@ -338,6 +353,25 @@ export function showFeedback(o: FeedbackOpen = {}): void {
         if (lost) tierButtons.find((b) => !b.disabled)?.focus();
       });
   };
+
+  // "Report a player": who (a name box when the form wasn't opened on someone), then why, as two words like the tiers.
+  let target: ReportTarget | null = o.report ?? null;
+  let reason: (typeof REASONS)[number]["id"] | null = null;
+  const whoLine = h("p.fb-ask.fb-who");
+  const whoInput = h("input.fb-input", { id: "fb-who", type: "text", maxlength: 32, autocomplete: "off", spellcheck: "false", placeholder: "Their name", "aria-label": "The player's name" }) as HTMLInputElement;
+  whoInput.addEventListener("input", () => (err.textContent = ""));
+  const reasonButtons = REASONS.map((r) =>
+    h("button.fb-tier.fb-reason", { type: "button", role: "radio", title: r.hint, onclick: () => ((reason = r.id), paintReport(), (err.textContent = "")) }, r.title),
+  );
+  const reasonRow = h("div.fb-tiers", { role: "radiogroup", "aria-label": "Why" }, ...reasonButtons);
+  const paintReport = () => {
+    if (!target) whoLine.textContent = "Who are you reporting?";
+    else whoLine.replaceChildren(h("b", null, target.name), target.run ? `, their run on ${target.run.map}${target.run.time !== null ? ` in ${formatTime(target.run.time)}` : ""}` : "");
+    whoInput.hidden = !!target;
+    reasonButtons.forEach((b, i) => b.setAttribute("aria-checked", String(REASONS[i]!.id === reason)));
+    if (category === "report") text.placeholder = REASONS.find((r) => r.id === reason)?.placeholder ?? PLACEHOLDER.report;
+  };
+  const reportPage = h("div.fb-tier-pick.fb-report", { hidden: true }, whoLine, whoInput, reasonRow);
 
   // What goes with it, in words, with one switch.
   let include = true;
@@ -411,7 +445,7 @@ export function showFeedback(o: FeedbackOpen = {}): void {
     h("button.fb-inline.dim", { type: "button", onclick: (e: Event) => ((contactRow.hidden = false), (e.currentTarget as HTMLElement).remove(), contact.focus()) }, "Somewhere else?"),
   );
 
-  const writePage = h("div.fb-page.fb-write", { hidden: true }, tierPage, h("div.fb-field", null, text, count), h("div.fb-with", null, ctxCard, ctxNote, raw, shotTile), reply, contactRow);
+  const writePage = h("div.fb-page.fb-write", { hidden: true }, tierPage, reportPage, h("div.fb-field", null, text, count), h("div.fb-with", null, ctxCard, ctxNote, raw, shotTile), reply, contactRow);
 
   // ---- the moderator application (its own page)
   const answers = Object.fromEntries(
@@ -470,21 +504,28 @@ export function showFeedback(o: FeedbackOpen = {}): void {
     title.textContent = next === "pick" ? "Send feedback" : next === "apply" ? "Apply to moderate" : (k?.head ?? "Send feedback");
     send.textContent = next === "apply" ? "Send application" : "Send";
     if (next === "pick") (kinds.querySelector<HTMLElement>(`[data-kind="${category}"]`) ?? kinds.querySelector<HTMLElement>("button"))?.focus();
-    if (next === "write") (category === "tier" ? (tierRow.querySelector<HTMLElement>("button:not(:disabled)") ?? text) : text).focus();
+    if (next === "write") (category === "tier" ? (tierRow.querySelector<HTMLElement>("button:not(:disabled)") ?? text) : category === "report" ? (target ? reasonButtons[0]! : whoInput) : text).focus();
     if (next === "apply") (prepareApply(), answers.discord.focus());
   }
-  function pick(id: FeedbackCategory): void {
+  function pick(id: FeedbackCategory, about?: ReportTarget): void {
     if (id === "tier" && !onMap) id = "map";
     category = id;
     if (id === "application") return show("apply");
+    if (about) target = about;
     text.placeholder = PLACEHOLDER[id];
-    text.required = id !== "tier";
+    text.required = id !== "tier" && id !== "report";
+    text.maxLength = id === "report" ? REPORT_NOTE_MAX : MESSAGE_MAX;
     tierPage.hidden = id !== "tier";
+    reportPage.hidden = id !== "report";
+    // A report is about someone else: the reporter's own game info doesn't help (a screenshot of chat still can).
+    ctxCard.hidden = ctxNote.hidden = id === "report";
+    if (id === "report") raw.hidden = true;
     if (id === "tier") loadTier();
+    if (id === "report") paintReport();
     updateCount();
     show("write");
   }
-  (d as HTMLDialogElement & { pick?: (c: FeedbackCategory) => void }).pick = pick;
+  (d as HTMLDialogElement & { pick?: (c: FeedbackCategory, r?: ReportTarget) => void }).pick = pick;
 
   let busy = false;
   const form = h(
@@ -506,7 +547,17 @@ export function showFeedback(o: FeedbackOpen = {}): void {
           (tierRow.querySelector<HTMLElement>("button:not(:disabled)"))?.focus();
           return;
         }
-        if (!applying && category !== "tier" && [...message.trim()].length < MESSAGE_MIN) {
+        if (!applying && category === "report" && !target && !whoInput.value.trim()) {
+          err.textContent = "Who are you reporting? Their full name.";
+          whoInput.focus();
+          return;
+        }
+        if (!applying && category === "report" && !reason) {
+          err.textContent = "Pick why you're reporting them.";
+          reasonButtons[0]!.focus();
+          return;
+        }
+        if (!applying && category !== "tier" && category !== "report" && [...message.trim()].length < MESSAGE_MIN) {
           err.textContent = "Tell us a bit more so we can act on it.";
           text.focus();
           if (!calm()) text.animate([{ transform: "none" }, { transform: "translateX(-5px)" }, { transform: "translateX(4px)" }, { transform: "translateX(-2px)" }, { transform: "none" }], { duration: 300, easing: "ease-out" });
@@ -526,11 +577,17 @@ export function showFeedback(o: FeedbackOpen = {}): void {
             return;
           }
           const tier = category === "tier" && onMap && tierPick ? { tier: { map: onMap, current: tierNow ?? null, suggested: tierPick } } : {};
-          const body: FeedbackBody = { category, message, ...tier, ...(contact.value.trim() ? { contact: contact.value.trim() } : {}), ...(include ? { context: gameContext(fps.read()) } : {}) };
+          let report: Pick<FeedbackBody, "report"> = {};
+          if (category === "report" && reason) {
+            // Tied to a session, like an application (a guest's is fine).
+            await me();
+            report = { report: { reason, ...(target?.id ? { player: target.id } : target ? {} : { name: whoInput.value.trim() }), ...(target?.run ? { runId: target.run.id } : {}) } };
+          }
+          const body: FeedbackBody = { category, message, ...tier, ...report, ...(contact.value.trim() ? { contact: contact.value.trim() } : {}), ...(include && category !== "report" ? { context: gameContext(fps.read()) } : {}) };
           const r = await api.sendFeedback(body, shotBlob);
           sent = true;
           draft = null;
-          thanks(r.id, !!contact.value.trim());
+          thanks(r.id, !!contact.value.trim(), false, category === "report");
         } catch (x) {
           err.textContent =
             x instanceof ApiError ? x.message : x instanceof ApiUnavailable ? "Couldn't reach the server. Check your connection and try again." : "Something went wrong. Please try again.";
@@ -549,7 +606,7 @@ export function showFeedback(o: FeedbackOpen = {}): void {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) (e.preventDefault(), form.requestSubmit());
   });
 
-  const thanks = (id: string, withContact: boolean, application = false) => {
+  const thanks = (id: string, withContact: boolean, application = false, report = false) => {
     back.hidden = true;
     title.textContent = application ? "Application sent" : "Sent";
     const close = h("button.btn.primary", { type: "button", onclick: () => d.close() }, "Close");
@@ -562,7 +619,9 @@ export function showFeedback(o: FeedbackOpen = {}): void {
         bun.el,
         ...(application
           ? [h("h3", null, "Thanks for applying"), h("p.dim", null, "We'll look at your account and reply in your Inbox.")]
-          : [h("h3", null, "Thanks, we got it"), h("p.dim", null, withContact ? "We'll reply in your Inbox, or at the contact you gave." : "We'll reply in your Inbox.")]),
+          : report
+            ? [h("h3", null, "Thanks, we got it"), h("p.dim", null, "Staff will take a look.")]
+            : [h("h3", null, "Thanks, we got it"), h("p.dim", null, withContact ? "We'll reply in your Inbox, or at the contact you gave." : "We'll reply in your Inbox.")]),
         h("p.fb-ref", null, "Reference ", h("code", null, id)),
         h("div.fb-actions", null, application ? discordLink("btn.discord") : null, close),
       ),
@@ -583,7 +642,7 @@ export function showFeedback(o: FeedbackOpen = {}): void {
     draft = null;
     pick(restore.category);
     updateCount();
-  } else if (o.category) pick(o.category);
+  } else if (o.category) pick(o.category, o.report);
   else {
     show("pick");
     // The list eases in a row at a time and the bunny lands and waves (feedback.css .fb-kinds.enter).

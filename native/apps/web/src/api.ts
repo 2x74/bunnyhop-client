@@ -44,6 +44,8 @@ export interface StatBoardPage { total: number; offset: number; entries: StatBoa
 
 export interface NameBadgeSettings {
   staff?: import("./creators").StaffBadge | null;
+  /** A moderator holding Contributor: picking it wears it in the shield's place. */
+  contributorForStaff?: boolean;
   nameBadges: string[];
   owned: string[];
   giftsSent: number;
@@ -1403,11 +1405,14 @@ export interface InboxView {
 }
 
 export interface FeedbackBody {
-  category: "bug" | "physics" | "map" | "tier" | "multiplayer" | "idea" | "other" | "application";
+  category: "bug" | "physics" | "map" | "tier" | "multiplayer" | "idea" | "other" | "application" | "report";
   /** Ignored for applications: the server writes it from `application`. Optional (may be "") for "tier". */
   message: string;
   /** category "tier": the map and the tier the player thinks it should be (the server writes the "Tier:" line). */
   tier?: { map: string; current: number | null; suggested: number };
+  /** category "report" (apps/api src/player-reports.ts): who (id, else full name, else the run's player) and why. The
+   * message is optional; the server writes the "Reported:" line. */
+  report?: { player?: string; name?: string; runId?: string; reason: "cheating" | "chat" };
   /** category "application": the moderator application's answers, each optional (the API needs a few words in all). */
   application?: { discord?: string; hours?: string; why?: string; experience?: string };
   contact?: string;

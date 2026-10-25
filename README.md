@@ -1,4 +1,4 @@
-# Bunnyhop Native
+# bunnyhop.lol - Native
 
 A native desktop fork of [bunnyhop.lol](https://bunnyhop.lol), maintained in
 [2x74/bunnyhop-client](https://github.com/2x74/bunnyhop-client).
@@ -10,8 +10,8 @@ automation alone does not establish interactive gameplay or physical input
 validation. Check each release's notes for the artifacts and checks that actually
 completed.
 
-Current source targets physics **16**, timer rules **2**, and canonical verifier
-`bunnyhop-web/e0480bade42b`. See [current compatibility and qualification](docs/current-compatibility.md).
+Current source targets production v0.0.27, physics **17**, timer rules **2**, and canonical verifier
+`bunnyhop-web/35dac92ea33c`. See [current compatibility and qualification](docs/current-compatibility.md).
 Published archives have their own source/build identity and admission status.
 
 ## Native gameplay, shared game rules
@@ -37,7 +37,7 @@ parity work.
 
 Download the archive for your platform from
 [Releases](https://github.com/2x74/bunnyhop-client/releases), verify its SHA-256
-against the accompanying package report, extract it, and launch Bunnyhop.
+against the accompanying package report, extract it, and launch **bunnyhop.lol - Native**.
 macOS packages are ad-hoc signed, without Developer ID or notarization. Windows
 packages are unsigned. Expect the platform's usual first-launch warnings; these
 packages do not provide a signed automatic update channel. See
@@ -83,7 +83,7 @@ apps/native/build/bunnyhop-native --online-map bhop_eazy
 apps/native/build/bunnyhop-native --map /path/to/map.bsp --no-menu
 
 # Create an unsigned/ad-hoc package on the target OS.
-bun run package --version 0.3.4-dev.20261025.3
+bun run package --version 0.3.4-dev.20261025.6
 ```
 
 ## Preview limits
@@ -94,7 +94,8 @@ real desktop; headless checks cannot establish them. Windows runtime and
 interactive validation must be reported separately from compilation. Correctness
 tests establish no FPS or latency advantage.
 
-Website parity remains incomplete: full profile-card editing,
+The v0.0.27 practice/checkpoint controller, native HUD scaling and player-report
+entry points are not yet implemented. Website parity also remains incomplete: full profile-card editing,
 supporter/gauntlet flows, complete third-person animation blending, animated
 accessories, complete audio mixing and in-app updates remain follow-up work.
 Ghost/trail cosmetic choices can sync to the account, but those effects are not

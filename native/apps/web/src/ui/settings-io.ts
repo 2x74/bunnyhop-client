@@ -22,6 +22,7 @@ import { DEFAULT_PREFS, migratePrefs, type Prefs } from "./settings";
 import { PAINT_COLORS } from "../paint/prefs";
 import { TRIGGER_OPACITY, TRIGGER_STYLES, TRIGGER_THICKNESS } from "../triggers/volumes";
 import { COLOR_BLIND_MODES } from "../palette";
+import { HUD_SCALE } from "../hud/layout";
 
 /** What this document is; checked on import so pasting the wrong thing fails with a sentence. */
 export const FORMAT = "bunnyhop.lol/settings";
@@ -166,7 +167,7 @@ const RULES: [string, Rule][] = [
   ["crosshair.thickness", { range: [1, 6] }],
   ["crosshair.gap", { range: [0, 16] }],
   ["crosshair.alpha", { range: [0.2, 1] }],
-  ["hud.scale", { range: [0.7, 1.6] }],
+  ["hud.scale", { range: [HUD_SCALE.min, HUD_SCALE.max] }],
   ["hud.layout.*.a", { range: [0, 8], int: true }],
   ["hud.layout.*.x", { range: [-1, 1] }],
   ["hud.layout.*.y", { range: [-1, 1] }],

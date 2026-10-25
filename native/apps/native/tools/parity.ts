@@ -3,7 +3,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { Core, DEFAULT_SETTINGS, EVENT_TELEPORTED, applyRestartPoint, type PlayerState, type Settings } from "../../web/src/core";
+import { Core, DEFAULT_SETTINGS, EVENT_TELEPORTED, applyRestartPoint, isPhysicsVersion, type PlayerState, type Settings } from "../../web/src/core";
 
 const root = resolve(import.meta.dir, "../../..");
 const { values } = parseArgs({
@@ -12,10 +12,15 @@ const { values } = parseArgs({
     map: { type: "string", multiple: true }, runner: { type: "string" },
     wasm: { type: "string" }, ticks: { type: "string", default: "2000" },
     replay: { type: "string" }, report: { type: "string" }, help: { type: "boolean" },
+    physics: { type: "string" }, "contrast-physics": { type: "string" }, scratch: { type: "string" },
   },
 });
 if (values.help) {
-  console.log("bun apps/native/tools/parity.ts --map PATH.bsp [--map PATH.bsp ...] [--ticks 2000] [--replay FILE.bhr] [--report FILE.json]");
+  console.log("bun apps/native/tools/parity.ts --map PATH.bsp [--map PATH.bsp ...] [--ticks 2000] [--replay FILE.bhr] [--report FILE.json]\n" +
+    "  [--physics N]            simulate with physics N instead of the replay's/default version (same inputs)\n" +
+    "  [--contrast-physics N]   replay only: also step the WASM at physics N on the identical command/velocity stream\n" +
+    "                           and report where it diverges, showing the compared window exercises version-specific code\n" +
+    "  [--scratch DIR]          fixture output directory (default target/native-parity)");
   process.exit(0);
 }
 const maps = values.map?.map(resolveMap => resolve(resolveMap)) ?? [];
@@ -28,7 +33,16 @@ const wasmPath = resolve(values.wasm ?? join(root, "apps/web/src/wasm/bunnyhop_c
 if (!existsSync(runner)) throw new Error(`Build the C++ runner first: ${runner}`);
 const wasm = readFileSync(wasmPath);
 const wasmSha256 = new Bun.CryptoHasher("sha256").update(wasm).digest("hex");
-const scratch = join(root, "target/native-parity");
+const scratch = resolve(values.scratch ?? join(root, "target/native-parity"));
+const parsePhysics = (name: string, v: string | undefined): number | undefined => {
+  if (v === undefined) return undefined;
+  const n = Number(v);
+  if (!isPhysicsVersion(n)) throw new Error(`--${name} must be a physics version this code knows`);
+  return n;
+};
+const physicsOverride = parsePhysics("physics", values.physics);
+const contrastPhysics = parsePhysics("contrast-physics", values["contrast-physics"]);
+if (contrastPhysics !== undefined && !values.replay) throw new Error("--contrast-physics requires --replay.");
 mkdirSync(scratch, { recursive: true });
 const float = new Float32Array(1);
 const word = new Uint32Array(float.buffer);
@@ -79,6 +93,7 @@ for (const map of maps) {
   const lines: string[] = ["# native-parity-v1"];
   let settings = { ...DEFAULT_SETTINGS };
   let replayMeta: unknown = undefined;
+  let contrastMeta: unknown = undefined;
   const capture = (events = 0) => { lines.push("state"); expected.push(row(core.state(), events)); };
   function command(forward: number, side: number, yaw: number, pitch: number, buttons: number): number {
     const f = [forward, side, yaw, pitch].map(Math.fround);
@@ -90,12 +105,22 @@ for (const map of maps) {
     // This deliberately does NOT certify a native implementation of timer/style rules.
     const { decodeReplay, replayStyle, replayTimerRules, replayPhysics } = await import("../../web/src/replay");
     const { StyleFilter, styleDef } = await import("../../web/src/styles");
-    const { makeTimer, beforeStep, afterStep, replayCommand } = await import("../../web/src/sim");
+    const { makeTimer, beforeStep, afterStep, replayCommand, setVelocity } = await import("../../web/src/sim");
     const replay = await decodeReplay(readFileSync(values.replay));
     const mapSha = new Bun.CryptoHasher("sha256").update(bsp).digest("hex");
     if (replay.header.mapSha256 !== mapSha) throw new Error("Replay BSP hash does not match --map.");
-    settings = { ...replay.header.settings, physics: replayPhysics(replay.header) };
+    settings = { ...replay.header.settings, physics: physicsOverride ?? replayPhysics(replay.header) };
     core.setSettings(settings); core.reset();
+    // WASM-only lockstep core: same restart, commands and velocity writes, another physics version.
+    const contrast = contrastPhysics === undefined ? null : await Core.create(wasm);
+    const contrastRows: Row[] = [];
+    if (contrast) {
+      for (const [path, data] of physics) contrast.contentAddFile(path, data);
+      contrast.loadMap(bsp);
+      contrast.setSettings({ ...settings, physics: contrastPhysics! }); contrast.reset();
+      if (replay.header.spawn) applyRestartPoint(contrast, replay.header.spawn);
+      contrastRows.push(row(contrast.state(), EVENT_TELEPORTED));
+    }
     lines.push(settingsLine(settings), "reset");
     if (replay.header.spawn) {
       const p = replay.header.spawn;
@@ -117,16 +142,32 @@ for (const map of maps) {
       const cmd = filter.apply(replayCommand(replay, i), pre);
       beforeStep(core, timer, cmd);
       const afterBefore = core.state();
-      if (pre.velocity.some((v, j) => !Object.is(v, afterBefore.velocity[j])))
+      if (pre.velocity.some((v, j) => !Object.is(v, afterBefore.velocity[j]))) {
         lines.push(`velocity ${afterBefore.velocity.map(decimal).join(" ")}`);
+        if (contrast) setVelocity(contrast, afterBefore.velocity.map(Math.fround));
+      }
       const events = command(cmd.forward, cmd.side, cmd.yaw, cmd.pitch, cmd.buttons);
+      const contrastEvents = contrast?.step(...[cmd.forward, cmd.side, cmd.yaw, cmd.pitch].map(Math.fround) as [number, number, number, number], cmd.buttons >>> 0);
       const result = afterStep(core, timer, cmd, events);
-      if (result.update.clampVelocity) lines.push(`velocity ${result.state.velocity.map(decimal).join(" ")}`);
+      if (result.update.clampVelocity) {
+        lines.push(`velocity ${result.state.velocity.map(decimal).join(" ")}`);
+        if (contrast) setVelocity(contrast, result.state.velocity.map(Math.fround));
+      }
       capture(events);
+      if (contrast) contrastRows.push(row(contrast.state(), contrastEvents!));
+    }
+    if (contrast) {
+      const same = (a: Row, b: Row) => a.tick === b.tick && a.bits.every((x, j) => x === b.bits[j]) && a.flags.every((x, j) => x === b.flags[j]);
+      const first = expected.findIndex((e, i) => !same(e, contrastRows[i]));
+      contrastMeta = { physics: contrastPhysics, statesCompared: contrastRows.length,
+        firstDivergentState: first < 0 ? null : first, firstDivergentTick: first < 0 ? null : expected[first].tick,
+        divergentStates: expected.filter((e, i) => !same(e, contrastRows[i])).length,
+        scope: "WASM-only, identical command and velocity stream; no divergence means the window does not exercise the difference" };
     }
     replayMeta = { file: resolve(values.replay), ticksCompared: count, totalTicks: replay.header.totalTicks,
       scope: "shared JS timer/style transforms; differential native/WASM simulation only" };
   } else {
+    if (physicsOverride !== undefined) settings.physics = physicsOverride;
     core.setSettings(settings); core.reset();
     lines.push(settingsLine(settings), "reset"); capture(EVENT_TELEPORTED);
     let yaw = core.state().teleportAngles[1];
@@ -174,7 +215,7 @@ for (const map of maps) {
   const report = { map, mapSha256: new Bun.CryptoHasher("sha256").update(bsp).digest("hex"),
     wasmSha256, platform: `${globalThis.process.platform}/${processArch()}`, settings,
     comparedStates: expected.length, mismatchRows, pass: mismatchRows === 0,
-    cachedPhysicsFiles: physics.length, missingPhysics, replay: replayMeta, mismatches, commandFixture: fixture };
+    cachedPhysicsFiles: physics.length, missingPhysics, replay: replayMeta, contrast: contrastMeta, mismatches, commandFixture: fixture };
   reports.push(report);
   console.log(JSON.stringify(report, null, 2));
   failed ||= mismatchRows !== 0;

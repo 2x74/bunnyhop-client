@@ -74,7 +74,8 @@ function selectMap(id: string): void {
   roomService.leave();
   try { localStorage.setItem(LAST_MAP, id); } catch { /* private storage: no Continue */ }
   if (id === state.map) send({ type: "resume" });
-  else { notice(`Loading ${id}…`); send({ type: "selectMap", id,style:state.style,track:0 }); }
+  // The host owns loading/error status and clears it when the download settles.
+  else send({ type: "selectMap", id,style:state.style,track:0 });
 }
 function show(next: Screen): void { if(screen==="ranks"&&next!=="ranks")leaveRanksUrl();screen = next; notice(""); render(); }
 /** A bunnyhop.lol page the native client has no screen for (Gauntlets, Support): opened in the browser. */

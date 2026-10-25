@@ -17,12 +17,16 @@ use bunnyhop_core::game::{
     PHYSICS_FIX_DAMAGE_ACTIVATOR, PHYSICS_FIX_FUNC_LOD, PHYSICS_FIX_GLOCK_BURST, PHYSICS_FIX_LADDER, PHYSICS_FIX_WATER_JUMP,
     PHYSICS_FIX_TEMPLATE_NAMES, PHYSICS_FIX_USP_SILENCER, PHYSICS_FIX_WEAPON_COMMANDS, PHYSICS_FIX_WEAPON_RESTORE, PHYSICS_FIX_WEAPONS,
     PHYSICS_LATEST, PHYSICS_V1, PHYSICS_V2, PHYSICS_V3, PHYSICS_V4, PHYSICS_V5, PHYSICS_V6, PHYSICS_V7, PHYSICS_V8, PHYSICS_V9,
-    PHYSICS_V10, PHYSICS_V11, PHYSICS_V12, PHYSICS_V13, PHYSICS_V14, PHYSICS_V15, PHYSICS_V16, PHYSICS_FIX_MAP_PLAYER_IO, PHYSICS_FIX_DOWNHILL, PHYSICS_FIX_MAP_MAX_VELOCITY, PHYSICS_FIX_TRAIN_SPAWN, PHYSICS_FIX_MAP_DOOR_TRAVEL, PHYSICS_FIX_DOOR_START_OPEN, PHYSICS_FIX_CROUCH_GROUND, physics_fixes,
+    PHYSICS_V10, PHYSICS_V11, PHYSICS_V12, PHYSICS_V13, PHYSICS_V14, PHYSICS_V15, PHYSICS_V16, PHYSICS_V17, PHYSICS_FIX_MAP_PLAYER_IO, PHYSICS_FIX_INCLINE, PHYSICS_FIX_EDGE, PHYSICS_FIX_TRIGGER_JUMP, PHYSICS_FIX_TELEHOP, PHYSICS_FIX_DOWNHILL, PHYSICS_FIX_MAP_MAX_VELOCITY, PHYSICS_FIX_TRAIN_SPAWN, PHYSICS_FIX_MAP_DOOR_TRAVEL, PHYSICS_FIX_DOOR_START_OPEN, PHYSICS_FIX_CROUCH_GROUND, physics_fixes,
 };
+use bunnyhop_core::game::{EVENT_MAP_TELEPORT, EVENT_TELEPORTED, IN_JUMP};
+use bunnyhop_core::physics::ConvexBrush;
 use bunnyhop_core::{Cmd, Game, Settings};
 use playsrc_collision::Hull;
 use playsrc_movement::{self as movement, Command, Error, Player, State, StepInput, Trace, Tracer};
 use std::path::PathBuf;
+
+mod common;
 
 const CONTENTS_SOLID: u32 = 0x1;
 const CONTENTS_PLAYERCLIP: u32 = 0x10000;
@@ -34,7 +38,7 @@ fn v(version: u32) -> Settings {
 #[test]
 fn versions_and_fix_bits() {
     assert_eq!(Settings::css_bhop().physics_version, PHYSICS_V1, "native default stays v1");
-    assert_eq!(PHYSICS_LATEST, PHYSICS_V16);
+    assert_eq!(PHYSICS_LATEST, PHYSICS_V17);
     assert_eq!(physics_fixes(PHYSICS_V1), Some(0));
     assert_eq!(physics_fixes(PHYSICS_V2), Some(PHYSICS_FIX_PLAYERCLIP | PHYSICS_FIX_UNDUCK_JUMP));
     assert_eq!(
@@ -70,11 +74,21 @@ fn versions_and_fix_bits() {
     assert_eq!(physics_fixes(PHYSICS_V14), Some(v14));
     let v15 = v14 | PHYSICS_FIX_MAP_DOOR_TRAVEL;
     assert_eq!(physics_fixes(PHYSICS_V15), Some(v15));
-    assert_eq!(physics_fixes(PHYSICS_V16), Some(v15 | PHYSICS_FIX_MAP_PLAYER_IO));
+    let v16 = v15 | PHYSICS_FIX_MAP_PLAYER_IO;
+    assert_eq!(physics_fixes(PHYSICS_V16), Some(v16));
+    let rngfix = PHYSICS_FIX_INCLINE | PHYSICS_FIX_EDGE | PHYSICS_FIX_TRIGGER_JUMP | PHYSICS_FIX_TELEHOP;
+    assert_eq!(physics_fixes(PHYSICS_V17), Some(v16 | rngfix));
     for version in PHYSICS_V1..=PHYSICS_V12 {
         assert!(!v(version).configuration().fixes.downhill);
     }
     assert!(v(PHYSICS_V13).configuration().fixes.downhill);
+    for version in PHYSICS_V1..=PHYSICS_V16 {
+        let fixes = v(version).configuration().fixes;
+        assert!(!fixes.rngfix_incline && !fixes.rngfix_edge && !fixes.uphill, "v{version} keeps the old slopes");
+    }
+    let v17 = v(PHYSICS_V17).configuration().fixes;
+    assert!(v17.downhill && v17.rngfix_incline && v17.rngfix_edge);
+    assert!(!v17.uphill && !v17.rampbug, "v17 uses RNGFix's uphill, not the optional rule's");
     assert_eq!(physics_fixes(PHYSICS_DIAG | PHYSICS_FIX_TEMPLATE_NAMES), Some(PHYSICS_FIX_TEMPLATE_NAMES));
     assert_eq!(physics_fixes(PHYSICS_DIAG | PHYSICS_FIX_USP_SILENCER), Some(PHYSICS_FIX_USP_SILENCER));
     assert_eq!(physics_fixes(PHYSICS_DIAG | PHYSICS_FIX_DAMAGE_ACTIVATOR), Some(PHYSICS_FIX_DAMAGE_ACTIVATOR));
@@ -82,13 +96,14 @@ fn versions_and_fix_bits() {
     assert_eq!(physics_fixes(PHYSICS_DIAG | PHYSICS_FIX_KNIFE), Some(PHYSICS_FIX_KNIFE));
     assert_eq!(physics_fixes(PHYSICS_DIAG | PHYSICS_FIX_VPHYSICS_SEPARATION), Some(PHYSICS_FIX_VPHYSICS_SEPARATION));
     assert_eq!(physics_fixes(0), None);
-    assert_eq!(physics_fixes(17), None);
+    assert_eq!(physics_fixes(18), None);
     // v7 used all 16 bits of the old diagnostic mask (base 0x1_0000); v8's fix is bit 16, so the base moved to bit 24
-    // with 24 fix bits; v15's fix is bit 24, so it moved again to bit 25 with 25 fix bits, and v16's is bit 25, so it is
-    // now bit 26 with 26 fix bits. Versions keep their fix sets bit for bit (above), and the mask is never serialized.
+    // with 24 fix bits; v15's fix is bit 24, so it moved again to bit 25 with 25 fix bits, v16's is bit 25, so it moved
+    // to bit 26, and v17's four are bits 26..29, so it is now bit 30 with 30 fix bits. Versions keep their fix sets bit
+    // for bit (above), and the mask is never serialized.
     assert_eq!(v7, 0xffff);
-    assert_eq!(PHYSICS_DIAG, 1 << 26);
-    assert_eq!(PHYSICS_DIAG_FIXES, 0x03ff_ffff);
+    assert_eq!(PHYSICS_DIAG, 1 << 30);
+    assert_eq!(PHYSICS_DIAG_FIXES, 0x3fff_ffff);
     assert_eq!(v8, 0x1_ffff);
     assert_eq!(v8 & !PHYSICS_DIAG_FIXES, 0, "every fix fits the diagnostic mask");
     assert_eq!(physics_fixes(PHYSICS_DIAG | 0xffff), Some(0xffff), "v7's fixes alone");
@@ -103,7 +118,12 @@ fn versions_and_fix_bits() {
     // v14 used the last two bits of the old 24-bit diagnostic mask; v15 adds bit 24, v16 bit 25.
     assert_eq!(physics_fixes(PHYSICS_V14), Some(0x00ff_ffff), "v14 sets every bit of the old 24-bit mask");
     assert_eq!(physics_fixes(PHYSICS_V15), Some(0x01ff_ffff), "v15 sets every bit of the old 25-bit mask");
-    assert_eq!(physics_fixes(PHYSICS_V16), Some(PHYSICS_DIAG_FIXES), "v16 sets every diagnostic fix bit");
+    assert_eq!(physics_fixes(PHYSICS_V16), Some(0x03ff_ffff), "v16 sets every bit of the old 26-bit mask");
+    assert_eq!(physics_fixes(PHYSICS_V17), Some(PHYSICS_DIAG_FIXES), "v17 sets every diagnostic fix bit");
+    for fix in [PHYSICS_FIX_INCLINE, PHYSICS_FIX_EDGE, PHYSICS_FIX_TRIGGER_JUMP, PHYSICS_FIX_TELEHOP] {
+        assert_eq!(physics_fixes(PHYSICS_DIAG | fix), Some(fix));
+    }
+    assert_eq!(physics_fixes((1 << 26) | PHYSICS_FIX_TRAIN_SPAWN), None, "the 26-bit diagnostic base is not a version");
     assert_eq!(physics_fixes(PHYSICS_DIAG | PHYSICS_FIX_TRAIN_SPAWN), Some(PHYSICS_FIX_TRAIN_SPAWN));
     assert_eq!(physics_fixes(PHYSICS_DIAG | PHYSICS_FIX_MAP_DOOR_TRAVEL), Some(PHYSICS_FIX_MAP_DOOR_TRAVEL));
     assert_eq!(physics_fixes(PHYSICS_DIAG | PHYSICS_FIX_MAP_PLAYER_IO), Some(PHYSICS_FIX_MAP_PLAYER_IO));
@@ -557,5 +577,255 @@ fn start_open_door_children_follow_parent_at_spawn_and_reset() {
         }
         assert_ne!(parent,original_parent);
         game.reset();
+    }
+}
+
+// ---- v17: RNGFix parity (research/RNGFIX-1025.md) -------------------------------------------------------------------
+
+fn spread(v: &[f32]) -> (f32, f32) {
+    (v.iter().copied().fold(f32::INFINITY, f32::min), v.iter().copied().fold(f32::NEG_INFINITY, f32::max))
+}
+
+/// Synthetic uphill landings (RNGFix "Uphill Incline", `PHYSICS_FIX_INCLINE`): falling onto a 30 degree ramp while moving
+/// up it at 400 u/s, from 60 heights a fraction of a tick apart. v16: the move either clips into the slope (loses speed)
+/// or ends within 2 units above it and the ground probe lands it (keeps it), by sub-tick phase. v17: never the clip.
+#[test]
+fn uphill_landing_keeps_speed_from_v17() {
+    use common::{Scene, Sim, floor, ramp_up};
+    let scene = Scene::new(vec![floor(), ramp_up(0.0, 0.0, 4096.0, 2048.0, 30.0)]);
+    let surface = 400.0 * 30f32.to_radians().tan();
+    let landings = |version: u32| -> Vec<f32> {
+        (0..60)
+            .map(|i| {
+                let mut sim = Sim::new(&scene, v(version), [400.0, 0.0, surface + 30.0 + i as f32 * 0.137], [400.0, 0.0, -300.0]);
+                (0..200).find_map(|_| {
+                    sim.idle();
+                    sim.state.ground.is_some().then(|| sim.hspeed())
+                })
+                .expect("lands")
+            })
+            .collect()
+    };
+    let (lo16, hi16) = spread(&landings(PHYSICS_V16));
+    let (lo17, hi17) = spread(&landings(PHYSICS_V17));
+    eprintln!("uphill landing speed: v16 {lo16:.1}..{hi16:.1}, v17 {lo17:.1}..{hi17:.1}");
+    assert!(lo16 < 300.0 && hi16 > 399.0, "v16 keeps or loses the speed by sub-tick phase");
+    assert!(lo17 > 399.0 && hi17 - lo17 < 0.01, "v17 always lands with the horizontal speed");
+}
+
+/// The sub-tick sweep of `tools`' rngfixsim (crates/core/src/bin/rngfixsim.rs) on a real map: `phases` airborne starts
+/// spread over one tick of travel along `vel`, jump held (autohop); the horizontal speed 3 ticks after the first change.
+fn slope_sweep(game: &mut Game, version: u32, pos: [f32; 3], vel: [f32; 3], phases: usize) -> Vec<f32> {
+    game.set_settings(v(version));
+    let h = |v: [f32; 3]| v[0].hypot(v[1]);
+    let dir = [vel[0] / h(vel), vel[1] / h(vel)];
+    let step = h(vel) * 0.01 / phases as f32;
+    let yaw = vel[1].atan2(vel[0]).to_degrees();
+    (0..phases)
+        .map(|k| {
+            game.reset();
+            game.place_player([pos[0] + dir[0] * step * k as f32, pos[1] + dir[1] * step * k as f32, pos[2]]);
+            game.state.velocity = vel;
+            let mut prev = h(vel);
+            let mut impact = None;
+            for t in 0..120 {
+                game.step(Cmd { yaw, buttons: IN_JUMP, ..Cmd::default() }).unwrap();
+                let speed = h(game.state.velocity);
+                if impact.is_none() && ((speed - prev).abs() > 1.0 || game.state.ground.is_some()) {
+                    impact = Some(t);
+                }
+                if impact.is_some_and(|i| t >= i + 3) {
+                    return speed;
+                }
+                prev = speed;
+            }
+            panic!("no impact from phase {k}");
+        })
+        .collect()
+}
+
+/// GothQueen's report (Discord 2026-10-25, bhop_null_fix: "most direct jumps on bunnyhop.lol kill the speed", video at
+/// 693 u/s): her own runs meet the 45 degree face n = (0, -0.707, 0.707) at (-3960, 3015, 422) at ~690 u/s; one landed
+/// on it (kept 693), another clipped (675 -> 447 -> 348). A straight jump into it at 693 u/s, vz -200: v16 0..485 by
+/// phase (most under 300: her 173 / 137), v17 always lands and launches up the slope. Also Maharero's bhop_lego2 run
+/// onto the 30 degree slope brick at (-2900, -3945, 1030) (479 -> 307 in the run): v16 keeps or loses ~170, v17 keeps;
+/// and a bevelled beam on bhop_letour.
+#[test]
+fn reported_slope_jumps_keep_speed_from_v17() {
+    if let Some(mut game) = map_game("bhop_null_fix") {
+        let (pos, vel) = ([-3955.0, 2955.0, 440.0], [0.0, 693.0, -200.0]);
+        let (lo16, hi16) = spread(&slope_sweep(&mut game, PHYSICS_V16, pos, vel, 60));
+        let (lo17, hi17) = spread(&slope_sweep(&mut game, PHYSICS_V17, pos, vel, 60));
+        eprintln!("bhop_null_fix: v16 {lo16:.0}..{hi16:.0}, v17 {lo17:.0}..{hi17:.0}");
+        assert!(lo16 < 300.0 && hi16 > 480.0, "v16 kills the speed on some phases");
+        assert!(lo17 > 480.0 && hi17 - lo17 < 1.0, "v17: the same launch on every phase");
+    }
+    if let Some(mut game) = map_game("bhop_lego2") {
+        let (pos, vel) = ([-2917.174, -3916.63, 1037.473], [459.546, -149.903, -206.007]);
+        let (lo16, hi16) = spread(&slope_sweep(&mut game, PHYSICS_V16, pos, vel, 60));
+        let (lo17, hi17) = spread(&slope_sweep(&mut game, PHYSICS_V17, pos, vel, 60));
+        eprintln!("bhop_lego2: v16 {lo16:.0}..{hi16:.0}, v17 {lo17:.0}..{hi17:.0}");
+        assert!(lo16 < 350.0 && hi16 > 480.0, "v16 loses ~170 u/s on some phases");
+        assert!(lo17 > 480.0 && hi17 - lo17 < 1.0, "v17 keeps the speed on every phase");
+    }
+    // GothQueen's bhop_letour ("most of the slopes hit weird"; no finished run to replay): its blocks' top edges are
+    // 13-unit 45 degree bevels, e.g. the beam at x 2379..2453, y 9208..11501 (top 1816). Dropping onto it across the bevel.
+    if let Some(mut game) = map_game("bhop_letour") {
+        let (pos, vel) = ([2290.0, 10000.0, 1850.0], [600.0, 0.0, -200.0]);
+        let (lo16, hi16) = spread(&slope_sweep(&mut game, PHYSICS_V16, pos, vel, 60));
+        let (lo17, hi17) = spread(&slope_sweep(&mut game, PHYSICS_V17, pos, vel, 60));
+        eprintln!("bhop_letour: v16 {lo16:.0}..{hi16:.0}, v17 {lo17:.0}..{hi17:.0}");
+        assert!(lo16 < 300.0 && hi16 > 570.0, "v16 clips on the bevel on some phases");
+        assert!(lo17 > 570.0 && hi17 - lo17 < 1.0, "v17 lands on the bevel on every phase");
+    }
+}
+
+/// RNGFix's downhill computation (`PHYSICS_FIX_INCLINE` on top of v13's): a landing on a downhill slope through the
+/// ground probe with a base velocity (a trigger_push / conveyor) deflects velocity + base velocity and takes the base
+/// velocity out again (`DoInclineCollisionFixes` / `SetVelocity`); v13..v16 deflect the player's own velocity only.
+/// Same phases, same landings: without a base velocity the two agree (up to the CS:S push-out v13 adds); with 200 u/s
+/// along +x on the 30 degree slope (normal (0.5, 0, 0.866)) v17's own vx is 0.25 * 200 = 50 lower.
+#[test]
+fn downhill_landing_counts_base_velocity_from_v17() {
+    use common::{Scene, Sim, floor, ramp_down};
+    let angle = 30f32;
+    let scene = Scene::new(vec![floor(), ramp_down(0.0, 0.0, 4096.0, 2048.0, angle)]);
+    let surface = (4096.0 - 400.0) * angle.to_radians().tan();
+    // Own vx right after each phase's landing, None when the move collided with the slope (not a probe landing).
+    let land = |version: u32, base: [f32; 3]| -> Vec<Option<f32>> {
+        (0..60)
+            .map(|i| {
+                let mut sim = Sim::new(&scene, v(version), [400.0, 0.0, surface + 30.0 + i as f32 * 0.137], [400.0, 0.0, -500.0]);
+                for _ in 0..200 {
+                    sim.state.base_velocity = base;
+                    sim.state.base_velocity_applied = base != [0.0; 3];
+                    let r = sim.idle();
+                    if sim.state.ground.is_some() {
+                        return r.contacts.is_empty().then_some(sim.state.velocity[0]);
+                    }
+                }
+                panic!("never landed")
+            })
+            .collect()
+    };
+    let base = [200.0, 0.0, 0.0];
+    let (plain16, plain17, pushed16, pushed17) = (land(PHYSICS_V16, [0.0; 3]), land(PHYSICS_V17, [0.0; 3]), land(PHYSICS_V16, base), land(PHYSICS_V17, base));
+    let mut probes = 0;
+    for i in 0..60 {
+        if let (Some(a), Some(b)) = (plain16[i], plain17[i]) {
+            assert!(a > 500.0 && (a - b).abs() < 0.1, "phase {i}: both boost a plain probe landing ({a} / {b})");
+        }
+        if let (Some(a), Some(b)) = (pushed16[i], pushed17[i]) {
+            probes += 1;
+            assert!((a - b - 50.0).abs() < 0.1, "phase {i}: v17 deflects velocity + base velocity ({a} / {b})");
+        }
+    }
+    assert!(probes > 0, "some phases land through the probe");
+}
+
+/// RNGFix "Edge Bugs" (`PHYSICS_FIX_EDGE`): falling onto the far edge of a flat platform at speed. When the move hits the
+/// top and the rest of the tick slides past the edge, v16 loses the vertical speed without landing (no jump: an edge
+/// bug); v17 starts the move a fraction of a tick back so it lands on the edge and the autohop jump happens.
+#[test]
+fn edge_bug_still_jumps_from_v17() {
+    use common::{Scene, Sim};
+    let scene = Scene::new(vec![ConvexBrush::aabb([-1024.0, -512.0, -64.0], [0.0, 512.0, 0.0])]);
+    let jumped = |version: u32| -> (usize, usize) {
+        let (mut jumps, mut edge_bugs) = (0, 0);
+        for i in 0..80 {
+            // The hull's back edge reaches x = 0 (the platform's edge) at x = 16.
+            // Feet reach the top (z 0) at 3/4 of the first tick; the start x sweeps where that is relative to the edge.
+            let mut sim = Sim::new(&scene, v(version), [4.0 + i as f32 * 0.1, 0.0, 3.0], [800.0, 0.0, -400.0]);
+            let mut clipped = false;
+            for _ in 0..10 {
+                let before = sim.state.velocity[2];
+                sim.step(0.0, 0.0, 0.0, true, false);
+                if sim.state.velocity[2] > 200.0 {
+                    jumps += 1;
+                    break;
+                }
+                clipped |= before < -100.0 && sim.state.velocity[2] > before + 100.0 && sim.state.ground.is_none();
+            }
+            edge_bugs += usize::from(clipped);
+        }
+        (jumps, edge_bugs)
+    };
+    let (j16, e16) = jumped(PHYSICS_V16);
+    let (j17, e17) = jumped(PHYSICS_V17);
+    eprintln!("edge: v16 {j16}/80 jumped, {e16} edge bugs; v17 {j17}/80 jumped, {e17} edge bugs");
+    assert!(e16 > 0 && j16 < 80, "v16 edge-bugs off the platform on some phases");
+    assert!(e17 == 0, "v17 never edge-bugs");
+    assert_eq!(j17, j16 + e16, "every v16 edge bug is a jump in v17; the other phases are past the edge either way");
+}
+
+/// RNGFix "Trigger Jumping" (`PHYSICS_FIX_TRIGGER_JUMP`): bhop_null_fix's 1-unit teleport pad *288 (x -816..-752,
+/// y 80..144, z 160..161) on a block top at z 160. Dropped onto it from 40 heights, jump held: the landing tick ends
+/// 0..2 units above the block, so in v16 the pad (the hull doesn't reach it) teleports only some first landings; v17
+/// touches triggers in the landing gap, every first landing teleports.
+#[test]
+fn landing_touches_thin_triggers_from_v17() {
+    let Some(mut game) = map_game("bhop_null_fix") else { return };
+    let first_landing_teleports = |game: &mut Game, version: u32| -> usize {
+        game.set_settings(v(version));
+        (0..40)
+            .filter(|k| {
+                game.reset();
+                game.place_player([-784.0, 112.0, 260.0 + *k as f32 * 0.1]);
+                for _ in 0..80 {
+                    let grounded = game.state.ground.is_some();
+                    game.step(Cmd { buttons: IN_JUMP, ..Cmd::default() }).unwrap();
+                    if game.events & EVENT_TELEPORTED != 0 {
+                        return true;
+                    }
+                    if grounded {
+                        return false; // the tick after the first landing jumps away
+                    }
+                }
+                panic!("never landed");
+            })
+            .count()
+    };
+    let (n16, n17) = (first_landing_teleports(&mut game, PHYSICS_V16), first_landing_teleports(&mut game, PHYSICS_V17));
+    eprintln!("thin teleport pad: first landing teleports v16 {n16}/40, v17 {n17}/40");
+    assert!(n16 > 0 && n16 < 40, "v16 misses the pad on some landings");
+    assert_eq!(n17, 40, "v17 always touches it");
+}
+
+/// RNGFix "Telehops" (`PHYSICS_FIX_TELEHOP`), with only that fix on top of v16 (diagnostic version) so trigger jumping
+/// doesn't change which landings touch the pad: when the landing and the pad's teleport happen on the same tick, v16
+/// teleports the player with the landing's vz = 0; v17 restores the velocity the move started with (plus half a tick of
+/// gravity), as if the teleport had come first, and flags the map teleport (`EVENT_MAP_TELEPORT`) for the next tick.
+#[test]
+fn telehop_keeps_the_landing_velocity_from_v17() {
+    let Some(mut game) = map_game("bhop_null_fix") else { return };
+    let telehop = PHYSICS_DIAG | physics_fixes(PHYSICS_V16).unwrap() | PHYSICS_FIX_TELEHOP;
+    let landing_teleports = |game: &mut Game, version: u32| -> Vec<([f32; 3], u32)> {
+        game.set_settings(v(version));
+        (0..40)
+            .filter_map(|k| {
+                game.reset();
+                game.place_player([-784.0, 112.0, 260.0 + k as f32 * 0.1]);
+                for _ in 0..80 {
+                    let grounded = game.state.ground.is_some();
+                    game.step(Cmd::default()).unwrap();
+                    if game.events & EVENT_TELEPORTED != 0 {
+                        return Some((game.state.velocity, game.events));
+                    }
+                    if grounded {
+                        return None;
+                    }
+                }
+                None
+            })
+            .collect()
+    };
+    let (t16, t17) = (landing_teleports(&mut game, PHYSICS_V16), landing_teleports(&mut game, telehop));
+    assert!(!t16.is_empty() && t16.len() == t17.len(), "the same landings teleport ({} / {})", t16.len(), t17.len());
+    for ((v16, e16), (v17, e17)) in t16.iter().zip(&t17) {
+        assert_eq!(v16[2], 0.0, "v16: the landing zeroed vz before the teleport");
+        assert!(v17[2] < -300.0, "v17: the fall speed is restored ({v17:?})");
+        assert_eq!((v16[0], v16[1], v17[0], v17[1]), (0.0, 0.0, 0.0, 0.0));
+        assert_eq!(e16 & EVENT_MAP_TELEPORT, 0, "v16 never sets the v17 event");
+        assert_ne!(e17 & EVENT_MAP_TELEPORT, 0);
     }
 }

@@ -3,7 +3,7 @@ use crate::{
     CONTENTS_CURRENT_DOWN, CONTENTS_CURRENT_UP, CONTENTS_LADDER, CONTENTS_SLIME, CONTENTS_WATER,
     Configuration, Contact, CrouchPhase, Error, Event, FailureKind, GroundState, MASK_CURRENT,
     MAX_COMMAND_MAGNITUDE, MAX_COORDINATE, Mode, MoveCollision, MoverResult, MoverStatus,
-    ObserverMode, Operation, PointQueryPurpose, PointQueryRecord, Policy, QueryPurpose,
+    ObserverMode, Operation, PointQueryPurpose, PointQueryRecord, Policy, PreventedCollision, QueryPurpose,
     QueryRecord, State, StateDisposition, StepInput, StepResult, StepStrategy, StuckRecoveryMode,
     Trace, Tracer, WaterSampling, WishState,
 };
@@ -74,6 +74,9 @@ pub(super) fn step(
         queries: Vec::new(),
         point_queries: Vec::new(),
         mover_result,
+        air_move_velocity: None,
+        move_collided: false,
+        prevented_collision: None,
     };
 
     if mode_checks_stuck(result.state.mode)
@@ -106,7 +109,7 @@ pub(super) fn step(
             &mut result.ground_detach_by_upward_speed,
         )?;
         if result.state.mode == Mode::Walk {
-            fix_downhill_landing(&mut result.state, was_grounded, landing_velocity, &[], configuration);
+            fix_early_downhill_landing(&mut result.state, was_grounded, landing_velocity, configuration);
         }
     } else if result.state.velocity[2] > 250.0 {
         set_ground(
@@ -158,7 +161,7 @@ pub(super) fn step(
         categorize_position(&mut context, &mut result.state, configuration, policy,
             &mut result.contacts, &mut result.events, &mut result.ground_detach_by_upward_speed)?;
         if result.state.mode == Mode::Walk {
-            fix_downhill_landing(&mut result.state, was_grounded, landing_velocity, &[], configuration);
+            fix_early_downhill_landing(&mut result.state, was_grounded, landing_velocity, configuration);
         }
     }
     crop_crouched_command(&result.state, &mut command, policy, crop_before_duck);
@@ -1124,6 +1127,21 @@ fn full_walk(
     let hull = result.state.active_hull(policy);
     let grounded_before_move = result.state.ground.is_some();
     let total_velocity = add(result.state.velocity, result.state.base_velocity);
+    // The base velocity this move used (StartGravity zeroed its z): RNGFix's `g_vLastBaseVelocity`.
+    let move_base_velocity = result.state.base_velocity;
+    let mut move_start = result.state.position;
+    if !grounded_before_move {
+        result.air_move_velocity = Some(result.state.velocity);
+        // bunnyhop patch: RNGFix's pre-tick collision prediction (see `MovementFixes::rngfix_incline` / `rngfix_edge`).
+        if configuration.fixes.rngfix_incline || configuration.fixes.rngfix_edge {
+            if let Some((start, fix)) =
+                rngfix_prevent_collision(context, move_start, total_velocity, hull, configuration, policy, tick)?
+            {
+                move_start = start;
+                result.prevented_collision = Some(fix);
+            }
+        }
+    }
     let movement = if grounded_before_move {
         walk_move(
             context,
@@ -1138,7 +1156,7 @@ fn full_walk(
     } else {
         slide(
             context,
-            result.state.position,
+            move_start,
             total_velocity,
             hull,
             configuration,
@@ -1149,6 +1167,10 @@ fn full_walk(
             movement_surface_friction,
         )?
     };
+    if !grounded_before_move {
+        // A prevented collision is not one (the plugin clears `g_iLastCollisionTick`), whatever the moved start hits.
+        result.move_collided = result.prevented_collision.is_none() && !movement.contacts.is_empty();
+    }
     let move_contacts_start = result.contacts.len();
     apply_move_outcome(result, movement);
     result.state.velocity = sub(result.state.velocity, result.state.base_velocity);
@@ -1165,8 +1187,13 @@ fn full_walk(
         &mut result.ground_detach_by_upward_speed,
     )?;
     // bunnyhop patch: downhill landing fix (see `MovementFixes::downhill`).
-    fix_downhill_landing(&mut result.state, was_grounded, pre_categorize_velocity,
-        &result.contacts[move_contacts_start..], configuration);
+    if configuration.fixes.rngfix_incline {
+        fix_downhill_landing_rngfix(&mut result.state, was_grounded, pre_categorize_velocity, move_base_velocity,
+            result.move_collided, configuration);
+    } else {
+        fix_downhill_landing(&mut result.state, was_grounded, pre_categorize_velocity,
+            &result.contacts[move_contacts_start..], configuration);
+    }
     clamp_velocity(&mut result.state.velocity, configuration.maximum_velocity);
     let swimming = if policy.water.refresh_before_walk {
         check_water(context, &mut result.state, configuration, policy)?
@@ -1212,6 +1239,157 @@ fn fix_downhill_landing(
             state.velocity[1] = clipped[1];
         }
     }
+}
+
+/// A landing by a ground probe before the move (game code moved the player, or a finished duck / unduck): the
+/// downhill fix with no move contacts; with `rngfix_incline`, the plugin's variant with this tick's horizontal base
+/// velocity.
+fn fix_early_downhill_landing(state: &mut State, was_grounded: bool, landing_velocity: [f32; 3], configuration: Configuration) {
+    if configuration.fixes.rngfix_incline {
+        let base = [state.base_velocity[0], state.base_velocity[1], 0.0];
+        fix_downhill_landing_rngfix(state, was_grounded, landing_velocity, base, false, configuration);
+    } else {
+        fix_downhill_landing(state, was_grounded, landing_velocity, &[], configuration);
+    }
+}
+
+/// RNGFix `DoInclineCollisionFixes` (downhill part) for a landing at the end of the move (`MovementFixes::
+/// rngfix_incline` with `downhill`). Like `fix_downhill_landing`, but as the plugin computes it: nothing if the move
+/// hit anything ("a collision was predicted this tick, no fix is needed"), the deflection is computed from the
+/// velocity including the move's base velocity (a trigger_push / conveyor on the slope) and the base velocity is
+/// taken out again afterwards (`SetVelocity`; the old slopefix baked it in, a double boost), and its `ClipVelocity`
+/// has no CS:S push-out.
+fn fix_downhill_landing_rngfix(
+    state: &mut State,
+    was_grounded: bool,
+    landing_velocity: [f32; 3],
+    base_velocity: [f32; 3],
+    move_collided: bool,
+    configuration: Configuration,
+) {
+    if configuration.fixes.downhill
+        && !was_grounded
+        && !move_collided
+        && landing_velocity[2] <= 0.0
+        && state.water_level <= 1
+        && let Some(ground) = state.ground
+        && ground.normal[2] < 1.0
+    {
+        let velocity = add(landing_velocity, base_velocity);
+        let clipped = rngfix_clip_velocity(velocity, ground.normal);
+        let speed = |v: [f32; 3]| v[0] * v[0] + v[1] * v[1];
+        // Landing downhill (or across: normal xy . velocity xy >= 0) always takes the clip; landing uphill only when it
+        // is faster (steep inclines), the rest is the uphill fix's job.
+        let uphill = ground.normal[0] * velocity[0] + ground.normal[1] * velocity[1] < 0.0;
+        if !uphill || speed(clipped) > speed(velocity) {
+            state.velocity[0] = clipped[0] - base_velocity[0];
+            state.velocity[1] = clipped[1] - base_velocity[1];
+        }
+    }
+}
+
+/// RNGFix's `ClipVelocity`: `velocity - normal * (velocity . normal)`, without the engine's overbounce adjust ("only
+/// matters with overbounce which doesn't apply to walkable surfaces").
+fn rngfix_clip_velocity(velocity: [f32; 3], normal: [f32; 3]) -> [f32; 3] {
+    let backoff = dot(velocity, normal);
+    sub(velocity, scale(normal, backoff))
+}
+
+/// RNGFix `RunPreTickChecks` from the trace on: the first hull trace of this tick's airborne move (from `position`
+/// along `velocity * tick`, velocity including base velocity) decides whether the player would collide with walkable
+/// ground in a way that keeps them from landing or loses speed, and if so returns the start the plugin moves the
+/// player to (`PreventCollision`: `collision point - velocity * tick`, 0.1 up) and which fix it was. The plugin
+/// predicts this velocity before ProcessMovement; here it is the move's real one (identical except for the plugin's
+/// own prediction errors, e.g. it traces a duck-transition tick from the unducked origin).
+fn rngfix_prevent_collision(
+    context: &mut QueryContext<'_, impl Tracer>,
+    position: [f32; 3],
+    velocity: [f32; 3],
+    hull: Hull,
+    configuration: Configuration,
+    policy: Policy,
+    tick: f32,
+) -> Result<Option<([f32; 3], PreventedCollision)>, Error> {
+    let velocity_tick = scale(velocity, tick);
+    let trace = context.trace(
+        QueryPurpose::Displacement,
+        position,
+        add(position, velocity_tick),
+        hull,
+        configuration.solid_mask,
+    )?;
+    if trace.fraction >= 1.0 || trace.start_solid || trace.all_solid {
+        return Ok(None);
+    }
+    let Some(normal) = trace.normal else { return Ok(None) };
+    let collision_point = trace.end;
+    // "If we are moving up too fast, we can't land anyway so these fixes aren't needed." (NON_JUMP_VELOCITY)
+    if velocity[2] > policy.ground_detach_speed {
+        return Ok(None);
+    }
+    // "Landing also requires a walkable surface." (MIN_STANDABLE_ZNRM)
+    if normal[2] < configuration.standable_normal {
+        return Ok(None);
+    }
+    // "PreventCollision": rewind part of a tick so the move ends 0.1 above the contact without touching it. The rewound
+    // start retraces this tick's path, so it is free unless something moved into it; then (a deviation: the plugin
+    // doesn't check) the fix is skipped rather than starting the move stuck.
+    let start = sub(collision_point, velocity_tick);
+    let start = [start[0], start[1], start[2] + 0.1];
+    let free = context.trace(QueryPurpose::Endpoint, start, start, hull, configuration.solid_mask)?;
+    let prevent = |fix| (!free.start_solid && !free.all_solid).then_some((start, fix));
+    let speed = |v: [f32; 3]| v[0] * v[0] + v[1] * v[1];
+    // Uphill first ("more common and faster"): not flat, and moving into the incline.
+    if configuration.fixes.rngfix_incline
+        && normal[2] < 1.0
+        && normal[0] * velocity[0] + normal[1] * velocity[1] < 0.0
+    {
+        // Unless colliding is faster (steep inclines can be): then the downhill fix's outcome is the better one.
+        let downhill_instead =
+            configuration.fixes.downhill && speed(rngfix_clip_velocity(velocity, normal)) > speed(velocity);
+        if !downhill_instead {
+            // "This naturally prevents any edge bugs so we can skip the edge fix."
+            return Ok(prevent(PreventedCollision::Uphill));
+        }
+    }
+    if !configuration.fixes.rngfix_edge {
+        return Ok(None);
+    }
+    // Where the rest of the tick would end after the collision (assuming no further collisions).
+    let fraction_left = 1.0 - trace.fraction;
+    let tick_end = if normal[2] == 1.0 {
+        // Level ground: only the z velocity goes.
+        [
+            collision_point[0] + velocity_tick[0] * fraction_left,
+            collision_point[1] + velocity_tick[1] * fraction_left,
+            collision_point[2],
+        ]
+    } else {
+        let clipped = rngfix_clip_velocity(velocity, normal);
+        if clipped[2] > policy.ground_detach_speed {
+            // An edge bug every time: the clip leaves too much z velocity to land.
+            return Ok(None);
+        }
+        add(collision_point, scale(clipped, tick * fraction_left))
+    };
+    // Is there ground to land on within LAND_HEIGHT below the end of the tick?
+    let below = [tick_end[0], tick_end[1], tick_end[2] - configuration.ground_probe];
+    let ground = context.trace(QueryPurpose::GroundFull, tick_end, below, hull, configuration.solid_mask)?;
+    if ground.fraction < 1.0 || ground.start_solid || ground.all_solid {
+        if ground.normal.is_some_and(|n| n[2] >= configuration.standable_normal) {
+            return Ok(None);
+        }
+        // TracePlayerBBoxForGround's quadrants.
+        for quadrant in quadrants(hull) {
+            let trace = context.trace(QueryPurpose::GroundQuadrant, tick_end, below, quadrant, configuration.solid_mask)?;
+            if (trace.fraction < 1.0 || trace.start_solid || trace.all_solid)
+                && trace.normal.is_some_and(|n| n[2] >= configuration.standable_normal)
+            {
+                return Ok(None);
+            }
+        }
+    }
+    Ok(prevent(PreventedCollision::Edge))
 }
 
 fn start_gravity(state: &mut State, configuration: Configuration, tick: f32) {

@@ -1,5 +1,97 @@
 # Native client audit — 25 October 2026
 
+## Latest branded preview
+
+The `.6` macOS ARM64 preview is named **bunnyhop.lol - Native**, with the
+website's existing logo used as its application/window image. The Mac bundle
+contains the official ICNS, Windows embeds the official ICO, and Linux packages
+the PNG and desktop-entry identity. All three source icon formats are copied
+into the hashed asset tree; package checks verify the OS integration copies.
+
+Version `0.3.4-dev.20261025.6` has build identity
+`bunnyhop-native/22ed1604d2cf2785e80be5c2`. Its ZIP is 50,081,746 bytes,
+SHA-256 `386e4c6b8b540e06d873d835364e98c8e388b11ec300e0307ad42f06ff57e51d`.
+It remains an ad-hoc signed preview requiring macOS 27.0, with physics 17/rules 2
+and the same canonical verifier described below. It is not production-admitted.
+
+A visible launch confirmed the app/window/menu name and the official logo in
+macOS's About window. Closing About left the game running; Cmd+Q with the app
+focused terminated the exact `.6` process. These checks made no score submission.
+The `.6` build passes 13 CTests, 18 macOS packaging tests and 19 Linux packaging
+tests; all 28 correctly re-signed identity/branding tamper variants are rejected.
+The `.5` evidence below remains the detailed identity-fix qualification record.
+
+## v0.0.27 / physics 17 candidate
+
+The current candidate supersedes the physics-16 packages recorded below. It ports
+the production physics-17 incline, edge, thin-trigger and telehop changes, retaining
+the native WASM-compatible math. The canonical verifier is now
+`bunnyhop-web/35dac92ea33c`, SHA-256
+`35dac92ea33c874d4434f738f089b4b137d492ce8a1f9e4945ef6609c27d8778`,
+1,415,101 bytes; timer rules remain 2.
+
+The macOS ARM64 preview `0.3.4-dev.20261025.5` has build identity
+`bunnyhop-native/7f722c62963fa3bdf1745ddf`. Its ZIP is 49,770,027 bytes,
+SHA-256 `9f231ef2df34a5c292d807736475c5f94e081a0c8c26b091b5a1a95354a3c8a4`.
+It is ad-hoc signed, without Developer ID signing or notarization. Release-check
+passes its preview checks; strict release signing checks reject it as expected.
+Its minimum macOS version is **27.0**, derived from the executable and bundled
+SDL library. This local preview does not establish older-macOS compatibility.
+The package and JSON report are retained under `native/target/native-packages/`.
+
+Thirteen real recordings on nine maps were re-simulated as physics 17 against
+the exact production WASM: 331,678 states, zero mismatches. Every case diverges
+when run with physics 16, demonstrating that the comparisons exercise changed
+behavior. Historical physics 13, 14 and 16 comparisons add 136,579 states with
+zero mismatches. Two finishing v17 recordings (boxes_snowy and aztec) match the
+shared encoder byte for byte, pass the offline ranked verifier and native
+playback/seek, and reject a tampered checkpoint. These are offline proofs, not
+production submissions or server qualification of a logged-in user.
+
+The isolated macOS build passes 12 CTest checks, 38 physics tests, 21 bridge
+tests, 64 UI tests and typechecking. The final identity-fix package passes 14 macOS packaging tests (three skips)
+and 15 Linux packaging tests (two skips). The latter reuses the reviewed Linux
+bridge library, rather than qualifying a new complete Linux package. The sandtrap2 map-dependent case skips because its fixture is absent.
+Real-map backdrop checks pass on eazy and japan, including interrupted-tour
+resumption. Source and unpacked-package home/pause smokes pass with HTTP 200,
+zero WebGL/canvas use and zero simulation ticks. Parent inspection of the
+packaged PNGs confirms the native map backdrop, six map tiles, complete pause
+leaderboard and non-overlapping Inbox badge. The version reads v0.0.27 alpha.
+Evidence and screenshots are retained under `native/target/readiness-v27-20261025/`.
+
+Independent review of the final identity fixes found no material findings: 38
+focused checks, 30 re-signed negative package checks and nine offline runtime
+cases passed. The checker recomputes the full package identity and validates the
+WASM pin, physics 17/rules 2 and actual macOS minimum. Invalid and development
+manifests remain playable locally without claiming a qualified build.
+
+Interactive inspection of `.5` confirmed the live native map backdrop, all six
+home tiles and a successful home-to-map pause transition without a lingering
+loading message. Both the window close button and the macOS Quit Bunnyhop menu
+command terminated their exact test processes. The synthetic Cmd+Q keystroke
+was inconclusive and is not claimed as keyboard verification. No score was
+submitted. The `.6` package above adds the official logo and native display name.
+
+Required candidate CI now compares the platform's built native ABI runner with
+the pinned WASM on four self-contained v17 fixtures: 31,440 states, zero
+mismatches locally. All four contrast with v16; a native-v16 mutation fails with
+3,479 mismatches. Independent gate review reproduced those results. The evidence
+binds six package/parity artifacts to source, run and attempt. Hosted execution
+is tracked separately; a local pass does not certify Windows runtime behavior.
+
+This establishes the tested simulation and presentation scope, not full web
+feature parity. Native still lacks the v0.0.27 practice/checkpoint controller,
+sticky practice and noclip clock coasting, the Practice label, applied 50–175%
+HUD scaling, and player-report entry points. The shared version/changelog and
+Contributor/Owner badges are ported. HUD scale values survive settings import
+but do not change the native renderer.
+
+Independent review and current-revision Windows/Linux qualification are tracked
+separately. Physical sign-in/input/gameplay, a controlled human leaderboard
+finish, platform signing and exact-build admission remain release requirements.
+The server's browser grace period does not admit old native physics-16 builds.
+No package in this record was activated or published by these checks.
+
 The starting point is ln's public `90a8c9f` source, after merging the previous
 physics-15 compatibility PR. The overnight work adds polled/prorated mouse
 input, configurable turn binds, SSJ/jump statistics, a strafe trainer, movable

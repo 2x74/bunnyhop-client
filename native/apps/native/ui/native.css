@@ -43,6 +43,13 @@ html.native-clock-stopped *, html.native-clock-stopped *::before, html.native-cl
 #native-status[data-kind="error"] { color: var(--loss); }
 #native-notice:empty, #native-status:empty { display: none; }
 
+/* The pause rail's Feedback / Inbox pair: in a half-width cell the web's corner badge (inbox.css) lands on the label
+   with wider fallback fonts (Linux). Unread, the count takes the mail icon's place before the label instead. */
+.rail-pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.rail-pair .rail-item:has(.ib-badge:not([hidden])) > .ri-icon { display: none; }
+.rail-pair .ri-label:has(> .ib-badge:not([hidden])) { flex-direction: row; align-items: center; gap: 0.4rem; white-space: nowrap; overflow: hidden; }
+.rail-pair .ri-label > .ib-badge { position: static; transform: none; flex: none; order: -1; margin: 0; }
+
 /* The finished run (host timer) under the pause screen's map name. */
 #native-finish-result:empty { display: none; }
 .native-finish { margin-top: var(--sp-2); padding: 0.35rem 0 0.35rem 0.7rem; border-left: 2px solid var(--amber); }

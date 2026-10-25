@@ -27,8 +27,8 @@ See the repository [release process](../../../docs/releases.md).
 
 ## Current compatibility
 
-This source targets physics 16, timer rules 2 and verifier
-`bunnyhop-web/e0480bade42b`. See [qualification notes](../../../docs/current-compatibility.md)
+This source targets production v0.0.27, physics 17, timer rules 2 and verifier
+`bunnyhop-web/35dac92ea33c`. See [qualification notes](../../../docs/current-compatibility.md)
 for scope, test evidence and remaining live-score requirements.
 
 ## Build and play
@@ -133,9 +133,9 @@ Windows packages are unsigned unless signing is explicitly configured.
 Signing credentials are not a prerequisite for the default package command:
 
 ```sh
-bun run package --version 0.3.4-dev.20261025.3
+bun run package --version 0.3.4-dev.20261025.6
 bun apps/native/packaging/release-check.ts \
-  --package target/native-packages/bunnyhop-native-0.3.4-dev.20261025.3-darwin-arm64
+  --package target/native-packages/bunnyhop-native-0.3.4-dev.20261025.6-darwin-arm64
 ```
 
 Use the actual stage path printed by the packager for `--package`. It produces a

@@ -5,7 +5,7 @@ import { DEFAULT_MOUSE_DPI } from "../mouse-settings";
 // key) and recorded in replays.
 
 import { DEFAULT_BINDS } from "../binds";
-import { CLASSIC, DEFAULT_KEYS, HUD_ELEMENTS, moveRetiredPlaces, type HudLayout, type KeysPrefs } from "../hud/layout";
+import { CLASSIC, DEFAULT_KEYS, HUD_ELEMENTS, HUD_SCALE, moveRetiredPlaces, type HudLayout, type KeysPrefs } from "../hud/layout";
 import { VIEWMODEL_POS, VIEWMODEL_POS_V1, VIEWMODEL_REV } from "../viewmodel/defaults";
 import { DEFAULT_SSJ, type SsjPrefs } from "../ssj/stats";
 import { DEFAULT_TRIGGER_PREFS, normalizeTriggerPrefs, type TriggerPrefs } from "../triggers/volumes";
@@ -48,7 +48,7 @@ export type Action =
   | "measurePoint"
   | "clearMeasure"
   | "lastLj"
-  // Practice mode (practice-mode/): the toggle, then tools that only work while it's on.
+  // Practice (practice-mode/): practice mode's toggle, then the tools (any solo attempt; a teleport or noclip makes it practice).
   | "practice"
   | "noclip"
   | "cpSave"
@@ -649,6 +649,12 @@ function migrateModels(raw: Record<string, unknown>): void {
 /** Pre-layout prefs stored HUD visibility as hud.speed / hud.timer / ... booleans. */
 function migrateHud(raw: Record<string, unknown>): Record<string, unknown> {
   const hud = raw?.hud as Record<string, unknown> | undefined;
+  // HUD scale: within its slider (50-175%; it was 70-160%, so an older stored value always fits). A broken one
+  // falls back to the default.
+  if (hud && typeof hud === "object" && "scale" in hud) {
+    if (typeof hud.scale === "number" && Number.isFinite(hud.scale)) hud.scale = Math.max(HUD_SCALE.min, Math.min(HUD_SCALE.max, hud.scale));
+    else delete hud.scale;
+  }
   if (hud && typeof hud === "object" && hud.layout && typeof hud.layout === "object") moveRetiredPlaces(hud.layout as Record<string, never>);
   if (!hud || typeof hud !== "object" || hud.layout) return raw;
   const old: Record<string, string> = { speed: "speed", timer: "timer", split: "split", stats: "stats", keys: "keys", mapLine: "map", fps: "fps" };

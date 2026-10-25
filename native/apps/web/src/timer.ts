@@ -188,7 +188,8 @@ export class RunTimer {
   }
 
   /**
-   * Practice mode noclip (practice-mode/): ends the run in progress without a finish, keeping the track. Never called
+   * Practice noclip outside a run (practice-mode/): back to idle without a finish, keeping the track, so flying out of
+   * a start zone doesn't start a run. Never called
    * on re-simulation (sim.ts, verifier.ts).
    */
   stop(): void {
@@ -201,6 +202,21 @@ export class RunTimer {
     this.perfGroundTicks = 0;
     this.prevYaw = NaN;
     this.clearStats();
+  }
+
+  /**
+   * Practice noclip (practice-mode/) during a run: the clock keeps counting to `tick` (a practice attempt now, never
+   * submitted), and no zone, split or stat is read while flying. The first tick back on the ground starts fresh for
+   * landings and sync. Never called on re-simulation (sim.ts, verifier.ts).
+   */
+  coast(tick: number): void {
+    this.lastTick = tick;
+    this.lastPerfectTick = -1;
+    this.perfGroundTicks = 0;
+    this.preGrounded = null;
+    this.wasOnGround = false;
+    this.groundSince = 0;
+    this.prevYaw = NaN;
   }
 
   /** Called before movement, including while outside start zones, so landings are detected consistently. */

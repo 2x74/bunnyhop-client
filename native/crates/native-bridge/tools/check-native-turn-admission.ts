@@ -6,6 +6,7 @@ import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { ReplayRecorder, encodeRaw, decodeRaw } from "../../../apps/web/src/replay";
+import { PHYSICS_VERSION } from "../../../apps/web/src/core";
 const [server, executable] = Bun.argv.slice(2);
 assert.ok(server && executable, "pass the private input-analysis.ts and the compiled C++ oracle");
 const scratch = mkdtempSync(join(tmpdir(), "bh-turn-admission-"));
@@ -23,7 +24,7 @@ try {
     const r = new ReplayRecorder(100);
     for(const t of c.ticks)r.push(0,0,t.yaw,0,t.buttons,t.look);
     const replay = decodeRaw(encodeRaw(r.build({map:"fixture",mapSha256:"00".repeat(32),
-      settings:{tickInterval:Math.fround(.01),airAccelerate:1000,accelerate:5,friction:4,stopSpeed:75,gravity:800,maxSpeed:260,autohop:true,physics:16},
+      settings:{tickInterval:Math.fround(.01),airAccelerate:1000,accelerate:5,friction:4,stopSpeed:75,gravity:800,maxSpeed:260,autohop:true,physics:PHYSICS_VERSION},
       style:c.style,timerRules:2,prespeedCap:null,track:0,zones:[],spawn:null,startTick:0,endTick:8,
       clientBuild:"native/admission-oracle",player:"test",recordedAt:0})));
     const actual = countedTurns(replay,{events:c.ticks.map((t:any)=>t.event)},c.style);

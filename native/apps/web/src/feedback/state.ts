@@ -91,13 +91,23 @@ export const lastSubmittedRun = () => lastRunId;
 // Opening the form
 
 /** "application": a moderator application (the form asks its own questions; apps/api src/feedback.ts). "tier": the
- * current map's tier is wrong (the form adds a tier pick). */
-export type FeedbackCategory = "bug" | "physics" | "map" | "tier" | "multiplayer" | "idea" | "other" | "application";
+ * current map's tier is wrong (the form adds a tier pick). "report": a player report (apps/api src/player-reports.ts). */
+export type FeedbackCategory = "bug" | "physics" | "map" | "tier" | "multiplayer" | "idea" | "other" | "application" | "report";
+
+/** Who a player report is about: their id when the opener knows it (a profile, the room), else their full name; a run
+ * of theirs when it's about one (the replay viewer: the server finds the player from the run). */
+export interface ReportTarget {
+  id?: string;
+  name: string;
+  run?: { id: string; map: string; time: number | null };
+}
 
 export interface FeedbackOpen {
   category?: FeedbackCategory;
-  /** Text to start the message with (a player report: who it's about). */
+  /** Text to start the message with. */
   message?: string;
+  /** category "report": who it's about (no target: the form asks for a name). */
+  report?: ReportTarget;
   /** Called after the dialog closed (focus goes back to the opener by itself). */
   onClose?: () => void;
 }

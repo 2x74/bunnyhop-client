@@ -128,14 +128,22 @@ public:
     bool cancel_loading() {
         if (!job && !pending) return false;
         if (job) { job->cancel = true; retired.push_back(std::move(job)); }
-        pending.reset(); status_ = Status::idle; wanted.clear();
+        pending.reset(); status_ = Status::idle; interrupted = std::move(wanted); wanted.clear();
         return true;
+    }
+    // The gameplay download that cancelled a tour failed: load that tour again.
+    // The menu may never have seen the loading state, so it won't ask itself.
+    bool resume() {
+        if (interrupted.empty() || status_ != Status::idle || !wanted.empty()) return false;
+        const auto map = std::move(interrupted);
+        interrupted.clear();
+        return request(map);
     }
     // Drops the scene and cancels any load (a gameplay map is taking over).
     void release() {
         if (job) { job->cancel = true; retired.push_back(std::move(job)); }
         renderer.reset(); map_.reset(); director.reset(); pending.reset();
-        status_ = Status::idle; error_.clear(); wanted.clear(); seconds = 0;
+        status_ = Status::idle; error_.clear(); wanted.clear(); interrupted.clear(); seconds = 0;
     }
     // Once per frame. A finished download is loaded and given a Renderer only
     // when `may_build` (no gameplay download is writing the shared cache).
@@ -194,7 +202,7 @@ private:
     std::unique_ptr<Renderer> renderer;
     std::unique_ptr<native::tour::Director> director;
     Status status_ = Status::idle;
-    std::string wanted, error_;
+    std::string wanted, error_, interrupted;
     double seconds = 0;
 };
 }

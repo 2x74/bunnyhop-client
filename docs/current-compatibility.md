@@ -1,14 +1,15 @@
 # Current native compatibility
 
-This source targets production v0.0.26, physics **16**, timer rules **2**, and
-canonical verifier `bunnyhop-web/e0480bade42b`. Its pinned WASM SHA-256 is
-`e0480bade42bed8cec193908d52de340ddc66070c1fa5640a76da1ac75cf1d8e`.
+This source targets production v0.0.27, physics **17**, timer rules **2**, and
+canonical verifier `bunnyhop-web/35dac92ea33c`. Its pinned WASM SHA-256 is
+`35dac92ea33c874d4434f738f089b4b137d492ce8a1f9e4945ef6609c27d8778`.
 The build verifies the downloaded bytes and rejects changes to the rules until
 the verifier pin is reviewed.
 
 ## Simulation and input
 
-Physics 16 matches production's item gates on `bhop_synthetic_fix`,
+Physics 17 includes production's incline, edge, thin-trigger landing and telehop
+fixes. Physics 16 matches production's item gates on `bhop_synthetic_fix`,
 `bhop_wonderland` and `bhop_lego3`, and the ingredient objectives on
 `bhop_cooksassistant`. Physics 14/15 fixes and historical replay versions remain
 available. The native Rust core retains its WASM-compatible math configuration.
@@ -25,6 +26,16 @@ server-supported 210°/s rate is ranked-compatible. Using another configured tur
 rate makes that attempt local-only while retaining its BHR archive. Recording
 uses the shared counted/uncounted formats and fractional turn format as needed.
 The client does not run a client-side WASM self-check.
+
+## v0.0.27 presentation and feature scope
+
+The shared menu shows the new version, changelog, Contributor and Owner badges.
+Native gameplay does not yet implement the web practice/checkpoint controller,
+sticky practice attempts, noclip clock coasting or the Practice label. The native
+HUD still sizes itself by window height; importing a 50–175% HUD scale preserves
+the setting but does not apply that scale to native rendering. Shared player-report
+types and form code are present, but native report entry points are unfinished.
+Simulation compatibility is not a claim of complete website feature parity.
 
 ## Accounts and packages
 
@@ -43,6 +54,12 @@ ln's overnight source is now public in commits through `90a8c9f`, including the
 previously unpublished custom audio, JHUD/SSJ and platform fixes. The source audit
 and fixes in this branch do not authenticate older separately uploaded archives.
 Each release must be qualified using its own source and packaged identity.
+The package checker and runtime validate the pinned WASM, physics/rules and
+recomputed component identity. Invalid manifests remain local-only. macOS
+packages declare the maximum deployment target across the executable and bundled
+libraries; the local `.6` preview requires macOS 27.0.
+The app display name is **bunnyhop.lol - Native**; packaged icons use the existing
+official bunnyhop logo.
 
 ## Validation
 

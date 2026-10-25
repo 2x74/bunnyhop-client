@@ -32,7 +32,7 @@ on disk.
 2. Compare its SHA-256 with `SHA256SUMS` and the accompanying package JSON report.
    On macOS use `shasum -a 256 ARCHIVE`; on Linux use `sha256sum ARCHIVE`; on
    Windows use `Get-FileHash ARCHIVE -Algorithm SHA256` in PowerShell.
-3. Extract the archive before launching. On macOS move `Bunnyhop.app` to a chosen
+3. Extract the archive before launching. On macOS move `bunnyhop.lol - Native.app` to a chosen
    application folder. Use the normal Finder **Open** flow if macOS asks you to
    confirm an unnotarized app. Windows includes optional installation scripts and
    needs the WebView2 runtime for menus. Linux's launcher uses the bundled native
@@ -90,10 +90,19 @@ validated as exact numeric `MAJOR.MINOR.PATCH`; use the matching `v0.0.1` tag fo
 this release.
 
 The workflow builds native resources, then macOS ARM64, Linux x64 and Windows
-x64 packages. Platform artifact names are `bunnyhop-macos-arm64`,
-`bunnyhop-linux-x64` and `bunnyhop-windows-x64`. They contain the platform archive,
-package JSON report and `SHA256SUMS`. `native-resources` is an intermediate build
-artifact. Inspect each job's result before treating that platform as available.
+x64 packages. Platform artifact names are `bunnyhop-macos-arm64-RUN-ATTEMPT`,
+`bunnyhop-linux-x64-RUN-ATTEMPT` and `bunnyhop-windows-x64-RUN-ATTEMPT`,
+where `RUN` and `ATTEMPT` are the immutable workflow run coordinates. They
+contain the platform archive, package JSON report and `SHA256SUMS`.
+`native-resources-RUN-ATTEMPT` is an intermediate build artifact. `native-candidate-evidence-RUN-ATTEMPT` binds source SHA, successful
+deterministic gates, package identities and artifact IDs/digests. Single-platform
+candidates are for inspection; promotion review requires all platform gates.
+Inspect each job's result before treating that platform as available.
+
+The [candidate-to-owner-promotion contract](native-release-flow.md) describes
+the isolated stronger-model Hermes review, exact evidence binding, owner final
+approval, private server admission and announcement ordering. Those private
+integrations are not activated by this public workflow.
 
 The workflow uploads Actions artifacts only. It does not publish GitHub
 Releases, register ranked builds, submit scores, configure update keys or deploy
