@@ -1,8 +1,37 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { exportMusic, OST, verifyMusicAssets } from "../src/export-music";
+
+test("the pinned OST manifest keeps exact LF bytes in an autocrlf checkout", () => {
+  const dir = mkdtempSync(join(tmpdir(), "bunnyhop-ost-checkout-"));
+  const root = resolve(import.meta.dir, "../../../..");
+  const manifest = "native/apps/native/assets/music/manifest.json";
+  const git = (...args: string[]) => {
+    const result = Bun.spawnSync(["git", "-c", "core.autocrlf=true", "-c", "core.eol=crlf",
+      "-c", "core.safecrlf=false", ...args], { cwd: dir,
+      env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: join(dir, "no-global-config") } });
+    if (result.exitCode) throw new Error(result.stderr.toString());
+    return Buffer.from(result.stdout);
+  };
+  try {
+    mkdirSync(dirname(join(dir, manifest)), { recursive: true });
+    writeFileSync(join(dir, ".gitattributes"), readFileSync(join(root, ".gitattributes")));
+    writeFileSync(join(dir, manifest), readFileSync(join(root, manifest)));
+    // An adjacent text file must still undergo CRLF conversion: the rule is narrow.
+    const adjacent = "native/apps/native/assets/music/checkout-control.json";
+    writeFileSync(join(dir, adjacent), "{}\n");
+    git("init", "--quiet");
+    git("add", "--", ".gitattributes", manifest, adjacent);
+    const canonical = git("show", `:${manifest}`);
+    expect(canonical.includes(Buffer.from("\r\n"))).toBe(false);
+    unlinkSync(join(dir, manifest)); unlinkSync(join(dir, adjacent));
+    git("checkout-index", "--all", "--force");
+    expect(readFileSync(join(dir, manifest))).toEqual(canonical);
+    expect(readFileSync(join(dir, adjacent), "utf8")).toBe("{}\r\n");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 test("the complete production OST is copied, credited and verified offline", () => {
   const dir = mkdtempSync(join(tmpdir(), "bunnyhop-ost-"));
@@ -14,6 +43,10 @@ test("the complete production OST is copied, credited and verified offline", () 
     expect(OST.tracks).toHaveLength(11);
     expect(OST.tracks.filter(t => t.role === "menu")).toHaveLength(1);
     expect(OST.tracks.every(t => t.credit.includes("ElevenLabs Music"))).toBe(true);
+    const manifest = join(dir, "music", "manifest.json"), manifestBytes = readFileSync(manifest);
+    writeFileSync(manifest, manifestBytes.toString().replace(/\n/g, "\r\n"));
+    expect(() => verifyMusicAssets(dir)).toThrow("manifest or file list mismatch");
+    writeFileSync(manifest, manifestBytes);
     const file = join(dir, "music", OST.tracks[0].file), original = readFileSync(file);
     const changed = Buffer.from(original); changed[100] ^= 1; writeFileSync(file, changed);
     expect(() => verifyMusicAssets(dir)).toThrow("Bundled OST file mismatch");
