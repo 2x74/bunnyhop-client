@@ -49,3 +49,43 @@ test("credits screen renders and its links go to the system browser",async()=>{
  expect(errors).toEqual([]);
  }finally{await browser.close();}
 },15_000);
+
+test("settings search, HUD positions and strafe trainer options",async()=>{
+ const browser=await chromium.launch({headless:true});try{const page=await browser.newPage({viewport:{width:1600,height:900}}),errors:string[]=[];page.on("pageerror",error=>errors.push(error.message));const html=await readFile(resolve(import.meta.dir,"../../../target/native-menu/menu.html"),"utf8");
+ await page.route("**/*",route=>route.request().url()==="https://bunnyhop.lol/native-hud-unit"?route.fulfill({status:200,contentType:"text/html",body:html}):route.abort());
+ await page.addInitScript(()=>{(window as unknown as {messages:unknown[]}).messages=[];window.addEventListener("bunnyhop:native-message",event=>(window as unknown as {messages:unknown[]}).messages.push((event as CustomEvent).detail));});
+ const last=()=>page.evaluate(()=>(window as unknown as {messages:unknown[]}).messages.at(-1));
+ await page.goto("https://bunnyhop.lol/native-hud-unit",{waitUntil:"domcontentloaded"});page.setDefaultTimeout(3000);
+ await page.getByRole("button",{name:"Settings",exact:true}).click();
+ // Untouched elements show their built-in place: the timer is centred, 154/900 up from the bottom.
+ expect(await page.getByLabel("Timer X",{exact:true}).inputValue()).toBe("50");
+ expect(await page.getByLabel("Timer Y",{exact:true}).inputValue()).toBe("82.9");
+ await page.locator(".nset-advanced > summary").click();
+ await page.getByLabel("Timer Y",{exact:true}).fill("40");await page.getByLabel("Timer Y",{exact:true}).blur();
+ expect(await last()).toEqual({type:"settings",patch:{hudLayout:{timer:{x:50,y:40}}}});
+ await page.evaluate(()=>window.bunnyhopNativeMenu.onState({settings:{hudLayout:{timer:{x:50,y:40}}}}));
+ await page.locator(`button[title="Put Timer back where it was"]`).click();
+ expect(await last()).toEqual({type:"settings",patch:{hudLayout:{}}});
+ // Strafe trainer: smoothing and hints follow the trainer switch.
+ expect(await page.getByLabel("Average over",{exact:true}).isDisabled()).toBe(true);
+ await page.getByLabel("Strafe trainer",{exact:true}).check();
+ expect(await last()).toEqual({type:"settings",patch:{strafeTrainer:true}});
+ await page.evaluate(()=>window.bunnyhopNativeMenu.onState({settings:{strafeTrainer:true}}));
+ expect(await page.getByLabel("Average over",{exact:true}).isDisabled()).toBe(false);
+ await page.getByRole("radio",{name:"Every N"}).click();
+ expect(await last()).toEqual({type:"settings",patch:{jumpStatsMode:"interval"}});
+ // Search narrows every section to matching rows, and finds rows inside Advanced.
+ await page.getByLabel("Search settings").fill("deadtime");
+ expect(await page.locator(".nset-row:visible").count()).toBe(1);
+ expect(await page.getByLabel("Hints",{exact:true}).isVisible()).toBe(true);
+ await page.getByLabel("Search settings").fill("crosshair");
+ expect(await page.getByLabel("Crosshair X",{exact:true}).isVisible()).toBe(true);
+ await page.getByLabel("Search settings").fill("zzzz");
+ expect(await page.getByText("No settings match.").isVisible()).toBe(true);
+ await page.getByLabel("Search settings").fill("");
+ expect(await page.getByLabel("Field of view",{exact:true}).isVisible()).toBe(true);
+ await page.getByRole("button",{name:"HUD",exact:true}).first().click();await page.waitForTimeout(400);
+ await page.screenshot({path:resolve(import.meta.dir,"../../../target/native-menu/settings-hud.png")});
+ expect(errors).toEqual([]);
+ }finally{await browser.close();}
+},20_000);

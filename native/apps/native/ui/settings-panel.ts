@@ -1,6 +1,7 @@
 import { h } from "../../web/src/ui/dom";
 import { ACTIONS, keyLabel } from "../../web/src/ui/settings";
 import { mouseCode } from "../../web/src/binds";
+import { HUD_ELEMENTS, defaultPosition, type HudElementId, type HudLayout } from "./hud-layout";
 import { AUDIO_PACKS, JUMP_STATS_MODES, NATIVE_BIND_ACTIONS, send, settingsPatch, state, nativeKeyCode, type AudioPack, type JumpStatsMode, type NativeSettings } from "./bridge";
 
 const DISCORD_TEXT={disabled:"Off",connecting:"Connecting…",ready:"Connected",reconnecting:"Discord not found"} as const;
@@ -45,8 +46,8 @@ export function settingsPanel(): HTMLElement {
 
   // One strip: the name (with an optional short hint under it) on the left, the
   // control on the right. |about| is the longer text for the help line.
-  function row(name: string, control: HTMLElement, hint = "", about = ""): HTMLElement {
-    const el = h("div.nset-row", null, h("span.nset-name", null, name, hint ? h("small.nset-hint", null, hint) : null), control);
+  function row(name: string, control: HTMLElement, hint = "", about = "", search = `${name} ${hint} ${about}`): HTMLElement {
+    const el = h("div.nset-row", { "data-search": search.toLowerCase() }, h("span.nset-name", null, name, hint ? h("small.nset-hint", null, hint) : null), control);
     const show = (): void => { help.textContent = about || hint; };
     el.addEventListener("pointerenter", show); el.addEventListener("focusin", show);
     return el;
@@ -60,7 +61,7 @@ export function settingsPanel(): HTMLElement {
     controls.set(key, input);
     input.addEventListener("change", () => {
       const value = input.valueAsNumber;
-      if (!Number.isFinite(value) || value < min || value > max || (key === "fpsLimit" && value !== 0 && value < 30) || (key === "jumpStatsInterval" && !Number.isInteger(value))) {
+      if (!Number.isFinite(value) || value < min || value > max || (key === "fpsLimit" && value !== 0 && value < 30) || ((key === "jumpStatsInterval" || key === "strafeTrainerSmoothing") && !Number.isInteger(value))) {
         say(key === "fpsLimit" ? "FPS limit is 0 (unlimited) or 30–1000." : `${name}: choose ${min}–${max}.`);
         input.value = String(state.settings[key]); return;
       }
@@ -105,16 +106,81 @@ export function settingsPanel(): HTMLElement {
     group("Video",
       number("Field of view", "fov", 60, 130, 1, "", "Field of view in degrees.", "°"),
       toggle("Vertical sync", "vsync", "", "Locks frames to your monitor's refresh rate. Off gives the lowest input latency."),
-      number("FPS limit", "fpsLimit", 0, 1000, 1, "0 is unlimited", "Caps the frame rate. 0 means no cap; otherwise 30–1000.")),
-    group("HUD",
-      toggle("HUD", "hud", "", "Speed, timer and keys."),
-      toggle("Crosshair", "crosshair"),
-      toggle("Viewmodel", "viewmodel", "", "Your weapon and hands."),
-      toggle("Jump stats", "jumpStats", "JHUD / SSJ", "Speed and gain per jump, ported from the game's !ssj.")),
-    group("Jump stats",
-      jumpStatsMode(),
-      number("N", "jumpStatsInterval", 2, 50, 1, "For Every N", "Show every Nth jump: 2 to 50."),
-      toggle("Strafe trainer", "strafeTrainer", "Turn rate", "While you're in the air: how fast you turned against the turn rate that gains the most speed at your speed. 100% is ideal; green is within 10%, amber within 25%. Updates every 0.1 s.")));
+      number("FPS limit", "fpsLimit", 0, 1000, 1, "0 is unlimited", "Caps the frame rate. 0 means no cap; otherwise 30–1000.")));
+
+  // ---- HUD positions (Advanced) -------------------------------------------
+  // Each element gets an X and a Y: a slider and a box showing the same
+  // number, in percent of the screen. Untouched elements show where the game
+  // draws them by default; Reset puts one back there.
+  const positions = new Map<HudElementId, { x: HTMLInputElement[]; y: HTMLInputElement[]; reset: HTMLButtonElement; row: HTMLElement }>();
+  const layout = (): HudLayout => ({ ...state.settings.hudLayout });
+  const placed = (id: HudElementId) => state.settings.hudLayout[id] ?? defaultPosition(id);
+  let layoutTimer = 0, pendingLayout: HudLayout | null = null;
+  const saveLayout = (next: HudLayout, now = false): void => {
+    // Sliders send while dragging, at most every 100 ms, so the HUD follows.
+    state.settings.hudLayout = next; pendingLayout = next;
+    const flush = (): void => { layoutTimer = 0; if (pendingLayout) { save({ hudLayout: pendingLayout }); pendingLayout = null; } };
+    if (now) { window.clearTimeout(layoutTimer); flush(); }
+    else if (!layoutTimer) layoutTimer = window.setTimeout(flush, 100);
+  };
+  function position(id: HudElementId, label: string): HTMLElement {
+    const inputs = { x: [] as HTMLInputElement[], y: [] as HTMLInputElement[] };
+    const axis = (name: "x" | "y"): HTMLElement => {
+      const range = h("input.nset-range", { type: "range", min: 0, max: 100, step: .1, "aria-label": `${label} ${name.toUpperCase()} slider` }) as HTMLInputElement;
+      const box = h("input.num-input.nset-pos-num", { type: "number", min: 0, max: 100, step: .1, "aria-label": `${label} ${name.toUpperCase()}` }) as HTMLInputElement;
+      inputs[name].push(range, box);
+      const apply = (value: number, now: boolean): void => {
+        if (!Number.isFinite(value) || value < 0 || value > 100) { say(`${label} ${name.toUpperCase()}: choose 0–100%.`); refreshPositions(true); return; }
+        value = Math.round(value * 10) / 10;
+        for (const input of inputs[name]) if (input !== document.activeElement || input === range) input.value = String(value);
+        saveLayout({ ...layout(), [id]: { ...placed(id), [name]: value } }, now);
+        positions.get(id)?.row.classList.add("moved");
+      };
+      range.addEventListener("input", () => apply(range.valueAsNumber, false));
+      range.addEventListener("change", () => apply(range.valueAsNumber, true));
+      box.addEventListener("change", () => apply(box.valueAsNumber, true));
+      return h("label.nset-axis", null, h("span.nset-axis-name", null, name.toUpperCase()), range, box, h("span.unit", null, "%"));
+    };
+    const reset = h("button.link-btn", { type: "button", title: `Put ${label} back where it was`, onclick: () => {
+      const next = layout(); delete next[id]; saveLayout(next, true); refreshPositions(true);
+    } }, "Reset") as HTMLButtonElement;
+    const el = row(label, h("div.nset-pos", null, axis("x"), axis("y"), reset), "", `Where ${label.toLowerCase()} sits on screen, in percent: X from the left, Y from the top.`,
+      `${label} position x y move hud layout advanced`);
+    el.classList.add("nset-row-pos");
+    positions.set(id, { ...inputs, reset, row: el });
+    return el;
+  }
+  function refreshPositions(force = false): void {
+    for (const [id, item] of positions) {
+      const at = placed(id), moved = !!state.settings.hudLayout[id];
+      for (const name of ["x", "y"] as const)
+        for (const input of item[name]) if (force || input !== document.activeElement) input.value = String(at[name]);
+      item.reset.disabled = !moved; item.row.classList.toggle("moved", moved);
+    }
+  }
+  const resetAll = h("button.link-btn", { type: "button", onclick: () => { saveLayout({}, true); refreshPositions(true); } }, "Reset all");
+  const advanced = h("details.nset-advanced", null,
+    h("summary", null, h("span", null, "Advanced: positions"), h("small.nset-hint", null, "Move any part of the HUD")),
+    h("div.nset-advanced-body", null,
+      h("div.nset-advanced-bar", null, h("span.nset-hint", null, "X is from the left, Y from the top, in percent of the screen."), resetAll),
+      group("", ...HUD_ELEMENTS.map(item => position(item.id, item.label)))));
+  window.addEventListener("resize", () => refreshPositions());
+
+  const hud = h("div.nset-hud", null,
+    h("div.nset-cols", null,
+      group("HUD",
+        toggle("HUD", "hud", "", "Speed, timer and keys."),
+        toggle("Crosshair", "crosshair"),
+        toggle("Viewmodel", "viewmodel", "", "Your weapon and hands.")),
+      group("Jump stats",
+        toggle("Jump stats", "jumpStats", "JHUD / SSJ", "Speed and gain per jump, ported from the game's !ssj."),
+        jumpStatsMode(),
+        number("N", "jumpStatsInterval", 2, 50, 1, "For Every N", "Show every Nth jump: 2 to 50.")),
+      group("Strafe trainer",
+        toggle("Strafe trainer", "strafeTrainer", "Turn rate", "While you're in the air: how fast you turned against the turn rate that gains the most speed at your speed. 100% is ideal; green is within 10%, amber within 25%."),
+        number("Average over", "strafeTrainerSmoothing", 1, 50, 1, "1 = every tick", "How many air ticks each reading averages. 1 updates every tick with that tick alone; higher is steadier but slower to react.", "ticks"),
+        toggle("Hints", "strafeTrainerHints", "Under the trainer", "Says what to fix over the last 0.3 s in the air: Less deadtime! (no single strafe key held), Strafe more! (turning too slowly) or Strafe less! (turning too fast)."))),
+    advanced);
   const audio = h("div.nset-cols", null,
     group("Volume",
       number("Volume", "volume", 0, 1, .01, "0 to 1", "Master volume for sound effects and music."),
@@ -142,13 +208,14 @@ export function settingsPanel(): HTMLElement {
     const add = h("button.link-btn", { type: "button", title: "Add another key", onclick: () => { capturing = action; appendBinding = true; refresh(); } }, "Add");
     const clear = h("button.link-btn", { type: "button", title: "Unbind", onclick: () => save({ binds: { [action]: [] } }) }, "Clear");
     buttons.set(action, button);
-    return row(label, h("div.nset-bind", null, button, add, clear), "", "Click, then press a key, mouse button or wheel direction. Escape cancels. Escape and F10 stay reserved. Up to four keys each.");
+    return row(label, h("div.nset-bind", null, button, add, clear), "", "Click, then press a key, mouse button or wheel direction. Escape cancels. Escape and F10 stay reserved. Up to four keys each.", `${label} ${action} key bind`);
   };
   const keys = h("div.nset-cols", null, ...BIND_GROUPS.map(item => group(item.title, ...item.actions.map(bindRow))));
 
   const sections: Section[] = [
     { id: "mouse", title: "Mouse", body: mouse },
     { id: "display", title: "Display", body: display },
+    { id: "hud", title: "HUD", body: hud },
     { id: "audio", title: "Audio", body: audio },
     { id: "keys", title: "Keys", body: keys },
     { id: "discord", title: "Discord", body: discord },
@@ -178,7 +245,48 @@ export function settingsPanel(): HTMLElement {
   mark(sections[0].id);
   scroll.addEventListener("pointerleave", () => { help.textContent = ""; });
 
-  const root = h("div.nset", null, h("div.nset-side", null, rail, saved), scroll, h("div.nset-foot", null, help, status));
+  // ---- search ---------------------------------------------------------------
+  // Filters rows across every section by name, hint and help text. A group or
+  // section whose title matches keeps all its rows. Ctrl+F or / focuses it.
+  const search = h("input.nset-search", { type: "search", placeholder: "Search settings", "aria-label": "Search settings", autocomplete: "off", spellcheck: "false" }) as HTMLInputElement;
+  const empty = h("p.nset-empty", { hidden: true }, "No settings match.");
+  scroll.append(empty);
+  function filter(): void {
+    const query = search.value.trim().toLowerCase();
+    let anyShown = false;
+    for (const section of sections) {
+      const el = document.getElementById(`nset-${section.id}`); if (!el) continue;
+      const sectionHit = !!query && section.title.toLowerCase().includes(query);
+      let sectionShown = false;
+      for (const groupEl of el.querySelectorAll<HTMLElement>(".nset-group")) {
+        const groupHit = sectionHit || (!!query && (groupEl.querySelector(".nset-group-title")?.textContent ?? "").toLowerCase().includes(query));
+        let groupShown = false;
+        for (const rowEl of groupEl.querySelectorAll<HTMLElement>(".nset-row")) {
+          const shown = !query || groupHit || (rowEl.dataset.search ?? "").includes(query);
+          rowEl.hidden = !shown; groupShown ||= shown;
+        }
+        groupEl.hidden = !groupShown; sectionShown ||= groupShown;
+      }
+      for (const details of el.querySelectorAll<HTMLDetailsElement>("details")) {
+        const visible = [...details.querySelectorAll<HTMLElement>(".nset-row")].some(rowEl => !rowEl.hidden);
+        details.hidden = !visible;
+        if (query && visible) details.open = true;
+      }
+      el.hidden = !sectionShown; anyShown ||= sectionShown;
+      railItems.get(section.id)?.classList.toggle("dim", !sectionShown);
+    }
+    empty.hidden = anyShown;
+    if (query) scroll.scrollTop = 0;
+  }
+  search.addEventListener("input", filter);
+  search.addEventListener("keydown", event => { if (event.key === "Escape" && search.value) { search.value = ""; filter(); event.preventDefault(); event.stopPropagation(); } });
+
+  const root = h("div.nset", null, h("div.nset-side", null, search, rail, saved), scroll, h("div.nset-foot", null, help, status));
+  root.addEventListener("keydown", event => {
+    if (capturing || document.activeElement === search) return;
+    const editing = document.activeElement instanceof HTMLInputElement && document.activeElement.type !== "checkbox" && document.activeElement.type !== "range";
+    if ((event.key === "f" && (event.ctrlKey || event.metaKey)) || (event.key === "/" && !editing)) { event.preventDefault(); search.focus(); search.select(); }
+  });
 
   let previous: Partial<NativeSettings> = {};
   function refresh(): void {
@@ -201,8 +309,17 @@ export function settingsPanel(): HTMLElement {
       const off = presenceOff || (key === "discordJoinLobbies" && !state.settings.discordJoin);
       if (input instanceof HTMLInputElement) { input.disabled = off; input.closest(".nset-row")?.classList.toggle("off", off); }
     }
-    const interval = controls.get("jumpStatsInterval");
-    if (interval instanceof HTMLInputElement) { interval.disabled = state.settings.jumpStatsMode !== "interval"; interval.closest(".nset-row")?.classList.toggle("off", interval.disabled); }
+    const off = (key: keyof NativeSettings, disabled: boolean): void => {
+      const control = controls.get(key);
+      if (control instanceof HTMLInputElement) control.disabled = disabled;
+      else if (control) for (const button of control.querySelectorAll("button")) button.disabled = disabled;
+      control?.closest(".nset-row")?.classList.toggle("off", disabled);
+    };
+    off("jumpStatsMode", !state.settings.jumpStats);
+    off("jumpStatsInterval", !state.settings.jumpStats || state.settings.jumpStatsMode !== "interval");
+    off("strafeTrainerSmoothing", !state.settings.strafeTrainer);
+    off("strafeTrainerHints", !state.settings.strafeTrainer);
+    refreshPositions();
     const vertical = controls.get("verticalSensitivity");
     if (vertical instanceof HTMLInputElement) { vertical.disabled = !state.settings.separateVertical; vertical.closest(".nset-row")?.classList.toggle("off", vertical.disabled); }
     for (const [action, button] of buttons) {

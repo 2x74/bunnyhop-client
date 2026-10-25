@@ -166,30 +166,60 @@ int main(int argc, char **argv) {
         tracker.set_interval(5);  // changing N starts the count over
         assert(tracker.interval() == 5 && tracker.jump == 0);
     }
-    {   // Strafe trainer: turning exactly atan(30/speed) per air tick reads 100%.
-        native::StrafeTrainer trainer;
-        const float speed = 600, ideal = native::StrafeTrainer::ideal_degrees(speed);
+    {   // Strafe trainer, per tick by default: the first air tick after one with a yaw reads.
+        using T = native::StrafeTrainer;
+        const std::uint32_t right = T::right_bit, left = T::left_bit;
+        const float speed = 600, ideal = T::ideal_degrees(speed);
         assert(std::fabs(ideal - 2.8624f) < 1e-3f);
-        std::optional<float> reading;
-        float yaw = 179.0f;  // crosses the 180/-180 wrap on the way
-        for (unsigned t = 0; t <= native::StrafeTrainer::window; ++t) {
-            if (const auto r = trainer.tick(false, speed, yaw)) reading = r;
-            yaw += ideal;
-            if (yaw > 180.0f) yaw -= 360.0f;
-        }
-        assert(reading && std::fabs(*reading - 100.0f) < 0.1f);
-        assert(native::strafe_band(*reading) == 0 && native::strafe_band(80) == 1 && native::strafe_band(150) == 2);
-        // Half the turn rate reads 50%; the ground starts a reading over.
-        native::StrafeTrainer half;
-        reading.reset();
+        T trainer;
+        assert(!trainer.tick(false, speed, 179.0f, right));  // nothing to compare the yaw with yet
+        auto r = trainer.tick(false, speed, 179.0f + ideal - 360.0f, right);  // across the 180/-180 wrap
+        assert(r && std::fabs(r->percent - 100.0f) < 0.1f && !r->hint);
+        r = trainer.tick(false, speed, 179.0f + 1.5f * ideal - 360.0f, right);  // half a tick's worth
+        assert(r && std::fabs(r->percent - 50.0f) < 0.1f);  // per tick: no averaging by default
+        assert(native::strafe_band(100) == 0 && native::strafe_band(80) == 1 && native::strafe_band(150) == 2);
+
+        // Smoothing is a rolling mean of the last N air ticks, still one reading per tick.
+        T smooth;
+        smooth.set_smoothing(2);
+        float yaw = 0;
+        smooth.tick(false, speed, yaw, right);
+        r = smooth.tick(false, speed, yaw += ideal, right);
+        assert(r && std::fabs(r->percent - 100.0f) < 0.1f);
+        r = smooth.tick(false, speed, yaw += ideal * 0.5f, right);
+        assert(r && std::fabs(r->percent - 75.0f) < 0.1f);
+        smooth.set_smoothing(0);
+        assert(smooth.smoothing() == 1);
+
+        // Hints wait for a full window, then say what's wrong over it.
+        auto run = [&](float rate, std::uint32_t keys) {
+            T t;
+            float y = 0;
+            std::optional<native::StrafeReading> last;
+            t.tick(false, speed, y, keys);
+            for (unsigned i = 0; i < T::hint_window; ++i) {
+                last = t.tick(false, speed, y += ideal * rate, keys);
+                if (i + 1 < T::hint_window) assert(last && !last->hint);
+            }
+            return last->hint;
+        };
+        assert(!run(1.0f, right));
+        assert(run(0.5f, right) == native::StrafeHint::strafe_more);
+        assert(run(1.6f, right) == native::StrafeHint::strafe_less);
+        assert(run(1.0f, 0) == native::StrafeHint::less_deadtime);           // no key
+        assert(run(1.0f, left | right) == native::StrafeHint::less_deadtime);  // both cancel
+        assert(std::string(native::strafe_hint_text(native::StrafeHint::strafe_more)) == "Strafe more!");
+
+        // Too slow to have an ideal angle: no reading. A long stand starts over.
+        T slow;
+        for (unsigned t = 0; t < 40; ++t) assert(!slow.tick(false, 10, float(t), right));
+        T chain;
         yaw = 0;
-        half.tick(true, speed, yaw);
-        for (unsigned t = 0; t < native::StrafeTrainer::window; ++t)
-            if (const auto r = half.tick(false, speed, yaw += ideal / 2)) reading = r;
-        assert(reading && std::fabs(*reading - 50.0f) < 0.1f);
-        // Too slow to have an ideal angle: no reading.
-        native::StrafeTrainer slow;
-        for (unsigned t = 0; t < 40; ++t) assert(!slow.tick(false, 10, float(t)));
+        chain.tick(false, speed, yaw, 0);
+        for (unsigned i = 0; i < T::hint_window; ++i) chain.tick(false, speed, yaw += ideal, 0);
+        for (unsigned i = 0; i <= T::ground_reset; ++i) assert(!chain.tick(true, speed, yaw, 0));
+        r = chain.tick(false, speed, yaw += ideal, right);
+        assert(r && !r->hint);  // the dead air from before the stand is gone
     }
     std::cout << "Jump stats interval and strafe trainer checks passed\n";
     return 0;

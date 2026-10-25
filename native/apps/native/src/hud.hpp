@@ -2,6 +2,7 @@
 #include "renderer.hpp"
 #include <array>
 #include <cstdio>
+#include <map>
 #include <optional>
 #include "strafe_trainer.hpp"
 
@@ -62,54 +63,76 @@ void main(){color=vec4(ink.rgb,ink.a*(uv.x<0.?1.:texture(font,uv).a));})");
         gl.TexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,640,312,0,GL_RGBA,GL_UNSIGNED_BYTE,data.data());
     }
     ~NativeHud(){gl.DeleteTextures(1,&atlas);gl.DeleteBuffers(1,&vbo);gl.DeleteVertexArrays(1,&vao);gl.DeleteProgram(program);}
+    // Where each element goes: element id -> {x, y} in percent of the screen.
+    // An element that isn't listed stays at its built-in place (see draw()).
+    // ui/hud-layout.ts mirrors the ids and built-in places for the settings
+    // screen; keep the two in step.
+    using Layout=std::map<std::string,std::array<float,2>>;
     void draw(int width,int height,const BhSnapshot &s,const BhRunState &run,const BhCmd &cmd,
               const std::string &map,const std::string &style,const std::string &notice,
               double fps,bool visible,bool crosshair,bool playback,const BhWeaponReport &weapon,
-              const std::string &jump_stats="",bool jump_stats_good=false,std::optional<float> strafe=std::nullopt) {
+              const std::string &jump_stats="",bool jump_stats_good=false,
+              std::optional<native::StrafeReading> strafe=std::nullopt,bool strafe_hints=true,
+              const Layout *layout=nullptr) {
         if(width<=0||height<=0||(!visible&&!crosshair))return;
         vertices.clear();scale=std::max(.6f,float(height)/900.f);
         const float w=width/scale,h=height/scale;
+        // HUD units are 1/900 of the screen height (above 540 px), so the
+        // built-in places below are the same fraction of the screen at any size.
+        auto at=[&](const char *id,float x,float y)->std::array<float,2>{
+            if(layout){const auto it=layout->find(id);if(it!=layout->end())return {it->second[0]/100.f*w,it->second[1]/100.f*h};}
+            return {x,y};
+        };
         if(crosshair) {
-            const float x=w/2,y=h/2;
+            const auto [x,y]=at("crosshair",w/2,h/2);
             rect(x-9,y-1,6,2,cream);rect(x+3,y-1,6,2,cream);
             rect(x-1,y-9,2,6,cream);rect(x-1,y+3,2,6,cream);
         }
         if(visible) {
-            text(26,18,map,17,cream);text(26,42,style+(run.track?" / BONUS "+std::to_string(run.track):""),14,amber);
-            char buf[160];std::snprintf(buf,sizeof(buf),"%.0f FPS",fps);text(w-135,20,buf,14,dim);
-            const double t=run.seconds;
-            std::snprintf(buf,sizeof(buf),"%02u:%06.3f",unsigned(t)/60,std::fmod(t,60));
-            text(w/2,h-154,buf,34,run.status==2?amber:cream,true);
-            std::snprintf(buf,sizeof(buf),"%.0f u/s",std::hypot(s.player.velocity[0],s.player.velocity[1]));
-            text(w/2,h-105,buf,25,cream,true);
-            std::snprintf(buf,sizeof(buf),"%u jumps  %u strafes  %.1f%% sync",run.jumps,run.strafes,run.sync_percent);
-            text(w/2,h-68,buf,13,dim,true);
+            {const auto [x,y]=at("map",26,18);
+                text(x,y,map,17,cream);text(x,y+24,style+(run.track?" / BONUS "+std::to_string(run.track):""),14,amber);}
+            char buf[160];
+            {const auto [x,y]=at("fps",w-135,20);std::snprintf(buf,sizeof(buf),"%.0f FPS",fps);text(x,y,buf,14,dim);}
+            {const auto [x,y]=at("timer",w/2,h-154);const double t=run.seconds;
+                std::snprintf(buf,sizeof(buf),"%02u:%06.3f",unsigned(t)/60,std::fmod(t,60));
+                text(x,y,buf,34,run.status==2?amber:cream,true);}
+            {const auto [x,y]=at("speed",w/2,h-105);
+                std::snprintf(buf,sizeof(buf),"%.0f u/s",std::hypot(s.player.velocity[0],s.player.velocity[1]));
+                text(x,y,buf,25,cream,true);}
+            {const auto [x,y]=at("runStats",w/2,h-68);
+                std::snprintf(buf,sizeof(buf),"%u jumps  %u strafes  %.1f%% sync",run.jumps,run.strafes,run.sync_percent);
+                text(x,y,buf,13,dim,true);}
             // Jump stats sit above the run status, clear of the timer and speed.
             // The accent marks a gain the plugin would call good.
-            if(!jump_stats.empty())text(w/2,h-222,jump_stats,14,jump_stats_good?amber:dim,true);
-            // Strafe trainer above that: the percentage and a bar whose centre
-            // line is 100%, either end being 0% and 200%.
+            if(!jump_stats.empty()){const auto [x,y]=at("jumpStats",w/2,h-222);text(x,y,jump_stats,14,jump_stats_good?amber:dim,true);}
+            // Strafe trainer above that: the percentage, a bar whose centre line
+            // is 100% (either end being 0% and 200%), and a hint under the bar.
             if(strafe) {
                 static const Color bands[3]={{.47f,.9f,.47f,1},amber,{1,.42f,.36f,1}};
-                const Color tone=bands[native::strafe_band(*strafe)];
-                std::snprintf(buf,sizeof(buf),"Strafe %.0f%%",*strafe);
-                text(w/2,h-276,buf,14,tone,true);
-                const float bar=240,left=w/2-bar/2,y=h-252;
-                rect(left,y,bar,6,{.05f,.05f,.07f,.6f});
-                rect(w/2-1,y-3,2,12,cream);
-                const float at=std::clamp(*strafe/200.f,0.f,1.f);
-                rect(left+at*bar-3,y-2,6,10,tone);
+                const Color tone=bands[native::strafe_band(strafe->percent)];
+                const auto [x,y]=at("strafeTrainer",w/2,h-276);
+                std::snprintf(buf,sizeof(buf),"Strafe %.0f%%",strafe->percent);
+                text(x,y,buf,14,tone,true);
+                const float bar=240,left=x-bar/2,by=y+24;
+                rect(left,by,bar,6,{.05f,.05f,.07f,.6f});
+                rect(x-1,by-3,2,12,cream);
+                const float pos=std::clamp(strafe->percent/200.f,0.f,1.f);
+                rect(left+pos*bar-3,by-2,6,10,tone);
+                if(strafe_hints&&strafe->hint)text(x,by+12,native::strafe_hint_text(*strafe->hint),12,bands[2],true);
             }
-            if(run.status==0)text(w/2,h-186,run.in_start?"IN START":"READY",13,amber,true);
-            if(run.status==2)text(w/2,h-186,"FINISHED",15,amber,true);
+            {const auto [x,y]=at("status",w/2,h-186);
+                if(run.status==0)text(x,y,run.in_start?"IN START":"READY",13,amber,true);
+                if(run.status==2)text(x,y,"FINISHED",15,amber,true);}
             const std::array<std::pair<const char*,uint32_t>,6> keys={{{"W",native::forward},{"A",native::left},{"S",native::back},{"D",native::right},{"JUMP",native::jump},{"DUCK",native::duck}}};
-            float x=26;for(const auto &[label,bit]:keys){float size=std::string(label).size()>1?54:28;
-                rect(x,h-65,size,27,(cmd.buttons&bit)?Color{1,.71f,.24f,.85f}:Color{.05f,.05f,.07f,.6f});
-                text(x+5,h-63,label,14,(cmd.buttons&bit)?Color{.08f,.07f,.06f,1}:dim);x+=size+4;}
-            std::snprintf(buf,sizeof(buf),"HP %.0f  AMMO %u/%u",s.health,weapon.clip,weapon.clip_size);
-            text(w-275,h-62,buf,14,cream);
-            if(!notice.empty())text(w/2,70,notice.substr(0,100),15,amber,true);
-            if(playback)text(w/2,22,"REPLAY - ESC FOR PLAYBACK CONTROLS",14,amber,true);
+            {const auto [x0,y]=at("keys",26,h-65);float x=x0;
+                for(const auto &[label,bit]:keys){float size=std::string(label).size()>1?54:28;
+                rect(x,y,size,27,(cmd.buttons&bit)?Color{1,.71f,.24f,.85f}:Color{.05f,.05f,.07f,.6f});
+                text(x+5,y+2,label,14,(cmd.buttons&bit)?Color{.08f,.07f,.06f,1}:dim);x+=size+4;}}
+            {const auto [x,y]=at("health",w-275,h-62);
+                std::snprintf(buf,sizeof(buf),"HP %.0f  AMMO %u/%u",s.health,weapon.clip,weapon.clip_size);
+                text(x,y,buf,14,cream);}
+            if(!notice.empty()){const auto [x,y]=at("notice",w/2,70);text(x,y,notice.substr(0,100),15,amber,true);}
+            if(playback){const auto [x,y]=at("replay",w/2,22);text(x,y,"REPLAY - ESC FOR PLAYBACK CONTROLS",14,amber,true);}
         }
         gl.Disable(GL_DEPTH_TEST);gl.DepthMask(GL_FALSE);gl.Disable(GL_CULL_FACE);gl.Enable(GL_BLEND);gl.BlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
         gl.UseProgram(program);const float viewport[3]={float(width),float(height),0};

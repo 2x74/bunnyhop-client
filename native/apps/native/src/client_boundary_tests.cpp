@@ -38,6 +38,18 @@ int main(){
     for(int i=0;i<15;i++)movement.tick(state,.01,NAN,"metal",hear);
     assert(cues.size()==1&&cues[0].id=="step_metal"&&cues[0].gain==.55);
     const auto original=native::default_settings();
+    {   // HUD layout: known elements, x and y 0–100; a patch replaces the whole layout.
+        auto laid=native::patch_settings(original,{{"hudLayout",{{"timer",{{"x",50},{"y",10.5}}},{"crosshair",{{"x",40},{"y",60}}}}}});
+        assert(laid["hudLayout"]["timer"]["y"]==10.5&&laid["hudLayout"].size()==2&&original["hudLayout"].empty());
+        laid=native::patch_settings(laid,{{"hudLayout",{{"timer",{{"x",1},{"y",2}}}}}});assert(laid["hudLayout"].size()==1);
+        auto smooth=native::patch_settings(original,{{"strafeTrainerSmoothing",5},{"strafeTrainerHints",false}});
+        assert(smooth["strafeTrainerSmoothing"]==5&&smooth["strafeTrainerHints"]==false&&original["strafeTrainerSmoothing"]==1&&original["strafeTrainerHints"]==true);
+        for(const auto &bad:{native::Json{{"hudLayout",{{"nope",{{"x",1},{"y",1}}}}}},native::Json{{"hudLayout",{{"timer",{{"x",101},{"y",1}}}}}},
+            native::Json{{"hudLayout",{{"timer",{{"x",1}}}}}},native::Json{{"hudLayout",{{"timer",{{"x",1},{"y",1},{"z",1}}}}}},native::Json{{"hudLayout",3}},
+            native::Json{{"strafeTrainerSmoothing",0}},native::Json{{"strafeTrainerSmoothing",2.5}}}){
+            bool threw=false;try{native::patch_settings(original,bad);}catch(const std::exception&){threw=true;}assert(threw);
+        }
+    }
     {   // Jump stats mode and interval, strafe trainer.
         auto js=native::patch_settings(original,{{"jumpStatsMode","interval"},{"jumpStatsInterval",4},{"strafeTrainer",true}});
         assert(js["jumpStatsMode"]=="interval"&&js["jumpStatsInterval"]==4&&js["strafeTrainer"]==true);

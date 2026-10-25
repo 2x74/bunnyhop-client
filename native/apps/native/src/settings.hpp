@@ -16,7 +16,11 @@ inline Json default_settings() {
         {"fov",90.0},{"vsync",true},{"fpsLimit",0},{"volume",.65},{"muted",false},
         {"hud",true},{"crosshair",true},{"viewmodel",true},{"jumpStats",true},
         // Jump stats: "sixth" (jump 6 only), "every" jump, or "interval" (every jumpStatsInterval jumps).
-        {"jumpStatsMode","sixth"},{"jumpStatsInterval",6},{"strafeTrainer",false},
+        {"jumpStatsMode","sixth"},{"jumpStatsInterval",6},
+        // Strafe trainer: smoothing is how many air ticks a reading averages (1 = every tick on its own).
+        {"strafeTrainer",false},{"strafeTrainerSmoothing",1},{"strafeTrainerHints",true},
+        // HUD element positions, element id -> {x, y} in percent. Absent means the built-in place.
+        {"hudLayout",Json::object()},
         {"sfxPack","default"},{"musicPack","default"},
         // Discord: presence on by default; privacy mode hides everything.
         {"discordRichPresence",true},{"discordShowMap",true},{"discordJoin",true},{"discordJoinLobbies",false},{"privacyMode",false},
@@ -31,6 +35,9 @@ inline Json default_settings() {
             {"giveUsp",{"Digit5"}},{"giveGlock",{"Digit6"}}
         }}};
 }
+// The HUD elements a layout may place. hud.hpp draws them; ui/hud-layout.ts lists them.
+inline const std::set<std::string> hud_elements={"crosshair","map","fps","timer","speed","runStats","status",
+    "jumpStats","strafeTrainer","keys","health","notice","replay"};
 inline bool valid_bind_code(const std::string &code) {
     if(code.size()==4 && code.starts_with("Key")) return code[3]>='A'&&code[3]<='Z';
     if(code.size()==6 && code.starts_with("Digit")) return code[5]>='0'&&code[5]<='9';
@@ -64,6 +71,17 @@ inline Json patch_settings(const Json &current,const Json &patch) {
                 binds[b.key()]=b.value();
             }
             out["binds"]=std::move(binds);continue;
+        } else if(key=="hudLayout") {
+            // Replaces the whole layout: what isn't listed goes back to its built-in place.
+            if(!v.is_object()||v.size()>hud_elements.size()) throw std::runtime_error("Invalid HUD layout");
+            for(auto e=v.begin();e!=v.end();++e) {
+                if(!hud_elements.contains(e.key())||!e.value().is_object()||e.value().size()!=2) throw std::runtime_error("Invalid HUD layout entry");
+                for(const char *axis:{"x","y"}) {
+                    if(!e.value().contains(axis)||!e.value()[axis].is_number()) throw std::runtime_error("Invalid HUD layout entry");
+                    const double n=e.value()[axis].get<double>();
+                    if(!std::isfinite(n)||n<0||n>100) throw std::runtime_error("HUD positions must be 0–100%");
+                }
+            }
         } else if(key=="jumpStatsMode") {
             if(!v.is_string()) throw std::runtime_error("Setting must be text: "+key);
             const auto mode=v.get<std::string>();
@@ -81,6 +99,7 @@ inline Json patch_settings(const Json &current,const Json &patch) {
             if((key=="sensitivity"||key=="verticalSensitivity") && (n<.01||n>100)) throw std::runtime_error("Sensitivity must be .01–100");
             if(key=="fov" && (n<60||n>130)) throw std::runtime_error("FOV must be 60–130");
             if(key=="volume" && (n<0||n>1)) throw std::runtime_error("Volume must be 0–1");
+            if(key=="strafeTrainerSmoothing" && (n!=std::floor(n) || n<1 || n>50)) throw std::runtime_error("Strafe trainer smoothing must be a whole number 1–50");
             if(key=="jumpStatsInterval" && (n!=std::floor(n) || n<2 || n>50)) throw std::runtime_error("Jump stats interval must be a whole number 2–50");
             if(key=="fpsLimit" && (n!=std::floor(n) || (n!=0 && (n<30||n>1000)))) throw std::runtime_error("FPS limit must be 0 or 30–1000");
         }

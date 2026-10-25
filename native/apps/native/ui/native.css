@@ -149,3 +149,25 @@ body.native-menu { height: 100dvh; background: linear-gradient(115deg,rgba(12,12
 .nset-state[data-tone="ok"]::before { background:var(--gain); }
 .nset-state[data-tone="busy"]::before { background:var(--amber); }
 .nset-state[data-tone="bad"]::before { background:var(--loss); }
+
+/* HUD positions (Settings > HUD > Advanced) and settings search. */
+.nset [hidden] { display:none !important; }
+.nset-search { width:100%;margin:0 0 .7rem;padding:.5rem .75rem;border:1px solid var(--line);border-radius:var(--r-2);background:var(--raise);color:var(--text);font:inherit;font-size:var(--fs-md); }
+.nset-search:focus { outline:none;border-color:var(--amber);background:var(--raise-2); }
+.nset-rail-item.dim { color:var(--faint); }
+.nset-empty { margin:1rem .85rem;color:var(--dim); }
+.nset-advanced { border-radius:var(--r-2);background:none; }
+.nset-advanced > summary { display:flex;align-items:baseline;gap:.75rem;padding:.6rem .85rem;border-radius:var(--r-2);background:var(--raise);font-weight:650;cursor:pointer;list-style:none; }
+.nset-advanced > summary::-webkit-details-marker { display:none; }
+.nset-advanced > summary::before { content:"▸";color:var(--dim);transition:transform var(--t-fast); }
+.nset-advanced[open] > summary::before { transform:rotate(90deg); }
+.nset-advanced > summary:hover { background:var(--raise-2); }
+.nset-advanced-body { display:flex;flex-direction:column;gap:.6rem;padding-top:.6rem; }
+.nset-advanced-bar { display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:0 .15rem; }
+.nset-pos { display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:.35rem 1rem; }
+.nset-axis { display:flex;align-items:center;gap:.45rem;font-size:var(--fs-sm);color:var(--dim); }
+.nset-axis-name { width:1ch;font-weight:650; }
+.nset-range { width:9rem;accent-color:var(--amber); }
+.nset-row .nset-pos-num { width:4.6rem; }
+.nset-row-pos.moved .nset-name { color:var(--amber); }
+.nset-hud { display:flex;flex-direction:column;gap:1.1rem; }

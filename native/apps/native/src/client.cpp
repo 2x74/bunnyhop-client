@@ -179,6 +179,7 @@ int run(const Options &opt) {
     const auto menu_path=opt.menu_html==BUNNYHOP_MENU_HTML?native::resource("menu.html",opt.menu_html):std::filesystem::path(opt.menu_html);
     const auto manifest_path=native::resource("native-manifest.json",BUNNYHOP_NATIVE_MANIFEST);
     NativeHud hud(gl,assets);
+    NativeHud::Layout hud_layout;
     // Resolved before the audio device so the custom sound/ and bgm/ folders
     // are known at the point the packs are first applied.
     char *pref_path=SDL_GetPrefPath("bunnyhop.lol","Bunnyhop Native");
@@ -224,6 +225,8 @@ int run(const Options &opt) {
     auto save_tutorial=[&](){if(!tutorial)return;tutorial_completed=tutorial->stateJSON().at("completed");native::save_settings(cache/"tutorial-progress.json",tutorial_completed);};
     std::set<std::string> held_codes;
     auto apply_preferences=[&]() {
+        hud_layout.clear();
+        for(const auto &[id,at]:preferences.at("hudLayout").items())hud_layout[id]={at.at("x").get<float>(),at.at("y").get<float>()};
         input.set_sensitivity(preferences.at("sensitivity").get<double>());
         input.vertical_sensitivity=preferences.at("verticalSensitivity").get<double>();input.separate_vertical=preferences.at("separateVertical").get<bool>();
         SDL_GL_SetSwapInterval(opt.frames?0:preferences.at("vsync").get<bool>()?1:0);
@@ -255,7 +258,7 @@ int run(const Options &opt) {
     bool ssj_was_in_start=false,ssj_was_noclip=false;
     // Strafe trainer: the latest reading, cleared once you've been on the ground a while.
     native::StrafeTrainer strafe_trainer;
-    std::optional<float> strafe_reading;
+    std::optional<native::StrafeReading> strafe_reading;
     unsigned strafe_ground_ticks=0;
     uint64_t run_generation=0;
     uint32_t beat_start=0,beat_upto=0,beat_hash=0x811c9dc5;
@@ -695,7 +698,8 @@ int run(const Options &opt) {
                 ssj_was_in_start=timing.in_start!=0;ssj_was_noclip=state.movement_mode==1;  // Mode::Noclip
                 if(info.teleported){strafe_trainer.reset();strafe_reading.reset();}
                 else if(!info.noclip) {
-                    if(const auto reading=strafe_trainer.tick(pre.grounded,std::hypot(pre.velocity[0],pre.velocity[1]),cmd.yaw))strafe_reading=reading;
+                    strafe_trainer.set_smoothing(preferences.at("strafeTrainerSmoothing").get<unsigned>());
+                    if(const auto reading=strafe_trainer.tick(pre.grounded,std::hypot(pre.velocity[0],pre.velocity[1]),cmd.yaw,cmd.buttons))strafe_reading=reading;
                     strafe_ground_ticks=pre.grounded?strafe_ground_ticks+1:0;
                     if(strafe_ground_ticks>native::bhop_frames)strafe_reading.reset();
                 }
@@ -770,7 +774,8 @@ int run(const Options &opt) {
             if(!menu||!menu->visible())hud.draw(width,height,state,run_state,shown,map_id,playback?playback_info.value("style",active_style):active_style,shown_notice,display_fps,
                 preferences.at("hud").get<bool>(),preferences.at("crosshair").get<bool>(),playback,weapon,
                 preferences.at("jumpStats").get<bool>()?ssj_line:std::string(),ssj_good,
-                preferences.at("strafeTrainer").get<bool>()&&!playback?strafe_reading:std::nullopt);
+                preferences.at("strafeTrainer").get<bool>()&&!playback?strafe_reading:std::nullopt,
+                preferences.at("strafeTrainerHints").get<bool>(),&hud_layout);
         } else {gl.Viewport(0,0,width,height);gl.ClearColor(.03f,.04f,.06f,1);gl.Clear(GL_COLOR_BUFFER_BIT);}
         if(menu&&menu_ready&&core&&!playback&&!spectator&&!room.id.empty()&&room.map==map_id&&now-room_time>=std::chrono::milliseconds(50)) {
             BhWeaponReport weapon{};bh_weapon_report(core.get(),&weapon);

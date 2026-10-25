@@ -1,3 +1,4 @@
+import { validHudLayout, type HudLayout } from "./hud-layout";
 import type { RunServiceStatus } from "./run-service";
 import { isStyleId, type StyleId } from "../../web/src/styles";
 import { LESSON_IDS, type LessonId } from "../../web/src/tutorial/data";
@@ -39,6 +40,12 @@ export interface NativeSettings {
   jumpStatsMode:JumpStatsMode;jumpStatsInterval:number;
   /** Turn rate against the ideal for your speed, while in the air. Off by default. */
   strafeTrainer:boolean;
+  /** Air ticks each reading averages; 1 is every tick on its own. */
+  strafeTrainerSmoothing:number;
+  /** "Less deadtime!" / "Strafe more!" / "Strafe less!" under the trainer. */
+  strafeTrainerHints:boolean;
+  /** Moved HUD elements, in percent of the screen. Absent means the built-in place. */
+  hudLayout:HudLayout;
   sfxPack:AudioPack;musicPack:AudioPack;
   /** Discord Rich Presence, on by default. Privacy mode hides everything. */
   discordRichPresence:boolean;discordShowMap:boolean;discordJoin:boolean;discordJoinLobbies:boolean;privacyMode:boolean;
@@ -103,7 +110,7 @@ export function openExternal(raw: string): boolean {
 }
 
 export const state: NativeMenuState = { map: null, loading: false, error: null, sensitivity: 2, paused: true,style:"autohop",track:0,
-  settings:{sensitivity:2,verticalSensitivity:2,separateVertical:false,fov:90,vsync:true,fpsLimit:0,volume:.8,muted:false,hud:true,crosshair:true,viewmodel:true,jumpStats:true,jumpStatsMode:"sixth",jumpStatsInterval:6,strafeTrainer:false,sfxPack:"default",musicPack:"default",discordRichPresence:true,discordShowMap:true,discordJoin:true,discordJoinLobbies:false,privacyMode:false,binds:Object.fromEntries(NATIVE_BIND_ACTIONS.map(action=>[action,[...DEFAULT_BINDS[action]]]))},
+  settings:{sensitivity:2,verticalSensitivity:2,separateVertical:false,fov:90,vsync:true,fpsLimit:0,volume:.8,muted:false,hud:true,crosshair:true,viewmodel:true,jumpStats:true,jumpStatsMode:"sixth",jumpStatsInterval:6,strafeTrainer:false,strafeTrainerSmoothing:1,strafeTrainerHints:true,hudLayout:{},sfxPack:"default",musicPack:"default",discordRichPresence:true,discordShowMap:true,discordJoin:true,discordJoinLobbies:false,privacyMode:false,binds:Object.fromEntries(NATIVE_BIND_ACTIONS.map(action=>[action,[...DEFAULT_BINDS[action]]]))},
   replays:[],discord:{state:"disabled",message:""},playback:{active:false,id:"",tick:0,totalTicks:0,paused:true,speed:1},ghost:{enabled:false,id:"",name:""},tutorial:{active:false,lesson:"jump",completed:[]}};
 
 export const nativeKeyCode=(code:unknown):code is string=>typeof code==="string"&&/^(?:Key[A-Z]|Digit[0-9]|F[1-9]|F11|F12|Mouse[1-5]|MouseWheel|MWheelUp|MWheelDown|(?:Control|Shift|Alt)(?:Left|Right)|Space|Tab|Enter|Backspace|Arrow(?:Up|Down|Left|Right)|Minus|Equal|BracketLeft|BracketRight|Semicolon|Quote|Comma|Period|Slash)$/.test(code);
@@ -113,11 +120,13 @@ export function settingsPatch(value:unknown):Partial<NativeSettings> {
   const input=value as Record<string,unknown>,out:Record<string,unknown>={};
   for(const [key,min,max] of [["sensitivity",.01,100],["verticalSensitivity",.01,100],["fov",60,130],["volume",0,1]] as const) if(typeof input[key]==="number"&&Number.isFinite(input[key])&&Number(input[key])>=min&&Number(input[key])<=max) out[key]=input[key];
   if(typeof input.fpsLimit==="number"&&Number.isFinite(input.fpsLimit)&&(input.fpsLimit===0||(input.fpsLimit>=30&&input.fpsLimit<=1000))) out.fpsLimit=input.fpsLimit;
-  for(const key of ["separateVertical","vsync","muted","hud","crosshair","viewmodel","jumpStats","strafeTrainer","discordRichPresence","discordShowMap","discordJoin","discordJoinLobbies","privacyMode"]) if(typeof input[key]==="boolean") out[key]=input[key];
+  for(const key of ["separateVertical","vsync","muted","hud","crosshair","viewmodel","jumpStats","strafeTrainer","strafeTrainerHints","discordRichPresence","discordShowMap","discordJoin","discordJoinLobbies","privacyMode"]) if(typeof input[key]==="boolean") out[key]=input[key];
   // Only these two words ever cross the bridge, so a pack choice can never
   // become a path the native side would go looking for.
   if(JUMP_STATS_MODES.includes(input.jumpStatsMode as JumpStatsMode)) out.jumpStatsMode=input.jumpStatsMode;
   if(Number.isInteger(input.jumpStatsInterval)&&Number(input.jumpStatsInterval)>=2&&Number(input.jumpStatsInterval)<=50) out.jumpStatsInterval=input.jumpStatsInterval;
+  if(Number.isInteger(input.strafeTrainerSmoothing)&&Number(input.strafeTrainerSmoothing)>=1&&Number(input.strafeTrainerSmoothing)<=50) out.strafeTrainerSmoothing=input.strafeTrainerSmoothing;
+  if(validHudLayout(input.hudLayout)) out.hudLayout=input.hudLayout;
   for(const key of ["sfxPack","musicPack"] as const) if(AUDIO_PACKS.includes(input[key] as AudioPack)) out[key]=input[key];
   if(input.binds&&typeof input.binds==="object"&&!Array.isArray(input.binds)) {
     const binds:Record<string,string[]>={};
