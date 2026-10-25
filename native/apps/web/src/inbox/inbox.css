@@ -1,0 +1,76 @@
+/* Inbox: the unread badge on the menu buttons (inbox/state.ts) and the panel (inbox/panel.ts). The dialog shell
+   (dialog.acct-dialog, .acct-head, .acct-body) is ui/account.css; tokens from style.css only. */
+
+.ib-badge {
+  display: inline-block; margin-left: 0.45rem; min-width: 1.25rem; padding: 0 0.32rem; border-radius: 999px;
+  background: var(--accent); color: var(--accent-ink); font-size: 0.72rem; font-weight: 800; line-height: 1.25rem;
+  letter-spacing: 0; text-transform: none; text-align: center; vertical-align: 0.15em; text-shadow: none;
+  font-variant-numeric: tabular-nums; box-shadow: 0 0 0.6rem color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.ri-label > .ib-badge { position: absolute; right: 0.7rem; top: 50%; transform: translateY(-50%); margin: 0; }
+
+dialog.ib-dialog { width: min(38rem, 94vw); }
+.ib-head { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
+.ib-head h2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-back { background: none; border: 0; color: var(--dim); font-size: 1.6rem; line-height: 1; padding: 0 0.35rem 0.1rem; border-radius: var(--radius-sm); cursor: pointer; }
+.ib-back:hover { color: var(--text); background: var(--raise-2); }
+.ib-back:focus-visible { outline: none; box-shadow: var(--ring); }
+.ib-pane { display: flex; flex-direction: column; gap: 0.6rem; }
+
+.ib-bar { display: flex; align-items: center; justify-content: space-between; min-height: 1.9rem; font-size: var(--fs-sm); color: var(--dim); }
+.ib-list { display: flex; flex-direction: column; gap: 2px; max-height: min(58vh, 30rem); overflow: auto; margin: 0 -0.4rem; padding: 0 0.4rem; }
+.ib-row {
+  display: grid; grid-template-columns: 1.8rem 1fr auto; align-items: center; gap: 0.7rem; width: 100%; padding: 0.6rem 0.7rem;
+  border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); text-align: left; cursor: pointer; font: inherit;
+  transition: background var(--t-fast);
+}
+.ib-row:hover { background: var(--raise-2); }
+.ib-row:focus-visible { outline: none; background: var(--raise-2); box-shadow: inset 0 0 0 1px var(--line-2); }
+.ib-glyph { display: grid; place-items: center; width: 1.8rem; height: 1.8rem; border-radius: 50%; background: var(--raise-2); font-size: 0.9rem; color: var(--dim); }
+.ib-text { display: flex; flex-direction: column; min-width: 0; gap: 0.1rem; }
+.ib-line { display: flex; gap: 0.45rem; align-items: baseline; min-width: 0; }
+.ib-sender { flex: none; font-size: var(--fs-xs); color: var(--dim); font-weight: 600; }
+.ib-subject { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-row.is-unread .ib-subject { font-weight: 800; }
+.ib-preview { font-size: var(--fs-sm); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-row.is-unread .ib-preview { color: var(--dim); }
+.ib-side { display: flex; flex-direction: column; align-items: flex-end; gap: 0.25rem; }
+.ib-when { font-size: var(--fs-xs); color: var(--faint); white-space: nowrap; }
+.ib-dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--accent); }
+
+.ib-status { display: inline-block; padding: 0.08rem 0.45rem; border-radius: 999px; font-size: 0.68rem; font-weight: 700; white-space: nowrap; background: var(--raise-2); color: var(--dim); }
+.ib-status.is-triaged { background: color-mix(in srgb, var(--ghost) 16%, transparent); color: var(--ghost); }
+.ib-status.is-resolved { background: color-mix(in srgb, var(--gain) 14%, transparent); color: var(--gain); }
+
+.ib-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 0.2rem; padding: 2.2rem 1rem; color: var(--text); }
+.ib-empty p { margin: 0; }
+.ib-mascot { margin-bottom: 0.5rem; }
+.ib-foot { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; padding-top: 0.7rem; border-top: 1px solid var(--line); }
+
+.ib-letter { gap: 0.8rem; }
+.ib-meta { display: flex; align-items: center; gap: 0.55rem; font-size: var(--fs-sm); }
+.ib-meta .ib-glyph { width: 1.5rem; height: 1.5rem; font-size: 0.78rem; }
+.ib-cat { font-size: 0.75rem; color: var(--faint); font-weight: 700; }
+.ib-body { margin: 0; white-space: pre-wrap; word-break: break-word; line-height: 1.55; font-size: var(--fs-md); }
+.ib-quote { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.7rem 0.85rem; border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.3); border: 1px solid var(--line); }
+.ib-quote .ib-body { color: var(--dim); font-size: var(--fs-sm); max-height: 14rem; overflow: auto; }
+.ib-quote-head { display: flex; align-items: center; gap: 0.55rem; font-size: var(--fs-sm); }
+.ib-quote-head .ib-status { margin-left: auto; }
+.ib-status-hint { font-size: var(--fs-xs); }
+.ib-reply { display: flex; flex-direction: column; gap: 0.35rem; padding: 0.15rem 0 0.15rem 0.85rem; border-left: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); }
+/* The player's own replies: the same thread, a neutral rule instead of the accent. */
+.ib-reply.is-you { border-left-color: var(--line-2); }
+.ib-none { margin: 0; font-size: var(--fs-sm); }
+/* The reply box under a ticket's thread (the textarea is the feedback form's .fb-text, feedback/feedback.css). */
+.ib-answer { display: flex; flex-direction: column; gap: 0.45rem; }
+.ib-answer .fb-text { min-height: 4.6rem; }
+.ib-answer-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; }
+.ib-answer-bar .fb-count { margin: 0; align-self: center; }
+.ib-letter-foot { display: flex; align-items: center; gap: 0.8rem; padding-top: 0.6rem; border-top: 1px solid var(--line); }
+.ib-ask { margin-left: auto; font-size: var(--fs-sm); }
+/* Welcome letter: moderator recruiting under the Discord button (ui/community.ts recruitNote; hidden without the API). */
+.ib-recruit { margin: 0; font-size: var(--fs-sm); color: var(--dim); }
+.ib-recruit[hidden] { display: none; }
+/* Welcome letter: "Join the Discord" (ui/community.ts; hidden without an invite). */
+.ib-discord:has(> a[hidden]) { display: none; }
+.ib-discord a { display: inline-flex; align-items: center; gap: 0.4rem; text-decoration: none; }

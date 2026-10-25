@@ -117,6 +117,8 @@ int main(){
             "https://evil.test/?next=https://github.com",  // allowed name only in the query
             "https://github.com@evil.test/",               // userinfo pointing elsewhere
             "https://evil.test#https://1998.lol",          // allowed name only in the fragment
+            "https://discord.gg.evil.test/bunnyhop",       // Discord invite host as a prefix
+            "https://notdiscord.gg/bunnyhop",              // Discord invite host as a suffix, no dot
             "javascript:alert(1)", "file:///etc/passwd", "https://", "",
         }) assert(!native::open_external(bad));
         // A control character can be re-read by whatever the desktop hands it to.

@@ -135,11 +135,14 @@ if(BUNNYHOP_BUILD_CLIENT)
         BUNNYHOP_MENU_HTML="target/native-menu/menu.html"
         BUNNYHOP_NATIVE_MANIFEST="target/native-menu/native-manifest.json"
         BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
-    # Explicit framebuffer check: run on a desktop or under Xvfb/Mesa, not in
-    # ordinary headless CTest. Does not initialize a map or gameplay context.
-    add_executable(bunnyhop-native-menu-scene-smoke src/menu_scene_smoke.cpp)
-    target_include_directories(bunnyhop-native-menu-scene-smoke PRIVATE vendor include)
-    target_link_libraries(bunnyhop-native-menu-scene-smoke PRIVATE SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
+    # Explicit framebuffer check of the home backdrop over a local BSP: run on a
+    # desktop or under Xvfb/Mesa, not in ordinary headless CTest. No network,
+    # menu or gameplay context.
+    add_executable(bunnyhop-native-menu-backdrop-smoke src/menu_backdrop_smoke.cpp)
+    target_include_directories(bunnyhop-native-menu-backdrop-smoke PRIVATE vendor include)
+    target_link_libraries(bunnyhop-native-menu-backdrop-smoke PRIVATE bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
+    target_compile_definitions(bunnyhop-native-menu-backdrop-smoke PRIVATE
+        BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
     add_executable(bunnyhop-native-render-smoke src/render_smoke.cpp)
     target_include_directories(bunnyhop-native-render-smoke PRIVATE vendor)
     target_link_libraries(bunnyhop-native-render-smoke PRIVATE bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
@@ -202,4 +205,8 @@ if(BUILD_TESTING)
     add_executable(bunnyhop-native-discord-tests src/discord_rpc_tests.cpp)
     target_include_directories(bunnyhop-native-discord-tests PRIVATE vendor src)
     add_test(NAME native_discord COMMAND bunnyhop-native-discord-tests)
+    # Home backdrop camera: the web attract TourDirector, without GL or a map.
+    add_executable(bunnyhop-native-menu-tour-tests src/menu_tour_tests.cpp)
+    target_include_directories(bunnyhop-native-menu-tour-tests PRIVATE vendor src)
+    add_test(NAME native_menu_tour COMMAND bunnyhop-native-menu-tour-tests)
 endif()

@@ -1,49 +1,72 @@
-html, body { background: transparent; }
-body.native-menu { height: 100dvh; background: linear-gradient(115deg,rgba(12,12,15,.98),rgba(12,12,15,.91)); }
-.native-shell { height: 100%; box-sizing: border-box; display: flex; flex-direction: column; padding: clamp(1.1rem,3.7vw,4rem); gap: 1.2rem; }
-.native-top { display: flex; align-items: center; justify-content: space-between; gap: 2rem; min-height: 3rem; }
-.native-top > .wordmark { opacity: .72; }
-#native-menu { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
-.native-home { width: 100%; display: grid; grid-template-columns: minmax(20rem,1fr) minmax(20rem,1fr); gap: 4rem; align-items: center; }
-.native-home-actions { display: flex; flex-direction: column; align-items: stretch; }
-.native-home-actions .home-item { width: 100%; }
-.native-home .wordmark-xl { font-size: clamp(2.4rem,5vw,4.3rem); }
-/* Native pause/menu controls must be painted as soon as the overlay opens.
-   The web title screen's delayed entrance can stay transparent while a host
-   loading-state update replaces the screen or WKWebView takes a snapshot. */
-.native-menu .native-home .home-menu > *,
-.native-menu .native-home .wordmark-xl .wm-text,
-.native-menu .native-home .wordmark-xl .logo-mark circle { animation:none; transform:none; }
-.native-menu .native-home .wordmark-xl .logo-mark path { animation:none; stroke-dashoffset:0; }
+/* The native menu is the web's own markup and style.css (home.ts, menu.ts pause screen, the panel screens); this file
+   only places what the web page has and the menu document doesn't: the map behind (#native-backdrop, in the place of
+   the web's #game canvas), the host's status lines, and the native-only panels. */
+html { background: transparent; }
+body.native-menu { height: 100dvh; margin: 0; overflow: hidden; background: var(--ink-0); }
+/* The host's live scene shows through a transparent page (macOS / Windows); the overlay's scrim still sits over it. */
+html[data-native-backdrop="scene"], html[data-native-backdrop="scene"] body.native-menu { background: transparent; }
+
+/* The map behind the menus: the web's #game rules (style.css), for the host's still or the map's picture. */
+#native-backdrop { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; background: var(--ink-0); }
+#native-backdrop > .card-art, #native-backdrop > img { position: absolute; inset: 0; width: 100%; height: 100%; aspect-ratio: auto; border-radius: 0; object-fit: cover; }
+#native-backdrop > .card-art::after { display: none; }
+#native-backdrop > .card-art .card-initials { display: none; }
+body:not(.in-game) #native-backdrop { opacity: 0; transition: opacity 0.5s ease, transform 0.8s var(--ease); }
+body.attract-live:not(.in-game) #native-backdrop { opacity: 1; transform: scale(1.02); }
+body.attract-live.attract-cut:not(.in-game) #native-backdrop { opacity: 0; }
+/* A full screen over it: the web's softened still (ui/backdrop.ts), here the picture blurred a little. */
+body.attract-live:not(.in-game):not([data-screen="home"]) #native-backdrop { transform: scale(1.05); }
+body:not([data-screen="home"]):not([data-screen="pause"]) #native-backdrop > * { filter: blur(4px); }
+/* The live scene is drawn by the host behind the page: the layer is only the black of a cut. */
+html[data-native-backdrop="scene"] #native-backdrop { background: #000; }
+html[data-native-backdrop="scene"] #native-backdrop > * { display: none; }
+/* (Also paused in game: the host's game frame shows through.) */
+html[data-native-backdrop="scene"] body.native-menu #native-backdrop { opacity: 0; transform: none; }
+html[data-native-backdrop="scene"] body.attract-live.attract-cut:not(.in-game) #native-backdrop { opacity: 1; }
+/* Paused over a loaded map without the host's scene (GTK window, loading): the map's picture under the web's dim. */
+html:not([data-native-backdrop="scene"]) body.in-game #native-backdrop { opacity: 1; }
+
+/* A screen redrawn for a host update (loading, error) doesn't replay its entrance. */
+#menu.native-steady :is(.home-brand *, .home-menu > *, .home-foot, .home-right > *, .wm-text, .logo-mark path, .logo-mark circle, .trail-hot) { animation: none !important; }
+#menu.native-steady .wordmark-xl .logo-mark path { stroke-dashoffset: 0; }
+
+/* The page's animation clock stopped (main.ts watchAnimationClock): entrances and fades end at once, nothing waits
+   invisible at its first frame. */
+html.native-clock-stopped *, html.native-clock-stopped *::before, html.native-clock-stopped *::after { animation-duration: 0s !important; animation-delay: 0s !important; transition-duration: 0s !important; transition-delay: 0s !important; }
+
+/* One column (a small window): the web's home is cut off below the fold; here the page scrolls to the maps to try. */
+@media (max-width: 58rem) { #menu.screen-home { overflow-y: auto; } }
+
+/* The host's status lines (loading, errors, notices): one quiet line at the bottom centre, above the menus. */
+#native-status, #native-notice { position: fixed; left: 50%; bottom: 1.1rem; z-index: calc(var(--z-overlay) + 1); transform: translateX(-50%); max-width: min(42rem, calc(100vw - 2rem)); margin: 0; padding: 0.45rem 0.9rem; border-radius: var(--r-2); background: var(--panel-solid); box-shadow: var(--shadow); font-size: var(--fs-sm); text-align: center; pointer-events: none; }
+#native-notice { bottom: 3.6rem; }
+#native-status[data-kind="error"] { color: var(--loss); }
+#native-notice:empty, #native-status:empty { display: none; }
+
+/* The finished run (host timer) under the pause screen's map name. */
 #native-finish-result:empty { display: none; }
-.native-finish { margin-top:1.25rem; padding:.55rem 0 .55rem 1rem; border-left:3px solid var(--amber); }
-.native-finish-label { margin:0 0 .2rem; color:var(--amber); font-size:var(--fs-sm); font-weight:var(--w-head); text-transform:uppercase; letter-spacing:.08em; }
-.native-finish-time { font-size:2.7rem; line-height:1.1; font-variant-numeric:tabular-nums; }
-.native-finish-stats { margin:.35rem 0 0; font-size:var(--fs-sm); }
-.native-home-left:has(.native-finish) .home-menu { margin-top:1rem; }
-.native-current { justify-self: stretch; max-width: 39rem; }
-.native-current > h1 { font-size: clamp(2rem,4vw,4rem); letter-spacing: -.04em; line-height: 1.02; margin-bottom: 1rem; }
-.native-current-art { width: 100%; aspect-ratio: 16/9; border-radius: var(--r-3); overflow: hidden; }
-.native-current h2 { margin: 1rem 0 .4rem; }
-.native-controls { line-height: 1.8; max-width: 34rem; }
+.native-finish { margin-top: var(--sp-2); padding: 0.35rem 0 0.35rem 0.7rem; border-left: 2px solid var(--amber); }
+.native-finish-label { margin: 0; color: var(--amber); font-size: var(--fs-xs); font-weight: var(--w-head); text-transform: uppercase; letter-spacing: 0.08em; }
+.native-finish-time { font-size: 1.5rem; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.native-finish-stats { margin: 0.15rem 0 0; font-size: var(--fs-xs); }
+
+/* Quit, last of the home screen's quiet links. */
+.home-link.home-quit { color: var(--cream-3); }
+
+/* Staff actions remain in the staff application. */
+.native-menu .rb-admin { display: none; }
+
+/* Panel screens: one column, the panel's own body scrolls (the web's #menu scrolls the page instead). */
 .native-maps { display: flex; flex-direction: column; height: 100%; max-height: 100%; box-sizing: border-box; }
 .native-maps > .map-browser { flex: 1; min-height: 0; }
 .native-sensitivity { width: 7rem; }
 .native-setting-result { min-height: 1.5rem; }
-#native-status, #native-notice { margin: 0; min-height: 1.2rem; font-size: var(--fs-sm); }
-#native-status[data-kind="error"] { color: var(--loss); }
-#native-notice:empty, #native-status:empty { display: none; }
-.native-footer { display: flex; align-items: center; gap: 1rem; color: var(--faint); font-size: var(--fs-xs); }
-.native-footer > span:first-child { margin-right: auto; }
 .native-account-section { display: flex; flex-direction: column; align-items: stretch; gap: .6rem; }
 .native-account-section h3 { margin: .4rem 0; font-size: 1rem; }
 .native-identity { display: flex; align-items: center; gap: 1rem; }
 .native-identity .avatar { width: 3rem; height: 3rem; font-size: 1.2rem; }
 .native-identity p { margin: .3rem 0 0; }
 .native-account-note { margin: 0; }
-/* Staff actions remain in the staff application. */
-.native-menu .rb-admin { display: none; }
-.native-style-row { display:flex;align-items:center;gap:1rem;margin-top:1rem; }
 .native-replay-screen { display:flex;flex-direction:column;max-height:100%;min-height:0; }
 .native-profile { width: min(48rem,100%); }
 .native-replays { overflow:auto;min-height:0;padding-right:.5rem; }
@@ -55,12 +78,7 @@ body.native-menu { height: 100dvh; background: linear-gradient(115deg,rgba(12,12
 .native-playback { padding:1rem 0; }
 .native-playback input[type=range] { flex:1;min-width:10rem; }
 .native-ghost-toggle { display:flex;align-items:center;gap:.4rem; }
-@media(max-width: 800px) { .native-home { grid-template-columns: 1fr; gap: 1rem; } .native-current { display: none; } .native-top > .wordmark { display: none; } .native-top { justify-content: flex-end; } .native-shell { padding: 1rem; } }
 
-.native-home-actions { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.2rem .8rem; }
-.native-home-actions .home-item { min-height:3rem; }
-.native-home-left { min-height:0;max-height:100%;overflow:auto;padding-right:.5rem; }
-.native-home .home-brand { margin-bottom:.7rem; }
 .native-room-screen,.native-servers,.native-stats,.native-ranks,.native-profile,.native-tutorial-screen,.native-loadout { display:flex;flex-direction:column;max-height:100%;min-height:0; }
 .native-room,.native-servers>.servers,.native-profile-body,.native-tutorial,.native-cosmetics,.native-stats>.stats { overflow:auto;min-height:0; }
 .native-room-columns { display:grid;grid-template-columns:minmax(12rem,1fr) minmax(18rem,2fr);gap:1.5rem;margin-top:1rem; }
@@ -171,107 +189,3 @@ body.native-menu { height: 100dvh; background: linear-gradient(115deg,rgba(12,12
 .nset-row .nset-pos-num { width:4.6rem; }
 .nset-row-pos.moved .nset-name { color:var(--amber); }
 .nset-hud { display:flex;flex-direction:column;gap:1.1rem; }
-
-/* A small hello in the top-left corner of the menu window. */
-.native-hi { position:fixed;top:.55rem;left:.8rem;margin:0;font-size:.7rem;color:var(--faint);opacity:.6;pointer-events:none;user-select:none;z-index:1; }
-.nset-speed { display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:.35rem .75rem; }
-
-/* Native home: one primary action, quiet groups, open space for the course. */
-body.native-menu { color:#f3eddf;background:radial-gradient(ellipse at 79% 36%,#343027 0,#1c1d1c 38%,#111416 75%); }
-.native-shell { padding:clamp(1.2rem,3.3vw,3.5rem);gap:1rem; }
-.native-top { min-height:2.6rem; }
-.native-top > .wordmark { font-size:.9rem;letter-spacing:.02em;opacity:.65; }
-.native-home { grid-template-columns:minmax(22rem,30rem) minmax(0,1fr);gap:clamp(3rem,8vw,9rem);height:100%;max-height:52rem;align-items:center; }
-.native-home-left { overflow:auto;max-height:100%;padding:.5rem .4rem .6rem;scrollbar-width:thin; }
-.native-home .home-brand { margin:0; }
-.native-home .wordmark-xl { font-size:clamp(2.4rem,3.4vw,3.5rem);letter-spacing:-.045em; }
-.native-home .wordmark-xl .logo-mark { width:1.25em;height:1.25em; }
-.native-home-intro { margin:.3rem 0 1.9rem;color:#bbb5a8;font-size:.94rem; }
-.native-home-actions { display:flex;flex-direction:column;gap:1.15rem;max-width:none;padding:0;margin:0; }
-.native-home-actions .home-item { display:flex;align-items:center;justify-content:space-between;min-height:2.8rem;padding:.65rem .8rem;width:100%;border:1px solid transparent;border-radius:.45rem;clip-path:none;transform:none;box-shadow:none;transition:background .15s,border-color .15s;color:#e0dacc;background:transparent; }
-.native-home-actions .home-item .mb-title { font-size:.98rem;font-weight:560;letter-spacing:0;text-transform:none;text-shadow:none;line-height:1.25; }
-.native-home-actions .home-item .mb-label { flex-direction:column;align-items:flex-start;gap:.35rem;min-width:0; }
-.native-home-actions .home-item small { display:block;font-size:.8rem;line-height:1.3;font-weight:450; }
-.native-home-actions .home-item:hover:not(:disabled) { transform:none;background:#efe9dd12;border-color:#efe9dd21; }
-.native-home-actions .home-item:focus-visible { transform:none;outline:2px solid #ffd18a;outline-offset:3px;box-shadow:none;background:#efe9dd17; }
-.native-home-actions .home-item.primary { min-height:5.2rem;padding:1rem 1.3rem;margin:0;background:#f6b950;color:#241b0d;border:1px solid #ffd28b;box-shadow:0 5px 24px #0002; }
-.native-home-actions .home-item.primary .mb-title { font-size:1.65rem;font-weight:700;letter-spacing:-.025em; }
-.native-home-actions .home-item.primary small { color:#55401f; }
-.native-home-actions .home-item.primary:hover:not(:disabled),.native-home-actions .home-item.primary:focus-visible { background:#ffcb70;transform:none; }
-.native-action-arrow { font-size:1rem;color:#958d7e; }
-.native-home-actions .primary .native-action-arrow { font-size:1.8rem;color:#493518; }
-.native-action-group { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.1rem .6rem; }
-.native-play-actions { padding-bottom:1rem;border-bottom:1px solid #efe9dd1c; }
-.native-group-label { grid-column:1/-1;margin:0 .8rem .4rem;font-size:.65rem;text-transform:uppercase;letter-spacing:.16em;font-weight:650;color:#a49e91; }
-.native-utility-actions { grid-template-columns:repeat(3,minmax(0,1fr));gap:.2rem;padding-top:.7rem;border-top:1px solid #efe9dd1c; }
-.native-utility-actions .home-item .mb-title { font-size:.85rem;color:#bdb6a8; }
-.native-utility-actions .native-action-arrow { display:none; }
-.native-style-row { display:flex;justify-content:space-between;gap:1rem;margin:1.2rem .8rem 0;font-size:.8rem;color:#a8a293; }
-.native-style { min-width:10rem;max-width:65%;padding:.4rem .65rem;border:1px solid #efe9dd26;border-radius:.3rem;background:#1d201f;color:#e4ddcf;font:inherit; }
-.native-style:focus-visible { outline:2px solid var(--amber);outline-offset:3px; }
-.native-current { align-self:stretch;display:flex;flex-direction:column;justify-content:center;position:relative;max-width:none;min-width:0;padding:0 1.4rem; }
-.native-course-plan { width:100%;max-width:40rem;margin:0 auto;color:#c8a665; }
-.native-course-plan svg { display:block;width:100%; }
-.native-scene-caption { padding:2rem 0 0; }
-.native-eyebrow { font-size:.65rem;font-weight:650;letter-spacing:.15em;text-transform:uppercase;color:#c7ac7f;margin:0 0 .8rem; }
-.native-scene-caption h2 { font-size:clamp(1.8rem,3vw,3rem);font-weight:550;letter-spacing:-.045em;line-height:1.1;margin:0 0 .8rem; }
-.native-scene-caption .dim { font-size:.9rem;line-height:1.5;color:#b7b1a5;margin:0; }
-.native-current-art { box-shadow:0 18px 60px #0004;border:1px solid #efe9dd24;border-radius:.7rem; }
-.native-current > h2 { font-size:1.45rem;overflow-wrap:anywhere;letter-spacing:-.025em;font-weight:600; }
-.native-current > .dim { font-size:.85rem; }
-.native-finish { margin:.8rem 0 1.2rem;padding:.6rem 1rem;border-left:2px solid var(--amber);background:#171b1b99;border-radius:0 .4rem .4rem 0; }
-.native-finish-label { font-size:.65rem;letter-spacing:.13em; }
-.native-finish-time { font-size:2rem;font-weight:600; }
-.native-finish-stats { font-size:.75rem; }
-.native-home-left:has(.native-finish) .home-menu { margin-top:0; }
-.native-footer { padding-top:.8rem;border-top:1px solid #efe9dd17;color:#a7a092;font-size:.7rem; }
-/* Set only when the host has successfully created both the scene and alpha view. */
-html[data-native-backdrop="scene"] body.native-menu { background:linear-gradient(90deg,rgba(15,18,19,.98) 0%,rgba(15,18,19,.93) 29%,rgba(15,18,19,.42) 55%,rgba(15,18,19,.04) 82%),linear-gradient(0deg,rgba(15,18,19,.8),transparent 35%); }
-html[data-native-backdrop] .native-course-plan { visibility:hidden; }
-html[data-native-backdrop] .native-scene-caption { margin-top:auto;margin-bottom:1.8rem; }
-html[data-native-backdrop="scene"] body:not([data-screen="home"]):not([data-screen="pause"]) { background:rgba(14,17,18,.94); }
-@media(max-width:1000px) {
-  .native-home { grid-template-columns:minmax(19rem,25rem) minmax(0,1fr);gap:2.5rem; }
-  .native-current { padding:0; }
-}
-@media(max-width:800px) {
-  .native-home { grid-template-columns:minmax(0,1fr);gap:1rem;max-width:32rem; }
-  .native-current { display:none; }
-  .native-shell { padding:1rem 1.3rem; }
-  .native-top > .wordmark { display:block; }
-  .native-top { justify-content:space-between; }
-  .native-home .wordmark-xl { font-size:2.6rem; }
-  .native-home-intro { margin-bottom:1.3rem; }
-  html[data-native-backdrop="scene"] body.native-menu { background:rgba(15,18,19,.92); }
-}
-@media(max-height:740px) {
-  .native-shell { padding-top:1rem;padding-bottom:1rem;gap:.6rem; }
-  .native-home-intro { margin-bottom:1rem; }
-  .native-home-actions { gap:.65rem; }
-  .native-home-actions .home-item { min-height:2.5rem;padding-top:.5rem;padding-bottom:.5rem; }
-  .native-home-actions .home-item.primary { min-height:4.5rem; }
-  .native-style-row { margin-top:.7rem; }
-  .native-play-actions { padding-bottom:.6rem; }
-  .native-home .wordmark-xl { font-size:2.6rem; }
-}
-@media(prefers-reduced-motion:reduce) { .native-home * { transition:none!important;animation:none!important; } }
-
-/* Static native capture keeps the GTK menu independent of SDL compositing. */
-html[data-native-backdrop="static"] body.native-menu { background:linear-gradient(90deg,rgba(15,18,19,.98) 0%,rgba(15,18,19,.93) 29%,rgba(15,18,19,.42) 55%,rgba(15,18,19,.04) 82%),linear-gradient(0deg,rgba(15,18,19,.8),transparent 35%),var(--native-scene-image) center/cover no-repeat,#131719; }
-html[data-native-backdrop="static"] body:not([data-screen="home"]):not([data-screen="pause"]) { background:rgba(14,17,18,.97); }
-.native-footer { padding-right:11rem; }
-@media(max-width:800px) { .native-footer > span:last-child { display:none; } html[data-native-backdrop="static"] body.native-menu { background:linear-gradient(#0f1213ed,#0f1213ed),var(--native-scene-image) center/cover; } }
-@media(max-height:640px) {
-  .native-home .wordmark-xl { font-size:2.1rem; }
-  .native-home-intro { margin-bottom:.65rem;font-size:.84rem; }
-  .native-home-actions { gap:.45rem; }
-  .native-home-actions .home-item { min-height:2.2rem;padding-top:.35rem;padding-bottom:.35rem; }
-  .native-home-actions .home-item.primary { min-height:3.8rem;padding:.65rem 1.1rem; }
-  .native-home-actions .home-item.primary .mb-title { font-size:1.4rem; }
-  .native-finish { margin:.4rem 0 .7rem;padding:.4rem .8rem; }
-  .native-finish-time { font-size:1.7rem; }
-  .native-finish-stats { margin-top:.2rem; }
-  .native-group-label { margin-bottom:.15rem; }
-  .native-utility-actions { padding-top:.4rem; }
-  .native-style-row { margin-top:.4rem; }
-}

@@ -23,6 +23,7 @@ export type MenuMessage =
   | { type: "sensitivity"; value: number }
   | { type: "openAuth"; url: string }
   | { type: "openExternal"; url: string }
+  | { type: "menuBackdrop"; map: string | null }
   | RunServiceStatus;
 
 export const NATIVE_BIND_ACTIONS=["forward","back","left","right","jump","duck","use","restart","restartBonus","restartMain","cycleStyle","attack","attack2","inspect","viewmodel","hideUi","mute","slot1","slot2","slot3","lastWeapon","drop","reload","giveUsp","giveGlock","turnLeft","turnRight","turnFast"] as const;
@@ -75,7 +76,7 @@ export interface NativeMenuState {
 declare global {
   interface Window {
     webkit?: { messageHandlers?: { bunnyhop?: { postMessage: (value: string) => void } } };
-    bunnyhopNativeMenu: { onState: (value: unknown) => void; onAuth: (value?: unknown) => void; onRunEvent: (value: unknown) => void; version: number; open?:(screen:string,focus?:string)=>void; joinRoom?:(id:string)=>void; onRoomPose?:(value:unknown)=>void; onRoomCommand?:(value:unknown)=>void };
+    bunnyhopNativeMenu: { onState: (value: unknown) => void; onAuth: (value?: unknown) => void; onRunEvent: (value: unknown) => void; version: number; open?:(screen:string,focus?:string)=>void; joinRoom?:(id:string)=>void; onRoomPose?:(value:unknown)=>void; onRoomCommand?:(value:unknown)=>void; settle?:(timeoutMs?:number)=>Promise<{ended:number;pendingImages:number}> };
     __nativeMenuGraphics?: { contexts: number; attempts: number };
   }
 }
@@ -96,8 +97,8 @@ export function openAuth(raw: string): void {
   send({ type: "openAuth", url: url.href });
 }
 
-/** Hosts the client will hand to the system browser. Credits links only. */
-export const EXTERNAL_HOSTS = ["github.com", "1998.lol", "bunnyhop.lol"] as const;
+/** Hosts the client will hand to the system browser: credits links, the site's own pages, the Discord invite. */
+export const EXTERNAL_HOSTS = ["github.com", "1998.lol", "bunnyhop.lol", "discord.gg"] as const;
 /**
  * Opens a link outside the client. The menu webview refuses every navigation
  * away from the loaded document, so an <a href> here does nothing at all —

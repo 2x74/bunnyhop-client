@@ -1,78 +1,229 @@
 import {test,expect} from "bun:test";
-import type {} from "./home-menu";
-import {chromium} from "playwright";
+import type {} from "./menu-backdrop";
+import {chromium,type Page} from "playwright";
 import {readFile,mkdir} from "node:fs/promises";
 import {resolve} from "node:path";
 
-test("home navigation, pause, loading and responsive presentation remain accessible",async()=>{
-  const out=resolve(import.meta.dir,"../../../target/native-menu/redesign");await mkdir(out,{recursive:true});
-  const html=await readFile(resolve(out,"../menu.html"),"utf8");
+// The native home and pause screens are the web's (ui/home.ts, menu.ts pauseScreen): same markup, same style.css.
+// Offline except a small map index, so nothing reaches the live API.
+const out=resolve(import.meta.dir,"../../../target/native-menu/web-port");
+const INDEX={maps:["bhop_eazy","bh_aztec","bhop_1","bhop_13","bhop_ambience","bhop_easyhop","bhop_2_easy","bhop_alley"].map(name=>({name,title:name,tier:1,size:1<<20}))};
+const messages=(page:Page)=>page.evaluate(()=>(window as any).messages as {type:string;[key:string]:unknown}[]);
+const last=async(page:Page)=>(await messages(page)).filter(m=>m.type!=="cosmetics"&&m.type!=="menuAppearance").at(-1);
+
+async function open(width=1280,height=720,routes:(url:URL)=>unknown=()=>null) {
+  await mkdir(out,{recursive:true});
+  const html=await readFile(resolve(import.meta.dir,"../../../target/native-menu/menu.html"),"utf8");
   const browser=await chromium.launch({headless:true});
+  const page=await browser.newPage({viewport:{width,height},reducedMotion:"reduce"});
+  const errors:string[]=[];page.on("pageerror",e=>errors.push(e.message));page.setDefaultTimeout(4000);
+  await page.route("**/*",r=>{
+    const url=new URL(r.request().url());
+    if(url.pathname==="/native-home-unit")return r.fulfill({status:200,contentType:"text/html",body:html});
+    if(url.pathname==="/index.json")return r.fulfill({json:INDEX});
+    const body=routes(url);
+    return body?r.fulfill({json:body}):r.abort();
+  });
+  await page.addInitScript(()=>{(window as any).messages=[];window.addEventListener("bunnyhop:native-message",e=>(window as any).messages.push((e as CustomEvent).detail));});
+  await page.goto("https://bunnyhop.lol/native-home-unit?attract=bhop_eazy",{waitUntil:"domcontentloaded"});
+  return {browser,page,errors};
+}
+
+test("home is the web title screen: menu, maps to try, footer, and native routes",async()=>{
+  const {browser,page,errors}=await open();
   try {
-    const page=await browser.newPage({viewport:{width:1280,height:720},reducedMotion:"reduce"});
-    const errors:string[]=[];page.on("pageerror",e=>errors.push(e.message));page.setDefaultTimeout(3000);
-    await page.route("**/*",r=>r.request().url()==="https://bunnyhop.lol/menu-redesign-test"?r.fulfill({status:200,contentType:"text/html",body:html}):r.abort());
-    await page.addInitScript(()=>{(window as any).messages=[];window.addEventListener("bunnyhop:native-message",e=>(window as any).messages.push((e as CustomEvent).detail));});
-    await page.goto("https://bunnyhop.lol/menu-redesign-test",{waitUntil:"domcontentloaded"});
-    expect(await page.locator(".native-home-actions .primary").getAttribute("aria-label")).toBe("Play");
-    expect(await page.getByRole("group",{name:"Your game",exact:true}).getByRole("button").count()).toBe(4);
-    await page.getByRole("button",{name:"Play",exact:true}).focus();
-    await page.keyboard.press("ArrowDown");expect(await page.evaluate(()=>document.activeElement?.getAttribute("aria-label"))).toBe("Play online");
-    await page.keyboard.press("End");expect(await page.evaluate(()=>document.activeElement?.getAttribute("aria-label"))).toBe("Quit");
-    await page.keyboard.press("Home");expect(await page.evaluate(()=>document.activeElement?.getAttribute("aria-label"))).toBe("Play");
-    for(const [button,screen] of [["Play","maps"],["Play online","servers"],["Tutorial","tutorial"],["Loadout","loadout"],["Ranks","ranks"],["Statistics","stats"],["Replays","replays"],["Settings","settings"],["Credits","credits"]]) {
-      await page.getByRole("button",{name:button,exact:true}).click();expect(await page.locator("body").getAttribute("data-screen")).toBe(screen);
+    expect(await page.locator("#menu.screen-home > section.home > .home-left > .home-brand .wordmark-xl").count()).toBe(1);
+    expect(await page.locator(".home-menu .home-item .mb-title").allTextContents()).toEqual(["Play","Learn to bhop","Play online","Gauntlets","Profile","Ranks","Stats","Settings"]);
+    // Play is focused like the web's [data-autofocus].
+    expect(await page.evaluate(()=>document.activeElement?.matches(".home-item.primary"))).toBe(true);
+    await page.keyboard.press("ArrowDown");expect(await page.evaluate(()=>document.activeElement?.textContent)).toBe("Learn to bhop");
+    // Six maps to try, the background's map first, and the host is asked for that map's scene.
+    await page.locator(".home-grid .home-tile").nth(5).waitFor();
+    expect(await page.locator(".home-tile").first().getAttribute("data-name")).toBe("bhop_eazy");
+    expect((await messages(page)).filter(m=>m.type==="menuBackdrop")).toEqual([{type:"menuBackdrop",map:"bhop_eazy"}]);
+    expect(await page.locator(".home-foot .home-acts > :not([hidden])").allInnerTexts()).toEqual(["Support","Inbox"]);
+    expect(await page.locator(".home-links .home-link").allTextContents()).toEqual(["Feedback","Replays","Credits","What's new","Quit"]);
+    // Nothing to continue: Play goes straight into the first map to try (the one behind the menu), like the web.
+    await page.getByRole("button",{name:"Play",exact:true}).click();expect(await last(page)).toEqual({type:"selectMap",id:"bhop_eazy",style:"autohop",track:0});
+    for(const [button,screen] of [["Learn to bhop","tutorial"],["Play online","servers"],["Ranks","ranks"],["Stats","stats"],["Settings","settings"],["Replays","replays"],["Credits","credits"],["Profile","loadout"]]) {
+      await page.getByRole("button",{name:button,exact:true}).click();await page.waitForFunction(s=>document.body.dataset.screen===s,screen);
       await page.keyboard.press("Escape");expect(await page.locator("body").getAttribute("data-screen")).toBe("home");
     }
-    await page.getByRole("combobox",{name:"Play style"}).selectOption("scroll");
-    expect(await page.evaluate(()=>(window as any).messages.some((m:any)=>m.type==="style"&&m.id==="scroll"))).toBe(true);
-    await page.getByRole("button",{name:"Quit",exact:true}).click();
-    expect(await page.evaluate(()=>(window as any).messages.at(-1).type)).toBe("quit");
-    await page.getByRole("combobox",{name:"Play style"}).selectOption("autohop");
-    await page.evaluate(()=>(document.activeElement as HTMLElement)?.blur());
-    await page.mouse.move(1270,70);
+    // Pages the native client has no screen for open on bunnyhop.lol in the browser.
+    await page.getByRole("button",{name:/^Gauntlets/}).click();expect(await last(page)).toEqual({type:"openExternal",url:"https://bunnyhop.lol/gauntlets"});
+    await page.getByRole("button",{name:"Support",exact:true}).click();expect(await last(page)).toEqual({type:"openExternal",url:"https://bunnyhop.lol/?support"});
+    await page.getByRole("button",{name:"Quit",exact:true}).click();expect(await last(page)).toEqual({type:"quit"});
+    await page.getByRole("button",{name:"bh_aztec",exact:false}).first().click();expect(await last(page)).toEqual({type:"selectMap",id:"bh_aztec",style:"autohop",track:0});
+    await page.evaluate(()=>(document.activeElement as HTMLElement)?.blur());await page.mouse.move(1275,360);
     await page.screenshot({path:resolve(out,"home-1280x720.png")});
-    await page.evaluate(()=>window.bunnyhopNativeMenu.onState({map:"bhop_eazy",paused:true,timer:{status:2,seconds:61.234,jumps:12,strafes:34,sync:98.3}}));
-    expect(await page.locator(".native-current h2").textContent()).toBe("bhop_eazy");
-    expect(await page.locator(".native-home-actions .primary").getAttribute("aria-label")).toBe("Resume");
-    expect(await page.locator(".native-finish-time").textContent()).toBe("01:01.234");
-    await page.getByRole("button",{name:"Restart",exact:true}).click();expect(await page.evaluate(()=>(window as any).messages.at(-1).type)).toBe("restart");
-    await page.getByRole("button",{name:"Resume",exact:true}).click();expect(await page.evaluate(()=>(window as any).messages.at(-1).type)).toBe("resume");
-    await page.keyboard.press("Escape");expect(await page.evaluate(()=>(window as any).messages.at(-1).type)).toBe("resume");
-    await page.evaluate(()=>(document.activeElement as HTMLElement)?.blur());
-    await page.screenshot({path:resolve(out,"pause-1280x720.png")});
+    // Loading: the menu stays painted (a redraw for the host doesn't replay the entrance) and can't be used.
     await page.evaluate(()=>window.bunnyhopNativeMenu.onState({loading:"Reading map…"}));
-    expect(await page.locator(".native-home-actions button:enabled").count()).toBe(0);
-    expect(await page.getByRole("combobox",{name:"Play style"}).isDisabled()).toBe(true);
+    expect(await page.locator("#menu").getAttribute("class")).toContain("native-steady");
+    expect(await page.locator(".home-menu button:enabled").count()).toBe(0);
+    expect(await page.locator("#native-status").textContent()).toBe("Reading map…");
     await page.evaluate(()=>window.bunnyhopNativeMenu.onState({loading:false}));
-    // Test the host-provided PNG path as well as the standalone fallback. The
-    // native scene smoke produces optional visual evidence; CI uses a 1px PNG.
-    let scene:string;
-    try {scene=(await readFile(resolve(out,"native-scene.png"))).toString("base64");}
-    catch {scene="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a4b8AAAAASUVORK5CYII=";}
-    await page.evaluate(source=>window.bunnyhopNativeBackdrop?.("data:image/png;base64,"+source),scene);
-    await page.waitForFunction(()=>document.documentElement.dataset.nativeBackdrop==="static");
-    await page.screenshot({path:resolve(out,"pause-static-1280x720.png")});
-    for(const paused of [true,false]) {
-      await page.setViewportSize({width:640,height:600});
-      if(!paused)await page.evaluate(()=>window.bunnyhopNativeMenu.onState({map:"",timer:{status:0}}));
-      await page.getByRole("combobox",{name:"Play style"}).scrollIntoViewIfNeeded();
-      const bounds=await page.getByRole("button",{name:"Quit",exact:true}).boundingBox();expect(bounds!.x).toBeGreaterThanOrEqual(0);expect(bounds!.y+bounds!.height).toBeLessThan(600);
-      expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
-      await page.mouse.move(639,0);
-      await page.evaluate(()=>(document.activeElement as HTMLElement)?.blur());
-      await page.screenshot({path:resolve(out,`${paused?"pause":"home"}-640x600.png`)});
-    }
-    await page.setViewportSize({width:1280,height:720});
-    await page.screenshot({path:resolve(out,"home-static-1280x720.png")});
-    await page.evaluate(()=>window.bunnyhopNativeBackdrop?.("javascript:alert(1)"));
-    expect(await page.locator("html").getAttribute("data-native-backdrop")).toBe("static");
-    await page.evaluate(()=>window.bunnyhopNativeBackdrop?.("native"));
-    expect(await page.locator("html").getAttribute("data-native-backdrop")).toBe("scene");
-    expect(await page.evaluate(()=>(window as any).messages.some((m:any)=>m.type==="menuAppearance"&&m.reducedMotion===true))).toBe(true);
-    await page.emulateMedia({reducedMotion:"no-preference"});
-    await page.waitForFunction(()=>(window as any).messages.some((m:any)=>m.type==="menuAppearance"&&m.reducedMotion===false));
+    expect(await page.locator("#native-status").textContent()).toBe("");
+    expect(await page.evaluate(()=>getComputedStyle(document.querySelector(".home-item")!).opacity)).toBe("1");
     expect(await page.evaluate(()=>window.__nativeMenuGraphics)).toEqual({contexts:0,attempts:0});
     expect(await page.locator("canvas").count()).toBe(0);expect(errors).toEqual([]);
   } finally {await browser.close();}
 },30_000);
+
+test("backdrop: the map's picture, then the host's live scene or still, cuts and stale calls",async()=>{
+  const {browser,page,errors}=await open();
+  try {
+    const look=()=>page.evaluate(()=>({source:document.documentElement.dataset.nativeBackdrop??"",live:document.body.classList.contains("attract-live"),cut:document.body.classList.contains("attract-cut"),
+      layer:getComputedStyle(document.getElementById("native-backdrop")!).opacity,art:!!document.querySelector("#native-backdrop .native-backdrop-art"),
+      body:getComputedStyle(document.body).backgroundColor,html:getComputedStyle(document.documentElement).backgroundColor}));
+    await page.waitForFunction(()=>document.querySelector("#native-backdrop .native-backdrop-art"));
+    expect((await look()).art).toBe(true);
+    await page.evaluate(()=>window.bunnyhopNativeBackdrop?.("native","bhop_other"));
+    expect((await look()).source).toBe("");
+    await page.evaluate(()=>window.bunnyhopNativeBackdrop?.("native","bhop_eazy"));
+    expect(await look()).toMatchObject({source:"scene",live:true,cut:false,layer:"0",body:"rgba(0, 0, 0, 0)",html:"rgba(0, 0, 0, 0)"});
+    await page.emulateMedia({reducedMotion:"no-preference"});
+    await page.evaluate(()=>window.bunnyhopNativeBackdrop?.("cut","bhop_eazy"));
+    await page.waitForFunction(()=>getComputedStyle(document.getElementById("native-backdrop")!).opacity==="1");
+    expect((await look()).cut).toBe(true);
+    await page.evaluate(()=>window.bunnyhopNativeBackdrop?.("native","bhop_eazy"));
+    expect((await look()).cut).toBe(false);
+    await page.evaluate(()=>window.bunnyhopNativeBackdrop?.("none","bhop_eazy"));
+    expect(await look()).toMatchObject({source:"",art:true});
+    await page.evaluate(()=>window.bunnyhopNativeBackdrop?.("javascript:alert(1)","bhop_eazy"));
+    expect((await look()).source).toBe("");
+    const png="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a4b8AAAAASUVORK5CYII=";
+    await page.evaluate(src=>window.bunnyhopNativeBackdrop?.("data:image/png;base64,"+src,"bhop_eazy"),png);
+    await page.waitForFunction(()=>document.documentElement.dataset.nativeBackdrop==="static");
+    expect(await page.locator("#native-backdrop img.native-backdrop-still").count()).toBe(1);
+    expect((await messages(page)).some(m=>m.type==="menuAppearance"&&m.reducedMotion===false)).toBe(true);
+    expect(errors).toEqual([]);
+  } finally {await browser.close();}
+},20_000);
+
+test("pause is the web pause screen: resume, restart, style, quit, and the game shows through the live scene",async()=>{
+  const {browser,page,errors}=await open();
+  try {
+    await page.evaluate(()=>window.bunnyhopNativeMenu.onState({map:"bhop_eazy",paused:true,settings:{binds:{restart:["KeyR"]}},timer:{status:2,seconds:61.234,jumps:12,strafes:34,sync:98.3}}));
+    expect(await page.evaluate(()=>({screen:document.body.dataset.screen,map:document.body.dataset.map,inGame:document.body.classList.contains("in-game")}))).toEqual({screen:"pause",map:"bhop_eazy",inGame:true});
+    expect(await page.locator("section.pause .pause-map").textContent()).toBe("bhop_eazy");
+    expect(await page.locator(".rail-list .rail-item.primary").textContent()).toBe("ResumeEsc");
+    expect(await page.locator(".native-finish-time").textContent()).toBe("01:01.234");
+    expect(await page.locator(".native-finish-stats").textContent()).toBe("12 jumps · 34 strafes · 98.3% sync");
+    await page.getByRole("tab",{name:"Style"}).click();
+    await page.getByRole("radio",{name:/Low Gravity/}).click();expect(await last(page)).toEqual({type:"style",id:"lowgrav"});
+    await page.evaluate(()=>window.bunnyhopNativeMenu.onState({style:"sideways"}));
+    expect(await page.locator('.style-row[data-style="sideways"]').getAttribute("aria-checked")).toBe("true");
+    await page.getByRole("button",{name:/^Restart/}).click();expect(await last(page)).toEqual({type:"restart"});
+    await page.getByRole("button",{name:/^Resume/}).click();expect(await last(page)).toEqual({type:"resume"});
+    await page.keyboard.press("Escape");expect(await last(page)).toEqual({type:"resume"});
+    await page.getByRole("button",{name:"Quit",exact:true}).click();expect(await last(page)).toEqual({type:"quit"});
+    for(const [button,screen] of [["Change map","maps"],["Settings","settings"],["Loadout","loadout"]]) {
+      await page.getByRole("button",{name:button,exact:true}).click();expect(await page.locator("body").getAttribute("data-screen")).toBe(screen);
+      await page.keyboard.press("Escape");expect(await page.locator("body").getAttribute("data-screen")).toBe("pause");
+    }
+    // The host's game frame behind: the backdrop layer is see-through once the host says the scene is live.
+    await page.evaluate(()=>window.bunnyhopNativeBackdrop?.("native","bhop_eazy"));
+    expect(await page.evaluate(()=>({layer:getComputedStyle(document.getElementById("native-backdrop")!).opacity,body:getComputedStyle(document.body).backgroundColor}))).toEqual({layer:"0",body:"rgba(0, 0, 0, 0)"});
+    // Home screen's map asked for again after the map is left; no request while one is loaded.
+    expect((await messages(page)).filter(m=>m.type==="menuBackdrop").length).toBe(1);
+    await page.evaluate(()=>window.bunnyhopNativeMenu.onState({loading:"Reading map…"}));
+    expect(await page.locator(".rail-list button:enabled").count()).toBe(0);
+    await page.evaluate(()=>window.bunnyhopNativeMenu.onState({loading:false}));
+    await page.evaluate(()=>(document.activeElement as HTMLElement)?.blur());await page.mouse.move(1275,360);
+    await page.screenshot({path:resolve(out,"pause-1280x720.png")});
+    await page.evaluate(()=>window.bunnyhopNativeMenu.onState({map:"",timer:{status:0}}));
+    expect(await page.locator("body").getAttribute("data-screen")).toBe("home");
+    expect((await messages(page)).filter(m=>m.type==="menuBackdrop")).toEqual([{type:"menuBackdrop",map:"bhop_eazy"},{type:"menuBackdrop",map:"bhop_eazy"}]);
+    expect(errors).toEqual([]);
+  } finally {await browser.close();}
+},30_000);
+
+test("your own profile keeps its way to the Loadout",async()=>{
+  const me={id:"alice",name:"alice",provider:"email",avatarUrl:null};
+  const {browser,page}=await open(1280,720,url=>url.pathname==="/api/me"?me:url.pathname==="/api/players/alice"?{player:me,mine:true,level:{level:3},rank:{group:{name:"Hopper"}},stats:{maps:1,wrs:0,pbs:1,clearedMaps:["bhop_eazy"]}}:null);
+  try {
+    await page.getByRole("button",{name:"Profile",exact:true}).click();
+    await page.locator(".native-profile-loadout").click();
+    expect(await page.locator("body").getAttribute("data-screen")).toBe("loadout");
+  } finally {await browser.close();}
+},20_000);
+
+test("home fits a small window and a 1440×900 one",async()=>{
+  for(const [width,height] of [[1440,900],[800,600]]) {
+    const {browser,page,errors}=await open(width,height);
+    try {
+      await page.locator(".home-grid .home-tile").first().waitFor();
+      expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+      const play=await page.getByRole("button",{name:"Play",exact:true}).boundingBox();
+      expect(play!.x).toBeGreaterThanOrEqual(0);expect(play!.y+play!.height).toBeLessThan(height);
+      await page.evaluate(()=>(document.activeElement as HTMLElement)?.blur());await page.mouse.move(width-5,height/2);
+      await page.screenshot({path:resolve(out,`home-${width}x${height}.png`)});
+      expect(errors).toEqual([]);
+    } finally {await browser.close();}
+  }
+},30_000);
+
+test("review regressions: feedback context, loads, backdrop re-request and release",async()=>{
+  const {browser,page,errors}=await open();
+  try {
+    await page.locator(".home-grid .home-tile").nth(5).waitFor();
+    // A tile clicked while a map loads is refused (they land after the disabled pass).
+    await page.evaluate(()=>window.bunnyhopNativeMenu.onState({loading:"Reading map…"}));
+    const before=(await messages(page)).length;
+    await page.locator(".home-tile").nth(1).dispatchEvent("click");
+    expect((await messages(page)).slice(before).some(m=>m.type==="selectMap")).toBe(false);
+    // The home pick is asked for again after a failed load (the host dropped it meanwhile).
+    await page.evaluate(()=>window.bunnyhopNativeMenu.onState({loading:false,error:"Couldn't read map"}));
+    expect((await messages(page)).filter(m=>m.type==="menuBackdrop")).toEqual([{type:"menuBackdrop",map:"bhop_eazy"},{type:"menuBackdrop",map:"bhop_eazy"}]);
+    // The host's release ('none' for no map) is accepted.
+    await page.evaluate(()=>window.bunnyhopNativeBackdrop?.("native","bhop_eazy"));
+    expect(await page.evaluate(()=>document.documentElement.dataset.nativeBackdrop)).toBe("scene");
+    await page.evaluate(()=>window.bunnyhopNativeBackdrop?.("none",""));
+    expect(await page.evaluate(()=>document.documentElement.dataset.nativeBackdrop??"")).toBe("");
+    // Style rows refuse a change during a load too.
+    await page.evaluate(()=>window.bunnyhopNativeMenu.onState({map:"bhop_eazy",error:null,paused:true,settings:{fov:100,sensitivity:1.5}}));
+    await page.getByRole("tab",{name:"Style"}).click();
+    await page.evaluate(()=>window.bunnyhopNativeMenu.onState({loading:"Reading map…"}));
+    const styleBefore=(await messages(page)).length;
+    await page.locator('.style-row[data-style="scroll"]').dispatchEvent("click");
+    expect((await messages(page)).slice(styleBefore).some(m=>m.type==="style")).toBe(false);
+    await page.evaluate(()=>window.bunnyhopNativeMenu.onState({loading:false}));
+    // Feedback's attached context is the native host's: its map and own settings, no web build, prefs or GPU.
+    await page.getByRole("button",{name:"Feedback",exact:true}).click();
+    await page.locator("dialog[open] .fb-kind").first().click();
+    await page.getByRole("button",{name:"See all of it"}).click();
+    const context=JSON.parse(await page.locator("dialog[open] pre").first().textContent()??"{}");
+    expect(context).toMatchObject({client:"native",inGame:true,map:"bhop_eazy",style:"autohop",track:0,screen:"pause",settings:{sensitivity:1.5,fov:100,vsync:true,fpsLimit:0}});
+    for(const key of ["webBuild","fps","gpu","page","nativeSettings"]) expect(key in context).toBe(false);
+    expect(errors).toEqual([]);
+  } finally {await browser.close();}
+},30_000);
+
+test("one column (a small window): the maps to try can be scrolled to",async()=>{
+  const {browser,page,errors}=await open(800,600);
+  try {
+    const last=page.locator(".home-grid .home-tile").nth(5);await last.waitFor();
+    expect(await page.evaluate(()=>getComputedStyle(document.getElementById("menu")!).overflowY)).toBe("auto");
+    await page.mouse.move(400,300);await page.mouse.wheel(0,3000);
+    await page.waitForFunction(()=>document.getElementById("menu")!.scrollTop>0);
+    const box=await last.boundingBox();expect(box!.y+box!.height).toBeLessThanOrEqual(600);
+    expect(errors).toEqual([]);
+  } finally {await browser.close();}
+},20_000);
+
+test("settle() ends the entrance for a screenshot, at once",async()=>{
+  const {browser,page,errors}=await open();
+  try {
+    await page.emulateMedia({reducedMotion:"no-preference"});
+    await page.locator(".home-grid .home-tile").nth(5).waitFor();
+    await page.getByRole("button",{name:"Stats",exact:true}).click();await page.keyboard.press("Escape");
+    // The web entrance is playing again (home redrawn) ...
+    expect(await page.evaluate(()=>document.getAnimations().filter(a=>a.playState==="running").length)).toBeGreaterThan(0);
+    const result=await page.evaluate(()=>window.bunnyhopNativeMenu.settle!(1000));
+    expect(result.ended).toBeGreaterThan(0);
+    // ... and has ended: every finite animation done, the menu fully painted.
+    expect(await page.evaluate(()=>({running:document.getAnimations().filter(a=>a.playState==="running"&&Number.isFinite(a.effect?.getComputedTiming().endTime)).length,
+      item:getComputedStyle([...document.querySelectorAll(".home-menu .home-item")].at(-1)!).opacity}))).toEqual({running:0,item:"1"});
+    expect(errors).toEqual([]);
+  } finally {await browser.close();}
+},20_000);

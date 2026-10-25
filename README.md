@@ -83,7 +83,7 @@ apps/native/build/bunnyhop-native --online-map bhop_eazy
 apps/native/build/bunnyhop-native --map /path/to/map.bsp --no-menu
 
 # Create an unsigned/ad-hoc package on the target OS.
-bun run package --version 0.3.4-dev.20261025.2
+bun run package --version 0.3.4-dev.20261025.3
 ```
 
 ## Preview limits

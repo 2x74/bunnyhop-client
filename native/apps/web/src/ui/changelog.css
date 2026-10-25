@@ -1,0 +1,56 @@
+/* Version button + changelog card (ui/changelog.ts). The dialog shell (dialog.acct-dialog, .acct-head, .acct-body) is
+   ui/account.css; tokens from style.css only. */
+
+.ver-btn {
+  display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.22rem 0.55rem; border-radius: 999px;
+  background: transparent; border: 1px solid var(--line); color: var(--faint); cursor: pointer;
+  font-size: var(--fs-2xs); font-weight: 600; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; white-space: nowrap;
+  transition: color var(--t-fast), background var(--t-fast), border-color var(--t-fast);
+}
+.ver-btn:hover { color: var(--text); background: var(--raise-2); border-color: var(--line-2); }
+.ver-btn.has-new { color: var(--dim); }
+/* The dot is still: it rings twice when the button first shows (ui/changelog.ts, notify ring), then waits. */
+.ver-dot { width: 0.42rem; height: 0.42rem; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0.45rem var(--accent); flex: none; }
+
+/* Where it sits: under the key hints on the home screen; beside the account chip at the bottom of the pause rail. The
+   pause footer stays short so the rail's list never scrolls: the chip's second line doesn't wrap, and a guest's
+   "Save progress" shares the version's row (under the chip) instead of stacking. */
+.pause-foot:has(> .ver-btn) { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-1) var(--sp-2); }
+.pause-foot:has(> .ver-btn) > .account { display: contents; }
+.pause-foot:has(.save-progress) .account > .chip { grid-column: 1 / -1; }
+.pause-foot .chip-col small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pause-foot .save-progress { justify-self: start; font-size: var(--fs-xs); padding: 0.3em 0.75em; }
+.pause-foot > .ver-btn { flex: none; justify-self: end; }
+/* The one quiet support link (ui/community.ts supportLink), on its own line under the account and the version. */
+.pause-foot > .pause-support { grid-column: 1 / -1; justify-self: start; padding: 0 0 var(--sp-1); font-size: var(--fs-xs); color: var(--faint); text-decoration: none; }
+.pause-foot > .pause-support:hover, .pause-foot > .pause-support:focus-visible { color: var(--dim); text-decoration: underline; text-underline-offset: 0.2em; }
+
+dialog.chlog-dialog { width: min(38rem, 94vw); }
+dialog.chlog-dialog[open] { animation: vt-drop var(--t-air) var(--ease-land) both; }
+.chlog-body { gap: 0; }
+.chlog-lead { margin: 0 0 0.9rem; font-size: var(--fs-sm); }
+.chlog-list { display: flex; flex-direction: column; }
+.chlog-meta { display: flex; align-items: baseline; gap: 0.6rem; }
+.chlog-ver { font-weight: 800; font-size: var(--fs-sm); color: var(--cream-2); font-variant-numeric: tabular-nums; }
+.chlog-date { margin-left: auto; font-size: var(--fs-xs); color: var(--cream-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chlog-notes { display: flex; flex-direction: column; gap: 0.5rem; font-family: var(--font-text); font-size: var(--fs-sm); line-height: 1.5; color: var(--cream-2); }
+.chlog-notes p { margin: 0; }
+/* The newest version: big title, three sentences. */
+.chlog-latest { padding: 0 0 1.1rem; }
+.chlog-latest .chlog-title { margin: 0.2rem 0 0.7rem; font-size: var(--fs-2xl); font-weight: 800; letter-spacing: -0.015em; line-height: 1.15; }
+.chlog-latest .chlog-notes { font-size: var(--fs-md); color: var(--cream); }
+.chlog-more { display: inline-block; margin-top: 0.8rem; font-size: var(--fs-sm); font-weight: 650; text-decoration: none; }
+/* Older versions: a line each; opens in place (grid rows 0fr -> 1fr). */
+.chlog-entry { border-top: 1px solid var(--ink-3); }
+.chlog-row { display: flex; align-items: baseline; gap: 0.8rem; width: 100%; padding: 0.65rem 0; border: 0; background: none; color: var(--cream); text-align: left; cursor: pointer; }
+.chlog-row-title { flex: 1; min-width: 0; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chlog-row:hover .chlog-row-title, .chlog-row:focus-visible .chlog-row-title { color: #fff; }
+.chlog-row:focus-visible { outline: none; box-shadow: inset 2px 0 0 var(--amber); padding-left: 0.5rem; }
+.chlog-fold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.2s var(--ease-glide); }
+.chlog-entry.open .chlog-fold { grid-template-rows: 1fr; }
+.chlog-body-inner { min-height: 0; overflow: hidden; }
+.chlog-entry.open .chlog-body-inner { padding-bottom: 0.9rem; }
+.chlog-entry.open .chlog-row-title { white-space: normal; }
+/* "Join the Discord" after the lead line (ui/community.ts; hidden without an invite). */
+.chlog-discord { display: inline-flex; align-items: center; gap: 0.35rem; color: #b9bfff; font-weight: 650; text-decoration: none; white-space: nowrap; }
+.chlog-discord:hover, .chlog-discord:focus-visible { color: #dfe2ff; text-decoration: underline; text-underline-offset: 0.2em; }

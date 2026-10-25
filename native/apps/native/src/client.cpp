@@ -4,7 +4,7 @@
 #include "menu_webview.hpp"
 #include "online.hpp"
 #include "renderer.hpp"
-#include "menu_scene.hpp"
+#include "menu_backdrop.hpp"
 #include "hud.hpp"
 #include "ssj.hpp"
 #include "strafe_trainer.hpp"
@@ -35,6 +35,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -204,10 +205,28 @@ int run(const Options &opt) {
     }
     if(!menu && opt.map.empty() && opt.online_map.empty())
         throw std::runtime_error("Menus are unavailable on this build; use --map PATH or --online-map NAME");
-    std::unique_ptr<native::MenuScene<Gl>> menu_scene;
-    bool menu_reduced_motion=true,menu_backdrop_sent=false;
-    if(menu)try {menu_scene=std::make_unique<native::MenuScene<Gl>>(gl);}
-    catch(const std::exception &e){std::cerr<<"Menu scene unavailable: "<<e.what()<<'\n';}
+    // Every download_map call shares one content cache whose temporary names
+    // are deterministic, so downloads take turns. Waiting gives up once its
+    // own download is cancelled, so neither worker can hold up shutdown.
+    std::mutex cache_mutex;
+    auto lock_cache=[&cache_mutex](const std::atomic_bool &cancel) {
+        std::unique_lock lock(cache_mutex,std::defer_lock);
+        while(!lock.try_lock()){if(cancel)throw std::runtime_error("Map download cancelled");std::this_thread::sleep_for(std::chrono::milliseconds(20));}
+        if(cancel)throw std::runtime_error("Map download cancelled");
+        return lock;
+    };
+    // Home-screen backdrop: the web map tour over the map the menu picked,
+    // from its own native context. Released as soon as a gameplay map loads.
+    std::unique_ptr<MenuBackdrop> backdrop;
+    if(menu)backdrop=std::make_unique<MenuBackdrop>(gl,assets,[&lock_cache,cache](const std::string &id,const std::atomic_bool &cancel) {
+        const auto lock=lock_cache(cancel);
+        native::DownloadLimits limits;limits.bsp=32*1024*1024;limits.content_total=256*1024*1024;
+        return native::download_map(id,cache,[](const std::string &){},&cancel,limits);
+    });
+    // What the menu was last told: the backdrop source and the map it shows.
+    bool menu_reduced_motion=true,backdrop_cut=false,gameplay_backdrop_due=false;
+    std::string backdrop_source,backdrop_shown,backdrop_failed,backdrop_png;
+    auto backdrop_clock=std::chrono::steady_clock::now();
     bool captured=false,focused=true,running=true,menu_ready=false,smoke_requested=false,smoke_pass=false,smoke_snapshot=false,resume_wanted=false;
     bool recording_ended=false;
     auto preferences=native::default_settings();
@@ -289,6 +308,9 @@ int run(const Options &opt) {
     };
     auto show_menu=[&](bool on) {
         if(menu) menu->set_visible(on);
+        // Each pause re-announces the paused map (a fresh still for a
+        // separate GTK window); sent with the menu state once it is visible.
+        if(on&&core&&menu)gameplay_backdrop_due=true;
         if(on)audio.pause();
         resume_wanted=!on&&bool(core);
         if(resume_wanted) SDL_RaiseWindow(window.get());
@@ -361,14 +383,20 @@ int run(const Options &opt) {
         if(id==tutorial_map){const auto metadata=nlohmann::json::parse(read_text(assets/"tutorial.json"));if(file_hash(path)!=metadata.at("bspSha256").get<std::string>())throw std::runtime_error("Tutorial BSP does not match bundled lessons; update the tutorial assets and map together");next_tutorial=std::make_unique<native::Tutorial>(metadata,selected_style=="legit"||selected_style=="scroll");next_tutorial->set_completed(tutorial_completed);}
         auto next_renderer=std::make_unique<Renderer>(gl,next.get(),assets);
         renderer.reset(); core=std::move(next); renderer=std::move(next_renderer);
+        // The pause screen shows this map itself, never the home tour.
+        if(backdrop)backdrop->release();backdrop_shown.clear();backdrop_failed.clear();backdrop_cut=false;gameplay_backdrop_due=true;
         zones=next_zones;tutorial=std::move(next_tutorial);tutorial_demo=false; map_id=id; error.clear();playback=false;ghost_handle=0;ghost_enabled=false;ghost_id.clear(); reset();apply_preferences();renderer->set_cosmetics(outfit,packed_loadout);apply_room_mode(room_modes.map_loaded(map_id,room.spectator_target.has_value(),epoch_ms()));
     };
     auto request_map=[&](const std::string &id) {
         if(download.valid()) throw std::runtime_error("A map is already loading");
         if(!native::valid_map_id(id)) throw std::runtime_error("Invalid map name");
         error.clear(); show_menu(true);
+        // A background still downloading gives way; one already on screen
+        // stays until this map has loaded.
+        if(backdrop)backdrop->cancel_loading();
         {std::lock_guard lock(progress_mutex); loading="Reading "+id;}
         download=std::async(std::launch::async,[&,id] {
+            const auto lock=lock_cache(cancel_download);
             return native::download_map(id,cache,[&](const std::string &message) {std::lock_guard lock(progress_mutex);loading=message;},&cancel_download);
         });
     };
@@ -545,16 +573,26 @@ int run(const Options &opt) {
                 auto message=nlohmann::json::parse(raw);const auto type=message.at("type").get<std::string>();
                 const size_t limit=type=="replayData"?12*1024*1024:(type=="roomSnapshot"||type=="roomEvent")?128*1024:16*1024;
                 if(raw.size()>limit)throw std::runtime_error("Menu command exceeds its type limit");
-                if(type=="ready") {menu_ready=true;menu_backdrop_sent=false;run_event({{"type","reset"}});std::cout<<"Native menu ready: "<<raw<<'\n';}
+                if(type=="ready") {menu_ready=true;backdrop_shown.clear();backdrop_failed.clear();backdrop_cut=false;gameplay_backdrop_due=bool(core);run_event({{"type","reset"}});std::cout<<"Native menu ready: "<<raw<<'\n';}
                 else if(type=="resume" && core && !download.valid()) show_menu(false);
                 else if(type=="menuAppearance") {menu_reduced_motion=message.value("reducedMotion",true);}
+                else if(type=="menuBackdrop") {
+                    // Home only: ignored once a gameplay map is loading or loaded.
+                    const auto &value=message.at("map");const auto id=value.is_null()?std::string():value.get<std::string>();
+                    if(!id.empty()&&!native::valid_map_id(id))throw std::runtime_error("Invalid backdrop map name");
+                    if(backdrop&&!core&&!download.valid()&&backdrop->request(id)) {
+                        backdrop_shown.clear();backdrop_failed.clear();backdrop_cut=false;backdrop_source.clear();
+                        // Released at the menu's request: no map to match against.
+                        if(id.empty())menu->evaluate_js("window.bunnyhopNativeBackdrop?.('none')");
+                    }
+                }
                 else if(type=="restart" && core && !download.valid()) {reset();show_menu(false);}
                 else if(type=="selectMap") {
                     const auto style=message.value("style",selected_style);if(!native::styles.contains(style))throw std::runtime_error("Unknown style");
                     tutorial_stopped=false;selected_style=style;active_track=message.value("track",0u);if(active_track>64)throw std::runtime_error("Invalid track");
                     request_map(message.at("id").get<std::string>());
                 }
-                else if(type=="style") {const auto id=message.at("id").get<std::string>();if(!native::styles.contains(id))throw std::runtime_error("Unknown style");selected_style=id;active_track=0;reset();}
+                else if(type=="style") {if(download.valid())throw std::runtime_error("A map is loading");const auto id=message.at("id").get<std::string>();if(!native::styles.contains(id))throw std::runtime_error("Unknown style");selected_style=id;active_track=0;reset();}
                 else if(type=="settings") {auto changed=native::patch_settings(preferences,message.at("patch"));native::save_settings(cache/"settings.json",changed);preferences=std::move(changed);input.held=input.pulse=0;held_codes.clear();apply_preferences();error.clear();}
                 else if(type=="replays")refresh_replays();
                 else if(type=="ghost")ghost_enabled=ghost_handle&&message.at("enabled").get<bool>();
@@ -610,16 +648,23 @@ int run(const Options &opt) {
                 else if(type=="quit") running=false;
                 else if(type=="smoke" && !opt.menu_smoke.empty()) {
                     message["engine"]="native";message["renderer"]="opengl";message["map"]=map_id;message["nativeTick"]=curr.tick;
+                    message["backdropHost"]=backdrop?backdrop->state(backdrop_source):nlohmann::json(nullptr);message["backdropShown"]=backdrop_shown;
+                    const auto ui_backdrop=message.value("backdrop",std::string());
+                    // Home: the real map tour the menu asked for is on screen
+                    // behind the web home. Pause: the loaded map itself.
                     const bool matches_screen=opt.menu_home_smoke
-                        ? map_id.empty() && message.value("screen",std::string())=="home" && message.value("uiMap",std::string()).empty() && message.value("heading",std::string())=="Find your flow."
-                        : !map_id.empty() && message.value("screen",std::string())=="map" && message.value("uiMap",std::string())==map_id;
-                    smoke_pass=message.value("apiStatus",0)==200 && message.value("origin",std::string())=="https://bunnyhop.lol" && message.value("webglAttempts",1)==0 && message.value("webglContexts",1)==0 && message.value("canvasCount",1)==0 && message.value("controlsVisible",false) && matches_screen && (opt.menu_home_smoke?bool(menu_scene):bool(renderer));
+                        ? map_id.empty() && message.value("screen",std::string())=="home" && message.value("uiMap",std::string()).empty() && message.value("tiles",0)>=1 && message.value("attractLive",false)
+                            && backdrop && backdrop->status()==MenuBackdrop::Status::ready && !backdrop_shown.empty() && backdrop_shown==backdrop->map() && backdrop->shots()>0
+                        : !map_id.empty() && message.value("screen",std::string())=="pause" && message.value("uiMap",std::string())==map_id && backdrop_shown==map_id && bool(renderer);
+                    smoke_pass=message.value("apiStatus",0)==200 && message.value("origin",std::string())=="https://bunnyhop.lol" && message.value("webglAttempts",1)==0 && message.value("webglContexts",1)==0 && message.value("canvasCount",1)==0 && message.value("controlsVisible",false) && matches_screen
+                        && (ui_backdrop=="scene"||(ui_backdrop=="static"&&message.value("stillShown",false)));
                     message["pass"]=smoke_pass;
                     std::ofstream(opt.menu_smoke+".json")<<message.dump(2)<<'\n';
                     std::cout<<"Native menu smoke: "<<message.dump()<<'\n';
                     int w=0,h=0;SDL_GetWindowSizeInPixels(window.get(),&w,&h);
                     if(renderer) renderer->screenshot(opt.menu_smoke+"-game.ppm",w,h);
-                    else if(menu_scene) {const auto png=menu_scene->snapshot_png(w,h);std::ofstream(opt.menu_smoke+"-scene.png",std::ios::binary).write(png.data(),png.size());}
+                    // The exact native frame the menu was handed.
+                    if(!backdrop_png.empty())std::ofstream(opt.menu_smoke+"-scene.png",std::ios::binary).write(backdrop_png.data(),backdrop_png.size());
                     smoke_snapshot=menu->screenshot(opt.menu_smoke+".png");
                     if(!smoke_snapshot) {smoke_pass=false;running=false;}
                 }
@@ -817,23 +862,36 @@ int run(const Options &opt) {
                 preferences.at("jumpStats").get<bool>()?feedback.ssj_line:std::string(),feedback.ssj_good,
                 preferences.at("strafeTrainer").get<bool>()&&!playback?feedback.strafe_reading:std::nullopt,
                 preferences.at("strafeTrainerHints").get<bool>(),&hud_layout);
-        } else if(menu_scene) menu_scene->draw(width,height,std::chrono::duration<double>(now-started).count(),menu_reduced_motion);
-        else {gl.Viewport(0,0,width,height);gl.ClearColor(.03f,.04f,.06f,1);gl.Clear(GL_COLOR_BUFFER_BIT);}
-        if(menu && menu_ready && menu_scene && !menu_backdrop_sent && width>0 && height>0) {
-            // Separate GTK windows and screenshot runs use one bounded native
-            // PNG. Transparent embedded views show the live SDL scene directly.
-            try {
-                const bool live=menu->supports_backdrop()&&opt.menu_smoke.empty();
-                const auto source=live?std::string("native"):"data:image/png;base64,"+base64(menu_scene->snapshot_png(width,height));
-                menu->evaluate_js("window.bunnyhopNativeBackdrop?.("+nlohmann::json(source).dump()+")");
-                std::cout<<"Native menu backdrop: supports="<<menu->supports_backdrop()<<" source="<<(live?"native":"png")<<std::endl;
-                menu_backdrop_sent=true;
-                // snapshot_png draws a small preview into the current buffer.
-                // Redraw before swapping; never expose it over a loaded map.
-                if(!renderer)menu_scene->draw(width,height,std::chrono::duration<double>(now-started).count(),menu_reduced_motion);
-                else continue;
-            } catch(const std::exception &e) {menu_backdrop_sent=true;std::cerr<<"Menu backdrop: "<<e.what()<<'\n';}
         }
+        // Separate GTK windows and screenshot runs cannot show the SDL layer:
+        // they get one bounded PNG of the still pose instead of a live scene.
+        const bool backdrop_live=menu&&menu->supports_backdrop()&&opt.menu_smoke.empty();
+        const bool backdrop_still=menu_reduced_motion||!backdrop_live;
+        // An unfocused window holds the current shot rather than animating.
+        const double backdrop_dt=focused?std::chrono::duration<double>(now-backdrop_clock).count():0;backdrop_clock=now;
+        bool backdrop_drawn=false;
+        if(backdrop&&!renderer){backdrop->poll(!download.valid());backdrop_drawn=backdrop->draw(width,height,backdrop_dt,backdrop_still);}
+        if(!renderer&&!backdrop_drawn){gl.Viewport(0,0,width,height);gl.ClearColor(.03f,.04f,.06f,1);gl.Clear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);}
+        // Tell the menu what it is drawn over: the home tour (once per map,
+        // then fade cuts), or the paused gameplay map. "native" waits for the
+        // frame to be presented; a PNG is read back from this frame first.
+        std::string backdrop_call;bool backdrop_log=false;
+        if(menu&&menu_ready&&width>0&&height>0)try {
+            auto call=[](const std::string &source,const std::string &id){return "window.bunnyhopNativeBackdrop?.("+nlohmann::json(source).dump()+","+nlohmann::json(id).dump()+")";};
+            auto png_source=[&]{backdrop_png=backbuffer_png(gl,width,height);return "data:image/png;base64,"+base64(backdrop_png);};
+            if(renderer&&gameplay_backdrop_due&&menu->visible()) {
+                gameplay_backdrop_due=false;backdrop_source=backdrop_live?"native":"png";backdrop_shown=map_id;
+                backdrop_call=call(backdrop_live?std::string("native"):png_source(),map_id);backdrop_log=true;
+            } else if(!renderer&&backdrop_drawn&&backdrop_shown!=backdrop->map()) {
+                backdrop_source=backdrop_live?"native":"png";backdrop_shown=backdrop->map();backdrop_cut=false;
+                backdrop_call=call(backdrop_live?std::string("native"):png_source(),backdrop_shown);backdrop_log=true;
+            } else if(!renderer&&backdrop_drawn&&backdrop_live&&backdrop->cut(backdrop_still)!=backdrop_cut) {
+                backdrop_cut=!backdrop_cut;backdrop_call=call(backdrop_cut?"cut":"native",backdrop_shown);
+            } else if(!renderer&&backdrop&&backdrop->status()==MenuBackdrop::Status::failed&&backdrop_failed!=backdrop->map()) {
+                backdrop_failed=backdrop->map();std::cerr<<"Menu backdrop "<<backdrop_failed<<": "<<backdrop->error()<<'\n';
+                backdrop_call=call("none",backdrop_failed);
+            }
+        } catch(const std::exception &e) {std::cerr<<"Menu backdrop: "<<e.what()<<'\n';}
         if(menu&&menu_ready&&core&&!playback&&!spectator&&!room.id.empty()&&room.map==map_id&&now-room_time>=std::chrono::milliseconds(50)) {
             BhWeaponReport weapon{};bh_weapon_report(core.get(),&weapon);
             const auto tick=uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(now-started).count()/10);
@@ -851,7 +909,10 @@ int run(const Options &opt) {
         if(opt.frames&&renderer&&(curr.tick>=opt.frames||(playback&&playback_paused&&curr.tick>=playback_info.value("totalTicks",0u)))&&!opt.screenshot.empty()) renderer->screenshot(opt.screenshot,width,height);
         const GLenum gl_error=gl.GetError(); if(gl_error!=GL_NO_ERROR) throw std::runtime_error("OpenGL error "+std::to_string(gl_error));
         if(!SDL_GL_SwapWindow(window.get())) throw std::runtime_error(std::string("Swapping framebuffer failed: ")+SDL_GetError());
-        if(menu && menu_ready && (menu->visible()||!room.id.empty()) && (now-ui_time>=std::chrono::milliseconds(200) || (!opt.menu_smoke.empty() && (renderer||opt.menu_home_smoke) && !download.valid() && !smoke_requested))) {
+        // State first: the menu accepts a backdrop only for its current or
+        // requested map, so it must already know a newly loaded map. Scripts
+        // run in the order they are queued.
+        if(menu && menu_ready && (menu->visible()||!room.id.empty()) && (now-ui_time>=std::chrono::milliseconds(200) || !backdrop_call.empty() || (!opt.menu_smoke.empty() && (renderer||opt.menu_home_smoke) && !download.valid() && !smoke_requested))) {
             std::string progress;{std::lock_guard lock(progress_mutex);progress=loading;}
             const nlohmann::json state={{"engine","native"},{"renderer","opengl"},{"map",map_id},{"loading",progress},{"error",error},
                 {"sensitivity",input.sensitivity},{"paused",!captured},{"recordingPath",record_path},
@@ -861,49 +922,78 @@ int run(const Options &opt) {
                 {"playback",{{"active",playback},{"id",playback_id},{"tick",curr.tick},{"totalTicks",playback?playback_info.value("totalTicks",0u):0u},{"paused",playback_paused},{"speed",playback_speed}}},
                 {"ghost",{{"enabled",ghost_enabled},{"id",ghost_id},{"name",ghost_info.is_object()?ghost_info.value("player",std::string("Ghost")):"Ghost"}}},
                 {"timer",{{"status",run_state.status},{"seconds",run_state.seconds},{"jumps",run_state.jumps},{"strafes",run_state.strafes},{"sync",run_state.sync_percent}}},
-                {"discord",{{"state",discord_allowed?discord.state:"disabled"},{"message",discord.message}}}};
+                {"discord",{{"state",discord_allowed?discord.state:"disabled"},{"message",discord.message}}},
+                {"backdrop",backdrop?backdrop->state(backdrop_source):nlohmann::json{{"status","idle"},{"map",""},{"renderer","native-bsp"},{"kind","tour"},{"shots",0},{"source",""},{"error",""}}}};
             const auto encoded=state.dump();
             if(encoded!=last_ui) {menu->evaluate_js("window.bunnyhopNativeMenu?.onState("+encoded+")");last_ui=encoded;}
             ui_time=now;
         }
-        if(menu && menu_ready && (renderer||(opt.menu_home_smoke&&menu_scene)) && menu_backdrop_sent && !download.valid() && !opt.menu_smoke.empty() && !smoke_requested) {
+        if(!backdrop_call.empty()) {
+            menu->evaluate_js(backdrop_call);
+            if(backdrop_log)std::cout<<"Native menu backdrop: "<<backdrop_source<<" "<<backdrop_shown<<" (live="<<backdrop_live<<")"<<std::endl;
+        }
+        const bool smoke_backdrop=opt.menu_home_smoke
+            ? !renderer && backdrop && ((backdrop->status()==MenuBackdrop::Status::ready && !backdrop_shown.empty() && backdrop_shown==backdrop->map()) || backdrop->status()==MenuBackdrop::Status::failed)
+            : renderer && !map_id.empty() && backdrop_shown==map_id && !gameplay_backdrop_due;
+        if(menu && menu_ready && smoke_backdrop && !download.valid() && !opt.menu_smoke.empty() && !smoke_requested) {
             smoke_requested=true;
             std::cout<<"Native menu smoke: checking "<<(opt.menu_home_smoke?"home":map_id)<<std::endl;
             // App-owned integration check: reads the same live account API as the menu; never submits a run.
             menu->evaluate_js("(()=>{const home="+std::string(opt.menu_home_smoke?"true":"false")+",expected="+nlohmann::json(map_id).dump()+R"JS(;
                 const post=value=>window.webkit.messageHandlers.bunnyhop.postMessage(JSON.stringify({type:'smoke',...value}));
                 let attempts=0;
-                const check=()=>{
-                    const current=document.querySelector('.native-current');
-                    const heading=current?.querySelector('h2')?.textContent??'';
-                    const screen=current?.getAttribute('aria-label')==='Current map'?'map':current?.getAttribute('aria-label')==='Play bunnyhop'?'home':'unknown';
-                    const uiMap=screen==='map'?heading:'';
-                    const buttons=[...document.querySelectorAll('.native-home-actions button')];
-                    const primary=buttons[0]?.getAttribute('aria-label');
-                    const matchesScreen=home?screen==='home' && heading==='Find your flow.' && primary==='Play':screen==='map' && uiMap===expected && primary==='Resume';
-                    const controlsVisible=buttons.length>=5 && buttons.every(button=>{
-                        const style=getComputedStyle(button),rect=button.getBoundingClientRect();
-                        return !button.disabled && style.visibility==='visible' && Number(style.opacity)>.95 && rect.width>0 && rect.height>0;
-                    });
-                    if(!matchesScreen || !controlsVisible || !document.documentElement.dataset.nativeBackdrop || document.getElementById('native-status')?.textContent) {
-                        if(++attempts<100) {setTimeout(check,100);return;}
-                        post({error:(home?'Home':'Loaded-map')+' controls did not become ready',screen,heading,uiMap,controlsVisible,primary,backdrop:document.documentElement.dataset.nativeBackdrop,status:document.getElementById('native-status')?.textContent});return;
+                // Painted, not merely present: on screen, and no ancestor hidden,
+                // collapsed or still faded in (an entrance stuck at opacity 0).
+                const visible=element=>{
+                    if(!element?.isConnected || element.disabled) return false;
+                    const rect=element.getBoundingClientRect();
+                    if(rect.width<=0 || rect.height<=0 || rect.right<=0 || rect.bottom<=0 || rect.left>=innerWidth || rect.top>=innerHeight) return false;
+                    let opacity=1;
+                    for(let node=element;node;node=node.parentElement) {
+                        const style=getComputedStyle(node);
+                        if(style.display==='none' || style.visibility!=='visible' || style.contentVisibility==='hidden') return false;
+                        opacity*=Number(style.opacity);
                     }
-                    fetch('/api/me',{credentials:'include'}).then(r=>post({apiStatus:r.status,origin:location.origin,
+                    return opacity>.95;
+                };
+                const check=()=>{
+                    const screen=document.body.dataset.screen??'';
+                    const uiMap=document.body.dataset.map??'';
+                    const buttons=[...document.querySelectorAll('.home-menu button, .rail-list button')].filter(visible);
+                    const primary=document.querySelector(home?'.home-menu .home-item.primary':'.rail-list .rail-item.primary');
+                    const tiles=[...document.querySelectorAll('.home-tile')].filter(visible).length;
+                    const backdrop=document.documentElement.dataset.nativeBackdrop??'';
+                    // A static backdrop is the host's PNG, decoded and showing (the scrim sits above it, not around it).
+                    const still=document.querySelector('#native-backdrop > img.native-backdrop-still');
+                    const stillShown=backdrop!=='static' || (!!still && still.complete && still.naturalWidth>0 && visible(still));
+                    const attractLive=document.body.classList.contains('attract-live');
+                    const status=document.getElementById('native-status')?.textContent??'';
+                    const matchesScreen=home?screen==='home' && uiMap==='' && tiles>=1 && attractLive:screen==='pause' && uiMap===expected;
+                    const controlsVisible=buttons.length>=3 && !!primary && visible(primary);
+                    const facts={screen,uiMap,tiles,attractLive,controlsVisible,controls:buttons.length,backdrop,stillShown,status};
+                    if(!matchesScreen || !controlsVisible || !backdrop || !stillShown || status) {
+                        if(++attempts<100) {setTimeout(check,100);return;}
+                        post({error:(home?'Home':'Loaded-map')+' controls did not become ready',...facts});return;
+                    }
+                    fetch('/api/me',{credentials:'include'}).then(async r=>{await window.bunnyhopNativeMenu?.settle?.();post({apiStatus:r.status,origin:location.origin,
                         canvasCount:document.querySelectorAll('canvas').length,webglAttempts:window.__nativeMenuGraphics?.attempts,webglContexts:window.__nativeMenuGraphics?.contexts,
-                        screen,heading,uiMap,controlsVisible,backdrop:document.documentElement.dataset.nativeBackdrop})).catch(e=>post({error:String(e)}));
+                        ...facts});}).catch(e=>post({error:String(e)}));
                 };
                 setTimeout(check,300);
             })())JS");
         }
-        if(!opt.menu_smoke.empty() && now-started>std::chrono::seconds(90)) throw std::runtime_error("Native menu smoke timed out (ready="+std::to_string(menu_ready)+", backdrop="+std::to_string(menu_backdrop_sent)+", requested="+std::to_string(smoke_requested)+", snapshot="+std::to_string(smoke_snapshot)+"): "+error);
+        if(!opt.menu_smoke.empty() && now-started>std::chrono::seconds(90)) throw std::runtime_error("Native menu smoke timed out (ready="+std::to_string(menu_ready)+", backdrop="+(backdrop?backdrop->state(backdrop_source).dump():std::string("none"))+", shown="+backdrop_shown+", requested="+std::to_string(smoke_requested)+", snapshot="+std::to_string(smoke_snapshot)+"): "+error);
         const double elapsed=std::chrono::duration<double>(now-title_time).count();
         if(elapsed>=.5) {
             display_fps=title_frames/elapsed;char title[320]; std::snprintf(title,sizeof(title),"Bunnyhop native | %s | %.0f FPS | %.1f u/s | %.2fs | %s | Esc menu | R restart",map_id.c_str(),title_frames/elapsed,std::hypot(curr.velocity[0],curr.velocity[1]),run_state.seconds,captured?"SDL raw input":"paused");
             SDL_SetWindowTitle(window.get(),title); title_time=now; title_frames=0;
         }
         if(opt.frames&&renderer&&(curr.tick>=opt.frames||(playback&&playback_paused&&curr.tick>=playback_info.value("totalTicks",0u)))) running=false;
-        if(!core||download.valid()||(!opt.frames&&(!focused||!captured))) SDL_Delay(10);
+        if(!core&&backdrop_drawn&&!backdrop_still&&focused&&!download.valid()) {
+            // The live home tour runs at up to ~60 fps, like the web's.
+            const double spent=std::chrono::duration<double>(Clock::now()-now).count();
+            if(spent<1./62)SDL_DelayNS(uint64_t((1./62-spent)*1e9));
+        } else if(!core||download.valid()||(!opt.frames&&(!focused||!captured))) SDL_Delay(10);
         else if(!opt.frames&&preferences.at("fpsLimit").get<int>()>0) {
             const double target=1./preferences.at("fpsLimit").get<int>();const double spent=std::chrono::duration<double>(Clock::now()-now).count();
             if(spent<target)SDL_DelayNS(uint64_t((target-spent)*1e9));
@@ -928,7 +1018,7 @@ int main(int argc,char **argv) {
                          "  [--menu-html PATH] [--no-menu] [--frames N] [--screenshot output.ppm] [--hidden]\n"
                          "  [--tutorial jump|strafe|speed|final] [--tutorial-demo] (tutorial map only)\n"
                          "  [--menu-smoke OUTPUT_PREFIX] (with --online-map; live API reads only, no scores)\n"
-                         "  [--menu-home-smoke OUTPUT_PREFIX] (3D home scene and menu, no map or scores)\n"
+                         "  [--menu-home-smoke OUTPUT_PREFIX] (home menu over the real map tour backdrop; no gameplay or scores)\n"
                          "No map: open the map browser. WASD move, Space/wheel jump, Ctrl crouch, E use, R restart, Esc menu, F10 quit.\n"
                          "Frame-limited mode simulates one fixed tick per rendered frame; screenshot implies --frames 1.\n";
             return 0;

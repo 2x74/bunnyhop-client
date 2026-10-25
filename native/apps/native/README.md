@@ -13,11 +13,12 @@ retains its native renderer and input. Windows uses WebView2 for menus and a
 separate authentication view, with SDL still owning gameplay. There is no Electron dependency in this
 client. The legacy Electron client remains at the repository root.
 
-The home menu has a native OpenGL course and bunny scene behind its navigation.
-macOS and Windows can composite the menu over the live scene; GTK uses a bounded
-PNG captured from the same renderer. Reduced-motion preferences keep the camera
-still. If native scene initialization fails, a lightweight course illustration
-keeps the menu usable without a web gameplay renderer.
+The home menu follows the website's layout and shared styles: navigation and
+account controls on the left, six suggested maps on the right, and the featured
+map behind them. Native OpenGL renders the map tour; macOS and Windows can
+composite the menu over it, while GTK uses a bounded capture. Reduced-motion
+preferences keep the camera still. The same map's artwork appears while loading
+or if the native backdrop is unavailable, without a web gameplay renderer.
 
 macOS ARM64 has been built and smoke-tested. Linux x64 and Windows x64 are
 automated build targets, with execution and physical input validation reported
@@ -132,9 +133,9 @@ Windows packages are unsigned unless signing is explicitly configured.
 Signing credentials are not a prerequisite for the default package command:
 
 ```sh
-bun run package --version 0.3.4-dev.20261025.2
+bun run package --version 0.3.4-dev.20261025.3
 bun apps/native/packaging/release-check.ts \
-  --package target/native-packages/bunnyhop-native-0.3.4-dev.20261025.2-darwin-arm64
+  --package target/native-packages/bunnyhop-native-0.3.4-dev.20261025.3-darwin-arm64
 ```
 
 Use the actual stage path printed by the packager for `--package`. It produces a
@@ -161,7 +162,8 @@ cargo test -p bunnyhop-native-bridge
 bun test apps/native/ui apps/native/packaging
 bun apps/native/src/tutorial_oracle.ts /tmp/native-tutorial-oracle.json
 apps/native/build/bunnyhop-native-tutorial-tests /tmp/native-tutorial-oracle.json
-apps/native/build/bunnyhop-native-menu-scene-smoke /tmp/bunnyhop-native-scene.png
+apps/native/build/bunnyhop-native-menu-backdrop-smoke \
+  --map /path/to/bhop_eazy.bsp --out /tmp/bunnyhop-native-backdrop.png
 apps/native/build/bunnyhop-native --menu-home-smoke /tmp/bunnyhop-native-home
 apps/native/build/bunnyhop-native --online-map bhop_eazy --hidden \
   --menu-smoke /tmp/bunnyhop-native-menu
