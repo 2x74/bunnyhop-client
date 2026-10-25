@@ -27,8 +27,15 @@
   --accent-hi: var(--amber-hi);
   --accent-ink: var(--amber-ink);
   --accent-soft: var(--amber-wash);
+  /* Colours that mean something: palette.ts PALETTES.off holds the same values and swaps them on <html> for the
+     colour-blind settings (with --st-g / --st-o / --st-r in hud/strafe-trainer.css). */
   --gain: #4dff88;
   --loss: #ff5d5d;
+  --sync-ok: #ffd24d;
+  --behind-soft: rgba(255, 110, 110, 0.72);
+  --zone-start: #33dd66;
+  /* Practice mode's timer (hud.ts setPractice): a lemon yellow, apart from the WR gold. */
+  --practice: #f2e64a;
   --ghost: #66b3ff;
   --discord: #5865f2;
   --tier-1: #5ee08a; --tier-2: #3fd0c9; --tier-3: #ffd84d; --tier-4: #ff9a3c; --tier-5: #ff5468; --tier-6: #c477ff; --tier-x: #8a93a6;
@@ -116,11 +123,11 @@ body:not(.in-game) #overlay::after {
 body.attract-live:not(.in-game) #overlay::before { opacity: 0; }
 body.attract-live:not(.in-game) #overlay::after { opacity: 1; }
 body:not(.in-game):not([data-screen="home"]) #overlay::after { background: linear-gradient(90deg, rgba(12, 12, 15, 0.86), rgba(12, 12, 15, 0.7) 45%, rgba(12, 12, 15, 0.5)); }
-/* Panel screens: dark where the screen's text is, lighter towards the right and bottom edges so the scene shows. */
+/* Panel screens: dark where the screen's text is (the middle), lighter towards the sides and bottom so the scene shows. */
 body:not(.in-game):not([data-screen="home"]):not([data-screen="loading"]) #overlay::after,
 body.in-game:not([data-screen="pause"]):not([data-screen="loading"]) #overlay {
   background:
-    linear-gradient(90deg, rgba(12, 12, 15, 0.93) 0%, rgba(12, 12, 15, 0.88) min(80%, 4.5vw + 68rem), rgba(12, 12, 15, 0.5) min(100%, 4.5vw + 92rem)),
+    linear-gradient(90deg, rgba(12, 12, 15, 0.5) 0%, rgba(12, 12, 15, 0.88) max(0%, 50% - 44rem), rgba(12, 12, 15, 0.93) 50%, rgba(12, 12, 15, 0.88) min(100%, 50% + 44rem), rgba(12, 12, 15, 0.5) 100%),
     linear-gradient(180deg, rgba(12, 12, 15, 0.2) 0%, transparent 20%, transparent 75%, rgba(12, 12, 15, 0.45) 100%);
 }
 /* The live background canvas: hidden until its first frame, then softly defocused; fades through black on cuts. */
@@ -145,11 +152,14 @@ body.bg-frozen #game { visibility: hidden; filter: none !important; transition: 
 .boot { display: grid; place-items: center; min-height: 60vh; opacity: 0.9; }
 
 /* Panel screens (maps, ranks, profile, stats, servers, settings...): one quiet frame for all of them. No card: the
-   screen stands on a left-weighted scrim over the (frozen) scene, on the home column's left edge, one width for all,
-   so it reads as part of the same place as the home screen. Header: a back arrow in the title's own type, the title. */
+   screen stands on a scrim over the (frozen) scene, one width for all. Up to that width it fills the space between the
+   home column's margins; past it (wide and 1440p screens) it sits in the middle, the scrim darkest behind it, rather
+   than pinned to the left with the spare width all on the right. Header: a back arrow in the title's own type, the title. */
 .panel { width: min(82rem, 100%); padding: 0; background: none; border: 0; border-radius: 0; box-shadow: none; box-sizing: border-box; }
 .panel-wide { width: min(82rem, 100%); }
 #menu:has(> .panel) { justify-content: flex-start; align-items: flex-start; padding: 4.5vh 4.5vw 3vh; }
+/* Auto margins, not justify-content: a screen wider than the menu still starts at its left edge (and scrolls). */
+#menu > .panel { margin-inline: auto; }
 .screen-head { display: flex; align-items: center; gap: 0.7rem; margin: 0 0 var(--sp-5); min-height: 2.8rem; }
 .screen-back { flex: none; display: grid; place-items: center; width: 2.6rem; height: 2.6rem; margin-left: -0.55rem; padding: 0; border: 0; border-radius: var(--r-2); background: transparent; color: var(--cream-2); cursor: pointer; transition: color var(--t-step) var(--ease-glide), transform var(--t-step) var(--ease-glide); }
 .screen-back svg { width: 1.7rem; height: 1.7rem; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
@@ -493,7 +503,7 @@ body.potato .range-bub { display: none; }
 .num-wrap { position: relative; display: inline-flex; align-items: center; flex: none; }
 .num-input { width: 4.6rem; padding: 0.3rem 0.45rem; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; text-align: right; -moz-appearance: textfield; }
 .num-input::-webkit-inner-spin-button, .num-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-.num-wrap:has(.unit) .num-input { padding-right: 1.45rem; }
+.num-wrap .num-input { padding-right: 1.45rem; } /* with or without a unit: every box the same width */
 .num-wrap .unit { position: absolute; right: 0.5rem; font-size: var(--fs-xs); color: var(--faint); pointer-events: none; }
 /* switch: a keycap in a slot. Off: a dim cap on the left of a dark slot. On: the slot goes amber (on its darker ground)
    and the cap clicks across with a little overshoot. Position and colour are the state; no word beside it. */
@@ -519,6 +529,7 @@ input.switch.sm:checked::after { transform: translateX(calc(2.15rem - var(--sw-c
 .swatch:hover { transform: scale(1.12); }
 .swatch.on { box-shadow: 0 0 0 2px var(--panel-solid), 0 0 0 3.5px var(--text); }
 .swatch:focus-visible { outline: none; box-shadow: var(--ring); }
+.paint-swatches .swatch { border-radius: 3px; }
 input[type="color"] { width: 2.2rem; height: 1.6rem; border: 1px solid var(--line-2); border-radius: 0.35rem; background: none; padding: 0.1rem; cursor: pointer; }
 /* mouse readouts */
 .set-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); padding: 0 0.6rem; }
@@ -552,7 +563,7 @@ input[type="color"] { width: 2.2rem; height: 1.6rem; border: 1px solid var(--lin
 .note { color: var(--dim); font-size: 0.82rem; line-height: 1.5; margin: 0.9rem 0 0; }
 
 /* controls help: three columns, fits one screen */
-.panel-controls { width: min(78rem, 96vw); }
+.panel-controls { width: min(78rem, 100%); }
 .controls { display: grid; grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr) minmax(0, 1fr); gap: var(--sp-6); }
 .controls h3 { margin: 0 0 var(--sp-2); font-size: var(--fs-sm); font-weight: 700; color: var(--text); }
 .controls h3:not(:first-child) { margin-top: var(--sp-5); }
@@ -664,14 +675,15 @@ body:not(.in-game) #hud { display: none; }
 @keyframes ec-breathe { to { opacity: 0.85; } }
 @media (prefers-reduced-motion: reduce) { #hud-endcard.wr-prov .ec-time { animation: none; } }
 #hud-endcard.rejected .ec-time { color: var(--cream-3); }
+#hud-endcard.practice .ec-time { color: var(--practice); }
 .ec-sheen { position: absolute; inset: 0; color: transparent; text-shadow: none; background: linear-gradient(100deg, transparent 38%, rgba(255, 255, 255, 0.95) 50%, transparent 62%) 150% 0 / 250% 100% no-repeat; -webkit-background-clip: text; background-clip: text; pointer-events: none; }
 .ec-delta { display: flex; align-items: baseline; gap: 0.6em; font-size: 1.2em; font-weight: 750; font-variant-numeric: tabular-nums; }
 .ec-delta.ahead { color: var(--gain); }
-.ec-delta.behind { color: rgba(255, 110, 110, 0.72); }
+.ec-delta.behind { color: var(--behind-soft); }
 .ec-word { display: inline-block; font-weight: 850; color: #fff; }
 #hud-endcard.wr .ec-word { color: var(--wr); }
 .ec-note { margin-top: 0.15em; font-weight: 600; color: var(--wr); }
-.ec-stats { display: flex; gap: 1em; margin-top: 0.35em; font-size: 0.82em; color: rgba(255, 255, 255, 0.6); }
+.ec-stats { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.2em 1em; margin-top: 0.35em; font-size: 0.82em; color: rgba(255, 255, 255, 0.6); }
 .ec-stats b { color: #fff; font-weight: 700; }
 .endcard-sub { margin-top: 0.55em; font-size: 0.9em; font-weight: 600; color: var(--cream-2); }
 .endcard-sub:empty { display: none; }
@@ -755,7 +767,7 @@ body:not(.in-game) #hud { display: none; }
 
 /* menu column: big uppercase items, the landing dot (ui/hop.ts) marks the one you're on; PLAY leans like a strafe */
 .home-menu { gap: 0.1rem; margin-top: clamp(1.2rem, 5vh, 3.4rem); max-width: 26rem; padding-left: 1.6rem; margin-left: -1.6rem; }
-.home-item { position: relative; justify-content: flex-start; padding: 0.42rem 0.4rem 0.42rem 0.2rem; background: transparent; border: 0; border-radius: 0; transition: transform var(--t-step) var(--ease-glide), color var(--t-step) var(--ease-glide); }
+.home-item { position: relative; justify-content: flex-start; padding: 0.42rem 0.4rem 0.42rem 0.55rem; background: transparent; border: 0; border-radius: 0; transition: transform var(--t-step) var(--ease-glide), color var(--t-step) var(--ease-glide); }
 .home-item .mb-label { flex-direction: row; align-items: baseline; gap: 0.75rem; }
 .home-item .mb-title { font-size: 1.4rem; font-weight: 800; letter-spacing: 0.035em; text-transform: uppercase; line-height: 1.1; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.45); }
 .home-item small { font-family: var(--font-text); font-size: var(--fs-sm); color: var(--cream-3); font-weight: 500; transition: color var(--t-step); }
@@ -773,7 +785,7 @@ body:not(.in-game) #hud { display: none; }
 /* footer: you, then one quiet row of words (no pills); Support is the warm one, the version the faintest */
 .home-foot { margin-top: auto; padding-top: 1.5rem; display: flex; flex-direction: column; align-items: flex-start; gap: 0.9rem; width: max-content; max-width: min(64vw, 100vw - 30rem); }
 .home-foot-row { display: flex; align-items: center; flex-wrap: wrap; gap: 0.7rem 1.4rem; }
-/* Support, Discord, Inbox: real buttons, one size, each with its own colour. Press = land. */
+/* Support, Discord, Inbox: real buttons, one size. Press = land. */
 .home-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem; }
 .home-act { position: relative; display: inline-flex; align-items: center; gap: 0.55rem; height: 2.75rem; padding: 0 1.15rem; border: 0; border-radius: var(--r-2); background: var(--ink-2); color: var(--cream); font-family: var(--font-ui); font-size: 1.02rem; font-weight: 750; text-decoration: none; cursor: pointer; box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.35); transition: background var(--t-step) var(--ease-glide), color var(--t-step) var(--ease-glide), transform 0.24s var(--ease-land), box-shadow var(--t-tick); }
 .home-act svg { width: 1.2rem; height: 1.2rem; flex: none; }
@@ -781,16 +793,11 @@ body:not(.in-game) #hud { display: none; }
 .home-act:focus-visible { outline: none; box-shadow: var(--ring); }
 .home-act:active { transform: translateY(2px) scale(0.98); box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.35); transition-duration: var(--t-tick); }
 .home-act[hidden] { display: none; }
-.act-support { background: linear-gradient(180deg, #3a2410, #2b1a0b); color: var(--amber-hi); box-shadow: inset 0 0 0 1.5px rgba(255, 180, 60, 0.55), inset 0 -3px 0 rgba(0, 0, 0, 0.35); }
+/* One quiet style for Support, Discord and Inbox: each keeps only its icon colour (Support's heart, Discord's blurple). */
 .act-support svg path:last-child { color: #ff6f91; fill: #ff6f91; }
-.act-support:hover, .act-support:focus-visible { background: var(--amber); color: var(--amber-ink); box-shadow: inset 0 -3px 0 var(--amber-deep); }
-.act-support:hover svg path:last-child, .act-support:focus-visible svg path:last-child { fill: #d8264f; }
-.act-discord { background: #5865f2; color: #fff; }
-.act-discord:hover, .act-discord:focus-visible { background: #6873ff; }
+.act-discord svg { color: #7983ff; }
 .act-inbox .mb-title { display: inline-flex; align-items: center; gap: 0.5rem; }
 .act-inbox .ib-badge { position: static; transform: none; margin: 0; min-width: 1.35rem; height: 1.35rem; padding: 0 0.35rem; border-radius: var(--r-round); background: var(--amber); color: var(--amber-ink); font-size: 0.8rem; font-weight: 850; line-height: 1.35rem; text-align: center; box-sizing: border-box; }
-.act-inbox:has(.ib-badge:not([hidden])) { color: #fff; box-shadow: inset 0 0 0 1.5px rgba(255, 180, 60, 0.45), inset 0 -3px 0 rgba(0, 0, 0, 0.35); }
-.act-inbox:has(.ib-badge:not([hidden])) svg { color: var(--amber); }
 .key-hints { margin: 0; font-size: 0.74rem; color: var(--faint); display: flex; gap: 0.3rem; align-items: center; flex-wrap: wrap; }
 .key-hints kbd { font-size: 0.72rem; color: var(--dim); }
 .home .account { gap: 1.1rem; flex-wrap: nowrap; }
@@ -1126,3 +1133,6 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .rail-item:hover kbd, .rail-item:focus-visible kbd, .action-card:hover kbd, .action-card:focus-visible kbd { opacity: 1; }
 .rail-item.primary kbd { color: rgba(29, 19, 6, 0.6); background: none; border: 0; }
 .rail-item.pause-home kbd { background: none; border: 0; }
+
+/* Local video grading excludes HUD/menu DOM and follows the frozen scene behind full-screen panels. */
+#game, #bg-still { filter: var(--video-grade, none); }

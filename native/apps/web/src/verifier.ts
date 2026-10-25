@@ -83,6 +83,15 @@ export interface VerifyResult {
   rules1?: { ticks: number; startTick: number; endTick: number };
 }
 
+/** Result for a replay whose simulation stopped early (a desync): invalid, nothing timed. */
+function unsimulatedResult(style: string, problems: string[], sim: SimResult, simMs: number): VerifyResult {
+  return {
+    valid: false, problems, style, track: 0, ticks: 0, time: 0, startTick: 0, endTick: 0, totalTicks: sim.ticks,
+    checkpointsMatch: false, checkpointsChecked: 0, firstMismatchTick: null, finalStateMatches: false,
+    final: sim.final, stats: { jumps: 0, strafes: 0, sync: 0, perf: 0 }, simMs,
+  };
+}
+
 /** Result for a replay that can't be re-simulated at all. */
 function unsimulated(core: Core, problems: string[], style: string): VerifyResult {
   return {
@@ -122,13 +131,20 @@ export async function verifyReplaySliced(core: Core, replay: Replay, zones: read
   const slice = Math.max(1, opts.sliceTicks ?? 20_000);
   const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
   const t0 = now();
+  let stoppedAt: number | null = null;
   for (;;) {
     v.run.step(slice);
     if (v.run.done) break;
+    // A desynced replay is rejected whatever comes after, so the rest isn't simulated (security hotfix 2026-10-21,
+    // audit H3: a fake replay carrying a million ticks costs one slice past its first mismatch, not all of them).
+    if (v.run.desynced) {
+      stoppedAt = v.run.ticksDone;
+      break;
+    }
     await opts.between(v.run.ticksDone, v.run.n);
   }
   // simMs includes the time spent in `between` (Workers freeze clocks during code: apps/api/src/verify.ts measures its own).
-  return concludeVerify(replay, v.problems, v.run.result(), now() - t0);
+  return concludeVerify(replay, v.problems, v.run.result(), now() - t0, stoppedAt);
 }
 
 /** The checks before simulating, then a SimRun ready to step (or the result when the replay can't be simulated). */
@@ -182,7 +198,7 @@ function beginVerify(core: Core, replay: Replay, zones: readonly Zone[], opts: V
 }
 
 /** The verdict from a finished simulation. */
-function concludeVerify(replay: Replay, problems: string[], sim: SimResult, simMs: number): VerifyResult {
+function concludeVerify(replay: Replay, problems: string[], sim: SimResult, simMs: number, stoppedAt: number | null = null): VerifyResult {
   const h = replay.header;
   const style = replayStyle(h);
   const def = styleDef(style);
@@ -204,6 +220,11 @@ function concludeVerify(replay: Replay, problems: string[], sim: SimResult, simM
     !!last && last.tick === sim.ticks && [0, 1, 2].every((i) => Object.is(last.position[i], sim.final.position[i]) && Object.is(last.velocity[i], sim.final.velocity[i]));
 
   if (!sim.checkpointsMatch) problems.push(`desync: checkpoint mismatch at tick ${sim.firstMismatchTick}`);
+  if (stoppedAt !== null) {
+    // Stopped at the first desync (verifyReplaySliced): the finish checks would only describe the unsimulated rest.
+    problems.push(`not simulated past tick ${stoppedAt} of ${h.totalTicks} after the desync`);
+    return { ...unsimulatedResult(style, problems, sim, simMs), checkpointsChecked: sim.checkpointsChecked, firstMismatchTick: sim.firstMismatchTick };
+  }
   if (!finalStateMatches) problems.push("final state does not match final checkpoint");
   if (!finished) problems.push("run did not finish (end zone never reached)");
   if (finished && (sim.startTick !== h.startTick || sim.endTick !== h.endTick)) {

@@ -87,11 +87,13 @@
 .st-fresh-line { margin: 0; color: var(--cream-2); font-family: var(--font-text); }
 
 /* A tab's panel lands when it's switched to; the online chart's line draws itself in on the first paint, then the area
-   under it fades up. Transform / opacity / stroke-dashoffset only. */
+   under it fades up. Transform / opacity / clip-path only. */
 .st-body > .st-in { animation: vt-drop var(--t-air) var(--ease-land) both; }
-.st-first .st-line { stroke-dasharray: 1; stroke-dashoffset: 1; animation: st-draw 0.7s 0.1s var(--ease-glide) forwards; }
+/* The line draws in left to right with a clip wipe. (Not a pathLength dash: with vector-effect: non-scaling-stroke
+   Chrome measures the dash in screen pixels, so a dash of "1" stopped short and left the end of the line undrawn.) */
+.st-first .st-line { clip-path: inset(-4px 100% -4px -4px); animation: st-draw 0.7s 0.1s var(--ease-glide) forwards; }
 .st-first .st-area { opacity: 0; animation: st-fade 0.4s 0.7s ease-out forwards; }
-@keyframes st-draw { to { stroke-dashoffset: 0; } }
+@keyframes st-draw { to { clip-path: inset(-4px -4px -4px -4px); } }
 @keyframes st-fade { to { opacity: 1; } }
-body.potato .st-body > .st-in, body.potato .st-first .st-line, body.potato .st-first .st-area { animation: none; stroke-dashoffset: 0; opacity: 1; }
-@media (prefers-reduced-motion: reduce) { .st-body > .st-in, .st-first .st-line, .st-first .st-area { animation: none; stroke-dashoffset: 0; opacity: 1; } }
+body.potato .st-body > .st-in, body.potato .st-first .st-line, body.potato .st-first .st-area { animation: none; clip-path: none; opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .st-body > .st-in, .st-first .st-line, .st-first .st-area { animation: none; clip-path: none; opacity: 1; } }

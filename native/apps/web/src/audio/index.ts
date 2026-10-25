@@ -7,7 +7,7 @@
 //   new SpatialMover()                     another player / ghost: positional, update(...) per rendered frame
 //   runSounds.start() / split(d) / finish(kind)      run feedback (session.ts)
 //   setListenerFromCamera(camera)          per rendered frame
-//   toggleMute(), nextTrack(), duckMusic()
+//   toggleMute(), nextTrack(), duckMusic()            (music controls: music.next() / previous() / toggle(), now-playing.ts)
 //
 // Nothing here touches the simulation.
 
@@ -20,6 +20,7 @@ import { MusicPlayer, type MusicScene } from "./music";
 import { ClassicSounds } from "./classic";
 import { MoveSounds, windFor, type SoundSink } from "./movement";
 import { installUiSounds, mountAudioChrome, type AudioChrome } from "./ui";
+import { mountNowPlaying, trackName, type NowPlaying } from "./now-playing";
 export { toggleSound, uiOpen, uiClose, uiSound } from "./ui";
 import { viewmodelEvents } from "./events";
 import type { SfxId } from "./catalog";
@@ -35,7 +36,7 @@ export const classic = new ClassicSounds(engine);
 
 const trackers = new Set<MoveSounds>();
 let chrome: AudioChrome | null = null;
-let hiddenMute = false;
+let nowPlaying: NowPlaying | null = null;
 let started = false;
 
 /** One-shot sound (no-op until audio is unlocked or when the file is missing). */
@@ -50,7 +51,7 @@ function muteKey(): string | null {
 
 function applyPrefs(p: Prefs): void {
   const a = p.audio;
-  const off = a.muted || hiddenMute;
+  const off = a.muted || (document.hidden && a.muteInBackground);
   engine.setLevels({
     master: off ? 0 : sliderGain(p.volume),
     music: a.mute.music ? 0 : sliderGain(a.music),
@@ -62,6 +63,13 @@ function applyPrefs(p: Prefs): void {
   classic.set(a.classic);
   for (const t of trackers) t.footsteps = a.footsteps;
   chrome?.setMuted(a.muted, muteKey());
+  nowPlaying?.setEnabled(musicAudible(p));
+}
+
+/** Music is on and can be heard (the now-playing control shows only then). */
+export function musicAudible(p: Prefs): boolean {
+  const a = p.audio;
+  return a.musicMode !== "off" && !a.muted && !a.mute.music && p.volume > 0 && a.music > 0;
 }
 
 export function toggleMute(): boolean {
@@ -96,7 +104,10 @@ export function initAudio(): void {
   if (started || typeof window === "undefined") return;
   started = true;
   engine.init();
-  chrome = mountAudioChrome(() => toggleMute());
+  chrome = mountAudioChrome(() => toggleMute(), (el) => engine.consumeUnlockPress(el));
+  engine.onState(() => chrome?.setLocked(!engine.unlocked));
+  chrome.setLocked(!engine.unlocked);
+  nowPlaying = mountNowPlaying(music);
   prefs.watch(applyPrefs);
   engine.onUnlock(() => {
     applyPrefs(prefs.get());
@@ -107,11 +118,14 @@ export function initAudio(): void {
   music.setScene(sceneFromBody());
   let lastToast = "";
   music.onTrack = (t) => {
-    if (t.role === "game" && t.id !== lastToast) whisper(`♪ ${t.title}`, { key: "audio", ms: 2600 });
+    // The now-playing control says it in the menus; in game (and the viewer) a toast does.
+    const shown = document.getElementById("music-now")?.classList.contains("on");
+    if (!shown && t.role === "game" && t.id !== lastToast) whisper(`♪ ${trackName(t)}`, { key: "audio", ms: 2600 });
     lastToast = t.id;
   };
+  // Media autoplay can be refused even with WebAudio running (WebKit): any later gesture retries the track.
+  for (const t of ["pointerdown", "keydown", "touchend", "click"]) addEventListener(t, (e) => e.isTrusted && music.retryBlocked(), true);
   document.addEventListener("visibilitychange", () => {
-    hiddenMute = document.hidden && prefs.get().audio.muteInBackground;
     applyPrefs(prefs.get());
   });
   // Mute / next track work everywhere (menus, game, replay viewer); capture phase so the viewer's key handler
@@ -252,6 +266,10 @@ export const runSounds = {
   finish(kind: "normal" | "pb" | "wr"): void {
     sfx(kind === "wr" ? "finish_wr" : kind === "pb" ? "finish_pb" : "finish");
     duckMusic(0.3, kind === "normal" ? 1.2 : 2.5);
+  },
+  /** Auto restart set to a sound (auto-restart.ts): the run can no longer beat its target. A low countdown beep. */
+  pastTarget(): void {
+    sfx("countdown_tick", 1, 0.75);
   },
 };
 

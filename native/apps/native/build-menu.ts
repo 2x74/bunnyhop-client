@@ -24,7 +24,7 @@ const result = await Bun.build({
   entrypoints: [resolve(native,"main.ts")], target: "browser", format: "iife", splitting: false,
   minify: true, sourcemap: "none",
   define: { "import.meta.env.VITE_API_URL": JSON.stringify("/api"), "import.meta.env.DEV": "false", "import.meta.env": JSON.stringify({VITE_API_URL:"/api",DEV:false}) },
-  // Bun supports dataurl at runtime; bun-types 1.4.3 omits this loader literal.
+  // Bun 1.4.3 supports dataurl; its Loader type omits this literal.
   loader: { ".svg": "dataurl" as Bun.Loader, ".png": "dataurl" as Bun.Loader, ".webp": "dataurl" as Bun.Loader, ".woff2": "dataurl" as Bun.Loader },
   plugins: [{ name: "native-menu-boundary", setup(build) {
     build.onResolve({filter: /./}, (args) => {

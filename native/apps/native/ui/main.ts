@@ -161,11 +161,12 @@ const roomService=new NativeRoomService({connect:(id,handlers)=>new RoomConnecti
 roomService.subscribe(()=>{const view=roomService.view;setRoomPresence(view.id&&view.room?{id:view.id,name:view.room.name}:null);});
 onBeforeSend(message=>{if(roomService.view.id&&((message.type==="replay"&&["play","ghost"].includes(message.action))||message.type==="replayData"||(message.type==="tutorial"&&message.action!=="stop")))roomService.leave();});
 setRaceTag(board=>{const race=roomService.view.race;return race&&race.state==="live"&&race.map===board.map&&race.style===board.style&&race.track===board.track?race.id:null;});
-const runService=new NativeRunService({api,context:identity=>({room:currentRoom(),race:currentRace(identity)}),version:()=>api.version(),origin:()=>location.origin,send:message=>{
+const runService=new NativeRunService({api,account:async()=>{const user=await api.me();return api.meStale()?null:user?.id??null;},context:identity=>({room:currentRoom(),race:currentRace(identity)}),version:()=>api.version(),origin:()=>location.origin,send:message=>{
   send(message);
   if(message.message) notice(message.message);
   if(message.status==="verified") refreshAccount();
 }});
+window.addEventListener("bunnyhop:account",()=>runService.refreshAccount());
 window.bunnyhopNativeMenu = { onState: receive, onAuth: refreshAccount, onRunEvent:value=>{void runService.receive(value);},open:(next,focus)=>{if(next==="rooms")next="servers";if(["home","maps","settings","profile","replays","servers","room","ranks","stats","tutorial","loadout","credits"].includes(next))show(next as Screen);if(next==="room"&&focus==="chat")document.querySelector<HTMLInputElement>(".native-room-chat-form input")?.focus();},onRoomPose:value=>{roomService.pose(value);},onRoomCommand:value=>{roomService.command(value);},
   // A friend pressed Join on your Discord activity. The host has already checked the secret.
   joinRoom:id=>{if(typeof id!=="string"||!/^(?:[a-z0-9][a-z0-9-]{0,31}|p-[a-z2-7]{10})$/.test(id))return;void roomService.join(id).catch(()=>notice("Couldn't join that room."));show("room");},

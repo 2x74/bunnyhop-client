@@ -71,10 +71,10 @@ describe("native run service, mocked network only",()=>{
     const f=fixture(async()=>{throw new Error("offline");});await reset(f.service);await f.service.receive(finish(1));
     expect(f.uploads).toHaveLength(0);expect(f.statuses.at(-1)?.status).toBe("kept");
   });
-  test("reset during preflight prevents a stale upload",async()=>{
+  test("restart preserves a completed upload without borrowing the new attempt",async()=>{
     const policy=deferred<VersionPolicy>(),f=fixture(()=>policy.promise);await reset(f.service);
     const pending=f.service.receive(finish(1));await reset(f.service,2);policy.resolve(allowed);await pending;
-    expect(f.uploads).toHaveLength(0);expect(f.statuses.at(-1)?.generation).toBe(2);
+    expect(f.uploads).toHaveLength(1);expect(f.uploads[0].beats).toEqual([]);expect(f.statuses.at(-1)?.generation).toBe(1);
   });
   test("known exact release uploads original bytes and server rejection stays rejected",async()=>{
     const f=fixture();f.api.submitRun=async(bytes,options)=>{f.uploads.push({bytes,beats:options.beats});return{id:"",status:"rejected",code:"unranked_map",reason:"Unranked map"};};
@@ -130,4 +130,94 @@ test("room and race submission context is frozen before asynchronous release pre
  const policy=deferred<VersionPolicy>();let context={room:"room-at-finish",race:"race-at-finish"};let submitted:unknown=null;
  const service=new NativeRunService({api:{runBeat:async()=>({sid:"s",token:"t"}),submitRun:async(_bytes,options)=>{submitted=options;return{id:"v",status:"verified"};},submission:async()=>({id:"v",status:"verified"})},version:()=>policy.promise,context:()=>context,origin:()=>"https://bunnyhop.lol",send:()=>{}});
  await reset(service);const upload=service.receive(finish(1));context={room:"different-room",race:"different-race"};policy.resolve(allowed);await upload;expect(submitted).toEqual({beats:[],room:"room-at-finish",race:"race-at-finish"});
+});
+
+describe("native ranked account ownership",()=>{
+  function accountFixture() {
+    let account: string|null="alice";
+    const bodies: unknown[]=[],uploads: {beats:string[]}[]=[],statuses:RunServiceStatus[]=[];
+    const api:RunApi={runBeat:async body=>{bodies.push(body);return{sid:account!,token:`${account}-${body.tick}`};},submitRun:async(_bytes,options)=>{uploads.push(options);return{id:"run",status:"verified"};},submission:async()=>({id:"run",status:"verified"})};
+    const service=new NativeRunService({api,account:async()=>account,version:async()=>allowed,origin:()=>"https://bunnyhop.lol",send:value=>statuses.push(value)});
+    return{service,bodies,uploads,statuses,setAccount(value:string|null){account=value;service.refreshAccount();}};
+  }
+  test("switching accounts cannot attach an earlier player's tokens; restart starts a clean session",async()=>{
+    const f=accountFixture();await reset(f.service);await f.service.receive(beat(1,0));
+    f.setAccount("bob");await f.service.receive(beat(1,400));await f.service.receive(finish(1));
+    expect(f.bodies).toHaveLength(1);expect(f.uploads).toHaveLength(0);expect(f.statuses.at(-1)?.message).toContain("Account changed");
+    await reset(f.service,2);await f.service.receive(beat(2,0));await f.service.receive(finish(2));
+    expect(f.uploads[0].beats).toEqual(["bob-0"]);
+  });
+  test("same-account profile refresh preserves the attempt",async()=>{
+    const f=accountFixture();await reset(f.service);await f.service.receive(beat(1,0));
+    f.setAccount("alice");await f.service.receive(finish(1));expect(f.uploads[0].beats).toEqual(["alice-0"]);
+  });
+  test("guest to saved account transition requires a fresh native attempt",async()=>{
+    const f=accountFixture();f.setAccount("guest");await reset(f.service);await f.service.receive(beat(1,0));
+    f.setAccount("saved");await f.service.receive(finish(1));expect(f.uploads).toHaveLength(0);
+  });
+  test("account changes during release preflight prevent upload",async()=>{
+    const version=deferred<VersionPolicy>();let account="alice";const uploads:unknown[]=[],statuses:RunServiceStatus[]=[];
+    const service=new NativeRunService({account:async()=>account,api:{runBeat:async()=>({sid:"alice",token:"alice"}),submitRun:async(...args)=>{uploads.push(args);return{id:"run",status:"verified"};},submission:async()=>({id:"run",status:"verified"})},version:()=>version.promise,origin:()=>"https://bunnyhop.lol",send:s=>statuses.push(s)});
+    await reset(service);await service.receive(beat(1,0));const pending=service.receive(finish(1));
+    await Promise.resolve();await Promise.resolve();account="bob";service.refreshAccount();version.resolve(allowed);await pending;
+    expect(uploads).toHaveLength(0);expect(statuses.at(-1)?.message).toContain("Account changed");
+  });
+  test("unconfirmed account never sends beats or uploads",async()=>{
+    const f=accountFixture();f.setAccount(null);await reset(f.service);await f.service.receive(beat(1,0));await f.service.receive(finish(1));
+    expect(f.bodies).toHaveLength(0);expect(f.uploads).toHaveLength(0);
+  });
+});
+
+test("late account refresh and heartbeat answers cannot resurrect an invalidated attempt",async()=>{
+ const old=deferred<string|null>(),pending=deferred<{sid:string;token:string}>();let resolveAccount=async():Promise<string|null>=>"alice";let calls=0;const statuses:RunServiceStatus[]=[],uploads:unknown[]=[];
+ const service=new NativeRunService({account:()=>resolveAccount(),api:{runBeat:()=>{calls++;return pending.promise;},submitRun:async(...args)=>{uploads.push(args);return{id:"run",status:"verified"};},submission:async()=>({id:"run",status:"verified"})},version:async()=>allowed,origin:()=>"https://bunnyhop.lol",send:s=>statuses.push(s)});
+ await reset(service);const beatPromise=service.receive(beat(1,0));for(let i=0;i<10&&!calls;i++)await Promise.resolve();expect(calls).toBe(1);
+ resolveAccount=()=>old.promise;service.refreshAccount();await Promise.resolve();resolveAccount=async()=>"bob";service.refreshAccount();
+ await service.receive(finish(1));old.resolve("alice");pending.resolve({sid:"alice",token:"alice"});await beatPromise;
+ expect(uploads).toHaveLength(0);expect(statuses.at(-1)?.status).toBe("kept");expect(statuses.at(-1)?.message).toContain("Account changed");
+});
+
+test("completed jobs remain account-bound after starting another attempt",async()=>{
+ let account="alice";const version=deferred<VersionPolicy>();const uploads:unknown[]=[];
+ const service=new NativeRunService({account:async()=>account,api:{runBeat:async()=>({sid:account,token:account}),submitRun:async(...args)=>{uploads.push(args);return{id:"run",status:"verified"};},submission:async()=>({id:"run",status:"verified"})},version:()=>version.promise,origin:()=>"https://bunnyhop.lol",send:()=>{}});
+ await reset(service);await service.receive(beat(1,0));const pending=service.receive(finish(1));await reset(service,2);
+ account="bob";service.refreshAccount();version.resolve(allowed);await pending;expect(uploads).toHaveLength(0);
+});
+
+test("concurrent beats released by an account lookup share one initial server session",async()=>{
+ const account=deferred<string|null>(),requests:ReturnType<typeof deferred<{sid:string;token:string}>>[]=[],bodies:Parameters<RunApi["runBeat"]>[0][]=[],uploads:{beats:string[]}[]=[];
+ const service=new NativeRunService({account:()=>account.promise,api:{runBeat:body=>{bodies.push(body);const request=deferred<{sid:string;token:string}>();requests.push(request);return request.promise;},submitRun:async(_bytes,options)=>{uploads.push(options);return{id:"run",status:"verified"};},submission:async()=>({id:"run",status:"verified"})},version:async()=>allowed,origin:()=>"https://bunnyhop.lol",send:()=>{}});
+ await reset(service);const a=service.receive(beat(1,0)),b=service.receive(beat(1,512));account.resolve("alice");
+ for(let i=0;i<15;i++)await Promise.resolve();expect(bodies).toHaveLength(1);expect(bodies[0].sid).toBeNull();
+ requests[0].resolve({sid:"shared",token:"first"});await a;
+ for(let i=0;i<15&&bodies.length<2;i++)await Promise.resolve();expect(bodies[1].sid).toBe("shared");requests[1].resolve({sid:"shared",token:"second"});await b;
+ await service.receive(finish(1));expect(uploads[0].beats).toEqual(["first","second"]);
+});
+
+test.each(["beat","finish"] as const)("account refresh at every promise boundary prevents %s dispatch with changed credentials",async kind=>{
+ let blocked=0,alreadySent=0;
+ for(let delay=0;delay<25;delay++) {
+  let credentials="alice",refreshing=false;
+  const confirmation=deferred<string|null>(),owners:string[]=[];
+  const service=new NativeRunService({
+   account:()=>refreshing?confirmation.promise:Promise.resolve(credentials),
+   api:{runBeat:async()=>{owners.push(credentials);return{sid:"alice-session",token:"alice-token"};},submitRun:async()=>{owners.push(credentials);return{id:"run",status:"verified"};},submission:async()=>({id:"run",status:"verified"})},
+   version:async()=>allowed,origin:()=>"https://bunnyhop.lol",send:()=>{},
+  });
+  await reset(service);await service.receive(beat(1,0));owners.length=0;
+  const pending=service.receive(kind==="beat"?beat(1,512):finish(1));
+  const switchAfter=(remaining:number):void=>{
+   if(remaining) {queueMicrotask(()=>switchAfter(remaining-1));return;}
+   credentials="bob";refreshing=true;service.refreshAccount();
+  };
+  switchAfter(delay);
+  for(let turn=0;turn<50;turn++)await Promise.resolve();
+  // Account lookup is deliberately unresolved while Bob's credentials are
+  // already active. No suspended write may slip through that interval.
+  expect(owners).not.toContain("bob");
+  if(owners.length)alreadySent++;else blocked++;
+  confirmation.resolve("bob");await pending;
+  expect(owners).not.toContain("bob");
+ }
+ expect(blocked).toBeGreaterThan(0);expect(alreadySent).toBeGreaterThan(0);
 });

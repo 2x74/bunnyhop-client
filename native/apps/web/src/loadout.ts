@@ -51,7 +51,7 @@ export const DEFAULT_LOADOUT: CosmeticLoadout = Object.freeze({ knife: DEFAULT_K
  * Shader finish designs (viewmodel/finishes/shader.ts FINISH_CODE): one per finish, each a fixed design baked into its
  * GLSL. "founder": Founder's Gold, the owner's finish (role-held in progression.ts).
  */
-export type FinishKind = "none" | "sunset" | "ember" | "tigerlily" | "nebula" | "dewweb" | "frost" | "heartbeet" | "fourleaf" | "founder" | "geode" | "rift" | "spectrum" | "goldleaf" | "aurora";
+export type FinishKind = "none" | "sunset" | "ember" | "tigerlily" | "nebula" | "dewweb" | "frost" | "heartbeet" | "fourleaf" | "founder" | "geode" | "rift" | "spectrum" | "goldleaf" | "aurora" | "contour" | "meteor" | "hourglass" | "lantern" | "wildflower" | "tally" | "devgrid";
 
 export interface FinishStyle {
   kind: FinishKind;
@@ -75,6 +75,14 @@ export const FINISH_STYLE: Record<string, FinishStyle> = {
   "fin-spectrum": { kind: "spectrum" },
   "fin-goldleaf": { kind: "goldleaf" },
   "fin-aurora": { kind: "aurora" },
+  // Batch 1 (progression.ts, research/PROGRESSION-BATCH1.md), earned by playing.
+  "fin-contour": { kind: "contour" },
+  "fin-meteor": { kind: "meteor" },
+  "fin-hourglass": { kind: "hourglass" },
+  "fin-lantern": { kind: "lantern" },
+  "fin-wildflower": { kind: "wildflower" },
+  "fin-tally": { kind: "tally" },
+  "fin-devgrid": { kind: "devgrid" },
 };
 
 /** Render data of a finish id (retired ids resolve to their replacement; unknown -> the plain carrot). */
@@ -148,6 +156,15 @@ export const GLOVE_STYLE: Record<string, GloveStyle> = {
   "glove-garden-classic": G("garden", 0xe8dcc0, 0xe8dcc0, 0x2e7d4a, 0x2e7d4a, 0xb9a27a),
   "glove-garden-tulip": G("garden", 0xf1e6d6, 0xf1e6d6, 0xe0457b, 0xffd45e, 0xc9a27a),
   "glove-garden-moss": G("garden", 0xc9c2a3, 0xc9c2a3, 0x4d6b2a, 0x8a5a2b, 0x8f8566),
+  // Batch 1 (progression.ts, research/PROGRESSION-BATCH1.md), earned by playing.
+  "glove-garden-buttercup": G("garden", 0xf1ead2, 0xf1ead2, 0xffc93a, 0x4f9a3a, 0xb9a27a),
+  "glove-driver-saddle": G("driver", 0x8a4f2a, 0x7e4726, 0x5e341b, 0xf2e6d0, 0xf2e6d0),
+  "glove-paws-hare": G("paws", 0xa07850, 0xa07850, 0x3a2a20, 0xf1e6d6, 0x3a2a20),
+  "glove-wraps-chalk": G("wraps", 0xf2efe8, 0xe6e2d8, 0xf2efe8, 0x8a8f99, 0xc9c4b8),
+  "glove-specialist-nightshift": G("specialist", 0x1b1d22, 0x2a2d33, 0xffa63a, 0x1b1d22, 0xffa63a),
+  "glove-moto-racer": G("moto", 0xf4f4f6, 0xd8262f, 0xd8262f, 0x1b1b22, 0x1b1b22),
+  "glove-garden-pumpkin": G("garden", 0xefe2c6, 0xefe2c6, 0xe0701c, 0x3d6b2a, 0x8a5a2b),
+  "glove-moto-devgrid": G("moto", 0x6b6e73, 0x8c8f94, 0xe8862a, 0x4d5054, 0xffffff),
   // Supporter (progression.ts SUPPORTER): the Geode. Deep teal shell and cuff, a dark stone grip, amethyst knuckle
   // pads, crystal-aqua detail.
   // Supporter: High Roller (black leather, felt-green tips, gold snap and stitching) and Borealis (navy, aurora panels).

@@ -554,9 +554,85 @@ function capybara(): THREE.BufferGeometry {
   return g;
 }
 
+/** Maxwell the tuxedo cat loaf perched on the forehead, with iconic eyes and bhop-driven spin, hop and facial reactions. */
+function maxwell(): THREE.BufferGeometry {
+  const b = new Builder(), W = headWeight();
+  const FUR = 0x161820, HEAD = 0x1d202a, EAR_OUT = 0x12141b, EAR_IN = 0x2a262c, WHITE = 0xf0f3f8, CREAM = 0xdad5cd, NOSE = 0x322b30, EYE_RIM = 0x8e9682, PUPIL = 0x090a0d;
+  const blob = (c: V3, r: V3, color: number, square = 1, seg = 24, rows = 12, code = -5) => {
+    const points = b.ellipsoidRows([0, 0, 0], [1, 1, 1], [0, 0, 1], [1, 0, 0], seg, rows)
+      .map(row => row.map(p => p.map((v, i) => c[i] + Math.sign(v) * Math.pow(Math.abs(v), square) * r[i]) as V3));
+    if (color === FUR && c[0] === 0) for (const row of points) for (const p of row) {
+      // Taper the rear of the cat loaf between the bunny ear roots and arch the back like the classic low-poly Maxwell loaf.
+      p[0] *= 1 - 0.38 * Math.max(0, Math.min(1, (p[1] + 0.5) / 2.2));
+      if (p[2] > c[2]) p[2] += 0.34 * Math.max(0, 1 - ((p[1] + 0.4) / 1.95) ** 2);
+    }
+    b.surface(points, { closed: true, paint: () => ({ code, color }), weight: () => W, out: (i, k) => sub(points[i][k], c) });
+  };
+  // Arched tuxedo cat loaf body and shoulders centered around the forehead pivot so it can spin cleanly in place.
+  blob([0, -0.7, 76.92], [2.1, 2.22, 1.82], FUR, 0.76);
+  for (const side of [-1, 1]) {
+    blob([side * 1.28, -2.42, 76.34], [0.74, 0.94, 0.96], HEAD, 0.84);
+    // Four tucked white socks resting cleanly on the curved hood.
+    blob([side * 1.32, -0.45, 75.46], [0.56, 0.78, 0.56], WHITE, 0.82);
+    blob([side * 1.08, -3.12, 75.48], [0.56, 0.8, 0.54], WHITE, 0.78);
+  }
+  // Prominent white tuxedo chest bib under the chin.
+  blob([0, -2.52, 76.42], [1.38, 0.8, 1.1], WHITE, 0.84);
+  blob([0, -2.84, 75.78], [1.16, 0.68, 0.62], WHITE, 0.84);
+  // Broad low-poly rounded cat head and snout bridge.
+  blob([0, -3.32, 77.72], [1.94, 1.46, 1.42], HEAD, 0.82);
+  blob([0, -4.28, 77.42], [1.34, 0.68, 0.74], HEAD, 0.78);
+  // Plump cream/white peanut whisker pads and chin under the dark face.
+  for (const side of [-1, 1]) blob([side * 0.58, -4.68, 76.96], [0.68, 0.52, 0.44], CREAM, 0.8);
+  blob([0, -4.58, 76.64], [0.58, 0.42, 0.28], WHITE, 0.85);
+  blob([0, -5.12, 77.22], [0.28, 0.16, 0.17], NOSE, 0.75, 14, 8);
+  for (const side of [-1, 1]) {
+    // Wide-set pointed cat ears angled slightly outward like the Source Dingus / Maxwell mesh.
+    const earRows = [0, 0.28, 0.62, 0.88, 1].map(f => {
+      const s = 1 - 0.86 * Math.pow(f, 1.15);
+      const c: V3 = [side * (1.26 + 0.64 * f), -3.14 - 0.12 * f, 78.66 + 1.72 * f];
+      return ring(c, norm([side * 0.92, 0.16, -0.34]), norm([-side * 0.16, 0.98, -0.1]), 0.68 * s, 0.4 * s, 16, 1.65);
+    });
+    b.surface(earRows, { closed: true, paint: () => ({ code: -5, color: EAR_OUT }), weight: () => W, capEnd: { code: -5, color: EAR_OUT } });
+    const innerRows = [0.08, 0.45, 0.82].map(f => {
+      const s = 1 - 0.82 * f;
+      const c: V3 = [side * (1.28 + 0.56 * f), -3.4 - 0.08 * f, 78.78 + 1.38 * f];
+      return ring(c, [1, 0, 0], [0, 0, 1], 0.34 * s, 0.4 * s, 12, 1.6);
+    });
+    b.surface(innerRows, { closed: true, paint: () => ({ code: -5, color: EAR_IN }), weight: () => W, capEnd: { code: -5, color: EAR_IN } });
+    // Maxwell's iconic eyes: pale sage-grey outer iris ring, huge dark glossy oval eye, and off-center white catchlight.
+    blob([side * 0.94, -4.52, 77.78], [0.46, 0.2, 0.39], EYE_RIM, 0.86, 16, 8, -6);
+    blob([side * 0.95, -4.64, 77.78], [0.35, 0.16, 0.31], PUPIL, 0.88, 16, 8, -6);
+    blob([side * 0.82, -4.77, 77.91], [0.13, 0.08, 0.12], WHITE, 0.9, 12, 6, -6);
+    blob([side * 1.07, -4.75, 77.67], [0.065, 0.05, 0.06], WHITE, 0.9, 10, 6, -6);
+    // Crisp white whiskers fanning out from each cheek and brow.
+    b.tube([[side * 0.85, -4.42, 78.26], [side * 1.35, -4.3, 78.58], [side * 1.82, -4.15, 78.78]], 0.032, 6, [0, 0, 1], () => ({ code: -5, color: WHITE }), () => W);
+    b.tube([[side * 1.05, -4.68, 77.06], [side * 1.72, -4.56, 77.12], [side * 2.38, -4.38, 77.14]], 0.04, 6, [0, 0, 1], () => ({ code: -5, color: WHITE }), () => W);
+    b.tube([[side * 1.02, -4.64, 76.88], [side * 1.68, -4.52, 76.82], [side * 2.28, -4.34, 76.74]], 0.038, 6, [0, 0, 1], () => ({ code: -5, color: WHITE }), () => W);
+  }
+  // Small mouth under the peanut whisker pads that opens into a surprised "o" at high speed.
+  const mouth = Array.from({ length: 21 }, (_, i): V3 => {
+    const a = i / 20 * Math.PI * 2;
+    return [0.32 * Math.cos(a), -4.94, 76.76 + 0.24 * Math.sin(a)];
+  });
+  b.tube(mouth, 0.046, 8, [0, -1, 0], () => ({ code: -7, color: NOSE }), () => W);
+  // Curled dark tail tucked closely behind the rump so it clears the bunny ears while spinning.
+  const tail: V3[] = [
+    [0, 1.18, 75.84],
+    [0.52, 1.42, 75.92],
+    [1.04, 1.32, 76.06],
+    [1.36, 0.92, 76.22],
+    [1.44, 0.38, 76.38],
+  ];
+  b.tube(tail, i => 0.34 - 0.025 * i, 10, [0, 0, 1], i => ({ code: -8, color: i >= 4 ? WHITE : EAR_OUT }), () => W);
+  const g = b.geometry();
+  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 70), 60);
+  return g;
+}
 const BUILD: Record<string, () => THREE.BufferGeometry> = {
   "hat-propeller": propellerCap,
   "hat-capybara": capybara,
+  "hat-maxwell": maxwell,
   "hat-founder-crown": founderCrown,
   "hat-tophat": topHat,
   "hat-beanie": beanie,

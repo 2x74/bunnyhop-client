@@ -2,8 +2,10 @@
 // The game stays open, so the code is the main path; the link (?signin=<token>) works in whichever browser opens it
 // and is finished by handleAuthReturn() on page load. API: apps/api/src/email.ts.
 
+import { appHref } from "../platform/navigation";
 import { api, ApiError, type User } from "../api";
 import { h } from "./dom";
+import { confirmDialog } from "./settings-transfer";
 
 const OUTCOME: Record<string, string> = {
   linked: "Progress saved. Sign in with this email on any device.",
@@ -152,7 +154,7 @@ export async function handleAuthReturn(): Promise<string | null> {
     sessionStorage.removeItem(TOAST_KEY);
     return carried;
   }
-  const url = new URL(location.href);
+  const url = new URL(appHref());
   const token = url.searchParams.get("signin");
   const login = url.searchParams.get("login");
   const loginError = url.searchParams.get("login_error");
@@ -167,6 +169,32 @@ export async function handleAuthReturn(): Promise<string | null> {
     const r = await api.emailVerify({ token });
     return OUTCOME[r.outcome] ?? "Signed in.";
   } catch (e) {
+    if (e instanceof ApiError && e.code === "confirm_switch") return confirmSwitch(token, e);
     return e instanceof ApiError ? e.message : "Couldn't reach the server to finish signing in.";
+  }
+}
+
+/**
+ * A sign-in link this browser didn't ask for, while it's on another player (someone may have sent their own link):
+ * name the account and ask before switching. A guest left this way comes back on sign-out (the API keeps it).
+ */
+async function confirmSwitch(token: string, e: ApiError): Promise<string | null> {
+  const email = typeof e.body.email === "string" ? e.body.email : "another account";
+  const current = typeof e.body.current === "string" ? e.body.current : "this player";
+  const guest = e.body.guest === true;
+  const ok = await confirmDialog({
+    title: "Switch account?",
+    body:
+      `This sign-in link is for ${email}, and it wasn't requested in this browser. Signing in leaves ${current}` +
+      (guest ? " (signing out later brings this guest back)." : ".") +
+      " Only continue if you asked for this email.",
+    confirm: `Sign in as ${email}`,
+  });
+  if (!ok) return `Still playing as ${current}.`;
+  try {
+    const r = await api.emailVerify({ token, confirm: true });
+    return OUTCOME[r.outcome] ?? "Signed in.";
+  } catch (err) {
+    return err instanceof ApiError ? err.message : "Couldn't reach the server to finish signing in.";
   }
 }

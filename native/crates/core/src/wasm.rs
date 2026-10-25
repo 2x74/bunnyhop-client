@@ -394,7 +394,7 @@ pub extern "C" fn step(forward: f32, side: f32, yaw: f32, pitch: f32, buttons: u
 ///  view angle change pitch, yaw, roll (rotating pushers this tick; see EVENT_ANGLES_CHANGED),
 ///  touch pass x, y, z, crouched (where this tick's trigger touch pass after the move happened, before any
 ///  teleport it caused; NaN after a reset / respawn: `Game::touch_origin`), weapons held, active weapon
-///  (WEAPON_* bits, physics v4: `Game::weapons`)]
+///  (WEAPON_* bits, physics v4: `Game::weapons`), clean movement tick for local jump stats]
 /// (movement mode: playsrc `Mode` as a number; 6 = ladder. Style key filters exempt ladders, like bhoptimer.)
 #[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
 pub extern "C" fn player_state() -> usize {
@@ -416,6 +416,7 @@ pub extern "C" fn player_state() -> usize {
             let (weapons, active) = g.weapons();
             c.scratch_f32.push(f32::from(weapons));
             c.scratch_f32.push(f32::from(active));
+            c.scratch_f32.push(g.jumpstats_valid as u32 as f32);
         }
         c.scratch_f32.len()
     })

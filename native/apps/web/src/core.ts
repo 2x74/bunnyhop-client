@@ -121,6 +121,8 @@ export interface PlayerState {
    */
   weapons?: number;
   activeWeapon?: number;
+  /** Read-only clean movement observation for local LJ stats (absent on older WASM builds). */
+  jumpStatsValid?: boolean;
 }
 
 /**
@@ -199,6 +201,12 @@ export const PROP_TRANSFORM_KEY = 1 << 20;
  * - v11: v10 + finished crouch/uncrouch hull or origin changes recategorize ground support before movement.
  * - v12: v11 + linear doors honor their StartOpen / spawnpos initial position.
  * - v13: v12 + consistent downhill ramp boosts for collision and ground-probe landings.
+ * - v14: v13 + per-map sv_maxvelocity (crates/core/src/game/map_fixes.rs MAX_VELOCITY: 10000 on bhop_sandtrap 1-3,
+ *   bhop_icetrap and bhop_goldsrc, as their logic_auto sets it on a CS:S server; research/MAX-VELOCITY.md) and
+ *   func_tracktrains that find their path before the map's spawn outputs (bhop_areaportal_v1's green platform moves).
+ * - v15: v14 + Source's signed door travel on the maps in crates/core/src/game/map_fixes.rs SIGNED_DOOR_TRAVEL: a door
+ *   whose lip is larger than its brush moves the other way (bhop_montana_fix's "UP" block rises and launches the player;
+ *   research/RELEASE-MAPS-HOTFIX-1025.md). Every other map is unchanged.
  */
 export const PHYSICS_V1 = 1;
 /** Weapon commands and the USP silencer (research/WEAPONS.md). */
@@ -215,8 +223,12 @@ export const PHYSICS_V11 = 11;
 export const PHYSICS_V12 = 12;
 /** Consistent downhill ramp landing boosts. */
 export const PHYSICS_V13 = 13;
+/** Per-map sv_maxvelocity (10000 on the sandtraps, icetrap, goldsrc); trains started at map spawn move. */
+export const PHYSICS_V14 = 14;
+/** Source's signed door travel on bhop_montana_fix (its "UP" block launches the player). */
+export const PHYSICS_V15 = 15;
 /** The physics version new runs are played and recorded with. */
-export const PHYSICS_VERSION = 13;
+export const PHYSICS_VERSION = 15;
 /** Versions this code knows (the wasm build must support them too, see Core.setSettings). */
 export const isPhysicsVersion = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= PHYSICS_V1 && (v as number) <= PHYSICS_VERSION;
 
@@ -643,6 +655,7 @@ export class Core {
       angleChange: len > 16 ? [s[14], s[15], s[16]] : [0, 0, 0],
       ...(len > 20 && s[17] === s[17] ? { touchPosition: [s[17], s[18], s[19]] as [number, number, number], touchCrouched: s[20] !== 0 } : {}),
       ...(len > 22 ? { weapons: s[21], activeWeapon: s[22] } : {}),
+      ...(len > 23 ? { jumpStatsValid: s[23] !== 0 } : {}),
     };
   }
 

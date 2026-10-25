@@ -1,31 +1,33 @@
 // The map list's board (ui/maps.ts, tutorial/learn.ts): the selected map's top runs in the selected style, the WR
 // first and your row pinned under them when it's further down, from the same GET /leaderboards read as the full board
 // (ui/leaderboard.ts). One request per map the player settles on (callers debounce), aborted when they move on, cached
-// for 30 s. Rows that don't fit the panel are left out rather than scrolled.
+// for 30 s (shared-reads.ts: the WR ghost and the viewer's compare take the WR from it). Rows that don't fit the panel
+// are left out rather than scrolled.
 
 import { api, ApiUnavailable, type Leaderboard, type LeaderboardEntry } from "../api";
 import { getPB } from "../pb";
+import { topBoard } from "../shared-reads";
 import { formatTime } from "../timer";
 import { gapTime, playerCell } from "./board-pager";
 import { h } from "./dom";
 import { icon } from "./icons";
 import { navigate } from "./nav";
 
-const LIMIT = 10;
-const CACHE_MS = 30_000;
-const cache = new Map<string, { at: number; p: Promise<Leaderboard> }>();
 let inflight: AbortController | null = null;
 
 function load(map: string, style: string, track: number): Promise<Leaderboard> {
-  const key = `${map}|${style}|${track}`;
-  const hit = cache.get(key);
-  if (hit && performance.now() - hit.at < CACHE_MS) return hit.p;
-  inflight?.abort();
-  const ctl = (inflight = new AbortController());
-  const p = api.leaderboard(map, style, { limit: LIMIT, track }, { signal: ctl.signal });
-  cache.set(key, { at: performance.now(), p });
-  p.catch(() => cache.delete(key));
-  return p;
+  return topBoard(map, style, track, () => {
+    inflight?.abort();
+    return (inflight = new AbortController()).signal;
+  });
+}
+
+/**
+ * Starts a map's board before its panel is drawn (the map list knows the map it opens on before the /maps it waits
+ * for); the panel then takes it from the cache.
+ */
+export function preloadMapBoard(map: string, style: string, track = 0): void {
+  if (api.available()) void load(map, style, track).catch(() => {});
 }
 
 export interface MapBoardOptions {

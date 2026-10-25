@@ -1,3 +1,5 @@
+import { appHref, appLocation } from "../platform/navigation";
+import { publicOrigin } from "../platform/env";
 // Tiny navigation bus so any UI (leaderboard rows, home cards, the account chip) can open a profile or the rank
 // board without importing the menu shell (menu.ts registers the handler in initMenu).
 
@@ -23,7 +25,7 @@ export function navigate(r: NavRequest): void {
   if (handler) handler(r);
   else {
     // No menu shell (yet): fall back to a page load.
-    const url = new URL(location.href);
+    const url = new URL(appHref());
     url.search = "";
     if (r.screen === "profile") url.pathname = `/u/${encodeURIComponent(r.id)}`;
     else if (r.screen === "ranks") {
@@ -49,9 +51,28 @@ export function onNavigate(h: (r: NavRequest) => void): void {
   handler = h;
 }
 
+let localPop: (() => void) | null = null;
+
+/**
+ * The menu takes the next popstate itself (a Back it started with history.back(): the screen under it is still live),
+ * instead of the page reload every other Back gets (main.ts). One at a time; the latest claim wins.
+ */
+export function claimNextPop(fn: () => void): void {
+  localPop = fn;
+}
+
+/** main.ts's popstate listener: runs the menu's claim and returns true, or false (nothing claimed: reload). */
+export function takeLocalPop(): boolean {
+  const fn = localPop;
+  localPop = null;
+  if (!fn) return false;
+  fn();
+  return true;
+}
+
 /** Shareable profile link: /u/<id> (the Worker serves it with the player card as its preview image). */
 export function profileUrl(id: string): string {
-  return `${location.origin}/u/${encodeURIComponent(id)}`;
+  return `${publicOrigin()}/u/${encodeURIComponent(id)}`;
 }
 
 /**
@@ -60,8 +81,9 @@ export function profileUrl(id: string): string {
  * The Worker serves these paths with per-page meta (apps/api/src/seo/); /replay/<id> is the viewer's (viewer/request.ts).
  */
 export function routeFromUrl(): NavRequest | null {
-  const p = new URLSearchParams(location.search);
-  const path = location.pathname.replace(/\/+$/, "");
+  const here = appLocation();
+  const p = here.searchParams;
+  const path = here.pathname.replace(/\/+$/, "");
   const u = p.get("u") ?? /^\/u\/([\w-]+)$/.exec(path)?.[1] ?? null;
   if (u) return { screen: "profile", id: u };
   const r = p.get("ranks");

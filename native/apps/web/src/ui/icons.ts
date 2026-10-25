@@ -33,6 +33,10 @@ const DRAW = {
   graphics: [p("M2.5 3.5H17.5V13.5H2.5Z"), p("M10 13.5V17M6.5 17H13.5")],
   /** The carrot blade: body, leaves, two ridges. */
   viewmodel: [p("M3 17L7.6 7.9L12.1 12.4Z"), p("M9.85 10.15L15.5 4.5M12.7 7.3L12.7 2.5M12.7 7.3L17.5 7.3"), p("M5.6 13.4L6.9 14.7M7 10.6L8.3 11.9")],
+  /** A paint brush: handle, ferrule, bristle tip. */
+  paint: [p("M16.5 3.5L9.5 10.5"), p("M9.5 10.5L11 12L8.5 14.5L7 13Z"), p("M7 13L3.5 16.5L4.5 17.5L8.5 14.5")],
+  /** A ruler: a bar with tick marks. */
+  measure: [p("M2.5 7H17.5V13H2.5Z"), p("M5.5 7V9.5M8.5 7V10.5M11.5 7V9.5M14.5 7V10.5")],
   /** A speaker with two waves. */
   audio: [p("M3 7.5H6L10 4V16L6 12.5H3Z"), p("M13 7.5A3.5 3.5 0 0 1 13 12.5M15.3 5A7 7 0 0 1 15.3 15")],
   /** A person: head over shoulders. */
@@ -57,6 +61,8 @@ const DRAW = {
   chevronRight: [p("M7.5 4.5L13 10L7.5 15.5")],
   undo: [p("M7.5 4L3.5 8L7.5 12"), p("M3.5 8H12A4.5 4.5 0 0 1 12 17H8")],
   warn: [p("M10 2.5L18 17H2Z"), p("M10 8V12M10 14.25V14.75")],
+  /** A die showing five: a random map (the map list's toolbar). */
+  die: [p("M5.5 3H14.5A2.5 2.5 0 0 1 17 5.5V14.5A2.5 2.5 0 0 1 14.5 17H5.5A2.5 2.5 0 0 1 3 14.5V5.5A2.5 2.5 0 0 1 5.5 3Z"), p("M7 6.75V7.25M13 6.75V7.25M10 9.75V10.25M7 12.75V13.25M13 12.75V13.25")],
   /** A five-point star: a favorite map (filled with .on in the map list's CSS). */
   star: [p("M10 2.8L11.94 7.93L17.42 8.19L13.14 11.62L14.58 16.91L10 13.9L5.42 16.91L6.86 11.62L2.58 8.19L8.06 7.93Z")],
   /** Arrow out of a doorway, to the left: leave (the pause menu's Main menu). */
@@ -67,6 +73,8 @@ const DRAW = {
   friends: [c(7.5, 7, 2.7), p("M2.5 16.5C3.3 13.8 5.2 12.3 7.5 12.3S11.7 13.8 12.5 16.5"), c(13.6, 6.4, 2.2), p("M13.4 10.9C15.4 10.9 16.9 12.3 17.5 14.6")],
   /** A speech bubble: a message. */
   message: [p("M3 4H17V13.5H8.5L5 16.5V13.5H3Z")],
+  /** An eye: spectate (a friend's row, social/dock.ts). */
+  eye: [p("M2 10C3.9 6.6 6.7 4.75 10 4.75S16.1 6.6 18 10C16.1 13.4 13.3 15.25 10 15.25S3.9 13.4 2 10Z"), c(10, 10, 2.5)],
 
   // ---- pause rail, action cards, panel tabs (menu.ts)
   /** A triangle pointing right: play / resume / watch. */
@@ -167,6 +175,8 @@ const SECTION_ICONS: Record<string, IconName> = {
   viewmodel: "viewmodel",
   audio: "audio",
   account: "account",
+  paint: "paint",
+  measure: "measure",
 };
 
 export function sectionIcon(id: string, named?: string): SVGSVGElement {

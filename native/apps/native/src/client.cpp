@@ -270,8 +270,11 @@ int run(const Options &opt) {
     std::future<native::DownloadedMap> download;
     struct CancelDownload { std::atomic_bool &flag; ~CancelDownload(){flag=true;} } cancel_on_exit{cancel_download};
     double accumulator=0;
+    // A focus, menu or restart reset: the simulation starts again from now and
+    // motion from before it is dropped rather than handed to the next tick.
+    auto reset_input_timing=[&]() {accumulator=0;input.clear();};
     auto capture=[&](bool on) {
-        input.clear();held_codes.clear();
+        reset_input_timing();held_codes.clear();
         if (!SDL_SetWindowRelativeMouseMode(window.get(),on)) {
             captured=false; std::cerr << "Relative mouse mode failed: " << SDL_GetError() << '\n';
         } else captured=on;
@@ -329,7 +332,7 @@ int run(const Options &opt) {
             if(tutorial_demo)tutorial_demo_start=curr.tick;
         }
         if(renderer){renderer->reset_presentation();renderer->set_viewmodel_weapon(std::nullopt);renderer->set_cosmetics(outfit,packed_loadout);}
-        audio.reset();prev=curr; accumulator=0; input.set_angles(curr.teleport_angles[0],curr.teleport_angles[1]); input.clear();
+        audio.reset();prev=curr;reset_input_timing();input.set_angles(curr.teleport_angles[0],curr.teleport_angles[1]);
         begin_record();
     };
     auto apply_room_mode=[&](const native::RoomModeAction &action){
@@ -540,7 +543,7 @@ int run(const Options &opt) {
                     request_map(message.at("id").get<std::string>());
                 }
                 else if(type=="style") {const auto id=message.at("id").get<std::string>();if(!native::styles.contains(id))throw std::runtime_error("Unknown style");selected_style=id;active_track=0;reset();}
-                else if(type=="settings") {auto changed=native::patch_settings(preferences,message.at("patch"));native::save_settings(cache/"settings.json",changed);preferences=std::move(changed);input.clear();held_codes.clear();apply_preferences();error.clear();}
+                else if(type=="settings") {auto changed=native::patch_settings(preferences,message.at("patch"));native::save_settings(cache/"settings.json",changed);preferences=std::move(changed);input.held=input.pulse=0;held_codes.clear();apply_preferences();error.clear();}
                 else if(type=="replays")refresh_replays();
                 else if(type=="ghost")ghost_enabled=ghost_handle&&message.at("enabled").get<bool>();
                 else if(type=="replay") {
@@ -727,7 +730,7 @@ int run(const Options &opt) {
             if(tutorial&&tutorial->is_active()&&!playback){BhCmd filtered=cmd;bh_last_command(core.get(),&filtered);const auto result=tutorial->tick(tutorial_pre,curr,filtered,curr.events,dt);if(result.completed)save_tutorial();if(tick_run.status==2&&tutorial->lesson_id()=="final"&&!tutorial_final_saved){tutorial->finish(tick_run.seconds);save_tutorial();tutorial_final_saved=true;}if(result.next_lesson>=0&&result.next_lesson<4){const char *ids[]={"jump","strafe","speed","final"};start_tutorial(ids[result.next_lesson],false);accumulator=0;break;}}
 
             // Finish the recording on the exact native tick, before any further catch-up steps.
-            if(!playback&&tick_run.status==2&&!recording_ended) {accumulator=0;break;}
+            if(!playback&&tick_run.status==2&&!recording_ended) {reset_input_timing();break;}
         }
         BhRunState run_state{};
         if(core) {

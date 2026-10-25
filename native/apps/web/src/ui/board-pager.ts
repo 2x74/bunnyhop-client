@@ -93,6 +93,8 @@ export interface PagedBoard<E> {
 
 const CACHE_MS = 30_000;
 const MIN_ROWS = 3;
+/** Rows on every page of every board. */
+export const PAGE_ROWS = 20;
 
 /** Compact page list, `room` items long: 1 … 9 10 11 … 20 (first, last, the current page and its neighbours). */
 export function pageList(cur: number, pages: number, room = 7): (number | null)[] {
@@ -167,26 +169,11 @@ export function pagedBoard<E>(view: BoardView<E>): PagedBoard<E> {
     void fetchPage(page).catch(() => {});
   }
 
-  // ---- measuring: rows that fit the frame without scrolling
+  // ---- page size: fixed (PAGE_ROWS rows counting the pinned ones), the same on every board, window size and scope.
+  // (It used to be the rows that fit the frame, which changed with the scope's pinned rows and the window: 8 on one
+  // tab, 11 on the next.) The frame scrolls when a page is taller than the screen.
   function measure(): number {
-    const avail = frame.clientHeight - thead.getBoundingClientRect().height;
-    let probe = rows.querySelector<HTMLElement>("tr.rb-row, tr.rb-skel") ?? pins.querySelector<HTMLElement>("tr.rb-row");
-    let temp: HTMLElement | null = null;
-    if (!probe) {
-      temp = skeletonRow();
-      rows.append(temp);
-      probe = temp;
-    }
-    const rowH = probe.getBoundingClientRect().height;
-    temp?.remove();
-    const sp = getComputedStyle(table).borderSpacing.split(" ");
-    const gap = parseFloat(sp[1] ?? sp[0]) || 0;
-    if (!rowH || avail <= 0) return per || 10;
-    // Spacing sits above every row and once below the last.
-    const slots = Math.floor((avail - gap) / (rowH + gap));
-    const n = slots - view.base - 1 - (view.spare ?? 0); // pinned rows above, your strip below
-    frame.classList.toggle("tight", n < MIN_ROWS);
-    return Math.max(MIN_ROWS, n);
+    return Math.max(MIN_ROWS, PAGE_ROWS - view.base);
   }
 
   function skeletonRow(): HTMLTableRowElement {
@@ -499,7 +486,7 @@ export function hueOf(id: string): number {
 }
 
 /** Avatar (Discord picture when shown publicly) + name (opens the profile) + Verified / Creator marks + an optional quiet suffix. */
-export function playerCell(p: { id: string; name: string; avatarUrl: string | null; provider?: string; country?: string | null } & PlayerMarks, open: () => void, sub: string[] = []): HTMLTableCellElement {
+export function playerCell(p: { id: string; name: string; avatarUrl: string | null; provider?: string; country?: string | null } & PlayerMarks, open: () => void, sub: string[] = [], href = `/u/${encodeURIComponent(p.id)}`): HTMLTableCellElement {
   const letter = () => h("span.rb-av", { "aria-hidden": "true", style: `--hue:${hueOf(p.id)}` }, (p.name.trim()[0] ?? "?").toUpperCase());
   const av = p.avatarUrl ? avatarImg(p.avatarUrl, { cls: "rb-av", px: 24, letter }) : letter();
   const tags = [...sub, p.provider === "guest" ? "guest" : ""].filter(Boolean);
@@ -511,7 +498,13 @@ export function playerCell(p: { id: string; name: string; avatarUrl: string | nu
       null,
       av,
       countryFlag(p.country),
-      h("button.rb-name", { type: "button", title: `${p.name}'s profile`, onclick: open, ...nameAttrs(p) }, p.name),
+      // A real link to the profile's address (middle-click / Ctrl-click open it in a new tab); a plain click opens it in place.
+      h("a.rb-name", { href, title: `${p.name}'s profile`, onclick: (ev: Event) => {
+        const e = ev as MouseEvent;
+        if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+        e.preventDefault();
+        open();
+      }, ...nameAttrs(p) }, p.name),
       nameMarks(p),
       tags.length ? h("span.rb-sub", { title: p.provider === "guest" ? "Guest players haven't linked an account" : null }, tags.join(" · ")) : null,
     ),

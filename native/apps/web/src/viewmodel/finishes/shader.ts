@@ -31,7 +31,7 @@ import { GLOVE_FRAGMENT_PARS, GLOVE_VERTEX_MAIN, GLOVE_VERTEX_PARS } from "../gl
 export { GLOVE_FRAGMENT_ALBEDO, GLOVE_FRAGMENT_LIGHT } from "../gloves/glsl";
 
 /** `#define FINISH n` per design (0 = no finish code at all). */
-export const FINISH_CODE: Record<FinishKind, number> = { none: 0, sunset: 1, ember: 2, tigerlily: 3, nebula: 4, dewweb: 5, frost: 6, heartbeet: 7, fourleaf: 8, founder: 9, geode: 10, rift: 11, spectrum: 12, goldleaf: 13, aurora: 14 };
+export const FINISH_CODE: Record<FinishKind, number> = { none: 0, sunset: 1, ember: 2, tigerlily: 3, nebula: 4, dewweb: 5, frost: 6, heartbeet: 7, fourleaf: 8, founder: 9, geode: 10, rift: 11, spectrum: 12, goldleaf: 13, aurora: 14, contour: 15, meteor: 16, hourglass: 17, lantern: 18, wildflower: 19, tally: 20, devgrid: 21 };
 
 /** One finished item, as the shader sees it: which design. */
 export interface FinishSpec {
@@ -147,7 +147,7 @@ export const VERTEX_MAIN = /* glsl */ `
 #endif
 ${GLOVE_VERTEX_MAIN}`;
 
-/** Fragment: declarations + the finish recipes (FINISH 1..14) + the glove materials (GLOVE). */
+/** Fragment: declarations + the finish recipes (FINISH 1..21) + the glove materials (GLOVE). */
 export const FRAGMENT_PARS = /* glsl */ `
 #if defined(FINISH) || defined(GLOVE)
 ${NOISE_GLSL}
@@ -505,6 +505,150 @@ vec3 finishAlbedo(float u, float v, vec2 P, out float metal, out float sparkle, 
 #endif
   metal = 0.35;
   return c;
+#elif FINISH == 15
+  // CONTOUR (Centurion, 100 maps): a topographic map. Slate blue, a little lighter on the high ground, with cream contour
+  // lines and every fifth line in carrot orange.
+  float h = fbm3(P * vec2(0.32, 0.85) + vec2(5.3, 1.7)) * 1.6 + 0.12 * gnoise(P * 1.3 + 9.0);
+  vec3 c = mix(vec3(0.17, 0.24, 0.34), vec3(0.22, 0.31, 0.43), smoothstep(-0.5, 0.5, h));
+  float f = h * 6.0;
+  float d = abs(fract(f + 0.5) - 0.5) / max(fwidth(f), 1e-4);
+  float line = 1.0 - smoothstep(0.5, 1.3, d);
+  float major = step(abs(mod(floor(f + 0.5), 5.0)), 0.5);
+  c = mix(c, mix(vec3(0.94, 0.90, 0.81), vec3(1.0, 0.54, 0.16), major), line * (0.8 + 0.2 * major));
+  metal = 0.4;
+  return c * c;
+#elif FINISH == 16
+  // METEOR (Hard Five, 5 T4 clears): black iron with a fine speckle, crossed by three falling streaks: a white-hot head
+  // cooling through orange to a dull red tail. The heads glint now and then.
+  vec3 c = mix(vec3(0.05, 0.05, 0.06), vec3(0.11, 0.11, 0.13), smoothstep(-0.4, 0.4, fbm3(P * 1.4 + 3.0)));
+  float sp = fh21(floor(P * 70.0));
+  c = mix(c, vec3(0.45, 0.47, 0.54), step(0.994, sp) * 0.5);
+  vec2 dir = normalize(vec2(1.0, -0.4));
+  vec2 nrm = vec2(-dir.y, dir.x);
+  float heat = 0.0, headGlow = 0.0;
+  for (int i = 0; i < 3; i++) {
+    float fi = float(i);
+    vec2 head = vec2(5.0 + fi * 2.4, 0.3 - fi * 0.16);
+    float len = 2.6 - 0.4 * fi;
+    vec2 q = P - head;
+    float s = -dot(q, dir);            // 0 at the head, growing along the tail
+    float t = dot(q, nrm);
+    float a = clamp(s / len, 0.0, 1.0);
+    float w = mix(0.13, 0.02, a);
+    float on = step(-0.06, s) * step(s, len);
+    float k = on * (1.0 - smoothstep(w * 0.4, w, abs(t)));
+    heat = max(heat, k * (1.0 - a));
+    headGlow = max(headGlow, exp(-dot(q, q) * 40.0));
+  }
+  vec3 hot = heat > 0.7 ? mix(vec3(1.0, 0.62, 0.25), vec3(1.0, 0.97, 0.9), (heat - 0.7) / 0.3)
+           : heat > 0.3 ? mix(vec3(0.75, 0.12, 0.04), vec3(1.0, 0.62, 0.25), (heat - 0.3) / 0.4)
+           : mix(vec3(0.25, 0.04, 0.03), vec3(0.75, 0.12, 0.04), heat / 0.3);
+  float lit = smoothstep(0.0, 0.08, heat);
+  c = mix(c, hot * 0.6, lit);
+  emit = hot * lit * 0.9 + vec3(1.0, 0.85, 0.6) * headGlow * 0.7;
+#ifndef FINISH_LOD
+  sparkle = headGlow * max(0.0, sin(uFinTime * 2.3)) * 0.8;
+#endif
+  metal = 0.75;
+  return c;
+#elif FINISH == 17
+  // HOURGLASS (Lifer, 50 h): sand. Pale gold to toasted dunes in soft ripples across the blade, a fine grain, and the
+  // ripples creeping slowly toward the tip.
+  float ph = P.x * 4.2 + 1.4 * gnoise(P * vec2(0.6, 1.4) + 2.0) + v * 1.1 - uFinTime * 0.12;
+  float rip = 0.5 + 0.5 * sin(ph);
+  rip = rip * rip;
+  vec3 c = mix(vec3(0.93, 0.82, 0.60), vec3(0.72, 0.52, 0.30), rip * 0.55 + 0.3 * smoothstep(0.2, 1.0, u));
+  float g = fh21(floor(P * 95.0));
+  c *= 0.92 + 0.12 * g;
+  c = mix(c, vec3(0.50, 0.34, 0.20), step(0.9, g) * 0.25);
+#ifndef FINISH_LOD
+  sparkle = step(0.995, g) * max(0.0, sin(uFinTime * 2.0 + g * 40.0)) * 0.6;
+#endif
+  metal = 0.35;
+  return c * c;
+#elif FINISH == 18
+  // LANTERN (Lantern Night, 10 Halloween maps): a near-black plum blade lit from its cutting edge by a warm candle glow
+  // that flickers a little, with a few embers drifting up from it.
+  float t = uFinTime;
+  vec3 c = mix(vec3(0.012, 0.006, 0.014), vec3(0.035, 0.014, 0.036), smoothstep(-0.5, 0.5, fbm3(P * 0.8 + 4.0)));
+  float flick = 0.85 + 0.15 * gnoise(vec2(t * 2.1, P.x * 0.4));
+  float edgeD = (v + 1.0) * 0.5;      // 0 at the cutting edge, 1 at the spine
+  float glow = pow(1.0 - smoothstep(0.0, 0.62, edgeD + 0.06 * fbm3(vec2(P.x * 0.7, t * 0.3))), 1.8) * flick;
+  vec3 warm = mix(vec3(0.75, 0.16, 0.02), vec3(1.0, 0.66, 0.22), glow);
+  c = mix(c, warm * 0.12, glow);
+  emit = warm * glow * 1.05;
+  // Embers: cells rising slowly across the blade, each its own speed and size.
+  vec2 eg = vec2(P.x * 3.0, (v + 1.0) * 2.2 - t * 0.25);
+  vec2 ei = floor(eg);
+  float eh = fh21(ei + 6.0);
+  vec2 ef = fract(eg) - 0.5 - 0.3 * fh22(ei + 3.0);
+  float ember = step(0.8, eh) * (1.0 - smoothstep(0.0, 0.07 + 0.04 * fract(eh * 17.0), length(ef * vec2(1.0, 1.6))));
+  emit += vec3(1.0, 0.7, 0.3) * ember * (0.6 + 0.4 * sin(t * 3.0 + eh * 30.0)) * smoothstep(1.0, 0.3, edgeD);
+  metal = 0.3;
+  return c;
+#elif FINISH == 19
+  // WILDFLOWER (T2 Sweep): a pale meadow green painted with small five-petal flowers (white, butter yellow and lilac)
+  // with sunny middles, scattered unevenly.
+  vec3 c = mix(vec3(0.68, 0.82, 0.55), vec3(0.52, 0.70, 0.42), smoothstep(-0.4, 0.4, fbm3(P * 0.9 + 12.0)));
+  vec2 g = P * vec2(1.5, 1.9);
+  vec2 gi = floor(g);
+  float h = fh21(gi + 4.0);
+  if (h > 0.3) {
+    vec2 p = fract(g) - 0.5 - 0.18 * fh22(gi + 1.0);
+    p = finRot(p, h * 25.0);
+    float r = length(p), a = atan(p.y, p.x);
+    float size = 0.3 + 0.08 * fract(h * 11.0);
+    float petal = size * (0.62 + 0.38 * cos(a * 5.0));
+    float flower = 1.0 - smoothstep(petal - 0.02, petal + 0.02, r);
+    float k = fract(h * 7.3);
+    vec3 pc = k < 0.45 ? vec3(1.0, 1.0, 0.98) : k < 0.75 ? vec3(1.0, 0.86, 0.36) : vec3(0.70, 0.55, 0.95);
+    c = mix(c, pc, flower);
+    c = mix(c, vec3(0.96, 0.62, 0.14), 1.0 - smoothstep(size * 0.2, size * 0.28, r));
+  }
+  metal = 0.35;
+  return c * c;
+#elif FINISH == 20
+  // TALLY (Atlas, 250 maps): bone white with rows of scratched tally marks in graphite, four strokes and a slash to a
+  // group; now and then a group is in carrot orange.
+  vec3 c = mix(vec3(0.95, 0.92, 0.86), vec3(0.88, 0.84, 0.76), smoothstep(-0.4, 0.4, fbm3(P * 1.6 + 2.0)));
+  // Groups: 0.9 units along the blade, rows 0.42 across it.
+  vec2 q = vec2(P.x - 2.7, P.y + 0.63);
+  vec2 gi = floor(q / vec2(0.9, 0.42));
+  vec2 lp = q - gi * vec2(0.9, 0.42);
+  float ink = 0.0;
+  for (int i = 0; i < 4; i++) {
+    float xk = 0.12 + float(i) * 0.15 + 0.025 * (fh21(gi * 1.7 + float(i)) - 0.5);
+    vec2 a0 = vec2(xk, 0.07), a1 = vec2(xk + 0.03, 0.35);
+    vec2 pa = lp - a0, ba = a1 - a0;
+    float d = length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
+    ink = max(ink, 1.0 - smoothstep(0.014, 0.026, d));
+  }
+  vec2 s0 = vec2(0.03, 0.30), s1 = vec2(0.72, 0.11);
+  vec2 ps = lp - s0, bs = s1 - s0;
+  float ds = length(ps - bs * clamp(dot(ps, bs) / dot(bs, bs), 0.0, 1.0));
+  ink = max(ink, 1.0 - smoothstep(0.014, 0.026, ds));
+  // Three rows, the count thinning toward the narrow tip, a few groups missing; one in seven in orange.
+  float show = step(0.0, gi.y) * step(gi.y, 2.0) * step(0.0, gi.x) * step(gi.x, 8.0 - abs(gi.y - 1.0) * 3.0) * step(fh21(gi + 9.0), 0.92);
+  float orange = step(0.86, fh21(gi + 3.0));
+  ink *= show * (0.8 + 0.2 * gnoise(P * 40.0));
+  c = mix(c, mix(vec3(0.22, 0.21, 0.24), vec3(1.0, 0.48, 0.10), orange), clamp(ink, 0.0, 1.0) * 0.9);
+  metal = 0.3;
+  return c * c;
+#elif FINISH == 21
+  // DEV GRID (Every Week, 4 weekly gauntlets): the old orange-and-grey developer texture. Orange and grey blocks, each a
+  // checker of two close tones under thin white grid lines.
+  vec2 cell = P * 3.0;
+  vec2 big = floor(P * 0.75);
+  float grey = step(0.5, fract((big.x + big.y) * 0.5));
+  float chk = step(0.5, fract((floor(cell.x) + floor(cell.y)) * 0.5));
+  vec3 a = mix(vec3(0.94, 0.54, 0.14), vec3(0.56, 0.57, 0.59), grey);
+  vec3 b = mix(vec3(0.88, 0.48, 0.09), vec3(0.50, 0.51, 0.53), grey);
+  vec3 c = mix(a, b, chk);
+  vec2 dl = abs(fract(cell + 0.5) - 0.5) / max(fwidth(cell), vec2(1e-4)); // to the nearest grid line, in pixels
+  float grid = 1.0 - smoothstep(0.5, 1.5, min(dl.x, dl.y));
+  c = mix(c, mix(vec3(1.0), vec3(0.85, 0.86, 0.88), grey), grid * 0.85);
+  metal = 0.2;
+  return c * c;
 #else
   return vColor;
 #endif

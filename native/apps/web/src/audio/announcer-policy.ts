@@ -1,6 +1,6 @@
 // Cosmetic policy only: timer counters and verified run identities are the inputs.
 import type { AnnouncerLine, AnnouncerPrefs } from "../ui/settings";
-export type AnnouncerEvent = "pb" | "wr" | "speed" | "highSpeed" | "streak";
+export type AnnouncerEvent = "pb" | "wr" | "speed" | "highSpeed" | "streak" | "lj";
 export class AnnouncerPolicy {
   private seen = new Set<string>();
   private until = 0;
@@ -29,6 +29,7 @@ export class AnnouncerPolicy {
   }
   /** No queue: stale cues are dropped. A verified WR may interrupt anything; PB may interrupt movement. */
   admit(p: AnnouncerPrefs, event: AnnouncerEvent, now: number, duration: number, id?: string, remote = false, preview = false): AnnouncerLine | null {
+    if (event === "lj" && remote) return null;
     const movement = event !== "pb" && event !== "wr";
     if (!preview && id) {
       if (this.seen.has(id)) return null;

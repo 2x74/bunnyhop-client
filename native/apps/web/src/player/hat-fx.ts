@@ -2,7 +2,7 @@
 // (player/materials.ts) for every bunny: no extra textures or draw calls. A hat face opts in with an accent
 // code (player/bunny/builder.ts Paint.code), its colour stays partColor:
 //
-//   -1  propeller rotor; -2 capybara body, -3 eyes, -4 mouth (per-player movement uniforms)
+//   -1  propeller rotor; -2 capybara body, -3 eyes, -4 mouth; -5 maxwell body, -6 eyes, -7 mouth, -8 tail (per-player movement uniforms)
 //   11  the Aurora ribbon (Borealis): floats (bobs) above the ears with a light flowing round it (AURORA_C)
 //   12  a gem of the Gem Orbit (and a coin of Lucky Coins: the same orbit): the ring of four turns slowly about the vertical axis through ORBIT_C, each gem spins
 //       on its own axis and bobs, and every few seconds one of them pops and a white shine crosses it (hold, burst,
@@ -31,6 +31,8 @@ export const AURORA_C: V3 = [0, 1.0, 87.9];
 export const CROWN_C: V3 = [0, 0.55, 73.0];
 /** Toy rotor, forward of the ears; negative accent keeps it separate from crystal and glove codes. */
 export const PROPELLER_C: V3 = [0, -2.9, 78.0];
+/** Bind-space pivot of Maxwell the Cat on the forehead (forward of the bunny ear roots), for spinning and hopping. */
+export const MAXWELL_C: V3 = [0, -1.9, 75.2];
 
 /** HUD horizontal u/s, including high-speed airborne bhops; integrate without phase jumps or a run-speed cap. */
 export function advancePropeller(angle: number, speedU: number, dt: number): number {
@@ -96,6 +98,7 @@ const vec3 FX_HALO_C = ${v3(HALO_C)};
 const vec3 FX_CROWN_C = ${v3(CROWN_C)};
 const vec3 FX_AURORA_C = ${v3(AURORA_C)};
 const vec3 FX_PROPELLER_C = ${v3(PROPELLER_C)};
+const vec3 FX_MAXWELL_C = ${v3(MAXWELL_C)};
 // vFx: 1 orbit, 2 halo, 3 halo inset, 4 circlet line (codes 12-15), 5 aurora ribbon (code 11), 0 none.
 float fxCode() { return accent > 11.5 && accent < 15.5 ? floor(accent - 11.0 + 0.5) : accent > 10.5 && accent < 11.5 ? 5.0 : 0.0; }
 vec2 fxRot(vec2 p, float a) { float c = cos(a), s = sin(a); return vec2(c * p.x - s * p.y, s * p.x + c * p.y); }
@@ -104,6 +107,18 @@ bool fxCapy() { return accent < -1.5 && accent > -4.5; }
 float fxCapyEyeScale() { return 0.12 + 0.88 * uCapybara.x; }
 float fxCapyMouthScale() { return 0.12 + 0.88 * smoothstep(0.45, 0.95, uCapybara.x); }
 float fxCapyStretch() { return 1.0 + uCapybara.y + 0.012 * sin(uCapybara.w * 2.0); }
+bool fxMaxwell() { return accent < -4.5 && accent > -8.5; }
+float fxMaxwellEyeScale() { return 0.52 + 0.62 * uCapybara.x; }
+float fxMaxwellMouthScale() { return 0.18 + 0.82 * smoothstep(0.45, 0.95, uCapybara.x); }
+float fxMaxwellSway() { return (0.045 + 0.14 * uCapybara.x) * sin(uPropellerAngle * 2.0 + uCapybara.w * 5.0); }
+float fxMaxwellHop() {
+  float b = abs(sin(uPropellerAngle + uCapybara.w * 3.2));
+  return (0.12 + 1.05 * uCapybara.x) * b + max(uCapybara.y, 0.0) * 5.5;
+}
+float fxMaxwellStretch() {
+  float b = cos(uPropellerAngle * 2.0 + uCapybara.w * 6.4);
+  return 1.0 + uCapybara.y * 1.35 - 0.11 * uCapybara.x * b;
+}
 // Gem Orbit: which gem a bind-space point belongs to (by its angle round the ring), that gem's rest centre, its own
 // spin (alternate gems turn the other way, at slightly different speeds), the ring's turn, and the pop of the gem whose
 // turn it is (0..1, the first 0.12 s of its cycle).
@@ -125,6 +140,13 @@ export const HAT_FX_VERTEX_NORMAL = /* glsl */ `
     objectNormal.z = (objectNormal.z - uCapybara.z * objectNormal.y) / fxCapyStretch();
     objectNormal = normalize(objectNormal);
   }
+  if (fxMaxwell()) {
+    if (accent < -5.5 && accent > -6.5) objectNormal.z /= fxMaxwellEyeScale();
+    if (accent < -6.5 && accent > -7.5) objectNormal.z /= fxMaxwellMouthScale();
+    objectNormal.z = (objectNormal.z - uCapybara.z * objectNormal.y - fxMaxwellSway() * objectNormal.x) / fxMaxwellStretch();
+    objectNormal.xy = fxRot(objectNormal.xy, uPropellerAngle);
+    objectNormal = normalize(objectNormal);
+  }
   if (fxCode() == 1.0) objectNormal.xy = fxRot(objectNormal.xy, fxSelf(fxGem(position)) + fxRing());`;
 
 /** Vertex, after <begin_vertex> (before skinning): spin / bob in bind space, and the pattern point. */
@@ -138,6 +160,21 @@ export const HAT_FX_VERTEX_POSITION = /* glsl */ `
     // Squash about the paws, keeping contact with the hood; lean the upper body into the wind.
     transformed.y += (transformed.z - 74.9) * uCapybara.z;
     transformed.z = 74.9 + (transformed.z - 74.9) * fxCapyStretch();
+  }
+  if (fxMaxwell()) {
+    if (accent < -5.5 && accent > -6.5) transformed.z = 77.78 + (transformed.z - 77.78) * fxMaxwellEyeScale();
+    if (accent < -6.5 && accent > -7.5) transformed.z = 76.76 + (transformed.z - 76.76) * fxMaxwellMouthScale();
+    if (accent < -7.5) {
+      float w = clamp((transformed.y - 0.1) / 1.5, 0.0, 1.0);
+      transformed.x += w * (0.1 + 0.34 * uCapybara.x) * sin(uPropellerAngle * 2.0 + uCapybara.w * 6.0);
+      transformed.z += w * (0.05 + 0.16 * uCapybara.x) * cos(uPropellerAngle * 2.0 + uCapybara.w * 6.0);
+    }
+    float h = transformed.z - FX_MAXWELL_C.z;
+    float s = fxMaxwellStretch();
+    transformed.x = FX_MAXWELL_C.x + (transformed.x - FX_MAXWELL_C.x) / sqrt(max(s, 0.65)) + h * fxMaxwellSway();
+    transformed.y = FX_MAXWELL_C.y + (transformed.y - FX_MAXWELL_C.y) / sqrt(max(s, 0.65)) + h * uCapybara.z * 0.5;
+    transformed.z = FX_MAXWELL_C.z + h * s + fxMaxwellHop();
+    transformed.xy = FX_MAXWELL_C.xy + fxRot(transformed.xy - FX_MAXWELL_C.xy, uPropellerAngle);
   }
   if (vFx == 1.0) {
     float gi = fxGem(transformed);

@@ -1,13 +1,18 @@
+import { videoGrade, VIDEO_LIMITS, type VideoGrade } from "../video-settings";
 import { DEFAULT_MOUSE_DPI } from "../mouse-settings";
 // Client preferences (localStorage, applied live). Nothing here feeds the simulation's physics:
 // tick rate / airaccelerate / autohop are fixed per style (styles.ts, picked in the menus or with the cycleStyle
 // key) and recorded in replays.
 
 import { DEFAULT_BINDS } from "../binds";
-import { CLASSIC, DEFAULT_KEYS, HUD_ELEMENTS, type HudLayout, type KeysPrefs } from "../hud/layout";
+import { CLASSIC, DEFAULT_KEYS, HUD_ELEMENTS, moveRetiredPlaces, type HudLayout, type KeysPrefs } from "../hud/layout";
 import { VIEWMODEL_POS, VIEWMODEL_POS_V1, VIEWMODEL_REV } from "../viewmodel/defaults";
 import { DEFAULT_SSJ, type SsjPrefs } from "../ssj/stats";
-import { DEFAULT_TRIGGER_PREFS, type TriggerPrefs } from "../triggers/volumes";
+import { DEFAULT_TRIGGER_PREFS, normalizeTriggerPrefs, type TriggerPrefs } from "../triggers/volumes";
+import { DEFAULT_PAINT, type PaintPrefs } from "../paint/prefs";
+import type { GhostRouteMode, GhostRouteSource } from "../ghost-route-data";
+import type { AutoRestartAction, AutoRestartWhen } from "../auto-restart";
+import { COLOR_BLIND_MODES, type ColorBlindMode } from "../palette";
 
 export type Action =
   | "forward"
@@ -37,6 +42,12 @@ export type Action =
   | "hideUi"
   | "mute"
   | "nextTrack"
+  | "paint"
+  | "paintOnce"
+  | "clearPaint"
+  | "measurePoint"
+  | "clearMeasure"
+  | "lastLj"
   // Practice mode (practice-mode/): the toggle, then tools that only work while it's on.
   | "practice"
   | "noclip"
@@ -65,6 +76,8 @@ export type AspectRatio = "native" | "4:3" | "5:4" | "16:10" | "16:9";
 /** A fixed aspect ratio fills the screen stretched (CS's "4:3 stretched") or sits between black bars. */
 export type AspectFit = "stretch" | "bars";
 export type HiddenKeeps = "speedKeys" | "nothing";
+/** Leaderboard place beside the split (board-place.ts): off, the place ("#4"), or the place and top % ("#4 · top 3%"). */
+export type PlaceReadout = "off" | "place" | "top";
 /** Player model: the bunnyhop.lol bunny (default), the classic runner, or the original CS:S models (team + skin below). */
 export type PlayerModelChoice = "bunny" | "runner" | "css";
 export type CssTeam = "ct" | "t";
@@ -76,12 +89,15 @@ export type ViewmodelHand = "right" | "left";
 /** Music: always (menu track in menus, the playlist in game), only in menus (home + pause), or off. */
 export type MusicMode = "always" | "menus" | "off";
 
+/** See AudioPrefs.rev. 1 (0.0.25): Wind defaults to off. */
+export const AUDIO_REV = 1;
+
 /** Sound options (apps/web/src/audio). Bus levels multiply the master `volume`. */
 export type AnnouncerLine = "off" | "perfect" | "godlike" | "holyshit";
 export interface AnnouncerPrefs {
   enabled: boolean; finish: boolean; movement: boolean; local: boolean; server: boolean;
-  volume: number; pb: AnnouncerLine; wr: AnnouncerLine; speed: AnnouncerLine; highSpeed: AnnouncerLine; streak: AnnouncerLine;
-  speedThreshold: number; highSpeedThreshold: number; streakThreshold: number;
+  volume: number; pb: AnnouncerLine; wr: AnnouncerLine; speed: AnnouncerLine; highSpeed: AnnouncerLine; streak: AnnouncerLine; lj: AnnouncerLine;
+  speedThreshold: number; highSpeedThreshold: number; streakThreshold: number; ljThreshold: number;
 }
 export interface AudioPrefs {
   announcer: AnnouncerPrefs;
@@ -101,8 +117,13 @@ export interface AudioPrefs {
   /** Use the original CS:S footstep / landing / water / knife sounds when the hosted CS:S content has them. */
   classic: boolean;
   footsteps: boolean;
-  /** Wind that rises with speed. */
+  /** Wind that rises with speed (off by default since 0.0.25). */
   wind: boolean;
+  /**
+   * Revision of the audio defaults these values were saved under (AUDIO_REV): migrateAudio moves players from before it
+   * to the new defaults once (0.0.25: Wind off), and keeps every choice made after.
+   */
+  rev: number;
   /** Other players in rooms (positional). */
   others: boolean;
   /** Race ghosts (positional, quiet). */
@@ -112,6 +133,7 @@ export interface AudioPrefs {
 }
 
 export interface Prefs {
+  paint: PaintPrefs;
   /** CS:S `sensitivity` (degrees per count = sensitivity * m_yaw). */
   sensitivity: number;
   verticalSensitivityEnabled: boolean;
@@ -125,6 +147,8 @@ export interface Prefs {
   invertY: boolean;
   /** Pointer lock with unadjustedMovement (raw input) where the browser supports it. */
   rawInput: boolean;
+  /** Null binds (null-binds.ts): with A + D or W + S held, the key pressed last wins. Off by default. */
+  nullBinds: boolean;
   /** Drop lone impossible mouse reports (browser pointer-lock jumps) and the first event after locking (mouse-filter.ts). */
   spikeFilter: boolean;
   /** Input diagnostics overlay: event rate, deltas, dropped spikes, frame times (input-debug.ts; also ?inputdebug=1). */
@@ -147,7 +171,9 @@ export interface Prefs {
     gainTicks: boolean;
     /** A soft edge glow that grows with speed from 600 u/s (off by default; never on potato). */
     edgeGlow: boolean;
-    strafeTrainer: { color: string; hints: boolean };
+    /** The leaderboard place your time would take, beside the split (off by default). */
+    place: PlaceReadout;
+    strafeTrainer: TrainerPrefs;
     /** Overall HUD size multiplier (on top of each element's own scale). */
     scale: number;
     /** Per-element visibility, position (9-grid anchor + viewport-fraction offset) and scale. */
@@ -160,6 +186,7 @@ export interface Prefs {
     hiddenKeeps: HiddenKeeps;
     /** Jump stats (!ssj, ssj/): the chat line, which jumps it reports and its fields. The HUD element is layout.jumpStats. */
     ssj: SsjPrefs;
+    movement: { fjtChat: boolean; lj: boolean; ljChat: boolean };
   };
   /** Master volume (0..1). The per-bus levels and the rest of the sound options are in `audio`. */
   volume: number;
@@ -174,6 +201,10 @@ export interface Prefs {
     opacity: number;
     /** Fading path of the last few seconds. */
     trail: boolean;
+    /** Persistent jump-to-jump/recorded path and white takeoff markers for one selected race ghost. */
+    route: boolean;
+    routeSource: GhostRouteSource;
+    routeMode: GhostRouteMode;
     /** Fade a ghost out when the camera is inside / right next to it. */
     nearFade: boolean;
     /** Name / time / live delta tag above each ghost. */
@@ -187,6 +218,11 @@ export interface Prefs {
     players: boolean;
   };
   showZones: boolean;
+  /**
+   * Colour-blind palette (palette.ts): the colours that mean something (gain / loss, ahead / behind, the strafe trainer's
+   * zones, zones and default trigger colours) swapped for ones that stay apart. Off is the original look.
+   */
+  colorBlind: ColorBlindMode;
   showPlayerGlow: boolean;
   /** A supporter's own glow on their first-person hands and knife (0.0.21; the glow panel's "In first person"). */
   firstPersonGlow: boolean;
@@ -220,6 +256,12 @@ export interface Prefs {
     /** Upscale a lowered resolution with sharp pixels instead of smoothing (CSS image-rendering: pixelated). */
     pixelated: boolean;
     anisotropy: number;
+    /** Local display adjustment: 1 is neutral; no simulation or replay changes. */
+    brightness: number;
+    gamma: number;
+    vibrance: number;
+    /** Remove baked map lighting while keeping textures and fog. */
+    fullbright: boolean;
     /** Main-menu background: a live 3D map flythrough, a still frame of it, or a plain gradient. */
     menuBackground: MenuBackground;
     /**
@@ -282,6 +324,8 @@ export interface Prefs {
   practice: { keepVelocity: boolean };
   /** Restart keys (R / B / M) need a short hold (restart-hold.ts HOLD_MS) so a stray press can't end a run (restart-guard.ts). */
   holdRestart: boolean;
+  /** Auto restart (auto-restart.ts): once a run passes your PB / the WR / the custom ghost, restart it or play a sound. Off by default. */
+  autoRestart: { when: AutoRestartWhen; action: AutoRestartAction };
   /**
    * How `binds` name mouse buttons: MOUSE_NAMES = Source's (Mouse2 right, Mouse3 middle; binds.ts mouseCode). Absent in
    * prefs saved before 0.0.12, whose Mouse2 / Mouse3 were the DOM's middle / right (migrateMouseNames).
@@ -300,7 +344,7 @@ export const ACTIONS: { id: Action; label: string }[] = [
   { id: "duck", label: "Duck" },
   { id: "use", label: "Use (doors, buttons)" },
   { id: "restart", label: "Restart run" },
-  { id: "restartBonus", label: "Bonus (next bonus)" },
+  { id: "restartBonus", label: "Bonus (next track)" },
   { id: "restartMain", label: "Main track" },
   { id: "setStart", label: "Set start point" },
   { id: "clearStart", label: "Clear start point" },
@@ -317,6 +361,12 @@ export const ACTIONS: { id: Action; label: string }[] = [
   { id: "hideUi", label: "Hide UI" },
   { id: "mute", label: "Mute sound" },
   { id: "nextTrack", label: "Next music track" },
+  { id: "paint", label: "Paint (hold)" },
+  { id: "paintOnce", label: "Place paint mark" },
+  { id: "clearPaint", label: "Clear paint" },
+  { id: "measurePoint", label: "Set measurement point" },
+  { id: "clearMeasure", label: "Clear measurement" },
+  { id: "lastLj", label: "Last jump / share" },
   { id: "practice", label: "Practice mode" },
   { id: "noclip", label: "Noclip" },
   { id: "cpSave", label: "Save checkpoint" },
@@ -344,7 +394,44 @@ export { VIEWMODEL_POS, VIEWMODEL_REV };
 /** Prefs.mouseNames: mouse binds use Source's button names (binds.ts mouseCode; 0.0.12). */
 export const MOUSE_NAMES = 2;
 
+/** Strafe trainer looks: the original thin gauge, a thick bar with coloured zones, a thin zoned line with a marker. */
+export type TrainerStyle = "classic" | "detailed" | "minimal";
+export interface TrainerPrefs {
+  color: string;
+  hints: boolean;
+  style: TrainerStyle;
+  /** 100% in the middle and the marker moves the way you turn; off: 0% at the left end, 200% at the right. */
+  follow: boolean;
+  /** Ticks averaged into the reading (1 = none). */
+  smoothing: number;
+  /** ± % around 100 that counts as on pace (green); amber reaches three times as far. */
+  zone: number;
+  /** Gauge thickness, a multiple of the style's own. */
+  height: number;
+  /** The trainer fades while the pace is under this % (0 = never). */
+  dimBelow: number;
+  showPace: boolean;
+  /** A tick on each jump, pitched by that jump's zone. */
+  sound: boolean;
+}
+export const DEFAULT_TRAINER: TrainerPrefs = { color: "#ffffff", hints: false, style: "classic", follow: false, smoothing: 8, zone: 10, height: 1, dimBelow: 0, showPace: true, sound: false };
+export type TrainerPreset = "beginner" | "standard" | "strict";
+/** What a preset sets; colour, height, dimming and sound stay the player's. */
+const TRAINER_PRESETS: Record<TrainerPreset, Pick<TrainerPrefs, "style" | "follow" | "smoothing" | "zone" | "hints" | "showPace">> = {
+  beginner: { style: "detailed", follow: true, smoothing: 12, zone: 20, hints: true, showPace: true },
+  standard: { style: "classic", follow: false, smoothing: 8, zone: 10, hints: false, showPace: true },
+  strict: { style: "minimal", follow: true, smoothing: 3, zone: 5, hints: false, showPace: true },
+};
+export function applyTrainerPreset(t: TrainerPrefs, preset: TrainerPreset): void {
+  Object.assign(t, TRAINER_PRESETS[preset]);
+}
+/** The preset `t` matches, if any. */
+export function trainerPreset(t: TrainerPrefs): TrainerPreset | null {
+  return (Object.keys(TRAINER_PRESETS) as TrainerPreset[]).find((k) => Object.entries(TRAINER_PRESETS[k]).every(([f, v]) => t[f as keyof TrainerPrefs] === v)) ?? null;
+}
+
 export const DEFAULT_PREFS: Prefs = {
+  paint: { ...DEFAULT_PAINT },
   sensitivity: 2,
   verticalSensitivityEnabled: false,
   verticalSensitivity: 2,
@@ -353,14 +440,15 @@ export const DEFAULT_PREFS: Prefs = {
   dpiHidden: false,
   invertY: false,
   rawInput: true,
+  nullBinds: false,
   spikeFilter: true,
   inputStats: false,
   fov: 90,
   crosshair: { style: "cross", color: "#4dff6a", size: 6, thickness: 2, gap: 4, outline: true, alpha: 1 },
-  hud: { speedColors: true, gainTicks: true, edgeGlow: false, strafeTrainer: { color: "#ffffff", hints: false }, scale: 1, layout: CLASSIC, keys: DEFAULT_KEYS, hidden: false, hiddenKeeps: "speedKeys", ssj: DEFAULT_SSJ },
+  hud: { speedColors: true, gainTicks: true, edgeGlow: false, place: "off", strafeTrainer: DEFAULT_TRAINER, scale: 1, layout: CLASSIC, keys: DEFAULT_KEYS, hidden: false, hiddenKeeps: "speedKeys", ssj: DEFAULT_SSJ, movement: { fjtChat: false, lj: false, ljChat: true } },
   volume: 0.8,
   audio: {
-    announcer: { enabled: false, finish: true, movement: true, local: true, server: true, volume: 0.8, pb: "perfect", wr: "godlike", speed: "godlike", highSpeed: "holyshit", streak: "perfect", speedThreshold: 1500, highSpeedThreshold: 2500, streakThreshold: 3 },
+    announcer: { enabled: false, finish: true, movement: true, local: true, server: true, volume: 0.8, pb: "perfect", wr: "godlike", speed: "godlike", highSpeed: "holyshit", streak: "perfect", lj: "perfect", speedThreshold: 1500, highSpeedThreshold: 2500, streakThreshold: 3, ljThreshold: 250 },
     perfHud: true, perfectIndicator: true, perfectTick: false,
     music: 0.5,
     sfx: 0.8,
@@ -372,24 +460,27 @@ export const DEFAULT_PREFS: Prefs = {
     shuffle: true,
     classic: false,
     footsteps: true,
-    wind: true,
+    wind: false,
+    rev: AUDIO_REV,
     others: true,
     ghosts: false,
     muteInBackground: true,
   },
   showGhost: true,
-  ghost: { pb: true, wr: true, custom: true, opacity: 0.55, trail: true, nearFade: true, tag: true },
+  ghost: { pb: true, wr: true, custom: true, opacity: 0.55, trail: true, route: false, routeSource: "auto", routeMode: "jumps", nearFade: true, tag: true },
   tags: { throughWalls: false, players: true },
   showZones: true,
+  colorBlind: "off",
   triggers: DEFAULT_TRIGGER_PREFS,
   showPlayerGlow: true,
   firstPersonGlow: true,
   models: { player: "bunny", ghost: "same", team: "ct", ct: "ct_urban", t: "t_leet" },
-  graphics: { resolutionScale: 1, antialias: true, aspect: "native", aspectFit: "stretch", pixelated: false, anisotropy: 8, menuBackground: "live", fullscreen: true, potato: false, flashlight: false, fpsLimit: 1000, uncapped: false, lowLatency: false, menuFps: 0 },
+  graphics: { resolutionScale: 1, antialias: true, aspect: "native", aspectFit: "stretch", pixelated: false, anisotropy: 8, brightness: 1, gamma: 1, vibrance: 1, fullbright: false, menuBackground: "live", fullscreen: true, potato: false, flashlight: false, fpsLimit: 1000, uncapped: false, lowLatency: false, menuFps: 0 },
   viewmodel: { show: true, ...VIEWMODEL_POS, bob: 1, sway: 1, hand: "right", rev: VIEWMODEL_REV },
   binds: DEFAULT_BINDS,
   practice: { keepVelocity: true },
   holdRestart: false,
+  autoRestart: { when: "off", action: "restart" },
   mouseNames: MOUSE_NAMES,
   bonusBindRevision: 1,
 };
@@ -414,12 +505,25 @@ const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 function migrate(raw: Record<string, unknown>): Record<string, unknown> {
   if (typeof raw.verticalSensitivity !== "number" || !Number.isFinite(raw.verticalSensitivity)) delete raw.verticalSensitivity;
   else raw.verticalSensitivity = Math.max(0.01, Math.min(100, raw.verticalSensitivity));
+  const graphics = raw.graphics;
+  if (graphics && typeof graphics === "object" && !Array.isArray(graphics)) {
+    const g = graphics as Record<string, unknown>;
+    const normalized = videoGrade(g);
+    // Partial imports keep settings they do not mention; saved values cannot escape the display controls' bounds.
+    for (const key of Object.keys(VIDEO_LIMITS) as (keyof VideoGrade)[]) {
+      if (typeof g[key] !== "number") continue;
+      if (Number.isFinite(g[key])) g[key] = normalized[key];
+      else delete g[key];
+    }
+  }
   migrateAntialias(raw);
   migrateModels(raw);
   migrateMouseNames(raw);
   migrateBonusBind(raw);
   migrateBinds(raw);
   migrateViewmodel(raw);
+  migrateAudio(raw);
+  normalizeTriggerPrefs(raw.triggers);
   return migrateHud(raw);
 }
 
@@ -434,6 +538,18 @@ function migrateViewmodel(raw: Record<string, unknown>): void {
   const old = VIEWMODEL_POS_V1 as Record<string, number>;
   if (Object.keys(old).every((k) => v[k] === undefined || v[k] === old[k])) Object.assign(v, VIEWMODEL_POS);
   v.rev = VIEWMODEL_REV;
+}
+
+/**
+ * Audio prefs saved before AUDIO_REV 1 (0.0.25) had Wind on by default, and the whole store is saved on any change, so
+ * a stored `wind: true` can't tell a choice from the old default: it turns off once, like for new players. Off stays off.
+ * Marked current either way, so turning Wind back on afterwards sticks.
+ */
+function migrateAudio(raw: Record<string, unknown>): void {
+  const a = raw?.audio as Record<string, unknown> | undefined;
+  if (!a || typeof a !== "object" || Array.isArray(a) || (typeof a.rev === "number" && a.rev >= AUDIO_REV)) return;
+  if (a.wind === true) a.wind = false;
+  a.rev = AUDIO_REV;
 }
 
 /**
@@ -495,6 +611,29 @@ function migrateBinds(raw: Record<string, unknown>): void {
   for (const [a, codes] of Object.entries(DEFAULT_BINDS)) if (!(a in b)) b[a] = codes.filter((c) => !used.has(c));
 }
 
+/** Whether `action` has its default keys (in either order: the two slots do the same). */
+export function bindIsDefault(binds: Record<Action, string[]>, action: Action): boolean {
+  const cur = binds[action] ?? [];
+  const def = DEFAULT_BINDS[action] ?? [];
+  return cur.length === def.length && def.every((c) => cur.includes(c));
+}
+
+/**
+ * Settings → Keys, a row's reset: `action` gets its default keys back. Like binding a key by hand, a default key leaves
+ * any other action that had it. Returns those actions.
+ */
+export function resetBind(binds: Record<Action, string[]>, action: Action): Action[] {
+  const def = DEFAULT_BINDS[action] ?? [];
+  const took: Action[] = [];
+  for (const a of Object.keys(binds) as Action[]) {
+    if (a === action || !binds[a].some((c) => def.includes(c))) continue;
+    binds[a] = binds[a].filter((c) => !def.includes(c));
+    took.push(a);
+  }
+  binds[action] = [...def];
+  return took;
+}
+
 /**
  * Retired player / ghost overrides migrate to the bunny. Appearance now comes from each player's loadout.
  * Keep the old team fields only for importing older preference files and the developer model viewer.
@@ -510,6 +649,7 @@ function migrateModels(raw: Record<string, unknown>): void {
 /** Pre-layout prefs stored HUD visibility as hud.speed / hud.timer / ... booleans. */
 function migrateHud(raw: Record<string, unknown>): Record<string, unknown> {
   const hud = raw?.hud as Record<string, unknown> | undefined;
+  if (hud && typeof hud === "object" && hud.layout && typeof hud.layout === "object") moveRetiredPlaces(hud.layout as Record<string, never>);
   if (!hud || typeof hud !== "object" || hud.layout) return raw;
   const old: Record<string, string> = { speed: "speed", timer: "timer", split: "split", stats: "stats", keys: "keys", mapLine: "map", fps: "fps" };
   const layout = clone(CLASSIC) as Record<string, { on: boolean }>;
@@ -518,10 +658,17 @@ function migrateHud(raw: Record<string, unknown>): Record<string, unknown> {
   return raw;
 }
 
+/** Saved prefs (the PREFS_KEY JSON, or null: none saved) over the defaults, migrated. Throws on malformed JSON. */
+export function parsePrefs(raw: string | null): Prefs {
+  if (!raw) return clone(DEFAULT_PREFS);
+  const p = merge(DEFAULT_PREFS, migrate(JSON.parse(raw)));
+  if (!COLOR_BLIND_MODES.some(([m]) => m === p.colorBlind)) p.colorBlind = DEFAULT_PREFS.colorBlind;
+  return p;
+}
+
 function load(): Prefs {
   try {
-    const raw = localStorage.getItem(KEY);
-    const p = raw ? merge(DEFAULT_PREFS, migrate(JSON.parse(raw))) : clone(DEFAULT_PREFS);
+    const p = parsePrefs(localStorage.getItem(KEY));
     p.graphics.flashlight = false;
     return p;
   } catch {
@@ -595,11 +742,6 @@ export function keyLabel(code: string): string {
     MouseWheel: "Wheel ↕",
     MWheelUp: "Wheel ↑",
     MWheelDown: "Wheel ↓",
-    Mouse1: "Mouse 1",
-    Mouse2: "Mouse 2",
-    Mouse3: "Mouse 3",
-    Mouse4: "Mouse 4",
-    Mouse5: "Mouse 5",
     ArrowUp: "↑",
     ArrowDown: "↓",
     ArrowLeft: "←",
@@ -609,6 +751,7 @@ export function keyLabel(code: string): string {
     Tab: "Tab",
   };
   if (special[code]) return special[code];
+  if (/^Mouse[1-9]\d*$/.test(code)) return `Mouse ${code.slice(5)}`;
   if (code.startsWith("Key")) return code.slice(3);
   if (code.startsWith("Digit")) return code.slice(5);
   if (code.startsWith("Numpad")) return "Num " + code.slice(6);

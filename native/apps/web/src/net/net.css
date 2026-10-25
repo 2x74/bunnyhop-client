@@ -112,7 +112,7 @@
 #mp-specbar { left: 50%; bottom: 2.2rem; transform: translateX(-50%); font-size: calc(1rem * var(--hs, 1)); font-weight: 650; text-shadow: var(--shadow-text); white-space: nowrap; }
 #mp-specbar b { font-weight: 800; }
 /* Spectating: your own run's readouts would mislead; the speed and timer stay and show the watched player's. */
-body.mp-spectating #hud .hud-el:not([data-el="chat"]):not([data-el="map"]):not([data-el="fps"]):not([data-el="speed"]):not([data-el="timer"]) { visibility: hidden; }
+body.mp-spectating #hud .hud-el:not([data-el="chat"]):not([data-el="map"]):not([data-el="fps"]):not([data-el="speed"]):not([data-el="timer"]):not([data-el="spectators"]) { visibility: hidden; }
 body.mp-spectating #hud-endcard { display: none; }
 body.menu-open #mp-menu, body.menu-open #mp-scoreboard, body.menu-open #mp-specbar, body.menu-open #mp-race, body.menu-open #mp-count { display: none; }
 
@@ -149,5 +149,6 @@ body.menu-open #mp-menu, body.menu-open #mp-scoreboard, body.menu-open #mp-specb
 .menu-room small { color: var(--dim); }
 /* Verified / Creator marks (ui/marks.ts) after a name in chat and on the scoreboard. */
 .sb-name .nm-marks { margin-left: 0.35em; }
+.sb-name .country-flag { margin-right: 0.35em; }
 .chat-line .nm-marks { font-size: 0.92em; }
 .chat-link { color: var(--accent-hi, #ffc35f); text-decoration: underline; text-underline-offset: 2px; pointer-events: auto; }

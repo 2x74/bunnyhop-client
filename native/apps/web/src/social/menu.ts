@@ -1,13 +1,15 @@
 // A small drop-down menu for a button (profile actions: Friends ▾, Following ▾, the ⋯ overflow; the dock's friend rows).
 // A real menu: role=menu / menuitem, opens on click or ↓, arrows and Home / End move, Esc or Tab closes and Esc returns
-// focus to the button (before the menu screen takes Esc as Back). A line of text (where a friend is) can head it.
+// focus to the button (before the menu screen takes Esc as Back). A line of text (where a friend is) can head it. An
+// item with `checked` is a checkbox item (the map panel's Groups: a check by each group the map is in).
 // Styles: social/dock.css (.sm-*). Enters with the drop (opacity + a short fall), nothing under reduced motion.
 
 import { h } from "../ui/dom";
+import { icon } from "../ui/icons";
 import { uiClose, uiOpen } from "../audio/ui";
 
 export type MenuItem =
-  | { label: string; run: () => void | Promise<void>; tone?: "bad"; hint?: string; disabled?: boolean }
+  | { label: string; run: () => void | Promise<void>; tone?: "bad"; hint?: string; disabled?: boolean; checked?: boolean }
   | { note: string | Node }
   | null
   | false;
@@ -43,9 +45,17 @@ export function withMenu<T extends HTMLElement>(btn: T, items: () => MenuItem[],
       }
       const b = h(
         `button.sm-item${it.tone === "bad" ? ".bad" : ""}`,
-        { type: "button", role: "menuitem", tabindex: "-1", disabled: it.disabled, onclick: () => (close(true), void Promise.resolve(it.run())) },
+        {
+          type: "button",
+          role: it.checked === undefined ? "menuitem" : "menuitemcheckbox",
+          "aria-checked": it.checked === undefined ? null : String(it.checked),
+          tabindex: "-1",
+          disabled: it.disabled,
+          onclick: () => (close(true), void Promise.resolve(it.run())),
+        },
         h("span", null, it.label),
         it.hint ? h("small", null, it.hint) : null,
+        it.checked ? icon("check", { cls: "sm-check" }) : null,
       ) as HTMLButtonElement;
       buttons.push(b);
       menu.append(b);

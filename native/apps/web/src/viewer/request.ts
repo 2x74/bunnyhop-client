@@ -9,6 +9,8 @@
 //   ?map=<m>&replay=pending      bytes stashed in sessionStorage (local files)
 //   ?replay=<url>                a .bhr URL
 
+import { appHref, appLocation } from "../platform/navigation";
+
 export type ReplayTarget =
   /** A verified leaderboard run. */
   | { runId: string; name?: string }
@@ -23,6 +25,8 @@ export interface ViewerRequest {
   sourceRunId?: string;
   /** Optional second replay to overlay as a ghost (compare mode), e.g. WR vs PB. */
   compare?: ReplayTarget;
+  /** Watching a whole gauntlet attempt (gauntlet/watch.ts): this replay is split `idx` of `plan`. */
+  gauntlet?: { plan: import("../api").GauntletWatchPlan; idx: number };
 }
 
 /** Keep preloaded bytes and their server provenance together, without downloading a second time. */
@@ -59,7 +63,7 @@ export function takePending(): Uint8Array | null {
 export function viewerUrl(target: ReplayTarget, map?: string): string {
   // The Worker serves /replay/<runId> (the game plus the run's preview card for link unfurls); ?replay=run:<id> also works.
   if ("runId" in target) return `/replay/${encodeURIComponent(target.runId)}`;
-  const u = new URL("/", location.href);
+  const u = new URL("/", appHref());
   if ("bytes" in target) {
     stashPending(target.bytes);
     if (map) u.searchParams.set("map", map);
@@ -67,7 +71,7 @@ export function viewerUrl(target: ReplayTarget, map?: string): string {
     return u.pathname + u.search;
   }
   const pb = target.pb === true ? null : target.pb;
-  const m = pb?.map ?? map ?? new URLSearchParams(location.search).get("map");
+  const m = pb?.map ?? map ?? appLocation().searchParams.get("map");
   if (m) u.searchParams.set("map", m);
   u.searchParams.set("replay", "pb");
   if (pb?.style) u.searchParams.set("style", pb.style);

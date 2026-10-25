@@ -1,3 +1,4 @@
+import { appHref } from "./platform/navigation";
 import type { PlayerGlow } from "./player/glow-config";
 // Client contract for the bunnyhop.lol backend (apps/api). UI code depends only on these signatures.
 // When VITE_API_URL is unset (or the API is unreachable) callers should degrade gracefully:
@@ -13,9 +14,20 @@ import type { PlayerGlow } from "./player/glow-config";
 import type { NameColorId, NameEffect, PlayerMarks, ProfileLink, ProfileLinks } from "./creators";
 import { deviceHeaders } from "./device";
 import { resolveMe } from "./me-rules";
+import { WAVEDASH } from "./platform/env";
+import { wavedashCredentials, wavedashUserId } from "./platform/wavedash";
 import type { GiftTarget, GiftWallet, GiftPreview, GiftDelivery } from "./gifting";
 
 /** Account-owned name badge selection and Prism appearance. */
+/** One of your map groups (map-groups.ts; GET / POST /me/map-groups). */
+export interface ApiMapGroup {
+  id: string;
+  name: string;
+  maps: string[];
+}
+/** A change to one map group: {id, delete: true}, or a name (creates or renames) and maps to add / remove. */
+export type ApiMapGroupChange = { id: string; delete: true } | { id: string; name?: string; add?: string[]; remove?: string[] };
+
 export interface GameStats {
   now: number;
   totals: { maps: number; players: number; playersWhoJumped: number; verifiedRuns: number; mapsCompleted: number; jumps: number; playtimeSeconds: number; runTimeMs: number; replayViews?: number };
@@ -119,7 +131,8 @@ export interface NameCheck {
 }
 
 export interface SignInMethod {
-  provider: "discord" | "email";
+  /** "wavedash": the player's Wavedash account (the Wavedash build signs in with it). */
+  provider: "discord" | "email" | "wavedash";
   label: string;
   since: string;
 }
@@ -249,13 +262,51 @@ interface GauntletHead {
   endsAt: number | null;
   publishedAt: number | null;
   maxMs: number;
+  /** permanent | weekly (Monday to Monday, `week` its Monday) | event (dated). Absent from a pre-0.0.25 server. */
+  kind?: GauntletKind;
+  week?: string | null;
 }
+
+export type GauntletKind = "permanent" | "weekly" | "event";
 
 export interface GauntletListItem extends GauntletHead {
   maps: number;
   finishers: number;
   /** The world record's total (seconds), null without finishers. */
   wrTime?: number | null;
+  /** Your rank and total (seconds) on it, when you have finished it. */
+  me?: { rank: number; time: number } | null;
+}
+
+/** GET /gauntlets: this week's weekly, the permanent ones and events, past weeks with their winner. */
+export interface GauntletHub {
+  weekly: (GauntletListItem & {
+    mapList: { idx: number; map: string; title: string; tier: number | null }[];
+    top: { rank: number; player: ApiPlayer; time: number }[];
+  }) | null;
+  gauntlets: GauntletListItem[];
+  past: (GauntletListItem & { winner: { player: ApiPlayer; time: number } | null })[];
+}
+
+/** GET /gauntlets/attempts/:id/watch: an attempt to watch whole (gauntlet/watch.ts, viewer/gauntlet-layer.ts). */
+export interface GauntletWatchPlan {
+  attemptId: string;
+  state: GauntletAttemptState;
+  gauntlet: { slug: string; title: string; kind: GauntletKind; maps: number };
+  player: ApiPlayer;
+  totalTicks: number | null;
+  realMs: number | null;
+  finishedAt: number | null;
+  /** In order; `mapSha256`: the build the run was played on (its replay re-simulates on that BSP). */
+  splits: { idx: number; map: string; runId: string; ticks: number; time: number; mapSha256: string; verified: boolean }[];
+  record: { attemptId: string; player: ApiPlayer; splits: { idx: number; time: number }[] } | null;
+}
+
+/** GET /players/:id/gauntlets. */
+export interface PlayerGauntlets {
+  pbs: { slug: string; title: string; kind: GauntletKind; week: string | null; attemptId?: string; rank: number; of: number; ticks: number; time: number; at: number }[];
+  /** Weekly podiums (rank 1-3), latest first. */
+  weeklyWins: { week: string; slug: string; title: string; rank: number; time: number }[];
 }
 
 export interface GauntletSplit {
@@ -352,6 +403,23 @@ export interface RunCard {
   players: number | null;
   points: number | null;
   pb: boolean;
+  /** Counted replay views (absent from older APIs). */
+  views?: number;
+}
+
+/** GET /players/:id/points: the records giving the most points on a rank board (scope "all" or a style). */
+export interface PointsRecord {
+  map: string;
+  tier: number;
+  style: string;
+  track: number;
+  rank: number;
+  players: number;
+  runId: string;
+  /** What the record scores on that board (Overall: style-weighted; a style: raw). */
+  points: number;
+  /** What it adds to the total after the 0.975-per-place weighting. */
+  counted: number;
 }
 
 export type CosmeticChoice = Record<"background" | "frame" | "title" | "ghost" | "trail" | "outfit" | "knife" | "finish" | "glove" | "hat" | "body", string | null>;
@@ -469,6 +537,8 @@ export interface MapSummary {
   wr: { player: string; time: number; id?: string | null } | null;
   /** Players on the main-track board in this style (absent from older APIs). */
   runners?: number;
+  /** When the map came to bunnyhop.lol, ms (absent from older APIs). */
+  added?: number;
 }
 
 /** A recently set personal best on a ranked board (newest first). rank 1 = world record. */
@@ -638,10 +708,27 @@ async function withDevice(init: RequestInit): Promise<RequestInit> {
   return { ...init, headers: h };
 }
 
-async function request(path: string, init: RequestInit = {}): Promise<Response> {
+/**
+ * Writes sent from this page (anything but GET / HEAD, counted as they go out): a read shared between screens
+ * (account-state.ts profileFor, shared-reads.ts) is reused only while no write went out after it was asked.
+ */
+let writes = 0;
+const countWrite = (init: RequestInit) => {
+  const m = (init.method ?? "GET").toUpperCase();
+  if (m !== "GET" && m !== "HEAD") writes++;
+};
+
+/** Optional ownership fence around the actual fetch, after asynchronous headers. */
+export type RequestDispatch = (send: () => Promise<Response>) => Promise<Response>;
+
+async function request(path: string, init: RequestInit = {}, dispatch?: RequestDispatch): Promise<Response> {
+  countWrite(init);
   let res: Response;
   try {
-    res = await fetch(base() + path, { credentials: "include", ...(await withDevice(init)) });
+    const url = base() + path;
+    const prepared = { credentials: "include" as const, ...(await withDevice(init)) };
+    const send = () => fetch(url, prepared);
+    res = await (dispatch ? dispatch(send) : send());
   } catch (e) {
     if (e instanceof ApiUnavailable) throw e;
     throw new ApiUnavailable();
@@ -650,8 +737,8 @@ async function request(path: string, init: RequestInit = {}): Promise<Response> 
   return res;
 }
 
-async function json<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await request(path, init);
+async function json<T>(path: string, init: RequestInit = {}, dispatch?: RequestDispatch): Promise<T> {
+  const res = await request(path, init, dispatch);
   const body = (await res.json().catch(() => null)) as (T & { error?: string; message?: string }) | null;
   if (!res.ok) throw new ApiError(res.status, body?.error ?? "error", body?.message ?? `HTTP ${res.status}`, (body ?? {}) as Record<string, unknown>);
   return body as T;
@@ -659,6 +746,7 @@ async function json<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 /** Like json(), but 5xx answers with an error body (email_failed, email_unavailable) become ApiErrors too. */
 async function jsonOr5xx<T>(path: string, init: RequestInit): Promise<T> {
+  countWrite(init);
   let res: Response;
   try {
     res = await fetch(base() + path, { credentials: "include", ...(await withDevice(init)) });
@@ -738,12 +826,49 @@ function setMe(u: User | null): void {
   rememberMe(u);
 }
 
+/**
+ * The Wavedash build's sign-in: the player's Wavedash JWT for a session. null: carry on like the site (no Wavedash
+ * player, or the API turned the token down for good). A failure that may pass (offline, 5xx, rate limited, the SDK
+ * slow to answer) throws, so me() keeps no guest and tries again later (account-state.ts recheckLater) rather than
+ * starting this player as a guest. Once it has answered, later me() calls in the page (after a sign-in or sign-out
+ * there) ask GET /me like the site.
+ */
+let wavedashDone = false;
+async function wavedashSession(): Promise<User | null> {
+  if (wavedashDone) return null;
+  // A few quick tries in place (a slow SDK, a blip): the player shouldn't sit signed out for the recheck's 5 s+.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const c = await wavedashCredentials();
+      if (!c) return ((wavedashDone = true), null);
+      const r = await json<{ user: User; outcome: string }>("/auth/wavedash", post(c));
+      wavedashDone = true;
+      return r.user;
+    } catch (e) {
+      if (e instanceof ApiError && e.status !== 429 && e.status < 500) return ((wavedashDone = true), null);
+      if (attempt >= 3) throw new ApiUnavailable();
+      await sleep(1000 * 2 ** attempt);
+    }
+  }
+}
+
+/**
+ * Wavedash build: the player has a Wavedash account, so the game never starts them as a guest (a guest would lose the
+ * name and progress to the account, and counts against the network's guest limit): until the account signs in, the
+ * player is "not answered yet" and me() tries again.
+ */
+const wavedashPlayer = () => WAVEDASH && !!wavedashUserId();
+
 export const api = {
   async personalBests(after: string | null = null): Promise<{ user: string; pbs: import("./pb").ServerPB[]; next: string | null }> {
     return json(`/me/pbs${after ? `?after=${encodeURIComponent(after)}` : ""}`);
   },
   available(): boolean {
     return API_URL !== null;
+  },
+  /** How many writes this page has sent (see countWrite): a cached read asked before the last one may be stale. */
+  writes(): number {
+    return writes;
   },
   /**
    * The current player; issues a guest identity on first visit. Never throws: without an answer from the API (offline,
@@ -752,15 +877,18 @@ export const api = {
   async me(): Promise<User | null> {
     if (!api.available()) return null;
     if (!meCache) {
-      const pending: Promise<User | null> = resolveMe<User>({
+      // The Wavedash build signs in with the player's Wavedash account first (no guest is made for them); without one
+      // (no SDK, a signed-out Wavedash visitor, the API refusing) it carries on like the site.
+      const platform = WAVEDASH ? wavedashSession() : Promise.resolve(null);
+      const pending: Promise<User | null> = platform.then((signedIn) => signedIn ?? resolveMe<User>({
         ask: askMe, transient: (e) => e instanceof ApiUnavailable,
         guest: () => {
           // A superseded lookup must never replace a newly signed-in session with a guest cookie.
-          if (meCache !== pending) throw new ApiUnavailable();
+          if (meCache !== pending || wavedashPlayer()) throw new ApiUnavailable();
           return json<User>("/auth/guest", post({}));
         }, known: lastKnownMe,
         forget: () => { if (meCache === pending) rememberMe(null); }, wait: sleep,
-      }).then(
+      })).then(
         (u) => {
           if (meCache === pending) { meStale = false; rememberMe(u); }
           return u;
@@ -804,6 +932,8 @@ export const api = {
     return json("/me/country", post({ country }));
   },
   async setDisplayName(name: string): Promise<User> {
+    // Without a session the server would make a guest for the name: a Wavedash player names their account instead.
+    if (wavedashPlayer() && !(await api.me())) throw new ApiUnavailable();
     const user = await json<User>("/me/name", post({ name }));
     setMe(user);
     return user;
@@ -875,20 +1005,31 @@ export const api = {
     return json<AccountView>("/me/account", { cache: "no-store" });
   },
   /** Removes a sign-in method (refused for the last one: ApiError 400 "last_method"). */
-  async unlink(provider: "discord" | "email"): Promise<AccountView> {
+  async unlink(provider: SignInMethod["provider"]): Promise<AccountView> {
     const v = await json<AccountView>("/me/unlink", post({ provider }));
     setMe(v.user);
     return v;
   },
   /** Emails a 6-digit code + link. ApiError: bad_email, rate_limited, email_busy, email_failed, undeliverable, email_unavailable. */
-  async emailStart(email: string, returnTo = location.href): Promise<EmailStart> {
+  async emailStart(email: string, returnTo = appHref()): Promise<EmailStart> {
     return jsonOr5xx<EmailStart>("/auth/email/start", post({ email, returnTo }));
   },
-  /** Verifies the code (this browser) or a link token. ApiError: bad_code (body.attemptsLeft), code_expired, link_expired. */
-  async emailVerify(v: { code: string } | { token: string }): Promise<{ user: User; outcome: "linked" | "signed_in" | "merged" | "created" }> {
-    const r = await json<{ user: User; outcome: "linked" | "signed_in" | "merged" | "created" }>("/auth/email/verify", post(v));
+  /**
+   * Verifies the code (this browser) or a link token. ApiError: bad_code (body.attemptsLeft), code_expired, link_expired,
+   * confirm_switch (409: a link this browser didn't ask for would leave its player; body.email masked, body.current;
+   * re-post with confirm: true after asking).
+   */
+  async emailVerify(v: { code: string } | { token: string; confirm?: boolean }): Promise<{ user: User; outcome: "linked" | "signed_in" | "merged" | "created"; keptGuest?: boolean }> {
+    const r = await json<{ user: User; outcome: "linked" | "signed_in" | "merged" | "created"; keptGuest?: boolean }>("/auth/email/verify", post(v));
     setMe(r.user);
     return r;
+  },
+  /** Settings saved with the account (platform/settings-sync.ts): the Settings document, or null. */
+  async savedSettings(): Promise<{ doc: unknown; updatedAt?: number }> {
+    return json("/me/settings", { cache: "no-store" });
+  },
+  async saveSettings(doc: unknown): Promise<{ updatedAt: number }> {
+    return json("/me/settings", post({ doc }));
   },
   async onboarding(): Promise<OnboardingState> {
     return json<OnboardingState>("/me/onboarding", { cache: "no-store" });
@@ -953,7 +1094,7 @@ export const api = {
    * Uploads the server refuses outright (unranked map, zone/build mismatch, rate limit, ...) resolve to
    * { id: "", status: "rejected", reason, code } rather than throwing.
    */
-  async submitRun(replay: Uint8Array, opts: { room?: string | null; race?: string | null; gauntlet?: string | null; beats?: string[]; mouse?: import("./mouse-settings").MouseSettings | null } = {}): Promise<Submission> {
+  async submitRun(replay: Uint8Array, opts: { room?: string | null; race?: string | null; gauntlet?: string | null; beats?: string[]; mouse?: import("./mouse-settings").MouseSettings | null; dispatch?: RequestDispatch } = {}): Promise<Submission> {
     // ?room=<id>: played in a multiplayer room, so the room announces the verified result (PB / top 10 / SR / WR).
     // &race=<id>: a run for the room's race you're in (net/race.ts): the room ties it to the race.
     // ?gauntlet=<attemptId>: a run in a gauntlet attempt (gauntlet/): the reply says whether it became the next split.
@@ -972,19 +1113,26 @@ export const api = {
       if (opts.mouse) form.append("mouse", JSON.stringify(opts.mouse));
       init = { method: "POST", body: form };
     }
-    const res = await request(path, init);
+    const res = await request(path, init, opts.dispatch);
     const body = (await res.json().catch(() => null)) as (Submission & { error?: string; message?: string }) | null;
     if (!res.ok || !body) return { id: "", status: "rejected", reason: body?.message ?? `HTTP ${res.status}`, code: body?.error ?? "error" };
     meCache = null; // the server may have just issued a guest identity
     return body;
   },
   /** A run-session heartbeat (run-clock.ts): the server signs what was recorded so far. */
-  async runBeat(body: { sid: string | null; map: string; track: number; style: string; tick: number; hash: string; paused: boolean; att?: [number, number, number, number] }): Promise<{ sid: string; token: string }> {
-    return json("/runs/beat", { ...post(body), keepalive: true });
+  async runBeat(body: { sid: string | null; map: string; track: number; style: string; tick: number; hash: string; paused: boolean; att?: [number, number, number, number] }, dispatch?: RequestDispatch): Promise<{ sid: string; token: string }> {
+    return json("/runs/beat", { ...post(body), keepalive: true }, dispatch);
   },
   // --- gauntlets
-  async gauntlets(): Promise<GauntletListItem[]> {
-    return (await json<{ gauntlets: GauntletListItem[] }>("/gauntlets")).gauntlets;
+  async gauntlets(): Promise<GauntletHub> {
+    const r = await json<Partial<GauntletHub>>("/gauntlets", { cache: "no-cache" });
+    return { weekly: r.weekly ?? null, gauntlets: r.gauntlets ?? [], past: r.past ?? [] };
+  },
+  async gauntletWatch(attemptId: string): Promise<GauntletWatchPlan> {
+    return json<GauntletWatchPlan>(`/gauntlets/attempts/${encodeURIComponent(attemptId)}/watch`);
+  },
+  async playerGauntlets(id: string): Promise<PlayerGauntlets> {
+    return json<PlayerGauntlets>(`/players/${encodeURIComponent(id)}/gauntlets`);
   },
   async gauntlet(slug: string, init: RequestInit = {}): Promise<GauntletDetail> {
     return json<GauntletDetail>(`/gauntlets/${encodeURIComponent(slug)}`, { cache: "no-cache", ...init });
@@ -1059,6 +1207,17 @@ export const api = {
   async saveFavorites(user: string, add: string[], remove: string[]): Promise<string[]> {
     return (await json<{ maps: string[] }>("/me/favorites", { ...post({ user, add, remove }), keepalive: true })).maps;
   },
+  /** Your map groups (map-groups.ts), oldest first. ApiError 401 without a session. */
+  async mapGroups(): Promise<ApiMapGroup[]> {
+    return (await json<{ groups: ApiMapGroup[] }>("/me/map-groups", { cache: "no-store" })).groups;
+  },
+  /**
+   * Creates, renames and deletes `user`'s map groups and changes their maps; the groups after the change. ApiError 401
+   * without a session, 409 wrong_account (the session is another player's), groups_full or group_full, 429 rate_limited.
+   */
+  async saveMapGroups(user: string, changes: ApiMapGroupChange[]): Promise<ApiMapGroup[]> {
+    return (await json<{ groups: ApiMapGroup[] }>("/me/map-groups", { ...post({ user, changes }), keepalive: true })).groups;
+  },
   async myCosmetics(): Promise<{ level: number; choice: CosmeticChoice; unlocked: string[]; role?: ApiStaffRole | null; playerGlow?: PlayerGlow | null }> {
     return json("/me/cosmetics", { cache: "no-cache" });
   },
@@ -1111,6 +1270,9 @@ export const api = {
   /** Gzip .bhr bytes of a verified run, for ghosts and watch mode. */
   async runPlayerGlow(id: string): Promise<PlayerGlow | null> {
     return (await json<{ player: { playerGlow?: PlayerGlow | null } }>(`/runs/${encodeURIComponent(id)}`)).player.playerGlow ?? null;
+  },
+  async playerPoints(id: string, scope = "all"): Promise<{ scope: string; records: PointsRecord[] }> {
+    return json(`/players/${encodeURIComponent(id)}/points?scope=${encodeURIComponent(scope)}`);
   },
   async replayViews(runId: string): Promise<number> {
     return (await json<{views:number}>(`/runs/${encodeURIComponent(runId)}/views`)).views;
@@ -1172,6 +1334,10 @@ export const api = {
   },
   async follow(id: string, on = true): Promise<{ following: boolean; mutual?: boolean }> {
     return json(`/me/follows/${encodeURIComponent(id)}`, post(on ? {} : { follow: false }));
+  },
+  /** Hide (or show again) a follower you don't follow back from your Friends panel. */
+  async dismissFollower(id: string, on = true): Promise<{ dismissed: boolean }> {
+    return json(`/me/followers/${encodeURIComponent(id)}/${on ? "dismiss" : "undismiss"}`, post({}));
   },
   async block(id: string, on = true): Promise<{ blocked: boolean }> {
     return json(`/me/blocks/${encodeURIComponent(id)}`, post(on ? {} : { block: false }));
@@ -1237,9 +1403,11 @@ export interface InboxView {
 }
 
 export interface FeedbackBody {
-  category: "bug" | "physics" | "map" | "multiplayer" | "idea" | "other" | "application";
-  /** Ignored for applications: the server writes it from `application`. */
+  category: "bug" | "physics" | "map" | "tier" | "multiplayer" | "idea" | "other" | "application";
+  /** Ignored for applications: the server writes it from `application`. Optional (may be "") for "tier". */
   message: string;
+  /** category "tier": the map and the tier the player thinks it should be (the server writes the "Tier:" line). */
+  tier?: { map: string; current: number | null; suggested: number };
   /** category "application": the moderator application's answers, each optional (the API needs a few words in all). */
   application?: { discord?: string; hours?: string; why?: string; experience?: string };
   contact?: string;

@@ -4,6 +4,7 @@
 // page can be shared; the Worker serves the same URL with a crawlable list (apps/api/src/seo/pages.ts ranksPage).
 // Formula: ranking.ts, research/RANKS.md.
 
+import { appLocation } from "../platform/navigation";
 import { api, ApiUnavailable, type RankBoard, type RankEntry } from "../api";
 import { BONUS_TRACK_FACTOR, fmtPoints, isRankedStyle, PLACEMENT, RANK_GROUPS, STYLE_WEIGHT, TIER_BASE, topPercent } from "../ranking";
 import { STYLE_DEFS, styleLabel } from "../styles";
@@ -31,7 +32,7 @@ let ownsUrl = false;
 export function leaveRanksUrl(): void {
   if (!ownsUrl) return;
   ownsUrl = false;
-  if (location.pathname === "/ranks") history.replaceState(history.state, "", "/");
+  if (appLocation().pathname === "/ranks") history.replaceState(history.state, "", "/");
 }
 
 /** Points rounded for the table; small gaps keep a decimal so a 0.4-point race doesn't read "0". */
@@ -160,7 +161,7 @@ export function ranksScreen(initial = "all", o: RanksOptions = {}): HTMLElement 
     onPage: (page) => {
       o.onChange?.(scope, page);
       // The address follows the board (shareable), except over a running game (its URL carries the map).
-      if (board.root.isConnected && !new URLSearchParams(location.search).has("map")) {
+      if (board.root.isConnected && !appLocation().searchParams.has("map")) {
         history.replaceState(history.state, "", ranksPath(scope, page));
         ownsUrl = true;
       }

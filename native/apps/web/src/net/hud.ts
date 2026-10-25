@@ -9,6 +9,7 @@ import { styleLabel } from "../styles";
 import type { StaffRole } from "../progression";
 import type { RankTag } from "./protocol";
 import type { PlayerMarks } from "../creators";
+import { countryFlag } from "../ui/country-flag";
 import { nameAttrs, nameMarks } from "../ui/marks";
 import { hopKeyframes, hopOffKeyframes } from "../notify/spring";
 
@@ -317,6 +318,8 @@ export interface ScoreRow extends PlayerMarks {
   ping: number | null;
   /** A private lobby's host (net/lobby.ts). */
   host?: boolean;
+  /** Profile flag (countries.ts code), before the name as on the boards. */
+  country?: string | null;
 }
 
 export interface ScoreHead {
@@ -360,6 +363,7 @@ export class Scoreboard {
           null,
           h("i.sb-dot", { style: `background:${r.color}` }),
           r.rank ? h("span.chat-tag", { style: `--rc:${r.rank.color}` }, r.rank.name) : null,
+          countryFlag(r.country),
           h("span.sb-pname", nameAttrs(r), r.name),
           nameMarks(r),
           r.host ? h("span.sb-host", { title: "Lobby host" }, "host") : null,

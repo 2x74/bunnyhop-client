@@ -3,10 +3,12 @@
 // a copied link.
 
 import { toast as notifyToast, whisper } from "../notify";
+import { publicOrigin } from "../platform/env";
 
-export const mapUrl = (name: string) => `${location.origin}/maps/${encodeURIComponent(name)}`;
-export const runUrl = (runId: string) => `${location.origin}/replay/${encodeURIComponent(runId)}`;
-export const playerUrl = (id: string) => `${location.origin}/u/${encodeURIComponent(id)}`;
+// The site's pages, in the Wavedash build too (its own origin is a per-player Wavedash frame).
+export const mapUrl = (name: string) => `${publicOrigin()}/maps/${encodeURIComponent(name)}`;
+export const runUrl = (runId: string) => `${publicOrigin()}/replay/${encodeURIComponent(runId)}`;
+export const playerUrl = (id: string) => `${publicOrigin()}/u/${encodeURIComponent(id)}`;
 
 export interface ShareData {
   url: string;

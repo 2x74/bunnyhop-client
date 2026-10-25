@@ -95,6 +95,9 @@ impl<'a> Reader<'a> {
         let mut v = 0u32;
         for shift in (0..=28).step_by(7) {
             let b = self.u8()?;
+            if shift == 28 && b & 0xf0 != 0 {
+                return Err("bad replay varint".into());
+            }
             v |= u32::from(b & 127) << shift;
             if b & 128 == 0 {
                 return Ok(v);
@@ -191,10 +194,15 @@ impl Decoded {
             return Err("bad replay magic".into());
         }
         let version = r.u16()?;
-        if !(1..=9).contains(&version) {
+        if !(1..=10).contains(&version) {
             return Err("unsupported replay version".into());
         }
         let flags = r.u16()?;
+        let fractional = version == 10;
+        let counted = version == 8 || (version >= 9 && flags & 4 != 0);
+        if fractional && !counted {
+            return Err("fractional counts require counted yaw".into());
+        }
         let map = r.str8()?;
         let map_sha = r
             .take(32)?
@@ -310,13 +318,22 @@ impl Decoded {
         if !styles::IDS.contains(&style.as_str()) || ![1, 2].contains(&rules) {
             return Err("unsupported replay style/timer rules".into());
         }
+        // Every command needs at least one byte per varint column (v10 has four and
+        // an absolute f64 count). Reject impossible lengths before allocating commands.
+        if n * if fractional { 12 } else { 5 } > bytes.len().saturating_sub(r.at) {
+            return Err("truncated replay commands".into());
+        }
         let mut commands = vec![BhCmd::default(); n];
         for side in [false, true] {
             let mut prev = 0i64;
             for c in &mut commands {
                 prev += i64::from(r.signed()?);
                 let v = prev as i16 as f32;
-                if side { c.side = v } else { c.forward = v }
+                if side {
+                    c.side = v
+                } else {
+                    c.forward = v
+                }
             }
         }
         let mut prev = 0u32;
@@ -329,7 +346,6 @@ impl Decoded {
                     0xffff
                 };
         }
-        let counted = version == 8 || (version == 9 && flags & 4 != 0);
         for pitch in if counted {
             &[true][..]
         } else {
@@ -339,13 +355,28 @@ impl Decoded {
             for c in &mut commands {
                 prev = prev.wrapping_add(r.signed()?);
                 let f = f32::from_bits(prev as u32);
-                if *pitch { c.pitch = f } else { c.yaw = f }
+                if *pitch {
+                    c.pitch = f
+                } else {
+                    c.yaw = f
+                }
             }
         }
         if counted {
             let mut raw = Vec::with_capacity(n);
             for _ in 0..n {
-                raw.push(r.signed()?);
+                // v8/v9 store integer deltas, reset at each rebase. v10 instead
+                // stores exact absolute counts, including across manual turn rebases.
+                let count = if fractional {
+                    let count = r.f64()?;
+                    if !count.is_finite() || count.abs() > 0x3fffffff as f64 {
+                        return Err("bad fractional mouse count".into());
+                    }
+                    count
+                } else {
+                    f64::from(r.signed()?)
+                };
+                raw.push(count);
             }
             let n_rebase = r.varint()? as usize;
             if n_rebase > n.saturating_mul(2) + 1 {
@@ -377,12 +408,19 @@ impl Decoded {
                     rb += 1;
                     rebase = true;
                 }
-                count = if rebase {
+                let yaw_count = if fractional {
                     raw[i]
                 } else {
-                    count.wrapping_add(raw[i])
+                    count = if rebase {
+                        raw[i] as i32
+                    } else {
+                        count.wrapping_add(raw[i] as i32)
+                    };
+                    f64::from(count)
                 };
-                c.yaw = look::yaw(base, count, k);
+                // Match JS norm360 and round only the final yaw to f32. Rebase kinds
+                // describe provenance; their base already contains any manual turn.
+                c.yaw = (((base - yaw_count * k) % 360.0 + 360.0) % 360.0) as f32;
             }
             for _ in 0..n * 3 {
                 r.varint()?;

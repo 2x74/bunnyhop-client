@@ -117,6 +117,10 @@ function showImage(art: HTMLElement, url: string, storePreview: boolean, priorit
       img.classList.add("in");
       art.classList.add("loaded");
       if (cors && storePreview) storeLqip(img, url);
+      // The blurred placeholder is covered for good once the picture has faded in: drop it, so the page doesn't keep
+      // a filtered layer under every loaded thumbnail. (A gallery fades the next picture in over it: kept there.)
+      const lq = art.querySelector("img.lqip");
+      if (lq && !art.classList.contains("has-gallery")) window.setTimeout(() => art.dataset.src === url && lq.remove(), 600);
     });
     img.addEventListener("error", () => {
       img.remove();
@@ -221,6 +225,7 @@ export function prefetchThumbs(urls: (string | null | undefined)[], concurrency 
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.decoding = "async";
+    img.fetchPriority = "low"; // behind the background map's download and anything the player asks for
     img.referrerPolicy = "no-referrer";
     img.onload = () => (registry.size ? null : storeLqip(img, url), next());
     img.onerror = () => next();

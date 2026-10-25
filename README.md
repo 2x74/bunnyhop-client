@@ -10,6 +10,10 @@ automation alone does not establish interactive gameplay or physical input
 validation. Check each release's notes for the artifacts and checks that actually
 completed.
 
+Current source targets physics **15**, timer rules **2**, and canonical verifier
+`bunnyhop-web/3cca0f22a3c3`. See [current compatibility and qualification](docs/current-compatibility.md).
+Published archives have their own source/build identity and admission status.
+
 ## Native gameplay, shared game rules
 
 C++20 and SDL3 own the window, relative mouse input, simulation scheduling and

@@ -100,6 +100,12 @@ export function tracksOf(zones: readonly Zone[]): number[] {
   return [...starts].filter((t) => ends.has(t)).sort((a, b) => a - b);
 }
 
+/** B / F4: the track after `track` in main -> bonus 1 -> ... -> last bonus -> main. */
+export function nextTrack(track: number, bonuses: readonly number[]): number {
+  const all = [0, ...bonuses];
+  return all[(all.indexOf(track) + 1) % all.length];
+}
+
 /** Number of split zones (distinct stage/checkpoint indices) on a track. */
 export function splitCount(zones: readonly Zone[], track: number): number {
   return new Set(zones.filter((z) => (z.kind === "stage" || z.kind === "checkpoint") && trackOf(z) === track).map((z) => z.index ?? 0)).size;

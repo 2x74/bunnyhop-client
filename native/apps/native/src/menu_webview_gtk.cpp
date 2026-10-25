@@ -1,4 +1,5 @@
 #include "menu_webview.hpp"
+#include "menu_gl_context.hpp"
 #include <SDL3/SDL.h>
 #include <gtk/gtk.h>
 #include <webkit2/webkit2.h>
@@ -74,21 +75,12 @@ std::string restricted_html(const std::string &source) {
 //
 // GDK's X11 backend does not need EGL to paint, which is why forcing
 // GDK_BACKEND=x11 looked like a fix for a problem that was never X11's.
-struct GlContextRelease {
-    SDL_Window *window = SDL_GL_GetCurrentWindow();
-    SDL_GLContext context = SDL_GL_GetCurrentContext();
-    GlContextRelease() { if (context) SDL_GL_MakeCurrent(window, nullptr); }
-    // Restored on every exit: callers are mid-frame and the next GL call has to
-    // land on the game's context again.
-    ~GlContextRelease() { if (context) SDL_GL_MakeCurrent(window, context); }
-    GlContextRelease(const GlContextRelease &) = delete;
-    GlContextRelease &operator=(const GlContextRelease &) = delete;
-};
 
 void pump_glib() {
+    // Signal/async callbacks dispatched here share this main-thread boundary.
+    const native::GlContextRelease release;
     // SDL remains the application's event loop. Bound GTK work per game frame
     // and never wait for events or present/refocus a window from here.
-    GlContextRelease released;
     const gint64 until = g_get_monotonic_time() + 2000;
     for (int n = 0; n < 64 && g_main_context_pending(nullptr) && g_get_monotonic_time() < until; ++n)
         g_main_context_iteration(nullptr, FALSE);
@@ -108,6 +100,7 @@ struct MenuWebView::Impl {
 
     Impl(SDL_Window *sdl, const std::string &html) {
         if (!sdl) { state->error = "No SDL window for web menus"; return; }
+        const GlContextRelease release;
         if (!gtk_init_check(nullptr, nullptr)) { state->error = "GTK could not open the display for native menus"; return; }
         gchar *data = g_build_filename(g_get_user_data_dir(), "bunnyhop-native", "webkit", nullptr);
         gchar *cache = g_build_filename(g_get_user_cache_dir(), "bunnyhop-native", "webkit", nullptr);
@@ -163,6 +156,7 @@ if (window === top && location.origin === 'https://bunnyhop.lol') {
         // remain hidden and the host explicitly controls the menu lifecycle.
     }
     ~Impl() {
+        const GlContextRelease release;
         if (pending) g_cancellable_cancel(pending);
         close_auth(false, false);
         if (manager) {
@@ -271,6 +265,7 @@ if (window === top && location.origin === 'https://bunnyhop.lol') {
     }
     bool open_auth(const char *url) {
         if (!menu || !auth_url(url)) { state->error = "Authentication must begin at https://bunnyhop.lol/api/auth/"; return false; }
+        const GlContextRelease release;
         close_auth(false, false);
         auto *empty = webkit_user_content_manager_new();
         // Do not use new_with_related_view: it would inherit the host manager.
@@ -287,6 +282,7 @@ if (window === top && location.origin === 'https://bunnyhop.lol') {
         return true;
     }
     void close_auth(bool complete, bool notify = true) {
+        const GlContextRelease release;
         if (auth_complete_idle) { g_source_remove(auth_complete_idle); auth_complete_idle = 0; }
         if (!auth_window) return;
         g_signal_handlers_disconnect_by_data(auth, this); webkit_web_view_stop_loading(auth);
@@ -299,7 +295,7 @@ if (window === top && location.origin === 'https://bunnyhop.lol') {
 MenuWebView::MenuWebView(SDL_Window *window, const std::string &html) : impl_(std::make_unique<Impl>(window, html)) {}
 MenuWebView::~MenuWebView() {
     // Destroying the windows is GDK work as well.
-    GlContextRelease released;
+    const GlContextRelease release;
     impl_.reset();
 }
 bool MenuWebView::available() const { return impl_->menu && impl_->window; }
@@ -309,7 +305,7 @@ void MenuWebView::set_visible(bool show) {
     if (!available() || show == impl_->shown) return;
     // Realising and presenting a window is GDK drawing work too, so it needs
     // the game's context off this thread just as much as pump_glib does.
-    GlContextRelease released;
+    const GlContextRelease release;
     impl_->shown = show;
     if (show) {
         gtk_widget_show_all(impl_->window);
@@ -326,6 +322,7 @@ std::vector<std::string> MenuWebView::drain_messages() {
 }
 void MenuWebView::evaluate_js(const std::string &script) {
     if (!available()) return;
+    const GlContextRelease release;
     auto *state = new std::shared_ptr<MenuState>(impl_->state);
     const auto source = script + "\n;null;";
     webkit_web_view_evaluate_javascript(impl_->menu, source.c_str(), source.size(), nullptr, nullptr, impl_->pending,
@@ -338,15 +335,14 @@ void MenuWebView::evaluate_js(const std::string &script) {
             g_clear_error(&error);
         }, state);
 }
-// The sign-in window is created, shown and destroyed from here, straight from
-// the game loop's message handling rather than inside pump_glib(), so it needs
-// its own release. Without it, opening "Sign in with Discord" mapped a new
-// GDK/EGL surface while the game's context was current, which labwc answered
-// by dropping the Wayland connection.
-bool MenuWebView::open_auth(const std::string &url) { GlContextRelease released; return impl_->open_auth(url.c_str()); }
-void MenuWebView::close_auth() { GlContextRelease released; impl_->close_auth(false); }
+// Impl::open_auth and close_auth release the game's GL context themselves:
+// without that, opening "Sign in with Discord" mapped a new GDK/EGL surface
+// while the context was current and labwc dropped the Wayland connection.
+bool MenuWebView::open_auth(const std::string &url) { return impl_->open_auth(url.c_str()); }
+void MenuWebView::close_auth() { impl_->close_auth(false); }
 bool MenuWebView::screenshot(const std::string &path) {
     if (!available() || path.empty()) return false;
+    const GlContextRelease release;
     struct Snapshot { std::shared_ptr<MenuState> state; std::string path; };
     auto *snapshot = new Snapshot{impl_->state, path};
     webkit_web_view_get_snapshot(impl_->menu, WEBKIT_SNAPSHOT_REGION_VISIBLE, WEBKIT_SNAPSHOT_OPTIONS_NONE, impl_->pending,

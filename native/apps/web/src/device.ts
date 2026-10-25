@@ -14,6 +14,8 @@
 // secret or trusted: a cheater can strip all of it; it only has to catch the ones who don't.
 
 import { gpuInfo, glCaps } from "./gpu-info";
+import { WAVEDASH } from "./platform/env";
+import { setJarCookie } from "./platform/jar";
 
 const KEY = "bh_did";
 const COOKIE_DAYS = 730;
@@ -50,6 +52,8 @@ function readCookie(): string | null {
 }
 
 function writeCookie(id: string): void {
+  // The Wavedash build keeps its cookies for bunnyhop.lol itself (platform/jar.ts): the device id rides there too.
+  if (WAVEDASH) setJarCookie(KEY, encodeURIComponent(id));
   try {
     document.cookie = `${KEY}=${encodeURIComponent(id)}; Path=/; Max-Age=${COOKIE_DAYS * 86400}; SameSite=Lax${location.protocol === "https:" ? "; Secure" : ""}`;
   } catch {
