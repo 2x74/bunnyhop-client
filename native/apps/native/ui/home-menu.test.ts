@@ -11,7 +11,11 @@ const INDEX={maps:["bhop_eazy","bh_aztec","bhop_1","bhop_13","bhop_ambience","bh
 const messages=(page:Page)=>page.evaluate(()=>(window as any).messages as {type:string;[key:string]:unknown}[]);
 const last=async(page:Page)=>(await messages(page)).filter(m=>m.type!=="cosmetics"&&m.type!=="menuAppearance").at(-1);
 
-async function open(width=1280,height=720,routes:(url:URL)=>unknown=()=>null) {
+/** The home screen's own backdrop request (sent once backgroundPick has the map index): waited for, never assumed. */
+const homeBackdrop=(page:Page)=>page.waitForFunction(()=>(window as any).messages.some((m:{type:string})=>m.type==="menuBackdrop"));
+
+/** `indexGate`: the map index is answered only once it resolves (a slow network, as on CI). */
+async function open(width=1280,height=720,routes:(url:URL)=>unknown=()=>null,indexGate?:Promise<void>) {
   await mkdir(out,{recursive:true});
   const html=await readFile(resolve(import.meta.dir,"../../../target/native-menu/menu.html"),"utf8");
   const browser=await chromium.launch({headless:true});
@@ -20,7 +24,7 @@ async function open(width=1280,height=720,routes:(url:URL)=>unknown=()=>null) {
   await page.route("**/*",r=>{
     const url=new URL(r.request().url());
     if(url.pathname==="/native-home-unit")return r.fulfill({status:200,contentType:"text/html",body:html});
-    if(url.pathname==="/index.json")return r.fulfill({json:INDEX});
+    if(url.pathname==="/index.json")return indexGate?indexGate.then(()=>r.fulfill({json:INDEX})):r.fulfill({json:INDEX});
     const body=routes(url);
     return body?r.fulfill({json:body}):r.abort();
   });
@@ -108,6 +112,8 @@ test("backdrop: the map's picture, then the host's live scene or still, cuts and
 test("pause is the web pause screen: resume, restart, style, main menu, and the game shows through the live scene",async()=>{
   const {browser,page,errors}=await open();
   try {
+    // The home screen asked for its backdrop before the map loads (the request is async: the map index comes first).
+    await homeBackdrop(page);
     await page.evaluate(()=>window.bunnyhopNativeMenu.onState({map:"bhop_eazy",paused:true,settings:{binds:{restart:["KeyR"]}},timer:{status:2,seconds:61.234,jumps:12,strafes:34,sync:98.3}}));
     expect(await page.evaluate(()=>({screen:document.body.dataset.screen,map:document.body.dataset.map,inGame:document.body.classList.contains("in-game")}))).toEqual({screen:"pause",map:"bhop_eazy",inGame:true});
     expect(await page.locator("section.pause .pause-map").textContent()).toBe("bhop_eazy");
@@ -233,6 +239,31 @@ test("settle() ends the entrance for a screenshot, at once",async()=>{
     // ... and has ended: every finite animation done, the menu fully painted.
     expect(await page.evaluate(()=>({running:document.getAnimations().filter(a=>a.playState==="running"&&Number.isFinite(a.effect?.getComputedTiming().endTime)).length,
       item:getComputedStyle([...document.querySelectorAll(".home-menu .home-item")].at(-1)!).opacity}))).toEqual({running:0,item:"1"});
+    expect(errors).toEqual([]);
+  } finally {await browser.close();}
+},20_000);
+
+test("a map that loads before the home screen's backdrop pick: no home request while it's loaded, one on the way back",async()=>{
+  let release!:()=>void;
+  const gate=new Promise<void>(resolve=>release=resolve);
+  const {browser,page,errors}=await open(1280,720,()=>null,gate);
+  try {
+    // The map loads while the index (and so backgroundPick) is still out, the CI ordering.
+    await page.evaluate(()=>window.bunnyhopNativeMenu.onState({map:"bhop_eazy",paused:true}));
+    expect(await page.locator("body").getAttribute("data-screen")).toBe("pause");
+    // (Listening before the index is let go, so its response can't come first.)
+    const index=page.waitForResponse(response=>response.url().endsWith("/index.json"));
+    release();
+    // The pick lands under the pause screen (index answered, the network quiet): the home's request is dropped, not
+    // sent for a loaded map.
+    await index;
+    await page.waitForLoadState("networkidle");
+    expect((await messages(page)).filter(m=>m.type==="menuBackdrop")).toEqual([]);
+    // Back home: the request goes out once.
+    await page.evaluate(()=>window.bunnyhopNativeMenu.onState({map:""}));
+    expect(await page.locator("body").getAttribute("data-screen")).toBe("home");
+    await homeBackdrop(page);
+    expect((await messages(page)).filter(m=>m.type==="menuBackdrop")).toEqual([{type:"menuBackdrop",map:"bhop_eazy"}]);
     expect(errors).toEqual([]);
   } finally {await browser.close();}
 },20_000);
