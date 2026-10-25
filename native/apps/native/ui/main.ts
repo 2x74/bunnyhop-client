@@ -30,8 +30,9 @@ import { profilePanel } from "./profile-panel";
 import { tutorialPanel } from "./tutorial-panel";
 import { nativeNavigate } from "./navigation";
 import { cosmeticsPanel,initCosmetics } from "./cosmetics";
+import { creditsPanel } from "./credits";
 
-type Screen = "home" | "maps" | "settings" | "profile" | "replays" | "servers" | "room" | "ranks" | "stats" | "tutorial" | "loadout";
+type Screen = "home" | "maps" | "settings" | "profile" | "replays" | "servers" | "room" | "ranks" | "stats" | "tutorial" | "loadout" | "credits";
 let screen: Screen = "home";
 let profileId = "";
 let rankScope="all",rankPage=1,focusMap:string|undefined;
@@ -96,7 +97,7 @@ function render(): void {
       menu.append(button("Resume", () => send({ type: "resume" }), true, state.map),
         button("Restart", () => send({ type: "restart" })));
     }
-    menu.append(button("Play", () => show("maps"), !state.map),button(roomService.view.id?"Current room":"Play online",()=>show(roomService.view.id?"room":"servers")),button("Tutorial",()=>show("tutorial")),button("Loadout",()=>show("loadout")),button("Ranks",()=>show("ranks")),button("Statistics",()=>show("stats")),button("Replays",()=>show("replays")), button("Settings", () => show("settings")), button("Quit", () => send({ type: "quit" })));
+    menu.append(button("Play", () => show("maps"), !state.map),button(roomService.view.id?"Current room":"Play online",()=>show(roomService.view.id?"room":"servers")),button("Tutorial",()=>show("tutorial")),button("Loadout",()=>show("loadout")),button("Ranks",()=>show("ranks")),button("Statistics",()=>show("stats")),button("Replays",()=>show("replays")), button("Settings", () => show("settings")), button("Credits", () => show("credits")), button("Quit", () => send({ type: "quit" })));
     for (const control of menu.querySelectorAll<HTMLButtonElement>("button")) control.disabled = !!state.loading;
     const current = h("section.native-current", { "aria-label": state.map ? "Current map" : "Play bunnyhop" });
     if (state.map) {
@@ -118,6 +119,8 @@ function render(): void {
     app.replaceChildren(h("section.panel.panel-wide.native-maps", null, heading("Play"), browser));
   } else if (screen === "settings") {
     app.replaceChildren(h("section.panel.native-settings", null, heading("Settings"),settingsPanel()));
+  } else if (screen === "credits") {
+    app.replaceChildren(h("section.panel.native-credits", null, heading("Credits"),creditsPanel()));
   } else if(screen==="replays") {
     app.replaceChildren(h("section.panel.native-replay-screen",null,heading("Replays"),replayPanel(notice)));
   } else if(screen==="servers") {
@@ -163,7 +166,7 @@ const runService=new NativeRunService({api,context:identity=>({room:currentRoom(
   if(message.message) notice(message.message);
   if(message.status==="verified") refreshAccount();
 }});
-window.bunnyhopNativeMenu = { onState: receive, onAuth: refreshAccount, onRunEvent:value=>{void runService.receive(value);},open:(next,focus)=>{if(next==="rooms")next="servers";if(["home","maps","settings","profile","replays","servers","room","ranks","stats","tutorial","loadout"].includes(next))show(next as Screen);if(next==="room"&&focus==="chat")document.querySelector<HTMLInputElement>(".native-room-chat-form input")?.focus();},onRoomPose:value=>{roomService.pose(value);},onRoomCommand:value=>{roomService.command(value);},version: 2 };
+window.bunnyhopNativeMenu = { onState: receive, onAuth: refreshAccount, onRunEvent:value=>{void runService.receive(value);},open:(next,focus)=>{if(next==="rooms")next="servers";if(["home","maps","settings","profile","replays","servers","room","ranks","stats","tutorial","loadout","credits"].includes(next))show(next as Screen);if(next==="room"&&focus==="chat")document.querySelector<HTMLInputElement>(".native-room-chat-form input")?.focus();},onRoomPose:value=>{roomService.pose(value);},onRoomCommand:value=>{roomService.command(value);},version: 2 };
 window.addEventListener("bunnyhop:native-state", (event) => receive((event as CustomEvent).detail));
 window.addEventListener("bunnyhop:native-auth", refreshAccount);
 window.addEventListener("bunnyhop-native-auth", (event) => {

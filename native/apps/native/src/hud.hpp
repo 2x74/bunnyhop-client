@@ -62,7 +62,8 @@ void main(){color=vec4(ink.rgb,ink.a*(uv.x<0.?1.:texture(font,uv).a));})");
     ~NativeHud(){gl.DeleteTextures(1,&atlas);gl.DeleteBuffers(1,&vbo);gl.DeleteVertexArrays(1,&vao);gl.DeleteProgram(program);}
     void draw(int width,int height,const BhSnapshot &s,const BhRunState &run,const BhCmd &cmd,
               const std::string &map,const std::string &style,const std::string &notice,
-              double fps,bool visible,bool crosshair,bool playback,const BhWeaponReport &weapon) {
+              double fps,bool visible,bool crosshair,bool playback,const BhWeaponReport &weapon,
+              const std::string &jump_stats="",bool jump_stats_good=false) {
         if(width<=0||height<=0||(!visible&&!crosshair))return;
         vertices.clear();scale=std::max(.6f,float(height)/900.f);
         const float w=width/scale,h=height/scale;
@@ -81,6 +82,9 @@ void main(){color=vec4(ink.rgb,ink.a*(uv.x<0.?1.:texture(font,uv).a));})");
             text(w/2,h-105,buf,25,cream,true);
             std::snprintf(buf,sizeof(buf),"%u jumps  %u strafes  %.1f%% sync",run.jumps,run.strafes,run.sync_percent);
             text(w/2,h-68,buf,13,dim,true);
+            // Jump stats sit above the run status, clear of the timer and speed.
+            // The accent marks a gain the plugin would call good.
+            if(!jump_stats.empty())text(w/2,h-222,jump_stats,14,jump_stats_good?amber:dim,true);
             if(run.status==0)text(w/2,h-186,run.in_start?"IN START":"READY",13,amber,true);
             if(run.status==2)text(w/2,h-186,"FINISHED",15,amber,true);
             const std::array<std::pair<const char*,uint32_t>,6> keys={{{"W",native::forward},{"A",native::left},{"S",native::back},{"D",native::right},{"JUMP",native::jump},{"DUCK",native::duck}}};

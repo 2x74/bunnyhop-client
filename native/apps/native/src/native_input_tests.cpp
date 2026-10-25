@@ -6,6 +6,7 @@
 #include <cassert>
 #include <cmath>
 #include <iostream>
+#include <vector>
 
 namespace {
 bool close(double a,double b,double tolerance=1e-5) { return std::abs(a-b)<tolerance; }
@@ -71,5 +72,99 @@ int main() {
     BhTransform transform{{10,20,30},{0,90,0},1};
     auto model=native::model_matrix(transform);
     assert(close(model[0],0) && close(model[1],1) && close(model[12],10) && close(model[14],30));
+    // ---- tick-windowed motion -------------------------------------------
+    //
+    // The property under test is that how a flick divides between ticks
+    // follows the mouse report timestamps and nothing else. The old
+    // behaviour applied every report polled in a frame to the first tick
+    // after the poll, so a 60 Hz frame gave one tick sixteen reports and the
+    // next tick none, while 1000 Hz gave one each. Same hand movement,
+    // different simulation input.
+    {
+        constexpr uint64_t tick_ns=10'000'000;  // 100 Hz
+        // A steady 1000 Hz mouse: one count every millisecond for 5 ticks.
+        auto reports=[]{std::vector<native::Input::Report> r;for(int i=0;i<50;++i)r.push_back({uint64_t(i)*1'000'000+500'000,1,0});return r;}();
+
+        // Replays those reports against a given poll pattern and returns the
+        // mouse counts each tick actually simulated.
+        auto counts_per_tick=[&](const std::vector<int> &ticks_per_poll) {
+            native::Input in;in.set_angles(0,0);
+            std::vector<int> counts;size_t next=0;uint64_t sim=0;
+            for(const int ticks:ticks_per_poll) {
+                // The poll delivers everything stamped up to the end of the
+                // ticks it is about to drive, which is what SDL does.
+                const uint64_t poll_until=sim+uint64_t(ticks)*tick_ns;
+                while(next<reports.size()&&reports[next].at_ns<=poll_until){in.motion_at(reports[next].at_ns,reports[next].x,reports[next].y);++next;}
+                for(int t=0;t<ticks;++t){sim+=tick_ns;in.consume_until(sim);const auto sample=in.look_sample();assert(sample);counts.push_back(sample->count);in.set_yaw(in.yaw());}
+            }
+            return counts;
+        };
+
+        const auto one_tick_per_frame=counts_per_tick({1,1,1,1,1});      // 100 fps
+        const auto two_ticks_per_frame=counts_per_tick({2,2,1});          // 50 fps
+        const auto uneven=counts_per_tick({1,3,1});                       // a stutter
+
+        // Ten reports land in every tick regardless of how they were polled.
+        for(const auto &run:{one_tick_per_frame,two_ticks_per_frame,uneven}) {
+            assert(run.size()==5);
+            for(const int count:run) assert(count==10);
+        }
+        assert(one_tick_per_frame==two_ticks_per_frame);
+        assert(one_tick_per_frame==uneven);
+
+        // Nothing is invented or lost: every report is simulated exactly once.
+        int total=0;for(const int count:uneven) total+=count;
+        assert(total==int(reports.size()));
+    }
+    {
+        // A report is never divided between ticks — BhLookSample has to stay
+        // integral, so splitting one count across a boundary would make the
+        // sample unrepresentable and silently drop the whole tick's look.
+        native::Input in;in.set_angles(0,0);
+        in.motion_at(1'000'000,3,0);in.motion_at(15'000'000,4,0);
+        in.consume_until(10'000'000);
+        auto first=in.look_sample();assert(first && first->count==3);
+        in.set_yaw(in.yaw());
+        in.consume_until(20'000'000);
+        auto second=in.look_sample();assert(second && second->count==4);
+    }
+    {
+        // Reports arriving out of order are ordered rather than stranded
+        // behind a newer timestamp where no deadline would ever claim them.
+        native::Input in;in.set_angles(0,0);
+        in.motion_at(9'000'000,1,0);in.motion_at(2'000'000,1,0);
+        in.consume_until(9'000'000);
+        assert(in.pending_reports()==0);
+        auto sample=in.look_sample();assert(sample && sample->count==2);
+    }
+    {
+        // A stall must not grow the queue without bound, and must not lose
+        // aim the player made: the oldest report is applied early instead.
+        native::Input in;in.set_angles(0,0);
+        for(std::size_t i=0;i<native::Input::max_pending+64;++i) in.motion_at(uint64_t(i+1)*1'000'000,1,0);
+        assert(in.pending_reports()<=native::Input::max_pending);
+        in.consume_all();
+        auto sample=in.look_sample();
+        assert(sample && sample->count==int32_t(native::Input::max_pending+64));
+    }
+    {
+        // motion_events must describe the tick that consumed them, since it
+        // is reported per sample and not per frame.
+        native::Input in;in.set_angles(0,0);
+        in.motion_at(1'000'000,1,0);in.motion_at(2'000'000,1,0);in.motion_at(12'000'000,1,0);
+        in.consume_until(10'000'000);
+        auto first=in.look_sample();assert(first && first->events==2);
+        in.set_yaw(in.yaw());in.consume_until(20'000'000);
+        auto second=in.look_sample();assert(second && second->events==1);
+    }
+    {
+        // Resetting input state drops queued motion; it belongs to a run or a
+        // capture session that has ended.
+        native::Input in;in.motion_at(1'000'000,5,0);
+        assert(in.pending_reports()==1);
+        in.clear();
+        assert(in.pending_reports()==0);
+    }
+
     std::cout << "Native input and Source camera checks passed\n";
 }

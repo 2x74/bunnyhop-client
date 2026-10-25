@@ -50,6 +50,24 @@ int main(){
     native::save_settings(folder/"settings.json",original);native::save_settings(folder/"settings.json",changed);
     assert(native::load_settings(folder/"settings.json")==changed);
     assert(!std::filesystem::exists(folder/"settings.json.tmp")&&!std::filesystem::exists(folder/"settings.json.previous"));
+    {
+        // External links. The host decides, by parsing the authority, so
+        // neither a lookalike host nor a URL that merely mentions an allowed
+        // one gets through. SDL_OpenURL is never reached for any of these, so
+        // nothing is launched by the test.
+        for(const char *bad:{
+            "http://github.com/8tp",                       // not https
+            "https://github.com.evil.test/8tp",            // allowed name as a host prefix
+            "https://notgithub.com/8tp",                   // allowed name as a suffix, no dot
+            "https://evil.test/?next=https://github.com",  // allowed name only in the query
+            "https://github.com@evil.test/",               // userinfo pointing elsewhere
+            "https://evil.test#https://1998.lol",          // allowed name only in the fragment
+            "javascript:alert(1)", "file:///etc/passwd", "https://", "",
+        }) assert(!native::open_external(bad));
+        // A control character can be re-read by whatever the desktop hands it to.
+        assert(!native::open_external("https://github.com/\n8tp"));
+        assert(!native::open_external("https://github.com/"+std::string(4096,'a')));
+    }
     assert(native::decode_base64("TWFu")==std::vector<uint8_t>({'M','a','n'}));
     assert(native::decode_base64("TWE=")==std::vector<uint8_t>({'M','a'}));
     assert(native::decode_base64("TQ==")==std::vector<uint8_t>({'M'}));

@@ -61,9 +61,34 @@ std::string restricted_html(const std::string &source) {
     const size_t at = end == std::string::npos ? 0 : end + 1;
     return source.substr(0, at) + policy + source.substr(at);
 }
+// Releases the game's GL context for as long as GTK runs on this thread.
+//
+// GDK draws with EGL on its own Wayland connection, and eglMakeCurrent binds
+// per thread. Any GDK work dispatched from the render thread therefore finds
+// the game's context already current from a different EGLDisplay and fails —
+// that is the "eglMakeCurrent failed" warning. GDK is then unable to repaint,
+// and the next configure it has to honour (maximising the menu is the reliable
+// way to produce one) resizes a surface whose EGL state never took, ending with
+// the compositor dropping the connection: "Lost connection to Wayland
+// compositor".
+//
+// GDK's X11 backend does not need EGL to paint, which is why forcing
+// GDK_BACKEND=x11 looked like a fix for a problem that was never X11's.
+struct GlContextRelease {
+    SDL_Window *window = SDL_GL_GetCurrentWindow();
+    SDL_GLContext context = SDL_GL_GetCurrentContext();
+    GlContextRelease() { if (context) SDL_GL_MakeCurrent(window, nullptr); }
+    // Restored on every exit: callers are mid-frame and the next GL call has to
+    // land on the game's context again.
+    ~GlContextRelease() { if (context) SDL_GL_MakeCurrent(window, context); }
+    GlContextRelease(const GlContextRelease &) = delete;
+    GlContextRelease &operator=(const GlContextRelease &) = delete;
+};
+
 void pump_glib() {
     // SDL remains the application's event loop. Bound GTK work per game frame
     // and never wait for events or present/refocus a window from here.
+    GlContextRelease released;
     const gint64 until = g_get_monotonic_time() + 2000;
     for (int n = 0; n < 64 && g_main_context_pending(nullptr) && g_get_monotonic_time() < until; ++n)
         g_main_context_iteration(nullptr, FALSE);
@@ -278,6 +303,9 @@ const std::string &MenuWebView::error() const { return impl_->state->error; }
 bool MenuWebView::visible() const { return impl_->shown; }
 void MenuWebView::set_visible(bool show) {
     if (!available() || show == impl_->shown) return;
+    // Realising and presenting a window is GDK drawing work too, so it needs
+    // the game's context off this thread just as much as pump_glib does.
+    GlContextRelease released;
     impl_->shown = show;
     if (show) {
         gtk_widget_show_all(impl_->window);

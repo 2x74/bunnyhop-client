@@ -6,7 +6,7 @@
       "name": "bunnyhop-native-client",
       "devDependencies": {
         "@resvg/resvg-wasm": "2.6.2",
-        "@types/bun": "latest",
+        "@types/bun": "1.4.3",
         "@types/three": "0.186.0",
         "flag-icons": "7.5.0",
         "playwright": "1.63.0",

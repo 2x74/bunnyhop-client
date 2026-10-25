@@ -14,7 +14,8 @@ inline const std::set<std::string> styles={"autohop","legit","scroll","wonly","s
 inline Json default_settings() {
     return {{"sensitivity",2.0},{"verticalSensitivity",2.0},{"separateVertical",false},
         {"fov",90.0},{"vsync",true},{"fpsLimit",0},{"volume",.65},{"muted",false},
-        {"hud",true},{"crosshair",true},{"viewmodel",true},
+        {"hud",true},{"crosshair",true},{"viewmodel",true},{"jumpStats",true},
+        {"sfxPack","default"},{"musicPack","default"},
         {"binds",{
             {"forward",{"KeyW"}},{"back",{"KeyS"}},{"left",{"KeyA"}},{"right",{"KeyD"}},
             {"jump",{"Space","MouseWheel"}},{"duck",{"ControlLeft","ControlRight"}},{"use",{"KeyE"}},
@@ -59,6 +60,13 @@ inline Json patch_settings(const Json &current,const Json &patch) {
                 binds[b.key()]=b.value();
             }
             out["binds"]=std::move(binds);continue;
+        } else if(defaults[key].is_string()) {
+            // Audio pack choices. Only these two words are ever stored, so the
+            // value can never become a path the client would then go looking
+            // for: which folder "custom" means is decided by the client alone.
+            if(!v.is_string()) throw std::runtime_error("Setting must be text: "+key);
+            const auto choice=v.get<std::string>();
+            if(choice!="default"&&choice!="custom") throw std::runtime_error("Audio pack must be default or custom: "+key);
         } else {
             if(!v.is_number() || !std::isfinite(v.get<double>())) throw std::runtime_error("Setting must be finite: "+key);
             const auto n=v.get<double>();

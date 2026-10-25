@@ -2,10 +2,41 @@
 #include "settings.hpp"
 #include <SDL3/SDL.h>
 #include <filesystem>
+#include <iostream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace native {
+// Hands a credits link to the system browser.
+//
+// The menu checks the URL before sending it, but that check is advice, not
+// protection: it runs inside the webview, which is the thing being guarded
+// against. This is the decision that counts.
+//
+// Parsed rather than searched, so a host is matched as a host and never as a
+// substring: "https://github.com.evil.test/" and "https://evil.test/?=github.com"
+// both fail here, as does "https://github.com@evil.test/".
+inline bool open_external(const std::string &url) {
+    static constexpr std::string_view allowed[]={"github.com","1998.lol","bunnyhop.lol"};
+    static constexpr std::string_view scheme="https://";
+    if(url.size()<scheme.size()+3||url.size()>2048||!url.starts_with(scheme))return false;
+    // Control characters and spaces can be read differently by whatever the
+    // desktop hands this to, so refuse them rather than try to normalise.
+    for(const unsigned char c:url)if(c<=0x20||c==0x7f)return false;
+    const auto authority_end=url.find_first_of("/?#",scheme.size());
+    const auto authority=url.substr(scheme.size(),
+        authority_end==std::string::npos?std::string::npos:authority_end-scheme.size());
+    if(authority.empty()||authority.find('@')!=std::string::npos)return false;
+    const auto host=authority.substr(0,authority.find(':'));
+    bool permitted=false;
+    for(const auto &candidate:allowed)
+        if(host==candidate||(host.size()>candidate.size()+1&&host.ends_with(candidate)&&
+           host[host.size()-candidate.size()-1]=='.')){permitted=true;break;}
+    if(!permitted){std::cerr<<"Refused an external link outside the allowed sites\n";return false;}
+    if(!SDL_OpenURL(url.c_str())){std::cerr<<"Could not open "<<url<<": "<<SDL_GetError()<<'\n';return false;}
+    return true;
+}
 inline std::filesystem::path resource(const std::string &name,const std::filesystem::path &fallback) {
     const auto base=std::filesystem::path(SDL_GetBasePath());
     for(const auto &root:{base/"resources",base/"../Resources",base/"../share/bunnyhop-native"}) {

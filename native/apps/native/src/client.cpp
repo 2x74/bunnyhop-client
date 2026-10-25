@@ -5,6 +5,7 @@
 #include "online.hpp"
 #include "renderer.hpp"
 #include "hud.hpp"
+#include "ssj.hpp"
 #include "audio.hpp"
 #include "client_util.hpp"
 #include "room_state.hpp"
@@ -175,7 +176,16 @@ int run(const Options &opt) {
     const auto menu_path=opt.menu_html==BUNNYHOP_MENU_HTML?native::resource("menu.html",opt.menu_html):std::filesystem::path(opt.menu_html);
     const auto manifest_path=native::resource("native-manifest.json",BUNNYHOP_NATIVE_MANIFEST);
     NativeHud hud(gl,assets);
-    native::Audio audio(assets,!opt.hidden&&!opt.frames);
+    // Resolved before the audio device so the custom sound/ and bgm/ folders
+    // are known at the point the packs are first applied.
+    char *pref_path=SDL_GetPrefPath("bunnyhop.lol","Bunnyhop Native");
+    if(!pref_path) throw std::runtime_error("Cannot find the native client data directory");
+    const std::filesystem::path cache(pref_path); SDL_free(pref_path);
+    std::filesystem::create_directories(cache/"replays");
+    // Created empty so a player looking for where their own audio goes finds
+    // the folders already there rather than having to guess the names.
+    {std::error_code ec;std::filesystem::create_directories(cache/"sound",ec);std::filesystem::create_directories(cache/"bgm",ec);}
+    native::Audio audio(assets,cache,!opt.hidden&&!opt.frames);
     std::unique_ptr<native::MenuWebView> menu;
     const bool wants_menu=!opt.no_menu && (!opt.frames || !opt.menu_smoke.empty());
     if(wants_menu) {
@@ -186,10 +196,6 @@ int run(const Options &opt) {
     }
     if(!menu && opt.map.empty() && opt.online_map.empty())
         throw std::runtime_error("Menus are unavailable on this build; use --map PATH or --online-map NAME");
-    char *pref_path=SDL_GetPrefPath("bunnyhop.lol","Bunnyhop Native");
-    if(!pref_path) throw std::runtime_error("Cannot find the native client data directory");
-    const std::filesystem::path cache(pref_path); SDL_free(pref_path);
-    std::filesystem::create_directories(cache/"replays");
     bool captured=false,focused=true,running=true,menu_ready=false,smoke_requested=false,smoke_pass=false,smoke_snapshot=false,resume_wanted=false;
     bool recording_ended=false;
     auto preferences=native::default_settings();
@@ -219,6 +225,8 @@ int run(const Options &opt) {
         input.vertical_sensitivity=preferences.at("verticalSensitivity").get<double>();input.separate_vertical=preferences.at("separateVertical").get<bool>();
         SDL_GL_SetSwapInterval(opt.frames?0:preferences.at("vsync").get<bool>()?1:0);
         audio.gain(preferences.at("muted").get<bool>()?0:preferences.at("volume").get<float>());
+        audio.set_sfx_pack(preferences.at("sfxPack").get<std::string>()=="custom");
+        audio.set_music_pack(preferences.at("musicPack").get<std::string>()=="custom");
         if(renderer){renderer->set_fov(preferences.at("fov").get<float>());renderer->set_viewmodel_visible(preferences.at("viewmodel").get<bool>());}
     };
     apply_preferences();
@@ -233,6 +241,15 @@ int run(const Options &opt) {
             else std::cerr<<"Native release manifest is stale; replays remain local. Rebuild with bun apps/native/build.ts\n";
         } catch(const std::exception &e) {std::cerr<<"Native release manifest: "<<e.what()<<"; replays remain local\n";}
     }
+    // Jump stats (!ssj). Display only — it reads the same pre-state, command and
+    // events the simulation already produced and never feeds anything back.
+    native::SsjTracker ssj;
+    const native::SsjFields ssj_fields;
+    std::string ssj_line;
+    bool ssj_good=false;
+    // The reference samples the state from BEFORE the tick, so the zone and
+    // noclip flags are carried from the previous one rather than read after.
+    bool ssj_was_in_start=false,ssj_was_noclip=false;
     uint64_t run_generation=0;
     uint32_t beat_start=0,beat_upto=0,beat_hash=0x811c9dc5;
     bool beat_paused=false;
@@ -460,7 +477,7 @@ int run(const Options &opt) {
                     if(captured&&!playback)handle_code(native::key_code(event.key.scancode),down,event.key.repeat);
                     break;
                 }
-                case SDL_EVENT_MOUSE_MOTION: if(captured&&focused&&!playback) input.motion(event.motion.xrel,event.motion.yrel); break;
+                case SDL_EVENT_MOUSE_MOTION: if(captured&&focused&&!playback) input.motion_at(event.motion.timestamp,event.motion.xrel,event.motion.yrel); break;
                 case SDL_EVENT_MOUSE_BUTTON_DOWN:
                 case SDL_EVENT_MOUSE_BUTTON_UP: {
                     const bool down=event.type==SDL_EVENT_MOUSE_BUTTON_DOWN;
@@ -533,6 +550,7 @@ int run(const Options &opt) {
                 }
                 else if(type=="roomSnapshot")room.snapshot(message,std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count());
                 else if(type=="openAuth") menu->open_auth(message.at("url").get<std::string>());
+                else if(type=="openExternal") native::open_external(message.at("url").get<std::string>());
                 else if(type=="auth") menu->evaluate_js("window.bunnyhopNativeMenu?.onAuth("+message.dump()+")");
                 else if(type=="menuError") {error=message.value("error",std::string("Menu failed"));std::cerr<<"Menu: "<<error<<'\n';}
                 else if(type=="runService") {
@@ -573,7 +591,22 @@ int run(const Options &opt) {
         if(beat_start&&!simulation_active) beat_paused=true;
         if(simulation_active) accumulator+=(opt.frames?dt:std::clamp(std::chrono::duration<double>(now-last).count(),0.0,.25))*(playback?playback_speed:1);
         last=now;
+        // Where simulated time has reached, on SDL's clock, so each tick below
+        // can claim the mouse reports stamped inside it. accumulator is how far
+        // behind the simulation currently is, so subtracting it from now gives
+        // the instant the next tick starts from.
+        const uint64_t wall_ns=SDL_GetTicksNS();
+        const uint64_t behind_ns=uint64_t(std::max(0.0,accumulator)*1e9);
+        uint64_t sim_ns=behind_ns<wall_ns?wall_ns-behind_ns:0;
+        const uint64_t tick_ns=uint64_t(dt*1e9);
+        // Not simulating means nothing will claim them on a schedule, so apply
+        // them now and keep the pre-existing behaviour for paused states.
+        if(!simulation_active) input.consume_all();
         while(accumulator>=dt) {
+            // --frames is a deterministic mode with no wall clock to window
+            // against, so a tick there takes whatever is waiting.
+            if(opt.frames) input.consume_all();
+            else {sim_ns+=tick_ns;input.consume_until(sim_ns);}
             prev=curr;const BhState tutorial_pre=curr;
             BhCmd cmd{};
             if(playback) {
@@ -585,6 +618,25 @@ int run(const Options &opt) {
             if(curr.events&(1u<<5)){const bool stab=cmd.buttons&native::attack2;room_events|=stab?32:16;if(!playback)bh_record_cosmetic(core.get(),stab?2:1);}
             if(playback){BhReplayEvents e{};if(bh_replay_events(core.get(),prev.tick,curr.tick,&e)){if(e.inspect_signal)renderer->inspect_press();renderer->inspect_held(e.inspect_held!=0);}}
             BhSnapshot state{};bh_snapshot(core.get(),&state);BhRunState timing{};bh_run_state(core.get(),&timing);BhWeaponReport weapon{};bh_weapon_report(core.get(),&weapon);BhAttackReport attack{};
+            {
+                // Jump stats. |prev| is the state before this tick, which is what the
+                // plugin reads in OnPlayerRunCmd, and curr.events carries the jump.
+                native::SsjState pre;
+                pre.position=prev.position;pre.velocity=prev.velocity;
+                pre.grounded=prev.grounded!=0;pre.on_ladder=prev.on_ladder!=0;
+                const native::SsjCmd ssj_cmd{cmd.forward,cmd.side,cmd.yaw,cmd.buttons};
+                native::SsjTick info;
+                info.jumped=(curr.events&(1u<<1))!=0;              // EVENT_JUMPED
+                info.teleported=(curr.events&native::teleported)!=0;
+                info.in_start=ssj_was_in_start;info.noclip=ssj_was_noclip;
+                if(timing.status==1)info.time=timing.seconds;
+                if(timing.update_flags&4){ssj.reset();ssj_line.clear();ssj_good=false;}  // restarted
+                if(const auto report=ssj.tick(pre,ssj_cmd,info)) {
+                    ssj_line=native::ssj_text(*report,ssj_fields);
+                    ssj_good=report->gain&&*report->gain>=native::good_gain;
+                }
+                ssj_was_in_start=timing.in_start!=0;ssj_was_noclip=state.movement_mode==1;  // Mode::Noclip
+            }
             BhSurfaceProbe surface{};surface.water_z=std::numeric_limits<float>::quiet_NaN();const bool surface_found=bh_surface_at(core.get(),curr.position[0],curr.position[1],curr.position[2],&surface)!=0;const double water_depth=surface_found?surface.water_z-curr.position[2]:std::numeric_limits<double>::quiet_NaN();
             static const std::array<const char*,6> surfaces={"concrete","metal","wood","grass","tile","water"};
             audio.tick(state,timing,weapon,bh_attack_report(core.get(),&attack)?&attack:nullptr,dt,surfaces[std::clamp(surface.surface,0,5)],water_depth);
@@ -645,7 +697,7 @@ int run(const Options &opt) {
                 if(bh_ghost_frame(core.get(),ghost_handle,tick,&ghost))renderer->set_replay_actor(ghost,tutorial_demo?"outfit-cream":outfit,(ghost_info.contains("packedLoadout")&&ghost_info["packedLoadout"].is_string()?ghost_info["packedLoadout"].get<std::string>():std::string()),.4f);
                 else{renderer->set_replay_actor(nullptr,0,0);if(tutorial_demo){ghost_enabled=false;tutorial_demo=false;}}
             } else renderer->set_replay_actor(nullptr,0,0);
-            const double steady_seconds=std::chrono::duration<double>(now.time_since_epoch()).count();auto actors=room.actors(steady_seconds);auto camera_input=input;std::string shown_notice=tutorial&&tutorial->is_active()&&!playback?tutorial->notice():score_notice;
+            const double steady_seconds=std::chrono::duration<double>(now.time_since_epoch()).count();auto actors=room.actors(steady_seconds);auto camera_input=input;camera_input.consume_all();std::string shown_notice=tutorial&&tutorial->is_active()&&!playback?tutorial->notice():score_notice;
             const auto race_notice=room_modes.notice(epoch_ms());if(!race_notice.empty())shown_notice=race_notice;
             renderer->set_viewmodel_weapon(std::nullopt);renderer->set_viewmodel_visible(preferences.at("viewmodel").get<bool>());
             if(spectator){const auto target=room.spectated(steady_seconds);if(target){for(int k=0;k<3;k++){eye[k]=target->frame.position[k];state.player.position[k]=target->frame.position[k];state.player.velocity[k]=target->frame.velocity[k];}eye[2]+=target->frame.view_offset_z;state.player.tick=target->frame.tick;state.player.grounded=!!(target->frame.flags&2);state.player.crouched=!!(target->frame.flags&1);camera_input.set_angles(target->frame.pitch,target->frame.yaw);renderer->set_cosmetics(target->outfit,target->loadout);renderer->set_viewmodel_weapon(target->frame.weapon);shown_notice="Spectating "+target->name+" - Esc for Room controls";actors.erase(std::remove_if(actors.begin(),actors.end(),[&](const auto &a){return a.id==target->id;}),actors.end());}else{renderer->set_viewmodel_visible(false);shown_notice="Waiting for spectator target";}}
@@ -653,7 +705,8 @@ int run(const Options &opt) {
             renderer->draw(width,height,eye,camera_input,&state,(playback||opt.frames)?curr.tick*dt:std::chrono::duration<double>(now-started).count());
             BhCmd shown{};bh_last_command(core.get(),&shown);BhWeaponReport weapon{};bh_weapon_report(core.get(),&weapon);
             if(!menu||!menu->visible())hud.draw(width,height,state,run_state,shown,map_id,playback?playback_info.value("style",active_style):active_style,shown_notice,display_fps,
-                preferences.at("hud").get<bool>(),preferences.at("crosshair").get<bool>(),playback,weapon);
+                preferences.at("hud").get<bool>(),preferences.at("crosshair").get<bool>(),playback,weapon,
+                preferences.at("jumpStats").get<bool>()?ssj_line:std::string(),ssj_good);
         } else {gl.Viewport(0,0,width,height);gl.ClearColor(.03f,.04f,.06f,1);gl.Clear(GL_COLOR_BUFFER_BIT);}
         if(menu&&menu_ready&&core&&!playback&&!spectator&&!room.id.empty()&&room.map==map_id&&now-room_time>=std::chrono::milliseconds(50)) {
             BhWeaponReport weapon{};bh_weapon_report(core.get(),&weapon);
@@ -668,6 +721,7 @@ int run(const Options &opt) {
             menu->evaluate_js("window.bunnyhopNativeMenu?.onRoomPose?.("+pose.dump()+")");room_events=0;room_time=now;
         }
         ++frame; ++title_frames;if(simulation_active&&!playback)input.frame();
+        audio.pump();  // advances the music playlist; decoding cannot run on the audio thread
         if(opt.frames&&renderer&&(curr.tick>=opt.frames||(playback&&playback_paused&&curr.tick>=playback_info.value("totalTicks",0u)))&&!opt.screenshot.empty()) renderer->screenshot(opt.screenshot,width,height);
         const GLenum gl_error=gl.GetError(); if(gl_error!=GL_NO_ERROR) throw std::runtime_error("OpenGL error "+std::to_string(gl_error));
         if(!SDL_GL_SwapWindow(window.get())) throw std::runtime_error(std::string("Swapping framebuffer failed: ")+SDL_GetError());

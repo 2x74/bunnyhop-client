@@ -2,6 +2,9 @@
 #include "bunnyhop_native.h"
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <deque>
 #include <limits>
 #include <optional>
 
@@ -29,6 +32,54 @@ struct Input {
         ++motion_events;yaw_counts += x;
         pitch = std::clamp(pitch + y * (separate_vertical?vertical_sensitivity:sensitivity) * 0.022, -89.0, 89.0);
     }
+
+    // ---- tick-windowed motion ------------------------------------------
+    //
+    // SDL hands over mouse reports when it is polled, which is once per
+    // rendered frame. Applying each report the moment it arrives means the
+    // first simulation tick after a poll receives every report from that
+    // frame and any later tick in the same catch-up receives none, so how a
+    // flick is divided between ticks follows the frame rate rather than when
+    // the mouse actually moved. At 100 Hz with a 1000 Hz mouse that is the
+    // difference between ten even reports per tick and a burst of sixteen
+    // followed by nothing.
+    //
+    // Reports therefore wait here carrying the timestamp SDL stamped on
+    // them, and a tick applies only the ones that happened inside its own
+    // window. A report is never divided between two ticks: a mouse count is
+    // an integer and BhLookSample has to stay integral, so each report
+    // belongs wholly to one tick.
+    struct Report { uint64_t at_ns; double x, y; };
+
+    // Enough for a quarter second of a 1000 Hz mouse. Past this the oldest
+    // report is applied early rather than discarded — losing a report loses
+    // aim the player made, which is worse than attributing it a tick late.
+    static constexpr std::size_t max_pending = 4096;
+
+    std::deque<Report> pending;
+
+    void motion_at(uint64_t at_ns, double x, double y) {
+        if(!std::isfinite(x)||!std::isfinite(y))return;
+        if(pending.size()>=max_pending){const auto oldest=pending.front();pending.pop_front();motion(oldest.x,oldest.y);}
+        // Keep the queue non-decreasing so consuming a window stays a prefix
+        // walk; SDL does not promise ordered timestamps across devices.
+        if(!pending.empty()&&at_ns<pending.back().at_ns) at_ns=pending.back().at_ns;
+        pending.push_back({at_ns,x,y});
+    }
+
+    // Applies every report stamped at or before |deadline_ns|.
+    void consume_until(uint64_t deadline_ns) {
+        while(!pending.empty()&&pending.front().at_ns<=deadline_ns){const auto next=pending.front();pending.pop_front();motion(next.x,next.y);}
+    }
+
+    // Applies everything still waiting. The render camera uses this on a copy
+    // so the view keeps showing the newest motion and gains no latency from
+    // the simulation holding a report back for its tick.
+    void consume_all() { while(!pending.empty()){const auto next=pending.front();pending.pop_front();motion(next.x,next.y);} }
+
+    std::size_t pending_reports() const { return pending.size(); }
+    void drop_pending() { pending.clear(); }
+
     void frame() {if(frames<std::numeric_limits<uint16_t>::max())++frames;}
     std::optional<BhLookSample> look_sample() {
         const auto f=frames,e=motion_events;frames=motion_events=0;
@@ -38,7 +89,10 @@ struct Input {
         return BhLookSample{yaw_base,sensitivity*.022,int32_t(yaw_counts),epoch,kind,f,e,e};
     }
     void button(uint32_t bit, bool down) { if (down) held |= bit; else held &= ~bit; }
-    void clear() { held = pulse = 0; }
+    // Every caller is a state reset — capture changed, run restarted, settings
+    // reapplied — so queued motion from before it must not survive into the
+    // next tick.
+    void clear() { held = pulse = 0; pending.clear(); }
     BhCmd command() {
         const uint32_t bits = held | pulse;
         pulse = 0;

@@ -80,3 +80,18 @@ body.native-menu { height: 100dvh; background: linear-gradient(115deg,rgba(12,12
 .native-cosmetic-card[aria-pressed=true] { border-color:var(--amber); }
 .native-cosmetic-swatch { width:100%;height:2.5rem;border-radius:var(--r-1); }
 @media(max-width:800px) { .native-room-columns{grid-template-columns:1fr;} }
+
+/* Credits. Links are buttons because the webview refuses to navigate; they are
+   styled as links so they still read as one. */
+.native-credits-body { overflow:auto;min-height:0;padding-right:.5rem; }
+.credits-people { list-style:none;margin:0 0 1.5rem;padding:0;display:flex;flex-direction:column;gap:.9rem; }
+.credit-row { display:flex;flex-wrap:wrap;align-items:baseline;gap:.15rem 1rem; }
+.credit-who { font-size:1.05rem; }
+.credit-name { font-weight:600; }
+.credit-role { flex:1 1 14rem; }
+.credit-link { background:none;border:0;padding:0;font:inherit;color:inherit;
+  text-decoration:underline;text-underline-offset:.15em;cursor:pointer; }
+.credit-link:hover,.credit-link:focus-visible { opacity:.75; }
+.credit-site { font-size:1.05rem; }
+.credits-links { margin:0 0 1rem;display:flex;flex-direction:column;align-items:flex-start;gap:.45rem; }
+.credits-foot { font-size:.85rem; }
