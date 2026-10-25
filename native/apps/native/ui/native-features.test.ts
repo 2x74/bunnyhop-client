@@ -60,7 +60,7 @@ test("settings search, HUD positions and strafe trainer options",async()=>{
  // Untouched elements show their built-in place: the timer is centred, 154/900 up from the bottom.
  expect(await page.getByLabel("Timer X",{exact:true}).inputValue()).toBe("50");
  expect(await page.getByLabel("Timer Y",{exact:true}).inputValue()).toBe("82.9");
- await page.locator(".nset-advanced > summary").click();
+ await page.locator(".nset-advanced > summary",{hasText:"positions"}).click();
  await page.getByLabel("Timer Y",{exact:true}).fill("40");await page.getByLabel("Timer Y",{exact:true}).blur();
  expect(await last()).toEqual({type:"settings",patch:{hudLayout:{timer:{x:50,y:40}}}});
  await page.evaluate(()=>window.bunnyhopNativeMenu.onState({settings:{hudLayout:{timer:{x:50,y:40}}}}));
@@ -84,6 +84,18 @@ test("settings search, HUD positions and strafe trainer options",async()=>{
  expect(await page.getByText("No settings match.").isVisible()).toBe(true);
  await page.getByLabel("Search settings").fill("");
  expect(await page.getByLabel("Field of view",{exact:true}).isVisible()).toBe(true);
+ // Turnbinds: yaw speed slider and box show the same number; the modifier has its own speed and bind.
+ await page.getByLabel("Search settings").fill("yawspeed");
+ expect(await page.getByLabel("Yaw speed",{exact:true}).inputValue()).toBe("118.888888");
+ await page.getByLabel("Yaw speed",{exact:true}).fill("170");await page.getByLabel("Yaw speed",{exact:true}).blur();
+ expect(await last()).toEqual({type:"settings",patch:{yawSpeed:170}});
+ expect(await page.getByLabel("Yaw speed slider",{exact:true}).inputValue()).toBe("170");
+ expect(await page.getByLabel("Modifier yaw speed",{exact:true}).inputValue()).toBe("210");
+ await page.getByLabel("Modifier yaw speed",{exact:true}).fill("90");await page.getByLabel("Modifier yaw speed",{exact:true}).blur();
+ expect(await last()).toEqual({type:"settings",patch:{yawSpeedAlt:90}});
+ await page.getByLabel("Search settings").fill("");
+ expect(await page.getByLabel("Turn modifier (alt yaw speed) binding").first().textContent()).toContain("4");
+ expect(await page.getByLabel("Turn left (+left) binding").textContent()).not.toBe("Unbound");
  await page.getByRole("button",{name:"HUD",exact:true}).first().click();await page.waitForTimeout(400);
  await page.screenshot({path:resolve(import.meta.dir,"../../../target/native-menu/settings-hud.png")});
  expect(errors).toEqual([]);

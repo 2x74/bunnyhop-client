@@ -174,3 +174,4 @@ body.native-menu { height: 100dvh; background: linear-gradient(115deg,rgba(12,12
 
 /* A small hello in the top-left corner of the menu window. */
 .native-hi { position:fixed;top:.55rem;left:.8rem;margin:0;font-size:.7rem;color:var(--faint);opacity:.6;pointer-events:none;user-select:none;z-index:1; }
+.nset-speed { display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:.35rem .75rem; }

@@ -2,7 +2,7 @@ import { h } from "../../web/src/ui/dom";
 import { ACTIONS, keyLabel } from "../../web/src/ui/settings";
 import { mouseCode } from "../../web/src/binds";
 import { HUD_ELEMENTS, defaultPosition, type HudElementId, type HudLayout } from "./hud-layout";
-import { AUDIO_PACKS, JUMP_STATS_MODES, NATIVE_BIND_ACTIONS, send, settingsPatch, state, nativeKeyCode, type AudioPack, type JumpStatsMode, type NativeSettings } from "./bridge";
+import { AUDIO_PACKS, DEFAULT_YAW_SPEED, DEFAULT_YAW_SPEED_ALT, JUMP_STATS_MODES, NATIVE_BIND_ACTIONS, send, settingsPatch, state, nativeKeyCode, type AudioPack, type JumpStatsMode, type NativeSettings } from "./bridge";
 
 const DISCORD_TEXT={disabled:"Off",connecting:"Connecting…",ready:"Connected",reconnecting:"Discord not found"} as const;
 const DISCORD_TONE={disabled:"",connecting:"busy",ready:"ok",reconnecting:"bad"} as const;
@@ -18,11 +18,16 @@ type Control = HTMLInputElement | HTMLElement;
 interface Section { id: string; title: string; body: HTMLElement }
 type BindAction = (typeof NATIVE_BIND_ACTIONS)[number];
 
+// Labels for native-only actions the web game's list doesn't have.
+const NATIVE_LABELS: Partial<Record<string, string>> = { turnFast: "Turn modifier (alt yaw speed)" };
+const actionLabel = (action: string): string => NATIVE_LABELS[action] ?? ACTIONS.find(item => item.id === action)?.label ?? action;
+
 const BIND_GROUPS: readonly { title: string; actions: readonly BindAction[] }[] = [
   { title: "Movement", actions: ["forward", "back", "left", "right", "jump", "duck", "use"] },
   { title: "Runs", actions: ["restart", "restartMain", "restartBonus", "cycleStyle"] },
   { title: "Weapons", actions: ["attack", "attack2", "inspect", "reload", "slot1", "slot2", "slot3", "lastWeapon", "drop", "giveUsp", "giveGlock"] },
   { title: "Interface", actions: ["viewmodel", "hideUi", "mute"] },
+  { title: "Turning", actions: ["turnLeft", "turnRight", "turnFast"] },
 ];
 
 export function settingsPanel(): HTMLElement {
@@ -97,11 +102,46 @@ export function settingsPanel(): HTMLElement {
     return row("Show on", seg, "", "6th jump: only jump 6, compared with jump 1, like !ssj. Every jump: each jump compared with the one before. Every N: jumps N, 2N, 3N ..., each compared with the last one shown.");
   }
 
+  // A yaw speed: a slider and a box showing the same number (the box keeps any
+  // precision, the slider moves in tenths), and Default to go back.
+  const speedSyncs: (() => void)[] = [];
+  let speedTimer = 0; const pendingSpeed: Partial<NativeSettings> = {};
+  function speed(name: string, key: "yawSpeed" | "yawSpeedAlt", fallback: number, hint: string, about: string): HTMLElement {
+    const range = h("input.nset-range", { type: "range", min: 1, max: 500, step: .1, "aria-label": `${name} slider` }) as HTMLInputElement;
+    const box = h("input.num-input", { type: "number", min: .01, max: 1000, step: "any", "aria-label": name }) as HTMLInputElement;
+    const reset = h("button.link-btn", { type: "button", title: `Back to ${fallback}` }, "Default") as HTMLButtonElement;
+    const send = (value: number, now: boolean): void => {
+      state.settings[key] = value; pendingSpeed[key] = value;
+      const flush = (): void => { speedTimer = 0; if (Object.keys(pendingSpeed).length) { save({ ...pendingSpeed }); for (const k of Object.keys(pendingSpeed)) delete pendingSpeed[k as keyof NativeSettings]; } };
+      if (now) { window.clearTimeout(speedTimer); flush(); } else if (!speedTimer) speedTimer = window.setTimeout(flush, 100);
+      sync();
+    };
+    const sync = (): void => {
+      const value = state.settings[key];
+      if (document.activeElement !== box) box.value = String(value);
+      range.value = String(value); reset.disabled = value === fallback;
+    };
+    range.addEventListener("input", () => send(range.valueAsNumber, false));
+    range.addEventListener("change", () => send(range.valueAsNumber, true));
+    box.addEventListener("change", () => {
+      const value = box.valueAsNumber;
+      if (!Number.isFinite(value) || value < .01 || value > 1000) { say(`${name}: choose .01–1000.`); box.value = String(state.settings[key]); return; }
+      send(value, true);
+    });
+    reset.addEventListener("click", () => send(fallback, true));
+    speedSyncs.push(sync); sync();
+    const el = row(name, h("div.nset-speed", null, range, h("span.num-wrap", null, box, h("span.unit", null, "°/s")), reset), hint, about, `${name} ${hint} ${about} turnbind turn yaw speed cl_yawspeed +left +right`);
+    el.classList.add("nset-row-pos");
+    return el;
+  }
+
   const mouse = h("div.nset-cols", null,
     group("",
       number("Mouse sensitivity", "sensitivity", .01, 100, .01, "", "Same scale as the game and CS:S: each mouse count turns sensitivity × 0.022 degrees."),
       toggle("Separate vertical sensitivity", "separateVertical", "", "Use a different sensitivity for looking up and down."),
-      number("Vertical sensitivity", "verticalSensitivity", .01, 100, .01, "", "Only used when separate vertical sensitivity is on.")));
+      number("Vertical sensitivity", "verticalSensitivity", .01, 100, .01, "", "Only used when separate vertical sensitivity is on.")),
+    group("Turnbinds",
+      speed("Yaw speed", "yawSpeed", DEFAULT_YAW_SPEED, "cl_yawspeed", "How fast Turn left / Turn right (+left / +right) turn you, in degrees per second. Bind them under Keys > Turning.")));
   const display = h("div.nset-cols", null,
     group("Video",
       number("Field of view", "fov", 60, 130, 1, "", "Field of view in degrees.", "°"),
@@ -201,19 +241,27 @@ export function settingsPanel(): HTMLElement {
       toggle("Include private lobbies", "discordJoinLobbies", "", "Also offer Join from a private lobby. Anyone who can see your profile could then get in.")));
 
   let capturing: string | null = null, appendBinding = false;
-  const buttons = new Map<string, HTMLButtonElement>();
+  const buttons = new Map<string, HTMLButtonElement[]>();
   const bindRow = (action: BindAction): HTMLElement => {
-    const label = ACTIONS.find(item => item.id === action)?.label ?? action;
+    const label = actionLabel(action);
     const button = h("button.bind", { type: "button", "aria-label": `${label} binding`, onclick: () => { capturing = action; appendBinding = false; refresh(); } });
     const add = h("button.link-btn", { type: "button", title: "Add another key", onclick: () => { capturing = action; appendBinding = true; refresh(); } }, "Add");
     const clear = h("button.link-btn", { type: "button", title: "Unbind", onclick: () => save({ binds: { [action]: [] } }) }, "Clear");
-    buttons.set(action, button);
+    buttons.set(action, [...(buttons.get(action) ?? []), button]);
     return row(label, h("div.nset-bind", null, button, add, clear), "", "Click, then press a key, mouse button or wheel direction. Escape cancels. Escape and F10 stay reserved. Up to four keys each.", `${label} ${action} key bind`);
   };
   const keys = h("div.nset-cols", null, ...BIND_GROUPS.map(item => group(item.title, ...item.actions.map(bindRow))));
+  const turnAdvanced = h("details.nset-advanced", null,
+    h("summary", null, h("span", null, "Advanced: turnbind modifier"), h("small.nset-hint", null, "A second turn speed")),
+    h("div.nset-advanced-body", null,
+      h("div.nset-advanced-bar", null, h("span.nset-hint", null, "While Turn modifier is held, turnbinds use this speed instead: faster or slower, your choice.")),
+      group("",
+        bindRow("turnFast"),
+        speed("Modifier yaw speed", "yawSpeedAlt", DEFAULT_YAW_SPEED_ALT, "While Turn modifier is held", "The speed Turn left / Turn right use while Turn modifier is held, in degrees per second. Set it above your yaw speed for a fast turn (170, 210 ...) or below it for a slow one."))));
+  const mouseBody = h("div.nset-hud", null, mouse, turnAdvanced);
 
   const sections: Section[] = [
-    { id: "mouse", title: "Mouse", body: mouse },
+    { id: "mouse", title: "Mouse", body: mouseBody },
     { id: "display", title: "Display", body: display },
     { id: "hud", title: "HUD", body: hud },
     { id: "audio", title: "Audio", body: audio },
@@ -322,7 +370,8 @@ export function settingsPanel(): HTMLElement {
     refreshPositions();
     const vertical = controls.get("verticalSensitivity");
     if (vertical instanceof HTMLInputElement) { vertical.disabled = !state.settings.separateVertical; vertical.closest(".nset-row")?.classList.toggle("off", vertical.disabled); }
-    for (const [action, button] of buttons) {
+    for (const sync of speedSyncs) sync();
+    for (const [action, list] of buttons) for (const button of list) {
       const codes = state.settings.binds[action] ?? [];
       button.classList.toggle("capturing", capturing === action);
       button.classList.toggle("empty", capturing !== action && !codes.length);
@@ -347,7 +396,7 @@ export function settingsPanel(): HTMLElement {
     const codes = appendBinding ? [...new Set([...(state.settings.binds[action] ?? []), code])] : [code];
     if (codes.length > 4) { say("Each action takes up to four keys."); refresh(); return; }
     patch[action] = codes; save({ binds: patch });
-    const moved = Object.keys(patch).filter(other => other !== action).map(other => ACTIONS.find(item => item.id === other)?.label ?? other);
+    const moved = Object.keys(patch).filter(other => other !== action).map(actionLabel);
     if (moved.length) say(`${keyLabel(code)} moved from ${moved.join(", ")}.`);
     refresh();
   };

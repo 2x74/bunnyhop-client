@@ -422,6 +422,14 @@ int run(const Options &opt) {
         if(action=="jump")return native::jump;if(action=="duck")return native::duck;
         if(action=="use")return native::use;if(action=="attack")return native::attack;if(action=="attack2")return native::attack2;return 0;
     };
+    // Turnbinds: +left / +right turn at yawSpeed degrees per second (cl_yawspeed),
+    // or yawSpeedAlt while Turn modifier is held. Positive is left (yaw goes up).
+    auto turn_rate=[&]()->double {
+        auto held=[&](const char *action){for(const auto &key:preferences.at("binds").at(action))if(held_codes.contains(key.get<std::string>()))return true;return false;};
+        const int dir=int(held("turnLeft"))-int(held("turnRight"));
+        if(!dir)return 0;
+        return dir*preferences.at(held("turnFast")?"yawSpeedAlt":"yawSpeed").get<double>();
+    };
     auto act=[&](const std::string &action) {
         if(action=="restart"||action=="restartMain") {if(tutorial&&tutorial->is_active())start_tutorial(tutorial->lesson_id(),tutorial_demo);else{if(action=="restartMain")active_track=0;reset();}}
         else if(action=="restartBonus") {
@@ -661,7 +669,11 @@ int run(const Options &opt) {
             if(playback) {
                 if(curr.tick>=playback_info.at("totalTicks").get<uint32_t>()){playback_paused=true;accumulator=0;break;}
                 BhSnapshot state{};if(!bh_replay_step(core.get(),&state)){const std::string failure=bh_last_error(core.get());playback_failed=true;reset();error="Replay stopped: "+failure;std::cerr<<error<<'\n';show_menu(true);accumulator=0;if(opt.frames)running=false;break;}curr=state.player;bh_last_command(core.get(),&cmd);input.set_angles(cmd.pitch,cmd.yaw,5);
-            } else {input.held=0;for(auto b=preferences["binds"].begin();b!=preferences["binds"].end();++b){const auto bit=movement_bit(b.key());if(bit)for(const auto &key:b.value())if(held_codes.contains(key.get<std::string>()))input.held|=bit;}cmd=input.command();const auto look=input.look_sample();require(bh_step_look(core.get(),&cmd,look?&*look:nullptr,&curr),core.get(),"Stepping simulation");input.events(curr);}
+            } else {
+                // A turnbind tick moves the view by speed × tick, which isn't whole mouse
+                // counts, so it's recorded as a raw yaw rebase (YAW_SET_RAW) like any other set.
+                if(const double rate=turn_rate())input.set_yaw(input.yaw()+rate*dt,5);
+                input.held=0;for(auto b=preferences["binds"].begin();b!=preferences["binds"].end();++b){const auto bit=movement_bit(b.key());if(bit)for(const auto &key:b.value())if(held_codes.contains(key.get<std::string>()))input.held|=bit;}cmd=input.command();const auto look=input.look_sample();require(bh_step_look(core.get(),&cmd,look?&*look:nullptr,&curr),core.get(),"Stepping simulation");input.events(curr);}
             renderer->simulation_tick();
             if(input_log&&!playback) {
                 const double moved=input.yaw_counts-counts_before;
@@ -764,7 +776,9 @@ int run(const Options &opt) {
                 if(bh_ghost_frame(core.get(),ghost_handle,tick,&ghost))renderer->set_replay_actor(ghost,tutorial_demo?"outfit-cream":outfit,(ghost_info.contains("packedLoadout")&&ghost_info["packedLoadout"].is_string()?ghost_info["packedLoadout"].get<std::string>():std::string()),.4f);
                 else{renderer->set_replay_actor(nullptr,0,0);if(tutorial_demo){ghost_enabled=false;tutorial_demo=false;}}
             } else renderer->set_replay_actor(nullptr,0,0);
-            const double steady_seconds=std::chrono::duration<double>(now.time_since_epoch()).count();auto actors=room.actors(steady_seconds);auto camera_input=input;camera_input.consume_all();std::string shown_notice=tutorial&&tutorial->is_active()&&!playback?tutorial->notice():score_notice;
+            const double steady_seconds=std::chrono::duration<double>(now.time_since_epoch()).count();auto actors=room.actors(steady_seconds);auto camera_input=input;camera_input.consume_all();
+            // Show turnbind motion between ticks too, so turning is smooth at any frame rate.
+            if(!playback&&!spectator)if(const double rate=turn_rate())camera_input.set_yaw(camera_input.yaw()+rate*std::clamp(accumulator,0.0,dt));std::string shown_notice=tutorial&&tutorial->is_active()&&!playback?tutorial->notice():score_notice;
             const auto race_notice=room_modes.notice(epoch_ms());if(!race_notice.empty())shown_notice=race_notice;
             renderer->set_viewmodel_weapon(std::nullopt);renderer->set_viewmodel_visible(preferences.at("viewmodel").get<bool>());
             if(spectator){const auto target=room.spectated(steady_seconds);if(target){for(int k=0;k<3;k++){eye[k]=target->frame.position[k];state.player.position[k]=target->frame.position[k];state.player.velocity[k]=target->frame.velocity[k];}eye[2]+=target->frame.view_offset_z;state.player.tick=target->frame.tick;state.player.grounded=!!(target->frame.flags&2);state.player.crouched=!!(target->frame.flags&1);camera_input.set_angles(target->frame.pitch,target->frame.yaw);renderer->set_cosmetics(target->outfit,target->loadout);renderer->set_viewmodel_weapon(target->frame.weapon);shown_notice="Spectating "+target->name+" - Esc for Room controls";actors.erase(std::remove_if(actors.begin(),actors.end(),[&](const auto &a){return a.id==target->id;}),actors.end());}else{renderer->set_viewmodel_visible(false);shown_notice="Waiting for spectator target";}}

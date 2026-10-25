@@ -13,6 +13,8 @@ using Json = nlohmann::json;
 inline const std::set<std::string> styles={"autohop","legit","scroll","wonly","sideways","hsw","lowgrav","autostrafe"};
 inline Json default_settings() {
     return {{"sensitivity",2.0},{"verticalSensitivity",2.0},{"separateVertical",false},
+        // Turnbinds (+left / +right): degrees per second, like cl_yawspeed. The alt speed is used while Turn modifier is held.
+        {"yawSpeed",118.888888},{"yawSpeedAlt",210.0},
         {"fov",90.0},{"vsync",true},{"fpsLimit",0},{"volume",.65},{"muted",false},
         {"hud",true},{"crosshair",true},{"viewmodel",true},{"jumpStats",true},
         // Jump stats: "sixth" (jump 6 only), "every" jump, or "interval" (every jumpStatsInterval jumps).
@@ -32,7 +34,8 @@ inline Json default_settings() {
             {"inspect",{"KeyF"}},{"viewmodel",{"KeyH"}},{"hideUi",{"F1"}},
             {"mute",{"KeyO"}},{"slot1",{"Digit1"}},{"slot2",{"Digit2"}},{"slot3",{"Digit3"}},
             {"lastWeapon",{"KeyQ"}},{"drop",{"KeyG"}},{"reload",Json::array()},
-            {"giveUsp",{"Digit5"}},{"giveGlock",{"Digit6"}}
+            {"giveUsp",{"Digit5"}},{"giveGlock",{"Digit6"}},
+            {"turnLeft",{"ArrowLeft"}},{"turnRight",{"ArrowRight"}},{"turnFast",{"Mouse4"}}
         }}};
 }
 // The HUD elements a layout may place. hud.hpp draws them; ui/hud-layout.ts lists them.
@@ -99,6 +102,7 @@ inline Json patch_settings(const Json &current,const Json &patch) {
             if((key=="sensitivity"||key=="verticalSensitivity") && (n<.01||n>100)) throw std::runtime_error("Sensitivity must be .01–100");
             if(key=="fov" && (n<60||n>130)) throw std::runtime_error("FOV must be 60–130");
             if(key=="volume" && (n<0||n>1)) throw std::runtime_error("Volume must be 0–1");
+            if((key=="yawSpeed"||key=="yawSpeedAlt") && (n<.01||n>1000)) throw std::runtime_error("Yaw speed must be .01–1000");
             if(key=="strafeTrainerSmoothing" && (n!=std::floor(n) || n<1 || n>50)) throw std::runtime_error("Strafe trainer smoothing must be a whole number 1–50");
             if(key=="jumpStatsInterval" && (n!=std::floor(n) || n<2 || n>50)) throw std::runtime_error("Jump stats interval must be a whole number 2–50");
             if(key=="fpsLimit" && (n!=std::floor(n) || (n!=0 && (n<30||n>1000)))) throw std::runtime_error("FPS limit must be 0 or 30–1000");

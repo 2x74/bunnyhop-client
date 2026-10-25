@@ -38,6 +38,15 @@ int main(){
     for(int i=0;i<15;i++)movement.tick(state,.01,NAN,"metal",hear);
     assert(cues.size()==1&&cues[0].id=="step_metal"&&cues[0].gain==.55);
     const auto original=native::default_settings();
+    {   // Turnbinds: yaw speeds and their binds.
+        assert(original["yawSpeed"]==118.888888&&original["yawSpeedAlt"]==210.0);
+        assert(original["binds"]["turnLeft"][0]=="ArrowLeft"&&original["binds"]["turnRight"][0]=="ArrowRight"&&original["binds"]["turnFast"][0]=="Mouse4");
+        auto turned=native::patch_settings(original,{{"yawSpeed",170},{"yawSpeedAlt",90.5},{"binds",{{"turnFast",{"ShiftLeft"}}}}});
+        assert(turned["yawSpeed"]==170&&turned["yawSpeedAlt"]==90.5&&turned["binds"]["turnFast"][0]=="ShiftLeft");
+        for(const auto &bad:{native::Json{{"yawSpeed",0}},native::Json{{"yawSpeedAlt",1001}},native::Json{{"yawSpeed","fast"}}}){
+            bool threw=false;try{native::patch_settings(original,bad);}catch(const std::exception&){threw=true;}assert(threw);
+        }
+    }
     {   // HUD layout: known elements, x and y 0–100; a patch replaces the whole layout.
         auto laid=native::patch_settings(original,{{"hudLayout",{{"timer",{{"x",50},{"y",10.5}}},{"crosshair",{{"x",40},{"y",60}}}}}});
         assert(laid["hudLayout"]["timer"]["y"]==10.5&&laid["hudLayout"].size()==2&&original["hudLayout"].empty());

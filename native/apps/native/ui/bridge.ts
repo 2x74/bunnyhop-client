@@ -2,7 +2,7 @@ import { validHudLayout, type HudLayout } from "./hud-layout";
 import type { RunServiceStatus } from "./run-service";
 import { isStyleId, type StyleId } from "../../web/src/styles";
 import { LESSON_IDS, type LessonId } from "../../web/src/tutorial/data";
-import { DEFAULT_BINDS } from "../../web/src/binds";
+import { DEFAULT_BINDS as WEB_DEFAULT_BINDS } from "../../web/src/binds";
 export const LIVE_ORIGIN = "https://bunnyhop.lol";
 export type MenuMessage =
   | { type: "ready"; origin: string; webglContexts: number; webglAttempts: number }
@@ -25,14 +25,21 @@ export type MenuMessage =
   | { type: "openExternal"; url: string }
   | RunServiceStatus;
 
-export const NATIVE_BIND_ACTIONS=["forward","back","left","right","jump","duck","use","restart","restartBonus","restartMain","cycleStyle","attack","attack2","inspect","viewmodel","hideUi","mute","slot1","slot2","slot3","lastWeapon","drop","reload","giveUsp","giveGlock"] as const;
+export const NATIVE_BIND_ACTIONS=["forward","back","left","right","jump","duck","use","restart","restartBonus","restartMain","cycleStyle","attack","attack2","inspect","viewmodel","hideUi","mute","slot1","slot2","slot3","lastWeapon","drop","reload","giveUsp","giveGlock","turnLeft","turnRight","turnFast"] as const;
+type NativeBindAction=(typeof NATIVE_BIND_ACTIONS)[number];
+/** The web game's defaults, plus the native-only Turn modifier (settings.hpp keeps the same list). */
+const DEFAULT_BINDS:Record<NativeBindAction,readonly string[]>={...WEB_DEFAULT_BINDS,turnLeft:["ArrowLeft"],turnRight:["ArrowRight"],turnFast:["Mouse4"]};
+/** cl_yawspeed and the modifier's speed when nothing has been chosen. */
+export const DEFAULT_YAW_SPEED=118.888888,DEFAULT_YAW_SPEED_ALT=210;
 /** "default" is the bunnyhop.lol pack; "custom" is the player's own sound/ and bgm/ folders. */
 export type AudioPack="default"|"custom";
 export type JumpStatsMode="sixth"|"every"|"interval";
 export const JUMP_STATS_MODES:readonly JumpStatsMode[]=["sixth","every","interval"];
 export const AUDIO_PACKS:readonly AudioPack[]=["default","custom"];
 export interface NativeSettings {
-  sensitivity:number;verticalSensitivity:number;separateVertical:boolean;fov:number;vsync:boolean;fpsLimit:number;
+  sensitivity:number;verticalSensitivity:number;separateVertical:boolean;
+  /** Turnbinds: degrees per second (cl_yawspeed), and while Turn modifier is held. */
+  yawSpeed:number;yawSpeedAlt:number;fov:number;vsync:boolean;fpsLimit:number;
   volume:number;muted:boolean;hud:boolean;crosshair:boolean;viewmodel:boolean;binds:Record<string,string[]>;
   /** The jump HUD (!ssj jump stats). On by default. */
   jumpStats:boolean;
@@ -110,7 +117,7 @@ export function openExternal(raw: string): boolean {
 }
 
 export const state: NativeMenuState = { map: null, loading: false, error: null, sensitivity: 2, paused: true,style:"autohop",track:0,
-  settings:{sensitivity:2,verticalSensitivity:2,separateVertical:false,fov:90,vsync:true,fpsLimit:0,volume:.8,muted:false,hud:true,crosshair:true,viewmodel:true,jumpStats:true,jumpStatsMode:"sixth",jumpStatsInterval:6,strafeTrainer:false,strafeTrainerSmoothing:1,strafeTrainerHints:true,hudLayout:{},sfxPack:"default",musicPack:"default",discordRichPresence:true,discordShowMap:true,discordJoin:true,discordJoinLobbies:false,privacyMode:false,binds:Object.fromEntries(NATIVE_BIND_ACTIONS.map(action=>[action,[...DEFAULT_BINDS[action]]]))},
+  settings:{sensitivity:2,verticalSensitivity:2,separateVertical:false,yawSpeed:DEFAULT_YAW_SPEED,yawSpeedAlt:DEFAULT_YAW_SPEED_ALT,fov:90,vsync:true,fpsLimit:0,volume:.8,muted:false,hud:true,crosshair:true,viewmodel:true,jumpStats:true,jumpStatsMode:"sixth",jumpStatsInterval:6,strafeTrainer:false,strafeTrainerSmoothing:1,strafeTrainerHints:true,hudLayout:{},sfxPack:"default",musicPack:"default",discordRichPresence:true,discordShowMap:true,discordJoin:true,discordJoinLobbies:false,privacyMode:false,binds:Object.fromEntries(NATIVE_BIND_ACTIONS.map(action=>[action,[...DEFAULT_BINDS[action]]]))},
   replays:[],discord:{state:"disabled",message:""},playback:{active:false,id:"",tick:0,totalTicks:0,paused:true,speed:1},ghost:{enabled:false,id:"",name:""},tutorial:{active:false,lesson:"jump",completed:[]}};
 
 export const nativeKeyCode=(code:unknown):code is string=>typeof code==="string"&&/^(?:Key[A-Z]|Digit[0-9]|F[1-9]|F11|F12|Mouse[1-5]|MouseWheel|MWheelUp|MWheelDown|(?:Control|Shift|Alt)(?:Left|Right)|Space|Tab|Enter|Backspace|Arrow(?:Up|Down|Left|Right)|Minus|Equal|BracketLeft|BracketRight|Semicolon|Quote|Comma|Period|Slash)$/.test(code);
@@ -118,7 +125,7 @@ export const nativeKeyCode=(code:unknown):code is string=>typeof code==="string"
 export function settingsPatch(value:unknown):Partial<NativeSettings> {
   if(!value||typeof value!=="object"||Array.isArray(value)) return {};
   const input=value as Record<string,unknown>,out:Record<string,unknown>={};
-  for(const [key,min,max] of [["sensitivity",.01,100],["verticalSensitivity",.01,100],["fov",60,130],["volume",0,1]] as const) if(typeof input[key]==="number"&&Number.isFinite(input[key])&&Number(input[key])>=min&&Number(input[key])<=max) out[key]=input[key];
+  for(const [key,min,max] of [["sensitivity",.01,100],["verticalSensitivity",.01,100],["fov",60,130],["volume",0,1],["yawSpeed",.01,1000],["yawSpeedAlt",.01,1000]] as const) if(typeof input[key]==="number"&&Number.isFinite(input[key])&&Number(input[key])>=min&&Number(input[key])<=max) out[key]=input[key];
   if(typeof input.fpsLimit==="number"&&Number.isFinite(input.fpsLimit)&&(input.fpsLimit===0||(input.fpsLimit>=30&&input.fpsLimit<=1000))) out.fpsLimit=input.fpsLimit;
   for(const key of ["separateVertical","vsync","muted","hud","crosshair","viewmodel","jumpStats","strafeTrainer","strafeTrainerHints","discordRichPresence","discordShowMap","discordJoin","discordJoinLobbies","privacyMode"]) if(typeof input[key]==="boolean") out[key]=input[key];
   // Only these two words ever cross the bridge, so a pack choice can never
