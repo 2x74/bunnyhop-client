@@ -36,3 +36,16 @@ test("native account changes close old social transport and replace friend data 
  await page.locator("button.fd-friends").click();await page.getByText("alice friend",{exact:true}).waitFor();account="bob";await page.evaluate(()=>window.bunnyhopNativeMenu.onAuth());await page.waitForFunction(()=>(window as unknown as {sockets:{closed:boolean}[]}).sockets[0].closed);await page.waitForFunction(()=>document.querySelector(".name-text")?.textContent==="bob");await page.locator("button.fd-friends").click();await page.getByText("bob friend",{exact:true}).waitFor();expect(await page.getByText("alice friend",{exact:true}).count()).toBe(0);expect(page.url()).toBe("https://bunnyhop.lol/native-social-unit");
  }finally{await browser.close();}
 },10_000);
+
+test("credits screen renders and its links go to the system browser",async()=>{
+ const browser=await chromium.launch({headless:true});try{const page=await browser.newPage({viewport:{width:1280,height:900}}),errors:string[]=[];page.on("pageerror",error=>errors.push(error.message));const html=await readFile(resolve(import.meta.dir,"../../../target/native-menu/menu.html"),"utf8");
+ await page.route("**/*",route=>route.request().url()==="https://bunnyhop.lol/native-credits-unit"?route.fulfill({status:200,contentType:"text/html",body:html}):route.abort());
+ await page.addInitScript(()=>{(window as unknown as {messages:unknown[]}).messages=[];window.addEventListener("bunnyhop:native-message",event=>(window as unknown as {messages:unknown[]}).messages.push((event as CustomEvent).detail));});
+ await page.goto("https://bunnyhop.lol/native-credits-unit",{waitUntil:"domcontentloaded"});
+ await page.getByRole("button",{name:"Credits",exact:true}).click();
+ expect(await page.locator(".native-credits .credits-people li").count()).toBe(2);
+ await page.getByRole("button",{name:"bunnyhop.lol",exact:true}).click();
+ expect(await page.evaluate(()=>(window as unknown as {messages:unknown[]}).messages.at(-1))).toEqual({type:"openExternal",url:"https://bunnyhop.lol/"});
+ expect(errors).toEqual([]);
+ }finally{await browser.close();}
+},15_000);

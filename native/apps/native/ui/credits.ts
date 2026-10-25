@@ -23,6 +23,8 @@ const LINKS: readonly { label: string; url: string }[] = [
  * away from the loaded document, so an <a href> would look like a link and do
  * nothing. These hand the URL to the host, which opens the system browser.
  */
+// className is h()'s dotted form ("a.b"): a space in it makes classList.add
+// throw, which used to take the whole Credits screen down with it.
 function link(label: string, url: string, className = "credit-link"): HTMLElement {
   return h(`button.${className}`, {
     type: "button",
@@ -41,7 +43,7 @@ export function creditsPanel(): HTMLElement {
       h("span.credit-role.dim", null, person.role)));
   }
   const elsewhere = h("p.credits-links", null);
-  for (const item of LINKS) elsewhere.append(link(item.label, item.url, "credit-link credit-site"));
+  for (const item of LINKS) elsewhere.append(link(item.label, item.url, "credit-link.credit-site"));
   return h("div.native-credits-body", null,
     people,
     elsewhere,
