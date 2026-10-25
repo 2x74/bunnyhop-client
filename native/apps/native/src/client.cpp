@@ -11,6 +11,7 @@
 #include "room_state.hpp"
 #include "room_modes.hpp"
 #include "tutorial.hpp"
+#include "discord_rpc.hpp"
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
@@ -27,6 +28,7 @@
 #include <future>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -459,6 +461,15 @@ int run(const Options &opt) {
     if(!opt.replay.empty())request_replay(opt.replay,"play");
     using Clock=std::chrono::steady_clock;
     auto last=Clock::now(),title_time=last,ui_time=last,started=last; uint64_t frame=0,title_frames=0;
+    // Discord Rich Presence / Join. Never from scripted or hidden runs, so a
+    // smoke test can't show up on the developer's own profile.
+    native::discord::Client discord;
+    const bool discord_allowed=!opt.frames&&!opt.hidden&&opt.menu_smoke.empty();
+    std::string presence_map;int64_t presence_started=0;auto presence_time=std::chrono::steady_clock::time_point{};
+    discord.on_join=[&](const std::string &id){
+        if(!menu||!menu_ready)return;
+        show_menu(true);menu->evaluate_js("window.bunnyhopNativeMenu?.joinRoom?.("+nlohmann::json(id).dump()+")");
+    };
     while(running) {
         SDL_Event event;
         while(SDL_PollEvent(&event)) {
@@ -583,6 +594,26 @@ int run(const Options &opt) {
         if(!running) break;
         const auto now=Clock::now();
         const auto spectator=core&&room.map==map_id?room.spectator_target:std::optional<unsigned>();
+        if(now-presence_time>=std::chrono::milliseconds(250)) {
+            presence_time=now;
+            const auto unix_now=int64_t(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+            if(map_id!=presence_map){presence_map=map_id;presence_started=unix_now;}
+            const auto settings=native::discord::settings_from(preferences);
+            nlohmann::json activity;
+            if(discord_allowed&&settings.enabled&&!settings.privacy) {
+                static const std::map<std::string,std::string> style_names={{"autohop","Normal"},{"legit","EZ Scroll"},{"scroll","Legit Scroll"},{"wonly","W-Only"},
+                    {"sideways","Sideways"},{"hsw","Half-Sideways"},{"lowgrav","Low Gravity"},{"autostrafe","Auto-strafe"}};
+                native::discord::Status status;
+                status.kind=map_id.empty()?"menu":playback?"replay":(!captured||(menu&&menu->visible()))?"paused":"playing";
+                status.mode=playback?"replay":!room.id.empty()?"multiplayer":map_id==tutorial_map?"practice":"solo";
+                status.map=map_id==tutorial_map?"the tutorial":map_id;
+                const auto named=style_names.find(active_style);status.style=named==style_names.end()?active_style:named->second;
+                status.started_at=presence_started;status.room=room.id;
+                activity=native::discord::build_activity(status,settings,[](const std::string &text){
+                    char hex[65]{};bh_sha256(reinterpret_cast<const uint8_t *>(text.data()),text.size(),hex);return std::string(hex);},unix_now);
+            }
+            discord.update(discord_allowed&&settings.enabled&&!settings.privacy,activity);
+        }
         if(spectator!=observed_spectator){
             if(spectator){bh_record_end(core.get());recording_ended=true;record_path.clear();beat_start=0;++run_generation;run_event({{"type","reset"}});audio.reset();accumulator=0;input.clear();renderer->reset_presentation();show_menu(false);}
             else if(observed_spectator&&core&&!playback)reset();observed_spectator=spectator;
@@ -734,7 +765,8 @@ int run(const Options &opt) {
                 {"tutorial",tutorial?tutorial->stateJSON():nlohmann::json{{"active",false},{"lesson","jump"},{"completed",tutorial_completed}}},
                 {"playback",{{"active",playback},{"id",playback_id},{"tick",curr.tick},{"totalTicks",playback?playback_info.value("totalTicks",0u):0u},{"paused",playback_paused},{"speed",playback_speed}}},
                 {"ghost",{{"enabled",ghost_enabled},{"id",ghost_id},{"name",ghost_info.is_object()?ghost_info.value("player",std::string("Ghost")):"Ghost"}}},
-                {"timer",{{"status",run_state.status},{"seconds",run_state.seconds},{"jumps",run_state.jumps},{"strafes",run_state.strafes},{"sync",run_state.sync_percent}}}};
+                {"timer",{{"status",run_state.status},{"seconds",run_state.seconds},{"jumps",run_state.jumps},{"strafes",run_state.strafes},{"sync",run_state.sync_percent}}},
+                {"discord",{{"state",discord_allowed?discord.state:"disabled"},{"message",discord.message}}}};
             const auto encoded=state.dump();
             if(encoded!=last_ui) {menu->evaluate_js("window.bunnyhopNativeMenu?.onState("+encoded+")");last_ui=encoded;}
             ui_time=now;

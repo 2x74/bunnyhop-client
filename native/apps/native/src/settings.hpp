@@ -16,6 +16,8 @@ inline Json default_settings() {
         {"fov",90.0},{"vsync",true},{"fpsLimit",0},{"volume",.65},{"muted",false},
         {"hud",true},{"crosshair",true},{"viewmodel",true},{"jumpStats",true},
         {"sfxPack","default"},{"musicPack","default"},
+        // Discord: presence on by default; privacy mode hides everything.
+        {"discordRichPresence",true},{"discordShowMap",true},{"discordJoin",true},{"discordJoinLobbies",false},{"privacyMode",false},
         {"binds",{
             {"forward",{"KeyW"}},{"back",{"KeyS"}},{"left",{"KeyA"}},{"right",{"KeyD"}},
             {"jump",{"Space","MouseWheel"}},{"duck",{"ControlLeft","ControlRight"}},{"use",{"KeyE"}},

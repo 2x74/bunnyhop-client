@@ -175,4 +175,8 @@ if(BUILD_TESTING)
         target_compile_options(bunnyhop-native-input-tests PRIVATE -ffp-contract=off)
     endif()
     add_test(NAME native_input COMMAND bunnyhop-native-input-tests)
+    # Discord RPC: framing, Join secrets, privacy rules, and a fake Discord socket.
+    add_executable(bunnyhop-native-discord-tests src/discord_rpc_tests.cpp)
+    target_include_directories(bunnyhop-native-discord-tests PRIVATE vendor src)
+    add_test(NAME native_discord COMMAND bunnyhop-native-discord-tests)
 endif()

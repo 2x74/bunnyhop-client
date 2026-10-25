@@ -166,7 +166,10 @@ const runService=new NativeRunService({api,context:identity=>({room:currentRoom(
   if(message.message) notice(message.message);
   if(message.status==="verified") refreshAccount();
 }});
-window.bunnyhopNativeMenu = { onState: receive, onAuth: refreshAccount, onRunEvent:value=>{void runService.receive(value);},open:(next,focus)=>{if(next==="rooms")next="servers";if(["home","maps","settings","profile","replays","servers","room","ranks","stats","tutorial","loadout","credits"].includes(next))show(next as Screen);if(next==="room"&&focus==="chat")document.querySelector<HTMLInputElement>(".native-room-chat-form input")?.focus();},onRoomPose:value=>{roomService.pose(value);},onRoomCommand:value=>{roomService.command(value);},version: 2 };
+window.bunnyhopNativeMenu = { onState: receive, onAuth: refreshAccount, onRunEvent:value=>{void runService.receive(value);},open:(next,focus)=>{if(next==="rooms")next="servers";if(["home","maps","settings","profile","replays","servers","room","ranks","stats","tutorial","loadout","credits"].includes(next))show(next as Screen);if(next==="room"&&focus==="chat")document.querySelector<HTMLInputElement>(".native-room-chat-form input")?.focus();},onRoomPose:value=>{roomService.pose(value);},onRoomCommand:value=>{roomService.command(value);},
+  // A friend pressed Join on your Discord activity. The host has already checked the secret.
+  joinRoom:id=>{if(typeof id!=="string"||!/^(?:[a-z0-9][a-z0-9-]{0,31}|p-[a-z2-7]{10})$/.test(id))return;void roomService.join(id).catch(()=>notice("Couldn't join that room."));show("room");},
+  version: 2 };
 window.addEventListener("bunnyhop:native-state", (event) => receive((event as CustomEvent).detail));
 window.addEventListener("bunnyhop:native-auth", refreshAccount);
 window.addEventListener("bunnyhop-native-auth", (event) => {

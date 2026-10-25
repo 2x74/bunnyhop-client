@@ -3,6 +3,9 @@ import { ACTIONS, keyLabel } from "../../web/src/ui/settings";
 import { mouseCode } from "../../web/src/binds";
 import { AUDIO_PACKS, NATIVE_BIND_ACTIONS, send, settingsPatch, state, nativeKeyCode, type AudioPack, type NativeSettings } from "./bridge";
 
+const DISCORD_TEXT={disabled:"Off",connecting:"Connecting…",ready:"Connected",reconnecting:"Discord not found"} as const;
+const DISCORD_TONE={disabled:"",connecting:"busy",ready:"ok",reconnecting:"bad"} as const;
+
 // The settings screen, laid out like the game's own (AIRTIME): a rail of
 // sections on the left, label | control rows on raised strips, the game's
 // switches and segmented controls, and a help line under the page that follows
@@ -108,6 +111,16 @@ export function settingsPanel(): HTMLElement {
         "Custom sounds come from the sound folder in your Bunnyhop Native data directory. Name a file after the cue it replaces, such as jump.wav; WAV, MP3, FLAC or Ogg all work. Cues you haven't supplied keep the bunnyhop.lol sound."),
       pack("Music", "musicPack", "bunnyhop.lol OST", "Custom music comes from the bgm folder beside it, played in filename order.")));
 
+  const discordState = h("span.nset-state");
+  const discord = h("div.nset-cols", null,
+    group("Rich Presence",
+      toggle("Show on Discord", "discordRichPresence", "", "Shows what you're playing on your Discord profile. Needs the Discord desktop app running."),
+      toggle("Show the map", "discordShowMap", "", "Off shows only that you're bunnyhopping, not where."),
+      toggle("Privacy mode", "privacyMode", "Hides everything", "Turns presence and Join off without changing the switches above.")),
+    group("Join",
+      toggle("Let friends join", "discordJoin", "Public servers", "While you're on a public server, friends get a Join button on your Discord profile."),
+      toggle("Include private lobbies", "discordJoinLobbies", "", "Also offer Join from a private lobby. Anyone who can see your profile could then get in.")));
+
   let capturing: string | null = null, appendBinding = false;
   const buttons = new Map<string, HTMLButtonElement>();
   const bindRow = (action: BindAction): HTMLElement => {
@@ -125,6 +138,7 @@ export function settingsPanel(): HTMLElement {
     { id: "display", title: "Display", body: display },
     { id: "audio", title: "Audio", body: audio },
     { id: "keys", title: "Keys", body: keys },
+    { id: "discord", title: "Discord", body: discord },
   ];
 
   const scroll = h("div.nset-scroll", { tabindex: "-1" });
@@ -135,7 +149,7 @@ export function settingsPanel(): HTMLElement {
   };
   for (const section of sections) {
     const el = h("section.nset-sec", { id: `nset-${section.id}`, "aria-labelledby": `nset-${section.id}-h` },
-      h("div.nset-sec-head", null, h("h2", { id: `nset-${section.id}-h` }, section.title)), section.body);
+      h("div.nset-sec-head", null, h("h2", { id: `nset-${section.id}-h` }, section.title), section.id === "discord" ? discordState : null), section.body);
     scroll.append(el);
     const item = h("button.nset-rail-item", { type: "button", onclick: () => { el.scrollIntoView({ block: "start", behavior: "smooth" }); mark(section.id); } }, section.title);
     railItems.set(section.id, item); rail.append(item);
@@ -165,6 +179,15 @@ export function settingsPanel(): HTMLElement {
       }
     }
     previous = { ...state.settings };
+    const presence = state.settings.privacyMode ? "disabled" : state.discord.state;
+    discordState.textContent = state.settings.privacyMode ? "Privacy mode" : DISCORD_TEXT[presence];
+    discordState.dataset.tone = DISCORD_TONE[presence]; discordState.title = state.discord.message;
+    const presenceOff = !state.settings.discordRichPresence || state.settings.privacyMode;
+    for (const key of ["discordShowMap", "discordJoin", "discordJoinLobbies"] as const) {
+      const input = controls.get(key);
+      const off = presenceOff || (key === "discordJoinLobbies" && !state.settings.discordJoin);
+      if (input instanceof HTMLInputElement) { input.disabled = off; input.closest(".nset-row")?.classList.toggle("off", off); }
+    }
     const vertical = controls.get("verticalSensitivity");
     if (vertical instanceof HTMLInputElement) { vertical.disabled = !state.settings.separateVertical; vertical.closest(".nset-row")?.classList.toggle("off", vertical.disabled); }
     for (const [action, button] of buttons) {

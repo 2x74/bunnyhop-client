@@ -34,7 +34,11 @@ export interface NativeSettings {
   /** The jump HUD (!ssj jump stats). On by default. */
   jumpStats:boolean;
   sfxPack:AudioPack;musicPack:AudioPack;
+  /** Discord Rich Presence, on by default. Privacy mode hides everything. */
+  discordRichPresence:boolean;discordShowMap:boolean;discordJoin:boolean;discordJoinLobbies:boolean;privacyMode:boolean;
 }
+export type DiscordState="disabled"|"connecting"|"ready"|"reconnecting";
+export const DISCORD_STATES:readonly DiscordState[]=["disabled","connecting","ready","reconnecting"];
 export interface NativeReplay {id:string;name:string;map:string;style:StyleId;track:number;seconds:number;recordedAt:number;bytes:number}
 export interface PlaybackState {active:boolean;id:string;tick:number;totalTicks:number;paused:boolean;speed:number}
 
@@ -45,13 +49,13 @@ export interface NativeMenuState {
   sensitivity: number;
   paused: boolean;
   style:StyleId;track:number;settings:NativeSettings;replays:NativeReplay[];
-  playback:PlaybackState;ghost:{enabled:boolean;id:string;name:string};tutorial:{active:boolean;lesson:LessonId;completed:LessonId[]};
+  discord:{state:DiscordState;message:string};playback:PlaybackState;ghost:{enabled:boolean;id:string;name:string};tutorial:{active:boolean;lesson:LessonId;completed:LessonId[]};
 }
 
 declare global {
   interface Window {
     webkit?: { messageHandlers?: { bunnyhop?: { postMessage: (value: string) => void } } };
-    bunnyhopNativeMenu: { onState: (value: unknown) => void; onAuth: (value?: unknown) => void; onRunEvent: (value: unknown) => void; version: number; open?:(screen:string,focus?:string)=>void; onRoomPose?:(value:unknown)=>void; onRoomCommand?:(value:unknown)=>void };
+    bunnyhopNativeMenu: { onState: (value: unknown) => void; onAuth: (value?: unknown) => void; onRunEvent: (value: unknown) => void; version: number; open?:(screen:string,focus?:string)=>void; joinRoom?:(id:string)=>void; onRoomPose?:(value:unknown)=>void; onRoomCommand?:(value:unknown)=>void };
     __nativeMenuGraphics?: { contexts: number; attempts: number };
   }
 }
@@ -93,8 +97,8 @@ export function openExternal(raw: string): boolean {
 }
 
 export const state: NativeMenuState = { map: null, loading: false, error: null, sensitivity: 2, paused: true,style:"autohop",track:0,
-  settings:{sensitivity:2,verticalSensitivity:2,separateVertical:false,fov:90,vsync:true,fpsLimit:0,volume:.8,muted:false,hud:true,crosshair:true,viewmodel:true,jumpStats:true,sfxPack:"default",musicPack:"default",binds:Object.fromEntries(NATIVE_BIND_ACTIONS.map(action=>[action,[...DEFAULT_BINDS[action]]]))},
-  replays:[],playback:{active:false,id:"",tick:0,totalTicks:0,paused:true,speed:1},ghost:{enabled:false,id:"",name:""},tutorial:{active:false,lesson:"jump",completed:[]}};
+  settings:{sensitivity:2,verticalSensitivity:2,separateVertical:false,fov:90,vsync:true,fpsLimit:0,volume:.8,muted:false,hud:true,crosshair:true,viewmodel:true,jumpStats:true,sfxPack:"default",musicPack:"default",discordRichPresence:true,discordShowMap:true,discordJoin:true,discordJoinLobbies:false,privacyMode:false,binds:Object.fromEntries(NATIVE_BIND_ACTIONS.map(action=>[action,[...DEFAULT_BINDS[action]]]))},
+  replays:[],discord:{state:"disabled",message:""},playback:{active:false,id:"",tick:0,totalTicks:0,paused:true,speed:1},ghost:{enabled:false,id:"",name:""},tutorial:{active:false,lesson:"jump",completed:[]}};
 
 export const nativeKeyCode=(code:unknown):code is string=>typeof code==="string"&&/^(?:Key[A-Z]|Digit[0-9]|F[1-9]|F11|F12|Mouse[1-5]|MouseWheel|MWheelUp|MWheelDown|(?:Control|Shift|Alt)(?:Left|Right)|Space|Tab|Enter|Backspace|Arrow(?:Up|Down|Left|Right)|Minus|Equal|BracketLeft|BracketRight|Semicolon|Quote|Comma|Period|Slash)$/.test(code);
 
@@ -103,7 +107,7 @@ export function settingsPatch(value:unknown):Partial<NativeSettings> {
   const input=value as Record<string,unknown>,out:Record<string,unknown>={};
   for(const [key,min,max] of [["sensitivity",.01,100],["verticalSensitivity",.01,100],["fov",60,130],["volume",0,1]] as const) if(typeof input[key]==="number"&&Number.isFinite(input[key])&&Number(input[key])>=min&&Number(input[key])<=max) out[key]=input[key];
   if(typeof input.fpsLimit==="number"&&Number.isFinite(input.fpsLimit)&&(input.fpsLimit===0||(input.fpsLimit>=30&&input.fpsLimit<=1000))) out.fpsLimit=input.fpsLimit;
-  for(const key of ["separateVertical","vsync","muted","hud","crosshair","viewmodel","jumpStats"]) if(typeof input[key]==="boolean") out[key]=input[key];
+  for(const key of ["separateVertical","vsync","muted","hud","crosshair","viewmodel","jumpStats","discordRichPresence","discordShowMap","discordJoin","discordJoinLobbies","privacyMode"]) if(typeof input[key]==="boolean") out[key]=input[key];
   // Only these two words ever cross the bridge, so a pack choice can never
   // become a path the native side would go looking for.
   for(const key of ["sfxPack","musicPack"] as const) if(AUDIO_PACKS.includes(input[key] as AudioPack)) out[key]=input[key];
@@ -138,6 +142,7 @@ export function applyState(value: unknown): boolean {
     for(const key of ["tick","totalTicks","speed"] as const) if(typeof playback[key]==="number"&&Number.isFinite(playback[key])&&Number(playback[key])>=0) state.playback[key]=Number(playback[key]);
     if(typeof playback.id==="string") state.playback.id=playback.id;
   }
+  if(next.discord&&typeof next.discord==="object") {const discord=next.discord as Record<string,unknown>;if(DISCORD_STATES.includes(discord.state as DiscordState))state.discord.state=discord.state as DiscordState;if(typeof discord.message==="string")state.discord.message=discord.message.slice(0,200);}
   if(next.ghost&&typeof next.ghost==="object") {const ghost=next.ghost as Record<string,unknown>;if(typeof ghost.enabled==="boolean") state.ghost.enabled=ghost.enabled;for(const key of ["id","name"] as const) if(typeof ghost[key]==="string") state.ghost[key]=ghost[key];}
   if(next.tutorial&&typeof next.tutorial==="object") {const tutorial=next.tutorial as Record<string,unknown>;if(typeof tutorial.active==="boolean")state.tutorial.active=tutorial.active;if(LESSON_IDS.includes(tutorial.lesson as LessonId))state.tutorial.lesson=tutorial.lesson as LessonId;if(Array.isArray(tutorial.completed))state.tutorial.completed=LESSON_IDS.filter(id=>(tutorial.completed as unknown[]).includes(id));}
   return true;
