@@ -19,6 +19,8 @@ mod usable;
 mod map_fixes;
 // Practice mode noclip (never called by `step`; see the module docs).
 mod practice;
+// DanZay's VScript objective gates, emulated natively on bhop_cooksassistant (physics v16).
+mod vscript;
 // Trigger / clip overlays for the client (never called by `step`; see the module docs).
 mod overlay;
 pub use overlay::{
@@ -155,14 +157,19 @@ pub const PHYSICS_V14: u32 = 14;
 /// v15: Source's signed door / button travel on the maps that need it (`PHYSICS_FIX_MAP_DOOR_TRAVEL`,
 /// `game/map_fixes.rs` `SIGNED_DOOR_TRAVEL`): bhop_montana_fix's "UP" block rises and launches the player.
 pub const PHYSICS_V15: u32 = 15;
+/// v16: the player's own outputs and filter tests on the maps that need them (`PHYSICS_FIX_MAP_PLAYER_IO`,
+/// `game/map_fixes.rs` `PLAYER_IO`): bhop_synthetic_fix's potion door, bhop_wonderland's key room and bhop_lego3's coins
+/// open once all three items are collected. Same bit: DanZay's VScript objective gates on the maps in
+/// `NONLINEAR_OBJECTIVES` (`game/vscript.rs`): bhop_cooksassistant's kitchen doors need its 4 ingredients.
+pub const PHYSICS_V16: u32 = 16;
 /// The version new recordings use.
-pub const PHYSICS_LATEST: u32 = PHYSICS_V15;
+pub const PHYSICS_LATEST: u32 = PHYSICS_V16;
 /// Diagnostic pseudo-versions (never valid in a replay, whose field is a u8): `PHYSICS_DIAG | fix bits` turns on only
-/// the listed fixes, to tell which fix changes a replay (tools: /tmp physics-v2 analysis). The fix bits are the low 25
-/// (`PHYSICS_DIAG_FIXES`); before v15 the base was 1 << 24 with 24 fix bits, before v8 0x1_0000 with 16 (and 0x100 with
-/// 8 before v5), and those old diagnostic numbers are not versions any more. The mask is never stored: replays carry
+/// the listed fixes, to tell which fix changes a replay (tools: /tmp physics-v2 analysis). The fix bits are the low 26
+/// (`PHYSICS_DIAG_FIXES`); before v16 the base was 1 << 25 with 25 fix bits, before v15 1 << 24 with 24, before v8
+/// 0x1_0000 with 16 (and 0x100 with 8 before v5), and those old diagnostic numbers are not versions any more. The mask is never stored: replays carry
 /// the u8 version, run hashes fold only the commands, and the state digest has no settings in it.
-pub const PHYSICS_DIAG: u32 = 1 << 25;
+pub const PHYSICS_DIAG: u32 = 1 << 26;
 /// The fix bits a diagnostic pseudo-version may carry.
 pub const PHYSICS_DIAG_FIXES: u32 = PHYSICS_DIAG - 1;
 /// Fix bit: MASK_PLAYERSOLID / matching ladder mask (playerclips are solid).
@@ -286,7 +293,15 @@ const PHYSICS_FIX_V14: u32 = PHYSICS_FIX_V13 | PHYSICS_FIX_MAP_MAX_VELOCITY | PH
 /// brush along movedir moves the difference the other way (`CBaseDoor::Spawn` has no clamp), and so does a func_button
 /// when that is 1 unit or more (`CBaseButton::Spawn`). Elsewhere, and before v15, the travel is clamped at 0.
 pub const PHYSICS_FIX_MAP_DOOR_TRAVEL: u32 = 1 << 24;
-const PHYSICS_FIX_ALL: u32 = PHYSICS_FIX_V14 | PHYSICS_FIX_MAP_DOOR_TRAVEL;
+const PHYSICS_FIX_V15: u32 = PHYSICS_FIX_V14 | PHYSICS_FIX_MAP_DOOR_TRAVEL;
+/// Fix bit (v16): on the maps in `game/map_fixes.rs` `PLAYER_IO`, the player keeps the outputs `AddOutput` gives it
+/// (`!activator,AddOutput,OnUser1 target:input:param:delay:times`) and fires them on `FireUser1..4`
+/// (`CBaseEntity::InputFireUser1`), and filters answer `TestActivator` with `OnPass` / `OnFail`
+/// (`CBaseFilter::InputTestActivator`), all with the input's activator. Elsewhere, and before v16, all three are ignored.
+/// On the maps in `game/map_fixes.rs` `NONLINEAR_OBJECTIVES` the same bit runs the native emulation of their VScript
+/// objective triggers and gates (`game/vscript.rs`); elsewhere, and before v16, scripts do nothing.
+pub const PHYSICS_FIX_MAP_PLAYER_IO: u32 = 1 << 25;
+const PHYSICS_FIX_ALL: u32 = PHYSICS_FIX_V15 | PHYSICS_FIX_MAP_PLAYER_IO;
 
 /// The per-map fix (`game/map_fixes.rs`) a parsed entity lump matches, by map name (tests, tools).
 pub fn map_fix_for(entities: &[Entity]) -> Option<&'static str> {
@@ -297,6 +312,26 @@ pub fn map_fix_for(entities: &[Entity]) -> Option<&'static str> {
 /// (map name, value) (tests, tools).
 pub fn map_max_velocity_for(entities: &[Entity]) -> Option<(&'static str, f32)> {
     map_fixes::max_velocity(entities).map(|m| (m.map, m.max_velocity))
+}
+
+/// The map a parsed entity lump matches in `game/map_fixes.rs` `PLAYER_IO` (tests, tools).
+pub fn map_player_io_for(entities: &[Entity]) -> Option<&'static str> {
+    map_fixes::player_io(entities).map(|m| m.map)
+}
+
+/// Every map in `game/map_fixes.rs` `PLAYER_IO` (tests, tools).
+pub fn map_player_io_table() -> Vec<&'static str> {
+    map_fixes::PLAYER_IO.iter().map(|m| m.map).collect()
+}
+
+/// The map a parsed entity lump matches in `game/map_fixes.rs` `NONLINEAR_OBJECTIVES` (tests, tools).
+pub fn map_nonlinear_objectives_for(entities: &[Entity]) -> Option<&'static str> {
+    map_fixes::nonlinear_objectives(entities).map(|m| m.map)
+}
+
+/// Every map in `game/map_fixes.rs` `NONLINEAR_OBJECTIVES` (tests, tools).
+pub fn map_nonlinear_objectives_table() -> Vec<&'static str> {
+    map_fixes::NONLINEAR_OBJECTIVES.iter().map(|m| m.map).collect()
 }
 
 /// The map a parsed entity lump matches in `game/map_fixes.rs` `SIGNED_DOOR_TRAVEL` (tests, tools).
@@ -326,7 +361,8 @@ pub fn physics_fixes(version: u32) -> Option<u32> {
         PHYSICS_V12 => Some(PHYSICS_FIX_V12),
         PHYSICS_V13 => Some(PHYSICS_FIX_V13),
         PHYSICS_V14 => Some(PHYSICS_FIX_V14),
-        PHYSICS_V15 => Some(PHYSICS_FIX_ALL),
+        PHYSICS_V15 => Some(PHYSICS_FIX_V15),
+        PHYSICS_V16 => Some(PHYSICS_FIX_ALL),
         v if v & !PHYSICS_DIAG_FIXES == PHYSICS_DIAG && v & PHYSICS_DIAG_FIXES & !PHYSICS_FIX_ALL == 0 => Some(v & PHYSICS_DIAG_FIXES),
         _ => None,
     }
@@ -1227,6 +1263,12 @@ pub struct Game {
     /// The map is in `map_fixes::SIGNED_DOOR_TRAVEL`: from physics v15 (`PHYSICS_FIX_MAP_DOOR_TRAVEL`) its movers use
     /// Source's signed travel. Fixed at load.
     map_signed_door_travel: bool,
+    /// The map is in `map_fixes::PLAYER_IO`: from physics v16 (`PHYSICS_FIX_MAP_PLAYER_IO`) the player keeps and fires
+    /// its own outputs and filters answer TestActivator. Fixed at load.
+    map_player_io: bool,
+    /// The map is in `map_fixes::NONLINEAR_OBJECTIVES`: its scripted triggers (entity, role); from physics v16
+    /// (`PHYSICS_FIX_MAP_PLAYER_IO`) `game/vscript.rs` runs their scripts. Empty elsewhere. Fixed at load.
+    script_triggers: Vec<(usize, vscript::ScriptRole)>,
 }
 
 /// Physics v4 world state the entity list doesn't hold; saved with the game state, cleared on reset.
@@ -1242,6 +1284,12 @@ struct Extra {
     game_ui: Option<minigame::ActiveUi>,
     /// func_breakables (SF_BREAK_PRESSURE) the player stood on, breaking after their pressuredelay (v5).
     pressure_breaks: std::collections::BTreeSet<usize>,
+    /// Outputs `AddOutput` gave the player (v16, `PHYSICS_FIX_MAP_PLAYER_IO` maps), in the order added; spent ones
+    /// (times 0) are dropped, as `CBaseEntityOutput::FireOutput` deletes them.
+    player_outputs: Vec<Output>,
+    /// Objective triggers the player collected (v16, `NONLINEAR_OBJECTIVES` maps: the script scope's
+    /// `nl_collectedObjectives`), entity indices in the order collected.
+    objectives: Vec<u32>,
 }
 
 impl Extra {
@@ -1262,6 +1310,22 @@ impl Extra {
         // (Empty before v5: the digest of older states is unchanged.)
         for i in &self.pressure_breaks {
             out.extend_from_slice(&(*i as u32 | 0x8000_0000).to_le_bytes());
+        }
+        // (Empty before v16 and on every map outside `map_fixes::PLAYER_IO`: those digests are unchanged.)
+        for o in &self.player_outputs {
+            for s in [&o.event, &o.target, &o.input, &o.param] {
+                out.extend_from_slice(s.as_bytes());
+                out.push(0);
+            }
+            out.extend_from_slice(&o.delay.to_le_bytes());
+            out.extend_from_slice(&o.times.to_le_bytes());
+        }
+        // (Empty before v16 and on every map outside `map_fixes::NONLINEAR_OBJECTIVES`: those digests are unchanged.)
+        if !self.objectives.is_empty() {
+            out.extend_from_slice(b"objectives\0");
+            for i in &self.objectives {
+                out.extend_from_slice(&i.to_le_bytes());
+            }
         }
         out
     }
@@ -1289,6 +1353,8 @@ impl Game {
         };
         let map_max_velocity = map_fixes::max_velocity(&entities).map(|m| m.max_velocity);
         let map_signed_door_travel = map_fixes::signed_door_travel(&entities).is_some();
+        let map_player_io = map_fixes::player_io(&entities).is_some();
+        let script_triggers = vscript::script_triggers(&entities);
         let physics::MapPhysics { prop_sources, world, texinfo_surface, props, diagnostics, displacement_count } =
             physics::build_with_entities(bsp, content, &entities, prop_mesh)?;
         let models: &[Model] = match bsp.lump(playsrc_bsp::MODELS).map(|l| &l.records) {
@@ -1379,6 +1445,8 @@ impl Game {
             map_trigger_boxes,
             map_max_velocity,
             map_signed_door_travel,
+            map_player_io,
+            script_triggers,
         };
         game.link_hierarchy();
         game.link_templates();
@@ -1521,6 +1589,10 @@ impl Game {
         self.player_name.clear();
         self.player_class.clear();
         self.player_class.push_str(PLAYER_CLASS);
+        // A restart is a fresh player: no outputs from the last attempt (v16; always empty elsewhere), and no objectives
+        // (v16 NONLINEAR_OBJECTIVES maps; in CS:S a respawn lands in the start room's script triggers, which clear them).
+        self.extra.player_outputs.clear();
+        self.extra.objectives.clear();
         if let (Some(_), Some((name, class))) = (self.restart_point, &self.restart_names) {
             self.player_name.clone_from(name);
             self.player_class.clone_from(class);
@@ -2024,6 +2096,37 @@ impl Game {
         }
     }
 
+    /// v16: the player's own outputs and filter tests run on this map (`map_fixes::PLAYER_IO`, `PHYSICS_FIX_MAP_PLAYER_IO`).
+    fn player_io(&self) -> bool {
+        self.map_player_io && self.settings.physics_fixes() & PHYSICS_FIX_MAP_PLAYER_IO != 0
+    }
+
+    /// `fire_output` for the outputs `AddOutput` gave the player (v16): caller = the player; spent outputs are removed.
+    fn fire_player_output(&mut self, event: &str, activator: Actor) {
+        let mut queued: Vec<_> = self
+            .extra
+            .player_outputs
+            .iter()
+            .filter(|o| &*o.event == event && o.times != 0)
+            .map(|o| (o.target.clone(), o.input.clone(), o.param.clone(), o.delay))
+            .collect();
+        // CBaseEntityOutput::AddEventAction prepends, so the SDK fires the newest first (v16 always has OUTPUT_ORDER).
+        if self.settings.physics_fixes() & PHYSICS_FIX_OUTPUT_ORDER != 0 {
+            queued.reverse();
+        }
+        for o in self.extra.player_outputs.iter_mut() {
+            if &*o.event == event && o.times > 0 {
+                o.times -= 1;
+            }
+        }
+        self.extra.player_outputs.retain(|o| o.times != 0);
+        for (target, input, param, delay) in queued {
+            let fire_time = self.io_time + delay.max(0.0);
+            self.seq += 1;
+            self.queue.push(QueuedEvent { fire_time, seq: self.seq, target, input, param, activator, caller: Actor::Player });
+        }
+    }
+
     /// Server time (gpGlobals->curtime) of server frame `frame` ticks after the reset tick: TICKS_TO_TIME.
     fn server_time(&self, frame: i64) -> f32 {
         let tick = i64::from(self.rules.server_tick_base) + frame;
@@ -2120,13 +2223,24 @@ impl Game {
         let input = input.to_ascii_lowercase();
         match target {
             Actor::None => {}
-            Actor::Player => self.player_input(&input, param),
+            Actor::Player => self.player_input(&input, param, activator),
             Actor::Entity(i) => self.entity_input(i, &input, param, activator),
         }
     }
 
-    fn player_input(&mut self, input: &str, param: &str) {
+    fn player_input(&mut self, input: &str, param: &str, activator: Actor) {
         match input {
+            // v16 (`PHYSICS_FIX_MAP_PLAYER_IO` maps): `AddOutput "OnUser1 target:input:param:delay:times"` gives the
+            // player an output (CBaseEntity::InputAddOutput -> KeyValue -> the output's ParseEventAction).
+            "addoutput" if self.player_io() && Output::parse_add_output(param).is_some() => {
+                self.extra.player_outputs.extend(Output::parse_add_output(param));
+            }
+            "fireuser1" | "fireuser2" | "fireuser3" | "fireuser4" if self.player_io() => {
+                let event = format!("onuser{}", &input[8..]);
+                self.fire_player_output(&event, activator);
+            }
+            // v16 (`NONLINEAR_OBJECTIVES` maps): the start room's `!activator,RunScriptFile,danzay/nonlinear.nut`.
+            "runscriptfile" if self.objectives_on() => self.run_script_file(param),
             "addoutput" => {
                 let (key, value) = param.trim().split_once(char::is_whitespace).unwrap_or((param.trim(), ""));
                 let value = value.trim();
@@ -2189,6 +2303,10 @@ impl Game {
         if self.ents[i].removed {
             return;
         }
+        // v16 (`NONLINEAR_OBJECTIVES` maps): a scripted trigger's ConnectOutput action runs its script function.
+        if input == "callscriptfunction" && self.objectives_on() && self.call_script_function(i, param, activator) {
+            return;
+        }
         // point_template / game_ui (v4).
         if self.settings.physics_fixes() & PHYSICS_FIX_GAME_ENTITIES != 0 {
             match (self.ents[i].class.as_str(), input) {
@@ -2208,6 +2326,17 @@ impl Game {
                 ("player_weaponstrip", "strip" | "stripweaponsandsuit") => return self.strip_player(),
                 _ => {}
             }
+        }
+        // v16 (`PHYSICS_FIX_MAP_PLAYER_IO` maps): CBaseFilter::InputTestActivator fires OnPass or OnFail with the
+        // input's activator, by the same PassesFilter test triggers use, applied to that activator.
+        if input == "testactivator" && matches!(self.ents[i].data, Data::Filter { .. }) && self.player_io() {
+            let pass = match activator {
+                Actor::None => return,
+                Actor::Player => self.filter_entity_passes(i, &self.player_name, &self.player_class, 0),
+                Actor::Entity(j) => self.filter_entity_passes(i, &self.ents[j].name, &self.ents[j].class, 0),
+            };
+            self.fire_output(i, if pass { "onpass" } else { "onfail" }, activator);
+            return;
         }
         // Inputs every entity accepts.
         match input {
@@ -2724,23 +2853,34 @@ impl Game {
     }
 
     fn passes_filter(&self, filter: Option<&str>, depth: u32) -> bool {
-        let Some(name) = filter else { return true };
+        self.passes_filter_as(filter, &self.player_name, &self.player_class, depth)
+    }
+
+    /// `passes_filter` for an entity with targetname `name` and classname `class` (the player, or a TestActivator
+    /// activator).
+    fn passes_filter_as(&self, filter: Option<&str>, name: &str, class: &str, depth: u32) -> bool {
+        let Some(filter) = filter else { return true };
         if depth > 8 {
             return true;
         }
         let Some(f) = self
             .ents
             .iter()
-            .find(|e| !e.removed && matches!(e.data, Data::Filter { .. }) && name_matches(name, &e.name))
+            .position(|e| !e.removed && matches!(e.data, Data::Filter { .. }) && name_matches(filter, &e.name))
         else {
             return true; // unresolved filter: m_hFilter is NULL, so everything passes
         };
-        let Data::Filter { kind, negated } = &f.data else { unreachable!() };
+        self.filter_entity_passes(f, name, class, depth)
+    }
+
+    /// CBaseFilter::PassesFilter of filter entity `f` for an entity named `name` of class `class`.
+    fn filter_entity_passes(&self, f: usize, name: &str, class: &str, depth: u32) -> bool {
+        let Data::Filter { kind, negated } = &self.ents[f].data else { return true };
         let pass = match kind {
-            FilterKind::Name(n) => name_matches(n, &self.player_name),
-            FilterKind::Class(c) => name_matches(c, &self.player_class),
+            FilterKind::Name(n) => name_matches(n, name),
+            FilterKind::Class(c) => name_matches(c, class),
             FilterKind::Multi { all, filters } => {
-                let mut results = filters.iter().map(|n| self.passes_filter(Some(n), depth + 1));
+                let mut results = filters.iter().map(|n| self.passes_filter_as(Some(n), name, class, depth + 1));
                 if *all { results.all(|r| r) } else { results.any(|r| r) }
             }
             FilterKind::PassAll | FilterKind::DamageType { .. } => true,
@@ -2862,6 +3002,10 @@ impl Game {
                         self.auto_movement_disabled |= no_auto_movement;
                     }
                     self.fire_output(i, "onstarttouch", Actor::Player);
+                    // v16 NONLINEAR_OBJECTIVES maps: the script's ConnectOutput("OnStartTouch", ...) action.
+                    if !self.script_triggers.is_empty() {
+                        self.script_start_touch(i);
+                    }
                     self.fire_output(i, "onstarttouchall", Actor::Player);
                 }
             }

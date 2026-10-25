@@ -110,16 +110,21 @@ export function settingsPanel(): HTMLElement {
     const range = h("input.nset-range", { type: "range", min: 1, max: 500, step: .1, "aria-label": `${name} slider` }) as HTMLInputElement;
     const box = h("input.num-input", { type: "number", min: .01, max: 1000, step: "any", "aria-label": name }) as HTMLInputElement;
     const reset = h("button.link-btn", { type: "button", title: `Back to ${fallback}` }, "Default") as HTMLButtonElement;
+    // Keep the local edit until the host echoes it; older periodic state can
+    // arrive both before the debounce and after the patch has been dispatched.
+    let draft: number | undefined;
     const send = (value: number, now: boolean): void => {
-      state.settings[key] = value; pendingSpeed[key] = value;
+      draft = value; pendingSpeed[key] = value;
       const flush = (): void => { speedTimer = 0; if (Object.keys(pendingSpeed).length) { save({ ...pendingSpeed }); for (const k of Object.keys(pendingSpeed)) delete pendingSpeed[k as keyof NativeSettings]; } };
       if (now) { window.clearTimeout(speedTimer); flush(); } else if (!speedTimer) speedTimer = window.setTimeout(flush, 100);
       sync();
     };
     const sync = (): void => {
-      const value = state.settings[key];
+      if (draft === state.settings[key]) draft = undefined;
+      const value = draft ?? state.settings[key];
       if (document.activeElement !== box) box.value = String(value);
-      range.value = String(value); reset.disabled = value === fallback;
+      if (draft !== undefined || document.activeElement !== range) range.value = String(value);
+      reset.disabled = value === fallback;
     };
     range.addEventListener("input", () => send(range.valueAsNumber, false));
     range.addEventListener("change", () => send(range.valueAsNumber, true));
@@ -141,7 +146,8 @@ export function settingsPanel(): HTMLElement {
       toggle("Separate vertical sensitivity", "separateVertical", "", "Use a different sensitivity for looking up and down."),
       number("Vertical sensitivity", "verticalSensitivity", .01, 100, .01, "", "Only used when separate vertical sensitivity is on.")),
     group("Turnbinds",
-      speed("Yaw speed", "yawSpeed", DEFAULT_YAW_SPEED, "cl_yawspeed", "How fast Turn left / Turn right (+left / +right) turn you, in degrees per second. Bind them under Keys > Turning.")));
+      speed("Yaw speed", "yawSpeed", DEFAULT_YAW_SPEED, "cl_yawspeed", "How fast Turn left / Turn right (+left / +right) turn you, in degrees per second. Bind them under Keys > Turning. Only 210°/s supports ranked submission; other speeds keep the attempt local."),
+      h("p.nset-hint", null, "For ranked turn binds, set both speeds to 210°/s. Using another speed keeps that attempt as a local replay.")));
   const display = h("div.nset-cols", null,
     group("Video",
       number("Field of view", "fov", 60, 130, 1, "", "Field of view in degrees.", "°"),
@@ -228,7 +234,8 @@ export function settingsPanel(): HTMLElement {
     group("Packs",
       pack("Sound effects", "sfxPack", "bunnyhop.lol SFX",
         "Custom sounds come from the sound folder in your Bunnyhop Native data directory. Name a file after the cue it replaces, such as jump.wav; WAV, MP3, FLAC or Ogg all work. Cues you haven't supplied keep the bunnyhop.lol sound."),
-      pack("Music", "musicPack", "bunnyhop.lol OST", "Custom music comes from the bgm folder beside it, played in filename order.")));
+      pack("Music", "musicPack", "No music", "This download does not include the bunnyhop.lol soundtrack. Choose Custom to play WAV, MP3, FLAC or Ogg files from the bgm folder in your Bunnyhop Native data directory, in filename order."),
+      h("p.nset-hint", null, "The default soundtrack is not included. Add your own tracks to the bgm folder and choose Custom.")));
 
   const discordState = h("span.nset-state");
   const discord = h("div.nset-cols", null,

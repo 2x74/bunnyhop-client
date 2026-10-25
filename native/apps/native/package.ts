@@ -41,6 +41,7 @@ function bundleMacLibraries(original:string,executable:string,frameworks:string)
 function notices(resources:string,extra:string[]){
  const to=join(resources,"licenses");copy(join(root,"apps/native/packaging/licenses"),to);
  copy(join(root,"apps/native/vendor/nlohmann/LICENSE.MIT"),join(to,"nlohmann-json.txt"));
+ for(const name of ["dr_libs","stb"])copy(join(root,"apps/native/vendor",name,"LICENSE"),join(to,`${name}.txt`));
  for(const name of ["JetBrainsMono-OFL.txt","LeagueGothic-OFL.txt"])copy(join(root,"tools/hermes/fonts",name),join(to,name));
  for(const name of ["LICENSE-playsrc","LICENSE.source-sdk-2013","thirdpartylegalnotices.txt","NOTICE-playsrc.md","SOURCE-SDK-NOTICES.md"])copy(join(root,"crates/vendor",name),join(to,name));
  const metadata=JSON.parse(run(["cargo","metadata","--format-version","1","--locked"]));

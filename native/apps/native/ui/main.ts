@@ -31,6 +31,7 @@ import { tutorialPanel } from "./tutorial-panel";
 import { nativeNavigate } from "./navigation";
 import { cosmeticsPanel,initCosmetics } from "./cosmetics";
 import { creditsPanel } from "./credits";
+import { homeActions, courseIllustration, watchMenuMotion, installMenuBackdrop } from "./home-menu";
 
 type Screen = "home" | "maps" | "settings" | "profile" | "replays" | "servers" | "room" | "ranks" | "stats" | "tutorial" | "loadout" | "credits";
 let screen: Screen = "home";
@@ -75,10 +76,6 @@ function selectMap(id: string): void {
   else { notice(`Loading ${id}…`); send({ type: "selectMap", id,style:state.style,track:0 }); }
 }
 function show(next: Screen): void { if(screen==="ranks"&&next!=="ranks")leaveRanksUrl();screen = next; notice(""); render(); }
-function button(label: string, action: () => void, primary = false, sub = ""): HTMLButtonElement {
-  return h(`button.menu-btn.home-item${primary ? ".primary" : ""}`, { type: "button", onclick: action },
-    h("span.mb-label", null, h("span.mb-title", null, label), sub ? h("small", null, sub) : null));
-}
 function heading(title: string): HTMLElement {
   return h("header.screen-head", null,
     h("button.screen-back", { type: "button", "aria-label": "Back", onclick: () => show("home") }, "←"),
@@ -92,25 +89,26 @@ function render(): void {
   status.textContent = state.error || (typeof state.loading === "string" ? state.loading : state.loading ? "Loading map…" : "");
   status.dataset.kind = state.error ? "error" : "";
   if (screen === "home") {
-    const menu = h("nav.home-menu.native-home-actions", { "aria-label": "Main menu" });
-    if (state.map) {
-      menu.append(button("Resume", () => send({ type: "resume" }), true, state.map),
-        button("Restart", () => send({ type: "restart" })));
-    }
-    menu.append(button("Play", () => show("maps"), !state.map),button(roomService.view.id?"Current room":"Play online",()=>show(roomService.view.id?"room":"servers")),button("Tutorial",()=>show("tutorial")),button("Loadout",()=>show("loadout")),button("Ranks",()=>show("ranks")),button("Statistics",()=>show("stats")),button("Replays",()=>show("replays")), button("Settings", () => show("settings")), button("Credits", () => show("credits")), button("Quit", () => send({ type: "quit" })));
+    const menu = homeActions({map:state.map,room:!!roomService.view.id,
+      navigate:next=>show(next),resume:()=>send({type:"resume"}),
+      restart:()=>send({type:"restart"}),quit:()=>send({type:"quit"})});
     for (const control of menu.querySelectorAll<HTMLButtonElement>("button")) control.disabled = !!state.loading;
     const current = h("section.native-current", { "aria-label": state.map ? "Current map" : "Play bunnyhop" });
     if (state.map) {
-      current.append(mapArt(state.map, null, { className: "native-current-art" }), h("h2", null, state.map), h("p.dim", null, "Esc opens this menu."));
+      current.append(mapArt(state.map, null, { className: "native-current-art" }), h("h2", null, state.map), h("p.dim", null, "Your next hop is right where you left it."));
       void fetchMapIndex().then((maps) => {
         if (screen!=="home" || !current.isConnected || !state.map) return;
         registerMapImages(maps);
         current.querySelector(".native-current-art")?.replaceWith(mapArt(state.map, null, { className: "native-current-art" }));
       });
-    } else current.append(h("h1", null, "Keep your speed."), h("p.dim", null, "Pick a map and start hopping."), h("p.native-controls", null, "WASD move · Mouse look · Space / wheel jump · Ctrl crouch"));
-    const style=h("select.native-style",{"aria-label":"Play style"},...STYLE_DEFS.map(item=>h("option",{value:item.id,title:item.rule},item.name)));style.value=state.style;style.addEventListener("change",()=>{if(isStyleId(style.value)){setSelectedStyle(style.value);}});
+    } else current.append(courseIllustration(),h("div.native-scene-caption",null,
+      h("p.native-eyebrow",null,"A little further. A little faster."),
+      h("h2",null,"Find your flow."),h("p.dim",null,"One more jump. One better run.")));
+    const style=h("select.native-style",{"aria-label":"Play style"},...STYLE_DEFS.map(item=>h("option",{value:item.id,title:item.rule},item.name)));style.value=state.style;style.disabled=!!state.loading;style.addEventListener("change",()=>{if(isStyleId(style.value)){setSelectedStyle(style.value);}});
     app.replaceChildren(h("section.native-home.screen-home", null,
-      h("div.native-home-left", null, h("div.home-brand", null, wordmark("xl")),h("div#native-finish-result"),h("label.native-style-row",null,h("span.dim",null,"Style"),style), menu), current));
+      h("div.native-home-left", null, h("div.home-brand", null, wordmark("xl")),
+        h("p.native-home-intro",null,state.map?"Take a breath. Keep your momentum.":"The art of getting there faster."),
+        h("div#native-finish-result"), menu,h("label.native-style-row",null,h("span",null,"Play style"),style)), current));
     paintFinish();
     arrowNav(menu, ".home-item");
   } else if (screen === "maps") {
@@ -216,6 +214,9 @@ window.addEventListener("bunnyhop:navigate",event=>{
 });
 document.getElementById("native-account")!.append(accountChip());
 initSocial();initDock();initCosmetics();
+document.querySelector(".native-hi")?.remove();
+installMenuBackdrop();
+watchMenuMotion();
 render();
 const graphics = window.__nativeMenuGraphics;
 send({ type: "ready", origin: location.origin, webglContexts: graphics?.contexts ?? 0, webglAttempts: graphics?.attempts ?? 0 });

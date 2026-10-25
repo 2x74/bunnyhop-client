@@ -149,6 +149,9 @@ fn c_layouts_are_stable() {
     assert_eq!(size_of::<BhSurfaceProbe>(), 16);
     assert_eq!(size_of::<BhLookSample>(), 40);
     assert_eq!(offset_of!(BhLookSample, count), 16);
+    assert_eq!(size_of::<BhLookSampleV2>(), 48);
+    assert_eq!(offset_of!(BhLookSampleV2, count), 16);
+    assert_eq!(offset_of!(BhLookSampleV2, epoch), 24);
     assert_eq!(size_of::<BhGhostFrame>(), 48);
     assert_eq!(size_of::<BhReplayEvents>(), 12);
     assert_eq!(size_of::<BhSkyInfo>(), 76);
@@ -846,6 +849,10 @@ fn counted_telemetry_matches_shared_recorder_rebases_and_decoder() {
         ("counted9", true, false, false, 9),
         ("missing", false, true, false, 7),
         ("rawnegative", false, false, true, 7),
+        ("turns8", false, false, false, 8),
+        ("turns10", false, false, false, 10),
+        ("turns10-stamina", true, false, false, 10),
+        ("fractional-no-turns", false, false, false, 7),
     ] {
         let settings = if stamina {
             styles::settings("scroll").unwrap()
@@ -857,16 +864,31 @@ fn counted_telemetry_matches_shared_recorder_rebases_and_decoder() {
         let mut commands = Vec::new();
         let mut looks = Vec::new();
         for i in 0..150 {
-            let l = BhLookSample {
+            let mut l = BhLookSampleV2 {
                 base: if i < 70 { 350.125 } else { 17.0 },
                 k: 0.022,
-                count: if i < 70 { i * 3 } else { (i - 70) * 7 },
+                count: f64::from(if i < 70 { i * 3 } else { (i - 70) * 7 }),
                 epoch: u32::from(i >= 70),
                 kind: if i < 70 { 1 } else { 2 },
                 frames: 1,
                 events: 2,
                 reports: if i == 15 { 99999 } else { 8 },
             };
+            if case.contains("10") || case == "fractional-no-turns" {
+                l.count += 0.5;
+            }
+            let turn = case.starts_with("turns") && i >= 20 && i < 40;
+            if turn {
+                l.base += f64::from(i - 19) * 210.0 * f64::from(settings.tick_interval);
+                l.epoch = i as u32;
+                l.kind = if i == 25 {
+                    5 | 128
+                } else if i == 30 {
+                    2 | 128
+                } else {
+                    6
+                };
+            }
             let yaw = if i == 12 {
                 123.45
             } else if negative && i == 13 {
@@ -879,7 +901,7 @@ fn counted_telemetry_matches_shared_recorder_rebases_and_decoder() {
                 side: if i % 2 == 0 { 450.0 } else { -450.0 },
                 yaw,
                 pitch: i as f32 / 9.0,
-                buttons: ((i as u32) << 16) | 2,
+                buttons: ((i as u32) << 16) | 2 | if turn { 1 << 7 } else { 0 },
             });
             looks.push(if missing && i == 23 { None } else { Some(l) });
         }

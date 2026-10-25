@@ -29,6 +29,7 @@ class Audio {
     // replacing it: supplying one jump.wav should change the jump, not silence
     // the eighty cues the player did not supply.
     std::unordered_map<std::string,std::vector<std::vector<float>>> custom;
+    const bool enabled_;
     bool use_custom_sfx=false;
     std::string sfx_status_text;
     std::array<Voice,48> voices{};
@@ -88,7 +89,7 @@ class Audio {
             }
             auto mono=to_mono(decoded);
             // A rate of zero means raw float already at the mixer's rate.
-            if(decoded.rate>0&&decoded.rate!=mixer_rate)mono=resample_mono(mono,decoded.rate,mixer_rate);
+            if(decoded.rate>0&&decoded.rate!=mixer_rate)mono=resample_mono(mono,decoded.rate,mixer_rate,budget);
             if(mono.empty()||mono.size()>budget) {++skipped;continue;}
             budget-=mono.size();
             custom[id].push_back(std::move(mono));
@@ -123,7 +124,7 @@ class Audio {
 
 public:
     Audio(const std::filesystem::path &assets,const std::filesystem::path &data,bool enabled=true)
-        :assets_root(assets),data_root(data) {
+        :enabled_(enabled),assets_root(assets),data_root(data) {
         if(!enabled)return;
         try {
             std::ifstream meta(assets/"audio.json");nlohmann::json manifest;meta>>manifest;
@@ -151,6 +152,7 @@ public:
 
     // "default" is the bunnyhop.lol pack, anything else is the player's own.
     void set_sfx_pack(bool custom_pack) {
+        if(!enabled_)return;
         if(custom_pack==use_custom_sfx&&(!custom_pack||!custom.empty()))return;
         // Every voice points into one of the banks, so nothing may still be
         // playing while they are rebuilt.
@@ -161,6 +163,7 @@ public:
         rebind_wind();
     }
     void set_music_pack(bool custom_pack) {
+        if(!enabled_)return;
         if(custom_pack)
             music.set_playlist(scan_music_pack(data_root/"bgm"),
                 "No music yet. Drop audio files into "+(data_root/"bgm").string()+" to hear them here.");
@@ -168,11 +171,11 @@ public:
             music.set_playlist(shipped_music(),"The bunnyhop.lol OST is not bundled with this build.");
     }
     // Called once a frame: music decoding cannot run on the audio thread.
-    void pump() {music.pump();}
+    void pump() {if(enabled_)music.pump();}
     const std::string &sfx_status() const {return sfx_status_text;}
     const std::string &music_status() const {return music.status();}
     const std::string &music_title() const {return music.title();}
-    void skip_track() {music.skip();}
+    void skip_track() {if(enabled_)music.skip();}
 
     void gain(float value){
         music.gain(value);

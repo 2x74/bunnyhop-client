@@ -12,6 +12,8 @@ namespace {
 bool close(double a,double b,double tolerance=1e-5) { return std::abs(a-b)<tolerance; }
 }
 int main() {
+    static_assert(sizeof(BhLookSample)==40 && offsetof(BhLookSample,count)==16);
+    static_assert(sizeof(BhLookSampleV2)==48 && offsetof(BhLookSampleV2,epoch)==24);
     native::Input input;
     input.set_angles(0,90);
     for(int i=0;i<10000;++i) input.motion(.125,.001);
@@ -49,7 +51,7 @@ int main() {
     assert(close(native::Input::normalize(telemetry->base-telemetry->count*telemetry->k),mouse.command().yaw,1e-4));
     telemetry=mouse.look_sample();assert(telemetry->frames==0 && telemetry->events==0 && telemetry->count==2);
     mouse.motion(.125,0);const auto fractional_yaw=mouse.yaw();
-    assert(!mouse.look_sample() && close(mouse.yaw(),fractional_yaw));
+    assert(mouse.look_sample()->count==2.125 && close(mouse.yaw(),fractional_yaw));
     const auto epoch=mouse.epoch;mouse.set_sensitivity(3);
     telemetry=mouse.look_sample();assert(telemetry && telemetry->kind==4 && telemetry->epoch==epoch+1 && telemetry->count==0);
     assert(close(mouse.yaw(),fractional_yaw));
@@ -138,6 +140,69 @@ int main() {
         // the paused path and the render camera rely on.
         native::Input in;in.accumulate(7,1);in.arrived(50);in.take_tick(0,10);
         in.consume_all();assert(in.pending_counts()==0&&in.yaw_counts==7&&!in.have_split);
+    }
+
+    {
+        // Integral totals must not erase fractional report provenance on either axis.
+        native::Input in;
+        in.accumulate(.5,.5);in.accumulate(.5,.5);in.arrived(20);
+        in.take_tick(0,10);
+        assert(close(in.yaw_counts,.5)&&close(in.pitch,.5*.044));
+        assert(in.look_sample()->count==.5);
+        in.take_tick(10,20);
+        assert(close(in.yaw_counts,1)&&close(in.pitch,.044));
+        assert(!in.fractional_x&&!in.fractional_y);
+        // Cancellation to zero also keeps provenance until the pending span ends.
+        in.accumulate(.5,0);in.accumulate(-.5,0);in.accumulate(1,0);in.arrived(40);
+        in.take_tick(20,30);assert(close(in.yaw_counts,1.5));
+        in.clear();assert(!in.fractional_x&&!in.fractional_y);
+    }
+    {
+        native::Input in;in.set_angles(0,90);in.motion(.5,0);in.frame();
+        in.turn(210,.01);
+        auto l=in.look_sample();auto cmd=in.command();
+        assert(l&&l->kind==(1|128)&&l->count==.5&&l->events==1&&l->frames==1);
+        assert(cmd.buttons==native::turn_left&&close(l->base,92.1));
+        in.motion(1,0);in.turn(-210,.01);l=in.look_sample();cmd=in.command();
+        assert(l->kind==6&&l->count==1.5&&close(l->base,90));
+        assert(cmd.buttons==native::turn_right&&in.command().buttons==0);
+        in.set_angles(0,180,2);in.turn(210,.01);assert(in.look_sample()->kind==(2|128));
+        in.set_yaw(10,5);in.turn(210,.01);assert(in.look_sample()->kind==(5|128));
+        in.motion(.5,0);in.turn(118.888888,.01);l=in.look_sample();
+        assert(l->kind==(5|128)&&l->count==.5); // Custom rate is never passed off as canonical.
+        const double yaw=in.yaw();in.command();
+        in.turn(std::numeric_limits<double>::infinity(),.01);in.turn(210,0);in.turn(1001,.01);
+        assert(in.yaw()==yaw&&in.command().buttons==0);
+        assert(!native::turn_binds_allowed("scroll",false));
+        assert(native::turn_binds_allowed("scroll",true)&&native::turn_binds_allowed("wonly",false));
+        assert(native::configured_turn_rate(true,true,210)==0);
+        assert(native::configured_turn_rate(false,false,210)==0);
+        assert(native::configured_turn_rate(true,false,.01)==.01);
+        assert(native::configured_turn_rate(false,true,1000)==-1000);
+        assert(native::configured_turn_rate(true,false,.009)==0);
+        assert(native::configured_turn_rate(true,false,std::numeric_limits<double>::quiet_NaN())==0);
+        native::TurnAdmission admission;
+        assert(!admission.observe(210)&&!admission.observe(-210)&&!admission.observe(0));
+        assert(admission.allows_event("finish"));
+        assert(admission.observe(118.888888));
+        assert(!admission.allows_event("beat")&&!admission.allows_event("finish"));
+        assert(admission.allows_event("reset")&&!admission.observe(210)&&admission.local_only);
+        admission.reset();assert(admission.allows_event("finish"));
+        assert(admission.observe(210,true)&&!admission.allows_event("finish")); // scroll practice is local too
+    }
+    {
+        using namespace std::chrono;
+        native::InputClock clock;
+        const auto start=native::InputClock::Clock::time_point{};
+        clock.reset(start);
+        clock.reset(start+milliseconds(250)); // blocking reset work has finished
+        assert(clock.elapsed(start+milliseconds(250))==0); // no 25 stale ticks
+        assert(close(clock.elapsed(start+milliseconds(260)),.01));
+        clock.reset(start+milliseconds(280));
+        assert(clock.elapsed(start+milliseconds(270))==0); // stale frame timestamp cannot rewind reset
+        assert(close(clock.elapsed(start+milliseconds(290)),.01));
+        native::Input in;in.frame();in.motion(1,2);in.accumulate(3,4);in.clear();
+        assert(in.frames==0&&in.motion_events==0&&in.acc_events==0);
     }
 
     std::cout << "Native input and Source camera checks passed\n";

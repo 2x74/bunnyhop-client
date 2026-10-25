@@ -1,5 +1,6 @@
 //! Per-map fixes: trigger boxes (physics v8, `PHYSICS_FIX_MAP_TRIGGERS`), sv_maxvelocity (physics v14,
-//! `PHYSICS_FIX_MAP_MAX_VELOCITY`) and Source's signed door travel (physics v15, `PHYSICS_FIX_MAP_DOOR_TRAVEL`).
+//! `PHYSICS_FIX_MAP_MAX_VELOCITY`), Source's signed door travel (physics v15, `PHYSICS_FIX_MAP_DOOR_TRAVEL`), the
+//! player's own outputs and filter tests and DanZay's VScript objective gates (physics v16, `PHYSICS_FIX_MAP_PLAYER_IO`).
 //! Data, not code per map.
 //!
 //! A fix names a map by keyvalues of its worldspawn and of every trigger it changes, and gives each of those triggers a
@@ -183,4 +184,80 @@ pub(crate) const SIGNED_DOOR_TRAVEL: &[SignedDoorTravel] = &[SignedDoorTravel {
 pub(crate) fn signed_door_travel(entities: &[Entity]) -> Option<&'static SignedDoorTravel> {
     let world = entities.iter().find(|e| e.classname().eq_ignore_ascii_case("worldspawn"))?;
     SIGNED_DOOR_TRAVEL.iter().find(|m| m.worldspawn.iter().all(|(k, v)| world.get(k) == Some(*v)))
+}
+
+/// Maps whose route needs the player's own outputs and filter tests (physics v16, `PHYSICS_FIX_MAP_PLAYER_IO`), matched
+/// by worldspawn keyvalues like `MAX_VELOCITY`.
+///
+/// All three use the same "collect N items" prefab: touching an item renames the player and adds an output to the
+/// player (`!activator,AddOutput,OnUser1 <filter>:testactivator::0:1`); the next `!activator,FireUser1` fires those
+/// outputs, and a chain of filter_activator_name `TestActivator` inputs (`OnPass` / `OnFail`) adds 1 to a math_counter
+/// per item held. At its max the counter renames the player (`!activator,AddOutput,targetname <pass name>`), and a
+/// filtered trigger_teleport in front of the rest of the course lets only that name through. Before v16 the core
+/// dropped all three links (player outputs, FireUser on the player, TestActivator), so the counter never moved and the
+/// teleport sent every player back. Audit of every local BSP (2026-10-25, research/SYNTHETIC-DOOR-1025.md): these three
+/// are the only maps that add outputs to the player and fire them.
+pub(crate) struct PlayerIo {
+    pub map: &'static str,
+    /// Worldspawn keyvalues that must match exactly (bounds and Hammer's mapversion pin the build).
+    pub worldspawn: &'static [(&'static str, &'static str)],
+    /// Why, for the reader.
+    #[allow(dead_code)]
+    pub reason: &'static str,
+}
+
+pub(crate) const PLAYER_IO: &[PlayerIo] = &[
+    PlayerIo {
+        map: "bhop_synthetic_fix",
+        worldspawn: &[("world_mins", "-15884 -16291 -14628"), ("world_maxs", "15856 16291 13654"), ("mapversion", "50")],
+        reason: "stage 3's potion room: three potions (trigger_multiple *100..*102) feed counter_potcount, whose max \
+                 renames the player potpass; the door (trigger_teleport *98, filter_potpass, the room's whole exit) \
+                 sends everyone else back to teleport_12. Its stage 4 / 7 tick plates also send filter_*,TestActivator \
+                 (feedback 2026-10-25, GothQueen: \"The door doesn't seem to open after collecting three bottles\")",
+    },
+    PlayerIo {
+        map: "bhop_wonderland",
+        worldspawn: &[("world_mins", "-11616 -16184 -13814"), ("world_maxs", "12588 15864 2454"), ("mapversion", "136")],
+        reason: "the cp3 key room: three keys (*241..*243) feed counter, whose max renames the player ng0_pass; only \
+                 that name takes the exit teleport *244 to cp4a",
+    },
+    PlayerIo {
+        map: "bhop_lego3",
+        worldspawn: &[("world_mins", "-13216 -4576 -3680"), ("world_maxs", "11136 12288 1856"), ("mapversion", "4978")],
+        reason: "three coins (*3..*5) feed counter at checking_trigger *171, whose max renames the player ng0_pass; \
+                 everyone else meets the denied teleport *178 and push *177",
+    },
+];
+
+/// The map's player-I/O entry, if `entities` is one of the `PLAYER_IO` builds.
+pub(crate) fn player_io(entities: &[Entity]) -> Option<&'static PlayerIo> {
+    let world = entities.iter().find(|e| e.classname().eq_ignore_ascii_case("worldspawn"))?;
+    PLAYER_IO.iter().find(|m| m.worldspawn.iter().all(|(k, v)| world.get(k) == Some(*v)))
+}
+
+/// Maps whose route goes through DanZay's VScript objective gates (`scripts/vscripts/danzay/nonlinear*.nut`), which
+/// physics v16 emulates natively on these maps only (`PHYSICS_FIX_MAP_PLAYER_IO`, `game/vscript.rs`), matched by
+/// worldspawn keyvalues like `PLAYER_IO`. The core runs no VScript; without the emulation the gates do nothing.
+/// Scan of every catalogue BSP (2026-10-24, research/RELEASE-MAPS-DISCORD-1024.md): the only map with scripts.
+pub(crate) struct NonlinearObjectives {
+    pub map: &'static str,
+    /// Worldspawn keyvalues that must match exactly (bounds and Hammer's mapversion pin the build).
+    pub worldspawn: &'static [(&'static str, &'static str)],
+    /// Why, for the reader.
+    #[allow(dead_code)]
+    pub reason: &'static str,
+}
+
+pub(crate) const NONLINEAR_OBJECTIVES: &[NonlinearObjectives] = &[NonlinearObjectives {
+    map: "bhop_cooksassistant",
+    worldspawn: &[("world_mins", "0 0 0"), ("world_maxs", "8192 8704 576"), ("mapversion", "1085")],
+    reason: "the cook's kitchen (end zone) is behind two doorways, each a rebound gate (*10, *12) and a teleport gate \
+             (*3, *11) named 4: 4 of the 4 ingredient triggers (*4..*7) must be touched since the start room's reset \
+             (*8, *9). Without them the end is a 13 s walk from the start (SourceJump WR for the quest: 32.6 s)",
+}];
+
+/// The map's objective-system entry, if `entities` is one of the `NONLINEAR_OBJECTIVES` builds.
+pub(crate) fn nonlinear_objectives(entities: &[Entity]) -> Option<&'static NonlinearObjectives> {
+    let world = entities.iter().find(|e| e.classname().eq_ignore_ascii_case("worldspawn"))?;
+    NONLINEAR_OBJECTIVES.iter().find(|m| m.worldspawn.iter().all(|(k, v)| world.get(k) == Some(*v)))
 }

@@ -111,6 +111,10 @@ int main() {
         receive(4);
         assert(got[3].payload["cmd"] == "SET_ACTIVITY" && !got[3].payload["args"]["activity"].contains("secrets"));
         assert(got[3].payload["args"]["activity"]["buttons"][0]["label"] == "Play Bunnyhop");
+        // Successful RPC replies use evt:null; that is not a malformed event.
+        say(d::op_frame, {{"cmd", "SET_ACTIVITY"}, {"evt", nullptr}, {"data", Json::object()}});
+        client.update(true, activity);
+        assert(client.state == "ready");
         // Ping is answered.
         say(d::op_ping, {{"n", 7}});
         receive(5);
@@ -130,6 +134,55 @@ int main() {
         assert(client.state == "disabled");
         close(server); std::filesystem::remove_all(dir);
     }
+    {
+        // Syntactically valid JSON with invalid protocol field types used to
+        // escape Client::update after decode_frames' catch and exit the game.
+        const auto dir = std::filesystem::temp_directory_path() / ("bh-discord-types-" + std::to_string(getpid()));
+        std::filesystem::create_directories(dir);
+        setenv("XDG_RUNTIME_DIR", dir.c_str(), 1);
+        const auto path = (dir / "discord-ipc-0").string();
+        const int server = socket(AF_UNIX, SOCK_STREAM, 0);
+        sockaddr_un addr{}; addr.sun_family = AF_UNIX; std::strcpy(addr.sun_path, path.c_str());
+        assert(bind(server, reinterpret_cast<sockaddr *>(&addr), sizeof addr) == 0 && listen(server, 1) == 0);
+        const std::vector<d::Frame> malformed{
+            {d::op_frame, {{"cmd", nullptr}, {"evt", "READY"}}},
+            {d::op_frame, {{"cmd", 7}, {"evt", "READY"}}},
+            {d::op_frame, {{"cmd", Json::array()}, {"evt", "READY"}}},
+            {d::op_frame, {{"evt", "READY"}}},
+            {d::op_frame, {{"cmd", "DISPATCH"}, {"evt", 7}}},
+            {d::op_frame, {{"cmd", "DISPATCH"}, {"evt", Json::object()}}},
+            {d::op_frame, Json::array()},
+            {d::op_close, nullptr},
+            {d::op_close, {{"message", 42}}},
+            {d::op_close, {{"message", nullptr}}},
+            {d::op_frame, {{"cmd", "SUBSCRIBE"}, {"evt", "ERROR"}, {"data", {{"message", 42}}}}},
+            {d::op_frame, {{"cmd", "SET_ACTIVITY"}, {"evt", "ERROR"}, {"data", {{"message", nullptr}}}}},
+            {d::op_frame, {{"cmd", "SET_ACTIVITY"}, {"evt", "ERROR"}, {"data", Json::array()}}},
+        };
+        for (const auto &frame : malformed) {
+            d::Client client;
+            bool joined = false;
+            client.on_join = [&](const std::string &) { joined = true; };
+            client.update(true, Json::object());
+            assert(client.state == "connecting");
+            const int peer = accept(server, nullptr, nullptr); assert(peer >= 0);
+            // A valid frame following the malformed one must never be acted on.
+            const auto bytes = d::encode_frame(frame.op, frame.payload) + d::encode_frame(d::op_frame,
+                {{"cmd", "DISPATCH"}, {"evt", "ACTIVITY_JOIN"}, {"data", {{"secret", "bh1:s:eu-1"}}}});
+            assert(send(peer, bytes.data(), bytes.size(), 0) == ssize_t(bytes.size()));
+            for (int i = 0; i < 50 && client.state != "reconnecting"; ++i) {
+                client.update(true, Json::object());
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
+            assert(client.state == "reconnecting" && !client.message.empty() && !joined);
+            client.update(true, Json::object()); // Retry backoff remains usable.
+            assert(client.state == "reconnecting");
+            client.update(false, Json()); assert(client.state == "disabled");
+            close(peer);
+        }
+        close(server); std::filesystem::remove_all(dir);
+    }
+
 #endif
     std::cout << "discord rpc ok\n";
 }

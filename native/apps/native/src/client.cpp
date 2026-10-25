@@ -4,6 +4,7 @@
 #include "menu_webview.hpp"
 #include "online.hpp"
 #include "renderer.hpp"
+#include "menu_scene.hpp"
 #include "hud.hpp"
 #include "ssj.hpp"
 #include "strafe_trainer.hpp"
@@ -42,7 +43,7 @@ struct Options {
     std::string map, content_root, screenshot, online_map, menu_html = BUNNYHOP_MENU_HTML, menu_smoke;
     uint64_t frames = 0;
     double sensitivity = 2;
-    bool hidden = false, help = false, no_menu = false, sensitivity_set=false;
+    bool hidden = false, help = false, no_menu = false, sensitivity_set=false, menu_home_smoke=false;
     std::string style="autohop", replay,tutorial_lesson;bool tutorial_demo=false;
 };
 Options options(int argc, char **argv) {
@@ -58,6 +59,7 @@ Options options(int argc, char **argv) {
         else if (arg == "--online-map") out.online_map = value();
         else if (arg == "--menu-html") out.menu_html = value();
         else if (arg == "--menu-smoke") out.menu_smoke = value();
+        else if (arg == "--menu-home-smoke") {out.menu_smoke=value();out.menu_home_smoke=true;}
         else if (arg == "--no-menu") out.no_menu = true;
         else if (arg == "--content-root") out.content_root = value();
         else if (arg == "--screenshot") out.screenshot = value();
@@ -81,6 +83,8 @@ Options options(int argc, char **argv) {
     if (!out.online_map.empty() && !native::valid_map_id(out.online_map)) throw std::runtime_error("Invalid online map name");
     if (out.map.empty() && out.online_map.empty() && (out.no_menu || out.frames) && !out.help)
         throw std::runtime_error("This mode needs --map or --online-map");
+    if(out.menu_home_smoke && (!out.map.empty()||!out.online_map.empty()||out.frames||out.no_menu||!out.replay.empty()||!out.tutorial_lesson.empty()))
+        throw std::runtime_error("Home menu smoke must start without a map or gameplay mode");
     return out;
 }
 
@@ -200,6 +204,10 @@ int run(const Options &opt) {
     }
     if(!menu && opt.map.empty() && opt.online_map.empty())
         throw std::runtime_error("Menus are unavailable on this build; use --map PATH or --online-map NAME");
+    std::unique_ptr<native::MenuScene<Gl>> menu_scene;
+    bool menu_reduced_motion=true,menu_backdrop_sent=false;
+    if(menu)try {menu_scene=std::make_unique<native::MenuScene<Gl>>(gl);}
+    catch(const std::exception &e){std::cerr<<"Menu scene unavailable: "<<e.what()<<'\n';}
     bool captured=false,focused=true,running=true,menu_ready=false,smoke_requested=false,smoke_pass=false,smoke_snapshot=false,resume_wanted=false;
     bool recording_ended=false;
     auto preferences=native::default_settings();
@@ -249,17 +257,14 @@ int run(const Options &opt) {
     }
     // Jump stats (!ssj). Display only — it reads the same pre-state, command and
     // events the simulation already produced and never feeds anything back.
-    native::SsjTracker ssj;
+    native::MovementFeedback feedback;
+    native::TurnAdmission turn_admission;
     const native::SsjFields ssj_fields;
-    std::string ssj_line;
-    bool ssj_good=false;
-    // The reference samples the state from BEFORE the tick, so the zone and
-    // noclip flags are carried from the previous one rather than read after.
-    bool ssj_was_in_start=false,ssj_was_noclip=false;
-    // Strafe trainer: the latest reading, cleared once you've been on the ground a while.
-    native::StrafeTrainer strafe_trainer;
-    std::optional<native::StrafeReading> strafe_reading;
-    unsigned strafe_ground_ticks=0;
+    auto reset_feedback=[&](bool incomplete_history=false) {
+        BhRunState timing{}; BhSnapshot snapshot{};
+        if(core){bh_run_state(core.get(),&timing);bh_snapshot(core.get(),&snapshot);}
+        feedback.reset(timing.in_start!=0,snapshot.movement_mode==1,incomplete_history);
+    };
     uint64_t run_generation=0;
     uint32_t beat_start=0,beat_upto=0,beat_hash=0x811c9dc5;
     bool beat_paused=false;
@@ -270,14 +275,17 @@ int run(const Options &opt) {
     std::future<native::DownloadedMap> download;
     struct CancelDownload { std::atomic_bool &flag; ~CancelDownload(){flag=true;} } cancel_on_exit{cancel_download};
     double accumulator=0;
+    using Clock=std::chrono::steady_clock;
+    native::InputClock input_clock;
     // A focus, menu or restart reset: the simulation starts again from now and
     // motion from before it is dropped rather than handed to the next tick.
-    auto reset_input_timing=[&]() {accumulator=0;input.clear();};
+    auto reset_input_timing=[&]() {accumulator=0;input.clear();input_clock.reset();};
     auto capture=[&](bool on) {
         reset_input_timing();held_codes.clear();
         if (!SDL_SetWindowRelativeMouseMode(window.get(),on)) {
             captured=false; std::cerr << "Relative mouse mode failed: " << SDL_GetError() << '\n';
         } else captured=on;
+        input_clock.reset();
     };
     auto show_menu=[&](bool on) {
         if(menu) menu->set_visible(on);
@@ -287,6 +295,7 @@ int run(const Options &opt) {
         capture(resume_wanted && focused); accumulator=0; prev=curr;
     };
     auto run_event=[&](nlohmann::json event) {
+        if(!turn_admission.allows_event(event.value("type",std::string())))return;
         if(!menu || !menu_ready || opt.frames || !opt.menu_smoke.empty()) return;
         event["generation"]=run_generation;event["map"]=map_id;event["style"]=active_style;
         event["build"]=identity.value("build",std::string("bunnyhop-native/local"));
@@ -294,6 +303,8 @@ int run(const Options &opt) {
         menu->evaluate_js("window.bunnyhopNativeMenu?.onRunEvent?.("+event.dump()+")");
     };
     auto begin_record=[&]() {
+        if(turn_admission.local_only)score_notice.clear();
+        turn_admission.reset();
         recording_ended=false; record_path.clear();
         ++run_generation;beat_start=beat_upto=0;beat_hash=0x811c9dc5;beat_paused=false;
         run_event({{"type","reset"}});
@@ -333,7 +344,7 @@ int run(const Options &opt) {
         }
         if(renderer){renderer->reset_presentation();renderer->set_viewmodel_weapon(std::nullopt);renderer->set_cosmetics(outfit,packed_loadout);}
         audio.reset();prev=curr;reset_input_timing();input.set_angles(curr.teleport_angles[0],curr.teleport_angles[1]);
-        begin_record();
+        begin_record();reset_feedback();reset_input_timing();
     };
     auto apply_room_mode=[&](const native::RoomModeAction &action){
         if(action.stop_spectating&&menu&&menu_ready)menu->evaluate_js("window.bunnyhopNativeMenu?.onRoomCommand?.({t:'spec',target:null})");
@@ -398,7 +409,7 @@ int run(const Options &opt) {
             renderer->set_cosmetics(outfit,(playback_info.contains("packedLoadout")&&playback_info["packedLoadout"].is_string()?playback_info["packedLoadout"].get<std::string>():std::string()));
             playback=true;playback_paused=false;playback_speed=1;playback_id=path.filename().string();recording_ended=true;record_path.clear();
             BhCmd cmd{};bh_last_command(core.get(),&cmd);bh_state(core.get(),&curr);prev=curr;input.set_angles(cmd.pitch,cmd.yaw);
-            accumulator=0;show_menu(false);
+            reset_feedback();reset_input_timing();show_menu(false);
         }
     };
     auto request_replay=[&](const std::filesystem::path &path,const std::string &action) {
@@ -428,10 +439,11 @@ int run(const Options &opt) {
     // Turnbinds: +left / +right turn at yawSpeed degrees per second (cl_yawspeed),
     // or yawSpeedAlt while Turn modifier is held. Positive is left (yaw goes up).
     auto turn_rate=[&]()->double {
+        if(!captured || !native::turn_binds_allowed(active_style,
+            (tutorial&&tutorial->is_active()) || feedback.ssj_was_noclip))return 0;
         auto held=[&](const char *action){for(const auto &key:preferences.at("binds").at(action))if(held_codes.contains(key.get<std::string>()))return true;return false;};
-        const int dir=int(held("turnLeft"))-int(held("turnRight"));
-        if(!dir)return 0;
-        return dir*preferences.at(held("turnFast")?"yawSpeedAlt":"yawSpeed").get<double>();
+        return native::configured_turn_rate(held("turnLeft"),held("turnRight"),
+            preferences.at(held("turnFast")?"yawSpeedAlt":"yawSpeed").get<double>());
     };
     auto act=[&](const std::string &action) {
         if(action=="restart"||action=="restartMain") {if(tutorial&&tutorial->is_active())start_tutorial(tutorial->lesson_id(),tutorial_demo);else{if(action=="restartMain")active_track=0;reset();}}
@@ -478,8 +490,7 @@ int run(const Options &opt) {
     if(tutorial){const auto lesson=pending_tutorial.empty()?"jump":pending_tutorial;start_tutorial(lesson,pending_tutorial_demo);pending_tutorial.clear();}
     if(menu) show_menu(true); else if(!opt.hidden) capture(true);
     if(!opt.replay.empty())request_replay(opt.replay,"play");
-    using Clock=std::chrono::steady_clock;
-    auto last=Clock::now(),title_time=last,ui_time=last,started=last; uint64_t frame=0,title_frames=0;
+    auto title_time=Clock::now(),ui_time=title_time,started=title_time; uint64_t frame=0,title_frames=0;
     // Discord Rich Presence / Join. Never from scripted or hidden runs, so a
     // smoke test can't show up on the developer's own profile.
     // BUNNYHOP_INPUT_LOG=path writes one line per tick: what that tick got from
@@ -534,8 +545,9 @@ int run(const Options &opt) {
                 auto message=nlohmann::json::parse(raw);const auto type=message.at("type").get<std::string>();
                 const size_t limit=type=="replayData"?12*1024*1024:(type=="roomSnapshot"||type=="roomEvent")?128*1024:16*1024;
                 if(raw.size()>limit)throw std::runtime_error("Menu command exceeds its type limit");
-                if(type=="ready") {menu_ready=true;run_event({{"type","reset"}});std::cout<<"Native menu ready: "<<raw<<'\n';}
+                if(type=="ready") {menu_ready=true;menu_backdrop_sent=false;run_event({{"type","reset"}});std::cout<<"Native menu ready: "<<raw<<'\n';}
                 else if(type=="resume" && core && !download.valid()) show_menu(false);
+                else if(type=="menuAppearance") {menu_reduced_motion=message.value("reducedMotion",true);}
                 else if(type=="restart" && core && !download.valid()) {reset();show_menu(false);}
                 else if(type=="selectMap") {
                     const auto style=message.value("style",selected_style);if(!native::styles.contains(style))throw std::runtime_error("Unknown style");
@@ -574,7 +586,7 @@ int run(const Options &opt) {
                     const auto action=message.at("action").get<std::string>();
                     if(action=="pause")playback_paused=message.value("paused",!playback_paused);
                     else if(action=="speed") {const double value=message.at("speed").get<double>();if(!std::isfinite(value)||value<.1||value>4)throw std::runtime_error("Replay speed must be 0.1–4");playback_speed=value;}
-                    else if(action=="seek") {const auto tick=message.at("tick").get<uint32_t>();if(tick>playback_info.at("totalTicks").get<uint32_t>())throw std::runtime_error("Replay tick outside run");BhSnapshot state{};if(!bh_replay_seek(core.get(),tick,&state)){const std::string failure=bh_last_error(core.get());reset();show_menu(true);throw std::runtime_error("Replay seek stopped: "+failure);}curr=prev=state.player;BhCmd view{};bh_last_command(core.get(),&view);input.set_angles(view.pitch,view.yaw);renderer->reset_presentation();audio.reset();accumulator=0;}
+                    else if(action=="seek") {const auto tick=message.at("tick").get<uint32_t>();if(tick>playback_info.at("totalTicks").get<uint32_t>())throw std::runtime_error("Replay tick outside run");BhSnapshot state{};if(!bh_replay_seek(core.get(),tick,&state)){const std::string failure=bh_last_error(core.get());reset();show_menu(true);throw std::runtime_error("Replay seek stopped: "+failure);}curr=prev=state.player;BhCmd view{};bh_last_command(core.get(),&view);input.set_angles(view.pitch,view.yaw);renderer->reset_presentation();audio.reset();reset_feedback(tick!=0);reset_input_timing();}
                     else if(action=="stop")reset();
                 }
                 else if(type=="sensitivity") {preferences=native::patch_settings(preferences,{{"sensitivity",message.at("value")}});native::save_settings(cache/"settings.json",preferences);apply_preferences();}
@@ -593,16 +605,21 @@ int run(const Options &opt) {
                 else if(type=="auth") menu->evaluate_js("window.bunnyhopNativeMenu?.onAuth("+message.dump()+")");
                 else if(type=="menuError") {error=message.value("error",std::string("Menu failed"));std::cerr<<"Menu: "<<error<<'\n';}
                 else if(type=="runService") {
-                    score_notice=message.value("message",std::string());std::cout<<"Score service: "<<message.dump()<<'\n';
+                    if(!turn_admission.local_only)score_notice=message.value("message",std::string());std::cout<<"Score service: "<<message.dump()<<'\n';
                 }
                 else if(type=="quit") running=false;
                 else if(type=="smoke" && !opt.menu_smoke.empty()) {
                     message["engine"]="native";message["renderer"]="opengl";message["map"]=map_id;message["nativeTick"]=curr.tick;
+                    const bool matches_screen=opt.menu_home_smoke
+                        ? map_id.empty() && message.value("screen",std::string())=="home" && message.value("uiMap",std::string()).empty() && message.value("heading",std::string())=="Find your flow."
+                        : !map_id.empty() && message.value("screen",std::string())=="map" && message.value("uiMap",std::string())==map_id;
+                    smoke_pass=message.value("apiStatus",0)==200 && message.value("origin",std::string())=="https://bunnyhop.lol" && message.value("webglAttempts",1)==0 && message.value("webglContexts",1)==0 && message.value("canvasCount",1)==0 && message.value("controlsVisible",false) && matches_screen && (opt.menu_home_smoke?bool(menu_scene):bool(renderer));
+                    message["pass"]=smoke_pass;
                     std::ofstream(opt.menu_smoke+".json")<<message.dump(2)<<'\n';
-                    smoke_pass=message.value("apiStatus",0)==200 && message.value("origin",std::string())=="https://bunnyhop.lol" && message.value("webglAttempts",1)==0 && message.value("controlsVisible",false) && message.value("uiMap",std::string())==map_id && bool(renderer);
                     std::cout<<"Native menu smoke: "<<message.dump()<<'\n';
                     int w=0,h=0;SDL_GetWindowSizeInPixels(window.get(),&w,&h);
                     if(renderer) renderer->screenshot(opt.menu_smoke+"-game.ppm",w,h);
+                    else if(menu_scene) {const auto png=menu_scene->snapshot_png(w,h);std::ofstream(opt.menu_smoke+"-scene.png",std::ios::binary).write(png.data(),png.size());}
                     smoke_snapshot=menu->screenshot(opt.menu_smoke+".png");
                     if(!smoke_snapshot) {smoke_pass=false;running=false;}
                 }
@@ -648,9 +665,9 @@ int run(const Options &opt) {
         }
         const bool simulation_active=core && !spectator && !room_modes.frozen() && !download.valid() && ((focused&&captured)||opt.frames)&&(!playback||!playback_paused);
         if(beat_start&&!simulation_active) beat_paused=true;
-        ++input_frame;input_frame_ms=std::chrono::duration<double,std::milli>(now-last).count();
-        if(simulation_active) accumulator+=(opt.frames?dt:std::clamp(std::chrono::duration<double>(now-last).count(),0.0,.25))*(playback?playback_speed:1);
-        last=now;
+        const double frame_seconds=input_clock.elapsed(now);
+        ++input_frame;input_frame_ms=frame_seconds*1000;
+        if(simulation_active) accumulator+=(opt.frames?dt:std::clamp(frame_seconds,0.0,.25))*(playback?playback_speed:1);
         // Where simulated time has reached, on SDL's clock. accumulator is how
         // far behind the simulation is, so now minus it is where the next tick
         // starts. This frame's motion arrived now; the ticks below share it by
@@ -667,19 +684,25 @@ int run(const Options &opt) {
             const double counts_before=input.yaw_counts;
             if(opt.frames) input.consume_all();
             else {input.take_tick(sim_ns,sim_ns+tick_ns);sim_ns+=tick_ns;}
+            const double mouse_counts=input.yaw_counts-counts_before;
             prev=curr;const BhState tutorial_pre=curr;
             BhCmd cmd{};
             if(playback) {
                 if(curr.tick>=playback_info.at("totalTicks").get<uint32_t>()){playback_paused=true;accumulator=0;break;}
                 BhSnapshot state{};if(!bh_replay_step(core.get(),&state)){const std::string failure=bh_last_error(core.get());playback_failed=true;reset();error="Replay stopped: "+failure;std::cerr<<error<<'\n';show_menu(true);accumulator=0;if(opt.frames)running=false;break;}curr=state.player;bh_last_command(core.get(),&cmd);input.set_angles(cmd.pitch,cmd.yaw,5);
             } else {
-                // A turnbind tick moves the view by speed × tick, which isn't whole mouse
-                // counts, so it's recorded as a raw yaw rebase (YAW_SET_RAW) like any other set.
-                if(const double rate=turn_rate())input.set_yaw(input.yaw()+rate*dt,5);
-                input.held=0;for(auto b=preferences["binds"].begin();b!=preferences["binds"].end();++b){const auto bit=movement_bit(b.key());if(bit)for(const auto &key:b.value())if(held_codes.contains(key.get<std::string>()))input.held|=bit;}cmd=input.command();const auto look=input.look_sample();require(bh_step_look(core.get(),&cmd,look?&*look:nullptr,&curr),core.get(),"Stepping simulation");input.events(curr);}
+                if(const double rate=turn_rate()) {
+                    input.turn(rate,dt);
+                    if(turn_admission.observe(rate,active_style=="scroll")) {
+                        // Invalidate any open ranked session, but keep recording the local archive.
+                        ++run_generation;run_event({{"type","reset"}});beat_start=0;
+                        score_notice=active_style=="scroll"?"Practice turn controls: local replay only":"Custom turn speed: local replay only; ranked submission disabled";
+                    }
+                }
+                input.held=0;for(auto b=preferences["binds"].begin();b!=preferences["binds"].end();++b){const auto bit=movement_bit(b.key());if(bit)for(const auto &key:b.value())if(held_codes.contains(key.get<std::string>()))input.held|=bit;}cmd=input.command();const auto look=input.look_sample();require(bh_step_look_v2(core.get(),&cmd,look?&*look:nullptr,&curr),core.get(),"Stepping simulation");require(bh_last_command(core.get(),&cmd),core.get(),"Reading filtered command");input.events(curr);}
             renderer->simulation_tick();
             if(input_log&&!playback) {
-                const double moved=input.yaw_counts-counts_before;
+                const double moved=mouse_counts;
                 input_log<<curr.tick<<','<<input_frame<<','<<input_frame_ms<<','<<double(sim_ns)/1e6<<','<<moved<<','<<input.pending_counts()<<','
                     <<cmd.buttons<<(cmd.side>0?"R":cmd.side<0?"L":"")<<(cmd.forward>0?"F":cmd.forward<0?"B":"")<<','
                     <<std::hypot(double(curr.velocity[0]),double(curr.velocity[1]))<<','<<int(curr.grounded!=0)<<','<<int((curr.events&2u)!=0)<<'\n';
@@ -698,25 +721,26 @@ int run(const Options &opt) {
                 native::SsjTick info;
                 info.jumped=(curr.events&(1u<<1))!=0;              // EVENT_JUMPED
                 info.teleported=(curr.events&native::teleported)!=0;
-                info.in_start=ssj_was_in_start;info.noclip=ssj_was_noclip;
+                info.in_start=feedback.ssj_was_in_start;info.noclip=feedback.ssj_was_noclip;
                 if(timing.status==1)info.time=timing.seconds;
                 {
                     const auto mode=preferences.at("jumpStatsMode").get<std::string>();
-                    ssj.set_mode(mode=="every"?native::SsjMode::every:mode=="interval"?native::SsjMode::every_nth:native::SsjMode::sixth);
-                    ssj.set_interval(preferences.at("jumpStatsInterval").get<unsigned>());
+                    feedback.ssj.set_mode(mode=="every"?native::SsjMode::every:mode=="interval"?native::SsjMode::every_nth:native::SsjMode::sixth);
+                    feedback.ssj.set_interval(preferences.at("jumpStatsInterval").get<unsigned>());
                 }
-                if(timing.update_flags&4){ssj.reset();ssj_line.clear();ssj_good=false;strafe_trainer.reset();strafe_reading.reset();}  // restarted
-                if(const auto report=ssj.tick(pre,ssj_cmd,info)) {
-                    ssj_line=native::ssj_text(*report,ssj_fields);
-                    ssj_good=report->gain&&*report->gain>=native::good_gain;
+                if(timing.update_flags&4)reset_feedback();  // restarted
+                const bool history_ready=feedback.history_ready(pre.grounded,info.in_start,info.noclip);
+                if(history_ready)if(const auto report=feedback.ssj.tick(pre,ssj_cmd,info)) {
+                    feedback.ssj_line=native::ssj_text(*report,ssj_fields);
+                    feedback.ssj_good=report->gain&&*report->gain>=native::good_gain;
                 }
-                ssj_was_in_start=timing.in_start!=0;ssj_was_noclip=state.movement_mode==1;  // Mode::Noclip
-                if(info.teleported){strafe_trainer.reset();strafe_reading.reset();}
-                else if(!info.noclip) {
-                    strafe_trainer.set_smoothing(preferences.at("strafeTrainerSmoothing").get<unsigned>());
-                    if(const auto reading=strafe_trainer.tick(pre.grounded,std::hypot(pre.velocity[0],pre.velocity[1]),cmd.yaw,cmd.buttons))strafe_reading=reading;
-                    strafe_ground_ticks=pre.grounded?strafe_ground_ticks+1:0;
-                    if(strafe_ground_ticks>native::bhop_frames)strafe_reading.reset();
+                feedback.ssj_was_in_start=timing.in_start!=0;feedback.ssj_was_noclip=state.movement_mode==1;  // Mode::Noclip
+                if(info.teleported)reset_feedback();
+                else if(history_ready&&!info.noclip) {
+                    feedback.strafe_trainer.set_smoothing(preferences.at("strafeTrainerSmoothing").get<unsigned>());
+                    if(const auto reading=feedback.strafe_trainer.tick(pre.grounded,std::hypot(pre.velocity[0],pre.velocity[1]),cmd.yaw,cmd.forward,cmd.side))feedback.strafe_reading=reading;
+                    feedback.strafe_ground_ticks=pre.grounded?feedback.strafe_ground_ticks+1:0;
+                    if(feedback.strafe_ground_ticks>native::bhop_frames)feedback.strafe_reading.reset();
                 }
             }
             BhSurfaceProbe surface{};surface.water_z=std::numeric_limits<float>::quiet_NaN();const bool surface_found=bh_surface_at(core.get(),curr.position[0],curr.position[1],curr.position[2],&surface)!=0;const double water_depth=surface_found?surface.water_z-curr.position[2]:std::numeric_limits<double>::quiet_NaN();
@@ -781,7 +805,7 @@ int run(const Options &opt) {
             } else renderer->set_replay_actor(nullptr,0,0);
             const double steady_seconds=std::chrono::duration<double>(now.time_since_epoch()).count();auto actors=room.actors(steady_seconds);auto camera_input=input;camera_input.consume_all();
             // Show turnbind motion between ticks too, so turning is smooth at any frame rate.
-            if(!playback&&!spectator)if(const double rate=turn_rate())camera_input.set_yaw(camera_input.yaw()+rate*std::clamp(accumulator,0.0,dt));std::string shown_notice=tutorial&&tutorial->is_active()&&!playback?tutorial->notice():score_notice;
+            if(simulation_active&&!playback&&!spectator)if(const double rate=turn_rate())camera_input.turn(rate,std::clamp(accumulator,0.0,dt));std::string shown_notice=tutorial&&tutorial->is_active()&&!playback?tutorial->notice():score_notice;
             const auto race_notice=room_modes.notice(epoch_ms());if(!race_notice.empty())shown_notice=race_notice;
             renderer->set_viewmodel_weapon(std::nullopt);renderer->set_viewmodel_visible(preferences.at("viewmodel").get<bool>());
             if(spectator){const auto target=room.spectated(steady_seconds);if(target){for(int k=0;k<3;k++){eye[k]=target->frame.position[k];state.player.position[k]=target->frame.position[k];state.player.velocity[k]=target->frame.velocity[k];}eye[2]+=target->frame.view_offset_z;state.player.tick=target->frame.tick;state.player.grounded=!!(target->frame.flags&2);state.player.crouched=!!(target->frame.flags&1);camera_input.set_angles(target->frame.pitch,target->frame.yaw);renderer->set_cosmetics(target->outfit,target->loadout);renderer->set_viewmodel_weapon(target->frame.weapon);shown_notice="Spectating "+target->name+" - Esc for Room controls";actors.erase(std::remove_if(actors.begin(),actors.end(),[&](const auto &a){return a.id==target->id;}),actors.end());}else{renderer->set_viewmodel_visible(false);shown_notice="Waiting for spectator target";}}
@@ -790,10 +814,26 @@ int run(const Options &opt) {
             BhCmd shown{};bh_last_command(core.get(),&shown);BhWeaponReport weapon{};bh_weapon_report(core.get(),&weapon);
             if(!menu||!menu->visible())hud.draw(width,height,state,run_state,shown,map_id,playback?playback_info.value("style",active_style):active_style,shown_notice,display_fps,
                 preferences.at("hud").get<bool>(),preferences.at("crosshair").get<bool>(),playback,weapon,
-                preferences.at("jumpStats").get<bool>()?ssj_line:std::string(),ssj_good,
-                preferences.at("strafeTrainer").get<bool>()&&!playback?strafe_reading:std::nullopt,
+                preferences.at("jumpStats").get<bool>()?feedback.ssj_line:std::string(),feedback.ssj_good,
+                preferences.at("strafeTrainer").get<bool>()&&!playback?feedback.strafe_reading:std::nullopt,
                 preferences.at("strafeTrainerHints").get<bool>(),&hud_layout);
-        } else {gl.Viewport(0,0,width,height);gl.ClearColor(.03f,.04f,.06f,1);gl.Clear(GL_COLOR_BUFFER_BIT);}
+        } else if(menu_scene) menu_scene->draw(width,height,std::chrono::duration<double>(now-started).count(),menu_reduced_motion);
+        else {gl.Viewport(0,0,width,height);gl.ClearColor(.03f,.04f,.06f,1);gl.Clear(GL_COLOR_BUFFER_BIT);}
+        if(menu && menu_ready && menu_scene && !menu_backdrop_sent && width>0 && height>0) {
+            // Separate GTK windows and screenshot runs use one bounded native
+            // PNG. Transparent embedded views show the live SDL scene directly.
+            try {
+                const bool live=menu->supports_backdrop()&&opt.menu_smoke.empty();
+                const auto source=live?std::string("native"):"data:image/png;base64,"+base64(menu_scene->snapshot_png(width,height));
+                menu->evaluate_js("window.bunnyhopNativeBackdrop?.("+nlohmann::json(source).dump()+")");
+                std::cout<<"Native menu backdrop: supports="<<menu->supports_backdrop()<<" source="<<(live?"native":"png")<<std::endl;
+                menu_backdrop_sent=true;
+                // snapshot_png draws a small preview into the current buffer.
+                // Redraw before swapping; never expose it over a loaded map.
+                if(!renderer)menu_scene->draw(width,height,std::chrono::duration<double>(now-started).count(),menu_reduced_motion);
+                else continue;
+            } catch(const std::exception &e) {menu_backdrop_sent=true;std::cerr<<"Menu backdrop: "<<e.what()<<'\n';}
+        }
         if(menu&&menu_ready&&core&&!playback&&!spectator&&!room.id.empty()&&room.map==map_id&&now-room_time>=std::chrono::milliseconds(50)) {
             BhWeaponReport weapon{};bh_weapon_report(core.get(),&weapon);
             const auto tick=uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(now-started).count()/10);
@@ -811,7 +851,7 @@ int run(const Options &opt) {
         if(opt.frames&&renderer&&(curr.tick>=opt.frames||(playback&&playback_paused&&curr.tick>=playback_info.value("totalTicks",0u)))&&!opt.screenshot.empty()) renderer->screenshot(opt.screenshot,width,height);
         const GLenum gl_error=gl.GetError(); if(gl_error!=GL_NO_ERROR) throw std::runtime_error("OpenGL error "+std::to_string(gl_error));
         if(!SDL_GL_SwapWindow(window.get())) throw std::runtime_error(std::string("Swapping framebuffer failed: ")+SDL_GetError());
-        if(menu && menu_ready && (menu->visible()||!room.id.empty()) && (now-ui_time>=std::chrono::milliseconds(200) || (!opt.menu_smoke.empty() && renderer && !download.valid() && !smoke_requested))) {
+        if(menu && menu_ready && (menu->visible()||!room.id.empty()) && (now-ui_time>=std::chrono::milliseconds(200) || (!opt.menu_smoke.empty() && (renderer||opt.menu_home_smoke) && !download.valid() && !smoke_requested))) {
             std::string progress;{std::lock_guard lock(progress_mutex);progress=loading;}
             const nlohmann::json state={{"engine","native"},{"renderer","opengl"},{"map",map_id},{"loading",progress},{"error",error},
                 {"sensitivity",input.sensitivity},{"paused",!captured},{"recordingPath",record_path},
@@ -826,31 +866,37 @@ int run(const Options &opt) {
             if(encoded!=last_ui) {menu->evaluate_js("window.bunnyhopNativeMenu?.onState("+encoded+")");last_ui=encoded;}
             ui_time=now;
         }
-        if(menu && menu_ready && renderer && !download.valid() && !opt.menu_smoke.empty() && !smoke_requested) {
+        if(menu && menu_ready && (renderer||(opt.menu_home_smoke&&menu_scene)) && menu_backdrop_sent && !download.valid() && !opt.menu_smoke.empty() && !smoke_requested) {
             smoke_requested=true;
+            std::cout<<"Native menu smoke: checking "<<(opt.menu_home_smoke?"home":map_id)<<std::endl;
             // App-owned integration check: reads the same live account API as the menu; never submits a run.
-            menu->evaluate_js("(()=>{const expected="+nlohmann::json(map_id).dump()+R"JS(;
+            menu->evaluate_js("(()=>{const home="+std::string(opt.menu_home_smoke?"true":"false")+",expected="+nlohmann::json(map_id).dump()+R"JS(;
                 const post=value=>window.webkit.messageHandlers.bunnyhop.postMessage(JSON.stringify({type:'smoke',...value}));
                 let attempts=0;
                 const check=()=>{
-                    const uiMap=document.querySelector('.native-current h2')?.textContent;
+                    const current=document.querySelector('.native-current');
+                    const heading=current?.querySelector('h2')?.textContent??'';
+                    const screen=current?.getAttribute('aria-label')==='Current map'?'map':current?.getAttribute('aria-label')==='Play bunnyhop'?'home':'unknown';
+                    const uiMap=screen==='map'?heading:'';
                     const buttons=[...document.querySelectorAll('.native-home-actions button')];
+                    const primary=buttons[0]?.getAttribute('aria-label');
+                    const matchesScreen=home?screen==='home' && heading==='Find your flow.' && primary==='Play':screen==='map' && uiMap===expected && primary==='Resume';
                     const controlsVisible=buttons.length>=5 && buttons.every(button=>{
                         const style=getComputedStyle(button),rect=button.getBoundingClientRect();
                         return !button.disabled && style.visibility==='visible' && Number(style.opacity)>.95 && rect.width>0 && rect.height>0;
                     });
-                    if(uiMap!==expected || !controlsVisible || document.getElementById('native-status')?.textContent) {
+                    if(!matchesScreen || !controlsVisible || !document.documentElement.dataset.nativeBackdrop || document.getElementById('native-status')?.textContent) {
                         if(++attempts<100) {setTimeout(check,100);return;}
-                        post({error:'Loaded-map controls did not become ready',uiMap,controlsVisible});return;
+                        post({error:(home?'Home':'Loaded-map')+' controls did not become ready',screen,heading,uiMap,controlsVisible,primary,backdrop:document.documentElement.dataset.nativeBackdrop,status:document.getElementById('native-status')?.textContent});return;
                     }
                     fetch('/api/me',{credentials:'include'}).then(r=>post({apiStatus:r.status,origin:location.origin,
-                        canvasCount:document.querySelectorAll('canvas').length,webglAttempts:window.__nativeMenuGraphics?.attempts,
-                        uiMap,controlsVisible})).catch(e=>post({error:String(e)}));
+                        canvasCount:document.querySelectorAll('canvas').length,webglAttempts:window.__nativeMenuGraphics?.attempts,webglContexts:window.__nativeMenuGraphics?.contexts,
+                        screen,heading,uiMap,controlsVisible,backdrop:document.documentElement.dataset.nativeBackdrop})).catch(e=>post({error:String(e)}));
                 };
                 setTimeout(check,300);
             })())JS");
         }
-        if(!opt.menu_smoke.empty() && now-started>std::chrono::seconds(90)) throw std::runtime_error("Native menu smoke timed out: "+error);
+        if(!opt.menu_smoke.empty() && now-started>std::chrono::seconds(90)) throw std::runtime_error("Native menu smoke timed out (ready="+std::to_string(menu_ready)+", backdrop="+std::to_string(menu_backdrop_sent)+", requested="+std::to_string(smoke_requested)+", snapshot="+std::to_string(smoke_snapshot)+"): "+error);
         const double elapsed=std::chrono::duration<double>(now-title_time).count();
         if(elapsed>=.5) {
             display_fps=title_frames/elapsed;char title[320]; std::snprintf(title,sizeof(title),"Bunnyhop native | %s | %.0f FPS | %.1f u/s | %.2fs | %s | Esc menu | R restart",map_id.c_str(),title_frames/elapsed,std::hypot(curr.velocity[0],curr.velocity[1]),run_state.seconds,captured?"SDL raw input":"paused");
@@ -871,14 +917,18 @@ int run(const Options &opt) {
 }
 
 int main(int argc,char **argv) {
-    bool hidden=false;
+    bool interactive_errors=true;
+    // Scripted checks must also exit on failure without a modal alert. Inspect
+    // flags before parsing so malformed smoke invocations cannot wait for input.
+    for(int i=1;i<argc;++i)if(std::string(argv[i])=="--hidden"||std::string(argv[i])=="--menu-smoke"||std::string(argv[i])=="--menu-home-smoke")interactive_errors=false;
     try {
-        Options opt=options(argc,argv); hidden=opt.hidden;
+        Options opt=options(argc,argv);
         if(opt.help) {
             std::cout << "Usage: bunnyhop-native [--map MAP.bsp | --online-map NAME] [--content-root DIR] [--sensitivity 2]\n"
                          "  [--menu-html PATH] [--no-menu] [--frames N] [--screenshot output.ppm] [--hidden]\n"
                          "  [--tutorial jump|strafe|speed|final] [--tutorial-demo] (tutorial map only)\n"
-                         "  [--menu-smoke OUTPUT_PREFIX] (live API reads only; never records/submits a run)\n"
+                         "  [--menu-smoke OUTPUT_PREFIX] (with --online-map; live API reads only, no scores)\n"
+                         "  [--menu-home-smoke OUTPUT_PREFIX] (3D home scene and menu, no map or scores)\n"
                          "No map: open the map browser. WASD move, Space/wheel jump, Ctrl crouch, E use, R restart, Esc menu, F10 quit.\n"
                          "Frame-limited mode simulates one fixed tick per rendered frame; screenshot implies --frames 1.\n";
             return 0;
@@ -886,7 +936,7 @@ int main(int argc,char **argv) {
         return run(opt);
     } catch(const std::exception &error) {
         std::cerr << "Bunnyhop native: " << error.what() << '\n';
-        if(!hidden) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"Bunnyhop native",error.what(),nullptr);
+        if(interactive_errors) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"Bunnyhop native",error.what(),nullptr);
         return 1;
     }
 }

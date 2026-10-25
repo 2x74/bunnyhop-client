@@ -308,6 +308,7 @@ MenuWebView::~MenuWebView() {
     impl_.reset();
 }
 bool MenuWebView::available() const { return impl_->menu && impl_->window; }
+bool MenuWebView::supports_backdrop() const { return false; }
 const std::string &MenuWebView::error() const { return impl_->state->error; }
 bool MenuWebView::visible() const { return impl_->shown; }
 void MenuWebView::set_visible(bool show) {

@@ -1,6 +1,8 @@
 #include "client_util.hpp"
 #include "room_state.hpp"
 #include "movement_audio.hpp"
+#include "audio.hpp"
+#include <thread>
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -76,6 +78,30 @@ int main(){
     auto folder=std::filesystem::temp_directory_path()/("bunnyhop-boundary-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(folder);
     struct Cleanup{std::filesystem::path path;~Cleanup(){std::error_code ec;std::filesystem::remove_all(path,ec);}} cleanup{folder};
+    {
+        // Hidden/frame-limited runs disable audio once at construction. Later
+        // application of persisted pack settings must not decode or open SDL.
+        assert(SDL_WasInit(SDL_INIT_AUDIO) == 0);
+        SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+        std::filesystem::create_directories(folder/"bgm");
+        std::filesystem::create_directories(folder/"sound");
+        // One second of valid mono PCM WAV, enough for a music worker to open
+        // the dummy device if the constructor's gate is accidentally lost.
+        std::ofstream wav(folder/"bgm"/"silence.wav", std::ios::binary);
+        const auto u16 = [&](unsigned n) { wav.put(char(n)); wav.put(char(n >> 8)); };
+        const auto u32 = [&](unsigned n) { u16(n); u16(n >> 16); };
+        wav.write("RIFF",4);u32(36+44100);wav.write("WAVEfmt ",8);u32(16);
+        u16(1);u16(1);u32(22050);u32(44100);u16(2);u16(16);
+        wav.write("data",4);u32(44100);wav << std::string(44100, '\0');wav.close();
+        std::filesystem::copy_file(folder/"bgm"/"silence.wav",folder/"sound"/"jump.wav");
+        native::Audio audio(folder/"missing-assets",folder,false);
+        for(bool custom:{true,false,true}) {
+            audio.set_sfx_pack(custom);audio.set_music_pack(custom);audio.skip_track();
+            for(int i=0;i<20;++i) { audio.pump();std::this_thread::sleep_for(std::chrono::milliseconds(2)); }
+            assert(SDL_WasInit(SDL_INIT_AUDIO)==0);
+            assert(audio.sfx_status().empty() && audio.music_status().empty() && audio.music_title().empty());
+        }
+    }
     native::save_settings(folder/"settings.json",original);native::save_settings(folder/"settings.json",changed);
     assert(native::load_settings(folder/"settings.json")==changed);
     assert(!std::filesystem::exists(folder/"settings.json.tmp")&&!std::filesystem::exists(folder/"settings.json.previous"));

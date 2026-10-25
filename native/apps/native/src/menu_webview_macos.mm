@@ -112,7 +112,7 @@ struct MenuWebView::Impl {
     NSView *auth_container = nil;
     BHNativeMenuDelegate *delegate = nil;
     std::shared_ptr<MenuState> state = std::make_shared<MenuState>();
-    bool shown = false;
+    bool shown = false, backdrop = false;
 
     Impl(SDL_Window *sdl, const std::string &html) {
         if (!NSThread.isMainThread) { state->error = "WebKit menus must be created on the SDL main thread"; return; }
@@ -137,6 +137,12 @@ struct MenuWebView::Impl {
         delegate.authCancel = ^{ close_auth(false); };
         [config.userContentController addScriptMessageHandler:delegate name:@"bunnyhop"];
         menu = [[WKWebView alloc] initWithFrame:window.contentView.bounds configuration:config];
+        // WKWebView otherwise paints an opaque page over the SDL OpenGL view.
+        // WebKit exposes this macOS switch via KVC rather than public WK API.
+        // Keep the opaque fallback if a future WebKit removes it.
+        @try { [menu setValue:@NO forKey:@"drawsBackground"]; backdrop = true; }
+        @catch (NSException *) { backdrop = false; }
+        if (@available(macOS 12.0, *)) menu.underPageBackgroundColor = NSColor.clearColor;
         menu.navigationDelegate = delegate;
         menu.UIDelegate = delegate;
         menu.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
@@ -211,6 +217,7 @@ struct MenuWebView::Impl {
 MenuWebView::MenuWebView(SDL_Window *window, const std::string &html) : impl_(std::make_unique<Impl>(window, html)) {}
 MenuWebView::~MenuWebView() = default;
 bool MenuWebView::available() const { return impl_->menu != nil; }
+bool MenuWebView::supports_backdrop() const { return available() && impl_->backdrop; }
 const std::string &MenuWebView::error() const { return impl_->state->error; }
 bool MenuWebView::visible() const { return impl_->shown; }
 void MenuWebView::set_visible(bool show) {

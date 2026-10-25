@@ -23,7 +23,7 @@ pub struct Checkpoint {
 pub struct ReplayData {
     pub header: Value,
     pub commands: Vec<BhCmd>,
-    pub looks: Vec<Option<crate::BhLookSample>>,
+    pub looks: Vec<Option<crate::BhLookSampleV2>>,
     pub checkpoints: Vec<Checkpoint>,
     pub start_tick: u32,
     pub end_tick: u32,
@@ -75,7 +75,9 @@ impl ReplayData {
         } else {
             None
         };
-        let version = if flag("stamina") || h["style"] == "lowgrav" {
+        let version = if counted.as_ref().is_some_and(|c| c.fractional) {
+            10u16
+        } else if flag("stamina") || h["style"] == "lowgrav" {
             9u16
         } else if counted.is_some() {
             8
@@ -94,7 +96,7 @@ impl ReplayData {
         w.u16(
             u16::from(flag("autohop"))
                 | (u16::from(flag("stamina")) << 1)
-                | (u16::from(version == 9 && counted.is_some()) << 2),
+                | (u16::from(version >= 9 && counted.is_some()) << 2),
         );
         w.str8(h["map"].as_str().ok_or("missing map")?)?;
         let sha = h["mapSha256"].as_str().ok_or("missing map digest")?;
@@ -213,12 +215,17 @@ impl ReplayData {
                 while rb < counted.rebases.len() && counted.rebases[rb].tick == i as u32 {
                     rb += 1;
                 }
-                w.svarint(if rebase {
-                    value
+                if counted.fractional {
+                    w.0.extend_from_slice(&value.to_le_bytes());
                 } else {
-                    value.wrapping_sub(prev)
-                });
-                prev = value;
+                    let value = value as i32;
+                    w.svarint(if rebase {
+                        value
+                    } else {
+                        value.wrapping_sub(prev)
+                    });
+                    prev = value;
+                }
             }
             w.varint(counted.rebases.len() as u32);
             let mut prev = 0;
@@ -444,7 +451,7 @@ impl Map {
     pub fn record_tick(
         &mut self,
         cmd: BhCmd,
-        look: Option<crate::BhLookSample>,
+        look: Option<crate::BhLookSampleV2>,
     ) -> Result<(), String> {
         if self.recorder.is_none() {
             return Ok(());

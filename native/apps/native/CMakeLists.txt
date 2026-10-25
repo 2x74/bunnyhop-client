@@ -135,6 +135,11 @@ if(BUNNYHOP_BUILD_CLIENT)
         BUNNYHOP_MENU_HTML="target/native-menu/menu.html"
         BUNNYHOP_NATIVE_MANIFEST="target/native-menu/native-manifest.json"
         BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
+    # Explicit framebuffer check: run on a desktop or under Xvfb/Mesa, not in
+    # ordinary headless CTest. Does not initialize a map or gameplay context.
+    add_executable(bunnyhop-native-menu-scene-smoke src/menu_scene_smoke.cpp)
+    target_include_directories(bunnyhop-native-menu-scene-smoke PRIVATE vendor include)
+    target_link_libraries(bunnyhop-native-menu-scene-smoke PRIVATE SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
     add_executable(bunnyhop-native-render-smoke src/render_smoke.cpp)
     target_include_directories(bunnyhop-native-render-smoke PRIVATE vendor)
     target_link_libraries(bunnyhop-native-render-smoke PRIVATE bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)

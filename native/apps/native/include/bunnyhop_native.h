@@ -185,6 +185,13 @@ typedef struct BhLookSample {
 } BhLookSample;
 /* Real native mouse telemetry only. Missing samples retain existing uncounted replay encoding. */
 int bh_step_look(BhContext *ctx, const BhCmd *cmd, const BhLookSample *look, BhState *out);
+/* Additive ABI: the original 40-byte BhLookSample and bh_step_look remain unchanged.
+ * Fractional counts retain real mouse provenance in v10 recordings with manual turns. */
+typedef struct BhLookSampleV2 {
+    double base, k, count;
+    uint32_t epoch, kind, frames, events, reports;
+} BhLookSampleV2;
+int bh_step_look_v2(BhContext *ctx, const BhCmd *cmd, const BhLookSampleV2 *look, BhState *out);
 typedef struct BhWeaponReport {
     uint32_t flags, active, primary, secondary, knife, clip, clip_size, reload_ticks, burst, floor_changed, silencer, silencer_ticks;
 } BhWeaponReport;

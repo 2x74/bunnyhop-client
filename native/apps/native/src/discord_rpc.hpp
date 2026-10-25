@@ -285,20 +285,33 @@ private:
             inbox_.append(buffer, got);
             if (inbox_.size() > 4 * max_frame) { lost("Discord sent too much"); return false; }
         }
-        std::vector<Frame> frames;
-        try { frames = decode_frames(inbox_); } catch (const std::exception &e) { lost(e.what()); return false; }
-        for (const auto &frame : frames) if (!handle(frame)) return false;
+        // Parsing valid JSON is only the first protocol boundary: malformed
+        // field types and errors while handling a frame must also stay inside
+        // Discord, never unwind through the game's update loop.
+        try {
+            for (const auto &frame : decode_frames(inbox_)) if (!handle(frame)) return false;
+        } catch (const std::exception &e) { lost(e.what()); return false; }
         return connected();
     }
     bool handle(const Frame &frame) {
         const auto &p = frame.payload;
         if (frame.op == op_ping) { write(op_pong, p); return connected(); }
-        if (frame.op == op_close) { lost(clean(p.value("message", std::string("Discord closed RPC")), 160)); return false; }
-        if (frame.op != op_frame || !p.is_object()) return true;
-        const auto evt = p.value("evt", Json()).is_string() ? p["evt"].get<std::string>() : "";
-        const auto cmd = p.value("cmd", std::string());
+        const auto string_field = [](const Json &object, const char *key, const std::string &fallback) {
+            if (!object.is_object()) throw std::runtime_error("Invalid Discord RPC object");
+            const auto field = object.find(key);
+            if (field == object.end()) return fallback;
+            if (!field->is_string()) throw std::runtime_error(std::string("Invalid Discord RPC ") + key);
+            return field->get<std::string>();
+        };
+        if (frame.op == op_close) { lost(clean(string_field(p, "message", "Discord closed RPC"), 160)); return false; }
+        if (frame.op != op_frame) return true;
+        if (!p.is_object() || !p.contains("cmd") || !p["cmd"].is_string())
+            throw std::runtime_error("Invalid Discord RPC cmd");
+        // Successful command replies legitimately carry evt:null.
+        const auto evt = !p.contains("evt") || p["evt"].is_null() ? "" : string_field(p, "evt", "");
+        const auto cmd = p["cmd"].get<std::string>();
         const auto error_text = [&](const char *fallback) {
-            return p.contains("data") && p["data"].is_object() ? clean(p["data"].value("message", std::string(fallback)), 160) : std::string(fallback);
+            return p.contains("data") && !p["data"].is_null() ? clean(string_field(p["data"], "message", fallback), 160) : std::string(fallback);
         };
         if (evt == "READY") {
             ready_ = true; retry_ = 0; state = "ready"; message.clear();

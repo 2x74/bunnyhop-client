@@ -5,9 +5,9 @@ import { dirname, resolve } from "node:path";
 import { PHYSICS_VERSION } from "../web/src/core";
 import { TIMER_RULES } from "../web/src/timer";
 
-export const CANONICAL_WASM_URL = "https://bunnyhop.lol/assets/bunnyhop_core-DY4PXduP.wasm";
-export const CANONICAL_WASM_SHA256 = "3cca0f22a3c30492d30c2f5e745f8940cc29498eafdbab4d9ff5cd9e07bbd20a";
-export const CANONICAL_WASM_BYTES = 1387961;
+export const CANONICAL_WASM_URL = "https://bunnyhop.lol/assets/bunnyhop_core-DgJsmOWQ.wasm";
+export const CANONICAL_WASM_SHA256 = "e0480bade42bed8cec193908d52de340ddc66070c1fa5640a76da1ac75cf1d8e";
+export const CANONICAL_WASM_BYTES = 1407626;
 const defaultPath = resolve(import.meta.dir, "../web/src/wasm/bunnyhop_core.wasm");
 function valid(bytes: Uint8Array): boolean {
   return bytes.byteLength === CANONICAL_WASM_BYTES &&
@@ -15,7 +15,7 @@ function valid(bytes: Uint8Array): boolean {
 }
 
 export async function ensureCanonicalWasm(path = defaultPath): Promise<string> {
-  if (PHYSICS_VERSION !== 15 || TIMER_RULES !== 2) {
+  if (PHYSICS_VERSION !== 16 || TIMER_RULES !== 2) {
     throw new Error("Game rules changed: update the pinned native verifier and rerun native/WASM parity before building a release.");
   }
   const existing = await readFile(path).catch(() => null);

@@ -1,6 +1,10 @@
 #include "audio_pack.hpp"
 
 #include <algorithm>
+#include <array>
+#include <limits>
+#include <memory>
+#include <type_traits>
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -88,28 +92,108 @@ bool read_file(const std::filesystem::path &file, std::vector<unsigned char> *ou
     return true;
 }
 
-// Ogg carries more than one codec. Vorbis is overwhelmingly the common case, so
-// it is tried first and FLAC-in-Ogg is the fallback rather than a second sniff.
-bool decode_ogg_f32(const std::vector<unsigned char> &bytes, DecodedAudio *out) {
-    int channels = 0, rate = 0;
-    // stb_vorbis only decodes a whole file to int16, so the widening happens
-    // here rather than in the decoder.
-    short *interleaved = nullptr;
-    const int frames = stb_vorbis_decode_memory(bytes.data(), int(bytes.size()), &channels, &rate, &interleaved);
-    if (frames <= 0 || !interleaved || channels <= 0) { if (interleaved) free(interleaved); return false; }
-    const std::size_t count = std::size_t(frames) * std::size_t(channels);
-    if (count > max_sfx_samples) { free(interleaved); return false; }
-    out->channels = channels;
-    out->rate = rate;
-    out->samples.resize(count);
-    for (std::size_t i = 0; i < count; ++i) out->samples[i] = float(interleaved[i]) / 32768.0f;
-    free(interleaved);
+// All decoders use the same sample budget, including containers whose length
+// is missing or dishonest. The fixed scratch buffer permits one extra frame
+// at the limit to distinguish exact fits from oversized streams, without ever
+// appending PCM beyond the budget.
+template <typename Audio, typename Read>
+bool read_bounded(Audio *out, int channels, int rate, std::uint64_t frames,
+                  std::uint64_t cap, Read read, std::string *error) {
+    using Sample = typename decltype(out->samples)::value_type;
+    const auto too_long = [&] { *error = "exceeds the decoded sample budget"; return false; };
+    if (channels <= 0 || channels > 256 || rate <= 0) {
+        *error = "has invalid audio parameters"; return false;
+    }
+    if (frames > cap / std::uint64_t(channels)) return too_long();
+    std::array<Sample, 4096> chunk;
+    Audio decoded;
+    decoded.channels = channels; decoded.rate = rate;
+    const auto capacity = std::size_t(cap);
+    // Metadata can reject early but never authorizes reading past the cap.
+    if (frames) decoded.samples.reserve(std::size_t(frames) * channels);
+    for (;;) {
+        const auto remaining = (capacity - decoded.samples.size()) / channels;
+        const auto want = std::min(chunk.size() / channels, remaining + 1);
+        const std::uint64_t got = read(want, chunk.data());
+        if (got > remaining) return too_long();
+        if (!got) break;
+        const auto count = std::size_t(got) * channels;
+        const auto size = decoded.samples.size() + count;
+        if (size > decoded.samples.capacity()) {
+            // Bound geometric vector growth too, not only its logical size.
+            const auto grown = std::min(capacity, decoded.samples.capacity() +
+                std::max(decoded.samples.capacity(), chunk.size()));
+            decoded.samples.reserve(std::max(size, grown));
+        }
+        decoded.samples.insert(decoded.samples.end(), chunk.data(), chunk.data() + count);
+    }
+    if (!decoded.ok()) { *error = "decoded to no audio"; return false; }
+    *out = std::move(decoded);
     return true;
 }
 
-template <typename T>
-bool too_many(std::uint64_t frames, std::uint64_t channels, std::uint64_t cap) {
-    return channels == 0 || frames > cap / channels;
+template <typename Audio>
+bool decode_encoded(const std::vector<unsigned char> &bytes, AudioFormat format,
+                    Audio *out, std::uint64_t cap, std::string *error) {
+    using Sample = typename decltype(out->samples)::value_type;
+    constexpr bool floating = std::is_same_v<Sample, float>;
+    switch (format) {
+        case AudioFormat::wav: {
+            drwav wav{};
+            if (!drwav_init_memory(&wav, bytes.data(), bytes.size(), nullptr)) break;
+            const auto cleanup = [](drwav *p) { drwav_uninit(p); };
+            const std::unique_ptr<drwav, decltype(cleanup)> guard(&wav, cleanup);
+            return read_bounded(out, int(wav.channels), int(wav.sampleRate), wav.totalPCMFrameCount, cap,
+                [&](std::size_t frames, Sample *samples) {
+                    if constexpr (floating) return drwav_read_pcm_frames_f32(&wav, frames, samples);
+                    else return drwav_read_pcm_frames_s16(&wav, frames, samples);
+                }, error);
+        }
+        case AudioFormat::mp3: {
+            drmp3 mp3{};
+            if (!drmp3_init_memory(&mp3, bytes.data(), bytes.size(), nullptr)) break;
+            const auto cleanup = [](drmp3 *p) { drmp3_uninit(p); };
+            const std::unique_ptr<drmp3, decltype(cleanup)> guard(&mp3, cleanup);
+            // Xing/Info lengths include encoder delay and padding. Without a
+            // length tag, decode incrementally rather than scanning twice.
+            const auto frames = mp3.totalPCMFrameCount == DRMP3_UINT64_MAX ? 0 : drmp3_get_pcm_frame_count(&mp3);
+            return read_bounded(out, int(mp3.channels), int(mp3.sampleRate), frames, cap,
+                [&](std::size_t count, Sample *samples) {
+                    if constexpr (floating) return drmp3_read_pcm_frames_f32(&mp3, count, samples);
+                    else return drmp3_read_pcm_frames_s16(&mp3, count, samples);
+                }, error);
+        }
+        case AudioFormat::ogg: {
+            // Vorbis first; FLAC-in-Ogg uses the same bounded FLAC path below.
+            int code = 0;
+            const std::unique_ptr<stb_vorbis, decltype(&stb_vorbis_close)> vorbis(
+                stb_vorbis_open_memory(bytes.data(), int(bytes.size()), &code, nullptr), stb_vorbis_close);
+            if (vorbis) {
+                const auto info = stb_vorbis_get_info(vorbis.get());
+                const auto frames = stb_vorbis_stream_length_in_samples(vorbis.get());
+                return read_bounded(out, info.channels, int(info.sample_rate), frames, cap,
+                    [&](std::size_t count, Sample *samples) {
+                        if constexpr (floating) return stb_vorbis_get_samples_float_interleaved(vorbis.get(), info.channels, samples, int(count * info.channels));
+                        else return stb_vorbis_get_samples_short_interleaved(vorbis.get(), info.channels, samples, int(count * info.channels));
+                    }, error);
+            }
+            [[fallthrough]];
+        }
+        case AudioFormat::flac: {
+            const auto cleanup = [](drflac *p) { drflac_close(p); };
+            const std::unique_ptr<drflac, decltype(cleanup)> flac(
+                drflac_open_memory(bytes.data(), bytes.size(), nullptr), cleanup);
+            if (!flac) break;
+            return read_bounded(out, int(flac->channels), int(flac->sampleRate), flac->totalPCMFrameCount, cap,
+                [&](std::size_t frames, Sample *samples) {
+                    if constexpr (floating) return drflac_read_pcm_frames_f32(flac.get(), frames, samples);
+                    else return drflac_read_pcm_frames_s16(flac.get(), frames, samples);
+                }, error);
+        }
+        default: break;
+    }
+    *error = "is not a WAV, MP3, FLAC or Ogg file this build can decode";
+    return false;
 }
 
 }  // namespace
@@ -133,145 +217,32 @@ const char *audio_format_name(AudioFormat format) {
     }
 }
 
-bool decode_sfx_file(const std::filesystem::path &file, DecodedAudio *out, std::string *error) {
+bool decode_sfx_file(const std::filesystem::path &file, DecodedAudio *out, std::string *error,
+                     std::uint64_t max_samples) {
+    *out = {}; error->clear();
+    const auto cap = std::min(max_samples, max_sfx_samples);
     std::vector<unsigned char> bytes;
     if (!read_file(file, &bytes, error)) return false;
-    *out = {};
     const auto format = sniff_audio(bytes.data(), bytes.size());
-
-    // Raw float32 has no header to recognise, so it is accepted on its
-    // extension alone. It is the format the shipped pack uses, which makes it
-    // the one way to supply a file that is already at the mixer's own rate.
+    // Raw float32 has no header; its samples already use the mixer's rate.
     if (format == AudioFormat::unknown && file.extension() == ".f32") {
-        if (bytes.size() % 4 || bytes.size() / 4 > max_sfx_samples) { *error = "is not a whole number of float samples"; return false; }
+        if (bytes.size() % sizeof(float)) { *error = "is not a whole number of float samples"; return false; }
+        if (bytes.size() / sizeof(float) > cap) { *error = "exceeds the decoded sample budget"; return false; }
         out->channels = 1;
-        out->rate = 0;  // caller's mixer rate; no resampling
-        out->samples.resize(bytes.size() / 4);
+        out->samples.resize(bytes.size() / sizeof(float));
         std::memcpy(out->samples.data(), bytes.data(), bytes.size());
         return true;
     }
-
-    switch (format) {
-        case AudioFormat::wav: {
-            unsigned channels = 0, rate = 0;
-            drwav_uint64 frames = 0;
-            float *samples = drwav_open_memory_and_read_pcm_frames_f32(bytes.data(), bytes.size(), &channels, &rate, &frames, nullptr);
-            if (!samples) { *error = "is not a WAV file this build can decode"; return false; }
-            if (too_many<float>(frames, channels, max_sfx_samples)) { drwav_free(samples, nullptr); *error = "is too long for a sound effect"; return false; }
-            out->channels = int(channels); out->rate = int(rate);
-            out->samples.assign(samples, samples + std::size_t(frames) * channels);
-            drwav_free(samples, nullptr);
-            break;
-        }
-        case AudioFormat::flac: {
-            unsigned channels = 0, rate = 0;
-            drflac_uint64 frames = 0;
-            float *samples = drflac_open_memory_and_read_pcm_frames_f32(bytes.data(), bytes.size(), &channels, &rate, &frames, nullptr);
-            if (!samples) { *error = "is not a FLAC file this build can decode"; return false; }
-            if (too_many<float>(frames, channels, max_sfx_samples)) { drflac_free(samples, nullptr); *error = "is too long for a sound effect"; return false; }
-            out->channels = int(channels); out->rate = int(rate);
-            out->samples.assign(samples, samples + std::size_t(frames) * channels);
-            drflac_free(samples, nullptr);
-            break;
-        }
-        case AudioFormat::mp3: {
-            drmp3_config config{};
-            drmp3_uint64 frames = 0;
-            float *samples = drmp3_open_memory_and_read_pcm_frames_f32(bytes.data(), bytes.size(), &config, &frames, nullptr);
-            if (!samples) { *error = "is not an MP3 file this build can decode"; return false; }
-            if (too_many<float>(frames, config.channels, max_sfx_samples)) { drmp3_free(samples, nullptr); *error = "is too long for a sound effect"; return false; }
-            out->channels = int(config.channels); out->rate = int(config.sampleRate);
-            out->samples.assign(samples, samples + std::size_t(frames) * config.channels);
-            drmp3_free(samples, nullptr);
-            break;
-        }
-        case AudioFormat::ogg: {
-            if (decode_ogg_f32(bytes, out)) break;
-            unsigned channels = 0, rate = 0;
-            drflac_uint64 frames = 0;
-            float *samples = drflac_open_memory_and_read_pcm_frames_f32(bytes.data(), bytes.size(), &channels, &rate, &frames, nullptr);
-            if (!samples) { *error = "is an Ogg file in a codec this build cannot decode"; return false; }
-            out->channels = int(channels); out->rate = int(rate);
-            out->samples.assign(samples, samples + std::size_t(frames) * channels);
-            drflac_free(samples, nullptr);
-            break;
-        }
-        default:
-            *error = "is not WAV, MP3, FLAC or Ogg";
-            return false;
-    }
-    if (out->samples.size() > max_sfx_samples) { *out = {}; *error = "is too long for a sound effect"; return false; }
-    if (!out->ok()) { *out = {}; *error = "decoded to no audio"; return false; }
-    return true;
+    return decode_encoded(bytes, format, out, cap, error);
 }
 
-bool decode_music_file(const std::filesystem::path &file, DecodedMusic *out, std::string *error) {
+bool decode_music_file(const std::filesystem::path &file, DecodedMusic *out, std::string *error,
+                       std::uint64_t max_samples) {
+    *out = {}; error->clear();
     std::vector<unsigned char> bytes;
     if (!read_file(file, &bytes, error)) return false;
-    *out = {};
-    switch (sniff_audio(bytes.data(), bytes.size())) {
-        case AudioFormat::wav: {
-            unsigned channels = 0, rate = 0;
-            drwav_uint64 frames = 0;
-            drwav_int16 *samples = drwav_open_memory_and_read_pcm_frames_s16(bytes.data(), bytes.size(), &channels, &rate, &frames, nullptr);
-            if (!samples) { *error = "is not a WAV file this build can decode"; return false; }
-            if (too_many<drwav_int16>(frames, channels, max_music_samples)) { drwav_free(samples, nullptr); *error = "is longer than this build can hold in memory"; return false; }
-            out->channels = int(channels); out->rate = int(rate);
-            out->samples.assign(samples, samples + std::size_t(frames) * channels);
-            drwav_free(samples, nullptr);
-            break;
-        }
-        case AudioFormat::flac: {
-            unsigned channels = 0, rate = 0;
-            drflac_uint64 frames = 0;
-            drflac_int16 *samples = drflac_open_memory_and_read_pcm_frames_s16(bytes.data(), bytes.size(), &channels, &rate, &frames, nullptr);
-            if (!samples) { *error = "is not a FLAC file this build can decode"; return false; }
-            if (too_many<drflac_int16>(frames, channels, max_music_samples)) { drflac_free(samples, nullptr); *error = "is longer than this build can hold in memory"; return false; }
-            out->channels = int(channels); out->rate = int(rate);
-            out->samples.assign(samples, samples + std::size_t(frames) * channels);
-            drflac_free(samples, nullptr);
-            break;
-        }
-        case AudioFormat::mp3: {
-            drmp3_config config{};
-            drmp3_uint64 frames = 0;
-            drmp3_int16 *samples = drmp3_open_memory_and_read_pcm_frames_s16(bytes.data(), bytes.size(), &config, &frames, nullptr);
-            if (!samples) { *error = "is not an MP3 file this build can decode"; return false; }
-            if (too_many<drmp3_int16>(frames, config.channels, max_music_samples)) { drmp3_free(samples, nullptr); *error = "is longer than this build can hold in memory"; return false; }
-            out->channels = int(config.channels); out->rate = int(config.sampleRate);
-            out->samples.assign(samples, samples + std::size_t(frames) * config.channels);
-            drmp3_free(samples, nullptr);
-            break;
-        }
-        case AudioFormat::ogg: {
-            int channels = 0, rate = 0;
-            short *samples = nullptr;
-            const int frames = stb_vorbis_decode_memory(bytes.data(), int(bytes.size()), &channels, &rate, &samples);
-            if (frames > 0 && samples) {
-                if (too_many<short>(std::uint64_t(frames), std::uint64_t(channels), max_music_samples)) {
-                    free(samples); *error = "is longer than this build can hold in memory"; return false;
-                }
-                out->channels = channels; out->rate = rate;
-                out->samples.assign(samples, samples + std::size_t(frames) * std::size_t(channels));
-                free(samples);
-                break;
-            }
-            if (samples) free(samples);
-            unsigned flac_channels = 0, flac_rate = 0;
-            drflac_uint64 flac_frames = 0;
-            drflac_int16 *flac = drflac_open_memory_and_read_pcm_frames_s16(bytes.data(), bytes.size(), &flac_channels, &flac_rate, &flac_frames, nullptr);
-            if (!flac) { *error = "is an Ogg file in a codec this build cannot decode"; return false; }
-            out->channels = int(flac_channels); out->rate = int(flac_rate);
-            out->samples.assign(flac, flac + std::size_t(flac_frames) * flac_channels);
-            drflac_free(flac, nullptr);
-            break;
-        }
-        default:
-            *error = "is not WAV, MP3, FLAC or Ogg";
-            return false;
-    }
-    if (!out->ok()) { *out = {}; *error = "decoded to no audio"; return false; }
-    return true;
+    return decode_encoded(bytes, sniff_audio(bytes.data(), bytes.size()), out,
+                          std::min(max_samples, max_music_samples), error);
 }
 
 std::vector<float> to_mono(const DecodedAudio &audio) {
@@ -288,11 +259,19 @@ std::vector<float> to_mono(const DecodedAudio &audio) {
     return mono;
 }
 
-std::vector<float> resample_mono(const std::vector<float> &samples, int from_rate, int to_rate) {
-    if (samples.empty() || from_rate <= 0 || to_rate <= 0 || from_rate == to_rate) return samples;
-    const double ratio = double(from_rate) / double(to_rate);
-    const std::size_t count = std::size_t(double(samples.size()) / ratio);
+std::vector<float> resample_mono(const std::vector<float> &samples, int from_rate, int to_rate, std::size_t max_samples) {
+    if (samples.empty()) return {};
+    if (from_rate <= 0 || to_rate <= 0 || from_rate == to_rate)
+        return samples.size() <= max_samples ? samples : std::vector<float>{};
+    // Integer quotient/remainder arithmetic avoids overflow and an out-of-range
+    // floating-point-to-size_t conversion, even for adversarial sample rates.
+    const auto whole = samples.size() / std::size_t(from_rate);
+    const auto tail = std::uint64_t(samples.size() % std::size_t(from_rate)) * std::uint64_t(to_rate) / std::uint64_t(from_rate);
+    const auto limit = std::min(max_samples, std::vector<float>{}.max_size());
+    if (tail > limit || whole > (limit - tail) / std::size_t(to_rate)) return {};
+    const std::size_t count = whole * std::size_t(to_rate) + std::size_t(tail);
     if (count == 0) return {};
+    const double ratio = double(from_rate) / double(to_rate);
     std::vector<float> out(count);
     if (ratio > 1.0) {
         // Going down in rate, every output sample averages the whole input span
