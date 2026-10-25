@@ -167,4 +167,28 @@ int main() {
     }
 
     std::cout << "Native input and Source camera checks passed\n";
+    {
+        // Keys share the motion window: a tick sees the key that was down
+        // during its own 10 ms, not whatever was down when SDL was polled.
+        native::Input keys;
+        keys.keys_resync=false;
+        keys.key_at(1'000'000,"KeyA",true);
+        keys.key_at(25'000'000,"KeyA",false);
+        keys.key_at(25'000'000,"KeyD",true);
+        keys.motion_at(5'000'000,-3,0); keys.motion_at(26'000'000,3,0);
+        keys.consume_until(10'000'000);
+        assert(keys.tick_codes.contains("KeyA")&&!keys.tick_codes.contains("KeyD")&&keys.yaw_counts==-3);
+        keys.consume_until(20'000'000);
+        assert(keys.tick_codes.contains("KeyA"));      // still A: the switch hasn't happened yet
+        keys.consume_until(30'000'000);
+        assert(!keys.tick_codes.contains("KeyA")&&keys.tick_codes.contains("KeyD")&&keys.yaw_counts==0);
+        // clear() drops what's queued and asks the next tick to resync from the poll-time set.
+        keys.key_at(40'000'000,"Space",true);keys.clear();
+        assert(keys.key_pending.empty()&&keys.keys_resync);
+        // Out-of-order stamps are held to the queue's order rather than reordered.
+        native::Input order;order.key_at(9,"KeyW",true);order.key_at(3,"KeyW",false);
+        order.consume_until(8);assert(order.tick_codes.empty());
+        order.consume_until(9);assert(order.tick_codes.empty()&&order.key_pending.empty());
+        order.consume_all();
+    }
 }

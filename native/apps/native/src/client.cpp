@@ -433,9 +433,11 @@ int run(const Options &opt) {
             preferences[key]=!preferences[key].get<bool>();native::save_settings(cache/"settings.json",preferences);apply_preferences();
         }
     };
-    auto handle_code=[&](const std::string &code,bool down,bool repeat=false,bool wheel=false) {
+    auto handle_code=[&](const std::string &code,bool down,bool repeat=false,bool wheel=false,uint64_t at_ns=0) {
         if(code.empty())return;
         if(down)held_codes.insert(code);else held_codes.erase(code);
+        // Ticks see keys when they happened, like mouse motion (see Input::key_at).
+        if(!wheel){if(at_ns)input.key_at(at_ns,code,down);else input.keys_resync=true;}
         input.held=0;
         for(auto binding=preferences["binds"].begin();binding!=preferences["binds"].end();++binding) {
             const auto bit=movement_bit(binding.key());bool matching=false,held=false;
@@ -463,6 +465,15 @@ int run(const Options &opt) {
     auto last=Clock::now(),title_time=last,ui_time=last,started=last; uint64_t frame=0,title_frames=0;
     // Discord Rich Presence / Join. Never from scripted or hidden runs, so a
     // smoke test can't show up on the developer's own profile.
+    // BUNNYHOP_INPUT_LOG=path writes one line per tick: what that tick got from
+    // the mouse and keyboard, and the frame it ran in. Off unless asked for.
+    std::ofstream input_log;uint64_t input_frame=0;
+    if(const char *log_path=std::getenv("BUNNYHOP_INPUT_LOG");log_path&&*log_path){
+        input_log.open(log_path,std::ios::trunc);
+        if(input_log)input_log<<"tick,frame,frame_ms,sim_ms,counts,pending,keys,speed,grounded,jumped\n";
+        else std::cerr<<"Could not open BUNNYHOP_INPUT_LOG\n";
+    }
+    double input_frame_ms=0;
     native::discord::Client discord;
     const bool discord_allowed=!opt.frames&&!opt.hidden&&opt.menu_smoke.empty();
     std::string presence_map;int64_t presence_started=0;auto presence_time=std::chrono::steady_clock::time_point{};
@@ -485,7 +496,7 @@ int run(const Options &opt) {
                         else if(event.key.scancode==SDL_SCANCODE_ESCAPE) show_menu(captured);
                         else if(event.key.scancode==SDL_SCANCODE_T&&captured&&menu) {show_menu(true);menu->evaluate_js("window.bunnyhopNativeMenu?.open?.('room','chat')");}
                     }
-                    if(captured&&!playback)handle_code(native::key_code(event.key.scancode),down,event.key.repeat);
+                    if(captured&&!playback)handle_code(native::key_code(event.key.scancode),down,event.key.repeat,false,event.key.timestamp);
                     break;
                 }
                 case SDL_EVENT_MOUSE_MOTION: if(captured&&focused&&!playback) input.motion_at(event.motion.timestamp,event.motion.xrel,event.motion.yrel); break;
@@ -493,7 +504,7 @@ int run(const Options &opt) {
                 case SDL_EVENT_MOUSE_BUTTON_UP: {
                     const bool down=event.type==SDL_EVENT_MOUSE_BUTTON_DOWN;
                     if(!captured&&down&&focused&&(!menu||!menu->visible())&&core) {capture(true);break;}
-                    if(captured&&!playback)handle_code(native::mouse_code(event.button.button),down);
+                    if(captured&&!playback)handle_code(native::mouse_code(event.button.button),down,false,false,event.button.timestamp);
                     break;
                 }
                 case SDL_EVENT_MOUSE_WHEEL: if(captured&&!playback&&event.wheel.y!=0)handle_code(event.wheel.y>0?"MWheelUp":"MWheelDown",true,false,true); break;
@@ -620,6 +631,7 @@ int run(const Options &opt) {
         }
         const bool simulation_active=core && !spectator && !room_modes.frozen() && !download.valid() && ((focused&&captured)||opt.frames)&&(!playback||!playback_paused);
         if(beat_start&&!simulation_active) beat_paused=true;
+        ++input_frame;input_frame_ms=std::chrono::duration<double,std::milli>(now-last).count();
         if(simulation_active) accumulator+=(opt.frames?dt:std::clamp(std::chrono::duration<double>(now-last).count(),0.0,.25))*(playback?playback_speed:1);
         last=now;
         // Where simulated time has reached, on SDL's clock, so each tick below
@@ -636,6 +648,7 @@ int run(const Options &opt) {
         while(accumulator>=dt) {
             // --frames is a deterministic mode with no wall clock to window
             // against, so a tick there takes whatever is waiting.
+            const double counts_before=input.yaw_counts;
             if(opt.frames) input.consume_all();
             else {sim_ns+=tick_ns;input.consume_until(sim_ns);}
             prev=curr;const BhState tutorial_pre=curr;
@@ -643,8 +656,14 @@ int run(const Options &opt) {
             if(playback) {
                 if(curr.tick>=playback_info.at("totalTicks").get<uint32_t>()){playback_paused=true;accumulator=0;break;}
                 BhSnapshot state{};if(!bh_replay_step(core.get(),&state)){const std::string failure=bh_last_error(core.get());playback_failed=true;reset();error="Replay stopped: "+failure;std::cerr<<error<<'\n';show_menu(true);accumulator=0;if(opt.frames)running=false;break;}curr=state.player;bh_last_command(core.get(),&cmd);input.set_angles(cmd.pitch,cmd.yaw,5);
-            } else {input.held=0;for(auto b=preferences["binds"].begin();b!=preferences["binds"].end();++b){const auto bit=movement_bit(b.key());if(bit)for(const auto &key:b.value())if(held_codes.contains(key.get<std::string>()))input.held|=bit;}cmd=input.command();const auto look=input.look_sample();require(bh_step_look(core.get(),&cmd,look?&*look:nullptr,&curr),core.get(),"Stepping simulation");input.events(curr);}
+            } else {if(input.keys_resync){input.tick_codes=held_codes;input.keys_resync=false;}input.held=0;for(auto b=preferences["binds"].begin();b!=preferences["binds"].end();++b){const auto bit=movement_bit(b.key());if(bit)for(const auto &key:b.value())if(input.tick_codes.contains(key.get<std::string>()))input.held|=bit;}cmd=input.command();const auto look=input.look_sample();require(bh_step_look(core.get(),&cmd,look?&*look:nullptr,&curr),core.get(),"Stepping simulation");input.events(curr);}
             renderer->simulation_tick();
+            if(input_log&&!playback) {
+                const double moved=input.yaw_counts-counts_before;
+                input_log<<curr.tick<<','<<input_frame<<','<<input_frame_ms<<','<<double(sim_ns)/1e6<<','<<moved<<','<<input.pending_reports()<<','
+                    <<cmd.buttons<<(cmd.side>0?"R":cmd.side<0?"L":"")<<(cmd.forward>0?"F":cmd.forward<0?"B":"")<<','
+                    <<std::hypot(double(curr.velocity[0]),double(curr.velocity[1]))<<','<<int(curr.grounded!=0)<<','<<int((curr.events&2u)!=0)<<'\n';
+            }
             if(curr.events&native::teleported)room_events|=8;if(curr.events&2)room_events|=4;
             if(curr.events&(1u<<5)){const bool stab=cmd.buttons&native::attack2;room_events|=stab?32:16;if(!playback)bh_record_cosmetic(core.get(),stab?2:1);}
             if(playback){BhReplayEvents e{};if(bh_replay_events(core.get(),prev.tick,curr.tick,&e)){if(e.inspect_signal)renderer->inspect_press();renderer->inspect_held(e.inspect_held!=0);}}
