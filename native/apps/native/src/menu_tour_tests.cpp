@@ -1,7 +1,11 @@
 // The native menu tour against the web TourDirector (apps/web/src/attract.ts):
 // anchor choice and order, shot bounds from the clear-distance probe, the
 // camera path, fade cuts and the reduced-motion still. No GL or map needed.
+// Windows SDK headers define `near` to nothing before the client includes this
+// header. Keep that include-order condition covered on every test platform.
+#define near
 #include "menu_tour.hpp"
+#undef near
 #include <cstdlib>
 #include <iostream>
 

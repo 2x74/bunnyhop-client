@@ -92,10 +92,10 @@ inline std::vector<Anchor> anchors(const nlohmann::json &entities) {
     }
     std::vector<Anchor> out;
     for (const auto &a : list) {
-        const bool near = std::any_of(out.begin(), out.end(), [&](const Anchor &b) {
+        const bool nearby_anchor = std::any_of(out.begin(), out.end(), [&](const Anchor &b) {
             return std::hypot(a.pos[0] - b.pos[0], a.pos[1] - b.pos[1], a.pos[2] - b.pos[2]) < 160;
         });
-        if (!near) out.push_back(a);
+        if (!nearby_anchor) out.push_back(a);
     }
     return out;
 }
