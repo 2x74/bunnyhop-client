@@ -301,3 +301,48 @@ test("an attempt started under a confirmed account keeps it through same-account
   t.g.onAccount(null);
   expect(t.g.id).toBeNull();
 });
+
+test("only the latest account check's answer binds or ends an unknown-owner attempt, in either reply order", async () => {
+  type Reply = { resolve: (a: GauntletAttempt) => void; reject: (e: Error) => void };
+  const setup = async () => {
+    const replies: Reply[] = [];
+    let first = true;
+    const g = new NativeGauntlet({
+      api: {
+        gauntletAttempt: () => first ? ((first = false), Promise.resolve(attempt())) : new Promise((resolve, reject) => replies.push({ resolve, reject })),
+        pingGauntlet: async () => ({ id: ID, state: "open", step: 0, expiresAt: null }), gauntlet: async () => ({ me: null }),
+      },
+      send: () => {}, map: () => null, loading: () => false, notice: () => {}, result: () => {}, line: () => {},
+      account: async () => { throw new Error("offline"); }, // unknown, not signed out
+      setTimeout: () => 1, clearTimeout: () => {},
+    });
+    await g.start(ID);
+    g.onAccount("u1");
+    g.onAccount("u2");
+    return { g, u1: replies[0], u2: replies[1] };
+  };
+  const ok = () => attempt(), offline = () => new TypeError("Failed to fetch") as unknown as Error, gone = () => new ApiError(404, "unknown_attempt", "unknown attempt");
+  const owner = (g: NativeGauntlet) => (g as unknown as { owner: string | null | undefined }).owner;
+  // u2's check fails for the network, u1's stale success arrives (before or after): still unknown, never u1.
+  for (const order of ["u1-first", "u2-first"] as const) {
+    const t = await setup();
+    if (order === "u1-first") { t.u1.resolve(ok()); t.u2.reject(offline()); } else { t.u2.reject(offline()); t.u1.resolve(ok()); }
+    await settle();
+    expect(t.g.id).toBe(ID);
+    expect(owner(t.g)).toBeUndefined();
+  }
+  // u1's stale 404 (before or after u2's success): doesn't end it; u2 is the owner.
+  for (const order of ["u1-first", "u2-first"] as const) {
+    const t = await setup();
+    if (order === "u1-first") { t.u1.reject(gone()); t.u2.resolve(ok()); } else { t.u2.resolve(ok()); t.u1.reject(gone()); }
+    await settle();
+    expect(t.g.id).toBe(ID);
+    expect(owner(t.g)).toBe("u2");
+  }
+  // A leave in between: neither answer does anything afterwards.
+  const t = await setup();
+  t.g.leave();
+  t.u2.resolve(ok()); t.u1.reject(gone());
+  await settle();
+  expect(t.g.id).toBeNull();
+});

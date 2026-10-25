@@ -40,8 +40,14 @@ zero gameplay ticks. The old local test image's SDL 3.2.10 was insufficient;
 the source requirement was not weakened. Generated presentation assets must be
 regenerated to include the OST; stale shared build output is not release input.
 
-The final UI audit and final hosted candidate remain separate qualification
-steps. Local packages are ad-hoc previews, not production-admitted builds.
+The final UI audit is clean. Its four findings (split countdown, unknown account
+ownership, pause tab styling and stale report targets) were fixed and independently
+verified. A final account-response fence also passed 17 focused/reproduction tests
+and 74 independent race/lifecycle cases. All 57 frozen UI files matched, and an
+isolated menu rebuild matched SHA-256
+`cd3aa90213bcf632d0ac1f4fff7c1750a9cf3b0c18b880cdd1458de9b7f6b7cf`.
+The final hosted candidate remains a separate qualification step. Local packages
+are ad-hoc previews, not production-admitted builds.
 Physical Windows/WebView2, Linux hardware/Wayland, signed-in native submissions
 and a human finish-to-leaderboard flow are not established by these checks.
 

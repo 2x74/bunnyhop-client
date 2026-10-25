@@ -95,6 +95,8 @@ export class NativeGauntlet {
    * under the signed-in account (it only shows you your own). undefined: not known yet. Another account lets it go.
    */
   private owner: string | null | undefined;
+  /** Bumped by every onAccount (and start / leave / end): only the latest account's server answer may bind or end. */
+  private accountCheck = 0;
 
   constructor(private h: GauntletHost) {}
 
@@ -114,7 +116,7 @@ export class NativeGauntlet {
   async start(id: string, urlMap: string | null = null): Promise<void> {
     this.leave();
     const epoch = ++this.epoch;
-    const owner = this.h.account ? await this.h.account().catch(() => null) : undefined;
+    const owner = this.h.account ? await this.h.account().catch(() => undefined) : undefined;
     if (epoch !== this.epoch) return;
     let a: GauntletAttempt;
     try {
@@ -154,6 +156,7 @@ export class NativeGauntlet {
    */
   onAccount(id: string | null): void {
     const a = this.attempt;
+    const check = ++this.accountCheck;
     if (!a) return;
     if (this.owner !== undefined) {
       if (id !== this.owner) this.leave();
@@ -161,9 +164,11 @@ export class NativeGauntlet {
     }
     if (id === null) return this.leave();
     const epoch = this.epoch;
+    // Only the answer to the latest account check counts: an earlier account's late reply neither binds nor ends.
+    const current = () => epoch === this.epoch && check === this.accountCheck && this.attempt === a;
     this.h.api.gauntletAttempt(a.id).then(
-      (server) => { if (epoch === this.epoch && this.attempt === a && server.id === a.id) this.owner = id; },
-      (e) => { if (epoch === this.epoch && this.attempt === a && e instanceof ApiError && (e.status === 404 || e.status === 401)) this.end(endedText("unknown")); },
+      (server) => { if (current() && server.id === a.id) this.owner = id; },
+      (e) => { if (current() && e instanceof ApiError && (e.status === 404 || e.status === 401)) this.end(endedText("unknown")); },
     );
   }
 
@@ -361,6 +366,7 @@ export class NativeGauntlet {
 
   private stop(): void {
     this.epoch++;
+    this.accountCheck++;
     this.clear(this.pingTimer);
     this.clear(this.goTimer);
     this.pingTimer = this.goTimer = 0;
