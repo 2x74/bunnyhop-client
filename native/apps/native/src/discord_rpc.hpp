@@ -204,8 +204,15 @@ private:
             sockaddr_un addr{}; addr.sun_family = AF_UNIX;
             if (path.size() >= sizeof(addr.sun_path)) continue;
             std::memcpy(addr.sun_path, path.c_str(), path.size() + 1);
+#ifdef SOCK_CLOEXEC
             const int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
             if (fd < 0) return false;
+#else
+            // macOS has no SOCK_CLOEXEC; set close-on-exec right after creating it.
+            const int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+            if (fd < 0) return false;
+            fcntl(fd, F_SETFD, fcntl(fd, F_GETFD) | FD_CLOEXEC);
+#endif
             if (connect(fd, reinterpret_cast<sockaddr *>(&addr), sizeof addr) == 0) {
                 fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
 #ifdef SO_NOSIGPIPE
