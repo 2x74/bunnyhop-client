@@ -297,7 +297,11 @@ if (window === top && location.origin === 'https://bunnyhop.lol') {
 };
 
 MenuWebView::MenuWebView(SDL_Window *window, const std::string &html) : impl_(std::make_unique<Impl>(window, html)) {}
-MenuWebView::~MenuWebView() = default;
+MenuWebView::~MenuWebView() {
+    // Destroying the windows is GDK work as well.
+    GlContextRelease released;
+    impl_.reset();
+}
 bool MenuWebView::available() const { return impl_->menu && impl_->window; }
 const std::string &MenuWebView::error() const { return impl_->state->error; }
 bool MenuWebView::visible() const { return impl_->shown; }
@@ -334,8 +338,13 @@ void MenuWebView::evaluate_js(const std::string &script) {
             g_clear_error(&error);
         }, state);
 }
-bool MenuWebView::open_auth(const std::string &url) { return impl_->open_auth(url.c_str()); }
-void MenuWebView::close_auth() { impl_->close_auth(false); }
+// The sign-in window is created, shown and destroyed from here, straight from
+// the game loop's message handling rather than inside pump_glib(), so it needs
+// its own release. Without it, opening "Sign in with Discord" mapped a new
+// GDK/EGL surface while the game's context was current, which labwc answered
+// by dropping the Wayland connection.
+bool MenuWebView::open_auth(const std::string &url) { GlContextRelease released; return impl_->open_auth(url.c_str()); }
+void MenuWebView::close_auth() { GlContextRelease released; impl_->close_auth(false); }
 bool MenuWebView::screenshot(const std::string &path) {
     if (!available() || path.empty()) return false;
     struct Snapshot { std::shared_ptr<MenuState> state; std::string path; };
