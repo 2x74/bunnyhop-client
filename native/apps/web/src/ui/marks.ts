@@ -29,7 +29,7 @@ const svg = (inner: string) => `<svg viewBox="0 0 24 24" aria-hidden="true" focu
 
 export const VERIFIED_TITLE = "Verified: this is really them";
 
-/** The staff shield: Developer (the owner), Admin or Moderator. */
+/** The staff shield: Owner, Admin or Moderator. */
 export function staffMark(b: StaffBadge): HTMLElement {
   return h(`span.nm-staff.${b}`, { role: "img", "aria-label": STAFF_LABEL[b], title: STAFF_LABEL[b], html: svg(STAFF_SVG[b]) });
 }

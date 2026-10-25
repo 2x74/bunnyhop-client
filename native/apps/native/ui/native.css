@@ -1,49 +1,85 @@
-html, body { background: transparent; }
-body.native-menu { height: 100dvh; background: linear-gradient(115deg,rgba(12,12,15,.98),rgba(12,12,15,.91)); }
-.native-shell { height: 100%; box-sizing: border-box; display: flex; flex-direction: column; padding: clamp(1.1rem,3.7vw,4rem); gap: 1.2rem; }
-.native-top { display: flex; align-items: center; justify-content: space-between; gap: 2rem; min-height: 3rem; }
-.native-top > .wordmark { opacity: .72; }
-#native-menu { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
-.native-home { width: 100%; display: grid; grid-template-columns: minmax(20rem,1fr) minmax(20rem,1fr); gap: 4rem; align-items: center; }
-.native-home-actions { display: flex; flex-direction: column; align-items: stretch; }
-.native-home-actions .home-item { width: 100%; }
-.native-home .wordmark-xl { font-size: clamp(2.4rem,5vw,4.3rem); }
-/* Native pause/menu controls must be painted as soon as the overlay opens.
-   The web title screen's delayed entrance can stay transparent while a host
-   loading-state update replaces the screen or WKWebView takes a snapshot. */
-.native-menu .native-home .home-menu > *,
-.native-menu .native-home .wordmark-xl .wm-text,
-.native-menu .native-home .wordmark-xl .logo-mark circle { animation:none; transform:none; }
-.native-menu .native-home .wordmark-xl .logo-mark path { animation:none; stroke-dashoffset:0; }
+/* The native menu is the web's own markup and style.css (home.ts, menu.ts pause screen, the panel screens); this file
+   only places what the web page has and the menu document doesn't: the map behind (#native-backdrop, in the place of
+   the web's #game canvas), the host's status lines, and the native-only panels. */
+html { background: transparent; }
+body.native-menu { height: 100dvh; margin: 0; overflow: hidden; background: var(--ink-0); }
+/* The host's live scene shows through a transparent page (macOS / Windows); the overlay's scrim still sits over it. */
+html[data-native-backdrop="scene"], html[data-native-backdrop="scene"] body.native-menu { background: transparent; }
+
+/* The map behind the menus: the web's #game rules (style.css), for the host's still or the map's picture. */
+#native-backdrop { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; background: var(--ink-0); }
+#native-backdrop > .card-art, #native-backdrop > img { position: absolute; inset: 0; width: 100%; height: 100%; aspect-ratio: auto; border-radius: 0; object-fit: cover; }
+#native-backdrop > .card-art::after { display: none; }
+#native-backdrop > .card-art .card-initials { display: none; }
+body:not(.in-game) #native-backdrop { opacity: 0; transition: opacity 0.5s ease, transform 0.8s var(--ease); }
+body.attract-live:not(.in-game) #native-backdrop { opacity: 1; transform: scale(1.02); }
+body.attract-live.attract-cut:not(.in-game) #native-backdrop { opacity: 0; }
+/* A full screen over it: the web's softened still (ui/backdrop.ts), here the picture blurred a little. */
+body.attract-live:not(.in-game):not([data-screen="home"]) #native-backdrop { transform: scale(1.05); }
+body:not([data-screen="home"]):not([data-screen="pause"]) #native-backdrop > * { filter: blur(4px); }
+/* The live scene is drawn by the host behind the page: the layer is only the black of a cut. */
+html[data-native-backdrop="scene"] #native-backdrop { background: #000; }
+html[data-native-backdrop="scene"] #native-backdrop > * { display: none; }
+/* (Also paused in game: the host's game frame shows through.) */
+html[data-native-backdrop="scene"] body.native-menu #native-backdrop { opacity: 0; transform: none; }
+html[data-native-backdrop="scene"] body.attract-live.attract-cut:not(.in-game) #native-backdrop { opacity: 1; }
+/* Paused over a loaded map without the host's scene (GTK window, loading): the map's picture under the web's dim. */
+html:not([data-native-backdrop="scene"]) body.in-game #native-backdrop { opacity: 1; }
+
+/* A screen redrawn for a host update (loading, error) doesn't replay its entrance. */
+#menu.native-steady :is(.home-brand *, .home-menu > *, .home-foot, .home-right > *, .wm-text, .logo-mark path, .logo-mark circle, .trail-hot) { animation: none !important; }
+#menu.native-steady .wordmark-xl .logo-mark path { stroke-dashoffset: 0; }
+
+/* The page's animation clock stopped (main.ts watchAnimationClock): entrances and fades end at once, nothing waits
+   invisible at its first frame. */
+html.native-clock-stopped *, html.native-clock-stopped *::before, html.native-clock-stopped *::after { animation-duration: 0s !important; animation-delay: 0s !important; transition-duration: 0s !important; transition-delay: 0s !important; }
+
+/* One column (a small window): the web's home is cut off below the fold; here the page scrolls to the maps to try. */
+@media (max-width: 58rem) { #menu.screen-home { overflow-y: auto; } }
+
+/* The host's status lines (loading, errors, notices): one quiet line at the bottom centre, above the menus. */
+#native-status, #native-notice { position: fixed; left: 50%; bottom: 1.1rem; z-index: calc(var(--z-overlay) + 1); transform: translateX(-50%); max-width: min(42rem, calc(100vw - 2rem)); margin: 0; padding: 0.45rem 0.9rem; border-radius: var(--r-2); background: var(--panel-solid); box-shadow: var(--shadow); font-size: var(--fs-sm); text-align: center; pointer-events: none; }
+#native-notice { bottom: 3.6rem; }
+#native-status[data-kind="error"] { color: var(--loss); }
+#native-notice:empty, #native-status:empty { display: none; }
+
+/* The pause rail's Feedback / Inbox pair: in a half-width cell the web's corner badge (inbox.css) lands on the label
+   with wider fallback fonts (Linux). Unread, the count takes the mail icon's place before the label instead. */
+.rail-pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.rail-pair .rail-item:has(.ib-badge:not([hidden])) > .ri-icon { display: none; }
+.rail-pair .ri-label:has(> .ib-badge:not([hidden])) { flex-direction: row; align-items: center; gap: 0.4rem; white-space: nowrap; overflow: hidden; }
+.rail-pair .ri-label > .ib-badge { position: static; transform: none; flex: none; order: -1; margin: 0; }
+
+/* The finished run (host timer) under the pause screen's map name. */
 #native-finish-result:empty { display: none; }
-.native-finish { margin-top:1.25rem; padding:.55rem 0 .55rem 1rem; border-left:3px solid var(--amber); }
-.native-finish-label { margin:0 0 .2rem; color:var(--amber); font-size:var(--fs-sm); font-weight:var(--w-head); text-transform:uppercase; letter-spacing:.08em; }
-.native-finish-time { font-size:2.7rem; line-height:1.1; font-variant-numeric:tabular-nums; }
-.native-finish-stats { margin:.35rem 0 0; font-size:var(--fs-sm); }
-.native-home-left:has(.native-finish) .home-menu { margin-top:1rem; }
-.native-current { justify-self: stretch; max-width: 39rem; }
-.native-current > h1 { font-size: clamp(2rem,4vw,4rem); letter-spacing: -.04em; line-height: 1.02; margin-bottom: 1rem; }
-.native-current-art { width: 100%; aspect-ratio: 16/9; border-radius: var(--r-3); overflow: hidden; }
-.native-current h2 { margin: 1rem 0 .4rem; }
-.native-controls { line-height: 1.8; max-width: 34rem; }
+.native-finish { margin-top: var(--sp-2); padding: 0.35rem 0 0.35rem 0.7rem; border-left: 2px solid var(--amber); }
+.native-finish-label { margin: 0; color: var(--amber); font-size: var(--fs-xs); font-weight: var(--w-head); text-transform: uppercase; letter-spacing: 0.08em; }
+.native-finish-time { font-size: 1.5rem; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.native-finish-stats { margin: 0.15rem 0 0; font-size: var(--fs-xs); }
+/* The finish's one line under the stats: a practice finish wasn't submitted (web hud/result.ts), a gauntlet split. */
+.native-finish-sub { margin: 0.15rem 0 0; font-size: var(--fs-xs); line-height: 1.3; }
+.native-finish-sub.ok { color: var(--gain); }
+/* A practice finish keeps the timer's yellow (web #hud-endcard.practice .ec-time). */
+.native-finish.practice { border-left-color: var(--practice); }
+.native-finish.practice .native-finish-label, .native-finish.practice .native-finish-time { color: var(--practice); }
+
+/* Quit, last of the home screen's quiet links. */
+.home-link.home-quit { color: var(--cream-3); }
+
+/* Staff actions remain in the staff application. */
+.native-menu .rb-admin { display: none; }
+
+/* Panel screens: one column, the panel's own body scrolls (the web's #menu scrolls the page instead). */
 .native-maps { display: flex; flex-direction: column; height: 100%; max-height: 100%; box-sizing: border-box; }
 .native-maps > .map-browser { flex: 1; min-height: 0; }
 .native-sensitivity { width: 7rem; }
 .native-setting-result { min-height: 1.5rem; }
-#native-status, #native-notice { margin: 0; min-height: 1.2rem; font-size: var(--fs-sm); }
-#native-status[data-kind="error"] { color: var(--loss); }
-#native-notice:empty, #native-status:empty { display: none; }
-.native-footer { display: flex; align-items: center; gap: 1rem; color: var(--faint); font-size: var(--fs-xs); }
-.native-footer > span:first-child { margin-right: auto; }
 .native-account-section { display: flex; flex-direction: column; align-items: stretch; gap: .6rem; }
 .native-account-section h3 { margin: .4rem 0; font-size: 1rem; }
 .native-identity { display: flex; align-items: center; gap: 1rem; }
 .native-identity .avatar { width: 3rem; height: 3rem; font-size: 1.2rem; }
 .native-identity p { margin: .3rem 0 0; }
 .native-account-note { margin: 0; }
-/* Staff actions remain in the staff application. */
-.native-menu .rb-admin { display: none; }
-.native-style-row { display:flex;align-items:center;gap:1rem;margin-top:1rem; }
 .native-replay-screen { display:flex;flex-direction:column;max-height:100%;min-height:0; }
 .native-profile { width: min(48rem,100%); }
 .native-replays { overflow:auto;min-height:0;padding-right:.5rem; }
@@ -55,12 +91,7 @@ body.native-menu { height: 100dvh; background: linear-gradient(115deg,rgba(12,12
 .native-playback { padding:1rem 0; }
 .native-playback input[type=range] { flex:1;min-width:10rem; }
 .native-ghost-toggle { display:flex;align-items:center;gap:.4rem; }
-@media(max-width: 800px) { .native-home { grid-template-columns: 1fr; gap: 1rem; } .native-current { display: none; } .native-top > .wordmark { display: none; } .native-top { justify-content: flex-end; } .native-shell { padding: 1rem; } }
 
-.native-home-actions { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.2rem .8rem; }
-.native-home-actions .home-item { min-height:3rem; }
-.native-home-left { min-height:0;max-height:100%;overflow:auto;padding-right:.5rem; }
-.native-home .home-brand { margin-bottom:.7rem; }
 .native-room-screen,.native-servers,.native-stats,.native-ranks,.native-profile,.native-tutorial-screen,.native-loadout { display:flex;flex-direction:column;max-height:100%;min-height:0; }
 .native-room,.native-servers>.servers,.native-profile-body,.native-tutorial,.native-cosmetics,.native-stats>.stats { overflow:auto;min-height:0; }
 .native-room-columns { display:grid;grid-template-columns:minmax(12rem,1fr) minmax(18rem,2fr);gap:1.5rem;margin-top:1rem; }
@@ -171,7 +202,17 @@ body.native-menu { height: 100dvh; background: linear-gradient(115deg,rgba(12,12
 .nset-row .nset-pos-num { width:4.6rem; }
 .nset-row-pos.moved .nset-name { color:var(--amber); }
 .nset-hud { display:flex;flex-direction:column;gap:1.1rem; }
-
-/* A small hello in the top-left corner of the menu window. */
-.native-hi { position:fixed;top:.55rem;left:.8rem;margin:0;font-size:.7rem;color:var(--faint);opacity:.6;pointer-events:none;user-select:none;z-index:1; }
-.nset-speed { display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:.35rem .75rem; }
+/* Watching a gauntlet attempt (gauntlet-watch.ts): its own line under the playback controls. */
+.native-gauntlet-watch { display: flex; flex-basis: 100%; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.native-gauntlet-watch:empty { display: none; }
+/* The pause panel's head and tabs are the web's (style.css .pp-head / .pp-tab). The friends dock (social/dock.css) uses
+   the same class names for its own panel and is bundled after style.css here, so its rules would win; scoped to the
+   pause panel, the web's exact values come back and the dock keeps its own. */
+.pause-panel .pp-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4); margin: -0.35rem 0 var(--sp-3); padding: 0; border-bottom: 1px solid var(--line); box-shadow: none; }
+.pause-panel .pp-tabs { display: flex; flex: initial; gap: 0.1rem; min-width: 0; margin-left: -0.7rem; overflow-x: auto; scrollbar-width: none; }
+.pause-panel .pp-tab { position: relative; flex: none; display: inline-flex; align-items: center; gap: 0.45rem; margin-bottom: -1px; padding: 0.45rem 0.7rem 0.6rem; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; box-shadow: none; color: var(--dim); font: inherit; font-size: var(--fs-lg); font-weight: 700; white-space: nowrap; cursor: pointer; transition: color var(--t-fast), border-color var(--t-fast); }
+.pause-panel .pp-tab:hover { color: var(--text); }
+.pause-panel .pp-tab .ri-icon { width: auto; min-width: 1rem; color: inherit; }
+.pause-panel .pp-tab.on { background: none; box-shadow: none; color: var(--text); border-bottom-color: var(--accent); }
+.pause-panel .pp-tab:focus-visible { outline: none; box-shadow: var(--ring); background: var(--raise); border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
+.pause-panel .pp-tabs.hop-host { padding-top: 1.4rem; margin-top: -1.4rem; }

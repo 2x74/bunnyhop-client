@@ -15,18 +15,21 @@ test("identical host state and timer-only updates retain visible menu controls",
     await page.route("**/*",route=>route.request().url()==="https://bunnyhop.lol/native-menu-unit"
       ?route.fulfill({status:200,contentType:"text/html",body:html}):route.abort());
     await page.goto("https://bunnyhop.lol/native-menu-unit",{waitUntil:"domcontentloaded"});
+    // The web title screen's entrance plays once; a redraw for the host (loading) must not replay it.
+    await page.waitForTimeout(900);
     const immediate=await page.evaluate(()=>{
       const value=()=>({button:Number(getComputedStyle(document.querySelector(".home-item")!).opacity),brand:Number(getComputedStyle(document.querySelector(".wm-text")!).opacity)});
       const initial=value();
       window.bunnyhopNativeMenu.onState({loading:"Reading map content"});
       return {initial,loading:value()};
     });
-    expect(immediate.initial.button).toBeGreaterThan(0);expect(immediate.initial.brand).toBe(1);
-    expect(immediate.loading.button).toBeGreaterThan(0);expect(immediate.loading.brand).toBe(1);
+    expect(immediate.initial.button).toBe(1);expect(immediate.initial.brand).toBe(1);
+    // (Disabled while loading: the web's dimmed .menu-btn:disabled, never the entrance's 0.)
+    expect(immediate.loading.button).toBeGreaterThan(.3);expect(immediate.loading.brand).toBe(1);
     const stable=await page.evaluate(async()=>{
-      const state={map:"",loading:"",error:"",paused:true,sensitivity:2,engine:"native",renderer:"opengl"};
+      const state={map:"bhop_eazy",loading:"",error:"",paused:true,sensitivity:2,engine:"native",renderer:"opengl"};
       window.bunnyhopNativeMenu.onState(state);
-      const original=document.querySelector(".native-home-actions");
+      const original=document.querySelector(".rail-list");
       for(let tick=0;tick<12;tick++) {
         window.bunnyhopNativeMenu.onState({...state,timer:{tick}});
         await new Promise(resolve=>setTimeout(resolve,100));
@@ -39,8 +42,8 @@ test("identical host state and timer-only updates retain visible menu controls",
       window.bunnyhopNativeMenu.onRunEvent({type:"reset",generation:9});
       window.bunnyhopNativeMenu.onRunEvent({type:"finish",generation:9,map:"bhop_eazy",track:0,style:"autohop",build:"bunnyhop-native/local",wasm:"",replayBase64:""});
       await Promise.resolve();
-      return {same:document.querySelector(".native-home-actions")===original,
-        opacity:getComputedStyle(document.querySelector(".home-item")!).opacity,
+      return {same:document.querySelector(".rail-list")===original,
+        opacity:getComputedStyle(document.querySelector(".rail-item")!).opacity,
         time,summary,afterNotice:document.querySelector(".native-finish-time")?.textContent,notice:document.getElementById("native-notice")?.textContent,
         webgl:window.__nativeMenuGraphics,canvases:document.querySelectorAll("canvas").length};
     });

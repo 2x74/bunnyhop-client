@@ -17,6 +17,8 @@ public:
     MenuWebView &operator=(const MenuWebView &) = delete;
 
     bool available() const;
+    // Alpha composition over the SDL window; false for the separate GTK window.
+    bool supports_backdrop() const;
     const std::string &error() const;
     void set_visible(bool visible);
     bool visible() const;

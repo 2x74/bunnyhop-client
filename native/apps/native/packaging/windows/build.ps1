@@ -25,7 +25,10 @@ else {
     if (!(Get-Command ffmpeg -ErrorAction SilentlyContinue)) { throw 'Source asset generation requires ffmpeg on PATH; or provide complete prebuilt target/native-menu and target/native-assets resources.' }
     Run 'bun' @('apps/native/build.ts')
 }
-Run 'ctest' @('--test-dir', 'apps/native/build', '--output-on-failure')
+Run 'bun' @('apps/native/tools/parity-gate.ts')
+Run 'bun' @('test', 'apps/native/tools/parity-gate.test.ts')
+Run 'ctest' @('--test-dir', 'apps/native/build', '--output-on-failure', '--no-tests=error')
 Run 'cargo' @('test', '-p', 'bunnyhop-native-bridge', '--locked')
+Run 'cargo' @('test', '-p', 'bunnyhop-core', '--features', 'native-wasm-math', '--test', 'physics_versions', '--locked')
 Run 'bun' @('test', 'apps/native/packaging')
 Run 'bun' @('apps/native/package.ts', '--skip-build', '--version', $Version, '--dependencies', "$vcpkg/installed/x64-windows/bin", '--licenses', "$vcpkg/installed/x64-windows/share")

@@ -5,7 +5,7 @@ import {readFile,readdir,mkdir,writeFile,rm,copyFile} from "node:fs/promises";
 import {resolve,join,dirname,relative} from "node:path";
 const root=resolve(import.meta.dir,"../.."),output=join(root,"target/native-typecheck");
 await rm(output,{recursive:true,force:true});
-const adapters:Record<string,string>={"gpu-info":"gpu-info","ui/account-panel":"account-panel","audio":"audio","audio/index":"audio","audio/ui":"audio","tutorial/entry":"tutorial-entry","player/race":"race-bus"};
+const adapters:Record<string,string>={"gpu-info":"gpu-info","ui/account-panel":"account-panel","audio":"audio","audio/index":"audio","audio/ui":"audio","tutorial/entry":"tutorial-entry","player/race":"race-bus","play-lock":"play-lock","hud":"hud-types"};
 async function walk(path:string):Promise<string[]>{const out:string[]=[];for(const entry of await readdir(path,{withFileTypes:true})){const file=join(path,entry.name);if(entry.isDirectory())out.push(...await walk(file));else if(file.endsWith(".ts"))out.push(file);}return out;}
 const tools=[...await walk(join(root,"apps/native")),...await walk(join(root,"tools/tutorial"))].filter(path=>!path.includes("/apps/native/ui/")&&!path.endsWith("/typecheck.ts")&&!path.endsWith(".test.ts"));
 const files=[...await walk(join(root,"apps/native/ui")),...await walk(join(root,"apps/web/src")),...tools];

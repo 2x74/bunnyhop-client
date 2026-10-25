@@ -1,17 +1,17 @@
-# Bunnyhop Native
+# bunnyhop.lol - Native
 
 A native desktop fork of [bunnyhop.lol](https://bunnyhop.lol), maintained in
 [2x74/bunnyhop-client](https://github.com/2x74/bunnyhop-client).
 
-**v0.0.1 is an unsigned preview.** Get available packages and their checksums from
+**Native releases are unsigned previews.** Get available packages and their checksums from
 [Releases](https://github.com/2x74/bunnyhop-client/releases). macOS ARM64 has been
 built and smoke-tested. Linux x64 and Windows x64 are automated build targets;
 automation alone does not establish interactive gameplay or physical input
 validation. Check each release's notes for the artifacts and checks that actually
 completed.
 
-Current source targets physics **15**, timer rules **2**, and canonical verifier
-`bunnyhop-web/3cca0f22a3c3`. See [current compatibility and qualification](docs/current-compatibility.md).
+Current source targets production v0.0.27, physics **17**, timer rules **2**, and canonical verifier
+`bunnyhop-web/35dac92ea33c`. See [current compatibility and qualification](docs/current-compatibility.md).
 Published archives have their own source/build identity and admission status.
 
 ## Native gameplay, shared game rules
@@ -29,7 +29,9 @@ Electron dependency.
 
 Native features include eight movement styles, persistent settings and binds,
 local BHR recording/playback, ghosts, tutorial coaching, native HUD/audio,
-cosmetics, and multiplayer room pose rendering. See the
+practice checkpoints and noclip, HUD scaling, Gauntlets, player-report entry points,
+cosmetics, multiplayer room pose rendering, and native map/PB replay menu backgrounds.
+The eleven-track bunnyhop.lol OST is bundled for offline playback. See the
 [native guide](native/apps/native/README.md) for the detailed scope and remaining
 parity work.
 
@@ -37,7 +39,7 @@ parity work.
 
 Download the archive for your platform from
 [Releases](https://github.com/2x74/bunnyhop-client/releases), verify its SHA-256
-against the accompanying package report, extract it, and launch Bunnyhop.
+against the accompanying package report, extract it, and launch **bunnyhop.lol - Native**.
 macOS packages are ad-hoc signed, without Developer ID or notarization. Windows
 packages are unsigned. Expect the platform's usual first-launch warnings; these
 packages do not provide a signed automatic update channel. See
@@ -83,7 +85,7 @@ apps/native/build/bunnyhop-native --online-map bhop_eazy
 apps/native/build/bunnyhop-native --map /path/to/map.bsp --no-menu
 
 # Create an unsigned/ad-hoc package on the target OS.
-bun run package --version 0.0.1
+bun run package --version 0.3.4
 ```
 
 ## Preview limits
@@ -94,9 +96,9 @@ real desktop; headless checks cannot establish them. Windows runtime and
 interactive validation must be reported separately from compilation. Correctness
 tests establish no FPS or latency advantage.
 
-Website parity remains incomplete: full profile-card editing,
-supporter/gauntlet flows, complete third-person animation blending, animated
-accessories, full audio mixing/music and in-app updates remain follow-up work.
+Website parity remains incomplete: full profile-card editing, supporter checkout,
+complete third-person animation blending, animated accessories, browser-style
+music crossfades/ducking and in-app updates remain follow-up work.
 Ghost/trail cosmetic choices can sync to the account, but those effects are not
 yet drawn natively. Long replay seeking can briefly stall the UI. See the native
 guide for recording limits and verification details.

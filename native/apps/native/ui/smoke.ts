@@ -55,7 +55,7 @@ try {
   if(errors.length) throw new Error(errors.join("\n"));
   if(diagnostics.graphics?.attempts!==0||diagnostics.graphics?.contexts!==0||diagnostics.canvases!==0||diagnostics.wasmCalls!==0) throw new Error("Menu tried to initialize gameplay rendering/simulation");
   if(!diagnostics.messages.some(message=>message.type==="selectMap"&&message.id==="bhop_eazy")) throw new Error("Map selection was not bridged");
-  if(!diagnostics.messages.some(message=>message.type==="sensitivity"&&message.value===2.4)) throw new Error("Sensitivity was not bridged");
+  if(!diagnostics.messages.some(message=>message.type==="settings"&&(message.patch as {sensitivity?:number}|undefined)?.sensitivity===2.4)) throw new Error("Sensitivity was not bridged");
   if(!diagnostics.messages.some(message=>message.type==="resume")) throw new Error("Resume was not bridged");
   if(requests.some(request=>request.type==="script"||request.url.includes(".wasm"))) throw new Error("Menu requested external JavaScript/WASM");
   const report={pass:true,mapCount,diagnostics,errors,requests};

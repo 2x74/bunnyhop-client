@@ -149,6 +149,9 @@ fn c_layouts_are_stable() {
     assert_eq!(size_of::<BhSurfaceProbe>(), 16);
     assert_eq!(size_of::<BhLookSample>(), 40);
     assert_eq!(offset_of!(BhLookSample, count), 16);
+    assert_eq!(size_of::<BhLookSampleV2>(), 48);
+    assert_eq!(offset_of!(BhLookSampleV2, count), 16);
+    assert_eq!(offset_of!(BhLookSampleV2, epoch), 24);
     assert_eq!(size_of::<BhGhostFrame>(), 48);
     assert_eq!(size_of::<BhReplayEvents>(), 12);
     assert_eq!(size_of::<BhSkyInfo>(), 76);
@@ -846,6 +849,10 @@ fn counted_telemetry_matches_shared_recorder_rebases_and_decoder() {
         ("counted9", true, false, false, 9),
         ("missing", false, true, false, 7),
         ("rawnegative", false, false, true, 7),
+        ("turns8", false, false, false, 8),
+        ("turns10", false, false, false, 10),
+        ("turns10-stamina", true, false, false, 10),
+        ("fractional-no-turns", false, false, false, 7),
     ] {
         let settings = if stamina {
             styles::settings("scroll").unwrap()
@@ -857,16 +864,31 @@ fn counted_telemetry_matches_shared_recorder_rebases_and_decoder() {
         let mut commands = Vec::new();
         let mut looks = Vec::new();
         for i in 0..150 {
-            let l = BhLookSample {
+            let mut l = BhLookSampleV2 {
                 base: if i < 70 { 350.125 } else { 17.0 },
                 k: 0.022,
-                count: if i < 70 { i * 3 } else { (i - 70) * 7 },
+                count: f64::from(if i < 70 { i * 3 } else { (i - 70) * 7 }),
                 epoch: u32::from(i >= 70),
                 kind: if i < 70 { 1 } else { 2 },
                 frames: 1,
                 events: 2,
                 reports: if i == 15 { 99999 } else { 8 },
             };
+            if case.contains("10") || case == "fractional-no-turns" {
+                l.count += 0.5;
+            }
+            let turn = case.starts_with("turns") && i >= 20 && i < 40;
+            if turn {
+                l.base += f64::from(i - 19) * 210.0 * f64::from(settings.tick_interval);
+                l.epoch = i as u32;
+                l.kind = if i == 25 {
+                    5 | 128
+                } else if i == 30 {
+                    2 | 128
+                } else {
+                    6
+                };
+            }
             let yaw = if i == 12 {
                 123.45
             } else if negative && i == 13 {
@@ -879,7 +901,7 @@ fn counted_telemetry_matches_shared_recorder_rebases_and_decoder() {
                 side: if i % 2 == 0 { 450.0 } else { -450.0 },
                 yaw,
                 pitch: i as f32 / 9.0,
-                buttons: ((i as u32) << 16) | 2,
+                buttons: ((i as u32) << 16) | 2 | if turn { 1 << 7 } else { 0 },
             });
             looks.push(if missing && i == 23 { None } else { Some(l) });
         }
@@ -1194,6 +1216,124 @@ fn clearing_replay_timer_leaves_local_simulation_usable() {
         let mut state = BhState::default();
         assert_eq!(bh_step(c, &BhCmd::default(), &mut state), 1);
         assert_eq!(state.tick, 1);
+        bh_destroy(c);
+    }
+}
+
+#[test]
+fn practice_save_is_harmless_and_mutations_coast_without_recording_or_zones() {
+    let fixture = Fixture::new();
+    let path = prop_fixture(&fixture);
+    unsafe {
+        let c = bh_create();
+        assert_eq!(bh_load_map(c, path.as_ptr(), fixture.root().as_ptr()), 1);
+        let zones = timer_zones();
+        assert_eq!(
+            bh_run_configure(c, &BhRunOptions::default(), zones.as_ptr(), zones.len()),
+            1
+        );
+        assert_eq!(
+            bh_record_begin(
+                c,
+                ptr::null(),
+                c"autohop".as_ptr(),
+                c"practice-test".as_ptr(),
+                100
+            ),
+            1
+        );
+        let cmd = BhCmd {
+            forward: 450.0,
+            yaw: 0.0,
+            ..BhCmd::default()
+        };
+        let mut state = BhState::default();
+        assert_eq!(bh_step(c, &cmd, &mut state), 1);
+        let (bytes, timer, hash, commands) = {
+            let m = (*c).map.as_ref().unwrap();
+            (
+                m.game.snapshot_bytes(),
+                m.timer.as_ref().unwrap().json(),
+                m.record_hash,
+                m.recorded_commands,
+            )
+        };
+        let handle = bh_practice_save(c, 10.0, 15.0);
+        assert!(handle > 0);
+        {
+            let m = (*c).map.as_ref().unwrap();
+            assert_eq!(m.game.snapshot_bytes(), bytes);
+            assert_eq!(m.timer.as_ref().unwrap().json(), timer);
+            assert_eq!((m.record_hash, m.recorded_commands), (hash, commands));
+            assert!(m.recorder.is_some() && m.record_valid);
+        }
+        // Simulate an already-running practice attempt; the clock must cross
+        // the end volume while flying without finishing, stats or splits.
+        {
+            let m = (*c).map.as_mut().unwrap();
+            let t = m.timer.as_mut().unwrap();
+            t.state.status = 1;
+            t.state.start_tick = 0;
+            t.state.jumps = 7;
+            t.state.strafes = 9;
+        }
+        assert_eq!(bh_practice_enter(c, 1), 1);
+        let flight = BhNoclipState {
+            position: [200.0, 0.0, 100.0],
+            velocity: [1.0, 2.0, 3.0],
+        };
+        let mut snapshot = BhSnapshot::default();
+        for _ in 0..25 {
+            assert_eq!(bh_practice_noclip_tick(c, &flight, &mut snapshot), 1);
+        }
+        let mut run = BhRunState::default();
+        assert_eq!(bh_run_state(c, &mut run), 1);
+        assert_eq!(
+            (run.status, run.jumps, run.strafes, run.split_count),
+            (1, 7, 9, 0)
+        );
+        assert_eq!(
+            (run.recording, run.recording_valid, run.total_commands),
+            (0, 0, commands)
+        );
+        assert_eq!(run.last_tick, snapshot.player.tick);
+        assert!(
+            (run.seconds
+                - f64::from(snapshot.player.tick) * f64::from((*c).settings.tick_interval))
+            .abs()
+                < 1e-12
+        );
+        // Restoring the harmless save is a mutation: timer/world/view restore,
+        // while recording remains invalid and can never become a completed BHR.
+        let mut view = BhCmd::default();
+        assert_eq!(bh_practice_restore(c, handle, &mut view, &mut snapshot), 1);
+        assert_eq!((view.yaw, view.pitch), (10.0, 15.0));
+        assert_eq!(bh_run_state(c, &mut run), 1);
+        assert_eq!(run.recording_valid, 0);
+        assert_eq!((*c).map.as_ref().unwrap().game.snapshot_bytes(), bytes);
+        let bhr = fixture.file("practice.bhr", &[]);
+        assert_eq!(bh_record_write_bhr(c, bhr.as_ptr()), 0);
+        // Restart starts fresh; this is the only native host transition which
+        // clears practice policy and begins another clean recording.
+        assert_eq!(bh_reset(c), 1);
+        assert_eq!(
+            bh_record_begin(c, ptr::null(), c"autohop".as_ptr(), c"clean".as_ptr(), 100),
+            1
+        );
+        assert_eq!(bh_run_state(c, &mut run), 1);
+        assert_eq!(
+            (run.recording, run.recording_valid, run.total_commands),
+            (1, 1, 0)
+        );
+        assert_eq!(bh_practice_enter(c, 1), 1); // idle timer must not arm in flight
+        for _ in 0..5 {
+            assert_eq!(bh_practice_noclip_tick(c, &flight, &mut snapshot), 1);
+        }
+        assert_eq!(bh_run_state(c, &mut run), 1);
+        assert_eq!((run.status, run.in_start, run.seconds), (0, 0, 0.0));
+        // Handles belong to a single map; replacing the map destroys them.
+        assert_eq!(bh_load_map(c, path.as_ptr(), fixture.root().as_ptr()), 1);
+        assert_eq!(bh_practice_restore(c, handle, &mut view, &mut snapshot), 0);
         bh_destroy(c);
     }
 }

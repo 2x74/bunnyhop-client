@@ -185,6 +185,13 @@ typedef struct BhLookSample {
 } BhLookSample;
 /* Real native mouse telemetry only. Missing samples retain existing uncounted replay encoding. */
 int bh_step_look(BhContext *ctx, const BhCmd *cmd, const BhLookSample *look, BhState *out);
+/* Additive ABI: the original 40-byte BhLookSample and bh_step_look remain unchanged.
+ * Fractional counts retain real mouse provenance in v10 recordings with manual turns. */
+typedef struct BhLookSampleV2 {
+    double base, k, count;
+    uint32_t epoch, kind, frames, events, reports;
+} BhLookSampleV2;
+int bh_step_look_v2(BhContext *ctx, const BhCmd *cmd, const BhLookSampleV2 *look, BhState *out);
 typedef struct BhWeaponReport {
     uint32_t flags, active, primary, secondary, knife, clip, clip_size, reload_ticks, burst, floor_changed, silencer, silencer_ticks;
 } BhWeaponReport;
@@ -258,6 +265,8 @@ int bh_surface_at(BhContext *ctx, float x, float y, float z, BhSurfaceProbe *out
  * No recording command stream can represent these mutations. Restart normally before a ranked attempt.
  */
 typedef struct BhNoclipState {double position[3], velocity[3];} BhNoclipState;
+/* Immediately invalidate recording; noclip!=0 also stops an idle/finished timer. */
+int bh_practice_enter(BhContext *ctx, uint32_t noclip);
 int bh_noclip_move(BhNoclipState *state, const BhCmd *cmd, double dt);
 int bh_practice_noclip_tick(BhContext *ctx, const BhNoclipState *state, BhSnapshot *out);
 /* returns1 standing,2 crouched,0 stuck/error. */

@@ -18,7 +18,7 @@ namespace native {
 // substring: "https://github.com.evil.test/" and "https://evil.test/?=github.com"
 // both fail here, as does "https://github.com@evil.test/".
 inline bool open_external(const std::string &url) {
-    static constexpr std::string_view allowed[]={"github.com","1998.lol","bunnyhop.lol"};
+    static constexpr std::string_view allowed[]={"github.com","1998.lol","bunnyhop.lol","discord.gg"};
     static constexpr std::string_view scheme="https://";
     if(url.size()<scheme.size()+3||url.size()>2048||!url.starts_with(scheme))return false;
     // Control characters and spaces can be read differently by whatever the

@@ -39,6 +39,8 @@ const result = await Bun.build({
         [resolve(web,"audio/ui")]: "audio.ts",
         [resolve(web,"tutorial/entry")]: "tutorial-entry.ts",
         [resolve(web,"player/race")]: "race-bus.ts",
+        [resolve(web,"play-lock")]: "play-lock.ts",
+        [resolve(web,"hud")]: "hud-types.ts",
       };
       if(adapters[path]) return {path:resolve(native,adapters[path])};
       if (["main","render","session","attract","input"].some(name=>path===resolve(web,name))) throw new Error(`Gameplay module is forbidden in the native menu: ${path}`);
@@ -46,7 +48,7 @@ const result = await Bun.build({
     build.onLoad({filter:/.*/,namespace:"native-menu"},()=>({contents:coreConstants,loader:"ts"}));
     build.onLoad({filter:/\.[cm]?[jt]sx?$/}, async (args) => {
       modules.add(args.path);
-      if(["ui/servers.ts","net/lobby.ts","social/state.ts","social/dock.ts"].some(path=>args.path===resolve(web,path))) {
+      if(["ui/servers.ts","net/lobby.ts","social/state.ts","social/dock.ts","ui/gauntlets.ts"].some(path=>args.path===resolve(web,path))) {
         let source=await Bun.file(args.path).text();
         if(args.path===resolve(web,"social/state.ts"))source=adaptSocialSource(source);
         if(args.path===resolve(web,"social/dock.ts"))source+=`\nwindow.addEventListener("bunnyhop:account",()=>close());`;
@@ -76,7 +78,7 @@ for(let index=0;index<styles.length;index++) {
   }
 }
 const prelude = `window.__nativeMenuGraphics={contexts:0,attempts:0};(()=>{const original=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type,...args){if(/webgl|experimental-webgl/i.test(type)){window.__nativeMenuGraphics.attempts++;return null;}return original.call(this,type,...args);};})();`;
-const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="https://bunnyhop.lol/"><title>bunnyhop.lol</title><style>${styles.join("\n").replaceAll("</style","<\\/style")}</style></head><body class="native-menu menu-open"><div class="native-shell"><p class="native-hi" aria-hidden="true">luna says hi!</p><header class="native-top"><div class="wordmark wordmark-sm" aria-label="bunnyhop.lol">bunnyhop.lol</div><div id="native-account"></div></header><main id="native-menu"></main><p id="native-status" role="status"></p><p id="native-notice" role="status"></p><footer class="native-footer"><span>Esc menu</span><span>WASD · Space / wheel · Ctrl</span></footer></div><script>${prelude}</script><script>${scripts[0].replaceAll("</script","<\\/script")}</script></body></html>`;
+const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="https://bunnyhop.lol/"><title>bunnyhop.lol</title><style>${styles.join("\n").replaceAll("</style","<\\/style")}</style></head><body class="native-menu menu-open"><div id="native-backdrop" aria-hidden="true"></div><div id="overlay"><div id="menu" class="screen-home"></div></div><p id="native-status" role="status"></p><p id="native-notice" role="status"></p><script>${prelude}</script><script>${scripts[0].replaceAll("</script","<\\/script")}</script></body></html>`;
 await mkdir(dirname(out),{recursive:true}); await writeFile(out,html);
 await writeFile(resolve(dirname(out),"menu-manifest.json"),JSON.stringify({html:out,bytes:Buffer.byteLength(html),webGameEntry:false,three:false,modules:[...modules].sort().map(path=>relative(root,path))},null,2)+"\n");
 console.log(`Native menu: ${out} (${Buffer.byteLength(html).toLocaleString()} bytes, ${modules.size} source modules, no Three/game entry)`);

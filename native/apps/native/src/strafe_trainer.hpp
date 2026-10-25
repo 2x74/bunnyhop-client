@@ -12,11 +12,12 @@
 // moves every tick rather than jumping once per window).
 //
 // Hints look at a longer window so they don't flicker: too many air ticks
-// without exactly one of left/right held is dead time; otherwise the average
+// without effective movement is dead time; otherwise the average
 // turn rate decides between "turn more" and "turn less".
 //
 // Display only. Like the jump stats it reads the pre-tick state and the
 // command already stepped, and feeds nothing back.
+#include "ssj.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -61,8 +62,8 @@ public:
     unsigned smoothing() const { return smoothing_; }
     void set_smoothing(unsigned n) { smoothing_ = std::clamp(n, 1u, max_smoothing); }
 
-    /** One tick. |grounded| and |speed| are from before it; |yaw| (degrees) and |buttons| are the command's. */
-    std::optional<StrafeReading> tick(bool grounded, float speed, float yaw, std::uint32_t buttons) {
+    /** One tick, using movement AFTER style filtering (W-only/HSW/auto-strafe included). */
+    std::optional<StrafeReading> tick(bool grounded, float speed, float yaw, float forward, float side) {
         std::optional<StrafeReading> reading;
         if (grounded) {
             if (++ground_ticks_ > ground_reset) clear_windows();
@@ -71,8 +72,7 @@ public:
             if (have_yaw_ && speed >= min_speed) {
                 const float turned = std::fabs(std::remainder(yaw - last_yaw_, 360.0f));
                 const float percent = turned / ideal_degrees(speed) * 100.0f;
-                const bool left = buttons & left_bit, right = buttons & right_bit;
-                samples_.push_back({percent, left == right});
+                samples_.push_back({percent, forward == 0 && side == 0});
                 while (samples_.size() > std::max<std::size_t>(max_smoothing, hint_window)) samples_.pop_front();
                 reading = StrafeReading{mean(smoothing_), hint()};
             }
@@ -80,6 +80,12 @@ public:
         last_yaw_ = yaw;
         have_yaw_ = true;
         return reading;
+    }
+
+    std::optional<StrafeReading> tick(bool grounded, float speed, float yaw, std::uint32_t buttons) {
+        return tick(grounded, speed, yaw,
+            450.f * (int(bool(buttons & ssj_in_forward)) - int(bool(buttons & ssj_in_back))),
+            450.f * (int(bool(buttons & right_bit)) - int(bool(buttons & left_bit))));
     }
 
     void reset() {
@@ -121,6 +127,36 @@ private:
     float last_yaw_ = 0;
     unsigned smoothing_ = 1, ground_ticks_ = 0;
     bool have_yaw_ = false;
+};
+
+// Presentation state has the same lifetime as its observed tick history. A seek
+// skips that history, so no jump number or partial trainer window is presented
+// until a start-zone or a full grounded reset supplies a known chain boundary.
+struct MovementFeedback {
+    SsjTracker ssj;
+    std::string ssj_line;
+    bool ssj_good = false, ssj_was_in_start = false, ssj_was_noclip = false;
+    StrafeTrainer strafe_trainer;
+    std::optional<StrafeReading> strafe_reading;
+    unsigned strafe_ground_ticks = 0, history_ground_ticks = 0;
+    bool incomplete_history = false;
+
+    void reset(bool in_start = false, bool noclip = false, bool incomplete = false) {
+        ssj.reset(); ssj_line.clear(); ssj_good = false;
+        strafe_trainer.reset(); strafe_reading.reset();
+        strafe_ground_ticks = history_ground_ticks = 0;
+        ssj_was_in_start = in_start; ssj_was_noclip = noclip;
+        incomplete_history = incomplete;
+    }
+    bool history_ready(bool grounded, bool in_start, bool noclip) {
+        if (!incomplete_history) return true;
+        history_ground_ticks = grounded && !noclip ? history_ground_ticks + 1 : 0;
+        if (!noclip && ((grounded && in_start) || history_ground_ticks > bhop_frames + 1)) {
+            incomplete_history = false;
+            history_ground_ticks = 0;
+        }
+        return !incomplete_history;
+    }
 };
 
 /** 0: within 10% of ideal, 1: within 25%, 2: further off. */

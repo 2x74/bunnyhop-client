@@ -51,13 +51,19 @@ inline constexpr std::uint64_t max_music_samples = 64ull << 20; // 128 MB as int
 
 // |error| receives a short reason the file was skipped. A pack is user-supplied
 // data, so a bad file is reported and stepped over, never fatal.
-bool decode_sfx_file(const std::filesystem::path &file, DecodedAudio *out, std::string *error);
-bool decode_music_file(const std::filesystem::path &file, DecodedMusic *out, std::string *error);
+// Optional budgets may lower (never raise) the per-file decoded sample cap.
+// Failure clears the output, including any partially decoded PCM.
+bool decode_sfx_file(const std::filesystem::path &file, DecodedAudio *out, std::string *error,
+                     std::uint64_t max_samples = max_sfx_samples);
+bool decode_music_file(const std::filesystem::path &file, DecodedMusic *out, std::string *error,
+                       std::uint64_t max_samples = max_music_samples);
 
 // Sound effects mix into one mono stream, so a stereo file is averaged rather
 // than having a channel dropped, and resampled to the mixer's rate.
 std::vector<float> to_mono(const DecodedAudio &audio);
-std::vector<float> resample_mono(const std::vector<float> &samples, int from_rate, int to_rate);
+// Returns empty if the output would exceed max_samples, before allocating it.
+std::vector<float> resample_mono(const std::vector<float> &samples, int from_rate, int to_rate,
+                                 std::size_t max_samples = max_sfx_samples);
 
 // Files directly inside |dir|; subdirectories, dotfiles and oversized files are
 // skipped. Results are sorted so the order does not depend on the filesystem.
@@ -71,6 +77,7 @@ struct MusicTrack {
     std::string id;                  // filename without extension, or manifest id
     std::string title;               // what the menu shows
     std::filesystem::path file;      // empty for a shipped track that is absent
+    std::string role = "game";       // the shipped menu track is skipped during gameplay
 };
 std::vector<MusicTrack> scan_music_pack(const std::filesystem::path &dir);
 

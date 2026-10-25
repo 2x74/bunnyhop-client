@@ -1,6 +1,15 @@
 //! Exact existing practice mechanics; never part of ranked replay simulation.
 use super::*;
 
+fn invalidate_recording(m: &mut Map, reason: &str) -> Result<(), String> {
+    m.finish_record(false, reason)?;
+    // A completed archive from before the tool use must not remain exportable
+    // as though it described this externally mutated world.
+    m.record_valid = false;
+    m.completed_record = None;
+    Ok(())
+}
+
 pub struct Checkpoint {
     game: game::GameState,
     settings: BhSettings,
@@ -99,6 +108,26 @@ pub unsafe extern "C" fn bh_noclip_move(
     .ok()
     .is_some_and(|r| r.is_ok()) as c_int
 }
+/// Host practice mode invalidates recording immediately. Noclip outside a running
+/// timer stops it, so crossing a start zone while flying cannot arm a run.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_practice_enter(ctx: *mut BhContext, noclip: u32) -> c_int {
+    unsafe {
+        call(ctx, |c| {
+            let m = c.map()?;
+            invalidate_recording(m, "practice")?;
+            m.playback = None;
+            if noclip != 0 {
+                if let Some(t) = &mut m.timer {
+                    if t.state.status != 1 {
+                        t.reset(t.interval as f32);
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
+}
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_practice_noclip_tick(
     ctx: *mut BhContext,
@@ -117,9 +146,14 @@ pub unsafe extern "C" fn bh_practice_noclip_tick(
                 return Err("null output".into());
             }
             let m = c.map()?;
-            m.finish_record(false, "practice_noclip")?;
+            invalidate_recording(m, "practice_noclip")?;
             m.playback = None;
             m.game.practice_noclip_tick(position, velocity);
+            if let Some(t) = &mut m.timer {
+                if t.state.status == 1 {
+                    t.coast(m.game.tick);
+                }
+            }
             m.transforms_dirty = true;
             output(out, BhSnapshot::from(&m.game))
         })
@@ -147,7 +181,7 @@ pub unsafe extern "C" fn bh_practice_noclip_exit(
                 return Err("null output".into());
             }
             let m = c.map()?;
-            m.finish_record(false, "practice_noclip")?;
+            invalidate_recording(m, "practice_noclip")?;
             m.playback = None;
             result = m.game.practice_noclip_exit(position, velocity, yaw, pitch);
             m.transforms_dirty = true;
@@ -222,7 +256,7 @@ pub unsafe extern "C" fn bh_practice_restore(
             {
                 return Err("invalid practice checkpoint".into());
             }
-            m.finish_record(false, "practice_restore")?;
+            invalidate_recording(m, "practice_restore")?;
             m.playback = None;
             let s = m.checkpoints[handle as usize - 1].as_ref().unwrap();
             m.game.restore_state(&s.game);

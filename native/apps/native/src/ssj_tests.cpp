@@ -221,6 +221,50 @@ int main(int argc, char **argv) {
         r = chain.tick(false, speed, yaw += ideal, right);
         assert(r && !r->hint);  // the dead air from before the stand is gone
     }
+    {
+        using T=native::StrafeTrainer;
+        const float speed=300,ideal=T::ideal_degrees(speed);
+        T wonly;float yaw=90;
+        wonly.tick(false,speed,yaw,450.f,0.f);
+        std::optional<native::StrafeReading> reading;
+        for(unsigned i=0;i<T::hint_window;++i)reading=wonly.tick(false,speed,yaw+=ideal,450.f,0.f);
+        assert(reading&&std::fabs(reading->percent-100)<.1f&&!reading->hint);
+        // Filtered D in W-only has no effective movement, regardless of the original physical keys.
+        T filtered;filtered.tick(false,speed,90,0.f,0.f);yaw=90;
+        for(unsigned i=0;i<T::hint_window;++i)reading=filtered.tick(false,speed,yaw+=ideal,0.f,0.f);
+        assert(reading&&reading->hint==native::StrafeHint::less_deadtime);
+
+        // The reported W-only gain must use zeroed D, not the unfiltered side wish.
+        float pos[3]={0,0,100},vel[3]={300,0,0};
+        native::SsjState pre{pos,vel,true,false};
+        native::SsjTracker live(native::SsjMode::every),replay(native::SsjMode::every),raw(native::SsjMode::every);
+        const native::SsjCmd start{450,0,90,native::ssj_in_forward|native::ssj_in_jump};
+        const native::SsjCmd effective{0,0,90,0},unfiltered{0,450,90,native::ssj_in_moveright};
+        native::SsjTick info;info.jumped=true;
+        live.tick(pre,start,info);replay.tick(pre,start,info);raw.tick(pre,start,info);
+        pre.grounded=false;info.jumped=false;
+        for(int i=0;i<30;++i){live.tick(pre,effective,info);replay.tick(pre,effective,info);raw.tick(pre,unfiltered,info);}
+        pre.grounded=true;info.jumped=true;
+        const auto a=live.tick(pre,start,info),b=replay.tick(pre,start,info),c=raw.tick(pre,start,info);
+        assert(a&&b&&c&&a->gain==b->gain&&a->sync==b->sync&&a->strafes==b->strafes);
+        assert(a->gain!=c->gain||a->sync!=c->sync||a->strafes!=c->strafes);
+    }
+    {
+        native::MovementFeedback f;
+        f.ssj.jump=6;f.ssj_line="stale";f.ssj_good=true;f.ssj_was_in_start=true;f.ssj_was_noclip=true;
+        f.strafe_ground_ticks=99;f.strafe_reading=native::StrafeReading{100,native::StrafeHint::less_deadtime};
+        f.strafe_trainer.tick(false,300,90,450.f,0.f);
+        f.reset(false,false,true);
+        assert(f.ssj.jump==0&&f.ssj_line.empty()&&!f.ssj_good&&!f.strafe_reading);
+        assert(f.strafe_ground_ticks==0&&!f.ssj_was_in_start&&!f.ssj_was_noclip);
+        assert(!f.strafe_trainer.tick(false,300,200,450.f,0.f)); // no stale yaw
+        for(int i=0;i<100;++i)assert(!f.history_ready(false,false,false));
+        for(unsigned i=0;i<native::bhop_frames+1;++i)assert(!f.history_ready(true,false,false));
+        assert(f.history_ready(true,false,false));
+        f.reset(false,false,true);assert(!f.history_ready(false,true,false));assert(f.history_ready(true,true,false));
+        f.reset(false,false,true);assert(!f.history_ready(true,true,true)); // noclip isn't a chain
+        f.reset(true,false);assert(f.ssj_was_in_start&&f.history_ready(false,false,false));
+    }
     std::cout << "Jump stats interval and strafe trainer checks passed\n";
     return 0;
 }

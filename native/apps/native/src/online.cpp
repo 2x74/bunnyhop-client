@@ -109,7 +109,7 @@ bool safe_content_path(const std::string &path) {
 }
 DownloadedMap download_map(const std::string &id, const std::filesystem::path &cache,
                            const std::function<void(const std::string &)> &progress,
-                           const std::atomic_bool *cancel) {
+                           const std::atomic_bool *cancel, const DownloadLimits &limits) {
     if (!valid_map_id(id)) throw std::runtime_error("Invalid map name");
     progress("Reading " + id);
     auto detail_bytes = get("/api/maps/" + id, 4 * MiB, cancel);
@@ -117,7 +117,7 @@ DownloadedMap download_map(const std::string &id, const std::filesystem::path &c
     const auto sha = detail.at("sha256").get<std::string>();
     if (!hash_id(sha)) throw std::runtime_error("Invalid map checksum");
     progress("Downloading " + id);
-    const auto bsp_object = asset(cache, sha, "/api/bsp/" + sha + ".bsp", 512 * MiB, cancel);
+    const auto bsp_object = asset(cache, sha, "/api/bsp/" + sha + ".bsp", limits.bsp, cancel);
     const auto directory = cache / "maps" / sha;
     std::filesystem::create_directories(directory);
     const auto bsp = directory / (id + ".bsp");
@@ -139,7 +139,7 @@ DownloadedMap download_map(const std::string &id, const std::filesystem::path &c
         if (cancel && cancel->load()) throw std::runtime_error("Map download cancelled");
         if (!safe_content_path(path)) throw std::runtime_error("Unsafe content path");
         const auto size = info.at("size").get<size_t>();
-        if (size > 256 * MiB || size > 1024 * MiB - total) throw std::runtime_error("Map content is too large");
+        if (size > limits.content_file || size > limits.content_total - total) throw std::runtime_error("Map content is too large");
         total += size;
         const auto file_sha = info.at("sha256").get<std::string>();
         progress("Map content " + std::to_string(++count) + "/" + std::to_string(files.size()));

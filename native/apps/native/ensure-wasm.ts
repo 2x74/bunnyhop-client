@@ -5,9 +5,12 @@ import { dirname, resolve } from "node:path";
 import { PHYSICS_VERSION } from "../web/src/core";
 import { TIMER_RULES } from "../web/src/timer";
 
-export const CANONICAL_WASM_URL = "https://bunnyhop.lol/assets/bunnyhop_core-DY4PXduP.wasm";
-export const CANONICAL_WASM_SHA256 = "3cca0f22a3c30492d30c2f5e745f8940cc29498eafdbab4d9ff5cd9e07bbd20a";
-export const CANONICAL_WASM_BYTES = 1387961;
+export const CANONICAL_WASM_URL = "https://bunnyhop.lol/assets/bunnyhop_core-Ux2Os1qz.wasm";
+export const CANONICAL_WASM_SHA256 = "35dac92ea33c874d4434f738f089b4b137d492ce8a1f9e4945ef6609c27d8778";
+export const CANONICAL_WASM_BYTES = 1415101;
+/** The game rules the pinned verifier was built for; release identity records and checks them. */
+export const CANONICAL_PHYSICS = 17;
+export const CANONICAL_TIMER_RULES = 2;
 const defaultPath = resolve(import.meta.dir, "../web/src/wasm/bunnyhop_core.wasm");
 function valid(bytes: Uint8Array): boolean {
   return bytes.byteLength === CANONICAL_WASM_BYTES &&
@@ -15,7 +18,7 @@ function valid(bytes: Uint8Array): boolean {
 }
 
 export async function ensureCanonicalWasm(path = defaultPath): Promise<string> {
-  if (PHYSICS_VERSION !== 15 || TIMER_RULES !== 2) {
+  if (PHYSICS_VERSION !== CANONICAL_PHYSICS || TIMER_RULES !== CANONICAL_TIMER_RULES) {
     throw new Error("Game rules changed: update the pinned native verifier and rerun native/WASM parity before building a release.");
   }
   const existing = await readFile(path).catch(() => null);

@@ -240,3 +240,123 @@ fn replay_varints_reject_overflow_and_unterminated_values() {
         assert_eq!(replay::Decoded::parse(&raw).err().unwrap(), error);
     }
 }
+
+#[test]
+fn legacy_and_fractional_look_apis_record_the_filtered_command() {
+    let fixture = Fixture::new();
+    unsafe {
+        let c = bh_create();
+        let map = fixture.file("input.bsp", &bsp(&[]));
+        assert_eq!(bh_load_map(c, map.as_ptr(), fixture.root().as_ptr()), 1);
+        assert_eq!(bh_style_set(c, c"wonly".as_ptr()), 1);
+        assert_eq!(bh_set_velocity(c, 300.0, 0.0, 0.0), 1);
+        let mut state = BhState::default();
+        assert_eq!(bh_state(c, &mut state), 1);
+        assert_eq!(state.grounded, 0);
+        // Previously live SSJ used this physical D input, whereas replay used
+        // the filtered zero movement. The accessor is the sole canonical input.
+        let physical = BhCmd {
+            side: 450.0,
+            yaw: 90.0,
+            buttons: 1 << 10,
+            ..BhCmd::default()
+        };
+        let legacy = BhLookSample {
+            base: 90.0,
+            k: 0.044,
+            kind: 1,
+            ..BhLookSample::default()
+        };
+        assert_eq!(bh_step_look(c, &physical, &legacy, &mut state), 1);
+        let mut filtered = BhCmd::default();
+        assert_eq!(bh_last_command(c, &mut filtered), 1);
+        assert_eq!(
+            (
+                filtered.forward,
+                filtered.side,
+                filtered.buttons,
+                filtered.yaw
+            ),
+            (0.0, 0.0, 0, 90.0)
+        );
+
+        assert_eq!(bh_style_set(c, c"autohop".as_ptr()), 1);
+        let zones = timer_zones();
+        assert_eq!(
+            bh_run_configure(c, &BhRunOptions::default(), zones.as_ptr(), zones.len()),
+            1
+        );
+        assert_eq!(
+            bh_record_begin(
+                c,
+                ptr::null(),
+                c"autohop".as_ptr(),
+                c"input-test".as_ptr(),
+                100
+            ),
+            1
+        );
+        let mut commands = Vec::new();
+        for i in 0..4 {
+            let look = BhLookSampleV2 {
+                base: 45.0 + i as f64 * 210.0 * f64::from(BhSettings::default().tick_interval),
+                k: 0.044,
+                count: if i == 0 { 1.0 } else { i as f64 + 0.5 },
+                epoch: i,
+                kind: if i == 0 { 1 } else { 6 },
+                frames: 1,
+                events: 2,
+                reports: 2,
+            };
+            let command = BhCmd {
+                yaw: look::yaw(look.base, look.count, look.k),
+                buttons: if i == 0 { 0 } else { 1 << 7 },
+                ..BhCmd::default()
+            };
+            if i == 0 {
+                // Actual legacy entry point still accepts exactly its original layout.
+                let legacy = BhLookSample {
+                    base: look.base,
+                    k: look.k,
+                    count: 1,
+                    epoch: 0,
+                    kind: 1,
+                    frames: 1,
+                    events: 2,
+                    reports: 2,
+                };
+                assert_eq!(bh_step_look(c, &command, &legacy, &mut state), 1);
+            } else {
+                assert_eq!(bh_step_look_v2(c, &command, &look, &mut state), 1);
+            }
+            commands.push(command);
+        }
+        let path = CString::new(fixture.0.join("look-v2.bhr").to_str().unwrap()).unwrap();
+        // Serialize captured input directly: this four-tick fixture is not a
+        // completed timed run and must not pass the public completed-run gate.
+        (*c).map
+            .as_ref()
+            .unwrap()
+            .recorder
+            .as_ref()
+            .unwrap()
+            .data
+            .write_bhr(Path::new(path.to_str().unwrap()))
+            .unwrap();
+        assert_eq!(bh_record_end(c), 1);
+        let replay = replay::Decoded::load(Path::new(path.to_str().unwrap())).unwrap();
+        let info: serde_json::Value = serde_json::from_slice(replay.info.as_bytes()).unwrap();
+        assert_eq!(info["version"], 10);
+        assert_eq!(replay::bh_replay_load(c, path.as_ptr()), 1);
+        let mut snapshot = BhSnapshot::default();
+        for expected in commands {
+            assert_eq!(replay::bh_replay_step(c, &mut snapshot), 1);
+            assert_eq!(bh_last_command(c, &mut filtered), 1);
+            assert_eq!(
+                (filtered.yaw.to_bits(), filtered.buttons),
+                (expected.yaw.to_bits(), expected.buttons)
+            );
+        }
+        bh_destroy(c);
+    }
+}

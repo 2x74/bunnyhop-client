@@ -2,6 +2,8 @@
 #include "bunnyhop_native.h"
 #include <algorithm>
 #include <cmath>
+#include <chrono>
+#include <string_view>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -11,7 +13,45 @@ namespace native {
 constexpr uint32_t attack = 1u, jump = 1u << 1, duck = 1u << 2;
 constexpr uint32_t forward = 1u << 3, back = 1u << 4, use = 1u << 5;
 constexpr uint32_t left = 1u << 9, right = 1u << 10, attack2 = 1u << 11;
+constexpr uint32_t turn_left = 1u << 7, turn_right = 1u << 8;
 constexpr uint32_t teleported = 1u, angles_changed = 1u << 4;
+
+// Reset the wall-clock baseline along with accumulated simulation time. Work
+// done before a restart/capture transition must never become catch-up ticks.
+struct InputClock {
+    using Clock = std::chrono::steady_clock;
+    Clock::time_point last = Clock::now();
+    void reset(Clock::time_point now = Clock::now()) { last = now; }
+    double elapsed(Clock::time_point now) {
+        const double seconds = std::max(0.0, std::chrono::duration<double>(now-last).count());
+        last = std::max(last,now);
+        return seconds;
+    }
+};
+
+inline bool turn_binds_allowed(std::string_view style, bool practice) {
+    return style != "scroll" || practice;
+}
+
+inline double configured_turn_rate(bool left, bool right, double speed) {
+    if(left==right || !std::isfinite(speed) || speed<.01 || speed>1000)return 0;
+    return left?speed:-speed;
+}
+
+// A noncanonical turn remains playable/recordable but cannot enter ranked
+// admission. Sticky for the complete attempt, including its pre-start ticks.
+struct TurnAdmission {
+    bool local_only = false;
+    void reset() { local_only = false; }
+    bool observe(double rate, bool restricted_style = false) {
+        const bool first = !local_only && rate != 0 && (std::abs(rate) != 210 || restricted_style);
+        local_only |= first;
+        return first;
+    }
+    bool allows_event(std::string_view type) const {
+        return !local_only || (type != "beat" && type != "finish");
+    }
+};
 
 // Keep fractional SDL deltas; recomputing from a double base avoids accumulating
 // a float rounding error for every mouse report. Only SDL relative motion feeds this.
@@ -20,10 +60,23 @@ struct Input {
     bool separate_vertical=false;
     uint32_t epoch=0,kind=1,frames=0,motion_events=0;
     uint32_t held = 0, pulse = 0;
+    std::optional<uint32_t> sampled_epoch;
     // Match replay.ts norm360's two remainders, including its double rounding.
     static double normalize(double v) { return std::fmod(std::fmod(v,360.0)+360.0,360.0); }
     double yaw() const { return normalize(yaw_base - yaw_counts * (sensitivity * 0.022)); }
     void set_yaw(double v,uint32_t reason=5) { yaw_base = normalize(v); yaw_counts = 0; ++epoch;kind=reason; }
+    // The shared format describes fixed 210 deg/s turns. Custom rates are
+    // conservatively RAW|WITH_TURN: retain counts and the turn buttons without
+    // claiming they were the canonical fixed turn. Never hide a prior raw set.
+    void turn(double rate, double dt) {
+        if (!std::isfinite(rate) || !std::isfinite(dt) || rate == 0 || dt <= 0 ||
+            std::abs(rate) < .01 || std::abs(rate) > 1000 || !std::isfinite(rate * dt)) return;
+        yaw_base = normalize(yaw_base + rate * dt);
+        kind = std::abs(rate) != 210 ? 5u | 128u :
+            sampled_epoch == epoch ? 6u : kind | 128u;
+        ++epoch;
+        pulse |= rate > 0 ? turn_left : turn_right;
+    }
     void set_sensitivity(double v) { if(v==sensitivity)return;const double at=yaw(); sensitivity=v; set_yaw(at,4); }
     void set_angles(double p, double y,uint32_t reason=1) { pitch = std::clamp(p, -89.0, 89.0); set_yaw(y,reason); }
     void motion(double x, double y) {
@@ -46,17 +99,18 @@ struct Input {
     // whatever a tick doesn't reach waits for the next one. Nothing is
     // invented or lost, only moved between ticks.
     //
-    // Mouse counts stay integral, because BhLookSample has to: a share of
-    // whole counts is rounded and the remainder stays queued. Fractional
-    // (trackpad) motion is shared exactly.
+    // Whole-report streams keep integer shares. Once fractional reports enter
+    // a pending span, share that axis exactly even if its total is integral.
     double acc_x = 0, acc_y = 0;   // polled, not yet given to a tick
     uint32_t acc_events = 0;
+    bool fractional_x = false, fractional_y = false;
     uint64_t arrival_ns = 0;       // when the newest poll handed it over
     uint64_t split_ns = 0;         // where the previous tick's share ended
     bool have_split = false;
 
     void accumulate(double x, double y) {
         if(!std::isfinite(x)||!std::isfinite(y))return;
+        fractional_x |= x != std::floor(x); fractional_y |= y != std::floor(y);
         acc_x+=x;acc_y+=y;++acc_events;
     }
     // Marks everything accumulated so far as having arrived at |now_ns|.
@@ -78,12 +132,12 @@ struct Input {
     void consume_all() { give(1); have_split=false; }
 
     void give(double share) {
-        auto part=[&](double &acc){
+        auto part=[&](double &acc, bool &fractional){
             double s=share>=1?acc:acc*share;
-            if(share<1&&acc==std::floor(acc))s=std::round(s);
-            acc-=s;return s;
+            if(share<1&&!fractional)s=std::round(s);
+            acc-=s;if(share>=1)fractional=false;return s;
         };
-        const double x=part(acc_x),y=part(acc_y);
+        const double x=part(acc_x,fractional_x),y=part(acc_y,fractional_y);
         const uint32_t e=share>=1?acc_events:std::min(acc_events,uint32_t(std::lround(acc_events*share)));
         acc_events-=e;
         if(x==0&&y==0&&e==0)return;
@@ -94,17 +148,16 @@ struct Input {
     double pending_counts() const { return acc_x; }
 
     void frame() {if(frames<std::numeric_limits<uint16_t>::max())++frames;}
-    std::optional<BhLookSample> look_sample() {
-        const auto f=frames,e=motion_events;frames=motion_events=0;
+    std::optional<BhLookSampleV2> look_sample() {
+        const auto f=frames,e=motion_events;frames=motion_events=0;sampled_epoch=epoch;
         // SDL preserves trackpad fractional deltas. Never round those into invented integer mouse counts.
-        if(!std::isfinite(yaw_counts)||yaw_counts!=std::floor(yaw_counts)||
-            yaw_counts<std::numeric_limits<int32_t>::min()||yaw_counts>std::numeric_limits<int32_t>::max())return std::nullopt;
-        return BhLookSample{yaw_base,sensitivity*.022,int32_t(yaw_counts),epoch,kind,f,e,e};
+        if(!std::isfinite(yaw_counts)||std::abs(yaw_counts)>0x3fffffff)return std::nullopt;
+        return BhLookSampleV2{yaw_base,sensitivity*.022,yaw_counts,epoch,kind,f,e,e};
     }
     void button(uint32_t bit, bool down) { if (down) held |= bit; else held &= ~bit; }
     // Every caller is a state reset — capture changed, run restarted, settings
     // reapplied — so motion from before it must not survive into the next tick.
-    void clear() { held = pulse = 0; acc_x = acc_y = 0; acc_events = 0; have_split = false; }
+    void clear() { held = pulse = 0; acc_x = acc_y = 0; acc_events = frames = motion_events = 0; fractional_x = fractional_y = false; arrival_ns = split_ns = 0; have_split = false; }
     BhCmd command() {
         const uint32_t bits = held | pulse;
         pulse = 0;

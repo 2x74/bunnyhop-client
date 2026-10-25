@@ -23,9 +23,25 @@ export type MenuMessage =
   | { type: "sensitivity"; value: number }
   | { type: "openAuth"; url: string }
   | { type: "openExternal"; url: string }
+  | { type: "menuBackdrop"; map: string | null; replay?: { runId: string; replayBase64: string } }
+  /** Practice tools (web practice-mode/controller.ts). Sent from the menu, so the timed-run key gate doesn't apply. */
+  | { type: "practice"; action: PracticeAction; value?: boolean }
+  /** Pause menu → Main menu: release the map, back to the home screen (state map:null). */
+  | { type: "leaveMap" }
+  /** A gauntlet attempt (gauntlet-native.ts): locks Normal/main track and practice; null id ends it. */
+  | { type: "gauntlet"; id: string | null; map?: string; progress?: GauntletHudProgress }
+  /** One line on the in-game HUD's toast (gauntlet split lines). */
+  | { type: "hudToast"; text: string; ms: number; tone?: "good" | "bad"; key?: "gauntlet" | "practice" }
+  /** The soundtrack's previous / play-pause / next (now-playing). */
+  | { type: "music"; action: "previous" | "toggle" | "next" }
   | RunServiceStatus;
 
-export const NATIVE_BIND_ACTIONS=["forward","back","left","right","jump","duck","use","restart","restartBonus","restartMain","cycleStyle","attack","attack2","inspect","viewmodel","hideUi","mute","slot1","slot2","slot3","lastWeapon","drop","reload","giveUsp","giveGlock","turnLeft","turnRight","turnFast"] as const;
+export const PRACTICE_ACTIONS=["toggle","menu","noclip","save","tele","prev","next","keepVelocity"] as const;
+export type PracticeAction=(typeof PRACTICE_ACTIONS)[number];
+/** gauntlet/state.ts GauntletProgress: this map's index, the map count, the earlier splits' sum, your PB's split here. */
+export interface GauntletHudProgress {idx:number;maps:number;before:number;pbSplit:number|null}
+
+export const NATIVE_BIND_ACTIONS=["forward","back","left","right","jump","duck","use","restart","restartBonus","restartMain","cycleStyle","attack","attack2","inspect","viewmodel","hideUi","mute","slot1","slot2","slot3","lastWeapon","drop","reload","giveUsp","giveGlock","turnLeft","turnRight","turnFast","mainMenu","practice","noclip","cpSave","cpTeleport","cpPrev","cpNext"] as const;
 type NativeBindAction=(typeof NATIVE_BIND_ACTIONS)[number];
 /** The web game's defaults, plus the native-only Turn modifier (settings.hpp keeps the same list). */
 const DEFAULT_BINDS:Record<NativeBindAction,readonly string[]>={...WEB_DEFAULT_BINDS,turnLeft:["ArrowLeft"],turnRight:["ArrowRight"],turnFast:["Mouse4"]};
@@ -53,6 +69,10 @@ export interface NativeSettings {
   strafeTrainerHints:boolean;
   /** Moved HUD elements, in percent of the screen. Absent means the built-in place. */
   hudLayout:HudLayout;
+  /** The whole HUD's size, in percent (the web's hud.scale × 100): 50–175. */
+  hudScale:number;
+  /** A checkpoint teleport keeps the speed it was saved with (web prefs practice.keepVelocity). */
+  practiceKeepVelocity:boolean;
   sfxPack:AudioPack;musicPack:AudioPack;
   /** Discord Rich Presence, on by default. Privacy mode hides everything. */
   discordRichPresence:boolean;discordShowMap:boolean;discordJoin:boolean;discordJoinLobbies:boolean;privacyMode:boolean;
@@ -60,7 +80,26 @@ export interface NativeSettings {
 export type DiscordState="disabled"|"connecting"|"ready"|"reconnecting";
 export const DISCORD_STATES:readonly DiscordState[]=["disabled","connecting","ready","reconnecting"];
 export interface NativeReplay {id:string;name:string;map:string;style:StyleId;track:number;seconds:number;recordedAt:number;bytes:number}
-export interface PlaybackState {active:boolean;id:string;tick:number;totalTicks:number;paused:boolean;speed:number}
+export interface PlaybackState {active:boolean;id:string;tick:number;totalTicks:number;paused:boolean;speed:number;player?:{id?:string;name?:string;runId?:string}}
+/** Practice as the host has it (web practice-mode/: PracticeAttempt, Checkpoints, the !cp menu). */
+export interface PracticeState {
+  available:boolean;
+  /** Why practice can't be used here (web rules.ts practiceUnavailable wording), or null. */
+  unavailable:string|null;
+  /** Practice mode: every attempt is practice until it's turned off. */
+  mode:boolean;
+  /** This attempt is practice (mode, or a teleport / noclip was used). */
+  active:boolean;
+  tool:"teleport"|"noclip"|null;
+  noclip:boolean;menuOpen:boolean;
+  /** Checkpoints saved, and the current one (1-based; 0 none). */
+  count:number;current:number;keepVelocity:boolean;
+}
+export type PlayerMode="solo"|"multiplayer"|"practice"|"replay"|"gauntlet"|"tutorial";
+export const PLAYER_MODES:readonly PlayerMode[]=["solo","multiplayer","practice","replay","gauntlet","tutorial"];
+/** What the player is actually doing (playback's style for a replay). Feedback and reports attach it. */
+export interface PlayerState {map:string|null;style:StyleId;track:number;mode:PlayerMode;practice:boolean}
+export interface MusicState {id:string;title:string;role:string;playing:boolean;available:boolean;loading:boolean;status:string}
 
 export interface NativeMenuState {
   map: string | null;
@@ -70,12 +109,17 @@ export interface NativeMenuState {
   paused: boolean;
   style:StyleId;track:number;settings:NativeSettings;replays:NativeReplay[];
   discord:{state:DiscordState;message:string};playback:PlaybackState;ghost:{enabled:boolean;id:string;name:string};tutorial:{active:boolean;lesson:LessonId;completed:LessonId[]};
+  practice:PracticeState;gauntlet:{id:string|null;map:string|null};player:PlayerState|null;
+  /** The soundtrack (null: this host doesn't report music). */
+  music:MusicState|null;
 }
 
 declare global {
   interface Window {
     webkit?: { messageHandlers?: { bunnyhop?: { postMessage: (value: string) => void } } };
-    bunnyhopNativeMenu: { onState: (value: unknown) => void; onAuth: (value?: unknown) => void; onRunEvent: (value: unknown) => void; version: number; open?:(screen:string,focus?:string)=>void; joinRoom?:(id:string)=>void; onRoomPose?:(value:unknown)=>void; onRoomCommand?:(value:unknown)=>void };
+    bunnyhopNativeMenu: { onState: (value: unknown) => void; onAuth: (value?: unknown) => void; onRunEvent: (value: unknown) => void; version: number; open?:(screen:string,focus?:string)=>void;
+      /** The host left the map (every leave_map, also its own Main menu bind): stop the room, the gauntlet and their timers now. */
+      onLeaveMap?:()=>void; joinRoom?:(id:string)=>void; onRoomPose?:(value:unknown)=>void; onRoomCommand?:(value:unknown)=>void; settle?:(timeoutMs?:number)=>Promise<{ended:number;pendingImages:number}> };
     __nativeMenuGraphics?: { contexts: number; attempts: number };
   }
 }
@@ -96,8 +140,8 @@ export function openAuth(raw: string): void {
   send({ type: "openAuth", url: url.href });
 }
 
-/** Hosts the client will hand to the system browser. Credits links only. */
-export const EXTERNAL_HOSTS = ["github.com", "1998.lol", "bunnyhop.lol"] as const;
+/** Hosts the client will hand to the system browser: credits links, the site's own pages, the Discord invite. */
+export const EXTERNAL_HOSTS = ["github.com", "1998.lol", "bunnyhop.lol", "discord.gg"] as const;
 /**
  * Opens a link outside the client. The menu webview refuses every navigation
  * away from the loaded document, so an <a href> here does nothing at all —
@@ -116,9 +160,18 @@ export function openExternal(raw: string): boolean {
   return true;
 }
 
+/** The web's HUD_SCALE (hud/layout.ts: 0.5–1.75, steps of 0.05) in percent. */
+export const HUD_SCALE_PERCENT={min:50,max:175,step:5} as const;
+const ATTEMPT_ID=/^[\w-]{16}$/,MAP_NAME=/^[a-zA-Z0-9_.-]{1,128}$/;
+export const isMapName=(value:unknown):value is string=>typeof value==="string"&&MAP_NAME.test(value);
+export const isAttemptId=(value:unknown):value is string=>typeof value==="string"&&ATTEMPT_ID.test(value);
+const nonNegativeInt=(value:unknown):value is number=>Number.isSafeInteger(value)&&Number(value)>=0;
+const shortText=(value:unknown,max=200):string|null=>typeof value==="string"?value.slice(0,max):null;
+
 export const state: NativeMenuState = { map: null, loading: false, error: null, sensitivity: 2, paused: true,style:"autohop",track:0,
-  settings:{sensitivity:2,verticalSensitivity:2,separateVertical:false,yawSpeed:DEFAULT_YAW_SPEED,yawSpeedAlt:DEFAULT_YAW_SPEED_ALT,fov:90,vsync:true,fpsLimit:0,volume:.8,muted:false,hud:true,crosshair:true,viewmodel:true,jumpStats:true,jumpStatsMode:"sixth",jumpStatsInterval:6,strafeTrainer:false,strafeTrainerSmoothing:1,strafeTrainerHints:true,hudLayout:{},sfxPack:"default",musicPack:"default",discordRichPresence:true,discordShowMap:true,discordJoin:true,discordJoinLobbies:false,privacyMode:false,binds:Object.fromEntries(NATIVE_BIND_ACTIONS.map(action=>[action,[...DEFAULT_BINDS[action]]]))},
-  replays:[],discord:{state:"disabled",message:""},playback:{active:false,id:"",tick:0,totalTicks:0,paused:true,speed:1},ghost:{enabled:false,id:"",name:""},tutorial:{active:false,lesson:"jump",completed:[]}};
+  settings:{sensitivity:2,verticalSensitivity:2,separateVertical:false,yawSpeed:DEFAULT_YAW_SPEED,yawSpeedAlt:DEFAULT_YAW_SPEED_ALT,fov:90,vsync:true,fpsLimit:0,volume:.8,muted:false,hud:true,crosshair:true,viewmodel:true,jumpStats:true,jumpStatsMode:"sixth",jumpStatsInterval:6,strafeTrainer:false,strafeTrainerSmoothing:1,strafeTrainerHints:true,hudLayout:{},hudScale:100,practiceKeepVelocity:true,sfxPack:"default",musicPack:"default",discordRichPresence:true,discordShowMap:true,discordJoin:true,discordJoinLobbies:false,privacyMode:false,binds:Object.fromEntries(NATIVE_BIND_ACTIONS.map(action=>[action,[...DEFAULT_BINDS[action]]]))},
+  replays:[],discord:{state:"disabled",message:""},playback:{active:false,id:"",tick:0,totalTicks:0,paused:true,speed:1},ghost:{enabled:false,id:"",name:""},tutorial:{active:false,lesson:"jump",completed:[]},
+  practice:{available:false,unavailable:null,mode:false,active:false,tool:null,noclip:false,menuOpen:false,count:0,current:0,keepVelocity:true},gauntlet:{id:null,map:null},player:null,music:null};
 
 export const nativeKeyCode=(code:unknown):code is string=>typeof code==="string"&&/^(?:Key[A-Z]|Digit[0-9]|F[1-9]|F11|F12|Mouse[1-5]|MouseWheel|MWheelUp|MWheelDown|(?:Control|Shift|Alt)(?:Left|Right)|Space|Tab|Enter|Backspace|Arrow(?:Up|Down|Left|Right)|Minus|Equal|BracketLeft|BracketRight|Semicolon|Quote|Comma|Period|Slash)$/.test(code);
 
@@ -134,6 +187,8 @@ export function settingsPatch(value:unknown):Partial<NativeSettings> {
   if(Number.isInteger(input.jumpStatsInterval)&&Number(input.jumpStatsInterval)>=2&&Number(input.jumpStatsInterval)<=50) out.jumpStatsInterval=input.jumpStatsInterval;
   if(Number.isInteger(input.strafeTrainerSmoothing)&&Number(input.strafeTrainerSmoothing)>=1&&Number(input.strafeTrainerSmoothing)<=50) out.strafeTrainerSmoothing=input.strafeTrainerSmoothing;
   if(validHudLayout(input.hudLayout)) out.hudLayout=input.hudLayout;
+  if(Number.isInteger(input.hudScale)&&Number(input.hudScale)>=HUD_SCALE_PERCENT.min&&Number(input.hudScale)<=HUD_SCALE_PERCENT.max) out.hudScale=input.hudScale;
+  if(typeof input.practiceKeepVelocity==="boolean") out.practiceKeepVelocity=input.practiceKeepVelocity;
   for(const key of ["sfxPack","musicPack"] as const) if(AUDIO_PACKS.includes(input[key] as AudioPack)) out[key]=input[key];
   if(input.binds&&typeof input.binds==="object"&&!Array.isArray(input.binds)) {
     const binds:Record<string,string[]>={};
@@ -169,5 +224,44 @@ export function applyState(value: unknown): boolean {
   if(next.discord&&typeof next.discord==="object") {const discord=next.discord as Record<string,unknown>;if(DISCORD_STATES.includes(discord.state as DiscordState))state.discord.state=discord.state as DiscordState;if(typeof discord.message==="string")state.discord.message=discord.message.slice(0,200);}
   if(next.ghost&&typeof next.ghost==="object") {const ghost=next.ghost as Record<string,unknown>;if(typeof ghost.enabled==="boolean") state.ghost.enabled=ghost.enabled;for(const key of ["id","name"] as const) if(typeof ghost[key]==="string") state.ghost[key]=ghost[key];}
   if(next.tutorial&&typeof next.tutorial==="object") {const tutorial=next.tutorial as Record<string,unknown>;if(typeof tutorial.active==="boolean")state.tutorial.active=tutorial.active;if(LESSON_IDS.includes(tutorial.lesson as LessonId))state.tutorial.lesson=tutorial.lesson as LessonId;if(Array.isArray(tutorial.completed))state.tutorial.completed=LESSON_IDS.filter(id=>(tutorial.completed as unknown[]).includes(id));}
+  if(next.practice&&typeof next.practice==="object") {
+    const practice=next.practice as Record<string,unknown>,out=state.practice;
+    for(const key of ["available","mode","active","noclip","menuOpen","keepVelocity"] as const) if(typeof practice[key]==="boolean") out[key]=practice[key];
+    if(practice.unavailable===null) out.unavailable=null; else if(typeof practice.unavailable==="string") out.unavailable=practice.unavailable.slice(0,200);
+    if(practice.tool===null||practice.tool==="teleport"||practice.tool==="noclip") out.tool=practice.tool;
+    if(nonNegativeInt(practice.count)) out.count=Math.min(Number(practice.count),1000);
+    if(nonNegativeInt(practice.current)) out.current=Math.min(Number(practice.current),out.count);
+  }
+  if(next.gauntlet===null) state.gauntlet={id:null,map:null};
+  else if(next.gauntlet&&typeof next.gauntlet==="object") {
+    const gauntlet=next.gauntlet as Record<string,unknown>;
+    if(gauntlet.id===null||isAttemptId(gauntlet.id)) state.gauntlet.id=gauntlet.id;
+    if(gauntlet.map===null||isMapName(gauntlet.map)) state.gauntlet.map=gauntlet.map;
+  }
+  if(next.player===null) state.player=null;
+  else if(next.player&&typeof next.player==="object") {
+    const player=next.player as Record<string,unknown>;
+    if((player.map===null||isMapName(player.map))&&isStyleId(player.style)&&nonNegativeInt(player.track)&&PLAYER_MODES.includes(player.mode as PlayerMode))
+      state.player={map:player.map,style:player.style,track:Number(player.track),mode:player.mode as PlayerMode,practice:player.practice===true};
+  }
+  if(next.playback&&typeof next.playback==="object") {
+    const who=(next.playback as Record<string,unknown>).player;
+    if(who===null) delete state.playback.player;
+    else if(who&&typeof who==="object") {
+      const raw=who as Record<string,unknown>,player:NonNullable<PlaybackState["player"]>={};
+      if(typeof raw.id==="string"&&/^[\w-]{1,64}$/.test(raw.id)) player.id=raw.id;
+      if(typeof raw.runId==="string"&&/^[\w-]{1,64}$/.test(raw.runId)) player.runId=raw.runId;
+      const name=shortText(raw.name,64);if(name) player.name=name;
+      state.playback.player=player;
+    }
+  }
+  if(next.music===null) state.music=null;
+  else if(next.music&&typeof next.music==="object") {
+    const music=next.music as Record<string,unknown>;
+    const out:MusicState={...(state.music??{id:"",title:"",role:"",playing:false,available:false,loading:false,status:""})};
+    for(const key of ["id","title","role","status"] as const){const text=shortText(music[key]);if(text!==null)out[key]=text;}
+    for(const key of ["playing","available","loading"] as const) if(typeof music[key]==="boolean") out[key]=music[key];
+    state.music=out;
+  }
   return true;
 }

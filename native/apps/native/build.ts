@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { treeHash } from "./package";
-import { ensureCanonicalWasm } from "./ensure-wasm";
+import { CANONICAL_PHYSICS, CANONICAL_TIMER_RULES, ensureCanonicalWasm } from "./ensure-wasm";
 const root = resolve(import.meta.dir, "../..");
 await ensureCanonicalWasm();
 const {values}=parseArgs({args:Bun.argv.slice(2),options:{"prebuilt-resources":{type:"boolean"}}});
@@ -37,6 +37,8 @@ hash.update(assetsSha256);
 const manifest = {
   build: `bunnyhop-native/${hash.digest("hex").slice(0, 24)}`,
   wasm: `bunnyhop-web/${new Bun.CryptoHasher("sha256").update(wasm).digest("hex").slice(0, 12)}`,
+  physics: CANONICAL_PHYSICS,
+  rules: CANONICAL_TIMER_RULES,
   platform: `${process.platform}/${process.arch}`,
   renderer: "native-opengl",
   binarySha256: fileHashes[0],

@@ -30,9 +30,9 @@ mod run;
 mod styles;
 pub use assets::{BhAttackReport, BhFloorWeapon, BhWeaponReport};
 pub use assets::{BhMaterialExtra, BhPropGroup, BhSkyInfo};
-pub use look::BhLookSample;
+pub use look::{BhLookSample, BhLookSampleV2};
 pub use practice::{
-    BhNoclipState, bh_noclip_move, bh_practice_free, bh_practice_noclip_exit,
+    BhNoclipState, bh_noclip_move, bh_practice_enter, bh_practice_free, bh_practice_noclip_exit,
     bh_practice_noclip_tick, bh_practice_restore, bh_practice_save, bh_trace_camera,
 };
 pub use run::{BhRunOptions, BhRunState, BhZone};
@@ -898,6 +898,33 @@ pub unsafe extern "C" fn bh_step_look(
             let look = if look.is_null() {
                 None
             } else {
+                Some(BhLookSampleV2::from(input(look)?))
+            };
+            let m = c.map()?;
+            if m.playback.is_some() {
+                return Err("use bh_replay_step or stop playback before live input".into());
+            }
+            let state = m.advance(cmd, look)?;
+            output(out, state)
+        })
+    }
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_step_look_v2(
+    ctx: *mut BhContext,
+    cmd: *const BhCmd,
+    look: *const BhLookSampleV2,
+    out: *mut BhState,
+) -> c_int {
+    unsafe {
+        call(ctx, |c| {
+            if out.is_null() {
+                return Err("null output".into());
+            }
+            let cmd = input(cmd)?;
+            let look = if look.is_null() {
+                None
+            } else {
                 Some(input(look)?)
             };
             let m = c.map()?;
@@ -1443,13 +1470,13 @@ pub unsafe extern "C" fn bh_step(
 }
 
 impl Map {
-    fn advance(&mut self, cmd: BhCmd, look: Option<BhLookSample>) -> Result<BhState, String> {
+    fn advance(&mut self, cmd: BhCmd, look: Option<BhLookSampleV2>) -> Result<BhState, String> {
         self.advance_canonical(cmd, look, true)
     }
     fn advance_canonical(
         &mut self,
         cmd: BhCmd,
-        look: Option<BhLookSample>,
+        look: Option<BhLookSampleV2>,
         filter: bool,
     ) -> Result<BhState, String> {
         finite(&[cmd.forward, cmd.side, cmd.yaw, cmd.pitch])?;

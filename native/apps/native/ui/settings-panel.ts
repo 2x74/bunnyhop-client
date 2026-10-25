@@ -2,7 +2,7 @@ import { h } from "../../web/src/ui/dom";
 import { ACTIONS, keyLabel } from "../../web/src/ui/settings";
 import { mouseCode } from "../../web/src/binds";
 import { HUD_ELEMENTS, defaultPosition, type HudElementId, type HudLayout } from "./hud-layout";
-import { AUDIO_PACKS, DEFAULT_YAW_SPEED, DEFAULT_YAW_SPEED_ALT, JUMP_STATS_MODES, NATIVE_BIND_ACTIONS, send, settingsPatch, state, nativeKeyCode, type AudioPack, type JumpStatsMode, type NativeSettings } from "./bridge";
+import { AUDIO_PACKS, HUD_SCALE_PERCENT, DEFAULT_YAW_SPEED, DEFAULT_YAW_SPEED_ALT, JUMP_STATS_MODES, NATIVE_BIND_ACTIONS, send, settingsPatch, state, nativeKeyCode, type AudioPack, type JumpStatsMode, type NativeSettings } from "./bridge";
 
 const DISCORD_TEXT={disabled:"Off",connecting:"Connecting…",ready:"Connected",reconnecting:"Discord not found"} as const;
 const DISCORD_TONE={disabled:"",connecting:"busy",ready:"ok",reconnecting:"bad"} as const;
@@ -24,10 +24,13 @@ const actionLabel = (action: string): string => NATIVE_LABELS[action] ?? ACTIONS
 
 const BIND_GROUPS: readonly { title: string; actions: readonly BindAction[] }[] = [
   { title: "Movement", actions: ["forward", "back", "left", "right", "jump", "duck", "use"] },
-  { title: "Runs", actions: ["restart", "restartMain", "restartBonus", "cycleStyle"] },
+  { title: "Runs", actions: ["restart", "restartMain", "restartBonus", "cycleStyle", "mainMenu"] },
   { title: "Weapons", actions: ["attack", "attack2", "inspect", "reload", "slot1", "slot2", "slot3", "lastWeapon", "drop", "giveUsp", "giveGlock"] },
   { title: "Interface", actions: ["viewmodel", "hideUi", "mute"] },
   { title: "Turning", actions: ["turnLeft", "turnRight", "turnFast"] },
+  // Practice (web practice-mode/): practice mode's toggle, then the tools. During a timed run Z / X only act while the
+  // !cp menu is open; C always saves.
+  { title: "Practice", actions: ["practice", "noclip", "cpSave", "cpTeleport", "cpPrev", "cpNext"] },
 ];
 
 export function settingsPanel(): HTMLElement {
@@ -110,16 +113,21 @@ export function settingsPanel(): HTMLElement {
     const range = h("input.nset-range", { type: "range", min: 1, max: 500, step: .1, "aria-label": `${name} slider` }) as HTMLInputElement;
     const box = h("input.num-input", { type: "number", min: .01, max: 1000, step: "any", "aria-label": name }) as HTMLInputElement;
     const reset = h("button.link-btn", { type: "button", title: `Back to ${fallback}` }, "Default") as HTMLButtonElement;
+    // Keep the local edit until the host echoes it; older periodic state can
+    // arrive both before the debounce and after the patch has been dispatched.
+    let draft: number | undefined;
     const send = (value: number, now: boolean): void => {
-      state.settings[key] = value; pendingSpeed[key] = value;
+      draft = value; pendingSpeed[key] = value;
       const flush = (): void => { speedTimer = 0; if (Object.keys(pendingSpeed).length) { save({ ...pendingSpeed }); for (const k of Object.keys(pendingSpeed)) delete pendingSpeed[k as keyof NativeSettings]; } };
       if (now) { window.clearTimeout(speedTimer); flush(); } else if (!speedTimer) speedTimer = window.setTimeout(flush, 100);
       sync();
     };
     const sync = (): void => {
-      const value = state.settings[key];
+      if (draft === state.settings[key]) draft = undefined;
+      const value = draft ?? state.settings[key];
       if (document.activeElement !== box) box.value = String(value);
-      range.value = String(value); reset.disabled = value === fallback;
+      if (draft !== undefined || document.activeElement !== range) range.value = String(value);
+      reset.disabled = value === fallback;
     };
     range.addEventListener("input", () => send(range.valueAsNumber, false));
     range.addEventListener("change", () => send(range.valueAsNumber, true));
@@ -135,13 +143,47 @@ export function settingsPanel(): HTMLElement {
     return el;
   }
 
+  // HUD scale (web settings-panel.ts: 50–175 %, steps of 5): a slider and a box, Default for 100 %.
+  function hudScale(): HTMLElement {
+    const { min, max, step } = HUD_SCALE_PERCENT;
+    const range = h("input.nset-range", { type: "range", min, max, step, "aria-label": "HUD scale slider" }) as HTMLInputElement;
+    const box = h("input.num-input", { type: "number", min, max, step, "aria-label": "HUD scale" }) as HTMLInputElement;
+    const reset = h("button.link-btn", { type: "button", title: "Back to 100%" }, "Default") as HTMLButtonElement;
+    let draft: number | undefined, timer = 0;
+    const sync = (): void => {
+      if (draft === state.settings.hudScale) draft = undefined;
+      const value = draft ?? state.settings.hudScale;
+      if (document.activeElement !== box) box.value = String(value);
+      if (draft !== undefined || document.activeElement !== range) range.value = String(value);
+      reset.disabled = value === 100;
+    };
+    const apply = (value: number, now: boolean): void => {
+      value = Math.round(value);
+      if (!Number.isFinite(value) || value < min || value > max) { say(`HUD scale: choose ${min}–${max}%.`); draft = undefined; sync(); return; }
+      draft = value; sync();
+      window.clearTimeout(timer);
+      // While dragging, at most every 100 ms, so the HUD follows.
+      if (now) save({ hudScale: value }); else timer = window.setTimeout(() => save({ hudScale: value }), 100);
+    };
+    range.addEventListener("input", () => apply(range.valueAsNumber, false));
+    range.addEventListener("change", () => apply(range.valueAsNumber, true));
+    box.addEventListener("change", () => apply(box.valueAsNumber, true));
+    reset.addEventListener("click", () => apply(100, true));
+    speedSyncs.push(sync); sync();
+    const el = row("HUD scale", h("div.nset-speed", null, range, h("span.num-wrap", null, box, h("span.unit", null, "%")), reset), "",
+      "The whole HUD, chat included. The gaps between elements grow with it.", "HUD scale hud size scale bigger smaller ultrawide 21:9 1440p 4k resolution small text");
+    el.classList.add("nset-row-pos");
+    return el;
+  }
+
   const mouse = h("div.nset-cols", null,
     group("",
       number("Mouse sensitivity", "sensitivity", .01, 100, .01, "", "Same scale as the game and CS:S: each mouse count turns sensitivity × 0.022 degrees."),
       toggle("Separate vertical sensitivity", "separateVertical", "", "Use a different sensitivity for looking up and down."),
       number("Vertical sensitivity", "verticalSensitivity", .01, 100, .01, "", "Only used when separate vertical sensitivity is on.")),
     group("Turnbinds",
-      speed("Yaw speed", "yawSpeed", DEFAULT_YAW_SPEED, "cl_yawspeed", "How fast Turn left / Turn right (+left / +right) turn you, in degrees per second. Bind them under Keys > Turning.")));
+      speed("Yaw speed", "yawSpeed", DEFAULT_YAW_SPEED, "cl_yawspeed", "How fast Turn left / Turn right (+left / +right) turn you, in degrees per second. Bind them under Keys > Turning. Only 210°/s supports ranked submission; other speeds keep the attempt local."),
+      h("p.nset-hint", null, "For ranked turn binds, set both speeds to 210°/s. Using another speed keeps that attempt as a local replay.")));
   const display = h("div.nset-cols", null,
     group("Video",
       number("Field of view", "fov", 60, 130, 1, "", "Field of view in degrees.", "°"),
@@ -210,6 +252,7 @@ export function settingsPanel(): HTMLElement {
     h("div.nset-cols", null,
       group("HUD",
         toggle("HUD", "hud", "", "Speed, timer and keys."),
+        hudScale(),
         toggle("Crosshair", "crosshair"),
         toggle("Viewmodel", "viewmodel", "", "Your weapon and hands.")),
       group("Jump stats",
@@ -221,6 +264,25 @@ export function settingsPanel(): HTMLElement {
         number("Average over", "strafeTrainerSmoothing", 1, 50, 1, "1 = every tick", "How many air ticks each reading averages. 1 updates every tick with that tick alone; higher is steadier but slower to react.", "ticks"),
         toggle("Hints", "strafeTrainerHints", "Under the trainer", "Says what to fix over the last 0.3 s in the air: Less deadtime! (no single strafe key held), Strafe more! (turning too slowly) or Strafe less! (turning too fast)."))),
     advanced);
+  // The soundtrack as the host reports it (state.music): what's playing, Skip, and whether it's available at all.
+  const musicNote = h("p.nset-hint.nset-music-note");
+  const musicNow = h("span.nset-hint.nset-music-now");
+  const skip = h("button.btn", { type: "button", onclick: () => send({ type: "music", action: "next" }) }, "Skip ▸") as HTMLButtonElement;
+  function musicRow(): HTMLElement {
+    return row("Next track", h("div.btn-row", null, musicNow, skip), "", "Skips to the next track. The play / pause and previous / next controls also sit on the home and pause screens.", "music skip song next track now playing soundtrack ost");
+  }
+  function refreshMusic(): void {
+    const music = state.music;
+    const custom = state.settings.musicPack === "custom";
+    musicNow.textContent = music?.title ? `${music.playing ? "" : "Paused · "}${music.title.replace(/\s*\((menu|game)\)\s*$/i, "")}` : "";
+    skip.disabled = !music?.available;
+    musicNote.textContent = !music
+      ? ""
+      : music.loading ? "Loading the soundtrack…"
+      : music.available ? (custom ? "Playing your tracks from the bgm folder." : "bunnyhop.lol OST is included with the app. No download needed.")
+      : music.status || (custom ? "No playable tracks in the bgm folder yet." : "The soundtrack isn't available in this build.");
+  }
+
   const audio = h("div.nset-cols", null,
     group("Volume",
       number("Volume", "volume", 0, 1, .01, "0 to 1", "Master volume for sound effects and music."),
@@ -228,7 +290,9 @@ export function settingsPanel(): HTMLElement {
     group("Packs",
       pack("Sound effects", "sfxPack", "bunnyhop.lol SFX",
         "Custom sounds come from the sound folder in your Bunnyhop Native data directory. Name a file after the cue it replaces, such as jump.wav; WAV, MP3, FLAC or Ogg all work. Cues you haven't supplied keep the bunnyhop.lol sound."),
-      pack("Music", "musicPack", "bunnyhop.lol OST", "Custom music comes from the bgm folder beside it, played in filename order.")));
+      pack("Music", "musicPack", "bunnyhop.lol OST", "bunnyhop.lol OST is the game's own soundtrack, included with the app and played offline: every track in the menus, the game tracks in game. Custom plays WAV, MP3, FLAC or Ogg files from the bgm folder in your Bunnyhop Native data directory, in filename order."),
+      musicRow(),
+      musicNote));
 
   const discordState = h("span.nset-state");
   const discord = h("div.nset-cols", null,
@@ -250,7 +314,9 @@ export function settingsPanel(): HTMLElement {
     buttons.set(action, [...(buttons.get(action) ?? []), button]);
     return row(label, h("div.nset-bind", null, button, add, clear), "", "Click, then press a key, mouse button or wheel direction. Escape cancels. Escape and F10 stay reserved. Up to four keys each.", `${label} ${action} key bind`);
   };
-  const keys = h("div.nset-cols", null, ...BIND_GROUPS.map(item => group(item.title, ...item.actions.map(bindRow))));
+  const keys = h("div.nset-cols", null, ...BIND_GROUPS.map(item => item.title === "Practice"
+    ? group(item.title, ...item.actions.map(bindRow), toggle("Teleport keeps speed", "practiceKeepVelocity", "", "On: a checkpoint teleport gives you back the speed you saved it with. Off: you arrive standing still."))
+    : group(item.title, ...item.actions.map(bindRow))));
   const turnAdvanced = h("details.nset-advanced", null,
     h("summary", null, h("span", null, "Advanced: turnbind modifier"), h("small.nset-hint", null, "A second turn speed")),
     h("div.nset-advanced-body", null,
@@ -368,6 +434,7 @@ export function settingsPanel(): HTMLElement {
     off("strafeTrainerSmoothing", !state.settings.strafeTrainer);
     off("strafeTrainerHints", !state.settings.strafeTrainer);
     refreshPositions();
+    refreshMusic();
     const vertical = controls.get("verticalSensitivity");
     if (vertical instanceof HTMLInputElement) { vertical.disabled = !state.settings.separateVertical; vertical.closest(".nset-row")?.classList.toggle("off", vertical.disabled); }
     for (const sync of speedSyncs) sync();

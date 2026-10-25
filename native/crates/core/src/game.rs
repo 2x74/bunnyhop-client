@@ -19,6 +19,8 @@ mod usable;
 mod map_fixes;
 // Practice mode noclip (never called by `step`; see the module docs).
 mod practice;
+// DanZay's VScript objective gates, emulated natively on bhop_cooksassistant (physics v16).
+mod vscript;
 // Trigger / clip overlays for the client (never called by `step`; see the module docs).
 mod overlay;
 pub use overlay::{
@@ -64,6 +66,9 @@ pub const EVENT_ANGLES_CHANGED: u32 = 1 << 4;
 pub const EVENT_ATTACK: u32 = 1 << 5;
 /// The player's inventory changed this tick (switch, pickup, reload, drop, ...; physics v4): see `Game::weapon_report`.
 pub const EVENT_WEAPON: u32 = 1 << 6;
+/// A trigger_teleport moved the player this tick (physics v17 only: RNGFix's map teleport, `PHYSICS_FIX_TELEHOP`).
+/// Kept in the saved state with the other events, so the next tick knows it follows a teleport.
+pub const EVENT_MAP_TELEPORT: u32 = 1 << 7;
 
 /// The player entity's classname until a map renames it with `AddOutput classname`.
 const PLAYER_CLASS: &str = "player";
@@ -155,14 +160,25 @@ pub const PHYSICS_V14: u32 = 14;
 /// v15: Source's signed door / button travel on the maps that need it (`PHYSICS_FIX_MAP_DOOR_TRAVEL`,
 /// `game/map_fixes.rs` `SIGNED_DOOR_TRAVEL`): bhop_montana_fix's "UP" block rises and launches the player.
 pub const PHYSICS_V15: u32 = 15;
+/// v16: the player's own outputs and filter tests on the maps that need them (`PHYSICS_FIX_MAP_PLAYER_IO`,
+/// `game/map_fixes.rs` `PLAYER_IO`): bhop_synthetic_fix's potion door, bhop_wonderland's key room and bhop_lego3's coins
+/// open once all three items are collected. Same bit: DanZay's VScript objective gates on the maps in
+/// `NONLINEAR_OBJECTIVES` (`game/vscript.rs`): bhop_cooksassistant's kitchen doors need its 4 ingredients.
+pub const PHYSICS_V16: u32 = 16;
+/// v17: RNGFix parity (jason-e/rngfix 1.1.3, the plugin ranked CS:S bhop servers run; research/RNGFIX-1025.md):
+/// uphill and downhill inclines as the plugin does them (`PHYSICS_FIX_INCLINE`), edge bugs (`PHYSICS_FIX_EDGE`),
+/// trigger jumping (`PHYSICS_FIX_TRIGGER_JUMP`) and telehops (`PHYSICS_FIX_TELEHOP`). Landing on (or jumping into) a
+/// slope or a ledge no longer depends on where inside a tick the player meets it.
+pub const PHYSICS_V17: u32 = 17;
 /// The version new recordings use.
-pub const PHYSICS_LATEST: u32 = PHYSICS_V15;
+pub const PHYSICS_LATEST: u32 = PHYSICS_V17;
 /// Diagnostic pseudo-versions (never valid in a replay, whose field is a u8): `PHYSICS_DIAG | fix bits` turns on only
-/// the listed fixes, to tell which fix changes a replay (tools: /tmp physics-v2 analysis). The fix bits are the low 25
-/// (`PHYSICS_DIAG_FIXES`); before v15 the base was 1 << 24 with 24 fix bits, before v8 0x1_0000 with 16 (and 0x100 with
-/// 8 before v5), and those old diagnostic numbers are not versions any more. The mask is never stored: replays carry
-/// the u8 version, run hashes fold only the commands, and the state digest has no settings in it.
-pub const PHYSICS_DIAG: u32 = 1 << 25;
+/// the listed fixes, to tell which fix changes a replay (tools: /tmp physics-v2 analysis). The fix bits are the low 30
+/// (`PHYSICS_DIAG_FIXES`); before v17 the base was 1 << 26 with 26 fix bits, before v16 1 << 25 with 25, before v15
+/// 1 << 24 with 24, before v8 0x1_0000 with 16 (and 0x100 with 8 before v5), and those old diagnostic numbers are not
+/// versions any more. The mask is never stored: replays carry the u8 version, run hashes fold only the commands, and
+/// the state digest has no settings in it.
+pub const PHYSICS_DIAG: u32 = 1 << 30;
 /// The fix bits a diagnostic pseudo-version may carry.
 pub const PHYSICS_DIAG_FIXES: u32 = PHYSICS_DIAG - 1;
 /// Fix bit: MASK_PLAYERSOLID / matching ladder mask (playerclips are solid).
@@ -286,7 +302,36 @@ const PHYSICS_FIX_V14: u32 = PHYSICS_FIX_V13 | PHYSICS_FIX_MAP_MAX_VELOCITY | PH
 /// brush along movedir moves the difference the other way (`CBaseDoor::Spawn` has no clamp), and so does a func_button
 /// when that is 1 unit or more (`CBaseButton::Spawn`). Elsewhere, and before v15, the travel is clamped at 0.
 pub const PHYSICS_FIX_MAP_DOOR_TRAVEL: u32 = 1 << 24;
-const PHYSICS_FIX_ALL: u32 = PHYSICS_FIX_V14 | PHYSICS_FIX_MAP_DOOR_TRAVEL;
+const PHYSICS_FIX_V15: u32 = PHYSICS_FIX_V14 | PHYSICS_FIX_MAP_DOOR_TRAVEL;
+/// Fix bit (v16): on the maps in `game/map_fixes.rs` `PLAYER_IO`, the player keeps the outputs `AddOutput` gives it
+/// (`!activator,AddOutput,OnUser1 target:input:param:delay:times`) and fires them on `FireUser1..4`
+/// (`CBaseEntity::InputFireUser1`), and filters answer `TestActivator` with `OnPass` / `OnFail`
+/// (`CBaseFilter::InputTestActivator`), all with the input's activator. Elsewhere, and before v16, all three are ignored.
+/// On the maps in `game/map_fixes.rs` `NONLINEAR_OBJECTIVES` the same bit runs the native emulation of their VScript
+/// objective triggers and gates (`game/vscript.rs`); elsewhere, and before v16, scripts do nothing.
+pub const PHYSICS_FIX_MAP_PLAYER_IO: u32 = 1 << 25;
+const PHYSICS_FIX_V16: u32 = PHYSICS_FIX_V15 | PHYSICS_FIX_MAP_PLAYER_IO;
+/// Fix bit (v17): RNGFix's incline fixes (`MovementFixes::rngfix_incline`). Uphill: an airborne move that would first
+/// hit a walkable incline it moves into (vz <= 140, and clipping on it no faster) starts a fraction of a tick back
+/// instead (`PreventCollision`) and lands on it through the 2-unit ground probe with its horizontal speed, so the next
+/// jump launches off the slope instead of the clip taking the speed into it (before v17: either, by sub-tick phase;
+/// bhop_null_fix's first room, research/RNGFIX-1025.md). Downhill (on top of v13's): computed from the velocity with the
+/// move's base velocity, and not after a move that hit anything.
+pub const PHYSICS_FIX_INCLINE: u32 = 1 << 26;
+/// Fix bit (v17): RNGFix "Edge Bugs" (`MovementFixes::rngfix_edge`): an airborne move that would hit walkable ground
+/// (vz <= 140) and then slide off it before the tick ends, with no ground under the end, starts a fraction of a tick
+/// back instead and lands on the edge, so the jump still happens.
+pub const PHYSICS_FIX_EDGE: u32 = 1 << 27;
+/// Fix bit (v17): RNGFix "Trigger Jumping": on the tick the player lands, triggers between their feet and the ground
+/// (the 2-unit landing gap, which the hull doesn't cover) are touched too, so a jump off a thin booster or teleport
+/// always activates it.
+pub const PHYSICS_FIX_TRIGGER_JUMP: u32 = 1 << 28;
+/// Fix bit (v17): RNGFix "Telehops": a trigger_teleport touched on a tick whose airborne move collided or landed (and
+/// that did not follow a teleport on the tick before) restores the velocity the move started with (plus the second
+/// half of gravity), as if the teleport had come first. Replaces the optional `Rules::telehop_fix` rule.
+pub const PHYSICS_FIX_TELEHOP: u32 = 1 << 29;
+const PHYSICS_FIX_ALL: u32 =
+    PHYSICS_FIX_V16 | PHYSICS_FIX_INCLINE | PHYSICS_FIX_EDGE | PHYSICS_FIX_TRIGGER_JUMP | PHYSICS_FIX_TELEHOP;
 
 /// The per-map fix (`game/map_fixes.rs`) a parsed entity lump matches, by map name (tests, tools).
 pub fn map_fix_for(entities: &[Entity]) -> Option<&'static str> {
@@ -297,6 +342,26 @@ pub fn map_fix_for(entities: &[Entity]) -> Option<&'static str> {
 /// (map name, value) (tests, tools).
 pub fn map_max_velocity_for(entities: &[Entity]) -> Option<(&'static str, f32)> {
     map_fixes::max_velocity(entities).map(|m| (m.map, m.max_velocity))
+}
+
+/// The map a parsed entity lump matches in `game/map_fixes.rs` `PLAYER_IO` (tests, tools).
+pub fn map_player_io_for(entities: &[Entity]) -> Option<&'static str> {
+    map_fixes::player_io(entities).map(|m| m.map)
+}
+
+/// Every map in `game/map_fixes.rs` `PLAYER_IO` (tests, tools).
+pub fn map_player_io_table() -> Vec<&'static str> {
+    map_fixes::PLAYER_IO.iter().map(|m| m.map).collect()
+}
+
+/// The map a parsed entity lump matches in `game/map_fixes.rs` `NONLINEAR_OBJECTIVES` (tests, tools).
+pub fn map_nonlinear_objectives_for(entities: &[Entity]) -> Option<&'static str> {
+    map_fixes::nonlinear_objectives(entities).map(|m| m.map)
+}
+
+/// Every map in `game/map_fixes.rs` `NONLINEAR_OBJECTIVES` (tests, tools).
+pub fn map_nonlinear_objectives_table() -> Vec<&'static str> {
+    map_fixes::NONLINEAR_OBJECTIVES.iter().map(|m| m.map).collect()
 }
 
 /// The map a parsed entity lump matches in `game/map_fixes.rs` `SIGNED_DOOR_TRAVEL` (tests, tools).
@@ -326,7 +391,9 @@ pub fn physics_fixes(version: u32) -> Option<u32> {
         PHYSICS_V12 => Some(PHYSICS_FIX_V12),
         PHYSICS_V13 => Some(PHYSICS_FIX_V13),
         PHYSICS_V14 => Some(PHYSICS_FIX_V14),
-        PHYSICS_V15 => Some(PHYSICS_FIX_ALL),
+        PHYSICS_V15 => Some(PHYSICS_FIX_V15),
+        PHYSICS_V16 => Some(PHYSICS_FIX_V16),
+        PHYSICS_V17 => Some(PHYSICS_FIX_ALL),
         v if v & !PHYSICS_DIAG_FIXES == PHYSICS_DIAG && v & PHYSICS_DIAG_FIXES & !PHYSICS_FIX_ALL == 0 => Some(v & PHYSICS_DIAG_FIXES),
         _ => None,
     }
@@ -398,6 +465,8 @@ impl Settings {
             ladder_mask,
             fixes: movement::MovementFixes {
                 downhill: self.physics_fixes() & PHYSICS_FIX_DOWNHILL != 0,
+                rngfix_incline: self.physics_fixes() & PHYSICS_FIX_INCLINE != 0,
+                rngfix_edge: self.physics_fixes() & PHYSICS_FIX_EDGE != 0,
                 ..Default::default()
             },
             ..Configuration::default()
@@ -508,6 +577,8 @@ impl Rules {
             downhill: self.downhill_fix || settings.physics_fixes() & PHYSICS_FIX_DOWNHILL != 0,
             uphill: self.uphill_fix,
             rampbug: self.rampbug_fix,
+            rngfix_incline: settings.physics_fixes() & PHYSICS_FIX_INCLINE != 0,
+            rngfix_edge: settings.physics_fixes() & PHYSICS_FIX_EDGE != 0,
         }
     }
 }
@@ -1227,6 +1298,12 @@ pub struct Game {
     /// The map is in `map_fixes::SIGNED_DOOR_TRAVEL`: from physics v15 (`PHYSICS_FIX_MAP_DOOR_TRAVEL`) its movers use
     /// Source's signed travel. Fixed at load.
     map_signed_door_travel: bool,
+    /// The map is in `map_fixes::PLAYER_IO`: from physics v16 (`PHYSICS_FIX_MAP_PLAYER_IO`) the player keeps and fires
+    /// its own outputs and filters answer TestActivator. Fixed at load.
+    map_player_io: bool,
+    /// The map is in `map_fixes::NONLINEAR_OBJECTIVES`: its scripted triggers (entity, role); from physics v16
+    /// (`PHYSICS_FIX_MAP_PLAYER_IO`) `game/vscript.rs` runs their scripts. Empty elsewhere. Fixed at load.
+    script_triggers: Vec<(usize, vscript::ScriptRole)>,
 }
 
 /// Physics v4 world state the entity list doesn't hold; saved with the game state, cleared on reset.
@@ -1242,6 +1319,12 @@ struct Extra {
     game_ui: Option<minigame::ActiveUi>,
     /// func_breakables (SF_BREAK_PRESSURE) the player stood on, breaking after their pressuredelay (v5).
     pressure_breaks: std::collections::BTreeSet<usize>,
+    /// Outputs `AddOutput` gave the player (v16, `PHYSICS_FIX_MAP_PLAYER_IO` maps), in the order added; spent ones
+    /// (times 0) are dropped, as `CBaseEntityOutput::FireOutput` deletes them.
+    player_outputs: Vec<Output>,
+    /// Objective triggers the player collected (v16, `NONLINEAR_OBJECTIVES` maps: the script scope's
+    /// `nl_collectedObjectives`), entity indices in the order collected.
+    objectives: Vec<u32>,
 }
 
 impl Extra {
@@ -1262,6 +1345,22 @@ impl Extra {
         // (Empty before v5: the digest of older states is unchanged.)
         for i in &self.pressure_breaks {
             out.extend_from_slice(&(*i as u32 | 0x8000_0000).to_le_bytes());
+        }
+        // (Empty before v16 and on every map outside `map_fixes::PLAYER_IO`: those digests are unchanged.)
+        for o in &self.player_outputs {
+            for s in [&o.event, &o.target, &o.input, &o.param] {
+                out.extend_from_slice(s.as_bytes());
+                out.push(0);
+            }
+            out.extend_from_slice(&o.delay.to_le_bytes());
+            out.extend_from_slice(&o.times.to_le_bytes());
+        }
+        // (Empty before v16 and on every map outside `map_fixes::NONLINEAR_OBJECTIVES`: those digests are unchanged.)
+        if !self.objectives.is_empty() {
+            out.extend_from_slice(b"objectives\0");
+            for i in &self.objectives {
+                out.extend_from_slice(&i.to_le_bytes());
+            }
         }
         out
     }
@@ -1289,6 +1388,8 @@ impl Game {
         };
         let map_max_velocity = map_fixes::max_velocity(&entities).map(|m| m.max_velocity);
         let map_signed_door_travel = map_fixes::signed_door_travel(&entities).is_some();
+        let map_player_io = map_fixes::player_io(&entities).is_some();
+        let script_triggers = vscript::script_triggers(&entities);
         let physics::MapPhysics { prop_sources, world, texinfo_surface, props, diagnostics, displacement_count } =
             physics::build_with_entities(bsp, content, &entities, prop_mesh)?;
         let models: &[Model] = match bsp.lump(playsrc_bsp::MODELS).map(|l| &l.records) {
@@ -1379,6 +1480,8 @@ impl Game {
             map_trigger_boxes,
             map_max_velocity,
             map_signed_door_travel,
+            map_player_io,
+            script_triggers,
         };
         game.link_hierarchy();
         game.link_templates();
@@ -1521,6 +1624,10 @@ impl Game {
         self.player_name.clear();
         self.player_class.clear();
         self.player_class.push_str(PLAYER_CLASS);
+        // A restart is a fresh player: no outputs from the last attempt (v16; always empty elsewhere), and no objectives
+        // (v16 NONLINEAR_OBJECTIVES maps; in CS:S a respawn lands in the start room's script triggers, which clear them).
+        self.extra.player_outputs.clear();
+        self.extra.objectives.clear();
         if let (Some(_), Some((name, class))) = (self.restart_point, &self.restart_names) {
             self.player_name.clone_from(name);
             self.player_class.clone_from(class);
@@ -1716,6 +1823,8 @@ impl Game {
     pub fn step(&mut self, cmd: Cmd) -> Result<(), String> {
         self.jumpstats_valid = false;
         let before_events = self.state;
+        // RNGFix telehop: no fix right after another map teleport (`g_bMapTeleportedSequentialTicks`).
+        let map_teleported_last_tick = self.events & EVENT_MAP_TELEPORT != 0;
         self.events = 0;
         self.attack = None;
         self.weapon_events = 0;
@@ -1777,6 +1886,10 @@ impl Game {
         self.contacts.clear();
         let pre_velocity = self.state.velocity;
         let mut wall_hit = false;
+        // What RNGFix's telehop fix needs from the move: the airborne move's velocity, whether it collided, and the
+        // gravity it ran with.
+        let mut air_move: Option<([f32; 3], bool)> = None;
+        let mut move_config = self.config;
         if self.speed_scale > 0.0 {
             // game_ui's FL_ATCONTROLS (v4): no movement from the command.
             let (cmd_forward, cmd_side) = if self.at_controls() { (0.0, 0.0) } else { (cmd.forward, cmd.side) };
@@ -1833,6 +1946,8 @@ impl Game {
             self.contacts.extend(result.contacts.iter().filter_map(|c| c.hit));
             self.last_move_origin = result.state.position;
             wall_hit = result.contacts.iter().any(|c| c.normal[2].abs() < 0.7);
+            air_move = result.air_move_velocity.map(|v| (v, result.move_collided));
+            move_config = config;
             self.state = result.state;
             self.near_region = None;
         }
@@ -1852,13 +1967,24 @@ impl Game {
         if self.settings.physics_fixes() & PHYSICS_FIX_WEAPONS != 0 {
             self.weapon_pickups();
         }
+        // RNGFix's post-tick fixes run in the PostThink pre-hook: after the touches, before ItemPostFrame.
+        if self.settings.physics_fixes() & PHYSICS_FIX_TRIGGER_JUMP != 0 && !was_grounded {
+            self.trigger_jump_fix();
+        }
+        if self.settings.physics_fixes() & PHYSICS_FIX_TELEHOP != 0 {
+            self.telehop_fix(air_move, map_teleported_last_tick, move_config);
+        }
         self.in_touch = false;
         // CBasePlayer::PostThink -> ItemPostFrame: the active weapon, after the command's movement and touches (v4).
         if self.settings.physics_fixes() & PHYSICS_FIX_KNIFE != 0 && !self.weapon_hidden() {
             self.weapon_post_frame(cmd);
         }
         self.state_after_command = self.state;
-        if self.rules.telehop_fix && wall_hit && self.events & EVENT_TELEPORTED != 0 && self.events & EVENT_RESPAWNED == 0
+        if self.rules.telehop_fix
+            && self.settings.physics_fixes() & PHYSICS_FIX_TELEHOP == 0
+            && wall_hit
+            && self.events & EVENT_TELEPORTED != 0
+            && self.events & EVENT_RESPAWNED == 0
         {
             // RNGFix-style telehop: the wall hit and the teleport happened in the same tick; keep
             // the horizontal velocity from before the collision (if it was faster).
@@ -2024,6 +2150,37 @@ impl Game {
         }
     }
 
+    /// v16: the player's own outputs and filter tests run on this map (`map_fixes::PLAYER_IO`, `PHYSICS_FIX_MAP_PLAYER_IO`).
+    fn player_io(&self) -> bool {
+        self.map_player_io && self.settings.physics_fixes() & PHYSICS_FIX_MAP_PLAYER_IO != 0
+    }
+
+    /// `fire_output` for the outputs `AddOutput` gave the player (v16): caller = the player; spent outputs are removed.
+    fn fire_player_output(&mut self, event: &str, activator: Actor) {
+        let mut queued: Vec<_> = self
+            .extra
+            .player_outputs
+            .iter()
+            .filter(|o| &*o.event == event && o.times != 0)
+            .map(|o| (o.target.clone(), o.input.clone(), o.param.clone(), o.delay))
+            .collect();
+        // CBaseEntityOutput::AddEventAction prepends, so the SDK fires the newest first (v16 always has OUTPUT_ORDER).
+        if self.settings.physics_fixes() & PHYSICS_FIX_OUTPUT_ORDER != 0 {
+            queued.reverse();
+        }
+        for o in self.extra.player_outputs.iter_mut() {
+            if &*o.event == event && o.times > 0 {
+                o.times -= 1;
+            }
+        }
+        self.extra.player_outputs.retain(|o| o.times != 0);
+        for (target, input, param, delay) in queued {
+            let fire_time = self.io_time + delay.max(0.0);
+            self.seq += 1;
+            self.queue.push(QueuedEvent { fire_time, seq: self.seq, target, input, param, activator, caller: Actor::Player });
+        }
+    }
+
     /// Server time (gpGlobals->curtime) of server frame `frame` ticks after the reset tick: TICKS_TO_TIME.
     fn server_time(&self, frame: i64) -> f32 {
         let tick = i64::from(self.rules.server_tick_base) + frame;
@@ -2120,13 +2277,24 @@ impl Game {
         let input = input.to_ascii_lowercase();
         match target {
             Actor::None => {}
-            Actor::Player => self.player_input(&input, param),
+            Actor::Player => self.player_input(&input, param, activator),
             Actor::Entity(i) => self.entity_input(i, &input, param, activator),
         }
     }
 
-    fn player_input(&mut self, input: &str, param: &str) {
+    fn player_input(&mut self, input: &str, param: &str, activator: Actor) {
         match input {
+            // v16 (`PHYSICS_FIX_MAP_PLAYER_IO` maps): `AddOutput "OnUser1 target:input:param:delay:times"` gives the
+            // player an output (CBaseEntity::InputAddOutput -> KeyValue -> the output's ParseEventAction).
+            "addoutput" if self.player_io() && Output::parse_add_output(param).is_some() => {
+                self.extra.player_outputs.extend(Output::parse_add_output(param));
+            }
+            "fireuser1" | "fireuser2" | "fireuser3" | "fireuser4" if self.player_io() => {
+                let event = format!("onuser{}", &input[8..]);
+                self.fire_player_output(&event, activator);
+            }
+            // v16 (`NONLINEAR_OBJECTIVES` maps): the start room's `!activator,RunScriptFile,danzay/nonlinear.nut`.
+            "runscriptfile" if self.objectives_on() => self.run_script_file(param),
             "addoutput" => {
                 let (key, value) = param.trim().split_once(char::is_whitespace).unwrap_or((param.trim(), ""));
                 let value = value.trim();
@@ -2189,6 +2357,10 @@ impl Game {
         if self.ents[i].removed {
             return;
         }
+        // v16 (`NONLINEAR_OBJECTIVES` maps): a scripted trigger's ConnectOutput action runs its script function.
+        if input == "callscriptfunction" && self.objectives_on() && self.call_script_function(i, param, activator) {
+            return;
+        }
         // point_template / game_ui (v4).
         if self.settings.physics_fixes() & PHYSICS_FIX_GAME_ENTITIES != 0 {
             match (self.ents[i].class.as_str(), input) {
@@ -2208,6 +2380,17 @@ impl Game {
                 ("player_weaponstrip", "strip" | "stripweaponsandsuit") => return self.strip_player(),
                 _ => {}
             }
+        }
+        // v16 (`PHYSICS_FIX_MAP_PLAYER_IO` maps): CBaseFilter::InputTestActivator fires OnPass or OnFail with the
+        // input's activator, by the same PassesFilter test triggers use, applied to that activator.
+        if input == "testactivator" && matches!(self.ents[i].data, Data::Filter { .. }) && self.player_io() {
+            let pass = match activator {
+                Actor::None => return,
+                Actor::Player => self.filter_entity_passes(i, &self.player_name, &self.player_class, 0),
+                Actor::Entity(j) => self.filter_entity_passes(i, &self.ents[j].name, &self.ents[j].class, 0),
+            };
+            self.fire_output(i, if pass { "onpass" } else { "onfail" }, activator);
+            return;
         }
         // Inputs every entity accepts.
         match input {
@@ -2724,23 +2907,34 @@ impl Game {
     }
 
     fn passes_filter(&self, filter: Option<&str>, depth: u32) -> bool {
-        let Some(name) = filter else { return true };
+        self.passes_filter_as(filter, &self.player_name, &self.player_class, depth)
+    }
+
+    /// `passes_filter` for an entity with targetname `name` and classname `class` (the player, or a TestActivator
+    /// activator).
+    fn passes_filter_as(&self, filter: Option<&str>, name: &str, class: &str, depth: u32) -> bool {
+        let Some(filter) = filter else { return true };
         if depth > 8 {
             return true;
         }
         let Some(f) = self
             .ents
             .iter()
-            .find(|e| !e.removed && matches!(e.data, Data::Filter { .. }) && name_matches(name, &e.name))
+            .position(|e| !e.removed && matches!(e.data, Data::Filter { .. }) && name_matches(filter, &e.name))
         else {
             return true; // unresolved filter: m_hFilter is NULL, so everything passes
         };
-        let Data::Filter { kind, negated } = &f.data else { unreachable!() };
+        self.filter_entity_passes(f, name, class, depth)
+    }
+
+    /// CBaseFilter::PassesFilter of filter entity `f` for an entity named `name` of class `class`.
+    fn filter_entity_passes(&self, f: usize, name: &str, class: &str, depth: u32) -> bool {
+        let Data::Filter { kind, negated } = &self.ents[f].data else { return true };
         let pass = match kind {
-            FilterKind::Name(n) => name_matches(n, &self.player_name),
-            FilterKind::Class(c) => name_matches(c, &self.player_class),
+            FilterKind::Name(n) => name_matches(n, name),
+            FilterKind::Class(c) => name_matches(c, class),
             FilterKind::Multi { all, filters } => {
-                let mut results = filters.iter().map(|n| self.passes_filter(Some(n), depth + 1));
+                let mut results = filters.iter().map(|n| self.passes_filter_as(Some(n), name, class, depth + 1));
                 if *all { results.all(|r| r) } else { results.any(|r| r) }
             }
             FilterKind::PassAll | FilterKind::DamageType { .. } => true,
@@ -2807,14 +3001,22 @@ impl Game {
     /// that were not refreshed happens at the end of the frame (`untouch_triggers`). Returns true if the player
     /// died.
     fn touch_triggers_at(&mut self) -> bool {
-        let hull = self.current_hull();
-        let position = self.state.position;
+        self.touch_triggers_in(self.state.position, self.current_hull(), false)
+    }
+
+    /// The touch pass of `touch_triggers_at` for the triggers overlapping `hull` at `position`; with `new_only`, only
+    /// the ones the player has no touch link with yet (RNGFix trigger jumping's `MarkEntitiesAsTouching`, which skips
+    /// triggers between StartTouch and EndTouch). Returns true if the player died.
+    fn touch_triggers_in(&mut self, position: [f32; 3], hull: Hull, new_only: bool) -> bool {
         let map_boxes: &[(usize, physics::ConvexBrush)] =
             if self.settings.physics_fixes() & PHYSICS_FIX_MAP_TRIGGERS != 0 { &self.map_trigger_boxes } else { &[] };
         let mut list = Vec::new();
         for k in 0..self.triggers.len() {
             let i = self.triggers[k];
             let Data::Trigger(t) = &self.ents[i].data else { continue };
+            if new_only && t.linked {
+                continue;
+            }
             let e = &self.ents[i];
             // v8 per-map fix: the box replaces the brush (`game/map_fixes.rs`).
             let map_box = map_boxes.iter().find(|(j, _)| *j == i).map(|(_, b)| b);
@@ -2862,6 +3064,10 @@ impl Game {
                         self.auto_movement_disabled |= no_auto_movement;
                     }
                     self.fire_output(i, "onstarttouch", Actor::Player);
+                    // v16 NONLINEAR_OBJECTIVES maps: the script's ConnectOutput("OnStartTouch", ...) action.
+                    if !self.script_triggers.is_empty() {
+                        self.script_start_touch(i);
+                    }
                     self.fire_output(i, "onstarttouchall", Actor::Player);
                 }
             }
@@ -2890,7 +3096,10 @@ impl Game {
                     }
                 }
                 TriggerKind::Teleport { .. } => {
-                    self.teleport_through(i);
+                    // v17: RNGFix counts the teleports a trigger_teleport's Touch makes (`Hook_TriggerTeleportTouchPost`).
+                    if self.teleport_through(i) && self.settings.physics_fixes() & PHYSICS_FIX_TELEHOP != 0 {
+                        self.events |= EVENT_MAP_TELEPORT;
+                    }
                 }
                 TriggerKind::Push { dir, speed, once } => {
                     // CTriggerPush stores pushdir in entity space and rotates it back by the
@@ -2945,6 +3154,75 @@ impl Game {
             }
         }
         false
+    }
+
+    /// RNGFix "Trigger Jumping" (`PHYSICS_FIX_TRIGGER_JUMP`, rngfix.sp `Hook_PlayerPostThink` / `DoTriggerjumpFix`), after
+    /// the touch pass of a tick that started in the air. If the player is on the ground now, the 2-unit ground probe
+    /// may have landed them with their feet up to 2 units above it: triggers in that gap (the hull's footprint, or the
+    /// quadrant that found the ground, from the ground up to the feet) that the player has no touch link with get
+    /// StartTouch and Touch, as if the hull reached the ground. A thin booster or teleport on the floor (less than
+    /// 2 units tall) otherwise fires only when the landing happens to end low enough.
+    fn trigger_jump_fix(&mut self) {
+        if self.state.ground.is_none() || self.state.mode != movement::Mode::Walk || self.state.water_level > 1 {
+            return;
+        }
+        let origin = self.state.position;
+        let below = [origin[0], origin[1], origin[2] - self.config.ground_probe];
+        let mask = self.config.solid_mask;
+        let scene = self.scene(self.tick as f32 * self.settings.tick_interval);
+        let trace = |hull: Hull| scene.trace_filtered(origin, below, hull, mask, &[]).ok();
+        let hit = |t: &Trace| t.fraction < 1.0 || t.start_solid || t.all_solid;
+        let standable = |t: &Trace| t.normal.is_some_and(|n| n[2] >= self.config.standable_normal);
+        let hull = self.current_hull();
+        let Some(full) = trace(hull).filter(hit) else { return };
+        // The ground the player officially landed on: the full hull, else TracePlayerBBoxForGround's quadrants.
+        let landing = if standable(&full) {
+            Some((hull, full))
+        } else {
+            let (lo, hi) = (hull.mins, hull.maxs);
+            [
+                Hull { mins: lo, maxs: [hi[0].min(0.0), hi[1].min(0.0), hi[2]] },
+                Hull { mins: [lo[0].max(0.0), lo[1].max(0.0), lo[2]], maxs: hi },
+                Hull { mins: [lo[0], lo[1].max(0.0), lo[2]], maxs: [hi[0].min(0.0), hi[1], hi[2]] },
+                Hull { mins: [lo[0].max(0.0), lo[1], lo[2]], maxs: [hi[0], hi[1].min(0.0), hi[2]] },
+            ]
+            .into_iter()
+            .find_map(|q| trace(q).filter(|t| hit(t) && standable(t)).map(|t| (q, t)))
+        };
+        drop(scene);
+        let Some((landing_hull, ground)) = landing else { return };
+        if ground.fraction <= 0.0 {
+            return;
+        }
+        // The gap between the ground and the feet.
+        let point = ground.end;
+        let gap = Hull { mins: landing_hull.mins, maxs: [landing_hull.maxs[0], landing_hull.maxs[1], origin[2] - point[2]] };
+        self.touch_triggers_in(point, gap, true);
+    }
+
+    /// RNGFix "Telehops" (`PHYSICS_FIX_TELEHOP`, rngfix.sp `DoTelehopFix`): a trigger_teleport moved the player this tick
+    /// (`EVENT_MAP_TELEPORT`), not also on the tick before (a speed-stopping teleport hub), and this tick's airborne move
+    /// collided with something or landed: the player gets the velocity the move started with (`air_move`: after
+    /// gravity, jump and air acceleration; base velocity excluded) plus the second half of gravity, as if the teleport
+    /// had happened before the collision. The trigger touch comes after the whole move in Source, so passing through a
+    /// thin stage-end teleport against a wall (or a floor) otherwise keeps or loses the speed by sub-tick luck.
+    fn telehop_fix(&mut self, air_move: Option<([f32; 3], bool)>, map_teleported_last_tick: bool, config: Configuration) {
+        let Some((velocity, collided)) = air_move else { return };
+        let landed = self.events & EVENT_LANDED != 0;
+        if self.events & EVENT_MAP_TELEPORT == 0 || map_teleported_last_tick || !(collided || landed) {
+            return;
+        }
+        // A teleport that stops the player (`teleport_keeps_velocity` off, never in Source) has nothing to restore.
+        if !self.rules.teleport_keeps_velocity {
+            return;
+        }
+        let mut v = velocity;
+        // FinishGravity (m_flGravity, 0 = 1, times sv_gravity, half a frame) and CheckVelocity.
+        v[2] -= config.gravity * config.gravity_scale * 0.5 * config.tick_interval * config.lagged_movement_scale;
+        for k in &mut v {
+            *k = k.clamp(-config.maximum_velocity, config.maximum_velocity);
+        }
+        self.state.velocity = v;
     }
 
     /// End of the server frame (PhysicsCheckForEntityUntouch): trigger links not touched this frame end, on the

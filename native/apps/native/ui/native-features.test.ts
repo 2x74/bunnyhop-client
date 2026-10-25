@@ -8,10 +8,13 @@ test("offline menu routes styles, native settings, replay controls, tutorials an
  await page.route("**/*",route=>route.request().url()==="https://bunnyhop.lol/native-features-unit"?route.fulfill({status:200,contentType:"text/html",body:html}):route.abort());
  await page.addInitScript(()=>{(window as unknown as {messages:unknown[]}).messages=[];window.addEventListener("bunnyhop:native-message",event=>(window as unknown as {messages:unknown[]}).messages.push((event as CustomEvent).detail));});
  await page.goto("https://bunnyhop.lol/native-features-unit",{waitUntil:"domcontentloaded"});
- expect(await page.locator("select.native-style option").count()).toBe(8);
- await page.locator("select.native-style").selectOption("lowgrav");
+ // Styles: the web pause screen's Style tab, one row per style.
+ await page.evaluate(()=>window.bunnyhopNativeMenu.onState({map:"bhop_eazy",paused:true}));await page.getByRole("tab",{name:"Style"}).click();
+ expect(await page.locator(".style-list .style-row").count()).toBe(8);
+ await page.locator('.style-row[data-style="lowgrav"]').click();
  expect(await page.evaluate(()=>(window as unknown as {messages:unknown[]}).messages.at(-1))).toEqual({type:"style",id:"lowgrav"});
- await page.evaluate(()=>window.bunnyhopNativeMenu.onState({style:"sideways"}));expect(await page.locator("select.native-style").inputValue()).toBe("sideways");
+ await page.evaluate(()=>window.bunnyhopNativeMenu.onState({style:"sideways"}));expect(await page.locator('.style-row[data-style="sideways"]').getAttribute("aria-checked")).toBe("true");
+ await page.evaluate(()=>window.bunnyhopNativeMenu.onState({map:""}));
  await page.getByRole("button",{name:"Settings",exact:true}).click();await page.getByLabel("Field of view",{exact:true}).fill("110");await page.getByLabel("Field of view",{exact:true}).blur();
  expect(await page.evaluate(()=>(window as unknown as {messages:unknown[]}).messages.at(-1))).toEqual({type:"settings",patch:{fov:110}});
  await page.getByRole("button",{name:"Back",exact:true}).click();await page.getByRole("button",{name:"Replays",exact:true}).click();
@@ -20,8 +23,8 @@ test("offline menu routes styles, native settings, replay controls, tutorials an
  await page.getByRole("button",{name:"Pause",exact:true}).click();expect(await page.evaluate(()=>(window as unknown as {messages:unknown[]}).messages.at(-1))).toEqual({type:"replayControl",action:"pause",paused:true});
  await page.getByLabel("Replay speed").selectOption("2");expect(await page.evaluate(()=>(window as unknown as {messages:unknown[]}).messages.at(-1))).toEqual({type:"replayControl",action:"speed",speed:2});
  await page.getByRole("button",{name:"Delete",exact:true}).click();expect(await page.getByRole("dialog",{name:"Delete replay"}).isVisible()).toBe(true);await page.getByRole("button",{name:"Delete replay",exact:true}).click();expect(await page.evaluate(()=>(window as unknown as {messages:unknown[]}).messages.at(-1))).toEqual({type:"replay",action:"delete",id:"test-replay",confirmed:true});
- await page.getByRole("button",{name:"Back",exact:true}).click();await page.getByRole("button",{name:"Tutorial",exact:true}).click();await page.getByRole("button",{name:"Start lesson",exact:true}).nth(2).click();expect(await page.evaluate(()=>(window as unknown as {messages:unknown[]}).messages.at(-1))).toEqual({type:"tutorial",action:"start",lesson:"speed"});
- await page.getByRole("button",{name:"Back",exact:true}).click();await page.getByRole("button",{name:"Loadout",exact:true}).click();await page.getByLabel("Cosmetic category").selectOption("outfit");await page.locator(".native-cosmetic-card").first().click();
+ await page.getByRole("button",{name:"Back",exact:true}).click();await page.getByRole("button",{name:"Learn to bhop",exact:true}).click();await page.getByRole("button",{name:"Start lesson",exact:true}).nth(2).click();expect(await page.evaluate(()=>(window as unknown as {messages:unknown[]}).messages.at(-1))).toEqual({type:"tutorial",action:"start",lesson:"speed"});
+ await page.getByRole("button",{name:"Back",exact:true}).click();await page.getByRole("button",{name:"Profile",exact:true}).click();await page.getByLabel("Cosmetic category").selectOption("outfit");await page.locator(".native-cosmetic-card").first().click();
  await page.waitForFunction(()=>(window as unknown as {messages:{type:string}[]}).messages.some(message=>message.type==="cosmetics"));
  const graphics=await page.evaluate(()=>({gl:window.__nativeMenuGraphics,canvases:document.querySelectorAll("canvas").length}));expect(graphics).toEqual({gl:{contexts:0,attempts:0},canvases:0});expect(errors).toEqual([]);
  await page.getByRole("button",{name:"Back",exact:true}).click();await page.screenshot({path:resolve(import.meta.dir,"../../../target/native-menu/menu-features-offline.png")});

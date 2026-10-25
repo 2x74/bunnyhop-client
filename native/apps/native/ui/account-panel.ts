@@ -68,3 +68,13 @@ export function openAccountPanel(section: AccountSection = null): void {
     body.replaceChildren(...parts);
   }
 }
+
+/** The web dialog shell (ui/account-panel.ts modal), for the Inbox and Feedback dialogs the home screen opens. */
+export function modal(cls: string, label: string, onClose?: () => void): HTMLDialogElement {
+  const d = h("dialog", { class: cls, "aria-label": label }) as HTMLDialogElement;
+  d.addEventListener("keydown", (e) => e.stopPropagation());
+  dismissOutside(d, () => d.close());
+  d.addEventListener("close", () => { d.remove(); onClose?.(); });
+  document.body.append(d);
+  return d;
+}

@@ -41,7 +41,7 @@
 #hud .hud-el.off:has(.chat-open) { display: block; }
 
 /* ------------------------------------------------------------------ numbered menu (votes, spectate, nominate) */
-#mp-menu { left: 1.2rem; top: 50%; transform: translateY(-50%); min-width: 17rem; max-width: 26rem; font-size: calc(0.92rem * var(--hs, 1)); padding: 0.7em 0.9em; background: rgba(10, 12, 16, 0.78); border: 1px solid rgba(255, 255, 255, 0.1); border-left: 3px solid var(--accent); border-radius: 0.5em; text-shadow: none; }
+#mp-menu { left: 1.2rem; top: 50%; transform: translateY(-50%); min-width: calc(17rem * var(--hs, 1)); max-width: min(calc(26rem * var(--hs, 1)), 90vw); font-size: calc(0.92rem * var(--hs, 1)); padding: 0.7em 0.9em; background: rgba(10, 12, 16, 0.78); border: 1px solid rgba(255, 255, 255, 0.1); border-left: 3px solid var(--accent); border-radius: 0.5em; text-shadow: none; }
 .mm-title { font-weight: 800; color: var(--accent); margin-bottom: 0.45em; }
 .mm-item { display: flex; align-items: baseline; gap: 0.5em; padding: 0.12em 0.2em; border-radius: 0.3em; }
 .mm-item.sel { background: rgba(255, 180, 58, 0.18); }
@@ -56,7 +56,7 @@
 #mp-menu { top: 40%; }
 
 /* ------------------------------------------------------------------ scoreboard (hold Tab) */
-#mp-scoreboard { left: 50%; top: 12vh; transform: translateX(-50%); width: min(52rem, 92vw); max-height: 76vh; overflow: auto; font-size: calc(0.9rem * var(--hs, 1)); padding: 1em 1.2em; background: rgba(10, 12, 16, 0.86); border: 1px solid var(--line-2); border-radius: var(--radius); box-shadow: var(--shadow); text-shadow: none; }
+#mp-scoreboard { left: 50%; top: 12vh; transform: translateX(-50%); width: min(calc(52rem * var(--hs, 1)), 92vw); max-height: 76vh; overflow: auto; font-size: calc(0.9rem * var(--hs, 1)); padding: 1em 1.2em; background: rgba(10, 12, 16, 0.86); border: 1px solid var(--line-2); border-radius: var(--radius); box-shadow: var(--shadow); text-shadow: none; }
 .sb-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1em; flex-wrap: wrap; padding-bottom: 0.6em; border-bottom: 1px solid var(--line); margin-bottom: 0.4em; }
 .sb-room b { font-size: 1.1em; }
 .sb-map { display: flex; align-items: baseline; gap: 0.4em; }

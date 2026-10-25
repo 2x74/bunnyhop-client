@@ -75,7 +75,7 @@ struct MenuWebView::Impl {
     std::shared_ptr<State> state=std::make_shared<State>();
     HWND window=nullptr,auth_window=nullptr;ComPtr<ICoreWebView2Environment> environment;
     ComPtr<ICoreWebView2Controller> controller,auth_controller;ComPtr<ICoreWebView2> menu,auth;
-    bool shown=false,initial_navigation=true,served=false,com_initialized=false,failed=false;
+    bool backdrop=false,shown=false,initial_navigation=true,served=false,com_initialized=false,failed=false;
     uint64_t auth_generation=0;std::string html;
     static LRESULT CALLBACK host_proc(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR data){auto *self=reinterpret_cast<Impl*>(data);
         if(msg==WM_SIZE&&self->controller){RECT bounds;GetClientRect(h,&bounds);self->controller->put_Bounds(bounds);}
@@ -120,6 +120,10 @@ struct MenuWebView::Impl {
         if(!menu&&!failed){failed=true;state->fail("WebView2 startup timed out");}
     }
     void configure(){
+        // WebView2 alpha reveals the native OpenGL child surface. CSS remains
+        // opaque until the client explicitly enables the scene presentation.
+        ComPtr<ICoreWebView2Controller2> alpha;
+        if(SUCCEEDED(controller.As(&alpha)))backdrop=SUCCEEDED(alpha->put_DefaultBackgroundColor(COREWEBVIEW2_COLOR{0,0,0,0}));
         restrict_webview(menu.Get(),true);RECT r;GetClientRect(window,&r);controller->put_Bounds(r);controller->put_IsVisible(FALSE);
         const auto life=state;EventRegistrationToken token{};
         menu->add_NavigationStarting(Callback<ICoreWebView2NavigationStartingEventHandler>([life](ICoreWebView2*,ICoreWebView2NavigationStartingEventArgs*a)->HRESULT{
@@ -197,6 +201,7 @@ struct MenuWebView::Impl {
 MenuWebView::MenuWebView(SDL_Window *window,const std::string &html):impl_(std::make_unique<Impl>(window,html)){}
 MenuWebView::~MenuWebView()=default;
 bool MenuWebView::available()const{return impl_->menu&&!impl_->failed;}
+bool MenuWebView::supports_backdrop()const{return available()&&impl_->backdrop;}
 const std::string &MenuWebView::error()const{return impl_->state->error;}
 bool MenuWebView::visible()const{return impl_->shown;}
 void MenuWebView::set_visible(bool visible){if(!available())return;impl_->shown=visible;impl_->controller->put_IsVisible(visible);if(impl_->auth_window)ShowWindow(impl_->auth_window,visible?SW_SHOW:SW_HIDE);if(visible)(impl_->auth_controller?impl_->auth_controller:impl_->controller)->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);else SetFocus(impl_->window);}

@@ -1,7 +1,7 @@
 // Account/network transport only. Native code owns ticks, command hashes,
 // heartbeat cadence, replay bytes and the local replay archive. This module
 // never owns the gameplay clock, simulation, WebGL context or WASM verifier.
-import type { Submission, RequestDispatch } from "../../web/src/api";
+import type { Submission, RequestDispatch, GauntletSplitResult } from "../../web/src/api";
 import { isStyleId, type StyleId } from "../../web/src/styles";
 
 interface Identity { map: string; track: number; style: StyleId; build: string; wasm: string }
@@ -15,11 +15,17 @@ export interface RunServiceStatus {
   status: "reset" | "beat" | "gap" | "checking" | "uploading" | "pending" | "verified" | "rejected" | "error" | "kept";
   message?: string; id?: string; progress?: number; rank?: number; time?: number;
   code?: string; pb?: boolean; beats?: number; gaps?: number; local?: boolean;
+  /** POST /runs?gauntlet=: whether the run became the attempt's split (gauntlet-native.ts). */
+  gauntlet?: GauntletSplitResult;
+  /** A gauntlet candidate that couldn't reach the server: kept and sent again (web gauntlet/mode.ts "held"). */
+  held?: boolean;
 }
+/** Where a finished run is submitted for: a room, a race, a gauntlet attempt (?gauntlet=). */
+export interface RunContext {room?:string|null;race?:string|null;gauntlet?:string|null}
 interface BeatBody { sid: string | null; map: string; track: number; style: string; tick: number; hash: string; paused: boolean }
 export interface RunApi {
   runBeat(body: BeatBody, dispatch?: RequestDispatch): Promise<{sid: string; token: string}>;
-  submitRun(bytes: Uint8Array, options: {beats: string[];room?:string|null;race?:string|null;dispatch?:RequestDispatch}): Promise<Submission>;
+  submitRun(bytes: Uint8Array, options: {beats: string[];room?:string|null;race?:string|null;gauntlet?:string|null;dispatch?:RequestDispatch}): Promise<Submission>;
   submission(id: string): Promise<Submission>;
 }
 export interface VersionPolicy { wasm?: unknown; native?: unknown }
@@ -32,7 +38,15 @@ export interface RunServiceDependencies {
   sleep?: (ms: number) => Promise<void>;
   pollLimitMs?: number;
   pollDelayMs?: number;
-  context?:(identity:Identity)=>{room?:string|null;race?:string|null};
+  /** Called once per finished run, with its generation: a gauntlet tag is spent here. */
+  context?:(identity:Identity,generation:number)=>RunContext;
+  /**
+   * A gauntlet candidate's upload failed for the connection: whether to send it again (the attempt and its map are
+   * still the ones being played, and this generation is still their candidate). Without it, nothing is resent.
+   */
+  holdGauntlet?:(attempt:string,generation:number)=>boolean;
+  /** Between gauntlet resends (web gauntlet/state.ts RETRY_MS), and how many before it's given up (the grace period). */
+  gauntletRetryMs?:number;gauntletRetries?:number;
   /** Confirmed account only; stale/offline identity must return null. */
   account?: () => Promise<string | null>;
 }
@@ -44,6 +58,13 @@ interface Session {
 }
 
 const MAX_BEATS = 7500, MAX_REPLAY_BYTES = 8 << 20;
+/** The web's RETRY_MS, and its 10-minute grace period (state.ts GRACE_MS) in resends. */
+const GAUNTLET_RETRY_MS = 10_000, GAUNTLET_RETRIES = 60;
+/** A refusal a resend can't change (a 4xx other than a timeout / rate limit): never retried. */
+const definiteRefusal = (error: unknown): boolean => {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === "number" && status >= 400 && status < 500 && status !== 408 && status !== 429;
+};
 const LIVE_ORIGIN = "https://bunnyhop.lol";
 const identityKeys = ["map","track","style","build","wasm"] as const;
 const timeoutError = () => new Error("Native run service request timed out");
@@ -226,7 +247,7 @@ export class NativeRunService {
   }
   private async finish(session: Session,base64: unknown): Promise<void> {
     const event=session.identity!;
-    const context=this.dependencies.context?.(event);
+    const context=this.dependencies.context?.(event,session.generation);
     if(this.dependencies.account && await this.ownsAccount(session)===null) return;
     if(typeof base64!=="string") {this.kept(session,"No replay bytes were supplied.");return;}
     let bytes: Uint8Array;
@@ -249,8 +270,29 @@ export class NativeRunService {
       }
     }
     let result: Submission;
-    try {result=await bounded(this.dependencies.api.submitRun(bytes,{beats:tokens,...context,...(this.dependencies.account?{dispatch:this.accountDispatch(session,true)}:{})}),20_000);}
-    catch {if(!session.accountBlocked)this.kept(session,"The replay could not reach the server.");return;}
+    // A gauntlet candidate is the attempt's split on this map until the server has it (web gauntlet/mode.ts): an upload
+    // that fails for the connection is sent again, the same bytes, beats and attempt, under the same account checks,
+    // every GAUNTLET_RETRY_MS while holdGauntlet says it's still wanted, for up to the attempt's grace period.
+    for(let tries=0;;tries++) {
+      try {result=await bounded(this.dependencies.api.submitRun(bytes,{beats:tokens,...context,...(this.dependencies.account?{dispatch:this.accountDispatch(session,true)}:{})}),20_000);break;}
+      catch(error) {
+        if(session.accountBlocked||!this.active(session)) return;
+        const attempt=context?.gauntlet;
+        const hold=!!attempt&&!definiteRefusal(error)&&tries<(this.dependencies.gauntletRetries??GAUNTLET_RETRIES)&&!!this.dependencies.holdGauntlet?.(attempt,session.generation);
+        if(!hold) {this.kept(session,"The replay could not reach the server.");return;}
+        this.status(session,"uploading",{message:"No connection. This run counts once it uploads.",held:true,beats:tokens.length,gaps});
+        await this.sleep(this.dependencies.gauntletRetryMs??GAUNTLET_RETRY_MS);
+        if(!this.active(session)||session.accountBlocked) return;
+        if(!this.dependencies.holdGauntlet?.(attempt,session.generation)) {this.kept(session,"The gauntlet moved on before this run could upload.");return;}
+        if(this.dependencies.account) {
+          for(;;) {
+            const revision=await this.ownsAccount(session);
+            if(revision===null) return;
+            if(revision===this.accountRevision) break;
+          }
+        }
+      }
+    }
     if(!this.active(session)) return;
     this.verdict(session,result);
     const deadline=this.now()+this.pollLimit;
@@ -268,6 +310,6 @@ export class NativeRunService {
   }
   private verdict(session: Session,result: Submission): void {
     const status=result.status==="queued"||result.status==="verifying"?"pending":result.status;
-    this.status(session,status,{id:result.id,progress:result.progress,rank:result.rank,time:result.time,pb:result.pb,code:result.code,message:result.reason});
+    this.status(session,status,{id:result.id,progress:result.progress,rank:result.rank,time:result.time,pb:result.pb,code:result.code,message:result.reason,...(result.gauntlet?{gauntlet:result.gauntlet}:{})});
   }
 }

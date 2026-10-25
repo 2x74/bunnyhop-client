@@ -93,9 +93,11 @@ export const DEFAULT_BINDS: Record<BindAction, string[]> = {
   measurePoint: [],
   clearMeasure: [],
   lastLj: [],
-  // Practice mode (practice-mode/). The toggle is in the pause menu, so it starts unbound. Its tools only act while it's
-  // on (elsewhere their keys fall through: the tutorial's X, the dev zone editor's Z). Z / X / C sit together under
-  // the movement keys; the arrows turn the view like CS:S's default +left / +right binds.
+  // Practice (practice-mode/). Practice mode's toggle is in the pause menu, so it starts unbound. The tools work in any
+  // solo attempt (a teleport or noclip makes it practice), but during a real timed run X / Z only act while the !cp
+  // menu is open (rules.ts practiceKeyGate); C always saves. Where the tools can't work, their keys fall through (the
+  // tutorial's X; the dev zone editor's Z while practice mode is off). Z / X / C sit together under the movement keys; the arrows
+  // turn the view like CS:S's default +left / +right binds.
   practice: [],
   noclip: ["KeyZ"],
   cpSave: ["KeyC"],

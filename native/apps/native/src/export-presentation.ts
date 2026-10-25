@@ -3,6 +3,7 @@ import { SFX } from "../../web/src/audio/catalog";
 import { gunById } from "../../web/src/viewmodel/guns/index";
 import { mkdir, readFile, writeFile, stat, readdir, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { exportMusic } from "./export-music";
 const root=resolve(import.meta.dir,"../../..");
 const out=resolve(Bun.argv[2]??join(root,"target/native-assets"));
 await mkdir(join(out,"audio"),{recursive:true});
@@ -40,8 +41,9 @@ await Promise.all(Array.from({length:4},async()=>{
 }));
 const weaponIds=["","knife","glock","usp","p228","deagle","elite","fiveseven","m3","xm1014","mac10","tmp","mp5navy","ump45","p90","galil","famas","ak47","m4a1","sg552","aug","scout","awp","g3sg1","sg550","m249"];
 manifest.mix=Object.fromEntries(Object.entries(SFX).filter(([id])=>!omittedCues.has(id)));manifest.guns=weaponIds.map(id=>gunById(id)?.sounds??null);
+exportMusic(out,manifest.music);
 await writeFile(join(out,"audio.json"),JSON.stringify(manifest));
-console.log(`Native presentation assets: 95 font glyphs, ${tasks.length} sound variants`);
+console.log(`Native presentation assets: 95 font glyphs, ${tasks.length} sound variants, ${manifest.music.length} bundled OST tracks`);
 
 // Keep lesson geometry, BSP identity and original deterministic demonstration recordings together.
 const tutorial=JSON.parse(await readFile(join(root,"maps/bhop_lol_tutorial.tutorial.json"),"utf8"));

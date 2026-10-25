@@ -137,6 +137,28 @@ pub struct MovementFixes {
     /// of creasing into it, and an airborne move that ends embedded (float error on ramp
     /// seams) is pushed out along the plane normal instead of zeroing velocity.
     pub rampbug: bool,
+    /// RNGFix's incline fixes as the plugin implements them (jason-e/rngfix `RunPreTickChecks` "Uphill Incline" and
+    /// `DoInclineCollisionFixes`). Uphill: when this tick's airborne move would first hit a walkable incline
+    /// (0.7 <= normal z < 1) while moving into it (normal xy . velocity xy < 0) with vz <= 140, and clipping on it
+    /// would not give more horizontal speed (that case is left to the downhill fix), the move starts from
+    /// `collision point - velocity * tick + 0.1 up` instead (`PreventCollision`): it ends just above the contact
+    /// without touching the slope, and the 2-unit ground probe lands the player with the full horizontal speed.
+    /// Downhill (with `downhill`): the landing clip uses the velocity plus the base velocity of the move and is
+    /// skipped when the move hit anything (the plugin's "collision predicted this tick").
+    pub rngfix_incline: bool,
+    /// RNGFix "Edge Bugs": when this tick's airborne move would first hit walkable ground with vz <= 140 and the rest
+    /// of the tick (sliding along it after the clip) would end with no ground within 2 units below, the move starts
+    /// from `collision point - velocity * tick + 0.1 up` instead, so the player lands on the edge and can jump.
+    pub rngfix_edge: bool,
+}
+
+/// bunnyhop patch: which RNGFix pre-move fix moved the start of this tick's move (`StepResult::prevented_collision`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreventedCollision {
+    /// `MovementFixes::rngfix_incline` (RNGFix "Uphill Incline").
+    Uphill,
+    /// `MovementFixes::rngfix_edge` (RNGFix "Edge Bug").
+    Edge,
 }
 
 impl Default for Configuration {
@@ -1037,6 +1059,16 @@ pub struct StepResult {
     pub queries: Vec<QueryRecord>,
     pub point_queries: Vec<PointQueryRecord>,
     pub mover_result: Option<MoverResult>,
+    /// bunnyhop patch: the player's own velocity (base velocity excluded) entering this tick's airborne
+    /// TryPlayerMove, after gravity, jump and air acceleration: RNGFix's `g_vPreCollisionVelocity` minus the base
+    /// velocity. `None` when the tick moved on the ground (or swam, climbed, ...): RNGFix predicts only airborne moves.
+    pub air_move_velocity: Option<[f32; 3]>,
+    /// bunnyhop patch: this tick's airborne move hit something (its first trace stopped short): RNGFix's
+    /// "collision predicted this tick" (`g_iLastCollisionTick`).
+    pub move_collided: bool,
+    /// bunnyhop patch: an RNGFix pre-move fix moved the start of this tick's move (`MovementFixes::rngfix_incline` /
+    /// `rngfix_edge`).
+    pub prevented_collision: Option<PreventedCollision>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

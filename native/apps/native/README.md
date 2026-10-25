@@ -13,6 +13,13 @@ retains its native renderer and input. Windows uses WebView2 for menus and a
 separate authentication view, with SDL still owning gameplay. There is no Electron dependency in this
 client. The legacy Electron client remains at the repository root.
 
+The home menu follows the website's layout and shared styles: navigation and
+account controls on the left, six suggested maps on the right, and the featured
+map behind them. Native OpenGL renders the map tour; macOS and Windows can
+composite the menu over it, while GTK uses a bounded capture. Reduced-motion
+preferences keep the camera still. The same map's artwork appears while loading
+or if the native backdrop is unavailable, without a web gameplay renderer.
+
 macOS ARM64 has been built and smoke-tested. Linux x64 and Windows x64 are
 automated build targets, with execution and physical input validation reported
 separately in the [release notes](https://github.com/2x74/bunnyhop-client/releases).
@@ -20,8 +27,8 @@ See the repository [release process](../../../docs/releases.md).
 
 ## Current compatibility
 
-This source targets physics 15, timer rules 2 and verifier
-`bunnyhop-web/3cca0f22a3c3`. See [qualification notes](../../../docs/current-compatibility.md)
+This source targets production v0.0.27, physics 17, timer rules 2 and verifier
+`bunnyhop-web/35dac92ea33c`. See [qualification notes](../../../docs/current-compatibility.md)
 for scope, test evidence and remaining live-score requirements.
 
 ## Build and play
@@ -86,17 +93,19 @@ current server WASM/physics/timer rules enables ranked upload. A local, stale,
 unknown or expired release keeps the replay on disk. Sign in through the menu
 to use an existing account; it does not import another browser's cookies.
 
-SDL motion reports are queued by their event timestamps and consumed at native
-tick boundaries. Slow-frame catch-up no longer assigns the last polled angle to
-the first tick. Rendering previews pending motion without advancing the recording.
-Focus/menu/restart transitions discard stale queued motion; teleports rebase the
-view while preserving later reports. Keyboard/button timing is unchanged.
+Mouse motion is accumulated at each SDL poll and prorated across simulation
+ticks by elapsed time. Device event timestamps are not used. Rendering previews
+pending motion without advancing the recording; focus/menu/restart transitions
+discard pending input and reset the simulation clock baseline. Keyboard/button
+state is read when SDL polls it.
 
-Integer SDL mouse counts produce the existing counted-yaw replay telemetry.
-Fractional trackpad deltas remain exact and use the uncounted format rather than
-being rounded into mouse counts. Native playback supports BHR versions 1–10, including fractional counted yaw
-and manual-turn provenance from current web replays. Native recording retains its
-existing honest counted/uncounted formats, including loadout and inspect events. The native client
+Integer mouse counts retain counted-yaw telemetry. Fractional reports preserve
+their precision through proration and recording. Playback supports BHR versions
+1–10; recording uses the shared counted/uncounted formats, including fractional
+manual-turn provenance when needed, loadout and inspect events. Turn binds at
+210°/s preserve the server-supported provenance; other configured speeds keep the
+attempt local-only with its BHR archive. Legit Scroll prohibits turn binds outside
+practice. The native client
 does not yet run a client-side WASM self-check. Server verification and signed
 heartbeats remain enabled. Recordings are currently capped at 180,000 commands
 (about 30 minutes); longer recordings cannot upload. Press R for a new recording
@@ -116,7 +125,7 @@ replays can briefly stall the UI.
 
 ## Unsigned test releases
 
-The v0.0.1 preview is distributed from
+Preview builds are distributed from
 [2x74/bunnyhop-client Releases](https://github.com/2x74/bunnyhop-client/releases)
 under an unsigned preview policy. macOS bundles are
 ad-hoc sealed (`codesign --sign -`), without Developer ID or notarization.
@@ -124,9 +133,9 @@ Windows packages are unsigned unless signing is explicitly configured.
 Signing credentials are not a prerequisite for the default package command:
 
 ```sh
-bun run package --version 0.0.1
+bun run package --version 0.3.4
 bun apps/native/packaging/release-check.ts \
-  --package target/native-packages/bunnyhop-native-0.0.1-darwin-arm64
+  --package target/native-packages/bunnyhop-native-0.3.4-darwin-arm64
 ```
 
 Use the actual stage path printed by the packager for `--package`. It produces a
@@ -153,6 +162,9 @@ cargo test -p bunnyhop-native-bridge
 bun test apps/native/ui apps/native/packaging
 bun apps/native/src/tutorial_oracle.ts /tmp/native-tutorial-oracle.json
 apps/native/build/bunnyhop-native-tutorial-tests /tmp/native-tutorial-oracle.json
+apps/native/build/bunnyhop-native-menu-backdrop-smoke \
+  --map /path/to/bhop_eazy.bsp --out /tmp/bunnyhop-native-backdrop.png
+apps/native/build/bunnyhop-native --menu-home-smoke /tmp/bunnyhop-native-home
 apps/native/build/bunnyhop-native --online-map bhop_eazy --hidden \
   --menu-smoke /tmp/bunnyhop-native-menu
 ```
@@ -197,9 +209,16 @@ Web menus reuse the account API, map browser, leaderboards, friends/DMs,
 notifications, ranks/stats, cosmetics and room transport. Rooms relay poses to
 native interpolation/rendering and support chat, voting and scheduled map
 changes. Tutorial goals and coaching use a native port compared against the
-original web implementation. This is not a claim of complete website parity:
-full profile-card editing, supporter/gauntlet flows, complete third-person
-animation blending, animated accessories, full audio mixing/music, and in-app
+original web implementation. Practice checkpoints/noclip, sticky practice state,
+the Practice label and 50–175% HUD scaling are implemented in the native host.
+Gauntlets and player-report forms reuse the web UI. Main menu leaves the map,
+and the home backdrop can replay a PB on a separate native context or tour a map.
+All eleven production OST tracks are bundled, with native pause/previous/next
+controls and menu-track exclusion during gameplay.
+
+This is not a claim of complete website parity: full profile-card editing,
+supporter checkout, complete third-person animation blending, animated
+accessories, browser-style music crossfades/ducking, and in-app
 updates remain follow-up work. Ghost/trail cosmetic selectors currently update
 account choices; those visual effects are not rendered natively.
 

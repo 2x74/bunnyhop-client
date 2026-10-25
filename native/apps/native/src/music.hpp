@@ -38,9 +38,9 @@ class Music {
     std::size_t cursor = 0;
     std::atomic_bool exhausted{false};
     std::future<Loaded> loading;
-    std::string playing_title, status_text;
+    std::string playing_title, playing_role, status_text;
     float volume = 0.65f, level = 0.55f;
-    bool muted = false, enabled = false;
+    bool muted = false, enabled = false, held = false, gameplay = false;
 
     static void SDLCALL callback(void *data, SDL_AudioStream *stream, int needed, int) {
         auto &self = *static_cast<Music *>(data);
@@ -66,6 +66,11 @@ class Music {
         if (stream) SDL_SetAudioStreamGain(stream, muted ? 0.0f : std::clamp(volume * level, 0.0f, 1.0f));
     }
 
+    void resume_allowed() {
+        if (stream && enabled && !held && !playing.samples.empty() && !(gameplay && playing_role == "menu"))
+            SDL_ResumeAudioStreamDevice(stream);
+    }
+
     bool open() {
         if (stream) return true;
         if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) { status_text = SDL_GetError(); return false; }
@@ -86,7 +91,8 @@ class Music {
             exhausted = true;  // a bad file must not stall the playlist on itself
             return;
         }
-        if (!open()) return;
+        if (!open()) { stop_playback(status_text); return; }
+        SDL_PauseAudioStreamDevice(stream);
         const SDL_AudioSpec spec{SDL_AUDIO_S16, loaded.audio.channels, loaded.audio.rate};
         SDL_LockAudioStream(stream);
         // Swapped rather than assigned so the outgoing track's buffer — tens of
@@ -97,20 +103,22 @@ class Music {
         exhausted = false;
         SDL_SetAudioStreamFormat(stream, &spec, nullptr);
         SDL_UnlockAudioStream(stream);
+        SDL_ClearAudioStream(stream);
         playing_title = loaded.track.title;
+        playing_role = loaded.track.role;
         status_text.clear();
         failures = 0;
-        SDL_ResumeAudioStreamDevice(stream);
+        resume_allowed();
     }
 
     // Starts decoding the first playable track at or after |at|. Tracks with no
     // file are skipped here rather than failing: that is what a manifest entry
     // whose audio this build does not bundle looks like.
-    void begin(std::size_t at) {
+    void begin(std::size_t at, bool backwards = false) {
         if (playlist.empty()) return;
         for (std::size_t step = 0; step < playlist.size(); ++step) {
-            const std::size_t candidate = (at + step) % playlist.size();
-            if (playlist[candidate].file.empty()) continue;
+            const std::size_t candidate = backwards ? (at + playlist.size() - step) % playlist.size() : (at + step) % playlist.size();
+            if (playlist[candidate].file.empty() || (gameplay && playlist[candidate].role == "menu")) continue;
             index = candidate;
             const MusicTrack track = playlist[index];
             loading = std::async(std::launch::async, [track] {
@@ -127,6 +135,7 @@ class Music {
         enabled = false;
         status_text = reason;
         playing_title.clear();
+        playing_role.clear();
         if (!stream) return;
         SDL_PauseAudioStreamDevice(stream);
     }
@@ -150,7 +159,7 @@ public:
     void set_playlist(std::vector<MusicTrack> tracks, const std::string &empty_reason) {
         const bool same = enabled && tracks.size() == playlist.size() &&
             std::equal(tracks.begin(), tracks.end(), playlist.begin(),
-                       [](const MusicTrack &a, const MusicTrack &b) { return a.id == b.id && a.file == b.file; });
+                       [](const MusicTrack &a, const MusicTrack &b) { return a.id == b.id && a.file == b.file && a.role == b.role; });
         if (same) return;
         silence();
         playlist = std::move(tracks);
@@ -164,8 +173,10 @@ public:
 
     void silence() {
         enabled = false;
+        held = false;
         playlist.clear();
         playing_title.clear();
+        playing_role.clear();
         status_text.clear();
         failures = 0;
         if (loading.valid()) loading.wait();
@@ -188,10 +199,17 @@ public:
             if (loading.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
             auto loaded = loading.get();
             loading = {};
+            // A scene can change while decoding. Never install a stale menu
+            // track over gameplay, and never wait for the decoder in an input handler.
+            if (gameplay && loaded.track.role == "menu") {
+                begin(index + 1);
+                if (!loading.valid()) stop_playback("No gameplay music in this pack.");
+                return;
+            }
             install(std::move(loaded));
             return;
         }
-        if (!enabled || playlist.empty() || !exhausted) return;
+        if (!enabled || held || playlist.empty() || !exhausted) return;
         // A pack where nothing decodes would otherwise retry every track as
         // fast as the worker can fail. One full lap without a success stops.
         if (failures >= playlist.size()) {
@@ -204,8 +222,58 @@ public:
 
     void gain(float value) { volume = std::clamp(value, 0.0f, 1.0f); apply_gain(); }
     void mute(bool on) { muted = on; apply_gain(); }
-    void skip() { if (enabled && !playlist.empty() && !loading.valid()) begin(index + 1); }
+    void skip() {
+        if (!enabled || playlist.empty() || loading.valid()) return;
+        held = false;
+        begin(index + 1);
+    }
+    void previous() {
+        if (!enabled || playlist.empty() || loading.valid()) return;
+        held = false;
+        bool restart = false;
+        if (stream) {
+            SDL_LockAudioStream(stream);
+            restart = playing.rate > 0 && playing.channels > 0 &&
+                double(cursor) / playing.rate / playing.channels > 4.0;
+            SDL_UnlockAudioStream(stream);
+        }
+        if (restart) {
+            SDL_PauseAudioStreamDevice(stream);
+            SDL_LockAudioStream(stream);
+            cursor = 0;
+            exhausted = false;
+            SDL_UnlockAudioStream(stream);
+            SDL_ClearAudioStream(stream);
+            resume_allowed();
+        } else begin((index + playlist.size() - 1) % playlist.size(), true);
+    }
+    void toggle() {
+        if (!enabled || playlist.empty()) return;
+        held = !held;
+        if (stream) {
+            if (held) SDL_PauseAudioStreamDevice(stream);
+            else resume_allowed();
+        }
+    }
+    void set_scene(bool in_game) {
+        if (gameplay == in_game) return;
+        gameplay = in_game;
+        // index names the pending track during a skip; the device can still
+        // contain the previous one. Gate the installed track independently.
+        if (stream && gameplay && playing_role == "menu") SDL_PauseAudioStreamDevice(stream);
+        if (enabled && gameplay && !playlist.empty() && playlist[index].role == "menu" && !loading.valid()) {
+            if (stream) SDL_PauseAudioStreamDevice(stream);
+            begin(index + 1);
+            if (!loading.valid()) stop_playback("No gameplay music in this pack.");
+        }
+    }
     bool active() const { return enabled && !playlist.empty(); }
+    bool is_loading() const { return loading.valid(); }
+    // Like a media element's paused flag, controls reflect playback intent
+    // while buffering. Otherwise a visible Play button would toggle to pause.
+    bool is_playing() const { return active() && !held && (loading.valid() || is_output_running()); }
+    bool is_output_running() const { return stream && !SDL_AudioDevicePaused(SDL_GetAudioStreamDevice(stream)); }
+    const MusicTrack *shown() const { return active() ? &playlist[index] : nullptr; }
     const std::string &title() const { return playing_title; }
     const std::string &status() const { return status_text; }
 };

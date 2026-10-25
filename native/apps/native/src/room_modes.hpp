@@ -94,6 +94,8 @@ class RoomModes {
     }
     void reset_race(){race_.reset();prepared_.clear();went_.clear();pending_go_=false;result_until_=go_until_=0;}
 public:
+    // Preserve the highest observed room generation when the host leaves a map.
+    void close(uint64_t generation){generation_=std::max(generation_,generation);reset_race();room_.clear();closed_=true;clock_offset_=0;}
     RoomModeAction event(const J &envelope,const std::string &map,bool spectating,double now_epoch_ms) {
         if(!envelope.is_object()||!envelope.contains("generation")||(!envelope["generation"].is_number_unsigned()&&!(envelope["generation"].is_number_integer()&&envelope["generation"].get<int64_t>()>=0))||!envelope.contains("id")||!envelope["id"].is_string()||!envelope.contains("event")||!envelope["event"].is_object())return {};
         const auto generation=envelope["generation"].get<uint64_t>();const auto id=envelope["id"].get<std::string>();

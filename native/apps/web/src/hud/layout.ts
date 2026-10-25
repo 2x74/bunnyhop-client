@@ -29,6 +29,8 @@ export const HUD_ELEMENTS = [
   { id: "longJump", label: "Longjump stats" },
   // Who is watching you in a room (net/spectators.ts), left middle like a CS:S server's spectator list.
   { id: "spectators", label: "Spectator list" },
+  // "Practice" just under the crosshair while the attempt won't count (practice-mode/attempt.ts, hud.ts setPractice).
+  { id: "practice", label: "Practice" },
 ] as const;
 
 export type HudElId = (typeof HUD_ELEMENTS)[number]["id"];
@@ -80,6 +82,7 @@ export const CLASSIC: HudLayout = {
   strafeTrainer: P(false, 1, 0, 0.22, 1.15),
   ammo: P(true, 8, -0.014, -0.022),
   spectators: P(true, 3, 0.012, -0.06),
+  practice: P(true, 4, 0, 0.032),
 };
 
 export const MINIMAL: HudLayout = {
@@ -105,6 +108,7 @@ export const MINIMAL: HudLayout = {
   strafeTrainer: P(false, 1, 0, 0.22, 1.15),
   ammo: P(true, 8, -0.014, -0.022, 0.85),
   spectators: P(true, 3, 0.012, -0.06, 0.9),
+  practice: P(true, 4, 0, 0.024, 0.85),
 };
 
 export const STREAMER: HudLayout = {
@@ -131,6 +135,7 @@ export const STREAMER: HudLayout = {
   ammo: P(true, 8, -0.02, -0.125, 1.1),
   // Above the chat, which sits at left middle here.
   spectators: P(true, 3, 0.015, -0.14),
+  practice: P(true, 4, 0, 0.035, 1),
 };
 
 /**
@@ -177,6 +182,12 @@ export function sameLayout(a: HudLayout, b: HudLayout): boolean {
   });
 }
 
+/**
+ * Settings → HUD → HUD scale (prefs.hud.scale): its slider, the F2 editor's, and what a stored or imported value is
+ * clamped to. 175%: where Classic's centre block fills the room between the crosshair and the screen's bottom (hudPoints).
+ */
+export const HUD_SCALE = { min: 0.5, max: 1.75, step: 0.05 } as const;
+
 export const clampScale = (s: number) => Math.round(Math.max(0.4, Math.min(3, s)) * 100) / 100;
 const round4 = (v: number) => Math.round(v * 10000) / 10000;
 
@@ -195,13 +206,173 @@ export function placeFromRect(r: { left: number; top: number; width: number; hei
   return { on: prev.on, a, x: round4((px - (col / 2) * vw) / vw), y: round4((py - (row / 2) * vh) / vh), s: prev.s };
 }
 
-/** CSS for an element's position (applied once per layout change, never per frame). */
-export function placeStyle(p: HudPlace): { left: string; top: string; translate: string } {
+// ---------------------------------------------------------------------------------------------
+// HUD scale (Settings → HUD → HUD scale, prefs.hud.scale). Every element grows by it around its own anchor point (CSS
+// --hs), and the gaps between elements grow with it, so a bigger HUD is the same picture, bigger, not bigger elements
+// on the old spots (which, in Classic, put the keys over the speed from about 120%). Positions are stored at 100%; the
+// scale is applied here, at display time:
+//   - side columns (anchored left or right): the offset from the anchor point scales, so an element in a corner keeps
+//     its corner and its margin grows with it;
+//   - the centre column (anchored top, centre or bottom middle): horizontal offsets scale from the screen's centre line
+//     (the split stays beside the timer); vertically, the shown elements above the crosshair and those below it each
+//     zoom as one picture around a pivot placed so the group's gaps to the crosshair and to the screen's edge shrink in
+//     proportion. Classic's keys / speed / timer block grows towards both and fills that room at about 175%.
+// The groups' extents use each element's nominal height (EL_HEIGHT), not its live box, so the pivots never move while
+// you play. At 100% every point is exactly the stored one.
+
+/** Nominal element heights in rem at element scale 1 (measured with the layout editor's demo values). */
+export const EL_HEIGHT: Partial<Record<HudElId, number>> = {
+  speed: 2.1, timer: 1.5, split: 1.15, track: 1, stage: 0.95, stats: 1.05, sync: 1.3, keys: 5.55, ghostKeys: 6.25, graph: 3.6,
+  jumpStats: 2.15, map: 0.95, pb: 0.95, fps: 0.85, chat: 2.4, ammo: 2.1, strafeTrainer: 1.7, startPre: 0.85, strafeOffsets: 1.05,
+  firstJump: 1.05, longJump: 2.8, spectators: 3.3, practice: 1.08,
+};
+/** For an element missing from EL_HEIGHT (one added later). */
+const EL_HEIGHT_DEFAULT = 1.2;
+
+/** A point on the screen as fractions of the viewport (0..1). */
+export interface HudPoint {
+  x: number;
+  y: number;
+}
+
+/** The page's root font size (CSS px) on a `vw`×`vh` window: style.css `html { font-size: clamp(...) }`. */
+export function hudRem(vw: number, vh: number): number {
+  return Math.max(14, Math.min(28, 0.0035 * vw + 0.0045 * vh + 7));
+}
+
+/** The root font size as a fraction of the screen's height: turns EL_HEIGHT into screen fractions. 1080p: 18.58 / 1080. */
+export function remFraction(vw: number, vh: number): number {
+  return vh > 0 ? hudRem(vw, vh) / vh : 0;
+}
+
+const centreColumn = (p: HudPlace) => p.a % 3 === 1;
+
+/**
+ * Centre-column labels that belong to the crosshair, not to a group: they zoom around the crosshair and stay out of the
+ * groups' extents (Practice shows only now and then, and counting it would pin Classic's block where it is).
+ */
+const CROSSHAIR_LABELS: ReadonlySet<HudElId> = new Set<HudElId>(["practice"]);
+
+/** Room kept clear around the crosshair when a big HUD scale pushes the centre column's groups towards it. */
+export const CROSSHAIR_CLEAR = 0.02;
+
+/**
+ * The vertical pivots of the centre column's two groups (shown elements whose box centre is above the screen's middle,
+ * and those at or below it); null for an empty group. `remFrac`: remFraction for the screen. Normally the point that
+ * splits the group's extent like its gaps to the crosshair and to the screen's edge, so both shrink in proportion. A
+ * scale too big for that keeps CROSSHAIR_CLEAR to the crosshair instead, and the group runs into the screen's edge
+ * (where the HUD's keep-on-screen pass stops it): elements on the edge may overlap, the crosshair stays clear.
+ */
+export function centrePivots(layout: HudLayout, remFrac: number, hs = 1): { above: number | null; below: number | null; belowTop: number | null } {
+  const ext = { above: [Infinity, -Infinity], below: [Infinity, -Infinity] };
+  for (const { id } of HUD_ELEMENTS) {
+    const p = layout[id];
+    if (!p.on || !centreColumn(p) || CROSSHAIR_LABELS.has(id)) continue;
+    const ay = anchorY(p.a);
+    const h = (EL_HEIGHT[id] ?? EL_HEIGHT_DEFAULT) * p.s * remFrac;
+    const top = ay + p.y - ay * h;
+    const e = top + h / 2 < 0.5 ? ext.above : ext.below;
+    e[0] = Math.min(e[0], top);
+    e[1] = Math.max(e[1], top + h);
+  }
+  // [t, b]: the group's extent; `near`: its end on the crosshair's side; `sign`: +1 below the crosshair, -1 above.
+  const pivot = (lo: number, hi: number, [t, b]: number[], sign: 1 | -1) => {
+    if (t > b) return null;
+    const g0 = Math.max(0, t - lo);
+    const g1 = Math.max(0, hi - b);
+    const p = t + (b - t) * (g0 + g1 > 1e-9 ? g0 / (g0 + g1) : 0.5);
+    if (hs <= 1) return p;
+    // Where the crosshair-side end lands, and the closest it may come (no closer than it already was at 100%).
+    const near = sign > 0 ? t : b;
+    const limit = sign > 0 ? Math.min(near, 0.5 + CROSSHAIR_CLEAR) : Math.max(near, 0.5 - CROSSHAIR_CLEAR);
+    const lands = p + (near - p) * hs;
+    return sign * (lands - limit) >= 0 ? p : (limit - near * hs) / (1 - hs);
+  };
+  const below = pivot(0.5, 1, ext.below, 1);
+  // Where the group below lands its crosshair-side end (a crosshair label gives way to it).
+  const belowTop = below === null ? null : below + (ext.below[0]! - below) * hs;
+  return { above: pivot(0, 0.5, ext.above, -1), below, belowTop };
+}
+
+/** Where one element's anchor point sits on screen at HUD scale `hs` (see the section header). */
+function zoomPoint(id: HudElId, p: HudPlace, hs: number, pv: ReturnType<typeof centrePivots>, remFrac: number): HudPoint {
+  const ax = anchorX(p.a);
+  const ay = anchorY(p.a);
+  if (!centreColumn(p)) return { x: ax + p.x * hs, y: ay + p.y * hs };
+  const y = ay + p.y;
+  if (CROSSHAIR_LABELS.has(id)) {
+    // Under the crosshair while the group below leaves room; once a big scale brings that group up to it, the same
+    // distance above the crosshair instead.
+    const off = (y - 0.5) * hs;
+    const h = (EL_HEIGHT[id] ?? EL_HEIGHT_DEFAULT) * p.s * remFrac * hs;
+    const crowded = off > 0 && pv.belowTop !== null && 0.5 + off + h / 2 > pv.belowTop - h * 0.15;
+    return { x: 0.5 + p.x * hs, y: 0.5 + (crowded ? -off : off) };
+  }
+  const h = (EL_HEIGHT[id] ?? EL_HEIGHT_DEFAULT) * p.s * remFrac;
+  const mid = y - ay * h + h / 2;
+  const pivot = (mid < 0.5 ? pv.above : pv.below) ?? y;
+  return { x: 0.5 + p.x * hs, y: pivot + (y - pivot) * hs };
+}
+
+/** Every element's anchor point on screen at HUD scale `hs` on a screen with remFraction `remFrac`. */
+export function hudPoints(layout: HudLayout, hs: number, remFrac: number): Record<HudElId, HudPoint> {
+  const pv = centrePivots(layout, remFrac, hs);
+  const out = {} as Record<HudElId, HudPoint>;
+  for (const { id } of HUD_ELEMENTS) out[id] = zoomPoint(id, layout[id], hs, pv, remFrac);
+  return out;
+}
+
+/**
+ * The stored (100%) place for element `id` that shows at `screen` (a place read off the screen as if the scale were
+ * 100%, e.g. placeFromRect) at HUD scale `hs`: the editor drops an element where it was dragged, at any scale. Inverse
+ * of hudPoints for that element (the centre column's pivots depend on the element's own place, so it's solved for).
+ */
+export function unzoomPlace(layout: HudLayout, id: HudElId, screen: HudPlace, hs: number, remFrac: number): HudPlace {
+  if (Math.abs(hs - 1) < 1e-6) return { ...screen };
+  const out: HudPlace = { ...screen, x: round4(screen.x / hs) };
+  if (!centreColumn(screen)) return { ...out, y: round4(screen.y / hs) };
+  const ay = anchorY(screen.a);
+  const sy = ay + screen.y;
+  const trial = { ...layout };
+  const shown = (y: number) => {
+    trial[id] = { ...out, y: y - ay };
+    return zoomPoint(id, trial[id], hs, centrePivots(trial, remFrac, hs), remFrac).y;
+  };
+  // Where it shows rises with where it's stored: bisect.
+  let lo = -1;
+  let hi = 2;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (shown(mid) < sy) lo = mid;
+    else hi = mid;
+  }
+  const y = (lo + hi) / 2;
+  return { ...out, y: round4(y - ay) };
+}
+
+/**
+ * How far (CSS px) to move a box so it stays on a `vw`×`vh` screen, `pad` px in from the edges: the HUD scale and the
+ * element scales can grow an element past the edge it sits near. A box bigger than the screen keeps its top-left corner.
+ */
+export function keepOnScreen(r: { left: number; top: number; width: number; height: number }, vw: number, vh: number, pad = 0): { dx: number; dy: number } {
+  const fit = (start: number, size: number, room: number) => {
+    if (start + size > room - pad) return Math.max(pad - start, room - pad - (start + size));
+    if (start < pad) return pad - start;
+    return 0;
+  };
+  return { dx: Math.round(fit(r.left, r.width, vw)), dy: Math.round(fit(r.top, r.height, vh)) };
+}
+
+/**
+ * CSS for an element's position (applied once per layout change, never per frame). `at`: where its anchor point goes
+ * (hudPoints, for the HUD scale); default the stored place.
+ */
+export function placeStyle(p: HudPlace, at: HudPoint = { x: anchorX(p.a) + p.x, y: anchorY(p.a) + p.y }): { left: string; top: string; translate: string } {
   const ax = anchorX(p.a);
   const ay = anchorY(p.a);
   return {
-    left: `${((ax + p.x) * 100).toFixed(3)}%`,
-    top: `${((ay + p.y) * 100).toFixed(3)}%`,
+    left: `${(at.x * 100).toFixed(3)}%`,
+    top: `${(at.y * 100).toFixed(3)}%`,
     translate: `${-ax * 100}% ${-ay * 100}%`,
   };
 }
@@ -231,10 +402,10 @@ export const DEFAULT_KEYS: KeysPrefs = {
 };
 
 // Version byte: 1 = first 14, 2 = first 15, 3 = first 16, 4 = first 17 (through strafe trainer), 5 = first 18,
-// 6 = first 21 (through longjump stats), 7 = all.
+// 6 = first 21 (through longjump stats), 7 = first 22 (through the spectator list), 8 = all.
 // Elements an older code doesn't carry keep the Classic placement. The "bhl1." prefix names the format.
-const VERSION = 7;
-const ELEMENTS_IN: Record<number, number> = { 1: 14, 2: 15, 3: 16, 4: 17, 5: 18, 6: 21, [VERSION]: HUD_ELEMENTS.length };
+const VERSION = 8;
+const ELEMENTS_IN: Record<number, number> = { 1: 14, 2: 15, 3: 16, 4: 17, 5: 18, 6: 21, 7: 22, [VERSION]: HUD_ELEMENTS.length };
 const PREFIX = "bhl1.";
 
 function rgb(hex: string): number[] {
