@@ -48,6 +48,21 @@ export const COLOURWAYS: Record<string, Colourway> = {
   // Supporter: Borealis. Night-sky navy hoodie and pants, aurora-green trim, violet stripes, a green glow.
   "outfit-borealis": { hoodie: 0x101a33, trim: 0x3ff0a0, pants: 0x0b1124, pantsTrim: 0x9a6bff, shoe: 0xe8f6ff, face: 0x05070d, glove: 0x14203d, detail: 0xb8ffe0, accent: 0x5dffb0 },
   "outfit-geode": { hoodie: 0x1d6b74, trim: 0x7a5ce8, pants: 0x23232e, pantsTrim: 0x7a5ce8, shoe: 0xe6fbf8, face: 0x081417, glove: 0x23232e, detail: 0xd6fff8, accent: 0x5ff2df },
+  // Batch 1 (progression.ts, research/PROGRESSION-BATCH1.md), earned by playing.
+  // Home Turf: clover-green hoodie, buttercup ears and visor, soil-brown pants.
+  "outfit-meadow": { hoodie: 0x4f9a3a, trim: 0x3b7a2c, pants: 0x4a3626, pantsTrim: 0x36271b, shoe: 0xf4efdc, face: 0x14200f, glove: 0x3b7a2c, detail: 0xfff6c8, accent: 0xffd23a },
+  // Wayfarer (50 maps): the Backrooms' mono-yellow wallpaper, carpet-brown pants, a tube-white visor.
+  "outfit-fluorescent": { hoodie: 0xd8c35a, trim: 0xb8a23f, pants: 0x7d6a45, pantsTrim: 0x5e4f33, shoe: 0xe9e4c8, face: 0x1b1a12, glove: 0xb3a45e, detail: 0xfffbe0, accent: 0xf6f7e6 },
+  // Second Gear (25 T2 clears): Aero's sky blue, white trim and pants, a grass-green accent.
+  "outfit-skyglass": { hoodie: 0x48b4f0, trim: 0xffffff, pants: 0xe8f4fb, pantsTrim: 0x9fd6f5, shoe: 0xffffff, face: 0x0d2a3d, glove: 0xd8eef9, detail: 0xffffff, accent: 0x7bd23c },
+  // Centurion (100 maps): olive with brass trim and stripes.
+  "outfit-laurel": { hoodie: 0x34452c, trim: 0xc9a24a, pants: 0x1e2419, pantsTrim: 0xc9a24a, shoe: 0xf2ead2, face: 0x0d100b, glove: 0x34452c, detail: 0xffe9b0, accent: 0xd9b45a },
+  // Cartographer (150 maps): Palmera Plaza. Teal hoodie, pink trim, violet pants, a sunset-orange accent.
+  // Ran the Gauntlet: the old developer texture. Grey hoodie, dev-orange trim, stripes and gloves.
+  "outfit-devgrid": { hoodie: 0x8f9296, trim: 0xf08a24, pants: 0x4d5054, pantsTrim: 0xf08a24, shoe: 0xdadcdf, face: 0x151515, glove: 0xf08a24, detail: 0xffffff, accent: 0xffffff },
+  // Trick or Treat (October): pumpkin hoodie, night-plum pants, vine-green gloves, a candle-glow visor.
+  "outfit-pumpkin": { hoodie: 0xe0701c, trim: 0xb8550f, pants: 0x2a1f36, pantsTrim: 0x3d2a4a, shoe: 0x2e2622, face: 0x120904, glove: 0x3d6b2a, detail: 0xffe08a, accent: 0xffb43c },
+  "outfit-palmera": { hoodie: 0x2bb6b0, trim: 0xff7ac0, pants: 0x6f58b8, pantsTrim: 0xff7ac0, shoe: 0xfff0f6, face: 0x1a1030, glove: 0x2bb6b0, detail: 0xffe9a8, accent: 0xffa04a },
 };
 
 export const DEFAULT_COLOURWAY = "outfit-cream";

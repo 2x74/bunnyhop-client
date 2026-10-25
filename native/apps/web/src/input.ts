@@ -1,16 +1,18 @@
 // Mouse/keyboard input mapped to Source-style user commands.
 // Sensitivity matches CS:S: degrees = counts * sensitivity * m_yaw (0.022).
 //
-// Binds are KeyboardEvent.code strings plus mouse pseudo-codes: Mouse1..Mouse5 (buttons, Source's names: binds.ts mouseCode),
+// Binds are KeyboardEvent.code strings plus mouse pseudo-codes: Mouse1 and up (buttons, Source's names: binds.ts mouseCode),
 // MWheelUp / MWheelDown, and MouseWheel (either direction). Wheel binds pulse for one tick,
 // like `bind mwheeldown +jump` in CS:S.
 
 import type { Action } from "./ui/settings";
-import { DEFAULT_BINDS, isWeaponAction, mouseCode, type BindAction } from "./binds";
+import { DEFAULT_BINDS, guardSideMouseButtons, isWeaponAction, mouseCode, type BindAction } from "./binds";
 import { cursorFree, endFreeCursorAsPause, setCursorFree } from "./free-cursor";
 import { MouseFilter, type MotionSample } from "./mouse-filter";
 import { IN_GIVE_SHIFT, IN_WEAPON_COMMAND_MASK } from "./weapon-rules";
-import { countedYaw, norm360, YAW_SET_RAW, YAW_SET_SENSITIVITY, YAW_SET_SPAWN, type LookSample } from "./replay";
+import { countedYaw, norm360, YAW_SET_RAW, YAW_SET_SENSITIVITY, YAW_SET_SPAWN, YAW_SET_TURN, YAW_WITH_TURN, type LookSample } from "./replay";
+import { IN_LEFT, IN_RIGHT, turnDelta } from "./turn-binds";
+import { resolveNullBinds } from "./null-binds";
 import { NativeMouse } from "./native-input";
 
 /**
@@ -81,6 +83,8 @@ export interface UserCmd {
   buttons: number;
   /** v8: the view state the yaw was computed from (replay.ts LookSample); recorded with the command. */
   look?: LookSample;
+  /** Null binds resolved this command's movement keys (null-binds.ts); the replay header records it. */
+  nullBinds?: boolean;
 }
 
 export interface InputSettings {
@@ -119,12 +123,14 @@ export class Input {
    * The view yaw is counted (v8 replays, replay.ts countedYaw): an exact base plus the whole mouse counts since it,
    * yaw = norm360(base - count * k) with k = sensitivity * m_yaw. Anything that sets the view (spawn, teleport, a
    * rotating pusher, a sensitivity change) starts a new base (setYaw); plain assignment to `yaw` does too, as a raw set.
+   * Manual turn binds shift the base without resetting those counts.
    */
   private yawBase = 0;
   private yawCount = 0;
   private yawK = 0.044;
   private yawEpoch = 0;
   private yawKind = YAW_SET_SPAWN;
+  private sampledYawEpoch = -1;
   /** v8 input stats since the last command: rAF frames, motion events, mouse reports. */
   private framesSince = 0;
   private eventsSince = 0;
@@ -260,6 +266,7 @@ export class Input {
       },
       { passive: true },
     );
+    guardSideMouseButtons(document, () => this.pointerLocked);
     document.addEventListener("mousedown", (e) => {
       if (this.pointerLocked) this.press(mouseCode(e.button), false, e);
     });
@@ -444,8 +451,20 @@ export class Input {
     return this.codeBits.has(code) || this.codeAction.has(code);
   }
 
+  /**
+   * Null binds (null-binds.ts), as of the last sample(): opposite movement keys go to the one pressed last. heldCodes
+   * keeps press order (a Set keeps insertion order; a release deletes the code, key repeat re-adds nothing).
+   */
+  private nullBinds = false;
+
   /** Buttons currently held (for the keys overlay; includes a pending wheel pulse). */
   get held(): number {
+    if (this.nullBinds) {
+      const pressed: number[] = [];
+      for (const c of this.heldCodes) pressed.push(this.codeBits.get(c) ?? 0);
+      pressed.push(this.wheelBits); // a wheel pulse is this tick's press: the newest
+      return resolveNullBinds(pressed);
+    }
     let b = this.wheelBits;
     for (const c of this.heldCodes) b |= this.codeBits.get(c) ?? 0;
     return b;
@@ -564,10 +583,23 @@ export class Input {
   }
 
   /** Builds the command for the next simulation tick. */
-  sample(): UserCmd {
+  sample(o: { turnBinds?: boolean; tickInterval?: number; nullBinds?: boolean } = {}): UserCmd {
+    this.nullBinds = !!o.nullBinds;
+    // Keep mouse counts intact: replay analysis can check the fixed turn separately from mouse movement. A spawn,
+    // teleport, pusher, sensitivity or raw set in this tick retains its own reason (including unexplained raw sets).
+    let turn = 0;
+    if (o.turnBinds && o.tickInterval && this.locked) {
+      const left = this.actionHeld("turnLeft"), right = this.actionHeld("turnRight");
+      if (left !== right) turn = left ? IN_LEFT : IN_RIGHT;
+      if (turn) {
+        this.yawBase = norm360(this.yawBase + turnDelta(turn, o.tickInterval));
+        this.yawKind = this.yawEpoch === this.sampledYawEpoch ? YAW_SET_TURN : this.yawKind | YAW_WITH_TURN;
+        this.yawEpoch++;
+      }
+    }
     // The knife binds are actions (the viewmodel swings on them), not movement bits: add their buttons here.
     // A weapon slot request (requestSlot) goes into this one command only.
-    const buttons = this.held | (this.actionHeld("attack") ? IN_ATTACK : 0) | (this.actionHeld("attack2") ? IN_ATTACK2 : 0) | (this.slot << IN_SLOT_SHIFT) | this.weaponBits | (this.give << IN_GIVE_SHIFT);
+    const buttons = this.held | turn | (this.actionHeld("attack") ? IN_ATTACK : 0) | (this.actionHeld("attack2") ? IN_ATTACK2 : 0) | (this.slot << IN_SLOT_SHIFT) | this.weaponBits | (this.give << IN_GIVE_SHIFT);
     this.wheelBits = 0;
     this.slot = 0;
     this.weaponBits = 0;
@@ -584,6 +616,7 @@ export class Input {
       frames: this.framesSince, events: this.eventsSince, reports: this.reportsSince,
     };
     this.framesSince = this.eventsSince = this.reportsSince = 0;
-    return { pitch: this.pitch, yaw: this.yaw, forwardmove, sidemove, buttons, look };
+    this.sampledYawEpoch = this.yawEpoch;
+    return { pitch: this.pitch, yaw: this.yaw, forwardmove, sidemove, buttons, look, ...(this.nullBinds ? { nullBinds: true } : {}) };
   }
 }

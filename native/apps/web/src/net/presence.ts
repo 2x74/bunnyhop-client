@@ -1,6 +1,8 @@
 // Which room (if any) this page is playing in. Tiny and DOM-free so online.ts (run submission tags the room) and the
 // menus can ask without importing the multiplayer layer. Set by net/mp.ts while connected.
 
+import { appHref } from "../platform/navigation";
+
 export interface RoomPresence {
   id: string;
   name: string;
@@ -65,6 +67,9 @@ export interface RoomActions {
     host: boolean;
   };
   spectate(): void;
+  /** The friends list's Spectate (social/spectate.ts): whether player `id` is in this room (not you), and watching them. */
+  canWatch(id: string): boolean;
+  watch(id: string): void;
   /** Private lobbies: copy the invite link (says so in chat). */
   invite(): void;
   /** Private lobbies, host: pick the next map (!map). */
@@ -87,11 +92,15 @@ export function roomActions(): RoomActions | null {
   return actions;
 }
 
-/** URL that plays `map` in room `id` (main.ts loads the map, then net/mp.ts connects). */
-export function roomUrl(id: string, map: string): string {
-  const url = new URL(location.href);
+/**
+ * URL that plays `map` in room `id` (main.ts loads the map, then net/mp.ts connects). `spectate`: a player id to watch
+ * on arrival instead of spawning (social/spectate.ts).
+ */
+export function roomUrl(id: string, map: string, o: { spectate?: string | null } = {}): string {
+  const url = new URL(appHref());
   url.search = "";
   url.searchParams.set("map", map);
   url.searchParams.set("server", id);
+  if (o.spectate) url.searchParams.set("spectate", o.spectate);
   return url.toString();
 }

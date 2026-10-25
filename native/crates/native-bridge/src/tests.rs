@@ -2,6 +2,9 @@ use super::*;
 use std::mem::{align_of, offset_of, size_of};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[path = "replay_tests.rs"]
+mod replay_v10;
+
 struct Fixture(PathBuf);
 impl Fixture {
     fn new() -> Self {

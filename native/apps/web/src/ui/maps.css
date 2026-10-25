@@ -30,6 +30,10 @@
 .mb-menus select:hover { background-color: transparent; color: #fff; }
 .mb-menus select:focus-visible { box-shadow: 0 2px 0 var(--amber); }
 .mb-menus .mb-stylesel { color: var(--cream); }
+/* The die (a random map from the list): an icon in the menus' colour. */
+.mb-random { display: inline-flex; align-items: center; padding: 0.35rem 0.1rem; border: 0; background: none; cursor: pointer; color: var(--cream-2); font-size: 1.15rem; line-height: 1; }
+.mb-random:hover { color: #fff; }
+.mb-random:focus-visible { box-shadow: 0 2px 0 var(--amber); outline: none; }
 /* The way to the gauntlets: a word like the menus beside it, with a chevron. */
 .mb-gauntlets { display: inline-flex; align-items: center; gap: 0.1rem; padding: 0.4rem 0; color: var(--cream-2); font-weight: 650; }
 .mb-gauntlets:hover { color: #fff; text-decoration: none; }
@@ -78,6 +82,7 @@
 .mb-row.skeleton { height: 3.85rem; box-sizing: border-box; cursor: default; animation: mb-pulse 1.4s ease-in-out infinite; }
 @keyframes mb-pulse { 50% { opacity: 0.55; } }
 .mb-empty { margin: var(--sp-6) 0; text-align: center; color: var(--dim); }
+.mb-empty .link-btn { padding: 0; font-size: inherit; color: var(--text); }
 
 /* the tutorial's picture: the logo's hop arcs on a warm dark plate */
 .tut-art { background: radial-gradient(120% 140% at 15% 100%, rgba(255, 180, 58, 0.24), transparent 60%), linear-gradient(160deg, #2a2117, #14161d 70%); }
@@ -134,7 +139,7 @@
 .mbd-local b { color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; }
 .mbd-actions { flex: none; display: flex; align-items: center; gap: var(--sp-2); }
 .mbd-play { flex: 1; justify-content: center; padding: 0.7em 1em; font-size: var(--fs-lg); }
-.mbd-share { flex: none; }
+.mbd-share, .mbd-groups { flex: none; }
 .mbd-star { flex: none; padding-inline: 0.7em; color: var(--dim); }
 .mbd-star .icon { width: 1.2em; height: 1.2em; }
 .mbd-star:hover { color: var(--text); }

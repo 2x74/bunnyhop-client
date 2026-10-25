@@ -9,7 +9,7 @@
     "presentation": "bun apps/native/src/export-presentation.ts",
     "models": "bun apps/native/src/export-viewmodels.ts",
     "typecheck": "bun apps/native/typecheck.ts",
-    "test": "bun test ./apps/native/ui/cosmetics.test.ts ./apps/native/ui/menu-state.test.ts ./apps/native/ui/native-features.test.ts ./apps/native/ui/room-service.test.ts ./apps/native/ui/run-service.test.ts",
+    "test": "bun test ./apps/native/ui",
     "check": "bun run menu && bun run typecheck && bun run test",
     "package": "bun run wasm && bun apps/native/package.ts",
     "wasm": "bun apps/native/ensure-wasm.ts"

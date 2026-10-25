@@ -44,6 +44,7 @@ dialog[open].acct-dialog { animation: acct-in 0.16s ease-out; }
 .acct-icon { display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 0.5rem; background: var(--raise-2); }
 .acct-icon.discord { color: #fff; background: var(--discord); }
 .acct-icon.email { color: var(--accent); }
+.acct-icon.wavedash { color: var(--text); font-weight: 800; }
 .acct-unlink:disabled { opacity: 0.45; }
 .acct-toggle { display: flex; align-items: center; gap: 0.6rem; font-size: 0.88rem; color: var(--dim); cursor: pointer; }
 /* Discord avatar opt-in, under the Discord row: switch, the picture it would use, what it does. */
@@ -95,3 +96,9 @@ dialog[open].acct-dialog { animation: acct-in 0.16s ease-out; }
 /* The community Discord server under the Discord method (ui/account-panel.ts): one line and a button, no box. */
 .acct-support-link { margin-left: auto; color: var(--dim); font-size: var(--fs-sm); }
 .acct-support-link:hover { color: var(--text); }
+
+/* The home screen's Desktop app popup (ui/desktop-link.ts). */
+dialog.desktop-dialog { width: min(30rem, 94vw); }
+.desktop-dialog .acct-body p { margin: 0 0 0.7rem; line-height: 1.45; }
+.desktop-ver { margin-left: 0.3rem; font-size: var(--fs-sm); font-weight: 500; color: var(--faint); }
+.desktop-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem 1rem; margin-top: 1rem; }

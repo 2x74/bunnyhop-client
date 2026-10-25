@@ -14,13 +14,41 @@ export type BindAction = Action | WeaponAction;
 export const isWeaponAction = (a: string): a is WeaponAction => (WEAPON_ACTIONS as readonly string[]).includes(a);
 
 /**
- * Mouse button codes are Source's names: Mouse1 left, Mouse2 right, Mouse3 middle, Mouse4 / Mouse5 the side buttons.
+ * Mouse button codes are Source's names: Mouse1 left, Mouse2 right, Mouse3 middle, Mouse4 / Mouse5 the side buttons,
+ * then Mouse6 and up for additional buttons reported by the browser.
  * MouseEvent.button numbers them left 0, middle 1, right 2 (before 0.0.12 the code was `Mouse${button + 1}`, which made
  * right-click Mouse3 and left the default stab / silencer bind, Mouse2, on the middle button; settings.ts
  * migrateMouseNames moves saved binds over).
  */
 export function mouseCode(button: number): string {
   return button === 1 ? "Mouse3" : button === 2 ? "Mouse2" : `Mouse${button + 1}`;
+}
+
+/**
+ * Side buttons also mean browser Back / Forward. Cancel the whole press, including release and auxclick:
+ * canceling only mousedown can still navigate on release. Keep propagation so input / bind capture still sees it.
+ * The caller decides when the game owns these buttons; normal page navigation works outside that scope.
+ */
+export function guardSideMouseButtons(target: EventTarget, active: () => boolean): () => void {
+  const owned = new Set<number>();
+  const guard = (event: Event) => {
+    const button = (event as Event & { button: number }).button;
+    if (!(button >= 3)) return;
+    const on = active();
+    if (event.type === "mousedown") {
+      if (on) owned.add(button);
+      else owned.delete(button);
+    }
+    // A bind can open a menu and release pointer lock on mousedown. Still own that press's release / auxclick.
+    if (on || owned.has(button)) event.preventDefault();
+    if (event.type === "auxclick") owned.delete(button);
+  };
+  const events = ["mousedown", "mouseup", "auxclick"] as const;
+  const options = { capture: true, passive: false };
+  for (const type of events) target.addEventListener(type, guard, options);
+  return () => {
+    for (const type of events) target.removeEventListener(type, guard, options);
+  };
 }
 
 export const DEFAULT_BINDS: Record<BindAction, string[]> = {
@@ -58,6 +86,13 @@ export const DEFAULT_BINDS: Record<BindAction, string[]> = {
   // M is the main-track restart; O / P are free in game and in the replay viewer.
   mute: ["KeyO"],
   nextTrack: ["KeyP"],
+  // Private surface paint. Opt in through Settings -> Keys; no existing keyboard or side-button bind is taken.
+  paint: [],
+  paintOnce: [],
+  clearPaint: [],
+  measurePoint: [],
+  clearMeasure: [],
+  lastLj: [],
   // Practice mode (practice-mode/). The toggle is in the pause menu, so it starts unbound. Its tools only act while it's
   // on (elsewhere their keys fall through: the tutorial's X, the dev zone editor's Z). Z / X / C sit together under
   // the movement keys; the arrows turn the view like CS:S's default +left / +right binds.

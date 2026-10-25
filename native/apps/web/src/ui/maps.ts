@@ -1,12 +1,17 @@
-// The map list (Play): one toolbar row (search, tier, set, sort, style as text menus), a list of every map with your
-// status on each, and a panel for the selected map with its board (ui/map-board.ts) and Play. The tutorial sits at
-// the top of the list (tutorial/learn.ts) unless the player hid it. A star by a map's name (and in its panel) makes it
-// a favorite (ui/favorites.ts); "Favorites" in the set menu shows just those.
+// The map list (Play): one toolbar row (search, tier, a die, then set, sort and style as text menus), a list of every
+// map with your status on each, and a panel for the selected map with its board (ui/map-board.ts) and Play. The
+// tutorial sits at the top of the list (tutorial/learn.ts) unless the player hid it. A star by a map's name (and in its
+// panel) makes it a favorite (ui/favorites.ts); "Favorites" in the set menu shows just those. Each set says how many of
+// its maps you've done, and the menu ends with the set on show done per tier. The player's own groups
+// (ui/map-groups.ts) follow it in the set menu; Groups by the panel's star adds the map to one, makes one, renames or
+// deletes the group the list is showing, and plays the group (or Favorites) on show in order (map-queue.ts). The die
+// picks one of the maps on the list (map-list.ts randomMap) and selects it.
 //
 // The style picked here is the style of everything on the page: the PBs and records in the list, the board in the
 // panel (and the full leaderboard opened from it) and the run you start. Click or ↑ / ↓ selects; double-click or
-// Enter plays. Rows are built once and reused (the list holds ~210 maps): filtering and sorting only re-order them,
-// thumbnails load as rows near the view, and only the selected map's board is fetched.
+// Enter plays. Rows are built once per page and reused (the list holds ~600 maps; the home screen builds them in idle
+// time, prewarmMapRows): opening the list, filtering and sorting only re-order them, thumbnails load as rows near the
+// view, and only the selected map's board is fetched.
 
 import { api, type MapSummary } from "../api";
 import { getPB, onPBChange } from "../pb";
@@ -23,20 +28,24 @@ import { openLeaderboardDialog } from "./leaderboard";
 import { requestRace, requestRaceAfterReload } from "../player/race";
 import { me } from "./account-state";
 import { playedMaps } from "./stats";
-import { mapBoard, refitBoard } from "./map-board";
+import { mapBoard, preloadMapBoard, refitBoard } from "./map-board";
 import { openTutorial, tutorialEnabled, tutorialPrompt, tutorialSub, TUTORIAL_MAP } from "../tutorial/entry";
 import { matchesTutorial, tutorialArt, tutorialPanel } from "../tutorial/learn";
 import { tutorialProgress } from "../tutorial/flag";
-import { toast } from "../notify";
+import { toast, whisper } from "../notify";
 import { isFavorite, onFavoritesChange, setFavorite, syncFavorites } from "./favorites";
+import { createGroup, deleteGroup, groupNameProblem, mapGroup, mapGroups, onMapGroupsChange, renameGroup, restoreGroup, setInGroup, syncMapGroups, type MapGroupView } from "./map-groups";
+import { GROUP_NAME_MAX } from "../map-groups";
+import { withMenu, type MenuItem } from "../social/menu";
+import { textDialog } from "./settings-transfer";
 import { icon } from "./icons";
+import { firstMapOfTheDay } from "./first-map";
+import { menuIdleAllowed } from "./menu-work";
+import { doneByTier, listed, randomMap } from "../map-list";
+import { readQueue, startQueue, stopQueue } from "../map-queue";
+import { attemptsText, mapTime, playedText } from "../map-time";
 import "./maps.css";
 
-/**
- * Where new players start: onboarding's "Play", the featured card on a first visit and the map list's default
- * selection. bhop_ambience: tier 1, ~29 s for newcomers (WR 19 s). bhop_eazy took newcomers 137 s on average (WR 32 s).
- */
-export const START_MAP = "bhop_ambience";
 
 export interface MapEntry {
   sha256?: string;
@@ -55,6 +64,7 @@ export interface MapEntry {
   shots?: string[];
   /** GameBanana screenshots (gallery extras). */
   screenshots?: string[];
+  /** GameBanana upload date (YYYY-MM-DD), not when the map came to bunnyhop.lol (MapSummary.added). */
   added?: string | null;
   /** maps/<name>.zones.json exists locally (not shown in the UI). */
   zones?: boolean;
@@ -150,9 +160,13 @@ const COLLECTIONS: [id: string, label: string][] = [
   ["short", "Short"],
   ["modern", "Modern"],
   ["halloween", "Halloween"],
+  ["new", "New maps"],
 ];
 /** The set menu's own entry: the player's starred maps. */
 const FAVORITES = "favorites";
+/** The set menu's value for one of the player's groups: this + the group's id. */
+const GROUP = "group:";
+const groupOf = (collection: string): MapGroupView | null => (collection.startsWith(GROUP) ? mapGroup(collection.slice(GROUP.length)) : null);
 /** Debounce for keyboard selection: the panel (hero image, board request) follows once you stop on a map. */
 const SETTLE_MS = 140;
 
@@ -187,8 +201,62 @@ export function closeMapPanel(browser: HTMLElement): boolean {
   return true;
 }
 
+// ---- rows (shared by every map list on the page: built once, re-painted per list and style)
+
+const rowCache = new Map<string, HTMLElement>();
+let browserSeq = 0;
+
+function rowShell(name: string, art: HTMLElement, title: string, sub: string, star = false): HTMLElement {
+  const r = h(
+    "div.mb-row",
+    { role: "option", "data-name": name, tabindex: "-1", "aria-selected": "false" },
+    art,
+    // (The row's star is for the mouse: rows are options, so the keyboard stars from the panel, one Tab past Play.)
+    h("span.mb-name", null, h("span.mb-title", null, h("b", null, title), star ? h("button.mb-star", { type: "button", tabindex: "-1" }, icon("star")) : null), h("small", null, sub)),
+    h("span.mb-c-tier"),
+    h("span.mb-c-pb"),
+    h("span.mb-c-wr"),
+  );
+  rowCache.set(name, r);
+  return r;
+}
+
+function mapRow(m: MapEntry, fallbackThumb: string | null = null): HTMLElement {
+  const hit = rowCache.get(m.name);
+  if (hit) return hit;
+  const bonus = bonusCount(m);
+  const by = m.author?.trim() && !/^(unknown|none)$/i.test(m.author.trim()) ? `by ${m.author.trim()}` : "Unknown author";
+  const r = rowShell(m.name, mapArt(m.name, m.thumbnail ?? fallbackThumb, { className: "mb-thumb" }), m.name, bonus ? `${by}, ${bonus} bonus${bonus > 1 ? "es" : ""}` : by, true);
+  if (bonus) r.querySelector(".mb-name small")!.setAttribute("title", "Bonus tracks are timed and ranked separately, always in Normal style");
+  return r;
+}
+
+let prewarming = false;
+/**
+ * Builds the list's rows ahead, a few dozen per idle callback (the home screen, once the index is in), so opening the
+ * list doesn't build ~600 rows inside the click.
+ */
+export function prewarmMapRows(maps: MapEntry[]): void {
+  if (prewarming) return;
+  prewarming = true;
+  const queue = maps.filter((m) => !rowCache.has(m.name));
+  const ric = (fn: (d?: IdleDeadline) => void) => ("requestIdleCallback" in window ? requestIdleCallback(fn, { timeout: 1000 }) : setTimeout(fn, 50));
+  const step = (d?: IdleDeadline) => {
+    if (!menuIdleAllowed()) {
+      prewarming = false;
+      return;
+    }
+    const t0 = performance.now();
+    while (queue.length && (d && !d.didTimeout ? d.timeRemaining() > 2 : performance.now() - t0 < 6)) mapRow(queue.shift()!);
+    if (queue.length) ric(step);
+    else prewarming = false;
+  };
+  ric(step);
+}
+
 /** `focus`: map to select first (a /maps/<name> link, the home screen's Tutorial link); the filters open on "all". */
 export function mapBrowser(o: { current: string | null; focus?: string | null; style: string; onPick: (name: string) => void; gauntlets?: (() => void) | null }): HTMLElement {
+  const seq = ++browserSeq;
   let saved: { sort?: string; tier?: string; collection?: string } = {};
   try {
     saved = JSON.parse(localStorage.getItem(LAST_FILTER) ?? "{}") ?? {};
@@ -198,7 +266,8 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
   if (o.focus) Object.assign(saved, { tier: "all", collection: "all" });
   let sort: Sort = SORTS.some(([s]) => s === saved.sort) ? (saved.sort as Sort) : "tier";
   let tierFilter: TierFilter = TIER_FILTERS.includes(saved.tier as TierFilter) ? (saved.tier as TierFilter) : "all";
-  let collection = saved.collection === FAVORITES || COLLECTIONS.some(([id]) => id === saved.collection) ? saved.collection! : "all";
+  let collection =
+    saved.collection === FAVORITES || COLLECTIONS.some(([id]) => id === saved.collection) || (saved.collection && groupOf(saved.collection)) ? saved.collection! : "all";
   let query = "";
   let style: StyleId = isStyleId(o.style) ? o.style : selectedStyle();
 
@@ -208,8 +277,8 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
   let played = playedMaps();
   let myId: string | null = null;
   let selected: string | null = null;
-  /** Rows built once per map (and the tutorial's), reused by every filter / sort. */
-  const rows = new Map<string, HTMLElement>();
+  /** Rows built once per map (and the tutorial's), reused by every filter / sort, and by the next list opened. */
+  const rows = rowCache;
   let visible: string[] = [];
 
   // ---- toolbar
@@ -218,6 +287,7 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
   const searchWrap = h("label.mb-search", null, h("span.mb-q-icon", { "aria-hidden": "true" }, "⌕"), search, qCount, h("kbd.mb-q-kbd", { "aria-hidden": "true" }, "/"));
   const tiers = h("div.seg.mb-tiers", { role: "radiogroup", "aria-label": "Tier" });
   const setSel = h("select.mb-set", { "aria-label": "Map set" });
+  const die = h("button.mb-random", { type: "button", title: "Random map", "aria-label": "Random map", onclick: () => pickRandom() }, icon("die"));
   const sortSel = h("select.mb-sort", { "aria-label": "Sort" }, ...SORTS.map(([v, l]) => h("option", { value: v }, l)));
   sortSel.value = sort;
   const cycleKey = () => prefs.get().binds.cycleStyle?.[0] ?? null;
@@ -250,7 +320,7 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
       null,
       searchWrap,
       tiers,
-      h("div.mb-menus", null, setSel, sortSel, styleSel),
+      h("div.mb-menus", null, die, setSel, sortSel, styleSel),
       // Gauntlets (ui/gauntlets.ts): fixed lists of maps run in one go.
       o.gauntlets ? h("button.link-btn.mb-gauntlets", { type: "button", onclick: o.gauntlets }, "Gauntlets", icon("chevronRight")) : null,
     ),
@@ -268,32 +338,12 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
   const ranked = (name: string): boolean | null => (online ? (online.get(name)?.ranked ?? false) : null);
 
   // ---- rows
-  function rowShell(name: string, art: HTMLElement, title: string, sub: string, star = false): HTMLElement {
-    const r = h(
-      "div.mb-row",
-      { role: "option", "data-name": name, tabindex: "-1", "aria-selected": "false" },
-      art,
-      // (The row's star is for the mouse: rows are options, so the keyboard stars from the panel, one Tab past Play.)
-      h("span.mb-name", null, h("span.mb-title", null, h("b", null, title), star ? h("button.mb-star", { type: "button", tabindex: "-1" }, icon("star")) : null), h("small", null, sub)),
-      h("span.mb-c-tier"),
-      h("span.mb-c-pb"),
-      h("span.mb-c-wr"),
-    );
-    rows.set(name, r);
-    return r;
-  }
-  function mapRow(m: MapEntry): HTMLElement {
-    const bonus = bonusCount(m);
-    const by = m.author?.trim() && !/^(unknown|none)$/i.test(m.author.trim()) ? `by ${m.author.trim()}` : "Unknown author";
-    const r = rowShell(m.name, mapArt(m.name, m.thumbnail ?? online?.get(m.name)?.thumbnailUrl ?? null, { className: "mb-thumb" }), m.name, bonus ? `${by}, ${bonus} bonus${bonus > 1 ? "es" : ""}` : by, true);
-    if (bonus) r.querySelector(".mb-name small")!.setAttribute("title", "Bonus tracks are timed and ranked separately, always in Normal style");
-    return r;
-  }
   function tutorialRow(): HTMLElement {
     return rows.get(TUTORIAL_MAP) ?? rowShell(TUTORIAL_MAP, tutorialArt("mb-thumb"), "Tutorial", "Learn to bhop");
   }
   /** Status cells for the selected style. */
   function paint(name: string): void {
+    if (seq !== browserSeq) return;
     const r = rows.get(name);
     if (!r) return;
     const [tierCell, pbCell, wrCell] = [r.querySelector<HTMLElement>(".mb-c-tier")!, r.querySelector<HTMLElement>(".mb-c-pb")!, r.querySelector<HTMLElement>(".mb-c-wr")!];
@@ -339,6 +389,60 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
     setFavorite(name, !isFavorite(name));
   }
 
+  // ---- groups (the panel's Groups menu)
+  function groupItems(name: string, btn: HTMLElement): MenuItem[] {
+    const shown = groupOf(collection);
+    const queue = readQueue();
+    // In order: the group or Favorites on show, from this map; a queue started here stops here.
+    const orderable = collection === FAVORITES ? "Favorites" : shown ? `“${shown.name}”` : null;
+    return [
+      ...mapGroups().map((g): MenuItem => {
+        const on = g.maps.has(name);
+        return { label: g.name, checked: on, run: () => void (setInGroup(g.id, name, !on) && whisper(on ? `Removed from ${g.name}` : `Added to ${g.name}`, { at: btn })) };
+      }),
+      { label: "New group…", run: () => newGroup(name, btn) },
+      queue?.set === collection
+        ? { label: `Stop playing ${orderable ?? `“${queue.name}”`} in order`, run: () => stopInOrder() }
+        : orderable ? { label: `Play ${orderable} in order`, run: () => playInOrder(name) } : null,
+      shown && { label: `Rename “${shown.name}”…`, run: () => renameShown(shown) },
+      shown && { label: `Delete “${shown.name}”`, tone: "bad", run: () => deleteShown(shown) },
+    ];
+  }
+  /** Plays the set on show in the list's order (not the search or tier: the whole set), from `from` to its last map. */
+  function playInOrder(from: string): void {
+    const name = collection === FAVORITES ? "Favorites" : (groupOf(collection)?.name ?? "");
+    const q = startQueue(collection, name, sorted(maps.filter((m) => inSet(m.name))).map((m) => m.name), from);
+    if (q) play(q.maps[q.at]);
+  }
+  function stopInOrder(): void {
+    stopQueue();
+    whisper("Stopped playing in order");
+  }
+  async function newGroup(name: string, btn: HTMLElement): Promise<void> {
+    const raw = await textDialog({ title: "New group", label: "Group name", confirm: "Create", maxLength: GROUP_NAME_MAX, problem: (t) => groupNameProblem(t) });
+    if (raw === null) return;
+    const id = createGroup(raw, [name]);
+    if (id) whisper(`Added to ${mapGroup(id)!.name}`, { at: btn.isConnected ? btn : null });
+  }
+  async function renameShown(g: MapGroupView): Promise<void> {
+    const raw = await textDialog({ title: "Rename group", label: "Group name", confirm: "Rename", value: g.name, maxLength: GROUP_NAME_MAX, problem: (t) => groupNameProblem(t, g.id) });
+    if (raw !== null) renameGroup(g.id, raw);
+  }
+  function deleteShown(g: MapGroupView): void {
+    const was = deleteGroup(g.id);
+    if (!was) return;
+    toast(`Deleted ${was.name}.`, {
+      action: {
+        label: "Undo",
+        run: () => {
+          restoreGroup(was);
+          collection = GROUP + was.id;
+          render();
+        },
+      },
+    });
+  }
+
   // ---- filters
   function renderTiers(): void {
     const hadFocus = tiers.contains(document.activeElement);
@@ -354,7 +458,7 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
             role: "radio",
             "aria-checked": String(on),
             title: t === "all" ? "Every tier" : t === "x" ? `Unrated (${counts.get(t)} maps)` : `Tier ${t}, ${tierName(Number(t))} (${counts.get(t)} maps)`,
-            onclick: () => ((tierFilter = t), render()),
+            onclick: () => ((tierFilter = t), refilter()),
           },
           t === "all" ? "All" : t === "x" ? "?" : t,
         );
@@ -364,12 +468,27 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
   }
   function renderSets(): void {
     const present = COLLECTIONS.filter(([id]) => maps.some((m) => m.collections?.includes(id)));
-    const done = (label: string, inSet: MapEntry[]) => `${label}, ${inSet.filter((m) => getPB(m.name, style)).length} of ${inSet.length} done`;
+    const isDone = (name: string) => !!getPB(name, style);
+    const done = (label: string, inSet: MapEntry[]) => `${label}, ${inSet.filter((m) => isDone(m.name)).length} of ${inSet.length} done`;
     const favs = maps.filter((m) => isFavorite(m.name));
+    // The set on show, tier by tier (disabled lines: read, not picked).
+    const group = groupOf(collection);
+    const setName = collection === "all" ? "All maps" : collection === FAVORITES ? "Favorites" : (group?.name ?? COLLECTIONS.find(([id]) => id === collection)?.[1] ?? "");
+    const onShow = maps.filter((m) => inSet(m.name));
+    const tierLines = doneByTier(
+      onShow.map((m) => m.name),
+      (n) => tierKey(byName.get(n)!),
+      isDone,
+    ).map((t) => h("option", { disabled: true, value: `tier:${t.tier}` }, `${t.tier === "x" ? "T?" : `T${t.tier}`} · ${t.done} of ${t.total}`));
     setSel.replaceChildren(
       h("option", { value: "all" }, "All maps"),
       h("option", { value: FAVORITES }, favs.length ? done("Favorites", favs) : "Favorites"),
+      ...mapGroups().map((g) => {
+        const inSet = maps.filter((m) => g.maps.has(m.name));
+        return h("option", { value: GROUP + g.id }, inSet.length ? done(g.name, inSet) : g.name);
+      }),
       ...present.map(([id, label]) => h("option", { value: id }, done(label, maps.filter((m) => m.collections?.includes(id))))),
+      ...(tierLines.length ? [h("optgroup", { label: `${setName} by tier` }, ...tierLines)] : []),
     );
     setSel.value = collection;
   }
@@ -377,31 +496,42 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
   const popularity = (m: MapEntry) => online?.get(m.name)?.runners ?? 0;
   const byTier = (a: MapEntry, b: MapEntry) => (tierOf(a, online?.get(a.name)) ?? 99) - (tierOf(b, online?.get(b.name)) ?? 99) || a.name.localeCompare(b.name);
   const unfinished = (m: MapEntry) => played.has(m.name) && !getPB(m.name, style);
+  /** When the map came to the site (maps come in batches: within one, A to Z). */
+  const addedAt = (m: MapEntry) => online?.get(m.name)?.added ?? 0;
 
-  let landed = false;
-  function render(): void {
-    persist();
-    renderTiers();
-    renderSets();
-    const q = query.toLowerCase().trim();
-    const shown = maps.filter((m) => {
-      if (q && !`${m.name} ${m.title ?? ""} ${m.author ?? ""}`.toLowerCase().includes(q)) return false;
-      if (tierFilter !== "all" && tierKey(m) !== tierFilter) return false;
-      if (collection === FAVORITES ? !isFavorite(m.name) : collection !== "all" && !m.collections?.includes(collection)) return false;
-      return true;
-    });
-    shown.sort((a, b) => {
+  /** The map is in the set on show (all maps, Favorites, a group or a collection). */
+  function inSet(name: string): boolean {
+    const group = groupOf(collection);
+    return collection === FAVORITES ? isFavorite(name) : group ? group.maps.has(name) : collection === "all" || !!byName.get(name)?.collections?.includes(collection);
+  }
+  /** Maps in the list's sort order (sorted in place). */
+  function sorted(list: MapEntry[]): MapEntry[] {
+    return list.sort((a, b) => {
       if (sort === "popular") return popularity(b) - popularity(a) || byTier(a, b);
-      if (sort === "newest") return (b.added ?? "").localeCompare(a.added ?? "") || a.name.localeCompare(b.name);
+      if (sort === "newest") return addedAt(b) - addedAt(a) || a.name.localeCompare(b.name);
       if (sort === "name") return a.name.localeCompare(b.name);
       if (sort === "unplayed") return Number(played.has(a.name)) - Number(played.has(b.name)) || byTier(a, b);
       if (sort === "unfinished") return Number(unfinished(b)) - Number(unfinished(a)) || byTier(a, b);
       return byTier(a, b);
     });
+  }
+
+  let landed = false;
+  function render(): void {
+    // A previous list's slower API/style request must not take the shared rows out of the current list.
+    if (seq !== browserSeq) return;
+    // The group on show was deleted (here, or on another device): back to every map.
+    if (collection.startsWith(GROUP) && !groupOf(collection)) collection = "all";
+    const group = groupOf(collection);
+    persist();
+    renderTiers();
+    renderSets();
+    const q = query.toLowerCase().trim();
+    const shown = sorted(maps.filter((m) => listed(m, { q, tier: tierFilter, inSet, tierKey: (n) => tierKey(byName.get(n)!) })));
     // The tutorial: pinned first while it's on the list; hidden, a search still finds it (and so does its own link).
     const tut = tutorialEnabled() && (q ? matchesTutorial(q) : tutorialPrompt() || selected === TUTORIAL_MAP);
     visible = [...(tut ? [TUTORIAL_MAP] : []), ...shown.map((m) => m.name)];
-    const els = visible.map((n) => rows.get(n) ?? (n === TUTORIAL_MAP ? tutorialRow() : mapRow(byName.get(n)!)));
+    const els = visible.map((n) => rows.get(n) ?? (n === TUTORIAL_MAP ? tutorialRow() : mapRow(byName.get(n)!, online?.get(n)?.thumbnailUrl ?? null)));
     for (const n of visible) paint(n);
     list.replaceChildren(...els);
     // The first real paint lands row by row (only rows near the top are seen: the rest are capped at the last delay).
@@ -412,14 +542,39 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
     search.placeholder = maps.length ? `Search ${maps.length} maps or authors` : "Search maps or authors";
     // (No favorites yet is said even under the pinned tutorial: the list would look like the filter did nothing.)
     const noFavorites = maps.length > 0 && collection === FAVORITES && !maps.some((m) => isFavorite(m.name));
-    empty.hidden = visible.length > 0 && !noFavorites;
+    const emptyGroup = maps.length > 0 && !!group && !maps.some((m) => group.maps.has(m.name));
+    empty.hidden = visible.length > 0 && !noFavorites && !emptyGroup;
     empty.textContent = !maps.length
       ? "No maps found. Run tools/scripts/gen-map-index.ts to build maps/index.json."
       : noFavorites
         ? "No favorites yet. Star a map to add it."
-        : "No maps match. Try another search, tier or set.";
+        : emptyGroup
+          ? "No maps in this group yet. Add one with Groups, next to the star. "
+          : "No maps match. Try another search, tier or set.";
+    // (An empty group has no map panel to reach its Groups menu from, so its delete is here.)
+    if (emptyGroup) empty.append(h("button.link-btn", { type: "button", onclick: () => deleteShown(group) }, "Delete group"));
     if (!selected || !visible.includes(selected)) select(visible.find((n) => n !== TUTORIAL_MAP) ?? visible[0] ?? null, { scroll: false });
     else markSelected();
+  }
+
+  /**
+   * render() for a new set, tier or style: the selected map (the one you're playing, unless you picked another)
+   * stays in the middle of the list while it's still on it, else the list starts at the top.
+   */
+  function refilter(): void {
+    render();
+    centerOn(selected ? (rows.get(selected) ?? null) : null);
+  }
+  /**
+   * Puts a row in the middle of the list (no row: the top). Rows off screen have an estimated height until they're
+   * drawn (content-visibility), so the rows that come into view move it: it's put back for a few frames, unless the
+   * list was scrolled or another map selected meanwhile.
+   */
+  function centerOn(r: HTMLElement | null, frames = 4): void {
+    if (r?.parentElement !== list) return void (list.scrollTop = 0);
+    list.scrollTop = Math.max(0, r.offsetTop - list.offsetTop - list.clientHeight / 2 + r.offsetHeight / 2);
+    const at = list.scrollTop;
+    if (frames) requestAnimationFrame(() => list.scrollTop === at && selected === r.dataset.name && centerOn(r, frames - 1));
   }
 
   // ---- selection + the panel
@@ -441,6 +596,14 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
     clearTimeout(settle);
     if (o2.now) showDetail();
     else settle = window.setTimeout(showDetail, SETTLE_MS);
+  }
+  /** The die: a map from the list, selected like a click (in the middle of the list, its panel open). */
+  function pickRandom(): void {
+    const name = randomMap(visible.filter((n) => n !== TUTORIAL_MAP), selected);
+    if (!name) return;
+    select(name, { focus: true, now: true, scroll: false });
+    centerOn(rows.get(name) ?? null);
+    if (matchMedia("(max-width: 52rem)").matches) root.classList.add("show-detail");
   }
   function play(name: string | null): void {
     if (!name) return;
@@ -490,6 +653,8 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
     const bonus = bonusCount(m);
     const isRanked = ranked(m.name);
     const current = m.name === o.current;
+    // Yours on this device (map-time.ts).
+    const onMap = mapTime.get(m.name);
     const meta = h(
       "p.mbd-meta",
       null,
@@ -497,10 +662,15 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
       h("span", null, m.author?.trim() ? `by ${m.author.trim()}` : "Unknown author"),
       bonus ? h("span", { title: "Bonus tracks are timed and ranked separately, always in Normal style" }, `${bonus} bonus track${bonus > 1 ? "s" : ""}`) : null,
       m.size && m.size > 48 << 20 ? h("span", { title: "Download size" }, fmtBytes(m.size)) : null,
+      sum?.added ? h("span", null, `Added ${new Date(sum.added).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`) : null,
+      onMap.attempts ? h("span", null, attemptsText(onMap.attempts)) : null,
+      onMap.seconds >= 60 ? h("span", null, `${playedText(onMap.seconds)} played`) : null,
     );
     const playBtn = h("button.btn.primary.mbd-play", { type: "button", onclick: () => play(m.name) }, current ? "Resume" : "Play");
     const star = h("button.btn.mbd-star", { type: "button", onclick: () => toggleFavorite(m.name) }, icon("star"));
     paintStar(star, m.name);
+    const groups: HTMLButtonElement = h("button.btn.mbd-groups", { type: "button" }, "Groups");
+    withMenu(groups, () => groupItems(m.name, groups), { label: "Groups" });
     const share = shareButton("btn mbd-share", () => ({ url: mapUrl(m.name), title: `${m.name} · bunnyhop.lol`, text: `${m.name} on bunnyhop.lol` }), `Link to ${m.name} copied`);
     return h(
       "div.mbd-inner",
@@ -517,7 +687,7 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
           label: styleLabel(style),
           onFull: () => boardDialog(m, style, o.current, o.onPick, (id) => (applyStyle(id), sw.set(id))),
         }),
-        h("div.mbd-actions", null, playBtn, star, share),
+        h("div.mbd-actions", null, playBtn, star, groups, share),
       ),
     );
   }
@@ -529,7 +699,7 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
     setSelectedStyle(id); // in game, the session switches style and restarts (style-picker listeners)
     void onlineMaps(id).then((on) => {
       online = on;
-      render();
+      refilter();
       showDetail(true);
     });
   }
@@ -591,6 +761,7 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
       render();
     }
   });
+  // A new sort starts at the top (Newest is asked for to see the newest); the filters keep your map in view.
   sortSel.addEventListener("change", () => {
     sort = sortSel.value as Sort;
     render();
@@ -598,8 +769,7 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
   });
   setSel.addEventListener("change", () => {
     collection = setSel.value;
-    render();
-    list.scrollTop = 0;
+    refilter();
   });
   root.addEventListener("keydown", (e) => {
     if (e.key === "/" && !typing(e.target)) {
@@ -625,6 +795,15 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
     renderSets();
   });
   syncFavorites();
+  // Groups: a change this page made re-labels the set menu (a map taken out of the group on show stays until the list is
+  // filtered again, like an unstar); the account's groups arriving, or the group on show going, re-filters.
+  onMapGroupsChange(root, (server) => {
+    const gone = collection.startsWith(GROUP) && !groupOf(collection);
+    if (gone) collection = "all";
+    if ((server || gone) && maps.length) return render();
+    renderSets();
+  });
+  syncMapGroups();
   onPBChange(root, () => {
     for (const name of rows.keys()) paint(name);
     if (maps.length) render();
@@ -637,25 +816,39 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
   list.append(...Array.from({ length: 8 }, () => h("div.mb-row.skeleton", { "aria-hidden": "true" }, h("span.mb-thumb"), h("span.mb-name"))));
   detail.append(h("div.mbd-inner.skeleton", { "aria-hidden": "true" }, h("div.card-art.mbd-art"), h("div.mbd-main")));
   void (async () => {
-    [maps, online] = await Promise.all([fetchMapIndex(), onlineMaps(style)]);
+    const pending = onlineMaps(style);
+    // The map it opens on is known from the (local) index alone: its board starts now, beside the much bigger /maps
+    // (map-board.ts keeps it for the panel). Unless /maps then says the map is unranked, that's the panel's request.
+    const index = await fetchMapIndex();
+    const preselect = () => {
+      const last = localStorage.getItem("bunnyhop:last-map");
+      // First visit (nothing played): the tutorial when it's on the list, else today's first map (first-map.ts).
+      const fresh = !played.size && !last;
+      return (
+        [o.focus, fresh && tutorialPrompt() ? TUTORIAL_MAP : null, o.current, last, firstMapOfTheDay()].find(
+          (n) => n && (n === TUTORIAL_MAP ? tutorialEnabled() : index.some((m) => m.name === n)),
+        ) ?? null
+      );
+    };
+    const early = preselect();
+    if (early && early !== TUTORIAL_MAP && seq === browserSeq) preloadMapBoard(early, style);
+    [maps, online] = [index, await pending];
+    if (seq !== browserSeq) return;
     for (const m of maps) byName.set(m.name, m);
     played = playedMaps();
-    const last = localStorage.getItem("bunnyhop:last-map");
-    // First visit (nothing played): the tutorial when it's on the list, else the start map.
-    const fresh = !played.size && !last;
-    const pref =
-      [o.focus, fresh && tutorialPrompt() ? TUTORIAL_MAP : null, o.current, last, START_MAP].find(
-        (n) => n && (n === TUTORIAL_MAP ? tutorialEnabled() : maps.some((m) => m.name === n)),
-      ) ?? null;
+    const pref = preselect();
     selected = pref;
     render();
     if (pref) select(pref, { now: true, scroll: false });
     // The screen may still be on its way in (menu.ts swaps it in a view transition): focus and scroll once it's there.
     const cur = selected ? rows.get(selected) : null;
     const reveal = (tries: number) => {
+      if (seq !== browserSeq) return;
       if (!root.isConnected) return void (tries && requestAnimationFrame(() => reveal(tries - 1)));
+      // Rows excluded by this list's filters may still be in a previous, closed view.
+      for (const r of rows.values()) if (!r.isConnected) r.remove();
       (cur ?? search).focus({ preventScroll: true });
-      if (cur) list.scrollTop = Math.max(0, cur.offsetTop - list.offsetTop - list.clientHeight / 2 + cur.offsetHeight / 2);
+      if (cur) centerOn(cur);
     };
     reveal(60);
     // Your WRs: the account's id against each record holder (once it answers).

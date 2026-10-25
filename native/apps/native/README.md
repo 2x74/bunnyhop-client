@@ -1,4 +1,4 @@
-# Native client — v0.0.1 preview
+# Native client — preview
 
 This fork's primary client is C++20/SDL3/OpenGL, linked to the shared Rust
 simulation through a C ABI. Input, simulation ticks, rendering, timer rules,
@@ -17,6 +17,12 @@ macOS ARM64 has been built and smoke-tested. Linux x64 and Windows x64 are
 automated build targets, with execution and physical input validation reported
 separately in the [release notes](https://github.com/2x74/bunnyhop-client/releases).
 See the repository [release process](../../../docs/releases.md).
+
+## Current compatibility
+
+This source targets physics 15, timer rules 2 and verifier
+`bunnyhop-web/3cca0f22a3c3`. See [qualification notes](../../../docs/current-compatibility.md)
+for scope, test evidence and remaining live-score requirements.
 
 ## Build and play
 
@@ -80,15 +86,27 @@ current server WASM/physics/timer rules enables ranked upload. A local, stale,
 unknown or expired release keeps the replay on disk. Sign in through the menu
 to use an existing account; it does not import another browser's cookies.
 
+SDL motion reports are queued by their event timestamps and consumed at native
+tick boundaries. Slow-frame catch-up no longer assigns the last polled angle to
+the first tick. Rendering previews pending motion without advancing the recording.
+Focus/menu/restart transitions discard stale queued motion; teleports rebase the
+view while preserving later reports. Keyboard/button timing is unchanged.
+
 Integer SDL mouse counts produce the existing counted-yaw replay telemetry.
 Fractional trackpad deltas remain exact and use the uncounted format rather than
-being rounded into mouse counts. Native recording and playback support the
-existing BHR versions, including loadout and inspect events. The native client
+being rounded into mouse counts. Native playback supports BHR versions 1–10, including fractional counted yaw
+and manual-turn provenance from current web replays. Native recording retains its
+existing honest counted/uncounted formats, including loadout and inspect events. The native client
 does not yet run a client-side WASM self-check. Server verification and signed
 heartbeats remain enabled. Recordings are currently capped at 180,000 commands
 (about 30 minutes); longer recordings cannot upload. Press R for a new recording
 after a completed attempt. A pending server result may take longer than the
-menu's 30-second status-poll window; the replay remains on disk.
+menu's 30-second status-poll window; the replay remains on disk. Completed
+uploads survive starting another attempt (up to four in flight), but closing the
+app does not persist heartbeat tokens or an automatic retry job. Changing the
+confirmed account ID blocks the old attempt from further beats/upload; restart
+after signing in or switching accounts. Same-account profile refreshes preserve
+the attempt. An unavailable account check keeps the attempt local.
 
 The replay library can watch, seek, pause, change playback speed, race a ghost,
 import and export BHR files. Delete moves a replay into the local trash folder.

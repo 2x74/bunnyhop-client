@@ -9,8 +9,115 @@
 
 namespace {
 bool close(double a,double b,double tolerance=1e-5) { return std::abs(a-b)<tolerance; }
+void timestamped_input() {
+    struct Motion {uint64_t time;double x,y;};
+    const Motion reports[]={{0,1,0},{5,2,1},{10,3,2},{10,-1,-1},
+        {11,4,1},{20,-2,-1},{21,5,0},{35,.125,.5}};
+    native::Input delayed,even;
+    delayed.set_angles(0,90);even.set_angles(0,90);
+    for(const auto &r:reports)delayed.motion_at(r.time,r.x,r.y);
+    delayed.frame_at(5);delayed.frame_at(20);
+    assert(delayed.yaw()==90 && delayed.pitch==0);
+    const auto empty=delayed.look_sample();
+    assert(empty && empty->events==0 && empty->frames==0 && empty->count==0);
+    // Rendering previews pending motion on a copy, never advancing the tick input.
+    auto preview=delayed;preview.consume_all();
+    assert(close(preview.yaw(),90-12.125*.044));
+    assert(delayed.yaw()==90 && delayed.pitch==0);
+    size_t next=0;
+    for(uint64_t tick_end:{10,20,30,40}) {
+        while(next<std::size(reports)&&reports[next].time<=tick_end) {
+            const auto &r=reports[next++];even.motion_at(r.time,r.x,r.y);
+        }
+        if(tick_end==10)even.frame_at(5);
+        if(tick_end==20)even.frame_at(20);
+        delayed.consume_until(tick_end);even.consume_until(tick_end);
+        const auto a=delayed.command(),b=even.command();
+        assert(a.yaw==b.yaw && a.pitch==b.pitch && a.buttons==b.buttons);
+        const auto al=delayed.look_sample(),bl=even.look_sample();
+        assert(bool(al)==bool(bl));
+        if(al) {
+            assert(al->base==bl->base && al->k==bl->k && al->count==bl->count);
+            assert(al->epoch==bl->epoch && al->kind==bl->kind);
+            assert(al->events==bl->events && al->reports==bl->reports && al->frames==bl->frames);
+            assert(float(native::Input::normalize(al->base-al->count*al->k))==a.yaw);
+            const int counts[]={5,7,12};
+            assert(al->count==counts[tick_end/10-1]);
+        } else assert(tick_end==40); // Fractional reports select the uncounted path.
+    }
+    const double final_yaw=delayed.yaw();delayed.consume_all();
+    assert(delayed.yaw()==final_yaw); // No report can be consumed twice.
+
+    native::Input boundary;
+    boundary.motion_at(11,7,0);boundary.motion_at(10,2,5000);boundary.motion_at(10,-1,-5000);
+    boundary.frame_at(10);boundary.frame_at(11);
+    boundary.consume_until(9);auto look=boundary.look_sample();
+    assert(look && look->count==0 && look->events==0 && look->frames==0);
+    boundary.consume_until(10);look=boundary.look_sample();
+    assert(look && look->count==1 && look->events==2 && look->reports==2 && look->frames==1);
+    assert(boundary.pitch==-89); // Equal timestamps preserve delivery order through pitch clamps.
+    boundary.consume_until(10);look=boundary.look_sample();assert(look->events==0 && look->frames==0);
+    boundary.consume_until(11);look=boundary.look_sample();
+    assert(look->count==8 && look->events==1 && look->frames==1);
+}
+
+void queued_resets_and_settings() {
+    native::Input input;input.set_angles(0,90);
+    input.motion_at(10,2,1);input.motion_at(20,3,2);input.motion_at(30,-1,-1);
+    input.consume_until(10);auto look=input.look_sample();assert(look->count==2 && look->events==1);
+    // A simulation teleport rebases the consumed angle, preserving later real reports.
+    BhState state{};state.events=native::teleported;state.teleport_angles[0]=10;state.teleport_angles[1]=180;
+    input.events(state);const auto teleport_epoch=input.epoch;
+    input.consume_until(20);look=input.look_sample();
+    assert(close(input.yaw(),180-3*.044) && close(input.pitch,10+2*.044));
+    assert(look->epoch==teleport_epoch && look->kind==2 && look->count==3 && look->events==1);
+    state.events=native::angles_changed;state.angle_change[0]=2;state.angle_change[1]=90;
+    input.events(state);input.consume_until(30);look=input.look_sample();
+    assert(close(input.yaw(),270-2*.044) && close(input.pitch,12+.044));
+    assert(look->kind==3 && look->count==-1 && look->events==1);
+
+    input.button(native::forward,true);input.pulse=native::jump;
+    input.motion_at(40,100,100);input.frame_at(40);input.frame();
+    // Pause, focus/menu capture changes and restarts discard queued reports/telemetry.
+    input.clear_at(35);input.set_angles(0,90);
+    input.motion_at(34,100,100);input.motion_at(35,100,100);input.frame_at(35);
+    input.consume_all();look=input.look_sample();
+    assert(input.command().buttons==0 && input.yaw()==90 && input.pitch==0);
+    assert(look->count==0 && look->events==0 && look->reports==0 && look->frames==0);
+    input.motion_at(36,2,1);input.frame_at(36);input.consume_until(36);look=input.look_sample();
+    assert(close(input.yaw(),90-2*.044) && look->events==1 && look->frames==1);
+    input.motion_at(50,100,100);input.clear();input.consume_all();
+    assert(close(input.yaw(),90-2*.044));
+
+    native::Input settings;
+    settings.motion_at(10,2,3);settings.set_sensitivity(3);
+    settings.separate_vertical=true;settings.vertical_sensitivity=5;
+    settings.motion_at(20,4,5);
+    settings.consume_until(10);look=settings.look_sample();
+    assert(close(settings.yaw(),360-2*.044) && close(settings.pitch,3*.044));
+    assert(look->k==2*.022 && look->count==2 && look->events==1);
+    const double before=settings.yaw();settings.consume_until(20);look=settings.look_sample();
+    assert(close(settings.yaw(),before-4*.066) && close(settings.pitch,3*.044+5*.11));
+    assert(look->k==3*.022 && look->count==4 && look->events==1 && look->kind==4);
+    assert(close(look->base,before));
+    const double after=settings.yaw();settings.set_sensitivity(4);look=settings.look_sample();
+    assert(settings.yaw()==after && look->count==0 && look->kind==4 && look->events==0);
+
+    native::Input fractional;
+    fractional.motion_at(1,std::numeric_limits<double>::infinity(),0);
+    fractional.motion_at(1,0,std::numeric_limits<double>::quiet_NaN());
+    for(uint64_t i=1;i<=8;++i) {
+        fractional.motion_at(i,.125,.25);fractional.frame_at(i);fractional.consume_until(i);
+        look=fractional.look_sample();
+        if(i<8)assert(!look);
+        else assert(look && look->count==1 && look->events==1 && look->reports==1 && look->frames==1);
+        assert(close(fractional.yaw(),native::Input::normalize(-double(i)*.125*.044)));
+    }
+    fractional.consume_all();look=fractional.look_sample();assert(look->events==0 && look->frames==0);
+}
 }
 int main() {
+    timestamped_input();queued_resets_and_settings();
     native::Input input;
     input.set_angles(0,90);
     for(int i=0;i<10000;++i) input.motion(.125,.001);

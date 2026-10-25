@@ -486,6 +486,8 @@ export interface RosterPlayer {
   nameBadges?: string[]; giftsSent?: number; gifterColors?: string[]; gifterAnimated?: boolean;
   /** Staff-granted special badges (creators.ts SPECIAL_BADGES, 0.0.21). Absent from older servers. */
   special?: string[];
+  /** Profile flag (countries.ts code; null = none), shown on the scoreboard. Absent from older servers. */
+  country?: string | null;
 }
 
 export interface RoomInfo {

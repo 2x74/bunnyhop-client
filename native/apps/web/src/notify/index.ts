@@ -496,6 +496,9 @@ function flip(container: HTMLElement, mutate: () => void): void {
 // Moments and celebrations: shared parts
 
 /** The reward's disc: the level number, the emblem given, or a spark. */
+/** The emblem wrap's classes for its 3D model: `.has-model`, and `.nt-model-off` if it gave up already (item3d.ts). */
+const modelClass = (s: CelebrationSpec): string => (s.model ? (s.model.el.dataset.state === "off" ? ".has-model.nt-model-off" : ".has-model") : "");
+
 function emblemOf(s: CelebrationSpec): { emblem: HTMLElement; level: HTMLElement | null; shine: HTMLElement | null } {
   const emblem = h("span.nt-cel-emblem", { "aria-hidden": "true" });
   let level: HTMLElement | null = null;
@@ -544,7 +547,7 @@ function showMoment(n: Note<Data>, s: CelebrationSpec): void {
   const title = h("b.nt-cel-title", null, s.title);
   const detail = s.detail ? h("span.nt-cel-detail", null, s.detail) : null;
   const m = s.mood ? mascot(s.mood, { className: "nt-cel-mascot" }) : null;
-  const slab = h("div.nt-cel-slab", null, h(`span.nt-cel-emblem-wrap${s.model ? ".has-model" : ""}`, null, ringEl, emblem, s.model?.el ?? null), h("div.nt-cel-text", null, kicker, title, detail), s.action ? actionButton(n, s.action) : null);
+  const slab = h("div.nt-cel-slab", null, h(`span.nt-cel-emblem-wrap${modelClass(s)}`, null, ringEl, emblem, s.model?.el ?? null), h("div.nt-cel-text", null, kicker, title, detail), s.action ? actionButton(n, s.action) : null);
   const el = h(`div.nt-cel${m ? ".has-mascot" : ""}`, { style: `--c:${color}`, title: s.hint ?? null }, m?.el ?? null, slab);
   holdable(el, n);
   swipeable(el, n);
@@ -601,7 +604,7 @@ function showStage(n: Note<Data>, s: CelebrationSpec): void {
   const ringEl = h("i.nt-ring", { "aria-hidden": "true" });
   // The dotted trail the reward leaves on its way in (the wordmark's hop line): 6 dots, opacity only. Not on Potato.
   const dots = lite ? [] : arcPoints(ARC.x, ARC.y, ARC.lift).map((p) => h("i.nt-arc-dot", { style: `left:${p.x.toFixed(1)}px;top:${p.y.toFixed(1)}px` }));
-  const wrap = h(`span.nt-stage-reward${s.model ? ".has-model" : ""}`, null, h("span.nt-arc", { "aria-hidden": "true" }, ...dots), ringEl, emblem, s.model?.el ?? null);
+  const wrap = h(`span.nt-stage-reward${modelClass(s)}`, null, h("span.nt-arc", { "aria-hidden": "true" }, ...dots), ringEl, emblem, s.model?.el ?? null);
   const title = h("b.nt-stage-title", null, s.title);
   const sub = s.detail ? h("span.nt-stage-sub", null, s.detail) : null;
   const dim = h("i.nt-stage-dim", { "aria-hidden": "true" });

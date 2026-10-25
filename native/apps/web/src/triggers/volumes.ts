@@ -1,9 +1,10 @@
-// Trigger and clip overlays (!showtriggers / !showclips / !triggers): the kinds, which of them the prefs show, and the
-// geometry. DOM- and three-free, so apps/api/test/trigger-overlay.test.ts runs it.
+// Trigger and clip overlays (!showtriggers / !showclips / !triggers): the kinds, which of them the prefs show and how
+// they look, and the geometry. DOM- and three-free, so apps/api/test/trigger-overlay.test.ts runs it.
 //
 // The core says what each volume is (crates/core/src/game/overlay.rs: the triggers it touches, the brushes the player's
-// solid mask hits) as convex brushes given by their planes; this turns them into one triangle list and one line list for
-// all kinds, each vertex tagged with its kind and its slot (what moves it and switches it on: triggers/overlay.ts).
+// solid mask hits) as convex brushes given by their planes; this turns them into one triangle list and two line lists
+// (every edge; the bottom style's floor outlines) for all kinds, each vertex tagged with its kind and its slot (what
+// moves it and switches it on: triggers/overlay.ts).
 
 import { OVERLAY_STATE_ACTIVE, OVERLAY_STATE_VISIBLE, type OverlayVolume } from "../core";
 
@@ -22,6 +23,21 @@ export type KindId = (typeof KINDS)[number]["id"];
 /** OVERLAY_WHEN_HIDDEN: the volume only blocks while its entity isn't drawn (a func_brush disabled but solid). */
 export const WHEN_HIDDEN = 1;
 
+/**
+ * How volumes draw: filled (see-through faces and their edges), outline (the edges only) or bottom (only the outline of
+ * each volume's floor, its downward faces: where a teleport or booster starts, without boxes in the way).
+ */
+export type TriggerStyle = "filled" | "outline" | "bottom";
+export const TRIGGER_STYLES: readonly [TriggerStyle, string][] = [
+  ["filled", "Filled"],
+  ["outline", "Outline"],
+  ["bottom", "Bottom"],
+];
+
+/** Settings → HUD → Triggers and clips: the slider bounds (settings-io.ts clamps imports to the same). */
+export const TRIGGER_OPACITY: [number, number] = [0, 1];
+export const TRIGGER_THICKNESS: [number, number] = [1, 6];
+
 /** ui/settings.ts Prefs.triggers. */
 export interface TriggerPrefs {
   /** !showtriggers: the trigger kinds. */
@@ -30,13 +46,50 @@ export interface TriggerPrefs {
   clips: boolean;
   /** Kinds turned off in the !triggers menu. */
   kinds: Record<KindId, boolean>;
+  /** Colour per kind, "#rrggbb" (defaults: KINDS). */
+  colors: Record<KindId, string>;
+  style: TriggerStyle;
+  /** Opacity of the faces in the filled style. */
+  opacity: number;
+  /** Line width in CSS px (1 = the plain 1px lines). */
+  thickness: number;
 }
+
+const hex = (c: number) => `#${c.toString(16).padStart(6, "0")}`;
 
 export const DEFAULT_TRIGGER_PREFS: TriggerPrefs = {
   show: false,
   clips: false,
   kinds: { teleport: true, push: true, gravity: true, other: true, clip: true, wall: true },
+  colors: Object.fromEntries(KINDS.map((k) => [k.id, hex(k.color)])) as Record<KindId, string>,
+  style: "filled",
+  opacity: 0.16,
+  thickness: 1,
 };
+
+/**
+ * Stored or imported trigger prefs (ui/settings.ts migratePrefs, in place): a colour that isn't "#rrggbb", an unknown
+ * style or a number that isn't one goes (the default takes its place); numbers are clamped to the sliders. Prefs saved
+ * before colours and styles existed have none of them and get the defaults, which are the old look.
+ */
+export function normalizeTriggerPrefs(raw: unknown): void {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
+  const t = raw as Record<string, unknown>;
+  const colors = t.colors;
+  if (colors && typeof colors === "object" && !Array.isArray(colors)) {
+    const c = colors as Record<string, unknown>;
+    for (const k of Object.keys(c)) {
+      if (typeof c[k] === "string" && /^#[0-9a-f]{6}$/i.test(c[k] as string)) c[k] = (c[k] as string).toLowerCase();
+      else delete c[k];
+    }
+  } else delete t.colors;
+  if (!TRIGGER_STYLES.some(([s]) => s === t.style)) delete t.style;
+  for (const [k, [lo, hi]] of [["opacity", TRIGGER_OPACITY], ["thickness", TRIGGER_THICKNESS]] as const) {
+    const v = t[k];
+    if (typeof v === "number" && Number.isFinite(v)) t[k] = Math.min(hi, Math.max(lo, v));
+    else delete t[k];
+  }
+}
 
 const kindDef = (id: KindId) => KINDS.find((k) => k.id === id)!;
 
@@ -57,6 +110,17 @@ export function toggleKind(p: TriggerPrefs, id: KindId): void {
   p.kinds[id] = true;
   if (kindDef(id).group === "triggers") p.show = true;
   else p.clips = true;
+}
+
+/** The !triggers menu's Style item: the next style, round. */
+export function nextStyle(s: TriggerStyle): TriggerStyle {
+  const i = TRIGGER_STYLES.findIndex(([x]) => x === s);
+  return TRIGGER_STYLES[(i + 1) % TRIGGER_STYLES.length][0];
+}
+
+/** The !triggers menu's Line thickness item: 1, 2, 3, 4 px, round (a width set in Settings goes on to the next step). */
+export function nextThickness(px: number): number {
+  return [2, 3, 4].find((s) => s > px) ?? 1;
 }
 
 /** How much a disabled trigger shows (it may switch on later: a delayed teleport, a stage gate). */
@@ -143,6 +207,46 @@ export function brushFaces(planes: ArrayLike<number>): Vec3[][] {
   return faces;
 }
 
+/** Points closer than this (1/8 unit) are one point when edges are matched up. */
+const pointKey = (p: Vec3) => `${Math.round(p[0] * 8)},${Math.round(p[1] * 8)},${Math.round(p[2] * 8)}`;
+
+/**
+ * The bottom style's lines for one brush (its `brushFaces`): the outline of its floor, i.e. the edges of the faces that
+ * look down which no other downward face shares (a box gives its bottom face's four edges; a brush whose underside is
+ * two slopes gives their rim, not the crease between them). In the brush's own space: a rotated brush keeps the floor
+ * it was built with.
+ */
+export function bottomEdges(faces: readonly Vec3[][]): [Vec3, Vec3][] {
+  const edges = new Map<string, { a: Vec3; b: Vec3; n: number }>();
+  for (const f of faces) {
+    // Newell's normal: faces are wound counter-clockwise seen from outside, so it points out.
+    const n: Vec3 = [0, 0, 0];
+    for (let i = 0; i < f.length; i++) {
+      const a = f[i];
+      const b = f[(i + 1) % f.length];
+      n[0] += (a[1] - b[1]) * (a[2] + b[2]);
+      n[1] += (a[2] - b[2]) * (a[0] + b[0]);
+      n[2] += (a[0] - b[0]) * (a[1] + b[1]);
+    }
+    const len = Math.hypot(n[0], n[1], n[2]);
+    const nz = len > 0 ? n[2] / len : 0;
+    // Down, not sideways: a wall's face is never part of the floor.
+    if (nz > -0.01) continue;
+    for (let i = 0; i < f.length; i++) {
+      const a = f[i];
+      const b = f[(i + 1) % f.length];
+      const ka = pointKey(a);
+      const kb = pointKey(b);
+      if (ka === kb) continue;
+      const k = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+      const e = edges.get(k);
+      if (e) e.n++;
+      else edges.set(k, { a, b, n: 1 });
+    }
+  }
+  return [...edges.values()].filter((e) => e.n === 1).map((e) => [e.a, e.b]);
+}
+
 function area(w: Vec3[]): number {
   let x = 0;
   let y = 0;
@@ -172,6 +276,8 @@ export interface OverlayGeometry {
   faces: { position: Float32Array; kind: Float32Array; slot: Float32Array };
   /** Line segments (pairs of vertices), same layout. */
   edges: { position: Float32Array; kind: Float32Array; slot: Float32Array };
+  /** The bottom style's line segments (`bottomEdges` of every volume), same layout. */
+  bottom: { position: Float32Array; kind: Float32Array; slot: Float32Array };
   /** Slot 0 is the static world (identity, always on). */
   slots: Slot[];
   /** Volumes per kind (KINDS order), for the menu. */
@@ -189,6 +295,9 @@ export function buildOverlayGeometry(volumes: readonly OverlayVolume[]): Overlay
   const ep: number[] = [];
   const ek: number[] = [];
   const es: number[] = [];
+  const bp: number[] = [];
+  const bk: number[] = [];
+  const bs: number[] = [];
   for (const v of volumes) {
     const kind = KINDS.findIndex((k) => k.core === v.kind);
     if (kind < 0) continue;
@@ -207,7 +316,11 @@ export function buildOverlayGeometry(volumes: readonly OverlayVolume[]): Overlay
     counts[kind]++;
     // Edges shared by two faces of the brush are drawn once.
     const seen = new Set<string>();
-    const key = (p: Vec3) => `${Math.round(p[0] * 8)},${Math.round(p[1] * 8)},${Math.round(p[2] * 8)}`;
+    for (const [a, b] of bottomEdges(faces)) {
+      bp.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+      bk.push(kind, kind);
+      bs.push(slot, slot);
+    }
     for (const f of faces) {
       for (let i = 1; i + 1 < f.length; i++) {
         for (const p of [f[0], f[i], f[i + 1]]) fp.push(p[0], p[1], p[2]);
@@ -217,8 +330,8 @@ export function buildOverlayGeometry(volumes: readonly OverlayVolume[]): Overlay
       for (let i = 0; i < f.length; i++) {
         const a = f[i];
         const b = f[(i + 1) % f.length];
-        const ka = key(a);
-        const kb = key(b);
+        const ka = pointKey(a);
+        const kb = pointKey(b);
         if (ka === kb) continue;
         const e = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
         if (seen.has(e)) continue;
@@ -232,6 +345,7 @@ export function buildOverlayGeometry(volumes: readonly OverlayVolume[]): Overlay
   return {
     faces: { position: new Float32Array(fp), kind: new Float32Array(fk), slot: new Float32Array(fs) },
     edges: { position: new Float32Array(ep), kind: new Float32Array(ek), slot: new Float32Array(es) },
+    bottom: { position: new Float32Array(bp), kind: new Float32Array(bk), slot: new Float32Array(bs) },
     slots,
     counts,
   };

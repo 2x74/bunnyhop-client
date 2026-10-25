@@ -6,6 +6,7 @@
 // Nothing pops mid-run: toasts from here wait while a timed run is going (notify defer) and messages also land in the
 // chat log as one line, like room chat.
 
+import { appHref } from "../platform/navigation";
 import { api, ApiError, type ApiPlayer, type Dm, type Friend, type FriendWhere, type FriendsView, type Note } from "../api";
 import { dismissKey, toast, whisper } from "../notify";
 import { avatar } from "./avatar";
@@ -190,7 +191,7 @@ export function setFollow(id: string, on: boolean, o: FollowOpts = {}): Promise<
   if (busy) return busy.done;
   if (loadState === "signin") {
     const error = "Sign in to follow players.";
-    if (!o.quiet) toast(error, { key: "follow-signin", action: { label: "Sign in", run: () => void (location.href = api.discordLoginUrl(location.href)) } });
+    if (!o.quiet) toast(error, { key: "follow-signin", action: { label: "Sign in", run: () => void (location.href = api.discordLoginUrl(appHref())) } });
     return Promise.resolve({ ok: false, error });
   }
   const who: Who | undefined = o.who ?? friendById(id) ?? view?.followers.find((x) => x.id === id) ?? view?.following.find((x) => x.id === id);
@@ -239,6 +240,30 @@ export function setFollow(id: string, on: boolean, o: FollowOpts = {}): Promise<
   })();
   pending.set(id, { on, who, done });
   return done;
+}
+
+/**
+ * Hide a follower you don't follow back from your list (they still follow you and aren't told), with Undo. Lands at
+ * once; a failure puts them back.
+ */
+export function dismissFollower(p: ApiPlayer): void {
+  if (!view) return;
+  const at = view.followers.findIndex((x) => x.id === p.id);
+  if (at < 0) return;
+  const row = view.followers[at];
+  view.followers = view.followers.filter((x) => x.id !== p.id);
+  changed();
+  const back = () => {
+    if (view && !view.followers.some((x) => x.id === p.id)) view.followers = [...view.followers.slice(0, at), row, ...view.followers.slice(at)];
+    changed();
+  };
+  const saved = api.dismissFollower(p.id, true);
+  toast(`Hid ${p.name}`, { key: `dismiss:${p.id}`, action: { label: "Undo", run: () => (back(), void saved.then(() => api.dismissFollower(p.id, false)).catch(() => refreshFriends())) } });
+  void saved.catch(() => {
+    dismissKey(`dismiss:${p.id}`);
+    back();
+    toast("Couldn't reach the server.", { tone: "bad" });
+  });
 }
 
 export async function setBlock(id: string, on: boolean): Promise<void> {

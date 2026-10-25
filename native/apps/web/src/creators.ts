@@ -306,13 +306,43 @@ export const CREATOR_GOLD_SVG: Record<CreatorKind, string> = {
   x: `${goldFill("cg-x")}<rect x="2" y="2" width="20" height="20" rx="6" fill="url(#cg-x)"/><path d="M7 6.5h3.1l2.6 3.6 3.1-3.6h1.7l-4 4.6 4.6 6.4h-3.1l-2.8-3.9-3.4 3.9H7.1l4.3-4.9z" fill="${GOLD_INK}"/>`,
 };
 
-export const SPECIAL_BADGES: Record<string, { name: string; svg: string; gold?: boolean }> = {
+// Gauntlet marks (research/GAUNTLETS.md "Marks"): earned in play, never granted (apps/api/src/admin-tools.ts refuses
+// them), and stored with the special badges (apps/api/src/gauntlets.ts awards them: a complete attempt, a closed week).
+// One plate, one colour, dark ink, like the staff shields and Clipper, so each reads at 14 px:
+//   gauntlet          a periwinkle disc with a finish flag: cleared any gauntlet (worn when picked)
+//   weekly-winner     a tangerine calendar page with a 1: won a weekly gauntlet
+//   gauntlet-classic  a gold octagon with 20 engraved, with the gold glint: cleared the 20-map Bunny Hop Map Gauntlet
+// The alternatives drawn for the owner (B / C of each) are in tools/gauntlets/mark-options.ts.
+export const GAUNTLET_PERIWINKLE = "#8e9cff";
+export const GAUNTLET_INK = "#0e1428";
+export const WEEKLY_TANGERINE = "#ff9b54";
+/** Bold ink numerals (system font, like the level tokens' digits). */
+const engraved = (t: string, y: number, size: number, fill: string) =>
+  `<text x="12" y="${y}" text-anchor="middle" font-size="${size}" font-weight="900" fill="${fill}" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif">${t}</text>`;
+export const GAUNTLET_SVG =
+  `<circle cx="12" cy="12" r="11" fill="${GAUNTLET_PERIWINKLE}"/><path d="M8.2 5.4v13.4" stroke="${GAUNTLET_INK}" stroke-width="2.2" stroke-linecap="round"/>` +
+  `<path d="M9.2 5.6h8.6l-2.5 3.5 2.5 3.5H9.2z" fill="${GAUNTLET_INK}"/>`;
+export const WEEKLY_WINNER_SVG =
+  `<rect x="2.5" y="4.2" width="19" height="17.6" rx="3.6" fill="${WEEKLY_TANGERINE}"/><path d="M7.4 2.4v4M16.6 2.4v4" stroke="${GAUNTLET_INK}" stroke-width="2.2" stroke-linecap="round"/>` +
+  engraved("1", 19.4, 13, GAUNTLET_INK);
+export const GAUNTLET_CLASSIC_SVG =
+  `${goldFill("gc-oct")}<path d="M8.1 1.4h7.8l5.7 5.7v7.8l-5.7 5.7H8.1l-5.7-5.7V7.1z" fill="url(#gc-oct)"/>` +
+  `<path d="M8.7 3h6.6l4.7 4.7v6.6L15.3 19H8.7L4 14.3V7.7z" fill="none" stroke="${GOLD_INK}" stroke-width=".8" opacity=".5"/>${engraved("20", 15.6, 10.5, GOLD_INK)}`;
+
+/** earned: awarded by play (never staff-granted). quiet: worn only when the player picks it (a common mark). */
+export const SPECIAL_BADGES: Record<string, { name: string; svg: string; gold?: boolean; earned?: boolean; quiet?: boolean }> = {
   clipper: { name: "Clipper", svg: CLIPPER_SVG },
+  gauntlet: { name: "Gauntlet clear", svg: GAUNTLET_SVG, earned: true, quiet: true },
+  "weekly-winner": { name: "Weekly gauntlet winner", svg: WEEKLY_WINNER_SVG, earned: true },
+  "gauntlet-classic": { name: "Bunny Hop Map Gauntlet", svg: GAUNTLET_CLASSIC_SVG, gold: true, earned: true },
   ...Object.fromEntries(
     CREATOR_KINDS.map((k) => [`creator-gold-${k}`, { name: `Top ${({ youtube: "YouTube", twitch: "Twitch", tiktok: "TikTok", x: "X" } as const)[k]} creator`, svg: CREATOR_GOLD_SVG[k], gold: true }]),
   ),
 };
 export const isSpecialBadge = (id: unknown): id is string => typeof id === "string" && Object.hasOwn(SPECIAL_BADGES, id);
+/** Special badges staff may give or take: not the ones earned by play (the gauntlet marks). */
+export const isGrantableBadge = (id: unknown): id is string => isSpecialBadge(id) && !SPECIAL_BADGES[id].earned;
+export const GRANTABLE_BADGES = Object.fromEntries(Object.entries(SPECIAL_BADGES).filter(([, d]) => !d.earned));
 
 // ---------------------------------------------------------------------------------------------
 // Profile links
@@ -449,7 +479,7 @@ function nameBadgesOf(saved: string | null | undefined): { nameBadges?: string[]
 }
 export const gifterTier = (n = 0) => [...GIFTER_TIERS].reverse().find((t) => n >= t.goal);
 export function equippedNameBadges(m: PlayerMarks): string[] {
-  const legacy = [m.verified && "verified", m.creator && "creator", m.booster && "booster", m.supporter && "supporter", ...(m.special ?? [])].filter(
+  const legacy = [m.verified && "verified", m.creator && "creator", m.booster && "booster", m.supporter && "supporter", ...(m.special ?? []).filter((id) => !SPECIAL_BADGES[id]?.quiet)].filter(
     (x): x is string => typeof x === "string",
   );
   const tier = gifterTier(m.giftsSent);

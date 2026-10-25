@@ -1,9 +1,11 @@
+import { appLocation } from "../platform/navigation";
+import { desktopNoticePending } from "../platform/touch";
 import { setPBAccount, syncPBs } from "../pb";
 import { playerGlowRevision, setPlayerGlow } from "../player/cosmetics";
 // The current player, cached for the page, plus a change signal so every account chip / panel repaints after a
 // rename, sign-in or unlink. ui/account.ts re-exports these for older imports.
 
-import { api, type Profile, type User } from "../api";
+import { api, lastKnownMe, type Profile, type User } from "../api";
 import { h } from "./dom";
 import { avatarImg } from "./avatar";
 import { setLoadout } from "../player/cosmetics";
@@ -25,7 +27,9 @@ export const getReplayIntro = () => replayIntro;
 /** Cheap pre-check before loading ui/onboarding.ts: false once this browser finished or skipped the intro. */
 export const ONBOARDED_KEY = "bunnyhop:onboarded";
 export function onboardingMaybeNeeded(): boolean {
-  return !localStorage.getItem(ONBOARDED_KEY) || new URLSearchParams(location.search).get("intro") === "1";
+  // The Wavedash build's keyboard-and-mouse notice on a phone comes first (platform/touch.ts).
+  if (desktopNoticePending()) return false;
+  return !localStorage.getItem(ONBOARDED_KEY) || appLocation().searchParams.get("intro") === "1";
 }
 
 export function accountAvatar(user: { name: string; avatarUrl: string | null }, size = 24): HTMLElement {
@@ -73,25 +77,51 @@ function recheckLater(shown: User | null): void {
 }
 
 let cachedProfile: Promise<Profile | null> | null = null;
+/** When cachedProfile's GET /players/<me> went out, and api.writes() then (profileFor). */
+let cachedAsk: { p: Promise<Profile | null>; at: number; writes: number } | null = null;
 /** The signed-in player's profile (level, rank title, suggestions); null offline. Cached for the page once it loads. */
 export function myProfile(): Promise<Profile | null> {
   if (cachedProfile) return cachedProfile;
   const glowRevision = playerGlowRevision();
   const p: Promise<Profile | null> = me()
-    .then((u) => (u ? api.profile(u.id) : null))
+    .then((u) => {
+      // (After me(): a guest it just made is a write, but not one the profile could miss.)
+      if (cachedAsk?.p === p) Object.assign(cachedAsk, { at: Date.now(), writes: api.writes() });
+      return u ? api.profile(u.id) : null;
+    })
     .catch(() => {
       if (cachedProfile === p) cachedProfile = null; // a failed load isn't kept: the next call tries again
       return null;
     });
   cachedProfile = p;
+  cachedAsk = { p, at: Date.now(), writes: api.writes() };
   // Keep this device's knife / finish / gloves in step with the account (another device may have changed them).
   void p.then((prof) => {
     if (p !== cachedProfile) return;
+    if (prof) for (const fn of profileListeners) fn(prof);
     if (glowRevision === playerGlowRevision()) setPlayerGlow(prof?.mine ? prof.player.playerGlow ?? null : null);
     if (prof?.mine) setLoadout(loadoutFor(prof.cosmetics, crownOf(heldRanks([prof.rank, ...prof.styles]))));
   });
   return p;
 }
+const profileListeners = new Set<(p: Profile) => void>();
+/** Runs fn with every freshly loaded own profile (platform/hooks.ts: Wavedash's stats follow the verified totals). */
+export function onMyProfile(fn: (p: Profile) => void): void {
+  profileListeners.add(fn);
+}
+
+const REUSE_MS = 60_000;
+/**
+ * A player's profile for a screen (the profile, Stats). Your own reuses myProfile()'s GET /players/<me> (or the one in
+ * flight) while it's under a minute old and nothing was written since, as a copy (screens edit theirs in place);
+ * anyone else's, or an older one, is read fresh like before.
+ */
+export function profileFor(id: string): Promise<Profile> {
+  const ask = cachedAsk;
+  if (!ask || ask.p !== cachedProfile || lastKnownMe()?.id !== id || Date.now() - ask.at > REUSE_MS || ask.writes !== api.writes()) return api.profile(id);
+  return ask.p.then((p) => (p?.mine && p.player.id === id ? structuredClone(p) : api.profile(id)));
+}
+
 /** Forget the cached profile (after a verified run). */
 export function refreshMyProfile(): void {
   cachedProfile = null;

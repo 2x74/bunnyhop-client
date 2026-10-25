@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — current-server compatibility
+
+- Update the shared simulation to physics 15 and pin the matching canonical WASM.
+- Decode BHR v10 fractional look data and manual-turn rebases for replay playback.
+- Queue SDL mouse reports by simulation tick deadlines and preserve GL contexts
+  around GTK menu work.
+- Bind ranked attempts to confirmed accounts through actual HTTP dispatch and
+  preserve completed uploads across gameplay restarts.
+- Harden Linux package library paths and dependency closure; retain standalone
+  release resource builds and platform-specific packaging fixes.
+- Refresh shared menu/protocol modules. No release publication or score admission
+  is included; see [qualification notes](docs/current-compatibility.md).
+
 ## v0.0.1 — Native preview
 
 - Introduces the C++20/SDL3/OpenGL native client, linked to the shared Rust game

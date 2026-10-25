@@ -24,6 +24,11 @@ export const HUD_ELEMENTS = [
   { id: "ammo", label: "Ammo" },
   { id: "strafeTrainer", label: "Strafe trainer" },
   { id: "startPre", label: "Start Pre" },
+  { id: "strafeOffsets", label: "Strafe offsets" },
+  { id: "firstJump", label: "First jump tick" },
+  { id: "longJump", label: "Longjump stats" },
+  // Who is watching you in a room (net/spectators.ts), left middle like a CS:S server's spectator list.
+  { id: "spectators", label: "Spectator list" },
 ] as const;
 
 export type HudElId = (typeof HUD_ELEMENTS)[number]["id"];
@@ -61,14 +66,20 @@ export const CLASSIC: HudLayout = {
   keys: P(true, 4, 0, 0.115),
   ghostKeys: P(false, 4, 0.085, 0.115, 0.8),
   graph: P(false, 6, 0.015, -0.03),
-  jumpStats: P(false, 4, 0, -0.1),
-  startPre: P(false, 4, 0, -0.065, 0.85),
+  // The jump block, top to bottom between the in-game toasts (22vh) and the crosshair: last jump, offsets, first
+  // jump tick, jump stats. Start Pre sits left of the speed (the gain tick flashes on its right).
+  jumpStats: P(false, 4, 0, -0.06),
+  startPre: P(false, 7, -0.075, -0.262),
+  strafeOffsets: P(false, 4, 0, -0.13, 0.85),
+  firstJump: P(false, 4, 0, -0.104, 0.85),
+  longJump: P(false, 4, 0, -0.185),
   map: P(true, 0, 0.012, 0.016),
   pb: P(true, 2, -0.012, 0.016),
   fps: P(false, 0, 0.012, 0.045),
   chat: P(true, 6, 0.012, -0.2),
   strafeTrainer: P(false, 1, 0, 0.22, 1.15),
   ammo: P(true, 8, -0.014, -0.022),
+  spectators: P(true, 3, 0.012, -0.06),
 };
 
 export const MINIMAL: HudLayout = {
@@ -82,14 +93,18 @@ export const MINIMAL: HudLayout = {
   keys: P(false, 4, 0, 0.115),
   ghostKeys: P(false, 4, 0.085, 0.115, 0.8),
   graph: P(false, 7, 0, -0.33),
-  jumpStats: P(false, 4, 0, -0.08, 0.85),
-  startPre: P(false, 4, 0, -0.065, 0.85),
+  jumpStats: P(false, 4, 0, -0.06, 0.85),
+  startPre: P(false, 4, -0.06, 0.07, 0.85),
+  strafeOffsets: P(false, 4, 0, -0.13, 0.85),
+  firstJump: P(false, 4, 0, -0.104, 0.85),
+  longJump: P(false, 4, 0, -0.185),
   map: P(false, 0, 0.012, 0.016),
   pb: P(false, 2, -0.012, 0.016),
   fps: P(false, 0, 0.012, 0.045),
   chat: P(true, 6, 0.012, -0.03, 0.9),
   strafeTrainer: P(false, 1, 0, 0.22, 1.15),
   ammo: P(true, 8, -0.014, -0.022, 0.85),
+  spectators: P(true, 3, 0.012, -0.06, 0.9),
 };
 
 export const STREAMER: HudLayout = {
@@ -104,14 +119,47 @@ export const STREAMER: HudLayout = {
   ghostKeys: P(true, 6, 0.15, -0.04, 1.0),
   graph: P(true, 8, -0.02, -0.04, 1.2),
   jumpStats: P(true, 5, -0.02, 0, 1.1),
-  startPre: P(false, 4, 0, -0.065, 0.85),
+  startPre: P(false, 7, -0.09, -0.2, 1.25),
+  strafeOffsets: P(false, 4, 0, -0.13, 0.85),
+  firstJump: P(false, 4, 0, -0.104, 0.85),
+  longJump: P(false, 4, 0, -0.185, 1.1),
   map: P(true, 0, 0.012, 0.016, 1.1),
   pb: P(true, 2, -0.012, 0.016, 1.2),
   fps: P(true, 2, -0.012, 0.055),
   chat: P(true, 3, 0.015, 0.12),
   strafeTrainer: P(false, 1, 0, 0.22, 1.15),
   ammo: P(true, 8, -0.02, -0.125, 1.1),
+  // Above the chat, which sits at left middle here.
+  spectators: P(true, 3, 0.015, -0.14),
 };
+
+/**
+ * Placements the movement elements and the jump stats had before v0.0.25 grouped them (the same in every preset, except
+ * Minimal's jump stats). A saved layout still holding one of these exactly was never moved there: settings.ts moves it
+ * to its preset's current placement (the preset whose speed placement the layout has; else Classic), keeping on / off.
+ * Anything the player placed themselves stays where it is.
+ */
+const RETIRED_PLACES: Partial<Record<HudElId, Omit<HudPlace, "on">[]>> = {
+  jumpStats: [{ a: 4, x: 0, y: -0.1, s: 1 }, { a: 4, x: 0, y: -0.08, s: 0.85 }],
+  startPre: [{ a: 4, x: 0, y: -0.065, s: 0.85 }],
+  strafeOffsets: [{ a: 4, x: 0, y: -0.2, s: 0.85 }],
+  firstJump: [{ a: 4, x: 0, y: -0.16, s: 0.85 }],
+  longJump: [{ a: 4, x: 0, y: -0.27, s: 0.9 }],
+};
+
+const samePlace = (p: Partial<HudPlace> | undefined, q: Omit<HudPlace, "on">) => !!p && p.a === q.a && p.x === q.x && p.y === q.y && p.s === q.s;
+
+/** Moves never-moved elements off their retired placements (RETIRED_PLACES). Mutates `layout`. */
+export function moveRetiredPlaces(layout: Record<string, Partial<HudPlace> | undefined>): void {
+  const preset = [MINIMAL, STREAMER].find((l) => samePlace(layout.speed, l.speed)) ?? CLASSIC;
+  for (const [id, olds] of Object.entries(RETIRED_PLACES) as [HudElId, Omit<HudPlace, "on">[]][]) {
+    const p = layout[id];
+    if (!p || typeof p !== "object" || !olds.some((o) => samePlace(p, o))) continue;
+    const n = preset[id];
+    // Streamer's jump stats never moved (right side): leave it.
+    if (!olds.some((o) => samePlace(n, o))) Object.assign(p, { a: n.a, x: n.x, y: n.y, s: n.s });
+  }
+}
 
 export const PRESETS: { id: string; label: string; layout: HudLayout }[] = [
   { id: "classic", label: "Classic centred", layout: CLASSIC },
@@ -182,10 +230,11 @@ export const DEFAULT_KEYS: KeysPrefs = {
   rows: { wasd: true, actions: true, mouse: true },
 };
 
-// Version byte: 1 = first 14, 2 = first 15, 3 = first 16, 4 = first 17 (through strafe trainer), 5 = all.
+// Version byte: 1 = first 14, 2 = first 15, 3 = first 16, 4 = first 17 (through strafe trainer), 5 = first 18,
+// 6 = first 21 (through longjump stats), 7 = all.
 // Elements an older code doesn't carry keep the Classic placement. The "bhl1." prefix names the format.
-const VERSION = 5;
-const ELEMENTS_IN: Record<number, number> = { 1: 14, 2: 15, 3: 16, 4: 17, [VERSION]: HUD_ELEMENTS.length };
+const VERSION = 7;
+const ELEMENTS_IN: Record<number, number> = { 1: 14, 2: 15, 3: 16, 4: 17, 5: 18, 6: 21, [VERSION]: HUD_ELEMENTS.length };
 const PREFIX = "bhl1.";
 
 function rgb(hex: string): number[] {

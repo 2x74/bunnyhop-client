@@ -156,7 +156,7 @@ export function openGiftDialog(o: GiftDialogOptions = {}): void {
       review.hidden = send.hidden = !ok;
       choose.hidden = ok;
       send.textContent = preview.cost === 1 ? "Send gift" : `Send ${preview.cost} gifts`;
-      status.textContent = ok ? "" : preview.eligibleCount === 0 ? (wanted.mode === "direct" ? "They're already a supporter." : "Nobody can get a gift right now. Supporters are skipped.") : preview.eligibleCount < preview.cost ? `Only ${preview.eligibleCount} player${preview.eligibleCount === 1 ? " is" : "s are"} eligible. Choose fewer gifts.` : `Not enough credits: you have ${preview.credits}.`;
+      status.textContent = ok ? "" : preview.eligibleCount === 0 ? (wanted.mode === "direct" ? "They can't get a gift: they're already a supporter or not eligible." : "Nobody can get a gift right now. Supporters are skipped.") : preview.eligibleCount < preview.cost ? `Only ${preview.eligibleCount} player${preview.eligibleCount === 1 ? " is" : "s are"} eligible. Choose fewer gifts.` : `Not enough credits: you have ${preview.credits}.`;
       if (!send.hidden) send.focus();
     } catch (error) {
       status.textContent = error instanceof Error ? error.message : "Couldn't review this gift. Try again.";

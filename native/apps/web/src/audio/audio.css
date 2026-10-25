@@ -10,6 +10,9 @@
 #audio-btn:hover { background: rgba(30, 34, 44, 0.9); }
 #audio-btn:active { transform: scale(0.94); }
 #audio-btn.off { color: #ff8a8a; }
+/* Waiting for the first click / key press before the browser lets it play (engine.ts unlock). */
+#audio-btn.locked { color: var(--cream-3); }
+#audio-btn.locked:hover { color: var(--cream); }
 body.menu-open #audio-btn { display: flex; }
 /* The replay viewer has its own controls along the bottom: sit above them. */
 body.viewer-open #audio-btn { display: flex; bottom: auto; top: 0.9rem; right: 3.6rem; }
@@ -24,3 +27,30 @@ body.viewer-open #audio-btn { right: calc(1.1rem + 2 * 2.1rem + 2 * 0.4rem); wid
 body.audio-muted:not(.menu-open):not(.viewer-open) #audio-muted { display: block; }
 
 /* The audio toast (mute, now playing) is a notification: notify/notify.css. */
+
+/* Now playing (now-playing.ts): the track's name and three icons, on the speaker button's line, no box. */
+#music-now {
+  position: fixed; right: 3.7rem; bottom: 0.9rem; z-index: 60; height: 2.3rem;
+  display: none; align-items: center; gap: 0.05rem;
+  font-family: var(--font-text); font-size: var(--fs-sm); font-weight: 600; color: var(--cream-2);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+#music-now.on { display: flex; animation: mn-in 0.4s var(--ease-glide) both; }
+@keyframes mn-in { from { opacity: 0; transform: translateY(4px); } }
+#music-now .mn-title {
+  max-width: 14rem; margin-right: 0.45rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  transition: color var(--t-step) var(--ease-glide);
+}
+#music-now.paused .mn-title { color: var(--cream-3); }
+#music-now .mn-btn {
+  width: 1.9rem; height: 1.9rem; padding: 0.42rem; border: 0; border-radius: var(--r-round); background: none;
+  display: inline-flex; align-items: center; justify-content: center; color: var(--cream-3); cursor: pointer;
+  transition: color var(--t-step) var(--ease-glide), background var(--t-step) var(--ease-glide), transform 0.1s;
+}
+#music-now .mn-btn svg { width: 100%; height: 100%; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5)); }
+#music-now .mn-btn:hover { color: var(--cream); background: var(--raise-2); }
+#music-now .mn-btn:active { transform: scale(0.9); }
+#music-now .mn-btn:focus-visible { outline: none; color: var(--cream); box-shadow: var(--ring); }
+#music-now .mn-toggle { color: var(--cream-2); }
+@media (max-width: 760px) { #music-now .mn-title { display: none; } }
+@media (prefers-reduced-motion: reduce) { #music-now.on { animation: none; } }

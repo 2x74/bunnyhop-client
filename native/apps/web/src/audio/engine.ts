@@ -5,15 +5,19 @@
 //          ├─ ui                 menus, rooms, progression
 //          └─ ambience           wind, water loops
 //
-// Autoplay: the AudioContext is created on the first user gesture (click / key / touch). Buffers are fetched and
-// decoded before that through an OfflineAudioContext (no gesture needed), so the first sound after the click is
-// instant. Voices are pre-built gain (+ panner) chains per bus; a play is one AudioBufferSourceNode (the only
+// Autoplay: the AudioContext is created at startup. Where the browser lets the page play sound without a gesture
+// (Chrome's media engagement, a site setting, Firefox's policy) it runs at once; otherwise it starts suspended and the
+// first user gesture anywhere (pointer / click / key / touch) resumes it. Either way everything waiting on audio
+// (onUnlock: music, levels) starts the moment the context runs, whatever started it: a page opened straight onto
+// something that plays by itself (a /replay/<id> link) is not silent until a menu click. Buffers are fetched and
+// decoded through an OfflineAudioContext (no gesture needed), so the first sound after the click is instant. Voices are pre-built gain (+ panner) chains per bus; a play is one AudioBufferSourceNode (the only
 // per-sound allocation WebAudio allows), no closures. Per-tick callers pass plain numbers.
 //
 // Coordinates for positional sounds are Source units (x, y, z with z up), the same as the sim: the listener is set
 // from the render camera every frame (setListenerFromCamera).
 
 import { supporterGiftWave } from "./gift";
+import { UnlockPress } from "./unlock-press";
 import { SFX, SFX_IDS, type SfxId } from "./catalog";
 import { assetUrl, manifest, otherFormat, preferredFormat, sfxPath, type AudioFormat } from "./assets";
 
@@ -39,6 +43,7 @@ export interface LoopHandle {
 export const sliderGain = (v: number) => (v <= 0 ? 0 : Math.pow(Math.min(1, v), 1.7));
 
 const POOL = { sfx: 20, ui: 8, ambience: 4 } as const;
+const GESTURES = ["pointerdown", "mousedown", "pointerup", "mouseup", "click", "keydown", "keyup", "touchend"];
 const SPATIAL_POOL = 14;
 
 type OfflineCtor = new (channels: number, length: number, rate: number) => OfflineAudioContext;
@@ -90,6 +95,9 @@ export class AudioEngine {
   private lastStart: Record<string, number> = {};
   private lastVariant: Record<string, number> = {};
   private unlockFns: (() => void)[] = [];
+  private stateFns: (() => void)[] = [];
+  /** The gesture that got the context running (the speaker button doesn't also mute on that press). */
+  readonly unlockPress = new UnlockPress();
   private levels = { master: 1, music: 1, sfx: 1, ui: 1, ambience: 1 };
   /** Sounds loaded (shipped bank). */
   loaded: Promise<void> = Promise.resolve();
@@ -100,15 +108,31 @@ export class AudioEngine {
     return !!this.ctx && this.ctx.state === "running";
   }
 
-  /** Starts fetching + decoding every shipped SFX and arms the first-gesture unlock. Call once. */
+  /** Starts fetching + decoding every shipped SFX, creates the context and arms the first-gesture unlock. Call once. */
   init(): void {
     if (!LiveCtx) return;
     this.loaded = this.loadBank();
-    const unlock = () => {
+    // Every event that counts as a user activation somewhere (Safari wants click / touchend; Chrome takes
+    // pointerdown / keydown). Capture phase on window: nothing a screen does (stopPropagation) can swallow it. The
+    // listeners stay: a context the system suspends later (Safari, a device change) is resumed by the next gesture.
+    const gesture = (e: Event) => {
+      if (!e.isTrusted || this.unlocked) return;
+      this.unlockPress.record(e.target, performance.now());
       this.unlock();
-      if (this.unlocked) for (const t of ["pointerdown", "keydown", "touchend", "mousedown"]) removeEventListener(t, unlock, true);
     };
-    for (const t of ["pointerdown", "keydown", "touchend", "mousedown"]) addEventListener(t, unlock, true);
+    for (const t of GESTURES) addEventListener(t, gesture, true);
+    // Try now: browsers that allow it play straight away, the rest wait (suspended) for the listeners above.
+    this.unlock();
+  }
+
+  /** True once, for the click whose press on `el` turned sound on (that click shouldn't also act). */
+  consumeUnlockPress(el: Element): boolean {
+    return this.unlockPress.consume((t) => t instanceof Node && el.contains(t), performance.now());
+  }
+
+  /** Calls fn whenever the context starts or stops running. */
+  onState(fn: () => void): void {
+    this.stateFns.push(fn);
   }
 
   /** Calls fn once audio is running (now, if it already is). */
@@ -126,15 +150,21 @@ export class AudioEngine {
         return;
       }
       this.build();
+      // However it gets to "running" (a gesture's resume, the browser allowing autoplay a moment later), flush.
+      this.ctx.addEventListener("statechange", () => this.ran());
     }
     const ctx = this.ctx;
-    const done = () => {
-      if (ctx.state !== "running") return;
+    if (ctx.state !== "running") void ctx.resume().then(() => this.ran(), () => undefined);
+    else this.ran();
+  }
+
+  /** The context's state changed: run what waited for audio once it's running. */
+  private ran(): void {
+    if (this.ctx?.state === "running") {
       const fns = this.unlockFns.splice(0);
       for (const f of fns) f();
-    };
-    if (ctx.state === "suspended") void ctx.resume().then(done, () => undefined);
-    else done();
+    }
+    for (const f of this.stateFns) f();
   }
 
   private build(): void {

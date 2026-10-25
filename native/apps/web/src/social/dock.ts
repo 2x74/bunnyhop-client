@@ -2,6 +2,7 @@
 // while playing. Two buttons: the bell (social notes: invites, follows, beaten PBs) and Friends (who's online, where,
 // messages). Each opens a panel above the dock. Live data: social/state.ts.
 
+import { appHref } from "../platform/navigation";
 import "./dock.css";
 import { api, ApiError, type ApiPlayer, type Dm, type Friend, type FriendsView, type FriendWhere, type Note, type NoteFilter } from "../api";
 import { closeMenus, withMenu } from "./menu";
@@ -13,7 +14,8 @@ import { staffButton } from "../staff-lens";
 import { dismissOutside } from "../ui/dismiss";
 import { nameAttrs, nameMarks } from "../ui/marks";
 import { navigate } from "../ui/nav";
-import { roomUrl } from "../net/presence";
+import { roomActions, roomUrl } from "../net/presence";
+import { spectateHow } from "./spectate";
 import { requestRace } from "../player/race";
 import { openReplayViewer } from "../viewer/request";
 import { formatTime } from "../timer";
@@ -22,6 +24,7 @@ import { landFailed, landFollow } from "./land";
 import {
   cardText,
   followBusy,
+  dismissFollower,
   followState,
   followsYou,
   friendById,
@@ -129,8 +132,11 @@ interface Act {
   count?: number;
 }
 
-/** What you'd most likely do with a friend right now (one button on their row), then the rest (the row's menu). */
-export function friendActs(f: Friend): { main: Act | null; more: Act[] } {
+/**
+ * What you'd most likely do with a friend right now (one button on their row), then the rest (the row's menu). `watch`:
+ * Spectate (social/spectate.ts), its own button on the row and in the menu.
+ */
+export function friendActs(f: Friend): { main: Act | null; more: Act[]; watch: Act | null } {
   const v = friendsView();
   const w = f.where;
   const mine = myWhere();
@@ -142,11 +148,23 @@ export function friendActs(f: Friend): { main: Act | null; more: Act[] } {
   const join: Act | null = w?.k === "server" && w.map && !together ? { label: "Join", title: `Join ${f.name} on ${w.name ?? "their server"}`, run: () => void (location.href = roomUrl(w.id, w.map!)) } : null;
   const ask: Act | null = w?.k === "lobby" && !inRoom ? { label: "Ask to join", title: `Ask ${f.name} to invite you`, run: async () => (await api.askToJoin(f.id), whisper(`Asked ${f.name}`)) } : null;
   const race: Act | null = map ? { label: "Race", title: `Race ${f.name}'s PB on ${map.map}`, run: () => raceFriend(f, map) } : null;
+  const watch = watchAct(f);
   const order = f.unread ? [message, invite, join, ask, race] : [invite, join, ask, race, w ? message : null];
   const main = order.find((x): x is Act => !!x) ?? null;
-  const more = [message, invite, join, ask, race].filter((x): x is Act => !!x && x !== main);
+  const more = [message, invite, join, watch, ask, race].filter((x): x is Act => !!x && x !== main);
   more.push({ label: "Profile", run: () => (close(), navigate({ screen: "profile", id: f.id })) });
-  return { main, more };
+  return { main, more, watch };
+}
+
+function watchAct(f: Friend): Act | null {
+  const room = roomActions();
+  const how = spectateHow(f.where, !!room?.canWatch(f.id));
+  if (!how) return null;
+  const run =
+    how.k === "here"
+      ? () => (close(), closeMenus(), room?.watch(f.id))
+      : () => void (location.href = roomUrl(how.id, how.map, { spectate: f.id }));
+  return { label: "Spectate", title: `Spectate ${f.name}`, run };
 }
 
 const actBtn = (a: Act, cls = "") =>
@@ -158,7 +176,7 @@ const actBtn = (a: Act, cls = "") =>
   );
 
 function friendRow(f: Friend): HTMLElement {
-  const { main, more } = friendActs(f);
+  const { main, more, watch } = friendActs(f);
   const menuBtn = withMenu(
     h("button.fd-more-btn", { type: "button", "aria-label": `More for ${f.name}`, title: "More" }, h("span.fd-dots", { html: DOTS })),
     () => [
@@ -172,6 +190,13 @@ function friendRow(f: Friend): HTMLElement {
     { "data-id": f.id },
     profileLink(f, [h("span.fd-avw", null, avatar(f), h("i.fd-dot", { "aria-hidden": "true" })), h("span.fd-txt", null, name(f), h("small", null, whereText(f.where, f.lastSeen)))]),
     main ? actBtn(main, main.label === "Join" ? ".go" : "") : null,
+    watch
+      ? h(
+          "button.fd-more-btn.fd-watch",
+          { type: "button", title: watch.title, "aria-label": watch.title, onclick: (e: Event) => (e.stopPropagation(), void Promise.resolve(watch.run()).catch(fail)) },
+          icon("eye"),
+        )
+      : null,
     more.length ? menuBtn : null,
   );
 }
@@ -222,7 +247,7 @@ function finder(): HTMLElement {
  * presence dot when they're your friend), name, a line (where they are, or `sub`), and the follow button. The name
  * opens their profile.
  */
-export function personRow(p: ApiPlayer, o: { sub?: string | null; onOpen?: () => void } = {}): HTMLElement {
+export function personRow(p: ApiPlayer, o: { sub?: string | null; onOpen?: () => void; dismiss?: { label: string; run: () => void } } = {}): HTMLElement {
   const f = friendById(p.id);
   const me = p.id === myPlayerId();
   const sub = f ? whereText(f.where, f.lastSeen) : (o.sub ?? (!me && followsYou(p.id) ? "Follows you" : null));
@@ -231,6 +256,8 @@ export function personRow(p: ApiPlayer, o: { sub?: string | null; onOpen?: () =>
     { "data-id": p.id },
     profileLink(p, [h("span.fd-avw", null, avatar(p), f ? h("i.fd-dot", { "aria-hidden": "true" }) : null), h("span.fd-txt", null, name(p), sub ? h("small", null, sub) : null)], { onOpen: o.onOpen }),
     me ? h("span.fd-you", null, "You") : followButton(p, "sm"),
+    // A quiet × on hover / focus: hide a follower, or unfollow a one-way follow (both with Undo).
+    o.dismiss ? h("button.fd-dismiss", { type: "button", title: o.dismiss.label, "aria-label": `${o.dismiss.label}: ${p.name}`, onclick: (e: Event) => (e.stopPropagation(), o.dismiss!.run()) }, icon("close")) : null,
   );
 }
 
@@ -295,7 +322,7 @@ function followBack(v: FriendsView): HTMLElement | null {
     "section.fd-sec.fd-back-sec",
     null,
     h("h4", null, "Follow back to be friends"),
-    h("ul.fd-list", null, ...shown.map((p) => personRow(p, { sub: `Followed you ${ago(p.since)}` }))),
+    h("ul.fd-list", null, ...shown.map((p) => personRow(p, { sub: `Followed you ${ago(p.since)}`, dismiss: { label: "Hide", run: () => dismissFollower(p) } }))),
     rest > 0 ? h("button.link-btn.fd-all", { type: "button", onclick: () => ((showAllBack = true), render()) }, `${rest} more`) : null,
   );
 }
@@ -305,20 +332,20 @@ function friendsBody(): HTMLElement[] {
   if (!v) {
     const st = friendsLoad();
     if (st === "signin")
-      return [h("p.fd-empty.fd-signin", null, h("span", null, "Sign in to see your friends."), h("a.btn.btn-sm", { href: api.discordLoginUrl(location.href) }, "Sign in"))];
+      return [h("p.fd-empty.fd-signin", null, h("span", null, "Sign in to see your friends."), h("a.btn.btn-sm", { href: api.discordLoginUrl(appHref()) }, "Sign in"))];
     if (st === "error") return [h("p.fd-empty.fd-signin", null, h("span", null, "Couldn't load your friends."), h("button.btn.btn-sm", { type: "button", onclick: () => void refreshFriends() }, "Retry"))];
     return [h("p.fd-empty", null, "Loading")];
   }
   const sorted = [...v.friends].sort((a, b) => Number(!!b.where) - Number(!!a.where) || b.unread - a.unread || (b.lastSeen ?? 0) - (a.lastSeen ?? 0) || a.name.localeCompare(b.name));
   const list = sorted.length
     ? h("ul.fd-list.fd-friend-list", null, ...sorted.map(friendRow))
-    : h("p.fd-empty.fd-teach", null, "Follow players you know. When they follow you back, you're friends.");
+    : null; // (No friends yet: the finder above says what to do.)
   const oneWay = v.following.length
     ? h(
         "details.fd-more",
         null,
         h("summary", null, "You follow ", h("span.fd-n", null, String(v.following.length)), v.following.length === 1 ? " player who hasn't followed back" : " players who haven't followed back"),
-        h("ul.fd-list", null, ...v.following.map((p) => personRow(p))),
+        h("ul.fd-list", null, ...v.following.map((p) => personRow(p, { dismiss: { label: "Unfollow", run: () => void setFollow(p.id, false, { who: p }) } }))),
       )
     : null;
   const hide = h("input.switch", { type: "checkbox", checked: v.appearOffline, "aria-label": "Appear offline" }) as HTMLInputElement;
@@ -461,7 +488,7 @@ function bellBody(): HTMLElement[] {
       // Signed out: no tabs, one line and the way in.
       if (e instanceof ApiError && e.status === 401) {
         tabs.remove();
-        list.replaceChildren(h("li.fd-empty.fd-signin", null, h("span", null, "Sign in to get invites and follows."), h("a.btn.btn-sm", { href: api.discordLoginUrl(location.href) }, "Sign in")));
+        list.replaceChildren(h("li.fd-empty.fd-signin", null, h("span", null, "Sign in to get invites and follows."), h("a.btn.btn-sm", { href: api.discordLoginUrl(appHref()) }, "Sign in")));
       } else list.replaceChildren(h("li.fd-empty", null, "Couldn't load notifications. Try again in a moment."));
     },
   );

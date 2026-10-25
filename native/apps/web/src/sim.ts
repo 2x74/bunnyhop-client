@@ -1,6 +1,6 @@
 // Shared deterministic run step + replay re-simulation (browser playback, ghosts and the headless verifier).
 
-import { applyRestartPoint, type Core, type PlayerState, type Settings } from "./core";
+import { applyRestartPoint, EVENT_JUMPED, EVENT_TELEPORTED, type Core, type PlayerState, type Settings } from "./core";
 import { replayPhysics, replayStyle, replayTimerRules, type Checkpoint, type Replay } from "./replay";
 import { StyleFilter, strafeKeys, styleDef, type StyleDef } from "./styles";
 import { RunTimer, TIMER_RULES, TIMER_RULES_V1, TIMER_RULES_V2, type TickCmd, type TimerUpdate } from "./timer";
@@ -111,6 +111,8 @@ export interface SimResult {
   startTick: number;
   endTick: number;
   frames?: Float32Array;
+  /** Presentation-only jump/teleport events at each captured frame tick; never serialized into replays. */
+  frameEvents?: Uint8Array;
   /** Recorded commands the replay's style filter had to change (blocked keys; 0 for a legitimate replay). */
   styleViolations: number;
   /** The style filter after the last simulated tick (ladder state), so playback can continue from here. */
@@ -154,6 +156,7 @@ export class SimRun {
   private readonly timer: RunTimer;
   private readonly filter: StyleFilter;
   private readonly frames?: Float32Array;
+  private readonly frameEvents?: Uint8Array;
   private state: PlayerState;
   private cp = 0;
   private checked = 0;
@@ -187,6 +190,7 @@ export class SimRun {
     }
     const n = (this.n = Math.min(opts.untilTick ?? h.totalTicks, h.totalTicks));
     this.frames = opts.frames ? new Float32Array((n + 1) * FRAME_STRIDE) : undefined;
+    this.frameEvents = opts.frames ? new Uint8Array(n + 1) : undefined;
     this.state = core.state();
     this.putFrame(0, this.state, n > 0 ? replay.yaw[0] : this.state.teleportAngles[1], n > 0 ? replay.pitch[0] : this.state.teleportAngles[0]);
     // The style's key filter is re-applied to every recorded command (from the pre-tick state, as the client did).
@@ -200,6 +204,11 @@ export class SimRun {
 
   get done(): boolean {
     return this.i >= this.n;
+  }
+
+  /** A checkpoint has mismatched: the replay is already invalid, whatever the rest does. */
+  get desynced(): boolean {
+    return this.firstMismatch !== null;
   }
 
   private putFrame(t: number, s: PlayerState, yaw: number, pitch: number): void {
@@ -242,6 +251,7 @@ export class SimRun {
         this.cp++;
       }
       this.putFrame(tick, state, cmd.yaw, cmd.pitch);
+      if (this.frameEvents) this.frameEvents[tick] = events & (EVENT_JUMPED | EVENT_TELEPORTED);
       opts.onTick?.(tick, state, events, { timer, filter, cmd, update: r.update });
     }
     this.i = end;
@@ -260,6 +270,7 @@ export class SimRun {
       startTick: this.startTick,
       endTick: this.endTick,
       frames: this.frames,
+      frameEvents: this.frameEvents,
       styleViolations: this.violations,
       filter: this.filter,
       firstViolationTick: this.firstViolationTick,

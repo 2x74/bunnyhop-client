@@ -18,7 +18,7 @@ import { earnsProgression, isStyleId, STYLE_DEFS } from "./styles";
 // ---------------------------------------------------------------------------------------------
 // XP
 
-export type XpKind = "finish" | "time" | "jumps" | "pb" | "first_clear" | "first_tier";
+export type XpKind = "finish" | "time" | "jumps" | "pb" | "first_clear" | "first_tier" | "gauntlet";
 
 export interface XpRunInput {
   /** Raw map tier (null = unrated: counts as half a tier). */
@@ -50,7 +50,15 @@ export const XP_RULES = {
   firstClearPerTier: 50,
   firstTierPerTier: 100,
   bonusTrackFactor: 0.5,
+  /** A gauntlet's first clear (apps/api/src/gauntlets.ts): this much per tier of each of its maps (an unrated map 0.5),
+   * half a map's own first clear, on top of the runs' XP. The 3-map weekly ≈ 150, the 20-map classic ≈ 1,800. */
+  gauntletPerTier: 25,
 } as const;
+
+/** XP for a gauntlet's first clear: XP_RULES.gauntletPerTier per (clamped) map tier, an unrated map counting half. */
+export function gauntletXp(tiers: readonly (number | null)[]): number {
+  return Math.floor(tiers.reduce<number>((t, x) => t + (clampTier(x) ?? 0.5), 0) * XP_RULES.gauntletPerTier);
+}
 
 /** Repeat-finish damping: the n-th finish (0-based) of the same board in a UTC day. */
 export function repeatFactor(finishesToday: number): number {
@@ -191,9 +199,44 @@ export interface ProgressStats {
   bestNormal: Record<string, number>;
   /** Best sync % on a main-track finish of tier >= 2. */
   bestSync: number;
+  /** Maps with a main-track finish in a progression style (Home Turf and the map-set goals). Absent = none known. */
+  clearedMaps?: readonly string[];
+  /** Slowest main-track Normal finish (seconds) per map (Scenic Route). */
+  worstNormal?: Record<string, number>;
+  /** A main-track bhop_eazy finish after reaching level 25 (Back to Basics). */
+  eazyAfterL25?: boolean;
+  /** !races won by finishing first (not by forfeit or timeout), and how many different players were beaten. */
+  raceWins?: number;
+  raceOpponents?: number;
+  /** A !race won by less than PHOTO_FINISH_S on server finish times, with both runs verified. */
+  photoFinish?: boolean;
+  /** Most HALLOWEEN_MAPS cleared inside one year's HALLOWEEN_WINDOW. */
+  halloweenSeason?: number;
+  /** Gauntlets (apps/api/src/gauntlets.ts). Absent = none cleared. */
+  gauntlets?: GauntletStats;
 }
 
-export type AchievementGroup = "start" | "tier" | "sweep" | "maps" | "records" | "style" | "time" | "lifetime" | "level" | "social";
+/** A player's gauntlet record for the gauntlet achievements. */
+export interface GauntletStats {
+  /** Slugs of the gauntlets with a complete attempt (any kind). */
+  cleared: string[];
+  /** Published public permanent gauntlets, and how many of them are cleared. */
+  permanent: number;
+  permanentCleared: number;
+  /** Best total (seconds) on the classic 20-map gauntlet (CLASSIC_GAUNTLET), null without a clear. */
+  classicBest: number | null;
+  /** Weekly results (frozen at close): top-3 places and wins. */
+  podiums: number;
+  wins: number;
+}
+
+/** The classic 20-map Bunny Hop Map Gauntlet and its Mini (slugs: tools/gauntlets/seed-permanent.ts). */
+export const CLASSIC_GAUNTLET = "classic";
+export const MINI_GAUNTLET = "classic-mini";
+/** "Under Five Hours": the classic's ranked total (the sum of the runs) under this. */
+export const CLASSIC_FAST_SECONDS = 5 * 3600;
+
+export type AchievementGroup = "start" | "tier" | "sweep" | "maps" | "records" | "style" | "time" | "lifetime" | "level" | "social" | "gauntlet" | "event";
 /** Ring colour of the badge token (hatchdle-style ladders): bronze, silver, gold, prism. */
 export type Ring = 0 | 1 | 2 | 3;
 
@@ -223,6 +266,8 @@ export interface AchievementDef {
    * locked like any other while the achievement itself is never listed as a goal to chase.
    */
   availability?: "closed" | "discord_server" | "support";
+  /** A hidden achievement's cryptic line on its "???" (no numbers, nothing that gives it away). */
+  secretHint?: string;
   /** Progress towards it: [current, goal]. */
   progress: (s: ProgressStats) => [number, number];
 }
@@ -232,10 +277,59 @@ const TIER_TITLE: Record<Tier, string | undefined> = { 1: undefined, 2: undefine
 const RING_BY_TIER: Record<Tier, Ring> = { 1: 0, 2: 0, 3: 1, 4: 1, 5: 2, 6: 3 };
 
 /** Time goals ("Sub-X on bhop_eazy"). Thresholds need tuning against real WRs (see research/RANKS.md open questions). */
-export const TIME_GOALS: { map: string; seconds: number; name: string; ring: Ring; title?: string }[] = [
-  { map: "bhop_eazy", seconds: 60, name: "Eazy Does It", ring: 0 },
-  { map: "bhop_eazy", seconds: 30, name: "Eazy Money", ring: 2, title: "Eazy" },
+export const TIME_GOALS: { map: string; seconds: number; name: string; ring: Ring; title?: string; id?: string }[] = [
+  // Was under 30 s, which nobody could earn (the Normal WR was 31.77 s in 2026-10). Owner, 2026-10-21: under 60 s. The
+  // id stays the old one (user_achievements rows carry it). That made Eazy Does It (time_bhop_eazy_60, under 60 s, no
+  // items) the same goal, so it's retired: rows that carry it stay in D1 but no longer show or pay XP; whoever had it
+  // qualifies for Eazy Money instead (granted on their next run or profile view).
+  { map: "bhop_eazy", seconds: 60, name: "Eazy Money", ring: 2, title: "Eazy", id: "time_bhop_eazy_30" },
+  // Our own maps (WRs 2026-10: Meadow 14.1 s, 35 players under 20 s; Aero 22.6 s, 10 under 40 s).
+  { map: "bhop_lol_meadow", seconds: 16, name: "Meadowlark", ring: 1 },
+  { map: "bhop_lol_aero", seconds: 35, name: "Fair Weather", ring: 2 },
 ];
+
+/**
+ * Home Turf: the maps made for bunnyhop.lol (tools/meadow, tools/aero, tools/backrooms, tools/plaza). Hermes is left out:
+ * clearing it is the secret (WINGS below).
+ */
+export const HOME_TURF_MAPS = ["bhop_lol_meadow", "bhop_lol_aero", "bhop_lol_backrooms", "bhop_lol_plaza"] as const;
+
+/** The Halloween collection (maps/index.json "halloween"; a test keeps them in step). */
+export const HALLOWEEN_MAPS = [
+  "bhop_asylum",
+  "bhop_bfur_halloween",
+  "bhop_bram_halloween",
+  "bhop_cobblestone",
+  "bhop_dark_forest",
+  "bhop_darkage",
+  "bhop_forgotten",
+  "bhop_forgotten2",
+  "bhop_halloween_sm_css",
+  "bhop_haunt",
+  "bhop_nature",
+  "bhop_serenity",
+  "bhop_tehoputki",
+  "bhop_terrarium",
+] as const;
+
+/** The October window, every year (UTC, inclusive): Trick or Treat counts clears inside it. "MM-DD". */
+export const HALLOWEEN_WINDOW = { from: "10-15", to: "11-07" } as const;
+
+/** Whether `ms` falls inside that year's Halloween window. */
+export function inHalloweenWindow(ms: number): boolean {
+  const d = new Date(ms);
+  const md = `${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+  return md >= HALLOWEEN_WINDOW.from && md <= HALLOWEEN_WINDOW.to;
+}
+
+/** A race won by less than this (seconds between server finishes) is a photo finish. */
+export const PHOTO_FINISH_S = 0.05;
+
+/** How many of `maps` the stats have cleared (main track, progression styles). */
+export function clearedOf(s: ProgressStats, maps: readonly string[]): number {
+  const set = new Set(s.clearedMaps ?? []);
+  return maps.filter((m) => set.has(m)).length;
+}
 
 /** The "Play with the Owner" achievement (room-awarded) and how long both players must share a server. */
 export const PLAY_WITH_OWNER = "play_with_owner";
@@ -325,9 +419,104 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: "style_t4", name: "Off the Beaten Path", desc: "Finish a T4+ map in a style other than Normal", group: "style", icon: "styles", ring: 3, title: "Stylish", progress: (s) => at(s.altStyleMaxTier >= 4 ? 1 : 0, 1) },
   { id: "scroll_10", name: "Wheel Warrior", desc: "Finish 10 maps in EZ Scroll", group: "style", icon: "scroll", ring: 2, title: "Scroller", progress: (s) => at(s.styleMaps.legit ?? 0, 10) },
   { id: "legitscroll_10", name: "Legit Scroller", desc: "Finish 10 different maps in Legit Scroll", goal: "Clear 10 maps in Legit Scroll", group: "style", icon: "scroll", ring: 2, title: "Legit Scroller", progress: (s) => at(s.styleMaps.scroll ?? 0, 10) },
+  // Batch 1 (2026-10-21, research/PROGRESSION-BATCH1.md): the ladders that went flat. Thresholds from the live
+  // distributions (maps: 85 players at 25, 43 at 50, 15 at 100, 7 at 150, max 237).
+  { id: "maps_50", name: "Wayfarer", desc: "Finish 50 different maps", group: "maps", icon: "map", ring: 2, title: "Wayfarer", progress: (s) => at(s.maps, 50) },
+  { id: "maps_150", name: "Cartographer", desc: "Finish 150 different maps", group: "maps", icon: "map", ring: 3, title: "Cartographer", progress: (s) => at(s.maps, 150) },
+  { id: "maps_250", name: "Atlas", desc: "Finish 250 different maps", group: "maps", icon: "map", ring: 3, title: "Atlas", progress: (s) => at(s.maps, 250) },
+  {
+    id: "home_turf",
+    name: "Home Turf",
+    desc: "Finish bhop_lol_meadow, bhop_lol_aero, bhop_lol_backrooms and bhop_lol_plaza",
+    goal: "Clear Meadow, Aero, Backrooms and Plaza",
+    group: "maps",
+    icon: "map",
+    ring: 1,
+    progress: (s) => at(clearedOf(s, HOME_TURF_MAPS), HOME_TURF_MAPS.length),
+  },
+  { id: "bonus_25", name: "Bonus Collector", desc: "Finish 25 bonus tracks", group: "maps", icon: "bonus", ring: 2, title: "Bonus Collector", progress: (s) => at(s.bonuses, 25) },
+  { id: "t2_clears_25", name: "Second Gear", desc: "Finish 25 different tier 2 maps", goal: "Clear 25 T2 maps", group: "tier", icon: "t2", ring: 1, progress: (s) => at(s.clearsByTier[2] ?? 0, 25) },
+  { id: "t3_clears_10", name: "Rock Face", desc: "Finish 10 different tier 3 maps", goal: "Clear 10 T3 maps", group: "tier", icon: "t3", ring: 2, progress: (s) => at(s.clearsByTier[3] ?? 0, 10) },
+  { id: "t4_clears_5", name: "Hard Five", desc: "Finish 5 different tier 4 maps", goal: "Clear 5 T4 maps", group: "tier", icon: "t4", ring: 3, progress: (s) => at(s.clearsByTier[4] ?? 0, 5) },
+  { id: "top10_25", name: "Fixture", desc: "Hold 25 top-10 places at once", group: "records", icon: "podium", ring: 3, title: "Fixture", progress: (s) => at(s.top10s, 25) },
+  { id: "wr_10", name: "Ten Crowns", desc: "Hold 10 world records at once", group: "records", icon: "crown", ring: 3, progress: (s) => at(s.wrs, 10) },
+  { id: "sideways_10", name: "Crab Walk", desc: "Finish 10 different maps in Sideways", goal: "Clear 10 maps in Sideways", group: "style", icon: "sw", ring: 2, progress: (s) => at(s.styleMaps.sideways ?? 0, 10) },
+  { id: "wonly_10", name: "One Key", desc: "Finish 10 different maps in W-Only", goal: "Clear 10 maps in W-Only", group: "style", icon: "w", ring: 2, progress: (s) => at(s.styleMaps.wonly ?? 0, 10) },
+  { id: "hsw_10", name: "Halfway", desc: "Finish 10 different maps in Half-Sideways", goal: "Clear 10 maps in Half-Sideways", group: "style", icon: "hsw", ring: 2, progress: (s) => at(s.styleMaps.hsw ?? 0, 10) },
+  // Batch 1, part 2: !race, the October window and three hidden ones (research/PROGRESSION-BATCH1.md). The gauntlet
+  // achievements are GAUNTLET_ACHIEVEMENTS below (gauntlets-weekly); batch 1's gauntlet items unlock with those.
+  { id: "race_1", name: "Head to Head", desc: "Win a !race", goal: "Win a !race", group: "social", icon: "race", ring: 0, progress: (s) => at(s.raceWins ?? 0, 1) },
+  {
+    id: "race_10",
+    name: "Duelist",
+    desc: "Win 10 !races, against at least 5 different players",
+    goal: "Win 10 !races against 5 players",
+    group: "social",
+    icon: "race",
+    ring: 2,
+    title: "Duelist",
+    // Both halves count: 10 wins and 5 opponents (whichever is further behind shows).
+    progress: (s) => {
+      const w = Math.min(s.raceWins ?? 0, 10) / 10, o = Math.min(s.raceOpponents ?? 0, 5) / 5;
+      return w <= o ? at(s.raceWins ?? 0, 10) : [Math.min(s.raceOpponents ?? 0, 5) * 2, 10];
+    },
+  },
+  {
+    id: "halloween_5",
+    name: "Trick or Treat",
+    desc: "Finish 5 maps from the Halloween collection between October 15 and November 7 (any year)",
+    goal: "5 Halloween maps, Oct 15 to Nov 7",
+    group: "event",
+    icon: "pumpkin",
+    ring: 1,
+    progress: (s) => at(s.halloweenSeason ?? 0, 5),
+  },
+  {
+    id: "halloween_10",
+    name: "Lantern Night",
+    desc: "Finish 10 maps from the Halloween collection",
+    goal: "Clear 10 Halloween maps",
+    group: "event",
+    icon: "pumpkin",
+    ring: 2,
+    progress: (s) => at(clearedOf(s, HALLOWEEN_MAPS), 10),
+  },
+  {
+    id: "scenic_route",
+    name: "Scenic Route",
+    desc: "Finish bhop_eazy taking more than five minutes",
+    group: "time",
+    icon: "clock",
+    ring: 0,
+    hidden: true,
+    secretHint: "Take your time.",
+    progress: (s) => at((s.worstNormal?.bhop_eazy ?? 0) > 300 ? 1 : 0, 1),
+  },
+  {
+    id: "photo_finish",
+    name: "Photo Finish",
+    desc: `Win a !race by less than ${PHOTO_FINISH_S} seconds`,
+    group: "social",
+    icon: "race",
+    ring: 2,
+    hidden: true,
+    secretHint: "Closer than close.",
+    progress: (s) => at(s.photoFinish ? 1 : 0, 1),
+  },
+  {
+    id: "back_to_basics",
+    name: "Back to Basics",
+    desc: "Finish bhop_eazy at level 25 or higher",
+    group: "start",
+    icon: "sprout",
+    ring: 0,
+    hidden: true,
+    secretHint: "Where it all started.",
+    progress: (s) => at(s.eazyAfterL25 ? 1 : 0, 1),
+  },
   ...TIME_GOALS.map(
     (g): AchievementDef => ({
-      id: `time_${g.map}_${g.seconds}`,
+      id: g.id ?? `time_${g.map}_${g.seconds}`,
       name: g.name,
       desc: `Finish ${g.map} under ${fmtGoal(g.seconds)} (Normal)`,
       group: "time",
@@ -343,8 +532,13 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: "jumps_100k", name: "Hare Raiser", desc: "100,000 jumps in finished runs", group: "lifetime", icon: "jump", ring: 3, title: "Hare Raiser", progress: (s) => at(s.jumps, 100_000) },
   { id: "clock_1h", name: "Clocked In", desc: "Play for one hour", group: "lifetime", icon: "clock", ring: 0, progress: (s) => at(Math.floor(s.playtime), 3600) },
   { id: "clock_10h", name: "Overtime", desc: "Play for ten hours", group: "lifetime", icon: "clock", ring: 2, title: "Workhorse", progress: (s) => at(Math.floor(s.playtime), 36_000) },
+  { id: "jumps_25k", name: "Spring Loaded", desc: "25,000 jumps in finished runs", group: "lifetime", icon: "jump", ring: 2, progress: (s) => at(s.jumps, 25_000) },
+  { id: "clock_25h", name: "Night Shift", desc: "Play for 25 hours", group: "lifetime", icon: "clock", ring: 2, progress: (s) => at(Math.floor(s.playtime), 90_000) },
+  { id: "clock_50h", name: "Lifer", desc: "Play for 50 hours", group: "lifetime", icon: "clock", ring: 3, title: "Lifer", progress: (s) => at(Math.floor(s.playtime), 180_000) },
   { id: "level_10", name: "Level 10", desc: "Reach level 10", group: "level", icon: "level", ring: 0, progress: (s) => at(s.level, 10) },
   { id: "level_25", name: "Level 25", desc: "Reach level 25", group: "level", icon: "level", ring: 2, title: "Veteran", progress: (s) => at(s.level, 25) },
+  { id: "level_35", name: "Level 35", desc: "Reach level 35", group: "level", icon: "level", ring: 2, progress: (s) => at(s.level, 35) },
+  { id: "level_40", name: "Level 40", desc: "Reach level 40", group: "level", icon: "level", ring: 3, progress: (s) => at(s.level, 40) },
   { id: "level_50", name: "Level 50", desc: "Reach level 50", group: "level", icon: "level", ring: 3, title: "Legend of the Hop", progress: (s) => at(s.level, 50) },
   // Garry's Mod's "Play with Garry": awarded by the room (apps/api/src/rooms/room.ts) after OWNER_OVERLAP_SECONDS on the
   // same multiplayer server as the site owner (the API's OWNER_ID). Not a run stat, so progress stays [0, 1].
@@ -473,13 +667,81 @@ ACHIEVEMENTS.push({
 /** A hidden achievement that isn't earned yet shows as "???" (name, goal, unlock text, its items). */
 export const isSecret = (a: AchievementDef | null | undefined): boolean => !!a?.hidden;
 
-/** What a locked secret item says about how to get it: "???", plus WINGS_HINT when there is one. */
-export const secretLockText = (): string => (WINGS_HINT ? `??? · ${WINGS_HINT}` : "???");
+/** A hidden achievement's cryptic line: its own secretHint, WINGS_HINT for the wings, else none. */
+export const secretHintOf = (a?: AchievementDef | null): string | null => a?.secretHint ?? (!a || a.id === WINGS ? WINGS_HINT : null);
+
+/** What a locked secret item says about how to get it: "???", plus its cryptic line when there is one. */
+export const secretLockText = (a?: AchievementDef | null): string => {
+  const hint = secretHintOf(a);
+  return hint ? `??? · ${hint}` : "???";
+};
 
 for (const [i, goal] of [1,5,25,100].entries()) ACHIEVEMENTS.push({ id:`gift_${goal}`, name:["Bronze Gifter","Silver Gifter","Gold Gifter","Prism Gifter"][i], desc:`Deliver ${goal} Supporter gift${goal === 1 ? "" : "s"}`, group:"social", icon:"gift", ring:i as Ring, progress:s => [s.giftsSent ?? 0, goal] });
 
+// Gauntlets (research/GAUNTLETS.md "Marks"): from GauntletStats (apps/api/src/progress.ts progressStats). Every
+// gauntlet counts toward the first two, weeklies and events too; "Every Gauntlet" is the permanent ones published now.
+const gs = (s: ProgressStats): GauntletStats => s.gauntlets ?? { cleared: [], permanent: 0, permanentCleared: 0, classicBest: null, podiums: 0, wins: 0 };
+export const GAUNTLET_ACHIEVEMENTS: AchievementDef[] = [
+  { id: "gauntlet_1", name: "Run the Gauntlet", desc: "Clear a gauntlet: every map in one attempt", goal: "Clear a gauntlet", group: "gauntlet", icon: "g_route", ring: 0, progress: (s) => at(gs(s).cleared.length, 1) },
+  { id: "gauntlet_5", name: "Gauntlet Regular", desc: "Clear 5 different gauntlets", goal: "Clear 5 gauntlets", group: "gauntlet", icon: "g_stack", ring: 1, progress: (s) => at(gs(s).cleared.length, 5) },
+  { id: "gauntlet_mini", name: "Mini Gauntlet", desc: "Clear Gauntlet Mini", group: "gauntlet", icon: "g_mini", ring: 2, progress: (s) => at(gs(s).cleared.includes(MINI_GAUNTLET) ? 1 : 0, 1) },
+  {
+    id: "gauntlet_every",
+    name: "Every Gauntlet",
+    desc: "Clear every permanent gauntlet",
+    group: "gauntlet",
+    icon: "g_every",
+    ring: 3,
+    title: "Gauntleteer",
+    progress: (s) => (gs(s).permanent ? at(gs(s).permanentCleared, gs(s).permanent) : [0, 1]),
+  },
+  { id: "weekly_podium", name: "Weekly Podium", desc: "Finish a weekly gauntlet in the top 3", goal: "Top 3 on a weekly gauntlet", group: "gauntlet", icon: "g_podium", ring: 1, progress: (s) => at(gs(s).podiums, 1) },
+  { id: "weekly_win", name: "Weekly Winner", desc: "Win a weekly gauntlet", group: "gauntlet", icon: "g_weekly", ring: 2, title: "Weekly Winner", progress: (s) => at(gs(s).wins, 1) },
+  {
+    id: "gauntlet_classic",
+    name: "The Gauntlet",
+    desc: "Clear the 20-map Bunny Hop Map Gauntlet",
+    group: "gauntlet",
+    icon: "g20",
+    ring: 3,
+    title: "Gauntlet Champion",
+    progress: (s) => at(gs(s).cleared.includes(CLASSIC_GAUNTLET) ? 1 : 0, 1),
+  },
+  {
+    id: "gauntlet_classic_fast",
+    name: "Under Five Hours",
+    desc: "Clear the Bunny Hop Map Gauntlet with a total under 5:00:00",
+    group: "gauntlet",
+    icon: "g_hourglass",
+    ring: 3,
+    progress: (s) => at(gs(s).classicBest !== null && gs(s).classicBest! < CLASSIC_FAST_SECONDS ? 1 : 0, 1),
+  },
+];
+ACHIEVEMENTS.push(...GAUNTLET_ACHIEVEMENTS);
+
 const ACH_BY_ID = new Map(ACHIEVEMENTS.map((a) => [a.id, a]));
 export const achievement = (id: string) => ACH_BY_ID.get(id) ?? null;
+
+/**
+ * Achievement XP (2026-10-21, research/PROGRESSION-BATCH1.md): an achievement pays XP once, by its ring. Recorded per
+ * (player, achievement) in achievement_xp (apps/api/src/achievement-xp.ts), so it never pays twice; a player's XP is
+ * their run XP (xp_events) plus this. Owner call: players get it for the achievements they already hold too (the
+ * one-off backfill, which keeps level-ups from it quiet on Discord).
+ */
+export const ACHIEVEMENT_XP: Readonly<Record<Ring, number>> = { 0: 100, 1: 250, 2: 500, 3: 1000 };
+
+/**
+ * Achievements that pay no XP: paid or Discord-boost ones (XP is never for sale) and the level ones (XP for levels
+ * would feed itself).
+ */
+const NO_XP = (a: AchievementDef) => a.availability === "support" || a.id === DISCORD_BOOSTER || a.id.startsWith("gift_") || a.group === "level";
+
+/** The XP an achievement pays once (0 for unknown ids and the NO_XP ones). */
+export function achievementXp(a: AchievementDef | string | null | undefined): number {
+  const d = typeof a === "string" ? achievement(a) : a;
+  if (!d || NO_XP(d)) return 0;
+  return ACHIEVEMENT_XP[d.ring];
+}
 
 /** Ids of every achievement the stats satisfy. */
 export function earnedAchievements(s: ProgressStats): string[] {
@@ -793,6 +1055,54 @@ export const COSMETICS: CosmeticDef[] = [
   // High Roller: black driving gloves, felt-green tips, gold snaps. Borealis: navy sport gloves, green and violet panels.
   { id: "glove-driver-highroller", slot: "glove", name: "Driver · High Roller", unlock: ach(SUPPORTER), color: "#17181c", rarity: 4 },
   { id: "glove-sport-borealis", slot: "glove", name: "Sport · Borealis", unlock: ach(SUPPORTER), color: "#14203d", rarity: 4 },
+  // Batch 1 (2026-10-21, research/PROGRESSION-BATCH1.md): earned by playing, themed on our own maps. Each goal gives a
+  // small matched set. Colourways in player/bunny/palettes.ts, gloves in loadout.ts GLOVE_STYLE.
+  // Home Turf: Meadow's clover green with buttercup accents, and canvas gloves dipped in buttercup yellow.
+  { id: "outfit-meadow", slot: "outfit", name: "Meadow", unlock: ach("home_turf"), color: "#4f9a3a" },
+  { id: "glove-garden-buttercup", slot: "glove", name: "Garden · Buttercup", unlock: ach("home_turf"), color: "#ffc93a", rarity: 2 },
+  // Wayfarer (50 maps): the Backrooms' mono-yellow wallpaper and carpet, saddle leather, a dandelion trail.
+  { id: "outfit-fluorescent", slot: "outfit", name: "Fluorescent", unlock: ach("maps_50"), color: "#d8c35a" },
+  { id: "glove-driver-saddle", slot: "glove", name: "Driver · Saddle", unlock: ach("maps_50"), color: "#8a4f2a", rarity: 3 },
+  { id: "trail-dandelion", slot: "trail", name: "Dandelion", unlock: ach("maps_50"), color: "#ffd23a", color2: "#fff3c8" },
+  // Centurion (100 maps; a title only until now): olive with brass trim.
+  { id: "outfit-laurel", slot: "outfit", name: "Laurel", unlock: ach("maps_100"), color: "#34452c" },
+  // Cartographer (150 maps): Palmera Plaza's teal, pink and violet.
+  { id: "outfit-palmera", slot: "outfit", name: "Palmera", unlock: ach("maps_150"), color: "#2bb6b0" },
+  // Second Gear (25 T2 clears): Aero's glossy sky blue and white, a grass-green accent.
+  { id: "outfit-skyglass", slot: "outfit", name: "Skyglass", unlock: ach("t2_clears_25"), color: "#48b4f0" },
+  // Rock Face (10 T3 clears): hare-brown paw pads.
+  { id: "glove-paws-hare", slot: "glove", name: "Paw Pads · Hare", unlock: ach("t3_clears_10"), color: "#a07850", rarity: 3 },
+  // Spring Loaded (25,000 jumps): chalk-white hand wraps.
+  { id: "glove-wraps-chalk", slot: "glove", name: "Hand Wraps · Chalk", unlock: ach("jumps_25k"), color: "#f2efe8", rarity: 3 },
+  // Night Shift (25 h): black tactical gloves with sodium-amber stitching, and a street-lamp amber ghost.
+  { id: "glove-specialist-nightshift", slot: "glove", name: "Specialist · Night Shift", unlock: ach("clock_25h"), color: "#1b1d22", rarity: 4 },
+  { id: "ghost-sodium", slot: "ghost", name: "Sodium", unlock: ach("clock_25h"), color: "#ffa63a", color2: "#ffd27a" },
+  // Finishes (viewmodel/finishes/shader.ts FINISH 15-21): one fixed design each, like the rest.
+  // Contour: a slate topographic map, cream contour lines, every fifth in carrot orange.
+  { id: "fin-contour", slot: "finish", name: "Contour", unlock: ach("maps_100"), color: "#2c3e57", rarity: 4 },
+  // Meteor: black iron crossed by three falling streaks, white-hot heads cooling to red.
+  { id: "fin-meteor", slot: "finish", name: "Meteor", unlock: ach("t4_clears_5"), color: "#ff6a2a", rarity: 4 },
+  // Hourglass: sand-gold dunes in soft ripples that creep toward the tip, a fine grain.
+  { id: "fin-hourglass", slot: "finish", name: "Hourglass", unlock: ach("clock_50h"), color: "#e0bf80", rarity: 5 },
+  // Wildflower: pale meadow green with small five-petal flowers.
+  { id: "fin-wildflower", slot: "finish", name: "Wildflower", unlock: ach("sweep_2"), color: "#c6e3a8", rarity: 5 },
+  // Tally: bone white with scratched tally marks, now and then a group in orange.
+  { id: "fin-tally", slot: "finish", name: "Tally", unlock: ach("maps_250"), color: "#efe9dc", rarity: 5 },
+  // Gauntlets: the old orange-and-grey developer texture.
+  // Run the Gauntlet (any gauntlet), Gauntlet Regular (5 different), Weekly Podium: GAUNTLET_ACHIEVEMENTS.
+  { id: "outfit-devgrid", slot: "outfit", name: "Dev Grid", unlock: ach("gauntlet_1"), color: "#8f9296" },
+  { id: "glove-moto-devgrid", slot: "glove", name: "Moto · Dev Grid", unlock: ach("gauntlet_1"), color: "#e8862a", rarity: 2 },
+  { id: "fin-devgrid", slot: "finish", name: "Dev Grid", unlock: ach("gauntlet_5"), color: "#f08a24", rarity: 4 },
+  { id: "trail-checker", slot: "trail", name: "Checker", unlock: ach("weekly_podium"), color: "#f08a24", color2: "#8f9296" },
+  // !race: white moto gloves with red plates.
+  { id: "glove-moto-racer", slot: "glove", name: "Moto · Racer", unlock: ach("race_10"), color: "#d8262f", rarity: 3 },
+  // October: a pumpkin colourway and gloves (Trick or Treat, inside the window), a candle-lit blade (any time).
+  { id: "outfit-pumpkin", slot: "outfit", name: "Pumpkin Patch", unlock: ach("halloween_5"), color: "#e0701c" },
+  { id: "glove-garden-pumpkin", slot: "glove", name: "Garden · Pumpkin", unlock: ach("halloween_5"), color: "#e0701c", rarity: 3 },
+  { id: "fin-lantern", slot: "finish", name: "Lantern", unlock: ach("halloween_10"), color: "#ff8a1f", rarity: 4 },
+  // Level 35 / 40: the card between Holo (30) and Four-Leaf (50).
+  { id: "frame-brass", slot: "frame", name: "Brass", unlock: lvl(35), color: "#c9a24a" },
+  { id: "bg-nightgarden", slot: "background", name: "Night Garden", unlock: lvl(40), color: "#102418" },
 ];
 
 // Titles: every achievement title, plus a few level titles. id = "title-<slug>".
@@ -824,6 +1134,7 @@ COSMETICS.push(
   { id: "hat-halo", slot: "hat", name: "Halo", unlock: ach(SUPPORTER), color: "#8f72ff", rarity: 4 },
   { id: "hat-propeller", slot: "hat", name: "Propeller Cap", unlock: ach(SUPPORTER), color: "#ffd052", rarity: 4 },
   { id: "hat-capybara", slot: "hat", name: "Capybara", unlock: ach(SUPPORTER), color: "#b88955", rarity: 4 },
+  { id: "hat-maxwell", slot: "hat", name: "Maxwell", unlock: ach(SUPPORTER), color: "#2b2c38", rarity: 4 },
   // A band of dark amethyst glass round the hood, a light sweeping the aqua line across its forehead plate.
   { id: "hat-circlet", slot: "hat", name: "Circlet", unlock: ach(SUPPORTER), color: "#342a78", rarity: 4 },
   // High Roller: a dealer's green eyeshade on a black band with gold piping; four gold coins flipping round the head.

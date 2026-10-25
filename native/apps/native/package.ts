@@ -4,6 +4,7 @@ import{basename,dirname,join,relative,resolve}from"node:path";
 import{parseArgs}from"node:util";
 import{createHash}from"node:crypto";
 import{executableHash,MACHO_MODE}from"./packaging/executable-identity";
+import{bundleLinuxDependencies}from"./packaging/linux-elf";
 const root=resolve(import.meta.dir,"../..");
 const sha=(b:Uint8Array|string)=>createHash("sha256").update(b).digest("hex");
 export function run(args:string[],cwd=root):string{const r=Bun.spawnSync(args,{cwd,stdout:"pipe",stderr:"pipe",env:process.env});if(r.exitCode)throw new Error(`${args[0]} failed (${r.exitCode}): ${Buffer.from(r.stderr).toString()}`);return Buffer.from(r.stdout).toString();}
@@ -59,7 +60,6 @@ function windowsDependencies(exe:string,destination:string,search:string[]){
  const redist=process.env.VCToolsRedistDir;if(redist)search.push(join(redist,"x64","Microsoft.VC143.CRT"));
  for(let i=0;i<queue.length;i++){for(const match of run(["dumpbin","/DEPENDENTS",queue[i]]).matchAll(/^\s+([A-Za-z0-9_.-]+\.dll)\s*$/gmi)){const name=match[1];if(system.test(name)||seen.has(name.toLowerCase()))continue;seen.add(name.toLowerCase());const file=[dirname(exe),...search,...(process.env.PATH??"").split(";")].map(p=>join(p,name)).find(existsSync);if(!file)throw new Error(`Unresolved Windows dependency ${name}; pass --dependencies DIR / configure VCToolsRedistDir`);const to=join(destination,name);copy(file,to);queue.push(to);}}
 }
-function linuxDependencies(exe:string,destination:string){mkdirSync(destination,{recursive:true});const queue=[exe],seen=new Set<string>();for(let i=0;i<queue.length;i++)for(const m of run(["ldd",queue[i]]).matchAll(/(\S+) => (\/\S+) \(/g)){if(!/^lib(?:SDL3|curl|ssl|crypto|z\.|zstd|brotli|idn|nghttp|psl|ssh2)/.test(m[1])||seen.has(m[1]))continue;seen.add(m[1]);const to=join(destination,m[1]);copy(realpathSync(m[2]),to);queue.push(to);}return run(["ldd",exe]);}
 export function makeManifest(executable:string,resources:string,platform:string,arch:string,wasm:Uint8Array,source:Record<string,unknown>){
  const wasmSha256=sha(wasm),canonical=`bunnyhop-web/${wasmSha256.slice(0,12)}`;
  if(source.wasm!==canonical)throw new Error("Source manifest canonical WASM identity does not match the artifact; build first");
@@ -68,12 +68,13 @@ export function makeManifest(executable:string,resources:string,platform:string,
  return{schema:1,build,wasm:source.wasm,canonicalWasmSha256:wasmSha256,platform:`${platform}/${arch}`,renderer:"native-opengl",binaryHashMode,binarySha256,menuSha256,assetsSha256};
 }
 if(import.meta.main){
- const {values}=parseArgs({args:Bun.argv.slice(2),options:{"skip-build":{type:"boolean"},out:{type:"string",default:"target/native-packages"},platform:{type:"string",default:process.platform},arch:{type:"string",default:process.arch},version:{type:"string",default:"0.0.1"},binary:{type:"string"},dependencies:{type:"string",multiple:true},identity:{type:"string",default:process.env.BUNNYHOP_CODESIGN_IDENTITY??"-"},"notary-profile":{type:"string"},"windows-thumbprint":{type:"string",default:process.env.BUNNYHOP_WINDOWS_SIGNING_THUMBPRINT},licenses:{type:"string",multiple:true},release:{type:"boolean"},"require-platform-signing":{type:"boolean"}}});
+ const {values}=parseArgs({args:Bun.argv.slice(2),options:{"skip-build":{type:"boolean"},out:{type:"string",default:"target/native-packages"},platform:{type:"string",default:process.platform},arch:{type:"string",default:process.arch},version:{type:"string",default:"0.1.0"},binary:{type:"string"},dependencies:{type:"string",multiple:true},"linux-dlopen-library":{type:"string",multiple:true},identity:{type:"string",default:process.env.BUNNYHOP_CODESIGN_IDENTITY??"-"},"notary-profile":{type:"string"},"windows-thumbprint":{type:"string",default:process.env.BUNNYHOP_WINDOWS_SIGNING_THUMBPRINT},licenses:{type:"string",multiple:true},release:{type:"boolean"},"require-platform-signing":{type:"boolean"}}});
  try{
  const platform=values.platform!,arch=values.arch!,version=values.version!;
  if(!["darwin","win32","linux"].includes(platform)||!['x64','arm64'].includes(arch)||!/^[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$/.test(version))throw new Error("Invalid package platform/architecture/version");
  if(platform!==process.platform)throw new Error("Package on the target OS (Windows via packaging CI); cross-OS dependency/signing closure is not supported");
  if(arch!==process.arch)throw new Error("Package on the target architecture; cross-architecture packaging needs a separately validated closure");
+ if(platform!=="linux"&&values["linux-dlopen-library"]?.length)throw new Error("--linux-dlopen-library requires Linux packaging");
  if(!values["skip-build"])console.log(run(["bun","apps/native/build.ts"]));
  const out=resolve(root,values.out!),tag=`bunnyhop-native-${version}-${platform}-${arch}`,stage=join(out,tag);if(existsSync(stage))throw new Error(`Package exists: ${stage}; choose a new output directory/version`);mkdirSync(stage,{recursive:true});
  const sourceBinary=resolve(root,values.binary??`apps/native/build/bunnyhop-native${platform==="win32"?".exe":""}`);
@@ -110,7 +111,8 @@ if(import.meta.main){
   if(values["require-platform-signing"]&&signing!=="authenticode")throw new Error("Windows release requires a configured Authenticode certificate in the certificate store");
   for(const name of ["Install.ps1","Uninstall.ps1","Install-WebView2.ps1"])copy(join(root,"apps/native/packaging/windows",name),join(packageRoot,name));
  }else{
-  writeFileSync(join(packageRoot,"RUNTIME.txt"),linuxDependencies(executable,join(packageRoot,"lib")));
+  // Patch and verify every bundled ELF before makeManifest hashes the executable.
+  writeFileSync(join(packageRoot,"RUNTIME.txt"),bundleLinuxDependencies(executable,join(packageRoot,"lib"),(values["linux-dlopen-library"]??[]).map(p=>resolve(root,p))));
   copy(join(root,"apps/native/packaging/linux-launch.sh"),join(packageRoot,"bunnyhop-native"));chmodSync(join(packageRoot,"bunnyhop-native"),0o755);
   copy(join(root,"apps/native/packaging/linux-dependencies.txt"),join(packageRoot,"DEPENDENCIES.txt"));
  }

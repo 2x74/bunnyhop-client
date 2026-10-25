@@ -2,10 +2,12 @@
 // It is deliberately not versioned: upstream debug strings contain build-machine paths.
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { PHYSICS_VERSION } from "../web/src/core";
+import { TIMER_RULES } from "../web/src/timer";
 
-export const CANONICAL_WASM_URL = "https://bunnyhop.lol/assets/bunnyhop_core-DHZPH4Tl.wasm";
-export const CANONICAL_WASM_SHA256 = "b585ad5fe0568bb0b9a2ed7653f27996a6f65ee36b8f672e6f9fedcd0c355296";
-export const CANONICAL_WASM_BYTES = 1_384_449;
+export const CANONICAL_WASM_URL = "https://bunnyhop.lol/assets/bunnyhop_core-DY4PXduP.wasm";
+export const CANONICAL_WASM_SHA256 = "3cca0f22a3c30492d30c2f5e745f8940cc29498eafdbab4d9ff5cd9e07bbd20a";
+export const CANONICAL_WASM_BYTES = 1387961;
 const defaultPath = resolve(import.meta.dir, "../web/src/wasm/bunnyhop_core.wasm");
 function valid(bytes: Uint8Array): boolean {
   return bytes.byteLength === CANONICAL_WASM_BYTES &&
@@ -13,6 +15,9 @@ function valid(bytes: Uint8Array): boolean {
 }
 
 export async function ensureCanonicalWasm(path = defaultPath): Promise<string> {
+  if (PHYSICS_VERSION !== 15 || TIMER_RULES !== 2) {
+    throw new Error("Game rules changed: update the pinned native verifier and rerun native/WASM parity before building a release.");
+  }
   const existing = await readFile(path).catch(() => null);
   if (existing && valid(existing)) return path;
   const temporary = `${path}.download-${process.pid}`;
@@ -41,7 +46,7 @@ export async function ensureCanonicalWasm(path = defaultPath): Promise<string> {
     return path;
   } catch (error) {
     await rm(temporary, { force: true });
-    throw new Error(`Canonical WASM is missing or invalid. Connect once and run 'bun run wasm', or place the exact public asset (SHA-256 ${CANONICAL_WASM_SHA256}) at apps/web/src/wasm/bunnyhop_core.wasm. Offline native compilation requires this cached verifier for identity and parity checks. ${String(error)}`);
+    throw new Error(`Canonical WASM is missing or invalid. Connect once and run 'bun apps/native/ensure-wasm.ts', or place the exact public asset (SHA-256 ${CANONICAL_WASM_SHA256}) at apps/web/src/wasm/bunnyhop_core.wasm. Offline native compilation requires this cached verifier for identity and parity checks. ${String(error)}`);
   }
 }
 

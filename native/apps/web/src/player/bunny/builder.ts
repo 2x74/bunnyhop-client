@@ -3,7 +3,7 @@
 // materials read (player/materials.ts):
 //   partColor vec3   fixed colour (linear), used when accent == 0
 //   accent    float  -1 = spinning propeller (partColor), 0 = partColor, 1 = style accent, 2 = accent + glow, 3 + k = colourway palette slot k,
-//                    -2 capybara body, -3 eyes, -4 mouth (partColor, movement reactions);
+//                    -2 capybara body, -3 eyes, -4 mouth; -5 maxwell body, -6 eyes, -7 mouth, -8 tail (partColor, movement reactions);
 //                    12..15 hat crystal (player/hat-fx.ts: partColor, moving / lit), >= 16 glove faces
 //   skinIndex / skinWeight (4 influences)
 //   finishUV  vec4   only when a section set `finish` (knife blades, viewmodel/knives/): x along the blade 0 (guard)

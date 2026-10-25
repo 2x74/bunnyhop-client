@@ -12,8 +12,9 @@ import { navigate } from "./nav";
 import { styleLabel } from "../styles";
 import { formatTime } from "../timer";
 import { landRows } from "./land";
+import { profileFor } from "./account-state";
 
-type PlayerStats = Awaited<ReturnType<typeof api.playerStats>>;
+export type PlayerStats = Awaited<ReturnType<typeof api.playerStats>>;
 
 const DAY = 86_400_000;
 const number = (n: number) => n.toLocaleString();
@@ -126,7 +127,7 @@ function onlineChart(s: GameStats): HTMLElement {
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.setAttribute("preserveAspectRatio", "none");
   svg.setAttribute("aria-hidden", "true");
-  svg.innerHTML = `<defs><linearGradient id="st-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".28"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs><path class="st-area" d="${area}" fill="url(#st-fill)"/><path class="st-line" pathLength="1" d="${line}" fill="none" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>`;
+  svg.innerHTML = `<defs><linearGradient id="st-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".28"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs><path class="st-area" d="${area}" fill="url(#st-fill)"/><path class="st-line" d="${line}" fill="none" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>`;
   const cursor = h("div.st-cursor", { hidden: true }, h("span.st-cursor-dot"), h("span.st-cursor-tip"));
   const plot = h("div.st-plot", { role: "img", "aria-label": `Players online over the last 24 hours, highest ${number(top)}` }, svg, cursor, h("span.st-plot-max", null, number(top)));
   plot.addEventListener("pointermove", (e) => {
@@ -185,14 +186,17 @@ function mapRows(maps: PlayerStats["maps"]): HTMLElement {
 
 /**
  * A profile's activity: the totals, the last 30 days, styles and most played maps. `compact` (the profile's overview,
- * whose ranks already list the styles): no Styles block, and no chart for a month without finishes.
+ * whose ranks already list the styles): no Styles block, and no chart for a month without finishes. `early`: the read,
+ * already started (ui/profile.ts starts it with the profile's); Try again reads anew.
  */
-export function playerStatsSection(id: string, o: { compact?: boolean } = {}): HTMLElement {
+export function playerStatsSection(id: string, o: { compact?: boolean; early?: Promise<PlayerStats> } = {}): HTMLElement {
   const box = h("section.st-player", { "aria-busy": "true" }, skeleton({ figs: 4 }));
+  let early = o.early;
   const load = () => {
     box.setAttribute("aria-busy", "true");
-    void api
-      .playerStats(id)
+    const read = early ?? api.playerStats(id);
+    early = undefined;
+    void read
       .then((s) => {
         const active = s.activity.some((d) => d.runs > 0);
         clear(
@@ -370,7 +374,8 @@ export function statsScreen(o: { tabsHost: HTMLElement; play?: () => void }): HT
     try {
       const user = await api.me();
       if (!user) throw new Error("No account");
-      const [profile, stats] = await Promise.all([api.profile(user.id), api.playerStats(user.id).catch(() => null)]);
+      // (Your profile as home / the account chip just read it, if it's fresh: account-state.ts profileFor.)
+      const [profile, stats] = await Promise.all([profileFor(user.id), api.playerStats(user.id).catch(() => null)]);
       if (disposed) return;
       const view = personalView(profile, stats, o.play ?? null);
       panels.personal.replaceChildren(view);

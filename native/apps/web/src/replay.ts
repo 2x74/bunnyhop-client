@@ -84,6 +84,9 @@
 // in that order, right after the pitch column. The decoder rebuilds the yaw column bit for bit (Math.fround of
 // countedYaw), so everything downstream (simulation, hashes, viewers) is unchanged. A recording whose counts aren't
 // whole numbers (an OS-scaled mouse) is written as v7, without counts. v1-v7 decode exactly as before.
+// v10: a turn-bind recording with fractional mouse counts keeps exact absolute f64 counts in place of the integer
+// count deltas. Everything else follows v9 (including its stamina/count flags). This preserves both the original
+// mouse motion and the manual-turn markers on scaled/accelerated mice; integer recordings retain v8/v9 encoding.
 
 import { PHYSICS_V1, PHYSICS_V7, type RestartPoint, type Settings } from "./core";
 import { TIMER_RULES_V1 } from "./timer";
@@ -98,11 +101,11 @@ export const REPLAY_VERSION = 7;
 export const REPLAY_VERSION_COUNTED = 8;
 /** Version of a timer rules 1 replay with physics v2+. */
 export const REPLAY_VERSION_PHYSICS = 6;
-/** Highest version decoded: v5 = v4 + restart point names (written only when the restart point has names); v6 = v5 +
- * physics version; v7 = v6 + timer rules. */
-export const REPLAY_VERSION_MAX = 9;
+/** Highest decoded format: v8 counted yaw, v9 stamina, v10 fractional counts with turn provenance. */
+export const REPLAY_VERSION_MAX = 10;
 /** v9 adds stamina (flag 1) and explicitly marks counted yaw (flag 2); other styles retain their old formats. */
 export const REPLAY_VERSION_STAMINA = 9;
+export const REPLAY_VERSION_FRACTIONAL = 10;
 const hasRestartNames = (h: Pick<ReplayHeader, "spawn">) => !!(h.spawn && (h.spawn.targetname || h.spawn.classname));
 /** Physics version of a header (settings without the field: v1). */
 export const replayPhysics = (h: Pick<ReplayHeader, "settings">): number => h.settings.physics ?? PHYSICS_V1;
@@ -114,6 +117,10 @@ export const YAW_SET_TELEPORT = 2;
 export const YAW_SET_PUSHER = 3;
 export const YAW_SET_SENSITIVITY = 4;
 export const YAW_SET_RAW = 5;
+/** Manual turn: changes the base while retaining the cumulative mouse counts and sensitivity. */
+export const YAW_SET_TURN = 6;
+/** A turn on the same tick as another view set retains that set's reason in the low bits. */
+export const YAW_WITH_TURN = 1 << 7;
 /** [0, 360) the way the client always wrapped yaw. */
 export const norm360 = (x: number): number => ((x % 360) + 360) % 360;
 /** v8: the view yaw from an exact base and whole mouse counts (degrees = counts * sensitivity * m_yaw, CS:S style). */
@@ -131,9 +138,9 @@ export interface LookSample {
   reports: number;
 }
 
-/** v8 counted-yaw data of a replay: per-tick counts and input stats, the rebases (tick = first command of the base). */
+/** Counted-yaw data: whole counts in v8/v9, exact fractional counts in v10; rebases/input stats share the layout. */
 export interface CountedYaw {
-  count: Int32Array;
+  count: Int32Array | Float64Array;
   rebases: { tick: number; kind: number; base: number; k: number }[];
   frames: Uint16Array;
   events: Uint16Array;
@@ -150,6 +157,12 @@ const ZONE_KIND_CODES: readonly ZoneKind[] = ["start", "end", "stage", "checkpoi
 export const FLAG_AUTOHOP = 1 << 0;
 const FLAG_STAMINA = 1 << 1;
 const FLAG_COUNTED = 1 << 2;
+/**
+ * Null binds were on for some of the recording (null-binds.ts): with A + D (or W + S) held, the key pressed last moved
+ * the player. Any version; only written when set, so other replays are byte-identical. Older decoders ignore it.
+ * Information for the anticheat only: the commands are the resolved ones and re-simulate as always.
+ */
+export const FLAG_NULL_BINDS = 1 << 3;
 export const DEFAULT_CHECKPOINT_INTERVAL = 100;
 export const COSMETIC_MAGIC = 0x58434842; // "BHCX" little-endian
 export const LOADOUT_MAGIC = 0x4f4c4842; // "BHLO" little-endian
@@ -190,6 +203,8 @@ export interface ReplayHeader {
   player: string;
   recordedAt: number;
   checkpointInterval: number;
+  /** Null binds were on during the recording (FLAG_NULL_BINDS). Absent when off. */
+  nullBinds?: boolean;
 }
 
 export interface Checkpoint {
@@ -244,6 +259,8 @@ export class ReplayRecorder {
   checkpoints: Checkpoint[] = [];
   cosmetic: CosmeticEvent[] = [];
   inspect: CosmeticEvent[] = [];
+  /** Null binds resolved some recorded command (header.nullBinds). */
+  nullBinds = false;
 
   constructor(public checkpointInterval = DEFAULT_CHECKPOINT_INTERVAL) {}
 
@@ -254,6 +271,7 @@ export class ReplayRecorder {
   clear(): void {
     this.n = 0;
     this.looks = [];
+    this.nullBinds = false;
     this.checkpoints = [];
     this.cosmetic = [];
     this.inspect = [];
@@ -322,7 +340,7 @@ export class ReplayRecorder {
   build(header: Omit<ReplayHeader, "totalTicks" | "checkpointInterval" | "version">): Replay {
     const n = this.n;
     return {
-      header: { ...header, version: replayVersionFor(header), totalTicks: n, checkpointInterval: this.checkpointInterval },
+      header: { ...header, version: replayVersionFor(header), totalTicks: n, checkpointInterval: this.checkpointInterval, ...(this.nullBinds ? { nullBinds: true } : {}) },
       forward: this.forward.slice(0, n),
       side: this.side.slice(0, n),
       buttons: this.buttons.slice(0, n),
@@ -337,14 +355,17 @@ export class ReplayRecorder {
 }
 
 /**
- * v8: the counted-yaw data of a recording, or nothing when it can't be represented (a command without a view state, a
- * count that isn't a whole number). Each command's recorded yaw must be exactly Math.fround(countedYaw(...)) of its
+ * Counted-yaw data, or nothing when it can't be represented (a missing view state; fractional counts without turns
+ * retain the old v7 fallback). Each recorded yaw must be exactly Math.fround(countedYaw(...)) of its
  * view state; a command where it isn't (a view set this module wasn't told about) becomes a raw rebase at its own yaw,
  * so the encoding is always lossless.
  */
 function withCounted(looks: readonly (LookSample | null)[], yaw: Float32Array, n: number): { counted?: CountedYaw } {
   if (n === 0) return {};
-  const count = new Int32Array(n);
+  const fractional = looks.some((l) => l && !Number.isInteger(l.count));
+  // Preserve the historical fallback unless turns need their metadata retained.
+  if (fractional && !looks.some((l) => l && (l.kind === YAW_SET_TURN || (l.kind & YAW_WITH_TURN) !== 0))) return {};
+  const count = fractional ? new Float64Array(n) : new Int32Array(n);
   const frames = new Uint16Array(n);
   const events = new Uint16Array(n);
   const reports = new Uint16Array(n);
@@ -357,7 +378,7 @@ function withCounted(looks: readonly (LookSample | null)[], yaw: Float32Array, n
   const fits = (base: number, c: number, k: number, y: number) => Object.is(Math.fround(countedYaw(base, c, k)), y);
   for (let i = 0; i < n; i++) {
     const l = looks[i];
-    if (!l || !Number.isInteger(l.count) || Math.abs(l.count) > 0x3fffffff || !Number.isFinite(l.base) || !Number.isFinite(l.k)) return {};
+    if (!l || !Number.isFinite(l.count) || Math.abs(l.count) > 0x3fffffff || !Number.isFinite(l.base) || !Number.isFinite(l.k)) return {};
     frames[i] = clampU16(l.frames);
     events[i] = clampU16(l.events);
     reports[i] = clampU16(l.reports);
@@ -538,9 +559,10 @@ export function encodeRaw(r: Replay): Uint8Array {
   const w = new Writer();
   w.u32(REPLAY_MAGIC);
   const counted = r.counted && replayTimerRules(h) !== TIMER_RULES_V1 ? r.counted : null;
-  const version = h.settings.stamina || h.style === "lowgrav" ? REPLAY_VERSION_STAMINA : counted ? REPLAY_VERSION_COUNTED : replayVersionFor(h);
+  const fractional = counted?.count instanceof Float64Array;
+  const version = fractional ? REPLAY_VERSION_FRACTIONAL : h.settings.stamina || h.style === "lowgrav" ? REPLAY_VERSION_STAMINA : counted ? REPLAY_VERSION_COUNTED : replayVersionFor(h);
   w.u16(version);
-  w.u16((h.settings.autohop ? FLAG_AUTOHOP : 0) | (h.settings.stamina ? FLAG_STAMINA : 0) | (version === REPLAY_VERSION_STAMINA && counted ? FLAG_COUNTED : 0));
+  w.u16((h.settings.autohop ? FLAG_AUTOHOP : 0) | (h.settings.stamina ? FLAG_STAMINA : 0) | (version >= REPLAY_VERSION_STAMINA && counted ? FLAG_COUNTED : 0) | (h.nullBinds ? FLAG_NULL_BINDS : 0));
   w.str8(h.map);
   w.bytes(hexToBytes(h.mapSha256));
   const s = h.settings;
@@ -601,7 +623,8 @@ export function encodeRaw(r: Replay): Uint8Array {
     for (let i = 0; i < n; i++) {
       const rebase = rb < counted.rebases.length && counted.rebases[rb].tick === i;
       while (rb < counted.rebases.length && counted.rebases[rb].tick === i) rb++;
-      w.svarint(rebase ? counted.count[i] : (counted.count[i] - prev) | 0);
+      if (fractional) w.f64(counted.count[i]);
+      else w.svarint(rebase ? counted.count[i] : (counted.count[i] - prev) | 0);
       prev = counted.count[i];
     }
     w.varint(counted.rebases.length);
@@ -737,11 +760,14 @@ export function decodeRaw(buf: Uint8Array, opts: { commands?: boolean } = {}): R
   const buttons = new Uint32Array(cols);
   const yaw = new Float32Array(cols);
   const pitch = new Float32Array(cols);
-  const isCounted = version === REPLAY_VERSION_COUNTED || (version === REPLAY_VERSION_STAMINA && (flags & FLAG_COUNTED) !== 0);
+  const fractional = version === REPLAY_VERSION_FRACTIONAL;
+  const isCounted = version === REPLAY_VERSION_COUNTED || (version >= REPLAY_VERSION_STAMINA && (flags & FLAG_COUNTED) !== 0);
+  if (fractional && !isCounted) throw new Error("replay: fractional counts require counted yaw");
   let counted: CountedYaw | undefined;
   let prev = 0;
   if (!keep) {
-    for (let i = 0; i < 5 * n; i++) r.varint(); // v8: pitch and the counts take the yaw column's place
+    for (let i = 0; i < (fractional ? 4 : 5) * n; i++) r.varint(); // v8: pitch and counts replace yaw; v10 counts are f64
+    if (fractional) for (let i = 0; i < n; i++) readFractionalCount(r);
     if (isCounted) {
       for (let i = r.varint(); i > 0; i--) (r.varint(), r.u8(), r.f64(), r.f64());
       for (let i = 0; i < 3 * n; i++) r.varint();
@@ -757,7 +783,7 @@ export function decodeRaw(buf: Uint8Array, opts: { commands?: boolean } = {}): R
       prev = 0;
       for (let i = 0; i < n; i++) bits[i] = prev = (prev + r.svarint()) | 0;
     }
-    if (isCounted) counted = readCounted(r, n, yaw);
+    if (isCounted) counted = readCounted(r, n, yaw, fractional);
   }
   const checkpoints: Checkpoint[] = [];
   prev = 0;
@@ -788,6 +814,7 @@ export function decodeRaw(buf: Uint8Array, opts: { commands?: boolean } = {}): R
       player,
       recordedAt,
       checkpointInterval,
+      ...(flags & FLAG_NULL_BINDS ? { nullBinds: true } : {}),
     },
     forward,
     side,
@@ -802,10 +829,16 @@ export function decodeRaw(buf: Uint8Array, opts: { commands?: boolean } = {}): R
   };
 }
 
-/** v8: reads the counts, rebases and input stats, and rebuilds the yaw column from them (bit for bit). */
-function readCounted(r: Reader, n: number, yaw: Float32Array): CountedYaw {
-  const raw = new Int32Array(n);
-  for (let i = 0; i < n; i++) raw[i] = r.svarint();
+/** v10: an exact, bounded mouse count (header-only uploads check the same values as full reads). */
+function readFractionalCount(r: Reader): number {
+  const count = r.f64();
+  if (!Number.isFinite(count) || Math.abs(count) > 0x3fffffff) throw new Error("replay: bad fractional mouse count");
+  return count;
+}
+/** Reads counts/rebases/input stats and reconstructs every yaw bit. v10 stores absolute f64 counts. */
+function readCounted(r: Reader, n: number, yaw: Float32Array, fractional = false): CountedYaw {
+  const raw = fractional ? new Float64Array(n) : new Int32Array(n);
+  for (let i = 0; i < n; i++) raw[i] = fractional ? readFractionalCount(r) : r.svarint();
   const rebases: CountedYaw["rebases"] = [];
   let tick = 0;
   for (let i = r.varint(); i > 0; i--) {
@@ -817,14 +850,14 @@ function readCounted(r: Reader, n: number, yaw: Float32Array): CountedYaw {
     rebases.push({ tick, kind, base, k });
   }
   if (n > 0 && (!rebases.length || rebases[0].tick !== 0)) throw new Error("replay: counted yaw without a base at tick 0");
-  const count = new Int32Array(n);
+  const count = fractional ? new Float64Array(n) : new Int32Array(n);
   let rb = 0;
   let base = 0;
   let k = 0;
   for (let i = 0; i < n; i++) {
     let rebase = false;
     while (rb < rebases.length && rebases[rb].tick === i) ({ base, k } = rebases[rb++]), (rebase = true);
-    count[i] = rebase ? raw[i] : (count[i - 1] + raw[i]) | 0;
+    count[i] = fractional || rebase ? raw[i] : (count[i - 1] + raw[i]) | 0;
     yaw[i] = countedYaw(base, count[i], k);
   }
   const col = () => {

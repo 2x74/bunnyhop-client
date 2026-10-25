@@ -3,6 +3,8 @@
 
 import { api } from "../api";
 import { roomUrl } from "./presence";
+import { WAVEDASH } from "../platform/env";
+import { wavedashLink } from "../platform/wavedash";
 
 const LOBBY_RE = /^p-[a-z2-7]{10}$/;
 
@@ -14,8 +16,9 @@ export function lobbyIdFromParam(v: string | null): string | null {
   return id && LOBBY_RE.test(id) ? id : null;
 }
 
-/** The link friends open. */
+/** The link friends open: the site's, or in the Wavedash build the Wavedash game page (they join there, signed in). */
 export function lobbyInviteUrl(id: string): string {
+  if (WAVEDASH) return wavedashLink({ lobby: id.replace(/^p-/, "") });
   const u = new URL("/", location.origin);
   u.searchParams.set("lobby", id.replace(/^p-/, ""));
   return u.toString();

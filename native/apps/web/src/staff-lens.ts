@@ -9,6 +9,7 @@
 //   - evidenceTicks(runId, data): the jumps the run's analysis flagged (its best 6-jump gain window, GET
 //     /admin/integrity/run/<id>, staff-only), as replay ticks for the viewer's timeline to mark once. Never in live play.
 
+import { appHref } from "./platform/navigation";
 import { API_URL } from "./api";
 import { myProfile } from "./ui/account-state";
 import type { StaffRole } from "./progression";
@@ -101,7 +102,7 @@ export function staffButton(): { el: HTMLButtonElement; refresh: () => void } {
 }
 
 /** ?t=<tick> / ?jump=<n> on the page URL (a replay link), read before the viewer rewrites the URL. */
-export function replayDeepLink(href = location.href): { tick: number | null; jump: number | null } {
+export function replayDeepLink(href = appHref()): { tick: number | null; jump: number | null } {
   const q = new URL(href).searchParams;
   const num = (k: string) => {
     const v = Number(q.get(k));

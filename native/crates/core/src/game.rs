@@ -149,14 +149,20 @@ pub const PHYSICS_V11: u32 = 11;
 pub const PHYSICS_V12: u32 = 12;
 /// v13: consistent downhill ramp landing boosts, including early ground probes.
 pub const PHYSICS_V13: u32 = 13;
+/// v14: per-map sv_maxvelocity (`PHYSICS_FIX_MAP_MAX_VELOCITY`) and func_tracktrains that find their path before the
+/// map's spawn outputs (`PHYSICS_FIX_TRAIN_SPAWN`).
+pub const PHYSICS_V14: u32 = 14;
+/// v15: Source's signed door / button travel on the maps that need it (`PHYSICS_FIX_MAP_DOOR_TRAVEL`,
+/// `game/map_fixes.rs` `SIGNED_DOOR_TRAVEL`): bhop_montana_fix's "UP" block rises and launches the player.
+pub const PHYSICS_V15: u32 = 15;
 /// The version new recordings use.
-pub const PHYSICS_LATEST: u32 = PHYSICS_V13;
+pub const PHYSICS_LATEST: u32 = PHYSICS_V15;
 /// Diagnostic pseudo-versions (never valid in a replay, whose field is a u8): `PHYSICS_DIAG | fix bits` turns on only
-/// the listed fixes, to tell which fix changes a replay (tools: /tmp physics-v2 analysis). The fix bits are the low 24
-/// (`PHYSICS_DIAG_FIXES`); before v8 the base was 0x1_0000 with 16 fix bits (and 0x100 with 8 before v5), and those old
-/// diagnostic numbers are not versions any more. The mask is never stored: replays carry the u8 version, run hashes
-/// fold only the commands, and the state digest has no settings in it.
-pub const PHYSICS_DIAG: u32 = 1 << 24;
+/// the listed fixes, to tell which fix changes a replay (tools: /tmp physics-v2 analysis). The fix bits are the low 25
+/// (`PHYSICS_DIAG_FIXES`); before v15 the base was 1 << 24 with 24 fix bits, before v8 0x1_0000 with 16 (and 0x100 with
+/// 8 before v5), and those old diagnostic numbers are not versions any more. The mask is never stored: replays carry
+/// the u8 version, run hashes fold only the commands, and the state digest has no settings in it.
+pub const PHYSICS_DIAG: u32 = 1 << 25;
 /// The fix bits a diagnostic pseudo-version may carry.
 pub const PHYSICS_DIAG_FIXES: u32 = PHYSICS_DIAG - 1;
 /// Fix bit: MASK_PLAYERSOLID / matching ladder mask (playerclips are solid).
@@ -265,11 +271,42 @@ pub const PHYSICS_FIX_DOOR_START_OPEN: u32 = 1 << 20;
 const PHYSICS_FIX_V12: u32 = PHYSICS_FIX_V11 | PHYSICS_FIX_DOOR_START_OPEN;
 /// Downhill landings receive the collision boost even when caught by a ground probe.
 pub const PHYSICS_FIX_DOWNHILL: u32 = 1 << 21;
-const PHYSICS_FIX_ALL: u32 = PHYSICS_FIX_V12 | PHYSICS_FIX_DOWNHILL;
+const PHYSICS_FIX_V13: u32 = PHYSICS_FIX_V12 | PHYSICS_FIX_DOWNHILL;
+/// Fix bit (v14): the map's own sv_maxvelocity (`game/map_fixes.rs` `MAX_VELOCITY`) replaces the server's 3500 for the
+/// whole map. The maps that run `sv_maxvelocity 10000` through a point_servercommand (bhop_sandtrap, bhop_icetrap, ...)
+/// are built for it; Momentum Mod sets the same per map. Matched on the entity lump like the trigger fixes.
+pub const PHYSICS_FIX_MAP_MAX_VELOCITY: u32 = 1 << 22;
+/// Fix bit (v14): func_tracktrain / func_tanktrain run `CFuncTrackTrain::Find` before the map's spawn outputs fire. In
+/// Source, Find thinks on the spawn frame and logic_auto fires 0.2 s later (`CLogicAuto::Spawn`), so a train started by
+/// `logic_auto -> StartForward` already has its path; before v14 the input came first, `Next` found no path and zeroed
+/// the speed, and the train never moved (bhop_areaportal_v1's green platform, feedback 2026-10-23).
+pub const PHYSICS_FIX_TRAIN_SPAWN: u32 = 1 << 23;
+const PHYSICS_FIX_V14: u32 = PHYSICS_FIX_V13 | PHYSICS_FIX_MAP_MAX_VELOCITY | PHYSICS_FIX_TRAIN_SPAWN;
+/// Fix bit (v15): on the maps in `game/map_fixes.rs` `SIGNED_DOOR_TRAVEL`, a func_door whose lip is larger than its
+/// brush along movedir moves the difference the other way (`CBaseDoor::Spawn` has no clamp), and so does a func_button
+/// when that is 1 unit or more (`CBaseButton::Spawn`). Elsewhere, and before v15, the travel is clamped at 0.
+pub const PHYSICS_FIX_MAP_DOOR_TRAVEL: u32 = 1 << 24;
+const PHYSICS_FIX_ALL: u32 = PHYSICS_FIX_V14 | PHYSICS_FIX_MAP_DOOR_TRAVEL;
 
 /// The per-map fix (`game/map_fixes.rs`) a parsed entity lump matches, by map name (tests, tools).
 pub fn map_fix_for(entities: &[Entity]) -> Option<&'static str> {
     map_fixes::find(entities).map(|(fix, _)| fix.map)
+}
+
+/// The map's own sv_maxvelocity entry (`game/map_fixes.rs` `MAX_VELOCITY`) a parsed entity lump matches, as
+/// (map name, value) (tests, tools).
+pub fn map_max_velocity_for(entities: &[Entity]) -> Option<(&'static str, f32)> {
+    map_fixes::max_velocity(entities).map(|m| (m.map, m.max_velocity))
+}
+
+/// The map a parsed entity lump matches in `game/map_fixes.rs` `SIGNED_DOOR_TRAVEL` (tests, tools).
+pub fn map_signed_door_travel_for(entities: &[Entity]) -> Option<&'static str> {
+    map_fixes::signed_door_travel(entities).map(|m| m.map)
+}
+
+/// Every map's own sv_maxvelocity (`game/map_fixes.rs` `MAX_VELOCITY`), as (map name, value) (tests, tools).
+pub fn map_max_velocity_table() -> Vec<(&'static str, f32)> {
+    map_fixes::MAX_VELOCITY.iter().map(|m| (m.map, m.max_velocity)).collect()
 }
 
 /// The fixes a physics version turns on; None for unknown versions.
@@ -287,7 +324,9 @@ pub fn physics_fixes(version: u32) -> Option<u32> {
         PHYSICS_V10 => Some(PHYSICS_FIX_V10),
         PHYSICS_V11 => Some(PHYSICS_FIX_V11),
         PHYSICS_V12 => Some(PHYSICS_FIX_V12),
-        PHYSICS_V13 => Some(PHYSICS_FIX_ALL),
+        PHYSICS_V13 => Some(PHYSICS_FIX_V13),
+        PHYSICS_V14 => Some(PHYSICS_FIX_V14),
+        PHYSICS_V15 => Some(PHYSICS_FIX_ALL),
         v if v & !PHYSICS_DIAG_FIXES == PHYSICS_DIAG && v & PHYSICS_DIAG_FIXES & !PHYSICS_FIX_ALL == 0 => Some(v & PHYSICS_DIAG_FIXES),
         _ => None,
     }
@@ -1102,6 +1141,8 @@ pub struct Game {
     pub spawn_angles: [f32; 3],
     pub tick: u32,
     pub events: u32,
+    /// Observational only: a clean, unmodified movement tick for local jump statistics. Never feeds physics.
+    pub jumpstats_valid: bool,
     /// View angles forced by the last teleport (pitch, yaw, roll).
     pub teleport_angles: [f32; 3],
     /// The player's targetname (bhop maps rename `!activator` to gate filtered teleports).
@@ -1180,6 +1221,12 @@ pub struct Game {
     /// the touch test from physics v8 (`PHYSICS_FIX_MAP_TRIGGERS`). Fixed at load, never part of the state.
     map_fix: Option<&'static str>,
     map_trigger_boxes: Vec<(usize, physics::ConvexBrush)>,
+    /// The map's sv_maxvelocity (`map_fixes::MAX_VELOCITY`), if it has one; used from physics v14
+    /// (`PHYSICS_FIX_MAP_MAX_VELOCITY`). Fixed at load.
+    map_max_velocity: Option<f32>,
+    /// The map is in `map_fixes::SIGNED_DOOR_TRAVEL`: from physics v15 (`PHYSICS_FIX_MAP_DOOR_TRAVEL`) its movers use
+    /// Source's signed travel. Fixed at load.
+    map_signed_door_travel: bool,
 }
 
 /// Physics v4 world state the entity list doesn't hold; saved with the game state, cleared on reset.
@@ -1240,6 +1287,8 @@ impl Game {
             Some((fix, boxes)) => (Some(fix.map), boxes),
             None => (None, Vec::new()),
         };
+        let map_max_velocity = map_fixes::max_velocity(&entities).map(|m| m.max_velocity);
+        let map_signed_door_travel = map_fixes::signed_door_travel(&entities).is_some();
         let physics::MapPhysics { prop_sources, world, texinfo_surface, props, diagnostics, displacement_count } =
             physics::build_with_entities(bsp, content, &entities, prop_mesh)?;
         let models: &[Model] = match bsp.lump(playsrc_bsp::MODELS).map(|l| &l.records) {
@@ -1284,6 +1333,7 @@ impl Game {
             spawn_angles: spawn.1,
             tick: 0,
             events: 0,
+            jumpstats_valid: false,
             teleport_angles: spawn.1,
             player_name: String::new(),
             player_class: PLAYER_CLASS.to_string(),
@@ -1327,6 +1377,8 @@ impl Game {
             templates: Vec::new(),
             map_fix,
             map_trigger_boxes,
+            map_max_velocity,
+            map_signed_door_travel,
         };
         game.link_hierarchy();
         game.link_templates();
@@ -1357,17 +1409,22 @@ impl Game {
     }
 
     pub fn set_settings(&mut self, settings: Settings) {
-        let door_spawn_changed = (self.settings.physics_fixes() ^ settings.physics_fixes()) & PHYSICS_FIX_DOOR_START_OPEN != 0;
+        let spawn_changed = (self.settings.physics_fixes() ^ settings.physics_fixes())
+            & (PHYSICS_FIX_DOOR_START_OPEN | PHYSICS_FIX_TRAIN_SPAWN | PHYSICS_FIX_MAP_DOOR_TRAVEL)
+            != 0;
         self.settings = settings;
         self.config = Configuration {
             fixes: self.rules.movement_fixes(settings),
             record_queries: false,
             ..settings.configuration()
         };
+        if let Some(v) = self.map_max_velocity.filter(|_| settings.physics_fixes() & PHYSICS_FIX_MAP_MAX_VELOCITY != 0) {
+            self.config.maximum_velocity = v;
+        }
         self.policy = settings.policy();
         // load_map starts at v1; the client selects its version before building the rendered world.
-        // Spawn geometry must follow that selection immediately, even before an explicit restart.
-        if door_spawn_changed {
+        // Spawn geometry and spawn-time entity state must follow that selection immediately, even before an explicit restart.
+        if spawn_changed {
             self.reset();
         }
     }
@@ -1383,9 +1440,16 @@ impl Game {
 
     /// Restart the map: entity state, event queue and player.
     pub fn reset(&mut self) {
+        self.jumpstats_valid = false;
         self.restart_point = None;
         self.restart_names = None;
         self.ents = self.initial_ents.clone();
+        if self.map_signed_door_travel && self.settings.physics_fixes() & PHYSICS_FIX_MAP_DOOR_TRAVEL != 0 {
+            for k in 0..self.movers.len() {
+                let i = self.movers[k];
+                apply_signed_travel(&self.entities[i], &mut self.ents[i]);
+            }
+        }
         if self.settings.physics_fixes() & PHYSICS_FIX_DOOR_START_OPEN != 0 {
             // SDK doors.cpp CBaseDoor::Spawn: StartOpen is position2 / TS_AT_TOP,
             // without scheduling a return or firing movement outputs. Close/Open keep their usual meaning.
@@ -1411,6 +1475,9 @@ impl Game {
         self.state_after_command = self.state;
         self.events = EVENT_TELEPORTED;
         self.io_time = self.server_time(-1);
+        if self.settings.physics_fixes() & PHYSICS_FIX_TRAIN_SPAWN != 0 {
+            self.find_train_paths();
+        }
         for i in 0..self.ents.len() {
             if let Data::Auto { once } = self.ents[i].data {
                 for event in ["onmapspawn", "onnewgame", "onmultinewmap", "onmultinewround"] {
@@ -1647,6 +1714,8 @@ impl Game {
     }
 
     pub fn step(&mut self, cmd: Cmd) -> Result<(), String> {
+        self.jumpstats_valid = false;
+        let before_events = self.state;
         self.events = 0;
         self.attack = None;
         self.weapon_events = 0;
@@ -1664,6 +1733,11 @@ impl Game {
         }
 
         let was_grounded = self.state.ground.is_some();
+        let clean_before = before_events.position == self.state.position
+            && before_events.velocity == self.state.velocity
+            && self.state.water_level == 0 && self.state.base_velocity == [0.0; 3]
+            && self.gravity_scale == 1.0 && self.speed_scale == 1.0 && self.settings.gravity == 800.0
+            && self.state.ground.is_none_or(|g| g.support.is_none_or(|hit| hit_entity(hit).is_none()) && g.normal[2] >= 0.99 && g.jump_factor == 1.0);
         // Historical autohop mode (also used by our srcds parity plugin): IN_JUMP is stripped while the
         // player is airborne at the start of the tick (not on a ladder, water level < 2), so the engine's
         // jump latch is clear on the landing tick and holding jump re-jumps at once. Shavit instead clears old jump
@@ -1751,6 +1825,11 @@ impl Game {
             if result.jump_velocity != [0.0; 3] {
                 self.events |= EVENT_JUMPED;
             }
+            self.jumpstats_valid = clean_before && result.state.water_level == 0
+                && result.state.base_velocity == [0.0; 3] && result.mover_result.is_none()
+                // CheckJumpButton adds 0.15 to the view's step smoothing even on a flat takeoff.
+                && result.climbed_step <= if result.jump_velocity != [0.0; 3] { 0.15 } else { 0.0 }
+                && result.contacts.iter().all(|c| c.normal[2] >= 0.99);
             self.contacts.extend(result.contacts.iter().filter_map(|c| c.hit));
             self.last_move_origin = result.state.position;
             wall_hit = result.contacts.iter().any(|c| c.normal[2].abs() < 0.7);
@@ -1762,6 +1841,7 @@ impl Game {
         }
 
         // Touches run inside the player's usercmd, on the player's clock.
+        let after_movement = self.state;
         self.io_time = self.player_time();
         self.in_touch = true;
         let contacts = std::mem::take(&mut self.contacts);
@@ -1795,6 +1875,10 @@ impl Game {
             self.game_ui_think(cmd, pressed);
         }
         self.untouch_triggers();
+        self.jumpstats_valid &= self.state.position == after_movement.position
+            && self.state.velocity == after_movement.velocity && self.state.base_velocity == [0.0; 3]
+            && self.gravity_scale == 1.0 && self.speed_scale == 1.0
+            && self.state.ground.is_none_or(|g| g.support.is_none_or(|hit| hit_entity(hit).is_none()) && g.normal[2] >= 0.99 && g.jump_factor == 1.0);
         self.tick += 1;
         Ok(())
     }
@@ -3072,6 +3156,11 @@ impl Game {
         self.map_fix
     }
 
+    /// The sv_maxvelocity in effect: the map's own from physics v14 (`map_fixes::MAX_VELOCITY`), else 3500.
+    pub fn max_velocity(&self) -> f32 {
+        self.config.maximum_velocity
+    }
+
     /// The triggers that fix replaces (entity index, box mins, box maxs); the boxes count from physics v8.
     pub fn map_trigger_boxes(&self) -> Vec<(usize, [f32; 3], [f32; 3])> {
         self.map_trigger_boxes.iter().map(|(i, b)| (*i, b.mins, b.maxs)).collect()
@@ -3503,6 +3592,23 @@ impl GameState {
         let queue: usize = self.queue.iter().map(|q| size_of::<QueuedEvent>() + q.target.len() + q.input.len() + q.param.len()).sum();
         size_of::<Self>() + ents + queue + self.player_name.len() + self.player_class.len() + self.last_movement_error.len()
     }
+}
+
+/// `PHYSICS_FIX_MAP_DOOR_TRAVEL`: Source's signed travel for a func_door / func_button whose travel `build_entity`
+/// clamped at 0 (lip larger than the brush along movedir): it moves the difference against movedir. A button that
+/// would move under 1 unit, or has "Don't move", stays put (`CBaseButton::Spawn`). Run on a fresh copy at every reset.
+fn apply_signed_travel(entity: &Entity, ent: &mut RtEnt) {
+    let Some((mins, maxs)) = ent.brush.as_ref().map(|b| (b.mins, b.maxs)) else { return };
+    let Data::Mover(m) = &mut ent.data else { return };
+    let dir = angle_vectors_forward(entity.vec3("movedir").unwrap_or([0.0; 3]));
+    let size = [maxs[0] - mins[0], maxs[1] - mins[1], maxs[2] - mins[2]];
+    let lip = entity.float("lip").unwrap_or(0.0);
+    let travel = (dir[0] * size[0]).abs() + (dir[1] * size[1]).abs() + (dir[2] * size[2]).abs() - lip;
+    if travel >= 0.0 || (m.button && (entity.int("spawnflags") & 1 != 0 || travel > -1.0)) {
+        return;
+    }
+    m.dir = [-dir[0], -dir[1], -dir[2]];
+    m.distance = -travel;
 }
 
 /// Position2 is the open endpoint for linear doors, including the legacy StartOpen flag.

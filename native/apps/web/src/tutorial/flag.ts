@@ -4,6 +4,7 @@
 // one click away from the home screen's links (and the map list's search). Unlike `?tutorial=0`, it's still there.
 // Also the tutorial's local progress (lessons done, the final course, the graduate badge record).
 
+import { appLocation } from "../platform/navigation";
 import { getPB } from "../pb";
 import { BONUS_STYLE } from "../styles";
 import { TUTORIAL_MAP, type LessonId } from "./data";
@@ -14,7 +15,7 @@ const PROGRESS = "bunnyhop:tutorial-progress";
 
 export function tutorialEnabled(): boolean {
   try {
-    const q = new URLSearchParams(location.search).get("tutorial");
+    const q = appLocation().searchParams.get("tutorial");
     if (q === "1") localStorage.removeItem(FLAG);
     if (q === "0") localStorage.setItem(FLAG, "0");
     return localStorage.getItem(FLAG) !== "0";

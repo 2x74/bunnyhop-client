@@ -2099,6 +2099,22 @@ impl Game {
         }
     }
 
+    /// Physics v14 reset (`PHYSICS_FIX_TRAIN_SPAWN`): every train still waiting for its spawn think runs `Find` now,
+    /// before the map's spawn outputs, like Source's spawn-frame Find ahead of logic_auto's 0.2 s think.
+    pub(super) fn find_train_paths(&mut self) {
+        for k in 0..self.kins.len() {
+            let i = self.kins[k];
+            if self.ents[i].removed {
+                continue;
+            }
+            let waiting = matches!(&self.kin(i).kind, KinKind::Train(t) if t.think == TrainThink::Find);
+            if waiting && self.kin(i).push.think.is_some() {
+                self.kin_mut(i).push.think = None;
+                self.train_find(i);
+            }
+        }
+    }
+
     /// CFuncTrackTrain::ArriveAtNode.
     fn train_arrive_at_node(&mut self, i: usize, node: usize) {
         // FirePassInputs(node, node->GetNext(), true): InPass on `node`.

@@ -1,7 +1,7 @@
 // Account/network transport only. Native code owns ticks, command hashes,
 // heartbeat cadence, replay bytes and the local replay archive. This module
 // never owns the gameplay clock, simulation, WebGL context or WASM verifier.
-import type { Submission } from "../../web/src/api";
+import type { Submission, RequestDispatch } from "../../web/src/api";
 import { isStyleId, type StyleId } from "../../web/src/styles";
 
 interface Identity { map: string; track: number; style: StyleId; build: string; wasm: string }
@@ -18,8 +18,8 @@ export interface RunServiceStatus {
 }
 interface BeatBody { sid: string | null; map: string; track: number; style: string; tick: number; hash: string; paused: boolean }
 export interface RunApi {
-  runBeat(body: BeatBody): Promise<{sid: string; token: string}>;
-  submitRun(bytes: Uint8Array, options: {beats: string[];room?:string|null;race?:string|null}): Promise<Submission>;
+  runBeat(body: BeatBody, dispatch?: RequestDispatch): Promise<{sid: string; token: string}>;
+  submitRun(bytes: Uint8Array, options: {beats: string[];room?:string|null;race?:string|null;dispatch?:RequestDispatch}): Promise<Submission>;
   submission(id: string): Promise<Submission>;
 }
 export interface VersionPolicy { wasm?: unknown; native?: unknown }
@@ -33,11 +33,14 @@ export interface RunServiceDependencies {
   pollLimitMs?: number;
   pollDelayMs?: number;
   context?:(identity:Identity)=>{room?:string|null;race?:string|null};
+  /** Confirmed account only; stale/offline identity must return null. */
+  account?: () => Promise<string | null>;
 }
 interface Session {
   generation: number; identity: Identity | null; sid: string | null;
   tokens: (string | undefined)[]; sent: number; gaps: number; lastTick: number;
   carryPause: boolean; handshake: Promise<void> | null; finished: boolean;
+  account: string | null | undefined; accountBlocked: boolean;
 }
 
 const MAX_BEATS = 7500, MAX_REPLAY_BYTES = 8 << 20;
@@ -76,20 +79,70 @@ export function replayBytes(base64: string): Uint8Array {
 
 export class NativeRunService {
   private current: Session | null = null;
+  private readonly completed = new Set<Session>();
   private latestGeneration = -1;
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly pollLimit: number;
   private readonly pollDelay: number;
+  private accountId: string | null | undefined;
+  private accountRevision = 0;
+  private accountReady: Promise<void> = Promise.resolve();
   constructor(private readonly dependencies: RunServiceDependencies) {
     this.now=dependencies.now??Date.now;
     this.sleep=dependencies.sleep??(ms=>new Promise(resolve=>setTimeout(resolve,ms)));
     this.pollLimit=Math.min(30_000,Math.max(1,dependencies.pollLimitMs??30_000));
     this.pollDelay=Math.max(0,dependencies.pollDelayMs??1000);
+    this.refreshAccount();
   }
-  private active(session: Session): boolean { return this.current===session; }
+  /** Suspend network writes until a refresh confirms which account owns them. */
+  refreshAccount(): void {
+    if(!this.dependencies.account) return;
+    const revision=++this.accountRevision;
+    this.accountReady=Promise.resolve().then(()=>bounded(this.dependencies.account!(),10_000)).catch(()=>null).then(id=>{
+      if(revision!==this.accountRevision) return;
+      this.accountId=id;
+      for(const session of new Set([...this.completed,...(this.current?[this.current]:[])])) {
+        if(session.account!==undefined && session.account!==id) {
+          session.accountBlocked=true;
+          this.kept(session,"Account changed during this attempt. Restart to submit under your current account.");
+        }
+      }
+    });
+  }
+  private async ownsAccount(session: Session): Promise<number | null> {
+    let revision: number;
+    do {revision=this.accountRevision;await this.accountReady;} while(revision!==this.accountRevision);
+    if(!this.active(session)||session.accountBlocked) return null;
+    if(!this.accountId) {
+      session.accountBlocked=true;
+      this.kept(session,"Account could not be confirmed. Reconnect and restart before submitting.");
+      return null;
+    }
+    session.account??=this.accountId;
+    if(session.account!==this.accountId) {
+      session.accountBlocked=true;
+      this.kept(session,"Account changed during this attempt. Restart to submit under your current account.");
+      return null;
+    }
+    return revision;
+  }
+  private accountDispatch(session: Session, completed: boolean): RequestDispatch | undefined {
+    if(!this.dependencies.account) return undefined;
+    return async send=>{
+      for(;;) {
+        const revision=await this.ownsAccount(session);
+        if(revision===null || !this.active(session) || session.accountBlocked || (!completed && session.finished)) throw new Error("Native attempt cannot send under this account");
+        if(revision!==this.accountRevision) continue;
+        // The HTTP adapter has prepared headers. No await may separate this
+        // ownership check from invoking fetch with the current credentials.
+        return send();
+      }
+    };
+  }
+  private active(session: Session): boolean { return this.current===session || this.completed.has(session); }
   private status(session: Session,status: RunServiceStatus["status"],extra: Omit<Partial<RunServiceStatus>,"type"|"generation"|"status"> = {}): void {
-    if(this.active(session)) this.dependencies.send({type:"runService",generation:session.generation,status,...extra});
+    if(this.active(session) && (!session.accountBlocked || status==="kept")) this.dependencies.send({type:"runService",generation:session.generation,status,...extra});
   }
   private kept(session: Session,message: string): void {
     this.status(session,"kept",{message:`${message} Replay remains in your local native archive.`,local:true});
@@ -102,11 +155,11 @@ export class NativeRunService {
     if(generation<this.latestGeneration) return;
     if(event.type==="reset") {
       this.latestGeneration=generation;
-      this.current={generation,identity:null,sid:null,tokens:[],sent:0,gaps:0,lastTick:0,carryPause:false,handshake:null,finished:false};
+      this.current={generation,identity:null,sid:null,tokens:[],sent:0,gaps:0,lastTick:0,carryPause:false,handshake:null,finished:false,account:this.accountId,accountBlocked:false};
       this.status(this.current,"reset"); return;
     }
     const session=this.current;
-    if(!session || session.generation!==generation || session.finished) return;
+    if(!session || session.generation!==generation || session.finished || session.accountBlocked) return;
     if(!validIdentity(event)) {
       if(event.type==="finish") {session.finished=true;this.kept(session,"Build release manifest is missing or stale.");}
       return;
@@ -123,7 +176,10 @@ export class NativeRunService {
       await this.beat(session,{...identity,tick:Number(event.tick),hash:event.hash,paused:event.paused});
     } else if(event.type==="finish") {
       session.finished=true; // tokens are frozen in send order; late replies are gaps
-      await this.finish(session,event.replayBase64);
+      if(this.completed.size>=4) {this.kept(session,"Four completed runs are still awaiting the server.");return;}
+      this.completed.add(session);
+      try {await this.finish(session,event.replayBase64);}
+      finally {this.completed.delete(session);}
     }
   }
   private async beat(session: Session,event: Identity & {tick:number;hash:string;paused:boolean}): Promise<void> {
@@ -132,20 +188,32 @@ export class NativeRunService {
     session.lastTick=event.tick;
     // Only the initial handshake waits: later beats may answer out of order, and
     // their reserved slots preserve send order without delaying native cadence.
-    if(session.handshake) await session.handshake;
+    for(;;) {
+      if(this.dependencies.account) {
+        const revision=await this.ownsAccount(session);
+        if(revision===null) return;
+        // Refresh can start between the ownership promise resolving and this
+        // continuation. Observe its revision in the same turn as dispatch.
+        if(revision!==this.accountRevision) continue;
+      }
+      if(!session.handshake) break;
+      await session.handshake;
+    }
+    // No await between observing an empty handshake and reserving the next one:
+    // account refreshes can release several waiting beats in the same turn.
     if(!this.active(session) || session.finished) return;
     const paused=event.paused||session.carryPause; session.carryPause=false;
     const request=(async()=>{
       try {
-        const result=await bounded(this.dependencies.api.runBeat({sid:session.sid,map:event.map,track:event.track,style:event.style,tick:event.tick,hash:event.hash,paused}),10_000);
-        if(!this.active(session)||session.finished) return;
+        const result=await bounded(this.dependencies.api.runBeat({sid:session.sid,map:event.map,track:event.track,style:event.style,tick:event.tick,hash:event.hash,paused},this.accountDispatch(session,false)),10_000);
+        if(!this.active(session)||session.finished||session.accountBlocked) return;
         if(typeof result.sid!=="string" || !result.sid || typeof result.token!=="string" || !result.token || result.token.length>600) throw new Error("Invalid heartbeat response");
         session.sid??=result.sid;
         if(result.sid!==session.sid) throw new Error("Heartbeat session changed");
         session.tokens[slot]=result.token;
         this.status(session,"beat",{beats:session.tokens.filter(Boolean).length,gaps:session.gaps});
       } catch {
-        if(!this.active(session)||session.finished) return;
+        if(!this.active(session)||session.finished||session.accountBlocked) return;
         session.gaps++; session.carryPause ||= paused;
         this.status(session,"gap",{message:"A heartbeat could not be delivered; the gap will be included.",gaps:session.gaps});
       }
@@ -159,6 +227,7 @@ export class NativeRunService {
   private async finish(session: Session,base64: unknown): Promise<void> {
     const event=session.identity!;
     const context=this.dependencies.context?.(event);
+    if(this.dependencies.account && await this.ownsAccount(session)===null) return;
     if(typeof base64!=="string") {this.kept(session,"No replay bytes were supplied.");return;}
     let bytes: Uint8Array;
     try {bytes=replayBytes(base64);} catch {this.kept(session,"The replay cannot be uploaded.");return;}
@@ -172,9 +241,16 @@ export class NativeRunService {
     const tokens=session.tokens.filter((token):token is string=>typeof token==="string");
     const gaps=session.sent-tokens.length;
     this.status(session,"uploading",{message:"Uploading replay for server verification…",beats:tokens.length,gaps});
+    if(this.dependencies.account) {
+      for(;;) {
+        const revision=await this.ownsAccount(session);
+        if(revision===null) return;
+        if(revision===this.accountRevision) break;
+      }
+    }
     let result: Submission;
-    try {result=await bounded(this.dependencies.api.submitRun(bytes,{beats:tokens,...context}),20_000);}
-    catch {this.kept(session,"The replay could not reach the server.");return;}
+    try {result=await bounded(this.dependencies.api.submitRun(bytes,{beats:tokens,...context,...(this.dependencies.account?{dispatch:this.accountDispatch(session,true)}:{})}),20_000);}
+    catch {if(!session.accountBlocked)this.kept(session,"The replay could not reach the server.");return;}
     if(!this.active(session)) return;
     this.verdict(session,result);
     const deadline=this.now()+this.pollLimit;

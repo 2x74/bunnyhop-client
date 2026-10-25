@@ -2,7 +2,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { resolve, basename, dirname, join } from "node:path";
 import { parseArgs } from "node:util";
-import { Core, applyRestartPoint } from "../../../apps/web/src/core";
+import { Core, applyRestartPoint, PHYSICS_VERSION } from "../../../apps/web/src/core";
 import { decodeReplay, encodeReplay, encodeRaw, ReplayRecorder } from "../../../apps/web/src/replay";
 import { makeTimer, beforeStep, afterStep, replayCommand, simulate } from "../../../apps/web/src/sim";
 import { gunzipSync } from "node:zlib";
@@ -15,7 +15,7 @@ const root=resolve(import.meta.dir,"../../..");const map=resolve(values.map);con
 const source=await decodeReplay(readFileSync(values.replay));
 
 if(values["client-build"]&&!/^bunnyhop-native\/[0-9a-f]{12,64}$/.test(values["client-build"]))throw new Error("--client-build requires an exact native release identity");
-source.header.settings.physics=13;
+source.header.settings.physics=PHYSICS_VERSION;
 const mapBytes=readFileSync(map);const hash=new Bun.CryptoHasher("sha256").update(mapBytes).digest("hex");if(hash!==source.header.mapSha256)throw new Error("fixture BSP hash mismatch");
 const wasm=readFileSync(values.wasm??join(root,"apps/web/src/wasm/bunnyhop_core.wasm"));
 const core=await Core.create(wasm);
@@ -58,6 +58,6 @@ if(!verified.valid)throw new Error("native BHR rejected by shared ranked verifie
 const changed=await decodeReplay(readFileSync(nativeBhr));changed.checkpoints[0].position[0]=Math.fround(changed.checkpoints[0].position[0]+1);
 const mutation=verifyReplay(core,changed,changed.header.zones,{mapSha256:hash,ranked:true});
 if(mutation.valid||mutation.checkpointsMatch)throw new Error("shared verifier accepted mutated native checkpoint");
-const report={pass:true,nativeHeartbeats,nativeReplayPlayback:true,nativeReplaySeek:true,ghostStatePreserved:true,offlineVerifierValid:verified.valid,rankedVerifier:true,mutatedCheckpointRejected:!mutation.valid,verifierProblems:verified.problems,physics:13,wasmSha256:new Bun.CryptoHasher("sha256").update(wasm).digest("hex"),mapSha256:hash,recording,bhr:nativeBhr,nativeRawBytes: nativeRaw.length,nativeRawEqualsSharedEncoder:true,runHash:hashHex(runHash),statesCompared:commands.length,timerRowsCompared:commands.length,
+const report={pass:true,nativeHeartbeats,nativeReplayPlayback:true,nativeReplaySeek:true,ghostStatePreserved:true,offlineVerifierValid:verified.valid,rankedVerifier:true,mutatedCheckpointRejected:!mutation.valid,verifierProblems:verified.problems,physics:PHYSICS_VERSION,wasmSha256:new Bun.CryptoHasher("sha256").update(wasm).digest("hex"),mapSha256:hash,recording,bhr:nativeBhr,nativeRawBytes: nativeRaw.length,nativeRawEqualsSharedEncoder:true,runHash:hashHex(runHash),statesCompared:commands.length,timerRowsCompared:commands.length,
  checkpointsChecked:checked.checkpointsChecked,startTick:checked.timer.startTick,endTick:checked.timer.endTick,time:checked.timer.time(),serverVerified:false,submissionEnabled:false};
 writeFileSync(join(output,"proof.json"),JSON.stringify(report,null,2)+"\n");console.log(JSON.stringify(report,null,2));

@@ -48,6 +48,7 @@ export const AUTOSTRAFE_S_STOPS_FROM = 5;
 export const AUTOSTRAFE_KEYS_FROM = 8;
 import type { TickCmd } from "./timer";
 import { AUTO_HOLD_TICKS, AUTO_MOVE, strafeDir, yawDelta } from "./autostrafe";
+import { TURN_BITS, turnBindsAllowed } from "./turn-binds";
 
 // Source IN_* button bits (same values as input.ts; duplicated to keep this module DOM-free).
 const IN_FORWARD = 1 << 3;
@@ -81,7 +82,7 @@ const NONE = { w: false, a: false, s: false, d: false };
 export const STYLE_DEFS: readonly StyleDef[] = [
   { id: "autohop", name: "Normal", short: "NM", brief: "Normal", autohop: true, block: NONE, hsw: false, rule: "Autohop: hold jump. Every key works." },
   { id: "legit", name: "EZ Scroll", short: "EZ", brief: "EZ Scroll", autohop: false, block: NONE, hsw: false, rule: "No autohop: press (scroll) jump for every hop." },
-  { id: "scroll", name: "Legit Scroll", short: "SCR", brief: "Legit Scroll", autohop: false, block: NONE, hsw: false, rule: "Scroll each hop. 250 run speed, 100 air acceleration and CS:S stamina." },
+  { id: "scroll", name: "Legit Scroll", short: "SCR", brief: "Legit Scroll", autohop: false, block: NONE, hsw: false, rule: "Scroll each hop. 250 run speed, 100 air acceleration and CS:S stamina. No +left / +right." },
   { id: "wonly", name: "W-Only", short: "W", brief: "W-Only", autohop: true, block: { w: false, a: true, s: true, d: true }, hsw: false, rule: "Only W in the air. A, S and D are blocked." },
   { id: "sideways", name: "Sideways", short: "SW", brief: "Sideways", autohop: true, block: { w: false, a: true, s: false, d: true }, hsw: false, rule: "Only W and S in the air: face sideways and strafe with W/S." },
   { id: "hsw", name: "Half-Sideways", short: "HSW", brief: "Half-SW", autohop: true, block: { w: false, a: false, s: true, d: false }, hsw: true, rule: "Hold W plus A or D together in the air. S, pure W and pure A/D do nothing." },
@@ -146,6 +147,8 @@ export interface StyleContext {
  * blocked, else a new command. Idempotent: filter(filter(c)) === filter(c) as values.
  */
 export function filterCommand(style: StyleDef | null, cmd: TickCmd, ctx: StyleContext): TickCmd {
+  // A recorded restricted-style command must be a fixed point of this filter, including on the ground / ladders.
+  if (style && !turnBindsAllowed(style.id) && (cmd.buttons & TURN_BITS)) cmd = { ...cmd, buttons: cmd.buttons & ~TURN_BITS };
   if (!style || !restrictsKeys(style) || ctx.grounded || ctx.onLadder) return cmd;
   let f = cmd.forward;
   let s = cmd.side;
