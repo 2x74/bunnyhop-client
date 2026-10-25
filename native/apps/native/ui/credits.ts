@@ -13,9 +13,9 @@ const PEOPLE: readonly Person[] = [
   { name: "luna", handle: "2x74", url: "https://github.com/2x74", role: "primary client producer" },
 ];
 
-const LINKS: readonly { label: string; url: string }[] = [
-  { label: "bunnyhop.lol", url: "https://bunnyhop.lol" },
-  { label: "1998.lol", url: "https://1998.lol" },
+const LINKS: readonly { label: string; url: string; about: string }[] = [
+  { label: "bunnyhop.lol", url: "https://bunnyhop.lol", about: "the website for this game" },
+  { label: "1998.lol", url: "https://1998.lol", about: "luna website" },
 ];
 
 /**
@@ -43,7 +43,10 @@ export function creditsPanel(): HTMLElement {
       h("span.credit-role.dim", null, person.role)));
   }
   const elsewhere = h("p.credits-links", null);
-  for (const item of LINKS) elsewhere.append(link(item.label, item.url, "credit-link.credit-site"));
+  // Only the domain is the button, so its accessible name stays the domain.
+  for (const item of LINKS) elsewhere.append(h("span.credit-site-row", null,
+    link(item.label, item.url, "credit-link.credit-site"),
+    h("span.dim", null, ` - ${item.about}`)));
   return h("div.native-credits-body", null,
     people,
     elsewhere,
