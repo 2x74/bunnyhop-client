@@ -16,7 +16,7 @@ inline Json default_settings() {
         // Turnbinds (+left / +right): degrees per second, like cl_yawspeed. The alt speed is used while Turn modifier is held.
         {"yawSpeed",118.888888},{"yawSpeedAlt",210.0},
         {"fov",90.0},{"vsync",true},{"fpsLimit",0},{"volume",.65},{"muted",false},
-        {"hud",true},{"crosshair",true},{"viewmodel",true},{"jumpStats",true},
+        {"hudScale",100.0},{"practiceKeepVelocity",true},{"hud",true},{"crosshair",true},{"viewmodel",true},{"jumpStats",true},
         // Jump stats: "sixth" (jump 6 only), "every" jump, or "interval" (every jumpStatsInterval jumps).
         {"jumpStatsMode","sixth"},{"jumpStatsInterval",6},
         // Strafe trainer: smoothing is how many air ticks a reading averages (1 = every tick on its own).
@@ -35,6 +35,7 @@ inline Json default_settings() {
             {"mute",{"KeyO"}},{"slot1",{"Digit1"}},{"slot2",{"Digit2"}},{"slot3",{"Digit3"}},
             {"lastWeapon",{"KeyQ"}},{"drop",{"KeyG"}},{"reload",Json::array()},
             {"giveUsp",{"Digit5"}},{"giveGlock",{"Digit6"}},
+            {"practice",Json::array()},{"cpSave",{"KeyC"}},{"cpTeleport",{"KeyX"}},{"cpPrev",Json::array()},{"cpNext",Json::array()},{"mainMenu",Json::array()},{"noclip",{"KeyZ"}},
             {"turnLeft",{"ArrowLeft"}},{"turnRight",{"ArrowRight"}},{"turnFast",{"Mouse4"}}
         }}};
 }
@@ -55,7 +56,7 @@ inline bool valid_bind_code(const std::string &code) {
 }
 // A patch is atomic. Invalid persisted input never silently changes half the controls.
 inline Json patch_settings(const Json &current,const Json &patch) {
-    if(!patch.is_object() || patch.size()>32) throw std::runtime_error("Invalid settings object");
+    if(!patch.is_object() || patch.size()>64) throw std::runtime_error("Invalid settings object");
     Json out=current;
     const auto defaults=default_settings();
     for(auto it=patch.begin();it!=patch.end();++it) {
@@ -100,6 +101,7 @@ inline Json patch_settings(const Json &current,const Json &patch) {
             if(!v.is_number() || !std::isfinite(v.get<double>())) throw std::runtime_error("Setting must be finite: "+key);
             const auto n=v.get<double>();
             if((key=="sensitivity"||key=="verticalSensitivity") && (n<.01||n>100)) throw std::runtime_error("Sensitivity must be .01–100");
+            if(key=="hudScale" && (n!=std::floor(n)||n<50||n>175)) throw std::runtime_error("HUD scale must be 50–175%");
             if(key=="fov" && (n<60||n>130)) throw std::runtime_error("FOV must be 60–130");
             if(key=="volume" && (n<0||n>1)) throw std::runtime_error("Volume must be 0–1");
             if((key=="yawSpeed"||key=="yawSpeedAlt") && (n<.01||n>1000)) throw std::runtime_error("Yaw speed must be .01–1000");

@@ -5,6 +5,8 @@
 #include <map>
 #include <optional>
 #include "strafe_trainer.hpp"
+#include "practice.hpp"
+#include "hud_geometry.hpp"
 
 namespace {
 class NativeHud {
@@ -73,10 +75,11 @@ void main(){color=vec4(ink.rgb,ink.a*(uv.x<0.?1.:texture(font,uv).a));})");
               double fps,bool visible,bool crosshair,bool playback,const BhWeaponReport &weapon,
               const std::string &jump_stats="",bool jump_stats_good=false,
               std::optional<native::StrafeReading> strafe=std::nullopt,bool strafe_hints=true,
-              const Layout *layout=nullptr) {
+              const Layout *layout=nullptr,float hud_percent=100,const native::Practice *practice=nullptr,bool keep_velocity=false,
+              const std::string &gauntlet_line="",const std::string &gauntlet_delta="",bool gauntlet_good=false,float leave_progress=-1) {
         if(width<=0||height<=0||(!visible&&!crosshair))return;
-        vertices.clear();scale=std::max(.6f,float(height)/900.f);
-        const float w=width/scale,h=height/scale;
+        vertices.clear();const native::HudGeometry geometry(width,height,hud_percent);scale=geometry.scale;
+        const float w=geometry.width,h=geometry.height;
         // HUD units are 1/900 of the screen height (above 540 px), so the
         // built-in places below are the same fraction of the screen at any size.
         auto at=[&](const char *id,float x,float y)->std::array<float,2>{
@@ -88,6 +91,7 @@ void main(){color=vec4(ink.rgb,ink.a*(uv.x<0.?1.:texture(font,uv).a));})");
             rect(x-9,y-1,6,2,cream);rect(x+3,y-1,6,2,cream);
             rect(x-1,y-9,2,6,cream);rect(x-1,y+3,2,6,cream);
         }
+        if(leave_progress>=0){const auto [x,y]=at("crosshair",w/2,h/2);for(int i=0;i<48;++i){const float a=float(i)/48*6.2831853f-1.5707963f;rect(x+std::cos(a)*26-2,y+std::sin(a)*26-2,4,4,float(i)/48<=leave_progress?amber:dim);}}
         if(visible) {
             {const auto [x,y]=at("map",26,18);
                 text(x,y,map,17,cream);text(x,y+24,style+(run.track?" / BONUS "+std::to_string(run.track):""),14,amber);}
@@ -95,7 +99,7 @@ void main(){color=vec4(ink.rgb,ink.a*(uv.x<0.?1.:texture(font,uv).a));})");
             {const auto [x,y]=at("fps",w-135,20);std::snprintf(buf,sizeof(buf),"%.0f FPS",fps);text(x,y,buf,14,dim);}
             {const auto [x,y]=at("timer",w/2,h-154);const double t=run.seconds;
                 std::snprintf(buf,sizeof(buf),"%02u:%06.3f",unsigned(t)/60,std::fmod(t,60));
-                text(x,y,buf,34,run.status==2?amber:cream,true);}
+                text(x,y,buf,34,(run.status==2||(practice&&practice->active))?amber:cream,true);}
             {const auto [x,y]=at("speed",w/2,h-105);
                 std::snprintf(buf,sizeof(buf),"%.0f u/s",std::hypot(s.player.velocity[0],s.player.velocity[1]));
                 text(x,y,buf,25,cream,true);}
@@ -132,6 +136,18 @@ void main(){color=vec4(ink.rgb,ink.a*(uv.x<0.?1.:texture(font,uv).a));})");
                 std::snprintf(buf,sizeof(buf),"HP %.0f  AMMO %u/%u",s.health,weapon.clip,weapon.clip_size);
                 text(x,y,buf,14,cream);}
             if(!notice.empty()){const auto [x,y]=at("notice",w/2,70);text(x,y,notice.substr(0,100),15,amber,true);}
+            if(practice&&practice->active)text(w/2,h/2+28,practice->noclip?"Practice | noclip":"Practice",14,amber,true);
+            if(practice&&practice->menu_open) {
+                const float x=26,y=h*.30f;rect(x-10,y-8,320,220,{.03f,.03f,.05f,.8f});
+                text(x,y,"Checkpoints",19,cream);
+                const std::string lines[]={"1. Save checkpoint ("+std::to_string(std::min(size_t(100),practice->checkpoints.size()+1))+"/100)",
+                    "2. Teleport to checkpoint ("+std::to_string(std::max(size_t(1),practice->number()))+")",
+                    "3. Previous", "4. Next", std::string("5. Noclip: ")+(practice->noclip?"on":"off"),
+                    std::string("6. Keep speed: ")+(keep_velocity?"on":"off"),"0. Close"};
+                for(size_t i=0;i<7;++i){const bool disabled=(i==1&&practice->checkpoints.empty())||(i==2&&practice->number()<=1)||(i==3&&practice->number()>=practice->checkpoints.size());text(x,y+34+float(i)*22,lines[i],14,disabled?dim:cream);}
+                text(x,y+196,"Teleport / noclip makes a run practice.",11,amber);
+            }
+            if(!gauntlet_line.empty()){text(w/2,h-32,gauntlet_line,13,cream,true);if(!gauntlet_delta.empty())text(w/2,h-15,gauntlet_delta,12,gauntlet_good?Color{.47f,.9f,.47f,1}:amber,true);}
             if(playback){const auto [x,y]=at("replay",w/2,22);text(x,y,"REPLAY - ESC FOR PLAYBACK CONTROLS",14,amber,true);}
         }
         gl.Disable(GL_DEPTH_TEST);gl.DepthMask(GL_FALSE);gl.Disable(GL_CULL_FACE);gl.Enable(GL_BLEND);gl.BlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);

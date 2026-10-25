@@ -36,5 +36,13 @@ int main(){
  modes.event(event({{"t","nativeLeave"}}),"bhop_eazy",false,90000);assert(!modes.has_race());assert(!modes.event(update(race()),"bhop_eazy",false,90001).restart);
  action=modes.event(event({{"t","race"},{"race",race("countdown","new")}},2,"room-b"),"bhop_eazy",false,90002);assert(action.restart&&modes.frozen());modes.event(update(race()),"bhop_eazy",false,90003);assert(modes.frozen());
  modes.event(event({{"t","nativeStatus"},{"status","closed"}},2,"room-b"),"bhop_eazy",false,90004);assert(!modes.frozen());
+ // Host leave discards a loading race and seals the current generation.
+ native::RoomModes left;left.event(event({{"t","race"},{"race",race()}},7,"old-room"),"old-map",false,7000);
+ left.close(7);assert(!left.has_race()&&!left.frozen());
+ assert(!left.event(event({{"t","race"},{"race",race("live")}},7,"old-room"),"bhop_eazy",false,11000).restart);
+ assert(!left.event(event({{"t","race"},{"race",race()}},6,"old-room"),"bhop_eazy",false,11000).restart);
+ assert(!left.map_loaded("bhop_eazy",false,12000).restart&&!left.has_race());
+ action=left.event(event({{"t","race"},{"race",race()}},9,"new-room"),"bhop_eazy",false,12001);assert(action.restart&&left.frozen());
+ left.close(7);assert(!left.event(event({{"t","race"},{"race",race()}},9,"new-room"),"bhop_eazy",false,12002).restart); // close never rewinds
  std::cout<<"Native room countdown, GO, authoritative results, reconnect and map placement checks passed\n";
 }

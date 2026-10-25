@@ -39,6 +39,8 @@ const result = await Bun.build({
         [resolve(web,"audio/ui")]: "audio.ts",
         [resolve(web,"tutorial/entry")]: "tutorial-entry.ts",
         [resolve(web,"player/race")]: "race-bus.ts",
+        [resolve(web,"play-lock")]: "play-lock.ts",
+        [resolve(web,"hud")]: "hud-types.ts",
       };
       if(adapters[path]) return {path:resolve(native,adapters[path])};
       if (["main","render","session","attract","input"].some(name=>path===resolve(web,name))) throw new Error(`Gameplay module is forbidden in the native menu: ${path}`);
@@ -46,7 +48,7 @@ const result = await Bun.build({
     build.onLoad({filter:/.*/,namespace:"native-menu"},()=>({contents:coreConstants,loader:"ts"}));
     build.onLoad({filter:/\.[cm]?[jt]sx?$/}, async (args) => {
       modules.add(args.path);
-      if(["ui/servers.ts","net/lobby.ts","social/state.ts","social/dock.ts"].some(path=>args.path===resolve(web,path))) {
+      if(["ui/servers.ts","net/lobby.ts","social/state.ts","social/dock.ts","ui/gauntlets.ts"].some(path=>args.path===resolve(web,path))) {
         let source=await Bun.file(args.path).text();
         if(args.path===resolve(web,"social/state.ts"))source=adaptSocialSource(source);
         if(args.path===resolve(web,"social/dock.ts"))source+=`\nwindow.addEventListener("bunnyhop:account",()=>close());`;

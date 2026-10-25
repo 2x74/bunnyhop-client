@@ -77,6 +77,7 @@ struct MusicTrack {
     std::string id;                  // filename without extension, or manifest id
     std::string title;               // what the menu shows
     std::filesystem::path file;      // empty for a shipped track that is absent
+    std::string role = "game";       // the shipped menu track is skipped during gameplay
 };
 std::vector<MusicTrack> scan_music_pack(const std::filesystem::path &dir);
 

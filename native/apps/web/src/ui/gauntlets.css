@@ -1,0 +1,97 @@
+/* Gauntlet screens (ui/gauntlets.ts): the leaderboards' rows and cells (boards.css) on a plain page, no boxes. */
+
+.gx { --rb-row: 2.3rem; min-width: 0; }
+.gx-page { display: grid; grid-template-columns: fit-content(32rem) minmax(0, 1fr); gap: var(--sp-6); align-items: start; }
+@media (max-width: 52rem) { .gx-page { grid-template-columns: minmax(0, 1fr); } }
+.gx-skel { height: 12rem; }
+
+.gx-title b { font-weight: 650; }
+.gx-title .rb-sub { margin-left: 0.55rem; }
+.gx-table th.gx-go, .gx-table td.gx-go { width: 1%; padding-left: 0; text-align: right; color: var(--faint); }
+.gx-chev { display: inline-flex; vertical-align: middle; transition: transform var(--t-fast) var(--ease); }
+
+/* The list: a row opens its gauntlet; the pointer's row gets the amber edge, like your own row on a board. */
+.gx-link { cursor: pointer; }
+.gx-link:focus-visible { outline: none; }
+.gx-link:focus-visible td { background: var(--raise-2); }
+.rb-table tr.gx-link:hover td:first-child, .rb-table tr.gx-link:focus-visible td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.gx-link:hover .gx-chev { color: var(--text); }
+
+.gx-meta { margin: 0 0 var(--sp-3); color: var(--dim); font-size: var(--fs-sm); }
+.gx-buttons { margin-top: var(--sp-4); }
+.gx-btn-sub { margin-left: 0.35em; font-size: var(--fs-xs); font-weight: 550; opacity: 0.75; }
+.gx-note { margin: var(--sp-2) 0 0; color: var(--loss); font-size: var(--fs-sm); }
+
+/* The board: a row opens into its splits, joined to it. */
+.gx-board tr.rb-row { cursor: pointer; }
+.gx-more { padding: 0.15em 0.3em; color: var(--faint); }
+.gx-more:hover { text-decoration: none; color: var(--text); }
+.gx-board tr.open .gx-chev { transform: rotate(90deg); }
+.gx-board tr.open > td:first-child { border-bottom-left-radius: 0; }
+.gx-board tr.open > td:last-child { border-bottom-right-radius: 0; }
+.rb-table tr.gx-splits > td { height: auto; padding: 0.15rem 0.7rem 0.55rem 3.3rem; border-radius: 0 0 var(--radius-sm) var(--radius-sm); background: var(--raise); }
+.gx-split-table { border-collapse: collapse; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.gx-split-table td, .rb-table .gx-split-table td { height: auto; padding: 0.2rem 1.1rem 0.2rem 0; border-radius: 0; background: none; white-space: nowrap; }
+.gx-split-table td.rb-rank { width: 1.4rem; padding-right: 0.7rem; color: var(--faint); text-align: right; }
+.gx-split-table .num { text-align: right; }
+.gx-delta { color: var(--faint); }
+.gx-delta.ahead { color: var(--gain); }
+.gx-boardwrap { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+/* (Not a fixed-height pager: the board is as long as its page and the screen scrolls.) */
+.gx-boardwrap > .rb-frame { flex: none; overflow: visible; }
+.gx-pager { display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
+
+/* The result: the total in the end card's type, the real time beside it, then the splits. */
+.gx-result { max-width: 40rem; }
+.gx-total { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.3rem var(--sp-4); }
+.gx-total-time { font-size: 3.2rem; font-weight: 800; font-stretch: 90%; line-height: 1.05; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.gx-real { color: var(--dim); font-size: var(--fs-md); font-variant-numeric: tabular-nums; }
+.gx-status { margin: var(--sp-2) 0 var(--sp-4); font-weight: 600; color: var(--cream-2); }
+.gx-status.ok { color: var(--text); }
+.gx-status.bad { color: var(--loss); }
+.gx-result-splits .gx-split-table { font-size: var(--fs-md); }
+.gx-result-splits .gx-split-table td { padding-top: 0.32rem; padding-bottom: 0.32rem; }
+
+/* Links inside rows keep the row's type; underline on hover only (player names: .rb-name in boards.css). */
+.gx-map, .gx-split, .gx-who, .gx-title-link { color: inherit; text-decoration: none; }
+.gx-map:hover, .gx-split:hover, .gx-who:hover, .gx-title-link:hover { text-decoration: underline; text-underline-offset: 0.2em; }
+.gx-maps .gx-map { font-weight: 650; }
+.gx-you .gx-delta { margin-left: 0.5em; font-size: var(--fs-xs); }
+
+/* The hub: three sections under plain headings, one after another, the panel's full width like a gauntlet's own page
+   (a narrower hub left a wide empty strip down the right of the screen). */
+.gx-hub { display: flex; flex-direction: column; gap: var(--sp-6); }
+.gx-h { margin: 0 0 var(--sp-2); font-size: var(--fs-lg); font-weight: 750; }
+.gx-week { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-6); align-items: start; }
+@media (max-width: 52rem) { .gx-week { grid-template-columns: minmax(0, 1fr); } }
+.gx-week-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem var(--sp-3); margin: 0; }
+.gx-week-title .gx-title-link { font-size: var(--fs-md); font-weight: 700; }
+.gx-left { color: var(--dim); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.gx-week-maps { display: flex; flex-wrap: wrap; gap: 0.4rem var(--sp-4); margin: var(--sp-3) 0 0; padding: 0; list-style: none; }
+.gx-week-maps li { display: inline-flex; align-items: center; gap: 0.45rem; white-space: nowrap; }
+.gx-week-maps .gx-map { font-weight: 600; }
+.gx-you { margin: var(--sp-3) 0 0; color: var(--cream-2); font-size: var(--fs-sm); }
+.gx-empty { margin: 0.4rem 0 0; color: var(--dim); font-size: var(--fs-sm); }
+.gx-mine { white-space: nowrap; }
+.gx-rank { margin-right: 0.55em; color: var(--dim); font-size: var(--fs-xs); }
+/* Rows don't push the panel sideways on narrow windows. */
+.gx-hub .rb-table, .gx-page .rb-table { width: 100%; }
+.gx-hub td.rb-player { max-width: 14rem; }
+
+/* The profile's Gauntlets block (ui/profile-gauntlets.ts): a plain table in the profile's row style. */
+.pfg-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.pfg-table th { padding: 0 0.6rem 0.3rem 0; color: var(--cream-3); font-size: var(--fs-xs); font-weight: 600; text-align: left; }
+.pfg-table td { height: 2.3rem; padding: 0 0.6rem 0 0; border-bottom: 1px solid var(--ink-3); white-space: nowrap; }
+.pfg-table td:first-child { max-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.pfg-table .num { text-align: right; }
+.pfg-table .gx-title-link { font-weight: 650; color: var(--cream); }
+.pfg-time { font-weight: 750; }
+.pfg-table .dim { color: var(--dim); }
+.pfg-wins { margin: 0.6rem 0 0; color: var(--cream-2); font-size: var(--fs-sm); }
+
+/* Watch (gauntlet/watch.ts): a quiet text link. */
+.gx-watch { color: var(--accent-hi, var(--accent)); font-size: var(--fs-sm); font-weight: 650; text-decoration: none; }
+.gx-watch:hover { text-decoration: underline; text-underline-offset: 0.2em; }
+.gx-split-wrap { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4); }
+.gx-buttons .gx-watch { align-self: center; margin-left: var(--sp-2); }
+.pfg-table td.pfg-watch { width: 1%; padding-left: 0.4rem; }

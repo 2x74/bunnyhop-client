@@ -1,6 +1,70 @@
 # Native client audit — 25 October 2026
 
-## Latest branded preview
+## Feature-parity follow-up
+
+The `.6` and hosted `7e6a2eb` candidates below are compatibility baselines. A
+follow-up adds native practice/checkpoint policy and UI, applied HUD scaling,
+in-client Gauntlets and player-report entry points, Main menu, PB menu backdrops,
+and all eleven production OST tracks. These changes require new package
+identities and fresh integrated/platform qualification; earlier package results
+must not be attributed to the changed source.
+
+The integrated follow-up passes 96 UI tests and typechecking, 22 bridge tests,
+15 macOS CTests and 17 Linux ARM64 GTK CTests. The fresh macOS native ABI runner
+matches pinned WASM for 31,440 states across all four release-gate fixtures with
+zero mismatches, no missing physics, and all physics-16/17 contrasts exercised.
+Runtime and PB tests cover practice/coasting, sticky submission exclusion,
+checkpoint state, HUD geometry, replay seek/loop/camera/entity transforms,
+bounded frame work, invalid replay fallback and cancellation. Linux additionally
+ran these PB checks with a completed physics-17 boxes_snowy recording.
+
+Independent audits found and fixed late room/gauntlet callbacks after leaving,
+timed-practice leave confirmation, and soundtrack decoding/scene transitions.
+The OST audit reconverted all eleven production originals to byte-identical
+bundled MP3s, checked metadata/source hashes, and passed actual SDL device-state
+assertions under sanitizers. Music uses dummy devices in automated checks; no
+hardware listening-quality claim is made.
+
+A visible packaged macOS app was inspected through the actual WKWebView:
+native map background, six loaded home tiles, Gauntlets hub, all five pause tabs,
+practice/checkpoint/noclip controls, Practice label, and the checkpoint HUD at
+100% and 175%. HUD scale was restored to 100%. Main menu unloaded the map and
+returned home; focused Cmd+Q terminated the exact app process. A long practice
+hint was shortened after visual inspection caught its truncation. These checks
+did not submit a score, join a gauntlet or send a report.
+
+Linux checks used Xvfb/software Mesa, GTK3 and WebKitGTK with an isolated SDL
+3.4.0 build. Home/pause smoke captures show native BSP backdrops, readable
+controls and complete tiles/leaderboards, HTTP 200, zero WebGL/canvas use and
+zero gameplay ticks. The old local test image's SDL 3.2.10 was insufficient;
+the source requirement was not weakened. Generated presentation assets must be
+regenerated to include the OST; stale shared build output is not release input.
+
+The final UI audit and final hosted candidate remain separate qualification
+steps. Local packages are ad-hoc previews, not production-admitted builds.
+Physical Windows/WebView2, Linux hardware/Wayland, signed-in native submissions
+and a human finish-to-leaderboard flow are not established by these checks.
+
+The integrated local `.9` package has build
+`bunnyhop-native/49fea1ccef79a8cf162c660a`, 83,263,668 archive bytes, SHA-256
+`e7808319a5799d983bfea20051eafc67ce6f26ff785ef9641cc0d82d3a96b714`.
+Its menu SHA-256 is
+`ab288008b3256cf0df4f646d8a9ed1fb74c70669d282f81532d469cceefd8f65`.
+The package checker passes, including identity, bundled OST and minimum macOS
+27.0. Home/pause smokes pass from the package; visible WK inspection confirms
+the corrected web pause tabs and fully readable practice hint. The window close
+button terminates the app. This preview is retained under `/tmp/nv17p7`, with
+`EVIDENCE.json`; final hosted release bytes will have their own identities.
+
+Hosted run `40228419808`, attempt 1, completed all macOS, Windows and Linux jobs
+successfully on source `7e6a2eb6ac1c5c0bd9083a3d9a4cf159963f80da`.
+Independent collection verified the exact GitHub job/step statuses, seven
+artifact ZIPs, package checksums, 108 parity files, full logs and source-bound
+candidate evidence. This baseline was not sent for approval after scope expanded.
+Its macOS package declares minimum OS 15.0; the local `.6` preview below declares
+27.0. Both remain ad-hoc, without notarization or production admission.
+
+## Earlier branded preview (.6)
 
 The `.6` macOS ARM64 preview is named **bunnyhop.lol - Native**, with the
 website's existing logo used as its application/window image. The Mac bundle
@@ -79,8 +143,8 @@ mismatches locally. All four contrast with v16; a native-v16 mutation fails with
 binds six package/parity artifacts to source, run and attempt. Hosted execution
 is tracked separately; a local pass does not certify Windows runtime behavior.
 
-This establishes the tested simulation and presentation scope, not full web
-feature parity. Native still lacks the v0.0.27 practice/checkpoint controller,
+This established the tested simulation and presentation scope, not full web
+feature parity. That baseline lacked the v0.0.27 practice/checkpoint controller,
 sticky practice and noclip clock coasting, the Practice label, applied 50–175%
 HUD scaling, and player-report entry points. The shared version/changelog and
 Contributor/Owner badges are ported. HUD scale values survive settings import

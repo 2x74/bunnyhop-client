@@ -1,13 +1,14 @@
 #pragma once
 // The home-screen backdrop: the web attract tour (menu_tour.hpp) over a real
-// map, drawn by the native Renderer from its own BhContext. That context is
-// loaded, reset once to place brush entities, and never stepped: nothing here
+// map, or a stored PB replay, drawn by the native Renderer from its own
+// BhContext. Only that private context is stepped for PB playback: nothing here
 // touches the gameplay core, input, recording, heartbeat, scores or style.
 // Include after renderer.hpp (Gl, Renderer) and online.hpp. Main thread only,
 // except the loader: it downloads into the cache on a worker and must not
 // call GL, SDL or the native core. The context is created, used and destroyed
 // on the main thread, as bunnyhop_native.h requires.
 #include "menu_tour.hpp"
+#include "menu_pb.hpp"
 #include <atomic>
 #include <chrono>
 #include <future>
@@ -24,6 +25,9 @@ struct BackdropMap {
 // applied only so bh_reset can place doors, trains and other brush entities.
 inline BackdropMap load_backdrop_map(const std::filesystem::path &bsp, const std::filesystem::path &content) {
     BackdropMap out;
+    // Also bound cached/local BSPs before the core allocates/parses them.
+    if (std::filesystem::file_size(bsp) > (32u << 20))
+        throw std::runtime_error("Backdrop BSP exceeds 32 MiB");
     out.core.reset(bh_create());
     if (!out.core) throw std::runtime_error("Could not create backdrop map context");
     if (!bh_load_map(out.core.get(), bsp.string().c_str(), content.empty() ? nullptr : content.string().c_str()))
@@ -108,11 +112,12 @@ public:
     MenuBackdrop(const MenuBackdrop &) = delete;
     MenuBackdrop &operator=(const MenuBackdrop &) = delete;
 
-    // Same id: no-op. Another id cancels the old load. Empty releases.
-    bool request(const std::string &map) {
-        if (map == wanted && status_ != Status::idle) return false;
+    // Same map/path: no-op. A changed PB path also rebuilds the same map.
+    // Paths name immutable cache entries; the host owns bytes/cache selection.
+    bool request(const std::string &map, const std::string &replayPath = {}) {
+        if (map == wanted && replayPath == wanted_replay && status_ != Status::idle) return false;
         release();
-        wanted = map;
+        wanted = map; wanted_replay = replayPath;
         if (map.empty()) return true;
         status_ = Status::loading;
         auto next = std::make_shared<Job>();
@@ -128,7 +133,8 @@ public:
     bool cancel_loading() {
         if (!job && !pending) return false;
         if (job) { job->cancel = true; retired.push_back(std::move(job)); }
-        pending.reset(); status_ = Status::idle; interrupted = std::move(wanted); wanted.clear();
+        pending.reset(); status_ = Status::idle; interrupted = std::move(wanted); interrupted_replay = std::move(wanted_replay);
+        wanted.clear(); wanted_replay.clear();
         return true;
     }
     // The gameplay download that cancelled a tour failed: load that tour again.
@@ -136,14 +142,16 @@ public:
     bool resume() {
         if (interrupted.empty() || status_ != Status::idle || !wanted.empty()) return false;
         const auto map = std::move(interrupted);
-        interrupted.clear();
-        return request(map);
+        const auto replay = std::move(interrupted_replay);
+        interrupted.clear(); interrupted_replay.clear();
+        return request(map, replay);
     }
     // Drops the scene and cancels any load (a gameplay map is taking over).
     void release() {
         if (job) { job->cancel = true; retired.push_back(std::move(job)); }
-        renderer.reset(); map_.reset(); director.reset(); pending.reset();
-        status_ = Status::idle; error_.clear(); wanted.clear(); interrupted.clear(); seconds = 0;
+        replay.reset(); renderer.reset(); map_.reset(); director.reset(); pending.reset();
+        status_ = Status::idle; error_.clear(); replay_error.clear(); wanted.clear(); wanted_replay.clear();
+        interrupted.clear(); interrupted_replay.clear(); seconds = 0;
     }
     // Once per frame. A finished download is loaded and given a Renderer only
     // when `may_build` (no gameplay download is writing the shared cache).
@@ -162,14 +170,39 @@ public:
                 next->set_fov(native::tour::renderer_fov());
                 director = std::make_unique<native::tour::Director>(loaded->shots);
                 renderer = std::move(next); map_ = std::move(loaded);
+                if (!wanted_replay.empty()) {
+                    try {
+                        auto pb = std::make_unique<native::backdrop::PbPlayback>();
+                        pb->load(map_->core.get(), wanted_replay);
+                        replay = std::move(pb);
+                        renderer->reset_presentation();
+                    } catch (const std::exception &e) { fallback_tour(e.what()); }
+                }
                 status_ = Status::ready;
             } catch (const std::exception &e) { status_ = Status::failed; error_ = e.what(); }
             pending.reset();
         }
     }
-    // The whole frame. Reduced motion (or a static capture) holds the web still().
+    // Reduced motion/static capture holds the current PB state and shader time,
+    // or the tour's canonical still pose.
     bool draw(int width, int height, double dt, bool still) {
         if (status_ != Status::ready || width <= 0 || height <= 0) return false;
+        if (replay) {
+            try {
+                const auto generation = replay->generation();
+                if (!still) replay->advance(dt);
+                if (generation != replay->generation()) renderer->reset_presentation();
+                const auto &state = replay->snapshot();
+                const auto &cmd = replay->command();
+                const float eye[3] = {state.player.position[0], state.player.position[1], state.player.position[2] + state.player.view_offset_z};
+                native::Input view; view.set_angles(cmd.pitch, cmd.yaw);
+                renderer->draw(width, height, eye, view, &state, replay->seconds());
+                return true;
+            } catch (const std::exception &e) {
+                try { fallback_tour(e.what()); }
+                catch (const std::exception &failure) { status_ = Status::failed; error_ = failure.what(); return false; }
+            }
+        }
         if (!still) { director->advance(dt); seconds += std::clamp(dt, 0.0, .1); }
         const auto pose = still ? director->still() : director->pose();
         const float eye[3] = {float(pose.eye[0]), float(pose.eye[1]), float(pose.eye[2])};
@@ -178,18 +211,37 @@ public:
         renderer->draw(width, height, eye, view, nullptr, seconds);
         return true;
     }
-    bool cut(bool still) const { return status_ == Status::ready && !still && director->cut(); }
+    bool cut(bool still) const { return status_ == Status::ready && !replay && !still && director->cut(); }
+    bool seek_replay(uint32_t tick) {
+        if (!replay || status_ != Status::ready || tick > replay->total_ticks()) return false;
+        try { replay->seek(tick); renderer->reset_presentation(); return true; }
+        catch (const std::exception &e) {
+            try { fallback_tour(e.what()); }
+            catch (const std::exception &failure) { status_ = Status::failed; error_ = failure.what(); }
+            return false;
+        }
+    }
     Status status() const { return status_; }
     const std::string &map() const { return wanted; }
     const std::string &error() const { return error_; }
     size_t shots() const { return director ? director->count() : 0; }
     nlohmann::json state(const std::string &source) const {
         static const char *names[] = {"idle", "loading", "ready", "failed"};
-        return {{"status", names[int(status_)]}, {"map", wanted}, {"renderer", "native-bsp"}, {"kind", "tour"},
-                {"shots", shots()}, {"source", source}, {"error", error_}};
+        return {{"status", names[int(status_)]}, {"map", wanted}, {"renderer", "native-bsp"}, {"kind", replay ? "pb" : "tour"},
+                {"shots", shots()}, {"source", source}, {"error", error_}, {"replayError", replay_error},
+                {"replayTick", replay ? replay->snapshot().player.tick : 0}, {"replayTicks", replay ? replay->total_ticks() : 0}};
     }
 
 private:
+    void fallback_tour(const std::string &failure) {
+        replay_error = failure; replay.reset();
+        BhContext *core = map_->core.get();
+        BhSettings settings{}; bh_default_settings(&settings);
+        if (!bh_replay_stop(core) || !bh_run_clear(core) || !bh_set_settings(core, &settings) || !bh_reset(core))
+            throw std::runtime_error(std::string("Backdrop tour reset: ") + bh_last_error(core));
+        renderer->reset_presentation();
+        seconds = 0;
+    }
     struct Job { std::atomic_bool cancel{false}; std::future<native::DownloadedMap> result; };
     Gl &gl;
     std::filesystem::path assets;
@@ -201,8 +253,9 @@ private:
     std::unique_ptr<BackdropMap> map_;
     std::unique_ptr<Renderer> renderer;
     std::unique_ptr<native::tour::Director> director;
+    std::unique_ptr<native::backdrop::PbPlayback> replay;
     Status status_ = Status::idle;
-    std::string wanted, error_, interrupted;
+    std::string wanted, wanted_replay, error_, replay_error, interrupted, interrupted_replay;
     double seconds = 0;
 };
 }

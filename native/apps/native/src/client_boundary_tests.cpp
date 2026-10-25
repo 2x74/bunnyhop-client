@@ -166,5 +166,21 @@ int main(){
     assert(room.actors(1.).empty());
     room.event(event(3,"room-b",welcome));room.event(event(2,"room-a",{{"t","nativeLeave"}}));assert(room.id=="room-b");
     room.event(event(3,"room-b",{{"t","nativeLeave"}}));assert(room.id.empty()&&room.actors(1.).empty());
+    // Host Main menu keeps its generation fence: an old map-change timeout,
+    // welcome or snapshot must not resurrect a closed room after leaving.
+    room.event(event(7,"old-room",welcome));room.close();
+    assert(room.generation==7&&room.id.empty()&&room.map.empty());
+    assert(room.event(event(7,"old-room",{{"t","nativeMap"},{"map","bhop_late"}})).empty());
+    assert(room.event(event(7,"old-room",welcome)).empty());
+    assert(room.event(event(6,"old-room",welcome)).empty());
+    room.snapshot(snapshot(7,"old-room",J::array({sample(300,999)})),20.);
+    assert(room.generation==7&&room.id.empty()&&room.map.empty()&&room.actors(20.).empty());
+    // A deliberate newer join succeeds; a late leave from the old lifecycle
+    // cannot close it, and its own nativeLeave seals that generation too.
+    assert(room.event(event(9,"new-room",welcome))=="bhop_eazy");
+    room.event(event(7,"old-room",{{"t","nativeLeave"}}));assert(room.id=="new-room");
+    room.event(event(9,"new-room",{{"t","nativeLeave"}}));
+    assert(room.event(event(9,"new-room",{{"t","nativeMap"},{"map","bhop_late"}})).empty());
+    assert(room.id.empty()&&room.map.empty()&&room.generation==9);
     std::cout<<"Native settings, replay boundaries, and room interpolation checks passed\n";
 }

@@ -7,6 +7,7 @@ import{executableHash,MACHO_MODE}from"./packaging/executable-identity";
 import{bundleLinuxDependencies}from"./packaging/linux-elf";
 import{CANONICAL_PHYSICS,CANONICAL_TIMER_RULES,CANONICAL_WASM_SHA256,CANONICAL_WASM_BYTES}from"./ensure-wasm";
 import{APP_NAME,APP_ID,MAC_APP,ICON_HASHES,packageBranding,verifyPackageBranding}from"./packaging/branding";
+import{verifyMusicAssets}from"./src/export-music";
 const root=resolve(import.meta.dir,"../..");
 const sha=(b:Uint8Array|string)=>createHash("sha256").update(b).digest("hex");
 export function run(args:string[],cwd=root):string{const r=Bun.spawnSync(args,{cwd,stdout:"pipe",stderr:"pipe",env:process.env});if(r.exitCode)throw new Error(`${args[0]} failed (${r.exitCode}): ${Buffer.from(r.stderr).toString()}`);return Buffer.from(r.stdout).toString();}
@@ -126,6 +127,7 @@ if(import.meta.main){
  mkdirSync(resources,{recursive:true});copy(sourceBinary,executable);chmodSync(executable,0o755);
  copy(join(root,"target/native-menu/menu.html"),join(resources,"menu.html"));const assets=join(root,"target/native-assets");treeFiles(assets);copy(assets,join(resources,"native-assets"));
  packageBranding(resources,packageRoot,platform);
+ verifyMusicAssets(join(resources,"native-assets"));
  if(existsSync(join(root,"target/native-menu/menu-manifest.json"))){
   const menuManifest=JSON.parse(readFileSync(join(root,"target/native-menu/menu-manifest.json"),"utf8"));
   // The builder records its local output path; packaged metadata names the bundled document.

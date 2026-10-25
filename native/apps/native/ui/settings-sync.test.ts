@@ -37,6 +37,8 @@ test("yaw slider edits survive stale host updates before and after dispatch", as
       expect(await range.inputValue()).toBe("200");
     }
     await page.getByLabel("Search settings").fill("music");
-    expect(await page.getByRole("radio", { name: "No music", exact: true }).isVisible()).toBe(true);
+    // The default pack is the bundled soundtrack, not "No music".
+    expect(await page.getByRole("radio", { name: "bunnyhop.lol OST", exact: true }).isVisible()).toBe(true);
+    expect(await page.getByRole("radio", { name: "No music", exact: true }).count()).toBe(0);
   } finally { await browser.close(); }
 }, 15_000);

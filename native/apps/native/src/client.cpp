@@ -6,6 +6,9 @@
 #include "renderer.hpp"
 #include "menu_backdrop.hpp"
 #include "hud.hpp"
+#include "practice.hpp"
+#include "leave_hold.hpp"
+#include "map_jobs.hpp"
 #include "ssj.hpp"
 #include "strafe_trainer.hpp"
 #include "audio.hpp"
@@ -47,14 +50,15 @@ struct Options {
     uint64_t frames = 0;
     double sensitivity = 2;
     bool hidden = false, help = false, no_menu = false, sensitivity_set=false, menu_home_smoke=false;
-    std::string style="autohop", replay,tutorial_lesson;bool tutorial_demo=false;
+    std::string style="autohop", replay,tutorial_lesson,runtime_smoke;bool tutorial_demo=false;
 };
 Options options(int argc, char **argv) {
     Options out;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         auto value = [&]() -> std::string { if (++i >= argc) throw std::runtime_error("Missing value for " + arg); return argv[i]; };
-        if(arg=="--tutorial")out.tutorial_lesson=value();
+        if(arg=="--runtime-smoke"){out.runtime_smoke=value();out.hidden=true;out.no_menu=true;}
+        else if(arg=="--tutorial")out.tutorial_lesson=value();
         else if(arg=="--tutorial-demo")out.tutorial_demo=true;
         else if(arg=="--style") out.style=value();
         else if(arg=="--replay") out.replay=value();
@@ -79,6 +83,7 @@ Options options(int argc, char **argv) {
         else if (arg == "--help" || arg == "-h") out.help = true;
         else throw std::runtime_error("Unknown argument: " + arg);
     }
+    if(!out.runtime_smoke.empty()&&(out.map.empty()||!out.online_map.empty()||out.replay.empty()))throw std::runtime_error("Runtime smoke requires a local --map and --replay");
     if(!out.tutorial_lesson.empty()&&out.tutorial_lesson!="jump"&&out.tutorial_lesson!="strafe"&&out.tutorial_lesson!="speed"&&out.tutorial_lesson!="final")throw std::runtime_error("Unknown tutorial lesson");
     if(!native::styles.contains(out.style))throw std::runtime_error("Unknown movement style");
     if (!out.screenshot.empty() && !out.frames) out.frames = 1;
@@ -193,7 +198,7 @@ int run(const Options &opt) {
     // are known at the point the packs are first applied.
     char *pref_path=SDL_GetPrefPath("bunnyhop.lol","Bunnyhop Native");
     if(!pref_path) throw std::runtime_error("Cannot find the native client data directory");
-    const std::filesystem::path cache(pref_path); SDL_free(pref_path);
+    const std::filesystem::path cache=opt.runtime_smoke.empty()?std::filesystem::path(pref_path):std::filesystem::path(opt.runtime_smoke)/"data"; SDL_free(pref_path);
     std::filesystem::create_directories(cache/"replays");
     // Created empty so a player looking for where their own audio goes finds
     // the folders already there rather than having to guess the names.
@@ -281,6 +286,10 @@ int run(const Options &opt) {
     // events the simulation already produced and never feeds anything back.
     native::MovementFeedback feedback;
     native::TurnAdmission turn_admission;
+    native::Practice practice;native::LeaveHold leave_hold;
+    std::string gauntlet_id,gauntlet_map;
+    nlohmann::json gauntlet_progress;
+    std::string toast_text;auto toast_until=std::chrono::steady_clock::time_point{};
     const native::SsjFields ssj_fields;
     auto reset_feedback=[&](bool incomplete_history=false) {
         BhRunState timing{}; BhSnapshot snapshot{};
@@ -293,15 +302,13 @@ int run(const Options &opt) {
     auto beat_time=std::chrono::steady_clock::now();
     std::vector<BhZone> zones;
     std::mutex progress_mutex;
-    std::atomic_bool cancel_download{false};
-    std::future<native::DownloadedMap> download;
-    struct CancelDownload { std::atomic_bool &flag; ~CancelDownload(){flag=true;} } cancel_on_exit{cancel_download};
+    native::MapJobs<native::DownloadedMap> download;
     double accumulator=0;
     using Clock=std::chrono::steady_clock;
     native::InputClock input_clock;
     // A focus, menu or restart reset: the simulation starts again from now and
     // motion from before it is dropped rather than handed to the next tick.
-    auto reset_input_timing=[&]() {accumulator=0;input.clear();input_clock.reset();};
+    auto reset_input_timing=[&]() {accumulator=0;input.clear();input_clock.reset();leave_hold.cancel();};
     auto capture=[&](bool on) {
         reset_input_timing();held_codes.clear();
         if (!SDL_SetWindowRelativeMouseMode(window.get(),on)) {
@@ -320,7 +327,7 @@ int run(const Options &opt) {
         capture(resume_wanted && focused); accumulator=0; prev=curr;
     };
     auto run_event=[&](nlohmann::json event) {
-        if(!turn_admission.allows_event(event.value("type",std::string())))return;
+        if(!native::practice_allows_event(practice.active,event.value("type",std::string()))||!turn_admission.allows_event(event.value("type",std::string())))return;
         if(!menu || !menu_ready || opt.frames || !opt.menu_smoke.empty()) return;
         event["generation"]=run_generation;event["map"]=map_id;event["style"]=active_style;
         event["build"]=identity.value("build",std::string("bunnyhop-native/local"));
@@ -333,7 +340,7 @@ int run(const Options &opt) {
         recording_ended=false; record_path.clear();
         ++run_generation;beat_start=beat_upto=0;beat_hash=0x811c9dc5;beat_paused=false;
         run_event({{"type","reset"}});
-        if(playback || room.spectator_target || map_id==tutorial_map || zones.empty() || opt.frames || !opt.menu_smoke.empty()) return;
+        if(practice.active || playback || room.spectator_target || map_id==tutorial_map || zones.empty() || opt.frames || !opt.menu_smoke.empty()) return;
         const auto stamp=std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         record_path=(cache/"replays"/(map_id+"-"+std::to_string(stamp)+".bhr")).string();
         require(bh_record_identity(core.get(),identity.at("build").get<std::string>().c_str()),core.get(),"Setting native release identity");
@@ -342,7 +349,7 @@ int run(const Options &opt) {
     };
     auto reset=[&]() {
         if(!core) return;
-        bh_record_end(core.get());room_events|=8;
+        bh_record_end(core.get());room_events|=8;practice.restart();
         if(playback){require(bh_replay_stop(core.get()),core.get(),"Stopping replay");playback=false;playback_id.clear();}
         BhRunOptions canonical{};bh_default_run_options(&canonical);if(zones.empty())require(bh_run_clear(core.get()),core.get(),"Clearing replay timer");else require(bh_run_configure(core.get(),&canonical,zones.data(),zones.size()),core.get(),"Restoring canonical map timer");
         active_style=active_track?"autohop":selected_style;
@@ -371,6 +378,67 @@ int run(const Options &opt) {
         audio.reset();prev=curr;reset_input_timing();input.set_angles(curr.teleport_angles[0],curr.teleport_angles[1]);
         begin_record();reset_feedback();reset_input_timing();
     };
+    auto practice_reason=[&](){return native::practice_unavailable(bool(core),playback,!room.id.empty(),map_id==tutorial_map,!gauntlet_id.empty());};
+    auto toast=[&](const std::string &text,unsigned ms=3000){toast_text=text;toast_until=Clock::now()+std::chrono::milliseconds(ms);};
+    auto practice_use=[&](const std::string &tool){
+        if(!practice.active){BhRunState timing{};bh_run_state(core.get(),&timing);practice.active=true;practice.tool=tool;toast(timing.status==1?"This run is practice now. Press R to restart for a real run.":"Practice until you restart. Press R for a real run.",5000);}
+        require(bh_practice_enter(core.get(),tool=="noclip"),core.get(),"Entering practice");
+        recording_ended=false;record_path.clear();score_notice.clear();++run_generation;beat_start=beat_upto=0;run_event({{"type","reset"}});
+    };
+    auto practice_action=[&](const std::string &action,bool bound=false,std::optional<bool> value=std::nullopt){
+        const auto unavailable=practice_reason();if(!unavailable.empty()){toast(unavailable);return;}
+        BhRunState timing{};bh_run_state(core.get(),&timing);
+        if(bound&&action!="toggle"&&!practice.key_allowed(action,timing.status==1)){if(practice.hinted_run!=timing.start_tick){practice.hinted_run=timing.start_tick;toast("Type !cp to use checkpoints and noclip during a run.",3500);}return;}
+        if(action=="menu"){practice.menu_open=!practice.menu_open;return;}
+        if(action=="keepVelocity"){preferences["practiceKeepVelocity"]=value.value_or(!preferences.at("practiceKeepVelocity").get<bool>());native::save_settings(cache/"settings.json",preferences);return;}
+        if(action=="toggle"){
+            practice.mode=!practice.mode;
+            if(practice.mode){practice.tool.clear();practice_use("");toast("Practice: no scores. Z: noclip | C: save checkpoint | X: teleport.",6000);}
+            else{reset();toast("Practice mode off. You're back at the start.");}
+            return;
+        }
+        if(action=="save"){
+            auto handle=bh_practice_save(core.get(),float(input.yaw()),float(input.pitch));
+            // Retain the newest 100 snapshots within the bridge's 128 MiB cap.
+            // On large maps evict the oldest and retry, as the web checkpoint store does.
+            while(!handle&&!practice.checkpoints.empty()){
+                bh_practice_free(core.get(),practice.checkpoints.front().handle);practice.checkpoints.erase(practice.checkpoints.begin());
+                handle=bh_practice_save(core.get(),float(input.yaw()),float(input.pitch));
+            }
+            require(handle!=0,core.get(),"Saving checkpoint");practice.retain({handle,selected_style,active_style,active_track});
+            toast("Checkpoint "+std::to_string(practice.number())+" saved");return;
+        }
+        if(action=="noclip"){
+            if(!practice.noclip){practice_use("noclip");practice.noclip=true;for(int k=0;k<3;k++){practice.flight.position[k]=curr.position[k];practice.flight.velocity[k]=curr.velocity[k];}}
+            else{BhSnapshot snapshot{};const auto result=bh_practice_noclip_exit(core.get(),&practice.flight,float(input.yaw()),float(input.pitch),&snapshot);practice.noclip=false;curr=prev=snapshot.player;if(!result)toast("You're stuck in a wall. Noclip again, or teleport to a checkpoint.",4000);}
+        } else if(action=="tele"||action=="prev"||action=="next"){
+            if(practice.checkpoints.empty()){toast("No checkpoint yet. Press C to save one.");return;}
+            if(action!="tele")practice.step(action=="prev"?-1:1);
+            const auto &cp=practice.checkpoints[practice.current];
+            if(cp.selected!=selected_style){toast("That checkpoint was saved in another style.");return;}
+            BhSnapshot snapshot{};BhCmd view{};
+            require(bh_practice_restore(core.get(),cp.handle,&view,&snapshot),core.get(),"Restoring checkpoint");
+            practice_use("teleport");practice.noclip=false;active_style=cp.style;active_track=cp.track;
+            if(!preferences.at("practiceKeepVelocity").get<bool>())require(bh_set_velocity(core.get(),0,0,0),core.get(),"Clearing checkpoint speed");
+            require(bh_state(core.get(),&curr),core.get(),"Reading checkpoint");prev=curr;input.set_angles(view.pitch,view.yaw);
+            toast("Checkpoint "+std::to_string(practice.number())+" of "+std::to_string(practice.checkpoints.size()));
+        } else throw std::runtime_error("Unknown practice action");
+        if(renderer)renderer->reset_presentation();audio.reset();reset_feedback(true);reset_input_timing();room_events|=8;
+    };
+    auto leave_map=[&](){
+        show_menu(true);
+        if(menu&&menu_ready)menu->evaluate_js("window.bunnyhopNativeMenu?.onLeaveMap?.()");
+        download.cancel();
+        {std::lock_guard lock(progress_mutex);loading.clear();}
+        pending_replay.clear();pending_action.clear();pending_room_map.clear();pending_tutorial.clear();tutorial_stopped=true;
+        if(core)bh_record_end(core.get());practice.clear(core.get());renderer.reset();core.reset();tutorial.reset();
+        playback=false;playback_paused=false;playback_id.clear();playback_info=nullptr;ghost_handle=0;ghost_enabled=false;ghost_id.clear();ghost_info=nullptr;
+        gauntlet_id.clear();gauntlet_map.clear();gauntlet_progress=nullptr;zones.clear();map_id.clear();active_track=0;active_style=selected_style;
+        curr={};prev={};recording_ended=true;record_path.clear();score_notice.clear();toast_text.clear();error.clear();turn_admission.reset();
+        ++run_generation;beat_start=beat_upto=0;run_event({{"type","reset"}});reset_feedback();reset_input_timing();audio.reset();
+        if(backdrop)backdrop->release();backdrop_shown.clear();backdrop_failed.clear();backdrop_source.clear();backdrop_cut=false;gameplay_backdrop_due=false;last_ui.clear();
+        room.close();room_modes.close(room.generation);observed_spectator.reset();
+    };
     auto apply_room_mode=[&](const native::RoomModeAction &action){
         if(action.stop_spectating&&menu&&menu_ready)menu->evaluate_js("window.bunnyhopNativeMenu?.onRoomCommand?.({t:'spec',target:null})");
         if(action.restart&&core){if(tutorial)tutorial->stop();tutorial_demo=false;if(!action.style.empty())selected_style=action.style;active_track=action.track;reset();show_menu(false);}
@@ -385,29 +453,59 @@ int run(const Options &opt) {
         std::unique_ptr<native::Tutorial> next_tutorial;
         if(id==tutorial_map){const auto metadata=nlohmann::json::parse(read_text(assets/"tutorial.json"));if(file_hash(path)!=metadata.at("bspSha256").get<std::string>())throw std::runtime_error("Tutorial BSP does not match bundled lessons; update the tutorial assets and map together");next_tutorial=std::make_unique<native::Tutorial>(metadata,selected_style=="legit"||selected_style=="scroll");next_tutorial->set_completed(tutorial_completed);}
         auto next_renderer=std::make_unique<Renderer>(gl,next.get(),assets);
-        renderer.reset(); core=std::move(next); renderer=std::move(next_renderer);
+        practice.clear(core.get());renderer.reset(); core=std::move(next); renderer=std::move(next_renderer);
         // The pause screen shows this map itself, never the home tour.
         if(backdrop)backdrop->release();backdrop_shown.clear();backdrop_failed.clear();backdrop_cut=false;gameplay_backdrop_due=true;
         zones=next_zones;tutorial=std::move(next_tutorial);tutorial_demo=false; map_id=id; error.clear();playback=false;ghost_handle=0;ghost_enabled=false;ghost_id.clear(); reset();apply_preferences();renderer->set_cosmetics(outfit,packed_loadout);apply_room_mode(room_modes.map_loaded(map_id,room.spectator_target.has_value(),epoch_ms()));
     };
     auto request_map=[&](const std::string &id) {
+        if(!opt.runtime_smoke.empty())throw std::runtime_error("Offline runtime smoke attempted a map download");
         if(download.valid()) throw std::runtime_error("A map is already loading");
         if(!native::valid_map_id(id)) throw std::runtime_error("Invalid map name");
         error.clear(); show_menu(true);
+        if(core)bh_record_end(core.get());++run_generation;beat_start=beat_upto=0;run_event({{"type","reset"}});
         // A background still downloading gives way; one already on screen
         // stays until this map has loaded.
         if(backdrop)backdrop->cancel_loading();
         {std::lock_guard lock(progress_mutex); loading="Reading "+id;}
-        download=std::async(std::launch::async,[&,id] {
-            const auto lock=lock_cache(cancel_download);
-            return native::download_map(id,cache,[&](const std::string &message) {std::lock_guard lock(progress_mutex);loading=message;},&cancel_download);
+        download.start([&,id](const std::atomic_bool &cancel) {
+            const auto lock=lock_cache(cancel);
+            return native::download_map(id,cache,[&](const std::string &message) {std::lock_guard lock(progress_mutex);if(!cancel)loading=message;},&cancel);
         });
+    };
+    auto apply_room_event=[&](const nlohmann::json &message){
+        const auto next=room.event(message);
+        if(!room.id.empty()){
+            const bool tainted=practice.active||practice.noclip;
+            practice.clear(core.get());gauntlet_id.clear();gauntlet_map.clear();gauntlet_progress=nullptr;
+            if(tainted&&core)reset();
+        }
+        apply_room_mode(room_modes.event(message,map_id,room.spectator_target.has_value(),epoch_ms()));
+        if(room.id.empty())pending_room_map.clear();
+        if(!next.empty()&&native::valid_map_id(next)&&next!=map_id){
+            if(download.valid())pending_room_map=next;else{active_track=0;request_map(next);}
+        }
     };
     CorePtr metadata_core(bh_create(),&bh_destroy);
     auto replay_metadata=[&](const std::filesystem::path &path) {
         size_t bytes=0;const char *json=bh_replay_header(metadata_core.get(),path.string().c_str(),&bytes);
         require(json!=nullptr,metadata_core.get(),"Reading replay header");
         return nlohmann::json::parse(json,json+bytes);
+    };
+    // Only clean finishes archived by this host enter its local PB registry.
+    // Old/unclassified and deliberately local-only archives remain replayable,
+    // but must not silently become a personal best or an attract PB.
+    nlohmann::json backdrop_pbs=nlohmann::json::object();
+    try{if(std::filesystem::exists(cache/"backdrop-pbs.json")&&std::filesystem::file_size(cache/"backdrop-pbs.json")<128*1024){const auto saved=nlohmann::json::parse(read_text(cache/"backdrop-pbs.json"));if(saved.is_object())backdrop_pbs=saved;}}catch(const std::exception &e){std::cerr<<"Backdrop PBs: "<<e.what()<<'\n';}
+    auto valid_backdrop_replay=[&](const std::filesystem::path &path,const std::string &map){
+        if(!std::filesystem::is_regular_file(path)||std::filesystem::is_symlink(path)||std::filesystem::file_size(path)>8*1024*1024)throw std::runtime_error("Invalid backdrop replay file");
+        const auto info=replay_metadata(path);
+        if(info.at("map")!=map||info.value("style",std::string("autohop"))!="autohop"||info.value("track",0)!=0||info.at("endTick").get<uint32_t>()<=info.at("startTick").get<uint32_t>())throw std::runtime_error("Backdrop replay is not a completed Normal main-track run of this map");
+        return info;
+    };
+    auto local_backdrop_replay=[&](const std::string &map)->std::string{
+        try{if(backdrop_pbs.contains(map)){const auto path=native::replay_file(cache/"replays",backdrop_pbs.at(map).at("id").get<std::string>());valid_backdrop_replay(path,map);return path.string();}}catch(const std::exception &e){std::cerr<<"Local backdrop PB: "<<e.what()<<'\n';}
+        return {};
     };
     auto refresh_replays=[&]() {
         replay_list=nlohmann::json::array();
@@ -426,7 +524,7 @@ int run(const Options &opt) {
     };
     auto open_replay=[&](const std::filesystem::path &path,const std::string &action) {
         if(!core)throw std::runtime_error("Load the replay map first");
-        if(tutorial)tutorial->stop();tutorial_demo=false;renderer->reset_presentation();
+        practice.clear(core.get());if(tutorial)tutorial->stop();tutorial_demo=false;renderer->reset_presentation();
         bh_record_end(core.get());++run_generation;run_event({{"type","reset"}});beat_start=0;audio.reset();
         if(action=="ghost") {
             if(ghost_handle)bh_ghost_free(core.get(),ghost_handle);
@@ -460,6 +558,21 @@ int run(const Options &opt) {
         }
         std::cout<<"Native tutorial "<<lesson<<(demo?" demonstration":" lesson")<<"; ranked recording disabled\n";show_menu(false);
     };
+    auto gauntlet_action=[&](const nlohmann::json &message){
+                    const auto id=message.at("id").is_null()?std::string():message.at("id").get<std::string>();
+                    if(id.size()>128)throw std::runtime_error("Invalid gauntlet id");
+                    const auto map=message.value("map",std::string());if(!map.empty()&&!native::valid_map_id(map))throw std::runtime_error("Invalid gauntlet map");
+                    const auto progress=message.value("progress",nlohmann::json(nullptr));
+                    if(!progress.is_null()){
+                        if(!progress.is_object())throw std::runtime_error("Invalid gauntlet progress");
+                        const auto idx=progress.at("idx").get<unsigned>(),maps=progress.at("maps").get<unsigned>();const auto before=progress.at("before").get<double>();
+                        if(!maps||maps>1000||idx>=maps||!std::isfinite(before)||before<0)throw std::runtime_error("Invalid gauntlet progress");
+                        if(!progress.at("pbSplit").is_null()){const auto pb=progress.at("pbSplit").get<double>();if(!std::isfinite(pb)||pb<0)throw std::runtime_error("Invalid gauntlet split");}
+                    }
+                    const bool restart=!id.empty()&&core&&(practice.active||playback||active_style!="autohop"||active_track!=0);
+                    gauntlet_id=id;gauntlet_map=id.empty()?std::string():map;gauntlet_progress=id.empty()?nlohmann::json(nullptr):progress;
+                    if(!id.empty()){practice.clear(core.get());selected_style="autohop";active_track=0;if(restart)reset();}
+    };
     uint32_t last_slot=3,observed_slot=3;
     auto movement_bit=[](const std::string &action)->uint32_t {
         if(action=="forward")return native::forward;if(action=="back")return native::back;
@@ -471,12 +584,21 @@ int run(const Options &opt) {
     // or yawSpeedAlt while Turn modifier is held. Positive is left (yaw goes up).
     auto turn_rate=[&]()->double {
         if(!captured || !native::turn_binds_allowed(active_style,
-            (tutorial&&tutorial->is_active()) || feedback.ssj_was_noclip))return 0;
+            (tutorial&&tutorial->is_active()) || practice.active || feedback.ssj_was_noclip))return 0;
         auto held=[&](const char *action){for(const auto &key:preferences.at("binds").at(action))if(held_codes.contains(key.get<std::string>()))return true;return false;};
         return native::configured_turn_rate(held("turnLeft"),held("turnRight"),
             preferences.at(held("turnFast")?"yawSpeedAlt":"yawSpeed").get<double>());
     };
-    auto act=[&](const std::string &action) {
+    auto act=[&](const std::string &action,bool wheel=false) {
+        if(action=="practice"||action=="noclip"||action=="cpSave"||action=="cpTeleport"||action=="cpPrev"||action=="cpNext"){
+            practice_action(action=="practice"?"toggle":action=="cpSave"?"save":action=="cpTeleport"?"tele":action=="cpPrev"?"prev":action=="cpNext"?"next":"noclip",true);return;
+        }
+        if(action=="mainMenu"){
+            BhRunState timing{};if(core)bh_run_state(core.get(),&timing);
+            const auto result=leave_hold.press(epoch_ms(),native::leave_requires_confirmation(timing.status,room.spectator_target.has_value()),!wheel);
+            if(result==native::LeaveHold::Result::leave)leave_map();else if(result==native::LeaveHold::Result::ask)toast("Main menu key again to leave");return;
+        }
+        if(!gauntlet_id.empty()&&(action=="restartBonus"||action=="cycleStyle")){toast("Gauntlets are Normal style on the main track.");return;}
         if(action=="restart"||action=="restartMain") {if(tutorial&&tutorial->is_active())start_tutorial(tutorial->lesson_id(),tutorial_demo);else{if(action=="restartMain")active_track=0;reset();}}
         else if(action=="restartBonus") {
             std::set<uint32_t> tracks;for(const auto &z:zones)if(z.kind==0&&z.track)tracks.insert(z.track);
@@ -497,13 +619,21 @@ int run(const Options &opt) {
     };
     auto handle_code=[&](const std::string &code,bool down,bool repeat=false,bool wheel=false) {
         if(code.empty())return;
+        if(practice.menu_open&&down&&!repeat&&code.size()==6&&code.starts_with("Digit")){
+            const int pick=code.back()-'0';
+            if(pick==0){practice.menu_open=false;return;}
+            if(pick>=1&&pick<=6){
+                if((pick==3&&practice.number()<=1)||(pick==4&&practice.number()>=practice.checkpoints.size()))return;
+                const char *actions[]={"save","tele","prev","next","noclip","keepVelocity"};practice_action(actions[pick-1]);return;
+            }
+        }
         if(down)held_codes.insert(code);else held_codes.erase(code);
         input.held=0;
         for(auto binding=preferences["binds"].begin();binding!=preferences["binds"].end();++binding) {
             const auto bit=movement_bit(binding.key());bool matching=false,held=false;
             for(const auto &raw:binding.value()) {const auto key=raw.get<std::string>();matching|=key==code||(wheel&&key=="MouseWheel");held|=held_codes.contains(key);}
             if(bit){if(wheel&&matching&&down)input.pulse|=bit;else if(held)input.held|=bit;}
-            else if(matching&&down&&!repeat)act(binding.key());
+            else if(matching&&down&&!repeat)act(binding.key(),wheel);
         }
         if(wheel)held_codes.erase(code);
         bool inspect=false;for(const auto &key:preferences["binds"]["inspect"])inspect|=held_codes.contains(key.get<std::string>());
@@ -520,7 +650,87 @@ int run(const Options &opt) {
     if(!opt.online_map.empty()) request_map(opt.online_map);
     if(tutorial){const auto lesson=pending_tutorial.empty()?"jump":pending_tutorial;start_tutorial(lesson,pending_tutorial_demo);pending_tutorial.clear();}
     if(menu) show_menu(true); else if(!opt.hidden) capture(true);
-    if(!opt.replay.empty())request_replay(opt.replay,"play");
+    if(!opt.replay.empty()&&opt.runtime_smoke.empty())request_replay(opt.replay,"play");
+    if(!opt.runtime_smoke.empty()){
+        const std::filesystem::path output(opt.runtime_smoke);std::filesystem::create_directories(output);
+        auto check=[](bool ok,const char *why){if(!ok)throw std::runtime_error(std::string("Runtime smoke: ")+why);};
+        check(core&&renderer&&!menu,"needs a local BSP and no menu");
+        check(!opt.replay.empty(),"needs a completed replay for the supplied BSP");
+        nlohmann::json detail;const auto sidecar=std::filesystem::path(opt.map).replace_extension(".zones.json");
+        if(std::filesystem::exists(sidecar))detail["zones"]=nlohmann::json::parse(read_text(sidecar));
+        // A neutral host id allows tools on the tutorial fixture without enabling its lesson controller.
+        load_map(opt.map,opt.content_root,"native-runtime-fixture",detail);
+        check(practice_reason().empty(),"solo practice unavailable");
+        BhRunState before{};bh_run_state(core.get(),&before);
+        const auto saved_tick=curr.tick;practice_action("save");BhRunState after{};bh_run_state(core.get(),&after);
+        check(practice.number()==1&&!practice.active&&curr.tick==saved_tick,"save tainted attempt or advanced simulation");
+        check(before.recording==after.recording&&before.total_commands==after.total_commands,"save changed recording");
+        // Gate exactly like a live timed run, without altering canonical movement.
+        check(!practice.key_allowed("tele",true)&&practice.key_allowed("save",true),"timed key guard");
+        practice_action("menu");check(practice.menu_open&&practice.key_allowed("noclip",true),"checkpoint menu guard");
+        practice_action("tele");check(practice.active&&practice.tool=="teleport","teleport not practice");
+        check(!native::practice_allows_event(practice.active,"beat")&&!native::practice_allows_event(practice.active,"finish"),"practice admission");
+        const auto count=practice.checkpoints.size();reset();check(!practice.active&&practice.checkpoints.size()==count&&!practice.noclip,"restart did not clean attempt/preserve checkpoints");
+        practice_action("toggle");reset();check(practice.mode&&practice.active,"practice mode lost across restart");
+        practice_action("toggle");check(!practice.mode&&!practice.active,"leaving practice did not reset");
+        practice_action("noclip");check(practice.noclip&&practice.active,"noclip entry");
+        BhCmd command{};command.forward=450;BhSnapshot snapshot{};
+        require(bh_noclip_move(&practice.flight,&command,dt),core.get(),"Smoke flight");require(bh_practice_noclip_tick(core.get(),&practice.flight,&snapshot),core.get(),"Smoke noclip tick");curr=prev=snapshot.player;
+        practice_action("noclip");check(!practice.noclip&&practice.active,"noclip exit cleared practice");
+        practice_action("menu");if(!practice.menu_open)practice_action("menu");
+        int w=0,h=0;SDL_GetWindowSizeInPixels(window.get(),&w,&h);
+        for(const float percent:{50.f,100.f,175.f}){
+            bh_snapshot(core.get(),&snapshot);BhRunState timing{};bh_run_state(core.get(),&timing);BhWeaponReport weapon{};bh_weapon_report(core.get(),&weapon);
+            const float eye[]={curr.position[0],curr.position[1],curr.position[2]+curr.view_offset_z};renderer->draw(w,h,eye,input,&snapshot,0);
+            hud.draw(w,h,snapshot,timing,command,map_id,active_style,"",60,true,true,false,weapon,"",false,std::nullopt,true,nullptr,percent,&practice,true,"Gauntlet 1/3 | 00:01.000","-0.500s",true,.5f);
+            const auto png=backbuffer_png(gl,w,h);std::ofstream image(output/("hud-"+std::to_string(int(percent))+".png"),std::ios::binary);image.write(png.data(),png.size());
+        }
+        gauntlet_action({{"id","offline-smoke"},{"map","native-runtime-fixture"},{"progress",{{"idx",0},{"maps",2},{"before",0.0},{"pbSplit",nullptr}}}});
+        check(!practice.active&&!practice.mode&&selected_style=="autohop"&&active_track==0,"gauntlet did not reset practice/style/track");
+        check(practice_reason()=="No practice during a gauntlet.","gauntlet permits practice");
+        act("cycleStyle");act("restartBonus");check(selected_style=="autohop"&&active_track==0,"gauntlet bindings escaped lock");
+        load_map(opt.map,opt.content_root,"native-runtime-fixture-next",detail);check(gauntlet_id=="offline-smoke"&&!practice.active,"gauntlet map progression lost lock");
+        gauntlet_action({{"id",nullptr}});check(practice_reason().empty(),"gauntlet clear left practice blocked");
+        practice_action("save");practice_action("tele");open_replay(opt.replay,"play");
+        check(playback&&!practice.active&&!practice.mode&&practice.checkpoints.empty(),"replay retained practice state");
+        BhSnapshot replay_state{};require(bh_replay_seek(core.get(),10,&replay_state),core.get(),"Smoke replay seek");curr=prev=replay_state.player;renderer->reset_presentation();reset_input_timing();
+        reset();check(!playback&&!practice.active,"replay restart not clean");
+        auto start_timed_practice=[&](){
+            practice_action("toggle");check(practice.active,"timed practice setup");
+            BhRunOptions options{};bh_default_run_options(&options);options.rules=1;
+            BhZone start{};for(int k=0;k<3;++k){start.mins[k]=curr.position[k]-32;start.maxs[k]=curr.position[k]+32;}
+            BhZone end=start;end.kind=1;end.mins[2]+=4096;end.maxs[2]+=4096;const BhZone test_zones[]={start,end};
+            require(bh_run_configure(core.get(),&options,test_zones,2),core.get(),"Smoke timed practice configuration");
+            BhCmd command{};require(bh_step(core.get(),&command,&curr),core.get(),"Smoke enter start");
+            require(bh_set_position(core.get(),curr.position[0]+256,curr.position[1],curr.position[2],0),core.get(),"Smoke leave start");
+            require(bh_step(core.get(),&command,&curr),core.get(),"Smoke start practice timer");
+            BhRunState timing{};require(bh_run_state(core.get(),&timing),core.get(),"Smoke read practice timer");check(timing.status==1,"practice timer did not start");
+        };
+        start_timed_practice();act("mainMenu");check(core&&leave_hold.started>=0,"timed practice skipped leave hold");
+        const auto held_at=leave_hold.started;
+        check(leave_hold.frame(held_at+599,true,false)==native::LeaveHold::Result::none,"practice leave fired early");
+        check(leave_hold.frame(held_at+600,true,false)==native::LeaveHold::Result::leave,"practice leave did not fire at 600ms");leave_map();
+        load_map(opt.map,opt.content_root,"native-runtime-fixture-wheel",detail);start_timed_practice();
+        act("mainMenu",true);check(core&&renderer,"first timed practice wheel press left the map");
+        act("mainMenu",true);check(!core&&!renderer,"second timed practice wheel press did not leave");
+        load_map(opt.map,opt.content_root,"native-runtime-fixture-room",detail);
+        const nlohmann::json welcome={{"t","welcome"},{"you",1},{"map",{{"name",map_id}}},{"players",nlohmann::json::array()}};
+        apply_room_event({{"generation",7},{"id","old-room"},{"event",welcome}});check(room.id=="old-room","room setup");
+        pending_replay="stale";pending_action="play";pending_room_map="stale";pending_tutorial="jump";
+        std::atomic_bool entered=false,stopped=false;
+        download.start([&](const std::atomic_bool &cancel)->native::DownloadedMap{entered=true;while(!cancel)std::this_thread::yield();{std::lock_guard lock(progress_mutex);if(!cancel)loading="stale";}stopped=true;throw std::runtime_error("cancelled");});
+        while(!entered)std::this_thread::yield();const auto generation=run_generation;leave_map();
+        const auto deadline=Clock::now()+std::chrono::seconds(1);while(!stopped&&Clock::now()<deadline)std::this_thread::yield();download.poll();
+        check(stopped&&!core&&!renderer&&!download.valid()&&map_id.empty()&&zones.empty(),"leave-map core/worker shutdown");
+        apply_room_event({{"generation",7},{"id","old-room"},{"event",{{"t","nativeMap"},{"map","bhop_late"}}}});
+        apply_room_event({{"generation",7},{"id","old-room"},{"event",welcome}});
+        check(room.generation==7&&room.id.empty()&&room.map.empty()&&!download.valid(),"late room callback revived map after leave");
+        check(pending_replay.empty()&&pending_room_map.empty()&&pending_tutorial.empty()&&loading.empty()&&run_generation>generation,"leave-map stale work/generation");
+        load_map(opt.map,opt.content_root,"native-runtime-fixture-new",detail);check(core&&renderer&&!practice.active&&practice.checkpoints.empty(),"new map after leave failed");
+        check(gl.GetError()==GL_NO_ERROR,"OpenGL error");
+        const nlohmann::json result={{"pass",true},{"practice",true},{"restart",true},{"newMap",true},{"replay",true},{"checkpointMenu",true},{"hudScales",{50,100,175}},{"gauntlet",true},{"leaveMapWorkerShutdown",true},{"closedRoomGeneration",true},{"timedPracticeLeaveHold",true},{"timedPracticeLeaveWheel",true},{"networkWrites",0},{"webglContexts",0}};
+        std::ofstream(output/"result.json")<<result.dump(2)<<'\n';std::cout<<"Native runtime lifecycle smoke: "<<result.dump()<<'\n';return 0;
+    }
     auto title_time=Clock::now(),ui_time=title_time,started=title_time; uint64_t frame=0,title_frames=0;
     // Discord Rich Presence / Join. Never from scripted or hidden runs, so a
     // smoke test can't show up on the developer's own profile.
@@ -577,7 +787,7 @@ int run(const Options &opt) {
             try {
                 if(raw.size()>12*1024*1024)throw std::runtime_error("Menu command too large");
                 auto message=nlohmann::json::parse(raw);const auto type=message.at("type").get<std::string>();
-                const size_t limit=type=="replayData"?12*1024*1024:(type=="roomSnapshot"||type=="roomEvent")?128*1024:16*1024;
+                const size_t limit=(type=="replayData"||type=="menuBackdrop")?12*1024*1024:(type=="roomSnapshot"||type=="roomEvent")?128*1024:16*1024;
                 if(raw.size()>limit)throw std::runtime_error("Menu command exceeds its type limit");
                 if(type=="ready") {menu_ready=true;backdrop_shown.clear();backdrop_failed.clear();backdrop_cut=false;gameplay_backdrop_due=bool(core);run_event({{"type","reset"}});std::cout<<"Native menu ready: "<<raw<<'\n';}
                 else if(type=="resume" && core && !download.valid()) show_menu(false);
@@ -586,19 +796,38 @@ int run(const Options &opt) {
                     // Home only: ignored once a gameplay map is loading or loaded.
                     const auto &value=message.at("map");const auto id=value.is_null()?std::string():value.get<std::string>();
                     if(!id.empty()&&!native::valid_map_id(id))throw std::runtime_error("Invalid backdrop map name");
-                    if(backdrop&&!core&&!download.valid()&&backdrop->request(id)) {
+                    std::string replay_path;
+                    if(backdrop&&!core&&!download.valid()&&!id.empty()){
+                        replay_path=local_backdrop_replay(id);
+                        if(message.contains("replay"))try{
+                            const auto &replay=message.at("replay");const auto run_id=replay.at("runId").get<std::string>();if(run_id.empty()||run_id.size()>128)throw std::runtime_error("Invalid PB run id");
+                            const auto bytes=native::decode_base64(replay.at("replayBase64").get<std::string>());char hash[65]{};if(!bh_sha256(bytes.data(),bytes.size(),hash))throw std::runtime_error("Cannot hash backdrop replay");
+                            std::filesystem::create_directories(cache/"backdrop");const auto path=cache/"backdrop"/(std::string(hash)+".bhr");
+                            if(!std::filesystem::exists(path)){std::ofstream out(path,std::ios::binary);out.write(reinterpret_cast<const char*>(bytes.data()),bytes.size());if(!out)throw std::runtime_error("Cannot cache backdrop replay");}
+                            valid_backdrop_replay(path,id);replay_path=path.string();
+                        }catch(const std::exception &e){std::cerr<<"PB backdrop: "<<e.what()<<"; using local PB/tour\n";}
+                    }
+                    if(backdrop&&!core&&!download.valid()&&backdrop->request(id,replay_path)) {
                         backdrop_shown.clear();backdrop_failed.clear();backdrop_cut=false;backdrop_source.clear();
                         // Released at the menu's request: no map to match against.
                         if(id.empty())menu->evaluate_js("window.bunnyhopNativeBackdrop?.('none')");
                     }
                 }
+                else if(type=="leaveMap")leave_map();
+                else if(type=="practice")practice_action(message.at("action").get<std::string>(),false,message.contains("value")?std::optional<bool>(message.at("value").get<bool>()):std::nullopt);
+                else if(type=="music"){const auto action=message.at("action").get<std::string>();if(action!="previous"&&action!="toggle"&&action!="next")throw std::runtime_error("Invalid music action");audio.music_control(action);}
+                else if(type=="hudToast"){const auto text=message.at("text").get<std::string>();if(text.size()>500)throw std::runtime_error("HUD toast too long");toast(text,std::clamp(message.value("ms",3000u),500u,15000u));}
+                else if(type=="gauntlet"){
+                    gauntlet_action(message);
+                }
                 else if(type=="restart" && core && !download.valid()) {reset();show_menu(false);}
                 else if(type=="selectMap") {
                     const auto style=message.value("style",selected_style);if(!native::styles.contains(style))throw std::runtime_error("Unknown style");
+                    if(!gauntlet_id.empty()&&(style!="autohop"||message.value("track",0u)!=0||(!gauntlet_map.empty()&&message.at("id").get<std::string>()!=gauntlet_map)))throw std::runtime_error("Gauntlets are Normal style on the main track.");
                     tutorial_stopped=false;selected_style=style;active_track=message.value("track",0u);if(active_track>64)throw std::runtime_error("Invalid track");
                     request_map(message.at("id").get<std::string>());
                 }
-                else if(type=="style") {if(download.valid())throw std::runtime_error("A map is loading");const auto id=message.at("id").get<std::string>();if(!native::styles.contains(id))throw std::runtime_error("Unknown style");selected_style=id;active_track=0;reset();}
+                else if(type=="style") {if(!gauntlet_id.empty())throw std::runtime_error("Gauntlets are Normal style on the main track.");if(download.valid())throw std::runtime_error("A map is loading");const auto id=message.at("id").get<std::string>();if(!native::styles.contains(id))throw std::runtime_error("Unknown style");selected_style=id;active_track=0;reset();}
                 else if(type=="settings") {auto changed=native::patch_settings(preferences,message.at("patch"));native::save_settings(cache/"settings.json",changed);preferences=std::move(changed);input.held=input.pulse=0;held_codes.clear();apply_preferences();error.clear();}
                 else if(type=="replays")refresh_replays();
                 else if(type=="ghost")ghost_enabled=ghost_handle&&message.at("enabled").get<bool>();
@@ -640,8 +869,7 @@ int run(const Options &opt) {
                     if(renderer)renderer->set_cosmetics(outfit,packed_loadout);
                 }
                 else if(type=="roomEvent") {
-                    const auto next=room.event(message);apply_room_mode(room_modes.event(message,map_id,room.spectator_target.has_value(),epoch_ms()));if(room.id.empty())pending_room_map.clear();
-                    if(!next.empty()&&native::valid_map_id(next)&&next!=map_id){if(download.valid())pending_room_map=next;else{active_track=0;request_map(next);}}
+                    apply_room_event(message);
                 }
                 else if(type=="roomSnapshot")room.snapshot(message,std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count());
                 else if(type=="openAuth") menu->open_auth(message.at("url").get<std::string>());
@@ -649,7 +877,8 @@ int run(const Options &opt) {
                 else if(type=="auth") menu->evaluate_js("window.bunnyhopNativeMenu?.onAuth("+message.dump()+")");
                 else if(type=="menuError") {error=message.value("error",std::string("Menu failed"));std::cerr<<"Menu: "<<error<<'\n';}
                 else if(type=="runService") {
-                    if(!turn_admission.local_only)score_notice=message.value("message",std::string());std::cout<<"Score service: "<<message.dump()<<'\n';
+                    if(message.value("generation",uint64_t(-1))!=run_generation)continue;
+                    if(!practice.active&&!turn_admission.local_only)score_notice=message.value("message",std::string());std::cout<<"Score service: "<<message.dump()<<'\n';
                 }
                 else if(type=="quit") running=false;
                 else if(type=="smoke" && !opt.menu_smoke.empty()) {
@@ -677,9 +906,11 @@ int run(const Options &opt) {
                 else if(type=="menuSnapshot" && smoke_snapshot) {smoke_pass=smoke_pass&&message.value("ok",false);running=false;}
             } catch(const std::exception &e) {error=e.what();std::cerr<<"Menu: "<<error<<'\n';}
         }
+        download.poll();
         if(download.valid() && download.wait_for(std::chrono::seconds(0))==std::future_status::ready) {
             try {auto result=download.get();load_map(result.bsp.string(),result.content_root.string(),result.id,result.detail);}
             catch(const std::exception &e) {
+                pending_replay.clear();pending_action.clear();pending_tutorial.clear();pending_tutorial_demo=false;
                 error=e.what();std::cerr<<error<<'\n';if(!menu||opt.frames)throw;
                 // Back on the home screen: restart the tour this download interrupted.
                 if(backdrop&&!core&&backdrop->resume()){backdrop_shown.clear();backdrop_failed.clear();backdrop_cut=false;backdrop_source.clear();}
@@ -693,6 +924,10 @@ int run(const Options &opt) {
         }
         if(!running) break;
         const auto now=Clock::now();
+        bool leave_held=false;for(const auto &key:preferences.at("binds").at("mainMenu"))leave_held|=held_codes.contains(key.get<std::string>());
+        const auto leave_result=leave_hold.frame(epoch_ms(),leave_held,!captured||playback);
+        if(leave_result==native::LeaveHold::Result::leave)leave_map();
+        else if(leave_result==native::LeaveHold::Result::tap)toast("Hold Main menu key to leave");
         const auto spectator=core&&room.map==map_id?room.spectator_target:std::optional<unsigned>();
         if(now-presence_time>=std::chrono::milliseconds(250)) {
             presence_time=now;
@@ -754,7 +989,9 @@ int run(const Options &opt) {
                         score_notice=active_style=="scroll"?"Practice turn controls: local replay only":"Custom turn speed: local replay only; ranked submission disabled";
                     }
                 }
-                input.held=0;for(auto b=preferences["binds"].begin();b!=preferences["binds"].end();++b){const auto bit=movement_bit(b.key());if(bit)for(const auto &key:b.value())if(held_codes.contains(key.get<std::string>()))input.held|=bit;}cmd=input.command();const auto look=input.look_sample();require(bh_step_look_v2(core.get(),&cmd,look?&*look:nullptr,&curr),core.get(),"Stepping simulation");require(bh_last_command(core.get(),&cmd),core.get(),"Reading filtered command");input.events(curr);}
+                input.held=0;for(auto b=preferences["binds"].begin();b!=preferences["binds"].end();++b){const auto bit=movement_bit(b.key());if(bit)for(const auto &key:b.value())if(held_codes.contains(key.get<std::string>()))input.held|=bit;}cmd=input.command();
+                if(practice.noclip){BhSnapshot snapshot{};require(bh_noclip_move(&practice.flight,&cmd,dt),core.get(),"Moving noclip");require(bh_practice_noclip_tick(core.get(),&practice.flight,&snapshot),core.get(),"Stepping practice noclip");curr=snapshot.player;}
+                else{const auto look=input.look_sample();require(bh_step_look_v2(core.get(),&cmd,look?&*look:nullptr,&curr),core.get(),"Stepping simulation");require(bh_last_command(core.get(),&cmd),core.get(),"Reading filtered command");input.events(curr);}}
             renderer->simulation_tick();
             if(input_log&&!playback) {
                 const double moved=mouse_counts;
@@ -776,7 +1013,7 @@ int run(const Options &opt) {
                 native::SsjTick info;
                 info.jumped=(curr.events&(1u<<1))!=0;              // EVENT_JUMPED
                 info.teleported=(curr.events&native::teleported)!=0;
-                info.in_start=feedback.ssj_was_in_start;info.noclip=feedback.ssj_was_noclip;
+                info.in_start=practice.noclip?false:feedback.ssj_was_in_start;info.noclip=practice.noclip||feedback.ssj_was_noclip;
                 if(timing.status==1)info.time=timing.seconds;
                 {
                     const auto mode=preferences.at("jumpStatsMode").get<std::string>();
@@ -814,7 +1051,7 @@ int run(const Options &opt) {
         BhRunState run_state{};
         if(core) {
             if(playback||!zones.empty())require(bh_run_state(core.get(),&run_state),core.get(),"Reading native timer");
-            if(!playback&&run_state.status==1&&run_state.recording) {
+            if(!practice.active&&!playback&&run_state.status==1&&run_state.recording) {
                 const bool started_run=beat_start!=run_state.start_tick;
                 if(started_run) {
                     ++run_generation;run_event({{"type","reset"}});
@@ -830,13 +1067,21 @@ int run(const Options &opt) {
             } else if(run_state.status==0&&beat_start) {
                 beat_start=0;++run_generation;run_event({{"type","reset"}});
             }
-            if(!playback&&run_state.status==2 && !recording_ended) {
+            if(practice.active&&!playback&&run_state.status==2&&!recording_ended){recording_ended=true;show_menu(true);}
+            if(!practice.active&&!playback&&run_state.status==2 && !recording_ended) {
                 recording_ended=true;
                 if(!record_path.empty()) {
                     try {
                         require(bh_record_end(core.get()),core.get(),"Finishing native recording");
                         require(bh_record_write_bhr(core.get(),record_path.c_str()),core.get(),"Writing native replay");
                         refresh_replays();
+                        if(!turn_admission.local_only&&active_style=="autohop"&&run_state.track==0){
+                            const auto old=backdrop_pbs.find(map_id);
+                            if(old==backdrop_pbs.end()||!old->is_object()||run_state.seconds<old->value("seconds",std::numeric_limits<double>::infinity())){
+                                backdrop_pbs[map_id]={{"id",std::filesystem::path(record_path).filename().string()},{"seconds",run_state.seconds}};
+                                native::save_settings(cache/"backdrop-pbs.json",backdrop_pbs);
+                            }
+                        }
                         run_event({{"type","finish"},{"track",run_state.track},{"replayBase64",base64(read_text(record_path))}});
                         std::cout<<"Native finish "<<run_state.seconds<<" seconds; replay "<<record_path<<'\n';
                     } catch(const std::exception &e) {
@@ -866,12 +1111,20 @@ int run(const Options &opt) {
             if(spectator){const auto target=room.spectated(steady_seconds);if(target){for(int k=0;k<3;k++){eye[k]=target->frame.position[k];state.player.position[k]=target->frame.position[k];state.player.velocity[k]=target->frame.velocity[k];}eye[2]+=target->frame.view_offset_z;state.player.tick=target->frame.tick;state.player.grounded=!!(target->frame.flags&2);state.player.crouched=!!(target->frame.flags&1);camera_input.set_angles(target->frame.pitch,target->frame.yaw);renderer->set_cosmetics(target->outfit,target->loadout);renderer->set_viewmodel_weapon(target->frame.weapon);shown_notice="Spectating "+target->name+" - Esc for Room controls";actors.erase(std::remove_if(actors.begin(),actors.end(),[&](const auto &a){return a.id==target->id;}),actors.end());}else{renderer->set_viewmodel_visible(false);shown_notice="Waiting for spectator target";}}
             renderer->set_room_actors(actors);
             renderer->draw(width,height,eye,camera_input,&state,(playback||opt.frames)?curr.tick*dt:std::chrono::duration<double>(now-started).count());
+            if(Clock::now()<toast_until)shown_notice=toast_text;
+            std::string gauntlet_line,gauntlet_delta;bool gauntlet_good=false;
+            if(!gauntlet_id.empty()&&gauntlet_progress.is_object()){
+                const bool timed=run_state.status==1;const double total=gauntlet_progress.at("before").get<double>()+(timed?run_state.seconds:0);
+                char formatted[80];std::snprintf(formatted,sizeof(formatted),"%02u:%06.3f",unsigned(total)/60,std::fmod(total,60));
+                gauntlet_line="Gauntlet "+std::to_string(gauntlet_progress.at("idx").get<unsigned>()+1)+"/"+std::to_string(gauntlet_progress.at("maps").get<unsigned>())+" | "+formatted;
+                if(timed&&!gauntlet_progress.at("pbSplit").is_null()){const auto delta=run_state.seconds-gauntlet_progress.at("pbSplit").get<double>();std::snprintf(formatted,sizeof(formatted),"%+.3fs",delta);gauntlet_delta=formatted;gauntlet_good=delta<0;}
+            }
             BhCmd shown{};bh_last_command(core.get(),&shown);BhWeaponReport weapon{};bh_weapon_report(core.get(),&weapon);
             if(!menu||!menu->visible())hud.draw(width,height,state,run_state,shown,map_id,playback?playback_info.value("style",active_style):active_style,shown_notice,display_fps,
                 preferences.at("hud").get<bool>(),preferences.at("crosshair").get<bool>(),playback,weapon,
                 preferences.at("jumpStats").get<bool>()?feedback.ssj_line:std::string(),feedback.ssj_good,
                 preferences.at("strafeTrainer").get<bool>()&&!playback?feedback.strafe_reading:std::nullopt,
-                preferences.at("strafeTrainerHints").get<bool>(),&hud_layout);
+                preferences.at("strafeTrainerHints").get<bool>(),&hud_layout,preferences.at("hudScale").get<float>(),&practice,preferences.at("practiceKeepVelocity").get<bool>(),gauntlet_line,gauntlet_delta,gauntlet_good,leave_hold.progress(epoch_ms()));
         }
         // Separate GTK windows and screenshot runs cannot show the SDL layer:
         // they get one bounded PNG of the still pose instead of a live scene.
@@ -915,6 +1168,7 @@ int run(const Options &opt) {
             menu->evaluate_js("window.bunnyhopNativeMenu?.onRoomPose?.("+pose.dump()+")");room_events=0;room_time=now;
         }
         ++frame; ++title_frames;if(simulation_active&&!playback)input.frame();
+        audio.set_music_scene(bool(core)&&(!menu||!menu->visible()));
         audio.pump();  // advances the music playlist; decoding cannot run on the audio thread
         if(opt.frames&&renderer&&(curr.tick>=opt.frames||(playback&&playback_paused&&curr.tick>=playback_info.value("totalTicks",0u)))&&!opt.screenshot.empty()) renderer->screenshot(opt.screenshot,width,height);
         const GLenum gl_error=gl.GetError(); if(gl_error!=GL_NO_ERROR) throw std::runtime_error("OpenGL error "+std::to_string(gl_error));
@@ -926,12 +1180,16 @@ int run(const Options &opt) {
             std::string progress;{std::lock_guard lock(progress_mutex);progress=loading;}
             const nlohmann::json state={{"engine","native"},{"renderer","opengl"},{"map",map_id},{"loading",progress},{"error",error},
                 {"sensitivity",input.sensitivity},{"paused",!captured},{"recordingPath",record_path},
+                {"player",{{"map",map_id},{"style",playback?playback_info.value("style",active_style):active_style},{"track",playback?playback_info.value("track",active_track):active_track},{"mode",playback?"replay":!room.id.empty()?"multiplayer":!gauntlet_id.empty()?"gauntlet":(practice.active||map_id==tutorial_map)?"practice":"solo"},{"practice",practice.active||map_id==tutorial_map}}},
+                {"practice",{{"available",practice_reason().empty()},{"unavailable",practice_reason().empty()?nlohmann::json(nullptr):nlohmann::json(practice_reason())},{"mode",practice.mode},{"active",practice.active},{"tool",practice.tool.empty()?nlohmann::json(nullptr):nlohmann::json(practice.tool)},{"noclip",practice.noclip},{"menuOpen",practice.menu_open},{"count",practice.checkpoints.size()},{"current",practice.number()},{"keepVelocity",preferences.at("practiceKeepVelocity")}}},
+                {"gauntlet",{{"id",gauntlet_id.empty()?nlohmann::json(nullptr):nlohmann::json(gauntlet_id)},{"map",gauntlet_map.empty()?nlohmann::json(nullptr):nlohmann::json(gauntlet_map)}}},
                 {"style",selected_style},{"track",active_track},{"settings",preferences},{"replays",replay_list},
                 {"room",{{"id",room.id},{"map",room.map},{"spectating",spectator.has_value()},{"target",spectator?nlohmann::json(*spectator):nlohmann::json(nullptr)},{"raceFrozen",room_modes.frozen()}}},
                 {"tutorial",tutorial?tutorial->stateJSON():nlohmann::json{{"active",false},{"lesson","jump"},{"completed",tutorial_completed}}},
                 {"playback",{{"active",playback},{"id",playback_id},{"tick",curr.tick},{"totalTicks",playback?playback_info.value("totalTicks",0u):0u},{"paused",playback_paused},{"speed",playback_speed}}},
                 {"ghost",{{"enabled",ghost_enabled},{"id",ghost_id},{"name",ghost_info.is_object()?ghost_info.value("player",std::string("Ghost")):"Ghost"}}},
                 {"timer",{{"status",run_state.status},{"seconds",run_state.seconds},{"jumps",run_state.jumps},{"strafes",run_state.strafes},{"sync",run_state.sync_percent}}},
+                {"music",audio.music_state()},
                 {"discord",{{"state",discord_allowed?discord.state:"disabled"},{"message",discord.message}}},
                 {"backdrop",backdrop?backdrop->state(backdrop_source):nlohmann::json{{"status","idle"},{"map",""},{"renderer","native-bsp"},{"kind","tour"},{"shots",0},{"source",""},{"error",""}}}};
             const auto encoded=state.dump();
@@ -1020,12 +1278,13 @@ int main(int argc,char **argv) {
     bool interactive_errors=true;
     // Scripted checks must also exit on failure without a modal alert. Inspect
     // flags before parsing so malformed smoke invocations cannot wait for input.
-    for(int i=1;i<argc;++i)if(std::string(argv[i])=="--hidden"||std::string(argv[i])=="--menu-smoke"||std::string(argv[i])=="--menu-home-smoke")interactive_errors=false;
+    for(int i=1;i<argc;++i)if(std::string(argv[i])=="--hidden"||std::string(argv[i])=="--menu-smoke"||std::string(argv[i])=="--menu-home-smoke"||std::string(argv[i])=="--runtime-smoke")interactive_errors=false;
     try {
         Options opt=options(argc,argv);
         if(opt.help) {
             std::cout << "Usage: bunnyhop-native [--map MAP.bsp | --online-map NAME] [--content-root DIR] [--sensitivity 2]\n"
                          "  [--menu-html PATH] [--no-menu] [--frames N] [--screenshot output.ppm] [--hidden]\n"
+                         "  [--runtime-smoke OUTPUT_DIR --replay PATH] (offline lifecycle checks with --map; private data, no network)\n"
                          "  [--tutorial jump|strafe|speed|final] [--tutorial-demo] (tutorial map only)\n"
                          "  [--menu-smoke OUTPUT_PREFIX] (with --online-map; live API reads only, no scores)\n"
                          "  [--menu-home-smoke OUTPUT_PREFIX] (home menu over the real map tour backdrop; no gameplay or scores)\n"

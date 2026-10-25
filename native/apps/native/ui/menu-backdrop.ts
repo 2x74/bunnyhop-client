@@ -4,6 +4,8 @@
 //
 //   UI → host   {type:"menuBackdrop", map}    home screen with no map loaded: the map backgroundPick() chose
 //                                              (featured.ts), or null to release it.
+//               {..., replay:{runId, replayBase64}}   with your PB's replay on that map (featured.ts pbReplay): the host
+//                                              runs it as the web's PB ghost does (attract.ts), else its tour.
 //   host → UI   bunnyhopNativeBackdrop(source, map)
 //               "native"            the live scene is on screen behind the view (html[data-native-backdrop=scene])
 //               "data:image/png…"   a still of it, shown in #native-backdrop (html[data-native-backdrop=static])
@@ -15,12 +17,17 @@
 
 import { mapArt } from "../../web/src/ui/thumbs";
 import { send, state } from "./bridge";
+import { base64Bytes } from "./base64";
 
 const MAP_ID = /^[a-zA-Z0-9_.-]{1,128}$/;
 const MAX_PNG = 2_000_000;
 
 let requested: string | null = null;
+/** Your PB replay on the requested map (backgroundPick), sent with it. */
+let requestedReplay: { runId: string; bytes: Uint8Array } | null = null;
 let sent: string | null | undefined;
+const MAX_REPLAY = 8 << 20;
+const key = (map: string | null) => `${map ?? ""}|${requestedReplay?.runId ?? ""}`;
 let artMap: string | null = null;
 let source: "scene" | "static" | null = null;
 let layer: HTMLElement | null = null;
@@ -70,12 +77,15 @@ function setSource(next: "scene" | "static" | null): void {
 }
 
 /** Home screen (no map loaded): ask the host for this map's scene. Same map again: nothing. */
-export function requestBackdrop(map: string | null): void {
+export function requestBackdrop(map: string | null, replay?: { runId: string; bytes: Uint8Array } | null): void {
   if (map !== null && !MAP_ID.test(map)) map = null;
+  if (replay !== undefined) requestedReplay = map && replay && replay.bytes.length > 0 && replay.bytes.length <= MAX_REPLAY && /^[\w-]{1,64}$/.test(replay.runId) ? replay : null;
+  else if (map !== requested) requestedReplay = null;
   requested = map;
-  if (!state.map && !state.loading && sent !== map) {
-    sent = map;
-    send({ type: "menuBackdrop", map });
+  if (!state.map && !state.loading && sent !== key(map)) {
+    sent = key(map);
+    const pb = map && requestedReplay ? requestedReplay : null;
+    send(pb ? { type: "menuBackdrop", map, replay: { runId: pb.runId, replayBase64: base64Bytes(pb.bytes) } } : { type: "menuBackdrop", map });
   }
   paintArt();
 }
@@ -85,7 +95,7 @@ export function syncBackdrop(): void {
   // A gameplay map (loading or loaded) replaces the home scene and the host drops home requests meanwhile; back on
   // the home screen (also after a failed load) it's asked for again.
   if (state.map || state.loading) sent = undefined;
-  else if (requested !== null && sent !== requested) requestBackdrop(requested);
+  else if (requested !== null && sent !== key(requested)) requestBackdrop(requested);
   paintArt();
 }
 

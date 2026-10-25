@@ -133,9 +133,9 @@ Windows packages are unsigned unless signing is explicitly configured.
 Signing credentials are not a prerequisite for the default package command:
 
 ```sh
-bun run package --version 0.3.4-dev.20261025.6
+bun run package --version 0.3.4
 bun apps/native/packaging/release-check.ts \
-  --package target/native-packages/bunnyhop-native-0.3.4-dev.20261025.6-darwin-arm64
+  --package target/native-packages/bunnyhop-native-0.3.4-darwin-arm64
 ```
 
 Use the actual stage path printed by the packager for `--package`. It produces a
@@ -209,9 +209,16 @@ Web menus reuse the account API, map browser, leaderboards, friends/DMs,
 notifications, ranks/stats, cosmetics and room transport. Rooms relay poses to
 native interpolation/rendering and support chat, voting and scheduled map
 changes. Tutorial goals and coaching use a native port compared against the
-original web implementation. This is not a claim of complete website parity:
-full profile-card editing, supporter/gauntlet flows, complete third-person
-animation blending, animated accessories, full audio mixing/music, and in-app
+original web implementation. Practice checkpoints/noclip, sticky practice state,
+the Practice label and 50–175% HUD scaling are implemented in the native host.
+Gauntlets and player-report forms reuse the web UI. Main menu leaves the map,
+and the home backdrop can replay a PB on a separate native context or tour a map.
+All eleven production OST tracks are bundled, with native pause/previous/next
+controls and menu-track exclusion during gameplay.
+
+This is not a claim of complete website parity: full profile-card editing,
+supporter checkout, complete third-person animation blending, animated
+accessories, browser-style music crossfades/ducking, and in-app
 updates remain follow-up work. Ghost/trail cosmetic selectors currently update
 account choices; those visual effects are not rendered natively.
 

@@ -7,6 +7,7 @@ import {bundleLinuxDependencies, linuxLoaderEnvironment, verifyLinuxPackage} fro
 import {makeManifest} from "../package";
 import {CANONICAL_PHYSICS, CANONICAL_TIMER_RULES} from "../ensure-wasm";
 import {packageBranding} from "./branding";
+import {exportMusic, OST} from "../src/export-music";
 
 const linuxTest = test.skipIf(process.platform !== "linux");
 function run(args: string[], env = linuxLoaderEnvironment()) {
@@ -51,6 +52,8 @@ function releaseResources(stage: string, exe: string) {
     const path = join(resources, name); mkdirSync(resolve(path, ".."), {recursive: true}); writeFileSync(path, "local fixture");
   }
   packageBranding(resources, stage, "linux");
+  exportMusic(join(resources,"native-assets"),OST.tracks);
+  writeFileSync(join(resources,"native-assets/audio.json"),JSON.stringify({music:OST.tracks}));
   const wasm = readFileSync(resolve(import.meta.dir, "../../web/src/wasm/bunnyhop_core.wasm")), wasmHash = createHash("sha256").update(wasm).digest("hex");
   const manifest = makeManifest(exe, resources, "linux", process.arch, wasm, {wasm: `bunnyhop-web/${wasmHash.slice(0, 12)}`, physics: CANONICAL_PHYSICS, rules: CANONICAL_TIMER_RULES});
   writeFileSync(join(resources, "native-manifest.json"), JSON.stringify(manifest));

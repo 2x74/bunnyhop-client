@@ -30,12 +30,23 @@ The client does not run a client-side WASM self-check.
 ## v0.0.27 presentation and feature scope
 
 The shared menu shows the new version, changelog, Contributor and Owner badges.
-Native gameplay does not yet implement the web practice/checkpoint controller,
-sticky practice attempts, noclip clock coasting or the Practice label. The native
-HUD still sizes itself by window height; importing a 50–175% HUD scale preserves
-the setting but does not apply that scale to native rendering. Shared player-report
-types and form code are present, but native report entry points are unfinished.
+The native practice controller uses the shared checkpoint/noclip primitives and
+v0.0.27 policy: saving is harmless, using teleport/noclip marks the attempt as
+practice until restart, noclip coasts the clock, and practice cannot submit.
+The checkpoint menu and Practice label render natively. HUD scale applies from
+50–175%, including spacing. Menus reuse the web's Gauntlet and player-report
+components, with native lifecycle adapters. Main menu releases the loaded map.
+Home backgrounds can play a PB in an independent native context, falling back
+to map tours. The eleven production OST tracks are bundled and hash-checked;
+playback controls use SDL, with no browser audio playback.
 Simulation compatibility is not a claim of complete website feature parity.
+
+Gauntlet playback has Previous/Next split navigation and rejects obsolete map
+builds. It does not have the web's continuous attempt timeline, automatic split
+advance or next-map prefetch. Pause includes Replays, On screen and Help tabs;
+On screen uses native setting switches and Help lists native keys. Solo native
+play has no chat console. Sharing a last run and MP4 export remain web features.
+Soundtrack controls stay inside the app and do not claim OS media keys.
 
 ## Accounts and packages
 
@@ -57,7 +68,9 @@ Each release must be qualified using its own source and packaged identity.
 The package checker and runtime validate the pinned WASM, physics/rules and
 recomputed component identity. Invalid manifests remain local-only. macOS
 packages declare the maximum deployment target across the executable and bundled
-libraries; the local `.6` preview requires macOS 27.0.
+libraries; local previews on this development Mac require macOS 27.0. Hosted
+package requirements must be read from that package's report, not inferred from
+the local preview.
 The app display name is **bunnyhop.lol - Native**; packaged icons use the existing
 official bunnyhop logo.
 

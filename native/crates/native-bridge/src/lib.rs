@@ -32,7 +32,7 @@ pub use assets::{BhAttackReport, BhFloorWeapon, BhWeaponReport};
 pub use assets::{BhMaterialExtra, BhPropGroup, BhSkyInfo};
 pub use look::{BhLookSample, BhLookSampleV2};
 pub use practice::{
-    BhNoclipState, bh_noclip_move, bh_practice_free, bh_practice_noclip_exit,
+    BhNoclipState, bh_noclip_move, bh_practice_enter, bh_practice_free, bh_practice_noclip_exit,
     bh_practice_noclip_tick, bh_practice_restore, bh_practice_save, bh_trace_camera,
 };
 pub use run::{BhRunOptions, BhRunState, BhZone};

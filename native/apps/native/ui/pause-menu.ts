@@ -1,7 +1,9 @@
 // The native pause screen: a port of the web's in-game pause menu (apps/web/src/menu.ts pauseScreen), same markup and
 // classes so style.css draws it unchanged. The rail on the left (Resume, Restart, places to go, the account), the
-// panel on the right with the map's Leaderboard and Style tabs. The web's last row, Main menu, is Quit here: the
-// native client has no page to go back to.
+// panel on the right with the map's Leaderboard and Style tabs. The last row is the web's Main menu: the host lets go of
+// the map and the home screen comes back (Backspace too, and the Main menu bind's key; neither asks, as on the web).
+// Practice (web menu.ts: "Practice" / "Leave practice") sits under Restart where practice works; the native client has
+// no solo chat to type !cp in, so a Checkpoints row opens the same numbered menu on the HUD.
 
 import { api } from "../../web/src/api";
 import { getPB } from "../../web/src/pb";
@@ -19,7 +21,13 @@ import { versionButton } from "../../web/src/ui/changelog";
 import { supportLink } from "../../web/src/ui/community";
 import { openFeedback } from "../../web/src/feedback/state";
 import { openInbox, withInboxBadge } from "../../web/src/inbox/state";
-import { keyLabel } from "../../web/src/ui/settings";
+import { ACTIONS, keyLabel } from "../../web/src/ui/settings";
+
+/** The pause menu's own keys (web menu.ts PAUSE_KEYS): a Main menu bind on one of these doesn't leave from here. */
+const PAUSE_KEYS = new Set(["Escape", "KeyQ", "KeyE", "Enter", "NumpadEnter", "Space", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"]);
+/** Backspace, plus the Main menu bind's keys that the pause menu doesn't use (web menu.ts mainMenuKeys). */
+export const mainMenuKeys = (binds?: Record<string, string[]>): string[] =>
+  ["Backspace", ...(binds?.mainMenu ?? []).filter((c) => !c.startsWith("Mouse") && !c.startsWith("MWheel") && !PAUSE_KEYS.has(c))];
 
 export interface PauseActions {
   map: string;
@@ -39,12 +47,26 @@ export interface PauseActions {
   profile: (id: string) => void;
   ranks: () => void;
   replays: () => void;
-  quit: () => void;
+  /** Main menu: leave the map for the home screen. */
+  leave: () => void;
+  /** Practice mode's row, where practice works (state.practice.available); null hides it. */
+  practice?: { on: boolean; toggle: () => void; checkpoints: () => void; count: number } | null;
+  /** Native binds, for the rows' key hints (Practice mode, Main menu). */
+  binds?: Record<string, string[]>;
+  /** On a bonus track: back to the main track (web "Main track" row). */
+  mainTrack?: (() => void) | null;
+  /** The Replays tab (web menu.ts replaysTab), over native playback and the local replay library. */
+  replayTab?: { watchPB: (() => void) | null; watchLast: (() => void) | null; exportLast: (() => void) | null; load: (file: File) => void };
+  /** The On screen tab (web screenTab): the HUD switches players flip most, and the way to the rest. */
+  screen?: { values: Record<OnScreenKey, boolean>; set: (key: OnScreenKey, on: boolean) => void; allHud: () => void };
+  /** The Help tab's "Every key" link: Settings → Keys. */
+  keys?: () => void;
   setStyle: (id: StyleId) => void;
   web: (path: string) => void;
 }
 
-type PauseTab = "board" | "style";
+type PauseTab = "board" | "style" | "replays" | "screen" | "help";
+export type OnScreenKey = "hud" | "crosshair" | "viewmodel" | "jumpStats" | "strafeTrainer";
 let pauseTab: PauseTab = "board";
 
 interface RailOpts { primary?: boolean; hint?: string; sub?: string; icon?: IconName }
@@ -56,6 +78,74 @@ function railItem(label: string, fn: (() => void) | null, o: RailOpts = {}): HTM
     h("span.ri-label", null, label, o.sub ? h("small", null, o.sub) : null),
     o.hint ? h("kbd", null, o.hint) : null,
   );
+}
+
+/** Card-style action (web menu.ts actionCard: the Replays tab). */
+function actionCard(label: string, fn: (() => void) | null, o: { sub?: string; hint?: string; icon?: IconName; primary?: boolean } = {}): HTMLButtonElement {
+  return h(
+    `button.action-card${o.primary ? ".primary" : ""}`,
+    { type: "button", disabled: !fn, onclick: fn ?? undefined },
+    o.icon ? h("span.ac-icon", { "aria-hidden": "true" }, icon(o.icon, { size: "1.2rem" })) : null,
+    h("span.ac-text", null, h("b", null, label), o.sub ? h("small", null, o.sub) : null),
+    o.hint ? h("kbd", null, o.hint) : null,
+  ) as HTMLButtonElement;
+}
+
+/** Replays tab (web replaysTab): your PB here, your last run (the local archive), and a .bhr file. */
+function replaysTab(a: PauseActions): HTMLElement | null {
+  const r = a.replayTab;
+  if (!r) return null;
+  const pb = getPB(a.map, styleForTrack(a.style, a.track), a.track);
+  const input = h("input", { type: "file", accept: ".bhr,application/octet-stream", hidden: true, tabindex: "-1" }) as HTMLInputElement;
+  input.addEventListener("change", () => { const file = input.files?.[0]; if (file) r.load(file); input.value = ""; });
+  const load = actionCard("Load replay file", () => input.click(), { sub: "From a .bhr file", icon: "upload" });
+  load.append(input);
+  return h("div.pp-replays", null, h("div.card-grid", null,
+    actionCard("Watch PB replay", pb ? r.watchPB : null, { sub: pb ? `${formatTime(pb.time)}, ${pb.jumps} jumps` : "No PB on this track yet", icon: "play", primary: !!(pb && r.watchPB) }),
+    actionCard("Watch last run", r.watchLast, { sub: r.watchLast ? undefined : "Finish a run first", icon: "restart" }),
+    actionCard("Export last run", r.exportLast, { sub: r.exportLast ? "As a .bhr file, to Downloads" : "Finish a run first", icon: "download" }),
+    load));
+}
+
+const ON_SCREEN: readonly { key: OnScreenKey; label: string; desc: string }[] = [
+  { key: "hud", label: "HUD", desc: "Speed, timer and keys." },
+  { key: "crosshair", label: "Crosshair", desc: "The crosshair in the middle of the screen." },
+  { key: "viewmodel", label: "Viewmodel", desc: "Your first-person hands and the carrot blade." },
+  { key: "jumpStats", label: "Jump stats", desc: "Speed and gain per jump (!ssj)." },
+  { key: "strafeTrainer", label: "Strafe trainer", desc: "Turn rate against the ideal for your speed, in the air." },
+];
+
+/** On screen tab (web screenTab): one click each for the HUD pieces players switch most; the game behind shows it. */
+function screenTab(a: PauseActions): HTMLElement | null {
+  const s = a.screen;
+  if (!s) return null;
+  const rows = ON_SCREEN.map((q) => {
+    const input = h("input.switch", { type: "checkbox", checked: s.values[q.key], "aria-label": q.label }) as HTMLInputElement;
+    input.addEventListener("change", () => s.set(q.key, input.checked));
+    const row = h("div.nset-row.nset-row-toggle", null, h("span.nset-name", null, q.label, h("small.nset-hint", null, q.desc)), input);
+    row.addEventListener("click", (e) => { if (e.target !== input) input.click(); });
+    return row;
+  });
+  return h("div.pp-screen", null,
+    h("div.nset-group", null, h("div.nset-group-rows", null, ...rows)),
+    h("div.pp-screen-foot", null, h("button.link-btn", { type: "button", onclick: s.allHud }, "All HUD settings", icon("chevronRight", { size: "0.95em" }))));
+}
+
+/** Help tab (web helpTab, the !help groups): your keys for the run, practice and the screen. Native solo play has no
+ * chat, so the commands column shows only what the menu does for them. */
+function helpTab(a: PauseActions): HTMLElement {
+  const label = (id: string) => ACTIONS.find((x) => x.id === id)?.label ?? id;
+  const key = (id: string) => { const c = a.binds?.[id]?.[0]; return c ? keyLabel(c) : ""; };
+  const groups: { label: string; rows: { what: string; cmd?: string; key: string }[] }[] = [
+    { label: "Run", rows: ["restart", "restartMain", "restartBonus", "cycleStyle", "mainMenu"].map((id) => ({ what: label(id), key: id === "mainMenu" ? key(id) || "Backspace" : key(id), cmd: id === "mainMenu" && !key(id) ? "in this menu" : undefined })) },
+    { label: "Practice", rows: [...["practice", "noclip", "cpSave", "cpTeleport", "cpPrev", "cpNext"].map((id) => ({ what: label(id), key: key(id) })), { what: "Checkpoint menu", cmd: "!cp", key: "" }] },
+    { label: "Screen", rows: ["hideUi", "viewmodel", "mute"].map((id) => ({ what: label(id), key: key(id) })) },
+  ];
+  const table = (g: (typeof groups)[number]) => h("section.pp-help-group", null, h("h3", null, g.label),
+    h("table.keys-table", null, h("tbody", null, ...g.rows.map((r) => h("tr", null, h("th", null, r.what), h("td.pp-help-cmd", null, r.cmd ?? ""), h("td", null, r.key ? h("kbd", null, r.key) : ""))))));
+  return h("div.pp-help", null, h("div.pp-help-cols", null, ...groups.map(table)),
+    h("div.pp-screen-foot", null, h("span.dim", null, "Checkpoints opens the !cp menu on screen: 1–6 pick, 0 closes."),
+      a.keys ? h("button.link-btn", { type: "button", onclick: a.keys }, "Every key", icon("chevronRight", { size: "0.95em" })) : null));
 }
 
 /** Style tab (menu.ts styleTab): one row per style with your PB on this map; bonus tracks are Normal only. */
@@ -96,9 +186,10 @@ function styleTab(a: PauseActions): HTMLElement {
 export function pauseScreen(a: PauseActions): HTMLElement {
   const runStyle = styleForTrack(a.style, a.track);
   const pb = getPB(a.map, runStyle, a.track);
-  const tabs: PauseTab[] = ["board", "style"];
-  const labels: Record<PauseTab, string> = { board: "Leaderboard", style: "Style" };
-  const tabIcons: Record<PauseTab, IconName> = { board: "board", style: "diamond" };
+  const tabs: PauseTab[] = ["board", "style", ...(a.replayTab ? (["replays"] as const) : []), ...(a.screen ? (["screen"] as const) : []), "help"];
+  if (!tabs.includes(pauseTab)) pauseTab = "board";
+  const labels: Record<PauseTab, string> = { board: "Leaderboard", style: "Style", replays: "Replays", screen: "On screen", help: "Help" };
+  const tabIcons: Record<PauseTab, IconName> = { board: "board", style: "diamond", replays: "play", screen: "hud", help: "help" };
   const tabBar = h(
     "div.pp-tabs",
     { role: "tablist", "aria-label": "Panel" },
@@ -120,12 +211,17 @@ export function pauseScreen(a: PauseActions): HTMLElement {
     }
     panelBody.setAttribute("aria-labelledby", `pp-tab-${t}`);
     if (!changed) return;
-    panelBody.replaceChildren(t === "board" ? leaderboardPanel(a.map, a.style, { tracks: [0, ...(a.track ? [a.track] : [])], track: a.track }) : styleTab(a));
+    const content = t === "board" ? leaderboardPanel(a.map, a.style, { tracks: [0, ...(a.track ? [a.track] : [])], track: a.track })
+      : t === "style" ? styleTab(a) : t === "replays" ? replaysTab(a) : t === "screen" ? screenTab(a) : helpTab(a);
+    panelBody.replaceChildren(...(content ? [content] : []));
   };
   const panel = h("section.pause-panel", { "aria-label": "Pause menu panel" }, h("header.pp-head", null, tabBar), panelBody);
 
-  const quit = railItem("Quit", a.quit, { icon: "leave" });
-  quit.classList.add("pause-home");
+  const homeKey = mainMenuKeys(a.binds);
+  const home = railItem("Main menu", a.leave, { hint: keyLabel(homeKey[1] ?? homeKey[0]), icon: "leave" });
+  home.classList.add("pause-home");
+  const bindHint = (action: string) => { const c = a.binds?.[action]?.[0]; return c ? keyLabel(c) : undefined; };
+  const practice = a.practice;
   const sep = () => h("div.rail-sep", { role: "separator" });
   const feedback = api.available() ? railItem("Feedback", () => openFeedback(), { icon: "pen" }) : null;
   const inbox = api.available() ? withInboxBadge(railItem("Inbox", () => openInbox(), { icon: "mail" })) : null;
@@ -134,6 +230,9 @@ export function pauseScreen(a: PauseActions): HTMLElement {
     { "aria-label": "Pause menu" },
     railItem("Resume", a.resume, { primary: true, hint: "Esc", icon: "play" }),
     railItem("Restart", a.restart, { hint: a.restartKey ? keyLabel(a.restartKey) : undefined, icon: "restart", sub: a.track ? trackName(a.track) : undefined }),
+    a.track && a.mainTrack ? railItem("Main track", a.mainTrack, { hint: bindHint("restartMain"), icon: "home" }) : null,
+    practice ? railItem(practice.on ? "Leave practice" : "Practice", practice.toggle, { hint: bindHint("practice"), icon: "flag", sub: practice.on ? "Back to the start" : "Every run is practice" }) : null,
+    practice ? railItem("Checkpoints", practice.checkpoints, { icon: "undo", hint: "!cp" }) : null,
     sep(),
     railItem(a.room ? "Current room" : "Play online", a.servers, { icon: "globe", sub: api.available() ? undefined : "offline" }),
     railItem("Change map", a.maps, { icon: "grid", sub: a.room ? "leaves the server" : undefined }),
@@ -145,7 +244,7 @@ export function pauseScreen(a: PauseActions): HTMLElement {
     feedback || inbox ? sep() : null,
     feedback || inbox ? h("div.rail-pair", null, feedback, inbox) : null,
     h("div.rail-fill", { "aria-hidden": "true" }),
-    quit,
+    home,
   );
   arrowNav(rail, "button");
   rail.classList.add("hop-host");
@@ -185,6 +284,25 @@ export function pauseScreen(a: PauseActions): HTMLElement {
     show(tabs[Math.min(j, tabs.length - 1)]);
     focusTab();
   });
+  // Q / E: previous / next tab from anywhere; Backspace (or the Main menu bind) leaves for the main menu. Only while this
+  // menu is what's showing: not under a dialog, not in a text box.
+  const onKey = (e: KeyboardEvent) => {
+    if (!screen.isConnected) return removeEventListener("keydown", onKey);
+    if (e.ctrlKey || e.metaKey || e.altKey || e.repeat || e.defaultPrevented) return;
+    const t = e.target as HTMLElement | null;
+    if (t instanceof HTMLInputElement || t?.closest?.("textarea, select, [contenteditable]") || document.querySelector("dialog[open]")) return;
+    if (homeKey.includes(e.code)) {
+      e.preventDefault();
+      a.leave();
+      return;
+    }
+    const k = e.key.toLowerCase();
+    if (k !== "q" && k !== "e") return;
+    const i = tabs.indexOf(pauseTab);
+    show(tabs[(i + (k === "e" ? 1 : -1) + tabs.length) % tabs.length]);
+    if ((document.activeElement as HTMLElement)?.closest(".pp-tabs")) focusTab();
+  };
+  addEventListener("keydown", onKey);
   show(pauseTab);
   return screen;
 }

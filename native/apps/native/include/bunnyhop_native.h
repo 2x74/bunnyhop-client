@@ -265,6 +265,8 @@ int bh_surface_at(BhContext *ctx, float x, float y, float z, BhSurfaceProbe *out
  * No recording command stream can represent these mutations. Restart normally before a ranked attempt.
  */
 typedef struct BhNoclipState {double position[3], velocity[3];} BhNoclipState;
+/* Immediately invalidate recording; noclip!=0 also stops an idle/finished timer. */
+int bh_practice_enter(BhContext *ctx, uint32_t noclip);
 int bh_noclip_move(BhNoclipState *state, const BhCmd *cmd, double dt);
 int bh_practice_noclip_tick(BhContext *ctx, const BhNoclipState *state, BhSnapshot *out);
 /* returns1 standing,2 crouched,0 stuck/error. */

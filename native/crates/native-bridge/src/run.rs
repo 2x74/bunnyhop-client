@@ -127,6 +127,18 @@ impl Timer {
     pub fn reset(&mut self, interval: f32) {
         *self = Self::new(self.zones.clone(), self.options, interval);
     }
+    // v27 practice noclip: clock only, without zones, splits, stats or prespeed.
+    pub fn coast(&mut self, tick: u32) {
+        self.state.last_tick = tick;
+        self.state.update_flags = 0;
+        self.state.last_perfect_tick = -1;
+        self.perf_ground_ticks = 0;
+        self.pre_grounded = None;
+        self.was_on_ground = false;
+        self.ground_since = 0;
+        self.prev_yaw = f64::NAN;
+        self.state.seconds = f64::from(self.ticks()) * self.interval;
+    }
     fn touching(
         &self,
         pos: [f32; 3],

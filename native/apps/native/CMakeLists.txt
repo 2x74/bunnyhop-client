@@ -241,3 +241,27 @@ if(BUILD_TESTING)
     target_include_directories(bunnyhop-native-menu-tour-tests PRIVATE vendor src)
     add_test(NAME native_menu_tour COMMAND bunnyhop-native-menu-tour-tests)
 endif()
+
+if(BUILD_TESTING AND BUNNYHOP_BUILD_CLIENT)
+    add_executable(bunnyhop-native-music-tests src/music_tests.cpp src/audio_pack.cpp)
+    target_include_directories(bunnyhop-native-music-tests PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-music-tests PRIVATE SDL3::SDL3 Threads::Threads)
+    add_test(NAME native_music COMMAND bunnyhop-native-music-tests "${CMAKE_CURRENT_SOURCE_DIR}/assets/music")
+    set_tests_properties(native_music PROPERTIES TIMEOUT 90)
+endif()
+
+if(BUILD_TESTING)
+    add_executable(bunnyhop-native-runtime-tests src/runtime_tests.cpp)
+    target_include_directories(bunnyhop-native-runtime-tests PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-runtime-tests PRIVATE bunnyhop_core_native)
+    add_test(NAME native_runtime COMMAND bunnyhop-native-runtime-tests)
+    set_tests_properties(native_runtime PROPERTIES TIMEOUT 20)
+endif()
+
+if(BUILD_TESTING)
+    # Offline PB integration accepts an explicit local BSP/replay fixture; it
+    # never downloads content or mutates the player's replay archive.
+    add_executable(bunnyhop-native-menu-pb-tests src/menu_pb_tests.cpp)
+    target_include_directories(bunnyhop-native-menu-pb-tests PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-menu-pb-tests PRIVATE bunnyhop_core_native)
+endif()

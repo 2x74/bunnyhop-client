@@ -112,6 +112,7 @@ class Audio {
             track.id=entry.value("id",std::string());
             if(track.id.empty()||track.id.find_first_of("/\\.")!=std::string::npos)continue;
             track.title=entry.value("title",track.id);
+            track.role=entry.value("role",std::string("game"));
             for(const char *extension:{".ogg",".mp3",".flac",".wav"}) {
                 std::error_code ec;
                 const auto candidate=assets_root/"music"/(track.id+extension);
@@ -176,6 +177,19 @@ public:
     const std::string &music_status() const {return music.status();}
     const std::string &music_title() const {return music.title();}
     void skip_track() {if(enabled_)music.skip();}
+    void set_music_scene(bool gameplay) {if(enabled_)music.set_scene(gameplay);}
+    void music_control(const std::string &action) {
+        if(!enabled_)return;
+        if(action=="previous")music.previous();
+        else if(action=="toggle")music.toggle();
+        else if(action=="next")music.skip();
+    }
+    nlohmann::json music_state() const {
+        const auto *track=music.shown();
+        return {{"id",track?track->id:""},{"title",track?track->title:""},{"role",track?track->role:""},
+                {"playing",enabled_&&music.is_playing()},{"available",enabled_&&music.active()},
+                {"loading",enabled_&&music.is_loading()},{"status",music.status()}};
+    }
 
     void gain(float value){
         music.gain(value);

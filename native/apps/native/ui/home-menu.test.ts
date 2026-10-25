@@ -49,8 +49,13 @@ test("home is the web title screen: menu, maps to try, footer, and native routes
       await page.getByRole("button",{name:button,exact:true}).click();await page.waitForFunction(s=>document.body.dataset.screen===s,screen);
       await page.keyboard.press("Escape");expect(await page.locator("body").getAttribute("data-screen")).toBe("home");
     }
+    // Gauntlets are a native screen (the web's ui/gauntlets.ts), not the website.
+    const before=(await messages(page)).length;
+    await page.getByRole("button",{name:/^Gauntlets/}).click();await page.waitForFunction(()=>document.body.dataset.screen==="gauntlets");
+    expect((await messages(page)).slice(before).filter(m=>m.type==="openExternal")).toEqual([]);
+    expect(await page.locator("section.panel-gauntlets .screen-title h2").textContent()).toBe("Gauntlets");
+    await page.keyboard.press("Escape");expect(await page.locator("body").getAttribute("data-screen")).toBe("home");
     // Pages the native client has no screen for open on bunnyhop.lol in the browser.
-    await page.getByRole("button",{name:/^Gauntlets/}).click();expect(await last(page)).toEqual({type:"openExternal",url:"https://bunnyhop.lol/gauntlets"});
     await page.getByRole("button",{name:"Support",exact:true}).click();expect(await last(page)).toEqual({type:"openExternal",url:"https://bunnyhop.lol/?support"});
     await page.getByRole("button",{name:"Quit",exact:true}).click();expect(await last(page)).toEqual({type:"quit"});
     await page.getByRole("button",{name:"bh_aztec",exact:false}).first().click();expect(await last(page)).toEqual({type:"selectMap",id:"bh_aztec",style:"autohop",track:0});
@@ -100,7 +105,7 @@ test("backdrop: the map's picture, then the host's live scene or still, cuts and
   } finally {await browser.close();}
 },20_000);
 
-test("pause is the web pause screen: resume, restart, style, quit, and the game shows through the live scene",async()=>{
+test("pause is the web pause screen: resume, restart, style, main menu, and the game shows through the live scene",async()=>{
   const {browser,page,errors}=await open();
   try {
     await page.evaluate(()=>window.bunnyhopNativeMenu.onState({map:"bhop_eazy",paused:true,settings:{binds:{restart:["KeyR"]}},timer:{status:2,seconds:61.234,jumps:12,strafes:34,sync:98.3}}));
@@ -116,7 +121,11 @@ test("pause is the web pause screen: resume, restart, style, quit, and the game 
     await page.getByRole("button",{name:/^Restart/}).click();expect(await last(page)).toEqual({type:"restart"});
     await page.getByRole("button",{name:/^Resume/}).click();expect(await last(page)).toEqual({type:"resume"});
     await page.keyboard.press("Escape");expect(await last(page)).toEqual({type:"resume"});
-    await page.getByRole("button",{name:"Quit",exact:true}).click();expect(await last(page)).toEqual({type:"quit"});
+    // The web's last row: Main menu (never Quit), and Backspace does the same without asking.
+    expect(await page.locator(".rail-list .pause-home").innerText()).toMatch(/^Main menu\s*Backspace$/);
+    expect(await page.getByRole("button",{name:"Quit",exact:true}).count()).toBe(0);
+    await page.getByRole("button",{name:/^Main menu/}).click();expect(await last(page)).toEqual({type:"leaveMap"});
+    await page.keyboard.press("Backspace");expect(await last(page)).toEqual({type:"leaveMap"});
     for(const [button,screen] of [["Change map","maps"],["Settings","settings"],["Loadout","loadout"]]) {
       await page.getByRole("button",{name:button,exact:true}).click();expect(await page.locator("body").getAttribute("data-screen")).toBe(screen);
       await page.keyboard.press("Escape");expect(await page.locator("body").getAttribute("data-screen")).toBe("pause");

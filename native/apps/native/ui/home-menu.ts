@@ -1,7 +1,8 @@
 // The native title screen: a port of the web's home screen (apps/web/src/ui/home.ts), same markup and classes so the
 // web's style.css draws it unchanged. The menu column over the map background, and on the right six maps to try (the
 // one behind the menu first, then what to play next). Differences from the web are only where the native client has
-// its own screen or no web page: Gauntlets and Support open their bunnyhop.lol pages in the browser, the quiet links
+// its own screen or no web page: Gauntlets are the native menu's own screens, Support opens its bunnyhop.lol page in the
+// browser, the quiet links
 // under the footer carry Replays, Credits and Quit, and "Desktop app" is gone (this is it).
 
 import { api, type MapSummary } from "../../web/src/api";
@@ -44,10 +45,12 @@ export interface HomeActions {
   replays: () => void;
   credits: () => void;
   quit: () => void;
+  /** The gauntlets (ui/gauntlets.ts), on the native menu's own screen. */
+  gauntlets?: () => void;
   /** A bunnyhop.lol page the native client has no screen for (opened in the browser). */
   web: (path: string) => void;
-  /** The map the background shows (backgroundPick), once known. */
-  background?: (map: string | null) => void;
+  /** The map the background shows (backgroundPick), once known, with your PB's replay there when it has one. */
+  background?: (map: string | null, pb?: { runId: string; bytes: Uint8Array } | null) => void;
 }
 
 export const LAST_MAP = "bunnyhop:last-map";
@@ -76,7 +79,8 @@ function mapsToTry(a: HomeActions, onFirst: (name: string) => void): HTMLElement
     let serverClears: string[] | null = null;
     const profile = myProfile().then((p) => void (serverClears = p?.stats.clearedMaps ?? null)).catch(() => {});
     const [pick, maps] = await Promise.all([backgroundPick().catch(() => null), fetchMapIndex()]);
-    a.background?.(pick?.map.name ?? null);
+    const pbRun = pick?.pbReplay ? getPB(pick.map.name, "autohop") : null;
+    a.background?.(pick?.map.name ?? null, pick?.pbReplay ? { runId: pbRun && "runId" in pbRun && typeof pbRun.runId === "string" ? pbRun.runId : "local-pb", bytes: pick.pbReplay } : null);
     if (!maps.length) return markFeaturedArtReady();
     const online = await Promise.race([onlineMaps(STYLE), new Promise<null>((r) => setTimeout(() => r(null), 1500))]);
     const byName = new Map(maps.map((m) => [m.name, m]));
@@ -256,7 +260,7 @@ export function homeScreen(a: HomeActions): HTMLElement {
     item("Play", null, play, { primary: true, hint: "Enter" }),
     learn ? item("Learn to bhop", /lessons done|Finished/.test(learnSub) ? learnSub : null, a.learn) : null,
     item("Play online", api.available() ? onlineSummary() : null, a.servers),
-    api.available() ? item("Gauntlets", weeklySub(), () => a.web("/gauntlets")) : null,
+    api.available() ? item("Gauntlets", weeklySub(), a.gauntlets ?? (() => a.web("/gauntlets"))) : null,
     last ? item("Continue", h("span.cont-sub", null, h("b", null, last), lastPB ? h("span", null, formatTime(lastPB.time)) : null), () => a.pick(last)) : null,
     api.available() ? profileItem(a) : item("Loadout", null, a.loadout),
     api.available() ? item("Ranks", null, a.ranks) : null,

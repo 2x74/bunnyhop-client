@@ -14,6 +14,7 @@ class RoomState {
     struct Sample {BhGhostFrame frame;bool teleport;};
     struct Peer {native_render::Actor actor;std::deque<Sample> samples;double arrived=0;bool spectator=false;};
     std::unordered_map<unsigned,Peer> peers;
+    bool closed_=false;
     void player(const nlohmann::json &p,bool patch=false) {
         const unsigned slot=p.at("slot").get<unsigned>();if(slot>=256)return;
         auto &peer=peers[slot];
@@ -48,16 +49,20 @@ public:
     unsigned self=256;
     std::optional<unsigned> spectator_target;
     void clear(){peers.clear();id.clear();map.clear();notice.clear();self=256;spectator_target.reset();}
+    // End the current room lifecycle without rewinding its stale-event fence.
+    // A deliberate join uses a newer UI generation; queued callbacks from the
+    // closed generation must never resurrect a room or request another map.
+    void close(){clear();closed_=true;}
     // Returns a map name only when the room has actually switched, not on a future vote announcement.
     std::string event(const nlohmann::json &message) {
         const auto next=message.at("generation").get<uint64_t>();
-        if(next<generation)return "";
+        if(next<generation||(next==generation&&closed_))return "";
         const auto next_id=message.at("id").get<std::string>();
         if(next==generation&&!id.empty()&&next_id!=id)return "";
-        if(next>generation){clear();generation=next;}
+        if(next>generation){clear();generation=next;closed_=false;}
         id=next_id;
         const auto &e=message.at("event");const auto type=e.at("t").get<std::string>();
-        if(type=="nativeLeave"){clear();return "";}
+        if(type=="nativeLeave"){close();return "";}
         if(type=="welcome") {
             peers.clear();spectator_target.reset();self=e.at("you").get<unsigned>();for(const auto &p:e.at("players"))player(p);
             map=e.at("map").at("name").get<std::string>();return map;
@@ -72,7 +77,7 @@ public:
         return "";
     }
     void snapshot(const nlohmann::json &message,double now) {
-        if(message.at("generation")!=generation||message.at("id")!=id)return;
+        if(closed_||message.at("generation")!=generation||message.at("id")!=id)return;
         const auto &blocks=message.at("snapshot").at("blocks");
         if(!blocks.is_array()||blocks.size()>64)throw std::runtime_error("Invalid room snapshot");
         for(const auto &block:blocks) {
