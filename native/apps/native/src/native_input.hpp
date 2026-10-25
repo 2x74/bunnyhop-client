@@ -4,11 +4,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <limits>
 #include <optional>
-#include <set>
-#include <string>
 
 namespace native {
 constexpr uint32_t attack = 1u, jump = 1u << 1, duck = 1u << 2;
@@ -35,77 +32,66 @@ struct Input {
         pitch = std::clamp(pitch + y * (separate_vertical?vertical_sensitivity:sensitivity) * 0.022, -89.0, 89.0);
     }
 
-    // ---- tick-windowed motion ------------------------------------------
+    // ---- per-tick proration (Momentum's m_rawinput 2) ------------------
     //
-    // SDL hands over mouse reports when it is polled, which is once per
-    // rendered frame. Applying each report the moment it arrives means the
-    // first simulation tick after a poll receives every report from that
-    // frame and any later tick in the same catch-up receives none, so how a
-    // flick is divided between ticks follows the frame rate rather than when
-    // the mouse actually moved. At 100 Hz with a 1000 Hz mouse that is the
-    // difference between ten even reports per tick and a burst of sixteen
-    // followed by nothing.
+    // SDL hands over mouse motion when it is polled, once per rendered
+    // frame. Giving a frame's whole motion to the first tick after the poll
+    // makes how a flick divides between ticks follow the frame rate: at 50
+    // fps and 100 Hz one tick gets twenty counts and the next gets none.
     //
-    // Reports therefore wait here carrying the timestamp SDL stamped on
-    // them, and a tick applies only the ones that happened inside its own
-    // window. A report is never divided between two ticks: a mouse count is
-    // an integer and BhLookSample has to stay integral, so each report
-    // belongs wholly to one tick.
-    struct Report { uint64_t at_ns; double x, y; };
+    // As in Momentum's m_rawinput 2, motion accumulates per frame and each
+    // tick takes an even share of it by time: the part of the span from where
+    // the previous tick's share ended to when this frame's motion arrived
+    // that the tick covers. A tick that reaches the arrival takes the rest;
+    // whatever a tick doesn't reach waits for the next one. Nothing is
+    // invented or lost, only moved between ticks.
+    //
+    // Mouse counts stay integral, because BhLookSample has to: a share of
+    // whole counts is rounded and the remainder stays queued. Fractional
+    // (trackpad) motion is shared exactly.
+    double acc_x = 0, acc_y = 0;   // polled, not yet given to a tick
+    uint32_t acc_events = 0;
+    uint64_t arrival_ns = 0;       // when the newest poll handed it over
+    uint64_t split_ns = 0;         // where the previous tick's share ended
+    bool have_split = false;
 
-    // Enough for a quarter second of a 1000 Hz mouse. Past this the oldest
-    // report is applied early rather than discarded — losing a report loses
-    // aim the player made, which is worse than attributing it a tick late.
-    static constexpr std::size_t max_pending = 4096;
-
-    std::deque<Report> pending;
-
-    void motion_at(uint64_t at_ns, double x, double y) {
+    void accumulate(double x, double y) {
         if(!std::isfinite(x)||!std::isfinite(y))return;
-        if(pending.size()>=max_pending){const auto oldest=pending.front();pending.pop_front();motion(oldest.x,oldest.y);}
-        // Keep the queue non-decreasing so consuming a window stays a prefix
-        // walk; SDL does not promise ordered timestamps across devices.
-        if(!pending.empty()&&at_ns<pending.back().at_ns) at_ns=pending.back().at_ns;
-        pending.push_back({at_ns,x,y});
+        acc_x+=x;acc_y+=y;++acc_events;
+    }
+    // Marks everything accumulated so far as having arrived at |now_ns|.
+    void arrived(uint64_t now_ns) { arrival_ns=now_ns; }
+
+    // Gives the tick covering [start_ns, end_ns] its share.
+    void take_tick(uint64_t start_ns, uint64_t end_ns) {
+        if(!have_split||split_ns<start_ns){split_ns=start_ns;have_split=true;}
+        double share=1;
+        if(end_ns<arrival_ns&&arrival_ns>split_ns)
+            share=end_ns<=split_ns?0:double(end_ns-split_ns)/double(arrival_ns-split_ns);
+        split_ns=std::max(split_ns,end_ns);
+        give(share);
     }
 
-    // ---- tick-windowed keys -------------------------------------------
-    //
-    // Keys and mouse buttons go through the same window as motion. Before,
-    // a tick read which keys were held at the moment SDL was polled, while
-    // its mouse motion came from its own window, so a tick that ended before
-    // you switched A to D still got D. In CS:S both come from the same
-    // instant (the usercmd). |tick_codes| is what the tick sees; the client
-    // keeps its own poll-time set for everything that isn't a tick.
-    struct KeyReport { uint64_t at_ns; std::string code; bool down; };
-    std::deque<KeyReport> key_pending;
-    std::set<std::string> tick_codes;
-    // Set by clear(): the next tick starts again from the poll-time set.
-    bool keys_resync = true;
+    // Gives everything waiting to the input now. Used when nothing is ticking
+    // (paused, --frames) and by the render camera on a copy, so the view shows
+    // the newest motion without waiting for a tick to claim it.
+    void consume_all() { give(1); have_split=false; }
 
-    void key_at(uint64_t at_ns, std::string code, bool down) {
-        if(key_pending.size()>=256){apply(key_pending.front());key_pending.pop_front();}
-        if(!key_pending.empty()&&at_ns<key_pending.back().at_ns) at_ns=key_pending.back().at_ns;
-        key_pending.push_back({at_ns,std::move(code),down});
-    }
-    void apply(const KeyReport &k) { if(k.down) tick_codes.insert(k.code); else tick_codes.erase(k.code); }
-
-    // Applies every report stamped at or before |deadline_ns|.
-    void consume_until(uint64_t deadline_ns) {
-        while(!pending.empty()&&pending.front().at_ns<=deadline_ns){const auto next=pending.front();pending.pop_front();motion(next.x,next.y);}
-        while(!key_pending.empty()&&key_pending.front().at_ns<=deadline_ns){apply(key_pending.front());key_pending.pop_front();}
+    void give(double share) {
+        auto part=[&](double &acc){
+            double s=share>=1?acc:acc*share;
+            if(share<1&&acc==std::floor(acc))s=std::round(s);
+            acc-=s;return s;
+        };
+        const double x=part(acc_x),y=part(acc_y);
+        const uint32_t e=share>=1?acc_events:std::min(acc_events,uint32_t(std::lround(acc_events*share)));
+        acc_events-=e;
+        if(x==0&&y==0&&e==0)return;
+        motion_events+=e;yaw_counts+=x;
+        pitch = std::clamp(pitch + y * (separate_vertical?vertical_sensitivity:sensitivity) * 0.022, -89.0, 89.0);
     }
 
-    // Applies everything still waiting. The render camera uses this on a copy
-    // so the view keeps showing the newest motion and gains no latency from
-    // the simulation holding a report back for its tick.
-    void consume_all() {
-        while(!pending.empty()){const auto next=pending.front();pending.pop_front();motion(next.x,next.y);}
-        while(!key_pending.empty()){apply(key_pending.front());key_pending.pop_front();}
-    }
-
-    std::size_t pending_reports() const { return pending.size(); }
-    void drop_pending() { pending.clear(); }
+    double pending_counts() const { return acc_x; }
 
     void frame() {if(frames<std::numeric_limits<uint16_t>::max())++frames;}
     std::optional<BhLookSample> look_sample() {
@@ -117,9 +103,8 @@ struct Input {
     }
     void button(uint32_t bit, bool down) { if (down) held |= bit; else held &= ~bit; }
     // Every caller is a state reset — capture changed, run restarted, settings
-    // reapplied — so queued motion from before it must not survive into the
-    // next tick.
-    void clear() { held = pulse = 0; pending.clear(); key_pending.clear(); keys_resync = true; }
+    // reapplied — so motion from before it must not survive into the next tick.
+    void clear() { held = pulse = 0; acc_x = acc_y = 0; acc_events = 0; have_split = false; }
     BhCmd command() {
         const uint32_t bits = held | pulse;
         pulse = 0;

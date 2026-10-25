@@ -433,11 +433,9 @@ int run(const Options &opt) {
             preferences[key]=!preferences[key].get<bool>();native::save_settings(cache/"settings.json",preferences);apply_preferences();
         }
     };
-    auto handle_code=[&](const std::string &code,bool down,bool repeat=false,bool wheel=false,uint64_t at_ns=0) {
+    auto handle_code=[&](const std::string &code,bool down,bool repeat=false,bool wheel=false) {
         if(code.empty())return;
         if(down)held_codes.insert(code);else held_codes.erase(code);
-        // Ticks see keys when they happened, like mouse motion (see Input::key_at).
-        if(!wheel){if(at_ns)input.key_at(at_ns,code,down);else input.keys_resync=true;}
         input.held=0;
         for(auto binding=preferences["binds"].begin();binding!=preferences["binds"].end();++binding) {
             const auto bit=movement_bit(binding.key());bool matching=false,held=false;
@@ -496,15 +494,15 @@ int run(const Options &opt) {
                         else if(event.key.scancode==SDL_SCANCODE_ESCAPE) show_menu(captured);
                         else if(event.key.scancode==SDL_SCANCODE_T&&captured&&menu) {show_menu(true);menu->evaluate_js("window.bunnyhopNativeMenu?.open?.('room','chat')");}
                     }
-                    if(captured&&!playback)handle_code(native::key_code(event.key.scancode),down,event.key.repeat,false,event.key.timestamp);
+                    if(captured&&!playback)handle_code(native::key_code(event.key.scancode),down,event.key.repeat);
                     break;
                 }
-                case SDL_EVENT_MOUSE_MOTION: if(captured&&focused&&!playback) input.motion_at(event.motion.timestamp,event.motion.xrel,event.motion.yrel); break;
+                case SDL_EVENT_MOUSE_MOTION: if(captured&&focused&&!playback) input.accumulate(event.motion.xrel,event.motion.yrel); break;
                 case SDL_EVENT_MOUSE_BUTTON_DOWN:
                 case SDL_EVENT_MOUSE_BUTTON_UP: {
                     const bool down=event.type==SDL_EVENT_MOUSE_BUTTON_DOWN;
                     if(!captured&&down&&focused&&(!menu||!menu->visible())&&core) {capture(true);break;}
-                    if(captured&&!playback)handle_code(native::mouse_code(event.button.button),down,false,false,event.button.timestamp);
+                    if(captured&&!playback)handle_code(native::mouse_code(event.button.button),down);
                     break;
                 }
                 case SDL_EVENT_MOUSE_WHEEL: if(captured&&!playback&&event.wheel.y!=0)handle_code(event.wheel.y>0?"MWheelUp":"MWheelDown",true,false,true); break;
@@ -634,33 +632,32 @@ int run(const Options &opt) {
         ++input_frame;input_frame_ms=std::chrono::duration<double,std::milli>(now-last).count();
         if(simulation_active) accumulator+=(opt.frames?dt:std::clamp(std::chrono::duration<double>(now-last).count(),0.0,.25))*(playback?playback_speed:1);
         last=now;
-        // Where simulated time has reached, on SDL's clock, so each tick below
-        // can claim the mouse reports stamped inside it. accumulator is how far
-        // behind the simulation currently is, so subtracting it from now gives
-        // the instant the next tick starts from.
+        // Where simulated time has reached, on SDL's clock. accumulator is how
+        // far behind the simulation is, so now minus it is where the next tick
+        // starts. This frame's motion arrived now; the ticks below share it by
+        // how much of the span up to now each covers (see Input::take_tick).
         const uint64_t wall_ns=SDL_GetTicksNS();
         const uint64_t behind_ns=uint64_t(std::max(0.0,accumulator)*1e9);
         uint64_t sim_ns=behind_ns<wall_ns?wall_ns-behind_ns:0;
         const uint64_t tick_ns=uint64_t(dt*1e9);
-        // Not simulating means nothing will claim them on a schedule, so apply
-        // them now and keep the pre-existing behaviour for paused states.
-        if(!simulation_active) input.consume_all();
+        // Not simulating means no tick will take it, so apply it now.
+        if(!simulation_active) input.consume_all(); else input.arrived(wall_ns);
         while(accumulator>=dt) {
-            // --frames is a deterministic mode with no wall clock to window
-            // against, so a tick there takes whatever is waiting.
+            // --frames is a deterministic mode with no wall clock to share by,
+            // so a tick there takes whatever is waiting.
             const double counts_before=input.yaw_counts;
             if(opt.frames) input.consume_all();
-            else {sim_ns+=tick_ns;input.consume_until(sim_ns);}
+            else {input.take_tick(sim_ns,sim_ns+tick_ns);sim_ns+=tick_ns;}
             prev=curr;const BhState tutorial_pre=curr;
             BhCmd cmd{};
             if(playback) {
                 if(curr.tick>=playback_info.at("totalTicks").get<uint32_t>()){playback_paused=true;accumulator=0;break;}
                 BhSnapshot state{};if(!bh_replay_step(core.get(),&state)){const std::string failure=bh_last_error(core.get());playback_failed=true;reset();error="Replay stopped: "+failure;std::cerr<<error<<'\n';show_menu(true);accumulator=0;if(opt.frames)running=false;break;}curr=state.player;bh_last_command(core.get(),&cmd);input.set_angles(cmd.pitch,cmd.yaw,5);
-            } else {if(input.keys_resync){input.tick_codes=held_codes;input.keys_resync=false;}input.held=0;for(auto b=preferences["binds"].begin();b!=preferences["binds"].end();++b){const auto bit=movement_bit(b.key());if(bit)for(const auto &key:b.value())if(input.tick_codes.contains(key.get<std::string>()))input.held|=bit;}cmd=input.command();const auto look=input.look_sample();require(bh_step_look(core.get(),&cmd,look?&*look:nullptr,&curr),core.get(),"Stepping simulation");input.events(curr);}
+            } else {input.held=0;for(auto b=preferences["binds"].begin();b!=preferences["binds"].end();++b){const auto bit=movement_bit(b.key());if(bit)for(const auto &key:b.value())if(held_codes.contains(key.get<std::string>()))input.held|=bit;}cmd=input.command();const auto look=input.look_sample();require(bh_step_look(core.get(),&cmd,look?&*look:nullptr,&curr),core.get(),"Stepping simulation");input.events(curr);}
             renderer->simulation_tick();
             if(input_log&&!playback) {
                 const double moved=input.yaw_counts-counts_before;
-                input_log<<curr.tick<<','<<input_frame<<','<<input_frame_ms<<','<<double(sim_ns)/1e6<<','<<moved<<','<<input.pending_reports()<<','
+                input_log<<curr.tick<<','<<input_frame<<','<<input_frame_ms<<','<<double(sim_ns)/1e6<<','<<moved<<','<<input.pending_counts()<<','
                     <<cmd.buttons<<(cmd.side>0?"R":cmd.side<0?"L":"")<<(cmd.forward>0?"F":cmd.forward<0?"B":"")<<','
                     <<std::hypot(double(curr.velocity[0]),double(curr.velocity[1]))<<','<<int(curr.grounded!=0)<<','<<int((curr.events&2u)!=0)<<'\n';
             }
