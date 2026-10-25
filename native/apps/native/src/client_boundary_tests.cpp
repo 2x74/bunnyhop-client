@@ -38,6 +38,14 @@ int main(){
     for(int i=0;i<15;i++)movement.tick(state,.01,NAN,"metal",hear);
     assert(cues.size()==1&&cues[0].id=="step_metal"&&cues[0].gain==.55);
     const auto original=native::default_settings();
+    {   // Jump stats mode and interval, strafe trainer.
+        auto js=native::patch_settings(original,{{"jumpStatsMode","interval"},{"jumpStatsInterval",4},{"strafeTrainer",true}});
+        assert(js["jumpStatsMode"]=="interval"&&js["jumpStatsInterval"]==4&&js["strafeTrainer"]==true);
+        assert(original["jumpStatsMode"]=="sixth"&&original["jumpStatsInterval"]==6&&original["strafeTrainer"]==false);
+        for(const auto &bad:{native::Json{{"jumpStatsMode","seventh"}},native::Json{{"jumpStatsInterval",1}},native::Json{{"jumpStatsInterval",51}},native::Json{{"jumpStatsInterval",4.5}},native::Json{{"jumpStatsMode",3}}}){
+            bool threw=false;try{native::patch_settings(original,bad);}catch(const std::exception&){threw=true;}assert(threw);
+        }
+    }
     auto changed=native::patch_settings(original,{{"sensitivity",1.7},{"binds",{{"jump",{"MWheelUp","Space"}}}}});
     assert(changed["sensitivity"]==1.7 && changed["binds"]["forward"]==original["binds"]["forward"]);
     rejects([&]{native::patch_settings(original,{{"volume",.2},{"sensitivity",0}});});assert(original["volume"]==.65);

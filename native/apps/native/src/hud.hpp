@@ -2,6 +2,8 @@
 #include "renderer.hpp"
 #include <array>
 #include <cstdio>
+#include <optional>
+#include "strafe_trainer.hpp"
 
 namespace {
 class NativeHud {
@@ -63,7 +65,7 @@ void main(){color=vec4(ink.rgb,ink.a*(uv.x<0.?1.:texture(font,uv).a));})");
     void draw(int width,int height,const BhSnapshot &s,const BhRunState &run,const BhCmd &cmd,
               const std::string &map,const std::string &style,const std::string &notice,
               double fps,bool visible,bool crosshair,bool playback,const BhWeaponReport &weapon,
-              const std::string &jump_stats="",bool jump_stats_good=false) {
+              const std::string &jump_stats="",bool jump_stats_good=false,std::optional<float> strafe=std::nullopt) {
         if(width<=0||height<=0||(!visible&&!crosshair))return;
         vertices.clear();scale=std::max(.6f,float(height)/900.f);
         const float w=width/scale,h=height/scale;
@@ -85,6 +87,19 @@ void main(){color=vec4(ink.rgb,ink.a*(uv.x<0.?1.:texture(font,uv).a));})");
             // Jump stats sit above the run status, clear of the timer and speed.
             // The accent marks a gain the plugin would call good.
             if(!jump_stats.empty())text(w/2,h-222,jump_stats,14,jump_stats_good?amber:dim,true);
+            // Strafe trainer above that: the percentage and a bar whose centre
+            // line is 100%, either end being 0% and 200%.
+            if(strafe) {
+                static const Color bands[3]={{.47f,.9f,.47f,1},amber,{1,.42f,.36f,1}};
+                const Color tone=bands[native::strafe_band(*strafe)];
+                std::snprintf(buf,sizeof(buf),"Strafe %.0f%%",*strafe);
+                text(w/2,h-276,buf,14,tone,true);
+                const float bar=240,left=w/2-bar/2,y=h-252;
+                rect(left,y,bar,6,{.05f,.05f,.07f,.6f});
+                rect(w/2-1,y-3,2,12,cream);
+                const float at=std::clamp(*strafe/200.f,0.f,1.f);
+                rect(left+at*bar-3,y-2,6,10,tone);
+            }
             if(run.status==0)text(w/2,h-186,run.in_start?"IN START":"READY",13,amber,true);
             if(run.status==2)text(w/2,h-186,"FINISHED",15,amber,true);
             const std::array<std::pair<const char*,uint32_t>,6> keys={{{"W",native::forward},{"A",native::left},{"S",native::back},{"D",native::right},{"JUMP",native::jump},{"DUCK",native::duck}}};

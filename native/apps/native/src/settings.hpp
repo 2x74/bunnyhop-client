@@ -15,6 +15,8 @@ inline Json default_settings() {
     return {{"sensitivity",2.0},{"verticalSensitivity",2.0},{"separateVertical",false},
         {"fov",90.0},{"vsync",true},{"fpsLimit",0},{"volume",.65},{"muted",false},
         {"hud",true},{"crosshair",true},{"viewmodel",true},{"jumpStats",true},
+        // Jump stats: "sixth" (jump 6 only), "every" jump, or "interval" (every jumpStatsInterval jumps).
+        {"jumpStatsMode","sixth"},{"jumpStatsInterval",6},{"strafeTrainer",false},
         {"sfxPack","default"},{"musicPack","default"},
         // Discord: presence on by default; privacy mode hides everything.
         {"discordRichPresence",true},{"discordShowMap",true},{"discordJoin",true},{"discordJoinLobbies",false},{"privacyMode",false},
@@ -62,6 +64,10 @@ inline Json patch_settings(const Json &current,const Json &patch) {
                 binds[b.key()]=b.value();
             }
             out["binds"]=std::move(binds);continue;
+        } else if(key=="jumpStatsMode") {
+            if(!v.is_string()) throw std::runtime_error("Setting must be text: "+key);
+            const auto mode=v.get<std::string>();
+            if(mode!="sixth"&&mode!="every"&&mode!="interval") throw std::runtime_error("Jump stats mode must be sixth, every or interval");
         } else if(defaults[key].is_string()) {
             // Audio pack choices. Only these two words are ever stored, so the
             // value can never become a path the client would then go looking
@@ -75,6 +81,7 @@ inline Json patch_settings(const Json &current,const Json &patch) {
             if((key=="sensitivity"||key=="verticalSensitivity") && (n<.01||n>100)) throw std::runtime_error("Sensitivity must be .01–100");
             if(key=="fov" && (n<60||n>130)) throw std::runtime_error("FOV must be 60–130");
             if(key=="volume" && (n<0||n>1)) throw std::runtime_error("Volume must be 0–1");
+            if(key=="jumpStatsInterval" && (n!=std::floor(n) || n<2 || n>50)) throw std::runtime_error("Jump stats interval must be a whole number 2–50");
             if(key=="fpsLimit" && (n!=std::floor(n) || (n!=0 && (n<30||n>1000)))) throw std::runtime_error("FPS limit must be 0 or 30–1000");
         }
         out[key]=v;

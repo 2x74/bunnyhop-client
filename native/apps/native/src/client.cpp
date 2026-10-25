@@ -6,6 +6,7 @@
 #include "renderer.hpp"
 #include "hud.hpp"
 #include "ssj.hpp"
+#include "strafe_trainer.hpp"
 #include "audio.hpp"
 #include "client_util.hpp"
 #include "room_state.hpp"
@@ -252,6 +253,10 @@ int run(const Options &opt) {
     // The reference samples the state from BEFORE the tick, so the zone and
     // noclip flags are carried from the previous one rather than read after.
     bool ssj_was_in_start=false,ssj_was_noclip=false;
+    // Strafe trainer: the latest reading, cleared once you've been on the ground a while.
+    native::StrafeTrainer strafe_trainer;
+    std::optional<float> strafe_reading;
+    unsigned strafe_ground_ticks=0;
     uint64_t run_generation=0;
     uint32_t beat_start=0,beat_upto=0,beat_hash=0x811c9dc5;
     bool beat_paused=false;
@@ -677,12 +682,23 @@ int run(const Options &opt) {
                 info.teleported=(curr.events&native::teleported)!=0;
                 info.in_start=ssj_was_in_start;info.noclip=ssj_was_noclip;
                 if(timing.status==1)info.time=timing.seconds;
-                if(timing.update_flags&4){ssj.reset();ssj_line.clear();ssj_good=false;}  // restarted
+                {
+                    const auto mode=preferences.at("jumpStatsMode").get<std::string>();
+                    ssj.set_mode(mode=="every"?native::SsjMode::every:mode=="interval"?native::SsjMode::every_nth:native::SsjMode::sixth);
+                    ssj.set_interval(preferences.at("jumpStatsInterval").get<unsigned>());
+                }
+                if(timing.update_flags&4){ssj.reset();ssj_line.clear();ssj_good=false;strafe_trainer.reset();strafe_reading.reset();}  // restarted
                 if(const auto report=ssj.tick(pre,ssj_cmd,info)) {
                     ssj_line=native::ssj_text(*report,ssj_fields);
                     ssj_good=report->gain&&*report->gain>=native::good_gain;
                 }
                 ssj_was_in_start=timing.in_start!=0;ssj_was_noclip=state.movement_mode==1;  // Mode::Noclip
+                if(info.teleported){strafe_trainer.reset();strafe_reading.reset();}
+                else if(!info.noclip) {
+                    if(const auto reading=strafe_trainer.tick(pre.grounded,std::hypot(pre.velocity[0],pre.velocity[1]),cmd.yaw))strafe_reading=reading;
+                    strafe_ground_ticks=pre.grounded?strafe_ground_ticks+1:0;
+                    if(strafe_ground_ticks>native::bhop_frames)strafe_reading.reset();
+                }
             }
             BhSurfaceProbe surface{};surface.water_z=std::numeric_limits<float>::quiet_NaN();const bool surface_found=bh_surface_at(core.get(),curr.position[0],curr.position[1],curr.position[2],&surface)!=0;const double water_depth=surface_found?surface.water_z-curr.position[2]:std::numeric_limits<double>::quiet_NaN();
             static const std::array<const char*,6> surfaces={"concrete","metal","wood","grass","tile","water"};
@@ -753,7 +769,8 @@ int run(const Options &opt) {
             BhCmd shown{};bh_last_command(core.get(),&shown);BhWeaponReport weapon{};bh_weapon_report(core.get(),&weapon);
             if(!menu||!menu->visible())hud.draw(width,height,state,run_state,shown,map_id,playback?playback_info.value("style",active_style):active_style,shown_notice,display_fps,
                 preferences.at("hud").get<bool>(),preferences.at("crosshair").get<bool>(),playback,weapon,
-                preferences.at("jumpStats").get<bool>()?ssj_line:std::string(),ssj_good);
+                preferences.at("jumpStats").get<bool>()?ssj_line:std::string(),ssj_good,
+                preferences.at("strafeTrainer").get<bool>()&&!playback?strafe_reading:std::nullopt);
         } else {gl.Viewport(0,0,width,height);gl.ClearColor(.03f,.04f,.06f,1);gl.Clear(GL_COLOR_BUFFER_BIT);}
         if(menu&&menu_ready&&core&&!playback&&!spectator&&!room.id.empty()&&room.map==map_id&&now-room_time>=std::chrono::milliseconds(50)) {
             BhWeaponReport weapon{};bh_weapon_report(core.get(),&weapon);

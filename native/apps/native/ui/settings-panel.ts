@@ -1,7 +1,7 @@
 import { h } from "../../web/src/ui/dom";
 import { ACTIONS, keyLabel } from "../../web/src/ui/settings";
 import { mouseCode } from "../../web/src/binds";
-import { AUDIO_PACKS, NATIVE_BIND_ACTIONS, send, settingsPatch, state, nativeKeyCode, type AudioPack, type NativeSettings } from "./bridge";
+import { AUDIO_PACKS, JUMP_STATS_MODES, NATIVE_BIND_ACTIONS, send, settingsPatch, state, nativeKeyCode, type AudioPack, type JumpStatsMode, type NativeSettings } from "./bridge";
 
 const DISCORD_TEXT={disabled:"Off",connecting:"Connecting…",ready:"Connected",reconnecting:"Discord not found"} as const;
 const DISCORD_TONE={disabled:"",connecting:"busy",ready:"ok",reconnecting:"bad"} as const;
@@ -60,7 +60,7 @@ export function settingsPanel(): HTMLElement {
     controls.set(key, input);
     input.addEventListener("change", () => {
       const value = input.valueAsNumber;
-      if (!Number.isFinite(value) || value < min || value > max || (key === "fpsLimit" && value !== 0 && value < 30)) {
+      if (!Number.isFinite(value) || value < min || value > max || (key === "fpsLimit" && value !== 0 && value < 30) || (key === "jumpStatsInterval" && !Number.isInteger(value))) {
         say(key === "fpsLimit" ? "FPS limit is 0 (unlimited) or 30–1000." : `${name}: choose ${min}–${max}.`);
         input.value = String(state.settings[key]); return;
       }
@@ -87,6 +87,15 @@ export function settingsPanel(): HTMLElement {
     return row(name, seg, "", about);
   }
 
+  function jumpStatsMode(): HTMLElement {
+    const text: Record<JumpStatsMode, string> = { sixth: "6th jump", every: "Every jump", interval: "Every N" };
+    const seg = h("div.seg", { role: "radiogroup", "aria-label": "Show jump stats on" });
+    for (const value of JUMP_STATS_MODES)
+      seg.append(h("button", { type: "button", role: "radio", "data-value": value, onclick: () => save({ jumpStatsMode: value }) }, text[value]));
+    controls.set("jumpStatsMode", seg);
+    return row("Show on", seg, "", "6th jump: only jump 6, compared with jump 1, like !ssj. Every jump: each jump compared with the one before. Every N: jumps N, 2N, 3N ..., each compared with the last one shown.");
+  }
+
   const mouse = h("div.nset-cols", null,
     group("",
       number("Mouse sensitivity", "sensitivity", .01, 100, .01, "", "Same scale as the game and CS:S: each mouse count turns sensitivity × 0.022 degrees."),
@@ -101,7 +110,11 @@ export function settingsPanel(): HTMLElement {
       toggle("HUD", "hud", "", "Speed, timer and keys."),
       toggle("Crosshair", "crosshair"),
       toggle("Viewmodel", "viewmodel", "", "Your weapon and hands."),
-      toggle("Jump stats", "jumpStats", "JHUD / SSJ", "Speed on the sixth jump and per-jump gain, ported from the game's !ssj.")));
+      toggle("Jump stats", "jumpStats", "JHUD / SSJ", "Speed and gain per jump, ported from the game's !ssj.")),
+    group("Jump stats",
+      jumpStatsMode(),
+      number("N", "jumpStatsInterval", 2, 50, 1, "For Every N", "Show every Nth jump: 2 to 50."),
+      toggle("Strafe trainer", "strafeTrainer", "Turn rate", "While you're in the air: how fast you turned against the turn rate that gains the most speed at your speed. 100% is ideal; green is within 10%, amber within 25%. Updates every 0.1 s.")));
   const audio = h("div.nset-cols", null,
     group("Volume",
       number("Volume", "volume", 0, 1, .01, "0 to 1", "Master volume for sound effects and music."),
@@ -188,6 +201,8 @@ export function settingsPanel(): HTMLElement {
       const off = presenceOff || (key === "discordJoinLobbies" && !state.settings.discordJoin);
       if (input instanceof HTMLInputElement) { input.disabled = off; input.closest(".nset-row")?.classList.toggle("off", off); }
     }
+    const interval = controls.get("jumpStatsInterval");
+    if (interval instanceof HTMLInputElement) { interval.disabled = state.settings.jumpStatsMode !== "interval"; interval.closest(".nset-row")?.classList.toggle("off", interval.disabled); }
     const vertical = controls.get("verticalSensitivity");
     if (vertical instanceof HTMLInputElement) { vertical.disabled = !state.settings.separateVertical; vertical.closest(".nset-row")?.classList.toggle("off", vertical.disabled); }
     for (const [action, button] of buttons) {

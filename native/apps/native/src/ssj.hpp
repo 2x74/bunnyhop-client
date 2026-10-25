@@ -29,7 +29,8 @@
 
 namespace native {
 
-enum class SsjMode { sixth, every, every_sixth };
+/** 6th jump only, every jump, or every Nth jump (6, 12, 18 ... when N is 6). */
+enum class SsjMode { sixth, every, every_nth, every_sixth = every_nth };
 
 /** Ground ticks after which the jump count starts over (the plugins' BHOP_FRAMES). */
 inline constexpr unsigned bhop_frames = 10;
@@ -83,11 +84,11 @@ struct SsjReport {
     std::optional<double> time;
 };
 
-/** Does |mode| report jump |n|? (6th: jump 6 only; every: all; every 6th: 6, 12, 18 ...) */
-inline bool ssj_shows(SsjMode mode, unsigned n) {
+/** Does |mode| report jump |n|? (6th: jump 6 only; every: all; every Nth: N, 2N, 3N ...) */
+inline bool ssj_shows(SsjMode mode, unsigned n, unsigned interval = 6) {
     if (mode == SsjMode::every) return true;
     if (mode == SsjMode::sixth) return n == 6;
-    return n > 0 && n % 6 == 0;
+    return n > 0 && interval > 0 && n % interval == 0;
 }
 
 namespace ssj_detail {
@@ -119,6 +120,15 @@ public:
     void set_mode(SsjMode mode) {
         if (mode == mode_) return;
         mode_ = mode;
+        reset();
+    }
+
+    /** N for "every Nth jump" (at least 2; 1 would just be "every jump"). Changing it starts over. */
+    unsigned interval() const { return interval_; }
+    void set_interval(unsigned n) {
+        n = std::max(2u, n);
+        if (n == interval_) return;
+        interval_ = n;
         reset();
     }
 
@@ -203,16 +213,16 @@ private:
         const float speed = ssj_detail::len2(pre.velocity[0], pre.velocity[1]);
         const float z = pre.position[2];
         std::optional<SsjReport> report;
-        if (ssj_shows(mode_, n)) report = build(speed, z, time);
+        if (ssj_shows(mode_, n, interval_)) report = build(speed, z, time);
         // What the next report covers: every jump in "every", from jump 6 on in "6th" (only 6 is
-        // shown), from each 6th jump in "every 6th".
+        // shown), from each Nth jump in "every Nth".
         if ((mode_ == SsjMode::sixth && n >= 6) || mode_ == SsjMode::every ||
-            (mode_ == SsjMode::every_sixth && n % 6 == 0)) {
+            (mode_ == SsjMode::every_nth && n % interval_ == 0)) {
             clear_window();
             old_speed_ = speed;
             old_height_ = z;
         }
-        if ((mode_ == SsjMode::sixth && n == 1) || (mode_ == SsjMode::every_sixth && n % 6 == 1)) {
+        if ((mode_ == SsjMode::sixth && n == 1) || (mode_ == SsjMode::every_nth && n % interval_ == 1)) {
             initial_speed_ = speed;
             initial_height_ = z;
             dx_ = dy_ = 0;
@@ -247,6 +257,7 @@ private:
     }
 
     SsjMode mode_;
+    unsigned interval_ = 6;
     unsigned ground_ticks_ = 0, strafe_ticks_ = 0, synced_ticks_ = 0, strafes_ = 0;
     float raw_gain_ = 0, trajectory_ = 0, dx_ = 0, dy_ = 0;
     std::uint32_t prev_buttons_ = 0;

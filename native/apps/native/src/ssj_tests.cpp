@@ -2,6 +2,7 @@
 // report for report. src/ssj_oracle.ts produces the stream and the expected reports; this replays
 // the stream and compares.
 #include "ssj.hpp"
+#include "strafe_trainer.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -152,5 +153,44 @@ int main(int argc, char **argv) {
         assert(native::ssj_text(bare, fields) == "Jump 1 \xC2\xB7 300 u/s");
     }
     std::cout << "SSJ report text checks passed\n";
+
+    {   // Every Nth jump: N, 2N, 3N ... and nothing else; 6 behaves as every 6th did.
+        for (unsigned n = 1; n <= 30; ++n) {
+            assert(native::ssj_shows(native::SsjMode::every_nth, n, 4) == (n % 4 == 0));
+            assert(native::ssj_shows(native::SsjMode::every_nth, n) == native::ssj_shows(native::SsjMode::every_sixth, n, 6));
+        }
+        native::SsjTracker tracker(native::SsjMode::every_nth);
+        tracker.set_interval(1);  // 1 would be "every jump"; held at 2
+        assert(tracker.interval() == 2);
+        tracker.jump = 3;
+        tracker.set_interval(5);  // changing N starts the count over
+        assert(tracker.interval() == 5 && tracker.jump == 0);
+    }
+    {   // Strafe trainer: turning exactly atan(30/speed) per air tick reads 100%.
+        native::StrafeTrainer trainer;
+        const float speed = 600, ideal = native::StrafeTrainer::ideal_degrees(speed);
+        assert(std::fabs(ideal - 2.8624f) < 1e-3f);
+        std::optional<float> reading;
+        float yaw = 179.0f;  // crosses the 180/-180 wrap on the way
+        for (unsigned t = 0; t <= native::StrafeTrainer::window; ++t) {
+            if (const auto r = trainer.tick(false, speed, yaw)) reading = r;
+            yaw += ideal;
+            if (yaw > 180.0f) yaw -= 360.0f;
+        }
+        assert(reading && std::fabs(*reading - 100.0f) < 0.1f);
+        assert(native::strafe_band(*reading) == 0 && native::strafe_band(80) == 1 && native::strafe_band(150) == 2);
+        // Half the turn rate reads 50%; the ground starts a reading over.
+        native::StrafeTrainer half;
+        reading.reset();
+        yaw = 0;
+        half.tick(true, speed, yaw);
+        for (unsigned t = 0; t < native::StrafeTrainer::window; ++t)
+            if (const auto r = half.tick(false, speed, yaw += ideal / 2)) reading = r;
+        assert(reading && std::fabs(*reading - 50.0f) < 0.1f);
+        // Too slow to have an ideal angle: no reading.
+        native::StrafeTrainer slow;
+        for (unsigned t = 0; t < 40; ++t) assert(!slow.tick(false, 10, float(t)));
+    }
+    std::cout << "Jump stats interval and strafe trainer checks passed\n";
     return 0;
 }
