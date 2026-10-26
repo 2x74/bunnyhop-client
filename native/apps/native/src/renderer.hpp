@@ -14,9 +14,12 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
 #include <algorithm>
+#include <cmath>
+#include <deque>
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -92,6 +95,8 @@ GLuint link_program(Gl &gl,const char *vertex_source,const char *fragment_source
     gl.DeleteShader(vertex);gl.DeleteShader(fragment);return program;
 }
 #include "native_viewmodel.hpp"
+// Inside this file's anonymous namespace: its standard headers are included above, at file scope, so they are never
+// first seen in here (MSVC's <deque> was).
 #include "source_hdr.hpp"
 
 class Renderer {
