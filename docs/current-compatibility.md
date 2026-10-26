@@ -1,12 +1,14 @@
 # Current native compatibility
 
-This source targets production v0.0.27 with the Source-look graphics update, physics **17**, timer rules **2**,
-and canonical verifier `bunnyhop-web/240b3b26afe5`. Its pinned WASM SHA-256 is
-`240b3b26afe569b98eb59a73ee4b8f809d360511bda0479ae2be9edb67b8757f`. That verifier simulates identically to the
-previous `bunnyhop-web/35dac92ea33c` (production re-simulated 2,331 replays with no difference); it changes only
-lightmap encoding and presentation-only entity states.
+This source targets production v0.0.28, physics **18**, timer rules **2**,
+and canonical verifier `bunnyhop-web/21d3cc6347ca`. Its pinned WASM SHA-256 is
+`21d3cc6347cacbc66ddb7118c05dc3ef265e9f6725d49b8962f2eedbbafa553f`.
+Physics 18 adds material-defined ladders, including `bhop_synthetic_fix`, while
+historical replay versions retain their original movement and surface identity.
+The same hotfix restores visible `tools/toolsblack` and `tools/toolswhite` faces.
 The build verifies the downloaded bytes and rejects changes to the rules until
-the verifier pin is reviewed.
+the verifier pin is reviewed. Native 0.4.0 package qualification is in progress;
+source compatibility does not activate production score admission.
 
 ## Simulation and input
 
@@ -29,7 +31,7 @@ rate makes that attempt local-only while retaining its BHR archive. Recording
 uses the shared counted/uncounted formats and fractional turn format as needed.
 The client does not run a client-side WASM self-check.
 
-## v0.0.27 presentation and feature scope
+## Native 0.4.0 presentation and feature scope
 
 The shared menu shows the new version, changelog, Contributor and Owner badges.
 The native practice controller uses the shared checkpoint/noclip primitives and
@@ -43,11 +45,16 @@ to map tours. The eleven production OST tracks are bundled and hash-checked;
 playback controls use SDL, with no browser audio playback.
 Simulation compatibility is not a claim of complete website feature parity.
 
-Gauntlet playback has Previous/Next split navigation and rejects obsolete map
-builds. It does not have the web's continuous attempt timeline, automatic split
-advance or next-map prefetch. Pause includes Replays, On screen and Help tabs;
-On screen uses native setting switches and Help lists native keys. Solo native
-play has no chat console. Sharing a last run and MP4 export remain web features.
+Native 0.4.0 adds profile statistics and editing, interactive Loadout previews,
+menu navigation history, settings presets/search, HUD placement, onboarding,
+controller menus, native solo/room chat, a scoreboard and map leaderboards.
+The Replay Vault supports imports, playback, scrubbing, ghosts and cinematic
+cameras. MP4 export includes synchronized gameplay audio and optional shipped
+or custom-pack music, with explicit track, offset, looping and level controls.
+Automatic PB/WR, movement and clean-longjump announcements follow the shared
+policies; the bundled replacement recordings carry CC BY 4.0 attribution.
+See [candidate release notes](native-0.4.0-release-notes.md) and the
+[native guide](../native/apps/native/README.md) for the detailed feature scope.
 Soundtrack controls stay inside the app and do not claim OS media keys.
 
 ## Accounts and packages
@@ -78,9 +85,9 @@ official bunnyhop logo.
 
 ## Validation
 
-See [the October 25 audit and qualification record](readiness-2026-10-25.md) for
-current results and the scope of native, browser, offline-verifier and platform
-checks. Run the standalone checks from `native/`:
+See [the October 25 audit](readiness-2026-10-25.md) for historical results and
+[the 0.4.0 candidate notes](native-0.4.0-release-notes.md) for current qualification.
+Each release retains its own platform, replay and native/WASM evidence. Run the standalone checks from `native/`:
 
 ```sh
 bun install --frozen-lockfile

@@ -27,8 +27,8 @@ See the repository [release process](../../../docs/releases.md).
 
 ## Current compatibility
 
-This source targets production v0.0.27, physics 17, timer rules 2 and verifier
-`bunnyhop-web/240b3b26afe5`. See [qualification notes](../../../docs/current-compatibility.md)
+This source targets production v0.0.28, physics 18, timer rules 2 and verifier
+`bunnyhop-web/21d3cc6347ca`. See [qualification notes](../../../docs/current-compatibility.md)
 for scope, test evidence and remaining live-score requirements.
 
 ## Build and play

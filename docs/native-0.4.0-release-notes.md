@@ -5,6 +5,10 @@ production admission evidence are recorded only after the exact candidates pass.
 
 ## Changes
 
+- Physics 18 and the v0.0.28 canonical verifier, including material-defined
+  ladders and visible black/white tool-material walls. Older replay physics
+  versions keep their historical behavior.
+
 - Shared web profile statistics, activity, card editing, Loadout and Support flows
   in the native menu, with Back/Esc history and narrow-window layouts.
 - Native chat entry, Unicode shaping, IME, grapheme editing and bidirectional
@@ -42,3 +46,26 @@ Custom CSS, enhanced graphics and optional CS player skins are outside this rele
 requested scope. Physical Windows/Linux and live account/multiplayer checks must
 be reported separately from automated fixtures. Performance charts describe fixed
 scene render throughput on one Mac, not general gameplay or input latency.
+
+## Local v18 qualification (October 26)
+
+The macOS build and all 48 CTests passed. Menu validation passed 194 tests with
+1,629 assertions; public release-contract validation passed 68 tests. The Rust
+bridge passed 27 tests and the targeted core suite passed 19, including the actual
+synthetic ladder and unreal-space black-wall maps.
+
+The release movement gate compared 47,832 native/WASM states with zero mismatches
+or missing physics. It retains v16/v17 RNGFix contrasts, tests those fixtures at
+v18, and adds a material-defined ladder with v17/v18 contrast. Deliberate native
+v17→v16 and v18→v17 downgrades were rejected (3,479 and 320 mismatched states).
+An offline native recording matched all 1,822 state/timer rows, shared BHR bytes,
+heartbeat hashes and 19 checkpoints. The canonical v18 ranked verifier accepted
+it and rejected a changed checkpoint; nothing was submitted to production.
+
+Independent source review found no P0/P1/P2 issues in the v18 integration.
+Cross-platform candidate builds and exact-package review remain pending.
+
+![Native C++ client on bhop_unreal_space](images/native-v18-unreal-space.png)
+
+Actual native OpenGL capture from the v18 build. This frame-limited smoke is
+render evidence; its FPS counter is not a performance measurement.

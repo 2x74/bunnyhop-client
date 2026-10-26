@@ -13,8 +13,8 @@ automation alone does not establish interactive gameplay or physical input
 validation. Check each release's notes for the artifacts and checks that actually
 completed.
 
-Current source targets production v0.0.27, physics **17**, timer rules **2**, and canonical verifier
-`bunnyhop-web/240b3b26afe5`. See [current compatibility and qualification](docs/current-compatibility.md).
+Current source targets production v0.0.28, physics **18**, timer rules **2**, and canonical verifier
+`bunnyhop-web/21d3cc6347ca`. See [current compatibility and qualification](docs/current-compatibility.md).
 Published archives have their own source/build identity and admission status.
 
 ## Native gameplay, shared game rules
@@ -40,7 +40,8 @@ Gameplay includes local BHR recording and Replay Vault playback/scrubbing, ghost
 tutorial coaching, native HUD/audio, practice checkpoints and noclip, Gauntlets,
 player reports, animated cosmetics, multiplayer rooms and shared scoreboard/map
 leaderboards. Maps are cached for offline use, with loading progress, retry and
-cancellation. Replay clips can be exported as video-only MP4 through FFmpeg.
+cancellation. Replay clips can be exported as MP4 through FFmpeg with gameplay audio and optional
+OST/custom-pack music, or as video only.
 The eleven-track bunnyhop.lol OST is bundled for offline playback. See the
 [native guide](native/apps/native/README.md) for the detailed scope and remaining
 parity work.
@@ -56,7 +57,7 @@ packages do not provide a signed automatic update channel. See
 [release and installation notes](docs/releases.md).
 
 Choose a map from **Play**. WASD moves, Space or the mouse wheel jumps, Ctrl ducks,
-E uses, R restarts, Escape opens the menu, and F10 exits. Sensitivity, separate
+E uses, R restarts, Escape opens the menu, and F10 opens Display settings. Sensitivity, separate
 vertical sensitivity, FOV, frame/audio settings and key bindings are available in
 the menu. Downloaded maps and shared content are checked against SHA-256 hashes
 and cached locally.

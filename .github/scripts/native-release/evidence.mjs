@@ -46,7 +46,7 @@ export function validateReport(report, version, platform) {
   requireThat(Number.isSafeInteger(report.bytes) && report.bytes > 0 && report.bytes <= MAX_ARCHIVE_BYTES && hex.test(report.sha256), 'Invalid archive digest/size');
   for (const key of ['canonicalWasmSha256', 'binarySha256', 'menuSha256', 'assetsSha256']) requireThat(hex.test(report[key]), `Missing identity: ${key}`);
   requireThat(report.wasm === `bunnyhop-web/${report.canonicalWasmSha256.slice(0, 12)}`, 'WASM identity mismatch');
-  requireThat(report.canonicalWasmSha256 === PINNED_WASM_SHA256 && report.physics === 17 && report.rules === 2, 'Package must use pinned WASM/physics 17/rules 2');
+  requireThat(report.canonicalWasmSha256 === PINNED_WASM_SHA256 && report.physics === 18 && report.rules === 2, 'Package must use pinned WASM/physics 18/rules 2');
   requireThat(Number.isInteger(report.physics) && report.physics > 0 && Number.isInteger(report.rules) && report.rules > 0, 'Missing physics/rules');
   const [os, arch] = platform.split('/');
   requireThat(report.binaryHashMode === (os === 'darwin' ? 'macho-code-v1' : 'sha256'), 'Unexpected binary hash mode');
@@ -143,10 +143,19 @@ export function validateReview(evidenceBytes, review, policy, now = Date.now()) 
   return evidence;
 }
 
+// Keep the complete multi-platform report within the manual review input bound.
+// Compact encoding changes only whitespace; the review binds these exact bytes.
+export function serializeEvidence(evidence) {
+  validateEvidence(evidence);
+  const bytes = JSON.stringify(evidence) + '\n';
+  requireThat(Buffer.byteLength(bytes, 'utf8') <= 64 * 1024, 'Candidate evidence exceeds manual review input limit');
+  return bytes;
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const context = { repository: process.env.GITHUB_REPOSITORY, sourceSha: process.env.GITHUB_SHA, ref: process.env.GITHUB_REF, workflowRef: process.env.GITHUB_WORKFLOW_REF, event: process.env.GITHUB_EVENT_NAME, runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT, version: process.env.PACKAGE_VERSION, platform: process.env.PACKAGE_PLATFORM || 'all' };
   const evidence = collectEvidence(process.argv[2], context, JSON.parse(process.env.CANDIDATE_NEEDS));
-  const bytes = JSON.stringify(evidence, null, 2) + '\n';
+  const bytes = serializeEvidence(evidence);
   writeFileSync(process.argv[3], bytes, { flag: 'wx' });
   console.log(`Candidate evidence SHA-256: ${sha256(bytes)}; production admission is not configured.`);
   if (process.env.GITHUB_OUTPUT) writeFileSync(process.env.GITHUB_OUTPUT, `sha256=${sha256(bytes)}\n`, { flag: 'a' });

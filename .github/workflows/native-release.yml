@@ -183,7 +183,7 @@ jobs:
       - name: Required native movement vs pinned WASM (v17 and v16 contrast)
         run: bun apps/native/tools/parity-gate.ts && bun test apps/native/tools/parity-gate.test.ts
       - run: ctest --test-dir apps/native/build --output-on-failure --no-tests=error
-      - run: cargo test -p bunnyhop-native-bridge --locked && cargo test -p bunnyhop-core --features native-wasm-math --test physics_versions --locked && bun test apps/native/packaging
+      - run: cargo test -p bunnyhop-native-bridge --locked && cargo test -p bunnyhop-core --features native-wasm-math --test physics_versions --test entities --test render --locked && bun test apps/native/packaging
       - env:
           PACKAGE_VERSION: ${{ needs.version.outputs.version }}
         run: bun apps/native/package.ts --skip-build --version "$PACKAGE_VERSION"
@@ -251,7 +251,7 @@ jobs:
           bun test apps/native/tools/parity-gate.test.ts
           ctest --test-dir apps/native/build --output-on-failure --no-tests=error
           cargo test -p bunnyhop-native-bridge --locked
-          cargo test -p bunnyhop-core --features native-wasm-math --test physics_versions --locked
+          cargo test -p bunnyhop-core --features native-wasm-math --test physics_versions --test entities --test render --locked
           bun test apps/native/packaging
       - env:
           PACKAGE_VERSION: ${{ needs.version.outputs.version }}

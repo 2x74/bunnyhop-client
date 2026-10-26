@@ -171,14 +171,16 @@ pub const PHYSICS_V16: u32 = 16;
 /// slope or a ledge no longer depends on where inside a tick the player meets it.
 pub const PHYSICS_V17: u32 = 17;
 /// The version new recordings use.
-pub const PHYSICS_LATEST: u32 = PHYSICS_V17;
+pub const PHYSICS_LATEST: u32 = PHYSICS_V18;
+/// v18: ladder surface properties, preserving historical replay behavior.
+pub const PHYSICS_V18: u32 = 18;
 /// Diagnostic pseudo-versions (never valid in a replay, whose field is a u8): `PHYSICS_DIAG | fix bits` turns on only
-/// the listed fixes, to tell which fix changes a replay (tools: /tmp physics-v2 analysis). The fix bits are the low 30
-/// (`PHYSICS_DIAG_FIXES`); before v17 the base was 1 << 26 with 26 fix bits, before v16 1 << 25 with 25, before v15
+/// the listed fixes, to tell which fix changes a replay (tools: /tmp physics-v2 analysis). The fix bits are the low 31
+/// (`PHYSICS_DIAG_FIXES`); before v18 the base was 1 << 30 with 30 fix bits; before v17 the base was 1 << 26 with 26 fix bits, before v16 1 << 25 with 25, before v15
 /// 1 << 24 with 24, before v8 0x1_0000 with 16 (and 0x100 with 8 before v5), and those old diagnostic numbers are not
 /// versions any more. The mask is never stored: replays carry the u8 version, run hashes fold only the commands, and
 /// the state digest has no settings in it.
-pub const PHYSICS_DIAG: u32 = 1 << 30;
+pub const PHYSICS_DIAG: u32 = 1 << 31;
 /// The fix bits a diagnostic pseudo-version may carry.
 pub const PHYSICS_DIAG_FIXES: u32 = PHYSICS_DIAG - 1;
 /// Fix bit: MASK_PLAYERSOLID / matching ladder mask (playerclips are solid).
@@ -330,8 +332,10 @@ pub const PHYSICS_FIX_TRIGGER_JUMP: u32 = 1 << 28;
 /// that did not follow a teleport on the tick before) restores the velocity the move started with (plus the second
 /// half of gravity), as if the teleport had come first. Replaces the optional `Rules::telehop_fix` rule.
 pub const PHYSICS_FIX_TELEHOP: u32 = 1 << 29;
-const PHYSICS_FIX_ALL: u32 =
+const PHYSICS_FIX_V17: u32 =
     PHYSICS_FIX_V16 | PHYSICS_FIX_INCLINE | PHYSICS_FIX_EDGE | PHYSICS_FIX_TRIGGER_JUMP | PHYSICS_FIX_TELEHOP;
+pub const PHYSICS_FIX_SURFACE_LADDER: u32 = 1 << 30;
+const PHYSICS_FIX_ALL: u32 = PHYSICS_FIX_V17 | PHYSICS_FIX_SURFACE_LADDER;
 
 /// The per-map fix (`game/map_fixes.rs`) a parsed entity lump matches, by map name (tests, tools).
 pub fn map_fix_for(entities: &[Entity]) -> Option<&'static str> {
@@ -393,7 +397,8 @@ pub fn physics_fixes(version: u32) -> Option<u32> {
         PHYSICS_V14 => Some(PHYSICS_FIX_V14),
         PHYSICS_V15 => Some(PHYSICS_FIX_V15),
         PHYSICS_V16 => Some(PHYSICS_FIX_V16),
-        PHYSICS_V17 => Some(PHYSICS_FIX_ALL),
+        PHYSICS_V17 => Some(PHYSICS_FIX_V17),
+        PHYSICS_V18 => Some(PHYSICS_FIX_ALL),
         v if v & !PHYSICS_DIAG_FIXES == PHYSICS_DIAG && v & PHYSICS_DIAG_FIXES & !PHYSICS_FIX_ALL == 0 => Some(v & PHYSICS_DIAG_FIXES),
         _ => None,
     }
@@ -890,6 +895,7 @@ struct Scene<'a> {
     props: &'a PropCollision,
     texinfo_surface: &'a [u16],
     surfaces: bool,
+    surface_ladders: bool,
     ents: &'a [RtEnt],
     solid: &'a [usize],
     /// Solid moving props (`RtEnt::prop`).
@@ -923,6 +929,14 @@ impl Scene<'_> {
             }
             _ => 0,
         };
+        self.surface_bits(index)
+    }
+
+    fn surface_bits(&self, index: usize) -> u64 {
+        // Before v18 ladder materials were default surfaces, including their hit identity/digest.
+        if !self.surface_ladders && physics::SURFACE_PROPS.get(index).is_some_and(|p| p.name == "ladder") {
+            return 0;
+        }
         (index as u64) << SURFACE_SHIFT
     }
 
@@ -996,7 +1010,7 @@ impl Scene<'_> {
                         all_solid: p.all_solid,
                         end: stop,
                         normal: p.normal,
-                        hit: Some(WORLD_SURFACE_HIT | (p.surface as u64) << SURFACE_SHIFT),
+                        hit: Some(WORLD_SURFACE_HIT | self.surface_bits(p.surface as usize)),
                         contents: 1,
                     },
                 );
@@ -1075,7 +1089,7 @@ impl Scene<'_> {
                             all_solid: t.all_solid,
                             end: stop,
                             normal: t.normal,
-                            hit: Some(ENTITY_HIT | index as u64 | (t.surface as u64) << SURFACE_SHIFT),
+                            hit: Some(ENTITY_HIT | index as u64 | self.surface_bits(t.surface as usize)),
                             contents: 1,
                         },
                     );
@@ -1125,6 +1139,12 @@ impl Tracer for Scene<'_> {
             }
         }
         Ok(contents)
+    }
+
+    fn surface_climbable(&self, hit: Option<u64>) -> bool {
+        self.surface_ladders && hit
+            .and_then(|hit| physics::SURFACE_PROPS.get((hit >> SURFACE_SHIFT) as usize))
+            .is_some_and(|surface| surface.name == "ladder")
     }
 
     fn ground_surface(&self, trace: &Trace) -> Option<movement::SurfaceProperties> {
@@ -1741,6 +1761,7 @@ impl Game {
             props: &self.props,
             texinfo_surface: &self.texinfo_surface,
             surfaces: self.rules.surface_properties,
+            surface_ladders: self.settings.physics_fixes() & PHYSICS_FIX_SURFACE_LADDER != 0,
             ents: &self.ents,
             solid: &self.solid,
             dyn_solid: &self.dyn_solid,

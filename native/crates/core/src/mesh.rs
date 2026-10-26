@@ -134,9 +134,12 @@ pub fn texture_names(bsp: &Bsp) -> Vec<String> {
         .collect()
 }
 
-/// Per texinfo: whether a face with it shows anything, by the same rules as `Builder::add_face` (sky faces count:
-/// the sky is drawn there). Tool textures and hidden surfaces (nodraw, trigger, hint, skip) don't. The trigger / clip
-/// overlays use it to tell invisible walls from drawn ones (`Game::overlay_brushes`).
+/// toolsblack and toolswhite are visible materials despite sharing the tool namespace.
+pub fn hidden_tool_material(name: &str) -> bool {
+    name.starts_with("tools/") && !matches!(name, "tools/toolsblack" | "tools/toolswhite")
+}
+
+/// Per-texinfo visibility, matching the mesh builder; used by invisible-wall overlays.
 pub fn texinfo_drawn(bsp: &Bsp) -> Vec<bool> {
     let texinfo: &[TextureInfo] = crate::lump!(bsp, playsrc_bsp::TEXINFO, TextureInfo);
     let texdata: &[TextureData] = crate::lump!(bsp, playsrc_bsp::TEXDATA, TextureData);
@@ -155,7 +158,7 @@ pub fn texinfo_drawn(bsp: &Bsp) -> Vec<bool> {
                 .and_then(|t| names.get(t.name_string_table_index.max(0) as usize))
                 .map(String::as_str)
                 .unwrap_or("");
-            !name.starts_with("tools/")
+            !hidden_tool_material(name)
         })
         .collect()
 }
@@ -237,7 +240,7 @@ impl<'a> Builder<'a> {
         }
         let material = self.material(ti.texture_data_index);
         let mat = &self.mesh.materials[material as usize];
-        if mat.name.starts_with("tools/") {
+        if hidden_tool_material(&mat.name) {
             return;
         }
         let (w, h) = (mat.width as f32, mat.height as f32);
