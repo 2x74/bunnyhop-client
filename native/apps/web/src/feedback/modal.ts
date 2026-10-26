@@ -127,8 +127,9 @@ export function gameContext(fps: number | null): Record<string, unknown> {
       ua: navigator.userAgent,
       lang: navigator.language,
       screenSize: `${screen.width}x${screen.height}`,
-      viewport: `${innerWidth}x${innerHeight}`,
-      dpr: Math.round(devicePixelRatio * 100) / 100,
+      // The game window when the host reports it (the menu web view is a separate, smaller window).
+      viewport: native.viewport ?? `${innerWidth}x${innerHeight}`,
+      dpr: native.dpr ?? Math.round(devicePixelRatio * 100) / 100,
       settings: nativeSettings ?? null,
       errors: recentErrors(),
     };

@@ -165,7 +165,8 @@ if(import.meta.main){
  const sourceManifest=JSON.parse(readFileSync(join(root,"target/native-menu/native-manifest.json"),"utf8"));
  verifyPackageBranding(resources,packageRoot,platform);
  const manifest=makeManifest(executable,resources,platform,arch,readFileSync(join(root,"apps/web/src/wasm/bunnyhop_core.wasm")),sourceManifest);
- writeFileSync(join(resources,"native-manifest.json"),JSON.stringify(manifest,null,2)+"\n");
+ // The release version is reported to the game (feedback context) but is not part of the hashed identity.
+ writeFileSync(join(resources,"native-manifest.json"),JSON.stringify({...manifest,version},null,2)+"\n");
  if(platform==="darwin"){
   const identity=values.identity!;run(["codesign","--force","--sign",identity,...(identity==="-"?[]:["--options","runtime","--timestamp"]),packageRoot]);run(["codesign","--verify","--deep","--strict",packageRoot]);
   if(executableHash(readFileSync(executable),manifest.binaryHashMode)!==manifest.binarySha256)throw new Error("Final bundle signing changed canonical binary identity");

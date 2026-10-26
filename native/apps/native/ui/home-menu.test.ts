@@ -203,13 +203,16 @@ test("review regressions: feedback context, loads, backdrop re-request and relea
     await page.locator('.style-row[data-style="scroll"]').dispatchEvent("click");
     expect((await messages(page)).slice(styleBefore).some(m=>m.type==="style")).toBe(false);
     await page.evaluate(()=>window.bunnyhopNativeMenu.onState({loading:false}));
-    // Feedback's attached context is the native host's: its map and own settings, no web build, prefs or GPU.
+    // Feedback's attached context is the native host's: its map, own settings, release, GPU and game window (not the
+    // menu web view's size or scale), and no web build or prefs.
+    await page.evaluate(()=>window.bunnyhopNativeMenu.onState({client:{version:"0.3.7",build:"bunnyhop-native/0123456789abcdef01234567",gpu:"Apple M4 Pro",viewport:[1920,1080],dpr:2}}));
     await page.getByRole("button",{name:"Feedback",exact:true}).click();
     await page.locator("dialog[open] .fb-kind").first().click();
     await page.getByRole("button",{name:"See all of it"}).click();
     const context=JSON.parse(await page.locator("dialog[open] pre").first().textContent()??"{}");
-    expect(context).toMatchObject({client:"native",inGame:true,map:"bhop_eazy",style:"autohop",track:0,screen:"pause",settings:{sensitivity:1.5,fov:100,vsync:true,fpsLimit:0}});
-    for(const key of ["webBuild","fps","gpu","page","nativeSettings"]) expect(key in context).toBe(false);
+    expect(context).toMatchObject({client:"native",inGame:true,map:"bhop_eazy",style:"autohop",track:0,screen:"pause",settings:{sensitivity:1.5,fov:100,vsync:true,fpsLimit:0},
+      nativeVersion:"0.3.7",nativeBuild:"bunnyhop-native/0123456789abcdef01234567",gpu:{renderer:"Apple M4 Pro"},viewport:"1920x1080",dpr:2});
+    for(const key of ["webBuild","fps","page","nativeSettings"]) expect(key in context).toBe(false);
     expect(errors).toEqual([]);
   } finally {await browser.close();}
 },30_000);

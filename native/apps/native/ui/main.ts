@@ -360,7 +360,11 @@ document.addEventListener("visibilitychange",()=>{if(document.visibilityState===
 watchAnimationClock();
 // Feedback form ("Attach game info", feedback/modal.ts gameContext): what the native host says, its own settings.
 setGameInfo(()=>({inGame:!!state.map,client:"native",...(state.map?{map:state.map,style:state.style,track:state.track,paused:state.paused}:{}),
-  ...(state.playback.active?{watchingReplay:true}:{}),nativeSettings:{sensitivity:state.settings.sensitivity,fov:state.settings.fov,vsync:state.settings.vsync,fpsLimit:state.settings.fpsLimit}}));
+  ...(state.playback.active?{watchingReplay:true}:{}),
+  // The game's own window, version and GPU (the modal would otherwise report the menu web view's).
+  ...(state.client?{nativeVersion:state.client.version,nativeBuild:state.client.build,gpu:{renderer:state.client.gpu},
+    ...(state.client.viewport[0]?{viewport:`${state.client.viewport[0]}x${state.client.viewport[1]}`}:{}),dpr:state.client.dpr}:{}),
+  nativeSettings:{sensitivity:state.settings.sensitivity,fov:state.settings.fov,vsync:state.settings.vsync,fpsLimit:state.settings.fpsLimit}}));
 initSocial();initDock();initCosmetics();installNowPlaying();
 installMenuBackdrop();
 watchMenuMotion();
