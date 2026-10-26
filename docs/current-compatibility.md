@@ -1,8 +1,10 @@
 # Current native compatibility
 
-This source targets production v0.0.27, physics **17**, timer rules **2**, and
-canonical verifier `bunnyhop-web/35dac92ea33c`. Its pinned WASM SHA-256 is
-`35dac92ea33c874d4434f738f089b4b137d492ce8a1f9e4945ef6609c27d8778`.
+This source targets production v0.0.27 with the Source-look graphics update, physics **17**, timer rules **2**,
+and canonical verifier `bunnyhop-web/240b3b26afe5`. Its pinned WASM SHA-256 is
+`240b3b26afe569b98eb59a73ee4b8f809d360511bda0479ae2be9edb67b8757f`. That verifier simulates identically to the
+previous `bunnyhop-web/35dac92ea33c` (production re-simulated 2,331 replays with no difference); it changes only
+lightmap encoding and presentation-only entity states.
 The build verifies the downloaded bytes and rejects changes to the rules until
 the verifier pin is reviewed.
 

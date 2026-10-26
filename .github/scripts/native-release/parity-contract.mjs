@@ -1,5 +1,5 @@
 // Data consistency only; the private receiver must authenticate the job/step and artifacts.
-export const PINNED_WASM_SHA256 = '35dac92ea33c874d4434f738f089b4b137d492ce8a1f9e4945ef6609c27d8778';
+export const PINNED_WASM_SHA256 = '240b3b26afe569b98eb59a73ee4b8f809d360511bda0479ae2be9edb67b8757f';
 export const PARITY_SUITE = 'rngfix-release-v1';
 export const parityArtifactName = (target, runId, attempt) => `native-parity-${target}-${runId}-${attempt}`;
 export const fixtureHashes = {
