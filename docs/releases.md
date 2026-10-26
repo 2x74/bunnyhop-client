@@ -2,14 +2,16 @@
 
 Native releases are published in
 [2x74/bunnyhop-client](https://github.com/2x74/bunnyhop-client/releases).
-Native **v0.4.0** is being prepared as an unsigned preview. The legacy Electron project
+Native [**v0.4.0**](https://github.com/2x74/bunnyhop-client/releases/tag/v0.4.0)
+is available as an unsigned preview for Windows x64, Linux x64 and macOS ARM64.
+Its exact packages are admitted for production scores until November 9, 2026 at
+22:00 UTC; see the [release record](native-0.4.0-release-notes.md). The legacy Electron project
 and its root npm version are separate from the native package version.
 
 ## Preview policy and platform status
 
-macOS ARM64 has been built and smoke-tested. Linux x64 and Windows x64 have
-native build automation; their packages should be attached only after their own
-jobs and package checks pass. CI checks do not establish physical mouse input,
+All three 0.4.0 platform builds and package checks passed. The downloaded macOS
+ARM64 package was smoke-tested and requires macOS 15.0 or newer. CI checks do not establish physical mouse input,
 Wayland behavior, interactive account/login flows or gameplay performance. Each
 release must identify the checks actually completed and the remaining limits.
 
