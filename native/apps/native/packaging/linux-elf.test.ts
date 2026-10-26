@@ -48,7 +48,7 @@ function fixture() {
 
 function releaseResources(stage: string, exe: string) {
   const resources = join(stage, "share/bunnyhop-native");
-  for (const name of ["menu.html", "native-assets/viewmodels.json", "native-assets/viewmodels.bin.z", "native-assets/audio.json", "native-assets/tutorial.json", "native-assets/hud.rgba", "licenses/SDL3.txt", "licenses/dr_libs.txt", "licenses/stb.txt", "licenses/LDNOOBW-CC-BY-4.0.txt", "licenses/JetBrainsMono-OFL.txt", "licenses/LeagueGothic-OFL.txt", "licenses/LICENSE-playsrc", "licenses/LICENSE.source-sdk-2013", "licenses/thirdpartylegalnotices.txt", "licenses/NOTICE-playsrc.md", "licenses/SOURCE-SDK-NOTICES.md", "licenses/rust-dependencies.json"]) {
+  for (const name of ["menu.html", "native-assets/viewmodels.json", "native-assets/viewmodels.bin.z", "native-assets/actor-animations.json", "native-assets/actor-animations.bin", "native-assets/tp-inspects.json", "native-assets/runner.json", "native-assets/runner.bin", "native-assets/audio.json", "native-assets/tutorial.json", "native-assets/hud.rgba", "licenses/SDL3.txt", "licenses/dr_libs.txt", "licenses/stb.txt", "licenses/LDNOOBW-CC-BY-4.0.txt", "licenses/Announcer-CC-BY-4.0.txt", "licenses/JetBrainsMono-OFL.txt", "licenses/LeagueGothic-OFL.txt", "licenses/LICENSE-playsrc", "licenses/LICENSE.source-sdk-2013", "licenses/thirdpartylegalnotices.txt", "licenses/NOTICE-playsrc.md", "licenses/SOURCE-SDK-NOTICES.md", "licenses/rust-dependencies.json"]) {
     const path = join(resources, name); mkdirSync(resolve(path, ".."), {recursive: true}); writeFileSync(path, "local fixture");
   }
   packageBranding(resources, stage, "linux");
