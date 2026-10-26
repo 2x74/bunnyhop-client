@@ -1,0 +1,4 @@
+import {test,expect} from "bun:test";
+import {adaptSocialSource} from "./adapt-social";
+test("social adapter preserves account epoch fences and mirrors live notifications into native chat",async()=>{const source=await Bun.file(new URL("../../web/src/social/state.ts",import.meta.url)).text();const adapted=adaptSocialSource(source);expect(adapted).toContain("const nativeEpoch = nativeAccountEpoch");expect(adapted).toContain('previous.onmessage=null;previous.onclose=null;previous.onopen=null;previous.close();');expect(adapted).toContain('postLocalLine(`${n.actor.name}:');expect(adapted).toContain('invited you to play (open Friends to join)');expect(adapted).toContain('setOpenConversation(null);changed();void refreshFriends();');});
+test("social upstream drift fails loudly instead of dropping identity boundaries",()=>{expect(()=>adaptSocialSource("export function refreshFriends(){}" )).toThrow("Native social adapter anchor changed");});

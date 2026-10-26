@@ -11,3 +11,8 @@ Map BSPs and Source model meshes/textures are not bundled; the native client fet
 The generated bunny/viewmodel rigs retain structural bind-pose data (bone names, hierarchy, positions and quaternions) extracted from Valve CS:S models/player/ct_urban.mdl and models/weapons/v_knife_t.mdl. Source data provenance is also recorded in the source skeleton.json files; Valve owns the referenced models and trademarks. Original procedural bunny geometry/animation is separate from that skeleton data.
 
 Menu name moderation incorporates the English LDNOOBW list, copyright Shutterstock, Inc. and LDNOOBW contributors, licensed CC BY 4.0: https://creativecommons.org/licenses/by/4.0/ . Source: https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words , commit 5faf2ba42d7b1c0977169ec3611df25a3c08eb13. List entries are unchanged; the client applies its own matching rules and exceptions. The license text is included in licenses/LDNOOBW-CC-BY-4.0.txt.
+
+Announcer recordings:
+Perfect: recorded and performed by Aimee Smith (https://www.aimeesmithva.com/), Announcer Voice Pack (Fighting, Female), uploaded by WinterWalrus, https://opengameart.org/content/announcer-voice-pack-fighting-female. CC BY 4.0 https://creativecommons.org/licenses/by/4.0/. Converted from WAV to mono Opus; no endorsement implied.
+Godlike / Holy shit: jkerman, Old-school arena FPS announcer voice lines, https://freesound.org/people/jkerman/sounds/718360/, 2024-01-05. CC BY 4.0 https://creativecommons.org/licenses/by/4.0/. Extracted phrases from public high-quality preview; converted to mono Opus; no endorsement implied.
+Full license: licenses/Announcer-CC-BY-4.0.txt.

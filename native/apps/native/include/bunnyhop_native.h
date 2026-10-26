@@ -55,6 +55,17 @@ typedef struct BhSnapshot {
     float stamina_ms, base_velocity[3], health, gravity_scale, speed_scale;
     uint32_t weapons, active_weapon, movement_mode, water_level;
 } BhSnapshot;
+/* Additive, display-only telemetry. Existing state/snapshot layouts remain unchanged.
+ * valid is the web jumpStatsValid clean-tick observation, false for timer clamps/non-walk modes.
+ * epoch changes on external state/configuration mutations and replay seeks; never serialized.
+ * pre/post and command are canonical simulation endpoints/input, available for live and replay steps.
+ */
+typedef struct BhJumpObservation {
+    BhState pre, post;
+    BhCmd command;
+    uint32_t valid, epoch;
+} BhJumpObservation;
+int bh_jump_observation(BhContext *ctx, BhJumpObservation *out);
 /* kind: 0=start, 1=end, 2=stage, 3=checkpoint. Coordinates are canonical f32. */
 typedef struct BhZone {
     uint32_t kind, track, index;
@@ -112,6 +123,9 @@ int bh_record_fold(BhContext *ctx, uint32_t hash, size_t from_index, size_t to_i
 const char *bh_record_summary_json(BhContext *ctx, size_t *byte_count);
 /* SHA-256 lowercase hex, 64 characters plus NUL. NULL bytes permitted only for zero length. */
 int bh_sha256(const uint8_t *bytes, size_t byte_count, char out_hex[65]);
+/* Strict Ed25519 verification for bounded release manifests. Public key32, signature64. */
+int bh_verify_release_signature(const uint8_t *key, const uint8_t *signature, const uint8_t *bytes, size_t byte_count);
+int bh_sha256_file(const char *path, uint64_t max_bytes, char out_hex[65]);
 
 uint32_t bh_abi_version(void);
 BhContext *bh_create(void);
@@ -139,6 +153,8 @@ const uint32_t *bh_indices(const BhContext *ctx, size_t *index_count);
 const BhGroup *bh_groups(const BhContext *ctx, size_t *group_count);
 const BhMaterial *bh_materials(const BhContext *ctx, size_t *material_count);
 int bh_lightmap(BhContext *ctx, BhImage *out);
+/* 1 updated, 0 unchanged; errors are available through bh_last_error. */
+int bh_lightmap_update(BhContext *ctx, BhImage *out);
 int bh_lightmap_info(BhContext *ctx, BhLightmapInfo *out);
 int bh_texture(BhContext *ctx, uint32_t index, BhImage *out);
 int bh_model_transform(BhContext *ctx, uint32_t model, BhTransform *out);
@@ -257,6 +273,8 @@ int bh_ghost_events(BhContext *ctx, uint32_t handle, uint32_t from, uint32_t to,
  */
 const char *bh_overlay_json(BhContext *ctx, size_t *byte_count);
 const uint32_t *bh_overlay_states(BhContext *ctx, size_t *count);
+/* Entity index / enabled flag pairs for map-authored particles and lights. */
+const uint32_t *bh_effect_states(BhContext *ctx, size_t *count);
 
 /* Audio surface query matches shared surfaces.ts world-mesh grid. surface: concrete0,metal1,wood2,
  * grass3,tile4,water5; -1 absent. material indexes bh_material_names_json; missing heights are NaN.

@@ -1,0 +1,57 @@
+{
+  "sfx": {
+    "announcer_perfect": {
+      "variants": 1,
+      "durations": [
+        0.869
+      ]
+    },
+    "announcer_godlike": {
+      "variants": 1,
+      "durations": [
+        2.408
+      ]
+    },
+    "announcer_holyshit": {
+      "variants": 1,
+      "durations": [
+        2.658
+      ]
+    }
+  },
+  "credits": [
+    "Perfect: recorded and performed by Aimee Smith (https://www.aimeesmithva.com/), Announcer Voice Pack (Fighting, Female), uploaded by WinterWalrus, https://opengameart.org/content/announcer-voice-pack-fighting-female. CC BY 4.0 https://creativecommons.org/licenses/by/4.0/. Converted from WAV to mono Opus; no endorsement implied.",
+    "Godlike / Holy shit: jkerman, Old-school arena FPS announcer voice lines, https://freesound.org/people/jkerman/sounds/718360/, 2024-01-05. CC BY 4.0 https://creativecommons.org/licenses/by/4.0/. Extracted phrases from public high-quality preview; converted to mono Opus; no endorsement implied."
+  ],
+  "license": "CC-BY-4.0",
+  "sources": [
+    {
+      "url": "https://opengameart.org/sites/default/files/Fighting.zip",
+      "sha256": "8f05a778c05f359cb5460ad46b836d88fbefafa4966283b9ebedf21dd6e30bb7"
+    },
+    {
+      "url": "https://cdn.freesound.org/previews/718/718360_8407562-hq.mp3",
+      "sha256": "0b687a2802ca2d762ea44315301a3642b824a4ed4a598091860f7d5b51bb0c3f"
+    }
+  ],
+  "files": {
+    "announcer_perfect-1.webm": {
+      "sha256": "ffc3efaaa9b4dc108c70aa2334a7e20be949e11fb77e879c10546b2ae7951302",
+      "source": "perfect.wav",
+      "startSeconds": 0,
+      "durationSeconds": null
+    },
+    "announcer_godlike-1.webm": {
+      "sha256": "b07c310e9b640c3b502254d21a695f49377502a765cd662f7740fe1a489167cb",
+      "source": "jkerman-announcer.mp3",
+      "startSeconds": 39.3,
+      "durationSeconds": 2.4
+    },
+    "announcer_holyshit-1.webm": {
+      "sha256": "27bc890b4f0a1ea8352462fc826cc683b7081840f080cf282dd5a87d58cc3abc",
+      "source": "jkerman-announcer.mp3",
+      "startSeconds": 55.02,
+      "durationSeconds": 2.65
+    }
+  }
+}

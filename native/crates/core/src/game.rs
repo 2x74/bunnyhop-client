@@ -2655,6 +2655,9 @@ impl Game {
                 e.visible = !e.visible;
                 e.solid = if e.visible { e.solidity != 1 } else { e.solidity == 2 };
             }
+            ("env_smokestack" | "func_smokevolume" | "env_spritetrail" | "light" | "light_spot" | "light_dynamic", "turnon" | "enable") => e.visible = true,
+            ("env_smokestack" | "func_smokevolume" | "env_spritetrail" | "light" | "light_spot" | "light_dynamic", "turnoff" | "disable") => e.visible = false,
+            ("env_smokestack" | "func_smokevolume" | "env_spritetrail" | "light" | "light_spot" | "light_dynamic", "toggle") => e.visible = !e.visible,
             ("func_wall_toggle", "turnon") => (e.visible, e.solid) = (true, true),
             ("func_wall_toggle", "turnoff") => (e.visible, e.solid) = (false, false),
             ("func_wall_toggle", "toggle") => (e.visible, e.solid) = (!e.visible, !e.visible),
@@ -3452,6 +3455,12 @@ impl Game {
             .collect()
     }
 
+    /// Presentation entity states share the simulation snapshot and output queue, so replay seeks restore them.
+    pub fn effect_states(&self) -> Vec<(usize, bool)> {
+        self.ents.iter().enumerate().filter(|(_, e)| matches!(e.class.as_str(), "env_smokestack" | "func_smokevolume" | "env_spritetrail" | "light" | "light_spot" | "light_dynamic"))
+            .map(|(i, e)| (i, e.visible && !e.removed)).collect()
+    }
+
     /// Sweep the player's current hull through the full collision scene (world, displacements,
     /// static props, solid brush entities) with MASK_PLAYERSOLID.
     pub fn trace_player_hull(&self, start: [f32; 3], end: [f32; 3]) -> Trace {
@@ -3943,7 +3952,12 @@ fn build_entity(e: &Entity, models: &[Model], tick_interval: f32, outputs: Vec<O
         })
     });
     let mut solid = false;
-    let mut visible = true;
+    let mut visible = match class.as_str() {
+        "light" | "light_spot" => spawnflags & 1 == 0,
+        "env_smokestack" => e.int("InitialState") != 0,
+        "func_smokevolume" => !disabled,
+        _ => true,
+    };
     let solidity = e.int("Solidity");
     let filter = e.get("filtername").filter(|f| !f.is_empty()).map(str::to_string);
     let trigger = |kind| {

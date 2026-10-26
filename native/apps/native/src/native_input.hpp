@@ -57,7 +57,7 @@ struct TurnAdmission {
 // a float rounding error for every mouse report. Only SDL relative motion feeds this.
 struct Input {
     double yaw_base = 0, yaw_counts = 0, pitch = 0, sensitivity = 2, vertical_sensitivity=2;
-    bool separate_vertical=false;
+    bool separate_vertical=false,invert_y=false;
     uint32_t epoch=0,kind=1,frames=0,motion_events=0;
     uint32_t held = 0, pulse = 0;
     std::optional<uint32_t> sampled_epoch;
@@ -82,7 +82,7 @@ struct Input {
     void motion(double x, double y) {
         if(!std::isfinite(x)||!std::isfinite(y))return;
         ++motion_events;yaw_counts += x;
-        pitch = std::clamp(pitch + y * (separate_vertical?vertical_sensitivity:sensitivity) * 0.022, -89.0, 89.0);
+        pitch = std::clamp(pitch + (invert_y?-y:y) * (separate_vertical?vertical_sensitivity:sensitivity) * 0.022, -89.0, 89.0);
     }
 
     // ---- per-tick proration (Momentum's m_rawinput 2) ------------------
@@ -142,7 +142,7 @@ struct Input {
         acc_events-=e;
         if(x==0&&y==0&&e==0)return;
         motion_events+=e;yaw_counts+=x;
-        pitch = std::clamp(pitch + y * (separate_vertical?vertical_sensitivity:sensitivity) * 0.022, -89.0, 89.0);
+        pitch = std::clamp(pitch + (invert_y?-y:y) * (separate_vertical?vertical_sensitivity:sensitivity) * 0.022, -89.0, 89.0);
     }
 
     double pending_counts() const { return acc_x; }

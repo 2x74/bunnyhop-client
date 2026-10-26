@@ -5,7 +5,7 @@
 // everything else once typing pauses, so "Dick" on the way to "Dickens" isn't flagged halfway. Availability comes
 // from GET /names/check after the pause.
 
-import { api, ApiError, type User } from "../api";
+import { api, type RequestDispatch, ApiError, type User } from "../api";
 import { cleanName, nameProblem, NAME_MAX, NAME_MESSAGES, suggestName, type NameError } from "../moderation/names";
 import { h } from "./dom";
 import { sfx } from "../audio";
@@ -37,7 +37,7 @@ export function nameErrorMessage(e: unknown): string {
   return "Couldn't reach the server. Try again.";
 }
 
-export function nameField(o: { initial?: string; label?: string; autofocus?: boolean; onSaved?: (u: User | null, name: string) => void; onInput?: () => void } = {}): NameField {
+export function nameField(o: { dispatch?:RequestDispatch; initial?: string; label?: string; autofocus?: boolean; onSaved?: (u: User | null, name: string) => void; onInput?: () => void } = {}): NameField {
   const id = `name-field-${++uid}`;
   const input = h("input.nf-input", {
     id,
@@ -150,7 +150,7 @@ export function nameField(o: { initial?: string; label?: string; autofocus?: boo
         return name;
       }
       try {
-        const u = await api.setDisplayName(name);
+        const u = await api.setDisplayName(name,o.dispatch);
         localStorage.setItem(NAME_LOCAL_KEY, u.name);
         input.value = u.name;
         set(u.nameAdjusted ? `That one was taken. You're ${u.name}.` : "Saved.", u.nameAdjusted ? "warn" : "ok");

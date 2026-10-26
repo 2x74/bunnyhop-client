@@ -1,0 +1,2 @@
+#pragma once
+namespace native { inline constexpr char update_config_json[] = R"UPDATES(@BUNNYHOP_UPDATE_CONFIG@)UPDATES"; }

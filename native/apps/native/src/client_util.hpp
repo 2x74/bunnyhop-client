@@ -26,23 +26,31 @@ inline std::string replay_player_name(std::string_view name) {
 // Parsed rather than searched, so a host is matched as a host and never as a
 // substring: "https://github.com.evil.test/" and "https://evil.test/?=github.com"
 // both fail here, as does "https://github.com@evil.test/".
-inline bool open_external(const std::string &url) {
-    static constexpr std::string_view allowed[]={"github.com","1998.lol","bunnyhop.lol","discord.gg"};
+inline bool external_url_allowed(const std::string &url) {
+    static constexpr std::string_view allowed[]={"github.com","1998.lol","bunnyhop.lol","discord.gg","discord.com","youtube.com","twitch.tv","tiktok.com","x.com"};
     static constexpr std::string_view scheme="https://";
     if(url.size()<scheme.size()+3||url.size()>2048||!url.starts_with(scheme))return false;
     // Control characters and spaces can be read differently by whatever the
     // desktop hands this to, so refuse them rather than try to normalise.
-    for(const unsigned char c:url)if(c<=0x20||c==0x7f)return false;
+    for(const unsigned char c:url)if(c<=0x20||c==0x7f||c=='\\')return false;
     const auto authority_end=url.find_first_of("/?#",scheme.size());
     const auto authority=url.substr(scheme.size(),
         authority_end==std::string::npos?std::string::npos:authority_end-scheme.size());
     if(authority.empty()||authority.find('@')!=std::string::npos)return false;
     const auto host=authority.substr(0,authority.find(':'));
+    if(host=="checkout.stripe.com"){
+        if(authority!="checkout.stripe.com"&&authority!="checkout.stripe.com:443")return false;
+        const auto path=authority_end==std::string::npos?std::string():url.substr(authority_end,url.find_first_of("?#",authority_end)-authority_end);
+        return path.starts_with("/c/pay/")||path.starts_with("/pay/");
+    }
     bool permitted=false;
     for(const auto &candidate:allowed)
         if(host==candidate||(host.size()>candidate.size()+1&&host.ends_with(candidate)&&
            host[host.size()-candidate.size()-1]=='.')){permitted=true;break;}
-    if(!permitted){std::cerr<<"Refused an external link outside the allowed sites\n";return false;}
+    return permitted;
+}
+inline bool open_external(const std::string &url) {
+    if(!external_url_allowed(url)){std::cerr<<"Refused an external link outside the allowed sites\n";return false;}
     if(!SDL_OpenURL(url.c_str())){std::cerr<<"Could not open "<<url<<": "<<SDL_GetError()<<'\n';return false;}
     return true;
 }

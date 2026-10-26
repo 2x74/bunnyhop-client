@@ -82,7 +82,7 @@ function notices(resources:string,extra:string[]){
  writeFileSync(join(to,"rust-dependencies.json"),JSON.stringify(index,null,2)+"\n");
 }
 function windowsDependencies(exe:string,destination:string,search:string[]){
- const queue=[exe],seen=new Set<string>();const system=/^(?:api-ms-|ext-ms-|kernel32|user32|gdi32|advapi32|shell32|ole32|oleaut32|comdlg32|comctl32|ws2_32|winhttp|wininet|crypt32|bcrypt|ntdll|secur32|userenv|version|shlwapi|urlmon|dwmapi|imm32|setupapi|winmm|opengl32|glu32|ucrtbase|msvcrt|rpcrt4|normaliz|dnsapi|iphlpapi|wldap32|dbghelp|hid|cfgmgr32|powrprof|dwrite|dxgi|d3d11|d3d12|dcomp|windowscodecs)\b/i;
+ const queue=[exe],seen=new Set<string>();const system=/^(?:api-ms-|ext-ms-|kernel32|user32|gdi32|advapi32|shell32|ole32|oleaut32|comdlg32|comctl32|ws2_32|winhttp|wininet|crypt32|bcrypt|ntdll|secur32|userenv|version|shlwapi|urlmon|dwmapi|imm32|setupapi|winmm|opengl32|glu32|ucrtbase|msvcrt|rpcrt4|normaliz|dnsapi|iphlpapi|wldap32|dbghelp|hid|cfgmgr32|powrprof|dwrite|d2d1|dxgi|d3d11|d3d12|dcomp|windowscodecs)\b/i;
  const redist=process.env.VCToolsRedistDir;if(redist)search.push(join(redist,"x64","Microsoft.VC143.CRT"));
  for(let i=0;i<queue.length;i++){for(const match of run(["dumpbin","/DEPENDENTS",queue[i]]).matchAll(/^\s+([A-Za-z0-9_.-]+\.dll)\s*$/gmi)){const name=match[1];if(system.test(name)||seen.has(name.toLowerCase()))continue;seen.add(name.toLowerCase());const file=[dirname(exe),...search,...(process.env.PATH??"").split(";")].map(p=>join(p,name)).find(existsSync);if(!file)throw new Error(`Unresolved Windows dependency ${name}; pass --dependencies DIR / configure VCToolsRedistDir`);const to=join(destination,name);copy(file,to);queue.push(to);}}
 }
@@ -125,7 +125,7 @@ if(import.meta.main){
  const executable=platform==="darwin"?join(packageRoot,"Contents/MacOS/bunnyhop-native"):platform==="win32"?join(packageRoot,"bunnyhop-native.exe"):join(packageRoot,"bin/bunnyhop-native");
  const resources=platform==="darwin"?join(packageRoot,"Contents/Resources"):platform==="win32"?join(packageRoot,"resources"):join(packageRoot,"share/bunnyhop-native");
  mkdirSync(resources,{recursive:true});copy(sourceBinary,executable);chmodSync(executable,0o755);
- copy(join(root,"target/native-menu/menu.html"),join(resources,"menu.html"));const assets=join(root,"target/native-assets");treeFiles(assets);copy(assets,join(resources,"native-assets"));
+ copy(join(root,"target/native-menu/menu.html"),join(resources,"menu.html"));const assets=join(root,"target/native-assets");treeFiles(assets);for(const file of ["actor-animations.json","actor-animations.bin","tp-inspects.json","runner.json","runner.bin"]){if(!existsSync(join(assets,file)))throw new Error(`Required hosted actor animation asset missing: ${file}`);}copy(assets,join(resources,"native-assets"));
  packageBranding(resources,packageRoot,platform);
  verifyMusicAssets(join(resources,"native-assets"));
  if(existsSync(join(root,"target/native-menu/menu-manifest.json"))){

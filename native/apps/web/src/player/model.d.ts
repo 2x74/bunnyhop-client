@@ -1,6 +1,8 @@
 // Shared presentation pose contract extracted from player/model.ts.
 // Native builds do not include the browser model facade or renderer.
 export interface PlayerPose {
+  /** Deterministic presentation clock for runner replay/export. */
+  visualTime?:number;
   /** Feet origin, Source units (x, y, z; z up). */
   position: ArrayLike<number>;
   /** Units/s. Derived from position changes when omitted. */

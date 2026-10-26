@@ -260,3 +260,87 @@ mod tests {
         assert!(!is_unlit(&[], &black));
     }
 }
+
+/// Optional client presentation layer for switchable/animated light pages. It leaves the movement mesh and the
+/// canonical style-0 atlas builder unchanged. Rectangles come from that builder, so UVs and packing cannot drift.
+pub struct StyleAtlas {
+    faces: Vec<StyleFace>,
+    width: u32,
+    height: u32,
+    previous: Option<[f32; 64]>,
+}
+struct StyleFace {
+    x: u32, y: u32, w: u32, h: u32,
+    styles: Vec<u8>,
+    pages: Vec<Vec<LightSample>>,
+}
+impl StyleAtlas {
+    pub fn new(bsp: &Bsp) -> Option<Self> {
+        if bsp.profile == playsrc_bsp::Profile::CsgoV21 { return None; }
+        let faces: &[Face] = crate::lump!(bsp, playsrc_bsp::FACES, Faces);
+        let texinfo: &[TextureInfo] = crate::lump!(bsp, playsrc_bsp::TEXINFO, TextureInfo);
+        if !faces.iter().any(|f| f.styles[0] != 255 && (f.styles[0] != 0 || f.styles[1] != 255)) { return None; }
+        let built = build(bsp, faces, texinfo);
+        let lighting: &[LightSample] = if built.atlas.hdr { crate::lump!(bsp, playsrc_bsp::LIGHTING_HDR, Lighting) } else { crate::lump!(bsp, playsrc_bsp::LIGHTING, Lighting) };
+        let mut work = Vec::new();
+        let mut total = 0usize;
+        for (i, f) in faces.iter().enumerate() {
+            let Some(rect) = built.rects[i] else { continue };
+            let styles = f.styles.iter().copied().take_while(|&s| s != 255).collect::<Vec<_>>();
+            if styles.is_empty() || styles == [0] { continue; }
+            let Some(ti) = texinfo.get(f.texture_info_index.max(0) as usize) else { continue };
+            let (w,h) = ((f.lightmap_size[0]+1) as u32,(f.lightmap_size[1]+1) as u32);
+            let n = (w*h) as usize;
+            let stride = n * if ti.flags & 0x800 != 0 { 4 } else { 1 };
+            let first = f.light_offset as usize / 4;
+            if first.checked_add((styles.len()-1)*stride+n).is_none_or(|end| end>lighting.len()) { continue; }
+            total += n*styles.len();
+            if total > 16_777_216 { return None; } // bound optional presentation memory, never compromise map loading
+            let pages = (0..styles.len()).map(|s| lighting[first+s*stride..first+s*stride+n].to_vec()).collect();
+            work.push(StyleFace{x:rect.x,y:rect.y,w,h,styles,pages});
+        }
+        if work.is_empty() { return None; }
+        Some(Self{faces:work,width:built.atlas.width,height:built.atlas.height,previous:None})
+    }
+    /// Rewrites only styled face blocks and their duplicated borders when a style value changes.
+    pub fn apply(&mut self, atlas: &mut Atlas, values: &[f32;64]) -> bool {
+        if self.width!=atlas.width || self.height!=atlas.height || self.previous.as_ref()==Some(values) { return false; }
+        for face in &self.faces {
+            for y in 0..face.h+2 { let sy=(y as i32-1).clamp(0,face.h as i32-1) as u32;
+                for x in 0..face.w+2 { let sx=(x as i32-1).clamp(0,face.w as i32-1) as u32;
+                    let sample=(sy*face.w+sx) as usize;
+                    let mut linear=[0f32;3];
+                    for (page,&style) in face.pages.iter().zip(&face.styles) {
+                        let s=&page[sample];let weight=values.get(style as usize).copied().unwrap_or(256./264.).max(0.);
+                        let scale=2f32.powi((s.exponent as i32).clamp(-32,16))/255.*weight;
+                        linear[0]+=s.red as f32*scale;linear[1]+=s.green as f32*scale;linear[2]+=s.blue as f32*scale;
+                    }
+                    let at=(((face.y-1+y)*atlas.width+face.x-1+x)*4) as usize;
+                    for c in 0..3 { atlas.rgba[at+c]=encode(linear[c],atlas.hdr); }
+                    atlas.rgba[at+3]=255;
+                }
+            }
+        }
+        self.previous=Some(*values);true
+    }
+}
+/// Source's canonical light style patterns, averaged for presentation (the web renderer uses the same averages).
+pub fn light_style_pattern(pattern: &str) -> f32 {
+    let mut sum=0u32;let mut count=0u32;
+    for c in pattern.bytes().map(|c|c.to_ascii_lowercase()).filter(|c|c.is_ascii_lowercase()){sum+=(c-b'a') as u32*22;count+=1;}
+    if count==0 {256./264.} else {sum as f32/count as f32/264.}
+}
+pub const LIGHT_STYLE_PATTERNS: [&str;13] = ["m","mmnmmommommnonmmonqnmmo","abcdefghijklmnopqrstuvwxyzyxwvutsrqponmlkjihgfedcba","mmmmmaaaaammmmmaaaaaabcdefgabcdefg","mamamamamama","jklmnopqrstuvwxyzyxwvutsrqponmlkj","nmonqnmomnmomomno","mmmaaaabcdefgmmmmaaaammmaamm","mmmaaammmaaammmabcdefaaaammmmabcdefmmmaaaa","aaaaaaaazzzzzzzz","mmamammmmammamamaaamammma","abcdefghijklmnopqrrqponmlkjihgfedcba","mmnnmmnnnmmnn"];
+
+#[cfg(test)]
+mod style_tests {
+    use super::*;
+    #[test] fn pattern_values_match_source(){assert_eq!(light_style_pattern("a"),0.);assert_eq!(light_style_pattern("m"),1.);assert_eq!(light_style_pattern("z"),25./12.);assert_eq!(light_style_pattern("am"),0.5);}
+    #[test] fn pages_add_in_linear_space_and_rewrite_borders(){
+        let sample=LightSample{red:64,green:32,blue:16,exponent:0};
+        let mut styles=StyleAtlas{faces:vec![StyleFace{x:1,y:1,w:1,h:1,styles:vec![0,32],pages:vec![vec![sample],vec![sample]]}],width:3,height:3,previous:None};
+        let mut atlas=Atlas{width:3,height:3,rgba:vec![0;36],hdr:true,scale:HDR_SCALE};let mut values=[0.;64];values[0]=1.;values[32]=1.;assert!(styles.apply(&mut atlas,&values));assert!(!styles.apply(&mut atlas,&values));
+        for pixel in atlas.rgba.chunks_exact(4){assert_eq!(pixel,&[encode(128./255.,true),encode(64./255.,true),encode(32./255.,true),255]);}
+        values[32]=0.;assert!(styles.apply(&mut atlas,&values));assert_eq!(atlas.rgba[0],encode(64./255.,true));
+    }
+}

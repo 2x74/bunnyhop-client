@@ -7,7 +7,7 @@ const ID = "AbCdEfGhIjKlMnOp";
 test("practice state keeps the web's shape and bounds", () => {
   expect(state.practice.keepVelocity).toBe(true); // web prefs practice.keepVelocity default
   applyState({ practice: { available: true, mode: true, active: true, tool: "noclip", noclip: true, menuOpen: true, count: 4, current: 9, keepVelocity: false, unavailable: null } });
-  expect(state.practice).toEqual({ available: true, unavailable: null, mode: true, active: true, tool: "noclip", noclip: true, menuOpen: true, count: 4, current: 4, keepVelocity: false });
+  expect(state.practice).toEqual({ available: true, unavailable: null, mode: true, active: true, thirdPerson: false, tool: "noclip", noclip: true, menuOpen: true, count: 4, current: 4, keepVelocity: false });
   applyState({ practice: { tool: "wallhack", count: -1, mode: "yes", unavailable: 7 } });
   expect(state.practice.tool).toBe("noclip");
   expect(state.practice.count).toBe(4);

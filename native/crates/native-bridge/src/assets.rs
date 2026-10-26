@@ -46,6 +46,8 @@ pub struct Assets {
     pub texinfo_drawn: Vec<bool>,
     pub overlay: CString,
     pub overlay_states: Vec<u32>,
+    pub effect_states: Vec<u32>,
+    pub light_styles: Option<bunnyhop_core::lightmap::StyleAtlas>,
     pub floor: Vec<BhFloorWeapon>,
     pub props: props::PropMesh,
     pub prop_groups: Vec<BhPropGroup>,
@@ -414,4 +416,45 @@ pub unsafe extern "C" fn bh_overlay_states(ctx: *mut BhContext, count: *mut usiz
         })
     };
     result
+}
+
+/// Pairs of entity index and enabled flag. Valid until the next call on this context.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_effect_states(ctx: *mut BhContext, count: *mut usize) -> *const u32 {
+    let mut result = ptr::null();
+    let _ = unsafe { output(count, 0) };
+    unsafe { call(ctx, |c| {
+        let m = c.map()?;
+        m.assets.effect_states.clear();
+        for (entity, enabled) in m.game.effect_states() {
+            m.assets.effect_states.extend([entity as u32, u32::from(enabled)]);
+        }
+        if !count.is_null() { output(count, m.assets.effect_states.len())?; }
+        result = m.assets.effect_states.as_ptr();
+        Ok(())
+    }) };
+    result
+}
+
+impl Map {
+    pub(super) fn refresh_light_styles(&mut self) -> bool {
+        let Some(styles)=self.assets.light_styles.as_mut() else {return false};
+        let mut values=[256.0/264.0;64];
+        for (i,p) in bunnyhop_core::lightmap::LIGHT_STYLE_PATTERNS.iter().enumerate(){values[i]=bunnyhop_core::lightmap::light_style_pattern(p);}
+        values[63]=0.;
+        let enabled=self.game.effect_states().into_iter().collect::<HashMap<_,_>>();
+        for (index,e) in self.game.entities.iter().enumerate(){
+            if !matches!(e.classname().to_ascii_lowercase().as_str(),"light"|"light_spot") {continue;}
+            let style=e.int("style");if !(32..64).contains(&style)||e.get("targetname").is_none(){continue;}
+            let preset=e.int("defaultstyle");let pattern=e.get("pattern").filter(|p|!p.is_empty()).unwrap_or_else(||bunnyhop_core::lightmap::LIGHT_STYLE_PATTERNS.get(preset.max(0) as usize).copied().unwrap_or("m"));
+            let on=enabled.get(&index).copied().unwrap_or(e.int("spawnflags")&1==0);
+            values[style as usize]=if on {bunnyhop_core::lightmap::light_style_pattern(pattern)} else {0.};
+        }
+        styles.apply(&mut self.mesh.lightmap,&values)
+    }
+}
+/// Returns an updated atlas only when a switchable light changed. Zero means the caller keeps its texture.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_lightmap_update(ctx:*mut BhContext,out:*mut BhImage)->c_int {
+    let mut changed=0;let status=unsafe { call(ctx,|c|{let m=c.map()?;if !m.refresh_light_styles(){return Ok(())}let a=&m.mesh.lightmap;output(out,BhImage{rgba:a.rgba.as_ptr(),byte_count:a.rgba.len(),width:a.width,height:a.height})?;changed=1;Ok(())}) };if status==0 {-1} else {changed}
 }

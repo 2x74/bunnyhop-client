@@ -3,7 +3,12 @@ Native SDL/OpenGL gameplay, WebKitGTK 4.1 menus/account. glibc, GPU/display driv
 WebKitGTK/GTK runtime are deliberately provided by the operating system and receive its security updates.
 
 Ubuntu/Debian runtime installation (review and run yourself):
-  sudo apt install libwebkit2gtk-4.1-0 libgtk-3-0t64 libgl1 libegl1 libx11-6 libxext6 libwayland-client0
+  sudo apt install libwebkit2gtk-4.1-0 libgtk-3-0t64 libpangocairo-1.0-0 libgl1 libegl1 libx11-6 libxext6 libwayland-client0
+
+Native Unicode HUD/chat text uses the system Pango/Cairo stack, including when menus are disabled.
+Install the fonts needed for the languages players use. Recommended broad fallback coverage:
+  sudo apt install fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji
+The system provides fontconfig and its font cache; fonts are not copied into the archive.
 
 SDL3 and non-system HTTP/compression dependencies are included when the build links them dynamically.
 RUNTIME.txt lists the exact linked libraries of this build. For another distribution, build/package there.

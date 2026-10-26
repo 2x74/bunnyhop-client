@@ -8,7 +8,7 @@ const bundledRoot = /^lib(?:SDL3|curl|ssl|crypto|z\.|zstd|brotli|idn|nghttp|psl|
 // Keep libc/toolchain, display/GPU/audio drivers and the desktop stack on the OS.
 // Other dependencies of bundled roots (e.g. curl's LDAP/GnuTLS dependencies)
 // must travel with them, even when their names don't match bundledRoot.
-const systemLibrary = /^(?:ld-linux[^/]*|lib(?:c|m|dl|pthread|rt|resolv|util|anl|nss_[\w-]+|BrokenLocale|stdc\+\+|gcc_s|GL[\w-]*|EGL|OpenGL|GLES[\w-]*|vulkan|gbm|drm[\w-]*|X[\w-]*|xcb[\w-]*|wayland[\w-]*|xkbcommon[\w-]*|asound|pulse[\w-]*|dbus-1|udev|systemd|decor-0|gtk-3|gdk-3|glib-2\.0|gobject-2\.0|gio-2\.0|gmodule-2\.0|webkit2gtk-4\.1|javascriptcoregtk-4\.1))\.so(?:\.|$)/;
+const systemLibrary = /^(?:ld-linux[^/]*|lib(?:c|m|dl|pthread|rt|resolv|util|anl|nss_[\w-]+|BrokenLocale|stdc\+\+|gcc_s|GL[\w-]*|EGL|OpenGL|GLES[\w-]*|vulkan|gbm|drm[\w-]*|X[\w-]*|xcb[\w-]*|wayland[\w-]*|xkbcommon[\w-]*|asound|pulse[\w-]*|dbus-1|udev|systemd|decor-0|gtk-3|gdk-3|glib-2\.0|gobject-2\.0|gio-2\.0|gmodule-2\.0|pango-1\.0|pangocairo-1\.0|pangoft2-1\.0|cairo(?:-gobject)?|harfbuzz(?:-subset)?|fontconfig|freetype|fribidi|webkit2gtk-4\.1|javascriptcoregtk-4\.1))\.so(?:\.|$)/;
 const systemPath = (path: string) => /^\/(?:usr\/)?lib(?:64|32)?\//.test(realpathSync(path));
 
 export function linuxLoaderEnvironment(discovery = false): NodeJS.ProcessEnv {

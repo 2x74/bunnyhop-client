@@ -1,0 +1,1209 @@
+{
+  "schema": 1,
+  "createdAt": "2026-10-26T17:12:45.785524+00:00",
+  "hardware": {
+    "machine": "MacBook Pro Mac17,9",
+    "cpu": "Apple M5 Pro, 15 CPU cores",
+    "gpu": "Apple M5 Pro, 16 GPU cores",
+    "memoryGB": 24,
+    "os": "macOS 27.0.1 (26A434)",
+    "power": "AC, battery charged",
+    "chartLabel": "Apple M5 Pro \u00b7 macOS 27.0.1"
+  },
+  "native": {
+    "head": "f9285b39c75ed3e5d6cc82a977f27176eb179ff9",
+    "uncommittedChanges": true,
+    "binarySHA256": "8c9f4639a4516cbdd3244e9371b2aa0c1ee64d7e4125c05a8b5e36c41892468d",
+    "build": "CMake Release, AppleClang, OpenGL 4.1"
+  },
+  "web": {
+    "build": {
+      "createdAt": "2026-10-26T17:01:10.270Z",
+      "mode": "production",
+      "instrumentation": "Only existing main.ts window.bunnyhop assignment enabled",
+      "mainSHA256": "cd8938c5fd0a888a8ded183435a219097206dee2347e437c6bcaa05b632b2490"
+    },
+    "backend": "Chromium headless, ANGLE Metal"
+  },
+  "method": {
+    "framesPerRun": 5000,
+    "warmupFrames": 500,
+    "repetitions": 3,
+    "scene": "fixed camera, matching BSP/content bytes, Source FOV90, classic/simple water, no actors/viewmodel/HUD/zones",
+    "clock": "visual time increments by 1/60 per frame, simulation does not advance",
+    "synchronization": "glFinish + one-pixel RGBA readback after every warmup/measured frame",
+    "throughput": "1000 / mean synchronized wall milliseconds",
+    "chart": "median of three run throughputs; points and whiskers show all runs/min-max, not confidence intervals",
+    "excluded": [
+      "simulation",
+      "input",
+      "network",
+      "menu",
+      "HUD",
+      "browser compositor",
+      "window presentation",
+      "image encoding",
+      "asset loading"
+    ],
+    "caveats": [
+      "Different GL drivers and material implementations; not pixel-identical",
+      "Not displayed gameplay FPS or input latency",
+      "Three fixed views on one Mac, not Windows/Linux qualification",
+      "No CPU/GPU frequency or background desktop control"
+    ]
+  },
+  "runs": [
+    {
+      "engine": "native",
+      "map": "bhop_lol_aero",
+      "height": 720,
+      "repeat": 1,
+      "file": "bhop_lol_aero-720p-r1-native.json",
+      "fps": 698.6016198959193,
+      "sha256": "0fa71a0efb653a56b32b66fb9d27204ac8be38b83ce341eb95929c7fd0a3b00e",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 1.431430978,
+        "p50": 1.4615,
+        "p95": 1.502083,
+        "p99": 1.558958,
+        "max": 2.849958
+      },
+      "submissionMs": {
+        "mean": 0.187385998,
+        "p95": 0.213875
+      },
+      "eye": [
+        -2834.0,
+        -2811.0,
+        65.0
+      ],
+      "yaw": 50.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "web",
+      "map": "bhop_lol_aero",
+      "height": 720,
+      "repeat": 1,
+      "file": "bhop_lol_aero-720p-r1-web.json",
+      "fps": 564.2321928342712,
+      "sha256": "0fa71a0efb653a56b32b66fb9d27204ac8be38b83ce341eb95929c7fd0a3b00e",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 1.7723199999928474,
+        "p50": 1.7000000178813934,
+        "p95": 2.0999999940395355,
+        "p99": 2.5999999940395355,
+        "max": 4.899999976158142
+      },
+      "submissionMs": {
+        "mean": 0.23597999991178512,
+        "p95": 0.30000001192092896
+      },
+      "eye": [
+        -2834.0,
+        -2811.0,
+        65.0
+      ],
+      "yaw": 50.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "native",
+      "map": "bhop_lol_aero",
+      "height": 1080,
+      "repeat": 1,
+      "file": "bhop_lol_aero-1080p-r1-native.json",
+      "fps": 701.176092139246,
+      "sha256": "0fa71a0efb653a56b32b66fb9d27204ac8be38b83ce341eb95929c7fd0a3b00e",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 1.4261752664,
+        "p50": 1.371583,
+        "p95": 1.614167,
+        "p99": 1.666167,
+        "max": 1.815625
+      },
+      "submissionMs": {
+        "mean": 0.1942897858,
+        "p95": 0.225333
+      },
+      "eye": [
+        -2834.0,
+        -2811.0,
+        65.0
+      ],
+      "yaw": 50.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "web",
+      "map": "bhop_lol_aero",
+      "height": 1080,
+      "repeat": 1,
+      "file": "bhop_lol_aero-1080p-r1-web.json",
+      "fps": 465.98322460520853,
+      "sha256": "0fa71a0efb653a56b32b66fb9d27204ac8be38b83ce341eb95929c7fd0a3b00e",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 2.1459999999940393,
+        "p50": 2.0999999940395355,
+        "p95": 2.699999988079071,
+        "p99": 3,
+        "max": 4.0999999940395355
+      },
+      "submissionMs": {
+        "mean": 0.23589999964237213,
+        "p95": 0.4000000059604645
+      },
+      "eye": [
+        -2834.0,
+        -2811.0,
+        65.0
+      ],
+      "yaw": 50.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "native",
+      "map": "bhop_xcsource",
+      "height": 720,
+      "repeat": 1,
+      "file": "bhop_xcsource-720p-r1-native.json",
+      "fps": 1807.2709318811515,
+      "sha256": "9f294938470134003056b05c4dfa6092296a62ef6eaf4e294cbba6f71a847dd5",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.5533204692,
+        "p50": 0.55525,
+        "p95": 0.576542,
+        "p99": 0.594208,
+        "max": 1.119584
+      },
+      "submissionMs": {
+        "mean": 0.031556894,
+        "p95": 0.03525
+      },
+      "eye": [
+        3259.47998046875,
+        310.5880126953125,
+        1537.0
+      ],
+      "yaw": 180.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "web",
+      "map": "bhop_xcsource",
+      "height": 720,
+      "repeat": 1,
+      "file": "bhop_xcsource-720p-r1-web.json",
+      "fps": 1058.6267493887192,
+      "sha256": "9f294938470134003056b05c4dfa6092296a62ef6eaf4e294cbba6f71a847dd5",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.9446199999928474,
+        "p50": 0.9000000059604645,
+        "p95": 1.0999999940395355,
+        "p99": 1.100000023841858,
+        "max": 2.199999988079071
+      },
+      "submissionMs": {
+        "mean": 0.05513999991416931,
+        "p95": 0.10000002384185791
+      },
+      "eye": [
+        3259.47998046875,
+        310.5880126953125,
+        1537.0
+      ],
+      "yaw": 180.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "native",
+      "map": "bhop_xcsource",
+      "height": 1080,
+      "repeat": 1,
+      "file": "bhop_xcsource-1080p-r1-native.json",
+      "fps": 1238.764825758864,
+      "sha256": "9f294938470134003056b05c4dfa6092296a62ef6eaf4e294cbba6f71a847dd5",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.807255727,
+        "p50": 0.884625,
+        "p95": 0.935166,
+        "p99": 0.961708,
+        "max": 1.082
+      },
+      "submissionMs": {
+        "mean": 0.033358289,
+        "p95": 0.047625
+      },
+      "eye": [
+        3259.47998046875,
+        310.5880126953125,
+        1537.0
+      ],
+      "yaw": 180.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "web",
+      "map": "bhop_xcsource",
+      "height": 1080,
+      "repeat": 1,
+      "file": "bhop_xcsource-1080p-r1-web.json",
+      "fps": 804.7642040882022,
+      "sha256": "9f294938470134003056b05c4dfa6092296a62ef6eaf4e294cbba6f71a847dd5",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 1.2426,
+        "p50": 1.199999988079071,
+        "p95": 1.5999999940395355,
+        "p99": 1.699999988079071,
+        "max": 2.399999976158142
+      },
+      "submissionMs": {
+        "mean": 0.06142000002861023,
+        "p95": 0.10000002384185791
+      },
+      "eye": [
+        3259.47998046875,
+        310.5880126953125,
+        1537.0
+      ],
+      "yaw": 180.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "native",
+      "map": "bh_aztec",
+      "height": 720,
+      "repeat": 1,
+      "file": "bh_aztec-720p-r1-native.json",
+      "fps": 361.3763626984243,
+      "sha256": "c9cff2c33ea13f5673aa6aadf0826ce2bd146fca41f82c2ba75ab7e4f478bb35",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 2.7671981436,
+        "p50": 2.745375,
+        "p95": 3.172042,
+        "p99": 3.5725,
+        "max": 4.06225
+      },
+      "submissionMs": {
+        "mean": 2.5622908554,
+        "p95": 2.767333
+      },
+      "eye": [
+        53.653900146484375,
+        -141.0,
+        144.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "web",
+      "map": "bh_aztec",
+      "height": 720,
+      "repeat": 1,
+      "file": "bh_aztec-720p-r1-web.json",
+      "fps": 757.1627597040929,
+      "sha256": "c9cff2c33ea13f5673aa6aadf0826ce2bd146fca41f82c2ba75ab7e4f478bb35",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 1.3207200000047683,
+        "p50": 1.300000011920929,
+        "p95": 1.4000000059604645,
+        "p99": 1.5,
+        "max": 2
+      },
+      "submissionMs": {
+        "mean": 0.06816000009179116,
+        "p95": 0.19999998807907104
+      },
+      "eye": [
+        53.653900146484375,
+        -141.0,
+        144.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "native",
+      "map": "bh_aztec",
+      "height": 1080,
+      "repeat": 1,
+      "file": "bh_aztec-1080p-r1-native.json",
+      "fps": 383.33358187149446,
+      "sha256": "c9cff2c33ea13f5673aa6aadf0826ce2bd146fca41f82c2ba75ab7e4f478bb35",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 2.6086939608,
+        "p50": 2.367292,
+        "p95": 4.424083,
+        "p99": 4.703166,
+        "max": 5.723042
+      },
+      "submissionMs": {
+        "mean": 2.417200204,
+        "p95": 4.158583
+      },
+      "eye": [
+        53.653900146484375,
+        -141.0,
+        144.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "web",
+      "map": "bh_aztec",
+      "height": 1080,
+      "repeat": 1,
+      "file": "bh_aztec-1080p-r1-web.json",
+      "fps": 1266.079205899835,
+      "sha256": "c9cff2c33ea13f5673aa6aadf0826ce2bd146fca41f82c2ba75ab7e4f478bb35",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.7898400000095367,
+        "p50": 0.7999999821186066,
+        "p95": 0.9000000059604645,
+        "p99": 1,
+        "max": 1.4000000059604645
+      },
+      "submissionMs": {
+        "mean": 0.0738200000166893,
+        "p95": 0.19999998807907104
+      },
+      "eye": [
+        53.653900146484375,
+        -141.0,
+        144.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "web",
+      "map": "bhop_lol_aero",
+      "height": 720,
+      "repeat": 2,
+      "file": "bhop_lol_aero-720p-r2-web.json",
+      "fps": 843.8106488946329,
+      "sha256": "0fa71a0efb653a56b32b66fb9d27204ac8be38b83ce341eb95929c7fd0a3b00e",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 1.1850999999940395,
+        "p50": 1.0999999940395355,
+        "p95": 1.9000000059604645,
+        "p99": 2.4000000059604645,
+        "max": 3.7999999821186066
+      },
+      "submissionMs": {
+        "mean": 0.24151999997496604,
+        "p95": 0.4000000059604645
+      },
+      "eye": [
+        -2834.0,
+        -2811.0,
+        65.0
+      ],
+      "yaw": 50.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "native",
+      "map": "bhop_lol_aero",
+      "height": 720,
+      "repeat": 2,
+      "file": "bhop_lol_aero-720p-r2-native.json",
+      "fps": 829.4659765577205,
+      "sha256": "0fa71a0efb653a56b32b66fb9d27204ac8be38b83ce341eb95929c7fd0a3b00e",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 1.205594959,
+        "p50": 1.147042,
+        "p95": 1.561541,
+        "p99": 1.928208,
+        "max": 2.499125
+      },
+      "submissionMs": {
+        "mean": 0.2037366656,
+        "p95": 0.252916
+      },
+      "eye": [
+        -2834.0,
+        -2811.0,
+        65.0
+      ],
+      "yaw": 50.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "web",
+      "map": "bhop_lol_aero",
+      "height": 1080,
+      "repeat": 2,
+      "file": "bhop_lol_aero-1080p-r2-web.json",
+      "fps": 939.2140656603833,
+      "sha256": "0fa71a0efb653a56b32b66fb9d27204ac8be38b83ce341eb95929c7fd0a3b00e",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 1.0647200000107289,
+        "p50": 1,
+        "p95": 1.300000011920929,
+        "p99": 1.4000000059604645,
+        "max": 2
+      },
+      "submissionMs": {
+        "mean": 0.2265800000369549,
+        "p95": 0.30000001192092896
+      },
+      "eye": [
+        -2834.0,
+        -2811.0,
+        65.0
+      ],
+      "yaw": 50.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "native",
+      "map": "bhop_lol_aero",
+      "height": 1080,
+      "repeat": 2,
+      "file": "bhop_lol_aero-1080p-r2-native.json",
+      "fps": 914.734871814108,
+      "sha256": "0fa71a0efb653a56b32b66fb9d27204ac8be38b83ce341eb95929c7fd0a3b00e",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 1.0932129416,
+        "p50": 1.061166,
+        "p95": 1.426375,
+        "p99": 1.789958,
+        "max": 2.915333
+      },
+      "submissionMs": {
+        "mean": 0.2238686552,
+        "p95": 0.280125
+      },
+      "eye": [
+        -2834.0,
+        -2811.0,
+        65.0
+      ],
+      "yaw": 50.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "web",
+      "map": "bhop_xcsource",
+      "height": 720,
+      "repeat": 2,
+      "file": "bhop_xcsource-720p-r2-web.json",
+      "fps": 1574.852751279583,
+      "sha256": "9f294938470134003056b05c4dfa6092296a62ef6eaf4e294cbba6f71a847dd5",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.6349799999952316,
+        "p50": 0.5999999940395355,
+        "p95": 1,
+        "p99": 1,
+        "max": 2.199999988079071
+      },
+      "submissionMs": {
+        "mean": 0.0523400000333786,
+        "p95": 0.10000002384185791
+      },
+      "eye": [
+        3259.47998046875,
+        310.5880126953125,
+        1537.0
+      ],
+      "yaw": 180.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "native",
+      "map": "bhop_xcsource",
+      "height": 720,
+      "repeat": 2,
+      "file": "bhop_xcsource-720p-r2-native.json",
+      "fps": 1777.1288259349328,
+      "sha256": "9f294938470134003056b05c4dfa6092296a62ef6eaf4e294cbba6f71a847dd5",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.5627054074,
+        "p50": 0.559417,
+        "p95": 0.593708,
+        "p99": 0.615542,
+        "max": 1.352083
+      },
+      "submissionMs": {
+        "mean": 0.0332436832,
+        "p95": 0.042625
+      },
+      "eye": [
+        3259.47998046875,
+        310.5880126953125,
+        1537.0
+      ],
+      "yaw": 180.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "web",
+      "map": "bhop_xcsource",
+      "height": 1080,
+      "repeat": 2,
+      "file": "bhop_xcsource-1080p-r2-web.json",
+      "fps": 840.3361344537815,
+      "sha256": "9f294938470134003056b05c4dfa6092296a62ef6eaf4e294cbba6f71a847dd5",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 1.19,
+        "p50": 1.199999988079071,
+        "p95": 1.699999988079071,
+        "p99": 2.2000000178813934,
+        "max": 2.5999999940395355
+      },
+      "submissionMs": {
+        "mean": 0.06906000002622605,
+        "p95": 0.19999998807907104
+      },
+      "eye": [
+        3259.47998046875,
+        310.5880126953125,
+        1537.0
+      ],
+      "yaw": 180.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "native",
+      "map": "bhop_xcsource",
+      "height": 1080,
+      "repeat": 2,
+      "file": "bhop_xcsource-1080p-r2-native.json",
+      "fps": 1690.970761135413,
+      "sha256": "9f294938470134003056b05c4dfa6092296a62ef6eaf4e294cbba6f71a847dd5",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.591376281,
+        "p50": 0.559792,
+        "p95": 0.908167,
+        "p99": 1.022792,
+        "max": 1.707834
+      },
+      "submissionMs": {
+        "mean": 0.0348026678,
+        "p95": 0.048958
+      },
+      "eye": [
+        3259.47998046875,
+        310.5880126953125,
+        1537.0
+      ],
+      "yaw": 180.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "web",
+      "map": "bh_aztec",
+      "height": 720,
+      "repeat": 2,
+      "file": "bh_aztec-720p-r2-web.json",
+      "fps": 1597.5461690629897,
+      "sha256": "c9cff2c33ea13f5673aa6aadf0826ce2bd146fca41f82c2ba75ab7e4f478bb35",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.6259600000083446,
+        "p50": 0.5999999940395355,
+        "p95": 0.800000011920929,
+        "p99": 1,
+        "max": 2
+      },
+      "submissionMs": {
+        "mean": 0.06595999987125396,
+        "p95": 0.19999998807907104
+      },
+      "eye": [
+        53.653900146484375,
+        -141.0,
+        144.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "native",
+      "map": "bh_aztec",
+      "height": 720,
+      "repeat": 2,
+      "file": "bh_aztec-720p-r2-native.json",
+      "fps": 490.8225327937247,
+      "sha256": "c9cff2c33ea13f5673aa6aadf0826ce2bd146fca41f82c2ba75ab7e4f478bb35",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 2.037396275,
+        "p50": 1.968166,
+        "p95": 2.730291,
+        "p99": 2.844916,
+        "max": 4.822417
+      },
+      "submissionMs": {
+        "mean": 1.8542164148,
+        "p95": 2.527667
+      },
+      "eye": [
+        53.653900146484375,
+        -141.0,
+        144.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "web",
+      "map": "bh_aztec",
+      "height": 1080,
+      "repeat": 2,
+      "file": "bh_aztec-1080p-r2-web.json",
+      "fps": 851.0493438418193,
+      "sha256": "c9cff2c33ea13f5673aa6aadf0826ce2bd146fca41f82c2ba75ab7e4f478bb35",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 1.175019999998808,
+        "p50": 1.199999988079071,
+        "p95": 1.300000011920929,
+        "p99": 1.4000000059604645,
+        "max": 2.0999999940395355
+      },
+      "submissionMs": {
+        "mean": 0.07067999986410141,
+        "p95": 0.19999998807907104
+      },
+      "eye": [
+        53.653900146484375,
+        -141.0,
+        144.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "native",
+      "map": "bh_aztec",
+      "height": 1080,
+      "repeat": 2,
+      "file": "bh_aztec-1080p-r2-native.json",
+      "fps": 465.7706296988487,
+      "sha256": "c9cff2c33ea13f5673aa6aadf0826ce2bd146fca41f82c2ba75ab7e4f478bb35",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 2.1469795136,
+        "p50": 2.014,
+        "p95": 2.503667,
+        "p99": 2.791416,
+        "max": 4.547708
+      },
+      "submissionMs": {
+        "mean": 1.9708632886,
+        "p95": 2.316375
+      },
+      "eye": [
+        53.653900146484375,
+        -141.0,
+        144.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "native",
+      "map": "bhop_lol_aero",
+      "height": 720,
+      "repeat": 3,
+      "file": "bhop_lol_aero-720p-r3-native.json",
+      "fps": 777.496623750845,
+      "sha256": "0fa71a0efb653a56b32b66fb9d27204ac8be38b83ce341eb95929c7fd0a3b00e",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 1.2861792186,
+        "p50": 1.223167,
+        "p95": 1.51525,
+        "p99": 2.101209,
+        "max": 2.347458
+      },
+      "submissionMs": {
+        "mean": 0.1931664804,
+        "p95": 0.232125
+      },
+      "eye": [
+        -2834.0,
+        -2811.0,
+        65.0
+      ],
+      "yaw": 50.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "web",
+      "map": "bhop_lol_aero",
+      "height": 720,
+      "repeat": 3,
+      "file": "bhop_lol_aero-720p-r3-web.json",
+      "fps": 989.7070467258494,
+      "sha256": "0fa71a0efb653a56b32b66fb9d27204ac8be38b83ce341eb95929c7fd0a3b00e",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 1.010399999988079,
+        "p50": 0.9000000059604645,
+        "p95": 1.699999988079071,
+        "p99": 1.800000011920929,
+        "max": 4.699999988079071
+      },
+      "submissionMs": {
+        "mean": 0.21723999980688094,
+        "p95": 0.30000001192092896
+      },
+      "eye": [
+        -2834.0,
+        -2811.0,
+        65.0
+      ],
+      "yaw": 50.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "native",
+      "map": "bhop_lol_aero",
+      "height": 1080,
+      "repeat": 3,
+      "file": "bhop_lol_aero-1080p-r3-native.json",
+      "fps": 780.5235382051006,
+      "sha256": "0fa71a0efb653a56b32b66fb9d27204ac8be38b83ce341eb95929c7fd0a3b00e",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 1.2811913428,
+        "p50": 1.301291,
+        "p95": 1.556084,
+        "p99": 1.720125,
+        "max": 2.304583
+      },
+      "submissionMs": {
+        "mean": 0.1936052972,
+        "p95": 0.230333
+      },
+      "eye": [
+        -2834.0,
+        -2811.0,
+        65.0
+      ],
+      "yaw": 50.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "web",
+      "map": "bhop_lol_aero",
+      "height": 1080,
+      "repeat": 3,
+      "file": "bhop_lol_aero-1080p-r3-web.json",
+      "fps": 946.6828233879208,
+      "sha256": "0fa71a0efb653a56b32b66fb9d27204ac8be38b83ce341eb95929c7fd0a3b00e",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 1.056319999998808,
+        "p50": 1,
+        "p95": 1.2999999821186066,
+        "p99": 1.5,
+        "max": 2.2000000178813934
+      },
+      "submissionMs": {
+        "mean": 0.2231599995493889,
+        "p95": 0.30000001192092896
+      },
+      "eye": [
+        -2834.0,
+        -2811.0,
+        65.0
+      ],
+      "yaw": 50.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "native",
+      "map": "bhop_xcsource",
+      "height": 720,
+      "repeat": 3,
+      "file": "bhop_xcsource-720p-r3-native.json",
+      "fps": 2688.1578882697,
+      "sha256": "9f294938470134003056b05c4dfa6092296a62ef6eaf4e294cbba6f71a847dd5",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.3720019588,
+        "p50": 0.253334,
+        "p95": 0.592292,
+        "p99": 0.736,
+        "max": 2.5765
+      },
+      "submissionMs": {
+        "mean": 0.0384873376,
+        "p95": 0.05625
+      },
+      "eye": [
+        3259.47998046875,
+        310.5880126953125,
+        1537.0
+      ],
+      "yaw": 180.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "web",
+      "map": "bhop_xcsource",
+      "height": 720,
+      "repeat": 3,
+      "file": "bhop_xcsource-720p-r3-web.json",
+      "fps": 1022.4112547018457,
+      "sha256": "9f294938470134003056b05c4dfa6092296a62ef6eaf4e294cbba6f71a847dd5",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.9780800000011921,
+        "p50": 1,
+        "p95": 1.2000000178813934,
+        "p99": 2.0999999940395355,
+        "max": 3.5999999940395355
+      },
+      "submissionMs": {
+        "mean": 0.06849999994039535,
+        "p95": 0.19999998807907104
+      },
+      "eye": [
+        3259.47998046875,
+        310.5880126953125,
+        1537.0
+      ],
+      "yaw": 180.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "native",
+      "map": "bhop_xcsource",
+      "height": 1080,
+      "repeat": 3,
+      "file": "bhop_xcsource-1080p-r3-native.json",
+      "fps": 1553.7308658350735,
+      "sha256": "9f294938470134003056b05c4dfa6092296a62ef6eaf4e294cbba6f71a847dd5",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.6436121094,
+        "p50": 0.660042,
+        "p95": 0.90975,
+        "p99": 1.324167,
+        "max": 2.638625
+      },
+      "submissionMs": {
+        "mean": 0.0348542818,
+        "p95": 0.05
+      },
+      "eye": [
+        3259.47998046875,
+        310.5880126953125,
+        1537.0
+      ],
+      "yaw": 180.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "web",
+      "map": "bhop_xcsource",
+      "height": 1080,
+      "repeat": 3,
+      "file": "bhop_xcsource-1080p-r3-web.json",
+      "fps": 858.1775740930982,
+      "sha256": "9f294938470134003056b05c4dfa6092296a62ef6eaf4e294cbba6f71a847dd5",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 1.1652600000143052,
+        "p50": 1.100000023841858,
+        "p95": 1.699999988079071,
+        "p99": 2.2999999821186066,
+        "max": 4
+      },
+      "submissionMs": {
+        "mean": 0.07300000004768371,
+        "p95": 0.19999998807907104
+      },
+      "eye": [
+        3259.47998046875,
+        310.5880126953125,
+        1537.0
+      ],
+      "yaw": 180.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "native",
+      "map": "bh_aztec",
+      "height": 720,
+      "repeat": 3,
+      "file": "bh_aztec-720p-r3-native.json",
+      "fps": 455.16699024298345,
+      "sha256": "c9cff2c33ea13f5673aa6aadf0826ce2bd146fca41f82c2ba75ab7e4f478bb35",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 2.196995875,
+        "p50": 2.0295,
+        "p95": 3.129375,
+        "p99": 3.385958,
+        "max": 7.213667
+      },
+      "submissionMs": {
+        "mean": 2.0066492014,
+        "p95": 2.921042
+      },
+      "eye": [
+        53.653900146484375,
+        -141.0,
+        144.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "web",
+      "map": "bh_aztec",
+      "height": 720,
+      "repeat": 3,
+      "file": "bh_aztec-720p-r3-web.json",
+      "fps": 883.0645873402,
+      "sha256": "c9cff2c33ea13f5673aa6aadf0826ce2bd146fca41f82c2ba75ab7e4f478bb35",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 1.1324200000047684,
+        "p50": 1.0999999940395355,
+        "p95": 1.5,
+        "p99": 2,
+        "max": 3.699999988079071
+      },
+      "submissionMs": {
+        "mean": 0.079700000166893,
+        "p95": 0.19999998807907104
+      },
+      "eye": [
+        53.653900146484375,
+        -141.0,
+        144.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "native",
+      "map": "bh_aztec",
+      "height": 1080,
+      "repeat": 3,
+      "file": "bh_aztec-1080p-r3-native.json",
+      "fps": 415.80996749998525,
+      "sha256": "c9cff2c33ea13f5673aa6aadf0826ce2bd146fca41f82c2ba75ab7e4f478bb35",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 2.404944754,
+        "p50": 2.389417,
+        "p95": 2.790083,
+        "p99": 3.915417,
+        "max": 8.913834
+      },
+      "submissionMs": {
+        "mean": 2.2188374252,
+        "p95": 2.574125
+      },
+      "eye": [
+        53.653900146484375,
+        -141.0,
+        144.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": []
+    },
+    {
+      "engine": "web",
+      "map": "bh_aztec",
+      "height": 1080,
+      "repeat": 3,
+      "file": "bh_aztec-1080p-r3-web.json",
+      "fps": 848.8820223859793,
+      "sha256": "c9cff2c33ea13f5673aa6aadf0826ce2bd146fca41f82c2ba75ab7e4f478bb35",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 1.178019999986887,
+        "p50": 1.199999988079071,
+        "p95": 1.4000000059604645,
+        "p99": 1.899999976158142,
+        "max": 8.199999988079071
+      },
+      "submissionMs": {
+        "mean": 0.0686000000178814,
+        "p95": 0.19999998807907104
+      },
+      "eye": [
+        53.653900146484375,
+        -141.0,
+        144.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": []
+    }
+  ]
+}

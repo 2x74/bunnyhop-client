@@ -11,6 +11,7 @@ test("yaw slider edits survive stale host updates before and after dispatch", as
     await page.route("**/*", route => route.request().url() === "https://bunnyhop.lol/settings-sync"
       ? route.fulfill({ contentType: "text/html", body: html }) : route.abort());
     await page.addInitScript(() => {
+      localStorage.setItem("bunnyhop:onboarded","1");localStorage.setItem("bunnyhop:first-seen",String(Date.now()));
       (window as any).messages = [];
       window.addEventListener("bunnyhop:native-message", event => (window as any).messages.push((event as CustomEvent).detail));
     });

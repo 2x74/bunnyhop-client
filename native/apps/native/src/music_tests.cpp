@@ -49,7 +49,8 @@ int main(int argc,char **argv) {
         music.toggle();music.toggle();assert(!music.is_output_running());
         settled(music);
         assert(music.shown()->id=="game-airstrafe"&&music.is_playing());
-        music.skip();settled(music);assert(music.shown()->id=="game-prestrafe");
+        music.skip();settled(music);assert(music.shown()->id=="game-prestrafe"&&music.is_crossfading());
+        music.duck(.3f,1.2);std::this_thread::sleep_for(std::chrono::milliseconds(100));music.pump();assert(music.duck_level()<.5f);
         music.previous();settled(music);assert(music.shown()->id=="game-airstrafe");
         music.toggle();music.set_scene(false);assert(!music.is_playing());
         music.previous();settled(music);assert(music.shown()->id=="menu-drift"&&music.is_playing());
@@ -59,6 +60,8 @@ int main(int argc,char **argv) {
         assert(music.shown()->role=="game");
         music.set_playlist({},"empty pack");assert(!music.active()&&music.status()=="empty pack");
     }
+    // Multiple skip/crossfade decks must not leak subsystem references.
+    assert(SDL_WasInit(SDL_INIT_AUDIO)==0);
     SDL_Quit();
     {
         native::Audio disabled(root,root,false);

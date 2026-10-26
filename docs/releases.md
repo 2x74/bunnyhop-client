@@ -2,7 +2,7 @@
 
 Native releases are published in
 [2x74/bunnyhop-client](https://github.com/2x74/bunnyhop-client/releases).
-The first release is **v0.0.1**, an unsigned preview. The legacy Electron project
+Native **v0.4.0** is being prepared as an unsigned preview. The legacy Electron project
 and its root npm version are separate from the native package version.
 
 ## Preview policy and platform status
@@ -15,9 +15,9 @@ release must identify the checks actually completed and the remaining limits.
 
 The default macOS package is ad-hoc signed, without Developer ID or notarization.
 Windows and Linux archives are unsigned. SHA-256 checksums detect changes to the
-published files; they do not replace a publisher signature. No active update
-signing keys are configured. Updates are manual; the optional native update
-manifest tooling is not an in-app automatic updater.
+published files; they do not replace a publisher signature. The menu supports signed update checks and verified package downloads when
+release keys and a manifest origin are configured. Installation is manual; an
+unconfigured build must not claim automatic update availability.
 
 A release archive's existence does not admit ranked scores. Ranked submission
 still requires an exact, unexpired server allowlist entry for the packaged native
@@ -56,7 +56,7 @@ bun run check
 ctest --test-dir apps/native/build --output-on-failure
 cargo test -p bunnyhop-native-bridge --locked
 bun test ./apps/native/packaging
-bun run package --version 0.0.1
+bun run package --version 0.4.0
 ```
 
 The first build downloads the pinned public canonical WASM verifier and checks
@@ -73,7 +73,7 @@ Run the package checker against the stage path printed by the packager:
 
 ```sh
 bun apps/native/packaging/release-check.ts \
-  --package target/native-packages/bunnyhop-native-0.0.1-darwin-arm64
+  --package target/native-packages/bunnyhop-native-0.4.0-darwin-arm64
 ```
 
 Substitute the actual platform path. Package checks validate integrity and
@@ -84,9 +84,9 @@ Do not describe a compile-only or headless run as physical desktop testing.
 
 [Native release builds](https://github.com/2x74/bunnyhop-client/actions/workflows/native-release.yml)
 is installed at `.github/workflows/native-release.yml`. It runs for `v*` tag
-pushes and manual dispatch with a `version` input (default `0.0.1`) and a
+pushes and manual dispatch with a `version` input (default `0.4.0`) and a
 `platform` selector (`all`, `windows`, `linux`, or `macos`). Versions are
-validated as exact numeric `MAJOR.MINOR.PATCH`; use the matching `v0.0.1` tag for
+validated as exact numeric `MAJOR.MINOR.PATCH`; use the matching `v0.4.0` tag for
 this release.
 
 The workflow builds native resources, then macOS ARM64, Linux x64 and Windows
@@ -130,5 +130,5 @@ The retained Electron shell uses `npm ci`, `npm run verify`,
 repository root. Its older updater/release helpers are separate from the native
 workflow. See the
 [original Electron documentation](https://github.com/2x74/bunnyhop-client/blob/321e746/README.md)
-for its development and integration behavior. Native v0.0.1 does not publish
+for its development and integration behavior. Native releases do not publish
 Electron installers or enable the Electron update channel.

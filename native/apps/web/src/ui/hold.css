@@ -1,0 +1,9 @@
+/* Hold to confirm (ui/hold.ts): the fill is a pseudo-element scaled across the button (transform only). Holding: it
+   sweeps in over --hold with a linear ramp; let go: it drains back fast. */
+.btn.hold { position: relative; overflow: hidden; isolation: isolate; }
+.btn.hold::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--hold-fill, rgba(255, 93, 93, 0.32)); transform: scaleX(0); transform-origin: 0 50%; transition: transform 160ms var(--ease-takeoff); pointer-events: none; }
+.btn.hold.holding::before { transform: scaleX(1); transition: transform var(--hold, 700ms) linear; }
+.btn.hold.held::before { transform: scaleX(1); background: var(--loss); transition: none; }
+.btn.hold.held { color: #1c0606; }
+.btn.hold:active:not(:disabled) { transform: none; }
+.hold-label { position: relative; }

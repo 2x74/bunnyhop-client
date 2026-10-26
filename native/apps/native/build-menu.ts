@@ -2,6 +2,7 @@
 // entry point, Three module, renderer, WASM asset or network script is permitted.
 import { mkdir, writeFile } from "node:fs/promises";
 import { adaptSocialSource } from "./ui/adapt-social";
+import { adaptSupportSource } from "./ui/adapt-support";
 import { dirname, resolve, relative } from "node:path";
 import { parseArgs } from "node:util";
 
@@ -14,7 +15,7 @@ const web = resolve(root,"apps/web/src");
 // UI style labels/settings need these values, never Core or a WASM transport.
 // Extract the exact declarations at build time so they cannot drift from web UI.
 const coreSource = await Bun.file(resolve(web,"core.ts")).text();
-const constantNames = ["PHYSICS_V1","PHYSICS_V7","PHYSICS_VERSION","DEFAULT_SETTINGS","OVERLAY_STATE_ACTIVE","OVERLAY_STATE_VISIBLE"];
+const constantNames = ["PHYSICS_V1","PHYSICS_V7","PHYSICS_VERSION","DEFAULT_SETTINGS","OVERLAY_STATE_ACTIVE","OVERLAY_STATE_VISIBLE","WEAPON_IDS","WEAPON_EVENT_DROPPED","WEAPON_EVENT_GIVEN"];
 const coreConstants = constantNames.map(name=>{
   const match=coreSource.match(new RegExp(`export const ${name}(?:\\s*:\\s*\\w+)?\\s*=\\s*([\\s\\S]*?);`));
   if(!match) throw new Error(`Native menu constant extraction failed: ${name}`);
@@ -37,10 +38,14 @@ const result = await Bun.build({
         [resolve(web,"audio")]: "audio.ts",
         [resolve(web,"audio/index")]: "audio.ts",
         [resolve(web,"audio/ui")]: "audio.ts",
+        [resolve(web,"audio/announcer")]: "audio.ts",
         [resolve(web,"tutorial/entry")]: "tutorial-entry.ts",
         [resolve(web,"player/race")]: "race-bus.ts",
         [resolve(web,"play-lock")]: "play-lock.ts",
         [resolve(web,"hud")]: "hud-types.ts",
+        [resolve(web,"net/hud")]: "chat-hud.ts",
+        [resolve(web,"ui/loadout-stage")]: "loadout-stage.ts",
+        [resolve(web,"notify/item3d")]: "item-emblem.ts",
       };
       if(adapters[path]) return {path:resolve(native,adapters[path])};
       if (["main","render","session","attract","input"].some(name=>path===resolve(web,name))) throw new Error(`Gameplay module is forbidden in the native menu: ${path}`);
@@ -48,6 +53,7 @@ const result = await Bun.build({
     build.onLoad({filter:/.*/,namespace:"native-menu"},()=>({contents:coreConstants,loader:"ts"}));
     build.onLoad({filter:/\.[cm]?[jt]sx?$/}, async (args) => {
       modules.add(args.path);
+      if(args.path===resolve(web,"ui/support.ts"))return {contents:adaptSupportSource(await Bun.file(args.path).text(),resolve(native,"support-checkout.ts"),resolve(native,"bridge.ts")),loader:"ts",resolveDir:dirname(args.path)};
       if(["ui/servers.ts","net/lobby.ts","social/state.ts","social/dock.ts","ui/gauntlets.ts"].some(path=>args.path===resolve(web,path))) {
         let source=await Bun.file(args.path).text();
         if(args.path===resolve(web,"social/state.ts"))source=adaptSocialSource(source);
