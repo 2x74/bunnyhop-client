@@ -76,7 +76,7 @@ inline bool newer(const std::string &candidate,const std::string &current){
  for(int i=1;i<=3;i++){int c=compare(a[i],b[i]);if(c)return c>0;}
  std::string x=a[4],y=b[4];if(x.empty()||y.empty())return x.empty()&&!y.empty();
  auto parts=[](const std::string &s){std::vector<std::string> v;size_t at=0;while(at<=s.size()){auto end=s.find('.',at);v.push_back(s.substr(at,end==std::string::npos?end:end-at));if(end==std::string::npos)break;at=end+1;}return v;};
- auto av=parts(x),bv=parts(y);for(size_t i=0;i<std::min(av.size(),bv.size());i++){if(av[i]==bv[i])continue;bool an=av[i].find_first_not_of("0123456789")==std::string::npos,bn=bv[i].find_first_not_of("0123456789")==std::string::npos;if(an!=bn)return !an;if(an)return compare(av[i],bv[i])>0;return av[i]>bv[i];}return av.size()>bv.size();
+ auto av=parts(x),bv=parts(y);for(size_t i=0;i<(std::min)(av.size(),bv.size());i++){if(av[i]==bv[i])continue;bool an=av[i].find_first_not_of("0123456789")==std::string::npos,bn=bv[i].find_first_not_of("0123456789")==std::string::npos;if(an!=bn)return !an;if(an)return compare(av[i],bv[i])>0;return av[i]>bv[i];}return av.size()>bv.size();
 }
 struct Transfer {std::string bytes;std::ofstream *file=nullptr;uint64_t limit=0,total=0;std::atomic_bool *cancel=nullptr;std::atomic_uint64_t *progress=nullptr;};
 inline size_t receive(char *data,size_t size,size_t count,void *opaque)noexcept{auto &t=*static_cast<Transfer*>(opaque);if(size&&count>SIZE_MAX/size)return 0;const auto n=size*count;if(t.cancel->load()||n>t.limit-t.total)return 0;try{if(t.file){t.file->write(data,std::streamsize(n));if(!*t.file)return 0;}else t.bytes.append(data,n);t.total+=n;if(t.progress)t.progress->store(t.total);return n;}catch(...){return 0;}}
