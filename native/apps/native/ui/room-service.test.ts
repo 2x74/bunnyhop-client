@@ -27,3 +27,15 @@ test("room audio fences duplicate gifts, vote refreshes, verified announcer iden
  await f.service.join("new");const before=f.sent.length;old.message(gift as never);expect(f.sent.length).toBe(before);
  }finally{f.service.leave();}
 });
+
+test("kick cancels scheduled map work and rejects delayed native map acknowledgments",async()=>{
+ const f=fixture();try{
+  await f.service.join("test");const h=f.handlers[0];h.message(welcome("test"));
+  h.message({t:"change",change:{map:"bhop_other",tier:2,at:Date.now()-1000}});
+  h.message({t:"kicked",reason:"Removed"});await new Promise(resolve=>setTimeout(resolve,10));
+  f.service.hostMap("bhop_other");
+  expect(f.service.view.status).toBe("closed");expect(f.service.view.change).toBeNull();expect(f.handlers).toHaveLength(1);
+  expect(f.sent.filter(m=>m.type==="roomEvent"&&m.event.t==="nativeMap")).toHaveLength(0);
+  await f.service.join("test");expect(f.handlers).toHaveLength(2);
+ }finally{f.service.leave();}
+});

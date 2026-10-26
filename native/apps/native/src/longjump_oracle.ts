@@ -9,8 +9,8 @@ function flight(name:string,o:any={}){
  for(let k=0;k<(o.ground??15);k++)feed(state(++tick,{grounded:true,velocity:[o.preSpeed??250,0,0],crouched:!!o.takeoffCrouch}),cmd(0),0);
  for(let k=1;k<=125;k++){
   const landed=k===(o.landAt??75)&&!o.drop||k===o.landAt;
-  const z=o.drop?(k<37?k*1.5:54-(k-36)*3):k===75?(o.height??1.5):40;
-  const post=state(++tick,{position:[k*3,0,z],velocity:[250+k,0,k<37?150:-150],grounded:landed,jumpStatsValid:o.missing?undefined:k!==o.invalidAt,onLadder:k===o.ladderAt,crouched:o.duckAt? k>=o.duckAt:false});
+  const z=o.drop?(k<37?k*1.5:54-(k-36)*3):k===(o.landAt??75)?(o.height??1.5):40;
+  const post=state(++tick,{position:[k*(o.step??3),0,z],velocity:[250+k,0,k<37?150:-150],grounded:landed,jumpStatsValid:o.missing?undefined:k!==o.invalidAt,onLadder:k===o.ladderAt,crouched:o.duckAt? k>=o.duckAt:false});
   if(k===o.skipAt){post.tick++;tick++;}
   feed(post,cmd(k),k===1?(o.walkoff?0:2):k===o.eventsAt?(o.event??1):landed?4:0,o.dt??.01);
   if(landed)break;
@@ -26,5 +26,6 @@ flight("drop",{drop:true});flight("dirty drop",{drop:true,invalidAt:55});flight(
 flight("ladder",{ladderAt:25});flight("skipped tick",{skipAt:25});flight("walkoff",{walkoff:true});
 flight("pre-speed limit",{preSpeed:300});flight("pre-speed BH",{preSpeed:301});flight("ducked takeoff",{takeoffCrouch:true});flight("negative height edge",{height:-2});
 flight("timeout",{dt:.02});flight("too short",{landAt:15});flight("air duck",{duckAt:25});
+flight("recorded 50 ms interval",{dt:.05,landAt:14,step:16});
 writeFileSync(process.argv[2],JSON.stringify(cases));
 console.log(`Web LJ oracle: ${cases.length} cases, ${cases.reduce((n,c)=>n+c.ticks.length,0)} ticks, ${cases.reduce((n,c)=>n+c.reports,0)} reports`);

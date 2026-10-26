@@ -15,7 +15,7 @@ import type { NativeRoomService } from "./room-service";
 
 // Kept explicit so the host can validate actions without accepting arbitrary
 // console commands or JS. The native host remains authoritative for all rules.
-export type ChatAction={type:"chatAction";action:"restart"|"restartBonus"|"setStart"|"clearStart"|"weapon"|"scores"|"hidePlayers"|"openRoom";track?:number;weapon?:string;weaponId?:number;hidden?:boolean};
+export type ChatAction={type:"chatAction";action:"restart"|"restartBonus"|"setStart"|"clearStart"|"weapon"|"scores"|"hidePlayers"|"openRoom"|"jumpStats";track?:number;weapon?:string;weaponId?:number;hidden?:boolean};
 export interface NativeChatLine {type:"chatLine";text:string;name?:string;kind?:string;ms?:number;[key:string]:unknown}
 export type NativeChatMessage=ChatAction|NativeChatLine|{type:"chatSuggestions";items:string[];request:number;input:string};
 const emit=(value:NativeChatMessage)=>send(value as unknown as Parameters<typeof send>[0]);
@@ -27,7 +27,7 @@ export class NativeChatService {
   if(!registered){registered=true;registerSocialCommands();
    for(const weapon of ["usp","glock","knife"])registerChatCommand({name:weapon,where:"both",group:"guns",help:`get the ${weapon}`,run:ctx=>{if(!ctx.room?.spectating())emit({type:"chatAction",action:"weapon",weapon,weaponId:weaponByName(weapon)});}});
    registerChatCommand({name:"gun",aliases:["give","guns","weapons"],where:"both",group:"guns",help:"get a weapon",args:"[name]",run:(ctx,arg)=>{if(!arg){emit({type:"chatAction",action:"weapon",weapon:"menu"});return;}if(!weaponByName(arg))return ctx.reply(`Unknown weapon "${arg}".`);if(!ctx.room?.spectating())emit({type:"chatAction",action:"weapon",weapon:arg.slice(0,64),weaponId:weaponByName(arg)});}});
-   registerChatCommand({name:"ssj",where:"both",group:"more",help:"toggle jump stats",run:()=>send({type:"settings",patch:{jumpStats:!state.settings.jumpStats}})});
+   registerChatCommand({name:"ssj",where:"both",group:"more",help:"toggle jump stats",run:()=>emit({type:"chatAction",action:"jumpStats"})});
   }
  }
  resetAccount():void {this.accountEpoch++;this.room.leave();}

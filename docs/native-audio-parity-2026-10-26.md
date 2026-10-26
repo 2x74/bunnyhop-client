@@ -29,7 +29,7 @@ and enhanced rendering remain outside scope. Nothing here publishes a release.
   in live and replay audio. BH/fail reports, missing telemetry, timer clamps, seeks,
   mode changes, external mutations and interrupted flights cannot announce.
   Existing state layouts, physics, canonical snapshot bytes and replay data are unchanged.
-  Targeted follow-up: 32 web-oracle cases / 2,872 ticks / 14 reports, real flat-jump
+  Targeted follow-up: 33 web-oracle cases / 2,901 ticks / 15 reports, real flat-jump
   and wall-hit regressions, live/replay observation equality across six replay
   versions, offline mixer positive/negative checks, and enabled-control browser tests.
   All 27 native bridge tests and the three focused CTests pass; no full app build
@@ -177,3 +177,12 @@ The result records `audioScope: gameplay+music`. Evidence:
 
 These are local pre-candidate checks. Platform CI, exact artifact review and
 production admission must be recorded against the actual release commit.
+
+Independent source review found and resolved three regressions before candidate
+publication: a kicked room client could retain a scheduled map reconnect; solo
+`!ssj` used stale menu settings; and imported replays used the default interval
+for playback/audio timing. Kick cleanup now fences pending map work, SSJ toggles
+the authoritative host setting, and replay scheduling/audio/interpolation/camera
+use the recording's interval. Follow-up reviews pass. The new 50 ms LJ regression
+passes through the original tracker oracle and offline mixer. The final menu
+suite passes **194 tests / 1,629 assertions**.

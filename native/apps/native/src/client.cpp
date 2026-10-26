@@ -1121,6 +1121,7 @@ int run(const Options &opt) {
                 else if(type=="chatAction"){
                     const auto action=message.at("action").get<std::string>();
                     if(action=="scores")show_scores=!show_scores;
+                    else if(action=="jumpStats"){preferences["jumpStats"]=!preferences.at("jumpStats").get<bool>();native::save_settings(cache/"settings.json",preferences);apply_preferences();}
                     else if(action=="hidePlayers")hide_players=message.value("hidden",!hide_players);
                     else if(action=="openRoom"){show_menu(true);menu->evaluate_js("window.bunnyhopNativeMenu?.open?.('room')");}
                     else if(core&&!download.valid()){
@@ -1359,7 +1360,8 @@ int run(const Options &opt) {
         const bool activity_active=core&&!download.valid()&&focused&&captured&&!playback&&!spectator&&!opt.frames&&opt.runtime_smoke.empty();
         activity.frame(map_id,frame_seconds,std::chrono::duration<double>(now.time_since_epoch()).count(),activity_active);
         ++input_frame;input_frame_ms=frame_seconds*1000;
-        if(simulation_active) accumulator+=(opt.frames?dt:std::clamp(frame_seconds,0.0,.25))*(playback?playback_speed:1);
+        const double step_dt=playback?playback_info.at("settings").value("tickInterval",dt):dt;
+        if(simulation_active) accumulator+=(opt.frames?step_dt:std::clamp(frame_seconds,0.0,.25))*(playback?playback_speed:1);
         // Where simulated time has reached, on SDL's clock. accumulator is how
         // far behind the simulation is, so now minus it is where the next tick
         // starts. This frame's motion arrived now; the ticks below share it by
@@ -1367,10 +1369,10 @@ int run(const Options &opt) {
         const uint64_t wall_ns=SDL_GetTicksNS();
         const uint64_t behind_ns=uint64_t(std::max(0.0,accumulator)*1e9);
         uint64_t sim_ns=behind_ns<wall_ns?wall_ns-behind_ns:0;
-        const uint64_t tick_ns=uint64_t(dt*1e9);
+        const uint64_t tick_ns=uint64_t(step_dt*1e9);
         // Not simulating means no tick will take it, so apply it now.
         if(!simulation_active) input.consume_all(); else input.arrived(wall_ns);
-        while(accumulator>=dt) {
+        while(accumulator>=step_dt) {
             // --frames is a deterministic mode with no wall clock to share by,
             // so a tick there takes whatever is waiting.
             const double counts_before=input.yaw_counts;
@@ -1443,12 +1445,12 @@ int run(const Options &opt) {
             const bool attacked=bh_attack_report(core.get(),&attack);if(!playback)scope.observe(weapon,attacked?&attack:nullptr);
             audio.set_style(playback?playback_info.value("style",active_style):active_style);
             BhJumpObservation jump_observation{};const bool observed_jump=bh_jump_observation(core.get(),&jump_observation)!=0;
-            audio.tick(state,timing,weapon,attacked?&attack:nullptr,dt,surfaces[std::clamp(surface.surface,0,5)],water_depth,observed_jump?&jump_observation:nullptr);
+            audio.tick(state,timing,weapon,attacked?&attack:nullptr,step_dt,surfaces[std::clamp(surface.surface,0,5)],water_depth,observed_jump?&jump_observation:nullptr);
             if(timing.update_flags&16){char split[100];std::snprintf(split,sizeof(split),"Split %u  %.3fs",timing.split_count,timing.seconds);hud.set_run_comparison(split,"");}
             if(!playback)kept_weapons.observe(weapon);
             const uint32_t slot=weapon.active==weapon.primary?1:weapon.active==weapon.secondary?2:3;if(slot!=observed_slot){last_slot=observed_slot;observed_slot=slot;}
              if(curr.events&native::teleported) prev=curr;
-            accumulator-=dt;
+            accumulator-=step_dt;
             BhRunState tick_run{};
             if(playback||!zones.empty())require(bh_run_state(core.get(),&tick_run),core.get(),"Reading native timer");
             if(tutorial&&tutorial->is_active()&&!playback){BhCmd filtered=cmd;bh_last_command(core.get(),&filtered);const auto result=tutorial->tick(tutorial_pre,curr,filtered,curr.events,dt);if(result.completed)save_tutorial();if(tick_run.status==2&&tutorial->lesson_id()=="final"&&!tutorial_final_saved){tutorial->finish(tick_run.seconds);save_tutorial();tutorial_final_saved=true;}if(result.next_lesson>=0&&result.next_lesson<4){const char *ids[]={"jump","strafe","speed","final"};start_tutorial(ids[result.next_lesson],false);accumulator=0;break;}}
@@ -1505,7 +1507,7 @@ int run(const Options &opt) {
         }
         int width=0,height=0; SDL_GetWindowSizeInPixels(window.get(),&width,&height);
         if(renderer&&!video_capture&&!director_job) {
-            const float blend=(opt.frames||!simulation_active)?1.0f:float(accumulator/dt); float eye[3];
+            const float blend=(opt.frames||!simulation_active)?1.0f:float(accumulator/step_dt); float eye[3];
             for(int i=0;i<3;++i) eye[i]=prev.position[i]+(curr.position[i]-prev.position[i])*blend;
             eye[2]+=prev.view_offset_z+(curr.view_offset_z-prev.view_offset_z)*blend;
             BhSnapshot state{};bh_snapshot(core.get(),&state);
@@ -1531,7 +1533,7 @@ int run(const Options &opt) {
             if(playback){
                 camera_controls.consume_all();camera_controls.held=chat.active?0:input.held;
                 if(replay_camera.mode=="free")replay_camera.move(camera_controls,frame_seconds,held_codes.contains("ShiftLeft")||held_codes.contains("ShiftRight"));
-                replay_camera.sample(core.get(),state.player,camera_input.yaw(),camera_input.pitch,curr.tick*dt,eye,camera_input,frame_seconds);external_camera=replay_camera.third_person();
+                replay_camera.sample(core.get(),state.player,camera_input.yaw(),camera_input.pitch,curr.tick*step_dt,eye,camera_input,frame_seconds);external_camera=replay_camera.third_person();
             }else if(third_person){third_camera.sample(core.get(),state.player,camera_input.yaw(),camera_input.pitch,steady_seconds,eye,camera_input,frame_seconds);external_camera=true;}
             if(spectator){display_run={};for(const auto &row:room.scoreboard(steady_seconds))if(row.value("slot",256u)==*spectator){display_run.track=row.value("track",0u);display_style=row.value("style",std::string("autohop"));break;}if(const auto timing=room.timer(*spectator,steady_seconds)){display_run.seconds=timing->second;display_run.in_start=timing->first==1;display_run.status=timing->first==3?2:timing->first==2?1:0;}}
             if(hide_players)actors.clear();
@@ -1562,7 +1564,7 @@ int run(const Options &opt) {
             audio.listener(eye,camera_input.yaw());
             if(focused&&captured&&!opt.frames){for(const auto &actor:actors)if(actor.id!="local-camera-target")audio.spatial_actor(actor,frame_seconds,actor.id.starts_with("ghost-"));if(audible_ghost)audio.spatial_actor(*audible_ghost,frame_seconds,true);if(spectated_actor&&!external_camera)audio.spatial_actor(*spectated_actor,frame_seconds,false);}
             renderer->set_room_actors(actors);
-            renderer->draw(width,height,eye,camera_input,&state,(playback||opt.frames)?curr.tick*dt:std::chrono::duration<double>(now-started).count());
+            renderer->draw(width,height,eye,camera_input,&state,(playback||opt.frames)?curr.tick*step_dt:std::chrono::duration<double>(now-started).count());
             if((!menu||!menu->visible())&&!opt.camera&&preferences.at("hud").get<bool>()){
                 hud.overlay_begin(width,height,preferences.at("hudScale").get<float>());
                 const native::HudGeometry geometry(width,height,preferences.at("hudScale").get<float>());

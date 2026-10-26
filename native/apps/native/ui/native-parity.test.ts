@@ -357,3 +357,13 @@ test("replay vault filters and scrubbing restores prior playback without stale p
   expect(await page.getByRole('slider',{name:'Replay tick',exact:true}).inputValue()).toBe('800');await shot(page,'replay-vault-scrub.png');expect(errors).toEqual([]);
  }finally{await browser.close();}
 });
+
+test("solo SSJ commands toggle in the host without relying on stale menu settings",async()=>{
+ const {browser,page,errors,writesSeen}=await open();try{
+  await page.evaluate(()=>window.bunnyhopNativeMenu.onState({map:"bhop_test",settings:{jumpStats:true}}));
+  const from=await count(page);
+  await page.evaluate(()=>{window.bunnyhopNativeMenu.onChatSubmit!("!ssj");window.bunnyhopNativeMenu.onChatSubmit!("!ssj");});
+  expect(await sent(page,from)).toEqual([{type:"chatAction",action:"jumpStats"},{type:"chatAction",action:"jumpStats"}]);
+  expect(errors).toEqual([]);expect(writesSeen).toEqual([]);
+ }finally{await browser.close();}
+});
