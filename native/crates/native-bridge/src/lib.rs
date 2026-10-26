@@ -208,6 +208,15 @@ pub struct BhImage {
     pub width: u32,
     pub height: u32,
 }
+/// How to read the loaded map's lightmap atlas (bunnyhop_core::lightmap).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct BhLightmapInfo {
+    /// Divide the sRGB-decoded texel by this for linear light.
+    pub scale: f32,
+    /// Built from the map's HDR lighting: CS:S draws the map with auto exposure and bloom.
+    pub hdr: u32,
+}
 impl Default for BhImage {
     fn default() -> Self {
         Self {
@@ -977,8 +986,14 @@ pub unsafe extern "C" fn bh_lightmap(ctx: *mut BhContext, out: *mut BhImage) -> 
     }
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn bh_lightmap_scale() -> f32 {
-    bunnyhop_core::lightmap::LIGHTMAP_SCALE
+pub unsafe extern "C" fn bh_lightmap_info(ctx: *mut BhContext, out: *mut BhLightmapInfo) -> c_int {
+    unsafe {
+        call(ctx, |c| {
+            output(out, BhLightmapInfo::default())?;
+            let a = &c.map()?.mesh.lightmap;
+            output(out, BhLightmapInfo { scale: a.scale, hdr: a.hdr as u32 })
+        })
+    }
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_texture(ctx: *mut BhContext, index: u32, out: *mut BhImage) -> c_int {

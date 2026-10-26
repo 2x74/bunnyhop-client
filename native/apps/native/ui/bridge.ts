@@ -67,6 +67,8 @@ export interface NativeSettings {
   strafeTrainerSmoothing:number;
   /** "Less deadtime!" / "Strafe more!" / "Strafe less!" under the trainer. */
   strafeTrainerHints:boolean;
+  /** CS:S's auto exposure and bloom on maps with HDR lighting (the web's Source look). On by default. */
+  sourceLook:boolean;
   /** Moved HUD elements, in percent of the screen. Absent means the built-in place. */
   hudLayout:HudLayout;
   /** The whole HUD's size, in percent (the web's hud.scale × 100): 50–175. */
@@ -169,7 +171,7 @@ const nonNegativeInt=(value:unknown):value is number=>Number.isSafeInteger(value
 const shortText=(value:unknown,max=200):string|null=>typeof value==="string"?value.slice(0,max):null;
 
 export const state: NativeMenuState = { map: null, loading: false, error: null, sensitivity: 2, paused: true,style:"autohop",track:0,
-  settings:{sensitivity:2,verticalSensitivity:2,separateVertical:false,yawSpeed:DEFAULT_YAW_SPEED,yawSpeedAlt:DEFAULT_YAW_SPEED_ALT,fov:90,vsync:true,fpsLimit:0,volume:.8,muted:false,hud:true,crosshair:true,viewmodel:true,jumpStats:true,jumpStatsMode:"sixth",jumpStatsInterval:6,strafeTrainer:false,strafeTrainerSmoothing:1,strafeTrainerHints:true,hudLayout:{},hudScale:100,practiceKeepVelocity:true,sfxPack:"default",musicPack:"default",discordRichPresence:true,discordShowMap:true,discordJoin:true,discordJoinLobbies:false,privacyMode:false,binds:Object.fromEntries(NATIVE_BIND_ACTIONS.map(action=>[action,[...DEFAULT_BINDS[action]]]))},
+  settings:{sensitivity:2,verticalSensitivity:2,separateVertical:false,yawSpeed:DEFAULT_YAW_SPEED,yawSpeedAlt:DEFAULT_YAW_SPEED_ALT,fov:90,sourceLook:true,vsync:true,fpsLimit:0,volume:.8,muted:false,hud:true,crosshair:true,viewmodel:true,jumpStats:true,jumpStatsMode:"sixth",jumpStatsInterval:6,strafeTrainer:false,strafeTrainerSmoothing:1,strafeTrainerHints:true,hudLayout:{},hudScale:100,practiceKeepVelocity:true,sfxPack:"default",musicPack:"default",discordRichPresence:true,discordShowMap:true,discordJoin:true,discordJoinLobbies:false,privacyMode:false,binds:Object.fromEntries(NATIVE_BIND_ACTIONS.map(action=>[action,[...DEFAULT_BINDS[action]]]))},
   replays:[],discord:{state:"disabled",message:""},playback:{active:false,id:"",tick:0,totalTicks:0,paused:true,speed:1},ghost:{enabled:false,id:"",name:""},tutorial:{active:false,lesson:"jump",completed:[]},
   practice:{available:false,unavailable:null,mode:false,active:false,tool:null,noclip:false,menuOpen:false,count:0,current:0,keepVelocity:true},gauntlet:{id:null,map:null},player:null,music:null};
 
@@ -180,7 +182,7 @@ export function settingsPatch(value:unknown):Partial<NativeSettings> {
   const input=value as Record<string,unknown>,out:Record<string,unknown>={};
   for(const [key,min,max] of [["sensitivity",.01,100],["verticalSensitivity",.01,100],["fov",60,130],["volume",0,1],["yawSpeed",.01,1000],["yawSpeedAlt",.01,1000]] as const) if(typeof input[key]==="number"&&Number.isFinite(input[key])&&Number(input[key])>=min&&Number(input[key])<=max) out[key]=input[key];
   if(typeof input.fpsLimit==="number"&&Number.isFinite(input.fpsLimit)&&(input.fpsLimit===0||(input.fpsLimit>=30&&input.fpsLimit<=1000))) out.fpsLimit=input.fpsLimit;
-  for(const key of ["separateVertical","vsync","muted","hud","crosshair","viewmodel","jumpStats","strafeTrainer","strafeTrainerHints","discordRichPresence","discordShowMap","discordJoin","discordJoinLobbies","privacyMode"]) if(typeof input[key]==="boolean") out[key]=input[key];
+  for(const key of ["separateVertical","sourceLook","vsync","muted","hud","crosshair","viewmodel","jumpStats","strafeTrainer","strafeTrainerHints","discordRichPresence","discordShowMap","discordJoin","discordJoinLobbies","privacyMode"]) if(typeof input[key]==="boolean") out[key]=input[key];
   // Only these two words ever cross the bridge, so a pack choice can never
   // become a path the native side would go looking for.
   if(JUMP_STATS_MODES.includes(input.jumpStatsMode as JumpStatsMode)) out.jumpStatsMode=input.jumpStatsMode;

@@ -56,7 +56,13 @@ namespace {
  X(void,DrawArrays,(GLenum,GLint,GLsizei)) X(void,PixelStorei,(GLenum,GLint)) \
  X(void,ReadPixels,(GLint,GLint,GLsizei,GLsizei,GLenum,GLenum,void*)) \
  X(void,GetIntegerv,(GLenum,GLint*)) X(const GLubyte*,GetString,(GLenum)) \
- X(GLenum,GetError,(void))
+ X(GLenum,GetError,(void)) X(void,Uniform2f,(GLint,GLfloat,GLfloat)) \
+ X(void,GenFramebuffers,(GLsizei,GLuint*)) X(void,BindFramebuffer,(GLenum,GLuint)) X(void,DeleteFramebuffers,(GLsizei,const GLuint*)) \
+ X(void,FramebufferTexture2D,(GLenum,GLenum,GLenum,GLuint,GLint)) X(GLenum,CheckFramebufferStatus,(GLenum)) \
+ X(void,GenRenderbuffers,(GLsizei,GLuint*)) X(void,BindRenderbuffer,(GLenum,GLuint)) X(void,DeleteRenderbuffers,(GLsizei,const GLuint*)) \
+ X(void,RenderbufferStorage,(GLenum,GLenum,GLsizei,GLsizei)) X(void,FramebufferRenderbuffer,(GLenum,GLenum,GLenum,GLuint)) \
+ X(void*,MapBufferRange,(GLenum,GLintptr,GLsizeiptr,GLbitfield)) X(GLboolean,UnmapBuffer,(GLenum)) \
+ X(GLsync,FenceSync,(GLenum,GLbitfield)) X(GLenum,ClientWaitSync,(GLsync,GLbitfield,GLuint64)) X(void,DeleteSync,(GLsync))
 struct Gl {
 #define DECLARE(ret,name,args) ret (APIENTRY *name) args = nullptr;
     GL_FUNCTIONS(DECLARE)
@@ -86,6 +92,7 @@ GLuint link_program(Gl &gl,const char *vertex_source,const char *fragment_source
     gl.DeleteShader(vertex);gl.DeleteShader(fragment);return program;
 }
 #include "native_viewmodel.hpp"
+#include "source_hdr.hpp"
 
 class Renderer {
     struct Geometry {GLuint vao=0,vbo=0,ebo=0,blend=0;size_t indices=0;};
@@ -102,6 +109,13 @@ class Renderer {
     std::vector<BhMaterial> materials;std::vector<BhMaterialExtra> extras;
     std::vector<Volume> volumes;std::array<int32_t,6> skyMaterials{-1,-1,-1,-1,-1,-1};BhSkyInfo skyInfo{};bool hasSky=false;
     std::unique_ptr<NativeViewmodel> viewmodel;bool viewmodelVisible=true;std::optional<uint32_t> viewmodelWeapon;
+    // Source look (source_hdr.hpp): CS:S's exposure and bloom on maps whose lightmap came from HDR lighting.
+    BhLightmapInfo lightmapInfo{1,0};bool sourceLook=true,hdrUnavailable=false;std::unique_ptr<SourceHdr> hdr;double lastSeconds=-1;
+    SourceHdr *hdr_pass(){
+        if(!sourceLook||!lightmapInfo.hdr||hdrUnavailable)return nullptr;
+        if(!hdr)try{hdr=std::make_unique<SourceHdr>(gl,emptyVao);}catch(const std::exception &e){hdrUnavailable=true;std::cerr<<"Native HDR unavailable, drawing straight: "<<e.what()<<'\n';return nullptr;}
+        return hdr.get();
+    }
     uint32_t queuedWeaponFlags=0,queuedAttackMode=0;bool queuedAttack=false;
     std::unordered_map<GLuint,std::unordered_map<std::string,GLint>> uniformLocations;
     GLint loc(GLuint p,const char *name){auto &locations=uniformLocations[p];const auto found=locations.find(name);if(found!=locations.end())return found->second;const GLint value=gl.GetUniformLocation(p,name);locations.emplace(name,value);return value;}
@@ -192,18 +206,22 @@ public:
         size_t pv=0,pi=0,pg=0;const float *propVertices=bh_prop_vertices(core,&pv);const auto *propIndices=bh_prop_indices(core,&pi);const auto *rawProps=bh_prop_groups(core,&pg);propMesh=geometry(propVertices,pv,8,propIndices,pi);if(rawProps&&pg)propGroups.assign(rawProps,rawProps+pg);for(const auto &item:propGroups)group_center((uint64_t(1)<<63)|item.first_index,item.first_index,item.index_count,propVertices,pv,8,propIndices,pi);
         size_t sv=0,si=0,sg=0;const float *skyVertices=bh_sky_vertices(core,&sv);const auto *skyIndices=bh_sky_indices(core,&si);const auto *rawSky=bh_sky_groups(core,&sg);skyMesh=geometry(skyVertices,sv,3,skyIndices,si);if(rawSky&&sg)skyGroups.assign(rawSky,rawSky+sg);hasSky=bh_sky_info(core,&skyInfo)!=0;
         size_t skyCount=0;const auto *sky=bh_sky_materials(core,&skyCount);if(sky&&skyCount==6)std::copy(sky,sky+6,skyMaterials.begin());
-        BhImage image{};lightmap=bh_lightmap(core,&image)?upload(image,false,false):white;
+        // The atlas is sRGB-encoded linear light times its scale (bunnyhop_core::lightmap): decode, then divide.
+        BhImage image{};lightmap=bh_lightmap(core,&image)?upload(image,false,false,true):white;if(lightmap==white||!bh_lightmap_info(core,&lightmapInfo))lightmapInfo={1,0};
         for(const auto &m:materials)cache_texture(m.texture);for(const auto &e:extras){cache_texture(e.texture2);cache_texture(e.detail,true);}
         std::vector<float> planes;size_t waterBytes=0;const auto *water=bh_water_json(core,&waterBytes);if(water&&waterBytes){const auto json=nlohmann::json::parse(water,water+waterBytes);const auto boxes=json.value("volumes",nlohmann::json::array()),allPlanes=json.value("planes",nlohmann::json::array());for(size_t i=0;i<boxes.size();i++){if(boxes[i].size()!=6)continue;Volume volume;for(int k=0;k<3;k++){volume.lo[k]=boxes[i][k];volume.hi[k]=boxes[i][k+3];}volume.span[0]=planes.size()/4;if(i<allPlanes.size())for(const auto &p:allPlanes[i])if(p.size()==4)for(int k=0;k<4;k++)planes.push_back(p[k].get<float>());volume.span[1]=planes.size()/4-volume.span[0];
             for(const auto &item:groups){if(item.material>=materials.size()||materials[item.material].kind!=2)continue;const auto &center=centers[item.first_index];if(std::abs(center[2]-volume.hi[2])<3&&center[0]>=volume.lo[0]-1&&center[0]<=volume.hi[0]+1&&center[1]>=volume.lo[1]-1&&center[1]<=volume.hi[1]+1){for(int k=0;k<3;k++)volume.color[k]=materials[item.material].color[k];if(item.material<extras.size()&&extras[item.material].fog_end>extras[item.material].fog_start)volume.range={extras[item.material].fog_start,extras[item.material].fog_end};break;}}
             volumes.push_back(volume);}}
         if(planes.empty())planes.resize(4);GLint limit=0;gl.GetIntegerv(GL_MAX_TEXTURE_SIZE,&limit);if(planes.size()/4>size_t(limit))throw std::runtime_error("Native water plane texture exceeds GPU size");gl.GenTextures(1,&planesTexture);gl.BindTexture(GL_TEXTURE_2D,planesTexture);gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);gl.TexImage2D(GL_TEXTURE_2D,0,GL_RGBA32F,planes.size()/4,1,0,GL_RGBA,GL_FLOAT,planes.data());
-        gl.UseProgram(program);gl.Uniform1i(loc(program,"baseTexture"),0);gl.Uniform1i(loc(program,"lightTexture"),1);gl.Uniform1i(loc(program,"secondaryTexture"),2);gl.Uniform1i(loc(program,"detailTexture"),3);gl.Uniform1f(loc(program,"lightmapScale"),bh_lightmap_scale());
+        gl.UseProgram(program);gl.Uniform1i(loc(program,"baseTexture"),0);gl.Uniform1i(loc(program,"lightTexture"),1);gl.Uniform1i(loc(program,"secondaryTexture"),2);gl.Uniform1i(loc(program,"detailTexture"),3);gl.Uniform1f(loc(program,"lightmapScale"),lightmapInfo.scale);
         load_normals();gl.UseProgram(program);gl.Uniform1i(loc(program,"normalTexture"),7);gl.Uniform3fv(loc(program,"sunDirection"),1,sunDirection.data());
         viewmodel=std::make_unique<NativeViewmodel>(gl,assetRoot);gl.Enable(GL_DEPTH_TEST);gl.DepthFunc(GL_LEQUAL);gl.CullFace(GL_BACK);gl.FrontFace(GL_CCW);
         std::cout<<"Native renderer: "<<nv/10<<" BSP vertices, "<<pv/8<<" prop vertices, "<<sv/3<<" sky vertices, "<<volumes.size()<<" water volumes, 3D sky="<<hasSky<<"\n";
     }
-    ~Renderer(){viewmodel.reset();destroy(worldMesh);destroy(propMesh);destroy(skyMesh);if(!ownedTextures.empty())gl.DeleteTextures(ownedTextures.size(),ownedTextures.data());if(planesTexture)gl.DeleteTextures(1,&planesTexture);if(emptyVao)gl.DeleteVertexArrays(1,&emptyVao);if(program)gl.DeleteProgram(program);if(skyProgram)gl.DeleteProgram(skyProgram);}
+    ~Renderer(){hdr.reset();viewmodel.reset();destroy(worldMesh);destroy(propMesh);destroy(skyMesh);if(!ownedTextures.empty())gl.DeleteTextures(ownedTextures.size(),ownedTextures.data());if(planesTexture)gl.DeleteTextures(1,&planesTexture);if(emptyVao)gl.DeleteVertexArrays(1,&emptyVao);if(program)gl.DeleteProgram(program);if(skyProgram)gl.DeleteProgram(skyProgram);}
+    void set_source_look(bool value){sourceLook=value;}
+    // Current Source-look exposure (1 off maps with HDR lighting or with the look off).
+    float exposure()const{return hdr&&sourceLook&&lightmapInfo.hdr?hdr->current_exposure():1;}
     void set_fov(float value){if(std::isfinite(value))fieldOfView=std::clamp(value,60.f,130.f);}
     void set_viewmodel(float fov=54,float x=.6f,float y=1.5f,float z=-.9f,bool left=false,bool visible=true){viewmodelVisible=visible;if(viewmodel)viewmodel->settings(fov,x,y,z,left);}
     void reset_presentation(){queuedWeaponFlags=queuedAttackMode=0;queuedAttack=false;if(viewmodel)viewmodel->reset_presentation();}
@@ -221,6 +239,8 @@ public:
     void set_simulation_context(BhContext *context){if(!context)throw std::runtime_error("Null renderer simulation context");core=context;reset_presentation();}
     void draw(int width,int height,const float eye[3],const native::Input &input,const BhSnapshot *state=nullptr,double seconds=-1){
         if(width<=0||height<=0)return;if(seconds<0)seconds=SDL_GetTicks()/1000.;lastYaw=input.yaw();lastPitch=input.pitch;
+        const double dt=lastSeconds<0?0:std::max(0.,seconds-lastSeconds);lastSeconds=seconds;
+        GLint frameTarget=0;gl.GetIntegerv(GL_FRAMEBUFFER_BINDING,&frameTarget);SourceHdr *pass=hdr_pass();if(pass)pass->begin(width,height);
         gl.Viewport(0,0,width,height);gl.ColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);gl.DepthMask(GL_TRUE);gl.ClearColor(.24,.34,.45,1);gl.Clear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);gl.Disable(GL_BLEND);gl.Disable(GL_CULL_FACE);gl.Disable(GL_DEPTH_TEST);gl.DepthMask(GL_FALSE);gl.UseProgram(skyProgram);gl.BindVertexArray(emptyVao);water_uniforms(skyProgram,eye);
         const float cy=std::cos(lastYaw*native::radians),sy=std::sin(lastYaw*native::radians),cp=std::cos(lastPitch*native::radians),sp=std::sin(lastPitch*native::radians);gl.Uniform3f(loc(skyProgram,"forward"),cp*cy,cp*sy,-sp);gl.Uniform3f(loc(skyProgram,"right"),sy,-cy,0);gl.Uniform3f(loc(skyProgram,"up"),sp*cy,sp*sy,cp);gl.Uniform1f(loc(skyProgram,"aspect"),float(width)/height);gl.Uniform1f(loc(skyProgram,"cot"),(4.f/3.f)/std::tan(float(fieldOfView*native::radians*.5)));
         GLint present[6]{},half[6]{};for(int i=0;i<6;i++){GLuint id=white;const int32_t m=skyMaterials[i];if(m>=0&&size_t(m)<materials.size()){const auto t=materials[m].texture;if(t>=0&&texture(t)!=checker){id=texture(t);present[i]=1;const auto wh=textureSizes[t];half[i]=i<4&&wh.first==wh.second*2;}}gl.ActiveTexture(GL_TEXTURE0+i);gl.BindTexture(GL_TEXTURE_2D,id);gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);const auto name="sky"+std::to_string(i);gl.Uniform1i(loc(skyProgram,name.c_str()),i);}gl.Uniform1iv(loc(skyProgram,"skyPresent"),6,present);gl.Uniform1iv(loc(skyProgram,"skyHalf"),6,half);gl.DrawArrays(GL_TRIANGLES,0,3);
@@ -231,6 +251,7 @@ public:
         if(skyMesh.vao){gl.UseProgram(program);gl.UniformMatrix4fv(loc(program,"viewProjection"),1,GL_FALSE,vp.data());gl.ColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE);gl.Disable(GL_CULL_FACE);gl.Enable(GL_POLYGON_OFFSET_FILL);gl.PolygonOffset(1,2);gl.BindVertexArray(skyMesh.vao);for(const auto &item:skyGroups){if(item.sky3d)continue;BhTransform t{};t.visible=1;if(item.model)bh_model_transform(core,item.model,&t);if(!t.visible)continue;const auto model=native::model_matrix(t);gl.UniformMatrix4fv(loc(program,"model"),1,GL_FALSE,model.data());gl.DrawElements(GL_TRIANGLES,item.index_count,GL_UNSIGNED_INT,reinterpret_cast<void*>(uintptr_t(item.first_index)*4));}gl.ColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);gl.Disable(GL_POLYGON_OFFSET_FILL);}
         draw_scene(vp,eye,false,seconds);
         if(viewmodel){size_t floorCount=0;const auto *floor=bh_floor_weapons(core,&floorCount);for(size_t i=0;floor&&i<floorCount;i++)viewmodel->draw_floor(floor[i],vp,eye,seconds);if(replayActor)viewmodel->draw_actor(*replayActor,vp,eye,seconds);for(const auto &actor:roomActors)viewmodel->draw_actor(actor,vp,eye,seconds);}
+        if(pass)pass->finish(GLuint(frameTarget),width,height,dt);
         BhSnapshot snapshot{};if(state)snapshot=*state;else bh_snapshot(core,&snapshot);
         BhWeaponReport weapon{};BhAttackReport attack{};bh_weapon_report(core,&weapon);bh_attack_report(core,&attack);
         if(viewmodel&&viewmodelVisible)viewmodel->draw(width,height,snapshot,viewmodelWeapon.value_or(weapon.active),viewmodelWeapon?0:weapon.flags|queuedWeaponFlags,viewmodelWeapon?false:queuedAttack||attack.weapon!=0,viewmodelWeapon?0:queuedAttack?queuedAttackMode:attack.mode,seconds);

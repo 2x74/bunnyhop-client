@@ -38,6 +38,12 @@ typedef struct BhImage {
     size_t byte_count;
     uint32_t width, height;
 } BhImage;
+/* How to read the lightmap atlas: divide the sRGB-decoded texel by scale for linear light. hdr: built from the
+ * map's HDR lighting (CS:S draws the map with auto exposure and bloom). */
+typedef struct BhLightmapInfo {
+    float scale;
+    uint32_t hdr;
+} BhLightmapInfo;
 typedef struct BhTransform {
     float origin[3], angles[3];
     uint32_t visible;
@@ -133,8 +139,7 @@ const uint32_t *bh_indices(const BhContext *ctx, size_t *index_count);
 const BhGroup *bh_groups(const BhContext *ctx, size_t *group_count);
 const BhMaterial *bh_materials(const BhContext *ctx, size_t *material_count);
 int bh_lightmap(BhContext *ctx, BhImage *out);
-/* Atlas RGB scale applied before sRGB encoding; divide sampled linear RGB by this. */
-float bh_lightmap_scale(void);
+int bh_lightmap_info(BhContext *ctx, BhLightmapInfo *out);
 int bh_texture(BhContext *ctx, uint32_t index, BhImage *out);
 int bh_model_transform(BhContext *ctx, uint32_t model, BhTransform *out);
 int bh_spawn(BhContext *ctx, float origin[3], float angles[3]);

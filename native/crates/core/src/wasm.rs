@@ -311,13 +311,13 @@ pub extern "C" fn tex_bytes_ptr() -> *const u8 {
     with(|c| c.tex_bytes.as_ptr())
 }
 
-/// Lightmap atlas into scratch_u32 as `[width, height]`; pixels (RGBA8, sRGB-encoded) at `lightmap_ptr`.
+/// Lightmap atlas into scratch_u32 as `[width, height, hdr]`; pixels (RGBA8, sRGB-encoded) at `lightmap_ptr`.
 #[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
 pub extern "C" fn lightmap_size() -> usize {
     with(|c| {
         c.scratch_u32.clear();
         if let Some(m) = &c.mesh {
-            c.scratch_u32.extend_from_slice(&[m.lightmap.width, m.lightmap.height]);
+            c.scratch_u32.extend_from_slice(&[m.lightmap.width, m.lightmap.height, m.lightmap.hdr as u32]);
         }
         c.scratch_u32.len()
     })
@@ -453,7 +453,7 @@ pub extern "C" fn prop_transforms() -> usize {
 /// Factor the lightmap atlas was scaled by before sRGB encoding (multiply by its inverse after sampling).
 #[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
 pub extern "C" fn lightmap_scale() -> f32 {
-    crate::lightmap::LIGHTMAP_SCALE
+    with(|c| c.mesh.as_ref().map_or(crate::lightmap::HDR_SCALE, |m| m.lightmap.scale))
 }
 
 /// Floats per vertex in `mesh_vertices`.

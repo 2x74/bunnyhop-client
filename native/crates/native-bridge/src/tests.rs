@@ -175,10 +175,7 @@ fn c_layouts_are_stable() {
         BhSettings::default().physics,
         bunnyhop_core::game::PHYSICS_LATEST
     );
-    assert_eq!(
-        bh_lightmap_scale().to_bits(),
-        bunnyhop_core::lightmap::LIGHTMAP_SCALE.to_bits()
-    );
+    assert_eq!(size_of::<BhLightmapInfo>(), 8);
 }
 #[test]
 fn contexts_step_exactly_like_core_and_remain_independent() {
@@ -250,6 +247,9 @@ fn contexts_step_exactly_like_core_and_remain_independent() {
         let mut image = BhImage::default();
         assert_eq!(bh_lightmap(a, &mut image), 1);
         assert_eq!(image.byte_count, (image.width * image.height * 4) as usize);
+        let mut info = BhLightmapInfo::default();
+        assert_eq!(bh_lightmap_info(a, &mut info), 1);
+        assert!(info.scale == bunnyhop_core::lightmap::HDR_SCALE || info.scale == bunnyhop_core::lightmap::LDR_SCALE);
         let mut origin = [0.0; 3];
         let mut angles = [0.0; 3];
         assert_eq!(bh_spawn(a, origin.as_mut_ptr(), angles.as_mut_ptr()), 1);

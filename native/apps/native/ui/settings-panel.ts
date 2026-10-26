@@ -187,6 +187,7 @@ export function settingsPanel(): HTMLElement {
   const display = h("div.nset-cols", null,
     group("Video",
       number("Field of view", "fov", 60, 130, 1, "", "Field of view in degrees.", "°"),
+      toggle("Source look", "sourceLook", "", "Maps with HDR lighting get CS:S's auto exposure and bloom. Other maps look the same either way. Off is the plain look."),
       toggle("Vertical sync", "vsync", "", "Locks frames to your monitor's refresh rate. Off gives the lowest input latency."),
       number("FPS limit", "fpsLimit", 0, 1000, 1, "0 is unlimited", "Caps the frame rate. 0 means no cap; otherwise 30–1000.")));
 
