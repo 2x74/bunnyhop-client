@@ -345,13 +345,16 @@ int run(const Options &opt) {
         event["wasm"]=identity.value("wasm",std::string());
         menu->evaluate_js("window.bunnyhopNativeMenu?.onRunEvent?.("+event.dump()+")");
     };
+    // The tutorial's lessons are practice; its final course (bonus 1) is a ranked run with its own board, as on the
+    // web (tutorial/flow.ts FINAL_TRACK) and the server.
+    auto tutorial_practice=[&](){return map_id==tutorial_map&&!(tutorial&&tutorial->is_active()&&tutorial->lesson_id()=="final");};
     auto begin_record=[&]() {
         if(turn_admission.local_only)score_notice.clear();
         turn_admission.reset();
         recording_ended=false; record_path.clear();
         ++run_generation;beat_start=beat_upto=0;beat_hash=0x811c9dc5;beat_paused=false;
         run_event({{"type","reset"}});
-        if(practice.active || playback || room.spectator_target || map_id==tutorial_map || zones.empty() || opt.frames || !opt.menu_smoke.empty()) return;
+        if(practice.active || playback || room.spectator_target || tutorial_practice() || zones.empty() || opt.frames || !opt.menu_smoke.empty()) return;
         const auto stamp=std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         record_path=(cache/"replays"/(map_id+"-"+std::to_string(stamp)+".bhr")).string();
         require(bh_record_identity(core.get(),identity.at("build").get<std::string>().c_str()),core.get(),"Setting native release identity");
@@ -567,7 +570,7 @@ int run(const Options &opt) {
         if(demo){const auto &meta=tutorial->lesson_data();const auto key=(active_style=="legit"||active_style=="scroll")&&meta.contains("nativeDemoLegit")?"nativeDemoLegit":"nativeDemo";if(!meta.contains(key))throw std::runtime_error("Tutorial demonstration is absent");const auto file=meta.at(key).get<std::string>();if(file.find_first_of("/\\")!=std::string::npos)throw std::runtime_error("Invalid bundled tutorial replay path");
             ghost_handle=bh_ghost_load(core.get(),(assets/"tutorial"/file).string().c_str());require(ghost_handle!=0,core.get(),"Loading native tutorial demonstration");size_t bytes=0;const auto *raw=bh_ghost_info(core.get(),ghost_handle,&bytes);require(raw!=nullptr,core.get(),"Reading tutorial demonstration");ghost_info=nlohmann::json::parse(raw,raw+bytes);ghost_enabled=true;tutorial_demo=true;tutorial_demo_start=curr.tick;ghost_id="tutorial-"+lesson;
         }
-        std::cout<<"Native tutorial "<<lesson<<(demo?" demonstration":" lesson")<<"; ranked recording disabled\n";show_menu(false);
+        std::cout<<"Native tutorial "<<lesson<<(demo?" demonstration":" lesson")<<(lesson=="final"?"; ranked final course\n":"; ranked recording disabled\n");show_menu(false);
     };
     auto gauntlet_action=[&](const nlohmann::json &message){
                     const auto id=message.at("id").is_null()?std::string():message.at("id").get<std::string>();
@@ -951,7 +954,7 @@ int run(const Options &opt) {
                     {"sideways","Sideways"},{"hsw","Half-Sideways"},{"lowgrav","Low Gravity"},{"autostrafe","Auto-strafe"}};
                 native::discord::Status status;
                 status.kind=map_id.empty()?"menu":playback?"replay":(!captured||(menu&&menu->visible()))?"paused":"playing";
-                status.mode=playback?"replay":!room.id.empty()?"multiplayer":map_id==tutorial_map?"practice":"solo";
+                status.mode=playback?"replay":!room.id.empty()?"multiplayer":tutorial_practice()?"practice":"solo";
                 status.map=map_id==tutorial_map?"the tutorial":map_id;
                 const auto named=style_names.find(active_style);status.style=named==style_names.end()?active_style:named->second;
                 status.started_at=presence_started;status.room=room.id;
@@ -1192,7 +1195,7 @@ int run(const Options &opt) {
             std::string progress;{std::lock_guard lock(progress_mutex);progress=loading;}
             const nlohmann::json state={{"engine","native"},{"renderer","opengl"},{"map",map_id},{"loading",progress},{"error",error},
                 {"sensitivity",input.sensitivity},{"paused",!captured},{"recordingPath",record_path},
-                {"player",{{"map",map_id},{"style",playback?playback_info.value("style",active_style):active_style},{"track",playback?playback_info.value("track",active_track):active_track},{"mode",playback?"replay":!room.id.empty()?"multiplayer":!gauntlet_id.empty()?"gauntlet":(practice.active||map_id==tutorial_map)?"practice":"solo"},{"practice",practice.active||map_id==tutorial_map}}},
+                {"player",{{"map",map_id},{"style",playback?playback_info.value("style",active_style):active_style},{"track",playback?playback_info.value("track",active_track):active_track},{"mode",playback?"replay":!room.id.empty()?"multiplayer":!gauntlet_id.empty()?"gauntlet":(practice.active||tutorial_practice())?"practice":"solo"},{"practice",practice.active||map_id==tutorial_map}}},
                 {"practice",{{"available",practice_reason().empty()},{"unavailable",practice_reason().empty()?nlohmann::json(nullptr):nlohmann::json(practice_reason())},{"mode",practice.mode},{"active",practice.active},{"tool",practice.tool.empty()?nlohmann::json(nullptr):nlohmann::json(practice.tool)},{"noclip",practice.noclip},{"menuOpen",practice.menu_open},{"count",practice.checkpoints.size()},{"current",practice.number()},{"keepVelocity",preferences.at("practiceKeepVelocity")}}},
                 {"gauntlet",{{"id",gauntlet_id.empty()?nlohmann::json(nullptr):nlohmann::json(gauntlet_id)},{"map",gauntlet_map.empty()?nlohmann::json(nullptr):nlohmann::json(gauntlet_map)}}},
                 {"style",selected_style},{"track",active_track},{"settings",preferences},{"replays",replay_list},
