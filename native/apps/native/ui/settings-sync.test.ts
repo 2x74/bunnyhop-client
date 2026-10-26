@@ -17,7 +17,7 @@ test("yaw slider edits survive stale host updates before and after dispatch", as
     await page.goto("https://bunnyhop.lol/settings-sync");
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByLabel("Search settings").fill("yaw speed");
-    for (const [name, key, old, next] of [["Yaw speed", "yawSpeed", 118.888888, 170], ["Modifier yaw speed", "yawSpeedAlt", 210, 90]] as const) {
+    for (const [name, key, old, next] of [["Yaw speed", "yawSpeed", 210, 170], ["Modifier yaw speed", "yawSpeedAlt", 210, 90]] as const) {
       const range = page.getByLabel(`${name} slider`, { exact: true });
       await range.evaluate((element, values) => {
         const input = element as HTMLInputElement;

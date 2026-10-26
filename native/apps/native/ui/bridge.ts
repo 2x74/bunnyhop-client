@@ -46,7 +46,7 @@ type NativeBindAction=(typeof NATIVE_BIND_ACTIONS)[number];
 /** The web game's defaults, plus the native-only Turn modifier (settings.hpp keeps the same list). */
 const DEFAULT_BINDS:Record<NativeBindAction,readonly string[]>={...WEB_DEFAULT_BINDS,turnLeft:["ArrowLeft"],turnRight:["ArrowRight"],turnFast:["Mouse4"]};
 /** cl_yawspeed and the modifier's speed when nothing has been chosen. */
-export const DEFAULT_YAW_SPEED=118.888888,DEFAULT_YAW_SPEED_ALT=210;
+export const DEFAULT_YAW_SPEED=210,DEFAULT_YAW_SPEED_ALT=210;
 /** "default" is the bunnyhop.lol pack; "custom" is the player's own sound/ and bgm/ folders. */
 export type AudioPack="default"|"custom";
 export type JumpStatsMode="sixth"|"every"|"interval";

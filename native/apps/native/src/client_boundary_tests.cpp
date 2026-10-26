@@ -41,7 +41,7 @@ int main(){
     assert(cues.size()==1&&cues[0].id=="step_metal"&&cues[0].gain==.55);
     const auto original=native::default_settings();
     {   // Turnbinds: yaw speeds and their binds.
-        assert(original["yawSpeed"]==118.888888&&original["yawSpeedAlt"]==210.0);
+        assert(original["yawSpeed"]==210.0&&original["yawSpeedAlt"]==210.0);
         assert(original["binds"]["turnLeft"][0]=="ArrowLeft"&&original["binds"]["turnRight"][0]=="ArrowRight"&&original["binds"]["turnFast"][0]=="Mouse4");
         auto turned=native::patch_settings(original,{{"yawSpeed",170},{"yawSpeedAlt",90.5},{"binds",{{"turnFast",{"ShiftLeft"}}}}});
         assert(turned["yawSpeed"]==170&&turned["yawSpeedAlt"]==90.5&&turned["binds"]["turnFast"][0]=="ShiftLeft");

@@ -89,7 +89,7 @@ test("settings search, HUD positions and strafe trainer options",async()=>{
  expect(await page.getByLabel("Field of view",{exact:true}).isVisible()).toBe(true);
  // Turnbinds: yaw speed slider and box show the same number; the modifier has its own speed and bind.
  await page.getByLabel("Search settings").fill("yawspeed");
- expect(await page.getByLabel("Yaw speed",{exact:true}).inputValue()).toBe("118.888888");
+ expect(await page.getByLabel("Yaw speed",{exact:true}).inputValue()).toBe("210");
  await page.getByLabel("Yaw speed",{exact:true}).fill("170");await page.getByLabel("Yaw speed",{exact:true}).blur();
  expect(await last()).toEqual({type:"settings",patch:{yawSpeed:170}});
  expect(await page.getByLabel("Yaw speed slider",{exact:true}).inputValue()).toBe("170");
