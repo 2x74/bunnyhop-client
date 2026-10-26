@@ -1,3 +1,6 @@
+> [!WARNING]
+> This is still in beta! If you run into any issues, use the `Feedback` button in the client to report a problem!
+
 # bunnyhop.lol - Native
 
 A native desktop fork of [bunnyhop.lol](https://bunnyhop.lol), maintained in
@@ -129,3 +132,5 @@ is retained in repository history; native v0.0.1 releases use the native path.
 The project retains the original Aeperion attribution under the
 [MIT license](LICENSE). Native packages include dependency and Source-related
 notices. See [CHANGELOG.md](CHANGELOG.md) and [release setup](docs/releases.md).
+
+<sub> luna says hi... </sub>
