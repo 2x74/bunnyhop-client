@@ -8,6 +8,15 @@
 #include <vector>
 
 namespace native {
+// The name a native replay header carries: the signed-in account's display name, as the web stamps it (its
+// localStorage "bunnyhop:name", sent by the menu), or "player" like the web when there is none. Display only: the
+// server attributes runs by the authenticated account. Anything odd falls back rather than reaching the header.
+inline std::string replay_player_name(std::string_view name) {
+    if(name.empty()||name.size()>64)return "player";
+    for(const unsigned char c:name)if(c<0x20||c==0x7f)return "player";
+    return std::string(name);
+}
+
 // Hands a credits link to the system browser.
 //
 // The menu checks the URL before sending it, but that check is advice, not
