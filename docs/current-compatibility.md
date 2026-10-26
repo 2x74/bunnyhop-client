@@ -7,8 +7,10 @@ Physics 18 adds material-defined ladders, including `bhop_synthetic_fix`, while
 historical replay versions retain their original movement and surface identity.
 The same hotfix restores visible `tools/toolsblack` and `tools/toolswhite` faces.
 The build verifies the downloaded bytes and rejects changes to the rules until
-the verifier pin is reviewed. Native 0.4.0 package qualification is in progress;
-source compatibility does not activate production score admission.
+the verifier pin is reviewed. Native 0.4.0 packages passed qualification and their exact identities are admitted
+for production scores until November 9, 2026 at 22:00 UTC. See the
+[release record](native-0.4.0-release-notes.md). Source builds do not automatically
+receive production admission.
 
 ## Simulation and input
 
