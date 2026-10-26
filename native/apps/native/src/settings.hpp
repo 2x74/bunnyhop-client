@@ -14,8 +14,10 @@ inline const std::set<std::string> styles={"autohop","legit","scroll","wonly","s
 inline Json default_settings() {
     return {{"sensitivity",2.0},{"verticalSensitivity",2.0},{"separateVertical",false},
         // Turnbinds (+left / +right): degrees per second, like cl_yawspeed. The alt speed is used while Turn modifier is held.
-        {"yawSpeed",118.888888},{"yawSpeedAlt",210.0},
-        {"fov",90.0},{"vsync",true},{"fpsLimit",0},{"volume",.65},{"muted",false},
+        // 210 is CS:S's cl_yawspeed, the web's fixed turn and the only speed the server ranks.
+        {"yawSpeed",210.0},{"yawSpeedAlt",210.0},
+        // Source look: CS:S's auto exposure and bloom on maps with HDR lighting.
+        {"fov",90.0},{"sourceLook",true},{"vsync",true},{"fpsLimit",0},{"volume",.65},{"muted",false},
         {"hudScale",100.0},{"practiceKeepVelocity",true},{"hud",true},{"crosshair",true},{"viewmodel",true},{"jumpStats",true},
         // Jump stats: "sixth" (jump 6 only), "every" jump, or "interval" (every jumpStatsInterval jumps).
         {"jumpStatsMode","sixth"},{"jumpStatsInterval",6},

@@ -46,7 +46,7 @@ type NativeBindAction=(typeof NATIVE_BIND_ACTIONS)[number];
 /** The web game's defaults, plus the native-only Turn modifier (settings.hpp keeps the same list). */
 const DEFAULT_BINDS:Record<NativeBindAction,readonly string[]>={...WEB_DEFAULT_BINDS,turnLeft:["ArrowLeft"],turnRight:["ArrowRight"],turnFast:["Mouse4"]};
 /** cl_yawspeed and the modifier's speed when nothing has been chosen. */
-export const DEFAULT_YAW_SPEED=118.888888,DEFAULT_YAW_SPEED_ALT=210;
+export const DEFAULT_YAW_SPEED=210,DEFAULT_YAW_SPEED_ALT=210;
 /** "default" is the bunnyhop.lol pack; "custom" is the player's own sound/ and bgm/ folders. */
 export type AudioPack="default"|"custom";
 export type JumpStatsMode="sixth"|"every"|"interval";
@@ -67,6 +67,8 @@ export interface NativeSettings {
   strafeTrainerSmoothing:number;
   /** "Less deadtime!" / "Strafe more!" / "Strafe less!" under the trainer. */
   strafeTrainerHints:boolean;
+  /** CS:S's auto exposure and bloom on maps with HDR lighting (the web's Source look). On by default. */
+  sourceLook:boolean;
   /** Moved HUD elements, in percent of the screen. Absent means the built-in place. */
   hudLayout:HudLayout;
   /** The whole HUD's size, in percent (the web's hud.scale × 100): 50–175. */
@@ -101,6 +103,7 @@ export const PLAYER_MODES:readonly PlayerMode[]=["solo","multiplayer","practice"
 export interface PlayerState {map:string|null;style:StyleId;track:number;mode:PlayerMode;practice:boolean}
 export interface MusicState {id:string;title:string;role:string;playing:boolean;available:boolean;loading:boolean;status:string}
 
+export interface NativeClientInfo {version:string;build:string;gpu:string;viewport:[number,number];dpr:number}
 export interface NativeMenuState {
   map: string | null;
   loading: boolean | string;
@@ -112,6 +115,8 @@ export interface NativeMenuState {
   practice:PracticeState;gauntlet:{id:string|null;map:string|null};player:PlayerState|null;
   /** The soundtrack (null: this host doesn't report music). */
   music:MusicState|null;
+  /** The native app itself, for the feedback form: release version, build id, GL renderer, game window. */
+  client:NativeClientInfo|null;
 }
 
 declare global {
@@ -169,9 +174,9 @@ const nonNegativeInt=(value:unknown):value is number=>Number.isSafeInteger(value
 const shortText=(value:unknown,max=200):string|null=>typeof value==="string"?value.slice(0,max):null;
 
 export const state: NativeMenuState = { map: null, loading: false, error: null, sensitivity: 2, paused: true,style:"autohop",track:0,
-  settings:{sensitivity:2,verticalSensitivity:2,separateVertical:false,yawSpeed:DEFAULT_YAW_SPEED,yawSpeedAlt:DEFAULT_YAW_SPEED_ALT,fov:90,vsync:true,fpsLimit:0,volume:.8,muted:false,hud:true,crosshair:true,viewmodel:true,jumpStats:true,jumpStatsMode:"sixth",jumpStatsInterval:6,strafeTrainer:false,strafeTrainerSmoothing:1,strafeTrainerHints:true,hudLayout:{},hudScale:100,practiceKeepVelocity:true,sfxPack:"default",musicPack:"default",discordRichPresence:true,discordShowMap:true,discordJoin:true,discordJoinLobbies:false,privacyMode:false,binds:Object.fromEntries(NATIVE_BIND_ACTIONS.map(action=>[action,[...DEFAULT_BINDS[action]]]))},
+  settings:{sensitivity:2,verticalSensitivity:2,separateVertical:false,yawSpeed:DEFAULT_YAW_SPEED,yawSpeedAlt:DEFAULT_YAW_SPEED_ALT,fov:90,sourceLook:true,vsync:true,fpsLimit:0,volume:.8,muted:false,hud:true,crosshair:true,viewmodel:true,jumpStats:true,jumpStatsMode:"sixth",jumpStatsInterval:6,strafeTrainer:false,strafeTrainerSmoothing:1,strafeTrainerHints:true,hudLayout:{},hudScale:100,practiceKeepVelocity:true,sfxPack:"default",musicPack:"default",discordRichPresence:true,discordShowMap:true,discordJoin:true,discordJoinLobbies:false,privacyMode:false,binds:Object.fromEntries(NATIVE_BIND_ACTIONS.map(action=>[action,[...DEFAULT_BINDS[action]]]))},
   replays:[],discord:{state:"disabled",message:""},playback:{active:false,id:"",tick:0,totalTicks:0,paused:true,speed:1},ghost:{enabled:false,id:"",name:""},tutorial:{active:false,lesson:"jump",completed:[]},
-  practice:{available:false,unavailable:null,mode:false,active:false,tool:null,noclip:false,menuOpen:false,count:0,current:0,keepVelocity:true},gauntlet:{id:null,map:null},player:null,music:null};
+  practice:{available:false,unavailable:null,mode:false,active:false,tool:null,noclip:false,menuOpen:false,count:0,current:0,keepVelocity:true},gauntlet:{id:null,map:null},player:null,music:null,client:null};
 
 export const nativeKeyCode=(code:unknown):code is string=>typeof code==="string"&&/^(?:Key[A-Z]|Digit[0-9]|F[1-9]|F11|F12|Mouse[1-5]|MouseWheel|MWheelUp|MWheelDown|(?:Control|Shift|Alt)(?:Left|Right)|Space|Tab|Enter|Backspace|Arrow(?:Up|Down|Left|Right)|Minus|Equal|BracketLeft|BracketRight|Semicolon|Quote|Comma|Period|Slash)$/.test(code);
 
@@ -180,7 +185,7 @@ export function settingsPatch(value:unknown):Partial<NativeSettings> {
   const input=value as Record<string,unknown>,out:Record<string,unknown>={};
   for(const [key,min,max] of [["sensitivity",.01,100],["verticalSensitivity",.01,100],["fov",60,130],["volume",0,1],["yawSpeed",.01,1000],["yawSpeedAlt",.01,1000]] as const) if(typeof input[key]==="number"&&Number.isFinite(input[key])&&Number(input[key])>=min&&Number(input[key])<=max) out[key]=input[key];
   if(typeof input.fpsLimit==="number"&&Number.isFinite(input.fpsLimit)&&(input.fpsLimit===0||(input.fpsLimit>=30&&input.fpsLimit<=1000))) out.fpsLimit=input.fpsLimit;
-  for(const key of ["separateVertical","vsync","muted","hud","crosshair","viewmodel","jumpStats","strafeTrainer","strafeTrainerHints","discordRichPresence","discordShowMap","discordJoin","discordJoinLobbies","privacyMode"]) if(typeof input[key]==="boolean") out[key]=input[key];
+  for(const key of ["separateVertical","sourceLook","vsync","muted","hud","crosshair","viewmodel","jumpStats","strafeTrainer","strafeTrainerHints","discordRichPresence","discordShowMap","discordJoin","discordJoinLobbies","privacyMode"]) if(typeof input[key]==="boolean") out[key]=input[key];
   // Only these two words ever cross the bridge, so a pack choice can never
   // become a path the native side would go looking for.
   if(JUMP_STATS_MODES.includes(input.jumpStatsMode as JumpStatsMode)) out.jumpStatsMode=input.jumpStatsMode;
@@ -222,6 +227,13 @@ export function applyState(value: unknown): boolean {
     if(typeof playback.id==="string") state.playback.id=playback.id;
   }
   if(next.discord&&typeof next.discord==="object") {const discord=next.discord as Record<string,unknown>;if(DISCORD_STATES.includes(discord.state as DiscordState))state.discord.state=discord.state as DiscordState;if(typeof discord.message==="string")state.discord.message=discord.message.slice(0,200);}
+  if(next.client&&typeof next.client==="object") {
+    const client=next.client as Record<string,unknown>,viewport=client.viewport;
+    const size=(v:unknown)=>typeof v==="number"&&Number.isInteger(v)&&v>0&&v<=65535;
+    state.client={version:typeof client.version==="string"?client.version.slice(0,40):"",build:typeof client.build==="string"?client.build.slice(0,80):"",
+      gpu:typeof client.gpu==="string"?client.gpu.slice(0,200):"",viewport:Array.isArray(viewport)&&viewport.length===2&&viewport.every(size)?[viewport[0],viewport[1]]:[0,0],
+      dpr:typeof client.dpr==="number"&&Number.isFinite(client.dpr)&&client.dpr>0&&client.dpr<=8?client.dpr:1};
+  }
   if(next.ghost&&typeof next.ghost==="object") {const ghost=next.ghost as Record<string,unknown>;if(typeof ghost.enabled==="boolean") state.ghost.enabled=ghost.enabled;for(const key of ["id","name"] as const) if(typeof ghost[key]==="string") state.ghost[key]=ghost[key];}
   if(next.tutorial&&typeof next.tutorial==="object") {const tutorial=next.tutorial as Record<string,unknown>;if(typeof tutorial.active==="boolean")state.tutorial.active=tutorial.active;if(LESSON_IDS.includes(tutorial.lesson as LessonId))state.tutorial.lesson=tutorial.lesson as LessonId;if(Array.isArray(tutorial.completed))state.tutorial.completed=LESSON_IDS.filter(id=>(tutorial.completed as unknown[]).includes(id));}
   if(next.practice&&typeof next.practice==="object") {

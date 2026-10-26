@@ -1,18 +1,24 @@
 //! Lightmap atlas: packs every lit face's style-0 lightmap into one RGBA8 texture.
 //!
-//! Samples are Source RGBExp32 (`c * 2^exp / 255` = linear light, 1.0 = full
-//! brightness). They are stored sRGB-encoded at `LIGHTMAP_SCALE` so that the
-//! overbright range up to `1 / LIGHTMAP_SCALE` survives in 8 bits; the client
-//! multiplies back by `1 / LIGHTMAP_SCALE` after the GPU's sRGB decode.
-//! Only style 0 is used (switchable light styles are ignored), and only the first
-//! (non-bumped) lightmap of bumpmapped faces.
+//! Samples are Source RGBExp32 (`c * 2^exp / 255` = linear light, 1.0 = full brightness), encoded the way
+//! CS:S draws them:
+//! - Maps with HDR lighting (CS:S runs them with `mat_hdr_level 2`) use the HDR lump as plain linear light,
+//!   stored sRGB-encoded at `HDR_SCALE` so the overbright range up to `1 / HDR_SCALE` survives in 8 bits.
+//! - LDR-only maps use Source's LDR lightmap texels exactly (`lineartolightmap`, mathlib/color_conversion.cpp):
+//!   `0.5 * L^(1/2.2)`, which the GPU then decodes as sRGB and scales by 2^2.2. The sRGB/2.2 mismatch lifts dark
+//!   luxels (about 2.3x at L = 0.01, none from L = 0.5 up); that lift is part of how LDR maps look in CS:S.
+//!
+//! Either way the client multiplies the decoded texel by `1 / scale`. Only style 0 is used (switchable light
+//! styles are ignored), and only the first (non-bumped) lightmap of bumpmapped faces.
 
 use playsrc_bsp::{Bsp, Face, LightSample, LumpData, TextureInfo};
 
-pub const LIGHTMAP_SCALE: f32 = 0.25;
-/// Mild lift of dark luxels. Pure linear math looks noticeably darker than Source's LDR
-/// gamma-space lightmap pipeline on dim maps; this keeps 1.0 fixed and brightens shadows.
-const LIGHTMAP_CURVE: f32 = 0.75;
+/// Atlas scale for HDR (linear) lightmaps.
+pub const HDR_SCALE: f32 = 0.25;
+/// Atlas scale for LDR lightmaps: Source's overbright 2 in linear space, 2^-2.2.
+pub const LDR_SCALE: f32 = 0.217_637_64;
+/// `mat_monitorgamma` / BuildGammaTable's gamma for the LDR lightmap table.
+const LDR_GAMMA: f32 = 2.2;
 const SURF_NOLIGHT: i32 = 0x400;
 const BORDER: u32 = 1;
 const WHITE_BLOCK: u32 = 4;
@@ -29,6 +35,10 @@ pub struct Atlas {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
+    /// Built from the HDR lump (CS:S would use HDR rendering: auto exposure and bloom).
+    pub hdr: bool,
+    /// Multiply the sRGB-decoded texel by `1 / scale` for linear light.
+    pub scale: f32,
 }
 
 pub struct Built {
@@ -54,13 +64,12 @@ impl Encoder {
     const MIN_EXP: i32 = -32;
     const MAX_EXP: i32 = 16;
 
-    fn new() -> Self {
+    fn new(hdr: bool) -> Self {
         let table = (Self::MIN_EXP..=Self::MAX_EXP)
             .map(|e| {
                 let mut row = [0u8; 256];
                 for (c, out) in row.iter_mut().enumerate() {
-                    let linear = (c as f32 * 2f32.powi(e) / 255.0).powf(LIGHTMAP_CURVE);
-                    *out = linear_to_srgb(linear * LIGHTMAP_SCALE);
+                    *out = encode(c as f32 * 2f32.powi(e) / 255.0, hdr);
                 }
                 row
             })
@@ -75,18 +84,32 @@ impl Encoder {
     }
 }
 
-pub fn build(bsp: &Bsp, faces: &[Face], texinfo: &[TextureInfo]) -> Built {
-    let mut lighting: &[LightSample] = crate::lump!(bsp, playsrc_bsp::LIGHTING, Lighting);
-    if lighting.is_empty() {
-        lighting = crate::lump!(bsp, playsrc_bsp::LIGHTING_HDR, Lighting);
+/// One linear-light channel as an atlas byte.
+fn encode(linear: f32, hdr: bool) -> u8 {
+    if hdr {
+        return linear_to_srgb(linear * HDR_SCALE);
     }
+    // BuildGammaTable: index = linear * 1024 (clamped to the table), (i / 1024)^(1/gamma) * 255 * 0.5, rounded.
+    let i = (linear * 1024.0).round().clamp(0.0, 4091.0);
+    ((i / 1024.0).powf(1.0 / LDR_GAMMA) * 255.0 * 0.5).round().clamp(0.0, 255.0) as u8
+}
+
+pub fn build(bsp: &Bsp, faces: &[Face], texinfo: &[TextureInfo]) -> Built {
+    // Faces index both lumps with the same offsets (VRAD lays them out identically); a differently sized HDR lump
+    // would not match them, so it is only used when the sizes agree or it's the only one.
+    let ldr: &[LightSample] = crate::lump!(bsp, playsrc_bsp::LIGHTING, Lighting);
+    let hdr_lump: &[LightSample] = crate::lump!(bsp, playsrc_bsp::LIGHTING_HDR, Lighting);
+    let mut hdr = !hdr_lump.is_empty() && (ldr.is_empty() || hdr_lump.len() == ldr.len());
+    let mut lighting = if hdr { hdr_lump } else { ldr };
     // CS:GO (v21) lighting is kept raw by the BSP crate (face offsets are byte offsets there, not sample
     // indices): copy each face's style-0 samples into one contiguous array and index that instead.
     let csgo = bsp.profile == playsrc_bsp::Profile::CsgoV21;
     let mut csgo_samples: Vec<LightSample> = Vec::new();
     let csgo_raw: &[u8] = if csgo {
         let raw = |i| bsp.lump(i).map(|l| l.bytes(bsp)).unwrap_or(&[]);
-        if raw(playsrc_bsp::LIGHTING).is_empty() { raw(playsrc_bsp::LIGHTING_HDR) } else { raw(playsrc_bsp::LIGHTING) }
+        // CS:GO only renders HDR.
+        hdr = !raw(playsrc_bsp::LIGHTING_HDR).is_empty();
+        if hdr { raw(playsrc_bsp::LIGHTING_HDR) } else { raw(playsrc_bsp::LIGHTING) }
     } else {
         &[]
     };
@@ -136,9 +159,10 @@ pub fn build(bsp: &Bsp, faces: &[Face], texinfo: &[TextureInfo]) -> Built {
     };
     let height = height.max(WHITE_BLOCK).next_multiple_of(4);
 
-    let mut atlas = Atlas { width, height, rgba: vec![0; (width * height * 4) as usize] };
-    let enc = Encoder::new();
-    let white = linear_to_srgb(LIGHTMAP_SCALE);
+    let scale = if hdr { HDR_SCALE } else { LDR_SCALE };
+    let mut atlas = Atlas { width, height, rgba: vec![0; (width * height * 4) as usize], hdr, scale };
+    let enc = Encoder::new(hdr);
+    let white = encode(1.0, hdr);
     for y in 0..WHITE_BLOCK {
         for x in 0..WHITE_BLOCK {
             let o = ((y * width + x) * 4) as usize;
@@ -197,6 +221,27 @@ mod tests {
 
     fn sample(v: u8) -> LightSample {
         LightSample { red: v, green: v, blue: v, exponent: 0 }
+    }
+
+    #[test]
+    fn ldr_texels_match_source_table() {
+        // lineartolightmap with gamma 2.2 and overbright 2.
+        assert_eq!(encode(0.0, false), 0);
+        assert_eq!(encode(1.0, false), 128);
+        assert_eq!(encode(0.01, false), 16);
+        // The table stops at 4x overbright.
+        assert_eq!(encode(4.0, false), 239);
+        assert_eq!(encode(100.0, false), 239);
+        // Decoding as sRGB and dividing by LDR_SCALE gives back full light at 1.0.
+        let srgb = |b: u8| ((b as f32 / 255.0 + 0.055) / 1.055).powf(2.4);
+        assert!((srgb(128) / LDR_SCALE - 1.0).abs() < 0.02);
+    }
+
+    #[test]
+    fn hdr_texels_are_linear() {
+        assert_eq!(encode(1.0, true), linear_to_srgb(0.25));
+        assert_eq!(encode(4.0, true), 255);
+        assert!(encode(0.5, true) < encode(1.0, true));
     }
 
     #[test]

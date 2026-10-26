@@ -1,5 +1,6 @@
 #include "native_input.hpp"
 #include "native_math.hpp"
+#include "settings.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -183,6 +184,9 @@ int main() {
         assert(native::configured_turn_rate(true,false,std::numeric_limits<double>::quiet_NaN())==0);
         native::TurnAdmission admission;
         assert(!admission.observe(210)&&!admission.observe(-210)&&!admission.observe(0));
+        // Default turn binds are the web's fixed 210 deg/s turn: ranked, like the web's +left / +right.
+        const double defaults=native::default_settings()["yawSpeed"],modifier=native::default_settings()["yawSpeedAlt"];
+        assert(defaults==210&&modifier==210&&!admission.observe(native::configured_turn_rate(true,false,defaults))&&admission.allows_event("finish"));
         assert(admission.allows_event("finish"));
         assert(admission.observe(118.888888));
         assert(!admission.allows_event("beat")&&!admission.allows_event("finish"));

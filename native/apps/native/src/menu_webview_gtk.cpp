@@ -110,6 +110,12 @@ struct MenuWebView::Impl {
     Impl(SDL_Window *sdl, const std::string &html) {
         if (!sdl) { state->error = "No SDL window for web menus"; return; }
         const GtkGlScope release;
+        // WebKitGTK's DMA-BUF renderer (2.42+) can make GDK's Wayland connection hit a protocol error; the compositor
+        // then drops it ("Gdk-Message: Error flushing display: Broken pipe") and the web process dies with internal
+        // load errors, which players saw as a crash when loading a map or opening a profile (staff, 2026-10-26).
+        // The menus are mostly still pages, so painting through shared memory costs little. Must be set before the
+        // first web process starts; WEBKIT_DISABLE_DMABUF_RENDERER=0 opts back in.
+        g_setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", FALSE);
         if (!gtk_init_check(nullptr, nullptr)) { state->error = "GTK could not open the display for native menus"; return; }
         gchar *data = g_build_filename(g_get_user_data_dir(), "bunnyhop-native", "webkit", nullptr);
         gchar *cache = g_build_filename(g_get_user_cache_dir(), "bunnyhop-native", "webkit", nullptr);

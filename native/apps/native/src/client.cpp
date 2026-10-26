@@ -27,7 +27,9 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
@@ -38,7 +40,9 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -51,6 +55,8 @@ struct Options {
     double sensitivity = 2;
     bool hidden = false, help = false, no_menu = false, sensitivity_set=false, menu_home_smoke=false;
     std::string style="autohop", replay,tutorial_lesson,runtime_smoke;bool tutorial_demo=false;
+    // Render checks: a fixed eye (Source x, y, z) and pitch, yaw, with no HUD or viewmodel.
+    std::optional<std::array<float,5>> camera;
 };
 Options options(int argc, char **argv) {
     Options out;
@@ -70,6 +76,11 @@ Options options(int argc, char **argv) {
         else if (arg == "--no-menu") out.no_menu = true;
         else if (arg == "--content-root") out.content_root = value();
         else if (arg == "--screenshot") out.screenshot = value();
+        else if (arg == "--camera") {
+            std::array<float,5> view{};std::stringstream parts(value());std::string part;size_t n=0;
+            while(std::getline(parts,part,',')){if(n==5)throw std::runtime_error("--camera takes x,y,z,pitch,yaw");size_t used=0;view[n]=std::stof(part,&used);if(used!=part.size()||!std::isfinite(view[n]))throw std::runtime_error("--camera takes x,y,z,pitch,yaw");n++;}
+            if(n!=5)throw std::runtime_error("--camera takes x,y,z,pitch,yaw");out.camera=view;
+        }
         else if (arg == "--sensitivity") {
             out.sensitivity_set=true;const auto s=value(); size_t n=0; out.sensitivity=std::stod(s,&n);
             if(n!=s.size() || !std::isfinite(out.sensitivity) || out.sensitivity<=0) throw std::runtime_error("--sensitivity must be a positive finite number");
@@ -189,6 +200,8 @@ int run(const Options &opt) {
     if (!SDL_GL_MakeCurrent(window.get(),context)) throw std::runtime_error(SDL_GetError());
     SDL_GL_SetSwapInterval(opt.frames?0:1);
     Gl gl; gl.load(); std::unique_ptr<Renderer> renderer;
+    // Feedback context (the menu's "Attach game info"): the GPU the game draws with, not the menu web view's.
+    const std::string gpu_renderer=[&]{const auto *name=gl.GetString(GL_RENDERER);return name?std::string(reinterpret_cast<const char*>(name)):std::string();}();
     const auto assets=native::resource("native-assets",BUNNYHOP_NATIVE_ASSET_ROOT);
     const auto menu_path=opt.menu_html==BUNNYHOP_MENU_HTML?native::resource("menu.html",opt.menu_html):std::filesystem::path(opt.menu_html);
     const auto manifest_path=native::resource("native-manifest.json",BUNNYHOP_NATIVE_MANIFEST);
@@ -334,13 +347,16 @@ int run(const Options &opt) {
         event["wasm"]=identity.value("wasm",std::string());
         menu->evaluate_js("window.bunnyhopNativeMenu?.onRunEvent?.("+event.dump()+")");
     };
+    // The tutorial's lessons are practice; its final course (bonus 1) is a ranked run with its own board, as on the
+    // web (tutorial/flow.ts FINAL_TRACK) and the server.
+    auto tutorial_practice=[&](){return map_id==tutorial_map&&!(tutorial&&tutorial->is_active()&&tutorial->lesson_id()=="final");};
     auto begin_record=[&]() {
         if(turn_admission.local_only)score_notice.clear();
         turn_admission.reset();
         recording_ended=false; record_path.clear();
         ++run_generation;beat_start=beat_upto=0;beat_hash=0x811c9dc5;beat_paused=false;
         run_event({{"type","reset"}});
-        if(practice.active || playback || room.spectator_target || map_id==tutorial_map || zones.empty() || opt.frames || !opt.menu_smoke.empty()) return;
+        if(practice.active || playback || room.spectator_target || tutorial_practice() || zones.empty() || opt.frames || !opt.menu_smoke.empty()) return;
         const auto stamp=std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         record_path=(cache/"replays"/(map_id+"-"+std::to_string(stamp)+".bhr")).string();
         require(bh_record_identity(core.get(),identity.at("build").get<std::string>().c_str()),core.get(),"Setting native release identity");
@@ -556,7 +572,7 @@ int run(const Options &opt) {
         if(demo){const auto &meta=tutorial->lesson_data();const auto key=(active_style=="legit"||active_style=="scroll")&&meta.contains("nativeDemoLegit")?"nativeDemoLegit":"nativeDemo";if(!meta.contains(key))throw std::runtime_error("Tutorial demonstration is absent");const auto file=meta.at(key).get<std::string>();if(file.find_first_of("/\\")!=std::string::npos)throw std::runtime_error("Invalid bundled tutorial replay path");
             ghost_handle=bh_ghost_load(core.get(),(assets/"tutorial"/file).string().c_str());require(ghost_handle!=0,core.get(),"Loading native tutorial demonstration");size_t bytes=0;const auto *raw=bh_ghost_info(core.get(),ghost_handle,&bytes);require(raw!=nullptr,core.get(),"Reading tutorial demonstration");ghost_info=nlohmann::json::parse(raw,raw+bytes);ghost_enabled=true;tutorial_demo=true;tutorial_demo_start=curr.tick;ghost_id="tutorial-"+lesson;
         }
-        std::cout<<"Native tutorial "<<lesson<<(demo?" demonstration":" lesson")<<"; ranked recording disabled\n";show_menu(false);
+        std::cout<<"Native tutorial "<<lesson<<(demo?" demonstration":" lesson")<<(lesson=="final"?"; ranked final course\n":"; ranked recording disabled\n");show_menu(false);
     };
     auto gauntlet_action=[&](const nlohmann::json &message){
                     const auto id=message.at("id").is_null()?std::string():message.at("id").get<std::string>();
@@ -940,7 +956,7 @@ int run(const Options &opt) {
                     {"sideways","Sideways"},{"hsw","Half-Sideways"},{"lowgrav","Low Gravity"},{"autostrafe","Auto-strafe"}};
                 native::discord::Status status;
                 status.kind=map_id.empty()?"menu":playback?"replay":(!captured||(menu&&menu->visible()))?"paused":"playing";
-                status.mode=playback?"replay":!room.id.empty()?"multiplayer":map_id==tutorial_map?"practice":"solo";
+                status.mode=playback?"replay":!room.id.empty()?"multiplayer":tutorial_practice()?"practice":"solo";
                 status.map=map_id==tutorial_map?"the tutorial":map_id;
                 const auto named=style_names.find(active_style);status.style=named==style_names.end()?active_style:named->second;
                 status.started_at=presence_started;status.room=room.id;
@@ -1107,8 +1123,9 @@ int run(const Options &opt) {
             // Show turnbind motion between ticks too, so turning is smooth at any frame rate.
             if(simulation_active&&!playback&&!spectator)if(const double rate=turn_rate())camera_input.turn(rate,std::clamp(accumulator,0.0,dt));std::string shown_notice=tutorial&&tutorial->is_active()&&!playback?tutorial->notice():score_notice;
             const auto race_notice=room_modes.notice(epoch_ms());if(!race_notice.empty())shown_notice=race_notice;
-            renderer->set_viewmodel_weapon(std::nullopt);renderer->set_viewmodel_visible(preferences.at("viewmodel").get<bool>());
+            renderer->set_viewmodel_weapon(std::nullopt);renderer->set_viewmodel_visible(preferences.at("viewmodel").get<bool>()&&!opt.camera);renderer->set_source_look(preferences.at("sourceLook").get<bool>());
             if(spectator){const auto target=room.spectated(steady_seconds);if(target){for(int k=0;k<3;k++){eye[k]=target->frame.position[k];state.player.position[k]=target->frame.position[k];state.player.velocity[k]=target->frame.velocity[k];}eye[2]+=target->frame.view_offset_z;state.player.tick=target->frame.tick;state.player.grounded=!!(target->frame.flags&2);state.player.crouched=!!(target->frame.flags&1);camera_input.set_angles(target->frame.pitch,target->frame.yaw);renderer->set_cosmetics(target->outfit,target->loadout);renderer->set_viewmodel_weapon(target->frame.weapon);shown_notice="Spectating "+target->name+" - Esc for Room controls";actors.erase(std::remove_if(actors.begin(),actors.end(),[&](const auto &a){return a.id==target->id;}),actors.end());}else{renderer->set_viewmodel_visible(false);shown_notice="Waiting for spectator target";}}
+            if(opt.camera){for(int k=0;k<3;k++)eye[k]=(*opt.camera)[k];camera_input.set_angles((*opt.camera)[3],(*opt.camera)[4]);}
             renderer->set_room_actors(actors);
             renderer->draw(width,height,eye,camera_input,&state,(playback||opt.frames)?curr.tick*dt:std::chrono::duration<double>(now-started).count());
             if(Clock::now()<toast_until)shown_notice=toast_text;
@@ -1120,7 +1137,7 @@ int run(const Options &opt) {
                 if(timed&&!gauntlet_progress.at("pbSplit").is_null()){const auto delta=run_state.seconds-gauntlet_progress.at("pbSplit").get<double>();std::snprintf(formatted,sizeof(formatted),"%+.3fs",delta);gauntlet_delta=formatted;gauntlet_good=delta<0;}
             }
             BhCmd shown{};bh_last_command(core.get(),&shown);BhWeaponReport weapon{};bh_weapon_report(core.get(),&weapon);
-            if(!menu||!menu->visible())hud.draw(width,height,state,run_state,shown,map_id,playback?playback_info.value("style",active_style):active_style,shown_notice,display_fps,
+            if((!menu||!menu->visible())&&!opt.camera)hud.draw(width,height,state,run_state,shown,map_id,playback?playback_info.value("style",active_style):active_style,shown_notice,display_fps,
                 preferences.at("hud").get<bool>(),preferences.at("crosshair").get<bool>(),playback,weapon,
                 preferences.at("jumpStats").get<bool>()?feedback.ssj_line:std::string(),feedback.ssj_good,
                 preferences.at("strafeTrainer").get<bool>()&&!playback?feedback.strafe_reading:std::nullopt,
@@ -1178,9 +1195,13 @@ int run(const Options &opt) {
         // run in the order they are queued.
         if(menu && menu_ready && (menu->visible()||!room.id.empty()) && (now-ui_time>=std::chrono::milliseconds(200) || !backdrop_call.empty() || (!opt.menu_smoke.empty() && (renderer||opt.menu_home_smoke) && !download.valid() && !smoke_requested))) {
             std::string progress;{std::lock_guard lock(progress_mutex);progress=loading;}
-            const nlohmann::json state={{"engine","native"},{"renderer","opengl"},{"map",map_id},{"loading",progress},{"error",error},
+            // The game window, as the web reports its page: logical size plus pixel density.
+            int window_w=0,window_h=0;SDL_GetWindowSize(window.get(),&window_w,&window_h);
+            const nlohmann::json client_info={{"version",identity.value("version",std::string("local"))},{"build",identity.value("build",std::string("bunnyhop-native/local"))},
+                {"gpu",gpu_renderer},{"viewport",{window_w,window_h}},{"dpr",std::round(SDL_GetWindowPixelDensity(window.get())*100)/100}};
+            const nlohmann::json state={{"engine","native"},{"renderer","opengl"},{"client",client_info},{"map",map_id},{"loading",progress},{"error",error},
                 {"sensitivity",input.sensitivity},{"paused",!captured},{"recordingPath",record_path},
-                {"player",{{"map",map_id},{"style",playback?playback_info.value("style",active_style):active_style},{"track",playback?playback_info.value("track",active_track):active_track},{"mode",playback?"replay":!room.id.empty()?"multiplayer":!gauntlet_id.empty()?"gauntlet":(practice.active||map_id==tutorial_map)?"practice":"solo"},{"practice",practice.active||map_id==tutorial_map}}},
+                {"player",{{"map",map_id},{"style",playback?playback_info.value("style",active_style):active_style},{"track",playback?playback_info.value("track",active_track):active_track},{"mode",playback?"replay":!room.id.empty()?"multiplayer":!gauntlet_id.empty()?"gauntlet":(practice.active||tutorial_practice())?"practice":"solo"},{"practice",practice.active||map_id==tutorial_map}}},
                 {"practice",{{"available",practice_reason().empty()},{"unavailable",practice_reason().empty()?nlohmann::json(nullptr):nlohmann::json(practice_reason())},{"mode",practice.mode},{"active",practice.active},{"tool",practice.tool.empty()?nlohmann::json(nullptr):nlohmann::json(practice.tool)},{"noclip",practice.noclip},{"menuOpen",practice.menu_open},{"count",practice.checkpoints.size()},{"current",practice.number()},{"keepVelocity",preferences.at("practiceKeepVelocity")}}},
                 {"gauntlet",{{"id",gauntlet_id.empty()?nlohmann::json(nullptr):nlohmann::json(gauntlet_id)},{"map",gauntlet_map.empty()?nlohmann::json(nullptr):nlohmann::json(gauntlet_map)}}},
                 {"style",selected_style},{"track",active_track},{"settings",preferences},{"replays",replay_list},
@@ -1269,7 +1290,7 @@ int run(const Options &opt) {
     }
     if(core) bh_record_end(core.get());
     capture(false);
-    std::cout << "Rendered " << frame << " frames; simulation tick " << curr.tick << "; position " << curr.position[0] << ' ' << curr.position[1] << ' ' << curr.position[2] << '\n';
+    std::cout << "Rendered " << frame << " frames; simulation tick " << curr.tick << "; position " << curr.position[0] << ' ' << curr.position[1] << ' ' << curr.position[2] << (renderer?"; exposure "+std::to_string(renderer->exposure()):std::string()) << '\n';
     return playback_failed||(!opt.menu_smoke.empty()&&!smoke_pass)?1:0;
 }
 }
@@ -1283,7 +1304,7 @@ int main(int argc,char **argv) {
         Options opt=options(argc,argv);
         if(opt.help) {
             std::cout << "Usage: bunnyhop-native [--map MAP.bsp | --online-map NAME] [--content-root DIR] [--sensitivity 2]\n"
-                         "  [--menu-html PATH] [--no-menu] [--frames N] [--screenshot output.ppm] [--hidden]\n"
+                         "  [--menu-html PATH] [--no-menu] [--frames N] [--screenshot output.ppm] [--camera x,y,z,pitch,yaw] [--hidden]\n"
                          "  [--runtime-smoke OUTPUT_DIR --replay PATH] (offline lifecycle checks with --map; private data, no network)\n"
                          "  [--tutorial jump|strafe|speed|final] [--tutorial-demo] (tutorial map only)\n"
                          "  [--menu-smoke OUTPUT_PREFIX] (with --online-map; live API reads only, no scores)\n"
