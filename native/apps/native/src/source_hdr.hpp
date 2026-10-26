@@ -21,6 +21,7 @@
 #include <deque>
 #include <numeric>
 #include <stdexcept>
+#include <string>
 
 namespace native_hdr {
 inline const char *hdr_vertex=R"(#version 330 core
