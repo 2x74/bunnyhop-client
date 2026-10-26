@@ -13,8 +13,8 @@ automation alone does not establish interactive gameplay or physical input
 validation. Check each release's notes for the artifacts and checks that actually
 completed.
 
-Current source targets production v0.0.27, physics **17**, timer rules **2**, and canonical verifier
-`bunnyhop-web/240b3b26afe5`. See [current compatibility and qualification](docs/current-compatibility.md).
+Current source targets production v0.0.28, physics **18**, timer rules **2**, and canonical verifier
+`bunnyhop-web/21d3cc6347ca`. See [current compatibility and qualification](docs/current-compatibility.md).
 Published archives have their own source/build identity and admission status.
 
 ## Native gameplay, shared game rules
@@ -31,9 +31,17 @@ Linux uses WebKitGTK, and Windows uses WebView2. The native client has no
 Electron dependency.
 
 Native features include eight movement styles, persistent settings and binds,
-local BHR recording/playback, ghosts, tutorial coaching, native HUD/audio,
-practice checkpoints and noclip, HUD scaling, Gauntlets, player-report entry points,
-cosmetics, multiplayer room pose rendering, and native map/PB replay menu backgrounds.
+named settings presets, searchable settings, draggable HUD placement, first-visit
+onboarding and controller menu navigation. Shared profiles include stats, runs,
+card editing and Loadout. The Loadout preview renders combined cosmetics natively,
+with rotation, close-up and inspect controls.
+
+Gameplay includes local BHR recording and Replay Vault playback/scrubbing, ghosts,
+tutorial coaching, native HUD/audio, practice checkpoints and noclip, Gauntlets,
+player reports, animated cosmetics, multiplayer rooms and shared scoreboard/map
+leaderboards. Maps are cached for offline use, with loading progress, retry and
+cancellation. Replay clips can be exported as MP4 through FFmpeg with gameplay audio and optional
+OST/custom-pack music, or as video only.
 The eleven-track bunnyhop.lol OST is bundled for offline playback. See the
 [native guide](native/apps/native/README.md) for the detailed scope and remaining
 parity work.
@@ -49,7 +57,7 @@ packages do not provide a signed automatic update channel. See
 [release and installation notes](docs/releases.md).
 
 Choose a map from **Play**. WASD moves, Space or the mouse wheel jumps, Ctrl ducks,
-E uses, R restarts, Escape opens the menu, and F10 exits. Sensitivity, separate
+E uses, R restarts, Escape opens the menu, and F10 opens Display settings. Sensitivity, separate
 vertical sensitivity, FOV, frame/audio settings and key bindings are available in
 the menu. Downloaded maps and shared content are checked against SHA-256 hashes
 and cached locally.
@@ -88,7 +96,7 @@ apps/native/build/bunnyhop-native --online-map bhop_eazy
 apps/native/build/bunnyhop-native --map /path/to/map.bsp --no-menu
 
 # Create an unsigned/ad-hoc package on the target OS.
-bun run package --version 0.3.4
+bun run package --version 0.4.0
 ```
 
 ## Preview limits
@@ -97,14 +105,16 @@ A human native sign-in/finish/verified-score flow still needs end-to-end
 confirmation. Physical Linux input and Wayland behavior require testing on a
 real desktop; headless checks cannot establish them. Windows runtime and
 interactive validation must be reported separately from compilation. Correctness
-tests establish no FPS or latency advantage.
+tests establish no FPS or latency advantage. The [controlled renderer comparison](docs/performance/README.md)
+records measured scene throughput and frame times on one Mac; it does not establish
+Windows performance, displayed gameplay FPS or input latency.
 
-Website parity remains incomplete: full profile-card editing, supporter checkout,
-complete third-person animation blending, animated accessories, browser-style
-music crossfades/ducking and in-app updates remain follow-up work.
-Ghost/trail cosmetic choices can sync to the account, but those effects are not
-yet drawn natively. Long replay seeking can briefly stall the UI. See the native
-guide for recording limits and verification details.
+Website parity remains incomplete. Exact animation/presentation and accessibility
+differences are tracked in the [implementation record](docs/native-parity-2026-10-26.md).
+Custom CSS is intentionally excluded from the native menu. In-app update checks
+and verified downloads require release keys and a manifest origin; installation
+is manual. Real account, multiplayer and platform qualification remains separate
+from local fixtures. See the native guide for recording limits and verification details.
 
 ## Contribute
 

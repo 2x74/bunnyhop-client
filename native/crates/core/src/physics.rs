@@ -46,6 +46,7 @@ pub const SURFACE_PROPS: &[SurfaceProp] = &[
     SurfaceProp { name: "snow", friction: 0.35, jump_factor: 1.0 },
     SurfaceProp { name: "gravel", friction: 0.4, jump_factor: 1.0 },
     SurfaceProp { name: "mud", friction: 0.6, jump_factor: 1.0 },
+    SurfaceProp { name: "ladder", friction: 0.8, jump_factor: 1.0 },
 ];
 
 /// Surface-table index of a `$surfaceprop` name (0 = default / unknown).

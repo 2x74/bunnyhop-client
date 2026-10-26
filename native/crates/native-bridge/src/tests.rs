@@ -164,6 +164,9 @@ fn c_layouts_are_stable() {
     assert_eq!(size_of::<BhSettings>(), 40);
     assert_eq!(size_of::<BhCmd>(), 20);
     assert_eq!(size_of::<BhState>(), 88);
+    assert_eq!(size_of::<BhJumpObservation>(), 204);
+    assert_eq!(offset_of!(BhJumpObservation, command), 176);
+    assert_eq!(offset_of!(BhJumpObservation, epoch), 200);
     assert_eq!(offset_of!(BhState, tick), 64);
     assert_eq!(size_of::<BhGroup>(), 20);
     assert_eq!(size_of::<BhMaterial>(), 32);
@@ -604,8 +607,12 @@ fn no_evidence_recording_exports_frozen_bhr_and_all_versions_match_shared_encode
             assert_eq!(bh_record_inspect(c, 1), 1);
             let mut state = BhState::default();
             let mut run = BhRunState::default();
+            let mut observations = Vec::new();
             for _ in 0..40 {
                 assert_eq!(bh_step(c, &BhCmd::default(), &mut state), 1);
+                let mut observation = BhJumpObservation::default();
+                assert_eq!(bh_jump_observation(c, &mut observation), 1);
+                observations.push(observation);
             }
             assert_eq!(bh_record_cosmetic(c, 1), 1);
             assert_eq!(bh_record_inspect(c, 2), 1);
@@ -618,6 +625,9 @@ fn no_evidence_recording_exports_frozen_bhr_and_all_versions_match_shared_encode
                     ..BhCmd::default()
                 };
                 assert_eq!(bh_step(c, &cmd, &mut state), 1);
+                let mut observation = BhJumpObservation::default();
+                assert_eq!(bh_jump_observation(c, &mut observation), 1);
+                observations.push(observation);
                 assert_eq!(bh_run_state(c, &mut run), 1);
                 if run.status == 2 {
                     break;
@@ -720,6 +730,20 @@ fn no_evidence_recording_exports_frozen_bhr_and_all_versions_match_shared_encode
                 playback.player.velocity.map(f32::to_bits),
                 frame.velocity.map(f32::to_bits)
             );
+            assert_eq!(crate::replay::bh_replay_seek(c, 0, &mut playback), 1);
+            let mut observation = BhJumpObservation::default();
+            assert_eq!(bh_jump_observation(c, &mut observation), 1);
+            assert_eq!(observation.valid, 0);
+            for expected in &observations {
+                assert_eq!(crate::replay::bh_replay_step(c, &mut playback), 1);
+                assert_eq!(bh_jump_observation(c, &mut observation), 1);
+                state_equal(observation.pre, expected.pre);
+                state_equal(observation.post, expected.post);
+                assert_eq!(observation.valid, expected.valid, "{case}: clean observation replay drift");
+                assert_ne!(observation.epoch, expected.epoch, "seek must fence movement history");
+                assert_eq!(observation.command.forward.to_bits(), expected.command.forward.to_bits());
+                assert_eq!(observation.command.buttons, expected.command.buttons);
+            }
             assert_eq!(crate::replay::bh_replay_seek(c, 0, &mut playback), 1);
             assert_eq!(crate::replay::bh_replay_step(c, &mut playback), 1);
             assert_eq!(playback.player.tick, 1);
@@ -1334,6 +1358,180 @@ fn practice_save_is_harmless_and_mutations_coast_without_recording_or_zones() {
         // Handles belong to a single map; replacing the map destroys them.
         assert_eq!(bh_load_map(c, path.as_ptr(), fixture.root().as_ptr()), 1);
         assert_eq!(bh_practice_restore(c, handle, &mut view, &mut snapshot), 0);
+        bh_destroy(c);
+    }
+}
+
+/// Native ABI integration: actual shots/ammo/state, independent of renderer effects.
+#[test]
+fn native_guns_fire_consume_ammo_reload_and_obey_trigger_cadence() {
+    use bunnyhop_core::game::GUNS;
+    let fixture = Fixture::new();
+    let path = fixture.file("weapons.bsp", &bsp(&[]));
+    unsafe {
+        let c = bh_create();
+        let settings = BhSettings { gravity: 0.0, ..BhSettings::default() };
+        assert_eq!(bh_set_settings(c, &settings), 1);
+        assert_eq!(bh_load_map(c, path.as_ptr(), ptr::null()), 1);
+        for gun in GUNS {
+            assert_eq!(bh_reset(c), 1);
+            let mut state = BhState::default();
+            let step = |buttons, state: &mut BhState| {
+                assert_eq!(bh_step(c, &BhCmd { buttons, ..BhCmd::default() }, state), 1);
+            };
+            step(u32::from(gun.id) << 16, &mut state);
+            for _ in 0..150 { step(0, &mut state); }
+            let mut report = BhWeaponReport::default();
+            assert_eq!(assets::bh_weapon_report(c, &mut report), 1);
+            assert_eq!((report.active, report.clip, report.clip_size), (u32::from(gun.id), u32::from(gun.clip), u32::from(gun.clip)), "{} given", gun.name);
+            let mut shots: Vec<i32> = Vec::new();
+            for tick in 0..250 {
+                step(1, &mut state);
+                let mut attack = BhAttackReport::default();
+                let fired = assets::bh_attack_report(c, &mut attack) == 1;
+                assert_eq!(fired, state.events & 32 != 0, "{} attack event", gun.name);
+                if fired {
+                    shots.push(tick);
+                    assert_eq!(attack.weapon, u32::from(gun.id));
+                    assert!(attack.start.iter().chain(attack.end.iter()).all(|v| v.is_finite()));
+                    assert!(attack.start.iter().zip(attack.end).any(|(a,b)| (a-b).abs() > 1.0));
+                }
+                assert_eq!(assets::bh_weapon_report(c, &mut report), 1);
+                assert_eq!(report.clip as usize + shots.len(), gun.clip as usize, "{} ammo", gun.name);
+            }
+            assert_eq!(shots[0], 0, "{} first shot", gun.name);
+            if gun.semi { assert_eq!(shots.len(), 1, "{} held pistol", gun.name); }
+            else {
+                assert!(shots.len() > 1, "{} automatic fire", gun.name);
+                let expected = (gun.cycle / settings.tick_interval).ceil() as i32;
+                for pair in shots.windows(2) {
+                    assert!((pair[1] - pair[0] - expected).abs() <= 1, "{} cadence {:?}", gun.name, shots);
+                }
+            }
+            for _ in 0..150 { step(0, &mut state); }
+            step(1 << 13, &mut state);
+            assert_eq!(assets::bh_weapon_report(c, &mut report), 1);
+            assert!(report.flags & 4 != 0 || report.reload_ticks > 0 || report.clip == u32::from(gun.clip), "{} reload starts or automatic reload already active", gun.name);
+            for _ in 0..1200 { step(0, &mut state); }
+            assert_eq!(assets::bh_weapon_report(c, &mut report), 1);
+            assert_eq!(report.clip, u32::from(gun.clip), "{} refill", gun.name);
+            step(1 << 12, &mut state);
+            assert_eq!(assets::bh_weapon_report(c, &mut report), 1);
+            assert_ne!(report.flags & 32, 0, "{} drop", gun.name);
+            assert_eq!(report.active, 1);
+        }
+        bh_destroy(c);
+    }
+}
+
+#[test]
+fn native_glock_burst_and_usp_silencer_keep_authoritative_state() {
+    let fixture = Fixture::new();
+    let path = fixture.file("weapon-modes.bsp", &bsp(&[]));
+    unsafe {
+        let c = bh_create();
+        assert_eq!(bh_set_settings(c, &BhSettings { gravity: 0.0, ..BhSettings::default() }), 1);
+        assert_eq!(bh_load_map(c, path.as_ptr(), ptr::null()), 1);
+        let mut state = BhState::default();
+        let step = |buttons, state: &mut BhState| assert_eq!(bh_step(c, &BhCmd { buttons, ..BhCmd::default() }, state), 1);
+        step(2 << 16, &mut state);
+        for _ in 0..150 { step(0, &mut state); }
+        step(1 << 11, &mut state);
+        for _ in 0..60 { step(0, &mut state); }
+        let mut shots = Vec::new();
+        for tick in 0..150 {
+            step(1, &mut state);
+            let mut attack = BhAttackReport::default();
+            if assets::bh_attack_report(c, &mut attack) == 1 { shots.push(tick); assert_eq!(attack.weapon, 2); }
+        }
+        assert_eq!(shots, vec![0,6,12], "held Glock is exactly one measured burst");
+        let mut report = BhWeaponReport::default();
+        assert_eq!(assets::bh_weapon_report(c, &mut report), 1);
+        assert_eq!((report.clip, report.burst), (17,1));
+        assert_eq!(bh_reset(c), 1);
+        step(3 << 16, &mut state);
+        for _ in 0..150 { step(0, &mut state); }
+        step(1 << 11, &mut state);
+        assert_eq!(assets::bh_weapon_report(c, &mut report), 1);
+        assert_eq!(report.silencer, 1);
+        assert!(report.silencer_ticks > 300);
+        for _ in 0..300 {
+            step(1, &mut state);
+            let mut attack = BhAttackReport::default();
+            assert_eq!(assets::bh_attack_report(c, &mut attack), 0, "attachment blocks fire");
+        }
+        for _ in 0..30 { step(0, &mut state); }
+        step(1, &mut state);
+        let mut attack = BhAttackReport::default();
+        assert_eq!(assets::bh_attack_report(c, &mut attack), 1);
+        assert_eq!((attack.weapon,attack.mode),(3,2));
+        assert_eq!(bh_reset(c), 1);
+        step((3 << 16) | (1 << 21) | (1 << 22), &mut state);
+        for _ in 0..2 { step(0, &mut state); }
+        assert_eq!(assets::bh_weapon_report(c, &mut report), 1);
+        assert_eq!((report.active,report.silencer,report.silencer_ticks),(3,1,0));
+        bh_destroy(c);
+    }
+}
+
+#[test]
+fn clean_jump_observation_real_flat_jump_wall_and_mutation_fences() {
+    let map = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_eazy.bsp");
+    if !map.is_file() { eprintln!("bhop_eazy map is unavailable; skipping external map observation regression"); return; }
+    unsafe {
+        let c = bh_create();
+        let path = CString::new(map.to_str().unwrap()).unwrap();
+        assert_eq!(bh_load_map(c, path.as_ptr(), ptr::null()), 1);
+        let mut state = BhState::default();
+        let mut observation = BhJumpObservation::default();
+        for wall in [false, true] {
+            assert_eq!(bh_reset(c), 1);
+            let mut jumped = false;
+            let mut dirty_air = false;
+            let mut clean_landing = false;
+            let mut flight = false;
+            for i in 0..130 {
+                let cmd = BhCmd { forward: if i >= 15 {450.0} else {0.0}, yaw: if wall {180.0} else {0.0},
+                    buttons: if i == if wall {25} else {50} {2} else {0}, ..BhCmd::default() };
+                let mut pre = BhState::default();
+                assert_eq!(bh_state(c, &mut pre), 1);
+                assert_eq!(bh_step(c, &cmd, &mut state), 1);
+                let bytes = (*c).map.as_ref().unwrap().game.snapshot_bytes();
+                assert_eq!(bh_jump_observation(c, &mut observation), 1);
+                assert_eq!(bytes, (*c).map.as_ref().unwrap().game.snapshot_bytes(), "telemetry must not change canonical bytes");
+                state_equal(observation.pre, pre);
+                state_equal(observation.post, state);
+                assert_eq!(observation.valid, u32::from((*c).map.as_ref().unwrap().game.jumpstats_valid));
+                if state.events & 2 != 0 { jumped = true; flight = true; assert_eq!(observation.valid, 1); }
+                if flight && state.grounded == 0 && state.events & (1|8) == 0 && observation.valid == 0 {dirty_air = true;}
+                if flight && state.events & 4 != 0 { clean_landing = !dirty_air && observation.valid == 1;flight = false; }
+            }
+            assert!(jumped);
+            if wall {assert!(dirty_air);assert!(!clean_landing);} else {assert!(!dirty_air);assert!(clean_landing);}
+        }
+        let epoch = observation.epoch;
+        assert_eq!(bh_set_velocity(c, 1.0, 0.0, 0.0), 1);
+        assert_eq!(bh_jump_observation(c, &mut observation), 1);
+        assert_eq!(observation.valid, 0);assert_ne!(observation.epoch, epoch);
+        assert_eq!(bh_reset(c), 1);
+        let zones = [
+            BhZone { kind: 0, mins: [-100000.0;3], maxs: [100000.0;3], ..BhZone::default() },
+            BhZone { kind: 1, mins: [200000.0;3], maxs: [200100.0;3], ..BhZone::default() },
+        ];
+        assert_eq!(bh_run_configure(c, &BhRunOptions { prespeed_cap:200.0, ..BhRunOptions::default() }, zones.as_ptr(), zones.len()), 1);
+        for _ in 0..50 {assert_eq!(bh_step(c, &BhCmd::default(), &mut state), 1);}
+        assert_eq!(state.grounded, 1);
+        assert_eq!(bh_set_velocity(c, 500.0, 0.0, 0.0), 1);
+        assert_eq!(bh_step(c, &BhCmd {buttons:2, ..BhCmd::default()}, &mut state), 1);
+        let mut run = BhRunState::default();assert_eq!(bh_run_state(c, &mut run), 1);
+        assert_ne!(run.update_flags & 8, 0, "exercise a real timer prespeed clamp");
+        assert!((*c).map.as_ref().unwrap().game.jumpstats_valid, "movement itself was clean");
+        assert_eq!(bh_jump_observation(c, &mut observation), 1);
+        assert_eq!(observation.valid, 0, "timer clamp must invalidate the observational flight");
+        assert_eq!(bh_reset(c), 1);
+        let mut settings = BhSettings::default();settings.gravity=400.0;
+        assert_eq!(bh_set_settings(c, &settings), 1);
+        for _ in 0..10 {assert_eq!(bh_step(c, &BhCmd::default(), &mut state), 1);assert_eq!(bh_jump_observation(c, &mut observation), 1);assert_eq!(observation.valid, 0);}
         bh_destroy(c);
     }
 }

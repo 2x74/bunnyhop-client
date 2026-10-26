@@ -1,18 +1,30 @@
 #include "bunnyhop_native.h"
 #include "native_input.hpp"
+#include "mouse_diagnostics.hpp"
 #include "native_math.hpp"
 #include "menu_webview.hpp"
 #include "online.hpp"
 #include "renderer.hpp"
 #include "menu_backdrop.hpp"
+#include "loadout_preview.hpp"
+#include "menu_gamepad.hpp"
 #include "hud.hpp"
 #include "practice.hpp"
 #include "leave_hold.hpp"
+#include "native_chat.hpp"
+#include "sniper_zoom.hpp"
+#include "activity.hpp"
+#include "weapon_menu.hpp"
+#include "start_point.hpp"
+#include "weapon_commands.hpp"
+#include "replay_camera.hpp"
+#include "replay_controls.hpp"
 #include "map_jobs.hpp"
 #include "ssj.hpp"
 #include "strafe_trainer.hpp"
 #include "audio.hpp"
 #include "client_util.hpp"
+#include "run_vault.hpp"
 #include "app_identity.hpp"
 #include "room_state.hpp"
 #include "room_modes.hpp"
@@ -24,6 +36,11 @@
 #include "../packaging/executable_identity.hpp"
 #include "../packaging/assets_identity.hpp"
 #include "../packaging/release_identity.hpp"
+#include "native_update.hpp"
+#include "update_config.hpp"
+#include "video_capture.hpp"
+#include "presentation_smoke.hpp"
+#include "window_sdl.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
 #include <algorithm>
@@ -54,7 +71,7 @@ struct Options {
     uint64_t frames = 0;
     double sensitivity = 2;
     bool hidden = false, help = false, no_menu = false, sensitivity_set=false, menu_home_smoke=false;
-    std::string style="autohop", replay,tutorial_lesson,runtime_smoke;bool tutorial_demo=false;
+    std::string style="autohop", replay,tutorial_lesson,runtime_smoke,video_smoke,presentation_smoke;bool tutorial_demo=false;
     // Render checks: a fixed eye (Source x, y, z) and pitch, yaw, with no HUD or viewmodel.
     std::optional<std::array<float,5>> camera;
 };
@@ -63,7 +80,9 @@ Options options(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         auto value = [&]() -> std::string { if (++i >= argc) throw std::runtime_error("Missing value for " + arg); return argv[i]; };
-        if(arg=="--runtime-smoke"){out.runtime_smoke=value();out.hidden=true;out.no_menu=true;}
+        if(arg=="--presentation-smoke"){out.presentation_smoke=value();out.hidden=true;out.no_menu=true;}
+        else if(arg=="--video-smoke"){out.video_smoke=value();out.hidden=true;out.no_menu=true;}
+        else if(arg=="--runtime-smoke"){out.runtime_smoke=value();out.hidden=true;out.no_menu=true;}
         else if(arg=="--tutorial")out.tutorial_lesson=value();
         else if(arg=="--tutorial-demo")out.tutorial_demo=true;
         else if(arg=="--style") out.style=value();
@@ -206,12 +225,16 @@ int run(const Options &opt) {
     const auto menu_path=opt.menu_html==BUNNYHOP_MENU_HTML?native::resource("menu.html",opt.menu_html):std::filesystem::path(opt.menu_html);
     const auto manifest_path=native::resource("native-manifest.json",BUNNYHOP_NATIVE_MANIFEST);
     NativeHud hud(gl,assets);
+    native::MenuGamepad menu_gamepad;
+    std::unique_ptr<NativeLoadoutPreview> loadout_preview;
+    std::optional<nlohmann::json> preview_request;
     NativeHud::Layout hud_layout;
     // Resolved before the audio device so the custom sound/ and bgm/ folders
     // are known at the point the packs are first applied.
     char *pref_path=SDL_GetPrefPath("bunnyhop.lol","Bunnyhop Native");
     if(!pref_path) throw std::runtime_error("Cannot find the native client data directory");
-    const std::filesystem::path cache=opt.runtime_smoke.empty()?std::filesystem::path(pref_path):std::filesystem::path(opt.runtime_smoke)/"data"; SDL_free(pref_path);
+    const std::string isolated=!opt.runtime_smoke.empty()?opt.runtime_smoke:!opt.presentation_smoke.empty()?opt.presentation_smoke:opt.video_smoke;
+    const std::filesystem::path cache=isolated.empty()?std::filesystem::path(pref_path):std::filesystem::path(isolated)/"data"; SDL_free(pref_path);
     std::filesystem::create_directories(cache/"replays");
     // Created empty so a player looking for where their own audio goes finds
     // the folders already there rather than having to guess the names.
@@ -254,14 +277,39 @@ int run(const Options &opt) {
     auto preferences=native::default_settings();
     try {preferences=native::load_settings(cache/"settings.json");}catch(const std::exception &e){std::cerr<<"Settings: "<<e.what()<<'\n';}
     if(opt.sensitivity_set)preferences["sensitivity"]=opt.sensitivity;
-    std::string selected_style=opt.style,active_style=opt.style,outfit,packed_loadout;
+    native::WindowController window_controller(window.get());
+    const bool persist_window=!opt.hidden&&!opt.frames&&opt.menu_smoke.empty()&&opt.runtime_smoke.empty();
+    std::optional<native::WindowBounds> saved_window;
+    if(persist_window)try{const auto path=cache/"window-state.json";if(std::filesystem::exists(path)&&std::filesystem::file_size(path)<=16384)saved_window=native::read_window_bounds(nlohmann::json::parse(read_text(path)));}catch(const std::exception&e){std::cerr<<"Window bounds: "<<e.what()<<'\n';}
+    auto initial_window_preferences=preferences;if(menu&&menu->visible())initial_window_preferences["alwaysOnTop"]=false;
+    if(persist_window&&!window_controller.apply(initial_window_preferences,true,saved_window)){std::cerr<<"Window: "<<window_controller.error()<<'\n';preferences["windowMode"]=window_controller.mode();}
+    bool window_dirty=false;auto window_save_due=std::chrono::steady_clock::now();
+    auto save_window=[&](){if(!persist_window||!preferences.value("rememberWindowBounds",true))return;try{if(auto bounds=window_controller.observe_bounds())native::save_settings(cache/"window-state.json",native::window_bounds_json(*bounds));window_dirty=false;}catch(const std::exception&e){std::cerr<<"Window bounds: "<<e.what()<<'\n';}};
+    std::string selected_style=opt.style,active_style=opt.style,outfit,packed_loadout,ghost_cosmetic="ghost-default",trail_cosmetic="trail-none";
+    std::optional<native_render::Glow> player_glow;
     native::RoomState room;native::RoomModes room_modes;std::optional<unsigned> observed_spectator;
     auto epoch_ms=[](){return std::chrono::duration<double,std::milli>(std::chrono::system_clock::now().time_since_epoch()).count();};
     uint32_t room_events=8;auto room_time=std::chrono::steady_clock::now();
     uint32_t active_track=0,ghost_handle=0;
+    struct GhostSlot {uint32_t handle=0;std::string id;bool enabled=false;nlohmann::json info;};
+    std::array<GhostSlot,4> ghost_slots;unsigned pending_ghost_slot=0;
     std::string ghost_id,playback_id,pending_replay,pending_action,score_notice;
+    std::optional<double> known_world_record;uint64_t world_record_generation=~uint64_t(0);
     nlohmann::json replay_list=nlohmann::json::array(),playback_info,ghost_info;
     bool playback=false,playback_paused=false,ghost_enabled=false,playback_failed=false;
+    native::ReplayControls replay_controls;
+    bool replay_orbit_drag=false;
+    native::NativeVideoExport video_encoder;
+    native::VideoAvailability video_available{false,"Checking FFmpeg availability…","ffmpeg"};
+    auto video_probe=std::async(std::launch::async,[]{return native::NativeVideoExport::probe();});
+    std::unique_ptr<native::VideoCapture> video_capture;
+    std::unique_ptr<native::ReplayDirectorJob> director_job;
+    std::optional<native::VideoOptions> pending_video;
+    native::ReplayCamera prepared_camera,replay_camera,third_camera;
+    bool director_only=false;std::string video_error;
+    nlohmann::json video_music_catalog=nlohmann::json::array();
+    auto cancel_video=[&](){video_encoder.cancel();pending_video.reset();director_job.reset();prepared_camera.cancel_direct();replay_camera.cancel_direct();video_capture.reset();video_error.clear();};
+    auto video_state=[&](){auto result=video_encoder.status();result["available"]=video_available.available;result["reason"]=video_available.reason;result["musicTracks"]=video_music_catalog;if(director_job){result["state"]="capturing";result["reason"]="Preparing cinematic cameras…";result["progress"]=0;}if(!video_error.empty()){result["state"]="error";result["error"]=video_error;}return result;};
     std::string pending_room_map;
     double playback_speed=1,display_fps=0;
     constexpr const char *tutorial_map="bhop_lol_tutorial";
@@ -273,19 +321,33 @@ int run(const Options &opt) {
     std::function<void(const std::string&,bool)> start_tutorial;
     auto save_tutorial=[&](){if(!tutorial)return;tutorial_completed=tutorial->stateJSON().at("completed");native::save_settings(cache/"tutorial-progress.json",tutorial_completed);};
     std::set<std::string> held_codes;
+    native::Chat chat;
+    native::RestartGuard restart_guard;
+    native::StartPoints start_points;native::KeptWeapons kept_weapons;
+    third_camera.set_mode("chase");
+    native::Input camera_controls;
+    native::SniperZoom scope;
+    native::NativeWeaponMenu gun_menu;
+    bool third_person=false,flashlight=false,hide_players=false,show_scores=false;
+    try {const auto path=cache/"start-points.json";if(std::filesystem::exists(path)&&std::filesystem::file_size(path)<=1024*1024)start_points.load(nlohmann::json::parse(read_text(path)));}catch(const std::exception &e){std::cerr<<"Start points: "<<e.what()<<'\n';}
     auto apply_preferences=[&]() {
         hud_layout.clear();
         for(const auto &[id,at]:preferences.at("hudLayout").items())hud_layout[id]={at.at("x").get<float>(),at.at("y").get<float>()};
         input.set_sensitivity(preferences.at("sensitivity").get<double>());
-        input.vertical_sensitivity=preferences.at("verticalSensitivity").get<double>();input.separate_vertical=preferences.at("separateVertical").get<bool>();
+        input.vertical_sensitivity=preferences.at("verticalSensitivity").get<double>();input.separate_vertical=preferences.at("separateVertical").get<bool>();input.invert_y=preferences.at("invertY").get<bool>();
+        camera_controls.set_sensitivity(input.sensitivity);camera_controls.vertical_sensitivity=input.vertical_sensitivity;camera_controls.separate_vertical=input.separate_vertical;camera_controls.invert_y=input.invert_y;
+        hud.preferences(preferences);audio.preferences(preferences);
         SDL_GL_SetSwapInterval(opt.frames?0:preferences.at("vsync").get<bool>()?1:0);
         audio.gain(preferences.at("muted").get<bool>()?0:preferences.at("volume").get<float>());
         audio.set_sfx_pack(preferences.at("sfxPack").get<std::string>()=="custom");
         audio.set_music_pack(preferences.at("musicPack").get<std::string>()=="custom");
-        if(renderer){renderer->set_fov(preferences.at("fov").get<float>());renderer->set_viewmodel_visible(preferences.at("viewmodel").get<bool>());}
+        video_music_catalog=audio.export_music_catalog(preferences.at("musicPack").get<std::string>()=="custom");
+        if(renderer){renderer->set_player_glow(player_glow);renderer->set_glow_visible(preferences.value("showPlayerGlow",true),preferences.value("firstPersonGlow",false));renderer->set_fov(preferences.at("fov").get<float>());renderer->set_viewmodel(preferences.at("viewmodelFov").get<float>(),preferences.at("viewmodelX").get<float>(),preferences.at("viewmodelY").get<float>(),preferences.at("viewmodelZ").get<float>(),preferences.at("viewmodelLeftHand").get<bool>(),preferences.at("viewmodel").get<bool>(),preferences.at("viewmodelBob").get<float>(),preferences.at("viewmodelSway").get<float>());renderer->set_color_blind(preferences.value("colorBlind",std::string("off")));renderer->set_actor_models(preferences.value("playerModel",std::string("bunny")),preferences.value("ghostModel",std::string("same")));renderer->set_zones_visible(preferences.value("zonesVisible",true));renderer->set_effects_visible(preferences.value("effectsVisible",true));renderer->set_triggers_visible(preferences.value("triggersVisible",false));renderer->set_water_quality(preferences.value("waterQuality",std::string("simple"))=="refracted"?1:0);}
     };
     apply_preferences();
-    std::string map_id,loading,error,record_path,last_ui;
+    std::string map_id,loading,error,record_path,last_ui,last_requested_map;
+    native::RunVault run_vault(cache/"run-vault");std::optional<std::pair<std::string,std::string>> pending_vault_capture;
+    nlohmann::json load_progress=nullptr;
     nlohmann::json identity={{"build","bunnyhop-native/local"},{"wasm",""}};
     if(std::filesystem::exists(manifest_path)) {
         try {
@@ -295,6 +357,8 @@ int run(const Options &opt) {
             identity=manifest;
         } catch(const std::exception &e) {std::cerr<<"Native release manifest: "<<e.what()<<"; replays remain local\n";}
     }
+    native::updates::Service updater(nlohmann::json::parse(native::update_config_json),cache/"updates",identity.value("version",std::string("local")),identity.value("build",std::string("bunnyhop-native/local")));
+    std::string last_update;
     // Jump stats (!ssj). Display only — it reads the same pre-state, command and
     // events the simulation already produced and never feeds anything back.
     native::MovementFeedback feedback;
@@ -305,6 +369,7 @@ int run(const Options &opt) {
     std::string toast_text;auto toast_until=std::chrono::steady_clock::time_point{};
     const native::SsjFields ssj_fields;
     auto reset_feedback=[&](bool incomplete_history=false) {
+        hud.reset_history();
         BhRunState timing{}; BhSnapshot snapshot{};
         if(core){bh_run_state(core.get(),&timing);bh_snapshot(core.get(),&snapshot);}
         feedback.reset(timing.in_start!=0,snapshot.movement_mode==1,incomplete_history);
@@ -315,14 +380,20 @@ int run(const Options &opt) {
     auto beat_time=std::chrono::steady_clock::now();
     std::vector<BhZone> zones;
     std::mutex progress_mutex;
-    native::MapJobs<native::DownloadedMap> download;
+    native::MapJobs<native::DownloadedMap> download,prefetch;
+    bool map_preparing=false;
+    std::string prefetch_map,prefetch_sha,prefetch_active,prefetch_done;
+    auto cancel_prefetch=[&](){prefetch.cancel();prefetch_map.clear();prefetch_sha.clear();prefetch_active.clear();};
     double accumulator=0;
     using Clock=std::chrono::steady_clock;
+    native::ActivityCounter activity;activity.input(std::chrono::duration<double>(Clock::now().time_since_epoch()).count());
+    auto activity_time=Clock::now();
     native::InputClock input_clock;
     // A focus, menu or restart reset: the simulation starts again from now and
     // motion from before it is dropped rather than handed to the next tick.
-    auto reset_input_timing=[&]() {accumulator=0;input.clear();input_clock.reset();leave_hold.cancel();};
+    auto reset_input_timing=[&]() {accumulator=0;input.clear();camera_controls.clear();SDL_FlushEvent(SDL_EVENT_MOUSE_MOTION);input_clock.reset();leave_hold.cancel();restart_guard.cancel();};
     auto capture=[&](bool on) {
+        if(chat.active){chat.close();SDL_StopTextInput(window.get());}
         reset_input_timing();held_codes.clear();
         if (!SDL_SetWindowRelativeMouseMode(window.get(),on)) {
             captured=false; std::cerr << "Relative mouse mode failed: " << SDL_GetError() << '\n';
@@ -330,6 +401,8 @@ int run(const Options &opt) {
         input_clock.reset();
     };
     auto show_menu=[&](bool on) {
+        if(on){replay_controls.dragging=false;replay_orbit_drag=false;}
+        SDL_SetWindowAlwaysOnTop(window.get(),!on&&preferences.value("alwaysOnTop",false));
         if(menu) menu->set_visible(on);
         // Each pause re-announces the paused map (a fresh still for a
         // separate GTK window); sent with the menu state once it is visible.
@@ -337,8 +410,21 @@ int run(const Options &opt) {
         if(on)audio.pause();
         resume_wanted=!on&&bool(core);
         if(resume_wanted) SDL_RaiseWindow(window.get());
-        capture(resume_wanted && focused); accumulator=0; prev=curr;
+        capture(resume_wanted && focused&&!(playback&&replay_controls.visible)); accumulator=0; prev=curr;
     };
+    uint64_t chat_request=0;
+    auto chat_suggest=[&](){++chat_request;if(menu&&menu_ready)menu->evaluate_js("window.bunnyhopNativeMenu?.onChatSuggest?.("+nlohmann::json({{"text",chat.input},{"request",chat_request}}).dump()+")");};
+    auto open_chat=[&](bool command){
+        if(!core||playback||!captured||!menu||!menu_ready)return;
+        input.clear();camera_controls.clear();held_codes.clear();leave_hold.cancel();restart_guard.cancel();
+        // Keep gameplay running with neutral input while exposing the pointer for chat links.
+        chat.open(command);SDL_SetWindowRelativeMouseMode(window.get(),false);SDL_StartTextInput(window.get());
+        int w=0,h=0;SDL_GetWindowSize(window.get(),&w,&h);SDL_Rect area{16,std::max(0,h-120),std::max(1,w-32),32};SDL_SetTextInputArea(window.get(),&area,0);
+        chat_suggest();
+    };
+    bool chat_drag=false;
+    auto close_chat=[&](){chat_drag=false;chat.close();if(captured&&focused&&(!menu||!menu->visible()))SDL_SetWindowRelativeMouseMode(window.get(),true);SDL_StopTextInput(window.get());input.clear();camera_controls.clear();held_codes.clear();};
+    auto room_control=[&](const nlohmann::json &command){if(menu&&menu_ready)menu->evaluate_js("window.bunnyhopNativeMenu?.onRoomControl?.("+command.dump()+")");};
     auto run_event=[&](nlohmann::json event) {
         if(!native::practice_allows_event(practice.active,event.value("type",std::string()))||!turn_admission.allows_event(event.value("type",std::string())))return;
         if(!menu || !menu_ready || opt.frames || !opt.menu_smoke.empty()) return;
@@ -355,7 +441,7 @@ int run(const Options &opt) {
     auto begin_record=[&]() {
         if(turn_admission.local_only)score_notice.clear();
         turn_admission.reset();
-        recording_ended=false; record_path.clear();
+        recording_ended=false; record_path.clear();pending_vault_capture.reset();
         ++run_generation;beat_start=beat_upto=0;beat_hash=0x811c9dc5;beat_paused=false;
         run_event({{"type","reset"}});
         if(practice.active || playback || room.spectator_target || tutorial_practice() || zones.empty() || opt.frames || !opt.menu_smoke.empty()) return;
@@ -366,8 +452,11 @@ int run(const Options &opt) {
         bh_record_loadout(core.get(),packed_loadout.c_str());
     };
     auto reset=[&]() {
+        cancel_video();
+        replay_controls={};replay_controls.pending.reset();replay_orbit_drag=false;
         if(!core) return;
-        bh_record_end(core.get());room_events|=8;practice.restart();
+        if(pending_action!="play")cancel_prefetch();gun_menu.close();bh_record_end(core.get());room_events|=8;practice.restart();
+        if(third_person&&!room.spectator_target){practice.active=true;if(practice.tool.empty())practice.tool="camera";}
         if(playback){require(bh_replay_stop(core.get()),core.get(),"Stopping replay");playback=false;playback_id.clear();}
         BhRunOptions canonical{};bh_default_run_options(&canonical);if(zones.empty())require(bh_run_clear(core.get()),core.get(),"Clearing replay timer");else require(bh_run_configure(core.get(),&canonical,zones.data(),zones.size()),core.get(),"Restoring canonical map timer");
         active_style=active_track?"autohop":selected_style;
@@ -386,22 +475,28 @@ int run(const Options &opt) {
             if(map_id=="bhop_japan") require(bh_set_restart_names(core.get(),"","beginner"),core.get(),"Applying map restart names");
             require(bh_state(core.get(),&curr),core.get(),"Reading settled restart");
         }
+        std::optional<float> custom_pitch;
+        if(!(tutorial&&tutorial->is_active()))if(const auto point=start_points.get(map_id,active_track)){
+            const BhState fallback=curr;
+            if(bh_set_position(core.get(),point->position[0],point->position[1],point->position[2],point->yaw)&&bh_state(core.get(),&curr)&&native::start_point_problem(curr,zones,active_track,false).empty()&&curr.position[0]==point->position[0]&&curr.position[1]==point->position[1]&&std::abs(curr.position[2]-point->position[2])<=4)custom_pitch=point->pitch;
+            else{require(bh_set_position(core.get(),fallback.position[0],fallback.position[1],fallback.position[2],fallback.teleport_angles[1]),core.get(),"Restoring default start");require(bh_state(core.get(),&curr),core.get(),"Reading default start");}
+        }
         if(tutorial&&tutorial->is_active()){
             tutorial->set_legit(active_style=="legit"||active_style=="scroll");tutorial->start(tutorial->lesson_index());
             const auto spawn=tutorial->spawn();require(bh_set_position(core.get(),spawn.position[0],spawn.position[1],spawn.position[2],spawn.yaw),core.get(),"Placing tutorial player");
             require(bh_set_velocity(core.get(),0,0,0),core.get(),"Stopping tutorial player");require(bh_state(core.get(),&curr),core.get(),"Reading tutorial restart");
             if(tutorial_demo)tutorial_demo_start=curr.tick;
         }
-        if(renderer){renderer->reset_presentation();renderer->set_viewmodel_weapon(std::nullopt);renderer->set_cosmetics(outfit,packed_loadout);}
-        audio.reset();prev=curr;reset_input_timing();input.set_angles(curr.teleport_angles[0],curr.teleport_angles[1]);
-        begin_record();reset_feedback();reset_input_timing();
+        if(renderer){renderer->reset_presentation();scope.reset();renderer->set_viewmodel_weapon(std::nullopt);renderer->set_cosmetics(outfit,packed_loadout);}
+        audio.reset();hud.reset_history();replay_camera.reset();prev=curr;reset_input_timing();input.set_angles(custom_pitch.value_or(curr.teleport_angles[0]),curr.teleport_angles[1]);
+        kept_weapons.restarted(practice.active||zones.empty(),settings.physics>=10);begin_record();reset_feedback();reset_input_timing();
     };
     auto practice_reason=[&](){return native::practice_unavailable(bool(core),playback,!room.id.empty(),map_id==tutorial_map,!gauntlet_id.empty());};
     auto toast=[&](const std::string &text,unsigned ms=3000){toast_text=text;toast_until=Clock::now()+std::chrono::milliseconds(ms);};
     auto practice_use=[&](const std::string &tool){
         if(!practice.active){BhRunState timing{};bh_run_state(core.get(),&timing);practice.active=true;practice.tool=tool;toast(timing.status==1?"This run is practice now. Press R to restart for a real run.":"Practice until you restart. Press R for a real run.",5000);}
         require(bh_practice_enter(core.get(),tool=="noclip"),core.get(),"Entering practice");
-        recording_ended=false;record_path.clear();score_notice.clear();++run_generation;beat_start=beat_upto=0;run_event({{"type","reset"}});
+        recording_ended=false;record_path.clear();pending_vault_capture.reset();score_notice.clear();++run_generation;beat_start=beat_upto=0;run_event({{"type","reset"}});
     };
     auto practice_action=[&](const std::string &action,bool bound=false,std::optional<bool> value=std::nullopt){
         const auto unavailable=practice_reason();if(!unavailable.empty()){toast(unavailable);return;}
@@ -441,18 +536,20 @@ int run(const Options &opt) {
             require(bh_state(core.get(),&curr),core.get(),"Reading checkpoint");prev=curr;input.set_angles(view.pitch,view.yaw);
             toast("Checkpoint "+std::to_string(practice.number())+" of "+std::to_string(practice.checkpoints.size()));
         } else throw std::runtime_error("Unknown practice action");
-        if(renderer)renderer->reset_presentation();audio.reset();reset_feedback(true);reset_input_timing();room_events|=8;
+        if(renderer)renderer->reset_presentation();scope.reset();audio.reset();reset_feedback(true);reset_input_timing();room_events|=8;
     };
     auto leave_map=[&](){
+        cancel_video();
+        replay_controls={};replay_controls.pending.reset();replay_orbit_drag=false;
         show_menu(true);
         if(menu&&menu_ready)menu->evaluate_js("window.bunnyhopNativeMenu?.onLeaveMap?.()");
-        download.cancel();
-        {std::lock_guard lock(progress_mutex);loading.clear();}
+        download.cancel();cancel_prefetch();
+        {std::lock_guard lock(progress_mutex);loading.clear();load_progress=nullptr;}
         pending_replay.clear();pending_action.clear();pending_room_map.clear();pending_tutorial.clear();tutorial_stopped=true;
         if(core)bh_record_end(core.get());practice.clear(core.get());renderer.reset();core.reset();tutorial.reset();
-        playback=false;playback_paused=false;playback_id.clear();playback_info=nullptr;ghost_handle=0;ghost_enabled=false;ghost_id.clear();ghost_info=nullptr;
-        gauntlet_id.clear();gauntlet_map.clear();gauntlet_progress=nullptr;zones.clear();map_id.clear();active_track=0;active_style=selected_style;
-        curr={};prev={};recording_ended=true;record_path.clear();score_notice.clear();toast_text.clear();error.clear();turn_admission.reset();
+        playback=false;playback_paused=false;playback_id.clear();playback_info=nullptr;ghost_handle=0;ghost_enabled=false;ghost_id.clear();ghost_info=nullptr;ghost_slots={};
+        gauntlet_id.clear();gauntlet_map.clear();gauntlet_progress=nullptr;zones.clear();map_id.clear();audio.set_map(nullptr);active_track=0;active_style=selected_style;
+        curr={};prev={};recording_ended=true;record_path.clear();pending_vault_capture.reset();score_notice.clear();toast_text.clear();error.clear();turn_admission.reset();
         ++run_generation;beat_start=beat_upto=0;run_event({{"type","reset"}});reset_feedback();reset_input_timing();audio.reset();
         if(backdrop)backdrop->release();backdrop_shown.clear();backdrop_failed.clear();backdrop_source.clear();backdrop_cut=false;gameplay_backdrop_due=false;last_ui.clear();
         room.close();room_modes.close(room.generation);observed_spectator.reset();
@@ -462,6 +559,7 @@ int run(const Options &opt) {
         if(action.restart&&core){if(tutorial)tutorial->stop();tutorial_demo=false;if(!action.style.empty())selected_style=action.style;active_track=action.track;reset();show_menu(false);}
     };
     auto load_map=[&](const std::string &path,const std::string &content,const std::string &id,const nlohmann::json &detail) {
+        cancel_video();
         CorePtr next(bh_create(),&bh_destroy); if(!next) throw std::runtime_error("Could not create native core");
         require(bh_load_map(next.get(),path.c_str(),content.empty()?nullptr:content.c_str()),next.get(),"Loading BSP map");
         require(bh_set_settings(next.get(),&settings),next.get(),"Applying settings");
@@ -470,25 +568,31 @@ int run(const Options &opt) {
         if(!next_zones.empty())require(bh_run_configure(next.get(),&timing,next_zones.data(),next_zones.size()),next.get(),"Configuring timer");
         std::unique_ptr<native::Tutorial> next_tutorial;
         if(id==tutorial_map){const auto metadata=nlohmann::json::parse(read_text(assets/"tutorial.json"));if(file_hash(path)!=metadata.at("bspSha256").get<std::string>())throw std::runtime_error("Tutorial BSP does not match bundled lessons; update the tutorial assets and map together");next_tutorial=std::make_unique<native::Tutorial>(metadata,selected_style=="legit"||selected_style=="scroll");next_tutorial->set_completed(tutorial_completed);}
+        audio.set_classic_loader([content,cache](){if(!content.empty())native::download_classic_sounds(content,cache);});
         auto next_renderer=std::make_unique<Renderer>(gl,next.get(),assets);
-        practice.clear(core.get());renderer.reset(); core=std::move(next); renderer=std::move(next_renderer);
+        practice.clear(core.get());renderer.reset(); core=std::move(next);audio.set_map(core.get()); renderer=std::move(next_renderer);
         // The pause screen shows this map itself, never the home tour.
         if(backdrop)backdrop->release();backdrop_shown.clear();backdrop_failed.clear();backdrop_cut=false;gameplay_backdrop_due=true;
-        zones=next_zones;tutorial=std::move(next_tutorial);tutorial_demo=false; map_id=id; error.clear();playback=false;ghost_handle=0;ghost_enabled=false;ghost_id.clear(); reset();apply_preferences();renderer->set_cosmetics(outfit,packed_loadout);apply_room_mode(room_modes.map_loaded(map_id,room.spectator_target.has_value(),epoch_ms()));
+        if(pending_action!="play"&&opt.replay.empty()&&!opt.frames&&opt.runtime_smoke.empty())activity.loaded(id);
+        kept_weapons.forget();ghost_slots={};zones=next_zones;renderer->set_zones(zones);replay_camera.reset();hud.reset_history();tutorial=std::move(next_tutorial);tutorial_demo=false; map_id=id; error.clear();playback=false;ghost_handle=0;ghost_enabled=false;ghost_id.clear(); reset();apply_preferences();renderer->set_cosmetics(outfit,packed_loadout);renderer->set_ghost_cosmetics(ghost_cosmetic,trail_cosmetic);apply_room_mode(room_modes.map_loaded(map_id,room.spectator_target.has_value(),epoch_ms()));
     };
     auto request_map=[&](const std::string &id) {
         if(!opt.runtime_smoke.empty())throw std::runtime_error("Offline runtime smoke attempted a map download");
         if(download.valid()) throw std::runtime_error("A map is already loading");
         if(!native::valid_map_id(id)) throw std::runtime_error("Invalid map name");
-        error.clear(); show_menu(true);
+        cancel_prefetch();error.clear(); show_menu(true);
         if(core)bh_record_end(core.get());++run_generation;beat_start=beat_upto=0;run_event({{"type","reset"}});
         // A background still downloading gives way; one already on screen
         // stays until this map has loaded.
         if(backdrop)backdrop->cancel_loading();
-        {std::lock_guard lock(progress_mutex); loading="Reading "+id;}
+        last_requested_map=id;map_preparing=false;
+        {std::lock_guard lock(progress_mutex); loading="Reading "+id;load_progress={{"map",id},{"stage","metadata"},{"message",loading}};}
         download.start([&,id](const std::atomic_bool &cancel) {
             const auto lock=lock_cache(cancel);
-            return native::download_map(id,cache,[&](const std::string &message) {std::lock_guard lock(progress_mutex);if(!cancel)loading=message;},&cancel);
+            return native::download_map(id,cache,[&](const std::string &message) {std::lock_guard lock(progress_mutex);if(!cancel)loading=message;},&cancel,{},[&,id](const native::LoadProgress &p){
+                std::lock_guard lock(progress_mutex);if(cancel)return;
+                loading=p.message;load_progress={{"map",id},{"stage",p.stage},{"message",p.message},{"received",p.received},{"total",p.total},{"filesDone",p.filesDone},{"filesTotal",p.filesTotal},{"cached",p.cached},{"offline",p.offline}};
+            });
         });
     };
     auto apply_room_event=[&](const nlohmann::json &message){
@@ -534,39 +638,74 @@ int run(const Options &opt) {
         if(files.size()>500)files.resize(500);
         for(const auto &entry:files)try {
             const auto info=replay_metadata(entry.path());
-            replay_list.push_back({{"id",entry.path().filename().string()},{"name",info.value("player",std::string("Local run"))},
+            nlohmann::json listed={{"id",entry.path().filename().string()},{"name",info.value("player",std::string("Local run"))},
                 {"map",info.at("map")},{"style",info.value("style",std::string("autohop"))},{"track",info.value("track",0)},
                 {"seconds",(info.at("endTick").get<double>()-info.at("startTick").get<double>())*info.at("settings").value("tickInterval",.01)},
-                {"recordedAt",info.value("recordedAt",0.)},{"bytes",entry.file_size()}});
+                {"recordedAt",info.value("recordedAt",0.)},{"bytes",entry.file_size()}};
+            const auto summary=run_vault.read(entry.path().filename().string());if(summary.is_object())listed["localSummary"]=summary;listed["screenshot"]=run_vault.screenshot(entry.path().filename().string()).has_value();replay_list.push_back(std::move(listed));
         }catch(const std::exception &e){std::cerr<<"Skipping replay "<<entry.path().filename()<<": "<<e.what()<<'\n';}
     };
-    auto open_replay=[&](const std::filesystem::path &path,const std::string &action) {
+    auto open_replay=[&](const std::filesystem::path &path,const std::string &action,unsigned ghost_slot=0) {
+        if(ghost_slot>=ghost_slots.size())throw std::runtime_error("Invalid ghost slot");
         if(!core)throw std::runtime_error("Load the replay map first");
-        practice.clear(core.get());if(tutorial)tutorial->stop();tutorial_demo=false;renderer->reset_presentation();
+        practice.clear(core.get());if(tutorial)tutorial->stop();tutorial_demo=false;renderer->reset_presentation();scope.reset();
         bh_record_end(core.get());++run_generation;run_event({{"type","reset"}});beat_start=0;audio.reset();
         if(action=="ghost") {
-            if(ghost_handle)bh_ghost_free(core.get(),ghost_handle);
-            ghost_handle=bh_ghost_load(core.get(),path.string().c_str());require(ghost_handle!=0,core.get(),"Loading ghost");
-            size_t bytes=0;const auto raw=bh_ghost_info(core.get(),ghost_handle,&bytes);ghost_info=nlohmann::json::parse(raw,raw+bytes);
-            ghost_id=path.filename().string();ghost_enabled=true;active_track=ghost_info.value("track",0u);selected_style=ghost_info.value("style",std::string("autohop"));
+            auto &slot=ghost_slots[ghost_slot];if(slot.handle)bh_ghost_free(core.get(),slot.handle);slot={};
+            if(ghost_slot==0){ghost_handle=0;ghost_enabled=false;ghost_id.clear();}
+            const auto handle=bh_ghost_load(core.get(),path.string().c_str());require(handle!=0,core.get(),"Loading ghost");
+            size_t bytes=0;const auto raw=bh_ghost_info(core.get(),handle,&bytes);require(raw!=nullptr,core.get(),"Reading ghost");
+            slot={handle,path.filename().string(),true,nlohmann::json::parse(raw,raw+bytes)};
+            if(ghost_slot==0){ghost_handle=handle;ghost_info=slot.info;ghost_id=slot.id;ghost_enabled=true;}
+            active_track=slot.info.value("track",0u);selected_style=slot.info.value("style",std::string("autohop"));
             reset();show_menu(false);
         } else {
             if(!bh_replay_load(core.get(),path.string().c_str())){const std::string failure=bh_last_error(core.get());reset();throw std::runtime_error("Loading native replay: "+failure);}
             size_t bytes=0;const auto raw=bh_replay_info(core.get(),&bytes);playback_info=nlohmann::json::parse(raw,raw+bytes);
             renderer->set_cosmetics(outfit,(playback_info.contains("packedLoadout")&&playback_info["packedLoadout"].is_string()?playback_info["packedLoadout"].get<std::string>():std::string()));
-            playback=true;playback_paused=false;playback_speed=1;playback_id=path.filename().string();recording_ended=true;record_path.clear();
+            playback=true;playback_paused=false;playback_speed=1;replay_controls={};replay_camera.set_mode("eye");replay_orbit_drag=false;playback_id=path.filename().string();recording_ended=true;record_path.clear();pending_vault_capture.reset();
             BhCmd cmd{};bh_last_command(core.get(),&cmd);bh_state(core.get(),&curr);prev=curr;input.set_angles(cmd.pitch,cmd.yaw);
             reset_feedback();reset_input_timing();show_menu(false);
         }
     };
-    auto request_replay=[&](const std::filesystem::path &path,const std::string &action) {
+    auto refresh_playback_pose=[&](){if(core&&playback){bh_state(core.get(),&curr);prev=curr;BhCmd cmd{};bh_last_command(core.get(),&cmd);input.set_angles(cmd.pitch,cmd.yaw);renderer->reset_presentation();hud.reset_history();audio.reset();reset_input_timing();}};
+    auto seek_playback=[&](uint32_t tick){
+        if(!core||!playback)return;const auto total=playback_info.at("totalTicks").get<uint32_t>();if(tick>total)throw std::runtime_error("Replay tick outside run");
+        BhSnapshot state{};if(!bh_replay_seek(core.get(),tick,&state)){const std::string failure=bh_last_error(core.get());reset();show_menu(true);throw std::runtime_error("Replay seek stopped: "+failure);}
+        curr=prev=state.player;BhCmd view{};bh_last_command(core.get(),&view);input.set_angles(view.pitch,view.yaw);renderer->reset_presentation();scope.reset();audio.reset();hud.reset_history();
+        if(replay_camera.mode!="free")replay_camera.reset();camera_controls.clear();reset_feedback(tick!=0);reset_input_timing();
+    };
+    auto replay_action=[&](native::ReplayControls::Action action){using A=native::ReplayControls::Action;const auto total=playback_info.value("totalTicks",0u);const double interval=playback_info.at("settings").value("tickInterval",dt);
+        switch(action){case A::start:replay_controls.pending=0;break;case A::end:replay_controls.pending=total;playback_paused=true;break;case A::back:replay_controls.pending=native::ReplayControls::offset(curr.tick,-5,interval,total);break;case A::forward:replay_controls.pending=native::ReplayControls::offset(curr.tick,5,interval,total);break;case A::pause:playback_paused=!playback_paused;break;case A::slower:playback_speed=native::ReplayControls::speed(playback_speed,false);break;case A::faster:playback_speed=std::min(4.,native::ReplayControls::speed(playback_speed,true));break;case A::camera:replay_camera.set_mode(replay_camera.mode=="eye"?"chase":replay_camera.mode=="chase"?"free":"eye");camera_controls.set_angles(replay_camera.pitch,replay_camera.yaw);camera_controls.clear();break;default:break;}
+    };
+    auto begin_video=[&](const native::VideoOptions &options){
+        const auto timeline=native::VideoTimeline::make(options,playback_info.at("totalTicks").get<uint32_t>());
+        const char *downloads=SDL_GetUserFolder(SDL_FOLDER_DOWNLOADS);if(opt.video_smoke.empty()&&!downloads)throw std::runtime_error("Downloads folder unavailable");
+        const auto directory=opt.video_smoke.empty()?std::filesystem::path(downloads):std::filesystem::absolute(opt.video_smoke);std::filesystem::create_directories(directory);
+        const auto destination=directory/("bunnyhop-"+map_id+"-"+std::to_string(SDL_GetTicksNS())+".mp4");
+        video_capture=std::make_unique<native::VideoCapture>(gl,core.get(),*renderer,hud,video_encoder,options,playback_info.at("totalTicks").get<uint32_t>(),curr.tick,preferences,map_id,playback_info.value("style",active_style),outfit,(playback_info.contains("packedLoadout")&&playback_info["packedLoadout"].is_string()?playback_info["packedLoadout"].get<std::string>():std::string()),prepared_camera,assets,cache);
+        try{video_encoder.start(options,destination,timeline.frames,video_available.encoder);}catch(...){video_capture.reset();throw;}
+        audio.pause();
+    };
+    auto request_video=[&](native::VideoOptions options){
+        if(!playback||!renderer||!core||download.valid())throw std::runtime_error("Open a replay before exporting video");
+        if(video_capture||director_job||video_encoder.busy())throw std::runtime_error("A video export is already running");
+        if(!video_available.available)throw std::runtime_error(video_available.reason);
+        options.tick_interval=playback_info.at("settings").value("tickInterval",dt);
+        native::VideoTimeline::make(options,playback_info.at("totalTicks").get<uint32_t>());video_error.clear();show_menu(true);prepared_camera={};prepared_camera.set_mode(options.camera);
+        if(options.camera=="auto"){pending_video=options;director_only=false;director_job=std::make_unique<native::ReplayDirectorJob>(core.get(),playback_info.at("totalTicks").get<uint32_t>(),curr.tick);}
+        else begin_video(options);
+    };
+    auto request_replay=[&](const std::filesystem::path &path,const std::string &action,unsigned ghost_slot=0) {
+        if(ghost_slot>=ghost_slots.size())throw std::runtime_error("Invalid ghost slot");
         const auto info=replay_metadata(path);const auto id=info.at("map").get<std::string>();
         if(!native::valid_map_id(id))throw std::runtime_error("Replay has invalid map name");
-        if(map_id!=id||!core) {pending_replay=path.string();pending_action=action;request_map(id);}
-        else open_replay(path,action);
+        if(map_id!=id||!core) {pending_replay=path.string();pending_action=action;pending_ghost_slot=ghost_slot;request_map(id);}
+        else open_replay(path,action,ghost_slot);
     };
     start_tutorial=[&](const std::string &lesson,bool demo){
         if(!core||map_id!=tutorial_map||!tutorial)throw std::runtime_error("Load the tutorial map before starting a lesson");
+        for(size_t i=1;i<ghost_slots.size();++i)if(ghost_slots[i].handle)bh_ghost_free(core.get(),ghost_slots[i].handle);ghost_slots={};
         if(ghost_handle){bh_ghost_free(core.get(),ghost_handle);ghost_handle=0;}ghost_enabled=false;tutorial_demo=false;
         tutorial_stopped=false;tutorial_final_saved=false;tutorial->start(lesson);active_track=lesson=="final"?1:0;reset();
         std::array<std::string,4> labels{"Space","W","A","D"};const char *actions[]={"jump","forward","left","right"};for(int k=0;k<4;k++){const auto &bound=preferences.at("binds").at(actions[k]);if(!bound.empty()){labels[k]=bound[0];if(labels[k].rfind("Key",0)==0)labels[k].erase(0,3);}}
@@ -589,7 +728,7 @@ int run(const Options &opt) {
                     }
                     const bool restart=!id.empty()&&core&&(practice.active||playback||active_style!="autohop"||active_track!=0);
                     gauntlet_id=id;gauntlet_map=id.empty()?std::string():map;gauntlet_progress=id.empty()?nlohmann::json(nullptr):progress;
-                    if(!id.empty()){practice.clear(core.get());selected_style="autohop";active_track=0;if(restart)reset();}
+                    if(!id.empty()){third_person=false;practice.clear(core.get());selected_style="autohop";active_track=0;if(restart)reset();}
     };
     uint32_t last_slot=3,observed_slot=3;
     auto movement_bit=[](const std::string &action)->uint32_t {
@@ -607,15 +746,57 @@ int run(const Options &opt) {
         return native::configured_turn_rate(held("turnLeft"),held("turnRight"),
             preferences.at(held("turnFast")?"yawSpeedAlt":"yawSpeed").get<double>());
     };
-    auto act=[&](const std::string &action,bool wheel=false) {
-        if(action=="practice"||action=="noclip"||action=="cpSave"||action=="cpTeleport"||action=="cpPrev"||action=="cpNext"){
-            practice_action(action=="practice"?"toggle":action=="cpSave"?"save":action=="cpTeleport"?"tele":action=="cpPrev"?"prev":action=="cpNext"?"next":"noclip",true);return;
+    auto held_action=[&](const std::string &action){const auto &binds=preferences.at("binds");if(!binds.contains(action))return false;for(const auto &key:binds.at(action))if(held_codes.contains(key.get<std::string>()))return true;return false;};
+    auto weapon_context=[&](){return native::WeaponMenuContext{settings.physics,practice.active||zones.empty(),playback,room.spectator_target.has_value(),practice.noclip};};
+    auto act=[&](const std::string &action,bool wheel=false,bool instant=false) {
+        if(action=="chat"||action=="commandChat"){open_chat(action=="commandChat");return;}
+        if(action=="scoreboard")return;
+        if(action=="spectatorNext"||action=="spectatorPrevious"){room_control({{"action",action=="spectatorNext"?"next":"previous"}});return;}
+        if(action=="spectatorMode"){if(room.spectator_target)third_person=!third_person;return;}
+        if(action=="thirdPerson"){
+            if(playback){replay_camera.set_mode(replay_camera.mode=="eye"?"chase":"eye");return;}
+            if(room.spectator_target){third_person=!third_person;return;}
+            if(!core)return;
+            BhRunState timing{};bh_run_state(core.get(),&timing);
+            if(!third_person&&!gauntlet_id.empty()){toast("No third person during a gauntlet.");return;}
+            if(!third_person&&timing.status==1&&!practice.active&&!turn_admission.local_only&&!zones.empty()){toast("No third person during a timed run.");return;}
+            third_person=!third_person;
+            if(third_person){practice_use("camera");toast("Third person. This run is practice.");}
+            else{if(timing.status==0&&practice.tool=="camera"&&!practice.mode)reset();toast("First person");}
+            return;
+        }
+        if(action=="flashlight"){flashlight=!flashlight;return;}
+        if(action=="nextTrack"){audio.music_control("next");return;}
+        if(action=="hudEditor"){if(menu){show_menu(true);menu->evaluate_js("window.bunnyhopNativeMenu?.open?.('settings','hud-editor')");}return;}
+        if(action=="gunMenu"){gun_menu.toggle();return;}
+        if(action=="keysOverlay"){preferences["keysOverlay"]=!preferences.at("keysOverlay").get<bool>();native::save_settings(cache/"settings.json",preferences);apply_preferences();return;}
+        if(action=="viewmodel"||action=="hideUi"||action=="mute") {
+            const std::string key=action=="hideUi"?"hud":action=="mute"?"muted":"viewmodel";
+            preferences[key]=!preferences[key].get<bool>();native::save_settings(cache/"settings.json",preferences);apply_preferences();return;
         }
         if(action=="mainMenu"){
             BhRunState timing{};if(core)bh_run_state(core.get(),&timing);
-            const auto result=leave_hold.press(epoch_ms(),native::leave_requires_confirmation(timing.status,room.spectator_target.has_value()),!wheel);
+            const auto result=leave_hold.press(epoch_ms(),!playback&&native::leave_requires_confirmation(timing.status,room.spectator_target.has_value()),!wheel);
             if(result==native::LeaveHold::Result::leave)leave_map();else if(result==native::LeaveHold::Result::ask)toast("Main menu key again to leave");return;
         }
+        if(playback)return;
+        if(action=="setStart"||action=="clearStart"){
+            if(!core)return;
+            if(action=="clearStart"){start_points.clear(map_id,active_track);toast("Start point cleared");}
+            else{if(tutorial&&tutorial->is_active()){toast("Start points are unavailable in tutorial lessons");return;}const auto problem=native::start_point_problem(curr,zones,active_track,practice.active);if(!problem.empty()){toast(problem);return;}start_points.save(map_id,active_track,curr,input.yaw(),input.pitch);toast("Start point saved");}
+            native::save_settings(cache/"start-points.json",start_points.points);return;
+        }
+        if(action=="nextWeapon"||action=="prevWeapon"){
+            BhWeaponReport weapon{};if(core&&bh_weapon_report(core.get(),&weapon)){const uint32_t slot=weapon.active==weapon.primary&&weapon.primary?1:weapon.active==weapon.secondary&&weapon.secondary?2:3;uint32_t next=slot;for(int i=0;i<3;i++){next=action=="nextWeapon"?next%3+1:(next+1)%3+1;if(next==3||(next==1&&weapon.primary)||(next==2&&weapon.secondary))break;}input.pulse=(input.pulse&~(3u<<14))|(next<<14);}return;
+        }
+        if(!instant&&(action=="restart"||action=="restartMain"||action=="restartBonus")){
+            BhRunState timing{};if(core)bh_run_state(core.get(),&timing);
+            if(!restart_guard.press(action,epoch_ms(),preferences.at("holdRestart").get<bool>(),timing.status==1,wheel))return;
+        }
+        if(action=="practice"||action=="noclip"||action=="cpSave"||action=="cpTeleport"||action=="cpPrev"||action=="cpNext"){
+            practice_action(action=="practice"?"toggle":action=="cpSave"?"save":action=="cpTeleport"?"tele":action=="cpPrev"?"prev":action=="cpNext"?"next":"noclip",true);return;
+        }
+
         if(!gauntlet_id.empty()&&(action=="restartBonus"||action=="cycleStyle")){toast("Gauntlets are Normal style on the main track.");return;}
         if(action=="restart"||action=="restartMain") {if(tutorial&&tutorial->is_active())start_tutorial(tutorial->lesson_id(),tutorial_demo);else{if(action=="restartMain")active_track=0;reset();}}
         else if(action=="restartBonus") {
@@ -629,14 +810,14 @@ int run(const Options &opt) {
         else if(action=="inspect") {if(renderer)renderer->inspect_press();if(core)bh_record_inspect(core.get(),1);}
         else if(action=="drop")input.pulse|=1u<<12;
         else if(action=="reload")input.pulse|=1u<<13;
-        else if(action=="giveUsp"||action=="giveGlock")input.pulse|=(action=="giveUsp"?3u:2u)<<16;
-        else if(action=="viewmodel"||action=="hideUi"||action=="mute") {
-            const std::string key=action=="hideUi"?"hud":action=="mute"?"muted":"viewmodel";
-            preferences[key]=!preferences[key].get<bool>();native::save_settings(cache/"settings.json",preferences);apply_preferences();
-        }
+        else if(action=="giveUsp"||action=="giveGlock"){kept_weapons.cancel();input.pulse=(input.pulse&~native::weapon_command_mask)|((action=="giveUsp"?3u:2u)<<native::give_shift);}
+
     };
     auto handle_code=[&](const std::string &code,bool down,bool repeat=false,bool wheel=false) {
         if(code.empty())return;
+        if(down&&!repeat)for(const char *action:{"chat","commandChat"})for(const auto &key:preferences.at("binds").at(action))if(key==code){open_chat(std::string(action)=="commandChat");return;}
+        if(gun_menu.open&&down&&!repeat&&code.size()==6&&code.starts_with("Digit")){const auto picked=gun_menu.key(code.back()-'0',weapon_context());if(!picked.refusal.empty())toast(picked.refusal);if(picked.weapon){kept_weapons.cancel();input.pulse=(input.pulse&~native::weapon_command_mask)|(*picked.weapon<<native::give_shift);}if(picked.handled)return;}
+        if(!practice.menu_open&&!room.vote.is_null()&&down&&!repeat&&code.size()==6&&code.starts_with("Digit")){const int pick=code.back()-'0';if(pick>0&&room.vote.contains("options")&&size_t(pick)<=room.vote.at("options").size()){room_control({{"action","vote"},{"option",pick-1}});return;}}
         if(practice.menu_open&&down&&!repeat&&code.size()==6&&code.starts_with("Digit")){
             const int pick=code.back()-'0';
             if(pick==0){practice.menu_open=false;return;}
@@ -650,7 +831,8 @@ int run(const Options &opt) {
         for(auto binding=preferences["binds"].begin();binding!=preferences["binds"].end();++binding) {
             const auto bit=movement_bit(binding.key());bool matching=false,held=false;
             for(const auto &raw:binding.value()) {const auto key=raw.get<std::string>();matching|=key==code||(wheel&&key=="MouseWheel");held|=held_codes.contains(key);}
-            if(bit){if(wheel&&matching&&down)input.pulse|=bit;else if(held)input.held|=bit;}
+            if(bit){if(bit==native::attack2&&matching&&down&&!repeat&&core&&!playback&&!room.spectator_target){BhWeaponReport weapon{};if(bh_weapon_report(core.get(),&weapon))scope.secondary(weapon.active);}
+                if(wheel&&matching&&down)input.pulse|=bit;else if(held)input.held|=bit;}
             else if(matching&&down&&!repeat)act(binding.key(),wheel);
         }
         if(wheel)held_codes.erase(code);
@@ -679,6 +861,9 @@ int run(const Options &opt) {
         // A neutral host id allows tools on the tutorial fixture without enabling its lesson controller.
         load_map(opt.map,opt.content_root,"native-runtime-fixture",detail);
         check(practice_reason().empty(),"solo practice unavailable");
+        act("thirdPerson");check(third_person&&practice.active&&practice.tool=="camera","third person did not invalidate ranked admission");
+        reset();check(practice.active&&third_person,"restart lost third-person practice admission");
+        act("thirdPerson");check(!third_person&&!practice.active,"pre-start first person did not restore clean attempt");
         BhRunState before{};bh_run_state(core.get(),&before);
         const auto saved_tick=curr.tick;practice_action("save");BhRunState after{};bh_run_state(core.get(),&after);
         check(practice.number()==1&&!practice.active&&curr.tick==saved_tick,"save tainted attempt or advanced simulation");
@@ -706,12 +891,22 @@ int run(const Options &opt) {
         gauntlet_action({{"id","offline-smoke"},{"map","native-runtime-fixture"},{"progress",{{"idx",0},{"maps",2},{"before",0.0},{"pbSplit",nullptr}}}});
         check(!practice.active&&!practice.mode&&selected_style=="autohop"&&active_track==0,"gauntlet did not reset practice/style/track");
         check(practice_reason()=="No practice during a gauntlet.","gauntlet permits practice");
+        act("thirdPerson");check(!third_person&&!practice.active,"third person escaped gauntlet admission");
         act("cycleStyle");act("restartBonus");check(selected_style=="autohop"&&active_track==0,"gauntlet bindings escaped lock");
         load_map(opt.map,opt.content_root,"native-runtime-fixture-next",detail);check(gauntlet_id=="offline-smoke"&&!practice.active,"gauntlet map progression lost lock");
         gauntlet_action({{"id",nullptr}});check(practice_reason().empty(),"gauntlet clear left practice blocked");
         practice_action("save");practice_action("tele");open_replay(opt.replay,"play");
         check(playback&&!practice.active&&!practice.mode&&practice.checkpoints.empty(),"replay retained practice state");
-        BhSnapshot replay_state{};require(bh_replay_seek(core.get(),10,&replay_state),core.get(),"Smoke replay seek");curr=prev=replay_state.player;renderer->reset_presentation();reset_input_timing();
+        replay_camera.set_mode("free");replay_camera.initialized=true;replay_camera.position={11,22,33};replay_camera.yaw=42;replay_camera.pitch=17;
+        playback_paused=true;seek_playback(0);check(curr.tick==0&&playback_paused,"replay seek start/pause");
+        const auto replay_total=playback_info.at("totalTicks").get<uint32_t>();seek_playback(replay_total);check(curr.tick==replay_total&&playback_paused,"replay seek end/pause");
+        for(uint32_t tick=0;tick<std::min(10u,replay_total);++tick)replay_controls.pending=tick;
+        replay_controls.pending=std::min(10u,replay_total);if(auto target=replay_controls.take())seek_playback(*target);
+        check(curr.tick==std::min(10u,replay_total)&&!replay_controls.take(),"replay rapid seeks did not coalesce latest");
+        check(replay_camera.initialized&&replay_camera.position==std::array<float,3>{11,22,33}&&replay_camera.yaw==42&&replay_camera.pitch==17,"seek lost free camera");
+        replay_camera.set_mode("eye");BhSnapshot replay_snapshot{};bh_snapshot(core.get(),&replay_snapshot);const float replay_eye[]={curr.position[0],curr.position[1],curr.position[2]+curr.view_offset_z};renderer->draw(w,h,replay_eye,input,&replay_snapshot,0);
+        native::draw_replay_controls(hud,w,h,native::HudGeometry(w,h,100).scale,replay_controls,curr.tick,replay_total,dt,playback_paused,playback_speed,replay_camera.mode);
+        {const auto png=backbuffer_png(gl,w,h);std::ofstream image(output/"replay-controls.png",std::ios::binary);image.write(png.data(),png.size());}
         reset();check(!playback&&!practice.active,"replay restart not clean");
         auto start_timed_practice=[&](){
             practice_action("toggle");check(practice.active,"timed practice setup");
@@ -746,7 +941,7 @@ int run(const Options &opt) {
         check(pending_replay.empty()&&pending_room_map.empty()&&pending_tutorial.empty()&&loading.empty()&&run_generation>generation,"leave-map stale work/generation");
         load_map(opt.map,opt.content_root,"native-runtime-fixture-new",detail);check(core&&renderer&&!practice.active&&practice.checkpoints.empty(),"new map after leave failed");
         check(gl.GetError()==GL_NO_ERROR,"OpenGL error");
-        const nlohmann::json result={{"pass",true},{"practice",true},{"restart",true},{"newMap",true},{"replay",true},{"checkpointMenu",true},{"hudScales",{50,100,175}},{"gauntlet",true},{"leaveMapWorkerShutdown",true},{"closedRoomGeneration",true},{"timedPracticeLeaveHold",true},{"timedPracticeLeaveWheel",true},{"networkWrites",0},{"webglContexts",0}};
+        const nlohmann::json result={{"pass",true},{"practice",true},{"restart",true},{"newMap",true},{"replay",true},{"replayScrub",true},{"replaySeekPreservesFreeCamera",true},{"replaySeekEndpointsPaused",true},{"replaySeekCoalesced",true},{"checkpointMenu",true},{"hudScales",{50,100,175}},{"gauntlet",true},{"leaveMapWorkerShutdown",true},{"closedRoomGeneration",true},{"thirdPersonPracticeAdmission",true},{"timedPracticeLeaveHold",true},{"timedPracticeLeaveWheel",true},{"networkWrites",0},{"webglContexts",0}};
         std::ofstream(output/"result.json")<<result.dump(2)<<'\n';std::cout<<"Native runtime lifecycle smoke: "<<result.dump()<<'\n';return 0;
     }
     auto title_time=Clock::now(),ui_time=title_time,started=title_time; uint64_t frame=0,title_frames=0;
@@ -761,6 +956,7 @@ int run(const Options &opt) {
         else std::cerr<<"Could not open BUNNYHOP_INPUT_LOG\n";
     }
     double input_frame_ms=0;
+    native::MouseDiagnostics mouse_diagnostics;
     native::discord::Client discord;
     const bool discord_allowed=!opt.frames&&!opt.hidden&&opt.menu_smoke.empty();
     std::string presence_map;int64_t presence_started=0;auto presence_time=std::chrono::steady_clock::time_point{};
@@ -768,47 +964,132 @@ int run(const Options &opt) {
         if(!menu||!menu_ready)return;
         show_menu(true);menu->evaluate_js("window.bunnyhopNativeMenu?.joinRoom?.("+nlohmann::json(id).dump()+")");
     };
+    if(!opt.presentation_smoke.empty()){
+        if(!renderer||!core)throw std::runtime_error("Presentation smoke requires a local map");bh_record_end(core.get());int width=0,height=0;SDL_GetWindowSizeInPixels(window.get(),&width,&height);const auto result=native::presentation_smoke(gl,core.get(),*renderer,hud,width,height,opt.presentation_smoke,map_id);std::cout<<result.dump()<<'\n';return 0;
+    }
+    if(!opt.video_smoke.empty()){
+        // The viewer now plays with a free cursor too. Hold the fixture paused
+        // so restoration can be inspected after each asynchronous export phase.
+        playback_paused=true;
+        BhSnapshot restored{};require(bh_replay_seek(core.get(),37,&restored),core.get(),"Video smoke initial seek");curr=prev=restored.player;replay_camera.set_mode("free");replay_camera.initialized=true;replay_camera.position={11,22,33};replay_camera.yaw=42;replay_camera.pitch=17;camera_controls.set_angles(17,42);
+        if(video_probe.valid())video_available=video_probe.get();native::VideoOptions options;options.from=0;options.to=std::min(200u,playback_info.at("totalTicks").get<uint32_t>());options.camera="auto";request_video(options);
+    }
+    int video_smoke_stage=0;std::string video_smoke_encoder=video_available.encoder;
+    auto check_video_restored=[&](){if(!playback_paused||curr.tick!=37||replay_camera.mode!="free"||!replay_camera.initialized||replay_camera.position!=std::array<float,3>{11,22,33}||std::abs(replay_camera.yaw-42)>.0001||std::abs(replay_camera.pitch-17)>.0001)throw std::runtime_error("Video export did not restore the viewer state");};
+    const auto video_smoke_started=Clock::now();
     while(running) {
+        if(window_dirty&&Clock::now()>=window_save_due)save_window();
+        if(video_probe.valid()&&video_probe.wait_for(std::chrono::seconds(0))==std::future_status::ready)video_available=video_probe.get();
+        const uint64_t mouse_pump_start=SDL_GetTicksNS();
+        mouse_diagnostics.begin(mouse_pump_start,preferences.value("mouseDiagnostics",false)&&captured&&focused&&!chat.active&&!playback);
+        bool had_input_activity=false;
         SDL_Event event;
         while(SDL_PollEvent(&event)) {
+            if(event.type==SDL_EVENT_KEY_DOWN||event.type==SDL_EVENT_MOUSE_BUTTON_DOWN||event.type==SDL_EVENT_MOUSE_MOTION||event.type==SDL_EVENT_MOUSE_WHEEL||event.type==SDL_EVENT_TEXT_INPUT)had_input_activity=true;
             switch(event.type) {
                 case SDL_EVENT_QUIT: running=false; break;
                 case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
                     if(event.window.windowID==SDL_GetWindowID(window.get()))running=false;
                     break;
-                case SDL_EVENT_WINDOW_FOCUS_LOST: focused=false; show_menu(true); break;
-                case SDL_EVENT_WINDOW_FOCUS_GAINED: focused=true;if(resume_wanted&&(!menu||!menu->visible())) capture(true);break;
+                case SDL_EVENT_WINDOW_MOVED:case SDL_EVENT_WINDOW_RESIZED:case SDL_EVENT_WINDOW_MAXIMIZED:case SDL_EVENT_WINDOW_RESTORED:
+                    if(event.window.windowID==SDL_GetWindowID(window.get())){window_dirty=true;window_save_due=Clock::now()+std::chrono::milliseconds(500);}break;
+                case SDL_EVENT_WINDOW_FOCUS_LOST: if(!menu||!menu->visible())window_controller.focus_lost(preferences);focused=false;audio.focus(false); show_menu(true); break;
+                case SDL_EVENT_WINDOW_FOCUS_GAINED: audio.focus(true); focused=true;if(resume_wanted&&(!menu||!menu->visible())) capture(!(playback&&replay_controls.visible));break;
                 case SDL_EVENT_KEY_DOWN:
                 case SDL_EVENT_KEY_UP: {
                     const bool down=event.type==SDL_EVENT_KEY_DOWN;
-                    if(down && !event.key.repeat) {
-                        if(event.key.scancode==SDL_SCANCODE_F10) running=false;
-                        else if(event.key.scancode==SDL_SCANCODE_ESCAPE) show_menu(captured);
-                        else if(event.key.scancode==SDL_SCANCODE_T&&captured&&menu) {show_menu(true);menu->evaluate_js("window.bunnyhopNativeMenu?.open?.('room','chat')");}
+                    if(down&&!event.key.repeat&&event.key.scancode==SDL_SCANCODE_F10){show_menu(true);if(menu)menu->evaluate_js("window.bunnyhopNativeMenu?.open?.('settings','display')");break;}
+                    if(down&&!event.key.repeat&&event.key.scancode==SDL_SCANCODE_RETURN&&(event.key.mod&SDL_KMOD_ALT)){
+                        save_window();
+                        if(!(video_capture||director_job||video_encoder.busy())){auto changed=preferences;changed["windowMode"]=native::toggled_window_mode(window_controller.mode());if(window_controller.apply(changed)){preferences=changed;native::save_settings(cache/"settings.json",preferences);}else error=window_controller.error();if(menu&&menu->visible())SDL_SetWindowAlwaysOnTop(window.get(),false);}break;}
+                    if(video_capture||director_job||video_encoder.busy()){if(down&&event.key.scancode==SDL_SCANCODE_ESCAPE){cancel_video();refresh_playback_pose();}break;}
+                    if(chat.active){
+                        if(down){
+                            if(!chat.composition.empty()){if(event.key.scancode==SDL_SCANCODE_ESCAPE){SDL_ClearComposition(window.get());chat.composition.clear();}break;}
+                            const bool shortcut=(event.key.mod&(SDL_KMOD_CTRL|SDL_KMOD_GUI))!=0;const bool extend=(event.key.mod&SDL_KMOD_SHIFT)!=0;
+                            if(event.key.scancode==SDL_SCANCODE_ESCAPE)close_chat();
+                            else if(event.key.scancode==SDL_SCANCODE_RETURN||event.key.scancode==SDL_SCANCODE_KP_ENTER){
+                                if(chat.composition.empty()){const auto text=chat.submit();close_chat();if(!text.empty()&&menu&&menu_ready)menu->evaluate_js("window.bunnyhopNativeMenu?.onChatSubmit?.("+nlohmann::json(text).dump()+")");}
+                            }else if(shortcut&&event.key.scancode==SDL_SCANCODE_V){char *text=SDL_GetClipboardText();if(text){chat.insert(text);SDL_free(text);chat_suggest();}}
+                            else if(shortcut&&event.key.scancode==SDL_SCANCODE_C)SDL_SetClipboardText(chat.selected_text().c_str());
+                            else if(shortcut&&event.key.scancode==SDL_SCANCODE_X){const auto selected=chat.selected_text();if(!selected.empty()){SDL_SetClipboardText(selected.c_str());chat.erase();chat_suggest();}}
+                            else if(shortcut&&event.key.scancode==SDL_SCANCODE_A)chat.select_all();
+                            else if(event.key.scancode==SDL_SCANCODE_BACKSPACE){chat.backspace();chat_suggest();}
+                            else if(event.key.scancode==SDL_SCANCODE_DELETE){chat.erase();chat_suggest();}
+                            else if(event.key.scancode==SDL_SCANCODE_LEFT)chat.visual_move(false,hud.chat_carets(chat.input),extend);
+                            else if(event.key.scancode==SDL_SCANCODE_RIGHT)chat.visual_move(true,hud.chat_carets(chat.input),extend);
+                            else if(event.key.scancode==SDL_SCANCODE_HOME)chat.home(extend);
+                            else if(event.key.scancode==SDL_SCANCODE_END){chat.end(extend);chat.scroll_bottom();}
+                            else if(event.key.scancode==SDL_SCANCODE_PAGEUP)chat.scroll(8);
+                            else if(event.key.scancode==SDL_SCANCODE_PAGEDOWN)chat.scroll(-8);
+                            else if(event.key.scancode==SDL_SCANCODE_UP){chat.history_step(-1);chat_suggest();}
+                            else if(event.key.scancode==SDL_SCANCODE_DOWN){chat.history_step(1);chat_suggest();}
+                            else if(event.key.scancode==SDL_SCANCODE_TAB){chat.complete();chat_suggest();}
+                        }
+                        break;
                     }
-                    if(captured&&!playback)handle_code(native::key_code(event.key.scancode),down,event.key.repeat);
+                    if(down && !event.key.repeat) {
+                        if(playback&&(!menu||!menu->visible())&&event.key.scancode==SDL_SCANCODE_TAB){replay_controls.visible=!replay_controls.visible;replay_controls.dragging=false;capture(!replay_controls.visible);break;}
+                        if(playback&&(!menu||!menu->visible())&&event.key.scancode==SDL_SCANCODE_SPACE){replay_action(native::ReplayControls::Action::pause);break;}
+                        if(playback&&(!menu||!menu->visible())&&(event.key.scancode==SDL_SCANCODE_LEFT||event.key.scancode==SDL_SCANCODE_RIGHT)){playback_paused=true;replay_controls.pending=event.key.scancode==SDL_SCANCODE_LEFT?(curr.tick?curr.tick-1:0):std::min(curr.tick+1,playback_info.value("totalTicks",0u));break;}
+                        if(event.key.scancode==SDL_SCANCODE_ESCAPE) show_menu(!menu||!menu->visible());
+
+                    }
+                    if(captured)handle_code(native::key_code(event.key.scancode),down,event.key.repeat);
                     break;
                 }
-                case SDL_EVENT_MOUSE_MOTION: if(captured&&focused&&!playback) input.accumulate(event.motion.xrel,event.motion.yrel); break;
+                case SDL_EVENT_TEXT_INPUT: if(chat.active){chat.insert(event.text.text);chat_suggest();}break;
+                case SDL_EVENT_TEXT_EDITING: if(chat.active)chat.composition=native::Chat::clean(event.edit.text,512);break;
+                case SDL_EVENT_MOUSE_MOTION:
+                    if(mouse_diagnostics.active&&captured&&focused&&!chat.active)mouse_diagnostics.motion(event.motion.timestamp,SDL_GetTicksNS());
+                    if(video_capture||director_job||video_encoder.busy()){replay_controls.dragging=false;replay_orbit_drag=false;break;}
+                    if(playback&&replay_controls.dragging&&!chat.active&&(!menu||!menu->visible())){int w,h;SDL_GetWindowSizeInPixels(window.get(),&w,&h);const auto geometry=native::HudGeometry(w,h,100);replay_controls.motion(native::ReplayControls::layout(geometry.width,geometry.height),event.motion.x*SDL_GetWindowPixelDensity(window.get())/geometry.scale,playback_info.value("totalTicks",0u));break;}
+                    if(chat.active&&chat_drag){const float scale=SDL_GetWindowPixelDensity(window.get());if(const auto byte=hud.chat_input_byte(event.motion.x*scale,event.motion.y*scale,chat.input))chat.position(*byte,true);}
+                    if(captured&&focused&&!chat.active){if(playback&&replay_camera.mode=="free")camera_controls.accumulate(event.motion.xrel,event.motion.yrel);else if(playback&&replay_camera.mode=="chase")replay_camera.orbit(event.motion.xrel,event.motion.yrel);else if(!playback)input.accumulate(event.motion.xrel,event.motion.yrel);}break;
                 case SDL_EVENT_MOUSE_BUTTON_DOWN:
                 case SDL_EVENT_MOUSE_BUTTON_UP: {
+                    if(video_capture||director_job||video_encoder.busy()){replay_controls.dragging=false;replay_orbit_drag=false;break;}
                     const bool down=event.type==SDL_EVENT_MOUSE_BUTTON_DOWN;
+                    if(playback&&!chat.active&&(!menu||!menu->visible())&&event.button.button==SDL_BUTTON_RIGHT&&(replay_controls.visible||replay_orbit_drag)){replay_orbit_drag=down;capture(down);break;}
+                    if(playback&&replay_controls.visible&&!chat.active&&(!menu||!menu->visible())&&event.button.button==SDL_BUTTON_LEFT){int w,h;SDL_GetWindowSizeInPixels(window.get(),&w,&h);const auto geometry=native::HudGeometry(w,h,100);const float scale=SDL_GetWindowPixelDensity(window.get())/geometry.scale;replay_action(replay_controls.pointer(native::ReplayControls::layout(geometry.width,geometry.height),event.button.x*scale,event.button.y*scale,playback_info.value("totalTicks",0u),down));break;}
+                    if(chat.active){if(event.button.button==SDL_BUTTON_LEFT){chat_drag=false;if(down&&chat.composition.empty()){
+                        const float scale=SDL_GetWindowPixelDensity(window.get()),x=event.button.x*scale,y=event.button.y*scale;
+                        if(const auto byte=hud.chat_input_byte(x,y,chat.input)){chat.position(*byte,(SDL_GetModState()&SDL_KMOD_SHIFT)!=0);chat_drag=true;}
+                        else if(const auto target=hud.chat_hit(x,y,chat.viewport(epoch_ms()/1000.))){close_chat();show_menu(true);if(menu&&menu_ready)menu->evaluate_js("window.bunnyhopNativeMenu?.onChatLink?.("+nlohmann::json(target->url).dump()+")");}
+                    }}break;}
                     if(!captured&&down&&focused&&(!menu||!menu->visible())&&core) {capture(true);break;}
-                    if(captured&&!playback)handle_code(native::mouse_code(event.button.button),down);
+                    if(captured&&!chat.active){
+                        const auto code=native::mouse_code(event.button.button);bool custom=false;for(auto binding=preferences["binds"].begin();binding!=preferences["binds"].end();++binding)if(binding.key()!="attack"&&binding.key()!="attack2")for(const auto &key:binding.value())custom|=key==code;
+                        if(!custom&&room.spectator_target&&down&&(event.button.button==SDL_BUTTON_LEFT||event.button.button==SDL_BUTTON_RIGHT))room_control({{"action",event.button.button==SDL_BUTTON_LEFT?"next":"previous"}});
+                        else if(!custom&&room.spectator_target&&down&&event.button.button==SDL_BUTTON_MIDDLE)third_person=!third_person;
+                        else handle_code(native::mouse_code(event.button.button),down);
+                    }
                     break;
                 }
-                case SDL_EVENT_MOUSE_WHEEL: if(captured&&!playback&&event.wheel.y!=0)handle_code(event.wheel.y>0?"MWheelUp":"MWheelDown",true,false,true); break;
+                case SDL_EVENT_MOUSE_WHEEL: if(chat.active){chat.scroll(event.wheel.y>0?3:event.wheel.y<0?-3:0);break;}if(captured&&playback&&replay_camera.mode=="chase"&&event.wheel.y!=0){replay_camera.zoom_by(std::pow(1.12,-event.wheel.y));break;}if(captured&&!chat.active&&event.wheel.y!=0)handle_code(event.wheel.y>0?"MWheelUp":"MWheelDown",true,false,true); break;
                 default: break;
             }
         }
+        mouse_diagnostics.end(SDL_GetTicksNS(),mouse_pump_start);
+        if(had_input_activity)activity.input(std::chrono::duration<double>(Clock::now().time_since_epoch()).count());
         if(menu) for(const auto &raw:menu->drain_messages()) {
             try {
                 if(raw.size()>12*1024*1024)throw std::runtime_error("Menu command too large");
                 auto message=nlohmann::json::parse(raw);const auto type=message.at("type").get<std::string>();
+                if(type=="loadoutPreview") {if(menu->visible()&&raw.size()<=8192)preview_request=std::move(message);continue;}
+                if((video_capture||director_job||video_encoder.busy())&&type!="videoExport"&&type!="ready"&&type!="update"&&type!="audioCue"&&type!="music"&&type!="quit"){if(type=="settings")throw std::runtime_error("Finish or cancel video export before changing settings.");continue;}
                 const size_t limit=(type=="replayData"||type=="menuBackdrop")?12*1024*1024:(type=="roomSnapshot"||type=="roomEvent")?128*1024:16*1024;
                 if(raw.size()>limit)throw std::runtime_error("Menu command exceeds its type limit");
                 if(type=="ready") {menu_ready=true;backdrop_shown.clear();backdrop_failed.clear();backdrop_cut=false;gameplay_backdrop_due=bool(core);run_event({{"type","reset"}});std::cout<<"Native menu ready: "<<raw<<'\n';}
                 else if(type=="resume" && core && !download.valid()) show_menu(false);
+                else if(type=="prefetchMap"){
+                    if(message.at("map").is_null()){cancel_prefetch();continue;}
+                    const auto map=message.at("map").get<std::string>(),sha=message.at("sha").get<std::string>();
+                    if(!native::valid_map_id(map)||sha.size()!=64||sha.find_first_not_of("0123456789abcdef")!=std::string::npos)throw std::runtime_error("Invalid map prefetch");
+                    if(!opt.runtime_smoke.empty()||opt.frames||(!playback&&pending_action!="play"))continue;
+                    const auto key=map+":"+sha;if(key==prefetch_active||key==prefetch_done)continue;
+                    cancel_prefetch();prefetch_map=map;prefetch_sha=sha;
+                }
                 else if(type=="menuAppearance") {menu_reduced_motion=message.value("reducedMotion",true);}
                 else if(type=="menuBackdrop") {
                     // Home only: ignored once a gameplay map is loading or loaded.
@@ -831,9 +1112,47 @@ int run(const Options &opt) {
                         if(id.empty())menu->evaluate_js("window.bunnyhopNativeBackdrop?.('none')");
                     }
                 }
+                else if(type=="chatLine"){
+                    auto label=[&](const char *key){return message.contains(key)&&message[key].is_string()?message[key].get<std::string>():std::string();};
+                    native::ChatDecoration decoration;decoration.color=label("nativeNameColor");decoration.badge=label("nativeBadge");decoration.rank=label("nativeRank");decoration.country=label("nativeCountry");decoration.profile=label("nativeProfileId");
+                    chat.push(message.at("text").get<std::string>(),label("name"),label("kind"),epoch_ms()/1000.,std::clamp(message.value("ms",12000.),1000.,60000.)/1000.,decoration);
+                }
+                else if(type=="chatSuggestions"){if(message.value("request",uint64_t(0))!=chat_request||message.value("input",std::string())!=chat.input)continue;chat.suggestions.clear();if(chat.active&&message.at("items").is_array())for(const auto &value:message.at("items")){if(chat.suggestions.size()>=8)break;if(value.is_string())chat.suggestions.push_back(native::Chat::clean(value.get<std::string>(),512));}}
+                else if(type=="chatAction"){
+                    const auto action=message.at("action").get<std::string>();
+                    if(action=="scores")show_scores=!show_scores;
+                    else if(action=="jumpStats"){preferences["jumpStats"]=!preferences.at("jumpStats").get<bool>();native::save_settings(cache/"settings.json",preferences);apply_preferences();}
+                    else if(action=="hidePlayers")hide_players=message.value("hidden",!hide_players);
+                    else if(action=="openRoom"){show_menu(true);menu->evaluate_js("window.bunnyhopNativeMenu?.open?.('room')");}
+                    else if(core&&!download.valid()){
+                        if((action=="restart"||action=="restartBonus")&&message.contains("track")){const auto track=message.at("track").get<uint32_t>();bool found=false;for(const auto &zone:zones)found|=zone.kind==0&&zone.track==track;if(!found)throw std::runtime_error("That track is unavailable");if(!gauntlet_id.empty()&&track)throw std::runtime_error("Gauntlets use the main track");active_track=track;reset();}
+                        else if(action=="weapon"){const auto weapon=message.value("weapon",std::string());if(weapon=="menu"||weapon=="guns")gun_menu.show();else{const unsigned id=message.value("weaponId",weapon=="knife"?1u:weapon=="glock"?2u:weapon=="usp"?3u:0u);if(const auto reason=native::NativeWeaponMenu::refusal(id,weapon_context());!reason.empty())throw std::runtime_error(reason);if(!playback&&!room.spectator_target){kept_weapons.cancel();input.pulse=(input.pulse&~native::weapon_command_mask)|(id<<native::give_shift);}}}
+                        else if(action=="restart"||action=="restartBonus"||action=="setStart"||action=="clearStart")act(action,false,true);
+                        else throw std::runtime_error("Unknown chat action");
+                    }
+                }
+                else if(type=="mapLoad"){
+                    const auto action=message.at("action").get<std::string>();
+                    if(action=="cancel"){
+                        download.cancel();pending_replay.clear();pending_action.clear();pending_tutorial.clear();pending_tutorial_demo=false;pending_room_map.clear();
+                        {std::lock_guard lock(progress_mutex);loading.clear();load_progress=nullptr;}
+                        error.clear();if(core)reset();
+                        if(backdrop&&!core&&backdrop->resume()){backdrop_shown.clear();backdrop_failed.clear();backdrop_cut=false;backdrop_source.clear();}
+                    }else if(action=="retry"){if(last_requested_map.empty())throw std::runtime_error("No map to retry");request_map(last_requested_map);}
+                    else throw std::runtime_error("Invalid loading action");
+                }
                 else if(type=="leaveMap")leave_map();
                 else if(type=="practice")practice_action(message.at("action").get<std::string>(),false,message.contains("value")?std::optional<bool>(message.at("value").get<bool>()):std::nullopt);
                 else if(type=="music"){const auto action=message.at("action").get<std::string>();if(action!="previous"&&action!="toggle"&&action!="next")throw std::runtime_error("Invalid music action");audio.music_control(action);}
+                else if(type=="announce"){
+                    const auto event=message.at("event").get<std::string>(),id=message.value("id",std::string()),preview=message.value("preview",std::string());
+                    if(!native::announcer_event(event)||id.size()>256||(!preview.empty()&&!native::announcer_line(preview)))throw std::runtime_error("Invalid announcer request");
+                    audio.announce(event,id,message.value("remote",false),preview);
+                }
+                else if(type=="audioCue"){
+                    const auto id=message.at("id").get<std::string>();const double gain=message.value("gain",1.),rate=message.value("rate",1.);
+                    if(id.empty()||id.size()>64||id.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789_")!=std::string::npos||!std::isfinite(gain)||gain<0||gain>1||!std::isfinite(rate)||rate<.25||rate>4)throw std::runtime_error("Invalid interface sound");audio.play(id,float(gain),rate);
+                }
                 else if(type=="hudToast"){const auto text=message.at("text").get<std::string>();if(text.size()>500)throw std::runtime_error("HUD toast too long");toast(text,std::clamp(message.value("ms",3000u),500u,15000u));}
                 else if(type=="gauntlet"){
                     gauntlet_action(message);
@@ -846,18 +1165,26 @@ int run(const Options &opt) {
                     request_map(message.at("id").get<std::string>());
                 }
                 else if(type=="style") {if(!gauntlet_id.empty())throw std::runtime_error("Gauntlets are Normal style on the main track.");if(download.valid())throw std::runtime_error("A map is loading");const auto id=message.at("id").get<std::string>();if(!native::styles.contains(id))throw std::runtime_error("Unknown style");selected_style=id;active_track=0;reset();}
-                else if(type=="settings") {auto changed=native::patch_settings(preferences,message.at("patch"));native::save_settings(cache/"settings.json",changed);preferences=std::move(changed);input.held=input.pulse=0;held_codes.clear();apply_preferences();error.clear();}
+                else if(type=="settings") {save_window();auto changed=native::patch_settings(preferences,message.at("patch"));auto effective=changed;if(menu&&menu->visible())effective["alwaysOnTop"]=false;if(!window_controller.apply(effective))throw std::runtime_error(window_controller.error());native::save_settings(cache/"settings.json",changed);preferences=std::move(changed);input.held=input.pulse=0;held_codes.clear();apply_preferences();error.clear();}
+                else if(type=="window") {const auto action=message.at("action").get<std::string>();bool ok=false;if(action=="center")ok=window_controller.center();else if(action=="minimize")ok=window_controller.minimize();else if(action=="maximize")ok=window_controller.maximize();else if(action=="toggleFullscreen"){save_window();auto changed=preferences;changed["windowMode"]=native::toggled_window_mode(window_controller.mode());auto effective=changed;if(menu&&menu->visible())effective["alwaysOnTop"]=false;ok=window_controller.apply(effective);if(ok){preferences=changed;native::save_settings(cache/"settings.json",preferences);}}else throw std::runtime_error("Unknown window action");if(!ok)throw std::runtime_error(window_controller.error());window_dirty=true;window_save_due=Clock::now()+std::chrono::milliseconds(500);}
                 else if(type=="replays")refresh_replays();
-                else if(type=="ghost")ghost_enabled=ghost_handle&&message.at("enabled").get<bool>();
+                else if(type=="ghost"){ghost_enabled=ghost_handle&&message.at("enabled").get<bool>();ghost_slots[0].enabled=ghost_enabled;}
+                else if(type=="ghostControl"){
+                    const auto action=message.at("action").get<std::string>();const unsigned slot=message.value("slot",0u);if(slot>=4)throw std::runtime_error("Invalid ghost slot");
+                    if(action!="remove"&&action!="clear"&&action!="toggle")throw std::runtime_error("Invalid ghost action");
+                    for(unsigned i=0;i<4;i++)if(action=="clear"||i==slot){auto &ghost=ghost_slots[i];if(action=="toggle")ghost.enabled=ghost.handle&&message.value("enabled",!ghost.enabled);else{if(core&&ghost.handle)bh_ghost_free(core.get(),ghost.handle);ghost={};}if(i==0){ghost_handle=ghost.handle;ghost_enabled=ghost.enabled;ghost_id=ghost.id;ghost_info=ghost.info;}}
+                    if(renderer)renderer->reset_presentation();scope.reset();
+                }
                 else if(type=="replay") {
                     const auto path=native::replay_file(cache/"replays",message.at("id").get<std::string>());const auto action=message.at("action").get<std::string>();
-                    if(action=="play"||action=="ghost")request_replay(path,action);
+                    if(action=="play"||action=="ghost")request_replay(path,action,message.value("ghostSlot",0u));
+                    else if(action=="screenshot"){const auto screenshot=run_vault.screenshot(path.filename().string());if(!screenshot)throw std::runtime_error("This local run has no saved screenshot");if(!SDL_OpenURL(native::RunVault::file_uri(*screenshot).c_str()))throw std::runtime_error(SDL_GetError());}
                     else if(action=="export") {
                         const char *folder=SDL_GetUserFolder(SDL_FOLDER_DOWNLOADS);if(!folder)throw std::runtime_error("Downloads folder unavailable");
                         const auto dest=std::filesystem::path(folder)/path.filename();std::filesystem::copy_file(path,dest,std::filesystem::copy_options::none);score_notice="Replay exported to Downloads";
                     } else if(action=="delete") {
                         std::filesystem::create_directories(cache/"replays"/"trash");auto dest=cache/"replays"/"trash"/path.filename();
-                        if(std::filesystem::exists(dest))throw std::runtime_error("Replay already exists in local trash");std::filesystem::rename(path,dest);refresh_replays();
+                        if(std::filesystem::exists(dest))throw std::runtime_error("Replay already exists in local trash");std::filesystem::rename(path,dest);try{run_vault.trash(path.filename().string());}catch(const std::exception&e){std::cerr<<"Vault trash: "<<e.what()<<'\n';}refresh_replays();
                     } else throw std::runtime_error("Unknown replay action");
                 }
                 else if(type=="replayData") {
@@ -866,37 +1193,59 @@ int run(const Options &opt) {
                     const auto path=cache/"replays"/(std::string("import-")+sha+".bhr");
                     if(!std::filesystem::exists(path)){std::ofstream out(path,std::ios::binary);out.write(reinterpret_cast<const char*>(bytes.data()),bytes.size());if(!out)throw std::runtime_error("Cannot save imported replay");}
                     const auto action=message.at("action").get<std::string>();if(action!="play"&&action!="ghost")throw std::runtime_error("Invalid replay import action");
-                    request_replay(path,action);refresh_replays();
+                    request_replay(path,action,message.value("ghostSlot",0u));refresh_replays();
                 }
                 else if(type=="tutorial"){
                     const auto action=message.at("action").get<std::string>();if(action=="stop"){tutorial_stopped=true;pending_tutorial.clear();if(tutorial)tutorial->stop();if(tutorial_demo&&ghost_handle){bh_ghost_free(core.get(),ghost_handle);ghost_handle=0;ghost_enabled=false;}tutorial_demo=false;score_notice.clear();show_menu(true);}
                     else if(action=="start"||action=="demo"){const auto lesson=message.at("lesson").get<std::string>();if(lesson!="jump"&&lesson!="strafe"&&lesson!="speed"&&lesson!="final")throw std::runtime_error("Unknown tutorial lesson");if(map_id==tutorial_map&&core&&tutorial)start_tutorial(lesson,action=="demo");else{tutorial_stopped=false;pending_tutorial=lesson;pending_tutorial_demo=action=="demo";selected_style="autohop";active_track=0;request_map(tutorial_map);}}
                     else throw std::runtime_error("Unknown tutorial action");
                 }
+                else if(type=="videoExport") {
+                    try{if(message.value("action",std::string())=="cancel"){cancel_video();refresh_playback_pose();}
+                    else if(message.value("action",std::string())=="start"){const auto &v=message.at("options");native::VideoOptions options;options.width=v.at("width");options.height=v.at("height");options.fps=v.at("fps");options.quality=v.at("quality");options.camera=v.at("camera");options.hud=v.at("hud");options.audio=v.value("audio",true);options.music=v.value("music",std::string("none"));options.music_offset=v.value("musicOffset",0.);options.music_level=v.value("musicLevel",1.f);options.music_loop=v.value("musicLoop",true);options.music_duck=v.value("musicDuck",true);options.from=v.at("from");options.to=v.at("to");request_video(options);}}
+                    catch(const std::exception &e){cancel_video();refresh_playback_pose();video_error=e.what();}
+                }
                 else if(type=="replayControl"&&playback) {
                     const auto action=message.at("action").get<std::string>();
-                    if(action=="pause")playback_paused=message.value("paused",!playback_paused);
+                    if(action=="camera"){if(!replay_camera.set_mode(message.at("camera").get<std::string>()))throw std::runtime_error("Invalid replay camera");camera_controls.set_angles(replay_camera.pitch,replay_camera.yaw);camera_controls.clear();if(replay_camera.mode=="auto"){director_only=true;director_job=std::make_unique<native::ReplayDirectorJob>(core.get(),playback_info.at("totalTicks").get<uint32_t>(),curr.tick);}}
+                    else if(action=="pause")playback_paused=message.value("paused",!playback_paused);
                     else if(action=="speed") {const double value=message.at("speed").get<double>();if(!std::isfinite(value)||value<.1||value>4)throw std::runtime_error("Replay speed must be 0.1–4");playback_speed=value;}
-                    else if(action=="seek") {const auto tick=message.at("tick").get<uint32_t>();if(tick>playback_info.at("totalTicks").get<uint32_t>())throw std::runtime_error("Replay tick outside run");BhSnapshot state{};if(!bh_replay_seek(core.get(),tick,&state)){const std::string failure=bh_last_error(core.get());reset();show_menu(true);throw std::runtime_error("Replay seek stopped: "+failure);}curr=prev=state.player;BhCmd view{};bh_last_command(core.get(),&view);input.set_angles(view.pitch,view.yaw);renderer->reset_presentation();audio.reset();reset_feedback(tick!=0);reset_input_timing();}
+                    else if(action=="seek") {const auto tick=message.at("tick").get<uint32_t>();if(tick>playback_info.at("totalTicks").get<uint32_t>())throw std::runtime_error("Replay tick outside run");replay_controls.pending=tick;}
                     else if(action=="stop")reset();
                 }
                 else if(type=="sensitivity") {preferences=native::patch_settings(preferences,{{"sensitivity",message.at("value")}});native::save_settings(cache/"settings.json",preferences);apply_preferences();}
                 else if(type=="playerName") replay_player=native::replay_player_name(message.value("name",std::string()));
                 else if(type=="cosmetics") {
+                    player_glow=native_render::parse_glow(message.value("playerGlow",nlohmann::json(nullptr)));
                     outfit=message.value("outfit",std::string());packed_loadout=message.value("packedLoadout",std::string());
                     if(outfit.size()>64||packed_loadout.size()>200)throw std::runtime_error("Invalid cosmetic selection");
-                    if(renderer)renderer->set_cosmetics(outfit,packed_loadout);
+                    ghost_cosmetic=message.value("ghostId",ghost_cosmetic);trail_cosmetic=message.value("trailId",trail_cosmetic);if(ghost_cosmetic.size()>64||trail_cosmetic.size()>64)throw std::runtime_error("Invalid ghost cosmetic");
+                    if(renderer){renderer->set_player_glow(player_glow);renderer->set_cosmetics(outfit,packed_loadout);renderer->set_ghost_cosmetics(ghost_cosmetic,trail_cosmetic);}
                 }
                 else if(type=="roomEvent") {
                     apply_room_event(message);
                 }
                 else if(type=="roomSnapshot")room.snapshot(message,std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count());
                 else if(type=="openAuth") menu->open_auth(message.at("url").get<std::string>());
+                else if(type=="update") {
+                    const auto action=message.value("action",std::string());
+                    if(action=="check")updater.check();else if(action=="download")updater.download();else if(action=="cancel")updater.cancel();else if(action=="reveal")updater.reveal();
+                    last_update.clear();
+                }
                 else if(type=="openExternal") native::open_external(message.at("url").get<std::string>());
                 else if(type=="auth") menu->evaluate_js("window.bunnyhopNativeMenu?.onAuth("+message.dump()+")");
                 else if(type=="menuError") {error=message.value("error",std::string("Menu failed"));std::cerr<<"Menu: "<<error<<'\n';}
+                else if(type=="worldRecord") {
+                    if(message.value("generation",uint64_t(-1))!=run_generation||message.value("map",std::string())!=map_id||message.value("style",std::string())!=active_style||message.value("track",~0u)!=active_track)continue;
+                    known_world_record.reset();world_record_generation=run_generation;
+                    if(message.contains("seconds")&&!message["seconds"].is_null()){const double seconds=message.at("seconds").get<double>();if(!std::isfinite(seconds)||seconds<=0)throw std::runtime_error("Invalid world record time");known_world_record=seconds;}
+                }
                 else if(type=="runService") {
                     if(message.value("generation",uint64_t(-1))!=run_generation)continue;
+                    if(message.value("status",std::string())=="verified"&&!practice.active&&!turn_admission.local_only){
+                        const auto id=message.value("id",std::string());const auto event=message.value("announcer",std::string());
+                        if(!id.empty()&&(event=="pb"||event=="wr")){audio.verified_finish(event,id);}
+                    }
                     if(!practice.active&&!turn_admission.local_only)score_notice=message.value("message",std::string());std::cout<<"Score service: "<<message.dump()<<'\n';
                 }
                 else if(type=="quit") running=false;
@@ -923,25 +1272,50 @@ int run(const Options &opt) {
                     if(!smoke_snapshot) {smoke_pass=false;running=false;}
                 }
                 else if(type=="menuSnapshot" && smoke_snapshot) {smoke_pass=smoke_pass&&message.value("ok",false);running=false;}
-            } catch(const std::exception &e) {error=e.what();std::cerr<<"Menu: "<<error<<'\n';}
+            } catch(const std::exception &e) {error=e.what();std::cerr<<"Menu: "<<error<<'\n';chat.push(error,"","error",epoch_ms()/1000.);toast(error);}
+        }
+        prefetch.poll();
+        if(prefetch.valid()&&prefetch.wait_for(std::chrono::seconds(0))==std::future_status::ready){
+            try{auto result=prefetch.get();if(file_hash(result.bsp.string())==prefetch_sha)prefetch_done=prefetch_active;}
+            catch(const std::exception &e){std::cerr<<"Map prefetch: "<<e.what()<<'\n';}
+            prefetch_active.clear();prefetch_map.clear();prefetch_sha.clear();
+        }
+        if(!prefetch.valid()&&!prefetch_map.empty()&&!download.valid()&&playback){
+            const auto id=prefetch_map;prefetch_active=id+":"+prefetch_sha;
+            prefetch.start([&,id](const std::atomic_bool &cancel){const auto lock=lock_cache(cancel);native::DownloadLimits limits;limits.bsp=64*1024*1024;limits.content_total=256*1024*1024;return native::download_map(id,cache,[](const std::string &){},&cancel,limits);});
         }
         download.poll();
-        if(download.valid() && download.wait_for(std::chrono::seconds(0))==std::future_status::ready) {
+        if(download.valid() && download.wait_for(std::chrono::seconds(0))==std::future_status::ready && !map_preparing) {
+            map_preparing=true;
+            nlohmann::json update;
+            {std::lock_guard lock(progress_mutex);loading="Preparing map, models and native renderer…";load_progress["stage"]="renderer";load_progress["message"]=loading;update={{"loading",loading},{"loadProgress",load_progress},{"error",""}};}
+            if(menu&&menu_ready)menu->evaluate_js("window.bunnyhopNativeMenu?.onState?.("+update.dump()+")");
+        } else if(download.valid() && map_preparing) {
+            map_preparing=false;
             try {auto result=download.get();load_map(result.bsp.string(),result.content_root.string(),result.id,result.detail);}
             catch(const std::exception &e) {
                 pending_replay.clear();pending_action.clear();pending_tutorial.clear();pending_tutorial_demo=false;
-                error=e.what();std::cerr<<error<<'\n';if(!menu||opt.frames)throw;
+                const std::string failure=e.what();if(core)reset();error=failure;std::cerr<<error<<'\n';if(!menu||opt.frames)throw;
                 // Back on the home screen: restart the tour this download interrupted.
                 if(backdrop&&!core&&backdrop->resume()){backdrop_shown.clear();backdrop_failed.clear();backdrop_cut=false;backdrop_source.clear();}
             }
-            {std::lock_guard lock(progress_mutex);loading.clear();}
+            {std::lock_guard lock(progress_mutex);loading.clear();if(error.empty())load_progress=nullptr;else if(load_progress.is_object()){load_progress["stage"]="error";load_progress["message"]=error;}}
             if(tutorial&&!tutorial_stopped&&error.empty()&&pending_replay.empty()){const auto lesson=pending_tutorial.empty()?"jump":pending_tutorial;try{start_tutorial(lesson,pending_tutorial_demo);}catch(const std::exception &e){error=e.what();}pending_tutorial.clear();pending_tutorial_demo=false;}
-            if(!pending_replay.empty()&&error.empty()) {auto path=pending_replay,action=pending_action;pending_replay.clear();try{open_replay(path,action);}catch(const std::exception &e){error=e.what();}}
+            if(!pending_replay.empty()&&error.empty()) {auto path=pending_replay,action=pending_action;pending_replay.clear();try{open_replay(path,action,pending_ghost_slot);}catch(const std::exception &e){error=e.what();}}
             if(!pending_room_map.empty()&&pending_room_map!=map_id){const auto next=pending_room_map;pending_room_map.clear();active_track=0;request_map(next);}
             else pending_room_map.clear();
             if(!menu && core && !opt.hidden) capture(true);
         }
         if(!running) break;
+        if(menu&&menu_ready){
+            if(const auto state=menu_gamepad.sample(menu->visible()&&focused))menu->evaluate_js("window.bunnyhopNativeMenu?.onGamepad?.("+state->dump()+")");
+            if(preview_request){
+                auto job=std::move(*preview_request);preview_request.reset();std::string png;
+                try {if(menu->visible()) {if(!loadout_preview)loadout_preview=std::make_unique<NativeLoadoutPreview>(gl,assets);png=loadout_preview->render(job,double(SDL_GetTicksNS())/1e9);}}catch(const std::exception &e){std::cerr<<"Loadout preview: "<<e.what()<<'\n';}
+                const nlohmann::json result={{"id",job.value("id",0u)},{"png",png.empty()?std::string():"data:image/png;base64,"+base64(png)}};
+                menu->evaluate_js("window.bunnyhopNativeLoadoutPreview?.("+result.dump()+")");
+            }
+        }
         const auto now=Clock::now();
         bool leave_held=false;for(const auto &key:preferences.at("binds").at("mainMenu"))leave_held|=held_codes.contains(key.get<std::string>());
         const auto leave_result=leave_hold.frame(epoch_ms(),leave_held,!captured||playback);
@@ -969,14 +1343,25 @@ int run(const Options &opt) {
             discord.update(discord_allowed&&settings.enabled&&!settings.privacy,activity);
         }
         if(spectator!=observed_spectator){
-            if(spectator){bh_record_end(core.get());recording_ended=true;record_path.clear();beat_start=0;++run_generation;run_event({{"type","reset"}});audio.reset();accumulator=0;input.clear();renderer->reset_presentation();show_menu(false);}
+            if(spectator){bh_record_end(core.get());recording_ended=true;record_path.clear();pending_vault_capture.reset();beat_start=0;++run_generation;run_event({{"type","reset"}});audio.reset();accumulator=0;input.clear();renderer->reset_presentation();scope.reset();show_menu(false);}
             else if(observed_spectator&&core&&!playback)reset();observed_spectator=spectator;
         }
-        const bool simulation_active=core && !spectator && !room_modes.frozen() && !download.valid() && ((focused&&captured)||opt.frames)&&(!playback||!playback_paused);
+        if(const auto ready=restart_guard.frame(epoch_ms(),held_action(restart_guard.action),!captured||chat.active||playback))act(*ready,false,true);
+        if(director_job)try{if(director_job->step()){
+            const auto interval=playback_info.at("settings").value("tickInterval",dt);
+            if(director_only){if(director_job->plan(replay_camera,interval,0,playback_info.at("totalTicks").get<uint32_t>())){director_job.reset();refresh_playback_pose();}}
+            else{const auto options=*pending_video;if(director_job->plan(prepared_camera,interval,options.from,options.to)){director_job.reset();pending_video.reset();begin_video(options);}}
+        }}catch(const std::exception &e){cancel_video();refresh_playback_pose();video_error=e.what();}
+        if(video_capture)try{if(!video_encoder.busy()){video_capture.reset();refresh_playback_pose();}else{video_capture->step();if(video_capture->done()){video_capture.reset();refresh_playback_pose();}}}catch(const std::exception &e){cancel_video();refresh_playback_pose();video_error=e.what();}
+        if(!video_capture&&!director_job&&!video_encoder.busy())if(const auto seek=replay_controls.take())try{seek_playback(*seek);}catch(const std::exception&e){error=e.what();playback_paused=true;}
+        const bool simulation_active=!video_capture&&!director_job&&!video_encoder.busy()&&core && !spectator && !room_modes.frozen() && !download.valid() && ((focused&&(captured||(playback&&(!menu||!menu->visible()))))||opt.frames)&&(!playback||(!playback_paused&&!replay_controls.dragging));
         if(beat_start&&!simulation_active) beat_paused=true;
         const double frame_seconds=input_clock.elapsed(now);
+        const bool activity_active=core&&!download.valid()&&focused&&captured&&!playback&&!spectator&&!opt.frames&&opt.runtime_smoke.empty();
+        activity.frame(map_id,frame_seconds,std::chrono::duration<double>(now.time_since_epoch()).count(),activity_active);
         ++input_frame;input_frame_ms=frame_seconds*1000;
-        if(simulation_active) accumulator+=(opt.frames?dt:std::clamp(frame_seconds,0.0,.25))*(playback?playback_speed:1);
+        const double step_dt=playback?playback_info.at("settings").value("tickInterval",dt):dt;
+        if(simulation_active) accumulator+=(opt.frames?step_dt:std::clamp(frame_seconds,0.0,.25))*(playback?playback_speed:1);
         // Where simulated time has reached, on SDL's clock. accumulator is how
         // far behind the simulation is, so now minus it is where the next tick
         // starts. This frame's motion arrived now; the ticks below share it by
@@ -984,10 +1369,10 @@ int run(const Options &opt) {
         const uint64_t wall_ns=SDL_GetTicksNS();
         const uint64_t behind_ns=uint64_t(std::max(0.0,accumulator)*1e9);
         uint64_t sim_ns=behind_ns<wall_ns?wall_ns-behind_ns:0;
-        const uint64_t tick_ns=uint64_t(dt*1e9);
+        const uint64_t tick_ns=uint64_t(step_dt*1e9);
         // Not simulating means no tick will take it, so apply it now.
         if(!simulation_active) input.consume_all(); else input.arrived(wall_ns);
-        while(accumulator>=dt) {
+        while(accumulator>=step_dt) {
             // --frames is a deterministic mode with no wall clock to share by,
             // so a tick there takes whatever is waiting.
             const double counts_before=input.yaw_counts;
@@ -1008,10 +1393,10 @@ int run(const Options &opt) {
                         score_notice=active_style=="scroll"?"Practice turn controls: local replay only":"Custom turn speed: local replay only; ranked submission disabled";
                     }
                 }
-                input.held=0;for(auto b=preferences["binds"].begin();b!=preferences["binds"].end();++b){const auto bit=movement_bit(b.key());if(bit)for(const auto &key:b.value())if(held_codes.contains(key.get<std::string>()))input.held|=bit;}cmd=input.command();
+                input.held=0;for(auto b=preferences["binds"].begin();b!=preferences["binds"].end();++b){const auto bit=movement_bit(b.key());if(bit)for(const auto &key:b.value())if(held_codes.contains(key.get<std::string>()))input.held|=bit;}if(!(input.pulse&native::give_mask))if(const auto give=kept_weapons.next())input.pulse=(input.pulse&~native::weapon_command_mask)|(give<<native::give_shift);cmd=input.command();
                 if(practice.noclip){BhSnapshot snapshot{};require(bh_noclip_move(&practice.flight,&cmd,dt),core.get(),"Moving noclip");require(bh_practice_noclip_tick(core.get(),&practice.flight,&snapshot),core.get(),"Stepping practice noclip");curr=snapshot.player;}
                 else{const auto look=input.look_sample();require(bh_step_look_v2(core.get(),&cmd,look?&*look:nullptr,&curr),core.get(),"Stepping simulation");require(bh_last_command(core.get(),&cmd),core.get(),"Reading filtered command");input.events(curr);}}
-            renderer->simulation_tick();
+            renderer->simulation_tick();hud.tick(curr);
             if(input_log&&!playback) {
                 const double moved=mouse_counts;
                 input_log<<curr.tick<<','<<input_frame<<','<<input_frame_ms<<','<<double(sim_ns)/1e6<<','<<moved<<','<<input.pending_counts()<<','
@@ -1022,6 +1407,7 @@ int run(const Options &opt) {
             if(curr.events&(1u<<5)){const bool stab=cmd.buttons&native::attack2;room_events|=stab?32:16;if(!playback)bh_record_cosmetic(core.get(),stab?2:1);}
             if(playback){BhReplayEvents e{};if(bh_replay_events(core.get(),prev.tick,curr.tick,&e)){if(e.inspect_signal)renderer->inspect_press();renderer->inspect_held(e.inspect_held!=0);}}
             BhSnapshot state{};bh_snapshot(core.get(),&state);BhRunState timing{};bh_run_state(core.get(),&timing);BhWeaponReport weapon{};bh_weapon_report(core.get(),&weapon);BhAttackReport attack{};
+            if(!playback&&!practice.active&&!tutorial_practice()&&!opt.frames&&opt.runtime_smoke.empty()){if(curr.events&2)activity.jump(map_id);if(timing.update_flags&1)activity.attempt(map_id);}
             {
                 // Jump stats. |prev| is the state before this tick, which is what the
                 // plugin reads in OnPlayerRunCmd, and curr.events carries the jump.
@@ -1056,10 +1442,15 @@ int run(const Options &opt) {
             }
             BhSurfaceProbe surface{};surface.water_z=std::numeric_limits<float>::quiet_NaN();const bool surface_found=bh_surface_at(core.get(),curr.position[0],curr.position[1],curr.position[2],&surface)!=0;const double water_depth=surface_found?surface.water_z-curr.position[2]:std::numeric_limits<double>::quiet_NaN();
             static const std::array<const char*,6> surfaces={"concrete","metal","wood","grass","tile","water"};
-            audio.tick(state,timing,weapon,bh_attack_report(core.get(),&attack)?&attack:nullptr,dt,surfaces[std::clamp(surface.surface,0,5)],water_depth);
+            const bool attacked=bh_attack_report(core.get(),&attack);if(!playback)scope.observe(weapon,attacked?&attack:nullptr);
+            audio.set_style(playback?playback_info.value("style",active_style):active_style);
+            BhJumpObservation jump_observation{};const bool observed_jump=bh_jump_observation(core.get(),&jump_observation)!=0;
+            audio.tick(state,timing,weapon,attacked?&attack:nullptr,step_dt,surfaces[std::clamp(surface.surface,0,5)],water_depth,observed_jump?&jump_observation:nullptr);
+            if(timing.update_flags&16){char split[100];std::snprintf(split,sizeof(split),"Split %u  %.3fs",timing.split_count,timing.seconds);hud.set_run_comparison(split,"");}
+            if(!playback)kept_weapons.observe(weapon);
             const uint32_t slot=weapon.active==weapon.primary?1:weapon.active==weapon.secondary?2:3;if(slot!=observed_slot){last_slot=observed_slot;observed_slot=slot;}
              if(curr.events&native::teleported) prev=curr;
-            accumulator-=dt;
+            accumulator-=step_dt;
             BhRunState tick_run{};
             if(playback||!zones.empty())require(bh_run_state(core.get(),&tick_run),core.get(),"Reading native timer");
             if(tutorial&&tutorial->is_active()&&!playback){BhCmd filtered=cmd;bh_last_command(core.get(),&filtered);const auto result=tutorial->tick(tutorial_pre,curr,filtered,curr.events,dt);if(result.completed)save_tutorial();if(tick_run.status==2&&tutorial->lesson_id()=="final"&&!tutorial_final_saved){tutorial->finish(tick_run.seconds);save_tutorial();tutorial_final_saved=true;}if(result.next_lesson>=0&&result.next_lesson<4){const char *ids[]={"jump","strafe","speed","final"};start_tutorial(ids[result.next_lesson],false);accumulator=0;break;}}
@@ -1093,6 +1484,9 @@ int run(const Options &opt) {
                     try {
                         require(bh_record_end(core.get()),core.get(),"Finishing native recording");
                         require(bh_record_write_bhr(core.get(),record_path.c_str()),core.get(),"Writing native replay");
+                        // Local vault failures cannot withhold an otherwise valid replay submission.
+                        try{const auto id=std::filesystem::path(record_path).filename().string();const auto summary=run_vault.archive(id,{{"map",map_id},{"style",active_style},{"track",run_state.track},{"time",run_state.seconds},{"jumps",run_state.jumps},{"strafes",run_state.strafes},{"sync",run_state.sync_percent},{"finishedAt",epoch_ms()},{"client",identity.value("build",std::string("bunnyhop-native/local"))},{"eligible",!turn_admission.local_only&&bool(run_state.recording_valid)}});if(preferences.value("capturePbScreenshots",false)&&summary.value("localPb",false))pending_vault_capture=std::pair{id,map_id};}
+                        catch(const std::exception&e){std::cerr<<"Local run vault: "<<e.what()<<'\n';score_notice="Replay saved; finish summary could not be saved";}
                         refresh_replays();
                         if(!turn_admission.local_only&&active_style=="autohop"&&run_state.track==0){
                             const auto old=backdrop_pbs.find(map_id);
@@ -1112,25 +1506,81 @@ int run(const Options &opt) {
             }
         }
         int width=0,height=0; SDL_GetWindowSizeInPixels(window.get(),&width,&height);
-        if(renderer) {
-            const float blend=(opt.frames||!simulation_active)?1.0f:float(accumulator/dt); float eye[3];
+        if(renderer&&!video_capture&&!director_job) {
+            const float blend=(opt.frames||!simulation_active)?1.0f:float(accumulator/step_dt); float eye[3];
             for(int i=0;i<3;++i) eye[i]=prev.position[i]+(curr.position[i]-prev.position[i])*blend;
             eye[2]+=prev.view_offset_z+(curr.view_offset_z-prev.view_offset_z)*blend;
             BhSnapshot state{};bh_snapshot(core.get(),&state);
-            if(ghost_enabled&&ghost_handle&&!playback&&!spectator) {
+            std::optional<native_render::Actor> audible_ghost;
+            if(ghost_enabled&&preferences.value("showGhost",true)&&ghost_handle&&!playback&&!spectator&&(tutorial_demo||(ghost_info.value("track",0u)==active_track&&ghost_info.value("style",std::string("autohop"))==active_style))) {
                 BhGhostFrame ghost{};const uint32_t tick=ghost_info.value("startTick",0u)+(tutorial_demo?curr.tick-tutorial_demo_start:run_state.status?curr.tick-run_state.start_tick:0);
-                if(bh_ghost_frame(core.get(),ghost_handle,tick,&ghost))renderer->set_replay_actor(ghost,tutorial_demo?"outfit-cream":outfit,(ghost_info.contains("packedLoadout")&&ghost_info["packedLoadout"].is_string()?ghost_info["packedLoadout"].get<std::string>():std::string()),.4f);
+                if(bh_ghost_frame(core.get(),ghost_handle,tick,&ghost)){
+                    const float distance=std::hypot(std::hypot(ghost.position[0]-curr.position[0],ghost.position[1]-curr.position[1]),ghost.position[2]-curr.position[2]);
+                    const float opacity=preferences.value("ghostOpacity",.4f)*(preferences.value("ghostNearFade",true)?std::clamp((distance-24.f)/80.f,0.f,1.f):1.f);
+                    renderer->set_replay_actor(ghost,tutorial_demo?"outfit-cream":outfit,(ghost_info.contains("packedLoadout")&&ghost_info["packedLoadout"].is_string()?ghost_info["packedLoadout"].get<std::string>():std::string()),opacity);
+                    native_render::Actor actor;actor.id="replay-ghost";actor.frame=ghost;actor.opacity=opacity;audible_ghost=actor;
+                }
                 else{renderer->set_replay_actor(nullptr,0,0);if(tutorial_demo){ghost_enabled=false;tutorial_demo=false;}}
             } else renderer->set_replay_actor(nullptr,0,0);
+            BhRunState display_run=run_state;std::string display_style=playback?playback_info.value("style",active_style):active_style;std::optional<native_render::Actor> spectated_actor;
             const double steady_seconds=std::chrono::duration<double>(now.time_since_epoch()).count();auto actors=room.actors(steady_seconds);auto camera_input=input;camera_input.consume_all();
             // Show turnbind motion between ticks too, so turning is smooth at any frame rate.
             if(simulation_active&&!playback&&!spectator)if(const double rate=turn_rate())camera_input.turn(rate,std::clamp(accumulator,0.0,dt));std::string shown_notice=tutorial&&tutorial->is_active()&&!playback?tutorial->notice():score_notice;
             const auto race_notice=room_modes.notice(epoch_ms());if(!race_notice.empty())shown_notice=race_notice;
-            renderer->set_viewmodel_weapon(std::nullopt);renderer->set_viewmodel_visible(preferences.at("viewmodel").get<bool>()&&!opt.camera);renderer->set_source_look(preferences.at("sourceLook").get<bool>());
-            if(spectator){const auto target=room.spectated(steady_seconds);if(target){for(int k=0;k<3;k++){eye[k]=target->frame.position[k];state.player.position[k]=target->frame.position[k];state.player.velocity[k]=target->frame.velocity[k];}eye[2]+=target->frame.view_offset_z;state.player.tick=target->frame.tick;state.player.grounded=!!(target->frame.flags&2);state.player.crouched=!!(target->frame.flags&1);camera_input.set_angles(target->frame.pitch,target->frame.yaw);renderer->set_cosmetics(target->outfit,target->loadout);renderer->set_viewmodel_weapon(target->frame.weapon);shown_notice="Spectating "+target->name+" - Esc for Room controls";actors.erase(std::remove_if(actors.begin(),actors.end(),[&](const auto &a){return a.id==target->id;}),actors.end());}else{renderer->set_viewmodel_visible(false);shown_notice="Waiting for spectator target";}}
+            renderer->set_player_glow(player_glow);if(!spectator)renderer->set_spectated_actor(std::nullopt);renderer->set_viewmodel_weapon(std::nullopt);renderer->set_viewmodel_visible(preferences.at("viewmodel").get<bool>()&&!opt.camera);renderer->set_source_look(preferences.at("sourceLook").get<bool>());
+            if(spectator){spectated_actor=room.spectated(steady_seconds);const auto &target=spectated_actor;if(target){renderer->set_spectated_actor(*target);for(int k=0;k<3;k++){eye[k]=target->frame.position[k];state.player.position[k]=target->frame.position[k];state.player.velocity[k]=target->frame.velocity[k];}eye[2]+=target->frame.view_offset_z;state.player.tick=target->frame.tick;state.player.view_offset_z=target->frame.view_offset_z;state.player.grounded=!!(target->frame.flags&2);state.player.crouched=!!(target->frame.flags&1);camera_input.set_angles(target->frame.pitch,target->frame.yaw);renderer->set_cosmetics(target->outfit,target->loadout);renderer->set_player_glow(target->playerGlow);renderer->set_viewmodel_weapon(target->frame.weapon);shown_notice="Spectating "+target->name+" - Esc for Room controls";actors.erase(std::remove_if(actors.begin(),actors.end(),[&](const auto &a){return a.id==target->id;}),actors.end());}else{renderer->set_spectated_actor(std::nullopt);renderer->set_viewmodel_visible(false);shown_notice="Waiting for spectator target";}}
+            bool external_camera=false;
+            if(playback){
+                camera_controls.consume_all();camera_controls.held=chat.active?0:input.held;
+                if(replay_camera.mode=="free")replay_camera.move(camera_controls,frame_seconds,held_codes.contains("ShiftLeft")||held_codes.contains("ShiftRight"));
+                replay_camera.sample(core.get(),state.player,camera_input.yaw(),camera_input.pitch,curr.tick*step_dt,eye,camera_input,frame_seconds);external_camera=replay_camera.third_person();
+            }else if(third_person){third_camera.sample(core.get(),state.player,camera_input.yaw(),camera_input.pitch,steady_seconds,eye,camera_input,frame_seconds);external_camera=true;}
+            if(spectator){display_run={};for(const auto &row:room.scoreboard(steady_seconds))if(row.value("slot",256u)==*spectator){display_run.track=row.value("track",0u);display_style=row.value("style",std::string("autohop"));break;}if(const auto timing=room.timer(*spectator,steady_seconds)){display_run.seconds=timing->second;display_run.in_start=timing->first==1;display_run.status=timing->first==3?2:timing->first==2?1:0;}}
+            if(hide_players)actors.clear();
+            if(!playback&&!spectator&&!tutorial_demo&&preferences.value("showGhost",true))for(unsigned i=1;i<4;i++){
+                const auto &slot=ghost_slots[i];if(!slot.handle||!slot.enabled||slot.info.value("track",0u)!=active_track||slot.info.value("style",std::string("autohop"))!=active_style)continue;
+                native_render::Actor actor;actor.id="ghost-"+std::to_string(i);actor.name=slot.info.value("player",std::string("Ghost ")+std::to_string(i+1));
+                const uint32_t tick=slot.info.value("startTick",0u)+(run_state.status?curr.tick-run_state.start_tick:0);
+                if(!bh_ghost_frame(core.get(),slot.handle,tick,&actor.frame))continue;
+                actor.outfit=outfit;actor.loadout=slot.info.value("packedLoadout",std::string());
+                const float distance=std::hypot(std::hypot(actor.frame.position[0]-curr.position[0],actor.frame.position[1]-curr.position[1]),actor.frame.position[2]-curr.position[2]);
+                actor.opacity=preferences.value("ghostOpacity",.4f)*(preferences.value("ghostNearFade",true)?std::clamp((distance-24.f)/80.f,0.f,1.f):1.f);actors.push_back(actor);
+            }
+            if(external_camera){
+                renderer->set_viewmodel_visible(false);
+                native_render::Actor self;self.id="local-camera-target";self.opacity=1;self.outfit=outfit;self.loadout=packed_loadout;self.playerGlow=player_glow;
+                for(int k=0;k<3;k++){self.frame.position[k]=state.player.position[k];self.frame.velocity[k]=state.player.velocity[k];}
+                self.frame.tick=state.player.tick;self.frame.flags=(state.player.crouched?1:0)|(state.player.grounded?2:0);self.frame.view_offset_z=state.player.view_offset_z;self.frame.pitch=input.pitch;self.frame.yaw=input.yaw();
+                BhWeaponReport held{};bh_weapon_report(core.get(),&held);self.frame.weapon=held.active;
+                if(spectator){if(const auto target=room.spectated(steady_seconds)){self=*target;self.opacity=1;}}
+                actors.push_back(self);
+            }
             if(opt.camera){for(int k=0;k<3;k++)eye[k]=(*opt.camera)[k];camera_input.set_angles((*opt.camera)[3],(*opt.camera)[4]);}
+            const bool local_scope=!playback&&!spectator&&!external_camera&&!opt.camera;
+            if(local_scope&&simulation_active)scope.frame(frame_seconds);
+            renderer->set_camera_fov(local_scope?scope.fov(preferences.at("fov").get<float>()):preferences.at("fov").get<float>());
+            if(local_scope&&scope.scoped())renderer->set_viewmodel_visible(false);
+            renderer->set_zone_state(display_run.track,display_run,!playback&&!spectator&&!practice.active&&!turn_admission.local_only&&display_run.recording_valid&&world_record_generation==run_generation&&known_world_record&&display_run.seconds<*known_world_record);renderer->set_flashlight(flashlight);
+            audio.listener(eye,camera_input.yaw());
+            if(focused&&captured&&!opt.frames){for(const auto &actor:actors)if(actor.id!="local-camera-target")audio.spatial_actor(actor,frame_seconds,actor.id.starts_with("ghost-"));if(audible_ghost)audio.spatial_actor(*audible_ghost,frame_seconds,true);if(spectated_actor&&!external_camera)audio.spatial_actor(*spectated_actor,frame_seconds,false);}
             renderer->set_room_actors(actors);
-            renderer->draw(width,height,eye,camera_input,&state,(playback||opt.frames)?curr.tick*dt:std::chrono::duration<double>(now-started).count());
+            renderer->draw(width,height,eye,camera_input,&state,(playback||opt.frames)?curr.tick*step_dt:std::chrono::duration<double>(now-started).count());
+            if((!menu||!menu->visible())&&!opt.camera&&preferences.at("hud").get<bool>()){
+                hud.overlay_begin(width,height,preferences.at("hudScale").get<float>());
+                const native::HudGeometry geometry(width,height,preferences.at("hudScale").get<float>());
+                const auto vp=renderer->camera(eye,camera_input.yaw(),camera_input.pitch,float(width)/std::max(height,1));
+                auto tag=[&](const native_render::Actor &actor,const std::string &name,bool ghost){
+                    if(name.empty()||actor.opacity<.05f||(ghost&&!preferences.value("ghostTag",true)))return;
+                    float point[3]={actor.frame.position[0],actor.frame.position[1],actor.frame.position[2]+actor.frame.view_offset_z+20};
+                    std::array<float,4> clip{};for(int row=0;row<4;row++)clip[row]=vp[row]*point[0]+vp[4+row]*point[1]+vp[8+row]*point[2]+vp[12+row];
+                    if(clip[3]<=2||std::abs(clip[0])>clip[3]||std::abs(clip[1])>clip[3]||std::abs(clip[2])>clip[3])return;
+                    float fraction=0;if(!bh_trace_camera(core.get(),eye,point,0,&fraction)||fraction<.98f)return;
+                    hud.overlay_text((clip[0]/clip[3]*.5f+.5f)*geometry.width,(.5f-clip[1]/clip[3]*.5f)*geometry.height,name,13,ghost?std::array<float,4>{.55f,.85f,1,.85f}:std::array<float,4>{.94f,.91f,.86f,1},true);
+                };
+                for(const auto &actor:actors)if(actor.id!="local-camera-target")tag(actor,actor.name,actor.id.starts_with("ghost-"));
+                if(audible_ghost)tag(*audible_ghost,ghost_info.value("player",std::string("Ghost")),true);
+                hud.overlay_end(width,height);
+            }
             if(Clock::now()<toast_until)shown_notice=toast_text;
             std::string gauntlet_line,gauntlet_delta;bool gauntlet_good=false;
             if(!gauntlet_id.empty()&&gauntlet_progress.is_object()){
@@ -1140,12 +1590,37 @@ int run(const Options &opt) {
                 if(timed&&!gauntlet_progress.at("pbSplit").is_null()){const auto delta=run_state.seconds-gauntlet_progress.at("pbSplit").get<double>();std::snprintf(formatted,sizeof(formatted),"%+.3fs",delta);gauntlet_delta=formatted;gauntlet_good=delta<0;}
             }
             BhCmd shown{};bh_last_command(core.get(),&shown);BhWeaponReport weapon{};bh_weapon_report(core.get(),&weapon);
-            if((!menu||!menu->visible())&&!opt.camera)hud.draw(width,height,state,run_state,shown,map_id,playback?playback_info.value("style",active_style):active_style,shown_notice,display_fps,
+            if((!menu||!menu->visible())&&!opt.camera)hud.draw(width,height,state,display_run,shown,map_id,display_style,shown_notice,display_fps,
                 preferences.at("hud").get<bool>(),preferences.at("crosshair").get<bool>(),playback,weapon,
                 preferences.at("jumpStats").get<bool>()?feedback.ssj_line:std::string(),feedback.ssj_good,
                 preferences.at("strafeTrainer").get<bool>()&&!playback?feedback.strafe_reading:std::nullopt,
                 preferences.at("strafeTrainerHints").get<bool>(),&hud_layout,preferences.at("hudScale").get<float>(),&practice,preferences.at("practiceKeepVelocity").get<bool>(),gauntlet_line,gauntlet_delta,gauntlet_good,leave_hold.progress(epoch_ms()));
+            if((!menu||!menu->visible())&&!opt.camera){
+                if(preferences.value("mouseDiagnostics",false)&&!playback){const auto &m=mouse_diagnostics.last;char label[220];std::snprintf(label,sizeof(label),"Mouse %.0f events/s | burst %llu | age %.2f/%.2f ms | pump max %.2f ms",m.events_per_second,static_cast<unsigned long long>(m.peak_burst),m.average_age_ms,m.max_age_ms,m.max_pump_ms);hud.overlay_begin(width,height,100);hud.overlay_rect(16,40,730,32,{.02f,.02f,.025f,.85f});hud.overlay_text(24,48,m.seconds?label:"Mouse diagnostics: move continuously for a sample",14,{1,1,1,1});hud.overlay_end(width,height);}
+                if(playback&&!chat.active&&!video_capture&&!director_job)native::draw_replay_controls(hud,width,height,native::HudGeometry(width,height,100).scale,replay_controls,curr.tick,playback_info.value("totalTicks",0u),playback_info.at("settings").value("tickInterval",dt),playback_paused,playback_speed,replay_camera.mode);
+                if(chat.active||preferences.at("hud").get<bool>())hud.draw_chat_overlay(width,height,chat.visible(epoch_ms()/1000.),chat.input,chat.composition,chat.suggestions,chat.active,chat.scroll_offset(),preferences.at("hudScale").get<float>(),&chat,chat.viewport(epoch_ms()/1000.));
+                std::vector<std::string> panel;
+                if((held_action("scoreboard")||show_scores)&&!chat.active){
+                    for(auto player:room.scoreboard(steady_seconds)){
+                        if(player.value("slot",256u)==room.self){player["seconds"]=run_state.seconds;player["style"]=active_style;player["track"]=active_track;}
+                        char time[48];std::snprintf(time,sizeof(time),"%.3fs",player.value("seconds",0.));
+                        std::string line=player.value("name",std::string("Player"))+"  "+player.value("style",std::string(""))+"  "+time;
+                        if(player.value("track",0))line+="  B"+std::to_string(player.value("track",0));
+                        if(player.contains("ping")&&player["ping"].is_number())line+="  "+std::to_string(player["ping"].get<int>())+"ms";
+                        if(player.contains("spec")&&!player["spec"].is_null())line+="  SPECTATOR";panel.push_back(line);
+                    }
+                    if(panel.empty())panel.push_back("Solo | "+replay_player+" | "+active_style);
+                    hud.draw_panel(width,height,room.id.empty()?"Players":"Players - "+room.id,panel,preferences.at("hudScale").get<float>());
+                }else if(gun_menu.open&&!chat.active)hud.draw_panel(width,height,gun_menu.title(),gun_menu.rows(weapon_context()),preferences.at("hudScale").get<float>());
+                else if(!room.vote.is_null()&&room.vote.contains("options")&&!chat.active){
+                    unsigned number=0;for(const auto &option:room.vote.at("options")){std::string label=option.value("map",std::string());if(label.empty())label="Extend "+std::to_string(option.value("minutes",0))+" minutes";panel.push_back(std::to_string(++number)+". "+label);}
+                    hud.draw_panel(width,height,"Map vote",panel,preferences.at("hudScale").get<float>());
+                }
+                const auto change=room.change_notice(epoch_ms());if(!change.empty())hud.draw_overlay(width,height,{change},"","",{},false,preferences.at("hudScale").get<float>());
+            }
         }
+        // Capture only the finished gameplay framebuffer, before any menu/backdrop layer.
+        if(pending_vault_capture){const auto pending=*pending_vault_capture;pending_vault_capture.reset();if(renderer&&pending.second==map_id&&width>0&&height>0){try{run_vault.attach(pending.first,backbuffer_png(gl,width,height));refresh_replays();}catch(const std::exception&e){std::cerr<<"Local PB screenshot: "<<e.what()<<'\n';score_notice="Replay saved; optional screenshot could not be saved";}}}
         // Separate GTK windows and screenshot runs cannot show the SDL layer:
         // they get one bounded PNG of the still pose instead of a live scene.
         const bool backdrop_live=menu&&menu->supports_backdrop()&&opt.menu_smoke.empty();
@@ -1187,6 +1662,18 @@ int run(const Options &opt) {
                 {"weapon",weapon.active},{"silenced",weapon.silencer!=0}};
             menu->evaluate_js("window.bunnyhopNativeMenu?.onRoomPose?.("+pose.dump()+")");room_events=0;room_time=now;
         }
+        if(!opt.video_smoke.empty()){
+            const auto result=video_state();const auto phase=result.value("state",std::string());
+            if(video_smoke_stage==0&&phase=="capturing"&&result.value("frames",0)>=3){cancel_video();refresh_playback_pose();check_video_restored();video_smoke_stage=1;}
+            else if(video_smoke_stage==1&&!video_encoder.busy()){check_video_restored();video_available.encoder="/bunnyhop-test-missing-encoder";native::VideoOptions options;options.to=100;request_video(options);video_smoke_stage=2;}
+            else if(video_smoke_stage==2&&phase=="error"&&!video_encoder.busy()){check_video_restored();video_available.encoder=video_smoke_encoder;native::VideoOptions options;options.to=200;options.camera="auto";options.music="game-airstrafe";options.music_offset=12;
+                // Smoke-only soundtrack. Regular exports keep the explicit No music default.
+                preferences["musicPack"]="default";preferences["muted"]=false;preferences["muteMusic"]=false;preferences["musicVolume"]=1.;preferences["volume"]=.65;
+                request_video(options);video_smoke_stage=3;}
+            else if(video_smoke_stage==3&&phase=="completed"){check_video_restored();auto proof=result;proof["restoredTick"]=curr.tick;proof["restoredFreeCamera"]=true;proof["cancelRestored"]=true;proof["encoderFailureRestored"]=true;std::ofstream(std::filesystem::path(opt.video_smoke)/"result.json")<<proof.dump(2)<<'\n';running=false;}
+            else if(video_smoke_stage==3&&(phase=="error"||phase=="canceled"))throw std::runtime_error("Video smoke failed: "+result.dump());
+            else if(Clock::now()-video_smoke_started>std::chrono::minutes(3))throw std::runtime_error("Video smoke timed out");
+        }
         ++frame; ++title_frames;if(simulation_active&&!playback)input.frame();
         audio.set_music_scene(bool(core)&&(!menu||!menu->visible()));
         audio.pump();  // advances the music playlist; decoding cannot run on the audio thread
@@ -1196,26 +1683,33 @@ int run(const Options &opt) {
         // State first: the menu accepts a backdrop only for its current or
         // requested map, so it must already know a newly loaded map. Scripts
         // run in the order they are queued.
+        if(menu&&menu_ready&&now-activity_time>=std::chrono::seconds(1)&&!opt.frames&&opt.runtime_smoke.empty()){menu->evaluate_js("window.bunnyhopNativeMenu?.onActivity?.("+activity.sample(activity_active).dump()+")");activity_time=now;}
         if(menu && menu_ready && (menu->visible()||!room.id.empty()) && (now-ui_time>=std::chrono::milliseconds(200) || !backdrop_call.empty() || (!opt.menu_smoke.empty() && (renderer||opt.menu_home_smoke) && !download.valid() && !smoke_requested))) {
-            std::string progress;{std::lock_guard lock(progress_mutex);progress=loading;}
+            std::string progress;nlohmann::json progress_detail;{std::lock_guard lock(progress_mutex);progress=loading;progress_detail=load_progress;}
             // The game window, as the web reports its page: logical size plus pixel density.
             int window_w=0,window_h=0;SDL_GetWindowSize(window.get(),&window_w,&window_h);
             const nlohmann::json client_info={{"version",identity.value("version",std::string("local"))},{"build",identity.value("build",std::string("bunnyhop-native/local"))},
                 {"gpu",gpu_renderer},{"viewport",{window_w,window_h}},{"dpr",std::round(SDL_GetWindowPixelDensity(window.get())*100)/100}};
-            const nlohmann::json state={{"engine","native"},{"renderer","opengl"},{"client",client_info},{"map",map_id},{"loading",progress},{"error",error},
+            nlohmann::json state={{"engine","native"},{"renderer","opengl"},{"client",client_info},{"map",map_id},{"loading",progress},{"loadProgress",progress_detail},{"error",error},
                 {"sensitivity",input.sensitivity},{"paused",!captured},{"recordingPath",record_path},
                 {"player",{{"map",map_id},{"style",playback?playback_info.value("style",active_style):active_style},{"track",playback?playback_info.value("track",active_track):active_track},{"mode",playback?"replay":!room.id.empty()?"multiplayer":!gauntlet_id.empty()?"gauntlet":(practice.active||tutorial_practice())?"practice":"solo"},{"practice",practice.active||map_id==tutorial_map}}},
-                {"practice",{{"available",practice_reason().empty()},{"unavailable",practice_reason().empty()?nlohmann::json(nullptr):nlohmann::json(practice_reason())},{"mode",practice.mode},{"active",practice.active},{"tool",practice.tool.empty()?nlohmann::json(nullptr):nlohmann::json(practice.tool)},{"noclip",practice.noclip},{"menuOpen",practice.menu_open},{"count",practice.checkpoints.size()},{"current",practice.number()},{"keepVelocity",preferences.at("practiceKeepVelocity")}}},
+                {"practice",{{"available",practice_reason().empty()},{"unavailable",practice_reason().empty()?nlohmann::json(nullptr):nlohmann::json(practice_reason())},{"mode",practice.mode},{"active",practice.active},{"thirdPerson",third_person&&!playback&&!room.spectator_target},{"tool",practice.tool.empty()?nlohmann::json(nullptr):nlohmann::json(practice.tool)},{"noclip",practice.noclip},{"menuOpen",practice.menu_open},{"count",practice.checkpoints.size()},{"current",practice.number()},{"keepVelocity",preferences.at("practiceKeepVelocity")}}},
                 {"gauntlet",{{"id",gauntlet_id.empty()?nlohmann::json(nullptr):nlohmann::json(gauntlet_id)},{"map",gauntlet_map.empty()?nlohmann::json(nullptr):nlohmann::json(gauntlet_map)}}},
                 {"style",selected_style},{"track",active_track},{"settings",preferences},{"replays",replay_list},
                 {"room",{{"id",room.id},{"map",room.map},{"spectating",spectator.has_value()},{"target",spectator?nlohmann::json(*spectator):nlohmann::json(nullptr)},{"raceFrozen",room_modes.frozen()}}},
                 {"tutorial",tutorial?tutorial->stateJSON():nlohmann::json{{"active",false},{"lesson","jump"},{"completed",tutorial_completed}}},
-                {"playback",{{"active",playback},{"id",playback_id},{"tick",curr.tick},{"totalTicks",playback?playback_info.value("totalTicks",0u):0u},{"paused",playback_paused},{"speed",playback_speed}}},
+                {"playback",{{"tickInterval",playback?playback_info.at("settings").value("tickInterval",dt):dt},{"active",playback},{"id",playback_id},{"tick",curr.tick},{"totalTicks",playback?playback_info.value("totalTicks",0u):0u},{"paused",playback_paused},{"speed",playback_speed},{"camera",replay_camera.mode},{"seconds",run_state.seconds}}},
                 {"ghost",{{"enabled",ghost_enabled},{"id",ghost_id},{"name",ghost_info.is_object()?ghost_info.value("player",std::string("Ghost")):"Ghost"}}},
-                {"timer",{{"status",run_state.status},{"seconds",run_state.seconds},{"jumps",run_state.jumps},{"strafes",run_state.strafes},{"sync",run_state.sync_percent}}},
-                {"music",audio.music_state()},
+                {"runGeneration",run_generation},{"timer",{{"status",run_state.status},{"seconds",run_state.seconds},{"jumps",run_state.jumps},{"strafes",run_state.strafes},{"sync",run_state.sync_percent}}},
+                {"videoExport",video_state()},{"music",audio.music_state()},{"audio",audio.status()},
                 {"discord",{{"state",discord_allowed?discord.state:"disabled"},{"message",discord.message}}},
                 {"backdrop",backdrop?backdrop->state(backdrop_source):nlohmann::json{{"status","idle"},{"map",""},{"renderer","native-bsp"},{"kind","tour"},{"shots",0},{"source",""},{"error",""}}}};
+            state["ghosts"]=nlohmann::json::array();for(unsigned slot=0;slot<4;slot++){const auto &g=ghost_slots[slot];if(g.handle)state["ghosts"].push_back({{"slot",slot},{"id",g.id},{"name",g.info.value("player",std::string("Ghost"))},{"enabled",g.enabled},{"map",map_id},{"style",g.info.value("style",std::string("autohop"))},{"track",g.info.value("track",0u)}});}
+            const auto &m=mouse_diagnostics.last;
+            const int sdl_version=SDL_GetVersion();
+            const nlohmann::json mouse_state={{"active",mouse_diagnostics.active},{"seconds",m.seconds},{"eventsPerSecond",m.events_per_second},{"events",m.events},{"peakBurst",m.peak_burst},{"averageAgeMs",m.average_age_ms},{"maxAgeMs",m.max_age_ms},{"maxPumpMs",m.max_pump_ms},{"relative",SDL_GetWindowRelativeMouseMode(window.get())},{"systemScaling",SDL_GetHintBoolean(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE,false)},{"sdl",std::to_string(SDL_VERSIONNUM_MAJOR(sdl_version))+"."+std::to_string(SDL_VERSIONNUM_MINOR(sdl_version))+"."+std::to_string(SDL_VERSIONNUM_MICRO(sdl_version))}};
+            menu->evaluate_js("window.dispatchEvent(new CustomEvent('bunnyhop:mouse-diagnostics',{detail:"+mouse_state.dump()+"}))");
+            const auto update_state=updater.state().dump();if(update_state!=last_update){menu->evaluate_js("window.dispatchEvent(new CustomEvent('bunnyhop:update',{detail:"+update_state+"}))");last_update=update_state;}
             const auto encoded=state.dump();
             if(encoded!=last_ui) {menu->evaluate_js("window.bunnyhopNativeMenu?.onState("+encoded+")");last_ui=encoded;}
             ui_time=now;
@@ -1291,6 +1785,7 @@ int run(const Options &opt) {
             if(spent<target)SDL_DelayNS(uint64_t((target-spent)*1e9));
         }
     }
+    save_window();
     if(core) bh_record_end(core.get());
     capture(false);
     std::cout << "Rendered " << frame << " frames; simulation tick " << curr.tick << "; position " << curr.position[0] << ' ' << curr.position[1] << ' ' << curr.position[2] << (renderer?"; exposure "+std::to_string(renderer->exposure()):std::string()) << '\n';
@@ -1312,7 +1807,7 @@ int main(int argc,char **argv) {
                          "  [--tutorial jump|strafe|speed|final] [--tutorial-demo] (tutorial map only)\n"
                          "  [--menu-smoke OUTPUT_PREFIX] (with --online-map; live API reads only, no scores)\n"
                          "  [--menu-home-smoke OUTPUT_PREFIX] (home menu over the real map tour backdrop; no gameplay or scores)\n"
-                         "No map: open the map browser. WASD move, Space/wheel jump, Ctrl crouch, E use, R restart, Esc menu, F10 quit.\n"
+                         "No map: open the map browser. WASD move, Space/wheel jump, Ctrl crouch, E use, R restart, Esc menu, F10 Settings, Alt+Enter fullscreen.\n"
                          "Frame-limited mode simulates one fixed tick per rendered frame; screenshot implies --frames 1.\n";
             return 0;
         }

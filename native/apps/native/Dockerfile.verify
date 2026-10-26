@@ -4,7 +4,7 @@ ARG WITH_CLIENT=0
 RUN apt-get update && apt-get install -y --no-install-recommends \
       cmake ninja-build g++ pkg-config ca-certificates libcurl4-openssl-dev \
     && if [ "$WITH_CLIENT" = 1 ]; then \
-      apt-get install -y --no-install-recommends libsdl3-dev libgl1-mesa-dev \
+      apt-get install -y --no-install-recommends libsdl3-dev libgl1-mesa-dev libpango1.0-dev fonts-dejavu-core fonts-noto-core \
         xvfb xauth mesa-utils; \
     fi \
     && rm -rf /var/lib/apt/lists/*

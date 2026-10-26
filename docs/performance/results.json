@@ -1,0 +1,1437 @@
+{
+  "schema": 1,
+  "createdAt": "2026-10-26T17:46:17.472351+00:00",
+  "hardware": {
+    "machine": "MacBook Pro Mac17,9",
+    "cpu": "Apple M5 Pro, 15 CPU cores",
+    "gpu": "Apple M5 Pro, 16 GPU cores",
+    "memoryGB": 24,
+    "os": "macOS 27.0.1 (26A434)",
+    "power": "AC, battery charged",
+    "chartLabel": "Apple M5 Pro \u00b7 macOS 27.0.1"
+  },
+  "native": {
+    "head": "f9285b39c75ed3e5d6cc82a977f27176eb179ff9",
+    "uncommittedChanges": true,
+    "binarySHA256": "661ebe3bde0dadfc00bc601662235b5dc96bcddb6ab1dcccd8381fc15e7a57ac",
+    "build": "CMake Release, AppleClang, OpenGL 4.1"
+  },
+  "web": {
+    "build": {
+      "createdAt": "2026-10-26T17:37:05.512Z",
+      "mode": "production",
+      "instrumentation": "Existing main.ts renderer/weapon hooks enabled; core floorWeapons helper exposed",
+      "mainSHA256": "cd8938c5fd0a888a8ded183435a219097206dee2347e437c6bcaa05b632b2490"
+    },
+    "backend": "Chromium headless, ANGLE Metal"
+  },
+  "method": {
+    "framesPerRun": 5000,
+    "warmupFrames": 500,
+    "repetitions": 3,
+    "scene": "fixed camera, matching BSP/content bytes, Source FOV90, classic/simple water, floor weapons included, no players/viewmodel/HUD/zones",
+    "clock": "visual time increments by 1/60 per frame, simulation does not advance",
+    "synchronization": "glFinish + one-pixel RGBA readback after every warmup/measured frame",
+    "throughput": "1000 / mean synchronized wall milliseconds",
+    "chart": "median of three run throughputs; points and whiskers show all runs/min-max, not confidence intervals",
+    "excluded": [
+      "simulation",
+      "input",
+      "network",
+      "menu",
+      "HUD",
+      "browser compositor",
+      "window presentation",
+      "image encoding",
+      "asset loading"
+    ],
+    "caveats": [
+      "Different GL drivers and material implementations; not pixel-identical",
+      "Not displayed gameplay FPS or input latency",
+      "Four fixed views on one Mac, not Windows/Linux qualification",
+      "No CPU/GPU frequency or background desktop control"
+    ]
+  },
+  "runs": [
+    {
+      "engine": "native",
+      "map": "bhop_lol_aero",
+      "height": 1080,
+      "repeat": 1,
+      "file": "bhop_lol_aero-1080p-r1-native.json",
+      "fps": 1265.759508370744,
+      "sha256": "0fa71a0efb653a56b32b66fb9d27204ac8be38b83ce341eb95929c7fd0a3b00e",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.7900394928,
+        "p50": 0.783,
+        "p95": 0.843375,
+        "p99": 0.944666,
+        "max": 1.865709
+      },
+      "submissionMs": {
+        "mean": 0.1821459264,
+        "p95": 0.192042
+      },
+      "eye": [
+        -2834.0,
+        -2811.0,
+        65.0
+      ],
+      "yaw": 50.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": null
+      },
+      "settings": {
+        "effects": true,
+        "floorWeapons": true,
+        "fovDesired": 90,
+        "sourceLook": false,
+        "triggers": false,
+        "viewmodel": false,
+        "water": "simple",
+        "zones": false
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "web",
+      "map": "bhop_lol_aero",
+      "height": 1080,
+      "repeat": 1,
+      "file": "bhop_lol_aero-1080p-r1-web.json",
+      "fps": 1016.5700925017188,
+      "sha256": "0fa71a0efb653a56b32b66fb9d27204ac8be38b83ce341eb95929c7fd0a3b00e",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.9837000000059605,
+        "p50": 1,
+        "p95": 1.0999999940395355,
+        "p99": 1.2000000178813934,
+        "max": 3.800000011920929
+      },
+      "submissionMs": {
+        "mean": 0.20835999966859817,
+        "p95": 0.30000001192092896
+      },
+      "eye": [
+        -2834.0,
+        -2811.0,
+        65.0
+      ],
+      "yaw": 50.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": 0,
+        "presentCount": 0,
+        "meshes": 0,
+        "visibleMeshes": 0,
+        "rootVisible": true,
+        "rootInScene": true
+      },
+      "settings": {
+        "preset": "classic",
+        "potato": false,
+        "waterReflections": false,
+        "fullscreen": false,
+        "menuBackground": "off",
+        "resolutionScale": 1,
+        "antialias": false,
+        "anisotropy": 8,
+        "brightness": 1,
+        "gamma": 1,
+        "vibrance": 1,
+        "fullbright": false,
+        "flashlight": false,
+        "fpsLimit": 0,
+        "uncapped": false,
+        "mapProfiles": false,
+        "materialResponse": false,
+        "localLights": false,
+        "dynamicShadows": false,
+        "dynamicGI": false,
+        "tracedGI": false,
+        "clouds": false,
+        "skyMode": "map",
+        "lightingSource": "map"
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "native",
+      "map": "bhop_xcsource",
+      "height": 1080,
+      "repeat": 1,
+      "file": "bhop_xcsource-1080p-r1-native.json",
+      "fps": 3233.3431596571963,
+      "sha256": "9f294938470134003056b05c4dfa6092296a62ef6eaf4e294cbba6f71a847dd5",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.3092774106,
+        "p50": 0.310208,
+        "p95": 0.321459,
+        "p99": 0.340959,
+        "max": 1.04725
+      },
+      "submissionMs": {
+        "mean": 0.0316132346,
+        "p95": 0.035542
+      },
+      "eye": [
+        3259.47998046875,
+        310.5880126953125,
+        1537.0
+      ],
+      "yaw": 180.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": null
+      },
+      "settings": {
+        "effects": true,
+        "floorWeapons": true,
+        "fovDesired": 90,
+        "sourceLook": false,
+        "triggers": false,
+        "viewmodel": false,
+        "water": "simple",
+        "zones": false
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "web",
+      "map": "bhop_xcsource",
+      "height": 1080,
+      "repeat": 1,
+      "file": "bhop_xcsource-1080p-r1-web.json",
+      "fps": 1577.8345798642004,
+      "sha256": "9f294938470134003056b05c4dfa6092296a62ef6eaf4e294cbba6f71a847dd5",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.6337799999833107,
+        "p50": 0.5999999940395355,
+        "p95": 0.800000011920929,
+        "p99": 1.5,
+        "max": 2.4000000059604645
+      },
+      "submissionMs": {
+        "mean": 0.05960000002980232,
+        "p95": 0.10000002384185791
+      },
+      "eye": [
+        3259.47998046875,
+        310.5880126953125,
+        1537.0
+      ],
+      "yaw": 180.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": 0,
+        "presentCount": 0,
+        "meshes": 0,
+        "visibleMeshes": 0,
+        "rootVisible": true,
+        "rootInScene": true
+      },
+      "settings": {
+        "preset": "classic",
+        "potato": false,
+        "waterReflections": false,
+        "fullscreen": false,
+        "menuBackground": "off",
+        "resolutionScale": 1,
+        "antialias": false,
+        "anisotropy": 8,
+        "brightness": 1,
+        "gamma": 1,
+        "vibrance": 1,
+        "fullbright": false,
+        "flashlight": false,
+        "fpsLimit": 0,
+        "uncapped": false,
+        "mapProfiles": false,
+        "materialResponse": false,
+        "localLights": false,
+        "dynamicShadows": false,
+        "dynamicGI": false,
+        "tracedGI": false,
+        "clouds": false,
+        "skyMode": "map",
+        "lightingSource": "map"
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "native",
+      "map": "bh_aztec",
+      "height": 1080,
+      "repeat": 1,
+      "file": "bh_aztec-1080p-r1-native.json",
+      "fps": 1379.5275235602007,
+      "sha256": "c9cff2c33ea13f5673aa6aadf0826ce2bd146fca41f82c2ba75ab7e4f478bb35",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.7248858634,
+        "p50": 0.730708,
+        "p95": 0.787,
+        "p99": 0.845417,
+        "max": 1.413875
+      },
+      "submissionMs": {
+        "mean": 0.0652043568,
+        "p95": 0.069083
+      },
+      "eye": [
+        53.653900146484375,
+        -141.0,
+        144.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": null
+      },
+      "settings": {
+        "effects": true,
+        "floorWeapons": true,
+        "fovDesired": 90,
+        "sourceLook": false,
+        "triggers": false,
+        "viewmodel": false,
+        "water": "simple",
+        "zones": false
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "web",
+      "map": "bh_aztec",
+      "height": 1080,
+      "repeat": 1,
+      "file": "bh_aztec-1080p-r1-web.json",
+      "fps": 1290.2226924129013,
+      "sha256": "c9cff2c33ea13f5673aa6aadf0826ce2bd146fca41f82c2ba75ab7e4f478bb35",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.7750600000143051,
+        "p50": 0.7999999821186066,
+        "p95": 0.9000000059604645,
+        "p99": 1,
+        "max": 1.4000000059604645
+      },
+      "submissionMs": {
+        "mean": 0.07996000002622604,
+        "p95": 0.19999998807907104
+      },
+      "eye": [
+        53.653900146484375,
+        -141.0,
+        144.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": 10,
+        "presentCount": 10,
+        "meshes": 10,
+        "visibleMeshes": 10,
+        "rootVisible": true,
+        "rootInScene": true
+      },
+      "settings": {
+        "preset": "classic",
+        "potato": false,
+        "waterReflections": false,
+        "fullscreen": false,
+        "menuBackground": "off",
+        "resolutionScale": 1,
+        "antialias": false,
+        "anisotropy": 8,
+        "brightness": 1,
+        "gamma": 1,
+        "vibrance": 1,
+        "fullbright": false,
+        "flashlight": false,
+        "fpsLimit": 0,
+        "uncapped": false,
+        "mapProfiles": false,
+        "materialResponse": false,
+        "localLights": false,
+        "dynamicShadows": false,
+        "dynamicGI": false,
+        "tracedGI": false,
+        "clouds": false,
+        "skyMode": "map",
+        "lightingSource": "map"
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "native",
+      "map": "bhop_bfur",
+      "height": 1080,
+      "repeat": 1,
+      "file": "bhop_bfur-1080p-r1-native.json",
+      "fps": 3135.350186804603,
+      "sha256": "af51680e1184520b473062061fa429f1677339cae1cf025fd27903f5da2935b3",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.3189436396,
+        "p50": 0.319083,
+        "p95": 0.329875,
+        "p99": 0.363875,
+        "max": 1.211959
+      },
+      "submissionMs": {
+        "mean": 0.0364715644,
+        "p95": 0.040917
+      },
+      "eye": [
+        4448.0,
+        1856.0,
+        592.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": null
+      },
+      "settings": {
+        "effects": true,
+        "floorWeapons": true,
+        "fovDesired": 90,
+        "sourceLook": false,
+        "triggers": false,
+        "viewmodel": false,
+        "water": "simple",
+        "zones": false
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "web",
+      "map": "bhop_bfur",
+      "height": 1080,
+      "repeat": 1,
+      "file": "bhop_bfur-1080p-r1-web.json",
+      "fps": 2538.973239245113,
+      "sha256": "af51680e1184520b473062061fa429f1677339cae1cf025fd27903f5da2935b3",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.39385999999642374,
+        "p50": 0.4000000059604645,
+        "p95": 0.5,
+        "p99": 0.6000000238418579,
+        "max": 1.5
+      },
+      "submissionMs": {
+        "mean": 0.03690000004768371,
+        "p95": 0.10000002384185791
+      },
+      "eye": [
+        4448.0,
+        1856.0,
+        592.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": 0,
+        "presentCount": 0,
+        "meshes": 0,
+        "visibleMeshes": 0,
+        "rootVisible": true,
+        "rootInScene": true
+      },
+      "settings": {
+        "preset": "classic",
+        "potato": false,
+        "waterReflections": false,
+        "fullscreen": false,
+        "menuBackground": "off",
+        "resolutionScale": 1,
+        "antialias": false,
+        "anisotropy": 8,
+        "brightness": 1,
+        "gamma": 1,
+        "vibrance": 1,
+        "fullbright": false,
+        "flashlight": false,
+        "fpsLimit": 0,
+        "uncapped": false,
+        "mapProfiles": false,
+        "materialResponse": false,
+        "localLights": false,
+        "dynamicShadows": false,
+        "dynamicGI": false,
+        "tracedGI": false,
+        "clouds": false,
+        "skyMode": "map",
+        "lightingSource": "map"
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "web",
+      "map": "bhop_lol_aero",
+      "height": 1080,
+      "repeat": 2,
+      "file": "bhop_lol_aero-1080p-r2-web.json",
+      "fps": 1008.8984846453967,
+      "sha256": "0fa71a0efb653a56b32b66fb9d27204ac8be38b83ce341eb95929c7fd0a3b00e",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.9911799999892712,
+        "p50": 1,
+        "p95": 1.100000023841858,
+        "p99": 1.399999976158142,
+        "max": 3.4000000059604645
+      },
+      "submissionMs": {
+        "mean": 0.2090199994802475,
+        "p95": 0.30000001192092896
+      },
+      "eye": [
+        -2834.0,
+        -2811.0,
+        65.0
+      ],
+      "yaw": 50.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": 0,
+        "presentCount": 0,
+        "meshes": 0,
+        "visibleMeshes": 0,
+        "rootVisible": true,
+        "rootInScene": true
+      },
+      "settings": {
+        "preset": "classic",
+        "potato": false,
+        "waterReflections": false,
+        "fullscreen": false,
+        "menuBackground": "off",
+        "resolutionScale": 1,
+        "antialias": false,
+        "anisotropy": 8,
+        "brightness": 1,
+        "gamma": 1,
+        "vibrance": 1,
+        "fullbright": false,
+        "flashlight": false,
+        "fpsLimit": 0,
+        "uncapped": false,
+        "mapProfiles": false,
+        "materialResponse": false,
+        "localLights": false,
+        "dynamicShadows": false,
+        "dynamicGI": false,
+        "tracedGI": false,
+        "clouds": false,
+        "skyMode": "map",
+        "lightingSource": "map"
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "native",
+      "map": "bhop_lol_aero",
+      "height": 1080,
+      "repeat": 2,
+      "file": "bhop_lol_aero-1080p-r2-native.json",
+      "fps": 1262.5258934118347,
+      "sha256": "0fa71a0efb653a56b32b66fb9d27204ac8be38b83ce341eb95929c7fd0a3b00e",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.792062963,
+        "p50": 0.784709,
+        "p95": 0.846583,
+        "p99": 0.931458,
+        "max": 1.760833
+      },
+      "submissionMs": {
+        "mean": 0.18331923320000001,
+        "p95": 0.197875
+      },
+      "eye": [
+        -2834.0,
+        -2811.0,
+        65.0
+      ],
+      "yaw": 50.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": null
+      },
+      "settings": {
+        "effects": true,
+        "floorWeapons": true,
+        "fovDesired": 90,
+        "sourceLook": false,
+        "triggers": false,
+        "viewmodel": false,
+        "water": "simple",
+        "zones": false
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "web",
+      "map": "bhop_xcsource",
+      "height": 1080,
+      "repeat": 2,
+      "file": "bhop_xcsource-1080p-r2-web.json",
+      "fps": 1708.2336862987231,
+      "sha256": "9f294938470134003056b05c4dfa6092296a62ef6eaf4e294cbba6f71a847dd5",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.5854000000238418,
+        "p50": 0.5999999940395355,
+        "p95": 0.7000000178813934,
+        "p99": 0.7000000178813934,
+        "max": 1
+      },
+      "submissionMs": {
+        "mean": 0.05884000008106232,
+        "p95": 0.10000002384185791
+      },
+      "eye": [
+        3259.47998046875,
+        310.5880126953125,
+        1537.0
+      ],
+      "yaw": 180.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": 0,
+        "presentCount": 0,
+        "meshes": 0,
+        "visibleMeshes": 0,
+        "rootVisible": true,
+        "rootInScene": true
+      },
+      "settings": {
+        "preset": "classic",
+        "potato": false,
+        "waterReflections": false,
+        "fullscreen": false,
+        "menuBackground": "off",
+        "resolutionScale": 1,
+        "antialias": false,
+        "anisotropy": 8,
+        "brightness": 1,
+        "gamma": 1,
+        "vibrance": 1,
+        "fullbright": false,
+        "flashlight": false,
+        "fpsLimit": 0,
+        "uncapped": false,
+        "mapProfiles": false,
+        "materialResponse": false,
+        "localLights": false,
+        "dynamicShadows": false,
+        "dynamicGI": false,
+        "tracedGI": false,
+        "clouds": false,
+        "skyMode": "map",
+        "lightingSource": "map"
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "native",
+      "map": "bhop_xcsource",
+      "height": 1080,
+      "repeat": 2,
+      "file": "bhop_xcsource-1080p-r2-native.json",
+      "fps": 3253.2271243685523,
+      "sha256": "9f294938470134003056b05c4dfa6092296a62ef6eaf4e294cbba6f71a847dd5",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.3073870842,
+        "p50": 0.309,
+        "p95": 0.319333,
+        "p99": 0.347291,
+        "max": 0.966833
+      },
+      "submissionMs": {
+        "mean": 0.029993643,
+        "p95": 0.033625
+      },
+      "eye": [
+        3259.47998046875,
+        310.5880126953125,
+        1537.0
+      ],
+      "yaw": 180.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": null
+      },
+      "settings": {
+        "effects": true,
+        "floorWeapons": true,
+        "fovDesired": 90,
+        "sourceLook": false,
+        "triggers": false,
+        "viewmodel": false,
+        "water": "simple",
+        "zones": false
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "web",
+      "map": "bh_aztec",
+      "height": 1080,
+      "repeat": 2,
+      "file": "bh_aztec-1080p-r2-web.json",
+      "fps": 1295.0683796264384,
+      "sha256": "c9cff2c33ea13f5673aa6aadf0826ce2bd146fca41f82c2ba75ab7e4f478bb35",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.7721599999904633,
+        "p50": 0.7999999821186066,
+        "p95": 0.9000000059604645,
+        "p99": 1,
+        "max": 1.300000011920929
+      },
+      "submissionMs": {
+        "mean": 0.07850000014901161,
+        "p95": 0.19999998807907104
+      },
+      "eye": [
+        53.653900146484375,
+        -141.0,
+        144.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": 10,
+        "presentCount": 10,
+        "meshes": 10,
+        "visibleMeshes": 10,
+        "rootVisible": true,
+        "rootInScene": true
+      },
+      "settings": {
+        "preset": "classic",
+        "potato": false,
+        "waterReflections": false,
+        "fullscreen": false,
+        "menuBackground": "off",
+        "resolutionScale": 1,
+        "antialias": false,
+        "anisotropy": 8,
+        "brightness": 1,
+        "gamma": 1,
+        "vibrance": 1,
+        "fullbright": false,
+        "flashlight": false,
+        "fpsLimit": 0,
+        "uncapped": false,
+        "mapProfiles": false,
+        "materialResponse": false,
+        "localLights": false,
+        "dynamicShadows": false,
+        "dynamicGI": false,
+        "tracedGI": false,
+        "clouds": false,
+        "skyMode": "map",
+        "lightingSource": "map"
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "native",
+      "map": "bh_aztec",
+      "height": 1080,
+      "repeat": 2,
+      "file": "bh_aztec-1080p-r2-native.json",
+      "fps": 1395.1512874208859,
+      "sha256": "c9cff2c33ea13f5673aa6aadf0826ce2bd146fca41f82c2ba75ab7e4f478bb35",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.7167681448,
+        "p50": 0.717667,
+        "p95": 0.781541,
+        "p99": 0.80875,
+        "max": 1.168625
+      },
+      "submissionMs": {
+        "mean": 0.061784179599999996,
+        "p95": 0.069916
+      },
+      "eye": [
+        53.653900146484375,
+        -141.0,
+        144.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": null
+      },
+      "settings": {
+        "effects": true,
+        "floorWeapons": true,
+        "fovDesired": 90,
+        "sourceLook": false,
+        "triggers": false,
+        "viewmodel": false,
+        "water": "simple",
+        "zones": false
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "web",
+      "map": "bhop_bfur",
+      "height": 1080,
+      "repeat": 2,
+      "file": "bhop_bfur-1080p-r2-web.json",
+      "fps": 2727.768685304194,
+      "sha256": "af51680e1184520b473062061fa429f1677339cae1cf025fd27903f5da2935b3",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.3665999999880791,
+        "p50": 0.4000000059604645,
+        "p95": 0.5,
+        "p99": 0.5,
+        "max": 0.7000000178813934
+      },
+      "submissionMs": {
+        "mean": 0.03152000005245209,
+        "p95": 0.10000002384185791
+      },
+      "eye": [
+        4448.0,
+        1856.0,
+        592.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": 0,
+        "presentCount": 0,
+        "meshes": 0,
+        "visibleMeshes": 0,
+        "rootVisible": true,
+        "rootInScene": true
+      },
+      "settings": {
+        "preset": "classic",
+        "potato": false,
+        "waterReflections": false,
+        "fullscreen": false,
+        "menuBackground": "off",
+        "resolutionScale": 1,
+        "antialias": false,
+        "anisotropy": 8,
+        "brightness": 1,
+        "gamma": 1,
+        "vibrance": 1,
+        "fullbright": false,
+        "flashlight": false,
+        "fpsLimit": 0,
+        "uncapped": false,
+        "mapProfiles": false,
+        "materialResponse": false,
+        "localLights": false,
+        "dynamicShadows": false,
+        "dynamicGI": false,
+        "tracedGI": false,
+        "clouds": false,
+        "skyMode": "map",
+        "lightingSource": "map"
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "native",
+      "map": "bhop_bfur",
+      "height": 1080,
+      "repeat": 2,
+      "file": "bhop_bfur-1080p-r2-native.json",
+      "fps": 3169.0666260694866,
+      "sha256": "af51680e1184520b473062061fa429f1677339cae1cf025fd27903f5da2935b3",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.3155503238,
+        "p50": 0.315875,
+        "p95": 0.327375,
+        "p99": 0.36025,
+        "max": 1.016333
+      },
+      "submissionMs": {
+        "mean": 0.0352691576,
+        "p95": 0.0405
+      },
+      "eye": [
+        4448.0,
+        1856.0,
+        592.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": null
+      },
+      "settings": {
+        "effects": true,
+        "floorWeapons": true,
+        "fovDesired": 90,
+        "sourceLook": false,
+        "triggers": false,
+        "viewmodel": false,
+        "water": "simple",
+        "zones": false
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "native",
+      "map": "bhop_lol_aero",
+      "height": 1080,
+      "repeat": 3,
+      "file": "bhop_lol_aero-1080p-r3-native.json",
+      "fps": 1238.9976261206918,
+      "sha256": "0fa71a0efb653a56b32b66fb9d27204ac8be38b83ce341eb95929c7fd0a3b00e",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.8071040484,
+        "p50": 0.784875,
+        "p95": 0.90825,
+        "p99": 1.027417,
+        "max": 2.282292
+      },
+      "submissionMs": {
+        "mean": 0.1878988016,
+        "p95": 0.21825
+      },
+      "eye": [
+        -2834.0,
+        -2811.0,
+        65.0
+      ],
+      "yaw": 50.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": null
+      },
+      "settings": {
+        "effects": true,
+        "floorWeapons": true,
+        "fovDesired": 90,
+        "sourceLook": false,
+        "triggers": false,
+        "viewmodel": false,
+        "water": "simple",
+        "zones": false
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "web",
+      "map": "bhop_lol_aero",
+      "height": 1080,
+      "repeat": 3,
+      "file": "bhop_lol_aero-1080p-r3-web.json",
+      "fps": 1011.797559558931,
+      "sha256": "0fa71a0efb653a56b32b66fb9d27204ac8be38b83ce341eb95929c7fd0a3b00e",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.9883399999856949,
+        "p50": 1,
+        "p95": 1.0999999940395355,
+        "p99": 1.2000000178813934,
+        "max": 1.5999999940395355
+      },
+      "submissionMs": {
+        "mean": 0.2079399999320507,
+        "p95": 0.30000001192092896
+      },
+      "eye": [
+        -2834.0,
+        -2811.0,
+        65.0
+      ],
+      "yaw": 50.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": 0,
+        "presentCount": 0,
+        "meshes": 0,
+        "visibleMeshes": 0,
+        "rootVisible": true,
+        "rootInScene": true
+      },
+      "settings": {
+        "preset": "classic",
+        "potato": false,
+        "waterReflections": false,
+        "fullscreen": false,
+        "menuBackground": "off",
+        "resolutionScale": 1,
+        "antialias": false,
+        "anisotropy": 8,
+        "brightness": 1,
+        "gamma": 1,
+        "vibrance": 1,
+        "fullbright": false,
+        "flashlight": false,
+        "fpsLimit": 0,
+        "uncapped": false,
+        "mapProfiles": false,
+        "materialResponse": false,
+        "localLights": false,
+        "dynamicShadows": false,
+        "dynamicGI": false,
+        "tracedGI": false,
+        "clouds": false,
+        "skyMode": "map",
+        "lightingSource": "map"
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "native",
+      "map": "bhop_xcsource",
+      "height": 1080,
+      "repeat": 3,
+      "file": "bhop_xcsource-1080p-r3-native.json",
+      "fps": 3077.7680994624097,
+      "sha256": "9f294938470134003056b05c4dfa6092296a62ef6eaf4e294cbba6f71a847dd5",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.324910769,
+        "p50": 0.313,
+        "p95": 0.386208,
+        "p99": 0.513791,
+        "max": 1.757958
+      },
+      "submissionMs": {
+        "mean": 0.0335326868,
+        "p95": 0.041041
+      },
+      "eye": [
+        3259.47998046875,
+        310.5880126953125,
+        1537.0
+      ],
+      "yaw": 180.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": null
+      },
+      "settings": {
+        "effects": true,
+        "floorWeapons": true,
+        "fovDesired": 90,
+        "sourceLook": false,
+        "triggers": false,
+        "viewmodel": false,
+        "water": "simple",
+        "zones": false
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "web",
+      "map": "bhop_xcsource",
+      "height": 1080,
+      "repeat": 3,
+      "file": "bhop_xcsource-1080p-r3-web.json",
+      "fps": 1711.0981827823173,
+      "sha256": "9f294938470134003056b05c4dfa6092296a62ef6eaf4e294cbba6f71a847dd5",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.5844200000107288,
+        "p50": 0.5999999940395355,
+        "p95": 0.699999988079071,
+        "p99": 0.7000000178813934,
+        "max": 1.2999999821186066
+      },
+      "submissionMs": {
+        "mean": 0.056939999979734424,
+        "p95": 0.10000002384185791
+      },
+      "eye": [
+        3259.47998046875,
+        310.5880126953125,
+        1537.0
+      ],
+      "yaw": 180.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": 0,
+        "presentCount": 0,
+        "meshes": 0,
+        "visibleMeshes": 0,
+        "rootVisible": true,
+        "rootInScene": true
+      },
+      "settings": {
+        "preset": "classic",
+        "potato": false,
+        "waterReflections": false,
+        "fullscreen": false,
+        "menuBackground": "off",
+        "resolutionScale": 1,
+        "antialias": false,
+        "anisotropy": 8,
+        "brightness": 1,
+        "gamma": 1,
+        "vibrance": 1,
+        "fullbright": false,
+        "flashlight": false,
+        "fpsLimit": 0,
+        "uncapped": false,
+        "mapProfiles": false,
+        "materialResponse": false,
+        "localLights": false,
+        "dynamicShadows": false,
+        "dynamicGI": false,
+        "tracedGI": false,
+        "clouds": false,
+        "skyMode": "map",
+        "lightingSource": "map"
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "native",
+      "map": "bh_aztec",
+      "height": 1080,
+      "repeat": 3,
+      "file": "bh_aztec-1080p-r3-native.json",
+      "fps": 1429.963955253211,
+      "sha256": "c9cff2c33ea13f5673aa6aadf0826ce2bd146fca41f82c2ba75ab7e4f478bb35",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.6993183264,
+        "p50": 0.673916,
+        "p95": 0.814,
+        "p99": 0.884917,
+        "max": 1.459584
+      },
+      "submissionMs": {
+        "mean": 0.0701832756,
+        "p95": 0.086208
+      },
+      "eye": [
+        53.653900146484375,
+        -141.0,
+        144.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": null
+      },
+      "settings": {
+        "effects": true,
+        "floorWeapons": true,
+        "fovDesired": 90,
+        "sourceLook": false,
+        "triggers": false,
+        "viewmodel": false,
+        "water": "simple",
+        "zones": false
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "web",
+      "map": "bh_aztec",
+      "height": 1080,
+      "repeat": 3,
+      "file": "bh_aztec-1080p-r3-web.json",
+      "fps": 1288.5933714895532,
+      "sha256": "c9cff2c33ea13f5673aa6aadf0826ce2bd146fca41f82c2ba75ab7e4f478bb35",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.7760399999916554,
+        "p50": 0.7999999821186066,
+        "p95": 0.9000000059604645,
+        "p99": 1.0999999940395355,
+        "max": 2
+      },
+      "submissionMs": {
+        "mean": 0.07499999999403953,
+        "p95": 0.19999998807907104
+      },
+      "eye": [
+        53.653900146484375,
+        -141.0,
+        144.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": 10,
+        "presentCount": 10,
+        "meshes": 10,
+        "visibleMeshes": 10,
+        "rootVisible": true,
+        "rootInScene": true
+      },
+      "settings": {
+        "preset": "classic",
+        "potato": false,
+        "waterReflections": false,
+        "fullscreen": false,
+        "menuBackground": "off",
+        "resolutionScale": 1,
+        "antialias": false,
+        "anisotropy": 8,
+        "brightness": 1,
+        "gamma": 1,
+        "vibrance": 1,
+        "fullbright": false,
+        "flashlight": false,
+        "fpsLimit": 0,
+        "uncapped": false,
+        "mapProfiles": false,
+        "materialResponse": false,
+        "localLights": false,
+        "dynamicShadows": false,
+        "dynamicGI": false,
+        "tracedGI": false,
+        "clouds": false,
+        "skyMode": "map",
+        "lightingSource": "map"
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "native",
+      "map": "bhop_bfur",
+      "height": 1080,
+      "repeat": 3,
+      "file": "bhop_bfur-1080p-r3-native.json",
+      "fps": 2973.6025534282307,
+      "sha256": "af51680e1184520b473062061fa429f1677339cae1cf025fd27903f5da2935b3",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.3362924204,
+        "p50": 0.323209,
+        "p95": 0.422833,
+        "p99": 0.596416,
+        "max": 1.812
+      },
+      "submissionMs": {
+        "mean": 0.0427018688,
+        "p95": 0.050833
+      },
+      "eye": [
+        4448.0,
+        1856.0,
+        592.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "Apple M5 Pro",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": null
+      },
+      "settings": {
+        "effects": true,
+        "floorWeapons": true,
+        "fovDesired": 90,
+        "sourceLook": false,
+        "triggers": false,
+        "viewmodel": false,
+        "water": "simple",
+        "zones": false
+      },
+      "sync": "readback"
+    },
+    {
+      "engine": "web",
+      "map": "bhop_bfur",
+      "height": 1080,
+      "repeat": 3,
+      "file": "bhop_bfur-1080p-r3-web.json",
+      "fps": 2669.086638577765,
+      "sha256": "af51680e1184520b473062061fa429f1677339cae1cf025fd27903f5da2935b3",
+      "frames": 5000,
+      "warmup": 500,
+      "wallMs": {
+        "mean": 0.37465999999642374,
+        "p50": 0.4000000059604645,
+        "p95": 0.5,
+        "p99": 0.5,
+        "max": 1.2000000178813934
+      },
+      "submissionMs": {
+        "mean": 0.032939999920129776,
+        "p95": 0.10000002384185791
+      },
+      "eye": [
+        4448.0,
+        1856.0,
+        592.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+      "errors": [],
+      "missingFiles": [],
+      "floorWeapons": {
+        "enabled": true,
+        "count": 0,
+        "presentCount": 0,
+        "meshes": 0,
+        "visibleMeshes": 0,
+        "rootVisible": true,
+        "rootInScene": true
+      },
+      "settings": {
+        "preset": "classic",
+        "potato": false,
+        "waterReflections": false,
+        "fullscreen": false,
+        "menuBackground": "off",
+        "resolutionScale": 1,
+        "antialias": false,
+        "anisotropy": 8,
+        "brightness": 1,
+        "gamma": 1,
+        "vibrance": 1,
+        "fullbright": false,
+        "flashlight": false,
+        "fpsLimit": 0,
+        "uncapped": false,
+        "mapProfiles": false,
+        "materialResponse": false,
+        "localLights": false,
+        "dynamicShadows": false,
+        "dynamicGI": false,
+        "tracedGI": false,
+        "clouds": false,
+        "skyMode": "map",
+        "lightingSource": "map"
+      },
+      "sync": "readback"
+    }
+  ]
+}

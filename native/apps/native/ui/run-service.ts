@@ -14,7 +14,7 @@ export interface RunServiceStatus {
   type: "runService"; generation: number;
   status: "reset" | "beat" | "gap" | "checking" | "uploading" | "pending" | "verified" | "rejected" | "error" | "kept";
   message?: string; id?: string; progress?: number; rank?: number; time?: number;
-  code?: string; pb?: boolean; beats?: number; gaps?: number; local?: boolean;
+  announcer?:"pb"|"wr";code?: string; pb?: boolean; beats?: number; gaps?: number; local?: boolean;
   /** POST /runs?gauntlet=: whether the run became the attempt's split (gauntlet-native.ts). */
   gauntlet?: GauntletSplitResult;
   /** A gauntlet candidate that couldn't reach the server: kept and sent again (web gauntlet/mode.ts "held"). */
@@ -310,6 +310,6 @@ export class NativeRunService {
   }
   private verdict(session: Session,result: Submission): void {
     const status=result.status==="queued"||result.status==="verifying"?"pending":result.status;
-    this.status(session,status,{id:result.id,progress:result.progress,rank:result.rank,time:result.time,pb:result.pb,code:result.code,message:result.reason,...(result.gauntlet?{gauntlet:result.gauntlet}:{})});
+    this.status(session,status,{id:result.id,progress:result.progress,rank:result.rank,time:result.time,pb:result.pb,...(result.announcer==="pb"||result.announcer==="wr"?{announcer:result.announcer}:{}),code:result.code,message:result.reason,...(result.gauntlet?{gauntlet:result.gauntlet}:{})});
   }
 }

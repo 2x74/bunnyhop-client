@@ -38,11 +38,11 @@ let installed = false;
 function install(): void {
   if (installed || typeof window === "undefined") return;
   installed = true;
-  addEventListener("error", (e) => {
+  window.addEventListener("error", (e) => {
     // Runtime errors only (resource load failures don't bubble to window).
     push({ at: Date.now(), kind: "error", msg: e.message || describe(e.error), src: e.filename ? `${e.filename}:${e.lineno}:${e.colno}` : undefined, stack: e.error instanceof Error ? e.error.stack : undefined });
   });
-  addEventListener("unhandledrejection", (e) => {
+  window.addEventListener("unhandledrejection", (e) => {
     push({ at: Date.now(), kind: "rejection", msg: describe(e.reason), stack: e.reason instanceof Error ? e.reason.stack : undefined });
   });
   const orig = console.error;

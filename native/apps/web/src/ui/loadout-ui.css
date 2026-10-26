@@ -1,0 +1,26 @@
+/* Loadout swatches + rarity (ui/loadout-ui.ts; card editor, celebration, Settings -> Viewmodel). The
+   Loadout screen itself: ui/loadout-view.css. */
+
+/* A carrot-blade silhouette: grip on the left, point on the right. */
+.pf-sw-fin, .pf-sw-knife { position: relative; width: 2.9rem; height: 1.85rem; display: grid; place-items: center; }
+.pf-sw-fin > span, .pf-sw-knife > span { display: block; width: 2.7rem; height: 0.9rem; clip-path: polygon(0 38%, 22% 38%, 24% 10%, 30% 6%, 100% 50%, 30% 94%, 24% 90%, 22% 62%, 0 62%); }
+.pf-sw-fin > span { background: linear-gradient(90deg, #2f7d34 0 22%, transparent 22%), linear-gradient(90deg, transparent 22%, #ffb43c 22% 30%, transparent 30%), var(--fin); filter: drop-shadow(0 0 0.35rem color-mix(in srgb, var(--rar) 45%, transparent)); }
+.pf-sw-knife > span { background: linear-gradient(90deg, #2f7d34 0 22%, #ffb43c 22% 30%, var(--sw) 30% 100%); filter: drop-shadow(0 0 0.35rem color-mix(in srgb, var(--rar) 45%, transparent)); }
+
+/* A tiny glove: palm + three fingers with tips, strap across the palm. */
+.pf-sw-glove { position: relative; width: 2.9rem; height: 1.85rem; }
+.pf-sw-glove .palm { position: absolute; left: 0.75rem; top: 0.72rem; width: 1.15rem; height: 0.95rem; border-radius: 0.3rem 0.3rem 0.5rem 0.5rem; background: linear-gradient(180deg, var(--a) 0 55%, var(--s) 55% 72%, var(--a) 72%); }
+.pf-sw-glove i[class^="f"] { position: absolute; top: 0.18rem; width: 0.3rem; height: 0.66rem; border-radius: 0.2rem; background: linear-gradient(180deg, var(--t) 0 34%, var(--b) 34%); }
+.pf-sw-glove .f1 { left: 0.8rem; }
+.pf-sw-glove .f2 { left: 1.17rem; top: 0.08rem; height: 0.76rem; }
+.pf-sw-glove .f3 { left: 1.54rem; }
+
+/* Settings -> Viewmodel: the equipped loadout */
+.vm-loadout { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.vm-loadout { justify-content: flex-end; }
+.vm-loadout-items { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; max-width: 15rem; font-size: var(--fs-sm); text-align: right; }
+.vm-loadout-items small { color: var(--faint); font-size: var(--fs-2xs); }
+
+
+/* Pause rail: an icon (ui/icons.ts) in place of a glyph. */
+.ri-icon svg { margin: 0 auto; }

@@ -1,5 +1,5 @@
 // Required release movement gate: exact pinned WASM vs the built C++ ABI runner,
-// plus WASM v16/v17 behavioral contrasts. Artifacts retain the exact input/output.
+// plus v16/v17 RNGFix and v17/v18 material-ladder behavioral contrasts. Artifacts retain the exact input/output.
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -25,7 +25,7 @@ export function same(a: Row | undefined, b: Row | undefined): boolean {
   return !!a && !!b && a.tick === b.tick && a.bits.length === b.bits.length && a.bits.every((x, i) => x === b.bits[i] || (nan(x) && nan(b.bits[i]))) &&
     a.flags.length === b.flags.length && a.flags.every((x, i) => x === b.flags[i]);
 }
-export interface Behavior { landed: number; speedKept: number; speedLost: number; jumped: number; edgeBugs: number; teleported: number; fallRestored: number; mapTeleport: number }
+export interface Behavior { landed: number; speedKept: number; speedLost: number; jumped: number; edgeBugs: number; teleported: number; fallRestored: number; mapTeleport: number; attached: number; climbed: number }
 export async function simulate(fixture: Fixture, wasm: Uint8Array, physics: number) {
   const core = await Core.create(wasm); core.loadMap(fixture.bsp);
   const missingPhysics = core.physicsMissing();
@@ -33,16 +33,19 @@ export async function simulate(fixture: Fixture, wasm: Uint8Array, physics: numb
   const lines = [`# ${FIXTURE_SUITE} ${fixture.name} physics ${physics}`, `settings ${[settings.tickInterval, settings.airAccelerate, settings.accelerate,
     settings.friction, settings.stopSpeed, settings.gravity, settings.maxSpeed].map(number).join(' ')} ${+settings.autohop} ${physics} 0`];
   const rows: Row[] = [];
-  const behavior: Behavior = { landed: 0, speedKept: 0, speedLost: 0, jumped: 0, edgeBugs: 0, teleported: 0, fallRestored: 0, mapTeleport: 0 };
+  const behavior: Behavior = { landed: 0, speedKept: 0, speedLost: 0, jumped: 0, edgeBugs: 0, teleported: 0, fallRestored: 0, mapTeleport: 0, attached: 0, climbed: 0 };
   for (const trial of fixture.trials) {
     core.setSettings(settings); core.reset(); setPosition(core, ...trial.position, 0); setVelocity(core, trial.velocity);
     lines.push('reset', `position ${[...trial.position, 0].map(number).join(' ')}`, `velocity ${trial.velocity.map(number).join(' ')}`, 'state');
     rows.push(row(core.state(), 1));
-    let landed = false, jumped = false, edgeBug = false, teleported = false;
+    let landed = false, jumped = false, edgeBug = false, teleported = false, attached = false, climbed = false;
     for (let tick = 0; tick < trial.ticks; tick++) {
       const previous = core.state();
-      const events = core.step(0, 0, 0, 0, trial.buttons); const state = core.state();
-      lines.push(`cmd 0 0 0 0 ${trial.buttons}`, 'state'); rows.push(row(state, events));
+      const command = [trial.forward ?? 0, 0, trial.yaw ?? 0, trial.pitch ?? 0, trial.buttons];
+      const events = core.step(command[0], command[1], command[2], command[3], command[4]); const state = core.state();
+      lines.push(`cmd ${command.slice(0, 4).map(number).join(' ')} ${trial.buttons}`, 'state'); rows.push(row(state, events));
+      if (!attached && state.onLadder) { attached = true; behavior.attached++; }
+      if (!climbed && state.onLadder && state.position[2] > trial.position[2] + 25) { climbed = true; behavior.climbed++; }
       if (!landed && state.grounded) {
         landed = true; behavior.landed++;
         const speed = Math.hypot(state.velocity[0], state.velocity[1]);
@@ -71,14 +74,15 @@ export async function runGate(runner: string | string[], output: string, wasmPat
   if (wasm.length !== CANONICAL_WASM_BYTES || hash(wasm) !== CANONICAL_WASM_SHA256) throw new Error('Gate requires exact pinned canonical WASM bytes');
   const report: any = { schema: 1, suite: FIXTURE_SUITE, pass: false, platform: `${process.platform}/${process.arch}`,
     sourceSha: process.env.GITHUB_SHA ?? null, runId: process.env.GITHUB_RUN_ID ?? null, runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? null,
-    wasmSha256: hash(wasm), wasmBytes: wasm.length, wasmUrl: CANONICAL_WASM_URL, runnerSha256: hash(readFileSync(typeof runner === 'string' ? runner : runner[0])), physics: 17, contrastPhysics: 16, comparedStates: 0, mismatchRows: 0, missingPhysics: [], fixtures: [] };
+    wasmSha256: hash(wasm), wasmBytes: wasm.length, wasmUrl: CANONICAL_WASM_URL, runnerSha256: hash(readFileSync(typeof runner === 'string' ? runner : runner[0])), physics: 18, contrastPhysics: 16, ladderContrastPhysics: 17, comparedStates: 0, mismatchRows: 0, missingPhysics: [], fixtures: [] };
   try {
     for (const fixture of createFixtures()) {
       writeFileSync(join(output, `${fixture.name}.bsp`), fixture.bsp);
-      const v17 = await simulate(fixture, wasm, 17), v16 = await simulate(fixture, wasm, 16);
+      const simulations = await Promise.all(fixture.versions.map(async physics => [physics, await simulate(fixture, wasm, physics)] as const));
+      const previous = simulations[0][1], current = simulations[1][1];
       const item: any = { name: fixture.name, mapSha256: hash(fixture.bsp), trials: fixture.trials.length, versions: [],
-        divergentStates: v17.rows.filter((r, i) => !same(r, v16.rows[i])).length, behavior: { v17: v17.behavior, v16: v16.behavior } };
-      for (const [physics, simulation] of [[17, v17], [16, v16]] as const) {
+        divergentStates: current.rows.filter((r, i) => !same(r, previous.rows[i])).length, behavior: Object.fromEntries(simulations.map(([v, s]) => [`v${v}`, s.behavior])) };
+      for (const [physics, simulation] of simulations) {
         const prefix = `${fixture.name}-v${physics}`;
         const commandsPath = join(output, `${prefix}.commands`);
         writeFileSync(commandsPath, simulation.commands);

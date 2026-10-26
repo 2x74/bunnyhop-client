@@ -1,3 +1,4 @@
+import {nativeProfileFixture} from "./profile-fixture";
 import {test,expect} from "bun:test";
 import {chromium,type Page} from "playwright";
 import {readFile,mkdir} from "node:fs/promises";
@@ -11,7 +12,7 @@ const ID="AbCdEfGhIjKlMnOp";
 const INDEX={maps:["bhop_eazy","bhop_a","bhop_b","bhop_1","bhop_13","bhop_2_easy"].map(name=>({name,title:name,tier:1,size:1<<20}))};
 type Msg={type:string;[key:string]:unknown};
 const messages=(page:Page)=>page.evaluate(()=>(window as any).messages as Msg[]);
-const sent=async(page:Page,from:number)=>(await messages(page)).slice(from).filter(m=>!["cosmetics","menuAppearance","menuBackdrop"].includes(m.type));
+const sent=async(page:Page,from:number)=>(await messages(page)).slice(from).filter(m=>!["cosmetics","menuAppearance","menuBackdrop","audioCue"].includes(m.type));
 const count=async(page:Page)=>(await messages(page)).length;
 const player=(id:string,name:string)=>({id,name,avatar:null,country:null});
 const ATTEMPT={id:ID,gauntlet:{slug:"weekly-test",title:"Weekly test",maxMs:5*3600_000},state:"open",step:0,startedAt:Date.now(),lastPingAt:Date.now(),expiresAt:null,finishedAt:null,realMs:null,totalTicks:null,
@@ -28,7 +29,7 @@ function api(url:URL,method:string,writes:Record<string,unknown>={}):unknown {
   if(path==="/gauntlets/weekly-test") return DETAIL;
   if(path==="/gauntlets/weekly-test/board") return {slug:"weekly-test",total:0,offset:0,entries:[],me:null};
   if(path===`/gauntlets/attempts/${ID}`) return ATTEMPT;
-  if(path==="/players/p2") return {player:player("p2","Other"),mine:false,level:{level:7,xp:0,into:0,need:1,fraction:0},rank:{group:{name:"Silver"}},styles:[],stats:{maps:3,wrs:0,pbs:2},social:null};
+  if(path==="/players/p2") return nativeProfileFixture("p2","Other",false);
   if(path==="/players/p2/runs") return {total:0,runs:[]};
   return null;
 }
@@ -51,7 +52,7 @@ async function open(width=1280,height=720,writes:Record<string,unknown>={}) {
     }
     return r.abort();
   });
-  await page.addInitScript(()=>{(window as any).messages=[];window.addEventListener("bunnyhop:native-message",e=>(window as any).messages.push((e as CustomEvent).detail));});
+  await page.addInitScript(()=>{localStorage.setItem("bunnyhop:onboarded","1");localStorage.setItem("bunnyhop:first-seen",String(Date.now()));(window as any).messages=[];window.addEventListener("bunnyhop:native-message",e=>(window as any).messages.push((e as CustomEvent).detail));});
   await page.goto("https://bunnyhop.lol/native-parity-unit",{waitUntil:"domcontentloaded"});
   await page.waitForFunction(()=>!!window.bunnyhopNativeMenu);
   return {browser,page,errors,writesSeen};
@@ -82,6 +83,9 @@ test("pause: Practice and Checkpoints where practice works, Leave practice, and 
       expect(await page.locator(".native-finish.practice .native-finish-sub").textContent()).toBe("Not submitted: practice mode.");
       if(height>=720){const box=await page.locator(".rail-item.pause-home").boundingBox();expect(box&&box.y+box.height<=height).toBe(true);}
       await shot(page,`pause-practice-${width}x${height}.png`);
+      // A third-person attempt stays unranked after returning to first person.
+      await page.evaluate(p=>window.bunnyhopNativeMenu.onState({practice:{...p,active:true,thirdPerson:false,tool:"camera"},timer:{status:2,seconds:43,jumps:9}}),PRACTICE);
+      expect(await page.locator(".native-finish.practice .native-finish-sub").textContent()).toBe("Not submitted: practice run (third person).");
       // Nowhere practice doesn't work: the host says so, or a replay plays.
       await page.evaluate(p=>window.bunnyhopNativeMenu.onState({practice:{...p,unavailable:"Practice is for solo play, not servers."}}),PRACTICE);
       expect(await page.locator(".rail-item",{hasText:/^Practice/}).count()).toBe(0);
@@ -203,8 +207,9 @@ test("report a player from a profile opens the web's report form about them, and
   const {browser,page,errors,writesSeen}=await open(1280,720);
   try {
     await page.evaluate(()=>window.dispatchEvent(new CustomEvent("bunnyhop:navigate",{detail:{url:"https://bunnyhop.lol/u/p2"}})));
-    await page.locator(".native-profile-body h2",{hasText:"Other"}).waitFor();
-    await page.getByRole("button",{name:"Report",exact:true}).click();
+    await page.locator(".pc-name",{hasText:"Other"}).waitFor();
+    await page.getByRole("button",{name:"More",exact:true}).click();
+    await page.getByRole("menuitem",{name:"Report",exact:true}).click();
     const dialog=page.locator("dialog.fb-dialog[open]");
     await dialog.waitFor();
     expect(await dialog.locator(".fb-head").innerText()).toContain("Report a player");
@@ -308,3 +313,57 @@ test("pause tabs keep the web's own look under the friends dock's styles",async(
     expect({weight:tab.weight,size:tab.size,underline:tab.underline,background:tab.background,shadow:tab.shadow}).toEqual({weight:"700",size:lg,underline:"2px",background:"rgba(0, 0, 0, 0)",shadow:"none"});
   } finally {await browser.close();}
 },20_000);
+
+test("menu clicks and switches emit bounded native interface audio cues",async()=>{
+  const {browser,page,errors}=await open();
+  try{
+    const before=await count(page);await page.getByRole("button",{name:"Settings",exact:true}).click();
+    const clicked=(await messages(page)).slice(before).filter(m=>m.type==="audioCue");
+    expect(clicked.some(m=>m.id==="ui_click"&&m.gain===.8&&m.rate===1)).toBe(true);
+    const toggled=await count(page);await page.getByRole("checkbox",{name:"Mute",exact:true}).click();
+    const cues=(await messages(page)).slice(toggled).filter(m=>m.type==="audioCue");
+    expect(cues.some(m=>m.id==="ui_switch"&&m.gain===.8&&m.rate===1.12)).toBe(true);expect(errors).toEqual([]);
+  }finally{await browser.close();}
+});
+
+test("map loading: byte progress, cancellation, offline retry and stable transition",async()=>{
+ const {browser,page,errors}=await open();
+ try{
+  await page.evaluate(()=>window.bunnyhopNativeMenu.onState({loading:"Downloading bhop_test",loadProgress:{map:"bhop_test",stage:"download",message:"Downloading map data",received:1048576,total:4194304,filesDone:2,filesTotal:8,cached:false,offline:false}}));
+  const panel=page.locator('.native-loading');await panel.waitFor();expect(await panel.locator('progress').getAttribute('value')).toBe('0.25');expect(await panel.textContent()).toContain('1.0 MB / 4.0 MB');
+  await shot(page,'map-loading-progress.png');
+  let from=await count(page);await panel.getByRole('button',{name:'Cancel',exact:true}).click();expect(await sent(page,from)).toEqual([{type:'mapLoad',action:'cancel'}]);
+  await page.evaluate(()=>window.bunnyhopNativeMenu.onState({loading:false,error:"Network unavailable"}));
+  from=await count(page);await panel.getByRole('button',{name:'Retry',exact:true}).click();expect(await sent(page,from)).toEqual([{type:'mapLoad',action:'retry'}]);
+  await page.evaluate(()=>window.bunnyhopNativeMenu.onState({loading:"Loading cached map",error:null,loadProgress:{stage:"renderer",message:"Loading cached map",received:0,total:0,filesDone:8,filesTotal:8,cached:true,offline:true}}));
+  expect(await panel.textContent()).toContain('Offline');
+  await page.evaluate(()=>window.bunnyhopNativeMenu.onState({map:"bhop_test",loading:false,error:null,loadProgress:null}));
+  expect(await page.locator('.native-loading').count()).toBe(0);
+  await page.evaluate(()=>window.bunnyhopNativeMenu.onState({loading:false,error:'Fast cached-map failure',loadProgress:{stage:'error',message:'Fast cached-map failure',received:0,total:0,filesDone:0,filesTotal:0,cached:true,offline:false}}));
+  await page.locator('.native-loading').getByRole('button',{name:'Retry',exact:true}).waitFor();
+  await page.locator('.native-loading').getByRole('button',{name:'Back',exact:true}).click();expect(await page.locator('.native-loading').count()).toBe(0);
+  await page.evaluate(()=>window.bunnyhopNativeMenu.onState({loading:false,error:'Fast cached-map failure',loadProgress:{stage:'error',message:'Fast cached-map failure',received:0,total:0,filesDone:0,filesTotal:0,cached:true,offline:false}}));
+  expect(await page.locator('.native-loading').count()).toBe(0);expect(errors).toEqual([]);
+ }finally{await browser.close();}
+});
+
+test("replay vault filters and scrubbing restores prior playback without stale playhead jumps",async()=>{
+ const {browser,page,errors}=await open();try{
+  await page.evaluate(()=>{window.bunnyhopNativeMenu.onState({map:'bhop_a',replays:[{id:'a.bhr',name:'Alice',map:'bhop_a',style:'autohop',track:0,seconds:10,recordedAt:1700000000000,bytes:1200,screenshot:true,localSummary:{schema:1,map:'bhop_a',style:'autohop',track:0,time:10,jumps:12,strafes:40,sync:88,finishedAt:1700000000000,client:'native',localPb:true}},{id:'b.bhr',name:'Bob',map:'bhop_b',style:'scroll',track:0,seconds:11,recordedAt:1700000001000,bytes:1400}],playback:{active:true,id:'a.bhr',tick:100,totalTicks:1000,paused:false,speed:1,tickInterval:.01}});window.bunnyhopNativeMenu.open?.('replays');});
+  expect(await page.locator('.native-replay-row').count()).toBe(2);await page.getByRole('searchbox',{name:'Search replay vault'}).fill('Alice');expect(await page.locator('.native-replay-row').count()).toBe(1);expect(await page.locator('.native-replay-row').textContent()).toContain('Device PB');
+  let from=await count(page);await page.getByRole('button',{name:'View result',exact:true}).click();expect(await sent(page,from)).toEqual([{type:'replay',action:'screenshot',id:'a.bhr'}]);
+  from=await count(page);await page.getByRole('slider',{name:'Replay tick',exact:true}).evaluate(slider=>{const input=slider as HTMLInputElement;input.dispatchEvent(new PointerEvent('pointerdown'));for(let i=200;i<=800;i++){input.value=String(i);input.dispatchEvent(new Event('input'));}window.bunnyhopNativeMenu.onState({playback:{active:true,id:'a.bhr',tick:101,totalTicks:1000,paused:true,speed:1}});input.dispatchEvent(new Event('change'));});
+  const commands=await sent(page,from);expect(commands).toEqual([{type:'replayControl',action:'pause',paused:true},{type:'replayControl',action:'seek',tick:200},{type:'replayControl',action:'seek',tick:800},{type:'replayControl',action:'pause',paused:false}]);
+  expect(await page.getByRole('slider',{name:'Replay tick',exact:true}).inputValue()).toBe('800');await shot(page,'replay-vault-scrub.png');expect(errors).toEqual([]);
+ }finally{await browser.close();}
+});
+
+test("solo SSJ commands toggle in the host without relying on stale menu settings",async()=>{
+ const {browser,page,errors,writesSeen}=await open();try{
+  await page.evaluate(()=>window.bunnyhopNativeMenu.onState({map:"bhop_test",settings:{jumpStats:true}}));
+  const from=await count(page);
+  await page.evaluate(()=>{window.bunnyhopNativeMenu.onChatSubmit!("!ssj");window.bunnyhopNativeMenu.onChatSubmit!("!ssj");});
+  expect(await sent(page,from)).toEqual([{type:"chatAction",action:"jumpStats"},{type:"chatAction",action:"jumpStats"}]);
+  expect(errors).toEqual([]);expect(writesSeen).toEqual([]);
+ }finally{await browser.close();}
+});

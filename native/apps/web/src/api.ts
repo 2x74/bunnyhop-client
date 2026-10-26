@@ -721,7 +721,13 @@ const countWrite = (init: RequestInit) => {
 };
 
 /** Optional ownership fence around the actual fetch, after asynchronous headers. */
-export type RequestDispatch = (send: () => Promise<Response>) => Promise<Response>;
+export type RequestDispatch = ((send: () => Promise<Response>) => Promise<Response>) & {current?:()=>boolean};
+/** Recheck ownership after a streamed body, before any API cache effects. */
+export async function readOwnedJson(res:Response,dispatch?:RequestDispatch):Promise<unknown> {
+  const body=await res.json().catch(()=>null);
+  if(dispatch?.current&&!dispatch.current())throw new Error("Account changed. Reopen this profile.");
+  return body;
+}
 
 async function request(path: string, init: RequestInit = {}, dispatch?: RequestDispatch): Promise<Response> {
   countWrite(init);
@@ -741,22 +747,24 @@ async function request(path: string, init: RequestInit = {}, dispatch?: RequestD
 
 async function json<T>(path: string, init: RequestInit = {}, dispatch?: RequestDispatch): Promise<T> {
   const res = await request(path, init, dispatch);
-  const body = (await res.json().catch(() => null)) as (T & { error?: string; message?: string }) | null;
+  const body = (await readOwnedJson(res,dispatch)) as (T & { error?: string; message?: string }) | null;
   if (!res.ok) throw new ApiError(res.status, body?.error ?? "error", body?.message ?? `HTTP ${res.status}`, (body ?? {}) as Record<string, unknown>);
   return body as T;
 }
 
 /** Like json(), but 5xx answers with an error body (email_failed, email_unavailable) become ApiErrors too. */
-async function jsonOr5xx<T>(path: string, init: RequestInit): Promise<T> {
+async function jsonOr5xx<T>(path: string, init: RequestInit, dispatch?:RequestDispatch): Promise<T> {
   countWrite(init);
   let res: Response;
   try {
-    res = await fetch(base() + path, { credentials: "include", ...(await withDevice(init)) });
+    const prepared=await withDevice(init);
+    const send=()=>fetch(base()+path,{credentials:"include",...prepared});
+    res=await (dispatch?dispatch(send):send());
   } catch (e) {
     if (e instanceof ApiUnavailable) throw e;
     throw new ApiUnavailable();
   }
-  const body = (await res.json().catch(() => null)) as (T & { error?: string; message?: string }) | null;
+  const body = (await readOwnedJson(res,dispatch)) as (T & { error?: string; message?: string }) | null;
   if (!res.ok) {
     if (!body?.error) throw new ApiUnavailable();
     throw new ApiError(res.status, body.error, body.message ?? `HTTP ${res.status}`, body as Record<string, unknown>);
@@ -924,19 +932,19 @@ export const api = {
    * reserved, ...), 409 "taken" (body.suggestion; registered players), 429 "rename_limit". Guests asking for a taken
    * name get a numbered variant: the result has nameAdjusted.
    */
-  async setMouseSettings(mouse: import("./mouse-settings").MouseSettings): Promise<import("./mouse-settings").MouseSettings> {
-    return json("/me/mouse", post(mouse));
+  async setMouseSettings(mouse: import("./mouse-settings").MouseSettings, dispatch?: RequestDispatch): Promise<import("./mouse-settings").MouseSettings> {
+    return json("/me/mouse", post(mouse), dispatch);
   },
   async countrySettings(): Promise<{ country: string | null; detected: string | null }> {
     return json("/me/country");
   },
-  async setCountry(country: string | null): Promise<{ country: string | null }> {
-    return json("/me/country", post({ country }));
+  async setCountry(country: string | null, dispatch?: RequestDispatch): Promise<{ country: string | null }> {
+    return json("/me/country", post({ country }), dispatch);
   },
-  async setDisplayName(name: string): Promise<User> {
+  async setDisplayName(name: string, dispatch?: RequestDispatch): Promise<User> {
     // Without a session the server would make a guest for the name: a Wavedash player names their account instead.
     if (wavedashPlayer() && !(await api.me())) throw new ApiUnavailable();
-    const user = await json<User>("/me/name", post({ name }));
+    const user = await json<User>("/me/name", post({ name }), dispatch);
     setMe(user);
     return user;
   },
@@ -960,12 +968,12 @@ export const api = {
     return json("/me/links", { cache: "no-cache" });
   },
   /** Strict: 400 bad_links names the platform (`body.platform`) and what's wrong. */
-  async saveLinks(s: Partial<LinkSettings>): Promise<LinkSettings> {
-    return json("/me/links", post(s));
+  async saveLinks(s: Partial<LinkSettings>, dispatch?: RequestDispatch): Promise<LinkSettings> {
+    return json("/me/links", post(s), dispatch);
   },
   /** The "Show booster badge" switch; `boosting`: the badge would show now (the bot's latest read). */
-  async saveBooster(show: boolean): Promise<{ show: boolean; boosting: boolean }> {
-    return json("/me/booster", post({ show }));
+  async saveBooster(show: boolean, dispatch?: RequestDispatch): Promise<{ show: boolean; boosting: boolean }> {
+    return json("/me/booster", post({ show }), dispatch);
   },
   /** Your support (Settings → Account, the Support page). 401 without a session. */
   async mySupport(): Promise<MySupport> {
@@ -974,29 +982,29 @@ export const api = {
   async giftWallet(): Promise<GiftWallet> {
     return json("/me/gifts", { cache: "no-store" });
   },
-  async giftPreview(target: GiftTarget): Promise<GiftPreview> {
-    return json("/me/gifts/preview", post(target));
+  async giftPreview(target: GiftTarget, dispatch?: RequestDispatch): Promise<GiftPreview> {
+    return json("/me/gifts/preview", post(target), dispatch);
   },
-  async sendGifts(target: GiftTarget, requestId: string, maxCost: number): Promise<GiftDelivery> {
-    return json("/me/gifts", post({ ...target, requestId, maxCost }));
+  async sendGifts(target: GiftTarget, requestId: string, maxCost: number, dispatch?: RequestDispatch): Promise<GiftDelivery> {
+    return json("/me/gifts", post({ ...target, requestId, maxCost }), dispatch);
   },
   async myNameBadges(): Promise<NameBadgeSettings> {
     return json("/me/name-badges", { cache: "no-store" });
   },
-  async saveNameBadges(settings: { nameBadges: string[]; gifterColors?: string[]; gifterAnimated?: boolean }): Promise<NameBadgeSettings> {
-    return json("/me/name-badges", post(settings));
+  async saveNameBadges(settings: { nameBadges: string[]; gifterColors?: string[]; gifterAnimated?: boolean }, dispatch?: RequestDispatch): Promise<NameBadgeSettings> {
+    return json("/me/name-badges", post(settings), dispatch);
   },
   /** A supporter's name look, badge switch, About listing (403 not_supporter for everyone else). */
-  async saveSupporter(s: Partial<Pick<SupporterSettings, "nameColor" | "nameEffect" | "nameColor2" | "showBadge" | "showOnBoard" | "playerGlow">>): Promise<SupporterSettings> {
-    return json("/me/supporter", post(s));
+  async saveSupporter(s: Partial<Pick<SupporterSettings, "nameColor" | "nameEffect" | "nameColor2" | "showBadge" | "showOnBoard" | "playerGlow">>, dispatch?: RequestDispatch): Promise<SupporterSettings> {
+    return json("/me/supporter", post(s), dispatch);
   },
   /**
    * A Stripe Checkout page for a one-time payment of `amountCents` (the Support page sends the player there). ApiError:
    * signin_required (guests), bad_amount, payments_closed, rate_limited, checkout_failed.
    */
-  async supportCheckout(amountCents: number): Promise<{ url: string }> {
+  async supportCheckout(amountCents: number, dispatch?: RequestDispatch): Promise<{ url: string }> {
     // checkout_failed (502) and payments_closed (503) carry their message: show it rather than "offline".
-    return jsonOr5xx("/support/checkout", post({ amountCents }));
+    return jsonOr5xx("/support/checkout", post({ amountCents }), dispatch);
   },
   /** The About page's thank-you list (names of supporters who opted in). */
   async supporters(): Promise<{ names: string[]; top: TopSupporter[] }> {
@@ -1007,8 +1015,8 @@ export const api = {
     return json<AccountView>("/me/account", { cache: "no-store" });
   },
   /** Removes a sign-in method (refused for the last one: ApiError 400 "last_method"). */
-  async unlink(provider: SignInMethod["provider"]): Promise<AccountView> {
-    const v = await json<AccountView>("/me/unlink", post({ provider }));
+  async unlink(provider: SignInMethod["provider"], dispatch?: RequestDispatch): Promise<AccountView> {
+    const v = await json<AccountView>("/me/unlink", post({ provider }), dispatch);
     setMe(v.user);
     return v;
   },
@@ -1041,23 +1049,28 @@ export const api = {
     return json<OnboardingState>("/me/onboarding", post(o));
   },
   /** Discord-linked players: show (or hide) their Discord avatar publicly. Off by default; there are no uploads. */
-  async setUseDiscordAvatar(on: boolean): Promise<User> {
-    const user = await json<User>("/me/avatar", post({ useDiscord: on }));
+  async setUseDiscordAvatar(on: boolean, dispatch?: RequestDispatch): Promise<User> {
+    const user = await json<User>("/me/avatar", post({ useDiscord: on }), dispatch);
     setMe(user);
     return user;
   },
   /** Ends the session (everywhere: on every device); the next me() issues a fresh guest. */
-  async logout(everywhere = false): Promise<void> {
+  async logout(everywhere = false, dispatch?: RequestDispatch): Promise<void> {
+    // A guarded native dialog must finish its captured session request before
+    // clearing account memory; an old response cannot log out a new identity.
+    if (api.available()) await request("/auth/logout", post(everywhere ? { everywhere: true } : {}), dispatch);
     meCache = null;
-    rememberMe(null); // signed out on purpose: the next me() starts a guest without re-asking
-    if (!api.available()) return;
-    await request("/auth/logout", post(everywhere ? { everywhere: true } : {}));
+    rememberMe(null);
+
   },
   /** Forget the cached player (after signing in elsewhere in the page). */
   forgetMe(): void {
     meCache = null;
   },
   /** All maps; `wr` is the main-track world record in `style`. */
+  async reportPlaytime(seconds:number,dispatch?:RequestDispatch):Promise<unknown> {
+    return json("/me/playtime",post({seconds}),dispatch);
+  },
   async playerStats(id: string): Promise<{ totals: { verifiedRuns: number; jumps: number; playtimeSeconds: number; runTimeMs: number; mapsCompleted: number }; styles: { style: string; runs: number; maps: number }[]; maps: { map: string; runs: number }[]; activity: { at: number; runs: number }[] }> {
     return json(`/players/${encodeURIComponent(id)}/stats`);
   },
@@ -1224,16 +1237,16 @@ export const api = {
     return json("/me/cosmetics", { cache: "no-cache" });
   },
   /** Partial update; throws ApiError(400, "bad_cosmetic") naming the slot when an item is locked or unknown. */
-  async saveCosmetics(patch: Partial<CosmeticChoice>): Promise<CosmeticChoice> {
-    return json<CosmeticChoice>("/me/cosmetics", post(patch));
+  async saveCosmetics(patch: Partial<CosmeticChoice>, dispatch?: RequestDispatch): Promise<CosmeticChoice> {
+    return json<CosmeticChoice>("/me/cosmetics", post(patch), dispatch);
   },
   /** Up to 5 of your verified run ids ([] = automatic). */
-  async saveFeatured(runs: string[]): Promise<string[]> {
-    return (await json<{ runs: string[] }>("/me/featured", post({ runs }))).runs;
+  async saveFeatured(runs: string[], dispatch?: RequestDispatch): Promise<string[]> {
+    return (await json<{ runs: string[] }>("/me/featured", post({ runs }), dispatch)).runs;
   },
   /** Up to 3 earned achievement ids to showcase ([] = automatic). */
-  async saveBadges(badges: string[]): Promise<string[]> {
-    return (await json<{ badges: string[] }>("/me/badges", post({ badges }))).badges;
+  async saveBadges(badges: string[], dispatch?: RequestDispatch): Promise<string[]> {
+    return (await json<{ badges: string[] }>("/me/badges", post({ badges }), dispatch)).badges;
   },
   /** Public URL of a verified run's replay (watch links: ?replay=<url>). */
   replayUrl(runId: string): string {

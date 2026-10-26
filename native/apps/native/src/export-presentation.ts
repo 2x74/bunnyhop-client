@@ -1,7 +1,10 @@
 // Build-time conversion only; the desktop client renders text and mixes audio natively.
+import { CLASSIC_SOUNDS } from "../../web/src/audio/classic-map";
 import { SFX } from "../../web/src/audio/catalog";
+import { supporterGiftWave } from "../../web/src/audio/gift";
+import { GunAnimator,type BaseClip,type Cue } from "../../web/src/viewmodel/guns/anim";
 import { gunById } from "../../web/src/viewmodel/guns/index";
-import { mkdir, readFile, writeFile, stat, readdir, rm } from "node:fs/promises";
+import { mkdir, readFile, writeFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { exportMusic } from "./export-music";
 const root=resolve(import.meta.dir,"../../..");
@@ -20,14 +23,13 @@ await writeFile(join(out,"hud.rgba"),image.pixels);
 image.free();r.free();
 const source=join(root,"apps/web/src/assets/audio");
 const manifest=JSON.parse(await readFile(join(source,"manifest.json"),"utf8"));
-// Never reintroduce review-only samples, including stale PCM from a previous build.
-const omittedCues=new Set(["announcer_perfect","announcer_godlike","announcer_holyshit"]);
-for(const id of omittedCues)delete manifest.sfx[id];
-for(const file of await readdir(join(out,"audio")))
-  if([...omittedCues].some(id=>file.startsWith(id+"-")))await rm(join(out,"audio",file));
+const nativeAudio=join(root,"apps/native/assets/audio");
+const nativeManifest=JSON.parse(await readFile(join(nativeAudio,"manifest.json"),"utf8"));
+Object.assign(manifest.sfx,nativeManifest.sfx);
+manifest.credits=[...new Set([...(manifest.credits??[]),...(nativeManifest.credits??[])])];
 const tasks:{id:string;source:string;dest:string}[]=[];
 for(const [id,entry] of Object.entries(manifest.sfx) as [string,{variants:number}][])
-  for(let i=1;i<=entry.variants;i++)tasks.push({id,source:join(source,"sfx",`${id}-${i}.webm`),dest:join(out,"audio",`${id}-${i}.f32`)});
+  for(let i=1;i<=entry.variants;i++)tasks.push({id,source:Object.hasOwn(nativeManifest.sfx,id)?join(nativeAudio,`${id}-${i}.webm`):join(source,"sfx",`${id}-${i}.webm`),dest:join(out,"audio",`${id}-${i}.f32`)});
 let next=0;
 await Promise.all(Array.from({length:4},async()=>{
   while(next<tasks.length) {
@@ -40,7 +42,17 @@ await Promise.all(Array.from({length:4},async()=>{
   }
 }));
 const weaponIds=["","knife","glock","usp","p228","deagle","elite","fiveseven","m3","xm1014","mac10","tmp","mp5navy","ump45","p90","galil","famas","ak47","m4a1","sg552","aug","scout","awp","g3sg1","sg550","m249"];
-manifest.mix=Object.fromEntries(Object.entries(SFX).filter(([id])=>!omittedCues.has(id)));manifest.guns=weaponIds.map(id=>gunById(id)?.sounds??null);
+manifest.classic=CLASSIC_SOUNDS;manifest.mix=Object.fromEntries(Object.entries(SFX));manifest.guns=weaponIds.map(id=>gunById(id)?.sounds??null);
+// Capture the authored animation cue schedule at build time. These are the
+// web animator's actual timestamps, including the silencer's individual turns.
+manifest.weaponAudio=weaponIds.map(id=>{
+  const def=gunById(id);if(!def)return null;const anim=new GunAnimator(def);
+  const cues=(clip:BaseClip,duration:number,empty=false,on=false)=>{anim.play(clip,duration,true,empty,on);return (anim as unknown as {cues:[number,Cue,number][]}).cues;};
+  const reload=def.timing.reload??2.4,shells=def.timing.shells;
+  return {timing:def.timing,draw:cues("draw",Math.min(def.timing.draw,1)*.85),reload:cues("reload",reload),reloadEmpty:cues("reload",reload,true),
+    shellInsert:cues("shellInsert",shells?.each??.5),shellEnd:cues("shellEnd",shells?.end??.5),silencerOn:cues("silencer",114/37,false,true),silencerOff:cues("silencer",114/37,false,false)};
+});
+const gift=supporterGiftWave(22050);await writeFile(join(out,"audio/supporter_gift-1.f32"),new Uint8Array(gift.buffer));manifest.sfx.supporter_gift={variants:1,durations:[gift.length/22050]};
 exportMusic(out,manifest.music);
 await writeFile(join(out,"audio.json"),JSON.stringify(manifest));
 console.log(`Native presentation assets: 95 font glyphs, ${tasks.length} sound variants, ${manifest.music.length} bundled OST tracks`);

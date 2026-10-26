@@ -13,6 +13,7 @@ export function adaptSocialSource(input:string):string {
  replace('} catch (e) {\n      pending.delete(id);','} catch (e) {\n      if (nativeEpoch !== nativeAccountEpoch) return {ok:false,error:"Account changed"};\n      pending.delete(id);');
  replace('const r = await api.setAppearOffline(on);','const nativeEpoch = nativeAccountEpoch;\n  const r = await api.setAppearOffline(on);\n  if (nativeEpoch !== nativeAccountEpoch) return;');
  replace('let ping = 0;','let ping = 0;\n  nativeSocialStop=()=>clearInterval(ping);');
+ replace('function noteToast(n: Note): void {','function noteToast(n: Note): void {\n  postLocalLine(`${n.actor.name}: ${n.kind === "invite" ? "invited you to play (open Friends to join)" : n.kind === "ask" ? "asked to join your lobby" : n.kind === "follow" ? "followed you" : "new notification (open Friends)"}`);');
  return input+`\nlet nativeAccountEpoch = 0;
 let nativeSocialStop=()=>{};
 window.addEventListener("bunnyhop:account",()=>{

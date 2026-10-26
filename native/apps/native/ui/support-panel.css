@@ -1,0 +1,22 @@
+.native-support-screen{min-height:0;display:flex;flex-direction:column;gap:12px;width:100%;overflow:auto}
+.native-support-screen>.sp-screen{flex:1;min-height:420px}
+.native-support-refresh{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid #ffffff18;padding-top:12px}
+.native-support-return{margin:0;color:var(--dim,#a6adb9);font-size:13px;max-width:65ch}
+.native-support-screen .sp-err[data-kind=opened]{color:#a9d5b3}
+@media(max-width:850px){.native-support-screen .sp{display:flex;flex-direction:column}.native-support-screen .sp-set{min-height:380px}}
+/* Fills the stage like the web canvas (.lo-canvas: absolute, inset 0); the sample stays centred at its aspect. */
+.native-loadout-preview{width:100%;height:100%;object-fit:contain;border:1px solid transparent;border-radius:12px}
+.native-loadout-preview-note{position:absolute;bottom:5px;left:12px;right:12px;text-align:center;font-size:11px;color:#9da6b6;pointer-events:none}
+
+/* The static native stage draws one authored sample per item: no drag, inspect or First person/Close-up views to offer. */
+.lo-stage[data-native-static="true"] .lo-drag,.lo-stage[data-native-static="true"] .lo-insp,.lo-stage[data-native-static="true"] .lo-viewseg{display:none}
+.native-loadout-preview-note{z-index:3;background:#101722cc;padding:3px 6px;border-radius:4px}
+/* The web bounds the Loadout to the window and scrolls only its grid; the native Loadout screen and a narrow profile
+   scroll the whole body instead, which stretched the stage to the grid's full height with the sample far below the
+   fold. Keep the stage at the web's stacked 16:10 shape, beside the top of the grid and in view while it scrolls. */
+.native-profile-body .lo-stage[data-native-static="true"]{align-self:start;aspect-ratio:16/10;max-height:100%;position:sticky;top:0}
+
+.native-profile-body .lo-stage[data-native-interactive]{align-self:start;aspect-ratio:16/10;max-height:100%;position:sticky;top:0}
+.lo-stage[data-native-interactive] .native-loadout-preview{touch-action:none;cursor:grab}
+.lo-stage[data-native-interactive] .native-loadout-preview:active{cursor:grabbing}
+.lo-stage[data-native-interactive] .native-loadout-preview:focus-visible{outline:2px solid var(--accent,#f4bd60);outline-offset:-3px}

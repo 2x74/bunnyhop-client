@@ -1,0 +1,9 @@
+{
+  "machine": "MacBook Pro Mac17,9",
+  "cpu": "Apple M5 Pro, 15 CPU cores",
+  "gpu": "Apple M5 Pro, 16 GPU cores",
+  "memoryGB": 24,
+  "os": "macOS 27.0.1 (26A434)",
+  "power": "AC, battery charged",
+  "chartLabel": "Apple M5 Pro \u00b7 macOS 27.0.1"
+}

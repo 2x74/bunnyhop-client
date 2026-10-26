@@ -13,6 +13,7 @@ use std::ptr;
 use std::rc::Rc;
 use std::thread::{self, ThreadId};
 
+mod release_crypto;
 mod assets;
 mod look;
 mod replay;
@@ -150,6 +151,16 @@ impl From<&Game> for BhState {
         }
     }
 }
+/// Display-only last canonical movement observation. Not serialized into ranked state/replays.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BhJumpObservation {
+    pub pre: BhState,
+    pub post: BhState,
+    pub command: BhCmd,
+    pub valid: u32,
+    pub epoch: u32,
+}
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BhSnapshot {
@@ -265,6 +276,7 @@ struct Map {
     assets: assets::Assets,
     filter: styles::Filter,
     last_command: BhCmd,
+    jump_observation: BhJumpObservation,
     playback: Option<replay::Playback>,
     ghosts: Vec<Option<replay::Ghost>>,
     checkpoints: Vec<Option<practice::Checkpoint>>,
@@ -444,6 +456,8 @@ impl Map {
             texinfo_drawn: mesh::texinfo_drawn(&bsp),
             overlay: CString::default(),
             overlay_states: Vec::new(),
+            effect_states: Vec::new(),
+            light_styles: bunnyhop_core::lightmap::StyleAtlas::new(&bsp),
             material_names: CString::new(serde_json::to_string(&names).map_err(|e| e.to_string())?)
                 .map_err(|e| e.to_string())?,
             floor: Vec::new(),
@@ -542,6 +556,7 @@ impl Map {
             assets,
             filter: styles::Filter::new("autohop", settings.physics),
             last_command: BhCmd::default(),
+            jump_observation: BhJumpObservation::default(),
             playback: None,
             ghosts: Vec::new(),
             checkpoints: Vec::new(),
@@ -972,7 +987,7 @@ pub unsafe extern "C" fn bh_lightmap(ctx: *mut BhContext, out: *mut BhImage) -> 
     unsafe {
         call(ctx, |c| {
             output(out, BhImage::default())?;
-            let a = &c.map()?.mesh.lightmap;
+            let m=c.map()?;m.refresh_light_styles();let a = &m.mesh.lightmap;
             output(
                 out,
                 BhImage {
@@ -1118,6 +1133,11 @@ pub unsafe extern "C" fn bh_run_state(ctx: *mut BhContext, out: *mut BhRunState)
             output(out, s)
         })
     }
+}
+/// Same clean-tick bit as web PlayerState.jumpStatsValid, plus the canonical command and endpoints.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_jump_observation(ctx: *mut BhContext, out: *mut BhJumpObservation) -> c_int {
+    unsafe { call(ctx, |c| output(out, c.map()?.jump_observation)) }
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_snapshot(ctx: *mut BhContext, out: *mut BhSnapshot) -> c_int {
@@ -1485,6 +1505,10 @@ pub unsafe extern "C" fn bh_step(
 }
 
 impl Map {
+    fn invalidate_jump_observation(&mut self) {
+        self.jump_observation.valid = 0;
+        self.jump_observation.epoch = self.jump_observation.epoch.wrapping_add(1);
+    }
     fn advance(&mut self, cmd: BhCmd, look: Option<BhLookSampleV2>) -> Result<BhState, String> {
         self.advance_canonical(cmd, look, true)
     }
@@ -1508,9 +1532,15 @@ impl Map {
             cmd
         };
         self.last_command = cmd;
+        self.jump_observation.pre = BhState::from(&self.game);
+        self.jump_observation.command = cmd;
+        self.jump_observation.valid = 0;
+        let pre_walk = self.game.state.mode as u8 == 0;
+        let mut clamped = false;
         self.transforms_dirty = true;
         if let Some(t) = &mut self.timer {
             if let Some(v) = t.before_step(cmd, BhState::from(&self.game)) {
+                clamped = true;
                 self.game.state.velocity = v;
             }
         }
@@ -1526,9 +1556,13 @@ impl Map {
         }
         if let Some(t) = &mut self.timer {
             if let Some(v) = t.update(cmd, BhState::from(&self.game)) {
+                clamped = true;
                 self.game.state.velocity = v;
             }
         }
+        self.jump_observation.post = BhState::from(&self.game);
+        self.jump_observation.valid = u32::from(!clamped && pre_walk
+            && self.game.state.mode as u8 == 0 && self.game.jumpstats_valid);
         self.record_tick(cmd, look)?;
         Ok(BhState::from(&self.game))
     }

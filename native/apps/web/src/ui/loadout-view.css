@@ -1,0 +1,182 @@
+/* Loadout (ui/loadout-view.ts, ui/loadout-stage.ts): the categories across the top, the stage on the left, the item
+   grid on the right. Same language as Settings: no borders, a 3px accent bar for "this one", sentence-case labels.
+   Rarity is a thin line under each thumbnail and the tier's name, in its colour, and the stage is lit in the shown
+   item's rarity (--rar; data-rar 0-1 keeps common items quiet): a pool on the floor, a rim along its edge, and in the
+   bunny view a slow light circling behind it. All static gradients; the only motion is transforms. */
+
+/* ---- the profile's Loadout tab (ui/profile.ts; its layout in profile.css) */
+.lo-boot { flex: 1; margin-top: calc(2.7rem + var(--sp-4)); display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(18rem, 1fr); gap: var(--sp-6); min-height: 0; }
+.lo-boot > div { border-radius: var(--radius); background: var(--raise); }
+
+/* ---- layout: hero | side, stacked when narrow (container query on .lo) */
+.lo { container: lo / inline-size; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
+.lo-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(18rem, 1fr); gap: var(--sp-6); }
+@container lo (max-width: 44rem) {
+  .lo-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: var(--sp-4); }
+  .lo-stage { min-height: 16rem; aspect-ratio: 16 / 10; max-height: 50vh; }
+}
+
+/* ---- hero stage */
+.lo-stage {
+  --rar-a: 1;
+  position: relative; isolation: isolate; min-height: 0; border-radius: var(--radius); overflow: hidden; user-select: none; touch-action: none; cursor: grab;
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--rar, transparent) calc(var(--rar-a) * 75%), transparent);
+  background:
+    radial-gradient(60% 55% at 60% 52%, rgba(255, 236, 214, 0.075), transparent 72%),
+    radial-gradient(120% 90% at 50% 120%, rgba(255, 180, 58, 0.06), transparent 60%),
+    linear-gradient(180deg, #171b25, #0e1118);
+}
+.lo-stage[data-view="close"] { background: radial-gradient(50% 60% at 50% 48%, rgba(220, 230, 255, 0.09), transparent 70%), linear-gradient(180deg, #161a24, #0c0f15); }
+/* Your bunny: a warm pool of light it stands in. Your ghost: a cooler night it hops through. */
+.lo-stage[data-view="bunny"] { background: radial-gradient(38% 30% at 50% 86%, rgba(255, 214, 160, 0.11), transparent 70%), radial-gradient(70% 60% at 50% 50%, rgba(255, 236, 214, 0.06), transparent 75%), linear-gradient(180deg, #181c27, #0e1118); }
+.lo-stage[data-view="ghost"] { background: radial-gradient(60% 50% at 50% 70%, rgba(170, 200, 255, 0.08), transparent 72%), linear-gradient(180deg, #141824, #0b0e15); }
+.lo-stage.dragging { cursor: grabbing; }
+.lo-stage[data-rar="0"], .lo-stage[data-rar="1"] { --rar-a: 0.4; }
+.lo-light { position: absolute; left: 0; right: 0; bottom: 0; height: 55%; z-index: -1; pointer-events: none;
+  background: radial-gradient(48% 42% at 50% 100%, color-mix(in srgb, var(--rar, transparent) calc(var(--rar-a) * 26%), transparent), transparent 72%); }
+/* The bunny views: a soft light circling slowly behind the model (one transformed layer). */
+.lo-rim { position: absolute; left: 32%; top: 2%; width: 36%; aspect-ratio: 1; z-index: -1; pointer-events: none; opacity: 0; transition: opacity 0.4s; transform-origin: 50% 105%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--rar, #fff) calc(var(--rar-a) * 20%), transparent), transparent); }
+.lo-stage[data-view="bunny"] .lo-rim { opacity: 1; animation: lo-orbit 14s linear infinite; }
+@keyframes lo-orbit { to { transform: rotate(1turn); } }
+body.potato .lo-rim { display: none; }
+.lo-shine { position: absolute; inset: -10% auto -10% 0; width: 45%; z-index: 3; pointer-events: none; opacity: 0; background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.16) 50%, transparent 80%); }
+.lo-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; opacity: 0; transition: opacity 0.35s; }
+.lo-stage.ready .lo-canvas { opacity: 1; }
+.lo-stage.loading::after { content: ""; position: absolute; left: 50%; top: 50%; width: 2.2rem; height: 2.2rem; margin: -1.1rem; border-radius: 50%; border: 2px solid var(--raise-2); border-top-color: var(--accent); animation: lo-spin 0.8s linear infinite; }
+@keyframes lo-spin { to { transform: rotate(1turn); } }
+/* Legibility for the nameplate: a soft fade from the top left only. */
+.lo-stage::before { content: ""; position: absolute; left: 0; top: 0; width: 60%; height: 40%; background: radial-gradient(90% 100% at 0% 0%, rgba(8, 10, 14, 0.55), transparent 70%); pointer-events: none; z-index: 1; }
+
+/* The nameplate, top left and small: the item has the middle of the stage. (Bottom left is where the other hand
+   shows in first person.) */
+.lo-cap { position: absolute; left: clamp(1rem, 3%, 2rem); top: clamp(0.9rem, 3%, 1.8rem); right: 45%; z-index: 2; display: flex; flex-direction: column; gap: 0.25rem; pointer-events: none; }
+.lo-cap-name { margin: 0; display: flex; flex-direction: column; gap: 0.1rem; font-size: clamp(1.3rem, 2.1cqi, 2rem); font-weight: 780; letter-spacing: -0.015em; line-height: 1.05; text-shadow: 0 2px 18px rgba(0, 0, 0, 0.5); }
+.lo-cap-fin { font-size: 0.6em; font-weight: 560; letter-spacing: -0.01em; color: var(--dim); }
+.lo-cap-meta { margin: 0.25rem 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.9rem; font-size: var(--fs-sm); }
+.lo-cap-rar { display: inline-flex; align-items: center; gap: 0.45rem; color: var(--rar); font-weight: 650; }
+.lo-cap-rar i { display: block; width: 1.1rem; height: 3px; border-radius: 2px; background: var(--rar); box-shadow: 0 0 0.6rem color-mix(in srgb, var(--rar) 60%, transparent); }
+.lo-cap-how { margin: 0.2rem 0 0; font-size: var(--fs-sm); color: var(--dim); }
+.lo-cap-state { margin: 0.2rem 0 0; display: flex; align-items: center; gap: 0.4rem; font-size: var(--fs-sm); color: var(--dim); }
+.lo-cap-state.on { color: var(--gain); }
+.lo-cap-state.locked { color: var(--text); }
+.lo-cap-state .lo-prog { position: relative; width: 4.5rem; height: 3px; margin-left: 0.35rem; }
+
+.lo-tools { position: absolute; left: clamp(1rem, 3%, 2rem); bottom: clamp(0.9rem, 3%, 1.8rem); z-index: 2; display: flex; align-items: center; gap: 0.8rem; }
+/* (Solid, not a backdrop blur: the canvas under them changes every frame.) */
+.lo-viewseg { background: rgba(8, 10, 14, 0.72); }
+.lo-drag { font-size: var(--fs-xs); color: var(--faint); opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+.lo-stage[data-view="close"] .lo-drag, .lo-stage[data-view="bunny"] .lo-drag { opacity: 1; }
+.lo-stage[data-kind="bunny"] .lo-insp, .lo-stage[data-kind="ghost"] .lo-insp, .lo-stage[data-kind="ghost"] .lo-tools { display: none; }
+.lo-stage[data-kind="ghost"] { cursor: default; }
+.lo-viewseg[hidden] { display: none; }
+.lo-insp { position: absolute; right: clamp(0.8rem, 3%, 1.6rem); bottom: clamp(0.9rem, 3%, 1.8rem); z-index: 2; background: rgba(8, 10, 14, 0.72); }
+.lo-insp kbd { margin-left: 0.15rem; }
+.lo-stage[data-view="close"] .lo-insp { opacity: 0.75; }
+.lo-stage.failed .lo-tools, .lo-stage.failed .lo-insp { display: none; }
+.lo-stage.failed { cursor: default; }
+
+/* ---- categories across the top, the save status at the end of the line */
+.lo-clear { flex-shrink: 0; font-size: var(--fs-xs); color: var(--cream-3); }
+.lo-clear:disabled { visibility: hidden; }
+@media (max-width: 42rem) { .lo-head { flex-wrap: wrap; } .lo-head .lo-tabs { flex-basis: 100%; } }
+.lo-head { display: flex; align-items: center; gap: var(--sp-3); border-bottom: 1px solid var(--line); }
+.lo-tabs { display: flex; gap: var(--sp-1); flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.lo-tab { position: relative; display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.75rem 0.6rem; border: 0; background: none; color: var(--dim); font-size: var(--fs-md); font-weight: 650; white-space: nowrap; cursor: pointer; transition: color var(--t-fast); }
+.lo-tab small { font-size: 0.7rem; font-weight: 650; color: var(--faint); font-variant-numeric: tabular-nums; }
+.lo-tab:hover { color: var(--text); }
+.lo-tab.on { color: var(--text); }
+.lo-tab::after { content: ""; position: absolute; left: 0.6rem; right: 0.6rem; bottom: -1px; height: 3px; border-radius: 2px; background: var(--accent); transform: scaleX(0); transition: transform var(--t-med) var(--ease); }
+.lo-tab.on::after { transform: scaleX(1); }
+.lo-tab:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); border-radius: var(--radius-sm); }
+.lo-status { display: inline-flex; align-items: center; gap: 0.3rem; font-size: var(--fs-xs); color: var(--faint); white-space: nowrap; transition: opacity 0.6s; }
+.lo-status.saved { color: var(--gain); }
+.lo-status.error { color: var(--loss); }
+.lo-status.fade { opacity: 0; }
+.lo-status-ok { display: inline-flex; width: 0.95em; height: 0.95em; }
+.lo-status-ok svg, .lo-lock-i svg { width: 100%; height: 100%; }
+
+.lo-grid { min-height: 0; min-width: 0; overflow: hidden auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(9.25rem, 1fr)); align-content: start; gap: var(--sp-2) var(--sp-2); padding: 2px 0.35rem var(--sp-4) 2px; overscroll-behavior: contain; }
+
+/* Swatches for colours (ghost, trail, colourway before its thumbnail lands) and "No hat". */
+.lo-sw-dot { width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--sw); box-shadow: 0 0 0.8rem color-mix(in srgb, var(--sw) 55%, transparent); }
+.lo-sw-none { width: 1.6rem; height: 1.6rem; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--line-2); background: linear-gradient(135deg, transparent 46%, var(--line-2) 46% 54%, transparent 54%); }
+.lo-thumb.ready .lo-sw-none { opacity: 1; }
+
+/* ---- a tile: thumbnail, name, one line */
+.lo-tile { position: relative; display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; padding: 0.35rem 0.35rem 0.55rem; content-visibility: auto; contain-intrinsic-size: auto 9.5rem; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text); text-align: left; font: inherit; cursor: pointer; transition: background var(--t-fast); }
+.lo-tile:hover, .lo-tile.preview { background: var(--raise); }
+.lo-tile:focus-visible { outline: none; background: var(--raise-2); box-shadow: inset 0 0 0 2px var(--accent); }
+.lo-thumb { position: relative; display: grid; place-items: center; aspect-ratio: 16 / 10; margin-bottom: 0.25rem; border-radius: calc(var(--radius-sm) - 1px); overflow: hidden; background: radial-gradient(70% 70% at 50% 45%, rgba(255, 255, 255, 0.07), transparent 75%), rgba(255, 255, 255, 0.035); transition: box-shadow var(--t-fast); }
+.lo-thumb::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--rar, transparent); opacity: 0.85; }
+.lo-thumb canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; transition: opacity 0.25s; }
+.lo-thumb.ready canvas { opacity: 1; }
+.lo-thumb .pf-sw { transform: scale(1.6); transition: opacity 0.2s; }
+.lo-thumb.ready .pf-sw { opacity: 0; }
+.lo-on { position: absolute; top: 0.35rem; right: 0.35rem; display: grid; place-items: center; width: 1.25rem; height: 1.25rem; border-radius: 50%; background: var(--accent); color: var(--accent-ink); opacity: 0; transform: scale(0.6); transition: opacity var(--t-fast), transform var(--t-med) var(--ease); }
+.lo-on svg { width: 0.8rem; height: 0.8rem; }
+.lo-tile.on .lo-thumb { box-shadow: inset 0 0 0 2px var(--accent); }
+.lo-tile.on .lo-on { opacity: 1; transform: none; }
+.lo-name { display: flex; align-items: center; gap: 0.35rem; min-width: 0; font-size: var(--fs-sm); font-weight: 620; line-height: 1.25; }
+.lo-name > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lo-sub { display: flex; align-items: center; gap: 0.3rem; min-width: 0; font-size: var(--fs-xs); color: var(--rar, var(--faint)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lo-lock { color: var(--faint); display: block; }
+.lo-lock-i { display: inline-flex; width: 0.8em; height: 0.8em; margin-right: 0.25em; vertical-align: -0.05em; opacity: 0.85; }
+.lo-tile.locked .lo-thumb canvas { filter: grayscale(0.75) brightness(0.62); }
+.lo-tile.locked .lo-name { color: var(--dim); }
+.lo-tile.locked:hover .lo-thumb canvas, .lo-tile.locked.preview .lo-thumb canvas { filter: grayscale(0.2) brightness(0.9); }
+/* A secret item not earned yet (ui/loadout-view.ts veiled): its thumbnail is rendered as a silhouette already (no
+   colours in the pixels); keep it as it is, hover or not, rather than the locked tiles' dimming. */
+.lo-tile.locked .lo-thumb.lo-veiled canvas, .lo-tile.locked:hover .lo-thumb.lo-veiled canvas, .lo-tile.locked.preview .lo-thumb.lo-veiled canvas { filter: none; opacity: 1; }
+.lo-prog { position: absolute; left: 0.35rem; right: 0.35rem; bottom: 0.2rem; height: 2px; border-radius: 2px; background: var(--raise-2); overflow: hidden; }
+.lo-prog::after { content: ""; position: absolute; inset: 0; right: auto; width: calc(var(--f) * 100%); background: var(--accent); opacity: 0.8; }
+.lo-cap-state .lo-prog { left: auto; right: auto; bottom: auto; }
+
+/* Equip confirm: the ring settles in, the check pops. Locked: a small "no". */
+@media (prefers-reduced-motion: no-preference) {
+  .lo-tile.just .lo-thumb { animation: lo-equip 0.6s var(--ease); }
+  .lo-tile.just .lo-on { animation: lo-check 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.6); }
+  .lo-tile.nope { animation: lo-nope 0.32s ease; }
+}
+@keyframes lo-equip { 0% { box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); } 100% { box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 0.6rem transparent; } }
+@keyframes lo-check { from { transform: scale(0.3); } }
+@keyframes lo-nope { 25% { transform: translateX(-3px); } 50% { transform: translateX(3px); } 75% { transform: translateX(-2px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .lo-stage[data-view="bunny"] .lo-rim { animation: none; }
+  .lo-canvas, .lo-thumb canvas, .lo-on, .lo-tab::after { transition: none; }
+  .lo-stage.loading::after { animation: none; }
+}
+
+/* A locked supporter item's goal links to the Support page (ui/support.ts). The caption ignores the pointer, the link
+   doesn't; in a tile it's a span (a button can't hold a link) that opens the page on click. */
+.lo-cap a.lo-goal-link { pointer-events: auto; }
+.lo-goal-link { color: inherit; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 45%, transparent); text-underline-offset: 0.18em; cursor: pointer; }
+.lo-goal-link:hover { color: var(--text); text-decoration-color: currentColor; }
+
+/* The supporter sets' names over their items in the grid. */
+.lo-set-h { grid-column: 1 / -1; margin: 0.7rem 0 -0.1rem 0.15rem; font-size: var(--fs-sm); font-weight: 650; color: var(--dim); }
+
+/* The bunny build is independent of the equipped colourway and accessories. */
+.lo-model-row { display: flex; align-items: center; gap: 12px; padding: 0 0 14px; }
+.lo-model-row[hidden] { display: none; }
+.lo-model-label { font-size: 12px; font-weight: 700; color: var(--text); }
+.lo-modelseg button { min-width: 44px; }
+.lo-modelseg button:disabled { opacity: .45; cursor: default; }
+.lo-model-note { font-size: 11px; opacity: .6; }
+
+/* Personal supporter glow shares Support's editor; the disclosure keeps the stage usable on small screens. */
+.lo-glow-settings { flex: 0 0 auto; background: var(--raise); border-radius: var(--radius); }
+.lo-glow-settings > summary { cursor: pointer; padding: 0.65rem 0.9rem; font-weight: 600; }
+.lo-glow-settings > summary small { margin-left: 0.6rem; font-weight: 400; }
+/* Open: one row (wrapping when narrow): show, colour, intensity, aura. The summary is the heading. */
+.lo-glow-settings > .sp-glow { padding: 0.1rem 0.9rem 0.8rem; display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 2rem; }
+.lo-glow-settings .sp-glow-head .sp-h { display: none; }
+.lo-glow-settings .sp-glow-head .pf-status:empty { display: none; }
+.lo-glow-settings .sp-glow-strength { flex: 0 1 18rem; }
+.lo-glow-settings .sp-glow > small { flex-basis: 100%; }
+.lo-glow-settings .sp-glow { border: 0; }
+.lo:has(.lo-glow-settings[open]) .lo-body { min-height: 12rem; }
+
+/* A supporter item tried on: the way to get it (ui/loadout-view.ts). The caption ignores the pointer; the button doesn't. */
+.lo-cap .lo-cap-cta { align-self: flex-start; margin-top: 0.35rem; pointer-events: auto; }

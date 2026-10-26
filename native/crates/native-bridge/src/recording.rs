@@ -488,6 +488,9 @@ impl Map {
         Ok(())
     }
     pub fn finish_record(&mut self, valid: bool, reason: &str) -> Result<(), String> {
+        // External state/configuration changes also fence display-only movement history,
+        // even when no recording is open. Ending a valid recording is not a discontinuity.
+        if !valid { self.invalidate_jump_observation(); }
         let Some(mut recorder) = self.recorder.take() else {
             return Ok(());
         };

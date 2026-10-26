@@ -127,6 +127,9 @@ int main(){
             "https://notdiscord.gg/bunnyhop",              // Discord invite host as a suffix, no dot
             "javascript:alert(1)", "file:///etc/passwd", "https://", "",
         }) assert(!native::open_external(bad));
+        assert(native::external_url_allowed("https://checkout.stripe.com/c/pay/cs_test_example"));
+        assert(native::external_url_allowed("https://checkout.stripe.com:443/pay/cs_test_example"));
+        for(const char *bad:{"https://checkout.stripe.com/", "https://checkout.stripe.com:444/c/pay/x", "https://checkout.stripe.com.evil.test/c/pay/x", "https://other.checkout.stripe.com/c/pay/x", "https://checkout.stripe.com@evil.test/c/pay/x", "https://billing.stripe.com/pay/x"})assert(!native::external_url_allowed(bad));
         // A control character can be re-read by whatever the desktop hands it to.
         assert(!native::open_external("https://github.com/\n8tp"));
         assert(!native::open_external("https://github.com/"+std::string(4096,'a')));

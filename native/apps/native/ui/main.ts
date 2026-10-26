@@ -1,7 +1,11 @@
+import { applySemanticPalette } from "./semantic-palette";
+import { NativeWorldRecord } from "./world-record";
+import { worldRecord } from "../../web/src/shared-reads";
 import "../../web/src/style.css";
 import "./native.css";
+import {paintLoading} from "./loading-panel";
 import { api } from "../../web/src/api";
-import { accountChanged } from "../../web/src/ui/account-state";
+import { accountChanged,setReplayIntro } from "../../web/src/ui/account-state";
 import { localName } from "../../web/src/ui/account";
 import { h } from "../../web/src/ui/dom";
 import { mapBrowser, closeMapPanel } from "../../web/src/ui/maps";
@@ -9,11 +13,15 @@ import { onNavigate } from "../../web/src/ui/nav";
 import { onViewerRequest } from "../../web/src/viewer/request";
 import { onRaceRequest } from "../../web/src/player/race";
 import { applyState, openAuth, openExternal, send, state, onBeforeSend, LIVE_ORIGIN } from "./bridge";
+import { NativeActivityService } from "./activity-service";
+import { accountGeneration } from "../../web/src/ui/account-state";
+import { countJump,recordMapPlayed } from "../../web/src/ui/stats";
+import { mapTime } from "../../web/src/map-time";
 import { NativeRunService } from "./run-service";
 import { formatTime } from "../../web/src/timer";
 import { isStyleId } from "../../web/src/styles";
 import { onStyleChange, setSelectedStyle } from "../../web/src/ui/style-picker";
-import { settingsPanel } from "./settings-panel";
+import { settingsPanel, focusSettingsSection } from "./settings-panel";
 import { replayPanel, watchRequest, raceRequest, gauntletWatchDeps, sendReplay, playLocalReplay } from "./replays";
 import { watchGauntletSplit } from "./gauntlet-watch";
 import { NativeRoomService } from "./room-service";
@@ -21,11 +29,18 @@ import { RoomConnection } from "../../web/src/net/room";
 import { setRoomPresence,setRaceTag,currentRoom,currentRace } from "../../web/src/net/presence";
 import { serverBrowser } from "../../web/src/ui/servers";
 import { roomPanel } from "./rooms-panel";
+import { safeNativeChatUrl } from "./chat-links";
+import { NativeChatService } from "./chat-service";
+import { RoomAccountBoundary } from "./room-account";
+import { installNativeUiAudio } from "./audio";
 import { initDock } from "../../web/src/social/dock";
 import { initSocial,refreshFriends,setPlaying,setWatching } from "../../web/src/social/state";
 import { ranksScreen,leaveRanksUrl } from "../../web/src/ui/ranks";
 import { statsScreen } from "../../web/src/ui/stats-screen";
 import { profilePanel } from "./profile-panel";
+import type { ProfileOpen } from "../../web/src/ui/profile";
+import { nativeSupportScreen } from "./support-panel";
+import { openAccountPanel } from "./account-panel";
 import { tutorialPanel } from "./tutorial-panel";
 import { nativeNavigate } from "./navigation";
 import { cosmeticsPanel,initCosmetics } from "./cosmetics";
@@ -42,14 +57,22 @@ import { NativeGauntlet } from "./gauntlet-native";
 import { installNowPlaying } from "./music-now";
 import { leaveMapTeardown } from "./map-lifecycle";
 
-type Screen = "home" | "maps" | "settings" | "profile" | "replays" | "servers" | "room" | "ranks" | "stats" | "tutorial" | "loadout" | "credits" | "gauntlets" | "gauntlet";
-const SCREENS:readonly Screen[]=["home","maps","settings","profile","replays","servers","room","ranks","stats","tutorial","loadout","credits","gauntlets","gauntlet"];
+import {installGamepadNavigation} from "./gamepad";
+import {maybeStartOnboarding,openOnboarding} from "./onboarding";
+
+type Screen = "support" | "home" | "maps" | "settings" | "profile" | "replays" | "servers" | "room" | "ranks" | "stats" | "tutorial" | "loadout" | "credits" | "gauntlets" | "gauntlet";
+const SCREENS:readonly Screen[]=["support","home","maps","settings","profile","replays","servers","room","ranks","stats","tutorial","loadout","credits","gauntlets","gauntlet"];
 /** The gauntlet screen's gauntlet, and the attempt whose result it shows (web menu.ts S.gauntlet). */
 let gauntletView:{slug:string;attempt:string|null}={slug:"",attempt:null};
 /** The gauntlet split line under the finish (gauntlet-native.ts), and whether it's a split. */
 let gauntletLine:{text:string;ok:boolean}|null=null;
 let screen: Screen = "home";
 let profileId = "";
+let profileOpen:ProfileOpen={};
+/** The Loadout screen's category (web nav "loadout" slot: the unlock celebration's Equip). */
+let loadoutSlot:string|null=null;
+function openProfile(id:string,tab?:string|null,slot?:string|null):void{profileId=id;profileOpen={slot,...(["overview","loadout","runs","card","customise"].includes(tab??"")?{tab:tab as ProfileOpen["tab"]}:{})};show("profile");}
+async function ownProfile(tab?:string,slot?:string):Promise<void>{const generation=renderGeneration;const user=await api.me();if(generation!==renderGeneration||api.meStale())return;if(user)openProfile(user.id,tab,slot);else openAccountPanel("save");}
 let rankScope="all",rankPage=1,focusMap:string|undefined;
 let syncingStyle=false;
 let browser: HTMLElement | null = null;
@@ -80,7 +103,7 @@ function paintFinish():void {
   if(finishSummary.strafes!==undefined) stats.push(`${finishSummary.strafes} strafes`);
   if(finishSummary.sync!==undefined) stats.push(`${finishSummary.sync.toFixed(1)}% sync`);
   // A practice finish (web hud/result.ts): yellow, and its line says it wasn't submitted.
-  const practice=state.practice.active?practiceReason({debug:false,thirdPerson:false,scripted:false,lesson:false,mode:state.practice.mode&&!state.practice.tool,tool:state.practice.tool}):null;
+  const practice=state.practice.active?practiceReason({debug:false,thirdPerson:state.practice.thirdPerson,scripted:false,lesson:false,mode:state.practice.mode&&!state.practice.tool,tool:state.practice.tool}):null;
   host.replaceChildren(h(`section.native-finish${practice?".practice":""}`,{"aria-label":"Finished run"},
     h("p.native-finish-label",null,"Finished"),h("strong.native-finish-time",null,formatTime(finishSummary.seconds)),
     stats.length?h("p.dim.native-finish-stats",null,stats.join(" · ")):null,
@@ -93,15 +116,34 @@ function selectMap(id: string): void {
   // Another map than the attempt's: the attempt stays open on the server (Resume on its page), this client lets it go.
   if(gauntlet.id&&id!==gauntlet.map)gauntlet.leave();
   try { localStorage.setItem(LAST_MAP, id); } catch { /* private storage: no Continue */ }
-  if (id === state.map) send({ type: "resume" });
+  if (id === state.map) {if(LEAVE_FOR_GAME.has(screen)){backStack=[];screen="home";}send({ type: "resume" });}
   // The host owns loading/error status and clears it when the download settles.
   else send({ type: "selectMap", id,style:state.style,track:0 });
 }
-function show(next: Screen): void {
+/**
+ * Screens form a stack under home, as on the web (menu.ts push/pop): Back and Esc return to the screen a profile,
+ * board or page was opened from. Home is the root and clears it. An entry keeps what its screen was showing.
+ */
+interface BackEntry {screen:Screen;profileId:string;profileOpen:ProfileOpen;gauntletView:typeof gauntletView;loadoutSlot:string|null}
+let backStack:BackEntry[]=[];
+const BACK_LIMIT=16;
+function show(next: Screen,o:{back?:boolean;slot?:string|null}={}): void {
   if(screen==="ranks"&&next!=="ranks")leaveRanksUrl();
   if(next!=="gauntlets"&&next!=="gauntlet"&&next!=="profile")leaveGauntletUrl();
+  if(next==="home")backStack=[];
+  else if(!o.back&&screen!==next&&screen!=="home")backStack=[...backStack,{screen,profileId,profileOpen,gauntletView,loadoutSlot}].slice(-BACK_LIMIT);
+  if(next==="loadout"&&!o.back)loadoutSlot=o.slot??null;
   screen = next; notice(""); render();
 }
+/** Back (the header arrow, Esc): the screen this one was opened from, else the screen's own parent. */
+function back():void {
+  const entry=backStack.pop();
+  if(!entry){show(backOf(screen),{back:true});return;}
+  ({profileId,profileOpen,gauntletView,loadoutSlot}=entry);
+  show(entry.screen,{back:true});
+}
+/** Browse screens a map is picked from: once that map is up, Esc in game opens the pause menu (web: the game replaces the stack). */
+const LEAVE_FOR_GAME:ReadonlySet<Screen>=new Set(["maps","profile","ranks","stats","servers","loadout","gauntlets","gauntlet","support","credits"]);
 /** Settings, scrolled to one of its sections (the pause tabs' "All HUD settings" / "Every key"). */
 function openSettings(section:string):void {show("settings");document.getElementById(`nset-${section}`)?.scrollIntoView({block:"start"});}
 /** A gauntlet's page, or an attempt's result (ui/gauntlets.ts); replaces the gauntlet screen if it's showing. */
@@ -113,12 +155,12 @@ function openGauntlet(slug:string,attempt:string|null):void {
 const gauntletActions:GauntletScreens={open:(slug,attempt)=>openGauntlet(slug,attempt??null)};
 /** Where Back (and Esc) goes from a screen: a gauntlet's page back to the list, everything else home. */
 const backOf=(from:Screen):Screen=>from==="gauntlet"&&!state.map?"gauntlets":"home";
-/** A bunnyhop.lol page the native client has no screen for (Gauntlets, Support): opened in the browser. */
-function openWeb(path: string): void { if(!openExternal(new URL(path,LIVE_ORIGIN).href)) notice("This page is not available in the native menu."); }
+/** Route shared footer destinations into native screens; other trusted pages use the browser. */
+function openWeb(path: string): void {const url=new URL(path,LIVE_ORIGIN);if(url.origin===LIVE_ORIGIN&&url.searchParams.has("support")){show("support");return;} if(!openExternal(url.href)) notice("This page is not available in the native menu."); }
 const BACK_ARROW = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12H5M11 5.5 4.5 12 11 18.5"/></svg>';
 function heading(title: string, sub?: string|null, inner?: () => boolean): HTMLElement {
   return h("header.screen-head", null,
-    h("button.screen-back", { type: "button", "aria-label": "Back", title: "Back (Esc)", onclick: () => inner?.() || show(backOf(screen)), html: BACK_ARROW }),
+    h("button.screen-back", { type: "button", "aria-label": "Back", title: "Back (Esc)", onclick: () => inner?.() || back(), html: BACK_ARROW }),
     h("div.screen-title", null, h("h2", null, title), sub ? h("small", null, sub) : null));
 }
 let shown = "";
@@ -135,6 +177,7 @@ function render(): void {
   status.textContent = state.error || (typeof state.loading === "string" ? state.loading : state.loading ? "Loading map…" : "");
   status.dataset.kind = state.error ? "error" : "";
   syncBackdrop();
+  paintLoading();
   if (screen === "home" && state.map) {
     // The newest local replay of this map and track: the Replays tab's "last run".
     const last=state.replays.filter(item=>item.map===state.map&&item.track===state.track).sort((x,y)=>y.recordedAt-x.recordedAt)[0];
@@ -153,7 +196,7 @@ function render(): void {
         set:(key,on)=>send({type:"settings",patch:{[key]:on}}),allHud:()=>openSettings("hud")},
       keys:()=>openSettings("keys"),
       servers:()=>show(roomService.view.id?"room":"servers"),maps:()=>show("maps"),learn:()=>show("tutorial"),loadout:()=>show("loadout"),settings:()=>show("settings"),
-      profile:id=>{profileId=id;show("profile");},ranks:()=>show("ranks"),replays:()=>show("replays"),
+      profile:id=>openProfile(id),ranks:()=>show("ranks"),replays:()=>show("replays"),
       setStyle:id=>{if(state.loading)return;if(gauntlet.modeLock&&id!==state.style){notice(gauntlet.modeLock);return;}setSelectedStyle(id);render();},web:openWeb});
     pause.querySelector(".pause-head")?.append(h("div#native-finish-result"));
     for (const control of pause.querySelectorAll<HTMLButtonElement>(".rail-list button")) control.disabled = !!state.loading;
@@ -163,7 +206,7 @@ function render(): void {
   } else if (screen === "home") {
     // (Tiles land after the map index: a click during a load is refused here, not by a disabled state they missed.)
     const home = homeScreen({style:state.style,play:()=>show("maps"),pick:id=>{if(!state.loading)selectMap(id);},settings:()=>show("settings"),loadout:()=>show("loadout"),
-      profile:id=>{profileId=id;show("profile");},ranks:()=>show("ranks"),stats:()=>show("stats"),
+      profile:id=>openProfile(id),ranks:()=>show("ranks"),stats:()=>show("stats"),
       servers:()=>show(roomService.view.id?"room":"servers"),learn:()=>show("tutorial"),replays:()=>show("replays"),credits:()=>show("credits"),
       quit:()=>send({type:"quit"}),web:openWeb,gauntlets:()=>show("gauntlets"),background:(map,pb)=>{if(screen==="home"&&!state.map)requestBackdrop(map,pb);}});
     for (const control of home.querySelectorAll<HTMLButtonElement>(".home-menu button, .home-tile")) control.disabled = !!state.loading;
@@ -181,6 +224,9 @@ function render(): void {
     const head=heading("Gauntlet"),title=(text:string)=>void(head.querySelector("h2")!.textContent=text);
     const g=gauntletView;
     app.replaceChildren(h("section.panel.panel-wide.panel-gauntlet", null, head, g.attempt?gauntletResult(g.slug,g.attempt,gauntletActions,{title}):gauntletScreen(g.slug,gauntletActions,{title})));
+  } else if(screen==="support"){
+    const tabs=h("div.native-support-tabs");
+    app.replaceChildren(h("section.panel.panel-wide.native-support",null,heading("Support bunnyhop.lol"),tabs,nativeSupportScreen({tabsHost:tabs,loadout:()=>void ownProfile("loadout"),editCard:()=>void ownProfile("card")})));
   } else if (screen === "settings") {
     app.replaceChildren(h("section.panel.native-settings", null, heading("Settings"),settingsPanel()));
   } else if (screen === "credits") {
@@ -190,24 +236,31 @@ function render(): void {
   } else if(screen==="servers") {
     app.replaceChildren(h("section.panel.panel-wide.native-servers",null,heading("Play online"),serverBrowser({map:state.map,onSolo:()=>show("maps")})));
   } else if(screen==="room") {
-    app.replaceChildren(h("section.panel.panel-wide.native-room-screen",null,heading("Current room"),roomPanel(roomService,id=>{profileId=id;show("profile");},notice)));
+    app.replaceChildren(h("section.panel.panel-wide.native-room-screen",null,heading("Current room"),roomPanel(roomService,id=>openProfile(id),notice,text=>chatService.submit(text))));
   } else if(screen==="ranks") {
     app.replaceChildren(h("section.panel.panel-wide.native-ranks",null,heading("Ranks"),ranksScreen(rankScope,{page:rankPage,onChange:(scope,page)=>{rankScope=scope;rankPage=page;}})));
   } else if(screen==="stats") {
     const tabs=h("div");app.replaceChildren(h("section.panel.panel-wide.native-stats",null,heading("Statistics"),tabs,statsScreen({tabsHost:tabs,play:()=>show("maps")})));
   } else if(screen==="loadout") {
-    app.replaceChildren(h("section.panel.native-loadout",null,heading("Loadout"),cosmeticsPanel()));
+    app.replaceChildren(h("section.panel.native-loadout",null,heading("Loadout"),cosmeticsPanel((map,style)=>{if(isStyleId(style))setSelectedStyle(style);selectMap(map);},loadoutSlot)));
   } else if(screen==="tutorial") {
     app.replaceChildren(h("section.panel.native-tutorial-screen",null,heading("Tutorial"),tutorialPanel()));
-  } else app.replaceChildren(h("section.panel.panel-wide.native-profile",null,heading("Player"),profilePanel(profileId,selectMap,()=>show("loadout"))));
+  } else app.replaceChildren(h("section.panel.panel-wide.native-profile",null,heading("Player"),profilePanel(profileId,(map,style)=>{if(isStyleId(style))setSelectedStyle(style);selectMap(map);},()=>show("loadout"),profileOpen)));
 
 }
 
+const activityService=new NativeActivityService({store:{read:()=>JSON.parse(localStorage.getItem("bunnyhop:native-playtime-pending")??"null"),write:value=>{if(value)localStorage.setItem("bunnyhop:native-playtime-pending",JSON.stringify(value));else localStorage.removeItem("bunnyhop:native-playtime-pending");}},now:()=>Date.now(),generation:accountGeneration,account:async()=>{const user=await api.me();return api.meStale()?undefined:user?.id??null;},report:(seconds,dispatch)=>api.reportPlaytime(seconds,dispatch),local:delta=>{if(delta.loaded)recordMapPlayed(delta.map);for(let i=0;i<delta.jumps;i++)countJump();if(delta.map!=="bhop_lol_tutorial"){mapTime.played(delta.map,delta.seconds);for(let i=0;i<delta.attempts;i++)mapTime.attempt(delta.map);}}});
+void activityService.refreshAccount();
+window.addEventListener("bunnyhop:account",()=>{void activityService.refreshAccount();});
 function refreshAccount(): void { accountChanged(); }
+const nativeWorldRecord=new NativeWorldRecord(worldRecord,(context,seconds)=>send({type:"worldRecord",...context,seconds}));
 function receive(value: unknown): void {
+  const report=value as Record<string,unknown>|null;
+  if(report&&typeof report.map==="string"&&typeof report.style==="string"&&Number.isSafeInteger(report.track)&&Number.isSafeInteger(report.runGeneration)){nativeWorldRecord.update(report.map&&!report.loading&&api.available()?{map:report.map,style:report.style,track:Number(report.track),generation:Number(report.runGeneration)}:null);}
+
   if (value && typeof value === "object" && (value as { type?: string }).type === "auth") { refreshAccount(); return; }
   const structural=()=>JSON.stringify({map:state.map,loading:state.loading,error:state.error,paused:state.paused,style:state.style,track:state.track});
-  const before=structural();
+  const before=structural(),mapBefore=state.map;
   let finishChanged=false;
   if(value&&typeof value==="object"&&"timer" in value) {
     const next=readFinish((value as {timer:unknown}).timer);
@@ -216,9 +269,14 @@ function receive(value: unknown): void {
   // The pause screen also follows practice, the local replays (its Replays tab's last run) and the HUD switches.
   const paused=()=>JSON.stringify([state.practice,state.replays.length,state.replays[0]?.id,state.settings.hud,state.settings.crosshair,state.settings.viewmodel,state.settings.jumpStats,state.settings.strafeTrainer]);
   const pauseBefore=paused();
-  if (applyState(value) && structural()!==before) render();
+  const applied=applyState(value);
+  if(applied)applySemanticPalette(state.settings.colorBlind);
+  // A newly picked map is up: the next Esc in game is the pause menu, not the browser it was picked from.
+  if(applied&&state.map&&state.map!==mapBefore&&!state.playback.active&&LEAVE_FOR_GAME.has(screen)){backStack=[];screen="home";}
+  if (applied && structural()!==before) render();
   else if(screen==="home"&&state.map&&paused()!==pauseBefore) render();
   else if(finishChanged&&screen==="home") paintFinish();
+  paintLoading();
   if(finishChanged&&!finishSummary)gauntletLine=null;
   gauntlet.onHostState();
   roomService.hostMap(state.map);
@@ -226,7 +284,9 @@ function receive(value: unknown): void {
   if(state.map)setPlaying(state.map,state.style);setWatching(state.playback.active?state.map:false);
   window.dispatchEvent(new CustomEvent("bunnyhop:host-state",{detail:state}));
 }
-const roomService=new NativeRoomService({connect:(id,handlers)=>new RoomConnection(id,()=>state.style,handlers),ensureAccount:async()=>{try{return !!await api.me();}catch{return false;}},send});
+const roomService=new NativeRoomService({connect:(id,handlers)=>new RoomConnection(id,()=>state.style,handlers),ensureAccount:async()=>{try{const user=await api.me();if(api.meStale())return false;roomAccount.capture(user?.id??null);return !!user;}catch{return false;}},send});
+const chatService=new NativeChatService(roomService,()=>{send({type:"chatAction",action:"openRoom"} as unknown as Parameters<typeof send>[0]);show("room");});
+const roomAccount=new RoomAccountBoundary(()=>chatService.resetAccount());
 roomService.subscribe(()=>{const view=roomService.view;setRoomPresence(view.id&&view.room?{id:view.id,name:view.room.name}:null);});
 onBeforeSend(message=>{if(roomService.view.id&&((message.type==="replay"&&["play","ghost"].includes(message.action))||message.type==="replayData"||(message.type==="tutorial"&&message.action!=="stop")))roomService.leave();});
 setRaceTag(board=>{const race=roomService.view.race;return race&&race.state==="live"&&race.map===board.map&&race.style===board.style&&race.track===board.track?race.id:null;});
@@ -257,12 +317,17 @@ const runService=new NativeRunService({api,account:async()=>{const user=await ap
 let sentPlayerName:string|null=null;
 const syncPlayerName=()=>{const name=localName();if(name!==sentPlayerName){sentPlayerName=name;send({type:"playerName",name});}};
 syncPlayerName();setInterval(syncPlayerName,2000);
-window.addEventListener("bunnyhop:account",()=>{syncPlayerName();runService.refreshAccount();void api.me().then(user=>{if(!api.meStale())gauntlet.onAccount(user?.id??null);},()=>{});});
-window.bunnyhopNativeMenu = { onState: receive, onAuth: refreshAccount, onRunEvent:value=>{void runService.receive(value);},open:(next,focus)=>{if(next==="rooms")next="servers";if(next==="leave"){leaveMap();return;}if(next==="gauntlet"&&!gauntletView.slug)next="gauntlets";if(SCREENS.includes(next as Screen))show(next as Screen);if(next==="room"&&focus==="chat")document.querySelector<HTMLInputElement>(".native-room-chat-form input")?.focus();},onRoomPose:value=>{roomService.pose(value);},onRoomCommand:value=>{roomService.command(value);},
+window.addEventListener("bunnyhop:account",()=>{void roomAccount.refresh(async()=>{const user=await api.me();return api.meStale()?undefined:user?.id??null;});syncPlayerName();runService.refreshAccount();void api.me().then(user=>{if(!api.meStale())gauntlet.onAccount(user?.id??null);},()=>{});});
+const onGamepad=installGamepadNavigation(()=>!state.map||state.paused);
+const introHooks={play:selectMap,learn:()=>show("tutorial"),signIn:()=>openAccountPanel("save"),active:()=>screen==="home"&&!state.map&&!state.loading};
+setReplayIntro(()=>openOnboarding(introHooks));
+window.addEventListener("bunnyhop:intro",()=>openOnboarding(introHooks));
+window.bunnyhopNativeMenu = { onGamepad, onActivity:value=>activityService.receive(value),onState: receive, onAuth: refreshAccount, onRunEvent:value=>{void runService.receive(value);},open:(next,focus)=>{if(next==="intro"){openOnboarding(introHooks);return;}if(next==="rooms")next="servers";if(next==="leave"){leaveMap();return;}if(next==="gauntlet"&&!gauntletView.slug)next="gauntlets";if(next==="loadout")show("loadout",{slot:typeof focus==="string"?focus:null});else if(SCREENS.includes(next as Screen))show(next as Screen);if(next==="settings"&&focus)focusSettingsSection(app,focus);if(next==="room"&&focus==="chat")document.querySelector<HTMLInputElement>(".native-room-chat-form input")?.focus();},onChatSubmit:(value:unknown)=>chatService.submit(value),onChatSuggest:(value:unknown)=>chatService.suggest(value),onRoomControl:(value:unknown)=>chatService.control(value),onRoomPose:value=>{roomService.pose(value);},onRoomCommand:value=>{roomService.command(value);},
   // A friend pressed Join on your Discord activity. The host has already checked the secret.
   settle,
   onLeaveMap:teardownMap,
   joinRoom:id=>{if(typeof id!=="string"||!/^(?:[a-z0-9][a-z0-9-]{0,31}|p-[a-z2-7]{10})$/.test(id))return;void roomService.join(id).catch(()=>notice("Couldn't join that room."));show("room");},
+  onChatLink:(raw:string)=>{const url=safeNativeChatUrl(raw);if(url)nativeNavigate(url);},
   version: 2 };
 window.addEventListener("bunnyhop:native-state", (event) => receive((event as CustomEvent).detail));
 window.addEventListener("bunnyhop:native-auth", refreshAccount);
@@ -270,15 +335,15 @@ window.addEventListener("bunnyhop-native-auth", (event) => {
   if ((event as CustomEvent<{status?:string}>).detail?.status === "complete") refreshAccount();
 });
 onNavigate((request) => {
-  if (request.screen === "profile") { profileId = request.id; show("profile"); }
+  if (request.screen === "profile") openProfile(request.id,request.tab,request.slot);
   else if (request.screen === "maps") {focusMap=request.focus;show("maps");}
   else if(request.screen==="servers")show("servers");
   else if(request.screen==="ranks"){rankScope=request.scope??"all";rankPage=request.page??1;show("ranks");}
   else if(request.screen==="stats")show("stats");
-  else if(request.screen==="loadout")show("loadout");
+  else if(request.screen==="loadout")show("loadout",{slot:request.slot??null});
   else if(request.screen==="gauntlets")show("gauntlets");
   else if(request.screen==="gauntlet")openGauntlet(request.slug,request.attempt??null);
-  else if(request.screen==="support")openWeb("/?support");
+  else if(request.screen==="support")show("support");
   else notice("This screen is not available in the native menu yet.");
 });
 // These existing UI request buses must never fall back to a web-game navigation.
@@ -292,10 +357,12 @@ document.addEventListener("click", (event) => {
   nativeNavigate(anchor.href);
 }, true);
 document.addEventListener("keydown", (event) => {
+  if(event.key==="F10"){event.preventDefault();show("settings");focusSettingsSection(app,"display");return;}
+  if(event.key==="Enter"&&event.altKey){event.preventDefault();if(!event.repeat)send({type:"window",action:"toggleFullscreen"});return;}
   if (event.key !== "Escape" || event.defaultPrevented || document.querySelector("dialog[open]")) return;
   event.preventDefault();
   if (browser && closeMapPanel(browser)) return;
-  if (screen !== "home") show(backOf(screen));
+  if (screen !== "home") back();
   else if (state.map && !state.loading) send({ type: "resume" });
 });
 window.addEventListener("bunnyhop:tutorial",()=>show("tutorial"));
@@ -316,7 +383,9 @@ window.addEventListener("bunnyhop:navigate",event=>{
   if(page){openGauntlet(page[1],url.searchParams.get("attempt"));return;}
   if(url.pathname==="/gauntlets"){show("gauntlets");return;}
   const replay=/^\/replay\/([\w-]+)$/.exec(url.pathname);if(replay){void watchRequest({target:{runId:replay[1]}}).catch(error=>notice(error.message));return;}
-  const player=/^\/u\/([\w-]+)$/.exec(url.pathname);if(player){profileId=player[1];show("profile");return;}
+  const player=/^\/u\/([\w-]+)$/.exec(url.pathname);if(player){openProfile(player[1],url.searchParams.get("tab"),url.searchParams.get("slot"));return;}
+  if(url.searchParams.has("support")){show("support");return;}
+  const user=url.searchParams.get("u");if(user){openProfile(user,url.searchParams.get("tab"),url.searchParams.get("slot"));return;}
   const map=url.searchParams.get("map");if(map){if(isStyleId(url.searchParams.get("style")))setSelectedStyle(url.searchParams.get("style") as typeof state.style);selectMap(map);return;}
   if(url.pathname==="/servers")show("servers");else if(url.pathname==="/ranks")show("ranks");else if(url.pathname==="/stats")show("stats");else if(url.pathname.startsWith("/maps")){focusMap=url.pathname.split("/")[2];show("maps");}
   else if(url.pathname==="/"&&!url.search)show("home");
@@ -371,9 +440,10 @@ setGameInfo(()=>({inGame:!!state.map,client:"native",...(state.map?{map:state.ma
   ...(state.client?{nativeVersion:state.client.version,nativeBuild:state.client.build,gpu:{renderer:state.client.gpu},
     ...(state.client.viewport[0]?{viewport:`${state.client.viewport[0]}x${state.client.viewport[1]}`}:{}),dpr:state.client.dpr}:{}),
   nativeSettings:{sensitivity:state.settings.sensitivity,fov:state.settings.fov,vsync:state.settings.vsync,fpsLimit:state.settings.fpsLimit}}));
-initSocial();initDock();initCosmetics();installNowPlaying();
+initSocial();initDock();initCosmetics();installNowPlaying();installNativeUiAudio();
 installMenuBackdrop();
 watchMenuMotion();
 render();
+void maybeStartOnboarding(introHooks);
 const graphics = window.__nativeMenuGraphics;
 send({ type: "ready", origin: location.origin, webglContexts: graphics?.contexts ?? 0, webglAttempts: graphics?.attempts ?? 0 });

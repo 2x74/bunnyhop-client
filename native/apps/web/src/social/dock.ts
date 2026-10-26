@@ -631,7 +631,7 @@ export function initDock(): void {
   new MutationObserver(sync).observe(document.body, { attributes: true, attributeFilter: ["class", "data-screen"] });
   sync();
   // Esc closes the panel before the menu sees it.
-  addEventListener(
+  window.addEventListener(
     "keydown",
     (e) => {
       if (e.key !== "Escape" || !view || root!.hidden) return;

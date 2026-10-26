@@ -1,3 +1,4 @@
+import {nativeProfileFixture} from "./profile-fixture";
 import {test,expect} from "bun:test";
 import type {} from "./menu-backdrop";
 import {chromium,type Page} from "playwright";
@@ -28,7 +29,7 @@ async function open(width=1280,height=720,routes:(url:URL)=>unknown=()=>null,ind
     const body=routes(url);
     return body?r.fulfill({json:body}):r.abort();
   });
-  await page.addInitScript(()=>{(window as any).messages=[];window.addEventListener("bunnyhop:native-message",e=>(window as any).messages.push((e as CustomEvent).detail));});
+  await page.addInitScript(()=>{localStorage.setItem("bunnyhop:onboarded","1");localStorage.setItem("bunnyhop:first-seen",String(Date.now()));(window as any).messages=[];window.addEventListener("bunnyhop:native-message",e=>(window as any).messages.push((e as CustomEvent).detail));});
   await page.goto("https://bunnyhop.lol/native-home-unit?attract=bhop_eazy",{waitUntil:"domcontentloaded"});
   return {browser,page,errors};
 }
@@ -78,8 +79,8 @@ test("home is the web title screen: menu, maps to try, footer, and native routes
     expect((await messages(page)).slice(before).filter(m=>m.type==="openExternal")).toEqual([]);
     expect(await page.locator("section.panel-gauntlets .screen-title h2").textContent()).toBe("Gauntlets");
     await page.keyboard.press("Escape");expect(await page.locator("body").getAttribute("data-screen")).toBe("home");
-    // Pages the native client has no screen for open on bunnyhop.lol in the browser.
-    await page.getByRole("button",{name:"Support",exact:true}).click();expect(await last(page)).toEqual({type:"openExternal",url:"https://bunnyhop.lol/?support"});
+    // Support stays in the same native document; only an explicit checkout opens a browser.
+    const beforeSupport=(await messages(page)).length;await page.getByRole("button",{name:"Support",exact:true}).click();await page.waitForFunction(()=>document.body.dataset.screen==="support");expect((await messages(page)).slice(beforeSupport).filter(m=>m.type==="openExternal")).toEqual([]);await page.keyboard.press("Escape");
     await page.getByRole("button",{name:"Quit",exact:true}).click();expect(await last(page)).toEqual({type:"quit"});
     await page.getByRole("button",{name:"bh_aztec",exact:false}).first().click();expect(await last(page)).toEqual({type:"selectMap",id:"bh_aztec",style:"autohop",track:0});
     await page.evaluate(()=>(document.activeElement as HTMLElement)?.blur());await page.mouse.move(1275,360);
@@ -174,11 +175,12 @@ test("pause is the web pause screen: resume, restart, style, main menu, and the 
 
 test("your own profile keeps its way to the Loadout",async()=>{
   const me={id:"alice",name:"alice",provider:"email",avatarUrl:null};
-  const {browser,page}=await open(1280,720,url=>url.pathname==="/api/me"?me:url.pathname==="/api/players/alice"?{player:me,mine:true,level:{level:3},rank:{group:{name:"Hopper"}},stats:{maps:1,wrs:0,pbs:1,clearedMaps:["bhop_eazy"]}}:null);
+  const {browser,page}=await open(1280,720,url=>url.pathname==="/api/me"?me:url.pathname==="/api/players/alice"?nativeProfileFixture("alice","alice",true):null);
   try {
     await page.getByRole("button",{name:"Profile",exact:true}).click();
-    await page.locator(".native-profile-loadout").click();
-    expect(await page.locator("body").getAttribute("data-screen")).toBe("loadout");
+    await page.getByRole("tab",{name:/^Loadout/}).click();
+    await page.locator(".profile .lo-body").waitFor();
+    expect(await page.locator(".pf-layout").getAttribute("data-tab")).toBe("loadout");
   } finally {await browser.close();}
 },20_000);
 

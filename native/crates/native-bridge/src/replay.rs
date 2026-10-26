@@ -476,6 +476,7 @@ impl Map {
         if d.map_sha != self.map_sha256 {
             return Err("replay BSP digest mismatch".into());
         }
+        self.invalidate_jump_observation();
         self.game.set_settings(d.settings.checked()?);
         self.game.reset();
         self.filter = styles::Filter::new(&d.style, d.settings.physics);
@@ -668,6 +669,7 @@ pub unsafe extern "C" fn bh_ghost_load(ctx: *mut BhContext, path: *const c_char)
             let timer = m.timer.clone();
             let filter = m.filter.clone();
             let cmd = m.last_command;
+            let jump_observation = m.jump_observation;
             let result = (|| {
                 m.prepare_replay(&d)?;
                 let first = d.commands.first().copied().unwrap_or(BhCmd {
@@ -693,6 +695,7 @@ pub unsafe extern "C" fn bh_ghost_load(ctx: *mut BhContext, path: *const c_char)
             m.timer = timer;
             m.filter = filter;
             m.last_command = cmd;
+            m.jump_observation = jump_observation;
             m.transforms_dirty = true;
             let ghost = result?;
             let index = m

@@ -3,8 +3,9 @@ import "./account.css";
 import { api, ApiError } from "../api";
 import { GIFTER_BOW, GIFTER_PATH, GIFTER_TIERS } from "../creators";
 import { GIFT_MAX_RECIPIENTS, type GiftPreview, type GiftTarget, type GiftWallet } from "../gifting";
-import { me, refreshMyProfile } from "./account-state";
+import { me, refreshMyProfile, accountGeneration, onAccountChange } from "./account-state";
 import { h } from "./dom";
+import { profileWriteGuard } from "./profile-write";
 import { dismissOutside } from "./dismiss";
 
 /** A small credit coin, distinct from the transparent earned Gifter badge. */
@@ -48,11 +49,14 @@ export function openGiftDialog(o: GiftDialogOptions = {}): void {
   document.exitPointerLock?.();
   const dialog = h("dialog.acct-dialog.gift-dialog", { "aria-labelledby": "gift-title" });
   current = dialog;
+  const generation=accountGeneration();
+  const currentAccount=()=>generation===accountGeneration();
   let busy = false;
   let revision = 0;
   let preview: GiftPreview | null = null;
   let reviewed: GiftTarget | null = null;
   let userId = "";
+  let write:ReturnType<typeof profileWriteGuard>|undefined;
   let wallet: GiftWallet | null = null;
   const status = h("p.gift-status", { role: "status", "aria-live": "polite" }, "Loading your gift credits…");
   const balance = h("span.gift-balance", { "aria-label": "Available gift credits" });
@@ -137,14 +141,15 @@ export function openGiftDialog(o: GiftDialogOptions = {}): void {
   };
   quantity.addEventListener("input", invalidate);
   choose.addEventListener("click", async () => {
+    if (!currentAccount()) { dialog.close(); return; }
     if (busy || choose.disabled) return;
     try {
       const wanted = target();
       const seq = ++revision;
       setBusy(true);
       status.textContent = "Checking…";
-      preview = await api.giftPreview(wanted);
-      if (!dialog.isConnected || seq !== revision) return;
+      preview = await api.giftPreview(wanted,write);
+      if (!dialog.isConnected || seq !== revision || !currentAccount()) return;
       reviewed = wanted;
       balance.replaceChildren(giftCreditCoin(), `${preview.credits} credit${preview.credits === 1 ? "" : "s"} available`);
       const players = `${preview.cost} ${wanted.mode === "random" ? "random " : ""}player${preview.cost === 1 ? "" : "s"}`;
@@ -163,6 +168,7 @@ export function openGiftDialog(o: GiftDialogOptions = {}): void {
     } finally { setBusy(false); }
   });
   send.addEventListener("click", async () => {
+    if (!currentAccount()) { dialog.close(); return; }
     if (busy || !reviewed || !preview?.canDeliver || !userId) return;
     const key = operationKey(reviewed);
     const operation = pendingGift(key) ?? { id: crypto.randomUUID(), maxCost: preview.cost };
@@ -170,7 +176,8 @@ export function openGiftDialog(o: GiftDialogOptions = {}): void {
     setBusy(true);
     status.textContent = "Sending…";
     try {
-      const delivered = await api.sendGifts(reviewed, operation.id, operation.maxCost);
+      const delivered = await api.sendGifts(reviewed, operation.id, operation.maxCost,write);
+      if(!currentAccount()||!dialog.isConnected)return;
       rememberGift(key, null);
       showWallet(delivered.wallet);
       review.replaceChildren(h("strong", null, `${delivered.cost === 1 ? "Gift" : `${delivered.cost} gifts`} sent. Thank you!`), h("p", null, delivered.delivered.map((p) => p.name).join(", ")));
@@ -222,13 +229,15 @@ export function openGiftDialog(o: GiftDialogOptions = {}): void {
   dismissOutside(dialog, () => { if (!busy) dialog.close(); });
   dialog.addEventListener("close", () => { revision++; current = null; dialog.remove(); });
   document.body.append(dialog);
+  onAccountChange(dialog,()=>{revision++;dialog.close();});
   invalidate();
   dialog.showModal();
   void me().then(async (u) => {
     if (!u) throw new Error("Connect to your account to use gifting.");
-    userId = u.id;
+    if(!currentAccount()||!dialog.isConnected)return;
+    userId = u.id;write=profileWriteGuard(userId);
     const w = await api.giftWallet();
-    if (!dialog.isConnected) return;
+    if (!dialog.isConnected || !currentAccount()) return;
     showWallet(w);
     controls.disabled = false;
     invalidate();
@@ -245,7 +254,9 @@ export function giftWalletPanel(): HTMLElement {
   const detail = h("p.gift-wallet-note", null, "Loading…");
   const open = h("button.btn.primary", { type: "button", disabled: true, onclick: () => openGiftDialog() }, "Gift Supporter");
   const panel = h("section.sp-gifts", { "aria-label": "Your gift credits" }, h("div.sp-gifts-top", null, amount, open), track, detail);
-  const refresh = () => void me().then((u) => u ? api.giftWallet() : null).then((w) => {
+  let refreshSeq=0;
+  const refresh = () => {const generation=accountGeneration(),seq=++refreshSeq;open.disabled=true;return void me().then((u) => u ? api.giftWallet() : null).then((w) => {
+    if(generation!==accountGeneration()||seq!==refreshSeq)return;
     if (!w) { track.hidden = true; detail.hidden = false; detail.textContent = "Sign in to see your gift credits."; return; }
     amount.replaceChildren(giftCreditCoin(), `${w.credits} gift credit${w.credits === 1 ? "" : "s"}`);
     const next = GIFTER_TIERS.find(t => t.goal === w.nextTier);
@@ -257,9 +268,10 @@ export function giftWalletPanel(): HTMLElement {
     track.hidden = false;
     detail.hidden = true;
     open.disabled = false;
-  }).catch(() => { track.hidden = true; detail.hidden = false; detail.textContent = "Couldn't load your gift credits."; open.disabled = false; });
+  }).catch(() => {if(generation!==accountGeneration()||seq!==refreshSeq)return;track.hidden = true; detail.hidden = false; detail.textContent = "Couldn't load your gift credits."; open.disabled = false; });};
   const changed = () => { if (!panel.isConnected) window.removeEventListener("bunnyhop:gifts-changed", changed); else refresh(); };
   window.addEventListener("bunnyhop:gifts-changed", changed);
+  onAccountChange(panel,refresh);
   refresh();
   return panel;
 }

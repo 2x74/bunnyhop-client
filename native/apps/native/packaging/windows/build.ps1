@@ -18,7 +18,7 @@ if ((& git -C $vcpkg rev-parse HEAD).Trim() -ne $revision) { throw 'vcpkg revisi
 Run (Join-Path $vcpkg 'bootstrap-vcpkg.bat') @('-disableMetrics')
 Run (Join-Path $vcpkg 'vcpkg.exe') @('install', 'sdl3:x64-windows', 'curl:x64-windows', 'zlib:x64-windows', '--disable-metrics')
 Run 'cmake' @('-S', 'apps/native', '-B', 'apps/native/build', '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release', "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake", '-DVCPKG_TARGET_TRIPLET=x64-windows', '-DBUILD_TESTING=ON')
-$required = @('target/native-menu/menu.html', 'target/native-menu/menu-manifest.json', 'target/native-assets/viewmodels.json', 'target/native-assets/viewmodels.bin.z', 'target/native-assets/hud.rgba', 'target/native-assets/audio.json', 'target/native-assets/tutorial.json')
+$required = @('target/native-menu/menu.html', 'target/native-menu/menu-manifest.json', 'target/native-assets/viewmodels.json', 'target/native-assets/viewmodels.bin.z', 'target/native-assets/actor-animations.json', 'target/native-assets/actor-animations.bin', 'target/native-assets/tp-inspects.json', 'target/native-assets/runner.json', 'target/native-assets/runner.bin', 'target/native-assets/hud.rgba', 'target/native-assets/audio.json', 'target/native-assets/tutorial.json')
 $prebuilt = ($required | Where-Object { !(Test-Path -LiteralPath $_ -PathType Leaf) }).Count -eq 0
 if ($prebuilt) { Run 'bun' @('apps/native/build.ts', '--prebuilt-resources') }
 else {
@@ -29,6 +29,6 @@ Run 'bun' @('apps/native/tools/parity-gate.ts')
 Run 'bun' @('test', 'apps/native/tools/parity-gate.test.ts')
 Run 'ctest' @('--test-dir', 'apps/native/build', '--output-on-failure', '--no-tests=error')
 Run 'cargo' @('test', '-p', 'bunnyhop-native-bridge', '--locked')
-Run 'cargo' @('test', '-p', 'bunnyhop-core', '--features', 'native-wasm-math', '--test', 'physics_versions', '--locked')
+Run 'cargo' @('test', '-p', 'bunnyhop-core', '--features', 'native-wasm-math', '--test', 'physics_versions', '--test', 'entities', '--test', 'render', '--locked')
 Run 'bun' @('test', 'apps/native/packaging')
 Run 'bun' @('apps/native/package.ts', '--skip-build', '--version', $Version, '--dependencies', "$vcpkg/installed/x64-windows/bin", '--licenses', "$vcpkg/installed/x64-windows/share")

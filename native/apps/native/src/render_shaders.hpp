@@ -1,7 +1,8 @@
 #pragma once
 #include <string>
+#include "native_cosmetics.hpp"
 namespace native_render {
-struct Actor {std::string id,name;BhGhostFrame frame{};std::string outfit,loadout;float opacity=.45f;};
+struct Actor {std::string id,name;BhGhostFrame frame{};std::string outfit,loadout;float opacity=.45f;bool silenced=false,jumped=false,inspectHeld=false,snapped=false;unsigned attack=0,inspect=0;std::optional<Glow> playerGlow;};
 // Source coordinates throughout: Z up. Water is the site's convex-volume fog, evaluated in gamma
 // space after output conversion; planes live in a float texture to avoid fragment-uniform limits.
 inline const std::string water = R"(
@@ -9,6 +10,7 @@ uniform vec3 cameraPosition;
 uniform int waterCount;
 uniform vec3 waterMin[24],waterMax[24],waterColor[24];
 uniform vec2 waterRange[24],waterSpan[24];
+uniform vec4 waterRect[24];uniform vec2 viewportSize;
 uniform sampler2D waterPlanes;
 vec3 encode(vec3 x){x=max(x,vec3(0));return mix(x*12.92,1.055*pow(x,vec3(1./2.4))-.055,step(vec3(.0031308),x));}
 vec3 linearize(vec3 x){return mix(x/12.92,pow((x+.055)/1.055,vec3(2.4)),step(vec3(.04045),x));}
@@ -16,6 +18,7 @@ vec3 waterFog(vec3 color,vec3 p){
  vec3 d=p-cameraPosition;float len=length(d),total=0.;vec3 fog=vec3(0);vec2 range=vec2(0);
  vec3 inv=1./(d+vec3(equal(d,vec3(0)))*1e-6);
  for(int i=0;i<24;i++){if(i>=waterCount)break;
+  vec2 ndc=gl_FragCoord.xy/viewportSize*2.-1.;vec4 r=waterRect[i];if(ndc.x<r.x||ndc.y<r.y||ndc.x>r.z||ndc.y>r.w)continue;
   vec3 t0=(waterMin[i]-cameraPosition)*inv,t1=(waterMax[i]-cameraPosition)*inv;
   vec3 lo=min(t0,t1),hi=max(t0,t1);float a=max(max(max(lo.x,lo.y),lo.z),0.),b=min(min(min(hi.x,hi.y),hi.z),1.);
   for(int j=0;j<int(waterSpan[i].y);j++){
@@ -28,6 +31,13 @@ vec3 waterFog(vec3 color,vec3 p){
  if(total<=0.)return color;range/=total;return mix(color,fog/total,clamp((total-range.x)/max(range.y-range.x,1.),0.,1.));
 }
 )";
+inline const char *depth_vertex=R"(#version 330 core
+layout(location=0)in vec3 position;uniform mat4 viewProjection,model;
+void main(){gl_Position=viewProjection*model*vec4(position,1);}
+)";
+inline const char *depth_fragment=R"(#version 330 core
+void main(){}
+)";
 inline const char *world_vertex=R"(#version 330 core
 layout(location=0) in vec3 position;layout(location=1) in vec3 normal;
 layout(location=2) in vec2 baseUV;layout(location=3) in vec2 lightUV;layout(location=4) in float blendAlpha;
@@ -38,8 +48,10 @@ void main(){vec4 w=model*vec4(position,1);world=w.xyz;normalWorld=mat3(model)*no
 inline std::string world_fragment(){return std::string("#version 330 core\n")+water+R"(
 in vec2 uv,lm;in vec3 world,normalWorld;in float blend,depth;
 uniform sampler2D baseTexture,lightTexture,secondaryTexture,detailTexture,normalTexture;uniform bool hasNormal;uniform vec3 sunDirection;
+uniform sampler2D sceneColor,sceneDepth;uniform bool detailedWater;
 uniform vec3 tint;uniform float opacity,cutoff,lightmapScale,detailScale,detailBlend,timeSeconds;
 uniform int kind;uniform bool unlit,props,hasSecondary,hasDetail,aboveWater,skyPass,additive;
+uniform bool flashlight;uniform vec3 flashDirection;
 uniform vec3 skyFogColor;uniform vec3 skyFogRange;
 out vec4 color;
 void main(){
@@ -49,6 +61,7 @@ void main(){
  base*=vec4(tint,opacity);if(base.a<cutoff)discard;
  vec3 lighting=unlit?vec3(1):props?vec3(.5+.5*max(dot(n,normalize(vec3(.35,.45,.82))),0.)):texture(lightTexture,lm).rgb/lightmapScale;
  if(hasNormal){vec3 flatN=n*(gl_FrontFacing?1.:-1.);vec3 q0=dFdx(world),q1=dFdy(world);vec2 st0=dFdx(uv),st1=dFdy(uv);vec3 q1p=cross(q1,flatN),q0p=cross(flatN,q0);vec3 t=q1p*st0.x+q0p*st1.x,b=q1p*st0.y+q0p*st1.y;float len=max(dot(t,t),dot(b,b));if(len>1e-12){vec3 sampled=texture(normalTexture,uv).xyz*2.-1.;vec3 mapped=normalize((t*sampled.x+b*sampled.y)*inversesqrt(len)+flatN*sampled.z);lighting*=clamp(1.+.35*(dot(mapped,sunDirection)-dot(flatN,sunDirection)),.65,1.35);}}
+ if(flashlight){vec3 delta=world-cameraPosition;float dist=length(delta);float cone=smoothstep(.90,.975,dot(normalize(delta),flashDirection));lighting+=vec3(2.8,2.65,2.4)*cone*max(.12,dot(n,-normalize(delta)))/(1.+dist*dist/180000.);}
  vec3 col=encode(base.rgb*lighting);float alpha=base.a;
  if(kind==2){
   bool above=aboveWater&&gl_FrontFacing;if(!gl_FrontFacing)n=-n;
@@ -58,7 +71,9 @@ void main(){
   float c=clamp(abs(dot(n,v)),0.,1.);vec3 sky=linearize(vec3(.663,.757,.827));vec3 t=mix(linearize(vec3(.239,.435,.549)),tint,.45)+vec3(.06);
   if(above){float f=.02+.98*pow(1.-c,5.);col=mix(t,sky,clamp(f*.85,0.,1.));col+=vec3(.05)*smoothstep(.985,1.,dot(n,normalize(v+vec3(.3,-.2,.8))));alpha=mix(.38,.9,f);}
   else {float win=smoothstep(.55,.85,c);col=mix(tint*1.6+t*.3,sky*.9+t*.2,win);alpha=mix(.92,.35,win);}
+  if(detailedWater){vec2 screen=gl_FragCoord.xy/viewportSize;vec2 offset=g*.006*clamp(32./max(depth,1.),.15,1.);vec2 at=clamp(screen+offset,vec2(.001),vec2(.999));float background=texture(sceneDepth,at).r;if(background<=gl_FragCoord.z+.00001)at=screen;vec3 transmitted=linearize(texture(sceneColor,at).rgb);float thickness=max(0.,texture(sceneDepth,at).r-gl_FragCoord.z);float absorb=clamp(thickness*350.,.05,.8);transmitted=mix(transmitted,t,absorb*.55);float fres=.02+.98*pow(1.-c,5.);col=mix(transmitted,col,above?clamp(fres,.06,.85):.25);alpha=above?mix(.2,.85,fres):mix(.85,.25,smoothstep(.55,.85,c));}
  } else if(kind==3){float f=pow(1.-clamp(abs(dot(n,v)),0.,1.),3.);vec3 t=tint;if(all(greaterThan(t,vec3(.97))))t=linearize(vec3(.847,.91,.941));col=mix(t,vec3(1),f*.35);alpha=mix(.28,.6,f);}
+ if(kind==2||kind==3)col=encode(col);
  col=waterFog(col,world);
  if(skyPass){float f=clamp(min(skyFogRange.z,(depth-skyFogRange.x)/max(skyFogRange.y-skyFogRange.x,.001)),0.,1.);col=mix(col,additive?vec3(0):skyFogColor,f);}
  color=vec4(col,alpha);

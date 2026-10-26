@@ -1,0 +1,5 @@
+/* Shared game scoreboard in the menu document flow, independent of Tab HUD visibility. */
+.native-room-scoreboard{margin:1rem 0;min-width:0}
+body .native-room-scoreboard #mp-scoreboard:not([hidden]){position:static;display:block;left:auto;top:auto;transform:none;width:100%;max-height:none;box-sizing:border-box;font-size:.9rem;overflow:auto;background:var(--panel,#111820);box-shadow:none}
+.native-room-scoreboard .sb-hint{display:none}
+.native-room-scoreboard .sb-map{flex-wrap:wrap}.native-room-scoreboard .sb-name{min-width:130px}

@@ -1,3 +1,11 @@
+import {type AnnouncerPrefs,type AnnouncerEvent} from "./audio-settings";
+import {settingsPresets} from "./settings-presets";
+import {settingsMatch,settingsSuggestion} from "./settings-search";
+import {hudEditor} from "./hud-editor";
+import {mouseDiagnosticsPanel} from "./mouse-diagnostics";
+import {windowPanel} from "./window-panel";
+import { updatePanel } from "./update-panel";
+import { importSettings,exportSettings } from "./settings-transfer";
 import { h } from "../../web/src/ui/dom";
 import { ACTIONS, keyLabel } from "../../web/src/ui/settings";
 import { mouseCode } from "../../web/src/binds";
@@ -24,16 +32,19 @@ const actionLabel = (action: string): string => NATIVE_LABELS[action] ?? ACTIONS
 
 const BIND_GROUPS: readonly { title: string; actions: readonly BindAction[] }[] = [
   { title: "Movement", actions: ["forward", "back", "left", "right", "jump", "duck", "use"] },
-  { title: "Runs", actions: ["restart", "restartMain", "restartBonus", "cycleStyle", "mainMenu"] },
-  { title: "Weapons", actions: ["attack", "attack2", "inspect", "reload", "slot1", "slot2", "slot3", "lastWeapon", "drop", "giveUsp", "giveGlock"] },
-  { title: "Interface", actions: ["viewmodel", "hideUi", "mute"] },
+  { title: "Runs", actions: ["restart", "restartMain", "restartBonus", "cycleStyle", "setStart", "clearStart", "mainMenu"] },
+  { title: "Weapons", actions: ["attack", "attack2", "inspect", "reload", "slot1", "slot2", "slot3", "lastWeapon", "nextWeapon", "prevWeapon", "drop", "giveUsp", "giveGlock", "gunMenu"] },
+  { title: "Interface", actions: ["viewmodel", "hideUi", "mute", "keysOverlay", "hudEditor", "thirdPerson", "flashlight", "nextTrack", "chat", "commandChat", "scoreboard", "spectatorNext", "spectatorPrevious", "spectatorMode"] },
   { title: "Turning", actions: ["turnLeft", "turnRight", "turnFast"] },
   // Practice (web practice-mode/): practice mode's toggle, then the tools. During a timed run Z / X only act while the
   // !cp menu is open; C always saves.
   { title: "Practice", actions: ["practice", "noclip", "cpSave", "cpTeleport", "cpPrev", "cpNext"] },
 ];
 
-export function settingsPanel(): HTMLElement {
+export function focusSettingsSection(root:HTMLElement,id:string):boolean {
+ if(!/^[a-z][a-z-]*$/.test(id))return false;const item=root.querySelector<HTMLButtonElement>(`.nset-rail-item[data-section="${id}"]`);if(!item)return false;item.click();return true;
+}
+export function settingsPanel(initialSection?:string): HTMLElement {
   const controls = new Map<keyof NativeSettings, Control>();
   const help = h("p.nset-help", { "aria-live": "polite" });
   const status = h("p.nset-status", { role: "status" });
@@ -48,7 +59,11 @@ export function settingsPanel(): HTMLElement {
   function save(patch: Partial<NativeSettings>): void {
     const valid = settingsPatch(patch);
     if (!Object.keys(valid).length) return;
+    // Presets snapshot the setup the player just edited, even before the next host frame acknowledges it.
+    state.settings = {...state.settings,...valid,binds:{...state.settings.binds,...valid.binds}};
+    state.sensitivity = state.settings.sensitivity;
     send({ type: "settings", patch: valid });
+    window.dispatchEvent(new CustomEvent("bunnyhop:host-state"));
     say(""); flashSaved();
   }
 
@@ -86,6 +101,16 @@ export function settingsPanel(): HTMLElement {
     // The whole strip toggles, as in the game.
     el.addEventListener("click", event => { if (event.target !== input && !input.disabled) input.click(); });
     return el;
+  }
+  function choice(name:string,key:keyof NativeSettings,values:readonly string[]):HTMLElement {
+    const select=h("select",{"aria-label":name},...values.map(value=>h("option",{value},key==="colorBlind"?({off:"Off",redGreen:"Red-green",blueYellow:"Blue-yellow"} as Record<string,string>)[value]:value))) as HTMLSelectElement;
+    select.value=String(state.settings[key]);select.addEventListener("change",()=>save({[key]:select.value}));
+    const update=()=>{if(!select.isConnected){window.removeEventListener("bunnyhop:host-state",update);return;}if(document.activeElement!==select)select.value=String(state.settings[key]);};window.addEventListener("bunnyhop:host-state",update);
+    return row(name,select);
+  }
+  function color(name:string,key:keyof NativeSettings):HTMLElement {
+    const input=h("input",{type:"color",value:String(state.settings[key]),"aria-label":name}) as HTMLInputElement;
+    controls.set(key,input);input.addEventListener("change",()=>save({[key]:input.value}));return row(name,input);
   }
   function pack(name: string, key: "sfxPack" | "musicPack", defaultLabel: string, about: string): HTMLElement {
     const text: Record<AudioPack, string> = { default: defaultLabel, custom: "Custom" };
@@ -179,14 +204,19 @@ export function settingsPanel(): HTMLElement {
   const mouse = h("div.nset-cols", null,
     group("",
       number("Mouse sensitivity", "sensitivity", .01, 100, .01, "", "Same scale as the game and CS:S: each mouse count turns sensitivity × 0.022 degrees."),
+      toggle("Invert vertical look", "invertY"),
       toggle("Separate vertical sensitivity", "separateVertical", "", "Use a different sensitivity for looking up and down."),
       number("Vertical sensitivity", "verticalSensitivity", .01, 100, .01, "", "Only used when separate vertical sensitivity is on.")),
     group("Turnbinds",
       speed("Yaw speed", "yawSpeed", DEFAULT_YAW_SPEED, "cl_yawspeed", "How fast Turn left / Turn right (+left / +right) turn you, in degrees per second. Bind them under Keys > Turning. Only 210°/s supports ranked submission; other speeds keep the attempt local."),
       h("p.nset-hint", null, "For ranked turn binds, set both speeds to 210°/s. Using another speed keeps that attempt as a local replay.")));
   const display = h("div.nset-cols", null,
+    windowPanel(save),
+    group("Local replay vault",toggle("Capture device personal bests", "capturePbScreenshots", "Local result screenshots", "Saves a result screenshot when this computer records a faster completed run. Device bests are separate from account records.")),
     group("Video",
+      choice("Player model","playerModel",["bunny","runner"]),
       number("Field of view", "fov", 60, 130, 1, "", "Field of view in degrees.", "°"),
+      choice("Water","waterQuality",["simple","refracted"]),toggle("Zone outlines","zonesVisible"),toggle("World effects","effectsVisible"),toggle("Trigger and clip overlays","triggersVisible"),
       toggle("Source look", "sourceLook", "", "Maps with HDR lighting get CS:S's auto exposure and bloom. Other maps look the same either way. Off is the plain look."),
       toggle("Vertical sync", "vsync", "", "Locks frames to your monitor's refresh rate. Off gives the lowest input latency."),
       number("FPS limit", "fpsLimit", 0, 1000, 1, "0 is unlimited", "Caps the frame rate. 0 means no cap; otherwise 30–1000.")));
@@ -195,7 +225,7 @@ export function settingsPanel(): HTMLElement {
   // Each element gets an X and a Y: a slider and a box showing the same
   // number, in percent of the screen. Untouched elements show where the game
   // draws them by default; Reset puts one back there.
-  const positions = new Map<HudElementId, { x: HTMLInputElement[]; y: HTMLInputElement[]; reset: HTMLButtonElement; row: HTMLElement }>();
+  const positions = new Map<HudElementId, { x: HTMLInputElement[]; y: HTMLInputElement[]; reset: HTMLButtonElement; row: HTMLElement; visibility:HTMLInputElement; elementScale:HTMLInputElement }>();
   const layout = (): HudLayout => ({ ...state.settings.hudLayout });
   const placed = (id: HudElementId) => state.settings.hudLayout[id] ?? defaultPosition(id);
   let layoutTimer = 0, pendingLayout: HudLayout | null = null;
@@ -227,10 +257,14 @@ export function settingsPanel(): HTMLElement {
     const reset = h("button.link-btn", { type: "button", title: `Put ${label} back where it was`, onclick: () => {
       const next = layout(); delete next[id]; saveLayout(next, true); refreshPositions(true);
     } }, "Reset") as HTMLButtonElement;
-    const el = row(label, h("div.nset-pos", null, axis("x"), axis("y"), reset), "", `Where ${label.toLowerCase()} sits on screen, in percent: X from the left, Y from the top.`,
+    const visibility=h("input.switch",{type:"checkbox",checked:placed(id).visible!==false,"aria-label":`${label} visible`}) as HTMLInputElement;
+    const elementScale=h("input.num-input",{type:"number",min:.5,max:3,step:.1,value:placed(id).scale??1,"aria-label":`${label} scale`}) as HTMLInputElement;
+    visibility.addEventListener("change",()=>saveLayout({...layout(),[id]:{...placed(id),visible:visibility.checked}},true));
+    elementScale.addEventListener("change",()=>{const value=elementScale.valueAsNumber;if(Number.isFinite(value)&&value>=.5&&value<=3)saveLayout({...layout(),[id]:{...placed(id),scale:value}},true);});
+    const el = row(label, h("div.nset-pos", null, axis("x"), axis("y"), visibility, elementScale, reset), "", `Where ${label.toLowerCase()} sits on screen, in percent: X from the left, Y from the top.`,
       `${label} position x y move hud layout advanced`);
     el.classList.add("nset-row-pos");
-    positions.set(id, { ...inputs, reset, row: el });
+    positions.set(id, { ...inputs, reset, row: el,visibility,elementScale });
     return el;
   }
   function refreshPositions(force = false): void {
@@ -238,6 +272,8 @@ export function settingsPanel(): HTMLElement {
       const at = placed(id), moved = !!state.settings.hudLayout[id];
       for (const name of ["x", "y"] as const)
         for (const input of item[name]) if (force || input !== document.activeElement) input.value = String(at[name]);
+      if(force||document.activeElement!==item.visibility)item.visibility.checked=at.visible!==false;
+      if(force||document.activeElement!==item.elementScale)item.elementScale.value=String(at.scale??1);
       item.reset.disabled = !moved; item.row.classList.toggle("moved", moved);
     }
   }
@@ -247,15 +283,27 @@ export function settingsPanel(): HTMLElement {
     h("div.nset-advanced-body", null,
       h("div.nset-advanced-bar", null, h("span.nset-hint", null, "X is from the left, Y from the top, in percent of the screen."), resetAll),
       group("", ...HUD_ELEMENTS.map(item => position(item.id, item.label)))));
-  window.addEventListener("resize", () => refreshPositions());
+  const resizePositions=()=>refreshPositions();
+  window.addEventListener("resize", resizePositions);
 
+  const editorRow = row("Drag to place", hudEditor(layout, next => { saveLayout(next); refreshPositions(); }), "", "Move HUD elements with the mouse or arrow keys", "hud editor drag layout position");
+  editorRow.style.display = "block";
   const hud = h("div.nset-hud", null,
     h("div.nset-cols", null,
       group("HUD",
         toggle("HUD", "hud", "", "Speed, timer and keys."),
         hudScale(),
+        choice("Color-blind palette","colorBlind",["off","redGreen","blueYellow"]),
         toggle("Crosshair", "crosshair"),
-        toggle("Viewmodel", "viewmodel", "", "Your weapon and hands.")),
+        toggle("Viewmodel", "viewmodel", "", "Your weapon and hands."),
+        toggle("Speed graph", "speedGraph"),toggle("Speed colors","speedColors"),toggle("Jump gain ticks","gainTicks"),toggle("Perfect jump indicator","perfectIndicator"),toggle("Keys overlay", "keysOverlay"),choice("Keys style","keysStyle",["classic","minimal","keycaps"])),
+      group("Ghosts",choice("Ghost model","ghostModel",["same","bunny","runner"]),toggle("Show ghosts","showGhost"),number("Ghost opacity","ghostOpacity",0,1,.05),toggle("Fade near camera","ghostNearFade"),toggle("Ghost name tag","ghostTag")),
+      group("Crosshair",
+        choice("Style","crosshairStyle",["cross","cross-dot","dot","t","circle","none"]),color("Color","crosshairColor"),
+        number("Arm length","crosshairSize",0,40,.5),number("Gap","crosshairGap",0,40,.5),number("Thickness","crosshairThickness",.5,10,.5),number("Opacity","crosshairAlpha",0,1,.05),toggle("Outline","crosshairOutline")),
+      group("Viewmodel",
+        number("Weapon FOV","viewmodelFov",30,100,1),number("Offset X","viewmodelX",-10,10,.1),number("Offset Y","viewmodelY",-10,10,.1),number("Offset Z","viewmodelZ",-10,10,.1),
+        toggle("Left hand","viewmodelLeftHand"),number("Bob","viewmodelBob",0,2,.1),number("Sway","viewmodelSway",0,2,.1)),
       group("Jump stats",
         toggle("Jump stats", "jumpStats", "JHUD / SSJ", "Speed and gain per jump, ported from the game's !ssj."),
         jumpStatsMode(),
@@ -267,13 +315,14 @@ export function settingsPanel(): HTMLElement {
     advanced);
   // The soundtrack as the host reports it (state.music): what's playing, Skip, and whether it's available at all.
   const musicNote = h("p.nset-hint.nset-music-note");
+  const classicNote=h("p.nset-hint",{role:"status","data-testid":"classic-audio-status"});
   const musicNow = h("span.nset-hint.nset-music-now");
   const skip = h("button.btn", { type: "button", onclick: () => send({ type: "music", action: "next" }) }, "Skip ▸") as HTMLButtonElement;
   function musicRow(): HTMLElement {
     return row("Next track", h("div.btn-row", null, musicNow, skip), "", "Skips to the next track. The play / pause and previous / next controls also sit on the home and pause screens.", "music skip song next track now playing soundtrack ost");
   }
   function refreshMusic(): void {
-    const music = state.music;
+    const music = state.music;classicNote.textContent=state.audio?.classicStatus||(state.settings.classicSounds?"Classic CS:S sounds will load from the current map’s hosted content; unavailable cues keep bunnyhop.lol sounds.":"Classic CS:S sounds are off.");
     const custom = state.settings.musicPack === "custom";
     musicNow.textContent = music?.title ? `${music.playing ? "" : "Paused · "}${music.title.replace(/\s*\((menu|game)\)\s*$/i, "")}` : "";
     skip.disabled = !music?.available;
@@ -284,16 +333,38 @@ export function settingsPanel(): HTMLElement {
       : music.status || (custom ? "No playable tracks in the bgm folder yet." : "The soundtrack isn't available in this build.");
   }
 
+  const announcerControls=new Map<keyof AnnouncerPrefs,HTMLInputElement|HTMLSelectElement>();
+  function announcerSave(patch:Partial<AnnouncerPrefs>):void{save({announcer:{...state.settings.announcer,...patch}});}
+  function announcerToggle(name:string,key:"enabled"|"finish"|"movement"|"local"|"server"):HTMLElement{
+    const input=h("input.switch",{type:"checkbox",checked:state.settings.announcer[key],"aria-label":name}) as HTMLInputElement;
+    input.addEventListener("change",()=>announcerSave({[key]:input.checked}));announcerControls.set(key,input);return row(name,input);
+  }
+  function announcerNumber(name:string,key:"volume"|"speedThreshold"|"highSpeedThreshold"|"streakThreshold"|"ljThreshold",min:number,max:number,step=1):HTMLElement{
+    const input=h("input.num-input",{type:"number",min,max,step,value:state.settings.announcer[key],"aria-label":name}) as HTMLInputElement;
+    input.addEventListener("change",()=>{const n=input.valueAsNumber;if(Number.isFinite(n)&&n>=min&&n<=max&&(key==="volume"||Number.isInteger(n)))announcerSave({[key]:n});else input.value=String(state.settings.announcer[key]);});announcerControls.set(key,input);return row(name,input);
+  }
+  function announcerChoice(name:string,event:AnnouncerEvent):HTMLElement{
+    const select=h("select",{"aria-label":name},...["off","perfect","godlike","holyshit"].map(value=>h("option",{value},value))) as HTMLSelectElement;select.value=state.settings.announcer[event];
+    select.addEventListener("change",()=>announcerSave({[event]:select.value}));announcerControls.set(event,select);
+    const preview=h("button.btn",{type:"button",onclick:()=>send({type:"announce",event,preview:state.settings.announcer[event]})},"Preview");return row(name,h("div.btn-row",null,select,preview));
+  }
+  const refreshAnnouncer=()=>{if(!announcerControls.size)return;for(const [key,input] of announcerControls){if(document.activeElement===input)continue;if(input instanceof HTMLInputElement&&input.type==="checkbox")input.checked=Boolean(state.settings.announcer[key]);else input.value=String(state.settings.announcer[key]);}};
+  window.addEventListener("bunnyhop:host-state",refreshAnnouncer);
   const audio = h("div.nset-cols", null,
     group("Volume",
       number("Volume", "volume", 0, 1, .01, "0 to 1", "Master volume for sound effects and music."),
-      toggle("Mute", "muted")),
+      toggle("Mute", "muted"),number("Sound effects","sfxVolume",0,1,.05),number("Music level","musicVolume",0,1,.05),number("UI cues","uiVolume",0,1,.05),toggle("Footsteps","footsteps","Walking and ladder steps; jumps and landings stay audible"),toggle("Speed wind","wind"),toggle("Other player sounds","othersAudio"),toggle("Ghost sounds","ghostAudio"),
+      number("Wind / ambience level","ambienceVolume",0,1,.05),toggle("Mute sound effects","muteSfx"),toggle("Mute music","muteMusic"),toggle("Mute UI cues","muteUi"),toggle("Mute wind / ambience","muteAmbience"),toggle("Mute in background","muteInBackground"),toggle("Classic CS:S sounds","classicSounds","Downloads optional original movement, water and knife sounds; missing cues keep bunnyhop.lol sounds"),toggle("Perfect hop tick","perfectTick","Quiet tick on measured perfect hops in Scroll / Legit")),
+    group("Announcer",
+      announcerToggle("Enable announcer","enabled"),announcerNumber("Announcer volume","volume",0,1,.05),announcerToggle("Finish announcements","finish"),announcerToggle("Movement announcements","movement"),announcerToggle("Local announcements","local"),announcerToggle("Server announcements","server"),
+      announcerChoice("Personal best","pb"),announcerChoice("World record","wr"),announcerChoice("Speed milestone","speed"),announcerChoice("High speed milestone","highSpeed"),announcerChoice("Perfect hop streak","streak"),announcerChoice("Longjump","lj"),
+      announcerNumber("Speed threshold","speedThreshold",300,10000),announcerNumber("High speed threshold","highSpeedThreshold",300,10000),announcerNumber("Streak threshold","streakThreshold",2,100),announcerNumber("Longjump distance threshold","ljThreshold",200,1000)),
     group("Packs",
       pack("Sound effects", "sfxPack", "bunnyhop.lol SFX",
         "Custom sounds come from the sound folder in your Bunnyhop Native data directory. Name a file after the cue it replaces, such as jump.wav; WAV, MP3, FLAC or Ogg all work. Cues you haven't supplied keep the bunnyhop.lol sound."),
       pack("Music", "musicPack", "bunnyhop.lol OST", "bunnyhop.lol OST is the game's own soundtrack, included with the app and played offline: every track in the menus, the game tracks in game. Custom plays WAV, MP3, FLAC or Ogg files from the bgm folder in your Bunnyhop Native data directory, in filename order."),
       musicRow(),
-      musicNote));
+      musicNote,classicNote));
 
   const discordState = h("span.nset-state");
   const discord = h("div.nset-cols", null,
@@ -315,7 +386,7 @@ export function settingsPanel(): HTMLElement {
     buttons.set(action, [...(buttons.get(action) ?? []), button]);
     return row(label, h("div.nset-bind", null, button, add, clear), "", "Click, then press a key, mouse button or wheel direction. Escape cancels. Escape and F10 stay reserved. Up to four keys each.", `${label} ${action} key bind`);
   };
-  const keys = h("div.nset-cols", null, ...BIND_GROUPS.map(item => item.title === "Practice"
+  const keys = h("div.nset-cols", null, group("Restart protection",toggle("Hold to restart","holdRestart","500 ms","Hold restart keys for half a second. Wheel bindings act immediately.")), ...BIND_GROUPS.map(item => item.title === "Practice"
     ? group(item.title, ...item.actions.map(bindRow), toggle("Teleport keeps speed", "practiceKeepVelocity", "", "On: a checkpoint teleport gives you back the speed you saved it with. Off: you arrive standing still."))
     : group(item.title, ...item.actions.map(bindRow))));
   const turnAdvanced = h("details.nset-advanced", null,
@@ -325,15 +396,23 @@ export function settingsPanel(): HTMLElement {
       group("",
         bindRow("turnFast"),
         speed("Modifier yaw speed", "yawSpeedAlt", DEFAULT_YAW_SPEED_ALT, "While Turn modifier is held", "The speed Turn left / Turn right use while Turn modifier is held, in degrees per second. Set it above your yaw speed for a fast turn (170, 210 ...) or below it for a slow one."))));
-  const mouseBody = h("div.nset-hud", null, mouse, turnAdvanced);
+  const mouseBody = h("div.nset-hud", null, mouse, turnAdvanced, group("High-rate input", toggle("Input diagnostics overlay", "mouseDiagnostics", "", "Measure delivered mouse motion while playing. Polling rate is configured in your mouse software, not in the game.")), mouseDiagnosticsPanel());
 
+  const transferInput=h("textarea",{rows:12,"aria-label":"Settings JSON",placeholder:"Paste exported native or web preferences JSON"}) as HTMLTextAreaElement;
+  const transferStatus=h("p.nset-hint",{role:"status"});
+  const transfer=h("div",null,group("Named presets",row("Settings presets",settingsPresets(()=>state.settings,save),"Save setups on this device")),group("Import and export",
+    row("Export",h("button.btn",{type:"button",onclick:()=>{transferInput.value=exportSettings(state.settings);transferInput.focus();transferInput.select();transferStatus.textContent="Settings selected. Copy them to save a backup.";}},"Export JSON")),
+    row("Import",h("button.btn",{type:"button",onclick:()=>{try{if(transferInput.value.length>65536)throw new Error("Settings JSON exceeds 64 KiB.");const result=importSettings(JSON.parse(transferInput.value));if(!Object.keys(result.patch).length)throw new Error("No supported settings found.");save(result.patch);transferStatus.textContent=result.unsupported.length?`Applied supported settings. Not imported: ${result.unsupported.join(", ")}.`:"Settings imported.";}catch(error){transferStatus.textContent=(error as Error).message;}}},"Apply JSON"))),transferInput,transferStatus);
   const sections: Section[] = [
     { id: "mouse", title: "Mouse", body: mouseBody },
     { id: "display", title: "Display", body: display },
     { id: "hud", title: "HUD", body: hud },
+    { id: "hud-editor", title: "HUD editor", body: group("Placement", editorRow) },
     { id: "audio", title: "Audio", body: audio },
     { id: "keys", title: "Keys", body: keys },
     { id: "discord", title: "Discord", body: discord },
+    { id: "transfer", title: "Import / export", body: transfer },
+    { id: "updates", title: "Updates", body: updatePanel() },
   ];
 
   const scroll = h("div.nset-scroll", { tabindex: "-1" });
@@ -346,7 +425,7 @@ export function settingsPanel(): HTMLElement {
     const el = h("section.nset-sec", { id: `nset-${section.id}`, "aria-labelledby": `nset-${section.id}-h` },
       h("div.nset-sec-head", null, h("h2", { id: `nset-${section.id}-h` }, section.title), section.id === "discord" ? discordState : null), section.body);
     scroll.append(el);
-    const item = h("button.nset-rail-item", { type: "button", onclick: () => { el.scrollIntoView({ block: "start", behavior: "smooth" }); mark(section.id); } }, section.title);
+    const item = h("button.nset-rail-item", { type: "button", "data-section":section.id, onclick: () => { el.scrollIntoView({ block: "start", behavior: "smooth" }); mark(section.id); } }, section.title);
     railItems.set(section.id, item); rail.append(item);
   }
   // Light the section whose head has reached the top of the page.
@@ -371,13 +450,13 @@ export function settingsPanel(): HTMLElement {
     let anyShown = false;
     for (const section of sections) {
       const el = document.getElementById(`nset-${section.id}`); if (!el) continue;
-      const sectionHit = !!query && section.title.toLowerCase().includes(query);
+      const sectionHit = !!query && settingsMatch(section.title,query);
       let sectionShown = false;
       for (const groupEl of el.querySelectorAll<HTMLElement>(".nset-group")) {
-        const groupHit = sectionHit || (!!query && (groupEl.querySelector(".nset-group-title")?.textContent ?? "").toLowerCase().includes(query));
+        const groupHit = sectionHit || (!!query && settingsMatch(groupEl.querySelector(".nset-group-title")?.textContent ?? "",query));
         let groupShown = false;
         for (const rowEl of groupEl.querySelectorAll<HTMLElement>(".nset-row")) {
-          const shown = !query || groupHit || (rowEl.dataset.search ?? "").includes(query);
+          const shown = !query || groupHit || settingsMatch(rowEl.dataset.search ?? "",query);
           rowEl.hidden = !shown; groupShown ||= shown;
         }
         groupEl.hidden = !groupShown; sectionShown ||= groupShown;
@@ -391,6 +470,11 @@ export function settingsPanel(): HTMLElement {
       railItems.get(section.id)?.classList.toggle("dim", !sectionShown);
     }
     empty.hidden = anyShown;
+    empty.replaceChildren("No settings match.");
+    if (!anyShown && query) {
+      const suggestion = settingsSuggestion(query,[...scroll.querySelectorAll<HTMLElement>(".nset-row")].map(el=>el.dataset.search??""));
+      if(suggestion) empty.append(" Did you mean ", h("button.link-btn",{type:"button",onclick:()=>{search.value=suggestion;filter();search.focus();}},suggestion), "?");
+    }
     if (query) scroll.scrollTop = 0;
   }
   search.addEventListener("input", filter);
@@ -473,5 +557,10 @@ export function settingsPanel(): HTMLElement {
   const onState = (): void => { if (!root.isConnected) { window.removeEventListener("bunnyhop:host-state", onState); return; } refresh(); };
   window.addEventListener("bunnyhop:host-state", onState);
   refresh();
+  const openSection=(event:Event)=>{if(!root.isConnected){window.removeEventListener("bunnyhop:settings-section",openSection);return;}const id=(event as CustomEvent<unknown>).detail;if(typeof id==="string")focusSettingsSection(root,id);};
+  window.addEventListener("bunnyhop:settings-section",openSection);
+  const disposal=new MutationObserver(()=>{if(!root.isConnected){window.removeEventListener("bunnyhop:host-state",refreshAnnouncer);window.removeEventListener("resize",resizePositions);window.removeEventListener("bunnyhop:host-state",onState);window.removeEventListener("bunnyhop:settings-section",openSection);disposal.disconnect();}});
+  disposal.observe(document.body,{childList:true,subtree:true});
+  if(initialSection)requestAnimationFrame(()=>{if(root.isConnected)focusSettingsSection(root,initialSection);});
   return root;
 }

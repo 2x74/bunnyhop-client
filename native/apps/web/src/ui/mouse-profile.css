@@ -1,0 +1,11 @@
+.pf-mouse { padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); min-width: 0; }
+.pf-mouse dl { display: flex; flex-wrap: wrap; gap: var(--sp-3) var(--sp-5); margin: 0; }
+.pf-mouse dl > div { min-width: 0; }
+.pf-mouse dt { font-size: .75rem; opacity: .65; }
+.pf-mouse dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.mouse-dialog { width: min(34rem, 94vw); box-sizing: border-box; }
+.mouse-dialog .acct-body { gap: 2px; padding-top: var(--sp-2); }
+.mouse-dialog .set-row:first-child { border-radius: var(--r-2) var(--r-2) 0 0; }
+.mouse-dialog .set-row:nth-last-child(2) { border-radius: 0 0 var(--r-2) var(--r-2); }
+.mouse-dialog .range { width: 13rem; }
+.mouse-actions { display: flex; justify-content: flex-end; margin-top: var(--sp-4); }

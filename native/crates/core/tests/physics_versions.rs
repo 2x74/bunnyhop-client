@@ -17,7 +17,7 @@ use bunnyhop_core::game::{
     PHYSICS_FIX_DAMAGE_ACTIVATOR, PHYSICS_FIX_FUNC_LOD, PHYSICS_FIX_GLOCK_BURST, PHYSICS_FIX_LADDER, PHYSICS_FIX_WATER_JUMP,
     PHYSICS_FIX_TEMPLATE_NAMES, PHYSICS_FIX_USP_SILENCER, PHYSICS_FIX_WEAPON_COMMANDS, PHYSICS_FIX_WEAPON_RESTORE, PHYSICS_FIX_WEAPONS,
     PHYSICS_LATEST, PHYSICS_V1, PHYSICS_V2, PHYSICS_V3, PHYSICS_V4, PHYSICS_V5, PHYSICS_V6, PHYSICS_V7, PHYSICS_V8, PHYSICS_V9,
-    PHYSICS_V10, PHYSICS_V11, PHYSICS_V12, PHYSICS_V13, PHYSICS_V14, PHYSICS_V15, PHYSICS_V16, PHYSICS_V17, PHYSICS_FIX_MAP_PLAYER_IO, PHYSICS_FIX_INCLINE, PHYSICS_FIX_EDGE, PHYSICS_FIX_TRIGGER_JUMP, PHYSICS_FIX_TELEHOP, PHYSICS_FIX_DOWNHILL, PHYSICS_FIX_MAP_MAX_VELOCITY, PHYSICS_FIX_TRAIN_SPAWN, PHYSICS_FIX_MAP_DOOR_TRAVEL, PHYSICS_FIX_DOOR_START_OPEN, PHYSICS_FIX_CROUCH_GROUND, physics_fixes,
+    PHYSICS_V10, PHYSICS_V11, PHYSICS_V12, PHYSICS_V13, PHYSICS_V14, PHYSICS_V15, PHYSICS_V16, PHYSICS_V17, PHYSICS_V18, PHYSICS_FIX_SURFACE_LADDER, PHYSICS_FIX_MAP_PLAYER_IO, PHYSICS_FIX_INCLINE, PHYSICS_FIX_EDGE, PHYSICS_FIX_TRIGGER_JUMP, PHYSICS_FIX_TELEHOP, PHYSICS_FIX_DOWNHILL, PHYSICS_FIX_MAP_MAX_VELOCITY, PHYSICS_FIX_TRAIN_SPAWN, PHYSICS_FIX_MAP_DOOR_TRAVEL, PHYSICS_FIX_DOOR_START_OPEN, PHYSICS_FIX_CROUCH_GROUND, physics_fixes,
 };
 use bunnyhop_core::game::{EVENT_MAP_TELEPORT, EVENT_TELEPORTED, IN_JUMP};
 use bunnyhop_core::physics::ConvexBrush;
@@ -38,7 +38,7 @@ fn v(version: u32) -> Settings {
 #[test]
 fn versions_and_fix_bits() {
     assert_eq!(Settings::css_bhop().physics_version, PHYSICS_V1, "native default stays v1");
-    assert_eq!(PHYSICS_LATEST, PHYSICS_V17);
+    assert_eq!(PHYSICS_LATEST, PHYSICS_V18);
     assert_eq!(physics_fixes(PHYSICS_V1), Some(0));
     assert_eq!(physics_fixes(PHYSICS_V2), Some(PHYSICS_FIX_PLAYERCLIP | PHYSICS_FIX_UNDUCK_JUMP));
     assert_eq!(
@@ -86,6 +86,7 @@ fn versions_and_fix_bits() {
         let fixes = v(version).configuration().fixes;
         assert!(!fixes.rngfix_incline && !fixes.rngfix_edge && !fixes.uphill, "v{version} keeps the old slopes");
     }
+    assert_eq!(physics_fixes(PHYSICS_V18), Some(v16 | rngfix | PHYSICS_FIX_SURFACE_LADDER));
     let v17 = v(PHYSICS_V17).configuration().fixes;
     assert!(v17.downhill && v17.rngfix_incline && v17.rngfix_edge);
     assert!(!v17.uphill && !v17.rampbug, "v17 uses RNGFix's uphill, not the optional rule's");
@@ -96,14 +97,14 @@ fn versions_and_fix_bits() {
     assert_eq!(physics_fixes(PHYSICS_DIAG | PHYSICS_FIX_KNIFE), Some(PHYSICS_FIX_KNIFE));
     assert_eq!(physics_fixes(PHYSICS_DIAG | PHYSICS_FIX_VPHYSICS_SEPARATION), Some(PHYSICS_FIX_VPHYSICS_SEPARATION));
     assert_eq!(physics_fixes(0), None);
-    assert_eq!(physics_fixes(18), None);
+    assert_eq!(physics_fixes(19), None);
     // v7 used all 16 bits of the old diagnostic mask (base 0x1_0000); v8's fix is bit 16, so the base moved to bit 24
     // with 24 fix bits; v15's fix is bit 24, so it moved again to bit 25 with 25 fix bits, v16's is bit 25, so it moved
     // to bit 26, and v17's four are bits 26..29, so it is now bit 30 with 30 fix bits. Versions keep their fix sets bit
     // for bit (above), and the mask is never serialized.
     assert_eq!(v7, 0xffff);
-    assert_eq!(PHYSICS_DIAG, 1 << 30);
-    assert_eq!(PHYSICS_DIAG_FIXES, 0x3fff_ffff);
+    assert_eq!(PHYSICS_DIAG, 1 << 31);
+    assert_eq!(PHYSICS_DIAG_FIXES, 0x7fff_ffff);
     assert_eq!(v8, 0x1_ffff);
     assert_eq!(v8 & !PHYSICS_DIAG_FIXES, 0, "every fix fits the diagnostic mask");
     assert_eq!(physics_fixes(PHYSICS_DIAG | 0xffff), Some(0xffff), "v7's fixes alone");
@@ -119,7 +120,7 @@ fn versions_and_fix_bits() {
     assert_eq!(physics_fixes(PHYSICS_V14), Some(0x00ff_ffff), "v14 sets every bit of the old 24-bit mask");
     assert_eq!(physics_fixes(PHYSICS_V15), Some(0x01ff_ffff), "v15 sets every bit of the old 25-bit mask");
     assert_eq!(physics_fixes(PHYSICS_V16), Some(0x03ff_ffff), "v16 sets every bit of the old 26-bit mask");
-    assert_eq!(physics_fixes(PHYSICS_V17), Some(PHYSICS_DIAG_FIXES), "v17 sets every diagnostic fix bit");
+    assert_eq!(physics_fixes(PHYSICS_V17), Some(0x3fff_ffff), "v17 preserves its original fix bits");
     for fix in [PHYSICS_FIX_INCLINE, PHYSICS_FIX_EDGE, PHYSICS_FIX_TRIGGER_JUMP, PHYSICS_FIX_TELEHOP] {
         assert_eq!(physics_fixes(PHYSICS_DIAG | fix), Some(fix));
     }
