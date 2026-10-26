@@ -132,7 +132,7 @@ DownloadedMap download_map(const std::string &id, const std::filesystem::path &c
     auto offline_detail=[&](){
         try{return read(index,4*MiB);}catch(...){}
         // Migrate completed downloads made before the per-map index existed.
-        Bytes newest;std::filesystem::file_time_type date=std::filesystem::file_time_type::min();
+        Bytes newest;std::filesystem::file_time_type date=(std::filesystem::file_time_type::min)();
         const auto maps=cache/"maps";if(std::filesystem::is_directory(maps))for(const auto &entry:std::filesystem::directory_iterator(maps)){
             if(cancel&&cancel->load())throw std::runtime_error("Map download cancelled");
             if(!entry.is_directory()||!hash_id(entry.path().filename().string())||!std::filesystem::is_regular_file(entry.path()/(id+".bsp"))||!std::filesystem::is_regular_file(entry.path()/"manifest.json"))continue;
