@@ -350,6 +350,8 @@ int run(const Options &opt) {
     // The tutorial's lessons are practice; its final course (bonus 1) is a ranked run with its own board, as on the
     // web (tutorial/flow.ts FINAL_TRACK) and the server.
     auto tutorial_practice=[&](){return map_id==tutorial_map&&!(tutorial&&tutorial->is_active()&&tutorial->lesson_id()=="final");};
+    // The signed-in account's display name for replay headers (menu "playerName"), "player" until it says.
+    std::string replay_player="player";
     auto begin_record=[&]() {
         if(turn_admission.local_only)score_notice.clear();
         turn_admission.reset();
@@ -360,7 +362,7 @@ int run(const Options &opt) {
         const auto stamp=std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         record_path=(cache/"replays"/(map_id+"-"+std::to_string(stamp)+".bhr")).string();
         require(bh_record_identity(core.get(),identity.at("build").get<std::string>().c_str()),core.get(),"Setting native release identity");
-        require(bh_record_begin(core.get(),"",active_style.c_str(),"native-player",100),core.get(),"Starting native recording");
+        require(bh_record_begin(core.get(),"",active_style.c_str(),replay_player.c_str(),100),core.get(),"Starting native recording");
         bh_record_loadout(core.get(),packed_loadout.c_str());
     };
     auto reset=[&]() {
@@ -879,6 +881,7 @@ int run(const Options &opt) {
                     else if(action=="stop")reset();
                 }
                 else if(type=="sensitivity") {preferences=native::patch_settings(preferences,{{"sensitivity",message.at("value")}});native::save_settings(cache/"settings.json",preferences);apply_preferences();}
+                else if(type=="playerName") replay_player=native::replay_player_name(message.value("name",std::string()));
                 else if(type=="cosmetics") {
                     outfit=message.value("outfit",std::string());packed_loadout=message.value("packedLoadout",std::string());
                     if(outfit.size()>64||packed_loadout.size()>200)throw std::runtime_error("Invalid cosmetic selection");

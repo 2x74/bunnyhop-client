@@ -2,6 +2,7 @@ import "../../web/src/style.css";
 import "./native.css";
 import { api } from "../../web/src/api";
 import { accountChanged } from "../../web/src/ui/account-state";
+import { localName } from "../../web/src/ui/account";
 import { h } from "../../web/src/ui/dom";
 import { mapBrowser, closeMapPanel } from "../../web/src/ui/maps";
 import { onNavigate } from "../../web/src/ui/nav";
@@ -251,7 +252,12 @@ const runService=new NativeRunService({api,account:async()=>{const user=await ap
   if(message.message) notice(message.message);
   if(message.status==="verified") refreshAccount();
 }});
-window.addEventListener("bunnyhop:account",()=>{runService.refreshAccount();void api.me().then(user=>{if(!api.meStale())gauntlet.onAccount(user?.id??null);},()=>{});});
+// Replay headers carry the display name the web stamps on its own (account.ts's local name, "player" when signed out
+// or a guest without one). Sent at start, on account changes and whenever a rename lands, never repeated otherwise.
+let sentPlayerName:string|null=null;
+const syncPlayerName=()=>{const name=localName();if(name!==sentPlayerName){sentPlayerName=name;send({type:"playerName",name});}};
+syncPlayerName();setInterval(syncPlayerName,2000);
+window.addEventListener("bunnyhop:account",()=>{syncPlayerName();runService.refreshAccount();void api.me().then(user=>{if(!api.meStale())gauntlet.onAccount(user?.id??null);},()=>{});});
 window.bunnyhopNativeMenu = { onState: receive, onAuth: refreshAccount, onRunEvent:value=>{void runService.receive(value);},open:(next,focus)=>{if(next==="rooms")next="servers";if(next==="leave"){leaveMap();return;}if(next==="gauntlet"&&!gauntletView.slug)next="gauntlets";if(SCREENS.includes(next as Screen))show(next as Screen);if(next==="room"&&focus==="chat")document.querySelector<HTMLInputElement>(".native-room-chat-form input")?.focus();},onRoomPose:value=>{roomService.pose(value);},onRoomCommand:value=>{roomService.command(value);},
   // A friend pressed Join on your Discord activity. The host has already checked the secret.
   settle,

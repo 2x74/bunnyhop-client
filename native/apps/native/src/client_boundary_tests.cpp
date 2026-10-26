@@ -39,6 +39,12 @@ int main(){
     movement.tick(state,.01,NAN,"metal",hear);
     for(int i=0;i<15;i++)movement.tick(state,.01,NAN,"metal",hear);
     assert(cues.size()==1&&cues[0].id=="step_metal"&&cues[0].gain==.55);
+    {   // Replay header names: the account's display name as the web stamps it, else the web's "player".
+        assert(native::replay_player_name("luna")=="luna"&&native::replay_player_name("Sync Goblin2429")=="Sync Goblin2429");
+        assert(native::replay_player_name("")=="player"&&native::replay_player_name(std::string(65,'a'))=="player");
+        assert(native::replay_player_name("a\nb")=="player"&&native::replay_player_name(std::string("a\0b",3))=="player");
+        assert(native::replay_player_name("Ünïcødé")=="Ünïcødé");
+    }
     const auto original=native::default_settings();
     {   // Turnbinds: yaw speeds and their binds.
         assert(original["yawSpeed"]==210.0&&original["yawSpeedAlt"]==210.0);

@@ -9,7 +9,7 @@ import {resolve} from "node:path";
 const out=resolve(import.meta.dir,"../../../target/native-menu/web-port");
 const INDEX={maps:["bhop_eazy","bh_aztec","bhop_1","bhop_13","bhop_ambience","bhop_easyhop","bhop_2_easy","bhop_alley"].map(name=>({name,title:name,tier:1,size:1<<20}))};
 const messages=(page:Page)=>page.evaluate(()=>(window as any).messages as {type:string;[key:string]:unknown}[]);
-const last=async(page:Page)=>(await messages(page)).filter(m=>m.type!=="cosmetics"&&m.type!=="menuAppearance").at(-1);
+const last=async(page:Page)=>(await messages(page)).filter(m=>m.type!=="cosmetics"&&m.type!=="menuAppearance"&&m.type!=="playerName").at(-1);
 
 /** The home screen's own backdrop request (sent once backgroundPick has the map index): waited for, never assumed. */
 const homeBackdrop=(page:Page)=>page.waitForFunction(()=>(window as any).messages.some((m:{type:string})=>m.type==="menuBackdrop"));
@@ -32,6 +32,25 @@ async function open(width=1280,height=720,routes:(url:URL)=>unknown=()=>null,ind
   await page.goto("https://bunnyhop.lol/native-home-unit?attract=bhop_eazy",{waitUntil:"domcontentloaded"});
   return {browser,page,errors};
 }
+
+test("replay headers get the web's local display name, falling back to player",async()=>{
+  const {browser,page,errors}=await open();
+  try {
+    const names=async()=>(await messages(page)).filter(m=>m.type==="playerName");
+    await page.waitForFunction(()=>(window as any).messages.some((m:{type:string})=>m.type==="playerName"));
+    expect(await names()).toEqual([{type:"playerName",name:"player"}]);
+    // A sign-in or rename stores the name where the web's session.ts reads it; the host hears it once.
+    await page.evaluate(()=>{localStorage.setItem("bunnyhop:name","Sync Goblin2429");window.dispatchEvent(new Event("bunnyhop:account"));});
+    expect(await names()).toEqual([{type:"playerName",name:"player"},{type:"playerName",name:"Sync Goblin2429"}]);
+    await page.evaluate(()=>window.dispatchEvent(new Event("bunnyhop:account")));
+    expect((await names()).length).toBe(2);
+    // With no stored name the next headers fall back to the web's "player" again.
+    await page.evaluate(()=>localStorage.removeItem("bunnyhop:name"));
+    await page.waitForFunction(()=>(window as any).messages.filter((m:{type:string})=>m.type==="playerName").length===3);
+    expect((await names()).at(-1)).toEqual({type:"playerName",name:"player"});
+    expect(errors).toEqual([]);
+  } finally {await browser.close();}
+},30_000);
 
 test("home is the web title screen: menu, maps to try, footer, and native routes",async()=>{
   const {browser,page,errors}=await open();

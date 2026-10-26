@@ -34,6 +34,8 @@ export type MenuMessage =
   | { type: "hudToast"; text: string; ms: number; tone?: "good" | "bad"; key?: "gauntlet" | "practice" }
   /** The soundtrack's previous / play-pause / next (now-playing). */
   | { type: "music"; action: "previous" | "toggle" | "next" }
+  /** The name native replay headers carry: the web's local display name ("bunnyhop:name", else "player"). */
+  | { type: "playerName"; name: string }
   | RunServiceStatus;
 
 export const PRACTICE_ACTIONS=["toggle","menu","noclip","save","tele","prev","next","keepVelocity"] as const;
