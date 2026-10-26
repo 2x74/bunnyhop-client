@@ -11,7 +11,7 @@ validation. Check each release's notes for the artifacts and checks that actuall
 completed.
 
 Current source targets production v0.0.27, physics **17**, timer rules **2**, and canonical verifier
-`bunnyhop-web/35dac92ea33c`. See [current compatibility and qualification](docs/current-compatibility.md).
+`bunnyhop-web/240b3b26afe5`. See [current compatibility and qualification](docs/current-compatibility.md).
 Published archives have their own source/build identity and admission status.
 
 ## Native gameplay, shared game rules

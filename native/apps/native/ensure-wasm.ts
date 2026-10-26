@@ -5,9 +5,9 @@ import { dirname, resolve } from "node:path";
 import { PHYSICS_VERSION } from "../web/src/core";
 import { TIMER_RULES } from "../web/src/timer";
 
-export const CANONICAL_WASM_URL = "https://bunnyhop.lol/assets/bunnyhop_core-Ux2Os1qz.wasm";
-export const CANONICAL_WASM_SHA256 = "35dac92ea33c874d4434f738f089b4b137d492ce8a1f9e4945ef6609c27d8778";
-export const CANONICAL_WASM_BYTES = 1415101;
+export const CANONICAL_WASM_URL = "https://bunnyhop.lol/assets/bunnyhop_core-CgiWj2m5.wasm";
+export const CANONICAL_WASM_SHA256 = "240b3b26afe569b98eb59a73ee4b8f809d360511bda0479ae2be9edb67b8757f";
+export const CANONICAL_WASM_BYTES = 1421405;
 /** The game rules the pinned verifier was built for; release identity records and checks them. */
 export const CANONICAL_PHYSICS = 17;
 export const CANONICAL_TIMER_RULES = 2;
