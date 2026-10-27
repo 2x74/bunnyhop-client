@@ -5,6 +5,7 @@ import {hudEditor} from "./hud-editor";
 import {mouseDiagnosticsPanel} from "./mouse-diagnostics";
 import {windowPanel} from "./window-panel";
 import { updatePanel } from "./update-panel";
+import { dataFolderPanel } from "./data-folder-panel";
 import { importSettings,exportSettings } from "./settings-transfer";
 import { h } from "../../web/src/ui/dom";
 import { ACTIONS, keyLabel } from "../../web/src/ui/settings";
@@ -412,6 +413,7 @@ export function settingsPanel(initialSection?:string): HTMLElement {
     { id: "keys", title: "Keys", body: keys },
     { id: "discord", title: "Discord", body: discord },
     { id: "transfer", title: "Import / export", body: transfer },
+    { id: "data", title: "Game data", body: dataFolderPanel() },
     { id: "updates", title: "Updates", body: updatePanel() },
   ];
 

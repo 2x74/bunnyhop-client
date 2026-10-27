@@ -11,6 +11,8 @@ export interface VideoExportState {available:boolean;reason:string;state:"idle"|
 export type MenuMessage =
   | {type:"mapLoad";action:"cancel"|"retry"}
   | { type:"update"; action:"check"|"download"|"cancel"|"reveal"|"status" }
+  | { type:"dataFolder"; action:"status"|"pick"|"useDefault"|"cancelChoice"|"cancelPending"|"forget"|"reveal" }
+  | { type:"dataFolder"; action:"move"; when:"now"|"later" }
   | {type:"videoExport";action:"start"|"cancel";options?:VideoExportOptions}
   | { type: "ready"; origin: string; webglContexts: number; webglAttempts: number }
   | { type: "resume" | "restart" | "quit" }

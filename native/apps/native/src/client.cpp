@@ -30,6 +30,8 @@
 #include "room_modes.hpp"
 #include "tutorial.hpp"
 #include "discord_rpc.hpp"
+#include "data_location.hpp"
+#include "relaunch.hpp"
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
@@ -189,6 +191,18 @@ std::vector<BhZone> timer_zones(const nlohmann::json &detail) {
     return out;
 }
 
+// Settings -> Game data: set by "Move now"; main() starts a fresh copy once run()
+// has returned and every file in the old data folder is closed.
+static bool relaunch_requested=false;
+// The system folder picker answers on its own schedule (possibly another thread);
+// static so a late answer during shutdown never lands in freed memory.
+struct DataFolderPicker{std::mutex m;bool open=false,done=false;std::optional<std::string> result;std::string error;};
+static DataFolderPicker data_picker;
+static void data_folder_picked(void *userdata,const char *const *files,int){
+    auto *picker=static_cast<DataFolderPicker*>(userdata);std::lock_guard lock(picker->m);
+    picker->open=false;picker->done=true;if(!files)picker->error=SDL_GetError();else if(files[0])picker->result=files[0];
+}
+
 int run(const Options &opt) {
     using CorePtr=std::unique_ptr<BhContext,decltype(&bh_destroy)>;
     CorePtr core(nullptr,&bh_destroy);
@@ -235,7 +249,41 @@ int run(const Options &opt) {
     char *pref_path=SDL_GetPrefPath("bunnyhop.lol","Bunnyhop Native");
     if(!pref_path) throw std::runtime_error("Cannot find the native client data directory");
     const std::string isolated=!opt.runtime_smoke.empty()?opt.runtime_smoke:!opt.presentation_smoke.empty()?opt.presentation_smoke:opt.video_smoke;
-    const std::filesystem::path cache=isolated.empty()?std::filesystem::path(pref_path):std::filesystem::path(isolated)/"data"; SDL_free(pref_path);
+    namespace data_location=native::data_location;
+    const std::filesystem::path default_root=std::filesystem::path(pref_path); SDL_free(pref_path);
+    // Settings -> Game data: the folder may live elsewhere (another drive), and a
+    // move chosen there runs here, before anything opens the data folder.
+    auto location=isolated.empty()?data_location::read(default_root):data_location::Location{default_root,std::nullopt};
+    std::string data_startup_notice;bool data_unavailable=false;
+    auto folder_available=[](const std::filesystem::path &p){std::error_code ec;return std::filesystem::is_directory(p,ec);};
+    if(location.pending){
+        if(!folder_available(location.active)&&!data_location::same(location.active,default_root))
+            data_startup_notice="Your game data couldn't move: "+data_location::utf8(location.active)+" isn't available. The move will run once it is.";
+        else{
+            const auto from=location.active,to=*location.pending;data_location::Progress progress;std::string error;std::atomic<bool> finished=false;
+            std::thread worker([&]{try{error=data_location::move(from,to,default_root,progress);}catch(const std::exception &e){error=e.what();}finished=true;});
+            while(!finished){
+                // Quit is ignored: stopping halfway would leave data split across folders.
+                SDL_Event ignored;while(SDL_PollEvent(&ignored)){}
+                int w=0,h=0;SDL_GetWindowSizeInPixels(window.get(),&w,&h);gl.Viewport(0,0,w,h);gl.ClearColor(.03f,.03f,.045f,1);gl.Clear(GL_COLOR_BUFFER_BIT);
+                const double total=double(progress.total.load()),done=double(progress.done.load());char line[96];
+                std::snprintf(line,sizeof line,"%.0f%%   %.2f / %.2f GB",total>0?100*done/total:0.,done/1e9,total/1e9);
+                hud.draw_panel(w,h,"Moving game data",{"To "+data_location::utf8(to),line,"The game starts as soon as this finishes."});
+                SDL_GL_SwapWindow(window.get());SDL_Delay(33);
+            }
+            worker.join();
+            if(error.empty()){location={to,std::nullopt};data_startup_notice="Game data moved to "+data_location::utf8(to);}
+            else{location.pending.reset();data_startup_notice="Moving game data failed and nothing changed: "+error;}
+            try{data_location::write(default_root,location);}catch(const std::exception &e){std::cerr<<"Data folder: "<<e.what()<<'\n';}
+            std::cerr<<"Data folder: "<<data_startup_notice<<'\n';
+        }
+    }
+    if(!data_location::same(location.active,default_root)&&!folder_available(location.active)){
+        data_unavailable=true;
+        data_startup_notice="Your game data folder "+data_location::utf8(location.active)+" isn't available (is the drive connected?). Using the default folder this session.";
+    }
+    const std::filesystem::path cache=!isolated.empty()?std::filesystem::path(isolated)/"data":data_unavailable?default_root:location.active;
+    std::optional<data_location::Choice> data_choice;std::string data_notice,last_data_state;
     std::filesystem::create_directories(cache/"replays");
     // Created empty so a player looking for where their own audio goes finds
     // the folders already there rather than having to guess the names.
@@ -377,6 +425,7 @@ int run(const Options &opt) {
     std::string gauntlet_id,gauntlet_map;
     nlohmann::json gauntlet_progress;
     std::string toast_text;auto toast_until=std::chrono::steady_clock::time_point{};
+    if(!data_startup_notice.empty()){toast_text=data_startup_notice;toast_until=std::chrono::steady_clock::now()+std::chrono::seconds(8);data_notice=data_startup_notice;}
     const native::SsjFields ssj_fields;
     auto reset_feedback=[&](bool incomplete_history=false) {
         hud.reset_history();
@@ -1248,6 +1297,31 @@ int run(const Options &opt) {
                     if(action=="check")updater.check();else if(action=="download")updater.download();else if(action=="cancel")updater.cancel();else if(action=="reveal")updater.reveal();
                     last_update.clear();
                 }
+                else if(type=="dataFolder") {
+                    // The host only ever moves to a folder it validated from its own
+                    // picker (data_choice); the menu never supplies a path.
+                    const auto action=message.value("action",std::string());
+                    auto save_location=[&]{try{data_location::write(default_root,location);return true;}catch(const std::exception &e){data_notice=e.what();return false;}};
+                    if(action=="pick"){
+                        bool start=false;{std::lock_guard lock(data_picker.m);if(!data_picker.open){data_picker.open=true;data_picker.done=false;data_picker.result.reset();data_picker.error.clear();start=true;}}
+                        if(start){data_notice.clear();const auto from=data_location::utf8(cache);SDL_ShowOpenFolderDialog(&data_folder_picked,&data_picker,window.get(),from.c_str(),false);}
+                    }
+                    else if(action=="useDefault"){data_notice.clear();data_choice=data_location::choose(default_root,cache,default_root);}
+                    else if(action=="cancelChoice")data_choice.reset();
+                    else if(action=="move"){
+                        const bool now=message.value("when",std::string())=="now";
+                        if(data_unavailable)data_notice="Reconnect the drive with your data folder first, or use the default folder.";
+                        else if(!data_choice||!data_choice->problem.empty())data_notice="Pick a folder first.";
+                        else{location.pending=data_choice->target;if(save_location()){const auto where=data_location::utf8(data_choice->target);data_choice.reset();
+                            if(now){relaunch_requested=true;running=false;}
+                            else{data_notice="Your game data will move to "+where+" the next time the game starts.";toast(data_notice,5000);}}
+                            else location.pending.reset();}
+                    }
+                    else if(action=="cancelPending"){location.pending.reset();if(save_location())data_notice="Data move cancelled.";}
+                    else if(action=="forget"&&data_unavailable){location={default_root,std::nullopt};if(save_location()){data_unavailable=false;data_notice="Using the default folder from now on.";}}
+                    else if(action=="reveal")SDL_OpenURL(data_location::file_url(cache).c_str());
+                    last_data_state.clear();
+                }
                 else if(type=="openExternal") native::open_external(message.at("url").get<std::string>());
                 else if(type=="auth") menu->evaluate_js("window.bunnyhopNativeMenu?.onAuth("+message.dump()+")");
                 else if(type=="menuError") {error=message.value("error",std::string("Menu failed"));std::cerr<<"Menu: "<<error<<'\n';}
@@ -1726,6 +1800,16 @@ int run(const Options &opt) {
             const nlohmann::json mouse_state={{"active",mouse_diagnostics.active},{"seconds",m.seconds},{"eventsPerSecond",m.events_per_second},{"events",m.events},{"peakBurst",m.peak_burst},{"averageAgeMs",m.average_age_ms},{"maxAgeMs",m.max_age_ms},{"maxPumpMs",m.max_pump_ms},{"relative",SDL_GetWindowRelativeMouseMode(window.get())},{"systemScaling",SDL_GetHintBoolean(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE,false)},{"sdl",std::to_string(SDL_VERSIONNUM_MAJOR(sdl_version))+"."+std::to_string(SDL_VERSIONNUM_MINOR(sdl_version))+"."+std::to_string(SDL_VERSIONNUM_MICRO(sdl_version))}};
             menu->evaluate_js("window.dispatchEvent(new CustomEvent('bunnyhop:mouse-diagnostics',{detail:"+mouse_state.dump()+"}))");
             const auto update_state=updater.state().dump();if(update_state!=last_update){menu->evaluate_js("window.dispatchEvent(new CustomEvent('bunnyhop:update',{detail:"+update_state+"}))");last_update=update_state;}
+            {   // Settings -> Game data
+                std::optional<std::string> picked;std::string pick_error;bool picking=false;
+                {std::lock_guard lock(data_picker.m);picking=data_picker.open;if(data_picker.done){data_picker.done=false;picked=std::move(data_picker.result);data_picker.result.reset();pick_error=std::move(data_picker.error);data_picker.error.clear();}}
+                if(picked)data_choice=data_location::choose(data_location::from_utf8(*picked),cache,default_root);else if(!pick_error.empty())data_notice="Folder picker: "+pick_error;
+                nlohmann::json data_state={{"path",data_location::utf8(cache)},{"defaultPath",data_location::utf8(default_root)},{"isDefault",data_location::same(cache,default_root)},
+                    {"configured",data_location::utf8(location.active)},{"unavailable",data_unavailable},{"pending",location.pending?nlohmann::json(data_location::utf8(*location.pending)):nlohmann::json(nullptr)},
+                    {"picking",picking},{"notice",data_notice},{"choice",data_choice?nlohmann::json{{"path",data_location::utf8(data_choice->target)},{"problem",data_choice->problem}}:nlohmann::json(nullptr)}};
+                const auto encoded_data=data_state.dump(-1,' ',false,nlohmann::json::error_handler_t::replace);
+                if(encoded_data!=last_data_state){menu->evaluate_js("window.dispatchEvent(new CustomEvent('bunnyhop:data-folder',{detail:"+encoded_data+"}))");last_data_state=encoded_data;}
+            }
             const auto encoded=state.dump();
             if(encoded!=last_ui) {menu->evaluate_js("window.bunnyhopNativeMenu?.onState("+encoded+")");last_ui=encoded;}
             ui_time=now;
@@ -1827,7 +1911,9 @@ int main(int argc,char **argv) {
                          "Frame-limited mode simulates one fixed tick per rendered frame; screenshot implies --frames 1.\n";
             return 0;
         }
-        return run(opt);
+        const int code=run(opt);
+        if(relaunch_requested&&!native::relaunch(executable_path()))std::cerr<<"Bunnyhop native: could not restart; start the game again to move your data\n";
+        return code;
     } catch(const std::exception &error) {
         std::cerr << "Bunnyhop native: " << error.what() << '\n';
         if(interactive_errors) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,native::app_name,error.what(),nullptr);
