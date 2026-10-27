@@ -59,6 +59,15 @@ void near(const std::string &where, const char *field, const nlohmann::json &exp
 }  // namespace
 
 int main(int argc, char **argv) {
+    {   // JHUD gain colours: red 0-59, orange 60-69, green 70-79, blue 80-89, white 90+.
+        using native::GainBand;using native::gain_band;
+        assert(gain_band(0)==GainBand::red&&gain_band(59.99f)==GainBand::red);
+        assert(gain_band(60)==GainBand::orange&&gain_band(69.9f)==GainBand::orange);
+        assert(gain_band(70)==GainBand::green&&gain_band(79.9f)==GainBand::green);
+        assert(gain_band(80)==GainBand::blue&&gain_band(89.9f)==GainBand::blue);
+        assert(gain_band(90)==GainBand::white&&gain_band(100)==GainBand::white&&gain_band(130)==GainBand::white);
+    }
+
     const std::string path = argc > 1 ? argv[1] : "ssj-oracle.json";
     std::ifstream file(path);
     if (!file) {
@@ -251,11 +260,11 @@ int main(int argc, char **argv) {
     }
     {
         native::MovementFeedback f;
-        f.ssj.jump=6;f.ssj_line="stale";f.ssj_good=true;f.ssj_was_in_start=true;f.ssj_was_noclip=true;
+        f.ssj.jump=6;f.ssj_line="stale";f.ssj_gain=87.5f;f.ssj_was_in_start=true;f.ssj_was_noclip=true;
         f.strafe_ground_ticks=99;f.strafe_reading=native::StrafeReading{100,native::StrafeHint::less_deadtime};
         f.strafe_trainer.tick(false,300,90,450.f,0.f);
         f.reset(false,false,true);
-        assert(f.ssj.jump==0&&f.ssj_line.empty()&&!f.ssj_good&&!f.strafe_reading);
+        assert(f.ssj.jump==0&&f.ssj_line.empty()&&!f.ssj_gain&&!f.strafe_reading);
         assert(f.strafe_ground_ticks==0&&!f.ssj_was_in_start&&!f.ssj_was_noclip);
         assert(!f.strafe_trainer.tick(false,300,200,450.f,0.f)); // no stale yaw
         for(int i=0;i<100;++i)assert(!f.history_ready(false,false,false));

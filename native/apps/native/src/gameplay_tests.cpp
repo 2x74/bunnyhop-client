@@ -42,9 +42,11 @@ int main(){
     guard.press("restart",0,true,true,false);assert(!guard.frame(600,true,true));
     BhZone zone{};zone.maxs[0]=zone.maxs[1]=100;zone.mins[2]=1;zone.maxs[2]=50;
     BhState player{};player.grounded=1;player.position[0]=player.position[1]=50;
-    std::vector<BhZone> zones={zone};assert(native::start_point_problem(player,zones,0,false).empty());
-    player.position[0]=15;assert(!native::start_point_problem(player,zones,0,false).empty());player.position[0]=50;
-    assert(!native::start_point_problem(player,zones,0,true).empty());player.velocity[0]=2;assert(!native::start_point_problem(player,zones,0,false).empty());player.velocity[0]=0;
+    std::vector<BhZone> zones={zone};assert(native::start_point_problem(player,false).empty());assert(native::start_point_in_zone(player,zones,0));
+    player.position[0]=15;assert(native::start_point_problem(player,false).empty());assert(!native::start_point_in_zone(player,zones,0));player.position[0]=50; // allowed, outside the zone
+    assert(!native::start_point_problem(player,true).empty()); // noclip refuses
+    player.velocity[0]=2;assert(!native::start_point_problem(player,false).empty());player.velocity[0]=0;
+    player.grounded=0;assert(!native::start_point_problem(player,false).empty());player.grounded=1;
     native::StartPoints points;points.save("map",0,player,90,-5);native::StartPoints restored;assert(restored.load(native::Json::parse(points.points.dump())));assert(restored.get("map",0)->yaw==90);assert(!restored.get("map",1));
     assert(!restored.load({{"bad",{{"position",{1,2,3}},{"yaw",0},{"pitch",100}}}}));
     native::ReplayCamera camera;native::Input view;float eye[3]{};player.view_offset_z=64;

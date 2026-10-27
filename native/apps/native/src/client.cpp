@@ -30,6 +30,8 @@
 #include "room_modes.hpp"
 #include "tutorial.hpp"
 #include "discord_rpc.hpp"
+#include "data_location.hpp"
+#include "relaunch.hpp"
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
@@ -70,7 +72,7 @@ struct Options {
     std::string map, content_root, screenshot, online_map, menu_html = BUNNYHOP_MENU_HTML, menu_smoke;
     uint64_t frames = 0;
     double sensitivity = 2;
-    bool hidden = false, help = false, no_menu = false, sensitivity_set=false, menu_home_smoke=false;
+    bool hidden = false, help = false, no_menu = false, windowed = false, sensitivity_set=false, menu_home_smoke=false;
     std::string style="autohop", replay,tutorial_lesson,runtime_smoke,video_smoke,presentation_smoke;bool tutorial_demo=false;
     // Render checks: a fixed eye (Source x, y, z) and pitch, yaw, with no HUD or viewmodel.
     std::optional<std::array<float,5>> camera;
@@ -93,6 +95,7 @@ Options options(int argc, char **argv) {
         else if (arg == "--menu-smoke") out.menu_smoke = value();
         else if (arg == "--menu-home-smoke") {out.menu_smoke=value();out.menu_home_smoke=true;}
         else if (arg == "--no-menu") out.no_menu = true;
+        else if (arg == "--windowed") out.windowed = true;
         else if (arg == "--content-root") out.content_root = value();
         else if (arg == "--screenshot") out.screenshot = value();
         else if (arg == "--camera") {
@@ -188,6 +191,18 @@ std::vector<BhZone> timer_zones(const nlohmann::json &detail) {
     return out;
 }
 
+// Settings -> Game data: set by "Move now"; main() starts a fresh copy once run()
+// has returned and every file in the old data folder is closed.
+static bool relaunch_requested=false;
+// The system folder picker answers on its own schedule (possibly another thread);
+// static so a late answer during shutdown never lands in freed memory.
+struct DataFolderPicker{std::mutex m;bool open=false,done=false;std::optional<std::string> result;std::string error;};
+static DataFolderPicker data_picker;
+static void data_folder_picked(void *userdata,const char *const *files,int){
+    auto *picker=static_cast<DataFolderPicker*>(userdata);std::lock_guard lock(picker->m);
+    picker->open=false;picker->done=true;if(!files)picker->error=SDL_GetError();else if(files[0])picker->result=files[0];
+}
+
 int run(const Options &opt) {
     using CorePtr=std::unique_ptr<BhContext,decltype(&bh_destroy)>;
     CorePtr core(nullptr,&bh_destroy);
@@ -234,7 +249,41 @@ int run(const Options &opt) {
     char *pref_path=SDL_GetPrefPath("bunnyhop.lol","Bunnyhop Native");
     if(!pref_path) throw std::runtime_error("Cannot find the native client data directory");
     const std::string isolated=!opt.runtime_smoke.empty()?opt.runtime_smoke:!opt.presentation_smoke.empty()?opt.presentation_smoke:opt.video_smoke;
-    const std::filesystem::path cache=isolated.empty()?std::filesystem::path(pref_path):std::filesystem::path(isolated)/"data"; SDL_free(pref_path);
+    namespace data_location=native::data_location;
+    const std::filesystem::path default_root=std::filesystem::path(pref_path); SDL_free(pref_path);
+    // Settings -> Game data: the folder may live elsewhere (another drive), and a
+    // move chosen there runs here, before anything opens the data folder.
+    auto location=isolated.empty()?data_location::read(default_root):data_location::Location{default_root,std::nullopt};
+    std::string data_startup_notice;bool data_unavailable=false;
+    auto folder_available=[](const std::filesystem::path &p){std::error_code ec;return std::filesystem::is_directory(p,ec);};
+    if(location.pending){
+        if(!folder_available(location.active)&&!data_location::same(location.active,default_root))
+            data_startup_notice="Your game data couldn't move: "+data_location::utf8(location.active)+" isn't available. The move will run once it is.";
+        else{
+            const auto from=location.active,to=*location.pending;data_location::Progress progress;std::string error;std::atomic<bool> finished=false;
+            std::thread worker([&]{try{error=data_location::move(from,to,default_root,progress);}catch(const std::exception &e){error=e.what();}finished=true;});
+            while(!finished){
+                // Quit is ignored: stopping halfway would leave data split across folders.
+                SDL_Event ignored;while(SDL_PollEvent(&ignored)){}
+                int w=0,h=0;SDL_GetWindowSizeInPixels(window.get(),&w,&h);gl.Viewport(0,0,w,h);gl.ClearColor(.03f,.03f,.045f,1);gl.Clear(GL_COLOR_BUFFER_BIT);
+                const double total=double(progress.total.load()),done=double(progress.done.load());char line[96];
+                std::snprintf(line,sizeof line,"%.0f%%   %.2f / %.2f GB",total>0?100*done/total:0.,done/1e9,total/1e9);
+                hud.draw_panel(w,h,"Moving game data",{"To "+data_location::utf8(to),line,"The game starts as soon as this finishes."});
+                SDL_GL_SwapWindow(window.get());SDL_Delay(33);
+            }
+            worker.join();
+            if(error.empty()){location={to,std::nullopt};data_startup_notice="Game data moved to "+data_location::utf8(to);}
+            else{location.pending.reset();data_startup_notice="Moving game data failed and nothing changed: "+error;}
+            try{data_location::write(default_root,location);}catch(const std::exception &e){std::cerr<<"Data folder: "<<e.what()<<'\n';}
+            std::cerr<<"Data folder: "<<data_startup_notice<<'\n';
+        }
+    }
+    if(!data_location::same(location.active,default_root)&&!folder_available(location.active)){
+        data_unavailable=true;
+        data_startup_notice="Your game data folder "+data_location::utf8(location.active)+" isn't available (is the drive connected?). Using the default folder this session.";
+    }
+    const std::filesystem::path cache=!isolated.empty()?std::filesystem::path(isolated)/"data":data_unavailable?default_root:location.active;
+    std::optional<data_location::Choice> data_choice;std::string data_notice,last_data_state;
     std::filesystem::create_directories(cache/"replays");
     // Created empty so a player looking for where their own audio goes finds
     // the folders already there rather than having to guess the names.
@@ -277,11 +326,20 @@ int run(const Options &opt) {
     auto preferences=native::default_settings();
     try {preferences=native::load_settings(cache/"settings.json");}catch(const std::exception &e){std::cerr<<"Settings: "<<e.what()<<'\n';}
     if(opt.sensitivity_set)preferences["sensitivity"]=opt.sensitivity;
+    // Recovery: --windowed resets a display mode the player cannot leave and keeps it.
+    if(opt.windowed&&preferences.value("windowMode",std::string())!="windowed"){preferences["windowMode"]="windowed";try{native::save_settings(cache/"settings.json",preferences);}catch(const std::exception &e){std::cerr<<"Settings: "<<e.what()<<'\n';}}
     native::WindowController window_controller(window.get());
     const bool persist_window=!opt.hidden&&!opt.frames&&opt.menu_smoke.empty()&&opt.runtime_smoke.empty();
     std::optional<native::WindowBounds> saved_window;
     if(persist_window)try{const auto path=cache/"window-state.json";if(std::filesystem::exists(path)&&std::filesystem::file_size(path)<=16384)saved_window=native::read_window_bounds(nlohmann::json::parse(read_text(path)));}catch(const std::exception&e){std::cerr<<"Window bounds: "<<e.what()<<'\n';}
-    auto initial_window_preferences=preferences;if(menu&&menu->visible())initial_window_preferences["alwaysOnTop"]=false;
+    // While the menu is open the window may not be always-on-top, and exclusive
+    // fullscreen runs as borderless: the menu (a WebView2/WKWebView child, or the
+    // separate GTK window) is composited by the desktop, which exclusive mode
+    // bypasses, so it would be open, focused and invisible. Gameplay with the
+    // menu closed keeps the exclusive mode the player chose.
+    auto window_for_menu=[&](nlohmann::json p,bool menu_open){if(menu_open){p["alwaysOnTop"]=false;if(p.value("windowMode",std::string())=="fullscreen")p["windowMode"]="borderless";}return p;};
+    // Launch opens the home menu, so start as it will be shown.
+    auto initial_window_preferences=window_for_menu(preferences,bool(menu));
     if(persist_window&&!window_controller.apply(initial_window_preferences,true,saved_window)){std::cerr<<"Window: "<<window_controller.error()<<'\n';preferences["windowMode"]=window_controller.mode();}
     bool window_dirty=false;auto window_save_due=std::chrono::steady_clock::now();
     auto save_window=[&](){if(!persist_window||!preferences.value("rememberWindowBounds",true))return;try{if(auto bounds=window_controller.observe_bounds())native::save_settings(cache/"window-state.json",native::window_bounds_json(*bounds));window_dirty=false;}catch(const std::exception&e){std::cerr<<"Window bounds: "<<e.what()<<'\n';}};
@@ -342,7 +400,7 @@ int run(const Options &opt) {
         audio.set_sfx_pack(preferences.at("sfxPack").get<std::string>()=="custom");
         audio.set_music_pack(preferences.at("musicPack").get<std::string>()=="custom");
         video_music_catalog=audio.export_music_catalog(preferences.at("musicPack").get<std::string>()=="custom");
-        if(renderer){renderer->set_player_glow(player_glow);renderer->set_glow_visible(preferences.value("showPlayerGlow",true),preferences.value("firstPersonGlow",false));renderer->set_fov(preferences.at("fov").get<float>());renderer->set_viewmodel(preferences.at("viewmodelFov").get<float>(),preferences.at("viewmodelX").get<float>(),preferences.at("viewmodelY").get<float>(),preferences.at("viewmodelZ").get<float>(),preferences.at("viewmodelLeftHand").get<bool>(),preferences.at("viewmodel").get<bool>(),preferences.at("viewmodelBob").get<float>(),preferences.at("viewmodelSway").get<float>());renderer->set_color_blind(preferences.value("colorBlind",std::string("off")));renderer->set_actor_models(preferences.value("playerModel",std::string("bunny")),preferences.value("ghostModel",std::string("same")));renderer->set_zones_visible(preferences.value("zonesVisible",true));renderer->set_effects_visible(preferences.value("effectsVisible",true));renderer->set_triggers_visible(preferences.value("triggersVisible",false));renderer->set_water_quality(preferences.value("waterQuality",std::string("simple"))=="refracted"?1:0);}
+        if(renderer){renderer->set_player_glow(player_glow);renderer->set_glow_visible(preferences.value("showPlayerGlow",true),preferences.value("firstPersonGlow",false));renderer->set_fov(preferences.at("fov").get<float>());renderer->set_viewmodel(preferences.at("viewmodelFov").get<float>(),preferences.at("viewmodelX").get<float>(),preferences.at("viewmodelY").get<float>(),preferences.at("viewmodelZ").get<float>(),preferences.at("viewmodelLeftHand").get<bool>(),preferences.at("viewmodel").get<bool>(),preferences.at("viewmodelBob").get<float>(),preferences.at("viewmodelSway").get<float>());renderer->set_color_blind(preferences.value("colorBlind",std::string("off")));renderer->set_actor_models(preferences.value("playerModel",std::string("bunny")),preferences.value("ghostModel",std::string("same")));renderer->set_zones_visible(preferences.value("zonesVisible",true));renderer->set_effects_visible(preferences.value("effectsVisible",true));renderer->set_triggers_visible(preferences.value("triggersVisible",false));renderer->set_clips_visible(preferences.value("clipsVisible",false));renderer->set_water_quality(preferences.value("waterQuality",std::string("simple"))=="refracted"?1:0);}
     };
     apply_preferences();
     std::string map_id,loading,error,record_path,last_ui,last_requested_map;
@@ -367,6 +425,7 @@ int run(const Options &opt) {
     std::string gauntlet_id,gauntlet_map;
     nlohmann::json gauntlet_progress;
     std::string toast_text;auto toast_until=std::chrono::steady_clock::time_point{};
+    if(!data_startup_notice.empty()){toast_text=data_startup_notice;toast_until=std::chrono::steady_clock::now()+std::chrono::seconds(8);data_notice=data_startup_notice;}
     const native::SsjFields ssj_fields;
     auto reset_feedback=[&](bool incomplete_history=false) {
         hud.reset_history();
@@ -403,6 +462,7 @@ int run(const Options &opt) {
     auto show_menu=[&](bool on) {
         if(on){replay_controls.dragging=false;replay_orbit_drag=false;}
         SDL_SetWindowAlwaysOnTop(window.get(),!on&&preferences.value("alwaysOnTop",false));
+        if(menu&&preferences.value("windowMode",std::string())=="fullscreen"){const auto want=window_for_menu(preferences,on);if(window_controller.mode()!=want.at("windowMode").get<std::string>()&&!window_controller.apply(want))std::cerr<<"Window: "<<window_controller.error()<<'\n';}
         if(menu) menu->set_visible(on);
         // Each pause re-announces the paused map (a fresh still for a
         // separate GTK window); sent with the menu state once it is visible.
@@ -475,10 +535,10 @@ int run(const Options &opt) {
             if(map_id=="bhop_japan") require(bh_set_restart_names(core.get(),"","beginner"),core.get(),"Applying map restart names");
             require(bh_state(core.get(),&curr),core.get(),"Reading settled restart");
         }
-        std::optional<float> custom_pitch;
+        std::optional<float> custom_pitch;bool outside_spawn=false;
         if(!(tutorial&&tutorial->is_active()))if(const auto point=start_points.get(map_id,active_track)){
             const BhState fallback=curr;
-            if(bh_set_position(core.get(),point->position[0],point->position[1],point->position[2],point->yaw)&&bh_state(core.get(),&curr)&&native::start_point_problem(curr,zones,active_track,false).empty()&&curr.position[0]==point->position[0]&&curr.position[1]==point->position[1]&&std::abs(curr.position[2]-point->position[2])<=4)custom_pitch=point->pitch;
+            if(bh_set_position(core.get(),point->position[0],point->position[1],point->position[2],point->yaw)&&bh_state(core.get(),&curr)&&native::start_point_problem(curr,false).empty()&&curr.position[0]==point->position[0]&&curr.position[1]==point->position[1]&&std::abs(curr.position[2]-point->position[2])<=4){custom_pitch=point->pitch;outside_spawn=!native::start_point_in_zone(curr,zones,active_track);}
             else{require(bh_set_position(core.get(),fallback.position[0],fallback.position[1],fallback.position[2],fallback.teleport_angles[1]),core.get(),"Restoring default start");require(bh_state(core.get(),&curr),core.get(),"Reading default start");}
         }
         if(tutorial&&tutorial->is_active()){
@@ -489,7 +549,10 @@ int run(const Options &opt) {
         }
         if(renderer){renderer->reset_presentation();scope.reset();renderer->set_viewmodel_weapon(std::nullopt);renderer->set_cosmetics(outfit,packed_loadout);}
         audio.reset();hud.reset_history();replay_camera.reset();prev=curr;reset_input_timing();input.set_angles(custom_pitch.value_or(curr.teleport_angles[0]),curr.teleport_angles[1]);
+        if(outside_spawn&&!practice.active){practice.active=true;practice.tool="spawn";}
         kept_weapons.restarted(practice.active||zones.empty(),settings.physics>=10);begin_record();reset_feedback();reset_input_timing();
+        // (toast() is declared after reset; set its state directly.)
+        if(outside_spawn){toast_text="Custom spawn outside the start zone: practice run. Enter and leave the start zone to time it.";toast_until=Clock::now()+std::chrono::milliseconds(4000);}
     };
     auto practice_reason=[&](){return native::practice_unavailable(bool(core),playback,!room.id.empty(),map_id==tutorial_map,!gauntlet_id.empty());};
     auto toast=[&](const std::string &text,unsigned ms=3000){toast_text=text;toast_until=Clock::now()+std::chrono::milliseconds(ms);};
@@ -506,7 +569,7 @@ int run(const Options &opt) {
         if(action=="keepVelocity"){preferences["practiceKeepVelocity"]=value.value_or(!preferences.at("practiceKeepVelocity").get<bool>());native::save_settings(cache/"settings.json",preferences);return;}
         if(action=="toggle"){
             practice.mode=!practice.mode;
-            if(practice.mode){practice.tool.clear();practice_use("");toast("Practice: no scores. Z: noclip | C: save checkpoint | X: teleport.",6000);}
+            if(practice.mode){practice.tool.clear();practice_use("");const auto bound=[&](const char *action)->std::string{const auto &keys=preferences.at("binds").at(action);if(keys.empty()){const std::string_view a(action);return a=="cpSave"?"!save":a=="cpTeleport"?"!tele":"!nc";}std::string k=keys[0].get<std::string>();if(k=="Backquote")return "`";if(k.starts_with("Key")||k.starts_with("Digit"))return k.substr(k.starts_with("Key")?3:5);if(k.starts_with("Mouse"))return "M"+k.substr(5);return k;};toast("Practice: no scores. "+bound("noclip")+": noclip | "+bound("cpSave")+": save checkpoint | "+bound("cpTeleport")+": teleport.",6000);}
             else{reset();toast("Practice mode off. You're back at the start.");}
             return;
         }
@@ -522,7 +585,7 @@ int run(const Options &opt) {
             toast("Checkpoint "+std::to_string(practice.number())+" saved");return;
         }
         if(action=="noclip"){
-            if(!practice.noclip){practice_use("noclip");practice.noclip=true;for(int k=0;k<3;k++){practice.flight.position[k]=curr.position[k];practice.flight.velocity[k]=curr.velocity[k];}}
+            if(!practice.noclip){BhRunState before{};bh_run_state(core.get(),&before);practice_use("noclip");practice.noclip=true;if(before.status==1)toast("Noclip: timer stopped. Press R for a real run.",3500);for(int k=0;k<3;k++){practice.flight.position[k]=curr.position[k];practice.flight.velocity[k]=curr.velocity[k];}}
             else{BhSnapshot snapshot{};const auto result=bh_practice_noclip_exit(core.get(),&practice.flight,float(input.yaw()),float(input.pitch),&snapshot);practice.noclip=false;curr=prev=snapshot.player;if(!result)toast("You're stuck in a wall. Noclip again, or teleport to a checkpoint.",4000);}
         } else if(action=="tele"||action=="prev"||action=="next"){
             if(practice.checkpoints.empty()){toast("No checkpoint yet. Press C to save one.");return;}
@@ -769,6 +832,7 @@ int run(const Options &opt) {
         if(action=="nextTrack"){audio.music_control("next");return;}
         if(action=="hudEditor"){if(menu){show_menu(true);menu->evaluate_js("window.bunnyhopNativeMenu?.open?.('settings','hud-editor')");}return;}
         if(action=="gunMenu"){gun_menu.toggle();return;}
+        if(action=="showTriggers"||action=="showClips"){const char *key=action=="showTriggers"?"triggersVisible":"clipsVisible";const bool on=!preferences.at(key).get<bool>();preferences[key]=on;native::save_settings(cache/"settings.json",preferences);apply_preferences();toast(std::string(action=="showTriggers"?"Triggers":"Player clips")+(on?" shown":" hidden"));return;}
         if(action=="keysOverlay"){preferences["keysOverlay"]=!preferences.at("keysOverlay").get<bool>();native::save_settings(cache/"settings.json",preferences);apply_preferences();return;}
         if(action=="viewmodel"||action=="hideUi"||action=="mute") {
             const std::string key=action=="hideUi"?"hud":action=="mute"?"muted":"viewmodel";
@@ -783,7 +847,7 @@ int run(const Options &opt) {
         if(action=="setStart"||action=="clearStart"){
             if(!core)return;
             if(action=="clearStart"){start_points.clear(map_id,active_track);toast("Start point cleared");}
-            else{if(tutorial&&tutorial->is_active()){toast("Start points are unavailable in tutorial lessons");return;}const auto problem=native::start_point_problem(curr,zones,active_track,practice.active);if(!problem.empty()){toast(problem);return;}start_points.save(map_id,active_track,curr,input.yaw(),input.pitch);toast("Start point saved");}
+            else{if(tutorial&&tutorial->is_active()){toast("Start points are unavailable in tutorial lessons");return;}const auto problem=native::start_point_problem(curr,practice.noclip);if(!problem.empty()){toast(problem);return;}start_points.save(map_id,active_track,curr,input.yaw(),input.pitch);toast(native::start_point_in_zone(curr,zones,active_track)?"Start point saved":"Start point saved outside the start zone: runs from it are practice, and the timer starts only from the start zone",native::start_point_in_zone(curr,zones,active_track)?3000u:5000u);}
             native::save_settings(cache/"start-points.json",start_points.points);return;
         }
         if(action=="nextWeapon"||action=="prevWeapon"){
@@ -885,7 +949,7 @@ int run(const Options &opt) {
         for(const float percent:{50.f,100.f,175.f}){
             bh_snapshot(core.get(),&snapshot);BhRunState timing{};bh_run_state(core.get(),&timing);BhWeaponReport weapon{};bh_weapon_report(core.get(),&weapon);
             const float eye[]={curr.position[0],curr.position[1],curr.position[2]+curr.view_offset_z};renderer->draw(w,h,eye,input,&snapshot,0);
-            hud.draw(w,h,snapshot,timing,command,map_id,active_style,"",60,true,true,false,weapon,"",false,std::nullopt,true,nullptr,percent,&practice,true,"Gauntlet 1/3 | 00:01.000","-0.500s",true,.5f);
+            hud.draw(w,h,snapshot,timing,command,map_id,active_style,"",60,true,true,false,weapon,"",std::nullopt,std::nullopt,true,nullptr,percent,&practice,true,"Gauntlet 1/3 | 00:01.000","-0.500s",true,.5f);
             const auto png=backbuffer_png(gl,w,h);std::ofstream image(output/("hud-"+std::to_string(int(percent))+".png"),std::ios::binary);image.write(png.data(),png.size());
         }
         gauntlet_action({{"id","offline-smoke"},{"map","native-runtime-fixture"},{"progress",{{"idx",0},{"maps",2},{"before",0.0},{"pbSplit",nullptr}}}});
@@ -1122,6 +1186,7 @@ int run(const Options &opt) {
                     const auto action=message.at("action").get<std::string>();
                     if(action=="scores")show_scores=!show_scores;
                     else if(action=="jumpStats"){preferences["jumpStats"]=!preferences.at("jumpStats").get<bool>();native::save_settings(cache/"settings.json",preferences);apply_preferences();}
+                    else if(action=="showTriggers"||action=="showClips"){const char *key=action=="showTriggers"?"triggersVisible":"clipsVisible";const bool on=!preferences.at(key).get<bool>();preferences[key]=on;native::save_settings(cache/"settings.json",preferences);apply_preferences();toast(std::string(action=="showTriggers"?"Triggers":"Player clips")+(on?" shown":" hidden"));}
                     else if(action=="hidePlayers")hide_players=message.value("hidden",!hide_players);
                     else if(action=="openRoom"){show_menu(true);menu->evaluate_js("window.bunnyhopNativeMenu?.open?.('room')");}
                     else if(core&&!download.valid()){
@@ -1165,8 +1230,8 @@ int run(const Options &opt) {
                     request_map(message.at("id").get<std::string>());
                 }
                 else if(type=="style") {if(!gauntlet_id.empty())throw std::runtime_error("Gauntlets are Normal style on the main track.");if(download.valid())throw std::runtime_error("A map is loading");const auto id=message.at("id").get<std::string>();if(!native::styles.contains(id))throw std::runtime_error("Unknown style");selected_style=id;active_track=0;reset();}
-                else if(type=="settings") {save_window();auto changed=native::patch_settings(preferences,message.at("patch"));auto effective=changed;if(menu&&menu->visible())effective["alwaysOnTop"]=false;if(!window_controller.apply(effective))throw std::runtime_error(window_controller.error());native::save_settings(cache/"settings.json",changed);preferences=std::move(changed);input.held=input.pulse=0;held_codes.clear();apply_preferences();error.clear();}
-                else if(type=="window") {const auto action=message.at("action").get<std::string>();bool ok=false;if(action=="center")ok=window_controller.center();else if(action=="minimize")ok=window_controller.minimize();else if(action=="maximize")ok=window_controller.maximize();else if(action=="toggleFullscreen"){save_window();auto changed=preferences;changed["windowMode"]=native::toggled_window_mode(window_controller.mode());auto effective=changed;if(menu&&menu->visible())effective["alwaysOnTop"]=false;ok=window_controller.apply(effective);if(ok){preferences=changed;native::save_settings(cache/"settings.json",preferences);}}else throw std::runtime_error("Unknown window action");if(!ok)throw std::runtime_error(window_controller.error());window_dirty=true;window_save_due=Clock::now()+std::chrono::milliseconds(500);}
+                else if(type=="settings") {save_window();auto changed=native::patch_settings(preferences,message.at("patch"));const auto effective=window_for_menu(changed,menu&&menu->visible());if(!window_controller.apply(effective))throw std::runtime_error(window_controller.error());native::save_settings(cache/"settings.json",changed);preferences=std::move(changed);input.held=input.pulse=0;held_codes.clear();apply_preferences();error.clear();}
+                else if(type=="window") {const auto action=message.at("action").get<std::string>();bool ok=false;if(action=="center")ok=window_controller.center();else if(action=="minimize")ok=window_controller.minimize();else if(action=="maximize")ok=window_controller.maximize();else if(action=="toggleFullscreen"){save_window();auto changed=preferences;changed["windowMode"]=native::toggled_window_mode(window_controller.mode());const auto effective=window_for_menu(changed,menu&&menu->visible());ok=window_controller.apply(effective);if(ok){preferences=changed;native::save_settings(cache/"settings.json",preferences);}}else throw std::runtime_error("Unknown window action");if(!ok)throw std::runtime_error(window_controller.error());window_dirty=true;window_save_due=Clock::now()+std::chrono::milliseconds(500);}
                 else if(type=="replays")refresh_replays();
                 else if(type=="ghost"){ghost_enabled=ghost_handle&&message.at("enabled").get<bool>();ghost_slots[0].enabled=ghost_enabled;}
                 else if(type=="ghostControl"){
@@ -1231,6 +1296,31 @@ int run(const Options &opt) {
                     const auto action=message.value("action",std::string());
                     if(action=="check")updater.check();else if(action=="download")updater.download();else if(action=="cancel")updater.cancel();else if(action=="reveal")updater.reveal();
                     last_update.clear();
+                }
+                else if(type=="dataFolder") {
+                    // The host only ever moves to a folder it validated from its own
+                    // picker (data_choice); the menu never supplies a path.
+                    const auto action=message.value("action",std::string());
+                    auto save_location=[&]{try{data_location::write(default_root,location);return true;}catch(const std::exception &e){data_notice=e.what();return false;}};
+                    if(action=="pick"){
+                        bool start=false;{std::lock_guard lock(data_picker.m);if(!data_picker.open){data_picker.open=true;data_picker.done=false;data_picker.result.reset();data_picker.error.clear();start=true;}}
+                        if(start){data_notice.clear();const auto from=data_location::utf8(cache);SDL_ShowOpenFolderDialog(&data_folder_picked,&data_picker,window.get(),from.c_str(),false);}
+                    }
+                    else if(action=="useDefault"){data_notice.clear();data_choice=data_location::choose(default_root,cache,default_root);}
+                    else if(action=="cancelChoice")data_choice.reset();
+                    else if(action=="move"){
+                        const bool now=message.value("when",std::string())=="now";
+                        if(data_unavailable)data_notice="Reconnect the drive with your data folder first, or use the default folder.";
+                        else if(!data_choice||!data_choice->problem.empty())data_notice="Pick a folder first.";
+                        else{location.pending=data_choice->target;if(save_location()){const auto where=data_location::utf8(data_choice->target);data_choice.reset();
+                            if(now){relaunch_requested=true;running=false;}
+                            else{data_notice="Your game data will move to "+where+" the next time the game starts.";toast(data_notice,5000);}}
+                            else location.pending.reset();}
+                    }
+                    else if(action=="cancelPending"){location.pending.reset();if(save_location())data_notice="Data move cancelled.";}
+                    else if(action=="forget"&&data_unavailable){location={default_root,std::nullopt};if(save_location()){data_unavailable=false;data_notice="Using the default folder from now on.";}}
+                    else if(action=="reveal")SDL_OpenURL(data_location::file_url(cache).c_str());
+                    last_data_state.clear();
                 }
                 else if(type=="openExternal") native::open_external(message.at("url").get<std::string>());
                 else if(type=="auth") menu->evaluate_js("window.bunnyhopNativeMenu?.onAuth("+message.dump()+")");
@@ -1429,7 +1519,7 @@ int run(const Options &opt) {
                 const bool history_ready=feedback.history_ready(pre.grounded,info.in_start,info.noclip);
                 if(history_ready)if(const auto report=feedback.ssj.tick(pre,ssj_cmd,info)) {
                     feedback.ssj_line=native::ssj_text(*report,ssj_fields);
-                    feedback.ssj_good=report->gain&&*report->gain>=native::good_gain;
+                    feedback.ssj_gain=report->gain;
                 }
                 feedback.ssj_was_in_start=timing.in_start!=0;feedback.ssj_was_noclip=state.movement_mode==1;  // Mode::Noclip
                 if(info.teleported)reset_feedback();
@@ -1592,7 +1682,7 @@ int run(const Options &opt) {
             BhCmd shown{};bh_last_command(core.get(),&shown);BhWeaponReport weapon{};bh_weapon_report(core.get(),&weapon);
             if((!menu||!menu->visible())&&!opt.camera)hud.draw(width,height,state,display_run,shown,map_id,display_style,shown_notice,display_fps,
                 preferences.at("hud").get<bool>(),preferences.at("crosshair").get<bool>(),playback,weapon,
-                preferences.at("jumpStats").get<bool>()?feedback.ssj_line:std::string(),feedback.ssj_good,
+                preferences.at("jumpStats").get<bool>()?feedback.ssj_line:std::string(),feedback.ssj_gain,
                 preferences.at("strafeTrainer").get<bool>()&&!playback?feedback.strafe_reading:std::nullopt,
                 preferences.at("strafeTrainerHints").get<bool>(),&hud_layout,preferences.at("hudScale").get<float>(),&practice,preferences.at("practiceKeepVelocity").get<bool>(),gauntlet_line,gauntlet_delta,gauntlet_good,leave_hold.progress(epoch_ms()));
             if((!menu||!menu->visible())&&!opt.camera){
@@ -1710,6 +1800,16 @@ int run(const Options &opt) {
             const nlohmann::json mouse_state={{"active",mouse_diagnostics.active},{"seconds",m.seconds},{"eventsPerSecond",m.events_per_second},{"events",m.events},{"peakBurst",m.peak_burst},{"averageAgeMs",m.average_age_ms},{"maxAgeMs",m.max_age_ms},{"maxPumpMs",m.max_pump_ms},{"relative",SDL_GetWindowRelativeMouseMode(window.get())},{"systemScaling",SDL_GetHintBoolean(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE,false)},{"sdl",std::to_string(SDL_VERSIONNUM_MAJOR(sdl_version))+"."+std::to_string(SDL_VERSIONNUM_MINOR(sdl_version))+"."+std::to_string(SDL_VERSIONNUM_MICRO(sdl_version))}};
             menu->evaluate_js("window.dispatchEvent(new CustomEvent('bunnyhop:mouse-diagnostics',{detail:"+mouse_state.dump()+"}))");
             const auto update_state=updater.state().dump();if(update_state!=last_update){menu->evaluate_js("window.dispatchEvent(new CustomEvent('bunnyhop:update',{detail:"+update_state+"}))");last_update=update_state;}
+            {   // Settings -> Game data
+                std::optional<std::string> picked;std::string pick_error;bool picking=false;
+                {std::lock_guard lock(data_picker.m);picking=data_picker.open;if(data_picker.done){data_picker.done=false;picked=std::move(data_picker.result);data_picker.result.reset();pick_error=std::move(data_picker.error);data_picker.error.clear();}}
+                if(picked)data_choice=data_location::choose(data_location::from_utf8(*picked),cache,default_root);else if(!pick_error.empty())data_notice="Folder picker: "+pick_error;
+                nlohmann::json data_state={{"path",data_location::utf8(cache)},{"defaultPath",data_location::utf8(default_root)},{"isDefault",data_location::same(cache,default_root)},
+                    {"configured",data_location::utf8(location.active)},{"unavailable",data_unavailable},{"pending",location.pending?nlohmann::json(data_location::utf8(*location.pending)):nlohmann::json(nullptr)},
+                    {"picking",picking},{"notice",data_notice},{"choice",data_choice?nlohmann::json{{"path",data_location::utf8(data_choice->target)},{"problem",data_choice->problem}}:nlohmann::json(nullptr)}};
+                const auto encoded_data=data_state.dump(-1,' ',false,nlohmann::json::error_handler_t::replace);
+                if(encoded_data!=last_data_state){menu->evaluate_js("window.dispatchEvent(new CustomEvent('bunnyhop:data-folder',{detail:"+encoded_data+"}))");last_data_state=encoded_data;}
+            }
             const auto encoded=state.dump();
             if(encoded!=last_ui) {menu->evaluate_js("window.bunnyhopNativeMenu?.onState("+encoded+")");last_ui=encoded;}
             ui_time=now;
@@ -1802,7 +1902,7 @@ int main(int argc,char **argv) {
         Options opt=options(argc,argv);
         if(opt.help) {
             std::cout << "Usage: bunnyhop-native [--map MAP.bsp | --online-map NAME] [--content-root DIR] [--sensitivity 2]\n"
-                         "  [--menu-html PATH] [--no-menu] [--frames N] [--screenshot output.ppm] [--camera x,y,z,pitch,yaw] [--hidden]\n"
+                         "  [--menu-html PATH] [--no-menu] [--windowed] [--frames N] [--screenshot output.ppm] [--camera x,y,z,pitch,yaw] [--hidden]\n"
                          "  [--runtime-smoke OUTPUT_DIR --replay PATH] (offline lifecycle checks with --map; private data, no network)\n"
                          "  [--tutorial jump|strafe|speed|final] [--tutorial-demo] (tutorial map only)\n"
                          "  [--menu-smoke OUTPUT_PREFIX] (with --online-map; live API reads only, no scores)\n"
@@ -1811,7 +1911,9 @@ int main(int argc,char **argv) {
                          "Frame-limited mode simulates one fixed tick per rendered frame; screenshot implies --frames 1.\n";
             return 0;
         }
-        return run(opt);
+        const int code=run(opt);
+        if(relaunch_requested&&!native::relaunch(executable_path()))std::cerr<<"Bunnyhop native: could not restart; start the game again to move your data\n";
+        return code;
     } catch(const std::exception &error) {
         std::cerr << "Bunnyhop native: " << error.what() << '\n';
         if(interactive_errors) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,native::app_name,error.what(),nullptr);

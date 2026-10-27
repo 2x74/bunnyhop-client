@@ -38,6 +38,12 @@ inline constexpr unsigned bhop_frames = 10;
 inline constexpr float air_wish_cap = 30.0f;
 /** Gain this high gets the accent colour (bhop-get-stats calls 80-90 good). */
 inline constexpr float good_gain = 80.0f;
+/** JHUD colours (Settings -> Jump stats colours, on by default), by the gain the
+ *  line shows: red 0-59%, orange 60-69%, green 70-79%, blue 80-89%, white 90%+. */
+enum class GainBand { red, orange, green, blue, white };
+inline GainBand gain_band(float gain) {
+    return gain < 60 ? GainBand::red : gain < 70 ? GainBand::orange : gain < 80 ? GainBand::green : gain < 90 ? GainBand::blue : GainBand::white;
+}
 
 // Source IN_* bits. The same values native_input.hpp uses.
 inline constexpr std::uint32_t ssj_in_jump = 1u << 1;

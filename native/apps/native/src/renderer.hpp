@@ -239,7 +239,7 @@ class Renderer {
     struct ShotEffect {BhAttackReport report;native_render::ShotBasis basis;double started;};
     native_render::EventQueue<QueuedShot,128> attackEvents;std::vector<ShotEffect> shotEffects;
     struct Overlay {int entity=-1,model=-1;uint32_t kind=0,flags=0;std::vector<std::array<native_render::Vec3,3>> triangles;};std::vector<Overlay> overlays;bool overlaysLoaded=false;
-    std::vector<BhZone> timerZones;BhRunState zoneState{};uint32_t activeZoneTrack=0;bool zonesVisible=true,effectsVisible=true,triggersVisible=false,flashlightEnabled=false;native::ZoneEffects zoneEffects;native::SemanticPalette semanticPalette=native::semantic_palette("off");bool zoneGold=false;
+    std::vector<BhZone> timerZones;BhRunState zoneState{};uint32_t activeZoneTrack=0;bool zonesVisible=true,effectsVisible=true,triggersVisible=false,clipsVisible=false,flashlightEnabled=false;native::ZoneEffects zoneEffects;native::SemanticPalette semanticPalette=native::semantic_palette("off");bool zoneGold=false;
     void load_overlays(){if(overlaysLoaded)return;overlaysLoaded=true;
         size_t overlayBytes=0;const auto *overlayJson=bh_overlay_json(core,&overlayBytes);if(overlayJson&&overlayBytes){const auto json=nlohmann::json::parse(overlayJson,overlayJson+overlayBytes);for(const auto &raw:json){Overlay o;o.kind=raw.value("kind",0u);o.flags=raw.value("flags",0u);if(raw.contains("entity")&&!raw["entity"].is_null())o.entity=raw["entity"];if(raw.contains("model")&&!raw["model"].is_null())o.model=raw["model"];std::vector<native_render::Plane> planes;for(const auto &p:raw.value("planes",nlohmann::json::array()))if(p.size()==4)planes.push_back({p[0],p[1],p[2],p[3]});o.triangles=native_render::convex_triangles(planes);if(!o.triangles.empty())overlays.push_back(std::move(o));}}
     }
@@ -272,8 +272,10 @@ class Renderer {
         };
         if(effectsVisible){if(replayActor)trail(*replayActor,"primary");for(const auto &actor:roomActors)if(actor.id.starts_with("ghost-"))trail(actor,actor.id);}
         ghostTrails.retain(activeTrails);
-        if(triggersVisible){size_t count=0;const auto *states=bh_overlay_states(core,&count);const auto &colors=semanticPalette.triggers;
-            for(const auto &o:overlays){if(o.entity>=0){if(!states||size_t(o.entity)>=count||!(states[o.entity]&1))continue;if((o.flags&1)&&(states[o.entity]&2))continue;}BhTransform t{};t.visible=1;if(o.model>0)bh_model_transform(core,uint32_t(o.model),&t);const auto model=native::model_matrix(t);const auto &c=colors[std::min(o.kind,5u)];for(const auto &triangle:o.triangles){const auto a=native_render::transform_point(model,triangle[0]),b=native_render::transform_point(model,triangle[1]),c0=native_render::transform_point(model,triangle[2]);presentation->quad({a,b,c0,c0},{c[0],c[1],c[2],.12f});}}}
+        // Overlay kinds follow crates/core/src/game/overlay.rs: 0-3 are triggers
+        // (!showtriggers), 4 player clips and 5 invisible walls (!showclips).
+        if(triggersVisible||clipsVisible){size_t count=0;const auto *states=bh_overlay_states(core,&count);const auto &colors=semanticPalette.triggers;
+            for(const auto &o:overlays){if(!(o.kind>=4?clipsVisible:triggersVisible))continue;if(o.entity>=0){if(!states||size_t(o.entity)>=count||!(states[o.entity]&1))continue;if((o.flags&1)&&(states[o.entity]&2))continue;}BhTransform t{};t.visible=1;if(o.model>0)bh_model_transform(core,uint32_t(o.model),&t);const auto model=native::model_matrix(t);const auto &c=colors[std::min(o.kind,5u)];for(const auto &triangle:o.triangles){const auto a=native_render::transform_point(model,triangle[0]),b=native_render::transform_point(model,triangle[1]),c0=native_render::transform_point(model,triangle[2]);presentation->quad({a,b,c0,c0},{c[0],c[1],c[2],.12f});}}}
         draw_map_effects(eye,seconds,right,up);
         profile_elapsed(frameProfile.presentationBuild,presentationStart);presentationStart=profile_now();
         gl.UseProgram(presentation->shader());water_uniforms(presentation->shader(),eye);
@@ -302,6 +304,7 @@ public:
     void set_color_blind(const std::string &mode){semanticPalette=native::semantic_palette(mode);}
     void set_zones_visible(bool value){zonesVisible=value;}
     void set_triggers_visible(bool value){if(value)load_overlays();triggersVisible=value;}
+    void set_clips_visible(bool value){if(value)load_overlays();clipsVisible=value;}
     void set_effects_visible(bool value){effectsVisible=value;}
     nlohmann::json water_diagnostics()const{auto out=nlohmann::json::array();for(const auto &v:volumes)out.push_back({{"mins",v.lo},{"maxs",v.hi},{"color",v.color},{"fogRange",v.range}});return out;}
     void set_water_quality(int value){waterQuality=std::clamp(value,0,1);}

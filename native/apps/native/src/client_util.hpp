@@ -73,7 +73,7 @@ inline std::string key_code(SDL_Scancode key) {
         case SDL_SCANCODE_LEFT:return "ArrowLeft";case SDL_SCANCODE_RIGHT:return "ArrowRight";case SDL_SCANCODE_UP:return "ArrowUp";case SDL_SCANCODE_DOWN:return "ArrowDown";
         case SDL_SCANCODE_LEFTBRACKET:return "BracketLeft";case SDL_SCANCODE_RIGHTBRACKET:return "BracketRight";
         case SDL_SCANCODE_MINUS:return "Minus";case SDL_SCANCODE_EQUALS:return "Equal";case SDL_SCANCODE_COMMA:return "Comma";
-        case SDL_SCANCODE_PERIOD:return "Period";case SDL_SCANCODE_SLASH:return "Slash";case SDL_SCANCODE_SEMICOLON:return "Semicolon";case SDL_SCANCODE_APOSTROPHE:return "Quote";
+        case SDL_SCANCODE_PERIOD:return "Period";case SDL_SCANCODE_SLASH:return "Slash";case SDL_SCANCODE_SEMICOLON:return "Semicolon";case SDL_SCANCODE_APOSTROPHE:return "Quote";case SDL_SCANCODE_GRAVE:return "Backquote";
         default:return "";
     }
 }

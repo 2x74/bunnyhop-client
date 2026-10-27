@@ -1,4 +1,5 @@
 #pragma once
+#include "settings.hpp"
 #include "bunnyhop_native.h"
 #include "audio_pack.hpp"
 #include "movement_audio.hpp"
@@ -47,7 +48,7 @@ class Audio {
         for(const auto &[id,paths]:mapping.items())for(const auto &path:paths){
             const auto rel=std::filesystem::path(path.get<std::string>());if(rel.is_absolute()||path.get<std::string>().find("..")!=std::string::npos)continue;
             const auto file=data_root/"classic"/rel;if(!std::filesystem::is_regular_file(file))continue;DecodedAudio decoded;std::string error;
-            if(!decode_sfx_file(file,&decoded,&error,budget))continue;auto mono=to_mono(decoded);if(decoded.rate!=mixer_rate)mono=resample_mono(mono,decoded.rate,mixer_rate,budget);
+            if(!decode_sfx_file(file,&decoded,&error,budget,true))continue;auto mono=to_mono(decoded);if(decoded.rate!=mixer_rate)mono=resample_mono(mono,decoded.rate,mixer_rate,budget);
             if(mono.empty()||mono.size()>budget)continue;budget-=mono.size();result.bank[id].push_back(std::move(mono));
         }return result;
     }
@@ -77,7 +78,7 @@ class Audio {
     std::string sfx_status_text;
     std::array<Voice,48> voices{};
     SDL_AudioStream *stream=nullptr;
-    float volume=.65f,sfx_volume=1,ui_volume=1,music_volume=1,ambience_volume=1;bool footsteps_enabled=true,wind_enabled=true,others_enabled=true,ghosts_enabled=true;
+    float volume=.65f,sfx_volume=1,ui_volume=1,music_volume=1,ambience_volume=1;bool footsteps_enabled=true,weapon_sounds_enabled=true,wind_enabled=true,others_enabled=true,ghosts_enabled=true;
     std::array<float,3> listener_position{};double listener_yaw=0;
     struct SpatialState{MovementAudio movement;bool grounded=false,first=true;uint32_t attack_tick=~0u,jump_tick=~0u;};
     std::unordered_map<std::string,SpatialState> spatial_states;
@@ -235,7 +236,7 @@ public:
     nlohmann::json status()const{return {{"classicLoading",classic_loading.valid()},{"classicActive",movement.classic},{"classicStatus",classic_status},{"sfxStatus",sfx_status_text},{"error",bank_error}};}
     bool classic_active()const{return movement.classic;}
     void set_map(BhContext *core){map_core=core;impact_surfaces.build(core);}
-    void set_style(const std::string &style){if(movement_style!=style)longjumps.reset();movement_style=style;scroll_style=style=="scroll"||style=="legit";}
+    void set_style(const std::string &style){if(movement_style!=style)longjumps.reset();movement_style=style;scroll_style=native::scroll_style(style);}
     void focus(bool value){focused=value;Lock lock(stream);volume=(!focused&&mute_background)?0:master_volume;music.gain(volume*music_volume);}
     void verified_finish(const std::string &event,const std::string &id){
         if(id.empty()||(event!="pb"&&event!="wr")||finished_results.contains(id))return;
@@ -316,7 +317,7 @@ public:
         master_volume=p.value("muted",false)?0:p.value("volume",.65f);mute_background=p.value("muteInBackground",true);volume=(!focused&&mute_background)?0:master_volume;
         sfx_volume=p.value("muteSfx",false)?0:p.value("sfxVolume",1.f);ui_volume=p.value("muteUi",false)?0:p.value("uiVolume",1.f);
         ambience_volume=p.value("muteAmbience",false)?0:p.value("ambienceVolume",1.f);music_volume=p.value("muteMusic",false)?0:p.value("musicVolume",1.f);
-        footsteps_enabled=p.value("footsteps",true);wind_enabled=p.value("wind",true);others_enabled=p.value("othersAudio",true);ghosts_enabled=p.value("ghostAudio",true);
+        footsteps_enabled=p.value("footsteps",true);weapon_sounds_enabled=p.value("weaponSounds",true);wind_enabled=p.value("wind",true);others_enabled=p.value("othersAudio",true);ghosts_enabled=p.value("ghostAudio",true);
         perfect_tick=p.value("perfectTick",false);announcer_prefs=p.value("announcer",default_announcer());
         movement.footsteps=footsteps_enabled;
         if(mode_==AudioMode::live)music.gain(volume*music_volume);}
@@ -351,7 +352,7 @@ public:
         if(a.snapped){s.movement.reset();s.first=true;}if(!s.first&&!s.grounded&&p.grounded)p.events|=4;if(!s.first&&s.grounded&&!p.grounded&&p.velocity[2]>120&&s.jump_tick!=a.frame.tick){p.events|=2;s.jump_tick=a.frame.tick;}if(a.jumped&&s.jump_tick!=a.frame.tick){p.events|=2;s.jump_tick=a.frame.tick;}
         BhSurfaceProbe probe{};probe.water_z=NAN;const bool found=map_core&&bh_surface_at(map_core,p.position[0],p.position[1],p.position[2],&probe);const double depth=found?probe.water_z-p.position[2]:NAN;static const char *surfaces[]={"concrete","metal","wood","grass","tile","water"};
         s.movement.footsteps=footsteps_enabled;s.movement.classic=movement.classic;s.movement.tick(p,std::clamp(dt,0.,.1),depth,surfaces[std::clamp(probe.surface,0,5)],[&](const std::string &id,double gain,double rate){spatial(id,a.frame.position,float(gain)*(ghost?.35f:.65f),rate);});s.first=false;s.grounded=p.grounded;
-        if(a.attack&&s.attack_tick!=a.frame.tick){s.attack_tick=a.frame.tick;std::string cue=a.frame.weapon==1?(a.attack==2?"carrot_stab":"carrot_swing"):"shot_pistol";
+        if(a.attack&&s.attack_tick!=a.frame.tick){s.attack_tick=a.frame.tick;if(!weapon_sounds_enabled)return;std::string cue=a.frame.weapon==1?(a.attack==2?"carrot_stab":"carrot_swing"):"shot_pistol";
             const nlohmann::json *gun=nullptr;if(gun_sounds.is_array()&&a.frame.weapon<gun_sounds.size()&&gun_sounds[a.frame.weapon].is_object())gun=&gun_sounds[a.frame.weapon];else if(gun_sounds.is_object()&&gun_sounds.contains(std::to_string(a.frame.weapon)))gun=&gun_sounds[std::to_string(a.frame.weapon)];
             if(a.frame.weapon!=1&&gun)cue=gun->value(a.silenced?"silenced":"fire",gun->value("fire",cue));spatial(cue,a.frame.position,ghost?.3f:.65f,a.frame.weapon!=1&&gun?gun->value("fireRate",1.):1.);
         }
@@ -386,6 +387,10 @@ public:
                 if(!cue.is_array()||cue.size()!=3)continue;const auto kind=cue[1].get<std::string>();const auto id=gun(kind,fallback(kind));if(!id.empty())pending_cues.push_back({elapsed+offset+cue[0].get<double>()*scale,id,cue[2].get<float>()});
             }
         };
+        // Settings -> Audio -> Weapon sounds: every cue below (draw, reload, fire,
+        // knife swing/stab, impacts) is weapon audio; the gameplay itself is unchanged.
+        if(!weapon_sounds_enabled)pending_cues.clear();
+        else{
         if(weapon.active!=previous_weapon.active||(weapon.flags&(1|32|64|1024)))pending_cues.clear();
         if(weapon.flags&1){if(weapon.active==1)play("carrot_draw");else if(timeline)schedule("draw");else play(gun("draw","gun_draw"));}
         if(weapon.flags&2)play(gun("pickup","gun_pickup"));
@@ -402,6 +407,7 @@ public:
             if(attack->hit)impact(*attack,impact_surfaces.surface(map_core,*attack));
         }
         for(auto it=pending_cues.begin();it!=pending_cues.end();)if(it->at<=elapsed+1e-9){play(it->id,it->gain);it=pending_cues.erase(it);}else ++it;
+        }
         previous_weapon=weapon;
         const double speed3=std::hypot(speed,double(p.velocity[2])),b=std::clamp((speed3-270)/1000,0.,1.);
         const double high=std::pow(std::clamp((speed3-750)/1300,0.,1.),1.5)*(p.grounded?.5:1.);

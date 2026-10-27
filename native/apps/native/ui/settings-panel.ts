@@ -5,6 +5,7 @@ import {hudEditor} from "./hud-editor";
 import {mouseDiagnosticsPanel} from "./mouse-diagnostics";
 import {windowPanel} from "./window-panel";
 import { updatePanel } from "./update-panel";
+import { dataFolderPanel } from "./data-folder-panel";
 import { importSettings,exportSettings } from "./settings-transfer";
 import { h } from "../../web/src/ui/dom";
 import { ACTIONS, keyLabel } from "../../web/src/ui/settings";
@@ -27,14 +28,14 @@ interface Section { id: string; title: string; body: HTMLElement }
 type BindAction = (typeof NATIVE_BIND_ACTIONS)[number];
 
 // Labels for native-only actions the web game's list doesn't have.
-const NATIVE_LABELS: Partial<Record<string, string>> = { turnFast: "Turn modifier (alt yaw speed)" };
+const NATIVE_LABELS: Partial<Record<string, string>> = { turnFast: "Turn modifier (alt yaw speed)", showTriggers: "Show triggers", showClips: "Show player clips" };
 const actionLabel = (action: string): string => NATIVE_LABELS[action] ?? ACTIONS.find(item => item.id === action)?.label ?? action;
 
 const BIND_GROUPS: readonly { title: string; actions: readonly BindAction[] }[] = [
   { title: "Movement", actions: ["forward", "back", "left", "right", "jump", "duck", "use"] },
   { title: "Runs", actions: ["restart", "restartMain", "restartBonus", "cycleStyle", "setStart", "clearStart", "mainMenu"] },
   { title: "Weapons", actions: ["attack", "attack2", "inspect", "reload", "slot1", "slot2", "slot3", "lastWeapon", "nextWeapon", "prevWeapon", "drop", "giveUsp", "giveGlock", "gunMenu"] },
-  { title: "Interface", actions: ["viewmodel", "hideUi", "mute", "keysOverlay", "hudEditor", "thirdPerson", "flashlight", "nextTrack", "chat", "commandChat", "scoreboard", "spectatorNext", "spectatorPrevious", "spectatorMode"] },
+  { title: "Interface", actions: ["viewmodel", "hideUi", "mute", "keysOverlay", "showTriggers", "showClips", "hudEditor", "thirdPerson", "flashlight", "nextTrack", "chat", "commandChat", "scoreboard", "spectatorNext", "spectatorPrevious", "spectatorMode"] },
   { title: "Turning", actions: ["turnLeft", "turnRight", "turnFast"] },
   // Practice (web practice-mode/): practice mode's toggle, then the tools. During a timed run Z / X only act while the
   // !cp menu is open; C always saves.
@@ -216,7 +217,7 @@ export function settingsPanel(initialSection?:string): HTMLElement {
     group("Video",
       choice("Player model","playerModel",["bunny","runner"]),
       number("Field of view", "fov", 60, 130, 1, "", "Field of view in degrees.", "°"),
-      choice("Water","waterQuality",["simple","refracted"]),toggle("Zone outlines","zonesVisible"),toggle("World effects","effectsVisible"),toggle("Trigger and clip overlays","triggersVisible"),
+      choice("Water","waterQuality",["simple","refracted"]),toggle("Zone outlines","zonesVisible"),toggle("World effects","effectsVisible"),toggle("Show triggers","triggersVisible","","Teleports, boosters, gravity and other triggers (!showtriggers). Drawn only, never part of a run."),toggle("Show player clips","clipsVisible","","Player clips and invisible walls (!showclips). Drawn only, never part of a run."),
       toggle("Source look", "sourceLook", "", "Maps with HDR lighting get CS:S's auto exposure and bloom. Other maps look the same either way. Off is the plain look."),
       toggle("Vertical sync", "vsync", "", "Locks frames to your monitor's refresh rate. Off gives the lowest input latency."),
       number("FPS limit", "fpsLimit", 0, 1000, 1, "0 is unlimited", "Caps the frame rate. 0 means no cap; otherwise 30–1000.")));
@@ -296,7 +297,7 @@ export function settingsPanel(initialSection?:string): HTMLElement {
         choice("Color-blind palette","colorBlind",["off","redGreen","blueYellow"]),
         toggle("Crosshair", "crosshair"),
         toggle("Viewmodel", "viewmodel", "", "Your weapon and hands."),
-        toggle("Speed graph", "speedGraph"),toggle("Speed colors","speedColors"),toggle("Jump gain ticks","gainTicks"),toggle("Perfect jump indicator","perfectIndicator"),toggle("Keys overlay", "keysOverlay"),choice("Keys style","keysStyle",["classic","minimal","keycaps"])),
+        toggle("Speed graph", "speedGraph"),toggle("Speed colors","speedColors"),toggle("Jump gain ticks","gainTicks"),toggle("Perfect jump indicator","perfectIndicator","EZ Scroll and Legit Scroll only (with autohop every hop is perfect); also shows perf % on the run line"),toggle("Keys overlay", "keysOverlay"),choice("Keys style","keysStyle",["classic","minimal","keycaps"])),
       group("Ghosts",choice("Ghost model","ghostModel",["same","bunny","runner"]),toggle("Show ghosts","showGhost"),number("Ghost opacity","ghostOpacity",0,1,.05),toggle("Fade near camera","ghostNearFade"),toggle("Ghost name tag","ghostTag")),
       group("Crosshair",
         choice("Style","crosshairStyle",["cross","cross-dot","dot","t","circle","none"]),color("Color","crosshairColor"),
@@ -305,7 +306,7 @@ export function settingsPanel(initialSection?:string): HTMLElement {
         number("Weapon FOV","viewmodelFov",30,100,1),number("Offset X","viewmodelX",-10,10,.1),number("Offset Y","viewmodelY",-10,10,.1),number("Offset Z","viewmodelZ",-10,10,.1),
         toggle("Left hand","viewmodelLeftHand"),number("Bob","viewmodelBob",0,2,.1),number("Sway","viewmodelSway",0,2,.1)),
       group("Jump stats",
-        toggle("Jump stats", "jumpStats", "JHUD / SSJ", "Speed and gain per jump, ported from the game's !ssj."),
+        toggle("Jump stats", "jumpStats", "JHUD / SSJ", "Speed and gain per jump, ported from the game's !ssj."),toggle("Jump stats colours","jumpStatsColors","Gain colours","Colours the jump stats line by gain: red under 60%, orange 60-69%, green 70-79%, blue 80-89%, white 90% and up. Off: amber from 80%."),
         jumpStatsMode(),
         number("N", "jumpStatsInterval", 2, 50, 1, "For Every N", "Show every Nth jump: 2 to 50.")),
       group("Strafe trainer",
@@ -353,8 +354,8 @@ export function settingsPanel(initialSection?:string): HTMLElement {
   const audio = h("div.nset-cols", null,
     group("Volume",
       number("Volume", "volume", 0, 1, .01, "0 to 1", "Master volume for sound effects and music."),
-      toggle("Mute", "muted"),number("Sound effects","sfxVolume",0,1,.05),number("Music level","musicVolume",0,1,.05),number("UI cues","uiVolume",0,1,.05),toggle("Footsteps","footsteps","Walking and ladder steps; jumps and landings stay audible"),toggle("Speed wind","wind"),toggle("Other player sounds","othersAudio"),toggle("Ghost sounds","ghostAudio"),
-      number("Wind / ambience level","ambienceVolume",0,1,.05),toggle("Mute sound effects","muteSfx"),toggle("Mute music","muteMusic"),toggle("Mute UI cues","muteUi"),toggle("Mute wind / ambience","muteAmbience"),toggle("Mute in background","muteInBackground"),toggle("Classic CS:S sounds","classicSounds","Downloads optional original movement, water and knife sounds; missing cues keep bunnyhop.lol sounds"),toggle("Perfect hop tick","perfectTick","Quiet tick on measured perfect hops in Scroll / Legit")),
+      toggle("Mute", "muted"),number("Sound effects","sfxVolume",0,1,.05),number("Music level","musicVolume",0,1,.05),number("UI cues","uiVolume",0,1,.05),toggle("Footsteps","footsteps","Walking and ladder steps; jumps and landings stay audible"),toggle("Weapon sounds","weaponSounds","Gunfire, knife swings and stabs, reloads and impacts, yours and other players'"),toggle("Speed wind","wind"),toggle("Other player sounds","othersAudio"),toggle("Ghost sounds","ghostAudio"),
+      number("Wind / ambience level","ambienceVolume",0,1,.05),toggle("Mute sound effects","muteSfx"),toggle("Mute music","muteMusic"),toggle("Mute UI cues","muteUi"),toggle("Mute wind / ambience","muteAmbience"),toggle("Mute in background","muteInBackground"),toggle("Classic CS:S sounds","classicSounds","Downloads optional original movement, water and knife sounds; missing cues keep bunnyhop.lol sounds"),toggle("Perfect hop tick","perfectTick","Quiet tick on measured perfect hops in EZ Scroll / Legit Scroll")),
     group("Announcer",
       announcerToggle("Enable announcer","enabled"),announcerNumber("Announcer volume","volume",0,1,.05),announcerToggle("Finish announcements","finish"),announcerToggle("Movement announcements","movement"),announcerToggle("Local announcements","local"),announcerToggle("Server announcements","server"),
       announcerChoice("Personal best","pb"),announcerChoice("World record","wr"),announcerChoice("Speed milestone","speed"),announcerChoice("High speed milestone","highSpeed"),announcerChoice("Perfect hop streak","streak"),announcerChoice("Longjump","lj"),
@@ -412,6 +413,7 @@ export function settingsPanel(initialSection?:string): HTMLElement {
     { id: "keys", title: "Keys", body: keys },
     { id: "discord", title: "Discord", body: discord },
     { id: "transfer", title: "Import / export", body: transfer },
+    { id: "data", title: "Game data", body: dataFolderPanel() },
     { id: "updates", title: "Updates", body: updatePanel() },
   ];
 
