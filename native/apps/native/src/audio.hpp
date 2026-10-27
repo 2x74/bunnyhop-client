@@ -47,7 +47,7 @@ class Audio {
         for(const auto &[id,paths]:mapping.items())for(const auto &path:paths){
             const auto rel=std::filesystem::path(path.get<std::string>());if(rel.is_absolute()||path.get<std::string>().find("..")!=std::string::npos)continue;
             const auto file=data_root/"classic"/rel;if(!std::filesystem::is_regular_file(file))continue;DecodedAudio decoded;std::string error;
-            if(!decode_sfx_file(file,&decoded,&error,budget))continue;auto mono=to_mono(decoded);if(decoded.rate!=mixer_rate)mono=resample_mono(mono,decoded.rate,mixer_rate,budget);
+            if(!decode_sfx_file(file,&decoded,&error,budget,true))continue;auto mono=to_mono(decoded);if(decoded.rate!=mixer_rate)mono=resample_mono(mono,decoded.rate,mixer_rate,budget);
             if(mono.empty()||mono.size()>budget)continue;budget-=mono.size();result.bank[id].push_back(std::move(mono));
         }return result;
     }

@@ -54,7 +54,7 @@ inline constexpr std::uint64_t max_music_samples = 64ull << 20; // 128 MB as int
 // Optional budgets may lower (never raise) the per-file decoded sample cap.
 // Failure clears the output, including any partially decoded PCM.
 bool decode_sfx_file(const std::filesystem::path &file, DecodedAudio *out, std::string *error,
-                     std::uint64_t max_samples = max_sfx_samples);
+                     std::uint64_t max_samples = max_sfx_samples, bool wav_only = false);
 bool decode_music_file(const std::filesystem::path &file, DecodedMusic *out, std::string *error,
                        std::uint64_t max_samples = max_music_samples);
 

@@ -218,12 +218,15 @@ const char *audio_format_name(AudioFormat format) {
 }
 
 bool decode_sfx_file(const std::filesystem::path &file, DecodedAudio *out, std::string *error,
-                     std::uint64_t max_samples) {
+                     std::uint64_t max_samples, bool wav_only) {
     *out = {}; error->clear();
     const auto cap = std::min(max_samples, max_sfx_samples);
     std::vector<unsigned char> bytes;
     if (!read_file(file, &bytes, error)) return false;
     const auto format = sniff_audio(bytes.data(), bytes.size());
+    // Downloaded content (the Classic CS:S group) is only ever WAV. Sniffing
+    // must not let a file named .wav reach the Ogg/FLAC/MP3 decoders.
+    if (wav_only && format != AudioFormat::wav) { *error = "is not a WAV file"; return false; }
     // Raw float32 has no header; its samples already use the mixer's rate.
     if (format == AudioFormat::unknown && file.extension() == ".f32") {
         if (bytes.size() % sizeof(float)) { *error = "is not a whole number of float samples"; return false; }
