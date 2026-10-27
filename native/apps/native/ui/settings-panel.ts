@@ -306,7 +306,7 @@ export function settingsPanel(initialSection?:string): HTMLElement {
         number("Weapon FOV","viewmodelFov",30,100,1),number("Offset X","viewmodelX",-10,10,.1),number("Offset Y","viewmodelY",-10,10,.1),number("Offset Z","viewmodelZ",-10,10,.1),
         toggle("Left hand","viewmodelLeftHand"),number("Bob","viewmodelBob",0,2,.1),number("Sway","viewmodelSway",0,2,.1)),
       group("Jump stats",
-        toggle("Jump stats", "jumpStats", "JHUD / SSJ", "Speed and gain per jump, ported from the game's !ssj."),
+        toggle("Jump stats", "jumpStats", "JHUD / SSJ", "Speed and gain per jump, ported from the game's !ssj."),toggle("Jump stats colours","jumpStatsColors","Gain colours","Colours the jump stats line by gain: red under 60%, orange 60-69%, green 70-79%, blue 80-89%, white 90% and up. Off: amber from 80%."),
         jumpStatsMode(),
         number("N", "jumpStatsInterval", 2, 50, 1, "For Every N", "Show every Nth jump: 2 to 50.")),
       group("Strafe trainer",

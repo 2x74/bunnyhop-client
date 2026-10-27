@@ -949,7 +949,7 @@ int run(const Options &opt) {
         for(const float percent:{50.f,100.f,175.f}){
             bh_snapshot(core.get(),&snapshot);BhRunState timing{};bh_run_state(core.get(),&timing);BhWeaponReport weapon{};bh_weapon_report(core.get(),&weapon);
             const float eye[]={curr.position[0],curr.position[1],curr.position[2]+curr.view_offset_z};renderer->draw(w,h,eye,input,&snapshot,0);
-            hud.draw(w,h,snapshot,timing,command,map_id,active_style,"",60,true,true,false,weapon,"",false,std::nullopt,true,nullptr,percent,&practice,true,"Gauntlet 1/3 | 00:01.000","-0.500s",true,.5f);
+            hud.draw(w,h,snapshot,timing,command,map_id,active_style,"",60,true,true,false,weapon,"",std::nullopt,std::nullopt,true,nullptr,percent,&practice,true,"Gauntlet 1/3 | 00:01.000","-0.500s",true,.5f);
             const auto png=backbuffer_png(gl,w,h);std::ofstream image(output/("hud-"+std::to_string(int(percent))+".png"),std::ios::binary);image.write(png.data(),png.size());
         }
         gauntlet_action({{"id","offline-smoke"},{"map","native-runtime-fixture"},{"progress",{{"idx",0},{"maps",2},{"before",0.0},{"pbSplit",nullptr}}}});
@@ -1519,7 +1519,7 @@ int run(const Options &opt) {
                 const bool history_ready=feedback.history_ready(pre.grounded,info.in_start,info.noclip);
                 if(history_ready)if(const auto report=feedback.ssj.tick(pre,ssj_cmd,info)) {
                     feedback.ssj_line=native::ssj_text(*report,ssj_fields);
-                    feedback.ssj_good=report->gain&&*report->gain>=native::good_gain;
+                    feedback.ssj_gain=report->gain;
                 }
                 feedback.ssj_was_in_start=timing.in_start!=0;feedback.ssj_was_noclip=state.movement_mode==1;  // Mode::Noclip
                 if(info.teleported)reset_feedback();
@@ -1682,7 +1682,7 @@ int run(const Options &opt) {
             BhCmd shown{};bh_last_command(core.get(),&shown);BhWeaponReport weapon{};bh_weapon_report(core.get(),&weapon);
             if((!menu||!menu->visible())&&!opt.camera)hud.draw(width,height,state,display_run,shown,map_id,display_style,shown_notice,display_fps,
                 preferences.at("hud").get<bool>(),preferences.at("crosshair").get<bool>(),playback,weapon,
-                preferences.at("jumpStats").get<bool>()?feedback.ssj_line:std::string(),feedback.ssj_good,
+                preferences.at("jumpStats").get<bool>()?feedback.ssj_line:std::string(),feedback.ssj_gain,
                 preferences.at("strafeTrainer").get<bool>()&&!playback?feedback.strafe_reading:std::nullopt,
                 preferences.at("strafeTrainerHints").get<bool>(),&hud_layout,preferences.at("hudScale").get<float>(),&practice,preferences.at("practiceKeepVelocity").get<bool>(),gauntlet_line,gauntlet_delta,gauntlet_good,leave_hold.progress(epoch_ms()));
             if((!menu||!menu->visible())&&!opt.camera){

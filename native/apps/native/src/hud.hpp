@@ -62,6 +62,18 @@ class NativeHud {
     }
     using Color=std::array<float,4>;
     const Color cream{.94f,.91f,.86f,1},amber{1,.71f,.24f,1},dim{.75f,.75f,.77f,1};
+    Color jump_stats_color(std::optional<float> gain) const {
+        if(!gain)return dim;
+        if(!prefs.value("jumpStatsColors",true))return *gain>=native::good_gain?amber:dim;
+        switch(native::gain_band(*gain)){
+            case native::GainBand::red:return {1,.33f,.33f,1};
+            case native::GainBand::orange:return {1,.6f,.2f,1};
+            case native::GainBand::green:return {.38f,.9f,.42f,1};
+            case native::GainBand::blue:return {.38f,.66f,1,1};
+            case native::GainBand::white:return {1,1,1,1};
+        }
+        return dim;
+    }
     void quad(float x,float y,float w,float h,float u,float v,float uw,float vh,Color c) {
         if(!element_visible)return;
         x=pivot_x+(x-pivot_x)*element_scale;y=pivot_y+(y-pivot_y)*element_scale;w*=element_scale;h*=element_scale;
@@ -215,7 +227,7 @@ void main(){color=vec4(ink.rgb,ink.a*(uv.x<0.?1.:texture(font,uv).a));})");
     void draw(int width,int height,const BhSnapshot &s,const BhRunState &run,const BhCmd &cmd,
               const std::string &map,const std::string &style,const std::string &notice,
               double fps,bool visible,bool crosshair,bool playback,const BhWeaponReport &weapon,
-              const std::string &jump_stats="",bool jump_stats_good=false,
+              const std::string &jump_stats="",std::optional<float> jump_stats_gain=std::nullopt,
               std::optional<native::StrafeReading> strafe=std::nullopt,bool strafe_hints=true,
               const Layout *layout=nullptr,float hud_percent=100,const native::Practice *practice=nullptr,bool keep_velocity=false,
               const std::string &gauntlet_line="",const std::string &gauntlet_delta="",bool gauntlet_good=false,float leave_progress=-1) {
@@ -263,7 +275,7 @@ void main(){color=vec4(ink.rgb,ink.a*(uv.x<0.?1.:texture(font,uv).a));})");
                 text(x,y,buf,13,dim,true);}
             // Jump stats sit above the run status, clear of the timer and speed.
             // The accent marks a gain the plugin would call good.
-            if(!jump_stats.empty()){const auto [x,y]=at("jumpStats",w/2,h-222);text(x,y,jump_stats,14,jump_stats_good?amber:dim,true);}
+            if(!jump_stats.empty()){const auto [x,y]=at("jumpStats",w/2,h-222);text(x,y,jump_stats,14,jump_stats_color(jump_stats_gain),true);}
             // Strafe trainer above that: the percentage, a bar whose centre line
             // is 100% (either end being 0% and 200%), and a hint under the bar.
             if(strafe) {

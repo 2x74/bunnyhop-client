@@ -32,7 +32,7 @@ inline Json default_settings() {
         {"capturePbScreenshots",false},{"showPlayerGlow",true},{"firstPersonGlow",true},{"waterQuality","simple"},{"zonesVisible",true},{"effectsVisible",true},{"triggersVisible",false},{"clipsVisible",false},{"fov",90.0},{"sourceLook",true},{"vsync",true},{"fpsLimit",0},{"volume",.65},{"muted",false},
         {"hudScale",100.0},{"practiceKeepVelocity",true},{"hud",true},{"crosshair",true},{"viewmodel",true},{"jumpStats",true},
         // Jump stats: "sixth" (jump 6 only), "every" jump, or "interval" (every jumpStatsInterval jumps).
-        {"jumpStatsMode","sixth"},{"jumpStatsInterval",6},
+        {"jumpStatsMode","sixth"},{"jumpStatsColors",true},{"jumpStatsInterval",6},
         // Strafe trainer: smoothing is how many air ticks a reading averages (1 = every tick on its own).
         {"strafeTrainer",false},{"strafeTrainerSmoothing",1},{"strafeTrainerHints",true},
         // HUD element positions, element id -> {x, y} in percent. Absent means the built-in place.

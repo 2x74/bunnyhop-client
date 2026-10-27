@@ -135,14 +135,14 @@ private:
 struct MovementFeedback {
     SsjTracker ssj;
     std::string ssj_line;
-    bool ssj_good = false, ssj_was_in_start = false, ssj_was_noclip = false;
+    std::optional<float> ssj_gain; bool ssj_was_in_start = false, ssj_was_noclip = false;
     StrafeTrainer strafe_trainer;
     std::optional<StrafeReading> strafe_reading;
     unsigned strafe_ground_ticks = 0, history_ground_ticks = 0;
     bool incomplete_history = false;
 
     void reset(bool in_start = false, bool noclip = false, bool incomplete = false) {
-        ssj.reset(); ssj_line.clear(); ssj_good = false;
+        ssj.reset(); ssj_line.clear(); ssj_gain.reset();
         strafe_trainer.reset(); strafe_reading.reset();
         strafe_ground_ticks = history_ground_ticks = 0;
         ssj_was_in_start = in_start; ssj_was_noclip = noclip;
