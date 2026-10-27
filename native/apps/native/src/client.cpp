@@ -1480,7 +1480,7 @@ int run(const Options &opt) {
                     if(turn_admission.observe(rate,active_style=="scroll")) {
                         // Invalidate any open ranked session, but keep recording the local archive.
                         ++run_generation;run_event({{"type","reset"}});beat_start=0;
-                        score_notice=active_style=="scroll"?"Practice turn controls: local replay only":"Custom turn speed: local replay only; ranked submission disabled";
+                        score_notice="Practice turn controls: local replay only";
                     }
                 }
                 input.held=0;for(auto b=preferences["binds"].begin();b!=preferences["binds"].end();++b){const auto bit=movement_bit(b.key());if(bit)for(const auto &key:b.value())if(held_codes.contains(key.get<std::string>()))input.held|=bit;}if(!(input.pulse&native::give_mask))if(const auto give=kept_weapons.next())input.pulse=(input.pulse&~native::weapon_command_mask)|(give<<native::give_shift);cmd=input.command();

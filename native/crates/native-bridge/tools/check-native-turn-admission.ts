@@ -30,7 +30,7 @@ try {
     const actual = countedTurns(replay,{events:c.ticks.map((t:any)=>t.event)},c.style);
     const expected = c.name==="custom"||c.name==="scroll-practice" ? [0,1,2,3,4,5,6,7] : c.name==="raw" ? [2] : [];
     assert.deepEqual([...actual.invalid],expected,c.name);
-    assert.equal(c.localOnly,c.name==="custom"||c.name==="scroll-practice");
+    assert.equal(c.localOnly,c.name==="scroll-practice"); // custom speeds are submitted; the server judges them
     if(c.name==="scroll")assert.ok(replay.buttons.every(b=>!(b&384)));
     if(c.name==="canonical") {
       // A decoder roundtrip alone cannot catch a wrong-rate turn marked canonical.

@@ -209,8 +209,8 @@ export function settingsPanel(initialSection?:string): HTMLElement {
       toggle("Separate vertical sensitivity", "separateVertical", "", "Use a different sensitivity for looking up and down."),
       number("Vertical sensitivity", "verticalSensitivity", .01, 100, .01, "", "Only used when separate vertical sensitivity is on.")),
     group("Turnbinds",
-      speed("Yaw speed", "yawSpeed", DEFAULT_YAW_SPEED, "cl_yawspeed", "How fast Turn left / Turn right (+left / +right) turn you, in degrees per second. Bind them under Keys > Turning. Only 210°/s supports ranked submission; other speeds keep the attempt local."),
-      h("p.nset-hint", null, "For ranked turn binds, set both speeds to 210°/s. Using another speed keeps that attempt as a local replay.")));
+      speed("Yaw speed", "yawSpeed", DEFAULT_YAW_SPEED, "cl_yawspeed", "How fast Turn left / Turn right (+left / +right) turn you, in degrees per second. Bind them under Keys > Turning. Runs with any speed are submitted; the server only ranks 210°/s."),
+      h("p.nset-hint", null, "The server only ranks 210°/s turns. Runs with another speed are still submitted, and the server decides. In Legit Scroll, turn binds only work in practice.")));
   const display = h("div.nset-cols", null,
     windowPanel(save),
     group("Local replay vault",toggle("Capture device personal bests", "capturePbScreenshots", "Local result screenshots", "Saves a result screenshot when this computer records a faster completed run. Device bests are separate from account records.")),
