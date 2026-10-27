@@ -236,3 +236,6 @@ html.native-clock-stopped *, html.native-clock-stopped *::before, html.native-cl
 .native-data-warning{color:var(--amber)}
 .native-data-prompt{margin:.75rem 0;padding:.75rem;border:1px solid var(--amber);border-radius:6px}
 .native-data div>.btn,.native-data-prompt .btn{margin:.25rem .5rem .25rem 0}
+
+/* Settings -> Import and export */
+.nset-transfer{box-sizing:border-box;width:100%;min-height:8rem;margin-top:.5rem;font-family:ui-monospace,monospace;font-size:.8rem;word-break:break-all}
