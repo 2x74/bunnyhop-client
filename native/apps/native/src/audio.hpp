@@ -1,4 +1,5 @@
 #pragma once
+#include "settings.hpp"
 #include "bunnyhop_native.h"
 #include "audio_pack.hpp"
 #include "movement_audio.hpp"
