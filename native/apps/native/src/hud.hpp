@@ -255,10 +255,11 @@ void main(){color=vec4(ink.rgb,ink.a*(uv.x<0.?1.:texture(font,uv).a));})");
                 const double speed=std::hypot(s.player.velocity[0],s.player.velocity[1]);const Color speedColor=!prefs.at("speedColors").get<bool>()?cream:speed>800?palette.loss:speed>500?palette.sync:speed>270?palette.gain:cream;
                 text(x,y,buf,25,speedColor,true);
                 if(prefs.at("gainTicks").get<bool>()&&gain_tick&&s.player.tick>=gain_tick&&s.player.tick-gain_tick<70){char gain[32];std::snprintf(gain,sizeof(gain),"%+.0f",gain_delta);text(x+100,y-10-float(s.player.tick-gain_tick)*.25f,gain,16,gain_delta>=0?palette.gain:palette.loss);}
-                if(prefs.at("perfectIndicator").get<bool>()&&run.last_perfect_tick>=0&&s.player.tick>=uint32_t(run.last_perfect_tick)&&s.player.tick-uint32_t(run.last_perfect_tick)<35)text(x-160,y+5,"PERFECT",12,amber);
+                if(native::scroll_style(style)&&prefs.at("perfectIndicator").get<bool>()&&run.last_perfect_tick>=0&&s.player.tick>=uint32_t(run.last_perfect_tick)&&s.player.tick-uint32_t(run.last_perfect_tick)<35)text(x-160,y+5,"PERFECT",12,amber);
             }
             {const auto [x,y]=at("runStats",w/2,h-68);
-                std::snprintf(buf,sizeof(buf),"%u jumps  %u strafes  %.1f%% sync  %.1f%% perf",run.jumps,run.strafes,run.sync_percent,run.perf_percent);
+                if(native::scroll_style(style))std::snprintf(buf,sizeof(buf),"%u jumps  %u strafes  %.1f%% sync  %.1f%% perf",run.jumps,run.strafes,run.sync_percent,run.perf_percent);
+                else std::snprintf(buf,sizeof(buf),"%u jumps  %u strafes  %.1f%% sync",run.jumps,run.strafes,run.sync_percent);
                 text(x,y,buf,13,dim,true);}
             // Jump stats sit above the run status, clear of the timer and speed.
             // The accent marks a gain the plugin would call good.

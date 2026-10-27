@@ -235,7 +235,7 @@ public:
     nlohmann::json status()const{return {{"classicLoading",classic_loading.valid()},{"classicActive",movement.classic},{"classicStatus",classic_status},{"sfxStatus",sfx_status_text},{"error",bank_error}};}
     bool classic_active()const{return movement.classic;}
     void set_map(BhContext *core){map_core=core;impact_surfaces.build(core);}
-    void set_style(const std::string &style){if(movement_style!=style)longjumps.reset();movement_style=style;scroll_style=style=="scroll"||style=="legit";}
+    void set_style(const std::string &style){if(movement_style!=style)longjumps.reset();movement_style=style;scroll_style=native::scroll_style(style);}
     void focus(bool value){focused=value;Lock lock(stream);volume=(!focused&&mute_background)?0:master_volume;music.gain(volume*music_volume);}
     void verified_finish(const std::string &event,const std::string &id){
         if(id.empty()||(event!="pb"&&event!="wr")||finished_results.contains(id))return;

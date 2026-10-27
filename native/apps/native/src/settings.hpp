@@ -14,6 +14,9 @@
 namespace native {
 using Json = nlohmann::json;
 inline const std::set<std::string> styles={"autohop","legit","scroll","wonly","sideways","hsw","lowgrav","autostrafe"};
+// EZ Scroll ("legit") and Legit Scroll ("scroll"): every hop is a timed press, so
+// perfect-hop feedback means something. With autohop every hop is perfect.
+inline bool scroll_style(const std::string &style){return style=="legit"||style=="scroll";}
 inline Json default_settings() {
     Json result={{"sensitivity",2.0},{"verticalSensitivity",2.0},{"separateVertical",false},
         // Turnbinds (+left / +right): degrees per second, like cl_yawspeed. The alt speed is used while Turn modifier is held.
