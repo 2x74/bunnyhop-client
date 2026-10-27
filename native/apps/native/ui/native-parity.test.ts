@@ -116,7 +116,7 @@ test("settings: HUD scale 50–175 %, practice binds with Teleport keeps speed, 
     await page.getByRole("button",{name:"Keys",exact:true}).click();
     const practice=page.locator(".nset-group",{has:page.locator(".nset-group-title",{hasText:/^Practice$/})});
     expect(await practice.locator(".nset-name").allInnerTexts()).toEqual(["Practice mode","Noclip","Save checkpoint","Teleport to checkpoint","Previous checkpoint","Next checkpoint","Teleport keeps speed"]);
-    expect(await practice.getByLabel("Noclip binding").textContent()).toBe("Z");
+    expect(await practice.getByLabel("Noclip binding").textContent()).toBe("`");
     await practice.scrollIntoViewIfNeeded();await shot(page,"settings-practice-keys-1280x720.png");
     from=await count(page);
     await practice.getByLabel("Teleport keeps speed").click();
@@ -244,7 +244,7 @@ test("pause tabs as on the web: Replays, On screen, Help; Main track on a bonus"
       await shot(page,`pause-on-screen-${width}x${height}.png`);
       await page.getByRole("tab",{name:"Help"}).click();
       expect(await page.locator(".pp-help-group h3").allInnerTexts()).toEqual(["Run","Practice","Screen"]);
-      expect(await page.locator(".pp-help-group",{hasText:"Practice"}).locator("tr",{hasText:"Noclip"}).locator("kbd").textContent()).toBe("Z");
+      expect(await page.locator(".pp-help-group",{hasText:"Practice"}).locator("tr",{hasText:"Noclip"}).locator("kbd").textContent()).toBe("`");
       await shot(page,`pause-help-${width}x${height}.png`);
       await page.locator(".pp-screen-foot .link-btn",{hasText:"Every key"}).click();
       expect(await page.locator("body").getAttribute("data-screen")).toBe("settings");
