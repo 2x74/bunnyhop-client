@@ -1245,7 +1245,7 @@ fn clearing_replay_timer_leaves_local_simulation_usable() {
 }
 
 #[test]
-fn practice_save_is_harmless_and_mutations_coast_without_recording_or_zones() {
+fn practice_save_is_harmless_and_noclip_stops_the_timer_without_recording() {
     let fixture = Fixture::new();
     let path = prop_fixture(&fixture);
     unsafe {
@@ -1291,8 +1291,8 @@ fn practice_save_is_harmless_and_mutations_coast_without_recording_or_zones() {
             assert_eq!((m.record_hash, m.recorded_commands), (hash, commands));
             assert!(m.recorder.is_some() && m.record_valid);
         }
-        // Simulate an already-running practice attempt; the clock must cross
-        // the end volume while flying without finishing, stats or splits.
+        // Simulate an already-running attempt; noclip stops its timer, so the
+        // clock neither runs nor finishes while flying through the end volume.
         {
             let m = (*c).map.as_mut().unwrap();
             let t = m.timer.as_mut().unwrap();
@@ -1314,19 +1314,13 @@ fn practice_save_is_harmless_and_mutations_coast_without_recording_or_zones() {
         assert_eq!(bh_run_state(c, &mut run), 1);
         assert_eq!(
             (run.status, run.jumps, run.strafes, run.split_count),
-            (1, 7, 9, 0)
+            (0, 0, 0, 0)
         );
         assert_eq!(
             (run.recording, run.recording_valid, run.total_commands),
             (0, 0, commands)
         );
-        assert_eq!(run.last_tick, snapshot.player.tick);
-        assert!(
-            (run.seconds
-                - f64::from(snapshot.player.tick) * f64::from((*c).settings.tick_interval))
-            .abs()
-                < 1e-12
-        );
+        assert_eq!(run.seconds, 0.0);
         // Restoring the harmless save is a mutation: timer/world/view restore,
         // while recording remains invalid and can never become a completed BHR.
         let mut view = BhCmd::default();

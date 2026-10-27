@@ -9,18 +9,21 @@ struct StartPoint {std::array<float,3> position{};float yaw=0,pitch=0;};
 inline bool start_zone_holds(const BhZone &z,const float p[3],uint32_t track){
     return z.kind==0&&z.track==track&&p[0]-16>=z.mins[0]&&p[0]+16<=z.maxs[0]&&p[1]-16>=z.mins[1]&&p[1]+16<=z.maxs[1]&&p[2]<=z.maxs[2]&&p[2]+62>=z.mins[2];
 }
-// Practice runs may set a start point too (web keeps one start point per map and
-// track for main and practice alike). The point is still validated here and again
-// at every restart, and the verifier checks the replay header's spawn, so what
-// practice tools did earlier in the run cannot leak into it. Noclip is refused:
-// the flight state is not the player's resting state.
-inline std::string start_point_problem(const BhState &s,const std::vector<BhZone> &zones,uint32_t track,bool noclip){
+// A start point can be saved anywhere the player stands still on the ground, in
+// main or practice runs. Only one inside the start zone can begin a timed, recorded
+// run: the timer starts on leaving the start zone and the verifier requires the
+// replay's spawn there. A point elsewhere restarts as practice (see client.cpp).
+// Noclip is refused: the flight state is not the player's resting state.
+inline std::string start_point_problem(const BhState &s,bool noclip){
     if(noclip)return "Turn off noclip first";
     if(!s.grounded||s.on_ladder)return "Stand on the ground";
     if(s.crouched)return "Stand up";
     if(std::hypot(std::hypot(s.velocity[0],s.velocity[1]),s.velocity[2])>1)return "Stand still";
-    for(const auto &z:zones)if(start_zone_holds(z,s.position,track))return {};
-    return "Move fully inside the start zone";
+    return {};
+}
+inline bool start_point_in_zone(const BhState &s,const std::vector<BhZone> &zones,uint32_t track){
+    for(const auto &z:zones)if(start_zone_holds(z,s.position,track))return true;
+    return false;
 }
 struct StartPoints {
     Json points=Json::object();

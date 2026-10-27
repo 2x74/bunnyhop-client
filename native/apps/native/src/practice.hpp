@@ -16,7 +16,8 @@ struct Practice {
     size_t current=0;
     int64_t hinted_run=-1;
     bool key_allowed(const std::string &action,bool timed) const {
-        return action=="save" || !timed || active || menu_open;
+        // Noclip works mid-run in any mode: it stops the timer (bh_practice_enter).
+        return action=="save" || action=="noclip" || !timed || active || menu_open;
     }
     void restart() { active=mode;noclip=false;tool.clear();hinted_run=-1; }
     void clear(BhContext *core) {

@@ -475,10 +475,10 @@ int run(const Options &opt) {
             if(map_id=="bhop_japan") require(bh_set_restart_names(core.get(),"","beginner"),core.get(),"Applying map restart names");
             require(bh_state(core.get(),&curr),core.get(),"Reading settled restart");
         }
-        std::optional<float> custom_pitch;
+        std::optional<float> custom_pitch;bool outside_spawn=false;
         if(!(tutorial&&tutorial->is_active()))if(const auto point=start_points.get(map_id,active_track)){
             const BhState fallback=curr;
-            if(bh_set_position(core.get(),point->position[0],point->position[1],point->position[2],point->yaw)&&bh_state(core.get(),&curr)&&native::start_point_problem(curr,zones,active_track,false).empty()&&curr.position[0]==point->position[0]&&curr.position[1]==point->position[1]&&std::abs(curr.position[2]-point->position[2])<=4)custom_pitch=point->pitch;
+            if(bh_set_position(core.get(),point->position[0],point->position[1],point->position[2],point->yaw)&&bh_state(core.get(),&curr)&&native::start_point_problem(curr,false).empty()&&curr.position[0]==point->position[0]&&curr.position[1]==point->position[1]&&std::abs(curr.position[2]-point->position[2])<=4){custom_pitch=point->pitch;outside_spawn=!native::start_point_in_zone(curr,zones,active_track);}
             else{require(bh_set_position(core.get(),fallback.position[0],fallback.position[1],fallback.position[2],fallback.teleport_angles[1]),core.get(),"Restoring default start");require(bh_state(core.get(),&curr),core.get(),"Reading default start");}
         }
         if(tutorial&&tutorial->is_active()){
@@ -489,7 +489,10 @@ int run(const Options &opt) {
         }
         if(renderer){renderer->reset_presentation();scope.reset();renderer->set_viewmodel_weapon(std::nullopt);renderer->set_cosmetics(outfit,packed_loadout);}
         audio.reset();hud.reset_history();replay_camera.reset();prev=curr;reset_input_timing();input.set_angles(custom_pitch.value_or(curr.teleport_angles[0]),curr.teleport_angles[1]);
+        if(outside_spawn&&!practice.active){practice.active=true;practice.tool="spawn";}
         kept_weapons.restarted(practice.active||zones.empty(),settings.physics>=10);begin_record();reset_feedback();reset_input_timing();
+        // (toast() is declared after reset; set its state directly.)
+        if(outside_spawn){toast_text="Custom spawn outside the start zone: practice run. Enter and leave the start zone to time it.";toast_until=Clock::now()+std::chrono::milliseconds(4000);}
     };
     auto practice_reason=[&](){return native::practice_unavailable(bool(core),playback,!room.id.empty(),map_id==tutorial_map,!gauntlet_id.empty());};
     auto toast=[&](const std::string &text,unsigned ms=3000){toast_text=text;toast_until=Clock::now()+std::chrono::milliseconds(ms);};
@@ -522,7 +525,7 @@ int run(const Options &opt) {
             toast("Checkpoint "+std::to_string(practice.number())+" saved");return;
         }
         if(action=="noclip"){
-            if(!practice.noclip){practice_use("noclip");practice.noclip=true;for(int k=0;k<3;k++){practice.flight.position[k]=curr.position[k];practice.flight.velocity[k]=curr.velocity[k];}}
+            if(!practice.noclip){BhRunState before{};bh_run_state(core.get(),&before);practice_use("noclip");practice.noclip=true;if(before.status==1)toast("Noclip: timer stopped. Press R for a real run.",3500);for(int k=0;k<3;k++){practice.flight.position[k]=curr.position[k];practice.flight.velocity[k]=curr.velocity[k];}}
             else{BhSnapshot snapshot{};const auto result=bh_practice_noclip_exit(core.get(),&practice.flight,float(input.yaw()),float(input.pitch),&snapshot);practice.noclip=false;curr=prev=snapshot.player;if(!result)toast("You're stuck in a wall. Noclip again, or teleport to a checkpoint.",4000);}
         } else if(action=="tele"||action=="prev"||action=="next"){
             if(practice.checkpoints.empty()){toast("No checkpoint yet. Press C to save one.");return;}
@@ -784,7 +787,7 @@ int run(const Options &opt) {
         if(action=="setStart"||action=="clearStart"){
             if(!core)return;
             if(action=="clearStart"){start_points.clear(map_id,active_track);toast("Start point cleared");}
-            else{if(tutorial&&tutorial->is_active()){toast("Start points are unavailable in tutorial lessons");return;}const auto problem=native::start_point_problem(curr,zones,active_track,practice.noclip);if(!problem.empty()){toast(problem);return;}start_points.save(map_id,active_track,curr,input.yaw(),input.pitch);toast("Start point saved");}
+            else{if(tutorial&&tutorial->is_active()){toast("Start points are unavailable in tutorial lessons");return;}const auto problem=native::start_point_problem(curr,practice.noclip);if(!problem.empty()){toast(problem);return;}start_points.save(map_id,active_track,curr,input.yaw(),input.pitch);toast(native::start_point_in_zone(curr,zones,active_track)?"Start point saved":"Start point saved outside the start zone: runs from it are practice, and the timer starts only from the start zone",native::start_point_in_zone(curr,zones,active_track)?3000u:5000u);}
             native::save_settings(cache/"start-points.json",start_points.points);return;
         }
         if(action=="nextWeapon"||action=="prevWeapon"){

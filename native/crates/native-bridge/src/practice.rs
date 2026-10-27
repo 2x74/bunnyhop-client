@@ -108,8 +108,9 @@ pub unsafe extern "C" fn bh_noclip_move(
     .ok()
     .is_some_and(|r| r.is_ok()) as c_int
 }
-/// Host practice mode invalidates recording immediately. Noclip outside a running
-/// timer stops it, so crossing a start zone while flying cannot arm a run.
+/// Host practice mode invalidates recording immediately. Noclip always stops the
+/// timer: a running one ends (noclip is not part of a timed attempt), and an idle
+/// one is disarmed, so crossing a start zone while flying cannot arm a run.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_practice_enter(ctx: *mut BhContext, noclip: u32) -> c_int {
     unsafe {
@@ -119,9 +120,7 @@ pub unsafe extern "C" fn bh_practice_enter(ctx: *mut BhContext, noclip: u32) -> 
             m.playback = None;
             if noclip != 0 {
                 if let Some(t) = &mut m.timer {
-                    if t.state.status != 1 {
-                        t.reset(t.interval as f32);
-                    }
+                    t.reset(t.interval as f32);
                 }
             }
             Ok(())
