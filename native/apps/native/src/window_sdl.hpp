@@ -10,8 +10,20 @@ class WindowController {
  static std::vector<WindowArea> areas(){std::vector<WindowArea> out;int count=0;auto* displays=SDL_GetDisplays(&count);for(int i=0;displays&&i<count;i++){SDL_Rect r{};if(SDL_GetDisplayUsableBounds(displays[i],&r))out.push_back({r.x,r.y,r.w,r.h});}SDL_free(displays);return out;}
  bool set_mode(const std::string& mode){
   if(mode=="windowed")return SDL_SetWindowFullscreen(window_,false)&&SDL_SetWindowFullscreenMode(window_,nullptr)&&SDL_SetWindowBordered(window_,true);
-  if(mode=="borderless")return SDL_SetWindowFullscreenMode(window_,nullptr)&&SDL_SetWindowFullscreen(window_,true);
-  const auto* desktop=SDL_GetDesktopDisplayMode(SDL_GetDisplayForWindow(window_));if(!desktop){error_=SDL_GetError();return false;}const auto modeCopy=*desktop;return SDL_SetWindowFullscreenMode(window_,&modeCopy)&&SDL_SetWindowFullscreen(window_,true);
+  if(mode=="borderless"){
+#ifdef _WIN32
+   // A borderless window over the display, not SDL desktop fullscreen: Windows'
+   // fullscreen optimizations turn a GL window covering exactly the screen into
+   // exclusive-style presentation (alt-tab flicker, black capture). One extra row
+   // keeps it a normal composited window.
+   if(!SDL_SetWindowFullscreen(window_,false)||!SDL_SetWindowFullscreenMode(window_,nullptr))return false;
+   SDL_RestoreWindow(window_);SDL_Rect r{};if(!SDL_GetDisplayBounds(SDL_GetDisplayForWindow(window_),&r))return false;
+   return SDL_SetWindowBordered(window_,false)&&SDL_SetWindowSize(window_,r.w,r.h+1)&&SDL_SetWindowPosition(window_,r.x,r.y);
+#else
+   return SDL_SetWindowFullscreenMode(window_,nullptr)&&SDL_SetWindowFullscreen(window_,true);
+#endif
+  }
+  SDL_SetWindowBordered(window_,true);const auto* desktop=SDL_GetDesktopDisplayMode(SDL_GetDisplayForWindow(window_));if(!desktop){error_=SDL_GetError();return false;}const auto modeCopy=*desktop;return SDL_SetWindowFullscreenMode(window_,&modeCopy)&&SDL_SetWindowFullscreen(window_,true);
  }
  bool restore_bounds(WindowBounds b,bool requirePosition=false){b=clamp_window_bounds(b,areas());if(!SDL_RestoreWindow(window_)||!SDL_SetWindowSize(window_,b.width,b.height))return false;
   // Some compositors (notably Wayland) own placement: failure to position does
@@ -21,7 +33,7 @@ class WindowController {
 public:
  explicit WindowController(SDL_Window* window):window_(window){observe_bounds();desired_=mode();}
  const std::string& error()const{return error_;}
- std::string mode()const{const auto flags=SDL_GetWindowFlags(window_);if(!(flags&SDL_WINDOW_FULLSCREEN))return "windowed";return SDL_GetWindowFullscreenMode(window_)?"fullscreen":"borderless";}
+ std::string mode()const{const auto flags=SDL_GetWindowFlags(window_);if(!(flags&SDL_WINDOW_FULLSCREEN))return flags&SDL_WINDOW_BORDERLESS?"borderless":"windowed";return SDL_GetWindowFullscreenMode(window_)?"fullscreen":"borderless";}
  bool apply(const WindowJson& settings,bool restore=false,const std::optional<WindowBounds>& saved=std::nullopt){
   const auto requested=settings.value("windowMode",std::string("windowed"));if(!valid_window_mode(requested)){error_="Invalid window mode";return false;}
   error_.clear();const auto old=mode();const bool oldTop=bool(SDL_GetWindowFlags(window_)&SDL_WINDOW_ALWAYS_ON_TOP);if(old=="windowed")observe_bounds();const auto oldNormal=normal_;

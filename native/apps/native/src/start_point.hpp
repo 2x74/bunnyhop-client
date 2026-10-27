@@ -21,6 +21,13 @@ inline std::string start_point_problem(const BhState &s,bool noclip){
     if(std::hypot(std::hypot(s.velocity[0],s.velocity[1]),s.velocity[2])>1)return "Stand still";
     return {};
 }
+// Restart: the core settles the saved point onto the floor below it and respawns
+// the player there. A fresh respawn is not grounded until its first tick and has
+// no velocity, so the resting checks above cannot apply; the point holds when the
+// core put the player at it (same x/y, same floor within 4 units).
+inline bool start_point_landed(const BhState &s,const StartPoint &p){
+    return s.position[0]==p.position[0]&&s.position[1]==p.position[1]&&std::abs(s.position[2]-p.position[2])<=4;
+}
 inline bool start_point_in_zone(const BhState &s,const std::vector<BhZone> &zones,uint32_t track){
     for(const auto &z:zones)if(start_zone_holds(z,s.position,track))return true;
     return false;
