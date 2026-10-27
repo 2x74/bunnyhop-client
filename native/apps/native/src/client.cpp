@@ -70,7 +70,7 @@ struct Options {
     std::string map, content_root, screenshot, online_map, menu_html = BUNNYHOP_MENU_HTML, menu_smoke;
     uint64_t frames = 0;
     double sensitivity = 2;
-    bool hidden = false, help = false, no_menu = false, sensitivity_set=false, menu_home_smoke=false;
+    bool hidden = false, help = false, no_menu = false, windowed = false, sensitivity_set=false, menu_home_smoke=false;
     std::string style="autohop", replay,tutorial_lesson,runtime_smoke,video_smoke,presentation_smoke;bool tutorial_demo=false;
     // Render checks: a fixed eye (Source x, y, z) and pitch, yaw, with no HUD or viewmodel.
     std::optional<std::array<float,5>> camera;
@@ -93,6 +93,7 @@ Options options(int argc, char **argv) {
         else if (arg == "--menu-smoke") out.menu_smoke = value();
         else if (arg == "--menu-home-smoke") {out.menu_smoke=value();out.menu_home_smoke=true;}
         else if (arg == "--no-menu") out.no_menu = true;
+        else if (arg == "--windowed") out.windowed = true;
         else if (arg == "--content-root") out.content_root = value();
         else if (arg == "--screenshot") out.screenshot = value();
         else if (arg == "--camera") {
@@ -277,11 +278,20 @@ int run(const Options &opt) {
     auto preferences=native::default_settings();
     try {preferences=native::load_settings(cache/"settings.json");}catch(const std::exception &e){std::cerr<<"Settings: "<<e.what()<<'\n';}
     if(opt.sensitivity_set)preferences["sensitivity"]=opt.sensitivity;
+    // Recovery: --windowed resets a display mode the player cannot leave and keeps it.
+    if(opt.windowed&&preferences.value("windowMode",std::string())!="windowed"){preferences["windowMode"]="windowed";try{native::save_settings(cache/"settings.json",preferences);}catch(const std::exception &e){std::cerr<<"Settings: "<<e.what()<<'\n';}}
     native::WindowController window_controller(window.get());
     const bool persist_window=!opt.hidden&&!opt.frames&&opt.menu_smoke.empty()&&opt.runtime_smoke.empty();
     std::optional<native::WindowBounds> saved_window;
     if(persist_window)try{const auto path=cache/"window-state.json";if(std::filesystem::exists(path)&&std::filesystem::file_size(path)<=16384)saved_window=native::read_window_bounds(nlohmann::json::parse(read_text(path)));}catch(const std::exception&e){std::cerr<<"Window bounds: "<<e.what()<<'\n';}
-    auto initial_window_preferences=preferences;if(menu&&menu->visible())initial_window_preferences["alwaysOnTop"]=false;
+    // While the menu is open the window may not be always-on-top, and exclusive
+    // fullscreen runs as borderless: the menu (a WebView2/WKWebView child, or the
+    // separate GTK window) is composited by the desktop, which exclusive mode
+    // bypasses, so it would be open, focused and invisible. Gameplay with the
+    // menu closed keeps the exclusive mode the player chose.
+    auto window_for_menu=[&](nlohmann::json p,bool menu_open){if(menu_open){p["alwaysOnTop"]=false;if(p.value("windowMode",std::string())=="fullscreen")p["windowMode"]="borderless";}return p;};
+    // Launch opens the home menu, so start as it will be shown.
+    auto initial_window_preferences=window_for_menu(preferences,bool(menu));
     if(persist_window&&!window_controller.apply(initial_window_preferences,true,saved_window)){std::cerr<<"Window: "<<window_controller.error()<<'\n';preferences["windowMode"]=window_controller.mode();}
     bool window_dirty=false;auto window_save_due=std::chrono::steady_clock::now();
     auto save_window=[&](){if(!persist_window||!preferences.value("rememberWindowBounds",true))return;try{if(auto bounds=window_controller.observe_bounds())native::save_settings(cache/"window-state.json",native::window_bounds_json(*bounds));window_dirty=false;}catch(const std::exception&e){std::cerr<<"Window bounds: "<<e.what()<<'\n';}};
@@ -403,6 +413,7 @@ int run(const Options &opt) {
     auto show_menu=[&](bool on) {
         if(on){replay_controls.dragging=false;replay_orbit_drag=false;}
         SDL_SetWindowAlwaysOnTop(window.get(),!on&&preferences.value("alwaysOnTop",false));
+        if(menu&&preferences.value("windowMode",std::string())=="fullscreen"){const auto want=window_for_menu(preferences,on);if(window_controller.mode()!=want.at("windowMode").get<std::string>()&&!window_controller.apply(want))std::cerr<<"Window: "<<window_controller.error()<<'\n';}
         if(menu) menu->set_visible(on);
         // Each pause re-announces the paused map (a fresh still for a
         // separate GTK window); sent with the menu state once it is visible.
@@ -1170,8 +1181,8 @@ int run(const Options &opt) {
                     request_map(message.at("id").get<std::string>());
                 }
                 else if(type=="style") {if(!gauntlet_id.empty())throw std::runtime_error("Gauntlets are Normal style on the main track.");if(download.valid())throw std::runtime_error("A map is loading");const auto id=message.at("id").get<std::string>();if(!native::styles.contains(id))throw std::runtime_error("Unknown style");selected_style=id;active_track=0;reset();}
-                else if(type=="settings") {save_window();auto changed=native::patch_settings(preferences,message.at("patch"));auto effective=changed;if(menu&&menu->visible())effective["alwaysOnTop"]=false;if(!window_controller.apply(effective))throw std::runtime_error(window_controller.error());native::save_settings(cache/"settings.json",changed);preferences=std::move(changed);input.held=input.pulse=0;held_codes.clear();apply_preferences();error.clear();}
-                else if(type=="window") {const auto action=message.at("action").get<std::string>();bool ok=false;if(action=="center")ok=window_controller.center();else if(action=="minimize")ok=window_controller.minimize();else if(action=="maximize")ok=window_controller.maximize();else if(action=="toggleFullscreen"){save_window();auto changed=preferences;changed["windowMode"]=native::toggled_window_mode(window_controller.mode());auto effective=changed;if(menu&&menu->visible())effective["alwaysOnTop"]=false;ok=window_controller.apply(effective);if(ok){preferences=changed;native::save_settings(cache/"settings.json",preferences);}}else throw std::runtime_error("Unknown window action");if(!ok)throw std::runtime_error(window_controller.error());window_dirty=true;window_save_due=Clock::now()+std::chrono::milliseconds(500);}
+                else if(type=="settings") {save_window();auto changed=native::patch_settings(preferences,message.at("patch"));const auto effective=window_for_menu(changed,menu&&menu->visible());if(!window_controller.apply(effective))throw std::runtime_error(window_controller.error());native::save_settings(cache/"settings.json",changed);preferences=std::move(changed);input.held=input.pulse=0;held_codes.clear();apply_preferences();error.clear();}
+                else if(type=="window") {const auto action=message.at("action").get<std::string>();bool ok=false;if(action=="center")ok=window_controller.center();else if(action=="minimize")ok=window_controller.minimize();else if(action=="maximize")ok=window_controller.maximize();else if(action=="toggleFullscreen"){save_window();auto changed=preferences;changed["windowMode"]=native::toggled_window_mode(window_controller.mode());const auto effective=window_for_menu(changed,menu&&menu->visible());ok=window_controller.apply(effective);if(ok){preferences=changed;native::save_settings(cache/"settings.json",preferences);}}else throw std::runtime_error("Unknown window action");if(!ok)throw std::runtime_error(window_controller.error());window_dirty=true;window_save_due=Clock::now()+std::chrono::milliseconds(500);}
                 else if(type=="replays")refresh_replays();
                 else if(type=="ghost"){ghost_enabled=ghost_handle&&message.at("enabled").get<bool>();ghost_slots[0].enabled=ghost_enabled;}
                 else if(type=="ghostControl"){
@@ -1807,7 +1818,7 @@ int main(int argc,char **argv) {
         Options opt=options(argc,argv);
         if(opt.help) {
             std::cout << "Usage: bunnyhop-native [--map MAP.bsp | --online-map NAME] [--content-root DIR] [--sensitivity 2]\n"
-                         "  [--menu-html PATH] [--no-menu] [--frames N] [--screenshot output.ppm] [--camera x,y,z,pitch,yaw] [--hidden]\n"
+                         "  [--menu-html PATH] [--no-menu] [--windowed] [--frames N] [--screenshot output.ppm] [--camera x,y,z,pitch,yaw] [--hidden]\n"
                          "  [--runtime-smoke OUTPUT_DIR --replay PATH] (offline lifecycle checks with --map; private data, no network)\n"
                          "  [--tutorial jump|strafe|speed|final] [--tutorial-demo] (tutorial map only)\n"
                          "  [--menu-smoke OUTPUT_PREFIX] (with --online-map; live API reads only, no scores)\n"
