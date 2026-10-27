@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.5.0 — Native
+
+**Gameplay**
+- Setspawn (`!ss` / `!setspawn`) now works in practice and anywhere you're standing
+  still. A spawn outside the start zone restarts as a practice run, and the timer
+  still starts from the start zone.
+- Noclip (`!nc`) works in normal and practice runs, including mid-run, and stops a
+  running timer.
+- `!showtriggers` and `!showclips` now toggle triggers and player clips separately.
+  Both are also in Settings and can be bound.
+
+**HUD and audio**
+- JHUD colours by gain, on by default: red under 60%, orange 60–69%, green 70–79%,
+  cyan 80–89%, white 90% and up. Turn it off in Settings → Jump stats colours.
+- The PERFECT indicator and perf % now only show in EZ Scroll and Legit Scroll.
+- New **Weapon sounds** toggle covering gunfire, knife swings and stabs, reloads and
+  impacts.
+
+**Settings**
+- **Settings → Game data:** move your game data to another folder or drive, either
+  now or on the next launch.
+- New default binds: noclip is now `` ` `` (was Z), show triggers is Mouse 3, show
+  clips is T.
+
+**Fixes**
+- Fullscreen no longer leaves the menu invisible: the game runs borderless while the
+  menu is open. The new `--windowed` launch flag resets a display mode you can't get
+  out of.
+- The practice-mode hint now shows your actual binds.
+
+**Security**
+- Classic CS:S sounds only ever decode as WAV, and an Ogg Vorbis decoder overflow
+  (CVE-2023-45678) is patched.
+
 ## Unreleased — current-server compatibility
 
 - Update the shared simulation to physics 15 and pin the matching canonical WASM.
