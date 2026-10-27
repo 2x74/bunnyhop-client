@@ -67,7 +67,7 @@ class NativeHud {
         if(!prefs.value("jumpStatsColors",true))return *gain>=native::good_gain?amber:dim;
         switch(native::gain_band(*gain)){
             case native::GainBand::red:return {1,0,0,1};       // #FF0000
-            case native::GainBand::orange:return {1,.5f,0,1};  // #FF8000
+            case native::GainBand::orange:return {1,165.f/255,0,1}; // #FFA500
             case native::GainBand::green:return {0,1,0,1};     // #00FF00
             case native::GainBand::blue:return {0,1,1,1};      // #00FFFF
             case native::GainBand::white:return {1,1,1,1};     // #FFFFFF
