@@ -50,11 +50,11 @@ test("Back and Esc return to the screen a profile was opened from; a picked map'
   await go(page,"/u/profile-fixture");await player(page,"Profile Hopper");
   await page.evaluate(()=>window.bunnyhopNativeMenu.onState({map:"bhop_fixture",loading:"",error:"",paused:false,style:"autohop",track:0}));
   expect(await screen(page)).toBe("pause");
-  await page.keyboard.press("Escape");expect(await page.evaluate(()=>JSON.parse(String((window as unknown as {sent:unknown[]}).sent.at(-1))))).toEqual({type:"resume"});
+  await page.keyboard.press("Escape");expect(await page.evaluate(()=>JSON.parse(String((window as unknown as {sent:unknown[]}).sent.filter((m)=>!String(m).includes('"audioCue"')).at(-1))))).toEqual({type:"resume"});
   // Picking the map that is already up resumes it, and leaves the pause menu for the next Esc.
   await go(page,"/maps");expect(await screen(page)).toBe("maps");
   await page.evaluate(()=>window.bunnyhopNativeMenu.onState({paused:true}));
-  await go(page,"/?map=bhop_fixture");expect(JSON.parse(await page.evaluate(()=>String((window as unknown as {sent:unknown[]}).sent.at(-1))))).toEqual({type:"resume"});
+  await go(page,"/?map=bhop_fixture");expect(JSON.parse(await page.evaluate(()=>String((window as unknown as {sent:unknown[]}).sent.filter((m)=>!String(m).includes('"audioCue"')).at(-1))))).toEqual({type:"resume"});
   // (Drawn with the host's next state, not under the closing menu.)
   await page.evaluate(()=>window.bunnyhopNativeMenu.onState({paused:false}));expect(await screen(page)).toBe("pause");
   // A replay watched from a profile keeps the profile (the viewer returns there).
