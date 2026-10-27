@@ -38,13 +38,15 @@ inline double configured_turn_rate(bool left, bool right, double speed) {
     return left?speed:-speed;
 }
 
-// A noncanonical turn remains playable/recordable but cannot enter ranked
-// admission. Sticky for the complete attempt, including its pre-start ticks.
+// Turnbinds in Legit Scroll (practice only) keep the attempt local: sticky for
+// the complete attempt, including its pre-start ticks. Other styles submit any
+// turn speed; the replay still records non-210 turns as raw (see Input::turn), so
+// the server decides whether they rank.
 struct TurnAdmission {
     bool local_only = false;
     void reset() { local_only = false; }
     bool observe(double rate, bool restricted_style = false) {
-        const bool first = !local_only && rate != 0 && (std::abs(rate) != 210 || restricted_style);
+        const bool first = !local_only && rate != 0 && restricted_style;
         local_only |= first;
         return first;
     }

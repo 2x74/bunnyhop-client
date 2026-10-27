@@ -188,11 +188,11 @@ int main() {
         const double defaults=native::default_settings()["yawSpeed"],modifier=native::default_settings()["yawSpeedAlt"];
         assert(defaults==210&&modifier==210&&!admission.observe(native::configured_turn_rate(true,false,defaults))&&admission.allows_event("finish"));
         assert(admission.allows_event("finish"));
-        assert(admission.observe(118.888888));
-        assert(!admission.allows_event("beat")&&!admission.allows_event("finish"));
-        assert(admission.allows_event("reset")&&!admission.observe(210)&&admission.local_only);
+        // Outside Legit Scroll any turn speed is submitted; the server decides whether it ranks.
+        assert(!admission.observe(118.888888)&&!admission.observe(-720)&&admission.allows_event("finish")&&!admission.local_only);
+        assert(admission.observe(210,true)&&!admission.allows_event("beat")&&!admission.allows_event("finish")); // Legit Scroll practice is local
+        assert(admission.allows_event("reset")&&!admission.observe(118.888888,true)&&admission.local_only);
         admission.reset();assert(admission.allows_event("finish"));
-        assert(admission.observe(210,true)&&!admission.allows_event("finish")); // scroll practice is local too
     }
     {
         using namespace std::chrono;

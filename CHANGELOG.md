@@ -29,6 +29,9 @@
   menu is open. The new `--windowed` launch flag resets a display mode you can't get
   out of.
 - The practice-mode hint now shows your actual binds.
+- Turnbinds at any speed are no longer held back by the client outside Legit Scroll:
+  runs are submitted and the server decides whether they rank (it ranks 210°/s).
+  In Legit Scroll, turnbinds still only work in practice.
 
 **Security**
 - Classic CS:S sounds only ever decode as WAV, and an Ogg Vorbis decoder overflow
