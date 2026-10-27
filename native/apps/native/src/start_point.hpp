@@ -9,8 +9,13 @@ struct StartPoint {std::array<float,3> position{};float yaw=0,pitch=0;};
 inline bool start_zone_holds(const BhZone &z,const float p[3],uint32_t track){
     return z.kind==0&&z.track==track&&p[0]-16>=z.mins[0]&&p[0]+16<=z.maxs[0]&&p[1]-16>=z.mins[1]&&p[1]+16<=z.maxs[1]&&p[2]<=z.maxs[2]&&p[2]+62>=z.mins[2];
 }
-inline std::string start_point_problem(const BhState &s,const std::vector<BhZone> &zones,uint32_t track,bool practice){
-    if(practice)return "Start points can't be set in a practice run";
+// Practice runs may set a start point too (web keeps one start point per map and
+// track for main and practice alike). The point is still validated here and again
+// at every restart, and the verifier checks the replay header's spawn, so what
+// practice tools did earlier in the run cannot leak into it. Noclip is refused:
+// the flight state is not the player's resting state.
+inline std::string start_point_problem(const BhState &s,const std::vector<BhZone> &zones,uint32_t track,bool noclip){
+    if(noclip)return "Turn off noclip first";
     if(!s.grounded||s.on_ladder)return "Stand on the ground";
     if(s.crouched)return "Stand up";
     if(std::hypot(std::hypot(s.velocity[0],s.velocity[1]),s.velocity[2])>1)return "Stand still";

@@ -22,11 +22,11 @@ inline Json default_settings() {
         {"crosshairStyle","cross"},{"crosshairColor","#eee8db"},{"crosshairSize",6.0},{"crosshairGap",3.0},{"crosshairThickness",2.0},{"crosshairAlpha",1.0},{"crosshairOutline",true},
         {"viewmodelFov",54.0},{"viewmodelX",.6},{"viewmodelY",1.5},{"viewmodelZ",-.9},{"viewmodelLeftHand",false},{"viewmodelBob",1.0},{"viewmodelSway",1.0},
         {"playerModel","bunny"},{"ghostModel","same"},{"showGhost",true},{"ghostOpacity",.4},{"ghostNearFade",true},{"ghostTag",true},{"othersAudio",true},{"ghostAudio",true},
-        {"sfxVolume",1.0},{"musicVolume",1.0},{"uiVolume",1.0},{"ambienceVolume",1.0},{"muteSfx",false},{"muteUi",false},{"muteMusic",false},{"muteAmbience",false},{"muteInBackground",true},{"classicSounds",false},{"perfectTick",false},{"announcer",default_announcer()},{"footsteps",true},{"wind",true},
+        {"sfxVolume",1.0},{"musicVolume",1.0},{"uiVolume",1.0},{"ambienceVolume",1.0},{"muteSfx",false},{"muteUi",false},{"muteMusic",false},{"muteAmbience",false},{"muteInBackground",true},{"classicSounds",false},{"perfectTick",false},{"announcer",default_announcer()},{"footsteps",true},{"weaponSounds",true},{"wind",true},
         {"colorBlind","off"},{"gainTicks",true},{"speedColors",true},{"perfectIndicator",true},{"speedGraph",false},{"keysOverlay",true},{"keysStyle","classic"},
         {"yawSpeed",210.0},{"yawSpeedAlt",210.0},
         // Source look: CS:S's auto exposure and bloom on maps with HDR lighting.
-        {"capturePbScreenshots",false},{"showPlayerGlow",true},{"firstPersonGlow",true},{"waterQuality","simple"},{"zonesVisible",true},{"effectsVisible",true},{"triggersVisible",false},{"fov",90.0},{"sourceLook",true},{"vsync",true},{"fpsLimit",0},{"volume",.65},{"muted",false},
+        {"capturePbScreenshots",false},{"showPlayerGlow",true},{"firstPersonGlow",true},{"waterQuality","simple"},{"zonesVisible",true},{"effectsVisible",true},{"triggersVisible",false},{"clipsVisible",false},{"fov",90.0},{"sourceLook",true},{"vsync",true},{"fpsLimit",0},{"volume",.65},{"muted",false},
         {"hudScale",100.0},{"practiceKeepVelocity",true},{"hud",true},{"crosshair",true},{"viewmodel",true},{"jumpStats",true},
         // Jump stats: "sixth" (jump 6 only), "every" jump, or "interval" (every jumpStatsInterval jumps).
         {"jumpStatsMode","sixth"},{"jumpStatsInterval",6},
@@ -46,10 +46,11 @@ inline Json default_settings() {
             {"mute",{"KeyO"}},{"slot1",{"Digit1"}},{"slot2",{"Digit2"}},{"slot3",{"Digit3"}},
             {"lastWeapon",{"KeyQ"}},{"drop",{"KeyG"}},{"reload",Json::array()},
             {"giveUsp",{"Digit5"}},{"giveGlock",{"Digit6"}},
-            {"practice",Json::array()},{"cpSave",{"KeyC"}},{"cpTeleport",{"KeyX"}},{"cpPrev",Json::array()},{"cpNext",Json::array()},{"mainMenu",Json::array()},{"noclip",{"KeyZ"}},
+            {"practice",Json::array()},{"cpSave",{"KeyC"}},{"cpTeleport",{"KeyX"}},{"cpPrev",Json::array()},{"cpNext",Json::array()},{"mainMenu",Json::array()},{"noclip",{"Backquote"}},
             {"chat",{"KeyY"}},{"commandChat",{"KeyU"}},{"scoreboard",{"Tab"}},{"spectatorNext",Json::array()},{"spectatorPrevious",Json::array()},{"spectatorMode",{"KeyN"}},
             {"setStart",Json::array()},{"clearStart",Json::array()},{"nextWeapon",Json::array()},{"prevWeapon",Json::array()},
             {"gunMenu",Json::array()},{"nextTrack",Json::array()},{"keysOverlay",Json::array()},{"hudEditor",Json::array()},{"thirdPerson",Json::array()},{"flashlight",Json::array()},
+            {"showTriggers",{"Mouse3"}},{"showClips",{"KeyT"}},
             {"turnLeft",{"ArrowLeft"}},{"turnRight",{"ArrowRight"}},{"turnFast",{"Mouse4"}}
         }}};
     result.update(default_window_settings());return result;
@@ -66,7 +67,7 @@ inline bool valid_bind_code(const std::string &code) {
     }
     static const std::set<std::string> other={"Space","ControlLeft","ControlRight","ShiftLeft","ShiftRight",
         "AltLeft","AltRight","Tab","Enter","Backspace","ArrowLeft","ArrowRight","ArrowUp","ArrowDown",
-        "MouseWheel","MWheelUp","MWheelDown","BracketLeft","BracketRight","Minus","Equal","Comma","Period","Slash","Semicolon","Quote"};
+        "MouseWheel","MWheelUp","MWheelDown","BracketLeft","BracketRight","Minus","Equal","Comma","Period","Slash","Semicolon","Quote","Backquote"};
     return other.contains(code);
 }
 // A patch is atomic. Invalid persisted input never silently changes half the controls.
@@ -155,7 +156,11 @@ inline Json load_settings(const std::filesystem::path &file) {
     auto out=default_settings();
     if(!std::filesystem::exists(file)) return out;
     if(std::filesystem::file_size(file)>16384) throw std::runtime_error("Settings file is too large");
-    std::ifstream stream(file);Json saved;stream>>saved;return patch_settings(out,saved);
+    std::ifstream stream(file);Json saved;stream>>saved;
+    // Before !showclips existed, "Trigger and clip overlays" drew both groups.
+    // Keep clips on for anyone who had that toggle on.
+    if(saved.is_object()&&!saved.contains("clipsVisible")&&saved.value("triggersVisible",Json(false))==true)saved["clipsVisible"]=true;
+    return patch_settings(out,saved);
 }
 inline void save_settings(const std::filesystem::path &file,const Json &settings) {
     auto temp=file;temp+=".tmp";

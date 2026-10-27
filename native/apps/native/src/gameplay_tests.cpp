@@ -44,7 +44,7 @@ int main(){
     BhState player{};player.grounded=1;player.position[0]=player.position[1]=50;
     std::vector<BhZone> zones={zone};assert(native::start_point_problem(player,zones,0,false).empty());
     player.position[0]=15;assert(!native::start_point_problem(player,zones,0,false).empty());player.position[0]=50;
-    assert(!native::start_point_problem(player,zones,0,true).empty());player.velocity[0]=2;assert(!native::start_point_problem(player,zones,0,false).empty());player.velocity[0]=0;
+    assert(!native::start_point_problem(player,zones,0,true).empty()); // noclip refuses; a practice run alone does notplayer.velocity[0]=2;assert(!native::start_point_problem(player,zones,0,false).empty());player.velocity[0]=0;
     native::StartPoints points;points.save("map",0,player,90,-5);native::StartPoints restored;assert(restored.load(native::Json::parse(points.points.dump())));assert(restored.get("map",0)->yaw==90);assert(!restored.get("map",1));
     assert(!restored.load({{"bad",{{"position",{1,2,3}},{"yaw",0},{"pitch",100}}}}));
     native::ReplayCamera camera;native::Input view;float eye[3]{};player.view_offset_z=64;
