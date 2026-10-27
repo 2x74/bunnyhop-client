@@ -12,7 +12,7 @@ const ID="AbCdEfGhIjKlMnOp";
 const INDEX={maps:["bhop_eazy","bhop_a","bhop_b","bhop_1","bhop_13","bhop_2_easy"].map(name=>({name,title:name,tier:1,size:1<<20}))};
 type Msg={type:string;[key:string]:unknown};
 const messages=(page:Page)=>page.evaluate(()=>(window as any).messages as Msg[]);
-const sent=async(page:Page,from:number)=>(await messages(page)).slice(from).filter(m=>!["cosmetics","menuAppearance","menuBackdrop","audioCue"].includes(m.type));
+const sent=async(page:Page,from:number)=>(await messages(page)).slice(from).filter(m=>!["cosmetics","menuAppearance","menuBackdrop","audioCue","playerName"].includes(m.type));
 const count=async(page:Page)=>(await messages(page)).length;
 const player=(id:string,name:string)=>({id,name,avatar:null,country:null});
 const ATTEMPT={id:ID,gauntlet:{slug:"weekly-test",title:"Weekly test",maxMs:5*3600_000},state:"open",step:0,startedAt:Date.now(),lastPingAt:Date.now(),expiresAt:null,finishedAt:null,realMs:null,totalTicks:null,

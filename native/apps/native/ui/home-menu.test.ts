@@ -10,7 +10,7 @@ import {resolve} from "node:path";
 const out=resolve(import.meta.dir,"../../../target/native-menu/web-port");
 const INDEX={maps:["bhop_eazy","bh_aztec","bhop_1","bhop_13","bhop_ambience","bhop_easyhop","bhop_2_easy","bhop_alley"].map(name=>({name,title:name,tier:1,size:1<<20}))};
 const messages=(page:Page)=>page.evaluate(()=>(window as any).messages as {type:string;[key:string]:unknown}[]);
-const last=async(page:Page)=>(await messages(page)).filter(m=>m.type!=="cosmetics"&&m.type!=="menuAppearance"&&m.type!=="playerName").at(-1);
+const last=async(page:Page)=>(await messages(page)).filter(m=>m.type!=="cosmetics"&&m.type!=="menuAppearance"&&m.type!=="playerName"&&m.type!=="audioCue").at(-1);
 
 /** The home screen's own backdrop request (sent once backgroundPick has the map index): waited for, never assumed. */
 const homeBackdrop=(page:Page)=>page.waitForFunction(()=>(window as any).messages.some((m:{type:string})=>m.type==="menuBackdrop"));
