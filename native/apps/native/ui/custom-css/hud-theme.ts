@@ -7,7 +7,7 @@ import { onCssApplied } from "./custom-css";
 // - the colour variables --cream, --cream-2, --amber, --gain, --loss, --sync-ok;
 // - `#hud [data-el="..."]` color and opacity for the elements in HUD_ELEMENTS.
 // Everything else (fonts, sizes, backgrounds, shadows, images, live numbers,
-// #custom-art) is website-only; docs/native-ui-parity-2026-10-28.md lists it.
+// #custom-art) is website-only.
 
 export type Rgba = [number, number, number, number];
 
