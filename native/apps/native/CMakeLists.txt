@@ -5,7 +5,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 # Keep diagnostics on native code, including Objective-C++ platform adapters.
 if(MSVC)
-    add_compile_options(/W4)
+    # Sources and string literals are UTF-8 (HUD text uses "·" and "…").
+    add_compile_options(/W4 /utf-8)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options(-Wall -Wextra)
 endif()

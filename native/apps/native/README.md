@@ -189,9 +189,8 @@ fields that the menu already fetches:
   different run generation, map, style or track are ignored. A verified `runService.rank`
   also updates placement, even when no board message is available.
 
-The current menu forwards verdict rank but omits progression and board-percent fields.
-Those two menu producers must forward the fields above to populate the full result reel
-and percentile line. They do not affect recording or server verification.
+The menu sends both from `ui/run-rewards.ts` and `ui/hud-leaderboard.ts`. Neither affects
+recording or server verification.
 
 ## Unsigned test releases
 

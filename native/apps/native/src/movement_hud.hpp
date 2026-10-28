@@ -473,7 +473,7 @@ struct HudExtras {
         if (!rank)
             place.assign("");
         else if (top && std::isfinite(*top) && *top > 0 && *top <= 100)
-            place.format("#%u | top %.1f%%", rank, *top);
+            place.format("#%u · top %.0f%%", rank, std::ceil(*top));
         else
             place.format("#%u", rank);
     }

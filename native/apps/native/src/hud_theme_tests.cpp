@@ -531,7 +531,7 @@ void test_ghost_progress() {
     extras.ghost_progress(frames, state, run, nullptr);
     assert(!extras.have_ghost && extras.ghost_delta.empty());
     extras.leaderboard(4, 3);
-    assert(extras.place.view() == "#4 | top 3.0%");
+    assert(extras.place.view() == "#4 · top 3%");
     extras.leaderboard(0);
     assert(extras.place.empty());
 }
