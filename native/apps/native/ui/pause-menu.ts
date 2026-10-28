@@ -8,6 +8,7 @@
 import { api } from "../../web/src/api";
 import { getPB } from "../../web/src/pb";
 import { legalLinks } from "../../web/src/ui/legal";
+import { TUTORIAL_MAP, tutorialPrompt } from "./tutorial-entry";
 import { formatTime } from "../../web/src/timer";
 import { accountChip, me } from "../../web/src/ui/account";
 import { STYLE_DEFS, styleForTrack, styleLabel, type StyleId } from "../../web/src/styles";
@@ -237,6 +238,8 @@ export function pauseScreen(a: PauseActions): HTMLElement {
     sep(),
     railItem(a.room ? "Current room" : "Play online", a.servers, { icon: "globe", sub: api.available() ? undefined : "offline" }),
     railItem("Change map", a.maps, { icon: "grid", sub: a.room ? "leaves the server" : undefined }),
+    // (Unless the player hid the tutorial: "Change map" still has it at the top, or a search away.)
+    tutorialPrompt() && !a.room && a.map !== TUTORIAL_MAP ? railItem("Learn to bhop", a.learn, { icon: "spark" }) : null,
     railItem("Replays", a.replays, { icon: "play" }),
     sep(),
     railItem("Loadout", a.loadout, { icon: "viewmodel" }),

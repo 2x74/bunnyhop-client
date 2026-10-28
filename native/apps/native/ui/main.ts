@@ -25,6 +25,7 @@ import { settingsPanel, focusSettingsSection } from "./settings-panel";
 import { replayPanel, watchRequest, raceRequest, gauntletWatchDeps, sendReplay, playLocalReplay } from "./replays";
 import { legalLinks } from "../../web/src/ui/legal";
 import { installMuteButton } from "./mute-button";
+import { installTutorialProgress } from "./tutorial-entry";
 import { watchGauntletSplit } from "./gauntlet-watch";
 import { NativeRoomService } from "./room-service";
 import { RoomConnection } from "../../web/src/net/room";
@@ -493,6 +494,7 @@ setGameInfo(()=>({inGame:!!state.map,client:"native",...(state.map?{map:state.ma
   ...(latestMouseDiagnostics()?{inputDiagnostics:latestMouseDiagnostics()}:{})}));
 initSocial();initDock();initCosmetics();installNowPlaying();installNativeUiAudio();
 installMuteButton();
+installTutorialProgress();
 installHudTheme();
 initCustomCss();
 installMenuBackdrop();
