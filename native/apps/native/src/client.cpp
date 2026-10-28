@@ -43,6 +43,8 @@
 #include "video_capture.hpp"
 #include "presentation_smoke.hpp"
 #include "window_sdl.hpp"
+#include "window_mode_driver.hpp"
+#include "menu_scripts.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
 #include <algorithm>
@@ -290,11 +292,14 @@ int run(const Options &opt) {
     {std::error_code ec;std::filesystem::create_directories(cache/"sound",ec);std::filesystem::create_directories(cache/"bgm",ec);}
     native::Audio audio(assets,cache,!opt.hidden&&!opt.frames);
     std::unique_ptr<native::MenuWebView> menu;
+    std::string menu_failure;
     const bool wants_menu=!opt.no_menu && (!opt.frames || !opt.menu_smoke.empty());
     if(wants_menu) {
         menu=std::make_unique<native::MenuWebView>(window.get(),read_text(menu_path));
         if(!menu->available()) {
-            std::cerr << "Menu unavailable: " << menu->error() << '\n'; menu.reset();
+            std::cerr << "Menu unavailable: " << menu->error() << '\n';
+            menu_failure = menu->error();
+            menu.reset();
         }
     }
     if(!menu && opt.map.empty() && opt.online_map.empty())
@@ -332,17 +337,26 @@ int run(const Options &opt) {
     const bool persist_window=!opt.hidden&&!opt.frames&&opt.menu_smoke.empty()&&opt.runtime_smoke.empty();
     std::optional<native::WindowBounds> saved_window;
     if(persist_window)try{const auto path=cache/"window-state.json";if(std::filesystem::exists(path)&&std::filesystem::file_size(path)<=16384)saved_window=native::read_window_bounds(nlohmann::json::parse(read_text(path)));}catch(const std::exception&e){std::cerr<<"Window bounds: "<<e.what()<<'\n';}
-    // While the menu is open the window may not be always-on-top, and exclusive
-    // fullscreen runs as borderless: the menu (a WebView2/WKWebView child, or the
-    // separate GTK window) is composited by the desktop, which exclusive mode
-    // bypasses, so it would be open, focused and invisible. Gameplay with the
-    // menu closed keeps the exclusive mode the player chose.
-    auto window_for_menu=[&](nlohmann::json p,bool menu_open){if(menu_open){p["alwaysOnTop"]=false;if(p.value("windowMode",std::string())=="fullscreen")p["windowMode"]="borderless";}return p;};
-    // Launch opens the home menu, so start as it will be shown.
-    auto initial_window_preferences=window_for_menu(preferences,bool(menu));
-    if(persist_window&&!window_controller.apply(initial_window_preferences,true,saved_window)){std::cerr<<"Window: "<<window_controller.error()<<'\n';preferences["windowMode"]=window_controller.mode();}
+    // Exclusive fullscreen is borderless while the menu is open, and nothing
+    // changes while the window is minimized (window_modes.hpp).
+    native::WindowModeDriver window_modes(window_controller, preferences.value("windowMode", std::string("windowed")));
+    if (persist_window && !window_modes.launch(preferences, bool(menu), saved_window)) {
+        std::cerr << "Window: " << window_controller.error() << '\n';
+        preferences["windowMode"] = window_controller.mode();
+    }
     bool window_dirty=false;auto window_save_due=std::chrono::steady_clock::now();
-    auto save_window=[&](){if(!persist_window||!preferences.value("rememberWindowBounds",true))return;try{if(auto bounds=window_controller.observe_bounds())native::save_settings(cache/"window-state.json",native::window_bounds_json(*bounds));window_dirty=false;}catch(const std::exception&e){std::cerr<<"Window bounds: "<<e.what()<<'\n';}};
+    // While borderless/fullscreen, saved_bounds() is the last windowed bounds.
+    auto save_window = [&]() {
+        if (!persist_window || !preferences.value("rememberWindowBounds", true))
+            return;
+        try {
+            if (auto bounds = window_controller.saved_bounds())
+                native::save_settings(cache / "window-state.json", native::window_bounds_json(*bounds));
+            window_dirty = false;
+        } catch (const std::exception& e) {
+            std::cerr << "Window bounds: " << e.what() << '\n';
+        }
+    };
     std::string selected_style=opt.style,active_style=opt.style,outfit,packed_loadout,ghost_cosmetic="ghost-default",trail_cosmetic="trail-none";
     std::optional<native_render::Glow> player_glow;
     native::RoomState room;native::RoomModes room_modes;std::optional<unsigned> observed_spectator;
@@ -459,11 +473,17 @@ int run(const Options &opt) {
         } else captured=on;
         input_clock.reset();
     };
-    auto show_menu=[&](bool on) {
+    // from_focus_loss: the window mode change waits until focus returns.
+    auto show_menu=[&](bool on, bool from_focus_loss = false) {
         if(on){replay_controls.dragging=false;replay_orbit_drag=false;}
         SDL_SetWindowAlwaysOnTop(window.get(),!on&&preferences.value("alwaysOnTop",false));
-        if(menu&&preferences.value("windowMode",std::string())=="fullscreen"){const auto want=window_for_menu(preferences,on);if(window_controller.mode()!=want.at("windowMode").get<std::string>()&&!window_controller.apply(want))std::cerr<<"Window: "<<window_controller.error()<<'\n';}
-        if(menu) menu->set_visible(on);
+        // Hidden before the window goes exclusive, shown once it is composited.
+        if (menu && !on)
+            menu->set_visible(false);
+        if (menu)
+            window_modes.set_menu(on, from_focus_loss, preferences);
+        if (menu && on)
+            menu->set_visible(true);
         // Each pause re-announces the paused map (a fresh still for a
         // separate GTK window); sent with the menu state once it is visible.
         if(on&&core&&menu)gameplay_backdrop_due=true;
@@ -556,6 +576,7 @@ int run(const Options &opt) {
     };
     auto practice_reason=[&](){return native::practice_unavailable(bool(core),playback,!room.id.empty(),map_id==tutorial_map,!gauntlet_id.empty());};
     auto toast=[&](const std::string &text,unsigned ms=3000){toast_text=text;toast_until=Clock::now()+std::chrono::milliseconds(ms);};
+    native::PendingMenuScript menu_script;
     auto practice_use=[&](const std::string &tool){
         if(!practice.active){BhRunState timing{};bh_run_state(core.get(),&timing);practice.active=true;practice.tool=tool;toast(timing.status==1?"This run is practice now. Press R to restart for a real run.":"Practice until you restart. Press R for a real run.",5000);}
         require(bh_practice_enter(core.get(),tool=="noclip"),core.get(),"Entering practice");
@@ -830,7 +851,14 @@ int run(const Options &opt) {
         }
         if(action=="flashlight"){flashlight=!flashlight;return;}
         if(action=="nextTrack"){audio.music_control("next");return;}
-        if(action=="hudEditor"){if(menu){show_menu(true);menu->evaluate_js("window.bunnyhopNativeMenu?.open?.('settings','hud-editor')");}return;}
+        if (action == "hudEditor") {
+            show_menu(true);
+            if (!menu)
+                toast(native::menu_unavailable_text(menu_failure), 6000);
+            menu_script.open(menu.get(), menu_ready,
+                             "window.bunnyhopNativeMenu?.open?.('settings','hud-editor')");
+            return;
+        }
         if(action=="gunMenu"){gun_menu.toggle();return;}
         if(action=="showTriggers"||action=="showClips"){const char *key=action=="showTriggers"?"triggersVisible":"clipsVisible";const bool on=!preferences.at(key).get<bool>();preferences[key]=on;native::save_settings(cache/"settings.json",preferences);apply_preferences();toast(std::string(action=="showTriggers"?"Triggers":"Player clips")+(on?" shown":" hidden"));return;}
         if(action=="keysOverlay"){preferences["keysOverlay"]=!preferences.at("keysOverlay").get<bool>();native::save_settings(cache/"settings.json",preferences);apply_preferences();return;}
@@ -1056,16 +1084,60 @@ int run(const Options &opt) {
                     if(event.window.windowID==SDL_GetWindowID(window.get()))running=false;
                     break;
                 case SDL_EVENT_WINDOW_MOVED:case SDL_EVENT_WINDOW_RESIZED:case SDL_EVENT_WINDOW_MAXIMIZED:case SDL_EVENT_WINDOW_RESTORED:
+                    if (event.type == SDL_EVENT_WINDOW_RESTORED)
+                        window_modes.resumed(preferences);
                     if(event.window.windowID==SDL_GetWindowID(window.get())){window_dirty=true;window_save_due=Clock::now()+std::chrono::milliseconds(500);}break;
-                case SDL_EVENT_WINDOW_FOCUS_LOST: if(!menu||!menu->visible())window_controller.focus_lost(preferences);focused=false;audio.focus(false); show_menu(true); break;
-                case SDL_EVENT_WINDOW_FOCUS_GAINED: audio.focus(true); focused=true;if(resume_wanted&&(!menu||!menu->visible())) capture(!(playback&&replay_controls.visible));break;
+                case SDL_EVENT_WINDOW_FOCUS_LOST:
+                    if (!menu || !menu->visible())
+                        window_controller.focus_lost(preferences);
+                    focused = false;
+                    audio.focus(false);
+                    window_modes.focus_lost(SDL_GetWindowFlags(window.get()) & SDL_WINDOW_MINIMIZED);
+                    show_menu(true, true);
+                    break;
+                case SDL_EVENT_WINDOW_FOCUS_GAINED:
+                    audio.focus(true);
+                    focused = true;
+                    window_modes.resumed(preferences);
+                    // Keyboard focus back to the open menu.
+                    if (menu && menu->visible())
+                        menu->set_visible(true);
+                    if (resume_wanted && (!menu || !menu->visible()))
+                        capture(!(playback && replay_controls.visible));
+                    break;
+                case SDL_EVENT_WINDOW_MINIMIZED:
+                    window_modes.minimized();
+                    break;
+                case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+                case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+                case SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED:
+                case SDL_EVENT_DISPLAY_ADDED:
+                case SDL_EVENT_DISPLAY_REMOVED:
+                    window_modes.display_changed();
+                    break;
                 case SDL_EVENT_KEY_DOWN:
                 case SDL_EVENT_KEY_UP: {
                     const bool down=event.type==SDL_EVENT_KEY_DOWN;
-                    if(down&&!event.key.repeat&&event.key.scancode==SDL_SCANCODE_F10){show_menu(true);if(menu)menu->evaluate_js("window.bunnyhopNativeMenu?.open?.('settings','display')");break;}
+                    if(down&&!event.key.repeat&&event.key.scancode==SDL_SCANCODE_F10){
+                        show_menu(true);
+                        if (!menu)
+                            toast(native::menu_unavailable_text(menu_failure), 6000);
+                        menu_script.open(menu.get(), menu_ready,
+                                         "window.bunnyhopNativeMenu?.open?.('settings','display')");
+                        break;
+                    }
                     if(down&&!event.key.repeat&&event.key.scancode==SDL_SCANCODE_RETURN&&(event.key.mod&SDL_KMOD_ALT)){
                         save_window();
-                        if(!(video_capture||director_job||video_encoder.busy())){auto changed=preferences;changed["windowMode"]=native::toggled_window_mode(window_controller.mode());if(window_controller.apply(changed)){preferences=changed;native::save_settings(cache/"settings.json",preferences);}else error=window_controller.error();if(menu&&menu->visible())SDL_SetWindowAlwaysOnTop(window.get(),false);}break;}
+                        if (!(video_capture || director_job || video_encoder.busy())) {
+                            if (auto changed = window_modes.toggle(preferences)) {
+                                preferences = std::move(*changed);
+                                native::save_settings(cache / "settings.json", preferences);
+                            } else {
+                                error = window_controller.error();
+                            }
+                        }
+                        break;
+                    }
                     if(video_capture||director_job||video_encoder.busy()){if(down&&event.key.scancode==SDL_SCANCODE_ESCAPE){cancel_video();refresh_playback_pose();}break;}
                     if(chat.active){
                         if(down){
@@ -1144,7 +1216,16 @@ int run(const Options &opt) {
                 if((video_capture||director_job||video_encoder.busy())&&type!="videoExport"&&type!="ready"&&type!="update"&&type!="audioCue"&&type!="music"&&type!="quit"){if(type=="settings")throw std::runtime_error("Finish or cancel video export before changing settings.");continue;}
                 const size_t limit=(type=="replayData"||type=="menuBackdrop")?12*1024*1024:(type=="roomSnapshot"||type=="roomEvent")?128*1024:16*1024;
                 if(raw.size()>limit)throw std::runtime_error("Menu command exceeds its type limit");
-                if(type=="ready") {menu_ready=true;backdrop_shown.clear();backdrop_failed.clear();backdrop_cut=false;gameplay_backdrop_due=bool(core);run_event({{"type","reset"}});std::cout<<"Native menu ready: "<<raw<<'\n';}
+                if (type == "ready") {
+                    menu_ready = true;
+                    backdrop_shown.clear();
+                    backdrop_failed.clear();
+                    backdrop_cut = false;
+                    gameplay_backdrop_due = bool(core);
+                    run_event({{"type", "reset"}});
+                    std::cout << "Native menu ready: " << raw << '\n';
+                    menu_script.ready(menu.get());
+                }
                 else if(type=="resume" && core && !download.valid()) show_menu(false);
                 else if(type=="prefetchMap"){
                     if(message.at("map").is_null()){cancel_prefetch();continue;}
@@ -1230,8 +1311,43 @@ int run(const Options &opt) {
                     request_map(message.at("id").get<std::string>());
                 }
                 else if(type=="style") {if(!gauntlet_id.empty())throw std::runtime_error("Gauntlets are Normal style on the main track.");if(download.valid())throw std::runtime_error("A map is loading");const auto id=message.at("id").get<std::string>();if(!native::styles.contains(id))throw std::runtime_error("Unknown style");selected_style=id;active_track=0;reset();}
-                else if(type=="settings") {save_window();auto changed=native::patch_settings(preferences,message.at("patch"));const auto effective=window_for_menu(changed,menu&&menu->visible());if(!window_controller.apply(effective))throw std::runtime_error(window_controller.error());native::save_settings(cache/"settings.json",changed);preferences=std::move(changed);input.held=input.pulse=0;held_codes.clear();apply_preferences();error.clear();}
-                else if(type=="window") {const auto action=message.at("action").get<std::string>();bool ok=false;if(action=="center")ok=window_controller.center();else if(action=="minimize")ok=window_controller.minimize();else if(action=="maximize")ok=window_controller.maximize();else if(action=="toggleFullscreen"){save_window();auto changed=preferences;changed["windowMode"]=native::toggled_window_mode(window_controller.mode());const auto effective=window_for_menu(changed,menu&&menu->visible());ok=window_controller.apply(effective);if(ok){preferences=changed;native::save_settings(cache/"settings.json",preferences);}}else throw std::runtime_error("Unknown window action");if(!ok)throw std::runtime_error(window_controller.error());window_dirty=true;window_save_due=Clock::now()+std::chrono::milliseconds(500);}
+                else if (type == "settings") {
+                    save_window();
+                    auto changed = native::patch_settings(preferences, message.at("patch"));
+                    if (!window_modes.choose(changed))
+                        throw std::runtime_error(window_controller.error());
+                    native::save_settings(cache / "settings.json", changed);
+                    preferences = std::move(changed);
+                    input.held = input.pulse = 0;
+                    held_codes.clear();
+                    apply_preferences();
+                    error.clear();
+                }
+                else if (type == "window") {
+                    const auto action = message.at("action").get<std::string>();
+                    bool ok = false;
+                    if (action == "center") {
+                        ok = window_controller.center();
+                    } else if (action == "minimize") {
+                        ok = window_controller.minimize();
+                    } else if (action == "maximize") {
+                        ok = window_controller.maximize();
+                    } else if (action == "toggleFullscreen") {
+                        save_window();
+                        auto changed = window_modes.toggle(preferences);
+                        ok = changed.has_value();
+                        if (ok) {
+                            preferences = std::move(*changed);
+                            native::save_settings(cache / "settings.json", preferences);
+                        }
+                    } else {
+                        throw std::runtime_error("Unknown window action");
+                    }
+                    if (!ok)
+                        throw std::runtime_error(window_controller.error());
+                    window_dirty = true;
+                    window_save_due = Clock::now() + std::chrono::milliseconds(500);
+                }
                 else if(type=="replays")refresh_replays();
                 else if(type=="ghost"){ghost_enabled=ghost_handle&&message.at("enabled").get<bool>();ghost_slots[0].enabled=ghost_enabled;}
                 else if(type=="ghostControl"){
