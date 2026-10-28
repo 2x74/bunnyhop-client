@@ -119,23 +119,26 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
     hud.draw_chat_overlay(width, height, chat.visible(2), "", "", {}, true, 0, 100, &chat, chat.viewport(2));
     save("ws4-chat");
     HudResult result;
+    result.restart_bind("KeyR");
     result.finish(1, 16.731, 1, 17.421, true);
     clear();
-    draw_result(hud, width, height, 100, result, 2);
+    draw_result(hud, width, height, 100, result, 3.5);
     save("ws4-result-pending");
     result.service(
             {{"generation", 1},
              {"status", "verified"},
              {"announcer", "wr"},
+             {"rank", 1u},
              {"rewards", Json::array({{{"title", "+120 XP"}, {"detail", "Level 12 | New hat unlocked"}}})}},
-            1
+            1,
+            3.2
     );
     clear();
-    draw_result(hud, width, height, 100, result, 2);
+    draw_result(hud, width, height, 100, result, 3.5);
     save("ws4-result-wr-reel");
     const auto rasterizations = hud.rasterizations();
     clear();
-    draw_result(hud, width, height, 100, result, 2);
+    draw_result(hud, width, height, 100, result, 3.5);
     if (hud.rasterizations() != rasterizations)
         throw std::runtime_error("Unchanged result strings were rasterized again");
     clear();

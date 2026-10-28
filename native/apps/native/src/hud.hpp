@@ -302,6 +302,8 @@ class NativeHud {
             vertices.insert(vertices.end(), {p[0] * scale, p[1] * scale, p[2], p[3], c[0], c[1], c[2], c[3]});
     }
 
+    // u = -2 marks a solid fill. The shader tests u < -1 so a text quad whose u lands a hair below 0 at its left edge
+    // still samples the texture.
     void rect(float x, float y, float w, float h, Color c) { quad(x, y, w, h, -2, -2, 0, 0, c); }
 
     void text(float x, float y, std::string_view value, float size, Color color, bool center = false) {
@@ -403,6 +405,8 @@ public:
     void preferences(const native::Json &value) {
         prefs_ = native::HudPreferences::from(value);
         chat_layout_hash_ = ~uint64_t(0);
+        const auto &restart = value.at("binds").at("restart");
+        result.restart_bind(restart.empty() ? "" : restart[0].get_ref<const std::string &>());
     }
 
     const native::HudPreferences &preferences() const { return prefs_; }
@@ -1131,7 +1135,7 @@ void main(){uv=coord;ink=tint;gl_Position=vec4(pos.x/viewport.x*2.-1.,1.-pos.y/v
                 R"(#version 330 core
 in vec2 uv;in vec4 ink;uniform sampler2D font;out vec4 color;
 void main(){if(uv.y>2.){color=texture(font,vec2(uv.x,uv.y-3.))*ink;}
-else{color=vec4(ink.rgb,ink.a*(uv.x<0.?1.:texture(font,uv).a));}})"
+else{color=vec4(ink.rgb,ink.a*(uv.x<-1.?1.:texture(font,uv).a));}})"
         );
         gl.GenVertexArrays(1, &vao);
         gl.BindVertexArray(vao);

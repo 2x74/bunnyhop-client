@@ -3027,7 +3027,7 @@ int run(const native::Options &opt) {
                         hud.extras.leaderboard(message.value("place", 0u), message.value("topPercent", 0.));
                     } else if (type == "runService") {
                         if (message.value("generation", uint64_t(-1)) != heartbeat.generation) continue;
-                        hud.result.service(message, heartbeat.generation);
+                        hud.result.service(message, heartbeat.generation, double(SDL_GetTicksNS()) / 1e9);
                         if (message.value("status", std::string()) == "verified" && message.contains("rank"))
                             hud.extras.leaderboard(message.value("rank", 0u), message.value("topPercent", 0.));
                         if (message.value("status", std::string()) == "verified" && !practice.active

@@ -540,22 +540,37 @@ void test_results_toasts_and_room_widgets() {
     native::HudResult result;
     result.finish(4, 12.345, 1, 13, true);
     assert(result.delta && *result.delta < 0 && result.stamp == native::ResultStamp::pending);
-    result.service({{"generation", 3}, {"status", "verified"}, {"announcer", "wr"}}, 4);
+    assert(result.status_line.view() == "Submitting…");
+    result.service({{"generation", 3}, {"status", "verified"}, {"announcer", "wr"}}, 4, 1.5);
     assert(result.stamp == native::ResultStamp::pending);
+    result.service({{"generation", 4}, {"status", "uploading"}}, 4, 1.5);
+    assert(result.status_line.view() == "Verifying replay…");
     result.service(
             {{"generation", 4},
              {"status", "verified"},
              {"announcer", "wr"},
+             {"rank", 1u},
              {"rewards", native::Json::array({{{"title", "+120 XP"}, {"detail", "New hat unlocked"}}})}},
-            4
+            4,
+            1.5
     );
+    assert(result.status_line.view() == "Rank #1" && result.record_started == 1.5);
+    result.restart_bind("KeyR");
     DrawProbe result_probe;
     {
         NoAllocations no_allocations;
         native::draw_result(result_probe, 1280, 720, 100, result, 2);
     }
-    assert(result_probe.has("WORLD RECORD") && result_probe.has("+120 XP") && result_probe.has("R to go again"));
-    assert(!result_probe.particle_after_text);
+    // Confetti goes under the words; the hint waits two seconds.
+    assert(result_probe.has("World record") && result_probe.has("+120 XP") && result_probe.has("Rank #1"));
+    assert(!result_probe.has("R to go again") && !result_probe.particle_after_text);
+    DrawProbe settled_probe;
+    native::draw_result(settled_probe, 1280, 720, 100, result, 3.5);
+    assert(settled_probe.has("R to go again"));
+    result.restart_bind("");
+    DrawProbe unbound_probe;
+    native::draw_result(unbound_probe, 1280, 720, 100, result, 3.5);
+    assert(!unbound_probe.has("to go again"));
     assert(!result.visible(16));
     result.service(
             {{"generation", 4},
@@ -563,14 +578,17 @@ void test_results_toasts_and_room_widgets() {
              {"xp", 120u},
              {"level", {{"level", 12u}}},
              {"achievements", native::Json::array({"First finish"})}},
-            4
+            4,
+            2
     );
     assert(result.reward_count == 3);
     assert(result.rewards[0].title.view() == "+120 XP");
     assert(result.rewards[1].title.view() == "Level 12");
     assert(result.rewards[2].detail.view() == "First finish");
-    result.service({{"generation", 3}, {"status", "verified"}, {"xp", 999u}}, 4);
+    result.service({{"generation", 3}, {"status", "verified"}, {"xp", 999u}}, 4, 2);
     assert(result.rewards[0].title.view() == "+120 XP");
+    result.service({{"generation", 4}, {"status", "rejected"}}, 4, 2);
+    assert(result.status_bad && native::result_word(result).empty());
     native::Toasts toasts;
     for (unsigned i = 0; i < 8; ++i)
         toasts.push(std::to_string(i), 1);
