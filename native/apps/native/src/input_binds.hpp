@@ -1,6 +1,9 @@
 #pragma once
 #include "native_input.hpp"
 #include <nlohmann/json.hpp>
+#include <algorithm>
+#include <memory>
+#include <vector>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -29,19 +32,59 @@ inline uint32_t movement_bit(std::string_view action) {
 // Wheel codes are pulses (one tick per notch), never held.
 class BindTable {
 public:
+    struct Binding {
+        std::string action;
+        uint32_t bit;
+        std::vector<std::string> codes;
+    };
+
+    using Bindings = std::vector<Binding>;
+
     void rebuild(const nlohmann::json &binds) {
         bits_.clear();
+        auto bindings = std::make_shared<Bindings>();
+        bindings->reserve(binds.size());
         for (auto binding = binds.begin(); binding != binds.end(); ++binding) {
-            const uint32_t bit = movement_bit(binding.key());
-            if (!bit) {
-                continue;
-            }
+            Binding typed{binding.key(), movement_bit(binding.key()), {}};
             for (const auto &code : binding.value()) {
-                if (code.is_string() && !is_wheel(code.get<std::string>())) {
-                    bits_[code.get<std::string>()] |= bit;
-                }
+                if (!code.is_string()) continue;
+                typed.codes.push_back(code.get<std::string>());
+                if (typed.bit && !is_wheel(typed.codes.back())) bits_[typed.codes.back()] |= typed.bit;
             }
+            bindings->push_back(std::move(typed));
         }
+        bindings_ = std::move(bindings);
+    }
+
+    // A settings action can rebuild this table during dispatch. Finish that event using its original binds.
+    std::shared_ptr<const Bindings> snapshot() const { return bindings_; }
+
+    const std::vector<std::string> &codes(std::string_view action) const {
+        for (const auto &binding : *bindings_)
+            if (binding.action == action) return binding.codes;
+        static const std::vector<std::string> empty;
+        return empty;
+    }
+
+    bool is_bound(std::string_view action, const std::string &code) const {
+        const auto &keys = codes(action);
+        return std::find(keys.begin(), keys.end(), code) != keys.end();
+    }
+
+    template <class Codes>
+    bool held_action(std::string_view action, const Codes &held_codes) const {
+        for (const auto &key : codes(action))
+            if (held_codes.contains(key)) return true;
+        return false;
+    }
+
+    bool custom_mouse_binding(const std::string &code) const {
+        for (const auto &binding : *bindings_) {
+            if (binding.action == "attack" || binding.action == "attack2") continue;
+            for (const auto &key : binding.codes)
+                if (key == code) return true;
+        }
+        return false;
     }
 
     static bool is_wheel(std::string_view code) {
@@ -64,6 +107,7 @@ public:
 
 private:
     std::unordered_map<std::string, uint32_t> bits_;
+    std::shared_ptr<const Bindings> bindings_ = std::make_shared<Bindings>();
 };
 
 }  // namespace native

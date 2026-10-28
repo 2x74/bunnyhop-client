@@ -1,3 +1,4 @@
+#include "preferences.hpp"
 #include "options.hpp"
 #include "startup.hpp"
 #include "startup_display.hpp"
@@ -307,11 +308,12 @@ int run(const native::Options &opt) {
         std::cerr << "Window: " << window_controller.error() << '\n';
         preferences["windowMode"] = window_controller.mode();
     }
+    auto prefs = native::Preferences::from_settings(preferences);
     bool window_dirty = false;
     auto window_save_due = std::chrono::steady_clock::now();
     // While borderless/fullscreen, saved_bounds() is the last windowed bounds.
     auto save_window = [&]() {
-        if (!persist_window || !preferences.value("rememberWindowBounds", true)) return;
+        if (!persist_window || !prefs.remember_window_bounds) return;
         try {
             if (auto bounds = window_controller.saved_bounds())
                 json_writer.write(cache / "window-state.json", native::window_bounds_json(*bounds));
@@ -423,9 +425,7 @@ int run(const native::Options &opt) {
     native::FrameDiagnostics frame_diagnostics;
     native::TurnSettings configured_turns;
     native::RecordingInput recording_input;
-    // Typed copies of settings the frame loop reads every frame (apply_preferences).
-    bool diagnostics_enabled = false;
-    bool limit_queued_frames = true;
+    native::discord::Settings discord_settings;
     const char *video_driver = SDL_GetCurrentVideoDriver();
     input_timeline.configure_stamps(video_driver ? video_driver : "");
     native::Chat chat;
@@ -448,28 +448,28 @@ int run(const native::Options &opt) {
         std::cerr << "Start points: " << e.what() << '\n';
     }
     auto apply_preferences = [&]() {
+        prefs = native::Preferences::from_settings(preferences);
+        discord_settings = native::discord::settings_from(preferences);
         menu_state.settings_changed();
         graphics_menu_pacer.settings(preferences);
         flashlight = preferences.value("graphicsFlashlight", false);
         if (backdrop) backdrop->graphics_settings(preferences);
         hud_layout.clear();
-        input_timeline.set_sensitivity(input, preferences.at("sensitivity").get<double>());
-        input.vertical_sensitivity = preferences.at("verticalSensitivity").get<double>();
-        input.separate_vertical = preferences.at("separateVertical").get<bool>();
-        input.invert_y = preferences.at("invertY").get<bool>();
+        input_timeline.set_sensitivity(input, prefs.sensitivity);
+        input.vertical_sensitivity = prefs.vertical_sensitivity;
+        input.separate_vertical = prefs.separate_vertical;
+        input.invert_y = prefs.invert_y;
         input_timeline.rebuild_binds(preferences.at("binds"));
         configured_turns = native::TurnSettings::from_settings(preferences);
-        const bool timed_input = !opt.legacy_input && preferences.value("timedInput", true);
+        const bool timed_input = !opt.legacy_input && prefs.timed_input;
         input_timeline.set_timed(timed_input, input, held_codes);
-        diagnostics_enabled = preferences.at("mouseDiagnostics").get<bool>();
-        limit_queued_frames = preferences.at("limitQueuedFrames").get<bool>();
         camera_controls.set_sensitivity(input.sensitivity);
         camera_controls.vertical_sensitivity = input.vertical_sensitivity;
         camera_controls.separate_vertical = input.separate_vertical;
         camera_controls.invert_y = input.invert_y;
         hud.preferences(preferences);
         audio.preferences(preferences);
-        SDL_GL_SetSwapInterval(opt.frames ? 0 : preferences.at("vsync").get<bool>() ? 1 : 0);
+        SDL_GL_SetSwapInterval(opt.frames ? 0 : prefs.vsync ? 1 : 0);
         audio.gain(preferences.at("muted").get<bool>() ? 0 : preferences.at("volume").get<float>());
         audio.set_sfx_pack(preferences.at("sfxPack").get<std::string>() == "custom");
         audio.set_music_pack(preferences.at("musicPack").get<std::string>() == "custom");
@@ -480,14 +480,14 @@ int run(const native::Options &opt) {
             renderer->set_glow_visible(
                     preferences.value("showPlayerGlow", true), preferences.value("firstPersonGlow", false)
             );
-            renderer->set_fov(preferences.at("fov").get<float>());
+            renderer->set_fov(prefs.fov);
             renderer->set_viewmodel(
                     preferences.at("viewmodelFov").get<float>(),
                     preferences.at("viewmodelX").get<float>(),
                     preferences.at("viewmodelY").get<float>(),
                     preferences.at("viewmodelZ").get<float>(),
                     preferences.at("viewmodelLeftHand").get<bool>(),
-                    preferences.at("viewmodel").get<bool>(),
+                    prefs.viewmodel,
                     preferences.at("viewmodelBob").get<float>(),
                     preferences.at("viewmodelSway").get<float>()
             );
@@ -605,7 +605,7 @@ int run(const native::Options &opt) {
             replay_controls.dragging = false;
             replay_orbit_drag = false;
         }
-        SDL_SetWindowAlwaysOnTop(window.get(), !on && preferences.value("alwaysOnTop", false));
+        SDL_SetWindowAlwaysOnTop(window.get(), !on && prefs.always_on_top);
         // Hidden before the window goes exclusive, shown once it is composited.
         if (menu && !on) menu->set_visible(false);
         if (menu) window_modes.set_menu(on, from_focus_loss, preferences);
@@ -837,7 +837,8 @@ int run(const native::Options &opt) {
             return;
         }
         if (action == "keepVelocity") {
-            preferences["practiceKeepVelocity"] = value.value_or(!preferences.at("practiceKeepVelocity").get<bool>());
+            preferences["practiceKeepVelocity"] = value.value_or(!prefs.practice_keep_velocity);
+            prefs = native::Preferences::from_settings(preferences);
             menu_state.settings_changed();
             json_writer.write(cache / "settings.json", preferences);
             return;
@@ -848,12 +849,12 @@ int run(const native::Options &opt) {
                 practice.tool.clear();
                 practice_use("");
                 const auto bound = [&](const char *action) -> std::string {
-                    const auto &keys = preferences.at("binds").at(action);
+                    const auto &keys = input_timeline.binds().codes(action);
                     if (keys.empty()) {
                         const std::string_view a(action);
                         return a == "cpSave" ? "!save" : a == "cpTeleport" ? "!tele" : "!nc";
                     }
-                    std::string k = keys[0].get<std::string>();
+                    std::string k = keys[0];
                     if (k == "Backquote") return "`";
                     if (k.starts_with("Key") || k.starts_with("Digit")) return k.substr(k.starts_with("Key") ? 3 : 5);
                     if (k.starts_with("Mouse")) return "M" + k.substr(5);
@@ -920,7 +921,7 @@ int run(const native::Options &opt) {
             practice.noclip = false;
             active_style = cp.style;
             active_track = cp.track;
-            if (!preferences.at("practiceKeepVelocity").get<bool>())
+            if (!prefs.practice_keep_velocity)
                 require(bh_set_velocity(core.get(), 0, 0, 0), core.get(), "Clearing checkpoint speed");
             require(bh_state(core.get(), &curr), core.get(), "Reading checkpoint");
             prev = curr;
@@ -1428,7 +1429,7 @@ int run(const native::Options &opt) {
         std::array<std::string, 4> labels{"Space", "W", "A", "D"};
         const char *actions[] = {"jump", "forward", "left", "right"};
         for (int k = 0; k < 4; k++) {
-            const auto &bound = preferences.at("binds").at(actions[k]);
+            const auto &bound = input_timeline.binds().codes(actions[k]);
             if (!bound.empty()) {
                 labels[k] = bound[0];
                 if (labels[k].rfind("Key", 0) == 0) labels[k].erase(0, 3);
@@ -1494,11 +1495,7 @@ int run(const native::Options &opt) {
     };
     uint32_t last_slot = 3, observed_slot = 3;
     auto held_action = [&](const std::string &action) {
-        const auto &binds = preferences.at("binds");
-        if (!binds.contains(action)) return false;
-        for (const auto &key : binds.at(action))
-            if (held_codes.contains(key.get<std::string>())) return true;
-        return false;
+        return input_timeline.binds().held_action(action, held_codes);
     };
     auto weapon_context = [&]() {
         return native::WeaponMenuContext{
@@ -1670,10 +1667,7 @@ int run(const native::Options &opt) {
                 if (!instant && (action == "restart" || action == "restartMain" || action == "restartBonus")) {
                     BhRunState timing{};
                     if (core) bh_run_state(core.get(), &timing);
-                    if (!restart_guard.press(
-                                action, epoch_ms(), preferences.at("holdRestart").get<bool>(), timing.status == 1, wheel
-                        ))
-                        return;
+                    if (!restart_guard.press(action, epoch_ms(), prefs.hold_restart, timing.status == 1, wheel)) return;
                 }
                 if (action == "practice" || action == "noclip" || action == "cpSave" || action == "cpTeleport"
                     || action == "cpPrev" || action == "cpNext") {
@@ -1740,7 +1734,7 @@ int run(const native::Options &opt) {
                 if (code.empty()) return;
                 if (down && !repeat)
                     for (const char *action : {"chat", "commandChat"})
-                        for (const auto &key : preferences.at("binds").at(action))
+                        for (const auto &key : input_timeline.binds().codes(action))
                             if (key == code) {
                                 open_chat(std::string(action) == "commandChat");
                                 return;
@@ -1790,11 +1784,12 @@ int run(const native::Options &opt) {
                 if (!wheel) input.null_presses.edge(code, input_timeline.binds().of(code), down);
                 input_timeline.key(held_codes, code, down, wheel, stamp, SDL_GetTicksNS());
                 input.held = 0;
-                for (auto binding = preferences["binds"].begin(); binding != preferences["binds"].end(); ++binding) {
-                    const auto bit = native::movement_bit(binding.key());
+                const auto bindings = input_timeline.binds().snapshot();
+                for (const auto &binding : *bindings) {
+                    const auto bit = binding.bit;
                     bool matching = false, held = false;
-                    for (const auto &raw : binding.value()) {
-                        const auto key = raw.get<std::string>();
+                    for (const auto &raw : binding.codes) {
+                        const auto &key = raw;
                         matching |= key == code || (wheel && key == "MouseWheel");
                         held |= held_codes.contains(key);
                     }
@@ -1809,17 +1804,13 @@ int run(const native::Options &opt) {
                         else if (held)
                             input.held |= bit;
                     } else if (matching && down && !repeat)
-                        act(binding.key(), wheel);
+                        act(binding.action, wheel);
                 }
                 if (renderer) native_render::surface_tool_key(*renderer, code, down, repeat, curr, input, toast);
                 if (wheel) held_codes.erase(code);
-                bool inspect = false;
-                for (const auto &key : preferences["binds"]["inspect"])
-                    inspect |= held_codes.contains(key.get<std::string>());
+                const bool inspect = input_timeline.binds().held_action("inspect", held_codes);
                 if (renderer) renderer->inspect_held(inspect);
-                if (core
-                    && std::find(preferences["binds"]["inspect"].begin(), preferences["binds"]["inspect"].end(), code)
-                               != preferences["binds"]["inspect"].end())
+                if (core && input_timeline.binds().is_bound("inspect", code))
                     bh_record_inspect(core.get(), down ? 3 : 4);
             },
             toast
@@ -2198,7 +2189,7 @@ int run(const native::Options &opt) {
     };
     const auto video_smoke_started = Clock::now();
     while (running) {
-        frame_diagnostics.start_frame(SDL_GetTicksNS(), diagnostics_enabled);
+        frame_diagnostics.start_frame(SDL_GetTicksNS(), prefs.mouse_diagnostics);
         if (const auto failure = json_writer.take_error()) {
             std::cerr << "Could not save " << *failure << '\n';
             toast("Could not save " + *failure);
@@ -2213,8 +2204,7 @@ int run(const native::Options &opt) {
         pump_schedule.frame(mouse_pump_start, true, pump_tick_ns);
         input_timeline.begin_pump(input, mouse_pump_start, pump_schedule, pump_tick_ns);
         mouse_diagnostics.begin(
-                mouse_pump_start,
-                preferences.value("mouseDiagnostics", false) && captured && focused && !chat.active && !playback
+                mouse_pump_start, prefs.mouse_diagnostics && captured && focused && !chat.active && !playback
         );
         bool had_input_activity = false;
         SDL_Event event;
@@ -2514,12 +2504,7 @@ int run(const native::Options &opt) {
                     }
                     if (captured && !chat.active) {
                         const auto code = native::mouse_code(event.button.button);
-                        bool custom = false;
-                        for (auto binding = preferences["binds"].begin(); binding != preferences["binds"].end();
-                             ++binding)
-                            if (binding.key() != "attack" && binding.key() != "attack2")
-                                for (const auto &key : binding.value())
-                                    custom |= key == code;
+                        const bool custom = input_timeline.binds().custom_mouse_binding(code);
                         if (!custom && room.spectator_target && down
                             && (event.button.button == SDL_BUTTON_LEFT || event.button.button == SDL_BUTTON_RIGHT))
                             room_control({{"action", event.button.button == SDL_BUTTON_LEFT ? "next" : "previous"}});
@@ -3478,9 +3463,7 @@ int run(const native::Options &opt) {
         }
         const auto now = Clock::now();
         const uint64_t now_ns = SDL_GetTicksNS();
-        bool leave_held = false;
-        for (const auto &key : preferences.at("binds").at("mainMenu"))
-            leave_held |= held_codes.contains(key.get<std::string>());
+        const bool leave_held = input_timeline.binds().held_action("mainMenu", held_codes);
         const auto leave_result = leave_hold.frame(epoch_ms(), leave_held, !captured || playback);
         if (leave_result == native::LeaveHold::Result::leave)
             leave_map();
@@ -3498,7 +3481,7 @@ int run(const native::Options &opt) {
                 presence_map = map_id;
                 presence_started = unix_now;
             }
-            const auto settings = native::discord::settings_from(preferences);
+            const auto &settings = discord_settings;
             nlohmann::json activity;
             if (discord_allowed && settings.enabled && !settings.privacy) {
                 static const std::map<std::string, std::string> style_names = {
@@ -3928,7 +3911,7 @@ int run(const native::Options &opt) {
                                  {"finishedAt", epoch_ms()},
                                  {"client", identity.value("build", std::string("local"))},
                                  {"eligible", !turn_admission.local_only && bool(run_state.recording_valid)}},
-                                preferences.value("capturePbScreenshots", false)
+                                prefs.capture_pb_screenshots
                         );
                         refresh_replays();
                         if (!turn_admission.local_only && active_style == "autohop" && run_state.track == 0) {
@@ -3989,8 +3972,8 @@ int run(const native::Options &opt) {
             std::optional<native_render::Actor> audible_ghost;
             BhCmd ghost_command{};
             const BhCmd *shown_ghost_command = nullptr;
-            if (ghost_enabled && renderer->ghost_visible(0) && preferences.value("showGhost", true) && ghost_handle
-                && !playback && !spectator
+            if (ghost_enabled && renderer->ghost_visible(0) && prefs.show_ghost && ghost_handle && !playback
+                && !spectator
                 && (tutorial_demo
                     || (ghost_info.value("track", 0u) == active_track
                         && ghost_info.value("style", std::string("autohop")) == active_style))) {
@@ -4012,9 +3995,8 @@ int run(const native::Options &opt) {
                             ghost.position[2] - curr.position[2]
                     );
                     const float opacity =
-                            preferences.value("ghostOpacity", .4f)
-                            * (preferences.value("ghostNearFade", true) ? std::clamp((distance - 24.f) / 80.f, 0.f, 1.f)
-                                                                        : 1.f);
+                            prefs.ghost_opacity
+                            * (prefs.ghost_near_fade ? std::clamp((distance - 24.f) / 80.f, 0.f, 1.f) : 1.f);
                     renderer->set_replay_actor(
                             ghost, tutorial_demo ? "outfit-cream" : outfit, renderer->ghost_loadout(0), opacity
                     );
@@ -4056,8 +4038,8 @@ int run(const native::Options &opt) {
             renderer->set_player_glow(player_glow);
             if (!spectator) renderer->set_spectated_actor(std::nullopt);
             renderer->set_viewmodel_weapon(std::nullopt);
-            renderer->set_viewmodel_visible(preferences.at("viewmodel").get<bool>() && !opt.camera);
-            renderer->set_source_look(preferences.at("sourceLook").get<bool>());
+            renderer->set_viewmodel_visible(prefs.viewmodel && !opt.camera);
+            renderer->set_source_look(prefs.source_look);
             if (spectator) {
                 spectated_actor = room.spectated(steady_seconds);
                 const auto &target = spectated_actor;
@@ -4126,7 +4108,7 @@ int run(const native::Options &opt) {
             }
             if (spectator) room.spectator_run(display_run, display_style, *spectator, steady_seconds, epoch_ms());
             if (hide_players) actors.clear();
-            if (!playback && !spectator && !tutorial_demo && preferences.value("showGhost", true))
+            if (!playback && !spectator && !tutorial_demo && prefs.show_ghost)
                 for (unsigned i = 1; i < 4; i++) {
                     const auto &slot = ghost_slots[i];
                     if (!slot.handle || !slot.enabled || !renderer->ghost_visible(i)
@@ -4149,10 +4131,8 @@ int run(const native::Options &opt) {
                             ),
                             actor.frame.position[2] - curr.position[2]
                     );
-                    actor.opacity =
-                            preferences.value("ghostOpacity", .4f)
-                            * (preferences.value("ghostNearFade", true) ? std::clamp((distance - 24.f) / 80.f, 0.f, 1.f)
-                                                                        : 1.f);
+                    actor.opacity = prefs.ghost_opacity
+                                    * (prefs.ghost_near_fade ? std::clamp((distance - 24.f) / 80.f, 0.f, 1.f) : 1.f);
                     actors.push_back(actor);
                 }
             if (external_camera) {
@@ -4190,9 +4170,7 @@ int run(const native::Options &opt) {
             }
             const bool local_scope = !playback && !spectator && !external_camera && !opt.camera;
             if (local_scope && simulation_active) scope.frame(frame_seconds);
-            renderer->set_camera_fov(
-                    local_scope ? scope.fov(preferences.at("fov").get<float>()) : preferences.at("fov").get<float>()
-            );
+            renderer->set_camera_fov(local_scope ? scope.fov(prefs.fov) : prefs.fov);
             if (local_scope && scope.scoped()) renderer->set_viewmodel_visible(false);
             const bool world_record_finish =
                     !playback && !spectator && !practice.active && !turn_admission.local_only
@@ -4230,7 +4208,7 @@ int run(const native::Options &opt) {
                     width,
                     height
             );
-            if ((!menu || !menu->visible()) && !opt.camera && preferences.at("hud").get<bool>()) {
+            if ((!menu || !menu->visible()) && !opt.camera && prefs.hud) {
                 const auto matrix = renderer->camera(
                         eye, camera_input.yaw(), camera_input.pitch, float(width) / std::max(height, 1)
                 );
@@ -4238,23 +4216,23 @@ int run(const native::Options &opt) {
                         hud,
                         width,
                         height,
-                        preferences.at("hudScale").get<float>(),
+                        prefs.hud_scale,
                         matrix.data(),
                         actors,
                         room,
                         hud.preferences().tags_players,
-                        preferences.value("ghostTag", true),
+                        prefs.ghost_tag,
                         hud.preferences().tags_through_walls,
                         native::NameTagTrace{core.get(), eye},
                         steady_seconds,
                         renderer->output_view(width, height)
                 );
-                if (audible_ghost && preferences.value("ghostTag", true))
+                if (audible_ghost && prefs.ghost_tag)
                     native::draw_ghost_name_tag(
                             hud,
                             width,
                             height,
-                            preferences.at("hudScale").get<float>(),
+                            prefs.hud_scale,
                             matrix.data(),
                             *audible_ghost,
                             hud.extras.ghost_name.view(),
@@ -4296,26 +4274,25 @@ int run(const native::Options &opt) {
                         display_style,
                         shown_notice,
                         display_fps,
-                        preferences.at("hud").get<bool>(),
-                        preferences.at("crosshair").get<bool>(),
+                        prefs.hud,
+                        prefs.crosshair,
                         playback,
                         weapon,
-                        preferences.at("jumpStats").get<bool>() ? hud.ssj_line() : std::string_view(),
+                        prefs.jump_stats ? hud.ssj_line() : std::string_view(),
                         feedback.ssj_gain,
-                        preferences.at("strafeTrainer").get<bool>() && !playback ? feedback.strafe_reading
-                                                                                 : std::nullopt,
-                        preferences.at("strafeTrainerHints").get<bool>(),
+                        prefs.strafe_trainer && !playback ? feedback.strafe_reading : std::nullopt,
+                        prefs.strafe_trainer_hints,
                         &hud_layout,
-                        preferences.at("hudScale").get<float>(),
+                        prefs.hud_scale,
                         &practice,
-                        preferences.at("practiceKeepVelocity").get<bool>(),
+                        prefs.practice_keep_velocity,
                         gauntlet_line,
                         gauntlet_delta,
                         gauntlet_good,
                         leave_hold.progress(epoch_ms())
                 );
             if ((!menu || !menu->visible()) && !opt.camera) {
-                if (preferences.value("mouseDiagnostics", false) && !playback) {
+                if (prefs.mouse_diagnostics && !playback) {
                     const auto &m = mouse_diagnostics.last;
                     char label[220];
                     std::snprintf(
@@ -4358,7 +4335,7 @@ int run(const native::Options &opt) {
                             replay_camera.mode
                     );
                 }
-                if (chat.active || preferences.at("hud").get<bool>())
+                if (chat.active || prefs.hud)
                     hud.draw_chat_overlay(
                             width,
                             height,
@@ -4368,7 +4345,7 @@ int run(const native::Options &opt) {
                             chat.suggestions,
                             chat.active,
                             chat.scroll_offset(),
-                            preferences.at("hudScale").get<float>(),
+                            prefs.hud_scale,
                             &chat,
                             chat.viewport(epoch_ms() / 1000.)
                     );
@@ -4376,7 +4353,7 @@ int run(const native::Options &opt) {
                     hud.scoreboard(
                             width,
                             height,
-                            preferences.at("hudScale").get<float>(),
+                            prefs.hud_scale,
                             room.display(),
                             steady_seconds,
                             epoch_ms(),
@@ -4384,29 +4361,27 @@ int run(const native::Options &opt) {
                             active_style
                     );
                 } else if (gun_menu.open && !chat.active) {
-                    gun_menu.draw(hud, width, height, preferences.at("hudScale").get<float>(), weapon_context());
+                    gun_menu.draw(hud, width, height, prefs.hud_scale, weapon_context());
                 } else if (trigger_menu.open && !chat.active) {
                     trigger_menu.draw(
                             hud,
                             width,
                             height,
-                            preferences.at("hudScale").get<float>(),
+                            prefs.hud_scale,
                             hud.preferences().triggers_visible,
                             hud.preferences().clips_visible
                     );
                 } else if (!chat.active) {
-                    native::draw_vote(
-                            hud, width, height, preferences.at("hudScale").get<float>(), room.vote_display, epoch_ms()
-                    );
+                    native::draw_vote(hud, width, height, prefs.hud_scale, room.vote_display, epoch_ms());
                 }
-                if (preferences.at("hud").get<bool>()) {
-                    const float percent = preferences.at("hudScale").get<float>();
+                if (prefs.hud) {
+                    const float percent = prefs.hud_scale;
                     native::draw_result(hud, width, height, percent, hud.result, double(SDL_GetTicksNS()) / 1e9);
                     native::draw_toasts(hud, width, height, percent, hud.toasts, double(SDL_GetTicksNS()) / 1e9);
                     native::draw_race(hud, width, height, percent, room_modes.display(), epoch_ms());
                     native::draw_race_picker(hud, width, height, percent, race_picker);
                 }
-                room.draw_change(hud, width, height, preferences.at("hudScale").get<float>(), epoch_ms());
+                room.draw_change(hud, width, height, prefs.hud_scale, epoch_ms());
             }
         }
         // Capture only the finished gameplay framebuffer, before any menu/backdrop layer.
@@ -4581,7 +4556,7 @@ int run(const native::Options &opt) {
         if (!SDL_GL_SwapWindow(window.get()))
             throw std::runtime_error(std::string("Swapping framebuffer failed: ") + SDL_GetError());
         frame_diagnostics.mark(native::FrameDiagnostics::kSwap, SDL_GetTicksNS());
-        frame_pacer.after_swap(gl, limit_queued_frames && !opt.frames);
+        frame_pacer.after_swap(gl, prefs.limit_queued_frames && !opt.frames);
         frame_diagnostics.mark(native::FrameDiagnostics::kGpuWait, SDL_GetTicksNS());
         // Answers from file dialogs and the watched Custom CSS file.
         if (menu && menu_ready) {
@@ -4658,7 +4633,7 @@ int run(const native::Options &opt) {
                           {"menuOpen", practice.menu_open},
                           {"count", practice.checkpoints.size()},
                           {"current", practice.number()},
-                          {"keepVelocity", preferences.at("practiceKeepVelocity")}}},
+                          {"keepVelocity", prefs.practice_keep_velocity}}},
                         {"gauntlet",
                          {{"id", gauntlet_id.empty() ? nlohmann::json(nullptr) : nlohmann::json(gauntlet_id)},
                           {"map", gauntlet_map.empty() ? nlohmann::json(nullptr) : nlohmann::json(gauntlet_map)}}},
