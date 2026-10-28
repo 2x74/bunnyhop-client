@@ -17,6 +17,15 @@ int main(int argc,char **argv){try{
  job["stage"]["clock"]=.1;job["stage"]["acting"]["headRoll"]=16;job["stage"]["acting"]["headYaw"]=24;job["stage"]["acting"]["earL"]=.8;job["stage"]["acting"]["earR"]=-.5;capture("intro-puzzled",15.2);
  job["stage"]["clock"]=.2;job["stage"]["position"]={0,0,35};job["stage"]["velocity"]={220,0,100};job["stage"]["grounded"]=false;job["stage"]["jumped"]=true;job["stage"]["squash"]=.05;job["stage"]["spin"]=120;capture("intro-hop",15.3);
  job["stage"]["clock"]=.3;job["stage"]["grounded"]=true;job["stage"]["position"]={0,0,0};job["stage"]["velocity"]={0,0,0};job["stage"]["jumped"]=false;job["stage"]["crouched"]=true;job["stage"]["squash"]=-.1;capture("intro-contact",15.4);
+ job["view"] = "bunny";
+ job["playerGlow"] = {{"enabled", true}, {"aura", true}, {"color", "violet"}, {"intensity", 1}};
+ capture("bunny-aura", 17);
+ job["playerGlow"]["aura"] = false;
+ capture("bunny-outline", 17.2);
+ job["view"] = "fp";
+ job["playerGlow"]["aura"] = true;
+ capture("hands-aura", 17.5);
+ job["view"] = "onboarding";
  auto malformed=job;malformed["stage"]["position"]={0,0};if(!preview.render(malformed,15.5).empty())throw std::runtime_error("Malformed acting pose accepted");malformed=job;malformed["stage"]["squash"]=5;if(!preview.render(malformed,15.5).empty())throw std::runtime_error("Unbounded acting squash accepted");
  auto invalid=job;invalid["width"]=-100;invalid["height"]=100000;const auto bounded=preview.render(invalid,16);if(bounded.empty())throw std::runtime_error("Bounded dimensions failed");invalid["view"]="webgl";if(!preview.render(invalid,16).empty())throw std::runtime_error("Invalid view accepted");
  std::ofstream report(std::filesystem::path(argv[2])/"evidence.json");report<<evidence.dump(2);std::cout<<"Native loadout preview smoke: "<<evidence.size()<<" distinct PNGs; GL target/viewport restoration and dimension/view validation passed\n";

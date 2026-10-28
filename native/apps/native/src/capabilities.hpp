@@ -1,4 +1,5 @@
 #pragma once
+#include "render_capabilities.hpp"
 #include "settings.hpp"
 #include <array>
 #include <string_view>
@@ -21,9 +22,7 @@ inline const Json &native_capabilities() {
         Json result = hud_capabilities();
         for (const auto id : web_hud_elements)
             result.push_back("hud:" + std::string(id));
-#if __has_include("graphics_settings.hpp")
-        append_capabilities(result, graphics_capabilities());
-#endif
+        append_render_capabilities(result);
         return result;
     }();
     return capabilities;

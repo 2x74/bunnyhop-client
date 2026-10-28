@@ -1,6 +1,6 @@
 // Build-time only: compile the site's original meshes, material recipes and procedural pose clips.
 // Runtime gameplay uses C++/OpenGL and Rust; this compiler is never embedded in the application.
-import { mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdir, writeFile, rm, readFile } from "node:fs/promises";
 import { deflateSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
@@ -46,7 +46,25 @@ function geometry(name:string,g:any){
   // Index identical vertices; source builders intentionally emit triangle soup.
   const unique:number[]=[],indices=new Uint32Array(p.count),seen=new Map<string,number>();
   for(let i=0;i<p.count;i++){const view=new Uint8Array(vertices.buffer,i*22*4,22*4);const key=Buffer.from(view).toString("base64");let at=seen.get(key);if(at===undefined){at=unique.length/22;seen.set(key,at);for(let j=0;j<22;j++)unique.push(vertices[i*22+j]);}indices[i]=at;}
-  meshes[name]={offset:putUnique(new Float32Array(unique)),vertices:unique.length/22,indexOffset:putUnique(new Float32Array(indices.buffer)),indices:indices.length};g.dispose();
+  const sums = new Map<string, [number, number, number]>();
+  const keys: string[] = [];
+  for (let i = 0; i < p.count; i++) {
+    const key = [p.getX(i).toFixed(4), p.getY(i).toFixed(4), p.getZ(i).toFixed(4),
+      ...Array.from(ids.array.slice(i * 4, i * 4 + 4))].join(",");
+    keys.push(key);
+    const sum = sums.get(key) ?? [0, 0, 0];
+    sum[0] += n.getX(i);
+    sum[1] += n.getY(i);
+    sum[2] += n.getZ(i);
+    sums.set(key, sum);
+  }
+  const smooth = new Float32Array(unique.length / 22 * 3);
+  for (let i = 0; i < p.count; i++) {
+    const normal = sums.get(keys[i])!;
+    const length = Math.hypot(...normal) || 1;
+    smooth.set(normal.map(value => value / length), indices[i] * 3);
+  }
+  meshes[name]={glowOffset:putUnique(smooth),offset:putUnique(new Float32Array(unique)),vertices:unique.length/22,indexOffset:putUnique(new Float32Array(indices.buffer)),indices:indices.length};g.dispose();
 }
 const vr=vmRig(),gr=gunRig(),br=bunnyRig();
 for(const glove of GLOVE_STYLE_IDS){const b=new Builder();buildFpHands(b,glove);geometry(`hands:${glove}`,b.geometry());}
@@ -121,3 +139,11 @@ const actorExport=Bun.spawnSync([process.execPath,resolve(import.meta.dir,"expor
 const gestureExport=Bun.spawnSync([process.execPath,resolve(import.meta.dir,"export-tp-inspects.ts"),directory],{stdout:"inherit",stderr:"inherit"});if(gestureExport.exitCode)throw new Error("Third-person inspect export failed");
 
 const runnerExport=Bun.spawnSync([process.execPath,resolve(import.meta.dir,"export-runner.ts"),directory],{stdout:"inherit",stderr:"inherit"});if(runnerExport.exitCode)throw new Error("Original runner export failed");
+
+// Extract the upstream shader literals without importing its browser-owned materials module.
+const glowSource = await readFile(resolve(import.meta.dir, "../../web/src/player/glow.ts"), "utf8");
+for (const [name, constant] of [["glow-noise", "auraNoise"], ["glow-fragment", "auraFragment"]]) {
+  const source = glowSource.match(new RegExp(`const ${constant} = /\\* glsl \\*/ \x60([\\s\\S]*?)\x60;`))?.[1];
+  if (!source) throw new Error(`Missing upstream glow shader ${constant}`);
+  await writeFile(resolve(directory, name + ".glsl"), source);
+}

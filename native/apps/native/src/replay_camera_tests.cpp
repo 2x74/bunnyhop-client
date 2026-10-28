@@ -18,5 +18,9 @@ int main(int argc,char **argv){
  assert(turns>100);assert(incremental.shot_list().size()==shots.size());for(size_t i=0;i<shots.size();i++){const auto &actual=incremental.shot_list()[i];assert(actual.from==shots[i].from&&actual.to==shots[i].to&&actual.kind==shots[i].kind&&actual.at==shots[i].at);}
  incremental.begin_direct(path,100,0,n,nullptr,n,teleports);incremental.step_direct(1,-1);incremental.cancel_direct();assert(!incremental.direct_pending());assert(incremental.shot_list().size()==shots.size());
  incremental.begin_direct({},100,0,0);assert(incremental.step_direct());assert(incremental.shot_list().empty());
+ native::ReplayCamera free_path;
+ assert(free_path.set_mode("path") && free_path.mode == "flyby");
+ assert(free_path.set_mode("freePath") && free_path.third_person());
+ assert(!free_path.set_mode("unsupported"));
  std::cout<<"Web chase/flyby/eye smoothing and deterministic auto director oracle matched\n";
 }

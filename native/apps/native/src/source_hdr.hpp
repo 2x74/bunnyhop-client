@@ -65,7 +65,12 @@ class SourceHdr {
     struct Target {GLuint fbo=0,texture=0;};
     Gl &gl;GLuint emptyVao;
     GLuint downsample=0,blur=0,composite=0,luminance=0;
-    GLuint sceneFbo=0,sceneColor=0,sceneDepth=0;Target quarter[2],lum;GLuint pbo=0;GLsync fence=nullptr;
+    GLuint sceneFbo = 0, sceneColor = 0, sceneDepth = 0;
+    GLuint multisampleFbo = 0, multisampleColor = 0, multisampleDepth = 0;
+    int requestedSamples = 0, currentSamples = -1;
+    Target quarter[2], lum;
+    GLuint pbo = 0;
+    GLsync fence = nullptr;
     int width=0,height=0;float exposure=1;std::deque<float> goals;double sinceMeasure=0;
     GLint loc(GLuint program,const char *name){return gl.GetUniformLocation(program,name);}
     Target make_target(int w,int h,GLenum format,GLenum type,GLint internal){
@@ -80,14 +85,39 @@ class SourceHdr {
     void destroy(Target &t){if(t.fbo)gl.DeleteFramebuffers(1,&t.fbo);if(t.texture)gl.DeleteTextures(1,&t.texture);t={};}
     void release_targets(){
         if(sceneFbo)gl.DeleteFramebuffers(1,&sceneFbo);if(sceneColor)gl.DeleteTextures(1,&sceneColor);if(sceneDepth)gl.DeleteRenderbuffers(1,&sceneDepth);
+        if (multisampleFbo)
+            gl.DeleteFramebuffers(1, &multisampleFbo);
+        if (multisampleColor)
+            gl.DeleteRenderbuffers(1, &multisampleColor);
+        if (multisampleDepth)
+            gl.DeleteRenderbuffers(1, &multisampleDepth);
+        multisampleFbo = multisampleColor = multisampleDepth = 0;
         sceneFbo=sceneColor=sceneDepth=0;destroy(quarter[0]);destroy(quarter[1]);width=height=0;
     }
     void ensure_targets(int w,int h){
-        if(w==width&&h==height&&sceneFbo)return;release_targets();
+        if (w == width && h == height && sceneFbo && currentSamples == requestedSamples)
+            return;
+        release_targets();
         Target scene=make_target(w,h,GL_RGBA,GL_HALF_FLOAT,GL_RGBA16F);sceneFbo=scene.fbo;sceneColor=scene.texture;
         gl.GenRenderbuffers(1,&sceneDepth);gl.BindRenderbuffer(GL_RENDERBUFFER,sceneDepth);gl.RenderbufferStorage(GL_RENDERBUFFER,GL_DEPTH24_STENCIL8,w,h);
         gl.FramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_STENCIL_ATTACHMENT,GL_RENDERBUFFER,sceneDepth);
         if(gl.CheckFramebufferStatus(GL_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)throw std::runtime_error("Native HDR scene target incomplete");
+        if (requestedSamples) {
+            gl.GenFramebuffers(1, &multisampleFbo);
+            gl.BindFramebuffer(GL_FRAMEBUFFER, multisampleFbo);
+            gl.GenRenderbuffers(1, &multisampleColor);
+            gl.BindRenderbuffer(GL_RENDERBUFFER, multisampleColor);
+            gl.RenderbufferStorageMultisample(GL_RENDERBUFFER, requestedSamples, GL_RGBA16F, w, h);
+            gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, multisampleColor);
+            gl.GenRenderbuffers(1, &multisampleDepth);
+            gl.BindRenderbuffer(GL_RENDERBUFFER, multisampleDepth);
+            gl.RenderbufferStorageMultisample(GL_RENDERBUFFER, requestedSamples, GL_DEPTH24_STENCIL8, w, h);
+            gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, multisampleDepth);
+            if (gl.CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+                throw std::runtime_error("HDR multisample target incomplete");
+            }
+        }
+        currentSamples = requestedSamples;
         for(auto &q:quarter)q=make_target(std::max(1,w/4),std::max(1,h/4),GL_RGBA,GL_HALF_FLOAT,GL_RGBA16F);
         width=w;height=h;
     }
@@ -122,6 +152,11 @@ class SourceHdr {
 public:
     // CS:S's bloom on or off; exposure still adapts without it. bloomScale: env_tonemap_controller's SetBloomScale.
     bool bloom=true;float bloomScale=1;
+    void samples(int count) {
+        GLint maximum = 0;
+        gl.GetIntegerv(GL_MAX_SAMPLES, &maximum);
+        requestedSamples = std::clamp(count, 0, maximum);
+    }
     SourceHdr(Gl &g,GLuint vao):gl(g),emptyVao(vao){
         using namespace native_hdr;
         downsample=link_program(gl,hdr_vertex,hdr_downsample.c_str());blur=link_program(gl,hdr_vertex,hdr_blur);
@@ -139,9 +174,18 @@ public:
     // A new map or a cut: start from exposure 1 like a level load does.
     void reset(){exposure=1;goals.clear();sinceMeasure=0;}
     // Bind the half-float world target (sized to the frame) for the world's draws.
-    void begin(int w,int h){ensure_targets(w,h);gl.BindFramebuffer(GL_FRAMEBUFFER,sceneFbo);gl.Viewport(0,0,w,h);}
+    void begin(int w, int h) {
+        ensure_targets(w, h);
+        gl.BindFramebuffer(GL_FRAMEBUFFER, multisampleFbo ? multisampleFbo : sceneFbo);
+        gl.Viewport(0, 0, w, h);
+    }
     // Bloom and expose the world into `targetFbo` (the frame's own framebuffer), then meter.
     void finish(GLuint targetFbo,int w,int h,double dt){
+        if (multisampleFbo) {
+            gl.BindFramebuffer(GL_READ_FRAMEBUFFER, multisampleFbo);
+            gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, sceneFbo);
+            gl.BlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        }
         gl.Disable(GL_DEPTH_TEST);gl.Disable(GL_BLEND);gl.Disable(GL_CULL_FACE);gl.DepthMask(GL_FALSE);
         const bool withBloom=bloom&&bloomScale>0;
         if(withBloom){
@@ -156,5 +200,124 @@ public:
         meter(std::clamp(dt,0.,.25));
         gl.BindFramebuffer(GL_FRAMEBUFFER,targetFbo);gl.Viewport(0,0,w,h);gl.ActiveTexture(GL_TEXTURE0);
         gl.Enable(GL_DEPTH_TEST);gl.DepthMask(GL_TRUE);
+    }
+};
+
+// Reused scene target for MSAA, resolution/aspect scaling and display grading.
+class GraphicsTarget {
+    Gl &gl;
+    GLuint vao = 0, program = 0, framebuffer = 0, color = 0, depth = 0;
+    GLuint multisample_framebuffer = 0, multisample_color = 0, multisample_depth = 0;
+    int width = 0, height = 0, samples = -1;
+    GLint brightness_location = -1, gamma_location = -1, vibrance_location = -1;
+
+    void storage(GLuint renderbuffer, GLenum format, int count, int w, int h) {
+        gl.BindRenderbuffer(GL_RENDERBUFFER, renderbuffer);
+        if (count) {
+            gl.RenderbufferStorageMultisample(GL_RENDERBUFFER, count, format, w, h);
+        } else {
+            gl.RenderbufferStorage(GL_RENDERBUFFER, format, w, h);
+        }
+    }
+    void check_target() {
+        if (gl.CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            throw std::runtime_error("Graphics target incomplete");
+        }
+    }
+    void resize(int w, int h, int count) {
+        if (width == w && height == h && samples == count) {
+            return;
+        }
+        gl.BindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+        gl.BindTexture(GL_TEXTURE_2D, color);
+        gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color, 0);
+        storage(depth, GL_DEPTH_COMPONENT24, 0, w, h);
+        gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depth);
+        check_target();
+        if (count) {
+            gl.BindFramebuffer(GL_FRAMEBUFFER, multisample_framebuffer);
+            storage(multisample_color, GL_RGBA8, count, w, h);
+            storage(multisample_depth, GL_DEPTH_COMPONENT24, count, w, h);
+            gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, multisample_color);
+            gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, multisample_depth);
+            check_target();
+        }
+        width = w;
+        height = h;
+        samples = count;
+    }
+
+  public:
+    GraphicsTarget(Gl &api, GLuint empty_vao) : gl(api), vao(empty_vao) {
+        const char *fragment = R"(#version 330 core
+in vec2 uv;out vec4 color;uniform sampler2D scene;uniform float brightness,gamma,vibrance;
+void main(){
+ vec3 source=pow(max(texture(scene,uv).rgb,vec3(0)),vec3(1./gamma))*brightness;
+ float luminance=dot(source,vec3(.213,.715,.072));
+ color=vec4(mix(vec3(luminance),source,vibrance),1);
+}
+)";
+        program = link_program(gl, native_hdr::hdr_vertex, fragment);
+        brightness_location = gl.GetUniformLocation(program, "brightness");
+        gamma_location = gl.GetUniformLocation(program, "gamma");
+        vibrance_location = gl.GetUniformLocation(program, "vibrance");
+        gl.UseProgram(program);
+        gl.Uniform1i(gl.GetUniformLocation(program, "scene"), 0);
+        gl.GenFramebuffers(1, &framebuffer);
+        gl.GenFramebuffers(1, &multisample_framebuffer);
+        gl.GenTextures(1, &color);
+        gl.BindTexture(GL_TEXTURE_2D, color);
+        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        gl.GenRenderbuffers(1, &depth);
+        gl.GenRenderbuffers(1, &multisample_color);
+        gl.GenRenderbuffers(1, &multisample_depth);
+    }
+    ~GraphicsTarget() {
+        gl.DeleteRenderbuffers(1, &multisample_depth);
+        gl.DeleteRenderbuffers(1, &multisample_color);
+        gl.DeleteRenderbuffers(1, &depth);
+        gl.DeleteTextures(1, &color);
+        gl.DeleteFramebuffers(1, &multisample_framebuffer);
+        gl.DeleteFramebuffers(1, &framebuffer);
+        gl.DeleteProgram(program);
+    }
+    void begin(const native::GraphicsView &view, int requested_samples) {
+        GLint maximum_samples = 0;
+        gl.GetIntegerv(GL_MAX_SAMPLES, &maximum_samples);
+        resize(view.width, view.height, std::min(requested_samples, maximum_samples));
+        gl.BindFramebuffer(GL_FRAMEBUFFER, samples ? multisample_framebuffer : framebuffer);
+    }
+    void finish(GLuint target, int output_width, int output_height, const native::GraphicsView &view,
+                const native::GraphicsSettings &settings) {
+        if (samples) {
+            gl.BindFramebuffer(GL_READ_FRAMEBUFFER, multisample_framebuffer);
+            gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
+            gl.BlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        }
+        gl.BindFramebuffer(GL_FRAMEBUFFER, target);
+        gl.Viewport(0, 0, output_width, output_height);
+        gl.Disable(GL_DEPTH_TEST);
+        gl.Disable(GL_BLEND);
+        gl.Disable(GL_CULL_FACE);
+        gl.DepthMask(GL_FALSE);
+        gl.ClearColor(0, 0, 0, 1);
+        gl.Clear(GL_COLOR_BUFFER_BIT);
+        gl.Viewport(view.x, view.y, view.output_width, view.output_height);
+        gl.UseProgram(program);
+        gl.ActiveTexture(GL_TEXTURE0);
+        gl.BindTexture(GL_TEXTURE_2D, color);
+        const int filter = settings.pixelated ? GL_NEAREST : GL_LINEAR;
+        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+        gl.Uniform1f(brightness_location, settings.brightness);
+        gl.Uniform1f(gamma_location, settings.gamma);
+        gl.Uniform1f(vibrance_location, settings.vibrance);
+        gl.BindVertexArray(vao);
+        gl.DrawArrays(GL_TRIANGLES, 0, 3);
+        gl.Viewport(0, 0, output_width, output_height);
+        gl.DepthMask(GL_TRUE);
+        gl.Enable(GL_DEPTH_TEST);
     }
 };
