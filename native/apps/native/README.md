@@ -77,16 +77,22 @@ SDL relative mouse motion drives the view; focus loss/menu
 opening clears held input and pauses native simulation. All eight website styles
 are available; bonuses use their canonical Normal settings. Sensitivity, separate
 vertical sensitivity, FOV, VSync, FPS limit, volume, HUD/viewmodel visibility and
-key/mouse bindings persist in the app's settings file.
+key/mouse bindings persist in the app's settings file. New installs start with
+VSync off and a 500 FPS cap, and keep at most one frame queued on the GPU
+(Settings → Video → Limit queued frames); existing settings are kept.
 
 High-rate mice use the same unscaled SDL relative-input path without an
-application polling-rate cap. SDL's Windows backend drains buffered Raw Input;
-the client preserves delivered counts in double accumulators and previews the
-latest pending motion in the render camera. The fixed simulation tick rate is
-unchanged. Mouse polling rate, rendered FPS and simulation rate are distinct.
+application polling-rate cap. SDL's Windows backend drains buffered Raw Input.
+Each mouse report and movement key press or release counts in the tick it was
+made in, by its SDL event time, the same rule as the website's timestamped
+input, so strafes and A/D switches no longer depend on your frame rate. The
+render camera still shows the newest motion at once. `--legacy-input` restores
+the old per-frame behavior for comparison.
 
 Settings → Mouse → Input diagnostics overlay measures delivered motion events
-per second, peak events per frame, SDL timestamp age and event-processing time.
+per second, peak events per frame, SDL timestamp age and event-processing time,
+plus frame time per phase (input, menu, simulation, render, swap) and stalls
+over 50 ms. Feedback with "Attach game info" includes the last sample.
 Move continuously during play, then reopen Settings to inspect the last sample.
 This is not a USB polling-rate detector or an end-to-end latency measurement.
 The diagnostic is off by default and performs no per-event allocation or I/O.
