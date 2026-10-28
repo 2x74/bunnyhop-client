@@ -230,6 +230,11 @@
     "baseline": "42cee5dfafb20bc8e0e207045ae7e3e3fc98645e"
   },
   {
+    "path": "apps/web/src/ui/run-stats.ts",
+    "classification": "native patch",
+    "baseline": "f071454bc2652c22084633a168eb1b4b589035b6"
+  },
+  {
     "path": "apps/web/src/ui/support.ts",
     "classification": "native patch",
     "baseline": "1b4fddbf2e664c74a4313eb5b499532bdbe3c6b8"

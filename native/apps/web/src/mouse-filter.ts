@@ -219,15 +219,15 @@ export class InputStats {
   }
 
   /**
-   * Polling rate (Hz) while the mouse moved over the last 2 s: reports over the time they cover (0: under 50 ms of
-   * readable reports). Not a per-event median: with pointerrawupdate nearly every event has one report, and the few
-   * pairs share a timestamp rounded to Chromium's 100 µs, which read as 10,000 Hz.
+   * Polling rate (Hz) while the mouse moved over the last `windowMs` (2 s): reports over the time they cover (0: under
+   * 50 ms of readable reports). Not a per-event median: with pointerrawupdate nearly every event has one report, and
+   * the few pairs share a timestamp rounded to Chromium's 100 µs, which read as 10,000 Hz.
    */
-  pollHz(now: number): number {
+  pollHz(now: number, windowMs = 2000): number {
     let reports = 0;
     let ms = 0;
     for (let i = 0; i < InputStats.EVENTS; i++) {
-      if (this.evT[i] > now - 2000 && this.evSpan[i] > 0) {
+      if (this.evT[i] > now - windowMs && this.evSpan[i] > 0) {
         reports += this.evN[i];
         ms += this.evSpan[i];
       }
@@ -249,6 +249,44 @@ export class InputStats {
     this.framesOver25 = this.framesOver50 = this.maxFrame = this.longTasks = this.maxLongTask = 0;
     this.lastMotionT = this.lastFrameT = this.lastReportT = 0;
     this.motionSinceFrame = false;
+  }
+}
+
+/** Common mouse polling rates (Hz): a run's rate is recorded as one of them. */
+export const POLL_RATES = [125, 250, 500, 1000, 2000, 4000, 8000] as const;
+
+/**
+ * A run's polling rate (selfcheck.ts RunWatch; the boards' stats card): every half second of mouse movement is measured
+ * (InputStats.pollHz over 500 ms) and counted under the common rate it's within 15 % of. Slow movement only ever reads
+ * low (the mouse sends nothing when it has nothing to send), so the run's rate is the highest one that at least 3
+ * windows and a tenth of all of them landed on. 0: not enough movement to tell.
+ */
+export class RunPollRate {
+  private readonly bins = new Uint32Array(POLL_RATES.length);
+  private total = 0;
+  private last = -Infinity;
+
+  reset(): void {
+    this.bins.fill(0);
+    this.total = 0;
+    this.last = -Infinity;
+  }
+
+  /** Every frame of the run: measures a window once half a second has passed. */
+  sample(now: number, pollHz: (now: number, windowMs: number) => number): void {
+    if (now - this.last < 500) return;
+    this.last = now;
+    const hz = pollHz(now, 500);
+    if (!hz) return;
+    const k = POLL_RATES.findIndex((r) => Math.abs(hz - r) <= r * 0.15);
+    if (k < 0) return;
+    this.bins[k]!++;
+    this.total++;
+  }
+
+  hz(): number {
+    for (let k = POLL_RATES.length - 1; k >= 0; k--) if (this.bins[k]! >= 3 && this.bins[k]! >= this.total * 0.1) return POLL_RATES[k]!;
+    return 0;
   }
 }
 

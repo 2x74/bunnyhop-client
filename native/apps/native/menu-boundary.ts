@@ -46,6 +46,8 @@ const adapters: Record<string, string> = {
   "ui/controls": "settings-controls.ts",
   // Account sync with the native-only settings in the same document.
   "platform/settings-sync": "settings-sync.ts",
+  // The Sky picker installs sky packs with converters that load Three; the native renderer uses each map's sky.
+  "sky-packs/settings": "sky-settings.ts",
 };
 // Checked after the adapters: input stays forbidden apart from its command bits.
 const forbiddenGameModules = ["main", "render", "session", "attract", "input"];

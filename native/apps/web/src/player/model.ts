@@ -144,6 +144,8 @@ export class PlayerModel {
   /** The gun in hand (bunny only; viewmodel/guns), null = the knife. */
   private gun: string | null = null;
   private gunSilencer = false;
+  /** setHeldHidden: an empty hand. */
+  private heldHidden = false;
   private pose: PlayerPose | null = null;
   private wanted = "";
   private pendingSkin: string | null = null;
@@ -216,6 +218,24 @@ export class PlayerModel {
     this.impl.setKnife(this.knifeChoice());
   }
 
+  /** Bunny colourway ("outfit-*" id); undefined = follow the one you equipped. */
+  setOutfit(id: string | undefined): void {
+    this.o.outfit = id;
+    if (this.impl instanceof BunnyModel) this.impl.setOutfit(id ?? getOutfit());
+  }
+
+  /**
+   * Nothing in the bunny's hand: the knife collapses and a gun isn't shown (the replay viewer's held-weapon toggle).
+   * setGun keeps tracking the gun meanwhile, so it comes back when this is turned off.
+   */
+  setHeldHidden(on: boolean): void {
+    if (on === this.heldHidden) return;
+    this.heldHidden = on;
+    if (!(this.impl instanceof BunnyModel)) return;
+    this.impl.setKnifeHidden(on);
+    this.impl.setGun(on ? null : this.gun);
+  }
+
   /** The blade in hand (bunny; null = the carrot, undefined = follow your equipped knife). CS:S models keep w_knife. */
   setKnife(k: KnifeDef | null | undefined): void {
     this.o.knife = k;
@@ -228,7 +248,7 @@ export class PlayerModel {
    */
   setGun(id: string | null): void {
     this.gun = id;
-    if (this.impl instanceof BunnyModel) this.impl.setGun(id);
+    if (this.impl instanceof BunnyModel && !this.heldHidden) this.impl.setGun(id);
   }
 
   /**
@@ -314,7 +334,8 @@ export class PlayerModel {
     if (this.opacity !== null) next.setOpacity(this.opacity);
     if (this.nearFade) next.setNearFade(...this.nearFade);
     if (this.renderOrder !== null) next.setRenderOrder(this.renderOrder);
-    if (this.gun && next instanceof BunnyModel) next.setGun(this.gun);
+    if (this.gun && next instanceof BunnyModel && !this.heldHidden) next.setGun(this.gun);
+    if (this.heldHidden && next instanceof BunnyModel) next.setKnifeHidden(true);
     if (next instanceof BunnyModel) next.setGunSilencer(this.gunSilencer);
     if (this.pose) {
       next.setState(this.pose);

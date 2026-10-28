@@ -12,6 +12,7 @@ import { gapTime, playerCell } from "./board-pager";
 import { h } from "./dom";
 import { icon } from "./icons";
 import { navigate } from "./nav";
+import { bindRunStats } from "./run-stats";
 
 let inflight: AbortController | null = null;
 
@@ -80,12 +81,13 @@ export function mapBoard(o: MapBoardOptions): HTMLElement {
   // Skeleton rows of the final size while the board loads (nothing jumps when it arrives).
   rows.append(...Array.from({ length: 5 }, () => h("tr.rb-skel", { "aria-hidden": "true" }, h("td", null, h("span.rb-sk")), h("td", null, h("span.rb-sk")), h("td", null, h("span.rb-sk")))));
   body.append(table);
+  bindRunStats(table); // hover / focus / hold a row: its stats card (ui/run-stats.ts)
 
   const row = (e: LeaderboardEntry, first: LeaderboardEntry | null, mine: boolean) => {
     const gap = first && e.runId !== first.runId ? gapTime(e.time - first.time) : null;
     return h(
       "tr.rb-row",
-      { class: [e.rank <= 3 ? `top${e.rank}` : "", mine ? "me" : ""].filter(Boolean).join(" ") || null },
+      { class: [e.rank <= 3 ? `top${e.rank}` : "", mine ? "me" : ""].filter(Boolean).join(" ") || null, "data-run": e.runId, "data-run-title": `#${e.rank} · ${e.player.name}` },
       h("td.rb-rank", null, String(e.rank)),
       playerCell(e.player, () => navigate({ screen: "profile", id: e.player.id })),
       h("td.num.mbd-time", { title: gap ? `${gap.slice(1)} behind the world record` : e.rank === 1 ? "World record" : null }, h("b", null, formatTime(e.time)), gap ? h("small", null, gap) : null),

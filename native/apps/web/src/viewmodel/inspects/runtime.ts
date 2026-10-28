@@ -25,6 +25,8 @@ export class VmInspect {
   private pz: ComboPose = { cur: null, prev: null, mix: 1, weight: 0 };
   private angB: number[] = [];
   private angC: number[] = [];
+  /** No weapon events (sounds): the replay viewer's viewmodel (Viewmodel.silent). */
+  silent = false;
   /** START / NEXT when a trick starts (for rooms and the replay trailer; HELD is `holding`). */
   onSignal: ((sig: number) => void) | null = null;
 
@@ -89,6 +91,12 @@ export class VmInspect {
     this.publish();
   }
 
+  /** Puppet input (a replay's signals, combo.ts remote): START restarts the base trick, NEXT chains now. */
+  remote(sig: number): void {
+    this.handle(this.combo.remote(sig));
+    this.publish();
+  }
+
   cancel(reason: "attack" | "draw"): void {
     this.handle(this.combo.cancel(reason));
     this.publish();
@@ -125,9 +133,9 @@ export class VmInspect {
     for (const e of ev) {
       if (e.type === "start" || e.type === "trick") {
         const c = this.set.clips[e.trick];
-        emitWeaponEvent({ type: "inspect", source: "local", trick: e.trick, name: c?.id });
+        if (!this.silent) emitWeaponEvent({ type: "inspect", source: "local", trick: e.trick, name: c?.id });
         this.onSignal?.(e.type === "start" ? SIG_START : SIG_NEXT);
-      } else if (e.type === "cue") emitWeaponEvent({ type: e.cue, source: "local", trick: e.trick });
+      } else if (e.type === "cue" && !this.silent) emitWeaponEvent({ type: e.cue, source: "local", trick: e.trick });
     }
   }
 

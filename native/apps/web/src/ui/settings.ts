@@ -565,6 +565,9 @@ function migrate(raw: Record<string, unknown>): Record<string, unknown> {
       if (Number.isFinite(g[key])) g[key] = normalized[key];
       else delete g[key];
     }
+    // One Sky picker since 0.0.29 (Sky background + the sky packs' own picker before): "Selected sky pack" with no pack
+    // picked drew the map's sky, and now says so.
+    if (g.skyMode === "pack" && typeof g.skyPackId !== "string") g.skyMode = "map";
   }
   migrateAntialias(raw);
   migrateModels(raw);

@@ -18,9 +18,14 @@ const LOSS = "#ff5d5d";
 const ACCENT = "#ffb43a";
 
 export interface CanvasHudOptions {
+  /** Timer, sync, stats (and the speed unless `speed` is given). */
   hud: boolean;
+  /** The speed number on its own; undefined follows `hud`. */
+  speed?: boolean;
   keys: boolean;
   graph: boolean;
+  /** Your crosshair (Settings -> Crosshair) at the frame's centre; the caller passes it for first-person frames only. */
+  crosshair?: boolean;
   /** Brief hook text, independent of the HUD toggles. */
   caption?: string;
 }
@@ -112,13 +117,14 @@ export class CanvasHud {
     g.textAlign = "left";
     const em = (pl: HudPlace) => this.rem * pl.s * this.hs;
     if (o.caption?.trim()) drawShortCaption(g, this.w, this.h, o.caption);
+    if (o.crosshair) drawCrosshair(g, this.w, this.h, p.crosshair);
     if (this.w < this.h) {
       this.drawPortrait(g, d, t, v, o);
       g.restore();
       return;
     }
+    if ((o.speed ?? o.hud) && L.speed.on) this.place(g, "speed", L.speed, this.speed(g, v, em(L.speed)));
     if (o.hud) {
-      if (L.speed.on) this.place(g, "speed", L.speed, this.speed(g, v, em(L.speed)));
       if (L.timer.on) this.place(g, "timer", L.timer, this.timer(g, v, em(L.timer)));
       if (L.split.on && v.split !== null) this.place(g, "split", L.split, this.split(g, v.split, em(L.split)));
       if (L.track.on && v.track) this.place(g, "track", L.track, this.text(g, v.track, em(L.track) * 0.85, 750, ACCENT));
@@ -149,8 +155,8 @@ export class CanvasHud {
       return box.h * scale + gap;
     };
     let top = this.h * 0.16;
+    if ((o.speed ?? o.hud) && L.speed.on) top += draw(this.speed(g, v, e), top);
     if (o.hud) {
-      if (L.speed.on) top += draw(this.speed(g, v, e), top);
       if (L.timer.on) top += draw(this.timer(g, v, e), top);
       if (L.split.on && v.split !== null) top += draw(this.split(g, v.split, e), top);
       if (L.track.on && v.track) top += draw(this.text(g, v.track, e * 0.85, 750, ACCENT), top);
@@ -757,4 +763,57 @@ function drawLeaderboard(g: G, board: NonNullable<CardInfo["leaderboard"]>, cx: 
     height += px * 1.85;
   });
   return height;
+}
+
+/**
+ * The game's crosshair (hud.ts renderCrosshair / style.css #crosshair) drawn into a video frame: the same styles, colour,
+ * arm length, thickness, gap, outline and alpha, scaled from a 1080-pixel-tall screen to the frame.
+ */
+export function drawCrosshair(g: G, w: number, h: number, c: { style: string; color: string; size: number; thickness: number; gap: number; outline: boolean; alpha: number }): void {
+  if (c.style === "none") return;
+  const k = Math.min(w, h) / 1080;
+  const size = c.size * k;
+  const th = Math.max(1, c.thickness * k);
+  const gap = c.gap * k;
+  const cx = w / 2;
+  const cy = h / 2;
+  const rects: [number, number, number, number][] = [];
+  const arms = c.style === "cross" || c.style === "cross-dot" ? ["t", "r", "b", "l"] : c.style === "t" ? ["r", "b", "l"] : [];
+  for (const a of arms) {
+    if (a === "t") rects.push([cx - th / 2, cy - gap - size, th, size]);
+    if (a === "b") rects.push([cx - th / 2, cy + gap, th, size]);
+    if (a === "l") rects.push([cx - gap - size, cy - th / 2, size, th]);
+    if (a === "r") rects.push([cx + gap, cy - th / 2, size, th]);
+  }
+  g.save();
+  g.globalAlpha = Math.max(0, Math.min(1, c.alpha));
+  const outline = c.outline ? Math.max(1, k) : 0;
+  if (outline) {
+    g.fillStyle = "rgba(0,0,0,0.85)";
+    for (const [x, y, rw, rh] of rects) g.fillRect(x - outline, y - outline, rw + outline * 2, rh + outline * 2);
+  }
+  g.fillStyle = c.color;
+  for (const [x, y, rw, rh] of rects) g.fillRect(x, y, rw, rh);
+  const dot = (r: number) => {
+    g.beginPath();
+    g.arc(cx, cy, r, 0, Math.PI * 2);
+    if (outline) (g.lineWidth = outline), (g.strokeStyle = "rgba(0,0,0,0.85)"), g.stroke();
+    g.fill();
+  };
+  if (c.style === "dot") dot(th * 0.8);
+  if (c.style === "cross-dot") {
+    if (outline) (g.fillStyle = "rgba(0,0,0,0.85)"), g.fillRect(cx - th / 2 - outline, cy - th / 2 - outline, th + outline * 2, th + outline * 2), (g.fillStyle = c.color);
+    g.fillRect(cx - th / 2, cy - th / 2, th, th);
+  }
+  if (c.style === "circle") {
+    const r = size + gap - th / 2;
+    g.beginPath();
+    g.arc(cx, cy, Math.max(th, r), 0, Math.PI * 2);
+    if (outline) (g.lineWidth = th + outline * 2), (g.strokeStyle = "rgba(0,0,0,0.85)"), g.stroke();
+    g.lineWidth = th;
+    g.strokeStyle = c.color;
+    g.stroke();
+    g.fillRect(cx - th / 2, cy - th / 2, th, th);
+  }
+  g.restore();
 }

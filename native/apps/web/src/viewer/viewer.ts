@@ -11,12 +11,23 @@ import type { GraphicsPipeline } from "../graphics/pipeline";
 // is paused underneath and untouched (its core is never stepped or restored by the viewer).
 //
 // Keys: Space play/pause · , . ±1 tick · ←/→ ±5 s (Shift ±1 s) · Home/End run start/finish · [ ] speed ·
-//       1-5 / F camera · H HUD · F1 hide UI (the Hide UI bind) · C compare · E export · ? help · Esc close.
+//       1-5 / F camera · H HUD · V weapon in hand · F1 hide UI (the Hide UI bind) · C compare · E export · ? help ·
+//       Esc close.
+//
+// The runner's look (applyLook): the replay's loadout trailer (knife, finish, gloves, crown / hat, build and, since
+// v0.0.29, the colourway). A leaderboard replay without the colourway asks the account (GET /runs/<id>?look=1: their
+// bunny as it is now, so a colourway changed since the run shows the new one); your own PB replays use yours; any
+// other replay file the default. The weapon in hand (V): the bunny's knife / gun in third person, the first-person
+// viewmodel in-eye (viewer/arms.ts), remembered per view (WEAPON_KEY).
 //
 // Hide UI (ui/hide-ui.ts) leaves the picture, plus the speed and keys if Settings → HUD → Hide UI keeps them (H still
 // turns the HUD off altogether). For this visit only; every playback key keeps working; Esc brings the UI back.
 
 import { DEFAULT_LOADOUT } from "../loadout";
+import { DEFAULT_COSMETICS } from "../progression";
+import { getOutfit } from "../player/cosmetics";
+import { warmPrograms } from "../graphics/warm-programs";
+import { ReplayArms, type ArmsLook } from "./arms";
 import "./viewer.css";
 import * as THREE from "three";
 import { api, API_URL, lastKnownMe } from "../api";
@@ -41,10 +52,10 @@ import { prefs } from "../ui/settings";
 import { trackName } from "../zones";
 import { CameraRig, CAM_MODES, directShots, type CamMode, type TraceFn } from "./cameras";
 import type { CardInfo } from "./canvas-hud";
-import { openExportDialog, type ExportSource } from "./export";
+import { openExportDialog, type ExportCam, type ExportSource } from "./export";
 import { runUrl, shareButton } from "../ui/share";
 import { ViewerHud } from "./hud";
-import { F_GROUNDED, finalRunTime, ReplayPlayer, sampleAt, type RunData, type ViewSample } from "./player";
+import { F_GROUNDED, F_LANDED, finalRunTime, ReplayPlayer, sampleAt, type RunData, type ViewSample } from "./player";
 import { viewerRequestRunId, viewerUrl, type ReplayTarget, type ViewerRequest } from "./request";
 import { Timeline } from "./timeline";
 import { ReplayAudio } from "../audio/replay";
@@ -78,6 +89,25 @@ export interface ViewerHost {
 }
 
 const SPEEDS = [0.1, 0.25, 0.5, 1, 2, 4];
+
+/**
+ * The weapon-in-hand toggle (V), remembered per view. In-eye starts off: the run as a clean view of the line, like the
+ * HUD-off shorts; turned on it's the runner's first-person viewmodel. Third person starts on: the knife or gun is part of
+ * the bunny there, and swings / shots read from outside.
+ */
+const WEAPON_KEY = "bunnyhop:replay-weapon";
+interface WeaponShown {
+  eye: boolean;
+  third: boolean;
+}
+function loadWeaponShown(): WeaponShown {
+  try {
+    const v = JSON.parse(localStorage.getItem(WEAPON_KEY) ?? "{}") as Partial<WeaponShown> | null;
+    return { eye: v?.eye === true, third: v?.third !== false };
+  } catch {
+    return { eye: false, third: true };
+  }
+}
 
 interface Compare {
   ghost: Ghost;
@@ -129,12 +159,29 @@ export class ReplayViewer implements ExportSource {
   private sample: ViewSample | undefined;
   private camPos = new THREE.Vector3();
   private exporting = false;
+  /** The weapon in hand for the export running (prepareExport), in place of `weapon`. */
+  private exportWeapon: WeaponShown | null = null;
   private lockReleasedAt = 0;
   private dragging = false;
   private notice = "";
   private seq = 0;
   /** Watching a whole gauntlet attempt: its layer (viewer/gauntlet-layer.ts), else null. */
   private gauntlet: GauntletLayer | null = null;
+  /** The runner's look on the bunny and the first-person arms (applyLook). */
+  private look: ArmsLook = { loadout: { ...DEFAULT_LOADOUT }, outfit: DEFAULT_COSMETICS.outfit!, glow: null };
+  /** Weapon in hand shown, per view (V). */
+  private weapon = loadWeaponShown();
+  /** The last frame was in-eye (no player model): which of `weapon` the button shows and V flips. */
+  private firstPerson = true;
+  /** In-eye weapon (viewer/arms.ts): made the first time it's wanted. */
+  private arms: ReplayArms | null = null;
+  /** Tick the arms were last fed (-1: reset them at the next frame). */
+  private armsTick = -1;
+  /** Their programs compiling (ensureArms): an export waits for it. */
+  private armsWarm: Promise<void> | null = null;
+  /** The hardest landing since the arms' last frame (the viewmodel's landing dip) and the inspect key at the last tick. */
+  private armsLanded = 0;
+  private armsInspectHeld = false;
 
   // DOM
   private root: HTMLElement;
@@ -159,6 +206,7 @@ export class ReplayViewer implements ExportSource {
   private speedBtns: HTMLButtonElement[] = [];
   private camBtns = new Map<CamMode, HTMLButtonElement>();
   private hudBtn: HTMLButtonElement;
+  private weaponBtn: HTMLButtonElement;
   private cleanBtn: HTMLButtonElement;
   /** The Hide UI key in the shortcuts list (its bind can change). */
   private cleanKey = h("kbd");
@@ -190,6 +238,7 @@ export class ReplayViewer implements ExportSource {
     this.reportBtn = btn("Report", "Report this player", () => this.report(), ".rv-chip.rv-report");
     this.reportBtn.hidden = true;
     this.hudBtn = btn("HUD", "Toggle HUD (H)", () => this.toggleHud(), ".rv-chip.on");
+    this.weaponBtn = btn("Weapon", "Weapon in hand (V)", () => this.toggleWeapon(), ".rv-chip");
     this.cleanBtn = btn("Hide UI", "Hide UI", () => this.setClean(true), ".rv-chip");
     this.compareMenu = h("div.rv-menu", { hidden: true, role: "menu" });
     this.compareBtn = btn("Compare", "Overlay a second replay as a ghost (C)", () => this.toggleCompareMenu(), ".rv-chip");
@@ -231,6 +280,7 @@ export class ReplayViewer implements ExportSource {
             ["1–5 or F", "in-eye · chase · free · flyby · auto"],
             ["Drag / wheel", "orbit / zoom the chase cam (double-click resets)"],
             ["H", "HUD on / off"],
+            ["V", "weapon in hand on / off (in-eye and third person each remember theirs)"],
             [this.cleanKey, "hide the UI (Esc shows it)"],
             ["C", "compare with another replay"],
             ["E", "export MP4"],
@@ -266,6 +316,7 @@ export class ReplayViewer implements ExportSource {
       "div.rv-group.rv-right",
       null,
       this.hudBtn,
+      this.weaponBtn,
       this.cleanBtn,
       h("div.rv-menu-wrap", null, this.compareBtn, this.compareMenu),
       this.practiceBtn,
@@ -344,15 +395,20 @@ export class ReplayViewer implements ExportSource {
       if (my !== this.seq) return;
       this.setLoading("Preparing replay…");
       await afterPaint();
+      // Your own PB replays: your colourway when the trailer has none.
+      const own = "pb" in req.target || replay.header.player === lastKnownMe()?.name;
+      this.look = { loadout: replay.loadout ?? { ...DEFAULT_LOADOUT }, outfit: replay.loadout?.outfit ?? (own ? getOutfit() : DEFAULT_COSMETICS.outfit!), glow: null };
       this.load(replay, bytes, label);
       // Shareable link for leaderboard runs.
       this.runId = viewerRequestRunId(req);
       this.owner = null;
-      this.model.setPlayerGlow(null);
-      if (this.runId) void api.runPlayer(this.runId).then(p => {
+      // A replay without the colourway (all before v0.0.29): the account's bunny as it is now, with the trailer's knife /
+      // finish / gloves when it has them.
+      const askLook = !replay.loadout?.outfit;
+      if (this.runId) void api.runPlayer(this.runId, askLook).then(p => {
         if (my !== this.seq) return;
-        this.model.setPlayerGlow(p.playerGlow);
-        this.drawModel?.setPlayerGlow(p.playerGlow);
+        const acct = askLook ? p.look : null;
+        this.applyLook({ loadout: replay.loadout ?? acct?.loadout ?? this.look.loadout, outfit: acct?.outfit ?? this.look.outfit, glow: p.playerGlow });
         this.owner = p.name;
         this.updateTitle();
         this.reportBtn.hidden = !this.runId || !api.available() || p.id === lastKnownMe()?.id;
@@ -436,8 +492,10 @@ export class ReplayViewer implements ExportSource {
     this.rig.snap();
     this.model.snap();
     this.floorStale = true;
-    // The knife / finish / gloves the run was played with (replay trailer); older replays show the carrot.
-    this.model.setLoadout(replay.loadout ?? { ...DEFAULT_LOADOUT });
+    // The knife / finish / gloves / colourway the run was played with (replay trailer, open() picks the rest).
+    this.applyLook(this.look);
+    this.armsTick = -1;
+    if (this.weapon.eye) this.ensureArms();
     const h0 = replay.header;
     const notes: string[] = [];
     if (h0.mapSha256 !== this.host.mapSha256) notes.push("Recorded on a different build of this map, so playback may desync.");
@@ -507,6 +565,8 @@ export class ReplayViewer implements ExportSource {
     this.model.root.removeFromParent();
     this.floor.root.removeFromParent();
     this.floor.clear();
+    this.arms?.dispose();
+    this.arms = null;
     this.clearCompare();
     this.player?.dispose();
     this.trailHistory.clear();
@@ -605,6 +665,54 @@ export class ReplayViewer implements ExportSource {
     this.updateControls();
   }
 
+  /** V: the weapon in hand on / off for the current view (in-eye or third person), remembered. */
+  private toggleWeapon(): void {
+    const k = this.firstPerson ? "eye" : "third";
+    this.weapon = { ...this.weapon, [k]: !this.weapon[k] };
+    try {
+      localStorage.setItem(WEAPON_KEY, JSON.stringify(this.weapon));
+    } catch {
+      /* private mode */
+    }
+    if (this.weapon.eye) this.ensureArms();
+    this.updateControls();
+  }
+
+  /** The runner's bunny (colourway, loadout, glow) on the model, the export's copy and the first-person arms. */
+  private applyLook(l: ArmsLook): void {
+    this.look = l;
+    for (const m of new Set([this.model, this.drawModel])) {
+      m.setOutfit(l.outfit);
+      m.setLoadout(l.loadout);
+      m.setPlayerGlow(l.glow);
+    }
+    this.arms?.setLook(l);
+    // A colourway / hat / gloves new to this page: their programs compile now, not in the first frame that shows them.
+    void warmPrograms(this.host.renderer, this.model.root, this.host.camera, this.host.scene).catch(() => {});
+  }
+
+  /** The in-eye arms, made (and their programs compiled in the background) the first time they're wanted. */
+  private ensureArms(): void {
+    if (this.arms || !this.core) return;
+    const a = (this.arms = new ReplayArms(this.core, this.host.scene));
+    a.setLook(this.look);
+    this.armsTick = -1;
+    this.armsWarm = a.warm(this.host.renderer, this.host.camera).catch(() => {
+      a.ready = true;
+    });
+  }
+
+  /** The weapon-in-hand toggles in effect: the export's while one renders, else the viewer's (V). */
+  private get weaponNow(): WeaponShown {
+    return (this.exporting && this.exportWeapon) || this.weapon;
+  }
+
+  /** The export dialog's default for a camera: the viewer's toggle for that view (Auto-director: the view shown now). */
+  weaponFor(camera: ExportCam): boolean {
+    const eye = camera === "eye" || (camera === "auto" && this.firstPerson);
+    return eye ? this.weapon.eye : this.weapon.third;
+  }
+
   /** Hide UI: the picture, and the speed / keys if the player keeps them. Not kept between visits (ui/hide-ui.ts). */
   private setClean(on: boolean): void {
     if (on === this.clean) return;
@@ -639,6 +747,8 @@ export class ReplayViewer implements ExportSource {
     SPEEDS.forEach((s, i) => this.speedBtns[i].classList.toggle("on", s === this.speed));
     for (const [m, b] of this.camBtns) b.classList.toggle("on", m === this.rig.mode);
     this.hudBtn.classList.toggle("on", this.hudOn);
+    this.weaponBtn.classList.toggle("on", this.firstPerson ? this.weapon.eye : this.weapon.third);
+    this.weaponBtn.title = `Weapon in hand, ${this.firstPerson ? "in-eye" : "third person"} (V)`;
     this.freeHint.hidden = this.rig.mode !== "free" || document.pointerLockElement === this.stage;
     const c = this.compare;
     this.compareBtn.textContent = c ? `vs ${c.label}` : "Compare";
@@ -784,6 +894,28 @@ export class ReplayViewer implements ExportSource {
       rig.snap(); this.drawModel.snap();
     }
     this.lastRenderedTick = t;
+    // In-eye weapon: every tick played through feeds the guns (switches, reloads, shots) as in the game; a jump resets
+    // them to the core's state. Before the trails below, which move the core around.
+    const contiguous = this.lastShown >= 0 && i > this.lastShown && i - this.lastShown < 30;
+    const arms = this.arms;
+    if (arms && this.core) {
+      const core = this.core;
+      if (contiguous && this.armsTick === this.lastShown) {
+        let next = this.lastShown + 1;
+        let gap = false;
+        p.seek(i, (k, events) => {
+          if (k < next) return;
+          if (k > next) gap = true;
+          arms.step(core, events);
+          next = k + 1;
+        });
+        if (gap) arms.reset(core);
+      } else if (this.armsTick !== i) {
+        p.seek(i);
+        arms.reset(core);
+      }
+      this.armsTick = i;
+    }
     this.host.world.reconstructTrails(t * d.interval, seconds => {
       const tick = Math.max(0, Math.min(d.n, Math.floor(seconds / d.interval)));
       let at = this.trailHistory.get(tick);
@@ -807,26 +939,45 @@ export class ReplayViewer implements ExportSource {
     }
     const cam = this.host.camera;
     const showModel = rig.update(cam, d, t, dt, this.trace);
+    if (rig === this.rig && this.firstPerson === showModel) {
+      this.firstPerson = !showModel;
+      this.updateControls();
+    }
+    const shown = this.weaponNow;
+    const held = showModel ? shown.third : shown.eye;
+    if (!showModel && held && !arms) this.ensureArms();
     const s = (this.sample = sampleAt(d, t, this.sample));
     const model = this.drawModel;
     model.root.visible = showModel;
+    model.setHeldHidden(!shown.third);
     this.playerShadow.update(s.pos, s.crouched, !showModel);
     {
       // Grounded if any tick since the last frame touched the ground (bhop lands for a single tick).
       let grounded = s.grounded;
       if (!grounded && this.lastShown >= 0 && i > this.lastShown && i - this.lastShown < 30) for (let k = this.lastShown + 1; k <= i && !grounded; k++) grounded = (d.flags[k] & F_GROUNDED) !== 0;
       // Carrot swings recorded in the replay (cosmetic trailer), during normal playback.
-      const playing = this.lastShown >= 0 && i > this.lastShown && i - this.lastShown < 30;
+      const playing = contiguous;
       const attack = playing ? cosmeticBetween(d.replay.cosmetic, this.lastShown, i) : 0;
       if (showModel && attack && !this.exporting) emitWeaponEvent({ type: attack === 2 ? "stab" : "slash", source: "replay", position: [s.pos[0], s.pos[1], s.pos[2]] });
       // Inspect tricks (inspect trailer): the third-person gesture; seeks drop them (the model snaps).
       const ins = playing ? inspectBetween(d.replay.inspect, this.lastShown, i) : { sig: 0, held: false };
       if (showModel && ins.sig && !this.exporting) emitWeaponEvent({ type: "inspect", source: "replay", position: [s.pos[0], s.pos[1], s.pos[2]] });
-      const pose: PlayerPose = { visualTime: t * d.interval, position: s.pos, velocity: s.vel, yaw: s.yaw, pitch: s.pitch, crouched: s.crouched, grounded, forwardmove: s.forward, sidemove: s.side, attack, inspect: ins.sig, inspectHeld: ins.held };
+      // An empty hand (weapon off) doesn't swing or inspect.
+      const tpHeld = shown.third;
+      const pose: PlayerPose = { visualTime: t * d.interval, position: s.pos, velocity: s.vel, yaw: s.yaw, pitch: s.pitch, crouched: s.crouched, grounded, forwardmove: s.forward, sidemove: s.side, attack: tpHeld ? attack : 0, inspect: tpHeld ? ins.sig : 0, inspectHeld: tpHeld && ins.held };
       model.setGun(weapons && weapons.active >= 2 ? WEAPON_IDS[weapons.active] : null);
       model.setGunSilencer(!!weapons && weapons.active >= 2 && weapons.silencer);
       model.setState(pose);
       model.update(dt);
+      if (arms) {
+        if (attack) arms.swing(attack);
+        if (ins.sig) arms.inspect(ins.sig);
+        if (playing) for (let k = this.lastShown + 1; k <= i; k++) if (d.flags[k] & F_LANDED) this.armsLanded = Math.min(this.armsLanded, d.vel[(k - 1) * 3 + 2]);
+        // Frames on the same tick keep it; a jump lets go.
+        if (i !== this.lastShown) this.armsInspectHeld = ins.held;
+        // An export animates and draws them once per output frame (drawViewmodel), not once per motion-blur sample.
+        if (!this.exporting) this.armsFrame(arms, dt, s, !showModel && held, origins);
+      }
     }
     this.lastShown = i;
     const c = this.compare;
@@ -843,6 +994,15 @@ export class ReplayViewer implements ExportSource {
       ghost.showAt(gt, running && (!c.endTick || gt < c.endTick), dt, this.camPos, { opacity: g.opacity, trail: g.trail, nearFade: true, tag }, running);
     }
     this.host.graphicsPipeline.render(this.host.scene, cam,t*d.interval);
+    // The export draws it after its frame is complete (drawViewmodel): motion-blur samples composite first.
+    if (!this.exporting) this.arms?.render(this.host.renderer, cam);
+  }
+
+  /** The arms' animation, bob / sway from the replay's movement and effects, `show`: drawn this frame. */
+  private armsFrame(arms: ReplayArms, dt: number, s: ViewSample, show: boolean, origins: Map<number, BrushTransform>): void {
+    const input = { velocity: s.vel, grounded: s.grounded, viewOffsetZ: s.viewZ, sidemove: s.side, yaw: s.yaw, pitch: s.pitch, landed: this.armsLanded };
+    this.armsLanded = 0;
+    arms.frame(dt, input, this.armsInspectHeld, show, origins);
   }
 
   /** main.ts frame loop while the viewer is open. */
@@ -915,7 +1075,7 @@ export class ReplayViewer implements ExportSource {
     // Fresh player model / ghost for the render, so no animation state carries over from viewing (the exporter
     // seeds Math.random first, so their construction is deterministic too).
     this.model.root.visible = false;
-    this.drawModel = new PlayerModel({ style: "solid", playerGlow: this.model.playerGlow, loadout: this.replay?.loadout ?? { ...DEFAULT_LOADOUT } });
+    this.drawModel = new PlayerModel({ style: "solid", playerGlow: this.look.glow, outfit: this.look.outfit, loadout: this.look.loadout });
     this.playerShadow.bind(this.drawModel.root);
     this.drawModel.setNearFade(10, 34);
     this.host.scene.add(this.drawModel.root);
@@ -927,10 +1087,47 @@ export class ReplayViewer implements ExportSource {
       this.host.scene.add(this.drawGhost.root);
     }
     this.lastShown = -1;
+    // Not a realtime frame: arms still compiling are drawn anyway (their programs link in the first export frame).
+    this.armsTick = -1;
+    this.armsLanded = 0;
+    if (this.arms) {
+      this.arms.ready = true;
+      // Already in hand when the clip starts or cuts to an in-eye shot.
+      this.arms.deployOnShow = false;
+    }
+  }
+
+  /**
+   * Before beginExport: the weapon in hand for the export (`weapon` for both views, undefined: the viewer's toggles).
+   * In-eye it's the viewer's replay arms (viewer/arms.ts: the runner's knife, finish, gloves, glow and colourway, guns,
+   * shots, inspects), their programs compiled and the CS:S knife animations loaded first so the look can't change
+   * mid-render. Silent: the export mixes its own sound.
+   */
+  async prepareExport(o: { weapon?: boolean }): Promise<void> {
+    this.exportWeapon = o.weapon === undefined ? { ...this.weapon } : { eye: o.weapon, third: o.weapon };
+    if (!this.exportWeapon.eye) return;
+    const loader = await import("../player/studio/loader");
+    if (loader.hasViewmodelAnims()) await loader.loadViewmodelAnims().catch(() => null);
+    this.ensureArms();
+    await this.armsWarm;
+  }
+
+  /**
+   * Export, once per output frame after the scene (all of a motion-blur frame's samples): animates the in-eye weapon to
+   * display tick t and draws it over the frame in first-person shots, sharp.
+   */
+  drawViewmodel(t: number, dt: number, rig: CameraRig): void {
+    const arms = this.arms;
+    const d = this.data;
+    if (!arms || !d || !this.player) return;
+    this.armsFrame(arms, dt, sampleAt(d, t, this.sample), rig.firstPerson && this.weaponNow.eye, this.player.brushOrigins());
+    arms.render(this.host.renderer, this.host.camera);
   }
 
   endExport(): void {
     this.exporting = false;
+    this.exportWeapon = null;
+    if (this.arms) this.arms.deployOnShow = true;
     if (this.drawModel !== this.model) {
       this.drawModel.root.removeFromParent();
       this.drawModel.dispose();
@@ -939,6 +1136,7 @@ export class ReplayViewer implements ExportSource {
     }
     this.drawGhost?.dispose();
     this.drawGhost = null;
+    this.armsTick = -1;
     this.host.resize();
     this.rig.snap();
     this.model.snap();
@@ -1112,6 +1310,9 @@ export class ReplayViewer implements ExportSource {
         return true;
       case "KeyH":
         this.toggleHud();
+        return true;
+      case "KeyV":
+        this.toggleWeapon();
         return true;
       case "KeyC":
         this.setClean(false);

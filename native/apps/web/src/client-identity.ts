@@ -20,3 +20,15 @@ export function feedbackClient(context: { client?: unknown; nativeVersion?: unkn
   }
   return classifyClient(context?.ua);
 }
+
+/**
+ * Which client a run was played on, for its diagnostics (staff see it next to the run, apps/api src/run-client.ts):
+ * "desktop" when the desktop app's bridge (client-bridge.ts nativeClient()) or its user agent token is there, with the
+ * app version the token carries; otherwise "browser". The native C++ client is known from the run's client build.
+ * Self-reported, triage only.
+ */
+export function runClientInfo(bridge: unknown, ua: string): { kind: "desktop" | "browser"; version?: string } {
+  const app = classifyClient(ua);
+  if (!bridge && app.kind !== "desktop") return { kind: "browser" };
+  return app.version ? { kind: "desktop", version: app.version } : { kind: "desktop" };
+}

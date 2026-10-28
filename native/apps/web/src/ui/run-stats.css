@@ -1,0 +1,20 @@
+/* A board row's stats card (ui/run-stats.ts): the info tips' panel (settings.css .info-tip-text), a plain two-column
+   list in the boards' type (boards.css: sentence-case labels, tabular numerals). A manual popover in the top layer,
+   so the UA's popover box (inset, margin, border, padding) is reset here. Never takes the pointer. */
+
+.rs-card {
+  position: fixed; inset: auto; z-index: calc(var(--z-toast) + 1); margin: 0; box-sizing: border-box;
+  width: max-content; min-width: 14rem; max-width: min(20rem, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: hidden;
+  padding: 0.55rem 0.75rem 0.6rem; border: 0; border-radius: var(--radius-sm); background: var(--panel-solid); box-shadow: var(--shadow), 0 0 0 1px var(--line);
+  color: var(--text); font: 400 var(--fs-sm)/1.35 var(--font-ui); font-variant-numeric: tabular-nums; pointer-events: none;
+}
+.rs-card[hidden] { display: none; }
+.rs-head { margin: 0 0 0.35rem; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rs-list { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.12rem 0.9rem; margin: 0; }
+.rs-list + .rs-list { margin-top: 0.4rem; padding-top: 0.4rem; border-top: 1px solid var(--line); }
+.rs-list dt { color: var(--dim); }
+.rs-list dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.rs-skel { display: grid; gap: 0.45rem; padding: 0.15rem 0 0.1rem; }
+.rs-skel .rb-sk { width: 100%; }
+.rs-skel .rb-sk:nth-child(2n) { width: 72%; }
+.rs-skel .rb-sk:nth-child(3n) { width: 86%; }

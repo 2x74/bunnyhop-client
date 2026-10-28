@@ -74,7 +74,7 @@ svg.icon { display: block; flex: none; }
    the matching groups flow without gaps. */
 .set-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-5) var(--sp-6); align-items: start; }
 .set-col { display: flex; flex-direction: column; gap: var(--sp-5); min-width: 0; }
-.set-cols.auto { display: flex; flex-direction: column; }
+.set-cols.auto { display: flex; flex-direction: column; align-items: stretch; }
 @container setscroll (min-width: 56rem) {
   .set-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .set-cols.auto { display: block; columns: 2; column-gap: var(--sp-6); }
@@ -110,6 +110,20 @@ label.set-name { cursor: pointer; }
 .check-grid > .set-row:first-child { border-top-left-radius: var(--radius-sm); }
 .check-grid > .set-row:nth-child(2) { border-top-right-radius: var(--radius-sm); }
 .set-aside { padding: var(--sp-1) 0.2rem; }
+/* A row of buttons, or a link field and its button: the label keeps its own width and the control takes the rest,
+   its buttons wrapping inside it (an auto-width control column squeezed long button rows' labels to nothing). */
+.settings .set-row:has(> .set-control > :is(.btn-row, .set-link)) { grid-template-columns: fit-content(45%) minmax(0, 1fr); }
+.settings .set-control > .btn-row { justify-content: flex-end; }
+.set-link { display: flex; align-items: center; gap: var(--sp-2); flex: 1; min-width: 0; }
+.set-link > input { flex: 1; min-width: 6rem; box-sizing: border-box; padding: 0.38rem 0.6rem; font-size: var(--fs-sm); }
+/* A status line between a group's rows (a download's progress, what went wrong); hidden when it has nothing to say. */
+.set-note { margin: 0; padding: 0.5rem 0.85rem; background: var(--raise); color: var(--cream-2); font-size: var(--fs-sm); line-height: 1.35; overflow-wrap: anywhere; }
+.set-note[hidden] { display: none; }
+.set-note[data-tone="bad"] { color: var(--loss); }
+.sky-status { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
+.sky-status .link-btn { flex: none; padding: 0; color: var(--accent); }
+/* A sky file held over Settings → Graphics (settings-panel.ts): a dashed frame round the page; let go to import it. */
+.settings.sky-drop .set-scroll { outline: 2px dashed var(--accent); outline-offset: -2px; border-radius: var(--r-2); }
 
 /* Info tip (controls.ts infoTip): a small "i" after a row's label; its sentence shows while hovered or focused. */
 .set-name-line { display: inline-flex; align-items: center; gap: 0.4rem; min-width: 0; }
@@ -146,7 +160,8 @@ label.set-name { cursor: pointer; }
 .set-empty-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; justify-content: center; margin-top: 0.2rem; }
 
 /* ---- controls, refined for the strips */
-.settings .range { width: clamp(11rem, 17vw, 16.5rem); }
+/* At least the track's 5rem + the number box (at 11rem the box ran past the row's edge in windows under ~1000 px). */
+.settings .range { width: clamp(12.25rem, 17vw, 16.5rem); }
 .settings .num-input { width: 4.4rem; }
 .settings .seg button { display: inline-flex; align-items: center; gap: 0.35rem; }
 .settings .select { max-width: 13rem; }

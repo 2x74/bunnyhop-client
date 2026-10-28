@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {HDRLoader} from 'three/examples/jsm/loaders/HDRLoader.js';
 import {CUBE_FACES,skyBytes,skyHash,validateSkyPack,type SkyLighting,type SkyPack} from './manifest';
-import {installedSkyPacks,watchSkyPacks} from './store';
+import {findSkyPack,watchSkies} from './folder';
 export interface LoadedSky {id:string;version:string;format:'cube'|'equirect';texture:THREE.Texture;rotation:number;exposure:number;lighting?:SkyLighting;clouds?:SkyPack['clouds'];sha256:string;precision:'ldr'|'half-float'|'ldr-fallback'}
 export interface SkyState {asset:LoadedSky|null;loading:boolean;error:string|null}
 export async function loadSkyPack(pack:SkyPack,renderer:THREE.WebGLRenderer):Promise<LoadedSky>{
@@ -29,10 +29,10 @@ export async function loadSkyPack(pack:SkyPack,renderer:THREE.WebGLRenderer):Pro
 }
 export class SkyPackRuntime {
  private state:SkyState={asset:null,loading:false,error:null};private selected:string|null=null;private generation=0;private disposed=false;private pins=0;private queued:{id:string|null;force:boolean}|null=null;private disposeRequested=false;private pending:Promise<void>=Promise.resolve();private stop:()=>void;
- constructor(private renderer:THREE.WebGLRenderer,private services={read:installedSkyPacks,load:loadSkyPack,watch:watchSkyPacks}){this.stop=this.services.watch(()=>this.select(this.queued?this.queued.id:this.selected,true));}
+ constructor(private renderer:THREE.WebGLRenderer,private services={find:findSkyPack,load:loadSkyPack,watch:watchSkies}){this.stop=this.services.watch((changed?:ReadonlySet<string>)=>{const id=this.queued?this.queued.id:this.selected;if(changed&&(!id||!changed.has(id)))return;this.select(id,true);});}
  select(id:string|null,force=false):void{
   if(this.disposed)return;if(this.pins){this.queued={id,force:force||!!this.queued?.force};return;}if(!force&&id===this.selected)return;this.selected=id;const generation=++this.generation;this.state.asset?.texture.dispose();this.state={asset:null,loading:!!id,error:null};if(!id){this.pending=Promise.resolve();return;}
-  this.pending=(async()=>{let asset:LoadedSky|null=null;try{const record=(await this.services.read()).find(r=>r.pack.id===id);if(!record)throw Error('Selected sky pack is not installed');asset=await this.services.load(record.pack,this.renderer);if(this.disposed||generation!==this.generation){asset.texture.dispose();return;}this.state={asset,loading:false,error:null};}catch(error){asset?.texture.dispose();if(!this.disposed&&generation===this.generation)this.state={asset:null,loading:false,error:String((error as Error).message??error)};}})();
+  this.pending=(async()=>{let asset:LoadedSky|null=null;try{const pack=await this.services.find(id);if(!pack)throw Error('Selected sky pack is not installed');asset=await this.services.load(pack,this.renderer);if(this.disposed||generation!==this.generation){asset.texture.dispose();return;}this.state={asset,loading:false,error:null};}catch(error){asset?.texture.dispose();if(!this.disposed&&generation===this.generation)this.state={asset:null,loading:false,error:String((error as Error).message??error)};}})();
  }
  pin():void{if(this.disposed)throw Error('Sky runtime disposed');if(this.state.loading)throw Error('Await sky loading before export pin');this.pins++;}
  unpin():void{if(!this.pins)return;if(--this.pins)return;if(this.disposeRequested){this.dispose();return;}const queued=this.queued;this.queued=null;if(queued)this.select(queued.id,queued.force);}

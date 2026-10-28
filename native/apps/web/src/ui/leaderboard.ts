@@ -15,6 +15,7 @@ import { trackName } from "../zones";
 import { fullDate, gapTime, pagedBoard, playerCell, relDate, type BoardPage, type BoardSource } from "./board-pager";
 import { adminLink } from "../staff-lens";
 import { dismissOutside } from "./dismiss";
+import { bindRunStats } from "./run-stats";
 
 export interface BoardOptions {
   /** Timed tracks of the map (0 = main, N = bonus N); bonus tabs appear only when the map has bonuses. */
@@ -94,7 +95,7 @@ export function leaderboardPanel(map: string, style: string, opts: BoardOptions 
       const gap = c.first && e.runId !== c.first.runId ? h("span.rb-gap", { title: `${gapTime(e.time - c.first.time).slice(1)} behind the world record` }, gapTime(e.time - c.first.time)) : e.rank === 1 ? h("span.rb-wr", null, "WR") : null;
       return h(
         "tr",
-        { class: [e.rank <= 3 ? `top${e.rank}` : "", c.mine ? "me" : "", c.found ? "found" : ""].filter(Boolean).join(" ") || null },
+        { class: [e.rank <= 3 ? `top${e.rank}` : "", c.mine ? "me" : "", c.found ? "found" : ""].filter(Boolean).join(" ") || null, "data-run": e.runId, "data-run-title": name },
         h("td.rb-rank", null, String(e.rank)),
         playerCell(e.player, () => navigate({ screen: "profile", id: e.player.id })),
         h("td.num.rb-strong", { title: [`${e.ticks.toLocaleString("en-US")} ticks`, physicsNote(e)].filter(Boolean).join(" · ") }, formatTime(e.time)),
@@ -171,6 +172,8 @@ export function leaderboardPanel(map: string, style: string, opts: BoardOptions 
   }
 
   const root = h("div.leaderboard");
+  // Hover / focus / hold a row: its stats card (ui/run-stats.ts).
+  bindRunStats(root);
   function refresh(): void {
     root.classList.toggle("show-perf", boardStyle() === "scroll");
     renderControls();

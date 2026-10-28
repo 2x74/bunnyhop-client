@@ -6,4 +6,4 @@ export function publishHybridStatus(status:HybridStatus):void{
  if(current.status===status.status&&current.reason===status.reason&&current.loaded===status.loaded)return;
  current={...status};for(const node of nodes){if(!node.isConnected){nodes.delete(node);continue}node.textContent=`Traced lighting: ${current.reason}`;}
 }
-export function hybridStatusNode():HTMLElement{const node=document.createElement("p");node.className="setting-note";node.textContent=`Traced lighting: ${current.reason}`;nodes.add(node);return node;}
+export function hybridStatusNode():HTMLElement{const node=document.createElement("p");node.className="set-note";node.textContent=`Traced lighting: ${current.reason}`;nodes.add(node);return node;}

@@ -1,6 +1,6 @@
-/* /custom-css: the custom CSS guide (custom-css.html, on top of about.css). A text column beside a sticky contents rail,
-   real screenshots, code blocks with a copy button and light colouring (custom-css-page.ts), and a before / after
-   slider on the hero. Works without JS: the code is plain, the slider shows the "after" picture. */
+/* /custom-css and /custom-skies: the custom CSS and skies guides (custom-css.html, custom-skies.html, on top of
+   about.css). A text column beside a sticky contents rail, real screenshots, code blocks with a copy button and light
+   colouring (custom-css-page.ts), and a before / after slider on the hero. Works without JS: the code is plain, the slider shows the "after" picture. */
 
 .guide { max-width: 76rem; }
 .g-hero { max-width: 58rem; padding: 2.5rem 0 3rem; }

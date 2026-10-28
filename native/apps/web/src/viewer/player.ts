@@ -242,8 +242,12 @@ export class ReplayPlayer {
     this.cur = -1;
   }
 
-  /** Brings the core to "after tick t" (0..n). Cheap for small forward steps; otherwise keyframe restore + step. */
-  seek(t: number): void {
+  /**
+   * Brings the core to "after tick t" (0..n). Cheap for small forward steps; otherwise keyframe restore + step.
+   * `onStep(tick, events)`: called after every tick stepped on the way (the core is "after tick" then), including the
+   * ones from a restored keyframe up; callers watching playback ignore ticks they've already seen.
+   */
+  seek(t: number, onStep?: (tick: number, events: number) => void): void {
     const d = this.data;
     t = Math.max(0, Math.min(d.n, Math.floor(t)));
     if (t === this.cur) return;
@@ -270,6 +274,7 @@ export class ReplayPlayer {
       const r = replayStep(this.core, this.timer, this.filter, this.replay, this.cur, this.pre);
       this.pre = r.state;
       this.cur++;
+      onStep?.(this.cur, r.events);
       if (!this.warned) {
         const o = this.cur * 3;
         const p = r.state.position;

@@ -703,6 +703,11 @@ let browserUncapped = false;
 watchClientSettings((s) => {
   browserUncapped = s.browserUncapped === true;
 });
+// A run's stats card shows its frame cap (session.ts runPlay): the limit, and whether frames waited for the display.
+session.frameCap = () => {
+  const g = prefs.get().graphics;
+  return { limit: g.fpsLimit, vsync: !(g.uncapped || browserUncapped) };
+};
 // F10 → Benchmark: frame times over 30 s of play (benchmark.ts).
 const benchmark = desktopClient?.onBenchmark
   ? new FrameBenchmark({

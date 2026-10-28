@@ -25,6 +25,7 @@
 import { cinematicSettings } from "../graphics/cinematic-preset";
 import { composerPreset } from "../graphics/presets";
 import { hybridStatusNode } from "../graphics/hybrid-status";
+import { importSkyFile, skyFileKind, skyGroup } from "../sky-packs/settings";
 import { DEFAULT_PREFS, gameView, horizontalFovAt, keyLabel, prefs, ACTIONS, bindIsDefault, resetBind, type Action, type CrosshairStyle, applyGraphicsPreset, graphicsPreset, applyTrainerPreset, trainerPreset, type TrainerPreset, type TrainerStyle, type AspectFit, type AspectRatio, type GraphicsPreset, type MenuBackground, type PlaceReadout, type Prefs } from "./settings";
 import { arrowNav, h } from "./dom";
 import * as ui from "./controls";
@@ -126,7 +127,7 @@ function mouseSection(): SettingsContent {
       [
         group(
           "View",
-          range("Field of view", () => P().fov, (v) => (up((p) => (p.fov = v)), paint()), { min: 75, max: 110, step: 1, unit: "°", peek: true, hint: "Horizontal at 4:3, like CS:S", desc: "fov_desired (CS:S default 90). Wider screens see more at the sides (Hor+), like CS:S.", keywords: "fov fov_desired zoom" }),
+          range("Field of view", () => P().fov, (v) => (up((p) => (p.fov = v)), paint()), { min: 75, max: 120, step: 1, unit: "°", peek: true, hint: "Horizontal at 4:3, like CS:S", desc: "fov_desired (CS:S default 90). Wider screens see more at the sides (Hor+), like CS:S.", keywords: "fov fov_desired zoom" }),
           h("div.set-stats", null, stat(cm, "cm / 360°"), stat(edpi, "eDPI"), stat(hfov, "horizontal FOV", hsub)),
         ),
       ],
@@ -758,14 +759,16 @@ let cinematicPrevious:Prefs["graphics"]|null=null;
 try{const saved=JSON.parse(localStorage.getItem(cinematicBackupKey)??"null");if(saved&&typeof saved==="object"&&["source","classic","enhanced","cinematic"].includes(saved.preset))cinematicPrevious=saved;}catch{}
 let cinematicGeneration=0;
 let cinematicRestore:(()=>Promise<void>)|null=null;
-let cinematicStatus="Recommended packs download only when Cinematic is selected.";
+/** One line under Look while Cinematic downloads or switches back; empty (hidden) otherwise. */
+let cinematicStatus="";
 const cinematicNodes=new Set<HTMLElement>();
-function cinematicStatusNode(){const node=h("p.set-note",null,cinematicStatus);cinematicNodes.add(node);return node;}
-function paintCinematicStatus(){for(const node of cinematicNodes){if(node.isConnected)node.textContent=cinematicStatus;else cinematicNodes.delete(node);}}
+function cinematicStatusNode(){const node=h("p.set-note",{role:"status",hidden:!cinematicStatus},cinematicStatus);cinematicNodes.add(node);return node;}
+function paintCinematicStatus(){for(const node of cinematicNodes){if(node.isConnected){node.textContent=cinematicStatus;node.hidden=!cinematicStatus;}else cinematicNodes.delete(node);}}
 async function chooseGraphicsPreset(value:Prefs["graphics"]["preset"]){
  const generation=++cinematicGeneration;cinematicController?.abort();cinematicController=null;
  if(value!=="cinematic"){
   // Disabling graphics must not depend on storage/network recovery succeeding.
+  const leaving=!!cinematicPrevious;
   up(p=>{p.graphics=cinematicPrevious?{...cinematicPrevious,preset:value}:{...p.graphics,preset:value};});
   let restoreError:unknown=null;
   try{if(cinematicRestore){const restore=cinematicRestore;cinematicRestore=null;await restore();}
@@ -773,12 +776,12 @@ async function chooseGraphicsPreset(value:Prefs["graphics"]["preset"]){
   catch(error){restoreError=error;}
   if(generation!==cinematicGeneration)return;
   if(!restoreError){cinematicPrevious=null;localStorage.removeItem(cinematicBackupKey);}
-  cinematicStatus=restoreError?"Graphics restored. Material-pack recovery could not finish; retry by selecting Classic. "+String((restoreError as Error).message??restoreError):"Previous tuning restored. Texture changes apply next map load; your current run continues.";paintCinematicStatus();return;
+  cinematicStatus=restoreError?"Your settings are back, but the Cinematic materials couldn't be switched off. Pick Plain to try again. "+String((restoreError as Error).message??restoreError):leaving?"Your settings from before Cinematic are back. Textures change from the next map.":"";paintCinematicStatus();return;
  }
  cinematicPrevious??={...P().graphics};localStorage.setItem(cinematicBackupKey,JSON.stringify(cinematicPrevious));const controller=new AbortController();cinematicController=controller;
- up(p=>{p.graphics=cinematicSettings(p.graphics);});cinematicStatus="Loading recommended sky and materials… Original assets remain available.";paintCinematicStatus();
- try{const {ensureCinematicAssets}=await import("../graphics/cinematic-assets");controller.signal.throwIfAborted();const assets=await ensureCinematicAssets(controller.signal);if(controller.signal.aborted||P().graphics.preset!=="cinematic"){await assets.restore();return;}cinematicRestore=assets.restore;cinematicStatus="Cinematic ready. Sky and lighting apply now; recommended textures apply next map load. Advanced is optional.";}
- catch(error){if(controller.signal.aborted)return;cinematicStatus="Cinematic effects are active; recommended packs could not load. Original assets remain available. "+String((error as Error).message??error);}
+ up(p=>{p.graphics=cinematicSettings(p.graphics);});cinematicStatus="Downloading the Cinematic sky and materials…";paintCinematicStatus();
+ try{const {ensureCinematicAssets}=await import("../graphics/cinematic-assets");controller.signal.throwIfAborted();const assets=await ensureCinematicAssets(controller.signal);if(controller.signal.aborted||P().graphics.preset!=="cinematic"){await assets.restore();return;}cinematicRestore=assets.restore;cinematicStatus="Cinematic is on. Its textures show from the next map.";}
+ catch(error){if(controller.signal.aborted)return;cinematicStatus="Cinematic is on, but its sky and materials couldn't download. "+String((error as Error).message??error);}
  finally{if(cinematicController===controller)cinematicController=null;paintCinematicStatus();}
 }
 
@@ -789,14 +792,15 @@ function graphicsSection(ctx: Ctx): SettingsContent {
     res.textContent = `${v.bufW}×${v.bufH}`;
   };
   paintRes();
-  const fitRow = segmented<AspectFit>("Fit", () => P().graphics.aspectFit, (v) => (up((p) => (p.graphics.aspectFit = v)), paintRes()), [
+  const G = () => P().graphics;
+  const fitRow = segmented<AspectFit>("Fit", () => G().aspectFit, (v) => (up((p) => (p.graphics.aspectFit = v)), paintRes()), [
     ["stretch", "Stretched"],
     ["bars", "Black bars"],
   ], { desc: "Stretched fills your screen with the fixed aspect ratio. Black bars keeps its shape.", keywords: "stretched black bars letterbox pillarbox fit aspect" });
-  fitRow.hidden = P().graphics.aspect === "native";
-  // Quality presets set Potato mode, antialiasing, anisotropic filtering and resolution together; changing any of them
-  // by hand shows no preset lit (custom).
-  const presetRow = segmented<GraphicsPreset>("Preset", () => graphicsPreset(P().graphics) as GraphicsPreset, (v) => (up((p) => applyGraphicsPreset(p.graphics, v)), ctx.refresh()), [
+  fitRow.hidden = G().aspect === "native";
+  // Quality presets set Potato mode, antialiasing, anisotropic filtering, resolution and water reflections together;
+  // changing any of them by hand shows no preset lit (custom).
+  const presetRow = segmented<GraphicsPreset>("Preset", () => graphicsPreset(G()) as GraphicsPreset, (v) => (up((p) => applyGraphicsPreset(p.graphics, v)), ctx.refresh()), [
     ["lowest", "Lowest"],
     ["low", "Low"],
     ["medium", "Medium"],
@@ -806,84 +810,83 @@ function graphicsSection(ctx: Ctx): SettingsContent {
     keywords: "preset quality low medium high lowest potato performance fps lag laptop school chromebook integrated",
   });
   const repaintPreset = () => (presetRow as HTMLElement & { repaint?: () => void }).repaint?.();
+  // A setting under a switch that's off (shadow strength under Sun shadows off) hides until it applies.
+  const profiled = () => G().lightingProfile !== "map" || G().ambienceShowcase || G().lightingSource === "pack";
+  const giOn = () => G().dynamicGI || G().tracedGI;
   return {
     columns: [
       [
         group(
           "Quality",
           presetRow,
-          select("Look", () => P().graphics.preset, (v) => void chooseGraphicsPreset(v), [
+          select("Look", () => G().preset, (v) => void chooseGraphicsPreset(v), [
             ["source", "Source"], ["classic", "Plain"], ["enhanced", "Enhanced"], ["cinematic", "Cinematic · experimental"],
-          ], { desc: "Source draws maps the way CS:S does: reflective water, and auto exposure and bloom on maps with HDR lighting. Plain is the fastest. Enhanced and Cinematic add effects CS:S doesn't have; Cinematic downloads recommended packs once (about 23 MB). Potato mode overrides this.", keywords: "look source css cs:s hdr bloom exposure water reflections plain classic enhanced cinematic graphics" }),
+          ], { hint: G().potato ? "Potato mode overrides this" : undefined, desc: "Source draws maps the way CS:S does: reflective water, and auto exposure and bloom on maps with HDR lighting. Plain is the fastest. Enhanced and Cinematic add effects CS:S doesn't have (their settings are under Advanced); Cinematic downloads its sky and materials once (about 23 MB).", keywords: "look source css cs:s hdr bloom exposure water reflections plain classic enhanced cinematic graphics" }),
           cinematicStatusNode(),
-          toggle("Potato mode", () => P().graphics.potato, (v) => (up((p) => (p.graphics.potato = v)), paintRes(), repaintPreset()), {
+          toggle("Potato mode", () => G().potato, (v) => (up((p) => (p.graphics.potato = v)), paintRes(), repaintPreset()), {
             hint: "Flat colours, fewer effects",
             desc: "For slow GPUs and laptops: flat colours like dev textures, plain water and sky, no 3D skybox, no HiDPI.",
             keywords: "potato low performance fps lag laptop slow graphics quality textures dev flat",
           }),
-          toggle("Antialiasing", () => P().graphics.antialias, (v) => (up((p) => (p.graphics.antialias = v)), repaintPreset()), {
+          toggle("Antialiasing", () => G().antialias, (v) => (up((p) => (p.graphics.antialias = v)), repaintPreset()), {
             hint: "Applies after a reload",
             desc: "Smooths jagged edges (MSAA). Turning it off is one of the biggest FPS gains on integrated graphics and slow PCs.",
             keywords: "antialiasing anti-aliasing aa msaa jagged edges smooth performance fps",
           }),
-          toggle("Water reflections", () => P().graphics.waterReflections, (v) => (up((p) => (p.graphics.waterReflections = v)), repaintPreset()), {
+          toggle("Water reflections", () => G().waterReflections, (v) => (up((p) => (p.graphics.waterReflections = v)), repaintPreset()), {
             desc: "Water reflects the map, like CS:S. Draws the scene again wherever water is in view, so it costs FPS near water. Source look only.",
             keywords: "water reflections reflect expensive performance fps",
           }),
-          select("Anisotropic filtering", () => P().graphics.anisotropy, (v) => (up((p) => (p.graphics.anisotropy = v)), repaintPreset()), [
+          select("Anisotropic filtering", () => G().anisotropy, (v) => (up((p) => (p.graphics.anisotropy = v)), repaintPreset()), [
             [1, "Off"],
             [2, "2×"],
             [4, "4×"],
             [8, "8×"],
             [16, "16×"],
-          ], { desc: "Costs a little GPU time, and a lot on PCs drawing without a graphics card.", keywords: "af texture filtering quality" }),
-          toggle("Flashlight", () => P().graphics.flashlight, (v) => up((p) => (p.graphics.flashlight = v)), { hint: P().binds.flashlight?.[0] ? `${keyLabel(P().binds.flashlight[0])} in game` : undefined, desc: "Light up dark platforms where you look. Works in Potato mode and starts off on each map. Local view only; its state is not recorded in replays.", keywords: "flashlight torch dark lighting visibility lamp" }),
-          segmented<MenuBackground>("Menu background", () => P().graphics.menuBackground, (v) => up((p) => (p.graphics.menuBackground = v)), [
-            ["live", "Live map"],
-            ["still", "Still"],
-            ["off", "Off"],
-          ], { desc: "A live map flythrough (or your PB ghost) behind the main menu. It drops to a still frame by itself if your GPU can't keep up.", keywords: "attract menu background main menu performance" }),
+          ], { desc: "Sharper textures on floors and walls seen at an angle. Costs a little GPU time, and a lot on PCs drawing without a graphics card.", keywords: "af texture filtering quality" }),
         ),
+        skyGroup(ui, ctx),
       ],
       [
         group(
           "Colour & visibility",
-          range("Brightness", () => P().graphics.brightness, (v) => up((p) => (p.graphics.brightness = v)), {
+          range("Brightness", () => G().brightness, (v) => up((p) => (p.graphics.brightness = v)), {
             min: 0.5, max: 2, step: 0.05, scale: 100, unit: "%", peek: true,
             desc: "Lighten or darken the game view. 100% keeps the original brightness. Does not affect HUD or menu colours.",
             keywords: "brightness light dark exposure visibility video",
           }),
-          range("Gamma", () => P().graphics.gamma, (v) => up((p) => (p.graphics.gamma = v)), {
+          range("Gamma", () => G().gamma, (v) => up((p) => (p.graphics.gamma = v)), {
             min: 0.5, max: 2.5, step: 0.05, peek: true,
             desc: "Raise gamma to reveal dark midtones without changing pure black and white. 1 is neutral.",
             keywords: "gamma dark shadows visibility video",
           }),
-          range("Vibrance", () => P().graphics.vibrance, (v) => up((p) => (p.graphics.vibrance = v)), {
+          range("Vibrance", () => G().vibrance, (v) => up((p) => (p.graphics.vibrance = v)), {
             min: 0, max: 2, step: 0.05, scale: 100, unit: "%", peek: true,
             desc: "Adjust colour intensity in the game view. 100% keeps map colours; 0% is greyscale.",
             keywords: "vibrance saturation colour color video",
           }),
-          toggle("Fullbright", () => P().graphics.fullbright, (v) => up((p) => (p.graphics.fullbright = v)), {
+          toggle("Fullbright", () => G().fullbright, (v) => up((p) => (p.graphics.fullbright = v)), {
             peek: true,
             desc: "Remove baked lighting from map surfaces and props to make dark platforms easier to see. Keeps textures, fog and transparency. Works in Potato mode. Local view only.",
             keywords: "fullbright full bright lighting dark map shadows visibility video",
           }),
+          toggle("Flashlight", () => G().flashlight, (v) => up((p) => (p.graphics.flashlight = v)), { hint: P().binds.flashlight?.[0] ? `${keyLabel(P().binds.flashlight[0])} in game` : undefined, desc: "Light up dark platforms where you look. Works in Potato mode and starts off on each map. Local view only; its state is not recorded in replays.", keywords: "flashlight torch dark lighting visibility lamp" }),
         ),
         group(
           "Display",
-          toggle("Fullscreen when playing", () => P().graphics.fullscreen, (v) => up((p) => (p.graphics.fullscreen = v)), {
+          toggle("Fullscreen when playing", () => G().fullscreen, (v) => up((p) => (p.graphics.fullscreen = v)), {
             hint: keyboardLockSupported ? "Also keeps Ctrl+W from closing the tab" : "Clicking into the game goes fullscreen",
             desc: keyboardLockSupported
               ? "Clicking into the game goes fullscreen and takes the keyboard: Ctrl+W (crouch + forward) can't close the tab, Esc pauses and resumes. Hold Esc to leave fullscreen."
               : "Clicking into the game goes fullscreen. This browser can't take the keyboard in fullscreen, so Esc also leaves fullscreen and Ctrl+W can still close the tab (you get a \"Leave site?\" prompt mid-run).",
             keywords: "fullscreen full screen keyboard lock ctrl+w close tab esc",
           }),
-          range("Resolution", () => P().graphics.resolutionScale, (v) => (up((p) => (p.graphics.resolutionScale = v)), paintRes(), repaintPreset()), {
+          range("Resolution", () => G().resolutionScale, (v) => (up((p) => (p.graphics.resolutionScale = v)), paintRes(), repaintPreset()), {
             min: 0.25, max: 2, step: 0.05, scale: 100, unit: "%", readout: res, peek: true,
             desc: "The game's render resolution. Lower it for more FPS on slow GPUs and laptops; above 100% sharpens edges and costs a lot. 100% = your screen (capped at 2× pixel density).",
             keywords: "fps performance render quality resolution scale scaling low res upscale downscale",
           }),
-          select<AspectRatio>("Aspect ratio", () => P().graphics.aspect, (v) => (up((p) => (p.graphics.aspect = v)), paintRes(), fitRow.hidden = v === "native"), [
+          select<AspectRatio>("Aspect ratio", () => G().aspect, (v) => (up((p) => (p.graphics.aspect = v)), paintRes(), fitRow.hidden = v === "native"), [
             ["native", "Screen"],
             ["4:3", "4:3"],
             ["5:4", "5:4"],
@@ -894,14 +897,19 @@ function graphicsSection(ctx: Ctx): SettingsContent {
             keywords: "aspect ratio stretched stretch 4:3 5:4 16:10 black bars letterbox res resolution cs krunker",
           }),
           fitRow,
-          toggle("Sharp pixels", () => P().graphics.pixelated, (v) => up((p) => (p.graphics.pixelated = v)), {
+          toggle("Sharp pixels", () => G().pixelated, (v) => up((p) => (p.graphics.pixelated = v)), {
             desc: "Scale a lowered resolution up with crisp square pixels instead of smoothing it.",
             keywords: "pixelated pixel nearest sharp crisp retro upscale filter blurry",
           }),
+          segmented<MenuBackground>("Menu background", () => G().menuBackground, (v) => up((p) => (p.graphics.menuBackground = v)), [
+            ["live", "Live map"],
+            ["still", "Still"],
+            ["off", "Off"],
+          ], { desc: "A live map flythrough (or your PB ghost) behind the main menu. It drops to a still frame by itself if your GPU can't keep up.", keywords: "attract menu background main menu performance" }),
         ),
         group(
           "Frame rate",
-          select("FPS limit", () => P().graphics.fpsLimit, (v) => up((p) => (p.graphics.fpsLimit = v)), [
+          select("FPS limit", () => G().fpsLimit, (v) => up((p) => (p.graphics.fpsLimit = v)), [
             [60, "60"],
             [100, "100"],
             [144, "144"],
@@ -915,53 +923,56 @@ function graphicsSection(ctx: Ctx): SettingsContent {
             desc: "Above your refresh rate needs Exceed monitor FPS.",
             keywords: "fps cap limit max frame rate frames framerate unlimited uncapped vsync 1000",
           }),
-          toggle("Exceed monitor FPS", () => P().graphics.uncapped, (v) => up((p) => (p.graphics.uncapped = v)), {
-            desc: "Needs Low-latency canvas, or a browser started with --disable-gpu-vsync --disable-frame-rate-limit.",
+          toggle("Exceed monitor FPS", () => G().uncapped, (v) => up((p) => (p.graphics.uncapped = v)), {
+            desc: "Needs Low-latency canvas (Advanced), or a browser started with --disable-gpu-vsync --disable-frame-rate-limit.",
             keywords: "uncapped unlimited fps vsync latency frame rate exceed refresh",
           }),
         ),
       ],
     ],
     advanced: [
-      group("Appearance tuning",
-          toggle("Bloom", () => P().graphics.bloom, (v) => up((p) => (p.graphics.bloom = v)), { desc: "Glow around bright surfaces. Source look: CS:S's bloom, on maps with HDR lighting only (as in CS:S). Enhanced and Cinematic: their own, softer glow.", keywords: "glow bloom hdr" }),
-          select("Lighting profile", () => P().graphics.ambienceShowcase && P().graphics.lightingProfile === "map" ? "ambience" : P().graphics.lightingProfile, (v) => up((p) => { p.graphics.lightingProfile=v; p.graphics.ambienceShowcase=v==="ambience"; if(v!=="map"){p.graphics.preset=composerPreset(p.graphics.preset);p.graphics.dynamicShadows=true;}if(v==="ambience")p.graphics.skyMode="procedural"; }), [["map","Original baked balance"],["auto","Automatic · authored sun or indoor"],["balanced","Balanced"],["daylight","Cinematic daylight"],["indoor","Indoor / night"],["ambience","Ambience Showcase · supported map"]], { desc: "Reusable controlled lighting over the original baked maps. Stronger profiles enable Enhanced and sun shadows when needed. Maps without a sun keep no directional light. Ambience's material art direction stays restricted to its supported build; Potato bypasses effects.", keywords: "lighting profile ambience cinematic sun indoor night" }),
-          select("Sky background", () => P().graphics.skyMode, (v) => up((p) => {p.graphics.skyMode=v;if(v!=="map")p.graphics.preset=composerPreset(p.graphics.preset);}), [["map","Original map sky"],["procedural","Procedural daylight"],["pack","Selected sky pack"]], { desc: "Sky packs are installed and selected below in Advanced. Source sky openings and 3D sky geometry are preserved. Selecting a sky does not create a new sun.", keywords: "skybox hdr panorama background" }),
-          range("Sky rotation", () => P().graphics.skyRotation, (v) => up((p) => (p.graphics.skyRotation=v)), {min:-180,max:180,step:1,unit:"°",desc:"Additional horizontal rotation for a selected sky pack. Its declared sun rotates by the same amount when pack lighting is selected."}),
-          range("Sky exposure", () => P().graphics.skyExposure, (v) => up((p) => (p.graphics.skyExposure=v)), {min:-4,max:4,step:.1,unit:" stops",desc:"Additional linear exposure for a selected sky pack. Pack-light intensity follows this exposure only when explicitly selected below."}),
-          select("Lighting source", () => P().graphics.lightingSource, (v) => up((p) => {p.graphics.lightingSource=v;if(v==="pack"){p.graphics.dynamicShadows=true;if(p.graphics.lightingProfile==="map"&&!p.graphics.ambienceShowcase)p.graphics.lightingProfile="balanced";}}), [["map","Authored map lights"],["pack","Selected sky's declared lighting"]], {desc:"Map lighting is the default. Only explicit sky-pack sun/ambient metadata can replace it; missing metadata falls back to the map. A pack without a sun does not invent one."}),
-          range("Direct light contribution", () => P().graphics.directContribution, (v) => up((p) => (p.graphics.directContribution=v)), {min:0,max:2,step:.05,scale:100,unit:"%",desc:"Multiplier for the selected profile's shadowed directional response; original baked balance adds none. This hybrid renderer preserves existing baked lighting."}),
-          range("Sky ambient contribution", () => P().graphics.ambientContribution, (v) => up((p) => (p.graphics.ambientContribution=v)), {min:0,max:2,step:.05,scale:100,unit:"%",desc:"Bounded profile fill from explicit authored/pack ambient colors. It is not a full environment-light rebake."}),
-          toggle("Volumetric clouds", () => P().graphics.clouds, (v) => up((p) => {p.graphics.clouds=v;if(v)p.graphics.preset=composerPreset(p.graphics.preset);}), {desc:"Optional moving cloud volumes, with shared sun attenuation and replay time. Clear skies are recommended; photographic skies already contain static clouds. Adds GPU work; no cloud fly-through simulation.",keywords:"clouds weather volumetric"}),
-          select("Cloud quality", () => P().graphics.cloudQuality, (v) => up((p) => (p.graphics.cloudQuality=v)), [["low","Low · 320×180"],["medium","Medium · 480×270"],["high","High · 640×360"]], {desc:"Caps the raymarched cloud view. Reflected views use the same bounded quality and recorded clock."}),
-          range("Cloud coverage", () => P().graphics.cloudCoverage, (v) => up((p) => (p.graphics.cloudCoverage=v)), {min:0,max:1,step:.01,scale:100,unit:"%"}),
-          range("Cloud density", () => P().graphics.cloudDensity, (v) => up((p) => (p.graphics.cloudDensity=v)), {min:0,max:2,step:.05,scale:100,unit:"%"}),
-          toggle("Map visual profiles", () => P().graphics.mapProfiles, (v) => up((p) => (p.graphics.mapProfiles = v)), { desc: "Optional conservative bloom and haze tuning for supported maps. Other maps retain the default profile.", keywords: "map visual profile" }),
-          toggle("Contact shading", () => P().graphics.contactShading, (v) => up((p) => (p.graphics.contactShading = v)), { desc: "Subtle depth-aware shading near corners and touching surfaces. Requires Enhanced or Cinematic; costs an additional scene pass.", keywords: "ambient occlusion ssao shadows depth" }),
-          toggle("Atmospheric haze", () => P().graphics.atmosphere, (v) => up((p) => (p.graphics.atmosphere = v)), { desc: "A restrained distance haze using scene depth. Requires Enhanced or Cinematic; costs an additional scene pass.", keywords: "fog atmosphere depth" }),
-          toggle("Material detail", () => P().graphics.materialResponse, (v) => up((p) => (p.graphics.materialResponse = v)), { desc: "Conservative roughness and normal detail with the map's authored sun, preserving its baked lighting. Enhanced/Cinematic only.", keywords: "normal roughness material detail pbr" }),
-          toggle("Volumetric atmosphere", () => P().graphics.volumetric, (v) => up((p) => (p.graphics.volumetric = v)), { desc: "Light scattering through the camera's view, occluded by the actual sun shadow map. Requires dynamic sun shadows and an authored sun; off by default.", keywords: "volumetric atmosphere fog light scattering" }),
-          toggle("Edge smoothing", () => P().graphics.spatialAA, (v) => up((p) => (p.graphics.spatialAA = v)), { desc: "Smooths geometry edges in Enhanced/Cinematic. Applied before first-person weapons and HUD are drawn.", keywords: "antialiasing fxaa edges" }),
-          select("Local light shadows", () => P().graphics.localLights ? P().graphics.localQuality : "off", (v) => up((p) => { p.graphics.localLights = v !== "off"; if (v !== "off") p.graphics.localQuality = v; }), [["off", "Off"], ["low", "Low · 128"], ["medium", "Medium · 256"], ["high", "High · 512"]], { desc: "Colored direct response and actual point/spot shadows from nearby authored map lights. Point lights capture six faces, so this can be expensive. Enhanced/Cinematic only.", keywords: "point spot local light shadows" }),
-          select("Local light budget", () => P().graphics.localBudget, (v) => up((p) => (p.graphics.localBudget = v)), [[1, "One nearby light"], [2, "Two nearby lights"]], { desc: "Bounds per-frame scene captures. Only lights whose ranges intersect the camera view are selected." }),
-          range("Local light contribution", () => P().graphics.localStrength, (v) => up((p) => (p.graphics.localStrength = v)), { min: 0, max: .5, step: .01, scale: 100, unit: "%", desc: "Additional shadowed direct illumination over the map's baked lighting. Keep conservative to avoid excess brightness." }),
-          select("Indirect lighting", () => P().graphics.tracedGI ? "traced" : P().graphics.dynamicGI ? "screen" : "off", (v) => up((p) => { p.graphics.tracedGI = v === "traced"; p.graphics.dynamicGI = v === "screen"; }), [["off", "Off"], ["screen", "Screen-space bounce"], ["traced", "Traced lighting changes · experimental"]], { desc: "Traced mode follows one world-space bounce from lighting changes relative to the authored map. It preserves baked lighting, loads only when selected, and requires Enhanced/Cinematic. Static geometry and bounded materials only; no hardware ray tracing or 60 fps guarantee.", keywords: "ray tracing world gi indirect bounce experimental" }),
-          hybridStatusNode(),
-          select("Indirect quality", () => P().graphics.giQuality, (v) => up((p) => (p.graphics.giQuality = v)), [["low", "Low"], ["medium", "Medium"]], { desc: "Applies to screen-space bounce. Experimental traced mode uses a fixed 320×180 cap and one ray per pixel." }),
-          range("Indirect contribution", () => P().graphics.giStrength, (v) => up((p) => (p.graphics.giStrength = v)), { min: 0, max: .5, step: .01, scale: 100, unit: "%", desc: "Adds a conservative computed bounce to existing baked illumination." }),
-          range("Indirect range", () => P().graphics.giRange, (v) => up((p) => (p.graphics.giRange = v)), { min: 32, max: 512, step: 32, unit: " units", desc: "Maximum bounce travel distance. Traced mode can hit surfaces outside the view." }),
-          select("Dynamic sun shadows", () => P().graphics.dynamicShadows ? P().graphics.shadowQuality : "off", (v) => up((p) => { p.graphics.dynamicShadows = v !== "off"; if (v !== "off") p.graphics.shadowQuality = v; }), [["off", "Off"], ["low", "Low · 512"], ["medium", "Medium · 1024"], ["high", "High · 2048"]], { desc: "Actual sun shadows from moving geometry, foliage alpha masks and the full posed first-person avatar, with tinted transmission through up to two transparent surfaces. Supplements baked lighting gently; Enhanced/Cinematic and an authored sun required.", keywords: "dynamic sun shadow map moving players quality" }),
-          range("Shadow contribution", () => P().graphics.shadowStrength, (v) => up((p) => (p.graphics.shadowStrength = v)), { min: 0, max: .4, step: .01, scale: 100, unit: "%", desc: "Restrained extra occlusion over baked Source lighting. Dark rooms retain their detail." }),
-          range("Shadow range", () => P().graphics.shadowDistance, (v) => up((p) => (p.graphics.shadowDistance = v)), { min: 256, max: 4096, step: 128, unit: " units", desc: "World-space half-width around the camera. Smaller regions give sharper shadows." }),
-          toggle("Sun shafts", () => P().graphics.sunShafts, (v) => up((p) => (p.graphics.sunShafts = v)), { desc: "Depth-occluded light rays only on maps with an authored sun. Requires Enhanced or Cinematic; off by default.", keywords: "sun shafts god rays light" }),
+      group(
+        "Effects",
+        toggle("Bloom", () => G().bloom, (v) => up((p) => (p.graphics.bloom = v)), { desc: "Glow around bright surfaces. Source look: CS:S's bloom, on maps with HDR lighting only (as in CS:S). Enhanced and Cinematic: their own, softer glow.", keywords: "glow bloom hdr" }),
+        toggle("Map visual profiles", () => G().mapProfiles, (v) => up((p) => (p.graphics.mapProfiles = v)), { desc: "Gentle bloom and haze tuning made for a few maps. Other maps look as they do without it. Enhanced and Cinematic only.", keywords: "map visual profile" }),
+        toggle("Material detail", () => G().materialResponse, (v) => up((p) => (p.graphics.materialResponse = v)), { desc: "Roughness and normal detail lit by the map's own sun, on top of its baked lighting. Enhanced and Cinematic only.", keywords: "normal roughness material detail pbr" }),
+        toggle("Edge smoothing", () => G().spatialAA, (v) => up((p) => (p.graphics.spatialAA = v)), { desc: "Smooths geometry edges in Enhanced and Cinematic, before the viewmodel and HUD are drawn.", keywords: "antialiasing fxaa edges" }),
+        toggle("Contact shading", () => G().contactShading, (v) => up((p) => (p.graphics.contactShading = v)), { desc: "Soft shading in corners and where surfaces touch. Enhanced and Cinematic only; costs an extra pass.", keywords: "ambient occlusion ssao shadows depth" }),
+        toggle("Atmospheric haze", () => G().atmosphere, (v) => up((p) => (p.graphics.atmosphere = v)), { desc: "A light haze over distance. Enhanced and Cinematic only; costs an extra pass.", keywords: "fog atmosphere depth" }),
+        toggle("Sun shafts", () => G().sunShafts, (v) => up((p) => (p.graphics.sunShafts = v)), { desc: "Light rays from the sun, on maps that have one. Enhanced and Cinematic only.", keywords: "sun shafts god rays light" }),
+        toggle("Volumetric light", () => G().volumetric, (v) => up((p) => (p.graphics.volumetric = v)), { desc: "Light scattering in the air, blocked by the sun's shadows. Needs Sun shadows and a map with a sun. Enhanced and Cinematic only.", keywords: "volumetric atmosphere fog light scattering" }),
+      ),
+      group(
+        "Lighting",
+        select("Lighting profile", () => G().ambienceShowcase && G().lightingProfile === "map" ? "ambience" : G().lightingProfile, (v) => up((p) => { p.graphics.lightingProfile = v; p.graphics.ambienceShowcase = v === "ambience"; if (v !== "map") { p.graphics.preset = composerPreset(p.graphics.preset); p.graphics.dynamicShadows = true; } if (v === "ambience") p.graphics.skyMode = "procedural"; }), [["map", "Map's own"], ["auto", "Automatic"], ["balanced", "Balanced"], ["daylight", "Daylight"], ["indoor", "Indoor / night"], ["ambience", "Ambience showcase"]], { desc: "Extra light over the map's baked lighting. Anything but the map's own switches Source or Plain to Enhanced and turns on sun shadows. Automatic picks daylight on maps with a sun, indoor on the rest. Ambience showcase is made for one map.", keywords: "lighting profile ambience cinematic sun indoor night daylight" }),
+        range("Sun strength", () => G().directContribution, (v) => up((p) => (p.graphics.directContribution = v)), { min: 0, max: 2, step: 0.05, scale: 100, unit: "%", when: profiled, desc: "How strong the profile's sun light is, over the baked lighting.", keywords: "direct light contribution sun strength" }),
+        range("Ambient strength", () => G().ambientContribution, (v) => up((p) => (p.graphics.ambientContribution = v)), { min: 0, max: 2, step: 0.05, scale: 100, unit: "%", when: profiled, desc: "How much fill light the profile (or the sky pack) adds.", keywords: "sky ambient contribution fill" }),
+        select("Sun shadows", () => G().dynamicShadows ? G().shadowQuality : "off", (v) => up((p) => { p.graphics.dynamicShadows = v !== "off"; if (v !== "off") p.graphics.shadowQuality = v; }), [["off", "Off"], ["low", "Low · 512"], ["medium", "Medium · 1024"], ["high", "High · 2048"]], { desc: "Real sun shadows from moving things and players, over the baked lighting. Maps with a sun, Enhanced and Cinematic only.", keywords: "dynamic sun shadow map moving players quality" }),
+        range("Shadow strength", () => G().shadowStrength, (v) => up((p) => (p.graphics.shadowStrength = v)), { min: 0, max: .4, step: .01, scale: 100, unit: "%", when: () => G().dynamicShadows, desc: "How dark the extra shadows are. Dark rooms keep their detail.", keywords: "shadow contribution strength" }),
+        range("Shadow range", () => G().shadowDistance, (v) => up((p) => (p.graphics.shadowDistance = v)), { min: 256, max: 4096, step: 128, unit: " units", when: () => G().dynamicShadows, desc: "How far around you shadows reach. Smaller is sharper.", keywords: "shadow range distance" }),
+        select("Nearby light shadows", () => G().localLights ? G().localQuality : "off", (v) => up((p) => { p.graphics.localLights = v !== "off"; if (v !== "off") p.graphics.localQuality = v; }), [["off", "Off"], ["low", "Low · 128"], ["medium", "Medium · 256"], ["high", "High · 512"]], { desc: "Coloured light and shadows from the map's lamps near you. Can be expensive. Enhanced and Cinematic only.", keywords: "point spot local light shadows lamps" }),
+        select("Nearby lights", () => G().localBudget, (v) => up((p) => (p.graphics.localBudget = v)), [[1, "One"], [2, "Two"]], { when: () => G().localLights, desc: "How many lamps at once. Only lamps in view count.", keywords: "local light budget" }),
+        range("Nearby light strength", () => G().localStrength, (v) => up((p) => (p.graphics.localStrength = v)), { min: 0, max: .5, step: .01, scale: 100, unit: "%", when: () => G().localLights, desc: "How much the lamps add over the baked lighting.", keywords: "local light contribution strength" }),
+        select("Bounce light", () => G().tracedGI ? "traced" : G().dynamicGI ? "screen" : "off", (v) => up((p) => { p.graphics.tracedGI = v === "traced"; p.graphics.dynamicGI = v === "screen"; }), [["off", "Off"], ["screen", "Screen-space"], ["traced", "Traced · experimental"]], { desc: "Light bouncing off surfaces, over the baked lighting. Traced follows one bounce through the whole map and loads only when picked; it can be slow. Enhanced and Cinematic only.", keywords: "ray tracing world gi indirect bounce global illumination experimental" }),
+        ui.dependsOn(hybridStatusNode(), () => G().tracedGI),
+        select("Bounce quality", () => G().giQuality, (v) => up((p) => (p.graphics.giQuality = v)), [["low", "Low"], ["medium", "Medium"]], { when: () => G().dynamicGI, desc: "Screen-space bounce quality." , keywords: "indirect gi quality" }),
+        range("Bounce strength", () => G().giStrength, (v) => up((p) => (p.graphics.giStrength = v)), { min: 0, max: .5, step: .01, scale: 100, unit: "%", when: giOn, desc: "How much bounced light is added.", keywords: "indirect contribution gi strength" }),
+        range("Bounce range", () => G().giRange, (v) => up((p) => (p.graphics.giRange = v)), { min: 32, max: 512, step: 32, unit: " units", when: giOn, desc: "How far light travels in a bounce.", keywords: "indirect range gi distance" }),
+      ),
+      group(
+        "Clouds",
+        toggle("Volumetric clouds", () => G().clouds, (v) => up((p) => { p.graphics.clouds = v; if (v) p.graphics.preset = composerPreset(p.graphics.preset); }), { desc: "Moving 3D clouds (switches Source or Plain to Enhanced). Best with a clear sky; photographed skies have their own clouds. Costs GPU time.", keywords: "clouds weather volumetric" }),
+        select("Cloud quality", () => G().cloudQuality, (v) => up((p) => (p.graphics.cloudQuality = v)), [["low", "Low · 320×180"], ["medium", "Medium · 480×270"], ["high", "High · 640×360"]], { when: () => G().clouds, desc: "The resolution clouds are drawn at.", keywords: "cloud quality" }),
+        range("Cloud coverage", () => G().cloudCoverage, (v) => up((p) => (p.graphics.cloudCoverage = v)), { min: 0, max: 1, step: .01, scale: 100, unit: "%", when: () => G().clouds, keywords: "cloud coverage amount" }),
+        range("Cloud density", () => G().cloudDensity, (v) => up((p) => (p.graphics.cloudDensity = v)), { min: 0, max: 2, step: .05, scale: 100, unit: "%", when: () => G().clouds, keywords: "cloud density thickness" }),
       ),
       group(
         "Frame rate",
-        toggle("Low-latency canvas", () => P().graphics.lowLatency, (v) => up((p) => (p.graphics.lowLatency = v)), {
+        toggle("Low-latency canvas", () => G().lowLatency, (v) => up((p) => (p.graphics.lowLatency = v)), {
           desc: "Applies after a reload.",
           keywords: "low latency desynchronized canvas vsync fps tearing uncapped",
         }),
-        select("FPS limit in menus", () => P().graphics.menuFps, (v) => up((p) => (p.graphics.menuFps = v)), [
+        select("FPS limit in menus", () => G().menuFps, (v) => up((p) => (p.graphics.menuFps = v)), [
           [0, "Same as playing"],
           [30, "30"],
           [60, "60"],
@@ -1046,7 +1057,8 @@ const advOpen = (): Set<string> => {
  */
 function advancedBlock(id: string, groups: HTMLElement[]): HTMLElement | null {
   if (!groups.length) return null;
-  const n = groups.reduce((k, g) => k + g.querySelectorAll(".set-row").length, 0);
+  // Rows hidden until they apply (a `when` row) aren't counted.
+  const n = groups.reduce((k, g) => k + g.querySelectorAll(".set-row:not([hidden])").length, 0);
   const d = h(
     "details.set-adv",
     { "data-sec": id },
@@ -1121,6 +1133,27 @@ export function settingsPanel(o: SettingsPanelOpts = {}): HTMLElement {
     scroller,
     help,
   );
+
+  // ---- a sky file (.hdr, PNG/JPEG/WebP, .bhsky.json) dropped on the page while Graphics is open: imported like Import file there
+  let dropOff = 0;
+  const graphicsOpen = (e: DragEvent) => current === "graphics" || !!(e.target as Element | null)?.closest?.('[data-sec="graphics"]');
+  const carriesFiles = (e: DragEvent) => !!e.dataTransfer?.types.includes("Files");
+  root.addEventListener("dragover", (e) => {
+    if (!carriesFiles(e) || !graphicsOpen(e)) return;
+    e.preventDefault();
+    e.dataTransfer!.dropEffect = "copy";
+    root.classList.add("sky-drop");
+    // dragover repeats while a file is held over the page; it stops when the file leaves or is dropped.
+    clearTimeout(dropOff);
+    dropOff = window.setTimeout(() => root.classList.remove("sky-drop"), 200);
+  });
+  root.addEventListener("drop", (e) => {
+    if (!carriesFiles(e) || !graphicsOpen(e)) return;
+    e.preventDefault();
+    root.classList.remove("sky-drop");
+    const files = [...(e.dataTransfer?.files ?? [])];
+    importSkyFile(files.find((f) => skyFileKind(f.name)) ?? files[0]!);
+  });
 
   // ---- sections
   function buildSections(): void {
