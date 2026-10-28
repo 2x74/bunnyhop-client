@@ -689,6 +689,11 @@ fn no_evidence_recording_exports_frozen_bhr_and_all_versions_match_shared_encode
                 1
             );
             assert_eq!(frame.tick, finished_tick);
+            let mut size = 0;
+            let ghost_info = crate::replay::bh_ghost_info(c, ghost, &mut size);
+            let info: serde_json::Value = serde_json::from_slice(
+                std::slice::from_raw_parts(ghost_info.cast(), size)).unwrap();
+            assert_eq!(info["timeMs"], (*c).map.as_ref().unwrap().timer.as_ref().unwrap().time_ms());
             let mut events = BhReplayEvents::default();
             assert_eq!(bh_ghost_events(c, ghost, 0, 40, &mut events), 1);
             assert_eq!(

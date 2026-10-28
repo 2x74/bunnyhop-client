@@ -161,6 +161,22 @@ unsafe fn playback_and_ghost(
             "{}",
             CStr::from_ptr(bh_last_error(c)).to_string_lossy()
         );
+        unsafe extern "C" fn cancel_after(data: *mut c_void) -> c_int {
+            let remaining = unsafe { &mut *data.cast::<usize>() };
+            *remaining = remaining.saturating_sub(1);
+            i32::from(*remaining == 0)
+        }
+        let mut remaining = 6 + commands.len().min(4);
+        assert_eq!(replay::bh_ghost_load_cancellable(c, path.as_ptr(), Some(cancel_after),
+            (&mut remaining as *mut usize).cast()), 0);
+        assert_eq!(remaining, 0);
+        assert_eq!(initial, (*c).map.as_ref().unwrap().game.snapshot_bytes());
+        let mut remaining = 3usize;
+        let fresh = bh_create();
+        assert_eq!(bh_load_map_cancellable(fresh, map.as_ptr(), ptr::null(), Some(cancel_after),
+            (&mut remaining as *mut usize).cast()), 0);
+        assert_eq!(remaining, 0);
+        bh_destroy(fresh);
         assert_eq!(initial, (*c).map.as_ref().unwrap().game.snapshot_bytes());
         assert_eq!(replay::bh_replay_load(c, path.as_ptr()), 1);
         let decoded = replay::Decoded::load(Path::new(path.to_str().unwrap())).unwrap();
@@ -197,6 +213,11 @@ unsafe fn playback_and_ghost(
                 replay::bh_ghost_frame(c, ghost, i as u32 + 1, &mut frame),
                 1
             );
+            let mut ghost_command = BhCmd::default();
+            assert_eq!(replay::bh_ghost_command(c, ghost, i as u32 + 1, &mut ghost_command), 1);
+            assert_eq!(ghost_command.buttons, cmd.buttons);
+            assert_eq!(ghost_command.forward.to_bits(), cmd.forward.to_bits());
+            assert_eq!(ghost_command.side.to_bits(), cmd.side.to_bits());
             assert_eq!(frame.yaw.to_bits(), cmd.yaw.to_bits());
             assert_eq!(frame.pitch.to_bits(), cmd.pitch.to_bits());
             assert_eq!(

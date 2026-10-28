@@ -296,6 +296,12 @@ typedef struct BhGhostFrame {
 /* Builds immutable ghost frames, restoring the live game's exact state/timer/filter afterwards.
  * No live simulation or recorder is advanced by ghost playback. Handles >=1; at most four ghosts per map.
  */
+// Cancellation callbacks are checked between map preparation stages and each ghost tick.
+// The caller owns callback data until the synchronous call returns.
+typedef int (*BhCancel)(void *data);
+int bh_load_map_cancellable(BhContext *ctx, const char *path, const char *content_root, BhCancel cancel, void *data);
+uint32_t bh_ghost_load_cancellable(BhContext *ctx, const char *path, BhCancel cancel, void *data);
+int bh_ghost_command(BhContext *ctx, uint32_t handle, uint32_t tick, BhCmd *out);
 uint32_t bh_ghost_load(BhContext *ctx, const char *path);
 const char *bh_ghost_info(BhContext *ctx, uint32_t handle, size_t *byte_count);
 int bh_ghost_frame(BhContext *ctx, uint32_t handle, uint32_t tick, BhGhostFrame *out);

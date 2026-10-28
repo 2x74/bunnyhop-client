@@ -6,7 +6,7 @@
 
 use bunnyhop_core::{Cmd, Game, Settings, content, game, materials, mesh, physics, vfs};
 use std::collections::{HashMap, HashSet};
-use std::ffi::{CStr, CString, c_char, c_int};
+use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Component, Path, PathBuf};
 use std::ptr;
@@ -291,7 +291,13 @@ struct Map {
     checkpoints: Vec<Option<practice::Checkpoint>>,
 }
 impl Map {
-    fn load(path: &Path, root: Option<&Path>, settings: BhSettings) -> Result<Self, String> {
+    fn load_cancellable(
+        path: &Path,
+        root: Option<&Path>,
+        settings: BhSettings,
+        check: &dyn Fn() -> Result<(), String>,
+    ) -> Result<Self, String> {
+        check()?;
         let root = root
             .map(|p| {
                 p.canonicalize()
@@ -302,12 +308,14 @@ impl Map {
             return Err("content root is not a directory".into());
         }
         let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        check()?;
         let map_sha256 = recording::sha(&bytes);
         let map_name = path
             .file_stem()
             .and_then(|s| s.to_str())
             .ok_or("map filename is not UTF-8")?
             .to_string();
+        check()?;
         let bsp = bunnyhop_core::parse_bsp(&bytes)?;
         drop(bytes);
         let mut fs = physics::map_vfs(&bsp);
@@ -315,12 +323,14 @@ impl Map {
         let mut attempted = HashSet::new();
         if let Some(root) = &root {
             // Only files needed by this BSP's collision models are read, with pakfile precedence.
+            check()?;
             for p in physics::prop_sources(&bsp, &physics::entity_list(&bsp), &mut Vec::new()) {
                 let mut paths = vec![p.collision_file()];
                 if p.pushaway.is_some() {
                     paths.push(physics::collision_file(&p.name, 6));
                 }
                 for name in paths {
+                    check()?;
                     if fs.read(&name).is_none() && attempted.insert(name.clone()) {
                         if let Some(bytes) = read_loose(root, &name) {
                             loose.insert(name, bytes.into());
@@ -333,6 +343,7 @@ impl Map {
                 vfs::Listing::everything_under("disk", ""),
             )));
         }
+        check()?;
         let mesh = mesh::build(&bsp);
         let mut names = mesh
             .materials
@@ -342,11 +353,13 @@ impl Map {
         let all_names = mesh::texture_names(&bsp);
         // VMT includes/patches and texture dependencies are discovered through the existing resolver.
         loop {
+            check()?;
             let _ = materials::resolve(&fs, &all_names);
             let pending = fs.take_pending();
             let Some(root) = &root else { break };
             let mut changed = false;
             for req in pending {
+                check()?;
                 if attempted.insert(req.path.clone()) {
                     if let Some(bytes) = read_loose(root, &req.path) {
                         loose.insert(req.path, bytes.into());
@@ -365,14 +378,17 @@ impl Map {
         } else {
             content::cached_physics_content(path)
         };
+        check()?;
         let mut game = Game::load_with_content(&bsp, physics_content)?;
         game.set_settings(settings.checked()?);
         game.reset();
+        check()?;
         let mut sp = bunnyhop_core::props::static_props(&bsp);
         let n_static = sp.props.len();
         bunnyhop_core::props::add_props(&mut sp, game.render_props());
         bunnyhop_core::skybox::mark_props(&bsp, &mut sp, n_static);
         let props = loop {
+            check()?;
             let p = bunnyhop_core::props::build(&sp, &fs);
             if !assets::fetch_pending(&mut fs, root.as_deref(), &mut loose, &mut attempted) {
                 break p;
@@ -402,6 +418,7 @@ impl Map {
                 .collect()
         };
         let materials = loop {
+            check()?;
             let m = materials::resolve(&fs, &names);
             if !assets::fetch_pending(&mut fs, root.as_deref(), &mut loose, &mut attempted) {
                 break m;
@@ -808,8 +825,28 @@ pub unsafe extern "C" fn bh_load_map(
     path: *const c_char,
     content_root: *const c_char,
 ) -> c_int {
+    unsafe { bh_load_map_cancellable(ctx, path, content_root, None, ptr::null_mut()) }
+}
+
+pub type BhCancel = Option<unsafe extern "C" fn(*mut c_void) -> c_int>;
+fn check_cancel(callback: BhCancel, data: *mut c_void) -> Result<(), String> {
+    if callback.is_some_and(|callback| unsafe { callback(data) != 0 }) {
+        Err("replay preparation cancelled".into())
+    } else {
+        Ok(())
+    }
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_load_map_cancellable(
+    ctx: *mut BhContext,
+    path: *const c_char,
+    content_root: *const c_char,
+    cancel: BhCancel,
+    data: *mut c_void,
+) -> c_int {
     unsafe {
         call(ctx, |c| {
+            check_cancel(cancel, data)?;
             if let Some(mut old) = c.map.take() {
                 let _ = old.finish_record(false, "map_reload");
             }
@@ -819,7 +856,8 @@ pub unsafe extern "C" fn bh_load_map(
             } else {
                 Some(Path::new(string(content_root)?))
             };
-            let mut map = Map::load(path, root, c.settings)?;
+            let mut map = Map::load_cancellable(path, root, c.settings, &|| check_cancel(cancel, data))?;
+            check_cancel(cancel, data)?;
             map.filter = styles::Filter::new(&c.style_id, c.settings.physics);
             c.map = Some(map);
             Ok(())

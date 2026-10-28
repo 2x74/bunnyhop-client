@@ -60,6 +60,7 @@ pub struct Ghost {
     pub frames: Vec<BhGhostFrame>,
     pub cosmetic: Vec<CosmeticEvent>,
     pub inspect: Vec<CosmeticEvent>,
+    pub commands: Vec<BhCmd>,
 }
 struct Reader<'a> {
     bytes: &'a [u8],
@@ -661,9 +662,19 @@ pub unsafe extern "C" fn bh_replay_seek(
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_ghost_load(ctx: *mut BhContext, path: *const c_char) -> u32 {
+    unsafe { bh_ghost_load_cancellable(ctx, path, None, ptr::null_mut()) }
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_ghost_load_cancellable(
+    ctx: *mut BhContext,
+    path: *const c_char,
+    cancel: BhCancel,
+    data: *mut c_void,
+) -> u32 {
     let mut handle = 0;
     unsafe {
         call(ctx, |c| {
+            check_cancel(cancel, data)?;
             let d = Decoded::load(Path::new(string(path)?))?;
             if d.commands.len() > 1_000_000 {
                 return Err("ghost exceeds frame limit".into());
@@ -675,10 +686,12 @@ pub unsafe extern "C" fn bh_ghost_load(ctx: *mut BhContext, path: *const c_char)
             if m.ghosts.iter().filter(|g| g.is_some()).count() >= 4 {
                 return Err("at most four ghosts per map".into());
             }
+            check_cancel(cancel, data)?;
             let bytes = std::fs::read(&m.map_path).map_err(|e| e.to_string())?;
             if recording::sha(&bytes) != m.map_sha256 {
                 return Err("BSP changed since map load".into());
             }
+            check_cancel(cancel, data)?;
             let bsp = bunnyhop_core::parse_bsp(&bytes)?;
             drop(bytes);
             let source = if m.root.is_some() {
@@ -686,14 +699,17 @@ pub unsafe extern "C" fn bh_ghost_load(ctx: *mut BhContext, path: *const c_char)
             } else {
                 bunnyhop_core::content::cached_physics_content(&m.map_path)
             };
+            check_cancel(cancel, data)?;
             let ghost_game = Game::load_with_content(&bsp, source)?;
             drop(bsp);
+            check_cancel(cancel, data)?;
             let saved = std::mem::replace(&mut m.game, ghost_game);
             let timer = m.timer.clone();
             let filter = m.filter.clone();
             let cmd = m.last_command;
             let jump_observation = m.jump_observation;
             let result = (|| {
+                check_cancel(cancel, data)?;
                 m.prepare_replay(&d)?;
                 let first = d.commands.first().copied().unwrap_or(BhCmd {
                     yaw: m.game.teleport_angles[1],
@@ -703,15 +719,25 @@ pub unsafe extern "C" fn bh_ghost_load(ctx: *mut BhContext, path: *const c_char)
                 let mut frames = Vec::with_capacity(d.commands.len() + 1);
                 frames.push(m.ghost_frame(first));
                 for &cmd in &d.commands {
+                    check_cancel(cancel, data)?;
                     m.advance_canonical(cmd, None, false)?;
                     m.check_replay(&d)?;
                     frames.push(m.ghost_frame(cmd));
                 }
+                let mut info: serde_json::Value = serde_json::from_slice(d.info.as_bytes())
+                    .map_err(|error| error.to_string())?;
+                if let Some(timer) = &m.timer {
+                    if timer.state.status == 2 {
+                        info["timeMs"] = json!(timer.time_ms());
+                        info["timingPolicy"] = json!(run_timing::POLICY);
+                    }
+                }
                 Ok::<_, String>(Ghost {
-                    info: d.info,
+                    info: CString::new(info.to_string()).map_err(|error| error.to_string())?,
                     frames,
                     cosmetic: d.cosmetic,
                     inspect: d.inspect,
+                    commands: d.commands,
                 })
             })();
             m.game = saved;
@@ -782,6 +808,29 @@ pub unsafe extern "C" fn bh_ghost_frame(
                 .get(tick as usize)
                 .ok_or("ghost tick outside frames")?;
             output(out, f)
+        })
+    }
+}
+// Commands use the same tick indexing as ghost frames (frame zero has no held input).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_ghost_command(
+    ctx: *mut BhContext,
+    handle: u32,
+    tick: u32,
+    out: *mut BhCmd,
+) -> c_int {
+    unsafe {
+        call(ctx, |c| {
+            let ghost = c.map()?.ghosts
+                .get(handle.wrapping_sub(1) as usize)
+                .and_then(Option::as_ref)
+                .ok_or("invalid ghost handle")?;
+            let cmd = if tick == 0 {
+                BhCmd::default()
+            } else {
+                *ghost.commands.get(tick as usize - 1).ok_or("ghost tick outside commands")?
+            };
+            output(out, cmd)
         })
     }
 }
