@@ -1,0 +1,21 @@
+/* Hold-to-restart ring (hud/restart-ring.ts): centred on the crosshair, same text treatment as the HUD (hud.css). */
+#restart-ring {
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  transition: opacity 0.15s;
+}
+#restart-ring.hide { opacity: 0; }
+body.menu-open #restart-ring { visibility: hidden; }
+#restart-ring .rr-dial {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: calc(2.6rem * var(--hs));
+  height: calc(2.6rem * var(--hs));
+  transform: translate(-50%, -50%) rotate(-90deg);
+}
+#restart-ring svg { display: block; width: 100%; height: 100%; overflow: visible; }
+#restart-ring .rr-track { fill: none; stroke: rgba(0, 0, 0, 0.45); stroke-width: 3.5; }
+#restart-ring .rr-fill { fill: none; stroke: #fff; stroke-width: 2.5; stroke-linecap: round; filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.8)); }

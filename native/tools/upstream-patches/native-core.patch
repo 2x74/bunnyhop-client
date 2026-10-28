@@ -1,0 +1,2502 @@
+diff --git a/crates/core/Cargo.toml b/crates/core/Cargo.toml
+--- a/crates/core/Cargo.toml
++++ b/crates/core/Cargo.toml
+@@ -4,10 +4,15 @@
+ edition.workspace = true
+ license.workspace = true
+ 
++[features]
++native-web = ["native-wasm-math", "dep:bunnyhop-native-web-macros"]
++native-wasm-math = ["playsrc-collision/native-wasm-math", "playsrc-movement/native-wasm-math"]
++
+ [lib]
+ crate-type = ["cdylib", "rlib"]
+ 
+ [dependencies]
++bunnyhop-native-web-macros = { path = "../native-web/macros", optional = true }
+ playsrc-bsp = { path = "../vendor/bsp" }
+ playsrc-collision = { path = "../vendor/collision" }
+ playsrc-movement = { path = "../vendor/movement" }
+diff --git a/crates/core/src/game.rs b/crates/core/src/game.rs
+--- a/crates/core/src/game.rs
++++ b/crates/core/src/game.rs
+@@ -1178,8 +1178,8 @@
+ }
+ 
+ fn angle_vectors_forward(angles: [f32; 3]) -> [f32; 3] {
+-    let (sp, cp) = angles[0].to_radians().sin_cos();
+-    let (sy, cy) = angles[1].to_radians().sin_cos();
++    let (sp, cp) = playsrc_collision::math::sin_cos(angles[0].to_radians());
++    let (sy, cy) = playsrc_collision::math::sin_cos(angles[1].to_radians());
+     [cp * cy, cp * sy, -sp]
+ }
+ 
+@@ -2068,8 +2068,8 @@
+         let lo = [p[0] + hull.mins[0], p[1] + hull.mins[1], p[2] + hull.mins[2]];
+         let hi = [p[0] + hull.maxs[0], p[1] + hull.maxs[1], p[2] + hull.maxs[2]];
+         let center = [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5];
+-        let (sp, cp) = pitch.to_radians().sin_cos();
+-        let (sy, cy) = yaw.to_radians().sin_cos();
++        let (sp, cp) = playsrc_collision::math::sin_cos(pitch.to_radians());
++        let (sy, cy) = playsrc_collision::math::sin_cos(yaw.to_radians());
+         let dir = [cp * cy, cp * sy, -sp];
+         let right = [sy, -cy, 0.0];
+         let (mut forward, mut side) = (forward, side);
+diff --git a/crates/core/src/game/kin.rs b/crates/core/src/game/kin.rs
+--- a/crates/core/src/game/kin.rs
++++ b/crates/core/src/game/kin.rs
+@@ -99,12 +99,12 @@
+     if f[1] == 0.0 && f[0] == 0.0 {
+         return [if f[2] > 0.0 { 270.0 } else { 90.0 }, 0.0, 0.0];
+     }
+-    let mut yaw = (f[1] as f64).atan2(f[0] as f64).to_degrees() as f32;
++    let mut yaw = playsrc_collision::math::atan264(f[1] as f64, f[0] as f64).to_degrees() as f32;
+     if yaw < 0.0 {
+         yaw += 360.0;
+     }
+     let tmp = (f[0] * f[0] + f[1] * f[1]).sqrt();
+-    let mut pitch = (-(f[2] as f64)).atan2(tmp as f64).to_degrees() as f32;
++    let mut pitch = playsrc_collision::math::atan264(-(f[2] as f64), tmp as f64).to_degrees() as f32;
+     if pitch < 0.0 {
+         pitch += 360.0;
+     }
+@@ -2538,7 +2538,7 @@
+         let c = face.iter().fold([0.0f32; 3], |a, p| v_add(a, *p));
+         let c = v_scale(c, 1.0 / face.len() as f32);
+         let mut poly = face.clone();
+-        poly.sort_by(|p, q| (p[1] - c[1]).atan2(p[0] - c[0]).total_cmp(&(q[1] - c[1]).atan2(q[0] - c[0])));
++        poly.sort_by(|p, q| playsrc_collision::math::atan2(p[1] - c[1], p[0] - c[0]).total_cmp(&playsrc_collision::math::atan2(q[1] - c[1], q[0] - c[0])));
+         let (lo, hi) = poly.iter().fold(([f32::MAX; 2], [f32::MIN; 2]), |(lo, hi), p| ([lo[0].min(p[0]), lo[1].min(p[1])], [hi[0].max(p[0]), hi[1].max(p[1])]));
+         let inside = |x: f32, y: f32| {
+             (0..poly.len()).all(|k| {
+@@ -2616,9 +2616,9 @@
+ 
+ /// mathlib AngleQuaternion.
+ fn quat_from_angles(a: [f32; 3]) -> Quat {
+-    let (sy, cy) = (a[1].to_radians() * 0.5).sin_cos();
+-    let (sp, cp) = (a[0].to_radians() * 0.5).sin_cos();
+-    let (sr, cr) = (a[2].to_radians() * 0.5).sin_cos();
++    let (sy, cy) = playsrc_collision::math::sin_cos(a[1].to_radians() * 0.5);
++    let (sp, cp) = playsrc_collision::math::sin_cos(a[0].to_radians() * 0.5);
++    let (sr, cr) = playsrc_collision::math::sin_cos(a[2].to_radians() * 0.5);
+     let srxcp = sr * cp;
+     let crxsp = cr * sp;
+     let crxcp = cr * cp;
+@@ -2627,7 +2627,7 @@
+ }
+ 
+ fn quat_axis_angle(axis: [f32; 3], degrees: f32) -> Quat {
+-    let (s, c) = (degrees.to_radians() * 0.5).sin_cos();
++    let (s, c) = playsrc_collision::math::sin_cos(degrees.to_radians() * 0.5);
+     [axis[0] * s, axis[1] * s, axis[2] * s, c]
+ }
+ 
+@@ -2660,12 +2660,12 @@
+     let xy = (m00 * m00 + m10 * m10).sqrt();
+     if xy > 0.001 {
+         [
+-            (-m20).atan2(xy).to_degrees(),
+-            m10.atan2(m00).to_degrees(),
+-            m21.atan2(m22).to_degrees(),
++            playsrc_collision::math::atan2(-m20, xy).to_degrees(),
++            playsrc_collision::math::atan2(m10, m00).to_degrees(),
++            playsrc_collision::math::atan2(m21, m22).to_degrees(),
+         ]
+     } else {
+-        [(-m20).atan2(xy).to_degrees(), (-m01).atan2(m11).to_degrees(), 0.0]
++        [playsrc_collision::math::atan2(-m20, xy).to_degrees(), playsrc_collision::math::atan2(-m01, m11).to_degrees(), 0.0]
+     }
+ }
+ 
+@@ -2673,7 +2673,7 @@
+     let qinv = [-q[0], -q[1], -q[2], q[3]];
+     let d = quat_mul(p, qinv);
+     let sin = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().min(1.0);
+-    (2.0 * sin.asin()).to_degrees()
++    (2.0 * playsrc_collision::math::asin(sin)).to_degrees()
+ }
+ 
+ /// mathlib QuaternionSlerp (with QuaternionAlign).
+@@ -2687,10 +2687,10 @@
+     let mut qt = [0.0; 4];
+     if 1.0 + cosom > 0.000001 {
+         if 1.0 - cosom > 0.000001 {
+-            let omega = cosom.acos();
+-            let sinom = omega.sin();
+-            sclp = ((1.0 - t) * omega).sin() / sinom;
+-            sclq = (t * omega).sin() / sinom;
++            let omega = playsrc_collision::math::acos(cosom);
++            let sinom = playsrc_collision::math::sin(omega);
++            sclp = playsrc_collision::math::sin((1.0 - t) * omega) / sinom;
++            sclq = playsrc_collision::math::sin(t * omega) / sinom;
+         } else {
+             sclp = 1.0 - t;
+             sclq = t;
+@@ -2700,8 +2700,8 @@
+         }
+     } else {
+         qt = [-q[1], q[0], -q[3], q[2]];
+-        let sp = ((1.0 - t) * 0.5 * std::f32::consts::PI).sin();
+-        let sq = (t * 0.5 * std::f32::consts::PI).sin();
++        let sp = playsrc_collision::math::sin((1.0 - t) * 0.5 * std::f32::consts::PI);
++        let sq = playsrc_collision::math::sin(t * 0.5 * std::f32::consts::PI);
+         for k in 0..3 {
+             qt[k] = sp * p[k] + sq * qt[k];
+         }
+diff --git a/crates/core/src/game/minigame.rs b/crates/core/src/game/minigame.rs
+--- a/crates/core/src/game/minigame.rs
++++ b/crates/core/src/game/minigame.rs
+@@ -218,8 +218,8 @@
+         let last = ui.last.unwrap_or(buttons);
+         let fov = self.entities[i].float("FieldOfView").unwrap_or(-1.0);
+         if fov > -1.0 {
+-            let (sp, cp) = cmd.pitch.to_radians().sin_cos();
+-            let (sy, cy) = cmd.yaw.to_radians().sin_cos();
++            let (sp, cp) = playsrc_collision::math::sin_cos(cmd.pitch.to_radians());
++            let (sy, cy) = playsrc_collision::math::sin_cos(cmd.yaw.to_radians());
+             let facing = [cp * cy, cp * sy, -sp];
+             let p = self.state.position;
+             let center = [p[0], p[1], p[2] + self.current_hull().maxs[2] * 0.5];
+diff --git a/crates/core/src/game/practice.rs b/crates/core/src/game/practice.rs
+--- a/crates/core/src/game/practice.rs
++++ b/crates/core/src/game/practice.rs
+@@ -34,8 +34,8 @@
+     /// 100 units each), then the same with the crouched hull. Returns 1 (standing), 2 (crouched) or 0 (no free space
+     /// found: left at `position`, standing).
+     pub fn practice_noclip_exit(&mut self, position: [f32; 3], velocity: [f32; 3], yaw: f32, pitch: f32) -> u32 {
+-        let (sy, cy) = yaw.to_radians().sin_cos();
+-        let (sp, cp) = pitch.to_radians().sin_cos();
++        let (sy, cy) = playsrc_collision::math::sin_cos(yaw.to_radians());
++        let (sp, cp) = playsrc_collision::math::sin_cos(pitch.to_radians());
+         // AngleVectors (roll 0): forward, right, up.
+         let forward = [cp * cy, cp * sy, -sp];
+         let right = [sy, -cy, 0.0];
+diff --git a/crates/core/src/game/propdoor.rs b/crates/core/src/game/propdoor.rs
+--- a/crates/core/src/game/propdoor.rs
++++ b/crates/core/src/game/propdoor.rs
+@@ -181,9 +181,9 @@
+             let maxs = [hi[0] - o[0], hi[1] - o[1], 0.0];
+             let len2 = |v: [f32; 3]| v[0] * v[0] + v[1] * v[1];
+             let check = if len2(mins) > len2(maxs) { mins } else { maxs };
+-            let (sy, cy) = self.ents[i].angles[1].to_radians().sin_cos();
+-            let (sp, cp) = self.ents[i].angles[0].to_radians().sin_cos();
+-            let (sr, cr) = self.ents[i].angles[2].to_radians().sin_cos();
++            let (sy, cy) = playsrc_collision::math::sin_cos(self.ents[i].angles[1].to_radians());
++            let (sp, cp) = playsrc_collision::math::sin_cos(self.ents[i].angles[0].to_radians());
++            let (sr, cr) = playsrc_collision::math::sin_cos(self.ents[i].angles[2].to_radians());
+             let right = [-sr * sp * cy + cr * sy, -sr * sp * sy - cr * cy, -sr * cp];
+             if check[0] * right[0] + check[1] * right[1] + check[2] * right[2] > 0.0 {
+                 let d = self.prop_door_mut(i);
+@@ -327,8 +327,8 @@
+             let away_player = away_from_player == Some(true);
+             if away_player {
+                 let a = self.ents[i].angles;
+-                let (sp, cp) = a[0].to_radians().sin_cos();
+-                let (sy, cy) = a[1].to_radians().sin_cos();
++                let (sp, cp) = playsrc_collision::math::sin_cos(a[0].to_radians());
++                let (sy, cy) = playsrc_collision::math::sin_cos(a[1].to_radians());
+                 let f = [cp * cy, cp * sy, -sp];
+                 let p = self.state.position;
+                 let o = self.ents[i].origin;
+diff --git a/crates/core/src/game/usable.rs b/crates/core/src/game/usable.rs
+--- a/crates/core/src/game/usable.rs
++++ b/crates/core/src/game/usable.rs
+@@ -132,8 +132,8 @@
+ 
+     /// CBasePlayer::FindUseEntity.
+     pub(super) fn find_use_entity(&self, pitch: f32, yaw: f32) -> Option<usize> {
+-        let (sp, cp) = pitch.to_radians().sin_cos();
+-        let (sy, cy) = yaw.to_radians().sin_cos();
++        let (sp, cp) = playsrc_collision::math::sin_cos(pitch.to_radians());
++        let (sy, cy) = playsrc_collision::math::sin_cos(yaw.to_radians());
+         let forward = [cp * cy, cp * sy, -sp];
+         let up = [sp * cy, sp * sy, cp];
+         let p = self.state.position;
+diff --git a/crates/core/src/game/weapons.rs b/crates/core/src/game/weapons.rs
+--- a/crates/core/src/game/weapons.rs
++++ b/crates/core/src/game/weapons.rs
+@@ -498,8 +498,8 @@
+     }
+ 
+     fn eye_and_forward(&self, cmd: Cmd) -> ([f32; 3], [f32; 3]) {
+-        let (sp, cp) = cmd.pitch.to_radians().sin_cos();
+-        let (sy, cy) = cmd.yaw.to_radians().sin_cos();
++        let (sp, cp) = playsrc_collision::math::sin_cos(cmd.pitch.to_radians());
++        let (sy, cy) = playsrc_collision::math::sin_cos(cmd.yaw.to_radians());
+         let p = self.state.position;
+         let o = self.state.view_offset;
+         ([p[0] + o[0], p[1] + o[1], p[2] + o[2]], [cp * cy, cp * sy, -sp])
+@@ -706,7 +706,7 @@
+         self.weapon_event(WEAPON_EVENT_DROPPED);
+         // The entity it came from, unless a point_template has respawned a new copy into it meanwhile.
+         if let Some(e) = held.ent.filter(|&e| self.ents[e].removed) {
+-            let (sy, cy) = cmd.yaw.to_radians().sin_cos();
++            let (sy, cy) = playsrc_collision::math::sin_cos(cmd.yaw.to_radians());
+             let p = self.state.position;
+             let from = [p[0], p[1], p[2] + 32.0];
+             let to = [p[0] + cy * 48.0, p[1] + sy * 48.0, p[2] + 32.0];
+@@ -934,7 +934,7 @@
+         self.report_attack(gun.id, if silenced { 2 } else { 1 }, eye, end, hit);
+         // Damage falls off with distance: damage * rangeModifier ^ (distance / 500).
+         let distance = hit.map_or(gun.range, |t| t.fraction * gun.range);
+-        let damage = gun.damage * f32::from(gun.pellets) * gun.range_modifier.powf(distance / 500.0);
++        let damage = gun.damage * f32::from(gun.pellets) * playsrc_collision::math::pow(gun.range_modifier, distance / 500.0);
+         self.damage_hit(hit, damage);
+     }
+ 
+diff --git a/crates/core/src/lib.rs b/crates/core/src/lib.rs
+--- a/crates/core/src/lib.rs
++++ b/crates/core/src/lib.rs
+@@ -9,7 +9,7 @@
+ pub mod studio;
+ pub mod physics;
+ pub mod vfs;
+-#[cfg(target_arch = "wasm32")]
++#[cfg(any(target_arch = "wasm32", feature = "native-web"))]
+ mod wasm;
+ 
+ pub use game::{Cmd, Game, Settings};
+@@ -20,3 +20,6 @@
+     // v19/v20 maps keep the Source 2013 profile; v21 (CS:GO) maps get the CS:GO one.
+     playsrc_bsp::parse(bytes, playsrc_bsp::Profile::for_source(bytes), playsrc_bsp::Limits { max_compression_ratio: 4_096, ..Default::default() }).map_err(|e| format!("bsp: {e:?}"))
+ }
++
++#[cfg(all(feature = "native-web", not(target_arch = "wasm32")))]
++pub use wasm::native_web;
+diff --git a/crates/core/src/lightmap.rs b/crates/core/src/lightmap.rs
+--- a/crates/core/src/lightmap.rs
++++ b/crates/core/src/lightmap.rs
+@@ -260,3 +260,87 @@
+         assert!(!is_unlit(&[], &black));
+     }
+ }
++
++/// Optional client presentation layer for switchable/animated light pages. It leaves the movement mesh and the
++/// canonical style-0 atlas builder unchanged. Rectangles come from that builder, so UVs and packing cannot drift.
++pub struct StyleAtlas {
++    faces: Vec<StyleFace>,
++    width: u32,
++    height: u32,
++    previous: Option<[f32; 64]>,
++}
++struct StyleFace {
++    x: u32, y: u32, w: u32, h: u32,
++    styles: Vec<u8>,
++    pages: Vec<Vec<LightSample>>,
++}
++impl StyleAtlas {
++    pub fn new(bsp: &Bsp) -> Option<Self> {
++        if bsp.profile == playsrc_bsp::Profile::CsgoV21 { return None; }
++        let faces: &[Face] = crate::lump!(bsp, playsrc_bsp::FACES, Faces);
++        let texinfo: &[TextureInfo] = crate::lump!(bsp, playsrc_bsp::TEXINFO, TextureInfo);
++        if !faces.iter().any(|f| f.styles[0] != 255 && (f.styles[0] != 0 || f.styles[1] != 255)) { return None; }
++        let built = build(bsp, faces, texinfo);
++        let lighting: &[LightSample] = if built.atlas.hdr { crate::lump!(bsp, playsrc_bsp::LIGHTING_HDR, Lighting) } else { crate::lump!(bsp, playsrc_bsp::LIGHTING, Lighting) };
++        let mut work = Vec::new();
++        let mut total = 0usize;
++        for (i, f) in faces.iter().enumerate() {
++            let Some(rect) = built.rects[i] else { continue };
++            let styles = f.styles.iter().copied().take_while(|&s| s != 255).collect::<Vec<_>>();
++            if styles.is_empty() || styles == [0] { continue; }
++            let Some(ti) = texinfo.get(f.texture_info_index.max(0) as usize) else { continue };
++            let (w,h) = ((f.lightmap_size[0]+1) as u32,(f.lightmap_size[1]+1) as u32);
++            let n = (w*h) as usize;
++            let stride = n * if ti.flags & 0x800 != 0 { 4 } else { 1 };
++            let first = f.light_offset as usize / 4;
++            if first.checked_add((styles.len()-1)*stride+n).is_none_or(|end| end>lighting.len()) { continue; }
++            total += n*styles.len();
++            if total > 16_777_216 { return None; } // bound optional presentation memory, never compromise map loading
++            let pages = (0..styles.len()).map(|s| lighting[first+s*stride..first+s*stride+n].to_vec()).collect();
++            work.push(StyleFace{x:rect.x,y:rect.y,w,h,styles,pages});
++        }
++        if work.is_empty() { return None; }
++        Some(Self{faces:work,width:built.atlas.width,height:built.atlas.height,previous:None})
++    }
++    /// Rewrites only styled face blocks and their duplicated borders when a style value changes.
++    pub fn apply(&mut self, atlas: &mut Atlas, values: &[f32;64]) -> bool {
++        if self.width!=atlas.width || self.height!=atlas.height || self.previous.as_ref()==Some(values) { return false; }
++        for face in &self.faces {
++            for y in 0..face.h+2 { let sy=(y as i32-1).clamp(0,face.h as i32-1) as u32;
++                for x in 0..face.w+2 { let sx=(x as i32-1).clamp(0,face.w as i32-1) as u32;
++                    let sample=(sy*face.w+sx) as usize;
++                    let mut linear=[0f32;3];
++                    for (page,&style) in face.pages.iter().zip(&face.styles) {
++                        let s=&page[sample];let weight=values.get(style as usize).copied().unwrap_or(256./264.).max(0.);
++                        let scale=2f32.powi((s.exponent as i32).clamp(-32,16))/255.*weight;
++                        linear[0]+=s.red as f32*scale;linear[1]+=s.green as f32*scale;linear[2]+=s.blue as f32*scale;
++                    }
++                    let at=(((face.y-1+y)*atlas.width+face.x-1+x)*4) as usize;
++                    for c in 0..3 { atlas.rgba[at+c]=encode(linear[c],atlas.hdr); }
++                    atlas.rgba[at+3]=255;
++                }
++            }
++        }
++        self.previous=Some(*values);true
++    }
++}
++/// Source's canonical light style patterns, averaged for presentation (the web renderer uses the same averages).
++pub fn light_style_pattern(pattern: &str) -> f32 {
++    let mut sum=0u32;let mut count=0u32;
++    for c in pattern.bytes().map(|c|c.to_ascii_lowercase()).filter(|c|c.is_ascii_lowercase()){sum+=(c-b'a') as u32*22;count+=1;}
++    if count==0 {256./264.} else {sum as f32/count as f32/264.}
++}
++pub const LIGHT_STYLE_PATTERNS: [&str;13] = ["m","mmnmmommommnonmmonqnmmo","abcdefghijklmnopqrstuvwxyzyxwvutsrqponmlkjihgfedcba","mmmmmaaaaammmmmaaaaaabcdefgabcdefg","mamamamamama","jklmnopqrstuvwxyzyxwvutsrqponmlkj","nmonqnmomnmomomno","mmmaaaabcdefgmmmmaaaammmaamm","mmmaaammmaaammmabcdefaaaammmmabcdefmmmaaaa","aaaaaaaazzzzzzzz","mmamammmmammamamaaamammma","abcdefghijklmnopqrrqponmlkjihgfedcba","mmnnmmnnnmmnn"];
++
++#[cfg(test)]
++mod style_tests {
++    use super::*;
++    #[test] fn pattern_values_match_source(){assert_eq!(light_style_pattern("a"),0.);assert_eq!(light_style_pattern("m"),1.);assert_eq!(light_style_pattern("z"),25./12.);assert_eq!(light_style_pattern("am"),0.5);}
++    #[test] fn pages_add_in_linear_space_and_rewrite_borders(){
++        let sample=LightSample{red:64,green:32,blue:16,exponent:0};
++        let mut styles=StyleAtlas{faces:vec![StyleFace{x:1,y:1,w:1,h:1,styles:vec![0,32],pages:vec![vec![sample],vec![sample]]}],width:3,height:3,previous:None};
++        let mut atlas=Atlas{width:3,height:3,rgba:vec![0;36],hdr:true,scale:HDR_SCALE};let mut values=[0.;64];values[0]=1.;values[32]=1.;assert!(styles.apply(&mut atlas,&values));assert!(!styles.apply(&mut atlas,&values));
++        for pixel in atlas.rgba.chunks_exact(4){assert_eq!(pixel,&[encode(128./255.,true),encode(64./255.,true),encode(32./255.,true),255]);}
++        values[32]=0.;assert!(styles.apply(&mut atlas,&values));assert_eq!(atlas.rgba[0],encode(64./255.,true));
++    }
++}
+diff --git a/crates/core/src/physics.rs b/crates/core/src/physics.rs
+--- a/crates/core/src/physics.rs
++++ b/crates/core/src/physics.rs
+@@ -429,9 +429,9 @@
+ 
+ /// Source AngleMatrix applied to a local point.
+ pub fn rotate(v: [f32; 3], angles: [f32; 3]) -> [f32; 3] {
+-    let (sp, cp) = angles[0].to_radians().sin_cos();
+-    let (sy, cy) = angles[1].to_radians().sin_cos();
+-    let (sr, cr) = angles[2].to_radians().sin_cos();
++    let (sp, cp) = playsrc_collision::math::sin_cos(angles[0].to_radians());
++    let (sy, cy) = playsrc_collision::math::sin_cos(angles[1].to_radians());
++    let (sr, cr) = playsrc_collision::math::sin_cos(angles[2].to_radians());
+     let forward = [cp * cy, cp * sy, -sp];
+     let left = [sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, sr * cp];
+     let up = [cr * sp * cy + sr * sy, cr * sp * sy - sr * cy, cr * cp];
+diff --git a/crates/core/src/props.rs b/crates/core/src/props.rs
+--- a/crates/core/src/props.rs
++++ b/crates/core/src/props.rs
+@@ -307,9 +307,9 @@
+ 
+ /// Source `AngleMatrix` (pitch about Y, yaw about Z, roll about X), as rows applied to column vectors.
+ fn angle_matrix([pitch, yaw, roll]: [f32; 3]) -> [[f32; 3]; 3] {
+-    let (sp, cp) = pitch.to_radians().sin_cos();
+-    let (sy, cy) = yaw.to_radians().sin_cos();
+-    let (sr, cr) = roll.to_radians().sin_cos();
++    let (sp, cp) = playsrc_collision::math::sin_cos(pitch.to_radians());
++    let (sy, cy) = playsrc_collision::math::sin_cos(yaw.to_radians());
++    let (sr, cr) = playsrc_collision::math::sin_cos(roll.to_radians());
+     [
+         [cp * cy, sr * sp * cy - cr * sy, cr * sp * cy + sr * sy],
+         [cp * sy, sr * sp * sy + cr * cy, cr * sp * sy - sr * cy],
+diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
+--- a/crates/core/src/wasm_content.rs
++++ b/crates/core/src/wasm_content.rs
+@@ -43,7 +43,7 @@
+ 
+ /// Mounts a `_dir.vpk` tree (takes ownership of both buffers). `name` is e.g. `cstrike/cstrike_pak_dir.vpk`;
+ /// a mount with the same name is replaced. Mount order is search order. Returns the entry count, 0 on error.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn content_mount_vpk(name_ptr: *mut u8, name_len: usize, dir_ptr: *mut u8, dir_len: usize) -> usize {
+     let name = unsafe { owned_string(name_ptr, name_len) };
+     let dir = unsafe { owned(dir_ptr, dir_len) };
+@@ -68,7 +68,7 @@
+ }
+ 
+ /// Mounts a listing of fetchable paths (newline-separated; takes ownership). Searched after all VPKs.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn content_mount_listing(name_ptr: *mut u8, name_len: usize, text_ptr: *mut u8, text_len: usize) -> usize {
+     let name = unsafe { owned_string(name_ptr, name_len) };
+     let text = unsafe { owned_string(text_ptr, text_len) };
+@@ -91,7 +91,7 @@
+ }
+ 
+ /// Drops all VPK mounts and listings (fetched files are kept).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn content_unmount_all() {
+     CONTENT.with(|k| {
+         let mut k = k.borrow_mut();
+@@ -101,7 +101,7 @@
+ }
+ 
+ /// Adds a file whose bytes are already known (e.g. restored from the browser cache). Takes ownership.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn content_add_file(path_ptr: *mut u8, path_len: usize, data_ptr: *mut u8, data_len: usize) {
+     let path = normalize(&unsafe { owned_string(path_ptr, path_len) });
+     let data = unsafe { owned(data_ptr, data_len) };
+@@ -112,7 +112,7 @@
+ /// (`you/miku1\tconcrete/concretewall004a`). Material `from` then resolves as `to` (its VMT and textures, searched
+ /// pakfile -> fetched files -> mounts as usual) while keeping its slot, so the mesh is unchanged. An empty text clears
+ /// them. Returns the number of overrides.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn content_material_overrides(text_ptr: *mut u8, text_len: usize) -> usize {
+     let text = unsafe { owned_string(text_ptr, text_len) };
+     let map: HashMap<String, String> = text
+@@ -129,7 +129,7 @@
+ /// Supplies the bytes for a pending request of the last `content_resolve` (takes ownership): the
+ /// archive chunk `(archive, offset, length)` for VPK requests, the whole file for listings. VPK data
+ /// is joined with its directory preload bytes and CRC-checked. Returns 1 on success, 0 on error.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn content_provide(path_ptr: *mut u8, path_len: usize, data_ptr: *mut u8, data_len: usize) -> u32 {
+     let path = normalize(&unsafe { owned_string(path_ptr, path_len) });
+     let data = unsafe { owned(data_ptr, data_len) };
+@@ -164,7 +164,7 @@
+ 
+ /// Copies a fetched file's assembled bytes into `tex_bytes` (for host-side caching). Returns its
+ /// length; 0 if unknown or empty.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn content_file(path_ptr: *mut u8, path_len: usize) -> usize {
+     let path = normalize(&unsafe { owned_string(path_ptr, path_len) });
+     let bytes = CONTENT.with(|k| k.borrow().loose.get(&path).map(|b| b.to_vec()));
+@@ -179,7 +179,7 @@
+ /// `extra` (newline-separated material names, e.g. skybox faces; takes ownership) are resolved after
+ /// the mesh materials and appended to `material_info`/`material_extras`. Pending requests are listed in
+ /// scratch_str as `path\tmount\tarchive\toffset\tlength` lines; returns that text's length (0 = done).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn content_resolve(extra_ptr: *mut u8, extra_len: usize) -> usize {
+     let extra = unsafe { owned_string(extra_ptr, extra_len) };
+     with(|c| {
+@@ -221,7 +221,7 @@
+ }
+ 
+ /// Resolved texture paths (index = texture id in `material_info`), newline-separated in scratch_str.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn texture_paths() -> usize {
+     with(|c| {
+         c.scratch_str = c.materials.textures.join("\n");
+@@ -230,7 +230,7 @@
+ }
+ 
+ /// Per resolved material, 4 floats in scratch_f32: `[texture2, detail, detail_scale, detail_blend]`.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn material_extras() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -242,7 +242,7 @@
+ }
+ 
+ /// Per resolved material, 4 floats in scratch_f32: `[fog_start, fog_end, above_water (0/1), 0]` (water materials).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn material_water() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -254,7 +254,7 @@
+ }
+ 
+ /// Water volumes of the loaded map, 6 floats each in scratch_f32: `[minx, miny, minz, maxx, maxy, maxz]` (Source space).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn water_volumes() -> usize {
+     with(|c| {
+         c.scratch_f32 = c.mesh.as_ref().map(|m| m.water.iter().flatten().copied().collect()).unwrap_or_default();
+@@ -263,7 +263,7 @@
+ }
+ 
+ /// Matching water-box clipping planes, packed as count then count * [nx, ny, nz, distance].
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn water_planes() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -282,7 +282,7 @@
+ /// Reads a file through the current VFS (pakfile → fetched → mounts; rebuilt by `content_resolve`).
+ /// Returns 1 with the bytes in `tex_bytes` (`tex_bytes_len`), or 0; a hit in a mount records a
+ /// pending request (see `content_pending`).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn content_read(path_ptr: *mut u8, path_len: usize) -> u32 {
+     let path = unsafe { owned_string(path_ptr, path_len) };
+     with(|c| match c.vfs.read(&path).map(<[u8]>::to_vec) {
+@@ -294,13 +294,13 @@
+     })
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn tex_bytes_len() -> usize {
+     with(|c| c.tex_bytes.len())
+ }
+ 
+ /// Pending requests of the current VFS (same format as `content_resolve`); returns the text length.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn content_pending() -> usize {
+     with(|c| {
+         c.scratch_str.clear();
+@@ -312,7 +312,7 @@
+ }
+ 
+ /// Paths in the mounted VPKs starting with `prefix` (newline-separated in scratch_str).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn content_list(prefix_ptr: *mut u8, prefix_len: usize) -> usize {
+     let prefix = normalize(&unsafe { owned_string(prefix_ptr, prefix_len) });
+     let mut paths: Vec<String> = CONTENT.with(|k| k.borrow().vpks.iter().flat_map(|m| m.paths().filter(|p| p.starts_with(&prefix)).map(str::to_string).collect::<Vec<_>>()).collect());
+@@ -326,7 +326,7 @@
+ 
+ /// Material names a studio model uses (one per MDL texture, `$cdmaterials` resolved against the VFS),
+ /// newline-separated in scratch_str. 0 if the MDL isn't available (requested if it's in a mount).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn model_materials(path_ptr: *mut u8, path_len: usize) -> usize {
+     let path = unsafe { owned_string(path_ptr, path_len) };
+     with(|c| {
+@@ -345,7 +345,7 @@
+ 
+ /// Parses the static prop lump of a BSP (bytes copied in; ownership taken). Model paths (dictionary)
+ /// go to scratch_str, newline-separated; returns that text's length.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn props_load(ptr: *mut u8, len: usize) -> usize {
+     let bytes = unsafe { owned(ptr, len) };
+     let bsp = crate::parse_bsp(&bytes).ok();
+@@ -368,7 +368,7 @@
+ 
+ /// Builds the prop mesh from the loaded props and the current VFS. Material names go to scratch_str
+ /// (newline-separated); returns that text's length. Models whose files aren't loaded are skipped (and requested).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn props_build() -> usize {
+     with(|c| {
+         PROPS.with(|p| {
+@@ -383,7 +383,7 @@
+ 
+ /// Prop mesh stats into scratch_u32: `[instances, built models, missing models, vertex floats, indices, groups]`;
+ /// missing model paths in scratch_str.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn props_info() -> usize {
+     with(|c| {
+         PROPS.with(|p| {
+@@ -404,7 +404,7 @@
+ 
+ /// Moving prop groups (prop_door_rotating) into scratch_u32 as `[entity, material, first_index, index_count]`
+ /// quads; their vertices are in model space, placed every frame by `prop_transforms`.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn props_dynamic_groups() -> usize {
+     with(|c| {
+         PROPS.with(|p| {
+@@ -415,7 +415,7 @@
+ }
+ 
+ /// Prop groups into scratch_u32 as `[material, first_index, index_count]` triples.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn props_groups() -> usize {
+     with(|c| {
+         PROPS.with(|p| {
+@@ -427,7 +427,7 @@
+ 
+ /// Per prop group (parallel to `props_groups`), 1 if it's in the 3D skybox set (drawn by the skybox pass, see
+ /// `sky_camera`), into scratch_u32.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn props_group_sky3d() -> usize {
+     with(|c| {
+         PROPS.with(|p| {
+@@ -437,23 +437,45 @@
+     })
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn props_vertices_ptr() -> *const f32 {
+     PROPS.with(|p| p.borrow().1.vertices.as_ptr())
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn props_indices_ptr() -> *const u32 {
+     PROPS.with(|p| p.borrow().1.indices.as_ptr())
+ }
+ 
+ /// Per mesh vertex, the displacement blend alpha (0 = `$basetexture`, 1 = `$basetexture2`).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn mesh_blend_ptr() -> *const f32 {
+     with(|c| c.mesh.as_ref().map_or(std::ptr::null(), |m| m.blend.as_ptr()))
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn mesh_blend_len() -> usize {
+     with(|c| c.mesh.as_ref().map_or(0, |m| m.blend.len()))
+ }
++
++#[cfg(all(feature = "native-web", not(target_arch = "wasm32")))]
++pub(super) fn native_prop_vertices() -> Vec<f32> {
++    PROPS.with(|p| p.borrow().1.vertices.clone())
++}
++
++#[cfg(all(feature = "native-web", not(target_arch = "wasm32")))]
++pub(super) fn native_prop_indices() -> Vec<u32> {
++    PROPS.with(|p| p.borrow().1.indices.clone())
++}
++
++#[cfg(all(feature = "native-web", not(target_arch = "wasm32")))]
++pub(super) fn native_clear_map() {
++    PROPS.with(|p| *p.borrow_mut() = Default::default());
++    CONTENT.with(|c| c.borrow_mut().overrides.clear());
++}
++
++#[cfg(all(feature = "native-web", not(target_arch = "wasm32")))]
++pub(super) fn native_clear_all() {
++    native_clear_map();
++    CONTENT.with(|c| *c.borrow_mut() = Content::default());
++}
+diff --git a/crates/core/src/wasm_studio.rs b/crates/core/src/wasm_studio.rs
+--- a/crates/core/src/wasm_studio.rs
++++ b/crates/core/src/wasm_studio.rs
+@@ -21,7 +21,7 @@
+ /// Loads a studio model (`models/....mdl`, takes ownership of the path) with its includes, VVD, VTX and
+ /// materials. Returns a handle (>= 1), or 0: files pending (`content_pending` non-empty; provide them, call
+ /// `content_resolve`, retry) or an error (`error_ptr`). Loading the same path again returns the same handle.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn studio_load(path_ptr: *mut u8, path_len: usize) -> u32 {
+     let path = crate::vfs::normalize(&unsafe { owned_string(path_ptr, path_len) });
+     if let Some(h) = MODELS.with(|m| m.borrow().iter().position(|x| x.path == path)) {
+@@ -49,7 +49,7 @@
+ }
+ 
+ /// Model metadata JSON into scratch_str; returns its length (0 = bad handle).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn studio_info(h: u32) -> usize {
+     let json = model(h, |m| m.info_json()).unwrap_or_default();
+     with(|c| {
+@@ -59,7 +59,7 @@
+ }
+ 
+ /// Skinned mesh vertices into scratch_f32 (`STUDIO_VERTEX_FLOATS` per vertex); returns the float count.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn studio_vertices(h: u32) -> usize {
+     let v = model(h, |m| m.mesh.vertices.clone()).unwrap_or_default();
+     with(|c| {
+@@ -69,7 +69,7 @@
+ }
+ 
+ /// Triangle indices into scratch_u32 (groups are in the info JSON); returns the count.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn studio_indices(h: u32) -> usize {
+     let v = model(h, |m| m.mesh.indices.clone()).unwrap_or_default();
+     with(|c| {
+@@ -79,7 +79,7 @@
+ }
+ 
+ /// Decoded animation `anim` (all frames, `frames * bones * 7` floats: quat xyzw + pos) into scratch_f32.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn studio_anim(h: u32, anim: u32) -> usize {
+     let v = model(h, |m| m.decode_anim(anim as usize)).flatten().unwrap_or_default();
+     with(|c| {
+@@ -89,7 +89,7 @@
+ }
+ 
+ /// Texture payload of a VTF by game path (takes ownership of the path): same output as `texture_payload`.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn texture_payload_path(path_ptr: *mut u8, path_len: usize, allow_s3tc: u32, need_alpha: u32) -> usize {
+     let path = unsafe { owned_string(path_ptr, path_len) };
+     with(|c| {
+@@ -115,3 +115,8 @@
+         }
+     })
+ }
++
++#[cfg(all(feature = "native-web", not(target_arch = "wasm32")))]
++pub(super) fn native_clear_models() {
++    MODELS.with(|m| *m.borrow_mut() = Vec::new());
++}
+diff --git a/crates/vendor/SOURCE-SDK-NOTICES.md b/crates/vendor/SOURCE-SDK-NOTICES.md
+new file mode 100644
+--- /dev/null
++++ b/crates/vendor/SOURCE-SDK-NOTICES.md
+@@ -0,0 +1,9 @@
++# Source SDK notice provenance
++
++`thirdpartylegalnotices.txt` is preserved byte for byte from ValveSoftware/source-sdk-2013:
++
++- Commit: `be57e3d01ac7d7aa6a2cacbfef187c0b46616db0`
++- Source: https://raw.githubusercontent.com/ValveSoftware/source-sdk-2013/be57e3d01ac7d7aa6a2cacbfef187c0b46616db0/thirdpartylegalnotices.txt
++- SHA-256: `21319cf7b185d8676801680bc394655a028bc84e257ed844023c8bbed66d3a9e`
++
++The existing `LICENSE.source-sdk-2013` matches that revision's root `LICENSE` after whitespace normalization. The playsrc licensing notice is preserved separately in `NOTICE-playsrc.md`; original playsrc MIT terms are in `LICENSE-playsrc`.
+diff --git a/crates/vendor/collision/Cargo.toml b/crates/vendor/collision/Cargo.toml
+--- a/crates/vendor/collision/Cargo.toml
++++ b/crates/vendor/collision/Cargo.toml
+@@ -6,11 +6,15 @@
+ 
+ [features]
+ replay-reference = []
++native-wasm-math = ["dep:libm"]
+ 
+ [dependencies]
+ playsrc-bsp = { path = "../bsp" }
+ playsrc-phy = { path = "../phy" }
+ sha2 = "0.11"
+ 
++[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
++libm = { version = "=0.2.16", optional = true }
++
+ [lib]
+ path = "src/lib.rs"
+diff --git a/crates/vendor/collision/src/lib.rs b/crates/vendor/collision/src/lib.rs
+--- a/crates/vendor/collision/src/lib.rs
++++ b/crates/vendor/collision/src/lib.rs
+@@ -2742,3 +2742,6 @@
+         assert!(overlap.start_solid && overlap.all_solid);
+     }
+ }
++
++// Kept after existing code to preserve WASM panic source locations.
++pub mod math;
+diff --git a/crates/vendor/collision/src/math.rs b/crates/vendor/collision/src/math.rs
+new file mode 100644
+--- /dev/null
++++ b/crates/vendor/collision/src/math.rs
+@@ -0,0 +1,106 @@
++//! The native client can opt into the same portable transcendental routines as Rust's WASM
++//! compiler builtins. System libm implementations can differ by one ULP, which changes replays.
++//! Defaults and WASM builds retain their existing floating-point methods.
++//! Validation is toolchain-specific: Rust 1.99.1's wasm32 builtins matched libm 0.2.16
++//! for 60,000 sampled rows of f32/f64 trig, inverse trig and f32 pow. Re-run native/WASM
++//! replay parity when updating the Rust toolchain or this pinned dependency.
++
++macro_rules! portable {
++    ($name:ident, $ty:ty, $libm:ident, $method:ident) => {
++        #[inline]
++        pub fn $name(x: $ty) -> $ty {
++            #[cfg(all(feature = "native-wasm-math", not(target_arch = "wasm32")))]
++            {
++                libm::$libm(x)
++            }
++            #[cfg(not(all(feature = "native-wasm-math", not(target_arch = "wasm32"))))]
++            {
++                x.$method()
++            }
++        }
++    };
++}
++portable!(sin, f32, sinf, sin);
++portable!(cos, f32, cosf, cos);
++portable!(asin, f32, asinf, asin);
++portable!(acos, f32, acosf, acos);
++portable!(asin64, f64, asin, asin);
++
++#[inline]
++pub fn sin_cos(x: f32) -> (f32, f32) {
++    #[cfg(all(feature = "native-wasm-math", not(target_arch = "wasm32")))]
++    {
++        (libm::sinf(x), libm::cosf(x))
++    }
++    #[cfg(not(all(feature = "native-wasm-math", not(target_arch = "wasm32"))))]
++    {
++        x.sin_cos()
++    }
++}
++
++#[inline]
++pub fn sin_cos64(x: f64) -> (f64, f64) {
++    #[cfg(all(feature = "native-wasm-math", not(target_arch = "wasm32")))]
++    {
++        (libm::sin(x), libm::cos(x))
++    }
++    #[cfg(not(all(feature = "native-wasm-math", not(target_arch = "wasm32"))))]
++    {
++        x.sin_cos()
++    }
++}
++
++#[inline]
++pub fn atan2(y: f32, x: f32) -> f32 {
++    #[cfg(all(feature = "native-wasm-math", not(target_arch = "wasm32")))]
++    {
++        libm::atan2f(y, x)
++    }
++    #[cfg(not(all(feature = "native-wasm-math", not(target_arch = "wasm32"))))]
++    {
++        y.atan2(x)
++    }
++}
++
++#[inline]
++pub fn atan264(y: f64, x: f64) -> f64 {
++    #[cfg(all(feature = "native-wasm-math", not(target_arch = "wasm32")))]
++    {
++        libm::atan2(y, x)
++    }
++    #[cfg(not(all(feature = "native-wasm-math", not(target_arch = "wasm32"))))]
++    {
++        y.atan2(x)
++    }
++}
++
++#[inline]
++pub fn pow(x: f32, y: f32) -> f32 {
++    #[cfg(all(feature = "native-wasm-math", not(target_arch = "wasm32")))]
++    {
++        libm::powf(x, y)
++    }
++    #[cfg(not(all(feature = "native-wasm-math", not(target_arch = "wasm32"))))]
++    {
++        x.powf(y)
++    }
++}
++
++#[cfg(all(test, feature = "native-wasm-math", not(target_arch = "wasm32")))]
++mod tests {
++    #[test]
++    fn sin_cos_matches_wasm_builtin_regression_values() {
++        // Captured from a Rust 1.99.1 wasm32-unknown-unknown sin_cos probe. Darwin's
++        // system sinf/cosf round one ULP differently for these inputs.
++        for (x, sin, cos) in [
++            (-6.2242751121521_f32, 1030826008, 1065324113),
++            (-2.966160774230957_f32, 3190995171, 3212579355),
++            (-1.6350349187850952_f32, 3212802260, 3179509853),
++            (1.6350349187850952_f32, 1065318612, 3179509853),
++            (2.966160774230957_f32, 1043511523, 3212579355),
++        ] {
++            let (s, c) = super::sin_cos(x);
++            assert_eq!((s.to_bits(), c.to_bits()), (sin, cos));
++        }
++    }
++}
+diff --git a/crates/vendor/collision/src/snapshot.rs b/crates/vendor/collision/src/snapshot.rs
+--- a/crates/vendor/collision/src/snapshot.rs
++++ b/crates/vendor/collision/src/snapshot.rs
+@@ -41,9 +41,9 @@
+         {
+             return Err(error(ErrorCode::InvalidSnapshot, None));
+         }
+-        let (sp, cp) = self.angles[0].to_radians().sin_cos();
+-        let (sy, cy) = self.angles[1].to_radians().sin_cos();
+-        let (sr, cr) = self.angles[2].to_radians().sin_cos();
++        let (sp, cp) = crate::math::sin_cos(self.angles[0].to_radians());
++        let (sy, cy) = crate::math::sin_cos(self.angles[1].to_radians());
++        let (sr, cr) = crate::math::sin_cos(self.angles[2].to_radians());
+         let crcy = cr * cy;
+         let crsy = cr * sy;
+         let srcy = sr * cy;
+@@ -2197,9 +2197,9 @@
+ }
+ 
+ fn quaternion_from_angles(angles: [f32; 3]) -> [f64; 4] {
+-    let (sp, cp) = (f64::from(angles[0]).to_radians() * 0.5).sin_cos();
+-    let (sy, cy) = (f64::from(angles[1]).to_radians() * 0.5).sin_cos();
+-    let (sr, cr) = (f64::from(angles[2]).to_radians() * 0.5).sin_cos();
++    let (sp, cp) = crate::math::sin_cos64(f64::from(angles[0]).to_radians() * 0.5);
++    let (sy, cy) = crate::math::sin_cos64(f64::from(angles[1]).to_radians() * 0.5);
++    let (sr, cr) = crate::math::sin_cos64(f64::from(angles[2]).to_radians() * 0.5);
+     [
+         sr * cp * cy - cr * sp * sy,
+         cr * sp * cy + sr * cp * sy,
+@@ -2236,16 +2236,16 @@
+ }
+ 
+ fn angles_from_quaternion(value: [f64; 4]) -> [f32; 3] {
+-    let roll = (2.0 * (value[3] * value[0] + value[1] * value[2]))
+-        .atan2(1.0 - 2.0 * (value[0] * value[0] + value[1] * value[1]));
++    let roll = crate::math::atan264(2.0 * (value[3] * value[0] + value[1] * value[2]),
++        1.0 - 2.0 * (value[0] * value[0] + value[1] * value[1]));
+     let sine_pitch = 2.0 * (value[3] * value[1] - value[2] * value[0]);
+     let pitch = if sine_pitch.abs() >= 1.0 {
+         std::f64::consts::FRAC_PI_2.copysign(sine_pitch)
+     } else {
+-        sine_pitch.asin()
++        crate::math::asin64(sine_pitch)
+     };
+-    let yaw = (2.0 * (value[3] * value[2] + value[0] * value[1]))
+-        .atan2(1.0 - 2.0 * (value[1] * value[1] + value[2] * value[2]));
++    let yaw = crate::math::atan264(2.0 * (value[3] * value[2] + value[0] * value[1]),
++        1.0 - 2.0 * (value[1] * value[1] + value[2] * value[2]));
+     [
+         pitch.to_degrees() as f32,
+         yaw.to_degrees() as f32,
+diff --git a/crates/vendor/movement/Cargo.toml b/crates/vendor/movement/Cargo.toml
+--- a/crates/vendor/movement/Cargo.toml
++++ b/crates/vendor/movement/Cargo.toml
+@@ -4,6 +4,9 @@
+ edition.workspace = true
+ license.workspace = true
+ 
++[features]
++native-wasm-math = ["playsrc-collision/native-wasm-math"]
++
+ [dependencies]
+ playsrc-collision = { path = "../collision" }
+ 
+diff --git a/crates/vendor/movement/src/movement.rs b/crates/vendor/movement/src/movement.rs
+--- a/crates/vendor/movement/src/movement.rs
++++ b/crates/vendor/movement/src/movement.rs
+@@ -1112,7 +1112,7 @@
+     result.wish_state = wish;
+     if result.state.ground.is_some() {
+         if configuration.css_stamina && result.state.stamina_ms > 0.0 {
+-            let ratio = ((100.0 - (result.state.stamina_ms / 1000.0 * 19.0)) / 100.0).powf(tick / (1.0 / 70.0));
++            let ratio = playsrc_collision::math::pow((100.0 - (result.state.stamina_ms / 1000.0 * 19.0)) / 100.0, tick / (1.0 / 70.0));
+             result.state.velocity[0] *= ratio;
+             result.state.velocity[1] *= ratio;
+         }
+@@ -3422,9 +3422,9 @@
+     yaw_degrees: f32,
+     roll_degrees: f32,
+ ) -> ([f32; 3], [f32; 3], [f32; 3]) {
+-    let (pitch_sine, pitch_cosine) = pitch_degrees.to_radians().sin_cos();
+-    let (yaw_sine, yaw_cosine) = yaw_degrees.to_radians().sin_cos();
+-    let (roll_sine, roll_cosine) = roll_degrees.to_radians().sin_cos();
++    let (pitch_sine, pitch_cosine) = playsrc_collision::math::sin_cos(pitch_degrees.to_radians());
++    let (yaw_sine, yaw_cosine) = playsrc_collision::math::sin_cos(yaw_degrees.to_radians());
++    let (roll_sine, roll_cosine) = playsrc_collision::math::sin_cos(roll_degrees.to_radians());
+     let forward = [
+         pitch_cosine * yaw_cosine,
+         pitch_cosine * yaw_sine,
+diff --git a/crates/vendor/thirdpartylegalnotices.txt b/crates/vendor/thirdpartylegalnotices.txt
+new file mode 100644
+--- /dev/null
++++ b/crates/vendor/thirdpartylegalnotices.txt
+@@ -0,0 +1,912 @@
++The Source engine and Valve games use Third Party code for certain functions.  The 
++required legal notices for using such code are reproduced below in accordance with 
++Valve�s obligations to provide such notices:
++
++************************************************************************************
++Xzip/Xunzip:
++************************************************************************************
++
++	// This is version 2002-Feb-16 of the Info-ZIP copyright and license. The 
++	// definitive version of this document should be available at 
++	// ftp://ftp.info-zip.org/pub/infozip/license.html indefinitely.
++	// 
++	// Copyright (c) 1990-2002 Info-ZIP.  All rights reserved.
++	//
++	// For the purposes of this copyright and license, "Info-ZIP" is defined as
++	// the following set of individuals:
++	//
++	//   Mark Adler, John Bush, Karl Davis, Harald Denker, Jean-Michel Dubois,
++	//   Jean-loup Gailly, Hunter Goatley, Ian Gorman, Chris Herborth, Dirk Haase,
++	//   Greg Hartwig, Robert Heath, Jonathan Hudson, Paul Kienitz, 
++	//   David Kirschbaum, Johnny Lee, Onno van der Linden, Igor Mandrichenko, 
++	//   Steve P. Miller, Sergio Monesi, Keith Owens, George Petrov, Greg Roelofs, 
++	//   Kai Uwe Rommel, Steve Salisbury, Dave Smith, Christian Spieler, 
++	//   Antoine Verheijen, Paul von Behren, Rich Wales, Mike White
++	//
++	// This software is provided "as is", without warranty of any kind, express
++	// or implied.  In no event shall Info-ZIP or its contributors be held liable
++	// for any direct, indirect, incidental, special or consequential damages
++	// arising out of the use of or inability to use this software.
++	//
++	// Permission is granted to anyone to use this software for any purpose,
++	// including commercial applications, and to alter it and redistribute it
++	// freely, subject to the following restrictions:
++	//
++	//    1. Redistributions of source code must retain the above copyright notice,
++	//       definition, disclaimer, and this list of conditions.
++	//
++	//    2. Redistributions in binary form (compiled executables) must reproduce 
++	//       the above copyright notice, definition, disclaimer, and this list of 
++	//       conditions in documentation and/or other materials provided with the 
++	//       distribution. The sole exception to this condition is redistribution 
++	//       of a standard UnZipSFX binary as part of a self-extracting archive; 
++	//       that is permitted without inclusion of this license, as long as the 
++	//       normal UnZipSFX banner has not been removed from the binary or disabled.
++	//
++	//    3. Altered versions--including, but not limited to, ports to new 
++	//       operating systems, existing ports with new graphical interfaces, and 
++	//       dynamic, shared, or static library versions--must be plainly marked 
++	//       as such and must not be misrepresented as being the original source.  
++	//       Such altered versions also must not be misrepresented as being 
++	//       Info-ZIP releases--including, but not limited to, labeling of the 
++	//       altered versions with the names "Info-ZIP" (or any variation thereof, 
++	//       including, but not limited to, different capitalizations), 
++	//       "Pocket UnZip", "WiZ" or "MacZip" without the explicit permission of 
++	//       Info-ZIP.  Such altered versions are further prohibited from 
++	//       misrepresentative use of the Zip-Bugs or Info-ZIP e-mail addresses or 
++	//       of the Info-ZIP URL(s).
++	//
++	//    4. Info-ZIP retains the right to use the names "Info-ZIP", "Zip", "UnZip",
++	//       "UnZipSFX", "WiZ", "Pocket UnZip", "Pocket Zip", and "MacZip" for its 
++	//       own source and binary releases.
++	//
++	///////////////////////////////////////////////////////////////////////////////
++
++************************************************************************************
++JPEG image support:
++************************************************************************************
++
++	The Source engine and SDK also make use of library functions for working with .jpg 
++	files.  Specifically, the Source engine jpeg library is based in part on the work of 
++	the Independent JPEG Group (IJG).  The original source code and project files for the IJG's 
++	JPEG libraries may be found at:  http://www.ijg.org/files/jpegsrc.v6b.tar.gz
++
++	The following is the README. File from that archive and is produced in accordance with the legal 
++	notices required by the library:
++
++	The Independent JPEG Group's JPEG software
++	==========================================
++
++	README for release 6b of 27-Mar-1998
++	====================================
++
++	This distribution contains the sixth public release of the Independent JPEG
++	Group's free JPEG software.  You are welcome to redistribute this software and
++	to use it for any purpose, subject to the conditions under LEGAL ISSUES, below.
++
++	Serious users of this software (particularly those incorporating it into
++	larger programs) should contact IJG at jpeg-info@uunet.uu.net to be added to
++	our electronic mailing list.  Mailing list members are notified of updates
++	and have a chance to participate in technical discussions, etc.
++
++	This software is the work of Tom Lane, Philip Gladstone, Jim Boucher,
++	Lee Crocker, Julian Minguillon, Luis Ortiz, George Phillips, Davide Rossi,
++	Guido Vollbeding, Ge' Weijers, and other members of the Independent JPEG
++	Group.
++
++	IJG is not affiliated with the official ISO JPEG standards committee.
++
++
++	DOCUMENTATION ROADMAP
++	=====================
++
++	This file contains the following sections:
++
++	OVERVIEW            General description of JPEG and the IJG software.
++	LEGAL ISSUES        Copyright, lack of warranty, terms of distribution.
++	REFERENCES          Where to learn more about JPEG.
++	ARCHIVE LOCATIONS   Where to find newer versions of this software.
++	RELATED SOFTWARE    Other stuff you should get.
++	FILE FORMAT WARS    Software *not* to get.
++	TO DO               Plans for future IJG releases.
++
++	Other documentation files in the distribution are:
++
++	User documentation:
++	  install.doc       How to configure and install the IJG software.
++	  usage.doc         Usage instructions for cjpeg, djpeg, jpegtran,
++						rdjpgcom, and wrjpgcom.
++	  *.1               Unix-style man pages for programs (same info as usage.doc).
++	  wizard.doc        Advanced usage instructions for JPEG wizards only.
++	  change.log        Version-to-version change highlights.
++	Programmer and internal documentation:
++	  libjpeg.doc       How to use the JPEG library in your own programs.
++	  example.c         Sample code for calling the JPEG library.
++	  structure.doc     Overview of the JPEG library's internal structure.
++	  filelist.doc      Road map of IJG files.
++	  coderules.doc     Coding style rules --- please read if you contribute code.
++
++	Please read at least the files install.doc and usage.doc.  Useful information
++	can also be found in the JPEG FAQ (Frequently Asked Questions) article.  See
++	ARCHIVE LOCATIONS below to find out where to obtain the FAQ article.
++
++	If you want to understand how the JPEG code works, we suggest reading one or
++	more of the REFERENCES, then looking at the documentation files (in roughly
++	the order listed) before diving into the code.
++
++
++	OVERVIEW
++	========
++
++	This package contains C software to implement JPEG image compression and
++	decompression.  JPEG (pronounced "jay-peg") is a standardized compression
++	method for full-color and gray-scale images.  JPEG is intended for compressing
++	"real-world" scenes; line drawings, cartoons and other non-realistic images
++	are not its strong suit.  JPEG is lossy, meaning that the output image is not
++	exactly identical to the input image.  Hence you must not use JPEG if you
++	have to have identical output bits.  However, on typical photographic images,
++	very good compression levels can be obtained with no visible change, and
++	remarkably high compression levels are possible if you can tolerate a
++	low-quality image.  For more details, see the references, or just experiment
++	with various compression settings.
++
++	This software implements JPEG baseline, extended-sequential, and progressive
++	compression processes.  Provision is made for supporting all variants of these
++	processes, although some uncommon parameter settings aren't implemented yet.
++	For legal reasons, we are not distributing code for the arithmetic-coding
++	variants of JPEG; see LEGAL ISSUES.  We have made no provision for supporting
++	the hierarchical or lossless processes defined in the standard.
++
++	We provide a set of library routines for reading and writing JPEG image files,
++	plus two sample applications "cjpeg" and "djpeg", which use the library to
++	perform conversion between JPEG and some other popular image file formats.
++	The library is intended to be reused in other applications.
++
++	In order to support file conversion and viewing software, we have included
++	considerable functionality beyond the bare JPEG coding/decoding capability;
++	for example, the color quantization modules are not strictly part of JPEG
++	decoding, but they are essential for output to colormapped file formats or
++	colormapped displays.  These extra functions can be compiled out of the
++	library if not required for a particular application.  We have also included
++	"jpegtran", a utility for lossless transcoding between different JPEG
++	processes, and "rdjpgcom" and "wrjpgcom", two simple applications for
++	inserting and extracting textual comments in JFIF files.
++
++	The emphasis in designing this software has been on achieving portability and
++	flexibility, while also making it fast enough to be useful.  In particular,
++	the software is not intended to be read as a tutorial on JPEG.  (See the
++	REFERENCES section for introductory material.)  Rather, it is intended to
++	be reliable, portable, industrial-strength code.  We do not claim to have
++	achieved that goal in every aspect of the software, but we strive for it.
++
++	We welcome the use of this software as a component of commercial products.
++	No royalty is required, but we do ask for an acknowledgement in product
++	documentation, as described under LEGAL ISSUES.
++
++
++	LEGAL ISSUES
++	============
++
++	In plain English:
++
++	1. We don't promise that this software works.  (But if you find any bugs,
++	   please let us know!)
++	2. You can use this software for whatever you want.  You don't have to pay us.
++	3. You may not pretend that you wrote this software.  If you use it in a
++	   program, you must acknowledge somewhere in your documentation that
++	   you've used the IJG code.
++
++	In legalese:
++
++	The authors make NO WARRANTY or representation, either express or implied,
++	with respect to this software, its quality, accuracy, merchantability, or
++	fitness for a particular purpose.  This software is provided "AS IS", and you,
++	its user, assume the entire risk as to its quality and accuracy.
++
++	This software is copyright (C) 1991-1998, Thomas G. Lane.
++	All Rights Reserved except as specified below.
++
++	Permission is hereby granted to use, copy, modify, and distribute this
++	software (or portions thereof) for any purpose, without fee, subject to these
++	conditions:
++	(1) If any part of the source code for this software is distributed, then this
++	README file must be included, with this copyright and no-warranty notice
++	unaltered; and any additions, deletions, or changes to the original files
++	must be clearly indicated in accompanying documentation.
++	(2) If only executable code is distributed, then the accompanying
++	documentation must state that "this software is based in part on the work of
++	the Independent JPEG Group".
++	(3) Permission for use of this software is granted only if the user accepts
++	full responsibility for any undesirable consequences; the authors accept
++	NO LIABILITY for damages of any kind.
++
++	These conditions apply to any software derived from or based on the IJG code,
++	not just to the unmodified library.  If you use our work, you ought to
++	acknowledge us.
++
++	Permission is NOT granted for the use of any IJG author's name or company name
++	in advertising or publicity relating to this software or products derived from
++	it.  This software may be referred to only as "the Independent JPEG Group's
++	software".
++
++	We specifically permit and encourage the use of this software as the basis of
++	commercial products, provided that all warranty or liability claims are
++	assumed by the product vendor.
++
++
++	ansi2knr.c is included in this distribution by permission of L. Peter Deutsch,
++	sole proprietor of its copyright holder, Aladdin Enterprises of Menlo Park, CA.
++	ansi2knr.c is NOT covered by the above copyright and conditions, but instead
++	by the usual distribution terms of the Free Software Foundation; principally,
++	that you must include source code if you redistribute it.  (See the file
++	ansi2knr.c for full details.)  However, since ansi2knr.c is not needed as part
++	of any program generated from the IJG code, this does not limit you more than
++	the foregoing paragraphs do.
++
++	The Unix configuration script "configure" was produced with GNU Autoconf.
++	It is copyright by the Free Software Foundation but is freely distributable.
++	The same holds for its supporting scripts (config.guess, config.sub,
++	ltconfig, ltmain.sh).  Another support script, install-sh, is copyright
++	by M.I.T. but is also freely distributable.
++
++	It appears that the arithmetic coding option of the JPEG spec is covered by
++	patents owned by IBM, AT&T, and Mitsubishi.  Hence arithmetic coding cannot
++	legally be used without obtaining one or more licenses.  For this reason,
++	support for arithmetic coding has been removed from the free JPEG software.
++	(Since arithmetic coding provides only a marginal gain over the unpatented
++	Huffman mode, it is unlikely that very many implementations will support it.)
++	So far as we are aware, there are no patent restrictions on the remaining
++	code.
++
++	The IJG distribution formerly included code to read and write GIF files.
++	To avoid entanglement with the Unisys LZW patent, GIF reading support has
++	been removed altogether, and the GIF writer has been simplified to produce
++	"uncompressed GIFs".  This technique does not use the LZW algorithm; the
++	resulting GIF files are larger than usual, but are readable by all standard
++	GIF decoders.
++
++	We are required to state that
++		"The Graphics Interchange Format(c) is the Copyright property of
++		CompuServe Incorporated.  GIF(sm) is a Service Mark property of
++		CompuServe Incorporated."
++
++
++	REFERENCES
++	==========
++
++	We highly recommend reading one or more of these references before trying to
++	understand the innards of the JPEG software.
++
++	The best short technical introduction to the JPEG compression algorithm is
++		Wallace, Gregory K.  "The JPEG Still Picture Compression Standard",
++		Communications of the ACM, April 1991 (vol. 34 no. 4), pp. 30-44.
++	(Adjacent articles in that issue discuss MPEG motion picture compression,
++	applications of JPEG, and related topics.)  If you don't have the CACM issue
++	handy, a PostScript file containing a revised version of Wallace's article is
++	available at ftp://ftp.uu.net/graphics/jpeg/wallace.ps.gz.  The file (actually
++	a preprint for an article that appeared in IEEE Trans. Consumer Electronics)
++	omits the sample images that appeared in CACM, but it includes corrections
++	and some added material.  Note: the Wallace article is copyright ACM and IEEE,
++	and it may not be used for commercial purposes.
++
++	A somewhat less technical, more leisurely introduction to JPEG can be found in
++	"The Data Compression Book" by Mark Nelson and Jean-loup Gailly, published by
++	M&T Books (New York), 2nd ed. 1996, ISBN 1-55851-434-1.  This book provides
++	good explanations and example C code for a multitude of compression methods
++	including JPEG.  It is an excellent source if you are comfortable reading C
++	code but don't know much about data compression in general.  The book's JPEG
++	sample code is far from industrial-strength, but when you are ready to look
++	at a full implementation, you've got one here...
++
++	The best full description of JPEG is the textbook "JPEG Still Image Data
++	Compression Standard" by William B. Pennebaker and Joan L. Mitchell, published
++	by Van Nostrand Reinhold, 1993, ISBN 0-442-01272-1.  Price US$59.95, 638 pp.
++	The book includes the complete text of the ISO JPEG standards (DIS 10918-1
++	and draft DIS 10918-2).  This is by far the most complete exposition of JPEG
++	in existence, and we highly recommend it.
++
++	The JPEG standard itself is not available electronically; you must order a
++	paper copy through ISO or ITU.  (Unless you feel a need to own a certified
++	official copy, we recommend buying the Pennebaker and Mitchell book instead;
++	it's much cheaper and includes a great deal of useful explanatory material.)
++	In the USA, copies of the standard may be ordered from ANSI Sales at (212)
++	642-4900, or from Global Engineering Documents at (800) 854-7179.  (ANSI
++	doesn't take credit card orders, but Global does.)  It's not cheap: as of
++	1992, ANSI was charging $95 for Part 1 and $47 for Part 2, plus 7%
++	shipping/handling.  The standard is divided into two parts, Part 1 being the
++	actual specification, while Part 2 covers compliance testing methods.  Part 1
++	is titled "Digital Compression and Coding of Continuous-tone Still Images,
++	Part 1: Requirements and guidelines" and has document numbers ISO/IEC IS
++	10918-1, ITU-T T.81.  Part 2 is titled "Digital Compression and Coding of
++	Continuous-tone Still Images, Part 2: Compliance testing" and has document
++	numbers ISO/IEC IS 10918-2, ITU-T T.83.
++
++	Some extensions to the original JPEG standard are defined in JPEG Part 3,
++	a newer ISO standard numbered ISO/IEC IS 10918-3 and ITU-T T.84.  IJG
++	currently does not support any Part 3 extensions.
++
++	The JPEG standard does not specify all details of an interchangeable file
++	format.  For the omitted details we follow the "JFIF" conventions, revision
++	1.02.  A copy of the JFIF spec is available from:
++		Literature Department
++		C-Cube Microsystems, Inc.
++		1778 McCarthy Blvd.
++		Milpitas, CA 95035
++		phone (408) 944-6300,  fax (408) 944-6314
++	A PostScript version of this document is available by FTP at
++	ftp://ftp.uu.net/graphics/jpeg/jfif.ps.gz.  There is also a plain text
++	version at ftp://ftp.uu.net/graphics/jpeg/jfif.txt.gz, but it is missing
++	the figures.
++
++	The TIFF 6.0 file format specification can be obtained by FTP from
++	ftp://ftp.sgi.com/graphics/tiff/TIFF6.ps.gz.  The JPEG incorporation scheme
++	found in the TIFF 6.0 spec of 3-June-92 has a number of serious problems.
++	IJG does not recommend use of the TIFF 6.0 design (TIFF Compression tag 6).
++	Instead, we recommend the JPEG design proposed by TIFF Technical Note #2
++	(Compression tag 7).  Copies of this Note can be obtained from ftp.sgi.com or
++	from ftp://ftp.uu.net/graphics/jpeg/.  It is expected that the next revision
++	of the TIFF spec will replace the 6.0 JPEG design with the Note's design.
++	Although IJG's own code does not support TIFF/JPEG, the free libtiff library
++	uses our library to implement TIFF/JPEG per the Note.  libtiff is available
++	from ftp://ftp.sgi.com/graphics/tiff/.
++
++
++	ARCHIVE LOCATIONS
++	=================
++
++	The "official" archive site for this software is ftp.uu.net (Internet
++	address 192.48.96.9).  The most recent released version can always be found
++	there in directory graphics/jpeg.  This particular version will be archived
++	as ftp://ftp.uu.net/graphics/jpeg/jpegsrc.v6b.tar.gz.  If you don't have
++	direct Internet access, UUNET's archives are also available via UUCP; contact
++	help@uunet.uu.net for information on retrieving files that way.
++
++	Numerous Internet sites maintain copies of the UUNET files.  However, only
++	ftp.uu.net is guaranteed to have the latest official version.
++
++	You can also obtain this software in DOS-compatible "zip" archive format from
++	the SimTel archives (ftp://ftp.simtel.net/pub/simtelnet/msdos/graphics/), or
++	on CompuServe in the Graphics Support forum (GO CIS:GRAPHSUP), library 12
++	"JPEG Tools".  Again, these versions may sometimes lag behind the ftp.uu.net
++	release.
++
++	The JPEG FAQ (Frequently Asked Questions) article is a useful source of
++	general information about JPEG.  It is updated constantly and therefore is
++	not included in this distribution.  The FAQ is posted every two weeks to
++	Usenet newsgroups comp.graphics.misc, news.answers, and other groups.
++	It is available on the World Wide Web at http://www.faqs.org/faqs/jpeg-faq/
++	and other news.answers archive sites, including the official news.answers
++	archive at rtfm.mit.edu: ftp://rtfm.mit.edu/pub/usenet/news.answers/jpeg-faq/.
++	If you don't have Web or FTP access, send e-mail to mail-server@rtfm.mit.edu
++	with body
++		send usenet/news.answers/jpeg-faq/part1
++		send usenet/news.answers/jpeg-faq/part2
++
++
++	RELATED SOFTWARE
++	================
++
++	Numerous viewing and image manipulation programs now support JPEG.  (Quite a
++	few of them use this library to do so.)  The JPEG FAQ described above lists
++	some of the more popular free and shareware viewers, and tells where to
++	obtain them on Internet.
++
++	If you are on a Unix machine, we highly recommend Jef Poskanzer's free
++	PBMPLUS software, which provides many useful operations on PPM-format image
++	files.  In particular, it can convert PPM images to and from a wide range of
++	other formats, thus making cjpeg/djpeg considerably more useful.  The latest
++	version is distributed by the NetPBM group, and is available from numerous
++	sites, notably ftp://wuarchive.wustl.edu/graphics/graphics/packages/NetPBM/.
++	Unfortunately PBMPLUS/NETPBM is not nearly as portable as the IJG software is;
++	you are likely to have difficulty making it work on any non-Unix machine.
++
++	A different free JPEG implementation, written by the PVRG group at Stanford,
++	is available from ftp://havefun.stanford.edu/pub/jpeg/.  This program
++	is designed for research and experimentation rather than production use;
++	it is slower, harder to use, and less portable than the IJG code, but it
++	is easier to read and modify.  Also, the PVRG code supports lossless JPEG,
++	which we do not.  (On the other hand, it doesn't do progressive JPEG.)
++
++
++	FILE FORMAT WARS
++	================
++
++	Some JPEG programs produce files that are not compatible with our library.
++	The root of the problem is that the ISO JPEG committee failed to specify a
++	concrete file format.  Some vendors "filled in the blanks" on their own,
++	creating proprietary formats that no one else could read.  (For example, none
++	of the early commercial JPEG implementations for the Macintosh were able to
++	exchange compressed files.)
++
++	The file format we have adopted is called JFIF (see REFERENCES).  This format
++	has been agreed to by a number of major commercial JPEG vendors, and it has
++	become the de facto standard.  JFIF is a minimal or "low end" representation.
++	We recommend the use of TIFF/JPEG (TIFF revision 6.0 as modified by TIFF
++	Technical Note #2) for "high end" applications that need to record a lot of
++	additional data about an image.  TIFF/JPEG is fairly new and not yet widely
++	supported, unfortunately.
++
++	The upcoming JPEG Part 3 standard defines a file format called SPIFF.
++	SPIFF is interoperable with JFIF, in the sense that most JFIF decoders should
++	be able to read the most common variant of SPIFF.  SPIFF has some technical
++	advantages over JFIF, but its major claim to fame is simply that it is an
++	official standard rather than an informal one.  At this point it is unclear
++	whether SPIFF will supersede JFIF or whether JFIF will remain the de-facto
++	standard.  IJG intends to support SPIFF once the standard is frozen, but we
++	have not decided whether it should become our default output format or not.
++	(In any case, our decoder will remain capable of reading JFIF indefinitely.)
++
++	Various proprietary file formats incorporating JPEG compression also exist.
++	We have little or no sympathy for the existence of these formats.  Indeed,
++	one of the original reasons for developing this free software was to help
++	force convergence on common, open format standards for JPEG files.  Don't
++	use a proprietary file format!
++
++
++	TO DO
++	=====
++
++	The major thrust for v7 will probably be improvement of visual quality.
++	The current method for scaling the quantization tables is known not to be
++	very good at low Q values.  We also intend to investigate block boundary
++	smoothing, "poor man's variable quantization", and other means of improving
++	quality-vs-file-size performance without sacrificing compatibility.
++
++	In future versions, we are considering supporting some of the upcoming JPEG
++	Part 3 extensions --- principally, variable quantization and the SPIFF file
++	format.
++
++	As always, speeding things up is of great interest.
++
++	Please send bug reports, offers of help, etc. to jpeg-info@uunet.uu.net.
++
++************************************************************************************
++Celt Codec:
++************************************************************************************
++
++	Copyright 2001-2009 Jean-Marc Valin, Timothy B. Terriberry,
++	                    CSIRO, and other contributors
++
++	Redistribution and use in source and binary forms, with or without
++	modification, are permitted provided that the following conditions
++	are met:
++
++	- Redistributions of source code must retain the above copyright
++	notice, this list of conditions and the following disclaimer.
++
++	- Redistributions in binary form must reproduce the above copyright
++	notice, this list of conditions and the following disclaimer in the
++	documentation and/or other materials provided with the distribution.
++
++	- Neither the name of Internet Society, IETF or IETF Trust, nor the
++	names of specific contributors, may be used to endorse or promote
++	products derived from this software without specific prior written
++	permission.
++
++	THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++	``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++	LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++	A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
++	OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
++	EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
++	PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
++	PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
++	LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
++	NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
++	SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++************************************************************************************
++SPEEX Codes:
++************************************************************************************
++	SPEEX  � 2002-2003, Jean-Marc Valin/Xiph.Org Foundation
++	Redistribution and use in source and binary forms, with or without modification, are permitted 
++	provided that the following conditions are met: 
++	*	Redistributions of source code must retain the above copyright notice, this list of 
++	conditions and the following disclaimer. 
++	*	Redistributions in binary form must reproduce the above copyright notice, this list of 
++	conditions and the following disclaimer in the documentation and/or other materials 
++	provided with the distribution. 
++	*	Neither the name of the Xiph.org Foundation nor the names of its contributors may be 
++	used to endorse or promote products derived from this software without specific prior 
++	written permission. 
++	This software is provided by the copyright holders and contributors �as is� and any express or 
++	implied warranties, including, but not limited to, the implied warranties of merchantability and 
++	fitness for a particular purpose are disclaimed. In no event shall the foundation or contributors be 
++	liable for any direct, indirect, incidental, special, exemplary, or consequential damages (including, 
++	but not limited to, procurement of substitute goods or services; loss of use, data, or profits; or 
++	business interruption) however caused and on any theory of liability, whether in contract, strict 
++	liability, or tort (including negligence or otherwise) arising in any way out of the use of this 
++	software, even if advised of the possibility of such damage. 
++
++************************************************************************************
++google-perftools:
++************************************************************************************
++
++	http://code.google.com/p/gperftools/ 
++
++	Copyright (c) 2012, Google Inc.
++	All rights reserved.
++
++	Redistribution and use in source and binary forms, with or without
++	modification, are permitted provided that the following conditions are
++	met:
++
++		* Redistributions of source code must retain the above copyright
++	notice, this list of conditions and the following disclaimer.
++		* Redistributions in binary form must reproduce the above
++	copyright notice, this list of conditions and the following disclaimer
++	in the documentation and/or other materials provided with the
++	distribution.
++		* Neither the name of Google Inc. nor the names of its
++	contributors may be used to endorse or promote products derived from
++	this software without specific prior written permission.
++
++	THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++	"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++	LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++	A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++	OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++	SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++	LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++	DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++	THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++	(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++	OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++	For Google libjingle:
++	http://sourceforge.net/projects/libjingle/
++	Copyright (c) 2004--2005, Google Inc.
++	All rights reserved.
++
++	Redistribution and use in source and binary forms, with or without modification,
++	are permitted provided that the following conditions are met:
++
++		* Redistributions of source code must retain the above copyright notice,
++		  this list of conditions and the following disclaimer.
++		* Redistributions in binary form must reproduce the above copyright notice,
++		  this list of conditions and the following disclaimer in the documentation
++		  and/or other materials provided with the distribution.
++		* The name of the author may not be used to endorse or promote products
++		  derived from this software without specific prior written permission.
++
++	THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
++	AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE 
++	IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++	ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE 
++	LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR 
++	CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF 
++	SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS 
++	INTERRUPTION)
++	HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT 
++	LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY 
++	OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH 
++	DAMAGE.
++
++************************************************************************************
++CakePHP:
++************************************************************************************
++
++	CakePHP(tm) :  Rapid Development Framework <http://www.cakephp.org/>
++	Copyright 2005-2007,	Cake Software Foundation, Inc.
++				1785 E. Sahara Avenue, Suite 490-204
++				Las Vegas, Nevada 89104
++
++	Permission is hereby granted, free of charge, to any person obtaining a
++	copy of this software and associated documentation files (the "Software"),
++	to deal in the Software without restriction, including without limitation
++	the rights to use, copy, modify, merge, publish, distribute, sublicense,
++	and/or sell copies of the Software, and to permit persons to whom the
++	Software is furnished to do so, subject to the following conditions:
++
++	The above copyright notice and this permission notice shall be included in
++	all copies or substantial portions of the Software.
++
++	THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++	IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++	FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++	AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++	LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++	FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++	DEALINGS IN THE SOFTWARE.
++
++************************************************************************************
++LZMA
++************************************************************************************
++
++	LZMA SDK 4.40 Copyright (c) 1999-2006 Igor Pavlov (2006-05-01)
++	http://www.7-zip.org/
++	LZMA SDK is licensed under two licenses:
++	1) GNU Lesser General Public License (GNU LGPL)
++	2) Common Public License (CPL)
++	It means that you can select one of these two licenses and 
++	follow rules of that license.
++	SPECIAL EXCEPTION:
++	Igor Pavlov, as the author of this Code, expressly permits you to 
++	statically or dynamically link your Code (or bind by name) to the 
++	interfaces of this file without subjecting your linked Code to the 
++	terms of the CPL or GNU LGPL. Any modifications or additions 
++	to this file, however, are subject to the LGPL or CPL terms.
++
++************************************************************************************
++Fast Pow Function
++************************************************************************************
++
++	/*
++	 * (c) Ian Stephenson
++	 *
++	 * ian@dctsystems.co.uk
++	 *
++	 * Fast pow() reference implementation
++	 */
++
++	Used with permission from author
++
++	For libantlr3c:
++	// [The "BSD licence"]
++	// Copyright (c) 2005-2009 Jim Idle, Temporal Wave LLC
++	// http://www.temporal-wave.com
++	// http://www.linkedin.com/in/jimidle
++	//
++	// All rights reserved.
++	//
++	// Redistribution and use in source and binary forms, with or without
++	// modification, are permitted provided that the following conditions
++	// are met:
++	// 1. Redistributions of source code must retain the above copyright
++	//    notice, this list of conditions and the following disclaimer.
++	// 2. Redistributions in binary form must reproduce the above copyright
++	//    notice, this list of conditions and the following disclaimer in the
++	//    documentation and/or other materials provided with the distribution.
++	// 3. The name of the author may not be used to endorse or promote products
++	//    derived from this software without specific prior written permission.
++	//
++	// THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
++	// IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
++	// OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
++	// IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
++	// INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
++	// NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++	// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++	// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++	// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
++	// THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++************************************************************************************
++Autodesk� FBX�:
++************************************************************************************
++
++	�This software contains Autodesk� FBX� code developed by Autodesk, Inc. Copyright 2012 Autodesk, Inc. 
++	All rights, reserved. Such code is provided �as is� and Autodesk, Inc. disclaims any and all warranties, 
++	whether express or implied, including without limitation the implied warranties of merchantability, fitness for a 
++	particular purpose or non-infringement of third party rights. In no event shall Autodesk, Inc. be liable for any 
++	direct, indirect, incidental, special, exemplary, or consequential damages (including, but not limited to, 
++	procurement of substitute goods or services; loss of use, data, or profits; or business interruption) however 
++	caused and on any theory of liability, whether in contract, strict liability, or tort (including negligence or 
++	otherwise) arising in any way out of such code.�
++
++************************************************************************************
++OpenSSL:
++************************************************************************************
++
++	 * This product includes software developed by the OpenSSL Project
++	 * for use in the OpenSSL Toolkit. (http://www.openssl.org/)
++	 * This product includes cryptographic software written by Eric Young
++	 * (eay@cryptsoft.com).  This product includes software written by Tim
++	 * Hudson (tjh@cryptsoft.com).
++	/* ====================================================================
++	 * Copyright (c) 1998-2008 The OpenSSL Project.  All rights reserved.
++	 *
++	 * Redistribution and use in source and binary forms, with or without
++	 * modification, are permitted provided that the following conditions
++	 * are met:
++	 *
++	 * 1. Redistributions of source code must retain the above copyright
++	 *    notice, this list of conditions and the following disclaimer.
++	 *
++	 * 2. Redistributions in binary form must reproduce the above copyright
++	 *    notice, this list of conditions and the following disclaimer in
++	 *    the documentation and/or other materials provided with the
++	 *    distribution.
++	 *
++	 * 3. All advertising materials mentioning features or use of this
++	 *    software must display the following acknowledgment:
++	 *    "This product includes software developed by the OpenSSL Project
++	 *    for use in the OpenSSL Toolkit. (http://www.openssl.org/)"
++	 *
++	 * 4. The names "OpenSSL Toolkit" and "OpenSSL Project" must not be 
++	used to
++	 *    endorse or promote products derived from this software without
++	 *    prior written permission. For written permission, please contact
++	 *    openssl-core@openssl.org.
++	 *
++	 * 5. Products derived from this software may not be called "OpenSSL"
++	 *    nor may "OpenSSL" appear in their names without prior written
++	 *    permission of the OpenSSL Project.
++	 *
++	 * 6. Redistributions of any form whatsoever must retain the following
++	 *    acknowledgment:
++	 *    "This product includes software developed by the OpenSSL Project
++	 *    for use in the OpenSSL Toolkit (http://www.openssl.org/)"
++	 *
++	 * THIS SOFTWARE IS PROVIDED BY THE OpenSSL PROJECT ``AS IS'' AND ANY
++	 * EXPRESSED OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++	 * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++	 * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE OpenSSL PROJECT OR
++	 * ITS CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++	 * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
++	 * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
++	 * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++	 * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++	 * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++	 * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++	 * OF THE POSSIBILITY OF SUCH DAMAGE.
++	 * ====================================================================
++	 *
++	 *
++	 */
++
++
++	/* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
++	 * All rights reserved.
++	 *
++	 * This package is an SSL implementation written
++	 * by Eric Young (eay@cryptsoft.com).
++	 * The implementation was written so as to conform with Netscapes SSL.
++	 *
++	 * This library is free for commercial and non-commercial use as long as
++	 * the following conditions are aheared to.  The following conditions
++	 * apply to all code found in this distribution, be it the RC4, RSA,
++	 * lhash, DES, etc., code; not just the SSL code.  The SSL documentation
++	 * included with this distribution is covered by the same copyright terms
++	 * except that the holder is Tim Hudson (tjh@cryptsoft.com).
++	 *
++	 * Copyright remains Eric Young's, and as such any Copyright notices in
++	 * the code are not to be removed.
++	 * If this package is used in a product, Eric Young should be given attribution
++	 * as the author of the parts of the library used.
++	 * This can be in the form of a textual message at program startup or
++	 * in documentation (online or textual) provided with the package.
++	 *
++	 * Redistribution and use in source and binary forms, with or without
++	 * modification, are permitted provided that the following conditions
++	 * are met:
++	 * 1. Redistributions of source code must retain the copyright
++	 *    notice, this list of conditions and the following disclaimer.
++	 * 2. Redistributions in binary form must reproduce the above copyright
++	 *    notice, this list of conditions and the following disclaimer in the
++	 *    documentation and/or other materials provided with the distribution.
++	 * 3. All advertising materials mentioning features or use of this software
++	 *    must display the following acknowledgement:
++	 *    "This product includes cryptographic software written by
++	 *     Eric Young (eay@cryptsoft.com)"
++	 *    The word 'cryptographic' can be left out if the rouines from the library
++	 *    being used are not cryptographic related :-).
++	 * 4. If you include any Windows specific code (or a derivative thereof) from
++	 *    the apps directory (application code) you must include an 
++	acknowledgement:
++	 *    "This product includes software written by Tim Hudson 
++	(tjh@cryptsoft.com)"
++	 *
++	 * THIS SOFTWARE IS PROVIDED BY ERIC YOUNG ``AS IS'' AND
++	 * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++	 * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++	 * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
++	 * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++	 * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
++	 * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++	 * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++	 * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
++	 * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
++	 * SUCH DAMAGE.
++	 *
++	 * The licence and distribution terms for any publically available version or
++	 * derivative of this code cannot be changed.  i.e. this code cannot simply be
++	 * copied and put under another distribution licence
++	 * [including the GNU Public Licence.]
++	 */
++
++************************************************************************************
++Google protocol buffers
++************************************************************************************
++
++	// Protocol Buffers - Google's data interchange format
++	// Copyright 2008 Google Inc.  All rights reserved.
++	// http://code.google.com/p/protobuf/
++	//
++	// Redistribution and use in source and binary forms, with or without
++	// modification, are permitted provided that the following conditions are
++	// met:
++	//
++	//     * Redistributions of source code must retain the above copyright
++	// notice, this list of conditions and the following disclaimer.
++	//     * Redistributions in binary form must reproduce the above
++	// copyright notice, this list of conditions and the following disclaimer
++	// in the documentation and/or other materials provided with the
++	// distribution.
++	//     * Neither the name of Google Inc. nor the names of its
++	// contributors may be used to endorse or promote products derived from
++	// this software without specific prior written permission.
++	//
++	// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++	// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++	// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++	// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++	// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++	// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++	// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++	// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++	// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++	// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++	// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++	// Author: kenton@google.com (Kenton Varda)
++	//  Based on original Protocol Buffers design by
++	//  Sanjay Ghemawat, Jeff Dean, and others.
++
++************************************************************************************
++Google Snappy
++************************************************************************************
++
++	// Copyright 2005 Google Inc. All Rights Reserved.
++	//
++	// Redistribution and use in source and binary forms, with or without
++	// modification, are permitted provided that the following conditions are
++	// met:
++	//
++	//     * Redistributions of source code must retain the above copyright
++	// notice, this list of conditions and the following disclaimer.
++	//     * Redistributions in binary form must reproduce the above
++	// copyright notice, this list of conditions and the following disclaimer
++	// in the documentation and/or other materials provided with the
++	// distribution.
++	//     * Neither the name of Google Inc. nor the names of its
++	// contributors may be used to endorse or promote products derived from
++	// this software without specific prior written permission.
++	//
++	// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++	// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++	// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++	// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++	// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++	// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++	// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++	// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++	// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++	// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++	// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++************************************************************************************
++VAudio MiniMP3
++************************************************************************************
++
++Copyright 2022 Joshua Ashton and Josh Dowell
++
++Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++
++************************************************************************************
++Godot Engine
++************************************************************************************
++
++Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md).
++Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/crates/core/src/wasm.rs b/crates/core/src/wasm.rs
+--- a/crates/core/src/wasm.rs
++++ b/crates/core/src/wasm.rs
+@@ -31,7 +31,7 @@
+     CTX.with(|c| f(&mut c.borrow_mut()))
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn alloc(len: usize) -> *mut u8 {
+     let mut v = Vec::<u8>::with_capacity(len);
+     let p = v.as_mut_ptr();
+@@ -39,13 +39,13 @@
+     p
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn dealloc(ptr: *mut u8, len: usize) {
+     unsafe { drop(Vec::from_raw_parts(ptr, 0, len)) };
+ }
+ 
+ /// Loads a BSP from `len` bytes at `ptr` (takes ownership). Returns 1 on success, 0 on error (see `error_ptr`).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn load_map(ptr: *mut u8, len: usize) -> u32 {
+     let bytes = unsafe { Vec::from_raw_parts(ptr, len, len) };
+     with(|c| {
+@@ -82,7 +82,7 @@
+ 
+ /// Like `load_map`, but only builds the simulation (collision, triggers, entities): no render mesh, pakfile or
+ /// materials. Used by the server-side verifier to keep memory within Worker limits. Same return convention.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn load_map_physics(ptr: *mut u8, len: usize) -> u32 {
+     let bytes = unsafe { Vec::from_raw_parts(ptr, len, len) };
+     with(|c| {
+@@ -113,23 +113,23 @@
+     })
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn error_ptr() -> *const u8 {
+     with(|c| c.error.as_ptr())
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn error_len() -> usize {
+     with(|c| c.error.len())
+ }
+ 
+ macro_rules! mesh_buf {
+     ($ptr:ident, $len:ident, $field:ident, $ty:ty) => {
+-        #[unsafe(no_mangle)]
++        #[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+         pub extern "C" fn $ptr() -> *const $ty {
+             with(|c| c.mesh.as_ref().map_or(std::ptr::null(), |m| m.$field.as_ptr()))
+         }
+-        #[unsafe(no_mangle)]
++        #[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+         pub extern "C" fn $len() -> usize {
+             with(|c| c.mesh.as_ref().map_or(0, |m| m.$field.len()))
+         }
+@@ -142,7 +142,7 @@
+ mesh_buf!(mesh_sky_indices_ptr, mesh_sky_indices_len, sky_indices, u32);
+ 
+ /// Sky face groups as u32 triples in the scratch buffer: model, first_index, index_count (into `mesh_sky_indices`).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn mesh_sky_groups() -> usize {
+     with(|c| {
+         c.scratch_u32.clear();
+@@ -155,7 +155,7 @@
+ 
+ /// Per group (parallel to `mesh_groups`), 1 if it's in the 3D skybox set (drawn by the skybox pass, not the main
+ /// view; see `sky_camera`), into scratch_u32.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn mesh_group_sky3d() -> usize {
+     with(|c| {
+         c.scratch_u32.clear();
+@@ -169,7 +169,7 @@
+ /// The 3D skybox's `sky_camera` into scratch_f32 (`skybox.rs`); empty if the map has no usable 3D skybox:
+ /// [origin x, y, z, scale, area, fog enable, fog blend, fogcolor r, g, b, fogcolor2 r, g, b (0..255),
+ ///  fog dir x, y, z, fog start, fog end, fog max density].
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn sky_camera() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -187,7 +187,7 @@
+ }
+ 
+ /// Groups as u32 quads: model, material, first_index, index_count.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn mesh_groups() -> usize {
+     with(|c| {
+         c.scratch_u32.clear();
+@@ -200,23 +200,23 @@
+     })
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn scratch_u32_ptr() -> *const u32 {
+     with(|c| c.scratch_u32.as_ptr())
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn scratch_f32_ptr() -> *const f32 {
+     with(|c| c.scratch_f32.as_ptr())
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn scratch_str_ptr() -> *const u8 {
+     with(|c| c.scratch_str.as_ptr())
+ }
+ 
+ /// Materials as newline-separated `name width height` lines.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn mesh_materials() -> usize {
+     with(|c| {
+         c.scratch_str.clear();
+@@ -230,7 +230,7 @@
+ }
+ 
+ /// Raw entity lump as `classname\tkey=value\t...` lines.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn entities_text() -> usize {
+     with(|c| {
+         c.scratch_str.clear();
+@@ -245,19 +245,19 @@
+     })
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn pak_ptr() -> *const u8 {
+     with(|c| c.vfs.source("pak").map_or(std::ptr::null(), |s| s.bytes().as_ptr()))
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn pak_len() -> usize {
+     with(|c| c.vfs.source("pak").map_or(0, |s| s.bytes().len()))
+ }
+ 
+ /// Resolved materials (parallel to `mesh_materials`) as newline-separated lines:
+ /// `kind flags texture alpha alpha_ref r g b shader`.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn material_info() -> usize {
+     with(|c| {
+         c.scratch_str.clear();
+@@ -272,14 +272,14 @@
+     })
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn texture_count() -> usize {
+     with(|c| c.materials.textures.len())
+ }
+ 
+ /// Extracts texture `index` into `tex_bytes`. Header goes to scratch_u32 as
+ /// `[format, level_count, (width, height, offset, len) * level_count]`. Returns the header length, 0 on error.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn texture_payload(index: usize, allow_s3tc: u32, need_alpha: u32) -> usize {
+     with(|c| {
+         c.scratch_u32.clear();
+@@ -307,13 +307,13 @@
+     })
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn tex_bytes_ptr() -> *const u8 {
+     with(|c| c.tex_bytes.as_ptr())
+ }
+ 
+ /// Lightmap atlas into scratch_u32 as `[width, height, hdr]`; pixels (RGBA8, sRGB-encoded) at `lightmap_ptr`.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn lightmap_size() -> usize {
+     with(|c| {
+         c.scratch_u32.clear();
+@@ -324,12 +324,12 @@
+     })
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn lightmap_ptr() -> *const u8 {
+     with(|c| c.mesh.as_ref().map_or(std::ptr::null(), |m| m.lightmap.rgba.as_ptr()))
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn set_settings(tick_interval: f32, air_accelerate: f32, accelerate: f32, friction: f32, stop_speed: f32, gravity: f32, max_speed: f32, autohop: u32) {
+     with(|c| {
+         if let Some(g) = c.game.as_mut() {
+@@ -341,7 +341,7 @@
+ }
+ 
+ /// Enable CS:S stamina independently of the legacy settings ABI.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn set_stamina(enabled: u32) {
+     with(|c| {
+         if let Some(g) = c.game.as_mut() {
+@@ -353,7 +353,7 @@
+ /// Selects the physics version (`game::PHYSICS_V1`, `PHYSICS_V2`, ...; a loaded map starts at v1). Call after
+ /// `load_map*` like `set_settings`; kept across `set_settings` and `reset`. Returns 1 if this build knows the version,
+ /// else 0 (nothing changes). Clients feature-detect the export (builds without it are v1 only).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn set_physics_version(version: u32) -> u32 {
+     if crate::game::physics_fixes(version).is_none() {
+         return 0;
+@@ -366,7 +366,7 @@
+     1
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn reset() {
+     with(|c| {
+         if let Some(g) = c.game.as_mut() {
+@@ -376,7 +376,7 @@
+ }
+ 
+ /// Advances one tick. Returns event bits, or u32::MAX on error.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn step(forward: f32, side: f32, yaw: f32, pitch: f32, buttons: u32) -> u32 {
+     with(|c| {
+         let Some(g) = c.game.as_mut() else { return u32::MAX };
+@@ -397,7 +397,7 @@
+ ///  teleport it caused; NaN after a reset / respawn: `Game::touch_origin`), weapons held, active weapon
+ ///  (WEAPON_* bits, physics v4: `Game::weapons`), clean movement tick for local jump stats]
+ /// (movement mode: playsrc `Mode` as a number; 6 = ladder. Style key filters exempt ladders, like bhoptimer.)
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn player_state() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -424,7 +424,7 @@
+ }
+ 
+ /// Brush entity transforms into scratch_f32 as [model, x, y, z, pitch, yaw, roll] (7 floats each).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn brush_origins() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -438,7 +438,7 @@
+ }
+ 
+ /// Moving entity prop transforms (prop_door_rotating) into scratch_f32 as [entity, x, y, z, pitch, yaw, roll].
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn prop_transforms() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -452,19 +452,19 @@
+ }
+ 
+ /// Factor the lightmap atlas was scaled by before sRGB encoding (multiply by its inverse after sampling).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn lightmap_scale() -> f32 {
+     with(|c| c.mesh.as_ref().map_or(crate::lightmap::HDR_SCALE, |m| m.lightmap.scale))
+ }
+ 
+ /// Floats per vertex in `mesh_vertices`.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn mesh_vertex_floats() -> usize {
+     mesh::VERTEX_FLOATS
+ }
+ 
+ /// Overwrites the player velocity (used by the run timer's start-zone prespeed cap; replays apply it identically).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn set_velocity(x: f32, y: f32, z: f32) {
+     with(|c| {
+         if let Some(g) = c.game.as_mut() {
+@@ -477,7 +477,7 @@
+ 
+ /// Brush entity render/collision state into scratch_f32 as [model, visible, solid] triples
+ /// (killed/disabled func_brush, broken func_breakable, toggled func_wall_toggle, ...).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn brush_states() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -491,7 +491,7 @@
+ }
+ 
+ /// Presentation entity states [entity index, enabled], restored with simulation snapshots.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn effect_states() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -507,7 +507,7 @@
+ /// Server rules: bhop_block_fix (0 = stock sinking doors, 1 = block fix), grace seconds before a
+ /// standing player is sent through the block's teleport, teleport_keeps_velocity (Source = 1).
+ /// Resets the map.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn set_rules(bhop_block_fix: u32, bhop_block_grace: f32, teleport_keeps_velocity: u32) {
+     use crate::game::{BhopBlockMode, Rules};
+     with(|c| {
+@@ -523,7 +523,7 @@
+ }
+ 
+ /// Player extras into scratch_f32: [health, gravity_scale, speed_scale]; name via scratch_str.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn player_extras() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -550,7 +550,7 @@
+ /// Restart point (start-zone restart): respawns the player at (x, y, z) feet facing `yaw` with zero
+ /// velocity, settled onto the floor below; deaths respawn there until the next `reset`. Call right
+ /// after `reset` (tick 0); replays store it in their header and re-apply it after reset.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn set_position(x: f32, y: f32, z: f32, yaw: f32) {
+     with(|c| {
+         if let Some(g) = c.game.as_mut() {
+@@ -562,7 +562,7 @@
+ /// Names the player gets at the restart point (call after `set_position`): `name_len` bytes of targetname then
+ /// `class_len` bytes of classname (UTF-8; empty classname = "player") at `ptr` (from `alloc`; takes ownership).
+ /// See `Game::set_restart_names`.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn set_restart_names(ptr: *mut u8, name_len: usize, class_len: usize) {
+     let bytes = unsafe { Vec::from_raw_parts(ptr, name_len + class_len, name_len + class_len) };
+     let name = String::from_utf8_lossy(&bytes[..name_len]);
+@@ -575,7 +575,7 @@
+ }
+ 
+ /// Restart point since the last reset into scratch_f32: [] if none, else [x, y, z, yaw] (settled).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn restart_point() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -590,7 +590,7 @@
+ /// bit0 downhill landing fix, bit1 uphill landing fix, bit2 rampbug fix, bit3 telehop fix,
+ /// bit4 DISABLE per-material surface properties. Resets the map. Physics v17 runs RNGFix's versions of the downhill,
+ /// uphill and telehop fixes itself (bit3 is ignored there; bit1's slide-stop variant stays available on top).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn set_movement_rules(flags: u32) {
+     with(|c| {
+         if let Some(g) = c.game.as_mut() {
+@@ -610,7 +610,7 @@
+ /// Static/dynamic prop collision hulls as a triangle soup (9 floats per triangle, world space) into
+ /// scratch_f32. Props collide but their models are not rendered by the client; draw these so players
+ /// can see what they hit.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn prop_collision_mesh() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -624,7 +624,7 @@
+ // ---- physics content (prop collision models; see Game::physics_files) ----
+ 
+ /// Collision files (`.phy` / `.mdl`) the loaded map's props need, newline-separated in scratch_str.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn physics_files() -> usize {
+     with(|c| {
+         c.scratch_str = c.game.as_ref().map(|g| g.physics_files().join("\n")).unwrap_or_default();
+@@ -633,7 +633,7 @@
+ }
+ 
+ /// Prop models still without collision (their files weren't available), newline-separated in scratch_str.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn physics_missing() -> usize {
+     with(|c| {
+         c.scratch_str = c.game.as_ref().map(|g| g.missing_prop_models().join("\n")).unwrap_or_default();
+@@ -643,7 +643,7 @@
+ 
+ /// Rebuilds prop collision from the pakfile and the files added since the map loaded (content_add_file /
+ /// fetched content), then resets the map. Call after hosted content arrived, before playing.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn physics_reload() {
+     with(|c| {
+         let Some(g) = c.game.as_mut() else { return };
+@@ -671,7 +671,7 @@
+ 
+ /// Captures the full simulation state (player, brush entities/doors, triggers, entity I/O queue). Returns a
+ /// handle (>= 1) for `state_restore` / `state_free`, or 0 when no map is loaded.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn state_snapshot() -> u32 {
+     let Some(s) = with(|c| c.game.as_ref().map(|g| g.save_state())) else { return 0 };
+     SNAPSHOTS.with(|v| {
+@@ -691,7 +691,7 @@
+ 
+ /// Restores a capture made with `state_snapshot` on the currently loaded map. Returns 1 on success, 0 for an
+ /// unknown handle or no map. Stepping afterwards is bit-identical to the run the capture was taken from.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn state_restore(handle: u32) -> u32 {
+     SNAPSHOTS.with(|v| {
+         let v = v.borrow();
+@@ -707,7 +707,7 @@
+ }
+ 
+ /// Frees a capture (0 / unknown handles are ignored).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn state_free(handle: u32) {
+     SNAPSHOTS.with(|v| {
+         if let Some(slot) = v.borrow_mut().get_mut((handle as usize).wrapping_sub(1)) {
+@@ -717,7 +717,7 @@
+ }
+ 
+ /// Approximate memory held by a capture in bytes (0 for unknown handles).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn state_snapshot_bytes(handle: u32) -> usize {
+     SNAPSHOTS.with(|v| v.borrow().get((handle as usize).wrapping_sub(1)).and_then(|s| s.as_ref()).map_or(0, |s| s.approx_bytes()))
+ }
+@@ -725,7 +725,7 @@
+ /// Camera collision: sweeps a cube of half-size `radius` from start to end (Source units) against the world,
+ /// props and solid brush entities (MASK_SOLID, player clips ignored). Returns the clear fraction 0..1
+ /// (1 = unobstructed); 1 when no map is loaded.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn trace_ray(sx: f32, sy: f32, sz: f32, ex: f32, ey: f32, ez: f32, radius: f32) -> f32 {
+     with(|c| c.game.as_ref().map_or(1.0, |g| g.trace_camera([sx, sy, sz], [ex, ey, ez], radius)))
+ }
+@@ -733,7 +733,7 @@
+ /// The player's attack this tick (after a step that returned EVENT_ATTACK) into scratch_f32:
+ /// [weapon (WEAPON_* bit), mode (1 primary, 2 secondary), hit (0/1), start x,y,z, end x,y,z, normal x,y,z,
+ ///  entity index or -1]; empty when the last step had no attack.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn attack_report() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -752,7 +752,7 @@
+ /// id, primary id, secondary id, has knife, clip, clip size, reload ticks left, burst mode, floor items changed since
+ /// the last floor_weapons call (0/1), the USP's silencer on (v7), silencer attach / detach ticks left (v7)]; valid every
+ /// tick.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn weapon_report() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -766,7 +766,7 @@
+ /// Every weapon_* item of the map into scratch_f32 as [entity, weapon id, flags, x, y, z, pitch, yaw, roll] (9 floats
+ /// each, entity order, present or not; flags FLOOR_* = present 1, picked up 2, spawned 4, dropped 8, removed 16, moved 32
+ /// since the previous call); research/WEAPONS.md "Floor weapons". No allocation once scratch_f32 has grown.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn floor_weapons() -> usize {
+     with(|c| {
+         let Ctx { game, scratch_f32: out, .. } = c;
+@@ -786,7 +786,7 @@
+ 
+ /// Practice noclip tick: the player at (x, y, z) with velocity (vx, vy, vz), no collision or trigger touches, while the
+ /// world runs one tick (`Game::practice_noclip_tick`). Returns the event bits (0 with no map).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn practice_noclip_tick(x: f32, y: f32, z: f32, vx: f32, vy: f32, vz: f32) -> u32 {
+     with(|c| match c.game.as_mut() {
+         Some(g) => {
+@@ -799,7 +799,7 @@
+ 
+ /// Leaves practice noclip at (x, y, z) keeping the velocity, finding free space near it along the view (yaw, pitch)
+ /// if the hull is stuck (`Game::practice_noclip_exit`). Returns 1 standing, 2 crouched, 0 stuck or no map.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn practice_noclip_exit(x: f32, y: f32, z: f32, vx: f32, vy: f32, vz: f32, yaw: f32, pitch: f32) -> u32 {
+     with(|c| c.game.as_mut().map_or(0, |g| g.practice_noclip_exit([x, y, z], [vx, vy, vz], yaw, pitch)))
+ }
+@@ -809,7 +809,7 @@
+ /// The volumes the client's trigger and clip overlays draw, into scratch_f32: per volume
+ /// [kind (OVERLAY_*), entity (-1: world), model (-1: planes already in world space), flags (OVERLAY_WHEN_HIDDEN),
+ ///  plane count, then per plane normal x, y, z, distance]. Needs a full `load_map` (it tells drawn faces apart).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn overlay_volumes() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -827,7 +827,7 @@
+ 
+ /// Every entity's overlay state now (OVERLAY_STATE_* bits, `Game::overlay_state`) into scratch_u32, in entity order.
+ /// Works on a physics-only load too (the replay viewer's).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn overlay_states() -> usize {
+     with(|c| {
+         c.scratch_u32.clear();
+@@ -839,15 +839,15 @@
+ }
+ 
+ // Optional observational ABI v2. Does not change commands, snapshots or ranked timing.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn timing_path_version() -> u32 { playsrc_movement::accepted_path::VERSION }
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn timing_observe(enabled: u32) {
+     with(|c| { if let Some(g) = &mut c.game { g.observe_timing = enabled != 0; g.timing_path = None; } });
+ }
+ /// f64 buffer: status (0 absent, 1 supported, 2 unsupported), then 15 values per
+ /// segment: t0,t1,from[3],to[3],hull.mins[3],hull.maxs[3],discrete. Copy before next call.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn timing_path() -> usize {
+     with(|c| {
+         c.timing_f64.clear();
+@@ -865,9 +865,9 @@
+         c.timing_f64.len()
+     })
+ }
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn timing_path_ptr() -> *const f64 { with(|c| c.timing_f64.as_ptr()) }
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn timing_path_reason() -> usize {
+     with(|c| {
+         c.scratch_str = c.game.as_ref().and_then(|g| g.timing_path.as_ref())
+@@ -875,3 +875,7 @@
+         c.scratch_str.len()
+     })
+ }
++// The opt-in native adapter owns a thread per session; canonical WASM exports stay unchanged.
++#[cfg(all(feature = "native-web", not(target_arch = "wasm32")))]
++#[path = "../../native-web/core.rs"]
++pub mod native_web;
+diff --git a/crates/core/tests/native_entities.rs b/crates/core/tests/native_entities.rs
+new file mode 100644
+--- /dev/null
++++ b/crates/core/tests/native_entities.rs
+@@ -0,0 +1,33 @@
++use bunnyhop_core::{Cmd, Game};
++use std::path::PathBuf;
++
++fn load(name: &str) -> Option<Game> {
++    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
++    let bytes = std::fs::read(&path).map_err(|_| eprintln!("skipping {name}: {} not found", path.display())).ok()?;
++    Some(Game::load(&bunnyhop_core::parse_bsp(&bytes).unwrap()).unwrap())
++}
++
++/// Synthetic uses a solid brush with $surfaceprop ladder rather than CONTENTS_LADDER.
++#[test]
++fn synthetic_material_ladder_is_versioned() {
++    use bunnyhop_core::{Settings, game::{PHYSICS_V17, PHYSICS_V18}};
++    let Some(mut game) = load("bhop_synthetic_fix") else { return };
++    for version in [PHYSICS_V17, PHYSICS_V18] {
++        game.set_settings(Settings { physics_version: version, ..Settings::css_bhop() });
++        game.reset();
++        game.place_player([-12052.5, 13065.0, 7690.0]);
++        let start = game.state.position;
++        let mut ladder_ticks = 0;
++        for _ in 0..20 {
++            game.step(Cmd { forward: 400.0, yaw: 0.0, pitch: 0.0, ..Default::default() }).unwrap();
++            ladder_ticks += usize::from(game.state.mode == playsrc_movement::Mode::Ladder);
++        }
++        eprintln!("v{version}: {start:?} -> {:?}, ladder ticks {ladder_ticks}", game.state.position);
++        if version == PHYSICS_V18 {
++            assert!(ladder_ticks > 10, "attach to the reported ladder");
++            assert!(game.state.position[2] > start[2] + 25.0, "climb the ladder");
++        } else {
++            assert_eq!(ladder_ticks, 0, "old replays keep the original behavior");
++        }
++    }
++}
+diff --git a/crates/core/tests/native_render.rs b/crates/core/tests/native_render.rs
+new file mode 100644
+--- /dev/null
++++ b/crates/core/tests/native_render.rs
+@@ -0,0 +1,28 @@
++use bunnyhop_core::materials::{self, Kind};
++use bunnyhop_core::{content, mesh, vfs};
++use std::path::PathBuf;
++
++fn map_bytes(name: &str) -> Option<Vec<u8>> {
++    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
++    std::fs::read(&path).map_err(|_| eprintln!("skipping {name}: {} not found", path.display())).ok()
++}
++
++/// GothQueen's unreal_space report: toolsblack is a visible opaque wall, not a nodraw tool.
++#[test]
++fn black_tool_walls_are_rendered() {
++    assert!(!mesh::hidden_tool_material("tools/toolsblack"));
++    assert!(!mesh::hidden_tool_material("tools/toolswhite"));
++    assert!(mesh::hidden_tool_material("tools/toolsnodraw"));
++    assert!(mesh::hidden_tool_material("tools/toolsplayerclip"));
++    let Some(bytes) = map_bytes("bhop_unreal_space") else { return };
++    let bsp = bunnyhop_core::parse_bsp(&bytes).unwrap();
++    let m = mesh::build(&bsp);
++    let material = m.materials.iter().position(|m| m.name == "tools/toolsblack").expect("map uses black walls");
++    let count: u32 = m.groups.iter().filter(|g| g.material as usize == material).map(|g| g.index_count).sum();
++    assert!(count > 0, "black wall faces must reach the renderer");
++    let mut fs = vfs::Vfs::default();
++    fs.mount(vfs::Source::from_zip("pak", content::pakfile(&bsp)));
++    let mats = materials::resolve(&fs, &["tools/toolsblack".into()]);
++    assert_eq!(mats.descs[0].kind, Kind::Textured);
++    assert_eq!(mats.descs[0].flags & (materials::FLAG_TRANSLUCENT | materials::FLAG_ADDITIVE), 0);
++}

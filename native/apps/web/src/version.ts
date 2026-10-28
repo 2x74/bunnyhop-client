@@ -45,7 +45,7 @@
    two words, and VERSION stays below 0.1.0 while STAGE is alpha.
    ============================================================ */
 
-export const VERSION = "0.0.27";
+export const VERSION = "0.0.28";
 
 /** Release stage, printed after the number ("v0.0.4 alpha"). */
 export const STAGE = "alpha";
@@ -67,7 +67,7 @@ export interface ChangelogEntry {
 
 /** Notes for the next release, unpublished until promoted into CHANGELOG. */
 export const UPCOMING: ChangelogEntry = {
-  version: "0.0.28",
+  version: "0.0.29",
   date: "2026-10-25",
   kind: "minor",
   title: "Next update",
@@ -76,6 +76,31 @@ export const UPCOMING: ChangelogEntry = {
 
 /** Newest first. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.0.28",
+    date: "2026-10-26",
+    kind: "major",
+    title: "Source look, bunny avatars and custom CSS",
+    links: [
+      { label: "Native client v0.4.0 on GitHub", url: "https://github.com/2x74/bunnyhop-client/releases" },
+      { label: "Custom CSS guide", url: "https://bunnyhop.lol/custom-css" },
+    ],
+    notes: [
+      "Every player now has a bunny avatar on leaderboards and profiles. It starts as your bunny's colourway in a random pose.",
+      "Make it yours at bunnyhop.lol/avatar, or Edit avatar in your account panel: pick a pose, framing and backdrop, and dress it in the colourway, headwear, knife, finish and gloves you own. Download or copy it as a PNG to use anywhere. Prefer your Discord picture? Switch it back on in the same place.",
+      "Maps now look the way they do in CS:S. The new Source look is the default: lighting matches CS:S side by side, maps with HDR lighting get CS:S's auto exposure and bloom, and water reflects the map. Thanks to huddled for the CS:S reference renders.",
+      "Water reflections cost some FPS near water. They're on with the High preset; switch them in Settings → Graphics → Water reflections.",
+      "Pick a different look in Settings → Graphics → Look. Plain is the old look and the fastest. Enhanced and Cinematic are back, retuned to match the Source look, with sun shadows, light from nearby lamps, sky packs and more under Advanced. Cinematic is experimental and downloads its packs once (about 23 MB).",
+      "Smoke on the bhop_arcane maps is soft smoke now, and turns on and off with the map. A sky pack you picked stays picked after a reload.",
+      "Restyle the menus and the HUD with your own CSS in Settings → Custom CSS: colours, fonts, pictures and GIFs. Paste a theme someone shared or add one with Import link. The guide at bunnyhop.lol/custom-css shows how and has Slant, Source and Clean to start from, and #custom-css on our Discord has more. If a theme breaks your screen, Ctrl+Shift+V turns it off.",
+      "The desktop client (v0.2.2) can load a .css file and apply it again every time you save: F10 → Client → Custom CSS.",
+      "The native client, written in C++ and still in beta, got the Source look, tutorial runs that upload, and a fix for a Linux crash when loading a map or opening a profile.",
+      "Native client v0.4.0 brings its menus level with the browser game: profiles, Loadout, Support, the scoreboard, leaderboards and chat. It also adds replays with clip export and music, announcer sounds, character and knife animations, colour blind palettes, controller menu navigation, better high polling rate mouse handling, and the wall and ladder fixes below. Download it from GitHub.",
+      "Replays and ghosts show the runner's account name. Runs from the native client used to say native-player.",
+      "Black walls on bhop_unreal_space and other maps are visible again, so you no longer see through them or collide with invisible walls.",
+      "The ladder sections on bhop_synthetic_fix now work. Existing replays keep their original movement. Thanks to GothQueen for both reports.",
+    ],
+  },
   {
   version: "0.0.27",
   date: "2026-10-25",

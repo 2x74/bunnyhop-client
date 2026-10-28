@@ -1,5 +1,5 @@
 // Data consistency only; the private receiver must authenticate the job/step and artifacts.
-export const PINNED_WASM_SHA256 = '21d3cc6347cacbc66ddb7118c05dc3ef265e9f6725d49b8962f2eedbbafa553f';
+export const PINNED_WASM_SHA256 = '3cd68ab1a59fb71b32f448a1be195f9ceaf3074ccb5ccb89b72ed2014f563242';
 export const PARITY_SUITE = 'material-ladder-release-v2';
 export const parityArtifactName = (target, runId, attempt) => `native-parity-${target}-${runId}-${attempt}`;
 export const fixtureHashes = {

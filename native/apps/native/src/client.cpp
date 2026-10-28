@@ -207,6 +207,10 @@ int run(const Options &opt) {
     using CorePtr=std::unique_ptr<BhContext,decltype(&bh_destroy)>;
     CorePtr core(nullptr,&bh_destroy);
     if (bh_abi_version()!=1) throw std::runtime_error("Unsupported native core ABI version");
+    if (!bh_v29_check_abi(BH_V29_ABI_VERSION, sizeof(BhRecordOptionsV29),
+                          sizeof(BhTimingSegmentV2))) {
+        throw std::runtime_error("Unsupported native v29 ABI layout");
+    }
     BhSettings settings{}; bh_default_settings(&settings);
     const double dt=settings.tick_interval;
     if (!std::isfinite(dt) || dt<=0 || dt>.1) throw std::runtime_error("Invalid core tick interval");

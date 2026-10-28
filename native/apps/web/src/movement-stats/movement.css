@@ -1,0 +1,36 @@
+/* Movement HUD elements (movement-stats/view.ts): no box, the HUD's text shadow, numbers in the HUD face. */
+
+.lj-hud { display: flex; flex-direction: column; align-items: center; line-height: 1; font-variant-numeric: tabular-nums; color: #fff; transition: opacity 0.45s ease; }
+.lj-hud.lj-in { animation: lj-in 0.16s ease-out; }
+@keyframes lj-in { from { opacity: 0; translate: 0 0.2em; } }
+.lj-head { display: flex; align-items: baseline; gap: 0.3em; font-stretch: 90%; }
+.lj-kind { font-size: 0.95em; font-weight: 750; color: rgba(255, 255, 255, 0.72); }
+.lj-dist { font-size: 1.8em; font-weight: 800; letter-spacing: -0.01em; }
+.lj-fail { display: none; font-size: 0.95em; font-weight: 700; color: rgba(255, 255, 255, 0.72); }
+.lj-cols { display: flex; margin-top: 0.28em; font-size: 0.8em; }
+.lj-col { width: 4.5em; text-align: center; }
+.lj-col b { font-weight: 750; }
+.lj-col span { margin-left: 0.25em; font-weight: 600; color: rgba(255, 255, 255, 0.6); }
+/* A fail: same shape, dimmed, no tier colour (view.ts paints it white). */
+.lj-hud.lj-failed { opacity: 0.6; }
+.lj-hud.lj-failed .lj-fail { display: inline; }
+.lj-hud.lj-gone { opacity: 0; }
+
+/* Offsets and first jump tick: one short line each, the number bold. */
+.mv-line { font-size: 0.8em; line-height: 1.3; color: rgba(255, 255, 255, 0.85); font-variant-numeric: tabular-nums; }
+.mv-line b { color: #fff; font-weight: 750; }
+.mv-note { color: rgba(255, 255, 255, 0.6); font-weight: 600; }
+/* Start Pre sits beside the speed readout: the size of its "u/s". */
+.mv-pre { font-size: 0.85em; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1; }
+.mv-pre b { font-weight: 800; }
+
+/* Last jump (share.ts): the card big, two buttons under it. The paused game shows behind, not the pause menu. */
+body.lj-open #overlay { display: none !important; }
+dialog.acct-dialog.lj-dialog { width: min(56rem, 94vw); }
+.lj-dialog .acct-body { gap: 0.8rem; }
+.lj-shot { aspect-ratio: 1200 / 630; border-radius: 10px; overflow: hidden; background: #0b0d12; }
+.lj-card { display: block; width: 100%; height: auto; animation: lj-card-in 0.22s ease-out; }
+@keyframes lj-card-in { from { opacity: 0; } }
+.lj-actions { display: flex; align-items: center; gap: 0.6rem; }
+.lj-status { margin-left: 0.3rem; color: var(--dim); font-size: var(--fs-sm); }
+@media (prefers-reduced-motion: reduce) { .lj-card, .lj-hud.lj-in { animation: none; } }

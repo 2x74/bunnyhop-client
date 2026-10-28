@@ -1,0 +1,17 @@
+/* Hide UI (ui/hide-ui.ts). body.ui-hidden: just the game; body.ui-keep: the speed and keys overlay stay. The replay
+   viewer hides its own controls (viewer.css). */
+
+body.ui-hidden :is(#nt-toasts, #nt-cels, #nt-banners, #nt-confetti, #audio-btn, #audio-muted, .tip-box) { display: none !important; }
+/* Whispers go too, except Hide UI's own line saying how to get the UI back (ui/hide-ui.ts hideUiHint). */
+body.ui-hidden #nt-whispers > :not(.always) { display: none !important; }
+body.ui-hidden.ui-idle, body.ui-hidden.ui-idle * { cursor: none !important; }
+
+/* Game HUD: everything but a menu that wants an answer (votes, spectate list), the held scoreboard and a chat you're
+   typing in. Opacity, not display: the HUD keeps measuring its elements. Practice gets no mark: practice runs are never
+   submitted or ranked whatever the screen shows (the server re-checks every run). */
+body.ui-hidden #hud > :not(#mp-menu, #mp-scoreboard, :has(.chat-open), [data-el="speed"], [data-el="keys"]) { opacity: 0 !important; }
+body.ui-hidden:not(.ui-keep) #hud > :is([data-el="speed"], [data-el="keys"]) { opacity: 0 !important; }
+/* Custom CSS's images (custom-css/) are UI too. */
+body.ui-hidden #custom-art { opacity: 0 !important; }
+body.ui-hidden #rv .rv-hud > :not([data-el="speed"], [data-el="keys"]) { opacity: 0 !important; }
+body.ui-hidden:not(.ui-keep) #rv .rv-hud { opacity: 0 !important; }

@@ -27,9 +27,9 @@ See the repository [release process](../../../docs/releases.md).
 
 ## Current compatibility
 
-This source targets production v0.0.28, physics 18, timer rules 2 and verifier
-`bunnyhop-web/21d3cc6347ca`. See [qualification notes](../../../docs/current-compatibility.md)
-for scope, test evidence and remaining live-score requirements.
+This branch prepares web v0.0.29 at `9cde9db9`, physics 18 and timer rules 2.
+It pins a local build of the unpublished verifier. See the
+[v29 integration notes](../../docs/v0.0.29-native-integration.md) for the remaining integration work.
 
 ## Build and play
 
@@ -47,6 +47,8 @@ From this repository’s `native/` directory:
 
 ```sh
 bun install --frozen-lockfile
+# Until the v29 WASM is published, build the pinned upstream source once:
+bun tools/build-upstream-wasm.ts --upstream /path/to/bunnyhop
 bun apps/native/packaging/sdl.ts   # optional: the SDL3 commit releases use
 bun apps/native/build.ts
 apps/native/build/bunnyhop-native
@@ -57,10 +59,10 @@ Releases build SDL3 from the commit in `packaging/sdl.json` on every platform.
 otherwise any installed SDL3 3.4 or newer works for development.
 
 The build produces `target/native-menu/menu.html` and a release manifest bound
-to the executable, menu and canonical WASM. The first build downloads the public
-canonical WASM and verifies its pinned SHA-256; `bun run wasm` prepares it
-separately. The verified download is cached for offline builds and ignored by
-Git. Rust is pinned through `rust-toolchain.toml` to the tested compiler.
+to the executable, menu and canonical WASM. `upstream-wasm.json` pins the source
+commit, toolchain and WASM SHA-256. `bun run wasm` verifies the cached build;
+a published pin downloads its public asset. Verified bytes are cached for offline
+builds and ignored by Git. Rust is pinned through `rust-toolchain.toml` to the tested compiler.
 A CMake-only rebuild or menu edit makes the previous manifest stale: the game
 still works, but that binary cannot claim the previous release identity.
 

@@ -1,4 +1,6 @@
 import { videoGrade, VIDEO_LIMITS, type VideoGrade } from "../video-settings";
+import type { LightingProfileId } from "../graphics/profiles";
+import { graphicsPreset as lookPreset, type GraphicsPreset as LookPreset } from "../graphics/presets";
 import { DEFAULT_MOUSE_DPI } from "../mouse-settings";
 // Client preferences (localStorage, applied live). Nothing here feeds the simulation's physics:
 // tick rate / airaccelerate / autohop are fixed per style (styles.ts, picked in the menus or with the cycleStyle
@@ -151,6 +153,9 @@ export interface Prefs {
   nullBinds: boolean;
   /** Drop lone impossible mouse reports (browser pointer-lock jumps) and the first event after locking (mouse-filter.ts). */
   spikeFilter: boolean;
+  /** Timestamped input (timed-input.ts): each tick takes the mouse motion and movement keys made before it, not the
+   * frame's. On by default. */
+  timedInput: boolean;
   /** Input diagnostics overlay: event rate, deltas, dropped spikes, frame times (input-debug.ts; also ?inputdebug=1). */
   inputStats: boolean;
   /** CS:S `fov_desired`: horizontal FOV at 4:3; wider screens get more (Hor+). */
@@ -243,6 +248,33 @@ export interface Prefs {
     t: TSkin;
   };
   graphics: {
+    /** Rendering look (graphics/presets.ts), separate from the Quality presets below. */
+    preset: LookPreset;
+    /** Reflective water in the Source look (re-renders the scene for water in view, like CS:S). */
+    waterReflections: boolean;
+    bloom: boolean;
+    mapProfiles: boolean;
+    ambienceShowcase: boolean;
+    lightingProfile: LightingProfileId; skyMode: "map" | "procedural" | "pack"; skyPackId: string | null; skyRotation: number; skyExposure: number; lightingSource: "map" | "pack"; directContribution: number; ambientContribution: number; clouds: boolean; cloudQuality: "low" | "medium" | "high"; cloudCoverage: number; cloudDensity: number;
+    contactShading: boolean;
+    atmosphere: boolean;
+    sunShafts: boolean;
+    materialResponse: boolean;
+    volumetric: boolean;
+    spatialAA: boolean;
+    localLights: boolean;
+    localQuality: "low" | "medium" | "high";
+    localBudget: number;
+    localStrength: number;
+    dynamicGI: boolean;
+    tracedGI: boolean;
+    giQuality: "low" | "medium";
+    giStrength: number;
+    giRange: number;
+    dynamicShadows: boolean;
+    shadowQuality: "low" | "medium" | "high";
+    shadowDistance: number;
+    shadowStrength: number;
     /**
      * Render resolution as a fraction of the screen's (its pixel ratio capped at 2x, 1x in Potato mode): 0.25 to 2,
      * above 1 supersamples.
@@ -442,6 +474,7 @@ export const DEFAULT_PREFS: Prefs = {
   rawInput: true,
   nullBinds: false,
   spikeFilter: true,
+  timedInput: true,
   inputStats: false,
   fov: 90,
   crosshair: { style: "cross", color: "#4dff6a", size: 6, thickness: 2, gap: 4, outline: true, alpha: 1 },
@@ -475,7 +508,7 @@ export const DEFAULT_PREFS: Prefs = {
   showPlayerGlow: true,
   firstPersonGlow: true,
   models: { player: "bunny", ghost: "same", team: "ct", ct: "ct_urban", t: "t_leet" },
-  graphics: { resolutionScale: 1, antialias: true, aspect: "native", aspectFit: "stretch", pixelated: false, anisotropy: 8, brightness: 1, gamma: 1, vibrance: 1, fullbright: false, menuBackground: "live", fullscreen: true, potato: false, flashlight: false, fpsLimit: 1000, uncapped: false, lowLatency: false, menuFps: 0 },
+  graphics: { preset: "source", waterReflections: true, bloom: true, mapProfiles: false, ambienceShowcase: false, lightingProfile: "map", skyMode: "map", skyPackId: null, skyRotation: 0, skyExposure: 0, lightingSource: "map", directContribution: 1, ambientContribution: 1, clouds: false, cloudQuality: "low", cloudCoverage: .45, cloudDensity: 1, contactShading: false, atmosphere: false, sunShafts: false, materialResponse: true, volumetric: false, spatialAA: true, localLights: false, localQuality: "medium", localBudget: 1, localStrength: .2, dynamicGI: false, tracedGI: false, giQuality: "low", giStrength: .25, giRange: 256, dynamicShadows: false, shadowQuality: "medium", shadowDistance: 1024, shadowStrength: .18, resolutionScale: 1, antialias: true, aspect: "native", aspectFit: "stretch", pixelated: false, anisotropy: 8, brightness: 1, gamma: 1, vibrance: 1, fullbright: false, menuBackground: "live", fullscreen: true, potato: false, flashlight: false, fpsLimit: 1000, uncapped: false, lowLatency: false, menuFps: 0 },
   viewmodel: { show: true, ...VIEWMODEL_POS, bob: 1, sway: 1, hand: "right", rev: VIEWMODEL_REV },
   binds: DEFAULT_BINDS,
   practice: { keepVelocity: true },
@@ -490,7 +523,9 @@ export const PREFS_KEY = "bunnyhop:settings";
 const KEY = PREFS_KEY;
 
 function merge<T>(base: T, over: unknown): T {
-  if (typeof base !== "object" || base === null || Array.isArray(base)) {
+  // A null default (graphics.skyPackId) is an optional id: a saved string or null survives a reload.
+  if (base === null) return (over === null || typeof over === "string" ? over : base) as T;
+  if (typeof base !== "object" || Array.isArray(base)) {
     if (Array.isArray(base)) return (Array.isArray(over) && over.every((x) => typeof x === "string") ? over : base) as T;
     return (typeof over === typeof base ? over : base) as T;
   }
@@ -669,6 +704,7 @@ export function parsePrefs(raw: string | null): Prefs {
   if (!raw) return clone(DEFAULT_PREFS);
   const p = merge(DEFAULT_PREFS, migrate(JSON.parse(raw)));
   if (!COLOR_BLIND_MODES.some(([m]) => m === p.colorBlind)) p.colorBlind = DEFAULT_PREFS.colorBlind;
+  p.graphics.preset = lookPreset(p.graphics.preset);
   return p;
 }
 
@@ -771,12 +807,12 @@ export function gamePixelRatio(g: Prefs["graphics"]): number {
 
 /** Graphics presets (Settings → Graphics → Quality): the settings that cost the most GPU time on slow machines. */
 export type GraphicsPreset = "lowest" | "low" | "medium" | "high";
-type PresetKeys = "potato" | "antialias" | "anisotropy" | "resolutionScale";
+type PresetKeys = "potato" | "antialias" | "anisotropy" | "resolutionScale" | "waterReflections";
 export const GRAPHICS_PRESETS: Record<GraphicsPreset, Pick<Prefs["graphics"], PresetKeys>> = {
-  lowest: { potato: true, antialias: false, anisotropy: 1, resolutionScale: 0.5 },
-  low: { potato: true, antialias: false, anisotropy: 1, resolutionScale: 1 },
-  medium: { potato: false, antialias: false, anisotropy: 4, resolutionScale: 1 },
-  high: { potato: false, antialias: true, anisotropy: 8, resolutionScale: 1 },
+  lowest: { potato: true, antialias: false, anisotropy: 1, resolutionScale: 0.5, waterReflections: false },
+  low: { potato: true, antialias: false, anisotropy: 1, resolutionScale: 1, waterReflections: false },
+  medium: { potato: false, antialias: false, anisotropy: 4, resolutionScale: 1, waterReflections: false },
+  high: { potato: false, antialias: true, anisotropy: 8, resolutionScale: 1, waterReflections: true },
 };
 export const PRESET_ORDER: GraphicsPreset[] = ["lowest", "low", "medium", "high"];
 

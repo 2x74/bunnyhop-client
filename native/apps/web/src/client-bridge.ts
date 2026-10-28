@@ -40,6 +40,11 @@ export interface ClientBenchmarkResult {
   /** What the frames were drawn with. The shell adds the display and its own launch settings. */
   graphics: { potato: boolean; resolutionScale: number; antialias: boolean; uncapped: boolean; lowLatency: boolean; fpsLimit: number; browserUncapped: boolean; width: number; height: number };
 }
+/** The desktop app's custom CSS file (Settings -> Custom CSS file there): its name and text, sent again on each save. */
+export interface ClientCustomCss {
+  name: string;
+  css: string;
+}
 export interface ClientRunSummary {
   mapId: string; mapName: string; style: string;
   timeMs: number; ticks: number; tickRate: number;
@@ -59,6 +64,8 @@ export interface BunnyhopClient {
   /** Registers the game's benchmark; the shell offers it in F10 only once this is called. */
   onBenchmark?: (listener: (request: ClientBenchmarkRequest) => void) => unknown;
   benchmarkResult?: (result: ClientBenchmarkResult | { error: string }) => unknown;
+  /** The custom CSS file: called with it now and on every save, null when there is none. Returns an unsubscribe. */
+  onCustomCss?: (listener: (file: ClientCustomCss | null) => void) => unknown;
 }
 declare global { interface Window { bunnyhopClient?: BunnyhopClient } }
 export function nativeClient(): BunnyhopClient | null {
@@ -67,6 +74,16 @@ export function nativeClient(): BunnyhopClient | null {
 }
 function safely(call: () => unknown): void {
   try { void Promise.resolve(call()).catch(() => {}); } catch { /* Native conveniences cannot interrupt a run. */ }
+}
+/** The desktop app's custom CSS file (custom-css/index.ts). The text goes through the same rewrite as pasted CSS. */
+export function watchClientCustomCss(listener: (file: ClientCustomCss | null) => void): void {
+  const native = nativeClient();
+  if (!native?.onCustomCss) return;
+  const read = (v: unknown) => {
+    const f = v as Partial<ClientCustomCss> | null;
+    listener(f && typeof f === "object" && typeof f.css === "string" ? { name: String(f.name ?? "custom.css").slice(0, 80), css: f.css.slice(0, 256 * 1024) } : null);
+  };
+  safely(() => native.onCustomCss?.(read));
 }
 export async function saveClientRun(summary: ClientRunSummary): Promise<string | null> {
   const native = nativeClient();

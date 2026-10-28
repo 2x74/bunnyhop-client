@@ -1,0 +1,92 @@
+/* /avatar (avatar.html, avatar/main.ts): the avatar editor. about.css gives the tokens, the top bar and .btn; this is
+   the stage on the left (the picture, its small previews, the actions) and the choices on the right as plain lists. */
+
+.av { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 3rem; align-items: start; padding-top: 1rem; }
+.av [hidden] { display: none !important; }
+.av h1 { margin: 0 0 1rem; font-size: clamp(2rem, 4vw, 3rem); }
+
+.av-stage { position: sticky; top: 1rem; }
+.av-view { position: relative; aspect-ratio: 1; width: 100%; max-width: 34rem; border-radius: 12px; overflow: hidden; cursor: grab; touch-action: pan-y; user-select: none; background: var(--ink-1); }
+.av-view.is-dragging { cursor: grabbing; }
+/* Transparent backdrop: a quiet checkerboard, like an image editor, so "Clear" reads as clear. */
+.av-view.is-clear { background: repeating-conic-gradient(#202027 0 25%, #18181d 0 50%) 0 0 / 24px 24px; }
+.av-view canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+.av-small { display: flex; align-items: center; gap: 1.5rem; margin: 1rem 0 0; }
+.av-round { width: 72px; height: 72px; border-radius: 50%; background: var(--ink-2); object-fit: cover; }
+.av-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.45rem 0.8rem; border-radius: 6px; background: var(--ink-1); font: 600 0.9rem var(--font-ui); color: var(--cream); min-width: 15rem; }
+.av-row img { width: 24px; height: 24px; border-radius: 50%; background: var(--ink-3); object-fit: cover; }
+.av-row-time { margin-left: auto; color: var(--cream-2); font-variant-numeric: tabular-nums; }
+
+.av-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.8rem 1.4rem; margin: 1.4rem 0 0; }
+.av-actions .btn { border: 0; cursor: pointer; font-size: 1rem; }
+.av-actions .btn:disabled { opacity: 0.6; cursor: progress; }
+.av-dl { display: inline-flex; align-items: center; gap: 0.4rem; }
+.av-dl select { background: var(--ink-2); color: var(--cream-2); border: 1px solid var(--ink-4); border-radius: 4px; font: 600 0.85rem var(--font-ui); padding: 0.2rem 0.3rem; }
+.av-link { background: none; border: 0; padding: 0; cursor: pointer; color: var(--cream-2); font: 650 1rem var(--font-ui); }
+.av-link:hover { color: #fff; }
+.av-status { min-height: 1.6em; margin: 0.8rem 0 0; color: var(--cream-2); font-size: 0.95rem; }
+.av-status.bad { color: #ff8a7a; }
+.av-discord { display: flex; align-items: center; gap: 0.5rem; margin: 0.4rem 0 0; color: var(--cream-2); font: 600 0.95rem var(--font-ui); cursor: pointer; }
+.av-discord input { accent-color: var(--amber); width: 1.05rem; height: 1.05rem; }
+.av-reset { display: block; margin: 0.8rem 0 0; font-size: 0.9rem; color: var(--cream-3); }
+
+/* The choices. */
+.av-sec { margin: 0 0 2rem; }
+.av-sec h2, .av-sec h3 { display: flex; align-items: baseline; gap: 0.7rem; margin: 0 0 0.5rem; font-size: 1.2rem; }
+.av-sec h3 { font-size: 1rem; margin-top: 1rem; }
+.av-cur { color: var(--cream-3); font-weight: 600; font-size: 0.9rem; letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.av-list { display: flex; flex-direction: column; }
+.av-list.av-cols { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); column-gap: 1rem; }
+.av-list.av-row3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 1rem; }
+.av-list.av-row4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); column-gap: 1rem; }
+.av-list.av-scroll { max-height: 15.5rem; overflow-y: auto; scrollbar-width: thin; }
+.av-opt { position: relative; text-align: left; background: none; border: 0; padding: 0.32rem 0 0.32rem 0.85rem; color: var(--cream-2); font: 600 0.98rem var(--font-ui); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.av-opt::before { content: ""; position: absolute; left: 0; top: 0.35rem; bottom: 0.35rem; width: 3px; border-radius: 2px; background: var(--amber); transform: scaleY(0); transition: transform 0.18s var(--ease-glide); }
+.av-opt:hover { color: #fff; }
+.av-opt:hover::before { transform: scaleY(0.5); }
+.av-opt[aria-selected="true"] { color: var(--cream); }
+.av-opt[aria-selected="true"]::before { transform: scaleY(1); }
+
+.av-swatches { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+.av-sw { width: 2rem; height: 2rem; border-radius: 50%; border: 0; padding: 0; cursor: pointer; background: linear-gradient(160deg, var(--sw2) 0 45%, var(--sw) 55%); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); transition: transform 0.15s var(--ease-glide); }
+.av-sw[style*="--sw:transparent"] { background: repeating-conic-gradient(#3a3a44 0 25%, #24242b 0 50%) 0 0 / 10px 10px; }
+.av-sw:hover { transform: scale(1.1); }
+.av-sw[aria-selected="true"] { box-shadow: 0 0 0 2px var(--ink-0), 0 0 0 4px var(--amber); }
+
+.av-slider { display: grid; grid-template-columns: 6rem minmax(0, 1fr); align-items: center; gap: 0.8rem; margin: 0.35rem 0 0; color: var(--cream-2); font: 600 0.9rem var(--font-ui); }
+.av-slider input { accent-color: var(--amber); width: 100%; }
+.av-sec .av-list + .av-slider { margin-top: 0.8rem; }
+
+.av-bgrow { display: flex; flex-wrap: wrap; align-items: center; gap: 0.8rem; margin: 0.8rem 0 0; }
+.av-color { width: 2.4rem; height: 2rem; padding: 0; border: 0; background: none; cursor: pointer; }
+.av-map { background: var(--ink-1); color: var(--cream); border: 1px solid var(--ink-4); border-radius: 6px; padding: 0.35rem 0.6rem; font: 600 0.9rem var(--font-ui); width: 13rem; }
+.av-map:focus { border-color: var(--amber); outline: none; }
+
+@media (max-width: 56rem) {
+  .av { grid-template-columns: minmax(0, 1fr); gap: 2rem; }
+  .av-stage { position: static; }
+}
+
+/* Look: one row per cosmetic slot (what you wear, as a thumbnail); a row opens the slot's picker. */
+.av-picks { display: flex; flex-direction: column; margin: 0 0 0.6rem; }
+.av-pick { display: grid; grid-template-columns: 3.2rem 7rem minmax(0, 1fr) auto; align-items: center; gap: 0.9rem; padding: 0.35rem 0.4rem 0.35rem 0; background: none; border: 0; border-radius: 8px; color: var(--cream-2); font: 600 0.98rem var(--font-ui); text-align: left; cursor: pointer; }
+.av-pick:hover { background: var(--ink-1); color: #fff; }
+.av-pick-img { width: 3.2rem; height: 3.2rem; border-radius: 50%; background: radial-gradient(circle at 50% 35%, var(--ink-3), var(--ink-1)); object-fit: cover; }
+.av-pick-label { color: var(--cream); font-weight: 700; }
+.av-pick-name { color: var(--cream-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.av-pick-more { color: var(--cream-3); font-size: 1.3rem; padding-right: 0.4rem; }
+.av-pick:hover .av-pick-more { color: var(--amber); }
+
+/* A slot's picker, in place of the controls: the choices as 3D thumbnails. Hover previews on the big avatar. */
+.av-picker-top { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin: 0 0 0.8rem; }
+.av-picker-top h2 { display: flex; align-items: baseline; gap: 0.7rem; margin: 0; font-size: 1.4rem; }
+.av-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(7.4rem, 1fr)); gap: 0.6rem; }
+.av-tile { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; padding: 0.4rem 0.3rem 0.5rem; background: none; border: 0; border-radius: 10px; color: var(--cream-2); font: 600 0.88rem var(--font-ui); cursor: pointer; }
+.av-tile-img { width: 100%; aspect-ratio: 1; height: auto; border-radius: 10px; background: radial-gradient(circle at 50% 35%, var(--ink-3), var(--ink-1) 75%); transition: transform 0.18s var(--ease-glide); }
+.av-tile:hover, .av-tile:focus-visible { color: #fff; background: var(--ink-1); }
+.av-tile:hover .av-tile-img { transform: translateY(-2px); }
+.av-tile[aria-selected="true"] { color: var(--cream); }
+.av-tile[aria-selected="true"] .av-tile-img { box-shadow: 0 0 0 2px var(--amber); }
+.av-tile-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

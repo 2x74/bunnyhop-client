@@ -48,7 +48,7 @@ export function accountChip(o: { quiet?: boolean } = {}): HTMLElement {
       h("span.name-text", null, name),
       h("span.edit-icon", { "aria-hidden": "true" }, "✎"),
     );
-    const chip = h(`div.chip.${guest ? "guest-chip" : "user-chip"}`, null, accountAvatar({ name, avatarUrl: u?.avatarUrl ?? null }), h("span.chip-col", null, h("span.name-edit", null, nameBtn), tag));
+    const chip = h(`div.chip.${guest ? "guest-chip" : "user-chip"}`, null, accountAvatar({ id: u?.id ?? null, name, avatarUrl: u?.avatarUrl ?? null }), h("span.chip-col", null, h("span.name-edit", null, nameBtn), tag));
     root.replaceChildren(chip);
     if (guest && api.available()) root.append(h("button.btn.save-progress", { type: "button", title: SIGN_IN_HELP, onclick: () => openAccount("save") }, "Sign in"));
   };

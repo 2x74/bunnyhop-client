@@ -48,3 +48,4 @@ export const GLYPHS: Record<string, string> = {
   g_hourglass: P("M7 3.5h10M7 20.5h10M8 3.5c0 5 8 5.5 8 8.5s-8 3.5-8 8.5M16 3.5c0 5-8 5.5-8 8.5s8 3.5 8 8.5"),
 };
 for (let t = 1; t <= 6; t++) GLYPHS[`t${t}`] = textGlyph(`T${t}`, 10);
+

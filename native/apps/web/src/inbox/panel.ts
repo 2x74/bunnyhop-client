@@ -42,6 +42,7 @@ const TICKET_NAME: Record<string, string> = {
   other: "feedback",
   application: "moderator application",
   report: "player report",
+  privacy: "privacy request",
 };
 
 // Plain symbols, drawn in the text colour (no emoji; U+FE0E asks for the text form where a symbol has both).
@@ -80,7 +81,7 @@ function rowOf(t: InboxThread): Row {
       key: `t:${t.id}`,
       thread: t,
       glyph: GLYPH[t.category] ?? "✎",
-      sender: last && last.from !== "you" ? SENDER.staff : SENDER.you,
+      sender: last && last.from !== "you" ? (t.category === "privacy" ? "bunnyhop.lol developer" : SENDER.staff) : SENDER.you,
       subject: last ? `Re: your ${name}` : `Your ${name}`,
       preview: firstLine(last ? last.body : t.message),
       at: last ? last.created_at : t.created_at,
@@ -102,6 +103,7 @@ function rowOf(t: InboxThread): Row {
 /** A player report never says how it ended ("Fixed" would read as a verdict): closed is closed. */
 const REPORT_CLOSED: [string, string] = ["Closed", "Staff have looked at it."];
 const ticketStatus = (status: string, category?: string | null): [string, string] =>
+  category === "privacy" ? (["resolved", "wontfix"].includes(status) ? ["Closed", "Read the developer's reply for the outcome."] : [status === "new" ? "Received" : "Under review", "Only the developer can read and answer this request."]) :
   category === "report" && (status === "resolved" || status === "wontfix") ? REPORT_CLOSED : (TICKET_STATUS[status] ?? [status, ""]);
 
 const statusChip = (status: string, category?: string | null) => {
@@ -258,7 +260,7 @@ export function showInbox(): void {
               h(
                 `section.ib-reply${x.from === "you" ? ".is-you" : ""}`,
                 null,
-                h("div.ib-meta", null, h("b", null, x.from === "you" ? SENDER.you : x.from === "system" ? SENDER.system : SENDER.staff), h("span.dim", null, ago(x.created_at, now))),
+                h("div.ib-meta", null, h("b", null, x.from === "you" ? SENDER.you : x.from === "system" ? SENDER.system : t.category === "privacy" ? "bunnyhop.lol developer" : SENDER.staff), h("span.dim", null, ago(x.created_at, now))),
                 h("p.ib-body", null, x.body),
               ),
             )

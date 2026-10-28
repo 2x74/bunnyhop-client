@@ -1,0 +1,39 @@
+/* A light overlay: the world stays visible through the gauge. --st-h scales the rail's thickness; --st-good / --st-ok
+   are the zone half-widths along it (strafe-trainer-view.ts). The zone colours are the page's (palette.ts swaps them on
+   <html> for the colour-blind settings). */
+:root { --st-g: #4fd08a; --st-o: #f29a3a; --st-r: #e0473f; }
+.st-trainer {
+  width: 16em; max-width: calc(100vw - 2rem); color: var(--st-color, #ffffff); font-size: .85em; text-shadow: 0 1px 2px #000, 0 0 3px #0008;
+  transition: opacity .2s;
+}
+.st-trainer.st-dim { opacity: .3; }
+.st-rail { position: relative; height: calc(3px * var(--st-h, 1)); margin-block: 5px; background: color-mix(in srgb, currentColor 20%, transparent); box-shadow: 0 1px 2px #0007; }
+.st-band { position: absolute; left: calc(50% - var(--st-good, 5%)); width: calc(2 * var(--st-good, 5%)); inset-block: 0; background: color-mix(in srgb, currentColor 65%, transparent); }
+.st-target { position: absolute; left: 50%; top: -2px; bottom: -2px; border-left: 1px solid currentColor; }
+.st-marker { position: absolute; left: 50%; top: -4px; bottom: -4px; width: 2px; background: currentColor; transform: translateX(-50%); box-shadow: 0 1px 2px #000b; }
+.st-reading { position: relative; text-align: center; line-height: 1.3; }
+.st-reading b { font-size: .9em; font-weight: 550; font-variant-numeric: tabular-nums; }
+.st-cue { position: absolute; left: calc(50% + 2.7em); top: .12em; font-size: .7em; color: color-mix(in srgb, currentColor 58%, transparent); white-space: nowrap; }
+.st-cue:empty, .st-trainer:not(.st-hints):not([data-cue="unsupported"]) .st-cue { display: none; }
+.st-trainer[data-cue="unsupported"] .st-cue { position: static; margin-left: .65em; }
+.st-nopace .st-reading b { visibility: hidden; }
+.st-nopace:not(.st-hints):not([data-cue="unsupported"]) .st-reading { display: none; }
+
+/* Detailed and minimal: the rail itself is the zones, red at the ends, amber, green around 100%. */
+.st-trainer:not([data-style="classic"]) .st-band { display: none; }
+.st-trainer:not([data-style="classic"]) .st-rail {
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--st-r) 70%, transparent) calc(50% - var(--st-ok)), var(--st-o) 0 calc(50% - var(--st-good)),
+    var(--st-g) 0 calc(50% + var(--st-good)), var(--st-o) 0 calc(50% + var(--st-ok)), color-mix(in srgb, var(--st-r) 70%, transparent) 0);
+}
+
+.st-trainer[data-style="detailed"] .st-rail { height: calc(10px * var(--st-h, 1)); margin-block: 6px; border-radius: 999px; opacity: .85; }
+.st-trainer[data-style="detailed"] .st-target { top: 0; bottom: 0; border-left: 1px solid #0006; }
+.st-trainer[data-style="detailed"] .st-marker { top: -3px; bottom: -3px; width: 3px; border-radius: 1px; box-shadow: 0 0 0 1px #000a, 0 1px 3px #000b; }
+
+.st-trainer[data-style="minimal"] .st-rail { margin-top: 12px; border-radius: 2px; }
+.st-trainer[data-style="minimal"] .st-target { display: none; }
+.st-trainer[data-style="minimal"] .st-marker {
+  top: auto; bottom: calc(100% + 2px); width: 0; height: 0; background: none; box-shadow: none;
+  border: 5px solid transparent; border-top: 7px solid currentColor; border-bottom: 0; filter: drop-shadow(0 1px 1px #000b);
+}

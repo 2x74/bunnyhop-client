@@ -130,8 +130,12 @@ export function playerGlowControls(o: { root: () => HTMLElement; preview: () => 
     h("div.sp-glow-palette", null, glowColors, glowCustom),
     h("label.sp-glow-strength", null, "Intensity", glowIntensity, glowValue),
     h("label.sp-glow-aura", null, "Animated aura", glowAura),
-    h("label.sp-glow-aura",null,"In first person",h("input.switch.sm",{type:"checkbox",role:"switch",checked:prefs.get().firstPersonGlow,onchange:(e:Event)=>(prefs.update(p=>p.firstPersonGlow=(e.currentTarget as HTMLInputElement).checked),previewGlow())})),
-    h("small.dim",{hidden:prefs.get().showPlayerGlow},"Player glow is off in Settings."),
+    // Your own hands and knife: a setting of this device, not the account's glow.
+    h("label.sp-glow-aura", null, "In first person", h("input.switch.sm", {
+      type: "checkbox", role: "switch", checked: prefs.get().firstPersonGlow,
+      onchange: (e: Event) => (prefs.update((p) => (p.firstPersonGlow = (e.currentTarget as HTMLInputElement).checked)), previewGlow()),
+    })),
+    h("small.dim", { hidden: prefs.get().showPlayerGlow }, "Player glow is off in Settings, so you won't see it in game."),
     supportRow,
   );
   const showSupport = () => (supportRow.hidden = supporter || !o.support);

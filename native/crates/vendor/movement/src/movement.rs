@@ -1,3 +1,4 @@
+use crate::accepted_path::{AcceptedPath, MotionSegment};
 use crate::{
     CONTENTS_CURRENT_0, CONTENTS_CURRENT_90, CONTENTS_CURRENT_180, CONTENTS_CURRENT_270,
     CONTENTS_CURRENT_DOWN, CONTENTS_CURRENT_UP, CONTENTS_LADDER, CONTENTS_SLIME, CONTENTS_WATER,
@@ -29,11 +30,14 @@ pub(super) fn step(
     mut input: StepInput,
     configuration: Configuration,
     policy: Policy,
+    observe: bool,
 ) -> Result<StepResult, Error> {
     validate(state, input, configuration, policy)?;
+    let initial_state = state;
     let tick = configuration.tick_interval * configuration.lagged_movement_scale;
     let mut context = QueryContext::new(tracer);
     context.record = configuration.record_queries;
+    context.observe = observe;
     let mut events = Vec::new();
 
     apply_mode_request(&mut state, input.mode_request, policy, &mut events);
@@ -62,6 +66,7 @@ pub(super) fn step(
     let mover_result = apply_mover(&mut context, &mut state, selected_hull, configuration)?;
 
     let mut result = StepResult {
+        accepted_path: observe.then(|| AcceptedPath::unsupported("no-supported-movement")),
         ground_detach_by_upward_speed: false,
         state,
         selected_hull,
@@ -176,6 +181,8 @@ pub(super) fn step(
         &mut result.events,
     )?;
 
+    let movement_origin = result.state.position;
+    let movement_hull = result.state.active_hull(policy);
     match result.state.mode {
         Mode::None => {}
         Mode::Noclip => noclip(&mut result, input, command, configuration, policy, tick),
@@ -221,6 +228,25 @@ pub(super) fn step(
     }
 
     finish_step(&mut result, input, configuration, policy)?;
+    if observe {
+        let path = result.accepted_path.as_mut().unwrap();
+        if path.segments.first().is_some_and(|s| s.from == movement_origin)
+            && (initial_state.position != movement_origin || initial_state.active_hull(policy) != movement_hull) {
+            path.phase_change(initial_state.position, movement_origin, movement_hull, 0.0, true);
+        }
+        if initial_state.mode != Mode::Walk || result.state.mode != Mode::Walk {
+            path.reject("movement-mode");
+        } else if initial_state.water_level != 0 || result.state.water_level != 0 || result.state.water_jump_time_ms != 0.0 {
+            path.reject("water");
+        } else if result.mover_result.is_some() || initial_state.base_velocity != [0.0; 3] {
+            path.reject("mover-or-base-velocity");
+        } else if result.events.iter().any(|e| matches!(e, Event::Recovered { .. } | Event::Trapped)) {
+            path.reject("recovery-or-trapped");
+        } else if path.segments.first().is_none_or(|s| s.from != initial_state.position)
+            || path.segments.last().is_none_or(|s| s.to != result.state.position) {
+            path.reject("position-correction");
+        }
+    }
     result.queries = context.sweeps;
     result.point_queries = context.points;
     Ok(result)
@@ -1177,6 +1203,7 @@ fn full_walk(
 
     let was_grounded = result.state.ground.is_some();
     let pre_categorize_velocity = result.state.velocity;
+    let pre_categorize_position = result.state.position;
     categorize_position(
         context,
         &mut result.state,
@@ -1186,6 +1213,11 @@ fn full_walk(
         &mut result.events,
         &mut result.ground_detach_by_upward_speed,
     )?;
+    if pre_categorize_position != result.state.position {
+        if let Some(p) = &mut result.accepted_path {
+            p.phase_change(pre_categorize_position, result.state.position, hull, 1.0, false);
+        }
+    }
     // bunnyhop patch: downhill landing fix (see `MovementFixes::downhill`).
     if configuration.fixes.rngfix_incline {
         fix_downhill_landing_rngfix(&mut result.state, was_grounded, pre_categorize_velocity, move_base_velocity,
@@ -1725,6 +1757,7 @@ fn water_move(
         )?;
         if !down.start_solid && !down.all_solid {
             MoveOutcome {
+                path: context.observe.then(|| AcceptedPath::unsupported("unsupported-branch")),
                 position: down.end,
                 velocity: total_velocity,
                 contacts: Vec::new(),
@@ -2138,6 +2171,7 @@ fn clamp_backward_speed(
 
 #[derive(Clone, Debug)]
 struct MoveOutcome {
+    path: Option<AcceptedPath>,
     position: [f32; 3],
     velocity: [f32; 3],
     contacts: Vec<Contact>,
@@ -2146,6 +2180,7 @@ struct MoveOutcome {
 }
 
 fn apply_move_outcome(result: &mut StepResult, movement: MoveOutcome) {
+    result.accepted_path = movement.path;
     result.state.position = movement.position;
     result.state.velocity = movement.velocity;
     result.contacts.extend(movement.contacts);
@@ -2174,6 +2209,7 @@ fn walk_move(
 ) -> Result<MoveOutcome, Error> {
     if length(velocity) < 1.0 {
         return Ok(MoveOutcome {
+            path: context.observe.then(|| AcceptedPath::motion(start, start, hull)),
             position: start,
             velocity: [0.0; 3],
             contacts: Vec::new(),
@@ -2195,6 +2231,7 @@ fn walk_move(
     )?;
     if direct.all_solid {
         return Ok(MoveOutcome {
+            path: context.observe.then(|| AcceptedPath::unsupported("unsupported-branch")),
             position: start,
             velocity: [0.0; 3],
             contacts: Vec::new(),
@@ -2212,6 +2249,7 @@ fn walk_move(
         )?;
         if endpoint.start_solid || endpoint.fraction != 1.0 {
             return Ok(MoveOutcome {
+                path: context.observe.then(|| AcceptedPath::unsupported("unsupported-branch")),
                 position: start,
                 velocity: [0.0; 3],
                 contacts: Vec::new(),
@@ -2221,6 +2259,11 @@ fn walk_move(
         }
         let grounded = stay_on_ground(context, direct.end, hull, configuration)?;
         return Ok(MoveOutcome {
+            path: context.observe.then(|| {
+                let mut p = AcceptedPath::motion(start, direct.end, hull);
+                if grounded != direct.end { p.phase_change(direct.end, grounded, hull, 1.0, false); }
+                p
+            }),
             position: grounded,
             velocity,
             contacts: Vec::new(),
@@ -2238,7 +2281,11 @@ fn walk_move(
         tick,
         surface_friction,
     )?;
+    let before_snap = outcome.position;
     outcome.position = stay_on_ground(context, outcome.position, hull, configuration)?;
+    if before_snap != outcome.position {
+        if let Some(p) = &mut outcome.path { p.phase_change(before_snap, outcome.position, hull, 1.0, false); }
+    }
     Ok(outcome)
 }
 
@@ -2426,8 +2473,13 @@ fn high_step(
     {
         return Ok(None);
     }
+    let before_down = moved.position;
     if !down.start_solid && !down.all_solid {
         moved.position = down.end;
+    }
+    if let Some(p) = &mut moved.path {
+        p.phase_change(start, up.end, hull, 0.0, true);
+        if before_down != moved.position { p.phase_change(before_down, moved.position, hull, 1.0, false); }
     }
     moved.climbed = (moved.position[2] - start[2]).max(0.0);
     Ok(Some(moved))
@@ -2450,6 +2502,7 @@ fn slide(
     let mut original_velocity = velocity;
     let mut position = start;
     let mut remaining = tick;
+    let mut path = context.observe.then(AcceptedPath::default);
     let mut fraction_sum = 0.0;
     let mut planes = Vec::with_capacity(MAX_CLIP_PLANES);
     let mut contacts = Vec::new();
@@ -2467,11 +2520,13 @@ fn slide(
             && let Some(free) = unstick(context, position, planes.last().copied(), hull, configuration)?
         {
             // bunnyhop patch (rampbug fix): pushed out of the seam; retry from there.
+            if let Some(p) = &mut path { p.reject("unstick"); }
             position = free;
             continue;
         }
         if trace.all_solid {
             return Ok(MoveOutcome {
+                path: context.observe.then(|| AcceptedPath::unsupported("unsupported-branch")),
                 position,
                 velocity: [0.0; 3],
                 contacts,
@@ -2496,12 +2551,19 @@ fn slide(
                         && let Some(free) =
                             unstick(context, trace.end, planes.last().copied(), hull, configuration)?
                     {
+                        if let Some(p) = &mut path { p.reject("unstick"); }
                         position = free;
                         break;
                     }
                     velocity = [0.0; 3];
                     break;
                 }
+            }
+            if let Some(p) = &mut path {
+                let t0 = 1.0 - f64::from(remaining) / f64::from(tick);
+                let next_remaining = remaining - remaining * trace.fraction;
+                let t1 = 1.0 - f64::from(next_remaining) / f64::from(tick);
+                p.segments.push(MotionSegment { discrete: false, from: position, to: trace.end, t0, t1, hull });
             }
             position = trace.end;
             original_velocity = velocity;
@@ -2587,6 +2649,10 @@ fn slide(
             break;
         }
     }
+    if let Some(p) = &mut path {
+        let t0 = p.segments.last().map_or(0.0, |s| s.t1);
+        if t0 < 1.0 { p.segments.push(MotionSegment { discrete: false, from: position, to: position, t0, t1: 1.0, hull }); }
+    }
     let ramp_stall = configuration.fixes.rampbug
         && airborne
         && planes.iter().any(|plane| plane[2] > 0.0 && plane[2] < configuration.standable_normal);
@@ -2594,6 +2660,7 @@ fn slide(
         velocity = [0.0; 3];
     }
     Ok(MoveOutcome {
+        path,
         position,
         velocity,
         contacts,
@@ -2916,6 +2983,7 @@ fn toss_move(
 }
 
 struct QueryContext<'a, T: Tracer> {
+    observe: bool,
     tracer: &'a T,
     sweeps: Vec<QueryRecord>,
     points: Vec<PointQueryRecord>,
@@ -2925,6 +2993,7 @@ struct QueryContext<'a, T: Tracer> {
 impl<'a, T: Tracer> QueryContext<'a, T> {
     fn new(tracer: &'a T) -> Self {
         Self {
+            observe: false,
             tracer,
             sweeps: Vec::new(),
             points: Vec::new(),

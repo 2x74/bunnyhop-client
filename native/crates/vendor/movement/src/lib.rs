@@ -1,4 +1,5 @@
 mod movement;
+pub mod accepted_path;
 mod mover;
 
 pub use mover::{
@@ -1047,6 +1048,8 @@ pub struct WishState {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct StepResult {
+    /// Present only for opt-in observational timing. Never affects simulation.
+    pub accepted_path: Option<accepted_path::AcceptedPath>,
     pub ground_detach_by_upward_speed: bool,
     pub state: State,
     pub selected_hull: Hull,
@@ -1115,7 +1118,16 @@ pub fn step(
     configuration: Configuration,
     policy: Policy,
 ) -> Result<StepResult, Error> {
-    movement::step(tracer, state, input, configuration, policy)
+    movement::step(tracer, state, input, configuration, policy, false)
+        .map_err(|error| error.with_command(input.command_number))
+}
+
+/// Executes identical movement while retaining selected accepted path segments.
+pub fn step_observed(
+    tracer: &impl Tracer, state: State, input: StepInput,
+    configuration: Configuration, policy: Policy,
+) -> Result<StepResult, Error> {
+    movement::step(tracer, state, input, configuration, policy, true)
         .map_err(|error| error.with_command(input.command_number))
 }
 

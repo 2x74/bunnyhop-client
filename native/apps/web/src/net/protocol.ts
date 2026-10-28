@@ -441,6 +441,8 @@ export interface RosterPlayer {
   style: StyleId;
   /** Slot being spectated, null while playing. */
   spec: number | null;
+  /** Server-detected inactivity; absent from older servers means present. */
+  afk?: boolean;
   /** Verified main-track PBs on the room's current map, seconds, by style. */
   pb: Partial<Record<StyleId, number>>;
   joinedAt: number;
