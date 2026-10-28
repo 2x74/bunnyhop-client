@@ -25,8 +25,35 @@ export const cosmetics=new NativeCosmetics();
 export function initCosmetics():void {installGlowSettings();const notify=()=>{cosmetics.observeLocal();send({type:"cosmetics",outfit:getOutfit(),packedLoadout:packLoadout(getLoadout()),ghostId:getGhostCosmetics().ghostId,trailId:getGhostCosmetics().trailId,playerGlow:getPlayerGlow()});};onOutfit(notify);onLoadout(notify);onGhostCosmetics(notify);onPlayerGlow(()=>send({type:"cosmetics",outfit:getOutfit(),packedLoadout:packLoadout(getLoadout()),ghostId:getGhostCosmetics().ghostId,trailId:getGhostCosmetics().trailId,playerGlow:getPlayerGlow()}));notify();addEventListener("bunnyhop:account",()=>{void cosmetics.refresh();});void cosmetics.refresh();}
 // The standalone Loadout shortcut uses the same full web screen as the own
 // profile tab; inventory/save guards above remain available to existing callers.
-export function cosmeticsPanel(play:(map:string,style?:string)=>void=map=>navigate({screen:"maps",focus:map}),slot:string|null=null):HTMLElement {
- const root=h("div.native-cosmetics",null,h("p.dim",null,"Loading loadout…"));let request=0,attached=false;queueMicrotask(()=>{attached=root.isConnected;});
- const load=()=>{const current=++request,epoch=accountGeneration();void Promise.all([import("./profile-panel"),api.me().catch(()=>null)]).then(([module,user])=>{if(current!==request||epoch!==accountGeneration()||(attached&&!root.isConnected))return;root.replaceChildren(module.profilePanel(user?.id??"",play,undefined,{tab:"loadout",slot}));});};
- const account=()=>{if(root.isConnected)attached=true;else if(attached){window.removeEventListener("bunnyhop:account",account);return;}load();};window.addEventListener("bunnyhop:account",account);load();return root;
+export function cosmeticsPanel(
+  play: (map: string, style?: string) => void = (map) => navigate({ screen: "maps", focus: map }),
+  slot: string | null = null,
+  tabsHost: HTMLElement | null = null,
+): HTMLElement {
+  const root = h("div.native-cosmetics", null, h("p.dim", null, "Loading loadout…"));
+  let request = 0;
+  let attached = false;
+  queueMicrotask(() => {
+    attached = root.isConnected;
+  });
+  const load = (): void => {
+    const current = ++request;
+    const epoch = accountGeneration();
+    void Promise.all([import("./profile-panel"), api.me().catch(() => null)]).then(([module, user]) => {
+      if (current !== request || epoch !== accountGeneration() || (attached && !root.isConnected)) return;
+      tabsHost?.replaceChildren();
+      root.replaceChildren(module.profilePanel(user?.id ?? "", play, undefined, { tab: "loadout", slot, tabsHost }));
+    });
+  };
+  const account = (): void => {
+    if (root.isConnected) attached = true;
+    else if (attached) {
+      window.removeEventListener("bunnyhop:account", account);
+      return;
+    }
+    load();
+  };
+  window.addEventListener("bunnyhop:account", account);
+  load();
+  return root;
 }

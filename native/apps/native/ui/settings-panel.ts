@@ -6,7 +6,8 @@ import {mouseDiagnosticsPanel} from "./mouse-diagnostics";
 import {windowPanel} from "./window-panel";
 import { updatePanel } from "./update-panel";
 import { dataFolderPanel } from "./data-folder-panel";
-import { importSettings,exportSettings, readSettingsText } from "./settings-transfer";
+import { transferPanel } from "./settings-transfer-panel";
+import { customCssSection } from "./custom-css/section";
 import { h } from "../../web/src/ui/dom";
 import { ACTIONS, keyLabel } from "../../web/src/ui/settings";
 import { mouseCode } from "../../web/src/binds";
@@ -400,11 +401,7 @@ export function settingsPanel(initialSection?:string): HTMLElement {
         speed("Modifier yaw speed", "yawSpeedAlt", DEFAULT_YAW_SPEED_ALT, "While Turn modifier is held", "The speed Turn left / Turn right use while Turn modifier is held, in degrees per second. Set it above your yaw speed for a fast turn (170, 210 ...) or below it for a slow one."))));
   const mouseBody = h("div.nset-hud", null, mouse, turnAdvanced, group("High-rate input", toggle("Input diagnostics overlay", "mouseDiagnostics", "", "Measure delivered mouse motion while playing. Polling rate is configured in your mouse software, not in the game.")), mouseDiagnosticsPanel());
 
-  const transferInput=h("textarea.nset-transfer",{rows:8,spellcheck:false,"aria-label":"Settings code or JSON",placeholder:"Paste a settings code from the website (bhs1.…) or settings JSON"}) as HTMLTextAreaElement;
-  const transferStatus=h("p.nset-hint",{role:"status"});
-  const transfer=h("div",null,group("Named presets",row("Settings presets",settingsPresets(()=>state.settings,save),"Save setups on this device")),group("Import and export",
-    row("Export",h("button.btn",{type:"button",onclick:()=>{transferInput.value=exportSettings(state.settings);transferInput.focus();transferInput.select();transferStatus.textContent="Settings selected. Copy them to save a backup.";}},"Export JSON")),
-    row("Import",h("button.btn",{type:"button",onclick:async()=>{try{const result=importSettings(await readSettingsText(transferInput.value));if(!Object.keys(result.patch).length)throw new Error("No supported settings found.");save(result.patch);transferStatus.textContent=result.unsupported.length?`Applied supported settings. Not imported: ${result.unsupported.join(", ")}.`:"Settings imported.";}catch(error){transferStatus.textContent=(error as Error).message;}}},"Apply"))),transferInput,transferStatus);
+  const transfer = transferPanel({ row, group, save, presets: settingsPresets(() => state.settings, save) });
   const sections: Section[] = [
     { id: "mouse", title: "Mouse", body: mouseBody },
     { id: "display", title: "Display", body: display },
@@ -413,6 +410,7 @@ export function settingsPanel(initialSection?:string): HTMLElement {
     { id: "audio", title: "Audio", body: audio },
     { id: "keys", title: "Keys", body: keys },
     { id: "discord", title: "Discord", body: discord },
+    { id: "css", title: "Custom CSS", body: customCssSection(row, group) },
     { id: "transfer", title: "Import / export", body: transfer },
     { id: "data", title: "Game data", body: dataFolderPanel() },
     { id: "updates", title: "Updates", body: updatePanel() },

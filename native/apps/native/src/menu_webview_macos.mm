@@ -114,6 +114,16 @@ struct MenuWebView::Impl {
     std::shared_ptr<MenuState> state = std::make_shared<MenuState>();
     bool shown = false, backdrop = false;
 
+    // A responder inside the menu or the sign-in view.
+    bool owns(NSResponder *responder) const {
+        if (![responder isKindOfClass:NSView.class])
+            return false;
+        NSView *view = (NSView *)responder;
+        if (menu && [view isDescendantOf:menu])
+            return true;
+        return auth_container && [view isDescendantOf:auth_container];
+    }
+
     Impl(SDL_Window *sdl, const std::string &html) {
         if (!NSThread.isMainThread) { state->error = "WebKit menus must be created on the SDL main thread"; return; }
         if (!sdl) { state->error = "No SDL window for web menus"; return; }
@@ -153,7 +163,7 @@ struct MenuWebView::Impl {
         // Local inline menu code is trusted; remote executable content and
         // frames cannot enter that document. Fetch uses normal HTTPS/CORS and
         // the real bunnyhop.lol origin established by baseURL (spike verified).
-        NSString *policy = @"<meta http-equiv='Content-Security-Policy' content=\"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: data:; font-src https://bunnyhop.lol data:; connect-src https://bunnyhop.lol wss://bunnyhop.lol; base-uri 'none'; frame-src 'none'; object-src 'none'; form-action 'none'\">";
+        NSString *policy = @"<meta http-equiv='Content-Security-Policy' content=\"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: data: blob:; font-src https://bunnyhop.lol data: blob:; connect-src https://bunnyhop.lol wss://bunnyhop.lol; base-uri 'none'; frame-src 'none'; object-src 'none'; form-action 'none'\">";
         // Keep the bundled doctype first so the menu stays in standards mode.
         NSRange head = [source rangeOfString:@"<head" options:NSCaseInsensitiveSearch];
         NSRange insertion = NSMakeRange(NSNotFound, 0);
@@ -221,14 +231,29 @@ bool MenuWebView::supports_backdrop() const { return available() && impl_->backd
 const std::string &MenuWebView::error() const { return impl_->state->error; }
 bool MenuWebView::visible() const { return impl_->shown; }
 void MenuWebView::set_visible(bool show) {
-    if (!available() || show == impl_->shown) return;
+    if (!available() || show == impl_->shown)
+        return;
     impl_->shown = show;
-    impl_->menu.hidden = !show;
-    impl_->auth_container.hidden = !show;
     if (show) {
+        impl_->menu.hidden = NO;
+        impl_->auth_container.hidden = NO;
         impl_->previous_responder = impl_->window.firstResponder;
         [impl_->window makeFirstResponder:impl_->auth ?: impl_->menu];
-    } else if (impl_->window && impl_->previous_responder) [impl_->window makeFirstResponder:impl_->previous_responder];
+        return;
+    }
+    // Keys go back to the game view before the web view hides. If the earlier
+    // responder is gone, was the window itself or was the menu, SDL's view
+    // (the content view) takes them.
+    NSResponder *game = impl_->previous_responder;
+    if (![game isKindOfClass:NSView.class] || impl_->owns(game))
+        game = impl_->window.contentView;
+    if (impl_->window && game)
+        [impl_->window makeFirstResponder:game];
+    impl_->menu.hidden = YES;
+    impl_->auth_container.hidden = YES;
+}
+bool MenuWebView::has_keyboard_focus() const {
+    return impl_->shown && impl_->window && impl_->owns(impl_->window.firstResponder);
 }
 std::vector<std::string> MenuWebView::drain_messages() {
     std::vector<std::string> messages; messages.swap(impl_->state->messages); return messages;

@@ -66,7 +66,7 @@ test("home is the web title screen: menu, maps to try, footer, and native routes
     expect(await page.locator(".home-tile").first().getAttribute("data-name")).toBe("bhop_eazy");
     expect((await messages(page)).filter(m=>m.type==="menuBackdrop")).toEqual([{type:"menuBackdrop",map:"bhop_eazy"}]);
     expect(await page.locator(".home-foot .home-acts > :not([hidden])").allInnerTexts()).toEqual(["Support","Inbox"]);
-    expect(await page.locator(".home-links .home-link").allTextContents()).toEqual(["Feedback","Replays","Credits","What's new","Quit"]);
+    expect(await page.locator(".home-links .home-link").allTextContents()).toEqual(["Feedback","Replays","About","Privacy","Terms","Credits","What's new","Quit"]);
     // Nothing to continue: Play goes straight into the first map to try (the one behind the menu), like the web.
     await page.getByRole("button",{name:"Play",exact:true}).click();expect(await last(page)).toEqual({type:"selectMap",id:"bhop_eazy",style:"autohop",track:0});
     for(const [button,screen] of [["Learn to bhop","tutorial"],["Play online","servers"],["Ranks","ranks"],["Stats","stats"],["Settings","settings"],["Replays","replays"],["Credits","credits"],["Profile","loadout"]]) {
@@ -178,6 +178,9 @@ test("your own profile keeps its way to the Loadout",async()=>{
   const {browser,page}=await open(1280,720,url=>url.pathname==="/api/me"?me:url.pathname==="/api/players/alice"?nativeProfileFixture("alice","alice",true):null);
   try {
     await page.getByRole("button",{name:"Profile",exact:true}).click();
+    // As on the web: titled "Profile", with its tabs in the header.
+    await page.locator(".screen-head .pf-tabs-host .pf-tab").first().waitFor();
+    expect(await page.locator(".screen-head h2").textContent()).toBe("Profile");
     await page.getByRole("tab",{name:/^Loadout/}).click();
     await page.locator(".profile .lo-body").waitFor();
     expect(await page.locator(".pf-layout").getAttribute("data-tab")).toBe("loadout");

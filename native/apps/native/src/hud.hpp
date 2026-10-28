@@ -12,6 +12,7 @@
 #include "text_raster.hpp"
 #include "hud_text.hpp"
 #include "native_chat.hpp"
+#include "hud_theme.hpp"
 
 namespace {
 class NativeHud {
@@ -59,9 +60,32 @@ class NativeHud {
         element_visible=true;element_scale=1;pivot_x=x;pivot_y=y;
         const auto &layout=prefs.at("hudLayout");
         if(layout.contains(id)){element_visible=layout[id].value("visible",true);element_scale=layout[id].value("scale",1.f);}
+        const auto* style = theme_.element(id);
+        element_alpha = style ? style->opacity : 1;
+        element_color = style ? style->color : std::nullopt;
+    }
+    void clear_element_style() {
+        element_alpha = 1;
+        element_color.reset();
     }
     using Color=std::array<float,4>;
-    const Color cream{.94f,.91f,.86f,1},amber{1,.71f,.24f,1},dim{.75f,.75f,.77f,1};
+    // The HUD's own colours; Custom CSS may replace them (set_theme).
+    static constexpr Color kCream{.94f, .91f, .86f, 1};
+    static constexpr Color kAmber{1, .71f, .24f, 1};
+    static constexpr Color kDim{.75f, .75f, .77f, 1};
+    Color cream = kCream;
+    Color amber = kAmber;
+    Color dim = kDim;
+    native::HudTheme theme_;
+    // The current element's Custom CSS opacity and text colour.
+    float element_alpha = 1;
+    std::optional<Color> element_color;
+    // An element's CSS colour replaces its plain text colours; gain/loss and
+    // other meaningful colours stay.
+    Color themed_text(Color color) const {
+        const bool plain = color == cream || color == dim || color == amber;
+        return element_color && plain ? *element_color : color;
+    }
     Color jump_stats_color(std::optional<float> gain) const {
         if(!gain)return dim;
         if(!prefs.value("jumpStatsColors",true))return *gain>=native::good_gain?amber:dim;
@@ -76,6 +100,7 @@ class NativeHud {
     }
     void quad(float x,float y,float w,float h,float u,float v,float uw,float vh,Color c) {
         if(!element_visible)return;
+        c[3] *= element_alpha;
         x=pivot_x+(x-pivot_x)*element_scale;y=pivot_y+(y-pivot_y)*element_scale;w*=element_scale;h*=element_scale;
         const float points[6][4]={{x,y,u,v},{x+w,y,u+uw,v},{x+w,y+h,u+uw,v+vh},
             {x,y,u,v},{x+w,y+h,u+uw,v+vh},{x,y+h,u,v+vh}};
@@ -86,6 +111,7 @@ class NativeHud {
     void rect(float x,float y,float w,float h,Color c) {quad(x,y,w,h,-2,-2,0,0,c);}
     void text(float x,float y,const std::string &value,float size,Color color,bool center=false) {
         if(!element_visible)return;
+        color = themed_text(color);
         if(std::any_of(value.begin(),value.end(),[](unsigned char c){return c>=128;}))if(const auto glyphs=raster(value,size)){
             const float ratio=scale*element_scale,w=glyphs->width/ratio,h=glyphs->height/ratio;if(center)x-=w*.5f;
             current_texture=glyphs->texture;quad(x+1,y+1,w,h,0,0,1,1,{0,0,0,.85f});quad(x,y,w,h,0,0,1,1,color);current_texture=atlas;return;
@@ -112,6 +138,12 @@ class NativeHud {
     }
 public:
     void preferences(const native::Json &value){prefs=value;}
+    void set_theme(native::HudTheme theme) {
+        theme_ = std::move(theme);
+        cream = theme_.text.value_or(kCream);
+        dim = theme_.secondary.value_or(kDim);
+        amber = theme_.accent.value_or(kAmber);
+    }
     void reset_history(){speed_history.clear();have_jump=false;gain_tick=0;split_line.clear();delta_line.clear();}
     void set_run_comparison(const std::string &split,const std::string &delta,bool good=false){split_line=split;delta_line=delta;delta_good=good;}
     void tick(const BhState &s){
@@ -123,7 +155,14 @@ public:
     }
     // Shared SDL overlays use atlas ASCII and system-shaped Unicode line textures.
     // Failed or unavailable platform fonts retain one fallback per code point.
-    void overlay_begin(int width,int height,float percent=100){begin_batch();scale=native::HudGeometry(width,height,percent).scale;element_visible=true;element_scale=1;pivot_x=pivot_y=0;}
+    void overlay_begin(int width, int height, float percent = 100) {
+        begin_batch();
+        scale = native::HudGeometry(width, height, percent).scale;
+        element_visible = true;
+        element_scale = 1;
+        pivot_x = pivot_y = 0;
+        clear_element_style();
+    }
     void overlay_text(float x,float y,const std::string &value,float size,std::array<float,4> color,bool center=false){text(x,y,value,size,color,center);}
     void overlay_rect(float x,float y,float w,float h,std::array<float,4> color){rect(x,y,w,h,color);}
     void overlay_end(int width,int height){flush(width,height);}
@@ -254,7 +293,8 @@ void main(){color=vec4(ink.rgb,ink.a*(uv.x<0.?1.:texture(font,uv).a));})");
         }
         if(leave_progress>=0){const auto [x,y]=at("crosshair",w/2,h/2);for(int i=0;i<48;++i){const float a=float(i)/48*6.2831853f-1.5707963f;rect(x+std::cos(a)*26-2,y+std::sin(a)*26-2,4,4,float(i)/48<=leave_progress?amber:dim);}}
         if(visible) {
-            const auto palette=native::semantic_palette(prefs.value("colorBlind",std::string("off")));
+            auto palette=native::semantic_palette(prefs.value("colorBlind",std::string("off")));
+            theme_.apply(palette);
             {const auto [x,y]=at("map",26,18);
                 text(x,y,map,17,cream);text(x,y+24,style+(run.track?" / BONUS "+std::to_string(run.track):""),14,amber);}
             char buf[160];
@@ -312,6 +352,7 @@ void main(){color=vec4(ink.rgb,ink.a*(uv.x<0.?1.:texture(font,uv).a));})");
                 for(size_t i=0;i<speed_history.size();++i){const float bar=speed_history[i].second/peak*65;rect(x+float(i)*260/250,y+75-bar,1.2f,bar,amber);}
             }
             element_visible=true;element_scale=1;
+            clear_element_style();
             if(practice&&practice->active)text(w/2,h/2+28,practice->noclip?"Practice | noclip":"Practice",14,amber,true);
             if(practice&&practice->menu_open) {
                 const float x=26,y=h*.30f;rect(x-10,y-8,320,220,{.03f,.03f,.05f,.8f});

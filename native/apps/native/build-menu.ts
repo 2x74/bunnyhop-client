@@ -3,6 +3,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { adaptSocialSource } from "./ui/adapt-social";
 import { adaptSupportSource } from "./ui/adapt-support";
+import { adaptCopySource, hasCopyFix } from "./ui/adapt-copy";
 import { dirname, resolve, relative } from "node:path";
 import { parseArgs } from "node:util";
 
@@ -53,6 +54,11 @@ const result = await Bun.build({
     build.onLoad({filter:/.*/,namespace:"native-menu"},()=>({contents:coreConstants,loader:"ts"}));
     build.onLoad({filter:/\.[cm]?[jt]sx?$/}, async (args) => {
       modules.add(args.path);
+      const webFile = relative(web, args.path).replaceAll("\\", "/");
+      if (hasCopyFix(webFile)) {
+        const source = adaptCopySource(webFile, await Bun.file(args.path).text());
+        return { contents: source, loader: "ts", resolveDir: dirname(args.path) };
+      }
       if(args.path===resolve(web,"ui/support.ts"))return {contents:adaptSupportSource(await Bun.file(args.path).text(),resolve(native,"support-checkout.ts"),resolve(native,"bridge.ts")),loader:"ts",resolveDir:dirname(args.path)};
       if(["ui/servers.ts","net/lobby.ts","social/state.ts","social/dock.ts","ui/gauntlets.ts"].some(path=>args.path===resolve(web,path))) {
         let source=await Bun.file(args.path).text();

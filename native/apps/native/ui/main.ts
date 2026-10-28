@@ -57,6 +57,8 @@ import { practiceReason } from "../../web/src/practice";
 import { NativeGauntlet } from "./gauntlet-native";
 import { installNowPlaying } from "./music-now";
 import { leaveMapTeardown } from "./map-lifecycle";
+import { initCustomCss } from "./custom-css/custom-css";
+import { installHudTheme } from "./custom-css/hud-theme";
 
 import {installGamepadNavigation} from "./gamepad";
 import {maybeStartOnboarding,openOnboarding} from "./onboarding";
@@ -159,10 +161,26 @@ const backOf=(from:Screen):Screen=>from==="gauntlet"&&!state.map?"gauntlets":"ho
 /** Route shared footer destinations into native screens; other trusted pages use the browser. */
 function openWeb(path: string): void {const url=new URL(path,LIVE_ORIGIN);if(url.origin===LIVE_ORIGIN&&url.searchParams.has("support")){show("support");return;} if(!openExternal(url.href)) notice("This page is not available in the native menu."); }
 const BACK_ARROW = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12H5M11 5.5 4.5 12 11 18.5"/></svg>';
-function heading(title: string, sub?: string|null, inner?: () => boolean): HTMLElement {
-  return h("header.screen-head", null,
-    h("button.screen-back", { type: "button", "aria-label": "Back", title: "Back (Esc)", onclick: () => inner?.() || back(), html: BACK_ARROW }),
-    h("div.screen-title", null, h("h2", null, title), sub ? h("small", null, sub) : null));
+/** A screen's header. `sub` is a line under the title, or the screen's tabs (web menu.ts header). */
+function heading(title: string, sub?: string | HTMLElement | null, inner?: () => boolean): HTMLElement {
+  const goBack = (): void => {
+    if (!inner?.()) back();
+  };
+  const backOptions = { type: "button", "aria-label": "Back", title: "Back (Esc)", onclick: goBack, html: BACK_ARROW };
+  const backButton = h("button.screen-back", backOptions);
+  const below = typeof sub === "string" ? h("small", null, sub) : sub ?? null;
+  return h("header.screen-head", null, backButton, h("div.screen-title", null, h("h2", null, title), below));
+}
+
+/** A screen whose tabs sit in its header, as on the web: Profile, Stats, Support. */
+function tabbedHeading(title: string): { head: HTMLElement; tabs: HTMLElement } {
+  const tabs = h("div.pf-tabs-host");
+  return { head: heading(title, tabs), tabs };
+}
+
+function playMap(map: string, style?: string): void {
+  if (isStyleId(style)) setSelectedStyle(style);
+  selectMap(map);
 }
 let shown = "";
 function render(): void {
@@ -226,8 +244,13 @@ function render(): void {
     const g=gauntletView;
     app.replaceChildren(h("section.panel.panel-wide.panel-gauntlet", null, head, g.attempt?gauntletResult(g.slug,g.attempt,gauntletActions,{title}):gauntletScreen(g.slug,gauntletActions,{title})));
   } else if(screen==="support"){
-    const tabs=h("div.native-support-tabs");
-    app.replaceChildren(h("section.panel.panel-wide.native-support",null,heading("Support bunnyhop.lol"),tabs,nativeSupportScreen({tabsHost:tabs,loadout:()=>void ownProfile("loadout"),editCard:()=>void ownProfile("card")})));
+    const { head, tabs } = tabbedHeading("Support");
+    const support = nativeSupportScreen({
+      tabsHost: tabs,
+      loadout: () => void ownProfile("loadout"),
+      editCard: () => void ownProfile("card"),
+    });
+    app.replaceChildren(h("section.panel.panel-wide.native-support", null, head, support));
   } else if (screen === "settings") {
     app.replaceChildren(h("section.panel.native-settings", null, heading("Settings"),settingsPanel()));
   } else if (screen === "credits") {
@@ -241,12 +264,20 @@ function render(): void {
   } else if(screen==="ranks") {
     app.replaceChildren(h("section.panel.panel-wide.native-ranks",null,heading("Ranks"),ranksScreen(rankScope,{page:rankPage,onChange:(scope,page)=>{rankScope=scope;rankPage=page;}})));
   } else if(screen==="stats") {
-    const tabs=h("div");app.replaceChildren(h("section.panel.panel-wide.native-stats",null,heading("Statistics"),tabs,statsScreen({tabsHost:tabs,play:()=>show("maps")})));
+    const { head, tabs } = tabbedHeading("Stats");
+    const stats = statsScreen({ tabsHost: tabs, play: () => show("maps") });
+    app.replaceChildren(h("section.panel.panel-wide.native-stats", null, head, stats));
   } else if(screen==="loadout") {
-    app.replaceChildren(h("section.panel.native-loadout",null,heading("Loadout"),cosmeticsPanel((map,style)=>{if(isStyleId(style))setSelectedStyle(style);selectMap(map);},loadoutSlot)));
+    // The web's Loadout is your profile's Loadout tab (signed out: that tab alone), under "Profile".
+    const { head, tabs } = tabbedHeading("Profile");
+    app.replaceChildren(h("section.panel.native-loadout", null, head, cosmeticsPanel(playMap, loadoutSlot, tabs)));
   } else if(screen==="tutorial") {
     app.replaceChildren(h("section.panel.native-tutorial-screen",null,heading("Tutorial"),tutorialPanel()));
-  } else app.replaceChildren(h("section.panel.panel-wide.native-profile",null,heading("Player"),profilePanel(profileId,(map,style)=>{if(isStyleId(style))setSelectedStyle(style);selectMap(map);},()=>show("loadout"),profileOpen)));
+  } else {
+    const { head, tabs } = tabbedHeading("Profile");
+    const profile = profilePanel(profileId, playMap, () => show("loadout"), { ...profileOpen, tabsHost: tabs });
+    app.replaceChildren(h("section.panel.panel-wide.native-profile", null, head, profile));
+  }
 
 }
 
@@ -445,6 +476,8 @@ setGameInfo(()=>({inGame:!!state.map,client:"native",...(state.map?{map:state.ma
   // Mouse, frame-time and input-queue diagnostics, when the overlay has produced a sample.
   ...(latestMouseDiagnostics()?{inputDiagnostics:latestMouseDiagnostics()}:{})}));
 initSocial();initDock();initCosmetics();installNowPlaying();installNativeUiAudio();
+installHudTheme();
+initCustomCss();
 installMenuBackdrop();
 watchMenuMotion();
 render();
