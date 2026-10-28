@@ -1,3 +1,6 @@
+#include "options.hpp"
+#include "startup.hpp"
+#include "startup_display.hpp"
 #include "bunnyhop_native.h"
 #include "native_input.hpp"
 #include "mouse_diagnostics.hpp"
@@ -52,12 +55,6 @@
 #include "discord_rpc.hpp"
 #include "data_location.hpp"
 #include "relaunch.hpp"
-#ifdef __APPLE__
-#include <mach-o/dyld.h>
-#endif
-#include "../packaging/executable_identity.hpp"
-#include "../packaging/assets_identity.hpp"
-#include "../packaging/release_identity.hpp"
 #include "native_update.hpp"
 #include "update_config.hpp"
 #include "video_capture.hpp"
@@ -93,134 +90,12 @@
 #include <vector>
 
 namespace {
-struct Options {
-    std::string map, content_root, screenshot, online_map, menu_html = BUNNYHOP_MENU_HTML, menu_smoke;
-    uint64_t frames = 0;
-    double sensitivity = 2;
-    bool hidden = false, help = false, no_menu = false, windowed = false, sensitivity_set = false,
-         menu_home_smoke = false;
-    // Comparator: the pre-0.5.2 per-frame proration and latest-polled keys instead of timestamped input.
-    bool legacy_input = false;
-    std::string style = "autohop", replay, tutorial_lesson, runtime_smoke, video_smoke, presentation_smoke;
-    bool tutorial_demo = false;
-    // Render checks: a fixed eye (Source x, y, z) and pitch, yaw, with no HUD or viewmodel.
-    std::optional<std::array<float, 5>> camera;
-};
-
-Options options(int argc, char **argv) {
-    Options out;
-    for (int i = 1; i < argc; ++i) {
-        const std::string arg = argv[i];
-        auto value = [&]() -> std::string {
-            if (++i >= argc) throw std::runtime_error("Missing value for " + arg);
-            return argv[i];
-        };
-        if (arg == "--presentation-smoke") {
-            out.presentation_smoke = value();
-            out.hidden = true;
-            out.no_menu = true;
-        } else if (arg == "--video-smoke") {
-            out.video_smoke = value();
-            out.hidden = true;
-            out.no_menu = true;
-        } else if (arg == "--runtime-smoke") {
-            out.runtime_smoke = value();
-            out.hidden = true;
-            out.no_menu = true;
-        } else if (arg == "--tutorial")
-            out.tutorial_lesson = value();
-        else if (arg == "--tutorial-demo")
-            out.tutorial_demo = true;
-        else if (arg == "--style")
-            out.style = value();
-        else if (arg == "--replay")
-            out.replay = value();
-        else if (arg == "--map")
-            out.map = value();
-        else if (arg == "--online-map")
-            out.online_map = value();
-        else if (arg == "--menu-html")
-            out.menu_html = value();
-        else if (arg == "--menu-smoke")
-            out.menu_smoke = value();
-        else if (arg == "--menu-home-smoke") {
-            out.menu_smoke = value();
-            out.menu_home_smoke = true;
-        } else if (arg == "--no-menu")
-            out.no_menu = true;
-        else if (arg == "--windowed")
-            out.windowed = true;
-        else if (arg == "--legacy-input")
-            out.legacy_input = true;
-        else if (arg == "--content-root")
-            out.content_root = value();
-        else if (arg == "--screenshot")
-            out.screenshot = value();
-        else if (arg == "--camera") {
-            std::array<float, 5> view{};
-            std::stringstream parts(value());
-            std::string part;
-            size_t n = 0;
-            while (std::getline(parts, part, ',')) {
-                if (n == 5) throw std::runtime_error("--camera takes x,y,z,pitch,yaw");
-                size_t used = 0;
-                view[n] = std::stof(part, &used);
-                if (used != part.size() || !std::isfinite(view[n]))
-                    throw std::runtime_error("--camera takes x,y,z,pitch,yaw");
-                n++;
-            }
-            if (n != 5) throw std::runtime_error("--camera takes x,y,z,pitch,yaw");
-            out.camera = view;
-        } else if (arg == "--sensitivity") {
-            out.sensitivity_set = true;
-            const auto s = value();
-            size_t n = 0;
-            out.sensitivity = std::stod(s, &n);
-            if (n != s.size() || !std::isfinite(out.sensitivity) || out.sensitivity <= 0)
-                throw std::runtime_error("--sensitivity must be a positive finite number");
-        } else if (arg == "--frames") {
-            const auto s = value();
-            size_t n = 0;
-            if (s.empty() || s[0] == '-') throw std::runtime_error("--frames must be positive");
-            out.frames = std::stoull(s, &n);
-            if (n != s.size() || out.frames == 0) throw std::runtime_error("--frames must be positive");
-        } else if (arg == "--hidden")
-            out.hidden = true;
-        else if (arg == "--help" || arg == "-h")
-            out.help = true;
-        else
-            throw std::runtime_error("Unknown argument: " + arg);
-    }
-    if (!out.runtime_smoke.empty() && (out.map.empty() || !out.online_map.empty() || out.replay.empty()))
-        throw std::runtime_error("Runtime smoke requires a local --map and --replay");
-    if (!out.tutorial_lesson.empty() && out.tutorial_lesson != "jump" && out.tutorial_lesson != "strafe"
-        && out.tutorial_lesson != "speed" && out.tutorial_lesson != "final")
-        throw std::runtime_error("Unknown tutorial lesson");
-    if (!native::styles.contains(out.style)) throw std::runtime_error("Unknown movement style");
-    if (!out.screenshot.empty() && !out.frames) out.frames = 1;
-    if (!out.map.empty() && !out.online_map.empty()) throw std::runtime_error("Choose --map or --online-map");
-    if (!out.online_map.empty() && !native::valid_map_id(out.online_map))
-        throw std::runtime_error("Invalid online map name");
-    if (out.map.empty() && out.online_map.empty() && (out.no_menu || out.frames) && !out.help)
-        throw std::runtime_error("This mode needs --map or --online-map");
-    if (out.menu_home_smoke
-        && (!out.map.empty() || !out.online_map.empty() || out.frames || out.no_menu || !out.replay.empty()
-            || !out.tutorial_lesson.empty()))
-        throw std::runtime_error("Home menu smoke must start without a map or gameplay mode");
-    return out;
-}
 
 void require(bool ok, BhContext *ctx, const char *operation) {
     if (!ok) {
         const char *error = bh_last_error(ctx);
         throw std::runtime_error(std::string(operation) + ": " + (error && *error ? error : "native core failed"));
     }
-}
-
-std::string read_text(const std::filesystem::path &path) {
-    std::ifstream file(path, std::ios::binary);
-    if (!file) throw std::runtime_error("Cannot open " + native::data_location::utf8(path));
-    return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
 }
 
 std::string base64(const std::string &bytes) {
@@ -237,32 +112,6 @@ std::string base64(const std::string &bytes) {
         out += i + 2 < bytes.size() ? alphabet[n & 63] : '=';
     }
     return out;
-}
-
-std::string file_hash(const std::filesystem::path &path, const std::string &mode = "sha256") {
-    const auto raw = read_text(path);
-    const std::vector<uint8_t> source(raw.begin(), raw.end());
-    const auto bytes = native::executable_identity_bytes(source, mode);
-    char hash[65]{};
-    if (!bh_sha256(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size(), hash))
-        throw std::runtime_error("Could not hash " + native::data_location::utf8(path));
-    return hash;
-}
-
-std::filesystem::path executable_path() {
-#ifdef __APPLE__
-    uint32_t count = 4096;
-    std::vector<char> path(count);
-    if (_NSGetExecutablePath(path.data(), &count) != 0) {
-        path.resize(count);
-        if (_NSGetExecutablePath(path.data(), &count) != 0) throw std::runtime_error("Cannot locate native executable");
-    }
-    return std::filesystem::weakly_canonical(path.data());
-#elif defined(__linux__)
-    return std::filesystem::read_symlink("/proc/self/exe");
-#else
-    return native::data_location::from_utf8(SDL_GetBasePath()) / "bunnyhop-native.exe";
-#endif
 }
 
 std::vector<BhZone> timer_zones(const nlohmann::json &detail) {
@@ -318,7 +167,7 @@ static void data_folder_picked(void *userdata, const char *const *files, int) {
         picker->result = files[0];
 }
 
-int run(const Options &opt) {
+int run(const native::Options &opt) {
     using CorePtr = std::unique_ptr<BhContext, decltype(&bh_destroy)>;
     CorePtr core(nullptr, &bh_destroy);
     if (bh_abi_version() != 1) throw std::runtime_error("Unsupported native core ABI version");
@@ -332,41 +181,9 @@ int run(const Options &opt) {
     BhState curr{}, prev{};
     native::Input input;
     input.set_sensitivity(opt.sensitivity);
-    SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE, "0");
-    SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SPEED_SCALE, "1");
-    SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_WARP_MOTION, "0");
-    SDL_SetAppMetadata(native::app_name, nullptr, native::app_id);
-    if (!SDL_Init(SDL_INIT_VIDEO))
-        throw std::runtime_error(std::string("SDL initialization failed: ") + SDL_GetError());
-
-    struct SdlCleanup {
-        ~SdlCleanup() { SDL_Quit(); }
-    } cleanup;
-
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
-    SDL_WindowFlags flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
-    if (opt.hidden) flags |= SDL_WINDOW_HIDDEN;
-    using WindowPtr = std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)>;
-    WindowPtr window(SDL_CreateWindow(native::app_name, 1280, 720, flags), &SDL_DestroyWindow);
-    if (!window) throw std::runtime_error(std::string("Creating SDL window failed: ") + SDL_GetError());
-    if (!native::set_app_icon(window.get())) std::cerr << "Could not set native app icon: " << SDL_GetError() << '\n';
-    SDL_GLContext context = SDL_GL_CreateContext(window.get());
-    if (!context) throw std::runtime_error(std::string("Creating OpenGL 3.3 core context failed: ") + SDL_GetError());
-
-    struct ContextCleanup {
-        SDL_GLContext ctx;
-
-        ~ContextCleanup() { SDL_GL_DestroyContext(ctx); }
-    } context_cleanup{context};
-
-    if (!SDL_GL_MakeCurrent(window.get(), context)) throw std::runtime_error(SDL_GetError());
-    SDL_GL_SetSwapInterval(opt.frames ? 0 : 1);
+    native::SdlSession sdl;
+    auto window_and_gl = native::create_window_and_gl(opt);
+    auto &window = window_and_gl.window;
     Gl gl;
     gl.load();
     std::unique_ptr<Renderer> renderer;
@@ -387,94 +204,14 @@ int run(const Options &opt) {
     NativeHud::Layout hud_layout;
     // Resolved before the audio device so the custom sound/ and bgm/ folders
     // are known at the point the packs are first applied.
-    char *pref_path = SDL_GetPrefPath("bunnyhop.lol", "Bunnyhop Native");
-    if (!pref_path) throw std::runtime_error("Cannot find the native client data directory");
-    const std::string isolated = !opt.runtime_smoke.empty()        ? opt.runtime_smoke
-                                 : !opt.presentation_smoke.empty() ? opt.presentation_smoke
-                                                                   : opt.video_smoke;
+    native::DataMoveDisplay display(window.get(), gl, hud);
+    auto data_paths = native::resolve_data_folder(opt, window.get(), display);
     namespace data_location = native::data_location;
-    const std::filesystem::path default_root = native::data_location::from_utf8(pref_path);
-    SDL_free(pref_path);
-    // Settings -> Game data: the folder may live elsewhere (another drive), and a
-    // move chosen there runs here, before anything opens the data folder.
-    auto location =
-            isolated.empty() ? data_location::read(default_root) : data_location::Location{default_root, std::nullopt};
-    std::string data_startup_notice;
-    bool data_unavailable = false;
-    auto folder_available = [](const std::filesystem::path &p) {
-        std::error_code ec;
-        return std::filesystem::is_directory(p, ec);
-    };
-    if (location.pending) {
-        if (!folder_available(location.active) && !data_location::same(location.active, default_root))
-            data_startup_notice = "Your game data couldn't move: " + data_location::utf8(location.active)
-                                  + " isn't available. The move will run once it is.";
-        else {
-            const auto from = location.active, to = *location.pending;
-            data_location::Progress progress;
-            std::string error;
-            std::atomic<bool> finished = false;
-            std::thread worker([&] {
-                try {
-                    error = data_location::move(from, to, default_root, progress);
-                } catch (const std::exception &e) {
-                    error = e.what();
-                }
-                finished = true;
-            });
-            while (!finished) {
-                // Quit is ignored: stopping halfway would leave data split across folders.
-                SDL_Event ignored;
-                while (SDL_PollEvent(&ignored)) {
-                }
-                int w = 0, h = 0;
-                SDL_GetWindowSizeInPixels(window.get(), &w, &h);
-                gl.Viewport(0, 0, w, h);
-                gl.ClearColor(.03f, .03f, .045f, 1);
-                gl.Clear(GL_COLOR_BUFFER_BIT);
-                const double total = double(progress.total.load()), done = double(progress.done.load());
-                char line[96];
-                std::snprintf(
-                        line,
-                        sizeof line,
-                        "%.0f%%   %.2f / %.2f GB",
-                        total > 0 ? 100 * done / total : 0.,
-                        done / 1e9,
-                        total / 1e9
-                );
-                hud.draw_panel(
-                        w,
-                        h,
-                        "Moving game data",
-                        {"To " + data_location::utf8(to), line, "The game starts as soon as this finishes."}
-                );
-                SDL_GL_SwapWindow(window.get());
-                SDL_Delay(33);
-            }
-            worker.join();
-            if (error.empty()) {
-                location = {to, std::nullopt};
-                data_startup_notice = "Game data moved to " + data_location::utf8(to);
-            } else {
-                location.pending.reset();
-                data_startup_notice = "Moving game data failed and nothing changed: " + error;
-            }
-            try {
-                data_location::write(default_root, location);
-            } catch (const std::exception &e) {
-                std::cerr << "Data folder: " << e.what() << '\n';
-            }
-            std::cerr << "Data folder: " << data_startup_notice << '\n';
-        }
-    }
-    if (!data_location::same(location.active, default_root) && !folder_available(location.active)) {
-        data_unavailable = true;
-        data_startup_notice = "Your game data folder " + data_location::utf8(location.active)
-                              + " isn't available (is the drive connected?). Using the default folder this session.";
-    }
-    const std::filesystem::path cache = !isolated.empty()  ? native::data_location::from_utf8(isolated) / "data"
-                                        : data_unavailable ? default_root
-                                                           : location.active;
+    const auto &default_root = data_paths.default_root;
+    const auto &cache = data_paths.cache;
+    auto &location = data_paths.location;
+    const auto &data_startup_notice = data_paths.notice;
+    auto &data_unavailable = data_paths.unavailable;
     std::optional<data_location::Choice> data_choice;
     std::string data_notice, last_data_state;
     const auto startup_data = native::initialize_data_directory(cache);
@@ -484,7 +221,7 @@ int run(const Options &opt) {
     native::MenuFiles menu_files(cache);
     const bool wants_menu = !opt.no_menu && (!opt.frames || !opt.menu_smoke.empty());
     if (wants_menu) {
-        menu = std::make_unique<native::MenuWebView>(window.get(), read_text(menu_path));
+        menu = std::make_unique<native::MenuWebView>(window.get(), native::read_text(menu_path));
         if (!menu->available()) {
             std::cerr << "Menu unavailable: " << menu->error() << '\n';
             menu_failure = menu->error();
@@ -559,7 +296,7 @@ int run(const Options &opt) {
     if (persist_window) try {
             const auto path = cache / "window-state.json";
             if (std::filesystem::exists(path) && std::filesystem::file_size(path) <= 16384)
-                saved_window = native::read_window_bounds(nlohmann::json::parse(read_text(path)));
+                saved_window = native::read_window_bounds(nlohmann::json::parse(native::read_text(path)));
         } catch (const std::exception &e) {
             std::cerr << "Window bounds: " << e.what() << '\n';
         }
@@ -664,7 +401,7 @@ int run(const Options &opt) {
     try {
         if (std::filesystem::exists(cache / "tutorial-progress.json")
             && std::filesystem::file_size(cache / "tutorial-progress.json") <= 4096) {
-            const auto saved = nlohmann::json::parse(read_text(cache / "tutorial-progress.json"));
+            const auto saved = nlohmann::json::parse(native::read_text(cache / "tutorial-progress.json"));
             if (saved.is_array()) tutorial_completed = saved;
         }
     } catch (const std::exception &e) {
@@ -706,7 +443,7 @@ int run(const Options &opt) {
     try {
         const auto path = cache / "start-points.json";
         if (std::filesystem::exists(path) && std::filesystem::file_size(path) <= 1024 * 1024)
-            start_points.load(nlohmann::json::parse(read_text(path)));
+            start_points.load(nlohmann::json::parse(native::read_text(path)));
     } catch (const std::exception &e) {
         std::cerr << "Start points: " << e.what() << '\n';
     }
@@ -774,22 +511,7 @@ int run(const Options &opt) {
     native::RunVault run_vault(cache / "run-vault");
     std::optional<std::pair<std::string, std::string>> pending_vault_capture;
     nlohmann::json load_progress = nullptr;
-    nlohmann::json identity = {{"build", "bunnyhop-native/local"}, {"wasm", ""}};
-    if (std::filesystem::exists(manifest_path)) {
-        try {
-            const auto manifest = nlohmann::json::parse(read_text(manifest_path));
-            const auto executable = executable_path();
-            native::verify_release_identity(
-                    manifest,
-                    file_hash(executable, native::release_hash_mode()),
-                    file_hash(menu_path),
-                    native::assets_identity_hash(assets)
-            );
-            identity = manifest;
-        } catch (const std::exception &e) {
-            std::cerr << "Native release manifest: " << e.what() << "; replays remain local\n";
-        }
-    }
+    const auto identity = native::load_release_identity(manifest_path, menu_path, assets);
     native::updates::Service updater(
             nlohmann::json::parse(native::update_config_json),
             cache / "updates",
@@ -1317,8 +1039,8 @@ int run(const Options &opt) {
                     "Configuring timer");
         std::unique_ptr<native::Tutorial> next_tutorial;
         if (id == tutorial_map) {
-            const auto metadata = nlohmann::json::parse(read_text(assets / "tutorial.json"));
-            if (file_hash(data_location::from_utf8(path)) != metadata.at("bspSha256").get<std::string>())
+            const auto metadata = nlohmann::json::parse(native::read_text(assets / "tutorial.json"));
+            if (native::file_hash(data_location::from_utf8(path)) != metadata.at("bspSha256").get<std::string>())
                 throw std::runtime_error(
                         "Tutorial BSP does not match bundled lessons; update the tutorial assets and map together"
                 );
@@ -1453,7 +1175,7 @@ int run(const Options &opt) {
     try {
         if (std::filesystem::exists(cache / "backdrop-pbs.json")
             && std::filesystem::file_size(cache / "backdrop-pbs.json") < 128 * 1024) {
-            const auto saved = nlohmann::json::parse(read_text(cache / "backdrop-pbs.json"));
+            const auto saved = nlohmann::json::parse(native::read_text(cache / "backdrop-pbs.json"));
             if (saved.is_object()) backdrop_pbs = saved;
         }
     } catch (const std::exception &e) {
@@ -2106,7 +1828,7 @@ int run(const Options &opt) {
     if (!opt.map.empty()) {
         nlohmann::json detail;
         const auto sidecar = native::data_location::from_utf8(opt.map).replace_extension(".zones.json");
-        if (std::filesystem::exists(sidecar)) detail["zones"] = nlohmann::json::parse(read_text(sidecar));
+        if (std::filesystem::exists(sidecar)) detail["zones"] = nlohmann::json::parse(native::read_text(sidecar));
         load_map(
                 opt.map,
                 opt.content_root,
@@ -2135,7 +1857,7 @@ int run(const Options &opt) {
         check(!opt.replay.empty(), "needs a completed replay for the supplied BSP");
         nlohmann::json detail;
         const auto sidecar = native::data_location::from_utf8(opt.map).replace_extension(".zones.json");
-        if (std::filesystem::exists(sidecar)) detail["zones"] = nlohmann::json::parse(read_text(sidecar));
+        if (std::filesystem::exists(sidecar)) detail["zones"] = nlohmann::json::parse(native::read_text(sidecar));
         // A neutral host id allows tools on the tutorial fixture without enabling its lesson controller.
         load_map(opt.map, opt.content_root, "native-runtime-fixture", detail);
         check(practice_reason().empty(), "solo practice unavailable");
@@ -4229,7 +3951,7 @@ int run(const Options &opt) {
                                  {"track", run_state.track},
                                  {"timeMs", native::score_ms(run_state.seconds)},
                                  {"timingPolicy", native::timing_policy},
-                                 {"replayBase64", base64(read_text(data_location::from_utf8(record_path)))}}
+                                 {"replayBase64", base64(native::read_text(data_location::from_utf8(record_path)))}}
                         );
                         std::cout << "Native finish " << run_state.seconds << " seconds; replay " << record_path
                                   << '\n';
@@ -5237,26 +4959,13 @@ int main(int argc, char **argv) {
             || std::string(argv[i]) == "--menu-home-smoke" || std::string(argv[i]) == "--runtime-smoke")
             interactive_errors = false;
     try {
-        Options opt = options(argc, argv);
+        native::Options opt = native::options(argc, argv);
         if (opt.help) {
-            std::cout << "Usage: bunnyhop-native [--map MAP.bsp | --online-map NAME] [--content-root DIR] "
-                         "[--sensitivity 2]\n"
-                         "  [--menu-html PATH] [--no-menu] [--windowed] [--legacy-input] [--frames N] [--screenshot "
-                         "output.ppm] [--camera x,y,z,pitch,yaw] [--hidden]\n"
-                         "  [--runtime-smoke OUTPUT_DIR --replay PATH] (offline lifecycle checks with --map; private "
-                         "data, no network)\n"
-                         "  [--tutorial jump|strafe|speed|final] [--tutorial-demo] (tutorial map only)\n"
-                         "  [--menu-smoke OUTPUT_PREFIX] (with --online-map; live API reads only, no scores)\n"
-                         "  [--menu-home-smoke OUTPUT_PREFIX] (home menu over the real map tour backdrop; no gameplay "
-                         "or scores)\n"
-                         "No map: open the map browser. WASD move, Space/wheel jump, Ctrl crouch, E use, R restart, "
-                         "Esc menu, F10 Settings, Alt+Enter fullscreen.\n"
-                         "Frame-limited mode simulates one fixed tick per rendered frame; screenshot implies --frames "
-                         "1.\n";
+            native::print_help(std::cout);
             return 0;
         }
         const int code = run(opt);
-        if (relaunch_requested && !native::relaunch(executable_path()))
+        if (relaunch_requested && !native::relaunch(native::executable_path()))
             std::cerr << "Bunnyhop native: could not restart; start the game again to move your data\n";
         return code;
     } catch (const std::exception &error) {
