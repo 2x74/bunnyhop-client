@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.5.1 — Native
+
+**Fixes**
+- Custom spawns (`!ss` / `!setspawn`) now actually apply when you restart. Before,
+  the game said the spawn was saved but restarts ignored it.
+- Windows: **Borderless windowed** is now a real borderless window, so it no longer
+  turns into exclusive fullscreen (which could hide the menu and stop you moving).
+- Settings import accepts the website's settings code (`bhs1.…`) as well as JSON,
+  and the import box is bigger.
+
 ## v0.5.0 — Native
 
 **Gameplay**
