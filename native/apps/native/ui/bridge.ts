@@ -5,7 +5,9 @@ import type { RunServiceStatus } from "./run-service";
 import { isStyleId, type StyleId } from "../../web/src/styles";
 import { LESSON_IDS, type LessonId } from "../../web/src/tutorial/data";
 import { DEFAULT_BINDS as WEB_DEFAULT_BINDS } from "../../web/src/binds";
-import { ANGLE_SPEED_KEY_RANGE, DEFAULT_ANGLE_SPEED_KEY, DEFAULT_YAW_SPEED, YAW_SPEED_RANGE } from "./turn-speed";
+import { ANGLE_SPEED_KEY_RANGE, YAW_SPEED_RANGE } from "./turn-speed";
+import { DEFAULT_PREFS } from "../../web/src/ui/settings";
+import { requestedPatch } from "./settings-keys";
 export const LIVE_ORIGIN = "https://bunnyhop.lol";
 export interface VideoExportOptions {width:number;height:number;fps:number;quality:"standard"|"high"|"max";camera:"eye"|"chase"|"flyby"|"auto";hud:boolean;audio?:boolean;music?:string;musicOffset?:number;musicLevel?:number;musicLoop?:boolean;musicDuck?:boolean;fullRecording?:boolean;from?:number;to?:number}
 export interface VideoExportState {available:boolean;reason:string;state:"idle"|"capturing"|"encoding"|"completed"|"canceled"|"error";frames:number;encodedFrames:number;totalFrames:number;progress:number;path:string;error:string;videoOnly:boolean;musicTracks:{id:string;title:string}[]}
@@ -21,7 +23,7 @@ export type MenuMessage =
   | { type: "selectMap"; id: string; style?: StyleId; track?: number }
   | { type: "style"; id: StyleId }
   | {type:"cosmetics";outfit:string;packedLoadout:string;ghostId?:string;trailId?:string;playerGlow?:import("../../web/src/player/glow-config").PlayerGlow|null}
-  | { type: "settings"; patch: Partial<NativeSettings> }
+  | { type: "settings"; patch: SettingsPatch }
   | {type:"window";action:"center"|"minimize"|"maximize"|"toggleFullscreen"}
   /** The HUD colours and element styles resolved from Custom CSS (custom-css/hud-theme.ts). */
   | { type: "hudTheme"; theme: import("./custom-css/hud-theme").HudTheme }
@@ -76,7 +78,9 @@ export interface GauntletHudProgress {idx:number;maps:number;before:number;pbSpl
 export const NATIVE_BIND_ACTIONS=["forward","back","left","right","jump","duck","use","restart","restartBonus","restartMain","cycleStyle","attack","attack2","inspect","viewmodel","hideUi","mute","slot1","slot2","slot3","lastWeapon","drop","reload","giveUsp","giveGlock","turnLeft","turnRight","turnFast","mainMenu","practice","noclip","cpSave","cpTeleport","cpPrev","cpNext","setStart","clearStart","nextWeapon","prevWeapon","gunMenu","nextTrack","keysOverlay","showTriggers","showClips","hudEditor","thirdPerson","flashlight","chat","commandChat","scoreboard","spectatorNext","spectatorPrevious","spectatorMode"] as const;
 type NativeBindAction=(typeof NATIVE_BIND_ACTIONS)[number];
 /** The web game's defaults, plus native-only actions and defaults (settings.hpp keeps the same list). */
-const DEFAULT_BINDS:Record<NativeBindAction,readonly string[]>={...WEB_DEFAULT_BINDS,noclip:["Backquote"],showTriggers:["Mouse3"],showClips:["KeyT"],turnLeft:["ArrowLeft"],turnRight:["ArrowRight"],turnFast:["Mouse4"],chat:["KeyY"],commandChat:["KeyU"],scoreboard:["Tab"],spectatorNext:[],spectatorPrevious:[],spectatorMode:["KeyN"]};
+export const DEFAULT_BINDS:Record<NativeBindAction,readonly string[]>={...WEB_DEFAULT_BINDS,showTriggers:["Mouse3"],showClips:[],chat:["KeyY"],commandChat:["KeyU"],scoreboard:["Tab"],spectatorNext:[],spectatorPrevious:[],spectatorMode:["KeyN"]};
+/** A settings change: native keys, and website keys the host has added (settings-keys.ts). */
+export type SettingsPatch = Partial<NativeSettings> & Record<string, unknown>;
 /** "default" is the bunnyhop.lol pack; "custom" is the player's own sound/ and bgm/ folders. */
 export type AudioPack="default"|"custom";
 export type JumpStatsMode="sixth"|"every"|"interval";
@@ -98,6 +102,8 @@ export interface NativeSettings {
   sfxVolume:number;musicVolume:number;uiVolume:number;ambienceVolume:number;footsteps:boolean;weaponSounds:boolean;wind:boolean;
   muteSfx:boolean;muteMusic:boolean;muteUi:boolean;muteAmbience:boolean;muteInBackground:boolean;classicSounds:boolean;perfectTick:boolean;announcer:AnnouncerPrefs;
   colorBlind:"off"|"redGreen"|"blueYellow";gainTicks:boolean;speedColors:boolean;perfectIndicator:boolean;speedGraph:boolean;keysOverlay:boolean;keysStyle:"classic"|"minimal"|"keycaps";
+  /** Each tick takes the input made before it (timed-input.ts). Off is the legacy per-frame proration. */
+  timedInput:boolean;
   /** Turnbinds: degrees per second (cl_yawspeed), and while Turn modifier is held. */
   yawSpeed:number;angleSpeedKey:number;fov:number;vsync:boolean;fpsLimit:number;limitQueuedFrames:boolean;
   volume:number;muted:boolean;hud:boolean;crosshair:boolean;viewmodel:boolean;binds:Record<string,string[]>;
@@ -179,6 +185,14 @@ export interface NativeMenuState {
   music:MusicState|null;audio:NativeAudioState|null;videoExport:VideoExportState;
   /** The native app itself, for the feedback form: release version, build id, GL renderer, game window. */
   client:NativeClientInfo|null;
+  /** The keys of the host's last whole settings object: what it can store (null until it sends one). */
+  settingsKeys:string[]|null;
+  /** The bind actions in the host's last whole settings object. */
+  bindActions:string[]|null;
+  /** Features the host reports beyond its settings keys (prefs-bridge.ts); null when it doesn't say. */
+  capabilities:string[]|null;
+  /** Values of website settings the host has added (settings-keys.ts), and its web HUD layout. */
+  extraSettings:Record<string,unknown>;
 }
 
 declare global {
@@ -236,11 +250,52 @@ export const isAttemptId=(value:unknown):value is string=>typeof value==="string
 const nonNegativeInt=(value:unknown):value is number=>Number.isSafeInteger(value)&&Number(value)>=0;
 const shortText=(value:unknown,max=200):string|null=>typeof value==="string"?value.slice(0,max):null;
 
+/**
+ * The settings before the host's first state, and the defaults the C++ keeps in step with: the website's wherever the
+ * same setting exists there (ui/settings.ts DEFAULT_PREFS).
+ */
+function defaultSettings(): NativeSettings {
+  const web = DEFAULT_PREFS;
+  const crosshair = web.crosshair;
+  const trainer = web.hud.strafeTrainer;
+  return {
+    playerModel: "bunny", ghostModel: "same", mouseDiagnostics: web.inputStats, capturePbScreenshots: false,
+    windowMode: "windowed", alwaysOnTop: false, rememberWindowBounds: true, minimizeOnFocusLoss: false,
+    showPlayerGlow: web.showPlayerGlow, firstPersonGlow: web.firstPersonGlow, waterQuality: "simple",
+    showGhost: web.showGhost, ghostOpacity: web.ghost.opacity, ghostNearFade: web.ghost.nearFade, ghostTag: web.ghost.tag,
+    othersAudio: web.audio.others, ghostAudio: web.audio.ghosts, zonesVisible: web.showZones, effectsVisible: true,
+    triggersVisible: web.triggers.show, clipsVisible: web.triggers.clips, invertY: web.invertY,
+    holdRestart: web.holdRestart, crosshairStyle: crosshair.style, crosshairColor: crosshair.color,
+    crosshairSize: crosshair.size, crosshairGap: crosshair.gap, crosshairThickness: crosshair.thickness,
+    crosshairAlpha: crosshair.alpha, crosshairOutline: crosshair.outline, viewmodelFov: web.viewmodel.fov,
+    viewmodelX: web.viewmodel.x, viewmodelY: web.viewmodel.y, viewmodelZ: web.viewmodel.z,
+    viewmodelLeftHand: web.viewmodel.hand === "left", viewmodelBob: web.viewmodel.bob, viewmodelSway: web.viewmodel.sway,
+    sfxVolume: web.audio.sfx, musicVolume: web.audio.music, uiVolume: web.audio.ui, ambienceVolume: web.audio.ambience,
+    muteSfx: false, muteMusic: false, muteUi: false, muteAmbience: false, muteInBackground: web.audio.muteInBackground,
+    classicSounds: web.audio.classic, perfectTick: web.audio.perfectTick, announcer: { ...DEFAULT_ANNOUNCER },
+    footsteps: web.audio.footsteps, weaponSounds: true, wind: web.audio.wind, colorBlind: web.colorBlind,
+    gainTicks: web.hud.gainTicks, speedColors: web.hud.speedColors, perfectIndicator: web.audio.perfectIndicator,
+    speedGraph: web.hud.layout.graph.on, keysOverlay: web.hud.layout.keys.on, keysStyle: web.hud.keys.style,
+    sensitivity: web.sensitivity, verticalSensitivity: web.verticalSensitivity,
+    separateVertical: web.verticalSensitivityEnabled, timedInput: web.timedInput, yawSpeed: web.yawSpeed,
+    angleSpeedKey: web.angleSpeedKey, fov: web.fov, sourceLook: true, vsync: false, fpsLimit: web.graphics.fpsLimit,
+    limitQueuedFrames: true, volume: web.volume, muted: false, hud: !web.hud.hidden, crosshair: crosshair.style !== "none",
+    viewmodel: web.viewmodel.show, jumpStats: web.hud.layout.jumpStats.on, jumpStatsColors: true,
+    jumpStatsMode: "sixth", jumpStatsInterval: 6, strafeTrainer: web.hud.layout.strafeTrainer.on,
+    strafeTrainerSmoothing: trainer.smoothing, strafeTrainerHints: trainer.hints, hudLayout: {},
+    hudScale: Math.round(web.hud.scale * 100), practiceKeepVelocity: web.practice.keepVelocity, sfxPack: "default",
+    musicPack: "default", discordRichPresence: true, discordShowMap: true, discordJoin: true, discordJoinLobbies: false,
+    privacyMode: false,
+    binds: Object.fromEntries(NATIVE_BIND_ACTIONS.map((action) => [action, [...DEFAULT_BINDS[action]]])),
+  };
+}
+
 export const state: NativeMenuState = { map: null, loading: false, error: null, sensitivity: 2, paused: true,style:"autohop",track:0,
-  settings:{playerModel:"bunny",ghostModel:"same",mouseDiagnostics:false,capturePbScreenshots:false,windowMode:"windowed",alwaysOnTop:false,rememberWindowBounds:true,minimizeOnFocusLoss:false,showPlayerGlow:true,firstPersonGlow:true,waterQuality:"simple",showGhost:true,ghostOpacity:.4,ghostNearFade:true,ghostTag:true,othersAudio:true,ghostAudio:true,zonesVisible:true,effectsVisible:true,triggersVisible:false,clipsVisible:false,invertY:false,holdRestart:false,crosshairStyle:"cross",crosshairColor:"#eee8db",crosshairSize:6,crosshairGap:3,crosshairThickness:2,crosshairAlpha:1,crosshairOutline:true,
-    viewmodelFov:54,viewmodelX:.6,viewmodelY:1.5,viewmodelZ:-.9,viewmodelLeftHand:false,viewmodelBob:1,viewmodelSway:1,sfxVolume:1,musicVolume:1,uiVolume:1,ambienceVolume:1,muteSfx:false,muteMusic:false,muteUi:false,muteAmbience:false,muteInBackground:true,classicSounds:false,perfectTick:false,announcer:{...DEFAULT_ANNOUNCER},footsteps:true,weaponSounds:true,wind:true,colorBlind:"off",gainTicks:true,speedColors:true,perfectIndicator:true,speedGraph:false,keysOverlay:true,keysStyle:"classic",sensitivity:2,verticalSensitivity:2,separateVertical:false,yawSpeed:DEFAULT_YAW_SPEED,angleSpeedKey:DEFAULT_ANGLE_SPEED_KEY,fov:90,sourceLook:true,vsync:false,fpsLimit:500,limitQueuedFrames:true,volume:.65,muted:false,hud:true,crosshair:true,viewmodel:true,jumpStats:true,jumpStatsColors:true,jumpStatsMode:"sixth",jumpStatsInterval:6,strafeTrainer:false,strafeTrainerSmoothing:1,strafeTrainerHints:true,hudLayout:{},hudScale:100,practiceKeepVelocity:true,sfxPack:"default",musicPack:"default",discordRichPresence:true,discordShowMap:true,discordJoin:true,discordJoinLobbies:false,privacyMode:false,binds:Object.fromEntries(NATIVE_BIND_ACTIONS.map(action=>[action,[...DEFAULT_BINDS[action]]]))},
+  settings:defaultSettings(),
+
   replays:[],ghosts:[],discord:{state:"disabled",message:""},playback:{active:false,id:"",tick:0,totalTicks:0,paused:true,speed:1},ghost:{enabled:false,id:"",name:""},tutorial:{active:false,lesson:"jump",completed:[]},
-  practice:{available:false,unavailable:null,mode:false,active:false,thirdPerson:false,tool:null,noclip:false,menuOpen:false,count:0,current:0,keepVelocity:true},gauntlet:{id:null,map:null},player:null,music:null,audio:null,videoExport:{available:false,reason:"Checking FFmpeg availability…",state:"idle",frames:0,encodedFrames:0,totalFrames:0,progress:0,path:"",error:"",videoOnly:true,musicTracks:[]},client:null};
+  practice:{available:false,unavailable:null,mode:false,active:false,thirdPerson:false,tool:null,noclip:false,menuOpen:false,count:0,current:0,keepVelocity:true},gauntlet:{id:null,map:null},player:null,music:null,audio:null,videoExport:{available:false,reason:"Checking FFmpeg availability…",state:"idle",frames:0,encodedFrames:0,totalFrames:0,progress:0,path:"",error:"",videoOnly:true,musicTracks:[]},client:null,
+  settingsKeys:null,bindActions:null,capabilities:null,extraSettings:{}};
 
 export const nativeKeyCode=(code:unknown):code is string=>typeof code==="string"&&/^(?:Key[A-Z]|Digit[0-9]|F[1-9]|F11|F12|Mouse[1-5]|MouseWheel|MWheelUp|MWheelDown|(?:Control|Shift|Alt)(?:Left|Right)|Space|Tab|Enter|Backspace|Arrow(?:Up|Down|Left|Right)|Minus|Equal|BracketLeft|BracketRight|Semicolon|Quote|Backquote|Comma|Period|Slash)$/.test(code);
 
@@ -250,7 +305,7 @@ export function settingsPatch(value:unknown):Partial<NativeSettings> {
   if(WINDOW_MODES.includes(input.windowMode as WindowMode))out.windowMode=input.windowMode;
   for(const [key,min,max] of [["ghostOpacity",0,1],["crosshairSize",0,40],["crosshairGap",0,40],["crosshairThickness",.5,10],["crosshairAlpha",0,1],["viewmodelFov",30,100],["viewmodelX",-10,10],["viewmodelY",-10,10],["viewmodelZ",-10,10],["viewmodelBob",0,2],["viewmodelSway",0,2],["ambienceVolume",0,1],["sfxVolume",0,1],["musicVolume",0,1],["uiVolume",0,1],["sensitivity",.01,100],["verticalSensitivity",.01,100],["fov",60,130],["volume",0,1],["yawSpeed",YAW_SPEED_RANGE.min,YAW_SPEED_RANGE.max],["angleSpeedKey",ANGLE_SPEED_KEY_RANGE.min,ANGLE_SPEED_KEY_RANGE.max]] as const) if(typeof input[key]==="number"&&Number.isFinite(input[key])&&Number(input[key])>=min&&Number(input[key])<=max) out[key]=input[key];
   if(typeof input.fpsLimit==="number"&&Number.isInteger(input.fpsLimit)&&(input.fpsLimit===0||(input.fpsLimit>=30&&input.fpsLimit<=1000))) out.fpsLimit=input.fpsLimit;
-  for(const key of ["mouseDiagnostics","capturePbScreenshots","alwaysOnTop","rememberWindowBounds","minimizeOnFocusLoss","showPlayerGlow","firstPersonGlow","gainTicks","speedColors","perfectIndicator","showGhost","ghostNearFade","ghostTag","othersAudio","ghostAudio","zonesVisible","effectsVisible","triggersVisible","clipsVisible","invertY","holdRestart","crosshairOutline","viewmodelLeftHand","muteSfx","muteMusic","muteUi","muteAmbience","muteInBackground","classicSounds","perfectTick","footsteps","weaponSounds","wind","speedGraph","keysOverlay","separateVertical","sourceLook","vsync","limitQueuedFrames","muted","hud","crosshair","viewmodel","jumpStats","jumpStatsColors","strafeTrainer","strafeTrainerHints","discordRichPresence","discordShowMap","discordJoin","discordJoinLobbies","privacyMode"]) if(typeof input[key]==="boolean") out[key]=input[key];
+  for(const key of ["mouseDiagnostics","capturePbScreenshots","alwaysOnTop","rememberWindowBounds","minimizeOnFocusLoss","showPlayerGlow","firstPersonGlow","gainTicks","speedColors","perfectIndicator","showGhost","ghostNearFade","ghostTag","othersAudio","ghostAudio","zonesVisible","effectsVisible","triggersVisible","clipsVisible","invertY","holdRestart","crosshairOutline","viewmodelLeftHand","muteSfx","muteMusic","muteUi","muteAmbience","muteInBackground","classicSounds","perfectTick","footsteps","weaponSounds","wind","speedGraph","keysOverlay","separateVertical","sourceLook","vsync","limitQueuedFrames","muted","hud","crosshair","viewmodel","jumpStats","jumpStatsColors","strafeTrainer","strafeTrainerHints","discordRichPresence","discordShowMap","discordJoin","discordJoinLobbies","privacyMode","timedInput"]) if(typeof input[key]==="boolean") out[key]=input[key];
   if(input.waterQuality==="simple"||input.waterQuality==="refracted")out.waterQuality=input.waterQuality;
   if(typeof input.crosshairStyle==="string"&&["cross","cross-dot","dot","t","circle","none"].includes(input.crosshairStyle))out.crosshairStyle=input.crosshairStyle;
   if(input.playerModel==="bunny"||input.playerModel==="runner")out.playerModel=input.playerModel;
@@ -279,6 +334,19 @@ export function settingsPatch(value:unknown):Partial<NativeSettings> {
   return out as Partial<NativeSettings>;
 }
 
+/** What the host's settings say beyond NativeSettings: which keys it has, and the website settings it added. */
+function readHostSettings(value: unknown): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const input = value as Record<string, unknown>;
+  state.settingsKeys = Object.keys(input).slice(0, 1024);
+  const binds = input.binds;
+  if (binds && typeof binds === "object" && !Array.isArray(binds)) state.bindActions = Object.keys(binds).slice(0, 256);
+  const extra = { ...state.extraSettings, ...requestedPatch(input) };
+  const layout = input.hudLayoutWeb;
+  if (layout && typeof layout === "object" && !Array.isArray(layout)) extra.hudLayoutWeb = layout;
+  state.extraSettings = extra;
+}
+
 export function applyState(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const next = value as Record<string, unknown>;
@@ -296,8 +364,9 @@ export function applyState(value: unknown): boolean {
   if (typeof next.paused === "boolean") state.paused = next.paused;
   if(isStyleId(next.style)) state.style=next.style;
   if(Number.isSafeInteger(next.track)&&Number(next.track)>=0) state.track=Number(next.track);
-  if(next.settings) {const patch=settingsPatch(next.settings);state.settings={...state.settings,...patch,binds:{...state.settings.binds,...patch.binds}};state.sensitivity=state.settings.sensitivity;}
+  if(next.settings) {const patch=settingsPatch(next.settings);state.settings={...state.settings,...patch,binds:{...state.settings.binds,...patch.binds}};state.sensitivity=state.settings.sensitivity;readHostSettings(next.settings);}
   else state.settings.sensitivity=state.sensitivity;
+  if(Array.isArray(next.capabilities)) state.capabilities=next.capabilities.filter((item):item is string=>typeof item==="string"&&item.length<=64).slice(0,1024);
   if(Array.isArray(next.replays)) state.replays=next.replays.slice(0,5000).filter((item):item is NativeReplay=>!!item&&typeof item==="object"&&typeof item.id==="string"&&item.id.length<=256&&typeof item.name==="string"&&typeof item.map==="string"&&isStyleId(item.style)&&[item.track,item.seconds,item.recordedAt,item.bytes].every(value=>typeof value==="number"&&Number.isFinite(value)&&value>=0));
   if(next.playback&&typeof next.playback==="object") {
     const playback=next.playback as Record<string,unknown>;

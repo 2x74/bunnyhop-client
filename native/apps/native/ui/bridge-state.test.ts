@@ -39,9 +39,11 @@ test("settings: HUD scale in whole percents 50–175, keep speed, practice binds
   expect(settingsPatch({ hudScale: 125, practiceKeepVelocity: false })).toEqual({ hudScale: 125, practiceKeepVelocity: false });
   for (const bad of [49, 176, 100.5, "100", null]) expect(settingsPatch({ hudScale: bad })).toEqual({});
   for (const action of ["mainMenu", "practice", "noclip", "cpSave", "cpTeleport", "cpPrev", "cpNext"]) expect(NATIVE_BIND_ACTIONS).toContain(action as never);
-  expect(state.settings.binds.noclip).toEqual(["Backquote"]);
+  // The website's defaults: noclip on Z, third person on T. Show player clips is a native-only action with no key.
+  expect(state.settings.binds.noclip).toEqual(["KeyZ"]);
+  expect(state.settings.binds.thirdPerson).toEqual(["KeyT"]);
   expect(state.settings.binds.showTriggers).toEqual(["Mouse3"]);
-  expect(state.settings.binds.showClips).toEqual(["KeyT"]);
+  expect(state.settings.binds.showClips).toEqual([]);
   expect(state.settings.clipsVisible).toBe(false);
   expect(state.settings.weaponSounds).toBe(true);
   expect(settingsPatch({ clipsVisible: true, weaponSounds: false, binds: { noclip: ["Backquote"], showClips: ["KeyT"] } })).toEqual({ clipsVisible: true, weaponSounds: false, binds: { noclip: ["Backquote"], showClips: ["KeyT"] } });
