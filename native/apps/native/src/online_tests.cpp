@@ -1,5 +1,7 @@
 #include "online.hpp"
 #include "data_location.hpp"
+#include "map_prefetch.hpp"
+#include <future>
 #include <iostream>
 #include "bunnyhop_native.h"
 #include <fstream>
@@ -25,6 +27,15 @@ int main() {
     native::DownloadFetch fetch=[&](const std::string &route,size_t,const std::atomic_bool*,const native::LoadProgressCallback&){++requests;if(notFound)throw std::runtime_error("HTTP 404");if(offline)throw native::DownloadNetworkError("offline fixture");if(route=="/api/maps/bhop_test")return detail;if(route=="/content-manifests/"+sha+".json")return manifest;if(route=="/api/bsp/"+sha+".bsp")return bsp;if(route=="/content/"+fileSha)return content;throw std::runtime_error("Unexpected route");};
     auto load=[&]{return native::download_map("bhop_test",cache,[](const std::string&){},nullptr,{},[&](const auto &p){latest=p;},fetch);};
     const auto first=load();check(requests==4,"first load fetches detail/BSP/manifest/content");check(std::filesystem::exists(first.content_root/"materials/test.vmt"),"content not materialized");
+    const std::atomic_bool prefetch_cancel = false;
+    auto prefetched = std::async(std::launch::async, [&] {
+        return native::prefetch_map("bhop_test", sha, cache, prefetch_cancel, fetch);
+    });
+    check(prefetched.get(), "verified worker prefetch failed");
+    auto stale = std::async(std::launch::async, [&] {
+        return native::prefetch_map("bhop_test", std::string(64, '0'), cache, prefetch_cancel, fetch);
+    });
+    check(!stale.get(), "prefetch accepted a different map revision");
     requests=0;load();check(requests==1,"cached objects/manifest should avoid network");
     std::filesystem::remove(cache/"index"/"bhop_test.json"); // Older client cache migration.
     offline=true;requests=0;load();check(requests==1&&latest.offline,"offline cache did not load");

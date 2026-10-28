@@ -35,6 +35,8 @@
 #include "audio.hpp"
 #include "client_util.hpp"
 #include "run_vault.hpp"
+#include "replay_library.hpp"
+#include "map_prefetch.hpp"
 #include "recoverable_action.hpp"
 #include "app_identity.hpp"
 #include "room_state.hpp"
@@ -470,6 +472,7 @@ int run(const Options &opt) {
     };
     apply_preferences();
     std::string map_id,loading,error,record_path,last_ui,last_requested_map;
+    native::ReplayLibrary replay_library(cache);
     native::RunVault run_vault(cache/"run-vault");std::optional<std::pair<std::string,std::string>> pending_vault_capture;
     nlohmann::json load_progress=nullptr;
     nlohmann::json identity={{"build","bunnyhop-native/local"},{"wasm",""}};
@@ -505,7 +508,8 @@ int run(const Options &opt) {
     auto beat_time=std::chrono::steady_clock::now();
     std::vector<BhZone> zones;
     std::mutex progress_mutex;
-    native::MapJobs<native::DownloadedMap> download,prefetch;
+    native::MapJobs<native::DownloadedMap> download;
+    native::MapJobs<bool> prefetch;
     bool map_preparing=false;
     std::string prefetch_map,prefetch_sha,prefetch_active,prefetch_done;
     auto cancel_prefetch=[&](){prefetch.cancel();prefetch_map.clear();prefetch_sha.clear();prefetch_active.clear();};
@@ -804,20 +808,7 @@ int run(const Options &opt) {
         return {};
     };
     auto refresh_replays=[&]() {
-        replay_list=nlohmann::json::array();
-        std::vector<std::filesystem::directory_entry> files;
-        for(const auto &entry:std::filesystem::directory_iterator(cache/"replays"))
-            if(entry.is_regular_file()&&!entry.is_symlink()&&entry.path().extension()==".bhr"&&entry.file_size()<=8*1024*1024)files.push_back(entry);
-        std::sort(files.begin(),files.end(),[](const auto &a,const auto &b){return a.last_write_time()>b.last_write_time();});
-        if(files.size()>500)files.resize(500);
-        for(const auto &entry:files)try {
-            const auto info=replay_metadata(entry.path());
-            nlohmann::json listed={{"id",native::data_location::utf8(entry.path().filename())},{"name",info.value("player",std::string("Local run"))},
-                {"map",info.at("map")},{"style",info.value("style",std::string("autohop"))},{"track",info.value("track",0)},
-                {"seconds",(info.at("endTick").get<double>()-info.at("startTick").get<double>())*info.at("settings").value("tickInterval",.01)},
-                {"recordedAt",info.value("recordedAt",0.)},{"bytes",entry.file_size()}};
-            const auto summary=run_vault.read(native::data_location::utf8(entry.path().filename()));if(summary.is_object())listed["localSummary"]=summary;listed["screenshot"]=run_vault.screenshot(native::data_location::utf8(entry.path().filename())).has_value();replay_list.push_back(std::move(listed));
-        }catch(const std::exception &e){std::cerr<<"Skipping replay "<<entry.path().filename()<<": "<<e.what()<<'\n';}
+        replay_library.refresh();
     };
     auto open_replay=[&](const std::filesystem::path &path,const std::string &action,
                          unsigned ghost_slot=0, bool full_recording=false) {
@@ -1600,7 +1591,7 @@ int run(const Options &opt) {
                         const auto dest=native::data_location::from_utf8(folder)/path.filename();std::filesystem::copy_file(path,dest,std::filesystem::copy_options::none);score_notice="Replay exported to Downloads";
                     } else if(action=="delete") {
                         std::filesystem::create_directories(cache/"replays"/"trash");auto dest=cache/"replays"/"trash"/path.filename();
-                        if(std::filesystem::exists(dest))throw std::runtime_error("Replay already exists in local trash");std::filesystem::rename(path,dest);try{run_vault.trash(native::data_location::utf8(path.filename()));}catch(const std::exception&e){std::cerr<<"Vault trash: "<<e.what()<<'\n';}refresh_replays();
+                        if(std::filesystem::exists(dest))throw std::runtime_error("Replay already exists in local trash");std::filesystem::rename(path,dest);try{replay_library.trash(native::data_location::utf8(path.filename()));}catch(const std::exception&e){std::cerr<<"Vault trash: "<<e.what()<<'\n';}refresh_replays();
                     } else throw std::runtime_error("Unknown replay action");
                 }
                 else if(type=="replayData") {
@@ -1737,15 +1728,27 @@ int run(const Options &opt) {
             } catch(const std::exception &e) {error=e.what();std::cerr<<"Menu: "<<error<<'\n';chat.push(error,"","error",epoch_ms()/1000.);toast(error);}
         }
         frame_diagnostics.mark(native::FrameDiagnostics::kMenu, SDL_GetTicksNS());
+        if (auto update = replay_library.take()) {
+            if (update->replays)
+                replay_list = std::move(*update->replays);
+            for (const auto& capture : update->captures) {
+                if (capture.map == map_id)
+                    pending_vault_capture = std::pair{capture.id, capture.map};
+            }
+            for (const auto& failure : update->errors) {
+                std::cerr << "Replay library: " << failure << '\n';
+                toast(failure);
+            }
+        }
         prefetch.poll();
         if(prefetch.valid()&&prefetch.wait_for(std::chrono::seconds(0))==std::future_status::ready){
-            try{auto result=prefetch.get();if(file_hash(native::data_location::utf8(result.bsp))==prefetch_sha)prefetch_done=prefetch_active;}
+            try{if(prefetch.get())prefetch_done=prefetch_active;}
             catch(const std::exception &e){std::cerr<<"Map prefetch: "<<e.what()<<'\n';}
             prefetch_active.clear();prefetch_map.clear();prefetch_sha.clear();
         }
         if(!prefetch.valid()&&!prefetch_map.empty()&&!download.valid()&&playback){
             const auto id=prefetch_map;prefetch_active=id+":"+prefetch_sha;
-            prefetch.start([&,id](const std::atomic_bool &cancel){const auto lock=lock_cache(cancel);native::DownloadLimits limits;limits.bsp=64*1024*1024;limits.content_total=256*1024*1024;return native::download_map(id,cache,[](const std::string &){},&cancel,limits);});
+            prefetch.start([&,id,sha=prefetch_sha](const std::atomic_bool &cancel){const auto lock=lock_cache(cancel);return native::prefetch_map(id,sha,cache,cancel);});
         }
         download.poll();
         if(download.valid() && download.wait_for(std::chrono::seconds(0))==std::future_status::ready && !map_preparing) {
@@ -2019,8 +2022,13 @@ int run(const Options &opt) {
                         require(bh_record_end(core.get()),core.get(),"Finishing native recording");
                         require(bh_record_write_bhr(core.get(),record_path.c_str()),core.get(),"Writing native replay");
                         // Local vault failures cannot withhold an otherwise valid replay submission.
-                        try{const auto id=native::data_location::utf8(native::data_location::from_utf8(record_path).filename());const auto summary=run_vault.archive(id,{{"map",map_id},{"style",active_style},{"track",run_state.track},{"time",run_state.seconds},{"jumps",run_state.jumps},{"strafes",run_state.strafes},{"sync",run_state.sync_percent},{"finishedAt",epoch_ms()},{"client",identity.value("build",std::string("bunnyhop-native/local"))},{"eligible",!turn_admission.local_only&&bool(run_state.recording_valid)}});if(preferences.value("capturePbScreenshots",false)&&summary.value("localPb",false))pending_vault_capture=std::pair{id,map_id};}
-                        catch(const std::exception&e){std::cerr<<"Local run vault: "<<e.what()<<'\n';score_notice="Replay saved; finish summary could not be saved";}
+                        const auto id = data_location::utf8(data_location::from_utf8(record_path).filename());
+                        replay_library.archive(id, {{"map", map_id}, {"style", active_style},
+                            {"track", run_state.track}, {"time", run_state.seconds}, {"jumps", run_state.jumps},
+                            {"strafes", run_state.strafes}, {"sync", run_state.sync_percent},
+                            {"finishedAt", epoch_ms()}, {"client", identity.value("build", std::string("local"))},
+                            {"eligible", !turn_admission.local_only && bool(run_state.recording_valid)}},
+                            preferences.value("capturePbScreenshots", false));
                         refresh_replays();
                         if(!turn_admission.local_only&&active_style=="autohop"&&run_state.track==0){
                             const auto old=backdrop_pbs.find(map_id);
@@ -2171,7 +2179,7 @@ int run(const Options &opt) {
             }
         }
         // Capture only the finished gameplay framebuffer, before any menu/backdrop layer.
-        if(pending_vault_capture){const auto pending=*pending_vault_capture;pending_vault_capture.reset();if(renderer&&pending.second==map_id&&width>0&&height>0){try{run_vault.attach(pending.first,backbuffer_png(gl,width,height));refresh_replays();}catch(const std::exception&e){std::cerr<<"Local PB screenshot: "<<e.what()<<'\n';score_notice="Replay saved; optional screenshot could not be saved";}}}
+        if(pending_vault_capture){const auto pending=*pending_vault_capture;pending_vault_capture.reset();if(renderer&&pending.second==map_id&&width>0&&height>0){try{replay_library.attach(pending.first,backbuffer_png(gl,width,height));}catch(const std::exception&e){std::cerr<<"Local PB screenshot: "<<e.what()<<'\n';score_notice="Replay saved; optional screenshot could not be saved";}}}
         // Separate GTK windows and screenshot runs cannot show the SDL layer:
         // they get one bounded PNG of the still pose instead of a live scene.
         const bool backdrop_live=menu&&menu->supports_backdrop()&&opt.menu_smoke.empty();

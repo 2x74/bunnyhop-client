@@ -5,6 +5,7 @@
 #include "replay_practice.hpp"
 #include "replay_session.hpp"
 #include "replay_controls.hpp"
+#include "replay_library.hpp"
 #include <zlib.h>
 #ifdef NDEBUG
 #undef NDEBUG
@@ -281,6 +282,50 @@ void test_replay_playback_range() {
     assert(state.at("rangeTotalTicks") == 2650 && state.at("elapsedSeconds") == 1);
 }
 
+void test_replay_library_cache() {
+    Fixture fixture;
+    const auto source = fixture.record("source.bhr", true, true);
+    const auto replays = fixture.directory / "replays";
+    std::filesystem::create_directories(replays);
+    const auto replay = replays / "run.bhr";
+    std::filesystem::copy_file(source, replay);
+    {
+        native::ReplayLibrary library(fixture.directory);
+        library.refresh();
+        library.flush();
+        auto first = library.take();
+        assert(first && first->errors.empty() && first->decoded == 1);
+        assert(first->replays && first->replays->size() == 1);
+        library.refresh();
+        library.flush();
+        auto unchanged = library.take();
+        assert(unchanged && unchanged->decoded == 0 && unchanged->replays == first->replays);
+        const auto modified = std::filesystem::last_write_time(replay);
+        std::filesystem::last_write_time(replay, modified + std::chrono::seconds(1));
+        library.refresh();
+        library.flush();
+        assert(library.take()->decoded == 1);
+        {
+            std::ofstream corrupt(replay, std::ios::binary | std::ios::app);
+            corrupt << "bad";
+        }
+        library.refresh();
+        library.flush();
+        assert(library.take()->decoded == 1);
+        std::filesystem::remove(replay);
+        library.refresh();
+        library.flush();
+        const auto removed = library.take();
+        assert(removed && removed->replays->empty());
+        library.archive("saved.bhr", {{"map", "fixture"}, {"style", "autohop"}, {"track", 0},
+            {"time", 10}, {"jumps", 2}, {"strafes", 3}, {"sync", 90}, {"finishedAt", 1234},
+            {"eligible", true}}, false);
+        // Destructor drains accepted archive jobs.
+    }
+    native::RunVault vault(fixture.directory / "run-vault");
+    assert(vault.read("saved.bhr").is_object());
+}
+
 void test_bonus_takeover_uses_normal_style() {
     Fixture fixture;
     for (auto &zone : fixture.zones) {
@@ -297,6 +342,7 @@ void test_bonus_takeover_uses_normal_style() {
 }  // namespace
 
 int main() {
+    test_replay_library_cache();
     test_recording_options_roundtrip();
     test_turn_settings_validation();
     test_practice_takeover();
