@@ -3,6 +3,7 @@
 // never owns the gameplay clock, simulation, WebGL context or WASM verifier.
 import type { Submission, RequestDispatch, GauntletSplitResult } from "../../web/src/api";
 import { isStyleId, type StyleId } from "../../web/src/styles";
+import { runProgression, type RunProgression } from "./run-rewards";
 
 interface Identity { map: string; track: number; style: StyleId; build: string; wasm: string }
 interface Generation { generation: number }
@@ -10,7 +11,7 @@ export type NativeRunEvent =
   | (Generation & { type: "reset" })
   | (Generation & Identity & { type: "beat"; tick: number; hash: string; paused: boolean })
   | (Generation & Identity & { type: "finish"; replayBase64: string });
-export interface RunServiceStatus {
+export interface RunServiceStatus extends RunProgression {
   type: "runService"; generation: number;
   status: "reset" | "beat" | "gap" | "checking" | "uploading" | "pending" | "verified" | "rejected" | "error" | "kept";
   message?: string; id?: string; progress?: number; rank?: number; time?: number;
@@ -310,6 +311,11 @@ export class NativeRunService {
   }
   private verdict(session: Session,result: Submission): void {
     const status=result.status==="queued"||result.status==="verifying"?"pending":result.status;
-    this.status(session,status,{id:result.id,progress:result.progress,rank:result.rank,time:result.time,pb:result.pb,...(result.announcer==="pb"||result.announcer==="wr"?{announcer:result.announcer}:{}),code:result.code,message:result.reason,...(result.gauntlet?{gauntlet:result.gauntlet}:{})});
+    // XP, the level and unlocks feed the finish card's reward reel; only a verified run has earned them.
+    const progression=status==="verified"?runProgression(result):{};
+    const announcer=result.announcer==="pb"||result.announcer==="wr"?{announcer:result.announcer}:{};
+    this.status(session,status,{...progression,
+      id:result.id,progress:result.progress,rank:result.rank,time:result.time,pb:result.pb,...announcer,
+      code:result.code,message:result.reason,...(result.gauntlet?{gauntlet:result.gauntlet}:{})});
   }
 }
