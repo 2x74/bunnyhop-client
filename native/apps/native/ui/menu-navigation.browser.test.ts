@@ -69,14 +69,19 @@ test("Back and Esc return to the screen a profile was opened from; a picked map'
  }finally{await browser.close();}
 },30_000);
 
-test("Loadout opens on a category; the static stage offers no dead view buttons; a narrow profile stacks without overlap",async()=>{
+test("Loadout opens on a category; the static stage keeps the web's view switch; a narrow profile stacks without overlap",async()=>{
  const {browser,page,errors,writes}=await open(800,600);
  try{
   await page.evaluate(()=>window.bunnyhopNativeMenu.open!("loadout","glove"));
   await page.locator(".lo-tab.on").filter({hasText:"Gloves"}).waitFor();
   await page.locator(".lo-stage.ready").waitFor();
-  expect(await page.locator(".lo-viewseg").isVisible()).toBe(false);
-  expect(await page.locator(".lo-insp").isVisible()).toBe(false);
+  // First person / Close-up as on the web: Close-up frames the authored sample closer. Inspect asks the host for its
+  // live preview (this page stands in for a host; without one it's greyed, native-features.test.ts).
+  await page.locator(".lo-viewseg").getByRole("radio",{name:"Close-up"}).click();
+  expect(await page.locator(".lo-stage").getAttribute("data-view")).toBe("close");
+  expect(await page.locator(".lo-viewseg").getByRole("radio",{name:"Close-up"}).getAttribute("aria-checked")).toBe("true");
+  expect(await page.locator(".lo-insp").isVisible()).toBe(true);
+  expect(await page.locator(".lo-insp").evaluate(button=>getComputedStyle(button).pointerEvents)).toBe("auto");
   // The stage keeps its 16:10 shape in view instead of stretching down the scrolling item grid.
   const stage=await page.evaluate(()=>{const r=document.querySelector(".lo-stage")!.getBoundingClientRect();return {inView:r.bottom<=innerHeight+1,ratio:Math.round(r.width/r.height*10)/10};});
   expect(stage).toEqual({inView:true,ratio:1.6});

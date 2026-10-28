@@ -12,7 +12,7 @@ import { mapBrowser, closeMapPanel } from "../../web/src/ui/maps";
 import { onNavigate } from "../../web/src/ui/nav";
 import { onViewerRequest } from "../../web/src/viewer/request";
 import { onRaceRequest } from "../../web/src/player/race";
-import { applyState, openAuth, openExternal, send, state, onBeforeSend, LIVE_ORIGIN } from "./bridge";
+import { applyState, openAuth, openExternal, runSeconds, send, state, onBeforeSend, LIVE_ORIGIN } from "./bridge";
 import { NativeActivityService } from "./activity-service";
 import { accountGeneration } from "../../web/src/ui/account-state";
 import { countJump,recordMapPlayed } from "../../web/src/ui/stats";
@@ -22,7 +22,14 @@ import { formatTime } from "../../web/src/timer";
 import { isStyleId } from "../../web/src/styles";
 import { onStyleChange, setSelectedStyle } from "../../web/src/ui/style-picker";
 import { settingsPanel, focusSettingsSection } from "./settings-panel";
-import { replayPanel, watchRequest, raceRequest, gauntletWatchDeps, sendReplay, playLocalReplay } from "./replays";
+import { replayPanel, replayViewer, watchRequest, raceRequest, gauntletWatchDeps, sendReplay, playLocalReplay } from "./replays";
+import { applyReplayHostState, applyReplayTimeline } from "./replay-host";
+import { practiceFromReplay } from "./replay-practice";
+import { applyChatFeatures } from "./chat-features";
+import { hostScoreboard, ScoreboardFeed } from "./host-decoration";
+import { legalLinks } from "../../web/src/ui/legal";
+import { installMuteButton } from "./mute-button";
+import { installTutorialProgress } from "./tutorial-entry";
 import { watchGauntletSplit } from "./gauntlet-watch";
 import { NativeRoomService } from "./room-service";
 import { RoomConnection } from "../../web/src/net/room";
@@ -91,7 +98,8 @@ function readFinish(value:unknown):FinishSummary|null {
   if(!value||typeof value!=="object") return null;
   const timer=value as Record<string,unknown>;
   if(timer.status!==2||typeof timer.seconds!=="number"||!Number.isFinite(timer.seconds)||timer.seconds<0) return null;
-  const summary:FinishSummary={seconds:timer.seconds};
+  // The score in whole milliseconds, as the server and the web show it (timer.seconds on older hosts).
+  const summary:FinishSummary={seconds:runSeconds({seconds:timer.seconds,timeMs:timer.timeMs})??timer.seconds};
   if(Number.isSafeInteger(timer.jumps)&&Number(timer.jumps)>=0) summary.jumps=Number(timer.jumps);
   if(Number.isSafeInteger(timer.strafes)&&Number(timer.strafes)>=0) summary.strafes=Number(timer.strafes);
   if(typeof timer.sync==="number"&&Number.isFinite(timer.sync)&&timer.sync>=0&&timer.sync<=100) summary.sync=timer.sync;
@@ -183,8 +191,27 @@ function playMap(map: string, style?: string): void {
   selectMap(map);
 }
 let shown = "";
+/** The replay viewer while it's up: it sits over the page, not in #menu (web viewer.css #rv, body.viewer-open). */
+let viewer:{el:HTMLElement;dispose:()=>void}|null=null;
+function closeViewer():void {
+  if(!viewer)return;
+  viewer.dispose();
+  viewer.el.remove();
+  viewer=null;
+  document.body.classList.remove("viewer-open");
+}
+/** Replays while a replay plays is the viewer; otherwise the vault. */
+function showViewer():void {
+  if(!viewer){
+    viewer=replayViewer(notice);
+    document.body.append(viewer.el);
+  }
+  document.body.classList.add("viewer-open");
+  app.replaceChildren();
+}
 function render(): void {
   ++renderGeneration;
+  if(screen!=="replays"||!state.playback.active)closeViewer();
   const root = screen==="home"?(state.map?"pause":"home"):screen;
   document.body.dataset.screen=screen==="room"?"pause":root;
   document.body.dataset.map=state.map??"";
@@ -235,7 +262,7 @@ function render(): void {
     const maps = mapBrowser({ current: state.map, style: state.style, onPick: selectMap,focus:focusMap,gauntlets:api.available()?()=>show("gauntlets"):null });
     browser = maps;
     focusMap=undefined;
-    app.replaceChildren(h("section.panel.panel-wide.native-maps", null, heading("Choose a map",state.map?`playing ${state.map}`:null,()=>closeMapPanel(maps)), maps));
+    app.replaceChildren(h("section.panel.panel-wide.panel-maps.native-maps", null, heading("Choose a map",state.map?`playing ${state.map}`:null,()=>closeMapPanel(maps)), maps));
   } else if (screen === "gauntlets") {
     app.replaceChildren(h("section.panel.panel-wide.panel-gauntlets", null, heading("Gauntlets"), gauntletsScreen(gauntletActions)));
   } else if (screen === "gauntlet") {
@@ -250,13 +277,15 @@ function render(): void {
       loadout: () => void ownProfile("loadout"),
       editCard: () => void ownProfile("card"),
     });
-    app.replaceChildren(h("section.panel.panel-wide.native-support", null, head, support));
+    app.replaceChildren(h("section.panel.panel-wide.panel-support.native-support", null, head, support));
   } else if (screen === "settings") {
     app.replaceChildren(h("section.panel.native-settings", null, heading("Settings"),settingsPanel()));
   } else if (screen === "credits") {
-    app.replaceChildren(h("section.panel.native-credits", null, heading("Credits"),creditsPanel()));
+    app.replaceChildren(h("section.panel.panel-wide.native-credits", null, heading("Credits"),creditsPanel()));
+  } else if(screen==="replays"&&state.playback.active) {
+    showViewer();
   } else if(screen==="replays") {
-    app.replaceChildren(h("section.panel.native-replay-screen",null,heading("Replays"),replayPanel(notice)));
+    app.replaceChildren(h("section.panel.panel-wide.native-replay-screen",null,heading("Replays"),replayPanel(notice)));
   } else if(screen==="servers") {
     app.replaceChildren(h("section.panel.panel-wide.native-servers",null,heading("Play online"),serverBrowser({map:state.map,onSolo:()=>show("maps")})));
   } else if(screen==="room") {
@@ -266,19 +295,26 @@ function render(): void {
   } else if(screen==="stats") {
     const { head, tabs } = tabbedHeading("Stats");
     const stats = statsScreen({ tabsHost: tabs, play: () => show("maps") });
-    app.replaceChildren(h("section.panel.panel-wide.native-stats", null, head, stats));
+    app.replaceChildren(h("section.panel.panel-wide.panel-stats.native-stats", null, head, stats));
   } else if(screen==="loadout") {
     // The web's Loadout is your profile's Loadout tab (signed out: that tab alone), under "Profile".
     const { head, tabs } = tabbedHeading("Profile");
-    app.replaceChildren(h("section.panel.native-loadout", null, head, cosmeticsPanel(playMap, loadoutSlot, tabs)));
+    app.replaceChildren(h("section.panel.panel-wide.panel-profile.native-loadout", null, head, cosmeticsPanel(playMap, loadoutSlot, tabs)));
   } else if(screen==="tutorial") {
-    app.replaceChildren(h("section.panel.native-tutorial-screen",null,heading("Tutorial"),tutorialPanel()));
+    app.replaceChildren(h("section.panel.panel-wide.native-tutorial-screen",null,heading("Tutorial"),tutorialPanel()));
   } else {
     const { head, tabs } = tabbedHeading("Profile");
     const profile = profilePanel(profileId, playMap, () => show("loadout"), { ...profileOpen, tabsHost: tabs });
-    app.replaceChildren(h("section.panel.panel-wide.native-profile", null, head, profile));
+    app.replaceChildren(h("section.panel.panel-wide.panel-profile.native-profile", null, head, profile));
   }
-
+  // Privacy · Terms · Credits under every panel screen (web menu.ts render).
+  if(screen!=="home")app.querySelector(":scope > .panel")?.append(legalLinks());
+  if(screen!=="home"&&screen!=="maps"&&!app.classList.contains("native-steady"))focusFirstControl();
+}
+/** A screen opens with its first control focused, as on the web (menu.ts render): the keyboard and pad start there. */
+function focusFirstControl():void {
+  const first=app.querySelector<HTMLElement>("[data-autofocus]")??app.querySelector<HTMLElement>("button:not([disabled]), [href], input, select");
+  first?.focus({preventScroll:true});
 }
 
 const activityService=new NativeActivityService({store:{read:()=>JSON.parse(localStorage.getItem("bunnyhop:native-playtime-pending")??"null"),write:value=>{if(value)localStorage.setItem("bunnyhop:native-playtime-pending",JSON.stringify(value));else localStorage.removeItem("bunnyhop:native-playtime-pending");}},now:()=>Date.now(),generation:accountGeneration,account:async()=>{const user=await api.me();return api.meStale()?undefined:user?.id??null;},report:(seconds,dispatch)=>api.reportPlaytime(seconds,dispatch),local:delta=>{if(delta.loaded)recordMapPlayed(delta.map);for(let i=0;i<delta.jumps;i++)countJump();if(delta.map!=="bhop_lol_tutorial"){mapTime.played(delta.map,delta.seconds);for(let i=0;i<delta.attempts;i++)mapTime.attempt(delta.map);}}});
@@ -291,7 +327,7 @@ function receive(value: unknown): void {
   if(report&&typeof report.map==="string"&&typeof report.style==="string"&&Number.isSafeInteger(report.track)&&Number.isSafeInteger(report.runGeneration)){nativeWorldRecord.update(report.map&&!report.loading&&api.available()?{map:report.map,style:report.style,track:Number(report.track),generation:Number(report.runGeneration)}:null);}
 
   if (value && typeof value === "object" && (value as { type?: string }).type === "auth") { refreshAccount(); return; }
-  const structural=()=>JSON.stringify({map:state.map,loading:state.loading,error:state.error,paused:state.paused,style:state.style,track:state.track});
+  const structural=()=>JSON.stringify({map:state.map,loading:state.loading,error:state.error,paused:state.paused,style:state.style,track:state.track,playback:state.playback.active});
   const before=structural(),mapBefore=state.map;
   let finishChanged=false;
   if(value&&typeof value==="object"&&"timer" in value) {
@@ -302,6 +338,8 @@ function receive(value: unknown): void {
   const paused=()=>JSON.stringify([state.practice,state.replays.length,state.replays[0]?.id,state.settings.hud,state.settings.crosshair,state.settings.viewmodel,state.settings.jumpStats,state.settings.strafeTrainer]);
   const pauseBefore=paused();
   const applied=applyState(value);
+  applyReplayHostState(value);
+  applyChatFeatures(value);
   if(applied)applySemanticPalette(state.settings.colorBlind);
   // A newly picked map is up: the next Esc in game is the pause menu, not the browser it was picked from.
   if(applied&&state.map&&state.map!==mapBefore&&!state.playback.active&&LEAVE_FOR_GAME.has(screen)){backStack=[];screen="home";}
@@ -320,6 +358,12 @@ const roomService=new NativeRoomService({connect:(id,handlers)=>new RoomConnecti
 const chatService=new NativeChatService(roomService,()=>{send({type:"chatAction",action:"openRoom"} as unknown as Parameters<typeof send>[0]);show("room");});
 const roomAccount=new RoomAccountBoundary(()=>chatService.resetAccount());
 roomService.subscribe(()=>{const view=roomService.view;setRoomPresence(view.id&&view.room?{id:view.id,name:view.room.name}:null);});
+// The Tab board the host draws in game: the room screen's rows (host-decoration.ts).
+const scoreboardFeed=new ScoreboardFeed(board=>send(board));
+roomService.subscribe(()=>{
+  const clock={now:roomService.clockNow(),server:roomService.serverNow(),ping:roomService.ping(),at:Date.now()};
+  scoreboardFeed.update(hostScoreboard(roomService.view,clock));
+});
 onBeforeSend(message=>{if(roomService.view.id&&((message.type==="replay"&&["play","ghost"].includes(message.action))||message.type==="replayData"||(message.type==="tutorial"&&message.action!=="stop")))roomService.leave();});
 setRaceTag(board=>{const race=roomService.view.race;return race&&race.state==="live"&&race.map===board.map&&race.style===board.style&&race.track===board.track?race.id:null;});
 /** Everything running for the map stops (map-lifecycle.ts). The host calls it as onLeaveMap for every leave_map. */
@@ -358,6 +402,8 @@ window.bunnyhopNativeMenu = { onGamepad, onActivity:value=>activityService.recei
   // A friend pressed Join on your Discord activity. The host has already checked the secret.
   settle,
   onLeaveMap:teardownMap,
+  onReplayTimeline:applyReplayTimeline,
+  onPracticeFromReplayResult:value=>practiceFromReplay.receive(value),
   joinRoom:id=>{if(typeof id!=="string"||!/^(?:[a-z0-9][a-z0-9-]{0,31}|p-[a-z2-7]{10})$/.test(id))return;void roomService.join(id).catch(()=>notice("Couldn't join that room."));show("room");},
   onChatLink:(raw:string)=>{const url=safeNativeChatUrl(raw);if(url)nativeNavigate(url);},
   version: 2 };
@@ -386,6 +432,12 @@ document.addEventListener("click", (event) => {
   const anchor = (event.target as Element | null)?.closest<HTMLAnchorElement>("a[href]");
   if (!anchor) return;
   event.preventDefault();
+  // A link within the page (the credits' contents): scroll to it.
+  const hash = anchor.getAttribute("href") ?? "";
+  if (hash.startsWith("#")) {
+    document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView({ block: "start" });
+    return;
+  }
   nativeNavigate(anchor.href);
 }, true);
 document.addEventListener("keydown", (event) => {
@@ -419,6 +471,7 @@ window.addEventListener("bunnyhop:navigate",event=>{
   if(url.searchParams.has("support")){show("support");return;}
   const user=url.searchParams.get("u");if(user){openProfile(user,url.searchParams.get("tab"),url.searchParams.get("slot"));return;}
   const map=url.searchParams.get("map");if(map){if(isStyleId(url.searchParams.get("style")))setSelectedStyle(url.searchParams.get("style") as typeof state.style);selectMap(map);return;}
+  if(url.pathname==="/credits"){show("credits");return;}
   if(url.pathname==="/servers")show("servers");else if(url.pathname==="/ranks")show("ranks");else if(url.pathname==="/stats")show("stats");else if(url.pathname.startsWith("/maps")){focusMap=url.pathname.split("/")[2];show("maps");}
   else if(url.pathname==="/"&&!url.search)show("home");
   // A page only the website has (About, Support): opened there.
@@ -476,6 +529,8 @@ setGameInfo(()=>({inGame:!!state.map,client:"native",...(state.map?{map:state.ma
   // Mouse, frame-time and input-queue diagnostics, when the overlay has produced a sample.
   ...(latestMouseDiagnostics()?{inputDiagnostics:latestMouseDiagnostics()}:{})}));
 initSocial();initDock();initCosmetics();installNowPlaying();installNativeUiAudio();
+installMuteButton();
+installTutorialProgress();
 installHudTheme();
 initCustomCss();
 installMenuBackdrop();

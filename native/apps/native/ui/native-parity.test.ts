@@ -275,6 +275,8 @@ test("watching a gauntlet attempt refuses a split on an earlier map build, with 
   } finally {await browser.close();}
 },20_000);
 
+/** The replay viewer's Report chip (replay-viewer.ts). */
+const reportChip=(page:Page)=>page.locator("#rv").getByRole("button",{name:"Report this player",exact:true});
 test("Report in playback is about the server run being watched, never a local replay or file played after it",async()=>{
   const {browser,page,errors}=await open(1280,720);
   try {
@@ -285,20 +287,22 @@ test("Report in playback is about the server run being watched, never a local re
     await page.evaluate(()=>window.dispatchEvent(new CustomEvent("bunnyhop:navigate",{detail:{url:"https://bunnyhop.lol/replay/run_x"}})));
     await page.waitForFunction(()=>(window as any).messages.some((m:any)=>m.type==="replayData"));
     await page.evaluate(()=>window.bunnyhopNativeMenu.onState({playback:{active:true,id:"import-x",tick:1,totalTicks:10,paused:false,speed:1}}));
-    expect(await page.locator(".native-playback-report .native-report").count()).toBe(1);
+    expect(await reportChip(page).isVisible()).toBe(true);
     // A local replay from the list: no Report about the earlier server run.
+    await page.evaluate(()=>window.bunnyhopNativeMenu.onState({playback:{active:false,id:""}}));
     await page.locator(".native-replay-row",{hasText:"local run"}).getByRole("button",{name:"Watch"}).click();
     await page.evaluate(()=>window.bunnyhopNativeMenu.onState({playback:{active:true,id:"r1",tick:2,totalTicks:10,paused:false,speed:1}}));
-    expect(await page.locator(".native-playback-report .native-report").count()).toBe(0);
+    expect(await reportChip(page).isVisible()).toBe(false);
     // Server run again, then a .bhr file: the same.
     await page.evaluate(()=>window.dispatchEvent(new CustomEvent("bunnyhop:navigate",{detail:{url:"https://bunnyhop.lol/replay/run_x"}})));
     await page.waitForFunction(()=>(window as any).messages.filter((m:any)=>m.type==="replayData").length===2);
     await page.evaluate(()=>window.bunnyhopNativeMenu.onState({playback:{active:true,id:"import-x",tick:1,totalTicks:10,paused:false,speed:1}}));
-    expect(await page.locator(".native-playback-report .native-report").count()).toBe(1);
+    expect(await reportChip(page).isVisible()).toBe(true);
+    await page.evaluate(()=>window.bunnyhopNativeMenu.onState({playback:{active:false,id:""}}));
     await page.locator('input[aria-label="Import replay"]').setInputFiles({name:"mine.bhr",mimeType:"application/octet-stream",buffer:Buffer.from("bhr-local-file")});
     await page.waitForFunction(()=>(window as any).messages.filter((m:any)=>m.type==="replayData").length===3);
     await page.evaluate(()=>window.bunnyhopNativeMenu.onState({playback:{active:true,id:"import-y",tick:3,totalTicks:10,paused:false,speed:1}}));
-    expect(await page.locator(".native-playback-report .native-report").count()).toBe(0);
+    expect(await reportChip(page).isVisible()).toBe(false);
     expect(errors).toEqual([]);
   } finally {await browser.close();}
 },20_000);
@@ -349,12 +353,31 @@ test("map loading: byte progress, cancellation, offline retry and stable transit
 
 test("replay vault filters and scrubbing restores prior playback without stale playhead jumps",async()=>{
  const {browser,page,errors}=await open();try{
-  await page.evaluate(()=>{window.bunnyhopNativeMenu.onState({map:'bhop_a',replays:[{id:'a.bhr',name:'Alice',map:'bhop_a',style:'autohop',track:0,seconds:10,recordedAt:1700000000000,bytes:1200,screenshot:true,localSummary:{schema:1,map:'bhop_a',style:'autohop',track:0,time:10,jumps:12,strafes:40,sync:88,finishedAt:1700000000000,client:'native',localPb:true}},{id:'b.bhr',name:'Bob',map:'bhop_b',style:'scroll',track:0,seconds:11,recordedAt:1700000001000,bytes:1400}],playback:{active:true,id:'a.bhr',tick:100,totalTicks:1000,paused:false,speed:1,tickInterval:.01}});window.bunnyhopNativeMenu.open?.('replays');});
+  const alice={id:'a.bhr',name:'Alice',map:'bhop_a',style:'autohop',track:0,seconds:10,recordedAt:1700000000000,bytes:1200,screenshot:true,localSummary:{schema:1,map:'bhop_a',style:'autohop',track:0,time:10,jumps:12,strafes:40,sync:88,finishedAt:1700000000000,client:'native',localPb:true}};
+  const bob={id:'b.bhr',name:'Bob',map:'bhop_b',style:'scroll',track:0,seconds:11,recordedAt:1700000001000,bytes:1400};
+  await page.evaluate(replays=>{window.bunnyhopNativeMenu.onState({map:'bhop_a',replays});window.bunnyhopNativeMenu.open?.('replays');},[alice,bob]);
   expect(await page.locator('.native-replay-row').count()).toBe(2);await page.getByRole('searchbox',{name:'Search replay vault'}).fill('Alice');expect(await page.locator('.native-replay-row').count()).toBe(1);expect(await page.locator('.native-replay-row').textContent()).toContain('Device PB');
   let from=await count(page);await page.getByRole('button',{name:'View result',exact:true}).click();expect(await sent(page,from)).toEqual([{type:'replay',action:'screenshot',id:'a.bhr'}]);
-  from=await count(page);await page.getByRole('slider',{name:'Replay tick',exact:true}).evaluate(slider=>{const input=slider as HTMLInputElement;input.dispatchEvent(new PointerEvent('pointerdown'));for(let i=200;i<=800;i++){input.value=String(i);input.dispatchEvent(new Event('input'));}window.bunnyhopNativeMenu.onState({playback:{active:true,id:'a.bhr',tick:101,totalTicks:1000,paused:true,speed:1}});input.dispatchEvent(new Event('change'));});
-  const commands=await sent(page,from);expect(commands).toEqual([{type:'replayControl',action:'pause',paused:true},{type:'replayControl',action:'seek',tick:200},{type:'replayControl',action:'seek',tick:800},{type:'replayControl',action:'pause',paused:false}]);
-  expect(await page.getByRole('slider',{name:'Replay tick',exact:true}).inputValue()).toBe('800');await shot(page,'replay-vault-scrub.png');expect(errors).toEqual([]);
+  // Playing: the viewer's timeline. A drag pauses, seeks along, and plays again from where it was let go.
+  await page.evaluate(()=>window.bunnyhopNativeMenu.onState({playback:{active:true,id:'a.bhr',tick:100,totalTicks:1000,paused:false,speed:1,tickInterval:.01}}));
+  const bar=(await page.locator('#rv .rv-tl-canvas').boundingBox())!;
+  const x=(tick:number)=>bar.x+bar.width*tick/1000,y=bar.y+bar.height/2;
+  from=await count(page);
+  await page.mouse.move(x(200),y);await page.mouse.down();
+  for(let tick=250;tick<=800;tick+=50)await page.mouse.move(x(tick),y);
+  // The host is behind: its stale tick doesn't pull the playhead back.
+  await page.evaluate(()=>window.bunnyhopNativeMenu.onState({playback:{active:true,id:'a.bhr',tick:101,totalTicks:1000,paused:true,speed:1}}));
+  await page.mouse.up();
+  const commands=await sent(page,from);
+  expect(commands[0]).toEqual({type:'replayControl',action:'pause',paused:true});
+  expect(Math.abs(Number(commands[1].tick)-200)).toBeLessThanOrEqual(1);
+  const seeks=commands.filter(command=>command.action==='seek').map(command=>Number(command.tick));
+  expect(seeks).toEqual([...seeks].sort((a,b)=>a-b));
+  expect(Math.abs(seeks.at(-1)!-800)).toBeLessThanOrEqual(1);
+  expect(commands.at(-1)).toEqual({type:'replayControl',action:'pause',paused:false});
+  await page.evaluate(()=>window.bunnyhopNativeMenu.onState({playback:{active:true,id:'a.bhr',tick:102,totalTicks:1000,paused:false,speed:1}}));
+  expect(Math.abs(Number((await page.locator('#rv .rv-tick').textContent())!.slice(5))-800)).toBeLessThanOrEqual(1);
+  await shot(page,'replay-vault-scrub.png');expect(errors).toEqual([]);
  }finally{await browser.close();}
 });
 

@@ -40,6 +40,9 @@ export type MenuMessage =
   | { type: "replayControl"; action: "pause"|"seek"|"speed"|"stop"|"camera"; camera?:string; paused?: boolean; tick?: number; speed?: number }
   | { type: "replayControl"; action: "fullRecording"; value: boolean }
   | { type: "practiceFromReplay"; tick?: number }
+  /** A second replay as a ghost on the one being watched (replay-host.ts); needs the host's "compare" feature. */
+  | { type: "replayCompare"; action: "set"; kind: "pb" | "wr" | "custom"; name: string; replayBase64: string }
+  | { type: "replayCompare"; action: "clear" }
   | { type: "ghost"; enabled: boolean }
   | {type:"ghostControl";action:"remove"|"clear"|"toggle";slot?:number;enabled?:boolean}
   | {type:"tutorial";action:"start"|"demo";lesson:LessonId}
@@ -65,6 +68,8 @@ export type MenuMessage =
   /** The name native replay headers carry: the web's local display name ("bunnyhop:name", else "player"). */
   | { type: "playerName"; name: string }
   | NativeChatMessage
+  /** The Tab board for the host to draw (host-decoration.ts). */
+  | import("./host-decoration").HostScoreboard
   | {type:"worldRecord";map:string;style:string;track:number;generation:number;seconds:number|null}
   | RunServiceStatus;
 
@@ -126,7 +131,14 @@ export interface NativeSettings {
 export type DiscordState="disabled"|"connecting"|"ready"|"reconnecting";
 export const DISCORD_STATES:readonly DiscordState[]=["disabled","connecting","ready","reconnecting"];
 export interface LocalRunSummary {schema:1;map:string;style:string;track:number;time:number;jumps:number;strafes:number;sync:number;finishedAt:number;client:string;localPb:boolean;eligible?:boolean;verified?:false}
-export interface NativeReplay {screenshot?:boolean;localSummary?:LocalRunSummary;id:string;name:string;map:string;style:StyleId;track:number;seconds:number;recordedAt:number;bytes:number}
+export interface NativeReplay {screenshot?:boolean;localSummary?:LocalRunSummary;id:string;name:string;map:string;style:StyleId;track:number;seconds:number;recordedAt:number;bytes:number;
+  /** The run's score in whole milliseconds, as the server times it (absent from older hosts). */
+  timeMs?:number}
+/** A run's time to show: the host's whole milliseconds when it sends them, else its seconds. */
+export function runSeconds(run:{seconds?:number;timeMs?:unknown}):number|null {
+  if(Number.isSafeInteger(run.timeMs)&&Number(run.timeMs)>0)return Number(run.timeMs)/1000;
+  return typeof run.seconds==="number"&&Number.isFinite(run.seconds)&&run.seconds>0?run.seconds:null;
+}
 export const REPLAY_CAMERAS=["eye","chase","free","flyby","auto"] as const;
 export type ReplayCamera=(typeof REPLAY_CAMERAS)[number];
 export interface NativeGhost {slot:number;id:string;name:string;enabled:boolean;map?:string;style?:StyleId;track?:number}
@@ -139,6 +151,8 @@ export interface PlaybackState {
   rangeStartTick?:number;rangeEndTick?:number;rangeTick?:number;rangeTotalTicks?:number;elapsedSeconds?:number;
   fullRecording?:boolean;
   camera?:ReplayCamera;seconds?:number;tickInterval?:number;
+  /** The replay's finished time in whole milliseconds (0 or absent: none). */
+  timeMs?:number;
   active:boolean;id:string;tick:number;totalTicks:number;paused:boolean;speed:number;
   player?:{id?:string;name?:string;runId?:string};
 }
@@ -186,7 +200,11 @@ declare global {
     webkit?: { messageHandlers?: { bunnyhop?: { postMessage: (value: string) => void } } };
     bunnyhopNativeMenu: { onGamepad?:(value:unknown)=>void; onState: (value: unknown) => void; onAuth: (value?: unknown) => void; onRunEvent: (value: unknown) => void; version: number; open?:(screen:string,focus?:string)=>void;
       /** The host left the map (every leave_map, also its own Main menu bind): stop the room, the gauntlet and their timers now. */
-      onActivity?:(value:unknown)=>void;onChatLink?:(url:string)=>void; onChatSubmit?:(value:unknown)=>void;onChatSuggest?:(value:unknown)=>void;onRoomControl?:(value:unknown)=>void;onLeaveMap?:()=>void; joinRoom?:(id:string)=>void; onRoomPose?:(value:unknown)=>void; onRoomCommand?:(value:unknown)=>void; settle?:(timeoutMs?:number)=>Promise<{ended:number;pendingImages:number}> };
+      onActivity?:(value:unknown)=>void;onChatLink?:(url:string)=>void; onChatSubmit?:(value:unknown)=>void;onChatSuggest?:(value:unknown)=>void;onRoomControl?:(value:unknown)=>void;onLeaveMap?:()=>void; joinRoom?:(id:string)=>void; onRoomPose?:(value:unknown)=>void; onRoomCommand?:(value:unknown)=>void;
+      /** The watched replay's speed graph and markers (replay-host.ts), once per replay. */
+      onReplayTimeline?:(value:unknown)=>void;
+      /** The host's answer to Practice from here (replay-practice.ts). */
+      onPracticeFromReplayResult?:(value:unknown)=>void; settle?:(timeoutMs?:number)=>Promise<{ended:number;pendingImages:number}> };
     __nativeMenuGraphics?: { contexts: number; attempts: number };
   }
 }
@@ -304,7 +322,7 @@ export function applyState(value: unknown): boolean {
     for(const key of ["active","paused","fullRecording"] as const) {
       if(typeof playback[key]==="boolean") state.playback[key]=playback[key];
     }
-    const numbers=["tick","totalTicks","speed","seconds","tickInterval",...PLAYBACK_RANGE_KEYS] as const;
+    const numbers=["tick","totalTicks","speed","seconds","tickInterval","timeMs",...PLAYBACK_RANGE_KEYS] as const;
     for(const key of numbers) {
       const value=playback[key];
       if(typeof value==="number"&&Number.isFinite(value)&&value>=0) state.playback[key]=value;
