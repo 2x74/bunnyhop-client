@@ -31,7 +31,7 @@ inline Json default_settings() {
         {"colorBlind","off"},{"gainTicks",true},{"speedColors",true},{"perfectIndicator",true},{"speedGraph",false},{"keysOverlay",true},{"keysStyle","classic"},
         {"yawSpeed",210.0},{"yawSpeedAlt",210.0},
         // Source look: CS:S's auto exposure and bloom on maps with HDR lighting.
-        {"capturePbScreenshots",false},{"showPlayerGlow",true},{"firstPersonGlow",true},{"waterQuality","simple"},{"zonesVisible",true},{"effectsVisible",true},{"triggersVisible",false},{"clipsVisible",false},{"fov",90.0},{"sourceLook",true},{"vsync",true},{"fpsLimit",0},{"volume",.65},{"muted",false},
+        {"capturePbScreenshots",false},{"showPlayerGlow",true},{"firstPersonGlow",true},{"waterQuality","simple"},{"zonesVisible",true},{"effectsVisible",true},{"triggersVisible",false},{"clipsVisible",false},{"fov",90.0},{"sourceLook",true},{"vsync",false},{"fpsLimit",500},{"limitQueuedFrames",true},{"volume",.65},{"muted",false},
         {"hudScale",100.0},{"practiceKeepVelocity",true},{"hud",true},{"crosshair",true},{"viewmodel",true},{"jumpStats",true},
         // Jump stats: "sixth" (jump 6 only), "every" jump, or "interval" (every jumpStatsInterval jumps).
         {"jumpStatsMode","sixth"},{"jumpStatsColors",true},{"jumpStatsInterval",6},
@@ -157,6 +157,19 @@ inline Json patch_settings(const Json &current,const Json &patch) {
     }
     return out;
 }
+// New installs start with VSync off and a 500 FPS cap (lowest input latency; see display_defaults.hpp). A settings
+// file from before that keeps what it had: VSync on and no cap were the defaults then.
+inline void keep_saved_display(Json &saved) {
+    if (!saved.is_object()) {
+        return;
+    }
+    if (!saved.contains("vsync")) {
+        saved["vsync"] = true;
+    }
+    if (!saved.contains("fpsLimit")) {
+        saved["fpsLimit"] = 0;
+    }
+}
 inline Json load_settings(const std::filesystem::path &file) {
     auto out=default_settings();
     if(!std::filesystem::exists(file)) return out;
@@ -165,6 +178,7 @@ inline Json load_settings(const std::filesystem::path &file) {
     // Before !showclips existed, "Trigger and clip overlays" drew both groups.
     // Keep clips on for anyone who had that toggle on.
     if(saved.is_object()&&!saved.contains("clipsVisible")&&saved.value("triggersVisible",Json(false))==true)saved["clipsVisible"]=true;
+    keep_saved_display(saved);
     return patch_settings(out,saved);
 }
 inline void save_settings(const std::filesystem::path &file,const Json &settings) {

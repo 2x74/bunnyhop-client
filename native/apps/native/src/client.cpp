@@ -3,6 +3,10 @@
 #include "mouse_diagnostics.hpp"
 #include "raw_keyboard.hpp"
 #include "input_timeline.hpp"
+#include "display_defaults.hpp"
+#include "json_file_writer.hpp"
+#include "diagnostics_report.hpp"
+#include "frame_pacing.hpp"
 #include "native_math.hpp"
 #include "menu_webview.hpp"
 #include "online.hpp"
@@ -239,6 +243,7 @@ int run(const Options &opt) {
     if (!SDL_GL_MakeCurrent(window.get(),context)) throw std::runtime_error(SDL_GetError());
     SDL_GL_SetSwapInterval(opt.frames?0:1);
     Gl gl; gl.load(); std::unique_ptr<Renderer> renderer;
+    native::FramePacer<Gl> frame_pacer;
     // Feedback context (the menu's "Attach game info"): the GPU the game draws with, not the menu web view's.
     const std::string gpu_renderer=[&]{const auto *name=gl.GetString(GL_RENDERER);return name?std::string(reinterpret_cast<const char*>(name)):std::string();}();
     const auto assets=native::resource("native-assets",BUNNYHOP_NATIVE_ASSET_ROOT);
@@ -328,13 +333,28 @@ int run(const Options &opt) {
     auto backdrop_clock=std::chrono::steady_clock::now();
     bool captured=false,focused=true,running=true,menu_ready=false,smoke_requested=false,smoke_pass=false,smoke_snapshot=false,resume_wanted=false;
     bool recording_ended=false;
+    // Settings and other small JSON files are written off the frame loop.
+    native::JsonFileWriter json_writer;
     auto preferences=native::default_settings();
-    try {preferences=native::load_settings(cache/"settings.json");}catch(const std::exception &e){std::cerr<<"Settings: "<<e.what()<<'\n';}
+    const bool first_settings = !std::filesystem::exists(cache / "settings.json");
+    try {
+        preferences = native::startup_settings(cache);
+    } catch (const std::exception &e) {
+        std::cerr << "Settings: " << e.what() << '\n';
+    }
     if(opt.sensitivity_set)preferences["sensitivity"]=opt.sensitivity;
     // Recovery: --windowed resets a display mode the player cannot leave and keeps it.
     if(opt.windowed&&preferences.value("windowMode",std::string())!="windowed"){preferences["windowMode"]="windowed";try{native::save_settings(cache/"settings.json",preferences);}catch(const std::exception &e){std::cerr<<"Settings: "<<e.what()<<'\n';}}
     native::WindowController window_controller(window.get());
     const bool persist_window=!opt.hidden&&!opt.frames&&opt.menu_smoke.empty()&&opt.runtime_smoke.empty();
+    // Keep the display defaults this launch chose (display_defaults.hpp), so the next launch reads the same ones.
+    if (first_settings && persist_window) {
+        try {
+            native::save_settings(cache / "settings.json", preferences);
+        } catch (const std::exception &e) {
+            std::cerr << "Settings: " << e.what() << '\n';
+        }
+    }
     std::optional<native::WindowBounds> saved_window;
     if(persist_window)try{const auto path=cache/"window-state.json";if(std::filesystem::exists(path)&&std::filesystem::file_size(path)<=16384)saved_window=native::read_window_bounds(nlohmann::json::parse(read_text(path)));}catch(const std::exception&e){std::cerr<<"Window bounds: "<<e.what()<<'\n';}
     // While the menu is open the window may not be always-on-top, and exclusive
@@ -347,7 +367,7 @@ int run(const Options &opt) {
     auto initial_window_preferences=window_for_menu(preferences,bool(menu));
     if(persist_window&&!window_controller.apply(initial_window_preferences,true,saved_window)){std::cerr<<"Window: "<<window_controller.error()<<'\n';preferences["windowMode"]=window_controller.mode();}
     bool window_dirty=false;auto window_save_due=std::chrono::steady_clock::now();
-    auto save_window=[&](){if(!persist_window||!preferences.value("rememberWindowBounds",true))return;try{if(auto bounds=window_controller.observe_bounds())native::save_settings(cache/"window-state.json",native::window_bounds_json(*bounds));window_dirty=false;}catch(const std::exception&e){std::cerr<<"Window bounds: "<<e.what()<<'\n';}};
+    auto save_window=[&](){if(!persist_window||!preferences.value("rememberWindowBounds",true))return;try{if(auto bounds=window_controller.observe_bounds())json_writer.write(cache/"window-state.json",native::window_bounds_json(*bounds));window_dirty=false;}catch(const std::exception&e){std::cerr<<"Window bounds: "<<e.what()<<'\n';}};
     std::string selected_style=opt.style,active_style=opt.style,outfit,packed_loadout,ghost_cosmetic="ghost-default",trail_cosmetic="trail-none";
     std::optional<native_render::Glow> player_glow;
     native::RoomState room;native::RoomModes room_modes;std::optional<unsigned> observed_spectator;
@@ -382,10 +402,14 @@ int run(const Options &opt) {
     std::string pending_tutorial=opt.tutorial_lesson;bool pending_tutorial_demo=opt.tutorial_demo,tutorial_demo=false,tutorial_stopped=false,tutorial_final_saved=false;
     uint32_t tutorial_demo_start=0;
     std::function<void(const std::string&,bool)> start_tutorial;
-    auto save_tutorial=[&](){if(!tutorial)return;tutorial_completed=tutorial->stateJSON().at("completed");native::save_settings(cache/"tutorial-progress.json",tutorial_completed);};
+    auto save_tutorial=[&](){if(!tutorial)return;tutorial_completed=tutorial->stateJSON().at("completed");json_writer.write(cache/"tutorial-progress.json",tutorial_completed);};
     // Keys as last polled (actions, turnbinds, overlays). Timed ticks use their own key state (input.queue.keys).
     std::set<std::string> held_codes;
     native::InputTimeline input_timeline;
+    native::FrameDiagnostics frame_diagnostics;
+    // Typed copies of settings the frame loop reads every frame (apply_preferences).
+    bool diagnostics_enabled = false;
+    bool limit_queued_frames = true;
     const char *video_driver = SDL_GetCurrentVideoDriver();
     input_timeline.configure_stamps(video_driver ? video_driver : "");
     native::Chat chat;
@@ -405,6 +429,8 @@ int run(const Options &opt) {
         input_timeline.rebuild_binds(preferences.at("binds"));
         const bool timed_input = !opt.legacy_input && preferences.value("timedInput", true);
         input_timeline.set_timed(timed_input, input, held_codes);
+        diagnostics_enabled = preferences.at("mouseDiagnostics").get<bool>();
+        limit_queued_frames = preferences.at("limitQueuedFrames").get<bool>();
         camera_controls.set_sensitivity(input.sensitivity);camera_controls.vertical_sensitivity=input.vertical_sensitivity;camera_controls.separate_vertical=input.separate_vertical;camera_controls.invert_y=input.invert_y;
         hud.preferences(preferences);audio.preferences(preferences);
         SDL_GL_SetSwapInterval(opt.frames?0:preferences.at("vsync").get<bool>()?1:0);
@@ -482,6 +508,7 @@ int run(const Options &opt) {
         }
         if (!SDL_SetWindowRelativeMouseMode(window.get(),on)) {
             captured=false; std::cerr << "Relative mouse mode failed: " << SDL_GetError() << '\n';
+            ++frame_diagnostics.relative_mode_failures;
         } else captured=on;
         native::set_raw_keyboard(captured);
         input_clock.reset();
@@ -612,7 +639,7 @@ int run(const Options &opt) {
         BhRunState timing{};bh_run_state(core.get(),&timing);
         if(bound&&action!="toggle"&&!practice.key_allowed(action,timing.status==1)){if(practice.hinted_run!=timing.start_tick){practice.hinted_run=timing.start_tick;toast("Type !cp to use checkpoints and noclip during a run.",3500);}return;}
         if(action=="menu"){practice.menu_open=!practice.menu_open;return;}
-        if(action=="keepVelocity"){preferences["practiceKeepVelocity"]=value.value_or(!preferences.at("practiceKeepVelocity").get<bool>());native::save_settings(cache/"settings.json",preferences);return;}
+        if(action=="keepVelocity"){preferences["practiceKeepVelocity"]=value.value_or(!preferences.at("practiceKeepVelocity").get<bool>());json_writer.write(cache/"settings.json",preferences);return;}
         if(action=="toggle"){
             practice.mode=!practice.mode;
             if(practice.mode){practice.tool.clear();practice_use("");const auto bound=[&](const char *action)->std::string{const auto &keys=preferences.at("binds").at(action);if(keys.empty()){const std::string_view a(action);return a=="cpSave"?"!save":a=="cpTeleport"?"!tele":"!nc";}std::string k=keys[0].get<std::string>();if(k=="Backquote")return "`";if(k.starts_with("Key")||k.starts_with("Digit"))return k.substr(k.starts_with("Key")?3:5);if(k.starts_with("Mouse"))return "M"+k.substr(5);return k;};toast("Practice: no scores. "+bound("noclip")+": noclip | "+bound("cpSave")+": save checkpoint | "+bound("cpTeleport")+": teleport.",6000);}
@@ -872,11 +899,11 @@ int run(const Options &opt) {
         if(action=="nextTrack"){audio.music_control("next");return;}
         if(action=="hudEditor"){if(menu){show_menu(true);menu->evaluate_js("window.bunnyhopNativeMenu?.open?.('settings','hud-editor')");}return;}
         if(action=="gunMenu"){gun_menu.toggle();return;}
-        if(action=="showTriggers"||action=="showClips"){const char *key=action=="showTriggers"?"triggersVisible":"clipsVisible";const bool on=!preferences.at(key).get<bool>();preferences[key]=on;native::save_settings(cache/"settings.json",preferences);apply_preferences();toast(std::string(action=="showTriggers"?"Triggers":"Player clips")+(on?" shown":" hidden"));return;}
-        if(action=="keysOverlay"){preferences["keysOverlay"]=!preferences.at("keysOverlay").get<bool>();native::save_settings(cache/"settings.json",preferences);apply_preferences();return;}
+        if(action=="showTriggers"||action=="showClips"){const char *key=action=="showTriggers"?"triggersVisible":"clipsVisible";const bool on=!preferences.at(key).get<bool>();preferences[key]=on;json_writer.write(cache/"settings.json",preferences);apply_preferences();toast(std::string(action=="showTriggers"?"Triggers":"Player clips")+(on?" shown":" hidden"));return;}
+        if(action=="keysOverlay"){preferences["keysOverlay"]=!preferences.at("keysOverlay").get<bool>();json_writer.write(cache/"settings.json",preferences);apply_preferences();return;}
         if(action=="viewmodel"||action=="hideUi"||action=="mute") {
             const std::string key=action=="hideUi"?"hud":action=="mute"?"muted":"viewmodel";
-            preferences[key]=!preferences[key].get<bool>();native::save_settings(cache/"settings.json",preferences);apply_preferences();return;
+            preferences[key]=!preferences[key].get<bool>();json_writer.write(cache/"settings.json",preferences);apply_preferences();return;
         }
         if(action=="mainMenu"){
             BhRunState timing{};if(core)bh_run_state(core.get(),&timing);
@@ -888,7 +915,7 @@ int run(const Options &opt) {
             if(!core)return;
             if(action=="clearStart"){start_points.clear(map_id,active_track);toast("Start point cleared");}
             else{if(tutorial&&tutorial->is_active()){toast("Start points are unavailable in tutorial lessons");return;}const auto problem=native::start_point_problem(curr,practice.noclip);if(!problem.empty()){toast(problem);return;}start_points.save(map_id,active_track,curr,input.yaw(),input.pitch);toast(native::start_point_in_zone(curr,zones,active_track)?"Start point saved":"Start point saved outside the start zone: runs from it are practice, and the timer starts only from the start zone",native::start_point_in_zone(curr,zones,active_track)?3000u:5000u);}
-            native::save_settings(cache/"start-points.json",start_points.points);return;
+            json_writer.write(cache/"start-points.json",start_points.points);return;
         }
         if(action=="nextWeapon"||action=="prevWeapon"){
             BhWeaponReport weapon{};if(core&&bh_weapon_report(core.get(),&weapon)){const uint32_t slot=weapon.active==weapon.primary&&weapon.primary?1:weapon.active==weapon.secondary&&weapon.secondary?2:3;uint32_t next=slot;for(int i=0;i<3;i++){next=action=="nextWeapon"?next%3+1:(next+1)%3+1;if(next==3||(next==1&&weapon.primary)||(next==2&&weapon.secondary))break;}input.pulse=(input.pulse&~(3u<<14))|(next<<14);}return;
@@ -1082,6 +1109,11 @@ int run(const Options &opt) {
     auto check_video_restored=[&](){if(!playback_paused||curr.tick!=37||replay_camera.mode!="free"||!replay_camera.initialized||replay_camera.position!=std::array<float,3>{11,22,33}||std::abs(replay_camera.yaw-42)>.0001||std::abs(replay_camera.pitch-17)>.0001)throw std::runtime_error("Video export did not restore the viewer state");};
     const auto video_smoke_started=Clock::now();
     while(running) {
+        frame_diagnostics.start_frame(SDL_GetTicksNS(), diagnostics_enabled);
+        if (const auto failure = json_writer.take_error()) {
+            std::cerr << "Could not save " << *failure << '\n';
+            toast("Could not save " + *failure);
+        }
         if(window_dirty&&Clock::now()>=window_save_due)save_window();
         if(video_probe.valid()&&video_probe.wait_for(std::chrono::seconds(0))==std::future_status::ready)video_available=video_probe.get();
         const uint64_t mouse_pump_start=SDL_GetTicksNS();
@@ -1097,7 +1129,9 @@ int run(const Options &opt) {
                     break;
                 case SDL_EVENT_WINDOW_MOVED:case SDL_EVENT_WINDOW_RESIZED:case SDL_EVENT_WINDOW_MAXIMIZED:case SDL_EVENT_WINDOW_RESTORED:
                     if(event.window.windowID==SDL_GetWindowID(window.get())){window_dirty=true;window_save_due=Clock::now()+std::chrono::milliseconds(500);}break;
-                case SDL_EVENT_WINDOW_FOCUS_LOST: if(!menu||!menu->visible())window_controller.focus_lost(preferences);focused=false;audio.focus(false); show_menu(true); break;
+                case SDL_EVENT_WINDOW_FOCUS_LOST:
+                    ++frame_diagnostics.focus_losses;
+                    if(!menu||!menu->visible())window_controller.focus_lost(preferences);focused=false;audio.focus(false); show_menu(true); break;
                 case SDL_EVENT_WINDOW_FOCUS_GAINED: audio.focus(true); focused=true;if(resume_wanted&&(!menu||!menu->visible())) capture(!(playback&&replay_controls.visible));break;
                 case SDL_EVENT_KEY_DOWN:
                 case SDL_EVENT_KEY_UP: {
@@ -1110,7 +1144,7 @@ int run(const Options &opt) {
                     if(down&&!repeat&&event.key.scancode==SDL_SCANCODE_F10){show_menu(true);if(menu)menu->evaluate_js("window.bunnyhopNativeMenu?.open?.('settings','display')");break;}
                     if(down&&!repeat&&event.key.scancode==SDL_SCANCODE_RETURN&&(event.key.mod&SDL_KMOD_ALT)){
                         save_window();
-                        if(!(video_capture||director_job||video_encoder.busy())){auto changed=preferences;changed["windowMode"]=native::toggled_window_mode(window_controller.mode());if(window_controller.apply(changed)){preferences=changed;native::save_settings(cache/"settings.json",preferences);}else error=window_controller.error();if(menu&&menu->visible())SDL_SetWindowAlwaysOnTop(window.get(),false);}break;}
+                        if(!(video_capture||director_job||video_encoder.busy())){auto changed=preferences;changed["windowMode"]=native::toggled_window_mode(window_controller.mode());if(window_controller.apply(changed)){preferences=changed;json_writer.write(cache/"settings.json",preferences);}else error=window_controller.error();if(menu&&menu->visible())SDL_SetWindowAlwaysOnTop(window.get(),false);}break;}
                     if(video_capture||director_job||video_encoder.busy()){if(down&&event.key.scancode==SDL_SCANCODE_ESCAPE){cancel_video();refresh_playback_pose();}break;}
                     if(chat.active){
                         if(down){
@@ -1194,6 +1228,7 @@ int run(const Options &opt) {
             }
         }
         mouse_diagnostics.end(SDL_GetTicksNS(),mouse_pump_start);
+        frame_diagnostics.mark(native::FrameDiagnostics::kPump, SDL_GetTicksNS());
         if(had_input_activity)activity.input(std::chrono::duration<double>(Clock::now().time_since_epoch()).count());
         if(menu) for(const auto &raw:menu->drain_messages()) {
             try {
@@ -1244,8 +1279,8 @@ int run(const Options &opt) {
                 else if(type=="chatAction"){
                     const auto action=message.at("action").get<std::string>();
                     if(action=="scores")show_scores=!show_scores;
-                    else if(action=="jumpStats"){preferences["jumpStats"]=!preferences.at("jumpStats").get<bool>();native::save_settings(cache/"settings.json",preferences);apply_preferences();}
-                    else if(action=="showTriggers"||action=="showClips"){const char *key=action=="showTriggers"?"triggersVisible":"clipsVisible";const bool on=!preferences.at(key).get<bool>();preferences[key]=on;native::save_settings(cache/"settings.json",preferences);apply_preferences();toast(std::string(action=="showTriggers"?"Triggers":"Player clips")+(on?" shown":" hidden"));}
+                    else if(action=="jumpStats"){preferences["jumpStats"]=!preferences.at("jumpStats").get<bool>();json_writer.write(cache/"settings.json",preferences);apply_preferences();}
+                    else if(action=="showTriggers"||action=="showClips"){const char *key=action=="showTriggers"?"triggersVisible":"clipsVisible";const bool on=!preferences.at(key).get<bool>();preferences[key]=on;json_writer.write(cache/"settings.json",preferences);apply_preferences();toast(std::string(action=="showTriggers"?"Triggers":"Player clips")+(on?" shown":" hidden"));}
                     else if(action=="hidePlayers")hide_players=message.value("hidden",!hide_players);
                     else if(action=="openRoom"){show_menu(true);menu->evaluate_js("window.bunnyhopNativeMenu?.open?.('room')");}
                     else if(core&&!download.valid()){
@@ -1289,10 +1324,10 @@ int run(const Options &opt) {
                     request_map(message.at("id").get<std::string>());
                 }
                 else if(type=="style") {if(!gauntlet_id.empty())throw std::runtime_error("Gauntlets are Normal style on the main track.");if(download.valid())throw std::runtime_error("A map is loading");const auto id=message.at("id").get<std::string>();if(!native::styles.contains(id))throw std::runtime_error("Unknown style");selected_style=id;active_track=0;reset();}
-                else if(type=="settings") {save_window();auto changed=native::patch_settings(preferences,message.at("patch"));const auto effective=window_for_menu(changed,menu&&menu->visible());if(!window_controller.apply(effective))throw std::runtime_error(window_controller.error());native::save_settings(cache/"settings.json",changed);preferences=std::move(changed);
+                else if(type=="settings") {save_window();auto changed=native::patch_settings(preferences,message.at("patch"));const auto effective=window_for_menu(changed,menu&&menu->visible());if(!window_controller.apply(effective))throw std::runtime_error(window_controller.error());json_writer.write(cache/"settings.json",changed);preferences=std::move(changed);
                     input_timeline.settings_changed(input, held_codes);
                     apply_preferences();error.clear();}
-                else if(type=="window") {const auto action=message.at("action").get<std::string>();bool ok=false;if(action=="center")ok=window_controller.center();else if(action=="minimize")ok=window_controller.minimize();else if(action=="maximize")ok=window_controller.maximize();else if(action=="toggleFullscreen"){save_window();auto changed=preferences;changed["windowMode"]=native::toggled_window_mode(window_controller.mode());const auto effective=window_for_menu(changed,menu&&menu->visible());ok=window_controller.apply(effective);if(ok){preferences=changed;native::save_settings(cache/"settings.json",preferences);}}else throw std::runtime_error("Unknown window action");if(!ok)throw std::runtime_error(window_controller.error());window_dirty=true;window_save_due=Clock::now()+std::chrono::milliseconds(500);}
+                else if(type=="window") {const auto action=message.at("action").get<std::string>();bool ok=false;if(action=="center")ok=window_controller.center();else if(action=="minimize")ok=window_controller.minimize();else if(action=="maximize")ok=window_controller.maximize();else if(action=="toggleFullscreen"){save_window();auto changed=preferences;changed["windowMode"]=native::toggled_window_mode(window_controller.mode());const auto effective=window_for_menu(changed,menu&&menu->visible());ok=window_controller.apply(effective);if(ok){preferences=changed;json_writer.write(cache/"settings.json",preferences);}}else throw std::runtime_error("Unknown window action");if(!ok)throw std::runtime_error(window_controller.error());window_dirty=true;window_save_due=Clock::now()+std::chrono::milliseconds(500);}
                 else if(type=="replays")refresh_replays();
                 else if(type=="ghost"){ghost_enabled=ghost_handle&&message.at("enabled").get<bool>();ghost_slots[0].enabled=ghost_enabled;}
                 else if(type=="ghostControl"){
@@ -1339,7 +1374,7 @@ int run(const Options &opt) {
                     else if(action=="seek") {const auto tick=message.at("tick").get<uint32_t>();if(tick>playback_info.at("totalTicks").get<uint32_t>())throw std::runtime_error("Replay tick outside run");replay_controls.pending=tick;}
                     else if(action=="stop")reset();
                 }
-                else if(type=="sensitivity") {preferences=native::patch_settings(preferences,{{"sensitivity",message.at("value")}});native::save_settings(cache/"settings.json",preferences);apply_preferences();}
+                else if(type=="sensitivity") {preferences=native::patch_settings(preferences,{{"sensitivity",message.at("value")}});json_writer.write(cache/"settings.json",preferences);apply_preferences();}
                 else if(type=="playerName") replay_player=native::replay_player_name(message.value("name",std::string()));
                 else if(type=="cosmetics") {
                     player_glow=native_render::parse_glow(message.value("playerGlow",nlohmann::json(nullptr)));
@@ -1425,6 +1460,7 @@ int run(const Options &opt) {
                 else if(type=="menuSnapshot" && smoke_snapshot) {smoke_pass=smoke_pass&&message.value("ok",false);running=false;}
             } catch(const std::exception &e) {error=e.what();std::cerr<<"Menu: "<<error<<'\n';chat.push(error,"","error",epoch_ms()/1000.);toast(error);}
         }
+        frame_diagnostics.mark(native::FrameDiagnostics::kMenu, SDL_GetTicksNS());
         prefetch.poll();
         if(prefetch.valid()&&prefetch.wait_for(std::chrono::seconds(0))==std::future_status::ready){
             try{auto result=prefetch.get();if(file_hash(result.bsp.string())==prefetch_sha)prefetch_done=prefetch_active;}
@@ -1518,6 +1554,7 @@ int run(const Options &opt) {
             const double elapsed = opt.frames ? step_dt : std::clamp(frame_seconds, 0.0, max_frame);
             accumulator += elapsed * (playback ? playback_speed : 1);
         }
+        frame_diagnostics.mark(native::FrameDiagnostics::kOther, SDL_GetTicksNS());
         uint64_t sim_ns = native::InputTimeline::tick_start_ns(now_ns, accumulator);
         const uint64_t tick_ns = uint64_t(step_dt * 1e9);
         input_timeline.begin_frame(input, simulation_active, now_ns);
@@ -1611,6 +1648,8 @@ int run(const Options &opt) {
             // Finish the recording on the exact native tick, before any further catch-up steps.
             if(!playback&&tick_run.status==2&&!recording_ended) {reset_input_timing();break;}
         }
+        frame_diagnostics.mark(native::FrameDiagnostics::kSimulation, SDL_GetTicksNS());
+        frame_diagnostics.input(input_timeline.queue());
         BhRunState run_state{};
         if(core) {
             if(playback||!zones.empty())require(bh_run_state(core.get(),&run_state),core.get(),"Reading native timer");
@@ -1645,7 +1684,7 @@ int run(const Options &opt) {
                             const auto old=backdrop_pbs.find(map_id);
                             if(old==backdrop_pbs.end()||!old->is_object()||run_state.seconds<old->value("seconds",std::numeric_limits<double>::infinity())){
                                 backdrop_pbs[map_id]={{"id",std::filesystem::path(record_path).filename().string()},{"seconds",run_state.seconds}};
-                                native::save_settings(cache/"backdrop-pbs.json",backdrop_pbs);
+                                json_writer.write(cache/"backdrop-pbs.json",backdrop_pbs);
                             }
                         }
                         run_event({{"type","finish"},{"track",run_state.track},{"replayBase64",base64(read_text(record_path))}});
@@ -1750,7 +1789,12 @@ int run(const Options &opt) {
                 preferences.at("strafeTrainer").get<bool>()&&!playback?feedback.strafe_reading:std::nullopt,
                 preferences.at("strafeTrainerHints").get<bool>(),&hud_layout,preferences.at("hudScale").get<float>(),&practice,preferences.at("practiceKeepVelocity").get<bool>(),gauntlet_line,gauntlet_delta,gauntlet_good,leave_hold.progress(epoch_ms()));
             if((!menu||!menu->visible())&&!opt.camera){
-                if(preferences.value("mouseDiagnostics",false)&&!playback){const auto &m=mouse_diagnostics.last;char label[220];std::snprintf(label,sizeof(label),"Mouse %.0f events/s | burst %llu | age %.2f/%.2f ms | pump max %.2f ms",m.events_per_second,static_cast<unsigned long long>(m.peak_burst),m.average_age_ms,m.max_age_ms,m.max_pump_ms);hud.overlay_begin(width,height,100);hud.overlay_rect(16,40,730,32,{.02f,.02f,.025f,.85f});hud.overlay_text(24,48,m.seconds?label:"Mouse diagnostics: move continuously for a sample",14,{1,1,1,1});hud.overlay_end(width,height);}
+                if(preferences.value("mouseDiagnostics",false)&&!playback){const auto &m=mouse_diagnostics.last;char label[220];std::snprintf(label,sizeof(label),"Mouse %.0f events/s | burst %llu | age %.2f/%.2f ms | pump max %.2f ms",m.events_per_second,static_cast<unsigned long long>(m.peak_burst),m.average_age_ms,m.max_age_ms,m.max_pump_ms);hud.overlay_begin(width,height,100);hud.overlay_rect(16,40,730,32,{.02f,.02f,.025f,.85f});hud.overlay_text(24,48,m.seconds?label:"Mouse diagnostics: move continuously for a sample",14,{1,1,1,1});
+                    char frame_line[320];
+                    native::format_frame_line(frame_diagnostics.last(), frame_line, sizeof(frame_line));
+                    hud.overlay_rect(16, 74, 1180, 32, {.02f, .02f, .025f, .85f});
+                    hud.overlay_text(24, 82, frame_line, 14, {1, 1, 1, 1});
+                    hud.overlay_end(width,height);}
                 if(playback&&!chat.active&&!video_capture&&!director_job)native::draw_replay_controls(hud,width,height,native::HudGeometry(width,height,100).scale,replay_controls,curr.tick,playback_info.value("totalTicks",0u),playback_info.at("settings").value("tickInterval",dt),playback_paused,playback_speed,replay_camera.mode);
                 if(chat.active||preferences.at("hud").get<bool>())hud.draw_chat_overlay(width,height,chat.visible(epoch_ms()/1000.),chat.input,chat.composition,chat.suggestions,chat.active,chat.scroll_offset(),preferences.at("hudScale").get<float>(),&chat,chat.viewport(epoch_ms()/1000.));
                 std::vector<std::string> panel;
@@ -1833,7 +1877,11 @@ int run(const Options &opt) {
         audio.pump();  // advances the music playlist; decoding cannot run on the audio thread
         if(opt.frames&&renderer&&(curr.tick>=opt.frames||(playback&&playback_paused&&curr.tick>=playback_info.value("totalTicks",0u)))&&!opt.screenshot.empty()) renderer->screenshot(opt.screenshot,width,height);
         const GLenum gl_error=gl.GetError(); if(gl_error!=GL_NO_ERROR) throw std::runtime_error("OpenGL error "+std::to_string(gl_error));
+        frame_diagnostics.mark(native::FrameDiagnostics::kRender, SDL_GetTicksNS());
         if(!SDL_GL_SwapWindow(window.get())) throw std::runtime_error(std::string("Swapping framebuffer failed: ")+SDL_GetError());
+        frame_diagnostics.mark(native::FrameDiagnostics::kSwap, SDL_GetTicksNS());
+        frame_pacer.after_swap(gl, limit_queued_frames && !opt.frames);
+        frame_diagnostics.mark(native::FrameDiagnostics::kGpuWait, SDL_GetTicksNS());
         // State first: the menu accepts a backdrop only for its current or
         // requested map, so it must already know a newly loaded map. Scripts
         // run in the order they are queued.
@@ -1862,7 +1910,12 @@ int run(const Options &opt) {
             const auto &m=mouse_diagnostics.last;
             const int sdl_version=SDL_GetVersion();
             const nlohmann::json mouse_state={{"active",mouse_diagnostics.active},{"seconds",m.seconds},{"eventsPerSecond",m.events_per_second},{"events",m.events},{"peakBurst",m.peak_burst},{"averageAgeMs",m.average_age_ms},{"maxAgeMs",m.max_age_ms},{"maxPumpMs",m.max_pump_ms},{"relative",SDL_GetWindowRelativeMouseMode(window.get())},{"systemScaling",SDL_GetHintBoolean(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE,false)},{"sdl",std::to_string(SDL_VERSIONNUM_MAJOR(sdl_version))+"."+std::to_string(SDL_VERSIONNUM_MINOR(sdl_version))+"."+std::to_string(SDL_VERSIONNUM_MICRO(sdl_version))}};
-            menu->evaluate_js("window.dispatchEvent(new CustomEvent('bunnyhop:mouse-diagnostics',{detail:"+mouse_state.dump()+"}))");
+            auto diagnostics_state = mouse_state;
+            const auto &stamps = input_timeline.stamps();
+            diagnostics_state.update(native::diagnostics_json(frame_diagnostics, stamps, input_timeline.timed()));
+            const std::string diagnostics_event = "new CustomEvent('bunnyhop:mouse-diagnostics',{detail:"
+                + diagnostics_state.dump() + "})";
+            menu->evaluate_js("window.dispatchEvent(" + diagnostics_event + ")");
             const auto update_state=updater.state().dump();if(update_state!=last_update){menu->evaluate_js("window.dispatchEvent(new CustomEvent('bunnyhop:update',{detail:"+update_state+"}))");last_update=update_state;}
             {   // Settings -> Game data
                 std::optional<std::string> picked;std::string pick_error;bool picking=false;
@@ -1882,6 +1935,7 @@ int run(const Options &opt) {
             menu->evaluate_js(backdrop_call);
             if(backdrop_log)std::cout<<"Native menu backdrop: "<<backdrop_source<<" "<<backdrop_shown<<" (live="<<backdrop_live<<")"<<std::endl;
         }
+        frame_diagnostics.mark(native::FrameDiagnostics::kMenu, SDL_GetTicksNS());
         const bool smoke_backdrop=opt.menu_home_smoke
             ? !renderer && backdrop && ((backdrop->status()==MenuBackdrop::Status::ready && !backdrop_shown.empty() && backdrop_shown==backdrop->map()) || backdrop->status()==MenuBackdrop::Status::failed)
             : renderer && !map_id.empty() && backdrop_shown==map_id && !gameplay_backdrop_due;
@@ -1939,6 +1993,7 @@ int run(const Options &opt) {
             SDL_SetWindowTitle(window.get(),title); title_time=now; title_frames=0;
         }
         if(opt.frames&&renderer&&(curr.tick>=opt.frames||(playback&&playback_paused&&curr.tick>=playback_info.value("totalTicks",0u)))) running=false;
+        frame_diagnostics.mark(native::FrameDiagnostics::kOther, SDL_GetTicksNS());
         if(!core&&backdrop_drawn&&!backdrop_still&&focused&&!download.valid()) {
             // The live home tour runs at up to ~60 fps, like the web's.
             const double spent=std::chrono::duration<double>(Clock::now()-now).count();
@@ -1948,8 +2003,10 @@ int run(const Options &opt) {
             const double target=1./preferences.at("fpsLimit").get<int>();const double spent=std::chrono::duration<double>(Clock::now()-now).count();
             if(spent<target)SDL_DelayNS(uint64_t((target-spent)*1e9));
         }
+        frame_diagnostics.mark(native::FrameDiagnostics::kSleep, SDL_GetTicksNS());
     }
     save_window();
+    frame_pacer.release(gl);
     if(core) bh_record_end(core.get());
     capture(false);
     std::cout << "Rendered " << frame << " frames; simulation tick " << curr.tick << "; position " << curr.position[0] << ' ' << curr.position[1] << ' ' << curr.position[2] << (renderer?"; exposure "+std::to_string(renderer->exposure()):std::string()) << '\n';

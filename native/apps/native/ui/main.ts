@@ -48,6 +48,7 @@ import { creditsPanel } from "./credits";
 import { homeScreen, watchMenuMotion, LAST_MAP } from "./home-menu";
 import { pauseScreen } from "./pause-menu";
 import { setGameInfo } from "../../web/src/feedback/state";
+import { latestMouseDiagnostics } from "./mouse-diagnostics";
 import { installMenuBackdrop, requestBackdrop, syncBackdrop } from "./menu-backdrop";
 import { gauntletResult, gauntletScreen, gauntletsScreen, leaveGauntletUrl, type GauntletScreens } from "../../web/src/ui/gauntlets";
 import { isAttemptId } from "../../web/src/gauntlet/state";
@@ -439,7 +440,10 @@ setGameInfo(()=>({inGame:!!state.map,client:"native",...(state.map?{map:state.ma
   // The game's own window, version and GPU (the modal would otherwise report the menu web view's).
   ...(state.client?{nativeVersion:state.client.version,nativeBuild:state.client.build,gpu:{renderer:state.client.gpu},
     ...(state.client.viewport[0]?{viewport:`${state.client.viewport[0]}x${state.client.viewport[1]}`}:{}),dpr:state.client.dpr}:{}),
-  nativeSettings:{sensitivity:state.settings.sensitivity,fov:state.settings.fov,vsync:state.settings.vsync,fpsLimit:state.settings.fpsLimit}}));
+  nativeSettings:{sensitivity:state.settings.sensitivity,fov:state.settings.fov,vsync:state.settings.vsync,fpsLimit:state.settings.fpsLimit,
+    limitQueuedFrames:state.settings.limitQueuedFrames},
+  // Mouse, frame-time and input-queue diagnostics, when the overlay has produced a sample.
+  ...(latestMouseDiagnostics()?{inputDiagnostics:latestMouseDiagnostics()}:{})}));
 initSocial();initDock();initCosmetics();installNowPlaying();installNativeUiAudio();
 installMenuBackdrop();
 watchMenuMotion();
