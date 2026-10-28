@@ -77,7 +77,7 @@ linuxTest("unsafe ELF build paths become relocatable, including transitive and d
     const exe = join(relocated, "bin/bunnyhop-native"), libs = join(relocated, "lib");
     expect(run([exe])).toBe("fixture=42\n"); // Direct launch, cwd outside package, no LD_LIBRARY_PATH.
     expect(verifyLinuxPackage(exe, libs)).toContain(join(libs, "libfixture-core.so.1"));
-    const check = [process.execPath, resolve(import.meta.dir, "release-check.ts"), "--package", relocated];
+    const check = [process.execPath, resolve(import.meta.dir, "release-check.ts"), "--package", relocated, "--skip-sdl-pin"];
     expect(JSON.parse(run(check)).valid).toBe(true);
     // The executable hash stays valid, but a tampered bundled library must fail.
     run(["patchelf", "--set-rpath", "/tmp/unsafe-builder-search", join(libs, "libfixture-plugin.so.1")]);

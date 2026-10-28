@@ -82,6 +82,16 @@ Substitute the actual platform path. Package checks validate integrity and
 closure; an interactive smoke test remains a separate action that opens windows.
 Do not describe a compile-only or headless run as physical desktop testing.
 
+## SDL version
+
+All three platforms build SDL3 from the commit in
+[`native/apps/native/packaging/sdl.json`](../native/apps/native/packaging/sdl.json), and
+`release-check.ts` rejects a package whose bundled SDL was built from anything else.
+The pin follows SDL's `release-3.4.x` maintenance branch until the next 3.4 tag, then moves to that tag.
+
+To update it: change the commit in `sdl.json`, read the SDL changes since the old commit for anything
+touching mouse, keyboard, focus or windows, and test input on a real Windows machine before tagging.
+
 ## Release workflow
 
 [Native release builds](https://github.com/2x74/bunnyhop-client/actions/workflows/native-release.yml)

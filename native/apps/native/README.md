@@ -47,9 +47,14 @@ From this repository’s `native/` directory:
 
 ```sh
 bun install --frozen-lockfile
+bun apps/native/packaging/sdl.ts   # optional: the SDL3 commit releases use
 bun apps/native/build.ts
 apps/native/build/bunnyhop-native
 ```
+
+Releases build SDL3 from the commit in `packaging/sdl.json` on every platform.
+`packaging/sdl.ts` builds it into `target/native-deps/sdl`, and `build.ts` uses it when present;
+otherwise any installed SDL3 3.4 or newer works for development.
 
 The build produces `target/native-menu/menu.html` and a release manifest bound
 to the executable, menu and canonical WASM. The first build downloads the public
