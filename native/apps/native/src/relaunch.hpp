@@ -20,18 +20,36 @@ extern char **environ;
 #endif
 
 namespace native {
-inline bool relaunch(std::filesystem::path exe){
+inline bool relaunch(std::filesystem::path exe) {
 #ifdef _WIN32
-    std::wstring command=L"\""+exe.wstring()+L"\"";
-    STARTUPINFOW startup{};startup.cb=sizeof startup;PROCESS_INFORMATION process{};
-    const auto directory=exe.parent_path().wstring();
-    if(!CreateProcessW(exe.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NEW_CONSOLE,nullptr,directory.c_str(),&startup,&process))return false;
-    CloseHandle(process.hThread);CloseHandle(process.hProcess);return true;
+    std::wstring command = L"\"" + exe.wstring() + L"\"";
+    STARTUPINFOW startup{};
+    startup.cb = sizeof startup;
+    PROCESS_INFORMATION process{};
+    const auto directory = exe.parent_path().wstring();
+    if (!CreateProcessW(
+                exe.c_str(),
+                command.data(),
+                nullptr,
+                nullptr,
+                FALSE,
+                CREATE_NEW_CONSOLE,
+                nullptr,
+                directory.c_str(),
+                &startup,
+                &process
+        ))
+        return false;
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return true;
 #else
     // An AppImage's /proc/self/exe lives in a mount that goes away on exit.
-    if(const char *image=std::getenv("APPIMAGE");image&&*image)exe=image;
-    const std::string path=exe.string();char *argv[]={const_cast<char*>(path.c_str()),nullptr};pid_t pid=0;
-    return posix_spawn(&pid,path.c_str(),nullptr,nullptr,argv,environ)==0;
+    if (const char *image = std::getenv("APPIMAGE"); image && *image) exe = image;
+    const std::string path = exe.string();
+    char *argv[] = {const_cast<char *>(path.c_str()), nullptr};
+    pid_t pid = 0;
+    return posix_spawn(&pid, path.c_str(), nullptr, nullptr, argv, environ) == 0;
 #endif
 }
-}
+}  // namespace native

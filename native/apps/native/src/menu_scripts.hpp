@@ -9,9 +9,8 @@ namespace native {
 // being dropped. Only the latest request is kept.
 class PendingMenuScript {
 public:
-    void open(MenuWebView* menu, bool ready, const std::string& script) {
-        if (!menu)
-            return;
+    void open(MenuWebView *menu, bool ready, const std::string &script) {
+        if (!menu) return;
         if (ready)
             menu->evaluate_js(script);
         else
@@ -19,9 +18,8 @@ public:
     }
 
     // The menu document said it is ready.
-    void ready(MenuWebView* menu) {
-        if (!menu || script_.empty())
-            return;
+    void ready(MenuWebView *menu) {
+        if (!menu || script_.empty()) return;
         menu->evaluate_js(script_);
         script_.clear();
     }
@@ -31,10 +29,9 @@ private:
 };
 
 // What the HUD says when a menu screen is asked for and there is no menu.
-inline std::string menu_unavailable_text(const std::string& failure) {
-    if (failure.empty())
-        return "Menus are off in this launch (--no-menu).";
+inline std::string menu_unavailable_text(const std::string &failure) {
+    if (failure.empty()) return "Menus are off in this launch (--no-menu).";
     return "Menus couldn't start: " + failure;
 }
 
-}
+}  // namespace native

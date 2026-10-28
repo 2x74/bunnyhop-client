@@ -22,4 +22,4 @@ inline std::optional<RestartNames> restart_names(std::string_view map, uint32_t 
     }
     return std::nullopt;
 }
-} // namespace native
+}  // namespace native

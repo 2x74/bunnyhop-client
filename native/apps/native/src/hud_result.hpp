@@ -5,12 +5,14 @@
 
 namespace native {
 enum class ResultStamp { pending, finished, personal_best, world_record, rejected };
+
 struct ResultReward {
     HudLabel<96> title;
     HudLabel<128> detail;
 };
+
 class HudResult {
-  public:
+public:
     uint64_t generation = ~uint64_t(0);
     ResultStamp stamp = ResultStamp::finished;
     double started = -100;
@@ -19,12 +21,10 @@ class HudResult {
     std::array<ResultReward, 12> rewards;
     size_t reward_count = 0;
 
-    void reset() {
-        started = -100;
-    }
+    void reset() { started = -100; }
+
     void finish(uint64_t attempt, double time, double now, std::optional<double> pb, bool pending) {
-        if (generation == attempt && started > -100)
-            return;
+        if (generation == attempt && started > -100) return;
         generation = attempt;
         started = now;
         seconds = time;
@@ -32,9 +32,9 @@ class HudResult {
         stamp = pending ? ResultStamp::pending : ResultStamp::finished;
         reward_count = 0;
     }
-    bool visible(double now) const {
-        return now >= started && now - started < 14;
-    }
+
+    bool visible(double now) const { return now >= started && now - started < 14; }
+
     void submission_rewards(const nlohmann::json &message) {
         reward_count = 0;
         const auto xp = message.find("xp");
@@ -44,8 +44,8 @@ class HudResult {
             reward.detail.assign("Run verified");
         }
         const auto level = message.find("level");
-        if (level != message.end() && level->is_object() && level->contains("level") &&
-            (*level)["level"].is_number_unsigned()) {
+        if (level != message.end() && level->is_object() && level->contains("level")
+            && (*level)["level"].is_number_unsigned()) {
             auto &reward = rewards[reward_count++];
             reward.title.format("Level %u", (*level)["level"].get<unsigned>());
             reward.detail.assign("Progress updated");
@@ -53,19 +53,17 @@ class HudResult {
         const auto achievements = message.find("achievements");
         if (achievements != message.end() && achievements->is_array()) {
             for (const auto &achievement : *achievements) {
-                if (reward_count == rewards.size())
-                    break;
-                if (!achievement.is_string())
-                    continue;
+                if (reward_count == rewards.size()) break;
+                if (!achievement.is_string()) continue;
                 auto &reward = rewards[reward_count++];
                 reward.title.assign("Achievement unlocked");
                 reward.detail.assign(achievement.get_ref<const std::string &>());
             }
         }
     }
+
     void service(const nlohmann::json &message, uint64_t attempt) {
-        if (generation != attempt || message.value("generation", ~uint64_t(0)) != attempt)
-            return;
+        if (generation != attempt || message.value("generation", ~uint64_t(0)) != attempt) return;
         const auto status = json_text(message, "status");
         if (status == "rejected" || status == "error")
             stamp = ResultStamp::rejected;
@@ -77,18 +75,15 @@ class HudResult {
                     : (event == "pb" || json_flag(message, "pb")) ? ResultStamp::personal_best
                                                                   : ResultStamp::finished;
         }
-        if (status == "verified" && !message.contains("rewards") &&
-            (message.contains("xp") || message.contains("level") || message.contains("achievements")))
+        if (status == "verified" && !message.contains("rewards")
+            && (message.contains("xp") || message.contains("level") || message.contains("achievements")))
             submission_rewards(message);
         const auto incoming = message.find("rewards");
-        if (incoming == message.end() || !incoming->is_array())
-            return;
+        if (incoming == message.end() || !incoming->is_array()) return;
         reward_count = 0;
         for (const auto &reward : *incoming) {
-            if (reward_count == rewards.size())
-                break;
-            if (!reward.is_object())
-                continue;
+            if (reward_count == rewards.size()) break;
+            if (!reward.is_object()) continue;
             auto &stored = rewards[reward_count++];
             stored.title.assign(json_text(reward, "title", 95));
             stored.detail.assign(json_text(reward, "detail", 127));
@@ -98,24 +93,23 @@ class HudResult {
 
 inline std::string_view result_stamp_text(ResultStamp stamp) {
     switch (stamp) {
-    case ResultStamp::pending:
-        return "Checking run";
-    case ResultStamp::personal_best:
-        return "NEW PB";
-    case ResultStamp::world_record:
-        return "WORLD RECORD";
-    case ResultStamp::rejected:
-        return "Run not ranked";
-    case ResultStamp::finished:
-        return "FINISHED";
+        case ResultStamp::pending:
+            return "Checking run";
+        case ResultStamp::personal_best:
+            return "NEW PB";
+        case ResultStamp::world_record:
+            return "WORLD RECORD";
+        case ResultStamp::rejected:
+            return "Run not ranked";
+        case ResultStamp::finished:
+            return "FINISHED";
     }
     return "";
 }
 
 template <class Hud>
 void draw_result(Hud &hud, int width, int height, float percent, const HudResult &result, double now) {
-    if (!result.visible(now))
-        return;
+    if (!result.visible(now)) return;
     const HudGeometry geometry(width, height, percent);
     const float age = float(now - result.started);
     const float flight = std::clamp(age / .45f, 0.f, 1.f);
@@ -123,8 +117,7 @@ void draw_result(Hud &hud, int width, int height, float percent, const HudResult
     const float x = geometry.width / 2;
     constexpr NameColor cream = {.94f, .91f, .86f, 1};
     NameColor gold = {1, .77f, .32f, 1};
-    if (result.stamp == ResultStamp::pending)
-        gold[3] = .65f + .25f * std::sin(age * 3);
+    if (result.stamp == ResultStamp::pending) gold[3] = .65f + .25f * std::sin(age * 3);
     hud.overlay_begin(width, height, percent);
     hud.overlay_rect(x - 215, y - 18, 430, result.reward_count ? 208 : 155, {.025f, .027f, .04f, .92f});
     const bool celebrate = result.stamp == ResultStamp::personal_best || result.stamp == ResultStamp::world_record;
@@ -155,4 +148,4 @@ void draw_result(Hud &hud, int width, int height, float percent, const HudResult
     }
     hud.overlay_end(width, height);
 }
-} // namespace native
+}  // namespace native

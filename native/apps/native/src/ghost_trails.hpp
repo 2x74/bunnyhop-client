@@ -11,13 +11,17 @@ namespace native_render {
 inline constexpr double ghost_trail_seconds = 2.5;
 inline constexpr unsigned ghost_trail_step = 2;
 inline constexpr size_t ghost_trail_capacity = 399;
+
 inline bool valid_ghost_position(const BhGhostFrame &frame) {
-    return std::all_of(std::begin(frame.position), std::end(frame.position),
-                       [](float value) { return std::isfinite(value); });
+    return std::all_of(std::begin(frame.position), std::end(frame.position), [](float value) {
+        return std::isfinite(value);
+    });
 }
+
 inline Vec3 ghost_feet(const BhGhostFrame &frame, float height = 6) {
     return {frame.position[0], frame.position[1], frame.position[2] + height};
 }
+
 inline bool positional_teleport(const BhGhostFrame &a, const BhGhostFrame &b) {
     // Positional-import fallback from ghost-route-data.ts. The ABI has no simulation teleport event bit.
     float distance = 0;
@@ -26,10 +30,12 @@ inline bool positional_teleport(const BhGhostFrame &a, const BhGhostFrame &b) {
     }
     return distance > 200;
 }
+
 struct GhostOptions {
     bool pb = true, wr = true, custom = true, trail = true, route = false, show = true;
     GhostSource route_source = GhostSource::none;
     bool route_path = false;
+
     void read(const nlohmann::json &settings) {
         show = settings.value("showGhost", true);
         pb = settings.value("ghostPb", true);
@@ -41,14 +47,17 @@ struct GhostOptions {
         route_source = source == "auto" ? GhostSource::none : ghost_source(source);
         route_path = settings.value("ghostRouteMode", std::string("jumps")) == "path";
     }
+
     bool visible(GhostSource source) const {
         return show && (source == GhostSource::pb ? pb : source == GhostSource::wr ? wr : custom);
     }
 };
+
 struct GhostPath {
     struct Segment {
         Vec3 from, to;
     };
+
     std::vector<BhGhostFrame> frames;
     std::vector<uint8_t> teleports;
     std::vector<Segment> jump_links;
@@ -69,9 +78,9 @@ struct GhostPath {
         const size_t last = std::min(size_t(end), frames.size() - 1);
         for (size_t tick = start + 1; tick <= last; ++tick) {
             const bool cut =
-                teleports[tick] || !valid_ghost_position(frames[tick]) || !valid_ghost_position(frames[tick - 1]);
-            const bool jumped = (frames[tick - 1].flags & 2) && !(frames[tick].flags & 2) &&
-                                frames[tick].position[2] > frames[tick - 1].position[2];
+                    teleports[tick] || !valid_ghost_position(frames[tick]) || !valid_ghost_position(frames[tick - 1]);
+            const bool jumped = (frames[tick - 1].flags & 2) && !(frames[tick].flags & 2)
+                                && frames[tick].position[2] > frames[tick - 1].position[2];
             if (cut || jumped) {
                 if (tick - 1 > anchor) {
                     jump_links.push_back({ghost_feet(frames[anchor], 2), ghost_feet(frames[tick - 1], 2)});
@@ -86,6 +95,7 @@ struct GhostPath {
             jump_links.push_back({ghost_feet(frames[anchor], 2), ghost_feet(frames[last], 2)});
         }
     }
+
     void load(BhContext *core, uint32_t handle, const nlohmann::json &info, GhostSource kind) {
         constexpr uint32_t maximum_ticks = 180000;
         const uint32_t total = info.value("totalTicks", 0u);
@@ -94,10 +104,8 @@ struct GhostPath {
         }
         source = kind == GhostSource::none ? GhostSource::custom : kind;
         track = info.value("track", 0u);
-        if (info.contains("player") && info.at("player").is_string())
-            name = info.at("player");
-        if (info.contains("packedLoadout") && info.at("packedLoadout").is_string())
-            loadout = info.at("packedLoadout");
+        if (info.contains("player") && info.at("player").is_string()) name = info.at("player");
+        if (info.contains("packedLoadout") && info.at("packedLoadout").is_string()) loadout = info.at("packedLoadout");
         style = info.value("style", std::string("autohop"));
         start = std::min(info.value("startTick", 0u), total);
         end = std::min(info.value("endTick", total), total);
@@ -120,11 +128,12 @@ struct GhostPath {
         build_route();
     }
 };
+
 class GhostTrails {
     std::array<Vec3, ghost_trail_capacity> points_{};
     size_t count_ = 0;
 
-  public:
+public:
     // Recorded frames make pause, scrubbing and low presentation FPS produce the same ribbon.
     std::span<const Vec3> recorded(const GhostPath &path, double tick) {
         count_ = 0;
@@ -159,12 +168,12 @@ class GhostTrails {
         }
         return {points_.data(), count_};
     }
-    void clear() {
-        count_ = 0;
-    }
+
+    void clear() { count_ = 0; }
 };
-inline std::array<float, 4> trail_color(const std::array<std::array<float, 3>, 2> &colors, float progress,
-                                        float opacity, float distance) {
+
+inline std::array<float, 4>
+trail_color(const std::array<std::array<float, 3>, 2> &colors, float progress, float opacity, float distance) {
     const float fraction = std::clamp((.92f - progress) * 2.4f, 0.f, 1.f);
     const float mix = fraction * fraction * (3 - 2 * fraction);
     const float near = std::clamp((distance - 40) / 160, 0.f, 1.f);
@@ -175,7 +184,8 @@ inline std::array<float, 4> trail_color(const std::array<std::array<float, 3>, 2
     result[3] = std::min(1.f, opacity * 1.2f) * progress * progress * near * near;
     return result;
 }
+
 inline int route_priority(GhostSource source) {
     return source == GhostSource::custom ? 0 : source == GhostSource::pb ? 1 : 2;
 }
-}
+}  // namespace native_render

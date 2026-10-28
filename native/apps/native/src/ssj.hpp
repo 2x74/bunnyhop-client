@@ -41,8 +41,13 @@ inline constexpr float good_gain = 80.0f;
 /** JHUD colours (Settings -> Jump stats colours, on by default), by the gain the
  *  line shows: red 0-59%, orange 60-69%, green 70-79%, blue 80-89%, white 90%+. */
 enum class GainBand { red, orange, green, blue, white };
+
 inline GainBand gain_band(float gain) {
-    return gain < 60 ? GainBand::red : gain < 70 ? GainBand::orange : gain < 80 ? GainBand::green : gain < 90 ? GainBand::blue : GainBand::white;
+    return gain < 60   ? GainBand::red
+           : gain < 70 ? GainBand::orange
+           : gain < 80 ? GainBand::green
+           : gain < 90 ? GainBand::blue
+                       : GainBand::white;
 }
 
 // Source IN_* bits. The same values native_input.hpp uses.
@@ -106,6 +111,7 @@ inline float len2(float x, float y) {
     const float sum = x * x + y * y;
     return float(std::sqrt(double(sum)));
 }
+
 /** SourcePawn RoundToFloor(x * 100.0 + 0.5) / 100.0. */
 inline float round2(float v) {
     const float biased = v * 100.0f + 0.5f;
@@ -131,6 +137,7 @@ public:
 
     /** N for "every Nth jump" (at least 2; 1 would just be "every jump"). Changing it starts over. */
     unsigned interval() const { return interval_; }
+
     void set_interval(unsigned n) {
         n = std::max(2u, n);
         if (n == interval_) return;
@@ -179,6 +186,7 @@ private:
         jump = 0;
         clear_window();
     }
+
     void clear_window() {
         strafe_ticks_ = synced_ticks_ = 0;
         raw_gain_ = trajectory_ = dx_ = dy_ = 0;
@@ -222,8 +230,8 @@ private:
         if (ssj_shows(mode_, n, interval_)) report = build(speed, z, time);
         // What the next report covers: every jump in "every", from jump 6 on in "6th" (only 6 is
         // shown), from each Nth jump in "every Nth".
-        if ((mode_ == SsjMode::sixth && n >= 6) || mode_ == SsjMode::every ||
-            (mode_ == SsjMode::every_nth && n % interval_ == 0)) {
+        if ((mode_ == SsjMode::sixth && n >= 6) || mode_ == SsjMode::every
+            || (mode_ == SsjMode::every_nth && n % interval_ == 0)) {
             clear_window();
             old_speed_ = speed;
             old_height_ = z;
@@ -283,7 +291,10 @@ inline std::string trunc1(float v) {
     std::snprintf(buffer, sizeof(buffer), "%.1f", std::trunc(double(v) * 10.0) / 10.0);
     return buffer;
 }
-inline std::string signed_value(int v) { return (v > 0 ? "+" : "") + std::to_string(v); }
+
+inline std::string signed_value(int v) {
+    return (v > 0 ? "+" : "") + std::to_string(v);
+}
 }  // namespace ssj_detail
 
 /**
@@ -293,7 +304,10 @@ inline std::string signed_value(int v) { return (v > 0 ? "+" : "") + std::to_str
 inline std::string ssj_text(const SsjReport &r, const SsjFields &fields) {
     static const std::string separator = " \xC2\xB7 ";  // " · "
     std::string out = "Jump " + std::to_string(r.jump);
-    auto add = [&out](const std::string &item) { out += separator; out += item; };
+    auto add = [&out](const std::string &item) {
+        out += separator;
+        out += item;
+    };
     if (fields.speed) {
         std::string item = std::to_string(r.speed) + " u/s";
         if (fields.diff && r.diff) item += " (" + ssj_detail::signed_value(*r.diff) + ")";

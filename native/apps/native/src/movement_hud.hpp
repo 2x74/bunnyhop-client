@@ -19,19 +19,23 @@ struct TrainerAppearance {
     float height = 1;
     float dim_below = 0;
 };
+
 inline Json trainer_preset(std::string_view preset) {
     const bool beginner = preset == "beginner";
     const bool strict = preset == "strict";
-    return {{"hudStrafeTrainerStyle", beginner ? "detailed"
-                                      : strict ? "minimal"
-                                               : "classic"},
+    return {{"hudStrafeTrainerStyle",
+             beginner ? "detailed"
+             : strict ? "minimal"
+                      : "classic"},
             {"hudStrafeTrainerFollow", beginner || strict},
-            {"strafeTrainerSmoothing", beginner ? 12
-                                       : strict ? 3
-                                                : 8},
-            {"hudStrafeTrainerZone", beginner ? 20
-                                     : strict ? 5
-                                              : 10},
+            {"strafeTrainerSmoothing",
+             beginner ? 12
+             : strict ? 3
+                      : 8},
+            {"hudStrafeTrainerZone",
+             beginner ? 20
+             : strict ? 5
+                      : 10},
             {"strafeTrainerHints", beginner},
             {"hudStrafeTrainerShowPace", true}};
 }
@@ -115,8 +119,9 @@ struct HudPreferences {
         result.keys_opacity = settings.at("hudKeysOpacity");
         result.keys_pressed = name_color(settings.at("hudKeysPressed").get<std::string>());
         result.keys_idle = name_color(settings.at("hudKeysIdle").get<std::string>());
-        result.keys_rows = {settings.at("hudKeysRowsWasd"), settings.at("hudKeysRowsActions"),
-                            settings.at("hudKeysRowsMouse")};
+        result.keys_rows = {
+                settings.at("hudKeysRowsWasd"), settings.at("hudKeysRowsActions"), settings.at("hudKeysRowsMouse")
+        };
         constexpr std::array<const char *, 6> actions = {"forward", "left", "back", "right", "duck", "jump"};
         for (size_t i = 0; i < actions.size(); ++i) {
             const auto &codes = settings.at("binds").at(actions[i]);
@@ -174,10 +179,9 @@ struct HudPreferences {
     }
 };
 
-inline std::optional<double> trainer_jump_sound(const HudPreferences &prefs, const BhState &state,
-                                                const std::optional<StrafeReading> &reading) {
-    if (!prefs.trainer_enabled || !prefs.trainer_sound || !(state.events & jump) || !reading)
-        return std::nullopt;
+inline std::optional<double>
+trainer_jump_sound(const HudPreferences &prefs, const BhState &state, const std::optional<StrafeReading> &reading) {
+    if (!prefs.trainer_enabled || !prefs.trainer_sound || !(state.events & jump) || !reading) return std::nullopt;
     const float error = std::abs(reading->percent - 100);
     constexpr double on_pace_pitch = 1.25;
     constexpr double near_pace_pitch = 1;
@@ -192,6 +196,7 @@ struct OffsetReport {
     bool overlap = false;
     bool gap = false;
 };
+
 class OffsetTracker {
     int64_t tick_ = -1;
     float yaw_ = 0;
@@ -202,22 +207,19 @@ class OffsetTracker {
     bool overlap_ = false;
     bool gap_ = false;
 
-  public:
-    void reset() {
-        *this = {};
-    }
+public:
+    void reset() { *this = {}; }
+
     std::optional<OffsetReport> feed(const BhCmd &cmd, const BhState &state, std::string_view style) {
         const bool manual = style == "autohop" || style == "legit" || style == "scroll" || style == "hsw";
         const bool continuous = int64_t(state.tick) == tick_ + 1;
         const float previous_yaw = yaw_;
-        const bool valid = continuous && manual && !state.grounded && !state.on_ladder && !(state.events & 9) &&
-                           std::isfinite(cmd.yaw);
-        if (!valid)
-            reset();
+        const bool valid = continuous && manual && !state.grounded && !state.on_ladder && !(state.events & 9)
+                           && std::isfinite(cmd.yaw);
+        if (!valid) reset();
         tick_ = state.tick;
         yaw_ = cmd.yaw;
-        if (!valid)
-            return std::nullopt;
+        if (!valid) return std::nullopt;
         const int side = (cmd.side > 0) - (cmd.side < 0);
         const float delta = std::remainder(cmd.yaw - previous_yaw, 360.f);
         const int turn = (delta < 0) - (delta > 0);
@@ -225,20 +227,13 @@ class OffsetTracker {
             overlap_ = true;
         else if (!side)
             gap_ = true;
-        if (side && side_ && side != side_)
-            key_at_ = {{tick_, side}};
-        if (turn && turn_ && turn != turn_)
-            turn_at_ = {{tick_, turn}};
-        if (side)
-            side_ = side;
-        if (turn)
-            turn_ = turn;
-        if (key_at_ && tick_ - key_at_->first >= 20)
-            key_at_.reset();
-        if (turn_at_ && tick_ - turn_at_->first >= 20)
-            turn_at_.reset();
-        if (!key_at_ || !turn_at_ || key_at_->second != turn_at_->second)
-            return std::nullopt;
+        if (side && side_ && side != side_) key_at_ = {{tick_, side}};
+        if (turn && turn_ && turn != turn_) turn_at_ = {{tick_, turn}};
+        if (side) side_ = side;
+        if (turn) turn_ = turn;
+        if (key_at_ && tick_ - key_at_->first >= 20) key_at_.reset();
+        if (turn_at_ && tick_ - turn_at_->first >= 20) turn_at_.reset();
+        if (!key_at_ || !turn_at_ || key_at_->second != turn_at_->second) return std::nullopt;
         OffsetReport result{int(key_at_->first - turn_at_->first), overlap_, gap_};
         key_at_.reset();
         turn_at_.reset();
@@ -251,19 +246,16 @@ class OffsetTracker {
 class FirstJumpTracker {
     bool reported_ = false;
 
-  public:
-    void reset() {
-        reported_ = false;
-    }
+public:
+    void reset() { reported_ = false; }
+
     std::optional<unsigned> feed(bool jumped, const BhRunState &run, uint32_t tick, bool broken) {
-        if (run.jumps == 0)
-            reset();
+        if (run.jumps == 0) reset();
         if (broken) {
             reported_ = true;
             return std::nullopt;
         }
-        if (reported_ || !jumped || run.jumps != 1 || (run.status != 1 && !run.in_start))
-            return std::nullopt;
+        if (reported_ || !jumped || run.jumps != 1 || (run.status != 1 && !run.in_start)) return std::nullopt;
         reported_ = true;
         return run.status == 1 ? tick - std::min(tick, run.start_tick) : 0;
     }
@@ -272,10 +264,10 @@ class FirstJumpTracker {
 class AutoRestart {
     uint64_t fired_ = ~uint64_t(0);
 
-  public:
+public:
     bool check(uint64_t attempt, const BhRunState &run, std::optional<double> target, bool blocked) {
-        if (attempt == fired_ || run.status != 1 || blocked || !target || !std::isfinite(*target) || *target <= 0 ||
-            std::round(run.seconds * 1000) <= std::round(*target * 1000))
+        if (attempt == fired_ || run.status != 1 || blocked || !target || !std::isfinite(*target) || *target <= 0
+            || std::round(run.seconds * 1000) <= std::round(*target * 1000))
             return false;
         fired_ = attempt;
         return true;
@@ -289,7 +281,7 @@ class MovementHud {
     uint32_t epoch_ = ~uint32_t(0);
     bool was_in_start_ = false;
 
-  public:
+public:
     HudLabel<> start_pre;
     HudLabel<> offset;
     HudLabel<> first_jump;
@@ -299,9 +291,8 @@ class MovementHud {
     bool new_first = false;
     bool new_long_jump = false;
 
-    void reset() {
-        *this = {};
-    }
+    void reset() { *this = {}; }
+
     void feed(const BhJumpObservation *observation, const BhRunState &run, double dt, const std::string &style) {
         if (!observation) {
             offsets_.reset();
@@ -323,30 +314,39 @@ class MovementHud {
         }
         was_in_start_ = run.in_start;
         if (const auto reading = offsets_.feed(observation->command, state, style)) {
-            offset.format("Offset %+d (%s%s)", reading->ticks,
-                          reading->ticks < 0   ? "key early"
-                          : reading->ticks > 0 ? "key late"
-                                               : "same tick",
-                          reading->overlap ? ", overlap"
-                          : reading->gap   ? ", gap"
-                                           : "");
+            offset.format(
+                    "Offset %+d (%s%s)",
+                    reading->ticks,
+                    reading->ticks < 0   ? "key early"
+                    : reading->ticks > 0 ? "key late"
+                                         : "same tick",
+                    reading->overlap ? ", overlap"
+                    : reading->gap   ? ", gap"
+                                     : ""
+            );
         }
         if (const auto ticks = first_.feed(state.events & jump, run, state.tick, state.events & 9)) {
             first_jump.format("FJT %u tick%s (%.0f ms)", *ticks, *ticks == 1 ? "" : "s", *ticks * dt * 1000);
             new_first = true;
         }
         const auto report =
-            longjump_.feed(observation->pre, state, observation->command, observation->valid == 1, dt, style);
+                longjump_.feed(observation->pre, state, observation->command, observation->valid == 1, dt, style);
         if (report) {
-            long_jump.format("%s %.2f%s", report->standing ? "LJ" : "BH", report->distance,
-                             report->failed ? " fail" : "");
-            long_jump_details.format("%.0f pre | %.0f max | %zu str | %.0f%% sync", report->pre, report->max,
-                                     report->strafes.size(), report->sync);
+            long_jump.format(
+                    "%s %.2f%s", report->standing ? "LJ" : "BH", report->distance, report->failed ? " fail" : ""
+            );
+            long_jump_details.format(
+                    "%.0f pre | %.0f max | %zu str | %.0f%% sync",
+                    report->pre,
+                    report->max,
+                    report->strafes.size(),
+                    report->sync
+            );
             new_long_jump = true;
         }
     }
 };
-} // namespace native
+}  // namespace native
 
 namespace native {
 inline Json movement_stat_patch(const Json &settings, const Json &message) {
@@ -355,16 +355,19 @@ inline Json movement_stat_patch(const Json &settings, const Json &message) {
                      : stat == "fjt"   ? "firstJump"
                      : stat == "lj"    ? "longJump"
                                        : nullptr;
-    if (!id)
-        throw std::runtime_error("Unknown movement stat");
+    if (!id) throw std::runtime_error("Unknown movement stat");
     auto layout = settings.at("hudLayoutWeb");
-    Json place = layout.value(id, Json{{"a", 4},
-                                       {"x", 0},
-                                       {"y", stat == "lj"    ? -.185
-                                             : stat == "fjt" ? -.104
-                                                             : -.13},
-                                       {"s", stat == "lj" ? 1.0 : .85},
-                                       {"on", false}});
+    Json place = layout.value(
+            id,
+            Json{{"a", 4},
+                 {"x", 0},
+                 {"y",
+                  stat == "lj"    ? -.185
+                  : stat == "fjt" ? -.104
+                                  : -.13},
+                 {"s", stat == "lj" ? 1.0 : .85},
+                 {"on", false}}
+    );
     const char *visible = place.contains("a") ? "on" : "visible";
     if (message.contains("on") && !message["on"].is_boolean())
         throw std::runtime_error("Movement stat visibility must be boolean");
@@ -372,8 +375,7 @@ inline Json movement_stat_patch(const Json &settings, const Json &message) {
     place[visible] = on;
     layout[id] = std::move(place);
     Json patch = {{"hudLayoutWeb", std::move(layout)}};
-    if (stat == "lj")
-        patch["hudMovementLj"] = on;
+    if (stat == "lj") patch["hudMovementLj"] = on;
     return patch;
 }
 
@@ -401,16 +403,20 @@ struct HudExtras {
     HudLabel<128> ghost_map;
     HudLabel<32> ghost_style;
     unsigned ghost_track = ~0u;
-    std::optional<double> ghost_target(std::string_view map, std::string_view style, unsigned track,
-                                       bool enabled) const {
+
+    std::optional<double>
+    ghost_target(std::string_view map, std::string_view style, unsigned track, bool enabled) const {
         return enabled && ghost_map.view() == map && ghost_style.view() == style && ghost_track == track ? ghost_seconds
                                                                                                          : std::nullopt;
     }
+
     HudLabel<96> ghost_delta;
     uint32_t ghost_start = 0, ghost_end = 0, ghost_match = 0, ghost_sample_tick = ~0u;
     double ghost_interval = legacy_tick_seconds;
-    void ghost_progress(std::span<const BhGhostFrame> frames, const BhState &state, const BhRunState &run,
-                        const BhCmd *command) {
+
+    void ghost_progress(
+            std::span<const BhGhostFrame> frames, const BhState &state, const BhRunState &run, const BhCmd *command
+    ) {
         have_ghost = command != nullptr;
         ghost_buttons = command ? command->buttons : 0;
         if (!command || !run.status || frames.empty()) {
@@ -419,24 +425,23 @@ struct HudExtras {
             ghost_sample_tick = ~0u;
             return;
         }
-        if (state.tick == ghost_sample_tick)
-            return;
+        if (state.tick == ghost_sample_tick) return;
         if (run.status == 2 && ghost_seconds) {
             ghost_delta.format("%+.3fs", run.seconds - *ghost_seconds);
             ghost_sample_tick = state.tick;
             return;
         }
         constexpr uint32_t sample_interval_ticks = 4;
-        if (ghost_sample_tick != ~0u && state.tick >= ghost_sample_tick &&
-            state.tick - ghost_sample_tick < sample_interval_ticks)
+        if (ghost_sample_tick != ~0u && state.tick >= ghost_sample_tick
+            && state.tick - ghost_sample_tick < sample_interval_ticks)
             return;
-        if (state.tick < ghost_sample_tick)
-            ghost_match = ghost_start;
+        if (state.tick < ghost_sample_tick) ghost_match = ghost_start;
         ghost_sample_tick = state.tick;
         const uint32_t end = std::min(ghost_end, uint32_t(frames.size() - 1));
         constexpr uint32_t search_back_ticks = 300, search_forward_ticks = 600;
         constexpr float match_radius_units = 128;
-        const uint32_t low = std::max(ghost_start, ghost_match > search_back_ticks ? ghost_match - search_back_ticks : 0);
+        const uint32_t low =
+                std::max(ghost_start, ghost_match > search_back_ticks ? ghost_match - search_back_ticks : 0);
         const uint32_t high = std::min(end, ghost_match + search_forward_ticks);
         float distance = match_radius_units * match_radius_units;
         std::optional<uint32_t> nearest;
@@ -456,13 +461,14 @@ struct HudExtras {
             return;
         }
         ghost_match = *nearest;
-        float fraction = *nearest < end
-                             ? ghost_segment_fraction(state.position, frames[*nearest], frames[*nearest + 1]) : 0;
+        float fraction =
+                *nearest < end ? ghost_segment_fraction(state.position, frames[*nearest], frames[*nearest + 1]) : 0;
         if (!fraction && *nearest > ghost_start)
             fraction = -ghost_segment_fraction(state.position, frames[*nearest], frames[*nearest - 1]);
         const double ghost_elapsed = (*nearest + double(fraction) - ghost_start) * ghost_interval;
         ghost_delta.format("%+.3fs", run.seconds - ghost_elapsed);
     }
+
     void leaderboard(unsigned rank, std::optional<double> top = std::nullopt) {
         if (!rank)
             place.assign("");
@@ -471,11 +477,11 @@ struct HudExtras {
         else
             place.format("#%u", rank);
     }
+
     void ghost(const Json &info) {
         ghost_name.assign(info.is_object() ? json_text(info, "player") : "Ghost");
         ghost_seconds.reset();
-        if (!info.is_object())
-            return;
+        if (!info.is_object()) return;
         ghost_map.assign(json_text(info, "map"));
         ghost_style.assign(json_text(info, "style"));
         ghost_track = info.value("track", ~0u);
@@ -484,8 +490,7 @@ struct HudExtras {
         ghost_match = ghost_start;
         ghost_sample_tick = ~0u;
         ghost_interval = info.value("settings", Json::object()).value("tickInterval", .01);
-        if (!std::isfinite(ghost_interval) || ghost_interval <= 0)
-            ghost_interval = .01;
+        if (!std::isfinite(ghost_interval) || ghost_interval <= 0) ghost_interval = .01;
         if (info.contains("timeMs") && info["timeMs"].is_number_integer())
             ghost_seconds = info["timeMs"].get<double>() / 1000;
         else if (info.contains("time") && info["time"].is_number())
@@ -494,33 +499,31 @@ struct HudExtras {
             ghost_seconds = info["realTime"].get<double>();
         else if (ghost_end > ghost_start && info.contains("settings"))
             ghost_seconds = score_seconds(legacy_replay_ms(info));
-        if (ghost_seconds && (!std::isfinite(*ghost_seconds) || *ghost_seconds <= 0 ||
-                              *ghost_seconds > max_score_seconds))
+        if (ghost_seconds
+            && (!std::isfinite(*ghost_seconds) || *ghost_seconds <= 0 || *ghost_seconds > max_score_seconds))
             ghost_seconds.reset();
     }
 
     void local_pb(const Json &entries, const std::string &map, const std::string &style, unsigned track) {
-        if (!entries.is_array())
-            return;
+        if (!entries.is_array()) return;
         for (const auto &entry : entries) {
-            if (!entry.is_object() || json_text(entry, "map") != map || json_text(entry, "style") != style ||
-                entry.value("track", ~0u) != track)
+            if (!entry.is_object() || json_text(entry, "map") != map || json_text(entry, "style") != style
+                || entry.value("track", ~0u) != track)
                 continue;
             const auto summary = entry.find("localSummary");
-            if (summary == entry.end() || !summary->is_object() || !json_flag(*summary, "eligible"))
-                continue;
+            if (summary == entry.end() || !summary->is_object() || !json_flag(*summary, "eligible")) continue;
             const auto milliseconds = summary->find("timeMs");
             const auto time = summary->find("time");
             const double seconds = milliseconds != summary->end() && milliseconds->is_number()
-                                       ? milliseconds->get<double>() / 1000
+                                           ? milliseconds->get<double>() / 1000
                                    : time != summary->end() && time->is_number() ? time->get<double>()
                                                                                  : 0;
             if (std::isfinite(seconds) && seconds > 0 && (!personal_best || seconds < *personal_best))
                 personal_best = seconds;
         }
-        if (personal_best)
-            pb.format("PB %.3fs", *personal_best);
+        if (personal_best) pb.format("PB %.3fs", *personal_best);
     }
+
     void contract(const Json &message) {
         const auto time = message.find("pb");
         if (time != message.end() && time->is_number()) {
@@ -552,10 +555,8 @@ struct HudExtras {
         const auto names = message.find("spectators");
         if (names != message.end() && names->is_array()) {
             for (const auto &name : *names) {
-                if (spectator_count == spectators.size())
-                    break;
-                if (name.is_string())
-                    spectators[spectator_count++].assign(name.get<std::string>());
+                if (spectator_count == spectators.size()) break;
+                if (name.is_string()) spectators[spectator_count++].assign(name.get<std::string>());
             }
         }
         have_ghost = message.contains("ghostButtons") && message["ghostButtons"].is_number_unsigned();
@@ -564,9 +565,18 @@ struct HudExtras {
 };
 
 template <class Hud, class At>
-void draw_movement_widgets(Hud &hud, At at, const HudPreferences &prefs, const MovementHud &movement,
-                           const HudExtras &extras, const BhRunState &run, float width, float height, bool practice,
-                           unsigned checkpoint) {
+void draw_movement_widgets(
+        Hud &hud,
+        At at,
+        const HudPreferences &prefs,
+        const MovementHud &movement,
+        const HudExtras &extras,
+        const BhRunState &run,
+        float width,
+        float height,
+        bool practice,
+        unsigned checkpoint
+) {
     constexpr NameColor cream = {.94f, .91f, .86f, 1};
     constexpr NameColor dim = {.63f, .65f, .70f, 1};
     constexpr NameColor amber = {1, .71f, .24f, 1};
@@ -575,8 +585,7 @@ void draw_movement_widgets(Hud &hud, At at, const HudPreferences &prefs, const M
         return place ? place->visible : fallback;
     };
     const auto line = [&](const char *id, std::string_view text, float x, float y, bool fallback) {
-        if (text.empty() || !wanted(id, fallback))
-            return;
+        if (text.empty() || !wanted(id, fallback)) return;
         const auto point = at(id, x, y);
         hud.overlay_text(point[0], point[1], text, 13, dim, true);
     };
@@ -592,8 +601,13 @@ void draw_movement_widgets(Hud &hud, At at, const HudPreferences &prefs, const M
     if (wanted("sync", false)) {
         const auto point = at("sync", width / 2, height - 32);
         hud.overlay_rect(point[0] - 90, point[1], 180, 4, {.08f, .08f, .10f, .7f});
-        hud.overlay_rect(point[0] - 90, point[1], 180 * float(std::clamp(run.sync_percent, 0., 100.)) / 100, 4,
-                         prefs.palette.sync);
+        hud.overlay_rect(
+                point[0] - 90,
+                point[1],
+                180 * float(std::clamp(run.sync_percent, 0., 100.)) / 100,
+                4,
+                prefs.palette.sync
+        );
     }
     line("startPre", movement.start_pre.view(), width / 2 - 160, height - 105, false);
     line("strafeOffsets", movement.offset.view(), width / 2, height * .37f, false);
@@ -610,7 +624,9 @@ void draw_movement_widgets(Hud &hud, At at, const HudPreferences &prefs, const M
         line("splits",
              prefs.place == "place" ? extras.place.view().substr(0, extras.place.view().find(" |"))
                                     : extras.place.view(),
-             width / 2 + 160, height - 154, true);
+             width / 2 + 160,
+             height - 154,
+             true);
     if (wanted("spectators", true) && extras.spectator_count) {
         const auto point = at("spectators", 26, height * .44f);
         hud.overlay_text(point[0], point[1], "Spectators", 12, amber);
@@ -627,14 +643,23 @@ void draw_movement_widgets(Hud &hud, At at, const HudPreferences &prefs, const M
         constexpr std::array<std::string_view, 6> names = {"W", "A", "S", "D", "DUCK", "JUMP"};
         hud.overlay_text(point[0], point[1] - 19, "Ghost", 11, dim);
         for (size_t i = 0; i < bits.size(); ++i)
-            hud.overlay_text(point[0] + float(i) * 30, point[1], names[i], 10,
-                             extras.ghost_buttons & bits[i] ? cream : dim);
+            hud.overlay_text(
+                    point[0] + float(i) * 30, point[1], names[i], 10, extras.ghost_buttons & bits[i] ? cream : dim
+            );
     }
 }
 
 template <class Hud>
-void draw_trainer(Hud &hud, float x, float y, const StrafeReading &reading, const TrainerAppearance &look, bool hints,
-                  const SemanticPalette &palette, int turn_direction) {
+void draw_trainer(
+        Hud &hud,
+        float x,
+        float y,
+        const StrafeReading &reading,
+        const TrainerAppearance &look,
+        bool hints,
+        const SemanticPalette &palette,
+        int turn_direction
+) {
     const float error = std::abs(reading.percent - 100);
     const unsigned band = error <= look.zone ? 2 : error <= look.zone * 3 ? 1 : 0;
     auto tone = palette.trainer[band];
@@ -652,8 +677,9 @@ void draw_trainer(Hud &hud, float x, float y, const StrafeReading &reading, cons
     const float top = y + (look.show_pace ? 24 : 0);
     const float left = x - bar / 2;
     hud.overlay_rect(left, top, bar, thickness, {.05f, .05f, .07f, .6f * tone[3]});
-    hud.overlay_rect(x - look.zone / 200 * bar, top, look.zone / 100 * bar, thickness,
-                     {tone[0], tone[1], tone[2], .2f * tone[3]});
+    hud.overlay_rect(
+            x - look.zone / 200 * bar, top, look.zone / 100 * bar, thickness, {tone[0], tone[1], tone[2], .2f * tone[3]}
+    );
     hud.overlay_rect(x - 1, top - 3, 2, thickness + 6, ink);
     const float direction = look.follow && turn_direction < 0 ? -1 : 1;
     const float position = std::clamp((reading.percent - 100) / 200 * direction, -.5f, .5f);
@@ -666,4 +692,4 @@ void draw_trainer(Hud &hud, float x, float y, const StrafeReading &reading, cons
     if (hints && reading.hint)
         hud.overlay_text(x, top + thickness + 23, strafe_hint_text(*reading.hint), 12, ink, true);
 }
-} // namespace native
+}  // namespace native

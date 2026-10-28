@@ -27,7 +27,9 @@ bool fail(const Failure &failure) {
 class ScenarioReplay {
 public:
     ScenarioReplay(const nlohmann::json &scenario, uint64_t start_ns)
-        : scenario_(scenario), name_(scenario.at("name").get<std::string>()), start_ns_(start_ns) {
+        : scenario_(scenario)
+        , name_(scenario.at("name").get<std::string>())
+        , start_ns_(start_ns) {
         scheduler_.reset(start_ns);
         timeline_.rebuild_binds(native::default_settings().at("binds"));
         timeline_.queue().holdback_ms = scenario.at("holdbackMs").get<double>();
@@ -74,6 +76,7 @@ private:
     std::set<std::string> held_codes_;
 
     uint64_t arrival(const nlohmann::json &event) const { return start_ns_ + event.at(2).get<uint64_t>(); }
+
     uint64_t boundary(const nlohmann::json &tick) const { return start_ns_ + tick.at(0).get<uint64_t>(); }
 
     void deliver(const nlohmann::json &event) {

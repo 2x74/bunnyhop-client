@@ -14,8 +14,16 @@ namespace native {
 class FrameDiagnostics {
 public:
     enum Phase : size_t { kPump, kMenu, kSimulation, kRender, kSwap, kGpuWait, kSleep, kOther, kPhaseCount };
+
     static constexpr const char *kPhaseNames[kPhaseCount] = {
-        "pump", "menu", "simulation", "render", "swap", "gpuWait", "sleep", "other",
+            "pump",
+            "menu",
+            "simulation",
+            "render",
+            "swap",
+            "gpuWait",
+            "sleep",
+            "other",
     };
     static constexpr size_t kMaxFramesPerWindow = 8192;
     static constexpr uint64_t kWindowNs = 1'000'000'000;
@@ -26,6 +34,7 @@ public:
         double p99_ms = 0;
         double max_ms = 0;
     };
+
     struct Sample {
         double seconds = 0;
         uint64_t frames = 0;
@@ -53,6 +62,7 @@ public:
     }
 
     const Sample &last() const { return last_; }
+
     bool active() const { return active_; }
 
     // At the top of each loop iteration: closes the previous frame and opens this one.

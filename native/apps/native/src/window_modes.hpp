@@ -24,33 +24,25 @@ struct WindowModePolicy {
     bool pending = false;
     bool waiting_for_focus = false;
 
-    explicit WindowModePolicy(const std::string& mode = "windowed") {
-        choose(mode);
-    }
+    explicit WindowModePolicy(const std::string &mode = "windowed") { choose(mode); }
 
-    void choose(const std::string& mode) {
-        if (!valid_window_mode(mode))
-            return;
+    void choose(const std::string &mode) {
+        if (!valid_window_mode(mode)) return;
         chosen = mode;
-        if (mode != "windowed")
-            last_fullscreen = mode;
+        if (mode != "windowed") last_fullscreen = mode;
     }
 
     std::string presented() const {
-        if (menu_open && chosen == "fullscreen")
-            return "borderless";
+        if (menu_open && chosen == "fullscreen") return "borderless";
         return chosen;
     }
 
-    std::string alt_enter_target() const {
-        return chosen == "windowed" ? last_fullscreen : "windowed";
-    }
+    std::string alt_enter_target() const { return chosen == "windowed" ? last_fullscreen : "windowed"; }
 
     // The preferences as WindowController should apply them now.
     WindowJson effective(WindowJson preferences) const {
         preferences["windowMode"] = presented();
-        if (menu_open)
-            preferences["alwaysOnTop"] = false;
+        if (menu_open) preferences["alwaysOnTop"] = false;
         return preferences;
     }
 
@@ -71,4 +63,4 @@ struct WindowModePolicy {
     }
 };
 
-}
+}  // namespace native

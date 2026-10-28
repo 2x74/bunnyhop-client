@@ -19,6 +19,7 @@ static std::vector<uint8_t> snapshot_bytes(BhContext *core) {
     }
     return {bytes, bytes + count};
 }
+
 int main(int argc, char **argv) {
     try {
         if (argc != 3) {
@@ -41,8 +42,8 @@ int main(int argc, char **argv) {
             throw std::runtime_error(bh_last_error(core.get()));
         }
         const auto before = snapshot_bytes(core.get());
-        if (native::render_menu_message_limit("replayCompare", 16384) != 12 * 1024 * 1024 ||
-            native::render_menu_message_limit("settings", 16384) != 16384) {
+        if (native::render_menu_message_limit("replayCompare", 16384) != 12 * 1024 * 1024
+            || native::render_menu_message_limit("settings", 16384) != 16384) {
             throw std::runtime_error("WS3 compare base64 message limit mismatch");
         }
         native::ReplayCompare compare;
@@ -52,13 +53,12 @@ int main(int argc, char **argv) {
                 throw std::runtime_error("Compare metadata/source missing");
             }
             const auto *actor = compare.sample(tick, info.at("settings").at("tickInterval"));
-            if (!actor)
-                throw std::runtime_error("Compare has no sample");
+            if (!actor) throw std::runtime_error("Compare has no sample");
             if (actor->frame.tick != tick)
-                throw std::runtime_error("Compare tick " + std::to_string(actor->frame.tick) + " expected " +
-                                         std::to_string(tick));
-            if (snapshot_bytes(core.get()) != before)
-                throw std::runtime_error("Compare moved playback bytes");
+                throw std::runtime_error(
+                        "Compare tick " + std::to_string(actor->frame.tick) + " expected " + std::to_string(tick)
+                );
+            if (snapshot_bytes(core.get()) != before) throw std::runtime_error("Compare moved playback bytes");
             auto wrong = info;
             wrong["style"] = "sideways";
             bool rejected = false;
@@ -75,40 +75,45 @@ int main(int argc, char **argv) {
         std::filesystem::create_directories(cache);
         std::ifstream input(argv[2], std::ios::binary);
         const std::vector<uint8_t> replay_bytes(std::istreambuf_iterator<char>(input), {});
-        const nlohmann::json request = {{"type", "replayCompare"},
-                                        {"action", "set"},
-                                        {"kind", "pb"},
-                                        {"name", "Your PB"},
-                                        {"replayBase64", "fixture"}};
-        native::ws3_compare_message(compare, core.get(), cache, request, info,
-                                    [&](const std::string &) { return replay_bytes; });
+        const nlohmann::json request = {
+                {"type", "replayCompare"},
+                {"action", "set"},
+                {"kind", "pb"},
+                {"name", "Your PB"},
+                {"replayBase64", "fixture"}
+        };
+        native::ws3_compare_message(compare, core.get(), cache, request, info, [&](const std::string &) {
+            return replay_bytes;
+        });
         nlohmann::json host = {{"playback", nlohmann::json::object()}};
         native::render_playback_state(host, compare, info.at("settings").at("tickInterval"));
-        if (host.at("playback").at("features").at(0) != "compare" ||
-            host.at("playback").at("compare").at("kind") != "pb" ||
-            host.at("playback").at("compare").at("name") != "Your PB" || snapshot_bytes(core.get()) != before) {
+        if (host.at("playback").at("features").at(0) != "compare"
+            || host.at("playback").at("compare").at("kind") != "pb"
+            || host.at("playback").at("compare").at("name") != "Your PB" || snapshot_bytes(core.get()) != before) {
             throw std::runtime_error("WS3 Compare contract mismatch");
         }
+
         struct Chat {
             std::string error;
-            void push(const std::string &text, const std::string &, const std::string &, double) {
-                error = text;
-            }
+
+            void push(const std::string &text, const std::string &, const std::string &, double) { error = text; }
         } chat;
+
         native::ReplayCompareImportService imports;
         imports.map(argv[1], {});
         compare.clear();
         auto async_request = request;
         async_request["name"] = "Async PB";
-        imports.message(compare, core.get(), cache, async_request, info, "fixture.bhr",
-                        [&](const std::string &) { return replay_bytes; });
+        imports.message(compare, core.get(), cache, async_request, info, "fixture.bhr", [&](const std::string &) {
+            return replay_bytes;
+        });
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
         while (!compare.active() && chat.error.empty() && std::chrono::steady_clock::now() < deadline) {
             imports.poll(compare, "fixture.bhr", true, chat, 0);
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-        if (!compare.active() || !chat.error.empty() || compare.menu_state(.01).at("name") != "Async PB" ||
-            snapshot_bytes(core.get()) != before)
+        if (!compare.active() || !chat.error.empty() || compare.menu_state(.01).at("name") != "Async PB"
+            || snapshot_bytes(core.get()) != before)
             throw std::runtime_error("Asynchronous WS3 Compare contract failed: " + chat.error);
         const auto wait_for_compare = [&] {
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
@@ -123,19 +128,31 @@ int main(int argc, char **argv) {
         compare.clear();
         const nlohmann::json local_request = {{"action", "set"}, {"id", "existing.bhr"}, {"source", "wr"}};
         for (unsigned replacement = 0; replacement < 100; ++replacement)
-            imports.message(compare, core.get(), cache, local_request, info, "fixture.bhr",
-                            [](const std::string &) -> std::vector<uint8_t> {
-                                throw std::runtime_error("Local compare must not decode base64");
-                            });
+            imports.message(
+                    compare,
+                    core.get(),
+                    cache,
+                    local_request,
+                    info,
+                    "fixture.bhr",
+                    [](const std::string &) -> std::vector<uint8_t> {
+                        throw std::runtime_error("Local compare must not decode base64");
+                    }
+            );
         wait_for_compare();
         if (compare.state().at("source") != "wr")
             throw std::runtime_error("Local-id worker did not adopt the prepared WR");
-        imports.message(compare, core.get(), cache, async_request, info, "fixture.bhr",
-                        [replay_bytes](const std::string &) { return replay_bytes; });
-        imports.message(compare, core.get(), cache, {{"action", "clear"}}, info, "fixture.bhr",
-                        [](const std::string &) { return std::vector<uint8_t>{}; });
-        if (compare.active())
-            throw std::runtime_error("Clear retained a prepared Compare");
+        imports.message(
+                compare, core.get(), cache, async_request, info, "fixture.bhr", [replay_bytes](const std::string &) {
+                    return replay_bytes;
+                }
+        );
+        imports.message(
+                compare, core.get(), cache, {{"action", "clear"}}, info, "fixture.bhr", [](const std::string &) {
+                    return std::vector<uint8_t>{};
+                }
+        );
+        if (compare.active()) throw std::runtime_error("Clear retained a prepared Compare");
         native::ReplayTimelineData bins;
         bins.step = 2;
         BhState sample{};
@@ -163,24 +180,27 @@ int main(int argc, char **argv) {
         sample.tick = 47;
         int64_t previous_split = -1;
         native::timeline_split(bins, sample, split_state, {stage}, previous_split);
-        if (bins.splits.size() != 1 || bins.splits[0].tick != 47 || bins.splits[0].index != 7 ||
-            bins.splits[0].checkpoint) {
+        if (bins.splits.size() != 1 || bins.splits[0].tick != 47 || bins.splits[0].index != 7
+            || bins.splits[0].checkpoint) {
             throw std::runtime_error("Timeline absolute split marker mismatch");
         }
         std::atomic_bool cancel = false;
         const auto timeline = native::build_replay_timeline(argv[1], {}, argv[2], cancel);
         const auto data = timeline.json("fixture.bhr");
-        if (data.at("id") != "fixture.bhr" || data.at("speed").empty() || !data.at("desyncTick").is_null() ||
-            snapshot_bytes(core.get()) != before)
+        if (data.at("id") != "fixture.bhr" || data.at("speed").empty() || !data.at("desyncTick").is_null()
+            || snapshot_bytes(core.get()) != before)
             throw std::runtime_error("Timeline altered playback or desynced");
+
         struct Menu {
             unsigned calls = 0;
             std::string script;
+
             void evaluate_js(const std::string &value) {
                 script = value;
                 ++calls;
             }
         } menu;
+
         native::ReplayTimelineService timeline_service;
         timeline_service.map(argv[1], {});
         timeline_service.request(argv[2], "fixture.bhr");
@@ -191,8 +211,8 @@ int main(int argc, char **argv) {
         }
         for (unsigned repeat = 0; repeat < 3; ++repeat)
             timeline_service.poll(&menu, true, "fixture.bhr", true);
-        if (menu.calls != 1 || menu.script.find("onReplayTimeline") == std::string::npos ||
-            menu.script.find("fixture.bhr") == std::string::npos || snapshot_bytes(core.get()) != before) {
+        if (menu.calls != 1 || menu.script.find("onReplayTimeline") == std::string::npos
+            || menu.script.find("fixture.bhr") == std::string::npos || snapshot_bytes(core.get()) != before) {
             throw std::runtime_error("Timeline delivery must be once per replay and preserve live state");
         }
         compare.clear();

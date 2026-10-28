@@ -13,7 +13,7 @@ namespace {
 
 namespace fs = std::filesystem;
 
-void write_raw(const fs::path& path, const std::string& bytes) {
+void write_raw(const fs::path &path, const std::string &bytes) {
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     out << bytes;
 }
@@ -21,7 +21,7 @@ void write_raw(const fs::path& path, const std::string& bytes) {
 bool throws(const fs::path &path, std::uintmax_t limit = native::file_dialog_max_bytes) {
     try {
         native::read_dialog_file(path, limit);
-    } catch (const std::exception&) {
+    } catch (const std::exception &) {
         return true;
     }
     return false;
@@ -33,25 +33,24 @@ struct FakeWindow {
     int refits = 0;
     bool iconified = false;
     bool on_top = false;
-    bool is_minimized() const {
-        return iconified;
-    }
-    bool apply(const native::WindowJson &settings, bool = false,
-               const std::optional<native::WindowBounds> & = std::nullopt) {
+
+    bool is_minimized() const { return iconified; }
+
+    bool
+    apply(const native::WindowJson &settings,
+          bool = false,
+          const std::optional<native::WindowBounds> & = std::nullopt) {
         shown = settings.at("windowMode");
         on_top = settings.value("alwaysOnTop", false);
         ++applies;
         return true;
     }
-    std::string mode() const {
-        return shown;
-    }
-    std::string error() const {
-        return {};
-    }
-    void refit() {
-        ++refits;
-    }
+
+    std::string mode() const { return shown; }
+
+    std::string error() const { return {}; }
+
+    void refit() { ++refits; }
 };
 
 void deferred_window_changes() {
@@ -81,7 +80,7 @@ void deferred_window_changes() {
     assert(window.shown == "borderless" && window.applies == 3 && !window.on_top);
 }
 
-void read_and_write(const fs::path& dir) {
+void read_and_write(const fs::path &dir) {
     const auto file = dir / "bunnyhop-settings.json";
     native::write_dialog_file(file, "{\"sensitivity\":1.5}\n");
     assert(native::read_dialog_file(file) == "{\"sensitivity\":1.5}\n");
@@ -147,7 +146,7 @@ void concurrent_replacements(const fs::path &dir) {
         assert(entry.path().filename().string().find(".partial-") == std::string::npos);
 }
 
-void css_watch(const fs::path& dir) {
+void css_watch(const fs::path &dir) {
     const auto file = dir / "theme.css";
     write_raw(file, ":root { --amber: #7fd1ff; }");
     native::CssFileWatch watch;
@@ -181,12 +180,11 @@ void css_watch(const fs::path& dir) {
 }
 
 // Waits for the worker to answer with a script containing `needle`.
-bool answered(native::MenuFiles& files, const std::string& needle) {
+bool answered(native::MenuFiles &files, const std::string &needle) {
     const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (std::chrono::steady_clock::now() < until) {
-        for (const auto& script : files.poll()) {
-            if (script.find(needle) != std::string::npos)
-                return true;
+        for (const auto &script : files.poll()) {
+            if (script.find(needle) != std::string::npos) return true;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
@@ -194,6 +192,7 @@ bool answered(native::MenuFiles& files, const std::string& needle) {
 }
 
 SDL_DialogFileCallback dialog_answer;
+
 void hold_dialog(SDL_DialogFileCallback answer, void *) {
     dialog_answer = answer;
 }
@@ -211,7 +210,7 @@ void accepted_save(const fs::path &dir) {
     assert(native::read_dialog_file(native::path_from_utf8(destination)) == "first");
 }
 
-void menu_files(const fs::path& dir) {
+void menu_files(const fs::path &dir) {
     const std::string dated = "bunnyhop-settings-2026-10-28.json";
     assert(native::MenuFiles::suggested_name(dated) == dated);
     assert(native::MenuFiles::suggested_name("../evil.json") == "bunnyhop-settings.json");
@@ -240,7 +239,7 @@ void menu_files(const fs::path& dir) {
     assert(native::read_dialog_file(data / "custom-css-file.json") == "{\"path\":null}");
 }
 
-}
+}  // namespace
 
 int main() {
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();

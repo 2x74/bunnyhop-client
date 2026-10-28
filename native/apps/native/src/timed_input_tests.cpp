@@ -27,8 +27,13 @@ void *operator new(std::size_t size) {
     throw std::bad_alloc();
 }
 
-void operator delete(void *memory) noexcept { std::free(memory); }
-void operator delete(void *memory, std::size_t) noexcept { std::free(memory); }
+void operator delete(void *memory) noexcept {
+    std::free(memory);
+}
+
+void operator delete(void *memory, std::size_t) noexcept {
+    std::free(memory);
+}
 
 using native::test::LoopHarness;
 using native::test::ms;
@@ -401,17 +406,17 @@ void check_transition(const Transition &transition) {
     loop.motion(start + 15 * ms, 2);
     loop.pump(start + 16 * ms);
     switch (transition.barrier) {
-    case Barrier::release:
-        loop.timeline.release(loop.input, loop.held_codes);
-        break;
-    case Barrier::restart:
-        loop.timeline.restart(loop.input, loop.held_codes);
-        break;
-    case Barrier::settings:
-        loop.timeline.settings_changed(loop.input, loop.held_codes);
-        break;
-    case Barrier::none:
-        break;
+        case Barrier::release:
+            loop.timeline.release(loop.input, loop.held_codes);
+            break;
+        case Barrier::restart:
+            loop.timeline.restart(loop.input, loop.held_codes);
+            break;
+        case Barrier::settings:
+            loop.timeline.settings_changed(loop.input, loop.held_codes);
+            break;
+        case Barrier::none:
+            break;
     }
     const bool captured_after = transition.barrier != Barrier::release;
     if (transition.barrier == Barrier::release || transition.barrier == Barrier::settings) {
@@ -450,17 +455,17 @@ void check_transition(const Transition &transition) {
 
 void test_transitions() {
     const Transition transitions[] = {
-        {"capture off (Esc menu)", Barrier::release},
-        {"capture on (resume)", Barrier::release},
-        {"menu open (F10, Esc)", Barrier::release},
-        {"focus lost", Barrier::release},
-        {"focus gained", Barrier::release},
-        {"replay controls (Tab)", Barrier::release},
-        {"chat open", Barrier::release},
-        {"chat close", Barrier::release},
-        {"settings patch", Barrier::settings},
-        {"restart / seek", Barrier::restart},
-        {"window mode (Alt+Enter)", Barrier::none},
+            {"capture off (Esc menu)", Barrier::release},
+            {"capture on (resume)", Barrier::release},
+            {"menu open (F10, Esc)", Barrier::release},
+            {"focus lost", Barrier::release},
+            {"focus gained", Barrier::release},
+            {"replay controls (Tab)", Barrier::release},
+            {"chat open", Barrier::release},
+            {"chat close", Barrier::release},
+            {"settings patch", Barrier::settings},
+            {"restart / seek", Barrier::restart},
+            {"window mode (Alt+Enter)", Barrier::none},
     };
     for (const Transition &transition : transitions) {
         check_transition(transition);
@@ -499,7 +504,6 @@ void test_bind_table_matches_binds() {
     const std::set<std::string> codes = {"KeyW", "KeyA", "Mouse2"};
     assert(binds.held(codes) == (native::forward | native::left | native::attack2));
 }
-
 
 // A key-up lost while the menu had focus leaves SDL's key state down, so SDL labels the next real press a repeat.
 void test_first_press_after_a_barrier_counts() {

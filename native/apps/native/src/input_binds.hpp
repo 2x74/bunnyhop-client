@@ -53,7 +53,8 @@ public:
         return found == bits_.end() ? 0 : found->second;
     }
 
-    template <class Codes> uint32_t held(const Codes &codes) const {
+    template <class Codes>
+    uint32_t held(const Codes &codes) const {
         uint32_t out = 0;
         for (const auto &code : codes) {
             out |= of(code);

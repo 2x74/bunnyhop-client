@@ -10,7 +10,8 @@ namespace native {
 // from input one or more frames older than the newest. After swapping frame N the pacer waits for the fence placed
 // after frame N-1's swap, then fences N, before the loop pumps input and builds N+1. The wait is capped so a stuck
 // driver costs a frame, not the game.
-template <class Gl> class FramePacer {
+template <class Gl>
+class FramePacer {
 public:
     using Sync = decltype(std::declval<Gl &>().FenceSync(0u, 0u));
 

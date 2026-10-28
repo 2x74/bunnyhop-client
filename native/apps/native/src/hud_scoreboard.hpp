@@ -34,6 +34,7 @@ struct ScoreRow {
     bool host_running = false;
     double running_at_ms = 0;
 };
+
 struct ScoreHead {
     std::string room;
     std::string map;
@@ -56,20 +57,19 @@ inline void format_hud_time(HudLabel<48> &label, double seconds) {
 
 inline std::optional<double> parse_hud_time(std::string_view text) {
     const auto colon = text.find(':');
-    if (colon == std::string_view::npos)
-        return std::nullopt;
+    if (colon == std::string_view::npos) return std::nullopt;
     unsigned minutes = 0;
     double seconds = 0;
     const auto first = std::from_chars(text.data(), text.data() + colon, minutes);
     const auto second = std::from_chars(text.data() + colon + 1, text.data() + text.size(), seconds);
-    if (first.ec != std::errc() || first.ptr != text.data() + colon || second.ec != std::errc() ||
-        second.ptr != text.data() + text.size() || !std::isfinite(seconds) || seconds < 0 || seconds >= 60)
+    if (first.ec != std::errc() || first.ptr != text.data() + colon || second.ec != std::errc()
+        || second.ptr != text.data() + text.size() || !std::isfinite(seconds) || seconds < 0 || seconds >= 60)
         return std::nullopt;
     return double(minutes) * 60 + seconds;
 }
 
 class HudScoreboard {
-  public:
+public:
     ScoreHead head;
     std::array<ScoreRow, 256> rows;
     size_t count = 0;
@@ -78,9 +78,9 @@ class HudScoreboard {
         head = {};
         count = 0;
     }
+
     void add(const nlohmann::json &player, const nlohmann::json &meta, unsigned self, double now) {
-        if (count == rows.size())
-            return;
+        if (count == rows.size()) return;
         auto &row = rows[count++];
         row = {};
         row.slot = player.value("slot", 256u);
@@ -89,8 +89,9 @@ class HudScoreboard {
         row.style = json_text(player, "style");
         row.look = name_appearance(player);
         if (player.contains("look") || player.contains("marks"))
-            row.look = host_name_appearance(player.value("look", nlohmann::json()),
-                                            player.value("marks", nlohmann::json()), row.look);
+            row.look = host_name_appearance(
+                    player.value("look", nlohmann::json()), player.value("marks", nlohmann::json()), row.look
+            );
         row.country = json_text(player, "country", 2);
         row.host = json_flag(player, "host");
         const auto rank = player.find("rank");
@@ -101,12 +102,12 @@ class HudScoreboard {
         const auto spec = player.find("spec");
         row.spectator = spec != player.end() && !spec->is_null();
         if (meta.is_object()) {
-            constexpr std::array<std::string_view, 8> styles = {"autohop", "legit",      "wonly",  "sideways",
-                                                                "hsw",     "autostrafe", "scroll", "lowgrav"};
+            constexpr std::array<std::string_view, 8> styles = {
+                    "autohop", "legit", "wonly", "sideways", "hsw", "autostrafe", "scroll", "lowgrav"
+            };
             if (meta.contains("style") && meta["style"].is_number_unsigned()) {
                 const unsigned index = meta["style"].get<unsigned>();
-                if (index < styles.size())
-                    row.style = styles[index];
+                if (index < styles.size()) row.style = styles[index];
             }
             row.track = meta.value("track", 0u);
             row.timer = meta.value("timer", 0u);
@@ -114,8 +115,7 @@ class HudScoreboard {
             if (row.timer == 3 && meta.contains("timeMs") && meta["timeMs"].is_number_integer())
                 row.seconds = meta["timeMs"].get<double>() / 1000;
             const auto ping = meta.find("ping");
-            if (ping != meta.end() && ping->is_number_unsigned())
-                row.ping = ping->get<unsigned>();
+            if (ping != meta.end() && ping->is_number_unsigned()) row.ping = ping->get<unsigned>();
         }
         row.sampled_at = now;
         const auto pb = player.find("pb");
@@ -127,16 +127,15 @@ class HudScoreboard {
             }
             if (value && value->is_number()) {
                 const double seconds = value->get<double>();
-                if (std::isfinite(seconds) && seconds > 0)
-                    row.pb = seconds;
+                if (std::isfinite(seconds) && seconds > 0) row.pb = seconds;
             }
         }
         row.status = json_text(player, "status", 128);
     }
+
     void sort() {
         std::sort(rows.begin(), rows.begin() + count, [](const ScoreRow &a, const ScoreRow &b) {
-            if (a.spectator != b.spectator)
-                return !a.spectator;
+            if (a.spectator != b.spectator) return !a.spectator;
             const double first = a.pb.value_or(std::numeric_limits<double>::infinity());
             const double second = b.pb.value_or(std::numeric_limits<double>::infinity());
             const double first_ms = std::round(first * 1000);
@@ -144,13 +143,14 @@ class HudScoreboard {
             return first_ms != second_ms ? first_ms < second_ms : a.name < b.name;
         });
     }
+
     void contract(const nlohmann::json &message) {
         if (message.contains("head") && message["head"].is_null()) {
             clear();
             return;
         }
-        if (!message.contains("head") || !message["head"].is_object() || !message.contains("rows") ||
-            !message["rows"].is_array() || message["rows"].size() > 256)
+        if (!message.contains("head") || !message["head"].is_object() || !message.contains("rows")
+            || !message["rows"].is_array() || message["rows"].size() > 256)
             return;
         HudScoreboard next;
         const auto &value = message["head"];
@@ -161,8 +161,7 @@ class HudScoreboard {
         next.head.tier = value.value("tier", nlohmann::json()).is_number_integer() ? value["tier"].get<int>() : 0;
         next.head.max = value.value("max", 0u);
         for (const auto &row : message["rows"]) {
-            if (!row.is_object())
-                continue;
+            if (!row.is_object()) continue;
             next.add(row, nullptr, 256, 0);
             auto &stored = next.rows[next.count - 1];
             stored.you = json_flag(row, "you");
@@ -192,8 +191,7 @@ class HudScoreboard {
                 }
             }
             const auto ping = row.find("ping");
-            if (ping != row.end() && ping->is_number_unsigned())
-                stored.ping = ping->get<unsigned>();
+            if (ping != row.end() && ping->is_number_unsigned()) stored.ping = ping->get<unsigned>();
         }
         next.sort();
         *this = std::move(next);
@@ -206,8 +204,17 @@ struct ScoreLocal {
 };
 
 template <class Hud>
-void draw_scoreboard(Hud &hud, int width, int height, float percent, const HudScoreboard &board, double now,
-                     double epoch_ms, const ScoreLocal *local = nullptr, std::string_view local_style = "") {
+void draw_scoreboard(
+        Hud &hud,
+        int width,
+        int height,
+        float percent,
+        const HudScoreboard &board,
+        double now,
+        double epoch_ms,
+        const ScoreLocal *local = nullptr,
+        std::string_view local_style = ""
+) {
     const HudGeometry geometry(width, height, percent);
     const auto box = scoreboard_bounds(geometry.width, geometry.height, board.count);
     constexpr NameColor cream = {.94f, .91f, .86f, 1};
@@ -244,8 +251,7 @@ void draw_scoreboard(Hud &hud, int width, int height, float percent, const HudSc
     for (size_t i = 0; i < std::min(board.count, visible); ++i) {
         const auto &row = board.rows[i];
         const float y = box.y + 120 + float(i) * 36;
-        if (row.you)
-            hud.overlay_rect(box.x + 8, y - 3, box.width - 16, 33, {.15f, .12f, .065f, .85f});
+        if (row.you) hud.overlay_rect(box.x + 8, y - 3, box.width - 16, 33, {.15f, .12f, .065f, .85f});
         label.format("%zu", i + 1);
         hud.overlay_text(box.x + box.width * offsets[0], y, label.view(), 13, dim);
         float x = box.x + box.width * offsets[1];
@@ -256,16 +262,19 @@ void draw_scoreboard(Hud &hud, int width, int height, float percent, const HudSc
             x += std::min(70.f, float(row.rank.size()) * 6 + 8);
         }
         hud.overlay_flag(x, y + 2, row.country);
-        if (!row.country.empty())
-            x += 24;
+        if (!row.country.empty()) x += 24;
         const size_t maximum_name =
-            size_t(std::max(2.f, (box.x + box.width * .47f - x - native::name_badge_count(row.look) * 18) / 8.4f));
+                size_t(std::max(2.f, (box.x + box.width * .47f - x - native::name_badge_count(row.look) * 18) / 8.4f));
         const auto name = std::string_view(row.name).substr(0, maximum_name);
         hud.overlay_name(x, y, name, 14, row.look, now);
-        if (row.host)
-            hud.overlay_mark(box.x + box.width * .47f, y, NameMark::crown, amber);
-        hud.overlay_text(box.x + box.width * offsets[2], y,
-                         row.you && !local_style.empty() ? local_style : std::string_view(row.style), 12, dim);
+        if (row.host) hud.overlay_mark(box.x + box.width * .47f, y, NameMark::crown, amber);
+        hud.overlay_text(
+                box.x + box.width * offsets[2],
+                y,
+                row.you && !local_style.empty() ? local_style : std::string_view(row.style),
+                12,
+                dim
+        );
         HudLabel<48> time;
         if (row.you && local && !row.spectator) {
             if (local->status)
@@ -294,8 +303,9 @@ void draw_scoreboard(Hud &hud, int width, int height, float percent, const HudSc
             time.assign("--");
         hud.overlay_text(box.x + box.width * offsets[5], y, time.view(), 12, dim);
     }
-    hud.overlay_text(box.x + 20, box.y + box.height - 25, "Y to chat   N to spectate   rtv / nominate / timeleft", 12,
-                     dim);
+    hud.overlay_text(
+            box.x + 20, box.y + box.height - 25, "Y to chat   N to spectate   rtv / nominate / timeleft", 12, dim
+    );
     hud.overlay_end(width, height);
 }
-} // namespace native
+}  // namespace native

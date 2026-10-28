@@ -7,6 +7,7 @@ namespace native {
 inline constexpr float restart_hull_half_width = 16;
 inline constexpr float restart_hull_height = 62;
 inline constexpr float restart_floor_offset = 1;
+
 struct RestartPlacement {
     BhState state{};
     std::optional<float> pitch;
@@ -22,8 +23,12 @@ struct RestartPlacement {
         check(core, bh_set_restart_names(core, names ? names->targetname : "", names ? names->classname : ""));
     }
 
-    static RestartPlacement place(BhContext *core, const std::string &map, uint32_t track,
-                                  const std::vector<BhZone> &zones, const StartPoints *points) {
+    static RestartPlacement
+    place(BhContext *core,
+          const std::string &map,
+          uint32_t track,
+          const std::vector<BhZone> &zones,
+          const StartPoints *points) {
         RestartPlacement result;
         check(core, bh_state(core, &result.state));
         const auto names = restart_names(map, track);
@@ -33,16 +38,22 @@ struct RestartPlacement {
             if (zone.kind != 0 || zone.track != track) continue;
             if (!start) start = &zone;
             const auto *p = result.state.position;
-            inside = inside || (p[0] - restart_hull_half_width <= zone.maxs[0] &&
-                                p[0] + restart_hull_half_width >= zone.mins[0] &&
-                                p[1] - restart_hull_half_width <= zone.maxs[1] &&
-                                p[1] + restart_hull_half_width >= zone.mins[1] &&
-                                p[2] <= zone.maxs[2] && p[2] + restart_hull_height >= zone.mins[2]);
+            inside =
+                    inside
+                    || (p[0] - restart_hull_half_width <= zone.maxs[0] && p[0] + restart_hull_half_width >= zone.mins[0]
+                        && p[1] - restart_hull_half_width <= zone.maxs[1]
+                        && p[1] + restart_hull_half_width >= zone.mins[1] && p[2] <= zone.maxs[2]
+                        && p[2] + restart_hull_height >= zone.mins[2]);
         }
         if (start && (!inside || names)) {
-            check(core, bh_set_position(core, float((double(start->mins[0]) + start->maxs[0]) / 2),
-                                       float((double(start->mins[1]) + start->maxs[1]) / 2),
-                                       start->mins[2] + restart_floor_offset, result.state.teleport_angles[1]));
+            check(core,
+                  bh_set_position(
+                          core,
+                          float((double(start->mins[0]) + start->maxs[0]) / 2),
+                          float((double(start->mins[1]) + start->maxs[1]) / 2),
+                          start->mins[2] + restart_floor_offset,
+                          result.state.teleport_angles[1]
+                  ));
             if (names) apply_names(core, names);
             check(core, bh_state(core, &result.state));
         }
@@ -54,20 +65,30 @@ struct RestartPlacement {
         return result;
     }
 
-    void custom(BhContext *core, const StartPoint &point, const std::vector<BhZone> &zones,
-                uint32_t track, const std::optional<RestartNames> &names) {
+    void
+    custom(BhContext *core,
+           const StartPoint &point,
+           const std::vector<BhZone> &zones,
+           uint32_t track,
+           const std::optional<RestartNames> &names) {
         const BhState fallback = state;
-        if (bh_set_position(core, point.position[0], point.position[1], point.position[2], point.yaw) &&
-            bh_state(core, &state) && start_point_landed(state, point)) {
+        if (bh_set_position(core, point.position[0], point.position[1], point.position[2], point.yaw)
+            && bh_state(core, &state) && start_point_landed(state, point)) {
             pitch = point.pitch;
             practice = start_point_practice(point, state, zones, track);
             apply_names(core, practice ? std::nullopt : names);
         } else {
-            check(core, bh_set_position(core, fallback.position[0], fallback.position[1], fallback.position[2],
-                                       fallback.teleport_angles[1]));
+            check(core,
+                  bh_set_position(
+                          core,
+                          fallback.position[0],
+                          fallback.position[1],
+                          fallback.position[2],
+                          fallback.teleport_angles[1]
+                  ));
             if (names) apply_names(core, names);
             check(core, bh_state(core, &state));
         }
     }
 };
-} // namespace native
+}  // namespace native

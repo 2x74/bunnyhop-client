@@ -40,10 +40,13 @@ struct ReplayRange {
     }
 
     uint32_t clamp(uint32_t tick) const { return std::clamp(tick, from, to); }
+
     uint32_t relative(uint32_t tick) const { return clamp(tick) - from; }
+
     uint32_t ticks() const { return to - from; }
 
-    template <class Options> void export_bounds(Options &options) const {
+    template <class Options>
+    void export_bounds(Options &options) const {
         const uint32_t first = options.full_recording ? 0 : from;
         const uint32_t last = options.full_recording ? total : to;
         if (options.to == 0 || (options.from == 0 && options.to == total)) {

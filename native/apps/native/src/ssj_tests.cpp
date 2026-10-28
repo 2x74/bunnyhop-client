@@ -36,7 +36,10 @@ void same(const std::string &where, const char *field, const nlohmann::json &exp
         if (actual) fail(where, std::string(field) + " should be absent, got " + std::to_string(*actual));
         return;
     }
-    if (!actual) { fail(where, std::string(field) + " is absent, expected " + expected.dump()); return; }
+    if (!actual) {
+        fail(where, std::string(field) + " is absent, expected " + expected.dump());
+        return;
+    }
     const auto want = expected.get<double>();
     if (double(*actual) != want)
         fail(where, std::string(field) + " is " + std::to_string(*actual) + ", expected " + expected.dump());
@@ -45,12 +48,17 @@ void same(const std::string &where, const char *field, const nlohmann::json &exp
 // Gain and efficiency are the only values that pass through cos and sin, whose last bit is not
 // portable between implementations (see the note atop ssj.hpp). Both are rounded to two decimals
 // before anyone sees them, so they are compared at that resolution rather than bit for bit.
-void near(const std::string &where, const char *field, const nlohmann::json &expected, const std::optional<float> &actual) {
+void near(
+        const std::string &where, const char *field, const nlohmann::json &expected, const std::optional<float> &actual
+) {
     if (expected.is_null()) {
         if (actual) fail(where, std::string(field) + " should be absent");
         return;
     }
-    if (!actual) { fail(where, std::string(field) + " is absent, expected " + expected.dump()); return; }
+    if (!actual) {
+        fail(where, std::string(field) + " is absent, expected " + expected.dump());
+        return;
+    }
     const double want = expected.get<double>();
     if (std::fabs(double(*actual) - want) > 0.0101)
         fail(where, std::string(field) + " is " + std::to_string(*actual) + ", expected " + expected.dump());
@@ -59,13 +67,15 @@ void near(const std::string &where, const char *field, const nlohmann::json &exp
 }  // namespace
 
 int main(int argc, char **argv) {
-    {   // JHUD gain colours: red 0-59, orange 60-69, green 70-79, blue 80-89, white 90+.
-        using native::GainBand;using native::gain_band;
-        assert(gain_band(0)==GainBand::red&&gain_band(59.99f)==GainBand::red);
-        assert(gain_band(60)==GainBand::orange&&gain_band(69.9f)==GainBand::orange);
-        assert(gain_band(70)==GainBand::green&&gain_band(79.9f)==GainBand::green);
-        assert(gain_band(80)==GainBand::blue&&gain_band(89.9f)==GainBand::blue);
-        assert(gain_band(90)==GainBand::white&&gain_band(100)==GainBand::white&&gain_band(130)==GainBand::white);
+    {  // JHUD gain colours: red 0-59, orange 60-69, green 70-79, blue 80-89, white 90+.
+        using native::gain_band;
+        using native::GainBand;
+        assert(gain_band(0) == GainBand::red && gain_band(59.99f) == GainBand::red);
+        assert(gain_band(60) == GainBand::orange && gain_band(69.9f) == GainBand::orange);
+        assert(gain_band(70) == GainBand::green && gain_band(79.9f) == GainBand::green);
+        assert(gain_band(80) == GainBand::blue && gain_band(89.9f) == GainBand::blue);
+        assert(gain_band(90) == GainBand::white && gain_band(100) == GainBand::white
+               && gain_band(130) == GainBand::white);
     }
 
     const std::string path = argc > 1 ? argv[1] : "ssj-oracle.json";
@@ -113,7 +123,10 @@ int main(int argc, char **argv) {
                 if (actual) fail(where, "produced a report where the reference produced none");
                 continue;
             }
-            if (!actual) { fail(where, "produced no report where the reference did"); continue; }
+            if (!actual) {
+                fail(where, "produced no report where the reference did");
+                continue;
+            }
             ++compared;
             if (actual->jump != expected.at("jump").get<unsigned>())
                 fail(where, "jump is " + std::to_string(actual->jump) + ", expected " + expected.at("jump").dump());
@@ -140,7 +153,7 @@ int main(int argc, char **argv) {
     }
     std::cout << "SSJ port matches the web reference across " << compared << " reports\n";
 
-    {   // The text line the HUD draws, independent of the oracle.
+    {  // The text line the HUD draws, independent of the oracle.
         native::SsjReport report;
         report.jump = 6;
         report.speed = 1013;
@@ -163,10 +176,11 @@ int main(int argc, char **argv) {
     }
     std::cout << "SSJ report text checks passed\n";
 
-    {   // Every Nth jump: N, 2N, 3N ... and nothing else; 6 behaves as every 6th did.
+    {  // Every Nth jump: N, 2N, 3N ... and nothing else; 6 behaves as every 6th did.
         for (unsigned n = 1; n <= 30; ++n) {
             assert(native::ssj_shows(native::SsjMode::every_nth, n, 4) == (n % 4 == 0));
-            assert(native::ssj_shows(native::SsjMode::every_nth, n) == native::ssj_shows(native::SsjMode::every_sixth, n, 6));
+            assert(native::ssj_shows(native::SsjMode::every_nth, n)
+                   == native::ssj_shows(native::SsjMode::every_sixth, n, 6));
         }
         native::SsjTracker tracker(native::SsjMode::every_nth);
         tracker.set_interval(1);  // 1 would be "every jump"; held at 2
@@ -175,17 +189,17 @@ int main(int argc, char **argv) {
         tracker.set_interval(5);  // changing N starts the count over
         assert(tracker.interval() == 5 && tracker.jump == 0);
     }
-    {   // Strafe trainer, per tick by default: the first air tick after one with a yaw reads.
+    {  // Strafe trainer, per tick by default: the first air tick after one with a yaw reads.
         using T = native::StrafeTrainer;
         const std::uint32_t right = T::right_bit, left = T::left_bit;
         const float speed = 600, ideal = T::ideal_degrees(speed);
         assert(std::fabs(ideal - 2.8624f) < 1e-3f);
         T trainer;
-        assert(!trainer.tick(false, speed, 179.0f, right));  // nothing to compare the yaw with yet
+        assert(!trainer.tick(false, speed, 179.0f, right));                   // nothing to compare the yaw with yet
         auto r = trainer.tick(false, speed, 179.0f + ideal - 360.0f, right);  // across the 180/-180 wrap
         assert(r && std::fabs(r->percent - 100.0f) < 0.1f && !r->hint);
         r = trainer.tick(false, speed, 179.0f + 1.5f * ideal - 360.0f, right);  // half a tick's worth
-        assert(r && std::fabs(r->percent - 50.0f) < 0.1f);  // per tick: no averaging by default
+        assert(r && std::fabs(r->percent - 50.0f) < 0.1f);                      // per tick: no averaging by default
         assert(native::strafe_band(100) == 0 && native::strafe_band(80) == 1 && native::strafe_band(150) == 2);
 
         // Smoothing is a rolling mean of the last N air ticks, still one reading per tick.
@@ -215,64 +229,92 @@ int main(int argc, char **argv) {
         assert(!run(1.0f, right));
         assert(run(0.5f, right) == native::StrafeHint::strafe_more);
         assert(run(1.6f, right) == native::StrafeHint::strafe_less);
-        assert(run(1.0f, 0) == native::StrafeHint::less_deadtime);           // no key
+        assert(run(1.0f, 0) == native::StrafeHint::less_deadtime);             // no key
         assert(run(1.0f, left | right) == native::StrafeHint::less_deadtime);  // both cancel
         assert(std::string(native::strafe_hint_text(native::StrafeHint::strafe_more)) == "Strafe more!");
 
         // Too slow to have an ideal angle: no reading. A long stand starts over.
         T slow;
-        for (unsigned t = 0; t < 40; ++t) assert(!slow.tick(false, 10, float(t), right));
+        for (unsigned t = 0; t < 40; ++t)
+            assert(!slow.tick(false, 10, float(t), right));
         T chain;
         yaw = 0;
         chain.tick(false, speed, yaw, 0);
-        for (unsigned i = 0; i < T::hint_window; ++i) chain.tick(false, speed, yaw += ideal, 0);
-        for (unsigned i = 0; i <= T::ground_reset; ++i) assert(!chain.tick(true, speed, yaw, 0));
+        for (unsigned i = 0; i < T::hint_window; ++i)
+            chain.tick(false, speed, yaw += ideal, 0);
+        for (unsigned i = 0; i <= T::ground_reset; ++i)
+            assert(!chain.tick(true, speed, yaw, 0));
         r = chain.tick(false, speed, yaw += ideal, right);
         assert(r && !r->hint);  // the dead air from before the stand is gone
     }
     {
-        using T=native::StrafeTrainer;
-        const float speed=300,ideal=T::ideal_degrees(speed);
-        T wonly;float yaw=90;
-        wonly.tick(false,speed,yaw,450.f,0.f);
+        using T = native::StrafeTrainer;
+        const float speed = 300, ideal = T::ideal_degrees(speed);
+        T wonly;
+        float yaw = 90;
+        wonly.tick(false, speed, yaw, 450.f, 0.f);
         std::optional<native::StrafeReading> reading;
-        for(unsigned i=0;i<T::hint_window;++i)reading=wonly.tick(false,speed,yaw+=ideal,450.f,0.f);
-        assert(reading&&std::fabs(reading->percent-100)<.1f&&!reading->hint);
+        for (unsigned i = 0; i < T::hint_window; ++i)
+            reading = wonly.tick(false, speed, yaw += ideal, 450.f, 0.f);
+        assert(reading && std::fabs(reading->percent - 100) < .1f && !reading->hint);
         // Filtered D in W-only has no effective movement, regardless of the original physical keys.
-        T filtered;filtered.tick(false,speed,90,0.f,0.f);yaw=90;
-        for(unsigned i=0;i<T::hint_window;++i)reading=filtered.tick(false,speed,yaw+=ideal,0.f,0.f);
-        assert(reading&&reading->hint==native::StrafeHint::less_deadtime);
+        T filtered;
+        filtered.tick(false, speed, 90, 0.f, 0.f);
+        yaw = 90;
+        for (unsigned i = 0; i < T::hint_window; ++i)
+            reading = filtered.tick(false, speed, yaw += ideal, 0.f, 0.f);
+        assert(reading && reading->hint == native::StrafeHint::less_deadtime);
 
         // The reported W-only gain must use zeroed D, not the unfiltered side wish.
-        float pos[3]={0,0,100},vel[3]={300,0,0};
-        native::SsjState pre{pos,vel,true,false};
-        native::SsjTracker live(native::SsjMode::every),replay(native::SsjMode::every),raw(native::SsjMode::every);
-        const native::SsjCmd start{450,0,90,native::ssj_in_forward|native::ssj_in_jump};
-        const native::SsjCmd effective{0,0,90,0},unfiltered{0,450,90,native::ssj_in_moveright};
-        native::SsjTick info;info.jumped=true;
-        live.tick(pre,start,info);replay.tick(pre,start,info);raw.tick(pre,start,info);
-        pre.grounded=false;info.jumped=false;
-        for(int i=0;i<30;++i){live.tick(pre,effective,info);replay.tick(pre,effective,info);raw.tick(pre,unfiltered,info);}
-        pre.grounded=true;info.jumped=true;
-        const auto a=live.tick(pre,start,info),b=replay.tick(pre,start,info),c=raw.tick(pre,start,info);
-        assert(a&&b&&c&&a->gain==b->gain&&a->sync==b->sync&&a->strafes==b->strafes);
-        assert(a->gain!=c->gain||a->sync!=c->sync||a->strafes!=c->strafes);
+        float pos[3] = {0, 0, 100}, vel[3] = {300, 0, 0};
+        native::SsjState pre{pos, vel, true, false};
+        native::SsjTracker live(native::SsjMode::every), replay(native::SsjMode::every), raw(native::SsjMode::every);
+        const native::SsjCmd start{450, 0, 90, native::ssj_in_forward | native::ssj_in_jump};
+        const native::SsjCmd effective{0, 0, 90, 0}, unfiltered{0, 450, 90, native::ssj_in_moveright};
+        native::SsjTick info;
+        info.jumped = true;
+        live.tick(pre, start, info);
+        replay.tick(pre, start, info);
+        raw.tick(pre, start, info);
+        pre.grounded = false;
+        info.jumped = false;
+        for (int i = 0; i < 30; ++i) {
+            live.tick(pre, effective, info);
+            replay.tick(pre, effective, info);
+            raw.tick(pre, unfiltered, info);
+        }
+        pre.grounded = true;
+        info.jumped = true;
+        const auto a = live.tick(pre, start, info), b = replay.tick(pre, start, info), c = raw.tick(pre, start, info);
+        assert(a && b && c && a->gain == b->gain && a->sync == b->sync && a->strafes == b->strafes);
+        assert(a->gain != c->gain || a->sync != c->sync || a->strafes != c->strafes);
     }
     {
         native::MovementFeedback f;
-        f.ssj.jump=6;f.ssj_line="stale";f.ssj_gain=87.5f;f.ssj_was_in_start=true;f.ssj_was_noclip=true;
-        f.strafe_ground_ticks=99;f.strafe_reading=native::StrafeReading{100,native::StrafeHint::less_deadtime};
-        f.strafe_trainer.tick(false,300,90,450.f,0.f);
-        f.reset(false,false,true);
-        assert(f.ssj.jump==0&&f.ssj_line.empty()&&!f.ssj_gain&&!f.strafe_reading);
-        assert(f.strafe_ground_ticks==0&&!f.ssj_was_in_start&&!f.ssj_was_noclip);
-        assert(!f.strafe_trainer.tick(false,300,200,450.f,0.f)); // no stale yaw
-        for(int i=0;i<100;++i)assert(!f.history_ready(false,false,false));
-        for(unsigned i=0;i<native::bhop_frames+1;++i)assert(!f.history_ready(true,false,false));
-        assert(f.history_ready(true,false,false));
-        f.reset(false,false,true);assert(!f.history_ready(false,true,false));assert(f.history_ready(true,true,false));
-        f.reset(false,false,true);assert(!f.history_ready(true,true,true)); // noclip isn't a chain
-        f.reset(true,false);assert(f.ssj_was_in_start&&f.history_ready(false,false,false));
+        f.ssj.jump = 6;
+        f.ssj_line = "stale";
+        f.ssj_gain = 87.5f;
+        f.ssj_was_in_start = true;
+        f.ssj_was_noclip = true;
+        f.strafe_ground_ticks = 99;
+        f.strafe_reading = native::StrafeReading{100, native::StrafeHint::less_deadtime};
+        f.strafe_trainer.tick(false, 300, 90, 450.f, 0.f);
+        f.reset(false, false, true);
+        assert(f.ssj.jump == 0 && f.ssj_line.empty() && !f.ssj_gain && !f.strafe_reading);
+        assert(f.strafe_ground_ticks == 0 && !f.ssj_was_in_start && !f.ssj_was_noclip);
+        assert(!f.strafe_trainer.tick(false, 300, 200, 450.f, 0.f));  // no stale yaw
+        for (int i = 0; i < 100; ++i)
+            assert(!f.history_ready(false, false, false));
+        for (unsigned i = 0; i < native::bhop_frames + 1; ++i)
+            assert(!f.history_ready(true, false, false));
+        assert(f.history_ready(true, false, false));
+        f.reset(false, false, true);
+        assert(!f.history_ready(false, true, false));
+        assert(f.history_ready(true, true, false));
+        f.reset(false, false, true);
+        assert(!f.history_ready(true, true, true));  // noclip isn't a chain
+        f.reset(true, false);
+        assert(f.ssj_was_in_start && f.history_ready(false, false, false));
     }
     std::cout << "Jump stats interval and strafe trainer checks passed\n";
     return 0;

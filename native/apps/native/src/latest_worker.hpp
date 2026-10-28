@@ -10,12 +10,15 @@
 namespace native {
 // One running job and one replaceable pending job. The shared state outlives the
 // service on shutdown so an uninterruptible library call never holds the UI up.
-template <class Result> class LatestWorker {
+template <class Result>
+class LatestWorker {
     using Work = std::function<Result(const std::atomic_bool &)>;
+
     struct Request {
         Work work;
         std::shared_ptr<std::atomic_bool> cancelled;
     };
+
     struct State {
         std::mutex mutex;
         std::condition_variable changed;
@@ -24,14 +27,15 @@ template <class Result> class LatestWorker {
         std::shared_ptr<std::atomic_bool> active;
         std::optional<Result> ready;
     };
+
     std::shared_ptr<State> state_ = std::make_shared<State>();
     std::thread worker_;
+
     static void run(const std::shared_ptr<State> &state) {
         std::unique_lock lock(state->mutex);
         for (;;) {
             state->changed.wait(lock, [&] { return state->stop || state->pending.has_value(); });
-            if (state->stop)
-                return;
+            if (state->stop) return;
             auto request = std::move(*state->pending);
             state->pending.reset();
             state->active = request.cancelled;
@@ -43,22 +47,22 @@ template <class Result> class LatestWorker {
                 // Services turn expected failures into Results. No exception may escape a worker.
             }
             lock.lock();
-            if (!*request.cancelled && !state->stop)
-                state->ready = std::move(result);
+            if (!*request.cancelled && !state->stop) state->ready = std::move(result);
             state->active.reset();
         }
     }
+
     void cancel_locked() {
-        if (state_->active)
-            *state_->active = true;
+        if (state_->active) *state_->active = true;
         state_->pending.reset();
         state_->ready.reset();
     }
 
-  public:
+public:
     LatestWorker() = default;
     LatestWorker(const LatestWorker &) = delete;
     LatestWorker &operator=(const LatestWorker &) = delete;
+
     ~LatestWorker() {
         {
             std::lock_guard lock(state_->mutex);
@@ -66,21 +70,22 @@ template <class Result> class LatestWorker {
             state_->stop = true;
         }
         state_->changed.notify_one();
-        if (worker_.joinable())
-            worker_.detach();
+        if (worker_.joinable()) worker_.detach();
     }
+
     void cancel() {
         std::lock_guard lock(state_->mutex);
         cancel_locked();
     }
+
     void submit(Work work) {
         std::lock_guard lock(state_->mutex);
         cancel_locked();
         state_->pending = Request{std::move(work), std::make_shared<std::atomic_bool>(false)};
-        if (!worker_.joinable())
-            worker_ = std::thread(run, state_);
+        if (!worker_.joinable()) worker_ = std::thread(run, state_);
         state_->changed.notify_one();
     }
+
     std::optional<Result> take() {
         std::lock_guard lock(state_->mutex);
         auto result = std::move(state_->ready);
@@ -88,7 +93,8 @@ template <class Result> class LatestWorker {
         return result;
     }
 };
+
 inline int replay_cancelled(void *data) {
     return static_cast<const std::atomic_bool *>(data)->load(std::memory_order_relaxed);
 }
-} // namespace native
+}  // namespace native

@@ -35,9 +35,11 @@ void check(int result, BhContext *core) {
 
 struct Fixture {
     std::filesystem::path directory =
-        std::filesystem::temp_directory_path() /
-        native::data_location::from_utf8("bunnyhop-v29-Jos\xc3\xa9-\xe6\xb8\xac-" +
-                                         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+            std::filesystem::temp_directory_path()
+            / native::data_location::from_utf8(
+                    "bunnyhop-v29-Jos\xc3\xa9-\xe6\xb8\xac-"
+                    + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())
+            );
     Core core{bh_create(), bh_destroy};
     std::array<BhZone, 2> zones{};
 
@@ -53,8 +55,11 @@ struct Fixture {
         std::ofstream model_output(directory / "models" / "fixture" / "box.mdl", std::ios::binary);
         model_output.write(reinterpret_cast<const char *>(model.data()), std::streamsize(model.size()));
         model_output.close();
-        check(bh_load_map(core.get(), native::data_location::utf8(map).c_str(),
-                          native::data_location::utf8(directory).c_str()),
+        check(bh_load_map(
+                      core.get(),
+                      native::data_location::utf8(map).c_str(),
+                      native::data_location::utf8(directory).c_str()
+              ),
               core.get());
         zones[0] = {0, 0, 0, {-100, -100, -10000}, {100, 100, 1000}};
         zones[1] = {1, 0, 0, {150, -100, -10000}, {1000, 100, 1000}};
@@ -96,9 +101,14 @@ struct Fixture {
         return path;
     }
 
-    void record_tick(native::Input &input, native::InputTimeline &timeline, native::InputScheduler &scheduler,
-                     native::RecordingInput &recording, uint64_t tick,
-                     bool contribute) {
+    void record_tick(
+            native::Input &input,
+            native::InputTimeline &timeline,
+            native::InputScheduler &scheduler,
+            native::RecordingInput &recording,
+            uint64_t tick,
+            bool contribute
+    ) {
         const uint64_t now = 1'000'000'000 + tick * tick_ns;
         scheduler.frame(now, true, tick_ns);
         timeline.begin_pump(input, now, scheduler, tick_ns);
@@ -162,12 +172,15 @@ void test_recording_options_roundtrip() {
 void test_turn_settings_validation() {
     const auto defaults = native::default_settings();
     assert(defaults.at("yawSpeed") == 210 && defaults.at("angleSpeedKey") == 2);
-    for (const auto &patch : {Json{{"yawSpeed", 60}}, Json{{"yawSpeed", 720}},
-                              Json{{"angleSpeedKey", 1}}, Json{{"angleSpeedKey", 4}}}) {
+    for (const auto &patch :
+         {Json{{"yawSpeed", 60}}, Json{{"yawSpeed", 720}}, Json{{"angleSpeedKey", 1}}, Json{{"angleSpeedKey", 4}}}) {
         native::patch_settings(defaults, patch);
     }
-    for (const auto &patch : {Json{{"yawSpeed", 59.99}}, Json{{"yawSpeed", 720.01}},
-                              Json{{"angleSpeedKey", .99}}, Json{{"angleSpeedKey", 4.01}}}) {
+    for (const auto &patch :
+         {Json{{"yawSpeed", 59.99}},
+          Json{{"yawSpeed", 720.01}},
+          Json{{"angleSpeedKey", .99}},
+          Json{{"angleSpeedKey", 4.01}}}) {
         bool rejected = false;
         try {
             native::patch_settings(defaults, patch);
@@ -190,8 +203,15 @@ void test_practice_takeover() {
             zones[0].maxs[0] += 1;
         }
         try {
-            native::ReplayTakeover::take(fixture.core.get(), info, zones,
-                rejection == 2 ? "legit" : "autohop", rejection == 0, rejection == 1, 10);
+            native::ReplayTakeover::take(
+                    fixture.core.get(),
+                    info,
+                    zones,
+                    rejection == 2 ? "legit" : "autohop",
+                    rejection == 0,
+                    rejection == 1,
+                    10
+            );
         } catch (const std::exception &) {
             rejected = true;
         }
@@ -202,8 +222,8 @@ void test_practice_takeover() {
     }
     BhSnapshot expected{};
     check(bh_replay_seek(fixture.core.get(), 20, &expected), fixture.core.get());
-    const auto takeover = native::ReplayTakeover::take(fixture.core.get(), info, fixture.zones,
-                                                     "autohop", false, false, 20);
+    const auto takeover =
+            native::ReplayTakeover::take(fixture.core.get(), info, fixture.zones, "autohop", false, false, 20);
     assert(std::memcmp(&takeover.snapshot, &expected, sizeof(expected)) == 0);
     native::Practice practice;
     native::Input input;
@@ -222,13 +242,14 @@ void test_practice_takeover() {
     check(bh_step(fixture.core.get(), &command, &state), fixture.core.get());
     assert(state.tick == 21);
     assert(!bh_record_begin(fixture.core.get(), "", "autohop", "test", 100));
-    assert(!bh_record_write_bhr(fixture.core.get(),
-                                native::data_location::utf8(fixture.directory / "invalid.bhr").c_str()));
+    assert(!bh_record_write_bhr(
+            fixture.core.get(), native::data_location::utf8(fixture.directory / "invalid.bhr").c_str()
+    ));
     practice.restart();
     assert(!practice.active);
     check(bh_replay_load(fixture.core.get(), native::data_location::utf8(path).c_str()), fixture.core.get());
-    const auto spawn = native::ReplayTakeover::take(fixture.core.get(), info, fixture.zones,
-                                                  "autohop", false, false, 0);
+    const auto spawn =
+            native::ReplayTakeover::take(fixture.core.get(), info, fixture.zones, "autohop", false, false, 0);
     assert(spawn.snapshot.player.tick == 0 && spawn.view.yaw == 0);
 }
 
@@ -252,20 +273,21 @@ void test_practice_rejection_replies() {
         if (reason == 5) expected = "No practice during a gauntlet.";
         if (reason == 6) expected = "Practice is for solo play, not servers.";
         try {
-            native::ReplayTakeover::take(fixture.core.get(), info, fixture.zones, selected,
-                                         reason == 5, reason == 6, 10, map);
+            native::ReplayTakeover::take(
+                    fixture.core.get(), info, fixture.zones, selected, reason == 5, reason == 6, 10, map
+            );
             assert(false);
         } catch (const std::exception &failure) {
             assert(failure.what() == expected);
-            assert(native::practice_from_replay_reply(false, failure.what()) ==
-                   Json({{"type", "practiceFromReplayResult"}, {"ok", false}, {"reason", expected}}));
+            assert(native::practice_from_replay_reply(false, failure.what())
+                   == Json({{"type", "practiceFromReplayResult"}, {"ok", false}, {"reason", expected}}));
         }
         BhState state{};
         check(bh_state(fixture.core.get(), &state), fixture.core.get());
         assert(state.tick == 0);
     }
-    assert(native::practice_from_replay_reply(true) ==
-           Json({{"type", "practiceFromReplayResult"}, {"ok", true}, {"reason", nullptr}}));
+    assert(native::practice_from_replay_reply(true)
+           == Json({{"type", "practiceFromReplayResult"}, {"ok", true}, {"reason", nullptr}}));
 }
 
 void test_replay_playback_range() {
@@ -286,15 +308,16 @@ void test_replay_playback_range() {
     assert(session.seek(fixture.core.get(), session.range.total).snapshot.player.tick == session.range.to);
     assert(decompress(path) == before);
 
-    Json info = {{"startTick", 1900}, {"endTick", 4300}, {"totalTicks", 5000},
-                 {"settings", {{"tickInterval", .01}}}};
+    Json info = {{"startTick", 1900}, {"endTick", 4300}, {"totalTicks", 5000}, {"settings", {{"tickInterval", .01}}}};
     const auto range = native::ReplayRange::make(info);
     assert(range.from == 1800 && range.to == 4450 && range.ticks() == 2650);
+
     struct ExportOptions {
         uint32_t from = 0;
         uint32_t to = 0;
         bool full_recording = false;
     };
+
     ExportOptions clip;
     range.export_bounds(clip);
     assert(clip.from == 1800 && clip.to == 4450);
@@ -353,8 +376,9 @@ void test_replay_library_cache() {
         const auto map_cache = fixture.directory / "maps" / header.at("mapSha256").get<std::string>();
         std::filesystem::create_directories(map_cache / "content");
         std::filesystem::copy_file(fixture.directory / "fixture.bsp", map_cache / "fixture.bsp");
-        std::filesystem::copy(fixture.directory / "models", map_cache / "content" / "models",
-                              std::filesystem::copy_options::recursive);
+        std::filesystem::copy(
+                fixture.directory / "models", map_cache / "content" / "models", std::filesystem::copy_options::recursive
+        );
         library.refresh();
         library.flush();
         const auto retimed = library.take();
@@ -363,10 +387,19 @@ void test_replay_library_cache() {
         assert(scored.at("timingPolicy") == 1);
         assert(scored.at("timeMs") == native::score_ms(expected.seconds));
         assert(scored.at("seconds").get<double>() == expected.seconds);
-        library.archive("run.bhr",
-                        {{"map", "fixture"}, {"style", "autohop"}, {"track", 0},
-                         {"timeMs", native::score_ms(expected.seconds)}, {"timingPolicy", 1},
-                         {"jumps", 2}, {"strafes", 3}, {"sync", 90}, {"finishedAt", 1234}}, false);
+        library.archive(
+                "run.bhr",
+                {{"map", "fixture"},
+                 {"style", "autohop"},
+                 {"track", 0},
+                 {"timeMs", native::score_ms(expected.seconds)},
+                 {"timingPolicy", 1},
+                 {"jumps", 2},
+                 {"strafes", 3},
+                 {"sync", 90},
+                 {"finishedAt", 1234}},
+                false
+        );
         library.flush();
         const auto archived = library.take();
         assert(archived && archived->replays->at(0).at("timeMs") == scored.at("timeMs"));
@@ -387,17 +420,19 @@ void test_replay_library_cache() {
         library.flush();
         const auto removed = library.take();
         assert(removed && removed->replays->empty());
-        library.archive("saved.bhr",
-                        {{"map", "fixture"},
-                         {"style", "autohop"},
-                         {"track", 0},
-                         {"time", 10},
-                         {"jumps", 2},
-                         {"strafes", 3},
-                         {"sync", 90},
-                         {"finishedAt", 1234},
-                         {"eligible", true}},
-                        false);
+        library.archive(
+                "saved.bhr",
+                {{"map", "fixture"},
+                 {"style", "autohop"},
+                 {"track", 0},
+                 {"time", 10},
+                 {"jumps", 2},
+                 {"strafes", 3},
+                 {"sync", 90},
+                 {"finishedAt", 1234},
+                 {"eligible", true}},
+                false
+        );
         // Destructor drains accepted archive jobs.
     }
     native::RunVault vault(fixture.directory / "run-vault");
@@ -410,7 +445,8 @@ void test_restart_placement_and_recorded_names() {
         for (const uint32_t track : {0u, 1u}) {
             for (const bool practice : {false, true}) {
                 auto zones = fixture.zones;
-                for (auto &zone : zones) zone.track = track;
+                for (auto &zone : zones)
+                    zone.track = track;
                 zones[0].mins[2] = 64;
                 BhRunOptions options{};
                 bh_default_run_options(&options);
@@ -422,12 +458,15 @@ void test_restart_placement_and_recorded_names() {
                 native::StartPoints points;
                 if (practice) points.save(map, track, player, 0, 0, true);
                 const auto restart = native::RestartPlacement::place(
-                    fixture.core.get(), map, track, std::vector<BhZone>(zones.begin(), zones.end()), &points);
+                        fixture.core.get(), map, track, std::vector<BhZone>(zones.begin(), zones.end()), &points
+                );
                 assert(restart.practice == practice);
                 const auto evidence = fixture.directory / "restart.jsonl";
                 std::filesystem::remove(evidence);
-                check(bh_record_begin(fixture.core.get(), native::data_location::utf8(evidence).c_str(),
-                                       "autohop", "test", 100), fixture.core.get());
+                check(bh_record_begin(
+                              fixture.core.get(), native::data_location::utf8(evidence).c_str(), "autohop", "test", 100
+                      ),
+                      fixture.core.get());
                 check(bh_record_end(fixture.core.get()), fixture.core.get());
                 std::ifstream input(evidence);
                 Json header;
@@ -448,8 +487,8 @@ void test_bonus_takeover_uses_normal_style() {
     const auto path = fixture.record("bonus.bhr", true, true);
     const auto session = native::ReplaySession::open(fixture.core.get(), path);
     assert(session.info.at("track") == 1);
-    const auto takeover = native::ReplayTakeover::take(fixture.core.get(), session.info, fixture.zones,
-                                                     "legit", false, false, 0);
+    const auto takeover =
+            native::ReplayTakeover::take(fixture.core.get(), session.info, fixture.zones, "legit", false, false, 0);
     assert(takeover.track == 1 && takeover.style == "autohop");
 }
 

@@ -9,38 +9,35 @@ namespace native {
 
 // Applies WindowModePolicy to the SDL window for client.cpp: launch, the Esc
 // menu, focus and minimize events, settings changes and Alt+Enter.
-template <class Controller> class BasicWindowModeDriver {
-  public:
+template <class Controller>
+class BasicWindowModeDriver {
+public:
     BasicWindowModeDriver(Controller &controller, const std::string &chosen)
-        : controller_(controller), policy_(chosen) {}
+        : controller_(controller)
+        , policy_(chosen) {}
 
-    const WindowModePolicy& policy() const {
-        return policy_;
-    }
+    const WindowModePolicy &policy() const { return policy_; }
 
     // Launch opens the home menu (when there is one), so start as it will be shown.
     // On failure the policy follows whatever mode the window kept.
-    bool launch(const WindowJson& preferences, bool menu, const std::optional<WindowBounds>& saved) {
+    bool launch(const WindowJson &preferences, bool menu, const std::optional<WindowBounds> &saved) {
         policy_.menu_open = menu;
-        if (controller_.apply(policy_.effective(preferences), true, saved))
-            return true;
+        if (controller_.apply(policy_.effective(preferences), true, saved)) return true;
         policy_.choose(controller_.mode());
         return false;
     }
 
     // Shows what the policy wants, unless the window is minimized.
-    void sync(const WindowJson& preferences) {
+    void sync(const WindowJson &preferences) {
         policy_.minimized = policy_.minimized || controller_.is_minimized();
-        if (!policy_.request())
-            return;
+        if (!policy_.request()) return;
         const WindowJson want = policy_.effective(preferences);
-        if (!controller_.apply(want))
-            std::cerr << "Window: " << controller_.error() << '\n';
+        if (!controller_.apply(want)) std::cerr << "Window: " << controller_.error() << '\n';
     }
 
     // The Esc menu opened or closed. When focus loss opened it, the mode change
     // waits until the window has focus again.
-    void set_menu(bool open, bool from_focus_loss, const WindowJson& preferences) {
+    void set_menu(bool open, bool from_focus_loss, const WindowJson &preferences) {
         policy_.menu_open = open;
         if (from_focus_loss) {
             policy_.waiting_for_focus = true;
@@ -49,20 +46,14 @@ template <class Controller> class BasicWindowModeDriver {
             sync(preferences);
     }
 
-    void focus_lost(bool minimized) {
-        policy_.minimized = minimized;
-    }
+    void focus_lost(bool minimized) { policy_.minimized = minimized; }
 
-    void minimized() {
-        policy_.minimized = true;
-    }
+    void minimized() { policy_.minimized = true; }
 
     // Focus gained or the window restored.
-    void resumed(const WindowJson& preferences) {
-        if (controller_.is_minimized())
-            return;
-        if (policy_.resume())
-            sync(preferences);
+    void resumed(const WindowJson &preferences) {
+        if (controller_.is_minimized()) return;
+        if (policy_.resume()) sync(preferences);
         if (pending_refit_) {
             pending_refit_ = false;
             controller_.refit();
@@ -71,7 +62,7 @@ template <class Controller> class BasicWindowModeDriver {
 
     // `preferences` with its windowMode applied (a settings change). The result
     // is what to keep; nullopt when the window manager refused (controller error()).
-    std::optional<WindowJson> choose(const WindowJson& preferences) {
+    std::optional<WindowJson> choose(const WindowJson &preferences) {
         auto next = policy_;
         next.minimized = next.minimized || controller_.is_minimized();
         next.choose(preferences.value("windowMode", std::string("windowed")));
@@ -79,8 +70,7 @@ template <class Controller> class BasicWindowModeDriver {
             policy_ = next;
             return preferences;
         }
-        if (!controller_.apply(next.effective(preferences)))
-            return std::nullopt;
+        if (!controller_.apply(next.effective(preferences))) return std::nullopt;
         policy_ = next;
         return preferences;
     }
@@ -101,10 +91,10 @@ template <class Controller> class BasicWindowModeDriver {
     }
 
 private:
-  Controller &controller_;
-  bool pending_refit_ = false;
-  WindowModePolicy policy_;
+    Controller &controller_;
+    bool pending_refit_ = false;
+    WindowModePolicy policy_;
 };
 
 using WindowModeDriver = BasicWindowModeDriver<WindowController>;
-}
+}  // namespace native

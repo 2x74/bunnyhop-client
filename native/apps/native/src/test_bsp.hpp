@@ -71,10 +71,10 @@ inline Bytes make_bsp() {
     integer(bytes, 0, 0x50534256);
     integer(bytes, 4, 20);
     constexpr std::string_view entities =
-        "{\"classname\" \"worldspawn\"}\n"
-        "{\"classname\" \"info_player_start\" \"origin\" \"10 20 100\" \"angles\" \"0 45 0\"}\n"
-        "{\"classname\" \"prop_dynamic\" \"model\" \"models/fixture/box.mdl\" "
-        "\"solid\" \"2\" \"origin\" \"10 20 0\"}";
+            "{\"classname\" \"worldspawn\"}\n"
+            "{\"classname\" \"info_player_start\" \"origin\" \"10 20 100\" \"angles\" \"0 45 0\"}\n"
+            "{\"classname\" \"prop_dynamic\" \"model\" \"models/fixture/box.mdl\" "
+            "\"solid\" \"2\" \"origin\" \"10 20 0\"}";
     lump(bytes, 0, 0, {reinterpret_cast<const uint8_t *>(entities.data()), entities.size()});
     Bytes plane(20);
     number(plane, 8, 1);

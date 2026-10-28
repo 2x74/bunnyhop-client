@@ -9,15 +9,21 @@ namespace native {
 namespace {
 constexpr std::uintmax_t replay_max_bytes = 8 * 1024 * 1024;
 constexpr size_t replay_list_limit = 500;
+
 // Imported BHRs contain ticks, not a score. Re-time them on the worker when the
 // matching map is cached; never alter the replay bytes or block the frame loop.
-std::optional<int64_t> replay_score(BhContext *core, const std::filesystem::path &cache,
-                                    const std::filesystem::path &replay, const nlohmann::json &info) {
+std::optional<int64_t> replay_score(
+        BhContext *core,
+        const std::filesystem::path &cache,
+        const std::filesystem::path &replay,
+        const nlohmann::json &info
+) {
     const auto map = info.at("map").get<std::string>();
     const auto hash = info.at("mapSha256").get<std::string>();
-    if (map.empty() || map.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") !=
-                           std::string::npos || hash.size() != 64 ||
-        hash.find_first_not_of("0123456789abcdef") != std::string::npos) {
+    if (map.empty()
+        || map.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+                   != std::string::npos
+        || hash.size() != 64 || hash.find_first_not_of("0123456789abcdef") != std::string::npos) {
         return std::nullopt;
     }
     const auto directory = cache / "maps" / hash;
@@ -25,23 +31,25 @@ std::optional<int64_t> replay_score(BhContext *core, const std::filesystem::path
     if (!std::filesystem::is_regular_file(bsp)) {
         return std::nullopt;
     }
-    if (!bh_load_map(core, data_location::utf8(bsp).c_str(),
-                     data_location::utf8(directory / "content").c_str()) ||
-        !bh_replay_load(core, data_location::utf8(replay).c_str())) {
+    if (!bh_load_map(core, data_location::utf8(bsp).c_str(), data_location::utf8(directory / "content").c_str())
+        || !bh_replay_load(core, data_location::utf8(replay).c_str())) {
         return std::nullopt;
     }
     BhSnapshot state{};
     BhRunState run{};
-    if (!bh_replay_seek(core, info.at("endTick").get<uint32_t>(), &state) ||
-        !bh_run_state(core, &run) || run.status != 2) {
+    if (!bh_replay_seek(core, info.at("endTick").get<uint32_t>(), &state) || !bh_run_state(core, &run)
+        || run.status != 2) {
         return std::nullopt;
     }
     return score_ms(run.seconds);
 }
-} // namespace
+}  // namespace
 
 ReplayLibrary::ReplayLibrary(std::filesystem::path cache)
-    : replays_(cache / "replays"), vault_(cache / "run-vault"), worker_([this] { work(); }) {}
+    : replays_(cache / "replays")
+    , vault_(cache / "run-vault")
+    , worker_([this] { work(); }) {
+}
 
 ReplayLibrary::~ReplayLibrary() {
     {
@@ -92,18 +100,17 @@ void ReplayLibrary::flush() {
 
 void ReplayLibrary::execute(const Job &job, Update &update) {
     switch (job.kind) {
-    case Job::Kind::archive: {
-        const auto summary = vault_.archive(job.id, job.summary);
-        if (job.capture && summary.value("localPb", false))
-            update.captures.push_back({job.id, summary.at("map")});
-        break;
-    }
-    case Job::Kind::attach:
-        vault_.attach(job.id, job.png);
-        break;
-    case Job::Kind::trash:
-        vault_.trash(job.id);
-        break;
+        case Job::Kind::archive: {
+            const auto summary = vault_.archive(job.id, job.summary);
+            if (job.capture && summary.value("localPb", false)) update.captures.push_back({job.id, summary.at("map")});
+            break;
+        }
+        case Job::Kind::attach:
+            vault_.attach(job.id, job.png);
+            break;
+        case Job::Kind::trash:
+            vault_.trash(job.id);
+            break;
     }
 }
 
@@ -111,8 +118,7 @@ void ReplayLibrary::work() {
     std::unique_lock lock(mutex_);
     while (true) {
         wake_.wait(lock, [this] { return stopping_ || scan_ || !jobs_.empty(); });
-        if (stopping_ && jobs_.empty() && !scan_)
-            return;
+        if (stopping_ && jobs_.empty() && !scan_) return;
         auto jobs = std::move(jobs_);
         jobs_.clear();
         scan_ = false;
@@ -136,10 +142,8 @@ void ReplayLibrary::work() {
             update.errors.push_back("Local replay scan failed");
         }
         lock.lock();
-        if (!update_)
-            update_.emplace();
-        if (update.replays)
-            update_->replays = std::move(update.replays);
+        if (!update_) update_.emplace();
+        if (update.replays) update_->replays = std::move(update.replays);
         update_->decoded += update.decoded;
         for (auto &capture : update.captures)
             update_->captures.push_back(std::move(capture));
@@ -154,17 +158,15 @@ void ReplayLibrary::scan(Update &update) {
     using Json = nlohmann::json;
     std::vector<std::filesystem::directory_entry> files;
     for (const auto &entry : std::filesystem::directory_iterator(replays_)) {
-        if (!entry.is_symlink() && entry.is_regular_file() && entry.path().extension() == ".bhr" &&
-            entry.file_size() <= replay_max_bytes)
+        if (!entry.is_symlink() && entry.is_regular_file() && entry.path().extension() == ".bhr"
+            && entry.file_size() <= replay_max_bytes)
             files.push_back(entry);
     }
     std::sort(files.begin(), files.end(), [](const auto &left, const auto &right) {
-        if (left.last_write_time() != right.last_write_time())
-            return left.last_write_time() > right.last_write_time();
+        if (left.last_write_time() != right.last_write_time()) return left.last_write_time() > right.last_write_time();
         return left.path() < right.path();
     });
-    if (files.size() > replay_list_limit)
-        files.resize(replay_list_limit);
+    if (files.size() > replay_list_limit) files.resize(replay_list_limit);
     std::unique_ptr<BhContext, decltype(&bh_destroy)> core(nullptr, bh_destroy);
     std::set<std::filesystem::path> seen;
     Json list = Json::array();
@@ -176,10 +178,8 @@ void ReplayLibrary::scan(Update &update) {
             const auto modified = entry.last_write_time();
             auto cached = headers_.find(path);
             if (cached == headers_.end() || cached->second.size != size || cached->second.modified != modified) {
-                if (!core)
-                    core.reset(bh_create());
-                if (!core)
-                    throw std::runtime_error("Could not create replay reader");
+                if (!core) core.reset(bh_create());
+                if (!core) throw std::runtime_error("Could not create replay reader");
                 size_t bytes = 0;
                 ++update.decoded;
                 const auto raw = bh_replay_header(core.get(), data_location::utf8(path).c_str(), &bytes);
@@ -187,8 +187,7 @@ void ReplayLibrary::scan(Update &update) {
                 cached = headers_.insert_or_assign(path, CachedHeader{size, modified, info}).first;
             }
             auto &info = cached->second.info;
-            if (!info.is_object())
-                continue;
+            if (!info.is_object()) continue;
             const auto id = data_location::utf8(path.filename());
             const auto summary = vault_.read(id);
             if (summary.is_object() && summary.value("timingPolicy", Json(nullptr)) == timing_policy) {
@@ -203,14 +202,18 @@ void ReplayLibrary::scan(Update &update) {
                 }
             }
             const auto ms = info.contains("timeMs") ? info.at("timeMs").get<int64_t>() : legacy_replay_ms(info);
-            Json listed = {{"id", id},
-                           {"name", info.value("player", std::string("Local run"))},
-                           {"map", info.at("map")},
-                           {"style", info.value("style", std::string("autohop"))},
-                           {"track", info.value("track", 0)},
-                           {"recordedAt", info.value("recordedAt", 0.)},
-                           {"bytes", size}, {"seconds", score_seconds(ms)}, {"timeMs", ms},
-                           {"timingPolicy", info.contains("timeMs") ? Json(timing_policy) : Json(nullptr)}};
+            Json listed = {
+                    {"id", id},
+                    {"name", info.value("player", std::string("Local run"))},
+                    {"map", info.at("map")},
+                    {"style", info.value("style", std::string("autohop"))},
+                    {"track", info.value("track", 0)},
+                    {"recordedAt", info.value("recordedAt", 0.)},
+                    {"bytes", size},
+                    {"seconds", score_seconds(ms)},
+                    {"timeMs", ms},
+                    {"timingPolicy", info.contains("timeMs") ? Json(timing_policy) : Json(nullptr)}
+            };
             if (summary.is_object()) {
                 listed["localSummary"] = summary;
             }
@@ -224,4 +227,4 @@ void ReplayLibrary::scan(Update &update) {
     update.replays = std::move(list);
 }
 
-} // namespace native
+}  // namespace native

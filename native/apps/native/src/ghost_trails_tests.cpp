@@ -16,6 +16,7 @@ static native_render::GhostPath recorded_path() {
     path.enabled = true;
     return path;
 }
+
 int main() {
     using namespace native_render;
     auto path = recorded_path();

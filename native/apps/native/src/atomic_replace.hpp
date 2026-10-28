@@ -15,8 +15,7 @@ namespace native {
 
 inline void atomic_replace(const std::filesystem::path &source, const std::filesystem::path &destination) {
 #ifdef _WIN32
-    if (!MoveFileExW(source.c_str(), destination.c_str(),
-                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    if (!MoveFileExW(source.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
         throw std::system_error(int(GetLastError()), std::system_category(), "Replacing file");
     }
 #else
@@ -35,18 +34,15 @@ inline void atomic_write_file(const std::filesystem::path &destination, std::str
 #else
     FILE *output = std::fopen(temporary.c_str(), "wbx");
 #endif
-    if (!output)
-        throw std::system_error(errno, std::generic_category(), "Creating temporary file");
+    if (!output) throw std::system_error(errno, std::generic_category(), "Creating temporary file");
     try {
         const bool written = std::fwrite(text.data(), 1, text.size(), output) == text.size();
         const bool closed = std::fclose(output) == 0;
         output = nullptr;
-        if (!written || !closed)
-            throw std::runtime_error("The file couldn't be written.");
+        if (!written || !closed) throw std::runtime_error("The file couldn't be written.");
         atomic_replace(temporary, destination);
     } catch (...) {
-        if (output)
-            std::fclose(output);
+        if (output) std::fclose(output);
         std::error_code error;
         std::filesystem::remove(temporary, error);
         throw;

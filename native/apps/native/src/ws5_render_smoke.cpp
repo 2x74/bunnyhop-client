@@ -30,6 +30,7 @@ static native_render::GhostPath fixture_path(const BhSnapshot &spawn, unsigned s
     path.teleports[200] = 1;
     return path;
 }
+
 int main(int argc, char **argv) {
     try {
         if (argc != 4) {
@@ -38,11 +39,11 @@ int main(int argc, char **argv) {
         if (!SDL_Init(SDL_INIT_VIDEO)) {
             throw std::runtime_error(SDL_GetError());
         }
+
         struct Sdl {
-            ~Sdl() {
-                SDL_Quit();
-            }
+            ~Sdl() { SDL_Quit(); }
         } sdl;
+
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
@@ -51,22 +52,24 @@ int main(int argc, char **argv) {
         if (!window) {
             throw std::runtime_error(SDL_GetError());
         }
+
         struct Window {
             SDL_Window *value;
-            ~Window() {
-                SDL_DestroyWindow(value);
-            }
+
+            ~Window() { SDL_DestroyWindow(value); }
         } window_guard{window};
+
         const auto context = SDL_GL_CreateContext(window);
         if (!context) {
             throw std::runtime_error(SDL_GetError());
         }
+
         struct Context {
             SDL_GLContext value;
-            ~Context() {
-                SDL_GL_DestroyContext(value);
-            }
+
+            ~Context() { SDL_GL_DestroyContext(value); }
         } context_guard{context};
+
         SDL_GL_MakeCurrent(window, context);
         SDL_GL_SetSwapInterval(0);
         Gl gl;
@@ -137,7 +140,7 @@ int main(int argc, char **argv) {
         supporter.loadout = "2;knife-carrot;fin-garden;glove-knit;;hat-halo";
         supporter.opacity = 1;
         supporter.playerGlow =
-            native_render::parse_glow({{"enabled", true}, {"aura", true}, {"intensity", 1}, {"color", "violet"}});
+                native_render::parse_glow({{"enabled", true}, {"aura", true}, {"intensity", 1}, {"color", "violet"}});
         actors.push_back(supporter);
         preferences["ghostRoute"] = false;
         renderer.clear_ghosts();
@@ -149,20 +152,24 @@ int main(int argc, char **argv) {
         capture("graphics-4x3-stretched");
         preferences["graphicsAspectFit"] = "bars";
         capture("graphics-4x3-bars");
-        preferences.update({{"graphicsAspect", "native"},
-                            {"graphicsAntialias", true},
+        preferences.update(
+                {{"graphicsAspect", "native"},
+                 {"graphicsAntialias", true},
 
-                            {"graphicsBrightness", 1.2},
-                            {"graphicsGamma", 1.15},
-                            {"graphicsVibrance", 1.4},
-                            {"graphicsResolutionScale", .75}});
+                 {"graphicsBrightness", 1.2},
+                 {"graphicsGamma", 1.15},
+                 {"graphicsVibrance", 1.4},
+                 {"graphicsResolutionScale", .75}}
+        );
         capture("graphics-msaa-grade-scale");
-        preferences.update({{"graphicsBrightness", 1},
-                            {"graphicsGamma", 1},
-                            {"graphicsVibrance", 1},
-                            {"graphicsAntialias", false},
-                            {"graphicsResolutionScale", 1},
-                            {"graphicsFullbright", true}});
+        preferences.update(
+                {{"graphicsBrightness", 1},
+                 {"graphicsGamma", 1},
+                 {"graphicsVibrance", 1},
+                 {"graphicsAntialias", false},
+                 {"graphicsResolutionScale", 1},
+                 {"graphicsFullbright", true}}
+        );
         capture("graphics-fullbright");
         preferences.update({{"graphicsFullbright", false}, {"graphicsPotato", true}});
         capture("graphics-potato");

@@ -42,4 +42,4 @@ inline int64_t legacy_replay_ms(const nlohmann::json &info) {
     const auto tick_us = std::floor(double(float(interval)) * microseconds_per_second + 0.5);
     return int64_t(std::floor(double(ticks) * tick_us / microseconds_per_millisecond + 0.5));
 }
-} // namespace native
+}  // namespace native

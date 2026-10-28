@@ -6,9 +6,11 @@
 
 namespace native {
 inline constexpr std::array<std::string_view, 23> web_hud_elements = {
-    "speed",         "timer",    "split",         "track",     "stage",    "stats",      "sync",    "keys",
-    "ghostKeys",     "graph",    "jumpStats",     "map",       "pb",       "fps",        "chat",    "ammo",
-    "strafeTrainer", "startPre", "strafeOffsets", "firstJump", "longJump", "spectators", "practice"};
+        "speed",         "timer",    "split",         "track",     "stage",    "stats",      "sync",    "keys",
+        "ghostKeys",     "graph",    "jumpStats",     "map",       "pb",       "fps",        "chat",    "ammo",
+        "strafeTrainer", "startPre", "strafeOffsets", "firstJump", "longJump", "spectators", "practice"
+};
+
 inline void append_capabilities(Json &result, const Json &entries) {
     for (const auto &entry : entries) {
         if (entry.is_string() && std::find(result.begin(), result.end(), entry) == result.end())
@@ -27,4 +29,4 @@ inline const Json &native_capabilities() {
     }();
     return capabilities;
 }
-} // namespace native
+}  // namespace native

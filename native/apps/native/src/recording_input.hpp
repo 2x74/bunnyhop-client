@@ -28,6 +28,7 @@ public:
     }
 
     void stop() { active_ = false; }
+
     bool active() const { return active_; }
 
 private:

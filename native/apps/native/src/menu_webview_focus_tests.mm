@@ -9,11 +9,11 @@
 
 namespace {
 
-const char* kMenuHtml = "<!doctype html><html><body><button>Play</button></body></html>";
+const char *kMenuHtml = "<!doctype html><html><body><button>Play</button></body></html>";
 
-NSWindow* cocoa_window(SDL_Window* window) {
+NSWindow *cocoa_window(SDL_Window *window) {
     const auto properties = SDL_GetWindowProperties(window);
-    return (__bridge NSWindow*)SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
+    return (__bridge NSWindow *)SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
 }
 
 void pump() {
@@ -22,8 +22,9 @@ void pump() {
     }
 }
 
-void check_mode(const std::string& mode) {
-    SDL_Window* window = SDL_CreateWindow("Bunnyhop menu focus test", 800, 600, SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE);
+void check_mode(const std::string &mode) {
+    SDL_Window *window =
+            SDL_CreateWindow("Bunnyhop menu focus test", 800, 600, SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE);
     assert(window);
     native::WindowController controller(window);
     auto settings = native::default_window_settings();
@@ -33,8 +34,8 @@ void check_mode(const std::string& mode) {
     {
         native::MenuWebView menu(window, kMenuHtml);
         assert(menu.available());
-        NSWindow* cocoa = cocoa_window(window);
-        NSView* game = cocoa.contentView;
+        NSWindow *cocoa = cocoa_window(window);
+        NSView *game = cocoa.contentView;
         [cocoa makeFirstResponder:game];
 
         for (int round = 0; round < 3; ++round) {
@@ -63,7 +64,7 @@ void check_mode(const std::string& mode) {
     SDL_DestroyWindow(window);
 }
 
-}
+} // namespace
 
 int main() {
     @autoreleasepool {
@@ -71,7 +72,7 @@ int main() {
             std::cout << "SDL video unavailable: " << SDL_GetError() << '\n';
             return 77;
         }
-        for (const char* mode : {"windowed", "borderless", "fullscreen"})
+        for (const char *mode : {"windowed", "borderless", "fullscreen"})
             check_mode(mode);
         SDL_Quit();
     }

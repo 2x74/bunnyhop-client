@@ -127,6 +127,7 @@ public:
         last_frame_ = now;
         scheduler.reset(uint64_t(now));
     }
+
     int64_t last_frame() const { return last_frame_; }
 
 private:
@@ -135,7 +136,9 @@ private:
     int64_t last_frame_ = 0;
 
     void add(const ScriptedEvent &event) {
-        const auto by_arrival = [](const ScriptedEvent &a, const ScriptedEvent &b) { return a.arrival < b.arrival; };
+        const auto by_arrival = [](const ScriptedEvent &a, const ScriptedEvent &b) {
+            return a.arrival < b.arrival;
+        };
         const auto at = std::upper_bound(events_.begin() + std::ptrdiff_t(next_), events_.end(), event, by_arrival);
         events_.insert(at, event);
     }

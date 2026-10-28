@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include "native_cosmetics.hpp"
+
 namespace native_render {
 struct Actor {
     std::string id, name;
@@ -13,6 +14,7 @@ struct Actor {
     GhostSource source = GhostSource::none;
     int ghost_slot = -1;
 };
+
 // Source coordinates throughout: Z up. Water is the site's convex-volume fog, evaluated in gamma
 // space after output conversion; planes live in a float texture to avoid fragment-uniform limits.
 inline const std::string water = R"(
@@ -41,20 +43,21 @@ vec3 waterFog(vec3 color,vec3 p){
  if(total<=0.)return color;range/=total;return mix(color,fog/total,clamp((total-range.x)/max(range.y-range.x,1.),0.,1.));
 }
 )";
-inline const char *depth_vertex=R"(#version 330 core
+inline const char *depth_vertex = R"(#version 330 core
 layout(location=0)in vec3 position;uniform mat4 viewProjection,model;
 void main(){gl_Position=viewProjection*model*vec4(position,1);}
 )";
-inline const char *depth_fragment=R"(#version 330 core
+inline const char *depth_fragment = R"(#version 330 core
 void main(){}
 )";
-inline const char *world_vertex=R"(#version 330 core
+inline const char *world_vertex = R"(#version 330 core
 layout(location=0) in vec3 position;layout(location=1) in vec3 normal;
 layout(location=2) in vec2 baseUV;layout(location=3) in vec2 lightUV;layout(location=4) in float blendAlpha;
 uniform mat4 viewProjection,model;
 out vec2 uv,lm;out vec3 world,normalWorld;out float blend,depth;
 void main(){vec4 w=model*vec4(position,1);world=w.xyz;normalWorld=mat3(model)*normal;uv=baseUV;lm=lightUV;blend=blendAlpha;gl_Position=viewProjection*w;depth=gl_Position.w;}
 )";
+
 inline std::string world_fragment() {
     return std::string("#version 330 core\n") + water + R"(
 in vec2 uv,lm;in vec3 world,normalWorld;in float blend,depth;
@@ -101,9 +104,11 @@ void main(){
 }
 )";
 }
-inline const char *sky_vertex=R"(#version 330 core
+
+inline const char *sky_vertex = R"(#version 330 core
 out vec2 ndc;void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);ndc=p*2.-1.;gl_Position=vec4(ndc,1,1);}
 )";
+
 inline std::string sky_fragment() {
     return std::string("#version 330 core\n") + water + R"(
 in vec2 ndc;uniform vec3 forward,right,up;uniform float aspect,cot,skyExposure;
@@ -120,4 +125,4 @@ void main(){vec3 d=normalize(forward+right*ndc.x*aspect/cot+up*ndc.y/cot),a=abs(
 }
 )";
 }
-}
+}  // namespace native_render

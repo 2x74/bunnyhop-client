@@ -8,6 +8,7 @@
 #include <limits>
 
 using Json = nlohmann::json;
+
 static void rejects(const std::string &key, const Json &patch) {
     auto document = native::default_graphics_settings();
     const auto before = document;
@@ -20,6 +21,7 @@ static void rejects(const std::string &key, const Json &patch) {
     assert(rejected);
     assert(document == before);
 }
+
 static void settings_validation() {
     rejects("graphicsResolutionScale", .1);
     rejects("graphicsGamma", 3);
@@ -69,6 +71,7 @@ static void settings_validation() {
     tools.read({{"binds", {{"paint", {"Mouse4"}}, {"measurePoint", {"KeyP"}}}}});
     assert(tools.match("Mouse4") == 0 && tools.match("KeyP") == 3 && tools.match("KeyX") == -1);
 }
+
 static void graphics_views() {
     native::GraphicsSettings settings;
     settings.aspect = 4.f / 3;
@@ -87,6 +90,7 @@ static void graphics_views() {
     assert(view.output_width == 800 && view.output_height == 450 && view.y == 275);
     assert(view.width == 1600 && view.height == 900);
 }
+
 static void surfaces_and_measurement() {
     using namespace native_render;
     const auto result = measure_distance({0, 0, 0}, {3, 4, -12});
@@ -106,6 +110,7 @@ static void surfaces_and_measurement() {
         assert(std::abs(roundtrip[axis] - local[axis]) < .001f);
     }
 }
+
 static void compare_alignment() {
     using native::compare_tick;
     assert(compare_tick(150, 100, .01, 40, 1000, .005) == 140);
@@ -113,6 +118,7 @@ static void compare_alignment() {
     assert(compare_tick(2000, 100, .01, 40, 1000, .005) == 1000);
     assert(compare_tick(150, 100, .01, 40, 1000, 0) == 40);
 }
+
 int main(int argc, char **argv) {
     if (argc == 2) {
         std::ifstream input(argv[1]);
@@ -140,6 +146,6 @@ int main(int argc, char **argv) {
     graphics_views();
     surfaces_and_measurement();
     compare_alignment();
-    std::cout
-        << "Graphics validation, aspect/fit, surface picks, moving-owner coordinates and compare alignment passed\n";
+    std::cout << "Graphics validation, aspect/fit, surface picks, moving-owner coordinates and compare alignment "
+                 "passed\n";
 }

@@ -16,38 +16,46 @@ extern "C" {
  * Input pointers are borrowed only during each call. No exception crosses this ABI.
  */
 typedef struct BhContext BhContext;
+
 typedef struct BhSettings {
     float tick_interval, air_accelerate, accelerate, friction, stop_speed, gravity, max_speed;
     uint32_t autohop, physics, stamina;
 } BhSettings;
+
 typedef struct BhCmd {
     float forward, side, yaw, pitch;
     uint32_t buttons;
 } BhCmd;
+
 typedef struct BhState {
     float position[3], velocity[3], view_offset_z;
     float teleport_angles[3], angle_change[3], touch_position[3];
     uint32_t tick, grounded, crouched, on_ladder, events, touch_crouched;
 } BhState;
+
 typedef struct BhGroup {
     uint32_t model, material, first_index, index_count, sky3d;
 } BhGroup;
+
 typedef struct BhMaterial {
     int32_t texture;
     uint32_t kind, flags;
     float alpha, alpha_ref, color[3];
 } BhMaterial;
+
 typedef struct BhImage {
     const uint8_t *rgba;
     size_t byte_count;
     uint32_t width, height;
 } BhImage;
+
 /* How to read the lightmap atlas: divide the sRGB-decoded texel by scale for linear light. hdr: built from the
  * map's HDR lighting (CS:S draws the map with auto exposure and bloom). */
 typedef struct BhLightmapInfo {
     float scale;
     uint32_t hdr;
 } BhLightmapInfo;
+
 typedef struct BhTransform {
     float origin[3], angles[3];
     uint32_t visible;
@@ -59,6 +67,7 @@ typedef struct BhSnapshot {
     float stamina_ms, base_velocity[3], health, gravity_scale, speed_scale;
     uint32_t weapons, active_weapon, movement_mode, water_level;
 } BhSnapshot;
+
 /* Additive, display-only telemetry. Existing state/snapshot layouts remain unchanged.
  * valid is the web jumpStatsValid clean-tick observation, false for timer clamps/non-walk modes.
  * epoch changes on external state/configuration mutations and replay seeks; never serialized.
@@ -69,16 +78,20 @@ typedef struct BhJumpObservation {
     BhCmd command;
     uint32_t valid, epoch;
 } BhJumpObservation;
+
 int bh_jump_observation(BhContext *ctx, BhJumpObservation *out);
+
 /* kind: 0=start, 1=end, 2=stage, 3=checkpoint. Coordinates are canonical f32. */
 typedef struct BhZone {
     uint32_t kind, track, index;
     float mins[3], maxs[3];
 } BhZone;
+
 typedef struct BhRunOptions {
     float prespeed_cap;
     uint32_t cap_enabled, rules, block_prehops, strafe_keys; /* keys: 0=AD, 1=WS, 2=W */
 } BhRunOptions;
+
 typedef struct BhRunState {
     uint32_t status, track, start_tick, end_tick, last_tick; /* 0=idle, 1=running, 2=finished */
     uint32_t jumps, strafes, perfect_jumps, measured_jumps, sync_good, sync_total;
@@ -89,6 +102,7 @@ typedef struct BhRunState {
     uint32_t rolling_hash;
     double seconds, sync_percent, perf_percent;
 } BhRunState;
+
 /* update_flags: 1=started, 2=finished, 4=restarted, 8=prespeed clamped, 16=split. */
 void bh_default_run_options(BhRunOptions *out);
 int bh_run_configure(BhContext *ctx, const BhRunOptions *options, const BhZone *zones, size_t zone_count);
@@ -105,10 +119,13 @@ const char *bh_models_json(BhContext *ctx, size_t *byte_count);
  * style accepts autohop, legit, scroll, wonly, sideways, hsw, lowgrav, autostrafe.
  * Native bh_step applies the style; callers supply unfiltered canonical input.
  * NULL/empty path disables JSONL evidence (normal play retains only native commands/checkpoints).
- * A supplied JSONL path uses create-new; settings/reset/position/velocity/name/map changes invalidate an active recording.
- * Recordings close invalid after 180000 commands. Files do not authorize score submission without server verification.
+ * A supplied JSONL path uses create-new; settings/reset/position/velocity/name/map changes invalidate an active
+ * recording. Recordings close invalid after 180000 commands. Files do not authorize score submission without server
+ * verification.
  */
-int bh_record_begin(BhContext *ctx, const char *path, const char *style, const char *player, uint32_t checkpoint_interval);
+int bh_record_begin(
+        BhContext *ctx, const char *path, const char *style, const char *player, uint32_t checkpoint_interval
+);
 int bh_record_end(BhContext *ctx);
 /* Optional presentation trailers: events at the current recording state tick, capped at 20000 each.
  * kind is stored as u8. Inspect kinds: start1,next2,held3,released4. No simulation/verification effect.
@@ -138,16 +155,19 @@ uint32_t bh_abi_version(void);
 #define BH_TIMING_PATH_VERSION 2
 #define BH_FLAG_TIMED_INPUT (1u << 4)
 #define BH_IN_TURN_FAST (1u << 6)
+
 typedef struct BhRecordOptionsV29 {
     uint32_t version, size;
     float yaw_speed, angle_speed_key; /* f32, inclusive 60..720 / 1..4 */
-    uint32_t timed_input; /* sticky after real timed input contributes, 0 or 1 */
+    uint32_t timed_input;             /* sticky after real timed input contributes, 0 or 1 */
 } BhRecordOptionsV29;
+
 typedef struct BhTimingSegmentV2 {
     double t0, t1;
     float from[3], to[3], mins[3], maxs[3];
     uint32_t discrete, reserved;
 } BhTimingSegmentV2;
+
 int bh_v29_check_abi(uint32_t version, size_t record_size, size_t segment_size);
 /* Begin first. Default frozen pair 210/2; set custom rates before the first command.
  * Later calls may mark timed_input; rates cannot change. New BHRs append BHTS. */
@@ -162,8 +182,15 @@ int bh_timing_observe(BhContext *ctx, uint32_t enabled);
 /* Query with capacity=0, then copy segments. Count/status required; status:
  * absent=0, supported=1, unsupported=2. Unsupported paths must use chord fallback.
  * Version must be 2, segment_size sizeof(BhTimingSegmentV2). Short buffers fail. */
-int bh_timing_path_v2(BhContext *ctx, uint32_t path_version, size_t segment_size,
-    BhTimingSegmentV2 *segments, size_t capacity, size_t *count, uint32_t *status);
+int bh_timing_path_v2(
+        BhContext *ctx,
+        uint32_t path_version,
+        size_t segment_size,
+        BhTimingSegmentV2 *segments,
+        size_t capacity,
+        size_t *count,
+        uint32_t *status
+);
 BhContext *bh_create(void);
 void bh_destroy(BhContext *ctx);
 /* Error string is context-owned, valid until another mutating call. */
@@ -201,15 +228,18 @@ typedef struct BhSkyInfo {
     uint32_t area, fog_enable, fog_blend;
     float fog_color[3], fog_color2[3], fog_dir[3], fog_start, fog_end, fog_max_density;
 } BhSkyInfo;
+
 typedef struct BhMaterialExtra {
     int32_t texture2, detail;
     float detail_scale, detail_blend, fog_start, fog_end;
     uint32_t above_water;
 } BhMaterialExtra;
+
 typedef struct BhPropGroup {
     uint32_t material, first_index, index_count, sky3d;
     int32_t entity; /* -1 = baked world geometry; otherwise model-space moving entity geometry. */
 } BhPropGroup;
+
 const float *bh_blend(const BhContext *ctx, size_t *float_count);
 const float *bh_sky_vertices(const BhContext *ctx, size_t *float_count);
 const uint32_t *bh_sky_indices(const BhContext *ctx, size_t *index_count);
@@ -235,31 +265,44 @@ int bh_texture_path(BhContext *ctx, const char *path, BhImage *out);
 int bh_style_settings(const char *style, BhSettings *out);
 int bh_style_set(BhContext *ctx, const char *style);
 int bh_last_command(BhContext *ctx, BhCmd *out); /* exact filtered command stepped/recorded */
+
 typedef struct BhLookSample {
     double base, k;
     int32_t count;
     uint32_t epoch, kind, frames, events, reports;
 } BhLookSample;
+
 /* Real native mouse telemetry only. Missing samples retain existing uncounted replay encoding. */
 int bh_step_look(BhContext *ctx, const BhCmd *cmd, const BhLookSample *look, BhState *out);
+
 /* Additive ABI: the original 40-byte BhLookSample and bh_step_look remain unchanged.
  * Fractional counts retain real mouse provenance in v10 recordings with manual turns. */
 typedef struct BhLookSampleV2 {
     double base, k, count;
     uint32_t epoch, kind, frames, events, reports;
 } BhLookSampleV2;
+
 int bh_step_look_v2(BhContext *ctx, const BhCmd *cmd, const BhLookSampleV2 *look, BhState *out);
+
 typedef struct BhWeaponReport {
-    uint32_t flags, active, primary, secondary, knife, clip, clip_size, reload_ticks, burst, floor_changed, silencer, silencer_ticks;
+    uint32_t flags, active, primary, secondary, knife, clip, clip_size, reload_ticks, burst, floor_changed, silencer,
+            silencer_ticks;
 } BhWeaponReport;
+
 typedef struct BhAttackReport {
     uint32_t weapon, mode, hit;
     float start[3], end[3], normal[3];
     int32_t entity;
 } BhAttackReport;
+
 int bh_weapon_report(BhContext *ctx, BhWeaponReport *out);
 int bh_attack_report(BhContext *ctx, BhAttackReport *out); /* 0 if no attack this tick */
-typedef struct BhFloorWeapon {uint32_t entity, weapon, flags; float position[3], angles[3];} BhFloorWeapon;
+
+typedef struct BhFloorWeapon {
+    uint32_t entity, weapon, flags;
+    float position[3], angles[3];
+} BhFloorWeapon;
+
 /* Per-item FLOOR flags: present1,picked2,spawned4,dropped8,removed16,moved32; consumes change marks. */
 const BhFloorWeapon *bh_floor_weapons(BhContext *ctx, size_t *count);
 /* Studio handles are context/map owned, >=1. Vertices:18 floats; metadata includes bones/groups/material paths. */
@@ -284,15 +327,21 @@ int bh_replay_step(BhContext *ctx, BhSnapshot *out);
 int bh_replay_seek(BhContext *ctx, uint32_t tick, BhSnapshot *out);
 /* Stop replay mode; current game state/settings remain available for a normal restart. */
 int bh_replay_stop(BhContext *ctx);
-typedef struct BhReplayEvents {uint32_t cosmetic, inspect_signal, inspect_held;} BhReplayEvents;
+
+typedef struct BhReplayEvents {
+    uint32_t cosmetic, inspect_signal, inspect_held;
+} BhReplayEvents;
+
 /* Presentation over state ticks (from,to]; inspect_held is held at to, including a backwards seek.
  * Replay/ghost info JSON includes packedLoadout and optional trailer event counts.
  */
 int bh_replay_events(BhContext *ctx, uint32_t from, uint32_t to, BhReplayEvents *out);
+
 typedef struct BhGhostFrame {
     float position[3], velocity[3], yaw, pitch, view_offset_z;
     uint32_t tick, flags, weapon; /* flags: crouched1, grounded2, ladder4; actual weapon id */
 } BhGhostFrame;
+
 /* Builds immutable ghost frames, restoring the live game's exact state/timer/filter afterwards.
  * No live simulation or recorder is advanced by ghost playback. Handles >=1; at most four ghosts per map.
  */
@@ -322,14 +371,21 @@ const uint32_t *bh_effect_states(BhContext *ctx, size_t *count);
  * grass3,tile4,water5; -1 absent. material indexes bh_material_names_json; missing heights are NaN.
  * Ground within [z-24,z+4]; nearest overhead water within [z-2,z+2000]. Read-only.
  */
-typedef struct BhSurfaceProbe {int32_t surface,material;float ground_z,water_z;} BhSurfaceProbe;
+typedef struct BhSurfaceProbe {
+    int32_t surface, material;
+    float ground_z, water_z;
+} BhSurfaceProbe;
+
 int bh_surface_at(BhContext *ctx, float x, float y, float z, BhSurfaceProbe *out);
 
 /* Practice only: restore/noclip invalidate an active recording. Checkpoints retain GameState,
  * native timer/style/settings and the view. Handles map-owned; max100 /128MiB; free old handles.
  * No recording command stream can represent these mutations. Restart normally before a ranked attempt.
  */
-typedef struct BhNoclipState {double position[3], velocity[3];} BhNoclipState;
+typedef struct BhNoclipState {
+    double position[3], velocity[3];
+} BhNoclipState;
+
 /* Immediately invalidate recording; noclip!=0 also stops an idle/finished timer. */
 int bh_practice_enter(BhContext *ctx, uint32_t noclip);
 int bh_noclip_move(BhNoclipState *state, const BhCmd *cmd, double dt);

@@ -20,13 +20,13 @@ inline bool replay_zones_match(const nlohmann::json &info, std::span<const BhZon
     for (size_t i = 0; i < zones.size(); ++i) {
         const auto &zone = zones[i];
         const auto &recorded = saved.at(i);
-        if (zone.kind > 3 || recorded.at("kind") != kinds[zone.kind] ||
-            recorded.value("track", 0u) != zone.track || recorded.value("index", 0u) != zone.index) {
+        if (zone.kind > 3 || recorded.at("kind") != kinds[zone.kind] || recorded.value("track", 0u) != zone.track
+            || recorded.value("index", 0u) != zone.index) {
             return false;
         }
         for (size_t axis = 0; axis < 3; ++axis) {
-            if (recorded.at("mins").at(axis).get<float>() != zone.mins[axis] ||
-                recorded.at("maxs").at(axis).get<float>() != zone.maxs[axis]) {
+            if (recorded.at("mins").at(axis).get<float>() != zone.mins[axis]
+                || recorded.at("maxs").at(axis).get<float>() != zone.maxs[axis]) {
                 return false;
             }
         }
@@ -35,15 +35,21 @@ inline bool replay_zones_match(const nlohmann::json &info, std::span<const BhZon
 }
 
 inline nlohmann::json practice_from_replay_reply(bool ok, const std::string &reason = {}) {
-    return {{"type", "practiceFromReplayResult"}, {"ok", ok},
+    return {{"type", "practiceFromReplayResult"},
+            {"ok", ok},
             {"reason", ok ? nlohmann::json(nullptr) : nlohmann::json(reason)}};
 }
 
 inline std::string replay_style_label(const std::string &style) {
     constexpr std::pair<std::string_view, std::string_view> labels[] = {
-        {"autohop", "Normal"}, {"legit", "EZ Scroll"}, {"scroll", "Legit Scroll"},
-        {"wonly", "W-Only"}, {"sideways", "Sideways"}, {"hsw", "Half-Sideways"},
-        {"lowgrav", "Low Gravity"}, {"autostrafe", "Auto Strafe"},
+            {"autohop", "Normal"},
+            {"legit", "EZ Scroll"},
+            {"scroll", "Legit Scroll"},
+            {"wonly", "W-Only"},
+            {"sideways", "Sideways"},
+            {"hsw", "Half-Sideways"},
+            {"lowgrav", "Low Gravity"},
+            {"autostrafe", "Auto Strafe"},
     };
     for (const auto &[id, label] : labels) {
         if (id == style) {
@@ -53,8 +59,8 @@ inline std::string replay_style_label(const std::string &style) {
     return style;
 }
 
-inline std::string replay_practice_problem(const nlohmann::json &info, const std::string &map,
-                                          const std::string &selected_style) {
+inline std::string
+replay_practice_problem(const nlohmann::json &info, const std::string &map, const std::string &selected_style) {
     if (!map.empty() && info.at("map") != map) {
         return "That replay is " + info.at("map").get<std::string>() + ". Switch to it first.";
     }
@@ -69,13 +75,17 @@ inline std::string replay_practice_problem(const nlohmann::json &info, const std
         return "Unknown replay style.";
     }
     const std::pair<const char *, float> numbers[] = {
-        {"tickInterval", settings.tick_interval}, {"airAccelerate", settings.air_accelerate},
-        {"accelerate", settings.accelerate}, {"friction", settings.friction},
-        {"stopSpeed", settings.stop_speed}, {"gravity", settings.gravity}, {"maxSpeed", settings.max_speed},
+            {"tickInterval", settings.tick_interval},
+            {"airAccelerate", settings.air_accelerate},
+            {"accelerate", settings.accelerate},
+            {"friction", settings.friction},
+            {"stopSpeed", settings.stop_speed},
+            {"gravity", settings.gravity},
+            {"maxSpeed", settings.max_speed},
     };
-    bool same = info.value("timerRules", 1u) == 2 && saved.at("physics") == settings.physics &&
-                saved.at("autohop") == bool(settings.autohop) &&
-                saved.value("stamina", false) == bool(settings.stamina);
+    bool same = info.value("timerRules", 1u) == 2 && saved.at("physics") == settings.physics
+                && saved.at("autohop") == bool(settings.autohop)
+                && saved.value("stamina", false) == bool(settings.stamina);
     for (const auto &[name, value] : numbers) {
         same = same && saved.at(name).get<float>() == value;
     }
@@ -88,9 +98,15 @@ struct ReplayTakeover {
     uint32_t track = 0;
     std::string style;
 
-    static ReplayTakeover take(BhContext *core, const nlohmann::json &info, std::span<const BhZone> zones,
-                               const std::string &selected_style, bool gauntlet, bool multiplayer,
-                               std::optional<uint32_t> tick = std::nullopt, const std::string &map = {}) {
+    static ReplayTakeover
+    take(BhContext *core,
+         const nlohmann::json &info,
+         std::span<const BhZone> zones,
+         const std::string &selected_style,
+         bool gauntlet,
+         bool multiplayer,
+         std::optional<uint32_t> tick = std::nullopt,
+         const std::string &map = {}) {
         if (gauntlet) {
             throw std::runtime_error("No practice during a gauntlet.");
         }
@@ -114,8 +130,8 @@ struct ReplayTakeover {
         if (target > info.at("totalTicks").get<uint32_t>()) {
             throw std::runtime_error("Replay tick outside recording.");
         }
-        if (!bh_replay_seek(core, target, &result.snapshot) || !bh_last_command(core, &result.view) ||
-            !bh_practice_from_replay(core, selected_style.c_str())) {
+        if (!bh_replay_seek(core, target, &result.snapshot) || !bh_last_command(core, &result.view)
+            || !bh_practice_from_replay(core, selected_style.c_str())) {
             throw std::runtime_error(bh_last_error(core));
         }
         return result;

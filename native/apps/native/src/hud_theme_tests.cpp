@@ -16,16 +16,17 @@
 #include <new>
 static bool count_allocations = false;
 static size_t allocation_count = 0;
+
 void *operator new(std::size_t bytes) {
-    if (count_allocations)
-        ++allocation_count;
-    if (void *memory = std::malloc(bytes ? bytes : 1))
-        return memory;
+    if (count_allocations) ++allocation_count;
+    if (void *memory = std::malloc(bytes ? bytes : 1)) return memory;
     throw std::bad_alloc();
 }
+
 void operator delete(void *memory) noexcept {
     std::free(memory);
 }
+
 void operator delete(void *memory, std::size_t) noexcept {
     std::free(memory);
 }
@@ -36,11 +37,13 @@ struct NoAllocations {
         allocation_count = 0;
         count_allocations = true;
     }
+
     ~NoAllocations() {
         count_allocations = false;
         assert(allocation_count == 0);
     }
 };
+
 struct DrawProbe {
     std::array<native::HudLabel<512>, 256> labels;
     size_t texts = 0;
@@ -49,32 +52,35 @@ struct DrawProbe {
     size_t names = 0;
     size_t avatars = 0;
     bool particle_after_text = false;
+
     bool has(std::string_view value) const {
         for (size_t i = 0; i < texts; ++i) {
-            if (labels[i].view().find(value) != std::string_view::npos)
-                return true;
+            if (labels[i].view().find(value) != std::string_view::npos) return true;
         }
         return false;
     }
+
     void overlay_begin(int, int, float) {}
+
     void overlay_end(int, int) {}
+
     void overlay_text(float x, float y, std::string_view text, float, native::NameColor, bool = false) {
         assert(std::isfinite(x) && std::isfinite(y));
-        if (texts < labels.size())
-            labels[texts++].assign(text);
+        if (texts < labels.size()) labels[texts++].assign(text);
     }
+
     void overlay_rect(float x, float y, float width, float height, native::NameColor) {
         assert(std::isfinite(x) && std::isfinite(y) && width >= 0 && height >= 0);
         particle_after_text |= texts > 0 && width == 3 && height == 5;
         ++rects;
     }
-    void overlay_flag(float, float, std::string_view) {
-        ++flags;
-    }
+
+    void overlay_flag(float, float, std::string_view) { ++flags; }
+
     void overlay_mark(float, float, native::NameMark, native::NameColor) {}
-    void overlay_avatar(float, float, unsigned, native::NameColor) {
-        ++avatars;
-    }
+
+    void overlay_avatar(float, float, unsigned, native::NameColor) { ++avatars; }
+
     void overlay_name(float, float, std::string_view, float, const native::NameAppearance &, double, bool = false) {
         ++names;
     }
@@ -149,8 +155,7 @@ void test_web_settings_schema() {
             native::patch_settings(settings, {{key, high}});
             assert(rejects_setting(settings, key, low - .01));
             assert(rejects_setting(settings, key, high + .01));
-            if (rule.value("whole", false))
-                assert(rejects_setting(settings, key, low + .5));
+            if (rule.value("whole", false)) assert(rejects_setting(settings, key, low + .5));
         } else if (kind == "choice") {
             for (const auto &value : rule.at("values"))
                 native::patch_settings(settings, {{key, value}});
@@ -206,36 +211,38 @@ void test_defaults_and_saved_settings() {
     assert(binds["noclip"] == native::Json::array({"KeyZ"}));
     assert(binds["thirdPerson"] == native::Json::array({"KeyT"}) && binds["showClips"].empty());
     assert(binds["duck"] == native::Json::array({"ControlLeft"}));
-    for (const auto &[action, key] : std::array<std::pair<const char *, const char *>, 5>{{{"flashlight", "KeyL"},
-                                                                                           {"hudEditor", "F2"},
-                                                                                           {"gunMenu", "Digit7"},
-                                                                                           {"setStart", "Digit4"},
-                                                                                           {"nextTrack", "KeyP"}}})
+    for (const auto &[action, key] : std::array<std::pair<const char *, const char *>, 5>{
+                 {{"flashlight", "KeyL"},
+                  {"hudEditor", "F2"},
+                  {"gunMenu", "Digit7"},
+                  {"setStart", "Digit4"},
+                  {"nextTrack", "KeyP"}}
+         })
         assert(binds[action] == native::Json::array({key}));
     const auto directory = std::filesystem::temp_directory_path() / "bunnyhop-ws4-saved-defaults";
     std::filesystem::create_directories(directory);
     const auto file = directory / "settings.json";
     const native::Json saved = {
-        {"volume", .65},
-        {"wind", true},
-        {"ghostAudio", true},
-        {"jumpStats", true},
-        {"keysStyle", "classic"},
-        {"crosshairGap", 3},
-        {"ghostOpacity", .4},
-        {"binds", {{"turnFast", {"Mouse4"}}, {"noclip", {"Backquote"}}, {"showClips", {"KeyT"}}}}};
+            {"volume", .65},
+            {"wind", true},
+            {"ghostAudio", true},
+            {"jumpStats", true},
+            {"keysStyle", "classic"},
+            {"crosshairGap", 3},
+            {"ghostOpacity", .4},
+            {"binds", {{"turnFast", {"Mouse4"}}, {"noclip", {"Backquote"}}, {"showClips", {"KeyT"}}}}
+    };
     std::ofstream(file) << saved;
     const auto loaded = native::load_settings(file);
     for (const auto &[key, value] : saved.items()) {
-        if (key != "binds")
-            assert(loaded[key] == value);
+        if (key != "binds") assert(loaded[key] == value);
     }
     for (const auto &[key, value] : saved["binds"].items())
         assert(loaded["binds"][key] == value);
     std::filesystem::remove_all(directory);
     for (const auto &key : native::hud_capabilities())
-        assert(defaults.contains(key.get<std::string>()) || key == "movementStats" || key == "longjump" ||
-               key == "triggerMenu");
+        assert(defaults.contains(key.get<std::string>()) || key == "movementStats" || key == "longjump"
+               || key == "triggerMenu");
 }
 
 void test_layouts_and_options() {
@@ -250,20 +257,22 @@ void test_layouts_and_options() {
     }
     for (const auto &id : native::hud_elements) {
         const auto changed = native::patch_settings(
-            defaults, {{"hudLayout", {{id, {{"a", 7}, {"x", -.1}, {"y", -.2}, {"s", 1.25}, {"on", false}}}}}});
+                defaults, {{"hudLayout", {{id, {{"a", 7}, {"x", -.1}, {"y", -.2}, {"s", 1.25}, {"on", false}}}}}}
+        );
         const auto options = native::HudPreferences::from(changed);
         const auto &place = options.layout[native::hud_index(id)];
         assert(place && place->anchored && !place->visible && place->scale == 1.25f);
     }
-    for (const auto &invalid :
-         native::Json::array({{{"hudLayout", {{"timer", {{"a", 9}, {"x", 0}, {"y", 0}}}}}},
-                              {{"hudLayout", {{"timer", {{"a", 4}, {"x", 0}, {"y", 0}, {"s", 0}}}}}},
-                              {{"hudHiddenKeeps", "all"}},
-                              {{"hudKeysOpacity", 1.1}},
-                              {{"hudKeysPressed", "red"}},
-                              {{"hudStrafeTrainerZone", 0}},
-                              {{"hudStrafeTrainerStyle", "unknown"}},
-                              {{"autoRestartWhen", "all"}}})) {
+    for (const auto &invalid : native::Json::array(
+                 {{{"hudLayout", {{"timer", {{"a", 9}, {"x", 0}, {"y", 0}}}}}},
+                  {{"hudLayout", {{"timer", {{"a", 4}, {"x", 0}, {"y", 0}, {"s", 0}}}}}},
+                  {{"hudHiddenKeeps", "all"}},
+                  {{"hudKeysOpacity", 1.1}},
+                  {{"hudKeysPressed", "red"}},
+                  {{"hudStrafeTrainerZone", 0}},
+                  {{"hudStrafeTrainerStyle", "unknown"}},
+                  {{"autoRestartWhen", "all"}}}
+         )) {
         bool rejected = false;
         try {
             native::patch_settings(defaults, invalid);
@@ -280,8 +289,9 @@ void test_layouts_and_options() {
 void test_scoreboard_and_names() {
     native::HudScoreboard board;
     board.contract(
-        {{"head", {{"room", "Test room"}, {"map", "bhop_test"}, {"tier", 8}, {"max", 16}}},
-         {"rows", native::Json::array(
+            {{"head", {{"room", "Test room"}, {"map", "bhop_test"}, {"tier", 8}, {"max", 16}}},
+             {"rows",
+              native::Json::array(
                       {{{"slot", 1},
                         {"name", "First"},
                         {"style", "autohop"},
@@ -297,7 +307,9 @@ void test_scoreboard_and_names() {
                         {"supporter", true},
                         {"verified", true},
                         {"special", {"mapper", "contributor"}}},
-                       {{"slot", 2}, {"name", "Spectator"}, {"statusKind", "spec"}, {"status", "SPEC -> First"}}})}});
+                       {{"slot", 2}, {"name", "Spectator"}, {"statusKind", "spec"}, {"status", "SPEC -> First"}}}
+              )}}
+    );
     assert(board.count == 2 && board.rows[0].pb == 12.345 && board.rows[1].spectator);
     assert(board.rows[0].look.marks & (1u << unsigned(native::NameMark::mapper)));
     const auto start = native::name_ink(board.rows[0].look, 0, 0);
@@ -340,28 +352,35 @@ void test_scoreboard_and_names() {
 
 void test_merged_menu_contracts() {
     const native::Json marks = native::Json::array(
-        {{{"id", "contributor"}, {"name", "Contributor"}},
-         {{"id", "verified"}, {"name", "Verified"}},
-         {{"id", "gifter-prism"}, {"name", "Prism Gifter"}, {"colors", {"#ffa8cb", "#6ff0f0"}}, {"animated", true}}});
+            {{{"id", "contributor"}, {"name", "Contributor"}},
+             {{"id", "verified"}, {"name", "Verified"}},
+             {{"id", "gifter-prism"}, {"name", "Prism Gifter"}, {"colors", {"#ffa8cb", "#6ff0f0"}}, {"animated", true}}}
+    );
     const native::Json look = {{"color", "#ffa8cb"}, {"color2", "#6ff0f0"}, {"effect", "paint"}};
     const auto decoration = native::chat_decoration(
-        {{"nativeName", look}, {"nativeMarks", marks}, {"nativeRankColor", "#ffc53d"}, {"nativeCountry", "us"}});
+            {{"nativeName", look}, {"nativeMarks", marks}, {"nativeRankColor", "#ffc53d"}, {"nativeCountry", "us"}}
+    );
     assert(decoration.appearance.badge_count == 3);
     assert(decoration.appearance.badges[0].glyph == native::NameMark::contributor);
     assert(decoration.appearance.badges[1].glyph == native::NameMark::verified);
     assert(decoration.appearance.badges[2].glyph == native::NameMark::gift);
     assert(decoration.appearance.effect == native::NameEffect::paint);
     native::RoomState room;
-    room.display_contract({{"type", "scoreboard"},
-                           {"head", {{"room", "Decorated"}, {"map", "bhop_test"}, {"max", 16}}},
-                           {"rows", native::Json::array({{{"slot", 3},
-                                                          {"name", "Runner"},
-                                                          {"look", look},
-                                                          {"marks", marks},
-                                                          {"status", "00:16.731"},
-                                                          {"statusKind", "running"},
-                                                          {"running", {{"seconds", 16.731}, {"at", 100000.}}},
-                                                          {"pb", 20.123}}})}});
+    room.display_contract(
+            {{"type", "scoreboard"},
+             {"head", {{"room", "Decorated"}, {"map", "bhop_test"}, {"max", 16}}},
+             {"rows",
+              native::Json::array(
+                      {{{"slot", 3},
+                        {"name", "Runner"},
+                        {"look", look},
+                        {"marks", marks},
+                        {"status", "00:16.731"},
+                        {"statusKind", "running"},
+                        {"running", {{"seconds", 16.731}, {"at", 100000.}}},
+                        {"pb", 20.123}}}
+              )}}
+    );
     room.refresh_display(90);
     assert(room.display().count == 1 && room.display().rows[0].look.badge_count == 3);
     DrawProbe probe;
@@ -379,7 +398,7 @@ void test_merged_menu_contracts() {
     auto settings = native::default_settings();
     for (const char *stat : {"offsets", "fjt", "lj"}) {
         settings =
-            native::patch_settings(settings, native::movement_stat_patch(settings, {{"stat", stat}, {"on", true}}));
+                native::patch_settings(settings, native::movement_stat_patch(settings, {{"stat", stat}, {"on", true}}));
     }
     assert(settings["hudLayoutWeb"]["strafeOffsets"]["on"] == true);
     assert(settings["hudLayoutWeb"]["firstJump"]["on"] == true);
@@ -406,18 +425,44 @@ void test_tags_and_race_picker() {
     const std::array<float, 16> matrix = {.01f, 0, 0, 0, 0, .01f, 0, 0, 0, 0, .01f, 0, 0, 0, 0, 4};
     DrawProbe hidden;
     native::draw_name_tags(
-        hidden, 1280, 720, 100, matrix.data(), actors, room, true, true, false, [](const float *) { return false; }, 0);
+            hidden,
+            1280,
+            720,
+            100,
+            matrix.data(),
+            actors,
+            room,
+            true,
+            true,
+            false,
+            [](const float *) { return false; },
+            0
+    );
     assert(hidden.names == 0);
     DrawProbe visible;
     {
         NoAllocations no_allocations;
         native::draw_name_tags(
-            visible, 1280, 720, 100, matrix.data(), actors, room, true, true, true, [](const float *) { return false; },
-            0);
+                visible,
+                1280,
+                720,
+                100,
+                matrix.data(),
+                actors,
+                room,
+                true,
+                true,
+                true,
+                [](const float *) { return false; },
+                0
+        );
     }
     assert(visible.names == 1);
-    native::draw_ghost_name_tag(visible, 1280, 720, 100, matrix.data(), actors[0], "PB ghost", 16.731, "-0.020s", true,
-                                [](const float *) { return false; });
+    native::draw_ghost_name_tag(
+            visible, 1280, 720, 100, matrix.data(), actors[0], "PB ghost", 16.731, "-0.020s", true, [](const float *) {
+                return false;
+            }
+    );
     assert(visible.has("16.731s | -0.020s"));
     native::HudScoreboard board;
     board.count = 1;
@@ -437,11 +482,24 @@ void test_tags_and_race_picker() {
 
 void test_ghost_progress() {
     native::HudExtras extras;
-    extras.ghost({{"map", "test"}, {"style", "autohop"}, {"track", 0u},
-                  {"startTick", 10u}, {"endTick", 100u}, {"settings", {{"tickInterval", .01}}}});
+    extras.ghost(
+            {{"map", "test"},
+             {"style", "autohop"},
+             {"track", 0u},
+             {"startTick", 10u},
+             {"endTick", 100u},
+             {"settings", {{"tickInterval", .01}}}}
+    );
     assert(extras.ghost_seconds && *extras.ghost_seconds == .9);
-    extras.ghost({{"map", "test"}, {"style", "autohop"}, {"track", 0u}, {"timeMs", 895u},
-                  {"startTick", 10u}, {"endTick", 100u}, {"settings", {{"tickInterval", .01}}}});
+    extras.ghost(
+            {{"map", "test"},
+             {"style", "autohop"},
+             {"track", 0u},
+             {"timeMs", 895u},
+             {"startTick", 10u},
+             {"endTick", 100u},
+             {"settings", {{"tickInterval", .01}}}}
+    );
     assert(extras.ghost_seconds && *extras.ghost_seconds == .895);
     assert(extras.ghost_target("test", "autohop", 0, true) == extras.ghost_seconds);
     assert(!extras.ghost_target("other", "autohop", 0, true));
@@ -484,11 +542,13 @@ void test_results_toasts_and_room_widgets() {
     assert(result.delta && *result.delta < 0 && result.stamp == native::ResultStamp::pending);
     result.service({{"generation", 3}, {"status", "verified"}, {"announcer", "wr"}}, 4);
     assert(result.stamp == native::ResultStamp::pending);
-    result.service({{"generation", 4},
-                    {"status", "verified"},
-                    {"announcer", "wr"},
-                    {"rewards", native::Json::array({{{"title", "+120 XP"}, {"detail", "New hat unlocked"}}})}},
-                   4);
+    result.service(
+            {{"generation", 4},
+             {"status", "verified"},
+             {"announcer", "wr"},
+             {"rewards", native::Json::array({{{"title", "+120 XP"}, {"detail", "New hat unlocked"}}})}},
+            4
+    );
     DrawProbe result_probe;
     {
         NoAllocations no_allocations;
@@ -497,8 +557,14 @@ void test_results_toasts_and_room_widgets() {
     assert(result_probe.has("WORLD RECORD") && result_probe.has("+120 XP") && result_probe.has("R to go again"));
     assert(!result_probe.particle_after_text);
     assert(!result.visible(16));
-    result.service({{"generation", 4}, {"status", "verified"}, {"xp", 120u},
-                    {"level", {{"level", 12u}}}, {"achievements", native::Json::array({"First finish"})}}, 4);
+    result.service(
+            {{"generation", 4},
+             {"status", "verified"},
+             {"xp", 120u},
+             {"level", {{"level", 12u}}},
+             {"achievements", native::Json::array({"First finish"})}},
+            4
+    );
     assert(result.reward_count == 3);
     assert(result.rewards[0].title.view() == "+120 XP");
     assert(result.rewards[1].title.view() == "Level 12");
@@ -513,15 +579,17 @@ void test_results_toasts_and_room_widgets() {
     native::draw_toasts(toast_probe, 1280, 720, 100, toasts, 2);
     assert(toast_probe.texts == 5);
     native::RoomState room;
-    room.vote = {{"options", {{{"map", "bhop_a"}}, {{"extend", true}, {"minutes", 10}}}},
-                 {"counts", native::Json::array({3u, 1u})},
-                 {"endsAt", 12000}};
+    room.vote = {
+            {"options", {{{"map", "bhop_a"}}, {{"extend", true}, {"minutes", 10}}}},
+            {"counts", native::Json::array({3u, 1u})},
+            {"endsAt", 12000}
+    };
     room.refresh_vote();
     room.voted(1);
     DrawProbe vote_probe;
     native::draw_vote(vote_probe, 1280, 720, 100, room.vote_display, 2000);
-    assert(vote_probe.has("10s") && vote_probe.has("[3]") && vote_probe.has("Extend 10 minutes") &&
-           vote_probe.has("<"));
+    assert(vote_probe.has("10s") && vote_probe.has("[3]") && vote_probe.has("Extend 10 minutes")
+           && vote_probe.has("<"));
     native::RaceDisplay race;
     race.state = native::RaceDisplay::State::challenge;
     race.recipient = true;
@@ -549,8 +617,17 @@ void test_movement_widgets_and_restart() {
     run.split_count = 3;
     DrawProbe probe;
     native::draw_movement_widgets(
-        probe, [](const char *, float x, float y) { return std::array{x, y}; }, options, movement, extras, run, 1600,
-        900, true, 2);
+            probe,
+            [](const char *, float x, float y) { return std::array{x, y}; },
+            options,
+            movement,
+            extras,
+            run,
+            1600,
+            900,
+            true,
+            2
+    );
     for (const auto label :
          {"Start Pre", "Offset -1", "FJT", "LJ 275.50", "PB", "Watcher", "Practice", "Bonus", "Stage", "Ghost"})
         assert(probe.has(label));
@@ -559,8 +636,16 @@ void test_movement_widgets_and_restart() {
         DrawProbe trainer;
         {
             NoAllocations no_allocations;
-            native::draw_trainer(trainer, 500, 200, {105, native::StrafeHint::strafe_more}, options.trainer, true,
-                                 options.palette, -1);
+            native::draw_trainer(
+                    trainer,
+                    500,
+                    200,
+                    {105, native::StrafeHint::strafe_more},
+                    options.trainer,
+                    true,
+                    options.palette,
+                    -1
+            );
         }
         assert(trainer.rects >= 4 && trainer.has("105%") && trainer.has("Strafe more"));
     }
@@ -588,7 +673,7 @@ void test_movement_widgets_and_restart() {
     assert(restart.check(2, run, 10, false));
     assert(!restart.check(3, run, std::nullopt, false));
 }
-} // namespace
+}  // namespace
 
 int main() {
     test_web_settings_schema();
@@ -609,21 +694,26 @@ int main() {
     assert(parse_hud_theme(nullptr).elements.empty());
 
     const auto theme = parse_hud_theme({
-        {"colors", {{"text", {1, 1, 1, 1}}, {"accent", {0.5, 0.8, 1, 1}}, {"gain", {0, 0.5, 1, 1}},
-                    {"loss", "red"}, {"sync", {1, 2, 0, 1}}}},
-        {"elements", {{"speed", {{"color", {1, 0.4, 0.8, 1}}, {"opacity", 0.5}}},
-                      {"keys", {{"opacity", 3}}},
-                      {"chat", {{"opacity", 0.1}}},
-                      {"timer", "bold"}}},
+            {"colors",
+             {{"text", {1, 1, 1, 1}},
+              {"accent", {0.5, 0.8, 1, 1}},
+              {"gain", {0, 0.5, 1, 1}},
+              {"loss", "red"},
+              {"sync", {1, 2, 0, 1}}}},
+            {"elements",
+             {{"speed", {{"color", {1, 0.4, 0.8, 1}}, {"opacity", 0.5}}},
+              {"keys", {{"opacity", 3}}},
+              {"chat", {{"opacity", 0.1}}},
+              {"timer", "bold"}}},
     });
     assert(theme.text && (*theme.text)[0] == 1);
     assert(theme.accent && (*theme.accent)[1] == 0.8f);
     // Malformed colours are ignored, not guessed.
     assert(!theme.loss && !theme.sync);
 
-    const auto* speed = theme.element("speed");
+    const auto *speed = theme.element("speed");
     assert(speed && speed->color && speed->opacity == 0.5f);
-    const auto* keys = theme.element("keys");
+    const auto *keys = theme.element("keys");
     assert(keys && !keys->color && keys->opacity == 1);
     // Elements the native HUD doesn't draw from this table are dropped.
     assert(theme.element("chat") && theme.element("chat")->opacity == .1f && !theme.element("timer"));

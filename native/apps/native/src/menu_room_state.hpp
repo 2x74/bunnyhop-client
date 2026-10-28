@@ -23,12 +23,12 @@ struct MenuRoomView {
 
 // Compare typed fields before allocating or serializing a hidden-menu update.
 class MenuRoomState {
-  public:
+public:
     nlohmann::json update(const MenuRoomView &next) {
-        if (sent_ && next.map == map_ && next.selected_style == selected_style_ && next.active_style == active_style_ &&
-            next.room_id == room_id_ && next.room_map == room_map_ && next.track == track_ &&
-            next.generation == generation_ && next.target == target_ && next.loading == loading_ &&
-            next.practice == practice_ && next.frozen == frozen_)
+        if (sent_ && next.map == map_ && next.selected_style == selected_style_ && next.active_style == active_style_
+            && next.room_id == room_id_ && next.room_map == room_map_ && next.track == track_
+            && next.generation == generation_ && next.target == target_ && next.loading == loading_
+            && next.practice == practice_ && next.frozen == frozen_)
             return nullptr;
         map_ = next.map;
         selected_style_ = next.selected_style;
@@ -61,7 +61,7 @@ class MenuRoomState {
                   {"raceFrozen", frozen_}}}};
     }
 
-  private:
+private:
     std::string map_;
     std::string selected_style_;
     std::string active_style_;
@@ -76,4 +76,4 @@ class MenuRoomState {
     bool sent_ = false;
 };
 
-} // namespace native
+}  // namespace native

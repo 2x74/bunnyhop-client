@@ -97,14 +97,17 @@ struct FakeGl {
     int created = 0;
     int deleted = 0;
     std::vector<int> waited;
+
     Sync FenceSync(unsigned, unsigned) {
         fences.push_back(++created);
         return &fences.back();
     }
+
     unsigned ClientWaitSync(Sync sync, unsigned, unsigned long long) {
         waited.push_back(*sync);
         return 0;
     }
+
     void DeleteSync(Sync) { ++deleted; }
 };
 
@@ -149,8 +152,7 @@ void test_json_writer_writes_off_thread_and_keeps_the_newest() {
 
 void test_menu_slices() {
     native::MenuRoomState hidden_room;
-    native::MenuRoomView room_view{"map", "autohop", "autohop", "room", "map", 0, 1,
-                                    std::nullopt, false, false, false};
+    native::MenuRoomView room_view{"map", "autohop", "autohop", "room", "map", 0, 1, std::nullopt, false, false, false};
     const auto room_state = hidden_room.update(room_view);
     assert(room_state.is_object() && !room_state.contains("settings") && !room_state.contains("replays"));
     assert(hidden_room.update(room_view).is_null());
@@ -161,8 +163,14 @@ void test_menu_slices() {
     native::MenuState publisher;
     const native::Json settings = {{"sensitivity", 3.0}};
     const native::Json replays = native::Json::array({{{"id", "one.bhr"}}});
-    native::Json state = {{"map", "test"},      {"style", "autohop"}, {"track", 0},
-                          {"runGeneration", 2}, {"loading", false},   {"room", {{"id", "room"}}}};
+    native::Json state = {
+            {"map", "test"},
+            {"style", "autohop"},
+            {"track", 0},
+            {"runGeneration", 2},
+            {"loading", false},
+            {"room", {{"id", "room"}}}
+    };
     const auto full = publisher.publish(state, true, settings, replays);
     assert(full.find("\"settings\"") != std::string::npos && full.find("one.bhr") != std::string::npos);
     assert(publisher.publish(state, true, settings, replays).empty());
@@ -192,10 +200,11 @@ void test_settings_recovery() {
     std::filesystem::create_directories(directory);
     const auto file = directory / "settings.json";
     const native::Json saved = {
-        {"futureOption", true},
-        {"fov", "bad"},
-        {"sensitivity", 3.5},
-        {"binds", {{"jump", {"KeyJ"}}, {"futureAction", {"KeyK"}}, {"duck", {"Invalid"}}, {"forward", {"KeyZ"}}}}};
+            {"futureOption", true},
+            {"fov", "bad"},
+            {"sensitivity", 3.5},
+            {"binds", {{"jump", {"KeyJ"}}, {"futureAction", {"KeyK"}}, {"duck", {"Invalid"}}, {"forward", {"KeyZ"}}}}
+    };
     native::save_settings(file, saved);
     const auto loaded = native::load_settings(file);
     assert(loaded.at("sensitivity") == 3.5);
@@ -224,8 +233,9 @@ void test_settings_recovery() {
     }
     int notices = 0;
     native::RecoverableAction action(
-        [](const std::string &, bool = false, bool = false) { throw std::runtime_error("settings locked"); },
-        [&](const char *) { ++notices; });
+            [](const std::string &, bool = false, bool = false) { throw std::runtime_error("settings locked"); },
+            [&](const char *) { ++notices; }
+    );
     action("mute");
     native::RestartGuard guard;
     guard.press("restart", 100, true, true, false);
@@ -278,8 +288,7 @@ void test_settings_replace_has_no_missing_destination() {
             try {
                 std::ifstream input(file);
                 const auto saved = nlohmann::json::parse(input);
-                if (!saved.at("generation").is_number_integer())
-                    failed = true;
+                if (!saved.at("generation").is_number_integer()) failed = true;
             } catch (const std::exception &) {
                 failed = true;
             }

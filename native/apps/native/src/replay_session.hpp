@@ -43,16 +43,32 @@ struct ReplaySession {
 
     void set_full_recording(bool full) { range = ReplayRange::make(info, full); }
 
-    nlohmann::json state(bool active, const std::string &id, uint32_t tick, bool paused, double speed,
-                         const std::string &camera, double run_seconds, double fallback_interval) const {
+    nlohmann::json
+    state(bool active,
+          const std::string &id,
+          uint32_t tick,
+          bool paused,
+          double speed,
+          const std::string &camera,
+          double run_seconds,
+          double fallback_interval) const {
         return {
-            {"tickInterval", active ? range.tick_interval : fallback_interval},
-            {"active", active}, {"id", id}, {"tick", tick}, {"totalTicks", active ? range.total : 0u},
-            {"paused", paused}, {"speed", speed}, {"camera", camera}, {"seconds", run_seconds}, {"timeMs", score_ms(run_seconds)},
-            {"rangeStartTick", active ? range.from : 0u}, {"rangeEndTick", active ? range.to : 0u},
-            {"rangeTick", active ? range.relative(tick) : 0u}, {"rangeTotalTicks", active ? range.ticks() : 0u},
-            {"elapsedSeconds", active ? range.relative(tick) * range.tick_interval : 0},
-            {"fullRecording", range.full_recording},
+                {"tickInterval", active ? range.tick_interval : fallback_interval},
+                {"active", active},
+                {"id", id},
+                {"tick", tick},
+                {"totalTicks", active ? range.total : 0u},
+                {"paused", paused},
+                {"speed", speed},
+                {"camera", camera},
+                {"seconds", run_seconds},
+                {"timeMs", score_ms(run_seconds)},
+                {"rangeStartTick", active ? range.from : 0u},
+                {"rangeEndTick", active ? range.to : 0u},
+                {"rangeTick", active ? range.relative(tick) : 0u},
+                {"rangeTotalTicks", active ? range.ticks() : 0u},
+                {"elapsedSeconds", active ? range.relative(tick) * range.tick_interval : 0},
+                {"fullRecording", range.full_recording},
         };
     }
 };

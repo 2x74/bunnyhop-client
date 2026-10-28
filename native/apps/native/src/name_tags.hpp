@@ -11,20 +11,19 @@
 
 namespace native {
 using NameColor = std::array<float, 4>;
+
 inline NameColor name_color(std::string_view value, NameColor fallback = {.94f, .91f, .86f, 1}) {
     constexpr std::array<std::string_view, 6> names = {"rose", "peach", "sand", "lime", "aqua", "periwinkle"};
-    constexpr std::array<std::string_view, 6> colors = {"#ffa8cb", "#ffab8f", "#d2c2a5",
-                                                        "#c4ee6a", "#6ff0f0", "#a8b8ff"};
+    constexpr std::array<std::string_view, 6> colors = {
+            "#ffa8cb", "#ffab8f", "#d2c2a5", "#c4ee6a", "#6ff0f0", "#a8b8ff"
+    };
     for (size_t i = 0; i < names.size(); ++i) {
-        if (value == names[i])
-            value = colors[i];
+        if (value == names[i]) value = colors[i];
     }
-    if (value.size() != 7 || value[0] != '#')
-        return fallback;
+    if (value.size() != 7 || value[0] != '#') return fallback;
     unsigned rgb = 0;
     const auto parsed = std::from_chars(value.data() + 1, value.data() + 7, rgb, 16);
-    if (parsed.ec != std::errc() || parsed.ptr != value.data() + 7)
-        return fallback;
+    if (parsed.ec != std::errc() || parsed.ptr != value.data() + 7) return fallback;
     return {float(rgb >> 16) / 255, float((rgb >> 8) & 255) / 255, float(rgb & 255) / 255, fallback[3]};
 }
 
@@ -46,12 +45,14 @@ enum class NameMark : unsigned {
     tiktok,
     x
 };
+
 struct NameBadge {
     NameMark glyph = NameMark::badge;
     std::array<NameColor, 3> colors = {NameColor{1, 1, 1, 1}, NameColor{1, 1, 1, 1}, NameColor{1, 1, 1, 1}};
     unsigned color_count = 0;
     bool animated = false;
 };
+
 struct NameAppearance {
     NameColor color = {.94f, .91f, .86f, 1};
     NameColor second = {1, 1, 1, 1};
@@ -65,15 +66,19 @@ inline std::string json_text(const nlohmann::json &value, const char *key, size_
     const auto found = value.find(key);
     return found != value.end() && found->is_string() ? found->get<std::string>().substr(0, limit) : "";
 }
+
 inline bool json_flag(const nlohmann::json &value, const char *key) {
     const auto found = value.find(key);
     return found != value.end() && *found == true;
 }
+
 inline NameAppearance name_appearance(const nlohmann::json &value) {
     NameAppearance look;
     look.color = name_color(json_text(value, "nameColor"));
-    look.second = name_color(json_text(value, "nameColor2"),
-                             {(look.color[0] + 1) / 2, (look.color[1] + 1) / 2, (look.color[2] + 1) / 2, 1});
+    look.second = name_color(
+            json_text(value, "nameColor2"),
+            {(look.color[0] + 1) / 2, (look.color[1] + 1) / 2, (look.color[2] + 1) / 2, 1}
+    );
     const auto effect = json_text(value, "nameEffect");
     look.effect = effect == "glow"                           ? NameEffect::glow
                   : effect == "paint" || effect == "shimmer" ? NameEffect::paint
@@ -81,51 +86,47 @@ inline NameAppearance name_appearance(const nlohmann::json &value) {
                                                              : NameEffect::plain;
     const auto staff = json_text(value, "staff");
     const auto role = json_text(value, "role");
-    const auto add = [&](NameMark mark) { look.marks |= 1u << unsigned(mark); };
+    const auto add = [&](NameMark mark) {
+        look.marks |= 1u << unsigned(mark);
+    };
     if (staff == "developer" || role == "owner")
         add(NameMark::owner);
     else if (!staff.empty() || role == "admin" || role == "moderator" || json_flag(value, "admin"))
         add(NameMark::staff);
-    if (json_flag(value, "verified"))
-        add(NameMark::verified);
-    if (!json_text(value, "creator").empty())
-        add(NameMark::creator);
-    if (json_flag(value, "booster"))
-        add(NameMark::booster);
-    if (json_flag(value, "supporter"))
-        add(NameMark::supporter);
+    if (json_flag(value, "verified")) add(NameMark::verified);
+    if (!json_text(value, "creator").empty()) add(NameMark::creator);
+    if (json_flag(value, "booster")) add(NameMark::booster);
+    if (json_flag(value, "supporter")) add(NameMark::supporter);
     const auto special = value.find("special");
     if (special != value.end() && special->is_array()) {
         for (const auto &badge : *special) {
-            if (badge == "contributor")
-                add(NameMark::contributor);
-            if (badge == "mapper")
-                add(NameMark::mapper);
+            if (badge == "contributor") add(NameMark::contributor);
+            if (badge == "mapper") add(NameMark::mapper);
         }
     }
     return look;
 }
 
-inline NameAppearance host_name_appearance(const nlohmann::json &value, const nlohmann::json &marks,
-                                           NameAppearance fallback = {}) {
+inline NameAppearance
+host_name_appearance(const nlohmann::json &value, const nlohmann::json &marks, NameAppearance fallback = {}) {
     auto look = fallback;
     if (value.is_object()) {
         look.color = name_color(json_text(value, "color"));
-        look.second = name_color(json_text(value, "color2"),
-                                 {(look.color[0] + 1) / 2, (look.color[1] + 1) / 2, (look.color[2] + 1) / 2, 1});
+        look.second = name_color(
+                json_text(value, "color2"),
+                {(look.color[0] + 1) / 2, (look.color[1] + 1) / 2, (look.color[2] + 1) / 2, 1}
+        );
         const auto effect = json_text(value, "effect");
         look.effect = effect == "glow"      ? NameEffect::glow
                       : effect == "paint"   ? NameEffect::paint
                       : effect == "sparkle" ? NameEffect::sparkle
                                             : NameEffect::plain;
     }
-    if (!marks.is_array())
-        return look;
+    if (!marks.is_array()) return look;
     look.badge_count = 0;
     look.marks = 0;
     for (const auto &mark : marks) {
-        if (!mark.is_object() || look.badge_count == look.badges.size())
-            continue;
+        if (!mark.is_object() || look.badge_count == look.badges.size()) continue;
         const auto id = json_text(mark, "id");
         const auto kind = json_text(mark, "kind");
         auto &badge = look.badges[look.badge_count++];
@@ -147,11 +148,9 @@ inline NameAppearance host_name_appearance(const nlohmann::json &value, const nl
         look.marks |= 1u << unsigned(badge.glyph);
         badge.animated = json_flag(mark, "animated");
         const auto colors = mark.find("colors");
-        if (colors == mark.end() || !colors->is_array())
-            continue;
+        if (colors == mark.end() || !colors->is_array()) continue;
         for (const auto &color : *colors) {
-            if (badge.color_count == badge.colors.size())
-                break;
+            if (badge.color_count == badge.colors.size()) break;
             if (color.is_string())
                 badge.colors[badge.color_count++] = name_color(color.get<std::string>(), {1, 1, 1, 1});
         }
@@ -160,8 +159,7 @@ inline NameAppearance host_name_appearance(const nlohmann::json &value, const nl
 }
 
 inline size_t name_badge_count(const NameAppearance &look) {
-    if (look.badge_count)
-        return look.badge_count;
+    if (look.badge_count) return look.badge_count;
     size_t count = 0;
     for (unsigned bit = 0; bit < 15; ++bit)
         count += bool(look.marks & (1u << bit));
@@ -169,10 +167,8 @@ inline size_t name_badge_count(const NameAppearance &look) {
 }
 
 inline NameColor name_badge_color(const NameBadge &badge, double seconds) {
-    if (!badge.color_count)
-        return {1, 1, 1, 1};
-    if (!badge.animated || badge.color_count == 1)
-        return badge.colors[0];
+    if (!badge.color_count) return {1, 1, 1, 1};
+    if (!badge.animated || badge.color_count == 1) return badge.colors[0];
     const double phase = std::fmod(std::max(0., seconds), 3.) / 3 * badge.color_count;
     const unsigned first = unsigned(phase);
     const auto &from = badge.colors[first];
@@ -197,8 +193,8 @@ inline NameColor name_ink(const NameAppearance &look, float position, double sec
     return result;
 }
 
-inline std::optional<std::array<float, 2>> project_name_tag(const float *matrix, const float *point, float width,
-                                                            float height) {
+inline std::optional<std::array<float, 2>>
+project_name_tag(const float *matrix, const float *point, float width, float height) {
     std::array<float, 4> clip{};
     for (unsigned row = 0; row < 4; ++row)
         clip[row] = matrix[row] * point[0] + matrix[4 + row] * point[1] + matrix[8 + row] * point[2] + matrix[12 + row];
@@ -207,8 +203,8 @@ inline std::optional<std::array<float, 2>> project_name_tag(const float *matrix,
     return std::array<float, 2>{(clip[0] / clip[3] * .5f + .5f) * width, (.5f - clip[1] / clip[3] * .5f) * height};
 }
 
-inline std::optional<std::array<float, 2>> project_name_tag(
-    const float *matrix, const float *point, const GraphicsView &view, int height, float scale) {
+inline std::optional<std::array<float, 2>>
+project_name_tag(const float *matrix, const float *point, const GraphicsView &view, int height, float scale) {
     auto screen = project_name_tag(matrix, point, float(view.output_width), float(view.output_height));
     if (screen) {
         (*screen)[0] = (view.x + (*screen)[0]) / scale;
@@ -217,9 +213,11 @@ inline std::optional<std::array<float, 2>> project_name_tag(
     return screen;
 }
 
-template <class Core> struct NameTagTrace {
+template <class Core>
+struct NameTagTrace {
     Core *core;
     const float *eye;
+
     bool operator()(const float *point) const {
         float fraction = 0;
         return bh_trace_camera(core, eye, point, 0, &fraction) && fraction >= .98f;
@@ -227,50 +225,73 @@ template <class Core> struct NameTagTrace {
 };
 
 template <class Hud, class Actors, class Room, class Trace>
-void draw_name_tags(Hud &hud, int width, int height, float percent, const float *matrix, const Actors &actors,
-                    const Room &room, bool players, bool ghosts, bool through_walls, Trace trace, double seconds,
-                    std::optional<GraphicsView> output = std::nullopt) {
+void draw_name_tags(
+        Hud &hud,
+        int width,
+        int height,
+        float percent,
+        const float *matrix,
+        const Actors &actors,
+        const Room &room,
+        bool players,
+        bool ghosts,
+        bool through_walls,
+        Trace trace,
+        double seconds,
+        std::optional<GraphicsView> output = std::nullopt
+) {
     const HudGeometry geometry(width, height, percent);
     hud.overlay_begin(width, height, percent);
     for (const auto &actor : actors) {
         const bool ghost = actor.id.starts_with("ghost-");
-        if (actor.id == "local-camera-target" || actor.name.empty() || actor.opacity < .05f ||
-            (ghost ? !ghosts : !players))
+        if (actor.id == "local-camera-target" || actor.name.empty() || actor.opacity < .05f
+            || (ghost ? !ghosts : !players))
             continue;
-        const float point[] = {actor.frame.position[0], actor.frame.position[1],
-                               actor.frame.position[2] + actor.frame.view_offset_z + 20};
+        const float point[] = {
+                actor.frame.position[0],
+                actor.frame.position[1],
+                actor.frame.position[2] + actor.frame.view_offset_z + 20
+        };
         const auto view = output.value_or(graphics_view(GraphicsSettings{}, width, height));
         const auto screen = project_name_tag(matrix, point, view, height, geometry.scale);
-        if (!screen || (!through_walls && !trace(point)))
-            continue;
+        if (!screen || (!through_walls && !trace(point))) continue;
         unsigned slot = 256;
         std::from_chars(actor.id.data(), actor.id.data() + actor.id.size(), slot);
         auto look = room.appearance(slot);
-        if (ghost)
-            look.color = {.55f, .85f, 1, .85f};
+        if (ghost) look.color = {.55f, .85f, 1, .85f};
         hud.overlay_name((*screen)[0], (*screen)[1], actor.name, 13, look, seconds, true);
     }
     hud.overlay_end(width, height);
 }
+
 template <class Hud, class Actor, class Trace>
-void draw_ghost_name_tag(Hud &hud, int width, int height, float percent, const float *matrix, const Actor &actor,
-                         std::string_view name, std::optional<double> seconds, std::string_view delta,
-                         bool through_walls, Trace trace, std::optional<GraphicsView> output = std::nullopt) {
-    if (actor.opacity < .05f)
-        return;
-    const float point[] = {actor.frame.position[0], actor.frame.position[1],
-                           actor.frame.position[2] + actor.frame.view_offset_z + 20};
+void draw_ghost_name_tag(
+        Hud &hud,
+        int width,
+        int height,
+        float percent,
+        const float *matrix,
+        const Actor &actor,
+        std::string_view name,
+        std::optional<double> seconds,
+        std::string_view delta,
+        bool through_walls,
+        Trace trace,
+        std::optional<GraphicsView> output = std::nullopt
+) {
+    if (actor.opacity < .05f) return;
+    const float point[] = {
+            actor.frame.position[0], actor.frame.position[1], actor.frame.position[2] + actor.frame.view_offset_z + 20
+    };
     const HudGeometry geometry(width, height, percent);
     const auto view = output.value_or(graphics_view(GraphicsSettings{}, width, height));
     const auto screen = project_name_tag(matrix, point, view, height, geometry.scale);
-    if (!screen || (!through_walls && !trace(point)))
-        return;
+    if (!screen || (!through_walls && !trace(point))) return;
     hud.overlay_begin(width, height, percent);
     constexpr NameColor blue = {.55f, .85f, 1, .85f};
     hud.overlay_text((*screen)[0], (*screen)[1], name, 13, blue, true);
     HudLabel<128> label;
-    if (seconds)
-        label.format("%.3fs", *seconds);
+    if (seconds) label.format("%.3fs", *seconds);
     if (!delta.empty()) {
         label.append(" | ");
         label.append(delta);
@@ -279,4 +300,4 @@ void draw_ghost_name_tag(Hud &hud, int width, int height, float percent, const f
     hud.overlay_end(width, height);
 }
 
-} // namespace native
+}  // namespace native

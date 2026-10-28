@@ -19,14 +19,13 @@ struct Window {
     bool on_top = false;
     int applies = 0;
 
-    explicit Window(const std::string& chosen, bool menu = true) : policy(chosen) {
+    explicit Window(const std::string &chosen, bool menu = true) : policy(chosen) {
         policy.menu_open = menu;
         sync();
     }
 
     void sync() {
-        if (!policy.request())
-            return;
+        if (!policy.request()) return;
         const auto want = policy.effective({{"windowMode", policy.chosen}, {"alwaysOnTop", true}});
         if (want["windowMode"] != shown) {
             shown = want["windowMode"];
@@ -49,24 +48,21 @@ struct Window {
     }
 
     void resumed() {
-        if (policy.resume())
-            sync();
+        if (policy.resume()) sync();
     }
 
-    void choose(const std::string& mode) {
+    void choose(const std::string &mode) {
         policy.choose(mode);
         sync();
     }
 
-    void alt_enter() {
-        choose(policy.alt_enter_target());
-    }
+    void alt_enter() { choose(policy.alt_enter_target()); }
 };
 
 void presentation() {
     // Exclusive fullscreen never shows under the open menu, and the menu never
     // shares the screen with an always-on-top window.
-    for (const auto& mode : modes) {
+    for (const auto &mode : modes) {
         for (bool menu : {false, true}) {
             WindowModePolicy policy(mode);
             policy.menu_open = menu;
@@ -80,7 +76,7 @@ void presentation() {
 
 void launch() {
     // The home menu is open at launch, so a saved fullscreen starts borderless.
-    for (const auto& mode : modes) {
+    for (const auto &mode : modes) {
         Window w(mode);
         assert(w.shown == (mode == "fullscreen" ? "borderless" : mode));
     }
@@ -91,7 +87,7 @@ void launch() {
 }
 
 void esc_menu() {
-    for (const auto& mode : modes) {
+    for (const auto &mode : modes) {
         Window w(mode, false);
         assert(w.shown == mode);
         w.menu(true);
@@ -219,7 +215,7 @@ void invalid_modes() {
     assert(fallback.chosen == "windowed");
 }
 
-}
+}  // namespace
 
 int main() {
     presentation();

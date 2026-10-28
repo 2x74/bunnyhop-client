@@ -54,6 +54,7 @@ public:
         double pitch_min = -89;
         double pitch_max = 89;
     };
+
     struct Edge {
         int64_t t;
         std::string code;
@@ -102,7 +103,9 @@ public:
     }
 
     size_t motion_storage() const { return motion_.size(); }
+
     size_t edge_storage() const { return edges_.size(); }
+
     bool take_folded_edges() { return std::exchange(folded_edges_, false); }
 
     int64_t holdback_ns() const { return int64_t(std::llround(holdback_ms * 1e6)); }
@@ -122,9 +125,13 @@ public:
         t = std::max(std::min(t, now), now - max_age_ns);
         return t < tail ? now : t;
     }
+
     int64_t motion_tail() const { return head_ < motion_.size() ? motion_.back().t : 0; }
+
     int64_t edge_tail() const { return edge_head_ < edges_.size() ? edges_.back().t : 0; }
+
     size_t pending() const { return motion_.size() - head_ + bool(folded_); }
+
     size_t pending_edges() const { return edges_.size() - edge_head_; }
 
     void add_motion(int64_t t, double x, double p) {
@@ -162,7 +169,8 @@ public:
 
     // The tick whose boundary is |at|: applies the motion (|apply(x, p)| per report, in order) and the key edges
     // stamped at or before at - holdback. Returns how many reports it took.
-    template <class Apply> uint32_t take(int64_t at, Apply &&apply) {
+    template <class Apply>
+    uint32_t take(int64_t at, Apply &&apply) {
         const int64_t until = at - holdback_ns();
         if (!have_cut_ || until > cut_) {
             cut_ = until;
@@ -185,7 +193,8 @@ public:
     }
 
     // Pending motion in order, without taking it (the render camera's preview).
-    template <class Apply> void peek(Apply &&apply) const {
+    template <class Apply>
+    void peek(Apply &&apply) const {
         if (folded_) {
             dispatch(apply, *folded_);
         }
@@ -195,7 +204,8 @@ public:
     }
 
     // Everything pending, now: nothing is ticking, the sensitivity changed, or --frames. Key edges fold into |keys|.
-    template <class Apply> uint32_t flush(Apply &&apply) {
+    template <class Apply>
+    uint32_t flush(Apply &&apply) {
         uint32_t taken = take_folded(INT64_MAX, apply);
         for (; head_ < motion_.size(); ++head_) {
             dispatch(apply, motion_[head_]);
@@ -219,7 +229,8 @@ public:
     }
 
     // The keys physically held right now become the tick state, with no edge pending for them.
-    template <class Codes> void seed_keys(const Codes &codes) {
+    template <class Codes>
+    void seed_keys(const Codes &codes) {
         release_keys();
         folded_edges_ = false;
         for (const auto &code : codes) {
@@ -260,7 +271,8 @@ private:
     uint32_t stuck_ = 0;
 
     // Sorted insert from the back: reports nearly always arrive in order.
-    template <class T> static void insert(std::vector<T> &queue, size_t from, T value) {
+    template <class T>
+    static void insert(std::vector<T> &queue, size_t from, T value) {
         size_t i = queue.size();
         while (i > from && queue[i - 1].t > value.t) {
             --i;
@@ -268,7 +280,8 @@ private:
         queue.insert(queue.begin() + std::ptrdiff_t(i), std::move(value));
     }
 
-    template <class Apply> static void dispatch(Apply &apply, const Report &report) {
+    template <class Apply>
+    static void dispatch(Apply &apply, const Report &report) {
         if constexpr (std::is_invocable_v<Apply, const Report &>) {
             apply(report);
         } else {
@@ -276,7 +289,8 @@ private:
         }
     }
 
-    template <class T> static void compact(std::vector<T> &queue, size_t &head) {
+    template <class T>
+    static void compact(std::vector<T> &queue, size_t &head) {
         if (head == queue.size()) {
             queue.clear();
             head = 0;
@@ -316,7 +330,8 @@ private:
         folded_->t = *fold_cut_;
     }
 
-    template <class Apply> uint32_t take_folded(int64_t until, Apply &apply) {
+    template <class Apply>
+    uint32_t take_folded(int64_t until, Apply &apply) {
         if (!folded_ || folded_->t > until) {
             return 0;
         }
@@ -328,9 +343,7 @@ private:
         return report.reports;
     }
 
-    int64_t bucket(int64_t stamp) const {
-        return stamp <= first_cut_ ? 0 : 1 + (stamp - first_cut_ - 1) / tick_ns_;
-    }
+    int64_t bucket(int64_t stamp) const { return stamp <= first_cut_ ? 0 : 1 + (stamp - first_cut_ - 1) / tick_ns_; }
 
     void make_motion_room() {
         if (motion_.size() < storage_limit) {

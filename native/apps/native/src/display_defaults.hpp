@@ -11,7 +11,12 @@ namespace native {
 // retains its earlier VSync-on, uncapped behavior.
 inline bool existing_install(const std::filesystem::path &data_dir) {
     static const char *const markers[] = {
-        "settings.json", "window-state.json", "tutorial-progress.json", "start-points.json", "replays", "run-vault",
+            "settings.json",
+            "window-state.json",
+            "tutorial-progress.json",
+            "start-points.json",
+            "replays",
+            "run-vault",
     };
     for (const char *marker : markers) {
         std::error_code error;

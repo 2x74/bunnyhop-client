@@ -18,6 +18,7 @@ namespace native {
 class EventStamps {
 public:
     enum Kind : size_t { kMotion = 0, kKeys = 1 };
+
     static constexpr uint32_t kOffClockLimit = 64;
     static constexpr uint64_t kFutureSlackNs = 1'000'000;
     static constexpr uint64_t kForeignClockNs = 10'000'000'000;

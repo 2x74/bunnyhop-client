@@ -27,9 +27,13 @@ namespace native {
 class InputTimeline {
 public:
     bool timed() const { return timed_; }
+
     const TimedInput &queue() const { return queue_; }
+
     TimedInput &queue() { return queue_; }
+
     const BindTable &binds() const { return binds_; }
+
     const EventStamps &stamps() const { return stamps_; }
 
     // Once, after SDL_Init: which event times this video backend gets right.
@@ -74,8 +78,13 @@ public:
 
     // A key or mouse button went down or up. A movement key's change of state is queued for the tick it was made in.
     // Repeats and wheel notches are not edges.
-    void key(std::set<std::string> &held_codes, const std::string &code, bool down, bool wheel, uint64_t stamp,
-             uint64_t received) {
+    void
+    key(std::set<std::string> &held_codes,
+        const std::string &code,
+        bool down,
+        bool wheel,
+        uint64_t stamp,
+        uint64_t received) {
         const bool changes = down != held_codes.contains(code);
         if (timed_ && changes && !wheel && binds_.of(code)) {
             const uint64_t event_time = stamps_.time(EventStamps::kKeys, stamp, received);
@@ -112,8 +121,8 @@ public:
         sim_ns += tick_ns;
         if (timed_) {
             const size_t edges = queue_.pending_edges();
-            const auto reports = queue_.take(int64_t(sim_ns),
-                [&input](const TimedInput::Report &report) { apply(input, report); });
+            const auto reports =
+                    queue_.take(int64_t(sim_ns), [&input](const TimedInput::Report &report) { apply(input, report); });
             const bool folded_edges = queue_.take_folded_edges();
             tick_contributed_ = reports != 0 || edges != queue_.pending_edges() || folded_edges;
         } else {

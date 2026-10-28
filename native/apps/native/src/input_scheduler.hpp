@@ -32,8 +32,11 @@ public:
     }
 
     uint64_t first_boundary(uint64_t tick_ns) const { return sim_ns + tick_ns; }
+
     bool due(uint64_t tick_ns) const { return accumulator_ns >= tick_ns; }
+
     void consume(uint64_t tick_ns) { accumulator_ns -= tick_ns; }
+
     double seconds() const { return double(accumulator_ns) / 1e9; }
 
 private:
