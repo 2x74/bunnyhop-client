@@ -49,6 +49,7 @@ you commit.
 ## TypeScript style
 
 - Same rules: one statement per line, lines under 120 columns, named helpers, no clever one-liners, no `any`.
+- Run `bun run format` in `native/` before committing. `bun run check` fails on unformatted files.
 - Menu code must not import the web game entry point, Three or the live simulation (`build-menu.ts`
   enforces this).
 - Match the existing UI. Avoid gradients, glows, emoji decoration, new card styles or anything that looks
