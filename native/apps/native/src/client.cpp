@@ -4,6 +4,7 @@
 #include "raw_keyboard.hpp"
 #include "input_timeline.hpp"
 #include "recording_input.hpp"
+#include "replay_practice.hpp"
 #include "display_defaults.hpp"
 #include "json_file_writer.hpp"
 #include "diagnostics_report.hpp"
@@ -1391,6 +1392,35 @@ int run(const Options &opt) {
                     else throw std::runtime_error("Invalid loading action");
                 }
                 else if(type=="leaveMap")leave_map();
+                else if (type == "practiceFromReplay") {
+                    if (!core || !playback || download.valid())
+                        throw std::runtime_error("Open a replay before continuing as practice.");
+                    const auto tick = message.contains("tick") ?
+                        std::optional<uint32_t>(message.at("tick").get<uint32_t>()) : std::nullopt;
+                    const auto takeover = native::ReplayTakeover::take(core.get(), playback_info, zones,
+                        selected_style, !gauntlet_id.empty(), !room.id.empty(), tick);
+                    takeover.resume(practice, input_timeline, input, held_codes);
+                    curr = prev = takeover.snapshot.player;
+                    active_style = takeover.style;
+                    active_track = takeover.track;
+                    playback = false;
+                    playback_id.clear();
+                    replay_controls = {};
+                    recording_input.stop();
+                    recording_ended = true;
+                    record_path.clear();
+                    pending_vault_capture.reset();
+                    ++run_generation;
+                    beat_start = beat_upto = 0;
+                    run_event({{"type", "reset"}});
+                    renderer->reset_presentation();
+                    scope.reset();
+                    audio.reset();
+                    reset_feedback(true);
+                    reset_input_timing();
+                    score_notice = "Practice from replay. Press R for a real run.";
+                    show_menu(false);
+                }
                 else if(type=="practice")practice_action(message.at("action").get<std::string>(),false,message.contains("value")?std::optional<bool>(message.at("value").get<bool>()):std::nullopt);
                 else if(type=="music"){const auto action=message.at("action").get<std::string>();if(action!="previous"&&action!="toggle"&&action!="next")throw std::runtime_error("Invalid music action");audio.music_control(action);}
                 else if(type=="announce"){

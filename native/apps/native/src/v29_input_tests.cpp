@@ -2,6 +2,7 @@
 #include "input_timeline.hpp"
 #include "settings.hpp"
 #include "test_bsp.hpp"
+#include "replay_practice.hpp"
 #include <zlib.h>
 #ifdef NDEBUG
 #undef NDEBUG
@@ -168,10 +169,64 @@ void test_turn_settings_validation() {
     }
 }
 
+void test_practice_takeover() {
+    Fixture fixture;
+    const auto path = fixture.record("practice.bhr", true, true);
+    const auto info = fixture.header(path);
+    check(bh_replay_load(fixture.core.get(), path.string().c_str()), fixture.core.get());
+    for (int rejection = 0; rejection < 4; ++rejection) {
+        bool rejected = false;
+        auto zones = fixture.zones;
+        if (rejection == 3) {
+            zones[0].maxs[0] += 1;
+        }
+        try {
+            native::ReplayTakeover::take(fixture.core.get(), info, zones,
+                rejection == 2 ? "legit" : "autohop", rejection == 0, rejection == 1, 10);
+        } catch (const std::exception &) {
+            rejected = true;
+        }
+        assert(rejected);
+        BhState state{};
+        check(bh_state(fixture.core.get(), &state), fixture.core.get());
+        assert(state.tick == 0);
+    }
+    BhSnapshot expected{};
+    check(bh_replay_seek(fixture.core.get(), 20, &expected), fixture.core.get());
+    const auto takeover = native::ReplayTakeover::take(fixture.core.get(), info, fixture.zones,
+                                                     "autohop", false, false, 20);
+    assert(std::memcmp(&takeover.snapshot, &expected, sizeof(expected)) == 0);
+    native::Practice practice;
+    native::Input input;
+    native::InputTimeline timeline;
+    std::set<std::string> held{"KeyW"};
+    timeline.motion(input, 1000, 1000, 7, 2);
+    takeover.resume(practice, timeline, input, held);
+    assert(practice.active && !practice.mode && practice.tool == "replay");
+    assert(held.empty() && timeline.queue().pending() == 0);
+    assert(input.yaw() == native::Input::normalize(takeover.view.yaw));
+    assert(input.pitch == takeover.view.pitch);
+    assert(!native::practice_allows_event(practice.active, "beat"));
+    assert(!native::practice_allows_event(practice.active, "finish"));
+    BhState state{};
+    const BhCmd command{};
+    check(bh_step(fixture.core.get(), &command, &state), fixture.core.get());
+    assert(state.tick == 21);
+    assert(!bh_record_begin(fixture.core.get(), "", "autohop", "test", 100));
+    assert(!bh_record_write_bhr(fixture.core.get(), (fixture.directory / "invalid.bhr").string().c_str()));
+    practice.restart();
+    assert(!practice.active);
+    check(bh_replay_load(fixture.core.get(), path.string().c_str()), fixture.core.get());
+    const auto spawn = native::ReplayTakeover::take(fixture.core.get(), info, fixture.zones,
+                                                  "autohop", false, false, 0);
+    assert(spawn.snapshot.player.tick == 0 && spawn.view.yaw == 0);
+}
+
 }  // namespace
 
 int main() {
     test_recording_options_roundtrip();
     test_turn_settings_validation();
+    test_practice_takeover();
     std::puts("v29 native recording input roundtrips passed");
 }
