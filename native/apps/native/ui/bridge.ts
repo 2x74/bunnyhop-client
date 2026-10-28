@@ -7,7 +7,7 @@ import { LESSON_IDS, type LessonId } from "../../web/src/tutorial/data";
 import { DEFAULT_BINDS as WEB_DEFAULT_BINDS } from "../../web/src/binds";
 import { ANGLE_SPEED_KEY_RANGE, DEFAULT_ANGLE_SPEED_KEY, DEFAULT_YAW_SPEED, YAW_SPEED_RANGE } from "./turn-speed";
 export const LIVE_ORIGIN = "https://bunnyhop.lol";
-export interface VideoExportOptions {width:number;height:number;fps:number;quality:"standard"|"high"|"max";camera:"eye"|"chase"|"flyby"|"auto";hud:boolean;audio?:boolean;music?:string;musicOffset?:number;musicLevel?:number;musicLoop?:boolean;musicDuck?:boolean;from:number;to:number}
+export interface VideoExportOptions {width:number;height:number;fps:number;quality:"standard"|"high"|"max";camera:"eye"|"chase"|"flyby"|"auto";hud:boolean;audio?:boolean;music?:string;musicOffset?:number;musicLevel?:number;musicLoop?:boolean;musicDuck?:boolean;fullRecording?:boolean;from?:number;to?:number}
 export interface VideoExportState {available:boolean;reason:string;state:"idle"|"capturing"|"encoding"|"completed"|"canceled"|"error";frames:number;encodedFrames:number;totalFrames:number;progress:number;path:string;error:string;videoOnly:boolean;musicTracks:{id:string;title:string}[]}
 export type MenuMessage =
   | {type:"mapLoad";action:"cancel"|"retry"}
@@ -38,6 +38,8 @@ export type MenuMessage =
   | { type: "replay"; action: "play"|"ghost"|"export"|"delete"|"screenshot"; ghostSlot?:number; id: string; confirmed?: boolean }
   | { type: "replayData"; action: "play"|"ghost"; ghostSlot?:number; name: string; map: string; replayBase64: string }
   | { type: "replayControl"; action: "pause"|"seek"|"speed"|"stop"|"camera"; camera?:string; paused?: boolean; tick?: number; speed?: number }
+  | { type: "replayControl"; action: "fullRecording"; value: boolean }
+  | { type: "practiceFromReplay"; tick?: number }
   | { type: "ghost"; enabled: boolean }
   | {type:"ghostControl";action:"remove"|"clear"|"toggle";slot?:number;enabled?:boolean}
   | {type:"tutorial";action:"start"|"demo";lesson:LessonId}
@@ -128,7 +130,18 @@ export interface NativeReplay {screenshot?:boolean;localSummary?:LocalRunSummary
 export const REPLAY_CAMERAS=["eye","chase","free","flyby","auto"] as const;
 export type ReplayCamera=(typeof REPLAY_CAMERAS)[number];
 export interface NativeGhost {slot:number;id:string;name:string;enabled:boolean;map?:string;style?:StyleId;track?:number}
-export interface PlaybackState {camera?:ReplayCamera;seconds?:number;tickInterval?:number;active:boolean;id:string;tick:number;totalTicks:number;paused:boolean;speed:number;player?:{id?:string;name?:string;runId?:string}}
+/**
+ * `tick` and `totalTicks` are absolute recording ticks. The range fields are the part the viewer shows: by default
+ * from 1 s before the timer starts to 1.5 s after it stops, or the whole recording with `fullRecording`.
+ */
+const PLAYBACK_RANGE_KEYS=["rangeStartTick","rangeEndTick","rangeTick","rangeTotalTicks","elapsedSeconds"] as const;
+export interface PlaybackState {
+  rangeStartTick?:number;rangeEndTick?:number;rangeTick?:number;rangeTotalTicks?:number;elapsedSeconds?:number;
+  fullRecording?:boolean;
+  camera?:ReplayCamera;seconds?:number;tickInterval?:number;
+  active:boolean;id:string;tick:number;totalTicks:number;paused:boolean;speed:number;
+  player?:{id?:string;name?:string;runId?:string};
+}
 /** Practice as the host has it (web practice-mode/: PracticeAttempt, Checkpoints, the !cp menu). */
 export interface PracticeState {
   available:boolean;
@@ -288,8 +301,14 @@ export function applyState(value: unknown): boolean {
   if(Array.isArray(next.replays)) state.replays=next.replays.slice(0,5000).filter((item):item is NativeReplay=>!!item&&typeof item==="object"&&typeof item.id==="string"&&item.id.length<=256&&typeof item.name==="string"&&typeof item.map==="string"&&isStyleId(item.style)&&[item.track,item.seconds,item.recordedAt,item.bytes].every(value=>typeof value==="number"&&Number.isFinite(value)&&value>=0));
   if(next.playback&&typeof next.playback==="object") {
     const playback=next.playback as Record<string,unknown>;
-    for(const key of ["active","paused"] as const) if(typeof playback[key]==="boolean") state.playback[key]=playback[key];
-    for(const key of ["tick","totalTicks","speed","seconds","tickInterval"] as const) if(typeof playback[key]==="number"&&Number.isFinite(playback[key])&&Number(playback[key])>=0) state.playback[key]=Number(playback[key]);
+    for(const key of ["active","paused","fullRecording"] as const) {
+      if(typeof playback[key]==="boolean") state.playback[key]=playback[key];
+    }
+    const numbers=["tick","totalTicks","speed","seconds","tickInterval",...PLAYBACK_RANGE_KEYS] as const;
+    for(const key of numbers) {
+      const value=playback[key];
+      if(typeof value==="number"&&Number.isFinite(value)&&value>=0) state.playback[key]=value;
+    }
     if(typeof playback.id==="string") state.playback.id=playback.id;
     if(REPLAY_CAMERAS.includes(playback.camera as ReplayCamera))state.playback.camera=playback.camera as ReplayCamera;
   }
