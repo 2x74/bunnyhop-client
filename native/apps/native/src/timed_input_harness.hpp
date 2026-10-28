@@ -40,7 +40,7 @@ public:
     Input input;
     std::set<std::string> held_codes;
     InputTimeline timeline;
-    double accumulator = 0;
+    InputScheduler scheduler;
     std::vector<TickRow> rows;
     // Called after each tick's command, like the core reporting teleport/pusher events (Input::events).
     std::function<void(Input &, size_t tick)> after_tick;
@@ -71,13 +71,13 @@ public:
 
     // Delivers what has arrived by |now| (the pump), then runs the ticks due, as run() does.
     void frame(int64_t now) {
+        scheduler.frame(uint64_t(now), true, uint64_t(tick_ns));
+        timeline.begin_pump(input, uint64_t(now), scheduler, uint64_t(tick_ns));
         pump(now);
-        const double frame_seconds = double(now - last_frame_) / 1e9;
         last_frame_ = now;
-        accumulator += std::clamp(frame_seconds, 0.0, InputTimeline::kMaxFrameSeconds);
-        uint64_t sim_ns = InputTimeline::tick_start_ns(uint64_t(now), accumulator);
+        uint64_t &sim_ns = scheduler.sim_ns;
         timeline.begin_frame(input, true, uint64_t(now));
-        while (accumulator >= tick_seconds) {
+        while (scheduler.due(uint64_t(tick_ns))) {
             const double before = input.yaw_counts;
             const uint32_t reports_before = input.motion_events;
             timeline.take_tick(input, sim_ns, uint64_t(tick_ns), false);
@@ -95,7 +95,7 @@ public:
             if (after_tick) {
                 after_tick(input, rows.size() - 1);
             }
-            accumulator -= tick_seconds;
+            scheduler.consume(uint64_t(tick_ns));
         }
     }
 
@@ -123,7 +123,10 @@ public:
         }
     }
 
-    void start_at(int64_t now) { last_frame_ = now; }
+    void start_at(int64_t now) {
+        last_frame_ = now;
+        scheduler.reset(uint64_t(now));
+    }
     int64_t last_frame() const { return last_frame_; }
 
 private:

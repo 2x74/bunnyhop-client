@@ -10,6 +10,24 @@
 #include <functional>
 #include <string>
 #include <vector>
+#include <cstdlib>
+#include <new>
+
+static bool count_allocations = false;
+static size_t allocation_count = 0;
+
+void *operator new(std::size_t size) {
+    if (count_allocations) {
+        ++allocation_count;
+    }
+    if (void *memory = std::malloc(size ? size : 1)) {
+        return memory;
+    }
+    throw std::bad_alloc();
+}
+
+void operator delete(void *memory) noexcept { std::free(memory); }
+void operator delete(void *memory, std::size_t) noexcept { std::free(memory); }
 
 using native::test::LoopHarness;
 using native::test::ms;
@@ -532,6 +550,102 @@ void test_held_tab_through_replay_routing() {
     assert(controls.visible);
 }
 
+void test_capped_gap_with_remainder_and_holdback() {
+    LoopHarness loop;
+    loop.start_at(start);
+    loop.timeline.queue().holdback_ms = 4;
+    loop.frame(start + 7 * ms);
+    loop.motion(start + 10 * ms, 3, 10000, start + 1000 * ms);
+    loop.motion(start + 11 * ms, 5, -100, start + 1000 * ms);
+    loop.key(start + 10 * ms, "KeyA", true, start + 1000 * ms);
+    loop.frame(start + 1000 * ms);
+    assert(loop.rows.size() == 25);
+    assert(loop.rows.front().boundary == start + 753 * ms);
+    assert(loop.rows.front().counts == 8);
+    assert(loop.rows.front().reports == 2);
+    assert(loop.rows.front().held == native::left);
+    assert(close(loop.rows.front().pitch, 89 - 4.4, 1e-5));
+}
+
+void test_long_stall_preserves_event_clock() {
+    native::EventStamps stamps;
+    stamps.begin_pump(uint64_t(start));
+    const uint64_t resumed = uint64_t(start + 60'000 * ms);
+    stamps.begin_pump(resumed);
+    for (uint64_t i = 1; i <= 1000; ++i) {
+        const uint64_t stamp = uint64_t(start) + i * ms;
+        assert(stamps.time(native::EventStamps::kMotion, stamp, resumed) == stamp);
+    }
+    assert(stamps.source(native::EventStamps::kMotion).trusted);
+    assert(stamps.source(native::EventStamps::kMotion).off_clock == 0);
+    stamps.begin_pump(resumed + ms);
+    for (uint32_t i = 0; i < native::EventStamps::kOffClockLimit; ++i) {
+        stamps.time(native::EventStamps::kMotion, 3 * ms, resumed + ms);
+    }
+    assert(!stamps.source(native::EventStamps::kMotion).trusted);
+}
+
+void test_backlog_storage_is_bounded() {
+    native::Input input;
+    native::InputTimeline timeline;
+    native::InputScheduler scheduler;
+    scheduler.reset(uint64_t(start));
+    const uint64_t resumed = uint64_t(start + 60'000 * ms);
+    scheduler.frame(resumed, true, uint64_t(native::test::tick_ns));
+    timeline.begin_pump(input, resumed, scheduler, uint64_t(native::test::tick_ns));
+    auto &queue = timeline.queue();
+    double pitch = 0;
+    constexpr int reports = 480'000;
+    const std::string code = "KeyA";
+    for (int i = 1; i <= reports; ++i) {
+        const uint64_t stamp = uint64_t(start) + uint64_t(i) * 125'000;
+        const double y = i % 2 ? 10000 : -100;
+        pitch = std::clamp(pitch + input.pitch_degrees(y), -89.0, 89.0);
+        timeline.motion(input, stamp, resumed, .125, y);
+        const int64_t edge_time = queue.stamp(int64_t(stamp), int64_t(resumed), queue.edge_tail());
+        queue.add_edge(edge_time, code, i % 2 != 0);
+        assert(queue.motion_storage() <= native::TimedInput::storage_limit);
+        assert(queue.edge_storage() <= native::TimedInput::storage_limit);
+    }
+    while (scheduler.due(uint64_t(native::test::tick_ns))) {
+        timeline.take_tick(input, scheduler.sim_ns, uint64_t(native::test::tick_ns), false);
+        scheduler.consume(uint64_t(native::test::tick_ns));
+    }
+    uint64_t sim_ns = resumed;
+    timeline.take_tick(input, sim_ns, uint64_t(native::test::tick_ns), false);
+    assert(input.yaw_counts == reports * .125);
+    assert(input.motion_events == reports);
+    assert(input.pitch == pitch);
+    assert(queue.keys.empty());
+    assert(queue.pending() == 0 && queue.pending_edges() == 0);
+}
+
+void test_8khz_input_does_not_allocate() {
+    native::Input input;
+    native::InputTimeline timeline;
+    native::InputScheduler scheduler;
+    scheduler.reset(uint64_t(start));
+    const std::string code = "KeyA";
+    allocation_count = 0;
+    count_allocations = true;
+    for (uint64_t frame = 1; frame <= 1000; ++frame) {
+        const uint64_t now = uint64_t(start) + frame * 16 * ms;
+        scheduler.frame(now, true, uint64_t(native::test::tick_ns));
+        timeline.begin_pump(input, now, scheduler, uint64_t(native::test::tick_ns));
+        for (uint64_t report = 0; report < 128; ++report) {
+            const uint64_t stamp = now - (127 - report) * 125'000;
+            timeline.motion(input, stamp, now, .125, .25);
+            timeline.queue().add_edge(int64_t(stamp), code, report % 2 == 0);
+        }
+        while (scheduler.due(uint64_t(native::test::tick_ns))) {
+            timeline.take_tick(input, scheduler.sim_ns, uint64_t(native::test::tick_ns), false);
+            scheduler.consume(uint64_t(native::test::tick_ns));
+        }
+    }
+    count_allocations = false;
+    assert(allocation_count == 0);
+}
+
 void test_event_stamps_per_backend() {
     const uint64_t now = 20'000 * ms;
     native::EventStamps windows;
@@ -575,6 +689,10 @@ void test_x11_motion_uses_arrival_time() {
 }  // namespace
 
 int main() {
+    test_capped_gap_with_remainder_and_holdback();
+    test_long_stall_preserves_event_clock();
+    test_backlog_storage_is_bounded();
+    test_8khz_input_does_not_allocate();
     test_held_tab_through_replay_routing();
     test_each_tick_takes_exactly_its_reports();
     test_fractional_reports_stay_exact();

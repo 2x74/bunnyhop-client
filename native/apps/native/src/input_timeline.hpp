@@ -1,5 +1,6 @@
 #pragma once
 #include "event_stamps.hpp"
+#include "input_scheduler.hpp"
 #include "input_binds.hpp"
 #include "key_routing.hpp"
 #include "native_input.hpp"
@@ -25,8 +26,6 @@ namespace native {
 // simulation runs, then take_tick() and held() for each tick.
 class InputTimeline {
 public:
-    static constexpr double kMaxFrameSeconds = .25;
-
     bool timed() const { return timed_; }
     const TimedInput &queue() const { return queue_; }
     TimedInput &queue() { return queue_; }
@@ -54,11 +53,9 @@ public:
         restart(input, held_codes);
     }
 
-    // Where the next tick starts on SDL's clock: |accumulator| seconds of simulation are still due at |wall_ns|.
-    // A tick's boundary is its end.
-    static uint64_t tick_start_ns(uint64_t wall_ns, double accumulator) {
-        const uint64_t behind_ns = uint64_t(std::max(0.0, accumulator) * 1e9);
-        return behind_ns < wall_ns ? wall_ns - behind_ns : 0;
+    void begin_pump(Input &input, uint64_t now, const InputScheduler &scheduler, uint64_t tick_ns) {
+        stamps_.begin_pump(now);
+        queue_.begin_pump(int64_t(scheduler.first_boundary(tick_ns)), int64_t(tick_ns), scheduler.capped, input.pitch);
     }
 
     // A gameplay SDL motion event, stamped |stamp| and read from SDL's queue at |received|.
@@ -113,7 +110,7 @@ public:
         const uint64_t start = sim_ns;
         sim_ns += tick_ns;
         if (timed_) {
-            queue_.take(int64_t(sim_ns), [&input](double x, double p) { input.apply_report(x, p); });
+            queue_.take(int64_t(sim_ns), [&input](const TimedInput::Report &report) { apply(input, report); });
         } else {
             input.take_tick(start, sim_ns);
         }
@@ -137,7 +134,7 @@ public:
     Input preview(const Input &input) const {
         Input view = input;
         view.consume_all();
-        queue_.peek([&view](double x, double p) { view.apply_report(x, p); });
+        queue_.peek([&view](const TimedInput::Report &report) { apply(view, report); });
         return view;
     }
 
@@ -185,8 +182,14 @@ private:
     KeyPresses presses_;
     std::vector<std::string> held_scratch_;
 
+    static void apply(Input &input, const TimedInput::Report &report) {
+        input.motion_events += report.reports;
+        input.yaw_counts += report.x;
+        input.pitch = std::clamp(input.pitch + report.p, report.pitch_min, report.pitch_max);
+    }
+
     void commit_pending(Input &input) {
-        queue_.flush([&input](double x, double p) { input.apply_report(x, p); });
+        queue_.flush([&input](const TimedInput::Report &report) { apply(input, report); });
     }
 };
 

@@ -28,6 +28,7 @@ class ScenarioReplay {
 public:
     ScenarioReplay(const nlohmann::json &scenario, uint64_t start_ns)
         : scenario_(scenario), name_(scenario.at("name").get<std::string>()), start_ns_(start_ns) {
+        scheduler_.reset(start_ns);
         timeline_.rebuild_binds(native::default_settings().at("binds"));
         timeline_.queue().holdback_ms = scenario.at("holdbackMs").get<double>();
         timeline_.queue().holdback_max_ms = scenario.at("holdbackMaxMs").get<double>();
@@ -40,13 +41,20 @@ public:
         size_t next_tick = 0;
         for (const auto &frame : scenario_.at("frames")) {
             const uint64_t now = start_ns_ + frame.get<uint64_t>();
+            scheduler_.frame(now, true, kTickNs);
+            timeline_.begin_pump(input_, now, scheduler_, kTickNs);
             while (next_event < events.size() && arrival(events[next_event]) <= now) {
                 deliver(events[next_event++]);
             }
-            while (next_tick < ticks.size() && boundary(ticks[next_tick]) <= now) {
+            timeline_.begin_frame(input_, true, now);
+            while (scheduler_.due(kTickNs)) {
+                if (next_tick >= ticks.size()) {
+                    return fail({name_, next_tick, "production scheduler emitted an extra tick"});
+                }
                 if (!check_tick(ticks[next_tick], next_tick)) {
                     return false;
                 }
+                scheduler_.consume(kTickNs);
                 ++next_tick;
             }
         }
@@ -60,6 +68,7 @@ private:
     const nlohmann::json &scenario_;
     std::string name_;
     uint64_t start_ns_;
+    native::InputScheduler scheduler_;
     native::Input input_;
     native::InputTimeline timeline_;
     std::set<std::string> held_codes_;
@@ -79,7 +88,10 @@ private:
     }
 
     bool check_tick(const nlohmann::json &expected, size_t index) {
-        uint64_t sim_ns = boundary(expected) - kTickNs;
+        uint64_t &sim_ns = scheduler_.sim_ns;
+        if (sim_ns + kTickNs != boundary(expected)) {
+            return fail({name_, index, "production tick boundary differs from web"});
+        }
         const double counts_before = input_.yaw_counts;
         const uint32_t reports_before = input_.motion_events;
         timeline_.take_tick(input_, sim_ns, kTickNs, false);

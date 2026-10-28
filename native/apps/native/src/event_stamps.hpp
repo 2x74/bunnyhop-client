@@ -35,6 +35,12 @@ public:
         }
     }
 
+    void begin_pump(uint64_t now) {
+        // The oldest plausible event was produced just after the previous pump.
+        backlog_floor_ns_ = last_pump_ns_;
+        last_pump_ns_ = now;
+    }
+
     // The event's own time if it is usable, else when it was read from SDL's queue.
     uint64_t time(Kind kind, uint64_t stamp, uint64_t received) {
         Source &source = sources_[kind];
@@ -42,7 +48,8 @@ public:
             return received;
         }
         const bool future = stamp > received + kFutureSlackNs;
-        const bool foreign = stamp == 0 || (stamp < received && received - stamp > kForeignClockNs);
+        const bool old = stamp < received && received - stamp > kForeignClockNs;
+        const bool foreign = stamp == 0 || (old && stamp < backlog_floor_ns_);
         if (!future && !foreign) {
             source.off_clock_in_row = 0;
             return stamp;
@@ -58,6 +65,8 @@ public:
 
 private:
     std::array<Source, 2> sources_{};
+    uint64_t last_pump_ns_ = 0;
+    uint64_t backlog_floor_ns_ = UINT64_MAX;
 
     void distrust(Kind kind, std::string_view reason) {
         sources_[kind].trusted = false;

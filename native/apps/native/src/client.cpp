@@ -497,7 +497,8 @@ int run(const Options &opt) {
     bool map_preparing=false;
     std::string prefetch_map,prefetch_sha,prefetch_active,prefetch_done;
     auto cancel_prefetch=[&](){prefetch.cancel();prefetch_map.clear();prefetch_sha.clear();prefetch_active.clear();};
-    double accumulator=0;
+    native::InputScheduler input_scheduler;
+    input_scheduler.reset(SDL_GetTicksNS());
     using Clock=std::chrono::steady_clock;
     native::ActivityCounter activity;activity.input(std::chrono::duration<double>(Clock::now().time_since_epoch()).count());
     auto activity_time=Clock::now();
@@ -505,7 +506,7 @@ int run(const Options &opt) {
     // A focus, menu or restart reset: the simulation starts again from now and
     // motion from before it is dropped rather than handed to the next tick.
     auto reset_input_timing=[&]() {
-        accumulator=0;
+        input_scheduler.reset(SDL_GetTicksNS());
         input_timeline.restart(input, held_codes);
         camera_controls.clear();
         SDL_FlushEvent(SDL_EVENT_MOUSE_MOTION);
@@ -548,7 +549,7 @@ int run(const Options &opt) {
         if(on)audio.pause();
         resume_wanted=!on&&bool(core);
         if(resume_wanted) SDL_RaiseWindow(window.get());
-        capture(resume_wanted && focused&&!(playback&&replay_controls.visible)); accumulator=0; prev=curr;
+        capture(resume_wanted && focused&&!(playback&&replay_controls.visible)); input_scheduler.reset(SDL_GetTicksNS()); prev=curr;
     };
     uint64_t chat_request=0;
     auto chat_suggest=[&](){++chat_request;if(menu&&menu_ready)menu->evaluate_js("window.bunnyhopNativeMenu?.onChatSuggest?.("+nlohmann::json({{"text",chat.input},{"request",chat_request}}).dump()+")");};
@@ -1149,6 +1150,11 @@ int run(const Options &opt) {
         if(window_dirty&&Clock::now()>=window_save_due)save_window();
         if(video_probe.valid()&&video_probe.wait_for(std::chrono::seconds(0))==std::future_status::ready)video_available=video_probe.get();
         const uint64_t mouse_pump_start=SDL_GetTicksNS();
+        const double pump_tick_seconds = playback ? playback_info.at("settings").value("tickInterval", dt) : dt;
+        const uint64_t pump_tick_ns = uint64_t(std::llround(pump_tick_seconds * 1e9));
+        auto pump_schedule = input_scheduler;
+        pump_schedule.frame(mouse_pump_start, true, pump_tick_ns);
+        input_timeline.begin_pump(input, mouse_pump_start, pump_schedule, pump_tick_ns);
         mouse_diagnostics.begin(mouse_pump_start,preferences.value("mouseDiagnostics",false)&&captured&&focused&&!chat.active&&!playback);
         bool had_input_activity=false;
         SDL_Event event;
@@ -1657,7 +1663,7 @@ int run(const Options &opt) {
             discord.update(discord_allowed&&settings.enabled&&!settings.privacy,activity);
         }
         if(spectator!=observed_spectator){
-            if(spectator){bh_record_end(core.get());recording_ended=true;record_path.clear();pending_vault_capture.reset();beat_start=0;++run_generation;run_event({{"type","reset"}});audio.reset();accumulator=0;input.clear();renderer->reset_presentation();scope.reset();show_menu(false);}
+            if(spectator){bh_record_end(core.get());recording_ended=true;record_path.clear();pending_vault_capture.reset();beat_start=0;++run_generation;run_event({{"type","reset"}});audio.reset();input_scheduler.reset(SDL_GetTicksNS());input.clear();renderer->reset_presentation();scope.reset();show_menu(false);}
             else if(observed_spectator&&core&&!playback)reset();observed_spectator=spectator;
         }
         if(const auto ready=restart_guard.frame(epoch_ms(),held_action(restart_guard.action),!captured||chat.active||playback))act(*ready,false,true);
@@ -1675,24 +1681,21 @@ int run(const Options &opt) {
         activity.frame(map_id,frame_seconds,std::chrono::duration<double>(now.time_since_epoch()).count(),activity_active);
         ++input_frame;input_frame_ms=frame_seconds*1000;
         const double step_dt=playback?playback_info.at("settings").value("tickInterval",dt):dt;
-        if(simulation_active) {
-            const double max_frame = native::InputTimeline::kMaxFrameSeconds;
-            const double elapsed = opt.frames ? step_dt : std::clamp(frame_seconds, 0.0, max_frame);
-            accumulator += elapsed * (playback ? playback_speed : 1);
-        }
+        const uint64_t tick_ns = uint64_t(std::llround(step_dt * 1e9));
+        input_scheduler.frame(mouse_pump_start, simulation_active, tick_ns,
+                              playback ? playback_speed : 1, opt.frames != 0);
         frame_diagnostics.mark(native::FrameDiagnostics::kOther, SDL_GetTicksNS());
-        uint64_t sim_ns = native::InputTimeline::tick_start_ns(now_ns, accumulator);
-        const uint64_t tick_ns = uint64_t(step_dt * 1e9);
+        uint64_t &sim_ns = input_scheduler.sim_ns;
         input_timeline.begin_frame(input, simulation_active, now_ns);
-        while(accumulator>=step_dt) {
+        while(input_scheduler.due(tick_ns)) {
             const double counts_before=input.yaw_counts;
             input_timeline.take_tick(input, sim_ns, tick_ns, opt.frames != 0);
             const double mouse_counts=input.yaw_counts-counts_before;
             prev=curr;const BhState tutorial_pre=curr;
             BhCmd cmd{};
             if(playback) {
-                if(curr.tick>=playback_info.at("totalTicks").get<uint32_t>()){playback_paused=true;accumulator=0;break;}
-                BhSnapshot state{};if(!bh_replay_step(core.get(),&state)){const std::string failure=bh_last_error(core.get());playback_failed=true;reset();error="Replay stopped: "+failure;std::cerr<<error<<'\n';show_menu(true);accumulator=0;if(opt.frames)running=false;break;}curr=state.player;bh_last_command(core.get(),&cmd);input.set_angles(cmd.pitch,cmd.yaw,5);
+                if(curr.tick>=playback_info.at("totalTicks").get<uint32_t>()){playback_paused=true;input_scheduler.reset(SDL_GetTicksNS());break;}
+                BhSnapshot state{};if(!bh_replay_step(core.get(),&state)){const std::string failure=bh_last_error(core.get());playback_failed=true;reset();error="Replay stopped: "+failure;std::cerr<<error<<'\n';show_menu(true);input_scheduler.reset(SDL_GetTicksNS());if(opt.frames)running=false;break;}curr=state.player;bh_last_command(core.get(),&cmd);input.set_angles(cmd.pitch,cmd.yaw,5);
             } else {
                 if(const double rate=turn_rate()) {
                     input.turn(rate,dt);
@@ -1766,10 +1769,10 @@ int run(const Options &opt) {
             if(!playback)kept_weapons.observe(weapon);
             const uint32_t slot=weapon.active==weapon.primary?1:weapon.active==weapon.secondary?2:3;if(slot!=observed_slot){last_slot=observed_slot;observed_slot=slot;}
              if(curr.events&native::teleported) prev=curr;
-            accumulator-=step_dt;
+            input_scheduler.consume(tick_ns);
             BhRunState tick_run{};
             if(playback||!zones.empty())require(bh_run_state(core.get(),&tick_run),core.get(),"Reading native timer");
-            if(tutorial&&tutorial->is_active()&&!playback){BhCmd filtered=cmd;bh_last_command(core.get(),&filtered);const auto result=tutorial->tick(tutorial_pre,curr,filtered,curr.events,dt);if(result.completed)save_tutorial();if(tick_run.status==2&&tutorial->lesson_id()=="final"&&!tutorial_final_saved){tutorial->finish(tick_run.seconds);save_tutorial();tutorial_final_saved=true;}if(result.next_lesson>=0&&result.next_lesson<4){const char *ids[]={"jump","strafe","speed","final"};start_tutorial(ids[result.next_lesson],false);accumulator=0;break;}}
+            if(tutorial&&tutorial->is_active()&&!playback){BhCmd filtered=cmd;bh_last_command(core.get(),&filtered);const auto result=tutorial->tick(tutorial_pre,curr,filtered,curr.events,dt);if(result.completed)save_tutorial();if(tick_run.status==2&&tutorial->lesson_id()=="final"&&!tutorial_final_saved){tutorial->finish(tick_run.seconds);save_tutorial();tutorial_final_saved=true;}if(result.next_lesson>=0&&result.next_lesson<4){const char *ids[]={"jump","strafe","speed","final"};start_tutorial(ids[result.next_lesson],false);input_scheduler.reset(SDL_GetTicksNS());break;}}
 
             // Finish the recording on the exact native tick, before any further catch-up steps.
             if(!playback&&tick_run.status==2&&!recording_ended) {reset_input_timing();break;}
@@ -1825,7 +1828,7 @@ int run(const Options &opt) {
         }
         int width=0,height=0; SDL_GetWindowSizeInPixels(window.get(),&width,&height);
         if(renderer&&!video_capture&&!director_job) {
-            const float blend=(opt.frames||!simulation_active)?1.0f:float(accumulator/step_dt); float eye[3];
+            const float blend=(opt.frames||!simulation_active)?1.0f:float(input_scheduler.seconds()/step_dt); float eye[3];
             for(int i=0;i<3;++i) eye[i]=prev.position[i]+(curr.position[i]-prev.position[i])*blend;
             eye[2]+=prev.view_offset_z+(curr.view_offset_z-prev.view_offset_z)*blend;
             BhSnapshot state{};bh_snapshot(core.get(),&state);
@@ -1844,7 +1847,7 @@ int run(const Options &opt) {
             const double steady_seconds=std::chrono::duration<double>(now.time_since_epoch()).count();auto actors=room.actors(steady_seconds);
             auto camera_input=input_timeline.preview(input);
             // Show turnbind motion between ticks too, so turning is smooth at any frame rate.
-            if(simulation_active&&!playback&&!spectator)if(const double rate=turn_rate())camera_input.turn(rate,std::clamp(accumulator,0.0,dt));std::string shown_notice=tutorial&&tutorial->is_active()&&!playback?tutorial->notice():score_notice;
+            if(simulation_active&&!playback&&!spectator)if(const double rate=turn_rate())camera_input.turn(rate,std::clamp(input_scheduler.seconds(),0.0,dt));std::string shown_notice=tutorial&&tutorial->is_active()&&!playback?tutorial->notice():score_notice;
             const auto race_notice=room_modes.notice(epoch_ms());if(!race_notice.empty())shown_notice=race_notice;
             renderer->set_player_glow(player_glow);if(!spectator)renderer->set_spectated_actor(std::nullopt);renderer->set_viewmodel_weapon(std::nullopt);renderer->set_viewmodel_visible(preferences.at("viewmodel").get<bool>()&&!opt.camera);renderer->set_source_look(preferences.at("sourceLook").get<bool>());
             if(spectator){spectated_actor=room.spectated(steady_seconds);const auto &target=spectated_actor;if(target){renderer->set_spectated_actor(*target);for(int k=0;k<3;k++){eye[k]=target->frame.position[k];state.player.position[k]=target->frame.position[k];state.player.velocity[k]=target->frame.velocity[k];}eye[2]+=target->frame.view_offset_z;state.player.tick=target->frame.tick;state.player.view_offset_z=target->frame.view_offset_z;state.player.grounded=!!(target->frame.flags&2);state.player.crouched=!!(target->frame.flags&1);camera_input.set_angles(target->frame.pitch,target->frame.yaw);renderer->set_cosmetics(target->outfit,target->loadout);renderer->set_player_glow(target->playerGlow);renderer->set_viewmodel_weapon(target->frame.weapon);shown_notice="Spectating "+target->name+" - Esc for Room controls";actors.erase(std::remove_if(actors.begin(),actors.end(),[&](const auto &a){return a.id==target->id;}),actors.end());}else{renderer->set_spectated_actor(std::nullopt);renderer->set_viewmodel_visible(false);shown_notice="Waiting for spectator target";}}
