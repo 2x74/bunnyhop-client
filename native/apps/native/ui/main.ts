@@ -12,7 +12,7 @@ import { mapBrowser, closeMapPanel } from "../../web/src/ui/maps";
 import { onNavigate } from "../../web/src/ui/nav";
 import { onViewerRequest } from "../../web/src/viewer/request";
 import { onRaceRequest } from "../../web/src/player/race";
-import { applyState, openAuth, openExternal, send, state, onBeforeSend, LIVE_ORIGIN } from "./bridge";
+import { applyState, openAuth, openExternal, runSeconds, send, state, onBeforeSend, LIVE_ORIGIN } from "./bridge";
 import { NativeActivityService } from "./activity-service";
 import { accountGeneration } from "../../web/src/ui/account-state";
 import { countJump,recordMapPlayed } from "../../web/src/ui/stats";
@@ -22,7 +22,9 @@ import { formatTime } from "../../web/src/timer";
 import { isStyleId } from "../../web/src/styles";
 import { onStyleChange, setSelectedStyle } from "../../web/src/ui/style-picker";
 import { settingsPanel, focusSettingsSection } from "./settings-panel";
-import { replayPanel, watchRequest, raceRequest, gauntletWatchDeps, sendReplay, playLocalReplay } from "./replays";
+import { replayPanel, replayViewer, watchRequest, raceRequest, gauntletWatchDeps, sendReplay, playLocalReplay } from "./replays";
+import { applyReplayHostState, applyReplayTimeline } from "./replay-host";
+import { practiceFromReplay } from "./replay-practice";
 import { legalLinks } from "../../web/src/ui/legal";
 import { installMuteButton } from "./mute-button";
 import { installTutorialProgress } from "./tutorial-entry";
@@ -94,7 +96,8 @@ function readFinish(value:unknown):FinishSummary|null {
   if(!value||typeof value!=="object") return null;
   const timer=value as Record<string,unknown>;
   if(timer.status!==2||typeof timer.seconds!=="number"||!Number.isFinite(timer.seconds)||timer.seconds<0) return null;
-  const summary:FinishSummary={seconds:timer.seconds};
+  // The score in whole milliseconds, as the server and the web show it (timer.seconds on older hosts).
+  const summary:FinishSummary={seconds:runSeconds({seconds:timer.seconds,timeMs:timer.timeMs})??timer.seconds};
   if(Number.isSafeInteger(timer.jumps)&&Number(timer.jumps)>=0) summary.jumps=Number(timer.jumps);
   if(Number.isSafeInteger(timer.strafes)&&Number(timer.strafes)>=0) summary.strafes=Number(timer.strafes);
   if(typeof timer.sync==="number"&&Number.isFinite(timer.sync)&&timer.sync>=0&&timer.sync<=100) summary.sync=timer.sync;
@@ -186,8 +189,27 @@ function playMap(map: string, style?: string): void {
   selectMap(map);
 }
 let shown = "";
+/** The replay viewer while it's up: it sits over the page, not in #menu (web viewer.css #rv, body.viewer-open). */
+let viewer:{el:HTMLElement;dispose:()=>void}|null=null;
+function closeViewer():void {
+  if(!viewer)return;
+  viewer.dispose();
+  viewer.el.remove();
+  viewer=null;
+  document.body.classList.remove("viewer-open");
+}
+/** Replays while a replay plays is the viewer; otherwise the vault. */
+function showViewer():void {
+  if(!viewer){
+    viewer=replayViewer(notice);
+    document.body.append(viewer.el);
+  }
+  document.body.classList.add("viewer-open");
+  app.replaceChildren();
+}
 function render(): void {
   ++renderGeneration;
+  if(screen!=="replays"||!state.playback.active)closeViewer();
   const root = screen==="home"?(state.map?"pause":"home"):screen;
   document.body.dataset.screen=screen==="room"?"pause":root;
   document.body.dataset.map=state.map??"";
@@ -257,9 +279,11 @@ function render(): void {
   } else if (screen === "settings") {
     app.replaceChildren(h("section.panel.native-settings", null, heading("Settings"),settingsPanel()));
   } else if (screen === "credits") {
-    app.replaceChildren(h("section.panel.native-credits", null, heading("Credits"),creditsPanel()));
+    app.replaceChildren(h("section.panel.panel-wide.native-credits", null, heading("Credits"),creditsPanel()));
+  } else if(screen==="replays"&&state.playback.active) {
+    showViewer();
   } else if(screen==="replays") {
-    app.replaceChildren(h("section.panel.native-replay-screen",null,heading("Replays"),replayPanel(notice)));
+    app.replaceChildren(h("section.panel.panel-wide.native-replay-screen",null,heading("Replays"),replayPanel(notice)));
   } else if(screen==="servers") {
     app.replaceChildren(h("section.panel.panel-wide.native-servers",null,heading("Play online"),serverBrowser({map:state.map,onSolo:()=>show("maps")})));
   } else if(screen==="room") {
@@ -301,7 +325,7 @@ function receive(value: unknown): void {
   if(report&&typeof report.map==="string"&&typeof report.style==="string"&&Number.isSafeInteger(report.track)&&Number.isSafeInteger(report.runGeneration)){nativeWorldRecord.update(report.map&&!report.loading&&api.available()?{map:report.map,style:report.style,track:Number(report.track),generation:Number(report.runGeneration)}:null);}
 
   if (value && typeof value === "object" && (value as { type?: string }).type === "auth") { refreshAccount(); return; }
-  const structural=()=>JSON.stringify({map:state.map,loading:state.loading,error:state.error,paused:state.paused,style:state.style,track:state.track});
+  const structural=()=>JSON.stringify({map:state.map,loading:state.loading,error:state.error,paused:state.paused,style:state.style,track:state.track,playback:state.playback.active});
   const before=structural(),mapBefore=state.map;
   let finishChanged=false;
   if(value&&typeof value==="object"&&"timer" in value) {
@@ -312,6 +336,7 @@ function receive(value: unknown): void {
   const paused=()=>JSON.stringify([state.practice,state.replays.length,state.replays[0]?.id,state.settings.hud,state.settings.crosshair,state.settings.viewmodel,state.settings.jumpStats,state.settings.strafeTrainer]);
   const pauseBefore=paused();
   const applied=applyState(value);
+  applyReplayHostState(value);
   if(applied)applySemanticPalette(state.settings.colorBlind);
   // A newly picked map is up: the next Esc in game is the pause menu, not the browser it was picked from.
   if(applied&&state.map&&state.map!==mapBefore&&!state.playback.active&&LEAVE_FOR_GAME.has(screen)){backStack=[];screen="home";}
@@ -368,6 +393,8 @@ window.bunnyhopNativeMenu = { onGamepad, onActivity:value=>activityService.recei
   // A friend pressed Join on your Discord activity. The host has already checked the secret.
   settle,
   onLeaveMap:teardownMap,
+  onReplayTimeline:applyReplayTimeline,
+  onPracticeFromReplayResult:value=>practiceFromReplay.receive(value),
   joinRoom:id=>{if(typeof id!=="string"||!/^(?:[a-z0-9][a-z0-9-]{0,31}|p-[a-z2-7]{10})$/.test(id))return;void roomService.join(id).catch(()=>notice("Couldn't join that room."));show("room");},
   onChatLink:(raw:string)=>{const url=safeNativeChatUrl(raw);if(url)nativeNavigate(url);},
   version: 2 };

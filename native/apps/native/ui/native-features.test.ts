@@ -6,7 +6,9 @@ import {resolve} from "node:path";
 test("offline menu routes styles, native settings, replay controls, tutorials and free cosmetics without gameplay contexts",async()=>{
  const browser=await chromium.launch({headless:true});try{const page=await browser.newPage({viewport:{width:1280,height:900}}),errors:string[]=[];page.on("pageerror",error=>errors.push(error.message));const html=await readFile(resolve(import.meta.dir,"../../../target/native-menu/menu.html"),"utf8");
  await page.route("**/*",route=>route.request().url()==="https://bunnyhop.lol/native-features-unit"?route.fulfill({status:200,contentType:"text/html",body:html}):route.abort());
- await page.addInitScript(()=>{localStorage.setItem("bunnyhop:onboarded","1");localStorage.setItem("bunnyhop:first-seen",String(Date.now()));(window as unknown as {messages:unknown[]}).messages=[];window.addEventListener("bunnyhop:native-message",event=>(window as unknown as {messages:unknown[]}).messages.push((event as CustomEvent).detail));});
+ await page.addInitScript(()=>{localStorage.setItem("bunnyhop:onboarded","1");localStorage.setItem("bunnyhop:first-seen",String(Date.now()));(window as unknown as {messages:unknown[]}).messages=[];
+  // (UI sounds from the pointer passing over buttons aren't what these checks are about.)
+  window.addEventListener("bunnyhop:native-message",event=>{const message=(event as CustomEvent).detail;if(message.type!=="audioCue")(window as unknown as {messages:unknown[]}).messages.push(message);});});
  await page.goto("https://bunnyhop.lol/native-features-unit",{waitUntil:"domcontentloaded"});
  // Styles: the web pause screen's Style tab, one row per style.
  await page.evaluate(()=>window.bunnyhopNativeMenu.onState({map:"bhop_eazy",paused:true}));await page.getByRole("tab",{name:"Style"}).click();
@@ -18,11 +20,16 @@ test("offline menu routes styles, native settings, replay controls, tutorials an
  await page.getByRole("button",{name:"Settings",exact:true}).click();await page.getByLabel("Field of view",{exact:true}).fill("110");await page.getByLabel("Field of view",{exact:true}).blur();
  expect(await page.evaluate(()=>(window as unknown as {messages:unknown[]}).messages.at(-1))).toEqual({type:"settings",patch:{fov:110}});
  await page.getByRole("button",{name:"Back",exact:true}).click();await page.getByRole("button",{name:"Replays",exact:true}).click();
- await page.evaluate(()=>window.bunnyhopNativeMenu.onState({replays:[{id:"test-replay",name:"Native test replay",map:"bhop_eazy",style:"scroll",track:0,seconds:12.34,recordedAt:1,bytes:100}],playback:{active:true,id:"test-replay",tick:100,totalTicks:1000,paused:false,speed:1},ghost:{enabled:true,id:"g",name:"Ghost"}}));
- await page.getByRole("button",{name:"Watch",exact:true}).click();expect(await page.evaluate(()=>(window as unknown as {messages:unknown[]}).messages.at(-1))).toEqual({type:"replay",action:"play",id:"test-replay"});
- await page.getByRole("button",{name:"Pause",exact:true}).click();expect(await page.evaluate(()=>(window as unknown as {messages:unknown[]}).messages.at(-1))).toEqual({type:"replayControl",action:"pause",paused:true});
- await page.getByLabel("Replay speed").selectOption("2");expect(await page.evaluate(()=>(window as unknown as {messages:unknown[]}).messages.at(-1))).toEqual({type:"replayControl",action:"speed",speed:2});
- await page.getByRole("button",{name:"Delete",exact:true}).click();expect(await page.getByRole("dialog",{name:"Delete replay"}).isVisible()).toBe(true);await page.getByRole("button",{name:"Delete replay",exact:true}).click();expect(await page.evaluate(()=>(window as unknown as {messages:unknown[]}).messages.at(-1))).toEqual({type:"replay",action:"delete",id:"test-replay",confirmed:true});
+ const lastMessage=()=>page.evaluate(()=>(window as unknown as {messages:unknown[]}).messages.at(-1));
+ await page.evaluate(()=>window.bunnyhopNativeMenu.onState({replays:[{id:"test-replay",name:"Native test replay",map:"bhop_eazy",style:"scroll",track:0,seconds:12.34,recordedAt:1,bytes:100}],ghost:{enabled:true,id:"g",name:"Ghost"}}));
+ // The vault: Watch, and Delete behind a confirmation.
+ await page.getByRole("button",{name:"Watch",exact:true}).click();expect(await lastMessage()).toEqual({type:"replay",action:"play",id:"test-replay"});
+ await page.getByRole("button",{name:"Delete",exact:true}).click();expect(await page.getByRole("dialog",{name:"Delete replay"}).isVisible()).toBe(true);await page.getByRole("button",{name:"Delete replay",exact:true}).click();expect(await lastMessage()).toEqual({type:"replay",action:"delete",id:"test-replay",confirmed:true});
+ // Playing: the viewer (replay-viewer.browser.test.ts has the rest).
+ await page.evaluate(()=>window.bunnyhopNativeMenu.onState({playback:{active:true,id:"test-replay",tick:100,totalTicks:1000,paused:false,speed:1}}));
+ await page.getByRole("button",{name:"Play / pause (Space)",exact:true}).click();expect(await lastMessage()).toEqual({type:"replayControl",action:"pause",paused:true});
+ await page.getByRole("button",{name:"Playback speed 2× ([ / ])",exact:true}).click();expect(await lastMessage()).toEqual({type:"replayControl",action:"speed",speed:2});
+ await page.evaluate(()=>window.bunnyhopNativeMenu.onState({playback:{active:false,id:""}}));
  await page.getByRole("button",{name:"Back",exact:true}).click();await page.getByRole("button",{name:"Learn to bhop",exact:true}).click();await page.getByRole("button",{name:"Start lesson",exact:true}).nth(2).click();expect(await page.evaluate(()=>(window as unknown as {messages:unknown[]}).messages.at(-1))).toEqual({type:"tutorial",action:"start",lesson:"speed"});
  await page.getByRole("button",{name:"Back",exact:true}).click();await page.getByRole("button",{name:"Profile",exact:true}).click();await page.getByRole("tab",{name:/^Colourway/}).click();await page.locator('.lo-tile[data-id="outfit-midnight"]').click();
  await page.waitForFunction(()=>(window as unknown as {messages:{type:string}[]}).messages.some(message=>message.type==="cosmetics"&&(message as {outfit?:string}).outfit==="outfit-midnight"));
