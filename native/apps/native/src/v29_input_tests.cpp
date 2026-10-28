@@ -3,6 +3,8 @@
 #include "settings.hpp"
 #include "test_bsp.hpp"
 #include "replay_practice.hpp"
+#include "replay_session.hpp"
+#include "replay_controls.hpp"
 #include <zlib.h>
 #ifdef NDEBUG
 #undef NDEBUG
@@ -10,6 +12,7 @@
 #include <array>
 #include <cassert>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -77,7 +80,7 @@ struct Fixture {
         scheduler.reset(1'000'000'000);
         BhRunState run{};
         for (uint64_t tick = 1; tick <= 1000 && run.status != 2; ++tick) {
-            record_tick(input, timeline, scheduler, recording, held, tick, contribute);
+            record_tick(input, timeline, scheduler, recording, tick, contribute);
             check(bh_run_state(core.get(), &run), core.get());
         }
         assert(run.status == 2);
@@ -88,7 +91,7 @@ struct Fixture {
     }
 
     void record_tick(native::Input &input, native::InputTimeline &timeline, native::InputScheduler &scheduler,
-                     native::RecordingInput &recording, std::set<std::string> &held, uint64_t tick,
+                     native::RecordingInput &recording, uint64_t tick,
                      bool contribute) {
         const uint64_t now = 1'000'000'000 + tick * tick_ns;
         scheduler.frame(now, true, tick_ns);
@@ -100,7 +103,7 @@ struct Fixture {
         timeline.take_tick(input, scheduler.sim_ns, tick_ns, false);
         scheduler.consume(tick_ns);
         check(recording.mark_timed(core.get(), timeline.tick_contributed()), core.get());
-        input.held = tick > 40 ? native::forward : 0;
+        input.held = tick > 200 ? native::forward : 0;
         const auto command = input.command();
         const auto look = input.look_sample();
         BhState state{};
@@ -222,11 +225,81 @@ void test_practice_takeover() {
     assert(spawn.snapshot.player.tick == 0 && spawn.view.yaw == 0);
 }
 
+void test_replay_playback_range() {
+    Fixture fixture;
+    const auto path = fixture.record("range.bhr", true, true);
+    const auto before = decompress(path);
+    auto session = native::ReplaySession::open(fixture.core.get(), path);
+    assert(session.range.from > 0 && !session.range.full_recording);
+    assert(session.initial.snapshot.player.tick == session.range.from);
+    const auto trimmed = session.initial;
+    session.set_full_recording(true);
+    assert(session.range.from == 0 && session.range.to == session.range.total);
+    const auto resimulated = session.seek(fixture.core.get(), trimmed.snapshot.player.tick);
+    assert(std::memcmp(&resimulated.snapshot, &trimmed.snapshot, sizeof(trimmed.snapshot)) == 0);
+    assert(std::memcmp(&resimulated.view, &trimmed.view, sizeof(trimmed.view)) == 0);
+    session.set_full_recording(false);
+    assert(session.seek(fixture.core.get(), 0).snapshot.player.tick == session.range.from);
+    assert(session.seek(fixture.core.get(), session.range.total).snapshot.player.tick == session.range.to);
+    assert(decompress(path) == before);
+
+    Json info = {{"startTick", 1900}, {"endTick", 4300}, {"totalTicks", 5000},
+                 {"settings", {{"tickInterval", .01}}}};
+    const auto range = native::ReplayRange::make(info);
+    assert(range.from == 1800 && range.to == 4450 && range.ticks() == 2650);
+    struct ExportOptions {
+        uint32_t from = 0;
+        uint32_t to = 0;
+        bool full_recording = false;
+    };
+    ExportOptions clip;
+    range.export_bounds(clip);
+    assert(clip.from == 1800 && clip.to == 4450);
+    clip = {0, 5000, false};
+    range.export_bounds(clip);
+    assert(clip.from == 1800 && clip.to == 4450);
+    clip = {0, 0, true};
+    range.export_bounds(clip);
+    assert(clip.from == 0 && clip.to == 5000);
+    native::ReplayControls controls;
+    controls.first_tick = range.from;
+    bool paused = false;
+    double speed = 1;
+    controls.action(native::ReplayControls::Action::start, 3000, range, paused, speed);
+    assert(controls.take() == range.from);
+    controls.action(native::ReplayControls::Action::end, 3000, range, paused, speed);
+    assert(controls.take() == range.to && paused);
+    const auto bounds = native::ReplayControls::layout(1000, 700);
+    controls.pointer(bounds, bounds.x, bounds.y + 40, range.to, true);
+    assert(controls.take() == range.from);
+    controls.motion(bounds, bounds.x + bounds.width, range.to);
+    assert(controls.take() == range.to);
+    session.range = range;
+    const auto state = session.state(true, "fixture", 1900, false, 1, "eye", 0, .01);
+    assert(state.at("tick") == 1900 && state.at("rangeTick") == 100);
+    assert(state.at("rangeTotalTicks") == 2650 && state.at("elapsedSeconds") == 1);
+}
+
+void test_bonus_takeover_uses_normal_style() {
+    Fixture fixture;
+    for (auto &zone : fixture.zones) {
+        zone.track = 1;
+    }
+    const auto path = fixture.record("bonus.bhr", true, true);
+    const auto session = native::ReplaySession::open(fixture.core.get(), path);
+    assert(session.info.at("track") == 1);
+    const auto takeover = native::ReplayTakeover::take(fixture.core.get(), session.info, fixture.zones,
+                                                     "legit", false, false, 0);
+    assert(takeover.track == 1 && takeover.style == "autohop");
+}
+
 }  // namespace
 
 int main() {
     test_recording_options_roundtrip();
     test_turn_settings_validation();
     test_practice_takeover();
+    test_replay_playback_range();
+    test_bonus_takeover_uses_normal_style();
     std::puts("v29 native recording input roundtrips passed");
 }

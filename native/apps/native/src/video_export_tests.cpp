@@ -1,6 +1,8 @@
 #include "video_export.hpp"
 #include "replay_audio.hpp"
 #include "settings.hpp"
+#include "video_request.hpp"
+#include "replay_range.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -38,7 +40,25 @@ static void music_clock(const std::filesystem::path &file,const std::vector<int1
     for(int ch=0;ch<2;++ch){const float x=song[at*2+ch]/32768.f,y=song[next*2+ch]/32768.f;assert(std::abs(full[sample*2+ch]-(x+(y-x)*float(position-at))*.55f*.65f)<1e-7);}
     assert(full[sample*2]!=full[sample*2+1]);assert(SDL_WasInit(SDL_INIT_AUDIO)==0);
 }
+static void default_export_range() {
+    const nlohmann::json info = {{"startTick", 1900}, {"endTick", 4300}, {"totalTicks", 5000},
+                                 {"settings", {{"tickInterval", .01}}}};
+    nlohmann::json request = {{"width", 1280}, {"height", 720}, {"fps", 60}, {"quality", "high"},
+                              {"camera", "eye"}, {"hud", true}};
+    const auto range = native::ReplayRange::make(info);
+    auto options = native::parse_video_options(request);
+    range.export_bounds(options);
+    assert(options.from == 1800 && options.to == 4450);
+    assert(native::VideoTimeline::make(options, 5000).frames == 1590);
+    request["fullRecording"] = true;
+    options = native::parse_video_options(request);
+    range.export_bounds(options);
+    assert(options.from == 0 && options.to == 5000);
+    assert(native::VideoTimeline::make(options, 5000).frames == 3000);
+}
+
 int main(int argc,char **argv){
+    default_export_range();
     native::VideoOptions options;options.from=10;options.to=110;options.fps=30;const auto timeline=native::VideoTimeline::make(options,200);assert(timeline.frames==30&&std::abs(timeline.tick(1)-13.3333333333)<1e-6&&timeline.audio_frames()==22050);
     for(int fps:{30,60,120}){options.fps=fps;assert(native::VideoTimeline::make(options,200).frames==uint64_t(fps));}options.to=111;assert(native::VideoTimeline::make(options,200).frames==122);options.to=110;
     bool rejected=false;try{auto bad=options;bad.to=300;native::VideoTimeline::make(bad,200);}catch(...){rejected=true;}assert(rejected);

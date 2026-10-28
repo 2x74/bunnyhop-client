@@ -12,6 +12,7 @@
 #include <vector>
 namespace native {
 struct VideoOptions {int width=1280,height=720,fps=60;std::string quality="high",camera="eye";bool hud=true,audio=true;uint32_t from=0,to=0;double tick_interval=.01;
+    bool full_recording = false;
     std::string music="none";double music_offset=0;float music_level=1;bool music_loop=true,music_duck=true;
     bool has_audio()const{return audio||music!="none";}
 };

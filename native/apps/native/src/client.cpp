@@ -5,6 +5,8 @@
 #include "input_timeline.hpp"
 #include "recording_input.hpp"
 #include "replay_practice.hpp"
+#include "replay_session.hpp"
+#include "video_request.hpp"
 #include "display_defaults.hpp"
 #include "json_file_writer.hpp"
 #include "diagnostics_report.hpp"
@@ -396,7 +398,11 @@ int run(const Options &opt) {
     std::array<GhostSlot,4> ghost_slots;unsigned pending_ghost_slot=0;
     std::string ghost_id,playback_id,pending_replay,pending_action,score_notice;
     std::optional<double> known_world_record;uint64_t world_record_generation=~uint64_t(0);
-    nlohmann::json replay_list=nlohmann::json::array(),playback_info,ghost_info;
+    nlohmann::json replay_list=nlohmann::json::array(),ghost_info;
+    native::ReplaySession playback_session;
+    auto &playback_info = playback_session.info;
+    auto &playback_range = playback_session.range;
+    bool pending_full_recording = false;
     bool playback=false,playback_paused=false,ghost_enabled=false,playback_failed=false;
     native::ReplayControls replay_controls;
     bool replay_orbit_drag=false;
@@ -554,7 +560,9 @@ int run(const Options &opt) {
         if(on)audio.pause();
         resume_wanted=!on&&bool(core);
         if(resume_wanted) SDL_RaiseWindow(window.get());
-        capture(resume_wanted && focused&&!(playback&&replay_controls.visible)); input_scheduler.reset(SDL_GetTicksNS()); prev=curr;
+        capture(resume_wanted && focused && !(playback && replay_controls.visible));
+        input_scheduler.reset(SDL_GetTicksNS());
+        prev = curr;
     };
     uint64_t chat_request=0;
     auto chat_suggest=[&](){++chat_request;if(menu&&menu_ready)menu->evaluate_js("window.bunnyhopNativeMenu?.onChatSuggest?.("+nlohmann::json({{"text",chat.input},{"request",chat_request}}).dump()+")");};
@@ -810,7 +818,8 @@ int run(const Options &opt) {
             const auto summary=run_vault.read(entry.path().filename().string());if(summary.is_object())listed["localSummary"]=summary;listed["screenshot"]=run_vault.screenshot(entry.path().filename().string()).has_value();replay_list.push_back(std::move(listed));
         }catch(const std::exception &e){std::cerr<<"Skipping replay "<<entry.path().filename()<<": "<<e.what()<<'\n';}
     };
-    auto open_replay=[&](const std::filesystem::path &path,const std::string &action,unsigned ghost_slot=0) {
+    auto open_replay=[&](const std::filesystem::path &path,const std::string &action,
+                         unsigned ghost_slot=0, bool full_recording=false) {
         if(ghost_slot>=ghost_slots.size())throw std::runtime_error("Invalid ghost slot");
         if(!core)throw std::runtime_error("Load the replay map first");
         recording_input.stop();
@@ -826,26 +835,66 @@ int run(const Options &opt) {
             active_track=slot.info.value("track",0u);selected_style=slot.info.value("style",std::string("autohop"));
             reset();show_menu(false);
         } else {
-            if(!bh_replay_load(core.get(),path.string().c_str())){const std::string failure=bh_last_error(core.get());reset();throw std::runtime_error("Loading native replay: "+failure);}
-            size_t bytes=0;const auto raw=bh_replay_info(core.get(),&bytes);playback_info=nlohmann::json::parse(raw,raw+bytes);
-            renderer->set_cosmetics(outfit,(playback_info.contains("packedLoadout")&&playback_info["packedLoadout"].is_string()?playback_info["packedLoadout"].get<std::string>():std::string()));
-            playback=true;playback_paused=false;playback_speed=1;replay_controls={};replay_camera.set_mode("eye");replay_orbit_drag=false;playback_id=path.filename().string();recording_ended=true;record_path.clear();pending_vault_capture.reset();
-            BhCmd cmd{};bh_last_command(core.get(),&cmd);bh_state(core.get(),&curr);prev=curr;input.set_angles(cmd.pitch,cmd.yaw);
-            reset_feedback();reset_input_timing();show_menu(false);
+            try {
+                playback_session = native::ReplaySession::open(core.get(), path, full_recording);
+            } catch (const std::exception &error) {
+                reset();
+                throw std::runtime_error(std::string("Loading native replay: ") + error.what());
+            }
+            renderer->set_cosmetics(outfit, playback_info.value("packedLoadout", nlohmann::json()).is_string() ?
+                playback_info.at("packedLoadout").get<std::string>() : std::string());
+            playback = true;
+            playback_paused = false;
+            playback_speed = 1;
+            replay_controls = {};
+            replay_controls.first_tick = playback_range.from;
+            replay_camera.set_mode("eye");
+            replay_orbit_drag = false;
+            playback_id = path.filename().string();
+            recording_ended = true;
+            record_path.clear();
+            pending_vault_capture.reset();
+            curr = prev = playback_session.initial.snapshot.player;
+            input.set_angles(playback_session.initial.view.pitch, playback_session.initial.view.yaw);
+            reset_feedback();
+            reset_input_timing();
+            show_menu(false);
         }
     };
     auto refresh_playback_pose=[&](){if(core&&playback){bh_state(core.get(),&curr);prev=curr;BhCmd cmd{};bh_last_command(core.get(),&cmd);input.set_angles(cmd.pitch,cmd.yaw);renderer->reset_presentation();hud.reset_history();audio.reset();reset_input_timing();}};
-    auto seek_playback=[&](uint32_t tick){
-        if(!core||!playback)return;const auto total=playback_info.at("totalTicks").get<uint32_t>();if(tick>total)throw std::runtime_error("Replay tick outside run");
-        BhSnapshot state{};if(!bh_replay_seek(core.get(),tick,&state)){const std::string failure=bh_last_error(core.get());reset();show_menu(true);throw std::runtime_error("Replay seek stopped: "+failure);}
-        curr=prev=state.player;BhCmd view{};bh_last_command(core.get(),&view);input.set_angles(view.pitch,view.yaw);renderer->reset_presentation();scope.reset();audio.reset();hud.reset_history();
-        if(replay_camera.mode!="free")replay_camera.reset();camera_controls.clear();reset_feedback(tick!=0);reset_input_timing();
+    auto seek_playback=[&](uint32_t tick) {
+        if (!core || !playback)
+            return;
+        native::ReplayPose pose;
+        try {
+            pose = playback_session.seek(core.get(), tick);
+        } catch (const std::exception &failure) {
+            reset();
+            show_menu(true);
+            throw std::runtime_error(std::string("Replay seek stopped: ") + failure.what());
+        }
+        curr = prev = pose.snapshot.player;
+        input.set_angles(pose.view.pitch, pose.view.yaw);
+        renderer->reset_presentation();
+        scope.reset();
+        audio.reset();
+        hud.reset_history();
+        if (replay_camera.mode != "free")
+            replay_camera.reset();
+        camera_controls.clear();
+        reset_feedback(curr.tick != 0);
+        reset_input_timing();
     };
-    auto replay_action=[&](native::ReplayControls::Action action){using A=native::ReplayControls::Action;const auto total=playback_info.value("totalTicks",0u);const double interval=playback_info.at("settings").value("tickInterval",dt);
-        switch(action){case A::start:replay_controls.pending=0;break;case A::end:replay_controls.pending=total;playback_paused=true;break;case A::back:replay_controls.pending=native::ReplayControls::offset(curr.tick,-5,interval,total);break;case A::forward:replay_controls.pending=native::ReplayControls::offset(curr.tick,5,interval,total);break;case A::pause:playback_paused=!playback_paused;break;case A::slower:playback_speed=native::ReplayControls::speed(playback_speed,false);break;case A::faster:playback_speed=std::min(4.,native::ReplayControls::speed(playback_speed,true));break;case A::camera:replay_camera.set_mode(replay_camera.mode=="eye"?"chase":replay_camera.mode=="chase"?"free":"eye");camera_controls.set_angles(replay_camera.pitch,replay_camera.yaw);camera_controls.clear();break;default:break;}
+    auto replay_action=[&](native::ReplayControls::Action action) {
+        if (replay_controls.action(action, curr.tick, playback_range, playback_paused, playback_speed)) {
+            const auto mode = replay_camera.mode == "eye" ? "chase" : replay_camera.mode == "chase" ? "free" : "eye";
+            replay_camera.set_mode(mode);
+            camera_controls.set_angles(replay_camera.pitch, replay_camera.yaw);
+            camera_controls.clear();
+        }
     };
     auto begin_video=[&](const native::VideoOptions &options){
-        const auto timeline=native::VideoTimeline::make(options,playback_info.at("totalTicks").get<uint32_t>());
+        const auto timeline = native::VideoTimeline::make(options, playback_range.total);
         const char *downloads=SDL_GetUserFolder(SDL_FOLDER_DOWNLOADS);if(opt.video_smoke.empty()&&!downloads)throw std::runtime_error("Downloads folder unavailable");
         const auto directory=opt.video_smoke.empty()?std::filesystem::path(downloads):std::filesystem::absolute(opt.video_smoke);std::filesystem::create_directories(directory);
         const auto destination=directory/("bunnyhop-"+map_id+"-"+std::to_string(SDL_GetTicksNS())+".mp4");
@@ -857,17 +906,30 @@ int run(const Options &opt) {
         if(!playback||!renderer||!core||download.valid())throw std::runtime_error("Open a replay before exporting video");
         if(video_capture||director_job||video_encoder.busy())throw std::runtime_error("A video export is already running");
         if(!video_available.available)throw std::runtime_error(video_available.reason);
-        options.tick_interval=playback_info.at("settings").value("tickInterval",dt);
-        native::VideoTimeline::make(options,playback_info.at("totalTicks").get<uint32_t>());video_error.clear();show_menu(true);prepared_camera={};prepared_camera.set_mode(options.camera);
+        options.tick_interval = playback_range.tick_interval;
+        native::ReplayRange::make(playback_info).export_bounds(options);
+        native::VideoTimeline::make(options, playback_range.total);
+        video_error.clear();
+        show_menu(true);
+        prepared_camera = {};
+        prepared_camera.set_mode(options.camera);
         if(options.camera=="auto"){pending_video=options;director_only=false;director_job=std::make_unique<native::ReplayDirectorJob>(core.get(),playback_info.at("totalTicks").get<uint32_t>(),curr.tick);}
         else begin_video(options);
     };
-    auto request_replay=[&](const std::filesystem::path &path,const std::string &action,unsigned ghost_slot=0) {
+    auto request_replay=[&](const std::filesystem::path &path,const std::string &action,
+                            unsigned ghost_slot=0, bool full_recording=false) {
         if(ghost_slot>=ghost_slots.size())throw std::runtime_error("Invalid ghost slot");
         const auto info=replay_metadata(path);const auto id=info.at("map").get<std::string>();
         if(!native::valid_map_id(id))throw std::runtime_error("Replay has invalid map name");
-        if(map_id!=id||!core) {pending_replay=path.string();pending_action=action;pending_ghost_slot=ghost_slot;request_map(id);}
-        else open_replay(path,action,ghost_slot);
+        if (map_id != id || !core) {
+            pending_replay = path.string();
+            pending_action = action;
+            pending_ghost_slot = ghost_slot;
+            pending_full_recording = full_recording;
+            request_map(id);
+        } else {
+            open_replay(path, action, ghost_slot, full_recording);
+        }
     };
     start_tutorial=[&](const std::string &lesson,bool demo){
         if(!core||map_id!=tutorial_map||!tutorial)throw std::runtime_error("Load the tutorial map before starting a lesson");
@@ -1054,7 +1116,7 @@ int run(const Options &opt) {
         act("cycleStyle");act("restartBonus");check(selected_style=="autohop"&&active_track==0,"gauntlet bindings escaped lock");
         load_map(opt.map,opt.content_root,"native-runtime-fixture-next",detail);check(gauntlet_id=="offline-smoke"&&!practice.active,"gauntlet map progression lost lock");
         gauntlet_action({{"id",nullptr}});check(practice_reason().empty(),"gauntlet clear left practice blocked");
-        practice_action("save");practice_action("tele");open_replay(opt.replay,"play");
+        practice_action("save");practice_action("tele");open_replay(opt.replay,"play",0,true);
         check(playback&&!practice.active&&!practice.mode&&practice.checkpoints.empty(),"replay retained practice state");
         replay_camera.set_mode("free");replay_camera.initialized=true;replay_camera.position={11,22,33};replay_camera.yaw=42;replay_camera.pitch=17;
         playback_paused=true;seek_playback(0);check(curr.tick==0&&playback_paused,"replay seek start/pause");
@@ -1131,7 +1193,13 @@ int run(const Options &opt) {
         // so restoration can be inspected after each asynchronous export phase.
         playback_paused=true;
         BhSnapshot restored{};require(bh_replay_seek(core.get(),37,&restored),core.get(),"Video smoke initial seek");curr=prev=restored.player;replay_camera.set_mode("free");replay_camera.initialized=true;replay_camera.position={11,22,33};replay_camera.yaw=42;replay_camera.pitch=17;camera_controls.set_angles(17,42);
-        if(video_probe.valid())video_available=video_probe.get();native::VideoOptions options;options.from=0;options.to=std::min(200u,playback_info.at("totalTicks").get<uint32_t>());options.camera="auto";request_video(options);
+        if (video_probe.valid())
+            video_available = video_probe.get();
+        native::VideoOptions options;
+        options.full_recording = true;
+        options.to = std::min(200u, playback_range.total);
+        options.camera = "auto";
+        request_video(options);
     }
     int video_smoke_stage=0;std::string video_smoke_encoder=video_available.encoder;
     auto check_video_restored=[&](){if(!playback_paused||curr.tick!=37||replay_camera.mode!="free"||!replay_camera.initialized||replay_camera.position!=std::array<float,3>{11,22,33}||std::abs(replay_camera.yaw-42)>.0001||std::abs(replay_camera.pitch-17)>.0001)throw std::runtime_error("Video export did not restore the viewer state");};
@@ -1145,7 +1213,7 @@ int run(const Options &opt) {
         if(window_dirty&&Clock::now()>=window_save_due)save_window();
         if(video_probe.valid()&&video_probe.wait_for(std::chrono::seconds(0))==std::future_status::ready)video_available=video_probe.get();
         const uint64_t mouse_pump_start=SDL_GetTicksNS();
-        const double pump_tick_seconds = playback ? playback_info.at("settings").value("tickInterval", dt) : dt;
+        const double pump_tick_seconds = playback ? playback_range.tick_interval : dt;
         const uint64_t pump_tick_ns = uint64_t(std::llround(pump_tick_seconds * 1e9));
         auto pump_schedule = input_scheduler;
         pump_schedule.frame(mouse_pump_start, true, pump_tick_ns);
@@ -1255,7 +1323,14 @@ int run(const Options &opt) {
                     }
                     if(down && !repeat) {
                         if(playback&&(!menu||!menu->visible())&&event.key.scancode==SDL_SCANCODE_SPACE){replay_action(native::ReplayControls::Action::pause);break;}
-                        if(playback&&(!menu||!menu->visible())&&(event.key.scancode==SDL_SCANCODE_LEFT||event.key.scancode==SDL_SCANCODE_RIGHT)){playback_paused=true;replay_controls.pending=event.key.scancode==SDL_SCANCODE_LEFT?(curr.tick?curr.tick-1:0):std::min(curr.tick+1,playback_info.value("totalTicks",0u));break;}
+                        if (playback && !menu_shown && (event.key.scancode == SDL_SCANCODE_LEFT ||
+                                                       event.key.scancode == SDL_SCANCODE_RIGHT)) {
+                            playback_paused = true;
+                            const uint32_t target = event.key.scancode == SDL_SCANCODE_LEFT ?
+                                (curr.tick ? curr.tick - 1 : 0) : curr.tick + 1;
+                            replay_controls.pending = playback_range.clamp(target);
+                            break;
+                        }
                         if(event.key.scancode==SDL_SCANCODE_ESCAPE) show_menu(!menu||!menu->visible());
 
                     }
@@ -1273,7 +1348,16 @@ int run(const Options &opt) {
                         mouse_diagnostics.motion(event.motion.timestamp, received);
                     }
                     if(video_capture||director_job||video_encoder.busy()){replay_controls.dragging=false;replay_orbit_drag=false;break;}
-                    if(playback&&replay_controls.dragging&&!chat.active&&(!menu||!menu->visible())){int w,h;SDL_GetWindowSizeInPixels(window.get(),&w,&h);const auto geometry=native::HudGeometry(w,h,100);replay_controls.motion(native::ReplayControls::layout(geometry.width,geometry.height),event.motion.x*SDL_GetWindowPixelDensity(window.get())/geometry.scale,playback_info.value("totalTicks",0u));break;}
+                    if (playback && replay_controls.dragging && !chat.active && (!menu || !menu->visible())) {
+                        int width = 0;
+                        int height = 0;
+                        SDL_GetWindowSizeInPixels(window.get(), &width, &height);
+                        const auto geometry = native::HudGeometry(width, height, 100);
+                        const float x = event.motion.x * SDL_GetWindowPixelDensity(window.get()) / geometry.scale;
+                        replay_controls.motion(native::ReplayControls::layout(geometry.width, geometry.height),
+                                               x, playback_range.to);
+                        break;
+                    }
                     if(chat.active&&chat_drag){const float scale=SDL_GetWindowPixelDensity(window.get());if(const auto byte=hud.chat_input_byte(event.motion.x*scale,event.motion.y*scale,chat.input))chat.position(*byte,true);}
                     if(captured&&focused&&!chat.active){if(playback&&replay_camera.mode=="free")camera_controls.accumulate(event.motion.xrel,event.motion.yrel);else if(playback&&replay_camera.mode=="chase")replay_camera.orbit(event.motion.xrel,event.motion.yrel);else if(!playback){
                         const auto &motion = event.motion;
@@ -1286,7 +1370,18 @@ int run(const Options &opt) {
                     if(video_capture||director_job||video_encoder.busy()){replay_controls.dragging=false;replay_orbit_drag=false;break;}
                     const bool down=event.type==SDL_EVENT_MOUSE_BUTTON_DOWN;
                     if(playback&&!chat.active&&(!menu||!menu->visible())&&event.button.button==SDL_BUTTON_RIGHT&&(replay_controls.visible||replay_orbit_drag)){replay_orbit_drag=down;capture(down);break;}
-                    if(playback&&replay_controls.visible&&!chat.active&&(!menu||!menu->visible())&&event.button.button==SDL_BUTTON_LEFT){int w,h;SDL_GetWindowSizeInPixels(window.get(),&w,&h);const auto geometry=native::HudGeometry(w,h,100);const float scale=SDL_GetWindowPixelDensity(window.get())/geometry.scale;replay_action(replay_controls.pointer(native::ReplayControls::layout(geometry.width,geometry.height),event.button.x*scale,event.button.y*scale,playback_info.value("totalTicks",0u),down));break;}
+                    if (playback && replay_controls.visible && !chat.active && (!menu || !menu->visible()) &&
+                        event.button.button == SDL_BUTTON_LEFT) {
+                        int width = 0;
+                        int height = 0;
+                        SDL_GetWindowSizeInPixels(window.get(), &width, &height);
+                        const auto geometry = native::HudGeometry(width, height, 100);
+                        const float scale = SDL_GetWindowPixelDensity(window.get()) / geometry.scale;
+                        replay_action(replay_controls.pointer(
+                            native::ReplayControls::layout(geometry.width, geometry.height),
+                            event.button.x * scale, event.button.y * scale, playback_range.to, down));
+                        break;
+                    }
                     if(chat.active){if(event.button.button==SDL_BUTTON_LEFT){chat_drag=false;if(down&&chat.composition.empty()){
                         const float scale=SDL_GetWindowPixelDensity(window.get()),x=event.button.x*scale,y=event.button.y*scale;
                         if(const auto byte=hud.chat_input_byte(x,y,chat.input)){chat.position(*byte,(SDL_GetModState()&SDL_KMOD_SHIFT)!=0);chat_drag=true;}
@@ -1494,7 +1589,10 @@ int run(const Options &opt) {
                 }
                 else if(type=="replay") {
                     const auto path=native::replay_file(cache/"replays",message.at("id").get<std::string>());const auto action=message.at("action").get<std::string>();
-                    if(action=="play"||action=="ghost")request_replay(path,action,message.value("ghostSlot",0u));
+                    if (action == "play" || action == "ghost") {
+                        request_replay(path, action, message.value("ghostSlot", 0u),
+                                       message.value("fullRecording", false));
+                    }
                     else if(action=="screenshot"){const auto screenshot=run_vault.screenshot(path.filename().string());if(!screenshot)throw std::runtime_error("This local run has no saved screenshot");if(!SDL_OpenURL(native::RunVault::file_uri(*screenshot).c_str()))throw std::runtime_error(SDL_GetError());}
                     else if(action=="export") {
                         const char *folder=SDL_GetUserFolder(SDL_FOLDER_DOWNLOADS);if(!folder)throw std::runtime_error("Downloads folder unavailable");
@@ -1510,24 +1608,45 @@ int run(const Options &opt) {
                     const auto path=cache/"replays"/(std::string("import-")+sha+".bhr");
                     if(!std::filesystem::exists(path)){std::ofstream out(path,std::ios::binary);out.write(reinterpret_cast<const char*>(bytes.data()),bytes.size());if(!out)throw std::runtime_error("Cannot save imported replay");}
                     const auto action=message.at("action").get<std::string>();if(action!="play"&&action!="ghost")throw std::runtime_error("Invalid replay import action");
-                    request_replay(path,action,message.value("ghostSlot",0u));refresh_replays();
+                    request_replay(path, action, message.value("ghostSlot", 0u), message.value("fullRecording", false));
+                    refresh_replays();
                 }
                 else if(type=="tutorial"){
                     const auto action=message.at("action").get<std::string>();if(action=="stop"){tutorial_stopped=true;pending_tutorial.clear();if(tutorial)tutorial->stop();if(tutorial_demo&&ghost_handle){bh_ghost_free(core.get(),ghost_handle);ghost_handle=0;ghost_enabled=false;}tutorial_demo=false;score_notice.clear();show_menu(true);}
                     else if(action=="start"||action=="demo"){const auto lesson=message.at("lesson").get<std::string>();if(lesson!="jump"&&lesson!="strafe"&&lesson!="speed"&&lesson!="final")throw std::runtime_error("Unknown tutorial lesson");if(map_id==tutorial_map&&core&&tutorial)start_tutorial(lesson,action=="demo");else{tutorial_stopped=false;pending_tutorial=lesson;pending_tutorial_demo=action=="demo";selected_style="autohop";active_track=0;request_map(tutorial_map);}}
                     else throw std::runtime_error("Unknown tutorial action");
                 }
-                else if(type=="videoExport") {
-                    try{if(message.value("action",std::string())=="cancel"){cancel_video();refresh_playback_pose();}
-                    else if(message.value("action",std::string())=="start"){const auto &v=message.at("options");native::VideoOptions options;options.width=v.at("width");options.height=v.at("height");options.fps=v.at("fps");options.quality=v.at("quality");options.camera=v.at("camera");options.hud=v.at("hud");options.audio=v.value("audio",true);options.music=v.value("music",std::string("none"));options.music_offset=v.value("musicOffset",0.);options.music_level=v.value("musicLevel",1.f);options.music_loop=v.value("musicLoop",true);options.music_duck=v.value("musicDuck",true);options.from=v.at("from");options.to=v.at("to");request_video(options);}}
-                    catch(const std::exception &e){cancel_video();refresh_playback_pose();video_error=e.what();}
+                else if (type == "videoExport") {
+                    try {
+                        const auto action = message.value("action", std::string());
+                        if (action == "cancel") {
+                            cancel_video();
+                            refresh_playback_pose();
+                        } else if (action == "start") {
+                            request_video(native::parse_video_options(message.at("options")));
+                        }
+                    } catch (const std::exception &failure) {
+                        cancel_video();
+                        refresh_playback_pose();
+                        video_error = failure.what();
+                    }
                 }
                 else if(type=="replayControl"&&playback) {
                     const auto action=message.at("action").get<std::string>();
                     if(action=="camera"){if(!replay_camera.set_mode(message.at("camera").get<std::string>()))throw std::runtime_error("Invalid replay camera");camera_controls.set_angles(replay_camera.pitch,replay_camera.yaw);camera_controls.clear();if(replay_camera.mode=="auto"){director_only=true;director_job=std::make_unique<native::ReplayDirectorJob>(core.get(),playback_info.at("totalTicks").get<uint32_t>(),curr.tick);}}
                     else if(action=="pause")playback_paused=message.value("paused",!playback_paused);
                     else if(action=="speed") {const double value=message.at("speed").get<double>();if(!std::isfinite(value)||value<.1||value>4)throw std::runtime_error("Replay speed must be 0.1–4");playback_speed=value;}
-                    else if(action=="seek") {const auto tick=message.at("tick").get<uint32_t>();if(tick>playback_info.at("totalTicks").get<uint32_t>())throw std::runtime_error("Replay tick outside run");replay_controls.pending=tick;}
+                    else if (action == "fullRecording") {
+                        playback_session.set_full_recording(message.at("value").get<bool>());
+                        replay_controls.first_tick = playback_range.from;
+                        replay_controls.pending = playback_range.clamp(curr.tick);
+                    }
+                    else if (action == "seek") {
+                        const auto tick = message.at("tick").get<uint32_t>();
+                        if (tick < playback_range.from || tick > playback_range.to)
+                            throw std::runtime_error("Replay tick outside playback range");
+                        replay_controls.pending = tick;
+                    }
                     else if(action=="stop")reset();
                 }
                 else if(type=="sensitivity") {preferences=native::patch_settings(preferences,{{"sensitivity",message.at("value")}});json_writer.write(cache/"settings.json",preferences);apply_preferences();}
@@ -1644,7 +1763,16 @@ int run(const Options &opt) {
             }
             {std::lock_guard lock(progress_mutex);loading.clear();if(error.empty())load_progress=nullptr;else if(load_progress.is_object()){load_progress["stage"]="error";load_progress["message"]=error;}}
             if(tutorial&&!tutorial_stopped&&error.empty()&&pending_replay.empty()){const auto lesson=pending_tutorial.empty()?"jump":pending_tutorial;try{start_tutorial(lesson,pending_tutorial_demo);}catch(const std::exception &e){error=e.what();}pending_tutorial.clear();pending_tutorial_demo=false;}
-            if(!pending_replay.empty()&&error.empty()) {auto path=pending_replay,action=pending_action;pending_replay.clear();try{open_replay(path,action,pending_ghost_slot);}catch(const std::exception &e){error=e.what();}}
+            if (!pending_replay.empty() && error.empty()) {
+                const auto path = pending_replay;
+                const auto action = pending_action;
+                pending_replay.clear();
+                try {
+                    open_replay(path, action, pending_ghost_slot, pending_full_recording);
+                } catch (const std::exception &failure) {
+                    error = failure.what();
+                }
+            }
             if(!pending_room_map.empty()&&pending_room_map!=map_id){const auto next=pending_room_map;pending_room_map.clear();active_track=0;request_map(next);}
             else pending_room_map.clear();
             if(!menu && core && !opt.hidden) capture(true);
@@ -1687,13 +1815,32 @@ int run(const Options &opt) {
             discord.update(discord_allowed&&settings.enabled&&!settings.privacy,activity);
         }
         if(spectator!=observed_spectator){
-            if(spectator){bh_record_end(core.get());recording_ended=true;record_path.clear();pending_vault_capture.reset();beat_start=0;++run_generation;run_event({{"type","reset"}});audio.reset();input_scheduler.reset(SDL_GetTicksNS());input.clear();renderer->reset_presentation();scope.reset();show_menu(false);}
+            if (spectator) {
+                bh_record_end(core.get());
+                recording_ended = true;
+                record_path.clear();
+                pending_vault_capture.reset();
+                beat_start = 0;
+                ++run_generation;
+                run_event({{"type", "reset"}});
+                audio.reset();
+                input_scheduler.reset(SDL_GetTicksNS());
+                input.clear();
+                renderer->reset_presentation();
+                scope.reset();
+                show_menu(false);
+            }
             else if(observed_spectator&&core&&!playback)reset();observed_spectator=spectator;
         }
         if(const auto ready=restart_guard.frame(epoch_ms(),held_action(restart_guard.action),!captured||chat.active||playback))act(*ready,false,true);
         if(director_job)try{if(director_job->step()){
-            const auto interval=playback_info.at("settings").value("tickInterval",dt);
-            if(director_only){if(director_job->plan(replay_camera,interval,0,playback_info.at("totalTicks").get<uint32_t>())){director_job.reset();refresh_playback_pose();}}
+            const double interval = playback_range.tick_interval;
+            if (director_only) {
+                if (director_job->plan(replay_camera, interval, playback_range.from, playback_range.to)) {
+                    director_job.reset();
+                    refresh_playback_pose();
+                }
+            }
             else{const auto options=*pending_video;if(director_job->plan(prepared_camera,interval,options.from,options.to)){director_job.reset();pending_video.reset();begin_video(options);}}
         }}catch(const std::exception &e){cancel_video();refresh_playback_pose();video_error=e.what();}
         if(video_capture)try{if(!video_encoder.busy()){video_capture.reset();refresh_playback_pose();}else{video_capture->step();if(video_capture->done()){video_capture.reset();refresh_playback_pose();}}}catch(const std::exception &e){cancel_video();refresh_playback_pose();video_error=e.what();}
@@ -1704,7 +1851,7 @@ int run(const Options &opt) {
         const bool activity_active=core&&!download.valid()&&focused&&captured&&!playback&&!spectator&&!opt.frames&&opt.runtime_smoke.empty();
         activity.frame(map_id,frame_seconds,std::chrono::duration<double>(now.time_since_epoch()).count(),activity_active);
         ++input_frame;input_frame_ms=frame_seconds*1000;
-        const double step_dt=playback?playback_info.at("settings").value("tickInterval",dt):dt;
+        const double step_dt = playback ? playback_range.tick_interval : dt;
         const uint64_t tick_ns = uint64_t(std::llround(step_dt * 1e9));
         input_scheduler.frame(mouse_pump_start, simulation_active, tick_ns,
                               playback ? playback_speed : 1, opt.frames != 0);
@@ -1718,8 +1865,27 @@ int run(const Options &opt) {
             prev=curr;const BhState tutorial_pre=curr;
             BhCmd cmd{};
             if(playback) {
-                if(curr.tick>=playback_info.at("totalTicks").get<uint32_t>()){playback_paused=true;input_scheduler.reset(SDL_GetTicksNS());break;}
-                BhSnapshot state{};if(!bh_replay_step(core.get(),&state)){const std::string failure=bh_last_error(core.get());playback_failed=true;reset();error="Replay stopped: "+failure;std::cerr<<error<<'\n';show_menu(true);input_scheduler.reset(SDL_GetTicksNS());if(opt.frames)running=false;break;}curr=state.player;bh_last_command(core.get(),&cmd);input.set_angles(cmd.pitch,cmd.yaw,5);
+                if (curr.tick >= playback_range.to) {
+                    playback_paused = true;
+                    input_scheduler.reset(SDL_GetTicksNS());
+                    break;
+                }
+                BhSnapshot state{};
+                if (!bh_replay_step(core.get(), &state)) {
+                    const std::string failure = bh_last_error(core.get());
+                    playback_failed = true;
+                    reset();
+                    error = "Replay stopped: " + failure;
+                    std::cerr << error << '\n';
+                    show_menu(true);
+                    input_scheduler.reset(SDL_GetTicksNS());
+                    if (opt.frames)
+                        running = false;
+                    break;
+                }
+                curr = state.player;
+                bh_last_command(core.get(), &cmd);
+                input.set_angles(cmd.pitch, cmd.yaw, 5);
             } else {
                 const bool turns_allowed = captured && native::turn_binds_allowed(active_style,
                     (tutorial && tutorial->is_active()) || practice.active || feedback.ssj_was_noclip);
@@ -1801,7 +1967,24 @@ int run(const Options &opt) {
             input_scheduler.consume(tick_ns);
             BhRunState tick_run{};
             if(playback||!zones.empty())require(bh_run_state(core.get(),&tick_run),core.get(),"Reading native timer");
-            if(tutorial&&tutorial->is_active()&&!playback){BhCmd filtered=cmd;bh_last_command(core.get(),&filtered);const auto result=tutorial->tick(tutorial_pre,curr,filtered,curr.events,dt);if(result.completed)save_tutorial();if(tick_run.status==2&&tutorial->lesson_id()=="final"&&!tutorial_final_saved){tutorial->finish(tick_run.seconds);save_tutorial();tutorial_final_saved=true;}if(result.next_lesson>=0&&result.next_lesson<4){const char *ids[]={"jump","strafe","speed","final"};start_tutorial(ids[result.next_lesson],false);input_scheduler.reset(SDL_GetTicksNS());break;}}
+            if (tutorial && tutorial->is_active() && !playback) {
+                BhCmd filtered = cmd;
+                bh_last_command(core.get(), &filtered);
+                const auto result = tutorial->tick(tutorial_pre, curr, filtered, curr.events, dt);
+                if (result.completed)
+                    save_tutorial();
+                if (tick_run.status == 2 && tutorial->lesson_id() == "final" && !tutorial_final_saved) {
+                    tutorial->finish(tick_run.seconds);
+                    save_tutorial();
+                    tutorial_final_saved = true;
+                }
+                if (result.next_lesson >= 0 && result.next_lesson < 4) {
+                    constexpr const char *ids[] = {"jump", "strafe", "speed", "final"};
+                    start_tutorial(ids[result.next_lesson], false);
+                    input_scheduler.reset(SDL_GetTicksNS());
+                    break;
+                }
+            }
 
             // Finish the recording on the exact native tick, before any further catch-up steps.
             if(!playback&&tick_run.status==2&&!recording_ended) {reset_input_timing();break;}
@@ -1857,7 +2040,8 @@ int run(const Options &opt) {
         }
         int width=0,height=0; SDL_GetWindowSizeInPixels(window.get(),&width,&height);
         if(renderer&&!video_capture&&!director_job) {
-            const float blend=(opt.frames||!simulation_active)?1.0f:float(input_scheduler.seconds()/step_dt); float eye[3];
+            const float blend = (opt.frames || !simulation_active) ? 1.0f : float(input_scheduler.seconds() / step_dt);
+            float eye[3];
             for(int i=0;i<3;++i) eye[i]=prev.position[i]+(curr.position[i]-prev.position[i])*blend;
             eye[2]+=prev.view_offset_z+(curr.view_offset_z-prev.view_offset_z)*blend;
             BhSnapshot state{};bh_snapshot(core.get(),&state);
@@ -1959,7 +2143,11 @@ int run(const Options &opt) {
                     hud.overlay_rect(16, 74, 1180, 32, {.02f, .02f, .025f, .85f});
                     hud.overlay_text(24, 82, frame_line, 14, {1, 1, 1, 1});
                     hud.overlay_end(width,height);}
-                if(playback&&!chat.active&&!video_capture&&!director_job)native::draw_replay_controls(hud,width,height,native::HudGeometry(width,height,100).scale,replay_controls,curr.tick,playback_info.value("totalTicks",0u),playback_info.at("settings").value("tickInterval",dt),playback_paused,playback_speed,replay_camera.mode);
+                if (playback && !chat.active && !video_capture && !director_job) {
+                    native::draw_replay_controls(hud, width, height, native::HudGeometry(width, height, 100).scale,
+                        replay_controls, curr.tick, playback_range.to, playback_range.tick_interval,
+                        playback_paused, playback_speed, replay_camera.mode);
+                }
                 if(chat.active||preferences.at("hud").get<bool>())hud.draw_chat_overlay(width,height,chat.visible(epoch_ms()/1000.),chat.input,chat.composition,chat.suggestions,chat.active,chat.scroll_offset(),preferences.at("hudScale").get<float>(),&chat,chat.viewport(epoch_ms()/1000.));
                 std::vector<std::string> panel;
                 if((held_action("scoreboard")||show_scores)&&!chat.active){
@@ -2027,8 +2215,24 @@ int run(const Options &opt) {
         if(!opt.video_smoke.empty()){
             const auto result=video_state();const auto phase=result.value("state",std::string());
             if(video_smoke_stage==0&&phase=="capturing"&&result.value("frames",0)>=3){cancel_video();refresh_playback_pose();check_video_restored();video_smoke_stage=1;}
-            else if(video_smoke_stage==1&&!video_encoder.busy()){check_video_restored();video_available.encoder="/bunnyhop-test-missing-encoder";native::VideoOptions options;options.to=100;request_video(options);video_smoke_stage=2;}
-            else if(video_smoke_stage==2&&phase=="error"&&!video_encoder.busy()){check_video_restored();video_available.encoder=video_smoke_encoder;native::VideoOptions options;options.to=200;options.camera="auto";options.music="game-airstrafe";options.music_offset=12;
+            else if (video_smoke_stage == 1 && !video_encoder.busy()) {
+                check_video_restored();
+                video_available.encoder = "/bunnyhop-test-missing-encoder";
+                native::VideoOptions options;
+                options.full_recording = true;
+                options.to = 100;
+                request_video(options);
+                video_smoke_stage = 2;
+            }
+            else if (video_smoke_stage == 2 && phase == "error" && !video_encoder.busy()) {
+                check_video_restored();
+                video_available.encoder = video_smoke_encoder;
+                native::VideoOptions options;
+                options.full_recording = true;
+                options.to = 200;
+                options.camera = "auto";
+                options.music = "game-airstrafe";
+                options.music_offset = 12;
                 // Smoke-only soundtrack. Regular exports keep the explicit No music default.
                 preferences["musicPack"]="default";preferences["muted"]=false;preferences["muteMusic"]=false;preferences["musicVolume"]=1.;preferences["volume"]=.65;
                 request_video(options);video_smoke_stage=3;}
@@ -2039,7 +2243,10 @@ int run(const Options &opt) {
         ++frame; ++title_frames;if(simulation_active&&!playback)input.frame();
         audio.set_music_scene(bool(core)&&(!menu||!menu->visible()));
         audio.pump();  // advances the music playlist; decoding cannot run on the audio thread
-        if(opt.frames&&renderer&&(curr.tick>=opt.frames||(playback&&playback_paused&&curr.tick>=playback_info.value("totalTicks",0u)))&&!opt.screenshot.empty()) renderer->screenshot(opt.screenshot,width,height);
+        if (opt.frames && renderer && !opt.screenshot.empty() &&
+            (curr.tick >= opt.frames || (playback && playback_paused && curr.tick >= playback_range.to))) {
+            renderer->screenshot(opt.screenshot, width, height);
+        }
         const GLenum gl_error=gl.GetError(); if(gl_error!=GL_NO_ERROR) throw std::runtime_error("OpenGL error "+std::to_string(gl_error));
         frame_diagnostics.mark(native::FrameDiagnostics::kRender, SDL_GetTicksNS());
         if(!SDL_GL_SwapWindow(window.get())) throw std::runtime_error(std::string("Swapping framebuffer failed: ")+SDL_GetError());
@@ -2069,7 +2276,8 @@ int run(const Options &opt) {
                 {"style",selected_style},{"track",active_track},{"settings",preferences},{"replays",replay_list},
                 {"room",{{"id",room.id},{"map",room.map},{"spectating",spectator.has_value()},{"target",spectator?nlohmann::json(*spectator):nlohmann::json(nullptr)},{"raceFrozen",room_modes.frozen()}}},
                 {"tutorial",tutorial?tutorial->stateJSON():nlohmann::json{{"active",false},{"lesson","jump"},{"completed",tutorial_completed}}},
-                {"playback",{{"tickInterval",playback?playback_info.at("settings").value("tickInterval",dt):dt},{"active",playback},{"id",playback_id},{"tick",curr.tick},{"totalTicks",playback?playback_info.value("totalTicks",0u):0u},{"paused",playback_paused},{"speed",playback_speed},{"camera",replay_camera.mode},{"seconds",run_state.seconds}}},
+                {"playback", playback_session.state(playback, playback_id, curr.tick, playback_paused,
+                                                    playback_speed, replay_camera.mode, run_state.seconds, dt)},
                 {"ghost",{{"enabled",ghost_enabled},{"id",ghost_id},{"name",ghost_info.is_object()?ghost_info.value("player",std::string("Ghost")):"Ghost"}}},
                 {"runGeneration",run_generation},{"timer",{{"status",run_state.status},{"seconds",run_state.seconds},{"jumps",run_state.jumps},{"strafes",run_state.strafes},{"sync",run_state.sync_percent}}},
                 {"videoExport",video_state()},{"music",audio.music_state()},{"audio",audio.status()},
@@ -2161,7 +2369,10 @@ int run(const Options &opt) {
             display_fps=title_frames/elapsed;char title[320]; std::snprintf(title,sizeof(title),"%s | %s | %.0f FPS | %.1f u/s | %.2fs | %s | Esc menu | R restart",native::app_name,map_id.c_str(),title_frames/elapsed,std::hypot(curr.velocity[0],curr.velocity[1]),run_state.seconds,captured?"SDL raw input":"paused");
             SDL_SetWindowTitle(window.get(),title); title_time=now; title_frames=0;
         }
-        if(opt.frames&&renderer&&(curr.tick>=opt.frames||(playback&&playback_paused&&curr.tick>=playback_info.value("totalTicks",0u)))) running=false;
+        if (opt.frames && renderer &&
+            (curr.tick >= opt.frames || (playback && playback_paused && curr.tick >= playback_range.to))) {
+            running = false;
+        }
         frame_diagnostics.mark(native::FrameDiagnostics::kOther, SDL_GetTicksNS());
         if(!core&&backdrop_drawn&&!backdrop_still&&focused&&!download.valid()) {
             // The live home tour runs at up to ~60 fps, like the web's.
