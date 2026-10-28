@@ -8,6 +8,7 @@
 #include "raw_keyboard.hpp"
 #include "input_timeline.hpp"
 #include "run_session.hpp"
+#include "game_session.hpp"
 #include "base64.hpp"
 #include "replay_practice.hpp"
 #include "ghost_slots.hpp"
@@ -101,33 +102,6 @@ void require(bool ok, BhContext *ctx, const char *operation) {
     }
 }
 
-std::vector<BhZone> timer_zones(const nlohmann::json &detail) {
-    std::vector<BhZone> out;
-    if (!detail.contains("zones") || !detail["zones"].is_object()) return out;
-    for (const auto &z : detail["zones"].value("zones", nlohmann::json::array())) {
-        const auto kind = z.at("kind").get<std::string>();
-        BhZone zone{};
-        if (kind == "start")
-            zone.kind = 0;
-        else if (kind == "end")
-            zone.kind = 1;
-        else if (kind == "stage")
-            zone.kind = 2;
-        else if (kind == "checkpoint")
-            zone.kind = 3;
-        else
-            continue;
-        zone.track = z.value("track", 0u);
-        zone.index = z.value("index", 0u);
-        for (int i = 0; i < 3; ++i) {
-            zone.mins[i] = z.at("mins").at(i).get<float>();
-            zone.maxs[i] = z.at("maxs").at(i).get<float>();
-        }
-        out.push_back(zone);
-    }
-    return out;
-}
-
 // Settings -> Game data: set by "Move now"; main() starts a fresh copy once run()
 // has returned and every file in the old data folder is closed.
 static bool relaunch_requested = false;
@@ -155,8 +129,6 @@ static void data_folder_picked(void *userdata, const char *const *files, int) {
 }
 
 int run(const native::Options &opt) {
-    using CorePtr = std::unique_ptr<BhContext, decltype(&bh_destroy)>;
-    CorePtr core(nullptr, &bh_destroy);
     if (bh_abi_version() != 1) throw std::runtime_error("Unsupported native core ABI version");
     if (!bh_v29_check_abi(BH_V29_ABI_VERSION, sizeof(BhRecordOptionsV29), sizeof(BhTimingSegmentV2))) {
         throw std::runtime_error("Unsupported native v29 ABI layout");
@@ -173,7 +145,6 @@ int run(const native::Options &opt) {
     auto &window = window_and_gl.window;
     native::Gl gl;
     gl.load();
-    std::unique_ptr<native::Renderer> renderer;
     native::FramePacer<native::Gl> frame_pacer;
     // Feedback context (the menu's "Attach game info"): the GPU the game draws with, not the menu web view's.
     const std::string gpu_renderer = [&] {
@@ -327,29 +298,26 @@ int run(const native::Options &opt) {
     nlohmann::json replay_list = nlohmann::json::array();
     native::ReplayPlayer viewer;
     bool pending_full_recording = false;
-    native::ReplayCompare replay_compare;
-    native::ReplayTimelineService replay_timeline;
-    native::ReplayCompareImportService replay_compare_import;
+    native::GameSession game(viewer.camera);
+    auto &core = game.core;
+    auto &renderer = game.renderer;
+    auto &map_id = game.map_id;
+    auto &replay_compare = game.replay_compare;
+    auto &replay_timeline = game.replay_timeline;
+    auto &replay_compare_import = game.replay_compare_import;
     native::GraphicsMenuPacer graphics_menu_pacer;
-    native::NativeVideoExport video_encoder;
+    auto &video_encoder = game.video_encoder;
     native::VideoAvailability video_available{false, "Checking FFmpeg availability…", "ffmpeg"};
     auto video_probe = std::async(std::launch::async, [] { return native::NativeVideoExport::probe(); });
-    std::unique_ptr<native::VideoCapture> video_capture;
-    std::unique_ptr<native::ReplayDirectorJob> director_job;
-    std::optional<native::VideoOptions> pending_video;
-    native::ReplayCamera prepared_camera, third_camera;
+    auto &video_capture = game.video_capture;
+    auto &director_job = game.director_job;
+    auto &pending_video = game.pending_video;
+    auto &prepared_camera = game.prepared_camera;
+    native::ReplayCamera third_camera;
     bool director_only = false;
-    std::string video_error;
+    auto &video_error = game.video_error;
     nlohmann::json video_music_catalog = nlohmann::json::array();
-    auto cancel_video = [&]() {
-        video_encoder.cancel();
-        pending_video.reset();
-        director_job.reset();
-        prepared_camera.cancel_direct();
-        viewer.camera.cancel_direct();
-        video_capture.reset();
-        video_error.clear();
-    };
+    auto cancel_video = std::bind_front(&native::GameSession::cancel_video, &game);
     auto video_state = [&]() {
         auto result = video_encoder.status();
         result["available"] = video_available.available;
@@ -460,7 +428,7 @@ int run(const native::Options &opt) {
         }
     };
     apply_preferences();
-    std::string map_id, loading, error, last_requested_map;
+    std::string loading, error, last_requested_map;
     native::ReplayLibrary replay_library(cache);
     native::RunVault run_vault(cache / "run-vault");
     nlohmann::json load_progress = nullptr;
@@ -496,7 +464,7 @@ int run(const native::Options &opt) {
         feedback.reset(timing.in_start != 0, snapshot.movement_mode == 1, incomplete_history);
     };
     native::RunHeartbeat heartbeat;
-    std::vector<BhZone> zones;
+    auto &zones = game.zones;
     std::mutex progress_mutex;
     native::MapJobs<native::DownloadedMap> download;
     native::MapJobs<bool> prefetch;
@@ -671,22 +639,14 @@ int run(const native::Options &opt) {
             viewer.active = false;
             viewer.id.clear();
         }
-        BhRunOptions canonical{};
-        bh_default_run_options(&canonical);
-        if (zones.empty())
-            require(bh_run_clear(core.get()), core.get(), "Clearing replay timer");
-        else
-            require(bh_run_configure(core.get(), &canonical, zones.data(), zones.size()),
-                    core.get(),
-                    "Restoring canonical map timer");
+        game.configure_timer();
         active_style = active_track ? "autohop" : selected_style;
         if (tutorial_runner.lesson && tutorial_runner.lesson->is_active() && active_style != "legit"
             && active_style != "scroll")
             active_style = "autohop";
         hud.context(replay_list, map_id, active_style, active_track);
         room.solo_display(map_id, replay_player, active_style);
-        require(bh_style_set(core.get(), active_style.c_str()), core.get(), "Applying movement style");
-        require(bh_reset(core.get()), core.get(), "Restarting map");
+        game.restart(active_style);
         const auto restart = native::RestartPlacement::place(
                 core.get(),
                 map_id,
@@ -847,10 +807,7 @@ int run(const native::Options &opt) {
         tutorial_runner.stopped = true;
         replay_compare.clear();
         replay_compare_import.reset();
-        if (core) bh_record_end(core.get());
-        practice.clear(core.get());
-        renderer.reset();
-        core.reset();
+        game.leave(practice);
         tutorial_runner.lesson.reset();
         viewer.active = false;
         viewer.paused = false;
@@ -907,35 +864,17 @@ int run(const native::Options &opt) {
                         const std::string &content,
                         const std::string &id,
                         const nlohmann::json &detail) {
-        cancel_video();
-        replay_timeline.map(native::data_location::from_utf8(path), native::data_location::from_utf8(content));
-        replay_compare_import.map(native::data_location::from_utf8(path), native::data_location::from_utf8(content));
-        CorePtr next(bh_create(), &bh_destroy);
-        if (!next) throw std::runtime_error("Could not create native core");
-        require(bh_load_map(next.get(), path.c_str(), content.empty() ? nullptr : content.c_str()),
-                next.get(),
-                "Loading BSP map");
-        require(bh_set_settings(next.get(), &settings), next.get(), "Applying settings");
-        const auto next_zones = timer_zones(detail);
-        BhRunOptions timing{};
-        bh_default_run_options(&timing);
-        if (!next_zones.empty())
-            require(bh_run_configure(next.get(), &timing, next_zones.data(), next_zones.size()),
-                    next.get(),
-                    "Configuring timer");
+        game.prepare_workers(path, content);
+        auto next = native::GameSession::prepare(path, content, settings, detail);
+        const auto &next_zones = next.zones;
         std::unique_ptr<native::Tutorial> next_tutorial;
         if (id == native::TutorialRunner::map_id)
             next_tutorial = tutorial_runner.prepare(data_location::from_utf8(path), assets, selected_style);
         audio.set_classic_loader([content, cache]() {
             if (!content.empty()) native::download_classic_sounds(data_location::from_utf8(content), cache);
         });
-        auto next_renderer = std::make_unique<native::Renderer>(gl, next.get(), assets);
-        replay_compare.clear();
-        practice.clear(core.get());
-        renderer.reset();
-        core = std::move(next);
-        audio.set_map(core.get());
-        renderer = std::move(next_renderer);
+        auto next_renderer = std::make_unique<native::Renderer>(gl, next.core.get(), assets);
+        game.install(std::move(next.core), std::move(next_renderer), practice, audio);
         // The pause screen shows this map itself, never the home tour.
         if (backdrop) backdrop->release();
         backdrop_shown.clear();
