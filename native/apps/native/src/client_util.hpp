@@ -44,6 +44,16 @@ inline bool external_url_allowed(const std::string &url) {
         const auto path=authority_end==std::string::npos?std::string():url.substr(authority_end,url.find_first_of("?#",authority_end)-authority_end);
         return path.starts_with("/c/pay/")||path.starts_with("/pay/");
     }
+    // Exact hosts used by the Credits page; no wildcard subdomains or alternate ports.
+    static constexpr std::string_view credits[] = {
+        "creativecommons.org", "gamebanana.com", "polyhaven.com", "openfontlicense.org",
+        "fonts.google.com", "elevenlabs.io", "www.unrealsoftware.de", "www.unicode.org",
+        "developer.microsoft.com"
+    };
+    for (const auto candidate : credits) {
+        if (host == candidate)
+            return authority == candidate || authority == std::string(candidate) + ":443";
+    }
     bool permitted=false;
     for(const auto &candidate:allowed)
         if(host==candidate||(host.size()>candidate.size()+1&&host.ends_with(candidate)&&
