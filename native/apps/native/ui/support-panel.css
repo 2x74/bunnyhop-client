@@ -8,8 +8,10 @@
 .native-loadout-preview{width:100%;height:100%;object-fit:contain;border:1px solid transparent;border-radius:12px}
 .native-loadout-preview-note{position:absolute;bottom:5px;left:12px;right:12px;text-align:center;font-size:11px;color:#9da6b6;pointer-events:none}
 
-/* The static native stage draws one authored sample per item: no drag, inspect or First person/Close-up views to offer. */
-.lo-stage[data-native-static="true"] .lo-drag,.lo-stage[data-native-static="true"] .lo-insp,.lo-stage[data-native-static="true"] .lo-viewseg{display:none}
+/* The static native stage draws one authored sample per item: nothing to drag. First person / Close-up stay (Close-up
+   frames the sample closer), and Inspect waits for the host's live preview, which is the only thing that animates. */
+.lo-stage[data-native-static="true"] .lo-drag{display:none}
+.lo-stage[data-native-static="true"]:not([data-native-host]) .lo-insp{opacity:.45;pointer-events:none}
 .native-loadout-preview-note{z-index:3;background:#101722cc;padding:3px 6px;border-radius:4px}
 /* The web bounds the Loadout to the window and scrolls only its grid; the native Loadout screen and a narrow profile
    scroll the whole body instead, which stretched the stage to the grid's full height with the sample far below the

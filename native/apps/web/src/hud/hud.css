@@ -1,0 +1,206 @@
+/* HUD elements, keys overlay, speed graph and the layout editor (hud.ts, hud/*; the jump stats element: ssj/ssj.css).
+   Each element is a .hud-el box positioned by hud/layout.ts (left/top % + translate, written only on
+   layout changes; hudPoints spreads the positions with the HUD scale) and sized by --s (element scale) x --hs (global
+   HUD scale). Sizes inside are em, so everything in a box follows both. hud.ts fit() may add a margin to keep a box on
+   screen. */
+
+#hud .hud-el {
+  position: absolute;
+  width: max-content;
+  white-space: nowrap;
+  font-size: calc(1rem * var(--s, 1) * var(--hs, 1));
+  text-shadow: var(--shadow-text);
+  contain: layout style;
+}
+#hud .hud-el.off { display: none; }
+/* Potato mode (body.potato): no blurred shadows to re-rasterise on text that changes every frame (speed, timer). */
+body.potato #hud { --shadow-text: 0 1px 0 rgba(0, 0, 0, 0.9), 0 0 1px rgba(0, 0, 0, 0.9); }
+#hud .hud-el.empty { visibility: hidden; }
+body.menu-open #hud .hud-el[data-el="keys"],
+body.menu-open #hud .hud-el[data-el="ghostKeys"],
+body.menu-open #hud .hud-el[data-el="strafeTrainer"],
+body.menu-open #hud .hud-el[data-el="startPre"],
+body.menu-open #hud .hud-el[data-el="jumpStats"] { visibility: hidden; }
+
+/* --- text elements --- */
+/* The HUD face: heavy for the numbers (speed, timer, ammo), tabular so they don't jitter. */
+.hud-speed, .hud-ammo, .hud-timer, .hud-split { font-stretch: 90%; font-variant-numeric: tabular-nums; }
+.hud-speed { position: relative; display: flex; align-items: baseline; gap: 0.25em; font-size: 2.1em; font-weight: 800; letter-spacing: -0.01em; line-height: 1; transition: color 0.12s; }
+.hud-speed .speed-num { display: inline-block; }
+.hud-speed .unit { font-size: 0.36em; font-weight: 650; opacity: 0.6; font-stretch: 100%; }
+.hud-speed.gain { color: var(--gain); }
+.hud-speed.loss { color: var(--loss); }
+/* A jump's gain floating off the speed (hud.ts gainTick): one reused element, transform/opacity only. */
+.hud-speed .gain-tick { position: absolute; left: 100%; top: -0.05em; margin-left: 0.15em; font-size: 0.4em; font-style: normal; font-weight: 800; opacity: 0; pointer-events: none; }
+.hud-speed .gain-tick.up { color: var(--gain); }
+.hud-speed .gain-tick.down { color: var(--loss); }
+/* Ammo (hud.ts setAmmo): the speed readout's digits with a small round where the speed has its unit. */
+.hud-ammo { display: flex; align-items: baseline; gap: 0.14em; font-size: 2.1em; font-weight: 800; letter-spacing: -0.01em; line-height: 1; color: #fff; transition: color 0.2s, opacity 0.2s; }
+.hud-ammo .ammo-glyph { width: 0.25em; height: 0.64em; opacity: 0.7; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6)); }
+.hud-ammo.low { color: color-mix(in srgb, var(--loss) 40%, #fff); }
+.hud-ammo.out { color: var(--loss); }
+.hud-ammo.reloading { opacity: 0.4; }
+/* Timer: "00:31.420" with the leading zeros quiet (hud/time-face.ts). */
+.hud-timer { position: relative; font-size: 1.2em; font-weight: 750; line-height: 1.25; }
+.hud-timer .time-text { position: relative; display: inline-block; }
+.time-text .t-lead { opacity: 0.4; }
+.hud-timer.idle { opacity: 0.5; }
+/* In the start zone: a dim zero over a thin zone-green line; leaving it, the line wipes out (hud.ts ignite). */
+.hud-timer.start .time-text { opacity: 0.6; }
+.hud-timer .zone-line { position: absolute; left: 0; right: 0; bottom: 0.02em; height: 2px; background: var(--zone-start); box-shadow: 0 0 0.35em color-mix(in srgb, var(--zone-start) 60%, transparent); opacity: 0; pointer-events: none; }
+.hud-timer.start .zone-line { opacity: 1; }
+.hud-timer.nozones .time-text { font-size: 0.72em; font-weight: 600; font-stretch: 100%; color: rgba(255, 255, 255, 0.7); }
+/* A practice attempt (practice mode, a checkpoint teleport, noclip, third person): the whole timer turns yellow, so it
+   never passes for a timed one. */
+.hud-timer.practice { color: var(--practice); }
+/* "Practice" under the crosshair (hud.ts setPractice): a quiet word in the timer's yellow, no box. */
+.hud-practice { font-size: 0.9em; font-weight: 700; color: var(--practice); }
+.hud-split { font-size: 0.95em; font-weight: 700; line-height: 1.2; opacity: 0.85; }
+.hud-split.hold { opacity: 1; font-weight: 800; }
+.hud-split.ahead { color: var(--gain); }
+.hud-split.behind { color: var(--loss); }
+/* The leaderboard place beside the delta (Settings → HUD → Leaderboard place): the timer's white, a little quieter. With a
+   delta it hangs off the delta's right, so the delta stays where the layout put it (a centred anchor would otherwise push
+   it into the timer); alone (no PB, no ghost) it takes the delta's spot. */
+.hud-split { position: relative; }
+.hud-split .split-place { color: rgba(255, 255, 255, 0.9); font-weight: 650; }
+.hud-split .split-delta:not(:empty) + .split-place { position: absolute; left: 100%; top: 0; margin-left: 0.55em; }
+.hud-track { font-size: 0.85em; font-weight: 750; color: var(--amber); }
+.hud-stage { position: relative; font-size: 0.8em; font-weight: 700; color: rgba(255, 255, 255, 0.9); }
+.hud-stage .stage-text { display: inline-block; }
+.hud-stage .stage-old { position: absolute; left: 0; top: 0; }
+.hud-stats { display: flex; gap: 0.9em; font-size: 0.8em; color: rgba(255, 255, 255, 0.85); line-height: 1.3; }
+.hud-stats b { color: #fff; font-weight: 700; }
+.hud-map { font-size: 0.78em; opacity: 0.88; }
+.hud-map b { font-weight: 700; }
+.hud-map span { color: rgba(255, 255, 255, 0.75); }
+/* Gauntlet mode (hud.ts setGauntlet): one quiet line under the map line (or the timer), in the map line's type; the
+   delta to your PB's split in the split colours. */
+.hud-gauntlet { margin-top: 0.25em; font-size: 0.78em; opacity: 0.88; color: rgba(255, 255, 255, 0.75); font-variant-numeric: tabular-nums; }
+.hud-g-delta:not(:empty) { margin-left: 0.6em; font-weight: 750; }
+.hud-g-delta.ahead { color: var(--gain); }
+.hud-g-delta.behind { color: var(--loss); }
+.hud-fps { font-size: 0.7em; color: rgba(255, 255, 255, 0.65); }
+/* Spectator list (hud.ts setSpectators): plain white lines like a CS:S server's, a long name cut with an ellipsis. */
+.hud-specs { font-size: 0.85em; font-weight: 650; line-height: 1.3; color: #fff; }
+.hud-specs > div { max-width: 16em; overflow: hidden; text-overflow: ellipsis; }
+.hud-pb { position: relative; font-size: 0.85em; font-variant-numeric: tabular-nums; }
+.hud-pb small { font-size: 0.8em; font-weight: 700; color: rgba(255, 255, 255, 0.7); margin-right: 0.45em; }
+.hud-pb b { font-weight: 700; }
+/* The PB ledger (hud.ts pbLedger): a line drawn through the old time, the new one drops in, the old falls away. */
+.hud-pb .pb-val { position: relative; display: inline-block; }
+.hud-pb .pb-val::after { content: ""; position: absolute; left: -0.1em; right: -0.1em; top: 52%; height: 0.11em; background: currentColor; transform: scaleX(0); transform-origin: left; transition: transform 0.2s ease-out; }
+.hud-pb .pb-val.struck::after { transform: scaleX(1); }
+.hud-pb .pb-old { position: absolute; right: 0; top: 0; }
+/* Edge glow (Settings → HUD, off by default; never on potato): opacity steps with speed, written per step only. */
+#hud-glow { inset: 0; opacity: 0; background: radial-gradient(ellipse 75% 70% at 50% 50%, transparent 62%, rgba(255, 170, 60, 0.12) 82%, rgba(255, 140, 40, 0.32)); transition: opacity 0.3s linear; }
+body.potato #hud-glow { display: none; }
+
+/* --- sync bar --- */
+.hud-sync { display: flex; flex-direction: column; align-items: center; gap: 0.2em; font-size: 0.7em; }
+.sync-readouts { display: flex; gap: 0.8em; align-items: center; white-space: nowrap; }
+.hud-perf:empty { display: none; }
+.sync-label { font-weight: 700; color: rgba(255, 255, 255, 0.7); }
+.sync-label b { color: #fff; }
+.sync-bar { display: block; width: 11em; height: 0.42em; border-radius: 0.21em; background: rgba(0, 0, 0, 0.4); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); overflow: hidden; }
+.sync-fill { display: block; height: 100%; transform-origin: 0 50%; transform: scaleX(0); background: var(--loss); transition: transform 0.08s linear; }
+.sync-fill.ok { background: var(--sync-ok); }
+.sync-fill.good { background: var(--gain); }
+
+/* --- speed graph --- */
+.speedgraph { width: 13em; height: 3.6em; border-radius: 0.35em; background: rgba(0, 0, 0, 0.28); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.sg-canvas { display: block; width: 100%; height: 100%; }
+
+/* --- keys overlay (hud/keys.ts); also the settings preview --- */
+.keys {
+  --k-on: #fff;
+  --k-idle: #9aa3b2;
+  --kw: 3.1em;
+  --kh: 2.5em;
+  --mw: 2.1em;
+  display: grid;
+  grid-template-columns: var(--mw) repeat(3, var(--kw)) var(--mw);
+  grid-template-areas: "cap cap cap cap cap" ". . w . ." "ml a s d mr" ". duck jump jump .";
+  font-size: 0.62em;
+  font-weight: 800;
+  line-height: 1;
+}
+.keys.no-mouse { grid-template-columns: repeat(3, var(--kw)); grid-template-areas: "cap cap cap" ". w ." "a s d" "duck jump jump"; }
+.keys.no-mouse .k-ml, .keys.no-mouse .k-mr, .keys.no-wasd .k-w, .keys.no-wasd .k-a, .keys.no-wasd .k-s, .keys.no-wasd .k-d,
+.keys.no-actions .k-duck, .keys.no-actions .k-jump { display: none; }
+.keys.no-wasd:not(.no-mouse) { grid-template-areas: "cap cap cap cap cap" ". . . . ." "ml . . . mr" ". duck jump jump ."; }
+.keys-cap { grid-area: cap; text-align: center; font-size: 0.8em; letter-spacing: 0.2em; color: var(--k-on); opacity: 0.85; margin-bottom: 0.3em; }
+.keys .k { position: relative; display: grid; place-items: center; height: var(--kh); margin: 0.12em; color: var(--k-idle); }
+.keys .k b { font-weight: inherit; }
+.keys .k .fl { position: absolute; inset: 0; display: grid; place-items: center; font-style: normal; opacity: 0; pointer-events: none; color: var(--k-on); }
+.keys .k-w { grid-area: w; } .keys .k-a { grid-area: a; } .keys .k-s { grid-area: s; } .keys .k-d { grid-area: d; }
+.keys .k-duck { grid-area: duck; } .keys .k-jump { grid-area: jump; }
+.keys .k-ml { grid-area: ml; } .keys .k-mr { grid-area: mr; }
+.keys .k-duck, .keys .k-jump { font-size: 0.8em; letter-spacing: 0.08em; height: calc(var(--kh) / 0.8); }
+.keys .k-ml, .keys .k-mr { font-size: 0.85em; height: calc(var(--kh) / 0.85); }
+.keys .k.on { color: var(--k-on); }
+
+/* keycaps: rounded keys with a bottom lip; pressed keys fill with the pressed colour */
+.ks-keycaps .k { border-radius: 0.45em; background: rgba(0, 0, 0, 0.38); border: 1px solid rgba(255, 255, 255, 0.14); border-bottom-width: 0.22em; text-shadow: none; transition: background 0.04s, color 0.04s; }
+.ks-keycaps .k.on { background: var(--k-on); border-color: var(--k-on); color: #0b0d12; transform: translateY(0.1em); }
+.ks-keycaps .k .fl { background: var(--k-on); color: #0b0d12; border-radius: inherit; }
+
+/* classic: SourceMod showkeys-style text; released keys show "_" */
+.ks-classic { font-family: var(--mono); font-weight: 700; font-size: 0.72em; --kw: 2.6em; --kh: 1.6em; --mw: 1.6em; }
+.ks-classic .k:not(.on) b { visibility: hidden; }
+.ks-classic .k:not(.on)::before { content: "_"; position: absolute; inset: 0; display: grid; place-items: center; color: var(--k-idle); }
+.ks-classic .k.on { color: var(--k-on); }
+
+/* minimal: letters only */
+.ks-minimal { --kh: 1.7em; --kw: 2.2em; --mw: 1.6em; }
+.ks-minimal .k { color: var(--k-idle); opacity: 0.45; }
+.ks-minimal .k.on { opacity: 1; color: var(--k-on); }
+.ks-minimal .k .fl { opacity: 0; }
+
+/* --- layout editor --- */
+body.hud-editing #overlay { display: none !important; }
+body.hud-editing #hud { display: block !important; }
+body.hud-editing #hud .hud-el { visibility: visible !important; }
+body.hud-editing #nt-toasts, body.hud-editing #hud-endcard { display: none; }
+#hud .hud-handle { display: none; }
+#hud.editing .hud-el { pointer-events: auto; cursor: move; touch-action: none; outline: 1px dashed rgba(255, 255, 255, 0.45); outline-offset: 0.25rem; min-width: 1.2rem; min-height: 0.8rem; user-select: none; }
+#hud.editing .hud-el:hover { outline-color: rgba(255, 255, 255, 0.85); }
+#hud.editing .hud-el.sel { outline: 2px solid var(--accent); }
+#hud.editing .hud-el.off { display: block; opacity: 0.28; }
+#hud.editing .hud-el::before { content: attr(data-label); position: absolute; left: -0.25rem; bottom: calc(100% + 0.35rem); font: 600 11px/1.3 var(--font); letter-spacing: 0.02em; color: #fff; background: rgba(0, 0, 0, 0.72); padding: 1px 6px; border-radius: 3px; text-shadow: none; pointer-events: none; opacity: 0; }
+#hud.editing .hud-el:hover::before, #hud.editing .hud-el.sel::before { opacity: 1; }
+#hud.editing .hud-el.sel::before { background: var(--accent); color: var(--accent-ink); }
+#hud.editing .hud-handle { display: block; position: absolute; right: calc(-0.25rem - 6px); bottom: calc(-0.25rem - 6px); width: 11px; height: 11px; border-radius: 2px; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6); cursor: nwse-resize; }
+#hud.editing .hud-el.sel .hud-handle { background: var(--accent); }
+#hud .hud-grid { inset: 0; background-color: rgba(4, 6, 10, 0.35); background-image: linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px), linear-gradient(90deg, transparent calc(50% - 0.5px), rgba(255, 255, 255, 0.18) calc(50% - 0.5px), rgba(255, 255, 255, 0.18) calc(50% + 0.5px), transparent calc(50% + 0.5px)), linear-gradient(transparent calc(50% - 0.5px), rgba(255, 255, 255, 0.18) calc(50% - 0.5px), rgba(255, 255, 255, 0.18) calc(50% + 0.5px), transparent calc(50% + 0.5px)); background-size: 8px 8px, 8px 8px, 100% 100%, 100% 100%; }
+#hud .hud-guide { display: none; background: #ff4dd2; box-shadow: 0 0 6px #ff4dd2; }
+#hud .hud-guide.v { left: 50%; top: 0; bottom: 0; width: 1px; }
+#hud .hud-guide.h { top: 50%; left: 0; right: 0; height: 1px; }
+#hud .hud-guide.show { display: block; }
+
+#hud-edit-bar { position: fixed; z-index: 60; top: 0.8rem; left: 50%; transform: translateX(-50%); width: min(60rem, 94vw); box-sizing: border-box; display: flex; flex-direction: column; gap: 0.45rem; padding: 0.6rem 0.8rem; font-size: 0.8rem; background: var(--ink-1); border: 1px solid var(--line-2); border-radius: var(--radius); box-shadow: var(--shadow); }
+#hud-edit-bar .he-head { display: flex; align-items: center; gap: 0.8rem; }
+#hud-edit-bar .he-head b { font-size: 0.95rem; }
+#hud-edit-bar .he-hint { flex: 1; color: var(--dim); font-size: 0.74rem; }
+#hud-edit-bar .he-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+#hud-edit-bar .he-chip { cursor: pointer; font-size: 0.74rem; padding: 0.2rem 0.55rem; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--faint); text-decoration: line-through; }
+#hud-edit-bar .he-chip.on { color: var(--text); background: var(--raise); text-decoration: none; }
+#hud-edit-bar .he-chip.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+#hud-edit-bar .he-info { color: var(--dim); font-variant-numeric: tabular-nums; min-height: 1.2em; }
+#hud-edit-bar .he-row { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
+#hud-edit-bar .he-label { color: var(--faint); font-size: 0.72rem; width: 4.2rem; }
+#hud-edit-bar .he-presets { display: flex; gap: 0.3rem; }
+#hud-edit-bar .he-btn { padding: 0.3em 0.7em; font-size: 0.78rem; }
+#hud-edit-bar .he-btn.on { border-color: var(--accent); color: var(--accent); }
+#hud-edit-bar .he-snap { display: inline-flex; align-items: center; gap: 0.3rem; margin-left: auto; color: var(--dim); }
+#hud-edit-bar .he-io { flex: 1; min-width: 12rem; padding: 0.3rem 0.5rem; border-radius: 0.35rem; border: 1px solid var(--line-2); background: rgba(0, 0, 0, 0.3); font-family: var(--mono); font-size: 0.74rem; }
+#hud-edit-bar .he-msg { color: var(--gain); font-size: 0.74rem; }
+
+/* --- settings panel bits (HUD tab) --- */
+.set-sub { margin: 1.3rem 0 0.2rem; font-size: var(--fs-xs); font-weight: 650; color: var(--dim); }
+.keys-preview { display: grid; place-items: center; padding: 1.1rem; margin: 0.6rem 0 0.2rem; border-radius: var(--radius-sm); background: linear-gradient(135deg, #3c5a6e, #6f8f6a); font-size: calc(1rem * var(--s, 1)); color: #fff; --shadow-text: 0 1px 2px rgba(0, 0, 0, 0.85); text-shadow: var(--shadow-text); }
+.share-row { display: flex; gap: 0.4rem; justify-content: flex-end; }
+.share-row .share-code { width: 13rem; text-align: left; font-family: var(--mono); font-size: 0.78rem; }
+.share-msg:empty { display: none; }
+.btn.on { border-color: var(--accent); color: var(--accent); }
+#hud-edit-bar.bottom { top: auto; bottom: 0.8rem; }

@@ -84,13 +84,16 @@ function localPB(map: string, style: string, track: number): PersonalBest | null
     return pb;
   } catch { return null; }
 }
+/** A PB's score: its time in whole milliseconds, as the boards rank (v0.0.29; older PBs hold whole-tick times). */
+export const pbMs = (pb: Pick<PersonalBest, "time">): number => Math.round(pb.time * 1000);
+
 export function getPB(map: string, style: string, track = 0): PersonalBest | null {
   let local = localPB(map, style, track);
   while (local?.rejected) local = local.previous ?? null;
   const l = local && !local.rejected && (local.owner == null || local.owner === account) && compatible(local) ? local : null;
   const remote = server.get(pbKey(map, style, track));
   const r = remote && compatible(remote) ? remote : null;
-  return l && (!r || l.ticks < r.ticks) ? l : r ?? l;
+  return l && (!r || pbMs(l) < pbMs(r)) ? l : r ?? l;
 }
 
 export function setPB(pb: PersonalBest): void {

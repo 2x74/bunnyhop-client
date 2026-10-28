@@ -9,8 +9,10 @@
     "presentation": "bun apps/native/src/export-presentation.ts",
     "models": "bun apps/native/src/export-viewmodels.ts",
     "typecheck": "bun apps/native/typecheck.ts",
+    "format": "prettier --write \"apps/native/**/*.ts\" \"tools/**/*.ts\"",
+    "format:check": "prettier --check \"apps/native/**/*.ts\" \"tools/**/*.ts\"",
     "test": "bun test ./apps/native/ui",
-    "check": "bun run menu && bun run typecheck && bun run test",
+    "check": "bun run menu && bun run typecheck && bun run format:check && bun run test",
     "package": "bun run wasm && bun apps/native/package.ts",
     "wasm": "bun apps/native/ensure-wasm.ts"
   },
@@ -20,6 +22,7 @@
     "@types/three": "0.186.0",
     "flag-icons": "7.5.0",
     "playwright": "1.63.0",
+    "prettier": "3.9.10",
     "three": "0.186.1",
     "typescript": "7.0.2"
   }

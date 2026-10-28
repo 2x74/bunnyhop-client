@@ -1,0 +1,82 @@
+/* /about: the static landing + FAQ page (no game code). AIRTIME tokens (style.css), the system face for titles and
+   for prose. The hero is a muted run loop (its poster is the LCP); the rest of the media loads lazily. */
+:root {
+  --ink-0: #0c0c0f; --ink-1: #141418; --ink-2: #1c1c22; --ink-3: #26262d; --ink-4: #33333c;
+  --cream: #efe9dd; --cream-2: #b8b1a4; --cream-3: #7f796e;
+  --amber: #ffb43c; --amber-hi: #ffc867; --amber-deep: #e08a12; --amber-ink: #1d1306;
+  --lean: 0.55em;
+  --font-ui: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-text: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --ease-glide: cubic-bezier(0.16, 1, 0.3, 1);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { background: var(--ink-0); color: var(--cream); font: 17px/1.6 var(--font-text); -webkit-font-smoothing: antialiased; }
+body { margin: 0; min-height: 100vh; }
+a { color: var(--amber); text-decoration: none; }
+a:hover { color: var(--amber-hi); text-decoration: underline; text-underline-offset: 0.2em; }
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; border-radius: 3px; }
+code { font: 0.88em ui-monospace, "SF Mono", Menlo, Consolas, monospace; background: var(--ink-2); padding: 0.05em 0.35em; border-radius: 0.25em; }
+h1, h2, summary, .wordmark, .btn { font-family: var(--font-ui); }
+
+.top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; max-width: 76rem; margin: 0 auto; padding: 1.4rem 1.5rem; }
+.wordmark { display: inline-flex; align-items: center; gap: 0.35em; color: var(--amber); font-weight: 850; font-stretch: 112%; font-size: 1.5rem; letter-spacing: -0.025em; text-decoration: none !important; }
+.logo-mark { width: 1.35em; height: 1.35em; }
+.wm-name { color: var(--cream); }
+.top nav { display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; font-family: var(--font-ui); }
+.top nav a:not(.btn) { color: var(--cream-2); font-weight: 650; }
+.top nav a:not(.btn):hover { color: #fff; text-decoration: none; }
+
+/* The one thing to press: amber, leaning, standing on a darker ground. */
+.btn { display: inline-block; padding: 0.55rem 1.1rem 0.55rem calc(1.1rem + var(--lean) * 0.6); background: var(--amber); color: var(--amber-ink); font-weight: 800; font-stretch: 108%; text-decoration: none !important; clip-path: polygon(var(--lean) 0, 100% 0, 100% 100%, 0 100%); box-shadow: inset 0 -3px 0 var(--amber-deep); }
+.btn:hover { background: var(--amber-hi); color: var(--amber-ink); }
+.btn:active { box-shadow: inset 0 -1px 0 var(--amber-deep); transform: translateY(1px); }
+.btn.big { padding: 0.8rem 1.6rem 0.8rem calc(1.6rem + var(--lean) * 0.6); font-size: 1.15rem; }
+.link { font-family: var(--font-ui); font-weight: 650; color: var(--cream-2); }
+.link:hover { color: #fff; }
+
+main { max-width: 76rem; margin: 0 auto; padding: 0 1.5rem 3rem; }
+.hero { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 3rem; align-items: center; padding: 3rem 0 5rem; }
+h1 { font-size: clamp(2.4rem, 5vw, 3.9rem); line-height: 1.02; letter-spacing: -0.03em; margin: 0 0 1.25rem; font-weight: 850; font-stretch: 108%; }
+.lede { font-size: 1.15rem; color: var(--cream-2); margin: 0 0 2rem; }
+.ctas { display: flex; flex-wrap: wrap; align-items: center; gap: 0.9rem 1.6rem; margin: 0 0 1rem; }
+.fine { color: var(--cream-3); font-size: 0.9rem; margin: 0; }
+.hero-media { margin: 0; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 10px; background: var(--ink-2) url("/about/run-poster.webp") center / cover; }
+.hero-media video { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+/* Three things the game does, each beside a real picture of it. No cards. */
+.feature { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); gap: 3rem; align-items: center; margin: 0 0 4.5rem; }
+.feature.flip { grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); }
+.feature.flip > img { order: 2; }
+.feature img { display: block; width: 100%; height: auto; border-radius: 10px; background: var(--ink-2); }
+h2 { font-size: 1.7rem; font-weight: 800; letter-spacing: -0.015em; line-height: 1.15; margin: 0 0 0.6rem; }
+.feature p { margin: 0; color: var(--cream-2); font-size: 1.05rem; }
+
+.how, .faq, .end { max-width: 46rem; margin: 0 0 3.5rem; }
+.how p { color: var(--cream-2); margin: 0 0 0.8rem; }
+.how b { color: var(--cream); }
+.faq h2 { margin-bottom: 0.8rem; }
+/* The questions, one line each; an answer opens in place (no JS). */
+.faq details { border-top: 1px solid var(--ink-3); }
+.faq details:last-child { border-bottom: 1px solid var(--ink-3); }
+.faq summary { list-style: none; cursor: pointer; padding: 0.75rem 0; font-weight: 650; font-size: 1.05rem; display: flex; justify-content: space-between; gap: 1rem; }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: "+"; color: var(--cream-3); font-weight: 600; transition: transform 0.2s var(--ease-glide); }
+.faq details[open] summary::after { transform: rotate(45deg); }
+.faq summary:hover { color: #fff; }
+.faq details p { margin: 0 0 1rem; color: var(--cream-2); }
+[data-discord][hidden] { display: none !important; }
+
+.foot { max-width: 76rem; margin: 0 auto; padding: 2rem 1.5rem 3rem; color: var(--cream-3); border-top: 1px solid var(--ink-3); font-size: 0.95rem; }
+.foot-links { display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; margin: 0; font-family: var(--font-ui); }
+.foot-links a { color: var(--cream-2); font-weight: 600; }
+/* The thank-you names (supporters who opted in, GET /supporters; site-community.ts fills them): the page's own type. */
+.thanks { margin: 1rem 0 0; color: var(--cream-3); line-height: 1.8; }
+.thanks .thanks-names { color: var(--cream-2); }
+
+@media (max-width: 56rem) {
+  .hero, .feature { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; }
+  .feature.flip > img { order: 0; }
+  .hero { padding-top: 1.5rem; }
+}
+@media (prefers-reduced-motion: reduce) { .faq summary::after { transition: none; } }

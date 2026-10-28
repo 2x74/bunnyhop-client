@@ -40,6 +40,17 @@ export interface ClientBenchmarkResult {
   /** What the frames were drawn with. The shell adds the display and its own launch settings. */
   graphics: { potato: boolean; resolutionScale: number; antialias: boolean; uncapped: boolean; lowLatency: boolean; fpsLimit: number; browserUncapped: boolean; width: number; height: number };
 }
+/** The desktop app's custom CSS file (Settings -> Custom CSS file there): its name and text, sent again on each save. */
+export interface ClientCustomCss {
+  name: string;
+  css: string;
+}
+/**
+ * A file in the desktop app's skies folder (F10 -> Client -> Open skies folder): a .hdr panorama (16 MiB at most), a PNG /
+ * JPEG / WebP panorama (32 MiB) or a .bhsky.json sky pack (45 MiB), up to 24 of them, or a file it couldn't read and why.
+ */
+export type ClientSky = { name: string; kind: "hdr" | "image" | "bhsky"; size: number; mtime: number; bytes: ArrayBuffer } | { name: string; error: string };
+export const CLIENT_SKY_LIMITS = { hdr: 16 * 1024 * 1024, image: 32 * 1024 * 1024, bhsky: 45 * 1024 * 1024, count: 24 };
 export interface ClientRunSummary {
   mapId: string; mapName: string; style: string;
   timeMs: number; ticks: number; tickRate: number;
@@ -59,6 +70,11 @@ export interface BunnyhopClient {
   /** Registers the game's benchmark; the shell offers it in F10 only once this is called. */
   onBenchmark?: (listener: (request: ClientBenchmarkRequest) => void) => unknown;
   benchmarkResult?: (result: ClientBenchmarkResult | { error: string }) => unknown;
+  /** The custom CSS file: called with it now and on every save, null when there is none. Returns an unsubscribe. */
+  onCustomCss?: (listener: (file: ClientCustomCss | null) => void) => unknown;
+  /** The skies folder: the whole list now and after every change. Returns an unsubscribe. */
+  onCustomSkies?: (listener: (skies: ClientSky[]) => void) => () => void;
+  openSkiesFolder?: () => unknown;
 }
 declare global { interface Window { bunnyhopClient?: BunnyhopClient } }
 export function nativeClient(): BunnyhopClient | null {
@@ -67,6 +83,54 @@ export function nativeClient(): BunnyhopClient | null {
 }
 function safely(call: () => unknown): void {
   try { void Promise.resolve(call()).catch(() => {}); } catch { /* Native conveniences cannot interrupt a run. */ }
+}
+/** The desktop app's custom CSS file (custom-css/index.ts). The text goes through the same rewrite as pasted CSS. */
+export function watchClientCustomCss(listener: (file: ClientCustomCss | null) => void): void {
+  const native = nativeClient();
+  if (!native?.onCustomCss) return;
+  const read = (v: unknown) => {
+    const f = v as Partial<ClientCustomCss> | null;
+    listener(f && typeof f === "object" && typeof f.css === "string" ? { name: String(f.name ?? "custom.css").slice(0, 80), css: f.css.slice(0, 256 * 1024) } : null);
+  };
+  safely(() => native.onCustomCss?.(read));
+}
+/** An ArrayBuffer from the bridge (also one from another realm, or a Uint8Array / Buffer view); null for anything else. */
+function arrayBuffer(v: unknown): ArrayBuffer | null {
+  if (Object.prototype.toString.call(v) === "[object ArrayBuffer]") return v as ArrayBuffer;
+  if (!ArrayBuffer.isView(v)) return null;
+  return v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength) as ArrayBuffer;
+}
+/**
+ * The desktop app's skies folder (sky-packs/folder.ts): the files it holds, now and after every change. A malformed entry
+ * is dropped; a file over the limits comes through as an error entry, without its bytes. Returns an unsubscribe; null
+ * without the desktop app (or an older one).
+ */
+export function watchClientSkies(listener: (skies: ClientSky[]) => void, native = nativeClient()): (() => void) | null {
+  if (!native?.onCustomSkies) return null;
+  const read = (v: unknown) => {
+    if (!Array.isArray(v)) return;
+    const out: ClientSky[] = [];
+    for (const raw of v.slice(0, CLIENT_SKY_LIMITS.count)) {
+      const s = raw as Partial<Record<string, unknown>> | null;
+      if (!s || typeof s !== "object" || typeof s.name !== "string" || !s.name) continue;
+      const name = s.name.slice(0, 120);
+      if (typeof s.error === "string") out.push({ name, error: s.error.slice(0, 200) || "Couldn't read it." });
+      else if ((s.kind === "hdr" || s.kind === "image" || s.kind === "bhsky") && typeof s.size === "number" && typeof s.mtime === "number") {
+        const bytes = arrayBuffer(s.bytes);
+        if (!bytes) continue;
+        if (bytes.byteLength > CLIENT_SKY_LIMITS[s.kind]) out.push({ name, error: `Over ${CLIENT_SKY_LIMITS[s.kind] / 1048576} MB.` });
+        else out.push({ name, kind: s.kind, size: s.size, mtime: s.mtime, bytes });
+      }
+    }
+    listener(out);
+  };
+  let stop: unknown = null;
+  try { stop = native.onCustomSkies(read); } catch { return null; }
+  return () => { try { if (typeof stop === "function") stop(); } catch { /* the bridge is gone */ } };
+}
+export function openClientSkiesFolder(): void {
+  const native = nativeClient();
+  if (native?.openSkiesFolder) safely(() => native.openSkiesFolder!());
 }
 export async function saveClientRun(summary: ClientRunSummary): Promise<string | null> {
   const native = nativeClient();

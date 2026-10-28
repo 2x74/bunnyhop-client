@@ -1,10 +1,84 @@
 // Offline only: captures the actual native meshes, poses, finishes and glove shader into an embedded menu atlas.
 #include "renderer.hpp"
-int main(int argc,char **argv){try{
- if(argc!=4)throw std::runtime_error("usage: native-export-previews ASSET_ROOT JOBS.json OUTPUT_DIR");std::ifstream f(argv[2]);nlohmann::json jobs;f>>jobs;const auto output=std::filesystem::path(argv[3]);std::filesystem::create_directories(output);
- if(!SDL_Init(SDL_INIT_VIDEO))throw std::runtime_error(SDL_GetError());SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION,3);SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION,3);SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,SDL_GL_CONTEXT_PROFILE_CORE);SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE,8);SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE,24);
- const int width=1024,height=768;auto *window=SDL_CreateWindow("Native authored preview export",width,height,SDL_WINDOW_OPENGL|SDL_WINDOW_HIDDEN);if(!window)throw std::runtime_error(SDL_GetError());auto context=SDL_GL_CreateContext(window);if(!context)throw std::runtime_error(SDL_GetError());SDL_GL_MakeCurrent(window,context);Gl gl;gl.load();NativeViewmodel models(gl,argv[1]);gl.Viewport(0,0,width,height);gl.ClearColor(0,0,0,0);gl.DepthFunc(GL_LEQUAL);
- for(const auto &job:jobs){models.reset_presentation();if(job.value("kind","")=="ghost")models.ghost_cosmetics(job.at("id"));models.player_glow(job.contains("playerGlow")?native_render::parse_glow(job["playerGlow"]):std::nullopt);models.cosmetics(job.value("outfit","outfit-cream"),job.value("loadout","2;knife-carrot;fin-garden;glove-knit"));gl.ColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);gl.DepthMask(GL_TRUE);gl.Clear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);const double seconds=std::clamp(job.value("seconds",2.),0.,10.);for(double t=0;t<seconds;t+=1./60){gl.Clear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);models.draw_preview(width,height,job.value("kind","fp"),t,job.value("weapon",1u),job.value("action","idle"),job.value("speed",0.f));}gl.Clear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);models.draw_preview(width,height,job.value("kind","fp"),seconds,job.value("weapon",1u),job.value("action","idle"),job.value("speed",0.f));const auto error=gl.GetError();if(error!=GL_NO_ERROR)throw std::runtime_error("Preview GL error "+std::to_string(error));std::vector<uint8_t> pixels(width*height*4);gl.PixelStorei(GL_PACK_ALIGNMENT,1);gl.ReadPixels(0,0,width,height,GL_RGBA,GL_UNSIGNED_BYTE,pixels.data());const auto path=output/(job.at("id").get<std::string>()+".rgba");std::ofstream out(path,std::ios::binary);for(int y=height-1;y>=0;y--)out.write(reinterpret_cast<const char*>(pixels.data()+size_t(y)*width*4),width*4);}
- // Models are destroyed before the SDL context goes away at process exit.
- std::cout<<"Authored native previews: "<<jobs.size()<<" captures at "<<width<<"x"<<height<<"\n";return 0;
-}catch(const std::exception &e){std::cerr<<e.what()<<'\n';return 1;}}
+
+int main(int argc, char **argv) {
+    try {
+        if (argc != 4) throw std::runtime_error("usage: native-export-previews ASSET_ROOT JOBS.json OUTPUT_DIR");
+        std::ifstream f(argv[2]);
+        nlohmann::json jobs;
+        f >> jobs;
+        const auto output = std::filesystem::path(argv[3]);
+        std::filesystem::create_directories(output);
+        if (!SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(SDL_GetError());
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+        SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8);
+        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+        const int width = 1024, height = 768;
+        auto *window = SDL_CreateWindow(
+                "Native authored preview export", width, height, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN
+        );
+        if (!window) throw std::runtime_error(SDL_GetError());
+        auto context = SDL_GL_CreateContext(window);
+        if (!context) throw std::runtime_error(SDL_GetError());
+        SDL_GL_MakeCurrent(window, context);
+        native::Gl gl;
+        gl.load();
+        native::NativeViewmodel models(gl, argv[1]);
+        gl.Viewport(0, 0, width, height);
+        gl.ClearColor(0, 0, 0, 0);
+        gl.DepthFunc(GL_LEQUAL);
+        for (const auto &job : jobs) {
+            models.reset_presentation();
+            if (job.value("kind", "") == "ghost") models.ghost_cosmetics(job.at("id"));
+            models.player_glow(
+                    job.contains("playerGlow") ? native_render::parse_glow(job["playerGlow"]) : std::nullopt
+            );
+            models.cosmetics(
+                    job.value("outfit", "outfit-cream"), job.value("loadout", "2;knife-carrot;fin-garden;glove-knit")
+            );
+            gl.ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+            gl.DepthMask(GL_TRUE);
+            gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            const double seconds = std::clamp(job.value("seconds", 2.), 0., 10.);
+            for (double t = 0; t < seconds; t += 1. / 60) {
+                gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+                models.draw_preview(
+                        width,
+                        height,
+                        job.value("kind", "fp"),
+                        t,
+                        job.value("weapon", 1u),
+                        job.value("action", "idle"),
+                        job.value("speed", 0.f)
+                );
+            }
+            gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            models.draw_preview(
+                    width,
+                    height,
+                    job.value("kind", "fp"),
+                    seconds,
+                    job.value("weapon", 1u),
+                    job.value("action", "idle"),
+                    job.value("speed", 0.f)
+            );
+            const auto error = gl.GetError();
+            if (error != GL_NO_ERROR) throw std::runtime_error("Preview GL error " + std::to_string(error));
+            std::vector<uint8_t> pixels(width * height * 4);
+            gl.PixelStorei(GL_PACK_ALIGNMENT, 1);
+            gl.ReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+            const auto path = output / (job.at("id").get<std::string>() + ".rgba");
+            std::ofstream out(path, std::ios::binary);
+            for (int y = height - 1; y >= 0; y--)
+                out.write(reinterpret_cast<const char *>(pixels.data() + size_t(y) * width * 4), width * 4);
+        }
+        // Models are destroyed before the SDL context goes away at process exit.
+        std::cout << "Authored native previews: " << jobs.size() << " captures at " << width << "x" << height << "\n";
+        return 0;
+    } catch (const std::exception &e) {
+        std::cerr << e.what() << '\n';
+        return 1;
+    }
+}

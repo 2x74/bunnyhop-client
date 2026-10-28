@@ -447,7 +447,9 @@ function noteLine(n: Note): (string | Node)[] {
     case "ask":
       return [who, " wants to join your lobby"];
     case "beat": {
-      const by = typeof d.yours === "number" && typeof d.ticks === "number" ? ` by ${formatTime((d.yours - d.ticks) / 100)}` : "";
+      // Milliseconds since v0.0.29 (ms / yoursMs); older notes carry ticks.
+      const gap = typeof d.yoursMs === "number" && typeof d.ms === "number" ? (d.yoursMs - d.ms) / 1000 : typeof d.yours === "number" && typeof d.ticks === "number" ? (d.yours - d.ticks) / 100 : null;
+      const by = gap !== null ? ` by ${formatTime(gap)}` : "";
       return [who, ` beat your PB on ${String(d.map)}${by}`];
     }
   }

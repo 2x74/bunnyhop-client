@@ -22,6 +22,7 @@
 // - Special badges (users.special_badges, 0.0.21): staff-granted for events (SPECIAL_BADGES). The first: Clipper, for
 //   taking part in the clip campaign, and a gold Creator mark per platform for its top creator. Contributor (2026-10-25):
 //   worked on the game or the client; no permissions (the Discord role of the same name sits between Admin and Moderator).
+//   Mapper (2026-10-28): made maps on the site; staff link the player to their author names (apps/api/src/mappers.ts).
 // Marks are server-authoritative: they come from the API / the room, never from the client.
 // Order after a name (unless the player picks their own, Edit card → Badges): staff, Verified, Creator, Server
 // Booster, Supporter, special badges.
@@ -346,10 +347,22 @@ export const CONTRIBUTOR_SVG =
   `<circle cx="12" cy="12" r="11" fill="${CONTRIBUTOR_TEAL}"/><path d="M6.9 17.1 12.6 11.4" stroke="${CONTRIBUTOR_INK}" stroke-width="4" stroke-linecap="round"/>` +
   `<circle cx="14.9" cy="9.1" r="4.9" fill="${CONTRIBUTOR_INK}"/><path d="M14.9 9.1 17.3 3.4 20.6 6.7z" fill="${CONTRIBUTOR_TEAL}"/>`;
 
+/**
+ * Mapper: made maps that are on the site (staff link the player to their author names: apps/api/src/mappers.ts, which also
+ * gives the badge). A block, the brush mappers build with, in ink on a coral disc: the lit faces are the disc showing
+ * through. Coral is clear of the owner's amber, the weekly tangerine, the Creator reds and the Booster pink.
+ */
+export const MAPPER_CORAL = "#ff8a70";
+const MAPPER_INK = "#0e1428";
+export const MAPPER_SVG =
+  `<circle cx="12" cy="12" r="11" fill="${MAPPER_CORAL}"/><path d="M12 5 18.2 8.5v7L12 19l-6.2-3.5v-7z" fill="${MAPPER_INK}"/>` +
+  `<path d="M5.8 8.5 12 12l6.2-3.5M12 12v7" fill="none" stroke="${MAPPER_CORAL}" stroke-width="1.5" stroke-linejoin="round"/>`;
+
 /** earned: awarded by play (never staff-granted). quiet: worn only when the player picks it (a common mark). */
 export const SPECIAL_BADGES: Record<string, { name: string; svg: string; gold?: boolean; earned?: boolean; quiet?: boolean }> = {
   clipper: { name: "Clipper", svg: CLIPPER_SVG },
   contributor: { name: "Contributor", svg: CONTRIBUTOR_SVG },
+  mapper: { name: "Mapper", svg: MAPPER_SVG },
   gauntlet: { name: "Gauntlet clear", svg: GAUNTLET_SVG, earned: true, quiet: true },
   "weekly-winner": { name: "Weekly gauntlet winner", svg: WEEKLY_WINNER_SVG, earned: true },
   "gauntlet-classic": { name: "Bunny Hop Map Gauntlet", svg: GAUNTLET_CLASSIC_SVG, gold: true, earned: true },

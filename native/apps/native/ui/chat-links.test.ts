@@ -1,6 +1,29 @@
-import {test,expect} from "bun:test";
-import {safeNativeChatUrl} from "./chat-links";
-import {nativeChatDecoration} from "./chat-decoration";
-test("native chat navigation allows only direct internal map/replay/profile/lobby/server routes",()=>{for(const route of ["/maps/bhop_eazy","/replay/run-1","/u/alice","/?lobby=p-abcdefghij","/?server=us-main"])expect(safeNativeChatUrl("http://www.bunnyhop.lol"+route)).toBe("https://bunnyhop.lol"+route);});
-test("native chat rejects auth/external/encoded/ambiguous navigation",()=>{for(const raw of ["javascript:alert(1)","https://evil.test/u/alice","https://bunnyhop.lol.evil.test/u/alice","https://bunnyhop.lol@evil.test/u/alice","https://bunnyhop.lol:443/u/alice","https://bunnyhop.lol/api/auth/discord/login","https://bunnyhop.lol/u/alice?gift=1","https://bunnyhop.lol/u/alice#x","https://bunnyhop.lol/u/%61lice","https://bunnyhop.lol/?server=us&other=1","https://bunnyhop.lol/../api/me","https://bunnyhop.lol/u/alice\n","https://bunnyhop.lol/maps/.."])expect(safeNativeChatUrl(raw)).toBeNull();});
-test("profile clicks use roster account ID and reject non-identifiers",()=>{expect(nativeChatDecoration({id:"player-42"}).nativeProfileId).toBe("player-42");expect(nativeChatDecoration({id:"alice/../api/me"}).nativeProfileId).toBeUndefined();});
+import { test, expect } from "bun:test";
+import { safeNativeChatUrl } from "./chat-links";
+import { nativeChatDecoration } from "./chat-decoration";
+test("native chat navigation allows only direct internal map/replay/profile/lobby/server routes", () => {
+  for (const route of ["/maps/bhop_eazy", "/replay/run-1", "/u/alice", "/?lobby=p-abcdefghij", "/?server=us-main"])
+    expect(safeNativeChatUrl("http://www.bunnyhop.lol" + route)).toBe("https://bunnyhop.lol" + route);
+});
+test("native chat rejects auth/external/encoded/ambiguous navigation", () => {
+  for (const raw of [
+    "javascript:alert(1)",
+    "https://evil.test/u/alice",
+    "https://bunnyhop.lol.evil.test/u/alice",
+    "https://bunnyhop.lol@evil.test/u/alice",
+    "https://bunnyhop.lol:443/u/alice",
+    "https://bunnyhop.lol/api/auth/discord/login",
+    "https://bunnyhop.lol/u/alice?gift=1",
+    "https://bunnyhop.lol/u/alice#x",
+    "https://bunnyhop.lol/u/%61lice",
+    "https://bunnyhop.lol/?server=us&other=1",
+    "https://bunnyhop.lol/../api/me",
+    "https://bunnyhop.lol/u/alice\n",
+    "https://bunnyhop.lol/maps/..",
+  ])
+    expect(safeNativeChatUrl(raw)).toBeNull();
+});
+test("profile clicks use roster account ID and reject non-identifiers", () => {
+  expect(nativeChatDecoration({ id: "player-42" }).nativeProfileId).toBe("player-42");
+  expect(nativeChatDecoration({ id: "alice/../api/me" }).nativeProfileId).toBeUndefined();
+});

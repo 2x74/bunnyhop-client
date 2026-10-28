@@ -325,7 +325,7 @@ export function showFeedback(o: FeedbackOpen = {}): void {
     if (err.textContent && text.value.trim().length >= MESSAGE_MIN) err.textContent = "";
   });
 
-  // "Wrong map tier": the map's tier in words, then the six to pick from (the current one can't be picked).
+  // "Wrong map tier": the map's tier in words, then the tiers to pick from (the current one can't be picked).
   let tierNow: number | null | undefined;
   let tierPick: number | null = null;
   const tierAsk = h("p.fb-ask");

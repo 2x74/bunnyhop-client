@@ -1,0 +1,88 @@
+---
+Language: Cpp
+Standard: c++20
+BasedOnStyle: LLVM
+
+ColumnLimit: 120
+IndentWidth: 4
+ContinuationIndentWidth: 8
+TabWidth: 4
+UseTab: Never
+AccessModifierOffset: -4
+IndentCaseLabels: true
+NamespaceIndentation: None
+FixNamespaceComments: true
+
+# AGENTS.md: "One statement per line. No if(x){a;b;}else{c;} chains on a single line."
+AllowShortBlocksOnASingleLine: Never
+AllowShortIfStatementsOnASingleLine: WithoutElse   # `if (done) return;` guards stay; else-chains split
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortEnumsOnASingleLine: true
+# Trivial accessors (`bool valid() const { return x; }`) may stay on one line inside a class.
+AllowShortFunctionsOnASingleLine: InlineOnly
+# `[](auto &a) { return a.id == id; }` stays inline; anything longer gets a body.
+AllowShortLambdasOnASingleLine: Inline
+
+BreakBeforeBraces: Attach
+BreakBeforeBinaryOperators: NonAssignment
+BreakBeforeTernaryOperators: true
+BreakConstructorInitializers: BeforeComma
+PackConstructorInitializers: CurrentLine
+BreakTemplateDeclarations: Yes
+
+# One argument per line when a call or signature does not fit, so hud.draw(...) and
+# renderer->set_viewmodel(...) show their parameters instead of a packed paragraph.
+BinPackArguments: false
+BinPackParameters: false
+AlignAfterOpenBracket: BlockIndent
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+
+PointerAlignment: Right
+ReferenceAlignment: Pointer
+SpaceBeforeParens: ControlStatements
+SpaceAfterTemplateKeyword: true
+SpacesBeforeTrailingComments: 2
+Cpp11BracedListStyle: true
+
+AlignConsecutiveAssignments: None
+AlignConsecutiveDeclarations: None
+AlignTrailingComments:
+  Kind: Always
+  OverEmptyLines: 0
+MaxEmptyLinesToKeep: 1
+KeepEmptyLinesAtTheStartOfBlocks: false
+InsertBraces: false          # true once the reformat has landed; it rewrites bodies and is noisier
+InsertNewlineAtEOF: true
+SeparateDefinitionBlocks: Always
+
+# Include order is NOT safe to sort yet: render_shaders.hpp must follow GL declarations,
+# the Windows sources depend on <windows.h> ordering, and NOMINMAX is set per target.
+# Turn on Regroup in a later, separate commit after a full build on all three OSes.
+SortIncludes: Never
+IncludeBlocks: Preserve
+
+# Keep embedded JS/GLSL/HTML raw strings as written.
+RawStringFormats: []
+ReflowComments: true
+AlignEscapedNewlines: DontAlign
+CommentPragmas: '^ (NOLINT|IWYU)'
+---
+# menu_webview_macos.mm: same layout rules for Objective-C++.
+Language: ObjC
+BasedOnStyle: LLVM
+ColumnLimit: 120
+IndentWidth: 4
+ContinuationIndentWidth: 8
+AllowShortBlocksOnASingleLine: Never
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: InlineOnly
+BinPackArguments: false
+BinPackParameters: false
+PointerAlignment: Right
+ObjCBlockIndentWidth: 4
+ObjCSpaceAfterProperty: true
+SortIncludes: Never
+...

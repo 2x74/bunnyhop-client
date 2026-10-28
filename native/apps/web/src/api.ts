@@ -1,5 +1,7 @@
 import { appHref } from "./platform/navigation";
+import type { AvatarSpec } from "./avatar/spec";
 import type { PlayerGlow } from "./player/glow-config";
+import { cleanLoadout, type CosmeticLoadout } from "./loadout";
 // Client contract for the bunnyhop.lol backend (apps/api). UI code depends only on these signatures.
 // When VITE_API_URL is unset (or the API is unreachable) callers should degrade gracefully:
 // leaderboards show "offline", submissions stay local.
@@ -8,7 +10,7 @@ import type { PlayerGlow } from "./player/glow-config";
 // display name like "guest-1234"). discordLoginUrl() optionally links a Discord account so progress is saved
 // across devices; existing guest runs carry over. All requests use credentials: "include".
 //
-// Writes (POST) also carry the device id and fingerprint hash (device.ts: x-bh-device / x-bh-fp; the server's
+// Session creation and run submissions carry the device id and fingerprint hash (device.ts: x-bh-device / x-bh-fp; the server's
 // network / device bans and ban-evasion checks, apps/api src/network.ts). Reads carry the device id in its cookie.
 
 import type { NameColorId, NameEffect, PlayerMarks, ProfileLink, ProfileLinks } from "./creators";
@@ -178,6 +180,31 @@ export interface LeaderboardEntry {
   sync: number;
   /** Physics version the run was played with (core.ts PHYSICS_*; absent from APIs before physics versions = 1). */
   physics?: number;
+}
+
+/**
+ * A board row's stats card (GET /runs/:id/stats, apps/api src/run-stats.ts; ui/run-stats.ts). Optional parts are absent
+ * when the run didn't record them (older runs, other clients).
+ */
+export interface RunStats {
+  id: string;
+  style: string;
+  track: number;
+  /** When the run was submitted, ISO. */
+  date: string;
+  ticks: number | null;
+  jumps: number | null;
+  strafes: number | null;
+  sync: number | null;
+  perf: number | null;
+  /** Replay views (since views began, one per network a day). */
+  views: number;
+  client?: { kind: "native" | "desktop" | "browser"; label: string };
+  version?: string;
+  fps?: number;
+  mouse?: { sensitivity?: number; dpi?: number; pollHz?: number; raw?: boolean };
+  turn?: { yawSpeed: number; angleSpeedKey: number };
+  play?: { attempt?: number; seconds?: number; session?: number; sessionSeconds?: number };
 }
 
 export interface Leaderboard {
@@ -420,7 +447,7 @@ export interface PointsRecord {
   runId: string;
   /** What the record scores on that board (Overall: style-weighted; a style: raw). */
   points: number;
-  /** What it adds to the total after the 0.975-per-place weighting. */
+  /** What it adds to the total after the per-place weighting (RECORD_WEIGHTING). */
   counted: number;
 }
 
@@ -484,6 +511,8 @@ export interface Profile {
     styleMaps: Record<string, number>;
     clearedMaps: string[];
   };
+  /** The author names staff linked to this player and the maps carrying them (apps/api src/mappers.ts); null when not a mapper. */
+  mapper?: { authors: string[]; maps: { name: string; title: string; tier: number | null; ranked: boolean; author: string }[] } | null;
   /**
    * Followers / following / friends (apps/api src/social.ts followCounts); `you`: how a signed-in visitor stands with
    * this player. Absent from older APIs.
@@ -702,12 +731,15 @@ function base(): string {
   return API_URL;
 }
 
-/** POSTs get the device headers (device.ts) on top of their own. */
-async function withDevice(init: RequestInit): Promise<RequestInit> {
-  if ((init.method ?? "GET").toUpperCase() !== "POST") return init;
-  const h = new Headers(init.headers);
+/** Only handlers calling requestOrigin() need device headers. Diagnostics carry components in their body;
+ * gifting's "fingerprint" is its transaction target JSON, not a browser fingerprint. */
+type ApiRequestInit = RequestInit & { device?: boolean };
+async function withDevice(init: ApiRequestInit): Promise<RequestInit> {
+  const { device, ...plain } = init;
+  if (!device) return plain;
+  const h = new Headers(plain.headers);
   for (const [k, v] of Object.entries(await deviceHeaders())) h.set(k, v);
-  return { ...init, headers: h };
+  return { ...plain, headers: h };
 }
 
 /**
@@ -729,7 +761,7 @@ export async function readOwnedJson(res:Response,dispatch?:RequestDispatch):Prom
   return body;
 }
 
-async function request(path: string, init: RequestInit = {}, dispatch?: RequestDispatch): Promise<Response> {
+async function request(path: string, init: ApiRequestInit = {}, dispatch?: RequestDispatch): Promise<Response> {
   countWrite(init);
   let res: Response;
   try {
@@ -745,7 +777,7 @@ async function request(path: string, init: RequestInit = {}, dispatch?: RequestD
   return res;
 }
 
-async function json<T>(path: string, init: RequestInit = {}, dispatch?: RequestDispatch): Promise<T> {
+async function json<T>(path: string, init: ApiRequestInit = {}, dispatch?: RequestDispatch): Promise<T> {
   const res = await request(path, init, dispatch);
   const body = (await readOwnedJson(res,dispatch)) as (T & { error?: string; message?: string }) | null;
   if (!res.ok) throw new ApiError(res.status, body?.error ?? "error", body?.message ?? `HTTP ${res.status}`, (body ?? {}) as Record<string, unknown>);
@@ -753,7 +785,7 @@ async function json<T>(path: string, init: RequestInit = {}, dispatch?: RequestD
 }
 
 /** Like json(), but 5xx answers with an error body (email_failed, email_unavailable) become ApiErrors too. */
-async function jsonOr5xx<T>(path: string, init: RequestInit, dispatch?:RequestDispatch): Promise<T> {
+async function jsonOr5xx<T>(path: string, init: ApiRequestInit, dispatch?:RequestDispatch): Promise<T> {
   countWrite(init);
   let res: Response;
   try {
@@ -772,7 +804,8 @@ async function jsonOr5xx<T>(path: string, init: RequestInit, dispatch?:RequestDi
   return body as T;
 }
 
-const post = (body?: unknown): RequestInit => ({
+const post = (body?: unknown, device = false): ApiRequestInit => ({
+  device,
   method: "POST",
   headers: { "content-type": "application/json" },
   body: body === undefined ? undefined : JSON.stringify(body),
@@ -851,7 +884,7 @@ async function wavedashSession(): Promise<User | null> {
     try {
       const c = await wavedashCredentials();
       if (!c) return ((wavedashDone = true), null);
-      const r = await json<{ user: User; outcome: string }>("/auth/wavedash", post(c));
+      const r = await json<{ user: User; outcome: string }>("/auth/wavedash", post(c, true));
       wavedashDone = true;
       return r.user;
     } catch (e) {
@@ -895,7 +928,7 @@ export const api = {
         guest: () => {
           // A superseded lookup must never replace a newly signed-in session with a guest cookie.
           if (meCache !== pending || wavedashPlayer()) throw new ApiUnavailable();
-          return json<User>("/auth/guest", post({}));
+          return json<User>("/auth/guest", post({}, true));
         }, known: lastKnownMe,
         forget: () => { if (meCache === pending) rememberMe(null); }, wait: sleep,
       })).then(
@@ -1030,7 +1063,7 @@ export const api = {
    * re-post with confirm: true after asking).
    */
   async emailVerify(v: { code: string } | { token: string; confirm?: boolean }): Promise<{ user: User; outcome: "linked" | "signed_in" | "merged" | "created"; keptGuest?: boolean }> {
-    const r = await json<{ user: User; outcome: "linked" | "signed_in" | "merged" | "created"; keptGuest?: boolean }>("/auth/email/verify", post(v));
+    const r = await json<{ user: User; outcome: "linked" | "signed_in" | "merged" | "created"; keptGuest?: boolean }>("/auth/email/verify", post(v, true));
     setMe(r.user);
     return r;
   },
@@ -1085,6 +1118,10 @@ export const api = {
   async maps(style = "autohop"): Promise<MapSummary[]> {
     return json<MapSummary[]>(`/maps?style=${encodeURIComponent(style)}`);
   },
+  /** Linked author names -> the player (apps/api src/mappers.ts), keyed by the lowercased author. */
+  async mappers(): Promise<Record<string, { author: string; id: string; name: string }>> {
+    return (await json<{ authors: Record<string, { author: string; id: string; name: string }> }>("/mappers")).authors;
+  },
   /** Newest personal bests across all ranked boards (rank 1 = new world record). */
   async recentRecords(style = "autohop", limit = 6): Promise<RecentRecord[]> {
     return json<RecentRecord[]>(`/records/recent?style=${encodeURIComponent(style)}&limit=${limit}`);
@@ -1128,7 +1165,7 @@ export const api = {
       if (opts.mouse) form.append("mouse", JSON.stringify(opts.mouse));
       init = { method: "POST", body: form };
     }
-    const res = await request(path, init, opts.dispatch);
+    const res = await request(path, { ...init, device: true }, opts.dispatch);
     const body = (await res.json().catch(() => null)) as (Submission & { error?: string; message?: string }) | null;
     if (!res.ok || !body) return { id: "", status: "rejected", reason: body?.message ?? `HTTP ${res.status}`, code: body?.error ?? "error" };
     meCache = null; // the server may have just issued a guest identity
@@ -1136,7 +1173,7 @@ export const api = {
   },
   /** A run-session heartbeat (run-clock.ts): the server signs what was recorded so far. */
   async runBeat(body: { sid: string | null; map: string; track: number; style: string; tick: number; hash: string; paused: boolean; att?: [number, number, number, number] }, dispatch?: RequestDispatch): Promise<{ sid: string; token: string }> {
-    return json("/runs/beat", { ...post(body), keepalive: true }, dispatch);
+    return json("/runs/beat", { ...post(body, true), keepalive: true }, dispatch);
   },
   // --- gauntlets
   async gauntlets(): Promise<GauntletHub> {
@@ -1233,6 +1270,21 @@ export const api = {
   async saveMapGroups(user: string, changes: ApiMapGroupChange[]): Promise<ApiMapGroup[]> {
     return (await json<{ groups: ApiMapGroup[] }>("/me/map-groups", { ...post({ user, changes }), keepalive: true })).groups;
   },
+  /** Your bunny avatar (avatar/spec.ts): the saved one, or your default; `url` is its picture. ApiError 401 without a session. */
+  async bunnyAvatar(): Promise<{ spec: AvatarSpec; custom: boolean; url: string }> {
+    return json("/me/avatar/bunny", { cache: "no-store" });
+  },
+  /**
+   * Saves a bunny avatar: its spec and the editor's 256 px WebP render (base64). ApiError 400 bad_cosmetic names a slot
+   * when an item isn't yours, 429 rate_limited.
+   */
+  async saveBunnyAvatar(spec: AvatarSpec, image: string): Promise<{ spec: AvatarSpec; custom: boolean; url: string }> {
+    return json("/me/avatar/bunny", post({ spec, image }));
+  },
+  /** Back to the default avatar (your colourway, the pose your id picks). */
+  async resetBunnyAvatar(): Promise<{ spec: AvatarSpec; custom: boolean; url: string }> {
+    return json("/me/avatar/bunny", { method: "DELETE" });
+  },
   async myCosmetics(): Promise<{ level: number; choice: CosmeticChoice; unlocked: string[]; role?: ApiStaffRole | null; playerGlow?: PlayerGlow | null }> {
     return json("/me/cosmetics", { cache: "no-cache" });
   },
@@ -1283,11 +1335,19 @@ export const api = {
     return u.toString();
   },
   /** Gzip .bhr bytes of a verified run, for ghosts and watch mode. */
-  async runPlayerGlow(id: string): Promise<PlayerGlow | null> {
-    return (await json<{ player: { playerGlow?: PlayerGlow | null } }>(`/runs/${encodeURIComponent(id)}`)).player.playerGlow ?? null;
+  /** A run's player as the server knows them (a replay's own player name is whatever its client wrote). */
+  /** The run's player; `look`: also their bunny as it is now (colourway + loadout, for replays that don't record it). */
+  async runPlayer(id: string, look = false): Promise<{ id: string; name: string; playerGlow: PlayerGlow | null; look: { outfit: string; loadout: CosmeticLoadout } | null }> {
+    const p = (await json<{ player: { id: string; name: string; playerGlow?: PlayerGlow | null; look?: { outfit?: unknown; loadout?: unknown } } }>(`/runs/${encodeURIComponent(id)}${look ? "?look=1" : ""}`)).player;
+    const l = p.look && typeof p.look.outfit === "string" ? { outfit: p.look.outfit, loadout: cleanLoadout(p.look.loadout) } : null;
+    return { id: p.id, name: p.name, playerGlow: p.playerGlow ?? null, look: l?.loadout ? { outfit: l.outfit, loadout: l.loadout } : null };
   },
   async playerPoints(id: string, scope = "all"): Promise<{ scope: string; records: PointsRecord[] }> {
     return json(`/players/${encodeURIComponent(id)}/points?scope=${encodeURIComponent(scope)}`);
+  },
+  /** A board row's stats card (cached at the edge; 404 for runs that aren't on a public board). */
+  async runStats(runId: string, signal?: AbortSignal): Promise<RunStats> {
+    return json(`/runs/${encodeURIComponent(runId)}/stats`, { signal });
   },
   async replayViews(runId: string): Promise<number> {
     return (await json<{views:number}>(`/runs/${encodeURIComponent(runId)}/views`)).views;
@@ -1303,6 +1363,11 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, "not_found", "replay not available");
     return new Uint8Array(await res.arrayBuffer());
   },
+  /** Owner-only privacy intake: no screenshot, game context or device headers. */
+  async sendPrivacyRequest(body: PrivacyRequestBody): Promise<{ ok: boolean; id: string; duplicate?: boolean }> {
+    return json("/feedback", post({ category: "privacy", kind: body.kind, note: body.note, contact: body.contact }));
+  },
+
   /**
    * In-game feedback (POST /feedback; apps/api src/feedback.ts). Works with or without a session. With a screenshot
    * the body is multipart (data = the JSON, screenshot = image/jpeg). Throws ApiError 400 <problem> / 429
@@ -1415,6 +1480,13 @@ export interface InboxView {
   unread: number;
   /** Newest activity first. */
   threads: InboxThread[];
+}
+
+export type PrivacyRequestKind = "export" | "delete" | "correct" | "other";
+export interface PrivacyRequestBody {
+  kind: PrivacyRequestKind;
+  note?: string;
+  contact?: string;
 }
 
 export interface FeedbackBody {

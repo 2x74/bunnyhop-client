@@ -1,0 +1,17 @@
+/* /changelog (changelog.html, on top of about.css). */
+.cl-hero { padding: 3rem 0 1.5rem; max-width: 46rem; }
+.cl-hero h1 { font-size: clamp(2.2rem, 5vw, 3.4rem); }
+.cl-hero .lede { margin-bottom: 0; }
+.cl-hero .lede b { color: var(--text); }
+.cl-list { max-width: 46rem; margin: 0 0 3rem; }
+.cl-entry { background: var(--panel); border: 1px solid var(--line); border-radius: 0.9rem; padding: 1.1rem 1.35rem 1.2rem; margin: 0 0 1rem; scroll-margin-top: 1rem; }
+.cl-meta { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.cl-meta h2 { margin: 0; font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.cl-meta h2 a { color: var(--text); }
+.cl-kind { font-size: 0.7rem; font-weight: 700; padding: 0.1em 0.6em; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.16); color: var(--dim); background: rgba(255, 255, 255, 0.045); }
+.cl-kind.major { color: var(--accent); border-color: rgba(255, 180, 58, 0.55); background: rgba(255, 180, 58, 0.13); }
+.cl-meta time { margin-left: auto; color: var(--faint); font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+.cl-entry h3 { margin: 0.4rem 0 0.5rem; font-size: 1.2rem; letter-spacing: -0.01em; }
+.cl-entry ul { margin: 0; padding-left: 1.2rem; color: var(--dim); font-size: 0.97rem; }
+.cl-entry li { margin: 0 0 0.35rem; }
+.cl-entry li::marker { color: var(--faint); }

@@ -106,6 +106,8 @@ export const DEFAULT_BINDS: Record<BindAction, string[]> = {
   cpNext: [],
   turnLeft: ["ArrowLeft"],
   turnRight: ["ArrowRight"],
+  // Fast turn (CS:S +speed with cl_anglespeedkey): up arrow, between the turn keys. Shift stays free for a crouch bind.
+  turnFast: ["ArrowUp"],
   // Weapons (CS:S slots). The zone editor's digit keys still work while it is open (main.ts passes them on).
   slot1: ["Digit1"],
   slot2: ["Digit2"],

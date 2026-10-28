@@ -1,0 +1,98 @@
+// Live third person (CS:S `thirdperson`), a practice aid for watching your own strafes. Camera only: the commands
+// fed to the sim are untouched (they come from input.ts as always). Runs finished with it on are practice runs
+// (session.ts doesn't submit them or save them as PBs).
+
+import type * as THREE from "three";
+import { traceRay, type Core, type PlayerState } from "../core";
+import { PlayerModel } from "../player/model";
+import { SpectatorCamera, type SpectatorTarget } from "./cameras";
+
+export class ThirdPerson {
+  active = false;
+  get shadowRoot(): THREE.Object3D { return this.model.root; }
+  private pendingAttack = 0;
+  private pendingInspect = 0;
+  private inspectHeld = false;
+  private spec: SpectatorCamera;
+  private model = new PlayerModel({ style: "solid" });
+  private s: SpectatorTarget & { pos: number[]; vel: number[] } = { pos: [0, 0, 0], vel: [0, 0, 0], viewZ: 64, yaw: 0, pitch: 0, crouched: false, grounded: true };
+
+  constructor(scene: THREE.Scene, core: Core) {
+    // `thirdperson`: the shared spectator chase cam, a little further out and quicker to follow your own mouse.
+    this.spec = new SpectatorCamera({ trace: (a, b, r) => traceRay(core, a, b, r), chase: { distance: 100, followRate: 14 } });
+    this.model.root.visible = false;
+    this.model.setNearFade(10, 34);
+    scene.add(this.model.root);
+  }
+
+  toggle(): boolean {
+    this.active = !this.active;
+    this.model.root.visible = this.active;
+    this.spec.snap();
+    this.model.snap();
+    return this.active;
+  }
+
+  set(on: boolean): void {
+    if (on !== this.active) this.toggle();
+  }
+
+  /** Hidden while the replay viewer is open (the live model would otherwise stand in its scene). */
+  setHidden(hidden: boolean): void {
+    this.model.root.visible = this.active && !hidden;
+  }
+
+  /** A carrot swing (viewmodel attack kind) to show on the third-person model next frame. */
+  /** The gun in the bunny's hand (a core weapon id, "glock"; viewmodel/guns), null = the knife. */
+  setGun(id: string | null): void {
+    this.model.setGun(id);
+  }
+
+  /** The gun's silencer (the USP's) on or off (GunPresenterHost.onSilencer). */
+  setGunSilencer(on: boolean): void {
+    this.model.setGunSilencer(on);
+  }
+
+  attack(kind: number): void {
+    this.pendingAttack = kind;
+  }
+
+  /** An inspect signal (viewmodel/inspects/combo.ts SIG_*) to play on the third-person model next frame. */
+  inspect(sig: number): void {
+    this.pendingInspect = sig;
+  }
+
+  setInspectHeld(h: boolean): void {
+    this.inspectHeld = h;
+  }
+
+  /** After teleports / restarts. */
+  snap(): void {
+    this.spec.snap();
+    this.model.snap();
+  }
+
+  /**
+   * Places the camera behind the interpolated player (alpha between prev and curr ticks), looking along the live
+   * view yaw. Returns false when inactive (main.ts places the first-person eye).
+   */
+  frame(camera: THREE.PerspectiveCamera, prev: PlayerState, curr: PlayerState, alpha: number, yaw: number, pitch: number, cmd: { forward: number; side: number }, dt: number, visualTime?: number): boolean {
+
+    const s = this.s;
+    for (let k = 0; k < 3; k++) {
+      s.pos[k] = prev.position[k] + (curr.position[k] - prev.position[k]) * alpha;
+      s.vel[k] = prev.velocity[k] + (curr.velocity[k] - prev.velocity[k]) * alpha;
+    }
+    s.viewZ = prev.viewOffsetZ + (curr.viewOffsetZ - prev.viewOffsetZ) * alpha;
+    s.yaw = yaw;
+    s.pitch = pitch;
+    s.crouched = curr.crouched;
+    s.grounded = curr.grounded || prev.grounded;
+    if (this.active) this.spec.update(camera, s, dt, "chase");
+    this.model.setState({ visualTime, position: s.pos, velocity: s.vel, yaw, pitch, crouched: s.crouched, grounded: s.grounded, forwardmove: cmd.forward, sidemove: cmd.side, attack: this.pendingAttack, inspect: this.pendingInspect, inspectHeld: this.inspectHeld });
+    this.pendingAttack = 0;
+    this.pendingInspect = 0;
+    this.model.update(dt);
+    return this.active;
+  }
+}

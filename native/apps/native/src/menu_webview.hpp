@@ -22,6 +22,9 @@ public:
     const std::string &error() const;
     void set_visible(bool visible);
     bool visible() const;
+    // The menu (or its sign-in view) holds keyboard focus. On Windows the
+    // WebView2 child takes focus without SDL seeing a focus loss.
+    bool has_keyboard_focus() const;
 
     // Only the original trusted bundled top-level document may post JSON
     // objects with a string `type` to webkit.messageHandlers.bunnyhop.
@@ -42,4 +45,4 @@ private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
-}
+}  // namespace native

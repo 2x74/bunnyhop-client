@@ -1,0 +1,49 @@
+/* Show on screen as a picture (ui/quick-toggles.ts hudMiniature): the game frame in miniature, each HUD piece a box at
+   its real place (hud/layout.ts), sized in container units of the frame's width (heights over its aspect, --ar). Lit = on, dim and dashed = off. Static until
+   a click; opacity / background transitions only. */
+.mn-row { grid-template-columns: minmax(0, 1fr) !important; padding: 0.5rem !important; }
+.mn-row .set-label { display: none; }
+.mn-row .set-control { justify-content: stretch; }
+.mn { display: flex; flex-direction: column; gap: 0.45rem; width: 100%; }
+.mn-frame {
+  position: relative; width: 100%; container-type: inline-size; border-radius: var(--r-2); overflow: hidden;
+  background:
+    linear-gradient(var(--grid-major) 1px, transparent 1px) 0 0 / 12.5% 22.2%,
+    linear-gradient(90deg, var(--grid-major) 1px, transparent 1px) 0 0 / 12.5% 22.2%,
+    linear-gradient(180deg, #1a1d24 0%, #15171c 52%, #101114 52.2%, #0c0c0f 100%);
+  box-shadow: inset 0 0 0 1px var(--ink-4);
+}
+.mn-xhair { position: absolute; left: 50%; top: 50%; width: 1.6cqw; height: 1.6cqw; translate: -50% -50%; pointer-events: none;
+  background: linear-gradient(var(--gain), var(--gain)) center / 100% 1px no-repeat, linear-gradient(var(--gain), var(--gain)) center / 1px 100% no-repeat; opacity: 0.8; }
+.mn-el {
+  position: absolute; box-sizing: border-box; width: calc(var(--w) * var(--s, 1) * 1cqw); height: calc(var(--h) * var(--s, 1) * 1cqw / var(--ar, 1.778));
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.4cqw; padding: 0.3cqw; margin: 0;
+  border: 0; border-radius: var(--r-1); background: transparent; color: var(--cream); cursor: pointer;
+  font: 700 calc(1.45cqw * var(--s, 1)) / 1 var(--font-ui); font-variant-numeric: tabular-nums; white-space: nowrap;
+  opacity: 0.32; outline: 1px dashed var(--cream-3); outline-offset: -1px;
+  transition: opacity var(--t-step) var(--ease-glide), background-color var(--t-step) var(--ease-glide), outline-color var(--t-step);
+}
+.mn-el.on { opacity: 1; outline-color: transparent; }
+.mn-el:hover { opacity: 1; background: var(--amber-wash); outline: 1px solid var(--amber); }
+.mn-el:not(.on):hover { opacity: 0.75; }
+.mn-el:focus-visible { opacity: 1; outline: 2px solid var(--amber); }
+.mn-el:active:not(:disabled) { transform: translateY(1px); }
+.mn-big { font-size: 2.5em; font-weight: 800; }
+.mn-txt.gain { color: var(--gain); }
+.mn-txt.dim { color: var(--cream-2); }
+.mn-bar { width: 100%; height: 45%; border-radius: 1px; background: linear-gradient(90deg, var(--gain) 72%, var(--ink-4) 0); }
+.mn-gauge { width: 100%; height: 55%; border-radius: 1px; box-shadow: inset 0 0 0 1px var(--cream-2); background: linear-gradient(90deg, transparent 46%, var(--amber) 46% 54%, transparent 54%); }
+.mn-keys { height: 24%; border-radius: 1px; background: repeating-linear-gradient(90deg, currentColor 0 calc(33.33% - 0.25cqw), transparent 0 33.33%); opacity: 0.85; }
+.mn-keys:nth-child(1) { width: 30%; background: currentColor; }
+.mn-keys:nth-child(2) { width: 92%; }
+.mn-keys:nth-child(3) { width: 92%; background: repeating-linear-gradient(90deg, currentColor 0 calc(50% - 0.25cqw), transparent 0 50%); opacity: 0.6; }
+.mn-line { display: block; width: 92%; height: 13%; border-radius: 1px; background: currentColor; opacity: 0.55; }
+.mn-line.short { width: 58%; }
+.mn-el-chat { align-items: flex-start; padding-left: 0.8cqw; }
+.mn-bunny, .mn-carrot { display: flex; height: 100%; }
+.mn-bunny svg, .mn-carrot svg { height: 100%; width: auto; }
+.mn-bunny { color: var(--ghost); }
+.mn-carrot { color: var(--carrot); }
+.mn-tag { width: 100%; height: 100%; border-radius: var(--r-round); box-shadow: inset 0 0 0 1px var(--ink-4);
+  background: radial-gradient(circle at 14% 50%, var(--amber) 0 0.45cqw, transparent 0.5cqw), linear-gradient(var(--cream), var(--cream)) 62% 50% / 56% 24% no-repeat, rgba(11, 13, 18, 0.75); }
+.mn-say { margin: 0; min-height: 1.3em; padding: 0 0.2rem; font-family: var(--font-text); font-size: var(--fs-sm); color: var(--cream-2); }

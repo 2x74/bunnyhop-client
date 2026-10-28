@@ -1,54 +1,84 @@
+// Credits: the website's /credits page in the menu (credits-document.ts, the site's page verbatim). Its map table is
+// filled from the live map index by the web's own renderCreditsPage, as the site's build does. The native client's
+// own libraries follow the site's "Engine and code".
+//
+// In-page links scroll here (main.ts); every other link goes through the menu's link handling to the browser.
+import { CREDITS_PAGE as creditsPage } from "./credits-document";
+import "../../web/src/about/legal.css";
+import { renderCreditsPage, type CreditMap } from "../../web/src/about/credits-page";
 import { h } from "../../web/src/ui/dom";
-import { openExternal } from "./bridge";
+import { fetchMapIndex } from "../../web/src/ui/maps";
 
-interface Person {
-  name: string;
-  handle: string;
-  url: string;
-  role: string;
+/** Libraries compiled into the native client (vendor/README.md, packaging/licenses/). */
+const NATIVE_LIBRARIES: readonly { name: string; url: string; licence: string }[] = [
+  { name: "SDL 3", url: "https://github.com/libsdl-org/SDL", licence: "zlib" },
+  { name: "nlohmann/json", url: "https://github.com/nlohmann/json", licence: "MIT" },
+  {
+    name: "dr_libs (dr_wav, dr_mp3, dr_flac)",
+    url: "https://github.com/mackron/dr_libs",
+    licence: "MIT-0 or public domain",
+  },
+  { name: "stb_vorbis", url: "https://github.com/nothings/stb", licence: "MIT or public domain" },
+  { name: "Unicode Character Database", url: "https://www.unicode.org/", licence: "Unicode License v3" },
+  {
+    name: "Microsoft Edge WebView2 (Windows)",
+    url: "https://developer.microsoft.com/microsoft-edge/webview2/",
+    licence: "Microsoft software licence",
+  },
+];
+
+/** The page's <main> (contributors, maps, zones, code, fonts, art and audio) and its footer disclaimer. */
+function pageParts(html: string): { main: HTMLElement; disclaimer: HTMLElement | null } {
+  const page = new DOMParser().parseFromString(html, "text/html");
+  const main = page.querySelector<HTMLElement>("main.legal") ?? h("main.legal");
+  const disclaimer = page.querySelector<HTMLElement>(".credits-disclaimer");
+  return {
+    main: document.importNode(main, true),
+    disclaimer: disclaimer ? document.importNode(disclaimer, true) : null,
+  };
 }
 
-const PEOPLE: readonly Person[] = [
-  { name: "huddled", handle: "8tp", url: "https://github.com/8tp", role: "owner and creator of bunnyhop.lol" },
-  { name: "luna", handle: "2x74", url: "https://github.com/2x74", role: "primary client producer" },
-];
+function nativeSection(): HTMLElement {
+  const items = NATIVE_LIBRARIES.map((library) =>
+    h("li", null, h("a", { href: library.url }, library.name), ` — ${library.licence}.`),
+  );
+  return h(
+    "section",
+    { "aria-labelledby": "native" },
+    h("h2", { id: "native" }, "Desktop client"),
+    h("p", null, "The desktop client also includes:"),
+    h("ul", null, ...items),
+  );
+}
 
-const LINKS: readonly { label: string; url: string; about: string }[] = [
-  { label: "bunnyhop.lol", url: "https://bunnyhop.lol", about: "the website for this game" },
-  { label: "1998.lol", url: "https://1998.lol", about: "luna website" },
-];
-
-/**
- * Buttons rather than anchors on purpose: the menu webview refuses to navigate
- * away from the loaded document, so an <a href> would look like a link and do
- * nothing. These hand the URL to the host, which opens the system browser.
- */
-// className is h()'s dotted form ("a.b"): a space in it makes classList.add
-// throw, which used to take the whole Credits screen down with it.
-function link(label: string, url: string, className = "credit-link"): HTMLElement {
-  return h(`button.${className}`, {
-    type: "button",
-    title: url,
-    onclick: () => { openExternal(url); },
-  }, label);
+/** The map index as the credits table reads it (licence and source come from the catalogue). */
+function creditMaps(maps: readonly object[]): CreditMap[] {
+  return maps.map((map) => {
+    const entry = map as Record<string, unknown>;
+    const text = (key: string) => (typeof entry[key] === "string" ? (entry[key] as string) : null);
+    return {
+      name: String(entry.name),
+      author: text("author"),
+      url: text("url"),
+      license: text("license"),
+      source: text("source"),
+    };
+  });
 }
 
 export function creditsPanel(): HTMLElement {
-  const people = h("ul.credits-people", { "aria-label": "People" });
-  for (const person of PEOPLE) {
-    people.append(h("li.credit-row", null,
-      h("span.credit-who", null,
-        h("span.credit-name", null, person.name),
-        " (", link(person.handle, person.url), ")"),
-      h("span.credit-role.dim", null, person.role)));
-  }
-  const elsewhere = h("p.credits-links", null);
-  // Only the domain is the button, so its accessible name stays the domain.
-  for (const item of LINKS) elsewhere.append(h("span.credit-site-row", null,
-    link(item.label, item.url, "credit-link.credit-site"),
-    h("span.dim", null, ` - ${item.about}`)));
-  return h("div.native-credits-body", null,
-    people,
-    elsewhere,
-    h("p.dim.credits-foot", null, "Links open in your browser."));
+  const { main, disclaimer } = pageParts(renderCreditsPage(creditsPage, []));
+  main.querySelector("h1")?.remove();
+  main.querySelector('section[aria-labelledby="code"]')?.after(nativeSection());
+  const mapsSection = main.querySelector('section[aria-labelledby="maps"]');
+  const body = h("div.native-credits-body", null, main, disclaimer);
+  void fetchMapIndex()
+    .then((maps) => {
+      if (!mapsSection) return;
+      const filled = pageParts(renderCreditsPage(creditsPage, creditMaps(maps)));
+      const section = filled.main.querySelector('section[aria-labelledby="maps"]');
+      if (section && mapsSection) mapsSection.replaceWith(section);
+    })
+    .catch(() => {});
+  return body;
 }

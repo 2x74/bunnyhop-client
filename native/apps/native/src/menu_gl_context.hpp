@@ -17,15 +17,19 @@ public:
         if (context_ && !SDL_GL_MakeCurrent(nullptr, nullptr))
             throw std::runtime_error(std::string("Releasing SDL OpenGL context for GTK failed: ") + SDL_GetError());
     }
+
     ~GlContextRelease() noexcept {
         if (context_ && !SDL_GL_MakeCurrent(window_, context_)) {
             // Rendering cannot safely resume after a failed restore. Report the
             // SDL error even during exception unwinding; never silently continue
             // or throw a second exception from this cleanup path.
-            SDL_LogCritical(SDL_LOG_CATEGORY_VIDEO, "Restoring SDL OpenGL context after GTK failed: %s", SDL_GetError());
+            SDL_LogCritical(
+                    SDL_LOG_CATEGORY_VIDEO, "Restoring SDL OpenGL context after GTK failed: %s", SDL_GetError()
+            );
             std::terminate();
         }
     }
+
     GlContextRelease(const GlContextRelease &) = delete;
     GlContextRelease &operator=(const GlContextRelease &) = delete;
 
@@ -33,4 +37,4 @@ private:
     SDL_Window *window_;
     SDL_GLContext context_;
 };
-}
+}  // namespace native

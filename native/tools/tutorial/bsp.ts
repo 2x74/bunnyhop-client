@@ -57,7 +57,9 @@ export interface Material {
 }
 
 /** Material per face of a box: one name, or per direction (px = +X face, nz = bottom, ...). */
-export type FaceTex = string | { all?: string; top?: string; bottom?: string; sides?: string; px?: string; nx?: string; py?: string; ny?: string };
+export type FaceTex =
+  | string
+  | { all?: string; top?: string; bottom?: string; sides?: string; px?: string; nx?: string; py?: string; ny?: string };
 
 export interface Box {
   min: Vec3;
@@ -167,8 +169,20 @@ export interface AABB {
   max: Vec3;
 }
 
-const overlaps = (a: AABB, b: AABB) => a.min[0] < b.max[0] && a.max[0] > b.min[0] && a.min[1] < b.max[1] && a.max[1] > b.min[1] && a.min[2] < b.max[2] && a.max[2] > b.min[2];
-const covers = (b: AABB, r: AABB) => b.min[0] <= r.min[0] && b.max[0] >= r.max[0] && b.min[1] <= r.min[1] && b.max[1] >= r.max[1] && b.min[2] <= r.min[2] && b.max[2] >= r.max[2];
+const overlaps = (a: AABB, b: AABB) =>
+  a.min[0] < b.max[0] &&
+  a.max[0] > b.min[0] &&
+  a.min[1] < b.max[1] &&
+  a.max[1] > b.min[1] &&
+  a.min[2] < b.max[2] &&
+  a.max[2] > b.min[2];
+const covers = (b: AABB, r: AABB) =>
+  b.min[0] <= r.min[0] &&
+  b.max[0] >= r.max[0] &&
+  b.min[1] <= r.min[1] &&
+  b.max[1] >= r.max[1] &&
+  b.min[2] <= r.min[2] &&
+  b.max[2] >= r.max[2];
 
 /** Material of a box's face on axis `a` facing `sign`. */
 function faceMaterial(tex: FaceTex, a: number, sign: 1 | -1): string {
@@ -183,7 +197,15 @@ function faceMaterial(tex: FaceTex, a: number, sign: 1 | -1): string {
 // ------------------------------------------------------------------------------------------------- BSP tree
 
 type TreeNode = { leaf: false; axis: 0 | 1 | 2; dist: number; front: Tree; back: Tree; region: AABB; index?: number };
-type TreeLeaf = { leaf: true; region: AABB; brushes: number[]; solid: boolean; contents: number; inside: boolean; index?: number };
+type TreeLeaf = {
+  leaf: true;
+  region: AABB;
+  brushes: number[];
+  solid: boolean;
+  contents: number;
+  inside: boolean;
+  index?: number;
+};
 type Tree = TreeNode | TreeLeaf;
 
 function buildTree(boxes: readonly AABB[], contents: readonly number[], region: AABB, cand: number[]): Tree {
@@ -191,7 +213,14 @@ function buildTree(boxes: readonly AABB[], contents: readonly number[], region: 
   if (!inRegion.length) return { leaf: true, region, brushes: [], solid: false, contents: 0, inside: false };
   const covering = inRegion.filter((i) => covers(boxes[i], region));
   if (covering.length) {
-    return { leaf: true, region, brushes: inRegion, solid: true, contents: covering.reduce((c, i) => c | contents[i], 0), inside: false };
+    return {
+      leaf: true,
+      region,
+      brushes: inRegion,
+      solid: true,
+      contents: covering.reduce((c, i) => c | contents[i], 0),
+      inside: false,
+    };
   }
   // Split on the brush face plane (strictly inside the region) that splits the fewest brushes, then balances.
   let best: { axis: 0 | 1 | 2; dist: number; score: number } | null = null;
@@ -200,7 +229,8 @@ function buildTree(boxes: readonly AABB[], contents: readonly number[], region: 
     const maxs = inRegion.map((i) => boxes[i].max[axis]).sort((x, y) => x - y);
     const values = new Set<number>();
     for (const i of inRegion) {
-      for (const v of [boxes[i].min[axis], boxes[i].max[axis]]) if (v > region.min[axis] && v < region.max[axis]) values.add(v);
+      for (const v of [boxes[i].min[axis], boxes[i].max[axis]])
+        if (v > region.min[axis] && v < region.max[axis]) values.add(v);
     }
     for (const v of values) {
       const back = upperBound(maxs, v); // max <= v
@@ -218,7 +248,14 @@ function buildTree(boxes: readonly AABB[], contents: readonly number[], region: 
   const frontR: AABB = { min: [...region.min] as Vec3, max: [...region.max] as Vec3 };
   backR.max[axis] = dist;
   frontR.min[axis] = dist;
-  return { leaf: false, axis, dist, region, front: buildTree(boxes, contents, frontR, inRegion), back: buildTree(boxes, contents, backR, inRegion) };
+  return {
+    leaf: false,
+    axis,
+    dist,
+    region,
+    front: buildTree(boxes, contents, frontR, inRegion),
+    back: buildTree(boxes, contents, backR, inRegion),
+  };
 }
 
 function lowerBound(a: number[], v: number): number {
@@ -304,18 +341,20 @@ function fillOutside(tree: Tree, seeds: readonly Vec3[]): number {
     const l = leafAt(tree, s);
     if (l.solid) throw new Error(`seed ${s.join(" ")} is inside a brush`);
     const i = id.get(l)!;
-    if (!seen[i]) (seen[i] = 1), queue.push(i);
+    if (!seen[i]) ((seen[i] = 1), queue.push(i));
   }
   while (queue.length) {
     const i = queue.pop()!;
-    for (const j of adj[i]) if (!seen[j]) (seen[j] = 1), queue.push(j);
+    for (const j of adj[i]) if (!seen[j]) ((seen[j] = 1), queue.push(j));
   }
   const root = tree.region;
   empty.forEach((l, i) => {
     if (!seen[i]) return;
     for (let k = 0; k < 3; k++) {
       if (l.region.min[k] <= root.min[k] || l.region.max[k] >= root.max[k]) {
-        throw new Error(`leak: the playable space reaches the map's outer bounds near ${l.region.min.join(" ")} .. ${l.region.max.join(" ")}`);
+        throw new Error(
+          `leak: the playable space reaches the map's outer bounds near ${l.region.min.join(" ")} .. ${l.region.max.join(" ")}`,
+        );
       }
     }
   });
@@ -352,7 +391,13 @@ interface RectFace {
  * Faces on one node's plane, inside its region: wherever one side is an inside (reachable) empty leaf and the other a
  * brush whose face lies on this plane. Cells between every brush edge, then merged into rectangles.
  */
-function nodeFaces(tree: Tree, node: TreeNode, boxes: readonly Box[], isOpen: (l: TreeLeaf) => boolean, chopOf?: (material: string) => number): RectFace[] {
+function nodeFaces(
+  tree: Tree,
+  node: TreeNode,
+  boxes: readonly Box[],
+  isOpen: (l: TreeLeaf) => boolean,
+  chopOf?: (material: string) => number,
+): RectFace[] {
   const a = node.axis;
   const ua = ((a + 1) % 3) as 0 | 1 | 2;
   const wa = ((a + 2) % 3) as 0 | 1 | 2;
@@ -394,7 +439,13 @@ function nodeFaces(tree: Tree, node: TreeNode, boxes: readonly Box[], isOpen: (l
       const sign: 1 | -1 = fOpen ? 1 : -1;
       const bi = touching.find((k) => {
         const b = boxes[k];
-        return (sign > 0 ? b.max[a] === v : b.min[a] === v) && b.min[ua] < cu && b.max[ua] > cu && b.min[wa] < cw && b.max[wa] > cw;
+        return (
+          (sign > 0 ? b.max[a] === v : b.min[a] === v) &&
+          b.min[ua] < cu &&
+          b.max[ua] > cu &&
+          b.min[wa] < cw &&
+          b.max[wa] > cw
+        );
       });
       if (bi === undefined) continue; // open space against the outside fill: never visible
       label[i * nw + j] = `${sign}|${faceMaterial(boxes[bi].tex, a, sign)}${boxes[bi].anchor ? `|${bi}` : ""}`;
@@ -403,7 +454,8 @@ function nodeFaces(tree: Tree, node: TreeNode, boxes: readonly Box[], isOpen: (l
   // Greedy rectangle merge (never across a chop line: every 512, or the material's own `chop`).
   const chopU = new Set(U.filter((x) => x % CHOP === 0));
   const chopW = new Set(W.filter((x) => x % CHOP === 0));
-  const cuts = (set: Set<number>, x: number, k: string) => set.has(x) && (chopOf === undefined || x % chopOf(k.split("|")[1]) === 0);
+  const cuts = (set: Set<number>, x: number, k: string) =>
+    set.has(x) && (chopOf === undefined || x % chopOf(k.split("|")[1]) === 0);
   const out: RectFace[] = [];
   const used = new Uint8Array(nu * nw);
   for (let i = 0; i < nu; i++) {
@@ -419,7 +471,17 @@ function nodeFaces(tree: Tree, node: TreeNode, boxes: readonly Box[], isOpen: (l
       }
       for (let ii = i; ii < i1; ii++) for (let jj = j; jj < j1; jj++) used[ii * nw + jj] = 1;
       const [s, material, anchor] = k.split("|");
-      const f: RectFace = { axis: a, sign: Number(s) as 1 | -1, dist: v, u0: U[i], u1: U[i1], w0: W[j], w1: W[j1], material, node };
+      const f: RectFace = {
+        axis: a,
+        sign: Number(s) as 1 | -1,
+        dist: v,
+        u0: U[i],
+        u1: U[i1],
+        w0: W[j],
+        w1: W[j1],
+        material,
+        node,
+      };
       if (anchor !== undefined) f.anchorBox = Number(anchor);
       out.push(f);
     }
@@ -440,19 +502,23 @@ function corners(f: RectFace): Vec3[] {
     return p;
   };
   // (u0,w0) (u1,w0) (u1,w1) (u0,w1) is counter-clockwise seen from +axis.
-  return f.sign > 0 ? [pt(f.u0, f.w0), pt(f.u0, f.w1), pt(f.u1, f.w1), pt(f.u1, f.w0)] : [pt(f.u0, f.w0), pt(f.u1, f.w0), pt(f.u1, f.w1), pt(f.u0, f.w1)];
+  return f.sign > 0
+    ? [pt(f.u0, f.w0), pt(f.u0, f.w1), pt(f.u1, f.w1), pt(f.u1, f.w0)]
+    : [pt(f.u0, f.w0), pt(f.u1, f.w0), pt(f.u1, f.w1), pt(f.u0, f.w1)];
 }
 
 /** Adds every known vertex lying strictly inside an edge (T-junction fix, like vbsp's FixTjuncs). */
 function fixTJunctions(polys: Vec3[][]): Vec3[][] {
   const lines = new Map<string, number[]>();
   const key = (k: number, p: readonly number[]) => `${k}|${p[(k + 1) % 3]}|${p[(k + 2) % 3]}`;
-  for (const poly of polys) for (const p of poly) for (let k = 0; k < 3; k++) {
-    const kk = key(k, p);
-    let l = lines.get(kk);
-    if (!l) lines.set(kk, (l = []));
-    l.push(p[k]);
-  }
+  for (const poly of polys)
+    for (const p of poly)
+      for (let k = 0; k < 3; k++) {
+        const kk = key(k, p);
+        let l = lines.get(kk);
+        if (!l) lines.set(kk, (l = []));
+        l.push(p[k]);
+      }
   for (const l of lines.values()) l.sort((x, y) => x - y);
   return polys.map((poly) => {
     const out: Vec3[] = [];
@@ -489,7 +555,9 @@ interface Bvh {
 function buildBvh(boxes: readonly AABB[], items: number[]): Bvh {
   const min: Vec3 = [Infinity, Infinity, Infinity];
   const max: Vec3 = [-Infinity, -Infinity, -Infinity];
-  for (const i of items) for (let k = 0; k < 3; k++) (min[k] = Math.min(min[k], boxes[i].min[k])), (max[k] = Math.max(max[k], boxes[i].max[k]));
+  for (const i of items)
+    for (let k = 0; k < 3; k++)
+      ((min[k] = Math.min(min[k], boxes[i].min[k])), (max[k] = Math.max(max[k], boxes[i].max[k])));
   if (items.length <= 4) return { min, max, items };
   const ext = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
   const k = ext.indexOf(Math.max(...ext));
@@ -519,7 +587,10 @@ class RayCaster {
     private boxes: readonly AABB[],
     private sky: readonly boolean[],
   ) {
-    this.bvh = buildBvh(boxes, boxes.map((_, i) => i));
+    this.bvh = buildBvh(
+      boxes,
+      boxes.map((_, i) => i),
+    );
   }
   /** Index of the first box hit, or -1. */
   first(o: Vec3, d: Vec3, tmax = 65536): number {
@@ -533,7 +604,7 @@ class RayCaster {
       if (n.items) {
         for (const i of n.items) {
           const t = rayBox(o, inv, this.boxes[i], best);
-          if (t < best) (best = t), (hit = i);
+          if (t < best) ((best = t), (hit = i));
         }
       } else stack.push(n.left!, n.right!);
     }
@@ -624,7 +695,9 @@ export class SceneCaster {
       // Split at the centroid median on the longest centroid axis.
       const cmn = [Infinity, Infinity, Infinity];
       const cmx = [-Infinity, -Infinity, -Infinity];
-      for (let i = from; i < to; i++) for (let k = 0; k < 3; k++) (cmn[k] = Math.min(cmn[k], c[order[i] * 3 + k])), (cmx[k] = Math.max(cmx[k], c[order[i] * 3 + k]));
+      for (let i = from; i < to; i++)
+        for (let k = 0; k < 3; k++)
+          ((cmn[k] = Math.min(cmn[k], c[order[i] * 3 + k])), (cmx[k] = Math.max(cmx[k], c[order[i] * 3 + k])));
       const ext = [cmx[0] - cmn[0], cmx[1] - cmn[1], cmx[2] - cmn[2]];
       const axis = ext.indexOf(Math.max(...ext));
       const part = Array.from(order.subarray(from, to)).sort((x, y) => c[x * 3 + axis] - c[y * 3 + axis] || x - y);
@@ -770,7 +843,12 @@ function rgbExp(c: Vec3): [number, number, number, number] {
   let e = Math.ceil(Math.log2(m));
   e = Math.max(-128, Math.min(127, e));
   const s = 255 / 2 ** e;
-  return [Math.min(255, Math.round(c[0] * s)), Math.min(255, Math.round(c[1] * s)), Math.min(255, Math.round(c[2] * s)), e];
+  return [
+    Math.min(255, Math.round(c[0] * s)),
+    Math.min(255, Math.round(c[1] * s)),
+    Math.min(255, Math.round(c[2] * s)),
+    e,
+  ];
 }
 
 // ------------------------------------------------------------------------------------------------- binary writer
@@ -859,7 +937,11 @@ interface OutFace {
 }
 
 const dot3 = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-const cross3 = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const cross3 = (a: Vec3, b: Vec3): Vec3 => [
+  a[1] * b[2] - a[2] * b[1],
+  a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0],
+];
 const norm3 = (a: Vec3): Vec3 => {
   const l = Math.hypot(a[0], a[1], a[2]);
   return [a[0] / l, a[1] / l, a[2] / l];
@@ -903,7 +985,11 @@ function prepareSolid(s: Solid): PreparedSolid {
     const u = norm3(cross3(Math.abs(n[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0], n));
     const v = cross3(n, u);
     const c: Vec3 = [n[0] * side.d, n[1] * side.d, n[2] * side.d];
-    const at = (a: number, b: number): Vec3 => [c[0] + u[0] * a + v[0] * b, c[1] + u[1] * a + v[1] * b, c[2] + u[2] * a + v[2] * b];
+    const at = (a: number, b: number): Vec3 => [
+      c[0] + u[0] * a + v[0] * b,
+      c[1] + u[1] * a + v[1] * b,
+      c[2] + u[2] * a + v[2] * b,
+    ];
     let w = [at(-BIG, -BIG), at(-BIG, BIG), at(BIG, BIG), at(BIG, -BIG)];
     s.sides.forEach((o, k) => {
       if (k !== i && w.length) w = clipPoly(w, o.n, o.d);
@@ -911,11 +997,13 @@ function prepareSolid(s: Solid): PreparedSolid {
     return w.map(snap3);
   });
   const verts: Vec3[] = [];
-  for (const w of windings) for (const p of w) if (!verts.some((q) => Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]) < 1e-3)) verts.push(p);
+  for (const w of windings)
+    for (const p of w) if (!verts.some((q) => Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]) < 1e-3)) verts.push(p);
   if (verts.length < 4) throw new Error("solid has no volume");
   const min: Vec3 = [0, 1, 2].map((k) => Math.min(...verts.map((p) => p[k]))) as Vec3;
   const max: Vec3 = [0, 1, 2].map((k) => Math.max(...verts.map((p) => p[k]))) as Vec3;
-  const has = (n: Vec3, d: number, list: { n: Vec3; d: number }[]) => list.some((p) => Math.abs(dot3(p.n, n) - 1) < 1e-6 && Math.abs(p.d - d) < 1e-3);
+  const has = (n: Vec3, d: number, list: { n: Vec3; d: number }[]) =>
+    list.some((p) => Math.abs(dot3(p.n, n) - 1) < 1e-6 && Math.abs(p.d - d) < 1e-3);
   const planes: { n: Vec3; d: number }[] = s.sides.map((x) => ({ n: x.n, d: x.d }));
   const bevels: { n: Vec3; d: number }[] = [];
   // Axial bevels: the bounds (vbsp AddBrushBevels).
@@ -968,7 +1056,14 @@ export type Shader = (scene: ShadeScene, samples: Float64Array, lighting: Lighti
  * Fill, sun (with shadows), sky (with occlusion, over the normal's hemisphere) and lamps (with shadows) for luxel
  * samples [from, to).
  */
-export function shadeSamples(caster: { seesSky(o: Vec3, d: Vec3): boolean; blocked(o: Vec3, d: Vec3, dist: number): boolean }, samples: Float64Array, L: Lighting, from = 0, to = samples.length / SAMPLE, out = new Float32Array((samples.length / SAMPLE) * 3)): Float32Array {
+export function shadeSamples(
+  caster: { seesSky(o: Vec3, d: Vec3): boolean; blocked(o: Vec3, d: Vec3, dist: number): boolean },
+  samples: Float64Array,
+  L: Lighting,
+  from = 0,
+  to = samples.length / SAMPLE,
+  out = new Float32Array((samples.length / SAMPLE) * 3),
+): Float32Array {
   const sunTo: Vec3 = [-L.sunDir[0], -L.sunDir[1], -L.sunDir[2]];
   const hemis = new Map<number, Vec3[]>();
   const lights = L.lights ?? [];
@@ -1016,13 +1111,17 @@ export function shadeSamples(caster: { seesSky(o: Vec3, d: Vec3): boolean; block
     let by = nrm[2] * tA[0] - nrm[0] * tA[2];
     let bz = nrm[0] * tA[1] - nrm[1] * tA[0];
     const bl2 = Math.hypot(bx, by, bz);
-    (bx /= bl2), (by /= bl2), (bz /= bl2);
+    ((bx /= bl2), (by /= bl2), (bz /= bl2));
     const tx = by * nrm[2] - bz * nrm[1];
     const ty = bz * nrm[0] - bx * nrm[2];
     const tz = bx * nrm[1] - by * nrm[0];
     let vis = 0;
     for (const hh of hemi) {
-      const dir: Vec3 = [hh[0] * tx + hh[1] * bx + hh[2] * nrm[0], hh[0] * ty + hh[1] * by + hh[2] * nrm[1], hh[0] * tz + hh[1] * bz + hh[2] * nrm[2]];
+      const dir: Vec3 = [
+        hh[0] * tx + hh[1] * bx + hh[2] * nrm[0],
+        hh[0] * ty + hh[1] * by + hh[2] * nrm[1],
+        hh[0] * tz + hh[1] * bz + hh[2] * nrm[2],
+      ];
       if (caster.seesSky(o, dir)) vis++;
     }
     const sky = hemi.length ? vis / hemi.length : 0;
@@ -1033,7 +1132,12 @@ export function shadeSamples(caster: { seesSky(o: Vec3, d: Vec3): boolean; block
   return out;
 }
 
-export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) => void, opts?: { shade?: Shader }): { bsp: Uint8Array; stats: BuildStats } {
+export function writeBsp(
+  src: MapSource,
+  mapRevision = 1,
+  log?: (step: string) => void,
+  opts?: { shade?: Shader },
+): { bsp: Uint8Array; stats: BuildStats } {
   const L = src.lighting;
   // ---- planes (pairs: even = +axis)
   const planes: { n: Vec3; d: number; type: number }[] = [];
@@ -1055,7 +1159,8 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
   };
   /** Any plane n·p = d (n unit): axial ones share plane(); others pair up with the even one facing its main axis' +. */
   const planeAny = (n: Vec3, d: number): number => {
-    for (let k = 0; k < 3; k++) if (Math.abs(Math.abs(n[k]) - 1) < 1e-9) return plane(k, n[k] > 0 ? d : -d, n[k] > 0 ? 1 : -1);
+    for (let k = 0; k < 3; k++)
+      if (Math.abs(Math.abs(n[k]) - 1) < 1e-9) return plane(k, n[k] > 0 ? d : -d, n[k] > 0 ? 1 : -1);
     const main = [0, 1, 2].reduce((m, k) => (Math.abs(n[k]) > Math.abs(n[m]) ? k : m), 0);
     const flip = n[main] < 0;
     const pn: Vec3 = flip ? [-n[0], -n[1], -n[2]] : n;
@@ -1087,7 +1192,21 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
   const texinfos: { s: number[]; t: number[]; ls: number[]; lt: number[]; flags: number; texdata: number }[] = [];
   const texinfoIdx = new Map<string, number>();
   /** Hammer world-aligned axes per face axis: floors s = +X, t = -Y; walls t = -Z. */
-  const axesFor = (axis: number): [Vec3, Vec3] => (axis === 2 ? [[1, 0, 0], [0, -1, 0]] : axis === 0 ? [[0, 1, 0], [0, 0, -1]] : [[1, 0, 0], [0, 0, -1]]);
+  const axesFor = (axis: number): [Vec3, Vec3] =>
+    axis === 2
+      ? [
+          [1, 0, 0],
+          [0, -1, 0],
+        ]
+      : axis === 0
+        ? [
+            [0, 1, 0],
+            [0, 0, -1],
+          ]
+        : [
+            [1, 0, 0],
+            [0, 0, -1],
+          ];
   const texinfo = (name: string, axis: number, shift?: [number, number]): number => {
     const shifted = !!shift && (shift[0] !== 0 || shift[1] !== 0);
     const k = shifted ? `${name}|${axis}|${shift[0]}|${shift[1]}` : `${name}|${axis}`;
@@ -1100,7 +1219,14 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
       const lm = 1 / (m.luxel ?? L.luxel);
       i = texinfos.length;
       texinfoIdx.set(k, i);
-      texinfos.push({ s: [s[0] * sc, s[1] * sc, s[2] * sc, shifted ? shift[0] : 0], t: [t[0] * sc, t[1] * sc, t[2] * sc, shifted ? shift[1] : 0], ls: [s[0] * lm, s[1] * lm, s[2] * lm, 0], lt: [t[0] * lm, t[1] * lm, t[2] * lm, 0], flags: m.flags ?? 0, texdata: texdata(name) });
+      texinfos.push({
+        s: [s[0] * sc, s[1] * sc, s[2] * sc, shifted ? shift[0] : 0],
+        t: [t[0] * sc, t[1] * sc, t[2] * sc, shifted ? shift[1] : 0],
+        ls: [s[0] * lm, s[1] * lm, s[2] * lm, 0],
+        lt: [t[0] * lm, t[1] * lm, t[2] * lm, 0],
+        flags: m.flags ?? 0,
+        texdata: texdata(name),
+      });
     }
     return i;
   };
@@ -1137,7 +1263,14 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
       const lm = 1 / (m.luxel ?? L.luxel);
       i = texinfos.length;
       texinfoIdx.set(k, i);
-      texinfos.push({ s: [s[0] * sc, s[1] * sc, s[2] * sc, 0], t: [t[0] * sc, t[1] * sc, t[2] * sc, 0], ls: [s[0] * lm, s[1] * lm, s[2] * lm, 0], lt: [t[0] * lm, t[1] * lm, t[2] * lm, 0], flags: m.flags ?? 0, texdata: texdata(name) });
+      texinfos.push({
+        s: [s[0] * sc, s[1] * sc, s[2] * sc, 0],
+        t: [t[0] * sc, t[1] * sc, t[2] * sc, 0],
+        ls: [s[0] * lm, s[1] * lm, s[2] * lm, 0],
+        lt: [t[0] * lm, t[1] * lm, t[2] * lm, 0],
+        flags: m.flags ?? 0,
+        texdata: texdata(name),
+      });
     }
     return i;
   };
@@ -1155,13 +1288,24 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
   // Solids come right after the world's boxes (still world brushes).
   const solids = (src.solids ?? []).map(prepareSolid);
   const firstSolid = brushes.length;
-  for (const s of solids) brushes.push({ box: { min: s.min, max: s.max, tex: s.src.sides[0].tex }, contents: s.src.contents ?? CONTENTS_SOLID, solid: s });
+  for (const s of solids)
+    brushes.push({
+      box: { min: s.min, max: s.max, tex: s.src.sides[0].tex },
+      contents: s.src.contents ?? CONTENTS_SOLID,
+      solid: s,
+    });
   const ents = src.brushEntities.map((e) => {
     const min: Vec3 = [Infinity, Infinity, Infinity];
     const max: Vec3 = [-Infinity, -Infinity, -Infinity];
-    for (const b of e.boxes) for (let k = 0; k < 3; k++) (min[k] = Math.min(min[k], b.min[k])), (max[k] = Math.max(max[k], b.max[k]));
+    for (const b of e.boxes)
+      for (let k = 0; k < 3; k++) ((min[k] = Math.min(min[k], b.min[k])), (max[k] = Math.max(max[k], b.max[k])));
     const c: Vec3 = e.origin ?? ([0, 1, 2].map((k) => Math.round((min[k] + max[k]) / 2)) as Vec3);
-    const local = e.boxes.map((b) => ({ ...b, min: [b.min[0] - c[0], b.min[1] - c[1], b.min[2] - c[2]] as Vec3, max: [b.max[0] - c[0], b.max[1] - c[1], b.max[2] - c[2]] as Vec3, contents: b.contents ?? CONTENTS_SOLID }));
+    const local = e.boxes.map((b) => ({
+      ...b,
+      min: [b.min[0] - c[0], b.min[1] - c[1], b.min[2] - c[2]] as Vec3,
+      max: [b.max[0] - c[0], b.max[1] - c[1], b.max[2] - c[2]] as Vec3,
+      contents: b.contents ?? CONTENTS_SOLID,
+    }));
     const first = brushes.length;
     for (const b of local) brushes.push({ box: b, contents: b.contents });
     return { e, center: c, local, first };
@@ -1172,13 +1316,26 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
   const bounds = (bs: readonly AABB[], pad: number): AABB => {
     const min: Vec3 = [Infinity, Infinity, Infinity];
     const max: Vec3 = [-Infinity, -Infinity, -Infinity];
-    for (const b of bs) for (let k = 0; k < 3; k++) (min[k] = Math.min(min[k], b.min[k])), (max[k] = Math.max(max[k], b.max[k]));
+    for (const b of bs)
+      for (let k = 0; k < 3; k++) ((min[k] = Math.min(min[k], b.min[k])), (max[k] = Math.max(max[k], b.max[k])));
     return { min: min.map((x) => x - pad) as Vec3, max: max.map((x) => x + pad) as Vec3 };
   };
   const worldBounds = bounds(world, 0);
-  const worldTree = buildTree(world, world.map((b) => b.contents), bounds(world, 64), world.map((_, i) => i));
+  const worldTree = buildTree(
+    world,
+    world.map((b) => b.contents),
+    bounds(world, 64),
+    world.map((_, i) => i),
+  );
   const outsideLeafs = fillOutside(worldTree, src.seeds);
-  const entTrees = ents.map((x) => buildTree(x.local, x.local.map((b) => b.contents), bounds(x.local, 64), x.local.map((_, i) => i)));
+  const entTrees = ents.map((x) =>
+    buildTree(
+      x.local,
+      x.local.map((b) => b.contents),
+      bounds(x.local, 64),
+      x.local.map((_, i) => i),
+    ),
+  );
 
   log?.("faces");
   // ---- faces per node (world: inside leaves only; brush models: any empty leaf)
@@ -1190,13 +1347,15 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
     if (m.chop === undefined) continue;
     if (m.chop % CHOP !== 0) throw new Error(`${name}: chop ${m.chop} isn't a multiple of ${CHOP}`);
     const lit = ((m.flags ?? 0) & (SURF_NOLIGHT | SURF_SKY | SURF_SKY2D | SURF_NODRAW | SURF_TRIGGER)) === 0;
-    if (lit && m.chop / (m.luxel ?? L.luxel) > 32) throw new Error(`${name}: chop ${m.chop} needs luxel >= ${m.chop / 32}`);
+    if (lit && m.chop / (m.luxel ?? L.luxel) > 32)
+      throw new Error(`${name}: chop ${m.chop} needs luxel >= ${m.chop / 32}`);
   }
   const chopOf = (material: string) => src.materials[material]?.chop ?? CHOP;
   const treeFaces = (tree: Tree, bs: readonly Box[], model: number, open: (l: TreeLeaf) => boolean) => {
     const ns = nodes(tree);
     nodeLists.push(ns);
-    for (const n of ns) for (const r of nodeFaces(tree, n, bs, open, anyChop ? chopOf : undefined)) faceRects.push({ rect: r, model });
+    for (const n of ns)
+      for (const r of nodeFaces(tree, n, bs, open, anyChop ? chopOf : undefined)) faceRects.push({ rect: r, model });
   };
   treeFaces(worldTree, world, 0, (l) => l.inside);
   ents.forEach((x, i) => treeFaces(entTrees[i], x.local, i + 1, (l) => !l.solid));
@@ -1214,11 +1373,24 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
   // ---- displacements: base quads (Source winding) and their displaced grids
   const dispSrc = src.displacements ?? [];
   const disps = dispSrc.map((d) => {
-    const rect = { axis: d.axis, sign: d.sign, dist: d.dist, u0: d.u0, u1: d.u1, w0: d.w0, w1: d.w1, material: d.material } as RectFace;
+    const rect = {
+      axis: d.axis,
+      sign: d.sign,
+      dist: d.dist,
+      u0: d.u0,
+      u1: d.u1,
+      w0: d.w0,
+      w1: d.w1,
+      material: d.material,
+    } as RectFace;
     const poly = corners(rect);
     const side = (1 << d.power) + 1;
     const n = side - 1;
-    const lerp = (p: Vec3, q: Vec3, t: number): Vec3 => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, p[2] + (q[2] - p[2]) * t];
+    const lerp = (p: Vec3, q: Vec3, t: number): Vec3 => [
+      p[0] + (q[0] - p[0]) * t,
+      p[1] + (q[1] - p[1]) * t,
+      p[2] + (q[2] - p[2]) * t,
+    ];
     /** Flat point at grid parameters (a along corner 0 -> 1, b along corner 0 -> 3), 0..1. */
     const flatAt = (a: number, b: number) => lerp(lerp(poly[0], poly[1], a), lerp(poly[3], poly[2], a), b);
     const grid: Vec3[] = [];
@@ -1239,7 +1411,9 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
     s.src.sides.forEach((side, si) => {
       const w = s.windings[si];
       if (w.length < 3) return;
-      const c = w.reduce((a, p) => [a[0] + p[0] / w.length, a[1] + p[1] / w.length, a[2] + p[2] / w.length] as Vec3, [0, 0, 0] as Vec3);
+      const c = w.reduce((a, p) => [a[0] + p[0] / w.length, a[1] + p[1] / w.length, a[2] + p[2] / w.length] as Vec3, [
+        0, 0, 0,
+      ] as Vec3);
       if (!leafAt(worldTree, [c[0] + side.n[0], c[1] + side.n[1], c[2] + side.n[2]]).inside) return;
       const [sa, ta] = planeAxes(side.n);
       const lux = src.materials[side.tex]?.luxel ?? L.luxel;
@@ -1268,7 +1442,11 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
   log?.("caster");
   // ---- lightmaps
   const allBoxes: AABB[] = world;
-  const skyBox = world.map((b) => [0, 1, 2].some((a) => [1, -1].some((s) => (src.materials[faceMaterial(b.tex, a, s as 1 | -1)]?.flags ?? 0) & SURF_SKY)));
+  const skyBox = world.map((b) =>
+    [0, 1, 2].some((a) =>
+      [1, -1].some((s) => (src.materials[faceMaterial(b.tex, a, s as 1 | -1)]?.flags ?? 0) & SURF_SKY),
+    ),
+  );
   let caster: { seesSky(o: Vec3, d: Vec3): boolean; blocked(o: Vec3, d: Vec3, dist: number): boolean };
   let scene: ShadeScene | undefined;
   // Maps with lamps light brush faces like displacements: samples, then shading (here or on the caller's workers).
@@ -1280,12 +1458,17 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
     const hidden = SURF_NODRAW | SURF_TRIGGER | SURF_SKY;
     for (const x of ents) {
       for (const b of x.local) {
-        const drawn = [0, 1, 2].some((a) => [1, -1].some((sg) => {
-          const m = src.materials[faceMaterial(b.tex, a, sg as 1 | -1)];
-          return ((m?.flags ?? 0) & hidden) === 0 && !m?.noShadow;
-        }));
+        const drawn = [0, 1, 2].some((a) =>
+          [1, -1].some((sg) => {
+            const m = src.materials[faceMaterial(b.tex, a, sg as 1 | -1)];
+            return ((m?.flags ?? 0) & hidden) === 0 && !m?.noShadow;
+          }),
+        );
         if (!drawn) continue;
-        casters.push({ min: [b.min[0] + x.center[0], b.min[1] + x.center[1], b.min[2] + x.center[2]], max: [b.max[0] + x.center[0], b.max[1] + x.center[1], b.max[2] + x.center[2]] });
+        casters.push({
+          min: [b.min[0] + x.center[0], b.min[1] + x.center[1], b.min[2] + x.center[2]],
+          max: [b.max[0] + x.center[0], b.max[1] + x.center[1], b.max[2] + x.center[2]],
+        });
         casterSky.push(false);
       }
     }
@@ -1304,7 +1487,7 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
         for (let k = 1; k + 1 < w.length; k++) tri.push(...w[0], ...w[k], ...w[k + 1]);
       });
     }
-    scene ={ boxes: casters, sky: casterSky, tris: Float64Array.from(tri) };
+    scene = { boxes: casters, sky: casterSky, tris: Float64Array.from(tri) };
     caster = new SceneCaster(scene.boxes, scene.sky, scene.tris);
   } else caster = new RayCaster(allBoxes, skyBox);
   const sunTo: Vec3 = [-L.sunDir[0], -L.sunDir[1], -L.sunDir[2]];
@@ -1316,12 +1499,27 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
   const brushRanges = new Map<number, [number, number]>();
   const outFaces: OutFace[] = faceRects.map(({ rect, model }, i) => {
     const flags = src.materials[rect.material].flags ?? 0;
-    const anchored = rect.anchorBox === undefined ? undefined : (model === 0 ? world : ents[model - 1].local)[rect.anchorBox];
-    const ti = texinfo(rect.material, rect.axis, anchored && anchorShift(rect.material, rect.axis, anchored.min, anchored.max));
+    const anchored =
+      rect.anchorBox === undefined ? undefined : (model === 0 ? world : ents[model - 1].local)[rect.anchorBox];
+    const ti = texinfo(
+      rect.material,
+      rect.axis,
+      anchored && anchorShift(rect.material, rect.axis, anchored.min, anchored.max),
+    );
     // Brush entity faces are in model space: light them where the model sits.
     const off: Vec3 = model === 0 ? [0, 0, 0] : ents[model - 1].center;
     const lit = (flags & (SURF_NOLIGHT | SURF_SKY | SURF_SKY2D | SURF_NODRAW | SURF_TRIGGER)) === 0;
-    const f: OutFace = { plane: plane(rect.axis, rect.dist, rect.sign), poly: polys[i], texinfo: ti, material: rect.material, rect, lit, lightOfs: -1, lmMins: [0, 0], lmSize: [0, 0] };
+    const f: OutFace = {
+      plane: plane(rect.axis, rect.dist, rect.sign),
+      poly: polys[i],
+      texinfo: ti,
+      material: rect.material,
+      rect,
+      lit,
+      lightOfs: -1,
+      lmMins: [0, 0],
+      lmSize: [0, 0],
+    };
     if (!lit) return f;
     const tinfo = texinfos[ti];
     const sOf = (p: Vec3) => p[0] * tinfo.ls[0] + p[1] * tinfo.ls[1] + p[2] * tinfo.ls[2] + tinfo.ls[3];
@@ -1342,7 +1540,14 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
     // Tangent frame for the hemisphere.
     const tA: Vec3 = rect.axis === 2 ? [1, 0, 0] : [0, 0, 1];
     const bA: Vec3 = [n[1] * tA[2] - n[2] * tA[1], n[2] * tA[0] - n[0] * tA[2], n[0] * tA[1] - n[1] * tA[0]];
-    const dirs = hemi.map((h) => [h[0] * tA[0] + h[1] * bA[0] + h[2] * n[0], h[0] * tA[1] + h[1] * bA[1] + h[2] * n[1], h[0] * tA[2] + h[1] * bA[2] + h[2] * n[2]] as Vec3);
+    const dirs = hemi.map(
+      (h) =>
+        [
+          h[0] * tA[0] + h[1] * bA[0] + h[2] * n[0],
+          h[0] * tA[1] + h[1] * bA[1] + h[2] * n[1],
+          h[0] * tA[2] + h[1] * bA[2] + h[2] * n[2],
+        ] as Vec3,
+    );
     const sunDot = Math.max(0, n[0] * sunTo[0] + n[1] * sunTo[1] + n[2] * sunTo[2]);
     const ua = (rect.axis + 1) % 3;
     const wa = (rect.axis + 2) % 3;
@@ -1422,10 +1627,21 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
     const ua = (d.axis + 1) % 3;
     const wa = (d.axis + 2) % 3;
     lo[d.axis] = hi[d.axis] = d.dist;
-    (lo[ua] = d.u0), (hi[ua] = d.u1), (lo[wa] = d.w0), (hi[wa] = d.w1);
+    ((lo[ua] = d.u0), (hi[ua] = d.u1), (lo[wa] = d.w0), (hi[wa] = d.w1));
     const ti = texinfo(d.material, d.axis, d.anchor ? anchorShift(d.material, d.axis, lo, hi) : undefined);
     const lit = (flags & (SURF_NOLIGHT | SURF_SKY | SURF_SKY2D | SURF_NODRAW | SURF_TRIGGER)) === 0;
-    const f: OutFace = { plane: plane(d.axis, d.dist, d.sign), poly: x.poly, texinfo: ti, material: d.material, rect, lit, lightOfs: -1, lmMins: [0, 0], lmSize: [0, 0], disp: di };
+    const f: OutFace = {
+      plane: plane(d.axis, d.dist, d.sign),
+      poly: x.poly,
+      texinfo: ti,
+      material: d.material,
+      rect,
+      lit,
+      lightOfs: -1,
+      lmMins: [0, 0],
+      lmSize: [0, 0],
+      disp: di,
+    };
     if (!lit) return f;
     const tinfo = texinfos[ti];
     const sOf = (p: Vec3) => p[0] * tinfo.ls[0] + p[1] * tinfo.ls[1] + p[2] * tinfo.ls[2] + tinfo.ls[3];
@@ -1468,7 +1684,9 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
       const p01 = g(ia, ib + 1);
       const p10 = g(ia + 1, ib);
       const p11 = g(ia + 1, ib + 1);
-      return [0, 1, 2].map((k) => (p00[k] * (1 - tb) + p01[k] * tb) * (1 - ta) + (p10[k] * (1 - tb) + p11[k] * tb) * ta) as Vec3;
+      return [0, 1, 2].map(
+        (k) => (p00[k] * (1 - tb) + p01[k] * tb) * (1 - ta) + (p10[k] * (1 - tb) + p11[k] * tb) * ta,
+      ) as Vec3;
     };
     const first = samples.length / SAMPLE;
     for (let j = 0; j <= h; j++) {
@@ -1480,7 +1698,18 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
         const p = at(a, b);
         const nrm = d.shape(x.flatAt(Math.min(1, Math.max(0, a)), Math.min(1, Math.max(0, b)))).n;
         const fill = src.materials[d.material].ambient ?? L.bounce;
-        samples.push(p[0] + nrm[0] * 2, p[1] + nrm[1] * 2, p[2] + nrm[2] * 2, nrm[0], nrm[1], nrm[2], rays, fill[0], fill[1], fill[2]);
+        samples.push(
+          p[0] + nrm[0] * 2,
+          p[1] + nrm[1] * 2,
+          p[2] + nrm[2] * 2,
+          nrm[0],
+          nrm[1],
+          nrm[2],
+          rays,
+          fill[0],
+          fill[1],
+          fill[2],
+        );
       }
     }
     dispSamples[di] = [first, samples.length / SAMPLE - first];
@@ -1514,11 +1743,26 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
     let area = 0;
     for (let i = 1; i + 1 < sp.poly.length; i++) {
       const a = sp.poly[0];
-      const c = cross3([sp.poly[i][0] - a[0], sp.poly[i][1] - a[1], sp.poly[i][2] - a[2]], [sp.poly[i + 1][0] - a[0], sp.poly[i + 1][1] - a[1], sp.poly[i + 1][2] - a[2]]);
+      const c = cross3(
+        [sp.poly[i][0] - a[0], sp.poly[i][1] - a[1], sp.poly[i][2] - a[2]],
+        [sp.poly[i + 1][0] - a[0], sp.poly[i + 1][1] - a[1], sp.poly[i + 1][2] - a[2]],
+      );
       area += Math.hypot(...c) / 2;
     }
     const dummy = { axis: 2, sign: 1, dist: 0, u0: 0, u1: 0, w0: 0, w1: 0, material: sp.tex } as unknown as RectFace;
-    const f: OutFace = { plane: planeAny(sp.n, sp.d), poly: sp.poly, texinfo: ti, material: sp.tex, rect: dummy, lit, lightOfs: -1, lmMins: [0, 0], lmSize: [0, 0], normal: sp.n, area };
+    const f: OutFace = {
+      plane: planeAny(sp.n, sp.d),
+      poly: sp.poly,
+      texinfo: ti,
+      material: sp.tex,
+      rect: dummy,
+      lit,
+      lightOfs: -1,
+      lmMins: [0, 0],
+      lmSize: [0, 0],
+      normal: sp.n,
+      area,
+    };
     if (!lit) return f;
     const tinfo = texinfos[ti];
     const ls: Vec3 = [tinfo.ls[0], tinfo.ls[1], tinfo.ls[2]];
@@ -1541,8 +1785,14 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
       const inward = norm3(cross3(sp.n, [b[0] - a[0], b[1] - a[1], b[2] - a[2]]));
       return { inward, d: dot3(inward, a) };
     });
-    const centre = sp.poly.reduce((a, p) => [a[0] + p[0] / sp.poly.length, a[1] + p[1] / sp.poly.length, a[2] + p[2] / sp.poly.length] as Vec3, [0, 0, 0] as Vec3);
-    const inset = Math.max(0, edges.reduce((m, e) => Math.min(m, dot3(e.inward, centre) - e.d), Infinity));
+    const centre = sp.poly.reduce(
+      (a, p) => [a[0] + p[0] / sp.poly.length, a[1] + p[1] / sp.poly.length, a[2] + p[2] / sp.poly.length] as Vec3,
+      [0, 0, 0] as Vec3,
+    );
+    const inset = Math.max(
+      0,
+      edges.reduce((m, e) => Math.min(m, dot3(e.inward, centre) - e.d), Infinity),
+    );
     const keep = Math.min(1, inset * 0.5);
     const m = src.materials[sp.tex];
     const fill = m.ambient ?? L.bounce;
@@ -1550,14 +1800,32 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
     const first = solidSamples.length / SAMPLE;
     for (let j = 0; j <= h; j++) {
       for (let i = 0; i <= w; i++) {
-        let p: Vec3 = [0, 1, 2].map((q) => sp.n[q] * sp.d + (ls[q] * (sMin + i)) / ls2 + (lt[q] * (tMin + j)) / lt2) as Vec3;
+        let p: Vec3 = [0, 1, 2].map(
+          (q) => sp.n[q] * sp.d + (ls[q] * (sMin + i)) / ls2 + (lt[q] * (tMin + j)) / lt2,
+        ) as Vec3;
         for (let pass = 0; pass < 3; pass++) {
           for (const e of edges) {
             const dist = dot3(e.inward, p) - e.d;
-            if (dist < keep) p = [p[0] + e.inward[0] * (keep - dist), p[1] + e.inward[1] * (keep - dist), p[2] + e.inward[2] * (keep - dist)];
+            if (dist < keep)
+              p = [
+                p[0] + e.inward[0] * (keep - dist),
+                p[1] + e.inward[1] * (keep - dist),
+                p[2] + e.inward[2] * (keep - dist),
+              ];
           }
         }
-        solidSamples.push(p[0] + sp.n[0], p[1] + sp.n[1], p[2] + sp.n[2], sp.n[0], sp.n[1], sp.n[2], rays, fill[0], fill[1], fill[2]);
+        solidSamples.push(
+          p[0] + sp.n[0],
+          p[1] + sp.n[1],
+          p[2] + sp.n[2],
+          sp.n[0],
+          sp.n[1],
+          sp.n[2],
+          rays,
+          fill[0],
+          fill[1],
+          fill[2],
+        );
       }
     }
     solidRanges[k] = [first, solidSamples.length / SAMPLE - first];
@@ -1654,7 +1922,9 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
         if (!seen.has(k)) (seen.add(k), by[kind]++);
       }
     }
-    throw new Error(`too many vertices for the BSP's 16-bit edges: ${verts.length} (brush faces ${by[0]}, displacements ${by[1]}, solids ${by[2]})`);
+    throw new Error(
+      `too many vertices for the BSP's 16-bit edges: ${verts.length} (brush faces ${by[0]}, displacements ${by[1]}, solids ${by[2]})`,
+    );
   }
 
   // ---- leafs / nodes numbering
@@ -1680,7 +1950,10 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
     if (old >= outFaces.length + dispFaces.length) {
       // Solid faces: the inside leaves their bounds touch.
       const poly = allFaces[old].poly;
-      const box: AABB = { min: [0, 1, 2].map((k) => Math.min(...poly.map((p) => p[k])) - 0.5) as Vec3, max: [0, 1, 2].map((k) => Math.max(...poly.map((p) => p[k])) + 0.5) as Vec3 };
+      const box: AABB = {
+        min: [0, 1, 2].map((k) => Math.min(...poly.map((p) => p[k])) - 0.5) as Vec3,
+        max: [0, 1, 2].map((k) => Math.max(...poly.map((p) => p[k])) + 0.5) as Vec3,
+      };
       for (const l of leavesIn(worldTree, box)) {
         if (!l.inside) continue;
         let list = leafFaceLists.get(l);
@@ -1716,9 +1989,17 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
   const versions: number[] = new Array(64).fill(0);
 
   // 0 entities
-  const kv = (o: Record<string, string>) => `{\n${Object.entries(o).map(([k, v]) => `"${k}" "${v}"`).join("\n")}\n}\n`;
+  const kv = (o: Record<string, string>) =>
+    `{\n${Object.entries(o)
+      .map(([k, v]) => `"${k}" "${v}"`)
+      .join("\n")}\n}\n`;
   const fmt = (x: number) => (Number.isInteger(x) ? String(x) : x.toFixed(2));
-  let text = kv({ ...src.worldspawn, world_mins: worldBounds.min.map(fmt).join(" "), world_maxs: worldBounds.max.map(fmt).join(" "), classname: "worldspawn" });
+  let text = kv({
+    ...src.worldspawn,
+    world_mins: worldBounds.min.map(fmt).join(" "),
+    world_maxs: worldBounds.max.map(fmt).join(" "),
+    classname: "worldspawn",
+  });
   ents.forEach((x, i) => (text += kv({ ...x.e.keys, model: `*${i + 1}`, origin: x.center.map(fmt).join(" ") })));
   for (const p of src.points) text += kv(p);
   lumps[0] = new TextEncoder().encode(text + "\0");
@@ -1845,7 +2126,16 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
     let lfCount = 0;
     let lbCount = 0;
     // Leaf 0: vbsp's dummy solid leaf.
-    const writeLeaf = (contents: number, cluster: number, area: number, flags: number, min: Vec3, max: Vec3, faces: number[], brushList: number[]) => {
+    const writeLeaf = (
+      contents: number,
+      cluster: number,
+      area: number,
+      flags: number,
+      min: Vec3,
+      max: Vec3,
+      faces: number[],
+      brushList: number[],
+    ) => {
       b.i32(contents);
       b.i16(cluster);
       b.i16((area & 0x1ff) | (flags << 9));
@@ -1867,7 +2157,10 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
     // Solids go in every world leaf their bounds touch (traces collect brushes from the leaves they cross).
     const leafSolids = new Map<TreeLeaf, number[]>();
     solids.forEach((s, k) => {
-      for (const l of leavesIn(worldTree, { min: [s.min[0] - 1, s.min[1] - 1, s.min[2] - 1], max: [s.max[0] + 1, s.max[1] + 1, s.max[2] + 1] })) {
+      for (const l of leavesIn(worldTree, {
+        min: [s.min[0] - 1, s.min[1] - 1, s.min[2] - 1],
+        max: [s.max[0] + 1, s.max[1] + 1, s.max[2] + 1],
+      })) {
         let list = leafSolids.get(l);
         if (!list) leafSolids.set(l, (list = []));
         list.push(firstSolid + k);
@@ -1882,7 +2175,16 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
       const faces = inside ? (leafFaceLists.get(l) ?? []) : [];
       const own = l.solid ? l.brushes.map((i) => i + brushOffset) : [];
       const extra = model === 0 ? leafSolids.get(l) : undefined;
-      writeLeaf(l.solid ? l.contents : 0, inside ? 0 : -1, inside ? 1 : 0, inside ? LEAF_FLAGS_SKY2D : 0, l.region.min, l.region.max, faces, extra ? [...own, ...extra] : own);
+      writeLeaf(
+        l.solid ? l.contents : 0,
+        inside ? 0 : -1,
+        inside ? 1 : 0,
+        inside ? LEAF_FLAGS_SKY2D : 0,
+        l.region.min,
+        l.region.max,
+        faces,
+        extra ? [...own, ...extra] : own,
+      );
       if (inside) {
         // One ambient cube sample at the leaf centre: sky + bounce everywhere, sun on the faces that see it.
         const c: Vec3 = [0, 1, 2].map((k) => (l.region.min[k] + l.region.max[k]) / 2) as Vec3;
@@ -1903,7 +2205,14 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
             seen.push([u, [lp.color[0] * k, lp.color[1] * k, lp.color[2] * k]]);
           }
         }
-        for (const d of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] as Vec3[]) {
+        for (const d of [
+          [1, 0, 0],
+          [-1, 0, 0],
+          [0, 1, 0],
+          [0, -1, 0],
+          [0, 0, 1],
+          [0, 0, -1],
+        ] as Vec3[]) {
           const s = Math.max(0, d[0] * sunTo[0] + d[1] * sunTo[1] + d[2] * sunTo[2]) * sunVisible * 0.6;
           const up = d[2] > 0 ? 0.8 : d[2] < 0 ? 0.35 : 0.55;
           const lamp: Vec3 = [0, 0, 0];
@@ -1911,7 +2220,11 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
             const f = Math.max(0, u[0] * d[0] + u[1] * d[1] + u[2] * d[2]);
             for (let k = 0; k < 3; k++) lamp[k] += col[k] * f;
           }
-          const col = rgbExp([L.bounce[0] + L.sky[0] * up + L.sun[0] * s + lamp[0], L.bounce[1] + L.sky[1] * up + L.sun[1] * s + lamp[1], L.bounce[2] + L.sky[2] * up + L.sun[2] * s + lamp[2]]);
+          const col = rgbExp([
+            L.bounce[0] + L.sky[0] * up + L.sun[0] * s + lamp[0],
+            L.bounce[1] + L.sky[1] * up + L.sun[1] * s + lamp[1],
+            L.bounce[2] + L.sky[2] * up + L.sun[2] * s + lamp[2],
+          ]);
           amb.u8(col[0]);
           amb.u8(col[1]);
           amb.u8(col[2]);
@@ -2013,7 +2326,14 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
       b.i32(6);
       b.i32(br.contents);
       sideCount += 6;
-      for (const [a, sign] of [[0, -1], [0, 1], [1, -1], [1, 1], [2, -1], [2, 1]] as [number, 1 | -1][]) {
+      for (const [a, sign] of [
+        [0, -1],
+        [0, 1],
+        [1, -1],
+        [1, 1],
+        [2, -1],
+        [2, 1],
+      ] as [number, 1 | -1][]) {
         s.u16(plane(a, sign > 0 ? br.box.max[a] : br.box.min[a], sign));
         s.i16(texinfo(faceMaterial(br.box.tex, a, sign), a));
         s.i16(0); // dispinfo
@@ -2116,7 +2436,8 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
       info.u16(0);
       info.i32(0); // lightmap alpha start
       info.i32(0); // lightmap sample position start
-      for (let e = 0; e < 4; e++) for (let k = 0; k < 2; k++) (info.u16(0xffff), info.u8(0), info.u8(0), info.u8(0), info.u8(0));
+      for (let e = 0; e < 4; e++)
+        for (let k = 0; k < 2; k++) (info.u16(0xffff), info.u8(0), info.u8(0), info.u8(0), info.u8(0));
       for (let c = 0; c < 4; c++) {
         for (let k = 0; k < 4; k++) info.u16(0xffff);
         info.u8(0);
@@ -2232,7 +2553,10 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
   for (let i = 0; i < 64; i++) for (let k = 0; k < 4; k++) file.i32(0);
   file.i32(mapRevision);
   const dir: [number, number][] = new Array(64).fill(null).map(() => [0, 0]);
-  const order = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 26, 27, 30, 31, 33, 46, 47, 48, 52, 56, 59, 43, 44, 0, 40];
+  const order = [
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 26, 27, 30, 31, 33, 46, 47, 48, 52, 56, 59,
+    43, 44, 0, 40,
+  ];
   for (const i of order) {
     const d = lumps[i];
     if (!d) continue;
@@ -2267,6 +2591,15 @@ export function writeBsp(src: MapSource, mapRevision = 1, log?: (step: string) =
   }
   return {
     bsp: out,
-    stats: { planes: planes.length, brushes: brushes.length, nodes: allNodes.length, leafs: allLeafs.length + 1, faces: faceOrder.length, luxels, bytes: out.length, outsideLeafs },
+    stats: {
+      planes: planes.length,
+      brushes: brushes.length,
+      nodes: allNodes.length,
+      leafs: allLeafs.length + 1,
+      faces: faceOrder.length,
+      luxels,
+      bytes: out.length,
+      outsideLeafs,
+    },
   };
 }

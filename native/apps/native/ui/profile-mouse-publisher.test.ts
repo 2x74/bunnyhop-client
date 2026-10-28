@@ -1,8 +1,115 @@
-import {test,expect} from "bun:test";
-import {ProfileMousePublisher} from "./profile-mouse-publisher";
-function fixture(){let owner:string|null="alice",epoch=0;const saved:unknown[]=[],tasks:(()=>void)[]=[];let user:()=>Promise<{id:string}|null>=async()=>owner?{id:owner}:null;const p=new ProfileMousePublisher({owner:()=>owner,epoch:()=>epoch,readUser:()=>user(),save:async value=>saved.push(value),schedule:fn=>(tasks.push(fn),fn),cancel:token=>{const i=tasks.indexOf(token as ()=>void);if(i>=0)tasks.splice(i,1);}});return {p,saved,tasks,setAccount:(id:string|null)=>{owner=id;epoch++;p.invalidate();},setUser:(fn:typeof user)=>{user=fn;},flush:async()=>{for(const task of tasks.splice(0))task();await Promise.resolve();await Promise.resolve();}};}
-test("mouse publication coalesces edits for the same identity",async()=>{const f=fixture();f.p.edit({sensitivity:2,dpi:800});f.p.edit({sensitivity:3,dpi:1600});await f.flush();expect(f.saved).toEqual([{sensitivity:3,dpi:1600}]);});
-test("account switch cancels pending publication",async()=>{const f=fixture();f.p.edit({sensitivity:2,dpi:800});f.setAccount("bob");await f.flush();expect(f.saved).toEqual([]);});
-test("account switch during async identity read cannot save Alice values to Bob",async()=>{const f=fixture();let resolve!:(id:{id:string})=>void;f.setUser(()=>new Promise(done=>{resolve=done;}));f.p.edit({sensitivity:2,dpi:800});await f.flush();f.setAccount("bob");resolve({id:"bob"});await Promise.resolve();await Promise.resolve();expect(f.saved).toEqual([]);});
-test("late same-id read after signout/signin is also rejected",async()=>{const f=fixture();let resolve!:(id:{id:string})=>void;f.setUser(()=>new Promise(done=>{resolve=done;}));f.p.edit({sensitivity:2,dpi:800});await f.flush();f.setAccount(null);f.setAccount("alice");resolve({id:"alice"});await Promise.resolve();await Promise.resolve();expect(f.saved).toEqual([]);});
-test("mouse publication rechecks account after asynchronous request preparation",async()=>{let epoch=0,run!:()=>void,gate:import("../../web/src/api").RequestDispatch|undefined,fetches=0;const p=new ProfileMousePublisher({owner:()=>"alice",epoch:()=>epoch,readUser:async()=>({id:"alice"}),save:async(_mouse,dispatch)=>{gate=dispatch;},schedule:fn=>(run=fn),cancel:()=>{}});p.edit({sensitivity:2,dpi:800});run();await Promise.resolve();expect(gate).toBeDefined();epoch++;await expect(gate!(async()=>{fetches++;return new Response("{}");})).rejects.toThrow("Account changed");expect(fetches).toBe(0);});
+import { test, expect } from "bun:test";
+import { ProfileMousePublisher } from "./profile-mouse-publisher";
+function fixture() {
+  let owner: string | null = "alice",
+    epoch = 0;
+  const saved: unknown[] = [],
+    tasks: (() => void)[] = [];
+  let user: () => Promise<{ id: string } | null> = async () => (owner ? { id: owner } : null);
+  const p = new ProfileMousePublisher({
+    owner: () => owner,
+    epoch: () => epoch,
+    readUser: () => user(),
+    save: async (value) => saved.push(value),
+    schedule: (fn) => (tasks.push(fn), fn),
+    cancel: (token) => {
+      const i = tasks.indexOf(token as () => void);
+      if (i >= 0) tasks.splice(i, 1);
+    },
+  });
+  return {
+    p,
+    saved,
+    tasks,
+    setAccount: (id: string | null) => {
+      owner = id;
+      epoch++;
+      p.invalidate();
+    },
+    setUser: (fn: typeof user) => {
+      user = fn;
+    },
+    flush: async () => {
+      for (const task of tasks.splice(0)) task();
+      await Promise.resolve();
+      await Promise.resolve();
+    },
+  };
+}
+test("mouse publication coalesces edits for the same identity", async () => {
+  const f = fixture();
+  f.p.edit({ sensitivity: 2, dpi: 800 });
+  f.p.edit({ sensitivity: 3, dpi: 1600 });
+  await f.flush();
+  expect(f.saved).toEqual([{ sensitivity: 3, dpi: 1600 }]);
+});
+test("account switch cancels pending publication", async () => {
+  const f = fixture();
+  f.p.edit({ sensitivity: 2, dpi: 800 });
+  f.setAccount("bob");
+  await f.flush();
+  expect(f.saved).toEqual([]);
+});
+test("account switch during async identity read cannot save Alice values to Bob", async () => {
+  const f = fixture();
+  let resolve!: (id: { id: string }) => void;
+  f.setUser(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  f.p.edit({ sensitivity: 2, dpi: 800 });
+  await f.flush();
+  f.setAccount("bob");
+  resolve({ id: "bob" });
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(f.saved).toEqual([]);
+});
+test("late same-id read after signout/signin is also rejected", async () => {
+  const f = fixture();
+  let resolve!: (id: { id: string }) => void;
+  f.setUser(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  f.p.edit({ sensitivity: 2, dpi: 800 });
+  await f.flush();
+  f.setAccount(null);
+  f.setAccount("alice");
+  resolve({ id: "alice" });
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(f.saved).toEqual([]);
+});
+test("mouse publication rechecks account after asynchronous request preparation", async () => {
+  let epoch = 0,
+    run!: () => void,
+    gate: import("../../web/src/api").RequestDispatch | undefined,
+    fetches = 0;
+  const p = new ProfileMousePublisher({
+    owner: () => "alice",
+    epoch: () => epoch,
+    readUser: async () => ({ id: "alice" }),
+    save: async (_mouse, dispatch) => {
+      gate = dispatch;
+    },
+    schedule: (fn) => (run = fn),
+    cancel: () => {},
+  });
+  p.edit({ sensitivity: 2, dpi: 800 });
+  run();
+  await Promise.resolve();
+  expect(gate).toBeDefined();
+  epoch++;
+  await expect(
+    gate!(async () => {
+      fetches++;
+      return new Response("{}");
+    }),
+  ).rejects.toThrow("Account changed");
+  expect(fetches).toBe(0);
+});

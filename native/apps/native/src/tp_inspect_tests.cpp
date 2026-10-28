@@ -1,3 +1,44 @@
 #include "tp_inspect.hpp"
 #include <iostream>
-int main(int argc,char**argv){try{if(argc!=3)throw std::runtime_error("usage: tp_inspect_tests TRACKS ORACLE");using namespace native_tp;J tracks,oracle;std::ifstream(argv[1])>>tracks;std::ifstream(argv[2])>>oracle;auto names=oracle["names"].get<std::vector<std::string>>();auto parent=oracle["parent"].get<std::vector<int>>();auto bind=oracle["bind"].get<std::vector<float>>();double error=0;size_t count=0;for(const auto&test:oracle["cases"]){Combo combo;const auto&spec=tracks["knives"][test["knife"].get<std::string>()];for(const auto&f:test["frames"]){if(f.contains("seek")){combo.reset();combo.begin(f["seek"]["clip"],f["seek"]["t"]);}else{if(f["reset"])combo.reset();if(f["attack"])combo.cancel();combo.remote(f["signal"],spec["clips"]);}combo.update(f["dt"],f.value("held",false),spec);auto pose=f["base"].get<std::vector<float>>(),expected=f["expected"].get<std::vector<float>>();apply(combo,spec,names,parent,bind,pose);for(size_t i=0;i<pose.size();i++){if(!std::isfinite(pose[i]))throw std::runtime_error("nonfinite gesture");error=std::max(error,std::abs(double(pose[i]-expected[i])));}count++;}}std::cout<<count<<" moving-pose web inspect frames; max matrix error="<<error<<'\n';return error>.002;}catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}
+
+int main(int argc, char **argv) {
+    try {
+        if (argc != 3) throw std::runtime_error("usage: tp_inspect_tests TRACKS ORACLE");
+        using namespace native_tp;
+        J tracks, oracle;
+        std::ifstream(argv[1]) >> tracks;
+        std::ifstream(argv[2]) >> oracle;
+        auto names = oracle["names"].get<std::vector<std::string>>();
+        auto parent = oracle["parent"].get<std::vector<int>>();
+        auto bind = oracle["bind"].get<std::vector<float>>();
+        double error = 0;
+        size_t count = 0;
+        for (const auto &test : oracle["cases"]) {
+            Combo combo;
+            const auto &spec = tracks["knives"][test["knife"].get<std::string>()];
+            for (const auto &f : test["frames"]) {
+                if (f.contains("seek")) {
+                    combo.reset();
+                    combo.begin(f["seek"]["clip"], f["seek"]["t"]);
+                } else {
+                    if (f["reset"]) combo.reset();
+                    if (f["attack"]) combo.cancel();
+                    combo.remote(f["signal"], spec["clips"]);
+                }
+                combo.update(f["dt"], f.value("held", false), spec);
+                auto pose = f["base"].get<std::vector<float>>(), expected = f["expected"].get<std::vector<float>>();
+                apply(combo, spec, names, parent, bind, pose);
+                for (size_t i = 0; i < pose.size(); i++) {
+                    if (!std::isfinite(pose[i])) throw std::runtime_error("nonfinite gesture");
+                    error = std::max(error, std::abs(double(pose[i] - expected[i])));
+                }
+                count++;
+            }
+        }
+        std::cout << count << " moving-pose web inspect frames; max matrix error=" << error << '\n';
+        return error > .002;
+    } catch (const std::exception &e) {
+        std::cerr << e.what() << '\n';
+        return 1;
+    }
+}

@@ -1203,6 +1203,9 @@ pub struct TeleportInfo {
 }
 
 pub struct Game {
+    /// Opt-in observational timing; excluded from physics snapshots.
+    pub observe_timing: bool,
+    pub timing_path: Option<movement::accepted_path::AcceptedPath>,
     world: CollisionWorld,
     props: PropCollision,
     /// What `props` is built from (static props + entity props), for `rebuild_props`.
@@ -1437,6 +1440,8 @@ impl Game {
             prop_mesh,
             entities,
             ents,
+            observe_timing: false,
+            timing_path: None,
             initial_ents: Vec::new(),
             solid: Vec::new(),
             dyn_solid: Vec::new(),
@@ -1563,6 +1568,7 @@ impl Game {
 
     /// Restart the map: entity state, event queue and player.
     pub fn reset(&mut self) {
+        self.timing_path = None;
         self.jumpstats_valid = false;
         self.restart_point = None;
         self.restart_names = None;
@@ -1652,6 +1658,7 @@ impl Game {
             self.player_name.clone_from(name);
             self.player_class.clone_from(class);
         }
+        self.timing_path = None;
         self.touch_origin = [f32::NAN; 3];
         self.touch_crouched = false;
         self.arms = weapons::Arms::default();
@@ -1842,6 +1849,7 @@ impl Game {
     }
 
     pub fn step(&mut self, cmd: Cmd) -> Result<(), String> {
+        self.timing_path = self.observe_timing.then(|| movement::accepted_path::AcceptedPath::unsupported("movement-not-executed"));
         self.jumpstats_valid = false;
         let before_events = self.state;
         // RNGFix telehop: no fix right after another map teleport (`g_bMapTeleportedSequentialTicks`).
@@ -1936,7 +1944,8 @@ impl Game {
             config.allow_auto_movement = !self.auto_movement_disabled;
             self.update_broadphase();
             let scene = self.scene(self.tick as f32 * self.settings.tick_interval);
-            let result = match movement::step(&scene, self.state, input, config, self.policy) {
+            let execute = if self.observe_timing { movement::step_observed } else { movement::step };
+            let result = match execute(&scene, self.state, input, config, self.policy) {
                 Ok(r) => r,
                 Err(e) => {
                     // Never wedge the client on a movement failure: keep the position, drop the
@@ -1956,6 +1965,7 @@ impl Game {
                     return Ok(());
                 }
             };
+            self.timing_path = result.accepted_path;
             if result.jump_velocity != [0.0; 3] {
                 self.events |= EVENT_JUMPED;
             }
@@ -3009,6 +3019,11 @@ impl Game {
 
     /// Records where the touch pass after the player's move happens (`touch_origin`).
     fn note_touch_origin(&mut self) {
+        if let Some(path) = &mut self.timing_path {
+            if path.segments.last().is_none_or(|s| s.to != self.state.position) {
+                path.reject("pre-touch-discontinuity");
+            }
+        }
         self.touch_origin = self.state.position;
         self.touch_crouched = self.state.crouch.uses_crouched_hull();
     }
@@ -3767,6 +3782,7 @@ impl Game {
         self.last_angles = s.last_angles;
         self.restart_point = s.restart_point;
         self.restart_names.clone_from(&s.restart_names);
+        self.timing_path = None;
         self.touch_origin = s.touch_origin;
         self.touch_crouched = s.touch_crouched;
         self.last_move_origin = s.last_move_origin;

@@ -120,7 +120,9 @@ export function initAudio(): void {
   music.onTrack = (t) => {
     // The now-playing control says it in the menus; in game (and the viewer) a toast does.
     const shown = document.getElementById("music-now")?.classList.contains("on");
-    if (!shown && t.role === "game" && t.id !== lastToast) whisper(`♪ ${trackName(t)}`, { key: "audio", ms: 2600 });
+    // Not over an open dialog (the replay export's music choice plays its track: the name landed on the dialog).
+    const dialogOpen = typeof document !== "undefined" && !!document.querySelector("dialog[open]");
+    if (!shown && !dialogOpen && t.role === "game" && t.id !== lastToast) whisper(`♪ ${trackName(t)}`, { key: "audio", ms: 2600 });
     lastToast = t.id;
   };
   // Media autoplay can be refused even with WebAudio running (WebKit): any later gesture retries the track.

@@ -12,19 +12,51 @@
 
 import * as THREE from "three";
 import { createBones, LEG, PALETTE, playerGeometry } from "../../web/src/player/rig";
-import { depthMaterial, ghostMaterial, playerUniforms, solidMaterial, type PlayerUniforms } from "../../web/src/player/materials";
+import {
+  depthMaterial,
+  ghostMaterial,
+  playerUniforms,
+  solidMaterial,
+  type PlayerUniforms,
+} from "../../web/src/player/materials";
 import type { PlayerPose } from "../../web/src/player/model";
-type PlayerStyle="ghost"|"solid";
-interface PlayerModelOptions {style?:PlayerStyle;color?:THREE.ColorRepresentation;dither?:boolean}
+type PlayerStyle = "ghost" | "solid";
+interface PlayerModelOptions {
+  style?: PlayerStyle;
+  color?: THREE.ColorRepresentation;
+  dither?: boolean;
+}
 
 // ---------------------------------------------------------------------------------------------
 // Pose channels (degrees, except HIPS_Y in units). Blended linearly between states.
 
 const enum C {
-  HIPS_Y, HIPS_PITCH, HIPS_YAW, HIPS_ROLL,
-  SPINE_PITCH, SPINE_YAW, CHEST_PITCH, CHEST_YAW, CHEST_ROLL, NECK_PITCH, HEAD_PITCH, HEAD_ROLL,
-  THIGH_X_L, THIGH_Z_L, KNEE_L, FOOT_L, THIGH_X_R, THIGH_Z_R, KNEE_R, FOOT_R,
-  ARM_X_L, ARM_Z_L, ELBOW_L, ARM_X_R, ARM_Z_R, ELBOW_R,
+  HIPS_Y,
+  HIPS_PITCH,
+  HIPS_YAW,
+  HIPS_ROLL,
+  SPINE_PITCH,
+  SPINE_YAW,
+  CHEST_PITCH,
+  CHEST_YAW,
+  CHEST_ROLL,
+  NECK_PITCH,
+  HEAD_PITCH,
+  HEAD_ROLL,
+  THIGH_X_L,
+  THIGH_Z_L,
+  KNEE_L,
+  FOOT_L,
+  THIGH_X_R,
+  THIGH_Z_R,
+  KNEE_R,
+  FOOT_R,
+  ARM_X_L,
+  ARM_Z_L,
+  ELBOW_L,
+  ARM_X_R,
+  ARM_Z_R,
+  ELBOW_R,
   COUNT,
 }
 type Pose = Float32Array;
@@ -37,7 +69,8 @@ const smooth = (x: number, a: number, b: number) => {
   return t * t * (3 - 2 * t);
 };
 /** Frame-rate independent exponential approach. */
-const damp = (cur: number, target: number, rate: number, dt: number) => cur + (target - cur) * (1 - Math.exp(-rate * dt));
+const damp = (cur: number, target: number, rate: number, dt: number) =>
+  cur + (target - cur) * (1 - Math.exp(-rate * dt));
 const wrap180 = (a: number) => ((((a + 180) % 360) + 360) % 360) - 180;
 
 function mix(out: Pose, a: Pose, b: Pose, t: number): Pose {
@@ -57,9 +90,26 @@ function legIK(fwd: number, down: number): [number, number] {
 }
 
 const BONE_INDEX = {
-  root: 0, hips: 1, spine: 2, chest: 3, neck: 4, head: 5, earL: 6, earR: 7,
-  upperArmL: 8, foreArmL: 9, handL: 10, upperArmR: 11, foreArmR: 12, handR: 13,
-  thighL: 14, shinL: 15, footL: 16, thighR: 17, shinR: 18, footR: 19,
+  root: 0,
+  hips: 1,
+  spine: 2,
+  chest: 3,
+  neck: 4,
+  head: 5,
+  earL: 6,
+  earR: 7,
+  upperArmL: 8,
+  foreArmL: 9,
+  handL: 10,
+  upperArmR: 11,
+  foreArmR: 12,
+  handR: 13,
+  thighL: 14,
+  shinL: 15,
+  footL: 16,
+  thighR: 17,
+  shinR: 18,
+  footR: 19,
 };
 
 let sharedInverses: THREE.Matrix4[] | null = null;
@@ -103,7 +153,16 @@ export class RunnerModel {
   private earTwitch = 2;
   private time = Math.random() * 10;
   private snapNext = true;
-  private p = { idle: newPose(), run: newPose(), crouch: newPose(), air: newPose(), airCrouch: newPose(), g: newPose(), a: newPose(), out: newPose() };
+  private p = {
+    idle: newPose(),
+    run: newPose(),
+    crouch: newPose(),
+    air: newPose(),
+    airCrouch: newPose(),
+    g: newPose(),
+    a: newPose(),
+    out: newPose(),
+  };
 
   constructor(o: PlayerModelOptions = {}, uniforms: PlayerUniforms = playerUniforms()) {
     this.uniforms = uniforms;
@@ -183,10 +242,12 @@ export class RunnerModel {
     const s = this.pose;
     if (!s) return;
     dt = clamp(dt, 0, 0.1);
-    this.time = s.visualTime ?? (this.time + dt);
+    this.time = s.visualTime ?? this.time + dt;
     const pos = s.position;
     // Source (x, y, z) -> three (x, z, -y)
-    const px = pos[0], py = pos[2], pz = -pos[1];
+    const px = pos[0],
+      py = pos[2],
+      pz = -pos[1];
     const lp = this.lastPos;
     if (this.hasLast && (lp.x - px) ** 2 + (lp.y - py) ** 2 + (lp.z - pz) ** 2 > 160 * 160) this.snapNext = true;
     const snap = this.snapNext;
@@ -200,7 +261,7 @@ export class RunnerModel {
     } else if (this.hasLast && dt > 0 && !snap) {
       const k = 1 - Math.exp(-20 * dt);
       this.vel[0] += ((px - this.lastPos.x) / dt - this.vel[0]) * k;
-      this.vel[1] += ((-(pz - this.lastPos.z)) / dt - this.vel[1]) * k;
+      this.vel[1] += (-(pz - this.lastPos.z) / dt - this.vel[1]) * k;
       this.vel[2] += ((py - this.lastPos.y) / dt - this.vel[2]) * k;
     } else this.vel[0] = this.vel[1] = this.vel[2] = 0;
     this.lastPos.set(px, py, pz);
@@ -252,14 +313,18 @@ export class RunnerModel {
       moveAng = wrap180(moveAng + 180);
     }
     const stride = clamp(50 + speed * 0.18, 50, 115);
-    if (snap && s.visualTime !== undefined) this.phase = (back ? -1 : 1) * (speed / stride) * Math.PI * 2 * s.visualTime;
+    if (snap && s.visualTime !== undefined)
+      this.phase = (back ? -1 : 1) * (speed / stride) * Math.PI * 2 * s.visualTime;
     this.phase += (back ? -1 : 1) * ((speed / stride) * Math.PI * 2 * dt) * (0.35 + 0.65 * this.ground);
     const legYawT = speed > 30 ? clamp(moveAng, -65, 65) * this.ground : 0;
     this.legYaw = snap ? legYawT : damp(this.legYaw, legYawT, 8, dt);
 
     // Strafe lean: into the turn (yaw rate), plus the side key (sidemove < 0 = moving left = lean left).
     const side = s.sidemove ?? 0;
-    const leanT = clamp(this.yawRate * 0.055 - (side / 450) * 7, -26, 26) * (0.35 + 0.65 * (1 - this.ground)) * clamp(speed / 200, 0.2, 1);
+    const leanT =
+      clamp(this.yawRate * 0.055 - (side / 450) * 7, -26, 26) *
+      (0.35 + 0.65 * (1 - this.ground)) *
+      clamp(speed / 200, 0.2, 1);
     this.lean = snap ? leanT : damp(this.lean, leanT, 6, dt);
 
     // --- Poses ---
@@ -292,7 +357,7 @@ export class RunnerModel {
     e[0] += e[1] * dt;
     e[3] += (110 * (earRollT - e[2]) - 7 * e[3]) * dt;
     e[2] += e[3] * dt;
-    if (snap) (e[0] = earPitchT), (e[1] = 0), (e[2] = earRollT), (e[3] = 0);
+    if (snap) ((e[0] = earPitchT), (e[1] = 0), (e[2] = earRollT), (e[3] = 0));
 
     this.apply(out);
   }
@@ -307,7 +372,10 @@ export class RunnerModel {
     o[C.SPINE_PITCH] = 2 + breath * 0.7;
     o[C.CHEST_PITCH] = -1 - breath * 0.9;
     o[C.HEAD_PITCH] = breath * 0.4;
-    for (const [tx, tz, kn, ft, side] of [[C.THIGH_X_L, C.THIGH_Z_L, C.KNEE_L, C.FOOT_L, 1], [C.THIGH_X_R, C.THIGH_Z_R, C.KNEE_R, C.FOOT_R, -1]] as const) {
+    for (const [tx, tz, kn, ft, side] of [
+      [C.THIGH_X_L, C.THIGH_Z_L, C.KNEE_L, C.FOOT_L, 1],
+      [C.THIGH_X_R, C.THIGH_Z_R, C.KNEE_R, C.FOOT_R, -1],
+    ] as const) {
       o[tx] = 3;
       o[kn] = 6;
       o[tz] = 3 - side * Math.sin(t * 0.6) * 1.2;
@@ -359,9 +427,15 @@ export class RunnerModel {
     o[C.CHEST_PITCH] = 10;
     o[C.NECK_PITCH] = -12;
     o[C.HEAD_PITCH] = -10;
-    for (const [tx, tz, kn, ft, sg] of [[C.THIGH_X_L, C.THIGH_Z_L, C.KNEE_L, C.FOOT_L, 1], [C.THIGH_X_R, C.THIGH_Z_R, C.KNEE_R, C.FOOT_R, -1]] as const) {
+    for (const [tx, tz, kn, ft, sg] of [
+      [C.THIGH_X_L, C.THIGH_Z_L, C.KNEE_L, C.FOOT_L, 1],
+      [C.THIGH_X_R, C.THIGH_Z_R, C.KNEE_R, C.FOOT_R, -1],
+    ] as const) {
       const step = sg * s * a * 9;
-      const [th, kn2] = legIK(1 + step, LEG.hip - drop - LEG.ankle + Math.max(0, sg * Math.cos(this.phase)) * a * 3 * -1);
+      const [th, kn2] = legIK(
+        1 + step,
+        LEG.hip - drop - LEG.ankle + Math.max(0, sg * Math.cos(this.phase)) * a * 3 * -1,
+      );
       o[tx] = th;
       o[kn] = kn2;
       o[ft] = 0; // apply() keeps the sole flat
@@ -416,7 +490,8 @@ export class RunnerModel {
   private apply(o: Pose): void {
     const b = this.bones;
     const I = BONE_INDEX;
-    const set = (i: number, x: number, y: number, z: number, order: THREE.EulerOrder = "YXZ") => b[i].rotation.set(x * D2R, y * D2R, z * D2R, order);
+    const set = (i: number, x: number, y: number, z: number, order: THREE.EulerOrder = "YXZ") =>
+      b[i].rotation.set(x * D2R, y * D2R, z * D2R, order);
 
     // Whole body faces the (smoothed) view yaw; model faces +Z so add 90 degrees.
     this.root.rotation.y = this.bodyYaw * D2R + Math.PI / 2;
@@ -432,7 +507,12 @@ export class RunnerModel {
     b[I.hips].position.y = 32 + o[C.HIPS_Y] - sq * 10;
     set(I.hips, o[C.HIPS_PITCH], o[C.HIPS_YAW] + legYaw, o[C.HIPS_ROLL] - lean);
     set(I.spine, o[C.SPINE_PITCH] + pitch * 0.08, o[C.SPINE_YAW] - legYaw * 0.5 + aimYaw * 0.2, lean * 0.15);
-    set(I.chest, o[C.CHEST_PITCH] + pitch * 0.15, o[C.CHEST_YAW] - legYaw * 0.5 + aimYaw * 0.3, o[C.CHEST_ROLL] + lean * 0.1);
+    set(
+      I.chest,
+      o[C.CHEST_PITCH] + pitch * 0.15,
+      o[C.CHEST_YAW] - legYaw * 0.5 + aimYaw * 0.3,
+      o[C.CHEST_ROLL] + lean * 0.1,
+    );
     set(I.neck, o[C.NECK_PITCH] + pitch * 0.25, aimYaw * 0.2, 0);
     set(I.head, o[C.HEAD_PITCH] + clamp(pitch * 0.45, -38, 40), aimYaw * 0.3, o[C.HEAD_ROLL] + lean * 0.45);
 

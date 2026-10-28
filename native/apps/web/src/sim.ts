@@ -5,6 +5,7 @@ import { replayPhysics, replayStyle, replayTimerRules, type Checkpoint, type Rep
 import { StyleFilter, strafeKeys, styleDef, type StyleDef } from "./styles";
 import { RunTimer, TIMER_RULES, TIMER_RULES_V1, TIMER_RULES_V2, type TickCmd, type TimerUpdate } from "./timer";
 import type { Zone } from "./zones";
+import { pathSource, startObserving } from "./timing-trace";
 
 interface RawExports {
   set_velocity?: (x: number, y: number, z: number) => void;
@@ -33,6 +34,8 @@ export function makeTimer(zones: readonly Zone[], settings: Settings, prespeedCa
 
 /** Apply start-zone prehop blocking before movement, shared by live play, recording and replay verification. */
 export function beforeStep(core: Core, timer: RunTimer, cmd: TickCmd): void {
+  // The timer measures sub-tick crossings on the step's accepted path (run-timing.ts). Observation only.
+  startObserving(core);
   const velocity = timer.beforeStep(cmd, core.state());
   if (velocity) setVelocity(core, velocity);
 }
@@ -43,6 +46,7 @@ export function beforeStep(core: Core, timer: RunTimer, cmd: TickCmd): void {
  */
 export function afterStep(core: Core, timer: RunTimer, cmd: TickCmd, events: number): { state: PlayerState; update: TimerUpdate } {
   let state = core.state();
+  timer.pathSource = pathSource(core);
   const update = timer.update(cmd, events, state);
   if (update.clampVelocity) {
     setVelocity(core, update.clampVelocity);
@@ -94,6 +98,7 @@ export function replayStep(core: Core, timer: RunTimer, filter: StyleFilter, rep
   beforeStep(core, timer, cmd);
   const events = core.step(cmd.forward, cmd.side, cmd.yaw, cmd.pitch, cmd.buttons);
   const r = afterStep(core, timer, cmd, events);
+  if (retimer) retimer.pathSource = timer.pathSource;
   const retimed = retimer ? retimer.update(cmd, events, r.state) : null;
   return { raw, cmd, events, state: r.state, update: r.update, retimed };
 }

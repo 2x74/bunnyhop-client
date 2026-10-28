@@ -24,15 +24,28 @@ export function hostMusicPlayer(): MusicPlayer {
   const listeners = new Set<() => void>();
   const action = (name: "previous" | "toggle" | "next") => () => send({ type: "music", action: name });
   const player = {
-    get shown() { return musicEntry(state.music); },
-    get playing() { return !!state.music?.playing; },
-    get wanted() { return !!state.music?.available && !!state.music.id; },
+    get shown() {
+      return musicEntry(state.music);
+    },
+    get playing() {
+      return !!state.music?.playing;
+    },
+    get wanted() {
+      return !!state.music?.available && !!state.music.id;
+    },
     previous: action("previous"),
     next: action("next"),
     toggle: action("toggle"),
-    play: () => { if (!state.music?.playing) send({ type: "music", action: "toggle" }); },
-    pause: () => { if (state.music?.playing) send({ type: "music", action: "toggle" }); },
-    subscribe(fn: () => void) { listeners.add(fn); return () => listeners.delete(fn); },
+    play: () => {
+      if (!state.music?.playing) send({ type: "music", action: "toggle" });
+    },
+    pause: () => {
+      if (state.music?.playing) send({ type: "music", action: "toggle" });
+    },
+    subscribe(fn: () => void) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
   };
   let last = "";
   window.addEventListener("bunnyhop:host-state", () => {
@@ -49,7 +62,11 @@ export function installNowPlaying(): void {
   if (mounted) return;
   // The web control also registers OS media keys (Media Session). The menu plays no audio of its own (SDL does), so
   // those handlers could only ever claim keys meant for another app: the native menu has no Media Session at all.
-  try { Object.defineProperty(navigator, "mediaSession", { value: undefined, configurable: true }); } catch { /* not configurable: no handlers set below either way */ }
+  try {
+    Object.defineProperty(navigator, "mediaSession", { value: undefined, configurable: true });
+  } catch {
+    /* not configurable: no handlers set below either way */
+  }
   mounted = mountNowPlaying(hostMusicPlayer());
   const sync = () => mounted?.setEnabled(musicAudible());
   window.addEventListener("bunnyhop:host-state", sync);

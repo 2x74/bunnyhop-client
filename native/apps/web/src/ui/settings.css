@@ -1,0 +1,255 @@
+/* Settings screen (ui/settings-panel.ts, ui/controls.ts, ui/settings-transfer.ts). After Aimperion's settings page:
+   search across the top, a rail of sections with a glyph each on the left, one scrolling page of sections on the right;
+   each row reads  label · hint  |  control  on a raised strip, and the row under the pointer explains itself in one help
+   line under the page. Design tokens: style.css.
+   Shared controls (sliders, switches, swatches, segmented) are styled in style.css; refined here inside .settings. */
+
+.panel-settings { display: flex; flex-direction: column; width: min(82rem, 100%); height: min(50rem, 100%); padding-bottom: var(--sp-4); }
+.panel-settings .screen-head { margin-bottom: var(--sp-3); }
+.settings { flex: 1; min-height: 0; display: grid; grid-template-columns: 12.5rem minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; gap: var(--sp-4) var(--sp-6); }
+.settings > .set-side { grid-row: 2 / 4; }
+svg.icon { display: block; flex: none; }
+
+/* ---- top bar: search + whole-setup actions */
+.set-top { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.set-search { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; }
+.set-q { width: 100%; box-sizing: border-box; padding: 0.6rem 7.5rem 0.6rem 2.45rem; font-size: var(--fs-md); border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.32); }
+.set-q::-webkit-search-cancel-button { -webkit-appearance: none; display: none; }
+.set-q::placeholder { color: var(--faint); }
+.set-q-icon { position: absolute; left: 0.85rem; display: flex; font-size: 1.05rem; color: var(--faint); pointer-events: none; transition: color var(--t-fast); }
+.set-search:focus-within .set-q-icon { color: var(--accent); }
+.set-q-count { position: absolute; right: 2.6rem; font-size: var(--fs-xs); color: var(--dim); font-variant-numeric: tabular-nums; pointer-events: none; white-space: nowrap; }
+.set-q-clear { position: absolute; right: 0.35rem; display: grid; place-items: center; width: 1.9rem; height: 1.9rem; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--dim); font-size: 0.95rem; cursor: pointer; }
+.set-q-clear:hover { color: var(--text); background: var(--raise-2); }
+.set-q-clear:focus-visible { outline: none; box-shadow: var(--ring); }
+.set-q-kbd { position: absolute; right: 0.75rem; opacity: 0.7; pointer-events: none; }
+.set-search:focus-within .set-q-kbd, .settings.is-searching .set-q-kbd { display: none; }
+.set-actions { display: flex; align-items: center; gap: 0.25rem; flex: none; }
+.set-act .icon { font-size: 1.05em; }
+.set-reset-all:hover { color: var(--loss); }
+.set-profile-row { display: flex; align-items: center; gap: 0.25rem; margin-right: 0.35rem; }
+.settings .set-profile { max-width: 12rem; }
+
+/* ---- rail */
+.set-side { display: flex; flex-direction: column; gap: var(--sp-3); min-height: 0; }
+.set-rail { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow: hidden auto; scrollbar-width: none; }
+.set-rail-item { position: relative; display: flex; align-items: center; gap: 0.7rem; width: 100%; padding: 0.5rem 0.75rem; border: 0; border-radius: var(--radius-sm); background: none; color: var(--dim); font-weight: 620; font-size: var(--fs-md); text-align: left; cursor: pointer; transition: background var(--t-fast), color var(--t-fast); }
+.set-rail-icon { display: flex; font-size: 1.12rem; color: var(--faint); transition: color var(--t-fast); }
+.set-rail-label { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.set-rail-item:hover { background: var(--raise); color: var(--text); }
+.set-rail-item:hover .set-rail-icon { color: var(--text); }
+.set-rail-item.on { background: var(--raise-2); color: var(--text); }
+.set-rail-item.on .set-rail-icon { color: var(--accent); }
+.set-rail-item::before { content: ""; position: absolute; left: 0; top: 22%; bottom: 22%; width: 3px; border-radius: 2px; background: var(--accent); transform: scaleY(0); transition: transform var(--t-med) var(--ease); }
+.set-rail-item.on::before { transform: scaleY(1); }
+.set-rail-item:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
+/* Saved: a tick at the foot of the rail flashes for 600 ms on every write. */
+.set-saved { display: flex; margin: auto 0 0 0.75rem; font-size: 1.1rem; color: var(--gain); opacity: 0; transform: translateY(0.3rem); transition: opacity 0.3s linear, transform 0.3s var(--ease-glide); pointer-events: none; }
+.set-saved.on { opacity: 1; transform: none; transition-duration: var(--t-tick), var(--t-hop); transition-timing-function: linear, var(--ease-land); }
+/* The help line: the hovered / focused row's description, under the page. Prose face, two lines at most. */
+.set-help { grid-column: 2; margin: calc(var(--sp-1) * -1) 0 0; min-height: 2.6em; padding: 0 0.85rem; font-family: var(--font-text); font-size: var(--fs-sm); line-height: 1.3; color: var(--cream-2); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; text-wrap: pretty; }
+
+/* ---- the page of sections */
+.set-scroll { position: relative; min-height: 0; min-width: 0; overflow: hidden auto; outline: none; padding-right: 0.4rem; container: setscroll / inline-size; overscroll-behavior: contain; }
+.set-sections { display: flex; flex-direction: column; gap: var(--sp-8); padding-bottom: calc(var(--sp-6) + var(--set-tail, 0px)); }
+.set-sec { min-width: 0; }
+.set-sec-head { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-4); padding-bottom: var(--sp-3); border-bottom: 1px solid var(--line); }
+.set-sec-title { flex: 1; min-width: 0; }
+.set-sec-title h3 { margin: 0; font-size: var(--fs-xl); font-weight: 750; letter-spacing: -0.01em; line-height: 1.15; }
+.set-sec-title p { margin: 0.12rem 0 0; color: var(--dim); font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.set-sec-reset { flex: none; }
+.set-sec-reset .icon, .set-act .icon { transition: transform var(--t-med) var(--ease); }
+.set-sec-reset:hover .icon { transform: rotate(-40deg); }
+.set-sec-reset.armed { color: var(--loss); border-color: color-mix(in srgb, var(--loss) 50%, transparent); background: rgba(255, 93, 93, 0.08); }
+.set-sec-reset.done { color: var(--gain); }
+.settings.is-searching .set-sec-reset { visibility: hidden; }
+@media (prefers-reduced-motion: no-preference) {
+  .set-sec-head.arrive { animation: set-arrive 0.34s var(--ease) both; }
+  .set-sec-head.arrive + .set-sec-body { animation: set-arrive-body 0.34s var(--ease) both; }
+}
+@keyframes set-arrive { from { opacity: 0.3; transform: translateY(6px); } }
+@keyframes set-arrive-body { from { opacity: 0.55; } }
+
+/* Groups sit in two columns where the page is wide enough, one below that. While searching, the columns dissolve so
+   the matching groups flow without gaps. */
+.set-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-5) var(--sp-6); align-items: start; }
+.set-col { display: flex; flex-direction: column; gap: var(--sp-5); min-width: 0; }
+.set-cols.auto { display: flex; flex-direction: column; align-items: stretch; }
+@container setscroll (min-width: 56rem) {
+  .set-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .set-cols.auto { display: block; columns: 2; column-gap: var(--sp-6); }
+  .set-cols.auto > * { break-inside: avoid; margin-bottom: var(--sp-5); }
+}
+.settings.is-searching .set-col { display: contents; }
+.s-miss { display: none !important; }
+
+.set-group { display: flex; flex-direction: column; min-width: 0; }
+.set-group-title { margin: 0 0 0.45rem; padding: 0 0.15rem; font-size: var(--fs-xs); font-weight: 650; letter-spacing: 0; color: var(--dim); }
+.set-group-rows { display: flex; flex-direction: column; gap: 2px; }
+.set-group-rows > :first-child { border-top-left-radius: var(--radius-sm); border-top-right-radius: var(--radius-sm); }
+.set-group-rows > :last-child { border-bottom-left-radius: var(--radius-sm); border-bottom-right-radius: var(--radius-sm); }
+
+/* ---- rows */
+.settings .set-row, .quick-set .set-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-3); min-height: 2.9rem; box-sizing: border-box; padding: 0.4rem 0.55rem 0.4rem 0.85rem; background: var(--raise); transition: background var(--t-fast); }
+.settings .set-row:hover, .quick-set .set-row:hover { background: var(--raise-2); }
+.settings .set-row:focus-within, .quick-set .set-row:focus-within { background: var(--raise-2); }
+.settings .set-row:focus-within::before, .quick-set .set-row:focus-within::before { content: ""; position: absolute; left: 0; top: 18%; bottom: 18%; width: 3px; border-radius: 2px; background: var(--accent); }
+.set-label { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.set-name { font-weight: 600; font-size: var(--fs-md); line-height: 1.25; overflow-wrap: break-word; }
+label.set-name { cursor: pointer; }
+.set-hint { font-size: var(--fs-xs); color: var(--faint); line-height: 1.3; }
+.set-readout { font-size: var(--fs-xs); color: var(--dim); font-variant-numeric: tabular-nums; }
+.set-control { display: flex; justify-content: flex-end; align-items: center; gap: 0.6rem; min-width: 0; }
+.ghost-dot { width: 0.7rem; height: 0.7rem; border-radius: 2px; background: var(--c); flex: none; }
+.set-row.compact { min-height: 2.35rem; padding-top: 0.2rem; padding-bottom: 0.2rem; }
+.set-row.compact .set-name { font-size: var(--fs-sm); font-weight: 560; }
+.set-row:has(.xh-styles) { grid-template-columns: 1fr; padding-top: 0.55rem; padding-bottom: 0.55rem; }
+.set-row:has(.xh-styles) .set-label { display: none; }
+.set-row:has(.xh-styles) .set-control { justify-content: stretch; }
+.check-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; }
+.check-grid > .set-row:first-child { border-top-left-radius: var(--radius-sm); }
+.check-grid > .set-row:nth-child(2) { border-top-right-radius: var(--radius-sm); }
+.set-aside { padding: var(--sp-1) 0.2rem; }
+/* A row of buttons, or a link field and its button: the label keeps its own width and the control takes the rest,
+   its buttons wrapping inside it (an auto-width control column squeezed long button rows' labels to nothing). */
+.settings .set-row:has(> .set-control > :is(.btn-row, .set-link)) { grid-template-columns: fit-content(45%) minmax(0, 1fr); }
+.settings .set-control > .btn-row { justify-content: flex-end; }
+.set-link { display: flex; align-items: center; gap: var(--sp-2); flex: 1; min-width: 0; }
+.set-link > input { flex: 1; min-width: 6rem; box-sizing: border-box; padding: 0.38rem 0.6rem; font-size: var(--fs-sm); }
+/* A status line between a group's rows (a download's progress, what went wrong); hidden when it has nothing to say. */
+.set-note { margin: 0; padding: 0.5rem 0.85rem; background: var(--raise); color: var(--cream-2); font-size: var(--fs-sm); line-height: 1.35; overflow-wrap: anywhere; }
+.set-note[hidden] { display: none; }
+.set-note[data-tone="bad"] { color: var(--loss); }
+.sky-status { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
+.sky-status .link-btn { flex: none; padding: 0; color: var(--accent); }
+/* A sky file held over Settings → Graphics (settings-panel.ts): a dashed frame round the page; let go to import it. */
+.settings.sky-drop .set-scroll { outline: 2px dashed var(--accent); outline-offset: -2px; border-radius: var(--r-2); }
+
+/* Info tip (controls.ts infoTip): a small "i" after a row's label; its sentence shows while hovered or focused. */
+.set-name-line { display: inline-flex; align-items: center; gap: 0.4rem; min-width: 0; }
+.info-tip { position: relative; display: inline-flex; flex: none; }
+.info-tip-btn { display: grid; place-items: center; width: 1.05rem; height: 1.05rem; padding: 0; border: 1px solid var(--line-2); border-radius: 50%; background: none; color: var(--dim); font: italic 650 0.68rem/1 var(--font-text); cursor: help; transition: color var(--t-fast), border-color var(--t-fast); }
+.info-tip-btn:hover, .info-tip-btn:focus-visible { color: var(--text); border-color: var(--dim); }
+.info-tip-btn:focus-visible { outline: none; box-shadow: var(--ring); }
+.info-tip-text { position: absolute; left: -0.6rem; top: calc(100% + 0.45rem); z-index: 5; width: max-content; max-width: min(19rem, 70vw); padding: 0.45rem 0.65rem; border-radius: var(--radius-sm); background: var(--panel-solid); box-shadow: var(--shadow); color: var(--cream-2); font: 400 var(--fs-sm)/1.35 var(--font-text); text-wrap: pretty; pointer-events: none; opacity: 0; visibility: hidden; transform: translateY(-0.15rem); transition: opacity var(--t-fast), transform var(--t-fast), visibility 0s linear var(--t-fast); }
+.info-tip:hover:not(.hushed) .info-tip-text, .info-tip:has(.info-tip-btn:focus-visible):not(.hushed) .info-tip-text { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+/* Rows after it paint later: lift the row whose tip is open. */
+.set-row:has(.info-tip:hover, .info-tip-btn:focus-visible) { z-index: 3; }
+
+/* Advanced: one quiet line under a section's groups; its groups lay out like the section's once open. */
+.set-adv { margin-top: var(--sp-4); }
+.set-adv-sum { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.3rem 0.5rem 0.3rem 0.2rem; border-radius: var(--radius-sm); color: var(--dim); font-weight: 620; font-size: var(--fs-sm); cursor: pointer; list-style: none; user-select: none; }
+.set-adv-sum::-webkit-details-marker { display: none; }
+.set-adv-sum small { color: var(--faint); font-weight: 500; }
+.set-adv-sum:hover { color: var(--text); }
+.set-adv-sum:focus-visible { outline: none; box-shadow: var(--ring); }
+.set-adv-chev { display: flex; font-size: 0.95rem; transition: transform var(--t-fast) var(--ease); }
+.set-adv[open] > .set-adv-sum .set-adv-chev { transform: rotate(90deg); }
+.set-adv > .set-cols { margin-top: var(--sp-3); }
+.settings.is-searching .set-adv-sum { display: none; }
+.settings.is-searching .set-adv > .set-cols { margin-top: 0; }
+.set-dym { padding: 0; font-weight: 650; color: var(--accent); }
+.set-aside .link-btn { display: inline-flex; align-items: center; gap: 0.3rem; padding-left: 0; color: var(--accent); }
+
+/* search marks + best match */
+.set-name mark { color: inherit; background: color-mix(in srgb, var(--accent) 26%, transparent); border-radius: 2px; box-shadow: inset 0 -2px 0 var(--accent); }
+.settings.is-searching .set-row.is-top { background: color-mix(in srgb, var(--accent) 9%, var(--raise-2)); }
+.set-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.45rem; min-height: 18rem; text-align: center; }
+.set-empty strong { font-size: var(--fs-lg); }
+.set-empty-icon { display: flex; font-size: 2rem; color: var(--faint); margin-bottom: 0.3rem; }
+.set-empty-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; justify-content: center; margin-top: 0.2rem; }
+
+/* ---- controls, refined for the strips */
+/* At least the track's 5rem + the number box (at 11rem the box ran past the row's edge in windows under ~1000 px). */
+.settings .range { width: clamp(12.25rem, 17vw, 16.5rem); }
+.settings .num-input { width: 4.4rem; }
+.settings .seg button { display: inline-flex; align-items: center; gap: 0.35rem; }
+.settings .select { max-width: 13rem; }
+.btn-inner { display: inline-flex; align-items: center; gap: 0.45rem; }
+
+/* key binds as keycaps */
+.settings .bind-pair { display: grid; grid-template-columns: 6.6rem 6.6rem; gap: 0.35rem; }
+.settings .bind { padding: 0.32rem 0.5rem 0.26rem; border: 1px solid var(--line-2); border-bottom-width: 3px; border-radius: 0.42rem; background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.045)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07); font-family: var(--mono); font-size: var(--fs-sm); font-weight: 600; transition: transform var(--t-fast), border-color var(--t-fast), background var(--t-fast); }
+.settings .bind:hover { border-color: rgba(255, 255, 255, 0.28); }
+.settings .bind:active { transform: translateY(1px); border-bottom-width: 2px; }
+.settings .bind.empty { color: var(--faint); background: none; border-style: dashed; border-bottom-width: 1px; box-shadow: none; }
+.settings .bind.capturing { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+/* Keys that land: a waiting slot breathes, the bound keycap drops 2px and settles, a slot that lost its key shakes. */
+@media (prefers-reduced-motion: no-preference) {
+  .settings .bind.capturing { animation: bind-wait 1.2s ease-in-out infinite; }
+  .settings .bind.landed { animation: bind-land 90ms linear; }
+  .settings .bind-nope { animation: lo-nope 0.32s ease; }
+}
+@keyframes bind-wait { 50% { border-color: color-mix(in srgb, var(--accent) 35%, transparent); } }
+@keyframes bind-land { 40% { transform: translateY(2px); } }
+@keyframes lo-nope { 25% { transform: translateX(-3px); } 50% { transform: translateX(3px); } 75% { transform: translateX(-2px); } }
+.settings .bind.fixed { border-style: solid; border-bottom-width: 3px; }
+/* A row's reset to its default keys: the section reset's arrow, in a slot of its own so keycaps stay in line. */
+.settings .bind-line { display: flex; align-items: center; gap: 0.25rem; }
+.settings .bind-reset { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 1.75rem; height: 1.75rem; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--dim); cursor: pointer; transition: color var(--t-fast), background var(--t-fast); }
+.settings .bind-reset:hover { color: var(--text); background: var(--raise-2); }
+.settings .bind-reset:focus-visible { outline: none; box-shadow: var(--ring); }
+.settings .bind-reset .icon { transition: transform var(--t-med) var(--ease); }
+.settings .bind-reset:hover .icon { transform: rotate(-40deg); }
+.settings .bind-reset:disabled, .settings span.bind-reset { visibility: hidden; }
+kbd.keycap { font-size: 0.8em; }
+
+/* section furniture */
+.settings .set-stats { padding: 0; gap: 2px; }
+.settings .set-stat { border: 0; border-radius: 0; background: var(--raise); }
+.settings .set-stats .set-stat:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.settings .set-stats .set-stat:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.settings .xh-stage { display: flex; flex-direction: column; gap: var(--sp-2); padding: 0.5rem; background: var(--raise); align-items: stretch; }
+.xh-stage-bar { display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; }
+.settings .xhair-preview:not(.xh-mini) { height: 9.5rem; }
+.settings .set-group .keys-preview { margin: 0; border-radius: 0; }
+.settings .share-row .share-code { width: 9rem; }
+
+/* ---- hold to see the game (controls.ts peek): in game, the menu clears away but the row you hold */
+body.in-game.peek #overlay { visibility: hidden; }
+body.in-game.peek #overlay, body.in-game.peek #overlay * { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+body.in-game.peek #overlay .peek-row { visibility: visible; background: var(--ink-1); border-radius: var(--r-2); box-shadow: 0 18px 40px -16px rgba(0, 0, 0, 0.7); }
+
+/* ---- export / import card, confirm card (dialog shell: ui/account.css) */
+dialog.xfer-dialog { width: min(40rem, 94vw); }
+.xfer-body { gap: 0.6rem; }
+.xfer-tabs { align-self: flex-start; }
+.xfer-tabs button { display: inline-flex; align-items: center; gap: 0.4rem; }
+.xfer-lead { margin: 0; font-size: var(--fs-sm); line-height: 1.5; }
+.xfer-text { width: 100%; box-sizing: border-box; min-height: 7.5rem; resize: vertical; padding: 0.6rem 0.7rem; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.32); color: var(--text); font-family: var(--mono); font-size: var(--fs-xs); line-height: 1.45; word-break: break-all; }
+.xfer-text:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255, 180, 58, 0.18); }
+.xfer-status { min-height: 1.3rem; font-size: var(--fs-sm); color: var(--dim); line-height: 1.45; }
+.xfer-status[data-tone="ok"] { color: var(--gain); }
+.xfer-status[data-tone="bad"] { color: var(--loss); }
+.xfer-undo { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0; color: var(--accent); }
+.xfer-body .btn { display: inline-flex; align-items: center; gap: 0.45rem; }
+dialog.confirm-dialog { width: min(30rem, 94vw); }
+.confirm-text { margin: 0 0 0.6rem; color: var(--dim); line-height: 1.5; font-size: var(--fs-sm); }
+.confirm-actions { justify-content: flex-end; }
+.btn.danger { background: var(--loss); color: #1c0606; border-color: transparent; }
+.btn.danger:hover { background: #ff7878; }
+.acct-close .icon { font-size: 1.05rem; }
+
+/* ---- narrow windows (below the 1024 px target): the rail becomes a row of pills */
+@media (max-width: 52rem) {
+  .panel-settings { height: calc(100vh - 1.5rem); }
+  .settings { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); }
+  .set-top { flex-wrap: wrap; }
+  .set-side { flex-direction: row; }
+  .set-rail { flex-direction: row; overflow: auto hidden; }
+  .set-rail-item { width: auto; flex: none; }
+  .set-saved { display: none; }
+  .settings > .set-side { grid-row: auto; }
+  .set-help { grid-column: 1; }
+}
+.keycaps { display: inline-flex; gap: 0.3rem; }
+/* A soft edge where the page scrolls under the top bar / off the bottom. */
+.set-scroll { mask-image: linear-gradient(to bottom, transparent 0, #000 0.6rem, #000 calc(100% - 1.2rem), transparent 100%); }
+.set-sec { scroll-margin-top: 0.6rem; }
+.settings .xh-styles { gap: 0.25rem; }
+.settings .xh-tile { padding-left: 0.1rem; padding-right: 0.1rem; }
+.settings .xh-tile small { font-size: 0.62rem; letter-spacing: -0.01em; }
+/* Pressed chips (keys overlay rows) wear the one selected look, not a white pill. */
+.settings .chip-btn.on { background: var(--ink-3); color: #fff; border-color: transparent; box-shadow: inset 0 -2px 0 var(--amber); }
+/* Peeking at a crosshair row shows the real crosshair over the paused game (the menu hides it otherwise). */
+body.in-game.peek #crosshair { visibility: visible; }

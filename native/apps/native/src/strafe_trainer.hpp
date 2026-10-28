@@ -18,6 +18,7 @@
 // Display only. Like the jump stats it reads the pre-tick state and the
 // command already stepped, and feeds nothing back.
 #include "ssj.hpp"
+#include "hud_geometry.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -30,9 +31,12 @@ enum class StrafeHint { less_deadtime, strafe_more, strafe_less };
 
 inline const char *strafe_hint_text(StrafeHint hint) {
     switch (hint) {
-        case StrafeHint::less_deadtime: return "Less deadtime!";
-        case StrafeHint::strafe_more: return "Strafe more!";
-        case StrafeHint::strafe_less: return "Strafe less!";
+        case StrafeHint::less_deadtime:
+            return "Less deadtime!";
+        case StrafeHint::strafe_more:
+            return "Strafe more!";
+        case StrafeHint::strafe_less:
+            return "Strafe less!";
     }
     return "";
 }
@@ -60,6 +64,7 @@ public:
     static constexpr std::uint32_t left_bit = 1u << 9, right_bit = 1u << 10;
 
     unsigned smoothing() const { return smoothing_; }
+
     void set_smoothing(unsigned n) { smoothing_ = std::clamp(n, 1u, max_smoothing); }
 
     /** One tick, using movement AFTER style filtering (W-only/HSW/auto-strafe included). */
@@ -73,7 +78,8 @@ public:
                 const float turned = std::fabs(std::remainder(yaw - last_yaw_, 360.0f));
                 const float percent = turned / ideal_degrees(speed) * 100.0f;
                 samples_.push_back({percent, forward == 0 && side == 0});
-                while (samples_.size() > std::max<std::size_t>(max_smoothing, hint_window)) samples_.pop_front();
+                while (samples_.size() > std::max<std::size_t>(max_smoothing, hint_window))
+                    samples_.pop_front();
                 reading = StrafeReading{mean(smoothing_), hint()};
             }
         }
@@ -83,9 +89,13 @@ public:
     }
 
     std::optional<StrafeReading> tick(bool grounded, float speed, float yaw, std::uint32_t buttons) {
-        return tick(grounded, speed, yaw,
-            450.f * (int(bool(buttons & ssj_in_forward)) - int(bool(buttons & ssj_in_back))),
-            450.f * (int(bool(buttons & right_bit)) - int(bool(buttons & left_bit))));
+        return tick(
+                grounded,
+                speed,
+                yaw,
+                450.f * (int(bool(buttons & ssj_in_forward)) - int(bool(buttons & ssj_in_back))),
+                450.f * (int(bool(buttons & right_bit)) - int(bool(buttons & left_bit)))
+        );
     }
 
     void reset() {
@@ -100,14 +110,18 @@ public:
     }
 
 private:
-    struct Sample { float percent; bool dead; };
+    struct Sample {
+        float percent;
+        bool dead;
+    };
 
     void clear_windows() { samples_.clear(); }
 
     float mean(unsigned n) const {
         n = std::min<unsigned>(n, unsigned(samples_.size()));
         float sum = 0;
-        for (auto it = samples_.end() - n; it != samples_.end(); ++it) sum += it->percent;
+        for (auto it = samples_.end() - n; it != samples_.end(); ++it)
+            sum += it->percent;
         return sum / float(n);
     }
 
@@ -115,7 +129,8 @@ private:
         // Not enough of this chain yet to say anything fair.
         if (samples_.size() < hint_window) return std::nullopt;
         unsigned dead = 0;
-        for (auto it = samples_.end() - hint_window; it != samples_.end(); ++it) dead += it->dead;
+        for (auto it = samples_.end() - hint_window; it != samples_.end(); ++it)
+            dead += it->dead;
         if (float(dead) / float(hint_window) > dead_limit) return StrafeHint::less_deadtime;
         const float average = mean(hint_window);
         if (average < low_limit) return StrafeHint::strafe_more;
@@ -123,7 +138,7 @@ private:
         return std::nullopt;
     }
 
-    std::deque<Sample> samples_;
+    HudSamples<Sample, max_smoothing> samples_;
     float last_yaw_ = 0;
     unsigned smoothing_ = 1, ground_ticks_ = 0;
     bool have_yaw_ = false;
@@ -135,19 +150,25 @@ private:
 struct MovementFeedback {
     SsjTracker ssj;
     std::string ssj_line;
-    std::optional<float> ssj_gain; bool ssj_was_in_start = false, ssj_was_noclip = false;
+    std::optional<float> ssj_gain;
+    bool ssj_was_in_start = false, ssj_was_noclip = false;
     StrafeTrainer strafe_trainer;
     std::optional<StrafeReading> strafe_reading;
     unsigned strafe_ground_ticks = 0, history_ground_ticks = 0;
     bool incomplete_history = false;
 
     void reset(bool in_start = false, bool noclip = false, bool incomplete = false) {
-        ssj.reset(); ssj_line.clear(); ssj_gain.reset();
-        strafe_trainer.reset(); strafe_reading.reset();
+        ssj.reset();
+        ssj_line.clear();
+        ssj_gain.reset();
+        strafe_trainer.reset();
+        strafe_reading.reset();
         strafe_ground_ticks = history_ground_ticks = 0;
-        ssj_was_in_start = in_start; ssj_was_noclip = noclip;
+        ssj_was_in_start = in_start;
+        ssj_was_noclip = noclip;
         incomplete_history = incomplete;
     }
+
     bool history_ready(bool grounded, bool in_start, bool noclip) {
         if (!incomplete_history) return true;
         history_ground_ticks = grounded && !noclip ? history_ground_ticks + 1 : 0;

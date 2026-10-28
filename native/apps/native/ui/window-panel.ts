@@ -1,20 +1,98 @@
-import {h} from "../../web/src/ui/dom";
-import {state,send,WINDOW_MODES,type NativeSettings,type WindowMode} from "./bridge";
-const labels:Record<WindowMode,string>={windowed:"Windowed",borderless:"Borderless fullscreen",fullscreen:"Fullscreen (display mode)"};
-export function windowPanel(save:(patch:Partial<NativeSettings>)=>void):HTMLElement {
- const root=h("div.nset-group.native-window-panel"),rows=h("div.nset-group-rows");
- const row=(title:string,control:HTMLElement,hint:string)=>h("div.nset-row",{"data-search":`${title} ${hint}`.toLowerCase()},h("span.nset-name",null,title,h("small.nset-hint",null,hint)),control);
- const mode=h("select",{"aria-label":"Window mode"},...WINDOW_MODES.map(id=>h("option",{value:id},labels[id]))) as HTMLSelectElement;
- mode.onchange=()=>save({windowMode:mode.value as WindowMode});
- rows.append(row("Window mode",mode,"Alt+Enter switches between windowed and borderless fullscreen. Fullscreen uses the display's desktop mode."));
- const toggles=new Map<"alwaysOnTop"|"rememberWindowBounds"|"minimizeOnFocusLoss",HTMLInputElement>();
- for(const [key,label,hint] of [["alwaysOnTop","Always on top","Keep this game above other windows when the window manager supports it."],["rememberWindowBounds","Remember window size and position","Restore logical window size, position and maximized state next launch. Off-screen saved windows are moved onto a connected display."],["minimizeOnFocusLoss","Minimize fullscreen when switching apps","Fullscreen only. Off keeps the game visible while you use another app."]] as const){const input=h("input.switch",{type:"checkbox","aria-label":label,checked:state.settings[key]}) as HTMLInputElement;input.onchange=()=>save({[key]:input.checked});toggles.set(key,input);rows.append(row(label,input,hint));}
- const center=h("button.btn",{type:"button",onclick:()=>send({type:"window",action:"center"})},"Center window") as HTMLButtonElement;
- const maximize=h("button.btn",{type:"button",onclick:()=>send({type:"window",action:"maximize"})},"Maximize / restore") as HTMLButtonElement;
- const minimize=h("button.btn",{type:"button",onclick:()=>send({type:"window",action:"minimize"})},"Minimize") as HTMLButtonElement;
- rows.append(row("Window controls",h("div.native-toolbar",null,center,maximize,minimize),"Center and maximize are available in windowed mode."));
- rows.append(row("Desktop shortcuts",h("div",null,h("kbd",null,"F10")," Settings · ",h("kbd",null,"Alt+Enter")," Fullscreen"),"Check and download signed releases under Updates. Installation remains manual."));
- root.append(h("h3.nset-group-title",null,"Game window"),rows);
- const refresh=()=>{mode.value=state.settings.windowMode;for(const [key,input]of toggles)input.checked=state.settings[key];center.disabled=maximize.disabled=state.settings.windowMode!=="windowed";};
- const host=()=>{if(!root.isConnected){window.removeEventListener("bunnyhop:host-state",host);return;}refresh();};window.addEventListener("bunnyhop:host-state",host);refresh();return root;
+// Settings → Display: the game window and frame pacing, which only the native client has.
+
+import { h } from "../../web/src/ui/dom";
+import { registerSettingsSection } from "../../web/src/ui/settings-registry";
+import { send, state, WINDOW_MODES, type WindowMode } from "./bridge";
+import { followHost, nativeChoice, nativeToggle, type Ui } from "./native-rows";
+
+const MODE_LABELS: Record<WindowMode, string> = {
+  windowed: "Windowed",
+  borderless: "Borderless",
+  fullscreen: "Fullscreen",
+};
+
+function windowGroup(ui: Ui): HTMLElement {
+  const center = ui.button("Center", () => send({ type: "window", action: "center" }));
+  const maximize = ui.button("Maximize", () => send({ type: "window", action: "maximize" }));
+  const minimize = ui.button("Minimize", () => send({ type: "window", action: "minimize" }));
+  const shortcuts = h("span.keycaps", null, ui.keycap("F10"), " Settings ", ui.keycap("Alt+Enter"), " Fullscreen");
+  const group = ui.group(
+    "Window",
+    nativeChoice(
+      ui,
+      "Window mode",
+      "windowMode",
+      WINDOW_MODES.map((mode) => [mode, MODE_LABELS[mode]]),
+      {
+        hint: "Alt+Enter switches",
+        desc: "Borderless covers the screen without changing its mode. Fullscreen uses the display's desktop mode.",
+        keywords: "window fullscreen borderless windowed display mode alt enter",
+      },
+    ),
+    nativeToggle(ui, "Always on top", "alwaysOnTop", {
+      desc: "Keeps the game above other windows where the window manager allows it.",
+      keywords: "window top above pin",
+    }),
+    nativeToggle(ui, "Remember window size and position", "rememberWindowBounds", {
+      desc: "Opens where you left it. A window saved off-screen comes back onto a connected display.",
+      keywords: "window size position bounds restore",
+    }),
+    nativeToggle(ui, "Minimize fullscreen when switching apps", "minimizeOnFocusLoss", {
+      desc: "Fullscreen only. Off keeps the game on screen while you use another app.",
+      keywords: "alt tab minimize focus fullscreen",
+    }),
+    ui.actions("Window controls", [center, maximize, minimize], {
+      hint: "Windowed mode",
+      desc: "Center and maximize work in windowed mode.",
+      keywords: "window center maximize minimize",
+    }),
+    ui.row("Shortcuts", shortcuts, {
+      keywords: "shortcut keys f10 alt enter",
+    }),
+  );
+  followHost(group, ui, () => {
+    const windowed = state.settings.windowMode === "windowed";
+    center.disabled = !windowed;
+    maximize.disabled = !windowed;
+  });
+  return group;
+}
+
+function framesGroup(ui: Ui): HTMLElement {
+  return ui.group(
+    "Frame pacing",
+    nativeToggle(ui, "VSync", "vsync", {
+      desc:
+        "Locks frames to your monitor's refresh rate. Off gives the lowest input latency. " +
+        "Graphics → FPS limit caps it.",
+      keywords: "vsync vertical sync tearing refresh latency fps",
+    }),
+    nativeToggle(ui, "GPU frame limit", "limitQueuedFrames", {
+      desc:
+        "Keeps at most one finished frame waiting on the graphics card, so the picture is closer to your input. Turn " +
+        "it off if your frame rate drops.",
+      keywords: "queued frames latency gpu input lag",
+    }),
+  );
+}
+
+function replaysGroup(ui: Ui): HTMLElement {
+  return ui.group(
+    "Local replays",
+    nativeToggle(ui, "Capture device personal bests", "capturePbScreenshots", {
+      desc:
+        "Saves a result screenshot when this computer records a faster completed run. Device bests are separate from " +
+        "account records.",
+      keywords: "screenshot replay vault personal best local",
+    }),
+  );
+}
+
+/** Registers Settings → Display (call once). */
+export function registerDisplaySection(): void {
+  registerSettingsSection("display", (ui) => ({ columns: [[windowGroup(ui)], [framesGroup(ui), replaysGroup(ui)]] }), {
+    label: "Display",
+    icon: "grid",
+    order: 62,
+  });
 }

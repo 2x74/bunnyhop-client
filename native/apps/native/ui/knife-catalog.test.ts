@@ -1,3 +1,10 @@
-import {test,expect} from "bun:test";
-import {KNIFE_IDS,knifeById} from "./knife-catalog";
-test("menu knife catalog matches shipped registry without importing render builders",async()=>{const source=await Bun.file(new URL("../../web/src/viewmodel/knives/index.ts",import.meta.url)).text();const registry=/export const KNIVES[^=]*=\s*\[([^\]]+)\]/.exec(source);expect(registry).not.toBeNull();expect([...KNIFE_IDS] as string[]).toEqual(registry![1].split(",").map(id=>id.trim()));expect(knifeById("knife-carrot")).toEqual({id:"carrot",cosmeticId:"knife-carrot"});expect(knifeById("knife-unshipped")).toBeUndefined();});
+import { test, expect } from "bun:test";
+import { KNIFE_IDS, knifeById } from "./knife-catalog";
+test("menu knife catalog matches shipped registry without importing render builders", async () => {
+  const source = await Bun.file(new URL("../../web/src/viewmodel/knives/index.ts", import.meta.url)).text();
+  const registry = /export const KNIVES[^=]*=\s*\[([^\]]+)\]/.exec(source);
+  expect(registry).not.toBeNull();
+  expect([...KNIFE_IDS] as string[]).toEqual(registry![1].split(",").map((id) => id.trim()));
+  expect(knifeById("knife-carrot")).toEqual({ id: "carrot", cosmeticId: "knife-carrot" });
+  expect(knifeById("knife-unshipped")).toBeUndefined();
+});

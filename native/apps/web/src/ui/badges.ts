@@ -13,7 +13,7 @@ export const RING_NAMES = ["Bronze", "Silver", "Gold", "Prism"];
 export function badgeToken(a: AchievementDef, o: { got?: boolean; size?: "sm" | "md" | "lg"; progress?: [number, number] | null } = {}): HTMLElement {
   const got = o.got ?? true;
   const glyph = !got && a.hidden ? textGlyph("?", 12) : (GLYPHS[a.icon] ?? GLYPHS.flag);
-  const tierCls = /^t[1-6]$/.test(a.icon) ? `.${a.icon}` : "";
+  const tierCls = /^t[1-7]$/.test(a.icon) ? `.${a.icon}` : "";
   // A hidden badge says nothing about itself until it's earned.
   const secret = !got && !!a.hidden;
   const el = h(`span.tk.r${a.ring}${got ? ".got" : ""}${tierCls}.tk-${o.size ?? "md"}`, {

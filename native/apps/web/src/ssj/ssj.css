@@ -1,0 +1,10 @@
+/* Jump stats (ssj/): the HUD element, the accent in its chat line, the !ssj panel. */
+
+.ssj { display: flex; flex-direction: column; gap: 0.1em; font-size: 0.8em; color: rgba(255, 255, 255, 0.85); line-height: 1.3; font-variant-numeric: tabular-nums; }
+.ssj b { color: #fff; font-weight: 700; }
+.ssj .ssj-good, .chat-line .ssj-good { color: var(--gain); }
+
+dialog.ssj-dialog { width: min(30rem, 94vw); }
+.ssj-dialog .acct-body { gap: var(--sp-3); }
+/* The paused game shows behind the panel, not the pause menu (like the HUD editor). */
+body.ssj-open #overlay { display: none !important; }

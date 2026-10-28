@@ -1,0 +1,6 @@
+.privacy-choices { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 0.65rem; }
+.privacy-choices legend { margin-bottom: 0.6rem; }
+.privacy-choice { display: flex; align-items: center; gap: 0.65rem; cursor: pointer; }
+.privacy-choice input { accent-color: var(--accent); }
+.privacy-dialog .fb-text { min-height: 5rem; }
+.privacy-dialog code { overflow-wrap: anywhere; }

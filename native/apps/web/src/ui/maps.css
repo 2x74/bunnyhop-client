@@ -107,6 +107,8 @@
 .mbd-inner.skeleton { animation: mb-pulse 1.4s ease-in-out infinite; }
 .mbd-main { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-4); padding: var(--sp-4) var(--sp-5) var(--sp-5); }
 .mbd-title h3 { margin: 0; font-size: var(--fs-xl); font-weight: 750; letter-spacing: -0.01em; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mbd-by-link { color: inherit; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 35%, transparent); text-underline-offset: 0.15em; }
+.mbd-by-link:hover { color: var(--cream); text-decoration-color: currentColor; }
 .mbd-meta { margin: 0.25rem 0 0; display: flex; flex-wrap: wrap; gap: 0.15rem 1.1rem; font-size: var(--fs-sm); color: var(--dim); line-height: 1.4; }
 .mbd-tier { font-weight: 650; color: var(--tc, var(--tier-x)); }
 

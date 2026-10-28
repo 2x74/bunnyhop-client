@@ -18,12 +18,13 @@ import { getPB, onPBChange } from "../pb";
 import { formatTime } from "../timer";
 import { fmtBytes, h } from "./dom";
 import { mapArt, mapGallery, observeThumbs, registerMapImages } from "./thumbs";
-import { clampTier, tierLabel, tierName, TIERS } from "../tiers";
+import { clampTier, tierLabel, tierName, tierNum, TIERS, type Tier } from "../tiers";
 import { isStyleId, nextStyle, STYLE_DEFS, styleLabel, type StyleId } from "../styles";
 import { selectedStyle, setSelectedStyle } from "./style-picker";
 import { keyLabel, prefs } from "./settings";
 import { landRows } from "./land";
 import { mapUrl, shareButton } from "./share";
+import { navigate } from "./nav";
 import { openLeaderboardDialog } from "./leaderboard";
 import { requestRace, requestRaceAfterReload } from "../player/race";
 import { me } from "./account-state";
@@ -68,7 +69,7 @@ export interface MapEntry {
   added?: string | null;
   /** maps/<name>.zones.json exists locally (not shown in the UI). */
   zones?: boolean;
-  /** Community difficulty tier (clamped to T1–T6 for display and points; null = unrated). */
+  /** Community difficulty tier (raw upstream value; T7 and up show as T7+, tiers.ts; null = unrated). */
   tier?: number | null;
   /** Track count: number of tracks, or { main, bonus } counts. */
   tracks?: number | { main?: number; bonus?: number } | null;
@@ -121,12 +122,12 @@ export function tierOf(m: MapEntry, online?: MapSummary | null): number | null {
   return clampTier(online?.tier ?? m.tier ?? null);
 }
 
-/** Tier pill (T1–T6, clamped; "T?" = unrated, unranked for points). `long` adds the tier name ("T5 · Very hard"). */
+/** Tier pill (T1–T6, T7+; "T?" = unrated, unranked for points). `long` adds the tier name ("T5 · Very hard"). */
 export function tierBadge(tier: number | null, o: { long?: boolean } = {}): HTMLElement {
   const t = clampTier(tier);
   return h(
     `span.badge.tier${t ? `.t${t}` : ".tx"}`,
-    { title: t ? `Tier ${t} of 6 · ${tierName(t)}` : "Unrated: no tier yet, so no rank points" },
+    { title: t ? `Tier ${tierNum(t)} · ${tierName(t)}` : "Unrated: no tier yet, so no rank points" },
     tierLabel(t),
     o.long ? h("span.tier-name", null, ` · ${tierName(t)}`) : null,
   );
@@ -141,7 +142,7 @@ export async function mapTier(name: string): Promise<number | null> {
 // ---------------------------------------------------------------------------------------------
 // The list
 
-type TierFilter = "all" | "1" | "2" | "3" | "4" | "5" | "6" | "x";
+type TierFilter = "all" | `${Tier}` | "x";
 const TIER_FILTERS: TierFilter[] = ["all", ...TIERS.map((t) => String(t) as TierFilter), "x"];
 type Sort = "popular" | "tier" | "newest" | "name" | "unplayed" | "unfinished";
 const SORTS: [Sort, string][] = [
@@ -231,6 +232,42 @@ function mapRow(m: MapEntry, fallbackThumb: string | null = null): HTMLElement {
   return r;
 }
 
+/** Linked mapper names (api.mappers), lowercased author -> player; null until read. Failing leaves the names as plain text. */
+let mapperLinks: Record<string, { author: string; id: string; name: string }> | null = null;
+let mapperRead: Promise<void> | null = null;
+
+/** The author in a map's meta line: a link to the player's profile when staff linked the name (src/mappers.ts). */
+function authorSpan(author: string): HTMLElement {
+  const name = author.trim();
+  const el = h("span.mbd-by", { "data-key": name.toLowerCase() }, `by ${name}`);
+  linkAuthor(el);
+  return el;
+}
+
+function linkAuthor(el: HTMLElement): void {
+  const l = mapperLinks?.[el.dataset.key ?? ""];
+  if (!l || el.querySelector("a")) return;
+  const name = el.textContent!.replace(/^by /, "");
+  el.replaceChildren("by ", h("a.mbd-by-link", { href: `/u/${encodeURIComponent(l.id)}`, title: `${l.name}'s profile`, onclick: (ev: Event) => {
+    const e = ev as MouseEvent;
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button) return;
+    e.preventDefault();
+    navigate({ screen: "profile", id: l.id });
+  } }, name));
+}
+
+/** Reads the links once, then turns every author already on screen into a link. */
+function readMapperLinks(): void {
+  if (!api.available() || mapperRead) return;
+  mapperRead = api.mappers().then(
+    (m) => {
+      mapperLinks = m;
+      for (const el of document.querySelectorAll<HTMLElement>(".mbd-by")) linkAuthor(el);
+    },
+    () => void (mapperRead = null),
+  );
+}
+
 let prewarming = false;
 /**
  * Builds the list's rows ahead, a few dozen per idle callback (the home screen, once the index is in), so opening the
@@ -257,6 +294,7 @@ export function prewarmMapRows(maps: MapEntry[]): void {
 /** `focus`: map to select first (a /maps/<name> link, the home screen's Tutorial link); the filters open on "all". */
 export function mapBrowser(o: { current: string | null; focus?: string | null; style: string; onPick: (name: string) => void; gauntlets?: (() => void) | null }): HTMLElement {
   const seq = ++browserSeq;
+  readMapperLinks();
   let saved: { sort?: string; tier?: string; collection?: string } = {};
   try {
     saved = JSON.parse(localStorage.getItem(LAST_FILTER) ?? "{}") ?? {};
@@ -358,8 +396,8 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
     const sum = online?.get(name);
     const t = m ? clampTier(tierOf(m, sum)) : null;
     tierCell.className = `mb-c-tier ${t ? `t${t}` : "tx"}`;
-    tierCell.textContent = t ? `T${t}` : "T?";
-    tierCell.title = t ? `Tier ${t}, ${tierName(t)}` : "Unrated: no rank points";
+    tierCell.textContent = tierLabel(t);
+    tierCell.title = t ? `Tier ${tierNum(t)}, ${tierName(t)}` : "Unrated: no rank points";
     const pb = getPB(name, style);
     const wrMine = !!(myId && sum?.wr?.id === myId);
     // (Your record set on another device has no PB in this browser: the record is your time.)
@@ -457,10 +495,10 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
             type: "button",
             role: "radio",
             "aria-checked": String(on),
-            title: t === "all" ? "Every tier" : t === "x" ? `Unrated (${counts.get(t)} maps)` : `Tier ${t}, ${tierName(Number(t))} (${counts.get(t)} maps)`,
+            title: t === "all" ? "Every tier" : t === "x" ? `Unrated (${counts.get(t)} maps)` : `Tier ${tierNum(Number(t))}, ${tierName(Number(t))} (${counts.get(t)} maps)`,
             onclick: () => ((tierFilter = t), refilter()),
           },
-          t === "all" ? "All" : t === "x" ? "?" : t,
+          t === "all" ? "All" : t === "x" ? "?" : tierNum(Number(t)),
         );
       }),
     );
@@ -479,7 +517,7 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
       onShow.map((m) => m.name),
       (n) => tierKey(byName.get(n)!),
       isDone,
-    ).map((t) => h("option", { disabled: true, value: `tier:${t.tier}` }, `${t.tier === "x" ? "T?" : `T${t.tier}`} · ${t.done} of ${t.total}`));
+    ).map((t) => h("option", { disabled: true, value: `tier:${t.tier}` }, `${t.tier === "x" ? "T?" : tierLabel(Number(t.tier))} · ${t.done} of ${t.total}`));
     setSel.replaceChildren(
       h("option", { value: "all" }, "All maps"),
       h("option", { value: FAVORITES }, favs.length ? done("Favorites", favs) : "Favorites"),
@@ -658,8 +696,8 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
     const meta = h(
       "p.mbd-meta",
       null,
-      h(`span.mbd-tier.${t ? `t${t}` : "tx"}`, { title: t ? `Tier ${t} of 6` : "Unrated: no rank points" }, t ? `Tier ${t}, ${tierName(t)}` : "Unrated"),
-      h("span", null, m.author?.trim() ? `by ${m.author.trim()}` : "Unknown author"),
+      h(`span.mbd-tier.${t ? `t${t}` : "tx"}`, { title: t ? tierName(t) : "Unrated: no rank points" }, t ? `Tier ${tierNum(t)}, ${tierName(t)}` : "Unrated"),
+      m.author?.trim() ? authorSpan(m.author) : h("span", null, "Unknown author"),
       bonus ? h("span", { title: "Bonus tracks are timed and ranked separately, always in Normal style" }, `${bonus} bonus track${bonus > 1 ? "s" : ""}`) : null,
       m.size && m.size > 48 << 20 ? h("span", { title: "Download size" }, fmtBytes(m.size)) : null,
       sum?.added ? h("span", null, `Added ${new Date(sum.added).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`) : null,

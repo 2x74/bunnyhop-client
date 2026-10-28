@@ -3,6 +3,13 @@ project(bunnyhop_native VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+# Keep diagnostics on native code, including Objective-C++ platform adapters.
+if(MSVC)
+    # Sources and string literals are UTF-8 (HUD text uses "·" and "…").
+    add_compile_options(/W4 /utf-8)
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    add_compile_options(-Wall -Wextra)
+endif()
 if(WIN32)
     # Windows headers pulled in by SDL/cURL must not replace C++ min/max calls.
     add_compile_definitions(NOMINMAX)
@@ -76,13 +83,47 @@ endif()
 add_executable(bunnyhop-native-runner src/runner.cpp)
 target_link_libraries(bunnyhop-native-runner PRIVATE bunnyhop_core_native)
 include(CTest)
+if(BUILD_TESTING)
+    add_executable(bunnyhop-native-run-session-tests src/run_session_tests.cpp src/run_session.cpp src/ghost_slots.cpp src/replay_player.cpp)
+    target_include_directories(bunnyhop-native-run-session-tests PRIVATE vendor src)
+    target_link_libraries(bunnyhop-native-run-session-tests PRIVATE bunnyhop_core_native)
+    add_test(NAME native_run_session COMMAND bunnyhop-native-run-session-tests)
+    add_executable(bunnyhop-native-preferences-tests src/preferences_tests.cpp src/preferences.cpp)
+    target_include_directories(bunnyhop-native-preferences-tests PRIVATE vendor src)
+    target_link_libraries(bunnyhop-native-preferences-tests PRIVATE bunnyhop_core_native)
+    target_compile_options(bunnyhop-native-preferences-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    add_test(NAME native_preferences COMMAND bunnyhop-native-preferences-tests)
+    add_test(NAME native_format
+        COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckFormat.cmake")
+endif()
 if(BUNNYHOP_BUILD_CLIENT)
     find_package(SDL3 3.4 CONFIG REQUIRED)
     find_package(OpenGL REQUIRED)
     find_package(CURL REQUIRED)
     find_package(ZLIB REQUIRED)
     find_package(Threads REQUIRED)
-    add_executable(bunnyhop-native src/client.cpp src/online.cpp src/audio_pack.cpp src/video_export.cpp)
+    add_executable(bunnyhop-native
+        src/client.cpp
+        src/game_session.cpp
+        src/video_controller.cpp
+        src/hud_frame.cpp
+        src/room_bridge.cpp
+        src/runtime_smoke.cpp
+        src/client_smoke.cpp
+        src/practice_controller.cpp
+        src/tutorial_runner.cpp
+        src/ghost_slots.cpp
+        src/replay_player.cpp
+        src/run_session.cpp
+        src/options.cpp
+        src/startup.cpp
+        src/preferences.cpp
+        src/replay_library.cpp
+        src/online.cpp
+        src/audio_pack.cpp
+        src/video_export.cpp
+    )
     add_executable(bunnyhop-native-export-previews EXCLUDE_FROM_ALL src/export_previews.cpp)
     add_executable(bunnyhop-native-loadout-preview-smoke EXCLUDE_FROM_ALL src/loadout_preview_smoke.cpp)
     target_include_directories(bunnyhop-native-loadout-preview-smoke PRIVATE include vendor src)
@@ -144,6 +185,15 @@ if(BUNNYHOP_BUILD_CLIENT)
         target_sources(bunnyhop-native PRIVATE src/menu_webview_macos.mm)
         set_source_files_properties(src/menu_webview_macos.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
         target_link_libraries(bunnyhop-native PRIVATE "-framework Cocoa" "-framework WebKit")
+        if(BUILD_TESTING)
+            add_executable(bunnyhop-native-menu-focus-tests src/menu_webview_focus_tests.mm src/menu_webview_macos.mm)
+            target_include_directories(bunnyhop-native-menu-focus-tests PRIVATE vendor src)
+            target_link_libraries(bunnyhop-native-menu-focus-tests PRIVATE
+                SDL3::SDL3 "-framework Cocoa" "-framework WebKit")
+            set_source_files_properties(src/menu_webview_focus_tests.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc;-UNDEBUG")
+            add_test(NAME native_menu_focus COMMAND bunnyhop-native-menu-focus-tests)
+            set_tests_properties(native_menu_focus PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
+        endif()
     elseif(WIN32)
         enable_language(RC)
         file(TO_CMAKE_PATH "${BUNNYHOP_ICON_DIR}/icon.ico" BUNNYHOP_WINDOWS_ICON)
@@ -244,7 +294,7 @@ if(BUNNYHOP_BUILD_CLIENT)
     endif()
 endif()
 if(BUILD_TESTING)
-    foreach(parity_test IN ITEMS zone_effects native_chat render_math room_state gameplay data_location sniper_zoom music_envelope weapon_menu ghost_trails activity cosmetics window_settings replay_controls)
+    foreach(parity_test IN ITEMS graphics_settings zone_effects native_chat render_math room_state gameplay data_location sniper_zoom music_envelope weapon_menu ghost_trails activity cosmetics window_settings window_modes hud_theme replay_controls)
         add_executable(bunnyhop-native-${parity_test}-tests src/${parity_test}_tests.cpp)
         target_include_directories(bunnyhop-native-${parity_test}-tests PRIVATE include vendor src)
         target_compile_options(bunnyhop-native-${parity_test}-tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
@@ -267,6 +317,13 @@ if(BUILD_TESTING)
         target_compile_options(bunnyhop-native-window-sdl-tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
         add_test(NAME native_window_sdl COMMAND bunnyhop-native-window-sdl-tests)
         set_tests_properties(native_window_sdl PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 20)
+        add_executable(bunnyhop-native-file-dialog-tests src/file_dialogs_tests.cpp)
+        target_include_directories(bunnyhop-native-file-dialog-tests PRIVATE vendor src)
+        target_link_libraries(bunnyhop-native-file-dialog-tests PRIVATE SDL3::SDL3)
+        target_compile_options(bunnyhop-native-file-dialog-tests PRIVATE
+            $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+        add_test(NAME native_file_dialogs COMMAND bunnyhop-native-file-dialog-tests)
+        set_tests_properties(native_file_dialogs PROPERTIES TIMEOUT 20)
         add_executable(bunnyhop-native-video-tests src/video_export_tests.cpp src/video_export.cpp src/audio_pack.cpp)
         target_include_directories(bunnyhop-native-video-tests PRIVATE include vendor src)
         target_link_libraries(bunnyhop-native-video-tests PRIVATE bunnyhop_core_native SDL3::SDL3 Threads::Threads)
@@ -284,6 +341,12 @@ if(BUILD_TESTING)
     target_compile_options(bunnyhop-native-camera-tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
     add_executable(bunnyhop-native-room-modes-tests src/room_modes_tests.cpp)
     target_include_directories(bunnyhop-native-room-modes-tests PRIVATE vendor)
+    add_executable(bunnyhop-native-latest-worker-tests src/latest_worker_tests.cpp)
+    target_include_directories(bunnyhop-native-latest-worker-tests PRIVATE src)
+    target_link_libraries(bunnyhop-native-latest-worker-tests PRIVATE Threads::Threads)
+    target_compile_options(bunnyhop-native-latest-worker-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    add_test(NAME native_latest_worker COMMAND bunnyhop-native-latest-worker-tests)
     add_test(NAME native_room_modes COMMAND bunnyhop-native-room-modes-tests)
     add_executable(bunnyhop-native-tutorial-tests src/tutorial_tests.cpp)
     target_include_directories(bunnyhop-native-tutorial-tests PRIVATE include vendor)
@@ -334,6 +397,19 @@ if(BUILD_TESTING)
         target_compile_options(bunnyhop-native-input-tests PRIVATE -ffp-contract=off)
     endif()
     add_test(NAME native_input COMMAND bunnyhop-native-input-tests)
+    add_executable(bunnyhop-native-timed-input-tests src/timed_input_tests.cpp)
+    target_include_directories(bunnyhop-native-timed-input-tests PRIVATE include vendor src)
+    add_test(NAME native_timed_input COMMAND bunnyhop-native-timed-input-tests)
+    add_executable(bunnyhop-native-frame-loop-tests src/frame_loop_tests.cpp)
+    target_include_directories(bunnyhop-native-frame-loop-tests PRIVATE include vendor src)
+    find_package(Threads REQUIRED)
+    target_link_libraries(bunnyhop-native-frame-loop-tests PRIVATE Threads::Threads)
+    add_test(NAME native_frame_loop COMMAND bunnyhop-native-frame-loop-tests)
+    # Golden vectors from the web's TimedInput; regenerate with native/tools/timed-input/generate-vectors.ts.
+    add_executable(bunnyhop-native-timed-input-parity-tests src/timed_input_parity_tests.cpp)
+    target_include_directories(bunnyhop-native-timed-input-parity-tests PRIVATE include vendor src)
+    add_test(NAME native_timed_input_parity COMMAND bunnyhop-native-timed-input-parity-tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/timed_input_vectors.json")
     # Turn-bind admission oracle for the optional server cross-check
     # (crates/native-bridge/tools/check-native-turn-admission.ts); built, not run by CTest.
     add_executable(bunnyhop-native-input-turn-oracle src/native_input_turn_oracle.cpp)
@@ -366,6 +442,14 @@ if(BUILD_TESTING AND BUNNYHOP_BUILD_CLIENT)
 endif()
 
 if(BUILD_TESTING)
+    find_package(ZLIB REQUIRED)
+    add_executable(bunnyhop-native-v29-input-tests src/v29_input_tests.cpp src/replay_library.cpp)
+    target_include_directories(bunnyhop-native-v29-input-tests PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-v29-input-tests PRIVATE bunnyhop_core_native ZLIB::ZLIB)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(bunnyhop-native-v29-input-tests PRIVATE -ffp-contract=off)
+    endif()
+    add_test(NAME native_v29_input COMMAND bunnyhop-native-v29-input-tests)
     add_executable(bunnyhop-native-runtime-tests src/runtime_tests.cpp)
     target_include_directories(bunnyhop-native-runtime-tests PRIVATE include vendor src)
     target_link_libraries(bunnyhop-native-runtime-tests PRIVATE bunnyhop_core_native)
@@ -447,4 +531,19 @@ if(BUILD_TESTING)
         add_test(NAME native_longjump COMMAND bunnyhop-native-longjump-tests "${LONGJUMP_ORACLE}")
         set_tests_properties(native_longjump PROPERTIES FIXTURES_REQUIRED longjump_oracle)
     endif()
+endif()
+
+if(BUNNYHOP_BUILD_CLIENT)
+    add_executable(bunnyhop-native-effects-render-smoke EXCLUDE_FROM_ALL src/effects_render_smoke.cpp)
+    target_include_directories(bunnyhop-native-effects-render-smoke PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-effects-render-smoke PRIVATE
+        bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
+endif()
+
+if(BUILD_TESTING)
+    add_executable(bunnyhop-native-replay-compare-tests src/replay_compare_tests.cpp)
+    target_include_directories(bunnyhop-native-replay-compare-tests PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-replay-compare-tests PRIVATE bunnyhop_core_native)
+    target_compile_options(bunnyhop-native-replay-compare-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
 endif()

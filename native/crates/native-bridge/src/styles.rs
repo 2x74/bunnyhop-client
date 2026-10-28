@@ -138,7 +138,7 @@ impl Filter {
         }
         // Shared filter removes keyboard turn bits even on the ground and ladders.
         if self.id == "scroll" {
-            c.buttons &= !((1 << 7) | (1 << 8));
+            c.buttons &= !((1 << 6) | (1 << 7) | (1 << 8));
         }
         if s.grounded != 0 || s.on_ladder != 0 || self.from_ladder {
             return c;
@@ -223,7 +223,11 @@ mod tests {
                     ..BhState::default()
                 };
                 let got = filter.apply(command(&row["cmd"]), state);
-                let expected = command(&row["expected"]);
+                let mut expected = command(&row["expected"]);
+                // The pinned web filter predates v29 IN_TURN_FAST. All other fields remain its exact oracle.
+                if style == "scroll" {
+                    expected.buttons &= !(1 << 6);
+                }
                 assert_eq!(
                     (
                         got.forward.to_bits(),

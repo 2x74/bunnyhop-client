@@ -29,7 +29,6 @@ function hashFile(path, maximum) {
   requireThat(total === stat.size, 'File size changed while hashing');
   return hash.digest('hex');
 }
-export const evidenceArtifactCoordinates = evidence => evidence.artifacts.flatMap(a => [a, a.parity]).map(a => `${a.id}:${a.digest}`).sort();
 export const targets = { windows: 'win32/x64', macos: 'darwin/arm64', linux: 'linux/x64' };
 const artifactBase = { windows: 'bunnyhop-windows-x64', macos: 'bunnyhop-macos-arm64', linux: 'bunnyhop-linux-x64' };
 const hex = /^[0-9a-f]{64}$/;
@@ -127,28 +126,12 @@ export function collectEvidence(directory, context, needs) {
   return validateEvidence(evidence);
 }
 
-// A review is a data contract, not authorization. Only a trusted receiver can establish who produced it.
-export function validateReview(evidenceBytes, review, policy, now = Date.now()) {
-  const evidence = validateEvidence(JSON.parse(evidenceBytes));
-  requireThat(evidence.platform === 'all', 'Promotion requires all platform gates');
-  requireThat(policy.enabled === true && typeof policy.provider === 'string' && policy.provider.length > 0, 'Review provider policy is not activated');
-  requireThat(policy.models?.includes(review.model) && review.provider === policy.provider && policy.reasoning === 'high' && review.reasoning === policy.reasoning, 'Unapproved review model/provider/reasoning');
-  requireThat(review.schema === 1 && review.decision === 'approve' && Array.isArray(review.blockers) && review.blockers.length === 0, 'Review did not approve');
-  requireThat(review.evidenceSha256 === sha256(evidenceBytes) && review.sourceSha === evidence.sourceSha && review.runId === evidence.runId && review.runAttempt === evidence.runAttempt, 'Review is bound to different evidence');
-  const expected = evidenceArtifactCoordinates(evidence);
-  requireThat(Array.isArray(review.artifacts) && JSON.stringify([...review.artifacts].sort()) === JSON.stringify(expected), 'Review artifacts differ');
-  const created = Date.parse(review.createdAt), expires = Date.parse(review.expiresAt);
-  requireThat(Number.isFinite(created) && Number.isFinite(expires) && created <= now && expires > now && expires > created && expires - created <= 24 * 3600_000, 'Review expired or invalid');
-  requireThat(typeof review.summary === 'string' && review.summary.length > 0 && review.summary.length <= 8000, 'Missing/bounded review summary');
-  return evidence;
-}
-
-// Keep the complete multi-platform report within the manual review input bound.
-// Compact encoding changes only whitespace; the review binds these exact bytes.
+// Keep the complete multi-platform report small enough to read by hand.
+// Compact encoding changes only whitespace.
 export function serializeEvidence(evidence) {
   validateEvidence(evidence);
   const bytes = JSON.stringify(evidence) + '\n';
-  requireThat(Buffer.byteLength(bytes, 'utf8') <= 64 * 1024, 'Candidate evidence exceeds manual review input limit');
+  requireThat(Buffer.byteLength(bytes, 'utf8') <= 64 * 1024, 'Candidate evidence exceeds the input limit');
   return bytes;
 }
 

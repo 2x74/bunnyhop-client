@@ -1,3 +1,50 @@
 #include "runner_anim.hpp"
 #include <iostream>
-int main(int argc,char**argv){try{if(argc!=2)throw std::runtime_error("usage: runner-anim-tests ORACLE");nlohmann::json frames;std::ifstream(argv[1])>>frames;native_runner::State state;std::vector<float> skin;double error=0;size_t count=0;for(const auto&f:frames){const auto&v=f["input"];native_runner::Input in;in.position=v["position"].get<native_runner::V>();in.velocity=v["velocity"].get<native_runner::V>();in.yaw=v["yaw"];in.pitch=v["pitch"];in.sidemove=v["sidemove"];in.crouched=v["crouched"];in.grounded=v["grounded"];in.hasVelocity=v["hasVelocity"];if(!state.pose(in,f["time"],f["snap"],skin))throw std::runtime_error("valid runner pose rejected");auto expected=f["expected"].get<std::vector<float>>();double frameError=0;for(size_t i=0;i<skin.size();i++){if(!std::isfinite(skin[i]))throw std::runtime_error("nonfinite runner matrix");frameError=std::max(frameError,std::abs(double(skin[i]-expected[i])));}error=std::max(error,frameError);if(frameError>.002||std::abs(state.bodyYaw-f["bodyYaw"].get<double>())>.00001||std::abs(state.phase-f["phase"].get<double>())>.00001){std::cerr<<"runner mismatch frame "<<count<<" matrix="<<frameError<<" yaw="<<state.bodyYaw-f["bodyYaw"].get<double>()<<" phase="<<state.phase-f["phase"].get<double>()<<'\n';return 1;}count++;}auto invalid=native_runner::Input{};invalid.yaw=std::numeric_limits<double>::infinity();if(state.pose(invalid,30,false,skin))throw std::runtime_error("nonfinite input accepted");std::cout<<count<<" original runner frames; max matrix error="<<error<<'\n';return 0;}catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}
+
+int main(int argc, char **argv) {
+    try {
+        if (argc != 2) throw std::runtime_error("usage: runner-anim-tests ORACLE");
+        nlohmann::json frames;
+        std::ifstream(argv[1]) >> frames;
+        native_runner::State state;
+        std::vector<float> skin;
+        double error = 0;
+        size_t count = 0;
+        for (const auto &f : frames) {
+            const auto &v = f["input"];
+            native_runner::Input in;
+            in.position = v["position"].get<native_runner::V>();
+            in.velocity = v["velocity"].get<native_runner::V>();
+            in.yaw = v["yaw"];
+            in.pitch = v["pitch"];
+            in.sidemove = v["sidemove"];
+            in.crouched = v["crouched"];
+            in.grounded = v["grounded"];
+            in.hasVelocity = v["hasVelocity"];
+            if (!state.pose(in, f["time"], f["snap"], skin)) throw std::runtime_error("valid runner pose rejected");
+            auto expected = f["expected"].get<std::vector<float>>();
+            double frameError = 0;
+            for (size_t i = 0; i < skin.size(); i++) {
+                if (!std::isfinite(skin[i])) throw std::runtime_error("nonfinite runner matrix");
+                frameError = std::max(frameError, std::abs(double(skin[i] - expected[i])));
+            }
+            error = std::max(error, frameError);
+            if (frameError > .002 || std::abs(state.bodyYaw - f["bodyYaw"].get<double>()) > .00001
+                || std::abs(state.phase - f["phase"].get<double>()) > .00001) {
+                std::cerr << "runner mismatch frame " << count << " matrix=" << frameError
+                          << " yaw=" << state.bodyYaw - f["bodyYaw"].get<double>()
+                          << " phase=" << state.phase - f["phase"].get<double>() << '\n';
+                return 1;
+            }
+            count++;
+        }
+        auto invalid = native_runner::Input{};
+        invalid.yaw = std::numeric_limits<double>::infinity();
+        if (state.pose(invalid, 30, false, skin)) throw std::runtime_error("nonfinite input accepted");
+        std::cout << count << " original runner frames; max matrix error=" << error << '\n';
+        return 0;
+    } catch (const std::exception &e) {
+        std::cerr << e.what() << '\n';
+        return 1;
+    }
+}

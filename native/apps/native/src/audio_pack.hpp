@@ -25,6 +25,7 @@ struct DecodedAudio {
     std::vector<float> samples;
     int channels = 0;
     int rate = 0;
+
     bool ok() const { return channels > 0 && rate > 0 && !samples.empty(); }
 };
 
@@ -37,6 +38,7 @@ struct DecodedMusic {
     std::vector<std::int16_t> samples;
     int channels = 0;
     int rate = 0;
+
     bool ok() const { return channels > 0 && rate > 0 && !samples.empty(); }
 };
 
@@ -46,24 +48,33 @@ inline constexpr std::uint64_t max_pack_file_bytes = 64ull << 20;
 // Caps are counted in decoded samples, never in file bytes: 300 KB of MP3
 // expands to 30 MB of PCM, so the compressed size predicts nothing about what
 // a decode will cost.
-inline constexpr std::uint64_t max_sfx_samples = 8ull << 20;    // 32 MB as float
-inline constexpr std::uint64_t max_music_samples = 64ull << 20; // 128 MB as int16
+inline constexpr std::uint64_t max_sfx_samples = 8ull << 20;     // 32 MB as float
+inline constexpr std::uint64_t max_music_samples = 64ull << 20;  // 128 MB as int16
 
 // |error| receives a short reason the file was skipped. A pack is user-supplied
 // data, so a bad file is reported and stepped over, never fatal.
 // Optional budgets may lower (never raise) the per-file decoded sample cap.
 // Failure clears the output, including any partially decoded PCM.
-bool decode_sfx_file(const std::filesystem::path &file, DecodedAudio *out, std::string *error,
-                     std::uint64_t max_samples = max_sfx_samples, bool wav_only = false);
-bool decode_music_file(const std::filesystem::path &file, DecodedMusic *out, std::string *error,
-                       std::uint64_t max_samples = max_music_samples);
+bool decode_sfx_file(
+        const std::filesystem::path &file,
+        DecodedAudio *out,
+        std::string *error,
+        std::uint64_t max_samples = max_sfx_samples,
+        bool wav_only = false
+);
+bool decode_music_file(
+        const std::filesystem::path &file,
+        DecodedMusic *out,
+        std::string *error,
+        std::uint64_t max_samples = max_music_samples
+);
 
 // Sound effects mix into one mono stream, so a stereo file is averaged rather
 // than having a channel dropped, and resampled to the mixer's rate.
 std::vector<float> to_mono(const DecodedAudio &audio);
 // Returns empty if the output would exceed max_samples, before allocating it.
-std::vector<float> resample_mono(const std::vector<float> &samples, int from_rate, int to_rate,
-                                 std::size_t max_samples = max_sfx_samples);
+std::vector<float>
+resample_mono(const std::vector<float> &samples, int from_rate, int to_rate, std::size_t max_samples = max_sfx_samples);
 
 // Files directly inside |dir|; subdirectories, dotfiles and oversized files are
 // skipped. Results are sorted so the order does not depend on the filesystem.
@@ -74,11 +85,12 @@ std::vector<float> resample_mono(const std::vector<float> &samples, int from_rat
 std::map<std::string, std::vector<std::filesystem::path>> scan_sfx_pack(const std::filesystem::path &dir);
 
 struct MusicTrack {
-    std::string id;                  // filename without extension, or manifest id
-    std::string title;               // what the menu shows
-    std::filesystem::path file;      // empty for a shipped track that is absent
-    std::string role = "game";       // the shipped menu track is skipped during gameplay
+    std::string id;              // filename without extension, or manifest id
+    std::string title;           // what the menu shows
+    std::filesystem::path file;  // empty for a shipped track that is absent
+    std::string role = "game";   // the shipped menu track is skipped during gameplay
 };
+
 std::vector<MusicTrack> scan_music_pack(const std::filesystem::path &dir);
 
 }  // namespace native

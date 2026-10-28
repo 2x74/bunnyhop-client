@@ -1,6 +1,51 @@
 #include "settings.hpp"
 #include <cassert>
 #include <limits>
-int main(){using namespace native;const auto full=default_settings();assert(full["windowMode"]=="windowed");assert(patch_settings(full,{{"windowMode","fullscreen"},{"alwaysOnTop",true}})["windowMode"]=="fullscreen");for(const auto&bad:{Json{{"windowMode","fake"}},Json{{"alwaysOnTop",1}},Json{{"rememberWindowBounds","true"}}}){bool threw=false;try{patch_settings(full,bad);}catch(...){threw=true;}assert(threw);}auto settings=default_window_settings();assert(settings["windowMode"]=="windowed"&&settings["rememberWindowBounds"]==true&&settings["minimizeOnFocusLoss"]==false);patch_window_settings(settings,{{"windowMode","borderless"},{"alwaysOnTop",true},{"minimizeOnFocusLoss",true},{"rememberWindowBounds",false},{"unknown","ignored"}});assert(settings["windowMode"]=="borderless"&&settings["alwaysOnTop"]==true&&!settings.contains("unknown"));const auto valid=settings;patch_window_settings(settings,{{"windowMode","other"},{"alwaysOnTop",1},{"rememberWindowBounds","yes"}});assert(settings==valid);
- assert(!read_window_bounds({{"x",0},{"y",0},{"width",0},{"height",720}}));assert(!read_window_bounds({{"x",std::numeric_limits<uint64_t>::max()},{"y",0},{"width",800},{"height",600}}));assert(!read_window_bounds({{"x",0},{"y",0},{"width",800.5},{"height",600}}));const WindowBounds original{-1500,100,1280,720,true};const auto restored=read_window_bounds(window_bounds_json(original));assert(restored&&restored->x==original.x&&restored->maximized);
- const std::vector<WindowArea> screens{{0,0,1920,1040},{-1600,0,1600,900}};const auto second=clamp_window_bounds(original,screens);assert(second.x==-1500&&second.y==100&&second.width==1280);const auto disconnected=clamp_window_bounds({4000,2000,2560,1440,false},screens);assert(disconnected.x==0&&disconnected.y==0&&disconnected.width==1920&&disconnected.height==1040);const auto small=clamp_window_bounds({-500,-500,100,100,false},{{0,30,480,300}});assert(small.x==0&&small.y==30&&small.width==480&&small.height==300);assert(toggled_window_mode("windowed")=="borderless"&&toggled_window_mode("fullscreen")=="windowed");}
+
+int main() {
+    using namespace native;
+    const auto full = default_settings();
+    assert(full["windowMode"] == "windowed");
+    assert(patch_settings(full, {{"windowMode", "fullscreen"}, {"alwaysOnTop", true}})["windowMode"] == "fullscreen");
+    for (const auto &bad :
+         {Json{{"windowMode", "fake"}}, Json{{"alwaysOnTop", 1}}, Json{{"rememberWindowBounds", "true"}}}) {
+        bool threw = false;
+        try {
+            patch_settings(full, bad);
+        } catch (...) {
+            threw = true;
+        }
+        assert(threw);
+    }
+    auto settings = default_window_settings();
+    assert(settings["windowMode"] == "windowed" && settings["rememberWindowBounds"] == true
+           && settings["minimizeOnFocusLoss"] == false);
+    patch_window_settings(
+            settings,
+            {{"windowMode", "borderless"},
+             {"alwaysOnTop", true},
+             {"minimizeOnFocusLoss", true},
+             {"rememberWindowBounds", false},
+             {"unknown", "ignored"}}
+    );
+    assert(settings["windowMode"] == "borderless" && settings["alwaysOnTop"] == true && !settings.contains("unknown"));
+    const auto valid = settings;
+    patch_window_settings(settings, {{"windowMode", "other"}, {"alwaysOnTop", 1}, {"rememberWindowBounds", "yes"}});
+    assert(settings == valid);
+    assert(!read_window_bounds({{"x", 0}, {"y", 0}, {"width", 0}, {"height", 720}}));
+    assert(!read_window_bounds(
+            {{"x", std::numeric_limits<uint64_t>::max()}, {"y", 0}, {"width", 800}, {"height", 600}}
+    ));
+    assert(!read_window_bounds({{"x", 0}, {"y", 0}, {"width", 800.5}, {"height", 600}}));
+    const WindowBounds original{-1500, 100, 1280, 720, true};
+    const auto restored = read_window_bounds(window_bounds_json(original));
+    assert(restored && restored->x == original.x && restored->maximized);
+    const std::vector<WindowArea> screens{{0, 0, 1920, 1040}, {-1600, 0, 1600, 900}};
+    const auto second = clamp_window_bounds(original, screens);
+    assert(second.x == -1500 && second.y == 100 && second.width == 1280);
+    const auto disconnected = clamp_window_bounds({4000, 2000, 2560, 1440, false}, screens);
+    assert(disconnected.x == 0 && disconnected.y == 0 && disconnected.width == 1920 && disconnected.height == 1040);
+    const auto small = clamp_window_bounds({-500, -500, 100, 100, false}, {{0, 30, 480, 300}});
+    assert(small.x == 0 && small.y == 30 && small.width == 480 && small.height == 300);
+    assert(toggled_window_mode("windowed") == "borderless" && toggled_window_mode("fullscreen") == "windowed");
+}

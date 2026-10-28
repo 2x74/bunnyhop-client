@@ -45,7 +45,7 @@
    two words, and VERSION stays below 0.1.0 while STAGE is alpha.
    ============================================================ */
 
-export const VERSION = "0.0.27";
+export const VERSION = "0.0.29";
 
 /** Release stage, printed after the number ("v0.0.4 alpha"). */
 export const STAGE = "alpha";
@@ -67,8 +67,8 @@ export interface ChangelogEntry {
 
 /** Notes for the next release, unpublished until promoted into CHANGELOG. */
 export const UPCOMING: ChangelogEntry = {
-  version: "0.0.28",
-  date: "2026-10-25",
+  version: "0.0.30",
+  date: "2026-10-28",
   kind: "minor",
   title: "Next update",
   notes: [],
@@ -76,6 +76,68 @@ export const UPCOMING: ChangelogEntry = {
 
 /** Newest first. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.0.29",
+    date: "2026-10-28",
+    kind: "major",
+    title: "Gain like CS:S, millisecond times, 71 maps and new guns",
+    links: [
+      { label: "Custom skies guide", url: "https://bunnyhop.lol/custom-skies" },
+      { label: "Native client on GitHub", url: "https://github.com/2x74/bunnyhop-client/releases" },
+    ],
+    notes: [
+      "Strafe gain and !ssj now match CS:S at any refresh rate. Each tick takes the mouse movement and W/A/S/D presses made before it, instead of whatever the last frame saw, so 60 Hz and 144 Hz screens no longer lose gain. It's on by default: Settings → Mouse & view → Advanced → Timestamped input. Thanks to PonyTrap, Worldspawn and hena for the reports.",
+      "Runs are timed to the millisecond, like bhoptimer: from the moment you leave the start zone to the moment you enter the end zone, measured inside the tick. Times shift by a few ms (most by +4 to +6 ms), and ties are about ten times rarer. Older records are re-timed from their replays. Gauntlets rank by the sum of your ms times, and races tied on arrival go to the lower time.",
+      "New T7+ tier, shown in indigo, for the hardest maps: bhop_triumph, bhop_apricity, bhop_badges2, bhop_futile, bhop_priexaliblyat and bhop_wrath. bhop_decimus, bhop_tieroverflow and bhop_alvo2 move up to T6, and bhop_greenroom_final to T5. Clearing a T7+ map gives the Transcendent badge.",
+      "Points: lower-ranked records now count for a little more toward your total, so a wide spread of good times adds up better.",
+      "71 new maps. Fly and tech: bhop_fly_care, bhop_fly_hell, bhop_fly_horty, bhop_fly_syzygy, bhop_fly_xerotic, bhop_flydown, bhop_flyflex, bhop_flying_rabbits_css, bhop_fly_ninja_fix_css, bhop_platinum_lol, bhop_transitions, bhop_technologeek, bhop_technology, bhop_askowo, bhop_nalliexkaren and bhop_spution. Nine Flartstrafe maps, including bhop_flartstrafe_630s, colorline, tux, dejavu_fix, lego, simpsons, cyber, kittttty and space. Plus bhop_30m, bhop_treehouse, bhop_wristbreaker, bhop_freefall, bhop_profane, bhop_skyruins, bhop_khufu, bhop_bathhouse, bhop_waterfall, bhop_beginner_castle and many more: sort the map list by Newest. Thanks to GothQueen for the map list and peril for the fly requests.",
+      "On bhop_shutdown, !setstart and restarts keep you in the start zone instead of sending you to the hub. Thanks to hena.",
+      "Turn speed: set how fast Turn left and Turn right turn (Settings → Keys → Turn speed, CS:S's cl_yawspeed, 210°/s by default) and hold Fast turn (Up arrow by default, like +speed) to turn faster. Both count in ranked runs in every style that allows turn binds.",
+      "!setspawn (or !ss, or 4) works anywhere you stand still: away from the start zone it makes a practice spawn to restart from.",
+      "Practice from here: in the replay viewer, press P (or the chip) to take over a replay at that moment and keep playing as practice, with its speed.",
+      "Replays show the runner's own bunny: their colourway, knife, finish, gloves and hat. Press V (or the Weapon chip) to show what they had in hand, with knife swings, inspects, shots and reloads. After a long wait in the spawn, the replay bar starts 2 seconds before the run. Thanks to hena.",
+      "Video export has a new dialog with presets (Standard, Shorts, Editing and your own saved settings), motion blur that works in every look, 4K, 240 fps, HEVC and AV1 where your browser supports them, an edit-ready quality, and Speed, Crosshair and Weapon in hand switches. Very large exports no longer run out of memory. Thanks to oasis.",
+      "New supporter cosmetics, from tyzi's asks: Space Buns and Ponytail wigs, with your own hair colour, the hood down and a ponytail that swings, plus the Half Oni Mask. New metal knife finishes: Emerald Steel, Ruby Steel, Sapphire Steel, Pearl, Chromatic and Chrome, which reflect the map in the Enhanced and Cinematic looks.",
+      "Gloves and sleeves got a detail pass: real hoodie sleeves with ribbed cuffs, gloves with straps, seams and pads that tuck into the sleeve, and new Plush and Bun-E forearms. The bunny's hoodie, shoes and visor have new materials and stitching.",
+      "Every gun has a reworked model and new animations: recoil that snaps and settles, slides and bolts that move, reloads that drop the old mag, shells that bounce at your feet, and wrists that no longer bend at odd angles. Each gun has its own new firing sound. Other players' guns now sit right in their hands, with recoil and reloads. None of it moves your aim.",
+      "Settings → Graphics is simpler: Quality, Sky, Colour & visibility and Display up front, everything else under Advanced. Sky packs no longer squash the layout.",
+      "One Sky picker in Settings → Graphics, with seven skies to download, and Add from a link for Poly Haven skies, .hdr files and now any 2:1 PNG, JPEG or WebP panorama. Drop a sky file onto Settings to add it. The new guide at bunnyhop.lol/custom-skies shows how, including turning a Source skybox into one.",
+      "In the desktop app, keep skies in a folder (F10 → Client → Open skies folder) and they show up in the Sky picker as soon as you save them there. This needs the next desktop app update.",
+      "Hover a time on any leaderboard (or hold it on touch) to see how the run was played: browser, desktop app or native client, average FPS, sensitivity, DPI and polling rate, turn speed, jumps, strafes, sync and how many times the replay was watched. Runs from now on also show which attempt it was and how long the player had played the map.",
+      "Field of view now goes up to 120.",
+      "Fixed the stutters since the Source look: shaders are now prepared while the map loads, instead of mid-run when a player joins or you first see water. Loading takes a moment longer.",
+      "Show input stats reads high polling rate mice correctly (a 2 kHz mouse no longer shows 10,000 Hz), and 2 kHz mice stay on raw input. Thanks to Throw.",
+      "New Mapper badge for players who made maps here. Their name on the map panel links to their profile, which lists their maps. Beat a mapper's own time on their map for the Beat the Mapper achievement. Thanks to Maharero for the idea.",
+      "In public rooms, players idle for 5 minutes no longer count toward RTV and map votes, and a full room makes space by moving out whoever has been idle longest.",
+      "Far fewer honest runs are held for a check.",
+      "The desktop app dialog explains luna's native C++ client and links to its releases.",
+    ],
+  },
+  {
+    version: "0.0.28",
+    date: "2026-10-26",
+    kind: "major",
+    title: "Source look, bunny avatars and custom CSS",
+    links: [
+      { label: "Native client v0.4.0 on GitHub", url: "https://github.com/2x74/bunnyhop-client/releases" },
+      { label: "Custom CSS guide", url: "https://bunnyhop.lol/custom-css" },
+    ],
+    notes: [
+      "Every player now has a bunny avatar on leaderboards and profiles. It starts as your bunny's colourway in a random pose.",
+      "Make it yours at bunnyhop.lol/avatar, or Edit avatar in your account panel: pick a pose, framing and backdrop, and dress it in the colourway, headwear, knife, finish and gloves you own. Download or copy it as a PNG to use anywhere. Prefer your Discord picture? Switch it back on in the same place.",
+      "Maps now look the way they do in CS:S. The new Source look is the default: lighting matches CS:S side by side, maps with HDR lighting get CS:S's auto exposure and bloom, and water reflects the map. Thanks to huddled for the CS:S reference renders.",
+      "Water reflections cost some FPS near water. They're on with the High preset; switch them in Settings → Graphics → Water reflections.",
+      "Pick a different look in Settings → Graphics → Look. Plain is the old look and the fastest. Enhanced and Cinematic are back, retuned to match the Source look, with sun shadows, light from nearby lamps, sky packs and more under Advanced. Cinematic is experimental and downloads its packs once (about 23 MB).",
+      "Smoke on the bhop_arcane maps is soft smoke now, and turns on and off with the map. A sky pack you picked stays picked after a reload.",
+      "Restyle the menus and the HUD with your own CSS in Settings → Custom CSS: colours, fonts, pictures and GIFs. Paste a theme someone shared or add one with Import link. The guide at bunnyhop.lol/custom-css shows how and has Slant, Source and Clean to start from, and #custom-css on our Discord has more. If a theme breaks your screen, Ctrl+Shift+V turns it off.",
+      "The desktop client (v0.2.2) can load a .css file and apply it again every time you save: F10 → Client → Custom CSS.",
+      "The native client, written in C++ and still in beta, got the Source look, tutorial runs that upload, and a fix for a Linux crash when loading a map or opening a profile.",
+      "Native client v0.4.0 brings its menus level with the browser game: profiles, Loadout, Support, the scoreboard, leaderboards and chat. It also adds replays with clip export and music, announcer sounds, character and knife animations, colour blind palettes, controller menu navigation, better high polling rate mouse handling, and the wall and ladder fixes below. Download it from GitHub.",
+      "Replays and ghosts show the runner's account name. Runs from the native client used to say native-player.",
+      "Black walls on bhop_unreal_space and other maps are visible again, so you no longer see through them or collide with invisible walls.",
+      "The ladder sections on bhop_synthetic_fix now work. Existing replays keep their original movement. Thanks to GothQueen for both reports.",
+    ],
+  },
   {
   version: "0.0.27",
   date: "2026-10-25",

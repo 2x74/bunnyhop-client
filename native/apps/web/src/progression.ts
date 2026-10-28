@@ -12,7 +12,7 @@
 //   - Staff own every earned cosmetic while they hold the role (rank-held ones: preview only, unless it's the owner;
 //     the owner's own items stay the owner's: staffGrant); their achievements and XP still come only from playing.
 
-import { clampTier, MAX_TIER, type Tier } from "./tiers";
+import { clampTier, MAX_TIER, TIERS, tierLabel, tierNum, type Tier } from "./tiers";
 import { earnsProgression, isStyleId, STYLE_DEFS } from "./styles";
 
 // ---------------------------------------------------------------------------------------------
@@ -103,6 +103,8 @@ export interface XpRun {
 
 const DAY_MS = 86_400_000;
 const before = (a: XpRun, b: XpRun) => a.at < b.at || (a.at === b.at && a.id < b.id);
+/** A run's score for PB comparisons: its time in whole milliseconds, as the boards rank (v0.0.29). */
+const scoreMs = (r: XpRun) => Math.round(r.time * 1000);
 
 /**
  * The XP context of `run` given the player's earlier verified runs (any order; anything not earlier is ignored). Only
@@ -115,8 +117,8 @@ export function xpContext(prior: XpRun[], run: XpRun): XpRunInput {
   let best = Infinity;
   let pbsToday = 0;
   for (const p of same) {
-    if (p.ticks < best && best !== Infinity && Math.floor(p.at / DAY_MS) === day) pbsToday++;
-    best = Math.min(best, p.ticks);
+    if (scoreMs(p) < best && best !== Infinity && Math.floor(p.at / DAY_MS) === day) pbsToday++;
+    best = Math.min(best, scoreMs(p));
   }
   const t = clampTier(run.tier);
   return {
@@ -127,7 +129,7 @@ export function xpContext(prior: XpRun[], run: XpRun): XpRunInput {
     finishesToday: same.filter((p) => Math.floor(p.at / DAY_MS) === day).length,
     pbsToday,
     firstClear: same.length === 0,
-    improvedPB: same.length > 0 && run.ticks < best,
+    improvedPB: same.length > 0 && scoreMs(run) < best,
     firstOfTier: run.track === 0 && t !== null && !earlier.some((p) => p.track === 0 && clampTier(p.tier) === t),
   };
 }
@@ -214,6 +216,11 @@ export interface ProgressStats {
   halloweenSeason?: number;
   /** Gauntlets (apps/api/src/gauntlets.ts). Absent = none cleared. */
   gauntlets?: GauntletStats;
+  /**
+   * Maps made by a linked mapper (apps/api/src/mappers.ts) where the player's best Normal main-track time is under the
+   * mapper's own. Never the player's own maps.
+   */
+  beatMapper?: number;
 }
 
 /** A player's gauntlet record for the gauntlet achievements. */
@@ -273,8 +280,10 @@ export interface AchievementDef {
 }
 
 const at = (n: number, goal: number): [number, number] => [Math.min(n, goal), goal];
-const TIER_TITLE: Record<Tier, string | undefined> = { 1: undefined, 2: undefined, 3: "Climber", 4: "Daredevil", 5: "Untouchable", 6: "Ascended" };
-const RING_BY_TIER: Record<Tier, Ring> = { 1: 0, 2: 0, 3: 1, 4: 1, 5: 2, 6: 3 };
+const TIER_TITLE: Record<Tier, string | undefined> = { 1: undefined, 2: undefined, 3: "Climber", 4: "Daredevil", 5: "Untouchable", 6: "Ascended", 7: "Transcendent" };
+const RING_BY_TIER: Record<Tier, Ring> = { 1: 0, 2: 0, 3: 1, 4: 1, 5: 2, 6: 3, 7: 3 };
+/** "tier 3", "tier 7+" (achievement copy). */
+const tierWords = (t: Tier) => `tier ${tierNum(t)}`;
 
 /** Time goals ("Sub-X on bhop_eazy"). Thresholds need tuning against real WRs (see research/RANKS.md open questions). */
 export const TIME_GOALS: { map: string; seconds: number; name: string; ring: Ring; title?: string; id?: string }[] = [
@@ -362,11 +371,11 @@ const fmtGoal = (s: number) => (s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60
 export const ACHIEVEMENTS: AchievementDef[] = [
   { id: "country_flag", name: "Flying the Flag", desc: "Set a country flag on your profile", goal: "Set a profile flag", group: "social", icon: "flag", ring: 0, event: true, progress: () => [0, 1] },
   { id: "first_finish", name: "First Hop", desc: "Finish a run on any map", group: "start", icon: "flag", ring: 0, title: "Hopper", progress: (s) => at(s.runs, 1) },
-  ...([1, 2, 3, 4, 5, 6] as Tier[]).map(
+  ...TIERS.map(
     (t): AchievementDef => ({
       id: `tier_${t}`,
-      name: `First T${t}`,
-      desc: `Finish the main track of a tier ${t} map`,
+      name: `First ${tierLabel(t)}`,
+      desc: `Finish the main track of a ${tierWords(t)} map`,
       group: "tier",
       icon: `t${t}`,
       ring: RING_BY_TIER[t],
@@ -374,15 +383,15 @@ export const ACHIEVEMENTS: AchievementDef[] = [
       progress: (s) => at(s.clearsByTier[t] ? 1 : 0, 1),
     }),
   ),
-  ...([1, 2, 3, 4, 5, 6] as Tier[]).map(
+  ...TIERS.map(
     (t): AchievementDef => ({
       id: `sweep_${t}`,
-      name: `T${t} Sweep`,
-      desc: `Finish every ranked tier ${t} map`,
+      name: `${tierLabel(t)} Sweep`,
+      desc: `Finish every ranked ${tierWords(t)} map`,
       group: "sweep",
       icon: `t${t}`,
       ring: Math.min(3, RING_BY_TIER[t] + 1) as Ring,
-      title: t >= 4 ? `T${t} Sweeper` : undefined,
+      title: t >= 4 ? `${tierLabel(t)} Sweeper` : undefined,
       progress: (s) => (s.rankedByTier[t] ? at((s.rankedClearsByTier ?? s.clearsByTier)[t], s.rankedByTier[t]) : [0, 1]),
     }),
   ),
@@ -718,6 +727,23 @@ export const GAUNTLET_ACHIEVEMENTS: AchievementDef[] = [
   },
 ];
 ACHIEVEMENTS.push(...GAUNTLET_ACHIEVEMENTS);
+
+/**
+ * Mapper recognition (2026-10-28, Maharero's idea): a verified Normal time under the mapper's own on a map they made.
+ * "Mapper" means a player staff linked to the map's author name (migrations/0076, apps/api/src/mappers.ts), and the
+ * mapper needs a time of their own to beat. Earned like any time goal (progress.ts progressStats), permanent once held.
+ */
+export const BEAT_MAPPER = "beat_mapper";
+ACHIEVEMENTS.push({
+  id: BEAT_MAPPER,
+  name: "Beat the Mapper",
+  desc: "Beat a mapper's own time on a map they made",
+  goal: "Beat a mapper's time on their own map",
+  group: "records",
+  icon: "mapper",
+  ring: 1,
+  progress: (s) => at(s.beatMapper ?? 0, 1),
+});
 
 const ACH_BY_ID = new Map(ACHIEVEMENTS.map((a) => [a.id, a]));
 export const achievement = (id: string) => ACH_BY_ID.get(id) ?? null;
@@ -1378,7 +1404,7 @@ export function suggestNextMaps(maps: SuggestMap[], cleared: ReadonlySet<string>
     if (graduated) continue;
     for (const m of open) {
       if (out.length >= n) break;
-      out.push({ map: m.name, tier: t, reason: done === 0 ? (t === 1 ? "Start here" : `Your first T${t}`) : `${done}/${Math.min(GRADUATE_CLEARS, pool.length)} T${t} clears to move up` });
+      out.push({ map: m.name, tier: t, reason: done === 0 ? (t === 1 ? "Start here" : `Your first ${tierLabel(t)}`) : `${done}/${Math.min(GRADUATE_CLEARS, pool.length)} ${tierLabel(t)} clears to move up` });
     }
   }
   if (out.length < n) {
@@ -1386,7 +1412,7 @@ export function suggestNextMaps(maps: SuggestMap[], cleared: ReadonlySet<string>
     const left = maps
       .filter((m) => clampTier(m.tier) && !cleared.has(m.name) && !out.some((o) => o.map === m.name))
       .sort((a, b) => clampTier(a.tier)! - clampTier(b.tier)! || (b.players ?? 0) - (a.players ?? 0) || a.name.localeCompare(b.name));
-    for (const m of left.slice(0, n - out.length)) out.push({ map: m.name, tier: clampTier(m.tier)!, reason: `Uncleared T${clampTier(m.tier)}` });
+    for (const m of left.slice(0, n - out.length)) out.push({ map: m.name, tier: clampTier(m.tier)!, reason: `Uncleared ${tierLabel(m.tier)}` });
   }
   return out;
 }

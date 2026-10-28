@@ -13,14 +13,14 @@ export interface PracticeFlags {
   /** Practice mode (practice-mode/: every attempt is practice while it's on) was on during this attempt. */
   mode?: boolean;
   /** A checkpoint teleport or noclip was used this attempt (practice-mode/attempt.ts). */
-  tool?: "teleport" | "noclip" | null;
+  tool?: "teleport" | "noclip" | "spawn" | null;
   /** A weapon command gave a gun ranked runs don't allow (weapon-rules.ts) this attempt. */
   freeGun?: boolean;
 }
 
 export function practiceReason(f: PracticeFlags): string | null {
   if (f.mode) return "practice mode";
-  if (f.tool) return f.tool === "noclip" ? "practice run (noclip)" : "practice run (checkpoint teleport)";
+  if (f.tool) return f.tool === "noclip" ? "practice run (noclip)" : f.tool === "spawn" ? "practice run (practice spawn)" : "practice run (checkpoint teleport)";
   if (f.debug) return "practice run (debug mode)";
   if (f.thirdPerson) return "practice run (third person)";
   if (f.scripted) return "practice run (scripted)";

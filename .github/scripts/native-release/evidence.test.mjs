@@ -3,9 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { artifactName, collectEvidence, evidenceArtifactCoordinates, sha256, targets, validateEvidence, validateReview, serializeEvidence } from './evidence.mjs';
+import { artifactName, collectEvidence, sha256, targets, validateEvidence, serializeEvidence } from './evidence.mjs';
 import { PINNED_WASM_SHA256, PARITY_SUITE, parityArtifactName, parityFiles, fixtureVersions, fixtureTrials, behaviorCounters } from './parity-contract.mjs';
-const now = Date.parse('2026-10-25T19:00:00Z');
 const context = { repository: '2x74/bunnyhop-client', sourceSha: 'a'.repeat(40), ref: 'refs/heads/main', workflowRef: '2x74/bunnyhop-client/.github/workflows/native-release.yml@refs/heads/main', event: 'workflow_dispatch', runId: '1234', runAttempt: '2', version: '0.0.2', platform: 'all' };
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'native-evidence-'));
@@ -45,10 +44,6 @@ function fixture() {
 function withEvidence(fn) {
   const f = fixture();
   try { return fn(collectEvidence(f.root, context, f.needs), f); } finally { f.clean(); }
-}
-const policy = { enabled: true, provider: 'test-provider', models: ['gpt-6.1-sol'], reasoning: 'high' };
-function reviewFor(bytes, evidence) {
-  return { schema: 1, decision: 'approve', sourceSha: evidence.sourceSha, runId: evidence.runId, runAttempt: evidence.runAttempt, evidenceSha256: sha256(bytes), artifacts: evidenceArtifactCoordinates(evidence), provider: policy.provider, model: policy.models[0], reasoning: policy.reasoning, createdAt: '2026-10-25T18:59:00Z', expiresAt: '2026-10-25T20:00:00Z', blockers: [], summary: 'Fixture review, not a real approval.' };
 }
 
 test('collects immutable coordinates and verifies archive/report/checksum bytes', () => withEvidence(e => {
@@ -114,46 +109,12 @@ test('rejects unexpected files', () => withEvidence((e, f) => {
   writeFileSync(join(f.root, e.artifacts[0].name, 'extra.sh'), 'bad');
   assert.throws(() => collectEvidence(f.root, context, f.needs), /Unexpected/);
 }));
-test('accepts an exactly bound review as data, not authorization', () => withEvidence(e => {
-  const bytes = JSON.stringify(e);
-  assert.equal(validateReview(bytes, reviewFor(bytes, e), policy, now).sourceSha, e.sourceSha);
-}));
-for (const [name, mutate] of [
-  ['model fallback', r => { r.model = 'cheap-fallback'; }],
-  ['reasoning downgrade', r => { r.reasoning = 'low'; }],
-  ['unapproved provider', r => { r.provider = 'other'; }],
-  ['stale review', r => { r.expiresAt = '2026-10-25T18:59:30Z'; }],
-  ['unbounded review lifetime', r => { r.expiresAt = '2026-10-27T20:00:00Z'; }],
-  ['rejection', r => { r.decision = 'reject'; }],
-  ['unresolved blocker', r => { r.blockers = ['failed parity']; }],
-  ['another source SHA', r => { r.sourceSha = '0'.repeat(40); }],
-  ['another run', r => { r.runId = '1235'; }],
-  ['another attempt', r => { r.runAttempt = '1'; }],
-  ['another evidence digest', r => { r.evidenceSha256 = '0'.repeat(64); }],
-  ['different artifact digest', r => { r.artifacts[0] = '100:' + '0'.repeat(64); }],
-]) test(`review rejects ${name}`, () => withEvidence(e => {
-  const bytes = JSON.stringify(e), review = reviewFor(bytes, e); mutate(review);
-  assert.throws(() => validateReview(bytes, review, policy, now));
-}));
-test('review rejects reserialized evidence or single-platform candidate', () => withEvidence(e => {
-  const bytes = JSON.stringify(e), review = reviewFor(bytes, e);
-  assert.throws(() => validateReview(bytes + '\n', review, policy, now), /different evidence/);
-  e.platform = 'linux'; e.artifacts = e.artifacts.filter(a => a.target === 'linux');
-  const partial = JSON.stringify(e);
-  assert.throws(() => validateReview(partial, reviewFor(partial, e), policy, now), /all platform/);
-}));
 test('workflow template remains identical and cannot issue production tokens', () => {
   const workflow = readFileSync(new URL('../../workflows/native-release.yml', import.meta.url), 'utf8');
   const template = readFileSync(new URL('../../../native/apps/native/packaging/workflows/native-packages.yml', import.meta.url), 'utf8');
   assert.equal(workflow, template);
   assert.doesNotMatch(workflow, /secrets\.|pull_request_target|workflow_run|id-token:|contents: write/);
 });
-
-test('unconfigured or disabled provider cannot validate a review', () => withEvidence(e => {
-  const bytes = JSON.stringify(e), review = reviewFor(bytes, e);
-  assert.throws(() => validateReview(bytes, review, { ...policy, provider: null }, now), /not activated/);
-  assert.throws(() => validateReview(bytes, review, { ...policy, enabled: false }, now), /not activated/);
-}));
 
 test('collector rejects modified parity trace bytes', () => withEvidence((e, f) => {
   writeFileSync(join(f.root, e.artifacts[0].parity.name, 'edge-v17.native.jsonl'), 'changed');
@@ -162,11 +123,6 @@ test('collector rejects modified parity trace bytes', () => withEvidence((e, f) 
 test('collector rejects oversized reports before parsing', () => withEvidence((e, f) => {
   writeFileSync(join(f.root, e.artifacts[0].name, e.artifacts[0].report.archive + '.json'), ' '.repeat(65537));
   assert.throws(() => collectEvidence(f.root, context, f.needs), /size limit/);
-}));
-test('review must bind parity artifact coordinates too', () => withEvidence(e => {
-  const bytes = JSON.stringify(e), review = reviewFor(bytes, e);
-  review.artifacts = e.artifacts.map(a => `${a.id}:${a.digest}`);
-  assert.throws(() => validateReview(bytes, review, policy, now), /artifacts differ/);
 }));
 test('both workflows require movement gates, evidence and immediate Windows exit handling', () => {
   const workflow = readFileSync(new URL('../../workflows/native-release.yml', import.meta.url), 'utf8');
@@ -181,15 +137,7 @@ test('both workflows require movement gates, evidence and immediate Windows exit
   assert.equal((workflow.match(/bun apps\/native\/tools\/parity-gate.ts/g) ?? []).length, 2);
 });
 
-test('tested public provider remains disabled until trusted release automation exists', () => {
-  const policy = JSON.parse(readFileSync(new URL('./review-policy.json', import.meta.url), 'utf8'));
-  assert.equal(policy.provider, 'openai-codex');
-  assert.equal(policy.enabled, false);
-  assert.deepEqual(policy.models, ['gpt-6.1-sol']);
-  assert.equal(policy.reasoning, 'high');
-});
-
- test('complete v18 all-platform evidence fits the bounded manual reviewer input', () => withEvidence(e => {
+ test('complete v18 all-platform evidence fits the bounded input', () => withEvidence(e => {
   assert.ok(Buffer.byteLength(JSON.stringify(e, null, 2)) > 64 * 1024);
   const bytes = serializeEvidence(e);
   assert.ok(Buffer.byteLength(bytes) <= 64 * 1024);

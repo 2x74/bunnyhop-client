@@ -1,0 +1,1421 @@
+diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
+--- a/apps/web/src/api.ts
++++ b/apps/web/src/api.ts
+@@ -726,11 +726,23 @@
+   if (m !== "GET" && m !== "HEAD") writes++;
+ };
+ 
+-async function request(path: string, init: ApiRequestInit = {}): Promise<Response> {
++/** Optional ownership fence around the actual fetch, after asynchronous headers. */
++export type RequestDispatch = ((send: () => Promise<Response>) => Promise<Response>) & {current?:()=>boolean};
++/** Recheck ownership after a streamed body, before any API cache effects. */
++export async function readOwnedJson(res:Response,dispatch?:RequestDispatch):Promise<unknown> {
++  const body=await res.json().catch(()=>null);
++  if(dispatch?.current&&!dispatch.current())throw new Error("Account changed. Reopen this profile.");
++  return body;
++}
++
++async function request(path: string, init: ApiRequestInit = {}, dispatch?: RequestDispatch): Promise<Response> {
+   countWrite(init);
+   let res: Response;
+   try {
+-    res = await fetch(base() + path, { credentials: "include", ...(await withDevice(init)) });
++    const url = base() + path;
++    const prepared = { credentials: "include" as const, ...(await withDevice(init)) };
++    const send = () => fetch(url, prepared);
++    res = await (dispatch ? dispatch(send) : send());
+   } catch (e) {
+     if (e instanceof ApiUnavailable) throw e;
+     throw new ApiUnavailable();
+@@ -739,24 +751,26 @@
+   return res;
+ }
+ 
+-async function json<T>(path: string, init: ApiRequestInit = {}): Promise<T> {
+-  const res = await request(path, init);
+-  const body = (await res.json().catch(() => null)) as (T & { error?: string; message?: string }) | null;
++async function json<T>(path: string, init: ApiRequestInit = {}, dispatch?: RequestDispatch): Promise<T> {
++  const res = await request(path, init, dispatch);
++  const body = (await readOwnedJson(res,dispatch)) as (T & { error?: string; message?: string }) | null;
+   if (!res.ok) throw new ApiError(res.status, body?.error ?? "error", body?.message ?? `HTTP ${res.status}`, (body ?? {}) as Record<string, unknown>);
+   return body as T;
+ }
+ 
+ /** Like json(), but 5xx answers with an error body (email_failed, email_unavailable) become ApiErrors too. */
+-async function jsonOr5xx<T>(path: string, init: ApiRequestInit): Promise<T> {
++async function jsonOr5xx<T>(path: string, init: ApiRequestInit, dispatch?:RequestDispatch): Promise<T> {
+   countWrite(init);
+   let res: Response;
+   try {
+-    res = await fetch(base() + path, { credentials: "include", ...(await withDevice(init)) });
++    const prepared=await withDevice(init);
++    const send=()=>fetch(base()+path,{credentials:"include",...prepared});
++    res=await (dispatch?dispatch(send):send());
+   } catch (e) {
+     if (e instanceof ApiUnavailable) throw e;
+     throw new ApiUnavailable();
+   }
+-  const body = (await res.json().catch(() => null)) as (T & { error?: string; message?: string }) | null;
++  const body = (await readOwnedJson(res,dispatch)) as (T & { error?: string; message?: string }) | null;
+   if (!res.ok) {
+     if (!body?.error) throw new ApiUnavailable();
+     throw new ApiError(res.status, body.error, body.message ?? `HTTP ${res.status}`, body as Record<string, unknown>);
+@@ -925,19 +939,19 @@
+    * reserved, ...), 409 "taken" (body.suggestion; registered players), 429 "rename_limit". Guests asking for a taken
+    * name get a numbered variant: the result has nameAdjusted.
+    */
+-  async setMouseSettings(mouse: import("./mouse-settings").MouseSettings): Promise<import("./mouse-settings").MouseSettings> {
+-    return json("/me/mouse", post(mouse));
++  async setMouseSettings(mouse: import("./mouse-settings").MouseSettings, dispatch?: RequestDispatch): Promise<import("./mouse-settings").MouseSettings> {
++    return json("/me/mouse", post(mouse), dispatch);
+   },
+   async countrySettings(): Promise<{ country: string | null; detected: string | null }> {
+     return json("/me/country");
+   },
+-  async setCountry(country: string | null): Promise<{ country: string | null }> {
+-    return json("/me/country", post({ country }));
++  async setCountry(country: string | null, dispatch?: RequestDispatch): Promise<{ country: string | null }> {
++    return json("/me/country", post({ country }), dispatch);
+   },
+-  async setDisplayName(name: string): Promise<User> {
++  async setDisplayName(name: string, dispatch?: RequestDispatch): Promise<User> {
+     // Without a session the server would make a guest for the name: a Wavedash player names their account instead.
+     if (wavedashPlayer() && !(await api.me())) throw new ApiUnavailable();
+-    const user = await json<User>("/me/name", post({ name }));
++    const user = await json<User>("/me/name", post({ name }), dispatch);
+     setMe(user);
+     return user;
+   },
+@@ -961,12 +975,12 @@
+     return json("/me/links", { cache: "no-cache" });
+   },
+   /** Strict: 400 bad_links names the platform (`body.platform`) and what's wrong. */
+-  async saveLinks(s: Partial<LinkSettings>): Promise<LinkSettings> {
+-    return json("/me/links", post(s));
++  async saveLinks(s: Partial<LinkSettings>, dispatch?: RequestDispatch): Promise<LinkSettings> {
++    return json("/me/links", post(s), dispatch);
+   },
+   /** The "Show booster badge" switch; `boosting`: the badge would show now (the bot's latest read). */
+-  async saveBooster(show: boolean): Promise<{ show: boolean; boosting: boolean }> {
+-    return json("/me/booster", post({ show }));
++  async saveBooster(show: boolean, dispatch?: RequestDispatch): Promise<{ show: boolean; boosting: boolean }> {
++    return json("/me/booster", post({ show }), dispatch);
+   },
+   /** Your support (Settings → Account, the Support page). 401 without a session. */
+   async mySupport(): Promise<MySupport> {
+@@ -975,29 +989,29 @@
+   async giftWallet(): Promise<GiftWallet> {
+     return json("/me/gifts", { cache: "no-store" });
+   },
+-  async giftPreview(target: GiftTarget): Promise<GiftPreview> {
+-    return json("/me/gifts/preview", post(target));
++  async giftPreview(target: GiftTarget, dispatch?: RequestDispatch): Promise<GiftPreview> {
++    return json("/me/gifts/preview", post(target), dispatch);
+   },
+-  async sendGifts(target: GiftTarget, requestId: string, maxCost: number): Promise<GiftDelivery> {
+-    return json("/me/gifts", post({ ...target, requestId, maxCost }));
++  async sendGifts(target: GiftTarget, requestId: string, maxCost: number, dispatch?: RequestDispatch): Promise<GiftDelivery> {
++    return json("/me/gifts", post({ ...target, requestId, maxCost }), dispatch);
+   },
+   async myNameBadges(): Promise<NameBadgeSettings> {
+     return json("/me/name-badges", { cache: "no-store" });
+   },
+-  async saveNameBadges(settings: { nameBadges: string[]; gifterColors?: string[]; gifterAnimated?: boolean }): Promise<NameBadgeSettings> {
+-    return json("/me/name-badges", post(settings));
++  async saveNameBadges(settings: { nameBadges: string[]; gifterColors?: string[]; gifterAnimated?: boolean }, dispatch?: RequestDispatch): Promise<NameBadgeSettings> {
++    return json("/me/name-badges", post(settings), dispatch);
+   },
+   /** A supporter's name look, badge switch, About listing (403 not_supporter for everyone else). */
+-  async saveSupporter(s: Partial<Pick<SupporterSettings, "nameColor" | "nameEffect" | "nameColor2" | "showBadge" | "showOnBoard" | "playerGlow">>): Promise<SupporterSettings> {
+-    return json("/me/supporter", post(s));
++  async saveSupporter(s: Partial<Pick<SupporterSettings, "nameColor" | "nameEffect" | "nameColor2" | "showBadge" | "showOnBoard" | "playerGlow">>, dispatch?: RequestDispatch): Promise<SupporterSettings> {
++    return json("/me/supporter", post(s), dispatch);
+   },
+   /**
+    * A Stripe Checkout page for a one-time payment of `amountCents` (the Support page sends the player there). ApiError:
+    * signin_required (guests), bad_amount, payments_closed, rate_limited, checkout_failed.
+    */
+-  async supportCheckout(amountCents: number): Promise<{ url: string }> {
++  async supportCheckout(amountCents: number, dispatch?: RequestDispatch): Promise<{ url: string }> {
+     // checkout_failed (502) and payments_closed (503) carry their message: show it rather than "offline".
+-    return jsonOr5xx("/support/checkout", post({ amountCents }));
++    return jsonOr5xx("/support/checkout", post({ amountCents }), dispatch);
+   },
+   /** The About page's thank-you list (names of supporters who opted in). */
+   async supporters(): Promise<{ names: string[]; top: TopSupporter[] }> {
+@@ -1008,8 +1022,8 @@
+     return json<AccountView>("/me/account", { cache: "no-store" });
+   },
+   /** Removes a sign-in method (refused for the last one: ApiError 400 "last_method"). */
+-  async unlink(provider: SignInMethod["provider"]): Promise<AccountView> {
+-    const v = await json<AccountView>("/me/unlink", post({ provider }));
++  async unlink(provider: SignInMethod["provider"], dispatch?: RequestDispatch): Promise<AccountView> {
++    const v = await json<AccountView>("/me/unlink", post({ provider }), dispatch);
+     setMe(v.user);
+     return v;
+   },
+@@ -1042,23 +1056,28 @@
+     return json<OnboardingState>("/me/onboarding", post(o));
+   },
+   /** Discord-linked players: show (or hide) their Discord avatar publicly. Off by default; there are no uploads. */
+-  async setUseDiscordAvatar(on: boolean): Promise<User> {
+-    const user = await json<User>("/me/avatar", post({ useDiscord: on }));
++  async setUseDiscordAvatar(on: boolean, dispatch?: RequestDispatch): Promise<User> {
++    const user = await json<User>("/me/avatar", post({ useDiscord: on }), dispatch);
+     setMe(user);
+     return user;
+   },
+   /** Ends the session (everywhere: on every device); the next me() issues a fresh guest. */
+-  async logout(everywhere = false): Promise<void> {
++  async logout(everywhere = false, dispatch?: RequestDispatch): Promise<void> {
++    // A guarded native dialog must finish its captured session request before
++    // clearing account memory; an old response cannot log out a new identity.
++    if (api.available()) await request("/auth/logout", post(everywhere ? { everywhere: true } : {}), dispatch);
+     meCache = null;
+-    rememberMe(null); // signed out on purpose: the next me() starts a guest without re-asking
+-    if (!api.available()) return;
+-    await request("/auth/logout", post(everywhere ? { everywhere: true } : {}));
++    rememberMe(null);
++
+   },
+   /** Forget the cached player (after signing in elsewhere in the page). */
+   forgetMe(): void {
+     meCache = null;
+   },
+   /** All maps; `wr` is the main-track world record in `style`. */
++  async reportPlaytime(seconds:number,dispatch?:RequestDispatch):Promise<unknown> {
++    return json("/me/playtime",post({seconds}),dispatch);
++  },
+   async playerStats(id: string): Promise<{ totals: { verifiedRuns: number; jumps: number; playtimeSeconds: number; runTimeMs: number; mapsCompleted: number }; styles: { style: string; runs: number; maps: number }[]; maps: { map: string; runs: number }[]; activity: { at: number; runs: number }[] }> {
+     return json(`/players/${encodeURIComponent(id)}/stats`);
+   },
+@@ -1101,7 +1120,7 @@
+    * Uploads the server refuses outright (unranked map, zone/build mismatch, rate limit, ...) resolve to
+    * { id: "", status: "rejected", reason, code } rather than throwing.
+    */
+-  async submitRun(replay: Uint8Array, opts: { room?: string | null; race?: string | null; gauntlet?: string | null; beats?: string[]; mouse?: import("./mouse-settings").MouseSettings | null } = {}): Promise<Submission> {
++  async submitRun(replay: Uint8Array, opts: { room?: string | null; race?: string | null; gauntlet?: string | null; beats?: string[]; mouse?: import("./mouse-settings").MouseSettings | null; dispatch?: RequestDispatch } = {}): Promise<Submission> {
+     // ?room=<id>: played in a multiplayer room, so the room announces the verified result (PB / top 10 / SR / WR).
+     // &race=<id>: a run for the room's race you're in (net/race.ts): the room ties it to the race.
+     // ?gauntlet=<attemptId>: a run in a gauntlet attempt (gauntlet/): the reply says whether it became the next split.
+@@ -1120,15 +1139,15 @@
+       if (opts.mouse) form.append("mouse", JSON.stringify(opts.mouse));
+       init = { method: "POST", body: form };
+     }
+-    const res = await request(path, { ...init, device: true });
++    const res = await request(path, { ...init, device: true }, opts.dispatch);
+     const body = (await res.json().catch(() => null)) as (Submission & { error?: string; message?: string }) | null;
+     if (!res.ok || !body) return { id: "", status: "rejected", reason: body?.message ?? `HTTP ${res.status}`, code: body?.error ?? "error" };
+     meCache = null; // the server may have just issued a guest identity
+     return body;
+   },
+   /** A run-session heartbeat (run-clock.ts): the server signs what was recorded so far. */
+-  async runBeat(body: { sid: string | null; map: string; track: number; style: string; tick: number; hash: string; paused: boolean; att?: [number, number, number, number] }): Promise<{ sid: string; token: string }> {
+-    return json("/runs/beat", { ...post(body), keepalive: true });
++  async runBeat(body: { sid: string | null; map: string; track: number; style: string; tick: number; hash: string; paused: boolean; att?: [number, number, number, number] }, dispatch?: RequestDispatch): Promise<{ sid: string; token: string }> {
++    return json("/runs/beat", { ...post(body, true), keepalive: true }, dispatch);
+   },
+   // --- gauntlets
+   async gauntlets(): Promise<GauntletHub> {
+@@ -1244,16 +1263,16 @@
+     return json("/me/cosmetics", { cache: "no-cache" });
+   },
+   /** Partial update; throws ApiError(400, "bad_cosmetic") naming the slot when an item is locked or unknown. */
+-  async saveCosmetics(patch: Partial<CosmeticChoice>): Promise<CosmeticChoice> {
+-    return json<CosmeticChoice>("/me/cosmetics", post(patch));
++  async saveCosmetics(patch: Partial<CosmeticChoice>, dispatch?: RequestDispatch): Promise<CosmeticChoice> {
++    return json<CosmeticChoice>("/me/cosmetics", post(patch), dispatch);
+   },
+   /** Up to 5 of your verified run ids ([] = automatic). */
+-  async saveFeatured(runs: string[]): Promise<string[]> {
+-    return (await json<{ runs: string[] }>("/me/featured", post({ runs }))).runs;
++  async saveFeatured(runs: string[], dispatch?: RequestDispatch): Promise<string[]> {
++    return (await json<{ runs: string[] }>("/me/featured", post({ runs }), dispatch)).runs;
+   },
+   /** Up to 3 earned achievement ids to showcase ([] = automatic). */
+-  async saveBadges(badges: string[]): Promise<string[]> {
+-    return (await json<{ badges: string[] }>("/me/badges", post({ badges }))).badges;
++  async saveBadges(badges: string[], dispatch?: RequestDispatch): Promise<string[]> {
++    return (await json<{ badges: string[] }>("/me/badges", post({ badges }), dispatch)).badges;
+   },
+   /** Public URL of a verified run's replay (watch links: ?replay=<url>). */
+   replayUrl(runId: string): string {
+diff --git a/apps/web/src/assets/audio/manifest.json b/apps/web/src/assets/audio/manifest.json
+--- a/apps/web/src/assets/audio/manifest.json
++++ b/apps/web/src/assets/audio/manifest.json
+@@ -734,24 +734,6 @@
+       "loop": false,
+       "loopStart": 0,
+       "loopEnd": 0
+-    },
+-    "announcer_perfect": {
+-      "variants": 1,
+-      "durations": [
+-        0.9
+-      ]
+-    },
+-    "announcer_godlike": {
+-      "variants": 1,
+-      "durations": [
+-        1.451247
+-      ]
+-    },
+-    "announcer_holyshit": {
+-      "variants": 1,
+-      "durations": [
+-        3.630794
+-      ]
+     },
+     "ui_press": {
+       "variants": 1,
+@@ -913,7 +895,14 @@
+   ],
+   "credits": [
+     "Sound effects: original, generated with ElevenLabs Sound Effects for bunnyhop.lol",
+-    "Music: original, generated with ElevenLabs Music for bunnyhop.lol",
+-    "Classic UT/Quake announcer review samples: community UT/Quake & Headshot ULTIMATE Sound System archive uploaded by CrawiS ([CW]), Unreal Software file 4778. Original recording owners retain rights; distribution permission unresolved."
+-  ]
++    "Music: original, generated with ElevenLabs Music for bunnyhop.lol"
++  ],
++  "omittedOptionalCues": {
++    "ids": [
++      "announcer_godlike",
++      "announcer_holyshit",
++      "announcer_perfect"
++    ],
++    "reason": "Omitted from the public native distribution because sample distribution permission is unresolved."
++  }
+ }
+diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
+--- a/apps/web/src/core.ts
++++ b/apps/web/src/core.ts
+@@ -1,5 +1,6 @@
+ // Thin wrapper over the bunnyhop-core WASM exports (crates/core/src/wasm.rs).
+ // Works in the browser and in Bun (for headless replay verification).
++import { coreBytes, coreWrite, coreF32, coreU32, type NativeRuntime } from "./native-runtime";
+ 
+ export interface MeshGroup {
+   model: number;
+@@ -294,6 +295,8 @@
+ 
+ interface Exports {
+   memory: WebAssembly.Memory;
++  nativeRead?: (pointer: number, length: number) => Uint8Array;
++  nativeWrite?: (pointer: number, bytes: Uint8Array) => void;
+   alloc(len: number): number;
+   load_map(ptr: number, len: number): number;
+   load_map_physics?: (ptr: number, len: number) => number;
+@@ -357,6 +360,27 @@
+ 
+ export class Core {
+   private constructor(private x: Exports) {}
++  readonly engine: "wasm" | "native" = "wasm";
++  nativeBuild?: string;
++  private nativeDispose?: () => void;
++
++  /** Explicit opt-in for the live desktop sim. Workers, ghosts and verifier still call create(). */
++  static createNative(runtime: NativeRuntime): Core {
++    const session = runtime.createSession();
++    const exports = Object.fromEntries(session.exports.map(name => [name, (...args: number[]) => session.call(name, args)]));
++    const core = new Core({
++      ...exports,
++      memory: { buffer: new ArrayBuffer(0) },
++      nativeRead: (ptr: number, length: number) => session.read(ptr, length),
++      nativeWrite: (ptr: number, bytes: Uint8Array) => session.write(ptr, bytes),
++    } as unknown as Exports);
++    Object.defineProperty(core, "engine", { value: "native" });
++    core.nativeBuild = runtime.build;
++    core.nativeDispose = () => session.dispose();
++    return core;
++  }
++
++  dispose(): void { this.nativeDispose?.(); this.nativeDispose = undefined; }
+ 
+   /** From wasm bytes, a fetch Response, or an already compiled module (Workers can't compile bytes at runtime). */
+   static async create(source: BufferSource | WebAssembly.Module | Response | Promise<Response>): Promise<Core> {
+@@ -368,21 +392,21 @@
+   }
+ 
+   private str(ptr: number, len: number): string {
+-    return decoder.decode(new Uint8Array(this.x.memory.buffer, ptr, len));
++    return decoder.decode(coreBytes(this.x, ptr, len));
+   }
+ 
+   private f32(ptr: number, len: number): Float32Array {
+-    return new Float32Array(this.x.memory.buffer, ptr, len);
++    return coreF32(this.x, ptr, len);
+   }
+ 
+   private u32(ptr: number, len: number): Uint32Array {
+-    return new Uint32Array(this.x.memory.buffer, ptr, len);
++    return coreU32(this.x, ptr, len);
+   }
+ 
+   loadMap(bsp: Uint8Array): void {
+     this.addPhysicsContent();
+     const ptr = this.x.alloc(bsp.length);
+-    new Uint8Array(this.x.memory.buffer, ptr, bsp.length).set(bsp);
++    coreWrite(this.x, ptr, bsp);
+     if (!this.x.load_map(ptr, bsp.length)) throw new Error(this.lastError());
+   }
+ 
+@@ -393,7 +417,7 @@
+   loadMapPhysics(bsp: Uint8Array): void {
+     this.addPhysicsContent();
+     const ptr = this.x.alloc(bsp.length);
+-    new Uint8Array(this.x.memory.buffer, ptr, bsp.length).set(bsp);
++    coreWrite(this.x, ptr, bsp);
+     this.commitPhysics(ptr, bsp.length);
+   }
+ 
+@@ -409,7 +433,7 @@
+         if (done) break;
+         if (off + value.length > len) throw new Error(`map stream longer than ${len} bytes`);
+         // Re-take the view each chunk: memory.buffer is detached if the wasm memory grew.
+-        new Uint8Array(this.x.memory.buffer, ptr + off, value.length).set(value);
++        coreWrite(this.x, ptr + off, value);
+         off += value.length;
+       }
+       if (off !== len) throw new Error(`map stream ended at ${off} of ${len} bytes`);
+@@ -513,7 +537,8 @@
+     if (!x.mesh_sky_vertices_ptr || !x.mesh_sky_vertices_len || !x.mesh_sky_indices_ptr || !x.mesh_sky_indices_len || !x.mesh_sky_groups) return null;
+     const vertices = this.f32(x.mesh_sky_vertices_ptr(), x.mesh_sky_vertices_len()).slice();
+     const indices = this.u32(x.mesh_sky_indices_ptr(), x.mesh_sky_indices_len()).slice();
+-    const g = this.u32(x.scratch_u32_ptr(), x.mesh_sky_groups());
++    const groupLen = x.mesh_sky_groups();
++    const g = this.u32(x.scratch_u32_ptr(), groupLen);
+     const groups = [];
+     for (let i = 0; i + 3 <= g.length; i += 3) groups.push({ model: g[i], firstIndex: g[i + 1], indexCount: g[i + 2] });
+     return { vertices, indices, groups };
+@@ -581,7 +606,7 @@
+     const levels: TextureLevel[] = [];
+     for (let i = 0; i < h[1]; i++) {
+       const [width, height, offset, size] = h.subarray(2 + i * 4, 6 + i * 4);
+-      levels.push({ width, height, data: new Uint8Array(this.x.memory.buffer, base + offset, size).slice() });
++      levels.push({ width, height, data: coreBytes(this.x, base + offset, size).slice() });
+     }
+     return { format: h[0] as TextureFormat, levels };
+   }
+@@ -590,7 +615,7 @@
+   lightmap(): Lightmap {
+     const len = this.x.lightmap_size();
+     const [width, height, hdr] = this.u32(this.x.scratch_u32_ptr(), len);
+-    const data = new Uint8Array(this.x.memory.buffer, this.x.lightmap_ptr(), width * height * 4).slice();
++    const data = coreBytes(this.x, this.x.lightmap_ptr(), width * height * 4).slice();
+     return { width, height, data, scale: this.x.lightmap_scale(), hdr: hdr === 1 };
+   }
+ 
+@@ -608,7 +633,7 @@
+   /** The BSP pakfile lump (a store-only zip of embedded content). */
+   pakfile(): Uint8Array {
+     const len = this.x.pak_len();
+-    return new Uint8Array(this.x.memory.buffer, this.x.pak_ptr(), len).slice();
++    return coreBytes(this.x, this.x.pak_ptr(), len).slice();
+   }
+ 
+   /** Physics settings and version (call after loading the map). Throws if this wasm build can't simulate the version. */
+@@ -718,7 +743,7 @@
+   /** Copies bytes into a fresh wasm allocation (ownership passes to the callee). */
+   private give(bytes: Uint8Array): [number, number] {
+     const ptr = this.x.alloc(bytes.length);
+-    new Uint8Array(this.x.memory.buffer, ptr, bytes.length).set(bytes);
++    coreWrite(this.x, ptr, bytes);
+     return [ptr, bytes.length];
+   }
+ 
+@@ -755,7 +780,7 @@
+   /** Bytes of a file fetched via `contentProvide`/`contentAddFile` (assembled, CRC-checked), or null. */
+   contentFile(path: string): Uint8Array | null {
+     const len = this.cx.content_file(...this.giveStr(path));
+-    return len ? new Uint8Array(this.x.memory.buffer, this.x.tex_bytes_ptr(), len).slice() : null;
++    return len ? coreBytes(this.x, this.x.tex_bytes_ptr(), len).slice() : null;
+   }
+ 
+   /** Supplies bytes for a pending request (archive chunk for VPKs, whole file for listings). */
+@@ -803,7 +828,7 @@
+   /** Reads a file through the current VFS (pakfile → fetched → mounts), or null (a mount hit becomes pending). */
+   contentRead(path: string): Uint8Array | null {
+     if (!this.cx.content_read(...this.giveStr(path))) return null;
+-    return new Uint8Array(this.x.memory.buffer, this.x.tex_bytes_ptr(), this.cx.tex_bytes_len()).slice();
++    return coreBytes(this.x, this.x.tex_bytes_ptr(), this.cx.tex_bytes_len()).slice();
+   }
+ 
+   /** Pending requests of the current VFS (materials and anything read since the last `contentResolve`). */
+@@ -968,7 +993,7 @@
+     const levels: TextureLevel[] = [];
+     for (let i = 0; i < h[1]; i++) {
+       const [width, height, offset, size] = h.subarray(2 + i * 4, 6 + i * 4);
+-      levels.push({ width, height, data: new Uint8Array(this.x.memory.buffer, base + offset, size).slice() });
++      levels.push({ width, height, data: coreBytes(this.x, base + offset, size).slice() });
+     }
+     return { format: h[0] as TextureFormat, levels };
+   }
+@@ -1050,6 +1075,8 @@
+ 
+ interface RestartExports {
+   memory: WebAssembly.Memory;
++  nativeRead?: (pointer: number, length: number) => Uint8Array;
++  nativeWrite?: (pointer: number, bytes: Uint8Array) => void;
+   scratch_f32_ptr(): number;
+   set_position?: (x: number, y: number, z: number, yaw: number) => void;
+   restart_point?: () => number;
+@@ -1098,9 +1125,10 @@
+   const name = new TextEncoder().encode(targetname);
+   const cls = new TextEncoder().encode(classname);
+   const ptr = e.alloc(name.length + cls.length);
+-  const mem = new Uint8Array(e.memory.buffer, ptr, name.length + cls.length);
++  const mem = new Uint8Array(name.length + cls.length);
+   mem.set(name, 0);
+   mem.set(cls, name.length);
++  coreWrite(e, ptr, mem);
+   e.set_restart_names(ptr, name.length, cls.length);
+   RESTART_NAMES.set(core, { targetname, classname });
+ }
+@@ -1117,7 +1145,7 @@
+   if (!e.restart_point) return null;
+   const len = e.restart_point();
+   if (len < 4) return null;
+-  const s = new Float32Array(e.memory.buffer, e.scratch_f32_ptr(), len);
++  const s = coreF32(e, e.scratch_f32_ptr(), len);
+   const names = RESTART_NAMES.get(core);
+   const p: RestartPoint = { position: [s[0], s[1], s[2]], yaw: s[3] };
+   if (names?.targetname) p.targetname = names.targetname;
+@@ -1145,7 +1173,7 @@
+   const e = restartExports(core);
+   if (!e.prop_collision_mesh) return new Float32Array(0);
+   const len = e.prop_collision_mesh();
+-  return new Float32Array(e.memory.buffer, e.scratch_f32_ptr(), len).slice();
++  return coreF32(e, e.scratch_f32_ptr(), len).slice();
+ }
+ 
+ // ---- replay viewer wrappers (appended; exports at the end of crates/core/src/wasm.rs) ----
+@@ -1254,7 +1282,7 @@
+   if (!x.attack_report) return null;
+   const len = x.attack_report();
+   if (len < 13) return null;
+-  const s = new Float32Array(x.memory.buffer, x.scratch_f32_ptr(), len);
++  const s = coreF32(x, x.scratch_f32_ptr(), len);
+   return {
+     weapon: s[0],
+     mode: s[1] === 2 ? 2 : 1,
+@@ -1352,7 +1380,7 @@
+   if (!x.weapon_report) return null;
+   const len = x.weapon_report();
+   if (len < 9) return null;
+-  const s = new Float32Array(x.memory.buffer, x.scratch_f32_ptr(), len);
++  const s = coreF32(x, x.scratch_f32_ptr(), len);
+   return { flags: s[0], active: s[1], primary: s[2], secondary: s[3], knife: s[4] !== 0, clip: s[5], clipSize: s[6], reloadTicks: s[7], burst: s[8] !== 0, floorChanged: len > 9 && s[9] !== 0, silencer: len > 10 && s[10] !== 0, silencerTicks: len > 11 ? s[11] : 0 };
+ }
+ 
+@@ -1379,6 +1407,7 @@
+   const len = x.floor_weapons ? x.floor_weapons() : 0;
+   if (len === 0) return EMPTY_F32;
+   const ptr = x.scratch_f32_ptr();
++  if (core.engine === "native") return coreF32(x, ptr, len);
+   let v = floorViews.get(core);
+   if (!v || v.buffer !== x.memory.buffer || v.byteOffset !== ptr || v.length !== len) floorViews.set(core, (v = new Float32Array(x.memory.buffer, ptr, len)));
+   return v;
+diff --git a/apps/web/src/feedback/modal.ts b/apps/web/src/feedback/modal.ts
+--- a/apps/web/src/feedback/modal.ts
++++ b/apps/web/src/feedback/modal.ts
+@@ -114,8 +114,28 @@
+   const room = currentRoom();
+   // The hashed entry chunk of this deploy (/assets/index-<hash>.js); "dev" under Vite.
+   const script = [...document.scripts].map((x) => x.getAttribute("src")).find((src) => !!src && src.includes("/assets/")) ?? (import.meta.env.DEV ? "dev" : null);
++  const game = gameInfo();
++  // The native client's menu (apps/native): its host reports the game and its own settings; this page's web build,
++  // frame rate and web prefs say nothing about it.
++  if (game?.client === "native") {
++    const { nativeSettings, ...native } = game;
++    return {
++      ...native,
++      ...(runId ? { runId } : {}),
++      ...(room ? { room } : {}),
++      screen: document.body.dataset.screen || null,
++      ua: navigator.userAgent,
++      lang: navigator.language,
++      screenSize: `${screen.width}x${screen.height}`,
++      // The game window when the host reports it (the menu web view is a separate, smaller window).
++      viewport: native.viewport ?? `${innerWidth}x${innerHeight}`,
++      dpr: native.dpr ?? Math.round(devicePixelRatio * 100) / 100,
++      settings: nativeSettings ?? null,
++      errors: recentErrors(),
++    };
++  }
+   return {
+-    ...(gameInfo() ?? { inGame: false }),
++    ...(game ?? { inGame: false }),
+     ...(runId ? { runId } : {}),
+     ...(room ? { room } : {}),
+     screen: document.body.dataset.screen || null,
+diff --git a/apps/web/src/feedback/state.ts b/apps/web/src/feedback/state.ts
+--- a/apps/web/src/feedback/state.ts
++++ b/apps/web/src/feedback/state.ts
+@@ -38,11 +38,11 @@
+ function install(): void {
+   if (installed || typeof window === "undefined") return;
+   installed = true;
+-  addEventListener("error", (e) => {
++  window.addEventListener("error", (e) => {
+     // Runtime errors only (resource load failures don't bubble to window).
+     push({ at: Date.now(), kind: "error", msg: e.message || describe(e.error), src: e.filename ? `${e.filename}:${e.lineno}:${e.colno}` : undefined, stack: e.error instanceof Error ? e.error.stack : undefined });
+   });
+-  addEventListener("unhandledrejection", (e) => {
++  window.addEventListener("unhandledrejection", (e) => {
+     push({ at: Date.now(), kind: "rejection", msg: describe(e.reason), stack: e.reason instanceof Error ? e.reason.stack : undefined });
+   });
+   const orig = console.error;
+diff --git a/apps/web/src/native-input.ts b/apps/web/src/native-input.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/native-input.ts
+@@ -0,0 +1,75 @@
++/** Narrow Electron preload contract. Native report times are monotonic epoch milliseconds. */
++export interface NativeInputStatus {
++  captured: boolean;
++  raw: boolean;
++  backend: string;
++  error?: string;
++}
++export interface NativeMotionSample { dx: number; dy: number; time: number }
++export interface NativeInputBridge {
++  capture(enabled: boolean): Promise<NativeInputStatus>;
++  drain(): NativeMotionSample[];
++  status?(): NativeInputStatus;
++}
++declare global {
++  interface Window { bunnyhopNativeInput?: NativeInputBridge }
++}
++
++/** Owns native capture lifetime independently of DOM lock events and stale IPC replies. */
++export class NativeMouse {
++  active = false;
++  pending = false;
++  backend = "";
++  error = "";
++  private epoch = 0;
++  private checkedAt = 0;
++  constructor(private readonly bridge: NativeInputBridge | undefined) {}
++
++  async start(): Promise<boolean> {
++    if (!this.bridge) return false;
++    const epoch = ++this.epoch;
++    this.pending = true;
++    this.active = false;
++    try {
++      const status = await this.bridge.capture(true);
++      if (epoch !== this.epoch) return false;
++      this.backend = status.backend;
++      this.error = status.error ?? "";
++      this.active = status.captured && status.raw;
++      if (status.captured && !status.raw) void this.bridge.capture(false).catch(() => {});
++      this.checkedAt = 0;
++      return this.active;
++    } catch (e) {
++      if (epoch === this.epoch) this.error = e instanceof Error ? e.message : String(e);
++      return false;
++    } finally {
++      if (epoch === this.epoch) this.pending = false;
++    }
++  }
++
++  stop(): void {
++    ++this.epoch;
++    this.active = this.pending = false;
++    if (this.bridge) void this.bridge.capture(false).catch(() => {});
++  }
++
++  drain(now: number): NativeMotionSample[] {
++    if (!this.bridge || !this.active) return [];
++    try {
++      if (this.bridge.status && now - this.checkedAt >= 250) {
++        this.checkedAt = now;
++        const status = this.bridge.status();
++        if (!(status.captured && status.raw)) {
++          this.error = status.error ?? "Native capture was released";
++          this.stop();
++          return [];
++        }
++      }
++      return this.bridge.drain();
++    } catch (e) {
++      this.error = e instanceof Error ? e.message : String(e);
++      this.stop();
++      return [];
++    }
++  }
++}
+diff --git a/apps/web/src/native-runtime.ts b/apps/web/src/native-runtime.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/native-runtime.ts
+@@ -0,0 +1,40 @@
++// Optional desktop transport. No DOM or Node dependency: server/worker simulations stay WASM.
++export interface NativeSession {
++  exports: string[];
++  call(name: string, args: number[]): number;
++  read(pointer: number, length: number): Uint8Array;
++  write(pointer: number, bytes: Uint8Array): void;
++  dispose(): void;
++}
++export interface NativeRuntime {
++  build: string;
++  compatibleWasm: string;
++  platform: string;
++  createSession(): NativeSession;
++}
++export function nativeRuntime(): NativeRuntime | undefined {
++  return (globalThis as typeof globalThis & { bunnyhopNative?: NativeRuntime }).bunnyhopNative;
++}
++
++interface MemoryTransport {
++  memory: { buffer: ArrayBufferLike };
++  nativeRead?: NativeSession["read"];
++  nativeWrite?: NativeSession["write"];
++}
++export function coreBytes(x: MemoryTransport, ptr: number, length: number): Uint8Array {
++  return x.nativeRead ? new Uint8Array(x.nativeRead(ptr, length)) : new Uint8Array(x.memory.buffer, ptr, length);
++}
++export function coreWrite(x: MemoryTransport, ptr: number, bytes: Uint8Array): void {
++  if (x.nativeWrite) x.nativeWrite(ptr, bytes);
++  else new Uint8Array(x.memory.buffer, ptr, bytes.length).set(bytes);
++}
++export function coreF32(x: MemoryTransport, ptr: number, length: number): Float32Array {
++  if (!x.nativeRead) return new Float32Array(x.memory.buffer, ptr, length);
++  const bytes = coreBytes(x, ptr, length * 4);
++  return new Float32Array(bytes.buffer, bytes.byteOffset, length);
++}
++export function coreU32(x: MemoryTransport, ptr: number, length: number): Uint32Array {
++  if (!x.nativeRead) return new Uint32Array(x.memory.buffer, ptr, length);
++  const bytes = coreBytes(x, ptr, length * 4);
++  return new Uint32Array(bytes.buffer, bytes.byteOffset, length);
++}
+diff --git a/apps/web/src/net/scoreboard.ts b/apps/web/src/net/scoreboard.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/net/scoreboard.ts
+@@ -0,0 +1,106 @@
++// Shared DOM scoreboard: usable by web gameplay and the native room menu.
++import "./net.css";
++import {clear,h} from "../ui/dom";
++import {formatTime} from "../timer";
++import {styleLabel} from "../styles";
++import {clampTier,tierLabel} from "../tiers";
++import type {StaffRole} from "../progression";
++import type {RankTag} from "./protocol";
++import type {PlayerMarks} from "../creators";
++import {countryFlag} from "../ui/country-flag";
++import {nameAttrs,nameMarks} from "../ui/marks";
++export interface ScoreRow extends PlayerMarks {
++  slot: number;
++  you: boolean;
++  name: string;
++  color: string;
++  rank: RankTag | null;
++  role: StaffRole | null;
++  style: string;
++  /** "0:12.345", "start", "—", "SPEC → name" */
++  status: string;
++  statusKind: "running" | "finished" | "idle" | "spec";
++  pb: number | null;
++  ping: number | null;
++  /** A private lobby's host (net/lobby.ts). */
++  host?: boolean;
++  /** Profile flag (countries.ts code), before the name as on the boards. */
++  country?: string | null;
++}
++
++export interface ScoreHead {
++  room: string;
++  map: string;
++  tier: number | null;
++  timeLeft: string;
++  players: number;
++  max: number;
++  nextMap: string | null;
++  /** You're spectating: the footer has the spectator's keys. */
++  spectating?: boolean;
++}
++
++/** Tab scoreboard. */
++export class Scoreboard {
++  readonly el = h("div#mp-scoreboard", { hidden: true, role: "dialog", "aria-label": "Scoreboard" });
++
++  constructor(parent: HTMLElement) {
++    parent.append(this.el);
++  }
++
++  get open(): boolean {
++    return !this.el.hidden;
++  }
++
++  show(on: boolean): void {
++    this.el.hidden = !on;
++  }
++
++  render(head: ScoreHead, rows: ScoreRow[]): void {
++    const playing = rows.filter((r) => r.statusKind !== "spec");
++    const spec = rows.filter((r) => r.statusKind === "spec");
++    const row = (r: ScoreRow, i: number) =>
++      h(
++        `tr${r.you ? ".you" : ""}`,
++        null,
++        h("td.sb-pos", null, String(i + 1)),
++        h(
++          "td.sb-name",
++          null,
++          h("i.sb-dot", { style: `background:${r.color}` }),
++          r.rank ? h("span.chat-tag", { style: `--rc:${r.rank.color}` }, r.rank.name) : null,
++          countryFlag(r.country),
++          h("span.sb-pname", nameAttrs(r), r.name),
++          nameMarks(r),
++          r.host ? h("span.sb-host", { title: "Lobby host" }, "host") : null,
++        ),
++        h("td.sb-style", null, styleLabel(r.style)),
++        h(`td.sb-time.${r.statusKind}`, null, r.status),
++        h("td.sb-pb", null, r.pb === null ? "—" : formatTime(r.pb)),
++        h("td.sb-ping", null, r.ping === null ? "—" : String(r.ping)),
++      );
++    clear(this.el,
++      h(
++        "div.sb-head",
++        null,
++        h("div.sb-room", null, h("b", null, head.room), h("span.dim", null, ` · ${head.players}/${head.max} players`)),
++        h(
++          "div.sb-map",
++          null,
++          h("b", null, head.map),
++          head.tier ? h(`span.badge.tier.t${clampTier(head.tier)}`, null, tierLabel(head.tier)) : null,
++          h("span.dim", null, ` · ${head.timeLeft}`),
++          head.nextMap ? h("span.dim", null, ` · next: ${head.nextMap}`) : null,
++        ),
++      ),
++      h(
++        "table.sb-table",
++        null,
++        h("thead", null, h("tr", null, h("th", null, "#"), h("th", null, "Player"), h("th", null, "Style"), h("th", null, "Time"), h("th", null, "PB"), h("th", null, "Ping"))),
++        h("tbody", null, ...playing.map(row)),
++      ),
++      spec.length ? h("div.sb-spec", null, h("span.dim", null, "Spectating: "), spec.map((r) => `${r.name}${r.status.replace(/^SPEC/, "")}`).join(", ")) : null,
++      h("div.sb-hint.dim", null, head.spectating ? "Mouse 1 and 2 switch players. Space changes the camera. R respawns you." : "Y to chat, N to spectate. Type rtv, nominate or timeleft. Esc has the server menu."),
++    );
++  }
++}
+diff --git a/apps/web/src/player/model.d.ts b/apps/web/src/player/model.d.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/player/model.d.ts
+@@ -0,0 +1,38 @@
++// Shared presentation pose contract extracted from player/model.ts.
++// Native builds do not include the browser model facade or renderer.
++export interface PlayerPose {
++  /** Deterministic presentation clock for runner replay/export. */
++  visualTime?:number;
++  /** Feet origin, Source units (x, y, z; z up). */
++  position: ArrayLike<number>;
++  /** Units/s. Derived from position changes when omitted. */
++  velocity?: ArrayLike<number>;
++  /** View angles, degrees (Source: yaw CCW from +X, pitch + = down). */
++  yaw: number;
++  pitch: number;
++  /** FL_DUCKING. */
++  crouched: boolean;
++  /** FL_ONGROUND (callers sampling slower than the tick rate should OR in any ground tick since the last frame). */
++  grounded: boolean;
++  /** Command inputs (i16 domain, e.g. ±450). Optional; used for strafe lean. */
++  forwardmove?: number;
++  sidemove?: number;
++  /**
++   * A jump happened since the last setState (PLAYERANIMEVENT_JUMP). Optional: when omitted the model detects jumps
++   * from the vertical velocity. Network clients that receive jump events should pass them.
++   */
++  jumped?: boolean;
++  /**
++   * Cosmetic carrot swing since the last setState: 1 = slash (primary), 2 = stab (secondary). Models with the CS:S
++   * animations play the knife attack layer (Idle/Walk/Run/Crouch_Shoot_KNIFE, like CCSPlayerAnimState's fire layer).
++   */
++  attack?: number;
++  /**
++   * Inspect signal since the last setState (viewmodel/inspects/combo.ts SIG_START = 1: the base inspect started,
++   * SIG_NEXT = 2: the next trick of the chain took over). The bunny and CS:S models play it as a gesture layer
++   * (viewmodel/inspects/third.ts); attacks and snaps cancel it.
++   */
++  inspect?: number;
++  /** The inspect key is held (hold-to-loop tricks keep looping while true). */
++  inspectHeld?: boolean;
++}
+diff --git a/apps/web/src/social/dock.ts b/apps/web/src/social/dock.ts
+--- a/apps/web/src/social/dock.ts
++++ b/apps/web/src/social/dock.ts
+@@ -633,7 +633,7 @@
+   new MutationObserver(sync).observe(document.body, { attributes: true, attributeFilter: ["class", "data-screen"] });
+   sync();
+   // Esc closes the panel before the menu sees it.
+-  addEventListener(
++  window.addEventListener(
+     "keydown",
+     (e) => {
+       if (e.key !== "Escape" || !view || root!.hidden) return;
+diff --git a/apps/web/src/ui/account-name.ts b/apps/web/src/ui/account-name.ts
+--- a/apps/web/src/ui/account-name.ts
++++ b/apps/web/src/ui/account-name.ts
+@@ -5,7 +5,7 @@
+ // everything else once typing pauses, so "Dick" on the way to "Dickens" isn't flagged halfway. Availability comes
+ // from GET /names/check after the pause.
+ 
+-import { api, ApiError, type User } from "../api";
++import { api, type RequestDispatch, ApiError, type User } from "../api";
+ import { cleanName, nameProblem, NAME_MAX, NAME_MESSAGES, suggestName, type NameError } from "../moderation/names";
+ import { h } from "./dom";
+ import { sfx } from "../audio";
+@@ -37,7 +37,7 @@
+   return "Couldn't reach the server. Try again.";
+ }
+ 
+-export function nameField(o: { initial?: string; label?: string; autofocus?: boolean; onSaved?: (u: User | null, name: string) => void; onInput?: () => void } = {}): NameField {
++export function nameField(o: { dispatch?:RequestDispatch; initial?: string; label?: string; autofocus?: boolean; onSaved?: (u: User | null, name: string) => void; onInput?: () => void } = {}): NameField {
+   const id = `name-field-${++uid}`;
+   const input = h("input.nf-input", {
+     id,
+@@ -150,7 +150,7 @@
+         return name;
+       }
+       try {
+-        const u = await api.setDisplayName(name);
++        const u = await api.setDisplayName(name,o.dispatch);
+         localStorage.setItem(NAME_LOCAL_KEY, u.name);
+         input.value = u.name;
+         set(u.nameAdjusted ? `That one was taken. You're ${u.name}.` : "Saved.", u.nameAdjusted ? "warn" : "ok");
+diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
+--- a/apps/web/src/ui/card-editor.ts
++++ b/apps/web/src/ui/card-editor.ts
+@@ -1,3 +1,4 @@
++import {profileWriteGuard} from "./profile-write";
+ import { NewTracker as IndicatorTracker } from "./new-tracker";
+ // Your profile card, edited in place (v0.0.9: no Customise tab). cardEditor() is the small editor under the card in
+ // ui/profile.ts's "Edit card" mode: background, frame, title, name (supporters), badges and links; one click equips and
+@@ -17,7 +18,7 @@
+ import { isLoadoutSlot, listedCosmetic, loadoutSwatch, shownCosmetic } from "./loadout-ui";
+ import { availableNow } from "./community";
+ import { CARD_PARTS, type CardPart } from "./cosmetic-slots";
+-import { refreshMyProfile } from "./account-state";
++import { accountGeneration, refreshMyProfile } from "./account-state";
+ import { nameMarks } from "./marks";
+ import { SPECIAL_BADGES, GIFTER_TIERS } from "../creators";
+ import { linkIcon } from "./marks";
+@@ -41,6 +42,8 @@
+   readonly owned: Set<string>;
+   readonly earned: Set<string>;
+   status: Status = { kind: "idle", text: "" };
++  private readonly writes:ReturnType<typeof profileWriteGuard>;
++  private current():boolean { return this.writes.current(); }
+   private saved: CosmeticChoice;
+   private pending: Partial<CosmeticChoice> = {};
+   private timer = 0;
+@@ -48,6 +51,7 @@
+   private listeners = new Set<() => void>();
+ 
+   constructor(readonly p: Profile) {
++    this.writes=profileWriteGuard(p.player.id);
+     this.choice = { ...DEFAULT_COSMETICS, ...p.cosmetics };
+     this.saved = { ...this.choice };
+     this.badges = [...p.badges];
+@@ -65,7 +69,7 @@
+ 
+   /** Your equipped knife / finish / gloves -> the viewmodel, your bunny, replays. */
+   private syncLoadout(): void {
+-    if (!this.p.mine) return;
++    if (!this.p.mine || !this.current()) return;
+     const l = loadoutFor(this.choice, crownOf(profileRanks(this.p)));
+     if (!sameLoadout(l, getLoadout())) setLoadout(l);
+   }
+@@ -92,6 +96,7 @@
+   }
+ 
+   equip(slot: CosmeticSlot, id: string | null): void {
++    if (!this.current()) return;
+     const c = id ? COSMETICS.find((x) => x.id === id) : null;
+     if (id && (!c || !this.owned.has(id) || !listedCosmetic(c))) return;
+     if (this.choice[slot] === id) return;
+@@ -100,6 +105,7 @@
+ 
+   /** Changes several slots at once (Randomise / Reset); `label` + undo in the status line. */
+   apply(patch: Partial<CosmeticChoice>, label?: string): void {
++    if (!this.current()) return;
+     const before = { ...this.choice };
+     this.choice = { ...this.choice, ...patch };
+     Object.assign(this.pending, patch);
+@@ -113,12 +119,14 @@
+ 
+   private async flush(label?: string, undo?: () => void): Promise<void> {
+     if (this.inflight) await this.inflight;
++    if (!this.current()) { this.pending = {}; return; }
+     const patch = this.pending;
+     this.pending = {};
+     if (!Object.keys(patch).length) return;
+     this.inflight = (async () => {
+       try {
+-        const res = await api.saveCosmetics(patch);
++        const res = await api.saveCosmetics(patch,this.writes);
++        if (!this.current()) return;
+         this.saved = res;
+         // What's saved is the profile now (the Loadout screen builds from it); the page's cached own profile refetches.
+         this.p.cosmetics = { ...res };
+@@ -130,6 +138,7 @@
+         this.syncLoadout();
+         this.setStatus({ kind: "saved", text: label ? `${label} saved` : "Saved", undo });
+       } catch (e) {
++        if (!this.current()) return;
+         this.choice = { ...this.saved };
+         this.pending = {};
+         this.syncLoadout();
+@@ -149,13 +158,15 @@
+   }
+ 
+   setBadges(next: string[]): void {
++    if (!this.current()) return;
+     const before = this.badges;
+     this.badges = next;
+     this.status = { kind: "saving", text: "Saving…" };
+     this.emit();
+-    api.saveBadges(next).then(
+-      () => this.setStatus({ kind: "saved", text: "Saved" }),
++    api.saveBadges(next,this.writes).then(
++      () => { if (this.current()) this.setStatus({ kind: "saved", text: "Saved" }); },
+       (e) => {
++        if (!this.current()) return;
+         this.badges = before;
+         this.setStatus({ kind: "error", text: e instanceof ApiError ? e.message : "Couldn't save" });
+       },
+@@ -447,6 +458,7 @@
+ // boosts the Discord server (the API sends boosterSettings then); the server decides who has the badge.
+ 
+ function boosterSwitch(p: Profile, onBooster?: (show: boolean) => void): HTMLElement | null {
++  const writes=profileWriteGuard(p.player.id);
+   if (!p.boosterSettings) return null;
+   let show = p.boosterSettings.show;
+   const toggle = h("input.switch", { type: "checkbox", checked: show }) as HTMLInputElement;
+@@ -456,7 +468,8 @@
+     status.className = "pf-status saving";
+     status.textContent = "Saving…";
+     try {
+-      show = (await api.saveBooster(toggle.checked)).show;
++      show = (await api.saveBooster(toggle.checked,writes)).show;
++      if(!writes.current())return;
+       p.boosterSettings = { show };
+       status.className = "pf-status saved";
+       status.replaceChildren(h("span.pf-status-ok", { html: CHECK_SVG }), "Saved");
+@@ -484,6 +497,7 @@
+ }
+ 
+ function supporterEditor(p: Profile, onSaved?: (s: SupporterSettings) => void): SupporterEditor | null {
++  const writes=profileWriteGuard(p.player.id);
+   if (!p.supporterSettings) return null;
+   const status = () => h("span.pf-status", { role: "status", "aria-live": "polite" });
+   const badgeStatus = status();
+@@ -497,7 +511,8 @@
+   const save = async (patch: SupporterPatch, el: HTMLElement | null = null): Promise<void> => {
+     if (el) say(el, "saving", "Saving…");
+     try {
+-      const s = await api.saveSupporter(patch);
++      const s = await api.saveSupporter(patch,writes);
++      if(!writes.current())return;
+       p.supporterSettings = s;
+       badge.checked = s.showBadge;
+       board.checked = s.showOnBoard;
+@@ -533,6 +548,7 @@
+ const LINK_PLACEHOLDER: Record<LinkPlatform, string> = { youtube: "@yourchannel", twitch: "yourchannel", x: "@yourhandle", tiktok: "@yourhandle" };
+ 
+ function linksEditor(p: Profile, onLinks?: (links: ProfileLinks, show: boolean) => void): { el: HTMLElement; count: () => string; onCount: () => void } {
++  const writes=profileWriteGuard(p.player.id);
+   let saved: ProfileLinks = { ...(p.linkSettings?.links ?? {}) };
+   let show = p.linkSettings?.show ?? false;
+   const out = { el: h("div.lk-editor"), count: () => (Object.keys(saved).length ? `${Object.keys(saved).length}${show ? "" : " · off"}` : "none"), onCount: () => {} };
+@@ -549,7 +565,8 @@
+     say("saving", "Saving…");
+     for (const r of rows.values()) r.err.textContent = "";
+     try {
+-      const r = await api.saveLinks(body);
++      const r = await api.saveLinks(body,writes);
++      if(!writes.current())return false;
+       saved = { ...r.links };
+       show = r.show;
+       toggle.checked = show;
+@@ -617,6 +634,7 @@
+ 
+ /** The badges after your name (Edit card → Badges): Verified, Creator, Server Booster, Supporter, your Gifter tier. */
+ function nameBadgeEditor(p: Profile, changed: () => void): HTMLElement {
++  const writes=profileWriteGuard(p.player.id);
+   const root = h("section.ce-name-badges", { "aria-label": "Badges after your name" });
+   let busy = false;
+   let feedback = "";
+@@ -656,7 +674,8 @@
+     const status = root.querySelector(".ce-name-status");
+     if (status) status.textContent = feedback;
+     try {
+-      const next = await api.saveNameBadges({ nameBadges, ...extra });
++      const next = await api.saveNameBadges({ nameBadges, ...extra },writes);
++      if(!writes.current())return;
+       p.nameBadgeSettings = next;
+       Object.assign(p.player, next, {
+         supporter: next.nameBadges.includes("supporter") && next.owned.includes("supporter"),
+diff --git a/apps/web/src/ui/country-picker.ts b/apps/web/src/ui/country-picker.ts
+--- a/apps/web/src/ui/country-picker.ts
++++ b/apps/web/src/ui/country-picker.ts
+@@ -1,4 +1,5 @@
+-import { api } from "../api";
++import {profileWriteGuard} from "./profile-write";
++import { api,lastKnownMe } from "../api";
+ import { COUNTRIES, countryCode } from "../countries";
+ import { countryFlag } from "./country-flag";
+ import { arrowNav, h } from "./dom";
+@@ -6,6 +7,7 @@
+ 
+ /** Detection is a shortcut only; nothing is published until Save. */
+ export function countryPicker(current: string | null | undefined, saved: (code: string | null) => void): void {
++  const writes=profileWriteGuard(lastKnownMe()?.id??"");
+   let selected = countryCode(current);
+   let busy = false;
+   const countries = Object.entries(COUNTRIES).sort((a, b) => a[1].localeCompare(b[1]));
+@@ -56,8 +58,9 @@
+     controls.disabled = save.disabled = true;
+     status.textContent = "Saving…";
+     try {
+-      const result = await api.setCountry(selected);
++      const result = await api.setCountry(selected,writes);
+       dialog.close();
++      if(!writes.current())return;
+       saved(result.country);
+     } catch (error) {
+       status.textContent = error instanceof Error ? error.message : "Couldn't save your flag. Try again.";
+diff --git a/apps/web/src/ui/gifting.ts b/apps/web/src/ui/gifting.ts
+--- a/apps/web/src/ui/gifting.ts
++++ b/apps/web/src/ui/gifting.ts
+@@ -3,8 +3,9 @@
+ import { api, ApiError } from "../api";
+ import { GIFTER_BOW, GIFTER_PATH, GIFTER_TIERS } from "../creators";
+ import { GIFT_MAX_RECIPIENTS, type GiftPreview, type GiftTarget, type GiftWallet } from "../gifting";
+-import { me, refreshMyProfile } from "./account-state";
++import { me, refreshMyProfile, accountGeneration, onAccountChange } from "./account-state";
+ import { h } from "./dom";
++import { profileWriteGuard } from "./profile-write";
+ import { dismissOutside } from "./dismiss";
+ 
+ /** A small credit coin, distinct from the transparent earned Gifter badge. */
+@@ -48,11 +49,14 @@
+   document.exitPointerLock?.();
+   const dialog = h("dialog.acct-dialog.gift-dialog", { "aria-labelledby": "gift-title" });
+   current = dialog;
++  const generation=accountGeneration();
++  const currentAccount=()=>generation===accountGeneration();
+   let busy = false;
+   let revision = 0;
+   let preview: GiftPreview | null = null;
+   let reviewed: GiftTarget | null = null;
+   let userId = "";
++  let write:ReturnType<typeof profileWriteGuard>|undefined;
+   let wallet: GiftWallet | null = null;
+   const status = h("p.gift-status", { role: "status", "aria-live": "polite" }, "Loading your gift credits…");
+   const balance = h("span.gift-balance", { "aria-label": "Available gift credits" });
+@@ -137,14 +141,15 @@
+   };
+   quantity.addEventListener("input", invalidate);
+   choose.addEventListener("click", async () => {
++    if (!currentAccount()) { dialog.close(); return; }
+     if (busy || choose.disabled) return;
+     try {
+       const wanted = target();
+       const seq = ++revision;
+       setBusy(true);
+       status.textContent = "Checking…";
+-      preview = await api.giftPreview(wanted);
+-      if (!dialog.isConnected || seq !== revision) return;
++      preview = await api.giftPreview(wanted,write);
++      if (!dialog.isConnected || seq !== revision || !currentAccount()) return;
+       reviewed = wanted;
+       balance.replaceChildren(giftCreditCoin(), `${preview.credits} credit${preview.credits === 1 ? "" : "s"} available`);
+       const players = `${preview.cost} ${wanted.mode === "random" ? "random " : ""}player${preview.cost === 1 ? "" : "s"}`;
+@@ -163,6 +168,7 @@
+     } finally { setBusy(false); }
+   });
+   send.addEventListener("click", async () => {
++    if (!currentAccount()) { dialog.close(); return; }
+     if (busy || !reviewed || !preview?.canDeliver || !userId) return;
+     const key = operationKey(reviewed);
+     const operation = pendingGift(key) ?? { id: crypto.randomUUID(), maxCost: preview.cost };
+@@ -170,7 +176,8 @@
+     setBusy(true);
+     status.textContent = "Sending…";
+     try {
+-      const delivered = await api.sendGifts(reviewed, operation.id, operation.maxCost);
++      const delivered = await api.sendGifts(reviewed, operation.id, operation.maxCost,write);
++      if(!currentAccount()||!dialog.isConnected)return;
+       rememberGift(key, null);
+       showWallet(delivered.wallet);
+       review.replaceChildren(h("strong", null, `${delivered.cost === 1 ? "Gift" : `${delivered.cost} gifts`} sent. Thank you!`), h("p", null, delivered.delivered.map((p) => p.name).join(", ")));
+@@ -222,13 +229,15 @@
+   dismissOutside(dialog, () => { if (!busy) dialog.close(); });
+   dialog.addEventListener("close", () => { revision++; current = null; dialog.remove(); });
+   document.body.append(dialog);
++  onAccountChange(dialog,()=>{revision++;dialog.close();});
+   invalidate();
+   dialog.showModal();
+   void me().then(async (u) => {
+     if (!u) throw new Error("Connect to your account to use gifting.");
+-    userId = u.id;
++    if(!currentAccount()||!dialog.isConnected)return;
++    userId = u.id;write=profileWriteGuard(userId);
+     const w = await api.giftWallet();
+-    if (!dialog.isConnected) return;
++    if (!dialog.isConnected || !currentAccount()) return;
+     showWallet(w);
+     controls.disabled = false;
+     invalidate();
+@@ -245,7 +254,9 @@
+   const detail = h("p.gift-wallet-note", null, "Loading…");
+   const open = h("button.btn.primary", { type: "button", disabled: true, onclick: () => openGiftDialog() }, "Gift Supporter");
+   const panel = h("section.sp-gifts", { "aria-label": "Your gift credits" }, h("div.sp-gifts-top", null, amount, open), track, detail);
+-  const refresh = () => void me().then((u) => u ? api.giftWallet() : null).then((w) => {
++  let refreshSeq=0;
++  const refresh = () => {const generation=accountGeneration(),seq=++refreshSeq;open.disabled=true;return void me().then((u) => u ? api.giftWallet() : null).then((w) => {
++    if(generation!==accountGeneration()||seq!==refreshSeq)return;
+     if (!w) { track.hidden = true; detail.hidden = false; detail.textContent = "Sign in to see your gift credits."; return; }
+     amount.replaceChildren(giftCreditCoin(), `${w.credits} gift credit${w.credits === 1 ? "" : "s"}`);
+     const next = GIFTER_TIERS.find(t => t.goal === w.nextTier);
+@@ -257,9 +268,10 @@
+     track.hidden = false;
+     detail.hidden = true;
+     open.disabled = false;
+-  }).catch(() => { track.hidden = true; detail.hidden = false; detail.textContent = "Couldn't load your gift credits."; open.disabled = false; });
++  }).catch(() => {if(generation!==accountGeneration()||seq!==refreshSeq)return;track.hidden = true; detail.hidden = false; detail.textContent = "Couldn't load your gift credits."; open.disabled = false; });};
+   const changed = () => { if (!panel.isConnected) window.removeEventListener("bunnyhop:gifts-changed", changed); else refresh(); };
+   window.addEventListener("bunnyhop:gifts-changed", changed);
++  onAccountChange(panel,refresh);
+   refresh();
+   return panel;
+ }
+diff --git a/apps/web/src/ui/loadout-ui.ts b/apps/web/src/ui/loadout-ui.ts
+--- a/apps/web/src/ui/loadout-ui.ts
++++ b/apps/web/src/ui/loadout-ui.ts
+@@ -8,7 +8,7 @@
+ import { achievement, cosmetic, RARITY, type CosmeticDef } from "../progression";
+ import { availableNow } from "./community";
+ import { finishStyle, gloveStyle, type CosmeticLoadout } from "../loadout";
+-import { knifeById } from "../viewmodel/knives/index";
++import { knifeById } from "../../../native/ui/knife-catalog";
+ import { h } from "./dom";
+ 
+ /** Knives the registry hasn't built yet stay hidden everywhere (they appear, as new, once they ship). */
+diff --git a/apps/web/src/ui/player-glow-controls.ts b/apps/web/src/ui/player-glow-controls.ts
+--- a/apps/web/src/ui/player-glow-controls.ts
++++ b/apps/web/src/ui/player-glow-controls.ts
+@@ -1,7 +1,8 @@
++import {prefs} from "./settings";
+ import { glowColorPicker } from "./glow-color-picker";
+-import { prefs } from "./settings";
+ import { DEFAULT_PLAYER_GLOW, GLOW_COLORS, glowColorHex, isHexGlowColor, type PlayerGlow } from "../player/glow-config";
+-import { api } from "../api";
++import { api, lastKnownMe } from "../api";
++import { profileWriteGuard } from "./profile-write";
+ import { getPlayerGlow, playerGlowRevision, setPlayerGlow } from "../player/cosmetics";
+ import { accountGeneration, onAccountChange } from "./account-state";
+ import { h } from "./dom";
+@@ -31,13 +32,14 @@
+     clearTimeout(glowTimer);
+     const seq = ++glowSeq;
+     const generation = accountGeneration();
++    const write=profileWriteGuard(lastKnownMe()?.id??"");
+     glowStatus.textContent = supporter ? "Saving…" : "Preview";
+     glowStatus.className = "pf-status";
+     if (!supporter) return;
+     glowTimer = window.setTimeout(() => {
+       if (generation !== accountGeneration() || disposed || !o.root().isConnected) return;
+       const want = { ...glow };
+-      void api.saveSupporter({ playerGlow: want }).then(
++      void api.saveSupporter({ playerGlow: want },write).then(
+         (s) => {
+           if (generation !== accountGeneration() || seq !== glowSeq || !o.root().isConnected) return;
+           savedGlow = { ...s.playerGlow };
+diff --git a/apps/web/src/ui/profile-write.ts b/apps/web/src/ui/profile-write.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/ui/profile-write.ts
+@@ -0,0 +1,9 @@
++import {lastKnownMe,type RequestDispatch} from "../api";
++import {accountGeneration} from "./account-state";
++export function captureProfileWrite(owner:string,source:{generation():number;owner():string|null}):RequestDispatch&{current():boolean} {
++ const epoch=source.generation();const current=()=>epoch===source.generation()&&source.owner()===owner;
++ const dispatch:RequestDispatch=async send=>{if(!current())throw new Error("Account changed. Reopen this profile.");const reply=await send();if(!current())throw new Error("Account changed. Reopen this profile.");return reply;};return Object.assign(dispatch,{current});
++}
++/** Capture when the editor opens; check immediately before fetch and before the
++ * API can apply response side effects. Native keeps its document across logins. */
++export function profileWriteGuard(owner:string):RequestDispatch&{current():boolean} {return captureProfileWrite(owner,{generation:accountGeneration,owner:()=>lastKnownMe()?.id??null});}
+diff --git a/apps/web/src/ui/profile.ts b/apps/web/src/ui/profile.ts
+--- a/apps/web/src/ui/profile.ts
++++ b/apps/web/src/ui/profile.ts
+@@ -1,3 +1,4 @@
++import {profileWriteGuard} from "./profile-write";
+ import { whisper } from "../notify";
+ import { playerGlowControls } from "./player-glow-controls";
+ import { DOTS } from "../social/dock";
+@@ -35,7 +36,7 @@
+ import { mouseFromPrefs } from "../mouse-settings";
+ import { prefs } from "./settings";
+ import { mouseProfileEditor, mouseProfileStats } from "./mouse-profile";
+-import { profileFor, refreshMyProfile } from "./account-state";
++import { accountGeneration, profileFor, refreshMyProfile } from "./account-state";
+ import { countryPicker } from "./country-picker";
+ import { api, ApiError, ApiUnavailable, lastKnownMe, type PlayerGauntlets, type PointsRecord, type Profile, type RunCard } from "../api";
+ import { COSMETICS, supporterItem, type CosmeticChoice } from "../progression";
+@@ -169,11 +170,14 @@
+     root.removeAttribute("aria-busy");
+     return root;
+   }
++  const accountEpoch = accountGeneration();
+   const early = earlyReads(id, profileTarget(open.tab, open.slot).tab);
+   // GET /config first (cached, one request per page): whether the Discord server rewards are listed (ui/community.ts).
+   // Your own profile may come from the home screen's read (account-state.ts profileFor).
+   Promise.all([profileFor(id), communityConfig()])
+     .then(([p]) => {
++      if (!root.isConnected) return;
++      if (accountEpoch !== accountGeneration()) { tabs.replaceChildren(); root.replaceChildren(h("p.dim",null,"Account changed. Reopen this profile.")); return; }
+       render(root, p, a, open, tabs, p.player.id === early.id ? early : { id: p.player.id });
+       if (ownTabs) root.prepend(tabs);
+     })
+@@ -191,6 +195,7 @@
+ // ---------------------------------------------------------------------------------------------
+ 
+ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileOpen, tabsHost: HTMLElement, early: EarlyReads): void {
++  const writes=profileWriteGuard(p.player.id);
+   const lo = new Loadout(p);
+   const news = NewTracker.forProfile(p);
+   let featuredIds = p.featuredAuto ? [] : p.featured.map((r) => r.runId);
+@@ -472,9 +477,11 @@
+     known.set(run.runId, run);
+     const next = featuredIds.includes(run.runId) ? featuredIds.filter((x) => x !== run.runId) : [...featuredIds, run.runId].slice(-5);
+     try {
+-      featuredIds = await api.saveFeatured(next);
++      featuredIds = await api.saveFeatured(next,writes);
++      if(!writes.current())return;
+       if (featuredIds.length) featured = featuredIds.map((x) => known.get(x)).filter((x): x is RunCard => !!x);
+       else featured = (await api.profile(p.player.id)).featured;
++      if(!writes.current())return;
+       drawCard();
+       drawFeatured();
+       runs?.refresh();
+diff --git a/apps/web/src/ui/run-stats.ts b/apps/web/src/ui/run-stats.ts
+--- a/apps/web/src/ui/run-stats.ts
++++ b/apps/web/src/ui/run-stats.ts
+@@ -200,7 +200,7 @@
+   if (globalBound) return;
+   globalBound = true;
+   // Escape closes the card first (not the dialog or menu under it).
+-  addEventListener(
++  window.addEventListener(
+     "keydown",
+     (e) => {
+       if (e.key !== "Escape" || !card || card.hidden) return;
+@@ -213,13 +213,13 @@
+   );
+   // Any other key (paging the board, typing in its search) or a press anywhere closes it too; Tab moves focus, which
+   // moves the card itself (focusin / focusout).
+-  addEventListener("keydown", (e) => {
++  window.addEventListener("keydown", (e) => {
+     if (card && !card.hidden && !["Escape", "Tab", "Shift", "Control", "Alt", "Meta"].includes(e.key)) hideRunStats();
+   });
+-  addEventListener("pointerdown", () => card && !card.hidden && hideRunStats(), true);
+-  addEventListener("scroll", hideRunStats, { capture: true, passive: true });
+-  addEventListener("resize", hideRunStats, { passive: true });
+-  addEventListener("blur", hideRunStats);
++  window.addEventListener("pointerdown", () => card && !card.hidden && hideRunStats(), true);
++  window.addEventListener("scroll", hideRunStats, { capture: true, passive: true });
++  window.addEventListener("resize", hideRunStats, { passive: true });
++  window.addEventListener("blur", hideRunStats);
+ }
+ 
+ const rowOf = (t: EventTarget | null): HTMLElement | null => (t instanceof Element ? t.closest<HTMLElement>("tr[data-run]") : null);
+diff --git a/apps/web/src/ui/support.ts b/apps/web/src/ui/support.ts
+--- a/apps/web/src/ui/support.ts
++++ b/apps/web/src/ui/support.ts
+@@ -24,7 +24,7 @@
+ import { WAVEDASH } from "../platform/env";
+ import { wavedashCopy } from "../platform/wavedash";
+ import "./support.css";
+-import { api, type MySupport, type Profile, type TopSupporter } from "../api";
++import { api, lastKnownMe, type MySupport, type Profile, type TopSupporter } from "../api";
+ import { NAME_COLORS, NAME_EFFECTS, type NameColorId, type NameEffect, type NameLook } from "../creators";
+ import { cosmetic, DEFAULT_COSMETICS, supporterItem, SUPPORTER_MIN_USD, SUPPORTER_SETS, type SupporterSetId } from "../progression";
+ import { UNRANKED } from "../ranking";
+@@ -38,6 +38,7 @@
+ import { loadoutView, type LoadoutChoice, type LoadoutModel } from "./loadout-view";
+ import { nameAttrs, supporterMark } from "./marks";
+ import { navigate } from "./nav";
++import { profileWriteGuard } from "./profile-write";
+ import { supportGifting } from "./support-gifting";
+ 
+ /**
+@@ -156,11 +157,12 @@
+   look.on(() => {
+     if (!savedLook || (look.color === savedLook.color && look.effect === savedLook.effect)) return;
+     clearTimeout(saveTimer);
++    const write=profileWriteGuard(lastKnownMe()?.id??"");
+     status("Saving…");
+     saveTimer = window.setTimeout(() => {
+       const seq = ++saveSeq;
+       const want = { color: look.color, effect: look.effect };
+-      api.saveSupporter({ nameColor: want.color, nameEffect: want.effect }).then(
++      api.saveSupporter({ nameColor: want.color, nameEffect: want.effect },write).then(
+         (s) => {
+           if (seq !== saveSeq) return;
+           savedLook = { color: s.nameColor, effect: s.nameEffect };
+@@ -439,13 +441,16 @@
+ 
+ /** A supporter's "Show me in Top supporters" switch (also the About page's thank-you list). */
+ function boardSwitch(s: MySupport): HTMLElement {
++  const generation=accountGeneration(),write=profileWriteGuard(lastKnownMe()?.id??"");
+   const box = h("input.switch", { type: "checkbox", checked: !!s.supporter?.showOnBoard }) as HTMLInputElement;
+   const status = h("span.pf-status", { role: "status", "aria-live": "polite" });
+   box.onchange = async () => {
++    if(generation!==accountGeneration())return;
+     box.disabled = true;
+     status.textContent = "Saving…";
+     try {
+-      const next = await api.saveSupporter({ showOnBoard: box.checked });
++      const next = await api.saveSupporter({ showOnBoard: box.checked },write);
++      if(generation!==accountGeneration()||!box.isConnected)return;
+       box.checked = next.showOnBoard;
+       status.textContent = "Saved";
+     } catch {
+diff --git a/apps/web/src/viewmodel/inspects/third.ts b/apps/web/src/viewmodel/inspects/third.ts
+--- a/apps/web/src/viewmodel/inspects/third.ts
++++ b/apps/web/src/viewmodel/inspects/third.ts
+@@ -60,7 +60,7 @@
+ }
+ 
+ /** Samples a first-person clip's knife-in-hand motion (relative to the held knife), for knife `def`. */
+-function trackOf(clip: InspectClip, def: KnifeDef | null): Track {
++export function inspectKnifeTrack(clip: InspectClip, def: KnifeDef | null): Track {
+   let m = tracks.get(clip);
+   if (!m) tracks.set(clip, (m = new Map()));
+   const key = def?.id ?? "carrot";
+@@ -239,11 +239,11 @@
+     // Presented amount and knife motion (crossfaded like the first person).
+     const cc = clips[pz.cur.trick];
+     let p = presented(pz.cur.t, cc.enter, cc.exit, cc.len);
+-    sampleTrack(trackOf(cc, this.knife), pz.cur.t, this.D);
++    sampleTrack(inspectKnifeTrack(cc, this.knife), pz.cur.t, this.D);
+     if (pz.prev && pz.mix < 1) {
+       const pc = clips[pz.prev.trick];
+       p = presented(pz.prev.t, pc.enter, pc.exit, pc.len) * (1 - pz.mix) + p * pz.mix;
+-      sampleTrack(trackOf(pc, this.knife), pz.prev.t, this.D2);
++      sampleTrack(inspectKnifeTrack(pc, this.knife), pz.prev.t, this.D2);
+       blend34(this.D2, this.D, pz.mix, this.D);
+     }
+     p *= w;
+diff --git a/apps/web/src/wasm/.gitignore b/apps/web/src/wasm/.gitignore
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/wasm/.gitignore
+@@ -0,0 +1,2 @@
++/bunnyhop_core.wasm
++/bunnyhop_core.wasm.download-*

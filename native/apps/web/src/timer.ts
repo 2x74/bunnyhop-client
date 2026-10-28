@@ -5,6 +5,7 @@
 // whose results may differ between JS engines (V8 vs JavaScriptCore).
 
 import { playerInZone, splitCount, touching, trackOf, type Zone } from "./zones";
+import { entryCrossing, exitCrossing, FRACTION_UNITS, movement, TIMING_POLICY, timeUnits, unitsToMs, type Crossing, type PathSource, type RunTiming } from "./run-timing";
 
 export type RunStatus = "idle" | "running" | "finished";
 
@@ -145,6 +146,16 @@ export class RunTimer {
   private preGrounded: boolean | null = null;
   private lastSide = 0;
   private prevYaw = NaN;
+  /**
+   * Sub-tick timing (run-timing.ts): where in the run's first tick the player left the start zone, and where in the
+   * finishing tick they entered the end zone. Read with timing() / timeMs().
+   */
+  startCrossing: Crossing = { fraction: 0, method: "boundary" };
+  endCrossing: Crossing = { fraction: FRACTION_UNITS, method: "boundary" };
+  /** The accepted movement path of the tick just stepped (sim.ts afterStep sets it); null = straight traces only. */
+  pathSource: PathSource | null = null;
+  /** Feet position after the previous update: where this tick's straight trace starts. */
+  private prevPosition: readonly number[] | null = null;
 
   constructor(
     public zones: readonly Zone[],
@@ -168,6 +179,7 @@ export class RunTimer {
     this.preGrounded = null;
     this.perfGroundTicks = 0;
     this.prevYaw = NaN;
+    this.prevPosition = null;
     this.clearStats();
   }
 
@@ -177,6 +189,8 @@ export class RunTimer {
     this.lastPerfectTick = -1;
     this.lastSide = 0;
     this.splits = [];
+    this.startCrossing = { fraction: 0, method: "boundary" };
+    this.endCrossing = { fraction: FRACTION_UNITS, method: "boundary" };
   }
 
   /**
@@ -201,6 +215,7 @@ export class RunTimer {
     this.preGrounded = null;
     this.perfGroundTicks = 0;
     this.prevYaw = NaN;
+    this.prevPosition = null;
     this.clearStats();
   }
 
@@ -217,6 +232,7 @@ export class RunTimer {
     this.wasOnGround = false;
     this.groundSince = 0;
     this.prevYaw = NaN;
+    this.prevPosition = null;
   }
 
   /** Called before movement, including while outside start zones, so landings are detected consistently. */
@@ -242,9 +258,34 @@ export class RunTimer {
     return 0;
   }
 
-  /** Seconds (canonical: ticks * tick interval). */
+  /**
+   * Seconds. A running clock counts whole ticks (ticks * tick interval); a finished run is its sub-tick time rounded to
+   * the millisecond (timeMs, run-timing.ts), what the boards show.
+   */
   time(atTick = this.lastTick): number {
+    if (this.status === "finished") return this.timeMs() / 1000;
     return this.ticks(atTick) * this.tickInterval;
+  }
+
+  /** A finished run's duration in phase units (run-timing.ts: millionths of a tick); 0 otherwise. */
+  timeUnits(): number {
+    if (this.status !== "finished") return 0;
+    return timeUnits(this.startTick, this.startCrossing.fraction, this.endTick, this.endCrossing.fraction);
+  }
+
+  /** A finished run's time in whole milliseconds (the ranked score); 0 otherwise. */
+  timeMs(): number {
+    return unitsToMs(this.timeUnits(), this.tickInterval);
+  }
+
+  /** How a finished run was timed (the verifier stores it), or null. */
+  timing(): RunTiming | null {
+    if (this.status !== "finished") return null;
+    const units = this.timeUnits();
+    return {
+      policy: TIMING_POLICY, startTick: this.startTick, endTick: this.endTick,
+      start: { ...this.startCrossing }, end: { ...this.endCrossing }, units, ms: unitsToMs(units, this.tickInterval),
+    };
   }
 
   syncPercent(): number {
@@ -259,6 +300,8 @@ export class RunTimer {
   update(cmd: TickCmd, events: number, s: TickState): TimerUpdate {
     const out: TimerUpdate = {};
     this.lastTick = s.tick;
+    const from = this.prevPosition;
+    this.prevPosition = s.position;
     if (s.onLadder || events & (EVENT_JUMPED | EVENT_TELEPORTED | EVENT_RESPAWNED)) this.lastPerfectTick = -1;
     // End zone touched by this tick's trigger pass, before a teleport in that pass moved the player out of it (not when
     // the player died in it: the respawn ends the run).
@@ -280,6 +323,8 @@ export class RunTimer {
         this.status = "running";
         this.startTick = s.tick;
         this.clearStats();
+        // Rules 1 start on leaving the zone, in the air too: the exit is always measured.
+        this.startCrossing = this.exitCrossing(events, s, from);
         out.started = true;
         this.capPrespeed(s, out);
       }
@@ -296,6 +341,9 @@ export class RunTimer {
         if (this.status === "idle" && this.armed) {
           // Left the armed state: this is the run's first tick (bhoptimer's last StartTimer was the tick before).
           this.pendingStart = s.tick;
+          // Walked out of the zone on the ground: the run starts where the player left it in this tick. A jump, a ledge
+          // drop or prespeed inside the zone starts it at the tick's start, before the zone is left.
+          this.startCrossing = !inStart && !(events & EVENT_JUMPED) ? this.exitCrossing(events, s, from) : { fraction: 0, method: "boundary" };
           this.capPrespeed(s, out);
         }
         this.armed = false;
@@ -361,12 +409,42 @@ export class RunTimer {
       if (passEnd || touching(s.position, s.crouched, this.zones, "end", this.track)) {
         this.status = "finished";
         this.endTick = s.tick;
+        this.endCrossing = this.entryCrossing(events, s, from, passEnd);
         out.finished = true;
       }
     }
     this.perfGroundTicks = s.grounded && !s.onLadder && !(events & EVENT_RESPAWNED) ? this.perfGroundTicks + 1 : 0;
     this.prevYaw = cmd.yaw;
     return out;
+  }
+
+  /**
+   * Where in this tick the player stopped touching the start zones (run-timing.ts exitCrossing), along the move to the
+   * touch position. A teleport in the tick's trigger pass that carried the player out of the zone starts the run at the
+   * tick's start, like the old timer.
+   */
+  private exitCrossing(events: number, s: TickState, from: readonly number[] | null): Crossing {
+    const to = s.touchPosition ?? s.position;
+    const crouched = s.touchPosition ? (s.touchCrouched ?? s.crouched) : s.crouched;
+    const starts = this.zones.filter((z) => z.kind === "start");
+    if (starts.some((z) => playerInZone(to, crouched, z))) return { fraction: 0, method: "boundary" };
+    // Without a touch position a teleport / respawn hides where the move ended.
+    if (!s.touchPosition && events & (EVENT_TELEPORTED | EVENT_RESPAWNED)) return { fraction: 0, method: "fallback" };
+    return exitCrossing(movement(this.pathSource?.() ?? null, from, to, crouched), starts);
+  }
+
+  /**
+   * Where in this tick the player first touched the end zone they finished in (run-timing.ts entryCrossing): along the
+   * move to this tick's touch position (passEnd), else (a teleport or respawn put them in it) at the tick's end.
+   */
+  private entryCrossing(events: number, s: TickState, from: readonly number[] | null, passEnd: boolean): Crossing {
+    const ends = this.zones.filter((z) => z.kind === "end" && trackOf(z) === this.track);
+    if (passEnd) return entryCrossing(movement(this.pathSource?.() ?? null, from, s.touchPosition!, s.touchCrouched ?? s.crouched), ends);
+    const moved = s.touchPosition
+      ? s.touchPosition[0] !== s.position[0] || s.touchPosition[1] !== s.position[1] || s.touchPosition[2] !== s.position[2]
+      : (events & (EVENT_TELEPORTED | EVENT_RESPAWNED)) !== 0;
+    if (moved) return { fraction: FRACTION_UNITS, method: "boundary" };
+    return entryCrossing(movement(this.pathSource?.() ?? null, from, s.position, s.crouched), ends);
   }
 
   /**

@@ -33,6 +33,12 @@ export interface CosmeticLoadout {
   /** Bunny build; omitted by older loadouts = Model A. Tek keeps its own shape. */
   body?: "body-a" | "body-b";
   /**
+   * Bunny colourway (progression.ts "outfit-*" id). Only replay trailers carry it (v0.0.29+), so a replay shows the
+   * colourway the run was played in; rooms send the colourway beside the loadout, and every other reader ignores it.
+   * Absent = unknown (older replays: the viewer asks the account).
+   */
+  outfit?: string;
+  /**
    * RESERVED, not implemented: a player-picked colour (sRGB 0xRRGGBB) for finishes that offer one (FinishStyle.tintable).
    * Nothing writes, reads, validates or sends it yet; cleanLoadout drops it. Plan: research/COSMETICS-PLAN.md §4.1.
    */
@@ -211,27 +217,39 @@ export function cleanLoadout(raw: unknown): CosmeticLoadout | null {
 }
 
 export const sameLoadout = (a: CosmeticLoadout | null | undefined, b: CosmeticLoadout | null | undefined) =>
-  !!a && !!b && a.knife === b.knife && a.finish === b.finish && a.glove === b.glove && (a.crown ?? null) === (b.crown ?? null) && (a.hat ?? null) === (b.hat ?? null) && (a.body ?? "body-a") === (b.body ?? "body-a");
+  !!a && !!b && a.knife === b.knife && a.finish === b.finish && a.glove === b.glove && (a.crown ?? null) === (b.crown ?? null) && (a.hat ?? null) === (b.hat ?? null) && (a.body ?? "body-a") === (b.body ?? "body-a") && (a.outfit ?? null) === (b.outfit ?? null);
 
 export const isDefaultLoadout = (l: CosmeticLoadout) => l.knife === DEFAULT_KNIFE && l.finish === DEFAULT_FINISH && l.glove === DEFAULT_GLOVE && l.body !== "body-b";
 
 // ---------------------------------------------------------------------------------------------
-// Packed text form: "2;<knife>;<finish>;<glove>[;<crown>[;<hat>[;<body>]]]". Empty tail fields are placeholders;
-// absent body means Model A. Older readers ignore new fields, so both builds keep the v2 replay format.
+// Packed text form: "2;<knife>;<finish>;<glove>[;<crown>[;<hat>[;<body>[;<outfit>]]]]". Empty tail fields are placeholders;
+// absent body means Model A, absent outfit an unknown colourway. Older readers ignore new fields (a v2 reader takes
+// fields 1-6 and stops), so every build keeps the v2 replay format.
 // v1 (v0.0.5 replays) was "1;<knife>;<finish>;<seed>;<wear × 10000>;<glove>[;<crown>]": still read, seed / wear ignored.
 
 const PACK_VERSION = "2";
 
 export function packLoadout(l: CosmeticLoadout): string {
-  const tail = l.body === "body-b" ? [l.crown ?? "", l.hat ?? "", l.body] : l.hat ? [l.crown ?? "", l.hat] : l.crown ? [l.crown] : [];
+  const outfit = outfitId(l.outfit);
+  const tail = outfit ? [l.crown ?? "", l.hat ?? "", l.body === "body-b" ? l.body : "", outfit] : l.body === "body-b" ? [l.crown ?? "", l.hat ?? "", l.body] : l.hat ? [l.crown ?? "", l.hat] : l.crown ? [l.crown] : [];
   return [PACK_VERSION, l.knife, l.finish, l.glove, ...tail].join(";");
 }
+
+/** A known colourway id (retired ids read as their replacement), else null. */
+const outfitId = (v: unknown): string | null => {
+  const c = typeof v === "string" && v ? cosmetic(v) : null;
+  return c?.slot === "outfit" ? c.id : null;
+};
 
 /** Inverse of packLoadout (v2, or a v1 trailer); null for anything else. Unknown ids fall back to the defaults. */
 export function unpackLoadout(s: string | null | undefined): CosmeticLoadout | null {
   if (!s || s.length > 200) return null;
   const f = s.split(";");
-  if (f[0] === "2" && f.length >= 4) return cleanLoadout({ knife: f[1], finish: f[2], glove: f[3], crown: f[4] ? Number(f[4]) : null, hat: f[5], body: f[6] });
+  if (f[0] === "2" && f.length >= 4) {
+    const l = cleanLoadout({ knife: f[1], finish: f[2], glove: f[3], crown: f[4] ? Number(f[4]) : null, hat: f[5], body: f[6] })!;
+    const outfit = outfitId(f[7]);
+    return outfit ? { ...l, outfit } : l;
+  }
   if (f[0] === "1" && f.length >= 6) {
     if (!Number.isInteger(Number(f[3])) || !Number.isInteger(Number(f[4]))) return null;
     return cleanLoadout({ knife: f[1], finish: f[2], glove: f[5], crown: f[6] ? Number(f[6]) : null });

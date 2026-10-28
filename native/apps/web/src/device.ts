@@ -1,21 +1,17 @@
 // Device id + fingerprint (anticheat v2, research/ANTICHEAT.md "v2"; the server side is apps/api src/network.ts).
 //
-// Device id: a long-lived random id for this browser, "<created, base36 ms>-<16 random bytes>", kept in three places:
-// localStorage, IndexedDB and a first-party cookie (bh_did, 2 years). Clearing one or two of them doesn't reset it: on
-// every page load the copies are read, the oldest id (smallest created time) wins, and every store is written back.
-// The cookie rides along with every API request on the same site; POSTs also send it as x-bh-device.
-//
-// Fingerprint: what the browser exposes about the machine (WebGL renderer / vendor and capabilities, screen, pixel
-// ratio, timezone, languages, cores, memory, platform, a small canvas render), hashed (x-bh-fp on POSTs). The raw
-// components go with run diagnostics (selfcheck.ts) for staff. Browser version strings are kept out of the hash so an
-// update doesn't change it (uaMajor is sent as a component only).
+// Device id: a random id in the bh_did first-party cookie (2 years). Wavedash uses its cookie jar instead,
+// because third-party cookies are unavailable in the frame. Legacy localStorage / IndexedDB copies are deleted
+// at startup and never consulted: clearing the cookie (or Wavedash jar) resets the id on the next page load.
+// Fingerprint: browser/GPU/canvas signals, hashed only for session creation and run submission. The raw components
+// go with run diagnostics (selfcheck.ts). Browser versions stay out of the hash so updates don't change it.
 //
 // Bans of a network / device / fingerprint and ban-evasion detection are server-side (src/network.ts). Nothing here is
 // secret or trusted: a cheater can strip all of it; it only has to catch the ones who don't.
 
 import { gpuInfo, glCaps } from "./gpu-info";
 import { WAVEDASH } from "./platform/env";
-import { setJarCookie } from "./platform/jar";
+import { jarHeader, setJarCookie } from "./platform/jar";
 
 const KEY = "bh_did";
 const COOKIE_DAYS = 730;
@@ -38,8 +34,6 @@ export interface FingerprintComponents {
   canvasHash?: string;
 }
 
-const created = (id: string) => parseInt(id.split("-")[0], 36);
-
 function newId(): string {
   const b = crypto.getRandomValues(new Uint8Array(16));
   const r = btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -47,80 +41,47 @@ function newId(): string {
 }
 
 function readCookie(): string | null {
-  const m = /(?:^|;\s*)bh_did=([^;]+)/.exec(document.cookie);
-  return m ? decodeURIComponent(m[1]) : null;
+  try {
+    const m = /(?:^|;\s*)bh_did=([^;]+)/.exec(WAVEDASH ? jarHeader() : document.cookie);
+    return m ? decodeURIComponent(m[1]) : null;
+  } catch { return null; }
 }
 
 function writeCookie(id: string): void {
-  // The Wavedash build keeps its cookies for bunnyhop.lol itself (platform/jar.ts): the device id rides there too.
-  if (WAVEDASH) setJarCookie(KEY, encodeURIComponent(id));
+  if (WAVEDASH) {
+    setJarCookie(KEY, encodeURIComponent(id));
+    return;
+  }
   try {
     document.cookie = `${KEY}=${encodeURIComponent(id)}; Path=/; Max-Age=${COOKIE_DAYS * 86400}; SameSite=Lax${location.protocol === "https:" ? "; Secure" : ""}`;
-  } catch {
-    /* cookies off */
-  }
-}
-
-function idb<T>(fn: (s: IDBObjectStore) => IDBRequest<T>, mode: IDBTransactionMode): Promise<T | null> {
-  return new Promise((resolve) => {
-    try {
-      const open = indexedDB.open("bunnyhop-device", 1);
-      open.onupgradeneeded = () => open.result.createObjectStore("kv");
-      open.onerror = () => resolve(null);
-      open.onsuccess = () => {
-        try {
-          const req = fn(open.result.transaction("kv", mode).objectStore("kv"));
-          req.onsuccess = () => resolve(req.result ?? null);
-          req.onerror = () => resolve(null);
-        } catch {
-          resolve(null);
-        }
-      };
-    } catch {
-      resolve(null);
-    }
-  });
+  } catch { /* cookies off: the id lasts this page */ }
 }
 
 let current: string | null = null;
-let reconciled: Promise<string> | null = null;
 
-/** The oldest valid id among the stores (and `extra`), or a new one; written back everywhere. */
-function settle(found: (string | null | undefined)[]): string {
-  const ok = found.filter((x): x is string => typeof x === "string" && ID_RE.test(x));
-  const id = ok.sort((a, b) => created(a) - created(b))[0] ?? current ?? newId();
-  current = id;
+/** Remove resurrection stores without adopting them. No new database is opened or written. */
+function clearLegacyStores(): void {
+  try { localStorage.removeItem(KEY); } catch { /* storage off */ }
   try {
-    localStorage.setItem(KEY, id);
-  } catch {
-    /* storage off */
-  }
-  writeCookie(id);
-  return id;
+    const deletion = indexedDB.deleteDatabase("bunnyhop-device");
+    deletion.onerror = () => { /* best effort when storage is blocked */ };
+    // An old tab may still hold the database open; deletion stays pending until it closes.
+  } catch { /* IndexedDB unavailable */ }
 }
 
-/** This browser's device id now (sync: localStorage / cookie); deviceIdSettled() also folds in IndexedDB. */
+/** Cookie only (Wavedash: its cookie jar), cached for this page. */
 export function deviceId(): string {
   if (current) return current;
-  let ls: string | null = null;
-  try {
-    ls = localStorage.getItem(KEY);
-  } catch {
-    /* storage off */
-  }
-  return settle([ls, readCookie()]);
+  clearLegacyStores();
+  const stored = readCookie();
+  current = stored && ID_RE.test(stored) ? stored : newId();
+  writeCookie(current);
+  return current;
 }
 
-/** The device id once IndexedDB has been read (and every store agrees). */
-export function deviceIdSettled(): Promise<string> {
-  reconciled ??= (async () => {
-    const first = deviceId();
-    const stored = await idb<string>((s) => s.get(KEY), "readonly");
-    const id = settle([first, stored]);
-    if (stored !== id) await idb((s) => s.put(id, KEY), "readwrite");
-    return id;
-  })();
-  return reconciled;
+/** Kept for callers that previously waited for cross-store reconciliation. */
+export async function deviceIdSettled(): Promise<string> {
+  return deviceId();
 }
 
 async function sha(s: string, n = 32): Promise<string> {
@@ -187,7 +148,7 @@ export function fingerprint(): Promise<{ hash: string; components: FingerprintCo
   return fp;
 }
 
-/** Headers for API writes: the device id and the fingerprint hash (best effort: never throws). */
+/** Headers for security endpoints that explicitly opt in: the device id and the fingerprint hash (best effort: never throws). */
 export async function deviceHeaders(): Promise<Record<string, string>> {
   try {
     const [id, f] = await Promise.all([deviceIdSettled(), fingerprint()]);

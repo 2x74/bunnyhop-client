@@ -20,7 +20,11 @@ export function leaveMapTeardown(o: MapLifecycle): () => void {
   return () => {
     // Each part on its own: one throwing must not leave another running.
     for (const step of [() => o.room.leave(), () => o.gauntlet.leave(), o.clear]) {
-      try { step(); } catch (error) { console.error("leave map:", error); }
+      try {
+        step();
+      } catch (error) {
+        console.error("leave map:", error);
+      }
     }
   };
 }

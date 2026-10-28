@@ -8,6 +8,7 @@ import { restartNamesAllowed, restartPointProblem } from "./restart";
 import { SimRun, type SimOptions, type SimResult } from "./sim";
 import { BONUS_STYLE, STYLE_DEFS, styleDef, stylePrespeedCap, styleSettings } from "./styles";
 import { isTimerRules } from "./timer";
+import type { RunTiming } from "./run-timing";
 import { HULL_HEIGHT, zonesEqual, type Zone } from "./zones";
 import { disallowedCommand, RANKED_COMMAND_WEAPONS } from "./weapon-rules";
 
@@ -62,9 +63,17 @@ export interface VerifyResult {
   style: string;
   /** Track the run was on, recomputed (0 = main, N = bonus N). */
   track: number;
-  /** Recomputed run length (0 if the run did not finish). */
+  /** Recomputed run length in whole ticks, as the old tick timer counted it (0 if the run did not finish). */
   ticks: number;
+  /** Seconds: timeMs / 1000. */
   time: number;
+  /**
+   * The ranked score: the run's sub-tick time (start-zone exit to end-zone entry, run-timing.ts) in whole
+   * milliseconds, recomputed here and never read from the replay. 0 if the run did not finish.
+   */
+  timeMs: number;
+  /** How timeMs was measured (stored with the run for audits), null if the run did not finish. */
+  timing: RunTiming | null;
   startTick: number;
   endTick: number;
   totalTicks: number;
@@ -80,13 +89,13 @@ export interface VerifyResult {
    * `endTick` / `stats` are then the run retimed with the current start-zone rules (sim.ts SimResult.retimed), which
    * is what the boards rank.
    */
-  rules1?: { ticks: number; startTick: number; endTick: number };
+  rules1?: { ticks: number; startTick: number; endTick: number; timeMs: number };
 }
 
 /** Result for a replay whose simulation stopped early (a desync): invalid, nothing timed. */
 function unsimulatedResult(style: string, problems: string[], sim: SimResult, simMs: number): VerifyResult {
   return {
-    valid: false, problems, style, track: 0, ticks: 0, time: 0, startTick: 0, endTick: 0, totalTicks: sim.ticks,
+    valid: false, problems, style, track: 0, ticks: 0, time: 0, timeMs: 0, timing: null, startTick: 0, endTick: 0, totalTicks: sim.ticks,
     checkpointsMatch: false, checkpointsChecked: 0, firstMismatchTick: null, finalStateMatches: false,
     final: sim.final, stats: { jumps: 0, strafes: 0, sync: 0, perf: 0 }, simMs,
   };
@@ -95,7 +104,7 @@ function unsimulatedResult(style: string, problems: string[], sim: SimResult, si
 /** Result for a replay that can't be re-simulated at all. */
 function unsimulated(core: Core, problems: string[], style: string): VerifyResult {
   return {
-    valid: false, problems, style, track: 0, ticks: 0, time: 0, startTick: 0, endTick: 0, totalTicks: 0,
+    valid: false, problems, style, track: 0, ticks: 0, time: 0, timeMs: 0, timing: null, startTick: 0, endTick: 0, totalTicks: 0,
     checkpointsMatch: false, checkpointsChecked: 0, firstMismatchTick: null, finalStateMatches: false,
     final: core.state(), stats: { jumps: 0, strafes: 0, sync: 0, perf: 0 }, simMs: 0,
   };
@@ -214,7 +223,8 @@ function concludeVerify(replay: Replay, problems: string[], sim: SimResult, simM
 
   const finished = sim.endTick > 0 && sim.timer.status === "finished";
   const ticks = finished ? sim.endTick - sim.startTick : 0;
-  const time = ticks * Math.fround(h.settings.tickInterval);
+  const timing = finished ? sim.timer.timing() : null;
+  const timeMs = timing?.ms ?? 0;
   const last = replay.checkpoints[replay.checkpoints.length - 1];
   const finalStateMatches =
     !!last && last.tick === sim.ticks && [0, 1, 2].every((i) => Object.is(last.position[i], sim.final.position[i]) && Object.is(last.velocity[i], sim.final.velocity[i]));
@@ -237,13 +247,14 @@ function concludeVerify(replay: Replay, problems: string[], sim: SimResult, simM
   // Rules 1 replays are ranked by the current start-zone rules: the same inputs and physics, timed from the last valid
   // ground start (a mid-air exit counts from its takeoff). A run with no such start doesn't count.
   const rt = sim.retimed;
-  let timing = { track: sim.track, ticks, time, startTick: sim.startTick, endTick: sim.endTick, timer: sim.timer };
+  let ranked = { track: sim.track, ticks, timeMs, timing, startTick: sim.startTick, endTick: sim.endTick, timer: sim.timer };
   let rules1: VerifyResult["rules1"];
   if (rt && finished) {
-    rules1 = { ticks, startTick: sim.startTick, endTick: sim.endTick };
+    rules1 = { ticks, startTick: sim.startTick, endTick: sim.endTick, timeMs };
     if (rt.endTick > 0 && rt.timer.status === "finished" && rt.track === sim.track && rt.endTick === sim.endTick) {
       const n = rt.endTick - rt.startTick;
-      timing = { track: rt.track, ticks: n, time: n * Math.fround(h.settings.tickInterval), startTick: rt.startTick, endTick: rt.endTick, timer: rt.timer };
+      const t = rt.timer.timing();
+      ranked = { track: rt.track, ticks: n, timeMs: t?.ms ?? 0, timing: t, startTick: rt.startTick, endTick: rt.endTick, timer: rt.timer };
     } else {
       problems.push(`no valid start under the current start-zone rules (timer rules 1 run, ${rt.endTick > 0 ? `retimed ${rt.startTick}..${rt.endTick} track ${rt.track}` : "never started"})`);
     }
@@ -253,18 +264,20 @@ function concludeVerify(replay: Replay, problems: string[], sim: SimResult, simM
     valid: problems.length === 0,
     problems,
     style,
-    track: timing.track,
-    ticks: timing.ticks,
-    time: timing.time,
-    startTick: timing.startTick,
-    endTick: timing.endTick,
+    track: ranked.track,
+    ticks: ranked.ticks,
+    time: ranked.timeMs / 1000,
+    timeMs: ranked.timeMs,
+    timing: ranked.timing,
+    startTick: ranked.startTick,
+    endTick: ranked.endTick,
     totalTicks: sim.ticks,
     checkpointsMatch: sim.checkpointsMatch,
     checkpointsChecked: sim.checkpointsChecked,
     firstMismatchTick: sim.firstMismatchTick,
     finalStateMatches,
     final: sim.final,
-    stats: { jumps: timing.timer.jumps, strafes: timing.timer.strafes, sync: timing.timer.syncPercent(), perf: timing.timer.perfPercent() },
+    stats: { jumps: ranked.timer.jumps, strafes: ranked.timer.strafes, sync: ranked.timer.syncPercent(), perf: ranked.timer.perfPercent() },
     simMs,
     ...(rules1 ? { rules1 } : {}),
   };

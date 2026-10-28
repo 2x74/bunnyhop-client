@@ -1,0 +1,8 @@
+# Vendored from the main game: synced, never reformatted here.
+apps/web/
+crates/
+apps/native/vendor/
+apps/native/build/
+node_modules/
+target/
+artifacts/

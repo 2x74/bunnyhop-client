@@ -1,11 +1,11 @@
 // Native presentation transport for the web intro's scalar acting timeline. No Three/WebGL is loaded by the menu.
-import {requestPreview,cancelPreview,nativePreviewAvailable,type OnboardingPose} from "./loadout-preview";
-import {getOutfit,getLoadout} from "../../web/src/player/cosmetics";
-import {packLoadout} from "../../web/src/loadout";
-import type {PlayerPose} from "../../web/src/player/model";
-import {sfx} from "./audio";
+import { requestPreview, cancelPreview, nativePreviewAvailable, type OnboardingPose } from "./loadout-preview";
+import { getOutfit, getLoadout } from "../../web/src/player/cosmetics";
+import { packLoadout } from "../../web/src/loadout";
+import type { PlayerPose } from "../../web/src/player/model";
+import { sfx } from "./audio";
 import "./onboarding-preview.css";
-type BunnyActing=OnboardingPose["acting"];
+type BunnyActing = OnboardingPose["acting"];
 const GRAV = 800;
 /** A hop's height (feet, units): the game's is 57; this keeps the ears and the tag in frame. 0.65 s in the air. */
 const HOP_H = 42;
@@ -58,17 +58,69 @@ type Fidget = "trick" | "hops" | "curious" | "lookback" | "shake";
 /** Where it looks when the pointer rests: you (the camera), the question (to the right), or somewhere (yaw, pitch). */
 type Attend = "you" | "question" | "pointer" | { yaw: number; pitch: number };
 
-export function bunnyStage(host:HTMLElement,o:{potato?:boolean}={}):BunnyStage|null {
-  if(!nativePreviewAvailable())return null;
-  const canvas=document.createElement("canvas");canvas.className="native-intro-canvas";canvas.setAttribute("aria-label","Your bunny reacts to the intro");canvas.setAttribute("role","img");
-  const tag=document.createElement("span");tag.className="native-intro-tag";const shadow=document.createElement("span");shadow.className="native-intro-shadow";shadow.setAttribute("aria-hidden","true");host.append(shadow,canvas,tag);const potato=!!o.potato;
-  let request=0,lastSent=-1,received=0,inspectCount=0,spinDegrees=0;
-  const render=()=>{
-    if(disposed||request||document.hidden||!canvas.isConnected||t-lastSent<1/30)return;lastSent=t;
-    const stage:OnboardingPose={position:Array.from(pose.position),velocity:Array.from(pose.velocity??[0,0,0]),yaw:pose.yaw,pitch:pose.pitch,crouched:pose.crouched,grounded:pose.grounded,jumped:!!pose.jumped,acting:{...act},squash:sq,spin:spinDegrees,clock:t};
-    request=requestPreview({loadout:packLoadout(getLoadout()),outfit:getOutfit(),ghost:"ghost-gold",playerGlow:null,view:"onboarding",yaw:0,pitch:0,inspect:inspectCount,held:false,width:Math.max(384,Math.min(768,Math.round(host.clientWidth*Math.min(devicePixelRatio||1,1.25)))),height:Math.max(240,Math.min(600,Math.round(host.clientHeight*Math.min(devicePixelRatio||1,1.25)))),stage},png=>{
-      request=0;if(disposed||!png)return;const frame=++received,image=new Image();image.onload=()=>{if(disposed||frame!==received)return;canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;canvas.getContext("2d")?.drawImage(image,0,0);};image.src=png;
-    });
+export function bunnyStage(host: HTMLElement, o: { potato?: boolean } = {}): BunnyStage | null {
+  if (!nativePreviewAvailable()) return null;
+  const canvas = document.createElement("canvas");
+  canvas.className = "native-intro-canvas";
+  canvas.setAttribute("aria-label", "Your bunny reacts to the intro");
+  canvas.setAttribute("role", "img");
+  const tag = document.createElement("span");
+  tag.className = "native-intro-tag";
+  const shadow = document.createElement("span");
+  shadow.className = "native-intro-shadow";
+  shadow.setAttribute("aria-hidden", "true");
+  host.append(shadow, canvas, tag);
+  const potato = !!o.potato;
+  let request = 0,
+    lastSent = -1,
+    received = 0,
+    inspectCount = 0,
+    spinDegrees = 0;
+  const render = () => {
+    if (disposed || request || document.hidden || !canvas.isConnected || t - lastSent < 1 / 30) return;
+    lastSent = t;
+    const stage: OnboardingPose = {
+      position: Array.from(pose.position),
+      velocity: Array.from(pose.velocity ?? [0, 0, 0]),
+      yaw: pose.yaw,
+      pitch: pose.pitch,
+      crouched: pose.crouched,
+      grounded: pose.grounded,
+      jumped: !!pose.jumped,
+      acting: { ...act },
+      squash: sq,
+      spin: spinDegrees,
+      clock: t,
+    };
+    request = requestPreview(
+      {
+        loadout: packLoadout(getLoadout()),
+        outfit: getOutfit(),
+        ghost: "ghost-gold",
+        playerGlow: null,
+        view: "onboarding",
+        yaw: 0,
+        pitch: 0,
+        inspect: inspectCount,
+        held: false,
+        width: Math.max(384, Math.min(768, Math.round(host.clientWidth * Math.min(devicePixelRatio || 1, 1.25)))),
+        height: Math.max(240, Math.min(600, Math.round(host.clientHeight * Math.min(devicePixelRatio || 1, 1.25)))),
+        stage,
+      },
+      (png) => {
+        request = 0;
+        if (disposed || !png) return;
+        const frame = ++received,
+          image = new Image();
+        image.onload = () => {
+          if (disposed || frame !== received) return;
+          canvas.width = image.naturalWidth;
+          canvas.height = image.naturalHeight;
+          canvas.getContext("2d")?.drawImage(image, 0, 0);
+        };
+        image.src = png;
+      },
+    );
   };
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   let raf = 0;
@@ -105,12 +157,18 @@ export function bunnyStage(host:HTMLElement,o:{potato?:boolean}={}):BunnyStage|n
   let nextBoing = 0;
   let onTakeoff: (() => void) | null = null;
   /** The current hop: when it left the ground and its airtime, for the strafe sweep through it. */
-  let hopT0 = 0, hopAir = 1;
-  let strafeYaw = 0, strafeLean = 0, yawFrom = 0, yawTo = 0;
+  let hopT0 = 0,
+    hopAir = 1;
+  let strafeYaw = 0,
+    strafeLean = 0,
+    yawFrom = 0,
+    yawTo = 0;
   /** The name accepted: flying up out of the frame, then away a moment until it drops back in. */
-  let flying = false, away = false;
+  let flying = false,
+    away = false;
   /** Squash (-) / stretch (+) of the body, a spring, and its velocity. */
-  let sq = 0, sqV = 0;
+  let sq = 0,
+    sqV = 0;
   /** Crouching (the CS:S crouch pose) until this time (the launch). */
   let crouchUntil = -1;
 
@@ -171,12 +229,13 @@ export function bunnyStage(host:HTMLElement,o:{potato?:boolean}={}):BunnyStage|n
   };
 
   // ---- facing and spins
-  let turnYaw = 0, turnV = 0;
+  let turnYaw = 0,
+    turnV = 0;
   let spin: { t0: number; dur: number; turn: number } | null = null;
 
-
   // ---- looking: the target (relative to the facing, degrees: yaw + = its left, pitch + = down) and where it looks
-  let lookYaw = 0, lookPitch = 0;
+  let lookYaw = 0,
+    lookPitch = 0;
   let pointer: { x: number; y: number; at: number } | null = null;
   let attend: Attend = "you";
   let attendUntil = 0;
@@ -185,16 +244,30 @@ export function bunnyStage(host:HTMLElement,o:{potato?:boolean}={}):BunnyStage|n
   if (!potato) window.addEventListener("pointermove", onPointer, { passive: true });
 
   // ---- acting (BunnyModel.setActing): breathing, looks, tilts, ears
-  const act: BunnyActing = { chestPitch: 0, chestYaw: 0, chestRoll: 0, headPitch: 0, headYaw: 0, headRoll: 0, earL: 0, earR: 0 };
+  const act: BunnyActing = {
+    chestPitch: 0,
+    chestYaw: 0,
+    chestRoll: 0,
+    headPitch: 0,
+    headYaw: 0,
+    headRoll: 0,
+    earL: 0,
+    earR: 0,
+  };
   /** Nod (keystrokes), a spring; head-shake time left; held tilt (puzzled) and its ear pose; ear perk until. */
-  let nod = 0, nodV = 0;
+  let nod = 0,
+    nodV = 0;
   let shakeT = 0;
-  let tilt = 0, tiltTo = 0;
+  let tilt = 0,
+    tiltTo = 0;
   let puzzledOn = false;
-  let perkTo = 0, perkUntil = 0, perk = 0;
+  let perkTo = 0,
+    perkUntil = 0,
+    perk = 0;
   let earsBack = 0;
   let earKick = 0;
-  let lean = 0, leanTo = 0;
+  let lean = 0,
+    leanTo = 0;
 
   // ---- inspect / fidgets
   let inspectNow = false;
@@ -209,25 +282,55 @@ export function bunnyStage(host:HTMLElement,o:{potato?:boolean}={}):BunnyStage|n
   let apexCb: (() => void) | null = null;
   let doneCb: (() => void) | null = null;
 
-  const pose: PlayerPose = { position: [0, 0, 0], velocity: [0, 0, 0], yaw: BASE_YAW, pitch: 4, crouched: false, grounded: true };
+  const pose: PlayerPose = {
+    position: [0, 0, 0],
+    velocity: [0, 0, 0],
+    yaw: BASE_YAW,
+    pitch: 4,
+    crouched: false,
+    grounded: true,
+  };
 
   /** The facing now (Source yaw, degrees). */
   const facing = () => BASE_YAW + turnYaw + strafeYaw;
 
-  const toward=(point:number[])=>{const dx=point[0],dy=-point[2],dz=point[1]-(z+HEAD_Z);return {yaw:wrap180(Math.atan2(dy,dx)/D2R-facing()),pitch:-Math.atan2(dz,Math.hypot(dx,dy))/D2R};};
-  const normalize=(v:number[])=>{const l=Math.hypot(...v)||1;return v.map(x=>x/l);};
-  const cross3=(a:number[],b:number[])=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
-  const target = (): {yaw:number;pitch:number} => {
-    const rect=canvas.getBoundingClientRect(),aspect=Math.max(1,rect.width)/Math.max(1,rect.height),zoom=Math.max(1,.8/aspect),camera=[79*zoom,122*zoom,295*zoom];
-    if(attend === "pointer" && pointer){
-      const nx=(pointer.x-rect.left)/Math.max(1,rect.width)*2-1,ny=1-(pointer.y-rect.top)/Math.max(1,rect.height)*2;
-      const forward=normalize([-camera[0],68-camera[1],-camera[2]]),right=normalize(cross3(forward,[0,1,0])),up=cross3(right,forward),tan=Math.tan(14*D2R);
-      const ray=normalize(forward.map((x,i)=>x+right[i]*nx*tan*aspect+up[i]*ny*tan)),horizontal=normalize([camera[0],0,camera[2]]),dist=Math.hypot(camera[0],camera[2])*.45;
-      const s=(dist-horizontal.reduce((n,x,i)=>n+x*camera[i],0))/(horizontal.reduce((n,x,i)=>n+x*ray[i],0)||-1e-6);
-      return toward(camera.map((x,i)=>x+ray[i]*Math.max(0,s)));
+  const toward = (point: number[]) => {
+    const dx = point[0],
+      dy = -point[2],
+      dz = point[1] - (z + HEAD_Z);
+    return { yaw: wrap180(Math.atan2(dy, dx) / D2R - facing()), pitch: -Math.atan2(dz, Math.hypot(dx, dy)) / D2R };
+  };
+  const normalize = (v: number[]) => {
+    const l = Math.hypot(...v) || 1;
+    return v.map((x) => x / l);
+  };
+  const cross3 = (a: number[], b: number[]) => [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+  const target = (): { yaw: number; pitch: number } => {
+    const rect = canvas.getBoundingClientRect(),
+      aspect = Math.max(1, rect.width) / Math.max(1, rect.height),
+      zoom = Math.max(1, 0.8 / aspect),
+      camera = [79 * zoom, 122 * zoom, 295 * zoom];
+    if (attend === "pointer" && pointer) {
+      const nx = ((pointer.x - rect.left) / Math.max(1, rect.width)) * 2 - 1,
+        ny = 1 - ((pointer.y - rect.top) / Math.max(1, rect.height)) * 2;
+      const forward = normalize([-camera[0], 68 - camera[1], -camera[2]]),
+        right = normalize(cross3(forward, [0, 1, 0])),
+        up = cross3(right, forward),
+        tan = Math.tan(14 * D2R);
+      const ray = normalize(forward.map((x, i) => x + right[i] * nx * tan * aspect + up[i] * ny * tan)),
+        horizontal = normalize([camera[0], 0, camera[2]]),
+        dist = Math.hypot(camera[0], camera[2]) * 0.45;
+      const s =
+        (dist - horizontal.reduce((n, x, i) => n + x * camera[i], 0)) /
+        (horizontal.reduce((n, x, i) => n + x * ray[i], 0) || -1e-6);
+      return toward(camera.map((x, i) => x + ray[i] * Math.max(0, s)));
     }
-    if(attend === "question")return {yaw:34,pitch:4};
-    if(typeof attend === "object")return attend;
+    if (attend === "question") return { yaw: 34, pitch: 4 };
+    if (typeof attend === "object") return attend;
     return toward(camera);
   };
   /** A fidget, now. */
@@ -260,7 +363,9 @@ export function bunnyStage(host:HTMLElement,o:{potato?:boolean}={}):BunnyStage|n
     }
   };
   const pickFidget = (): Fidget => {
-    const all: Fidget[] = potato ? ["hops", "curious", "lookback"] : ["trick", "hops", "curious", "lookback", "shake", "trick", "hops"];
+    const all: Fidget[] = potato
+      ? ["hops", "curious", "lookback"]
+      : ["trick", "hops", "curious", "lookback", "shake", "trick", "hops"];
     const pool = all.filter((f) => f !== lastFidget);
     return pool[Math.floor(Math.random() * pool.length)];
   };
@@ -270,11 +375,13 @@ export function bunnyStage(host:HTMLElement,o:{potato?:boolean}={}):BunnyStage|n
     for (let i = timers.length - 1; i >= 0; i--) if (timers[i].at <= t) timers.splice(i, 1)[0].fn();
 
     // -- body: the hop phases, the fall, landings
-    let x = 0, y = 0;
+    let x = 0,
+      y = 0;
     phaseT += dt;
     if (launchT >= 0) {
       launchT += dt;
-      const c = 0.3, f = 0.46;
+      const c = 0.3,
+        f = 0.46;
       if (launchT < c) {
         // (caught mid-hop: down first)
         if (z > 0) {
@@ -334,7 +441,15 @@ export function bunnyStage(host:HTMLElement,o:{potato?:boolean}={}):BunnyStage|n
     const grounded = phase !== "air";
 
     // -- bhopping on the name step: the first hop once it has landed and looked at you
-    if (strafeOn && entered && !flying && !away && launchT < 0 && (phase === "stand" || phase === "settle") && t >= strafeAt) {
+    if (
+      strafeOn &&
+      entered &&
+      !flying &&
+      !away &&
+      launchT < 0 &&
+      (phase === "stand" || phase === "settle") &&
+      t >= strafeAt
+    ) {
       strafeSide = 1;
       hop(1, { bhop: true });
     }
@@ -363,7 +478,14 @@ export function bunnyStage(host:HTMLElement,o:{potato?:boolean}={}):BunnyStage|n
 
     // -- squash / stretch: a spring toward a stretch by the vertical speed in the air
     // (gathering itself before a jump, it squats a little: the anticipation, and between bhops the landing)
-    const sqTo = launchT >= 0.3 || flying ? 0.13 : phase === "prep" || phase === "contact" ? -0.06 : grounded ? 0 : clamp(vz / 4000, -0.03, 0.04);
+    const sqTo =
+      launchT >= 0.3 || flying
+        ? 0.13
+        : phase === "prep" || phase === "contact"
+          ? -0.06
+          : grounded
+            ? 0
+            : clamp(vz / 4000, -0.03, 0.04);
     for (let left = dt; left > 1e-6; left -= 1 / 120) {
       const h = Math.min(1 / 120, left);
       sqV += (-(sq - sqTo) * 420 - sqV * 16) * h;
@@ -385,7 +507,8 @@ export function bunnyStage(host:HTMLElement,o:{potato?:boolean}={}):BunnyStage|n
     const want = target();
     let lim = still ? 0.5 : 1;
     if (strafeOn) lim *= 0.6; // strafing: it mostly looks where it turns
-    const wy = clamp(want.yaw, -72, 72) * lim, wp = clamp(want.pitch, -28, 30) * lim;
+    const wy = clamp(want.yaw, -72, 72) * lim,
+      wp = clamp(want.pitch, -28, 30) * lim;
     const lookRate = still ? 2.5 : attend === "pointer" ? 7 : 5;
     lookYaw = damp(lookYaw, wy, lookRate, dt);
     lookPitch = damp(lookPitch, wp, lookRate, dt);
@@ -430,33 +553,71 @@ export function bunnyStage(host:HTMLElement,o:{potato?:boolean}={}):BunnyStage|n
     const airStrafe = strafing && phase === "air" && launchT < 0;
     const fwd = airStrafe ? BHOP_SPEED : 0;
     const pos = pose.position as number[];
-    pos[0] = x, pos[1] = y, pos[2] = Math.max(0, z);
+    ((pos[0] = x), (pos[1] = y), (pos[2] = Math.max(0, z)));
     const vel = pose.velocity as number[];
-    vel[0] = Math.cos(r) * fwd, vel[1] = Math.sin(r) * fwd, vel[2] = grounded ? 0 : vz;
+    ((vel[0] = Math.cos(r) * fwd), (vel[1] = Math.sin(r) * fwd), (vel[2] = grounded ? 0 : vz));
     pose.yaw = yaw;
     // The CS:S crouch on the ground around a hop: the anticipation, the landing between bhops (a few frames of its
     // crossfade: the knees give), the landing after.
-    pose.crouched = t < crouchUntil || phase === "prep" || phase === "contact" || (phase === "settle" && phaseT < SETTLE * 0.6);
+    pose.crouched =
+      t < crouchUntil || phase === "prep" || phase === "contact" || (phase === "settle" && phaseT < SETTLE * 0.6);
     pose.grounded = grounded && launchT < 0.3;
     pose.jumped = jumpedNow;
-    if(inspectNow)inspectCount++;
+    if (inspectNow) inspectCount++;
     pose.sidemove = airStrafe ? (yawTo > yawFrom ? -450 : 450) : 0;
     jumpedNow = false;
     inspectNow = false;
-    const rect=canvas.getBoundingClientRect(),aspect=Math.max(1,rect.width)/Math.max(1,rect.height),zoom=Math.max(1,.8/aspect),cam=[79*zoom,122*zoom,295*zoom],f=normalize([-cam[0],68-cam[1],-cam[2]]),screenRight=normalize(cross3(f,[0,1,0])),u=cross3(screenRight,f),tan=Math.tan(14*D2R);
-    const project=(point:number[])=>{const v=point.map((x,i)=>x-cam[i]),depth=v.reduce((n,x,i)=>n+x*f[i],0);return [50*(1+v.reduce((n,x,i)=>n+x*screenRight[i],0)/depth/tan/aspect),50*(1-v.reduce((n,x,i)=>n+x*u[i],0)/depth/tan)];};
-    const label=project([x,Math.max(0,z)+TAG_Z*(1+sq),-y]);tag.style.left=label[0]+"%";tag.style.top=label[1]+"%";tag.style.opacity=String(tag.textContent&&launchT<0?clamp((80-z)/20,0,1):0);
-    const floor=project([x,0,-y]);shadow.style.left=floor[0]+"%";shadow.style.top=floor[1]+"%";shadow.style.transform=`translate(-50%,-50%) scale(${1-Math.min(.6,z/110)})`;shadow.style.opacity=String(launchT>=0?Math.max(0,.4-launchT):.4*(1-Math.min(1,z/160)));
-
+    const rect = canvas.getBoundingClientRect(),
+      aspect = Math.max(1, rect.width) / Math.max(1, rect.height),
+      zoom = Math.max(1, 0.8 / aspect),
+      cam = [79 * zoom, 122 * zoom, 295 * zoom],
+      f = normalize([-cam[0], 68 - cam[1], -cam[2]]),
+      screenRight = normalize(cross3(f, [0, 1, 0])),
+      u = cross3(screenRight, f),
+      tan = Math.tan(14 * D2R);
+    const project = (point: number[]) => {
+      const v = point.map((x, i) => x - cam[i]),
+        depth = v.reduce((n, x, i) => n + x * f[i], 0);
+      return [
+        50 * (1 + v.reduce((n, x, i) => n + x * screenRight[i], 0) / depth / tan / aspect),
+        50 * (1 - v.reduce((n, x, i) => n + x * u[i], 0) / depth / tan),
+      ];
+    };
+    const label = project([x, Math.max(0, z) + TAG_Z * (1 + sq), -y]);
+    tag.style.left = label[0] + "%";
+    tag.style.top = label[1] + "%";
+    tag.style.opacity = String(tag.textContent && launchT < 0 ? clamp((80 - z) / 20, 0, 1) : 0);
+    const floor = project([x, 0, -y]);
+    shadow.style.left = floor[0] + "%";
+    shadow.style.top = floor[1] + "%";
+    shadow.style.transform = `translate(-50%,-50%) scale(${1 - Math.min(0.6, z / 110)})`;
+    shadow.style.opacity = String(launchT >= 0 ? Math.max(0, 0.4 - launchT) : 0.4 * (1 - Math.min(1, z / 160)));
   };
-  const frame=(now:number)=>{if(disposed)return;raf=requestAnimationFrame(frame);if(document.hidden){last=now;return;}const dt=Math.min(.05,(now-last)/1000);last=now;step(dt);render();};
-  raf=requestAnimationFrame(frame);
-  const startSpin=(turn:number,dur:number)=>{spin={t0:t,dur,turn};};
-  const ready=()=>!still&&entered&&!flying&&!away&&launchT<0;
+  const frame = (now: number) => {
+    if (disposed) return;
+    raf = requestAnimationFrame(frame);
+    if (document.hidden) {
+      last = now;
+      return;
+    }
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    step(dt);
+    render();
+  };
+  raf = requestAnimationFrame(frame);
+  const startSpin = (turn: number, dur: number) => {
+    spin = { t0: t, dur, turn };
+  };
+  const ready = () => !still && entered && !flying && !away && launchT < 0;
   return {
-    el:canvas,
-    setName(name) {tag.textContent=name;},
-    setColor(css) {tag.style.color=css;},
+    el: canvas,
+    setName(name) {
+      tag.textContent = name;
+    },
+    setColor(css) {
+      tag.style.color = css;
+    },
     typed() {
       if (!ready()) return;
       nodV += 34;
@@ -546,6 +707,17 @@ export function bunnyStage(host:HTMLElement,o:{potato?:boolean}={}):BunnyStage|n
       sqV -= 1.4;
       return new Promise<void>((res) => (doneCb = res));
     },
-    dispose(){if(disposed)return;disposed=true;cancelAnimationFrame(raf);cancelPreview(request);window.removeEventListener("pointermove",onPointer);doneCb?.();doneCb=null;tag.remove();shadow.remove();canvas.remove();}
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      cancelAnimationFrame(raf);
+      cancelPreview(request);
+      window.removeEventListener("pointermove", onPointer);
+      doneCb?.();
+      doneCb = null;
+      tag.remove();
+      shadow.remove();
+      canvas.remove();
+    },
   };
 }

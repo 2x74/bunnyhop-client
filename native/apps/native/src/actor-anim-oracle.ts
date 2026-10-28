@@ -1,8 +1,73 @@
 // Numerical oracle uses the unchanged web evaluator on the same decoded hosted animation bytes.
-import { readFile,writeFile } from 'node:fs/promises';
-import { StudioData } from '../../web/src/player/studio/data';import { BoneSetup } from '../../web/src/player/studio/pose';import { CsAnimState } from '../../web/src/player/studio/animstate';
-const root=process.argv[2],m=JSON.parse(await readFile(`${root}/actor-animations.json`,'utf8')),raw=await readFile(`${root}/actor-animations.bin`),bytes=new Float32Array(raw.buffer.slice(raw.byteOffset,raw.byteOffset+raw.byteLength));
-const fake={studioInfo:()=>JSON.stringify(m.info),studioVertices:()=>new Float32Array(),studioIndices:()=>new Uint32Array(),studioAnim:(_:number,a:number)=>bytes.slice(m.offsets[a],m.offsets[a]+m.info.anims[a].frames*m.info.bones.length*7)};
-const d=new StudioData(fake as any,1),bs=new BoneSetup(d),anim=new CsAnimState(d,bs),frames=[];let time=0;
-for(let f=0;f<360;f++){const dt=1/60;time+=dt;const phase=Math.floor(f/45);const input={vel:[phase===0?0:phase===1?80:phase===2?240:phase===3?-250:phase===4?120:phase===5?0:180,phase===2?100:phase===4?170:0,phase===5?150:0],eyeYaw:phase===0?f*3:phase===3?-130:phase===6?175:25,eyePitch:Math.sin(f*.04)*65,ducking:phase===4,onGround:phase!==5,jumped:f===225};const snap=f===0||f===300,shot=[65,135,220,280,325].includes(f);if(snap){anim.reset(time);if(!input.onGround){const elapsed=(301.993-input.vel[2])/800;if(elapsed>=0&&elapsed<2)anim.startAirborne(elapsed);}}if(shot)anim.fire();anim.update(snap?0:dt,input,snap?time:undefined);anim.apply();const w=bs.buildMatrices();frames.push({time,input,snap,shot,feetYaw:anim.feetYaw,cycle:anim.cycle,world:f%15===0||f===359?Array.from(w):null});}
-await writeFile(`${root}/oracle.json`,JSON.stringify(frames));
+import { readFile, writeFile } from "node:fs/promises";
+import { StudioData } from "../../web/src/player/studio/data";
+import { BoneSetup } from "../../web/src/player/studio/pose";
+import { CsAnimState } from "../../web/src/player/studio/animstate";
+const root = process.argv[2],
+  m = JSON.parse(await readFile(`${root}/actor-animations.json`, "utf8")),
+  raw = await readFile(`${root}/actor-animations.bin`),
+  bytes = new Float32Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
+const fake = {
+  studioInfo: () => JSON.stringify(m.info),
+  studioVertices: () => new Float32Array(),
+  studioIndices: () => new Uint32Array(),
+  studioAnim: (_: number, a: number) =>
+    bytes.slice(m.offsets[a], m.offsets[a] + m.info.anims[a].frames * m.info.bones.length * 7),
+};
+const d = new StudioData(fake as any, 1),
+  bs = new BoneSetup(d),
+  anim = new CsAnimState(d, bs),
+  frames = [];
+let time = 0;
+for (let f = 0; f < 360; f++) {
+  const dt = 1 / 60;
+  time += dt;
+  const phase = Math.floor(f / 45);
+  const input = {
+    vel: [
+      phase === 0
+        ? 0
+        : phase === 1
+          ? 80
+          : phase === 2
+            ? 240
+            : phase === 3
+              ? -250
+              : phase === 4
+                ? 120
+                : phase === 5
+                  ? 0
+                  : 180,
+      phase === 2 ? 100 : phase === 4 ? 170 : 0,
+      phase === 5 ? 150 : 0,
+    ],
+    eyeYaw: phase === 0 ? f * 3 : phase === 3 ? -130 : phase === 6 ? 175 : 25,
+    eyePitch: Math.sin(f * 0.04) * 65,
+    ducking: phase === 4,
+    onGround: phase !== 5,
+    jumped: f === 225,
+  };
+  const snap = f === 0 || f === 300,
+    shot = [65, 135, 220, 280, 325].includes(f);
+  if (snap) {
+    anim.reset(time);
+    if (!input.onGround) {
+      const elapsed = (301.993 - input.vel[2]) / 800;
+      if (elapsed >= 0 && elapsed < 2) anim.startAirborne(elapsed);
+    }
+  }
+  if (shot) anim.fire();
+  anim.update(snap ? 0 : dt, input, snap ? time : undefined);
+  anim.apply();
+  const w = bs.buildMatrices();
+  frames.push({
+    time,
+    input,
+    snap,
+    shot,
+    feetYaw: anim.feetYaw,
+    cycle: anim.cycle,
+    world: f % 15 === 0 || f === 359 ? Array.from(w) : null,
+  });
+}
+await writeFile(`${root}/oracle.json`, JSON.stringify(frames));

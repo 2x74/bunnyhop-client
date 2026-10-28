@@ -99,6 +99,8 @@ export function isSpike(m: number, neighbour: number, dtMs: number, recentre = f
 
 const mag = (x: number, y: number) => Math.max(Math.abs(x), Math.abs(y));
 const smag = (s: MotionSample) => mag(s.movementX || 0, s.movementY || 0);
+/** Longest average gap between a moving mouse's reports (ms): 125 Hz is 8 ms. Longer means it was resting. */
+const MAX_REPORT_GAP_MS = 20;
 
 /** Ring buffers + counters for the diagnostics overlay and feedback reports. Fixed-size typed arrays: no garbage. */
 export class InputStats {
@@ -109,9 +111,14 @@ export class InputStats {
   readonly evMag = new Float32Array(InputStats.EVENTS);
   readonly evRaw = new Float32Array(InputStats.EVENTS);
   readonly evFlag = new Uint8Array(InputStats.EVENTS);
-  /** Mouse reports in each event, and the polling rate their timestamps give (Hz; 0 = fewer than 2 reports). */
+  /**
+   * Mouse reports in each event, and the time they cover: from the previous event's last report to this event's last
+   * (ms; 0 = reports unknown, the first after a reset, or a pause). pollHz divides one by the other.
+   */
   readonly evN = new Uint16Array(InputStats.EVENTS);
-  readonly evHz = new Float32Array(InputStats.EVENTS);
+  readonly evSpan = new Float32Array(InputStats.EVENTS);
+  /** Last report time of the previous event that had readable reports (0: none since the reset). */
+  private lastReportT = 0;
   evHead = 0;
   /** Per frame: time, duration, and how old the newest motion event was when the frame ran (-1: none this frame). */
   readonly frT = new Float64Array(InputStats.FRAMES);
@@ -139,14 +146,18 @@ export class InputStats {
   private lastFrameT = 0;
   private motionSinceFrame = false;
 
-  event(t: number, accepted: number, raw: number, flag: number, samples: number, hz = 0): void {
+  /** `lastReportT`: the event's last coalesced report's time (0 when the browser gave no readable reports). */
+  event(t: number, accepted: number, raw: number, flag: number, samples: number, lastReportT = 0): void {
     const i = this.evHead;
     this.evT[i] = t;
     this.evMag[i] = accepted;
     this.evRaw[i] = raw;
     this.evFlag[i] = flag;
     this.evN[i] = Math.min(65535, samples);
-    this.evHz[i] = hz;
+    // A report gap over MAX_REPORT_GAP_MS is the mouse resting, not its polling rate.
+    const span = lastReportT > 0 && this.lastReportT > 0 ? lastReportT - this.lastReportT : 0;
+    this.evSpan[i] = span > 0 && span / samples <= MAX_REPORT_GAP_MS ? span : 0;
+    if (lastReportT > 0) this.lastReportT = lastReportT;
     this.evHead = (i + 1) % InputStats.EVENTS;
     this.events++;
     this.samples += samples;
@@ -207,12 +218,21 @@ export class InputStats {
     return { eventHz: Math.round((ev * 1000) / span), reportHz: Math.round((rep * 1000) / span), frameHz: fr, pollHz: this.pollHz(now) };
   }
 
-  /** Median polling rate (Hz) the coalesced reports' timestamps gave over the last 2 s (0: none seen). Allocates. */
-  pollHz(now: number): number {
-    const v: number[] = [];
-    for (let i = 0; i < InputStats.EVENTS; i++) if (this.evT[i] > now - 2000 && this.evHz[i] > 0) v.push(this.evHz[i]);
-    v.sort((x, y) => x - y);
-    return v.length ? Math.round(v[v.length >> 1]) : 0;
+  /**
+   * Polling rate (Hz) while the mouse moved over the last `windowMs` (2 s): reports over the time they cover (0: under
+   * 50 ms of readable reports). Not a per-event median: with pointerrawupdate nearly every event has one report, and
+   * the few pairs share a timestamp rounded to Chromium's 100 µs, which read as 10,000 Hz.
+   */
+  pollHz(now: number, windowMs = 2000): number {
+    let reports = 0;
+    let ms = 0;
+    for (let i = 0; i < InputStats.EVENTS; i++) {
+      if (this.evT[i] > now - windowMs && this.evSpan[i] > 0) {
+        reports += this.evN[i];
+        ms += this.evSpan[i];
+      }
+    }
+    return ms >= 50 ? Math.round((reports * 1000) / ms) : 0;
   }
 
   /** Percentile `p` (0..1) of a ring's positive values (allocates: for the overlay / reports, not per event). */
@@ -222,13 +242,51 @@ export class InputStats {
   }
 
   reset(): void {
-    for (const a of [this.evT, this.evMag, this.evRaw, this.evFlag, this.evN, this.evHz, this.frT, this.frDur, this.frAge]) a.fill(0);
+    for (const a of [this.evT, this.evMag, this.evRaw, this.evFlag, this.evN, this.evSpan, this.frT, this.frDur, this.frAge]) a.fill(0);
     this.evHead = this.frHead = 0;
     this.events = this.samples = this.spikes = this.discards = this.mismatches = 0;
     this.maxDelta = this.maxSpike = 0;
     this.framesOver25 = this.framesOver50 = this.maxFrame = this.longTasks = this.maxLongTask = 0;
-    this.lastMotionT = this.lastFrameT = 0;
+    this.lastMotionT = this.lastFrameT = this.lastReportT = 0;
     this.motionSinceFrame = false;
+  }
+}
+
+/** Common mouse polling rates (Hz): a run's rate is recorded as one of them. */
+export const POLL_RATES = [125, 250, 500, 1000, 2000, 4000, 8000] as const;
+
+/**
+ * A run's polling rate (selfcheck.ts RunWatch; the boards' stats card): every half second of mouse movement is measured
+ * (InputStats.pollHz over 500 ms) and counted under the common rate it's within 15 % of. Slow movement only ever reads
+ * low (the mouse sends nothing when it has nothing to send), so the run's rate is the highest one that at least 3
+ * windows and a tenth of all of them landed on. 0: not enough movement to tell.
+ */
+export class RunPollRate {
+  private readonly bins = new Uint32Array(POLL_RATES.length);
+  private total = 0;
+  private last = -Infinity;
+
+  reset(): void {
+    this.bins.fill(0);
+    this.total = 0;
+    this.last = -Infinity;
+  }
+
+  /** Every frame of the run: measures a window once half a second has passed. */
+  sample(now: number, pollHz: (now: number, windowMs: number) => number): void {
+    if (now - this.last < 500) return;
+    this.last = now;
+    const hz = pollHz(now, 500);
+    if (!hz) return;
+    const k = POLL_RATES.findIndex((r) => Math.abs(hz - r) <= r * 0.15);
+    if (k < 0) return;
+    this.bins[k]!++;
+    this.total++;
+  }
+
+  hz(): number {
+    for (let k = POLL_RATES.length - 1; k >= 0; k--) if (this.bins[k]! >= 3 && this.bins[k]! >= this.total * 0.1) return POLL_RATES[k]!;
+    return 0;
   }
 }
 
@@ -239,6 +297,16 @@ export class MouseFilter {
   /** Accepted delta of the last `push` (counts). */
   outX = 0;
   outY = 0;
+  /**
+   * The last `push` judged its coalesced reports one by one: `repN` of them, report i's accepted motion in `repX[i]` /
+   * `repY[i]` (0 for a dropped one; a refund lands on the report that earned it). They add up to outX / outY. False:
+   * the accepted motion is the one aggregate (a single report, unreadable reports, a discard). Timestamped input
+   * (input.ts) keeps each report's own time this way instead of moving the whole event to its dispatch time.
+   */
+  perReport = false;
+  repN = 0;
+  repX = new Float64Array(64);
+  repY = new Float64Array(64);
   readonly stats = new InputStats();
   /** Magnitudes of the last WINDOW accepted reports (ring; tailHead is the oldest). */
   private tail = new Float64Array(WINDOW);
@@ -298,8 +366,8 @@ export class MouseFilter {
     this.dropN = reports;
   }
 
-  /** Gives the last drop back (see REFUND_RATIO) if a report of (`x`, `y`) says it was a hand speeding up. */
-  private refund(x: number, y: number, m: number): void {
+  /** Gives the last drop back (see REFUND_RATIO) if a report of (`x`, `y`) says it was a hand speeding up (report `at`). */
+  private refund(x: number, y: number, m: number, at = -1): void {
     if (!this.dropMag || m < REFUND_RATIO * this.dropMag) return;
     const ax = Math.abs(this.dropX) >= Math.abs(this.dropY);
     const d = ax ? this.dropX : this.dropY;
@@ -307,6 +375,10 @@ export class MouseFilter {
     if (!(d * v > 0)) return;
     this.outX += this.dropX;
     this.outY += this.dropY;
+    if (at >= 0) {
+      this.repX[at] += this.dropX;
+      this.repY[at] += this.dropY;
+    }
     this.stats.spikes = Math.max(0, this.stats.spikes - this.dropN);
     this.accept(this.dropMag);
   }
@@ -328,15 +400,17 @@ export class MouseFilter {
   push(dx: number, dy: number, t: number, reports: ArrayLike<MotionSample> | null): void {
     this.outX = dx;
     this.outY = dy;
+    this.perReport = false;
+    this.repN = 0;
     if (!(dx || dy)) return;
     const m = mag(dx, dy);
     const n = reports ? reports.length : 0;
     const st = this.stats;
     const span = n > 1 ? reports![n - 1].timeStamp - reports![0].timeStamp : 0;
-    const hz = span > 0 ? ((n - 1) * 1000) / span : 0;
+    const lastReport = n ? reports![n - 1].timeStamp : 0;
     if (!this.enabled) {
       this.discardNext = false;
-      st.event(t, m, m, EV_OK, Math.max(1, n), hz);
+      st.event(t, m, m, EV_OK, Math.max(1, n), lastReport);
       return;
     }
     if (this.discardNext || (m >= SPIKE_MIN && t - this.lockedAt < POST_LOCK_MS)) {
@@ -344,7 +418,7 @@ export class MouseFilter {
       this.outX = this.outY = 0;
       this.lastT = t;
       st.discards++;
-      st.event(t, 0, m, EV_DISCARD, Math.max(1, n), hz);
+      st.event(t, 0, m, EV_DISCARD, Math.max(1, n), lastReport);
       return;
     }
     if (n < 2 || !this.addsUp(dx, dy, reports!)) {
@@ -358,13 +432,13 @@ export class MouseFilter {
       if (isSpike(m, nb, dt, this.recentreSized(dx, dy) && this.warpBounded(dx, dy, nb, 2))) {
         st.spike(m);
         this.dropped(dx, dy, m, 1);
-        st.event(t, mag(this.outX, this.outY), m, EV_SPIKE, Math.max(1, n), hz);
+        st.event(t, mag(this.outX, this.outY), m, EV_SPIKE, Math.max(1, n), lastReport);
         return;
       }
       this.outX += dx;
       this.outY += dy;
       this.accept(m);
-      st.event(t, m, m, EV_OK, Math.max(1, n), hz);
+      st.event(t, m, m, EV_OK, Math.max(1, n), lastReport);
       return;
     }
     const r = reports!;
@@ -373,9 +447,29 @@ export class MouseFilter {
     if (this.mags.length < n) this.mags = new Float64Array(Math.max(n, this.mags.length * 2));
     const mags = this.mags;
     for (let i = 0; i < n; i++) mags[i] = smag(r[i]);
+    if (this.repX.length < n) {
+      this.repX = new Float64Array(Math.max(n, this.repX.length * 2));
+      this.repY = new Float64Array(this.repX.length);
+    }
+    for (let i = 0; i < n; i++) {
+      this.repX[i] = r[i].movementX || 0;
+      this.repY[i] = r[i].movementY || 0;
+    }
+    // The event's total may differ from its reports' sum by a rounding count (addsUp): the newest report takes it, so
+    // the per-report motion still adds up to outX / outY.
+    let sx = 0;
+    let sy = 0;
+    for (let i = 0; i < n; i++) {
+      sx += this.repX[i];
+      sy += this.repY[i];
+    }
+    this.repX[n - 1] += dx - sx;
+    this.repY[n - 1] += dy - sy;
+    this.perReport = true;
+    this.repN = n;
     let worst = 0;
     for (let i = 0; i < n; ) {
-      this.refund(r[i].movementX || 0, r[i].movementY || 0, mags[i]);
+      this.refund(r[i].movementX || 0, r[i].movementY || 0, mags[i], i);
       const run = mags[i] >= SPIKE_MIN ? this.spikeRun(r, mags, i, n, dt) : 0;
       if (!run) {
         this.accept(mags[i]);
@@ -389,6 +483,7 @@ export class MouseFilter {
       for (let k = i; k < i + run; k++) {
         x += r[k].movementX || 0;
         y += r[k].movementY || 0;
+        this.repX[k] = this.repY[k] = 0;
         st.spike(mags[k]);
         if (mags[k] > big) big = mags[k];
       }
@@ -399,7 +494,7 @@ export class MouseFilter {
       i += run;
     }
     this.lastT = r[n - 1].timeStamp;
-    st.event(t, mag(this.outX, this.outY), worst || m, worst ? EV_SPIKE : EV_OK, n, hz);
+    st.event(t, mag(this.outX, this.outY), worst || m, worst ? EV_SPIKE : EV_OK, n, lastReport);
   }
 
   /**

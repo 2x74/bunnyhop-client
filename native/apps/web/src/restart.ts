@@ -19,10 +19,15 @@ export interface RestartNames {
  * - bhop_japan: the start area is inside trigger_teleport *133 (-> "begin", the spawn room) filtered by bfilter
  *   (filter_activator_class, negated, "beginner"); the spawn room's trigger_multiple *132 does
  *   `!activator AddOutput classname beginner`. Without the fix every restart is sent back through the spawn room.
+ * - bhop_shutdown (hena, 10-26: "setstart didn't work on that map"): the start zone is inside trigger_teleport *178
+ *   (-> "hub") filtered by starttp (filter_activator_name, negated, "asdf"); the hub's trigger_multiple *229 does
+ *   `!activator AddOutput targetname asdf`. Without the fix every restart, a saved start point included, is sent to the
+ *   hub on its first tick.
  * (bhop_crash_egypt `resettargetname_main player` and bhop_drop `forcetargetnamereset` aren't modelled.)
  */
 const MAP_FIXES: Record<string, { main?: Partial<RestartNames>; bonus?: Partial<RestartNames> }> = {
   bhop_japan: { main: { classname: "beginner" } },
+  bhop_shutdown: { main: { targetname: "asdf" } },
 };
 
 /** Names a restart onto `track` gives on `map`, or null for the defaults. */

@@ -1,20 +1,140 @@
 // Turn actual C++ RGBA captures into lossless PNG evidence; contact sheets/video display those unchanged frames.
-import {readFile,writeFile,mkdir} from "node:fs/promises";
-import {resolve} from "node:path";
-import {deflateSync} from "node:zlib";
-import {chromium} from "playwright";
-const source=resolve(process.argv[2]??"/tmp/bunnyhop-cosmetic-evidence"),out=resolve(process.argv[3]??"/tmp/native-040-visuals");await mkdir(out,{recursive:true});
-const jobs=JSON.parse(await readFile(resolve(source,"jobs.json"),"utf8")) as {id:string;seconds?:number;weapon?:number}[];
-const crc=(data:Uint8Array)=>{let x=0xffffffff;for(const b of data){x^=b;for(let n=0;n<8;n++)x=x&1?(x>>>1)^0xedb88320:x>>>1;}return(x^0xffffffff)>>>0;};
-const chunk=(name:string,data:Uint8Array)=>{const a=Buffer.from(name),size=Buffer.alloc(4),c=Buffer.alloc(4);size.writeUInt32BE(data.length);c.writeUInt32BE(crc(Buffer.concat([a,data])));return Buffer.concat([size,a,data,c]);};
-const images:Record<string,string>={},pixels:Record<string,Buffer>={};
-for(const job of jobs){const raw=await readFile(resolve(source,job.id+".rgba"));if(raw.length!==512*384*4)throw Error("Bad capture length");let visible=0,x0=512,y0=384,x1=0,y1=0;for(let y=0;y<384;y++)for(let x=0;x<512;x++)if(raw[(y*512+x)*4+3]>5){visible++;x0=Math.min(x0,x);x1=Math.max(x1,x);y0=Math.min(y0,y);y1=Math.max(y1,y);}if(visible<20)throw Error("Blank native render: "+job.id);pixels[job.id]=raw;x0=Math.max(0,x0-5);y0=Math.max(0,y0-5);x1=Math.min(511,x1+5);y1=Math.min(383,y1+5);const width=x1-x0+1,height=y1-y0+1;const header=Buffer.alloc(13);header.writeUInt32BE(width);header.writeUInt32BE(height,4);header[8]=8;header[9]=6;const scan=Buffer.alloc(height*(width*4+1));for(let y=0;y<height;y++)raw.copy(scan,y*(width*4+1)+1,((y0+y)*512+x0)*4,((y0+y)*512+x1+1)*4);const png=Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk("IHDR",header),chunk("IDAT",deflateSync(scan)),chunk("IEND",Buffer.alloc(0))]);await writeFile(resolve(out,job.id+".png"),png);images[job.id]="data:image/png;base64,"+png.toString("base64");}
-const different=(a:string,b:string)=>{const x=pixels[a],y=pixels[b];let n=0;for(let i=0;i<x.length;i++)n+=x[i]!==y[i]?1:0;return n;};
-if(!different("glow-off","glow-rim")||!different("glow-rim","glow-aura"))throw Error("Native glow variants were identical");if(!different("propeller-00","propeller-11"))throw Error("Native propeller did not animate");if(!different("inspect-00","inspect-11"))throw Error("Native inspect did not animate");
-const browser=await chromium.launch({headless:true});
-try{const page=await browser.newPage({viewport:{width:1500,height:1100}});const style=`body{background:#0d121b;color:#eee;font:16px system-ui;margin:20px}h1{font-size:24px}.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}.cell{background:#1b2433;padding:6px;text-align:center}img{width:100%;height:190px;object-fit:contain}.three{grid-template-columns:repeat(3,1fr)}.three img{height:410px}`;
- for(const [name,prefix,title]of[["native-weapons-contact","weapon-","Actual native C++ renders · all 25 core weapon IDs · fire pose"],["native-glow-contact","glow-","Actual native C++ renders · glow off / rim / animated aura (cropped)"]]){const chosen=jobs.filter(j=>j.id.startsWith(prefix));await page.setContent(`<style>${style}</style><h1>${title}</h1><div class="grid ${prefix==="glow-"?"three":""}">${chosen.map(j=>`<div class="cell"><img src="${images[j.id]}"><div>${j.id}</div></div>`).join("")}</div>`);await page.evaluate(()=>Promise.all(Array.from(document.images).map(i=>i.decode())));await page.screenshot({path:resolve(out,name+".png"),fullPage:true});}
- const context=await browser.newContext({viewport:{width:1000,height:660},recordVideo:{dir:out,size:{width:1000,height:660}}});const motion=await context.newPage();await motion.setContent(`<style>${style}.grid{grid-template-columns:1fr 1fr}.grid img{height:450px}</style><h1>Actual C++ frame sequence · speed-reactive propeller / authored inspect</h1><div class="grid"><div class="cell"><img id="left"><p>Propeller · 900 u/s</p></div><div class="cell"><img id="right"><p>Karrotbit · authored third-person inspect</p></div></div>`);
- await motion.evaluate(async frames=>{for(let loop=0;loop<3;loop++)for(let i=0;i<12;i++){(document.querySelector('#left')as HTMLImageElement).src=frames[`propeller-${String(i).padStart(2,'0')}`];(document.querySelector('#right')as HTMLImageElement).src=frames[`inspect-${String(i).padStart(2,'0')}`];await new Promise(r=>setTimeout(r,100));}},images);const video=motion.video();await context.close();if(video)await video.saveAs(resolve(out,"native-accessory-inspect.webm"));
-}finally{await browser.close();}
-await writeFile(resolve(out,"native-cosmetic-evidence.json"),JSON.stringify({source:"C++ NativeViewmodel/SDL captures",frames:jobs.length,noBlankFrames:true,glowRimChangedBytes:different("glow-off","glow-rim"),glowAuraChangedBytes:different("glow-rim","glow-aura"),propellerChangedBytes:different("propeller-00","propeller-11"),inspectChangedBytes:different("inspect-00","inspect-11")},null,2));console.log(`Native captured evidence: ${jobs.length} nonblank frames, distinct glow/motion, contact sheets/video -> ${out}`);
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { resolve } from "node:path";
+import { deflateSync } from "node:zlib";
+import { chromium } from "playwright";
+const source = resolve(process.argv[2] ?? "/tmp/bunnyhop-cosmetic-evidence"),
+  out = resolve(process.argv[3] ?? "/tmp/native-040-visuals");
+await mkdir(out, { recursive: true });
+const jobs = JSON.parse(await readFile(resolve(source, "jobs.json"), "utf8")) as {
+  id: string;
+  seconds?: number;
+  weapon?: number;
+}[];
+const crc = (data: Uint8Array) => {
+  let x = 0xffffffff;
+  for (const b of data) {
+    x ^= b;
+    for (let n = 0; n < 8; n++) x = x & 1 ? (x >>> 1) ^ 0xedb88320 : x >>> 1;
+  }
+  return (x ^ 0xffffffff) >>> 0;
+};
+const chunk = (name: string, data: Uint8Array) => {
+  const a = Buffer.from(name),
+    size = Buffer.alloc(4),
+    c = Buffer.alloc(4);
+  size.writeUInt32BE(data.length);
+  c.writeUInt32BE(crc(Buffer.concat([a, data])));
+  return Buffer.concat([size, a, data, c]);
+};
+const images: Record<string, string> = {},
+  pixels: Record<string, Buffer> = {};
+for (const job of jobs) {
+  const raw = await readFile(resolve(source, job.id + ".rgba"));
+  if (raw.length !== 512 * 384 * 4) throw Error("Bad capture length");
+  let visible = 0,
+    x0 = 512,
+    y0 = 384,
+    x1 = 0,
+    y1 = 0;
+  for (let y = 0; y < 384; y++)
+    for (let x = 0; x < 512; x++)
+      if (raw[(y * 512 + x) * 4 + 3] > 5) {
+        visible++;
+        x0 = Math.min(x0, x);
+        x1 = Math.max(x1, x);
+        y0 = Math.min(y0, y);
+        y1 = Math.max(y1, y);
+      }
+  if (visible < 20) throw Error("Blank native render: " + job.id);
+  pixels[job.id] = raw;
+  x0 = Math.max(0, x0 - 5);
+  y0 = Math.max(0, y0 - 5);
+  x1 = Math.min(511, x1 + 5);
+  y1 = Math.min(383, y1 + 5);
+  const width = x1 - x0 + 1,
+    height = y1 - y0 + 1;
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 6;
+  const scan = Buffer.alloc(height * (width * 4 + 1));
+  for (let y = 0; y < height; y++)
+    raw.copy(scan, y * (width * 4 + 1) + 1, ((y0 + y) * 512 + x0) * 4, ((y0 + y) * 512 + x1 + 1) * 4);
+  const png = Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    chunk("IHDR", header),
+    chunk("IDAT", deflateSync(scan)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+  await writeFile(resolve(out, job.id + ".png"), png);
+  images[job.id] = "data:image/png;base64," + png.toString("base64");
+}
+const different = (a: string, b: string) => {
+  const x = pixels[a],
+    y = pixels[b];
+  let n = 0;
+  for (let i = 0; i < x.length; i++) n += x[i] !== y[i] ? 1 : 0;
+  return n;
+};
+if (!different("glow-off", "glow-rim") || !different("glow-rim", "glow-aura"))
+  throw Error("Native glow variants were identical");
+if (!different("propeller-00", "propeller-11")) throw Error("Native propeller did not animate");
+if (!different("inspect-00", "inspect-11")) throw Error("Native inspect did not animate");
+const browser = await chromium.launch({ headless: true });
+try {
+  const page = await browser.newPage({ viewport: { width: 1500, height: 1100 } });
+  const style = `body{background:#0d121b;color:#eee;font:16px system-ui;margin:20px}h1{font-size:24px}.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}.cell{background:#1b2433;padding:6px;text-align:center}img{width:100%;height:190px;object-fit:contain}.three{grid-template-columns:repeat(3,1fr)}.three img{height:410px}`;
+  for (const [name, prefix, title] of [
+    ["native-weapons-contact", "weapon-", "Actual native C++ renders · all 25 core weapon IDs · fire pose"],
+    ["native-glow-contact", "glow-", "Actual native C++ renders · glow off / rim / animated aura (cropped)"],
+  ]) {
+    const chosen = jobs.filter((j) => j.id.startsWith(prefix));
+    await page.setContent(
+      `<style>${style}</style><h1>${title}</h1><div class="grid ${prefix === "glow-" ? "three" : ""}">${chosen.map((j) => `<div class="cell"><img src="${images[j.id]}"><div>${j.id}</div></div>`).join("")}</div>`,
+    );
+    await page.evaluate(() => Promise.all(Array.from(document.images).map((i) => i.decode())));
+    await page.screenshot({ path: resolve(out, name + ".png"), fullPage: true });
+  }
+  const context = await browser.newContext({
+    viewport: { width: 1000, height: 660 },
+    recordVideo: { dir: out, size: { width: 1000, height: 660 } },
+  });
+  const motion = await context.newPage();
+  await motion.setContent(
+    `<style>${style}.grid{grid-template-columns:1fr 1fr}.grid img{height:450px}</style><h1>Actual C++ frame sequence · speed-reactive propeller / authored inspect</h1><div class="grid"><div class="cell"><img id="left"><p>Propeller · 900 u/s</p></div><div class="cell"><img id="right"><p>Karrotbit · authored third-person inspect</p></div></div>`,
+  );
+  await motion.evaluate(async (frames) => {
+    for (let loop = 0; loop < 3; loop++)
+      for (let i = 0; i < 12; i++) {
+        (document.querySelector("#left") as HTMLImageElement).src = frames[`propeller-${String(i).padStart(2, "0")}`];
+        (document.querySelector("#right") as HTMLImageElement).src = frames[`inspect-${String(i).padStart(2, "0")}`];
+        await new Promise((r) => setTimeout(r, 100));
+      }
+  }, images);
+  const video = motion.video();
+  await context.close();
+  if (video) await video.saveAs(resolve(out, "native-accessory-inspect.webm"));
+} finally {
+  await browser.close();
+}
+await writeFile(
+  resolve(out, "native-cosmetic-evidence.json"),
+  JSON.stringify(
+    {
+      source: "C++ NativeViewmodel/SDL captures",
+      frames: jobs.length,
+      noBlankFrames: true,
+      glowRimChangedBytes: different("glow-off", "glow-rim"),
+      glowAuraChangedBytes: different("glow-rim", "glow-aura"),
+      propellerChangedBytes: different("propeller-00", "propeller-11"),
+      inspectChangedBytes: different("inspect-00", "inspect-11"),
+    },
+    null,
+    2,
+  ),
+);
+console.log(
+  `Native captured evidence: ${jobs.length} nonblank frames, distinct glow/motion, contact sheets/video -> ${out}`,
+);

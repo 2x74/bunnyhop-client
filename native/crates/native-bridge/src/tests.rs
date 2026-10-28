@@ -4,6 +4,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[path = "replay_tests.rs"]
 mod replay_v10;
+#[path = "v29_tests.rs"]
+mod v29;
 
 struct Fixture(PathBuf);
 impl Fixture {
@@ -687,6 +689,11 @@ fn no_evidence_recording_exports_frozen_bhr_and_all_versions_match_shared_encode
                 1
             );
             assert_eq!(frame.tick, finished_tick);
+            let mut size = 0;
+            let ghost_info = crate::replay::bh_ghost_info(c, ghost, &mut size);
+            let info: serde_json::Value = serde_json::from_slice(
+                std::slice::from_raw_parts(ghost_info.cast(), size)).unwrap();
+            assert_eq!(info["timeMs"], (*c).map.as_ref().unwrap().timer.as_ref().unwrap().time_ms());
             let mut events = BhReplayEvents::default();
             assert_eq!(bh_ghost_events(c, ghost, 0, 40, &mut events), 1);
             assert_eq!(
@@ -761,7 +768,7 @@ fn no_evidence_recording_exports_frozen_bhr_and_all_versions_match_shared_encode
                 assert!(replay::Decoded::parse(&raw[..len]).is_err());
             }
             // Broken optional presentation data is discarded, preserving playable movement.
-            let mut malformed = raw.clone();
+            let mut malformed = raw[..raw.len() - 12].to_vec();
             malformed.pop();
             assert!(
                 replay::Decoded::parse(&malformed)
@@ -930,6 +937,7 @@ fn counted_telemetry_matches_shared_recorder_rebases_and_decoder() {
             looks.push(if missing && i == 23 { None } else { Some(l) });
         }
         let data = recording::ReplayData {
+            options: BhRecordOptionsV29::default(),
             header: header.clone(),
             commands: commands.clone(),
             looks: looks.clone(),

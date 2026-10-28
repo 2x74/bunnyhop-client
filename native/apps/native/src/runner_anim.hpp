@@ -2,40 +2,361 @@
 // Native port of the original web player/runner.ts. Independent state per actor; no sampled gait clips.
 #include "actor_anim.hpp"
 #include <limits>
+
 namespace native_runner {
-constexpr double pi=3.14159265358979323846,rad=pi/180;
-inline double clamp(double v,double a,double b){return std::clamp(v,a,b);}
-inline double wrap(double v){return v-360*std::floor((v+180)/360);}
-inline double damp(double a,double b,double rate,double dt){return a+(b-a)*(1-std::exp(-rate*dt));}
-enum C{HIPS_Y,HIPS_PITCH,HIPS_YAW,HIPS_ROLL,SPINE_PITCH,SPINE_YAW,CHEST_PITCH,CHEST_YAW,CHEST_ROLL,NECK_PITCH,HEAD_PITCH,HEAD_ROLL,THIGH_X_L,THIGH_Z_L,KNEE_L,FOOT_L,THIGH_X_R,THIGH_Z_R,KNEE_R,FOOT_R,ARM_X_L,ARM_Z_L,ELBOW_L,ARM_X_R,ARM_Z_R,ELBOW_R,COUNT};
-using Pose=std::array<float,COUNT>;using M=std::array<double,12>;using V=std::array<double,3>;
-inline M identity(){return {1,0,0,0,0,1,0,0,0,0,1,0};}
-inline M mul(const M&a,const M&b){M out;for(int r=0;r<3;r++)for(int c=0;c<4;c++)out[r*4+c]=a[r*4]*b[c]+a[r*4+1]*b[4+c]+a[r*4+2]*b[8+c]+(c==3?a[r*4+3]:0);return out;}
-inline M euler(double x,double y,double z,const std::string&order){x*=rad;y*=rad;z*=rad;M X={1,0,0,0,0,std::cos(x),-std::sin(x),0,0,std::sin(x),std::cos(x),0},Y={std::cos(y),0,std::sin(y),0,0,1,0,0,-std::sin(y),0,std::cos(y),0},Z={std::cos(z),-std::sin(z),0,0,std::sin(z),std::cos(z),0,0,0,0,1,0};return order=="YXZ"?mul(mul(Y,X),Z):order=="XZY"?mul(mul(X,Z),Y):mul(mul(X,Y),Z);}
-inline void mix(Pose&out,const Pose&a,const Pose&b,double t){for(int i=0;i<COUNT;i++)out[i]=float(a[i]+(double(b[i])-a[i])*t);}
-inline std::pair<double,double> legIK(double fwd,double down){constexpr double L1=15,L2=14;double d=clamp(std::hypot(fwd,down),1.1,28.99),knee=pi-std::acos(clamp((L1*L1+L2*L2-d*d)/(2*L1*L2),-1,1)),inner=std::acos(clamp((L1*L1+d*d-L2*L2)/(2*L1*d),-1,1));return {(std::atan2(fwd,down)+inner)/rad,knee/rad};}
-inline constexpr std::array<int,20> parents={-1,0,1,2,3,4,5,5,3,8,9,3,11,12,1,14,15,1,17,18};
-inline constexpr std::array<V,20> rest={V{0,0,0},V{0,32,0},V{0,38,0},V{0,45,0},V{0,54.5,0},V{0,57,.3},V{2.6,66.3,-1.6},V{-2.6,66.3,-1.6},V{10.7,52.5,0},V{10.7,44,0},V{10.7,36.4,0},V{-10.7,52.5,0},V{-10.7,44,0},V{-10.7,36.4,0},V{4.3,32,0},V{4.3,17,0},V{4.3,3,0},V{-4.3,32,0},V{-4.3,17,0},V{-4.3,3,0}};
-struct Input {V position{},velocity{};double yaw=0,pitch=0,sidemove=0;bool grounded=true,crouched=false,hasVelocity=true;};
-struct State {
- V velocity{},lastPos{};bool hasLast=false,wasGrounded=true;double bodyYaw=0,viewYaw=0,viewPitch=0,yawRate=0,lastYaw=std::numeric_limits<double>::quiet_NaN(),legYaw=0,ground=1,crouch=0,tuck=0,runAmp=0,phase=0,lean=0,airTime=0,squash=0,squashV=0,earTwitch=2,time=0,last=-1;std::array<double,4> ears{};unsigned randomState=0x12345678;Pose idle{},run{},duck{},air{},airDuck{},g{},a{},out{};
- double random(){randomState=1664525*randomState+1013904223;return double(randomState)/4294967296.;}
- void idlePose(Pose&o){o.fill(0);double breath=std::sin(time*1.7);o[HIPS_ROLL]=float(std::sin(time*.6)*1.2);o[SPINE_PITCH]=float(2+breath*.7);o[CHEST_PITCH]=float(-1-breath*.9);o[HEAD_PITCH]=float(breath*.4);for(int side=0;side<2;side++){int tx=side?THIGH_X_R:THIGH_X_L,tz=side?THIGH_Z_R:THIGH_Z_L,kn=side?KNEE_R:KNEE_L,ft=side?FOOT_R:FOOT_L;double sign=side?-1:1;o[tx]=3;o[kn]=6;o[tz]=float(3-sign*std::sin(time*.6)*1.2);o[ft]=0;}o[ARM_X_L]=o[ARM_X_R]=float(4+breath);o[ARM_Z_L]=o[ARM_Z_R]=float(7+breath*.8);o[ELBOW_L]=o[ELBOW_R]=14;}
- void runPose(Pose&o){o.fill(0);double s=std::sin(phase),c=std::cos(phase);o[HIPS_Y]=float(-1.6*(1+std::cos(2*phase))*.5-.6);o[HIPS_YAW]=float(-8*s);o[SPINE_PITCH]=9;o[SPINE_YAW]=float(4*s);o[CHEST_PITCH]=4;o[CHEST_YAW]=float(8*s);o[HEAD_PITCH]=-6;auto leg=[&](double sw,double cs,int tx,int kn,int ft){o[tx]=float(40*sw+6);o[kn]=float(14+22*std::max(0.,-sw)+62*std::pow(std::max(0.,cs),1.4));o[ft]=float(12*sw-6);};leg(s,c,THIGH_X_L,KNEE_L,FOOT_L);leg(-s,-c,THIGH_X_R,KNEE_R,FOOT_R);o[THIGH_Z_L]=o[THIGH_Z_R]=2;o[ARM_X_L]=float(-44*s+6);o[ARM_X_R]=float(44*s+6);o[ARM_Z_L]=o[ARM_Z_R]=9;o[ELBOW_L]=float(78+18*s);o[ELBOW_R]=float(78-18*s);}
- void crouchPose(Pose&o){o.fill(0);double drop=14.5,s=std::sin(phase);o[HIPS_Y]=float(-drop);o[SPINE_PITCH]=20;o[CHEST_PITCH]=10;o[NECK_PITCH]=-12;o[HEAD_PITCH]=-10;for(int side=0;side<2;side++){int tx=side?THIGH_X_R:THIGH_X_L,tz=side?THIGH_Z_R:THIGH_Z_L,kn=side?KNEE_R:KNEE_L,ft=side?FOOT_R:FOOT_L;double sign=side?-1:1,step=sign*s*runAmp*9;auto [th,knee]=legIK(1+step,32-drop-3-std::max(0.,sign*std::cos(phase))*runAmp*3);o[tx]=float(th);o[kn]=float(knee);o[ft]=0;o[tz]=7;}o[ARM_X_L]=float(28-14*s*runAmp);o[ARM_X_R]=float(28+14*s*runAmp);o[ARM_Z_L]=o[ARM_Z_R]=12;o[ELBOW_L]=o[ELBOW_R]=62;}
- void airPose(Pose&o,bool ducking){o.fill(0);double T=tuck;if(ducking){o[HIPS_Y]=-13;o[SPINE_PITCH]=14;o[CHEST_PITCH]=6;o[NECK_PITCH]=-8;o[HEAD_PITCH]=-6;o[THIGH_X_L]=88;o[KNEE_L]=128;o[THIGH_X_R]=76;o[KNEE_R]=120;o[FOOT_L]=o[FOOT_R]=-14;o[THIGH_Z_L]=o[THIGH_Z_R]=10;}else{o[SPINE_PITCH]=float(5+4*T);o[CHEST_PITCH]=2;o[HEAD_PITCH]=-4;o[THIGH_X_L]=float(18+42*T);o[KNEE_L]=float(22+70*T);o[THIGH_X_R]=float(6+30*T);o[KNEE_R]=float(34+52*T);o[FOOT_L]=float(-18+6*T);o[FOOT_R]=float(-22+8*T);o[THIGH_Z_L]=5;o[THIGH_Z_R]=4;}o[ARM_X_L]=14;o[ARM_X_R]=8;o[ARM_Z_L]=float(26+12*T);o[ARM_Z_R]=float(24+12*T);o[ELBOW_L]=38;o[ELBOW_R]=44;}
- void apply(std::vector<float>&skin){std::array<M,20> bones,world;for(auto&m:bones)m=identity();auto set=[&](int i,double x,double y,double z,const std::string&order="YXZ"){bones[i]=euler(x,y,z,order);};double aimYaw=wrap(viewYaw-bodyYaw),pitch=viewPitch;
- set(1,out[HIPS_PITCH],out[HIPS_YAW]+legYaw,out[HIPS_ROLL]-lean);set(2,out[SPINE_PITCH]+pitch*.08,out[SPINE_YAW]-legYaw*.5+aimYaw*.2,lean*.15);set(3,out[CHEST_PITCH]+pitch*.15,out[CHEST_YAW]-legYaw*.5+aimYaw*.3,out[CHEST_ROLL]+lean*.1);set(4,out[NECK_PITCH]+pitch*.25,aimYaw*.2,0);set(5,out[HEAD_PITCH]+clamp(pitch*.45,-38,40),aimYaw*.3,out[HEAD_ROLL]+lean*.45);
- set(14,-out[THIGH_X_L],0,out[THIGH_Z_L]+std::max(0.,-lean)*.3,"XZY");set(15,out[KNEE_L],0,0,"XYZ");set(16,-(double(out[FOOT_L])+out[KNEE_L]-out[THIGH_X_L])*.85,0,0,"XYZ");set(17,-out[THIGH_X_R],0,-out[THIGH_Z_R]-std::max(0.,lean)*.3,"XZY");set(18,out[KNEE_R],0,0,"XYZ");set(19,-(double(out[FOOT_R])+out[KNEE_R]-out[THIGH_X_R])*.85,0,0,"XYZ");
- set(8,-out[ARM_X_L],0,out[ARM_Z_L]-lean*.9,"XZY");set(9,-out[ELBOW_L],0,0,"XYZ");set(11,-out[ARM_X_R],0,-out[ARM_Z_R]-lean*.9,"XZY");set(12,-out[ELBOW_R],0,0,"XYZ");set(6,ears[0],0,-ears[2]-4+std::sin(time*2.1)*1.5,"XZY");set(7,ears[0]*.92,0,-ears[2]+4-std::sin(time*2.3+1)*1.5,"XZY");
- skin.resize(20*12);constexpr int perm[3]={2,0,1};for(int i=0;i<20;i++){for(int r=0;r<3;r++)bones[i][r*4+3]=rest[i][r]-(parents[i]<0?0:rest[parents[i]][r]);if(i==1)bones[i][7]=32+out[HIPS_Y]-squash*10;world[i]=parents[i]<0?bones[i]:mul(world[parents[i]],bones[i]);M S=world[i];for(int r=0;r<3;r++){for(int k=0;k<3;k++)S[r*4+3]-=world[i][r*4+k]*rest[i][k];double scale=r==1?1-squash:1+squash*.45;for(int c=0;c<4;c++)S[r*4+c]*=scale;}for(int r=0;r<3;r++){for(int c=0;c<3;c++)skin[i*12+r*4+c]=float(S[perm[r]*4+perm[c]]);skin[i*12+r*4+3]=float(S[perm[r]*4+3]);}}
- }
- bool pose(const Input&s,double seconds,bool snapped,std::vector<float>&skin){if(!std::isfinite(seconds)||!std::isfinite(s.yaw)||!std::isfinite(s.pitch)||!std::isfinite(s.sidemove))return false;for(auto v:s.position)if(!std::isfinite(v))return false;for(auto v:s.velocity)if(!std::isfinite(v))return false;bool snap=snapped||last<0||seconds<last;double dt=last<0||seconds<last?0:clamp(seconds-last,0,.1);last=seconds;time=seconds;double distance=0;for(int k=0;k<3;k++)distance+=(s.position[k]-lastPos[k])*(s.position[k]-lastPos[k]);if(hasLast&&distance>160*160)snap=true;
- if(s.hasVelocity)velocity=s.velocity;else if(hasLast&&dt>0&&!snap)for(int k=0;k<3;k++)velocity[k]=damp(velocity[k],(s.position[k]-lastPos[k])/dt,20,dt);else velocity={};lastPos=s.position;hasLast=true;double vx=velocity[0],vy=velocity[1],vz=velocity[2],speed=std::hypot(vx,vy),dyaw=std::isnan(lastYaw)||snap||dt<=0?0:wrap(s.yaw-lastYaw)/dt;lastYaw=s.yaw;if(std::abs(dyaw)>3000)dyaw=0;yawRate=snap?0:damp(yawRate,dyaw,10,dt);viewYaw=s.yaw;viewPitch=clamp(s.pitch,-89,89);if(snap)bodyYaw=s.yaw;else{bodyYaw+=wrap(s.yaw-bodyYaw)*(1-std::exp(-9*dt));double lag=wrap(s.yaw-bodyYaw);if(std::abs(lag)>50)bodyYaw=s.yaw-std::copysign(50.,lag);}double by=bodyYaw*rad,fwd=vx*std::cos(by)+vy*std::sin(by),left=-vx*std::sin(by)+vy*std::cos(by);
- if(s.grounded&&!wasGrounded&&airTime>.12)squashV+=clamp(-velocity[2]/900,.15,.7)*2.2;airTime=s.grounded?0:airTime+dt;wasGrounded=s.grounded;double gt=s.grounded?1:0;ground=snap?gt:damp(ground,gt,gt>ground?9:22,dt);crouch=snap?double(s.crouched):damp(crouch,s.crouched?1:0,14,dt);double tt=vz>0?1:clamp(1+vz/520,.2,1);tuck=snap?tt:damp(tuck,tt,7,dt);double amp=std::pow(clamp(speed/250,0,1),.8);runAmp=snap?amp:damp(runAmp,amp,8,dt);
- double move=std::atan2(left,fwd)/rad;bool back=std::abs(move)>100;if(back)move=wrap(move+180);double stride=clamp(50+speed*.18,50,115);if(snap)phase=(back?-1:1)*(speed/stride)*2*pi*seconds;phase+=(back?-1:1)*(speed/stride*2*pi*dt)*(.35+.65*ground);double ly=speed>30?clamp(move,-65,65)*ground:0;legYaw=snap?ly:damp(legYaw,ly,8,dt);double lt=clamp(yawRate*.055-(s.sidemove/450)*7,-26,26)*(.35+.65*(1-ground))*clamp(speed/200,.2,1);lean=snap?lt:damp(lean,lt,6,dt);
- idlePose(idle);runPose(run);crouchPose(duck);airPose(air,false);airPose(airDuck,true);mix(g,idle,run,runAmp);mix(g,g,duck,crouch);mix(a,air,airDuck,crouch);mix(out,a,g,ground);
- if(snap)squash=squashV=0;squashV+=(-240*squash-15*squashV)*dt;squash+=squashV*dt;squash=clamp(squash,-.08,.16);earTwitch-=dt;if(earTwitch<0){earTwitch=2.5+random()*4;if(speed<40)ears[1]+=260*(random()<.5?1:-1);}double ep=-clamp(speed*.028,0,26)-clamp(vz*.035,-22,22)*(1-ground),er=lean*.7;ears[1]+=(110*(ep-ears[0])-7*ears[1])*dt;ears[0]+=ears[1]*dt;ears[3]+=(110*(er-ears[2])-7*ears[3])*dt;ears[2]+=ears[3]*dt;if(snap)ears={ep,0,er,0};apply(skin);return true;
- }
+constexpr double pi = 3.14159265358979323846, rad = pi / 180;
+
+inline double clamp(double v, double a, double b) {
+    return std::clamp(v, a, b);
+}
+
+inline double wrap(double v) {
+    return v - 360 * std::floor((v + 180) / 360);
+}
+
+inline double damp(double a, double b, double rate, double dt) {
+    return a + (b - a) * (1 - std::exp(-rate * dt));
+}
+
+enum C {
+    HIPS_Y,
+    HIPS_PITCH,
+    HIPS_YAW,
+    HIPS_ROLL,
+    SPINE_PITCH,
+    SPINE_YAW,
+    CHEST_PITCH,
+    CHEST_YAW,
+    CHEST_ROLL,
+    NECK_PITCH,
+    HEAD_PITCH,
+    HEAD_ROLL,
+    THIGH_X_L,
+    THIGH_Z_L,
+    KNEE_L,
+    FOOT_L,
+    THIGH_X_R,
+    THIGH_Z_R,
+    KNEE_R,
+    FOOT_R,
+    ARM_X_L,
+    ARM_Z_L,
+    ELBOW_L,
+    ARM_X_R,
+    ARM_Z_R,
+    ELBOW_R,
+    COUNT
 };
-} // namespace native_runner
+
+using Pose = std::array<float, COUNT>;
+using M = std::array<double, 12>;
+using V = std::array<double, 3>;
+
+inline M identity() {
+    return {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
+}
+
+inline M mul(const M &a, const M &b) {
+    M out;
+    for (int r = 0; r < 3; r++)
+        for (int c = 0; c < 4; c++)
+            out[r * 4 + c] =
+                    a[r * 4] * b[c] + a[r * 4 + 1] * b[4 + c] + a[r * 4 + 2] * b[8 + c] + (c == 3 ? a[r * 4 + 3] : 0);
+    return out;
+}
+
+inline M euler(double x, double y, double z, const std::string &order) {
+    x *= rad;
+    y *= rad;
+    z *= rad;
+    M X = {1, 0, 0, 0, 0, std::cos(x), -std::sin(x), 0, 0, std::sin(x), std::cos(x), 0},
+      Y = {std::cos(y), 0, std::sin(y), 0, 0, 1, 0, 0, -std::sin(y), 0, std::cos(y), 0},
+      Z = {std::cos(z), -std::sin(z), 0, 0, std::sin(z), std::cos(z), 0, 0, 0, 0, 1, 0};
+    return order == "YXZ" ? mul(mul(Y, X), Z) : order == "XZY" ? mul(mul(X, Z), Y) : mul(mul(X, Y), Z);
+}
+
+inline void mix(Pose &out, const Pose &a, const Pose &b, double t) {
+    for (int i = 0; i < COUNT; i++)
+        out[i] = float(a[i] + (double(b[i]) - a[i]) * t);
+}
+
+inline std::pair<double, double> legIK(double fwd, double down) {
+    constexpr double L1 = 15, L2 = 14;
+    double d = clamp(std::hypot(fwd, down), 1.1, 28.99),
+           knee = pi - std::acos(clamp((L1 * L1 + L2 * L2 - d * d) / (2 * L1 * L2), -1, 1)),
+           inner = std::acos(clamp((L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), -1, 1));
+    return {(std::atan2(fwd, down) + inner) / rad, knee / rad};
+}
+
+inline constexpr std::array<int, 20> parents = {-1, 0, 1, 2, 3, 4, 5, 5, 3, 8, 9, 3, 11, 12, 1, 14, 15, 1, 17, 18};
+inline constexpr std::array<V, 20> rest = {V{0, 0, 0},       V{0, 32, 0},       V{0, 38, 0},        V{0, 45, 0},
+                                           V{0, 54.5, 0},    V{0, 57, .3},      V{2.6, 66.3, -1.6}, V{-2.6, 66.3, -1.6},
+                                           V{10.7, 52.5, 0}, V{10.7, 44, 0},    V{10.7, 36.4, 0},   V{-10.7, 52.5, 0},
+                                           V{-10.7, 44, 0},  V{-10.7, 36.4, 0}, V{4.3, 32, 0},      V{4.3, 17, 0},
+                                           V{4.3, 3, 0},     V{-4.3, 32, 0},    V{-4.3, 17, 0},     V{-4.3, 3, 0}};
+
+struct Input {
+    V position{}, velocity{};
+    double yaw = 0, pitch = 0, sidemove = 0;
+    bool grounded = true, crouched = false, hasVelocity = true;
+};
+
+struct State {
+    V velocity{}, lastPos{};
+    bool hasLast = false, wasGrounded = true;
+    double bodyYaw = 0, viewYaw = 0, viewPitch = 0, yawRate = 0, lastYaw = std::numeric_limits<double>::quiet_NaN(),
+           legYaw = 0, ground = 1, crouch = 0, tuck = 0, runAmp = 0, phase = 0, lean = 0, airTime = 0, squash = 0,
+           squashV = 0, earTwitch = 2, time = 0, last = -1;
+    std::array<double, 4> ears{};
+    unsigned randomState = 0x12345678;
+    Pose idle{}, run{}, duck{}, air{}, airDuck{}, g{}, a{}, out{};
+
+    double random() {
+        randomState = 1664525 * randomState + 1013904223;
+        return double(randomState) / 4294967296.;
+    }
+
+    void idlePose(Pose &o) {
+        o.fill(0);
+        double breath = std::sin(time * 1.7);
+        o[HIPS_ROLL] = float(std::sin(time * .6) * 1.2);
+        o[SPINE_PITCH] = float(2 + breath * .7);
+        o[CHEST_PITCH] = float(-1 - breath * .9);
+        o[HEAD_PITCH] = float(breath * .4);
+        for (int side = 0; side < 2; side++) {
+            int tx = side ? THIGH_X_R : THIGH_X_L, tz = side ? THIGH_Z_R : THIGH_Z_L, kn = side ? KNEE_R : KNEE_L,
+                ft = side ? FOOT_R : FOOT_L;
+            double sign = side ? -1 : 1;
+            o[tx] = 3;
+            o[kn] = 6;
+            o[tz] = float(3 - sign * std::sin(time * .6) * 1.2);
+            o[ft] = 0;
+        }
+        o[ARM_X_L] = o[ARM_X_R] = float(4 + breath);
+        o[ARM_Z_L] = o[ARM_Z_R] = float(7 + breath * .8);
+        o[ELBOW_L] = o[ELBOW_R] = 14;
+    }
+
+    void runPose(Pose &o) {
+        o.fill(0);
+        double s = std::sin(phase), c = std::cos(phase);
+        o[HIPS_Y] = float(-1.6 * (1 + std::cos(2 * phase)) * .5 - .6);
+        o[HIPS_YAW] = float(-8 * s);
+        o[SPINE_PITCH] = 9;
+        o[SPINE_YAW] = float(4 * s);
+        o[CHEST_PITCH] = 4;
+        o[CHEST_YAW] = float(8 * s);
+        o[HEAD_PITCH] = -6;
+        auto leg = [&](double sw, double cs, int tx, int kn, int ft) {
+            o[tx] = float(40 * sw + 6);
+            o[kn] = float(14 + 22 * std::max(0., -sw) + 62 * std::pow(std::max(0., cs), 1.4));
+            o[ft] = float(12 * sw - 6);
+        };
+        leg(s, c, THIGH_X_L, KNEE_L, FOOT_L);
+        leg(-s, -c, THIGH_X_R, KNEE_R, FOOT_R);
+        o[THIGH_Z_L] = o[THIGH_Z_R] = 2;
+        o[ARM_X_L] = float(-44 * s + 6);
+        o[ARM_X_R] = float(44 * s + 6);
+        o[ARM_Z_L] = o[ARM_Z_R] = 9;
+        o[ELBOW_L] = float(78 + 18 * s);
+        o[ELBOW_R] = float(78 - 18 * s);
+    }
+
+    void crouchPose(Pose &o) {
+        o.fill(0);
+        double drop = 14.5, s = std::sin(phase);
+        o[HIPS_Y] = float(-drop);
+        o[SPINE_PITCH] = 20;
+        o[CHEST_PITCH] = 10;
+        o[NECK_PITCH] = -12;
+        o[HEAD_PITCH] = -10;
+        for (int side = 0; side < 2; side++) {
+            int tx = side ? THIGH_X_R : THIGH_X_L, tz = side ? THIGH_Z_R : THIGH_Z_L, kn = side ? KNEE_R : KNEE_L,
+                ft = side ? FOOT_R : FOOT_L;
+            double sign = side ? -1 : 1, step = sign * s * runAmp * 9;
+            auto [th, knee] = legIK(1 + step, 32 - drop - 3 - std::max(0., sign * std::cos(phase)) * runAmp * 3);
+            o[tx] = float(th);
+            o[kn] = float(knee);
+            o[ft] = 0;
+            o[tz] = 7;
+        }
+        o[ARM_X_L] = float(28 - 14 * s * runAmp);
+        o[ARM_X_R] = float(28 + 14 * s * runAmp);
+        o[ARM_Z_L] = o[ARM_Z_R] = 12;
+        o[ELBOW_L] = o[ELBOW_R] = 62;
+    }
+
+    void airPose(Pose &o, bool ducking) {
+        o.fill(0);
+        double T = tuck;
+        if (ducking) {
+            o[HIPS_Y] = -13;
+            o[SPINE_PITCH] = 14;
+            o[CHEST_PITCH] = 6;
+            o[NECK_PITCH] = -8;
+            o[HEAD_PITCH] = -6;
+            o[THIGH_X_L] = 88;
+            o[KNEE_L] = 128;
+            o[THIGH_X_R] = 76;
+            o[KNEE_R] = 120;
+            o[FOOT_L] = o[FOOT_R] = -14;
+            o[THIGH_Z_L] = o[THIGH_Z_R] = 10;
+        } else {
+            o[SPINE_PITCH] = float(5 + 4 * T);
+            o[CHEST_PITCH] = 2;
+            o[HEAD_PITCH] = -4;
+            o[THIGH_X_L] = float(18 + 42 * T);
+            o[KNEE_L] = float(22 + 70 * T);
+            o[THIGH_X_R] = float(6 + 30 * T);
+            o[KNEE_R] = float(34 + 52 * T);
+            o[FOOT_L] = float(-18 + 6 * T);
+            o[FOOT_R] = float(-22 + 8 * T);
+            o[THIGH_Z_L] = 5;
+            o[THIGH_Z_R] = 4;
+        }
+        o[ARM_X_L] = 14;
+        o[ARM_X_R] = 8;
+        o[ARM_Z_L] = float(26 + 12 * T);
+        o[ARM_Z_R] = float(24 + 12 * T);
+        o[ELBOW_L] = 38;
+        o[ELBOW_R] = 44;
+    }
+
+    void apply(std::vector<float> &skin) {
+        std::array<M, 20> bones, world;
+        for (auto &m : bones)
+            m = identity();
+        auto set = [&](int i, double x, double y, double z, const std::string &order = "YXZ") {
+            bones[i] = euler(x, y, z, order);
+        };
+        double aimYaw = wrap(viewYaw - bodyYaw), pitch = viewPitch;
+        set(1, out[HIPS_PITCH], out[HIPS_YAW] + legYaw, out[HIPS_ROLL] - lean);
+        set(2, out[SPINE_PITCH] + pitch * .08, out[SPINE_YAW] - legYaw * .5 + aimYaw * .2, lean * .15);
+        set(3, out[CHEST_PITCH] + pitch * .15, out[CHEST_YAW] - legYaw * .5 + aimYaw * .3, out[CHEST_ROLL] + lean * .1);
+        set(4, out[NECK_PITCH] + pitch * .25, aimYaw * .2, 0);
+        set(5, out[HEAD_PITCH] + clamp(pitch * .45, -38, 40), aimYaw * .3, out[HEAD_ROLL] + lean * .45);
+        set(14, -out[THIGH_X_L], 0, out[THIGH_Z_L] + std::max(0., -lean) * .3, "XZY");
+        set(15, out[KNEE_L], 0, 0, "XYZ");
+        set(16, -(double(out[FOOT_L]) + out[KNEE_L] - out[THIGH_X_L]) * .85, 0, 0, "XYZ");
+        set(17, -out[THIGH_X_R], 0, -out[THIGH_Z_R] - std::max(0., lean) * .3, "XZY");
+        set(18, out[KNEE_R], 0, 0, "XYZ");
+        set(19, -(double(out[FOOT_R]) + out[KNEE_R] - out[THIGH_X_R]) * .85, 0, 0, "XYZ");
+        set(8, -out[ARM_X_L], 0, out[ARM_Z_L] - lean * .9, "XZY");
+        set(9, -out[ELBOW_L], 0, 0, "XYZ");
+        set(11, -out[ARM_X_R], 0, -out[ARM_Z_R] - lean * .9, "XZY");
+        set(12, -out[ELBOW_R], 0, 0, "XYZ");
+        set(6, ears[0], 0, -ears[2] - 4 + std::sin(time * 2.1) * 1.5, "XZY");
+        set(7, ears[0] * .92, 0, -ears[2] + 4 - std::sin(time * 2.3 + 1) * 1.5, "XZY");
+        skin.resize(20 * 12);
+        constexpr int perm[3] = {2, 0, 1};
+        for (int i = 0; i < 20; i++) {
+            for (int r = 0; r < 3; r++)
+                bones[i][r * 4 + 3] = rest[i][r] - (parents[i] < 0 ? 0 : rest[parents[i]][r]);
+            if (i == 1) bones[i][7] = 32 + out[HIPS_Y] - squash * 10;
+            world[i] = parents[i] < 0 ? bones[i] : mul(world[parents[i]], bones[i]);
+            M S = world[i];
+            for (int r = 0; r < 3; r++) {
+                for (int k = 0; k < 3; k++)
+                    S[r * 4 + 3] -= world[i][r * 4 + k] * rest[i][k];
+                double scale = r == 1 ? 1 - squash : 1 + squash * .45;
+                for (int c = 0; c < 4; c++)
+                    S[r * 4 + c] *= scale;
+            }
+            for (int r = 0; r < 3; r++) {
+                for (int c = 0; c < 3; c++)
+                    skin[i * 12 + r * 4 + c] = float(S[perm[r] * 4 + perm[c]]);
+                skin[i * 12 + r * 4 + 3] = float(S[perm[r] * 4 + 3]);
+            }
+        }
+    }
+
+    bool pose(const Input &s, double seconds, bool snapped, std::vector<float> &skin) {
+        if (!std::isfinite(seconds) || !std::isfinite(s.yaw) || !std::isfinite(s.pitch) || !std::isfinite(s.sidemove))
+            return false;
+        for (auto v : s.position)
+            if (!std::isfinite(v)) return false;
+        for (auto v : s.velocity)
+            if (!std::isfinite(v)) return false;
+        bool snap = snapped || last < 0 || seconds < last;
+        double dt = last < 0 || seconds < last ? 0 : clamp(seconds - last, 0, .1);
+        last = seconds;
+        time = seconds;
+        double distance = 0;
+        for (int k = 0; k < 3; k++)
+            distance += (s.position[k] - lastPos[k]) * (s.position[k] - lastPos[k]);
+        if (hasLast && distance > 160 * 160) snap = true;
+        if (s.hasVelocity)
+            velocity = s.velocity;
+        else if (hasLast && dt > 0 && !snap)
+            for (int k = 0; k < 3; k++)
+                velocity[k] = damp(velocity[k], (s.position[k] - lastPos[k]) / dt, 20, dt);
+        else
+            velocity = {};
+        lastPos = s.position;
+        hasLast = true;
+        double vx = velocity[0], vy = velocity[1], vz = velocity[2], speed = std::hypot(vx, vy),
+               dyaw = std::isnan(lastYaw) || snap || dt <= 0 ? 0 : wrap(s.yaw - lastYaw) / dt;
+        lastYaw = s.yaw;
+        if (std::abs(dyaw) > 3000) dyaw = 0;
+        yawRate = snap ? 0 : damp(yawRate, dyaw, 10, dt);
+        viewYaw = s.yaw;
+        viewPitch = clamp(s.pitch, -89, 89);
+        if (snap)
+            bodyYaw = s.yaw;
+        else {
+            bodyYaw += wrap(s.yaw - bodyYaw) * (1 - std::exp(-9 * dt));
+            double lag = wrap(s.yaw - bodyYaw);
+            if (std::abs(lag) > 50) bodyYaw = s.yaw - std::copysign(50., lag);
+        }
+        double by = bodyYaw * rad, fwd = vx * std::cos(by) + vy * std::sin(by),
+               left = -vx * std::sin(by) + vy * std::cos(by);
+        if (s.grounded && !wasGrounded && airTime > .12) squashV += clamp(-velocity[2] / 900, .15, .7) * 2.2;
+        airTime = s.grounded ? 0 : airTime + dt;
+        wasGrounded = s.grounded;
+        double gt = s.grounded ? 1 : 0;
+        ground = snap ? gt : damp(ground, gt, gt > ground ? 9 : 22, dt);
+        crouch = snap ? double(s.crouched) : damp(crouch, s.crouched ? 1 : 0, 14, dt);
+        double tt = vz > 0 ? 1 : clamp(1 + vz / 520, .2, 1);
+        tuck = snap ? tt : damp(tuck, tt, 7, dt);
+        double amp = std::pow(clamp(speed / 250, 0, 1), .8);
+        runAmp = snap ? amp : damp(runAmp, amp, 8, dt);
+        double move = std::atan2(left, fwd) / rad;
+        bool back = std::abs(move) > 100;
+        if (back) move = wrap(move + 180);
+        double stride = clamp(50 + speed * .18, 50, 115);
+        if (snap) phase = (back ? -1 : 1) * (speed / stride) * 2 * pi * seconds;
+        phase += (back ? -1 : 1) * (speed / stride * 2 * pi * dt) * (.35 + .65 * ground);
+        double ly = speed > 30 ? clamp(move, -65, 65) * ground : 0;
+        legYaw = snap ? ly : damp(legYaw, ly, 8, dt);
+        double lt = clamp(yawRate * .055 - (s.sidemove / 450) * 7, -26, 26) * (.35 + .65 * (1 - ground))
+                    * clamp(speed / 200, .2, 1);
+        lean = snap ? lt : damp(lean, lt, 6, dt);
+        idlePose(idle);
+        runPose(run);
+        crouchPose(duck);
+        airPose(air, false);
+        airPose(airDuck, true);
+        mix(g, idle, run, runAmp);
+        mix(g, g, duck, crouch);
+        mix(a, air, airDuck, crouch);
+        mix(out, a, g, ground);
+        if (snap) squash = squashV = 0;
+        squashV += (-240 * squash - 15 * squashV) * dt;
+        squash += squashV * dt;
+        squash = clamp(squash, -.08, .16);
+        earTwitch -= dt;
+        if (earTwitch < 0) {
+            earTwitch = 2.5 + random() * 4;
+            if (speed < 40) ears[1] += 260 * (random() < .5 ? 1 : -1);
+        }
+        double ep = -clamp(speed * .028, 0, 26) - clamp(vz * .035, -22, 22) * (1 - ground), er = lean * .7;
+        ears[1] += (110 * (ep - ears[0]) - 7 * ears[1]) * dt;
+        ears[0] += ears[1] * dt;
+        ears[3] += (110 * (er - ears[2]) - 7 * ears[3]) * dt;
+        ears[2] += ears[3] * dt;
+        if (snap) ears = {ep, 0, er, 0};
+        apply(skin);
+        return true;
+    }
+};
+}  // namespace native_runner

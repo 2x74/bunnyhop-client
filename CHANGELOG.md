@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.6.0 — Native
+
+**Input**
+- Mouse movement and key presses now count in the tick they happened in, using each event's timestamp, the same
+  way the website does. Quick A/D taps and strafes no longer get dropped or land late at low or uneven frame rates.
+- Windows reads the keyboard through raw input while you play, and keys no longer stick after the menu takes focus.
+- New installs start with VSync off and a 1000 FPS limit.
+- Settings → Mouse → Show input stats shows reports per second, event age and frame timing, and flags stalls.
+
+**Menus and settings**
+- Settings is now the website's settings screen, with the same search, sections and presets. Rows the native
+  renderer can't use are hidden or say why.
+- New installs use the website's default binds: fast turn ↑, noclip Z, third person T, show clips unbound.
+- Custom CSS, the replay viewer, credits and account screens match the website.
+- The finish card looks like the website's: your time, PB or record, delta, rank, and XP and unlocks once the run
+  is verified. The HUD shows your board place ("#4 · top 3%").
+- The scoreboard, chat, name tags and notifications follow the website's styles. The Runner player model is
+  retired, as on the website.
+
+**v0.0.29**
+- Turn speed (`cl_yawspeed`, 60–720°/s) and the fast-turn multiplier (1–4) are saved with your replay.
+- Times are scored in milliseconds, matching the server.
+- Practice from any point of a replay, and replays open trimmed to the run.
+- Ghost colours, trails and glow, replay Compare and the timeline match the website.
+
+**Fixes**
+- Borderless and fullscreen switching no longer hides the menu.
+- Settings no longer reset after a crash or a bad keybind, and settings files save safely.
+- Paths with non-English characters work.
+
 ## v0.5.1 — Native
 
 **Fixes**

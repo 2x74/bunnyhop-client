@@ -81,22 +81,28 @@ html.native-clock-stopped *, html.native-clock-stopped *::before, html.native-cl
 .native-identity p { margin: .3rem 0 0; }
 .native-account-note { margin: 0; }
 .native-replay-screen { display:flex;flex-direction:column;max-height:100%;min-height:0; }
-.native-profile { width: min(78rem,100%); }
+/* (No notice: no line, and no margins pushing the profile down.) */
+.native-profile-notice:empty { display: none; }
 .native-profile-body {display:flex;flex-direction:column;flex:1;}
 .native-profile-body>.profile {flex:1;min-height:0;}
 /* The web stacks the profile on narrow/short windows and scrolls the page (profile.css); here the body scrolls, so the
    stacked layout must keep its content height instead of squeezing the card over the runs column. */
 @media (max-width: 60rem), (max-height: 31rem) { .native-profile-body>.profile,.native-profile-body .pf-layout {flex:none;min-height:auto;} }
-.native-support {display:flex;flex-direction:column;width:min(78rem,100%);max-height:100%;min-height:0;}
+.native-support {display:flex;flex-direction:column;max-height:100%;min-height:0;}
 .native-support-screen {flex:1;min-height:0;overflow:auto;}
 .native-replays { overflow:auto;min-height:0;padding-right:.5rem; }
 .native-bind-buttons,.native-toolbar,.native-playback { display:flex;align-items:center;gap:.6rem;flex-wrap:wrap; }
-.native-replay-screen { width:min(82rem,100%); }
-.native-replay-row { display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem 0;border-bottom:1px solid var(--line); }
-.native-replay-row p { margin:.4rem 0 0; }
-.native-replay-list { margin-top:1rem; }
-.native-playback { padding:1rem 0; }
-.native-playback input[type=range] { flex:1;min-width:10rem; }
+/* The replay vault: one row per replay, like the profile's run lists (name over its line, the time, the actions). */
+.native-replay-lead { margin:0 0 var(--sp-3); }
+.native-replays .rb-q { width:16rem;padding-left:.65rem; }
+.native-replay-summary { margin:0; font-size:var(--fs-sm); }
+.native-replay-list { margin-top:var(--sp-3); }
+.native-replay-row { display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:1.5rem;padding:.55rem 0;border-bottom:1px solid var(--line); }
+.native-replay-what { display:flex;flex-direction:column;gap:.1rem;min-width:0; }
+.native-replay-what strong { font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.native-replay-what small { font-size:var(--fs-xs); }
+.native-replay-time { font-weight:700;font-variant-numeric:tabular-nums; }
+.native-replay-actions { display:flex;align-items:center;gap:.4rem; }
 .native-ghost-toggle { display:flex;align-items:center;gap:.4rem; }
 
 .native-room-screen,.native-servers,.native-stats,.native-ranks,.native-profile,.native-tutorial-screen,.native-loadout { display:flex;flex-direction:column;max-height:100%;min-height:0; }
@@ -109,7 +115,6 @@ html.native-clock-stopped *, html.native-clock-stopped *::before, html.native-cl
 .native-room-chat-form { display:flex;gap:.6rem;margin-top:.6rem; }
 .native-room-chat-form input { flex:1;min-width:0; }
 .native-room-vote { display:flex;gap:.5rem;align-items:center;flex-wrap:wrap; }
-.native-loadout,.native-tutorial-screen { width:min(76rem,100%); }
 .native-cosmetic-items { display:grid;grid-template-columns:repeat(auto-fill,minmax(10rem,1fr));gap:.7rem;margin-top:1rem; }
 .native-cosmetic-card { display:flex;flex-direction:column;align-items:flex-start;gap:.5rem;padding:1rem;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-2);text-align:left; }
 .native-cosmetic-card[aria-pressed=true] { border-color:var(--amber); }
@@ -168,6 +173,18 @@ html.native-clock-stopped *, html.native-clock-stopped *::before, html.native-cl
 .nset-row .num-input { width:6.5rem; }
 .nset-bind { display:flex;align-items:center;gap:.5rem; }
 .nset-bind .bind { min-width:7.2rem;max-width:12rem; }
+/* The Custom CSS editor (custom-css/editor.ts). */
+dialog.css-dialog { width:min(56rem,96vw); }
+.css-dialog .css-lead { margin:0 0 .4rem; }
+.css-text {
+  box-sizing:border-box;width:100%;min-height:52vh;padding:.6rem .7rem;
+  font-family:var(--mono,ui-monospace,monospace);font-size:.82rem;
+  white-space:pre;overflow-wrap:normal;tab-size:2;resize:vertical;
+}
+/* A row's buttons (Import / export, Custom CSS). */
+.nset-actions { display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:.5rem; }
+.nset-transfer-status[data-tone="ok"] { color:var(--gain); }
+.nset-transfer-status[data-tone="bad"] { color:var(--loss); }
 .nset-foot { grid-column:2;display:flex;flex-direction:column;gap:.3rem;min-width:0; }
 .nset-help { margin:0;min-height:2.6em;padding:0 .85rem;font-family:var(--font-text);font-size:var(--fs-sm);line-height:1.3;color:var(--dim);display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden; }
 .nset-status { margin:0;padding:0 .85rem;font-size:var(--fs-sm);color:var(--amber); }
@@ -239,3 +256,6 @@ html.native-clock-stopped *, html.native-clock-stopped *::before, html.native-cl
 
 /* Settings -> Import and export */
 .nset-transfer{box-sizing:border-box;width:100%;min-height:8rem;margin-top:.5rem;font-family:ui-monospace,monospace;font-size:.8rem;word-break:break-all}
+
+/* The replay viewer (replay-viewer.ts) over the host's playback, or the map's still without one: unblurred. */
+body.viewer-open #native-backdrop > * { filter: none; }

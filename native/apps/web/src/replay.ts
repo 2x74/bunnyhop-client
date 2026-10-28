@@ -60,7 +60,8 @@
 //                verification. Decoders that predate it stop after the checkpoints, so it needs no version bump;
 //                a malformed trailer is dropped, never an error.
 //   loadout      optional trailer after the cosmetics (absent = unknown, shown as the default carrot): u32 "BHLO",
-//                str8 packed cosmetic loadout (loadout.ts packLoadout: knife, finish, gloves, crown, the owner's hat;
+//                str8 packed cosmetic loadout (loadout.ts packLoadout: knife, finish, gloves, crown, the owner's hat,
+//                the bunny build and, from v0.0.29, the colourway as an 8th field that older readers never look at;
 //                v0.0.5 trailers also carried a pattern seed / wear, now ignored),
 //                so a replay or ghost shows the knife the run was played with. Same rules as the cosmetics trailer:
 //                no version bump (older decoders stop before it, including the cosmetics reader, which rewinds on
@@ -71,6 +72,12 @@
 //                inspect gesture in replays and ghosts. Its own magic rather than new BHCX kinds: older clients play
 //                every BHCX event as a swing. Same rules: no version bump (older decoders stop before it), never
 //                verified, dropped when malformed.
+//   turn speed   optional trailer after the inspects (absent = cl_yawspeed 210 and no fast turn, every replay before
+//                v0.0.29): u32 "BHTS", f32 yawSpeed (cl_yawspeed, degrees per second), f32 angleSpeedKey (the fast-turn
+//                multiplier, cl_anglespeedkey). The rates the +left / +right binds turned with for the whole recording
+//                (turn-binds.ts turnDelta); the anticheat checks every turn rebase against them. Only the analysis
+//                reads it: the commands re-simulate as always. No version bump (older decoders stop before it); unlike
+//                the cosmetic trailers a malformed one is an error, never silently the legacy rate.
 
 // v8 (counted yaw, research/ANTICHEAT.md §8.17): the client keeps the view yaw as an exact base plus whole mouse counts,
 // yaw = countedYaw(base, count, k) = norm360(base - count * k) with k = sensitivity * m_yaw (CS:S units), so the yaw of
@@ -93,6 +100,7 @@ import { TIMER_RULES_V1 } from "./timer";
 import { trackOf, trackSuffix, type Zone, type ZoneKind } from "./zones";
 import { packLoadout, unpackLoadout, type CosmeticLoadout } from "./loadout";
 import { foldRange } from "./run-hash";
+import type { TurnSpeed } from "./turn-binds";
 
 export const REPLAY_MAGIC = 0x50524842; // "BHRP" little-endian
 /** Version of new recordings (timer rules 2+). Rules 1 replays keep the v4 / v5 / v6 layout byte for byte. */
@@ -163,10 +171,17 @@ const FLAG_COUNTED = 1 << 2;
  * Information for the anticheat only: the commands are the resolved ones and re-simulate as always.
  */
 export const FLAG_NULL_BINDS = 1 << 3;
+/**
+ * Timestamped input built some of the recorded commands (timed-input.ts): each tick took the mouse reports and movement
+ * keys stamped before its boundary, not the frame's view. Any version; only written when set; older decoders ignore it.
+ * Information for the anticheat only (the frame-rate measures don't apply): the commands re-simulate as always.
+ */
+export const FLAG_TIMED_INPUT = 1 << 4;
 export const DEFAULT_CHECKPOINT_INTERVAL = 100;
 export const COSMETIC_MAGIC = 0x58434842; // "BHCX" little-endian
 export const LOADOUT_MAGIC = 0x4f4c4842; // "BHLO" little-endian
 export const INSPECT_MAGIC = 0x49434842; // "BHCI" little-endian
+export const TURN_SPEED_MAGIC = 0x53544842; // "BHTS" little-endian
 /** Inspect trailer kinds (the first two are combo.ts SIG_START / SIG_NEXT). */
 export const INSPECT_START = 1;
 export const INSPECT_NEXT = 2;
@@ -205,6 +220,10 @@ export interface ReplayHeader {
   checkpointInterval: number;
   /** Null binds were on during the recording (FLAG_NULL_BINDS). Absent when off. */
   nullBinds?: boolean;
+  /** Timestamped input built some recorded command (FLAG_TIMED_INPUT). Absent when off. */
+  timedInput?: boolean;
+  /** The turn binds' rates for the whole recording (the "BHTS" trailer). Absent: 210°/s, no fast turn. */
+  turnSpeed?: TurnSpeed;
 }
 
 export interface Checkpoint {
@@ -225,7 +244,7 @@ export interface Replay {
   checkpoints: Checkpoint[];
   /** Cosmetic events (carrot swings), tick order. Optional trailer; never simulated or verified. */
   cosmetic?: CosmeticEvent[];
-  /** The cosmetic loadout the run was played with (knife, finish, gloves). Optional trailer; never verified. */
+  /** The cosmetic loadout the run was played with (knife, finish, gloves, hat, build, colourway). Optional trailer; never verified. */
   loadout?: CosmeticLoadout;
   /** Inspect events (INSPECT_* kinds), tick order. Optional trailer; never simulated or verified. */
   inspect?: CosmeticEvent[];
@@ -261,6 +280,10 @@ export class ReplayRecorder {
   inspect: CosmeticEvent[] = [];
   /** Null binds resolved some recorded command (header.nullBinds). */
   nullBinds = false;
+  /** Timestamped input built some recorded command (header.timedInput). */
+  timedInput = false;
+  /** The turn binds' rates for this whole recording (header.turnSpeed); set at its start (session.ts). */
+  turnSpeed: TurnSpeed | null = null;
 
   constructor(public checkpointInterval = DEFAULT_CHECKPOINT_INTERVAL) {}
 
@@ -272,6 +295,8 @@ export class ReplayRecorder {
     this.n = 0;
     this.looks = [];
     this.nullBinds = false;
+    this.timedInput = false;
+    this.turnSpeed = null;
     this.checkpoints = [];
     this.cosmetic = [];
     this.inspect = [];
@@ -340,7 +365,7 @@ export class ReplayRecorder {
   build(header: Omit<ReplayHeader, "totalTicks" | "checkpointInterval" | "version">): Replay {
     const n = this.n;
     return {
-      header: { ...header, version: replayVersionFor(header), totalTicks: n, checkpointInterval: this.checkpointInterval, ...(this.nullBinds ? { nullBinds: true } : {}) },
+      header: { ...header, version: replayVersionFor(header), totalTicks: n, checkpointInterval: this.checkpointInterval, ...(this.nullBinds ? { nullBinds: true } : {}), ...(this.timedInput ? { timedInput: true } : {}), ...(this.turnSpeed ? { turnSpeed: { ...this.turnSpeed } } : {}) },
       forward: this.forward.slice(0, n),
       side: this.side.slice(0, n),
       buttons: this.buttons.slice(0, n),
@@ -562,7 +587,7 @@ export function encodeRaw(r: Replay): Uint8Array {
   const fractional = counted?.count instanceof Float64Array;
   const version = fractional ? REPLAY_VERSION_FRACTIONAL : h.settings.stamina || h.style === "lowgrav" ? REPLAY_VERSION_STAMINA : counted ? REPLAY_VERSION_COUNTED : replayVersionFor(h);
   w.u16(version);
-  w.u16((h.settings.autohop ? FLAG_AUTOHOP : 0) | (h.settings.stamina ? FLAG_STAMINA : 0) | (version >= REPLAY_VERSION_STAMINA && counted ? FLAG_COUNTED : 0) | (h.nullBinds ? FLAG_NULL_BINDS : 0));
+  w.u16((h.settings.autohop ? FLAG_AUTOHOP : 0) | (h.settings.stamina ? FLAG_STAMINA : 0) | (version >= REPLAY_VERSION_STAMINA && counted ? FLAG_COUNTED : 0) | (h.nullBinds ? FLAG_NULL_BINDS : 0) | (h.timedInput ? FLAG_TIMED_INPUT : 0));
   w.str8(h.map);
   w.bytes(hexToBytes(h.mapSha256));
   const s = h.settings;
@@ -673,6 +698,11 @@ export function encodeRaw(r: Replay): Uint8Array {
       w.u8(ins[i].kind & 0xff);
       prev = t;
     }
+  }
+  if (h.turnSpeed) {
+    w.u32(TURN_SPEED_MAGIC);
+    w.f32(h.turnSpeed.yawSpeed);
+    w.f32(h.turnSpeed.angleSpeedKey);
   }
   return w.result();
 }
@@ -795,6 +825,7 @@ export function decodeRaw(buf: Uint8Array, opts: { commands?: boolean } = {}): R
   const cosmetic = readCosmetics(r);
   const loadout = readLoadout(r);
   const inspect = readInspects(r);
+  const turnSpeed = readTurnSpeed(r);
   return {
     header: {
       version,
@@ -815,6 +846,8 @@ export function decodeRaw(buf: Uint8Array, opts: { commands?: boolean } = {}): R
       recordedAt,
       checkpointInterval,
       ...(flags & FLAG_NULL_BINDS ? { nullBinds: true } : {}),
+      ...(flags & FLAG_TIMED_INPUT ? { timedInput: true } : {}),
+      ...(turnSpeed ? { turnSpeed } : {}),
     },
     forward,
     side,
@@ -960,6 +993,21 @@ function readInspects(r: Reader): CosmeticEvent[] {
     r.pos = at;
     return [];
   }
+}
+
+/** The optional turn-speed trailer (see the format notes): null when absent; a truncated or non-finite one throws. */
+function readTurnSpeed(r: Reader): TurnSpeed | null {
+  if (r.remaining < 4) return null;
+  const at = r.pos;
+  if (r.u32() !== TURN_SPEED_MAGIC) {
+    r.pos = at;
+    return null;
+  }
+  if (r.remaining < 8) throw new Error("replay: bad turn speed");
+  const yawSpeed = r.f32();
+  const angleSpeedKey = r.f32();
+  if (!Number.isFinite(yawSpeed) || !Number.isFinite(angleSpeedKey)) throw new Error("replay: bad turn speed");
+  return { yawSpeed, angleSpeedKey };
 }
 
 /** The optional loadout trailer (see the format notes); null when absent or malformed. */

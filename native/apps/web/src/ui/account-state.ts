@@ -7,7 +7,7 @@ import { playerGlowRevision, setPlayerGlow } from "../player/cosmetics";
 
 import { api, lastKnownMe, type Profile, type User } from "../api";
 import { h } from "./dom";
-import { avatarImg } from "./avatar";
+import { avatarImg, pictureOf } from "./avatar";
 import { setLoadout } from "../player/cosmetics";
 import { loadoutFor } from "../loadout";
 import { crownOf, heldRanks } from "../progression";
@@ -32,9 +32,10 @@ export function onboardingMaybeNeeded(): boolean {
   return !localStorage.getItem(ONBOARDED_KEY) || appLocation().searchParams.get("intro") === "1";
 }
 
-export function accountAvatar(user: { name: string; avatarUrl: string | null }, size = 24): HTMLElement {
+export function accountAvatar(user: { id?: string | null; name: string; avatarUrl: string | null }, size = 24): HTMLElement {
   const letter = () => h("span.avatar.avatar-initial", { "aria-hidden": "true" }, (user.name[0] ?? "?").toUpperCase());
-  return user.avatarUrl ? avatarImg(user.avatarUrl, { cls: "avatar", px: size, letter, eager: true }) : letter();
+  const pic = pictureOf(user);
+  return pic ? avatarImg(pic, { cls: "avatar", px: size, letter, eager: true }) : letter();
 }
 
 /**

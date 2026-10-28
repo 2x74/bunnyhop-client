@@ -70,14 +70,15 @@ export function row(label: string, control: HTMLElement, o: RowOpts = {}, forId?
   return el;
 }
 
-/** Hides `row` while `when()` is false, following pref changes until the row leaves the page. */
-function dependsOn(row: HTMLElement, when: () => boolean): void {
+/** Hides `row` (any element) while `when()` is false, following pref changes until it leaves the page. Returns `row`. */
+export function dependsOn<E extends HTMLElement>(row: E, when: () => boolean): E {
   let shown = false;
   const stop = prefs.watch(() => {
     if (row.isConnected) shown = true;
     else if (shown) return void queueMicrotask(stop);
     row.hidden = !when();
   });
+  return row;
 }
 
 /**

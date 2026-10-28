@@ -1,0 +1,76 @@
+/* /custom-css and /custom-skies: the custom CSS and skies guides (custom-css.html, custom-skies.html, on top of
+   about.css). A text column beside a sticky contents rail, real screenshots, code blocks with a copy button and light
+   colouring (custom-css-page.ts), and a before / after slider on the hero. Works without JS: the code is plain, the slider shows the "after" picture. */
+
+.guide { max-width: 76rem; }
+.g-hero { max-width: 58rem; padding: 2.5rem 0 3rem; }
+.g-hero h1 { margin-bottom: 0.9rem; }
+.g-hero .lede { max-width: 44rem; margin-bottom: 2rem; }
+.agent-note { margin: 1.1rem 0 0; color: var(--cream-3); font-size: 0.95rem; }
+
+/* Before / after: the "after" picture with the "before" one clipped over it from the left. */
+.compare { position: relative; margin: 0; border-radius: 10px; overflow: hidden; background: var(--ink-2); aspect-ratio: 16 / 9; --pos: 50%; }
+.compare img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.compare-before { position: absolute; inset: 0; display: none; clip-path: inset(0 calc(100% - var(--pos)) 0 0); }
+.compare.ready .compare-before { display: block; }
+.compare.ready::after { content: ""; position: absolute; top: 0; bottom: 0; left: var(--pos); width: 3px; margin-left: -1.5px; background: var(--amber); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35); pointer-events: none; }
+.compare-range { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: ew-resize; }
+.compare figcaption { position: absolute; left: 0; right: 0; bottom: 0; padding: 2.2rem 1rem 0.7rem; background: linear-gradient(transparent, rgba(12, 12, 15, 0.85)); color: var(--cream-2); font-size: 0.92rem; pointer-events: none; }
+.compare figcaption a { pointer-events: auto; }
+.compare-range:focus-visible + figcaption { color: #fff; }
+
+.g-body { display: grid; grid-template-columns: 12rem minmax(0, 1fr); gap: 3.5rem; align-items: start; }
+.toc { position: sticky; top: 1.5rem; display: flex; flex-direction: column; gap: 0.15rem; font-family: var(--font-ui); font-size: 0.95rem; }
+.toc a { color: var(--cream-3); font-weight: 600; padding: 0.25rem 0 0.25rem 0.8rem; border-left: 2px solid var(--ink-3); }
+.toc a:hover { color: var(--cream); text-decoration: none; }
+.toc a.on { color: var(--cream); border-left-color: var(--amber); }
+
+.g-text { max-width: 48rem; min-width: 0; }
+.g-text section { margin: 0 0 4rem; scroll-margin-top: 1.5rem; }
+.g-text h2 { font-size: 1.9rem; margin-bottom: 0.9rem; }
+.g-text h3 { font-family: var(--font-ui); font-size: 1.2rem; font-weight: 750; margin: 2.2rem 0 0.6rem; scroll-margin-top: 1.5rem; }
+.g-text p, .g-text li { color: var(--cream-2); }
+.g-text b { color: var(--cream); font-weight: 650; }
+.g-text ul { padding-left: 1.2rem; margin: 0 0 1rem; }
+.g-text li { margin: 0 0 0.45rem; }
+.g-text li::marker { color: var(--amber); }
+.note { border-left: 2px solid var(--amber); padding-left: 0.9rem; }
+kbd { font: 0.82em ui-monospace, "SF Mono", Menlo, Consolas, monospace; padding: 0.08em 0.42em; border-radius: 0.3em; background: var(--ink-2); border: 1px solid var(--ink-4); border-bottom-width: 2px; color: var(--cream); }
+
+/* Code: a dark slab with a copy button; custom-css-page.ts colours it. */
+pre { position: relative; margin: 1.2rem 0 1.4rem; padding: 1rem 1.1rem; background: #08080b; border: 1px solid var(--ink-3); border-radius: 8px; overflow-x: auto; line-height: 1.55; }
+pre code { background: none; padding: 0; font-size: 0.86rem; color: var(--cream); white-space: pre; }
+.copy { position: absolute; top: 0.5rem; right: 0.5rem; padding: 0.25rem 0.6rem; font: 650 0.8rem var(--font-ui); color: var(--cream-2); background: var(--ink-2); border: 1px solid var(--ink-4); border-radius: 5px; cursor: pointer; opacity: 0; transition: opacity 0.15s; }
+pre:hover .copy, .copy:focus-visible, .copy.done { opacity: 1; }
+.copy:hover { color: #fff; }
+.copy.done { color: var(--amber); border-color: var(--amber); }
+.tk-c { color: #6f6a61; font-style: italic; }
+.tk-at { color: #ff9ad5; }
+.tk-sel { color: var(--amber-hi); }
+.tk-p { color: #8fd4ff; }
+.tk-s { color: #b5e48c; }
+.tk-v { color: #f0b37e; }
+
+/* Screenshots: full width, or two side by side, or one beside a short list. */
+.shot, .shots figure { margin: 1.2rem 0 1.4rem; }
+.shot img, .shots img { display: block; width: 100%; height: auto; border-radius: 8px; background: var(--ink-2); }
+figcaption { margin-top: 0.45rem; color: var(--cream-3); font-size: 0.9rem; }
+.shots { display: grid; gap: 1rem; margin: 1.2rem 0 1.4rem; }
+.shots figure { margin: 0; }
+.shots.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.shots.img-side { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 1.6rem; }
+.shots.img-side ul { margin: 0; }
+
+table { width: 100%; border-collapse: collapse; margin: 0.8rem 0 1.4rem; font-size: 0.95rem; }
+th { text-align: left; font: 700 0.85rem var(--font-ui); color: var(--cream-3); padding: 0.4rem 0.8rem 0.4rem 0; border-bottom: 1px solid var(--ink-4); }
+td { padding: 0.45rem 0.8rem 0.45rem 0; border-bottom: 1px solid var(--ink-3); color: var(--cream-2); vertical-align: top; }
+td code { white-space: nowrap; }
+.sw { display: inline-block; width: 0.95em; height: 0.95em; margin-right: 0.45em; vertical-align: -0.12em; border-radius: 3px; background: var(--c); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18); }
+
+@media (max-width: 56rem) {
+  .g-body { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .toc { display: none; }
+  .shots.two, .shots.img-side { grid-template-columns: minmax(0, 1fr); }
+  .compare figcaption { padding: 1.2rem 0.7rem 0.45rem; font-size: 0.78rem; }
+}
+@media (prefers-reduced-motion: reduce) { .copy { transition: none; } }

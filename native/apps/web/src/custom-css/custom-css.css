@@ -1,0 +1,3 @@
+/* The custom CSS editor (custom-css/editor.ts): the settings transfer card's text box, made for writing in. */
+dialog.css-dialog { width: min(56rem, 96vw); }
+.css-text { min-height: 52vh; word-break: normal; white-space: pre; overflow-wrap: normal; tab-size: 2; font-size: var(--fs-sm); }
