@@ -32,12 +32,14 @@ struct FakeWindow {
     int applies = 0;
     int refits = 0;
     bool iconified = false;
+    bool on_top = false;
     bool is_minimized() const {
         return iconified;
     }
     bool apply(const native::WindowJson &settings, bool = false,
                const std::optional<native::WindowBounds> & = std::nullopt) {
         shown = settings.at("windowMode");
+        on_top = settings.value("alwaysOnTop", false);
         ++applies;
         return true;
     }
@@ -65,11 +67,18 @@ void deferred_window_changes() {
     window.iconified = false;
     driver.resumed({{"windowMode", "windowed"}});
     assert(window.applies == 1 && window.refits == 1 && window.shown == "windowed");
+    window.iconified = true;
+    const native::WindowJson same_mode = {{"windowMode", "windowed"}, {"alwaysOnTop", true}};
+    assert(driver.choose(same_mode));
+    assert(window.applies == 1 && !window.on_top);
+    window.iconified = false;
+    driver.resumed(same_mode);
+    assert(window.applies == 2 && window.on_top);
     driver.set_menu(true, true, {});
     assert(driver.choose({{"windowMode", "fullscreen"}}));
-    assert(window.applies == 1);
+    assert(window.applies == 2);
     driver.resumed({{"windowMode", "fullscreen"}});
-    assert(window.shown == "borderless" && window.applies == 2);
+    assert(window.shown == "borderless" && window.applies == 3 && !window.on_top);
 }
 
 void read_and_write(const fs::path& dir) {

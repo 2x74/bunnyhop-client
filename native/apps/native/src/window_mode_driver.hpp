@@ -34,8 +34,6 @@ template <class Controller> class BasicWindowModeDriver {
         if (!policy_.request())
             return;
         const WindowJson want = policy_.effective(preferences);
-        if (controller_.mode() == want.at("windowMode").get<std::string>())
-            return;
         if (!controller_.apply(want))
             std::cerr << "Window: " << controller_.error() << '\n';
     }
