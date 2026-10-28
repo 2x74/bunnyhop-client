@@ -26,6 +26,7 @@ import { replayPanel, replayViewer, watchRequest, raceRequest, gauntletWatchDeps
 import { applyReplayHostState, applyReplayTimeline } from "./replay-host";
 import { practiceFromReplay } from "./replay-practice";
 import { applyChatFeatures } from "./chat-features";
+import { hostScoreboard, ScoreboardFeed } from "./host-decoration";
 import { legalLinks } from "../../web/src/ui/legal";
 import { installMuteButton } from "./mute-button";
 import { installTutorialProgress } from "./tutorial-entry";
@@ -357,6 +358,12 @@ const roomService=new NativeRoomService({connect:(id,handlers)=>new RoomConnecti
 const chatService=new NativeChatService(roomService,()=>{send({type:"chatAction",action:"openRoom"} as unknown as Parameters<typeof send>[0]);show("room");});
 const roomAccount=new RoomAccountBoundary(()=>chatService.resetAccount());
 roomService.subscribe(()=>{const view=roomService.view;setRoomPresence(view.id&&view.room?{id:view.id,name:view.room.name}:null);});
+// The Tab board the host draws in game: the room screen's rows (host-decoration.ts).
+const scoreboardFeed=new ScoreboardFeed(board=>send(board));
+roomService.subscribe(()=>{
+  const clock={now:roomService.clockNow(),server:roomService.serverNow(),ping:roomService.ping(),at:Date.now()};
+  scoreboardFeed.update(hostScoreboard(roomService.view,clock));
+});
 onBeforeSend(message=>{if(roomService.view.id&&((message.type==="replay"&&["play","ghost"].includes(message.action))||message.type==="replayData"||(message.type==="tutorial"&&message.action!=="stop")))roomService.leave();});
 setRaceTag(board=>{const race=roomService.view.race;return race&&race.state==="live"&&race.map===board.map&&race.style===board.style&&race.track===board.track?race.id:null;});
 /** Everything running for the map stops (map-lifecycle.ts). The host calls it as onLeaveMap for every leave_map. */

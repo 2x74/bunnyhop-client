@@ -68,6 +68,8 @@ export type MenuMessage =
   /** The name native replay headers carry: the web's local display name ("bunnyhop:name", else "player"). */
   | { type: "playerName"; name: string }
   | NativeChatMessage
+  /** The Tab board for the host to draw (host-decoration.ts). */
+  | import("./host-decoration").HostScoreboard
   | {type:"worldRecord";map:string;style:string;track:number;generation:number;seconds:number|null}
   | RunServiceStatus;
 
