@@ -4,7 +4,7 @@
 namespace {
 void(APIENTRY *realTexImage2D)(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *) = nullptr;
 size_t identityUploads = 0, allUploads = 0, floorDrawCalls = 0;
-Gl *trackedGl = nullptr;
+native::Gl *trackedGl = nullptr;
 GLuint identityTexture = 0;
 bool checkFloor = false;
 void(APIENTRY *realDrawElements)(GLenum, GLsizei, GLenum, const void *) = nullptr;
@@ -67,7 +67,7 @@ int main(int argc, char **argv) {
         auto context = SDL_GL_CreateContext(window);
         require(context, SDL_GetError());
         SDL_GL_MakeCurrent(window, context);
-        Gl gl;
+        native::Gl gl;
         gl.load();
         trackedGl = &gl;
         realTexImage2D = gl.TexImage2D;
@@ -77,7 +77,7 @@ int main(int argc, char **argv) {
         realDrawArrays = gl.DrawArrays;
         gl.DrawArrays = countDrawArrays;
         {
-            NativeViewmodel viewmodel(
+            native::NativeViewmodel viewmodel(
                     gl, argc > 1 ? std::filesystem::path(argv[1]) : std::filesystem::path(BUNNYHOP_NATIVE_ASSET_ROOT)
             );
             require(identityUploads == 1, "identity pose must upload exactly once at construction");

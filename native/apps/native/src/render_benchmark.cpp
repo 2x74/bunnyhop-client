@@ -51,7 +51,7 @@ int main(int argc, char **argv) {
 
         SDL_GL_MakeCurrent(window, context);
         SDL_GL_SetSwapInterval(0);
-        Gl gl;
+        native::Gl gl;
         gl.load();
         const auto finish = reinterpret_cast<void(APIENTRY *)()>(SDL_GL_GetProcAddress("glFinish"));
         if (!finish) throw std::runtime_error("Missing glFinish");
@@ -71,7 +71,7 @@ int main(int argc, char **argv) {
         const float yaw = spec.value("yaw", snapshot.player.teleport_angles[1]), pitch = spec.value("pitch", 0.f);
         native::Input input;
         input.set_angles(pitch, yaw);
-        Renderer renderer(gl, core.get());
+        native::Renderer renderer(gl, core.get());
         renderer.set_viewmodel_visible(false);
         renderer.set_zones_visible(false);
         renderer.set_triggers_visible(false);

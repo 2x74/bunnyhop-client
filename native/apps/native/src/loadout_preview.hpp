@@ -2,8 +2,8 @@
 
 // Include after menu_backdrop.hpp. Owns an independent cosmetic renderer and offscreen target.
 class NativeLoadoutPreview {
-    Gl &gl;
-    NativeViewmodel models;
+    native::Gl &gl;
+    native::NativeViewmodel models;
     GLuint framebuffer = 0, color = 0, depth = 0;
     int width = 0, height = 0;
     unsigned inspect = 0;
@@ -11,7 +11,7 @@ class NativeLoadoutPreview {
     std::string signature;
 
 public:
-    NativeLoadoutPreview(Gl &api, const std::filesystem::path &assets) : gl(api), models(api, assets) {
+    NativeLoadoutPreview(native::Gl &api, const std::filesystem::path &assets) : gl(api), models(api, assets) {
         gl.GenFramebuffers(1, &framebuffer);
         gl.GenTextures(1, &color);
         gl.GenRenderbuffers(1, &depth);
@@ -77,7 +77,7 @@ public:
         gl.GetIntegerv(GL_VIEWPORT, viewport);
 
         struct Restore {
-            Gl &gl;
+            native::Gl &gl;
             GLint target;
             GLint *vp;
 

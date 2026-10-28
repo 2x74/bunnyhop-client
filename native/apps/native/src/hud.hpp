@@ -17,7 +17,7 @@
 #include "hud_result.hpp"
 #include "toasts.hpp"
 
-namespace {
+namespace native {
 class NativeHud {
     Gl &gl;
     GLuint program = 0, vao = 0, vbo = 0, atlas = 0;
@@ -1501,4 +1501,4 @@ private:
         gl.Enable(GL_DEPTH_TEST);
     }
 };
-}  // namespace
+}  // namespace native

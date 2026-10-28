@@ -7,7 +7,6 @@
 #include <vector>
 #include <iostream>
 #include <thread>
-#define BUNNYHOP_NATIVE_RENDERER_AVAILABLE 1
 #include "replay_controls.hpp"
 #include "render_menu_contracts.hpp"
 

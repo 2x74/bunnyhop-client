@@ -1,5 +1,4 @@
 #pragma once
-#define BUNNYHOP_NATIVE_RENDERER_AVAILABLE 1
 #include "bunnyhop_native.h"
 #include "native_input.hpp"
 #include "native_math.hpp"
@@ -10,6 +9,9 @@
 #include "paint.hpp"
 #include "measure.hpp"
 #include "zone_effects.hpp"
+#include "actor_anim.hpp"
+#include "tp_inspect.hpp"
+#include <span>
 #include "nlohmann/json.hpp"
 #include <filesystem>
 #include <chrono>
@@ -33,7 +35,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace {
+namespace native {
 // All GL entry points come from the active SDL context, including on Linux.
 // clang-format off
 #define GL_FUNCTIONS(X) \
@@ -134,7 +136,7 @@ struct Gl {
     }
 };
 
-GLuint shader(Gl &gl, GLenum kind, const char *source) {
+inline GLuint shader(Gl &gl, GLenum kind, const char *source) {
     GLuint id = gl.CreateShader(kind);
     gl.ShaderSource(id, 1, &source, nullptr);
     gl.CompileShader(id);
@@ -149,7 +151,7 @@ GLuint shader(Gl &gl, GLenum kind, const char *source) {
     return id;
 }
 
-GLuint link_program(Gl &gl, const char *vertex_source, const char *fragment_source) {
+inline GLuint link_program(Gl &gl, const char *vertex_source, const char *fragment_source) {
     const GLuint vertex = shader(gl, GL_VERTEX_SHADER, vertex_source);
     GLuint fragment = 0, program = 0;
     try {
@@ -179,8 +181,7 @@ GLuint link_program(Gl &gl, const char *vertex_source, const char *fragment_sour
 #include "native_presentation.hpp"
 #include "native_viewmodel.hpp"
 #include "native_map_effects.hpp"
-// Inside this file's anonymous namespace: its standard headers are included above, at file scope, so they are never
-// first seen in here (MSVC's <deque> was).
+// Standard headers must be included at file scope before these GL-dependent definitions.
 #include "source_hdr.hpp"
 
 class GhostRouteGeometry {
@@ -2066,4 +2067,4 @@ public:
         std::cout << "Screenshot: " << path << '\n';
     }
 };
-}  // namespace
+}  // namespace native

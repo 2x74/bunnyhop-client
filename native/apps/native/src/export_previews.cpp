@@ -23,9 +23,9 @@ int main(int argc, char **argv) {
         auto context = SDL_GL_CreateContext(window);
         if (!context) throw std::runtime_error(SDL_GetError());
         SDL_GL_MakeCurrent(window, context);
-        Gl gl;
+        native::Gl gl;
         gl.load();
-        NativeViewmodel models(gl, argv[1]);
+        native::NativeViewmodel models(gl, argv[1]);
         gl.Viewport(0, 0, width, height);
         gl.ClearColor(0, 0, 0, 0);
         gl.DepthFunc(GL_LEQUAL);

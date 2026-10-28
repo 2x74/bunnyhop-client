@@ -150,7 +150,7 @@ int main(int argc, char **argv) {
 
         SDL_GL_MakeCurrent(window, context);
         SDL_GL_SetSwapInterval(0);
-        Gl gl;
+        native::Gl gl;
         gl.load();
         using Core = std::unique_ptr<BhContext, decltype(&bh_destroy)>;
         Core core(bh_create(), &bh_destroy);
@@ -173,7 +173,7 @@ int main(int argc, char **argv) {
                 eye[k] = snapshot.player.position[k] + (k == 2 ? snapshot.player.view_offset_z : 0);
         native::Input input;
         input.set_angles(pitch, yaw);
-        Renderer renderer(gl, core.get());
+        native::Renderer renderer(gl, core.get());
         renderer.set_viewmodel_visible(!worldOnly && weapon < 0);
         renderer.set_cosmetics(outfit, loadout);
         renderer.set_water_quality(waterQuality == "refracted" ? 1 : 0);
@@ -255,8 +255,8 @@ int main(int argc, char **argv) {
         }
         int width = 0, height = 0;
         SDL_GetWindowSizeInPixels(window, &width, &height);
-        std::unique_ptr<NativeViewmodel> preview;
-        if (!worldOnly && weapon >= 0 && !simulateFire) preview = std::make_unique<NativeViewmodel>(gl);
+        std::unique_ptr<native::NativeViewmodel> preview;
+        if (!worldOnly && weapon >= 0 && !simulateFire) preview = std::make_unique<native::NativeViewmodel>(gl);
         if (preview) {
             preview->cosmetics(outfit, loadout);
             preview->player_glow(glow);

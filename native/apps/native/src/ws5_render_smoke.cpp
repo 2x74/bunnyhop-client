@@ -72,7 +72,7 @@ int main(int argc, char **argv) {
 
         SDL_GL_MakeCurrent(window, context);
         SDL_GL_SetSwapInterval(0);
-        Gl gl;
+        native::Gl gl;
         gl.load();
         std::unique_ptr<BhContext, decltype(&bh_destroy)> core(bh_create(), &bh_destroy);
         if (!core || !bh_load_map(core.get(), argv[1], argv[2])) {
@@ -85,7 +85,7 @@ int main(int argc, char **argv) {
         }
         BhSnapshot spawn{};
         bh_snapshot(core.get(), &spawn);
-        Renderer renderer(gl, core.get());
+        native::Renderer renderer(gl, core.get());
         renderer.set_viewmodel_visible(false);
         renderer.set_zones_visible(false);
         renderer.set_ghost_cosmetics("ghost-geode", "trail-geode");

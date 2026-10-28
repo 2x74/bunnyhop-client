@@ -1,6 +1,11 @@
 #pragma once
 #include "replay_range.hpp"
 #include "latest_worker.hpp"
+#include "bunnyhop_native.h"
+#include "render_shaders.hpp"
+#include "graphics_settings.hpp"
+#include <filesystem>
+#include <vector>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -185,7 +190,7 @@ inline uint32_t compare_tick(
     return uint32_t(std::clamp(std::round(compare_start + elapsed / compare_interval), 0., double(compare_end)));
 }
 }  // namespace native
-#ifdef BUNNYHOP_NATIVE_RENDERER_AVAILABLE
+
 namespace native {
 // The compare handle never enters the live replay/reset pipeline; loading it preserves playback and recording state.
 class ReplayCompare {
@@ -394,4 +399,3 @@ set_requested_ghost_source(std::array<native_render::GhostSource, 4> &sources, c
 }
 
 }  // namespace native
-#endif

@@ -1,10 +1,10 @@
 #include "data_location.hpp"
 #pragma once
 // The home-screen backdrop: the web attract tour (menu_tour.hpp) over a real
-// map, or a stored PB replay, drawn by the native Renderer from its own
+// map, or a stored PB replay, drawn by the native native::Renderer from its own
 // BhContext. Only that private context is stepped for PB playback: nothing here
 // touches the gameplay core, input, recording, heartbeat, scores or style.
-// Include after renderer.hpp (Gl, Renderer) and online.hpp. Main thread only,
+// Include after renderer.hpp (native::Gl, native::Renderer) and online.hpp. Main thread only,
 // except the loader: it downloads into the cache on a worker and must not
 // call GL, SDL or the native core. The context is created, used and destroyed
 // on the main thread, as bunnyhop_native.h requires.
@@ -62,7 +62,7 @@ inline BackdropMap load_backdrop_map(const std::filesystem::path &bsp, const std
 
 // The current back buffer as a small PNG: box-filtered to fit 960x540, halved
 // again until its data URI fits `max_uri_bytes`. Read before SwapWindow.
-inline std::string backbuffer_png(Gl &gl, int width, int height, size_t max_uri_bytes = 2000000) {
+inline std::string backbuffer_png(native::Gl &gl, int width, int height, size_t max_uri_bytes = 2000000) {
     if (width <= 0 || height <= 0) return {};
     std::vector<unsigned char> pixels(size_t(width) * height * 3);
     int alignment = 4;
@@ -128,7 +128,7 @@ public:
     // promptly once `cancel` is set and must not write the cache after that.
     using Loader = std::function<native::DownloadedMap(const std::string &map, const std::atomic_bool &cancel)>;
 
-    MenuBackdrop(Gl &api, std::filesystem::path asset_root, Loader loader)
+    MenuBackdrop(native::Gl &api, std::filesystem::path asset_root, Loader loader)
         : gl(api)
         , assets(std::move(asset_root))
         , load(std::move(loader)) {}
@@ -210,7 +210,7 @@ public:
         seconds = 0;
     }
 
-    // Once per frame. A finished download is loaded and given a Renderer only
+    // Once per frame. A finished download is loaded and given a native::Renderer only
     // when `may_build` (no gameplay download is writing the shared cache).
     void poll(bool may_build) {
         retired.remove_if([](const std::shared_ptr<Job> &j) {
@@ -228,7 +228,7 @@ public:
         if (pending && may_build) {
             try {
                 auto loaded = std::make_unique<BackdropMap>(load_backdrop_map(pending->bsp, pending->content_root));
-                auto next = std::make_unique<Renderer>(gl, loaded->core.get(), assets);
+                auto next = std::make_unique<native::Renderer>(gl, loaded->core.get(), assets);
                 next->set_viewmodel_visible(false);
                 next->set_fov(native::tour::renderer_fov());
                 director = std::make_unique<native::tour::Director>(loaded->shots);
@@ -370,7 +370,7 @@ private:
         std::future<native::DownloadedMap> result;
     };
 
-    Gl &gl;
+    native::Gl &gl;
     native::GraphicsSettings graphics_;
     nlohmann::json settings_ = nlohmann::json::object();
     std::filesystem::path assets;
@@ -380,7 +380,7 @@ private:
     std::list<std::shared_ptr<Job>> retired;
     std::unique_ptr<native::DownloadedMap> pending;
     std::unique_ptr<BackdropMap> map_;
-    std::unique_ptr<Renderer> renderer;
+    std::unique_ptr<native::Renderer> renderer;
     std::unique_ptr<native::tour::Director> director;
     std::unique_ptr<native::backdrop::PbPlayback> replay;
     Status status_ = Status::idle;

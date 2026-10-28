@@ -171,10 +171,10 @@ int run(const native::Options &opt) {
     native::SdlSession sdl;
     auto window_and_gl = native::create_window_and_gl(opt);
     auto &window = window_and_gl.window;
-    Gl gl;
+    native::Gl gl;
     gl.load();
-    std::unique_ptr<Renderer> renderer;
-    native::FramePacer<Gl> frame_pacer;
+    std::unique_ptr<native::Renderer> renderer;
+    native::FramePacer<native::Gl> frame_pacer;
     // Feedback context (the menu's "Attach game info"): the GPU the game draws with, not the menu web view's.
     const std::string gpu_renderer = [&] {
         const auto *name = gl.GetString(GL_RENDERER);
@@ -184,11 +184,11 @@ int run(const native::Options &opt) {
     const auto menu_path = opt.menu_html == BUNNYHOP_MENU_HTML ? native::resource("menu.html", opt.menu_html)
                                                                : native::data_location::from_utf8(opt.menu_html);
     const auto manifest_path = native::resource("native-manifest.json", BUNNYHOP_NATIVE_MANIFEST);
-    NativeHud hud(gl, assets);
+    native::NativeHud hud(gl, assets);
     native::MenuGamepad menu_gamepad;
     std::unique_ptr<NativeLoadoutPreview> loadout_preview;
     std::optional<nlohmann::json> preview_request;
-    NativeHud::Layout hud_layout;
+    native::NativeHud::Layout hud_layout;
     // Resolved before the audio device so the custom sound/ and bgm/ folders
     // are known at the point the packs are first applied.
     native::DataMoveDisplay display(window.get(), gl, hud);
@@ -929,7 +929,7 @@ int run(const native::Options &opt) {
         audio.set_classic_loader([content, cache]() {
             if (!content.empty()) native::download_classic_sounds(data_location::from_utf8(content), cache);
         });
-        auto next_renderer = std::make_unique<Renderer>(gl, next.get(), assets);
+        auto next_renderer = std::make_unique<native::Renderer>(gl, next.get(), assets);
         replay_compare.clear();
         practice.clear(core.get());
         renderer.reset();

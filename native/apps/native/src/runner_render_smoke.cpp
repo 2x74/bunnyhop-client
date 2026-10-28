@@ -2,7 +2,7 @@
 #include "online.hpp"
 #include "renderer.hpp"
 #include "menu_backdrop.hpp"
-static decltype(Gl::TexImage2D) realUpload = nullptr;
+static decltype(native::Gl::TexImage2D) realUpload = nullptr;
 static int poseBones = 0;
 
 static void APIENTRY trackUpload(
@@ -33,11 +33,11 @@ int main(int argc, char **argv) {
         auto ctx = SDL_GL_CreateContext(w);
         if (!ctx) throw std::runtime_error(SDL_GetError());
         SDL_GL_MakeCurrent(w, ctx);
-        Gl gl;
+        native::Gl gl;
         gl.load();
         realUpload = gl.TexImage2D;
         gl.TexImage2D = trackUpload;
-        NativeViewmodel models(gl, argv[1]);
+        native::NativeViewmodel models(gl, argv[1]);
         std::filesystem::create_directories(argv[2]);
         gl.Viewport(0, 0, 768, 600);
         const float eye[3] = {105, -160, 82};

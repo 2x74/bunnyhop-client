@@ -1,5 +1,5 @@
 // Framebuffer evidence for the home backdrop: a real local BSP through the
-// same MenuBackdrop the client uses (own context, native Renderer, web tour).
+// same MenuBackdrop the client uses (own context, native native::Renderer, web tour).
 // No network, menu, gameplay context, live timer or recording.
 #include "renderer.hpp"
 #include "online.hpp"
@@ -84,7 +84,7 @@ int main(int argc, char **argv) {
             ~Context() { SDL_GL_DestroyContext(c); }
         } cleanup{context};
 
-        Gl gl;
+        native::Gl gl;
         gl.load();
         int width = 0, height = 0;
         SDL_GetWindowSizeInPixels(window.get(), &width, &height);
