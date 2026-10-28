@@ -72,7 +72,8 @@ uses its adjacent `.zones.json`, when present. `--content-root DIR` supplies
 loose Source files for local maps. Hosted maps use their downloaded content.
 
 WASD moves, Space/wheel jumps, Ctrl ducks, E uses, R restarts, Escape opens the
-menu, and F10 opens Display settings. Alt+Enter toggles borderless fullscreen.
+menu, and F10 opens Display settings. Alt+Enter switches between windowed and your
+fullscreen mode (borderless unless you chose exclusive fullscreen).
 SDL relative mouse motion drives the view; focus loss/menu
 opening clears held input and pauses native simulation. All eight website styles
 are available; bonuses use their canonical Normal settings. Sensitivity, separate
