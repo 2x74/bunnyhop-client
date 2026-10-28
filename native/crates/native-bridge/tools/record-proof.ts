@@ -6,6 +6,7 @@ import { parseArgs } from "node:util";
 import { Core, applyRestartPoint, PHYSICS_VERSION } from "../../../apps/web/src/core";
 import { decodeReplay, encodeReplay, ReplayRecorder } from "../../../apps/web/src/replay";
 import { makeTimer, beforeStep, afterStep, replayCommand, simulate } from "../../../apps/web/src/sim";
+import type { RunTimer } from "../../../apps/web/src/timer";
 import { gunzipSync } from "node:zlib";
 import {foldCommand,hashHex,RUN_HASH_SEED} from "../../../apps/web/src/run-hash";
 import { verifyReplay } from "../../../apps/web/src/verifier";
@@ -27,12 +28,15 @@ const timer=makeTimer(source.header.zones,source.header.settings,source.header.p
 const scratch=new ArrayBuffer(4),f32=new Float32Array(scratch),u32=new Uint32Array(scratch);const bits=(n:number)=>{f32[0]=n;return u32[0]};const fromBits=(n:number)=>{u32[0]=n;return f32[0]};
 const filter=new StyleFilter(styleDef(source.header.style??"autohop"),source.header.settings.physics);
 const commands:any[]=[],expected:unknown[]=[];let commandHash=RUN_HASH_SEED;
+// The native timer still scores whole ticks. Since v0.0.29 the web timer's finished time is the sub-tick
+// millisecond score (run-timing.ts), so rows compare the tick clock and the report records both scores.
+const tickClockSeconds=(t:RunTimer)=>t.ticks()*t.tickInterval;
 for(let i=0;i<source.header.totalTicks;i++){
  const cmd=filter.apply(replayCommand(source,i),core.state());beforeStep(core,timer,cmd);const events=core.step(cmd.forward,cmd.side,cmd.yaw,cmd.pitch,cmd.buttons);const {state:s,update}=afterStep(core,timer,cmd,events);
  commandHash=foldCommand(commandHash,cmd.forward,cmd.side,cmd.buttons,cmd.yaw,cmd.pitch);
  commands.push(cmd);expected.push({commandHash:hashHex(commandHash),floatBits:[...s.position,...s.velocity,s.viewOffsetZ,...s.teleportAngles,...s.angleChange,...(s.touchPosition??[NaN,NaN,NaN])].map(bits),
   state:{tick:s.tick,grounded:s.grounded,crouched:s.crouched,onLadder:s.onLadder,events,touchCrouched:s.touchCrouched??false,weapons:s.weapons??0,activeWeapon:s.activeWeapon??0},
-  timer:{status:timer.status,track:timer.track,startTick:timer.startTick,endTick:timer.endTick,lastTick:timer.lastTick,ticks:timer.ticks(),seconds:timer.time(),jumps:timer.jumps,strafes:timer.strafes,
+  timer:{status:timer.status,track:timer.track,startTick:timer.startTick,endTick:timer.endTick,lastTick:timer.lastTick,ticks:timer.ticks(),seconds:tickClockSeconds(timer),jumps:timer.jumps,strafes:timer.strafes,
    perfectJumps:timer.perfectJumps,measuredJumps:timer.measuredJumps,lastPerfectTick:timer.lastPerfectTick,syncGood:timer.syncGood,syncTotal:timer.syncTotal,syncPercent:timer.syncPercent(),perfPercent:timer.perfPercent(),inStart:timer.inStart,
    pendingStart:(timer as any).pendingStart,updateFlags:(update.started?1:0)|(update.finished?2:0)|(update.restarted?4:0)|(update.clampVelocity?8:0)|(update.split?16:0),splits:timer.splits.map(s=>({...s}))}});
 }
@@ -60,5 +64,6 @@ const changed=await decodeReplay(readFileSync(nativeBhr));changed.checkpoints[0]
 const mutation=verifyReplay(core,changed,changed.header.zones,{mapSha256:hash,ranked:true});
 if(mutation.valid||mutation.checkpointsMatch)throw new Error("shared verifier accepted mutated native checkpoint");
 const report={pass:true,nativeHeartbeats,nativeReplayPlayback:true,nativeReplaySeek:true,ghostStatePreserved:true,offlineVerifierValid:verified.valid,rankedVerifier:true,mutatedCheckpointRejected:!mutation.valid,verifierProblems:verified.problems,physics:PHYSICS_VERSION,wasmSha256:new Bun.CryptoHasher("sha256").update(wasm).digest("hex"),mapSha256:hash,recording,bhr:nativeBhr,nativeRawBytes: nativeRaw.length,nativeRawEqualsSharedEncoderPlusBhts:true,runHash:hashHex(runHash),statesCompared:commands.length,timerRowsCompared:commands.length,
- checkpointsChecked:checked.checkpointsChecked,startTick:checked.timer.startTick,endTick:checked.timer.endTick,time:checked.timer.time(),serverVerified:false,submissionEnabled:false};
+ checkpointsChecked:checked.checkpointsChecked,startTick:checked.timer.startTick,endTick:checked.timer.endTick,time:checked.timer.time(),
+ nativeTickSeconds:summary.timer.seconds,webTimeMs:verified.timeMs,serverVerified:false,submissionEnabled:false};
 writeFileSync(join(output,"proof.json"),JSON.stringify(report,null,2)+"\n");console.log(JSON.stringify(report,null,2));
