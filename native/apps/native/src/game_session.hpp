@@ -2,7 +2,7 @@
 #include "bunnyhop_native.h"
 #include "replay_controls.hpp"
 #include "render_menu_contracts.hpp"
-#include "video_export.hpp"
+#include "video_controller.hpp"
 #include "replay_camera.hpp"
 #include <memory>
 #include <optional>
@@ -38,12 +38,7 @@ public:
     ReplayCompare replay_compare;
     ReplayTimelineService replay_timeline;
     ReplayCompareImportService replay_compare_import;
-    NativeVideoExport video_encoder;
-    std::unique_ptr<VideoCapture> video_capture;
-    std::unique_ptr<ReplayDirectorJob> director_job;
-    std::optional<VideoOptions> pending_video;
-    ReplayCamera prepared_camera;
-    std::string video_error;
+    VideoController video;
 
     static PreparedMap
     prepare(const std::string &path,
@@ -55,10 +50,8 @@ public:
     void configure_timer();
     void restart(const std::string &style);
     void leave(PracticeController &practice);
-    void cancel_video();
 
 private:
-    ReplayCamera &playback_camera_;
     void release();
 };
 

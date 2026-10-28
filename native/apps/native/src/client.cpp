@@ -306,34 +306,17 @@ int run(const native::Options &opt) {
     auto &replay_timeline = game.replay_timeline;
     auto &replay_compare_import = game.replay_compare_import;
     native::GraphicsMenuPacer graphics_menu_pacer;
-    auto &video_encoder = game.video_encoder;
-    native::VideoAvailability video_available{false, "Checking FFmpeg availability…", "ffmpeg"};
-    auto video_probe = std::async(std::launch::async, [] { return native::NativeVideoExport::probe(); });
-    auto &video_capture = game.video_capture;
-    auto &director_job = game.director_job;
-    auto &pending_video = game.pending_video;
-    auto &prepared_camera = game.prepared_camera;
+    auto &video = game.video;
+    auto &video_encoder = video.encoder;
+    auto &video_available = video.available;
+
+    auto &video_capture = video.capture;
+    auto &director_job = video.director_job;
     native::ReplayCamera third_camera;
-    bool director_only = false;
-    auto &video_error = game.video_error;
-    nlohmann::json video_music_catalog = nlohmann::json::array();
-    auto cancel_video = std::bind_front(&native::GameSession::cancel_video, &game);
-    auto video_state = [&]() {
-        auto result = video_encoder.status();
-        result["available"] = video_available.available;
-        result["reason"] = video_available.reason;
-        result["musicTracks"] = video_music_catalog;
-        if (director_job) {
-            result["state"] = "capturing";
-            result["reason"] = "Preparing cinematic cameras…";
-            result["progress"] = 0;
-        }
-        if (!video_error.empty()) {
-            result["state"] = "error";
-            result["error"] = video_error;
-        }
-        return result;
-    };
+    auto &video_error = video.error;
+    auto &video_music_catalog = video.music_catalog;
+    auto cancel_video = std::bind_front(&native::VideoController::cancel, &video);
+    auto video_state = std::bind_front(&native::VideoController::state, &video);
     std::string pending_room_map;
     double display_fps = 0;
     native::TutorialRunner tutorial_runner;
@@ -1107,64 +1090,12 @@ int run(const native::Options &opt) {
     auto replay_action = [&](native::ReplayControls::Action action) {
         viewer.action(action, curr.tick, camera_controls);
     };
-    auto begin_video = [&](const native::VideoOptions &options) {
-        const auto timeline = native::VideoTimeline::make(options, viewer.session.range.total);
-        const char *downloads = SDL_GetUserFolder(SDL_FOLDER_DOWNLOADS);
-        if (opt.video_smoke.empty() && !downloads) throw std::runtime_error("Downloads folder unavailable");
-        const auto directory = opt.video_smoke.empty() ? native::data_location::from_utf8(downloads)
-                                                       : std::filesystem::absolute(opt.video_smoke);
-        std::filesystem::create_directories(directory);
-        const auto destination = directory / ("bunnyhop-" + map_id + "-" + std::to_string(SDL_GetTicksNS()) + ".mp4");
-        video_capture = std::make_unique<native::VideoCapture>(
-                gl,
-                core.get(),
-                *renderer,
-                hud,
-                video_encoder,
-                options,
-                viewer.session.info.at("totalTicks").get<uint32_t>(),
-                curr.tick,
-                preferences,
-                map_id,
-                viewer.session.info.value("style", active_style),
-                outfit,
-                (viewer.session.info.contains("packedLoadout") && viewer.session.info["packedLoadout"].is_string()
-                         ? viewer.session.info["packedLoadout"].get<std::string>()
-                         : std::string()),
-                prepared_camera,
-                assets,
-                cache
-        );
-        try {
-            video_encoder.start(options, destination, timeline.frames, video_available.encoder);
-        } catch (...) {
-            video_capture.reset();
-            throw;
-        }
-        audio.pause();
-    };
-    auto request_video = [&](native::VideoOptions options) {
-        if (!viewer.active || !renderer || !core || download.valid())
-            throw std::runtime_error("Open a replay before exporting video");
-        if (video_capture || director_job || video_encoder.busy())
-            throw std::runtime_error("A video export is already running");
-        if (!video_available.available) throw std::runtime_error(video_available.reason);
-        options.tick_interval = viewer.session.range.tick_interval;
-        native::ReplayRange::make(viewer.session.info).export_bounds(options);
-        native::VideoTimeline::make(options, viewer.session.range.total);
-        video_error.clear();
-        show_menu(true);
-        prepared_camera = {};
-        prepared_camera.set_mode(options.camera);
-        if (options.camera == "auto") {
-            pending_video = options;
-            director_only = false;
-            director_job = std::make_unique<native::ReplayDirectorJob>(
-                    core.get(), viewer.session.info.at("totalTicks").get<uint32_t>(), curr.tick
-            );
-        } else
-            begin_video(options);
-    };
+    video.bind(
+            {gl, game, hud, viewer, curr, preferences, active_style, outfit, assets, cache, opt, audio, download},
+            show_menu,
+            refresh_playback_pose
+    );
+    auto request_video = std::bind_front(&native::VideoController::request, &video);
     auto request_replay = [&](const std::filesystem::path &path,
                               const std::string &action,
                               unsigned ghost_slot = 0,
@@ -1910,7 +1841,7 @@ int run(const native::Options &opt) {
         viewer.camera.yaw = 42;
         viewer.camera.pitch = 17;
         camera_controls.set_angles(17, 42);
-        if (video_probe.valid()) video_available = video_probe.get();
+        video.wait_probe();
         native::VideoOptions options;
         options.full_recording = true;
         options.to = std::min(200u, viewer.session.range.total);
@@ -1933,8 +1864,7 @@ int run(const native::Options &opt) {
             toast("Could not save " + *failure);
         }
         if (window_dirty && Clock::now() >= window_save_due) save_window();
-        if (video_probe.valid() && video_probe.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
-            video_available = video_probe.get();
+        video.poll_probe();
         const uint64_t mouse_pump_start = SDL_GetTicksNS();
         const double pump_tick_seconds = viewer.active ? viewer.session.range.tick_interval : dt;
         const uint64_t pump_tick_ns = uint64_t(std::llround(pump_tick_seconds * 1e9));
@@ -2798,10 +2728,7 @@ int run(const native::Options &opt) {
                             camera_controls.set_angles(viewer.camera.pitch, viewer.camera.yaw);
                             camera_controls.clear();
                             if (viewer.camera.mode == "auto") {
-                                director_only = true;
-                                director_job = std::make_unique<native::ReplayDirectorJob>(
-                                        core.get(), viewer.session.info.at("totalTicks").get<uint32_t>(), curr.tick
-                                );
+                                video.prepare_viewer_camera();
                             }
                         } else if (action == "pause")
                             viewer.paused = message.value("paused", !viewer.paused);
@@ -3256,46 +3183,7 @@ int run(const native::Options &opt) {
                     epoch_ms(), held_action(restart_guard.action), !captured || chat.active || viewer.active
             ))
             act(*ready, false, true);
-        if (director_job) try {
-                if (director_job->step()) {
-                    const double interval = viewer.session.range.tick_interval;
-                    if (director_only) {
-                        if (director_job->plan(
-                                    viewer.camera, interval, viewer.session.range.from, viewer.session.range.to
-                            )) {
-                            director_job.reset();
-                            refresh_playback_pose();
-                        }
-                    } else {
-                        const auto options = *pending_video;
-                        if (director_job->plan(prepared_camera, interval, options.from, options.to)) {
-                            director_job.reset();
-                            pending_video.reset();
-                            begin_video(options);
-                        }
-                    }
-                }
-            } catch (const std::exception &e) {
-                cancel_video();
-                refresh_playback_pose();
-                video_error = e.what();
-            }
-        if (video_capture) try {
-                if (!video_encoder.busy()) {
-                    video_capture.reset();
-                    refresh_playback_pose();
-                } else {
-                    video_capture->step();
-                    if (video_capture->done()) {
-                        video_capture.reset();
-                        refresh_playback_pose();
-                    }
-                }
-            } catch (const std::exception &e) {
-                cancel_video();
-                refresh_playback_pose();
-                video_error = e.what();
-            }
+        video.step();
         if (!video_capture && !director_job && !video_encoder.busy())
             if (const auto seek = viewer.controls.take()) try {
                     seek_playback(*seek);

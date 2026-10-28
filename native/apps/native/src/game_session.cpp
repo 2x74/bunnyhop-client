@@ -46,7 +46,7 @@ std::vector<BhZone> timer_zones(const nlohmann::json &detail) {
 
 }  // namespace
 
-GameSession::GameSession(ReplayCamera &playback_camera) : playback_camera_(playback_camera) {
+GameSession::GameSession(ReplayCamera &playback_camera) : video(playback_camera) {
 }
 
 GameSession::~GameSession() {
@@ -75,7 +75,7 @@ GameSession::PreparedMap GameSession::prepare(
 }
 
 void GameSession::prepare_workers(const std::string &path, const std::string &content) {
-    cancel_video();
+    video.cancel();
     replay_timeline.map(data_location::from_utf8(path), data_location::from_utf8(content));
     replay_compare_import.map(data_location::from_utf8(path), data_location::from_utf8(content));
 }
@@ -114,19 +114,9 @@ void GameSession::leave(PracticeController &practice) {
     release();
 }
 
-void GameSession::cancel_video() {
-    video_encoder.cancel();
-    pending_video.reset();
-    director_job.reset();
-    prepared_camera.cancel_direct();
-    playback_camera_.cancel_direct();
-    video_capture.reset();
-    video_error.clear();
-}
-
 void GameSession::release() {
     // Capture and camera preparation restore borrowed replay state during teardown.
-    cancel_video();
+    video.cancel();
     replay_timeline.reset();
     replay_compare_import.reset();
     replay_compare.clear();
