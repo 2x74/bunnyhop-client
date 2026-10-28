@@ -127,7 +127,7 @@ int main(int argc, char **argv) {
         const auto defaults = native::default_graphics_settings();
         for (const auto &[key, value] : fixture.at("defaults").items()) {
             if (!defaults.contains(key) || defaults.at(key) != value)
-                throw std::runtime_error("WS2 default mismatch: " + key);
+                throw std::runtime_error("Web settings default mismatch: " + key);
         }
         for (const auto &test : fixture.at("cases")) {
             auto document = defaults;
@@ -137,10 +137,10 @@ int main(int argc, char **argv) {
             } catch (const std::runtime_error &) {
             }
             if (accepted != test.at("accepted").get<bool>())
-                throw std::runtime_error("WS2 range mismatch: " + test.dump());
+                throw std::runtime_error("Web settings range mismatch: " + test.dump());
         }
-        std::cout << "WS2 schema: " << fixture.at("defaults").size() << " defaults and " << fixture.at("cases").size()
-                  << " validation cases matched\n";
+        std::cout << "Web settings schema: " << fixture.at("defaults").size() << " defaults and "
+                  << fixture.at("cases").size() << " validation cases matched\n";
     }
     settings_validation();
     graphics_views();

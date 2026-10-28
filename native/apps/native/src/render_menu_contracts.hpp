@@ -36,7 +36,7 @@ void reply_surface_chat(
 }
 
 template <class Decode>
-void ws3_compare_message(
+void compare_message(
         ReplayCompare &compare,
         BhContext *core,
         const std::filesystem::path &directory,
@@ -119,7 +119,7 @@ public:
                 if (!cancelled) {
                     ReplayCompare prepared;
                     const auto cache = message.contains("replayBase64") ? directory / "compare-cache" : directory;
-                    ws3_compare_message(prepared, core.get(), cache, message, playback, decode, &cancelled);
+                    compare_message(prepared, core.get(), cache, message, playback, decode, &cancelled);
                     if (!cancelled)
                         result.prepared = prepared.detach(&cancelled);
                     else

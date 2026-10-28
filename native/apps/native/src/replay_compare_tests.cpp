@@ -43,7 +43,7 @@ int main(int argc, char **argv) {
         const auto before = snapshot_bytes(core.get());
         if (native::render_menu_message_limit("replayCompare", 16384) != 12 * 1024 * 1024
             || native::render_menu_message_limit("settings", 16384) != 16384) {
-            throw std::runtime_error("WS3 compare base64 message limit mismatch");
+            throw std::runtime_error("Compare base64 message limit mismatch");
         }
         native::ReplayCompare compare;
         for (unsigned attempt = 0; attempt < 5; ++attempt) {
@@ -70,7 +70,7 @@ int main(int argc, char **argv) {
                 throw std::runtime_error("Compare mismatch leaked a handle or changed playback");
             }
         }
-        const auto cache = std::filesystem::temp_directory_path() / "bunnyhop-ws5-compare-contract-test";
+        const auto cache = std::filesystem::temp_directory_path() / "bunnyhop-compare-contract-test";
         std::filesystem::create_directories(cache);
         std::ifstream input(argv[2], std::ios::binary);
         const std::vector<uint8_t> replay_bytes(std::istreambuf_iterator<char>(input), {});
@@ -81,7 +81,7 @@ int main(int argc, char **argv) {
                 {"name", "Your PB"},
                 {"replayBase64", "fixture"}
         };
-        native::ws3_compare_message(compare, core.get(), cache, request, info, [&](const std::string &) {
+        native::compare_message(compare, core.get(), cache, request, info, [&](const std::string &) {
             return replay_bytes;
         });
         nlohmann::json host = {{"playback", nlohmann::json::object()}};
@@ -89,7 +89,7 @@ int main(int argc, char **argv) {
         if (host.at("playback").at("features").at(0) != "compare"
             || host.at("playback").at("compare").at("kind") != "pb"
             || host.at("playback").at("compare").at("name") != "Your PB" || snapshot_bytes(core.get()) != before) {
-            throw std::runtime_error("WS3 Compare contract mismatch");
+            throw std::runtime_error("Compare contract mismatch");
         }
 
         struct Chat {
@@ -113,7 +113,7 @@ int main(int argc, char **argv) {
         }
         if (!compare.active() || !chat.error.empty() || compare.menu_state(.01).at("name") != "Async PB"
             || snapshot_bytes(core.get()) != before)
-            throw std::runtime_error("Asynchronous WS3 Compare contract failed: " + chat.error);
+            throw std::runtime_error("Asynchronous Compare contract failed: " + chat.error);
         const auto wait_for_compare = [&] {
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
             while (!compare.active() && chat.error.empty() && std::chrono::steady_clock::now() < deadline) {
@@ -217,7 +217,7 @@ int main(int argc, char **argv) {
         compare.clear();
         std::filesystem::remove_all(cache);
         std::cout << "Compare load/sample/clear/mismatch preserve exact playback bytes; five replacement cycles plus "
-                     "WS3 Compare and timeline contracts passed\n";
+                     "Compare and timeline contracts passed\n";
         return 0;
     } catch (const std::exception &error) {
         std::cerr << error.what() << '\n';

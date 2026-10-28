@@ -34,7 +34,7 @@ static native_render::GhostPath fixture_path(const BhSnapshot &spawn, unsigned s
 int main(int argc, char **argv) {
     try {
         if (argc != 4) {
-            throw std::runtime_error("usage: ws5-render-smoke MAP CONTENT_ROOT OUTPUT_DIRECTORY");
+            throw std::runtime_error("usage: effects-render-smoke MAP CONTENT_ROOT OUTPUT_DIRECTORY");
         }
         if (!SDL_Init(SDL_INIT_VIDEO)) {
             throw std::runtime_error(SDL_GetError());
@@ -48,7 +48,7 @@ int main(int argc, char **argv) {
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
         SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-        auto *window = SDL_CreateWindow("WS5 rendering fixtures", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
+        auto *window = SDL_CreateWindow("Rendering effect fixtures", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
         if (!window) {
             throw std::runtime_error(SDL_GetError());
         }
@@ -186,7 +186,7 @@ int main(int argc, char **argv) {
         }
         capture("paint-and-measure");
         std::ofstream(output / "surface-tools.json") << tools.dump(2);
-        std::cout << "12 WS5 native-rendered fixtures; GL_NO_ERROR\n";
+        std::cout << "12 rendering effect fixtures; GL_NO_ERROR\n";
         return 0;
     } catch (const std::exception &error) {
         std::cerr << error.what() << '\n';

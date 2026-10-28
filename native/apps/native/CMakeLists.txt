@@ -534,9 +534,9 @@ if(BUILD_TESTING)
 endif()
 
 if(BUNNYHOP_BUILD_CLIENT)
-    add_executable(bunnyhop-native-ws5-render-smoke EXCLUDE_FROM_ALL src/ws5_render_smoke.cpp)
-    target_include_directories(bunnyhop-native-ws5-render-smoke PRIVATE include vendor src)
-    target_link_libraries(bunnyhop-native-ws5-render-smoke PRIVATE
+    add_executable(bunnyhop-native-effects-render-smoke EXCLUDE_FROM_ALL src/effects_render_smoke.cpp)
+    target_include_directories(bunnyhop-native-effects-render-smoke PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-effects-render-smoke PRIVATE
         bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
 endif()
 

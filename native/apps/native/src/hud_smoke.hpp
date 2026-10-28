@@ -75,7 +75,7 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
         clear();
         draw_scoreboard(hud, width, height, percent, board, 1, 0);
         HudLabel<64> name;
-        name.format("ws4-scoreboard-%d", int(percent));
+        name.format("hud-scoreboard-%d", int(percent));
         save(name.view());
     }
     Chat chat;
@@ -117,13 +117,13 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
     );
     clear();
     hud.draw_chat_overlay(width, height, chat.visible(2), "", "", {}, true, 0, 100, &chat, chat.viewport(2));
-    save("ws4-chat");
+    save("hud-chat");
     HudResult result;
     result.restart_bind("KeyR");
     result.finish(1, 16.731, 1, 17.421, true);
     clear();
     draw_result(hud, width, height, 100, result, 3.5);
-    save("ws4-result-pending");
+    save("hud-result-pending");
     result.service(
             {{"generation", 1},
              {"status", "verified"},
@@ -135,7 +135,7 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
     );
     clear();
     draw_result(hud, width, height, 100, result, 3.5);
-    save("ws4-result-wr-reel");
+    save("hud-result-wr-reel");
     const auto rasterizations = hud.rasterizations();
     clear();
     draw_result(hud, width, height, 100, result, 3.5);
@@ -158,7 +158,7 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
     race.board.assign("Autohop | Main track");
     race.deadline = 14000;
     draw_race(hud, width, height, 100, race, 2000);
-    save("ws4-vote-race");
+    save("hud-vote-race");
     Toasts toasts;
     toasts.push("New hat unlocked", 1, 5, ToastTone::unlock, "Level 12");
     toasts.push("Bunny: ready for another race?", 1, 5, ToastTone::whisper);
@@ -173,12 +173,12 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
         top += 110;
     }
     hud.overlay_end(width, height);
-    save("ws4-toasts-trainers");
+    save("hud-toasts-trainers");
     NativeTriggerMenu trigger_menu;
     trigger_menu.toggle();
     clear();
     trigger_menu.draw(hud, width, height, 100, true, false);
-    save("ws4-trigger-menu");
+    save("hud-trigger-menu");
     auto preferences = default_settings();
     preferences["hudMovementLj"] = true;
     for (const char *id : {"startPre", "strafeOffsets", "firstJump", "longJump", "sync", "ghostKeys"})
@@ -237,7 +237,7 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
                 "Jump 6 | 645 u/s (+87)\nGain 87.5% | Sync 94% | 6 str"
         );
         HudLabel<64> filename;
-        filename.assign("ws4-hud-");
+        filename.assign("hud-");
         filename.append(style);
         save(filename.view());
     }
@@ -257,7 +257,7 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
             false,
             BhWeaponReport{}
     );
-    save("ws4-hidden-speed-keys");
+    save("hud-hidden-speed-keys");
     preferences["hudHiddenKeeps"] = "nothing";
     hud.preferences(preferences);
     clear();
@@ -276,7 +276,7 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
             false,
             BhWeaponReport{}
     );
-    save("ws4-hidden-nothing");
+    save("hud-hidden-nothing");
     hud.preferences(default_settings());
 }
 

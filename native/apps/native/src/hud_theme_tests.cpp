@@ -219,7 +219,7 @@ void test_defaults_and_saved_settings() {
                   {"nextTrack", "KeyP"}}
          })
         assert(binds[action] == native::Json::array({key}));
-    const auto directory = std::filesystem::temp_directory_path() / "bunnyhop-ws4-saved-defaults";
+    const auto directory = std::filesystem::temp_directory_path() / "bunnyhop-hud-saved-defaults";
     std::filesystem::create_directories(directory);
     const auto file = directory / "settings.json";
     const native::Json saved = {
@@ -703,7 +703,7 @@ int main() {
     test_ghost_progress();
     test_results_toasts_and_room_widgets();
     test_movement_widgets_and_restart();
-    std::cout << "WS4 HUD: 8 scenario groups, all layout IDs, three trainer styles, defaults and saved settings\n";
+    std::cout << "HUD: 8 scenario groups, all layout IDs, three trainer styles, defaults and saved settings\n";
     using native::parse_hud_theme;
 
     // Nothing set: the default HUD.
