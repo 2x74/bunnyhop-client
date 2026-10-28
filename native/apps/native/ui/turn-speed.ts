@@ -13,11 +13,6 @@ type Range = { readonly min: number; readonly max: number };
 const clamp = (value: number, range: Range): number => Math.min(range.max, Math.max(range.min, value));
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 
-/** The website stores whole degrees per second. */
-export const roundYawSpeed = (value: number): number => Math.round(value);
-/** The website stores the multiplier in steps of 0.05. */
-export const roundAngleSpeedKey = (value: number): number => Math.round(value * 20) / 20;
-
 /**
  * Brings imported or saved settings up to date, as the host does with its own settings file: an older native
  * `yawSpeedAlt` (an absolute speed) becomes a multiplier, and speeds outside the allowed ranges are clamped.

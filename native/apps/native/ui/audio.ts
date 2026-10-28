@@ -1,8 +1,9 @@
 // Menu events use the host mixer, sharing the same buses and custom sound pack.
-import { send } from "./bridge";
+import { send, state } from "./bridge";
 import { SFX } from "../../web/src/audio/catalog";
 import { setNotifySound } from "../../web/src/notify";
 import type {AnnouncerEvent,AnnouncerLine} from "./audio-settings";
+import type { MusicEntry } from "../../web/src/audio/assets";
 export const UI_CUES=["ui_hover","ui_press","ui_click","ui_confirm","ui_back","ui_card","ui_switch","ui_open","ui_close","ui_error"] as const;
 let installed=false,lastHover:Element|null=null,lastAt=0;
 export function uiSound(id:unknown,gain=1,rate=1):void {
@@ -21,4 +22,26 @@ export function installNativeUiAudio():void {
   document.addEventListener("pointerdown",event=>{const el=(event.target as Element|null)?.closest?.("button,a[href]");if(el&&!(el as HTMLButtonElement).disabled)uiSound("ui_press",.65);},{capture:true});
   document.addEventListener("click",event=>{const el=(event.target as Element|null)?.closest?.("button,a[href]");if(!el||(el as HTMLButtonElement).disabled)return;uiSound(el.matches(".back,[aria-label^=Back],[aria-label^=Close]")?"ui_back":el.matches(".primary")?"ui_confirm":"ui_click",.8);},{capture:true});
   document.addEventListener("change",event=>{const el=event.target;if(el instanceof HTMLInputElement&&el.type==="checkbox")uiSound("ui_switch",.8,el.checked?1.12:.88);},{capture:true});
+}
+
+// What the website's Settings → Audio reads from its audio engine; the host plays everything here.
+export const engine = { unlocked: true };
+export const classic = {
+  get available(): boolean {
+    return !!state.audio && !state.audio.error;
+  },
+};
+export const music = {
+  get current(): MusicEntry | null {
+    const now = state.music;
+    if (!now?.title) return null;
+    return { id: now.id, title: now.title, role: now.role === "game" ? "game" : "menu", duration: 0, credit: "" };
+  },
+};
+export function nextTrack(): void {
+  send({ type: "music", action: "next" });
+}
+/** The host ships the voice samples. */
+export function announcerAvailable(_line: AnnouncerLine): boolean {
+  return true;
 }

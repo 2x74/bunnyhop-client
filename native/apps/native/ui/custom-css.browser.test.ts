@@ -113,7 +113,7 @@ test("Settings -> Custom CSS: the editor applies as you type and a .css file rep
     page.on("pageerror", (error) => errors.push(error.message));
     await boot(page, "");
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.locator('.nset-rail-item[data-section="css"]').click();
+    await page.locator('.set-rail-item[data-sec="css"]').click();
 
     await page.getByRole("button", { name: "Edit CSS", exact: true }).click();
     await page.getByRole("textbox", { name: "Custom CSS" }).fill(":root { --cream: #ffffff; }");
@@ -133,7 +133,7 @@ test("Settings -> Custom CSS: the editor applies as you type and a .css file rep
       window.dispatchEvent(new CustomEvent("bunnyhop:native-file", { detail }));
     }, request.id);
     await waitForVariable(page, "--cream", "#00ffff");
-    await page.locator(".nset-hint", { hasText: /^theme\.css$/ }).waitFor();
+    await page.locator(".set-readout", { hasText: /^theme\.css$/ }).waitFor();
 
     // The host sends the file again when it's saved.
     await page.evaluate(() => {

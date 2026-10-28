@@ -53,9 +53,9 @@ test("identical host state and timer-only updates retain visible menu controls",
     expect(stable.webgl).toEqual({contexts:0,attempts:0});expect(stable.canvases).toBe(0);expect(errors).toEqual([]);
     await page.getByRole("button",{name:"Settings",exact:true}).click();
     const input=await page.evaluate(()=>{
-      const original=document.querySelector<HTMLInputElement>(".native-sensitivity")!;original.value="1.55";
+      const original=document.querySelector<HTMLInputElement>('.set-row[data-label="Sensitivity"] input.num-input')!;original.value="1.55";
       window.bunnyhopNativeMenu.onState({timer:{status:0,seconds:NaN,jumps:Infinity}});
-      return {same:original===document.querySelector(".native-sensitivity"),value:original.value};
+      return {same:original===document.querySelector('.set-row[data-label="Sensitivity"] input.num-input'),value:original.value};
     });
     expect(input).toEqual({same:true,value:"1.55"});
   } finally {await browser.close();}
