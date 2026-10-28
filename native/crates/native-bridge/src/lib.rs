@@ -33,6 +33,9 @@ mod practice;
 mod surfaces;
 pub use surfaces::{BhSurfaceProbe, bh_surface_at};
 mod run;
+mod run_timing;
+#[cfg(test)]
+mod run_timing_tests;
 mod styles;
 pub use assets::{BhAttackReport, BhFloorWeapon, BhWeaponReport};
 pub use assets::{BhMaterialExtra, BhPropGroup, BhSkyInfo};
@@ -1544,6 +1547,7 @@ impl Map {
         let pre_walk = self.game.state.mode as u8 == 0;
         let mut clamped = false;
         self.transforms_dirty = true;
+        self.game.observe_timing = self.timer.is_some() || self.game.observe_timing;
         if let Some(t) = &mut self.timer {
             if let Some(v) = t.before_step(cmd, BhState::from(&self.game)) {
                 clamped = true;
@@ -1561,7 +1565,7 @@ impl Map {
             return Err(e);
         }
         if let Some(t) = &mut self.timer {
-            if let Some(v) = t.update(cmd, BhState::from(&self.game)) {
+            if let Some(v) = t.update_observed(cmd, BhState::from(&self.game), Some(&self.game)) {
                 clamped = true;
                 self.game.state.velocity = v;
             }

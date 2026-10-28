@@ -232,7 +232,7 @@ apps/native/build/bunnyhop-native --map /path/to/bhop_eazy.bsp \
 Native recorder verification against the canonical WASM uses an offline fixture:
 
 ```sh
-bun crates/native-bridge/tools/record-proof.ts \
+bun apps/native/tools/record-proof.ts \
   --map /path/to/map.bsp --replay /path/to/route.bhr \
   --output target/native-record-proof/new-run
 ```

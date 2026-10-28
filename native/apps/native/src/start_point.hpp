@@ -5,14 +5,14 @@
 #include <optional>
 #include <vector>
 namespace native {
-struct StartPoint {std::array<float,3> position{};float yaw=0,pitch=0;};
+struct StartPoint {std::array<float,3> position{};float yaw=0,pitch=0;bool practice=false;};
 inline bool start_zone_holds(const BhZone &z,const float p[3],uint32_t track){
     return z.kind==0&&z.track==track&&p[0]-16>=z.mins[0]&&p[0]+16<=z.maxs[0]&&p[1]-16>=z.mins[1]&&p[1]+16<=z.maxs[1]&&p[2]<=z.maxs[2]&&p[2]+62>=z.mins[2];
 }
 // A start point can be saved anywhere the player stands still on the ground, in
 // main or practice runs. Only one inside the start zone can begin a timed, recorded
-// run: the timer starts on leaving the start zone and the verifier requires the
-// replay's spawn there. A point elsewhere restarts as practice (see client.cpp).
+// run if reached without practice tools. The verifier requires the replay's spawn
+// there. A point elsewhere or reached with tools restarts as practice.
 // Noclip is refused: the flight state is not the player's resting state.
 inline std::string start_point_problem(const BhState &s,bool noclip){
     if(noclip)return "Turn off noclip first";
@@ -32,14 +32,18 @@ inline bool start_point_in_zone(const BhState &s,const std::vector<BhZone> &zone
     for(const auto &z:zones)if(start_zone_holds(z,s.position,track))return true;
     return false;
 }
+inline bool start_point_practice(const StartPoint &point, const BhState &state,
+                                 const std::vector<BhZone> &zones, uint32_t track) {
+    return point.practice || !start_point_in_zone(state, zones, track);
+}
 struct StartPoints {
     Json points=Json::object();
     static std::string key(const std::string &map,uint32_t track){return map+":"+std::to_string(track);}
     bool load(const Json &value){if(!value.is_object()||value.size()>4096)return false;for(auto it=value.begin();it!=value.end();++it){if(!decode(it.value()))return false;}points=value;return true;}
     static std::optional<StartPoint> decode(const Json &v){
-        try{if(!v.is_object()||!v.contains("position")||!v["position"].is_array()||v["position"].size()!=3)return {};StartPoint out;for(int i=0;i<3;++i){out.position[i]=v["position"][i].get<float>();if(!std::isfinite(out.position[i])||std::abs(out.position[i])>32768)return {};}out.yaw=v.at("yaw").get<float>();out.pitch=v.at("pitch").get<float>();if(!std::isfinite(out.yaw)||!std::isfinite(out.pitch)||out.pitch< -89||out.pitch>89)return {};return out;}catch(...){return {};}
+        try{if(!v.is_object()||!v.contains("position")||!v["position"].is_array()||v["position"].size()!=3)return {};StartPoint out;for(int i=0;i<3;++i){out.position[i]=v["position"][i].get<float>();if(!std::isfinite(out.position[i])||std::abs(out.position[i])>32768)return {};}out.practice=v.value("practice",false);out.yaw=v.at("yaw").get<float>();out.pitch=v.at("pitch").get<float>();if(!std::isfinite(out.yaw)||!std::isfinite(out.pitch)||out.pitch< -89||out.pitch>89)return {};return out;}catch(...){return {};}
     }
-    void save(const std::string &map,uint32_t track,const BhState &s,double yaw,double pitch){points[key(map,track)]={{"position",{s.position[0],s.position[1],s.position[2]}},{"yaw",yaw},{"pitch",pitch}};}
+    void save(const std::string &map,uint32_t track,const BhState &s,double yaw,double pitch,bool practice=false){points[key(map,track)]={{"position",{s.position[0],s.position[1],s.position[2]}},{"yaw",yaw},{"pitch",pitch},{"practice",practice}};}
     bool clear(const std::string &map,uint32_t track){return points.erase(key(map,track))!=0;}
     std::optional<StartPoint> get(const std::string &map,uint32_t track)const{const auto it=points.find(key(map,track));return it==points.end()?std::nullopt:decode(*it);}
 };

@@ -3,6 +3,7 @@
 // never upgrades a local result to an account/server verified personal best.
 #include "nlohmann/json.hpp"
 #include "atomic_replace.hpp"
+#include "run_timing.hpp"
 #include <filesystem>
 #include <fstream>
 #include <vector>
@@ -34,14 +35,57 @@ public:
  static constexpr size_t max_summary_bytes=64*1024;
  explicit RunVault(std::filesystem::path root,size_t maxRuns=5000,size_t maxShots=500,size_t maxShotBytes=16*1024*1024,size_t maxTotalBytes=1024ull*1024*1024):root_(std::move(root)),maxRuns_(maxRuns),maxShots_(maxShots),maxShotBytes_(maxShotBytes),maxTotalBytes_(maxTotalBytes){}
  static bool valid_id(const std::string&id){if(id.size()<5||id.size()>180||!id.ends_with(".bhr")||id==".bhr"||id.find("..")!=std::string::npos)return false;for(unsigned char c:id)if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='-'||c=='_'||c=='.'))return false;return true;}
- static J sanitize(const J&raw){if(!raw.is_object())return nullptr;const auto time=number(raw,"time",86400),track=number(raw,"track",64,true),jumps=number(raw,"jumps",1000000000,true),strafes=number(raw,"strafes",1000000000,true),sync=number(raw,"sync",100),date=number(raw,"finishedAt",100000000000000.);const auto map=text(raw,"map",80),style=text(raw,"style",32);if(!time||*time<=0||!track||!jumps||!strafes||!sync||!date||map.empty()||style.empty())return nullptr;return {{"schema",1},{"map",map},{"style",style},{"track",unsigned(*track)},{"time",*time},{"jumps",jumps?J(uint64_t(*jumps)):J(nullptr)},{"strafes",strafes?J(uint64_t(*strafes)):J(nullptr)},{"sync",sync?J(*sync):J(nullptr)},{"finishedAt",date?J(*date):J(0)},{"client",text(raw,"client",32)},{"localPb",raw.value("localPb",J(false))==true},{"eligible",raw.value("eligible",J(false))==true},{"verified",false}};}
+ static J sanitize(const J &raw) {
+     if (!raw.is_object()) return nullptr;
+     const auto time = number(raw, "time", 86400);
+     const auto time_ms = number(raw, "timeMs", 86400000, true);
+     const auto track = number(raw, "track", 64, true);
+     const auto jumps = number(raw, "jumps", 1000000000, true);
+     const auto strafes = number(raw, "strafes", 1000000000, true);
+     const auto sync = number(raw, "sync", 100);
+     const auto date = number(raw, "finishedAt", 100000000000000.);
+     const auto map = text(raw, "map", 80);
+     const auto style = text(raw, "style", 32);
+     if ((!time && !time_ms) || (raw.contains("timeMs") && !time_ms) || !track || !jumps || !strafes ||
+         !sync || !date || map.empty() || style.empty()) return nullptr;
+     const auto ms = time_ms ? int64_t(*time_ms) : score_ms(*time);
+     if (ms <= 0) return nullptr;
+     return {{"schema", 2}, {"map", map}, {"style", style}, {"track", unsigned(*track)},
+             {"time", score_seconds(ms)}, {"timeMs", ms},
+             {"timingPolicy", raw.value("timingPolicy", J(nullptr))},
+             {"jumps", uint64_t(*jumps)}, {"strafes", uint64_t(*strafes)}, {"sync", *sync},
+             {"finishedAt", *date}, {"client", text(raw, "client", 32)},
+             {"localPb", raw.value("localPb", J(false)) == true},
+             {"eligible", raw.value("eligible", J(false)) == true}, {"verified", false}};
+ }
  J read(const std::string&id)const{try{const auto p=summary_path(id);if(std::filesystem::is_symlink(root_)||std::filesystem::is_symlink(root_/"runs")||!regular(p)||std::filesystem::file_size(p)>max_summary_bytes)return nullptr;std::ifstream in(p);J raw;in>>raw;return sanitize(raw);}catch(...){return nullptr;}}
- bool is_local_pb(const J&summary)const{const auto clean=sanitize(summary);if(clean.is_null()||!clean["eligible"].get<bool>())return false;for(const auto&e:files("runs",".json")){const auto name=e.path.filename().string();const auto old=read(name.substr(0,name.size()-5));if(old.is_object()&&old["eligible"]==true&&old["map"]==clean["map"]&&old["style"]==clean["style"]&&old["track"]==clean["track"]&&old["time"].get<double>()<=clean["time"].get<double>())return false;}return true;}
+ bool is_local_pb(const J&summary)const{const auto clean=sanitize(summary);if(clean.is_null()||!clean["eligible"].get<bool>())return false;for(const auto&e:files("runs",".json")){const auto name=e.path.filename().string();const auto old=read(name.substr(0,name.size()-5));if(old.is_object()&&old["eligible"]==true&&old["map"]==clean["map"]&&old["style"]==clean["style"]&&old["track"]==clean["track"]&&score_ms(old)<=score_ms(clean))return false;}return true;}
  J archive(const std::string&id,const J&raw){ensure();J clean=sanitize(raw);if(clean.is_null())throw std::runtime_error("Invalid finish summary");clean["localPb"]=false;
  // PB indices outlive bounded summary pruning. A damaged/full index cannot invent a PB.
  const auto pbFile=root_/"pbs.json";J pbs=J::object();bool indexValid=true;if(std::filesystem::exists(pbFile)){try{if(!regular(pbFile)||std::filesystem::file_size(pbFile)>1024*1024)throw std::runtime_error("Invalid PB index");std::ifstream input(pbFile);input>>pbs;if(!pbs.is_object()||pbs.size()>4096)throw std::runtime_error("Invalid PB index");}catch(...){indexValid=false;}}
  const std::string key=J::array({clean["map"],clean["style"],clean["track"]}).dump();
- if(indexValid&&clean["eligible"]==true){const auto found=pbs.find(key);const bool known=found!=pbs.end();bool validBest=!known||(found->is_number()&&std::isfinite(found->get<double>())&&found->get<double>()>0&&found->get<double>()<=86400);if(validBest&&(known||pbs.size()<4096)){const double best=known?found->get<double>():std::numeric_limits<double>::infinity();clean["localPb"]=clean["time"].get<double>()<best&&is_local_pb(clean);if(clean["time"].get<double>()<best){pbs[key]=clean["time"];atomic_write(pbFile,pbs.dump());}}}
+ if (indexValid && clean["eligible"] == true) {
+     const auto found = pbs.find(key);
+     const bool known = found != pbs.end();
+     std::optional<int64_t> best;
+     if (known) {
+         if (found->is_number()) {
+             const double seconds = found->get<double>();
+             if (std::isfinite(seconds) && seconds > 0 && seconds <= 86400) best = score_ms(seconds);
+         } else if (found->is_object()) {
+             if (const auto ms = number(*found, "timeMs", 86400000, true); ms && *ms > 0) best = int64_t(*ms);
+         }
+     }
+     if ((!known || best) && (known || pbs.size() < 4096)) {
+         const auto ms = score_ms(clean);
+         const bool faster = !best || ms < *best;
+         clean["localPb"] = faster && is_local_pb(clean);
+         if (faster) {
+             pbs[key] = {{"timeMs", ms}};
+             atomic_write(pbFile, pbs.dump());
+         }
+     }
+ }
  atomic_write(summary_path(id),clean.dump());auto summaries=files("runs",".json");for(size_t i=maxRuns_;i<summaries.size();i++){const auto name=summaries[i].path.filename().string(),oldId=name.substr(0,name.size()-5);std::filesystem::remove(summaries[i].path);const auto capture=capture_path(oldId);if(regular(capture))std::filesystem::remove(capture);}return clean;}
  std::optional<std::filesystem::path> screenshot(const std::string&id)const{try{if(read(id).is_null())return std::nullopt;const auto p=capture_path(id);if(std::filesystem::is_symlink(root_)||std::filesystem::is_symlink(root_/"captures")||!regular(p))return std::nullopt;const auto n=std::filesystem::file_size(p);if(!n||n>maxShotBytes_||n>maxTotalBytes_)return std::nullopt;std::ifstream in(p,std::ios::binary);char sig[8]{};in.read(sig,8);if(in.gcount()!=8||std::string(sig,8)!=std::string("\x89PNG\r\n\x1a\n",8))return std::nullopt;return std::filesystem::absolute(p);}catch(...){return std::nullopt;}}
  void attach(const std::string&id,const std::string&png){ensure();if(read(id).is_null()||png.size()<8||png.size()>maxShotBytes_||png.size()>maxTotalBytes_||png.compare(0,8,"\x89PNG\r\n\x1a\n",8))throw std::runtime_error("Invalid vault screenshot");atomic_write(capture_path(id),png);size_t kept=0;uintmax_t bytes=0;for(const auto&e:files("captures",".png")){if(!e.bytes||e.bytes>maxShotBytes_||kept>=maxShots_||e.bytes>maxTotalBytes_-bytes){std::filesystem::remove(e.path);continue;}kept++;bytes+=e.bytes;}}
