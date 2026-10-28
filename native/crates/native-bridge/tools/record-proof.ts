@@ -56,7 +56,11 @@ const decoded=await decodeReplay(readFileSync(nativeBhr));const checked=simulate
 if(!checked.checkpointsMatch||checked.timer.status!=="finished"||checked.timer.startTick!==summary.timer.startTick||checked.timer.endTick!==summary.timer.endTick)throw new Error("native BHR failed canonical replay verification");
 const verified=verifyReplay(core,decoded,decoded.header.zones,{mapSha256:hash,ranked:true});
 if(!verified.valid)throw new Error("native BHR rejected by shared ranked verifier: "+verified.problems.join("; "));
-if(summary.timer.timeMs!==verified.timeMs)throw new Error("native ms differs from verifier ms");
+// The ranked verifier re-times rules-1 replays by the current start-zone rules, so an old fixture's ranked time can
+// differ from its recorded timer. New native runs record rules 2, where the two must match exactly.
+const retimedLegacy=(decoded.header.timerRules??1)<2;
+if(!retimedLegacy&&summary.timer.timeMs!==verified.timeMs)throw new Error("native ms differs from verifier ms");
+if(retimedLegacy)console.error(`rules-1 fixture: native ${summary.timer.timeMs} ms as recorded, verifier ${verified.timeMs} ms re-timed`);
 const changed=await decodeReplay(readFileSync(nativeBhr));changed.checkpoints[0].position[0]=Math.fround(changed.checkpoints[0].position[0]+1);
 const mutation=verifyReplay(core,changed,changed.header.zones,{mapSha256:hash,ranked:true});
 if(mutation.valid||mutation.checkpointsMatch)throw new Error("shared verifier accepted mutated native checkpoint");
