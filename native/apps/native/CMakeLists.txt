@@ -334,6 +334,9 @@ if(BUILD_TESTING)
         target_compile_options(bunnyhop-native-input-tests PRIVATE -ffp-contract=off)
     endif()
     add_test(NAME native_input COMMAND bunnyhop-native-input-tests)
+    add_executable(bunnyhop-native-timed-input-tests src/timed_input_tests.cpp)
+    target_include_directories(bunnyhop-native-timed-input-tests PRIVATE include vendor src)
+    add_test(NAME native_timed_input COMMAND bunnyhop-native-timed-input-tests)
     # Turn-bind admission oracle for the optional server cross-check
     # (crates/native-bridge/tools/check-native-turn-admission.ts); built, not run by CTest.
     add_executable(bunnyhop-native-input-turn-oracle src/native_input_turn_oracle.cpp)

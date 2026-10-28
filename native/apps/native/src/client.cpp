@@ -1,6 +1,8 @@
 #include "bunnyhop_native.h"
 #include "native_input.hpp"
 #include "mouse_diagnostics.hpp"
+#include "raw_keyboard.hpp"
+#include "input_timeline.hpp"
 #include "native_math.hpp"
 #include "menu_webview.hpp"
 #include "online.hpp"
@@ -73,6 +75,8 @@ struct Options {
     uint64_t frames = 0;
     double sensitivity = 2;
     bool hidden = false, help = false, no_menu = false, windowed = false, sensitivity_set=false, menu_home_smoke=false;
+    // Comparator: the pre-0.5.2 per-frame proration and latest-polled keys instead of timestamped input.
+    bool legacy_input = false;
     std::string style="autohop", replay,tutorial_lesson,runtime_smoke,video_smoke,presentation_smoke;bool tutorial_demo=false;
     // Render checks: a fixed eye (Source x, y, z) and pitch, yaw, with no HUD or viewmodel.
     std::optional<std::array<float,5>> camera;
@@ -96,6 +100,7 @@ Options options(int argc, char **argv) {
         else if (arg == "--menu-home-smoke") {out.menu_smoke=value();out.menu_home_smoke=true;}
         else if (arg == "--no-menu") out.no_menu = true;
         else if (arg == "--windowed") out.windowed = true;
+        else if (arg == "--legacy-input") out.legacy_input = true;
         else if (arg == "--content-root") out.content_root = value();
         else if (arg == "--screenshot") out.screenshot = value();
         else if (arg == "--camera") {
@@ -378,7 +383,9 @@ int run(const Options &opt) {
     uint32_t tutorial_demo_start=0;
     std::function<void(const std::string&,bool)> start_tutorial;
     auto save_tutorial=[&](){if(!tutorial)return;tutorial_completed=tutorial->stateJSON().at("completed");native::save_settings(cache/"tutorial-progress.json",tutorial_completed);};
+    // Keys as last polled (actions, turnbinds, overlays). Timed ticks use their own key state (input.queue.keys).
     std::set<std::string> held_codes;
+    native::InputTimeline input_timeline;
     native::Chat chat;
     native::RestartGuard restart_guard;
     native::StartPoints start_points;native::KeptWeapons kept_weapons;
@@ -391,8 +398,11 @@ int run(const Options &opt) {
     auto apply_preferences=[&]() {
         hud_layout.clear();
         for(const auto &[id,at]:preferences.at("hudLayout").items())hud_layout[id]={at.at("x").get<float>(),at.at("y").get<float>()};
-        input.set_sensitivity(preferences.at("sensitivity").get<double>());
+        input_timeline.set_sensitivity(input, preferences.at("sensitivity").get<double>());
         input.vertical_sensitivity=preferences.at("verticalSensitivity").get<double>();input.separate_vertical=preferences.at("separateVertical").get<bool>();input.invert_y=preferences.at("invertY").get<bool>();
+        input_timeline.rebuild_binds(preferences.at("binds"));
+        const bool timed_input = !opt.legacy_input && preferences.value("timedInput", true);
+        input_timeline.set_timed(timed_input, input, held_codes);
         camera_controls.set_sensitivity(input.sensitivity);camera_controls.vertical_sensitivity=input.vertical_sensitivity;camera_controls.separate_vertical=input.separate_vertical;camera_controls.invert_y=input.invert_y;
         hud.preferences(preferences);audio.preferences(preferences);
         SDL_GL_SetSwapInterval(opt.frames?0:preferences.at("vsync").get<bool>()?1:0);
@@ -450,13 +460,23 @@ int run(const Options &opt) {
     native::InputClock input_clock;
     // A focus, menu or restart reset: the simulation starts again from now and
     // motion from before it is dropped rather than handed to the next tick.
-    auto reset_input_timing=[&]() {accumulator=0;input.clear();camera_controls.clear();SDL_FlushEvent(SDL_EVENT_MOUSE_MOTION);input_clock.reset();leave_hold.cancel();restart_guard.cancel();};
+    auto reset_input_timing=[&]() {
+        accumulator=0;
+        input_timeline.restart(input, held_codes);
+        camera_controls.clear();
+        SDL_FlushEvent(SDL_EVENT_MOUSE_MOTION);
+        input_clock.reset();
+        leave_hold.cancel();
+        restart_guard.cancel();
+    };
     auto capture=[&](bool on) {
         if(chat.active){chat.close();SDL_StopTextInput(window.get());}
-        reset_input_timing();held_codes.clear();
+        input_timeline.release(input, held_codes);
+        reset_input_timing();
         if (!SDL_SetWindowRelativeMouseMode(window.get(),on)) {
             captured=false; std::cerr << "Relative mouse mode failed: " << SDL_GetError() << '\n';
         } else captured=on;
+        native::set_raw_keyboard(captured);
         input_clock.reset();
     };
     auto show_menu=[&](bool on) {
@@ -476,14 +496,26 @@ int run(const Options &opt) {
     auto chat_suggest=[&](){++chat_request;if(menu&&menu_ready)menu->evaluate_js("window.bunnyhopNativeMenu?.onChatSuggest?.("+nlohmann::json({{"text",chat.input},{"request",chat_request}}).dump()+")");};
     auto open_chat=[&](bool command){
         if(!core||playback||!captured||!menu||!menu_ready)return;
-        input.clear();camera_controls.clear();held_codes.clear();leave_hold.cancel();restart_guard.cancel();
+        input_timeline.release(input, held_codes);
+        camera_controls.clear();leave_hold.cancel();restart_guard.cancel();
         // Keep gameplay running with neutral input while exposing the pointer for chat links.
         chat.open(command);SDL_SetWindowRelativeMouseMode(window.get(),false);SDL_StartTextInput(window.get());
+        native::set_raw_keyboard(false);
         int w=0,h=0;SDL_GetWindowSize(window.get(),&w,&h);SDL_Rect area{16,std::max(0,h-120),std::max(1,w-32),32};SDL_SetTextInputArea(window.get(),&area,0);
         chat_suggest();
     };
     bool chat_drag=false;
-    auto close_chat=[&](){chat_drag=false;chat.close();if(captured&&focused&&(!menu||!menu->visible()))SDL_SetWindowRelativeMouseMode(window.get(),true);SDL_StopTextInput(window.get());input.clear();camera_controls.clear();held_codes.clear();};
+    auto close_chat=[&](){
+        chat_drag=false;
+        chat.close();
+        if(captured&&focused&&(!menu||!menu->visible())) {
+            SDL_SetWindowRelativeMouseMode(window.get(),true);
+            native::set_raw_keyboard(true);
+        }
+        SDL_StopTextInput(window.get());
+        input_timeline.release(input, held_codes);
+        camera_controls.clear();
+    };
     auto room_control=[&](const nlohmann::json &command){if(menu&&menu_ready)menu->evaluate_js("window.bunnyhopNativeMenu?.onRoomControl?.("+command.dump()+")");};
     auto run_event=[&](nlohmann::json event) {
         if(!native::practice_allows_event(practice.active,event.value("type",std::string()))||!turn_admission.allows_event(event.value("type",std::string())))return;
@@ -794,12 +826,6 @@ int run(const Options &opt) {
                     if(!id.empty()){third_person=false;practice.clear(core.get());selected_style="autohop";active_track=0;if(restart)reset();}
     };
     uint32_t last_slot=3,observed_slot=3;
-    auto movement_bit=[](const std::string &action)->uint32_t {
-        if(action=="forward")return native::forward;if(action=="back")return native::back;
-        if(action=="left")return native::left;if(action=="right")return native::right;
-        if(action=="jump")return native::jump;if(action=="duck")return native::duck;
-        if(action=="use")return native::use;if(action=="attack")return native::attack;if(action=="attack2")return native::attack2;return 0;
-    };
     // Turnbinds: +left / +right turn at yawSpeed degrees per second (cl_yawspeed),
     // or yawSpeedAlt while Turn modifier is held. Positive is left (yaw goes up).
     auto turn_rate=[&]()->double {
@@ -877,7 +903,7 @@ int run(const Options &opt) {
         else if(action=="giveUsp"||action=="giveGlock"){kept_weapons.cancel();input.pulse=(input.pulse&~native::weapon_command_mask)|((action=="giveUsp"?3u:2u)<<native::give_shift);}
 
     };
-    auto handle_code=[&](const std::string &code,bool down,bool repeat=false,bool wheel=false) {
+    auto handle_code=[&](const std::string &code,bool down,bool repeat=false,bool wheel=false,uint64_t stamp=0) {
         if(code.empty())return;
         if(down&&!repeat)for(const char *action:{"chat","commandChat"})for(const auto &key:preferences.at("binds").at(action))if(key==code){open_chat(std::string(action)=="commandChat");return;}
         if(gun_menu.open&&down&&!repeat&&code.size()==6&&code.starts_with("Digit")){const auto picked=gun_menu.key(code.back()-'0',weapon_context());if(!picked.refusal.empty())toast(picked.refusal);if(picked.weapon){kept_weapons.cancel();input.pulse=(input.pulse&~native::weapon_command_mask)|(*picked.weapon<<native::give_shift);}if(picked.handled)return;}
@@ -890,10 +916,10 @@ int run(const Options &opt) {
                 const char *actions[]={"save","tele","prev","next","noclip","keepVelocity"};practice_action(actions[pick-1]);return;
             }
         }
-        if(down)held_codes.insert(code);else held_codes.erase(code);
+        input_timeline.key(held_codes, code, down, wheel, stamp, SDL_GetTicksNS());
         input.held=0;
         for(auto binding=preferences["binds"].begin();binding!=preferences["binds"].end();++binding) {
-            const auto bit=movement_bit(binding.key());bool matching=false,held=false;
+            const auto bit=native::movement_bit(binding.key());bool matching=false,held=false;
             for(const auto &raw:binding.value()) {const auto key=raw.get<std::string>();matching|=key==code||(wheel&&key=="MouseWheel");held|=held_codes.contains(key);}
             if(bit){if(bit==native::attack2&&matching&&down&&!repeat&&core&&!playback&&!room.spectator_target){BhWeaponReport weapon{};if(bh_weapon_report(core.get(),&weapon))scope.secondary(weapon.active);}
                 if(wheel&&matching&&down)input.pulse|=bit;else if(held)input.held|=bit;}
@@ -1099,17 +1125,28 @@ int run(const Options &opt) {
                         if(event.key.scancode==SDL_SCANCODE_ESCAPE) show_menu(!menu||!menu->visible());
 
                     }
-                    if(captured)handle_code(native::key_code(event.key.scancode),down,event.key.repeat);
+                    if(captured) {
+                        const auto code = native::key_code(event.key.scancode);
+                        handle_code(code, down, event.key.repeat, false, event.key.timestamp);
+                    }
                     break;
                 }
                 case SDL_EVENT_TEXT_INPUT: if(chat.active){chat.insert(event.text.text);chat_suggest();}break;
                 case SDL_EVENT_TEXT_EDITING: if(chat.active)chat.composition=native::Chat::clean(event.edit.text,512);break;
-                case SDL_EVENT_MOUSE_MOTION:
-                    if(mouse_diagnostics.active&&captured&&focused&&!chat.active)mouse_diagnostics.motion(event.motion.timestamp,SDL_GetTicksNS());
+                case SDL_EVENT_MOUSE_MOTION: {
+                    const uint64_t received=SDL_GetTicksNS();
+                    if(mouse_diagnostics.active&&captured&&focused&&!chat.active) {
+                        mouse_diagnostics.motion(event.motion.timestamp, received);
+                    }
                     if(video_capture||director_job||video_encoder.busy()){replay_controls.dragging=false;replay_orbit_drag=false;break;}
                     if(playback&&replay_controls.dragging&&!chat.active&&(!menu||!menu->visible())){int w,h;SDL_GetWindowSizeInPixels(window.get(),&w,&h);const auto geometry=native::HudGeometry(w,h,100);replay_controls.motion(native::ReplayControls::layout(geometry.width,geometry.height),event.motion.x*SDL_GetWindowPixelDensity(window.get())/geometry.scale,playback_info.value("totalTicks",0u));break;}
                     if(chat.active&&chat_drag){const float scale=SDL_GetWindowPixelDensity(window.get());if(const auto byte=hud.chat_input_byte(event.motion.x*scale,event.motion.y*scale,chat.input))chat.position(*byte,true);}
-                    if(captured&&focused&&!chat.active){if(playback&&replay_camera.mode=="free")camera_controls.accumulate(event.motion.xrel,event.motion.yrel);else if(playback&&replay_camera.mode=="chase")replay_camera.orbit(event.motion.xrel,event.motion.yrel);else if(!playback)input.accumulate(event.motion.xrel,event.motion.yrel);}break;
+                    if(captured&&focused&&!chat.active){if(playback&&replay_camera.mode=="free")camera_controls.accumulate(event.motion.xrel,event.motion.yrel);else if(playback&&replay_camera.mode=="chase")replay_camera.orbit(event.motion.xrel,event.motion.yrel);else if(!playback){
+                        const auto &motion = event.motion;
+                        input_timeline.motion(input, motion.timestamp, received, motion.xrel, motion.yrel);
+                    }}
+                    break;
+                }
                 case SDL_EVENT_MOUSE_BUTTON_DOWN:
                 case SDL_EVENT_MOUSE_BUTTON_UP: {
                     if(video_capture||director_job||video_encoder.busy()){replay_controls.dragging=false;replay_orbit_drag=false;break;}
@@ -1126,7 +1163,10 @@ int run(const Options &opt) {
                         const auto code=native::mouse_code(event.button.button);bool custom=false;for(auto binding=preferences["binds"].begin();binding!=preferences["binds"].end();++binding)if(binding.key()!="attack"&&binding.key()!="attack2")for(const auto &key:binding.value())custom|=key==code;
                         if(!custom&&room.spectator_target&&down&&(event.button.button==SDL_BUTTON_LEFT||event.button.button==SDL_BUTTON_RIGHT))room_control({{"action",event.button.button==SDL_BUTTON_LEFT?"next":"previous"}});
                         else if(!custom&&room.spectator_target&&down&&event.button.button==SDL_BUTTON_MIDDLE)third_person=!third_person;
-                        else handle_code(native::mouse_code(event.button.button),down);
+                        else {
+                            const auto code = native::mouse_code(event.button.button);
+                            handle_code(code, down, false, false, event.button.timestamp);
+                        }
                     }
                     break;
                 }
@@ -1230,7 +1270,9 @@ int run(const Options &opt) {
                     request_map(message.at("id").get<std::string>());
                 }
                 else if(type=="style") {if(!gauntlet_id.empty())throw std::runtime_error("Gauntlets are Normal style on the main track.");if(download.valid())throw std::runtime_error("A map is loading");const auto id=message.at("id").get<std::string>();if(!native::styles.contains(id))throw std::runtime_error("Unknown style");selected_style=id;active_track=0;reset();}
-                else if(type=="settings") {save_window();auto changed=native::patch_settings(preferences,message.at("patch"));const auto effective=window_for_menu(changed,menu&&menu->visible());if(!window_controller.apply(effective))throw std::runtime_error(window_controller.error());native::save_settings(cache/"settings.json",changed);preferences=std::move(changed);input.held=input.pulse=0;held_codes.clear();apply_preferences();error.clear();}
+                else if(type=="settings") {save_window();auto changed=native::patch_settings(preferences,message.at("patch"));const auto effective=window_for_menu(changed,menu&&menu->visible());if(!window_controller.apply(effective))throw std::runtime_error(window_controller.error());native::save_settings(cache/"settings.json",changed);preferences=std::move(changed);
+                    input_timeline.settings_changed(input, held_codes);
+                    apply_preferences();error.clear();}
                 else if(type=="window") {const auto action=message.at("action").get<std::string>();bool ok=false;if(action=="center")ok=window_controller.center();else if(action=="minimize")ok=window_controller.minimize();else if(action=="maximize")ok=window_controller.maximize();else if(action=="toggleFullscreen"){save_window();auto changed=preferences;changed["windowMode"]=native::toggled_window_mode(window_controller.mode());const auto effective=window_for_menu(changed,menu&&menu->visible());ok=window_controller.apply(effective);if(ok){preferences=changed;native::save_settings(cache/"settings.json",preferences);}}else throw std::runtime_error("Unknown window action");if(!ok)throw std::runtime_error(window_controller.error());window_dirty=true;window_save_due=Clock::now()+std::chrono::milliseconds(500);}
                 else if(type=="replays")refresh_replays();
                 else if(type=="ghost"){ghost_enabled=ghost_handle&&message.at("enabled").get<bool>();ghost_slots[0].enabled=ghost_enabled;}
@@ -1407,6 +1449,7 @@ int run(const Options &opt) {
             }
         }
         const auto now=Clock::now();
+        const uint64_t now_ns=SDL_GetTicksNS();
         bool leave_held=false;for(const auto &key:preferences.at("binds").at("mainMenu"))leave_held|=held_codes.contains(key.get<std::string>());
         const auto leave_result=leave_hold.frame(epoch_ms(),leave_held,!captured||playback);
         if(leave_result==native::LeaveHold::Result::leave)leave_map();
@@ -1451,23 +1494,17 @@ int run(const Options &opt) {
         activity.frame(map_id,frame_seconds,std::chrono::duration<double>(now.time_since_epoch()).count(),activity_active);
         ++input_frame;input_frame_ms=frame_seconds*1000;
         const double step_dt=playback?playback_info.at("settings").value("tickInterval",dt):dt;
-        if(simulation_active) accumulator+=(opt.frames?step_dt:std::clamp(frame_seconds,0.0,.25))*(playback?playback_speed:1);
-        // Where simulated time has reached, on SDL's clock. accumulator is how
-        // far behind the simulation is, so now minus it is where the next tick
-        // starts. This frame's motion arrived now; the ticks below share it by
-        // how much of the span up to now each covers (see Input::take_tick).
-        const uint64_t wall_ns=SDL_GetTicksNS();
-        const uint64_t behind_ns=uint64_t(std::max(0.0,accumulator)*1e9);
-        uint64_t sim_ns=behind_ns<wall_ns?wall_ns-behind_ns:0;
-        const uint64_t tick_ns=uint64_t(step_dt*1e9);
-        // Not simulating means no tick will take it, so apply it now.
-        if(!simulation_active) input.consume_all(); else input.arrived(wall_ns);
+        if(simulation_active) {
+            const double max_frame = native::InputTimeline::kMaxFrameSeconds;
+            const double elapsed = opt.frames ? step_dt : std::clamp(frame_seconds, 0.0, max_frame);
+            accumulator += elapsed * (playback ? playback_speed : 1);
+        }
+        uint64_t sim_ns = native::InputTimeline::tick_start_ns(now_ns, accumulator);
+        const uint64_t tick_ns = uint64_t(step_dt * 1e9);
+        input_timeline.begin_frame(input, simulation_active, now_ns);
         while(accumulator>=step_dt) {
-            // --frames is a deterministic mode with no wall clock to share by,
-            // so a tick there takes whatever is waiting.
             const double counts_before=input.yaw_counts;
-            if(opt.frames) input.consume_all();
-            else {input.take_tick(sim_ns,sim_ns+tick_ns);sim_ns+=tick_ns;}
+            input_timeline.take_tick(input, sim_ns, tick_ns, opt.frames != 0);
             const double mouse_counts=input.yaw_counts-counts_before;
             prev=curr;const BhState tutorial_pre=curr;
             BhCmd cmd{};
@@ -1483,13 +1520,20 @@ int run(const Options &opt) {
                         score_notice="Practice turn controls: local replay only";
                     }
                 }
-                input.held=0;for(auto b=preferences["binds"].begin();b!=preferences["binds"].end();++b){const auto bit=movement_bit(b.key());if(bit)for(const auto &key:b.value())if(held_codes.contains(key.get<std::string>()))input.held|=bit;}if(!(input.pulse&native::give_mask))if(const auto give=kept_weapons.next())input.pulse=(input.pulse&~native::weapon_command_mask)|(give<<native::give_shift);cmd=input.command();
+                input.held = input_timeline.held(held_codes);
+                if(!(input.pulse&native::give_mask)) {
+                    if(const auto give=kept_weapons.next()) {
+                        input.pulse=(input.pulse&~native::weapon_command_mask)|(give<<native::give_shift);
+                    }
+                }
+                cmd=input.command();
                 if(practice.noclip){BhSnapshot snapshot{};require(bh_noclip_move(&practice.flight,&cmd,dt),core.get(),"Moving noclip");require(bh_practice_noclip_tick(core.get(),&practice.flight,&snapshot),core.get(),"Stepping practice noclip");curr=snapshot.player;}
                 else{const auto look=input.look_sample();require(bh_step_look_v2(core.get(),&cmd,look?&*look:nullptr,&curr),core.get(),"Stepping simulation");require(bh_last_command(core.get(),&cmd),core.get(),"Reading filtered command");input.events(curr);}}
             renderer->simulation_tick();hud.tick(curr);
             if(input_log&&!playback) {
                 const double moved=mouse_counts;
-                input_log<<curr.tick<<','<<input_frame<<','<<input_frame_ms<<','<<double(sim_ns)/1e6<<','<<moved<<','<<input.pending_counts()<<','
+                input_log<<curr.tick<<','<<input_frame<<','<<input_frame_ms<<','<<double(sim_ns)/1e6<<','<<moved<<','
+                    <<input_timeline.pending_counts(input)<<','
                     <<cmd.buttons<<(cmd.side>0?"R":cmd.side<0?"L":"")<<(cmd.forward>0?"F":cmd.forward<0?"B":"")<<','
                     <<std::hypot(double(curr.velocity[0]),double(curr.velocity[1]))<<','<<int(curr.grounded!=0)<<','<<int((curr.events&2u)!=0)<<'\n';
             }
@@ -1613,7 +1657,8 @@ int run(const Options &opt) {
                 else{renderer->set_replay_actor(nullptr,0,0);if(tutorial_demo){ghost_enabled=false;tutorial_demo=false;}}
             } else renderer->set_replay_actor(nullptr,0,0);
             BhRunState display_run=run_state;std::string display_style=playback?playback_info.value("style",active_style):active_style;std::optional<native_render::Actor> spectated_actor;
-            const double steady_seconds=std::chrono::duration<double>(now.time_since_epoch()).count();auto actors=room.actors(steady_seconds);auto camera_input=input;camera_input.consume_all();
+            const double steady_seconds=std::chrono::duration<double>(now.time_since_epoch()).count();auto actors=room.actors(steady_seconds);
+            auto camera_input=input_timeline.preview(input);
             // Show turnbind motion between ticks too, so turning is smooth at any frame rate.
             if(simulation_active&&!playback&&!spectator)if(const double rate=turn_rate())camera_input.turn(rate,std::clamp(accumulator,0.0,dt));std::string shown_notice=tutorial&&tutorial->is_active()&&!playback?tutorial->notice():score_notice;
             const auto race_notice=room_modes.notice(epoch_ms());if(!race_notice.empty())shown_notice=race_notice;
@@ -1902,7 +1947,7 @@ int main(int argc,char **argv) {
         Options opt=options(argc,argv);
         if(opt.help) {
             std::cout << "Usage: bunnyhop-native [--map MAP.bsp | --online-map NAME] [--content-root DIR] [--sensitivity 2]\n"
-                         "  [--menu-html PATH] [--no-menu] [--windowed] [--frames N] [--screenshot output.ppm] [--camera x,y,z,pitch,yaw] [--hidden]\n"
+                         "  [--menu-html PATH] [--no-menu] [--windowed] [--legacy-input] [--frames N] [--screenshot output.ppm] [--camera x,y,z,pitch,yaw] [--hidden]\n"
                          "  [--runtime-smoke OUTPUT_DIR --replay PATH] (offline lifecycle checks with --map; private data, no network)\n"
                          "  [--tutorial jump|strafe|speed|final] [--tutorial-demo] (tutorial map only)\n"
                          "  [--menu-smoke OUTPUT_PREFIX] (with --online-map; live API reads only, no scores)\n"

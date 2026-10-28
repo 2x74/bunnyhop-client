@@ -22,6 +22,8 @@ inline Json default_settings() {
         // Turnbinds (+left / +right): degrees per second, like cl_yawspeed. The alt speed is used while Turn modifier is held.
         // 210 is CS:S's cl_yawspeed, the web's fixed turn and the only speed the server ranks.
         {"invertY",false},{"holdRestart",false},{"mouseDiagnostics",false},
+        // Hidden: false goes back to the per-frame proration comparator (also --legacy-input). See timed_input.hpp.
+        {"timedInput",true},
         {"crosshairStyle","cross"},{"crosshairColor","#eee8db"},{"crosshairSize",6.0},{"crosshairGap",3.0},{"crosshairThickness",2.0},{"crosshairAlpha",1.0},{"crosshairOutline",true},
         {"viewmodelFov",54.0},{"viewmodelX",.6},{"viewmodelY",1.5},{"viewmodelZ",-.9},{"viewmodelLeftHand",false},{"viewmodelBob",1.0},{"viewmodelSway",1.0},
         {"playerModel","bunny"},{"ghostModel","same"},{"showGhost",true},{"ghostOpacity",.4},{"ghostNearFade",true},{"ghostTag",true},{"othersAudio",true},{"ghostAudio",true},
