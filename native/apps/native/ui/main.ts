@@ -262,7 +262,7 @@ function render(): void {
   } else if(screen==="room") {
     app.replaceChildren(h("section.panel.panel-wide.native-room-screen",null,heading("Current room"),roomPanel(roomService,id=>openProfile(id),notice,text=>chatService.submit(text))));
   } else if(screen==="ranks") {
-    app.replaceChildren(h("section.panel.panel-wide.native-ranks",null,heading("Ranks"),ranksScreen(rankScope,{page:rankPage,onChange:(scope,page)=>{rankScope=scope;rankPage=page;}})));
+    app.replaceChildren(h("section.panel.panel-wide.panel-ranks.native-ranks",null,heading("Ranks"),ranksScreen(rankScope,{page:rankPage,onChange:(scope,page)=>{rankScope=scope;rankPage=page;}})));
   } else if(screen==="stats") {
     const { head, tabs } = tabbedHeading("Stats");
     const stats = statsScreen({ tabsHost: tabs, play: () => show("maps") });
