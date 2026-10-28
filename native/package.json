@@ -12,7 +12,7 @@
     "format": "prettier --write \"apps/native/**/*.ts\" \"tools/**/*.ts\"",
     "format:check": "prettier --check \"apps/native/**/*.ts\" \"tools/**/*.ts\"",
     "test": "bun test ./apps/native/ui",
-    "check": "bun run menu && bun run typecheck && bun run test",
+    "check": "bun run menu && bun run typecheck && bun run format:check && bun run test",
     "package": "bun run wasm && bun apps/native/package.ts",
     "wasm": "bun apps/native/ensure-wasm.ts"
   },

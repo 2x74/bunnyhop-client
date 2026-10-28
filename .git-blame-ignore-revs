@@ -3,3 +3,6 @@
 
 # clang-format: mechanical native C++ and Objective-C++ reformat.
 9b73443d092ec837eba56002d28e4455b7d8350f
+
+# Prettier: mechanical native TypeScript reformat.
+06ad3aa35c86e3013ceeaf792e3374ff135bef79
