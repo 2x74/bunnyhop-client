@@ -92,3 +92,145 @@ template<class Hud>void draw_replay_controls(Hud&hud,int width,int height,float 
  const char* labels[]={"|<","-5s",paused?"Play":"Pause","+5s",">|","Slower","Faster","Camera"};for(int i=0;i<8;++i){const float x=b.x+i*b.width/8;hud.overlay_rect(p(x+2),p(b.y+60),p(b.width/8-4),p(29),{.15f,.17f,.22f,1});hud.overlay_text(p(x+b.width/16),p(b.y+67),labels[i],p(13),{.94f,.91f,.85f,1},true);}hud.overlay_end(width,height);
 }
 }
+
+namespace native {
+inline uint32_t compare_tick(uint32_t playback_tick, uint32_t playback_start, double playback_interval,
+                             uint32_t compare_start, uint32_t compare_end, double compare_interval) {
+    if (!std::isfinite(playback_interval) || !std::isfinite(compare_interval) || playback_interval <= 0 ||
+        compare_interval <= 0) {
+        return compare_start;
+    }
+    const double elapsed = (double(playback_tick) - playback_start) * playback_interval;
+    return uint32_t(std::clamp(std::round(compare_start + elapsed / compare_interval), 0., double(compare_end)));
+}
+} // namespace native
+#ifdef BUNNYHOP_NATIVE_RENDERER_AVAILABLE
+namespace native {
+// The compare handle never enters the live replay/reset pipeline; loading it preserves playback and recording state.
+class ReplayCompare {
+    BhContext *core_ = nullptr;
+    uint32_t handle_ = 0, start_ = 0, end_ = 0, playback_start_ = 0;
+    double interval_ = 1. / 64;
+    native_render::Actor actor_;
+
+  public:
+    void clear() {
+        if (core_ && handle_) {
+            bh_ghost_free(core_, handle_);
+        }
+        core_ = nullptr;
+        handle_ = 0;
+    }
+    void load(BhContext *core, const std::string &path, native_render::GhostSource source,
+              const nlohmann::json &playback) {
+        clear();
+        const uint32_t handle = bh_ghost_load(core, path.c_str());
+        if (!handle) {
+            throw std::runtime_error(bh_last_error(core));
+        }
+        try {
+            size_t length = 0;
+            const auto *raw = bh_ghost_info(core, handle, &length);
+            if (!raw) {
+                throw std::runtime_error("Missing compare ghost metadata");
+            }
+            const auto info = nlohmann::json::parse(raw, raw + length);
+            if (info.at("map") != playback.at("map") || info.at("track") != playback.at("track") ||
+                info.at("style") != playback.at("style")) {
+                throw std::runtime_error("Compare ghost must match replay map, track and style");
+            }
+            actor_ = {};
+            actor_.id = "ghost-compare";
+            actor_.name = info.contains("player") && info.at("player").is_string()
+                              ? info.at("player").get<std::string>()
+                              : "Compare";
+            actor_.loadout = info.contains("packedLoadout") && info.at("packedLoadout").is_string()
+                                 ? info.at("packedLoadout").get<std::string>()
+                                 : std::string();
+            actor_.outfit = "outfit-cream";
+            actor_.opacity = .55f;
+            actor_.source = source;
+            playback_start_ = playback.value("startTick", 0u);
+            start_ = info.value("startTick", 0u);
+            end_ = info.value("endTick", info.value("totalTicks", 0u));
+            if (end_ <= start_)
+                end_ = info.value("totalTicks", 0u);
+            const auto &settings = info.at("settings");
+            interval_ = settings.value("tickInterval", 1. / 64);
+            core_ = core;
+            handle_ = handle;
+        } catch (...) {
+            bh_ghost_free(core, handle);
+            throw;
+        }
+    }
+    const native_render::Actor *sample(uint32_t tick, double interval) {
+        if (!handle_ || !core_) {
+            return nullptr;
+        }
+        const uint32_t at = compare_tick(tick, playback_start_, interval, start_, end_, interval_);
+        if (!bh_ghost_frame(core_, handle_, at, &actor_.frame)) {
+            return nullptr;
+        }
+        return &actor_;
+    }
+    bool active() const {
+        return handle_ != 0;
+    }
+    nlohmann::json state() const {
+        if (!active()) {
+            return nullptr;
+        }
+        return {{"name", actor_.name},
+                {"startTick", start_},
+                {"endTick", end_},
+                {"source", actor_.source == native_render::GhostSource::pb   ? "pb"
+                           : actor_.source == native_render::GhostSource::wr ? "wr"
+                                                                             : "custom"}};
+    }
+};
+template <class Renderer>
+void update_compare_actor(Renderer &renderer, ReplayCompare &compare, uint32_t tick, const ReplayRange &range,
+                          bool playback) {
+    renderer.set_compare_actor(playback ? compare.sample(tick, range.tick_interval) : nullptr);
+}
+inline void handle_replay_compare(ReplayCompare &compare, BhContext *core, const std::filesystem::path &directory,
+                                  const nlohmann::json &message, const nlohmann::json &playback) {
+    const auto action = message.at("action").get<std::string>();
+    if (action == "clear") {
+        compare.clear();
+        return;
+    }
+    if (action != "set")
+        throw std::runtime_error("Unknown replay compare action");
+    const auto id = message.at("id").get<std::string>();
+    if (id.empty() || id.size() > 200 || std::filesystem::path(id).filename() != id ||
+        std::filesystem::path(id).extension() != ".bhr")
+        throw std::runtime_error("Invalid compare replay id");
+    const auto source = message.value("source", std::string("custom"));
+    native::graphics_choice(source, {"pb", "wr", "custom"});
+    compare.load(core, (directory / id).string(), native_render::ghost_source(source), playback);
+}
+inline void load_imported_compare(ReplayCompare &compare, BhContext *core, const std::filesystem::path &path,
+                                  const nlohmann::json &message, const nlohmann::json &playback) {
+    const auto source = message.value("source", std::string("custom"));
+    native::graphics_choice(source, {"pb", "wr", "custom"});
+    compare.load(core, path.string(), native_render::ghost_source(source), playback);
+}
+template <class Slots> void sync_ghost_visibility(auto &renderer, const Slots &slots) {
+    for (unsigned slot = 0; slot < slots.size(); ++slot)
+        renderer.ghost_enabled(slot, slots[slot].enabled);
+}
+inline void set_requested_ghost_source(std::array<native_render::GhostSource, 4> &sources,
+                                       const nlohmann::json &message) {
+    const unsigned slot = message.value("ghostSlot", 0u);
+    if (slot >= sources.size())
+        throw std::runtime_error("Invalid ghost slot");
+    const auto source = message.value("source", std::string("custom"));
+    if (source != "pb" && source != "wr" && source != "custom")
+        throw std::runtime_error("Invalid ghost source");
+    sources[slot] = native_render::ghost_source(source);
+}
+
+} // namespace native
+#endif

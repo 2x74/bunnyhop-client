@@ -5,7 +5,41 @@
 #include <cmath>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <cstdint>
 namespace native_render {
+enum class GhostSource { none, pb, wr, custom };
+inline GhostSource ghost_source(std::string_view value) {
+    if (value == "pb") {
+        return GhostSource::pb;
+    }
+    return value == "wr" ? GhostSource::wr : GhostSource::custom;
+}
+inline std::array<float, 3> ghost_source_color(GhostSource source) {
+    const uint32_t hex = source == GhostSource::wr ? 0x4fa8ff : source == GhostSource::pb ? 0xffc23d : 0xe9f0fb;
+    return {float((hex >> 16) & 255) / 255, float((hex >> 8) & 255) / 255, float(hex & 255) / 255};
+}
+inline float srgb_linear(float value) {
+    return value <= .04045f ? value / 12.92f : std::pow((value + .055f) / 1.055f, 2.4f);
+}
+inline std::array<float, 3> linear_color(std::array<float, 3> color) {
+    for (auto &channel : color) {
+        channel = srgb_linear(channel);
+    }
+    return color;
+}
+inline float glow_distance(float distance) {
+    constexpr float fade_from = 1000, fade_to = 1800;
+    const float fraction = std::clamp((distance - fade_from) / (fade_to - fade_from), 0.f, 1.f);
+    return 1 - fraction * fraction * (3 - 2 * fraction);
+}
+inline constexpr int glow_halo_layers = 8;
+inline float halo_width(int layer) {
+    return .85f + layer * .52f;
+}
+inline float halo_alpha(int layer) {
+    return .08f * std::pow(1 - float(layer) / glow_halo_layers, 1.15f);
+}
 struct Glow {bool enabled=false,aura=true;float intensity=.7f;std::array<float,3> color{.741f,.329f,1};};
 inline std::optional<Glow> parse_glow(const nlohmann::json &value){
  if(!value.is_object())return std::nullopt;Glow glow;glow.enabled=value.contains("enabled")&&value["enabled"].is_boolean()&&value["enabled"].get<bool>();glow.aura=!value.contains("aura")||!value["aura"].is_boolean()||value["aura"].get<bool>();if(value.contains("intensity")&&value["intensity"].is_number()){const float n=value["intensity"];if(std::isfinite(n))glow.intensity=std::clamp(n,.25f,1.f);}

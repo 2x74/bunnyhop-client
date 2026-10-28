@@ -35,7 +35,19 @@ private:
     void snap(){chase_yaw=chase_z=chase_dist=NAN;eye_last_z=NAN;eye_error=0;fly_pos[0]=heading=NAN;}
     void look(const Point &from,const Point &at){for(int k=0;k<3;++k)position[k]=float(from[k]);const double dx=at[0]-from[0],dy=at[1]-from[1],dz=at[2]-from[2];yaw=std::atan2(dy,dx)/rad;pitch=-std::atan2(dz,std::hypot(dx,dy))/rad;}
 public:
-    bool set_mode(const std::string &value){if(value!="eye"&&value!="chase"&&value!="free"&&value!="flyby"&&value!="auto")return false;const bool keep_free=value=="free"&&initialized;mode=value;if(!keep_free)initialized=false;snap();shot_index=-1;last_seconds=NAN;return true;}
+  bool set_mode(const std::string &value) {
+      if (value != "eye" && value != "chase" && value != "free" && value != "flyby" && value != "auto" &&
+          value != "path" && value != "freePath")
+          return false;
+      const bool keep_free = value == "free" && initialized;
+      mode = (value == "path" || value == "freePath") ? "flyby" : value;
+      if (!keep_free)
+          initialized = false;
+      snap();
+      shot_index = -1;
+      last_seconds = NAN;
+      return true;
+  }
     void reset(){initialized=false;last_seconds=NAN;shot_index=-1;snap();}
     bool third_person()const{return mode=="auto"?active_mode!="eye":mode!="eye";}
     void orbit(double dx,double dy){orbit_yaw=wrap(orbit_yaw-dx*.3);orbit_pitch=std::clamp(orbit_pitch+dy*.25,-40.,70.);}

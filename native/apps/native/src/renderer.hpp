@@ -1,10 +1,14 @@
 #pragma once
+#define BUNNYHOP_NATIVE_RENDERER_AVAILABLE 1
 #include "bunnyhop_native.h"
 #include "native_input.hpp"
 #include "native_math.hpp"
 #include "render_shaders.hpp"
 #include "render_math.hpp"
 #include "ghost_trails.hpp"
+#include "graphics_settings.hpp"
+#include "paint.hpp"
+#include "measure.hpp"
 #include "zone_effects.hpp"
 #include "nlohmann/json.hpp"
 #include <filesystem>
@@ -31,48 +35,132 @@
 
 namespace {
 // All GL entry points come from the active SDL context, including on Linux.
-#define GL_FUNCTIONS(X) \
- X(void,Viewport,(GLint,GLint,GLsizei,GLsizei)) \
- X(void,ClearColor,(GLfloat,GLfloat,GLfloat,GLfloat)) \
- X(void,Clear,(GLbitfield)) X(void,Enable,(GLenum)) X(void,Disable,(GLenum)) \
- X(void,ColorMask,(GLboolean,GLboolean,GLboolean,GLboolean)) X(void,PolygonOffset,(GLfloat,GLfloat)) \
- X(void,DepthMask,(GLboolean)) X(void,DepthFunc,(GLenum)) \
- X(void,CullFace,(GLenum)) X(void,FrontFace,(GLenum)) X(void,BlendFunc,(GLenum,GLenum)) \
- X(void,GenVertexArrays,(GLsizei,GLuint*)) X(void,BindVertexArray,(GLuint)) \
- X(void,DeleteVertexArrays,(GLsizei,const GLuint*)) \
- X(void,GenBuffers,(GLsizei,GLuint*)) X(void,BindBuffer,(GLenum,GLuint)) \
- X(void,BufferData,(GLenum,GLsizeiptr,const void*,GLenum)) X(void,DeleteBuffers,(GLsizei,const GLuint*)) \
- X(void,EnableVertexAttribArray,(GLuint)) \
- X(void,VertexAttribPointer,(GLuint,GLint,GLenum,GLboolean,GLsizei,const void*)) \
- X(GLuint,CreateShader,(GLenum)) X(void,ShaderSource,(GLuint,GLsizei,const GLchar* const*,const GLint*)) \
- X(void,CompileShader,(GLuint)) X(void,GetShaderiv,(GLuint,GLenum,GLint*)) \
- X(void,GetShaderInfoLog,(GLuint,GLsizei,GLsizei*,GLchar*)) X(void,DeleteShader,(GLuint)) \
- X(GLuint,CreateProgram,(void)) X(void,AttachShader,(GLuint,GLuint)) X(void,LinkProgram,(GLuint)) \
- X(void,GetProgramiv,(GLuint,GLenum,GLint*)) X(void,GetProgramInfoLog,(GLuint,GLsizei,GLsizei*,GLchar*)) \
- X(void,DeleteProgram,(GLuint)) X(void,UseProgram,(GLuint)) \
- X(GLint,GetUniformLocation,(GLuint,const GLchar*)) \
- X(void,UniformMatrix4fv,(GLint,GLsizei,GLboolean,const GLfloat*)) \
- X(void,Uniform1i,(GLint,GLint)) X(void,Uniform1f,(GLint,GLfloat)) \
- X(void,Uniform4fv,(GLint,GLsizei,const GLfloat*)) \
- X(void,Uniform3fv,(GLint,GLsizei,const GLfloat*)) X(void,Uniform2fv,(GLint,GLsizei,const GLfloat*)) \
- X(void,Uniform1iv,(GLint,GLsizei,const GLint*)) X(void,Uniform3f,(GLint,GLfloat,GLfloat,GLfloat)) \
- X(void,GenTextures,(GLsizei,GLuint*)) X(void,BindTexture,(GLenum,GLuint)) \
- X(void,ActiveTexture,(GLenum)) X(void,TexParameteri,(GLenum,GLenum,GLint)) \
- X(void,TexImage2D,(GLenum,GLint,GLint,GLsizei,GLsizei,GLint,GLenum,GLenum,const void*)) \
- X(void,CopyTexSubImage2D,(GLenum,GLint,GLint,GLint,GLint,GLint,GLsizei,GLsizei)) \
- X(void,CopyTexImage2D,(GLenum,GLint,GLenum,GLint,GLint,GLsizei,GLsizei,GLint)) \
- X(void,GenerateMipmap,(GLenum)) X(void,DeleteTextures,(GLsizei,const GLuint*)) \
- X(void,DrawElements,(GLenum,GLsizei,GLenum,const void*)) \
- X(void,DrawArrays,(GLenum,GLint,GLsizei)) X(void,PixelStorei,(GLenum,GLint)) \
- X(void,ReadPixels,(GLint,GLint,GLsizei,GLsizei,GLenum,GLenum,void*)) \
- X(void,GetIntegerv,(GLenum,GLint*)) X(const GLubyte*,GetString,(GLenum)) \
- X(GLenum,GetError,(void)) X(void,Uniform2f,(GLint,GLfloat,GLfloat)) \
- X(void,GenFramebuffers,(GLsizei,GLuint*)) X(void,BindFramebuffer,(GLenum,GLuint)) X(void,DeleteFramebuffers,(GLsizei,const GLuint*)) \
- X(void,FramebufferTexture2D,(GLenum,GLenum,GLenum,GLuint,GLint)) X(GLenum,CheckFramebufferStatus,(GLenum)) \
- X(void,GenRenderbuffers,(GLsizei,GLuint*)) X(void,BindRenderbuffer,(GLenum,GLuint)) X(void,DeleteRenderbuffers,(GLsizei,const GLuint*)) \
- X(void,RenderbufferStorage,(GLenum,GLenum,GLsizei,GLsizei)) X(void,FramebufferRenderbuffer,(GLenum,GLenum,GLenum,GLuint)) \
- X(void*,MapBufferRange,(GLenum,GLintptr,GLsizeiptr,GLbitfield)) X(GLboolean,UnmapBuffer,(GLenum)) \
- X(GLsync,FenceSync,(GLenum,GLbitfield)) X(GLenum,ClientWaitSync,(GLsync,GLbitfield,GLuint64)) X(void,DeleteSync,(GLsync))
+#define GL_FUNCTIONS(X)                                                                                                        \
+    X(void, Viewport, (GLint, GLint, GLsizei, GLsizei))                                                                        \
+    X(void, ClearColor, (GLfloat, GLfloat, GLfloat, GLfloat))                                                                  \
+    X(void, Clear, (GLbitfield))                                                                                               \
+    X(void, Enable, (GLenum))                                                                                                  \
+    X(void, Disable, (GLenum))                                                                                                 \
+    X(void, ColorMask, (GLboolean, GLboolean, GLboolean, GLboolean))                                                           \
+    X(void, PolygonOffset, (GLfloat, GLfloat))                                                                                 \
+    X(void, DepthMask, (GLboolean))                                                                                            \
+    X(void, DepthFunc, (GLenum)) X(void, CullFace, (GLenum)) X(void, FrontFace, (GLenum)) X(                                   \
+        void, BlendFunc, (GLenum, GLenum)) X(void, GenVertexArrays, (GLsizei, GLuint *)) X(void, BindVertexArray,              \
+                                                                                           (GLuint))                           \
+        X(void, DeleteVertexArrays, (GLsizei, const GLuint *)) X(void, GenBuffers, (GLsizei, GLuint *)) X(                     \
+            void, BindBuffer, (GLenum, GLuint)) X(void, BufferData, (GLenum, GLsizeiptr, const void *, GLenum))                \
+            X(void, DeleteBuffers, (GLsizei, const GLuint *)) X(void, EnableVertexAttribArray, (GLuint)) X(                    \
+                void,                                                                                                          \
+                VertexAttribPointer,                                                                                           \
+                (GLuint, GLint, GLenum, GLboolean, GLsizei,                                                                    \
+                 const void                                                                                                    \
+                     *)) X(GLuint, CreateShader,                                                                               \
+                           (GLenum)) X(void, ShaderSource, (GLuint, GLsizei, const GLchar *const *, const GLint *))            \
+                X(void, CompileShader, (GLuint)) X(void, GetShaderiv, (GLuint, GLenum, GLint *)) X(                            \
+                    void,                                                                                                      \
+                    GetShaderInfoLog,                                                                                          \
+                    (GLuint, GLsizei, GLsizei *, GLchar *)) X(void, DeleteShader, (GLuint))                                    \
+                    X(GLuint, CreateProgram, (void)) X(void, AttachShader, (GLuint, GLuint)) X(void, LinkProgram, (GLuint)) X( \
+                        void,                                                                                                  \
+                        GetProgramiv,                                                                                          \
+                        (GLuint, GLenum,                                                                                       \
+                         GLint                                                                                                 \
+                             *)) X(void, GetProgramInfoLog,                                                                    \
+                                   (GLuint, GLsizei, GLsizei *, GLchar *)) X(void, DeleteProgram, (GLuint))                    \
+                        X(void, UseProgram, (GLuint)) X(GLint, GetUniformLocation, (GLuint, const GLchar *)) X(                \
+                            void,                                                                                              \
+                            UniformMatrix4fv,                                                                                  \
+                            (GLint, GLsizei, GLboolean,                                                                        \
+                             const GLfloat                                                                                     \
+                                 *)) X(void, Uniform1i,                                                                        \
+                                       (GLint, GLint)) X(void, Uniform1f, (GLint, GLfloat))                                    \
+                            X(void, Uniform4fv, (GLint, GLsizei, const GLfloat *)) X(                                          \
+                                void,                                                                                          \
+                                Uniform3fv,                                                                                    \
+                                (GLint, GLsizei,                                                                               \
+                                 const GLfloat                                                                                 \
+                                     *)) X(void, Uniform2fv, (GLint, GLsizei, const GLfloat *))                                \
+                                X(void, Uniform1iv, (GLint, GLsizei, const GLint *)) X(                                        \
+                                    void,                                                                                      \
+                                    Uniform3f,                                                                                 \
+                                    (GLint, GLfloat, GLfloat,                                                                  \
+                                     GLfloat)) X(void, GenTextures,                                                            \
+                                                 (GLsizei, GLuint *)) X(void, BindTexture, (GLenum, GLuint))                   \
+                                    X(void, ActiveTexture, (GLenum)) X(void, TexParameteri, (GLenum, GLenum, GLint)) X(        \
+                                        void,                                                                                  \
+                                        TexImage2D,                                                                            \
+                                        (GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum,                        \
+                                         const void                                                                            \
+                                             *)) X(void, CopyTexSubImage2D,                                                    \
+                                                   (GLenum, GLint, GLint, GLint, GLint, GLint, GLsizei, GLsizei))              \
+                                        X(void, CopyTexImage2D,                                                                \
+                                          (GLenum, GLint, GLenum, GLint, GLint, GLsizei, GLsizei,                              \
+                                           GLint)) X(void, GenerateMipmap,                                                     \
+                                                     (GLenum)) X(void, DeleteTextures, (GLsizei, const GLuint *))              \
+                                            X(void, DrawElements, (GLenum, GLsizei, GLenum, const void *)) X(                  \
+                                                void,                                                                          \
+                                                DrawElementsInstanced,                                                         \
+                                                (GLenum, GLsizei, GLenum, const void *,                                        \
+                                                 GLsizei)) X(void, DrawArraysInstanced,                                        \
+                                                             (GLenum, GLint, GLsizei, GLsizei))                                \
+                                                X(void, DrawArrays, (GLenum, GLint, GLsizei)) X(                               \
+                                                    void,                                                                      \
+                                                    PixelStorei,                                                               \
+                                                    (GLenum,                                                                   \
+                                                     GLint)) X(void, ReadPixels,                                               \
+                                                               (GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void *))       \
+                                                    X(void, GetIntegerv,                                                       \
+                                                      (GLenum,                                                                 \
+                                                       GLint *)) X(const GLubyte *, GetString,                                 \
+                                                                   (GLenum)) X(GLenum, GetError, (void))                       \
+                                                        X(void, Uniform2f, (GLint, GLfloat, GLfloat)) X(                       \
+                                                            void,                                                              \
+                                                            GenFramebuffers,                                                   \
+                                                            (GLsizei,                                                          \
+                                                             GLuint *)) X(void, BindFramebuffer, (GLenum, GLuint))             \
+                                                            X(void, DeleteFramebuffers, (GLsizei, const GLuint *)) X(          \
+                                                                void,                                                          \
+                                                                FramebufferTexture2D,                                          \
+                                                                (GLenum, GLenum, GLenum, GLuint,                               \
+                                                                 GLint)) X(GLenum, CheckFramebufferStatus, (GLenum))           \
+                                                                X(void, GenRenderbuffers, (GLsizei, GLuint *)) X(              \
+                                                                    void,                                                      \
+                                                                    BindRenderbuffer,                                          \
+                                                                    (                                                          \
+                                                                        GLenum,                                                \
+                                                                        GLuint)) X(void, DeleteRenderbuffers,                  \
+                                                                                   (GLsizei, const GLuint *))                  \
+                                                                    X(void, RenderbufferStorageMultisample,                    \
+                                                                      (GLenum, GLsizei, GLenum, GLsizei, GLsizei))             \
+                                                                        X(void, BlitFramebuffer,                               \
+                                                                          (GLint, GLint, GLint, GLint, GLint, GLint,           \
+                                                                           GLint, GLint,                                       \
+                                                                           GLbitfield,                                         \
+                                                                           GLenum))                                            \
+                                                                            X(void, TexParameterf,                             \
+                                                                              (GLenum, GLenum,                                 \
+                                                                               GLfloat)) X(void, GetFloatv,                    \
+                                                                                           (GLenum, GLfloat *))                \
+                                                                                X(void, RenderbufferStorage,                   \
+                                                                                  (GLenum, GLenum, GLsizei, GLsizei))          \
+                                                                                    X(void, FramebufferRenderbuffer,           \
+                                                                                      (GLenum, GLenum, GLenum,                 \
+                                                                                       GLuint))                                \
+                                                                                        X(void *, MapBufferRange,              \
+                                                                                          (GLenum, GLintptr,                   \
+                                                                                           GLsizeiptr,                         \
+                                                                                           GLbitfield)) X(GLboolean,           \
+                                                                                                          UnmapBuffer,         \
+                                                                                                          (GLenum))            \
+                                                                                            X(GLsync, FenceSync,               \
+                                                                                              (GLenum, GLbitfield))            \
+                                                                                                X(GLenum,                      \
+                                                                                                  ClientWaitSync,              \
+                                                                                                  (GLsync, GLbitfield,         \
+                                                                                                   GLuint64))                  \
+                                                                                                    X(void,                    \
+                                                                                                      DeleteSync,              \
+                                                                                                      (GLsync))
 struct Gl {
 #define DECLARE(ret,name,args) ret (APIENTRY *name) args = nullptr;
     GL_FUNCTIONS(DECLARE)
@@ -108,6 +196,97 @@ GLuint link_program(Gl &gl,const char *vertex_source,const char *fragment_source
 // first seen in here (MSVC's <deque> was).
 #include "source_hdr.hpp"
 
+class GhostRouteGeometry {
+    Gl &gl;
+    GLuint program = 0;
+    struct Mesh {
+        GLuint vao = 0, buffer = 0;
+        GLsizei count = 0;
+    };
+    std::array<Mesh, 4> meshes;
+    GLint projectionLocation = -1, colorLocation = -1;
+
+  public:
+    explicit GhostRouteGeometry(Gl &api) : gl(api) {
+        const char *vertex = R"(#version 330 core
+layout(location=0)in vec3 position;uniform mat4 projection;
+void main(){gl_Position=projection*vec4(position,1);}
+)";
+        const char *fragment = R"(#version 330 core
+uniform vec4 tint;out vec4 color;void main(){color=tint;}
+)";
+        program = link_program(gl, vertex, fragment);
+        projectionLocation = gl.GetUniformLocation(program, "projection");
+        colorLocation = gl.GetUniformLocation(program, "tint");
+        for (auto &mesh : meshes) {
+            gl.GenVertexArrays(1, &mesh.vao);
+            gl.GenBuffers(1, &mesh.buffer);
+            gl.BindVertexArray(mesh.vao);
+            gl.BindBuffer(GL_ARRAY_BUFFER, mesh.buffer);
+            gl.EnableVertexAttribArray(0);
+            gl.VertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(native_render::Vec3), nullptr);
+        }
+    }
+    ~GhostRouteGeometry() {
+        for (auto &mesh : meshes) {
+            gl.DeleteBuffers(1, &mesh.buffer);
+            gl.DeleteVertexArrays(1, &mesh.vao);
+        }
+        gl.DeleteProgram(program);
+    }
+    void upload(unsigned slot, const native_render::GhostPath &path, bool fullPath) {
+        std::vector<native_render::Vec3> vertices;
+        const size_t links = fullPath ? path.frames.size() : path.jump_links.size();
+        vertices.reserve(links * 2 + path.jumps.size() * 8);
+        if (fullPath && !path.frames.empty()) {
+            for (size_t tick = path.start + 1; tick <= path.end && tick < path.frames.size(); ++tick) {
+                if (path.teleports[tick] || !native_render::valid_ghost_position(path.frames[tick - 1]) ||
+                    !native_render::valid_ghost_position(path.frames[tick]))
+                    continue;
+                vertices.push_back(native_render::ghost_feet(path.frames[tick - 1], 2));
+                vertices.push_back(native_render::ghost_feet(path.frames[tick], 2));
+            }
+        } else {
+            for (const auto &link : path.jump_links) {
+                vertices.push_back(link.from);
+                vertices.push_back(link.to);
+            }
+        }
+        for (const auto &point : path.jumps) {
+            constexpr float halfSize = 8;
+            const std::array<native_render::Vec3, 4> corners = {{{point[0] - halfSize, point[1] - halfSize, point[2]},
+                                                                 {point[0] + halfSize, point[1] - halfSize, point[2]},
+                                                                 {point[0] + halfSize, point[1] + halfSize, point[2]},
+                                                                 {point[0] - halfSize, point[1] + halfSize, point[2]}}};
+            for (size_t edge = 0; edge < 4; ++edge) {
+                vertices.push_back(corners[edge]);
+                vertices.push_back(corners[(edge + 1) % 4]);
+            }
+        }
+        auto &mesh = meshes.at(slot);
+        gl.BindBuffer(GL_ARRAY_BUFFER, mesh.buffer);
+        gl.BufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(native_render::Vec3), vertices.data(), GL_STATIC_DRAW);
+        mesh.count = GLsizei(vertices.size());
+    }
+    void draw(unsigned slot, const native::Matrix &projection, const std::array<float, 3> &color) {
+        const auto &mesh = meshes.at(slot);
+        if (!mesh.count)
+            return;
+        gl.Enable(GL_DEPTH_TEST);
+        gl.DepthMask(GL_FALSE);
+        gl.Enable(GL_BLEND);
+        gl.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        gl.UseProgram(program);
+        gl.UniformMatrix4fv(projectionLocation, 1, GL_FALSE, projection.data());
+        const float tint[4] = {color[0], color[1], color[2], .45f};
+        gl.Uniform4fv(colorLocation, 1, tint);
+        gl.BindVertexArray(mesh.vao);
+        gl.DrawArrays(GL_LINES, 0, mesh.count);
+        gl.DepthMask(GL_TRUE);
+        gl.Disable(GL_BLEND);
+    }
+};
+
 class Renderer {
     struct Geometry {GLuint vao=0,vbo=0,ebo=0,blend=0;size_t indices=0;};
     struct Volume {std::array<float,3> lo{},hi{},color{.2f,.3f,.35f};std::array<float,2> range{0,400},span{};};
@@ -123,12 +302,16 @@ class Renderer {
     void profile_elapsed(double &value,ProfileClock::time_point start){if(profiling)value+=std::chrono::duration<double,std::milli>(ProfileClock::now()-start).count();}
     Gl &gl;BhContext *core;
     Geometry worldMesh,propMesh,skyMesh;
-    float fieldOfView=90;std::vector<native_render::Actor> roomActors;std::optional<native_render::Actor> replayActor;std::string outfit,packedLoadout;
+    float fieldOfView = 90;
+    std::vector<native_render::Actor> roomActors;
+    std::optional<native_render::Actor> replayActor, compareActor;
+    std::string outfit, packedLoadout;
     GLuint refractColor=0,refractDepth=0;int refractWidth=0,refractHeight=0,waterQuality=1;bool hasWaterMaterials=false;
     GLuint program=0,skyProgram=0,depthProgram=0,emptyVao=0,lightmap=0,white=0,checker=0,planesTexture=0;
     std::vector<GLuint> ownedTextures;
     std::unordered_map<uint64_t,GLuint> textures;
     std::unordered_map<int32_t,std::pair<uint32_t,uint32_t>> textureSizes;
+    std::unordered_map<int32_t, std::array<float, 3>> textureAverages;
     std::vector<BhGroup> groups,skyGroups;std::vector<BhPropGroup> propGroups;
     std::vector<GLuint> normals;std::array<float,3> sunDirection{.35f,.45f,.82f};bool hasSun=false;
     std::vector<BhMaterial> materials;std::vector<BhMaterialExtra> extras;
@@ -139,10 +322,20 @@ class Renderer {
     // Source look (source_hdr.hpp): CS:S's exposure and bloom on maps whose lightmap came from HDR lighting.
     BhLightmapInfo lightmapInfo{1,0};bool sourceLook=true,hdrUnavailable=false;std::unique_ptr<SourceHdr> hdr;double lastSeconds=-1;
     SourceHdr *hdr_pass(){
-        if(!sourceLook||!lightmapInfo.hdr||hdrUnavailable)return nullptr;
+        if (!sourceLook || graphics.potato || graphics.fullbright || !lightmapInfo.hdr || hdrUnavailable)
+            return nullptr;
         if(!hdr)try{hdr=std::make_unique<SourceHdr>(gl,emptyVao);}catch(const std::exception &e){hdrUnavailable=true;std::cerr<<"Native HDR unavailable, drawing straight: "<<e.what()<<'\n';return nullptr;}
         return hdr.get();
     }
+    bool toolsVisible = true, paintHeld = false;
+    std::string measureLabel;
+    double lastPaintSeconds = -1;
+    native_render::SurfaceToolBindings toolBindings;
+    native_render::Paint paint;
+    native_render::Measure measure;
+    native::GraphicsSettings graphics;
+    std::unique_ptr<GraphicsTarget> graphicsTarget;
+    bool anisotropySupported = false;
     uint32_t queuedWeaponFlags=0,queuedAttackMode=0;bool queuedAttack=false;
     std::unordered_map<GLuint,std::unordered_map<std::string,GLint>> uniformLocations;
     GLint loc(GLuint p,const char *name){auto &locations=uniformLocations[p];const auto found=locations.find(name);if(found!=locations.end())return found->second;const GLint value=gl.GetUniformLocation(p,name);locations.emplace(name,value);return value;}
@@ -154,7 +347,36 @@ class Renderer {
         gl.TexImage2D(GL_TEXTURE_2D,0,srgb?GL_SRGB8_ALPHA8:GL_RGBA8,image.width,image.height,0,GL_RGBA,GL_UNSIGNED_BYTE,image.rgba);if(mipmap)gl.GenerateMipmap(GL_TEXTURE_2D);return id;
     }
     GLuint texture(int32_t index,bool raw=false){if(index<0)return white;const uint64_t key=uint32_t(index)|(uint64_t(raw)<<32);const auto found=textures.find(key);return found==textures.end()?checker:found->second;}
-    void cache_texture(int32_t index,bool raw=false){if(index<0)return;const uint64_t key=uint32_t(index)|(uint64_t(raw)<<32);if(textures.count(key))return;BhImage image{};GLuint id=checker;if(bh_texture(core,index,&image)){textureSizes[index]={image.width,image.height};id=upload(image,true,true,!raw);}textures.emplace(key,id);}
+    void cache_texture(int32_t index, bool raw = false) {
+        if (index < 0)
+            return;
+        const uint64_t key = uint32_t(index) | (uint64_t(raw) << 32);
+        if (textures.count(key))
+            return;
+        BhImage image{};
+        GLuint id = checker;
+        if (bh_texture(core, index, &image)) {
+            textureSizes[index] = {image.width, image.height};
+            id = upload(image, true, true, !raw);
+            if (!raw) {
+                std::array<float, 3> average{};
+                const size_t pixels = size_t(image.width) * image.height;
+                const size_t step = std::max(size_t(1), pixels / 4096);
+                size_t count = 0;
+                for (size_t pixel = 0; pixel < pixels; pixel += step) {
+                    for (size_t channel = 0; channel < 3; ++channel) {
+                        average[channel] += native_render::srgb_linear(float(image.rgba[pixel * 4 + channel]) / 255);
+                    }
+                    ++count;
+                }
+                for (auto &channel : average)
+                    channel /= std::max(size_t(1), count);
+                textureAverages[index] = average;
+            }
+        }
+        textures.emplace(key, id);
+    }
+
     std::string normal_path(std::string name,int depth=0){
         if(depth>6)return {};std::transform(name.begin(),name.end(),name.begin(),[](unsigned char c){return char(std::tolower(c));});std::replace(name.begin(),name.end(),'\\','/');if(name.rfind("materials/",0)==0)name.erase(0,10);if(name.ends_with(".vmt"))name.resize(name.size()-4);
         const std::string path="materials/"+name+".vmt";size_t count=0;const auto *raw=bh_content_read(core,path.c_str(),&count);if(!raw||!count)return {};std::string text(reinterpret_cast<const char*>(raw),count);text=std::regex_replace(text,std::regex(R"(//[^\r\n]*)"),"");
@@ -182,11 +404,20 @@ class Renderer {
     bool transparent(const BhMaterial &m)const{return (m.flags&(1|8))||m.kind==2||m.kind==3||m.alpha<1;}
     void bind_material(uint32_t index,bool prop){
         const BhMaterial fallback={-1,1,0,1,.5f,{1,1,1}};const auto &m=index<materials.size()?materials[index]:fallback;
+        if (graphics.potato) {
+            const auto found = textureAverages.find(m.texture);
+            const std::array<float, 3> fallbackColor = {.5f, .5f, .5f};
+            gl.Uniform3fv(loc(program, "flatColor"), 1,
+                          found == textureAverages.end() ? fallbackColor.data() : found->second.data());
+        }
         const BhMaterialExtra empty={-1,-1,4,1,0,400,1};const auto &e=index<extras.size()?extras[index]:empty;
         gl.ActiveTexture(GL_TEXTURE0);gl.BindTexture(GL_TEXTURE_2D,m.texture<0?(m.kind==1?checker:white):texture(m.texture));
         gl.ActiveTexture(GL_TEXTURE2);gl.BindTexture(GL_TEXTURE_2D,texture(e.texture2));gl.ActiveTexture(GL_TEXTURE3);gl.BindTexture(GL_TEXTURE_2D,texture(e.detail,true));
         gl.ActiveTexture(GL_TEXTURE7);gl.BindTexture(GL_TEXTURE_2D,index<normals.size()&&normals[index]?normals[index]:white);gl.Uniform1i(loc(program,"hasNormal"),index<normals.size()&&normals[index]);
-        gl.Uniform1i(loc(program,"hasSecondary"),e.texture2>=0);gl.Uniform1i(loc(program,"hasDetail"),e.detail>=0);gl.Uniform1f(loc(program,"detailScale"),e.detail_scale);gl.Uniform1f(loc(program,"detailBlend"),e.detail_blend);
+        gl.Uniform1i(loc(program, "hasSecondary"), e.texture2 >= 0);
+        gl.Uniform1i(loc(program, "hasDetail"), e.detail >= 0 && !graphics.potato);
+        gl.Uniform1f(loc(program, "detailScale"), e.detail_scale);
+        gl.Uniform1f(loc(program, "detailBlend"), e.detail_blend);
         gl.Uniform3fv(loc(program,"tint"),1,m.color);gl.Uniform1f(loc(program,"opacity"),m.alpha);gl.Uniform1f(loc(program,"cutoff"),(m.flags&2)?m.alpha_ref:0);gl.Uniform1i(loc(program,"unlit"),(m.flags&16)!=0||(!prop&&lightmap==white));gl.Uniform1i(loc(program,"props"),prop);gl.Uniform1i(loc(program,"kind"),m.kind);gl.Uniform1i(loc(program,"aboveWater"),e.above_water);gl.Uniform1i(loc(program,"additive"),(m.flags&8)!=0);
         if((m.flags&4)||m.kind==2)gl.Disable(GL_CULL_FACE);else gl.Enable(GL_CULL_FACE);gl.BlendFunc(GL_SRC_ALPHA,(m.flags&8)?GL_ONE:GL_ONE_MINUS_SRC_ALPHA);
         if(m.kind==2){gl.Enable(GL_POLYGON_OFFSET_FILL);gl.PolygonOffset(-1,-4);}else gl.Disable(GL_POLYGON_OFFSET_FILL);
@@ -206,7 +437,19 @@ class Renderer {
     }
     void draw_scene(const native::Matrix &vp,const float eye[3],bool sky,double time){
         auto phaseStart=profile_now();
-        gl.UseProgram(program);gl.UniformMatrix4fv(loc(program,"viewProjection"),1,GL_FALSE,vp.data());water_uniforms(program,eye);gl.Uniform1f(loc(program,"timeSeconds"),time);gl.Uniform1i(loc(program,"detailedWater"),waterQuality>0&&!sky&&hasWaterMaterials);gl.Uniform1i(loc(program,"skyPass"),sky&&hasSky&&skyInfo.fog_enable);gl.Uniform1i(loc(program,"flashlight"),flashlightEnabled&&!sky);gl.Uniform3f(loc(program,"flashDirection"),std::cos(lastPitch*native::radians)*std::cos(lastYaw*native::radians),std::cos(lastPitch*native::radians)*std::sin(lastYaw*native::radians),-std::sin(lastPitch*native::radians));
+        gl.UseProgram(program);
+        gl.UniformMatrix4fv(loc(program, "viewProjection"), 1, GL_FALSE, vp.data());
+        water_uniforms(program, eye);
+        gl.Uniform1f(loc(program, "timeSeconds"), time);
+        gl.Uniform1i(loc(program, "detailedWater"), waterQuality > 0 && !graphics.potato && !sky && hasWaterMaterials);
+        gl.Uniform1i(loc(program, "fullbright"), graphics.fullbright);
+        gl.Uniform1i(loc(program, "potato"), graphics.potato);
+        gl.Uniform1i(loc(program, "skyPass"), sky && hasSky && skyInfo.fog_enable);
+        gl.Uniform1i(loc(program, "flashlight"), flashlightEnabled && !sky);
+        gl.Uniform3f(loc(program, "flashDirection"),
+                     std::cos(lastPitch * native::radians) * std::cos(lastYaw * native::radians),
+                     std::cos(lastPitch * native::radians) * std::sin(lastYaw * native::radians),
+                     -std::sin(lastPitch * native::radians));
         float fog[3]={skyInfo.fog_color[0]/255.f,skyInfo.fog_color[1]/255.f,skyInfo.fog_color[2]/255.f};
         if(skyInfo.fog_blend){const float dx=std::cos(lastPitch*native::radians)*std::cos(lastYaw*native::radians),dy=std::cos(lastPitch*native::radians)*std::sin(lastYaw*native::radians),dz=-std::sin(lastPitch*native::radians);const float len=std::hypot(std::hypot(skyInfo.fog_dir[0],skyInfo.fog_dir[1]),skyInfo.fog_dir[2]);const float t=len>0?std::clamp(.5f+.5f*(dx*skyInfo.fog_dir[0]+dy*skyInfo.fog_dir[1]+dz*skyInfo.fog_dir[2])/len,0.f,1.f):0;for(int k=0;k<3;k++)fog[k]=(skyInfo.fog_color[k]*t+skyInfo.fog_color2[k]*(1-t))/255.f;}
         gl.Uniform3fv(loc(program,"skyFogColor"),1,fog);gl.Uniform3f(loc(program,"skyFogRange"),skyInfo.fog_start/std::max(skyInfo.scale,.001f),skyInfo.fog_end/std::max(skyInfo.scale,.001f),skyInfo.fog_max_density);
@@ -223,7 +466,19 @@ class Renderer {
         const bool visibleWater=hasWaterMaterials&&std::any_of(draws.begin(),draws.end(),[&](const Draw &d){return d.material<materials.size()&&materials[d.material].kind==2;});
         for(int pass=0;pass<2;pass++){
             const double sortBefore=frameProfile.sort;phaseStart=profile_now();
-            if(pass){if(!sky&&waterQuality>0&&visibleWater)capture_refraction();gl.Enable(GL_BLEND);gl.DepthMask(GL_FALSE);auto sortStart=profile_now();std::stable_sort(draws.begin(),draws.end(),[](const Draw &a,const Draw &b){return a.distance>b.distance;});profile_elapsed(frameProfile.sort,sortStart);}else{gl.Disable(GL_BLEND);gl.DepthMask(GL_TRUE);}
+            if (pass) {
+                if (!sky && waterQuality > 0 && !graphics.potato && visibleWater)
+                    capture_refraction();
+                gl.Enable(GL_BLEND);
+                gl.DepthMask(GL_FALSE);
+                auto sortStart = profile_now();
+                std::stable_sort(draws.begin(), draws.end(),
+                                 [](const Draw &a, const Draw &b) { return a.distance > b.distance; });
+                profile_elapsed(frameProfile.sort, sortStart);
+            } else {
+                gl.Disable(GL_BLEND);
+                gl.DepthMask(GL_TRUE);
+            }
             for(const auto &d:draws){const auto &m=d.material<materials.size()?materials[d.material]:materials.front();if(transparent(m)!=(pass!=0))continue;
                 const uint64_t transformKey=(uint64_t(d.prop)<<63)|uint32_t(d.prop?d.entity:d.model);
                 auto found=transforms.find(transformKey);if(found==transforms.end()){BhTransform t{};t.visible=1;if(d.prop&&d.entity>=0)bh_prop_transform(core,d.entity,&t);else if(!d.prop&&d.model)bh_model_transform(core,d.model,&t);found=transforms.emplace(transformKey,t).first;}if(!found->second.visible)continue;
@@ -234,7 +489,13 @@ class Renderer {
         gl.DepthMask(GL_TRUE);gl.Disable(GL_POLYGON_OFFSET_FILL);gl.Disable(GL_BLEND);
     }
     double lastYaw=0,lastPitch=0;std::unordered_map<uint64_t,std::array<float,3>> centers;std::unordered_map<uint64_t,native_render::Bounds> groupBounds;
-    native_render::GhostTrails ghostTrails;std::array<std::array<float,3>,2> trailColors{{{1,.761f,.239f},{1,.761f,.239f}}};
+    native_render::GhostTrails ghostTrails;
+    std::array<native_render::GhostPath, 4> ghostPaths;
+    native_render::GhostOptions ghostOptions;
+    std::unique_ptr<GhostRouteGeometry> ghostRoutes;
+    std::array<bool, 4> routeAvailable{true, true, true, true};
+    std::array<float, 3> ghostRouteColor{1, .761f, .239f};
+    std::array<std::array<float, 3>, 2> trailColors{{{1, .761f, .239f}, {1, .761f, .239f}}};
     struct QueuedShot {BhAttackReport report;native_render::ShotBasis basis;};
     struct ShotEffect {BhAttackReport report;native_render::ShotBasis basis;double started;};
     native_render::EventQueue<QueuedShot,128> attackEvents;std::vector<ShotEffect> shotEffects;
@@ -265,13 +526,19 @@ class Renderer {
             if(r.hit){native_render::Vec3 impact{};for(int k=0;k<3;k++)impact[k]=r.end[k]+r.normal[k]*.2f;presentation->billboard(impact,2.2f,{.12f,.10f,.08f,std::min(1.f,(3-age)*2)*.8f},right,up);if(age<.25f)for(uint32_t i=0;i<4;i++){auto p=impact;for(int k=0;k<3;k++)p[k]+=(native_render::particle_random(i,k)*2-1)*age*35+r.normal[k]*age*20;p[2]-=age*age*80;presentation->billboard(p,.65f,{1,.65f,.2f,1-age/.25f},right,up);}}
             if(age<1.1f){auto shell=from;shell[0]+=e.basis.right[0]*age*70;shell[1]+=e.basis.right[1]*age*70;shell[2]+=age*30-age*age*160;presentation->billboard(shell,.65f,{.75f,.52f,.17f,1},right,up,false);}
         }
-        std::unordered_set<std::string> activeTrails;
-        auto trail=[&](const native_render::Actor &actor,const std::string &id){
-            activeTrails.insert(id);const auto &points=ghostTrails.sample(id,seconds,{actor.frame.position[0],actor.frame.position[1],actor.frame.position[2]+5},actor.snapped);
-            for(size_t i=1;i<points.size();++i){const float f=float(i)/float(points.size()-1);std::array<float,4> color{};for(int k=0;k<3;++k)color[k]=trailColors[1][k]*(1-f)+trailColors[0][k]*f;color[3]=native_render::ghost_trail_alpha(actor.opacity,f);presentation->ribbon(points[i-1].second,points[i].second,.45f+f*2.5f,color,eye);}
-        };
-        if(effectsVisible){if(replayActor)trail(*replayActor,"primary");for(const auto &actor:roomActors)if(actor.id.starts_with("ghost-"))trail(actor,actor.id);}
-        ghostTrails.retain(activeTrails);
+        if (effectsVisible && !graphics.potato && ghostOptions.trail) {
+            if (replayActor)
+                draw_ghost_trail(*replayActor, eye);
+            for (const auto &actor : roomActors) {
+                if (actor.ghost_slot >= 0)
+                    draw_ghost_trail(actor, eye);
+            }
+        }
+        draw_ghost_route(vp);
+        if (toolsVisible) {
+            paint.draw(core, *presentation);
+            measure.draw(core, *presentation, eye);
+        }
         // Overlay kinds follow crates/core/src/game/overlay.rs: 0-3 are triggers
         // (!showtriggers), 4 player clips and 5 invisible walls (!showclips).
         if(triggersVisible||clipsVisible){size_t count=0;const auto *states=bh_overlay_states(core,&count);const auto &colors=semanticPalette.triggers;
@@ -282,8 +549,204 @@ class Renderer {
         profile_elapsed(frameProfile.presentationWaterUniforms,presentationStart);presentationStart=profile_now();
         presentation->draw(vp,eye);profile_elapsed(frameProfile.presentationSubmit,presentationStart);
     }
-    void draw_map_effects(const float eye[3],double seconds,const native_render::Vec3 &right,const native_render::Vec3 &up){mapEffects.draw(*presentation,core,eye,seconds,right,up,effectsVisible);}
+    void draw_ghost_trail(const native_render::Actor &actor, const float eye[3]) {
+        if (actor.ghost_slot < 0 || actor.ghost_slot >= int(ghostPaths.size()))
+            return;
+        const auto &path = ghostPaths[size_t(actor.ghost_slot)];
+        if (!path.enabled || !ghostOptions.visible(path.source))
+            return;
+        const auto points = ghostTrails.recorded(path, actor.frame.tick);
+        auto colors = trailColors;
+        if (path.source != native_render::GhostSource::pb) {
+            colors.fill(native_render::ghost_source_color(path.source));
+        }
+        for (size_t i = 1; i < points.size(); ++i) {
+            const float progress = float(i) / float(points.size() - 1);
+            const auto &point = points[i];
+            const float distance = std::hypot(std::hypot(eye[0] - point[0], eye[1] - point[1]), eye[2] - point[2]);
+            const auto color = native_render::trail_color(colors, progress, actor.opacity, distance);
+            presentation->ribbon(points[i - 1], point, 2.5f * (.15f + .85f * progress), color, eye);
+        }
+    }
+    void draw_ghost_route(const native::Matrix &projection) {
+        if (!ghostOptions.route || !ghostRoutes)
+            return;
+        int selected = -1;
+        for (size_t slot = 0; slot < ghostPaths.size(); ++slot) {
+            const auto &path = ghostPaths[slot];
+            if (!routeAvailable[slot] || !path.enabled || path.frames.empty() || !ghostOptions.visible(path.source))
+                continue;
+            if (ghostOptions.route_source != native_render::GhostSource::none &&
+                path.source != ghostOptions.route_source)
+                continue;
+            if (selected < 0 || native_render::route_priority(path.source) <
+                                    native_render::route_priority(ghostPaths[size_t(selected)].source))
+                selected = int(slot);
+        }
+        if (selected < 0)
+            return;
+        const auto &path = ghostPaths[size_t(selected)];
+        const auto color = path.source == native_render::GhostSource::pb
+                               ? ghostRouteColor
+                               : native_render::ghost_source_color(path.source);
+        ghostRoutes->draw(unsigned(selected), projection, color);
+    }
+    void draw_map_effects(const float eye[3], double seconds, const native_render::Vec3 &right,
+                          const native_render::Vec3 &up) {
+        mapEffects.draw(*presentation, core, eye, seconds, right, up, effectsVisible && !graphics.potato);
+    }
+
 public:
+  nlohmann::json graphics_limits() const {
+      GLint maximumSamples = 0;
+      gl.GetIntegerv(GL_MAX_SAMPLES, &maximumSamples);
+      float maximumAnisotropy = 1;
+      if (anisotropySupported)
+          gl.GetFloatv(0x84ff, &maximumAnisotropy);
+      return {{"msaaMax", std::min(8, maximumSamples)},
+              {"anisotropyMax", maximumAnisotropy},
+              {"waterReflections", false},
+              {"models", {"bunny"}},
+              {"msaaRestartRequired", false}};
+  }
+  nlohmann::json surface_tools_state() {
+      return {{"paintMarks", paint.count()},
+              {"measurePoints", measure.count()},
+              {"measurement", measure.count() == 2 ? nlohmann::json(measure.text(core)) : nlohmann::json(nullptr)}};
+  }
+  const char *surface_tool(std::string_view action, const BhState &state, const native::Input &input,
+                           bool held = false) {
+      if (action == "clearPaint") {
+          paint.clear();
+          return "Paint cleared.";
+      }
+      if (action == "clearMeasure") {
+          measure.clear();
+          return "Measurement cleared.";
+      }
+      const native_render::Vec3 eye = {state.position[0], state.position[1], state.position[2] + state.view_offset_z};
+      const auto hit = native_render::pick_surface(core, eye, input.yaw(), input.pitch);
+      if (!hit)
+          return "No surface in range. Aim at a nearby wall or floor.";
+      if (action == "measurePoint") {
+          measure.pick(core, *hit);
+          return measure.text(core);
+      }
+      return paint.stamp(core, *hit, double(SDL_GetTicksNS()) / 1e9, held) ? "Paint mark placed."
+                                                                           : "Paint mark skipped.";
+  }
+  const char *tool_key(std::string_view code, bool down, bool repeat, const BhState &state,
+                       const native::Input &input) {
+      const int action = toolBindings.match(code);
+      if (action < 0)
+          return nullptr;
+      if (action == 0)
+          paintHeld = down;
+      if (!down || repeat)
+          return nullptr;
+      return surface_tool(native_render::SurfaceToolBindings::actions[size_t(action)], state, input);
+  }
+  void surface_tools_frame(const BhState &state, const native::Input &input, bool active, double seconds) {
+      if (!active) {
+          paintHeld = false;
+          return;
+      }
+      constexpr double paintInterval = .1;
+      if (paintHeld && seconds - lastPaintSeconds >= paintInterval) {
+          lastPaintSeconds = seconds;
+          surface_tool("paint", state, input, true);
+      }
+  }
+  std::string tool_message(const nlohmann::json &message, const BhState &state, const native::Input &input) {
+      const auto type = message.at("type").get<std::string>();
+      const auto action = message.at("action").get<std::string>();
+      if (action != "clear" && action != (type == "paint" ? "stamp" : "point")) {
+          throw std::runtime_error("Unknown surface tool action");
+      }
+      const auto bound = type == "paint" ? (action == "clear" ? "clearPaint" : "paintOnce")
+                                         : (action == "clear" ? "clearMeasure" : "measurePoint");
+      return surface_tool(bound, state, input, message.value("held", false));
+  }
+
+  template <class Hud>
+  void draw_measure_label(Hud &hud, const native::Matrix &vp, const float eye[3], int width, int height) {
+      if (!toolsVisible || measure.count() != 2)
+          return;
+      const auto points = measure.positions(core);
+      if (!points)
+          return;
+      native_render::Vec3 midpoint{};
+      for (int axis = 0; axis < 3; ++axis)
+          midpoint[axis] = ((*points)[0][axis] + (*points)[1][axis]) * .5f;
+      float fraction = 0;
+      if (!bh_trace_camera(core, eye, midpoint.data(), 0, &fraction) || fraction < .995f)
+          return;
+      float clip[4]{};
+      for (int row = 0; row < 4; ++row) {
+          clip[row] = vp[row] * midpoint[0] + vp[4 + row] * midpoint[1] + vp[8 + row] * midpoint[2] + vp[12 + row];
+      }
+      if (clip[3] <= 0 || std::abs(clip[0]) > clip[3] || std::abs(clip[1]) > clip[3])
+          return;
+      measureLabel.assign(measure.text(core));
+      hud.overlay_begin(width, height, 100);
+      const auto view = native::graphics_view(graphics, width, height);
+      hud.overlay_text(view.x + (clip[0] / clip[3] * .5f + .5f) * view.output_width,
+                       height - view.y - (clip[1] / clip[3] * .5f + .5f) * view.output_height, measureLabel, 13,
+                       {1, 1, 1, 1}, true);
+      hud.overlay_end(width, height);
+  }
+  void set_ghost_path(unsigned slot, native_render::GhostPath path) {
+      if (slot >= ghostPaths.size())
+          throw std::runtime_error("Invalid ghost slot");
+      path.build_route();
+      ghostPaths[slot] = std::move(path);
+      if (ghostRoutes)
+          ghostRoutes->upload(slot, ghostPaths[slot], ghostOptions.route_path);
+  }
+  void route_context(uint32_t track, const std::string &style, bool visible) {
+      for (size_t slot = 0; slot < ghostPaths.size(); ++slot) {
+          const auto &path = ghostPaths[slot];
+          routeAvailable[slot] = visible && path.track == track &&
+                                 (path.source == native_render::GhostSource::custom || path.style == style);
+      }
+  }
+  void clear_ghosts() {
+      for (auto &path : ghostPaths)
+          path = {};
+  }
+  void register_ghost(unsigned slot, uint32_t handle, const nlohmann::json &info,
+                      native_render::GhostSource source = native_render::GhostSource::custom) {
+      if (slot >= ghostPaths.size())
+          throw std::runtime_error("Invalid ghost slot");
+      native_render::GhostPath path;
+      path.load(core, handle, info, source);
+      ghostPaths[slot] = std::move(path);
+      if (ghostRoutes)
+          ghostRoutes->upload(slot, ghostPaths[slot], ghostOptions.route_path);
+  }
+  void ghost_enabled(unsigned slot, bool enabled) {
+      if (slot < ghostPaths.size())
+          ghostPaths[slot].enabled = enabled;
+  }
+  bool ghost_visible(unsigned slot) const {
+      return slot < ghostPaths.size() && ghostPaths[slot].enabled && ghostOptions.visible(ghostPaths[slot].source);
+  }
+  const std::string &ghost_name(unsigned slot) const {
+      return ghostPaths.at(slot).name;
+  }
+  const std::string &ghost_loadout(unsigned slot) const {
+      return ghostPaths.at(slot).loadout;
+  }
+  void decorate_ghost(native_render::Actor &actor, unsigned slot) const {
+      if (slot >= ghostPaths.size())
+          return;
+      actor.ghost_slot = int(slot);
+      actor.source = ghostPaths[slot].source;
+      if (actor.source != native_render::GhostSource::pb)
+          actor.outfit = "outfit-cream";
+      else if (actor.loadout.empty())
+          actor.loadout = packedLoadout;
+  }
     void set_profiling(bool enabled){profiling=enabled;}
     nlohmann::json profile_json()const{
         const auto &p=frameProfile;
@@ -298,7 +761,13 @@ public:
     void set_actor_models(const std::string &player,const std::string &ghost){if(viewmodel)viewmodel->actor_models(player,ghost);}
     void set_player_glow(std::optional<native_render::Glow> glow){if(viewmodel)viewmodel->player_glow(std::move(glow));}
     void set_glow_visible(bool show,bool firstPerson){if(viewmodel)viewmodel->glow_visibility(show,firstPerson);}
-    void set_ghost_cosmetics(const std::string &ghostId,const std::string &trailId){if(viewmodel){viewmodel->ghost_cosmetics(ghostId);trailColors=viewmodel->cosmetic_colors(trailId);}}
+    void set_ghost_cosmetics(const std::string &ghostId, const std::string &trailId) {
+        if (viewmodel) {
+            viewmodel->ghost_cosmetics(ghostId);
+            trailColors = viewmodel->cosmetic_colors(trailId);
+            ghostRouteColor = viewmodel->cosmetic_colors(ghostId)[0];
+        }
+    }
     void set_zones(const std::vector<BhZone> &zones){timerZones=zones;zoneEffects.clear();for(const auto &z:zones)zoneEffects.add(z.kind,z.track);zoneGold=false;}
     void set_zone_state(uint32_t track,const BhRunState &state,bool gold=false){activeZoneTrack=track;zoneState=state;zoneGold=gold;}
     void set_color_blind(const std::string &mode){semanticPalette=native::semantic_palette(mode);}
@@ -311,6 +780,7 @@ public:
     void set_flashlight(bool value){flashlightEnabled=value;}
     void set_viewmodel_bob(float value){if(viewmodel)viewmodel->set_bob(value);}
     Renderer(Gl &g,BhContext *c,const std::filesystem::path &assetRoot=BUNNYHOP_NATIVE_ASSET_ROOT):gl(g),core(c){
+        measureLabel.reserve(100);
         program=link_program(gl,native_render::world_vertex,native_render::world_fragment().c_str());skyProgram=link_program(gl,native_render::sky_vertex,native_render::sky_fragment().c_str());depthProgram=link_program(gl,native_render::depth_vertex,native_render::depth_fragment);gl.GenVertexArrays(1,&emptyVao);
         const uint8_t blank[4]={255,255,255,255};white=upload({blank,4,1,1},true,false);uint8_t fallback[8*8*4];for(int y=0;y<8;y++)for(int x=0;x<8;x++){const uint8_t v=((x/4+y/4)%2)?140:185;const int at=(y*8+x)*4;fallback[at]=fallback[at+1]=fallback[at+2]=v;fallback[at+3]=255;}checker=upload({fallback,sizeof(fallback),8,8},true,true);
         size_t nv=0,ni=0,ng=0,nm=0,ne=0,nb=0;const float *verts=bh_vertices(core,&nv);const uint32_t *indices=bh_indices(core,&ni);const auto *rawGroups=bh_groups(core,&ng);const auto *rawMaterials=bh_materials(core,&nm);const auto *rawExtras=bh_material_extras(core,&ne);const float *blend=bh_blend(core,&nb);
@@ -335,10 +805,65 @@ public:
         load_normals();gl.UseProgram(program);gl.Uniform1i(loc(program,"normalTexture"),7);gl.Uniform3fv(loc(program,"sunDirection"),1,sunDirection.data());
         presentation=std::make_unique<NativePresentation>(gl);mapEffects.load(core);
 
+        anisotropySupported = SDL_GL_ExtensionSupported("GL_EXT_texture_filter_anisotropic");
         viewmodel=std::make_unique<NativeViewmodel>(gl,assetRoot);gl.Enable(GL_DEPTH_TEST);gl.DepthFunc(GL_LEQUAL);gl.CullFace(GL_BACK);gl.FrontFace(GL_CCW);
         std::cout<<"Native renderer: "<<nv/10<<" BSP vertices, "<<pv/8<<" prop vertices, "<<sv/3<<" sky vertices, "<<volumes.size()<<" water volumes, 3D sky="<<hasSky<<"\n";
     }
-    ~Renderer(){presentation.reset();hdr.reset();viewmodel.reset();destroy(worldMesh);destroy(propMesh);destroy(skyMesh);if(!ownedTextures.empty())gl.DeleteTextures(ownedTextures.size(),ownedTextures.data());if(planesTexture)gl.DeleteTextures(1,&planesTexture);if(emptyVao)gl.DeleteVertexArrays(1,&emptyVao);if(program)gl.DeleteProgram(program);if(skyProgram)gl.DeleteProgram(skyProgram);if(depthProgram)gl.DeleteProgram(depthProgram);}
+    ~Renderer() {
+        ghostRoutes.reset();
+        graphicsTarget.reset();
+        presentation.reset();
+        hdr.reset();
+        viewmodel.reset();
+        destroy(worldMesh);
+        destroy(propMesh);
+        destroy(skyMesh);
+        if (!ownedTextures.empty())
+            gl.DeleteTextures(ownedTextures.size(), ownedTextures.data());
+        if (planesTexture)
+            gl.DeleteTextures(1, &planesTexture);
+        if (emptyVao)
+            gl.DeleteVertexArrays(1, &emptyVao);
+        if (program)
+            gl.DeleteProgram(program);
+        if (skyProgram)
+            gl.DeleteProgram(skyProgram);
+        if (depthProgram)
+            gl.DeleteProgram(depthProgram);
+    }
+    void graphics_settings(const nlohmann::json &settings) {
+        graphics = native::GraphicsSettings::read(settings);
+        const bool previousRoute = ghostOptions.route, previousPath = ghostOptions.route_path;
+        ghostOptions.read(settings);
+        if (ghostOptions.route) {
+            if (!ghostRoutes)
+                ghostRoutes = std::make_unique<GhostRouteGeometry>(gl);
+            if (!previousRoute || previousPath != ghostOptions.route_path) {
+                for (unsigned slot = 0; slot < ghostPaths.size(); ++slot) {
+                    ghostRoutes->upload(slot, ghostPaths[slot], ghostOptions.route_path);
+                }
+            }
+        }
+        paint.settings(settings);
+        toolBindings.read(settings);
+        paintHeld = false;
+        toolsVisible = settings.value("hud", true);
+        hdr_pass();
+        if (graphics.target_needed() && !graphicsTarget)
+            graphicsTarget = std::make_unique<GraphicsTarget>(gl, emptyVao);
+        if (!settings.contains("graphics"))
+            graphics.source = settings.value("sourceLook", true);
+        sourceLook = graphics.source;
+        if (anisotropySupported) {
+            constexpr GLenum anisotropy = 0x84fe, maximumAnisotropy = 0x84ff;
+            float maximum = 1;
+            gl.GetFloatv(maximumAnisotropy, &maximum);
+            for (GLuint texture : ownedTextures) {
+                gl.BindTexture(GL_TEXTURE_2D, texture);
+                gl.TexParameterf(GL_TEXTURE_2D, anisotropy, std::min(float(graphics.anisotropy), maximum));
+            }
+        }
+    }
     void set_source_look(bool value){sourceLook=value;}
     // Current Source-look exposure (1 off maps with HDR lighting or with the look off).
     float exposure()const{return hdr&&sourceLook&&lightmapInfo.hdr?hdr->current_exposure():1;}
@@ -350,10 +875,62 @@ public:
     void inspect_press(){if(viewmodel)viewmodel->inspect_press();}
     void inspect_held(bool value){if(viewmodel)viewmodel->inspect_held(value);}
     void set_cosmetics(const std::string &value,const std::string &loadout){outfit=value;packedLoadout=loadout;if(viewmodel)viewmodel->cosmetics(value,loadout);}
-    void set_replay_actor(const BhSnapshot *snapshot,float yaw,float pitch,float opacity=.45f){if(!snapshot){replayActor.reset();return;}native_render::Actor actor;actor.id="replay";actor.name="Replay";actor.opacity=std::clamp(opacity,0.f,1.f);for(int i=0;i<3;i++){actor.frame.position[i]=snapshot->player.position[i];actor.frame.velocity[i]=snapshot->player.velocity[i];}actor.frame.yaw=yaw;actor.frame.pitch=pitch;actor.frame.tick=snapshot->player.tick;actor.frame.flags=(snapshot->player.crouched?1:0)|(snapshot->player.grounded?2:0);actor.frame.weapon=1;actor.outfit=outfit;actor.loadout=packedLoadout;replayActor=actor;}
-    void set_replay_actor(const BhGhostFrame &frame,const std::string &actorOutfit,const std::string &loadout,float opacity=.45f){native_render::Actor actor;actor.id="replay";actor.name="Replay";actor.frame=frame;actor.outfit=actorOutfit;actor.loadout=loadout;actor.opacity=opacity;replayActor=std::move(actor);}
+    void set_replay_actor(const BhSnapshot *snapshot, float yaw, float pitch, float opacity = .45f) {
+        if (!snapshot) {
+            replayActor.reset();
+            return;
+        }
+        native_render::Actor actor;
+        actor.id = "replay";
+        actor.name = "Replay";
+        actor.opacity = std::clamp(opacity, 0.f, 1.f);
+        for (int i = 0; i < 3; i++) {
+            actor.frame.position[i] = snapshot->player.position[i];
+            actor.frame.velocity[i] = snapshot->player.velocity[i];
+        }
+        actor.frame.yaw = yaw;
+        actor.frame.pitch = pitch;
+        actor.frame.tick = snapshot->player.tick;
+        actor.frame.flags = (snapshot->player.crouched ? 1 : 0) | (snapshot->player.grounded ? 2 : 0);
+        actor.frame.weapon = 1;
+        actor.outfit = outfit;
+        actor.loadout = packedLoadout;
+        decorate_ghost(actor, 0);
+        replayActor = actor;
+    }
+    void set_replay_actor(const BhGhostFrame &frame, const std::string &actorOutfit, const std::string &loadout,
+                          float opacity = .45f) {
+        native_render::Actor actor;
+        actor.id = "replay";
+        actor.name = "Replay";
+        actor.frame = frame;
+        actor.outfit = actorOutfit;
+        actor.loadout = loadout;
+        actor.opacity = opacity;
+        decorate_ghost(actor, 0);
+        replayActor = std::move(actor);
+    }
+    void set_compare_actor(const native_render::Actor *actor) {
+        if (!actor) {
+            compareActor.reset();
+            return;
+        }
+        if (!compareActor)
+            compareActor.emplace();
+        *compareActor = *actor;
+    }
     void set_room_actors(const std::vector<native_render::Actor> &actors){roomActors=actors;if(roomActors.size()>64)roomActors.resize(64);}
-    native::Matrix camera(const float eye[3],double yaw,double pitch,float aspect){auto vp=native::camera_matrix(eye,yaw,pitch,aspect);const float scale=1/std::tan(float(fieldOfView*native::radians*.5));for(int c=0;c<4;c++){vp[c*4]*=scale;vp[c*4+1]*=scale;}return vp;}
+    native::Matrix camera(const float eye[3], double yaw, double pitch, float aspect) {
+        if (graphics.aspect > 0)
+            aspect = graphics.aspect;
+        auto vp = native::camera_matrix(eye, yaw, pitch, aspect);
+        const float scale = 1 / std::tan(float(fieldOfView * native::radians * .5));
+        for (int c = 0; c < 4; c++) {
+            vp[c * 4] *= scale;
+            vp[c * 4 + 1] *= scale;
+        }
+        return vp;
+    }
     void set_spectated_actor(std::optional<native_render::Actor> actor){
         const bool changed=bool(actor)!=bool(spectatedActor)||(actor&&spectatedActor&&actor->id!=spectatedActor->id);if(changed){spectatedTick=~0u;spectatedFlags=0;spectatedAttacks.clear();if(viewmodel){viewmodel->reset_presentation();if(!actor)viewmodel->inspect_held(false);}}
         if(actor){/* Actor pulses are already fenced by RoomState, independently of interpolated pose ticks. */if(viewmodel&&actor->inspect)viewmodel->inspect_press();if(actor->attack)spectatedAttacks.push(actor->attack);if(spectatedTick!=~0u&&actor->silenced!=spectatedSilenced)spectatedFlags|=256;spectatedTick=actor->frame.tick;spectatedSilenced=actor->silenced;if(viewmodel)viewmodel->inspect_held(actor->inspectHeld);}spectatedActor=std::move(actor);
@@ -365,20 +942,90 @@ public:
     // Geometry/materials remain tied to the loaded map; playback may supply another context of that map.
     void set_simulation_context(BhContext *context){if(!context)throw std::runtime_error("Null renderer simulation context");core=context;reset_presentation();}
     void draw(int width,int height,const float eye[3],const native::Input &input,const BhSnapshot *state=nullptr,double seconds=-1){
-        if(width<=0||height<=0)return;viewportWidth=width;viewportHeight=height;if(seconds<0)seconds=SDL_GetTicks()/1000.;lastYaw=input.yaw();lastPitch=input.pitch;if(viewmodel)viewmodel->view_angles(float(lastYaw),float(lastPitch));
+        if (width <= 0 || height <= 0)
+            return;
+        const int outputWidth = width, outputHeight = height;
+        GLint outputTarget = 0;
+        gl.GetIntegerv(GL_FRAMEBUFFER_BINDING, &outputTarget);
+        const auto graphicsView = native::graphics_view(graphics, width, height);
+        if (graphics.target_needed()) {
+            graphicsTarget->begin(graphicsView, graphics.samples);
+            width = graphicsView.width;
+            height = graphicsView.height;
+        }
+        viewportWidth = width;
+        viewportHeight = height;
+        if (seconds < 0)
+            seconds = SDL_GetTicks() / 1000.;
+        lastYaw = input.yaw();
+        lastPitch = input.pitch;
+        if (viewmodel)
+            viewmodel->view_angles(float(lastYaw), float(lastPitch));
         if(profiling){frameProfile={};frameProfile.hdrAuthored=lightmapInfo.hdr;frameProfile.waterVolumes=volumes.size();}
         auto phaseStart=profile_now();BhImage changedLightmap{};const int lightmapChanged=bh_lightmap_update(core,&changedLightmap);profile_elapsed(frameProfile.lightmapRefresh,phaseStart);
         phaseStart=profile_now();if(lightmapChanged>0){if(profiling)frameProfile.atlasUpdateBytes=changedLightmap.byte_count;gl.ActiveTexture(GL_TEXTURE1);gl.BindTexture(GL_TEXTURE_2D,lightmap);gl.TexImage2D(GL_TEXTURE_2D,0,GL_SRGB8_ALPHA8,changedLightmap.width,changedLightmap.height,0,GL_RGBA,GL_UNSIGNED_BYTE,changedLightmap.rgba);}
         profile_elapsed(frameProfile.lightmapUpload,phaseStart);
         const double dt=lastSeconds<0?0:std::max(0.,seconds-lastSeconds);lastSeconds=seconds;
-        GLint frameTarget=0;gl.GetIntegerv(GL_FRAMEBUFFER_BINDING,&frameTarget);SourceHdr *pass=hdr_pass();if(profiling)frameProfile.hdrEffective=pass!=nullptr;if(pass)pass->begin(width,height);
+        GLint frameTarget = 0;
+        gl.GetIntegerv(GL_FRAMEBUFFER_BINDING, &frameTarget);
+        SourceHdr *pass = hdr_pass();
+        if (profiling)
+            frameProfile.hdrEffective = pass != nullptr;
+        if (pass) {
+            pass->samples(graphics.samples);
+            pass->begin(width, height);
+        }
         phaseStart=profile_now();
-        gl.Viewport(0,0,width,height);gl.ColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);gl.DepthMask(GL_TRUE);gl.ClearColor(.24,.34,.45,1);gl.Clear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);gl.Disable(GL_BLEND);gl.Disable(GL_CULL_FACE);gl.Disable(GL_DEPTH_TEST);gl.DepthMask(GL_FALSE);gl.UseProgram(skyProgram);gl.BindVertexArray(emptyVao);water_uniforms(skyProgram,eye);
+        gl.Viewport(0, 0, width, height);
+        gl.ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        gl.DepthMask(GL_TRUE);
+        if (graphics.potato)
+            gl.ClearColor(.616f, .733f, .847f, 1);
+        else
+            gl.ClearColor(.24, .34, .45, 1);
+        gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        gl.Disable(GL_BLEND);
+        gl.Disable(GL_CULL_FACE);
+        gl.Disable(GL_DEPTH_TEST);
+        gl.DepthMask(GL_FALSE);
+        gl.UseProgram(skyProgram);
+        gl.BindVertexArray(emptyVao);
+        water_uniforms(skyProgram, eye);
         const float cy=std::cos(lastYaw*native::radians),sy=std::sin(lastYaw*native::radians),cp=std::cos(lastPitch*native::radians),sp=std::sin(lastPitch*native::radians);gl.Uniform3f(loc(skyProgram,"forward"),cp*cy,cp*sy,-sp);gl.Uniform3f(loc(skyProgram,"right"),sy,-cy,0);gl.Uniform3f(loc(skyProgram,"up"),sp*cy,sp*sy,cp);gl.Uniform1f(loc(skyProgram,"aspect"),float(width)/height);gl.Uniform1f(loc(skyProgram,"cot"),(4.f/3.f)/std::tan(float(fieldOfView*native::radians*.5)));
-        GLint present[6]{},half[6]{};for(int i=0;i<6;i++){GLuint id=white;const int32_t m=skyMaterials[i];if(m>=0&&size_t(m)<materials.size()){const auto t=materials[m].texture;if(t>=0&&texture(t)!=checker){id=texture(t);present[i]=1;const auto wh=textureSizes[t];half[i]=i<4&&wh.first==wh.second*2;}}gl.ActiveTexture(GL_TEXTURE0+i);gl.BindTexture(GL_TEXTURE_2D,id);gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);const auto name="sky"+std::to_string(i);gl.Uniform1i(loc(skyProgram,name.c_str()),i);}gl.Uniform1iv(loc(skyProgram,"skyPresent"),6,present);gl.Uniform1iv(loc(skyProgram,"skyHalf"),6,half);gl.DrawArrays(GL_TRIANGLES,0,3);
+        GLint present[6]{}, half[6]{};
+        for (int i = 0; i < 6; i++) {
+            GLuint id = white;
+            const int32_t m = skyMaterials[i];
+            if (m >= 0 && size_t(m) < materials.size()) {
+                const auto t = materials[m].texture;
+                if (t >= 0 && texture(t) != checker) {
+                    id = texture(t);
+                    present[i] = 1;
+                    const auto wh = textureSizes[t];
+                    half[i] = i < 4 && wh.first == wh.second * 2;
+                }
+            }
+            gl.ActiveTexture(GL_TEXTURE0 + i);
+            gl.BindTexture(GL_TEXTURE_2D, id);
+            gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            const auto name = "sky" + std::to_string(i);
+            gl.Uniform1i(loc(skyProgram, name.c_str()), i);
+        }
+        gl.Uniform1iv(loc(skyProgram, "skyPresent"), 6, present);
+        gl.Uniform1iv(loc(skyProgram, "skyHalf"), 6, half);
+        if (!graphics.potato)
+            gl.DrawArrays(GL_TRIANGLES, 0, 3);
         gl.Enable(GL_DEPTH_TEST);gl.DepthMask(GL_TRUE);gl.DepthFunc(GL_LEQUAL);
         const double skySceneBefore=frameProfile.buildCull+frameProfile.sort+frameProfile.submit;
-        if(hasSky&&skyInfo.scale>0){float skyEye[3];for(int k=0;k<3;k++)skyEye[k]=skyInfo.origin[k]+eye[k]/skyInfo.scale;const auto vp=camera(skyEye,lastYaw,lastPitch,float(width)/height);draw_scene(vp,skyEye,true,seconds);gl.Clear(GL_DEPTH_BUFFER_BIT);}
+        if (hasSky && !graphics.potato && skyInfo.scale > 0) {
+            float skyEye[3];
+            for (int k = 0; k < 3; k++)
+                skyEye[k] = skyInfo.origin[k] + eye[k] / skyInfo.scale;
+            const auto vp = camera(skyEye, lastYaw, lastPitch, float(width) / height);
+            draw_scene(vp, skyEye, true, seconds);
+            gl.Clear(GL_DEPTH_BUFFER_BIT);
+        }
         const auto vp=camera(eye,lastYaw,lastPitch,float(width)/height);
         gl.ActiveTexture(GL_TEXTURE7);gl.BindTexture(GL_TEXTURE_2D,white);
         if(skyMesh.vao){gl.Disable(GL_BLEND);gl.DepthMask(GL_TRUE);gl.UseProgram(depthProgram);gl.UniformMatrix4fv(loc(depthProgram,"viewProjection"),1,GL_FALSE,vp.data());gl.ColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE);gl.Disable(GL_CULL_FACE);gl.Enable(GL_POLYGON_OFFSET_FILL);gl.PolygonOffset(1,2);gl.BindVertexArray(skyMesh.vao);for(const auto &item:skyGroups){if(item.sky3d)continue;BhTransform t{};t.visible=1;if(item.model)bh_model_transform(core,item.model,&t);if(!t.visible)continue;const auto model=native::model_matrix(t);gl.UniformMatrix4fv(loc(depthProgram,"model"),1,GL_FALSE,model.data());gl.DrawElements(GL_TRIANGLES,item.index_count,GL_UNSIGNED_INT,reinterpret_cast<void*>(uintptr_t(item.first_index)*4));}gl.ColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);gl.Disable(GL_POLYGON_OFFSET_FILL);}
@@ -390,7 +1037,12 @@ public:
             profile_elapsed(frameProfile.floorReport,detailStart);if(profiling)frameProfile.floorCount=floorCount;detailStart=profile_now();
             for(size_t i=0;floorWeaponsVisible&&floor&&i<floorCount;i++)viewmodel->draw_floor(floor[i],vp,eye,seconds);
             profile_elapsed(frameProfile.floorDraw,detailStart);detailStart=profile_now();
-            if(replayActor)viewmodel->draw_actor(*replayActor,vp,eye,seconds);for(const auto &actor:roomActors)viewmodel->draw_actor(actor,vp,eye,seconds);
+            if (replayActor)
+                viewmodel->draw_actor(*replayActor, vp, eye, seconds);
+            if (compareActor)
+                viewmodel->draw_actor(*compareActor, vp, eye, seconds);
+            for (const auto &actor : roomActors)
+                viewmodel->draw_actor(actor, vp, eye, seconds);
             profile_elapsed(frameProfile.actorDraw,detailStart);
         }
         draw_presentation(vp,eye,seconds);
@@ -406,6 +1058,9 @@ public:
         spectatedAttacks.clear();spectatedFlags=0; // Hidden third-person viewmodels must not replay stale pulses on return to eye mode.
         queuedWeaponFlags=queuedAttackMode=0;queuedAttack=false;
         gl.DepthMask(GL_TRUE);gl.Enable(GL_DEPTH_TEST);gl.Disable(GL_BLEND);gl.Disable(GL_POLYGON_OFFSET_FILL);
+        if (graphics.target_needed()) {
+            graphicsTarget->finish(GLuint(outputTarget), outputWidth, outputHeight, graphicsView, graphics);
+        }
     }
     void screenshot(const std::string &path,int width,int height){
         if(width<=0||height<=0)throw std::runtime_error("Cannot capture empty framebuffer");std::vector<uint8_t> pixels(size_t(width)*height*3);gl.PixelStorei(GL_PACK_ALIGNMENT,1);gl.ReadPixels(0,0,width,height,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());std::ofstream file(path,std::ios::binary);if(!file)throw std::runtime_error("Cannot write screenshot: "+path);file<<"P6\n"<<width<<' '<<height<<"\n255\n";for(int y=height-1;y>=0;y--)file.write(reinterpret_cast<const char*>(pixels.data()+size_t(y)*width*3),width*3);if(!file)throw std::runtime_error("Screenshot write failed: "+path);std::cout<<"Screenshot: "<<path<<'\n';

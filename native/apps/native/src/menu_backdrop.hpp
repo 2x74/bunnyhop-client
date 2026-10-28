@@ -171,6 +171,7 @@ public:
                 next->set_viewmodel_visible(false);
                 next->set_fov(native::tour::renderer_fov());
                 director = std::make_unique<native::tour::Director>(loaded->shots);
+                next->graphics_settings(settings_);
                 renderer = std::move(next); map_ = std::move(loaded);
                 if (!wanted_replay.empty()) {
                     try {
@@ -188,6 +189,9 @@ public:
     // Reduced motion/static capture holds the current PB state and shader time,
     // or the tour's canonical still pose.
     bool draw(int width, int height, double dt, bool still) {
+        if (graphics_.background == native::GraphicsSettings::Background::off)
+            return false;
+        still = still || graphics_.background == native::GraphicsSettings::Background::still;
         if (status_ != Status::ready || width <= 0 || height <= 0) return false;
         if (replay) {
             try {
@@ -213,7 +217,16 @@ public:
         renderer->draw(width, height, eye, view, nullptr, seconds);
         return true;
     }
-    bool cut(bool still) const { return status_ == Status::ready && !replay && !still && director->cut(); }
+    void graphics_settings(const nlohmann::json &settings) {
+        graphics_ = native::GraphicsSettings::read(settings);
+        settings_ = settings;
+        if (renderer)
+            renderer->graphics_settings(settings);
+    }
+    bool cut(bool still) const {
+        return status_ == Status::ready && !replay && !still &&
+               graphics_.background == native::GraphicsSettings::Background::live && director->cut();
+    }
     bool seek_replay(uint32_t tick) {
         if (!replay || status_ != Status::ready || tick > replay->total_ticks()) return false;
         try { replay->seek(tick); renderer->reset_presentation(); return true; }
@@ -229,9 +242,19 @@ public:
     size_t shots() const { return director ? director->count() : 0; }
     nlohmann::json state(const std::string &source) const {
         static const char *names[] = {"idle", "loading", "ready", "failed"};
-        return {{"status", names[int(status_)]}, {"map", wanted}, {"renderer", "native-bsp"}, {"kind", replay ? "pb" : "tour"},
-                {"shots", shots()}, {"source", source}, {"error", error_}, {"replayError", replay_error},
-                {"replayTick", replay ? replay->snapshot().player.tick : 0}, {"replayTicks", replay ? replay->total_ticks() : 0}};
+        return {{"status", names[int(status_)]},
+                {"map", wanted},
+                {"renderer", "native-bsp"},
+                {"kind", replay ? "pb" : "tour"},
+                {"shots", shots()},
+                {"background", graphics_.background == native::GraphicsSettings::Background::off     ? "off"
+                               : graphics_.background == native::GraphicsSettings::Background::still ? "still"
+                                                                                                     : "live"},
+                {"source", source},
+                {"error", error_},
+                {"replayError", replay_error},
+                {"replayTick", replay ? replay->snapshot().player.tick : 0},
+                {"replayTicks", replay ? replay->total_ticks() : 0}};
     }
 
 private:
@@ -246,6 +269,8 @@ private:
     }
     struct Job { std::atomic_bool cancel{false}; std::future<native::DownloadedMap> result; };
     Gl &gl;
+    native::GraphicsSettings graphics_;
+    nlohmann::json settings_ = nlohmann::json::object();
     std::filesystem::path assets;
     Loader load;
     std::shared_ptr<Job> job;

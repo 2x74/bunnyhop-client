@@ -14,6 +14,10 @@ public:
         const int w=std::clamp(job.value("width",768),384,960),h=std::clamp(job.value("height",480),240,600);
         const float yaw=job.value("yaw",0.f),pitch=job.value("pitch",0.f);if(!std::isfinite(yaw)||!std::isfinite(pitch))return {};
         const auto packed=job.value("loadout",std::string("")),outfit=job.value("outfit",std::string("outfit-cream")),ghost=job.value("ghost",std::string("ghost-gold"));if(packed.size()>512||outfit.size()>80||ghost.size()>80)return {};
+        const auto trail = job.value("trail", std::string("trail-gold"));
+        if (trail.size() > 80)
+            return {};
+        models.trail_cosmetics(trail);
         const bool onboarding=view=="onboarding";
         if(onboarding){if(!job.contains("stage")||!job["stage"].is_object())return {};const auto&s=job["stage"];for(const char*key:{"position","velocity"}){if(!s.contains(key)||!s[key].is_array()||s[key].size()!=3)return {};for(const auto&v:s[key])if(!v.is_number()||!std::isfinite(v.get<double>())||std::abs(v.get<double>())>10000)return {};}if(!s.contains("acting")||!s["acting"].is_object())return {};for(const auto&v:s["acting"])if(!v.is_number()||!std::isfinite(v.get<double>())||std::abs(v.get<double>())>180)return {};for(const char*key:{"yaw","pitch","squash","spin","clock"})if(!s.contains(key)||!s[key].is_number()||!std::isfinite(s[key].get<double>()))return {};if(std::abs(s["squash"].get<double>())>.2||s["clock"].get<double>()<0)return {};}
         const auto next=onboarding?view:outfit+";"+packed+";"+view+";"+ghost;
