@@ -4,6 +4,13 @@ import {staffBadgeOf} from '../../web/src/creators';
 import {formatTime} from '../../web/src/timer';
 import type {RoomView} from './room-service';
 const PALETTE=['#ff7a59','#4fa8ff','#5ee08a','#ffd84d','#c477ff','#ff5d9e','#3fd0c9','#ffa94d','#9aa3ff','#b6f06a'];
+/** A player's run time while it runs (seconds at `now`), else null. */
+export function runningSeconds(view:RoomView,slot:number,now:number):number|null{
+ const meta=view.metas[String(slot)];
+ if(meta?.timer!==2)return null;
+ const readAt=view.metaAt?.[String(slot)]??now;
+ return meta.timerTicks/100+Math.max(0,(now-readAt)/1000);
+}
 /** Display only. Server metadata remains untrusted for records and score writes. */
 export function roomScoreboard(view:RoomView,now:number,serverNow:number,selfPing?:number|null):{head:ScoreHead;rows:ScoreRow[]}{
  const rows:ScoreRow[]=view.players.map(p=>{

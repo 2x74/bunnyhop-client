@@ -1,6 +1,7 @@
 #include "replay_library.hpp"
 #include "bunnyhop_native.h"
 #include "data_location.hpp"
+#include "run_timing.hpp"
 #include <memory>
 #include <set>
 
@@ -8,6 +9,35 @@ namespace native {
 namespace {
 constexpr std::uintmax_t replay_max_bytes = 8 * 1024 * 1024;
 constexpr size_t replay_list_limit = 500;
+// Imported BHRs contain ticks, not a score. Re-time them on the worker when the
+// matching map is cached; never alter the replay bytes or block the frame loop.
+std::optional<int64_t> replay_score(BhContext *core, const std::filesystem::path &cache,
+                                    const std::filesystem::path &replay, const nlohmann::json &info) {
+    const auto map = info.at("map").get<std::string>();
+    const auto hash = info.at("mapSha256").get<std::string>();
+    if (map.empty() || map.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") !=
+                           std::string::npos || hash.size() != 64 ||
+        hash.find_first_not_of("0123456789abcdef") != std::string::npos) {
+        return std::nullopt;
+    }
+    const auto directory = cache / "maps" / hash;
+    const auto bsp = directory / (map + ".bsp");
+    if (!std::filesystem::is_regular_file(bsp)) {
+        return std::nullopt;
+    }
+    if (!bh_load_map(core, data_location::utf8(bsp).c_str(),
+                     data_location::utf8(directory / "content").c_str()) ||
+        !bh_replay_load(core, data_location::utf8(replay).c_str())) {
+        return std::nullopt;
+    }
+    BhSnapshot state{};
+    BhRunState run{};
+    if (!bh_replay_seek(core, info.at("endTick").get<uint32_t>(), &state) ||
+        !bh_run_state(core, &run) || run.status != 2) {
+        return std::nullopt;
+    }
+    return score_ms(run.seconds);
+}
 } // namespace
 
 ReplayLibrary::ReplayLibrary(std::filesystem::path cache)
@@ -156,22 +186,34 @@ void ReplayLibrary::scan(Update &update) {
                 const auto info = raw ? Json::parse(raw, raw + bytes) : Json(nullptr);
                 cached = headers_.insert_or_assign(path, CachedHeader{size, modified, info}).first;
             }
-            const auto &info = cached->second.info;
+            auto &info = cached->second.info;
             if (!info.is_object())
                 continue;
             const auto id = data_location::utf8(path.filename());
+            const auto summary = vault_.read(id);
+            if (summary.is_object() && summary.value("timingPolicy", Json(nullptr)) == timing_policy) {
+                info["timeMs"] = summary.at("timeMs");
+            }
+            if (!info.contains("timeMs")) {
+                if (!core) core.reset(bh_create());
+                if (core) {
+                    if (const auto ms = replay_score(core.get(), replays_.parent_path(), path, info)) {
+                        info["timeMs"] = *ms;
+                    }
+                }
+            }
+            const auto ms = info.contains("timeMs") ? info.at("timeMs").get<int64_t>() : legacy_replay_ms(info);
             Json listed = {{"id", id},
                            {"name", info.value("player", std::string("Local run"))},
                            {"map", info.at("map")},
                            {"style", info.value("style", std::string("autohop"))},
                            {"track", info.value("track", 0)},
                            {"recordedAt", info.value("recordedAt", 0.)},
-                           {"bytes", size},
-                           {"seconds", (info.at("endTick").get<double>() - info.at("startTick").get<double>()) *
-                                           info.at("settings").value("tickInterval", .01)}};
-            const auto summary = vault_.read(id);
-            if (summary.is_object())
+                           {"bytes", size}, {"seconds", score_seconds(ms)}, {"timeMs", ms},
+                           {"timingPolicy", info.contains("timeMs") ? Json(timing_policy) : Json(nullptr)}};
+            if (summary.is_object()) {
                 listed["localSummary"] = summary;
+            }
             listed["screenshot"] = vault_.screenshot(id).has_value();
             list.push_back(std::move(listed));
         } catch (const std::exception &error) {

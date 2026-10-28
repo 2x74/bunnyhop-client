@@ -1,6 +1,9 @@
 //! Native port of apps/web/src/timer.ts and zones.ts. All timer arithmetic uses f64 like JS;
 //! only the prespeed velocity written back to Game is rounded to f32.
-use super::{BhCmd, BhSnapshot, BhState};
+use super::{
+    BhCmd, BhSnapshot, BhState,
+    run_timing::{self, Crossing, FRACTION_UNITS},
+};
 use bunnyhop_core::game::{EVENT_JUMPED, EVENT_RESPAWNED, EVENT_TELEPORTED};
 use serde_json::{Value, json};
 
@@ -102,6 +105,9 @@ pub struct Timer {
     perf_ground_ticks: u32,
     last_side: i32,
     prev_yaw: f64,
+    prev_position: Option<[f32; 3]>,
+    start_crossing: Crossing,
+    end_crossing: Crossing,
 }
 impl Timer {
     pub fn new(zones: Vec<BhZone>, options: BhRunOptions, interval: f32) -> Self {
@@ -122,6 +128,9 @@ impl Timer {
             perf_ground_ticks: 0,
             last_side: 0,
             prev_yaw: f64::NAN,
+            prev_position: None,
+            start_crossing: Crossing::boundary(0),
+            end_crossing: Crossing::boundary(FRACTION_UNITS),
         }
     }
     pub fn reset(&mut self, interval: f32) {
@@ -137,7 +146,12 @@ impl Timer {
         self.was_on_ground = false;
         self.ground_since = 0;
         self.prev_yaw = f64::NAN;
-        self.state.seconds = f64::from(self.ticks()) * self.interval;
+        self.prev_position = None;
+        self.state.seconds = if self.state.status == 2 {
+            self.time_ms() as f64 / 1000.0
+        } else {
+            f64::from(self.ticks()) * self.interval
+        };
     }
     fn touching(
         &self,
@@ -166,6 +180,8 @@ impl Timer {
         s.split_count = 0;
         self.last_side = 0;
         self.splits.clear();
+        self.start_crossing = Crossing::boundary(0);
+        self.end_crossing = Crossing::boundary(FRACTION_UNITS);
     }
     pub fn before_step(&mut self, cmd: BhCmd, s: BhState) -> Option<[f32; 3]> {
         let grounded = s.grounded != 0 && s.on_ladder == 0;
@@ -214,7 +230,18 @@ impl Timer {
             None
         }
     }
+    #[cfg(test)]
     pub fn update(&mut self, cmd: BhCmd, s: BhState) -> Option<[f32; 3]> {
+        self.update_observed(cmd, s, None)
+    }
+    pub fn update_observed(
+        &mut self,
+        cmd: BhCmd,
+        s: BhState,
+        game: Option<&bunnyhop_core::Game>,
+    ) -> Option<[f32; 3]> {
+        let from = self.prev_position;
+        self.prev_position = Some(s.position);
         let events = s.events;
         self.state.last_tick = s.tick;
         self.state.update_flags = 0;
@@ -249,6 +276,8 @@ impl Timer {
                 self.state.status = 1;
                 self.state.start_tick = s.tick;
                 self.clear_stats();
+                self.start_crossing =
+                    run_timing::measure(game, s, from, &self.zones, self.state.track, false, false);
                 self.state.update_flags |= 1;
                 clamp = self.cap(s);
             }
@@ -266,6 +295,19 @@ impl Timer {
             } else {
                 if self.state.status == 0 && self.armed {
                     self.state.pending_start = s.tick;
+                    self.start_crossing = if !in_start && events & EVENT_JUMPED == 0 {
+                        run_timing::measure(
+                            game,
+                            s,
+                            from,
+                            &self.zones,
+                            self.state.track,
+                            false,
+                            false,
+                        )
+                    } else {
+                        Crossing::boundary(0)
+                    };
                     clamp = self.cap(s);
                 }
                 self.armed = false;
@@ -370,6 +412,15 @@ impl Timer {
             {
                 self.state.status = 2;
                 self.state.end_tick = s.tick;
+                self.end_crossing = run_timing::measure(
+                    game,
+                    s,
+                    from,
+                    &self.zones,
+                    self.state.track,
+                    true,
+                    pass_end,
+                );
                 self.state.update_flags |= 2;
             }
         }
@@ -380,7 +431,11 @@ impl Timer {
                 0
             };
         self.prev_yaw = f64::from(cmd.yaw);
-        self.state.seconds = f64::from(self.ticks()) * self.interval;
+        self.state.seconds = if self.state.status == 2 {
+            self.time_ms() as f64 / 1000.0
+        } else {
+            f64::from(self.ticks()) * self.interval
+        };
         self.state.sync_percent = if self.state.sync_total != 0 {
             100.0 * f64::from(self.state.sync_good) / f64::from(self.state.sync_total)
         } else {
@@ -400,9 +455,31 @@ impl Timer {
             _ => 0,
         }
     }
+    pub fn time_units(&self) -> u64 {
+        if self.state.status != 2 {
+            return 0;
+        }
+        run_timing::time_units(
+            self.state.start_tick,
+            self.start_crossing.fraction,
+            self.state.end_tick,
+            self.end_crossing.fraction,
+        )
+    }
+    pub fn time_ms(&self) -> u64 {
+        run_timing::units_to_ms(self.time_units(), self.interval)
+    }
+    pub fn timing(&self) -> Value {
+        if self.state.status != 2 {
+            return Value::Null;
+        }
+        json!({"policy":run_timing::POLICY,"startTick":self.state.start_tick,"endTick":self.state.end_tick,
+               "start":self.start_crossing.json(),"end":self.end_crossing.json(),
+               "units":self.time_units(),"ms":self.time_ms()})
+    }
     pub fn json(&self) -> Value {
         json!({"status":(["idle","running","finished"][self.state.status as usize]),"track":self.state.track,
-            "startTick":self.state.start_tick,"endTick":self.state.end_tick,"lastTick":self.state.last_tick,"ticks":self.ticks(),"seconds":self.state.seconds,
+            "startTick":self.state.start_tick,"endTick":self.state.end_tick,"lastTick":self.state.last_tick,"ticks":self.ticks(),"seconds":self.state.seconds,"timeMs":self.time_ms(),"timingPolicy":run_timing::POLICY,"timing":self.timing(),
             "jumps":self.state.jumps,"strafes":self.state.strafes,"perfectJumps":self.state.perfect_jumps,"measuredJumps":self.state.measured_jumps,"lastPerfectTick":self.state.last_perfect_tick,
             "syncGood":self.state.sync_good,"syncTotal":self.state.sync_total,"syncPercent":self.state.sync_percent,"perfPercent":self.state.perf_percent,
             "inStart":self.state.in_start!=0,"pendingStart":self.state.pending_start,"updateFlags":self.state.update_flags,
