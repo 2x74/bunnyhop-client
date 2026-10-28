@@ -2714,12 +2714,14 @@ int run(const Options &opt) {
                 native::draw_name_tags(hud, width, height, preferences.at("hudScale").get<float>(), matrix.data(),
                                        actors, room, hud.preferences().tags_players,
                                        preferences.value("ghostTag", true), hud.preferences().tags_through_walls,
-                                       native::NameTagTrace{core.get(), eye}, steady_seconds);
+                                       native::NameTagTrace{core.get(), eye}, steady_seconds,
+                                       renderer->output_view(width, height));
                 if (audible_ghost && preferences.value("ghostTag", true))
                     native::draw_ghost_name_tag(
                         hud, width, height, preferences.at("hudScale").get<float>(), matrix.data(), *audible_ghost,
                         hud.extras.ghost_name.view(), hud.extras.ghost_seconds, hud.extras.ghost_delta.view(),
-                        hud.preferences().tags_through_walls, native::NameTagTrace{core.get(), eye});
+                        hud.preferences().tags_through_walls, native::NameTagTrace{core.get(), eye},
+                        renderer->output_view(width, height));
             }
             std::string gauntlet_line,gauntlet_delta;bool gauntlet_good=false;
             if(!gauntlet_id.empty()&&gauntlet_progress.is_object()){

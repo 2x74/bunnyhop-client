@@ -329,7 +329,7 @@ inline bool valid_bind_code(const std::string &code) {
     return other.contains(code);
 }
 // A patch is atomic. Invalid persisted input never silently changes half the controls.
-inline Json patch_settings(const Json &current,const Json &patch) {
+inline Json patch_settings(const Json &current,const Json &patch, bool switch_layout = true) {
     if (!patch.is_object() || patch.size() > 256)
         throw std::runtime_error("Invalid settings object");
     Json out=current;
@@ -394,7 +394,7 @@ inline Json patch_settings(const Json &current,const Json &patch) {
                     (!place.contains("x") && !place.contains("visible") && !place.contains("scale")))
                     throw std::runtime_error("HUD position needs both axes");
             }
-            if (web_schema)
+            if (web_schema && switch_layout && !patch.contains("hudLayout"))
                 out["hudLayout"] = Json::object();
         } else if (key == "triggersStyle" || key == "audioMusicMode") {
             const auto choices = key == "triggersStyle" ? std::set<std::string>{"filled", "outline", "bottom"}
@@ -551,7 +551,7 @@ inline Json load_settings(const std::filesystem::path &file) {
             continue;
         }
         try {
-            out = patch_settings(out, {{entry.key(), entry.value()}});
+            out = patch_settings(out, {{entry.key(), entry.value()}}, false);
         } catch (const std::exception &error) {
             if (!backed_up)
                 backup_settings(file);

@@ -1,4 +1,5 @@
 #pragma once
+#include "graphics_settings.hpp"
 #include "hud_text.hpp"
 #include "hud_geometry.hpp"
 #include <nlohmann/json.hpp>
@@ -206,6 +207,16 @@ inline std::optional<std::array<float, 2>> project_name_tag(const float *matrix,
     return std::array<float, 2>{(clip[0] / clip[3] * .5f + .5f) * width, (.5f - clip[1] / clip[3] * .5f) * height};
 }
 
+inline std::optional<std::array<float, 2>> project_name_tag(
+    const float *matrix, const float *point, const GraphicsView &view, int height, float scale) {
+    auto screen = project_name_tag(matrix, point, float(view.output_width), float(view.output_height));
+    if (screen) {
+        (*screen)[0] = (view.x + (*screen)[0]) / scale;
+        (*screen)[1] = (height - view.y - view.output_height + (*screen)[1]) / scale;
+    }
+    return screen;
+}
+
 template <class Core> struct NameTagTrace {
     Core *core;
     const float *eye;
@@ -217,7 +228,8 @@ template <class Core> struct NameTagTrace {
 
 template <class Hud, class Actors, class Room, class Trace>
 void draw_name_tags(Hud &hud, int width, int height, float percent, const float *matrix, const Actors &actors,
-                    const Room &room, bool players, bool ghosts, bool through_walls, Trace trace, double seconds) {
+                    const Room &room, bool players, bool ghosts, bool through_walls, Trace trace, double seconds,
+                    std::optional<GraphicsView> output = std::nullopt) {
     const HudGeometry geometry(width, height, percent);
     hud.overlay_begin(width, height, percent);
     for (const auto &actor : actors) {
@@ -227,7 +239,8 @@ void draw_name_tags(Hud &hud, int width, int height, float percent, const float 
             continue;
         const float point[] = {actor.frame.position[0], actor.frame.position[1],
                                actor.frame.position[2] + actor.frame.view_offset_z + 20};
-        const auto screen = project_name_tag(matrix, point, geometry.width, geometry.height);
+        const auto view = output.value_or(graphics_view(GraphicsSettings{}, width, height));
+        const auto screen = project_name_tag(matrix, point, view, height, geometry.scale);
         if (!screen || (!through_walls && !trace(point)))
             continue;
         unsigned slot = 256;
@@ -242,13 +255,14 @@ void draw_name_tags(Hud &hud, int width, int height, float percent, const float 
 template <class Hud, class Actor, class Trace>
 void draw_ghost_name_tag(Hud &hud, int width, int height, float percent, const float *matrix, const Actor &actor,
                          std::string_view name, std::optional<double> seconds, std::string_view delta,
-                         bool through_walls, Trace trace) {
+                         bool through_walls, Trace trace, std::optional<GraphicsView> output = std::nullopt) {
     if (actor.opacity < .05f)
         return;
     const float point[] = {actor.frame.position[0], actor.frame.position[1],
                            actor.frame.position[2] + actor.frame.view_offset_z + 20};
     const HudGeometry geometry(width, height, percent);
-    const auto screen = project_name_tag(matrix, point, geometry.width, geometry.height);
+    const auto view = output.value_or(graphics_view(GraphicsSettings{}, width, height));
+    const auto screen = project_name_tag(matrix, point, view, height, geometry.scale);
     if (!screen || (!through_walls && !trace(point)))
         return;
     hud.overlay_begin(width, height, percent);

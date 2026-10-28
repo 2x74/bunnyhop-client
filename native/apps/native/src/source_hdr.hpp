@@ -179,6 +179,14 @@ public:
         gl.BindFramebuffer(GL_FRAMEBUFFER, multisampleFbo ? multisampleFbo : sceneFbo);
         gl.Viewport(0, 0, w, h);
     }
+    void refraction_source(int w, int h) {
+        if (multisampleFbo) {
+            gl.BindFramebuffer(GL_READ_FRAMEBUFFER, multisampleFbo);
+            gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, sceneFbo);
+            gl.BlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+        }
+        gl.BindFramebuffer(GL_READ_FRAMEBUFFER, sceneFbo);
+    }
     // Bloom and expose the world into `targetFbo` (the frame's own framebuffer), then meter.
     void finish(GLuint targetFbo,int w,int h,double dt){
         if (multisampleFbo) {
@@ -288,6 +296,15 @@ void main(){
         gl.GetIntegerv(GL_MAX_SAMPLES, &maximum_samples);
         resize(view.width, view.height, std::min(requested_samples, maximum_samples));
         gl.BindFramebuffer(GL_FRAMEBUFFER, samples ? multisample_framebuffer : framebuffer);
+    }
+    void refraction_source() {
+        if (samples) {
+            gl.BindFramebuffer(GL_READ_FRAMEBUFFER, multisample_framebuffer);
+            gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
+            gl.BlitFramebuffer(0, 0, width, height, 0, 0, width, height,
+                               GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+        }
+        gl.BindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
     }
     void finish(GLuint target, int output_width, int output_height, const native::GraphicsView &view,
                 const native::GraphicsSettings &settings) {

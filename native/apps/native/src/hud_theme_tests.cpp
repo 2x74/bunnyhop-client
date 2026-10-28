@@ -173,6 +173,14 @@ void test_web_settings_schema() {
     web["timer"]["x"] = -.05;
     const auto modern = native::patch_settings(legacy, {{"hudLayoutWeb", web}});
     assert(modern.at("hudLayoutWeb") == web && modern.at("hudLayout").empty());
+    const auto file = std::filesystem::temp_directory_path() / "bunnyhop-polish-settings.json";
+    native::save_settings(file, legacy);
+    const auto reloaded = native::load_settings(file);
+    assert(reloaded.at("hudLayout") == legacy.at("hudLayout"));
+    assert(reloaded.at("hudLayoutWeb") == legacy.at("hudLayoutWeb"));
+    assert(native::HudPreferences::from(reloaded).layout[native::hud_index("fps")]->visible);
+    std::filesystem::remove(file);
+    assert(native::patch_settings(settings, legacy).at("hudLayout") == legacy.at("hudLayout"));
     const auto capabilities = native::native_capabilities();
     for (const auto id : native::web_hud_elements)
         assert(std::find(capabilities.begin(), capabilities.end(), "hud:" + std::string(id)) != capabilities.end());
@@ -312,6 +320,17 @@ void test_scoreboard_and_names() {
     const std::array<float, 16> matrix = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 4};
     const float point[] = {0, 0, 0};
     const auto projected = native::project_name_tag(matrix.data(), point, 1000, 800);
+    native::GraphicsView bars;
+    bars.x = 200;
+    bars.y = 100;
+    bars.output_width = 600;
+    bars.output_height = 600;
+    const float offset_point[] = {1, 1, 0};
+    const auto in_bars = native::project_name_tag(matrix.data(), offset_point, bars, 800, .5f);
+    const auto local = native::project_name_tag(matrix.data(), offset_point, 600, 600);
+    assert(in_bars && local);
+    assert(std::abs((*in_bars)[0] - (200 + (*local)[0]) * 2) < .001f);
+    assert(std::abs((*in_bars)[1] - (100 + (*local)[1]) * 2) < .001f);
     assert(projected && (*projected)[0] == 500 && (*projected)[1] == 400);
     const float hidden[] = {20, 0, 0};
     assert(!native::project_name_tag(matrix.data(), hidden, 1000, 800));

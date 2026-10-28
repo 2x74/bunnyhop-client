@@ -435,9 +435,20 @@ class Renderer {
         gl.Uniform2f(loc(target,"viewportSize"),float(viewportWidth),float(viewportHeight));gl.Uniform4fv(loc(target,"waterRect"),GLsizei(order.size()),rect);gl.Uniform1i(loc(target,"waterCount"),GLint(order.size()));if(!order.empty()){gl.Uniform3fv(loc(target,"waterMin"),order.size(),lo);gl.Uniform3fv(loc(target,"waterMax"),order.size(),hi);gl.Uniform3fv(loc(target,"waterColor"),order.size(),color);gl.Uniform2fv(loc(target,"waterRange"),order.size(),range);gl.Uniform2fv(loc(target,"waterSpan"),order.size(),span);}
         gl.ActiveTexture(GL_TEXTURE6);gl.BindTexture(GL_TEXTURE_2D,planesTexture);gl.Uniform1i(loc(target,"waterPlanes"),6);
     }
+    uint64_t refractionCaptures = 0;
     void capture_refraction(){
+        ++refractionCaptures;
+        GLint read_target = 0, draw_target = 0;
+        gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_target);
+        gl.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw_target);
+        if (auto *hdr = hdr_pass())
+            hdr->refraction_source(viewportWidth, viewportHeight);
+        else if (graphics.target_needed())
+            graphicsTarget->refraction_source();
         for(int i=0;i<2;i++){GLuint &id=i?refractDepth:refractColor;if(!id){gl.GenTextures(1,&id);ownedTextures.push_back(id);}gl.ActiveTexture(GL_TEXTURE4+i);gl.BindTexture(GL_TEXTURE_2D,id);gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,i?GL_NEAREST:GL_LINEAR);gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,i?GL_NEAREST:GL_LINEAR);gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);if(refractWidth!=viewportWidth||refractHeight!=viewportHeight)gl.CopyTexImage2D(GL_TEXTURE_2D,0,i?GL_DEPTH_COMPONENT24:GL_RGBA16F,0,0,viewportWidth,viewportHeight,0);else gl.CopyTexSubImage2D(GL_TEXTURE_2D,0,0,0,0,0,viewportWidth,viewportHeight);}
         refractWidth=viewportWidth;refractHeight=viewportHeight;
+        gl.BindFramebuffer(GL_READ_FRAMEBUFFER, GLuint(read_target));
+        gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, GLuint(draw_target));
     }
     void draw_scene(const native::Matrix &vp,const float eye[3],bool sky,double time){
         auto phaseStart=profile_now();
@@ -672,6 +683,12 @@ public:
       return surface_tool(bound, state, input, message.value("held", false));
   }
 
+  uint64_t refraction_captures() const {
+      return refractionCaptures;
+  }
+  native::GraphicsView output_view(int width, int height) const {
+      return native::graphics_view(graphics, width, height);
+  }
   template <class Hud>
   void draw_measure_label(Hud &hud, const native::Matrix &vp, const float eye[3], int width, int height) {
       if (!toolsVisible || measure.count() != 2)
@@ -698,6 +715,9 @@ public:
                        height - view.y - (clip[1] / clip[3] * .5f + .5f) * view.output_height, measureLabel, 13,
                        {1, 1, 1, 1}, true);
       hud.overlay_end(width, height);
+  }
+  const native_render::GhostPath &ghost_path(unsigned slot) const {
+      return ghostPaths.at(slot);
   }
   void set_ghost_path(unsigned slot, native_render::GhostPath path) {
       if (slot >= ghostPaths.size())
