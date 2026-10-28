@@ -7,7 +7,8 @@
 #include "mouse_diagnostics.hpp"
 #include "raw_keyboard.hpp"
 #include "input_timeline.hpp"
-#include "recording_input.hpp"
+#include "run_session.hpp"
+#include "base64.hpp"
 #include "replay_practice.hpp"
 #include "replay_session.hpp"
 #include "video_request.hpp"
@@ -97,22 +98,6 @@ void require(bool ok, BhContext *ctx, const char *operation) {
         const char *error = bh_last_error(ctx);
         throw std::runtime_error(std::string(operation) + ": " + (error && *error ? error : "native core failed"));
     }
-}
-
-std::string base64(const std::string &bytes) {
-    static constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string out;
-    out.reserve((bytes.size() + 2) / 3 * 4);
-    for (size_t i = 0; i < bytes.size(); i += 3) {
-        const uint32_t n = (uint32_t(uint8_t(bytes[i])) << 16)
-                           | (i + 1 < bytes.size() ? uint32_t(uint8_t(bytes[i + 1])) << 8 : 0)
-                           | (i + 2 < bytes.size() ? uint8_t(bytes[i + 2]) : 0);
-        out += alphabet[(n >> 18) & 63];
-        out += alphabet[(n >> 12) & 63];
-        out += i + 1 < bytes.size() ? alphabet[(n >> 6) & 63] : '=';
-        out += i + 2 < bytes.size() ? alphabet[n & 63] : '=';
-    }
-    return out;
 }
 
 std::vector<BhZone> timer_zones(const nlohmann::json &detail) {
@@ -263,7 +248,6 @@ int run(const native::Options &opt) {
     auto backdrop_clock = std::chrono::steady_clock::now();
     bool captured = false, focused = true, running = true, menu_ready = false, smoke_requested = false,
          smoke_pass = false, smoke_snapshot = false, resume_wanted = false;
-    bool recording_ended = false;
     // Settings and other small JSON files are written off the frame loop.
     native::JsonFileWriter json_writer;
     auto preferences = startup_data.settings;
@@ -424,7 +408,7 @@ int run(const native::Options &opt) {
     native::InputTimeline input_timeline;
     native::FrameDiagnostics frame_diagnostics;
     native::TurnSettings configured_turns;
-    native::RecordingInput recording_input;
+    native::RunRecorder recorder;
     native::discord::Settings discord_settings;
     const char *video_driver = SDL_GetCurrentVideoDriver();
     input_timeline.configure_stamps(video_driver ? video_driver : "");
@@ -506,10 +490,9 @@ int run(const native::Options &opt) {
         }
     };
     apply_preferences();
-    std::string map_id, loading, error, record_path, last_requested_map;
+    std::string map_id, loading, error, last_requested_map;
     native::ReplayLibrary replay_library(cache);
     native::RunVault run_vault(cache / "run-vault");
-    std::optional<std::pair<std::string, std::string>> pending_vault_capture;
     nlohmann::json load_progress = nullptr;
     const auto identity = native::load_release_identity(manifest_path, menu_path, assets);
     native::updates::Service updater(
@@ -542,10 +525,7 @@ int run(const native::Options &opt) {
         }
         feedback.reset(timing.in_start != 0, snapshot.movement_mode == 1, incomplete_history);
     };
-    uint64_t run_generation = 0;
-    uint32_t beat_start = 0, beat_upto = 0, beat_hash = 0x811c9dc5;
-    bool beat_paused = false;
-    auto beat_time = std::chrono::steady_clock::now();
+    native::RunHeartbeat heartbeat;
     std::vector<BhZone> zones;
     std::mutex progress_mutex;
     native::MapJobs<native::DownloadedMap> download;
@@ -666,7 +646,7 @@ int run(const native::Options &opt) {
             || !turn_admission.allows_event(event.value("type", std::string())))
             return;
         if (!menu || !menu_ready || opt.frames || !opt.menu_smoke.empty()) return;
-        event["generation"] = run_generation;
+        event["generation"] = heartbeat.generation;
         event["map"] = map_id;
         event["style"] = active_style;
         event["build"] = identity.value("build", std::string("bunnyhop-native/local"));
@@ -683,31 +663,24 @@ int run(const native::Options &opt) {
     auto begin_record = [&]() {
         if (turn_admission.local_only) score_notice.clear();
         turn_admission.reset();
-        recording_input.stop();
-        recording_ended = false;
-        record_path.clear();
-        pending_vault_capture.reset();
-        ++run_generation;
-        beat_start = beat_upto = 0;
-        beat_hash = 0x811c9dc5;
-        beat_paused = false;
-        run_event({{"type", "reset"}});
+        recorder.input.stop();
+        recorder.clear(false);
+        const auto event = heartbeat.invalidate();
+        heartbeat.restart();
+        run_event(event);
         if (practice.active || playback || room.spectator_target || tutorial_practice() || zones.empty() || opt.frames
             || !opt.menu_smoke.empty())
             return;
-        const auto stamp = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                   std::chrono::system_clock::now().time_since_epoch()
-        )
-                                   .count();
-        record_path = data_location::utf8(cache / "replays" / (map_id + "-" + std::to_string(stamp) + ".bhr"));
-        require(bh_record_identity(core.get(), identity.at("build").get<std::string>().c_str()),
+        recorder.begin(
                 core.get(),
-                "Setting native release identity");
-        require(bh_record_begin(core.get(), "", active_style.c_str(), replay_player.c_str(), 100),
-                core.get(),
-                "Starting native recording");
-        require(recording_input.begin(core.get(), configured_turns), core.get(), "Setting v29 recording input");
-        bh_record_loadout(core.get(), packed_loadout.c_str());
+                cache,
+                map_id,
+                identity.at("build").get<std::string>(),
+                active_style,
+                replay_player,
+                configured_turns,
+                packed_loadout
+        );
     };
     auto reset = [&]() {
         cancel_video();
@@ -806,14 +779,10 @@ int run(const native::Options &opt) {
                   5000);
         }
         require(bh_practice_enter(core.get(), tool == "noclip"), core.get(), "Entering practice");
-        recording_input.stop();
-        recording_ended = false;
-        record_path.clear();
-        pending_vault_capture.reset();
+        recorder.input.stop();
+        recorder.clear(false);
         score_notice.clear();
-        ++run_generation;
-        beat_start = beat_upto = 0;
-        run_event({{"type", "reset"}});
+        run_event(heartbeat.invalidate());
     };
     auto practice_action = [&](const std::string &action,
                                bool bound = false,
@@ -982,16 +951,12 @@ int run(const native::Options &opt) {
         active_style = selected_style;
         curr = {};
         prev = {};
-        recording_ended = true;
-        record_path.clear();
-        pending_vault_capture.reset();
+        recorder.clear(true);
         score_notice.clear();
         hud.toasts.clear();
         error.clear();
         turn_admission.reset();
-        ++run_generation;
-        beat_start = beat_upto = 0;
-        run_event({{"type", "reset"}});
+        run_event(heartbeat.invalidate());
         reset_feedback();
         reset_input_timing();
         audio.reset();
@@ -1096,9 +1061,7 @@ int run(const native::Options &opt) {
         error.clear();
         show_menu(true);
         if (core) bh_record_end(core.get());
-        ++run_generation;
-        beat_start = beat_upto = 0;
-        run_event({{"type", "reset"}});
+        run_event(heartbeat.invalidate());
         // A background still downloading gives way; one already on screen
         // stays until this map has loaded.
         if (backdrop) backdrop->cancel_loading();
@@ -1219,16 +1182,14 @@ int run(const native::Options &opt) {
             replay_compare_import.reset();
         }
         if (!core) throw std::runtime_error("Load the replay map first");
-        recording_input.stop();
+        recorder.input.stop();
         practice.clear(core.get());
         if (tutorial) tutorial->stop();
         tutorial_demo = false;
         renderer->reset_presentation();
         scope.reset();
         bh_record_end(core.get());
-        ++run_generation;
-        run_event({{"type", "reset"}});
-        beat_start = 0;
+        run_event(heartbeat.invalidate(native::RunHeartbeat::Reset::start));
         audio.reset();
         if (action == "ghost") {
             auto &slot = ghost_slots[ghost_slot];
@@ -1281,9 +1242,7 @@ int run(const native::Options &opt) {
             replay_orbit_drag = false;
             playback_id = native::data_location::utf8(path.filename());
             replay_timeline.request(path, playback_id);
-            recording_ended = true;
-            record_path.clear();
-            pending_vault_capture.reset();
+            recorder.clear(true);
             curr = prev = playback_session.initial.snapshot.player;
             input.set_angles(playback_session.initial.view.pitch, playback_session.initial.view.yaw);
             reset_feedback();
@@ -2075,7 +2034,7 @@ int run(const native::Options &opt) {
         });
         while (!entered)
             std::this_thread::yield();
-        const auto generation = run_generation;
+        const auto generation = heartbeat.generation;
         leave_map();
         const auto deadline = Clock::now() + std::chrono::seconds(1);
         while (!stopped && Clock::now() < deadline)
@@ -2090,7 +2049,7 @@ int run(const native::Options &opt) {
         check(room.generation == 7 && room.id.empty() && room.map.empty() && !download.valid(),
               "late room callback revived map after leave");
         check(pending_replay.empty() && pending_room_map.empty() && pending_tutorial.empty() && loading.empty()
-                      && run_generation > generation,
+                      && heartbeat.generation > generation,
               "leave-map stale work/generation");
         load_map(opt.map, opt.content_root, "native-runtime-fixture-new", detail);
         check(core && renderer && !practice.active && practice.checkpoints.empty(), "new map after leave failed");
@@ -2657,7 +2616,7 @@ int run(const native::Options &opt) {
                     } else if (type == "roomScoreboard" || type == "scoreboard")
                         room.display_contract(message);
                     else if (type == "hudData")
-                        hud.receive_data(message, run_generation, map_id, active_style, active_track);
+                        hud.receive_data(message, heartbeat.generation, map_id, active_style, active_track);
                     else if (type == "hudToast")
                         hud.receive_toast(message, double(SDL_GetTicksNS()) / 1e9);
                     else if (type == "chatSuggestions") {
@@ -2805,13 +2764,9 @@ int run(const native::Options &opt) {
                             playback = false;
                             playback_id.clear();
                             replay_controls = {};
-                            recording_input.stop();
-                            recording_ended = true;
-                            record_path.clear();
-                            pending_vault_capture.reset();
-                            ++run_generation;
-                            beat_start = beat_upto = 0;
-                            run_event({{"type", "reset"}});
+                            recorder.input.stop();
+                            recorder.clear(true);
+                            run_event(heartbeat.invalidate());
                             renderer->reset_presentation();
                             scope.reset();
                             audio.reset();
@@ -3227,13 +3182,13 @@ int run(const native::Options &opt) {
                         error = message.value("error", std::string("Menu failed"));
                         std::cerr << "Menu: " << error << '\n';
                     } else if (type == "worldRecord") {
-                        if (message.value("generation", uint64_t(-1)) != run_generation
+                        if (message.value("generation", uint64_t(-1)) != heartbeat.generation
                             || message.value("map", std::string()) != map_id
                             || message.value("style", std::string()) != active_style
                             || message.value("track", ~0u) != active_track)
                             continue;
                         known_world_record.reset();
-                        world_record_generation = run_generation;
+                        world_record_generation = heartbeat.generation;
                         if ((message.contains("seconds") && !message["seconds"].is_null())
                             || (message.contains("timeMs") && !message["timeMs"].is_null())) {
                             const auto ms = native::score_ms(message, "seconds");
@@ -3243,15 +3198,15 @@ int run(const native::Options &opt) {
                             known_world_record = native::score_seconds(ms);
                         }
                     } else if (type == "hudLeaderboard") {
-                        if (message.value("generation", ~uint64_t(0)) != run_generation
+                        if (message.value("generation", ~uint64_t(0)) != heartbeat.generation
                             || message.value("map", std::string()) != map_id
                             || message.value("style", std::string()) != active_style
                             || message.value("track", ~0u) != active_track)
                             continue;
                         hud.extras.leaderboard(message.value("place", 0u), message.value("topPercent", 0.));
                     } else if (type == "runService") {
-                        if (message.value("generation", uint64_t(-1)) != run_generation) continue;
-                        hud.result.service(message, run_generation);
+                        if (message.value("generation", uint64_t(-1)) != heartbeat.generation) continue;
+                        hud.result.service(message, heartbeat.generation);
                         if (message.value("status", std::string()) == "verified" && message.contains("rank"))
                             hud.extras.leaderboard(message.value("rank", 0u), message.value("topPercent", 0.));
                         if (message.value("status", std::string()) == "verified" && !practice.active
@@ -3330,7 +3285,8 @@ int run(const native::Options &opt) {
                 menu_state.replays_changed();
             }
             for (const auto &capture : update->captures) {
-                if (capture.matches(map_id, record_path)) pending_vault_capture = std::pair{capture.id, capture.map};
+                if (capture.matches(map_id, recorder.path))
+                    recorder.pending_capture = std::pair{capture.id, capture.map};
             }
             for (const auto &failure : update->errors) {
                 std::cerr << "Replay library: " << failure << '\n';
@@ -3456,7 +3412,7 @@ int run(const native::Options &opt) {
                 }
                 const nlohmann::json result = {
                         {"id", job.value("id", 0u)},
-                        {"png", png.empty() ? std::string() : "data:image/png;base64," + base64(png)}
+                        {"png", png.empty() ? std::string() : "data:image/png;base64," + native::base64(png)}
                 };
                 menu->evaluate_js("window.bunnyhopNativeLoadoutPreview?.(" + result.dump() + ")");
             }
@@ -3524,12 +3480,8 @@ int run(const native::Options &opt) {
         if (spectator != observed_spectator) {
             if (spectator) {
                 bh_record_end(core.get());
-                recording_ended = true;
-                record_path.clear();
-                pending_vault_capture.reset();
-                beat_start = 0;
-                ++run_generation;
-                run_event({{"type", "reset"}});
+                recorder.clear(true);
+                run_event(heartbeat.invalidate(native::RunHeartbeat::Reset::start));
                 audio.reset();
                 input_scheduler.reset(SDL_GetTicksNS());
                 input.clear();
@@ -3594,7 +3546,7 @@ int run(const native::Options &opt) {
                 && !download.valid()
                 && ((focused && (captured || (playback && (!menu || !menu->visible())))) || opt.frames)
                 && (!playback || (!playback_paused && !replay_controls.dragging));
-        if (beat_start && !simulation_active) beat_paused = true;
+        if (heartbeat.start && !simulation_active) heartbeat.paused = true;
         const double frame_seconds = input_clock.elapsed(now);
         const bool activity_active = core && !download.valid() && focused && captured && !playback && !spectator
                                      && !opt.frames && opt.runtime_smoke.empty();
@@ -3646,16 +3598,14 @@ int run(const native::Options &opt) {
                                 active_style,
                                 (tutorial && tutorial->is_active()) || practice.active || feedback.ssj_was_noclip
                         );
-                const auto &turns = recording_input.active() ? recording_input.turns : configured_turns;
+                const auto &turns = recorder.input.active() ? recorder.input.turns : configured_turns;
                 const double rate = turns.apply(input, input_timeline.held(held_codes), dt, turns_allowed);
                 if (turn_admission.observe(rate, active_style == "scroll")) {
-                    ++run_generation;
-                    run_event({{"type", "reset"}});
-                    beat_start = 0;
+                    run_event(heartbeat.invalidate(native::RunHeartbeat::Reset::start));
                     score_notice = "Practice turn controls: local replay only";
                 }
-                if (!record_path.empty() && !recording_ended) {
-                    require(recording_input.mark_timed(core.get(), input_timeline.tick_contributed()),
+                if (!recorder.path.empty() && !recorder.ended) {
+                    require(recorder.input.mark_timed(core.get(), input_timeline.tick_contributed()),
                             core.get(),
                             "Marking timed input recording");
                 }
@@ -3668,8 +3618,7 @@ int run(const native::Options &opt) {
                             input, input_timeline, hud.preferences().null_binds, active_style, practice.active
                     )
                     && turn_admission.observe(1, true)) {
-                    ++run_generation;
-                    run_event({{"type", "reset"}});
+                    run_event(heartbeat.invalidate(native::RunHeartbeat::Reset::generation));
                     score_notice = "Null binds: local replay only";
                 }
                 cmd = input.command();
@@ -3832,7 +3781,7 @@ int run(const native::Options &opt) {
             }
 
             // Finish the recording on the exact native tick, before any further catch-up steps.
-            if (!playback && tick_run.status == 2 && !recording_ended) {
+            if (!playback && tick_run.status == 2 && !recorder.ended) {
                 reset_input_timing();
                 break;
             }
@@ -3845,58 +3794,36 @@ int run(const native::Options &opt) {
             if (playback || !zones.empty())
                 require(bh_run_state(core.get(), &run_state), core.get(), "Reading native timer");
             if (!practice.active && !playback && run_state.status == 1 && run_state.recording) {
-                const bool started_run = beat_start != run_state.start_tick;
+                const bool started_run = heartbeat.start != run_state.start_tick;
                 if (started_run) {
-                    ++run_generation;
-                    run_event({{"type", "reset"}});
-                    beat_start = beat_upto = run_state.start_tick;
-                    beat_hash = 0x811c9dc5;
-                    beat_paused = false;
+                    run_event(heartbeat.invalidate(native::RunHeartbeat::Reset::generation));
+                    heartbeat.begin(run_state.start_tick);
                 }
-                if (started_run || now - beat_time >= std::chrono::seconds(4)) {
-                    const auto length = uint32_t(run_state.total_commands);
-                    require(bh_record_fold(core.get(), beat_hash, beat_upto, length, &beat_hash),
-                            core.get(),
-                            "Hashing native heartbeat");
-                    beat_upto = length;
-                    char hex[9];
-                    std::snprintf(hex, sizeof(hex), "%08x", beat_hash);
-                    run_event(
-                            {{"type", "beat"},
-                             {"track", run_state.track},
-                             {"tick", length - beat_start},
-                             {"hash", hex},
-                             {"paused", beat_paused}}
-                    );
-                    beat_time = now;
-                    beat_paused = false;
+                if (started_run || now - heartbeat.time >= std::chrono::seconds(4)) {
+                    run_event(heartbeat.fold(core.get(), run_state));
+                    heartbeat.sent(now);
                 }
-            } else if (run_state.status == 0 && beat_start) {
-                beat_start = 0;
-                ++run_generation;
-                run_event({{"type", "reset"}});
+            } else if (run_state.status == 0 && heartbeat.start) {
+                run_event(heartbeat.invalidate(native::RunHeartbeat::Reset::start));
             }
-            if (!playback && run_state.status == 2 && !recording_ended)
+            if (!playback && run_state.status == 2 && !recorder.ended)
                 hud.result.finish(
-                        run_generation,
+                        heartbeat.generation,
                         run_state.seconds,
                         double(SDL_GetTicksNS()) / 1e9,
                         hud.extras.personal_best,
                         !practice.active && !turn_admission.local_only
                 );
-            if (practice.active && !playback && run_state.status == 2 && !recording_ended) {
-                recording_ended = true;
+            if (practice.active && !playback && run_state.status == 2 && !recorder.ended) {
+                recorder.ended = true;
             }
-            if (!practice.active && !playback && run_state.status == 2 && !recording_ended) {
-                recording_ended = true;
-                if (!record_path.empty()) {
+            if (!practice.active && !playback && run_state.status == 2 && !recorder.ended) {
+                recorder.ended = true;
+                if (!recorder.path.empty()) {
                     try {
-                        require(bh_record_end(core.get()), core.get(), "Finishing native recording");
-                        require(bh_record_write_bhr(core.get(), record_path.c_str()),
-                                core.get(),
-                                "Writing native replay");
+                        recorder.write(core.get());
                         // Local vault failures cannot withhold an otherwise valid replay submission.
-                        const auto id = data_location::utf8(data_location::from_utf8(record_path).filename());
+                        const auto id = data_location::utf8(data_location::from_utf8(recorder.path).filename());
                         replay_library.archive(
                                 id,
                                 {{"map", map_id},
@@ -3921,7 +3848,7 @@ int run(const native::Options &opt) {
                                 backdrop_pbs[map_id] = {
                                         {"id",
                                          native::data_location::utf8(
-                                                 native::data_location::from_utf8(record_path).filename()
+                                                 native::data_location::from_utf8(recorder.path).filename()
                                          )},
                                         {"seconds", run_state.seconds},
                                         {"timeMs", native::score_ms(run_state.seconds)}
@@ -3929,14 +3856,12 @@ int run(const native::Options &opt) {
                                 json_writer.write(cache / "backdrop-pbs.json", backdrop_pbs);
                             }
                         }
-                        run_event(
-                                {{"type", "finish"},
-                                 {"track", run_state.track},
-                                 {"timeMs", native::score_ms(run_state.seconds)},
-                                 {"timingPolicy", native::timing_policy},
-                                 {"replayBase64", base64(native::read_text(data_location::from_utf8(record_path)))}}
-                        );
-                        std::cout << "Native finish " << run_state.seconds << " seconds; replay " << record_path
+                        run_event(recorder.finish_event(
+                                run_state.track,
+                                run_state.seconds,
+                                native::read_text(data_location::from_utf8(recorder.path))
+                        ));
+                        std::cout << "Native finish " << run_state.seconds << " seconds; replay " << recorder.path
                                   << '\n';
                     } catch (const std::exception &e) {
                         error = std::string("Replay was not submitted: ") + e.what();
@@ -3946,9 +3871,9 @@ int run(const native::Options &opt) {
             }
             if (hud.auto_restart_due(
                         auto_restart,
-                        run_generation,
+                        heartbeat.generation,
                         run_state,
-                        world_record_generation == run_generation ? known_world_record : std::nullopt,
+                        world_record_generation == heartbeat.generation ? known_world_record : std::nullopt,
                         hud.extras.ghost_target(map_id, active_style, active_track, ghost_enabled && ghost_handle),
                         practice.active || turn_admission.local_only || playback || room_modes.has_race()
                                 || (tutorial && tutorial->is_active()) || !captured
@@ -4023,7 +3948,7 @@ int run(const native::Options &opt) {
             auto camera_input = input_timeline.preview(input);
             // Show turnbind motion between ticks too, so turning is smooth at any frame rate.
             if (simulation_active && !playback && !spectator) {
-                const auto &turns = recording_input.active() ? recording_input.turns : configured_turns;
+                const auto &turns = recorder.input.active() ? recorder.input.turns : configured_turns;
                 const bool allowed = captured && native::turn_binds_allowed(active_style, practice.active);
                 turns.apply(
                         camera_input,
@@ -4174,7 +4099,8 @@ int run(const native::Options &opt) {
             if (local_scope && scope.scoped()) renderer->set_viewmodel_visible(false);
             const bool world_record_finish =
                     !playback && !spectator && !practice.active && !turn_admission.local_only
-                    && display_run.recording_valid && world_record_generation == run_generation && known_world_record
+                    && display_run.recording_valid && world_record_generation == heartbeat.generation
+                    && known_world_record
                     && native::score_ms(display_run.seconds) < native::score_ms(*known_world_record);
             renderer->set_zone_state(display_run.track, display_run, world_record_finish);
             renderer->set_flashlight(flashlight);
@@ -4385,9 +4311,9 @@ int run(const native::Options &opt) {
             }
         }
         // Capture only the finished gameplay framebuffer, before any menu/backdrop layer.
-        if (pending_vault_capture) {
-            const auto pending = *pending_vault_capture;
-            pending_vault_capture.reset();
+        if (recorder.pending_capture) {
+            const auto pending = *recorder.pending_capture;
+            recorder.pending_capture.reset();
             if (renderer && pending.second == map_id && width > 0 && height > 0) {
                 try {
                     replay_library.attach(pending.first, backbuffer_png(gl, width, height));
@@ -4426,7 +4352,7 @@ int run(const native::Options &opt) {
                 };
                 auto png_source = [&] {
                     backdrop_png = backbuffer_png(gl, width, height);
-                    return "data:image/png;base64," + base64(backdrop_png);
+                    return "data:image/png;base64," + native::base64(backdrop_png);
                 };
                 if (renderer && gameplay_backdrop_due && menu->visible()) {
                     gameplay_backdrop_due = false;
@@ -4609,7 +4535,7 @@ int run(const native::Options &opt) {
                         {"error", error},
                         {"sensitivity", input.sensitivity},
                         {"paused", !captured},
-                        {"recordingPath", record_path},
+                        {"recordingPath", recorder.path},
                         {"player",
                          {{"map", map_id},
                           {"style", playback ? playback_info.value("style", active_style) : active_style},
@@ -4670,7 +4596,7 @@ int run(const native::Options &opt) {
                         {"replayCompare", replay_compare.state()},
                         {"surfaceTools", renderer ? renderer->surface_tools_state() : nlohmann::json(nullptr)},
                         {"graphicsLimits", renderer ? renderer->graphics_limits() : nlohmann::json(nullptr)},
-                        {"runGeneration", run_generation},
+                        {"runGeneration", heartbeat.generation},
                         {"timer",
                          {{"status", run_state.status},
                           {"seconds", run_state.seconds},
@@ -4794,7 +4720,7 @@ int run(const native::Options &opt) {
                          .room_id = room.id,
                          .room_map = room.map,
                          .track = active_track,
-                         .generation = run_generation,
+                         .generation = heartbeat.generation,
                          .target = spectator,
                          .loading = download.valid(),
                          .practice = practice.active,
