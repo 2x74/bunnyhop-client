@@ -103,7 +103,25 @@ if(BUNNYHOP_BUILD_CLIENT)
     find_package(CURL REQUIRED)
     find_package(ZLIB REQUIRED)
     find_package(Threads REQUIRED)
-    add_executable(bunnyhop-native src/client.cpp src/game_session.cpp src/video_controller.cpp src/hud_frame.cpp src/practice_controller.cpp src/tutorial_runner.cpp src/ghost_slots.cpp src/replay_player.cpp src/run_session.cpp src/options.cpp src/startup.cpp src/preferences.cpp src/replay_library.cpp src/online.cpp src/audio_pack.cpp src/video_export.cpp)
+    add_executable(bunnyhop-native
+        src/client.cpp
+        src/game_session.cpp
+        src/video_controller.cpp
+        src/hud_frame.cpp
+        src/room_bridge.cpp
+        src/practice_controller.cpp
+        src/tutorial_runner.cpp
+        src/ghost_slots.cpp
+        src/replay_player.cpp
+        src/run_session.cpp
+        src/options.cpp
+        src/startup.cpp
+        src/preferences.cpp
+        src/replay_library.cpp
+        src/online.cpp
+        src/audio_pack.cpp
+        src/video_export.cpp
+    )
     add_executable(bunnyhop-native-export-previews EXCLUDE_FROM_ALL src/export_previews.cpp)
     add_executable(bunnyhop-native-loadout-preview-smoke EXCLUDE_FROM_ALL src/loadout_preview_smoke.cpp)
     target_include_directories(bunnyhop-native-loadout-preview-smoke PRIVATE include vendor src)

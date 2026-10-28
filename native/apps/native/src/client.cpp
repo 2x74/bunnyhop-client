@@ -55,6 +55,7 @@
 #include "recoverable_action.hpp"
 #include "app_identity.hpp"
 #include "room_state.hpp"
+#include "room_bridge.hpp"
 #include "room_modes.hpp"
 #include "tutorial_runner.hpp"
 #include "discord_rpc.hpp"
@@ -282,14 +283,14 @@ int run(const native::Options &opt) {
     std::string selected_style = opt.style, active_style = opt.style, outfit, packed_loadout,
                 ghost_cosmetic = "ghost-default", trail_cosmetic = "trail-none";
     std::optional<native_render::Glow> player_glow;
-    native::RoomState room;
-    native::RoomModes room_modes;
-    std::optional<unsigned> observed_spectator;
+    native::RoomBridge room_bridge;
+    auto &room = room_bridge.room;
+    auto &room_modes = room_bridge.room_modes;
+    auto &observed_spectator = room_bridge.observed_spectator;
     auto epoch_ms = []() {
         return std::chrono::duration<double, std::milli>(std::chrono::system_clock::now().time_since_epoch()).count();
     };
-    uint32_t room_events = 8;
-    auto room_time = std::chrono::steady_clock::now();
+    auto &room_events = room_bridge.room_events;
     uint32_t active_track = 0;
     native::GhostSlots ghosts;
     unsigned pending_ghost_slot = 0;
@@ -331,7 +332,7 @@ int run(const native::Options &opt) {
     native::FrameDiagnostics frame_diagnostics;
     native::TurnSettings configured_turns;
     native::RunRecorder recorder;
-    native::discord::Settings discord_settings;
+    auto &discord_settings = room_bridge.discord_settings;
     const char *video_driver = SDL_GetCurrentVideoDriver();
     input_timeline.configure_stamps(video_driver ? video_driver : "");
     native::Chat chat;
@@ -1792,8 +1793,6 @@ int run(const native::Options &opt) {
     }
     auto title_time = Clock::now(), ui_time = title_time, started = title_time;
     uint64_t frame = 0, title_frames = 0;
-    // Discord Rich Presence / Join. Never from scripted or hidden runs, so a
-    // smoke test can't show up on the developer's own profile.
     // BUNNYHOP_INPUT_LOG=path writes one line per tick: what that tick got from
     // the mouse and keyboard, and the frame it ran in. Off unless asked for.
     std::ofstream input_log;
@@ -1807,16 +1806,9 @@ int run(const native::Options &opt) {
     }
     double input_frame_ms = 0;
     native::MouseDiagnostics mouse_diagnostics;
-    native::discord::Client discord;
-    const bool discord_allowed = !opt.frames && !opt.hidden && opt.menu_smoke.empty();
-    std::string presence_map;
-    int64_t presence_started = 0;
-    auto presence_time = std::chrono::steady_clock::time_point{};
-    discord.on_join = [&](const std::string &id) {
-        if (!menu || !menu_ready) return;
-        show_menu(true);
-        menu->evaluate_js("window.bunnyhopNativeMenu?.joinRoom?.(" + nlohmann::json(id).dump() + ")");
-    };
+    room_bridge.bind_presence(opt, menu.get(), menu_ready, show_menu);
+    auto &discord = room_bridge.discord;
+    const bool discord_allowed = room_bridge.discord_allowed;
     if (!opt.presentation_smoke.empty()) {
         if (!renderer || !core) throw std::runtime_error("Presentation smoke requires a local map");
         bh_record_end(core.get());
@@ -3114,57 +3106,9 @@ int run(const native::Options &opt) {
         else if (leave_result == native::LeaveHold::Result::tap)
             toast("Hold Main menu key to leave");
         const auto spectator = core && room.map == map_id ? room.spectator_target : std::optional<unsigned>();
-        if (now - presence_time >= std::chrono::milliseconds(250)) {
-            presence_time = now;
-            const auto unix_now =
-                    int64_t(std::chrono::duration_cast<std::chrono::seconds>(
-                                    std::chrono::system_clock::now().time_since_epoch()
-                    )
-                                    .count());
-            if (map_id != presence_map) {
-                presence_map = map_id;
-                presence_started = unix_now;
-            }
-            const auto &settings = discord_settings;
-            nlohmann::json activity;
-            if (discord_allowed && settings.enabled && !settings.privacy) {
-                static const std::map<std::string, std::string> style_names = {
-                        {"autohop", "Normal"},
-                        {"legit", "EZ Scroll"},
-                        {"scroll", "Legit Scroll"},
-                        {"wonly", "W-Only"},
-                        {"sideways", "Sideways"},
-                        {"hsw", "Half-Sideways"},
-                        {"lowgrav", "Low Gravity"},
-                        {"autostrafe", "Auto-strafe"}
-                };
-                native::discord::Status status;
-                status.kind = map_id.empty()                             ? "menu"
-                              : viewer.active                            ? "replay"
-                              : (!captured || (menu && menu->visible())) ? "paused"
-                                                                         : "playing";
-                status.mode = viewer.active         ? "replay"
-                              : !room.id.empty()    ? "multiplayer"
-                              : tutorial_practice() ? "practice"
-                                                    : "solo";
-                status.map = map_id == native::TutorialRunner::map_id ? "the tutorial" : map_id;
-                const auto named = style_names.find(active_style);
-                status.style = named == style_names.end() ? active_style : named->second;
-                status.started_at = presence_started;
-                status.room = room.id;
-                activity = native::discord::build_activity(
-                        status,
-                        settings,
-                        [](const std::string &text) {
-                            char hex[65]{};
-                            bh_sha256(reinterpret_cast<const uint8_t *>(text.data()), text.size(), hex);
-                            return std::string(hex);
-                        },
-                        unix_now
-                );
-            }
-            discord.update(discord_allowed && settings.enabled && !settings.privacy, activity);
-        }
+        room_bridge.update_presence(
+                now, map_id, active_style, viewer.active, captured, menu && menu->visible(), tutorial_practice()
+        );
         if (spectator != observed_spectator) {
             if (spectator) {
                 bh_record_end(core.get());
@@ -3930,46 +3874,20 @@ int run(const native::Options &opt) {
             } catch (const std::exception &e) {
                 std::cerr << "Menu backdrop: " << e.what() << '\n';
             }
-        if (menu && menu_ready && core && !viewer.active && !spectator && !room.id.empty() && room.map == map_id
-            && now - room_time >= std::chrono::milliseconds(50)) {
-            BhWeaponReport weapon{};
-            bh_weapon_report(core.get(), &weapon);
-            const auto tick =
-                    uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(now - started).count() / 10);
-            const nlohmann::json pose = {
-                    {"generation", room.generation},
-                    {"id", room.id},
-                    {"map", map_id},
-                    {"sample",
-                     {{"tick", tick},
-                      {"x", curr.position[0]},
-                      {"y", curr.position[1]},
-                      {"z", curr.position[2]},
-                      {"vx", curr.velocity[0]},
-                      {"vy", curr.velocity[1]},
-                      {"vz", curr.velocity[2]},
-                      {"yaw", input.yaw()},
-                      {"pitch", input.pitch},
-                      {"flags", room_events | (curr.grounded ? 1 : 0) | (curr.crouched ? 2 : 0)}}},
-                    {"meta",
-                     {{"style", active_style},
-                      {"track", run_state.track},
-                      {"timer",
-                       run_state.status == 2   ? 3
-                       : run_state.status == 1 ? 2
-                       : run_state.in_start    ? 1
-                                               : 0},
-                      {"timerTicks",
-                       run_state.status
-                               ? (run_state.status == 2 ? run_state.end_tick : curr.tick) - run_state.start_tick
-                               : 0}}},
-                    {"weapon", weapon.active},
-                    {"silenced", weapon.silencer != 0}
-            };
-            menu->evaluate_js("window.bunnyhopNativeMenu?.onRoomPose?.(" + pose.dump() + ")");
-            room_events = 0;
-            room_time = now;
-        }
+        room_bridge.publish_pose(
+                now,
+                started,
+                menu.get(),
+                menu_ready,
+                core.get(),
+                map_id,
+                viewer.active,
+                spectator.has_value(),
+                curr,
+                input,
+                run_state,
+                active_style
+        );
         if (!opt.video_smoke.empty()) {
             const auto result = video_state();
             const auto phase = result.value("state", std::string());
