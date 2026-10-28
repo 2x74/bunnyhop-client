@@ -6,6 +6,7 @@
 #include "replay_session.hpp"
 #include "replay_controls.hpp"
 #include "replay_library.hpp"
+#include "restart_placement.hpp"
 #include <zlib.h>
 #ifdef NDEBUG
 #undef NDEBUG
@@ -231,6 +232,42 @@ void test_practice_takeover() {
     assert(spawn.snapshot.player.tick == 0 && spawn.view.yaw == 0);
 }
 
+void test_practice_rejection_replies() {
+    Fixture fixture;
+    const auto path = fixture.record("reasons.bhr", true, true);
+    const auto original = fixture.header(path);
+    check(bh_replay_load(fixture.core.get(), native::data_location::utf8(path).c_str()), fixture.core.get());
+    const std::string older = "That replay is from an older version of the game, so it can only be watched.";
+    for (int reason = 0; reason < 7; ++reason) {
+        auto info = original;
+        const auto selected = reason == 1 ? "legit" : "autohop";
+        const auto map = reason == 0 ? "other-map" : "fixture";
+        std::string expected;
+        if (reason == 0) expected = "That replay is fixture. Switch to it first.";
+        if (reason == 1) expected = "That replay is Normal. Switch to it first.";
+        if (reason == 2) info["settings"]["physics"] = 17;
+        if (reason == 3) info["timerRules"] = 1;
+        if (reason == 4) info["settings"]["gravity"] = 400;
+        if (reason >= 2 && reason <= 4) expected = older;
+        if (reason == 5) expected = "No practice during a gauntlet.";
+        if (reason == 6) expected = "Practice is for solo play, not servers.";
+        try {
+            native::ReplayTakeover::take(fixture.core.get(), info, fixture.zones, selected,
+                                         reason == 5, reason == 6, 10, map);
+            assert(false);
+        } catch (const std::exception &failure) {
+            assert(failure.what() == expected);
+            assert(native::practice_from_replay_reply(false, failure.what()) ==
+                   Json({{"type", "practiceFromReplayResult"}, {"ok", false}, {"reason", expected}}));
+        }
+        BhState state{};
+        check(bh_state(fixture.core.get(), &state), fixture.core.get());
+        assert(state.tick == 0);
+    }
+    assert(native::practice_from_replay_reply(true) ==
+           Json({{"type", "practiceFromReplayResult"}, {"ok", true}, {"reason", nullptr}}));
+}
+
 void test_replay_playback_range() {
     Fixture fixture;
     const auto path = fixture.record("range.bhr", true, true);
@@ -367,6 +404,42 @@ void test_replay_library_cache() {
     assert(vault.read("saved.bhr").is_object());
 }
 
+void test_restart_placement_and_recorded_names() {
+    Fixture fixture;
+    for (const std::string map : {"bhop_shutdown", "bhop_japan"}) {
+        for (const uint32_t track : {0u, 1u}) {
+            for (const bool practice : {false, true}) {
+                auto zones = fixture.zones;
+                for (auto &zone : zones) zone.track = track;
+                zones[0].mins[2] = 64;
+                BhRunOptions options{};
+                bh_default_run_options(&options);
+                check(bh_run_configure(fixture.core.get(), &options, zones.data(), zones.size()), fixture.core.get());
+                check(bh_reset(fixture.core.get()), fixture.core.get());
+                check(bh_set_position(fixture.core.get(), 10, 20, 65, 0), fixture.core.get());
+                BhState player{};
+                check(bh_state(fixture.core.get(), &player), fixture.core.get());
+                native::StartPoints points;
+                if (practice) points.save(map, track, player, 0, 0, true);
+                const auto restart = native::RestartPlacement::place(
+                    fixture.core.get(), map, track, std::vector<BhZone>(zones.begin(), zones.end()), &points);
+                assert(restart.practice == practice);
+                const auto evidence = fixture.directory / "restart.jsonl";
+                std::filesystem::remove(evidence);
+                check(bh_record_begin(fixture.core.get(), native::data_location::utf8(evidence).c_str(),
+                                       "autohop", "test", 100), fixture.core.get());
+                check(bh_record_end(fixture.core.get()), fixture.core.get());
+                std::ifstream input(evidence);
+                Json header;
+                input >> header;
+                const auto names = track == 0 && !practice ? native::restart_names(map, track) : std::nullopt;
+                assert(header.at("spawn").at("targetname") == (names ? names->targetname : ""));
+                assert(header.at("spawn").at("classname") == (names ? names->classname : ""));
+            }
+        }
+    }
+}
+
 void test_bonus_takeover_uses_normal_style() {
     Fixture fixture;
     for (auto &zone : fixture.zones) {
@@ -383,10 +456,12 @@ void test_bonus_takeover_uses_normal_style() {
 }  // namespace
 
 int main() {
+    test_restart_placement_and_recorded_names();
     test_replay_library_cache();
     test_recording_options_roundtrip();
     test_turn_settings_validation();
     test_practice_takeover();
+    test_practice_rejection_replies();
     test_replay_playback_range();
     test_bonus_takeover_uses_normal_style();
     std::puts("v29 native recording input roundtrips passed");

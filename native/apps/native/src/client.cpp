@@ -26,6 +26,7 @@
 #include "activity.hpp"
 #include "weapon_menu.hpp"
 #include "start_point.hpp"
+#include "restart_placement.hpp"
 #include "run_timing.hpp"
 #include "weapon_commands.hpp"
 #include "replay_camera.hpp"
@@ -681,24 +682,9 @@ int run(const Options &opt) {
         if(tutorial&&tutorial->is_active()&&active_style!="legit"&&active_style!="scroll")active_style="autohop";
         require(bh_style_set(core.get(),active_style.c_str()),core.get(),"Applying movement style");
         require(bh_reset(core.get()),core.get(),"Restarting map");
-        require(bh_state(core.get(),&curr),core.get(),"Reading restart state");
-        const BhZone *start=nullptr; bool spawn_inside=false;
-        for(const auto &z:zones) if(z.kind==0 && z.track==active_track) {
-            if(!start) start=&z;
-            const auto *p=curr.position;
-            if(p[0]-16<=z.maxs[0] && p[0]+16>=z.mins[0] && p[1]-16<=z.maxs[1] && p[1]+16>=z.mins[1] && p[2]<=z.maxs[2] && p[2]+62>=z.mins[2]) spawn_inside=true;
-        }
-        if(start && (!spawn_inside || map_id=="bhop_japan")) {
-            require(bh_set_position(core.get(),float((double(start->mins[0])+start->maxs[0])/2),float((double(start->mins[1])+start->maxs[1])/2),start->mins[2]+1,curr.teleport_angles[1]),core.get(),"Placing player in start zone");
-            if(map_id=="bhop_japan") require(bh_set_restart_names(core.get(),"","beginner"),core.get(),"Applying map restart names");
-            require(bh_state(core.get(),&curr),core.get(),"Reading settled restart");
-        }
-        std::optional<float> custom_pitch;bool outside_spawn=false;
-        if(!(tutorial&&tutorial->is_active()))if(const auto point=start_points.get(map_id,active_track)){
-            const BhState fallback=curr;
-            if(bh_set_position(core.get(),point->position[0],point->position[1],point->position[2],point->yaw)&&bh_state(core.get(),&curr)&&native::start_point_landed(curr,*point)){custom_pitch=point->pitch;outside_spawn=!native::start_point_in_zone(curr,zones,active_track);}
-            else{require(bh_set_position(core.get(),fallback.position[0],fallback.position[1],fallback.position[2],fallback.teleport_angles[1]),core.get(),"Restoring default start");require(bh_state(core.get(),&curr),core.get(),"Reading default start");}
-        }
+        const auto restart = native::RestartPlacement::place(
+            core.get(), map_id, active_track, zones, tutorial && tutorial->is_active() ? nullptr : &start_points);
+        curr = restart.state;
         if(tutorial&&tutorial->is_active()){
             tutorial->set_legit(active_style=="legit"||active_style=="scroll");tutorial->start(tutorial->lesson_index());
             const auto spawn=tutorial->spawn();require(bh_set_position(core.get(),spawn.position[0],spawn.position[1],spawn.position[2],spawn.yaw),core.get(),"Placing tutorial player");
@@ -706,11 +692,22 @@ int run(const Options &opt) {
             if(tutorial_demo)tutorial_demo_start=curr.tick;
         }
         if(renderer){renderer->reset_presentation();scope.reset();renderer->set_viewmodel_weapon(std::nullopt);renderer->set_cosmetics(outfit,packed_loadout);}
-        audio.reset();hud.reset_history();replay_camera.reset();prev=curr;reset_input_timing();input.set_angles(custom_pitch.value_or(curr.teleport_angles[0]),curr.teleport_angles[1]);
-        if(outside_spawn&&!practice.active){practice.active=true;practice.tool="spawn";}
+        audio.reset();
+        hud.reset_history();
+        replay_camera.reset();
+        prev = curr;
+        reset_input_timing();
+        input.set_angles(restart.pitch.value_or(curr.teleport_angles[0]), curr.teleport_angles[1]);
+        if (restart.practice && !practice.active) {
+            practice.active = true;
+            practice.tool = "spawn";
+        }
         kept_weapons.restarted(practice.active||zones.empty(),settings.physics>=10);begin_record();reset_feedback();reset_input_timing();
         // (toast() is declared after reset; set its state directly.)
-        if(outside_spawn){toast_text="Custom spawn outside the start zone: practice run. Enter and leave the start zone to time it.";toast_until=Clock::now()+std::chrono::milliseconds(4000);}
+        if (restart.practice) {
+            toast_text = "Custom practice spawn. !clearstart restores ranked restarts.";
+            toast_until = Clock::now() + std::chrono::milliseconds(4000);
+        }
     };
     auto practice_reason=[&](){return native::practice_unavailable(bool(core),playback,!room.id.empty(),map_id==tutorial_map,!gauntlet_id.empty());};
     auto toast=[&](const std::string &text,unsigned ms=3000){toast_text=text;toast_until=Clock::now()+std::chrono::milliseconds(ms);};
@@ -1169,8 +1166,13 @@ int run(const Options &opt) {
                         toast(problem);
                         return;
                     }
-                    start_points.save(map_id, active_track, curr, input.yaw(), input.pitch);
-                    toast(native::start_point_in_zone(curr, zones, active_track)
+                    const bool practice_spawn = practice.active ||
+                                                !native::start_point_in_zone(curr, zones, active_track);
+                    start_points.save(map_id, active_track, curr, input.yaw(), input.pitch, practice_spawn);
+                    toast(practice.active
+                              ? "Spawn saved. Restarts stay practice because this attempt used practice. "
+                                "!clearstart undoes it."
+                              : native::start_point_in_zone(curr, zones, active_track)
                               ? "Start point saved"
                               : "Start point saved outside the start zone: runs from it are practice, and the timer "
                                 "starts only from the start zone",
@@ -1699,6 +1701,12 @@ int run(const Options &opt) {
                 if(raw.size()>12*1024*1024)throw std::runtime_error("Menu command too large");
                 auto message=nlohmann::json::parse(raw);const auto type=message.at("type").get<std::string>();
                 if(type=="loadoutPreview") {if(menu->visible()&&raw.size()<=8192)preview_request=std::move(message);continue;}
+                if (type == "practiceFromReplay" && (video_capture || director_job || video_encoder.busy())) {
+                    menu->evaluate_js("window.bunnyhopNativeMenu?.onPracticeFromReplayResult?.(" +
+                        native::practice_from_replay_reply(
+                            false, "Finish or cancel video export before continuing as practice.").dump() + ")");
+                    continue;
+                }
                 if((video_capture||director_job||video_encoder.busy())&&type!="videoExport"&&type!="ready"&&type!="update"&&type!="audioCue"&&type!="music"&&type!="quit"){if(type=="settings")throw std::runtime_error("Finish or cancel video export before changing settings.");continue;}
                 const size_t limit = native::menu_message_limit(type);
                 if(raw.size()>limit)throw std::runtime_error("Menu command exceeds its type limit");
@@ -1791,33 +1799,41 @@ int run(const Options &opt) {
                 }
                 else if(type=="leaveMap")leave_map();
                 else if (type == "practiceFromReplay") {
-                    if (!core || !playback || download.valid())
-                        throw std::runtime_error("Open a replay before continuing as practice.");
-                    const auto tick = message.contains("tick") ?
-                        std::optional<uint32_t>(message.at("tick").get<uint32_t>()) : std::nullopt;
-                    const auto takeover = native::ReplayTakeover::take(core.get(), playback_info, zones,
-                        selected_style, !gauntlet_id.empty(), !room.id.empty(), tick);
-                    takeover.resume(practice, input_timeline, input, held_codes);
-                    curr = prev = takeover.snapshot.player;
-                    active_style = takeover.style;
-                    active_track = takeover.track;
-                    playback = false;
-                    playback_id.clear();
-                    replay_controls = {};
-                    recording_input.stop();
-                    recording_ended = true;
-                    record_path.clear();
-                    pending_vault_capture.reset();
-                    ++run_generation;
-                    beat_start = beat_upto = 0;
-                    run_event({{"type", "reset"}});
-                    renderer->reset_presentation();
-                    scope.reset();
-                    audio.reset();
-                    reset_feedback(true);
-                    reset_input_timing();
-                    score_notice = "Practice from replay. Press R for a real run.";
-                    show_menu(false);
+                    try {
+                        if (!core || !playback || download.valid())
+                            throw std::runtime_error("Open a replay before continuing as practice.");
+                        const auto tick = message.contains("tick") ?
+                            std::optional<uint32_t>(message.at("tick").get<uint32_t>()) : std::nullopt;
+                        const auto takeover = native::ReplayTakeover::take(core.get(), playback_info, zones,
+                            selected_style, !gauntlet_id.empty(), !room.id.empty(), tick, map_id);
+                        takeover.resume(practice, input_timeline, input, held_codes);
+                        curr = prev = takeover.snapshot.player;
+                        active_style = takeover.style;
+                        active_track = takeover.track;
+                        playback = false;
+                        playback_id.clear();
+                        replay_controls = {};
+                        recording_input.stop();
+                        recording_ended = true;
+                        record_path.clear();
+                        pending_vault_capture.reset();
+                        ++run_generation;
+                        beat_start = beat_upto = 0;
+                        run_event({{"type", "reset"}});
+                        renderer->reset_presentation();
+                        scope.reset();
+                        audio.reset();
+                        reset_feedback(true);
+                        reset_input_timing();
+                        score_notice = "Practice from replay. Press R for a real run.";
+                        menu->evaluate_js("window.bunnyhopNativeMenu?.onPracticeFromReplayResult?.(" +
+                                          native::practice_from_replay_reply(true).dump() + ")");
+                        show_menu(false);
+                    } catch (const std::exception &failure) {
+                        menu->evaluate_js("window.bunnyhopNativeMenu?.onPracticeFromReplayResult?.(" +
+                                          native::practice_from_replay_reply(false, failure.what()).dump() + ")");
+                        toast(failure.what());
+                    }
                 }
                 else if(type=="practice")practice_action(message.at("action").get<std::string>(),false,message.contains("value")?std::optional<bool>(message.at("value").get<bool>()):std::nullopt);
                 else if(type=="music"){const auto action=message.at("action").get<std::string>();if(action!="previous"&&action!="toggle"&&action!="next")throw std::runtime_error("Invalid music action");audio.music_control(action);}

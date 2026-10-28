@@ -1,5 +1,6 @@
 #include "settings.hpp"
 #include "start_point.hpp"
+#include "restart_names.hpp"
 #include "replay_camera.hpp"
 #include "weapon_commands.hpp"
 #include "spatial_audio.hpp"
@@ -58,6 +59,27 @@ int main(){
     }
     native::StartPoints points;points.save("map",0,player,90,-5);native::StartPoints restored;assert(restored.load(native::Json::parse(points.points.dump())));assert(restored.get("map",0)->yaw==90);assert(!restored.get("map",1));
     assert(!restored.load({{"bad",{{"position",{1,2,3}},{"yaw",0},{"pitch",100}}}}));
+    // The saved point carries tool provenance even when it is inside the start zone.
+    player.position[0] = player.position[1] = 50;
+    assert(native::start_point_in_zone(player, zones, 0));
+    for (const bool used_tool : {false, true}) {
+        points.save("map", 0, player, 90, -5, used_tool);
+        assert(restored.load(native::Json::parse(points.points.dump())));
+        const auto saved = restored.get("map", 0);
+        assert(saved && native::start_point_practice(*saved, player, zones, 0) == used_tool);
+    }
+    auto legacy = points.points;
+    legacy["map:0"].erase("practice");
+    assert(restored.load(legacy) && !restored.get("map", 0)->practice);
+    player.position[0] = 150;
+    assert(native::start_point_practice(*restored.get("map", 0), player, zones, 0));
+    player.position[0] = 50;
+    const auto japan = native::restart_names("bhop_japan", 0);
+    const auto shutdown = native::restart_names("bhop_shutdown", 0);
+    assert(japan && std::string(japan->classname) == "beginner" && std::string(japan->targetname).empty());
+    assert(shutdown && std::string(shutdown->targetname) == "asdf" && std::string(shutdown->classname).empty());
+    assert(!native::restart_names("bhop_japan", 1) && !native::restart_names("bhop_shutdown", 1));
+    assert(!native::restart_names("unknown", 0));
     native::ReplayCamera camera;native::Input view;float eye[3]{};player.view_offset_z=64;
     assert(camera.set_mode("chase"));trace_fraction=.5;camera.sample(reinterpret_cast<BhContext*>(1),player,0,0,0,eye,view);assert(std::abs(eye[0]-(50-std::cos(14*3.141592653589793/180)*46))<.001);assert(std::abs(eye[2]-(56+std::sin(14*3.141592653589793/180)*46))<.001);
     assert(!camera.set_mode("unknown"));assert(camera.mode=="chase");
