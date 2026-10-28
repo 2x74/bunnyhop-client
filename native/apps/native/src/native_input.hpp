@@ -38,11 +38,6 @@ inline bool turn_binds_allowed(std::string_view style, bool practice) {
     return style != "scroll" || practice;
 }
 
-inline double configured_turn_rate(bool left, bool right, double speed) {
-    if(left==right || !std::isfinite(speed) || speed<.01 || speed>1000)return 0;
-    return left?speed:-speed;
-}
-
 // Turnbinds in Legit Scroll keep the attempt local, including pre-start ticks.
 struct TurnAdmission {
     bool local_only = false;

@@ -170,6 +170,42 @@ void test_display_defaults() {
     std::filesystem::remove_all(dir);
 }
 
+void test_settings_replace_has_no_missing_destination() {
+#ifndef _WIN32
+    const auto directory = std::filesystem::temp_directory_path() / "bunnyhop-atomic-settings-test";
+    std::filesystem::remove_all(directory);
+    std::filesystem::create_directories(directory);
+    const auto file = directory / "settings.json";
+    native::save_settings(file, {{"generation", 0}});
+    std::atomic<bool> done = false;
+    std::atomic<bool> failed = false;
+    std::atomic<size_t> reads = 0;
+    std::thread reader([&] {
+        while (!done.load()) {
+            try {
+                std::ifstream input(file);
+                const auto saved = nlohmann::json::parse(input);
+                if (!saved.at("generation").is_number_integer())
+                    failed = true;
+            } catch (const std::exception &) {
+                failed = true;
+            }
+            ++reads;
+        }
+    });
+    while (reads.load() == 0)
+        std::this_thread::yield();
+    for (int generation = 1; generation <= 200; ++generation) {
+        native::save_settings(file, {{"generation", generation}});
+    }
+    done = true;
+    reader.join();
+    assert(!failed.load());
+    assert(!std::filesystem::exists(directory / "settings.json.previous"));
+    std::filesystem::remove_all(directory);
+#endif
+}
+
 }  // namespace
 
 int main() {
@@ -179,6 +215,7 @@ int main() {
     test_frame_pacer_waits_for_the_previous_frame();
     test_json_writer_writes_off_thread_and_keeps_the_newest();
     test_display_defaults();
+    test_settings_replace_has_no_missing_destination();
     std::puts("frame loop: all tests passed");
     return 0;
 }

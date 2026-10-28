@@ -1,6 +1,7 @@
 // Timestamped input (timed_input.hpp, input_timeline.hpp) through the client's frame-loop input path.
 #include "timed_input_harness.hpp"
 #include "replay_controls.hpp"
+#include "turn_settings.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -540,6 +541,7 @@ void test_held_tab_through_replay_routing() {
         if (controls.toggle_from_key(true, repeat)) {
             ++transitions;
             loop.timeline.release(loop.input, loop.held_codes);
+            loop.timeline.restart(loop.input, loop.held_codes);
         }
     }
     assert(transitions == 1);
@@ -572,6 +574,7 @@ void test_long_stall_preserves_event_clock() {
     stamps.begin_pump(uint64_t(start));
     const uint64_t resumed = uint64_t(start + 60'000 * ms);
     stamps.begin_pump(resumed);
+    assert(stamps.time(native::EventStamps::kMotion, uint64_t(start - ms), resumed) == uint64_t(start - ms));
     for (uint64_t i = 1; i <= 1000; ++i) {
         const uint64_t stamp = uint64_t(start) + i * ms;
         assert(stamps.time(native::EventStamps::kMotion, stamp, resumed) == stamp);
@@ -646,6 +649,35 @@ void test_8khz_input_does_not_allocate() {
     assert(allocation_count == 0);
 }
 
+void test_turn_keys_use_each_command_cutoff() {
+    native::Input input;
+    input.set_angles(0, 0);
+    native::InputTimeline timeline;
+    timeline.queue().holdback_ms = 0;
+    timeline.rebuild_binds(native::default_settings().at("binds"));
+    std::set<std::string> held;
+    timeline.key(held, "ArrowLeft", true, false, uint64_t(start + ms), uint64_t(start + 20 * ms));
+    timeline.key(held, "Mouse4", true, false, uint64_t(start + 12 * ms), uint64_t(start + 20 * ms));
+    uint64_t sim_ns = uint64_t(start);
+    const native::TurnSettings turns{300, 2.5};
+    for (int tick = 1; tick <= 2; ++tick) {
+        timeline.take_tick(input, sim_ns, uint64_t(native::test::tick_ns), false);
+        turns.apply(input, timeline.held(held), .01, true);
+        const auto command = input.command();
+        input.look_sample();
+        if (tick == 1) {
+            assert(command.yaw == 3 && command.buttons == native::turn_left);
+        } else {
+            assert(command.yaw == 10.5 && command.buttons == (native::turn_left | native::turn_fast));
+        }
+    }
+    timeline.key(held, "ArrowRight", true, false, uint64_t(start + 21 * ms), uint64_t(start + 30 * ms));
+    timeline.take_tick(input, sim_ns, uint64_t(native::test::tick_ns), false);
+    turns.apply(input, timeline.held(held), .01, true);
+    const auto command = input.command();
+    assert(command.yaw == 10.5 && command.buttons == 0);
+}
+
 void test_event_stamps_per_backend() {
     const uint64_t now = 20'000 * ms;
     native::EventStamps windows;
@@ -693,6 +725,7 @@ int main() {
     test_long_stall_preserves_event_clock();
     test_backlog_storage_is_bounded();
     test_8khz_input_does_not_allocate();
+    test_turn_keys_use_each_command_cutoff();
     test_held_tab_through_replay_routing();
     test_each_tick_takes_exactly_its_reports();
     test_fractional_reports_stay_exact();

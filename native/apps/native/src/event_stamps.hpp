@@ -49,7 +49,8 @@ public:
         }
         const bool future = stamp > received + kFutureSlackNs;
         const bool old = stamp < received && received - stamp > kForeignClockNs;
-        const bool foreign = stamp == 0 || (old && stamp < backlog_floor_ns_);
+        const bool before_backlog = stamp < backlog_floor_ns_ && backlog_floor_ns_ - stamp > kForeignClockNs;
+        const bool foreign = stamp == 0 || (old && before_backlog);
         if (!future && !foreign) {
             source.off_clock_in_row = 0;
             return stamp;

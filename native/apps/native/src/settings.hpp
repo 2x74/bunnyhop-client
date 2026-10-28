@@ -196,8 +196,14 @@ inline Json load_settings(const std::filesystem::path &file) {
     return patch_settings(out,saved);
 }
 inline void save_settings(const std::filesystem::path &file,const Json &settings) {
-    auto temp=file;temp+=".tmp";
-    {std::ofstream out(temp,std::ios::binary|std::ios::trunc);out<<settings.dump(2)<<'\n';if(!out)throw std::runtime_error("Could not save settings");}
+    auto temp = file;
+    temp += ".tmp";
+    std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+    out << settings.dump(2) << '\n';
+    out.close();
+    if (!out) {
+        throw std::runtime_error("Could not save settings");
+    }
     atomic_replace(temp, file);
 }
 }

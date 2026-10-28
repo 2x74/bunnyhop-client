@@ -177,17 +177,12 @@ int main() {
         assert(in.yaw()==yaw&&in.command().buttons==0);
         assert(!native::turn_binds_allowed("scroll",false));
         assert(native::turn_binds_allowed("scroll",true)&&native::turn_binds_allowed("wonly",false));
-        assert(native::configured_turn_rate(true,true,210)==0);
-        assert(native::configured_turn_rate(false,false,210)==0);
-        assert(native::configured_turn_rate(true,false,.01)==.01);
-        assert(native::configured_turn_rate(false,true,1000)==-1000);
-        assert(native::configured_turn_rate(true,false,.009)==0);
-        assert(native::configured_turn_rate(true,false,std::numeric_limits<double>::quiet_NaN())==0);
         native::TurnAdmission admission;
         assert(!admission.observe(210)&&!admission.observe(-210)&&!admission.observe(0));
         // Default turn binds are the web's fixed 210 deg/s turn: ranked, like the web's +left / +right.
-        const double defaults=native::default_settings()["yawSpeed"],modifier=native::default_settings()["angleSpeedKey"];
-        assert(defaults==210&&modifier==2&&!admission.observe(native::configured_turn_rate(true,false,defaults))&&admission.allows_event("finish"));
+        const auto defaults = native::TurnSettings::from_settings(native::default_settings());
+        assert(defaults.yaw_speed == 210 && defaults.angle_speed_key == 2);
+        assert(!admission.observe(defaults.rate(native::turn_left)) && admission.allows_event("finish"));
         assert(admission.allows_event("finish"));
         // Outside Legit Scroll any turn speed is submitted; the server decides whether it ranks.
         assert(!admission.observe(118.888888)&&!admission.observe(-720)&&admission.allows_event("finish")&&!admission.local_only);
