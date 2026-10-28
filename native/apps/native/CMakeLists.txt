@@ -334,6 +334,19 @@ if(BUILD_TESTING)
         target_compile_options(bunnyhop-native-input-tests PRIVATE -ffp-contract=off)
     endif()
     add_test(NAME native_input COMMAND bunnyhop-native-input-tests)
+    add_executable(bunnyhop-native-timed-input-tests src/timed_input_tests.cpp)
+    target_include_directories(bunnyhop-native-timed-input-tests PRIVATE include vendor src)
+    add_test(NAME native_timed_input COMMAND bunnyhop-native-timed-input-tests)
+    add_executable(bunnyhop-native-frame-loop-tests src/frame_loop_tests.cpp)
+    target_include_directories(bunnyhop-native-frame-loop-tests PRIVATE include vendor src)
+    find_package(Threads REQUIRED)
+    target_link_libraries(bunnyhop-native-frame-loop-tests PRIVATE Threads::Threads)
+    add_test(NAME native_frame_loop COMMAND bunnyhop-native-frame-loop-tests)
+    # Golden vectors from the web's TimedInput; regenerate with native/tools/timed-input/generate-vectors.ts.
+    add_executable(bunnyhop-native-timed-input-parity-tests src/timed_input_parity_tests.cpp)
+    target_include_directories(bunnyhop-native-timed-input-parity-tests PRIVATE include vendor src)
+    add_test(NAME native_timed_input_parity COMMAND bunnyhop-native-timed-input-parity-tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/timed_input_vectors.json")
     # Turn-bind admission oracle for the optional server cross-check
     # (crates/native-bridge/tools/check-native-turn-admission.ts); built, not run by CTest.
     add_executable(bunnyhop-native-input-turn-oracle src/native_input_turn_oracle.cpp)

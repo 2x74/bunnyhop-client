@@ -231,7 +231,7 @@ test("review regressions: feedback context, loads, backdrop re-request and relea
     await page.locator("dialog[open] .fb-kind").first().click();
     await page.getByRole("button",{name:"See all of it"}).click();
     const context=JSON.parse(await page.locator("dialog[open] pre").first().textContent()??"{}");
-    expect(context).toMatchObject({client:"native",inGame:true,map:"bhop_eazy",style:"autohop",track:0,screen:"pause",settings:{sensitivity:1.5,fov:100,vsync:true,fpsLimit:0},
+    expect(context).toMatchObject({client:"native",inGame:true,map:"bhop_eazy",style:"autohop",track:0,screen:"pause",settings:{sensitivity:1.5,fov:100,vsync:false,fpsLimit:500,limitQueuedFrames:true},
       nativeVersion:"0.3.7",nativeBuild:"bunnyhop-native/0123456789abcdef01234567",gpu:{renderer:"Apple M4 Pro"},viewport:"1920x1080",dpr:2});
     for(const key of ["webBuild","fps","page","nativeSettings"]) expect(key in context).toBe(false);
     expect(errors).toEqual([]);

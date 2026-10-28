@@ -15,6 +15,8 @@ constexpr uint32_t forward = 1u << 3, back = 1u << 4, use = 1u << 5;
 constexpr uint32_t left = 1u << 9, right = 1u << 10, attack2 = 1u << 11;
 constexpr uint32_t turn_left = 1u << 7, turn_right = 1u << 8;
 constexpr uint32_t teleported = 1u, angles_changed = 1u << 4;
+// m_yaw and m_pitch: view degrees per mouse count at sensitivity 1.
+constexpr double kDegreesPerCount = 0.022;
 
 // Reset the wall-clock baseline along with accumulated simulation time. Work
 // done before a restart/capture transition must never become catch-up ticks.
@@ -65,6 +67,18 @@ struct Input {
     std::optional<uint32_t> sampled_epoch;
     // Match replay.ts norm360's two remainders, including its double rounding.
     static double normalize(double v) { return std::fmod(std::fmod(v,360.0)+360.0,360.0); }
+    // A map or physics pitch (input-view.ts mapViewPitch): signed degrees first, so 357/358 look up 3/2 degrees
+    // rather than clamping to straight down, then the view's ±89.
+    static double view_pitch(double p) {
+        double signed_p = std::fmod(p, 360.0);
+        if (signed_p >= 180) {
+            signed_p -= 360;
+        }
+        if (signed_p < -180) {
+            signed_p += 360;
+        }
+        return std::clamp(signed_p, -89.0, 89.0);
+    }
     double yaw() const { return normalize(yaw_base - yaw_counts * (sensitivity * 0.022)); }
     void set_yaw(double v,uint32_t reason=5) { yaw_base = normalize(v); yaw_counts = 0; ++epoch;kind=reason; }
     // The shared format describes fixed 210 deg/s turns. Custom rates are
@@ -79,12 +93,33 @@ struct Input {
         ++epoch;
         pulse |= rate > 0 ? turn_left : turn_right;
     }
-    void set_sensitivity(double v) { if(v==sensitivity)return;const double at=yaw(); sensitivity=v; set_yaw(at,4); }
-    void set_angles(double p, double y,uint32_t reason=1) { pitch = std::clamp(p, -89.0, 89.0); set_yaw(y,reason); }
+    void set_sensitivity(double v) {
+        if (v == sensitivity) {
+            return;
+        }
+        const double at = yaw();
+        sensitivity = v;
+        set_yaw(at, 4);
+    }
+    void set_angles(double p, double y, uint32_t reason = 1) {
+        pitch = view_pitch(p);
+        set_yaw(y, reason);
+    }
+    // A report's pitch change in degrees, with the current inversion and (separate) vertical sensitivity.
+    double pitch_degrees(double y) const {
+        const double scale = separate_vertical ? vertical_sensitivity : sensitivity;
+        return (invert_y ? -y : y) * scale * kDegreesPerCount;
+    }
+    void apply_report(double x, double p) {
+        ++motion_events;
+        yaw_counts += x;
+        pitch = std::clamp(pitch + p, -89.0, 89.0);
+    }
     void motion(double x, double y) {
-        if(!std::isfinite(x)||!std::isfinite(y))return;
-        ++motion_events;yaw_counts += x;
-        pitch = std::clamp(pitch + (invert_y?-y:y) * (separate_vertical?vertical_sensitivity:sensitivity) * 0.022, -89.0, 89.0);
+        if (!std::isfinite(x) || !std::isfinite(y)) {
+            return;
+        }
+        apply_report(x, pitch_degrees(y));
     }
 
     // ---- per-tick proration (Momentum's m_rawinput 2) ------------------
@@ -144,7 +179,7 @@ struct Input {
         acc_events-=e;
         if(x==0&&y==0&&e==0)return;
         motion_events+=e;yaw_counts+=x;
-        pitch = std::clamp(pitch + (invert_y?-y:y) * (separate_vertical?vertical_sensitivity:sensitivity) * 0.022, -89.0, 89.0);
+        pitch = std::clamp(pitch + pitch_degrees(y), -89.0, 89.0);
     }
 
     double pending_counts() const { return acc_x; }
@@ -159,7 +194,20 @@ struct Input {
     void button(uint32_t bit, bool down) { if (down) held |= bit; else held &= ~bit; }
     // Every caller is a state reset — capture changed, run restarted, settings
     // reapplied — so motion from before it must not survive into the next tick.
-    void clear() { held = pulse = 0; acc_x = acc_y = 0; acc_events = frames = motion_events = 0; fractional_x = fractional_y = false; arrival_ns = split_ns = 0; have_split = false; }
+    void clear() {
+        held = 0;
+        pulse = 0;
+        acc_x = 0;
+        acc_y = 0;
+        acc_events = 0;
+        frames = 0;
+        motion_events = 0;
+        fractional_x = false;
+        fractional_y = false;
+        arrival_ns = 0;
+        split_ns = 0;
+        have_split = false;
+    }
     BhCmd command() {
         const uint32_t bits = held | pulse;
         pulse = 0;

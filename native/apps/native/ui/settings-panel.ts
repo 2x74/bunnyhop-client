@@ -220,7 +220,8 @@ export function settingsPanel(initialSection?:string): HTMLElement {
       choice("Water","waterQuality",["simple","refracted"]),toggle("Zone outlines","zonesVisible"),toggle("World effects","effectsVisible"),toggle("Show triggers","triggersVisible","","Teleports, boosters, gravity and other triggers (!showtriggers). Drawn only, never part of a run."),toggle("Show player clips","clipsVisible","","Player clips and invisible walls (!showclips). Drawn only, never part of a run."),
       toggle("Source look", "sourceLook", "", "Maps with HDR lighting get CS:S's auto exposure and bloom. Other maps look the same either way. Off is the plain look."),
       toggle("Vertical sync", "vsync", "", "Locks frames to your monitor's refresh rate. Off gives the lowest input latency."),
-      number("FPS limit", "fpsLimit", 0, 1000, 1, "0 is unlimited", "Caps the frame rate. 0 means no cap; otherwise 30–1000.")));
+      number("FPS limit", "fpsLimit", 0, 1000, 1, "0 is unlimited", "Caps the frame rate. 0 means no cap; otherwise 30–1000."),
+      toggle("Limit queued frames", "limitQueuedFrames", "", "Keeps at most one finished frame waiting on the graphics card, so the picture is closer to your input. Turn it off if your frame rate drops.")));
 
   // ---- HUD positions (Advanced) -------------------------------------------
   // Each element gets an X and a Y: a slider and a box showing the same
