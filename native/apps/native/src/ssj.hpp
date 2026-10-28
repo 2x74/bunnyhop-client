@@ -273,7 +273,7 @@ private:
 /** Which fields a report line shows, in the order they appear. */
 struct SsjFields {
     bool speed = true, diff = true, gain = true, sync = true, strafes = true;
-    bool eff = false, height = false, time = false;
+    bool eff = false, height = false, time = false, start_pre = false;
 };
 
 namespace ssj_detail {
@@ -306,6 +306,11 @@ inline std::string ssj_text(const SsjReport &r, const SsjFields &fields) {
     if (fields.strafes && r.strafes) add(std::to_string(*r.strafes) + (*r.strafes == 1 ? " strafe" : " strafes"));
     if (fields.eff && r.eff) add("Eff " + std::to_string(int(std::trunc(double(*r.eff)))) + "%");
     if (fields.height && r.height) add("Height " + ssj_detail::signed_value(*r.height));
+    if (fields.time && r.time) {
+        char time[48];
+        std::snprintf(time, sizeof(time), "Time %.3fs", *r.time);
+        add(time);
+    }
     return out;
 }
 

@@ -6,13 +6,9 @@
 
 namespace native {
 
-// Display defaults. New installs: VSync off and a 500 FPS cap. VSync adds one or more refresh periods of input
-// latency (more where the driver queues frames); a cap above every common refresh rate (up to 480 Hz panels) keeps
-// frames fresh without running a light map at thousands of FPS. Timed input makes what each tick takes independent
-// of the frame rate either way.
-//
-// Players who already have the game keep what they had. Their settings file stores its own values; an older install
-// that never saved settings still had VSync on and no cap, so it keeps those.
+// New installs use the website's display defaults: VSync off and a 1000 FPS cap.
+// Saved values stay authoritative. An existing install without a settings file
+// retains its earlier VSync-on, uncapped behavior.
 inline bool existing_install(const std::filesystem::path &data_dir) {
     static const char *const markers[] = {
         "settings.json", "window-state.json", "tutorial-progress.json", "start-points.json", "replays", "run-vault",

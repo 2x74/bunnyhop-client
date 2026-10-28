@@ -491,7 +491,7 @@ void test_bind_table_matches_binds() {
     settings["binds"]["jump"] = {"Space", "MouseWheel"};
     binds.rebuild(settings.at("binds"));
     assert(binds.of("KeyW") == native::forward);
-    assert(binds.of("ArrowUp") == native::forward);
+    assert(binds.of("ArrowUp") == (native::forward | native::turn_fast));
     assert(binds.of("Space") == native::jump);
     assert(binds.of("MouseWheel") == 0);
     assert(binds.of("Mouse1") == native::attack);
@@ -657,7 +657,7 @@ void test_turn_keys_use_each_command_cutoff() {
     timeline.rebuild_binds(native::default_settings().at("binds"));
     std::set<std::string> held;
     timeline.key(held, "ArrowLeft", true, false, uint64_t(start + ms), uint64_t(start + 20 * ms));
-    timeline.key(held, "Mouse4", true, false, uint64_t(start + 12 * ms), uint64_t(start + 20 * ms));
+    timeline.key(held, "ArrowUp", true, false, uint64_t(start + 12 * ms), uint64_t(start + 20 * ms));
     uint64_t sim_ns = uint64_t(start);
     const native::TurnSettings turns{300, 2.5};
     for (int tick = 1; tick <= 2; ++tick) {

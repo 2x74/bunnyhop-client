@@ -243,7 +243,7 @@ void test_display_defaults() {
     auto fresh = native::initialize_data_directory(dir).settings;
     assert(std::filesystem::is_directory(dir / "replays"));
     assert(fresh.at("vsync") == false);
-    assert(fresh.at("fpsLimit") == 500);
+    assert(fresh.at("fpsLimit") == 1000);
     assert(fresh.at("limitQueuedFrames") == true);
     // An install that played before but never saved settings keeps the old display defaults.
     std::filesystem::create_directories(dir / "replays");

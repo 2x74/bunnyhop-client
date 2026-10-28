@@ -1,5 +1,6 @@
 #pragma once
 #include "bunnyhop_native.h"
+#include "hud_geometry.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -13,8 +14,8 @@ struct LjPoint { double d=0,z=0,v=0; };
 struct LjReport {
     bool standing=false,failed=false,crouched=false;
     double distance=0,displacement=0,pre=0,max=0,sync=0,airtime=0;
-    std::vector<LjStrafe> strafes;
-    std::vector<LjPoint> path;
+    HudSamples<LjStrafe, 256> strafes;
+    HudSamples<LjPoint, 512> path;
 };
 // Display-only port of web/movement-stats/stats.ts LjTracker. The core's exact
 // clean-tick observation is required throughout; no value feeds the simulation.
@@ -22,7 +23,8 @@ class LjTracker {
     struct Flight {
         std::array<double,3> start{};uint32_t tick=0;bool standing=false,valid=false;
         double pre=0,max=0,duck=0;int side=0,samples=0,synced=0;
-        std::vector<LjStrafe> list;std::vector<LjPoint> path;
+        HudSamples<LjStrafe, 256> list;
+        HudSamples<LjPoint, 512> path;
         std::optional<std::pair<double,uint32_t>> cross;
     };
     unsigned ground=0;
