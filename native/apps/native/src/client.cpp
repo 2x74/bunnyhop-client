@@ -386,6 +386,8 @@ int run(const Options &opt) {
     // Keys as last polled (actions, turnbinds, overlays). Timed ticks use their own key state (input.queue.keys).
     std::set<std::string> held_codes;
     native::InputTimeline input_timeline;
+    const char *video_driver = SDL_GetCurrentVideoDriver();
+    input_timeline.configure_stamps(video_driver ? video_driver : "");
     native::Chat chat;
     native::RestartGuard restart_guard;
     native::StartPoints start_points;native::KeptWeapons kept_weapons;
@@ -473,6 +475,11 @@ int run(const Options &opt) {
         if(chat.active){chat.close();SDL_StopTextInput(window.get());}
         input_timeline.release(input, held_codes);
         reset_input_timing();
+        // Raw keys off before relative mode changes: SDL 3.4 restarts its raw-input thread on each toggle, and with raw
+        // keys on, key-ups in that gap are lost. With them off, the message loop delivers them.
+        if (!on) {
+            native::set_raw_keyboard(false);
+        }
         if (!SDL_SetWindowRelativeMouseMode(window.get(),on)) {
             captured=false; std::cerr << "Relative mouse mode failed: " << SDL_GetError() << '\n';
         } else captured=on;
@@ -499,8 +506,10 @@ int run(const Options &opt) {
         input_timeline.release(input, held_codes);
         camera_controls.clear();leave_hold.cancel();restart_guard.cancel();
         // Keep gameplay running with neutral input while exposing the pointer for chat links.
-        chat.open(command);SDL_SetWindowRelativeMouseMode(window.get(),false);SDL_StartTextInput(window.get());
+        chat.open(command);
         native::set_raw_keyboard(false);
+        SDL_SetWindowRelativeMouseMode(window.get(),false);
+        SDL_StartTextInput(window.get());
         int w=0,h=0;SDL_GetWindowSize(window.get(),&w,&h);SDL_Rect area{16,std::max(0,h-120),std::max(1,w-32),32};SDL_SetTextInputArea(window.get(),&area,0);
         chat_suggest();
     };
@@ -1093,8 +1102,13 @@ int run(const Options &opt) {
                 case SDL_EVENT_KEY_DOWN:
                 case SDL_EVENT_KEY_UP: {
                     const bool down=event.type==SDL_EVENT_KEY_DOWN;
-                    if(down&&!event.key.repeat&&event.key.scancode==SDL_SCANCODE_F10){show_menu(true);if(menu)menu->evaluate_js("window.bunnyhopNativeMenu?.open?.('settings','display')");break;}
-                    if(down&&!event.key.repeat&&event.key.scancode==SDL_SCANCODE_RETURN&&(event.key.mod&SDL_KMOD_ALT)){
+                    const bool repeat = input_timeline.key_repeat(event.key.scancode, down, event.key.repeat);
+                    const bool menu_shown = menu && menu->visible();
+                    if(!native::game_owns_keyboard(menu_shown, menu && menu->supports_backdrop())) {
+                        break;
+                    }
+                    if(down&&!repeat&&event.key.scancode==SDL_SCANCODE_F10){show_menu(true);if(menu)menu->evaluate_js("window.bunnyhopNativeMenu?.open?.('settings','display')");break;}
+                    if(down&&!repeat&&event.key.scancode==SDL_SCANCODE_RETURN&&(event.key.mod&SDL_KMOD_ALT)){
                         save_window();
                         if(!(video_capture||director_job||video_encoder.busy())){auto changed=preferences;changed["windowMode"]=native::toggled_window_mode(window_controller.mode());if(window_controller.apply(changed)){preferences=changed;native::save_settings(cache/"settings.json",preferences);}else error=window_controller.error();if(menu&&menu->visible())SDL_SetWindowAlwaysOnTop(window.get(),false);}break;}
                     if(video_capture||director_job||video_encoder.busy()){if(down&&event.key.scancode==SDL_SCANCODE_ESCAPE){cancel_video();refresh_playback_pose();}break;}
@@ -1123,7 +1137,7 @@ int run(const Options &opt) {
                         }
                         break;
                     }
-                    if(down && !event.key.repeat) {
+                    if(down && !repeat) {
                         if(playback&&(!menu||!menu->visible())&&event.key.scancode==SDL_SCANCODE_TAB){replay_controls.visible=!replay_controls.visible;replay_controls.dragging=false;capture(!replay_controls.visible);break;}
                         if(playback&&(!menu||!menu->visible())&&event.key.scancode==SDL_SCANCODE_SPACE){replay_action(native::ReplayControls::Action::pause);break;}
                         if(playback&&(!menu||!menu->visible())&&(event.key.scancode==SDL_SCANCODE_LEFT||event.key.scancode==SDL_SCANCODE_RIGHT)){playback_paused=true;replay_controls.pending=event.key.scancode==SDL_SCANCODE_LEFT?(curr.tick?curr.tick-1:0):std::min(curr.tick+1,playback_info.value("totalTicks",0u));break;}
@@ -1132,7 +1146,7 @@ int run(const Options &opt) {
                     }
                     if(captured) {
                         const auto code = native::key_code(event.key.scancode);
-                        handle_code(code, down, event.key.repeat, false, event.key.timestamp);
+                        handle_code(code, down, repeat, false, event.key.timestamp);
                     }
                     break;
                 }

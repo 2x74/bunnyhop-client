@@ -480,6 +480,75 @@ void test_bind_table_matches_binds() {
     assert(binds.held(codes) == (native::forward | native::left | native::attack2));
 }
 
+
+// A key-up lost while the menu had focus leaves SDL's key state down, so SDL labels the next real press a repeat.
+void test_first_press_after_a_barrier_counts() {
+    native::KeyPresses presses;
+    const size_t w = 26;
+    assert(!presses.repeat(w, true, false));
+    assert(presses.repeat(w, true, true));
+    // Menu opens: the key-up never reaches SDL. The barrier clears what the game has seen.
+    presses.clear();
+    assert(!presses.repeat(w, true, true));
+    assert(presses.repeat(w, true, true));
+    assert(!presses.repeat(w, false, false));
+    assert(!presses.repeat(w, true, false));
+
+    // The client's release barrier (capture toggle, menu, chat) clears it.
+    LoopHarness loop;
+    assert(!loop.timeline.key_repeat(w, true, false));
+    assert(loop.timeline.key_repeat(w, true, true));
+    loop.timeline.release(loop.input, loop.held_codes);
+    assert(!loop.timeline.key_repeat(w, true, true));
+}
+
+void test_embedded_menu_owns_the_keyboard() {
+    assert(native::game_owns_keyboard(false, true));
+    assert(!native::game_owns_keyboard(true, true));
+    assert(native::game_owns_keyboard(true, false));
+    assert(native::game_owns_keyboard(false, false));
+}
+
+void test_event_stamps_per_backend() {
+    const uint64_t now = 20'000 * ms;
+    native::EventStamps windows;
+    windows.configure("windows");
+    assert(windows.time(native::EventStamps::kMotion, now - 2 * ms, now) == now - 2 * ms);
+    // A hitch's backlog is still on the clock.
+    assert(windows.time(native::EventStamps::kMotion, now - 900 * ms, now) == now - 900 * ms);
+    assert(windows.source(native::EventStamps::kMotion).trusted);
+
+    native::EventStamps x11;
+    x11.configure("x11");
+    assert(x11.time(native::EventStamps::kMotion, now - 2 * ms, now) == now);
+    assert(!x11.source(native::EventStamps::kMotion).trusted);
+    assert(!x11.source(native::EventStamps::kMotion).reason.empty());
+    assert(x11.time(native::EventStamps::kKeys, now - 2 * ms, now) == now - 2 * ms);
+
+    // Stamps on another clock: arrival time for each, then for the session.
+    native::EventStamps foreign;
+    for (uint32_t i = 0; i < native::EventStamps::kOffClockLimit; ++i) {
+        assert(foreign.time(native::EventStamps::kKeys, 3 * ms, now) == now);
+    }
+    assert(!foreign.source(native::EventStamps::kKeys).trusted);
+    assert(foreign.time(native::EventStamps::kKeys, now - 1 * ms, now) == now);
+    assert(foreign.source(native::EventStamps::kMotion).trusted);
+}
+
+// X11: motion stamped in X server milliseconds would look 20 s old. Arrival time keeps each report in its frame.
+void test_x11_motion_uses_arrival_time() {
+    LoopHarness loop;
+    loop.timeline.configure_stamps("x11");
+    loop.start_at(start);
+    loop.motion(start + 4 * ms, 3);
+    loop.pump(start + 4 * ms);
+    loop.frame(start + 10 * ms);
+    loop.motion(5, 4, 0, start + 15 * ms);
+    loop.run(start + 40 * ms, 10 * ms);
+    assert(loop.rows[0].counts == 3);
+    assert(loop.rows[1].counts == 4);
+    assert(loop.timeline.queue().late == 0);
+}
 }  // namespace
 
 int main() {
@@ -503,6 +572,10 @@ int main() {
     test_transitions();
     test_input_mode_switch_carries_holds();
     test_bind_table_matches_binds();
+    test_first_press_after_a_barrier_counts();
+    test_embedded_menu_owns_the_keyboard();
+    test_event_stamps_per_backend();
+    test_x11_motion_uses_arrival_time();
     std::puts("timed input: all tests passed");
     return 0;
 }

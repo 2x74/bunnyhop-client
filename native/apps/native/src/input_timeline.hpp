@@ -1,5 +1,7 @@
 #pragma once
+#include "event_stamps.hpp"
 #include "input_binds.hpp"
+#include "key_routing.hpp"
 #include "native_input.hpp"
 #include "timed_input.hpp"
 #include <nlohmann/json.hpp>
@@ -8,6 +10,8 @@
 #include <cstdint>
 #include <set>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace native {
 
@@ -27,6 +31,13 @@ public:
     const TimedInput &queue() const { return queue_; }
     TimedInput &queue() { return queue_; }
     const BindTable &binds() const { return binds_; }
+    const EventStamps &stamps() const { return stamps_; }
+
+    // Once, after SDL_Init: which event times this video backend gets right.
+    void configure_stamps(std::string_view video_driver) { stamps_.configure(video_driver); }
+
+    // Whether a key event is a repeat as far as the game is concerned (KeyPresses).
+    bool key_repeat(size_t scancode, bool down, bool sdl_repeat) { return presses_.repeat(scancode, down, sdl_repeat); }
 
     void rebuild_binds(const nlohmann::json &binds) { binds_.rebuild(binds); }
 
@@ -57,7 +68,8 @@ public:
         if (!std::isfinite(x) || !std::isfinite(y)) {
             return;
         }
-        const int64_t at = queue_.stamp(int64_t(stamp), int64_t(received), queue_.motion_tail());
+        const uint64_t event_time = stamps_.time(EventStamps::kMotion, stamp, received);
+        const int64_t at = queue_.stamp(int64_t(event_time), int64_t(received), queue_.motion_tail());
         queue_.add_motion(at, x, input.pitch_degrees(y));
     }
 
@@ -67,7 +79,8 @@ public:
              uint64_t received) {
         const bool changes = down != held_codes.contains(code);
         if (timed_ && changes && !wheel && binds_.of(code)) {
-            const int64_t at = queue_.stamp(int64_t(stamp), int64_t(received), queue_.edge_tail());
+            const uint64_t event_time = stamps_.time(EventStamps::kKeys, stamp, received);
+            const int64_t at = queue_.stamp(int64_t(event_time), int64_t(received), queue_.edge_tail());
             queue_.add_edge(at, code, down);
         }
         if (down) {
@@ -131,8 +144,11 @@ public:
     // ---- barriers: every client transition uses one; none may leave a released key held -----------------------
 
     // Capture on or off (menu, focus change, replay controls), chat open or close: nothing held, nothing pending.
-    // Key-ups that arrive afterwards are no-ops.
+    // Key-ups that arrive afterwards are no-ops, and the first press afterwards counts even if SDL calls it a repeat.
+    // Held keys are cleared rather than resynced from SDL_GetKeyboardState: a key-up lost while the menu had focus or
+    // while SDL restarted its raw-input thread is missing from SDL's state too, so a resync would invent a hold.
     void release(Input &input, std::set<std::string> &held_codes) {
+        presses_.clear();
         held_codes.clear();
         input.clear();
         queue_.reset();
@@ -164,6 +180,8 @@ private:
     bool timed_ = true;
     TimedInput queue_;
     BindTable binds_;
+    EventStamps stamps_;
+    KeyPresses presses_;
     std::vector<std::string> held_scratch_;
 
     void commit_pending(Input &input) {
