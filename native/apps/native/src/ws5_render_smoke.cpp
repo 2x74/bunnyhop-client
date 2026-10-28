@@ -105,8 +105,8 @@ int main(int argc, char **argv) {
         const auto output = std::filesystem::path(argv[3]);
         std::filesystem::create_directories(output);
         auto preferences = native::default_graphics_settings();
-        preferences["graphics"]["antialias"] = false;
-        preferences["ghost"]["trail"] = false;
+        preferences["graphicsAntialias"] = false;
+        preferences["ghostTrail"] = false;
         auto capture = [&](const char *name) {
             renderer.graphics_settings(preferences);
             renderer.set_room_actors(actors);
@@ -120,12 +120,12 @@ int main(int argc, char **argv) {
             file.write(png.data(), std::streamsize(png.size()));
         };
         capture("ghost-colours-pb-wr-custom");
-        preferences["ghost"]["trail"] = true;
+        preferences["ghostTrail"] = true;
         capture("recorded-trails");
-        preferences["ghost"]["route"] = true;
-        preferences["ghost"]["routeMode"] = "path";
+        preferences["ghostRoute"] = true;
+        preferences["ghostRouteMode"] = "path";
         capture("route-guide");
-        preferences["ghost"]["wr"] = false;
+        preferences["ghostWr"] = false;
         // Model visibility is governed by the host's ghost_visible call, as in client.cpp.
         actors[1].opacity = 0;
         capture("wr-hidden");
@@ -139,34 +139,34 @@ int main(int argc, char **argv) {
         supporter.playerGlow =
             native_render::parse_glow({{"enabled", true}, {"aura", true}, {"intensity", 1}, {"color", "violet"}});
         actors.push_back(supporter);
-        preferences["ghost"]["route"] = false;
+        preferences["ghostRoute"] = false;
         renderer.clear_ghosts();
         capture("supporter-glow");
         actors[0].playerGlow->aura = false;
         capture("supporter-outline");
         actors.clear();
-        preferences["graphics"].update({{"aspect", "4:3"}, {"aspectFit", "stretch"}});
+        preferences.update({{"graphicsAspect", "4:3"}, {"graphicsAspectFit", "stretch"}});
         capture("graphics-4x3-stretched");
-        preferences["graphics"]["aspectFit"] = "bars";
+        preferences["graphicsAspectFit"] = "bars";
         capture("graphics-4x3-bars");
-        preferences["graphics"].update({{"aspect", "native"},
-                                        {"antialias", true},
-                                        {"msaa", 4},
-                                        {"brightness", 1.2},
-                                        {"gamma", 1.15},
-                                        {"vibrance", 1.4},
-                                        {"resolutionScale", .75}});
+        preferences.update({{"graphicsAspect", "native"},
+                            {"graphicsAntialias", true},
+
+                            {"graphicsBrightness", 1.2},
+                            {"graphicsGamma", 1.15},
+                            {"graphicsVibrance", 1.4},
+                            {"graphicsResolutionScale", .75}});
         capture("graphics-msaa-grade-scale");
-        preferences["graphics"].update({{"brightness", 1},
-                                        {"gamma", 1},
-                                        {"vibrance", 1},
-                                        {"antialias", false},
-                                        {"resolutionScale", 1},
-                                        {"fullbright", true}});
+        preferences.update({{"graphicsBrightness", 1},
+                            {"graphicsGamma", 1},
+                            {"graphicsVibrance", 1},
+                            {"graphicsAntialias", false},
+                            {"graphicsResolutionScale", 1},
+                            {"graphicsFullbright", true}});
         capture("graphics-fullbright");
-        preferences["graphics"].update({{"fullbright", false}, {"potato", true}});
+        preferences.update({{"graphicsFullbright", false}, {"graphicsPotato", true}});
         capture("graphics-potato");
-        preferences["graphics"]["potato"] = false;
+        preferences["graphicsPotato"] = false;
         native::Input aim;
         aim.set_angles(50, 0);
         renderer.tool_message({{"type", "paint"}, {"action", "stamp"}}, spawn.player, aim);

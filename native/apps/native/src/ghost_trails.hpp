@@ -31,21 +31,15 @@ struct GhostOptions {
     GhostSource route_source = GhostSource::none;
     bool route_path = false;
     void read(const nlohmann::json &settings) {
-        auto document = native::default_graphics_settings();
-        if (settings.contains("ghost")) {
-            native::patch_graphics_setting(document, "ghost", settings.at("ghost"));
-        }
         show = settings.value("showGhost", true);
-        const auto &value = document.at("ghost");
-        pb = value.at("pb");
-        wr = value.at("wr");
-        custom = value.at("custom");
-        trail = value.at("trail");
-        route = value.at("route");
-        route_source = value.at("routeSource") == "auto"
-                           ? GhostSource::none
-                           : ghost_source(value.at("routeSource").get_ref<const std::string &>());
-        route_path = value.at("routeMode") == "path";
+        pb = settings.value("ghostPb", true);
+        wr = settings.value("ghostWr", true);
+        custom = settings.value("ghostCustom", true);
+        trail = settings.value("ghostTrail", true);
+        route = settings.value("ghostRoute", false);
+        const auto source = settings.value("ghostRouteSource", std::string("auto"));
+        route_source = source == "auto" ? GhostSource::none : ghost_source(source);
+        route_path = settings.value("ghostRouteMode", std::string("jumps")) == "path";
     }
     bool visible(GhostSource source) const {
         return show && (source == GhostSource::pb ? pb : source == GhostSource::wr ? wr : custom);

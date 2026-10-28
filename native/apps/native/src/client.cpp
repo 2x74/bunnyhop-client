@@ -29,6 +29,8 @@
 #include "weapon_commands.hpp"
 #include "replay_camera.hpp"
 #include "replay_controls.hpp"
+#include "render_menu_contracts.hpp"
+#include "render_capabilities.hpp"
 #include "map_jobs.hpp"
 #include "ssj.hpp"
 #include "strafe_trainer.hpp"
@@ -420,6 +422,9 @@ int run(const Options &opt) {
     bool playback=false,playback_paused=false,ghost_enabled=false,playback_failed=false;
     native::ReplayControls replay_controls;
     native::ReplayCompare replay_compare;
+    native::ReplayTimelineService replay_timeline;
+    native::ReplayCompareImportService replay_compare_import;
+    native::GraphicsMenuPacer graphics_menu_pacer;
     bool replay_orbit_drag=false;
     native::NativeVideoExport video_encoder;
     native::VideoAvailability video_available{false,"Checking FFmpeg availability…","ffmpeg"};
@@ -464,6 +469,8 @@ int run(const Options &opt) {
     try {const auto path=cache/"start-points.json";if(std::filesystem::exists(path)&&std::filesystem::file_size(path)<=1024*1024)start_points.load(nlohmann::json::parse(read_text(path)));}catch(const std::exception &e){std::cerr<<"Start points: "<<e.what()<<'\n';}
     auto apply_preferences = [&]() {
         menu_state.settings_changed();
+        graphics_menu_pacer.settings(preferences);
+        flashlight = preferences.value("graphicsFlashlight", false);
         if (backdrop)
             backdrop->graphics_settings(preferences);
         hud_layout.clear();
@@ -780,6 +787,7 @@ int run(const Options &opt) {
         {std::lock_guard lock(progress_mutex);loading.clear();load_progress=nullptr;}
         pending_replay.clear();pending_action.clear();pending_room_map.clear();pending_tutorial.clear();tutorial_stopped=true;
         replay_compare.clear();
+        replay_compare_import.reset();
         if(core)bh_record_end(core.get());practice.clear(core.get());renderer.reset();core.reset();tutorial.reset();
         playback=false;playback_paused=false;playback_id.clear();playback_info=nullptr;ghost_handle=0;ghost_enabled=false;ghost_id.clear();ghost_info=nullptr;ghost_slots={};
         gauntlet_id.clear();gauntlet_map.clear();gauntlet_progress=nullptr;zones.clear();map_id.clear();audio.set_map(nullptr);active_track=0;active_style=selected_style;
@@ -801,6 +809,8 @@ int run(const Options &opt) {
     };
     auto load_map=[&](const std::string &path,const std::string &content,const std::string &id,const nlohmann::json &detail) {
         cancel_video();
+        replay_timeline.map(native::data_location::from_utf8(path), native::data_location::from_utf8(content));
+        replay_compare_import.map(native::data_location::from_utf8(path), native::data_location::from_utf8(content));
         CorePtr next(bh_create(),&bh_destroy); if(!next) throw std::runtime_error("Could not create native core");
         require(bh_load_map(next.get(),path.c_str(),content.empty()?nullptr:content.c_str()),next.get(),"Loading BSP map");
         require(bh_set_settings(next.get(),&settings),next.get(),"Applying settings");
@@ -896,8 +906,10 @@ int run(const Options &opt) {
     auto open_replay=[&](const std::filesystem::path &path,const std::string &action,
                          unsigned ghost_slot=0, bool full_recording=false) {
         if(ghost_slot>=ghost_slots.size())throw std::runtime_error("Invalid ghost slot");
-        if (action != "ghost")
+        if (action != "ghost") {
             replay_compare.clear();
+            replay_compare_import.reset();
+        }
         if(!core)throw std::runtime_error("Load the replay map first");
         recording_input.stop();
         practice.clear(core.get());if(tutorial)tutorial->stop();tutorial_demo=false;renderer->reset_presentation();scope.reset();
@@ -931,6 +943,7 @@ int run(const Options &opt) {
             replay_camera.set_mode("eye");
             replay_orbit_drag = false;
             playback_id = native::data_location::utf8(path.filename());
+            replay_timeline.request(path,playback_id);
             recording_ended = true;
             record_path.clear();
             pending_vault_capture.reset();
@@ -1104,7 +1117,9 @@ int run(const Options &opt) {
                 return;
             }
             if (action == "flashlight") {
-                flashlight = !flashlight;
+                native::toggle_graphics_flashlight(preferences,flashlight);
+                menu_state.settings_changed();
+                json_writer.write(cache/"settings.json",preferences);
                 return;
             }
             if (action == "nextTrack") {
@@ -1713,7 +1728,7 @@ int run(const Options &opt) {
                 auto message=nlohmann::json::parse(raw);const auto type=message.at("type").get<std::string>();
                 if(type=="loadoutPreview") {if(menu->visible()&&raw.size()<=8192)preview_request=std::move(message);continue;}
                 if((video_capture||director_job||video_encoder.busy())&&type!="videoExport"&&type!="ready"&&type!="update"&&type!="audioCue"&&type!="music"&&type!="quit"){if(type=="settings")throw std::runtime_error("Finish or cancel video export before changing settings.");continue;}
-                const size_t limit = native::menu_message_limit(type);
+                const size_t limit = native::render_menu_message_limit(type,native::menu_message_limit(type));
                 if(raw.size()>limit)throw std::runtime_error("Menu command exceeds its type limit");
                 if (type == "ready") {
                     menu_ready = true;
@@ -1767,7 +1782,15 @@ int run(const Options &opt) {
                 else if(type=="chatSuggestions"){if(message.value("request",uint64_t(0))!=chat_request||message.value("input",std::string())!=chat.input)continue;chat.suggestions.clear();if(chat.active&&message.at("items").is_array())for(const auto &value:message.at("items")){if(chat.suggestions.size()>=8)break;if(value.is_string())chat.suggestions.push_back(native::Chat::clean(value.get<std::string>(),512));}}
                 else if(type=="chatAction"){
                     const auto action=message.at("action").get<std::string>();
-                    if(action=="scores")show_scores=!show_scores;
+                    if (native::surface_chat_action(action)) {
+                        native::reply_surface_chat(renderer.get(), action, curr, input, chat, epoch_ms()/1000.);
+                        if (action == "paintOptions") {
+                            show_menu(true);
+                            menu_script.open(menu.get(), menu_ready,
+                                             "window.bunnyhopNativeMenu?.open?.('settings','paint')");
+                        }
+                    }
+                    else if(action=="scores")show_scores=!show_scores;
                     else if (action == "jumpStats") {
                         preferences["jumpStats"] = !preferences.at("jumpStats").get<bool>();
                         menu_state.settings_changed();
@@ -1901,7 +1924,8 @@ int run(const Options &opt) {
                     score_notice = renderer->tool_message(message, curr, input);
                 }
                 else if (type == "replayCompare" && playback) {
-                    native::handle_replay_compare(replay_compare, core.get(), cache / "replays", message, playback_info);
+                    replay_compare_import.message(replay_compare, core.get(), cache/"replays", message, playback_info,
+                                                  playback_id, native::decode_base64);
                 }
                 else if (type == "ghost") {
                     ghost_enabled = ghost_handle && message.at("enabled").get<bool>();
@@ -1960,7 +1984,8 @@ int run(const Options &opt) {
                         if (action != "play" && action != "ghost")
                             throw std::runtime_error("Invalid replay import action");
                         native::set_requested_ghost_source(ghost_sources, message);
-                        request_replay(path, action, message.value("ghostSlot", 0u), message.value("fullRecording", false));
+                        request_replay(path, action, message.value("ghostSlot", 0u),
+                                       message.value("fullRecording", false));
                     }
                     refresh_replays();
                 }
@@ -2159,6 +2184,8 @@ int run(const Options &opt) {
             if(!menu && core && !opt.hidden) capture(true);
         }
         if(!running) break;
+        replay_timeline.poll(menu.get(), menu_ready, playback_id, playback);
+        replay_compare_import.poll(replay_compare, playback_id, playback, chat, epoch_ms()/1000.);
         if(menu&&menu_ready){
             if(const auto state=menu_gamepad.sample(menu->visible()&&focused))menu->evaluate_js("window.bunnyhopNativeMenu?.onGamepad?.("+state->dump()+")");
             if(preview_request){
@@ -2444,12 +2471,15 @@ int run(const Options &opt) {
             eye[2]+=prev.view_offset_z+(curr.view_offset_z-prev.view_offset_z)*blend;
             BhSnapshot state{};bh_snapshot(core.get(),&state);
             std::optional<native_render::Actor> audible_ghost;
-            if(ghost_enabled&&renderer->ghost_visible(0)&&preferences.value("showGhost",true)&&ghost_handle&&!playback&&!spectator&&(tutorial_demo||(ghost_info.value("track",0u)==active_track&&ghost_info.value("style",std::string("autohop"))==active_style))) {
+            if (ghost_enabled && renderer->ghost_visible(0) && preferences.value("showGhost",true) && ghost_handle &&
+                !playback && !spectator && (tutorial_demo || (ghost_info.value("track",0u)==active_track &&
+                ghost_info.value("style",std::string("autohop"))==active_style))) {
                 BhGhostFrame ghost{};const uint32_t tick=ghost_info.value("startTick",0u)+(tutorial_demo?curr.tick-tutorial_demo_start:run_state.status?curr.tick-run_state.start_tick:0);
                 if(bh_ghost_frame(core.get(),ghost_handle,tick,&ghost)){
                     const float distance=std::hypot(std::hypot(ghost.position[0]-curr.position[0],ghost.position[1]-curr.position[1]),ghost.position[2]-curr.position[2]);
                     const float opacity=preferences.value("ghostOpacity",.4f)*(preferences.value("ghostNearFade",true)?std::clamp((distance-24.f)/80.f,0.f,1.f):1.f);
-                    renderer->set_replay_actor(ghost,tutorial_demo?"outfit-cream":outfit,renderer->ghost_loadout(0),opacity);
+                    renderer->set_replay_actor(ghost, tutorial_demo?"outfit-cream":outfit,
+                                               renderer->ghost_loadout(0), opacity);
                     native_render::Actor actor;actor.id="replay-ghost";actor.frame=ghost;actor.opacity=opacity;audible_ghost=actor;
                 }
                 else{renderer->set_replay_actor(nullptr,0,0);if(tutorial_demo){ghost_enabled=false;tutorial_demo=false;}}
@@ -2466,7 +2496,11 @@ int run(const Options &opt) {
             }
             std::string shown_notice=tutorial&&tutorial->is_active()&&!playback?tutorial->notice():score_notice;
             const auto race_notice=room_modes.notice(epoch_ms());if(!race_notice.empty())shown_notice=race_notice;
-            renderer->set_player_glow(player_glow);if(!spectator)renderer->set_spectated_actor(std::nullopt);renderer->set_viewmodel_weapon(std::nullopt);renderer->set_viewmodel_visible(preferences.at("viewmodel").get<bool>()&&!opt.camera);
+            renderer->set_player_glow(player_glow);
+            if (!spectator)
+                renderer->set_spectated_actor(std::nullopt);
+            renderer->set_viewmodel_weapon(std::nullopt);
+            renderer->set_viewmodel_visible(preferences.at("viewmodel").get<bool>()&&!opt.camera);
             if(spectator){spectated_actor=room.spectated(steady_seconds);const auto &target=spectated_actor;if(target){renderer->set_spectated_actor(*target);for(int k=0;k<3;k++){eye[k]=target->frame.position[k];state.player.position[k]=target->frame.position[k];state.player.velocity[k]=target->frame.velocity[k];}eye[2]+=target->frame.view_offset_z;state.player.tick=target->frame.tick;state.player.view_offset_z=target->frame.view_offset_z;state.player.grounded=!!(target->frame.flags&2);state.player.crouched=!!(target->frame.flags&1);camera_input.set_angles(target->frame.pitch,target->frame.yaw);renderer->set_cosmetics(target->outfit,target->loadout);renderer->set_player_glow(target->playerGlow);renderer->set_viewmodel_weapon(target->frame.weapon);shown_notice="Spectating "+target->name+" - Esc for Room controls";actors.erase(std::remove_if(actors.begin(),actors.end(),[&](const auto &a){return a.id==target->id;}),actors.end());}else{renderer->set_spectated_actor(std::nullopt);renderer->set_viewmodel_visible(false);shown_notice="Waiting for spectator target";}}
             bool external_camera=false;
             if(playback){
@@ -2477,7 +2511,11 @@ int run(const Options &opt) {
             if(spectator){display_run={};for(const auto &row:room.scoreboard(steady_seconds))if(row.value("slot",256u)==*spectator){display_run.track=row.value("track",0u);display_style=row.value("style",std::string("autohop"));break;}if(const auto timing=room.timer(*spectator,steady_seconds)){display_run.seconds=timing->second;display_run.in_start=timing->first==1;display_run.status=timing->first==3?2:timing->first==2?1:0;}}
             if(hide_players)actors.clear();
             if(!playback&&!spectator&&!tutorial_demo&&preferences.value("showGhost",true))for(unsigned i=1;i<4;i++){
-                const auto &slot=ghost_slots[i];if(!slot.handle||!slot.enabled||!renderer->ghost_visible(i)||slot.info.value("track",0u)!=active_track||slot.info.value("style",std::string("autohop"))!=active_style)continue;
+                const auto &slot=ghost_slots[i];
+                if (!slot.handle || !slot.enabled || !renderer->ghost_visible(i) ||
+                    slot.info.value("track",0u)!=active_track ||
+                    slot.info.value("style",std::string("autohop"))!=active_style)
+                    continue;
                 native_render::Actor actor;actor.id="ghost-"+std::to_string(i);actor.name=renderer->ghost_name(i);
                 const uint32_t tick=slot.info.value("startTick",0u)+(run_state.status?curr.tick-run_state.start_tick:0);
                 if(!bh_ghost_frame(core.get(),slot.handle,tick,&actor.frame))continue;
@@ -2516,11 +2554,16 @@ int run(const Options &opt) {
                 const native::HudGeometry geometry(width,height,preferences.at("hudScale").get<float>());
                 const auto vp=renderer->camera(eye,camera_input.yaw(),camera_input.pitch,float(width)/std::max(height,1));
                 auto tag=[&](const native_render::Actor &actor,const std::string &name,bool ghost){
-                    if(name.empty()||actor.opacity<.05f||(ghost&&!preferences.value("ghostTag",true)))return;
+                    if (!renderer->tag_visible(ghost) || name.empty() || actor.opacity<.05f ||
+                        (ghost&&!preferences.value("ghostTag",true)))
+                        return;
                     float point[3]={actor.frame.position[0],actor.frame.position[1],actor.frame.position[2]+actor.frame.view_offset_z+20};
                     std::array<float,4> clip{};for(int row=0;row<4;row++)clip[row]=vp[row]*point[0]+vp[4+row]*point[1]+vp[8+row]*point[2]+vp[12+row];
                     if(clip[3]<=2||std::abs(clip[0])>clip[3]||std::abs(clip[1])>clip[3]||std::abs(clip[2])>clip[3])return;
-                    float fraction=0;if(!bh_trace_camera(core.get(),eye,point,0,&fraction)||fraction<.98f)return;
+                    float fraction=0;
+                    if (!renderer->tags_through_walls() &&
+                        (!bh_trace_camera(core.get(),eye,point,0,&fraction)||fraction<.98f))
+                        return;
                     hud.overlay_text((clip[0]/clip[3]*.5f+.5f)*geometry.width,(.5f-clip[1]/clip[3]*.5f)*geometry.height,name,13,ghost?std::array<float,4>{.55f,.85f,1,.85f}:std::array<float,4>{.94f,.91f,.86f,1},true);
                 };
                 for(const auto &actor:actors)if(actor.id!="local-camera-target")tag(actor,actor.name,actor.id.starts_with("ghost-"));
@@ -2764,7 +2807,7 @@ int run(const Options &opt) {
                      {{"enabled", ghost_enabled},
                       {"id", ghost_id},
                       {"name", ghost_info.is_object() ? ghost_info.value("player", std::string("Ghost")) : "Ghost"}}},
-                    {"capabilities",native::graphics_capabilities()},
+                    {"capabilities",native::render_capabilities()},
                     {"replayCompare",replay_compare.state()},
                     {"surfaceTools",renderer?renderer->surface_tools_state():nlohmann::json(nullptr)},
                     {"graphicsLimits",renderer?renderer->graphics_limits():nlohmann::json(nullptr)},
@@ -2788,6 +2831,7 @@ int run(const Options &opt) {
                                                            {"shots", 0},
                                                            {"source", ""},
                                                            {"error", ""}}}};
+                native::render_playback_state(state,replay_compare,playback_range.tick_interval);
                 state["ghosts"] = nlohmann::json::array();
                 for (unsigned slot = 0; slot < 4; slot++) {
                     const auto &g = ghost_slots[slot];
@@ -2954,15 +2998,8 @@ int run(const Options &opt) {
             running = false;
         }
         frame_diagnostics.mark(native::FrameDiagnostics::kOther, SDL_GetTicksNS());
-        if(!core&&backdrop_drawn&&!backdrop_still&&focused&&!download.valid()) {
-            // The live home tour runs at up to ~60 fps, like the web's.
-            const double spent=std::chrono::duration<double>(Clock::now()-now).count();
-            if(spent<1./62)SDL_DelayNS(uint64_t((1./62-spent)*1e9));
-        } else if(!core||download.valid()||(!opt.frames&&(!focused||!captured))) SDL_Delay(10);
-        else if(!opt.frames&&preferences.at("fpsLimit").get<int>()>0) {
-            const double target=1./preferences.at("fpsLimit").get<int>();const double spent=std::chrono::duration<double>(Clock::now()-now).count();
-            if(spent<target)SDL_DelayNS(uint64_t((target-spent)*1e9));
-        }
+        graphics_menu_pacer.frame(bool(core),backdrop_drawn&&!backdrop_still,focused,download.valid(),bool(opt.frames),
+            captured,menu&&menu->visible(),std::chrono::duration<double>(Clock::now()-now).count(),SDL_DelayNS);
         frame_diagnostics.mark(native::FrameDiagnostics::kSleep, SDL_GetTicksNS());
     }
     save_window();

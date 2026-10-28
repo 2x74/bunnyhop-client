@@ -325,6 +325,8 @@ class Renderer {
         if (!sourceLook || graphics.potato || graphics.fullbright || !lightmapInfo.hdr || hdrUnavailable)
             return nullptr;
         if(!hdr)try{hdr=std::make_unique<SourceHdr>(gl,emptyVao);}catch(const std::exception &e){hdrUnavailable=true;std::cerr<<"Native HDR unavailable, drawing straight: "<<e.what()<<'\n';return nullptr;}
+        if (hdr)
+            hdr->bloom = graphics.bloom;
         return hdr.get();
     }
     bool toolsVisible = true, paintHeld = false;
@@ -413,7 +415,9 @@ class Renderer {
         const BhMaterialExtra empty={-1,-1,4,1,0,400,1};const auto &e=index<extras.size()?extras[index]:empty;
         gl.ActiveTexture(GL_TEXTURE0);gl.BindTexture(GL_TEXTURE_2D,m.texture<0?(m.kind==1?checker:white):texture(m.texture));
         gl.ActiveTexture(GL_TEXTURE2);gl.BindTexture(GL_TEXTURE_2D,texture(e.texture2));gl.ActiveTexture(GL_TEXTURE3);gl.BindTexture(GL_TEXTURE_2D,texture(e.detail,true));
-        gl.ActiveTexture(GL_TEXTURE7);gl.BindTexture(GL_TEXTURE_2D,index<normals.size()&&normals[index]?normals[index]:white);gl.Uniform1i(loc(program,"hasNormal"),index<normals.size()&&normals[index]);
+        gl.ActiveTexture(GL_TEXTURE7);
+        gl.BindTexture(GL_TEXTURE_2D, index < normals.size() && normals[index] ? normals[index] : white);
+        gl.Uniform1i(loc(program, "hasNormal"), graphics.material_response && index < normals.size() && normals[index]);
         gl.Uniform1i(loc(program, "hasSecondary"), e.texture2 >= 0);
         gl.Uniform1i(loc(program, "hasDetail"), e.detail >= 0 && !graphics.potato);
         gl.Uniform1f(loc(program, "detailScale"), e.detail_scale);
@@ -747,6 +751,12 @@ public:
       else if (actor.loadout.empty())
           actor.loadout = packedLoadout;
   }
+  bool tag_visible(bool ghost) const {
+      return ghost || graphics.tags_players;
+  }
+  bool tags_through_walls() const {
+      return graphics.tags_through_walls;
+  }
     void set_profiling(bool enabled){profiling=enabled;}
     nlohmann::json profile_json()const{
         const auto &p=frameProfile;
@@ -851,9 +861,9 @@ public:
         hdr_pass();
         if (graphics.target_needed() && !graphicsTarget)
             graphicsTarget = std::make_unique<GraphicsTarget>(gl, emptyVao);
-        if (!settings.contains("graphics"))
-            graphics.source = settings.value("sourceLook", true);
         sourceLook = graphics.source;
+        if (hdr)
+            hdr->bloom = graphics.bloom;
         if (anisotropySupported) {
             constexpr GLenum anisotropy = 0x84fe, maximumAnisotropy = 0x84ff;
             float maximum = 1;
@@ -991,7 +1001,14 @@ public:
         gl.UseProgram(skyProgram);
         gl.BindVertexArray(emptyVao);
         water_uniforms(skyProgram, eye);
-        const float cy=std::cos(lastYaw*native::radians),sy=std::sin(lastYaw*native::radians),cp=std::cos(lastPitch*native::radians),sp=std::sin(lastPitch*native::radians);gl.Uniform3f(loc(skyProgram,"forward"),cp*cy,cp*sy,-sp);gl.Uniform3f(loc(skyProgram,"right"),sy,-cy,0);gl.Uniform3f(loc(skyProgram,"up"),sp*cy,sp*sy,cp);gl.Uniform1f(loc(skyProgram,"aspect"),float(width)/height);gl.Uniform1f(loc(skyProgram,"cot"),(4.f/3.f)/std::tan(float(fieldOfView*native::radians*.5)));
+        const float cy = std::cos(lastYaw * native::radians), sy = std::sin(lastYaw * native::radians),
+                    cp = std::cos(lastPitch * native::radians), sp = std::sin(lastPitch * native::radians);
+        gl.Uniform3f(loc(skyProgram, "forward"), cp * cy, cp * sy, -sp);
+        gl.Uniform3f(loc(skyProgram, "right"), sy, -cy, 0);
+        gl.Uniform3f(loc(skyProgram, "up"), sp * cy, sp * sy, cp);
+        gl.Uniform1f(loc(skyProgram, "skyExposure"), graphics.sky_exposure);
+        gl.Uniform1f(loc(skyProgram, "aspect"), float(width) / height);
+        gl.Uniform1f(loc(skyProgram, "cot"), (4.f / 3.f) / std::tan(float(fieldOfView * native::radians * .5)));
         GLint present[6]{}, half[6]{};
         for (int i = 0; i < 6; i++) {
             GLuint id = white;

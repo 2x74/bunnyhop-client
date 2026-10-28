@@ -1,8 +1,10 @@
 #include "graphics_settings.hpp"
+#include "render_capabilities.hpp"
 #include "measure.hpp"
 #include "replay_controls.hpp"
 #include <cassert>
 #include <iostream>
+#include <fstream>
 #include <limits>
 
 using Json = nlohmann::json;
@@ -19,28 +21,45 @@ static void rejects(const std::string &key, const Json &patch) {
     assert(document == before);
 }
 static void settings_validation() {
-    rejects("graphics", {{"resolutionScale", .1}});
-    rejects("graphics", {{"gamma", 3}});
-    rejects("graphics", {{"brightness", std::numeric_limits<double>::infinity()}});
-    rejects("graphics", {{"msaa", 3}});
-    rejects("graphics", {{"anisotropy", 12}});
-    rejects("graphics", {{"aspect", "3:2"}});
-    rejects("graphics", {{"waterReflections", true}});
-    rejects("graphics", {{"fullbright", "yes"}});
-    rejects("graphics", {{"preset", "cinematic"}});
-    rejects("ghost", {{"routeSource", "top"}});
-    rejects("ghost", {{"routeMode", "unknown"}});
+    rejects("graphicsResolutionScale", .1);
+    rejects("graphicsGamma", 3);
+    rejects("graphicsBrightness", std::numeric_limits<double>::infinity());
+    rejects("graphicsAnisotropy", 12);
+    rejects("graphicsMenuFps", 90);
+    rejects("graphicsAspect", "3:2");
+    rejects("graphicsFullbright", "yes");
+    rejects("graphicsSkyExposure", -5);
+    rejects("ghostRouteSource", "top");
+    rejects("ghostRouteMode", "unknown");
     rejects("paint", {{"color", "#123456"}});
     rejects("paint", {{"size", "huge"}});
-    rejects("graphics", {{"gamma", 2}, {"unsupported", true}});
+    rejects("paint", {{"color", "#ff4040"}, {"unsupported", true}});
     auto document = native::default_graphics_settings();
-    assert(native::patch_graphics_setting(document, "graphics", {{"quality", "lowest"}}));
+    assert(document.at("graphicsWaterReflections") == true && document.at("graphicsBloom") == true);
+    assert(document.at("tagsPlayers") == true && document.at("tagsThroughWalls") == false);
+    native::apply_graphics_quality(document, "lowest");
     const auto graphics = native::GraphicsSettings::read(document);
-    assert(graphics.potato && graphics.samples == 0 && graphics.resolution_scale == .5f);
-    assert(graphics.anisotropy == 1);
-    assert(native::patch_graphics_setting(document, "graphics", {{"quality", "high"}, {"msaa", 8}}));
-    assert(native::GraphicsSettings::read(document).samples == 8);
-    assert(!native::patch_graphics_setting(document, "unrelated", 42));
+    assert(graphics.potato && graphics.samples == 0 && graphics.resolution_scale == .5f && graphics.anisotropy == 1);
+    native::apply_graphics_quality(document, "high");
+    assert(native::GraphicsSettings::read(document).samples == 4);
+    assert(!native::patch_graphics_setting(document, "graphics", 42));
+    assert(native::patch_graphics_setting(document, "graphicsSkyExposure", 4));
+    assert(native::GraphicsSettings::read(document).sky_exposure == 4);
+    native::GraphicsMenuPacer pacer;
+    pacer.settings({{"graphicsMenuFps", 30}});
+    uint64_t waited = 0;
+    assert(pacer.pace(true, 0, [&](uint64_t nanoseconds) { waited = nanoseconds; }));
+    assert(waited > 33000000 && waited < 34000000);
+    assert(!pacer.pace(false, 0, [&](uint64_t) { assert(false); }));
+    auto capabilities = Json::array({"scoreboard"});
+    native::append_render_capabilities(capabilities);
+    const auto count = capabilities.size();
+    native::append_render_capabilities(capabilities);
+    assert(capabilities.size() == count && capabilities.at(0) == "scoreboard");
+    assert(std::find(capabilities.begin(), capabilities.end(), "paint") != capabilities.end());
+    bool flashlight = false;
+    native::toggle_graphics_flashlight(document, flashlight);
+    assert(flashlight && document.at("graphicsFlashlight") == true);
     Json retired = {{"playerModel", "runner"}, {"ghostModel", "runner"}};
     native::migrate_retired_models(retired);
     assert(retired.at("playerModel") == "bunny" && retired.at("ghostModel") == "bunny");
@@ -94,7 +113,29 @@ static void compare_alignment() {
     assert(compare_tick(2000, 100, .01, 40, 1000, .005) == 1000);
     assert(compare_tick(150, 100, .01, 40, 1000, 0) == 40);
 }
-int main() {
+int main(int argc, char **argv) {
+    if (argc == 2) {
+        std::ifstream input(argv[1]);
+        Json fixture;
+        input >> fixture;
+        const auto defaults = native::default_graphics_settings();
+        for (const auto &[key, value] : fixture.at("defaults").items()) {
+            if (!defaults.contains(key) || defaults.at(key) != value)
+                throw std::runtime_error("WS2 default mismatch: " + key);
+        }
+        for (const auto &test : fixture.at("cases")) {
+            auto document = defaults;
+            bool accepted = false;
+            try {
+                accepted = native::patch_graphics_setting(document, test.at("key"), test.at("value"));
+            } catch (const std::runtime_error &) {
+            }
+            if (accepted != test.at("accepted").get<bool>())
+                throw std::runtime_error("WS2 range mismatch: " + test.dump());
+        }
+        std::cout << "WS2 schema: " << fixture.at("defaults").size() << " defaults and " << fixture.at("cases").size()
+                  << " validation cases matched\n";
+    }
     settings_validation();
     graphics_views();
     surfaces_and_measurement();

@@ -104,8 +104,9 @@ void main(){
 inline const char *sky_vertex=R"(#version 330 core
 out vec2 ndc;void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);ndc=p*2.-1.;gl_Position=vec4(ndc,1,1);}
 )";
-inline std::string sky_fragment(){return std::string("#version 330 core\n")+water+R"(
-in vec2 ndc;uniform vec3 forward,right,up;uniform float aspect,cot;
+inline std::string sky_fragment() {
+    return std::string("#version 330 core\n") + water + R"(
+in vec2 ndc;uniform vec3 forward,right,up;uniform float aspect,cot,skyExposure;
 uniform sampler2D sky0,sky1,sky2,sky3,sky4,sky5;
 uniform int skyPresent[6],skyHalf[6];out vec4 color;
 void main(){vec3 d=normalize(forward+right*ndc.x*aspect/cot+up*ndc.y/cot),a=abs(d);int f;vec2 st;
@@ -115,7 +116,8 @@ void main(){vec3 d=normalize(forward+right*ndc.x*aspect/cot+up*ndc.y/cot),a=abs(
  vec3 c;vec2 uv=vec2((st.x+1.)*.5,skyHalf[f]!=0?1.-st.y:(1.-st.y)*.5);
  if(skyPresent[f]!=0){if(f==0)c=texture(sky0,uv).rgb;else if(f==1)c=texture(sky1,uv).rgb;else if(f==2)c=texture(sky2,uv).rgb;else if(f==3)c=texture(sky3,uv).rgb;else if(f==4)c=texture(sky4,uv).rgb;else c=texture(sky5,uv).rgb;}
  else{c=d.z>0.?mix(linearize(vec3(.788,.863,.925)),linearize(vec3(.247,.435,.710)),pow(d.z,.55)):mix(linearize(vec3(.788,.863,.925)),linearize(vec3(.49,.541,.588)),pow(min(-d.z*3.,1.),.7));float sun=max(dot(d,normalize(vec3(.45,.6,.35))),0.);c+=vec3(1,.92,.75)*(pow(sun,600.)*1.5+pow(sun,12.)*.18);}
- color=vec4(waterFog(encode(c),cameraPosition+d*1e5),1);
+ color=vec4(waterFog(encode(c*exp2(skyExposure)),cameraPosition+d*1e5),1);
 }
-)";}
+)";
+}
 }

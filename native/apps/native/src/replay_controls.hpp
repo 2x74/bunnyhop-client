@@ -108,9 +108,21 @@ inline uint32_t compare_tick(uint32_t playback_tick, uint32_t playback_start, do
 namespace native {
 // The compare handle never enters the live replay/reset pipeline; loading it preserves playback and recording state.
 class ReplayCompare {
+  public:
+    struct Prepared {
+        std::vector<BhGhostFrame> frames;
+        native_render::Actor actor;
+        uint32_t start = 0, end = 0, playback_start = 0;
+        double interval = 1. / 64;
+        bool finished = false;
+    };
+
+  private:
+    std::vector<BhGhostFrame> frames_;
     BhContext *core_ = nullptr;
     uint32_t handle_ = 0, start_ = 0, end_ = 0, playback_start_ = 0;
     double interval_ = 1. / 64;
+    bool finished_ = false;
     native_render::Actor actor_;
 
   public:
@@ -120,6 +132,7 @@ class ReplayCompare {
         }
         core_ = nullptr;
         handle_ = 0;
+        frames_.clear();
     }
     void load(BhContext *core, const std::string &path, native_render::GhostSource source,
               const nlohmann::json &playback) {
@@ -153,6 +166,7 @@ class ReplayCompare {
             playback_start_ = playback.value("startTick", 0u);
             start_ = info.value("startTick", 0u);
             end_ = info.value("endTick", info.value("totalTicks", 0u));
+            finished_ = end_ > start_;
             if (end_ <= start_)
                 end_ = info.value("totalTicks", 0u);
             const auto &settings = info.at("settings");
@@ -165,17 +179,65 @@ class ReplayCompare {
         }
     }
     const native_render::Actor *sample(uint32_t tick, double interval) {
-        if (!handle_ || !core_) {
+        if (!active()) {
             return nullptr;
         }
         const uint32_t at = compare_tick(tick, playback_start_, interval, start_, end_, interval_);
+        if (!frames_.empty()) {
+            actor_.frame = frames_[std::min(size_t(at), frames_.size() - 1)];
+            return &actor_;
+        }
         if (!bh_ghost_frame(core_, handle_, at, &actor_.frame)) {
             return nullptr;
         }
         return &actor_;
     }
+    Prepared detach() {
+        Prepared result;
+        result.actor = actor_;
+        result.start = start_;
+        result.end = end_;
+        result.playback_start = playback_start_;
+        result.interval = interval_;
+        result.finished = finished_;
+        result.frames.resize(size_t(end_) + 1);
+        for (uint32_t tick = 0; tick <= end_; ++tick) {
+            if (!bh_ghost_frame(core_, handle_, tick, &result.frames[tick])) {
+                throw std::runtime_error("Could not prepare compare path");
+            }
+        }
+        clear();
+        return result;
+    }
+    void adopt(Prepared result) {
+        clear();
+        frames_ = std::move(result.frames);
+        actor_ = std::move(result.actor);
+        start_ = result.start;
+        end_ = result.end;
+        playback_start_ = result.playback_start;
+        interval_ = result.interval;
+        finished_ = result.finished;
+    }
+    void name(const std::string &value) {
+        if (value.size() > 512)
+            throw std::runtime_error("Compare name is too long");
+        actor_.name = value;
+    }
+    nlohmann::json menu_state(double playback_interval) const {
+        if (!active())
+            return nullptr;
+        const double finish =
+            playback_interval > 0 ? playback_start_ + (end_ - start_) * interval_ / playback_interval : 0;
+        return {{"kind", actor_.source == native_render::GhostSource::pb   ? "pb"
+                         : actor_.source == native_render::GhostSource::wr ? "wr"
+                                                                           : "custom"},
+                {"name", actor_.name},
+                {"endTick",
+                 finished_ ? nlohmann::json(uint32_t(std::max(0., std::round(finish)))) : nlohmann::json(nullptr)}};
+    }
     bool active() const {
-        return handle_ != 0;
+        return handle_ != 0 || !frames_.empty();
     }
     nlohmann::json state() const {
         if (!active()) {
