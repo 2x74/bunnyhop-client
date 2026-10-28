@@ -1,5 +1,6 @@
-// Attempts and time played per map, on this device (localStorage; never uploaded): the map list's panel ("214 attempts,
-// 1h 32m played") and the result card. Any style and track.
+// Attempts and time played per map, on this device (localStorage): the map list's panel ("214 attempts, 1h 32m
+// played") and the result card. Any style and track. A submitted run's diagnostics carry the two numbers as they were
+// at its finish, for its stats card on the boards (session.ts runPlay); nothing else is uploaded.
 //   - an attempt is a timer start: leaving a start zone with the timer running (session.ts). A restart or a respawn
 //     in the start zone isn't one; the run you start after it is. Practice mode's starts don't count.
 //   - time is playtime.ts's count (on the map with the game running: not paused, in a menu or tabbed out, and not

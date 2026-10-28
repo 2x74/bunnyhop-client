@@ -409,6 +409,14 @@ export function table(head: (string | [string, string])[], rows: HTMLTableRowEle
 
 /** A state: a word with a mark (never a pill). kind: ok | bad | warn | acc | info | "". */
 export const badge = (text: string, kind = "") => h("span", { class: `badge ${kind}` }, text);
+
+/** Which client played a run (apps/api src/run-client.ts, staff endpoints only): "Native 804eac9", "Desktop 0.2.2", "Chrome 156". The tooltip has the user agent and build. */
+export interface RunClient {
+  kind: "native" | "desktop" | "browser" | "unknown";
+  label: string;
+  title: string;
+}
+export const clientTag = (c: RunClient | null | undefined): HTMLElement | null => (c ? h("span", { class: "faint client-tag", title: c.title }, c.label) : null);
 export const timeCell = (ms: number | null | undefined) => h("td", { class: "time", title: when(ms) }, ago(ms));
 /** A run time in the timer's type. */
 export const timeEl = (sec: number | null | undefined, cls = "") => h("span", { class: `t-run ${cls}` }, fmtTime(sec));

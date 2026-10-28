@@ -29,7 +29,7 @@ import { playerUniforms, solidMaterial, type PlayerUniforms } from "../player/ma
 import { colourway, paletteOf } from "../player/bunny/palettes";
 import { getLoadout, getOutfit, getPlayerGlow, onLoadout, onOutfit } from "../player/cosmetics";
 import { PlayerGlowShell } from "../player/glow";
-import { gloveStyle, type CosmeticLoadout } from "../loadout";
+import { DEFAULT_LOADOUT, gloveStyle, type CosmeticLoadout } from "../loadout";
 import { applyLoadoutUniforms, NO_LOOK, sameLook, type FinishSpec, type MaterialLook } from "./finishes/shader";
 import { ensureViewmodelLayout } from "./finishes/layout";
 import { followLoadout } from "./equip";
@@ -39,7 +39,7 @@ import { STUDIO_SNAP, type StudioData } from "../player/studio/data";
 import { hasViewmodelAnims, loadViewmodelAnims, readyViewmodelAnims } from "../player/studio/loader";
 import { onPlayerContent } from "../content/player";
 import { prefs, verticalFov } from "../ui/settings";
-import { ATTACK_SLASH, ATTACK_STAB, emitWeaponEvent } from "./events";
+import { ATTACK_SLASH, ATTACK_STAB, emitWeaponEvent as emitEvent } from "./events";
 import { angleMatrix } from "./math";
 import { viewmodelGeometry } from "./mesh";
 import { equippedKnife, onKnife } from "./knives/equipped";
@@ -169,7 +169,15 @@ export class Viewmodel {
   /** Dev lab / previews: a finish shown instead of the loadout's (undefined = the loadout's). */
   private finishOverride: FinishSpec | null | undefined = undefined;
 
-  constructor() {
+  /** No sounds or weapon events from this viewmodel or its inspects (the replay viewer's arms; exports mix their own sound). */
+  readonly silent: boolean;
+
+  /**
+   * `follow: false` (the replay viewer): not your equipped loadout / knife / colourway; the owner sets them
+   * (setLoadout, setKnife, setOutfit). Default: follows yours. `silent`: see `silent`.
+   */
+  constructor(o: { follow?: boolean; silent?: boolean } = {}) {
+    this.silent = this.inspects.silent = !!o.silent;
     const n = this.r.names.length;
     this.W = new Float32Array(n * 12);
     this.S = new Float32Array(n * 12);
@@ -191,13 +199,16 @@ export class Viewmodel {
     this.proc = new VmProcedural(this.r);
     // Source viewmodel space (x forward, y left, z up) -> three camera space (-z forward, x right, y up).
     this.conv.set(0, -1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 0, 0, 0, 0, 1);
-    this.applyColours(getOutfit());
-    followLoadout();
-    this.setKnife(equippedKnife());
-    this.setLoadout(getLoadout());
-    this.unsub.push(onLoadout((l) => this.setLoadout(l)));
-    this.unsub.push(onKnife((k) => this.setKnife(k)));
-    this.unsub.push(onOutfit((id) => this.applyColours(id)));
+    const follow = o.follow !== false;
+    this.applyColours(follow ? getOutfit() : undefined);
+    if (follow) followLoadout();
+    this.setKnife(follow ? equippedKnife() : null);
+    this.setLoadout(follow ? getLoadout() : { ...DEFAULT_LOADOUT });
+    if (follow) {
+      this.unsub.push(onLoadout((l) => this.setLoadout(l)));
+      this.unsub.push(onKnife((k) => this.setKnife(k)));
+      this.unsub.push(onOutfit((id) => this.applyColours(id)));
+    }
     this.unsub.push(onPlayerContent(() => this.tryLoad()));
     this.tryLoad();
     this.draw();
@@ -268,6 +279,11 @@ export class Viewmodel {
     return this.knifeDef;
   }
 
+  /** The colourway on the hands (yours unless constructed with `follow: false`). */
+  setOutfit(id: string | null | undefined): void {
+    this.applyColours(id);
+  }
+
   private applyColours(id: string | null | undefined): void {
     const c = colourway(id);
     const pal = paletteOf(c);
@@ -311,12 +327,28 @@ export class Viewmodel {
   // -------------------------------------------------------------------------------------------
   // Actions
 
+  private emit(e: Parameters<typeof emitEvent>[0]): void {
+    if (!this.silent) emitEvent(e);
+  }
+
   /** Deploy (spawn, restart, viewmodel shown again). */
   draw(): void {
     this.setAction("draw");
     this.nextPrimary = this.nextSecondary = this.now + DRAW_NEXT;
     this.inspects.cancel("draw");
-    emitWeaponEvent({ type: "draw", source: "local" });
+    this.emit({ type: "draw", source: "local" });
+  }
+
+  /** A replay's / another player's inspect signal (combo.ts SIG_START / SIG_NEXT): the trick starts or chains now. */
+  inspectSignal(sig: number): void {
+    if (this.action !== "idle" && this.action !== "draw") return;
+    this.inspects.remote(sig);
+  }
+
+  /** Straight to idle, no deploy (the replay viewer after a seek). */
+  idle(): void {
+    this.setAction("idle");
+    this.inspects.cancel("draw");
   }
 
   /** Attack buttons pressed this frame (taps shorter than a frame still count). */
@@ -407,14 +439,14 @@ export class Viewmodel {
     const variant = this.slashSide ? 1 : 2;
     this.setAction(variant === 1 ? "slash1" : "slash2");
     this.inspects.cancel("attack");
-    emitWeaponEvent({ type: "slash", variant, source: "local" });
+    this.emit({ type: "slash", variant, source: "local" });
     this.onAttack?.(ATTACK_SLASH);
   }
 
   private stab(): void {
     this.setAction("stab");
     this.inspects.cancel("attack");
-    emitWeaponEvent({ type: "stab", source: "local" });
+    this.emit({ type: "stab", source: "local" });
     this.onAttack?.(ATTACK_STAB);
   }
 
@@ -579,8 +611,9 @@ export class Viewmodel {
   // -------------------------------------------------------------------------------------------
   // Rendering
 
-  setVisible(v: boolean): void {
-    if (v && !this.visible) this.draw();
+  /** Shown / hidden; shown again it deploys (draw) unless `deploy` is false (a replay export's camera cut). */
+  setVisible(v: boolean, deploy = true): void {
+    if (v && !this.visible && deploy) this.draw();
     this.visible = v;
   }
 

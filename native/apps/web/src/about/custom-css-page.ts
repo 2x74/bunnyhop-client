@@ -1,4 +1,4 @@
-// /custom-css (custom-css.html): copy buttons and light colouring on the code blocks, the before / after slider, and
+// /custom-css and /custom-skies (custom-css.html, custom-skies.html): copy buttons and light colouring on the code blocks, the before / after slider, and
 // the contents rail following the scroll. No game code; without it the page is plain and complete.
 
 // --- code: colour (comments, at-rules, selectors, properties, strings, values) and a Copy button

@@ -13,7 +13,7 @@ import { figEl } from "./pulse";
 import { modTable, staffButtons } from "./staff";
 import { chatRow } from "./live";
 import { mapLine } from "./art";
-import { fmtTime } from "./core";
+import { clientTag, fmtTime } from "./core";
 
 interface PlayerRow {
   id: string;
@@ -460,7 +460,7 @@ export const playerView: View = async (root, _params, [id]) => {
         "section",
         { class: "card" },
         h("h2", null, "Runs", may("runs.read") ? h("a", { href: `#/runs?user=${encodeURIComponent(u.id)}`, class: "go-link" }, "All runs", glyph("arrow")) : null),
-        table(["When", "Map", "Style", ["Time", "num"], ""], d.runs.map((r) => h("tr", null, timeCell(r.created_at), h("td", null, mapLine(r.map, { track: r.track })), h("td", null, r.style), h("td", { class: "num" }, h("span", { class: "t-run" }, fmtTime(r.time))), h("td", null, badge(r.status, r.status === "verified" ? "ok" : r.status === "rejected" || r.status === "error" ? "bad" : ""), r.pb ? badge("PB", "acc") : null, r.reason ? h("div", { class: "faint" }, r.reason) : null))), "No runs."),
+        table(["When", "Map", "Style", ["Time", "num"], "", "Client"], d.runs.map((r) => h("tr", null, timeCell(r.created_at), h("td", null, mapLine(r.map, { track: r.track })), h("td", null, r.style), h("td", { class: "num" }, h("span", { class: "t-run" }, fmtTime(r.time))), h("td", null, badge(r.status, r.status === "verified" ? "ok" : r.status === "rejected" || r.status === "error" ? "bad" : ""), r.pb ? badge("PB", "acc") : null, r.reason ? h("div", { class: "faint" }, r.reason) : null), h("td", null, clientTag(r.client)))), "No runs."),
       ),
       h("section", { class: "card" }, h("h2", null, "Names"), table(["When", "From", "To", "By", "Reason"], d.names.map((x) => h("tr", null, timeCell(x.created_at), h("td", null, x.old_name ?? "—"), h("td", null, x.new_name), h("td", null, x.source === "player" ? "them" : x.source), h("td", null, x.reason ?? ""))), "No changes.")),
     ),

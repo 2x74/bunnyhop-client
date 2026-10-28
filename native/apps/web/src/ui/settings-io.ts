@@ -160,7 +160,7 @@ const RULES: [string, Rule][] = [
   ["sensitivity", { range: [0.01, 100] }],
   ["verticalSensitivity", { range: [0.01, 100] }],
   ["dpi", { range: [50, 32000], int: true }],
-  ["fov", { range: [75, 110] }],
+  ["fov", { range: [75, 120] }],
   ["crosshair.style", { oneOf: ["cross", "cross-dot", "dot", "t", "circle", "none"] }],
   ["crosshair.color", color],
   ["crosshair.size", { range: [1, 20] }],

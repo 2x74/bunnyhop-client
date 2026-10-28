@@ -23,6 +23,7 @@
 // Weapon ids without a model of their own borrow the closest (guns/index.ts GUN_STAND_IN); unknown ids show nothing.
 
 import type * as THREE from "three";
+import type { CosmeticLoadout } from "../../loadout";
 import { floorWeapons, USP_SILENCER_TIME, WEAPON_EVENT_DRY_FIRE, WEAPON_EVENT_MODE, WEAPON_EVENT_PICKED_UP, WEAPON_EVENT_RELOAD_FINISHED, WEAPON_EVENT_RELOAD_STARTED, WEAPON_EVENT_RESTORED, WEAPON_EVENT_SILENCER, WEAPON_IDS, type AttackReport, type BrushTransform, type Core, type WeaponReport } from "../../core";
 import { impactSurface, modelOfEntity, playImpact } from "../../audio/impacts";
 import { gunById } from "./index";
@@ -53,10 +54,15 @@ export interface GunPresenterHost {
   onSilencer?: (on: boolean) => void;
   /** Sim tick length (s), default 0.01. */
   tick?: number;
+  /**
+   * The replay viewer's: these hands (gloves, colourway via vm.setOutfit) instead of your equipped ones, no sounds, and
+   * the floor guns left to the viewer (it keeps its own, viewer.ts).
+   */
+  replay?: { loadout: CosmeticLoadout };
 }
 
 export class GunPresenter {
-  readonly vm = new GunViewmodel();
+  readonly vm: GunViewmodel;
   readonly impacts = new GunImpacts();
   /** The weapon items lying in the world. */
   readonly floor = new FloorGuns();
@@ -79,9 +85,22 @@ export class GunPresenter {
 
   constructor(private h: GunPresenterHost) {
     this.tickS = h.tick ?? TICK;
+    this.vm = new GunViewmodel(h.replay ? { loadout: h.replay.loadout } : {});
     h.scene.add(this.impacts.root);
-    h.scene.add(this.floor.root);
-    this.vm.onSound = (kind, gain) => gunSound(this.active, kind, { gain });
+    if (!h.replay) h.scene.add(this.floor.root);
+    this.vm.onSound = (kind, gain) => this.sound(this.active, kind, gain);
+  }
+
+  private sound(def: GunDef | null, kind: Parameters<typeof gunSound>[1], gain?: number): void {
+    if (!this.h.replay) gunSound(def, kind, gain === undefined ? undefined : { gain });
+  }
+
+  /** Removes the impacts (and floor guns) from the scene and frees the viewmodel (the replay viewer's presenter). */
+  dispose(): void {
+    this.impacts.clear();
+    this.impacts.root.removeFromParent();
+    this.floor.root.removeFromParent();
+    this.vm.dispose();
   }
 
   /** Restart / respawn: straight to the core's state (the gun is drawn like a fresh spawn), impacts cleared. */
@@ -90,7 +109,7 @@ export class GunPresenter {
     this.weapon = -1;
     this.shells = false;
     this.startLeft = 0;
-    this.floor.update(floorWeapons(this.h.core));
+    if (!this.h.replay) this.floor.update(floorWeapons(this.h.core));
     this.silenced = null;
     if (r) {
       this.tick({ ...r, floorChanged: false, flags: r.flags & ~WEAPON_EVENT_SILENCER }, null);
@@ -129,7 +148,7 @@ export class GunPresenter {
   /** One sim tick: inventory events (switch, pickup, reloads, dry fire, mode) and this tick's shot. */
   tick(r: WeaponReport | null, attack: AttackReport | null): void {
     if (!r) return;
-    if (r.floorChanged) this.floor.update(floorWeapons(this.h.core));
+    if (r.floorChanged && !this.h.replay) this.floor.update(floorWeapons(this.h.core));
     const f = r.flags;
     if (r.active !== this.weapon) this.equip(r.active, r.silencer, !(f & WEAPON_EVENT_RESTORED));
     const def = this.active;
@@ -137,11 +156,11 @@ export class GunPresenter {
       this.silenced = r.silencer;
       this.h.onSilencer?.(r.silencer);
     }
-    if (f & WEAPON_EVENT_PICKED_UP) gunSound(def ?? gunForWeapon(r.primary || r.secondary) ?? null, "pickup");
+    if (f & WEAPON_EVENT_PICKED_UP) this.sound(def ?? gunForWeapon(r.primary || r.secondary) ?? null, "pickup");
     if (def) {
       if (f & WEAPON_EVENT_MODE) {
         this.vm.anim.modeToggle();
-        gunSound(def, "mode");
+        this.sound(def, "mode");
       }
       if (f & WEAPON_EVENT_DRY_FIRE) this.vm.dryFire();
       // The silencer going on / off: over the lock-out from this tick (the report has the ticks left after it).
@@ -192,7 +211,7 @@ export class GunPresenter {
     }
     const transforms = this.transforms ?? this.h.core.brushOrigins();
     const surface = impactSurface(this.h.core, a, transforms);
-    playImpact(surface, "bullet", a.end);
+    if (!this.h.replay) playImpact(surface, "bullet", a.end);
     this.impacts.hit(a.end, a.normal, surface, { model: modelOfEntity(a.entity), transforms, from, button: this.isButton(a.entity), heavy: def.cls === "shotgun" });
   }
 

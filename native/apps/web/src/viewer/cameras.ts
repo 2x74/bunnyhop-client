@@ -474,6 +474,8 @@ export class CameraRig {
   private shotIdx = -1;
   private tripodLook = [0, 0, 0];
   private tmp: ViewSample | undefined;
+  /** The last update placed the camera in the player's eyes (eye mode or an eye shot): exports add the knife / crosshair. */
+  firstPerson = false;
 
   get chase(): ChaseCam {
     return this.spec.chase;
@@ -516,6 +518,12 @@ export class CameraRig {
 
   /** Places `camera` for display tick t. Returns true if the player model should be drawn (third-person shots). */
   update(camera: THREE.PerspectiveCamera, d: RunData, t: number, dt: number, trace: TraceFn | null): boolean {
+    const showModel = this.place(camera, d, t, dt, trace);
+    this.firstPerson = !showModel;
+    return showModel;
+  }
+
+  private place(camera: THREE.PerspectiveCamera, d: RunData, t: number, dt: number, trace: TraceFn | null): boolean {
     const s = (this.tmp = sampleAt(d, t, this.tmp));
     this.spec.trace = trace;
     if (this.mode !== "auto") return this.spec.update(camera, s, dt, this.mode);

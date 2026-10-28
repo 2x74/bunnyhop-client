@@ -3,7 +3,7 @@
 // them all (100 per request), with Undo. A rejected run's Restore puts it back through verification. And Signals: the
 // pooled review, gain jumps and Legit jumps (the server keeps each list 10 minutes).
 
-import { act, ago, api, ask, badge, fmtTime, glyph, h, help, may, n, playerLink, plural, setKeys, short, stepRows, table, toast, when, type View, fill } from "./core";
+import { act, ago, api, ask, badge, clientTag, fmtTime, glyph, h, help, may, n, playerLink, plural, setKeys, short, stepRows, table, toast, when, type RunClient, type View, fill } from "./core";
 import { mapLine } from "./art";
 import { attemptText, type SessionAttempt } from "./cases";
 import { recentReasons, rememberReason } from "./dialogs";
@@ -29,6 +29,7 @@ interface RunRow {
   verified_at: number | null;
   pb: number | null;
   diagnostics?: RunDiagnostics | null;
+  client?: RunClient;
   session?: SessionAttempt | null;
 }
 
@@ -59,8 +60,9 @@ function browserName(ua = ""): string {
 }
 
 /** The client's self-check verdict and its numbers as label / value lines. */
-function clientCell(d: RunDiagnostics | null | undefined): HTMLElement {
-  if (!d) return h("td", { class: "faint" }, "—");
+function clientCell(d: RunDiagnostics | null | undefined, client: RunClient | undefined): HTMLElement {
+  // The client the run was played on (native / desktop / browser) shows even when the run has no diagnostics (a native run).
+  if (!d) return h("td", { class: "faint" }, clientTag(client) ?? "—");
   const verdict = d.selfCheck === "mismatch" ? badge(d.firstMismatchTick !== undefined ? `desync at ${d.firstMismatchTick}` : "desync", "bad") : d.selfCheck === "error" ? badge("check failed", "warn") : badge("ok", "ok");
   const i = d.input ?? {};
   const v = d.visibility;
@@ -80,7 +82,7 @@ function clientCell(d: RunDiagnostics | null | undefined): HTMLElement {
     "td",
     null,
     verdict,
-    h("details", { class: "client-more" }, h("summary", { class: "faint" }, browserName(d.ua)), h("dl", { class: "kv tight" }, rows.filter(([, x]) => x).flatMap(([k, x]) => [h("dt", null, k), h("dd", null, x!)]))),
+    h("details", { class: "client-more" }, h("summary", { class: "faint", title: client?.title }, client?.label ?? browserName(d.ua)), h("dl", { class: "kv tight" }, rows.filter(([, x]) => x).flatMap(([k, x]) => [h("dt", null, k), h("dd", null, x!)]))),
   );
 }
 
@@ -272,7 +274,7 @@ export const runsView: View = async (root, params) => {
       h("td", { class: "msg" }, r.reason ?? "", r.room_id ? h("div", { class: "faint" }, `in ${r.room_id}`) : null),
       h("td", { class: "num", title: attemptText(r.session) ?? "No attempt counter (an older client)" }, r.session ? `#${r.session.attempt}` : "—", h("div", null, h("a", { href: `#/suspicious?run=${encodeURIComponent(r.id)}`, class: "faint" }, "analysis"))),
       h("td", { class: "time", title: when(r.created_at) }, ago(r.created_at), r.attempts > 1 ? h("div", { class: "faint" }, `${r.attempts} tries`) : null),
-      clientCell(r.diagnostics),
+      clientCell(r.diagnostics, r.client),
       h("td", { class: "acts" }, restore, h("span", { class: "mono faint id", title: `${r.id}\nverifier ${r.verifier_build ?? "—"}, physics ${r.physics ?? 1}` }, short(r.id))),
     );
   };

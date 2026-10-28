@@ -19,7 +19,7 @@ import { mountOnlinePanel, submitAndTrack } from "./online";
 import { download, getPB, loadPBReplay, pbMs, savePBReplay, setPB, rejectPB, setPBContext, syncPBs, pbAccount, rememberPBSplits, type PersonalBest } from "./pb";
 import { keyLabel, prefs } from "./ui/settings";
 import { RunMouseSettings, mouseFromPrefs } from "./mouse-settings";
-import { turnSpeedOf } from "./turn-binds";
+import { DEFAULT_TURN_SPEED, turnSpeedOf } from "./turn-binds";
 import { decodeReplay, encodeReplay, ReplayRecorder, replayFileName, replayStyle, sha256Hex, type Replay } from "./replay";
 import { nextStyle, StyleFilter, strafeKeys, styleDef, styleForTrack, styleLabel, stylePrespeedCap, styleSettings, type StyleDef, type StyleId } from "./styles";
 import { onStyleChange, setSelectedStyle } from "./ui/style-picker";
@@ -37,11 +37,12 @@ import { mapTier } from "./ui/maps";
 import { announce, announcerPolicy, runSounds, sfx } from "./audio";
 import { restartTarget, withRestartNames } from "./restart";
 import { checkStartPoint, clearStartPoint, loadStartPoint, resolveStartPoint, savedMessage, saveStartPoint } from "./start-point";
-import { getLoadout } from "./player/cosmetics";
+import { getLoadout, getOutfit, knownOutfitUnlocks } from "./player/cosmetics";
+import { cosmetic } from "./progression";
 import { withTimeout } from "./content/fetch";
-import { reportRun, RunWatch, SelfCheck } from "./selfcheck";
+import { reportRun, RunWatch, SelfCheck, type RunPlay } from "./selfcheck";
 import { RunClock } from "./run-clock";
-import { AttemptCounter } from "./attempts";
+import { AttemptCounter, type AttemptClaim } from "./attempts";
 import { mapTime, type MapTimes } from "./map-time";
 import { holdReload, runEnded } from "./update";
 import { TUTORIAL_MAP } from "./tutorial/data";
@@ -76,6 +77,16 @@ export interface SessionInit {
   practiceSpawns?: boolean;
   /** Compiles ghosts' programs ahead of their first frame (ghost.ts GhostHost.renderer). */
   renderer?: THREE.WebGLRenderer;
+}
+
+/**
+ * The colourway for the replay's loadout trailer. A role-held one (the owner's Founder) only when the account is known
+ * to own it: the API refuses a trailer with a role-held item the account lacks (runs.ts assertLoadoutRoles), and a
+ * colourway left in this browser by another account mustn't cost a run. Without it the viewer asks the account.
+ */
+function recordedOutfit(): { outfit?: string } {
+  const id = getOutfit();
+  return cosmetic(id)?.unlock.kind === "role" && !knownOutfitUnlocks().has(id) ? {} : { outfit: id };
 }
 
 export class RunSession {
@@ -173,6 +184,10 @@ export class RunSession {
   private clock = new RunClock();
   /** Attempts / restarts per board in this tab (attempts.ts): sent with the heartbeats, context for staff. */
   private attempts = new AttemptCounter();
+  /** The timed attempt's claim (attempts.ts), for its stats card (runPlay). */
+  private runAttempt: AttemptClaim | null = null;
+  /** The FPS limit setting and whether frames wait for the display (main.ts sets it): for the run's stats card. */
+  frameCap: () => { limit: number; vsync: boolean } | null = () => null;
   private selfCheck: SelfCheck | null = null;
 
   private constructor(private o: SessionInit) {
@@ -531,14 +546,15 @@ export class RunSession {
       // The map's attempts on this device (map-time.ts): every timer start but practice's.
       if (!this.prac.practice && this.o.map !== TUTORIAL_MAP) mapTime.attempt(this.o.map);
       this.ensurePBGhost();
-      this.watch.start();
+      this.watch.start((now, windowMs) => this.o.input.filter.stats.pollHz(now, windowMs));
       // Run session (run-clock.ts): heartbeats over the commands recorded from the timer's start tick (the replay's
       // header.startTick: the recorder and the sim count ticks from the same reset). Not for practice (above).
       if (!this.unranked) {
+        this.runAttempt = this.attempts.start(this.o.map, this.timer.track, this.runStyle);
         this.clock.start({
           map: this.o.map, track: this.timer.track, style: this.runStyle, startTick: this.timer.startTick,
           length: () => this.recorder.length, fold: (h, from, to) => this.recorder.fold(h, from, to),
-          attempt: this.attempts.start(this.o.map, this.timer.track, this.runStyle),
+          attempt: this.runAttempt,
         });
       }
       this.ghosts.onRunStart();
@@ -717,8 +733,8 @@ export class RunSession {
       player: this.player,
       recordedAt: Date.now(),
     });
-    // Cosmetic trailer: the knife / finish / gloves this run was played with (replays and ghosts show them).
-    replay.loadout = getLoadout();
+    // Cosmetic trailer: the knife / finish / gloves and the colourway this run was played with (replays and ghosts show them).
+    replay.loadout = { ...getLoadout(), ...recordedOutfit() };
     return replay;
   }
 
@@ -805,10 +821,30 @@ export class RunSession {
     ).finally(() => uploaded(""));
     if (api.available()) {
       this.selfCheck ??= new SelfCheck({ wasmBytes: this.o.wasmBytes, bsp: this.o.bsp });
-      void reportRun({ check: this.selfCheck.check(bytes), upload, watched, input: this.o.input, wasm: this.clientBuild });
+      void reportRun({ check: this.selfCheck.check(bytes), upload, watched, input: this.o.input, wasm: this.clientBuild, play: this.runPlay(watched.pollHz) });
     }
     runEnded();
     await this.refreshMenu();
+  }
+
+  /**
+   * The player's side of the finished run for its stats card (selfcheck.ts RunPlay): its attempt on the map on this
+   * device (the start was counted already) and the time played there, its attempt on the board this session, the frame
+   * cap, the turn speed when it isn't the default, and the mouse's polling rate over the run.
+   */
+  private runPlay(pollHz?: number): RunPlay {
+    const on = this.onMap();
+    const a = this.runAttempt;
+    const cap = this.frameCap();
+    const t = this.recorder.turnSpeed;
+    const turned = t && (t.yawSpeed !== DEFAULT_TURN_SPEED.yawSpeed || t.angleSpeedKey !== DEFAULT_TURN_SPEED.angleSpeedKey);
+    return {
+      ...(on && on.attempts > 0 ? { attempt: on.attempts, seconds: Math.round(on.seconds) } : {}),
+      ...(a ? { session: a[0], sessionSeconds: a[3] } : {}),
+      ...(cap ? { frameCap: cap } : {}),
+      ...(turned ? { turn: { yawSpeed: t.yawSpeed, angleSpeedKey: t.angleSpeedKey } } : {}),
+      ...(pollHz ? { pollHz } : {}),
+    };
   }
 
   /** The map's attempts and time on this device, for the result (not on the tutorial). */

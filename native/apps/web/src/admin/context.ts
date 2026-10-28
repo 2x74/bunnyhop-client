@@ -2,7 +2,7 @@
 // (drawer.ts) and the anticheat case view (cases.ts) share: who they are in state words, their flags and how each ended,
 // alts and linked accounts, bans, recent chat, recent runs and moderation.
 
-import { ago, badge, emptyLine, fmtTime, h, n, plural, playerLink, staffShield, when, type ChatRow, type Child, type ModRow } from "./core";
+import { ago, badge, clientTag, emptyLine, fmtTime, h, n, plural, playerLink, staffShield, when, type ChatRow, type Child, type ModRow, type RunClient } from "./core";
 import { mapArt } from "./art";
 import { actionWords, detailSentence } from "./words";
 import type { NetworkBan } from "./dialogs";
@@ -30,6 +30,7 @@ export interface FlagRow {
   status: string;
   time: number | null;
   created_at: number;
+  client?: RunClient;
 }
 
 export interface PlayerDetail {
@@ -46,7 +47,7 @@ export interface PlayerDetail {
   configAdmin: boolean;
   sessions: { sessions: number; last_seen: number | null };
   runStats: { status: string; n: number }[];
-  runs: { id: string; map: string; style: string; track: number; status: string; reason: string | null; time: number | null; room_id: string | null; created_at: number; pb: number | null }[];
+  runs: { id: string; map: string; style: string; track: number; status: string; reason: string | null; time: number | null; room_id: string | null; created_at: number; pb: number | null; client?: RunClient }[];
   bans: { room_id: string; until: number | null; reason: string | null; banned_by: string | null; created_at: number }[];
   admin: { note: string | null; created_at: number } | null;
   names: { old_name: string | null; new_name: string; source: string; actor_id: string | null; reason: string | null; created_at: number }[];
@@ -114,7 +115,7 @@ export function flagRows(flags: FlagRow[], max = 8): HTMLElement[] {
       { class: "ctx-row two", href: `#/suspicious?run=${encodeURIComponent(f.run_id)}` },
       h("span", { class: `score-n ${f.score >= 90 ? "hi" : f.score >= 70 ? "mid" : ""}` }, String(f.score)),
       mapArt(f.map),
-      h("span", { class: "ctx-main" }, h("span", { class: "ctx-name" }, f.map, " ", h("span", { class: "t-run" }, fmtTime(f.time))), h("span", { class: "ctx-sub" }, flagEnd(f), h("span", { class: "faint" }, ago(f.created_at)))),
+      h("span", { class: "ctx-main" }, h("span", { class: "ctx-name" }, f.map, " ", h("span", { class: "t-run" }, fmtTime(f.time))), h("span", { class: "ctx-sub" }, flagEnd(f), h("span", { class: "faint" }, ago(f.created_at)), clientTag(f.client))),
     ),
   );
 }
@@ -142,7 +143,7 @@ export function runRows(runs: PlayerDetail["runs"], max = 5): HTMLElement[] {
         "span",
         { class: "ctx-main" },
         h("span", { class: "ctx-name" }, r.map, r.track ? h("span", { class: "faint" }, ` b${r.track}`) : null, " ", h("span", { class: "t-run" }, fmtTime(r.time))),
-        h("span", { class: "ctx-sub" }, r.status === "verified" ? (r.pb ? badge("PB", "acc") : h("span", { class: "faint" }, "verified")) : badge(r.status, r.status === "rejected" || r.status === "error" ? "bad" : ""), h("span", { class: "faint" }, ago(r.created_at))),
+        h("span", { class: "ctx-sub" }, r.status === "verified" ? (r.pb ? badge("PB", "acc") : h("span", { class: "faint" }, "verified")) : badge(r.status, r.status === "rejected" || r.status === "error" ? "bad" : ""), h("span", { class: "faint" }, ago(r.created_at)), clientTag(r.client)),
       ),
     ),
   );

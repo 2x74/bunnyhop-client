@@ -1,7 +1,8 @@
 # Vendored delta audit
 
 Baseline: native `4ca38014`; upstream `9cde9db9d37ea1b0752da6222b10f65e52d5f3d1`.
-Resynced to upstream `042dca417ae08ab7cf3fd37591eae21ef772aab1`; that sync changed only the rows marked 042dca41.
+Resynced to upstream `042dca417ae08ab7cf3fd37591eae21ef772aab1`, then `b29f5037fb8367d487cd3513fc8f19c9a467392b`; those syncs
+changed only the rows marked 042dca41 and b29f5037.
 The audit compared tracked files and both repositories' history, not working-tree timestamps.
 `tools/upstream-patches/classification.json` records the closest release-branch ancestor for each changed file.
 
@@ -22,6 +23,8 @@ The audit compared tracked files and both repositories' history, not working-tre
 | apps/web/src/net/scoreboard.ts | 042dca41: follow upstream's T7+ tier label in the shared scoreboard copy | native-web.patch |
 | apps/web/src/net/hud.ts | 042dca41: dropped. The hunk removed imports the scoreboard still used; menu builds map `net/hud` to `chat-hud.ts` | native-web.patch |
 | apps/web/src/{api,social/dock,ui/profile}.ts | 042dca41: hunks unchanged, refreshed for upstream line offsets | native-web.patch |
+| apps/web/src/ui/run-stats.ts | b29f5037: window-scoped key, pointer and resize handlers, so the tests' Bun globals typecheck. Drop once upstream takes the same change | native-web.patch |
+| apps/web/src/sky-packs/settings.ts | b29f5037: menu builds map it to `sky-settings.ts` (its converters load Three); only Sky brightness stays | menu-boundary.ts |
 | apps/web/src/assets/audio/manifest.json; optional announcer samples | Preserve native omission of three optional samples and its manifest metadata | ae531d1, 2460a2b |
 | apps/web/src/{badge-glyphs,ui/profile-social}.ts | Whitespace only: take upstream | 2460a2b |
 | apps/web/src/wasm/.gitignore | Keep generated WASM out of Git | ae531d1 |

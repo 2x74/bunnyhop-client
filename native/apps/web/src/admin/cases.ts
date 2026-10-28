@@ -11,7 +11,7 @@
 // API: GET /admin/integrity (the list), /admin/integrity/run/<id> (one run's analysis), /admin/players/<id>?lite=1 (the
 // player in context), the public GET /maps/<map> (the WR time), POST /admin/integrity and /admin/runs.
 
-import { act, ago, age, api, API, ask, badge, emptyLine, fmtTime, glyph, h, help, kv, may, mayShadow, n, phone, playerLink, plural, reduced, setKeys, toast, undoCall, when, type View, fill } from "./core";
+import { act, ago, age, api, API, ask, badge, clientTag, emptyLine, fmtTime, glyph, h, help, kv, may, mayShadow, n, phone, playerLink, plural, reduced, setKeys, toast, undoCall, when, type RunClient, type View, fill } from "./core";
 import { jumpStrip, ring, type JumpRow } from "./charts";
 import { mapArt, mapLine } from "./art";
 import { stamp, hopArc } from "./ui";
@@ -57,7 +57,7 @@ interface RunFeatures {
 }
 
 interface RunDetail {
-  run: { id: string; user_id: string; name: string; status: string; time: number | null; style: string; track: number; map: string; created_at: number; tier: string | null; score: number | null; review: string | null; analyzer: number | null };
+  run: { id: string; user_id: string; name: string; status: string; time: number | null; style: string; track: number; map: string; created_at: number; tier: string | null; score: number | null; review: string | null; analyzer: number | null; client?: RunClient };
   evidence: Evidence[];
   features: RunFeatures | null;
   consistency: { text: string; notable: boolean } | null;
@@ -88,6 +88,7 @@ export interface FlagRun {
   rank: number | null;
   created_at: number;
   session?: SessionAttempt | null;
+  client?: RunClient;
 }
 
 export interface FlagPlayer {
@@ -204,6 +205,7 @@ function numbers(x: RunDetail): HTMLElement {
     { class: "numbers" },
     h("summary", null, glyph("chevron"), "Numbers"),
     kv([
+      ["Client", x.run.client ? h("span", { title: x.run.client.title }, x.run.client.label) : null],
       ["Session", attemptText(f?.session) ?? "No attempt counter (an older client)"],
       ["Verdict", x.run.tier ? `${x.run.tier}, score ${x.run.score}${x.run.review ? `, ${x.run.review}` : ""}, analyzer ${x.run.analyzer}` : "Not analysed"],
       ["Jumps", j ? `${j.n} (${j.used} counted), gain ${pc(j.gain)}, best 6 ${pc(j.gainMax6)}, spread ${j.gainSd.toFixed(3)}` : "No per-jump stats"],
@@ -359,7 +361,7 @@ export const casesView: View = async (root, params) => {
             ),
           )
         : null,
-      run ? h("div", { class: "case-map" }, mapLine(run.map, { track: run.track }), h("span", { class: "faint" }, styleWord(run.style)), run.session ? h("span", { class: "faint", title: attemptText(run.session) ?? "" }, `attempt ${run.session.attempt}`) : null, h("span", { class: "faint", title: when(run.created_at) }, ago(run.created_at)), h("span", null, run.status === "verified" ? (run.tier === "blatant" ? badge("verified, shadowed by the rule", "warn") : badge("verified", "")) : badge(run.status, "bad")), run.review ? badge(run.reviewed_by === AUTO_REVIEWER ? `closed: ${reviewWord(run)}` : `${run.review}${run.note ? `: ${run.note}` : ""}`, "") : null) : null,
+      run ? h("div", { class: "case-map" }, mapLine(run.map, { track: run.track }), h("span", { class: "faint" }, styleWord(run.style)), run.session ? h("span", { class: "faint", title: attemptText(run.session) ?? "" }, `attempt ${run.session.attempt}`) : null, h("span", { class: "faint", title: when(run.created_at) }, ago(run.created_at)), clientTag(run.client), h("span", null, run.status === "verified" ? (run.tier === "blatant" ? badge("verified, shadowed by the rule", "warn") : badge("verified", "")) : badge(run.status, "bad")), run.review ? badge(run.reviewed_by === AUTO_REVIEWER ? `closed: ${reviewWord(run)}` : `${run.review}${run.note ? `: ${run.note}` : ""}`, "") : null) : null,
       h("section", { class: "case-sec" }, h("h3", null, "Evidence"), evidenceBlock([run?.evidence ?? [], p.signals])),
       runSlot,
       ctxSlot,

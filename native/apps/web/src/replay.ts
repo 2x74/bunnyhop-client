@@ -60,7 +60,8 @@
 //                verification. Decoders that predate it stop after the checkpoints, so it needs no version bump;
 //                a malformed trailer is dropped, never an error.
 //   loadout      optional trailer after the cosmetics (absent = unknown, shown as the default carrot): u32 "BHLO",
-//                str8 packed cosmetic loadout (loadout.ts packLoadout: knife, finish, gloves, crown, the owner's hat;
+//                str8 packed cosmetic loadout (loadout.ts packLoadout: knife, finish, gloves, crown, the owner's hat,
+//                the bunny build and, from v0.0.29, the colourway as an 8th field that older readers never look at;
 //                v0.0.5 trailers also carried a pattern seed / wear, now ignored),
 //                so a replay or ghost shows the knife the run was played with. Same rules as the cosmetics trailer:
 //                no version bump (older decoders stop before it, including the cosmetics reader, which rewinds on
@@ -243,7 +244,7 @@ export interface Replay {
   checkpoints: Checkpoint[];
   /** Cosmetic events (carrot swings), tick order. Optional trailer; never simulated or verified. */
   cosmetic?: CosmeticEvent[];
-  /** The cosmetic loadout the run was played with (knife, finish, gloves). Optional trailer; never verified. */
+  /** The cosmetic loadout the run was played with (knife, finish, gloves, hat, build, colourway). Optional trailer; never verified. */
   loadout?: CosmeticLoadout;
   /** Inspect events (INSPECT_* kinds), tick order. Optional trailer; never simulated or verified. */
   inspect?: CosmeticEvent[];

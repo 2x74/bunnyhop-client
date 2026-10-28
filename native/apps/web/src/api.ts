@@ -1,6 +1,7 @@
 import { appHref } from "./platform/navigation";
 import type { AvatarSpec } from "./avatar/spec";
 import type { PlayerGlow } from "./player/glow-config";
+import { cleanLoadout, type CosmeticLoadout } from "./loadout";
 // Client contract for the bunnyhop.lol backend (apps/api). UI code depends only on these signatures.
 // When VITE_API_URL is unset (or the API is unreachable) callers should degrade gracefully:
 // leaderboards show "offline", submissions stay local.
@@ -179,6 +180,31 @@ export interface LeaderboardEntry {
   sync: number;
   /** Physics version the run was played with (core.ts PHYSICS_*; absent from APIs before physics versions = 1). */
   physics?: number;
+}
+
+/**
+ * A board row's stats card (GET /runs/:id/stats, apps/api src/run-stats.ts; ui/run-stats.ts). Optional parts are absent
+ * when the run didn't record them (older runs, other clients).
+ */
+export interface RunStats {
+  id: string;
+  style: string;
+  track: number;
+  /** When the run was submitted, ISO. */
+  date: string;
+  ticks: number | null;
+  jumps: number | null;
+  strafes: number | null;
+  sync: number | null;
+  perf: number | null;
+  /** Replay views (since views began, one per network a day). */
+  views: number;
+  client?: { kind: "native" | "desktop" | "browser"; label: string };
+  version?: string;
+  fps?: number;
+  mouse?: { sensitivity?: number; dpi?: number; pollHz?: number; raw?: boolean };
+  turn?: { yawSpeed: number; angleSpeedKey: number };
+  play?: { attempt?: number; seconds?: number; session?: number; sessionSeconds?: number };
 }
 
 export interface Leaderboard {
@@ -1310,12 +1336,18 @@ export const api = {
   },
   /** Gzip .bhr bytes of a verified run, for ghosts and watch mode. */
   /** A run's player as the server knows them (a replay's own player name is whatever its client wrote). */
-  async runPlayer(id: string): Promise<{ id: string; name: string; playerGlow: PlayerGlow | null }> {
-    const p = (await json<{ player: { id: string; name: string; playerGlow?: PlayerGlow | null } }>(`/runs/${encodeURIComponent(id)}`)).player;
-    return { id: p.id, name: p.name, playerGlow: p.playerGlow ?? null };
+  /** The run's player; `look`: also their bunny as it is now (colourway + loadout, for replays that don't record it). */
+  async runPlayer(id: string, look = false): Promise<{ id: string; name: string; playerGlow: PlayerGlow | null; look: { outfit: string; loadout: CosmeticLoadout } | null }> {
+    const p = (await json<{ player: { id: string; name: string; playerGlow?: PlayerGlow | null; look?: { outfit?: unknown; loadout?: unknown } } }>(`/runs/${encodeURIComponent(id)}${look ? "?look=1" : ""}`)).player;
+    const l = p.look && typeof p.look.outfit === "string" ? { outfit: p.look.outfit, loadout: cleanLoadout(p.look.loadout) } : null;
+    return { id: p.id, name: p.name, playerGlow: p.playerGlow ?? null, look: l?.loadout ? { outfit: l.outfit, loadout: l.loadout } : null };
   },
   async playerPoints(id: string, scope = "all"): Promise<{ scope: string; records: PointsRecord[] }> {
     return json(`/players/${encodeURIComponent(id)}/points?scope=${encodeURIComponent(scope)}`);
+  },
+  /** A board row's stats card (cached at the edge; 404 for runs that aren't on a public board). */
+  async runStats(runId: string, signal?: AbortSignal): Promise<RunStats> {
+    return json(`/runs/${encodeURIComponent(runId)}/stats`, { signal });
   },
   async replayViews(runId: string): Promise<number> {
     return (await json<{views:number}>(`/runs/${encodeURIComponent(runId)}/views`)).views;

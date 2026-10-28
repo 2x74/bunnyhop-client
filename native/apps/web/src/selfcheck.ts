@@ -4,7 +4,8 @@
 // re-simulated in a worker (selfcheck-worker.ts) with the verifier the server runs, and once both are done a small
 // diagnostics object is attached to the submitted run (api.runDiagnostics, apps/api src/diagnostics.ts): the self-check
 // outcome, browser, sim / web build, fps over the run, the input stats summary, tab switches during the run and the
-// device fingerprint's components (device.ts; the hash itself goes with every write). The
+// device fingerprint's components (device.ts; the hash itself goes with every write), and the player's side of the run
+// for its stats card (RunPlay: attempts and time on the map, frame cap, turn speed). The
 // server stays authoritative; a client-side mismatch is only flagged ("client desync" in the admin Runs view), which
 // separates "this browser disagrees with its own recording" from "the server disagrees with the client".
 
@@ -12,9 +13,12 @@ import { api } from "./api";
 import { physicsContent } from "./core";
 import type { Input } from "./input";
 import { summary as inputSummary } from "./input-debug";
+import { RunPollRate } from "./mouse-filter";
 import { ownBuild } from "./update";
 import { VERSION } from "./version";
 import { fingerprint } from "./device";
+import { nativeClient } from "./client-bridge";
+import { runClientInfo } from "./client-identity";
 
 export interface SelfCheckResult {
   selfCheck: "ok" | "mismatch" | "error";
@@ -103,6 +107,9 @@ export class RunWatch {
   private hiddenMs = 0;
   private hiddenAt: number | null = null;
   private blurs = 0;
+  /** The run's polling rate (mouse-filter.ts), from the input's stats while the run is on. */
+  private readonly poll = new RunPollRate();
+  private pollSource: ((now: number, windowMs: number) => number) | null = null;
 
   constructor() {
     addEventListener("visibilitychange", () => {
@@ -118,8 +125,10 @@ export class RunWatch {
     addEventListener("blur", () => this.running && this.blurs++);
   }
 
-  start(): void {
+  start(pollHz?: (now: number, windowMs: number) => number): void {
     this.running = true;
+    this.poll.reset();
+    this.pollSource = pollHz ?? null;
     this.startAt = performance.now();
     this.dateAt = Date.now();
     this.rafFirst = null;
@@ -131,13 +140,14 @@ export class RunWatch {
   frame(raf?: number): void {
     if (!this.running) return;
     this.frames++;
+    if (this.pollSource) this.poll.sample(performance.now(), this.pollSource);
     if (raf !== undefined) {
       this.rafFirst ??= raf;
       this.rafLast = raf;
     }
   }
 
-  stop(): { fps: number; visibility: { hidden: number; hiddenMs: number; blurs: number }; clock?: { raf: number; perf: number; secs: number } } {
+  stop(): { fps: number; visibility: { hidden: number; hiddenMs: number; blurs: number }; clock?: { raf: number; perf: number; secs: number }; pollHz?: number } {
     const now = performance.now();
     this.running = false;
     const hiddenMs = this.hiddenMs + (this.hiddenAt !== null ? now - this.hiddenAt : 0);
@@ -145,20 +155,37 @@ export class RunWatch {
     const wall = Date.now() - this.dateAt;
     const r2 = (x: number) => Math.round(x * 100) / 100;
     const clock = wall > 0 && this.rafFirst !== null ? { raf: r2((this.rafLast - this.rafFirst) / wall), perf: r2((now - this.startAt) / wall), secs: Math.round(wall / 100) / 10 } : undefined;
-    return { fps: secs > 0 ? Math.round((this.frames / secs) * 10) / 10 : 0, visibility: { hidden: this.hidden, hiddenMs: Math.round(hiddenMs), blurs: this.blurs }, ...(clock ? { clock } : {}) };
+    const pollHz = this.poll.hz();
+    return { fps: secs > 0 ? Math.round((this.frames / secs) * 10) / 10 : 0, visibility: { hidden: this.hidden, hiddenMs: Math.round(hiddenMs), blurs: this.blurs }, ...(clock ? { clock } : {}), ...(pollHz ? { pollHz } : {}) };
   }
+}
+
+/**
+ * The player's side of a run, for its stats card on the boards (apps/api src/diagnostics.ts `play`, src/run-stats.ts):
+ * the run's attempt on the map on this device and the time played there (map-time.ts), its attempt on the board this
+ * session (attempts.ts), the frame cap, the turn speed and the mouse's polling rate over the run (RunWatch).
+ */
+export interface RunPlay {
+  attempt?: number;
+  seconds?: number;
+  session?: number;
+  sessionSeconds?: number;
+  frameCap?: { limit: number; vsync: boolean };
+  turn?: { yawSpeed: number; angleSpeedKey: number };
+  pollHz?: number;
 }
 
 /**
  * After a submitted run: waits for the self-check and the upload (its run id; "" = not stored: offline, refused at
  * upload), then attaches the diagnostics. Fire and forget.
  */
-export async function reportRun(o: { check: Promise<SelfCheckResult>; upload: Promise<string>; watched: ReturnType<RunWatch["stop"]>; input: Input; wasm: string }): Promise<void> {
+export async function reportRun(o: { check: Promise<SelfCheckResult>; upload: Promise<string>; watched: ReturnType<RunWatch["stop"]>; input: Input; wasm: string; play?: RunPlay }): Promise<void> {
   const [check, id, fp] = await Promise.all([o.check, o.upload, fingerprint().catch(() => null)]);
   if (!id) return;
   await api.runDiagnostics(id, {
     ...check,
     ua: navigator.userAgent,
+    client: runClientInfo(nativeClient(), typeof navigator === "undefined" ? "" : navigator.userAgent),
     wasm: o.wasm,
     web: ownBuild() ?? "dev",
     version: VERSION,
@@ -167,5 +194,6 @@ export async function reportRun(o: { check: Promise<SelfCheckResult>; upload: Pr
     visibility: o.watched.visibility,
     ...(o.watched.clock ? { clock: o.watched.clock } : {}),
     ...(fp ? { fp: fp.components } : {}),
+    ...(o.play ? { play: o.play } : {}),
   });
 }

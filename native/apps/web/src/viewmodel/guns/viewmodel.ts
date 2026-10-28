@@ -104,6 +104,11 @@ export class GunViewmodel {
     return this.poser.def;
   }
 
+  /** The colourway on the hands (yours unless constructed with a `loadout`; the replay viewer sets the runner's). */
+  setOutfit(id: string | null | undefined): void {
+    this.applyColours(id);
+  }
+
   private applyColours(id: string | null | undefined): void {
     const c = colourway(id);
     const pal = paletteOf(c);
