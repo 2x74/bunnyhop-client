@@ -10,6 +10,46 @@ fn invalidate_recording(m: &mut Map, reason: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Continue a successfully sought replay as practice. Mirrors replayStartProblem:
+/// current settings/rules, selected style (bonuses use Normal), same loaded map.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_practice_from_replay(
+    ctx: *mut BhContext,
+    selected_style: *const c_char,
+) -> c_int {
+    unsafe {
+        call(ctx, |c| {
+            let selected = string(selected_style)?;
+            styles::settings(selected)?;
+            let m = c.map()?;
+            let playback = m.playback.as_ref().ok_or("load and seek a replay first")?;
+            if playback.error.is_some() {
+                return Err("desynced replay is watch-only".into());
+            }
+            let info: serde_json::Value = serde_json::from_slice(playback.data.info.as_bytes())
+                .map_err(|e| e.to_string())?;
+            let expected_style = if info["track"].as_u64().unwrap_or(0) > 0 {
+                "autohop"
+            } else {
+                selected
+            };
+            let expected_settings = styles::settings(expected_style)?;
+            if info["map"].as_str() != Some(m.map_name.as_str())
+                || playback.data.style != expected_style
+                || playback.data.options.rules != 2
+                || recording::settings_json(playback.data.settings)
+                    != recording::settings_json(expected_settings)
+            {
+                return Err("replay map/style/settings/rules cannot continue as current practice".into());
+            }
+            invalidate_recording(m, "practice_from_replay")?;
+            m.playback = None;
+            m.invalidate_jump_observation();
+            Ok(())
+        })
+    }
+}
+
 pub struct Checkpoint {
     game: game::GameState,
     settings: BhSettings,

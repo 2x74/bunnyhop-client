@@ -62,6 +62,10 @@ int main(int argc, char** argv) {
         std::unique_ptr<BhContext, decltype(&bh_destroy)> ctx(bh_create(), bh_destroy);
         if (!ctx) throw std::runtime_error("could not create native core");
         if (bh_abi_version() != 1) throw std::runtime_error("unsupported native ABI");
+        if (!bh_v29_check_abi(BH_V29_ABI_VERSION, sizeof(BhRecordOptionsV29),
+                              sizeof(BhTimingSegmentV2))) {
+            throw std::runtime_error("Unsupported native v29 ABI layout");
+        }
         check(ctx.get(), bh_load_map(ctx.get(), map.c_str(), content.empty() ? nullptr : content.c_str()));
         std::ifstream file;
         if (!commands.empty()) {

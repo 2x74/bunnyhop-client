@@ -1,9 +1,10 @@
+import { encodeNativeExpected } from "./native-replay-format";
 // Offline native capture/BHR proof against the shared current WASM and timer. Never starts a live game.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { resolve, basename, dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { Core, applyRestartPoint, PHYSICS_VERSION } from "../../../apps/web/src/core";
-import { decodeReplay, encodeReplay, encodeRaw, ReplayRecorder } from "../../../apps/web/src/replay";
+import { decodeReplay, encodeReplay, ReplayRecorder } from "../../../apps/web/src/replay";
 import { makeTimer, beforeStep, afterStep, replayCommand, simulate } from "../../../apps/web/src/sim";
 import { gunzipSync } from "node:zlib";
 import {foldCommand,hashHex,RUN_HASH_SEED} from "../../../apps/web/src/run-hash";
@@ -49,7 +50,7 @@ const replay=rec.build({map:header.map,mapSha256:header.mapSha256,settings:heade
  spawn:header.spawn,style:header.style,timerRules:header.timerRules,zones:header.zones,clientBuild:header.clientBuild,player:header.player,recordedAt:header.recordedAt});
 const bhr=join(output,"native-recording.bhr");writeFileSync(bhr,await encodeReplay(replay));
 const nativeBhr=join(output,"recording.bhr");
-const nativeRaw=gunzipSync(readFileSync(nativeBhr)),jsRaw=encodeRaw(replay);
+const nativeRaw=gunzipSync(readFileSync(nativeBhr)),jsRaw=encodeNativeExpected(replay);
 if(Buffer.compare(nativeRaw,Buffer.from(jsRaw))!==0)throw new Error("native BHR raw layout differs from shared JS encoder");
 const decoded=await decodeReplay(readFileSync(nativeBhr));const checked=simulate(core,decoded,decoded.header.zones);
 if(!checked.checkpointsMatch||checked.timer.status!=="finished"||checked.timer.startTick!==summary.timer.startTick||checked.timer.endTick!==summary.timer.endTick)throw new Error("native BHR failed canonical replay verification");
@@ -58,6 +59,6 @@ if(!verified.valid)throw new Error("native BHR rejected by shared ranked verifie
 const changed=await decodeReplay(readFileSync(nativeBhr));changed.checkpoints[0].position[0]=Math.fround(changed.checkpoints[0].position[0]+1);
 const mutation=verifyReplay(core,changed,changed.header.zones,{mapSha256:hash,ranked:true});
 if(mutation.valid||mutation.checkpointsMatch)throw new Error("shared verifier accepted mutated native checkpoint");
-const report={pass:true,nativeHeartbeats,nativeReplayPlayback:true,nativeReplaySeek:true,ghostStatePreserved:true,offlineVerifierValid:verified.valid,rankedVerifier:true,mutatedCheckpointRejected:!mutation.valid,verifierProblems:verified.problems,physics:PHYSICS_VERSION,wasmSha256:new Bun.CryptoHasher("sha256").update(wasm).digest("hex"),mapSha256:hash,recording,bhr:nativeBhr,nativeRawBytes: nativeRaw.length,nativeRawEqualsSharedEncoder:true,runHash:hashHex(runHash),statesCompared:commands.length,timerRowsCompared:commands.length,
+const report={pass:true,nativeHeartbeats,nativeReplayPlayback:true,nativeReplaySeek:true,ghostStatePreserved:true,offlineVerifierValid:verified.valid,rankedVerifier:true,mutatedCheckpointRejected:!mutation.valid,verifierProblems:verified.problems,physics:PHYSICS_VERSION,wasmSha256:new Bun.CryptoHasher("sha256").update(wasm).digest("hex"),mapSha256:hash,recording,bhr:nativeBhr,nativeRawBytes: nativeRaw.length,nativeRawEqualsSharedEncoderPlusBhts:true,runHash:hashHex(runHash),statesCompared:commands.length,timerRowsCompared:commands.length,
  checkpointsChecked:checked.checkpointsChecked,startTick:checked.timer.startTick,endTick:checked.timer.endTick,time:checked.timer.time(),serverVerified:false,submissionEnabled:false};
 writeFileSync(join(output,"proof.json"),JSON.stringify(report,null,2)+"\n");console.log(JSON.stringify(report,null,2));

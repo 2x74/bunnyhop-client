@@ -447,8 +447,31 @@ impl Decoded {
         let cosmetic = r.cosmetics(0x58434842);
         let packed_loadout = r.loadout();
         let inspect = r.cosmetics(0x49434842);
+        let mut turn_speed = None;
+        if r.bytes.get(r.at..r.at + 4) == Some(&crate::v29::TURN_SPEED_MAGIC.to_le_bytes()) {
+            r.u32()?;
+            let options = BhRecordOptionsV29 {
+                yaw_speed: r.f32()?,
+                angle_speed_key: r.f32()?,
+                ..BhRecordOptionsV29::default()
+            }
+            .checked()?;
+            turn_speed = Some(json!({
+                "yawSpeed": options.yaw_speed,
+                "angleSpeedKey": options.angle_speed_key
+            }));
+        }
         let spawn_json=spawn.as_ref().map(|s|json!({"position":s.position,"yaw":s.yaw,"targetname":s.targetname,"classname":s.classname}));
         let info=CString::new(json!({"version":version,"map":map,"mapSha256":map_sha,"settings":recording::settings_json(settings),"prespeedCap":if cap>0.0{Some(cap)}else{None},"startTick":start,"endTick":end,"totalTicks":n,"track":track,"spawn":spawn_json,"style":style,"timerRules":rules,"zones":zones.iter().map(|z|z.json()).collect::<Vec<_>>(),"clientBuild":client,"player":player,"recordedAt":recorded,"checkpointInterval":interval,"checkpoints":cp_count,"counted":counted,"packedLoadout":packed_loadout,"cosmeticEvents":cosmetic.len(),"inspectEvents":inspect.len()}).to_string()).map_err(|e|e.to_string())?;
+        let mut metadata: serde_json::Value =
+            serde_json::from_slice(info.as_bytes()).map_err(|e| e.to_string())?;
+        if let Some(rates) = turn_speed {
+            metadata["turnSpeed"] = rates;
+        }
+        if flags & crate::v29::FLAG_TIMED_INPUT != 0 {
+            metadata["timedInput"] = true.into();
+        }
+        let info = CString::new(metadata.to_string()).map_err(|e| e.to_string())?;
         let options = BhRunOptions {
             prespeed_cap: cap.max(0.0),
             cap_enabled: u32::from(cap > 0.0),

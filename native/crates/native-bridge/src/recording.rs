@@ -21,6 +21,7 @@ pub struct Checkpoint {
     pub velocity: [f32; 3],
 }
 pub struct ReplayData {
+    pub options: crate::BhRecordOptionsV29,
     pub header: Value,
     pub commands: Vec<BhCmd>,
     pub looks: Vec<Option<crate::BhLookSampleV2>>,
@@ -54,7 +55,13 @@ impl ReplayData {
         gzip.finish().map_err(|e| e.to_string())?;
         Ok(())
     }
-    fn encode_raw(&self) -> Result<Vec<u8>, String> {
+    pub(crate) fn encode_raw(&self) -> Result<Vec<u8>, String> {
+        let options = self.options.checked()?;
+        let timed_input_flag = if options.timed_input != 0 {
+            crate::v29::FLAG_TIMED_INPUT
+        } else {
+            0
+        };
         let h = &self.header;
         let settings = &h["settings"];
         let flag = |key: &str| settings[key].as_bool().unwrap_or(false);
@@ -96,7 +103,8 @@ impl ReplayData {
         w.u16(
             u16::from(flag("autohop"))
                 | (u16::from(flag("stamina")) << 1)
-                | (u16::from(version >= 9 && counted.is_some()) << 2),
+                | (u16::from(version >= 9 && counted.is_some()) << 2)
+                | timed_input_flag,
         );
         w.str8(h["map"].as_str().ok_or("missing map")?)?;
         let sha = h["mapSha256"].as_str().ok_or("missing map digest")?;
@@ -276,6 +284,9 @@ impl ReplayData {
                 prev = e.tick;
             }
         }
+        w.u32(crate::v29::TURN_SPEED_MAGIC);
+        w.f32(options.yaw_speed);
+        w.f32(options.angle_speed_key);
         Ok(w.0)
     }
 }
@@ -423,6 +434,7 @@ impl Map {
             writer,
             checkpoint_interval,
             data: ReplayData {
+                options: crate::BhRecordOptionsV29::default(),
                 header: header.clone(),
                 commands: Vec::new(),
                 looks: Vec::new(),

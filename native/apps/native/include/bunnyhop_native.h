@@ -128,6 +128,38 @@ int bh_verify_release_signature(const uint8_t *key, const uint8_t *signature, co
 int bh_sha256_file(const char *path, uint64_t max_bytes, char out_hex[65]);
 
 uint32_t bh_abi_version(void);
+/* Additive v29 ABI: existing ABI v1 structs retain their exact layouts.
+ * Check version AND sizes before using the new calls; unknown layouts fail closed. */
+#define BH_V29_ABI_VERSION 1
+#define BH_TIMING_PATH_VERSION 2
+#define BH_FLAG_TIMED_INPUT (1u << 4)
+#define BH_IN_TURN_FAST (1u << 6)
+typedef struct BhRecordOptionsV29 {
+    uint32_t version, size;
+    float yaw_speed, angle_speed_key; /* f32, inclusive 60..720 / 1..4 */
+    uint32_t timed_input; /* sticky after real timed input contributes, 0 or 1 */
+} BhRecordOptionsV29;
+typedef struct BhTimingSegmentV2 {
+    double t0, t1;
+    float from[3], to[3], mins[3], maxs[3];
+    uint32_t discrete, reserved;
+} BhTimingSegmentV2;
+int bh_v29_check_abi(uint32_t version, size_t record_size, size_t segment_size);
+/* Begin first. Default frozen pair 210/2; set custom rates before the first command.
+ * Later calls may mark timed_input; rates cannot change. New BHRs append BHTS. */
+int bh_record_options_v29(BhContext *ctx, const BhRecordOptionsV29 *options);
+/* After bh_replay_load/seek on the live context: preserve full world/timer/filter
+ * state, leave playback, invalidate ranked recording. Current map/style/settings/
+ * rules required; old or desynced replays are watch-only. Bonuses use autohop.
+ * Host must mark the attempt as practice, resync view/input and disable gauntlets. */
+int bh_practice_from_replay(BhContext *ctx, const char *selected_style);
+/* Observational only: no change to physics, snapshots, timer rules or commands. */
+int bh_timing_observe(BhContext *ctx, uint32_t enabled);
+/* Query with capacity=0, then copy segments. Count/status required; status:
+ * absent=0, supported=1, unsupported=2. Unsupported paths must use chord fallback.
+ * Version must be 2, segment_size sizeof(BhTimingSegmentV2). Short buffers fail. */
+int bh_timing_path_v2(BhContext *ctx, uint32_t path_version, size_t segment_size,
+    BhTimingSegmentV2 *segments, size_t capacity, size_t *count, uint32_t *status);
 BhContext *bh_create(void);
 void bh_destroy(BhContext *ctx);
 /* Error string is context-owned, valid until another mutating call. */

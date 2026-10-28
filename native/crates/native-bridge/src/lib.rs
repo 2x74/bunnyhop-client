@@ -16,6 +16,11 @@ use std::thread::{self, ThreadId};
 mod release_crypto;
 mod assets;
 mod look;
+mod v29;
+pub use v29::{
+    BhRecordOptionsV29, BhTimingSegmentV2, bh_record_options_v29, bh_timing_observe,
+    bh_timing_path_v2, bh_v29_check_abi,
+};
 mod replay;
 pub use replay::{
     BhGhostFrame, BhReplayEvents, bh_ghost_events, bh_ghost_frame, bh_ghost_free, bh_ghost_info,
@@ -33,6 +38,7 @@ pub use assets::{BhAttackReport, BhFloorWeapon, BhWeaponReport};
 pub use assets::{BhMaterialExtra, BhPropGroup, BhSkyInfo};
 pub use look::{BhLookSample, BhLookSampleV2};
 pub use practice::{
+    bh_practice_from_replay,
     BhNoclipState, bh_noclip_move, bh_practice_enter, bh_practice_free, bh_practice_noclip_exit,
     bh_practice_noclip_tick, bh_practice_restore, bh_practice_save, bh_trace_camera,
 };
