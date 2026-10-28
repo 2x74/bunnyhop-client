@@ -87,17 +87,18 @@ test("settings search, HUD positions and strafe trainer options",async()=>{
  expect(await page.getByText("No settings match.").isVisible()).toBe(true);
  await page.getByLabel("Search settings").fill("");
  expect(await page.getByLabel("Field of view",{exact:true}).isVisible()).toBe(true);
- // Turnbinds: yaw speed slider and box show the same number; the modifier has its own speed and bind.
+ // Turn binds: turn speed slider and box show the same number; fast turn has its own multiplier and bind.
  await page.getByLabel("Search settings").fill("yawspeed");
- expect(await page.getByLabel("Yaw speed",{exact:true}).inputValue()).toBe("210");
- await page.getByLabel("Yaw speed",{exact:true}).fill("170");await page.getByLabel("Yaw speed",{exact:true}).blur();
+ expect(await page.getByLabel("Turn speed",{exact:true}).inputValue()).toBe("210");
+ await page.getByLabel("Turn speed",{exact:true}).fill("170");await page.getByLabel("Turn speed",{exact:true}).blur();
  expect(await last()).toEqual({type:"settings",patch:{yawSpeed:170}});
- expect(await page.getByLabel("Yaw speed slider",{exact:true}).inputValue()).toBe("170");
- expect(await page.getByLabel("Modifier yaw speed",{exact:true}).inputValue()).toBe("210");
- await page.getByLabel("Modifier yaw speed",{exact:true}).fill("90");await page.getByLabel("Modifier yaw speed",{exact:true}).blur();
- expect(await last()).toEqual({type:"settings",patch:{yawSpeedAlt:90}});
+ expect(await page.getByLabel("Turn speed slider",{exact:true}).inputValue()).toBe("170");
+ await page.getByLabel("Search settings").fill("anglespeedkey");
+ expect(await page.getByLabel("Fast turn",{exact:true}).inputValue()).toBe("2");
+ await page.getByLabel("Fast turn",{exact:true}).fill("3");await page.getByLabel("Fast turn",{exact:true}).blur();
+ expect(await last()).toEqual({type:"settings",patch:{angleSpeedKey:3}});
  await page.getByLabel("Search settings").fill("");
- expect(await page.getByLabel("Turn modifier (alt yaw speed) binding").first().textContent()).toContain("4");
+ expect(await page.getByLabel("Fast turn (+speed) binding").first().textContent()).toContain("4");
  expect(await page.getByLabel("Turn left (+left) binding").textContent()).not.toBe("Unbound");
  await page.getByRole("button",{name:"HUD",exact:true}).first().click();await page.waitForTimeout(400);
  await page.screenshot({path:resolve(import.meta.dir,"../../../target/native-menu/settings-hud.png")});

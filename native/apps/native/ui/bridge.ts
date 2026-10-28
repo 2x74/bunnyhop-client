@@ -5,8 +5,9 @@ import type { RunServiceStatus } from "./run-service";
 import { isStyleId, type StyleId } from "../../web/src/styles";
 import { LESSON_IDS, type LessonId } from "../../web/src/tutorial/data";
 import { DEFAULT_BINDS as WEB_DEFAULT_BINDS } from "../../web/src/binds";
+import { ANGLE_SPEED_KEY_RANGE, DEFAULT_ANGLE_SPEED_KEY, DEFAULT_YAW_SPEED, YAW_SPEED_RANGE } from "./turn-speed";
 export const LIVE_ORIGIN = "https://bunnyhop.lol";
-export interface VideoExportOptions {width:number;height:number;fps:number;quality:"standard"|"high"|"max";camera:"eye"|"chase"|"flyby"|"auto";hud:boolean;audio?:boolean;music?:string;musicOffset?:number;musicLevel?:number;musicLoop?:boolean;musicDuck?:boolean;from:number;to:number}
+export interface VideoExportOptions {width:number;height:number;fps:number;quality:"standard"|"high"|"max";camera:"eye"|"chase"|"flyby"|"auto";hud:boolean;audio?:boolean;music?:string;musicOffset?:number;musicLevel?:number;musicLoop?:boolean;musicDuck?:boolean;fullRecording?:boolean;from?:number;to?:number}
 export interface VideoExportState {available:boolean;reason:string;state:"idle"|"capturing"|"encoding"|"completed"|"canceled"|"error";frames:number;encodedFrames:number;totalFrames:number;progress:number;path:string;error:string;videoOnly:boolean;musicTracks:{id:string;title:string}[]}
 export type MenuMessage =
   | {type:"mapLoad";action:"cancel"|"retry"}
@@ -37,6 +38,8 @@ export type MenuMessage =
   | { type: "replay"; action: "play"|"ghost"|"export"|"delete"|"screenshot"; ghostSlot?:number; id: string; confirmed?: boolean }
   | { type: "replayData"; action: "play"|"ghost"; ghostSlot?:number; name: string; map: string; replayBase64: string }
   | { type: "replayControl"; action: "pause"|"seek"|"speed"|"stop"|"camera"; camera?:string; paused?: boolean; tick?: number; speed?: number }
+  | { type: "replayControl"; action: "fullRecording"; value: boolean }
+  | { type: "practiceFromReplay"; tick?: number }
   | { type: "ghost"; enabled: boolean }
   | {type:"ghostControl";action:"remove"|"clear"|"toggle";slot?:number;enabled?:boolean}
   | {type:"tutorial";action:"start"|"demo";lesson:LessonId}
@@ -74,8 +77,6 @@ export const NATIVE_BIND_ACTIONS=["forward","back","left","right","jump","duck",
 type NativeBindAction=(typeof NATIVE_BIND_ACTIONS)[number];
 /** The web game's defaults, plus native-only actions and defaults (settings.hpp keeps the same list). */
 const DEFAULT_BINDS:Record<NativeBindAction,readonly string[]>={...WEB_DEFAULT_BINDS,noclip:["Backquote"],showTriggers:["Mouse3"],showClips:["KeyT"],turnLeft:["ArrowLeft"],turnRight:["ArrowRight"],turnFast:["Mouse4"],chat:["KeyY"],commandChat:["KeyU"],scoreboard:["Tab"],spectatorNext:[],spectatorPrevious:[],spectatorMode:["KeyN"]};
-/** cl_yawspeed and the modifier's speed when nothing has been chosen. */
-export const DEFAULT_YAW_SPEED=210,DEFAULT_YAW_SPEED_ALT=210;
 /** "default" is the bunnyhop.lol pack; "custom" is the player's own sound/ and bgm/ folders. */
 export type AudioPack="default"|"custom";
 export type JumpStatsMode="sixth"|"every"|"interval";
@@ -98,7 +99,7 @@ export interface NativeSettings {
   muteSfx:boolean;muteMusic:boolean;muteUi:boolean;muteAmbience:boolean;muteInBackground:boolean;classicSounds:boolean;perfectTick:boolean;announcer:AnnouncerPrefs;
   colorBlind:"off"|"redGreen"|"blueYellow";gainTicks:boolean;speedColors:boolean;perfectIndicator:boolean;speedGraph:boolean;keysOverlay:boolean;keysStyle:"classic"|"minimal"|"keycaps";
   /** Turnbinds: degrees per second (cl_yawspeed), and while Turn modifier is held. */
-  yawSpeed:number;yawSpeedAlt:number;fov:number;vsync:boolean;fpsLimit:number;limitQueuedFrames:boolean;
+  yawSpeed:number;angleSpeedKey:number;fov:number;vsync:boolean;fpsLimit:number;limitQueuedFrames:boolean;
   volume:number;muted:boolean;hud:boolean;crosshair:boolean;viewmodel:boolean;binds:Record<string,string[]>;
   /** The jump HUD (!ssj jump stats). On by default. */
   jumpStats:boolean;jumpStatsColors:boolean;
@@ -129,7 +130,18 @@ export interface NativeReplay {screenshot?:boolean;localSummary?:LocalRunSummary
 export const REPLAY_CAMERAS=["eye","chase","free","flyby","auto"] as const;
 export type ReplayCamera=(typeof REPLAY_CAMERAS)[number];
 export interface NativeGhost {slot:number;id:string;name:string;enabled:boolean;map?:string;style?:StyleId;track?:number}
-export interface PlaybackState {camera?:ReplayCamera;seconds?:number;tickInterval?:number;active:boolean;id:string;tick:number;totalTicks:number;paused:boolean;speed:number;player?:{id?:string;name?:string;runId?:string}}
+/**
+ * `tick` and `totalTicks` are absolute recording ticks. The range fields are the part the viewer shows: by default
+ * from 1 s before the timer starts to 1.5 s after it stops, or the whole recording with `fullRecording`.
+ */
+const PLAYBACK_RANGE_KEYS=["rangeStartTick","rangeEndTick","rangeTick","rangeTotalTicks","elapsedSeconds"] as const;
+export interface PlaybackState {
+  rangeStartTick?:number;rangeEndTick?:number;rangeTick?:number;rangeTotalTicks?:number;elapsedSeconds?:number;
+  fullRecording?:boolean;
+  camera?:ReplayCamera;seconds?:number;tickInterval?:number;
+  active:boolean;id:string;tick:number;totalTicks:number;paused:boolean;speed:number;
+  player?:{id?:string;name?:string;runId?:string};
+}
 /** Practice as the host has it (web practice-mode/: PracticeAttempt, Checkpoints, the !cp menu). */
 export interface PracticeState {
   available:boolean;
@@ -226,7 +238,7 @@ const shortText=(value:unknown,max=200):string|null=>typeof value==="string"?val
 
 export const state: NativeMenuState = { map: null, loading: false, error: null, sensitivity: 2, paused: true,style:"autohop",track:0,
   settings:{playerModel:"bunny",ghostModel:"same",mouseDiagnostics:false,capturePbScreenshots:false,windowMode:"windowed",alwaysOnTop:false,rememberWindowBounds:true,minimizeOnFocusLoss:false,showPlayerGlow:true,firstPersonGlow:true,waterQuality:"simple",showGhost:true,ghostOpacity:.4,ghostNearFade:true,ghostTag:true,othersAudio:true,ghostAudio:true,zonesVisible:true,effectsVisible:true,triggersVisible:false,clipsVisible:false,invertY:false,holdRestart:false,crosshairStyle:"cross",crosshairColor:"#eee8db",crosshairSize:6,crosshairGap:3,crosshairThickness:2,crosshairAlpha:1,crosshairOutline:true,
-    viewmodelFov:54,viewmodelX:.6,viewmodelY:1.5,viewmodelZ:-.9,viewmodelLeftHand:false,viewmodelBob:1,viewmodelSway:1,sfxVolume:1,musicVolume:1,uiVolume:1,ambienceVolume:1,muteSfx:false,muteMusic:false,muteUi:false,muteAmbience:false,muteInBackground:true,classicSounds:false,perfectTick:false,announcer:{...DEFAULT_ANNOUNCER},footsteps:true,weaponSounds:true,wind:true,colorBlind:"off",gainTicks:true,speedColors:true,perfectIndicator:true,speedGraph:false,keysOverlay:true,keysStyle:"classic",sensitivity:2,verticalSensitivity:2,separateVertical:false,yawSpeed:DEFAULT_YAW_SPEED,yawSpeedAlt:DEFAULT_YAW_SPEED_ALT,fov:90,sourceLook:true,vsync:false,fpsLimit:500,limitQueuedFrames:true,volume:.65,muted:false,hud:true,crosshair:true,viewmodel:true,jumpStats:true,jumpStatsColors:true,jumpStatsMode:"sixth",jumpStatsInterval:6,strafeTrainer:false,strafeTrainerSmoothing:1,strafeTrainerHints:true,hudLayout:{},hudScale:100,practiceKeepVelocity:true,sfxPack:"default",musicPack:"default",discordRichPresence:true,discordShowMap:true,discordJoin:true,discordJoinLobbies:false,privacyMode:false,binds:Object.fromEntries(NATIVE_BIND_ACTIONS.map(action=>[action,[...DEFAULT_BINDS[action]]]))},
+    viewmodelFov:54,viewmodelX:.6,viewmodelY:1.5,viewmodelZ:-.9,viewmodelLeftHand:false,viewmodelBob:1,viewmodelSway:1,sfxVolume:1,musicVolume:1,uiVolume:1,ambienceVolume:1,muteSfx:false,muteMusic:false,muteUi:false,muteAmbience:false,muteInBackground:true,classicSounds:false,perfectTick:false,announcer:{...DEFAULT_ANNOUNCER},footsteps:true,weaponSounds:true,wind:true,colorBlind:"off",gainTicks:true,speedColors:true,perfectIndicator:true,speedGraph:false,keysOverlay:true,keysStyle:"classic",sensitivity:2,verticalSensitivity:2,separateVertical:false,yawSpeed:DEFAULT_YAW_SPEED,angleSpeedKey:DEFAULT_ANGLE_SPEED_KEY,fov:90,sourceLook:true,vsync:false,fpsLimit:500,limitQueuedFrames:true,volume:.65,muted:false,hud:true,crosshair:true,viewmodel:true,jumpStats:true,jumpStatsColors:true,jumpStatsMode:"sixth",jumpStatsInterval:6,strafeTrainer:false,strafeTrainerSmoothing:1,strafeTrainerHints:true,hudLayout:{},hudScale:100,practiceKeepVelocity:true,sfxPack:"default",musicPack:"default",discordRichPresence:true,discordShowMap:true,discordJoin:true,discordJoinLobbies:false,privacyMode:false,binds:Object.fromEntries(NATIVE_BIND_ACTIONS.map(action=>[action,[...DEFAULT_BINDS[action]]]))},
   replays:[],ghosts:[],discord:{state:"disabled",message:""},playback:{active:false,id:"",tick:0,totalTicks:0,paused:true,speed:1},ghost:{enabled:false,id:"",name:""},tutorial:{active:false,lesson:"jump",completed:[]},
   practice:{available:false,unavailable:null,mode:false,active:false,thirdPerson:false,tool:null,noclip:false,menuOpen:false,count:0,current:0,keepVelocity:true},gauntlet:{id:null,map:null},player:null,music:null,audio:null,videoExport:{available:false,reason:"Checking FFmpeg availability…",state:"idle",frames:0,encodedFrames:0,totalFrames:0,progress:0,path:"",error:"",videoOnly:true,musicTracks:[]},client:null};
 
@@ -236,7 +248,7 @@ export function settingsPatch(value:unknown):Partial<NativeSettings> {
   if(!value||typeof value!=="object"||Array.isArray(value)) return {};
   const input=value as Record<string,unknown>,out:Record<string,unknown>={};
   if(WINDOW_MODES.includes(input.windowMode as WindowMode))out.windowMode=input.windowMode;
-  for(const [key,min,max] of [["ghostOpacity",0,1],["crosshairSize",0,40],["crosshairGap",0,40],["crosshairThickness",.5,10],["crosshairAlpha",0,1],["viewmodelFov",30,100],["viewmodelX",-10,10],["viewmodelY",-10,10],["viewmodelZ",-10,10],["viewmodelBob",0,2],["viewmodelSway",0,2],["ambienceVolume",0,1],["sfxVolume",0,1],["musicVolume",0,1],["uiVolume",0,1],["sensitivity",.01,100],["verticalSensitivity",.01,100],["fov",60,130],["volume",0,1],["yawSpeed",.01,1000],["yawSpeedAlt",.01,1000]] as const) if(typeof input[key]==="number"&&Number.isFinite(input[key])&&Number(input[key])>=min&&Number(input[key])<=max) out[key]=input[key];
+  for(const [key,min,max] of [["ghostOpacity",0,1],["crosshairSize",0,40],["crosshairGap",0,40],["crosshairThickness",.5,10],["crosshairAlpha",0,1],["viewmodelFov",30,100],["viewmodelX",-10,10],["viewmodelY",-10,10],["viewmodelZ",-10,10],["viewmodelBob",0,2],["viewmodelSway",0,2],["ambienceVolume",0,1],["sfxVolume",0,1],["musicVolume",0,1],["uiVolume",0,1],["sensitivity",.01,100],["verticalSensitivity",.01,100],["fov",60,130],["volume",0,1],["yawSpeed",YAW_SPEED_RANGE.min,YAW_SPEED_RANGE.max],["angleSpeedKey",ANGLE_SPEED_KEY_RANGE.min,ANGLE_SPEED_KEY_RANGE.max]] as const) if(typeof input[key]==="number"&&Number.isFinite(input[key])&&Number(input[key])>=min&&Number(input[key])<=max) out[key]=input[key];
   if(typeof input.fpsLimit==="number"&&Number.isInteger(input.fpsLimit)&&(input.fpsLimit===0||(input.fpsLimit>=30&&input.fpsLimit<=1000))) out.fpsLimit=input.fpsLimit;
   for(const key of ["mouseDiagnostics","capturePbScreenshots","alwaysOnTop","rememberWindowBounds","minimizeOnFocusLoss","showPlayerGlow","firstPersonGlow","gainTicks","speedColors","perfectIndicator","showGhost","ghostNearFade","ghostTag","othersAudio","ghostAudio","zonesVisible","effectsVisible","triggersVisible","clipsVisible","invertY","holdRestart","crosshairOutline","viewmodelLeftHand","muteSfx","muteMusic","muteUi","muteAmbience","muteInBackground","classicSounds","perfectTick","footsteps","weaponSounds","wind","speedGraph","keysOverlay","separateVertical","sourceLook","vsync","limitQueuedFrames","muted","hud","crosshair","viewmodel","jumpStats","jumpStatsColors","strafeTrainer","strafeTrainerHints","discordRichPresence","discordShowMap","discordJoin","discordJoinLobbies","privacyMode"]) if(typeof input[key]==="boolean") out[key]=input[key];
   if(input.waterQuality==="simple"||input.waterQuality==="refracted")out.waterQuality=input.waterQuality;
@@ -289,8 +301,14 @@ export function applyState(value: unknown): boolean {
   if(Array.isArray(next.replays)) state.replays=next.replays.slice(0,5000).filter((item):item is NativeReplay=>!!item&&typeof item==="object"&&typeof item.id==="string"&&item.id.length<=256&&typeof item.name==="string"&&typeof item.map==="string"&&isStyleId(item.style)&&[item.track,item.seconds,item.recordedAt,item.bytes].every(value=>typeof value==="number"&&Number.isFinite(value)&&value>=0));
   if(next.playback&&typeof next.playback==="object") {
     const playback=next.playback as Record<string,unknown>;
-    for(const key of ["active","paused"] as const) if(typeof playback[key]==="boolean") state.playback[key]=playback[key];
-    for(const key of ["tick","totalTicks","speed","seconds","tickInterval"] as const) if(typeof playback[key]==="number"&&Number.isFinite(playback[key])&&Number(playback[key])>=0) state.playback[key]=Number(playback[key]);
+    for(const key of ["active","paused","fullRecording"] as const) {
+      if(typeof playback[key]==="boolean") state.playback[key]=playback[key];
+    }
+    const numbers=["tick","totalTicks","speed","seconds","tickInterval",...PLAYBACK_RANGE_KEYS] as const;
+    for(const key of numbers) {
+      const value=playback[key];
+      if(typeof value==="number"&&Number.isFinite(value)&&value>=0) state.playback[key]=value;
+    }
     if(typeof playback.id==="string") state.playback.id=playback.id;
     if(REPLAY_CAMERAS.includes(playback.camera as ReplayCamera))state.playback.camera=playback.camera as ReplayCamera;
   }
