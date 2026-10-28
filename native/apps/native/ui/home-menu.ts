@@ -204,6 +204,9 @@ function profileItem(a: HomeActions): HTMLElement {
   return item("Profile", null, () => void me().then((u) => (u ? a.profile(u.id) : a.loadout()), () => a.loadout()));
 }
 
+// The website's tagline says "in your browser"; this is the native game.
+const TAGLINE = "Counter-Strike: Source bunnyhop.";
+
 /** The footer's three things people come back for: Support, the Discord and the Inbox, as real buttons. */
 function homeActs(a: HomeActions): HTMLElement {
   const inbox = api.available()
@@ -227,6 +230,10 @@ function homeLinks(a: HomeActions, learnOnMenu: boolean): HTMLElement {
     !learnOnMenu ? link("Tutorial", a.learn, ".home-tutorial") : null,
     api.available() ? link("Feedback", () => openFeedback()) : null,
     link("Replays", a.replays),
+    // The website's pages open in the browser.
+    link("About", () => a.web("/about")),
+    link("Privacy", () => a.web("/privacy")),
+    link("Terms", () => a.web("/terms")),
     link("Credits", a.credits),
     versionLink(),
     link("Quit", a.quit, ".home-quit"),
@@ -288,7 +295,7 @@ export function homeScreen(a: HomeActions): HTMLElement {
     h(
       "div.home-left",
       null,
-      h("header.home-brand", null, h("div.brand-row", null, wordmark("xl"), hopTrail()), h("p.tagline", null, "Counter-Strike: Source bunnyhop in your browser.")),
+      h("header.home-brand", null, h("div.brand-row", null, wordmark("xl"), hopTrail()), h("p.tagline", null, TAGLINE)),
       menu,
       h("footer.home-foot", null, h("div.home-foot-row", null, accountChip({ quiet: true }), homeActs(a)), homeLinks(a, learn)),
     ),
