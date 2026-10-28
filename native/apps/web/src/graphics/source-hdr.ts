@@ -18,6 +18,7 @@
 
 import * as THREE from "three";
 import { FullScreenQuad } from "three/addons/postprocessing/Pass.js";
+import { compileFor } from "./warm-programs";
 
 /** Mean gamma-space luminance the exposure settles on. Calibrated so bhop_shutdown's start (pad *230, yaw 90) sits at
  * exposure 1, as in a CS:S render of that view (huddled, 2026-10-26); SDK 2013's own constant assumes its bucketed
@@ -43,6 +44,13 @@ const SRGB = `
   }`;
 
 /** A full-screen shader pass and its uniforms. */
+/** Stand-ins for compiling a pass's program outside a frame (Pass.compile); the geometry has the quad's attributes. */
+const PASS_GEOMETRY = new THREE.BufferGeometry()
+  .setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0], 3))
+  .setAttribute("uv", new THREE.Float32BufferAttribute([0, 0], 2));
+const PASS_CAMERA = new THREE.OrthographicCamera();
+const PASS_SCENE = new THREE.Scene();
+
 class Pass<U extends Record<string, THREE.IUniform>> {
   readonly material: THREE.ShaderMaterial;
   readonly quad: FullScreenQuad;
@@ -53,6 +61,11 @@ class Pass<U extends Record<string, THREE.IUniform>> {
   render(renderer: THREE.WebGLRenderer): void {
     this.quad.render(renderer);
   }
+  /** Starts compiling its program for where it draws: the screen or (offscreen) a render target. */
+  compile(renderer: THREE.WebGLRenderer, offscreen: boolean): void {
+    compileFor(renderer, (this.mesh ??= new THREE.Mesh(PASS_GEOMETRY, this.material)), PASS_CAMERA, PASS_SCENE, offscreen);
+  }
+  private mesh: THREE.Mesh | null = null;
   dispose(): void {
     this.material.dispose();
     this.quad.dispose();
@@ -121,12 +134,33 @@ export class AutoExposure {
     this.renderer = renderer;
   }
 
+  /** Starts compiling the luminance pass's program (SourceHdr.compilePasses). */
+  compile(): void {
+    this.luminance.compile(this.renderer, true);
+  }
+
   /** A new map, or a cut: start from exposure 1 like a level load does. */
   reset(): void {
     this.value = 1;
     this.goals = [];
     this.sinceMeasure = 0;
   }
+
+  /**
+   * Draws the luminance pass once without reading it back, so its program compiles now (the first, paused frame of a
+   * map) rather than in the first frame of play, when the first measurement is due.
+   */
+  warm(frame: THREE.Texture): void {
+    if (this.warmed) return;
+    this.warmed = true;
+    const r = this.renderer;
+    const previous = r.getRenderTarget();
+    this.luminance.uniforms.tScene.value = frame;
+    r.setRenderTarget(this.target);
+    this.luminance.render(r);
+    r.setRenderTarget(previous);
+  }
+  private warmed = false;
 
   /** Measure `frame` now and then (asynchronously) and move the exposure toward the averaged goal. */
   update(frame: THREE.Texture, dt: number): void {
@@ -179,6 +213,12 @@ export class CssBloom {
 
   constructor(renderer: THREE.WebGLRenderer) {
     this.renderer = renderer;
+  }
+
+  /** Starts compiling the downsample and blur passes' programs (SourceHdr.compilePasses). */
+  compile(): void {
+    this.downsample.compile(this.renderer, true);
+    this.blur.compile(this.renderer, true);
   }
 
   /** Full-size frame dimensions. */
@@ -275,12 +315,27 @@ export class SourceHdr {
     this.cssBloom.setSize(width, height);
   }
 
-  render(scene: THREE.Scene, camera: THREE.Camera, dt: number): void {
+  /** Starts compiling every pass's program, so the first HDR frame doesn't link them (GraphicsPipeline.warmPrograms). */
+  compilePasses(): void {
+    this.exposure.compile();
+    this.cssBloom.compile();
+    this.composite.compile(this.renderer, false);
+  }
+
+  /** Draws `scene` into the scene target only: no composite, no exposure measurement (GraphicsPipeline.warmDraw). */
+  drawScene(scene: THREE.Scene, camera: THREE.Camera): void {
     const r = this.renderer;
     this.ensureTargets();
     const previous = r.getRenderTarget();
     r.setRenderTarget(this.scene);
     r.render(scene, camera);
+    r.setRenderTarget(previous);
+  }
+
+  render(scene: THREE.Scene, camera: THREE.Camera, dt: number): void {
+    const r = this.renderer;
+    this.drawScene(scene, camera);
+    const previous = r.getRenderTarget();
 
     const exposure = this.exposure.value;
     const bloom = this.bloom && this.bloomScale > 0;
@@ -290,6 +345,7 @@ export class SourceHdr {
     r.setRenderTarget(previous);
     this.composite.render(r);
 
+    this.exposure.warm(this.scene!.texture);
     this.exposure.update(this.scene!.texture, dt);
   }
 

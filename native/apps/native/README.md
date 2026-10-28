@@ -27,7 +27,7 @@ See the repository [release process](../../../docs/releases.md).
 
 ## Current compatibility
 
-This branch prepares web v0.0.29 at `9cde9db9`, physics 18 and timer rules 2.
+This branch prepares web v0.0.29 at `042dca41`, physics 18 and timer rules 2.
 It pins a local build of the unpublished verifier. See the
 [v29 integration notes](../../docs/v0.0.29-native-integration.md) for the remaining integration work.
 

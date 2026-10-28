@@ -136,8 +136,11 @@ const TOPICS: readonly Topic[] = [
     ],
   },
   {
-    names: ["start", "startpoint", "setstart", "spawn", "setspawn", "clearstart"],
-    lines: (c) => [`${k(c, "!setstart", "setStart")}: stand still in the start zone and restarts put you on that spot, facing the same way. !clearstart goes back to the usual spot. Runs from it count.`],
+    names: ["start", "startpoint", "setstart", "spawn", "setspawn", "clearstart", "clearspawn"],
+    lines: (c) => [
+      `${k(c, "!setstart", "setStart")}: stand still in the start zone and restarts put you on that spot, facing the same way. Runs from it count. !clearstart goes back to the usual spot.`,
+      "Stand still anywhere else in solo play and it saves a practice spawn: restarts from it are practice, and the timer still starts from the start zone.",
+    ],
   },
   {
     names: ["guns", "gun", "weapons", "weapon", "usp", "glock", "knife"],

@@ -7,6 +7,21 @@ export interface WaterCaptureQuality {
 }
 interface Surface { material: THREE.ShaderMaterial; height: number | null; bounds: THREE.Box3 }
 
+const isWaterSurface = (m: THREE.Material): m is THREE.ShaderMaterial => m instanceof THREE.ShaderMaterial && !!m.userData.waterSurface;
+/** Whether `root` has a surface WaterCapture would capture for (cached per root). */
+const waterIn = new WeakMap<THREE.Object3D, boolean>();
+export function hasWaterSurfaces(root: THREE.Object3D): boolean {
+  let found = waterIn.get(root);
+  if (found === undefined) {
+    found = false;
+    root.traverse((o) => {
+      if (!found && o instanceof THREE.Mesh) found = (Array.isArray(o.material) ? o.material : [o.material]).some(isWaterSurface);
+    });
+    waterIn.set(root, found);
+  }
+  return found;
+}
+
 /** Bounded, non-recursive captures. Shared coplanar surfaces use one reflection pass. */
 export class WaterCapture {
   private surfaces: Surface[] = [];
@@ -30,7 +45,7 @@ export class WaterCapture {
       const normalMatrix = new THREE.Matrix3().getNormalMatrix(object.matrixWorld);
       for (const group of groups) {
         const material = materials[group.materialIndex ?? 0];
-        if (!(material instanceof THREE.ShaderMaterial) || !material.userData.waterSurface) continue;
+        if (!material || !isWaterSurface(material)) continue;
         for (let i = group.start; i < group.start + group.count; i++) {
           const index = geometry.index?.getX(i) ?? i;
           point.fromBufferAttribute(positions, index).applyMatrix4(object.matrixWorld);

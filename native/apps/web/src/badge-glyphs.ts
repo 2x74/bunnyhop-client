@@ -1,4 +1,5 @@
 import { GIFTER_SVG } from "./creators";
+import { MAX_TIER, TIERS, tierLabel } from "./tiers";
 const P = (d: string) => `<path d="${d}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
 export const textGlyph = (s: string, size = 9) => `<text x="12" y="15.5" text-anchor="middle" font-size="${size}" font-weight="800" fill="currentColor" font-family="ui-sans-serif, system-ui, sans-serif">${s}</text>`;
 
@@ -30,6 +31,8 @@ export const GLYPHS: Record<string, string> = {
   heart: P("M12 20.5s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.6a4.3 4.3 0 0 1 7.5 2.7c0 5.6-7.5 10.2-7.5 10.2z"),
   crystal: P("M12 2.5 17 7.6 16.3 17.6 12 21.5 7.7 17.6 7 7.6zM7 7.6l3.4 1.3h3.2L17 7.6M10.4 8.9l.2 9.6L12 21.5M13.6 8.9l-.2 9.6L12 21.5M12 2.5l-1.6 6.4M12 2.5l1.6 6.4"),
   sprout: P("M12 21v-9M12 12c0-3.6-2.6-6-6.5-6 0 3.6 2.6 6 6.5 6zM12 10c0-3.4 2.4-5.6 6.2-5.6 0 3.4-2.4 5.6-6.2 5.6z"),
+  // Beat the Mapper (progression.ts BEAT_MAPPER): a block, like the Mapper badge,.
+  mapper: P("M12 3.5 19 7.5v9l-7 4-7-4v-9zM5 7.5l7 4 7-4M12 11.5v9"),
   // Batch 1 (progression.ts): !race (two arrows passing), Halloween (a pumpkin).
   race: P("M4 7h13M13 3l4 4-4 4M20 17H7M11 13l-4 4 4 4"),
   pumpkin: P("M12 7c-5 0-8 3-8 7s3 7 8 7 8-3 8-7-3-7-8-7zM12 7c-2.2 2.5-2.2 11.5 0 14M12 7c2.2 2.5 2.2 11.5 0 14M12 7V4c1.2 0 2.2.5 2.8 1.3"),
@@ -47,5 +50,5 @@ export const GLYPHS: Record<string, string> = {
   g20: textGlyph("20", 10),
   g_hourglass: P("M7 3.5h10M7 20.5h10M8 3.5c0 5 8 5.5 8 8.5s-8 3.5-8 8.5M16 3.5c0 5-8 5.5-8 8.5s8 3.5 8 8.5"),
 };
-for (let t = 1; t <= 6; t++) GLYPHS[`t${t}`] = textGlyph(`T${t}`, 10);
+for (const t of TIERS) GLYPHS[`t${t}`] = textGlyph(tierLabel(t), t === MAX_TIER ? 8 : 10);
 

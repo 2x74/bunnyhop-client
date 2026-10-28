@@ -5,6 +5,7 @@
 import "./stat-boards.css";
 import { api, type StatBoardEntry, type StatBoardId, type StatBoardPage } from "../api";
 import { h } from "./dom";
+import { clampTier, tierLabel } from "../tiers";
 import { pagedBoard, playerCell, type BoardPage } from "./board-pager";
 import { openBoardDialog } from "./leaderboard";
 import { navigate } from "./nav";
@@ -18,8 +19,8 @@ const BOARDS: { id: StatBoardId; tab: string; column: string; value: (e: StatBoa
     tab: "Hardest clears",
     column: "Hardest",
     // The tier in its colour, then how many maps of it.
-    value: (e) => h("span.sb-hard", null, h("b", { style: `color:var(--tier-${e.tier ?? "x"})` }, `T${e.tier}`), ` × ${n(e.value)}`),
-    unit: (e) => `${n(e.value)} T${e.tier} ${e.value === 1 ? "map" : "maps"}`,
+    value: (e) => h("span.sb-hard", null, h("b", { style: `color:var(--tier-${clampTier(e.tier) ?? "x"})` }, tierLabel(e.tier)), ` × ${n(e.value)}`),
+    unit: (e) => `${n(e.value)} ${tierLabel(e.tier)} ${e.value === 1 ? "map" : "maps"}`,
   },
   { id: "maps", tab: "Maps cleared", column: "Maps", value: (e) => n(e.value), unit: count("map") },
   { id: "finishes", tab: "Finishes", column: "Finishes", value: (e) => n(e.value), unit: count("finish", "finishes") },

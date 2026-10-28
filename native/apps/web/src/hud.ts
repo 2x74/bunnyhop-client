@@ -589,7 +589,7 @@ export class Hud {
 
   // --- tiers: "bhop_badges · T5 · Normal · 100 tick" (map line)
   private info: { map: string; style: string; tickrate: number } | null = null;
-  /** Map tier (clamped 1..6, null = unrated "T?"); undefined until known. */
+  /** Map tier (clamped 1..7, 7 = T7+; null = unrated "T?"); undefined until known. */
   private tier: number | null | undefined = undefined;
 
   setTier(tier: number | null): void {

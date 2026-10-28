@@ -15,11 +15,14 @@ import { whisper } from "../notify";
 import { freeState, hasStateSnapshots, restoreState, snapshotBytes, snapshotState, type Core, type PlayerState } from "../core";
 import { IN_DUCK, IN_JUMP, type Input, type UserCmd } from "../input";
 import type { RunSession } from "../session";
-import { setVelocity } from "../sim";
+import { setVelocity, SimRun } from "../sim";
+import type { Replay } from "../replay";
+import { formatTime } from "../timer";
 import type { MenuSpec } from "../net/hud";
-import type { StyleId } from "../styles";
+import { styleForTrack, type StyleId } from "../styles";
 import { keyLabel, prefs, type Action } from "../ui/settings";
 import { Checkpoints, MAX_CHECKPOINTS, saveTimer, type Checkpoint, type TimerSnapshot } from "./checkpoints";
+import { replayStartProblem } from "./replay-start";
 import { hasNoclip, noclipExit, noclipMove, noclipTick, type NoclipState } from "./noclip";
 import { isPracticeTool, PRACTICE_KEY_HINT, practiceCommandPlan, practiceKeyGate, practiceUnavailable, type PracticeChatCommand, type PracticeContext, type PracticeTool } from "./rules";
 
@@ -33,6 +36,7 @@ interface CheckpointData {
 }
 
 export interface PracticeHost extends PracticeContext {
+  map: string;
   core: Core;
   session: RunSession;
   input: Input;
@@ -55,6 +59,11 @@ export interface PracticeMenuView {
 }
 
 const HINT_EVERY_MS = 8000;
+
+const restartHow = () => {
+  const c = prefs.get().binds.restart[0];
+  return `${c ? `Press ${keyLabel(c)}` : "Type !r"} to start over.`;
+};
 
 export class Practice {
   private noclip: NoclipState | null = null;
@@ -131,7 +140,8 @@ export class Practice {
     this.endNoclip();
     this.h.session.setPracticeMode(false);
     this.h.restart();
-    this.toast("Practice mode off. You're back at the start.", 3000);
+    // (A practice spawn, start-point.ts, keeps restarts practice until it's cleared.)
+    this.toast(this.h.session.practicing ? "Practice mode off. Your spawn keeps restarts practice. !clearstart removes it." : "Practice mode off. You're back at the start.", 3000);
     void this.h.session.refreshMenu();
   }
 
@@ -297,6 +307,38 @@ export class Practice {
     s.practiceRestored(cp.data.style, cp.data.timer);
     this.h.resync({ yaw: cp.data.yaw, pitch: cp.data.pitch });
     return true;
+  }
+
+  /**
+   * The replay viewer's "Practice from here": the replay is played into the live core up to `tick`, and the game
+   * carries on from there as a practice attempt (a checkpoint teleport to a state that comes from a replay: your own
+   * PB, the world record, anyone's run). Speed is kept. The viewer is open, so the live game isn't running. Returns why
+   * it can't, or null when you're there (replay-start.ts replayStartProblem).
+   */
+  fromReplay(replay: Replay, tick: number): string | null {
+    if (this.unavailable) return this.unavailable;
+    const s = this.h.session;
+    const zones = s.zones?.zones;
+    if (!zones) return "This map's zones aren't loaded yet.";
+    const why = replayStartProblem(replay.header, { map: this.h.map, selectedStyle: s.selectedStyle });
+    if (why) return why;
+    s.practiceUse("teleport"); // (before the core is touched; a failed playback restarts below)
+    const run = new SimRun(this.h.core, replay, zones, { untilTick: Math.max(0, Math.min(replay.header.totalTicks, tick)) });
+    run.step();
+    if (run.desynced) {
+      this.h.restart(); // (the core was left mid-replay)
+      return "This replay doesn't play back exactly in this version, so it can only be watched.";
+    }
+    const state = this.h.core.state();
+    const timer = run.result().timer;
+    const style = styleForTrack(s.selectedStyle, timer.track);
+    this.endNoclip();
+    s.practiceRestored(style, saveTimer(timer));
+    const n = run.ticksDone;
+    this.h.resync(n > 0 ? { yaw: replay.yaw[n - 1], pitch: replay.pitch[n - 1] } : { yaw: state.teleportAngles[1], pitch: state.teleportAngles[0] });
+    this.toast(`Practising from ${s.timer.status === "running" ? formatTime(s.timer.time()) : "the start"} of that run. ${restartHow()}`, 5000);
+    this.refreshMenu();
+    return null;
   }
 
   private noCheckpoint(): void {

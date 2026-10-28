@@ -497,7 +497,7 @@ export class Attract {
               });
               this.scene.add(ghost.root);
               director = new GhostDirector(sim.frames, sim.startTick, sim.endTick, ghost, fade);
-              const time = (sim.endTick - sim.startTick) * Math.fround(replay.header.settings.tickInterval);
+              const time = sim.timer.status === "finished" ? sim.timer.timeMs() / 1000 : (sim.endTick - sim.startTick) * Math.fround(replay.header.settings.tickInterval);
               setInfo({ map: entry.name, author: entry.author ?? null, kind: "ghost", caption: `Your PB · ${formatTime(time)}` });
             }
           }

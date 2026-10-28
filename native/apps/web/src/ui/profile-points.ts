@@ -1,7 +1,7 @@
 // Profile Overview → "Top points": the records giving the player the most points on the overall board or one style's
 // (GET /players/:id/points, read when the section is drawn and per scope switch; the profile starts the overall one with
 // its own read, ui/profile.ts). Points is what the record scores on
-// that board; Counted is what it adds to the total after the 0.975-per-place weighting (ranking.ts weightedTotal).
+// that board; Counted is what it adds to the total after the per-place weighting (ranking.ts weightedTotal).
 // Rows reuse the run-row look (ui/profile.css .pf-run): tier edge, map, place, numbers.
 
 import { api, type PointsRecord, type Profile } from "../api";

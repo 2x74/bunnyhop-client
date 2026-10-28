@@ -9,8 +9,9 @@ import * as THREE from "three";
 import { presetConfig, type GraphicsOptions } from "./presets";
 import { resolveVisualProfile } from "./profiles";
 import { publishHybridStatus } from "./hybrid-status";
-import { SourceHdr } from "./source-hdr";
-import { WaterCapture, type WaterCaptureQuality } from "../water-capture";
+import { hdrWorld, SourceHdr } from "./source-hdr";
+import { hasWaterSurfaces, WaterCapture, type WaterCaptureQuality } from "../water-capture";
+import { gpuIdle, setDrawTargets, type DrawTargets } from "./warm-programs";
 import type { ComposerPipeline } from "./composer-pipeline";
 
 /** CS:S's expensive water (reflect world): one reflection plane, captures at half resolution. Off: the plain water shader. */
@@ -40,6 +41,18 @@ export class GraphicsPipeline {
 
   constructor(readonly renderer: THREE.WebGLRenderer) {
     this.supported = renderer.extensions.has("EXT_color_buffer_float");
+    setDrawTargets((scene) => this.drawTargets(scene));
+  }
+
+  /** Where `scene` gets drawn with the current options, so its programs can be compiled ahead (warm-programs.ts). */
+  drawTargets(scene: THREE.Scene): DrawTargets {
+    // The composer draws into its own targets (and the Source look while it loads).
+    if (this.wantsComposer()) return { screen: true, offscreen: true };
+    const world = scene.children.find((o) => o.userData.lightmapHdr !== undefined);
+    if (!world || presetConfig(this.options).preset !== "source") return { screen: true, offscreen: false };
+    const hdr = this.supported && this.renderer.capabilities.isWebGL2 && hdrWorld(scene);
+    const water = this.options.waterReflections !== false && hasWaterSurfaces(world);
+    return { screen: !hdr, offscreen: hdr || water };
   }
 
   /** Whether these options draw through the composer (and so need it loaded). */
@@ -98,8 +111,8 @@ export class GraphicsPipeline {
     else this.renderer.render(scene, camera);
   }
 
-  /** The Source look: CS:S water reflections everywhere, CS:S HDR (auto exposure, bloom) on maps with HDR lighting. */
-  private renderSource(scene: THREE.Scene, camera: THREE.Camera, timeSeconds: number): void {
+  /** The Source look's water captures and HDR for `scene`'s world, set up anew when the world changes. */
+  private sourceFor(scene: THREE.Scene, timeSeconds: number): SourceHdr {
     const world = scene.children.find((o) => o.userData.lightmapHdr !== undefined) ?? null;
     const hdr = (this.sourceHdr ??= new SourceHdr(this.renderer));
     if (world !== this.sourceWorld) {
@@ -109,9 +122,16 @@ export class GraphicsPipeline {
       hdr.reset();
       this.sourceTime = timeSeconds;
     }
+    return hdr;
+  }
+
+  /** The Source look: CS:S water reflections everywhere, CS:S HDR (auto exposure, bloom) on maps with HDR lighting. */
+  private renderSource(scene: THREE.Scene, camera: THREE.Camera, timeSeconds: number): void {
+    const hdr = this.sourceFor(scene, timeSeconds);
     this.sourceWater?.render(this.renderer, camera, this.options.waterReflections === false ? NO_WATER_CAPTURE : SOURCE_WATER);
     // Visual time, not the wall clock: paused views hold their exposure and exports adapt the same way every time.
-    const dt = Math.max(0, timeSeconds - this.sourceTime);
+    // (NaN: set up by warmDraw, no frame yet.)
+    const dt = Number.isNaN(this.sourceTime) ? 0 : Math.max(0, timeSeconds - this.sourceTime);
     this.sourceTime = timeSeconds;
     if (!hdr.active(scene)) {
       this.renderer.render(scene, camera);
@@ -121,6 +141,46 @@ export class GraphicsPipeline {
     hdr.setSize(size.x, size.y);
     hdr.bloom = this.options.bloom !== false;
     hdr.render(scene, camera, dt);
+  }
+
+  /** Starts compiling the programs of the Source look's own passes for `scene` (HDR exposure, bloom, composite). */
+  compilePasses(scene: THREE.Scene): void {
+    if (this.wantsComposer() || presetConfig(this.options).preset !== "source" || !scene.children.some((o) => o.userData.lightmapHdr !== undefined)) return;
+    const hdr = this.sourceFor(scene, NaN);
+    if (hdr.active(scene)) hdr.compilePasses();
+  }
+
+  /**
+   * Draws all of `scene`'s world once (a camera over the whole of it, so nothing is culled) into the offscreen passes
+   * the Source look draws it through: the water captures and the HDR scene target. Nothing reaches the screen, and the
+   * next frame draws those targets anew. For map load, after warmPrograms: the first draw of a material into a new kind
+   * of target is slow on some GPUs (Metal builds a pipeline state for each), and these passes would otherwise do it in
+   * the frame a part of the map is first seen (research/PERF-0.0.29-STALLS.md). Resolves when the GPU is done with it.
+   */
+  warmDraw(scene: THREE.Scene, camera: THREE.PerspectiveCamera): Promise<void> {
+    if (!this.drawTargets(scene).offscreen || this.wantsComposer()) return Promise.resolve();
+    const world = scene.children.find((o) => o.userData.lightmapHdr !== undefined);
+    if (!world) return Promise.resolve();
+    const box = new THREE.Box3().setFromObject(world);
+    if (box.isEmpty()) return Promise.resolve();
+    const center = box.getCenter(new THREE.Vector3());
+    const radius = Math.max(1, box.getSize(new THREE.Vector3()).length() / 2);
+    const distance = radius / Math.sin(THREE.MathUtils.degToRad(30)) * 1.05;
+    const overview = new THREE.PerspectiveCamera(60, camera.aspect, Math.max(1, distance - radius * 1.1), distance + radius * 1.1);
+    overview.layers.mask = camera.layers.mask;
+    // From above, looking straight down (the water captures reflect only views from above the surface).
+    overview.up.set(0, 0, -1);
+    overview.position.set(center.x, center.y + distance, center.z);
+    overview.lookAt(center);
+    overview.updateMatrixWorld(true);
+    const hdr = this.sourceFor(scene, NaN);
+    this.sourceWater?.render(this.renderer, overview, this.options.waterReflections === false ? NO_WATER_CAPTURE : SOURCE_WATER);
+    if (hdr.active(scene)) {
+      const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+      hdr.setSize(size.x, size.y);
+      hdr.drawScene(scene, overview);
+    }
+    return gpuIdle(this.renderer);
   }
 
   private releaseSource(): void {

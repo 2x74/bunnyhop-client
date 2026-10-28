@@ -4,6 +4,10 @@
 
 import "./net.css";
 import { clear, h } from "../ui/dom";
+import { formatTime } from "../timer";
+import { styleLabel } from "../styles";
+import { clampTier, tierLabel } from "../tiers";
+import type { StaffRole } from "../progression";
 import type { RankTag } from "./protocol";
 import type { PlayerMarks } from "../creators";
 import { countryFlag } from "../ui/country-flag";
@@ -379,7 +383,7 @@ export class Scoreboard {
           "div.sb-map",
           null,
           h("b", null, head.map),
-          head.tier ? h(`span.badge.tier.t${head.tier}`, null, `T${head.tier}`) : null,
+          head.tier ? h(`span.badge.tier.t${clampTier(head.tier)}`, null, tierLabel(head.tier)) : null,
           h("span.dim", null, ` · ${head.timeLeft}`),
           head.nextMap ? h("span.dim", null, ` · next: ${head.nextMap}`) : null,
         ),

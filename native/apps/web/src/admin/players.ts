@@ -211,7 +211,8 @@ export const playerView: View = async (root, _params, [id]) => {
     "div",
     { class: "badge-shelf" },
     tile({ id: "verified", name: "Verified", svg: VERIFIED_SVG, on: !!u.verified, toggle: () => void post({ verified: !u.verified }, u.verified ? "Verified removed" : "Verified given", { verified: !!u.verified }) }),
-    // (Earned marks, the gauntlet ones, aren't staff's to give or take.)
+    // (Earned marks, the gauntlet ones, aren't staff's to give or take. Mapper is given by hand here too, as well as by
+    // linking an author name in Boards → Mappers; unlinking takes it back.)
     ...Object.entries(SPECIAL_BADGES).filter(([, def]) => !def.earned).map(([sid, def]) =>
       tile({
         id: sid,

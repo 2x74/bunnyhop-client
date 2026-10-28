@@ -53,6 +53,8 @@ export interface RunData {
   speed: Float32Array;
   status: Uint8Array;
   runTicks: Int32Array;
+  /** A finished run's time in whole milliseconds (run-timing.ts, what the boards show), 0 while not finished. */
+  finishMs: Int32Array;
   jumps: Uint16Array;
   strafes: Uint16Array;
   sync: Float32Array;
@@ -130,6 +132,7 @@ export class ReplayPlayer {
       speed: new Float32Array(n + 1),
       status: new Uint8Array(n + 1),
       runTicks: new Int32Array(n + 1),
+      finishMs: new Int32Array(n + 1),
       jumps: new Uint16Array(n + 1),
       strafes: new Uint16Array(n + 1),
       sync: new Float32Array(n + 1),
@@ -162,6 +165,7 @@ export class ReplayPlayer {
       if (!timer) return;
       d.status[t] = timer.status === "running" ? STATUS_RUNNING : timer.status === "finished" ? STATUS_FINISHED : STATUS_IDLE;
       d.runTicks[t] = timer.ticks();
+      d.finishMs[t] = timer.status === "finished" ? timer.timeMs() : 0;
       d.jumps[t] = timer.jumps;
       d.strafes[t] = timer.strafes;
       d.sync[t] = timer.syncPercent();
@@ -340,8 +344,16 @@ export function sampleAt(d: RunData, t: number, out?: ViewSample): ViewSample {
 }
 
 /** Run timer seconds at fractional tick t (advances smoothly between ticks while running). */
+/** The final run's time in seconds (milliseconds, as the boards show it), or null when it didn't finish. */
+export function finalRunTime(d: RunData): number | null {
+  if (!d.endTick) return null;
+  return d.finishMs[d.endTick] > 0 ? d.finishMs[d.endTick] / 1000 : (d.endTick - d.startTick) * d.interval;
+}
+
 export function runTimeAt(d: RunData, t: number): number {
   const i = Math.max(0, Math.min(d.n, Math.floor(t)));
+  // The running clock counts ticks; a finished run shows its millisecond time.
+  if (d.status[i] === STATUS_FINISHED && d.finishMs[i] > 0) return d.finishMs[i] / 1000;
   const running = d.status[i] === STATUS_RUNNING;
   return (d.runTicks[i] + (running && i < d.n ? t - i : 0)) * d.interval;
 }

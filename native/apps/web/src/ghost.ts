@@ -28,6 +28,7 @@ import { prefs } from "./ui/settings";
 import { trackName } from "./zones";
 import { SpatialMover } from "./audio";
 import { GhostRoute } from "./ghost-route";
+import { warmPrograms } from "./graphics/warm-programs";
 import { routeGhostKind, type GhostRouteMode } from "./ghost-route-data";
 
 /** A PB is always your own run: your account name, not the replay file's (the native client's say "native-player"). */
@@ -363,6 +364,8 @@ export interface GhostHost {
   toast: (msg: string, ms?: number) => void;
   /** PB ghost commands per track changed (HUD ghost keys overlay); null = removed. */
   onPBInputs?: (track: number, inputs: GhostInputs | null) => void;
+  /** Compiles a new ghost's programs before it's first drawn (null: they compile in its first frame). */
+  renderer?: THREE.WebGLRenderer;
 }
 
 const KIND_ORDER: GhostKind[] = ["pb", "wr", "custom"];
@@ -382,6 +385,8 @@ export class GhostManager {
   private lastSplitTick = -1;
   private primaryDelta: number | null = null;
   private camPos = new THREE.Vector3();
+  /** The last frame's camera (new ghosts compile for it). */
+  private camera: THREE.Camera | null = null;
   private unsub: () => void;
   /** Smoothed cost of frame() in ms (all ghosts: sampling, animation, trail, tags). */
   perf = { ms: 0, max: 0 };
@@ -432,6 +437,8 @@ export class GhostManager {
     [...this.ghosts.values()].forEach((x, i) => x.setRenderOrder(20 + i * 2));
     this.h.scene.add(g.root);
     g.setVisible(false);
+    // Ghosts show from the next start, so their programs have time to compile without blocking a frame.
+    if (this.h.renderer) void warmPrograms(this.h.renderer, g.root, this.camera ?? (this.camera = new THREE.PerspectiveCamera()), this.h.scene).catch(() => {});
     return g;
   }
 
@@ -636,6 +643,7 @@ export class GhostManager {
    * pos: player position (Source); camera: the render camera.
    */
   frame(timer: RunTimer, alpha: number, pos: readonly number[], camera: THREE.Camera | null): number | null {
+    if (camera) this.camera = camera;
     const t0 = performance.now();
     const dt = Math.min(0.1, (t0 - this.last) / 1000);
     this.last = t0;

@@ -8,14 +8,16 @@
 // (sim.ts, verifier.ts). Practice mode (the pause menu, !practice, its bind) makes every attempt practice until it's
 // turned off. DOM-free (test/practice-attempt.test.ts).
 
-/** A practice tool that moves the player outside the simulation. */
-export type PracticeUse = "teleport" | "noclip";
+/** A practice tool that moves the player outside the simulation, or a practice spawn (start-point.ts) that begins the attempt there. */
+export type PracticeUse = "teleport" | "noclip" | "spawn";
 
 export class PracticeAttempt {
   /** Practice mode is on: every attempt is practice, also after a restart. */
   mode = false;
   /** Why this attempt is practice ("mode", or the first tool used), or null for a clean attempt. */
   private why: "mode" | PracticeUse | null = null;
+  /** A tool or practice spawn moved the player outside the simulation this attempt, also in practice mode. */
+  private moved = false;
 
   /** This attempt is practice (practice mode, or a tool was used). Never submitted. */
   get practice(): boolean {
@@ -27,14 +29,20 @@ export class PracticeAttempt {
     return this.why === "mode" ? null : this.why;
   }
 
+  /** The player's place wasn't reached by movement alone this attempt: noclip, a checkpoint teleport or a practice spawn. */
+  get unwalked(): boolean {
+    return this.moved;
+  }
+
   /** Practice mode on or off. Turning it off keeps this attempt practice: the caller restarts right after. */
   setMode(on: boolean): void {
     this.mode = on;
     if (on) this.why = "mode";
   }
 
-  /** A checkpoint teleport or noclip. True if a clean attempt just became practice (say so once). */
+  /** A checkpoint teleport, noclip or practice spawn. True if a clean attempt just became practice (say so once). */
   use(tool: PracticeUse): boolean {
+    this.moved = true;
     if (this.why) return false;
     this.why = tool;
     return true;
@@ -47,6 +55,7 @@ export class PracticeAttempt {
   reset(): boolean {
     const exited = this.why !== null && !this.mode;
     this.why = this.mode ? "mode" : null;
+    this.moved = false;
     return exited;
   }
 }

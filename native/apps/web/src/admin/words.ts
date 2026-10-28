@@ -31,6 +31,8 @@ export const ACTION_WORDS: Record<string, [string, string]> = {
   "creator-clear": ["Cleared a creator tag", ""],
   "badge-grant": ["Gave a badge", ""],
   "badge-revoke": ["Took a badge away", ""],
+  "mapper-link": ["Linked a mapper", ""],
+  "mapper-unlink": ["Unlinked a mapper", ""],
   "links-clear": ["Cleared profile links", "warn"],
   "avatar-block": ["Blocked a Discord avatar", "warn"],
   "avatar-unblock": ["Allowed a Discord avatar", "ok"],
@@ -118,6 +120,10 @@ export function detailSentence(action: string, raw: string | null, room?: string
     case "badge-grant":
     case "badge-revoke":
       if (s("badge")) parts.push(`${s("badge")!.replace(/^./, (c) => c.toUpperCase())}.`);
+      break;
+    case "mapper-link":
+    case "mapper-unlink":
+      if (s("author")) parts.push(`${s("author")}.`);
       break;
     case "creator-set":
     case "creator-clear":

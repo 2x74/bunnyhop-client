@@ -16,9 +16,10 @@ import { formatDelta, Hud, type SubmissionView } from "./hud";
 import type { UserCmd, Input } from "./input";
 import { renderMenu, type MenuActions } from "./menu";
 import { mountOnlinePanel, submitAndTrack } from "./online";
-import { download, getPB, loadPBReplay, savePBReplay, setPB, rejectPB, setPBContext, syncPBs, pbAccount, rememberPBSplits, type PersonalBest } from "./pb";
+import { download, getPB, loadPBReplay, pbMs, savePBReplay, setPB, rejectPB, setPBContext, syncPBs, pbAccount, rememberPBSplits, type PersonalBest } from "./pb";
 import { keyLabel, prefs } from "./ui/settings";
 import { RunMouseSettings, mouseFromPrefs } from "./mouse-settings";
+import { turnSpeedOf } from "./turn-binds";
 import { decodeReplay, encodeReplay, ReplayRecorder, replayFileName, replayStyle, sha256Hex, type Replay } from "./replay";
 import { nextStyle, StyleFilter, strafeKeys, styleDef, styleForTrack, styleLabel, stylePrespeedCap, styleSettings, type StyleDef, type StyleId } from "./styles";
 import { onStyleChange, setSelectedStyle } from "./ui/style-picker";
@@ -71,6 +72,10 @@ export interface SessionInit {
   tick: () => void;
   /** No "This map has a bonus track" (a gauntlet: main tracks only). */
   mainTrackOnly?: boolean;
+  /** Practice spawns work (start-point.ts): solo, not the tutorial or a gauntlet (practice-mode/rules.ts practiceUnavailable). */
+  practiceSpawns?: boolean;
+  /** Compiles ghosts' programs ahead of their first frame (ghost.ts GhostHost.renderer). */
+  renderer?: THREE.WebGLRenderer;
 }
 
 export class RunSession {
@@ -140,7 +145,7 @@ export class RunSession {
   markExperimentalInput(): void {
     this.experimentalInputUsed = true;
     this.clock.stop();
-    this.recorder.clear();
+    this.newRecording();
     this.lastRun = null;
   }
   /** Submission status of the last finished run, as the end card gets it (the tutorial's final-course board listens). */
@@ -202,6 +207,7 @@ export class RunSession {
       scene: o.scene, core: o.core, map: o.map, style: s.selectedStyle, mapSha256: s.mapSha256, settings: s.settings, bsp: o.bsp, wasmBytes: o.wasmBytes,
       toast: (m, ms) => s.hud.toast(m, ms),
       onPBInputs: (track, inputs) => s.hud.setGhostInputs(track, inputs),
+      renderer: o.renderer,
     });
     // Summary hydration and ghost recovery are independent: map startup never waits for remote replay bodies.
     window.addEventListener("bunnyhop:pbs", () => s.ensurePBGhost());
@@ -370,6 +376,8 @@ export class RunSession {
     const p = at ?? sp?.point ?? this.restartTarget(track);
     if (p) applyRestartPoint(core, p);
     this.onReset();
+    // A practice spawn (outside the start zone, or reached with a practice tool): this attempt is practice from the first tick.
+    if (sp?.practice) this.prac.use("spawn");
     this.ensurePBGhost();
     this.updateInfo(track);
     return sp ? { pitch: sp.pitch } : null;
@@ -380,27 +388,33 @@ export class RunSession {
    * will check the replay), with its pitch. One that no longer passes (the zones or the map changed) is dropped.
    * Leaves the core probed: reset it next.
    */
-  private startPointFor(track: number): { point: RestartPoint; pitch: number } | null {
+  private startPointFor(track: number): { point: RestartPoint; pitch: number; practice: boolean } | null {
     const map = this.o.map;
     const saved = loadStartPoint(map, track);
     if (!saved) return null;
+    // A practice spawn stays saved where practice doesn't work (servers, the tutorial, a gauntlet), unused.
+    if (saved.practice && !this.o.practiceSpawns) return null;
     const point = resolveStartPoint(this.o.core, this.settings, map, track, saved, this.zones?.zones ?? []);
-    if (point) return { point, pitch: saved.pitch };
+    if (point) return { point, pitch: saved.pitch, practice: !!saved.practice };
     clearStartPoint(map, track);
-    this.hud.toast("Your start point isn't valid here any more, so it was cleared", 4000, "start-point");
+    this.hud.toast(`Your ${saved.practice ? "spawn" : "start point"} isn't valid here any more, so it was cleared`, 4000, "start-point");
     return null;
   }
 
   /**
-   * Set start point (bind or !setstart): saves where you stand for that start zone's track, or says why not: a toast,
-   * or `reply` (chat commands answer in the chat).
+   * Set start point / spawn (bind, !setstart, !setspawn): saves where you stand for that start zone's track, or says
+   * why not: a toast, or `reply` (chat commands answer in the chat). Where practice works, any other spot you stand
+   * still on is saved as a practice spawn for the current track (start-point.ts); a practice attempt that used noclip
+   * or a checkpoint saves one even in the zone.
    */
   setStartPoint(reply?: (text: string) => void): void {
     const say = (text: string, ms: number) => (reply ? reply(text) : this.hud.toast(text, ms, "start-point"));
     const { core, input, map } = this.o;
     const zones = this.zones?.zones ?? [];
     const r = checkStartPoint(core.state(), { yaw: input.yaw, pitch: input.pitch }, zones, {
-      practice: this.practicing || this.debug,
+      track: this.timer.track,
+      offZone: !!this.o.practiceSpawns && !this.debug,
+      tool: this.prac.unwalked,
     });
     if (!r.ok) return say(r.reason, 2500);
     // Try the restart there now (on a snapshot: play carries on untouched), so a spot the restart can't use is refused
@@ -409,7 +423,7 @@ export class RunSession {
     const usable = withRestoredState(core, () => resolveStartPoint(core, styleSettings(this.styleFor(r.track)), map, r.track, point, zones) !== null);
     if (usable === false) return say("Can't restart on this exact spot. Try a step away.", 3000);
     saveStartPoint(map, r.track, point);
-    say(savedMessage(r.track), 2000);
+    say(savedMessage(r.track, r.practice), r.practice ? 5000 : 2000);
   }
 
   /** Clear start point (bind or !clearstart): the current track goes back to the default start. `reply`: as above. */
@@ -505,7 +519,7 @@ export class RunSession {
     // Back in a start zone after a checkpoint teleport or noclip: the timer resets there as if for a new run, but the
     // attempt stays practice until a restart (attempt.ts). Said once per attempt, when the timer goes back to the start
     // after being out of it (not right after a teleport into the zone).
-    if (this.prac.tool && !this.prac.mode && this.practiceStartHint !== "said") {
+    if (this.prac.tool && this.prac.tool !== "spawn" && !this.prac.mode && this.practiceStartHint !== "said") {
       const atStart = t.inStart && t.status === "idle";
       if (!atStart) this.practiceStartHint = "armed";
       else if (this.practiceStartHint === "armed") {
@@ -536,7 +550,7 @@ export class RunSession {
     if (update.finished) {
       // Finish sting right away (the replay encode below is async): bigger for a PB.
       const pb = getPB(this.o.map, this.runStyle, this.timer.track);
-      runSounds.finish(!this.unranked && (!pb || this.timer.endTick - this.timer.startTick < pb.ticks) ? "pb" : "normal");
+      runSounds.finish(!this.unranked && (!pb || this.timer.timeMs() < pbMs(pb)) ? "pb" : "normal");
       this.view.finish(this.timer.track, !this.unranked && this.hud.beatsRecord(this.timer.time())); // the end zone flares
       void this.finish(state);
     }
@@ -623,6 +637,25 @@ export class RunSession {
     if (!this.experimentalInput) this.recorder.event(kind);
   }
 
+  /**
+   * Starts a new recording. Its turn binds turn at the Settings speeds from its first command to its last: the replay
+   * records one cl_yawspeed / cl_anglespeedkey (header.turnSpeed) and the anticheat checks every turn against it.
+   */
+  private newRecording(): void {
+    this.recorder.clear();
+    this.applyTurnSpeed();
+  }
+
+  /** Settings changed the turn speeds: they apply now to an attempt that is never submitted, else from the next restart. */
+  turnSpeedChanged(): void {
+    if (this.unranked) this.applyTurnSpeed();
+  }
+  private applyTurnSpeed(): void {
+    const t = turnSpeedOf(prefs.get().yawSpeed, prefs.get().angleSpeedKey);
+    this.o.input.turnSpeed = t;
+    this.recorder.turnSpeed = { ...t };
+  }
+
   /** Inspect event (replay.ts INSPECT_* kinds) at the current tick: the replay's inspect trailer, for third person. */
   recordInspect(kind: number): void {
     if (!this.experimentalInput) this.recorder.inspectEvent(kind);
@@ -642,7 +675,7 @@ export class RunSession {
     announcerPolicy.resetAttempt();
     this.clock.stop();
     this.styleFilter.reset();
-    this.recorder.clear();
+    this.newRecording();
     this.ghosts.onReset();
     const s = this.o.core.state();
     this.ssj.reset(s);
@@ -709,7 +742,7 @@ export class RunSession {
     const pb = getPB(this.o.map, style, track);
     const ticks = t.endTick - t.startTick;
     // (A practice run is never a PB: third person, the debug hook, a lesson, scripted commands.)
-    const newPB = !this.unranked && (!pb || ticks < pb.ticks);
+    const newPB = !this.unranked && (!pb || t.timeMs() < pbMs(pb));
     const pbDate = Date.now();
     const bytes = await encodeReplay(replay);
     if (this.experimentalInput) return; // opt-in while encoding invalidates this completion
@@ -868,7 +901,7 @@ export class RunSession {
     this.setRunStyle(style);
     loadTimer(this.timer, timer);
     this.styleFilter.reset();
-    this.recorder.clear();
+    this.newRecording();
     this.hud.resetTicks();
     const s = this.o.core.state();
     this.ssj.reset(s);

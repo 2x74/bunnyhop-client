@@ -4,7 +4,7 @@
 export interface ListFilter {
   /** The search, lower case and trimmed ("" = none). */
   q: string;
-  /** A tier key ("1" – "6", "x" = unrated) or "all". */
+  /** A tier key ("1" – "7", "x" = unrated) or "all". */
   tier: string;
   /** The map is in the set on show (all maps, Favorites, a group or a collection). */
   inSet: (name: string) => boolean;

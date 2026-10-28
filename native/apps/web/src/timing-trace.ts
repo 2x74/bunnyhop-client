@@ -45,3 +45,38 @@ export function timingPath(core: Core): TimingPath {
   }
   return { version: 2, segments, unsupported: data[0] === 2 ? reason || "unsupported-path" : null };
 }
+
+/**
+ * Ranked timing (run-timing.ts): observe the accepted path of every step on this core. Sticky until the next map load;
+ * sim.ts beforeStep calls it before every step. Observation never changes the simulation (crates/core/tests/
+ * timing_path.rs, tools/timing/identity.ts). False on a build without the ABI: crossings then use straight traces.
+ */
+export function startObserving(core: Core): boolean {
+  const x = exportsOf(core);
+  if (x.timing_path_version?.() !== 2 || !x.timing_observe) return false;
+  x.timing_observe(observing ? 1 : 0);
+  return observing;
+}
+
+let observing = true;
+/** Tools only (tools/timing/identity.ts): simulate without observation, for the identity comparison. */
+export function setRankedObservation(on: boolean): void {
+  observing = on;
+}
+
+const sources = new WeakMap<Core, () => TimingPath | null>();
+/** A lazy reader of the last step's path (RunTimer.pathSource): null when absent or malformed (straight traces then). */
+export function pathSource(core: Core): () => TimingPath | null {
+  let source = sources.get(core);
+  if (!source) {
+    source = () => {
+      try {
+        return timingPath(core);
+      } catch {
+        return null;
+      }
+    };
+    sources.set(core, source);
+  }
+  return source;
+}

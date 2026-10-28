@@ -27,7 +27,7 @@
   --amber-ink: #1d1306;
   --amber-wash: rgba(255, 180, 60, 0.12);
   --dot: #fff;
-  --tier-1: #5ee08a; --tier-2: #3fd0c9; --tier-3: #ffd84d; --tier-4: #ff9a3c; --tier-5: #ff5468; --tier-6: #c477ff; --tier-x: #8a93a6;
+  --tier-1: #5ee08a; --tier-2: #3fd0c9; --tier-3: #ffd84d; --tier-4: #ff9a3c; --tier-5: #ff5468; --tier-6: #c477ff; --tier-7: #7c83ff; --tier-x: #8a93a6;
   --wr: #ffd45e;
   /* jobs */
   --ground: var(--ink-0);
@@ -336,7 +336,7 @@ a.map-name:hover { color: var(--accent); }
 .map-art.plain { background-image: linear-gradient(135deg, hsl(var(--h, 30) 40% 30%), hsl(calc(var(--h, 30) + 40) 45% 18%)); }
 .map-art.hero { width: 100%; height: 100%; border-radius: 0; box-shadow: none; }
 .tier { font: 750 var(--t-label) var(--font-ui); letter-spacing: 0.02em; white-space: nowrap; color: var(--tier-x); }
-.tier.t1 { color: var(--tier-1); } .tier.t2 { color: var(--tier-2); } .tier.t3 { color: var(--tier-3); } .tier.t4 { color: var(--tier-4); } .tier.t5 { color: var(--tier-5); } .tier.t6 { color: var(--tier-6); }
+.tier.t1 { color: var(--tier-1); } .tier.t2 { color: var(--tier-2); } .tier.t3 { color: var(--tier-3); } .tier.t4 { color: var(--tier-4); } .tier.t5 { color: var(--tier-5); } .tier.t6 { color: var(--tier-6); } .tier.t7 { color: var(--tier-7); }
 
 /* ------------------------------------------------------------------ charts (charts.ts) */
 .chart { position: relative; width: 100%; touch-action: pan-y; }
@@ -465,7 +465,7 @@ div.seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-
 .seg button.hot b { color: var(--accent); }
 .seg-sep { width: 1px; margin: 5px 4px; background: var(--line-2); }
 .seg.tiers button.t1 { color: var(--tier-1); } .seg.tiers button.t2 { color: var(--tier-2); } .seg.tiers button.t3 { color: var(--tier-3); }
-.seg.tiers button.t4 { color: var(--tier-4); } .seg.tiers button.t5 { color: var(--tier-5); } .seg.tiers button.t6 { color: var(--tier-6); }
+.seg.tiers button.t4 { color: var(--tier-4); } .seg.tiers button.t5 { color: var(--tier-5); } .seg.tiers button.t6 { color: var(--tier-6); } .seg.tiers button.t7 { color: var(--tier-7); }
 .fold > summary { display: none; }
 .fold > summary::-webkit-details-marker { display: none; }
 
@@ -1085,7 +1085,7 @@ table.fb-table .fb-c-msg .fb-open { display: -webkit-box; -webkit-line-clamp: 2;
 .picked { margin-top: -10px; }
 .part { margin-right: 10px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tier-sel { min-height: 28px; padding: 0 26px 0 8px; font: 750 var(--t-label) var(--font-ui); background-color: transparent; background-position: right 8px center; box-shadow: none; }
-.tier-sel.t1 { color: var(--tier-1); } .tier-sel.t2 { color: var(--tier-2); } .tier-sel.t3 { color: var(--tier-3); } .tier-sel.t4 { color: var(--tier-4); } .tier-sel.t5 { color: var(--tier-5); } .tier-sel.t6 { color: var(--tier-6); } .tier-sel.tx { color: var(--tier-x); }
+.tier-sel.t1 { color: var(--tier-1); } .tier-sel.t2 { color: var(--tier-2); } .tier-sel.t3 { color: var(--tier-3); } .tier-sel.t4 { color: var(--tier-4); } .tier-sel.t5 { color: var(--tier-5); } .tier-sel.t6 { color: var(--tier-6); } .tier-sel.t7 { color: var(--tier-7); } .tier-sel.tx { color: var(--tier-x); }
 .maps-table td { vertical-align: middle; }
 .bulk details > summary { margin-bottom: 10px; color: var(--dim); font: 650 var(--t-body) var(--font-ui); }
 .bulk textarea { margin-bottom: 10px; }

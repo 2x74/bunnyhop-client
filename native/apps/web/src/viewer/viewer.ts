@@ -44,7 +44,7 @@ import type { CardInfo } from "./canvas-hud";
 import { openExportDialog, type ExportSource } from "./export";
 import { runUrl, shareButton } from "../ui/share";
 import { ViewerHud } from "./hud";
-import { F_GROUNDED, ReplayPlayer, sampleAt, type RunData, type ViewSample } from "./player";
+import { F_GROUNDED, finalRunTime, ReplayPlayer, sampleAt, type RunData, type ViewSample } from "./player";
 import { viewerRequestRunId, viewerUrl, type ReplayTarget, type ViewerRequest } from "./request";
 import { Timeline } from "./timeline";
 import { ReplayAudio } from "../audio/replay";
@@ -65,6 +65,11 @@ export interface ViewerHost {
   style: () => string;
   /** Re-applies the window size / pixel ratio / FOV to the renderer and camera. */
   resize: () => void;
+  /**
+   * "Practice from here": the live game takes the replay to this tick and carries on from there as a practice attempt
+   * (practice-mode/controller.ts fromReplay). Returns why it can't, or null (the viewer closes). Absent: no button.
+   */
+  practiceFrom?: (replay: Replay, tick: number) => string | null;
   /** After the world's brushes moved to this tick (`world.update`): the replay's sim and its transforms. */
   onWorldUpdate?: (core: Core, transforms: Map<number, BrushTransform>) => void;
   /** Viewer opened / closed: pause the live game, hide its HUD/ghosts/menu; then restore them. */
@@ -158,6 +163,8 @@ export class ReplayViewer implements ExportSource {
   /** The Hide UI key in the shortcuts list (its bind can change). */
   private cleanKey = h("kbd");
   private compareBtn: HTMLButtonElement;
+  /** Continue this moment in practice (host.practiceFrom). */
+  private practiceBtn: HTMLButtonElement;
   private compareMenu: HTMLElement;
   private helpEl: HTMLElement;
   private freeHint: HTMLElement;
@@ -186,6 +193,8 @@ export class ReplayViewer implements ExportSource {
     this.cleanBtn = btn("Hide UI", "Hide UI", () => this.setClean(true), ".rv-chip");
     this.compareMenu = h("div.rv-menu", { hidden: true, role: "menu" });
     this.compareBtn = btn("Compare", "Overlay a second replay as a ghost (C)", () => this.toggleCompareMenu(), ".rv-chip");
+    this.practiceBtn = btn("Practice from here", "Take over from this moment, in practice (P)", () => this.practiceFromHere(), ".rv-chip");
+    this.practiceBtn.hidden = !host.practiceFrom;
     this.freeHint = h("div.rv-freehint", { hidden: true }, "Click to fly · WASD move · mouse look · Shift fast · Space/Ctrl up/down · Esc release");
     const speeds = h(
       "div.rv-seg",
@@ -225,6 +234,7 @@ export class ReplayViewer implements ExportSource {
             [this.cleanKey, "hide the UI (Esc shows it)"],
             ["C", "compare with another replay"],
             ["E", "export MP4"],
+            ["P", "practice from this moment"],
             ["N / P", "next / previous map (watching a gauntlet)"],
             ["Esc", "close"],
           ] as const
@@ -258,6 +268,7 @@ export class ReplayViewer implements ExportSource {
       this.hudBtn,
       this.cleanBtn,
       h("div.rv-menu-wrap", null, this.compareBtn, this.compareMenu),
+      this.practiceBtn,
       btn("Export MP4", "Render this replay to an MP4 video (E)", () => this.openExport(), ".rv-chip.rv-accent"),
       btn("⤓ .bhr", "Download the replay file", () => this.downloadBhr(), ".rv-chip"),
       this.shareBtn,
@@ -314,6 +325,7 @@ export class ReplayViewer implements ExportSource {
     this.gauntlet?.dispose();
     this.gauntlet = req.gauntlet ? new GauntletLayer(req.gauntlet.plan, req.gauntlet.idx) : null;
     if (this.gauntlet) (this.panel.prepend(this.gauntlet.el), this.root.append(this.gauntlet.overlay));
+    this.practiceBtn.hidden = !this.host.practiceFrom || !!this.gauntlet;
     this.showShell();
     this.setLoading("Loading replay…");
     try {
@@ -437,6 +449,15 @@ export class ReplayViewer implements ExportSource {
     this.setLoading(null);
   }
 
+  /** The shown tick, in practice: the replay is played into the live game and the viewer closes. Else a notice says why not. */
+  private practiceFromHere(): void {
+    const d = this.data;
+    if (!this.replay || !d || this.gauntlet || !this.host.practiceFrom) return;
+    const why = this.host.practiceFrom(this.replay, Math.max(0, Math.min(d.n, Math.floor(this.t))));
+    if (why) this.flash(why);
+    else this.close();
+  }
+
   /** The feedback form on "Report a player", about this run (its player comes from the run on the server). */
   private report(): void {
     const r = this.replay;
@@ -444,7 +465,7 @@ export class ReplayViewer implements ExportSource {
     this.playing = false;
     this.updateControls();
     const d = this.player?.data;
-    openFeedback({ category: "report", report: { name: this.playerName() || "this player", run: { id: this.runId, map: r.header.map, time: d?.endTick ? (d.endTick - d.startTick) * d.interval : null } } });
+    openFeedback({ category: "report", report: { name: this.playerName() || "this player", run: { id: this.runId, map: r.header.map, time: d ? finalRunTime(d) : null } } });
   }
 
   /** Who ran it: the server's account name for a leaderboard run, else the name in the replay file. */
@@ -457,7 +478,7 @@ export class ReplayViewer implements ExportSource {
     if (!r) return;
     const h0 = r.header;
     const d = this.player!.data;
-    const time = d.endTick ? formatTime((d.endTick - d.startTick) * d.interval) : "DNF";
+    const time = d.endTick ? formatTime(finalRunTime(d)!) : "DNF";
     this.titleEl.replaceChildren(h("b", null, this.playerName() || "unknown"), h("span.rv-time-big", null, time));
     const track = d.runTrack || h0.track || 0;
     this.subEl.textContent = [h0.map, track ? trackName(track) : "", styleLabel(replayStyle(h0)), `${d.tickrate} tick`, this.label, new Date(h0.recordedAt).toLocaleDateString()].filter(Boolean).join(" · ");
@@ -517,7 +538,8 @@ export class ReplayViewer implements ExportSource {
   togglePlay(): void {
     const d = this.data;
     if (!d) return;
-    if (!this.playing && this.t >= d.n) this.seekTo(0, true);
+    // Played to the end: again from just before the run, as on load (not the wait in the spawn).
+    if (!this.playing && this.t >= d.n) this.seekTo(d.startTick ? Math.max(0, d.startTick - d.tickrate) : 0, true);
     this.playing = !this.playing;
     this.updateControls();
   }
@@ -945,7 +967,7 @@ export class ReplayViewer implements ExportSource {
       map: hd.map,
       tier,
       player: hd.player || "unknown",
-      time: d.endTick ? (d.endTick - d.startTick) * d.interval : null,
+      time: finalRunTime(d),
       style: styleLabel(replayStyle(hd)),
       track: trackName(d.runTrack || hd.track || 0),
       date: hd.recordedAt,
@@ -965,7 +987,7 @@ export class ReplayViewer implements ExportSource {
     const hd = r.header;
     const clean = (s: string) => s.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "x";
     const track = d.runTrack || hd.track || 0;
-    const time = d.endTick ? formatTime((d.endTick - d.startTick) * d.interval).replace(":", "m").replace(".", "s") : "dnf";
+    const time = d.endTick ? formatTime(finalRunTime(d)!).replace(":", "m").replace(".", "s") : "dnf";
     return `${clean(hd.map)}${track ? "_b" + track : ""}_${clean(replayStyle(hd))}_${time}_${clean(hd.player || "player")}.mp4`;
   }
 
@@ -1097,6 +1119,9 @@ export class ReplayViewer implements ExportSource {
         return true;
       case "KeyE":
         this.openExport();
+        return true;
+      case "KeyP":
+        this.practiceFromHere();
         return true;
       case "Slash":
         this.setClean(false);

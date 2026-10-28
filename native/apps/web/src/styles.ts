@@ -48,7 +48,7 @@ export const AUTOSTRAFE_S_STOPS_FROM = 5;
 export const AUTOSTRAFE_KEYS_FROM = 8;
 import type { TickCmd } from "./timer";
 import { AUTO_HOLD_TICKS, AUTO_MOVE, strafeDir, yawDelta } from "./autostrafe";
-import { TURN_BITS, turnBindsAllowed } from "./turn-binds";
+import { TURN_HOLD_BITS, turnBindsAllowed } from "./turn-binds";
 
 // Source IN_* button bits (same values as input.ts; duplicated to keep this module DOM-free).
 const IN_FORWARD = 1 << 3;
@@ -148,7 +148,7 @@ export interface StyleContext {
  */
 export function filterCommand(style: StyleDef | null, cmd: TickCmd, ctx: StyleContext): TickCmd {
   // A recorded restricted-style command must be a fixed point of this filter, including on the ground / ladders.
-  if (style && !turnBindsAllowed(style.id) && (cmd.buttons & TURN_BITS)) cmd = { ...cmd, buttons: cmd.buttons & ~TURN_BITS };
+  if (style && !turnBindsAllowed(style.id) && (cmd.buttons & TURN_HOLD_BITS)) cmd = { ...cmd, buttons: cmd.buttons & ~TURN_HOLD_BITS };
   if (!style || !restrictsKeys(style) || ctx.grounded || ctx.onLadder) return cmd;
   let f = cmd.forward;
   let s = cmd.side;

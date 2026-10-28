@@ -104,3 +104,4 @@ dialog.desktop-dialog { width: min(30rem, 94vw); }
 .desktop-dialog .acct-body p { margin: 0 0 0.7rem; line-height: 1.45; }
 .desktop-ver { margin-left: 0.3rem; font-size: var(--fs-sm); font-weight: 500; color: var(--faint); }
 .desktop-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem 1rem; margin-top: 1rem; }
+.desktop-sub { margin: 1.4rem 0 0.5rem; padding-top: 1rem; border-top: 1px solid var(--line); font-size: var(--fs-lg); font-weight: 600; }

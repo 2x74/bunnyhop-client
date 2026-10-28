@@ -6,6 +6,7 @@ import { PlayerShadowProxy } from "./graphics/player-shadow";
 import "./texture-packs/settings";
 import "./sky-packs/settings";
 import { GraphicsPipeline } from "./graphics/pipeline";
+import { warmPrograms } from "./graphics/warm-programs";
 // First: the feedback form's client error log (ring buffer of uncaught errors / rejections / console.error).
 import { openFeedback, setGameInfo } from "./feedback/state";
 import * as THREE from "three";
@@ -81,7 +82,7 @@ import { registerSocialCommands } from "./social/commands";
 import { setSharedRenderer } from "./shared-gl";
 import { Practice } from "./practice-mode/controller";
 import { practiceMenuView } from "./practice-mode/menu-view";
-import { thirdPersonBlocked } from "./practice-mode/rules";
+import { practiceUnavailable, thirdPersonBlocked } from "./practice-mode/rules";
 import { giveWeapon, initWeaponCommands, openGunPicker, registerWeaponChatCommands, weaponsAfterRestart, weaponsAfterTick, weaponsBeforeTick } from "./weapon-commands";
 import { startPlaytime } from "./playtime";
 import { mapTime } from "./map-time";
@@ -199,6 +200,7 @@ prefs.watch((p) => {
   input.rawUpdates = p.graphics.uncapped; // from the next lock (frame-loop.ts)
   input.filter.enabled = p.spikeFilter;
   input.timed = p.timedInput;
+  run?.turnSpeedChanged(); // turn binds: now when never submitted, else from the next restart (session.ts)
   inputDebug.setEnabled(p.inputStats || inputDebugParam);
   input.setBinds(p.binds);
   graphicsPipeline.setOptions(p.graphics);
@@ -417,6 +419,7 @@ let core: Core;
 let bsp: Uint8Array | undefined;
 let wasmBytes: Uint8Array<ArrayBuffer>;
 let content: ReturnType<typeof contentLoading> | null = null;
+let worldPrograms: Promise<void> = Promise.resolve();
 try {
   let lastPaint = 0;
   const cached = attract?.takeBsp(mapName);
@@ -451,6 +454,9 @@ try {
   world.setFullbright(prefs.get().graphics.fullbright);
   applyAnisotropy(world.root, prefs.get().graphics.anisotropy);
   scene.add(world.root);
+  // Every program the map draws with, culled parts included, for the screen and the look's render targets (water
+  // captures, the HDR scene target): started now, compiling in parallel while the run is set up (awaited before Ready).
+  worldPrograms = warmPrograms(renderer, world.root, camera, scene).catch(() => {});
 } catch (e) {
   console.error(e);
   content?.done();
@@ -524,8 +530,9 @@ const zoneEditorAllowed = import.meta.env.DEV || debugHookOptIn();
 await loading.stage("Preparing run", 0.94, "zones, PB ghost");
 await afterPaint();
 run = await RunSession.create({
-  core, scene, canvas, input, map: mapName, bsp, wasmBytes, style,
+  core, scene, canvas, input, map: mapName, bsp, wasmBytes, style, renderer,
   mainTrackOnly: !!gauntletStart,
+  practiceSpawns: !practiceUnavailable({ inRoom: !!params.get("server"), tutorial: mapName === TUTORIAL_MAP, gauntlet: !!gauntletStart }),
   onResync: () => { prev = curr = core.state(); input.resetSampler(performance.now(), "session-resync"); },
   restart,
   tick,
@@ -567,7 +574,7 @@ restart(0);
 // map's physics version (which brushes block depends on it).
 initTriggerOverlay(core, w.root);
 practice = new Practice({
-  core, session, input,
+  map: mapName, core, session, input,
   inRoom: !!params.get("server"),
   tutorial: mapName === TUTORIAL_MAP,
   gauntlet: !!gauntletStart,
@@ -596,6 +603,22 @@ if (gauntletStart) startGauntletMode(gauntletStart, session);
 startQueueMode({ session, map: mapName, arrived: queued, gauntlet: !!gauntletStart });
 // Tutorial mode on the tutorial map: lessons, strafe guide, demos (tutorial/mode.ts, loaded on demand).
 const tutorial = mapName === TUTORIAL_MAP ? await (await import("./tutorial/mode")).startTutorialMode({ session, core, input, scene, bsp, wasmBytes, restart }) : null;
+// The rest of the scene (your own bunny, zones, floor guns) joins the world's programs, so no part of the map, its
+// water or its HDR target compiles a program inside a frame. A slow driver gets 10 s; the rest finishes in the background.
+// Then the whole map is drawn once through the look's offscreen passes (water captures, HDR target), so the GPU's
+// first draws into them happen here too, not when a part of the map is first seen; Ready waits for the GPU to finish.
+await loading.stage("Compiling shaders", 0.97);
+try {
+  graphicsPipeline.compilePasses(scene);
+} catch (e) {
+  console.warn("compile passes:", e);
+}
+await Promise.race([
+  Promise.all([worldPrograms, warmPrograms(renderer, scene, camera, scene).catch(() => {})])
+    .then(() => graphicsPipeline.warmDraw(scene, camera))
+    .catch((e) => console.warn("warm draw:", e)),
+  new Promise((r) => setTimeout(r, 10_000)),
+]);
 await loading.stage("Ready", 1);
 // A new player's first look (until their first finish on a real map, and always in the tutorial): the world and one
 // "Click to start" line, not the pause menu with its empty leaderboard. Esc opens the menu. Returning players get the
@@ -623,6 +646,7 @@ viewer = new ReplayViewer({
   renderer, graphicsPipeline, scene, camera, world: w, map: mapName, bsp, wasmBytes, mapSha256: session.mapSha256,
   style: () => session.selectedStyle,
   resize,
+  practiceFrom: (replay, tick) => practice?.fromReplay(replay, tick) ?? "Practice isn't available here.",
   onWorldUpdate: (sim, origins) => triggerOverlayFrame(origins, sim, uiHidden()),
   onOpen: () => {
     stopMenuWork();
@@ -867,7 +891,7 @@ input.onAction = (a, code) => {
   if (a === "mute" || a === "nextTrack") return; // audio/index.ts handles these everywhere (menus, viewer too)
   if (mp?.onAction(a)) return;
   if (practiceMode.onAction(a, code)) return;
-  if (a === "turnLeft" || a === "turnRight") {
+  if (a === "turnLeft" || a === "turnRight" || a === "turnFast") {
     if (!session.practicing && !turnBindsAllowed(session.runStyle)) session.hud.toast("Turn binds are disabled in Legit Scroll. They're available in practice and other styles.", 3500);
     return; // held turning is sampled with each simulation tick
   }

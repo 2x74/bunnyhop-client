@@ -6,6 +6,7 @@
 import { act, api, ask, idCell, badge, emptyLine, fmtTime, glyph, h, help, may, money, n, playerLink, plural, reroute, setKeys, specialIcon, stepRows, table, timeCell, toast, undoCall, type View, fill } from "./core";
 import { recordsView } from "./records";
 import { mapArt, tierTag } from "./art";
+import { clampTier, MAX_TIER, TIERS, tierLabel } from "../tiers";
 import { SPECIAL_BADGES } from "../creators";
 
 export const recordsView2: View = recordsView({ h, api, act, toast, badge, playerLink, timeCell, fmtTime });
@@ -83,7 +84,7 @@ export const mapsView: View = async (root, params) => {
   const row = (m: MapRow) => {
     const tierCell = manage
       ? (() => {
-          const sel = h("select", { class: `tier-sel t${m.tier ?? "x"}`, "aria-label": `Tier of ${m.name}` }, h("option", { value: "", selected: m.tier === null }, "T?"), [1, 2, 3, 4, 5, 6].map((t) => h("option", { value: String(t), selected: m.tier === t }, `T${t}`)));
+          const sel = h("select", { class: `tier-sel t${clampTier(m.tier) ?? "x"}`, "aria-label": `Tier of ${m.name}` }, h("option", { value: "", selected: m.tier === null }, "T?"), [...TIERS, ...(m.tier && m.tier > MAX_TIER ? [m.tier] : [])].map((t) => h("option", { value: String(t), selected: m.tier === t }, t > MAX_TIER ? `T${t}` : tierLabel(t))));
           sel.onchange = () => void setTier(m, sel);
           return sel;
         })()
@@ -106,7 +107,7 @@ export const mapsView: View = async (root, params) => {
     return r.maps.filter(
       (m) =>
         (!t || m.name.toLowerCase().includes(t) || m.title.toLowerCase().includes(t)) &&
-        (!tierF || String(m.tier ?? "x") === tierF) &&
+        (!tierF || String(clampTier(m.tier) ?? "x") === tierF) &&
         (filter === "all" || (filter === "ranked" && m.ranked) || (filter === "unranked" && !m.ranked && !m.retired) || (filter === "retired" && m.retired) || (filter === "flags" && (m.flags > 0 || m.feedback > 0))),
     );
   };
@@ -123,7 +124,7 @@ export const mapsView: View = async (root, params) => {
       ),
     );
     fill(tiers, 
-      ...["", "1", "2", "3", "4", "5", "6", "x"].map((t) => h("button", { type: "button", class: t ? `t${t}` : "", "aria-pressed": String(tierF === t), onclick: () => ((tierF = tierF === t ? "" : t), paint()) }, t ? (t === "x" ? "T?" : `T${t}`) : "Any")),
+      ...["", ...TIERS.map(String), "x"].map((t) => h("button", { type: "button", class: t ? `t${t}` : "", "aria-pressed": String(tierF === t), onclick: () => ((tierF = tierF === t ? "" : t), paint()) }, t ? (t === "x" ? "T?" : tierLabel(Number(t))) : "Any")),
     );
   };
   q.addEventListener("input", paint);

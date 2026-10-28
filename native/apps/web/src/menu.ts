@@ -1269,6 +1269,8 @@ export function showLoading(map: string): LoadingView {
     async stage(text, frac, detail = "") {
       const l = S.loading;
       if (!l) return;
+      // Stage timings for the devtools timeline and tools/perf/hitch-probe.ts.
+      if (l.stage.textContent !== text) performance.mark(`loading: ${text}`);
       l.stage.textContent = text;
       l.detail.textContent = detail;
       l.bar.classList.toggle("indeterminate", frac === null);

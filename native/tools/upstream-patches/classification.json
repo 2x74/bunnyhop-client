@@ -166,7 +166,7 @@
   },
   {
     "path": "apps/web/src/net/hud.ts",
-    "classification": "native patch",
+    "classification": "dropped 042dca41: menu builds use the chat-hud adapter; take upstream",
     "baseline": "a7687f396927511db5126da5da7eda76532587c5"
   },
   {

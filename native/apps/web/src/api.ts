@@ -421,7 +421,7 @@ export interface PointsRecord {
   runId: string;
   /** What the record scores on that board (Overall: style-weighted; a style: raw). */
   points: number;
-  /** What it adds to the total after the 0.975-per-place weighting. */
+  /** What it adds to the total after the per-place weighting (RECORD_WEIGHTING). */
   counted: number;
 }
 
@@ -485,6 +485,8 @@ export interface Profile {
     styleMaps: Record<string, number>;
     clearedMaps: string[];
   };
+  /** The author names staff linked to this player and the maps carrying them (apps/api src/mappers.ts); null when not a mapper. */
+  mapper?: { authors: string[]; maps: { name: string; title: string; tier: number | null; ranked: boolean; author: string }[] } | null;
   /**
    * Followers / following / friends (apps/api src/social.ts followCounts); `you`: how a signed-in visitor stands with
    * this player. Absent from older APIs.
@@ -1089,6 +1091,10 @@ export const api = {
   },
   async maps(style = "autohop"): Promise<MapSummary[]> {
     return json<MapSummary[]>(`/maps?style=${encodeURIComponent(style)}`);
+  },
+  /** Linked author names -> the player (apps/api src/mappers.ts), keyed by the lowercased author. */
+  async mappers(): Promise<Record<string, { author: string; id: string; name: string }>> {
+    return (await json<{ authors: Record<string, { author: string; id: string; name: string }> }>("/mappers")).authors;
   },
   /** Newest personal bests across all ranked boards (rank 1 = new world record). */
   async recentRecords(style = "autohop", limit = 6): Promise<RecentRecord[]> {

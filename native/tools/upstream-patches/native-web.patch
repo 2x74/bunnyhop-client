@@ -98,12 +98,13 @@ diff --git a/apps/web/src/net/scoreboard.ts b/apps/web/src/net/scoreboard.ts
 new file mode 100644
 --- /dev/null
 +++ b/apps/web/src/net/scoreboard.ts
-@@ -0,0 +1,105 @@
+@@ -0,0 +1,106 @@
 +// Shared DOM scoreboard: usable by web gameplay and the native room menu.
 +import "./net.css";
 +import {clear,h} from "../ui/dom";
 +import {formatTime} from "../timer";
 +import {styleLabel} from "../styles";
++import {clampTier,tierLabel} from "../tiers";
 +import type {StaffRole} from "../progression";
 +import type {RankTag} from "./protocol";
 +import type {PlayerMarks} from "../creators";
@@ -188,7 +189,7 @@ new file mode 100644
 +          "div.sb-map",
 +          null,
 +          h("b", null, head.map),
-+          head.tier ? h(`span.badge.tier.t${head.tier}`, null, `T${head.tier}`) : null,
++          head.tier ? h(`span.badge.tier.t${clampTier(head.tier)}`, null, tierLabel(head.tier)) : null,
 +          h("span.dim", null, ` · ${head.timeLeft}`),
 +          head.nextMap ? h("span.dim", null, ` · next: ${head.nextMap}`) : null,
 +        ),
@@ -250,7 +251,7 @@ new file mode 100644
 diff --git a/apps/web/src/social/dock.ts b/apps/web/src/social/dock.ts
 --- a/apps/web/src/social/dock.ts
 +++ b/apps/web/src/social/dock.ts
-@@ -631,7 +631,7 @@
+@@ -633,7 +633,7 @@
    new MutationObserver(sync).observe(document.body, { attributes: true, attributeFilter: ["class", "data-screen"] });
    sync();
    // Esc closes the panel before the menu sees it.
@@ -631,7 +632,7 @@ diff --git a/apps/web/src/ui/profile.ts b/apps/web/src/ui/profile.ts
  import { whisper } from "../notify";
  import { playerGlowControls } from "./player-glow-controls";
  import { DOTS } from "../social/dock";
-@@ -34,7 +35,7 @@
+@@ -35,7 +36,7 @@
  import { mouseFromPrefs } from "../mouse-settings";
  import { prefs } from "./settings";
  import { mouseProfileEditor, mouseProfileStats } from "./mouse-profile";
@@ -640,7 +641,7 @@ diff --git a/apps/web/src/ui/profile.ts b/apps/web/src/ui/profile.ts
  import { countryPicker } from "./country-picker";
  import { api, ApiError, ApiUnavailable, lastKnownMe, type PlayerGauntlets, type PointsRecord, type Profile, type RunCard } from "../api";
  import { COSMETICS, supporterItem, type CosmeticChoice } from "../progression";
-@@ -168,11 +169,14 @@
+@@ -169,11 +170,14 @@
      root.removeAttribute("aria-busy");
      return root;
    }
@@ -655,7 +656,7 @@ diff --git a/apps/web/src/ui/profile.ts b/apps/web/src/ui/profile.ts
        render(root, p, a, open, tabs, p.player.id === early.id ? early : { id: p.player.id });
        if (ownTabs) root.prepend(tabs);
      })
-@@ -190,6 +194,7 @@
+@@ -191,6 +195,7 @@
  // ---------------------------------------------------------------------------------------------
  
  function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileOpen, tabsHost: HTMLElement, early: EarlyReads): void {
@@ -663,7 +664,7 @@ diff --git a/apps/web/src/ui/profile.ts b/apps/web/src/ui/profile.ts
    const lo = new Loadout(p);
    const news = NewTracker.forProfile(p);
    let featuredIds = p.featuredAuto ? [] : p.featured.map((r) => r.runId);
-@@ -471,9 +476,11 @@
+@@ -472,9 +477,11 @@
      known.set(run.runId, run);
      const next = featuredIds.includes(run.runId) ? featuredIds.filter((x) => x !== run.runId) : [...featuredIds, run.runId].slice(-5);
      try {
@@ -764,7 +765,7 @@ new file mode 100644
 diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
 --- a/apps/web/src/api.ts
 +++ b/apps/web/src/api.ts
-@@ -724,11 +724,23 @@
+@@ -726,11 +726,23 @@
    if (m !== "GET" && m !== "HEAD") writes++;
  };
  
@@ -790,7 +791,7 @@ diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
    } catch (e) {
      if (e instanceof ApiUnavailable) throw e;
      throw new ApiUnavailable();
-@@ -737,24 +749,26 @@
+@@ -739,24 +751,26 @@
    return res;
  }
  
@@ -823,7 +824,7 @@ diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
    if (!res.ok) {
      if (!body?.error) throw new ApiUnavailable();
      throw new ApiError(res.status, body.error, body.message ?? `HTTP ${res.status}`, body as Record<string, unknown>);
-@@ -923,19 +937,19 @@
+@@ -925,19 +939,19 @@
     * reserved, ...), 409 "taken" (body.suggestion; registered players), 429 "rename_limit". Guests asking for a taken
     * name get a numbered variant: the result has nameAdjusted.
     */
@@ -837,11 +838,10 @@ diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
    },
 -  async setCountry(country: string | null): Promise<{ country: string | null }> {
 -    return json("/me/country", post({ country }));
--  },
--  async setDisplayName(name: string): Promise<User> {
 +  async setCountry(country: string | null, dispatch?: RequestDispatch): Promise<{ country: string | null }> {
 +    return json("/me/country", post({ country }), dispatch);
-+  },
+   },
+-  async setDisplayName(name: string): Promise<User> {
 +  async setDisplayName(name: string, dispatch?: RequestDispatch): Promise<User> {
      // Without a session the server would make a guest for the name: a Wavedash player names their account instead.
      if (wavedashPlayer() && !(await api.me())) throw new ApiUnavailable();
@@ -850,7 +850,7 @@ diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
      setMe(user);
      return user;
    },
-@@ -959,12 +973,12 @@
+@@ -961,12 +975,12 @@
      return json("/me/links", { cache: "no-cache" });
    },
    /** Strict: 400 bad_links names the platform (`body.platform`) and what's wrong. */
@@ -867,18 +867,17 @@ diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
    },
    /** Your support (Settings → Account, the Support page). 401 without a session. */
    async mySupport(): Promise<MySupport> {
-@@ -973,29 +987,29 @@
+@@ -975,29 +989,29 @@
    async giftWallet(): Promise<GiftWallet> {
      return json("/me/gifts", { cache: "no-store" });
    },
 -  async giftPreview(target: GiftTarget): Promise<GiftPreview> {
 -    return json("/me/gifts/preview", post(target));
--  },
--  async sendGifts(target: GiftTarget, requestId: string, maxCost: number): Promise<GiftDelivery> {
--    return json("/me/gifts", post({ ...target, requestId, maxCost }));
 +  async giftPreview(target: GiftTarget, dispatch?: RequestDispatch): Promise<GiftPreview> {
 +    return json("/me/gifts/preview", post(target), dispatch);
-+  },
+   },
+-  async sendGifts(target: GiftTarget, requestId: string, maxCost: number): Promise<GiftDelivery> {
+-    return json("/me/gifts", post({ ...target, requestId, maxCost }));
 +  async sendGifts(target: GiftTarget, requestId: string, maxCost: number, dispatch?: RequestDispatch): Promise<GiftDelivery> {
 +    return json("/me/gifts", post({ ...target, requestId, maxCost }), dispatch);
    },
@@ -908,7 +907,7 @@ diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
    },
    /** The About page's thank-you list (names of supporters who opted in). */
    async supporters(): Promise<{ names: string[]; top: TopSupporter[] }> {
-@@ -1006,8 +1020,8 @@
+@@ -1008,8 +1022,8 @@
      return json<AccountView>("/me/account", { cache: "no-store" });
    },
    /** Removes a sign-in method (refused for the last one: ApiError 400 "last_method"). */
@@ -919,7 +918,7 @@ diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
      setMe(v.user);
      return v;
    },
-@@ -1040,23 +1054,28 @@
+@@ -1042,23 +1056,28 @@
      return json<OnboardingState>("/me/onboarding", post(o));
    },
    /** Discord-linked players: show (or hide) their Discord avatar publicly. Off by default; there are no uploads. */
@@ -954,7 +953,7 @@ diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
    async playerStats(id: string): Promise<{ totals: { verifiedRuns: number; jumps: number; playtimeSeconds: number; runTimeMs: number; mapsCompleted: number }; styles: { style: string; runs: number; maps: number }[]; maps: { map: string; runs: number }[]; activity: { at: number; runs: number }[] }> {
      return json(`/players/${encodeURIComponent(id)}/stats`);
    },
-@@ -1095,7 +1114,7 @@
+@@ -1101,7 +1120,7 @@
     * Uploads the server refuses outright (unranked map, zone/build mismatch, rate limit, ...) resolve to
     * { id: "", status: "rejected", reason, code } rather than throwing.
     */
@@ -963,7 +962,7 @@ diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
      // ?room=<id>: played in a multiplayer room, so the room announces the verified result (PB / top 10 / SR / WR).
      // &race=<id>: a run for the room's race you're in (net/race.ts): the room ties it to the race.
      // ?gauntlet=<attemptId>: a run in a gauntlet attempt (gauntlet/): the reply says whether it became the next split.
-@@ -1114,15 +1133,15 @@
+@@ -1120,15 +1139,15 @@
        if (opts.mouse) form.append("mouse", JSON.stringify(opts.mouse));
        init = { method: "POST", body: form };
      }
@@ -982,7 +981,7 @@ diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
    },
    // --- gauntlets
    async gauntlets(): Promise<GauntletHub> {
-@@ -1238,16 +1257,16 @@
+@@ -1244,16 +1263,16 @@
      return json("/me/cosmetics", { cache: "no-cache" });
    },
    /** Partial update; throws ApiError(400, "bad_cosmetic") naming the slot when an item is locked or unknown. */
@@ -1234,19 +1233,6 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
    let v = floorViews.get(core);
    if (!v || v.buffer !== x.memory.buffer || v.byteOffset !== ptr || v.length !== len) floorViews.set(core, (v = new Float32Array(x.memory.buffer, ptr, len)));
    return v;
-diff --git a/apps/web/src/net/hud.ts b/apps/web/src/net/hud.ts
---- a/apps/web/src/net/hud.ts
-+++ b/apps/web/src/net/hud.ts
-@@ -4,9 +4,6 @@
- 
- import "./net.css";
- import { clear, h } from "../ui/dom";
--import { formatTime } from "../timer";
--import { styleLabel } from "../styles";
--import type { StaffRole } from "../progression";
- import type { RankTag } from "./protocol";
- import type { PlayerMarks } from "../creators";
- import { countryFlag } from "../ui/country-flag";
 diff --git a/apps/web/src/ui/player-glow-controls.ts b/apps/web/src/ui/player-glow-controls.ts
 --- a/apps/web/src/ui/player-glow-controls.ts
 +++ b/apps/web/src/ui/player-glow-controls.ts

@@ -3,6 +3,7 @@
 // hero for a live room's backdrop, and the tier in the game's tier colour ("T3"). The index is the one the game reads
 // (/index.json); a map not in it gets its initials on a hue of its own. Plain DOM; no game UI code.
 
+import { clampTier, tierLabel } from "../tiers";
 import { h } from "./core";
 
 interface Entry {
@@ -97,8 +98,8 @@ export function mapArt(name: string, cls = ""): HTMLElement {
 
 /** "T3" in its tier colour ("T?" when unrated). */
 export function tierTag(tier: number | null | undefined): HTMLElement {
-  const t = tier && Number.isFinite(tier) ? Math.min(6, Math.max(1, Math.round(tier))) : null;
-  return h("span", { class: `tier t${t ?? "x"}`, title: t ? `Tier ${t}` : "Unrated" }, t ? `T${t}` : "T?");
+  const t = clampTier(tier);
+  return h("span", { class: `tier t${t ?? "x"}`, title: t ? `Tier ${tier}` : "Unrated" }, tierLabel(t));
 }
 
 /** A map line: chip, name, tier, and an optional track ("b1"). `href`: the name links there. */

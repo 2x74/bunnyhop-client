@@ -1,4 +1,5 @@
 import { videoGrade, VIDEO_LIMITS, type VideoGrade } from "../video-settings";
+import { ANGLE_SPEED_KEY_RANGE, YAW_SPEED_RANGE } from "../turn-binds";
 import type { LightingProfileId } from "../graphics/profiles";
 import { graphicsPreset as lookPreset, type GraphicsPreset as LookPreset } from "../graphics/presets";
 import { DEFAULT_MOUSE_DPI } from "../mouse-settings";
@@ -59,6 +60,7 @@ export type Action =
   | "cpNext"
   | "turnLeft"
   | "turnRight"
+  | "turnFast"
   // Weapons (binds.ts WEAPON_ACTIONS): slot requests, drop and reload for the guns some maps hand out (physics v5).
   | "slot1"
   | "slot2"
@@ -151,6 +153,10 @@ export interface Prefs {
   rawInput: boolean;
   /** Null binds (null-binds.ts): with A + D or W + S held, the key pressed last wins. Off by default. */
   nullBinds: boolean;
+  /** CS:S `cl_yawspeed`: +left / +right, degrees per second (turn-binds.ts YAW_SPEED_RANGE). Fixed per recording. */
+  yawSpeed: number;
+  /** CS:S `cl_anglespeedkey`: the turn speed's multiplier while Fast turn is held (ANGLE_SPEED_KEY_RANGE). */
+  angleSpeedKey: number;
   /** Drop lone impossible mouse reports (browser pointer-lock jumps) and the first event after locking (mouse-filter.ts). */
   spikeFilter: boolean;
   /** Timestamped input (timed-input.ts): each tick takes the mouse motion and movement keys made before it, not the
@@ -407,6 +413,7 @@ export const ACTIONS: { id: Action; label: string }[] = [
   { id: "cpNext", label: "Next checkpoint" },
   { id: "turnLeft", label: "Turn left (+left)" },
   { id: "turnRight", label: "Turn right (+right)" },
+  { id: "turnFast", label: "Fast turn (+speed)" },
   { id: "slot1", label: "Primary weapon" },
   { id: "slot2", label: "Pistol" },
   { id: "slot3", label: "Knife" },
@@ -473,6 +480,8 @@ export const DEFAULT_PREFS: Prefs = {
   invertY: false,
   rawInput: true,
   nullBinds: false,
+  yawSpeed: 210,
+  angleSpeedKey: 2,
   spikeFilter: true,
   timedInput: true,
   inputStats: false,
@@ -540,6 +549,12 @@ const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 function migrate(raw: Record<string, unknown>): Record<string, unknown> {
   if (typeof raw.verticalSensitivity !== "number" || !Number.isFinite(raw.verticalSensitivity)) delete raw.verticalSensitivity;
   else raw.verticalSensitivity = Math.max(0.01, Math.min(100, raw.verticalSensitivity));
+  // Turn speeds: within what a replay may record (turn-binds.ts); a broken one falls back to the default.
+  for (const [key, [lo, hi]] of [["yawSpeed", YAW_SPEED_RANGE], ["angleSpeedKey", ANGLE_SPEED_KEY_RANGE]] as const) {
+    const v = raw[key];
+    if (typeof v !== "number" || !Number.isFinite(v)) delete raw[key];
+    else raw[key] = Math.max(lo, Math.min(hi, v));
+  }
   const graphics = raw.graphics;
   if (graphics && typeof graphics === "object" && !Array.isArray(graphics)) {
     const g = graphics as Record<string, unknown>;

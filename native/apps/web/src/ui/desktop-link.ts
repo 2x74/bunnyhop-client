@@ -29,6 +29,8 @@ export function desktopDownloadUrl(): string {
 
 const RELEASES = "https://github.com/8tp/bunnyhop-client/releases/latest";
 const SOURCE = "https://github.com/8tp/bunnyhop-client";
+/** luna's native client (C++, its own engine around the same game core): the other desktop option. */
+const NATIVE_RELEASES = "https://github.com/2x74/bunnyhop-client/releases";
 
 function osName(): string | null {
   const p = ((navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.userAgent).toLowerCase();
@@ -38,7 +40,7 @@ function osName(): string | null {
   return null;
 }
 
-/** The "Desktop app" popup: what the client is, the version, and where to get it. */
+/** The "Desktop app" popup: what the client is, the version, and where to get it; then the native client, the other one. */
 export function openDesktopApp(): void {
   if (document.querySelector("dialog.desktop-dialog")) return;
   const os = osName();
@@ -60,6 +62,9 @@ export function openDesktopApp(): void {
         ext("Other downloads", RELEASES),
         ext("Source code", SOURCE),
       ),
+      h("h3.desktop-sub", null, "Native client (beta)"),
+      h("p", null, "A separate client written in C++ by luna, built around the same game core but without a browser. It reads the mouse directly, like m_rawinput 2 in CS:S, which some players find smoother. Its menus follow the browser game's, and its runs count once its build is reviewed. It's newer, so expect rough edges and updates by hand."),
+      h("div.desktop-acts", null, ext("Native client releases", NATIVE_RELEASES)),
     ),
   );
   d.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Escape") { e.preventDefault(); d.close(); } });

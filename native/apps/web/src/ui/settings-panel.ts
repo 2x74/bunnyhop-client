@@ -49,6 +49,7 @@ import { ssjRows } from "../ssj";
 import { movementRows } from "../movement-stats";
 import { requestRace } from "../player/race";
 import { guardSideMouseButtons, mouseCode } from "../binds";
+import { ANGLE_SPEED_KEY_RANGE, YAW_SPEED_RANGE } from "../turn-binds";
 import "./settings.css";
 import { nativeClient, openClientSettings } from "../client-bridge";
 import { GHOST_CSS, type GhostKind } from "../player/colors";
@@ -526,7 +527,7 @@ function ghostDot(kind: GhostKind, r: HTMLElement): HTMLElement {
 }
 
 const BIND_GROUPS: [string, Action[]][] = [
-  ["Movement", ["forward", "back", "left", "right", "jump", "duck", "turnLeft", "turnRight"]],
+  ["Movement", ["forward", "back", "left", "right", "jump", "duck", "turnLeft", "turnRight", "turnFast"]],
   ["Run", ["restart", "restartBonus", "restartMain", "setStart", "clearStart", "cycleStyle", "mainMenu"]],
   ["Show / hide", ["keysOverlay", "hideUi", "viewmodel", "thirdPerson", "flashlight", "mute", "nextTrack"]],
   ["Carrot", ["attack", "attack2", "inspect"]],
@@ -572,6 +573,7 @@ const BIND_KEYWORDS: Partial<Record<Action, string>> = {
   cpNext: "checkpoint next forward practice",
   turnLeft: "+left turn left keyboard yaw arrow cl_yawspeed mouse4 mouse5 ranked",
   turnRight: "+right turn right keyboard yaw arrow cl_yawspeed mouse4 mouse5 ranked",
+  turnFast: "+speed fast turn quick turn around 180 keyboard yaw arrow cl_anglespeedkey ranked",
   slot1: "weapon gun primary slot 1 shotgun rifle sniper",
   slot2: "weapon gun pistol secondary slot 2 glock usp",
   slot3: "weapon knife carrot slot 3",
@@ -630,6 +632,16 @@ function keysSection(ctx: Ctx): SettingsContent {
             info: "When you hold A and D together, the last one you pressed wins instead of both cancelling out. Same for W and S.",
             desc: "Letting go of the newer key goes back to the one still held. Works in every style except Legit Scroll, and always in practice.",
             keywords: "null bind binds nulls snap tap socd last input priority a d w s cancel overlap strafe script",
+          }),
+          range("Turn speed", () => P().yawSpeed, (v) => up((p) => (p.yawSpeed = Math.round(v))), {
+            min: YAW_SPEED_RANGE[0], max: YAW_SPEED_RANGE[1], step: 5, unit: "°/s",
+            desc: "How fast Turn left and Turn right turn the view. CS:S cl_yawspeed (default 210). A change applies from your next restart.",
+            keywords: "cl_yawspeed turn speed yaw rate +left +right keyboard arrow",
+          }),
+          range("Fast turn", () => P().angleSpeedKey, (v) => up((p) => (p.angleSpeedKey = Math.round(v * 20) / 20)), {
+            min: ANGLE_SPEED_KEY_RANGE[0], max: ANGLE_SPEED_KEY_RANGE[1], step: 0.05, unit: "×",
+            desc: "Turn speed multiplier while Fast turn is held. CS:S cl_anglespeedkey.",
+            keywords: "cl_anglespeedkey +speed fast turn quick 180 multiplier",
           }),
         ),
         group(carrot[0], ...carrot[1].map(bindRow)),
@@ -978,7 +990,7 @@ const BUILTIN: Section[] = [
   { id: "mouse", label: "Mouse & view", blurb: "", order: 10, render: mouseSection, reset: resetKeys("sensitivity", "verticalSensitivityEnabled", "verticalSensitivity", "dpi", "dpiConfirmed", "dpiHidden", "invertY", "rawInput", "spikeFilter", "timedInput", "inputStats", "fov") },
   { id: "crosshair", label: "Crosshair", blurb: "", order: 20, render: crosshairSection, reset: resetKeys("crosshair") },
   { id: "hud", label: "HUD", blurb: "", order: 30, render: hudSection, reset: resetKeys("hud", "showZones", "triggers") },
-  { id: "keys", label: "Keys", blurb: "Click a slot, then press a key. Backspace clears.", order: 40, render: keysSection, reset: resetKeys("binds", "holdRestart", "autoRestart", "practice", "nullBinds") },
+  { id: "keys", label: "Keys", blurb: "Click a slot, then press a key. Backspace clears.", order: 40, render: keysSection, reset: resetKeys("binds", "holdRestart", "autoRestart", "practice", "nullBinds", "yawSpeed", "angleSpeedKey") },
   { id: "ghost", label: "Ghosts & players", blurb: "", order: 50, render: ghostSection, reset: resetKeys("showGhost", "ghost", "tags", "showPlayerGlow", "firstPersonGlow") },
   { id: "graphics", label: "Graphics", blurb: "", order: 60, render: graphicsSection, reset: () => void chooseGraphicsPreset("source").then(() => { resetKeys("graphics")(); up((p) => (p.models = clone(DEFAULT_PREFS.models))); }) },
   { id: "audio", label: "Audio", blurb: "", order: 70, render: audioSection, reset: resetKeys("volume") },

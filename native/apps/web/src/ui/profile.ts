@@ -6,6 +6,7 @@ import { withMenu, type MenuItem } from "../social/menu";
 import { profileSocial } from "./profile-social";
 import { openFeedback } from "../feedback/state";
 import { profileGauntlets } from "./profile-gauntlets";
+import { profileMapper } from "./profile-mapper";
 import { playerStatsSection, type PlayerStats } from "./stats-screen";
 import { withReplayViews } from "./replay-views";
 import { openGiftDialog } from "./gifting";
@@ -548,7 +549,7 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
       : null;
     const { points, gauntlets, stats } = early;
     Object.assign(early, { points: undefined, gauntlets: undefined, stats: undefined });
-    return h("div.pf-ov", null, featBox, next, h("div.pf-ov-row", null, recent, ranks), topPoints(p, points), profileGauntlets(p.player.id, gauntlets), playerStatsSection(p.player.id, { compact: true, early: stats }));
+    return h("div.pf-ov", null, featBox, next, h("div.pf-ov-row", null, recent, ranks), topPoints(p, points), profileMapper(p), profileGauntlets(p.player.id, gauntlets), playerStatsSection(p.player.id, { compact: true, early: stats }));
   }
 
   // --- runs (virtualised)

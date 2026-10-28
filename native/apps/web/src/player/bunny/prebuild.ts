@@ -6,11 +6,13 @@
 //   await prebuildBunny(outfit, loadout)   geometry built in a worker (prebuild-worker.ts) and seeded into the caches,
 //                                          so the BunnyModel built afterwards finds it there (no-op when cached)
 //   await compileModel(renderer, root, camera, scene)   its programs compiled (KHR_parallel_shader_compile where
-//                                          available) before it's added to the scene
+//                                          available) before it's added to the scene, for the screen and the render
+//                                          targets the look draws the scene into (graphics/warm-programs.ts)
 //
 // Any failure (no module workers, a worker error) resolves anyway: the model then builds on the main thread as before.
 
 import * as THREE from "three";
+import { warmPrograms } from "../../graphics/warm-programs";
 import type { CosmeticLoadout } from "../../loadout";
 import { hasCrownGeometry, seedCrownGeometry } from "./crown";
 import { hasHatGeometry, seedHatGeometry } from "./hats";
@@ -111,13 +113,14 @@ export function prebuildBunny(outfit: string | null | undefined, loadout: Cosmet
 }
 
 /**
- * Compiles the programs of a model that isn't in the scene yet (renderer.compileAsync, fog / lights from `scene`), so
- * its first frame doesn't wait on the driver. Resolves after `timeoutMs` at the latest.
+ * Compiles the programs of a model that isn't in the scene yet (warmPrograms: compileAsync for each output the look
+ * draws `scene` to, fog / lights from `scene`), so its first frame doesn't wait on the driver. Resolves after
+ * `timeoutMs` at the latest.
  */
 export function compileModel(renderer: THREE.WebGLRenderer, root: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene, timeoutMs = 4000): Promise<void> {
   let timer = 0;
   return Promise.race([
-    renderer.compileAsync(root, camera, scene).then(() => {}),
+    warmPrograms(renderer, root, camera, scene),
     new Promise<void>((resolve) => (timer = window.setTimeout(resolve, timeoutMs))),
   ])
     .catch(() => {})

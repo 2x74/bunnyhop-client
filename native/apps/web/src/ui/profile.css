@@ -70,7 +70,7 @@ body.potato .pc { transform: none; }
 .pc-group { font-size: calc(30 * var(--u)); font-weight: 850; color: var(--rank); line-height: 1.05; letter-spacing: -0.02em; }
 .pc-rank-line { font-size: calc(16 * var(--u)); color: var(--text); }
 .pc-points { font-size: calc(15 * var(--u)); color: var(--dim); }
-.pc-bars { display: grid; grid-template-columns: repeat(6, 1fr); gap: calc(8 * var(--u)); margin-top: calc(6 * var(--u)); }
+.pc-bars { display: grid; grid-template-columns: repeat(7, 1fr); gap: calc(8 * var(--u)); margin-top: calc(6 * var(--u)); }
 .pc-bar { display: flex; flex-direction: column; align-items: center; gap: calc(3 * var(--u)); }
 .pc-bar-track { position: relative; width: 100%; height: calc(40 * var(--u)); border-radius: calc(4 * var(--u)); background: rgba(255, 255, 255, 0.07); overflow: hidden; }
 .pc-bar-fill { position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--f) * 100%); min-height: 0; background: var(--tc); opacity: calc(0.55 + var(--full) * 0.45); }
@@ -127,7 +127,7 @@ body.potato .pc { transform: none; }
 .pc-frame-plain { --frame: #2a3040; }
 .pc-frame-steel { --frame: linear-gradient(135deg, #5d6577 0%, #c9d1de 28%, #6b7385 50%, #aeb7c6 76%, #5d6577 100%); }
 .pc-frame-mint { --frame: linear-gradient(135deg, #1f5a35 0%, #5ee08a 35%, #2d7a43 60%, #8cf5a6 85%, #1f5a35 100%); }
-.pc-frame-tiers { --frame: linear-gradient(90deg, var(--tier-1), var(--tier-2), var(--tier-3), var(--tier-4), var(--tier-5), var(--tier-6)); }
+.pc-frame-tiers { --frame: linear-gradient(90deg, var(--tier-1), var(--tier-2), var(--tier-3), var(--tier-4), var(--tier-5), var(--tier-6), var(--tier-7)); }
 .pc-frame-ember { --frame: linear-gradient(135deg, #7a1020 0%, #ff5468 30%, #ff9a3c 55%, #ff5468 80%, #7a1020 100%); }
 .pc-frame-violet { --frame: linear-gradient(135deg, #3a1a5a 0%, #c477ff 30%, #6a3ab0 55%, #e2b8ff 80%, #3a1a5a 100%); }
 .pc-frame-gold { --frame: linear-gradient(135deg, #8a5a12 0%, #ffe08a 22%, #c8891e 45%, #fff1b8 62%, #b07a1c 82%, #ffd45e 100%); }
@@ -158,7 +158,7 @@ body.potato .pc { transform: none; }
 .tk.got { color: var(--ring); background: color-mix(in srgb, var(--ring) 14%, #12151c); box-shadow: inset 0 0 0 2px var(--ring), 0 0 0.8rem color-mix(in srgb, var(--ring) 25%, transparent); }
 .tk.r0 { --ring: #c98a50; } .tk.r1 { --ring: #b9c3d6; } .tk.r2 { --ring: #f2b628; } .tk.r3 { --ring: #b98cff; }
 .tk.r3.got { background: linear-gradient(135deg, rgba(255, 122, 154, 0.22), rgba(121, 210, 255, 0.22), rgba(185, 140, 255, 0.28)), #12151c; }
-.tk.got.t1, .tk.got.t2, .tk.got.t3, .tk.got.t4, .tk.got.t5, .tk.got.t6 { color: var(--tc); }
+.tk.got.t1, .tk.got.t2, .tk.got.t3, .tk.got.t4, .tk.got.t5, .tk.got.t6, .tk.got.t7 { color: var(--tc); }
 .tk-sm { width: 1.6rem; height: 1.6rem; }
 .tk-lg { width: 3.4rem; height: 3.4rem; }
 .tk-prog { position: absolute; left: 12%; right: 12%; bottom: 8%; height: 3px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
@@ -274,6 +274,8 @@ button.pf-count:focus-visible { outline: none; box-shadow: var(--ring); border-r
 .pf-rows { display: flex; flex-direction: column; }
 .pf-run { --cols: minmax(0, 1fr) 5.4rem 3.6rem 3.4rem 4.2rem 9.4rem; position: relative; display: grid; grid-template-columns: var(--cols); align-items: center; gap: var(--sp-3); height: var(--row, 2.6rem); box-sizing: border-box; padding: 0 0.3rem 0 0.85rem; border-bottom: 1px solid var(--ink-3); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; transition: background var(--t-step); }
 .pf-run::before { content: ""; position: absolute; left: 0; top: 0.45rem; bottom: 0.45rem; width: 3px; border-radius: 2px; background: var(--tc, var(--tier-x)); }
+.pf-run.pf-mapper-row { --cols: minmax(0, 1fr) auto; color: inherit; text-decoration: none; }
+.pf-mapper-row .pf-run-pts { display: block; }
 .pf-run.mini { --cols: minmax(0, 1fr) 5.4rem 2.6rem auto; }
 .pf-run:hover, .pf-run:focus-within { background: var(--ink-2); }
 .pf-run.found { animation: pf-found 1.2s ease-out; }

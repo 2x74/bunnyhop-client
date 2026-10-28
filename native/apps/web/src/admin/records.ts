@@ -6,6 +6,7 @@
 import { DISCORD_MOCK_CSS, messageHtml, type PayloadLike } from "./discord-embed";
 import { mapLine } from "./art";
 import { help } from "./core";
+import { TIERS, tierLabel } from "../tiers";
 
 type Child = Node | string | number | null | undefined | false | Child[];
 type View = (root: HTMLElement, params: URLSearchParams, rest: string[]) => Promise<void | (() => void)>;
@@ -199,7 +200,7 @@ export function recordsView(d: RecordsDeps): View {
   return async (root, params) => {
     const f = {
       map: h("input", { type: "search", placeholder: "map contains", value: params.get("map") ?? "" }),
-      tier: h("select", null, [["", "Any tier"], ...[1, 2, 3, 4, 5, 6].map((t) => [String(t), `T${t}`])].map(([v, l]) => h("option", { value: v, selected: (params.get("tier") ?? "") === v }, l))),
+      tier: h("select", null, [["", "Any tier"], ...TIERS.map((t) => [String(t), tierLabel(t)])].map(([v, l]) => h("option", { value: v, selected: (params.get("tier") ?? "") === v }, l))),
       style: h("select", null, STYLES.map(([v, l]) => h("option", { value: v, selected: (params.get("style") ?? "") === v }, l))),
       track: h("select", null, [["", "Main + bonus"], ["main", "Main"], ["bonus", "Bonus"]].map(([v, l]) => h("option", { value: v, selected: (params.get("track") ?? "") === v }, l))),
       posted: h("select", null, [["", "All current WRs"], ["0", "Not posted yet"], ["1", "Posted to Discord"]].map(([v, l]) => h("option", { value: v, selected: (params.get("posted") ?? "") === v }, l))),

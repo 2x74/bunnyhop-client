@@ -1,6 +1,8 @@
 // Viewer timeline: the whole run's speed graph with jump ticks, stage/checkpoint splits, start and finish markers
 // (plus the compare ghost's finish), the region outside the timed run dimmed, a playhead, and a hover readout.
 // Drag anywhere to scrub. One canvas, redrawn only when the playhead or the size changes.
+// A long wait in the spawn before the timer starts (hena, 10-27: 20 s of standing still in a 43 s replay) isn't drawn:
+// the bar starts LEAD_S before the start when the lead-in is longer than LEAD_MIN_S, so the run fills it.
 
 import { formatTime } from "../timer";
 import { h } from "../ui/dom";
@@ -8,6 +10,9 @@ import { palette } from "../palette";
 import type { RunData } from "./player";
 
 const ACCENT = "#ffb43a";
+/** Seconds of lead-in kept on the bar before the timer starts, once there are more than LEAD_MIN_S of them. */
+const LEAD_S = 2;
+const LEAD_MIN_S = 3;
 
 export interface TimelineHooks {
   /** Scrub to a tick (fractional allowed). `final` on pointer release. */
@@ -33,6 +38,9 @@ export class Timeline {
   private dragging = false;
   /** Staff only (staff-lens.ts): the jumps the run's analysis flagged, marked once in amber. */
   private evidence: number[] = [];
+  /** First tick the bar shows (see LEAD_S) and the ticks it spans. */
+  private lo = 0;
+  private span = 1;
 
   constructor(private hooks: TimelineHooks) {
     this.el = h("div.rv-timeline", { role: "slider", "aria-label": "Replay timeline", tabindex: "-1" }, this.canvas, this.tip);
@@ -50,7 +58,7 @@ export class Timeline {
     const tickAt = (e: PointerEvent) => {
       const r = this.canvas.getBoundingClientRect();
       const f = Math.max(0, Math.min(1, (e.clientX - r.left) / Math.max(1, r.width)));
-      return f * (this.data?.n ?? 0);
+      return this.lo + f * this.span;
     };
     this.canvas.addEventListener("pointerdown", (e) => {
       if (!this.data || e.button !== 0) return;
@@ -86,6 +94,9 @@ export class Timeline {
 
   setData(d: RunData): void {
     this.data = d;
+    const lead = Math.round(LEAD_S / d.interval);
+    this.lo = d.startTick && d.startTick * d.interval > LEAD_MIN_S ? d.startTick - lead : 0;
+    this.span = Math.max(1, d.n - this.lo);
     this.bg = null;
     this.dirty = true;
   }
@@ -105,7 +116,7 @@ export class Timeline {
   }
 
   setHead(t: number): void {
-    if (Math.abs(t - this.head) * this.w < (this.data?.n ?? 1) * 0.25) return;
+    if (Math.abs(t - this.head) * this.w < this.span * 0.25) return;
     this.head = t;
     this.dirty = true;
   }
@@ -134,7 +145,9 @@ export class Timeline {
     const dpr = this.dpr;
     const top = Math.round(14 * dpr);
     const bottom = H - Math.round(10 * dpr);
-    const xOf = (t: number) => (t / Math.max(1, d.n)) * W;
+    const lo = this.lo;
+    const span = this.span;
+    const xOf = (t: number) => ((t - lo) / span) * W;
     // Outside the timed run (before start / after finish): dimmed.
     g.fillStyle = "rgba(255,255,255,0.03)";
     g.fillRect(0, 0, W, H);
@@ -147,8 +160,8 @@ export class Timeline {
     const yOf = (v: number) => bottom - (v / max) * (bottom - top);
     const cols = new Float32Array(W);
     for (let x = 0; x < W; x++) {
-      const a = Math.floor((x / W) * d.n);
-      const b = Math.max(a + 1, Math.floor(((x + 1) / W) * d.n));
+      const a = Math.floor(lo + (x / W) * span);
+      const b = Math.max(a + 1, Math.floor(lo + ((x + 1) / W) * span));
       let m = 0;
       for (let t = a; t < b && t <= d.n; t++) if (d.speed[t] > m) m = d.speed[t];
       cols[x] = m;
@@ -180,7 +193,7 @@ export class Timeline {
       const mid = (top + bottom) / 2;
       const amp = (bottom - top) * 0.45;
       for (let x = 0; x < W; x++) {
-        const t = Math.min(d.n, Math.round((x / W) * d.n));
+        const t = Math.min(d.n, Math.round(lo + (x / W) * span));
         const v = this.delta[t];
         if (!Number.isFinite(v)) continue;
         g.fillStyle = v <= 0 ? "rgba(77,255,136,0.35)" : "rgba(255,93,93,0.35)";
@@ -229,13 +242,13 @@ export class Timeline {
     const d = this.data;
     g.clearRect(0, 0, this.w, this.hgt);
     g.drawImage(this.bg, 0, 0);
-    const x = (this.head / Math.max(1, d.n)) * this.w;
+    const x = (Math.max(0, this.head - this.lo) / this.span) * this.w;
     // Played part tint.
     g.fillStyle = "rgba(255,255,255,0.05)";
     g.fillRect(0, 0, x, this.hgt);
     if (this.hover !== null) {
       g.fillStyle = "rgba(255,255,255,0.35)";
-      g.fillRect(Math.round((this.hover / Math.max(1, d.n)) * this.w), 0, this.dpr, this.hgt);
+      g.fillRect(Math.round((Math.max(0, this.hover - this.lo) / this.span) * this.w), 0, this.dpr, this.hgt);
     }
     g.fillStyle = "#fff";
     g.fillRect(Math.round(x - this.dpr), 0, 2 * this.dpr, this.hgt);

@@ -6,7 +6,7 @@
 import { itemSlug } from "./item-slug";
 import { api, type MapSummary } from "../api";
 import { getPB, onPBChange } from "../pb";
-import { clampTier, tierName } from "../tiers";
+import { clampTier, tierLabel, tierName, tierNum } from "../tiers";
 import { formatTime } from "../timer";
 import { accountChip, me, myProfile } from "./account";
 import { suggestNextMaps } from "../progression";
@@ -171,7 +171,7 @@ function mapTile(a: HomeActions, m: MapEntry, o: MapSummary | null, first: boole
     h(
       "span.home-tile-text",
       null,
-      h("span.home-tile-name", null, h("b", null, m.name), h(`span.home-tile-tier.${t ? `t${t}` : "tx"}`, { title: t ? `Tier ${t}, ${tierName(t)}` : "Unrated" }, t ? `T${t}` : "T?")),
+      h("span.home-tile-name", null, h("b", null, m.name), h(`span.home-tile-tier.${t ? `t${t}` : "tx"}`, { title: t ? `Tier ${tierNum(t)}, ${tierName(t)}` : "Unrated" }, tierLabel(t))),
       h(
         "span.home-tile-times",
         null,

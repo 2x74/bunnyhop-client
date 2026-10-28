@@ -366,7 +366,7 @@ const BUILT_IN: ChatCommand[] = [
     name: "setstart",
     aliases: ["ss", "setspawn"],
     help: "save start point",
-    about: "stand still in the start zone: restarts put you on that spot, facing the same way.",
+    about: "stand still: restarts put you on that spot, facing the same way. In the start zone it's an ordinary start. Anywhere else (solo) restarts from it are practice, and the timer still starts from the start zone.",
     group: "run",
     key: "setStart",
     where: "both",
@@ -376,7 +376,7 @@ const BUILT_IN: ChatCommand[] = [
   },
   {
     name: "clearstart",
-    aliases: ["deletestart", "delstart", "ds"],
+    aliases: ["deletestart", "delstart", "ds", "clearspawn", "delspawn"],
     help: "clear start point",
     about: "restarts go back to the usual spot.",
     group: "run",

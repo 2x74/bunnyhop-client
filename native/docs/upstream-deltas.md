@@ -1,6 +1,7 @@
 # Vendored delta audit
 
 Baseline: native `4ca38014`; upstream `9cde9db9d37ea1b0752da6222b10f65e52d5f3d1`.
+Resynced to upstream `042dca417ae08ab7cf3fd37591eae21ef772aab1`; that sync changed only the rows marked 042dca41.
 The audit compared tracked files and both repositories' history, not working-tree timestamps.
 `tools/upstream-patches/classification.json` records the closest release-branch ancestor for each changed file.
 
@@ -18,6 +19,9 @@ The audit compared tracked files and both repositories' history, not working-tre
 | apps/web/src/api.ts; ui/{account-name,card-editor,country-picker,gifting,player-glow-controls,profile,profile-write,support}.ts | Keep account ownership fences; retain upstream API additions. Native heartbeat keeps device-header dispatch fencing | 2460a2b |
 | apps/web/src/feedback/{modal,state}.ts, social/dock.ts | Keep native game metadata and window-scoped event handlers | 5b746a1, 2460a2b |
 | apps/web/src/net/scoreboard.ts, player/model.d.ts, ui/loadout-ui.ts, viewmodel/inspects/third.ts | Keep renderer-free shared exports/imports needed by native builders | 2460a2b |
+| apps/web/src/net/scoreboard.ts | 042dca41: follow upstream's T7+ tier label in the shared scoreboard copy | native-web.patch |
+| apps/web/src/net/hud.ts | 042dca41: dropped. The hunk removed imports the scoreboard still used; menu builds map `net/hud` to `chat-hud.ts` | native-web.patch |
+| apps/web/src/{api,social/dock,ui/profile}.ts | 042dca41: hunks unchanged, refreshed for upstream line offsets | native-web.patch |
 | apps/web/src/assets/audio/manifest.json; optional announcer samples | Preserve native omission of three optional samples and its manifest metadata | ae531d1, 2460a2b |
 | apps/web/src/{badge-glyphs,ui/profile-social}.ts | Whitespace only: take upstream | 2460a2b |
 | apps/web/src/wasm/.gitignore | Keep generated WASM out of Git | ae531d1 |

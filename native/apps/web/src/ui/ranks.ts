@@ -6,7 +6,8 @@
 
 import { appLocation } from "../platform/navigation";
 import { api, ApiUnavailable, type RankBoard, type RankEntry } from "../api";
-import { BONUS_TRACK_FACTOR, fmtPoints, isRankedStyle, PLACEMENT, RANK_GROUPS, STYLE_WEIGHT, TIER_BASE, topPercent } from "../ranking";
+import { BONUS_TRACK_FACTOR, fmtPoints, isRankedStyle, PLACEMENT, RANK_GROUPS, RECORD_WEIGHTING, STYLE_WEIGHT, TIER_BASE, topPercent } from "../ranking";
+import { tierLabel } from "../tiers";
 import { STYLE_DEFS, styleLabel } from "../styles";
 import { h } from "./dom";
 import { icon } from "./icons";
@@ -39,7 +40,7 @@ export function leaveRanksUrl(): void {
 const pts = (p: number) => (Math.abs(p) < 10 ? (Math.round(p * 10) / 10).toLocaleString("en-US") : fmtPoints(p));
 
 function howItWorks(): void {
-  const tiers = Object.entries(TIER_BASE).map(([t, v]) => `T${t} ${v}`).join(" · ");
+  const tiers = Object.entries(TIER_BASE).map(([t, v]) => `${tierLabel(Number(t))} ${v}`).join(" · ");
   const styles = Object.entries(STYLE_WEIGHT).filter(([, w]) => w > 0).map(([s, w]) => `${styleLabel(s)} ×${w}`).join(" · ");
   // Weight-0 styles (Auto-strafe): a ranking of their own, nothing towards Overall.
   const separate = Object.entries(STYLE_WEIGHT).filter(([, w]) => w === 0).map(([s]) => styleLabel(s)).join(" and ");
@@ -62,7 +63,7 @@ function howItWorks(): void {
         h("li", null, `Base by tier: ${tiers}. Bonus tracks: ×${BONUS_TRACK_FACTOR}. Maps without a tier (T?) give no points.`),
         h("li", null, `Placement bonus: WR +${PLACEMENT[0]}, #2 +${PLACEMENT[1]}, #3 +${PLACEMENT[2]}, down to #10 +${PLACEMENT[9]}.`),
         h("li", null, `Overall rank weights styles: ${styles}. Each style also has its own board.${separate ? ` ${separate} is ranked on its own board only and doesn't count towards Overall.` : ""}`),
-        h("li", null, "Your total adds your records best first, each worth 0.975× the one before (like bhoptimer), so a strong set of records beats grinding easy maps."),
+        h("li", null, `Your total adds your records best first, each worth ${RECORD_WEIGHTING}× the one before, so a strong set of records beats grinding easy maps.`),
         h("li", null, "Points update the moment a run is verified, for everyone on that board, and again when a map's tier changes."),
       ),
       h(

@@ -2,7 +2,7 @@
 import type { UserCmd } from './input';
 import { YAW_SET_TELEPORT, YAW_SET_PUSHER, YAW_SET_SENSITIVITY, YAW_SET_TURN, YAW_WITH_TURN, type LookSample } from './replay';
 import { resolveNullBinds } from './null-binds';
-import { TURN_BITS, turnDelta } from './turn-binds';
+import { DEFAULT_TURN_SPEED, TURN_BITS, TURN_HOLD_BITS, turnDelta, type TurnSpeed } from './turn-binds';
 
 export type SamplerSource = 'pointermove' | 'pointerrawupdate' | 'mousemove';
 /**
@@ -12,8 +12,9 @@ export type SamplerSource = 'pointermove' | 'pointerrawupdate' | 'mousemove';
  */
 export interface SamplerOptions { source: SamplerSource; origin: number; capacity?: number; maxGapMs?: number; holdbackMs?: number }
 /** Per pump: the style's bind policy (main.ts tick()): null binds resolve opposite movement keys to the newest press;
- * turn binds (+left / +right) turn the committed view by cl_yawspeed per command, else their bits are dropped. */
-export interface SamplerPolicy { nullBinds?: boolean; turnBinds?: boolean }
+ * turn binds (+left / +right) turn the committed view by cl_yawspeed per command (times cl_anglespeedkey with fast turn
+ * held; turnSpeed, default 210 / x2), else their bits are dropped. */
+export interface SamplerPolicy { nullBinds?: boolean; turnBinds?: boolean; turnSpeed?: TurnSpeed }
 export interface SamplerView { base: number; count: number; k: number; epoch: number; kind: number; pitch: number }
 export type Payload =
   | { type: 'motion'; x: number; y: number; k: number; pitchK: number; delivery: number; quality: string; report?: number }
@@ -41,7 +42,7 @@ export interface SamplerReset {
 export interface RecordEntry { seq: number; originalEventTime: number | null; eventTime: number; arrivalTime: number; committedAtArrival: number; late: boolean; timing: 'event' | 'arrival-only'; payload: Readonly<Payload> }
 const norm = (v: number) => ((v % 360) + 360) % 360;
 const clamp = (v: number) => Math.max(-89, Math.min(89, v));
-const DIRECTION = (1 << 3) | (1 << 4) | (1 << 9) | (1 << 10) | (1 << 2) | TURN_BITS;
+const DIRECTION = (1 << 3) | (1 << 4) | (1 << 9) | (1 << 10) | (1 << 2) | TURN_HOLD_BITS;
 const finite = (v: number) => { if (!Number.isFinite(v)) throw new Error('Nonfinite sampler value'); return v; };
 
 /** Opt-in local evidence stream. Events contain immutable ingestion-time values, never device attestation. */
@@ -176,7 +177,9 @@ export class InputSampler {
     if (this.fault) throw new Error('Sampler overflow: reset required');
     if (now < this.lastPump || now < this.lastArrival) throw new Error('Sampler pump precedes arrival');
     const nullBinds = !!policy.nullBinds, turnBinds = !!policy.turnBinds;
-    this.evidence({type:'pump', now, delivery:{...delivery}, policy:{nullBinds, turnBinds}});
+    // The exact turn speed goes into the evidence too: the importer rebuilds the commands with it (Sol review 10-28).
+    const turnSpeed = policy.turnSpeed ? {yawSpeed:policy.turnSpeed.yawSpeed, angleSpeedKey:policy.turnSpeed.angleSpeedKey} : undefined;
+    this.evidence({type:'pump', now, delivery:{...delivery}, policy:{nullBinds, turnBinds, ...(turnSpeed ? {turnSpeed} : {})}});
     // Preserve the fractional accumulator remainder, discard the oldest excess wall interval.
     const collapsedMs = Math.max(0, now - this.lastPump - this.maxGapMs);
     this.offset += collapsedMs;
@@ -215,10 +218,10 @@ export class InputSampler {
       // Held keys in press order (null binds keep the newest of opposite keys; a pulse is this command's press).
       const held = [...this.keys.values()].filter(k => k.down).sort((a,b) => a.time-b.time || a.seq-b.seq).map(k => k.bits);
       let buttons = (nullBinds ? resolveNullBinds([...held, pulses]) : held.reduce((b,k) => b | k, pulses)) | (slot << 14) | (give << 16);
-      if (!turnBinds) buttons &= ~TURN_BITS;
-      else if ((buttons & TURN_BITS) === TURN_BITS) buttons &= ~TURN_BITS; // opposing turn binds cancel (legacy input.ts)
-      else if (buttons & TURN_BITS) {
-        this.view.base = norm(this.view.base + turnDelta(buttons, 0.01));
+      // Fast turn rides only on a command that turns (input.ts sample).
+      if (!turnBinds || (buttons & TURN_BITS) === TURN_BITS || !(buttons & TURN_BITS)) buttons &= ~TURN_HOLD_BITS; // opposing turn binds cancel (legacy input.ts)
+      else {
+        this.view.base = norm(this.view.base + turnDelta(buttons, 0.01, policy.turnSpeed ?? DEFAULT_TURN_SPEED));
         this.view.kind = this.view.epoch === this.sampledEpoch ? YAW_SET_TURN : this.view.kind | YAW_WITH_TURN;
         this.view.epoch++;
       }

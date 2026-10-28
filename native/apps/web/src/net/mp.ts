@@ -26,6 +26,7 @@ import { formatTime } from "../timer";
 import { IN_WEAPON_COMMAND_MASK } from "../weapon-rules";
 import { ATTACK_STAB } from "../viewmodel/events";
 import { styleLabel } from "../styles";
+import { tierLabel } from "../tiers";
 import { trackName } from "../zones";
 import { SpectatorCamera, type SpectatorMode, type SpectatorTarget } from "../viewer/cameras";
 import { Banner, ChatBox, localLine, NumberMenu, Scoreboard, SpecBar, type ScoreRow } from "./hud";
@@ -695,7 +696,7 @@ export class Multiplayer {
       title: v.kind === "rtv" ? "Rock the vote: next map" : "Vote for the next map",
       items: v.options.map((o, i) => ({
         label: isExtend(o) ? `Extend map (+${o.minutes} min)` : o.map,
-        detail: `${!isExtend(o) && o.tier ? `T${o.tier} · ` : ""}${v.counts[i] ?? 0}`,
+        detail: `${!isExtend(o) && o.tier ? `${tierLabel(o.tier)} · ` : ""}${v.counts[i] ?? 0}`,
         selected: this.myVote === i,
       })),
       footer: `${Math.max(0, Math.ceil((this.conn.toLocal(v.endsAt) - Date.now()) / 1000))} s left · ${v.counts.reduce((a, b) => a + b, 0)}/${this.players.players.size} voted`,
@@ -768,7 +769,7 @@ export class Multiplayer {
     const per = 7;
     const pages = Math.max(1, Math.ceil(pool.length / per));
     const slice = pool.slice(page * per, page * per + per);
-    const items = slice.map((p) => ({ label: p.name, detail: p.tier ? `T${p.tier}` : "" }));
+    const items = slice.map((p) => ({ label: p.name, detail: p.tier ? tierLabel(p.tier) : "" }));
     if (pages > 1) items.push({ label: "More…", detail: `${page + 1}/${pages}` });
     this.menu.show("nominate", {
       title: host ? "Change lobby map" : "Nominate a map",

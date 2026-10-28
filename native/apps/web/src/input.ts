@@ -15,7 +15,7 @@ import { cursorFree, endFreeCursorAsPause, setCursorFree } from "./free-cursor";
 import { MouseFilter, type MotionSample } from "./mouse-filter";
 import { IN_GIVE_SHIFT, IN_WEAPON_COMMAND_MASK } from "./weapon-rules";
 import { countedYaw, norm360, YAW_SET_RAW, YAW_SET_SENSITIVITY, YAW_SET_SPAWN, YAW_SET_TURN, YAW_WITH_TURN, type LookSample } from "./replay";
-import { IN_LEFT, IN_RIGHT, turnDelta } from "./turn-binds";
+import { DEFAULT_TURN_SPEED, IN_LEFT, IN_RIGHT, IN_TURN_FAST, turnDelta, type TurnSpeed } from "./turn-binds";
 import { resolveNullBinds } from "./null-binds";
 
 /**
@@ -37,8 +37,9 @@ export const hasRawUpdate = (): boolean => HAS_RAW_UPDATE;
 /**
  * Above this many raw updates a second the uncapped loop goes back to pointermove for the session (Aimperion
  * RAW_MAX_HZ): an 8 kHz mouse dispatches 8,000 events a second on the main thread for frames that can't use them all.
+ * Headroom over 2,000 so a 2 kHz mouse's jitter across a second boundary doesn't trip it (4 kHz and up still do).
  */
-const RAW_MAX_HZ = 2000;
+const RAW_MAX_HZ = 2500;
 /** Raw updates silent this long while pointermove still carries motion: the raw stream stalled, pointermove takes over. */
 const RAW_STALL_MS = 250;
 /** A refused pointer lock request's reason: the DOMException's name. */
@@ -207,7 +208,7 @@ export class Input {
   pumpSampler(now: number, apply?: (sample: SampledInput) => void, policy: SamplerPolicy = {}): SampledInput[] {
     if (!this.sampler) throw new Error("Sampler is not enabled");
     this.nullBinds = !!policy.nullBinds; // the keys overlay (held) shows what the commands resolve
-    const rows = this.sampler.pump(now, {frames:this.framesSince, events:this.eventsSince, reports:this.reportsSince}, apply, policy);
+    const rows = this.sampler.pump(now, {frames:this.framesSince, events:this.eventsSince, reports:this.reportsSince}, apply, {turnSpeed:this.turnSpeed, ...policy});
     if (rows.length) this.framesSince = this.eventsSince = this.reportsSince = 0;
     this.syncSamplerPreview();
     return rows;
@@ -221,6 +222,8 @@ export class Input {
     if (this.isBound(code)) this.queue({type:"key", code, down:false, bits:0}, e.timeStamp);
   }
   settings: InputSettings = { sensitivity: 2, m_yaw: 0.022, m_pitch: 0.022 };
+  /** The turn binds' rates (cl_yawspeed / cl_anglespeedkey); the session sets them when a recording starts. */
+  turnSpeed: TurnSpeed = { ...DEFAULT_TURN_SPEED };
   /** Request raw (unaccelerated) mouse input when locking. */
   rawInput = true;
   /** The view's pitch as the camera shows it (all motion so far). */
@@ -613,7 +616,7 @@ export class Input {
       e.preventDefault();
       this.heldCodes.add(code); // for actionHeld
       if (a === "attack" || a === "attack2") this.queue({type:"key", code, down:true, bits:a === "attack" ? IN_ATTACK : IN_ATTACK2}, e.timeStamp);
-      else if (!repeat && (a === "turnLeft" || a === "turnRight")) this.queue({type:"key", code, down:true, bits:a === "turnLeft" ? IN_LEFT : IN_RIGHT}, e.timeStamp);
+      else if (!repeat && (a === "turnLeft" || a === "turnRight" || a === "turnFast")) this.queue({type:"key", code, down:true, bits:a === "turnLeft" ? IN_LEFT : a === "turnRight" ? IN_RIGHT : IN_TURN_FAST}, e.timeStamp);
       this.onAction?.(a, code);
     } else this.onKey?.(code);
   }
@@ -849,7 +852,9 @@ export class Input {
       const left = this.actionHeld("turnLeft"), right = this.actionHeld("turnRight");
       if (left !== right) turn = left ? IN_LEFT : IN_RIGHT;
       if (turn) {
-        this.yawBase = norm360(this.yawBase + turnDelta(turn, o.tickInterval));
+        // Fast turn only goes on a command that turns (a lone IN_TURN_FAST is never recorded).
+        if (this.actionHeld("turnFast")) turn |= IN_TURN_FAST;
+        this.yawBase = norm360(this.yawBase + turnDelta(turn, o.tickInterval, this.turnSpeed));
         this.yawKind = this.yawEpoch === this.sampledYawEpoch ? YAW_SET_TURN : this.yawKind | YAW_WITH_TURN;
         this.yawEpoch++;
       }

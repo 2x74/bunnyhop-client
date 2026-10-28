@@ -191,10 +191,10 @@ export function playerCard(p: Profile, o: CardOverrides = {}): HTMLElement {
               const of = s.rankedByTier[t] ?? 0;
               return h(
                 `div.pc-bar.t${t}`,
-                { title: `T${t}: ${n}/${of} maps` },
+                { title: `${tierLabel(t)}: ${n}/${of} maps` },
                 h("span.pc-bar-track", null, h("span.pc-bar-fill", { style: `--f:${of ? n / maxClears : 0};--full:${of ? Math.min(1, n / of) : 0}` })),
                 h("b", null, String(n)),
-                h("small", null, `T${t}`),
+                h("small", null, tierLabel(t)),
               );
             }),
           ),

@@ -9,23 +9,26 @@
 //   placement = WR 1.0, #2 0.75, #3 0.6, #4–#10 0.5 → 0.2, else 0           top-10 bonus
 //   weighted = raw × styleWeight(style)                                     what the overall rank sums
 //
-//   total = Σ weighted[i] × 0.975^i over the player's records sorted best first (bhoptimer's osu!-style weighting)
+//   total = Σ weighted[i] × 0.985^i over the player's records sorted best first (bhoptimer's osu!-style weighting,
+//   flatter than its 0.975)
 //
-// - base(tier) is triangular (T1 10, T2 30, T3 60, T4 100, T5 150, T6 210): one T6 clear is worth 21 T1 clears, so the
-//   overall rank can't be farmed on easy maps. Tiers above 6 clamp to 6; maps with no tier are unranked (0 points).
+// - base(tier) is triangular (T1 10, T2 30, T3 60, T4 100, T5 150, T6 210, T7+ 280): one T6 clear is worth 21 T1
+//   clears, so the overall rank can't be farmed on easy maps. Tiers above 7 clamp to T7+; maps with no tier are unranked
+//   (0 points).
 // - Bonus tracks give a quarter of the main track's base (they're short, and bonus boards are Normal only).
 // - The completion part (the "1 +") guarantees every verified finish counts; quality rewards closing the gap to the WR
 //   on every board, not just the top 10; placement is the SurfTimer-style top-10 bonus.
-// - Overall points = the 0.975-weighted sum of weighted points over every record; style rankings = the same weighted
-//   sum of raw points over that style's records. The weighting (from shavit-rankings) means the 28th-best record counts
+// - Overall points = the 0.985-weighted sum of weighted points over every record; style rankings = the same weighted
+//   sum of raw points over that style's records. The weighting (from shavit-rankings) means the 46th-best record counts
 //   half, so rank comes from a strong set of records rather than from finishing the most maps or re-running the same
-//   map in every style.
+//   map in every style. (Until 2026-10-28 it was bhoptimer's 0.975: the 28th counted half and the 100th 0.08×, so a
+//   player past ~60 records got almost nothing for clearing more T1/T2 maps. research/RANKS.md "Weighting".)
 // - Everything is a pure function of (tier, track, style, ticks, wrTicks, rank), recomputed for a whole board when a
 //   run on it is verified, and for a whole map when its tier/version/pinned zones change.
 
 import { clampTier, type Tier } from "./tiers";
 
-export const TIER_BASE: Record<Tier, number> = { 1: 10, 2: 30, 3: 60, 4: 100, 5: 150, 6: 210 };
+export const TIER_BASE: Record<Tier, number> = { 1: 10, 2: 30, 3: 60, 4: 100, 5: 150, 6: 210, 7: 280 };
 export const BONUS_TRACK_FACTOR = 0.25;
 
 /** Placement bonus by board rank (index 0 = rank 1). Ties share a rank, so tied WRs both get 1.0. */
@@ -45,10 +48,10 @@ export const STYLE_WEIGHT: Record<string, number> = { autohop: 1, legit: 0.8, sc
 /** True if records in this style earn (style-ranking) points: the style has its own ranking. */
 export const isRankedStyle = (style: string): boolean => Object.hasOwn(STYLE_WEIGHT, style);
 
-/** Each record counts 0.975× the one before it (sorted by points, best first). */
-export const RECORD_WEIGHTING = 0.975;
-/** Records past this many add nothing (0.975^500 ≈ 3e-6); bounds the SQL weight table. */
-export const MAX_WEIGHTED_RECORDS = 500;
+/** Each record counts 0.985× the one before it (sorted by points, best first). */
+export const RECORD_WEIGHTING = 0.985;
+/** Records past this many add nothing (0.985^800 ≈ 6e-6); bounds the SQL weight table. */
+export const MAX_WEIGHTED_RECORDS = 800;
 
 export function placementBonus(rank: number): number {
   return rank >= 1 && rank <= PLACEMENT.length ? PLACEMENT[rank - 1] : 0;
@@ -71,7 +74,7 @@ export function recordPointsRaw(r: RecordInput): number {
   return base * (1 + r.wrTicks / r.ticks + placementBonus(r.rank));
 }
 
-/** Points the record adds to the overall rank (before the per-player 0.975 weighting). */
+/** Points the record adds to the overall rank (before the per-player RECORD_WEIGHTING). */
 export function recordPoints(r: RecordInput): number {
   return recordPointsRaw(r) * (STYLE_WEIGHT[r.style] ?? 0);
 }
