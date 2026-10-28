@@ -5,16 +5,14 @@
 
 namespace native {
 
-template<class Action, class Notice>
-class RecoverableAction {
-public:
+template <class Action, class Notice> class RecoverableAction {
+  public:
     RecoverableAction(Action action, Notice notice) : action_(std::move(action)), notice_(std::move(notice)) {}
 
-    template<class... Args>
-    void operator()(Args&&... args) const {
+    template <class... Args> void operator()(Args &&...args) const {
         try {
             action_(std::forward<Args>(args)...);
-        } catch (const std::exception& error) {
+        } catch (const std::exception &error) {
             std::cerr << "Input action: " << error.what() << '\n';
             notice_(error.what());
         } catch (...) {
@@ -23,9 +21,9 @@ public:
         }
     }
 
-private:
+  private:
     Action action_;
     Notice notice_;
 };
 
-}
+} // namespace native

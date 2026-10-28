@@ -25,15 +25,15 @@ inline void atomic_replace(const std::filesystem::path &source, const std::files
 }
 
 // Exclusive creation prevents concurrent saves from sharing a temporary file.
-inline void atomic_write_file(const std::filesystem::path& destination, std::string_view text) {
+inline void atomic_write_file(const std::filesystem::path &destination, std::string_view text) {
     static std::atomic<unsigned long long> sequence = 0;
     auto temporary = destination;
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
     temporary += ".partial-" + std::to_string(stamp) + "-" + std::to_string(sequence.fetch_add(1));
 #ifdef _WIN32
-    FILE* output = _wfopen(temporary.c_str(), L"wbx");
+    FILE *output = _wfopen(temporary.c_str(), L"wbx");
 #else
-    FILE* output = std::fopen(temporary.c_str(), "wbx");
+    FILE *output = std::fopen(temporary.c_str(), "wbx");
 #endif
     if (!output)
         throw std::system_error(errno, std::generic_category(), "Creating temporary file");

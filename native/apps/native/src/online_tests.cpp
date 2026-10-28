@@ -15,7 +15,9 @@ int main() {
     for(const auto &path:{"","/tmp/a","../x","materials/../../a","materials/../a","C:/a","a\\..\\x"})
         check(!native::safe_content_path(path),"unsafe content accepted");
     check(!native::safe_content_path(std::string("materials/a\0.vmt",16)),"NUL path accepted");
-    const auto cache=std::filesystem::temp_directory_path()/native::data_location::from_utf8("Jos\xc3\xa9-\xe6\xb8\xac")/("native-cache-test-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const auto cache =
+        std::filesystem::temp_directory_path() / native::data_location::from_utf8("Jos\xc3\xa9-\xe6\xb8\xac") /
+        ("native-cache-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     struct Cleanup{std::filesystem::path p;~Cleanup(){std::error_code e;std::filesystem::remove_all(p,e);}}cleanup{cache};
     using Bytes=std::vector<uint8_t>;const Bytes bsp{'V','B','S','P','1'},content{'m','a','t'};
     auto digest=[](const Bytes &b){char out[65]{};if(!bh_sha256(b.data(),b.size(),out))throw std::runtime_error("hash");return std::string(out);};
@@ -28,9 +30,8 @@ int main() {
     auto load=[&]{return native::download_map("bhop_test",cache,[](const std::string&){},nullptr,{},[&](const auto &p){latest=p;},fetch);};
     const auto first=load();check(requests==4,"first load fetches detail/BSP/manifest/content");check(std::filesystem::exists(first.content_root/"materials/test.vmt"),"content not materialized");
     const std::atomic_bool prefetch_cancel = false;
-    auto prefetched = std::async(std::launch::async, [&] {
-        return native::prefetch_map("bhop_test", sha, cache, prefetch_cancel, fetch);
-    });
+    auto prefetched = std::async(std::launch::async,
+                                 [&] { return native::prefetch_map("bhop_test", sha, cache, prefetch_cancel, fetch); });
     check(prefetched.get(), "verified worker prefetch failed");
     auto stale = std::async(std::launch::async, [&] {
         return native::prefetch_map("bhop_test", std::string(64, '0'), cache, prefetch_cancel, fetch);

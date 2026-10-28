@@ -21,7 +21,7 @@ class RunVault {
  void ensure()const{for(const auto&p:{root_,root_/"runs",root_/"captures"}){if(std::filesystem::is_symlink(p))throw std::runtime_error("Vault directory is a symbolic link");std::filesystem::create_directories(p);}}
  std::filesystem::path summary_path(const std::string&id)const{if(!valid_id(id))throw std::runtime_error("Invalid vault replay identifier");return root_/"runs"/(id+".json");}
  std::filesystem::path capture_path(const std::string&id)const{if(!valid_id(id))throw std::runtime_error("Invalid vault replay identifier");return root_/"captures"/(id+".png");}
- static void atomic_write(const std::filesystem::path& path, const std::string& value) {
+ static void atomic_write(const std::filesystem::path &path, const std::string &value) {
      if (std::filesystem::is_symlink(path))
          throw std::runtime_error("Vault file is a symbolic link");
      atomic_write_file(path, value);

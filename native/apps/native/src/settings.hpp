@@ -174,13 +174,13 @@ inline void keep_saved_display(Json &saved) {
         saved["fpsLimit"] = 0;
     }
 }
-inline void backup_settings(const std::filesystem::path& file) {
+inline void backup_settings(const std::filesystem::path &file) {
     auto previous = file;
     previous += ".previous";
     std::filesystem::copy_file(file, previous, std::filesystem::copy_options::overwrite_existing);
 }
 
-inline Json load_settings(const std::filesystem::path& file) {
+inline Json load_settings(const std::filesystem::path &file) {
     auto out = default_settings();
     if (!std::filesystem::exists(file))
         return out;
@@ -221,7 +221,7 @@ inline Json load_settings(const std::filesystem::path& file) {
             for (auto bind = entry->begin(); bind != entry->end(); ++bind) {
                 try {
                     out = patch_settings(out, {{"binds", {{bind.key(), bind.value()}}}});
-                } catch (const std::exception& error) {
+                } catch (const std::exception &error) {
                     if (!backed_up)
                         backup_settings(file);
                     backed_up = true;
@@ -232,7 +232,7 @@ inline Json load_settings(const std::filesystem::path& file) {
         }
         try {
             out = patch_settings(out, {{entry.key(), entry.value()}});
-        } catch (const std::exception& error) {
+        } catch (const std::exception &error) {
             if (!backed_up)
                 backup_settings(file);
             backed_up = true;

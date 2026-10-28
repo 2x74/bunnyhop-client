@@ -31,7 +31,8 @@ inline BackdropMap load_backdrop_map(const std::filesystem::path &bsp, const std
         throw std::runtime_error("Backdrop BSP exceeds 32 MiB");
     out.core.reset(bh_create());
     if (!out.core) throw std::runtime_error("Could not create backdrop map context");
-    if (!bh_load_map(out.core.get(), native::data_location::utf8(bsp).c_str(), content.empty() ? nullptr : native::data_location::utf8(content).c_str()))
+    if (!bh_load_map(out.core.get(), native::data_location::utf8(bsp).c_str(),
+                     content.empty() ? nullptr : native::data_location::utf8(content).c_str()))
         throw std::runtime_error(std::string("Backdrop map: ") + bh_last_error(out.core.get()));
     BhSettings settings{};
     bh_default_settings(&settings);

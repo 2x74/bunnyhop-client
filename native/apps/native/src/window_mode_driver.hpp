@@ -9,10 +9,9 @@ namespace native {
 
 // Applies WindowModePolicy to the SDL window for client.cpp: launch, the Esc
 // menu, focus and minimize events, settings changes and Alt+Enter.
-template<class Controller>
-class BasicWindowModeDriver {
-public:
-    BasicWindowModeDriver(Controller& controller, const std::string& chosen)
+template <class Controller> class BasicWindowModeDriver {
+  public:
+    BasicWindowModeDriver(Controller &controller, const std::string &chosen)
         : controller_(controller), policy_(chosen) {}
 
     const WindowModePolicy& policy() const {
@@ -47,8 +46,7 @@ public:
         if (from_focus_loss) {
             policy_.waiting_for_focus = true;
             policy_.pending = true;
-        }
-        else
+        } else
             sync(preferences);
     }
 
@@ -101,11 +99,10 @@ public:
     }
 
 private:
-    Controller& controller_;
-    bool pending_refit_ = false;
-    WindowModePolicy policy_;
+  Controller &controller_;
+  bool pending_refit_ = false;
+  WindowModePolicy policy_;
 };
 
 using WindowModeDriver = BasicWindowModeDriver<WindowController>;
-
 }

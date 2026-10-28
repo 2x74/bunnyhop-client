@@ -164,7 +164,8 @@ void require(bool ok,BhContext *ctx,const char *operation) {
 
 std::string read_text(const std::filesystem::path &path) {
     std::ifstream file(path, std::ios::binary);
-    if (!file) throw std::runtime_error("Cannot open " + native::data_location::utf8(path));
+    if (!file)
+        throw std::runtime_error("Cannot open " + native::data_location::utf8(path));
     return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
 }
 
@@ -183,7 +184,7 @@ std::string base64(const std::string &bytes) {
 std::string file_hash(const std::filesystem::path &path,const std::string &mode="sha256") {
     const auto raw=read_text(path);const std::vector<uint8_t> source(raw.begin(),raw.end());const auto bytes=native::executable_identity_bytes(source,mode);char hash[65]{};
     if(!bh_sha256(reinterpret_cast<const uint8_t *>(bytes.data()),bytes.size(),hash))
-        throw std::runtime_error("Could not hash "+native::data_location::utf8(path));
+        throw std::runtime_error("Could not hash " + native::data_location::utf8(path));
     return hash;
 }
 
@@ -193,7 +194,7 @@ std::filesystem::path executable_path() {
 #elif defined(__linux__)
     return std::filesystem::read_symlink("/proc/self/exe");
 #else
-    return native::data_location::from_utf8(SDL_GetBasePath())/"bunnyhop-native.exe";
+    return native::data_location::from_utf8(SDL_GetBasePath()) / "bunnyhop-native.exe";
 #endif
 }
 
@@ -263,7 +264,8 @@ int run(const Options &opt) {
     // Feedback context (the menu's "Attach game info"): the GPU the game draws with, not the menu web view's.
     const std::string gpu_renderer=[&]{const auto *name=gl.GetString(GL_RENDERER);return name?std::string(reinterpret_cast<const char*>(name)):std::string();}();
     const auto assets=native::resource("native-assets",BUNNYHOP_NATIVE_ASSET_ROOT);
-    const auto menu_path=opt.menu_html==BUNNYHOP_MENU_HTML?native::resource("menu.html",opt.menu_html):native::data_location::from_utf8(opt.menu_html);
+    const auto menu_path = opt.menu_html == BUNNYHOP_MENU_HTML ? native::resource("menu.html", opt.menu_html)
+                                                               : native::data_location::from_utf8(opt.menu_html);
     const auto manifest_path=native::resource("native-manifest.json",BUNNYHOP_NATIVE_MANIFEST);
     NativeHud hud(gl,assets);
     native::MenuGamepad menu_gamepad;
@@ -276,7 +278,8 @@ int run(const Options &opt) {
     if(!pref_path) throw std::runtime_error("Cannot find the native client data directory");
     const std::string isolated=!opt.runtime_smoke.empty()?opt.runtime_smoke:!opt.presentation_smoke.empty()?opt.presentation_smoke:opt.video_smoke;
     namespace data_location=native::data_location;
-    const std::filesystem::path default_root=native::data_location::from_utf8(pref_path); SDL_free(pref_path);
+    const std::filesystem::path default_root = native::data_location::from_utf8(pref_path);
+    SDL_free(pref_path);
     // Settings -> Game data: the folder may live elsewhere (another drive), and a
     // move chosen there runs here, before anything opens the data folder.
     auto location=isolated.empty()?data_location::read(default_root):data_location::Location{default_root,std::nullopt};
@@ -308,7 +311,9 @@ int run(const Options &opt) {
         data_unavailable=true;
         data_startup_notice="Your game data folder "+data_location::utf8(location.active)+" isn't available (is the drive connected?). Using the default folder this session.";
     }
-    const std::filesystem::path cache=!isolated.empty()?native::data_location::from_utf8(isolated)/"data":data_unavailable?default_root:location.active;
+    const std::filesystem::path cache = !isolated.empty()  ? native::data_location::from_utf8(isolated) / "data"
+                                        : data_unavailable ? default_root
+                                                           : location.active;
     std::optional<data_location::Choice> data_choice;std::string data_notice,last_data_state;
     const auto startup_data = native::initialize_data_directory(cache);
     native::Audio audio(assets,cache,!opt.hidden&&!opt.frames);
@@ -452,29 +457,55 @@ int run(const Options &opt) {
     native::NativeWeaponMenu gun_menu;
     bool third_person=false,flashlight=false,hide_players=false,show_scores=false;
     try {const auto path=cache/"start-points.json";if(std::filesystem::exists(path)&&std::filesystem::file_size(path)<=1024*1024)start_points.load(nlohmann::json::parse(read_text(path)));}catch(const std::exception &e){std::cerr<<"Start points: "<<e.what()<<'\n';}
-    auto apply_preferences=[&]() {
+    auto apply_preferences = [&]() {
         menu_state.settings_changed();
         hud_layout.clear();
-        for(const auto &[id,at]:preferences.at("hudLayout").items())hud_layout[id]={at.at("x").get<float>(),at.at("y").get<float>()};
+        for(const auto &[id,at]:preferences.at("hudLayout").items())
+            hud_layout[id] = {at.at("x").get<float>(), at.at("y").get<float>()};
         input_timeline.set_sensitivity(input, preferences.at("sensitivity").get<double>());
-        input.vertical_sensitivity=preferences.at("verticalSensitivity").get<double>();input.separate_vertical=preferences.at("separateVertical").get<bool>();input.invert_y=preferences.at("invertY").get<bool>();
+        input.vertical_sensitivity=preferences.at("verticalSensitivity").get<double>();
+        input.separate_vertical = preferences.at("separateVertical").get<bool>();
+        input.invert_y = preferences.at("invertY").get<bool>();
         input_timeline.rebuild_binds(preferences.at("binds"));
         configured_turns = native::TurnSettings::from_settings(preferences);
         const bool timed_input = !opt.legacy_input && preferences.value("timedInput", true);
         input_timeline.set_timed(timed_input, input, held_codes);
         diagnostics_enabled = preferences.at("mouseDiagnostics").get<bool>();
         limit_queued_frames = preferences.at("limitQueuedFrames").get<bool>();
-        camera_controls.set_sensitivity(input.sensitivity);camera_controls.vertical_sensitivity=input.vertical_sensitivity;camera_controls.separate_vertical=input.separate_vertical;camera_controls.invert_y=input.invert_y;
-        hud.preferences(preferences);audio.preferences(preferences);
+        camera_controls.set_sensitivity(input.sensitivity);
+        camera_controls.vertical_sensitivity = input.vertical_sensitivity;
+        camera_controls.separate_vertical = input.separate_vertical;
+        camera_controls.invert_y = input.invert_y;
+        hud.preferences(preferences);
+        audio.preferences(preferences);
         SDL_GL_SetSwapInterval(opt.frames?0:preferences.at("vsync").get<bool>()?1:0);
         audio.gain(preferences.at("muted").get<bool>()?0:preferences.at("volume").get<float>());
         audio.set_sfx_pack(preferences.at("sfxPack").get<std::string>()=="custom");
         audio.set_music_pack(preferences.at("musicPack").get<std::string>()=="custom");
         video_music_catalog=audio.export_music_catalog(preferences.at("musicPack").get<std::string>()=="custom");
-        if(renderer){renderer->set_player_glow(player_glow);renderer->set_glow_visible(preferences.value("showPlayerGlow",true),preferences.value("firstPersonGlow",false));renderer->set_fov(preferences.at("fov").get<float>());renderer->set_viewmodel(preferences.at("viewmodelFov").get<float>(),preferences.at("viewmodelX").get<float>(),preferences.at("viewmodelY").get<float>(),preferences.at("viewmodelZ").get<float>(),preferences.at("viewmodelLeftHand").get<bool>(),preferences.at("viewmodel").get<bool>(),preferences.at("viewmodelBob").get<float>(),preferences.at("viewmodelSway").get<float>());renderer->set_color_blind(preferences.value("colorBlind",std::string("off")));renderer->set_actor_models(preferences.value("playerModel",std::string("bunny")),preferences.value("ghostModel",std::string("same")));renderer->set_zones_visible(preferences.value("zonesVisible",true));renderer->set_effects_visible(preferences.value("effectsVisible",true));renderer->set_triggers_visible(preferences.value("triggersVisible",false));renderer->set_clips_visible(preferences.value("clipsVisible",false));renderer->set_water_quality(preferences.value("waterQuality",std::string("simple"))=="refracted"?1:0);}
+        if(renderer){
+            renderer->set_player_glow(player_glow);
+            renderer->set_glow_visible(preferences.value("showPlayerGlow", true),
+                                       preferences.value("firstPersonGlow", false));
+            renderer->set_fov(preferences.at("fov").get<float>());
+            renderer->set_viewmodel(
+                preferences.at("viewmodelFov").get<float>(), preferences.at("viewmodelX").get<float>(),
+                preferences.at("viewmodelY").get<float>(), preferences.at("viewmodelZ").get<float>(),
+                preferences.at("viewmodelLeftHand").get<bool>(), preferences.at("viewmodel").get<bool>(),
+                preferences.at("viewmodelBob").get<float>(), preferences.at("viewmodelSway").get<float>());
+            renderer->set_color_blind(preferences.value("colorBlind", std::string("off")));
+            renderer->set_actor_models(preferences.value("playerModel", std::string("bunny")),
+                                       preferences.value("ghostModel", std::string("same")));
+            renderer->set_zones_visible(preferences.value("zonesVisible", true));
+            renderer->set_effects_visible(preferences.value("effectsVisible", true));
+            renderer->set_triggers_visible(preferences.value("triggersVisible", false));
+            renderer->set_clips_visible(preferences.value("clipsVisible", false));
+            renderer->set_water_quality(preferences.value("waterQuality", std::string("simple")) == "refracted" ? 1
+                                                                                                                : 0);
+        }
     };
     apply_preferences();
-    std::string map_id,loading,error,record_path,last_requested_map;
+    std::string map_id, loading, error, record_path, last_requested_map;
     native::ReplayLibrary replay_library(cache);
     native::RunVault run_vault(cache/"run-vault");std::optional<std::pair<std::string,std::string>> pending_vault_capture;
     nlohmann::json load_progress=nullptr;
@@ -550,12 +581,15 @@ int run(const Options &opt) {
         input_clock.reset();
     };
     // from_focus_loss: the window mode change waits until focus returns.
-    auto show_menu=[&](bool on, bool from_focus_loss = false) {
+    auto show_menu = [&](bool on, bool from_focus_loss = false) {
         if (on)
             menu_state.reset();
         if (on)
             input_timeline.keyboard_focus_lost();
-        if(on){replay_controls.dragging=false;replay_orbit_drag=false;}
+        if(on){
+            replay_controls.dragging = false;
+            replay_orbit_drag = false;
+        }
         SDL_SetWindowAlwaysOnTop(window.get(),!on&&preferences.value("alwaysOnTop",false));
         // Hidden before the window goes exclusive, shown once it is composited.
         if (menu && !on)
@@ -566,10 +600,13 @@ int run(const Options &opt) {
             menu->set_visible(true);
         // Each pause re-announces the paused map (a fresh still for a
         // separate GTK window); sent with the menu state once it is visible.
-        if(on&&core&&menu)gameplay_backdrop_due=true;
-        if(on)audio.pause();
+        if(on&&core&&menu)
+            gameplay_backdrop_due = true;
+        if(on)
+            audio.pause();
         resume_wanted=!on&&bool(core);
-        if(resume_wanted) SDL_RaiseWindow(window.get());
+        if(resume_wanted)
+            SDL_RaiseWindow(window.get());
         capture(resume_wanted && focused && !(playback && replay_controls.visible));
         input_scheduler.reset(SDL_GetTicksNS());
         prev = curr;
@@ -623,7 +660,7 @@ int run(const Options &opt) {
         run_event({{"type","reset"}});
         if(practice.active || playback || room.spectator_target || tutorial_practice() || zones.empty() || opt.frames || !opt.menu_smoke.empty()) return;
         const auto stamp=std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-        record_path=data_location::utf8(cache/"replays"/(map_id+"-"+std::to_string(stamp)+".bhr"));
+        record_path = data_location::utf8(cache / "replays" / (map_id + "-" + std::to_string(stamp) + ".bhr"));
         require(bh_record_identity(core.get(),identity.at("build").get<std::string>().c_str()),core.get(),"Setting native release identity");
         require(bh_record_begin(core.get(),"",active_style.c_str(),replay_player.c_str(),100),core.get(),"Starting native recording");
         require(recording_input.begin(core.get(), configured_turns), core.get(), "Setting v29 recording input");
@@ -686,7 +723,12 @@ int run(const Options &opt) {
         BhRunState timing{};bh_run_state(core.get(),&timing);
         if(bound&&action!="toggle"&&!practice.key_allowed(action,timing.status==1)){if(practice.hinted_run!=timing.start_tick){practice.hinted_run=timing.start_tick;toast("Type !cp to use checkpoints and noclip during a run.",3500);}return;}
         if(action=="menu"){practice.menu_open=!practice.menu_open;return;}
-        if(action=="keepVelocity"){preferences["practiceKeepVelocity"]=value.value_or(!preferences.at("practiceKeepVelocity").get<bool>());menu_state.settings_changed();json_writer.write(cache/"settings.json",preferences);return;}
+        if (action == "keepVelocity") {
+            preferences["practiceKeepVelocity"] = value.value_or(!preferences.at("practiceKeepVelocity").get<bool>());
+            menu_state.settings_changed();
+            json_writer.write(cache / "settings.json", preferences);
+            return;
+        }
         if(action=="toggle"){
             practice.mode=!practice.mode;
             if(practice.mode){practice.tool.clear();practice_use("");const auto bound=[&](const char *action)->std::string{const auto &keys=preferences.at("binds").at(action);if(keys.empty()){const std::string_view a(action);return a=="cpSave"?"!save":a=="cpTeleport"?"!tele":"!nc";}std::string k=keys[0].get<std::string>();if(k=="Backquote")return "`";if(k.starts_with("Key")||k.starts_with("Digit"))return k.substr(k.starts_with("Key")?3:5);if(k.starts_with("Mouse"))return "M"+k.substr(5);return k;};toast("Practice: no scores. "+bound("noclip")+": noclip | "+bound("cpSave")+": save checkpoint | "+bound("cpTeleport")+": teleport.",6000);}
@@ -734,7 +776,14 @@ int run(const Options &opt) {
         gauntlet_id.clear();gauntlet_map.clear();gauntlet_progress=nullptr;zones.clear();map_id.clear();audio.set_map(nullptr);active_track=0;active_style=selected_style;
         curr={};prev={};recording_ended=true;record_path.clear();pending_vault_capture.reset();score_notice.clear();toast_text.clear();error.clear();turn_admission.reset();
         ++run_generation;beat_start=beat_upto=0;run_event({{"type","reset"}});reset_feedback();reset_input_timing();audio.reset();
-        if(backdrop)backdrop->release();backdrop_shown.clear();backdrop_failed.clear();backdrop_source.clear();backdrop_cut=false;gameplay_backdrop_due=false;menu_state.reset();
+        if (backdrop)
+            backdrop->release();
+        backdrop_shown.clear();
+        backdrop_failed.clear();
+        backdrop_source.clear();
+        backdrop_cut = false;
+        gameplay_backdrop_due = false;
+        menu_state.reset();
         room.close();room_modes.close(room.generation);observed_spectator.reset();
     };
     auto apply_room_mode=[&](const native::RoomModeAction &action){
@@ -750,8 +799,19 @@ int run(const Options &opt) {
         BhRunOptions timing{}; bh_default_run_options(&timing);
         if(!next_zones.empty())require(bh_run_configure(next.get(),&timing,next_zones.data(),next_zones.size()),next.get(),"Configuring timer");
         std::unique_ptr<native::Tutorial> next_tutorial;
-        if(id==tutorial_map){const auto metadata=nlohmann::json::parse(read_text(assets/"tutorial.json"));if(file_hash(data_location::from_utf8(path))!=metadata.at("bspSha256").get<std::string>())throw std::runtime_error("Tutorial BSP does not match bundled lessons; update the tutorial assets and map together");next_tutorial=std::make_unique<native::Tutorial>(metadata,selected_style=="legit"||selected_style=="scroll");next_tutorial->set_completed(tutorial_completed);}
-        audio.set_classic_loader([content,cache](){if(!content.empty())native::download_classic_sounds(data_location::from_utf8(content),cache);});
+        if (id == tutorial_map) {
+            const auto metadata = nlohmann::json::parse(read_text(assets / "tutorial.json"));
+            if (file_hash(data_location::from_utf8(path)) != metadata.at("bspSha256").get<std::string>())
+                throw std::runtime_error(
+                    "Tutorial BSP does not match bundled lessons; update the tutorial assets and map together");
+            next_tutorial =
+                std::make_unique<native::Tutorial>(metadata, selected_style == "legit" || selected_style == "scroll");
+            next_tutorial->set_completed(tutorial_completed);
+        }
+        audio.set_classic_loader([content, cache]() {
+            if (!content.empty())
+                native::download_classic_sounds(data_location::from_utf8(content), cache);
+        });
         auto next_renderer=std::make_unique<Renderer>(gl,next.get(),assets);
         practice.clear(core.get());renderer.reset(); core=std::move(next);audio.set_map(core.get()); renderer=std::move(next_renderer);
         // The pause screen shows this map itself, never the home tour.
@@ -792,8 +852,9 @@ int run(const Options &opt) {
         }
     };
     CorePtr metadata_core(bh_create(),&bh_destroy);
-    auto replay_metadata=[&](const std::filesystem::path &path) {
-        size_t bytes=0;const char *json=bh_replay_header(metadata_core.get(),native::data_location::utf8(path).c_str(),&bytes);
+    auto replay_metadata = [&](const std::filesystem::path &path) {
+        size_t bytes = 0;
+        const char *json = bh_replay_header(metadata_core.get(), native::data_location::utf8(path).c_str(), &bytes);
         require(json!=nullptr,metadata_core.get(),"Reading replay header");
         return nlohmann::json::parse(json,json+bytes);
     };
@@ -808,13 +869,20 @@ int run(const Options &opt) {
         if(info.at("map")!=map||info.value("style",std::string("autohop"))!="autohop"||info.value("track",0)!=0||info.at("endTick").get<uint32_t>()<=info.at("startTick").get<uint32_t>())throw std::runtime_error("Backdrop replay is not a completed Normal main-track run of this map");
         return info;
     };
-    auto local_backdrop_replay=[&](const std::string &map)->std::string{
-        try{if(backdrop_pbs.contains(map)){const auto path=native::replay_file(cache/"replays",backdrop_pbs.at(map).at("id").get<std::string>());valid_backdrop_replay(path,map);return native::data_location::utf8(path);}}catch(const std::exception &e){std::cerr<<"Local backdrop PB: "<<e.what()<<'\n';}
+    auto local_backdrop_replay = [&](const std::string &map) -> std::string {
+        try {
+            if (backdrop_pbs.contains(map)) {
+                const auto path =
+                    native::replay_file(cache / "replays", backdrop_pbs.at(map).at("id").get<std::string>());
+                valid_backdrop_replay(path, map);
+                return native::data_location::utf8(path);
+            }
+        } catch (const std::exception &e) {
+            std::cerr << "Local backdrop PB: " << e.what() << '\n';
+        }
         return {};
     };
-    auto refresh_replays=[&]() {
-        replay_library.refresh();
-    };
+    auto refresh_replays = [&]() { replay_library.refresh(); };
     auto open_replay=[&](const std::filesystem::path &path,const std::string &action,
                          unsigned ghost_slot=0, bool full_recording=false) {
         if(ghost_slot>=ghost_slots.size())throw std::runtime_error("Invalid ghost slot");
@@ -825,9 +893,11 @@ int run(const Options &opt) {
         if(action=="ghost") {
             auto &slot=ghost_slots[ghost_slot];if(slot.handle)bh_ghost_free(core.get(),slot.handle);slot={};
             if(ghost_slot==0){ghost_handle=0;ghost_enabled=false;ghost_id.clear();}
-            const auto handle=bh_ghost_load(core.get(),native::data_location::utf8(path).c_str());require(handle!=0,core.get(),"Loading ghost");
+            const auto handle = bh_ghost_load(core.get(), native::data_location::utf8(path).c_str());
+            require(handle != 0, core.get(), "Loading ghost");
             size_t bytes=0;const auto raw=bh_ghost_info(core.get(),handle,&bytes);require(raw!=nullptr,core.get(),"Reading ghost");
-            slot={handle,native::data_location::utf8(path.filename()),true,nlohmann::json::parse(raw,raw+bytes)};
+            slot = {handle, native::data_location::utf8(path.filename()), true,
+                    nlohmann::json::parse(raw, raw + bytes)};
             if(ghost_slot==0){ghost_handle=handle;ghost_info=slot.info;ghost_id=slot.id;ghost_enabled=true;}
             active_track=slot.info.value("track",0u);selected_style=slot.info.value("style",std::string("autohop"));
             reset();show_menu(false);
@@ -893,7 +963,9 @@ int run(const Options &opt) {
     auto begin_video=[&](const native::VideoOptions &options){
         const auto timeline = native::VideoTimeline::make(options, playback_range.total);
         const char *downloads=SDL_GetUserFolder(SDL_FOLDER_DOWNLOADS);if(opt.video_smoke.empty()&&!downloads)throw std::runtime_error("Downloads folder unavailable");
-        const auto directory=opt.video_smoke.empty()?native::data_location::from_utf8(downloads):std::filesystem::absolute(opt.video_smoke);std::filesystem::create_directories(directory);
+        const auto directory = opt.video_smoke.empty() ? native::data_location::from_utf8(downloads)
+                                                       : std::filesystem::absolute(opt.video_smoke);
+        std::filesystem::create_directories(directory);
         const auto destination=directory/("bunnyhop-"+map_id+"-"+std::to_string(SDL_GetTicksNS())+".mp4");
         video_capture=std::make_unique<native::VideoCapture>(gl,core.get(),*renderer,hud,video_encoder,options,playback_info.at("totalTicks").get<uint32_t>(),curr.tick,preferences,map_id,playback_info.value("style",active_style),outfit,(playback_info.contains("packedLoadout")&&playback_info["packedLoadout"].is_string()?playback_info["packedLoadout"].get<std::string>():std::string()),prepared_camera,assets,cache);
         try{video_encoder.start(options,destination,timeline.frames,video_available.encoder);}catch(...){video_capture.reset();throw;}
@@ -936,7 +1008,16 @@ int run(const Options &opt) {
         std::array<std::string,4> labels{"Space","W","A","D"};const char *actions[]={"jump","forward","left","right"};for(int k=0;k<4;k++){const auto &bound=preferences.at("binds").at(actions[k]);if(!bound.empty()){labels[k]=bound[0];if(labels[k].rfind("Key",0)==0)labels[k].erase(0,3);}}
         tutorial->set_keys(labels);score_notice.clear();
         if(demo){const auto &meta=tutorial->lesson_data();const auto key=(active_style=="legit"||active_style=="scroll")&&meta.contains("nativeDemoLegit")?"nativeDemoLegit":"nativeDemo";if(!meta.contains(key))throw std::runtime_error("Tutorial demonstration is absent");const auto file=meta.at(key).get<std::string>();if(file.find_first_of("/\\")!=std::string::npos)throw std::runtime_error("Invalid bundled tutorial replay path");
-            ghost_handle=bh_ghost_load(core.get(),data_location::utf8(assets/"tutorial"/file).c_str());require(ghost_handle!=0,core.get(),"Loading native tutorial demonstration");size_t bytes=0;const auto *raw=bh_ghost_info(core.get(),ghost_handle,&bytes);require(raw!=nullptr,core.get(),"Reading tutorial demonstration");ghost_info=nlohmann::json::parse(raw,raw+bytes);ghost_enabled=true;tutorial_demo=true;tutorial_demo_start=curr.tick;ghost_id="tutorial-"+lesson;
+            ghost_handle = bh_ghost_load(core.get(), data_location::utf8(assets / "tutorial" / file).c_str());
+            require(ghost_handle != 0, core.get(), "Loading native tutorial demonstration");
+            size_t bytes = 0;
+            const auto *raw = bh_ghost_info(core.get(), ghost_handle, &bytes);
+            require(raw != nullptr, core.get(), "Reading tutorial demonstration");
+            ghost_info = nlohmann::json::parse(raw, raw + bytes);
+            ghost_enabled = true;
+            tutorial_demo = true;
+            tutorial_demo_start = curr.tick;
+            ghost_id = "tutorial-" + lesson;
         }
         std::cout<<"Native tutorial "<<lesson<<(demo?" demonstration":" lesson")<<(lesson=="final"?"; ranked final course\n":"; ranked recording disabled\n");show_menu(false);
     };
@@ -958,123 +1039,327 @@ int run(const Options &opt) {
     uint32_t last_slot=3,observed_slot=3;
     auto held_action=[&](const std::string &action){const auto &binds=preferences.at("binds");if(!binds.contains(action))return false;for(const auto &key:binds.at(action))if(held_codes.contains(key.get<std::string>()))return true;return false;};
     auto weapon_context=[&](){return native::WeaponMenuContext{settings.physics,practice.active||zones.empty(),playback,room.spectator_target.has_value(),practice.noclip};};
-    auto act=native::RecoverableAction([&](const std::string &action,bool wheel=false,bool instant=false) {
-        if(action=="chat"||action=="commandChat"){open_chat(action=="commandChat");return;}
-        if(action=="scoreboard")return;
-        if(action=="spectatorNext"||action=="spectatorPrevious"){room_control({{"action",action=="spectatorNext"?"next":"previous"}});return;}
-        if(action=="spectatorMode"){if(room.spectator_target)third_person=!third_person;return;}
-        if(action=="thirdPerson"){
-            if(playback){replay_camera.set_mode(replay_camera.mode=="eye"?"chase":"eye");return;}
-            if(room.spectator_target){third_person=!third_person;return;}
-            if(!core)return;
-            BhRunState timing{};bh_run_state(core.get(),&timing);
-            if(!third_person&&!gauntlet_id.empty()){toast("No third person during a gauntlet.");return;}
-            if(!third_person&&timing.status==1&&!practice.active&&!turn_admission.local_only&&!zones.empty()){toast("No third person during a timed run.");return;}
-            third_person=!third_person;
-            if(third_person){practice_use("camera");toast("Third person. This run is practice.");}
-            else{if(timing.status==0&&practice.tool=="camera"&&!practice.mode)reset();toast("First person");}
-            return;
-        }
-        if(action=="flashlight"){flashlight=!flashlight;return;}
-        if(action=="nextTrack"){audio.music_control("next");return;}
-        if (action == "hudEditor") {
-            show_menu(true);
-            if (!menu)
-                toast(native::menu_unavailable_text(menu_failure), 6000);
-            menu_script.open(menu.get(), menu_ready,
-                             "window.bunnyhopNativeMenu?.open?.('settings','hud-editor')");
-            return;
-        }
-        if(action=="gunMenu"){gun_menu.toggle();return;}
-        if(action=="showTriggers"||action=="showClips"){const char *key=action=="showTriggers"?"triggersVisible":"clipsVisible";const bool on=!preferences.at(key).get<bool>();preferences[key]=on;menu_state.settings_changed();json_writer.write(cache/"settings.json",preferences);apply_preferences();toast(std::string(action=="showTriggers"?"Triggers":"Player clips")+(on?" shown":" hidden"));return;}
-        if(action=="keysOverlay"){preferences["keysOverlay"]=!preferences.at("keysOverlay").get<bool>();menu_state.settings_changed();json_writer.write(cache/"settings.json",preferences);apply_preferences();return;}
-        if(action=="viewmodel"||action=="hideUi"||action=="mute") {
-            const std::string key=action=="hideUi"?"hud":action=="mute"?"muted":"viewmodel";
-            preferences[key]=!preferences[key].get<bool>();menu_state.settings_changed();json_writer.write(cache/"settings.json",preferences);apply_preferences();return;
-        }
-        if(action=="mainMenu"){
-            BhRunState timing{};if(core)bh_run_state(core.get(),&timing);
-            const auto result=leave_hold.press(epoch_ms(),!playback&&native::leave_requires_confirmation(timing.status,room.spectator_target.has_value()),!wheel);
-            if(result==native::LeaveHold::Result::leave)leave_map();else if(result==native::LeaveHold::Result::ask)toast("Main menu key again to leave");return;
-        }
-        if(playback)return;
-        if(action=="setStart"||action=="clearStart"){
-            if(!core)return;
-            if(action=="clearStart"){start_points.clear(map_id,active_track);toast("Start point cleared");}
-            else{if(tutorial&&tutorial->is_active()){toast("Start points are unavailable in tutorial lessons");return;}const auto problem=native::start_point_problem(curr,practice.noclip);if(!problem.empty()){toast(problem);return;}start_points.save(map_id,active_track,curr,input.yaw(),input.pitch);toast(native::start_point_in_zone(curr,zones,active_track)?"Start point saved":"Start point saved outside the start zone: runs from it are practice, and the timer starts only from the start zone",native::start_point_in_zone(curr,zones,active_track)?3000u:5000u);}
-            json_writer.write(cache/"start-points.json",start_points.points);return;
-        }
-        if(action=="nextWeapon"||action=="prevWeapon"){
-            BhWeaponReport weapon{};if(core&&bh_weapon_report(core.get(),&weapon)){const uint32_t slot=weapon.active==weapon.primary&&weapon.primary?1:weapon.active==weapon.secondary&&weapon.secondary?2:3;uint32_t next=slot;for(int i=0;i<3;i++){next=action=="nextWeapon"?next%3+1:(next+1)%3+1;if(next==3||(next==1&&weapon.primary)||(next==2&&weapon.secondary))break;}input.pulse=(input.pulse&~(3u<<14))|(next<<14);}return;
-        }
-        if(!instant&&(action=="restart"||action=="restartMain"||action=="restartBonus")){
-            BhRunState timing{};if(core)bh_run_state(core.get(),&timing);
-            if(!restart_guard.press(action,epoch_ms(),preferences.at("holdRestart").get<bool>(),timing.status==1,wheel))return;
-        }
-        if(action=="practice"||action=="noclip"||action=="cpSave"||action=="cpTeleport"||action=="cpPrev"||action=="cpNext"){
-            practice_action(action=="practice"?"toggle":action=="cpSave"?"save":action=="cpTeleport"?"tele":action=="cpPrev"?"prev":action=="cpNext"?"next":"noclip",true);return;
-        }
-
-        if(!gauntlet_id.empty()&&(action=="restartBonus"||action=="cycleStyle")){toast("Gauntlets are Normal style on the main track.");return;}
-        if(action=="restart"||action=="restartMain") {if(tutorial&&tutorial->is_active())start_tutorial(tutorial->lesson_id(),tutorial_demo);else{if(action=="restartMain")active_track=0;reset();}}
-        else if(action=="restartBonus") {
-            std::set<uint32_t> tracks;for(const auto &z:zones)if(z.kind==0&&z.track)tracks.insert(z.track);
-            if(!tracks.empty()){auto next=tracks.upper_bound(active_track);active_track=next==tracks.end()?*tracks.begin():*next;reset();}
-        } else if(action=="cycleStyle") {
-            static const std::vector<std::string> order={"autohop","legit","scroll","wonly","sideways","hsw","lowgrav","autostrafe"};
-            auto at=std::find(order.begin(),order.end(),selected_style);selected_style=order[(size_t(at-order.begin())+1)%order.size()];reset();
-        } else if(action=="slot1"||action=="slot2"||action=="slot3") input.pulse=(input.pulse&~(3u<<14))|(uint32_t(action.back()-'0')<<14);
-        else if(action=="lastWeapon") input.pulse=(input.pulse&~(3u<<14))|(last_slot<<14);
-        else if(action=="inspect") {if(renderer)renderer->inspect_press();if(core)bh_record_inspect(core.get(),1);}
-        else if(action=="drop")input.pulse|=1u<<12;
-        else if(action=="reload")input.pulse|=1u<<13;
-        else if(action=="giveUsp"||action=="giveGlock"){kept_weapons.cancel();input.pulse=(input.pulse&~native::weapon_command_mask)|((action=="giveUsp"?3u:2u)<<native::give_shift);}
-
-    }, toast);
-    auto handle_code=native::RecoverableAction([&](const std::string &code,bool down,bool repeat=false,bool wheel=false,uint64_t stamp=0) {
-        if(code.empty())return;
-        if(down&&!repeat)for(const char *action:{"chat","commandChat"})for(const auto &key:preferences.at("binds").at(action))if(key==code){open_chat(std::string(action)=="commandChat");return;}
-        if(gun_menu.open&&down&&!repeat&&code.size()==6&&code.starts_with("Digit")){const auto picked=gun_menu.key(code.back()-'0',weapon_context());if(!picked.refusal.empty())toast(picked.refusal);if(picked.weapon){kept_weapons.cancel();input.pulse=(input.pulse&~native::weapon_command_mask)|(*picked.weapon<<native::give_shift);}if(picked.handled)return;}
-        if(!practice.menu_open&&!room.vote.is_null()&&down&&!repeat&&code.size()==6&&code.starts_with("Digit")){const int pick=code.back()-'0';if(pick>0&&room.vote.contains("options")&&size_t(pick)<=room.vote.at("options").size()){room_control({{"action","vote"},{"option",pick-1}});return;}}
-        if(practice.menu_open&&down&&!repeat&&code.size()==6&&code.starts_with("Digit")){
-            const int pick=code.back()-'0';
-            if(pick==0){practice.menu_open=false;return;}
-            if(pick>=1&&pick<=6){
-                if((pick==3&&practice.number()<=1)||(pick==4&&practice.number()>=practice.checkpoints.size()))return;
-                const char *actions[]={"save","tele","prev","next","noclip","keepVelocity"};practice_action(actions[pick-1]);return;
+    auto act = native::RecoverableAction(
+        [&](const std::string &action, bool wheel = false, bool instant = false) {
+            if (action == "chat" || action == "commandChat") {
+                open_chat(action == "commandChat");
+                return;
             }
-        }
-        input_timeline.key(held_codes, code, down, wheel, stamp, SDL_GetTicksNS());
-        input.held=0;
-        for(auto binding=preferences["binds"].begin();binding!=preferences["binds"].end();++binding) {
-            const auto bit=native::movement_bit(binding.key());bool matching=false,held=false;
-            for(const auto &raw:binding.value()) {const auto key=raw.get<std::string>();matching|=key==code||(wheel&&key=="MouseWheel");held|=held_codes.contains(key);}
-            if(bit){if(bit==native::attack2&&matching&&down&&!repeat&&core&&!playback&&!room.spectator_target){BhWeaponReport weapon{};if(bh_weapon_report(core.get(),&weapon))scope.secondary(weapon.active);}
-                if(wheel&&matching&&down)input.pulse|=bit;else if(held)input.held|=bit;}
-            else if(matching&&down&&!repeat)act(binding.key(),wheel);
-        }
-        if(wheel)held_codes.erase(code);
-        bool inspect=false;for(const auto &key:preferences["binds"]["inspect"])inspect|=held_codes.contains(key.get<std::string>());
-        if(renderer)renderer->inspect_held(inspect);
-        if(core&&std::find(preferences["binds"]["inspect"].begin(),preferences["binds"]["inspect"].end(),code)!=preferences["binds"]["inspect"].end())bh_record_inspect(core.get(),down?3:4);
-    }, toast);
+            if (action == "scoreboard")
+                return;
+            if (action == "spectatorNext" || action == "spectatorPrevious") {
+                room_control({{"action", action == "spectatorNext" ? "next" : "previous"}});
+                return;
+            }
+            if (action == "spectatorMode") {
+                if (room.spectator_target)
+                    third_person = !third_person;
+                return;
+            }
+            if (action == "thirdPerson") {
+                if (playback) {
+                    replay_camera.set_mode(replay_camera.mode == "eye" ? "chase" : "eye");
+                    return;
+                }
+                if (room.spectator_target) {
+                    third_person = !third_person;
+                    return;
+                }
+                if (!core)
+                    return;
+                BhRunState timing{};
+                bh_run_state(core.get(), &timing);
+                if (!third_person && !gauntlet_id.empty()) {
+                    toast("No third person during a gauntlet.");
+                    return;
+                }
+                if (!third_person && timing.status == 1 && !practice.active && !turn_admission.local_only &&
+                    !zones.empty()) {
+                    toast("No third person during a timed run.");
+                    return;
+                }
+                third_person = !third_person;
+                if (third_person) {
+                    practice_use("camera");
+                    toast("Third person. This run is practice.");
+                } else {
+                    if (timing.status == 0 && practice.tool == "camera" && !practice.mode)
+                        reset();
+                    toast("First person");
+                }
+                return;
+            }
+            if (action == "flashlight") {
+                flashlight = !flashlight;
+                return;
+            }
+            if (action == "nextTrack") {
+                audio.music_control("next");
+                return;
+            }
+            if (action == "hudEditor") {
+                show_menu(true);
+                if (!menu)
+                    toast(native::menu_unavailable_text(menu_failure), 6000);
+                menu_script.open(menu.get(), menu_ready, "window.bunnyhopNativeMenu?.open?.('settings','hud-editor')");
+                return;
+            }
+            if (action == "gunMenu") {
+                gun_menu.toggle();
+                return;
+            }
+            if (action == "showTriggers" || action == "showClips") {
+                const char *key = action == "showTriggers" ? "triggersVisible" : "clipsVisible";
+                const bool on = !preferences.at(key).get<bool>();
+                preferences[key] = on;
+                menu_state.settings_changed();
+                json_writer.write(cache / "settings.json", preferences);
+                apply_preferences();
+                toast(std::string(action == "showTriggers" ? "Triggers" : "Player clips") +
+                      (on ? " shown" : " hidden"));
+                return;
+            }
+            if (action == "keysOverlay") {
+                preferences["keysOverlay"] = !preferences.at("keysOverlay").get<bool>();
+                menu_state.settings_changed();
+                json_writer.write(cache / "settings.json", preferences);
+                apply_preferences();
+                return;
+            }
+            if (action == "viewmodel" || action == "hideUi" || action == "mute") {
+                const std::string key = action == "hideUi" ? "hud" : action == "mute" ? "muted" : "viewmodel";
+                preferences[key] = !preferences[key].get<bool>();
+                menu_state.settings_changed();
+                json_writer.write(cache / "settings.json", preferences);
+                apply_preferences();
+                return;
+            }
+            if (action == "mainMenu") {
+                BhRunState timing{};
+                if (core)
+                    bh_run_state(core.get(), &timing);
+                const auto result = leave_hold.press(
+                    epoch_ms(),
+                    !playback && native::leave_requires_confirmation(timing.status, room.spectator_target.has_value()),
+                    !wheel);
+                if (result == native::LeaveHold::Result::leave)
+                    leave_map();
+                else if (result == native::LeaveHold::Result::ask)
+                    toast("Main menu key again to leave");
+                return;
+            }
+            if (playback)
+                return;
+            if (action == "setStart" || action == "clearStart") {
+                if (!core)
+                    return;
+                if (action == "clearStart") {
+                    start_points.clear(map_id, active_track);
+                    toast("Start point cleared");
+                } else {
+                    if (tutorial && tutorial->is_active()) {
+                        toast("Start points are unavailable in tutorial lessons");
+                        return;
+                    }
+                    const auto problem = native::start_point_problem(curr, practice.noclip);
+                    if (!problem.empty()) {
+                        toast(problem);
+                        return;
+                    }
+                    start_points.save(map_id, active_track, curr, input.yaw(), input.pitch);
+                    toast(native::start_point_in_zone(curr, zones, active_track)
+                              ? "Start point saved"
+                              : "Start point saved outside the start zone: runs from it are practice, and the timer "
+                                "starts only from the start zone",
+                          native::start_point_in_zone(curr, zones, active_track) ? 3000u : 5000u);
+                }
+                json_writer.write(cache / "start-points.json", start_points.points);
+                return;
+            }
+            if (action == "nextWeapon" || action == "prevWeapon") {
+                BhWeaponReport weapon{};
+                if (core && bh_weapon_report(core.get(), &weapon)) {
+                    const uint32_t slot = weapon.active == weapon.primary && weapon.primary       ? 1
+                                          : weapon.active == weapon.secondary && weapon.secondary ? 2
+                                                                                                  : 3;
+                    uint32_t next = slot;
+                    for (int i = 0; i < 3; i++) {
+                        next = action == "nextWeapon" ? next % 3 + 1 : (next + 1) % 3 + 1;
+                        if (next == 3 || (next == 1 && weapon.primary) || (next == 2 && weapon.secondary))
+                            break;
+                    }
+                    input.pulse = (input.pulse & ~(3u << 14)) | (next << 14);
+                }
+                return;
+            }
+            if (!instant && (action == "restart" || action == "restartMain" || action == "restartBonus")) {
+                BhRunState timing{};
+                if (core)
+                    bh_run_state(core.get(), &timing);
+                if (!restart_guard.press(action, epoch_ms(), preferences.at("holdRestart").get<bool>(),
+                                         timing.status == 1, wheel))
+                    return;
+            }
+            if (action == "practice" || action == "noclip" || action == "cpSave" || action == "cpTeleport" ||
+                action == "cpPrev" || action == "cpNext") {
+                practice_action(action == "practice"     ? "toggle"
+                                : action == "cpSave"     ? "save"
+                                : action == "cpTeleport" ? "tele"
+                                : action == "cpPrev"     ? "prev"
+                                : action == "cpNext"     ? "next"
+                                                         : "noclip",
+                                true);
+                return;
+            }
+
+            if (!gauntlet_id.empty() && (action == "restartBonus" || action == "cycleStyle")) {
+                toast("Gauntlets are Normal style on the main track.");
+                return;
+            }
+            if (action == "restart" || action == "restartMain") {
+                if (tutorial && tutorial->is_active())
+                    start_tutorial(tutorial->lesson_id(), tutorial_demo);
+                else {
+                    if (action == "restartMain")
+                        active_track = 0;
+                    reset();
+                }
+            } else if (action == "restartBonus") {
+                std::set<uint32_t> tracks;
+                for (const auto &z : zones)
+                    if (z.kind == 0 && z.track)
+                        tracks.insert(z.track);
+                if (!tracks.empty()) {
+                    auto next = tracks.upper_bound(active_track);
+                    active_track = next == tracks.end() ? *tracks.begin() : *next;
+                    reset();
+                }
+            } else if (action == "cycleStyle") {
+                static const std::vector<std::string> order = {"autohop",  "legit", "scroll",  "wonly",
+                                                               "sideways", "hsw",   "lowgrav", "autostrafe"};
+                auto at = std::find(order.begin(), order.end(), selected_style);
+                selected_style = order[(size_t(at - order.begin()) + 1) % order.size()];
+                reset();
+            } else if (action == "slot1" || action == "slot2" || action == "slot3")
+                input.pulse = (input.pulse & ~(3u << 14)) | (uint32_t(action.back() - '0') << 14);
+            else if (action == "lastWeapon")
+                input.pulse = (input.pulse & ~(3u << 14)) | (last_slot << 14);
+            else if (action == "inspect") {
+                if (renderer)
+                    renderer->inspect_press();
+                if (core)
+                    bh_record_inspect(core.get(), 1);
+            } else if (action == "drop")
+                input.pulse |= 1u << 12;
+            else if (action == "reload")
+                input.pulse |= 1u << 13;
+            else if (action == "giveUsp" || action == "giveGlock") {
+                kept_weapons.cancel();
+                input.pulse = (input.pulse & ~native::weapon_command_mask) |
+                              ((action == "giveUsp" ? 3u : 2u) << native::give_shift);
+            }
+        },
+        toast);
+    auto handle_code = native::RecoverableAction(
+        [&](const std::string &code, bool down, bool repeat = false, bool wheel = false, uint64_t stamp = 0) {
+            if (code.empty())
+                return;
+            if (down && !repeat)
+                for (const char *action : {"chat", "commandChat"})
+                    for (const auto &key : preferences.at("binds").at(action))
+                        if (key == code) {
+                            open_chat(std::string(action) == "commandChat");
+                            return;
+                        }
+            if (gun_menu.open && down && !repeat && code.size() == 6 && code.starts_with("Digit")) {
+                const auto picked = gun_menu.key(code.back() - '0', weapon_context());
+                if (!picked.refusal.empty())
+                    toast(picked.refusal);
+                if (picked.weapon) {
+                    kept_weapons.cancel();
+                    input.pulse = (input.pulse & ~native::weapon_command_mask) | (*picked.weapon << native::give_shift);
+                }
+                if (picked.handled)
+                    return;
+            }
+            if (!practice.menu_open && !room.vote.is_null() && down && !repeat && code.size() == 6 &&
+                code.starts_with("Digit")) {
+                const int pick = code.back() - '0';
+                if (pick > 0 && room.vote.contains("options") && size_t(pick) <= room.vote.at("options").size()) {
+                    room_control({{"action", "vote"}, {"option", pick - 1}});
+                    return;
+                }
+            }
+            if (practice.menu_open && down && !repeat && code.size() == 6 && code.starts_with("Digit")) {
+                const int pick = code.back() - '0';
+                if (pick == 0) {
+                    practice.menu_open = false;
+                    return;
+                }
+                if (pick >= 1 && pick <= 6) {
+                    if ((pick == 3 && practice.number() <= 1) ||
+                        (pick == 4 && practice.number() >= practice.checkpoints.size()))
+                        return;
+                    const char *actions[] = {"save", "tele", "prev", "next", "noclip", "keepVelocity"};
+                    practice_action(actions[pick - 1]);
+                    return;
+                }
+            }
+            input_timeline.key(held_codes, code, down, wheel, stamp, SDL_GetTicksNS());
+            input.held = 0;
+            for (auto binding = preferences["binds"].begin(); binding != preferences["binds"].end(); ++binding) {
+                const auto bit = native::movement_bit(binding.key());
+                bool matching = false, held = false;
+                for (const auto &raw : binding.value()) {
+                    const auto key = raw.get<std::string>();
+                    matching |= key == code || (wheel && key == "MouseWheel");
+                    held |= held_codes.contains(key);
+                }
+                if (bit) {if(bit==native::attack2&&matching&&down&&!repeat&&core&&!playback&&!room.spectator_target){
+                        BhWeaponReport weapon{};
+                        if (bh_weapon_report(core.get(), &weapon))
+                            scope.secondary(weapon.active);
+                    }
+                    if (wheel && matching && down)
+                        input.pulse |= bit;
+                    else if (held)
+                        input.held |= bit;
+                } else if (matching && down && !repeat)
+                    act(binding.key(), wheel);
+            }
+            if (wheel)
+                held_codes.erase(code);
+            bool inspect = false;
+            for (const auto &key : preferences["binds"]["inspect"])
+                inspect |= held_codes.contains(key.get<std::string>());
+            if (renderer)
+                renderer->inspect_held(inspect);
+            if (core && std::find(preferences["binds"]["inspect"].begin(), preferences["binds"]["inspect"].end(),
+                                  code) != preferences["binds"]["inspect"].end())
+                bh_record_inspect(core.get(), down ? 3 : 4);
+        },
+        toast);
     refresh_replays();
     if(!opt.map.empty()) {
         nlohmann::json detail;
-        const auto sidecar=native::data_location::from_utf8(opt.map).replace_extension(".zones.json");
+        const auto sidecar = native::data_location::from_utf8(opt.map).replace_extension(".zones.json");
         if(std::filesystem::exists(sidecar)) detail["zones"]=nlohmann::json::parse(read_text(sidecar));
-        load_map(opt.map,opt.content_root,native::data_location::utf8(native::data_location::from_utf8(opt.map).stem()),detail);
+        load_map(opt.map, opt.content_root,
+                 native::data_location::utf8(native::data_location::from_utf8(opt.map).stem()), detail);
     }
     if(!opt.online_map.empty()) request_map(opt.online_map);
     if(tutorial){const auto lesson=pending_tutorial.empty()?"jump":pending_tutorial;start_tutorial(lesson,pending_tutorial_demo);pending_tutorial.clear();}
     if(menu) show_menu(true); else if(!opt.hidden) capture(true);
-    if(!opt.replay.empty()&&opt.runtime_smoke.empty())request_replay(data_location::from_utf8(opt.replay),"play");
+    if (!opt.replay.empty() && opt.runtime_smoke.empty())
+        request_replay(data_location::from_utf8(opt.replay), "play");
     if(!opt.runtime_smoke.empty()){
-        const auto output = data_location::from_utf8(opt.runtime_smoke);std::filesystem::create_directories(output);
+        const auto output = data_location::from_utf8(opt.runtime_smoke);
+        std::filesystem::create_directories(output);
         auto check=[](bool ok,const char *why){if(!ok)throw std::runtime_error(std::string("Runtime smoke: ")+why);};
         check(core&&renderer&&!menu,"needs a local BSP and no menu");
         check(!opt.replay.empty(),"needs a completed replay for the supplied BSP");
-        nlohmann::json detail;const auto sidecar=native::data_location::from_utf8(opt.map).replace_extension(".zones.json");
+        nlohmann::json detail;
+        const auto sidecar = native::data_location::from_utf8(opt.map).replace_extension(".zones.json");
         if(std::filesystem::exists(sidecar))detail["zones"]=nlohmann::json::parse(read_text(sidecar));
         // A neutral host id allows tools on the tutorial fixture without enabling its lesson controller.
         load_map(opt.map,opt.content_root,"native-runtime-fixture",detail);
@@ -1113,7 +1398,9 @@ int run(const Options &opt) {
         act("cycleStyle");act("restartBonus");check(selected_style=="autohop"&&active_track==0,"gauntlet bindings escaped lock");
         load_map(opt.map,opt.content_root,"native-runtime-fixture-next",detail);check(gauntlet_id=="offline-smoke"&&!practice.active,"gauntlet map progression lost lock");
         gauntlet_action({{"id",nullptr}});check(practice_reason().empty(),"gauntlet clear left practice blocked");
-        practice_action("save");practice_action("tele");open_replay(data_location::from_utf8(opt.replay),"play",0,true);
+        practice_action("save");
+        practice_action("tele");
+        open_replay(data_location::from_utf8(opt.replay), "play", 0, true);
         check(playback&&!practice.active&&!practice.mode&&practice.checkpoints.empty(),"replay retained practice state");
         replay_camera.set_mode("free");replay_camera.initialized=true;replay_camera.position={11,22,33};replay_camera.yaw=42;replay_camera.pitch=17;
         playback_paused=true;seek_playback(0);check(curr.tick==0&&playback_paused,"replay seek start/pause");
@@ -1280,7 +1567,7 @@ int run(const Options &opt) {
                             if (auto changed = window_modes.toggle(preferences)) {
                                 preferences = std::move(*changed);
                                 menu_state.settings_changed();
-                            json_writer.write(cache / "settings.json", preferences);
+                                json_writer.write(cache / "settings.json", preferences);
                             } else {
                                 error = window_controller.error();
                             }
@@ -1446,7 +1733,8 @@ int run(const Options &opt) {
                             const auto bytes=native::decode_base64(replay.at("replayBase64").get<std::string>());char hash[65]{};if(!bh_sha256(bytes.data(),bytes.size(),hash))throw std::runtime_error("Cannot hash backdrop replay");
                             std::filesystem::create_directories(cache/"backdrop");const auto path=cache/"backdrop"/(std::string(hash)+".bhr");
                             if(!std::filesystem::exists(path)){std::ofstream out(path,std::ios::binary);out.write(reinterpret_cast<const char*>(bytes.data()),bytes.size());if(!out)throw std::runtime_error("Cannot cache backdrop replay");}
-                            valid_backdrop_replay(path,id);replay_path=native::data_location::utf8(path);
+                            valid_backdrop_replay(path, id);
+                            replay_path = native::data_location::utf8(path);
                         }catch(const std::exception &e){std::cerr<<"PB backdrop: "<<e.what()<<"; using local PB/tour\n";}
                     }
                     if(backdrop&&!core&&!download.valid()&&backdrop->request(id,replay_path)) {
@@ -1464,9 +1752,22 @@ int run(const Options &opt) {
                 else if(type=="chatAction"){
                     const auto action=message.at("action").get<std::string>();
                     if(action=="scores")show_scores=!show_scores;
-                    else if(action=="jumpStats"){preferences["jumpStats"]=!preferences.at("jumpStats").get<bool>();menu_state.settings_changed();json_writer.write(cache/"settings.json",preferences);apply_preferences();}
-                    else if(action=="showTriggers"||action=="showClips"){const char *key=action=="showTriggers"?"triggersVisible":"clipsVisible";const bool on=!preferences.at(key).get<bool>();preferences[key]=on;menu_state.settings_changed();json_writer.write(cache/"settings.json",preferences);apply_preferences();toast(std::string(action=="showTriggers"?"Triggers":"Player clips")+(on?" shown":" hidden"));}
-                    else if(action=="hidePlayers")hide_players=message.value("hidden",!hide_players);
+                    else if (action == "jumpStats") {
+                        preferences["jumpStats"] = !preferences.at("jumpStats").get<bool>();
+                        menu_state.settings_changed();
+                        json_writer.write(cache / "settings.json", preferences);
+                        apply_preferences();
+                    } else if (action == "showTriggers" || action == "showClips") {
+                        const char *key = action == "showTriggers" ? "triggersVisible" : "clipsVisible";
+                        const bool on = !preferences.at(key).get<bool>();
+                        preferences[key] = on;
+                        menu_state.settings_changed();
+                        json_writer.write(cache / "settings.json", preferences);
+                        apply_preferences();
+                        toast(std::string(action == "showTriggers" ? "Triggers" : "Player clips") +
+                              (on ? " shown" : " hidden"));
+                    } else if (action == "hidePlayers")
+                        hide_players = message.value("hidden", !hide_players);
                     else if(action=="openRoom"){show_menu(true);menu->evaluate_js("window.bunnyhopNativeMenu?.open?.('room')");}
                     else if(core&&!download.valid()){
                         if((action=="restart"||action=="restartBonus")&&message.contains("track")){const auto track=message.at("track").get<uint32_t>();bool found=false;for(const auto &zone:zones)found|=zone.kind==0&&zone.track==track;if(!found)throw std::runtime_error("That track is unavailable");if(!gauntlet_id.empty()&&track)throw std::runtime_error("Gauntlets use the main track");active_track=track;reset();}
@@ -1592,15 +1893,30 @@ int run(const Options &opt) {
                     if (action == "play" || action == "ghost") {
                         request_replay(path, action, message.value("ghostSlot", 0u),
                                        message.value("fullRecording", false));
-                    }
-                    else if(action=="screenshot"){const auto screenshot=run_vault.screenshot(native::data_location::utf8(path.filename()));if(!screenshot)throw std::runtime_error("This local run has no saved screenshot");if(!SDL_OpenURL(native::RunVault::file_uri(*screenshot).c_str()))throw std::runtime_error(SDL_GetError());}
-                    else if(action=="export") {
+                    } else if (action == "screenshot") {
+                        const auto screenshot = run_vault.screenshot(native::data_location::utf8(path.filename()));
+                        if (!screenshot)
+                            throw std::runtime_error("This local run has no saved screenshot");
+                        if (!SDL_OpenURL(native::RunVault::file_uri(*screenshot).c_str()))
+                            throw std::runtime_error(SDL_GetError());
+                    } else if (action == "export") {
                         const char *folder=SDL_GetUserFolder(SDL_FOLDER_DOWNLOADS);if(!folder)throw std::runtime_error("Downloads folder unavailable");
-                        const auto dest=native::data_location::from_utf8(folder)/path.filename();std::filesystem::copy_file(path,dest,std::filesystem::copy_options::none);score_notice="Replay exported to Downloads";
-                    } else if(action=="delete") {
+                        const auto dest = native::data_location::from_utf8(folder) / path.filename();
+                        std::filesystem::copy_file(path, dest, std::filesystem::copy_options::none);
+                        score_notice = "Replay exported to Downloads";
+                    } else if (action == "delete") {
                         std::filesystem::create_directories(cache/"replays"/"trash");auto dest=cache/"replays"/"trash"/path.filename();
-                        if(std::filesystem::exists(dest))throw std::runtime_error("Replay already exists in local trash");std::filesystem::rename(path,dest);try{replay_library.trash(native::data_location::utf8(path.filename()));}catch(const std::exception&e){std::cerr<<"Vault trash: "<<e.what()<<'\n';}refresh_replays();
-                    } else throw std::runtime_error("Unknown replay action");
+                        if (std::filesystem::exists(dest))
+                            throw std::runtime_error("Replay already exists in local trash");
+                        std::filesystem::rename(path, dest);
+                        try {
+                            replay_library.trash(native::data_location::utf8(path.filename()));
+                        } catch (const std::exception &e) {
+                            std::cerr << "Vault trash: " << e.what() << '\n';
+                        }
+                        refresh_replays();
+                    } else
+                        throw std::runtime_error("Unknown replay action");
                 }
                 else if(type=="replayData") {
                     const auto bytes=native::decode_base64(message.at("replayBase64").get<std::string>());
@@ -1648,9 +1964,13 @@ int run(const Options &opt) {
                         replay_controls.pending = tick;
                     }
                     else if(action=="stop")reset();
-                }
-                else if(type=="sensitivity") {preferences=native::patch_settings(preferences,{{"sensitivity",message.at("value")}});menu_state.settings_changed();json_writer.write(cache/"settings.json",preferences);apply_preferences();}
-                else if(type=="playerName") replay_player=native::replay_player_name(message.value("name",std::string()));
+                } else if (type == "sensitivity") {
+                    preferences = native::patch_settings(preferences, {{"sensitivity", message.at("value")}});
+                    menu_state.settings_changed();
+                    json_writer.write(cache / "settings.json", preferences);
+                    apply_preferences();
+                } else if (type == "playerName")
+                    replay_player = native::replay_player_name(message.value("name", std::string()));
                 else if(type=="cosmetics") {
                     player_glow=native_render::parse_glow(message.value("playerGlow",nlohmann::json(nullptr)));
                     outfit=message.value("outfit",std::string());packed_loadout=message.value("packedLoadout",std::string());
@@ -1741,24 +2061,31 @@ int run(const Options &opt) {
                 replay_list = std::move(*update->replays);
                 menu_state.replays_changed();
             }
-            for (const auto& capture : update->captures) {
+            for (const auto &capture : update->captures) {
                 if (capture.map == map_id)
                     pending_vault_capture = std::pair{capture.id, capture.map};
             }
-            for (const auto& failure : update->errors) {
+            for (const auto &failure : update->errors) {
                 std::cerr << "Replay library: " << failure << '\n';
                 toast(failure);
             }
         }
         prefetch.poll();
         if(prefetch.valid()&&prefetch.wait_for(std::chrono::seconds(0))==std::future_status::ready){
-            try{if(prefetch.get())prefetch_done=prefetch_active;}
-            catch(const std::exception &e){std::cerr<<"Map prefetch: "<<e.what()<<'\n';}
+            try {
+                if (prefetch.get())
+                    prefetch_done = prefetch_active;
+            } catch (const std::exception &e) {
+                std::cerr << "Map prefetch: " << e.what() << '\n';
+            }
             prefetch_active.clear();prefetch_map.clear();prefetch_sha.clear();
         }
         if(!prefetch.valid()&&!prefetch_map.empty()&&!download.valid()&&playback){
             const auto id=prefetch_map;prefetch_active=id+":"+prefetch_sha;
-            prefetch.start([&,id,sha=prefetch_sha](const std::atomic_bool &cancel){const auto lock=lock_cache(cancel);return native::prefetch_map(id,sha,cache,cancel);});
+            prefetch.start([&, id, sha = prefetch_sha](const std::atomic_bool &cancel) {
+                const auto lock = lock_cache(cancel);
+                return native::prefetch_map(id, sha, cache, cancel);
+            });
         }
         download.poll();
         if(download.valid() && download.wait_for(std::chrono::seconds(0))==std::future_status::ready && !map_preparing) {
@@ -1768,8 +2095,11 @@ int run(const Options &opt) {
             if(menu&&menu_ready)menu->evaluate_js("window.bunnyhopNativeMenu?.onState?.("+update.dump()+")");
         } else if(download.valid() && map_preparing) {
             map_preparing=false;
-            try {auto result=download.get();load_map(native::data_location::utf8(result.bsp),native::data_location::utf8(result.content_root),result.id,result.detail);}
-            catch(const std::exception &e) {
+            try {
+                auto result = download.get();
+                load_map(native::data_location::utf8(result.bsp), native::data_location::utf8(result.content_root),
+                         result.id, result.detail);
+            } catch (const std::exception &e) {
                 pending_replay.clear();pending_action.clear();pending_tutorial.clear();pending_tutorial_demo=false;
                 const std::string failure=e.what();if(core)reset();error=failure;std::cerr<<error<<'\n';if(!menu||opt.frames)throw;
                 // Back on the home screen: restart the tour this download interrupted.
@@ -2033,21 +2363,33 @@ int run(const Options &opt) {
                         require(bh_record_write_bhr(core.get(),record_path.c_str()),core.get(),"Writing native replay");
                         // Local vault failures cannot withhold an otherwise valid replay submission.
                         const auto id = data_location::utf8(data_location::from_utf8(record_path).filename());
-                        replay_library.archive(id, {{"map", map_id}, {"style", active_style},
-                            {"track", run_state.track}, {"time", run_state.seconds}, {"jumps", run_state.jumps},
-                            {"strafes", run_state.strafes}, {"sync", run_state.sync_percent},
-                            {"finishedAt", epoch_ms()}, {"client", identity.value("build", std::string("local"))},
-                            {"eligible", !turn_admission.local_only && bool(run_state.recording_valid)}},
+                        replay_library.archive(
+                            id,
+                            {{"map", map_id},
+                             {"style", active_style},
+                             {"track", run_state.track},
+                             {"time", run_state.seconds},
+                             {"jumps", run_state.jumps},
+                             {"strafes", run_state.strafes},
+                             {"sync", run_state.sync_percent},
+                             {"finishedAt", epoch_ms()},
+                             {"client", identity.value("build", std::string("local"))},
+                             {"eligible", !turn_admission.local_only && bool(run_state.recording_valid)}},
                             preferences.value("capturePbScreenshots", false));
                         refresh_replays();
                         if(!turn_admission.local_only&&active_style=="autohop"&&run_state.track==0){
                             const auto old=backdrop_pbs.find(map_id);
                             if(old==backdrop_pbs.end()||!old->is_object()||run_state.seconds<old->value("seconds",std::numeric_limits<double>::infinity())){
-                                backdrop_pbs[map_id]={{"id",native::data_location::utf8(native::data_location::from_utf8(record_path).filename())},{"seconds",run_state.seconds}};
+                                backdrop_pbs[map_id] = {
+                                    {"id", native::data_location::utf8(
+                                               native::data_location::from_utf8(record_path).filename())},
+                                    {"seconds", run_state.seconds}};
                                 json_writer.write(cache/"backdrop-pbs.json",backdrop_pbs);
                             }
                         }
-                        run_event({{"type","finish"},{"track",run_state.track},{"replayBase64",base64(read_text(data_location::from_utf8(record_path)))}});
+                        run_event({{"type", "finish"},
+                                   {"track", run_state.track},
+                                   {"replayBase64", base64(read_text(data_location::from_utf8(record_path)))}});
                         std::cout<<"Native finish "<<run_state.seconds<<" seconds; replay "<<record_path<<'\n';
                     } catch(const std::exception &e) {
                         error=std::string("Replay was not submitted: ")+e.what();
@@ -2189,7 +2531,18 @@ int run(const Options &opt) {
             }
         }
         // Capture only the finished gameplay framebuffer, before any menu/backdrop layer.
-        if(pending_vault_capture){const auto pending=*pending_vault_capture;pending_vault_capture.reset();if(renderer&&pending.second==map_id&&width>0&&height>0){try{replay_library.attach(pending.first,backbuffer_png(gl,width,height));}catch(const std::exception&e){std::cerr<<"Local PB screenshot: "<<e.what()<<'\n';score_notice="Replay saved; optional screenshot could not be saved";}}}
+        if (pending_vault_capture) {
+            const auto pending = *pending_vault_capture;
+            pending_vault_capture.reset();
+            if (renderer && pending.second == map_id && width > 0 && height > 0) {
+                try {
+                    replay_library.attach(pending.first, backbuffer_png(gl, width, height));
+                } catch (const std::exception &e) {
+                    std::cerr << "Local PB screenshot: " << e.what() << '\n';
+                    score_notice = "Replay saved; optional screenshot could not be saved";
+                }
+            }
+        }
         // Separate GTK windows and screenshot runs cannot show the SDL layer:
         // they get one bounded PNG of the still pose instead of a live scene.
         const bool backdrop_live=menu&&menu->supports_backdrop()&&opt.menu_smoke.empty();
@@ -2254,9 +2607,19 @@ int run(const Options &opt) {
                 options.music_offset = 12;
                 // Smoke-only soundtrack. Regular exports keep the explicit No music default.
                 preferences["musicPack"]="default";preferences["muted"]=false;preferences["muteMusic"]=false;preferences["musicVolume"]=1.;preferences["volume"]=.65;
-                request_video(options);video_smoke_stage=3;}
-            else if(video_smoke_stage==3&&phase=="completed"){check_video_restored();auto proof=result;proof["restoredTick"]=curr.tick;proof["restoredFreeCamera"]=true;proof["cancelRestored"]=true;proof["encoderFailureRestored"]=true;std::ofstream(native::data_location::from_utf8(opt.video_smoke)/"result.json")<<proof.dump(2)<<'\n';running=false;}
-            else if(video_smoke_stage==3&&(phase=="error"||phase=="canceled"))throw std::runtime_error("Video smoke failed: "+result.dump());
+                request_video(options);video_smoke_stage=3;
+            } else if (video_smoke_stage == 3 && phase == "completed") {
+                check_video_restored();
+                auto proof = result;
+                proof["restoredTick"] = curr.tick;
+                proof["restoredFreeCamera"] = true;
+                proof["cancelRestored"] = true;
+                proof["encoderFailureRestored"] = true;
+                std::ofstream(native::data_location::from_utf8(opt.video_smoke) / "result.json")
+                    << proof.dump(2) << '\n';
+                running = false;
+            } else if (video_smoke_stage == 3 && (phase == "error" || phase == "canceled"))
+                throw std::runtime_error("Video smoke failed: " + result.dump());
             else if(Clock::now()-video_smoke_started>std::chrono::minutes(3))throw std::runtime_error("Video smoke timed out");
         }
         ++frame; ++title_frames;if(simulation_active&&!playback)input.frame();
@@ -2286,55 +2649,194 @@ int run(const Options &opt) {
             const bool full = menu_state.needs_full(visible);
             nlohmann::json state;
             if (visible || full) {
-            std::string progress;nlohmann::json progress_detail;{std::lock_guard lock(progress_mutex);progress=loading;progress_detail=load_progress;}
-            // The game window, as the web reports its page: logical size plus pixel density.
-            int window_w=0,window_h=0;SDL_GetWindowSize(window.get(),&window_w,&window_h);
-            const nlohmann::json client_info={{"version",identity.value("version",std::string("local"))},{"build",identity.value("build",std::string("bunnyhop-native/local"))},
-                {"gpu",gpu_renderer},{"viewport",{window_w,window_h}},{"dpr",std::round(SDL_GetWindowPixelDensity(window.get())*100)/100}};
-            state={{"engine","native"},{"renderer","opengl"},{"client",client_info},{"map",map_id},{"loading",progress},{"loadProgress",progress_detail},{"error",error},
-                {"sensitivity",input.sensitivity},{"paused",!captured},{"recordingPath",record_path},
-                {"player",{{"map",map_id},{"style",playback?playback_info.value("style",active_style):active_style},{"track",playback?playback_info.value("track",active_track):active_track},{"mode",playback?"replay":!room.id.empty()?"multiplayer":!gauntlet_id.empty()?"gauntlet":(practice.active||tutorial_practice())?"practice":"solo"},{"practice",practice.active||map_id==tutorial_map}}},
-                {"practice",{{"available",practice_reason().empty()},{"unavailable",practice_reason().empty()?nlohmann::json(nullptr):nlohmann::json(practice_reason())},{"mode",practice.mode},{"active",practice.active},{"thirdPerson",third_person&&!playback&&!room.spectator_target},{"tool",practice.tool.empty()?nlohmann::json(nullptr):nlohmann::json(practice.tool)},{"noclip",practice.noclip},{"menuOpen",practice.menu_open},{"count",practice.checkpoints.size()},{"current",practice.number()},{"keepVelocity",preferences.at("practiceKeepVelocity")}}},
-                {"gauntlet",{{"id",gauntlet_id.empty()?nlohmann::json(nullptr):nlohmann::json(gauntlet_id)},{"map",gauntlet_map.empty()?nlohmann::json(nullptr):nlohmann::json(gauntlet_map)}}},
-                {"style",selected_style},{"track",active_track},
-                {"room",{{"id",room.id},{"map",room.map},{"spectating",spectator.has_value()},{"target",spectator?nlohmann::json(*spectator):nlohmann::json(nullptr)},{"raceFrozen",room_modes.frozen()}}},
-                {"tutorial",tutorial?tutorial->stateJSON():nlohmann::json{{"active",false},{"lesson","jump"},{"completed",tutorial_completed}}},
-                {"playback", playback_session.state(playback, playback_id, curr.tick, playback_paused,
-                                                    playback_speed, replay_camera.mode, run_state.seconds, dt)},
-                {"ghost",{{"enabled",ghost_enabled},{"id",ghost_id},{"name",ghost_info.is_object()?ghost_info.value("player",std::string("Ghost")):"Ghost"}}},
-                {"runGeneration",run_generation},{"timer",{{"status",run_state.status},{"seconds",run_state.seconds},{"jumps",run_state.jumps},{"strafes",run_state.strafes},{"sync",run_state.sync_percent}}},
-                {"videoExport",video_state()},{"music",audio.music_state()},{"audio",audio.status()},
-                {"discord",{{"state",discord_allowed?discord.state:"disabled"},{"message",discord.message}}},
-                {"backdrop",backdrop?backdrop->state(backdrop_source):nlohmann::json{{"status","idle"},{"map",""},{"renderer","native-bsp"},{"kind","tour"},{"shots",0},{"source",""},{"error",""}}}};
-            state["ghosts"]=nlohmann::json::array();for(unsigned slot=0;slot<4;slot++){const auto &g=ghost_slots[slot];if(g.handle)state["ghosts"].push_back({{"slot",slot},{"id",g.id},{"name",g.info.value("player",std::string("Ghost"))},{"enabled",g.enabled},{"map",map_id},{"style",g.info.value("style",std::string("autohop"))},{"track",g.info.value("track",0u)}});}
-            const auto &m=mouse_diagnostics.last;
-            const int sdl_version=SDL_GetVersion();
-            const nlohmann::json mouse_state={{"active",mouse_diagnostics.active},{"seconds",m.seconds},{"eventsPerSecond",m.events_per_second},{"events",m.events},{"peakBurst",m.peak_burst},{"averageAgeMs",m.average_age_ms},{"maxAgeMs",m.max_age_ms},{"maxPumpMs",m.max_pump_ms},{"relative",SDL_GetWindowRelativeMouseMode(window.get())},{"systemScaling",SDL_GetHintBoolean(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE,false)},{"sdl",std::to_string(SDL_VERSIONNUM_MAJOR(sdl_version))+"."+std::to_string(SDL_VERSIONNUM_MINOR(sdl_version))+"."+std::to_string(SDL_VERSIONNUM_MICRO(sdl_version))}};
-            auto diagnostics_state = mouse_state;
-            const auto &stamps = input_timeline.stamps();
-            diagnostics_state.update(native::diagnostics_json(frame_diagnostics, stamps, input_timeline.timed()));
-            const std::string diagnostics_event = "new CustomEvent('bunnyhop:mouse-diagnostics',{detail:"
-                + diagnostics_state.dump() + "})";
-            menu->evaluate_js("window.dispatchEvent(" + diagnostics_event + ")");
-            const auto update_state=updater.state().dump();if(update_state!=last_update){menu->evaluate_js("window.dispatchEvent(new CustomEvent('bunnyhop:update',{detail:"+update_state+"}))");last_update=update_state;}
-            {   // Settings -> Game data
-                std::optional<std::string> picked;std::string pick_error;bool picking=false;
-                {std::lock_guard lock(data_picker.m);picking=data_picker.open;if(data_picker.done){data_picker.done=false;picked=std::move(data_picker.result);data_picker.result.reset();pick_error=std::move(data_picker.error);data_picker.error.clear();}}
-                if(picked)data_choice=data_location::choose(data_location::from_utf8(*picked),cache,default_root);else if(!pick_error.empty())data_notice="Folder picker: "+pick_error;
-                nlohmann::json data_state={{"path",data_location::utf8(cache)},{"defaultPath",data_location::utf8(default_root)},{"isDefault",data_location::same(cache,default_root)},
-                    {"configured",data_location::utf8(location.active)},{"unavailable",data_unavailable},{"pending",location.pending?nlohmann::json(data_location::utf8(*location.pending)):nlohmann::json(nullptr)},
-                    {"picking",picking},{"notice",data_notice},{"choice",data_choice?nlohmann::json{{"path",data_location::utf8(data_choice->target)},{"problem",data_choice->problem}}:nlohmann::json(nullptr)}};
-                const auto encoded_data=data_state.dump(-1,' ',false,nlohmann::json::error_handler_t::replace);
-                if(encoded_data!=last_data_state){menu->evaluate_js("window.dispatchEvent(new CustomEvent('bunnyhop:data-folder',{detail:"+encoded_data+"}))");last_data_state=encoded_data;}
-            }
+                std::string progress;
+                nlohmann::json progress_detail;
+                {
+                    std::lock_guard lock(progress_mutex);
+                    progress = loading;
+                    progress_detail = load_progress;
+                }
+                // The game window, as the web reports its page: logical size plus pixel density.
+                int window_w = 0, window_h = 0;
+                SDL_GetWindowSize(window.get(), &window_w, &window_h);
+                const nlohmann::json client_info = {
+                    {"version", identity.value("version", std::string("local"))},
+                    {"build", identity.value("build", std::string("bunnyhop-native/local"))},
+                    {"gpu", gpu_renderer},
+                    {"viewport", {window_w, window_h}},
+                    {"dpr", std::round(SDL_GetWindowPixelDensity(window.get()) * 100) / 100}};
+                state = {
+                    {"engine", "native"},
+                    {"renderer", "opengl"},
+                    {"client", client_info},
+                    {"map", map_id},
+                    {"loading", progress},
+                    {"loadProgress", progress_detail},
+                    {"error", error},
+                    {"sensitivity", input.sensitivity},
+                    {"paused", !captured},
+                    {"recordingPath", record_path},
+                    {"player",
+                     {{"map", map_id},
+                      {"style", playback ? playback_info.value("style", active_style) : active_style},
+                      {"track", playback ? playback_info.value("track", active_track) : active_track},
+                      {"mode", playback                                   ? "replay"
+                               : !room.id.empty()                         ? "multiplayer"
+                               : !gauntlet_id.empty()                     ? "gauntlet"
+                               : (practice.active || tutorial_practice()) ? "practice"
+                                                                          : "solo"},
+                      {"practice", practice.active || map_id == tutorial_map}}},
+                    {"practice",
+                     {{"available", practice_reason().empty()},
+                      {"unavailable",
+                       practice_reason().empty() ? nlohmann::json(nullptr) : nlohmann::json(practice_reason())},
+                      {"mode", practice.mode},
+                      {"active", practice.active},
+                      {"thirdPerson", third_person && !playback && !room.spectator_target},
+                      {"tool", practice.tool.empty() ? nlohmann::json(nullptr) : nlohmann::json(practice.tool)},
+                      {"noclip", practice.noclip},
+                      {"menuOpen", practice.menu_open},
+                      {"count", practice.checkpoints.size()},
+                      {"current", practice.number()},
+                      {"keepVelocity", preferences.at("practiceKeepVelocity")}}},
+                    {"gauntlet",
+                     {{"id", gauntlet_id.empty() ? nlohmann::json(nullptr) : nlohmann::json(gauntlet_id)},
+                      {"map", gauntlet_map.empty() ? nlohmann::json(nullptr) : nlohmann::json(gauntlet_map)}}},
+                    {"style", selected_style},
+                    {"track", active_track},
+                    {"room",
+                     {{"id", room.id},
+                      {"map", room.map},
+                      {"spectating", spectator.has_value()},
+                      {"target", spectator ? nlohmann::json(*spectator) : nlohmann::json(nullptr)},
+                      {"raceFrozen", room_modes.frozen()}}},
+                    {"tutorial",
+                     tutorial
+                         ? tutorial->stateJSON()
+                         : nlohmann::json{{"active", false}, {"lesson", "jump"}, {"completed", tutorial_completed}}},
+                    {"playback", playback_session.state(playback, playback_id, curr.tick, playback_paused,
+                                                        playback_speed, replay_camera.mode, run_state.seconds, dt)},
+                    {"ghost",
+                     {{"enabled", ghost_enabled},
+                      {"id", ghost_id},
+                      {"name", ghost_info.is_object() ? ghost_info.value("player", std::string("Ghost")) : "Ghost"}}},
+                    {"runGeneration", run_generation},
+                    {"timer",
+                     {{"status", run_state.status},
+                      {"seconds", run_state.seconds},
+                      {"jumps", run_state.jumps},
+                      {"strafes", run_state.strafes},
+                      {"sync", run_state.sync_percent}}},
+                    {"videoExport", video_state()},
+                    {"music", audio.music_state()},
+                    {"audio", audio.status()},
+                    {"discord",
+                     {{"state", discord_allowed ? discord.state : "disabled"}, {"message", discord.message}}},
+                    {"backdrop", backdrop ? backdrop->state(backdrop_source)
+                                          : nlohmann::json{{"status", "idle"},
+                                                           {"map", ""},
+                                                           {"renderer", "native-bsp"},
+                                                           {"kind", "tour"},
+                                                           {"shots", 0},
+                                                           {"source", ""},
+                                                           {"error", ""}}}};
+                state["ghosts"] = nlohmann::json::array();
+                for (unsigned slot = 0; slot < 4; slot++) {
+                    const auto &g = ghost_slots[slot];
+                    if (g.handle)
+                        state["ghosts"].push_back({{"slot", slot},
+                                                   {"id", g.id},
+                                                   {"name", g.info.value("player", std::string("Ghost"))},
+                                                   {"enabled", g.enabled},
+                                                   {"map", map_id},
+                                                   {"style", g.info.value("style", std::string("autohop"))},
+                                                   {"track", g.info.value("track", 0u)}});
+                }
+                const auto &m = mouse_diagnostics.last;
+                const int sdl_version = SDL_GetVersion();
+                const nlohmann::json mouse_state = {
+                    {"active", mouse_diagnostics.active},
+                    {"seconds", m.seconds},
+                    {"eventsPerSecond", m.events_per_second},
+                    {"events", m.events},
+                    {"peakBurst", m.peak_burst},
+                    {"averageAgeMs", m.average_age_ms},
+                    {"maxAgeMs", m.max_age_ms},
+                    {"maxPumpMs", m.max_pump_ms},
+                    {"relative", SDL_GetWindowRelativeMouseMode(window.get())},
+                    {"systemScaling", SDL_GetHintBoolean(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE, false)},
+                    {"sdl", std::to_string(SDL_VERSIONNUM_MAJOR(sdl_version)) + "." +
+                                std::to_string(SDL_VERSIONNUM_MINOR(sdl_version)) + "." +
+                                std::to_string(SDL_VERSIONNUM_MICRO(sdl_version))}};
+                auto diagnostics_state = mouse_state;
+                const auto &stamps = input_timeline.stamps();
+                diagnostics_state.update(native::diagnostics_json(frame_diagnostics, stamps, input_timeline.timed()));
+                const std::string diagnostics_event =
+                    "new CustomEvent('bunnyhop:mouse-diagnostics',{detail:" + diagnostics_state.dump() + "})";
+                menu->evaluate_js("window.dispatchEvent(" + diagnostics_event + ")");
+                const auto update_state = updater.state().dump();
+                if (update_state != last_update) {
+                    menu->evaluate_js("window.dispatchEvent(new CustomEvent('bunnyhop:update',{detail:" + update_state +
+                                      "}))");
+                    last_update = update_state;
+                }
+                { // Settings -> Game data
+                    std::optional<std::string> picked;
+                    std::string pick_error;
+                    bool picking = false;
+                    {
+                        std::lock_guard lock(data_picker.m);
+                        picking = data_picker.open;
+                        if (data_picker.done) {
+                            data_picker.done = false;
+                            picked = std::move(data_picker.result);
+                            data_picker.result.reset();
+                            pick_error = std::move(data_picker.error);
+                            data_picker.error.clear();
+                        }
+                    }
+                    if (picked)
+                        data_choice = data_location::choose(data_location::from_utf8(*picked), cache, default_root);
+                    else if (!pick_error.empty())
+                        data_notice = "Folder picker: " + pick_error;
+                    nlohmann::json data_state = {
+                        {"path", data_location::utf8(cache)},
+                        {"defaultPath", data_location::utf8(default_root)},
+                        {"isDefault", data_location::same(cache, default_root)},
+                        {"configured", data_location::utf8(location.active)},
+                        {"unavailable", data_unavailable},
+                        {"pending", location.pending ? nlohmann::json(data_location::utf8(*location.pending))
+                                                     : nlohmann::json(nullptr)},
+                        {"picking", picking},
+                        {"notice", data_notice},
+                        {"choice", data_choice ? nlohmann::json{{"path", data_location::utf8(data_choice->target)},
+                                                                {"problem", data_choice->problem}}
+                                               : nlohmann::json(nullptr)}};
+                    const auto encoded_data = data_state.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+                    if (encoded_data != last_data_state) {
+                        menu->evaluate_js("window.dispatchEvent(new CustomEvent('bunnyhop:data-folder',{detail:" +
+                                          encoded_data + "}))");
+                        last_data_state = encoded_data;
+                    }
+                }
             } else {
-                state = {{"map", map_id}, {"style", selected_style}, {"track", active_track},
-                    {"runGeneration", run_generation}, {"loading", download.valid()},
-                    {"player", {{"map", map_id}, {"style", active_style}, {"track", active_track},
-                        {"mode", "multiplayer"}, {"practice", practice.active}}},
-                    {"room", {{"id", room.id}, {"map", room.map}, {"spectating", spectator.has_value()},
-                        {"target", spectator ? nlohmann::json(*spectator) : nlohmann::json(nullptr)},
-                        {"raceFrozen", room_modes.frozen()}}}};
+                state = {{"map", map_id},
+                         {"style", selected_style},
+                         {"track", active_track},
+                         {"runGeneration", run_generation},
+                         {"loading", download.valid()},
+                         {"player",
+                          {{"map", map_id},
+                           {"style", active_style},
+                           {"track", active_track},
+                           {"mode", "multiplayer"},
+                           {"practice", practice.active}}},
+                         {"room",
+                          {{"id", room.id},
+                           {"map", room.map},
+                           {"spectating", spectator.has_value()},
+                           {"target", spectator ? nlohmann::json(*spectator) : nlohmann::json(nullptr)},
+                           {"raceFrozen", room_modes.frozen()}}}};
             }
             const auto script = menu_state.publish(std::move(state), visible, preferences, replay_list);
             if (!script.empty())

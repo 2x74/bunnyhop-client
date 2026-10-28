@@ -45,8 +45,7 @@ inline bool starts_with_utf8_bom(const std::string& text) {
 }
 
 // The whole file as text. Throws a sentence for the player.
-inline std::string read_dialog_file(const std::filesystem::path& path,
-                                    std::uintmax_t limit = file_dialog_max_bytes) {
+inline std::string read_dialog_file(const std::filesystem::path &path, std::uintmax_t limit = file_dialog_max_bytes) {
     std::error_code ec;
     if (!std::filesystem::is_regular_file(path, ec))
         throw std::runtime_error("That isn't a file.");
@@ -93,42 +92,42 @@ struct FileDialogResult {
 // another thread, so the answer lands in process-lifetime shared state.
 class FileDialogs {
 public:
-    using Launcher = void (*)(SDL_DialogFileCallback, void*);
-    explicit FileDialogs(Launcher launcher = nullptr) : launcher_(launcher) {}
+  using Launcher = void (*)(SDL_DialogFileCallback, void *);
+  explicit FileDialogs(Launcher launcher = nullptr) : launcher_(launcher) {}
 
-    bool busy() const {
-        auto& shared = state();
-        std::lock_guard lock(shared.mutex);
-        return shared.open;
-    }
+  bool busy() const {
+      auto &shared = state();
+      std::lock_guard lock(shared.mutex);
+      return shared.open;
+  }
 
     // action "open" or "save"; `start` is a folder, or for save a suggested file.
-    bool show(SDL_Window* window, const std::string& action, const std::string& purpose,
-              const std::string& id, const std::filesystem::path& start, std::string text = {}) {
-        if (!file_dialog_purpose(purpose) || (action != "open" && action != "save"))
-            return false;
-        auto& shared = state();
-        {
-            std::lock_guard lock(shared.mutex);
-            if (shared.open || shared.done)
-                return false;
-            shared.open = true;
-            shared.asked = FileDialogResult{id, purpose, action};
-            shared.asked.text = std::move(text);
-        }
-        if (launcher_) {
-            launcher_(&answered, nullptr);
-            return true;
-        }
-        const auto location = utf8_path(start);
-        const char* from = location.empty() ? nullptr : location.c_str();
-        const auto* filter = purpose == "css" ? &css_filter : &settings_filter;
-        if (action == "open")
-            SDL_ShowOpenFileDialog(&answered, nullptr, window, filter, 1, from, false);
-        else
-            SDL_ShowSaveFileDialog(&answered, nullptr, window, filter, 1, from);
-        return true;
-    }
+  bool show(SDL_Window *window, const std::string &action, const std::string &purpose, const std::string &id,
+            const std::filesystem::path &start, std::string text = {}) {
+      if (!file_dialog_purpose(purpose) || (action != "open" && action != "save"))
+          return false;
+      auto &shared = state();
+      {
+          std::lock_guard lock(shared.mutex);
+          if (shared.open || shared.done)
+              return false;
+          shared.open = true;
+          shared.asked = FileDialogResult{id, purpose, action};
+          shared.asked.text = std::move(text);
+      }
+      if (launcher_) {
+          launcher_(&answered, nullptr);
+          return true;
+      }
+      const auto location = utf8_path(start);
+      const char *from = location.empty() ? nullptr : location.c_str();
+      const auto *filter = purpose == "css" ? &css_filter : &settings_filter;
+      if (action == "open")
+          SDL_ShowOpenFileDialog(&answered, nullptr, window, filter, 1, from, false);
+      else
+          SDL_ShowSaveFileDialog(&answered, nullptr, window, filter, 1, from);
+      return true;
+  }
 
     std::optional<FileDialogResult> take() {
         auto& shared = state();
@@ -139,13 +138,13 @@ public:
     }
 
 private:
-    Launcher launcher_;
-    struct State {
-        std::mutex mutex;
-        bool open = false;
-        FileDialogResult asked;
-        std::optional<FileDialogResult> done;
-    };
+  Launcher launcher_;
+  struct State {
+      std::mutex mutex;
+      bool open = false;
+      FileDialogResult asked;
+      std::optional<FileDialogResult> done;
+  };
 
     static State& state() {
         static State shared;

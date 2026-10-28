@@ -78,7 +78,7 @@ std::string hash(const Bytes &bytes) {
 }
 void save(const std::filesystem::path &path, const Bytes &bytes) {
     std::filesystem::create_directories(path.parent_path());
-    atomic_write_file(path, std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+    atomic_write_file(path, std::string_view(reinterpret_cast<const char *>(bytes.data()), bytes.size()));
 }
 std::filesystem::path asset(const std::filesystem::path &cache, const std::string &sha,
                             const std::string &route, size_t max_size, const std::atomic_bool *cancel,const LoadProgressCallback &progress={},bool offline=false,const DownloadFetch &fetch={}) {

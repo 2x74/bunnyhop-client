@@ -56,14 +56,34 @@ bool NativeVideoExport::submit(std::vector<uint8_t> rgb,std::vector<float> sampl
 }
 void NativeVideoExport::finish(){std::lock_guard lock(mutex);if(!running)return;if(submitted!=total||audio_submitted!=audio_total)throw std::runtime_error("Cannot finish before every video frame and audio sample is captured.");finished=true;phase="encoding";ready.notify_one();}
 void NativeVideoExport::cancel(){{std::lock_guard lock(mutex);if(!running||phase=="completed")return;canceled=true;}ready.notify_all();std::lock_guard lock(process_mutex);if(process)SDL_KillProcess(process,true);}
-nlohmann::json NativeVideoExport::status()const{std::lock_guard lock(mutex);return {{"state",phase},{"frames",submitted},{"encodedFrames",written},{"totalFrames",total},{"progress",total?double(submitted)/total:0},{"path",phase=="completed"?native::data_location::utf8(destination):""},{"error",error},{"videoOnly",!options.has_audio()},{"audioSamples",audio_submitted},{"musicTrack",options.music},{"musicOffset",options.music_offset},{"musicLevel",options.music_level},{"audioScope",options.has_audio()?(options.music=="none"?"gameplay":options.audio?"gameplay+music":"music"):"none"}};}
+nlohmann::json NativeVideoExport::status() const {
+    std::lock_guard lock(mutex);
+    return {{"state", phase},
+            {"frames", submitted},
+            {"encodedFrames", written},
+            {"totalFrames", total},
+            {"progress", total ? double(submitted) / total : 0},
+            {"path", phase == "completed" ? native::data_location::utf8(destination) : ""},
+            {"error", error},
+            {"videoOnly", !options.has_audio()},
+            {"audioSamples", audio_submitted},
+            {"musicTrack", options.music},
+            {"musicOffset", options.music_offset},
+            {"musicLevel", options.music_level},
+            {"audioScope", options.has_audio() ? (options.music == "none" ? "gameplay"
+                                                  : options.audio         ? "gameplay+music"
+                                                                          : "music")
+                                               : "none"}};
+}
 void NativeVideoExport::run(std::string encoder){
     SDL_IOStream *input=nullptr;bool success=false;std::string failure;
     // Own one process at a time. The PCM spool avoids two pipe writers, pipe
     // deadlocks, and unbounded RAM for long clips. No shell parses filenames.
     auto spawn=[&](const std::vector<std::string> &arguments){
         std::vector<const char*> args;for(const auto &arg:arguments)args.push_back(arg.c_str());args.push_back(nullptr);
-        auto *errors=SDL_IOFromFile(native::data_location::utf8(log).c_str(),"ab");if(!errors)throw std::runtime_error("Cannot create video encoder log.");
+        auto *errors = SDL_IOFromFile(native::data_location::utf8(log).c_str(), "ab");
+        if (!errors)
+            throw std::runtime_error("Cannot create video encoder log.");
         const auto props=SDL_CreateProperties();SDL_SetPointerProperty(props,SDL_PROP_PROCESS_CREATE_ARGS_POINTER,const_cast<char**>(args.data()));SDL_SetNumberProperty(props,SDL_PROP_PROCESS_CREATE_STDIN_NUMBER,SDL_PROCESS_STDIO_APP);SDL_SetNumberProperty(props,SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER,SDL_PROCESS_STDIO_NULL);SDL_SetNumberProperty(props,SDL_PROP_PROCESS_CREATE_STDERR_NUMBER,SDL_PROCESS_STDIO_REDIRECT);SDL_SetPointerProperty(props,SDL_PROP_PROCESS_CREATE_STDERR_POINTER,errors);
         {std::lock_guard lock(process_mutex);if(!canceled)process=SDL_CreateProcessWithProperties(props);}
         SDL_DestroyProperties(props);SDL_CloseIO(errors);if(!process)throw std::runtime_error(canceled?"Video export canceled.":std::string("Cannot start FFmpeg: ")+SDL_GetError());
@@ -78,7 +98,40 @@ void NativeVideoExport::run(std::string encoder){
         std::ofstream audio;
         if(options.has_audio()){audio.open(pcm,std::ios::binary);if(!audio)throw std::runtime_error("Cannot create export audio spool.");}
         const std::string size=std::to_string(options.width)+"x"+std::to_string(options.height),fps=std::to_string(options.fps),count=std::to_string(total),crf=options.quality=="max"?"15":options.quality=="standard"?"23":"18";
-        spawn({encoder,"-hide_banner","-loglevel","error","-nostdin","-n","-f","rawvideo","-pixel_format","rgb24","-video_size",size,"-framerate",fps,"-i","pipe:0","-an","-frames:v",count,"-c:v","libx264","-bf","0","-video_track_timescale","2646000","-preset","fast","-crf",crf,"-pix_fmt","yuv420p","-movflags","+faststart",native::data_location::utf8(video)});
+        spawn({encoder,
+               "-hide_banner",
+               "-loglevel",
+               "error",
+               "-nostdin",
+               "-n",
+               "-f",
+               "rawvideo",
+               "-pixel_format",
+               "rgb24",
+               "-video_size",
+               size,
+               "-framerate",
+               fps,
+               "-i",
+               "pipe:0",
+               "-an",
+               "-frames:v",
+               count,
+               "-c:v",
+               "libx264",
+               "-bf",
+               "0",
+               "-video_track_timescale",
+               "2646000",
+               "-preset",
+               "fast",
+               "-crf",
+               crf,
+               "-pix_fmt",
+               "yuv420p",
+               "-movflags",
+               "+faststart",
+               native::data_location::utf8(video)});
         input=SDL_GetProcessInput(process);if(!input)throw std::runtime_error("FFmpeg input pipe is unavailable.");
         for(;;){Packet packet;{std::unique_lock lock(mutex);ready.wait(lock,[&]{return canceled||!queue.empty()||finished;});if(canceled)break;if(queue.empty()&&finished)break;packet=std::move(queue.front());queue.pop_front();}
             if(!packet.pcm.empty()){audio.write(reinterpret_cast<const char*>(packet.pcm.data()),std::streamsize(packet.pcm.size()*sizeof(float)));if(!audio)throw std::runtime_error("Cannot write export audio (disk full?).");}
@@ -98,11 +151,16 @@ void NativeVideoExport::run(std::string encoder){
             const uint64_t last=(total-1)*(scale/uint64_t(options.fps));
             const auto tail=std::max(int64_t(1),int64_t(duration)-int64_t(last));
             const std::string trim="setts=duration=if(eq(N\\,"+std::to_string(total-1)+")\\,"+std::to_string(tail)+"\\,DURATION)";
-            std::vector<std::string> arguments={encoder,"-hide_banner","-loglevel","error","-nostdin","-n","-i",native::data_location::utf8(video)};
-            if(options.has_audio())arguments.insert(arguments.end(),{"-f","f32le","-ar","22050","-ac","2","-i",native::data_location::utf8(pcm)});
+            std::vector<std::string> arguments = {
+                encoder,    "-hide_banner", "-loglevel", "error",
+                "-nostdin", "-n",           "-i",        native::data_location::utf8(video)};
+            if (options.has_audio())
+                arguments.insert(arguments.end(),
+                                 {"-f", "f32le", "-ar", "22050", "-ac", "2", "-i", native::data_location::utf8(pcm)});
             arguments.insert(arguments.end(),{"-map","0:v:0"});
             if(options.has_audio())arguments.insert(arguments.end(),{"-map","1:a:0","-c:a","aac","-b:a","160k"});
-            arguments.insert(arguments.end(),{"-c:v","copy","-bsf:v",trim,"-video_track_timescale","2646000","-movflags","+faststart",native::data_location::utf8(partial)});
+            arguments.insert(arguments.end(), {"-c:v", "copy", "-bsf:v", trim, "-video_track_timescale", "2646000",
+                                               "-movflags", "+faststart", native::data_location::utf8(partial)});
             spawn(arguments);if(auto *in=SDL_GetProcessInput(process))SDL_CloseIO(in);wait();
         }
         if(!canceled){std::lock_guard lock(mutex);if(!canceled){if(!std::filesystem::is_regular_file(partial)||std::filesystem::file_size(partial)<32)throw std::runtime_error("FFmpeg produced no playable video.");std::filesystem::create_hard_link(partial,destination);success=true;phase="completed";}}

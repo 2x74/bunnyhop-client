@@ -9,7 +9,7 @@
 namespace native {
 
 class ReplayLibrary {
-public:
+  public:
     struct Capture {
         std::string id;
         std::string map;
@@ -23,8 +23,8 @@ public:
 
     explicit ReplayLibrary(std::filesystem::path cache);
     ~ReplayLibrary();
-    ReplayLibrary(const ReplayLibrary&) = delete;
-    ReplayLibrary& operator=(const ReplayLibrary&) = delete;
+    ReplayLibrary(const ReplayLibrary &) = delete;
+    ReplayLibrary &operator=(const ReplayLibrary &) = delete;
     void refresh();
     void archive(std::string id, nlohmann::json summary, bool capture);
     void attach(std::string id, std::string png);
@@ -32,7 +32,7 @@ public:
     std::optional<Update> take();
     void flush();
 
-private:
+  private:
     struct Job {
         enum class Kind { archive, attach, trash };
         Kind kind;
@@ -61,8 +61,8 @@ private:
 
     void enqueue(Job job);
     void work();
-    void execute(const Job& job, Update& update);
-    void scan(Update& update);
+    void execute(const Job &job, Update &update);
+    void scan(Update &update);
 };
 
-}
+} // namespace native

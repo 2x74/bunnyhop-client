@@ -150,8 +150,8 @@ void test_menu_slices() {
     native::MenuState publisher;
     const native::Json settings = {{"sensitivity", 3.0}};
     const native::Json replays = native::Json::array({{{"id", "one.bhr"}}});
-    native::Json state = {{"map", "test"}, {"style", "autohop"}, {"track", 0},
-        {"runGeneration", 2}, {"loading", false}, {"room", {{"id", "room"}}}};
+    native::Json state = {{"map", "test"},      {"style", "autohop"}, {"track", 0},
+                          {"runGeneration", 2}, {"loading", false},   {"room", {{"id", "room"}}}};
     const auto full = publisher.publish(state, true, settings, replays);
     assert(full.find("\"settings\"") != std::string::npos && full.find("one.bhr") != std::string::npos);
     assert(publisher.publish(state, true, settings, replays).empty());
@@ -180,9 +180,11 @@ void test_settings_recovery() {
     const auto directory = std::filesystem::temp_directory_path() / "bunnyhop-settings-recovery";
     std::filesystem::create_directories(directory);
     const auto file = directory / "settings.json";
-    const native::Json saved = {{"futureOption", true}, {"fov", "bad"}, {"sensitivity", 3.5},
-        {"binds", {{"jump", {"KeyJ"}}, {"futureAction", {"KeyK"}}, {"duck", {"Invalid"}},
-                   {"forward", {"KeyZ"}}}}};
+    const native::Json saved = {
+        {"futureOption", true},
+        {"fov", "bad"},
+        {"sensitivity", 3.5},
+        {"binds", {{"jump", {"KeyJ"}}, {"futureAction", {"KeyK"}}, {"duck", {"Invalid"}}, {"forward", {"KeyZ"}}}}};
     native::save_settings(file, saved);
     const auto loaded = native::load_settings(file);
     assert(loaded.at("sensitivity") == 3.5);
@@ -203,16 +205,16 @@ void test_settings_recovery() {
     try {
         native::load_settings(file);
         assert(false);
-    } catch (const std::exception&) {
+    } catch (const std::exception &) {
         std::ifstream rejected(directory / "settings.json.previous");
         std::string text;
         rejected >> text;
         assert(text == "{broken");
     }
     int notices = 0;
-    native::RecoverableAction action([](const std::string&, bool = false, bool = false) {
-        throw std::runtime_error("settings locked");
-    }, [&](const char*) { ++notices; });
+    native::RecoverableAction action(
+        [](const std::string &, bool = false, bool = false) { throw std::runtime_error("settings locked"); },
+        [&](const char *) { ++notices; });
     action("mute");
     native::RestartGuard guard;
     guard.press("restart", 100, true, true, false);

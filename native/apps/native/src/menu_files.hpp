@@ -23,11 +23,11 @@ namespace native {
 // custom-css-file.json in the data folder.
 class MenuFiles {
 public:
-    explicit MenuFiles(const std::filesystem::path& data, FileDialogs::Launcher launcher = nullptr)
-        : dialogs_(launcher), state_file_(data / "custom-css-file.json") {
-        worker_ = std::thread([this] { work(); });
-        queue({Job::Kind::load_watch});
-    }
+  explicit MenuFiles(const std::filesystem::path &data, FileDialogs::Launcher launcher = nullptr)
+      : dialogs_(launcher), state_file_(data / "custom-css-file.json") {
+      worker_ = std::thread([this] { work(); });
+      queue({Job::Kind::load_watch});
+  }
 
     ~MenuFiles() {
         collect_dialog();

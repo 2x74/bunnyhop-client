@@ -17,7 +17,7 @@ void write_raw(const fs::path& path, const std::string& bytes) {
     out << bytes;
 }
 
-bool throws(const fs::path& path, std::uintmax_t limit = native::file_dialog_max_bytes) {
+bool throws(const fs::path &path, std::uintmax_t limit = native::file_dialog_max_bytes) {
     try {
         native::read_dialog_file(path, limit);
     } catch (const std::exception&) {
@@ -30,15 +30,21 @@ struct FakeWindow {
     std::string shown = "borderless";
     int applies = 0;
     int refits = 0;
-    bool apply(const native::WindowJson& settings, bool = false,
-               const std::optional<native::WindowBounds>& = std::nullopt) {
+    bool apply(const native::WindowJson &settings, bool = false,
+               const std::optional<native::WindowBounds> & = std::nullopt) {
         shown = settings.at("windowMode");
         ++applies;
         return true;
     }
-    std::string mode() const { return shown; }
-    std::string error() const { return {}; }
-    void refit() { ++refits; }
+    std::string mode() const {
+        return shown;
+    }
+    std::string error() const {
+        return {};
+    }
+    void refit() {
+        ++refits;
+    }
 };
 
 void deferred_window_changes() {
@@ -82,10 +88,10 @@ void read_and_write(const fs::path& dir) {
     try {
         native::write_dialog_file(blocked, "replacement");
         assert(false);
-    } catch (const std::exception&) {
+    } catch (const std::exception &) {
         assert(native::read_dialog_file(blocked / "original") == "keep");
     }
-    for (const auto& entry : fs::directory_iterator(dir))
+    for (const auto &entry : fs::directory_iterator(dir))
         assert(entry.path().filename().string().find(".partial-") == std::string::npos);
     assert(native::file_dialog_purpose("settings"));
     assert(native::file_dialog_purpose("css"));
@@ -139,17 +145,17 @@ bool answered(native::MenuFiles& files, const std::string& needle) {
 }
 
 SDL_DialogFileCallback dialog_answer;
-void hold_dialog(SDL_DialogFileCallback answer, void*) {
+void hold_dialog(SDL_DialogFileCallback answer, void *) {
     dialog_answer = answer;
 }
 
-void accepted_save(const fs::path& dir) {
+void accepted_save(const fs::path &dir) {
     const auto destination = native::utf8_path(dir / "accepted.json");
     {
         native::MenuFiles files(dir, hold_dialog);
         files.handle(nullptr, {{"action", "save"}, {"purpose", "settings"}, {"id", "accepted"}, {"text", "first"}});
         files.handle(nullptr, {{"action", "save"}, {"purpose", "settings"}, {"id", "rejected"}, {"text", "second"}});
-        const char* selected[] = {destination.c_str(), nullptr};
+        const char *selected[] = {destination.c_str(), nullptr};
         dialog_answer(nullptr, selected, 0);
         // Shutdown must collect the dialog answer and drain its write without a frame poll.
     }
