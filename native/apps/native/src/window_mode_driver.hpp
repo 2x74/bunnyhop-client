@@ -30,6 +30,7 @@ template <class Controller> class BasicWindowModeDriver {
 
     // Shows what the policy wants, unless the window is minimized.
     void sync(const WindowJson& preferences) {
+        policy_.minimized = policy_.minimized || controller_.is_minimized();
         if (!policy_.request())
             return;
         const WindowJson want = policy_.effective(preferences);
@@ -60,6 +61,8 @@ template <class Controller> class BasicWindowModeDriver {
 
     // Focus gained or the window restored.
     void resumed(const WindowJson& preferences) {
+        if (controller_.is_minimized())
+            return;
         if (policy_.resume())
             sync(preferences);
         if (pending_refit_) {
@@ -72,6 +75,7 @@ template <class Controller> class BasicWindowModeDriver {
     // is what to keep; nullopt when the window manager refused (controller error()).
     std::optional<WindowJson> choose(const WindowJson& preferences) {
         auto next = policy_;
+        next.minimized = next.minimized || controller_.is_minimized();
         next.choose(preferences.value("windowMode", std::string("windowed")));
         if (!next.request()) {
             policy_ = next;
@@ -91,7 +95,7 @@ template <class Controller> class BasicWindowModeDriver {
 
     // Windows borderless follows its display after a resolution, scale or monitor change.
     void display_changed() {
-        if (policy_.minimized || policy_.waiting_for_focus) {
+        if (policy_.minimized || controller_.is_minimized() || policy_.waiting_for_focus) {
             pending_refit_ = true;
             return;
         }

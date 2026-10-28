@@ -208,7 +208,12 @@ bool MenuWebView::has_keyboard_focus() const {
     if (!impl_->shown)
         return false;
     const HWND focus = GetFocus();
-    return focus && GetForegroundWindow() == impl_->window && IsChild(impl_->window, focus);
+    if (!focus)
+        return false;
+    const HWND foreground = GetForegroundWindow();
+    if (foreground == impl_->auth_window)
+        return focus == impl_->auth_window || IsChild(impl_->auth_window, focus);
+    return foreground == impl_->window && IsChild(impl_->window, focus);
 }
 // Keyboard focus follows the menu: into the web view when it opens (and again
 // when the game window is activated with it open), back to the SDL window

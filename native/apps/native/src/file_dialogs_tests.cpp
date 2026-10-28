@@ -4,6 +4,7 @@
 #include <cassert>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <string>
 #include <chrono>
 #include <thread>
@@ -30,6 +31,10 @@ struct FakeWindow {
     std::string shown = "borderless";
     int applies = 0;
     int refits = 0;
+    bool iconified = false;
+    bool is_minimized() const {
+        return iconified;
+    }
     bool apply(const native::WindowJson &settings, bool = false,
                const std::optional<native::WindowBounds> & = std::nullopt) {
         shown = settings.at("windowMode");
@@ -50,10 +55,14 @@ struct FakeWindow {
 void deferred_window_changes() {
     FakeWindow window;
     native::BasicWindowModeDriver<FakeWindow> driver(window, "borderless");
-    driver.minimized();
+    // SDL can update flags before the minimize event reaches the driver.
+    window.iconified = true;
     driver.display_changed();
     assert(driver.choose({{"windowMode", "windowed"}}));
     assert(window.applies == 0 && window.refits == 0);
+    driver.resumed({{"windowMode", "windowed"}});
+    assert(window.applies == 0 && window.refits == 0);
+    window.iconified = false;
     driver.resumed({{"windowMode", "windowed"}});
     assert(window.applies == 1 && window.refits == 1 && window.shown == "windowed");
     driver.set_menu(true, true, {});
@@ -96,6 +105,37 @@ void read_and_write(const fs::path& dir) {
     assert(native::file_dialog_purpose("settings"));
     assert(native::file_dialog_purpose("css"));
     assert(!native::file_dialog_purpose("replay"));
+}
+
+void concurrent_replacements(const fs::path &dir) {
+    const auto file = dir / "concurrent.json";
+    bool first_ok = true;
+    bool second_ok = true;
+    const std::string first(16384, 'a');
+    const std::string second(16384, 'b');
+    auto write = [&](const std::string &text, bool &ok) {
+        try {
+            for (int i = 0; i < 20; ++i)
+                native::write_dialog_file(file, text);
+        } catch (...) {
+            ok = false;
+        }
+    };
+    std::thread left(write, std::cref(first), std::ref(first_ok));
+    std::thread right(write, std::cref(second), std::ref(second_ok));
+    left.join();
+    right.join();
+    assert(first_ok && second_ok);
+    const auto saved = native::read_dialog_file(file);
+    assert(saved == first || saved == second);
+    try {
+        native::atomic_replace(dir / "missing-source", file);
+        assert(false);
+    } catch (const std::exception &) {
+        assert(native::read_dialog_file(file) == saved);
+    }
+    for (const auto &entry : fs::directory_iterator(dir))
+        assert(entry.path().filename().string().find(".partial-") == std::string::npos);
 }
 
 void css_watch(const fs::path& dir) {
@@ -199,6 +239,7 @@ int main() {
     fs::create_directories(dir);
     deferred_window_changes();
     read_and_write(dir);
+    concurrent_replacements(dir);
     css_watch(dir);
     menu_files(dir);
     accepted_save(dir);

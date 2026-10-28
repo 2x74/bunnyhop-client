@@ -41,7 +41,7 @@ void check_mode(const std::string& mode) {
             menu.set_visible(true);
             pump();
             assert(menu.visible());
-            assert(menu.has_keyboard_focus() == bool(cocoa.isKeyWindow));
+            assert(menu.has_keyboard_focus() == bool(NSApp.isActive && cocoa.isKeyWindow));
             menu.set_visible(false);
             pump();
             assert(!menu.has_keyboard_focus());
@@ -53,7 +53,7 @@ void check_mode(const std::string& mode) {
         [cocoa makeFirstResponder:nil];
         assert(cocoa.firstResponder == cocoa);
         menu.set_visible(true);
-        assert(menu.has_keyboard_focus() == bool(cocoa.isKeyWindow));
+        assert(menu.has_keyboard_focus() == bool(NSApp.isActive && cocoa.isKeyWindow));
         [cocoa orderOut:nil];
         pump();
         assert(!menu.has_keyboard_focus());

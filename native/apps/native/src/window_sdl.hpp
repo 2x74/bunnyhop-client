@@ -47,6 +47,9 @@ class WindowController {
  }
 public:
  explicit WindowController(SDL_Window* window):window_(window){observe_bounds();desired_=mode();}
+ bool is_minimized() const {
+     return (SDL_GetWindowFlags(window_) & SDL_WINDOW_MINIMIZED) != 0;
+ }
  const std::string& error()const{return error_;}
  std::string mode()const{const auto flags=SDL_GetWindowFlags(window_);if(!(flags&SDL_WINDOW_FULLSCREEN))return flags&SDL_WINDOW_BORDERLESS?"borderless":"windowed";return SDL_GetWindowFullscreenMode(window_)?"fullscreen":"borderless";}
  bool apply(const WindowJson& settings,bool restore=false,const std::optional<WindowBounds>& saved=std::nullopt){
