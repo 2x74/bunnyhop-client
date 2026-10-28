@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cmath>
+#include <limits>
 #include <deque>
 #include <string>
 #include <string_view>
@@ -9,9 +10,64 @@
 #include "graphemes.hpp"
 #include "text_raster.hpp"
 #include "chat_links.hpp"
+#include "name_tags.hpp"
 
 namespace native {
-struct ChatDecoration {std::string color,badge,country,rank,profile;};
+struct ChatDecoration {
+    std::string color, badge, country, rank, profile;
+    std::string color2, effect, rank_color;
+    NameAppearance appearance;
+};
+inline ChatDecoration chat_decoration(const nlohmann::json &message) {
+    ChatDecoration decoration;
+    decoration.color = json_text(message, "nativeNameColor");
+    decoration.color2 = json_text(message, "nativeNameColor2");
+    decoration.effect = json_text(message, "nativeNameEffect");
+    decoration.badge = json_text(message, "nativeBadge");
+    decoration.country = json_text(message, "nativeCountry", 2);
+    decoration.rank = json_text(message, "nativeRank", 64);
+    decoration.rank_color = json_text(message, "nativeRankColor");
+    decoration.profile = json_text(message, "nativeProfileId");
+    if (decoration.country.empty())
+        decoration.country = json_text(message, "country", 2);
+    const auto rank = message.find("rank");
+    if (decoration.rank.empty() && rank != message.end() && rank->is_object()) {
+        decoration.rank = json_text(*rank, "name", 64);
+        decoration.rank_color = json_text(*rank, "color");
+    }
+    decoration.appearance = name_appearance(message);
+    if (!decoration.color.empty())
+        decoration.appearance.color = name_color(decoration.color);
+    if (!decoration.color2.empty())
+        decoration.appearance.second = name_color(decoration.color2);
+    if (!decoration.effect.empty()) {
+        const auto &effect = decoration.effect;
+        decoration.appearance.effect = effect == "glow"                           ? NameEffect::glow
+                                       : effect == "paint" || effect == "shimmer" ? NameEffect::paint
+                                       : effect == "sparkle"                      ? NameEffect::sparkle
+                                                                                  : NameEffect::plain;
+    }
+    // Older menu adapters send labels. Keep their marks without printing the words in game.
+    constexpr std::array<std::pair<std::string_view, NameMark>, 8> legacy = {{{"Owner", NameMark::owner},
+                                                                              {"Admin", NameMark::staff},
+                                                                              {"Moderator", NameMark::staff},
+                                                                              {"Verified", NameMark::verified},
+                                                                              {"creator", NameMark::creator},
+                                                                              {"Booster", NameMark::booster},
+                                                                              {"Supporter", NameMark::supporter},
+                                                                              {"Mapper", NameMark::mapper}}};
+    for (const auto &[label, mark] : legacy) {
+        if (decoration.badge.find(label) != std::string::npos)
+            decoration.appearance.marks |= 1u << unsigned(mark);
+    }
+    const auto look = message.find("nativeName");
+    const auto marks = message.find("nativeMarks");
+    if (look != message.end() || marks != message.end())
+        decoration.appearance =
+            host_name_appearance(look != message.end() ? *look : nlohmann::json(),
+                                 marks != message.end() ? *marks : nlohmann::json(), decoration.appearance);
+    return decoration;
+}
 struct ChatLine { std::string text,name,kind; double expires=0; ChatDecoration decoration;uint64_t sequence=0; };
 // The editor owns text only. Opening it must clear gameplay input, not stop the
 // simulation or change the recorded camera. Byte cursors always sit on UTF-8 boundaries.
@@ -22,6 +78,12 @@ class Chat {
     size_t scroll_=0;
     uint64_t next_sequence_=0;
     size_t anchor_=0;
+    mutable std::vector<ChatLine> visible_cache_;
+    mutable uint64_t visible_sequence_ = ~uint64_t(0);
+    mutable size_t visible_scroll_ = 0;
+    mutable size_t visible_limit_ = 0;
+    mutable bool visible_active_ = false;
+    mutable double visible_until_ = -1;
     bool erase_selection(){if(!selected)return false;const auto [first,last]=selection();input.erase(first,last-first);cursor=first;anchor_=cursor;selected=false;return true;}
     void move(size_t to,bool extend){cursor_secondary=false;if(extend){if(!selected)anchor_=cursor;cursor=grapheme_floor(input,to);selected=cursor!=anchor_;}else{cursor=grapheme_floor(input,to);anchor_=cursor;selected=false;}}
 
@@ -98,9 +160,28 @@ public:
     size_t scroll_offset()const{return scroll_;}
     uint64_t viewport(double now,size_t limit=8)const{uint64_t hash=1469598103934665603ull;for(const auto&line:visible(now,limit)){hash^=line.sequence;hash*=1099511628211ull;}return hash^(scroll_<<1)^uint64_t(active);}
     void scroll_bottom(){scroll_=0;}
-    std::vector<ChatLine> visible(double now,size_t limit=8)const{
-        std::vector<ChatLine> out;size_t skipped=0;for(auto i=lines.rbegin();i!=lines.rend()&&out.size()<limit;++i)if(active||i->expires>now){if(active&&skipped++<scroll_)continue;out.push_back(*i);}
-        std::reverse(out.begin(),out.end());return out;
+    const std::vector<ChatLine> &visible(double now, size_t limit = 8) const {
+        if (visible_sequence_ == next_sequence_ && visible_scroll_ == scroll_ && visible_limit_ == limit &&
+            visible_active_ == active && now < visible_until_)
+            return visible_cache_;
+        visible_cache_.clear();
+        visible_until_ = std::numeric_limits<double>::infinity();
+        size_t skipped = 0;
+        for (auto line = lines.rbegin(); line != lines.rend() && visible_cache_.size() < limit; ++line) {
+            if (!active && line->expires <= now)
+                continue;
+            if (active && skipped++ < scroll_)
+                continue;
+            visible_cache_.push_back(*line);
+            if (!active)
+                visible_until_ = std::min(visible_until_, line->expires);
+        }
+        std::reverse(visible_cache_.begin(), visible_cache_.end());
+        visible_sequence_ = next_sequence_;
+        visible_scroll_ = scroll_;
+        visible_limit_ = limit;
+        visible_active_ = active;
+        return visible_cache_;
     }
 };
 }

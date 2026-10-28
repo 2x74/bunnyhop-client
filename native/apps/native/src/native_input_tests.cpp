@@ -1,4 +1,5 @@
 #include "native_input.hpp"
+#include "input_timeline.hpp"
 #include "native_math.hpp"
 #include "turn_settings.hpp"
 #include "settings.hpp"
@@ -13,7 +14,56 @@
 namespace {
 bool close(double a,double b,double tolerance=1e-5) { return std::abs(a-b)<tolerance; }
 }
+void test_null_binds_per_tick() {
+    native::Input input;
+    native::InputTimeline timeline;
+    timeline.queue().holdback_ms = 0;
+    timeline.rebuild_binds(native::default_settings().at("binds"));
+    constexpr uint64_t origin = 1000000000;
+    constexpr uint64_t millisecond = 1000000;
+    constexpr uint64_t tick_interval = 10 * millisecond;
+    const auto edge = [&](unsigned at, const char *code, bool down) {
+        timeline.queue().add_edge(origin + at * millisecond, code, down);
+    };
+    edge(1, "KeyA", true);
+    edge(5, "KeyW", true);
+    edge(11, "KeyD", true);
+    edge(12, "KeyS", true);
+    edge(21, "KeyD", false);
+    edge(22, "KeyS", false);
+    edge(31, "KeyA", false);
+    edge(32, "KeyW", false);
+    uint64_t simulation = origin;
+    constexpr std::array<uint32_t, 4> expected = {native::left | native::forward, native::right | native::back,
+                                                  native::left | native::forward, 0};
+    for (size_t tick = 0; tick < expected.size(); ++tick) {
+        timeline.take_tick(input, simulation, tick_interval, false);
+        input.held = native::null_bind_buttons(timeline, input.null_presses);
+        const auto command = input.command();
+        assert(command.buttons == expected[tick]);
+        assert(command.forward == (tick == 3 ? 0 : tick == 1 ? -450 : 450));
+        assert(command.side == (tick == 3 ? 0 : tick == 1 ? 450 : -450));
+        assert(command.yaw == 0 && command.pitch == 0);
+    }
+    const std::array<uint32_t, 2> same_key = {native::left, native::left | native::right};
+    assert(native::resolve_null_binds(same_key) == (native::left | native::right));
+    native::NullBindPresses legacy;
+    legacy.edge("KeyA", native::left, true);
+    legacy.edge("KeyD", native::right, true);
+    legacy.edge("KeyA", native::left, true);
+    assert(legacy.resolve() == native::right);
+    legacy.edge("KeyD", native::right, false);
+    assert(legacy.resolve() == native::left);
+    legacy.clear();
+    assert(!legacy.resolve());
+    assert(!native::null_binds_allowed("scroll", false));
+    assert(native::null_binds_allowed("scroll", true));
+    assert(native::null_binds_allowed("autohop", false));
+    std::cout << "Null binds: four pinned tick commands, duplicate bindings, release fallback, and style gate\n";
+}
+
 int main() {
+    test_null_binds_per_tick();
     static_assert(sizeof(BhLookSample)==40 && offsetof(BhLookSample,count)==16);
     static_assert(sizeof(BhLookSampleV2)==48 && offsetof(BhLookSampleV2,epoch)==24);
     native::Input input;

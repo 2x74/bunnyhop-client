@@ -1,6 +1,8 @@
 #pragma once
 #include "bunnyhop_native.h"
 #include <algorithm>
+#include <array>
+#include <span>
 #include <cmath>
 #include <chrono>
 #include <string_view>
@@ -20,6 +22,78 @@ constexpr double max_turn_rate = 720.0 * 4.0;
 constexpr uint32_t teleported = 1u, angles_changed = 1u << 4;
 // m_yaw and m_pitch: view degrees per mouse count at sensitivity 1.
 constexpr double kDegreesPerCount = 0.022;
+
+// Held keys are supplied oldest first. One physical key bound to both directions still cancels.
+inline uint32_t resolve_null_binds(std::span<const uint32_t> presses) {
+    uint32_t bits = 0;
+    for (const uint32_t press : presses)
+        bits |= press;
+    for (const uint32_t axis : {left | right, forward | back}) {
+        if ((bits & axis) != axis)
+            continue;
+        for (auto press = presses.rbegin(); press != presses.rend(); ++press) {
+            if (*press & axis) {
+                bits = (bits & ~axis) | (*press & axis);
+                break;
+            }
+        }
+    }
+    return bits;
+}
+inline bool null_binds_allowed(std::string_view style, bool practice) {
+    return style != "scroll" || practice;
+}
+
+class NullBindPresses {
+    struct Press {
+        uint64_t code = 0;
+        uint32_t bits = 0;
+    };
+    std::array<Press, 128> held_{};
+    size_t count_ = 0;
+
+  public:
+    void clear() {
+        count_ = 0;
+    }
+    void edge(std::string_view code, uint32_t bits, bool down) {
+        uint64_t identity = 1469598103934665603ull;
+        for (unsigned char character : code) {
+            identity ^= character;
+            identity *= 1099511628211ull;
+        }
+        for (size_t i = 0; i < count_; ++i) {
+            if (held_[i].code != identity)
+                continue;
+            if (down)
+                return;
+            std::move(held_.begin() + i + 1, held_.begin() + count_, held_.begin() + i);
+            --count_;
+            return;
+        }
+        if (down && bits && count_ < held_.size())
+            held_[count_++] = {identity, bits};
+    }
+    uint32_t resolve() const {
+        std::array<uint32_t, 128> presses{};
+        for (size_t i = 0; i < count_; ++i)
+            presses[i] = held_[i].bits;
+        return resolve_null_binds(std::span(presses.data(), count_));
+    }
+};
+
+template <class Timeline> uint32_t null_bind_buttons(const Timeline &timeline, const NullBindPresses &legacy) {
+    if (!timeline.timed())
+        return legacy.resolve();
+    std::array<uint32_t, 128> presses{};
+    size_t count = 0;
+    for (const auto &code : timeline.queue().keys) {
+        if (count == presses.size())
+            break;
+        presses[count++] = timeline.binds().of(code);
+    }
+    return resolve_null_binds(std::span(presses.data(), count));
+}
 
 // Reset the wall-clock baseline along with accumulated simulation time. Work
 // done before a restart/capture transition must never become catch-up ticks.
@@ -59,6 +133,7 @@ struct Input {
     bool separate_vertical=false,invert_y=false;
     uint32_t epoch=0,kind=1,frames=0,motion_events=0;
     uint32_t held = 0, pulse = 0;
+    NullBindPresses null_presses;
     std::optional<uint32_t> sampled_epoch;
     // Match replay.ts norm360's two remainders, including its double rounding.
     static double normalize(double v) { return std::fmod(std::fmod(v,360.0)+360.0,360.0); }
@@ -189,6 +264,7 @@ struct Input {
     void clear() {
         held = 0;
         pulse = 0;
+        null_presses.clear();
         acc_x = 0;
         acc_y = 0;
         acc_events = 0;
@@ -212,4 +288,11 @@ struct Input {
         else if (s.events & angles_changed) set_angles(pitch + s.angle_change[0], yaw() + s.angle_change[1],3);
     }
 };
+template <class Timeline>
+bool apply_null_binds(Input &input, const Timeline &timeline, bool enabled, std::string_view style, bool practice) {
+    if (!enabled || !null_binds_allowed(style, practice))
+        return false;
+    input.held = null_bind_buttons(timeline, input.null_presses) & ~turn_mask;
+    return true;
+}
 }

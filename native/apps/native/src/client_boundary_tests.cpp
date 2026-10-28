@@ -48,7 +48,8 @@ int main(){
     const auto original=native::default_settings();
     {   // Turnbinds: yaw speeds and their binds.
         assert(original["yawSpeed"]==210.0&&original["angleSpeedKey"]==2.0);
-        assert(original["binds"]["turnLeft"][0]=="ArrowLeft"&&original["binds"]["turnRight"][0]=="ArrowRight"&&original["binds"]["turnFast"][0]=="Mouse4");
+        assert(original["binds"]["turnLeft"][0] == "ArrowLeft" && original["binds"]["turnRight"][0] == "ArrowRight" &&
+               original["binds"]["turnFast"][0] == "ArrowUp");
         auto turned = native::patch_settings(original,
             {{"yawSpeed", 170}, {"angleSpeedKey", 2.5}, {"binds", {{"turnFast", {"ShiftLeft"}}}}});
         assert(turned["yawSpeed"]==170&&turned["angleSpeedKey"]==2.5&&turned["binds"]["turnFast"][0]=="ShiftLeft");
@@ -62,7 +63,8 @@ int main(){
         assert(laid["hudLayout"]["timer"]["y"]==10.5&&laid["hudLayout"].size()==2&&original["hudLayout"].empty());
         laid=native::patch_settings(laid,{{"hudLayout",{{"timer",{{"x",1},{"y",2}}}}}});assert(laid["hudLayout"].size()==1);
         auto smooth=native::patch_settings(original,{{"strafeTrainerSmoothing",5},{"strafeTrainerHints",false}});
-        assert(smooth["strafeTrainerSmoothing"]==5&&smooth["strafeTrainerHints"]==false&&original["strafeTrainerSmoothing"]==1&&original["strafeTrainerHints"]==true);
+        assert(smooth["strafeTrainerSmoothing"] == 5 && smooth["strafeTrainerHints"] == false &&
+               original["strafeTrainerSmoothing"] == 8 && original["strafeTrainerHints"] == false);
         for(const auto &bad:{native::Json{{"hudLayout",{{"nope",{{"x",1},{"y",1}}}}}},native::Json{{"hudLayout",{{"timer",{{"x",101},{"y",1}}}}}},
             native::Json{{"hudLayout",{{"timer",{{"x",1}}}}}},native::Json{{"hudLayout",{{"timer",{{"x",1},{"y",1},{"z",1}}}}}},native::Json{{"hudLayout",3}},
             native::Json{{"strafeTrainerSmoothing",0}},native::Json{{"strafeTrainerSmoothing",2.5}}}){
@@ -79,7 +81,8 @@ int main(){
     }
     auto changed=native::patch_settings(original,{{"sensitivity",1.7},{"binds",{{"jump",{"MWheelUp","Space"}}}}});
     assert(changed["sensitivity"]==1.7 && changed["binds"]["forward"]==original["binds"]["forward"]);
-    rejects([&]{native::patch_settings(original,{{"volume",.2},{"sensitivity",0}});});assert(original["volume"]==.65);
+    rejects([&] { native::patch_settings(original, {{"volume", .2}, {"sensitivity", 0}}); });
+    assert(original["volume"] == .8);
     for(const auto &bad:{J{{"fpsLimit",29}},J{{"fpsLimit",144.5}},J{{"volume",2}},J{{"fov","90"}},
         J{{"muted",1}},J{{"unknown",true}},J{{"binds",{{"jump",{"Escape"}}}}},J{{"binds",{{"jump",{"F10"}}}}}})
         rejects([&]{native::patch_settings(original,bad);});

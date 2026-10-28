@@ -1,5 +1,8 @@
 #pragma once
 #include <algorithm>
+#include <array>
+#include <cstdio>
+#include <string_view>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -24,3 +27,30 @@ inline std::vector<std::string> wrap_text(const std::string &s,unsigned columns)
     if(!line.empty()||out.empty())out.push_back(line);return out;
 }
 }
+
+namespace native {
+// Fixed storage for changing numeric HUD labels. Formatting never enters the allocator.
+template <size_t Capacity = 256> struct HudLabel {
+    std::array<char, Capacity> bytes{};
+    void assign(std::string_view text) {
+        const size_t count = std::min(text.size(), Capacity - 1);
+        std::copy_n(text.data(), count, bytes.data());
+        bytes[count] = '\0';
+    }
+    void append(std::string_view text) {
+        const size_t used = view().size();
+        const size_t count = std::min(text.size(), Capacity - used - 1);
+        std::copy_n(text.data(), count, bytes.data() + used);
+        bytes[used + count] = '\0';
+    }
+    template <class... Args> void format(const char *pattern, Args... args) {
+        std::snprintf(bytes.data(), bytes.size(), pattern, args...);
+    }
+    std::string_view view() const {
+        return bytes.data();
+    }
+    bool empty() const {
+        return bytes[0] == '\0';
+    }
+};
+} // namespace native

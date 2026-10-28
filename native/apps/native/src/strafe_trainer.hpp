@@ -18,6 +18,7 @@
 // Display only. Like the jump stats it reads the pre-tick state and the
 // command already stepped, and feeds nothing back.
 #include "ssj.hpp"
+#include "hud_geometry.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -123,7 +124,7 @@ private:
         return std::nullopt;
     }
 
-    std::deque<Sample> samples_;
+    HudSamples<Sample, max_smoothing> samples_;
     float last_yaw_ = 0;
     unsigned smoothing_ = 1, ground_ticks_ = 0;
     bool have_yaw_ = false;

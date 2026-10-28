@@ -19,6 +19,7 @@
 #include "loadout_preview.hpp"
 #include "menu_gamepad.hpp"
 #include "hud.hpp"
+#include "capabilities.hpp"
 #include "practice.hpp"
 #include "leave_hold.hpp"
 #include "native_chat.hpp"
@@ -59,6 +60,7 @@
 #include "update_config.hpp"
 #include "video_capture.hpp"
 #include "presentation_smoke.hpp"
+#include "hud_smoke.hpp"
 #include "window_sdl.hpp"
 #include "window_mode_driver.hpp"
 #include "menu_scripts.hpp"
@@ -454,18 +456,19 @@ int run(const Options &opt) {
     input_timeline.configure_stamps(video_driver ? video_driver : "");
     native::Chat chat;
     native::RestartGuard restart_guard;
+    native::AutoRestart auto_restart;
+    native::RacePicker race_picker;
     native::StartPoints start_points;native::KeptWeapons kept_weapons;
     third_camera.set_mode("chase");
     native::Input camera_controls;
     native::SniperZoom scope;
     native::NativeWeaponMenu gun_menu;
+    native::NativeTriggerMenu trigger_menu;
     bool third_person=false,flashlight=false,hide_players=false,show_scores=false;
     try {const auto path=cache/"start-points.json";if(std::filesystem::exists(path)&&std::filesystem::file_size(path)<=1024*1024)start_points.load(nlohmann::json::parse(read_text(path)));}catch(const std::exception &e){std::cerr<<"Start points: "<<e.what()<<'\n';}
     auto apply_preferences = [&]() {
         menu_state.settings_changed();
         hud_layout.clear();
-        for(const auto &[id,at]:preferences.at("hudLayout").items())
-            hud_layout[id] = {at.at("x").get<float>(), at.at("y").get<float>()};
         input_timeline.set_sensitivity(input, preferences.at("sensitivity").get<double>());
         input.vertical_sensitivity=preferences.at("verticalSensitivity").get<double>();
         input.separate_vertical = preferences.at("separateVertical").get<bool>();
@@ -531,9 +534,11 @@ int run(const Options &opt) {
     native::Practice practice;native::LeaveHold leave_hold;
     std::string gauntlet_id,gauntlet_map;
     nlohmann::json gauntlet_progress;
-    std::string toast_text;auto toast_until=std::chrono::steady_clock::time_point{};
-    if(!data_startup_notice.empty()){toast_text=data_startup_notice;toast_until=std::chrono::steady_clock::now()+std::chrono::seconds(8);data_notice=data_startup_notice;}
-    const native::SsjFields ssj_fields;
+    if (!data_startup_notice.empty()) {
+        hud.toasts.push(data_startup_notice, double(SDL_GetTicksNS()) / 1e9, 8);
+        data_notice = data_startup_notice;
+    }
+
     auto reset_feedback=[&](bool incomplete_history=false) {
         hud.reset_history();
         BhRunState timing{}; BhSnapshot snapshot{};
@@ -674,12 +679,20 @@ int run(const Options &opt) {
         cancel_video();
         replay_controls={};replay_controls.pending.reset();replay_orbit_drag=false;
         if(!core) return;
-        if(pending_action!="play")cancel_prefetch();gun_menu.close();bh_record_end(core.get());room_events|=8;practice.restart();
+        if (pending_action != "play")
+            cancel_prefetch();
+        gun_menu.close();
+        trigger_menu.close();
+        bh_record_end(core.get());
+        room_events |= 8;
+        practice.restart();
         if(third_person&&!room.spectator_target){practice.active=true;if(practice.tool.empty())practice.tool="camera";}
         if(playback){require(bh_replay_stop(core.get()),core.get(),"Stopping replay");playback=false;playback_id.clear();}
         BhRunOptions canonical{};bh_default_run_options(&canonical);if(zones.empty())require(bh_run_clear(core.get()),core.get(),"Clearing replay timer");else require(bh_run_configure(core.get(),&canonical,zones.data(),zones.size()),core.get(),"Restoring canonical map timer");
         active_style=active_track?"autohop":selected_style;
         if(tutorial&&tutorial->is_active()&&active_style!="legit"&&active_style!="scroll")active_style="autohop";
+        hud.context(replay_list, map_id, active_style, active_track);
+        room.solo_display(map_id, replay_player, active_style);
         require(bh_style_set(core.get(),active_style.c_str()),core.get(),"Applying movement style");
         require(bh_reset(core.get()),core.get(),"Restarting map");
         const auto restart = native::RestartPlacement::place(
@@ -704,13 +717,14 @@ int run(const Options &opt) {
         }
         kept_weapons.restarted(practice.active||zones.empty(),settings.physics>=10);begin_record();reset_feedback();reset_input_timing();
         // (toast() is declared after reset; set its state directly.)
-        if (restart.practice) {
-            toast_text = "Custom practice spawn. !clearstart restores ranked restarts.";
-            toast_until = Clock::now() + std::chrono::milliseconds(4000);
-        }
+        if (restart.practice)
+            hud.toasts.push("Custom practice spawn. !clearstart restores ranked restarts.",
+                            double(SDL_GetTicksNS()) / 1e9, 4);
     };
     auto practice_reason=[&](){return native::practice_unavailable(bool(core),playback,!room.id.empty(),map_id==tutorial_map,!gauntlet_id.empty());};
-    auto toast=[&](const std::string &text,unsigned ms=3000){toast_text=text;toast_until=Clock::now()+std::chrono::milliseconds(ms);};
+    auto toast = [&](const std::string &text, unsigned ms = 3000) {
+        hud.toasts.push(text, double(SDL_GetTicksNS()) / 1e9, double(ms) / 1000);
+    };
     native::PendingMenuScript menu_script;
     auto practice_use=[&](const std::string &tool){
         if(!practice.active){BhRunState timing{};bh_run_state(core.get(),&timing);practice.active=true;practice.tool=tool;toast(timing.status==1?"This run is practice now. Press R to restart for a real run.":"Practice until you restart. Press R for a real run.",5000);}
@@ -774,7 +788,15 @@ int run(const Options &opt) {
         if(core)bh_record_end(core.get());practice.clear(core.get());renderer.reset();core.reset();tutorial.reset();
         playback=false;playback_paused=false;playback_id.clear();playback_info=nullptr;ghost_handle=0;ghost_enabled=false;ghost_id.clear();ghost_info=nullptr;ghost_slots={};
         gauntlet_id.clear();gauntlet_map.clear();gauntlet_progress=nullptr;zones.clear();map_id.clear();audio.set_map(nullptr);active_track=0;active_style=selected_style;
-        curr={};prev={};recording_ended=true;record_path.clear();pending_vault_capture.reset();score_notice.clear();toast_text.clear();error.clear();turn_admission.reset();
+        curr = {};
+        prev = {};
+        recording_ended = true;
+        record_path.clear();
+        pending_vault_capture.reset();
+        score_notice.clear();
+        hud.toasts.clear();
+        error.clear();
+        turn_admission.reset();
         ++run_generation;beat_start=beat_upto=0;run_event({{"type","reset"}});reset_feedback();reset_input_timing();audio.reset();
         if (backdrop)
             backdrop->release();
@@ -840,6 +862,8 @@ int run(const Options &opt) {
     };
     auto apply_room_event=[&](const nlohmann::json &message){
         const auto next=room.event(message);
+        room.refresh_display(std::chrono::duration<double>(Clock::now().time_since_epoch()).count());
+        room.refresh_spectators(hud.extras);
         if(!room.id.empty()){
             const bool tainted=practice.active||practice.noclip;
             practice.clear(core.get());gauntlet_id.clear();gauntlet_map.clear();gauntlet_progress=nullptr;
@@ -898,7 +922,13 @@ int run(const Options &opt) {
             size_t bytes=0;const auto raw=bh_ghost_info(core.get(),handle,&bytes);require(raw!=nullptr,core.get(),"Reading ghost");
             slot = {handle, native::data_location::utf8(path.filename()), true,
                     nlohmann::json::parse(raw, raw + bytes)};
-            if(ghost_slot==0){ghost_handle=handle;ghost_info=slot.info;ghost_id=slot.id;ghost_enabled=true;}
+            if (ghost_slot == 0) {
+                ghost_handle = handle;
+                ghost_info = slot.info;
+                hud.extras.ghost(ghost_info);
+                ghost_id = slot.id;
+                ghost_enabled = true;
+            }
             active_track=slot.info.value("track",0u);selected_style=slot.info.value("style",std::string("autohop"));
             reset();show_menu(false);
         } else {
@@ -1014,6 +1044,7 @@ int run(const Options &opt) {
             const auto *raw = bh_ghost_info(core.get(), ghost_handle, &bytes);
             require(raw != nullptr, core.get(), "Reading tutorial demonstration");
             ghost_info = nlohmann::json::parse(raw, raw + bytes);
+            hud.extras.ghost(ghost_info);
             ghost_enabled = true;
             tutorial_demo = true;
             tutorial_demo_start = curr.tick;
@@ -1276,6 +1307,11 @@ int run(const Options &opt) {
                             open_chat(std::string(action) == "commandChat");
                             return;
                         }
+            if (const auto action = trigger_menu.key(code, down, repeat)) {
+                if (!action->empty())
+                    act(std::string(*action));
+                return;
+            }
             if (gun_menu.open && down && !repeat && code.size() == 6 && code.starts_with("Digit")) {
                 const auto picked = gun_menu.key(code.back() - '0', weapon_context());
                 if (!picked.refusal.empty())
@@ -1287,10 +1323,14 @@ int run(const Options &opt) {
                 if (picked.handled)
                     return;
             }
+            if (native::handle_race_key(code, down, repeat, room_modes, race_picker, menu_script, menu.get(),
+                                        menu_ready))
+                return;
             if (!practice.menu_open && !room.vote.is_null() && down && !repeat && code.size() == 6 &&
                 code.starts_with("Digit")) {
                 const int pick = code.back() - '0';
                 if (pick > 0 && room.vote.contains("options") && size_t(pick) <= room.vote.at("options").size()) {
+                    room.voted(pick - 1);
                     room_control({{"action", "vote"}, {"option", pick - 1}});
                     return;
                 }
@@ -1310,6 +1350,8 @@ int run(const Options &opt) {
                     return;
                 }
             }
+            if (!wheel)
+                input.null_presses.edge(code, input_timeline.binds().of(code), down);
             input_timeline.key(held_codes, code, down, wheel, stamp, SDL_GetTicksNS());
             input.held = 0;
             for (auto binding = preferences["binds"].begin(); binding != preferences["binds"].end(); ++binding) {
@@ -1475,7 +1517,16 @@ int run(const Options &opt) {
         show_menu(true);menu->evaluate_js("window.bunnyhopNativeMenu?.joinRoom?.("+nlohmann::json(id).dump()+")");
     };
     if(!opt.presentation_smoke.empty()){
-        if(!renderer||!core)throw std::runtime_error("Presentation smoke requires a local map");bh_record_end(core.get());int width=0,height=0;SDL_GetWindowSizeInPixels(window.get(),&width,&height);const auto result=native::presentation_smoke(gl,core.get(),*renderer,hud,width,height,opt.presentation_smoke,map_id);std::cout<<result.dump()<<'\n';return 0;
+        if (!renderer || !core)
+            throw std::runtime_error("Presentation smoke requires a local map");
+        bh_record_end(core.get());
+        int width = 0, height = 0;
+        SDL_GetWindowSizeInPixels(window.get(), &width, &height);
+        const auto result =
+            native::presentation_smoke(gl, core.get(), *renderer, hud, width, height, opt.presentation_smoke, map_id);
+        native::hud_parity_smoke(gl, hud, width, height, std::filesystem::path(opt.presentation_smoke));
+        std::cout << result.dump() << '\n';
+        return 0;
     }
     if(!opt.video_smoke.empty()){
         // The viewer now plays with a free cursor too. Hold the fixture paused
@@ -1586,7 +1637,17 @@ int run(const Options &opt) {
                             const bool shortcut=(event.key.mod&(SDL_KMOD_CTRL|SDL_KMOD_GUI))!=0;const bool extend=(event.key.mod&SDL_KMOD_SHIFT)!=0;
                             if(event.key.scancode==SDL_SCANCODE_ESCAPE)close_chat();
                             else if(event.key.scancode==SDL_SCANCODE_RETURN||event.key.scancode==SDL_SCANCODE_KP_ENTER){
-                                if(chat.composition.empty()){const auto text=chat.submit();close_chat();if(!text.empty()&&menu&&menu_ready)menu->evaluate_js("window.bunnyhopNativeMenu?.onChatSubmit?.("+nlohmann::json(text).dump()+")");}
+                                if (chat.composition.empty()) {
+                                    const auto text = chat.submit();
+                                    close_chat();
+                                    if (native::race_menu_command(text)) {
+                                        race_picker.open(room.display(), zones);
+                                        if (!race_picker.count)
+                                            toast("No other players to race.");
+                                    } else if (!text.empty() && menu && menu_ready)
+                                        menu->evaluate_js("window.bunnyhopNativeMenu?.onChatSubmit?.(" +
+                                                          nlohmann::json(text).dump() + ")");
+                                }
                             }else if(shortcut&&event.key.scancode==SDL_SCANCODE_V){char *text=SDL_GetClipboardText();if(text){chat.insert(text);SDL_free(text);chat_suggest();}}
                             else if(shortcut&&event.key.scancode==SDL_SCANCODE_C)SDL_SetClipboardText(chat.selected_text().c_str());
                             else if(shortcut&&event.key.scancode==SDL_SCANCODE_X){const auto selected=chat.selected_text();if(!selected.empty()){SDL_SetClipboardText(selected.c_str());chat.erase();chat_suggest();}}
@@ -1708,7 +1769,7 @@ int run(const Options &opt) {
                     continue;
                 }
                 if((video_capture||director_job||video_encoder.busy())&&type!="videoExport"&&type!="ready"&&type!="update"&&type!="audioCue"&&type!="music"&&type!="quit"){if(type=="settings")throw std::runtime_error("Finish or cancel video export before changing settings.");continue;}
-                const size_t limit = native::menu_message_limit(type);
+                const size_t limit = native::hud_message_limit(type, native::menu_message_limit(type));
                 if(raw.size()>limit)throw std::runtime_error("Menu command exceeds its type limit");
                 if (type == "ready") {
                     menu_ready = true;
@@ -1756,15 +1817,31 @@ int run(const Options &opt) {
                 }
                 else if(type=="chatLine"){
                     auto label=[&](const char *key){return message.contains(key)&&message[key].is_string()?message[key].get<std::string>():std::string();};
-                    native::ChatDecoration decoration;decoration.color=label("nativeNameColor");decoration.badge=label("nativeBadge");decoration.rank=label("nativeRank");decoration.country=label("nativeCountry");decoration.profile=label("nativeProfileId");
+                    const auto decoration = native::chat_decoration(message);
                     chat.push(message.at("text").get<std::string>(),label("name"),label("kind"),epoch_ms()/1000.,std::clamp(message.value("ms",12000.),1000.,60000.)/1000.,decoration);
-                }
+                } else if (type == "roomScoreboard" || type == "scoreboard")
+                    room.display_contract(message);
+                else if (type == "hudData")
+                    hud.receive_data(message, run_generation, map_id, active_style, active_track);
+                else if (type == "hudToast")
+                    hud.receive_toast(message, double(SDL_GetTicksNS()) / 1e9);
                 else if(type=="chatSuggestions"){if(message.value("request",uint64_t(0))!=chat_request||message.value("input",std::string())!=chat.input)continue;chat.suggestions.clear();if(chat.active&&message.at("items").is_array())for(const auto &value:message.at("items")){if(chat.suggestions.size()>=8)break;if(value.is_string())chat.suggestions.push_back(native::Chat::clean(value.get<std::string>(),512));}}
                 else if(type=="chatAction"){
                     const auto action=message.at("action").get<std::string>();
                     if(action=="scores")show_scores=!show_scores;
+                    else if (action == "triggerMenu")
+                        trigger_menu.toggle();
+                    else if (action == "movementStat") {
+                        preferences =
+                            native::patch_settings(preferences, native::movement_stat_patch(preferences, message));
+                        json_writer.write(cache / "settings.json", preferences);
+                        apply_preferences();
+                    } else if (action == "raceMenu")
+                        race_picker.open(room.display(), zones);
+                    else if (action == "lastLj")
+                        hud.repeat_long_jump(chat, epoch_ms() / 1000.);
                     else if (action == "jumpStats") {
-                        preferences["jumpStats"] = !preferences.at("jumpStats").get<bool>();
+                        preferences["hudSsjChat"] = !preferences.at("hudSsjChat").get<bool>();
                         menu_state.settings_changed();
                         json_writer.write(cache / "settings.json", preferences);
                         apply_preferences();
@@ -1846,7 +1923,6 @@ int run(const Options &opt) {
                     const auto id=message.at("id").get<std::string>();const double gain=message.value("gain",1.),rate=message.value("rate",1.);
                     if(id.empty()||id.size()>64||id.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789_")!=std::string::npos||!std::isfinite(gain)||gain<0||gain>1||!std::isfinite(rate)||rate<.25||rate>4)throw std::runtime_error("Invalid interface sound");audio.play(id,float(gain),rate);
                 }
-                else if(type=="hudToast"){const auto text=message.at("text").get<std::string>();if(text.size()>500)throw std::runtime_error("HUD toast too long");toast(text,std::clamp(message.value("ms",3000u),500u,15000u));}
                 else if(type=="gauntlet"){
                     gauntlet_action(message);
                 }
@@ -1904,7 +1980,24 @@ int run(const Options &opt) {
                 else if(type=="ghostControl"){
                     const auto action=message.at("action").get<std::string>();const unsigned slot=message.value("slot",0u);if(slot>=4)throw std::runtime_error("Invalid ghost slot");
                     if(action!="remove"&&action!="clear"&&action!="toggle")throw std::runtime_error("Invalid ghost action");
-                    for(unsigned i=0;i<4;i++)if(action=="clear"||i==slot){auto &ghost=ghost_slots[i];if(action=="toggle")ghost.enabled=ghost.handle&&message.value("enabled",!ghost.enabled);else{if(core&&ghost.handle)bh_ghost_free(core.get(),ghost.handle);ghost={};}if(i==0){ghost_handle=ghost.handle;ghost_enabled=ghost.enabled;ghost_id=ghost.id;ghost_info=ghost.info;}}
+                    for (unsigned i = 0; i < 4; i++)
+                        if (action == "clear" || i == slot) {
+                            auto &ghost = ghost_slots[i];
+                            if (action == "toggle")
+                                ghost.enabled = ghost.handle && message.value("enabled", !ghost.enabled);
+                            else {
+                                if (core && ghost.handle)
+                                    bh_ghost_free(core.get(), ghost.handle);
+                                ghost = {};
+                            }
+                            if (i == 0) {
+                                ghost_handle = ghost.handle;
+                                ghost_enabled = ghost.enabled;
+                                ghost_id = ghost.id;
+                                ghost_info = ghost.info;
+                                hud.extras.ghost(ghost_info);
+                            }
+                        }
                     if(renderer)renderer->reset_presentation();scope.reset();
                 }
                 else if(type=="replay") {
@@ -1999,9 +2092,12 @@ int run(const Options &opt) {
                 }
                 else if(type=="roomEvent") {
                     apply_room_event(message);
-                }
-                else if(type=="roomSnapshot")room.snapshot(message,std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count());
-                else if(type=="openAuth") menu->open_auth(message.at("url").get<std::string>());
+                } else if (type == "roomSnapshot") {
+                    const double now = std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
+                    room.snapshot(message, now);
+                    room.refresh_display(now);
+                } else if (type == "openAuth")
+                    menu->open_auth(message.at("url").get<std::string>());
                 else if(type=="update") {
                     const auto action=message.value("action",std::string());
                     if(action=="check")updater.check();else if(action=="download")updater.download();else if(action=="cancel")updater.cancel();else if(action=="reveal")updater.reveal();
@@ -2049,6 +2145,7 @@ int run(const Options &opt) {
                 }
                 else if(type=="runService") {
                     if(message.value("generation",uint64_t(-1))!=run_generation)continue;
+                    hud.result.service(message, run_generation);
                     if(message.value("status",std::string())=="verified"&&!practice.active&&!turn_admission.local_only){
                         const auto id=message.value("id",std::string());const auto event=message.value("announcer",std::string());
                         if(!id.empty()&&(event=="pb"||event=="wr")){audio.verified_finish(event,id);}
@@ -2085,6 +2182,7 @@ int run(const Options &opt) {
         if (auto update = replay_library.take()) {
             if (update->replays) {
                 replay_list = std::move(*update->replays);
+                hud.context(replay_list, map_id, active_style, active_track);
                 menu_state.replays_changed();
             }
             for (const auto &capture : update->captures) {
@@ -2276,10 +2374,18 @@ int run(const Options &opt) {
                         input.pulse=(input.pulse&~native::weapon_command_mask)|(give<<native::give_shift);
                     }
                 }
+                if (native::apply_null_binds(input, input_timeline, hud.preferences().null_binds, active_style,
+                                             practice.active) &&
+                    turn_admission.observe(1, true)) {
+                    ++run_generation;
+                    run_event({{"type", "reset"}});
+                    score_notice = "Null binds: local replay only";
+                }
                 cmd=input.command();
                 if(practice.noclip){BhSnapshot snapshot{};require(bh_noclip_move(&practice.flight,&cmd,dt),core.get(),"Moving noclip");require(bh_practice_noclip_tick(core.get(),&practice.flight,&snapshot),core.get(),"Stepping practice noclip");curr=snapshot.player;}
                 else{const auto look=input.look_sample();require(bh_step_look_v2(core.get(),&cmd,look?&*look:nullptr,&curr),core.get(),"Stepping simulation");require(bh_last_command(core.get(),&cmd),core.get(),"Reading filtered command");input.events(curr);}}
             renderer->simulation_tick();hud.tick(curr);
+            hud.command_tick(cmd, curr.tick);
             if(input_log&&!playback) {
                 const double moved=mouse_counts;
                 input_log<<curr.tick<<','<<input_frame<<','<<input_frame_ms<<','<<double(sim_ns)/1e6<<','<<moved<<','
@@ -2304,21 +2410,19 @@ int run(const Options &opt) {
                 info.teleported=(curr.events&native::teleported)!=0;
                 info.in_start=practice.noclip?false:feedback.ssj_was_in_start;info.noclip=practice.noclip||feedback.ssj_was_noclip;
                 if(timing.status==1)info.time=timing.seconds;
-                {
-                    const auto mode=preferences.at("jumpStatsMode").get<std::string>();
-                    feedback.ssj.set_mode(mode=="every"?native::SsjMode::every:mode=="interval"?native::SsjMode::every_nth:native::SsjMode::sixth);
-                    feedback.ssj.set_interval(preferences.at("jumpStatsInterval").get<unsigned>());
-                }
+                hud.configure_feedback(feedback);
                 if(timing.update_flags&4)reset_feedback();  // restarted
                 const bool history_ready=feedback.history_ready(pre.grounded,info.in_start,info.noclip);
-                if(history_ready)if(const auto report=feedback.ssj.tick(pre,ssj_cmd,info)) {
-                    feedback.ssj_line=native::ssj_text(*report,ssj_fields);
-                    feedback.ssj_gain=report->gain;
+                if (history_ready) {
+                    if (const auto report = feedback.ssj.tick(pre, ssj_cmd, info)) {
+                        hud.ssj_report(*report);
+                        feedback.ssj_gain = report->gain;
+                    }
                 }
                 feedback.ssj_was_in_start=timing.in_start!=0;feedback.ssj_was_noclip=state.movement_mode==1;  // Mode::Noclip
                 if(info.teleported)reset_feedback();
                 else if(history_ready&&!info.noclip) {
-                    feedback.strafe_trainer.set_smoothing(preferences.at("strafeTrainerSmoothing").get<unsigned>());
+                    feedback.strafe_trainer.set_smoothing(hud.preferences().trainer_smoothing);
                     if(const auto reading=feedback.strafe_trainer.tick(pre.grounded,std::hypot(pre.velocity[0],pre.velocity[1]),cmd.yaw,cmd.forward,cmd.side))feedback.strafe_reading=reading;
                     feedback.strafe_ground_ticks=pre.grounded?feedback.strafe_ground_ticks+1:0;
                     if(feedback.strafe_ground_ticks>native::bhop_frames)feedback.strafe_reading.reset();
@@ -2329,6 +2433,9 @@ int run(const Options &opt) {
             const bool attacked=bh_attack_report(core.get(),&attack);if(!playback)scope.observe(weapon,attacked?&attack:nullptr);
             audio.set_style(playback?playback_info.value("style",active_style):active_style);
             BhJumpObservation jump_observation{};const bool observed_jump=bh_jump_observation(core.get(),&jump_observation)!=0;
+            hud.movement.feed(observed_jump ? &jump_observation : nullptr, timing, step_dt, active_style);
+            if (const auto pitch = native::trainer_jump_sound(hud.preferences(), curr, feedback.strafe_reading))
+                audio.play("count_tick", .12f, *pitch);
             audio.tick(state,timing,weapon,attacked?&attack:nullptr,step_dt,surfaces[std::clamp(surface.surface,0,5)],water_depth,observed_jump?&jump_observation:nullptr);
             if(timing.update_flags&16){char split[100];std::snprintf(split,sizeof(split),"Split %u  %.3fs",timing.split_count,timing.seconds);hud.set_run_comparison(split,"");}
             if(!playback)kept_weapons.observe(weapon);
@@ -2359,6 +2466,7 @@ int run(const Options &opt) {
             // Finish the recording on the exact native tick, before any further catch-up steps.
             if(!playback&&tick_run.status==2&&!recording_ended) {reset_input_timing();break;}
         }
+        hud.publish_movement_chat(chat, epoch_ms() / 1000.);
         frame_diagnostics.mark(native::FrameDiagnostics::kSimulation, SDL_GetTicksNS());
         frame_diagnostics.input(input_timeline.queue());
         BhRunState run_state{};
@@ -2380,7 +2488,12 @@ int run(const Options &opt) {
             } else if(run_state.status==0&&beat_start) {
                 beat_start=0;++run_generation;run_event({{"type","reset"}});
             }
-            if(practice.active&&!playback&&run_state.status==2&&!recording_ended){recording_ended=true;show_menu(true);}
+            if (!playback && run_state.status == 2 && !recording_ended)
+                hud.result.finish(run_generation, run_state.seconds, double(SDL_GetTicksNS()) / 1e9,
+                                  hud.extras.personal_best, !practice.active && !turn_admission.local_only);
+            if (practice.active && !playback && run_state.status == 2 && !recording_ended) {
+                recording_ended = true;
+            }
             if(!practice.active&&!playback&&run_state.status==2 && !recording_ended) {
                 recording_ended=true;
                 if(!record_path.empty()) {
@@ -2427,8 +2540,18 @@ int run(const Options &opt) {
                         error=std::string("Replay was not submitted: ")+e.what();
                         std::cerr<<error<<'\n';
                     }
-                    show_menu(true);
                 }
+            }
+            if (hud.auto_restart_due(
+                    auto_restart, run_generation, run_state,
+                    world_record_generation == run_generation ? known_world_record : std::nullopt,
+                    hud.extras.ghost_target(map_id, active_style, active_track, ghost_enabled && ghost_handle),
+                    practice.active || turn_admission.local_only || playback || room_modes.has_race() ||
+                        (tutorial && tutorial->is_active()) || !captured)) {
+                if (hud.preferences().auto_restart_sound)
+                    audio.play("countdown_tick");
+                else
+                    act("restart", false, true);
             }
         }
         int width=0,height=0; SDL_GetWindowSizeInPixels(window.get(),&width,&height);
@@ -2460,7 +2583,7 @@ int run(const Options &opt) {
                             std::clamp(input_scheduler.seconds(), 0.0, dt), allowed);
             }
             std::string shown_notice=tutorial&&tutorial->is_active()&&!playback?tutorial->notice():score_notice;
-            const auto race_notice=room_modes.notice(epoch_ms());if(!race_notice.empty())shown_notice=race_notice;
+
             renderer->set_player_glow(player_glow);if(!spectator)renderer->set_spectated_actor(std::nullopt);renderer->set_viewmodel_weapon(std::nullopt);renderer->set_viewmodel_visible(preferences.at("viewmodel").get<bool>()&&!opt.camera);renderer->set_source_look(preferences.at("sourceLook").get<bool>());
             if(spectator){spectated_actor=room.spectated(steady_seconds);const auto &target=spectated_actor;if(target){renderer->set_spectated_actor(*target);for(int k=0;k<3;k++){eye[k]=target->frame.position[k];state.player.position[k]=target->frame.position[k];state.player.velocity[k]=target->frame.velocity[k];}eye[2]+=target->frame.view_offset_z;state.player.tick=target->frame.tick;state.player.view_offset_z=target->frame.view_offset_z;state.player.grounded=!!(target->frame.flags&2);state.player.crouched=!!(target->frame.flags&1);camera_input.set_angles(target->frame.pitch,target->frame.yaw);renderer->set_cosmetics(target->outfit,target->loadout);renderer->set_player_glow(target->playerGlow);renderer->set_viewmodel_weapon(target->frame.weapon);shown_notice="Spectating "+target->name+" - Esc for Room controls";actors.erase(std::remove_if(actors.begin(),actors.end(),[&](const auto &a){return a.id==target->id;}),actors.end());}else{renderer->set_spectated_actor(std::nullopt);renderer->set_viewmodel_visible(false);shown_notice="Waiting for spectator target";}}
             bool external_camera=false;
@@ -2469,7 +2592,8 @@ int run(const Options &opt) {
                 if(replay_camera.mode=="free")replay_camera.move(camera_controls,frame_seconds,held_codes.contains("ShiftLeft")||held_codes.contains("ShiftRight"));
                 replay_camera.sample(core.get(),state.player,camera_input.yaw(),camera_input.pitch,curr.tick*step_dt,eye,camera_input,frame_seconds);external_camera=replay_camera.third_person();
             }else if(third_person){third_camera.sample(core.get(),state.player,camera_input.yaw(),camera_input.pitch,steady_seconds,eye,camera_input,frame_seconds);external_camera=true;}
-            if(spectator){display_run={};for(const auto &row:room.scoreboard(steady_seconds))if(row.value("slot",256u)==*spectator){display_run.track=row.value("track",0u);display_style=row.value("style",std::string("autohop"));break;}if(const auto timing=room.timer(*spectator,steady_seconds)){display_run.seconds=timing->second;display_run.in_start=timing->first==1;display_run.status=timing->first==3?2:timing->first==2?1:0;}}
+            if (spectator)
+                room.spectator_run(display_run, display_style, *spectator, steady_seconds, epoch_ms());
             if(hide_players)actors.clear();
             if(!playback&&!spectator&&!tutorial_demo&&preferences.value("showGhost",true))for(unsigned i=1;i<4;i++){
                 const auto &slot=ghost_slots[i];if(!slot.handle||!slot.enabled||slot.info.value("track",0u)!=active_track||slot.info.value("style",std::string("autohop"))!=active_style)continue;
@@ -2504,23 +2628,19 @@ int run(const Options &opt) {
             if(focused&&captured&&!opt.frames){for(const auto &actor:actors)if(actor.id!="local-camera-target")audio.spatial_actor(actor,frame_seconds,actor.id.starts_with("ghost-"));if(audible_ghost)audio.spatial_actor(*audible_ghost,frame_seconds,true);if(spectated_actor&&!external_camera)audio.spatial_actor(*spectated_actor,frame_seconds,false);}
             renderer->set_room_actors(actors);
             renderer->draw(width,height,eye,camera_input,&state,(playback||opt.frames)?curr.tick*step_dt:std::chrono::duration<double>(now-started).count());
-            if((!menu||!menu->visible())&&!opt.camera&&preferences.at("hud").get<bool>()){
-                hud.overlay_begin(width,height,preferences.at("hudScale").get<float>());
-                const native::HudGeometry geometry(width,height,preferences.at("hudScale").get<float>());
-                const auto vp=renderer->camera(eye,camera_input.yaw(),camera_input.pitch,float(width)/std::max(height,1));
-                auto tag=[&](const native_render::Actor &actor,const std::string &name,bool ghost){
-                    if(name.empty()||actor.opacity<.05f||(ghost&&!preferences.value("ghostTag",true)))return;
-                    float point[3]={actor.frame.position[0],actor.frame.position[1],actor.frame.position[2]+actor.frame.view_offset_z+20};
-                    std::array<float,4> clip{};for(int row=0;row<4;row++)clip[row]=vp[row]*point[0]+vp[4+row]*point[1]+vp[8+row]*point[2]+vp[12+row];
-                    if(clip[3]<=2||std::abs(clip[0])>clip[3]||std::abs(clip[1])>clip[3]||std::abs(clip[2])>clip[3])return;
-                    float fraction=0;if(!bh_trace_camera(core.get(),eye,point,0,&fraction)||fraction<.98f)return;
-                    hud.overlay_text((clip[0]/clip[3]*.5f+.5f)*geometry.width,(.5f-clip[1]/clip[3]*.5f)*geometry.height,name,13,ghost?std::array<float,4>{.55f,.85f,1,.85f}:std::array<float,4>{.94f,.91f,.86f,1},true);
-                };
-                for(const auto &actor:actors)if(actor.id!="local-camera-target")tag(actor,actor.name,actor.id.starts_with("ghost-"));
-                if(audible_ghost)tag(*audible_ghost,ghost_info.value("player",std::string("Ghost")),true);
-                hud.overlay_end(width,height);
+            if ((!menu || !menu->visible()) && !opt.camera && preferences.at("hud").get<bool>()) {
+                const auto matrix =
+                    renderer->camera(eye, camera_input.yaw(), camera_input.pitch, float(width) / std::max(height, 1));
+                native::draw_name_tags(hud, width, height, preferences.at("hudScale").get<float>(), matrix.data(),
+                                       actors, room, hud.preferences().tags_players,
+                                       preferences.value("ghostTag", true), hud.preferences().tags_through_walls,
+                                       native::NameTagTrace{core.get(), eye}, steady_seconds);
+                if (audible_ghost && preferences.value("ghostTag", true))
+                    native::draw_ghost_name_tag(
+                        hud, width, height, preferences.at("hudScale").get<float>(), matrix.data(), *audible_ghost,
+                        hud.extras.ghost_name.view(), hud.extras.ghost_seconds, hud.extras.ghost_delta.view(),
+                        hud.preferences().tags_through_walls, native::NameTagTrace{core.get(), eye});
             }
-            if(Clock::now()<toast_until)shown_notice=toast_text;
             std::string gauntlet_line,gauntlet_delta;bool gauntlet_good=false;
             if(!gauntlet_id.empty()&&gauntlet_progress.is_object()){
                 const bool timed=run_state.status==1;const double total=gauntlet_progress.at("before").get<double>()+(timed?run_state.seconds:0);
@@ -2529,11 +2649,16 @@ int run(const Options &opt) {
                 if(timed&&!gauntlet_progress.at("pbSplit").is_null()){const auto delta=run_state.seconds-gauntlet_progress.at("pbSplit").get<double>();std::snprintf(formatted,sizeof(formatted),"%+.3fs",delta);gauntlet_delta=formatted;gauntlet_good=delta<0;}
             }
             BhCmd shown{};bh_last_command(core.get(),&shown);BhWeaponReport weapon{};bh_weapon_report(core.get(),&weapon);
-            if((!menu||!menu->visible())&&!opt.camera)hud.draw(width,height,state,display_run,shown,map_id,display_style,shown_notice,display_fps,
-                preferences.at("hud").get<bool>(),preferences.at("crosshair").get<bool>(),playback,weapon,
-                preferences.at("jumpStats").get<bool>()?feedback.ssj_line:std::string(),feedback.ssj_gain,
-                preferences.at("strafeTrainer").get<bool>()&&!playback?feedback.strafe_reading:std::nullopt,
-                preferences.at("strafeTrainerHints").get<bool>(),&hud_layout,preferences.at("hudScale").get<float>(),&practice,preferences.at("practiceKeepVelocity").get<bool>(),gauntlet_line,gauntlet_delta,gauntlet_good,leave_hold.progress(epoch_ms()));
+            if ((!menu || !menu->visible()) && !opt.camera)
+                hud.draw(
+                    width, height, state, display_run, shown, map_id, display_style, shown_notice, display_fps,
+                    preferences.at("hud").get<bool>(), preferences.at("crosshair").get<bool>(), playback, weapon,
+                    preferences.at("jumpStats").get<bool>() ? hud.ssj_line() : std::string_view(), feedback.ssj_gain,
+                    preferences.at("strafeTrainer").get<bool>() && !playback ? feedback.strafe_reading : std::nullopt,
+                    preferences.at("strafeTrainerHints").get<bool>(), &hud_layout,
+                    preferences.at("hudScale").get<float>(), &practice,
+                    preferences.at("practiceKeepVelocity").get<bool>(), gauntlet_line, gauntlet_delta, gauntlet_good,
+                    leave_hold.progress(epoch_ms()));
             if((!menu||!menu->visible())&&!opt.camera){
                 if(preferences.value("mouseDiagnostics",false)&&!playback){const auto &m=mouse_diagnostics.last;char label[220];std::snprintf(label,sizeof(label),"Mouse %.0f events/s | burst %llu | age %.2f/%.2f ms | pump max %.2f ms",m.events_per_second,static_cast<unsigned long long>(m.peak_burst),m.average_age_ms,m.max_age_ms,m.max_pump_ms);hud.overlay_begin(width,height,100);hud.overlay_rect(16,40,730,32,{.02f,.02f,.025f,.85f});hud.overlay_text(24,48,m.seconds?label:"Mouse diagnostics: move continuously for a sample",14,{1,1,1,1});
                     char frame_line[320];
@@ -2547,24 +2672,26 @@ int run(const Options &opt) {
                         playback_paused, playback_speed, replay_camera.mode);
                 }
                 if(chat.active||preferences.at("hud").get<bool>())hud.draw_chat_overlay(width,height,chat.visible(epoch_ms()/1000.),chat.input,chat.composition,chat.suggestions,chat.active,chat.scroll_offset(),preferences.at("hudScale").get<float>(),&chat,chat.viewport(epoch_ms()/1000.));
-                std::vector<std::string> panel;
-                if((held_action("scoreboard")||show_scores)&&!chat.active){
-                    for(auto player:room.scoreboard(steady_seconds)){
-                        if(player.value("slot",256u)==room.self){player["seconds"]=run_state.seconds;player["style"]=active_style;player["track"]=active_track;}
-                        char time[48];std::snprintf(time,sizeof(time),"%.3fs",player.value("seconds",0.));
-                        std::string line=player.value("name",std::string("Player"))+"  "+player.value("style",std::string(""))+"  "+time;
-                        if(player.value("track",0))line+="  B"+std::to_string(player.value("track",0));
-                        if(player.contains("ping")&&player["ping"].is_number())line+="  "+std::to_string(player["ping"].get<int>())+"ms";
-                        if(player.contains("spec")&&!player["spec"].is_null())line+="  SPECTATOR";panel.push_back(line);
-                    }
-                    if(panel.empty())panel.push_back("Solo | "+replay_player+" | "+active_style);
-                    hud.draw_panel(width,height,room.id.empty()?"Players":"Players - "+room.id,panel,preferences.at("hudScale").get<float>());
-                }else if(gun_menu.open&&!chat.active)hud.draw_panel(width,height,gun_menu.title(),gun_menu.rows(weapon_context()),preferences.at("hudScale").get<float>());
-                else if(!room.vote.is_null()&&room.vote.contains("options")&&!chat.active){
-                    unsigned number=0;for(const auto &option:room.vote.at("options")){std::string label=option.value("map",std::string());if(label.empty())label="Extend "+std::to_string(option.value("minutes",0))+" minutes";panel.push_back(std::to_string(++number)+". "+label);}
-                    hud.draw_panel(width,height,"Map vote",panel,preferences.at("hudScale").get<float>());
+                if ((held_action("scoreboard") || show_scores) && !chat.active) {
+                    hud.scoreboard(width, height, preferences.at("hudScale").get<float>(), room.display(),
+                                   steady_seconds, epoch_ms(), run_state, active_style);
+                } else if (gun_menu.open && !chat.active) {
+                    gun_menu.draw(hud, width, height, preferences.at("hudScale").get<float>(), weapon_context());
+                } else if (trigger_menu.open && !chat.active) {
+                    trigger_menu.draw(hud, width, height, preferences.at("hudScale").get<float>(),
+                                      hud.preferences().triggers_visible, hud.preferences().clips_visible);
+                } else if (!chat.active) {
+                    native::draw_vote(hud, width, height, preferences.at("hudScale").get<float>(), room.vote_display,
+                                      epoch_ms());
                 }
-                const auto change=room.change_notice(epoch_ms());if(!change.empty())hud.draw_overlay(width,height,{change},"","",{},false,preferences.at("hudScale").get<float>());
+                if (preferences.at("hud").get<bool>()) {
+                    const float percent = preferences.at("hudScale").get<float>();
+                    native::draw_result(hud, width, height, percent, hud.result, double(SDL_GetTicksNS()) / 1e9);
+                    native::draw_toasts(hud, width, height, percent, hud.toasts, double(SDL_GetTicksNS()) / 1e9);
+                    native::draw_race(hud, width, height, percent, room_modes.display(), epoch_ms());
+                    native::draw_race_picker(hud, width, height, percent, race_picker);
+                }
+                room.draw_change(hud, width, height, preferences.at("hudScale").get<float>(), epoch_ms());
             }
         }
         // Capture only the finished gameplay framebuffer, before any menu/backdrop layer.
@@ -2703,6 +2830,7 @@ int run(const Options &opt) {
                     {"viewport", {window_w, window_h}},
                     {"dpr", std::round(SDL_GetWindowPixelDensity(window.get()) * 100) / 100}};
                 state = {
+                    {"capabilities", native::native_capabilities()},
                     {"engine", "native"},
                     {"renderer", "opengl"},
                     {"client", client_info},

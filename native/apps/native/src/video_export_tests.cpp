@@ -71,7 +71,14 @@ int main(int argc,char **argv){
     for(int i=0;i<6;++i){while(!encoder.can_submit()&&encoder.busy())SDL_Delay(2);assert(encoder.submit(frame));}encoder.finish();done(encoder);assert(encoder.status()["state"]=="completed"&&std::filesystem::file_size(output)>32&&encoder.status()["videoOnly"]==true);
     const auto pixels=command({available.encoder,"-v","error","-i",output.string(),"-f","rawvideo","-pix_fmt","rgb24","pipe:1"});assert(pixels.size()==6*64*64*3);assert(pixels[0]>200&&pixels[2]<40&&pixels[64*48*3+2]>200);assert(probe(output)["streams"].size()==1);
     const std::filesystem::path assets=argc>1?argv[1]:std::filesystem::path(__FILE__).parent_path()/"../../../target/native-assets";
-    assert(std::filesystem::is_regular_file(assets/"audio.json"));auto prefs=native::default_settings();prefs["wind"]=false;prefs["footsteps"]=false;prefs["announcer"]["enabled"]=false;
+    assert(std::filesystem::is_regular_file(assets / "audio.json"));
+    auto prefs = native::default_settings();
+    prefs["volume"] = .65;
+    prefs["musicVolume"] = 1.;
+    prefs["sfxVolume"] = 1.;
+    prefs["wind"] = false;
+    prefs["footsteps"] = false;
+    prefs["announcer"]["enabled"] = false;
     native::VideoOptions audio_options;audio_options.to=120;auto full=mix(assets,directory,audio_options,prefs,60);assert(full.size()==2*26460&&energy(full)>.001);assert(SDL_WasInit(SDL_INIT_AUDIO)==0);
     for(int fps:{30,120}){auto same=audio_options;same.fps=fps;assert(mix(assets,directory,same,prefs,fps)==full);} // tick 119 fire lies after the last 30 FPS frame
     // First jump is at .02 s; there must be silence before it and sound after.

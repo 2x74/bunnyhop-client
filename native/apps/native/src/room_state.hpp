@@ -1,5 +1,6 @@
 #pragma once
 #include "bunnyhop_native.h"
+#include "hud_scoreboard.hpp"
 #include "render_shaders.hpp"
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -10,11 +11,52 @@
 #include <vector>
 
 namespace native {
+struct VoteDisplay {
+    std::array<HudLabel<128>, 9> options;
+    std::array<unsigned, 9> counts{};
+    size_t count = 0;
+    double ends_at = 0;
+    int choice = -1;
+};
+
+template <class Hud>
+void draw_vote(Hud &hud, int width, int height, float percent, const VoteDisplay &vote, double epoch_ms) {
+    if (!vote.count)
+        return;
+    const HudGeometry geometry(width, height, percent);
+    const float x = 24;
+    const float y = geometry.height * .32f;
+    const float panel_width = std::min(370.f, geometry.width - 48);
+    hud.overlay_begin(width, height, percent);
+    hud.overlay_rect(x, y, panel_width, 92 + float(vote.count) * 28, {.025f, .027f, .04f, .94f});
+    HudLabel<128> text;
+    const int seconds = int(std::clamp(std::ceil((vote.ends_at - epoch_ms) / 1000), 0., 999.));
+    text.format("Map vote | %ds", seconds);
+    hud.overlay_text(x + 14, y + 12, text.view(), 17, {1, .71f, .24f, 1});
+    unsigned total = 0;
+    for (size_t i = 0; i < vote.count; ++i)
+        total += vote.counts[i];
+    for (size_t i = 0; i < vote.count; ++i) {
+        const float row_y = y + 46 + float(i) * 28;
+        const bool chosen = int(i) == vote.choice;
+        hud.overlay_rect(x + 10, row_y - 2, (panel_width - 20) * float(vote.counts[i]) / std::max(1u, total), 25,
+                         {.27f, .21f, .09f, chosen ? .9f : .45f});
+        text.format("%zu. %.*s  [%u]%s", i + 1, int(vote.options[i].view().size()), vote.options[i].view().data(),
+                    vote.counts[i], chosen ? "  <" : "");
+        hud.overlay_text(x + 14, row_y, text.view(), 13,
+                         chosen ? NameColor{1, .71f, .24f, 1} : NameColor{.94f, .91f, .86f, 1});
+    }
+    hud.overlay_text(x + 14, y + 58 + float(vote.count) * 28, "Press 1-9 to vote", 12, {.64f, .66f, .70f, 1});
+    hud.overlay_end(width, height);
+}
+
 class RoomState {
     struct Sample {BhGhostFrame frame;bool teleport;unsigned wire_flags=0;bool silenced=false;};
     struct Peer {native_render::Actor actor;std::deque<Sample> samples;double arrived=0,offset=0,batch=.1,jitter=0,meta_at=0;bool clock=false,spectator=false;uint32_t rendered=0;double rendered_at=-1; nlohmann::json info,meta;};
     std::unordered_map<unsigned,Peer> peers;
     bool closed_=false;
+    HudScoreboard display_;
+    bool decorated_display_ = false;
     void player(const nlohmann::json &p,bool patch=false) {
         const unsigned slot=p.at("slot").get<unsigned>();if(slot>=256)return;
         auto &peer=peers[slot];
@@ -46,13 +88,167 @@ class RoomState {
         }
     }
 public:
+  NameAppearance appearance(unsigned slot) const {
+      for (size_t i = 0; i < display_.count; ++i) {
+          if (display_.rows[i].slot == slot)
+              return display_.rows[i].look;
+      }
+      return {};
+  }
+  const HudScoreboard &display() const {
+      return display_;
+  }
+  VoteDisplay vote_display;
+  HudLabel<128> changing_map;
+  double changing_at = 0;
+  template <class Extras> void refresh_spectators(Extras &extras) const {
+      extras.spectator_count = 0;
+      const unsigned target = spectator_target.value_or(self);
+      for (const auto &[slot, peer] : peers) {
+          const auto spec = peer.info.find("spec");
+          if (spec == peer.info.end() || !spec->is_number_integer() || spec->get<unsigned>() != target)
+              continue;
+          if (extras.spectator_count == extras.spectators.size())
+              break;
+          extras.spectators[extras.spectator_count++].assign(peer.actor.name);
+      }
+  }
+  void spectator_run(BhRunState &run, std::string &style, unsigned target, double now, double epoch_ms) const {
+      run = {};
+      for (size_t i = 0; i < display_.count; ++i) {
+          const auto &row = display_.rows[i];
+          if (row.slot != target)
+              continue;
+          style = row.style;
+          run.track = row.track;
+          run.seconds = row.seconds + (row.host_running ? std::max(0., (epoch_ms - row.running_at_ms) / 1000)
+                                       : row.timer == 2 ? std::max(0., now - row.sampled_at)
+                                                        : 0);
+          run.status = row.timer == 3 ? 2 : row.timer == 2 ? 1 : 0;
+          run.in_start = row.timer == 1;
+          return;
+      }
+  }
+  template <class Hud> void draw_change(Hud &hud, int width, int height, float percent, double now) const {
+      if (changing_map.empty())
+          return;
+      HudLabel<192> label;
+      const int seconds = int(std::clamp(std::ceil((changing_at - now) / 1000), 0., 999.));
+      label.format("Changing to %.*s in %ds", int(changing_map.view().size()), changing_map.view().data(), seconds);
+      const HudGeometry geometry(width, height, percent);
+      hud.overlay_begin(width, height, percent);
+      hud.overlay_text(geometry.width / 2, 65, label.view(), 16, {1, .71f, .24f, 1}, true);
+      hud.overlay_end(width, height);
+  }
+  void voted(int index) {
+      vote_display.choice = index;
+  }
+  void refresh_vote() {
+      const int choice = vote_display.choice;
+      vote_display = {};
+      vote_display.choice = choice;
+      if (!vote.is_object() || !vote.contains("options") || !vote["options"].is_array()) {
+          vote_display.choice = -1;
+          return;
+      }
+      vote_display.ends_at = vote.value("endsAt", 0.) - clock_offset_ms;
+      const auto counts = vote.find("counts");
+      for (const auto &option : vote["options"]) {
+          if (vote_display.count == vote_display.options.size())
+              break;
+          const size_t index = vote_display.count++;
+          if (option.contains("map"))
+              vote_display.options[index].assign(json_text(option, "map"));
+          else
+              vote_display.options[index].format("Extend %u minutes", option.value("minutes", 0u));
+          if (counts != vote.end() && counts->is_array() && index < counts->size() &&
+              (*counts)[index].is_number_unsigned())
+              vote_display.counts[index] = (*counts)[index].get<unsigned>();
+      }
+  }
+  void display_contract(const nlohmann::json &message) {
+      if ((message.contains("generation") && message.at("generation") != generation) ||
+          (message.contains("id") && message.at("id") != id))
+          return;
+      display_.contract(message);
+      decorated_display_ = message.contains("head") && message["head"].is_object();
+  }
+  void solo_display(const std::string &map, const std::string &name, const std::string &style) {
+      if (!id.empty())
+          return;
+      display_.clear();
+      display_.head.room = "Solo";
+      display_.head.map = map;
+      display_.head.max = 1;
+      display_.count = 1;
+      auto &row = display_.rows[0];
+      row = {};
+      row.name = name;
+      row.style = style;
+      row.you = true;
+  }
+  void refresh_display(double now) {
+      if (decorated_display_) {
+          for (size_t i = 0; i < display_.count; ++i) {
+              auto &row = display_.rows[i];
+              const auto peer = peers.find(row.slot);
+              if (peer != peers.end() && peer->second.meta.is_object())
+                  row.track = peer->second.meta.value("track", 0u);
+          }
+          refresh_vote();
+          changing_map.assign(change.is_object() ? json_text(change, "map") : "");
+          changing_at = change.is_object() ? change.value("at", 0.) - clock_offset_ms : 0;
+          return;
+      }
+      const auto previous_head = display_.head;
+      display_.clear();
+      display_.head = previous_head;
+      refresh_vote();
+      changing_map.assign(change.is_object() ? json_text(change, "map") : "");
+      changing_at = change.is_object() ? change.value("at", 0.) - clock_offset_ms : 0;
+      display_.head.room = room_info.is_object() ? json_text(room_info, "name") : id;
+      display_.head.map = map;
+      if (room_info.is_object())
+          display_.head.max = room_info.value("maxPlayers", 0u);
+      for (const auto &[slot, peer] : peers) {
+          display_.add(peer.info, peer.meta, self, peer.meta_at > 0 ? peer.meta_at : now);
+          auto &row = display_.rows[display_.count - 1];
+          if (room_info.is_object() && json_flag(room_info, "private"))
+              row.host = room_info.value("host", 256u) == slot;
+          if (peer.spectator) {
+              row.status = "SPEC";
+              const auto spec = peer.info.find("spec");
+              if (spec != peer.info.end() && spec->is_number_unsigned()) {
+                  const auto target = peers.find(spec->get<unsigned>());
+                  if (target != peers.end())
+                      row.status += " -> " + target->second.actor.name;
+              }
+          }
+      }
+      display_.sort();
+  }
     uint64_t generation=0;
     std::string id,map,notice,status;
     nlohmann::json vote=nullptr,change=nullptr,nominations=nlohmann::json::array(),room_info;
     double clock_offset_ms=0;
     unsigned self=256;
     std::optional<unsigned> spectator_target;
-    void clear(){vote=nullptr;change=nullptr;nominations=nlohmann::json::array();room_info=nullptr;status.clear();peers.clear();id.clear();map.clear();notice.clear();self=256;spectator_target.reset();}
+    void clear() {
+        decorated_display_ = false;
+        display_.clear();
+        vote_display = {};
+        vote = nullptr;
+        change = nullptr;
+        nominations = nlohmann::json::array();
+        room_info = nullptr;
+        status.clear();
+        peers.clear();
+        id.clear();
+        map.clear();
+        notice.clear();
+        self = 256;
+        spectator_target.reset();
+    }
     // End the current room lifecycle without rewinding its stale-event fence.
     // A deliberate join uses a newer UI generation; queued callbacks from the
     // closed generation must never resurrect a room or request another map.
@@ -66,10 +262,24 @@ public:
         if(next>generation){clear();generation=next;closed_=false;}
         id=next_id;
         const auto &e=message.at("event");const auto type=e.at("t").get<std::string>();
+        if (type == "welcome" || type == "map" || type == "nativeMap") {
+            decorated_display_ = false;
+            display_.head.next_map = json_text(e, "nextMap");
+            display_.head.ends_at_ms = 0;
+            display_.head.tier = 0;
+            if (e.contains("map") && e["map"].is_object()) {
+                const auto &map = e["map"];
+                display_.head.ends_at_ms = map.value("endsAt", 0.) - clock_offset_ms;
+                if (map.contains("tier") && map["tier"].is_number_integer())
+                    display_.head.tier = map["tier"].get<int>();
+            }
+        }
         if(type=="nativeLeave"){close();return "";}
         if(e.contains("nativeClockOffsetMs")&&e["nativeClockOffsetMs"].is_number())clock_offset_ms=e["nativeClockOffsetMs"].get<double>();
         if(type=="nativeStatus"){status=e.value("status",std::string());if(status=="closed"){peers.clear();spectator_target.reset();vote=nullptr;change=nullptr;}return "";}
         if(type=="kicked"){notice=e.value("reason",std::string("Removed from room"));peers.clear();spectator_target.reset();status="closed";return "";}
+        if (e.contains("myVote") && e["myVote"].is_number_integer())
+            vote_display.choice = e["myVote"].get<int>();
         if(type=="vote")vote=e.at("vote");else if(type=="voteEnd")vote=nullptr;else if(type=="change")change=e.at("change");else if(type=="nominations")nominations=e.at("list");
         if(type=="welcome") {
             status="open";room_info=e.value("room",nlohmann::json::object());vote=e.value("vote",nlohmann::json(nullptr));change=e.value("change",nlohmann::json(nullptr));nominations=e.value("nominations",nlohmann::json::array());

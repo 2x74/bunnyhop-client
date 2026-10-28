@@ -1,4 +1,5 @@
 #pragma once
+#include "hud_text.hpp"
 #include "bunnyhop_native.h"
 #include <algorithm>
 #include <string>
@@ -41,5 +42,28 @@ inline std::string practice_unavailable(bool core,bool playback,bool room,bool t
 // Run reset/stop must always pass so pending service replies can be invalidated.
 inline bool practice_allows_event(bool active,const std::string &type) {
     return !active || (type!="beat" && type!="finish");
+}
+template <class Hud>
+void draw_checkpoint_menu(Hud &hud, float width, float height, const Practice &practice, bool keep_velocity) {
+    const float x = 26;
+    const float y = height * .30f;
+    constexpr std::array<float, 4> cream = {.94f, .91f, .86f, 1};
+    constexpr std::array<float, 4> dim = {.63f, .65f, .70f, 1};
+    constexpr std::array<float, 4> amber = {1, .71f, .24f, 1};
+    hud.overlay_rect(x - 10, y - 8, 320, 220, {.03f, .03f, .05f, .8f});
+    hud.overlay_text(x, y, "Checkpoints", 19, cream);
+    HudLabel<96> label;
+    label.format("1. Save checkpoint (%zu/100)", std::min(size_t(100), practice.checkpoints.size() + 1));
+    hud.overlay_text(x, y + 34, label.view(), 14, cream);
+    label.format("2. Teleport to checkpoint (%zu)", std::max(size_t(1), practice.number()));
+    hud.overlay_text(x, y + 56, label.view(), 14, practice.checkpoints.empty() ? dim : cream);
+    hud.overlay_text(x, y + 78, "3. Previous", 14, practice.number() <= 1 ? dim : cream);
+    hud.overlay_text(x, y + 100, "4. Next", 14, practice.number() >= practice.checkpoints.size() ? dim : cream);
+    label.format("5. Noclip: %s", practice.noclip ? "on" : "off");
+    hud.overlay_text(x, y + 122, label.view(), 14, cream);
+    label.format("6. Keep speed: %s", keep_velocity ? "on" : "off");
+    hud.overlay_text(x, y + 144, label.view(), 14, cream);
+    hud.overlay_text(x, y + 166, "0. Close", 14, cream);
+    hud.overlay_text(x, y + 196, "Teleport / noclip makes a run practice.", 11, amber);
 }
 }
