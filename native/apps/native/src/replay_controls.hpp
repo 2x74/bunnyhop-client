@@ -1,5 +1,6 @@
 #pragma once
 #include "replay_range.hpp"
+#include "latest_worker.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -135,9 +136,10 @@ class ReplayCompare {
         frames_.clear();
     }
     void load(BhContext *core, const std::string &path, native_render::GhostSource source,
-              const nlohmann::json &playback) {
+              const nlohmann::json &playback, const std::atomic_bool *cancel = nullptr) {
         clear();
-        const uint32_t handle = bh_ghost_load(core, path.c_str());
+        const uint32_t handle = bh_ghost_load_cancellable(
+            core, path.c_str(), cancel ? replay_cancelled : nullptr, const_cast<std::atomic_bool *>(cancel));
         if (!handle) {
             throw std::runtime_error(bh_last_error(core));
         }
@@ -192,7 +194,7 @@ class ReplayCompare {
         }
         return &actor_;
     }
-    Prepared detach() {
+    Prepared detach(const std::atomic_bool *cancel = nullptr) {
         Prepared result;
         result.actor = actor_;
         result.start = start_;
@@ -202,6 +204,10 @@ class ReplayCompare {
         result.finished = finished_;
         result.frames.resize(size_t(end_) + 1);
         for (uint32_t tick = 0; tick <= end_; ++tick) {
+            if (cancel && cancel->load(std::memory_order_relaxed)) {
+                clear();
+                return {};
+            }
             if (!bh_ghost_frame(core_, handle_, tick, &result.frames[tick])) {
                 throw std::runtime_error("Could not prepare compare path");
             }
@@ -257,7 +263,8 @@ void update_compare_actor(Renderer &renderer, ReplayCompare &compare, uint32_t t
     renderer.set_compare_actor(playback ? compare.sample(tick, range.tick_interval) : nullptr);
 }
 inline void handle_replay_compare(ReplayCompare &compare, BhContext *core, const std::filesystem::path &directory,
-                                  const nlohmann::json &message, const nlohmann::json &playback) {
+                                  const nlohmann::json &message, const nlohmann::json &playback,
+                                  const std::atomic_bool *cancel = nullptr) {
     const auto action = message.at("action").get<std::string>();
     if (action == "clear") {
         compare.clear();
@@ -271,13 +278,7 @@ inline void handle_replay_compare(ReplayCompare &compare, BhContext *core, const
         throw std::runtime_error("Invalid compare replay id");
     const auto source = message.value("source", std::string("custom"));
     native::graphics_choice(source, {"pb", "wr", "custom"});
-    compare.load(core, (directory / id).string(), native_render::ghost_source(source), playback);
-}
-inline void load_imported_compare(ReplayCompare &compare, BhContext *core, const std::filesystem::path &path,
-                                  const nlohmann::json &message, const nlohmann::json &playback) {
-    const auto source = message.value("source", std::string("custom"));
-    native::graphics_choice(source, {"pb", "wr", "custom"});
-    compare.load(core, path.string(), native_render::ghost_source(source), playback);
+    compare.load(core, (directory / id).string(), native_render::ghost_source(source), playback, cancel);
 }
 template <class Slots> void sync_ghost_visibility(auto &renderer, const Slots &slots) {
     for (unsigned slot = 0; slot < slots.size(); ++slot)

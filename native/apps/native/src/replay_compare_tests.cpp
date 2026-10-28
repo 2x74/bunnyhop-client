@@ -110,6 +110,32 @@ int main(int argc, char **argv) {
         if (!compare.active() || !chat.error.empty() || compare.menu_state(.01).at("name") != "Async PB" ||
             snapshot_bytes(core.get()) != before)
             throw std::runtime_error("Asynchronous WS3 Compare contract failed: " + chat.error);
+        const auto wait_for_compare = [&] {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            while (!compare.active() && chat.error.empty() && std::chrono::steady_clock::now() < deadline) {
+                imports.poll(compare, "fixture.bhr", true, chat, 0);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            if (!compare.active() || !chat.error.empty() || snapshot_bytes(core.get()) != before)
+                throw std::runtime_error("Worker compare path failed: " + chat.error);
+        };
+        std::filesystem::copy_file(argv[2], cache / "existing.bhr", std::filesystem::copy_options::overwrite_existing);
+        compare.clear();
+        const nlohmann::json local_request = {{"action", "set"}, {"id", "existing.bhr"}, {"source", "wr"}};
+        for (unsigned replacement = 0; replacement < 100; ++replacement)
+            imports.message(compare, core.get(), cache, local_request, info, "fixture.bhr",
+                            [](const std::string &) -> std::vector<uint8_t> {
+                                throw std::runtime_error("Local compare must not decode base64");
+                            });
+        wait_for_compare();
+        if (compare.state().at("source") != "wr")
+            throw std::runtime_error("Local-id worker did not adopt the prepared WR");
+        imports.message(compare, core.get(), cache, async_request, info, "fixture.bhr",
+                        [replay_bytes](const std::string &) { return replay_bytes; });
+        imports.message(compare, core.get(), cache, {{"action", "clear"}}, info, "fixture.bhr",
+                        [](const std::string &) { return std::vector<uint8_t>{}; });
+        if (compare.active())
+            throw std::runtime_error("Clear retained a prepared Compare");
         native::ReplayTimelineData bins;
         bins.step = 2;
         BhState sample{};

@@ -1,5 +1,6 @@
 #pragma once
 #include "bunnyhop_native.h"
+#include "latest_worker.hpp"
 #include "data_location.hpp"
 #include "nlohmann/json.hpp"
 #include <algorithm>
@@ -7,9 +8,7 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
-#include <future>
 #include <iostream>
-#include <list>
 #include <memory>
 #include <optional>
 #include <string>
@@ -98,8 +97,10 @@ inline ReplayTimelineData build_replay_timeline(const std::filesystem::path &map
                                                 const std::filesystem::path &replay, const std::atomic_bool &cancel) {
     std::unique_ptr<BhContext, decltype(&bh_destroy)> core(bh_create(), &bh_destroy);
     if (!core ||
-        !bh_load_map(core.get(), data_location::utf8(map).c_str(),
-                     content.empty() ? nullptr : data_location::utf8(content).c_str()) ||
+        !bh_load_map_cancellable(core.get(), data_location::utf8(map).c_str(),
+                     content.empty() ? nullptr : data_location::utf8(content).c_str(),
+                     replay_cancelled, const_cast<std::atomic_bool *>(&cancel)) ||
+        cancel.load(std::memory_order_relaxed) ||
         !bh_replay_load(core.get(), data_location::utf8(replay).c_str())) {
         throw std::runtime_error(core ? bh_last_error(core.get()) : "No timeline context");
     }
@@ -139,57 +140,42 @@ class ReplayTimelineService {
     struct Result {
         std::string id, script, error;
     };
-    struct Job {
-        std::shared_ptr<std::atomic_bool> cancel;
-        std::future<Result> result;
-    };
     std::filesystem::path map_, content_;
-    std::optional<Job> active_;
-    std::list<Job> retired_;
+    LatestWorker<Result> worker_;
     std::optional<Result> ready_;
-    void cancel() {
-        if (active_) {
-            *active_->cancel = true;
-            retired_.push_back(std::move(*active_));
-            active_.reset();
-        }
-        ready_.reset();
-    }
 
   public:
-    ~ReplayTimelineService() {
-        cancel();
-        for (auto &job : retired_)
-            *job.cancel = true;
+    void reset() {
+        worker_.cancel();
+        ready_.reset();
     }
     void map(const std::filesystem::path &map, const std::filesystem::path &content) {
-        cancel();
+        reset();
         map_ = map;
         content_ = content;
     }
     void request(const std::filesystem::path &replay, const std::string &id) {
-        cancel();
-        const auto cancelled = std::make_shared<std::atomic_bool>(false);
-        active_.emplace(Job{
-            cancelled, std::async(std::launch::async, [map = map_, content = content_, replay, id, cancelled] {
-                Result result;
-                result.id = id;
-                try {
-                    const auto data = build_replay_timeline(map, content, replay, *cancelled);
-                    if (!*cancelled)
-                        result.script = "window.bunnyhopNativeMenu?.onReplayTimeline?.(" + data.json(id).dump() + ")";
-                } catch (const std::exception &error) {
-                    result.error = error.what();
-                }
-                return result;
-            })});
+        ready_.reset();
+        worker_.submit([map = map_, content = content_, replay, id](const std::atomic_bool &cancelled) {
+            Result result;
+            result.id = id;
+            try {
+                const auto data = build_replay_timeline(map, content, replay, cancelled);
+                if (!cancelled)
+                    result.script = "window.bunnyhopNativeMenu?.onReplayTimeline?.(" + data.json(id).dump() + ")";
+            } catch (const std::exception &error) {
+                result.error = error.what();
+            }
+            return result;
+        });
     }
     template <class Menu> void poll(Menu *menu, bool menu_ready, const std::string &id, bool playback) {
-        using namespace std::chrono_literals;
-        retired_.remove_if([](Job &job) { return job.result.wait_for(0ms) == std::future_status::ready; });
-        if (active_ && active_->result.wait_for(0ms) == std::future_status::ready) {
-            ready_ = active_->result.get();
-            active_.reset();
+        if (!playback) {
+            reset();
+            return;
+        }
+        if (auto result = worker_.take()) {
+            ready_ = std::move(*result);
             if (!ready_->error.empty())
                 std::cerr << "Replay timeline: " << ready_->error << '\n';
         }

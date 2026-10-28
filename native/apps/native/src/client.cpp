@@ -2083,21 +2083,24 @@ int run(const Options &opt) {
                     } else
                         throw std::runtime_error("Unknown replay action");
                 }
+                else if(type=="replayData" && message.value("action", std::string()) == "compare" && playback) {
+                    auto request = message;
+                    request["action"] = "set";
+                    request["kind"] = message.value("source", std::string("custom"));
+                    replay_compare_import.message(replay_compare, core.get(), cache / "replays", request,
+                                                  playback_info, playback_id, native::decode_base64);
+                }
                 else if(type=="replayData") {
                     const auto bytes=native::decode_base64(message.at("replayBase64").get<std::string>());
                     char sha[65]{};bh_sha256(bytes.data(),bytes.size(),sha);
                     const auto path=cache/"replays"/(std::string("import-")+sha+".bhr");
                     if(!std::filesystem::exists(path)){std::ofstream out(path,std::ios::binary);out.write(reinterpret_cast<const char*>(bytes.data()),bytes.size());if(!out)throw std::runtime_error("Cannot save imported replay");}
                     const auto action=message.at("action").get<std::string>();
-                    if (action == "compare" && playback) {
-                        native::load_imported_compare(replay_compare, core.get(), path, message, playback_info);
-                    } else {
-                        if (action != "play" && action != "ghost")
-                            throw std::runtime_error("Invalid replay import action");
-                        native::set_requested_ghost_source(ghost_sources, message);
-                        request_replay(path, action, message.value("ghostSlot", 0u),
-                                       message.value("fullRecording", false));
-                    }
+                    if (action != "play" && action != "ghost")
+                        throw std::runtime_error("Invalid replay import action");
+                    native::set_requested_ghost_source(ghost_sources, message);
+                    request_replay(path, action, message.value("ghostSlot", 0u),
+                                   message.value("fullRecording", false));
                     refresh_replays();
                 }
                 else if(type=="tutorial"){
