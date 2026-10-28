@@ -26,6 +26,7 @@
 #include "loadout_preview.hpp"
 #include "menu_gamepad.hpp"
 #include "hud.hpp"
+#include "hud_frame.hpp"
 #include "capabilities.hpp"
 #include "practice_controller.hpp"
 #include "leave_hold.hpp"
@@ -3821,130 +3822,44 @@ int run(const native::Options &opt) {
                     gauntlet_good = delta < 0;
                 }
             }
-            BhCmd shown{};
-            bh_last_command(core.get(), &shown);
-            BhWeaponReport weapon{};
-            bh_weapon_report(core.get(), &weapon);
-            if ((!menu || !menu->visible()) && !opt.camera)
-                hud.draw(
-                        width,
-                        height,
-                        state,
-                        display_run,
-                        shown,
-                        map_id,
-                        display_style,
-                        shown_notice,
-                        display_fps,
-                        prefs.hud,
-                        prefs.crosshair,
-                        viewer.active,
-                        weapon,
-                        prefs.jump_stats ? hud.ssj_line() : std::string_view(),
-                        feedback.ssj_gain,
-                        prefs.strafe_trainer && !viewer.active ? feedback.strafe_reading : std::nullopt,
-                        prefs.strafe_trainer_hints,
-                        &hud_layout,
-                        prefs.hud_scale,
-                        &practice,
-                        prefs.practice_keep_velocity,
-                        gauntlet_line,
-                        gauntlet_delta,
-                        gauntlet_good,
-                        leave_hold.progress(epoch_ms())
-                );
-            if ((!menu || !menu->visible()) && !opt.camera) {
-                if (prefs.mouse_diagnostics && !viewer.active) {
-                    const auto &m = mouse_diagnostics.last;
-                    char label[220];
-                    std::snprintf(
-                            label,
-                            sizeof(label),
-                            "Mouse %.0f events/s | burst %llu | age %.2f/%.2f ms | pump max %.2f ms",
-                            m.events_per_second,
-                            static_cast<unsigned long long>(m.peak_burst),
-                            m.average_age_ms,
-                            m.max_age_ms,
-                            m.max_pump_ms
-                    );
-                    hud.overlay_begin(width, height, 100);
-                    hud.overlay_rect(16, 40, 730, 32, {.02f, .02f, .025f, .85f});
-                    hud.overlay_text(
-                            24,
-                            48,
-                            m.seconds ? label : "Mouse diagnostics: move continuously for a sample",
-                            14,
-                            {1, 1, 1, 1}
-                    );
-                    char frame_line[320];
-                    native::format_frame_line(frame_diagnostics.last(), frame_line, sizeof(frame_line));
-                    hud.overlay_rect(16, 74, 1180, 32, {.02f, .02f, .025f, .85f});
-                    hud.overlay_text(24, 82, frame_line, 14, {1, 1, 1, 1});
-                    hud.overlay_end(width, height);
-                }
-                if (viewer.active && !chat.active && !video_capture && !director_job) {
-                    native::draw_replay_controls(
-                            hud,
-                            width,
-                            height,
-                            native::HudGeometry(width, height, 100).scale,
-                            viewer.controls,
-                            curr.tick,
-                            viewer.session.range.to,
-                            viewer.session.range.tick_interval,
-                            viewer.paused,
-                            viewer.speed,
-                            viewer.camera.mode
-                    );
-                }
-                if (chat.active || prefs.hud)
-                    hud.draw_chat_overlay(
-                            width,
-                            height,
-                            chat.visible(epoch_ms() / 1000.),
-                            chat.input,
-                            chat.composition,
-                            chat.suggestions,
-                            chat.active,
-                            chat.scroll_offset(),
-                            prefs.hud_scale,
-                            &chat,
-                            chat.viewport(epoch_ms() / 1000.)
-                    );
-                if ((held_action("scoreboard") || show_scores) && !chat.active) {
-                    hud.scoreboard(
-                            width,
-                            height,
-                            prefs.hud_scale,
-                            room.display(),
-                            steady_seconds,
-                            epoch_ms(),
-                            run_state,
-                            active_style
-                    );
-                } else if (gun_menu.open && !chat.active) {
-                    gun_menu.draw(hud, width, height, prefs.hud_scale, weapon_context());
-                } else if (trigger_menu.open && !chat.active) {
-                    trigger_menu.draw(
-                            hud,
-                            width,
-                            height,
-                            prefs.hud_scale,
-                            hud.preferences().triggers_visible,
-                            hud.preferences().clips_visible
-                    );
-                } else if (!chat.active) {
-                    native::draw_vote(hud, width, height, prefs.hud_scale, room.vote_display, epoch_ms());
-                }
-                if (prefs.hud) {
-                    const float percent = prefs.hud_scale;
-                    native::draw_result(hud, width, height, percent, hud.result, double(SDL_GetTicksNS()) / 1e9);
-                    native::draw_toasts(hud, width, height, percent, hud.toasts, double(SDL_GetTicksNS()) / 1e9);
-                    native::draw_race(hud, width, height, percent, room_modes.display(), epoch_ms());
-                    native::draw_race_picker(hud, width, height, percent, race_picker);
-                }
-                room.draw_change(hud, width, height, prefs.hud_scale, epoch_ms());
+            native::HudFrame{
+                    core.get(),
+                    hud,
+                    hud_layout,
+                    prefs,
+                    practice,
+                    feedback,
+                    mouse_diagnostics,
+                    frame_diagnostics,
+                    viewer,
+                    chat,
+                    room,
+                    room_modes,
+                    gun_menu,
+                    trigger_menu,
+                    race_picker,
+                    leave_hold,
+                    curr,
+                    state,
+                    display_run,
+                    run_state,
+                    map_id,
+                    active_style,
+                    display_style,
+                    shown_notice,
+                    gauntlet_line,
+                    gauntlet_delta,
+                    gauntlet_good,
+                    display_fps,
+                    steady_seconds,
+                    width,
+                    height,
+                    (!menu || !menu->visible()) && !opt.camera,
+                    bool(video_capture) || bool(director_job),
+                    held_action("scoreboard") || show_scores,
+                    weapon_context()
             }
+                    .draw();
         }
         // Capture only the finished gameplay framebuffer, before any menu/backdrop layer.
         if (recorder.pending_capture) {
