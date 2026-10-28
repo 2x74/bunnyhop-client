@@ -1,5 +1,6 @@
 #pragma once
 #include "settings.hpp"
+#include "data_location.hpp"
 #include <nlohmann/json.hpp>
 #include <atomic>
 #include <condition_variable>
@@ -110,9 +111,9 @@ private:
             save_settings(job.path, job.content);
             return {};
         } catch (const std::exception &e) {
-            return job.path.filename().string() + ": " + e.what();
+            return data_location::utf8(job.path.filename()) + ": " + e.what();
         } catch (...) {
-            return job.path.filename().string() + ": could not save";
+            return data_location::utf8(job.path.filename()) + ": could not save";
         }
     }
 };

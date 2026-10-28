@@ -1,4 +1,5 @@
 #include "online.hpp"
+#include "data_location.hpp"
 #include <iostream>
 #include "bunnyhop_native.h"
 #include <fstream>
@@ -12,7 +13,7 @@ int main() {
     for(const auto &path:{"","/tmp/a","../x","materials/../../a","materials/../a","C:/a","a\\..\\x"})
         check(!native::safe_content_path(path),"unsafe content accepted");
     check(!native::safe_content_path(std::string("materials/a\0.vmt",16)),"NUL path accepted");
-    const auto cache=std::filesystem::temp_directory_path()/("native-cache-test-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const auto cache=std::filesystem::temp_directory_path()/native::data_location::from_utf8("Jos\xc3\xa9-\xe6\xb8\xac")/("native-cache-test-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     struct Cleanup{std::filesystem::path p;~Cleanup(){std::error_code e;std::filesystem::remove_all(p,e);}}cleanup{cache};
     using Bytes=std::vector<uint8_t>;const Bytes bsp{'V','B','S','P','1'},content{'m','a','t'};
     auto digest=[](const Bytes &b){char out[65]{};if(!bh_sha256(b.data(),b.size(),out))throw std::runtime_error("hash");return std::string(out);};

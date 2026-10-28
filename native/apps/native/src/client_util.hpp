@@ -1,5 +1,6 @@
 #pragma once
 #include "settings.hpp"
+#include "data_location.hpp"
 #include <SDL3/SDL.h>
 #include <filesystem>
 #include <iostream>
@@ -55,7 +56,7 @@ inline bool open_external(const std::string &url) {
     return true;
 }
 inline std::filesystem::path resource(const std::string &name,const std::filesystem::path &fallback) {
-    const auto base=std::filesystem::path(SDL_GetBasePath());
+    const auto base=data_location::from_utf8(SDL_GetBasePath());
     for(const auto &root:{base/"resources",base/"../Resources",base/"../share/bunnyhop-native"}) {
         if(std::filesystem::exists(root/name))return std::filesystem::weakly_canonical(root/name);
     }
@@ -101,7 +102,7 @@ inline std::vector<uint8_t> decode_base64(const std::string &encoded) {
 inline std::filesystem::path replay_file(const std::filesystem::path &directory,const std::string &id) {
     if(id.empty()||id.size()>256||id=="."||id==".."||id.find_first_of("/\\:\0",0,4)!=std::string::npos||
        !id.ends_with(".bhr"))throw std::runtime_error("Invalid local replay identifier");
-    auto path=directory/id;
+    auto path=directory/data_location::from_utf8(id);
     if(std::filesystem::is_symlink(path)||!std::filesystem::is_regular_file(path)||std::filesystem::file_size(path)>8*1024*1024)
         throw std::runtime_error("Replay file is missing or invalid");
     return path;

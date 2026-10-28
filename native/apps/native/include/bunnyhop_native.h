@@ -6,7 +6,11 @@
 extern "C" {
 #endif
 
-/* Initial native ABI. All calls for one context must stay on its creating thread.
+/* All const char* strings, including filesystem paths, are UTF-8 and NUL terminated.
+ * The Rust bridge validates UTF-8 and converts paths to the platform representation
+ * (UTF-16 on Windows) through std::path before filesystem access.
+ *
+ * Initial native ABI. All calls for one context must stay on its creating thread.
  * Buffers are borrowed; mesh/material buffers last until map reload/destruction.
  * Texture bytes last until the next texture request/map reload/destruction.
  * Input pointers are borrowed only during each call. No exception crosses this ABI.

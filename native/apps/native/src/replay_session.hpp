@@ -1,3 +1,4 @@
+#include "data_location.hpp"
 #pragma once
 #include "bunnyhop_native.h"
 #include "replay_range.hpp"
@@ -16,7 +17,7 @@ struct ReplaySession {
     ReplayPose initial;
 
     static ReplaySession open(BhContext *core, const std::filesystem::path &path, bool full_recording = false) {
-        if (!bh_replay_load(core, path.string().c_str())) {
+        if (!bh_replay_load(core, native::data_location::utf8(path).c_str())) {
             throw std::runtime_error(bh_last_error(core));
         }
         size_t bytes = 0;

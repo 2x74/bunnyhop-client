@@ -1,3 +1,5 @@
+#include "atomic_replace.hpp"
+#include "data_location.hpp"
 #include "online.hpp"
 #include "bunnyhop_native.h"
 #include <curl/curl.h>
@@ -76,19 +78,7 @@ std::string hash(const Bytes &bytes) {
 }
 void save(const std::filesystem::path &path, const Bytes &bytes) {
     std::filesystem::create_directories(path.parent_path());
-    const auto temp = path.string() + ".part";
-    std::ofstream stream(temp, std::ios::binary | std::ios::trunc);
-    stream.write(reinterpret_cast<const char *>(bytes.data()), std::streamsize(bytes.size()));
-    stream.close();
-    if (!stream) throw std::runtime_error("Could not save " + path.string());
-    // Windows cannot rename over an existing cache entry. Retain the old bytes
-    // until replacement succeeds, including when a corrupted cached object is repaired.
-    const auto backup=path.string()+".previous";
-    std::error_code ec;
-    if(std::filesystem::exists(path)){std::filesystem::remove(backup,ec);std::filesystem::rename(path,backup);}
-    try{std::filesystem::rename(temp,path);}
-    catch(...){if(std::filesystem::exists(backup))std::filesystem::rename(backup,path);throw;}
-    std::filesystem::remove(backup,ec);
+    atomic_write_file(path, std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
 }
 std::filesystem::path asset(const std::filesystem::path &cache, const std::string &sha,
                             const std::string &route, size_t max_size, const std::atomic_bool *cancel,const LoadProgressCallback &progress={},bool offline=false,const DownloadFetch &fetch={}) {
@@ -115,7 +105,7 @@ bool valid_map_id(const std::string &id) {
 bool safe_content_path(const std::string &path) {
     if (path.empty() || path.size() > 1024 || path[0] == '/' ||
         path.find_first_of("\\:\0", 0, 3) != std::string::npos) return false;
-    for (const auto &part : std::filesystem::path(path))
+    for (const auto &part : data_location::from_utf8(path))
         if (part == "." || part == ".." || part.empty()) return false;
     return true;
 }
@@ -178,7 +168,7 @@ DownloadedMap download_map(const std::string &id, const std::filesystem::path &c
         emit({"content","Checking map content",0,size,count,files.size()});
         const auto object = asset(cache, file_sha, "/content/" + file_sha, size, cancel,emit,offline,fetch);
         if (std::filesystem::file_size(object) != size) throw std::runtime_error("Content size mismatch");
-        const auto destination = content / path;
+        const auto destination = content / data_location::from_utf8(path);
         std::filesystem::create_directories(destination.parent_path());
         std::filesystem::copy_file(object, destination, std::filesystem::copy_options::overwrite_existing);
     }

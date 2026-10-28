@@ -2,6 +2,7 @@
 // Device-local finish metadata and optional PB captures. Never deletes a BHR and
 // never upgrades a local result to an account/server verified personal best.
 #include "nlohmann/json.hpp"
+#include "atomic_replace.hpp"
 #include <filesystem>
 #include <fstream>
 #include <vector>
@@ -20,7 +21,12 @@ class RunVault {
  void ensure()const{for(const auto&p:{root_,root_/"runs",root_/"captures"}){if(std::filesystem::is_symlink(p))throw std::runtime_error("Vault directory is a symbolic link");std::filesystem::create_directories(p);}}
  std::filesystem::path summary_path(const std::string&id)const{if(!valid_id(id))throw std::runtime_error("Invalid vault replay identifier");return root_/"runs"/(id+".json");}
  std::filesystem::path capture_path(const std::string&id)const{if(!valid_id(id))throw std::runtime_error("Invalid vault replay identifier");return root_/"captures"/(id+".png");}
- static void atomic_write(const std::filesystem::path&p,const std::string&value){if(std::filesystem::is_symlink(p))throw std::runtime_error("Vault file is a symbolic link");const auto tmp=p.string()+".tmp";if(std::filesystem::is_symlink(tmp))throw std::runtime_error("Vault temporary file is a symbolic link");{std::ofstream out(tmp,std::ios::binary|std::ios::trunc);out.write(value.data(),std::streamsize(value.size()));if(!out)throw std::runtime_error("Cannot write run vault");}std::error_code ec;std::filesystem::rename(tmp,p,ec);if(ec){std::filesystem::remove(p,ec);ec.clear();std::filesystem::rename(tmp,p,ec);if(ec)throw std::runtime_error("Cannot replace run vault file");}}
+ static void atomic_write(const std::filesystem::path& path, const std::string& value) {
+     if (std::filesystem::is_symlink(path))
+         throw std::runtime_error("Vault file is a symbolic link");
+     atomic_write_file(path, value);
+ }
+
  std::vector<Entry> files(const char*dir,const char*extension)const{std::vector<Entry> result;if(std::filesystem::is_symlink(root_)||std::filesystem::is_symlink(root_/dir)||!std::filesystem::exists(root_/dir))return result;for(const auto&e:std::filesystem::directory_iterator(root_/dir)){if(e.is_symlink()||!e.is_regular_file()||e.path().extension()!=extension)continue;const auto name=e.path().filename().string(),suffix=std::string(extension);if(!valid_id(name.substr(0,name.size()-suffix.size())))continue;result.push_back({e.path(),e.last_write_time(),e.file_size()});}std::sort(result.begin(),result.end(),[](const auto&a,const auto&b){return a.age!=b.age?a.age>b.age:a.path.filename()>b.path.filename();});return result;}
  static std::optional<double> number(const J&j,const char*key,double max,bool integer=false){if(!j.contains(key)||!j[key].is_number())return std::nullopt;const double n=j[key];return std::isfinite(n)&&n>=0&&n<=max&&(!integer||std::floor(n)==n)?std::optional<double>(n):std::nullopt;}
  static std::string text(const J&j,const char*key,size_t limit){if(!j.contains(key)||!j[key].is_string())return {};std::string s;for(unsigned char c:j[key].get<std::string>())if(c>=32&&c!=127)s+=char(c);if(s.size()>limit)s.resize(limit);return s;}

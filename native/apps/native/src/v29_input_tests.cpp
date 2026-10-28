@@ -33,7 +33,8 @@ void check(int result, BhContext *core) {
 
 struct Fixture {
     std::filesystem::path directory = std::filesystem::temp_directory_path() /
-        ("bunnyhop-v29-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        native::data_location::from_utf8("bunnyhop-v29-Jos\xc3\xa9-\xe6\xb8\xac-" +
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     Core core{bh_create(), bh_destroy};
     std::array<BhZone, 2> zones{};
 
@@ -49,7 +50,7 @@ struct Fixture {
         std::ofstream model_output(directory / "models" / "fixture" / "box.mdl", std::ios::binary);
         model_output.write(reinterpret_cast<const char *>(model.data()), std::streamsize(model.size()));
         model_output.close();
-        check(bh_load_map(core.get(), map.string().c_str(), directory.string().c_str()), core.get());
+        check(bh_load_map(core.get(), native::data_location::utf8(map).c_str(), native::data_location::utf8(directory).c_str()), core.get());
         zones[0] = {0, 0, 0, {-100, -100, -10000}, {100, 100, 1000}};
         zones[1] = {1, 0, 0, {150, -100, -10000}, {1000, 100, 1000}};
     }
@@ -86,7 +87,7 @@ struct Fixture {
         assert(run.status == 2);
         check(bh_record_end(core.get()), core.get());
         const auto path = directory / name;
-        check(bh_record_write_bhr(core.get(), path.string().c_str()), core.get());
+        check(bh_record_write_bhr(core.get(), native::data_location::utf8(path).c_str()), core.get());
         return path;
     }
 
@@ -116,14 +117,14 @@ struct Fixture {
 
     Json header(const std::filesystem::path &path) {
         size_t size = 0;
-        const char *data = bh_replay_header(core.get(), path.string().c_str(), &size);
+        const char *data = bh_replay_header(core.get(), native::data_location::utf8(path).c_str(), &size);
         check(data != nullptr, core.get());
         return Json::parse(data, data + size);
     }
 };
 
 std::vector<uint8_t> decompress(const std::filesystem::path &path) {
-    gzFile file = gzopen(path.string().c_str(), "rb");
+    gzFile file = gzopen(native::data_location::utf8(path).c_str(), "rb");
     assert(file);
     std::vector<uint8_t> result;
     std::array<uint8_t, 4096> buffer{};
@@ -176,7 +177,7 @@ void test_practice_takeover() {
     Fixture fixture;
     const auto path = fixture.record("practice.bhr", true, true);
     const auto info = fixture.header(path);
-    check(bh_replay_load(fixture.core.get(), path.string().c_str()), fixture.core.get());
+    check(bh_replay_load(fixture.core.get(), native::data_location::utf8(path).c_str()), fixture.core.get());
     for (int rejection = 0; rejection < 4; ++rejection) {
         bool rejected = false;
         auto zones = fixture.zones;
@@ -216,10 +217,10 @@ void test_practice_takeover() {
     check(bh_step(fixture.core.get(), &command, &state), fixture.core.get());
     assert(state.tick == 21);
     assert(!bh_record_begin(fixture.core.get(), "", "autohop", "test", 100));
-    assert(!bh_record_write_bhr(fixture.core.get(), (fixture.directory / "invalid.bhr").string().c_str()));
+    assert(!bh_record_write_bhr(fixture.core.get(), native::data_location::utf8(fixture.directory / "invalid.bhr").c_str()));
     practice.restart();
     assert(!practice.active);
-    check(bh_replay_load(fixture.core.get(), path.string().c_str()), fixture.core.get());
+    check(bh_replay_load(fixture.core.get(), native::data_location::utf8(path).c_str()), fixture.core.get());
     const auto spawn = native::ReplayTakeover::take(fixture.core.get(), info, fixture.zones,
                                                   "autohop", false, false, 0);
     assert(spawn.snapshot.player.tick == 0 && spawn.view.yaw == 0);
