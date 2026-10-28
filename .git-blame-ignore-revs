@@ -1,2 +1,5 @@
 # Format revised native client blocks for readability.
 9ce9c7a47e672302cb6ee3cdb1af10c69396e6ce
+
+# clang-format: mechanical native C++ and Objective-C++ reformat.
+9b73443d092ec837eba56002d28e4455b7d8350f
