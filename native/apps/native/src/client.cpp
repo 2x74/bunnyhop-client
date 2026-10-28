@@ -36,6 +36,7 @@
 #include "client_util.hpp"
 #include "run_vault.hpp"
 #include "replay_library.hpp"
+#include "menu_state.hpp"
 #include "map_prefetch.hpp"
 #include "recoverable_action.hpp"
 #include "app_identity.hpp"
@@ -352,6 +353,7 @@ int run(const Options &opt) {
     // Settings and other small JSON files are written off the frame loop.
     native::JsonFileWriter json_writer;
     auto preferences = startup_data.settings;
+    native::MenuState menu_state;
     const bool first_settings = startup_data.first_settings;
     if (!startup_data.error.empty()) {
         std::cerr << "Settings: " << startup_data.error << '\n';
@@ -451,6 +453,7 @@ int run(const Options &opt) {
     bool third_person=false,flashlight=false,hide_players=false,show_scores=false;
     try {const auto path=cache/"start-points.json";if(std::filesystem::exists(path)&&std::filesystem::file_size(path)<=1024*1024)start_points.load(nlohmann::json::parse(read_text(path)));}catch(const std::exception &e){std::cerr<<"Start points: "<<e.what()<<'\n';}
     auto apply_preferences=[&]() {
+        menu_state.settings_changed();
         hud_layout.clear();
         for(const auto &[id,at]:preferences.at("hudLayout").items())hud_layout[id]={at.at("x").get<float>(),at.at("y").get<float>()};
         input_timeline.set_sensitivity(input, preferences.at("sensitivity").get<double>());
@@ -471,7 +474,7 @@ int run(const Options &opt) {
         if(renderer){renderer->set_player_glow(player_glow);renderer->set_glow_visible(preferences.value("showPlayerGlow",true),preferences.value("firstPersonGlow",false));renderer->set_fov(preferences.at("fov").get<float>());renderer->set_viewmodel(preferences.at("viewmodelFov").get<float>(),preferences.at("viewmodelX").get<float>(),preferences.at("viewmodelY").get<float>(),preferences.at("viewmodelZ").get<float>(),preferences.at("viewmodelLeftHand").get<bool>(),preferences.at("viewmodel").get<bool>(),preferences.at("viewmodelBob").get<float>(),preferences.at("viewmodelSway").get<float>());renderer->set_color_blind(preferences.value("colorBlind",std::string("off")));renderer->set_actor_models(preferences.value("playerModel",std::string("bunny")),preferences.value("ghostModel",std::string("same")));renderer->set_zones_visible(preferences.value("zonesVisible",true));renderer->set_effects_visible(preferences.value("effectsVisible",true));renderer->set_triggers_visible(preferences.value("triggersVisible",false));renderer->set_clips_visible(preferences.value("clipsVisible",false));renderer->set_water_quality(preferences.value("waterQuality",std::string("simple"))=="refracted"?1:0);}
     };
     apply_preferences();
-    std::string map_id,loading,error,record_path,last_ui,last_requested_map;
+    std::string map_id,loading,error,record_path,last_requested_map;
     native::ReplayLibrary replay_library(cache);
     native::RunVault run_vault(cache/"run-vault");std::optional<std::pair<std::string,std::string>> pending_vault_capture;
     nlohmann::json load_progress=nullptr;
@@ -548,6 +551,8 @@ int run(const Options &opt) {
     };
     // from_focus_loss: the window mode change waits until focus returns.
     auto show_menu=[&](bool on, bool from_focus_loss = false) {
+        if (on)
+            menu_state.reset();
         if (on)
             input_timeline.keyboard_focus_lost();
         if(on){replay_controls.dragging=false;replay_orbit_drag=false;}
@@ -681,7 +686,7 @@ int run(const Options &opt) {
         BhRunState timing{};bh_run_state(core.get(),&timing);
         if(bound&&action!="toggle"&&!practice.key_allowed(action,timing.status==1)){if(practice.hinted_run!=timing.start_tick){practice.hinted_run=timing.start_tick;toast("Type !cp to use checkpoints and noclip during a run.",3500);}return;}
         if(action=="menu"){practice.menu_open=!practice.menu_open;return;}
-        if(action=="keepVelocity"){preferences["practiceKeepVelocity"]=value.value_or(!preferences.at("practiceKeepVelocity").get<bool>());json_writer.write(cache/"settings.json",preferences);return;}
+        if(action=="keepVelocity"){preferences["practiceKeepVelocity"]=value.value_or(!preferences.at("practiceKeepVelocity").get<bool>());menu_state.settings_changed();json_writer.write(cache/"settings.json",preferences);return;}
         if(action=="toggle"){
             practice.mode=!practice.mode;
             if(practice.mode){practice.tool.clear();practice_use("");const auto bound=[&](const char *action)->std::string{const auto &keys=preferences.at("binds").at(action);if(keys.empty()){const std::string_view a(action);return a=="cpSave"?"!save":a=="cpTeleport"?"!tele":"!nc";}std::string k=keys[0].get<std::string>();if(k=="Backquote")return "`";if(k.starts_with("Key")||k.starts_with("Digit"))return k.substr(k.starts_with("Key")?3:5);if(k.starts_with("Mouse"))return "M"+k.substr(5);return k;};toast("Practice: no scores. "+bound("noclip")+": noclip | "+bound("cpSave")+": save checkpoint | "+bound("cpTeleport")+": teleport.",6000);}
@@ -729,7 +734,7 @@ int run(const Options &opt) {
         gauntlet_id.clear();gauntlet_map.clear();gauntlet_progress=nullptr;zones.clear();map_id.clear();audio.set_map(nullptr);active_track=0;active_style=selected_style;
         curr={};prev={};recording_ended=true;record_path.clear();pending_vault_capture.reset();score_notice.clear();toast_text.clear();error.clear();turn_admission.reset();
         ++run_generation;beat_start=beat_upto=0;run_event({{"type","reset"}});reset_feedback();reset_input_timing();audio.reset();
-        if(backdrop)backdrop->release();backdrop_shown.clear();backdrop_failed.clear();backdrop_source.clear();backdrop_cut=false;gameplay_backdrop_due=false;last_ui.clear();
+        if(backdrop)backdrop->release();backdrop_shown.clear();backdrop_failed.clear();backdrop_source.clear();backdrop_cut=false;gameplay_backdrop_due=false;menu_state.reset();
         room.close();room_modes.close(room.generation);observed_spectator.reset();
     };
     auto apply_room_mode=[&](const native::RoomModeAction &action){
@@ -981,11 +986,11 @@ int run(const Options &opt) {
             return;
         }
         if(action=="gunMenu"){gun_menu.toggle();return;}
-        if(action=="showTriggers"||action=="showClips"){const char *key=action=="showTriggers"?"triggersVisible":"clipsVisible";const bool on=!preferences.at(key).get<bool>();preferences[key]=on;json_writer.write(cache/"settings.json",preferences);apply_preferences();toast(std::string(action=="showTriggers"?"Triggers":"Player clips")+(on?" shown":" hidden"));return;}
-        if(action=="keysOverlay"){preferences["keysOverlay"]=!preferences.at("keysOverlay").get<bool>();json_writer.write(cache/"settings.json",preferences);apply_preferences();return;}
+        if(action=="showTriggers"||action=="showClips"){const char *key=action=="showTriggers"?"triggersVisible":"clipsVisible";const bool on=!preferences.at(key).get<bool>();preferences[key]=on;menu_state.settings_changed();json_writer.write(cache/"settings.json",preferences);apply_preferences();toast(std::string(action=="showTriggers"?"Triggers":"Player clips")+(on?" shown":" hidden"));return;}
+        if(action=="keysOverlay"){preferences["keysOverlay"]=!preferences.at("keysOverlay").get<bool>();menu_state.settings_changed();json_writer.write(cache/"settings.json",preferences);apply_preferences();return;}
         if(action=="viewmodel"||action=="hideUi"||action=="mute") {
             const std::string key=action=="hideUi"?"hud":action=="mute"?"muted":"viewmodel";
-            preferences[key]=!preferences[key].get<bool>();json_writer.write(cache/"settings.json",preferences);apply_preferences();return;
+            preferences[key]=!preferences[key].get<bool>();menu_state.settings_changed();json_writer.write(cache/"settings.json",preferences);apply_preferences();return;
         }
         if(action=="mainMenu"){
             BhRunState timing{};if(core)bh_run_state(core.get(),&timing);
@@ -1274,7 +1279,8 @@ int run(const Options &opt) {
                         if (!(video_capture || director_job || video_encoder.busy())) {
                             if (auto changed = window_modes.toggle(preferences)) {
                                 preferences = std::move(*changed);
-                                json_writer.write(cache / "settings.json", preferences);
+                                menu_state.settings_changed();
+                            json_writer.write(cache / "settings.json", preferences);
                             } else {
                                 error = window_controller.error();
                             }
@@ -1408,6 +1414,7 @@ int run(const Options &opt) {
                 if(raw.size()>limit)throw std::runtime_error("Menu command exceeds its type limit");
                 if (type == "ready") {
                     menu_ready = true;
+                    menu_state.reset();
                     backdrop_shown.clear();
                     backdrop_failed.clear();
                     backdrop_cut = false;
@@ -1457,8 +1464,8 @@ int run(const Options &opt) {
                 else if(type=="chatAction"){
                     const auto action=message.at("action").get<std::string>();
                     if(action=="scores")show_scores=!show_scores;
-                    else if(action=="jumpStats"){preferences["jumpStats"]=!preferences.at("jumpStats").get<bool>();json_writer.write(cache/"settings.json",preferences);apply_preferences();}
-                    else if(action=="showTriggers"||action=="showClips"){const char *key=action=="showTriggers"?"triggersVisible":"clipsVisible";const bool on=!preferences.at(key).get<bool>();preferences[key]=on;json_writer.write(cache/"settings.json",preferences);apply_preferences();toast(std::string(action=="showTriggers"?"Triggers":"Player clips")+(on?" shown":" hidden"));}
+                    else if(action=="jumpStats"){preferences["jumpStats"]=!preferences.at("jumpStats").get<bool>();menu_state.settings_changed();json_writer.write(cache/"settings.json",preferences);apply_preferences();}
+                    else if(action=="showTriggers"||action=="showClips"){const char *key=action=="showTriggers"?"triggersVisible":"clipsVisible";const bool on=!preferences.at(key).get<bool>();preferences[key]=on;menu_state.settings_changed();json_writer.write(cache/"settings.json",preferences);apply_preferences();toast(std::string(action=="showTriggers"?"Triggers":"Player clips")+(on?" shown":" hidden"));}
                     else if(action=="hidePlayers")hide_players=message.value("hidden",!hide_players);
                     else if(action=="openRoom"){show_menu(true);menu->evaluate_js("window.bunnyhopNativeMenu?.open?.('room')");}
                     else if(core&&!download.valid()){
@@ -1557,6 +1564,7 @@ int run(const Options &opt) {
                         ok = changed.has_value();
                         if (ok) {
                             preferences = std::move(*changed);
+                            menu_state.settings_changed();
                             json_writer.write(cache / "settings.json", preferences);
                         }
                     } else {
@@ -1641,7 +1649,7 @@ int run(const Options &opt) {
                     }
                     else if(action=="stop")reset();
                 }
-                else if(type=="sensitivity") {preferences=native::patch_settings(preferences,{{"sensitivity",message.at("value")}});json_writer.write(cache/"settings.json",preferences);apply_preferences();}
+                else if(type=="sensitivity") {preferences=native::patch_settings(preferences,{{"sensitivity",message.at("value")}});menu_state.settings_changed();json_writer.write(cache/"settings.json",preferences);apply_preferences();}
                 else if(type=="playerName") replay_player=native::replay_player_name(message.value("name",std::string()));
                 else if(type=="cosmetics") {
                     player_glow=native_render::parse_glow(message.value("playerGlow",nlohmann::json(nullptr)));
@@ -1729,8 +1737,10 @@ int run(const Options &opt) {
         }
         frame_diagnostics.mark(native::FrameDiagnostics::kMenu, SDL_GetTicksNS());
         if (auto update = replay_library.take()) {
-            if (update->replays)
+            if (update->replays) {
                 replay_list = std::move(*update->replays);
+                menu_state.replays_changed();
+            }
             for (const auto& capture : update->captures) {
                 if (capture.map == map_id)
                     pending_vault_capture = std::pair{capture.id, capture.map};
@@ -2272,17 +2282,21 @@ int run(const Options &opt) {
         // run in the order they are queued.
         if(menu&&menu_ready&&now-activity_time>=std::chrono::seconds(1)&&!opt.frames&&opt.runtime_smoke.empty()){menu->evaluate_js("window.bunnyhopNativeMenu?.onActivity?.("+activity.sample(activity_active).dump()+")");activity_time=now;}
         if(menu && menu_ready && (menu->visible()||!room.id.empty()) && (now-ui_time>=std::chrono::milliseconds(200) || !backdrop_call.empty() || (!opt.menu_smoke.empty() && (renderer||opt.menu_home_smoke) && !download.valid() && !smoke_requested))) {
+            const bool visible = menu->visible();
+            const bool full = menu_state.needs_full(visible);
+            nlohmann::json state;
+            if (visible || full) {
             std::string progress;nlohmann::json progress_detail;{std::lock_guard lock(progress_mutex);progress=loading;progress_detail=load_progress;}
             // The game window, as the web reports its page: logical size plus pixel density.
             int window_w=0,window_h=0;SDL_GetWindowSize(window.get(),&window_w,&window_h);
             const nlohmann::json client_info={{"version",identity.value("version",std::string("local"))},{"build",identity.value("build",std::string("bunnyhop-native/local"))},
                 {"gpu",gpu_renderer},{"viewport",{window_w,window_h}},{"dpr",std::round(SDL_GetWindowPixelDensity(window.get())*100)/100}};
-            nlohmann::json state={{"engine","native"},{"renderer","opengl"},{"client",client_info},{"map",map_id},{"loading",progress},{"loadProgress",progress_detail},{"error",error},
+            state={{"engine","native"},{"renderer","opengl"},{"client",client_info},{"map",map_id},{"loading",progress},{"loadProgress",progress_detail},{"error",error},
                 {"sensitivity",input.sensitivity},{"paused",!captured},{"recordingPath",record_path},
                 {"player",{{"map",map_id},{"style",playback?playback_info.value("style",active_style):active_style},{"track",playback?playback_info.value("track",active_track):active_track},{"mode",playback?"replay":!room.id.empty()?"multiplayer":!gauntlet_id.empty()?"gauntlet":(practice.active||tutorial_practice())?"practice":"solo"},{"practice",practice.active||map_id==tutorial_map}}},
                 {"practice",{{"available",practice_reason().empty()},{"unavailable",practice_reason().empty()?nlohmann::json(nullptr):nlohmann::json(practice_reason())},{"mode",practice.mode},{"active",practice.active},{"thirdPerson",third_person&&!playback&&!room.spectator_target},{"tool",practice.tool.empty()?nlohmann::json(nullptr):nlohmann::json(practice.tool)},{"noclip",practice.noclip},{"menuOpen",practice.menu_open},{"count",practice.checkpoints.size()},{"current",practice.number()},{"keepVelocity",preferences.at("practiceKeepVelocity")}}},
                 {"gauntlet",{{"id",gauntlet_id.empty()?nlohmann::json(nullptr):nlohmann::json(gauntlet_id)},{"map",gauntlet_map.empty()?nlohmann::json(nullptr):nlohmann::json(gauntlet_map)}}},
-                {"style",selected_style},{"track",active_track},{"settings",preferences},{"replays",replay_list},
+                {"style",selected_style},{"track",active_track},
                 {"room",{{"id",room.id},{"map",room.map},{"spectating",spectator.has_value()},{"target",spectator?nlohmann::json(*spectator):nlohmann::json(nullptr)},{"raceFrozen",room_modes.frozen()}}},
                 {"tutorial",tutorial?tutorial->stateJSON():nlohmann::json{{"active",false},{"lesson","jump"},{"completed",tutorial_completed}}},
                 {"playback", playback_session.state(playback, playback_id, curr.tick, playback_paused,
@@ -2313,8 +2327,18 @@ int run(const Options &opt) {
                 const auto encoded_data=data_state.dump(-1,' ',false,nlohmann::json::error_handler_t::replace);
                 if(encoded_data!=last_data_state){menu->evaluate_js("window.dispatchEvent(new CustomEvent('bunnyhop:data-folder',{detail:"+encoded_data+"}))");last_data_state=encoded_data;}
             }
-            const auto encoded=state.dump();
-            if(encoded!=last_ui) {menu->evaluate_js("window.bunnyhopNativeMenu?.onState("+encoded+")");last_ui=encoded;}
+            } else {
+                state = {{"map", map_id}, {"style", selected_style}, {"track", active_track},
+                    {"runGeneration", run_generation}, {"loading", download.valid()},
+                    {"player", {{"map", map_id}, {"style", active_style}, {"track", active_track},
+                        {"mode", "multiplayer"}, {"practice", practice.active}}},
+                    {"room", {{"id", room.id}, {"map", room.map}, {"spectating", spectator.has_value()},
+                        {"target", spectator ? nlohmann::json(*spectator) : nlohmann::json(nullptr)},
+                        {"raceFrozen", room_modes.frozen()}}}};
+            }
+            const auto script = menu_state.publish(std::move(state), visible, preferences, replay_list);
+            if (!script.empty())
+                menu->evaluate_js(script);
             ui_time=now;
         }
         if(!backdrop_call.empty()) {

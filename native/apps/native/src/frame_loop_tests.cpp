@@ -5,6 +5,7 @@
 #include "frame_pacing.hpp"
 #include "json_file_writer.hpp"
 #include "recoverable_action.hpp"
+#include "menu_state.hpp"
 #include "start_point.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
@@ -145,6 +146,36 @@ void test_json_writer_writes_off_thread_and_keeps_the_newest() {
     std::filesystem::remove_all(dir);
 }
 
+void test_menu_slices() {
+    native::MenuState publisher;
+    const native::Json settings = {{"sensitivity", 3.0}};
+    const native::Json replays = native::Json::array({{{"id", "one.bhr"}}});
+    native::Json state = {{"map", "test"}, {"style", "autohop"}, {"track", 0},
+        {"runGeneration", 2}, {"loading", false}, {"room", {{"id", "room"}}}};
+    const auto full = publisher.publish(state, true, settings, replays);
+    assert(full.find("\"settings\"") != std::string::npos && full.find("one.bhr") != std::string::npos);
+    assert(publisher.publish(state, true, settings, replays).empty());
+    publisher.settings_changed();
+    assert(publisher.publish(state, true, settings, replays).empty());
+    state["room"]["id"] = "changed";
+    const auto room = publisher.publish(state, false, settings, replays);
+    assert(room.find("changed") != std::string::npos && room.find("settings") == std::string::npos);
+    assert(room.find("replays") == std::string::npos);
+    publisher.settings_changed();
+    auto changed_settings = settings;
+    changed_settings["sensitivity"] = 4.0;
+    assert(publisher.publish(state, false, changed_settings, replays).empty());
+    assert(publisher.needs_full(true));
+    const auto reopened = publisher.publish(state, true, changed_settings, replays);
+    assert(reopened.find("sensitivity\":4.0") != std::string::npos);
+    publisher.replays_changed();
+    const auto changed_replays = native::Json::array({{{"id", "two.bhr"}}});
+    const auto replay = publisher.publish(state, true, changed_settings, changed_replays);
+    assert(replay.find("two.bhr") != std::string::npos && replay.find("settings") == std::string::npos);
+    publisher.reset();
+    assert(publisher.publish(state, false, changed_settings, changed_replays).find("settings") != std::string::npos);
+}
+
 void test_settings_recovery() {
     const auto directory = std::filesystem::temp_directory_path() / "bunnyhop-settings-recovery";
     std::filesystem::create_directories(directory);
@@ -263,6 +294,7 @@ int main() {
     test_disabled_diagnostics_record_nothing();
     test_frame_pacer_waits_for_the_previous_frame();
     test_json_writer_writes_off_thread_and_keeps_the_newest();
+    test_menu_slices();
     test_settings_recovery();
     test_display_defaults();
     test_settings_replace_has_no_missing_destination();
