@@ -10,6 +10,7 @@ export type StageView="fp"|"close"|"bunny"|"ghost";
 export interface StageLook {outfit?:string|null;ghost?:string|null;trail?:string|null;veil?:boolean;playerGlow?:PlayerGlow|null;previewGlow?:boolean}
 export type ThumbJob={key:string;kind:"knife";knife:string;loadout:CosmeticLoadout}|{key:string;kind:"glove";loadout:CosmeticLoadout}|{key:string;kind:"item";spec:PreviewSpec;scene?:unknown};
 export const THUMB_W=384,THUMB_H=240;
+const CLOSE_UP_ZOOM=1.3;
 const thumbs=new Map<string,HTMLCanvasElement>();
 const color=(id:string|undefined|null,fallback:string)=>cosmetic(id)?.color??fallback;
 const name=(id:string|undefined|null,fallback:string)=>cosmetic(id)?.name??fallback;
@@ -18,12 +19,13 @@ const nativeImages=new Map<string,HTMLImageElement>();
 function imageFor(id:string):HTMLImageElement|null{const src=(authored.images as Record<string,string>)[id];if(!src)return null;let image=nativeImages.get(id);if(!image){image=new Image();image.src=src;nativeImages.set(id,image);}return image;}
 function previewId(spec:PreviewSpec):string{if(spec.kind==="bunny")return spec.body==="body-b"?"body-b":spec.outfit??"outfit-cream";if(spec.kind==="ghost")return spec.key.startsWith("ghost-")?spec.key:spec.outfit??"outfit-cream";if(spec.kind==="hat")return spec.hat??"";if(spec.kind==="glove")return spec.glove??"glove-knit";if(spec.kind==="knife")return spec.knife==="knife-carrot"&&spec.finish&&spec.finish!=="fin-garden"?spec.finish:spec.knife??"knife-carrot";return spec.key;}
 // (No caption drawn in: the grid tile names its item under the picture, and the stage has its own caption.)
-function paint(canvas:HTMLCanvasElement,spec:PreviewSpec,hero=false):void {
+/** `zoom` frames the sample closer (the stage's Close-up view); the canvas crops what no longer fits. */
+function paint(canvas:HTMLCanvasElement,spec:PreviewSpec,hero=false,zoom=1):void {
  const ctx=canvas.getContext("2d");if(!ctx)return;const revision=(paintRevisions.get(canvas)??0)+1;paintRevisions.set(canvas,revision);canvas.width=hero?768:THUMB_W;canvas.height=hero?480:THUMB_H;
  const draw=()=>{if(paintRevisions.get(canvas)!==revision)return;ctx.clearRect(0,0,canvas.width,canvas.height);const w=canvas.width,h=canvas.height;
   // The stage's own lit background (loadout-view.css, per view / rarity / supporter set) shows through the hero; tiles get a backdrop.
   if(!hero){const background=ctx.createRadialGradient(w*.5,h*.4,0,w*.5,h*.4,w*.6);background.addColorStop(0,"#27303c");background.addColorStop(1,"#111720");ctx.fillStyle=background;ctx.fillRect(0,0,w,h);}
-  const id=previewId(spec),image=imageFor(id);if(image?.complete&&image.naturalWidth){const scale=Math.min(w*.83/image.naturalWidth,h*.84/image.naturalHeight);ctx.drawImage(image,(w-image.naturalWidth*scale)/2,(h-image.naturalHeight*scale)/2,image.naturalWidth*scale,image.naturalHeight*scale);
+  const id=previewId(spec),image=imageFor(id);if(image?.complete&&image.naturalWidth){const scale=Math.min(w*.83/image.naturalWidth,h*.84/image.naturalHeight)*zoom;ctx.drawImage(image,(w-image.naturalWidth*scale)/2,(h-image.naturalHeight*scale)/2,image.naturalWidth*scale,image.naturalHeight*scale);
    if(hero&&spec.kind==="knife"&&spec.finish&&spec.finish!=="fin-garden"&&id!==spec.finish){const sample=imageFor(spec.finish);if(sample?.complete&&sample.naturalWidth){const size=Math.min(w*.28/sample.naturalWidth,h*.3/sample.naturalHeight);ctx.fillStyle="#121922dd";ctx.fillRect(w*.69,h*.66,w*.29,h*.32);ctx.drawImage(sample,w*.7,h*.67,sample.naturalWidth*size,sample.naturalHeight*size);}}}
   else{const colors=[spec.color??color(spec.finish,"#ff8b45"),color(spec.outfit,"#eee1c8"),spec.color2??color(spec.glove,"#73849a")];for(let i=0;i<3;i++){ctx.fillStyle=colors[i];ctx.fillRect(w*(.24+i*.18),h*.3,w*.16,h*.35);}}
  };
@@ -36,13 +38,16 @@ export class LoadoutStage {
  private shown:CosmeticLoadout;private look:StageLook={};private viewMode:StageView="fp";private disposed=false;
  static acquire(host:HTMLElement,initial:CosmeticLoadout):LoadoutStage{return new LoadoutStage(host,initial);}
  static cached(key:string):HTMLCanvasElement|null{return thumbs.get(key)??null;}
- constructor(host:HTMLElement,initial:CosmeticLoadout){this.host=host;this.shown={...initial};this.canvas.className="lo-canvas native-loadout-preview";host.dataset.nativeStatic="true";this.canvas.setAttribute("role","img");host.append(this.canvas);const note=document.createElement("p");note.className="native-loadout-preview-note";note.textContent="Native-rendered item samples · combinations shown in game";host.append(note);this.note=note;this.canvas.tabIndex=0;this.canvas.addEventListener("pointerdown",this.down);this.canvas.addEventListener("pointermove",this.move);this.canvas.addEventListener("pointerup",this.up);this.canvas.addEventListener("pointercancel",this.up);this.canvas.addEventListener("keydown",this.key);this.draw();}
+ constructor(host:HTMLElement,initial:CosmeticLoadout){this.host=host;this.shown={...initial};this.canvas.className="lo-canvas native-loadout-preview";host.dataset.nativeStatic="true";if(nativePreviewAvailable())host.dataset.nativeHost="true";this.canvas.setAttribute("role","img");host.append(this.canvas);const note=document.createElement("p");note.className="native-loadout-preview-note";note.textContent="Native-rendered item samples · combinations shown in game";host.append(note);this.note=note;this.canvas.tabIndex=0;this.canvas.addEventListener("pointerdown",this.down);this.canvas.addEventListener("pointermove",this.move);this.canvas.addEventListener("pointerup",this.up);this.canvas.addEventListener("pointercancel",this.up);this.canvas.addEventListener("keydown",this.key);this.draw();}
  get view():StageView{return this.viewMode;}
  display(loadout:CosmeticLoadout,look:StageLook={}):void{this.shown={...loadout};this.look={...look};this.draw();}
  setView(view:StageView):void{this.viewMode=view;this.draw();this.onView?.(view);}
  private draw():void{if(this.disposed)return;this.renderNative();const slot=this.canvas.closest(".lo")?.querySelector<HTMLElement>(".lo-tab.on")?.dataset.slot;const character=this.viewMode==="bunny"||this.viewMode==="ghost";let spec:PreviewSpec={kind:this.viewMode==="ghost"?"ghost":character?"bunny":"knife",key:this.look.ghost??"stage",knife:this.shown.knife,finish:this.shown.finish,glove:this.shown.glove,body:this.shown.body,outfit:this.look.outfit??undefined,hat:this.shown.hat,color:this.viewMode==="ghost"?color(this.look.ghost,"#ffc23d"):undefined,color2:this.viewMode==="ghost"?cosmetic(this.look.ghost)?.color2:undefined,veil:this.look.veil};
   if(slot==="glove")spec={...spec,kind:"glove"};if(slot==="hat")spec={...spec,kind:"hat"};if(slot==="finish")spec={...spec,kind:"knife",knife:"knife-carrot"};
-  const label=slot==="glove"?name(this.shown.glove,"Gloves"):slot==="hat"?name(this.shown.hat,"Hat"):character?name(this.look.outfit,"Bunny"):name(this.shown.knife,"Knife")+" · "+name(this.shown.finish,"Finish");this.canvas.setAttribute("aria-label",label+" authored native-rendered item preview");paint(this.canvas,spec,true);
+  const label=slot==="glove"?name(this.shown.glove,"Gloves"):slot==="hat"?name(this.shown.hat,"Hat"):character?name(this.look.outfit,"Bunny"):name(this.shown.knife,"Knife")+" · "+name(this.shown.finish,"Finish");this.canvas.setAttribute("aria-label",label+" authored native-rendered item preview");
+  // Close-up (web loadout-view.ts, the hands' categories): the same sample, framed closer.
+  const zoom=this.viewMode==="close"&&!character?CLOSE_UP_ZOOM:1;
+  paint(this.canvas,spec,true,zoom);
  }
  private drag:{id:number;x:number;y:number}|null=null;
  private down=(e:PointerEvent)=>{if(!nativePreviewAvailable()||e.button!==0)return;this.drag={id:e.pointerId,x:e.clientX,y:e.clientY};this.canvas.setPointerCapture(e.pointerId);e.preventDefault();};

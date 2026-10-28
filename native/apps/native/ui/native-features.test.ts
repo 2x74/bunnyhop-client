@@ -26,7 +26,9 @@ test("offline menu routes styles, native settings, replay controls, tutorials an
  await page.getByRole("button",{name:"Back",exact:true}).click();await page.getByRole("button",{name:"Learn to bhop",exact:true}).click();await page.getByRole("button",{name:"Start lesson",exact:true}).nth(2).click();expect(await page.evaluate(()=>(window as unknown as {messages:unknown[]}).messages.at(-1))).toEqual({type:"tutorial",action:"start",lesson:"speed"});
  await page.getByRole("button",{name:"Back",exact:true}).click();await page.getByRole("button",{name:"Profile",exact:true}).click();await page.getByRole("tab",{name:/^Colourway/}).click();await page.locator('.lo-tile[data-id="outfit-midnight"]').click();
  await page.waitForFunction(()=>(window as unknown as {messages:{type:string}[]}).messages.some(message=>message.type==="cosmetics"&&(message as {outfit?:string}).outfit==="outfit-midnight"));
- const graphics=await page.evaluate(()=>({gl:window.__nativeMenuGraphics,canvases:document.querySelectorAll("canvas").length}));expect(graphics.gl).toEqual({contexts:0,attempts:0});await page.locator("canvas.native-loadout-preview").waitFor();expect(await page.locator("canvas.native-loadout-preview").count()).toBe(1);expect(errors).toEqual([]);
+ const graphics=await page.evaluate(()=>({gl:window.__nativeMenuGraphics,canvases:document.querySelectorAll("canvas").length}));expect(graphics.gl).toEqual({contexts:0,attempts:0});await page.locator("canvas.native-loadout-preview").waitFor();expect(await page.locator("canvas.native-loadout-preview").count()).toBe(1);
+ // No host to animate it: Inspect shows, greyed.
+ expect(await page.locator(".lo-insp").evaluate(button=>getComputedStyle(button).pointerEvents)).toBe("none");expect(errors).toEqual([]);
  await page.getByRole("button",{name:"Back",exact:true}).click();await page.screenshot({path:resolve(import.meta.dir,"../../../target/native-menu/menu-features-offline.png")});
  }finally{await browser.close();}
 },15_000);
