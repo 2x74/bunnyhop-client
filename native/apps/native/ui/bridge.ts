@@ -22,6 +22,8 @@ export type MenuMessage =
   | {type:"cosmetics";outfit:string;packedLoadout:string;ghostId?:string;trailId?:string;playerGlow?:import("../../web/src/player/glow-config").PlayerGlow|null}
   | { type: "settings"; patch: Partial<NativeSettings> }
   | {type:"window";action:"center"|"minimize"|"maximize"|"toggleFullscreen"}
+  /** The HUD colours and element styles resolved from Custom CSS (custom-css/hud-theme.ts). */
+  | { type: "hudTheme"; theme: import("./custom-css/hud-theme").HudTheme }
   /** A system file dialog (native-files.ts); the answer is a bunnyhop:native-file event. */
   | {
       type: "file";

@@ -53,7 +53,7 @@ struct MenuState {
     }
 };
 std::string restricted_html(const std::string &source) {
-    const std::string policy = "<meta http-equiv='Content-Security-Policy' content=\"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: data:; font-src https://bunnyhop.lol data:; connect-src https://bunnyhop.lol wss://bunnyhop.lol; base-uri 'none'; frame-src 'none'; object-src 'none'; form-action 'none'\">";
+    const std::string policy = "<meta http-equiv='Content-Security-Policy' content=\"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: data: blob:; font-src https://bunnyhop.lol data: blob:; connect-src https://bunnyhop.lol wss://bunnyhop.lol; base-uri 'none'; frame-src 'none'; object-src 'none'; form-action 'none'\">";
     std::string lower = source;
     std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(g_ascii_tolower(c)); });
     auto head = lower.find("<head");

@@ -7,6 +7,7 @@ import {windowPanel} from "./window-panel";
 import { updatePanel } from "./update-panel";
 import { dataFolderPanel } from "./data-folder-panel";
 import { transferPanel } from "./settings-transfer-panel";
+import { customCssSection } from "./custom-css/section";
 import { h } from "../../web/src/ui/dom";
 import { ACTIONS, keyLabel } from "../../web/src/ui/settings";
 import { mouseCode } from "../../web/src/binds";
@@ -408,6 +409,7 @@ export function settingsPanel(initialSection?:string): HTMLElement {
     { id: "audio", title: "Audio", body: audio },
     { id: "keys", title: "Keys", body: keys },
     { id: "discord", title: "Discord", body: discord },
+    { id: "css", title: "Custom CSS", body: customCssSection(row, group) },
     { id: "transfer", title: "Import / export", body: transfer },
     { id: "data", title: "Game data", body: dataFolderPanel() },
     { id: "updates", title: "Updates", body: updatePanel() },

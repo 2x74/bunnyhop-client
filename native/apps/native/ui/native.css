@@ -168,6 +168,14 @@ html.native-clock-stopped *, html.native-clock-stopped *::before, html.native-cl
 .nset-row .num-input { width:6.5rem; }
 .nset-bind { display:flex;align-items:center;gap:.5rem; }
 .nset-bind .bind { min-width:7.2rem;max-width:12rem; }
+/* The Custom CSS editor (custom-css/editor.ts). */
+dialog.css-dialog { width:min(56rem,96vw); }
+.css-dialog .css-lead { margin:0 0 .4rem; }
+.css-text {
+  box-sizing:border-box;width:100%;min-height:52vh;padding:.6rem .7rem;
+  font-family:var(--mono,ui-monospace,monospace);font-size:.82rem;
+  white-space:pre;overflow-wrap:normal;tab-size:2;resize:vertical;
+}
 /* A row's buttons (Import / export, Custom CSS). */
 .nset-actions { display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:.5rem; }
 .nset-transfer-status[data-tone="ok"] { color:var(--gain); }

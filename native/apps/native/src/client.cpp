@@ -1354,6 +1354,8 @@ int run(const Options &opt) {
                 }
                 else if (type == "file")
                     menu_files.handle(window.get(), message);
+                else if (type == "hudTheme")
+                    hud.set_theme(native::parse_hud_theme(message.at("theme")));
                 else if(type=="replays")refresh_replays();
                 else if(type=="ghost"){ghost_enabled=ghost_handle&&message.at("enabled").get<bool>();ghost_slots[0].enabled=ghost_enabled;}
                 else if(type=="ghostControl"){

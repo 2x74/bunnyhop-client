@@ -142,7 +142,7 @@ struct MenuWebView::Impl {
             ComPtr<IStream> stream;stream.Attach(SHCreateMemStream(reinterpret_cast<const BYTE*>(body.data()),UINT(body.size())));
             ComPtr<ICoreWebView2WebResourceResponse> response;
             self->environment->CreateWebResourceResponse(stream.Get(),allowed?200:403,allowed?L"OK":L"Forbidden",
-                L"Content-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: data:; font-src https://bunnyhop.lol data:; connect-src https://bunnyhop.lol wss://bunnyhop.lol; base-uri 'none'; frame-src 'none'; object-src 'none'; form-action 'none'\r\n",&response);
+                L"Content-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: data: blob:; font-src https://bunnyhop.lol data: blob:; connect-src https://bunnyhop.lol wss://bunnyhop.lol; base-uri 'none'; frame-src 'none'; object-src 'none'; form-action 'none'\r\n",&response);
             return a->put_Response(response.Get());
         }).Get(),&token);
         menu->add_WebMessageReceived(Callback<ICoreWebView2WebMessageReceivedEventHandler>([life](ICoreWebView2 *view,ICoreWebView2WebMessageReceivedEventArgs*a)->HRESULT{

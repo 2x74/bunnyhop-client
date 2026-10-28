@@ -163,7 +163,7 @@ struct MenuWebView::Impl {
         // Local inline menu code is trusted; remote executable content and
         // frames cannot enter that document. Fetch uses normal HTTPS/CORS and
         // the real bunnyhop.lol origin established by baseURL (spike verified).
-        NSString *policy = @"<meta http-equiv='Content-Security-Policy' content=\"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: data:; font-src https://bunnyhop.lol data:; connect-src https://bunnyhop.lol wss://bunnyhop.lol; base-uri 'none'; frame-src 'none'; object-src 'none'; form-action 'none'\">";
+        NSString *policy = @"<meta http-equiv='Content-Security-Policy' content=\"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: data: blob:; font-src https://bunnyhop.lol data: blob:; connect-src https://bunnyhop.lol wss://bunnyhop.lol; base-uri 'none'; frame-src 'none'; object-src 'none'; form-action 'none'\">";
         // Keep the bundled doctype first so the menu stays in standards mode.
         NSRange head = [source rangeOfString:@"<head" options:NSCaseInsensitiveSearch];
         NSRange insertion = NSMakeRange(NSNotFound, 0);

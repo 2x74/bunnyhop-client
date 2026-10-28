@@ -56,6 +56,8 @@ import { practiceReason } from "../../web/src/practice";
 import { NativeGauntlet } from "./gauntlet-native";
 import { installNowPlaying } from "./music-now";
 import { leaveMapTeardown } from "./map-lifecycle";
+import { initCustomCss } from "./custom-css/custom-css";
+import { installHudTheme } from "./custom-css/hud-theme";
 
 import {installGamepadNavigation} from "./gamepad";
 import {maybeStartOnboarding,openOnboarding} from "./onboarding";
@@ -441,6 +443,8 @@ setGameInfo(()=>({inGame:!!state.map,client:"native",...(state.map?{map:state.ma
     ...(state.client.viewport[0]?{viewport:`${state.client.viewport[0]}x${state.client.viewport[1]}`}:{}),dpr:state.client.dpr}:{}),
   nativeSettings:{sensitivity:state.settings.sensitivity,fov:state.settings.fov,vsync:state.settings.vsync,fpsLimit:state.settings.fpsLimit}}));
 initSocial();initDock();initCosmetics();installNowPlaying();installNativeUiAudio();
+installHudTheme();
+initCustomCss();
 installMenuBackdrop();
 watchMenuMotion();
 render();
