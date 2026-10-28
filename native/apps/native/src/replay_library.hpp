@@ -1,5 +1,6 @@
 #pragma once
 #include "run_vault.hpp"
+#include "data_location.hpp"
 #include <condition_variable>
 #include <deque>
 #include <map>
@@ -13,6 +14,12 @@ class ReplayLibrary {
     struct Capture {
         std::string id;
         std::string map;
+
+        bool matches(const std::string &current_map, const std::string &recording_path) const {
+            if (map != current_map || recording_path.empty())
+                return false;
+            return id == data_location::utf8(data_location::from_utf8(recording_path).filename());
+        }
     };
     struct Update {
         std::optional<nlohmann::json> replays;

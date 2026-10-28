@@ -2062,7 +2062,7 @@ int run(const Options &opt) {
                 menu_state.replays_changed();
             }
             for (const auto &capture : update->captures) {
-                if (capture.map == map_id)
+                if (capture.matches(map_id, record_path))
                     pending_vault_capture = std::pair{capture.id, capture.map};
             }
             for (const auto &failure : update->errors) {

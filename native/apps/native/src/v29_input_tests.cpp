@@ -287,6 +287,11 @@ void test_replay_playback_range() {
 }
 
 void test_replay_library_cache() {
+    const native::ReplayLibrary::Capture capture{"finished.bhr", "fixture"};
+    assert(capture.matches("fixture", "/replays/finished.bhr"));
+    assert(!capture.matches("fixture", "/replays/next.bhr"));
+    assert(!capture.matches("next-map", "/replays/finished.bhr"));
+    assert(!capture.matches("fixture", ""));
     Fixture fixture;
     const auto source = fixture.record("source.bhr", true, true);
     const auto replays = fixture.directory / "replays";
