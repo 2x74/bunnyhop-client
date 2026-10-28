@@ -45,6 +45,8 @@
 #include "window_sdl.hpp"
 #include "window_mode_driver.hpp"
 #include "menu_scripts.hpp"
+#include "menu_files.hpp"
+#include "menu_messages.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
 #include <algorithm>
@@ -293,6 +295,7 @@ int run(const Options &opt) {
     native::Audio audio(assets,cache,!opt.hidden&&!opt.frames);
     std::unique_ptr<native::MenuWebView> menu;
     std::string menu_failure;
+    native::MenuFiles menu_files(cache);
     const bool wants_menu=!opt.no_menu && (!opt.frames || !opt.menu_smoke.empty());
     if(wants_menu) {
         menu=std::make_unique<native::MenuWebView>(window.get(),read_text(menu_path));
@@ -1214,7 +1217,7 @@ int run(const Options &opt) {
                 auto message=nlohmann::json::parse(raw);const auto type=message.at("type").get<std::string>();
                 if(type=="loadoutPreview") {if(menu->visible()&&raw.size()<=8192)preview_request=std::move(message);continue;}
                 if((video_capture||director_job||video_encoder.busy())&&type!="videoExport"&&type!="ready"&&type!="update"&&type!="audioCue"&&type!="music"&&type!="quit"){if(type=="settings")throw std::runtime_error("Finish or cancel video export before changing settings.");continue;}
-                const size_t limit=(type=="replayData"||type=="menuBackdrop")?12*1024*1024:(type=="roomSnapshot"||type=="roomEvent")?128*1024:16*1024;
+                const size_t limit = native::menu_message_limit(type);
                 if(raw.size()>limit)throw std::runtime_error("Menu command exceeds its type limit");
                 if (type == "ready") {
                     menu_ready = true;
@@ -1225,6 +1228,7 @@ int run(const Options &opt) {
                     run_event({{"type", "reset"}});
                     std::cout << "Native menu ready: " << raw << '\n';
                     menu_script.ready(menu.get());
+                    menu_files.menu_ready();
                 }
                 else if(type=="resume" && core && !download.valid()) show_menu(false);
                 else if(type=="prefetchMap"){
@@ -1348,6 +1352,8 @@ int run(const Options &opt) {
                     window_dirty = true;
                     window_save_due = Clock::now() + std::chrono::milliseconds(500);
                 }
+                else if (type == "file")
+                    menu_files.handle(window.get(), message);
                 else if(type=="replays")refresh_replays();
                 else if(type=="ghost"){ghost_enabled=ghost_handle&&message.at("enabled").get<bool>();ghost_slots[0].enabled=ghost_enabled;}
                 else if(type=="ghostControl"){
@@ -1886,6 +1892,11 @@ int run(const Options &opt) {
         if(opt.frames&&renderer&&(curr.tick>=opt.frames||(playback&&playback_paused&&curr.tick>=playback_info.value("totalTicks",0u)))&&!opt.screenshot.empty()) renderer->screenshot(opt.screenshot,width,height);
         const GLenum gl_error=gl.GetError(); if(gl_error!=GL_NO_ERROR) throw std::runtime_error("OpenGL error "+std::to_string(gl_error));
         if(!SDL_GL_SwapWindow(window.get())) throw std::runtime_error(std::string("Swapping framebuffer failed: ")+SDL_GetError());
+        // Answers from file dialogs and the watched Custom CSS file.
+        if (menu && menu_ready) {
+            for (const auto& script : menu_files.poll())
+                menu->evaluate_js(script);
+        }
         // State first: the menu accepts a backdrop only for its current or
         // requested map, so it must already know a newly loaded map. Scripts
         // run in the order they are queued.

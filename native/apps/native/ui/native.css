@@ -168,6 +168,10 @@ html.native-clock-stopped *, html.native-clock-stopped *::before, html.native-cl
 .nset-row .num-input { width:6.5rem; }
 .nset-bind { display:flex;align-items:center;gap:.5rem; }
 .nset-bind .bind { min-width:7.2rem;max-width:12rem; }
+/* A row's buttons (Import / export, Custom CSS). */
+.nset-actions { display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:.5rem; }
+.nset-transfer-status[data-tone="ok"] { color:var(--gain); }
+.nset-transfer-status[data-tone="bad"] { color:var(--loss); }
 .nset-foot { grid-column:2;display:flex;flex-direction:column;gap:.3rem;min-width:0; }
 .nset-help { margin:0;min-height:2.6em;padding:0 .85rem;font-family:var(--font-text);font-size:var(--fs-sm);line-height:1.3;color:var(--dim);display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden; }
 .nset-status { margin:0;padding:0 .85rem;font-size:var(--fs-sm);color:var(--amber); }
