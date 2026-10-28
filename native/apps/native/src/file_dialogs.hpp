@@ -1,5 +1,7 @@
 #pragma once
 #include <SDL3/SDL.h>
+#include "atomic_replace.hpp"
+#include <limits>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -18,7 +20,7 @@ namespace native {
 // stylesheet the host then watches). The host reads and writes the files; the
 // menu only gets their text and name and never supplies a path.
 
-constexpr std::uintmax_t kFileDialogMaxBytes = 1024 * 1024;
+constexpr std::uintmax_t file_dialog_max_bytes = 1024 * 1024;
 
 inline bool file_dialog_purpose(const std::string& purpose) {
     return purpose == "settings" || purpose == "css";
@@ -44,22 +46,23 @@ inline bool starts_with_utf8_bom(const std::string& text) {
 
 // The whole file as text. Throws a sentence for the player.
 inline std::string read_dialog_file(const std::filesystem::path& path,
-                                    std::uintmax_t limit = kFileDialogMaxBytes) {
+                                    std::uintmax_t limit = file_dialog_max_bytes) {
     std::error_code ec;
     if (!std::filesystem::is_regular_file(path, ec))
         throw std::runtime_error("That isn't a file.");
-    const auto size = std::filesystem::file_size(path, ec);
-    if (ec)
-        throw std::runtime_error("The file couldn't be read.");
-    if (size > limit)
-        throw std::runtime_error("The file is larger than " + std::to_string(limit / 1024) + " KB.");
-
     std::ifstream in(path, std::ios::binary);
     if (!in)
         throw std::runtime_error("The file couldn't be opened.");
-    std::ostringstream buffer;
-    buffer << in.rdbuf();
-    auto text = buffer.str();
+    if (limit >= static_cast<std::uintmax_t>(std::numeric_limits<std::streamsize>::max()))
+        throw std::runtime_error("Invalid file read limit.");
+    std::string text(static_cast<size_t>(limit) + 1, '\0');
+    in.read(text.data(), static_cast<std::streamsize>(text.size()));
+    const auto count = in.gcount();
+    if (in.bad() || (in.fail() && !in.eof()))
+        throw std::runtime_error("The file couldn't be read.");
+    if (static_cast<std::uintmax_t>(count) > limit)
+        throw std::runtime_error("The file is too large.");
+    text.resize(static_cast<size_t>(count));
     if (starts_with_utf8_bom(text))
         text.erase(0, 3);
     if (text.find('\0') != std::string::npos)
@@ -70,32 +73,9 @@ inline std::string read_dialog_file(const std::filesystem::path& path,
 // Written beside the target and renamed over it, so a failed write never
 // leaves half a file.
 inline void write_dialog_file(const std::filesystem::path& path, const std::string& text) {
-    if (text.size() > kFileDialogMaxBytes)
+    if (text.size() > file_dialog_max_bytes)
         throw std::runtime_error("Too much to save.");
-    auto partial = path;
-    partial += ".partial";
-    {
-        std::ofstream out(partial, std::ios::binary | std::ios::trunc);
-        if (!out)
-            throw std::runtime_error("The file couldn't be created there.");
-        out << text;
-        out.close();
-        if (!out)
-            throw std::runtime_error("The file couldn't be written.");
-    }
-    std::error_code ec;
-    std::filesystem::rename(partial, path, ec);
-    if (ec) {
-        // Windows won't rename over an existing file.
-        ec.clear();
-        std::filesystem::remove(path, ec);
-        ec.clear();
-        std::filesystem::rename(partial, path, ec);
-    }
-    if (ec) {
-        std::filesystem::remove(partial, ec);
-        throw std::runtime_error("The file couldn't be replaced.");
-    }
+    atomic_write_file(path, text);
 }
 
 struct FileDialogResult {
@@ -106,12 +86,16 @@ struct FileDialogResult {
     bool cancelled = false;
     std::filesystem::path path;
     std::string error;
+    std::string text;
 };
 
 // One file dialog at a time. SDL answers on its own schedule, possibly on
 // another thread, so the answer lands in process-lifetime shared state.
 class FileDialogs {
 public:
+    using Launcher = void (*)(SDL_DialogFileCallback, void*);
+    explicit FileDialogs(Launcher launcher = nullptr) : launcher_(launcher) {}
+
     bool busy() const {
         auto& shared = state();
         std::lock_guard lock(shared.mutex);
@@ -120,16 +104,21 @@ public:
 
     // action "open" or "save"; `start` is a folder, or for save a suggested file.
     bool show(SDL_Window* window, const std::string& action, const std::string& purpose,
-              const std::string& id, const std::filesystem::path& start) {
+              const std::string& id, const std::filesystem::path& start, std::string text = {}) {
         if (!file_dialog_purpose(purpose) || (action != "open" && action != "save"))
             return false;
         auto& shared = state();
         {
             std::lock_guard lock(shared.mutex);
-            if (shared.open)
+            if (shared.open || shared.done)
                 return false;
             shared.open = true;
             shared.asked = FileDialogResult{id, purpose, action};
+            shared.asked.text = std::move(text);
+        }
+        if (launcher_) {
+            launcher_(&answered, nullptr);
+            return true;
         }
         const auto location = utf8_path(start);
         const char* from = location.empty() ? nullptr : location.c_str();
@@ -150,6 +139,7 @@ public:
     }
 
 private:
+    Launcher launcher_;
     struct State {
         std::mutex mutex;
         bool open = false;

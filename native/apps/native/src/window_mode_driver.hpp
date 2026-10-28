@@ -9,9 +9,10 @@ namespace native {
 
 // Applies WindowModePolicy to the SDL window for client.cpp: launch, the Esc
 // menu, focus and minimize events, settings changes and Alt+Enter.
-class WindowModeDriver {
+template<class Controller>
+class BasicWindowModeDriver {
 public:
-    WindowModeDriver(WindowController& controller, const std::string& chosen)
+    BasicWindowModeDriver(Controller& controller, const std::string& chosen)
         : controller_(controller), policy_(chosen) {}
 
     const WindowModePolicy& policy() const {
@@ -32,7 +33,7 @@ public:
     void sync(const WindowJson& preferences) {
         if (!policy_.request())
             return;
-        const auto want = policy_.effective(preferences);
+        const WindowJson want = policy_.effective(preferences);
         if (controller_.mode() == want.at("windowMode").get<std::string>())
             return;
         if (!controller_.apply(want))
@@ -43,8 +44,10 @@ public:
     // waits until the window has focus again.
     void set_menu(bool open, bool from_focus_loss, const WindowJson& preferences) {
         policy_.menu_open = open;
-        if (from_focus_loss)
+        if (from_focus_loss) {
+            policy_.waiting_for_focus = true;
             policy_.pending = true;
+        }
         else
             sync(preferences);
     }
@@ -61,6 +64,10 @@ public:
     void resumed(const WindowJson& preferences) {
         if (policy_.resume())
             sync(preferences);
+        if (pending_refit_) {
+            pending_refit_ = false;
+            controller_.refit();
+        }
     }
 
     // `preferences` with its windowMode applied (a settings change). The result
@@ -68,6 +75,10 @@ public:
     std::optional<WindowJson> choose(const WindowJson& preferences) {
         auto next = policy_;
         next.choose(preferences.value("windowMode", std::string("windowed")));
+        if (!next.request()) {
+            policy_ = next;
+            return preferences;
+        }
         if (!controller_.apply(next.effective(preferences)))
             return std::nullopt;
         policy_ = next;
@@ -82,12 +93,19 @@ public:
 
     // Windows borderless follows its display after a resolution, scale or monitor change.
     void display_changed() {
+        if (policy_.minimized || policy_.waiting_for_focus) {
+            pending_refit_ = true;
+            return;
+        }
         controller_.refit();
     }
 
 private:
-    WindowController& controller_;
+    Controller& controller_;
+    bool pending_refit_ = false;
     WindowModePolicy policy_;
 };
+
+using WindowModeDriver = BasicWindowModeDriver<WindowController>;
 
 }

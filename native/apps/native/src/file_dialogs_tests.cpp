@@ -1,5 +1,6 @@
 #include "file_dialogs.hpp"
 #include "menu_files.hpp"
+#include "window_mode_driver.hpp"
 #include <cassert>
 #include <filesystem>
 #include <fstream>
@@ -16,13 +17,44 @@ void write_raw(const fs::path& path, const std::string& bytes) {
     out << bytes;
 }
 
-bool throws(const fs::path& path, std::uintmax_t limit = native::kFileDialogMaxBytes) {
+bool throws(const fs::path& path, std::uintmax_t limit = native::file_dialog_max_bytes) {
     try {
         native::read_dialog_file(path, limit);
     } catch (const std::exception&) {
         return true;
     }
     return false;
+}
+
+struct FakeWindow {
+    std::string shown = "borderless";
+    int applies = 0;
+    int refits = 0;
+    bool apply(const native::WindowJson& settings, bool = false,
+               const std::optional<native::WindowBounds>& = std::nullopt) {
+        shown = settings.at("windowMode");
+        ++applies;
+        return true;
+    }
+    std::string mode() const { return shown; }
+    std::string error() const { return {}; }
+    void refit() { ++refits; }
+};
+
+void deferred_window_changes() {
+    FakeWindow window;
+    native::BasicWindowModeDriver<FakeWindow> driver(window, "borderless");
+    driver.minimized();
+    driver.display_changed();
+    assert(driver.choose({{"windowMode", "windowed"}}));
+    assert(window.applies == 0 && window.refits == 0);
+    driver.resumed({{"windowMode", "windowed"}});
+    assert(window.applies == 1 && window.refits == 1 && window.shown == "windowed");
+    driver.set_menu(true, true, {});
+    assert(driver.choose({{"windowMode", "fullscreen"}}));
+    assert(window.applies == 1);
+    driver.resumed({{"windowMode", "fullscreen"}});
+    assert(window.shown == "borderless" && window.applies == 2);
 }
 
 void read_and_write(const fs::path& dir) {
@@ -44,6 +76,17 @@ void read_and_write(const fs::path& dir) {
     assert(throws(dir / "missing.json"));
     assert(throws(dir));
     assert(native::file_display_name(dir / "theme.css") == "theme.css");
+    const auto blocked = dir / "destination";
+    fs::create_directory(blocked);
+    write_raw(blocked / "original", "keep");
+    try {
+        native::write_dialog_file(blocked, "replacement");
+        assert(false);
+    } catch (const std::exception&) {
+        assert(native::read_dialog_file(blocked / "original") == "keep");
+    }
+    for (const auto& entry : fs::directory_iterator(dir))
+        assert(entry.path().filename().string().find(".partial-") == std::string::npos);
     assert(native::file_dialog_purpose("settings"));
     assert(native::file_dialog_purpose("css"));
     assert(!native::file_dialog_purpose("replay"));
@@ -95,6 +138,24 @@ bool answered(native::MenuFiles& files, const std::string& needle) {
     return false;
 }
 
+SDL_DialogFileCallback dialog_answer;
+void hold_dialog(SDL_DialogFileCallback answer, void*) {
+    dialog_answer = answer;
+}
+
+void accepted_save(const fs::path& dir) {
+    const auto destination = native::utf8_path(dir / "accepted.json");
+    {
+        native::MenuFiles files(dir, hold_dialog);
+        files.handle(nullptr, {{"action", "save"}, {"purpose", "settings"}, {"id", "accepted"}, {"text", "first"}});
+        files.handle(nullptr, {{"action", "save"}, {"purpose", "settings"}, {"id", "rejected"}, {"text", "second"}});
+        const char* selected[] = {destination.c_str(), nullptr};
+        dialog_answer(nullptr, selected, 0);
+        // Shutdown must collect the dialog answer and drain its write without a frame poll.
+    }
+    assert(native::read_dialog_file(native::path_from_utf8(destination)) == "first");
+}
+
 void menu_files(const fs::path& dir) {
     const std::string dated = "bunnyhop-settings-2026-10-28.json";
     assert(native::MenuFiles::suggested_name(dated) == dated);
@@ -113,7 +174,7 @@ void menu_files(const fs::path& dir) {
     // A watched file from the last launch is sent to the reloaded menu, then its saves.
     const auto css = dir / "mine.css";
     write_raw(css, "body{color:red}");
-    native::write_dialog_file(data / "custom-css-file.json", "{\"path\":\"" + native::utf8_path(css) + "\"}");
+    native::write_dialog_file(data / "custom-css-file.json", nlohmann::json({{"path", native::utf8_path(css)}}).dump());
     native::MenuFiles files(data);
     files.menu_ready();
     assert(answered(files, "color:red"));
@@ -130,8 +191,15 @@ int main() {
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto dir = fs::temp_directory_path() / ("bunnyhop-file-dialog-tests-" + std::to_string(stamp));
     fs::create_directories(dir);
+    deferred_window_changes();
     read_and_write(dir);
     css_watch(dir);
     menu_files(dir);
+    accepted_save(dir);
+    {
+        native::MenuFiles files(dir / "data");
+        files.handle(nullptr, {{"action", "unwatch"}, {"purpose", "css"}});
+    }
+    assert(native::read_dialog_file(dir / "data" / "custom-css-file.json") == "{\"path\":null}");
     fs::remove_all(dir);
 }

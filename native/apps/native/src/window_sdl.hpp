@@ -55,8 +55,12 @@ public:
   const bool remember = settings.value("rememberWindowBounds", true);
   // Launching into borderless/fullscreen: place the window at its saved bounds
   // first, so it fills the display it was last on and returns there when windowed.
-  if (restore && saved && remember && requested != "windowed" && old == "windowed")
-      restore_bounds(*saved);
+  if (restore && saved && remember && requested != "windowed" && old == "windowed") {
+      if (!restore_bounds(*saved) || !SDL_SyncWindow(window_)) {
+          error_ = SDL_GetError();
+          return false;
+      }
+  }
   const bool changed=old!=requested;bool ok=true;if(changed)ok=set_mode(requested);if(ok&&changed)ok=SDL_SyncWindow(window_);
   if(ok)ok=SDL_SetWindowAlwaysOnTop(window_,settings.value("alwaysOnTop",false));
   // Back to windowed: this session's last windowed bounds (saved ones only when

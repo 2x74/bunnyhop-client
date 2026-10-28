@@ -23,12 +23,14 @@ namespace native {
 // custom-css-file.json in the data folder.
 class MenuFiles {
 public:
-    explicit MenuFiles(const std::filesystem::path& data) : state_file_(data / "custom-css-file.json") {
+    explicit MenuFiles(const std::filesystem::path& data, FileDialogs::Launcher launcher = nullptr)
+        : dialogs_(launcher), state_file_(data / "custom-css-file.json") {
         worker_ = std::thread([this] { work(); });
         queue({Job::Kind::load_watch});
     }
 
     ~MenuFiles() {
+        collect_dialog();
         {
             std::lock_guard lock(mutex_);
             stopping_ = true;
@@ -59,11 +61,14 @@ public:
             throw std::runtime_error("Only settings are saved to a file");
 
         auto start = documents_folder();
+        std::string saving;
         if (action == "save") {
             start /= suggested_name(message.value("name", std::string()));
-            saving_ = message.at("text").get<std::string>();
+            saving = message.at("text").get<std::string>();
+            if (saving.size() > file_dialog_max_bytes)
+                throw std::runtime_error("Too much to save.");
         }
-        if (!dialogs_.show(window, action, purpose, id, start))
+        if (!dialogs_.show(window, action, purpose, id, start, std::move(saving)))
             push(failure({id, purpose, action}, "A file dialog is already open."));
     }
 
@@ -74,8 +79,7 @@ public:
 
     // Scripts to evaluate in the menu. Cheap: once a frame is fine.
     std::vector<std::string> poll() {
-        if (auto result = dialogs_.take())
-            queue({Job::Kind::finish, std::move(*result), std::exchange(saving_, {})});
+        collect_dialog();
         std::lock_guard lock(mutex_);
         std::vector<std::string> out;
         out.swap(outbox_);
@@ -100,7 +104,12 @@ private:
 
     FileDialogs dialogs_;
     std::filesystem::path state_file_;
-    std::string saving_;
+    void collect_dialog() {
+        if (auto result = dialogs_.take()) {
+            auto text = std::move(result->text);
+            queue({Job::Kind::finish, std::move(*result), std::move(text)});
+        }
+    }
 
     // Shared with the worker.
     std::mutex mutex_;
@@ -149,15 +158,17 @@ private:
 
     void work() {
         std::unique_lock lock(mutex_);
-        while (!stopping_) {
+        while (true) {
             wake_.wait_for(lock, CssFileWatch::kCheckInterval, [this] { return stopping_ || !jobs_.empty(); });
-            while (!jobs_.empty() && !stopping_) {
+            while (!jobs_.empty()) {
                 auto job = std::move(jobs_.front());
                 jobs_.pop_front();
                 lock.unlock();
                 run_job(job);
                 lock.lock();
             }
+            if (stopping_)
+                return;
             lock.unlock();
             check_css(false);
             lock.lock();

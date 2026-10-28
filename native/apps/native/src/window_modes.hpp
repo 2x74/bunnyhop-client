@@ -22,6 +22,7 @@ struct WindowModePolicy {
     bool menu_open = false;
     bool minimized = false;
     bool pending = false;
+    bool waiting_for_focus = false;
 
     explicit WindowModePolicy(const std::string& mode = "windowed") {
         choose(mode);
@@ -56,13 +57,14 @@ struct WindowModePolicy {
     // A change to what is shown: true when it may be applied now, false when
     // it waits for the window to come back.
     bool request() {
-        pending = minimized;
-        return !minimized;
+        pending = minimized || waiting_for_focus;
+        return !pending;
     }
 
     // Focus gained or window restored: true when a waiting change should apply.
     bool resume() {
         minimized = false;
+        waiting_for_focus = false;
         const bool waiting = pending;
         pending = false;
         return waiting;

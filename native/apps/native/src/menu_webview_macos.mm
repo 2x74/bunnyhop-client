@@ -253,7 +253,7 @@ void MenuWebView::set_visible(bool show) {
     impl_->auth_container.hidden = YES;
 }
 bool MenuWebView::has_keyboard_focus() const {
-    return impl_->shown && impl_->window && impl_->owns(impl_->window.firstResponder);
+    return impl_->shown && impl_->window.isKeyWindow && impl_->owns(impl_->window.firstResponder);
 }
 std::vector<std::string> MenuWebView::drain_messages() {
     std::vector<std::string> messages; messages.swap(impl_->state->messages); return messages;
