@@ -7,7 +7,13 @@ import { hostSettings, nativeView, pullHost, type HostSettings } from "./prefs-b
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
 test("announcer and granular channel settings validate atomically", () => {
-  for (const invalid of [{ speedThreshold: 0 }, { streakThreshold: 2.5 }, { volume: Infinity }, { wr: "file:///tmp/sound.wav" }, { evil: true }]) {
+  for (const invalid of [
+    { speedThreshold: 0 },
+    { streakThreshold: 2.5 },
+    { volume: Infinity },
+    { wr: "file:///tmp/sound.wav" },
+    { evil: true },
+  ]) {
     expect(announcerPatch(invalid, DEFAULT_ANNOUNCER)).toBeNull();
   }
   expect(settingsPatch({ ambienceVolume: 2, announcer: { streakThreshold: 1 } })).toEqual({});
@@ -20,8 +26,16 @@ test("the website's audio settings are the native buses, mutes and announcer", (
   prefs.audio.announcer = { ...prefs.audio.announcer, enabled: true, highSpeedThreshold: 3200 };
   const native = nativeView(prefs, hostSettings());
   expect(native).toMatchObject({
-    sfxVolume: 0.3, ambienceVolume: 0.4, classicSounds: true, perfectTick: true, muteSfx: true, muteUi: true,
-    muteAmbience: true, muteMusic: true, muteInBackground: false, announcer: { enabled: true, highSpeedThreshold: 3200 },
+    sfxVolume: 0.3,
+    ambienceVolume: 0.4,
+    classicSounds: true,
+    perfectTick: true,
+    muteSfx: true,
+    muteUi: true,
+    muteAmbience: true,
+    muteMusic: true,
+    muteInBackground: false,
+    announcer: { enabled: true, highSpeedThreshold: 3200 },
   });
   const back = clone(DEFAULT_PREFS);
   pullHost(back, { ...hostSettings(), ...native } as HostSettings);

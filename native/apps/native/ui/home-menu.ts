@@ -58,7 +58,12 @@ export const LAST_MAP = "bunnyhop:last-map";
 /** The web's Support icon (ui/support.ts SUPPORT_ICON). */
 const SUPPORT_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true" width="1.1em" height="1.1em"><path d="M4.5 10.5h11v4.2a4.8 4.8 0 0 1-4.8 4.8H9.3a4.8 4.8 0 0 1-4.8-4.8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M15.5 11.8h1.3a2.3 2.3 0 0 1 0 4.6h-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M10 8.6c-1.7-1.1-2.8-2-2.8-3.2a1.5 1.5 0 0 1 2.8-.7 1.5 1.5 0 0 1 2.8.7c0 1.2-1.1 2.1-2.8 3.2z" fill="currentColor"/></svg>`;
 
-function item(label: string, sub: string | HTMLElement | null, fn: () => void, o: { primary?: boolean; hint?: string } = {}): HTMLElement {
+function item(
+  label: string,
+  sub: string | HTMLElement | null,
+  fn: () => void,
+  o: { primary?: boolean; hint?: string } = {},
+): HTMLElement {
   return h(
     `button.menu-btn.home-item${o.primary ? ".primary" : ""}`,
     { type: "button", onclick: fn, "data-autofocus": o.primary ? "" : undefined },
@@ -77,26 +82,48 @@ function mapsToTry(a: HomeActions, onFirst: (name: string) => void): HTMLElement
   const grid = h("div.home-grid", { role: "group", "aria-label": "Maps to try" });
   void (async () => {
     let serverClears: string[] | null = null;
-    const profile = myProfile().then((p) => void (serverClears = p?.stats.clearedMaps ?? null)).catch(() => {});
+    const profile = myProfile()
+      .then((p) => void (serverClears = p?.stats.clearedMaps ?? null))
+      .catch(() => {});
     const [pick, maps] = await Promise.all([backgroundPick().catch(() => null), fetchMapIndex()]);
     const pbRun = pick?.pbReplay ? getPB(pick.map.name, "autohop") : null;
-    a.background?.(pick?.map.name ?? null, pick?.pbReplay ? { runId: pbRun && "runId" in pbRun && typeof pbRun.runId === "string" ? pbRun.runId : "local-pb", bytes: pick.pbReplay } : null);
+    a.background?.(
+      pick?.map.name ?? null,
+      pick?.pbReplay
+        ? {
+            runId: pbRun && "runId" in pbRun && typeof pbRun.runId === "string" ? pbRun.runId : "local-pb",
+            bytes: pick.pbReplay,
+          }
+        : null,
+    );
     if (!maps.length) return markFeaturedArtReady();
     const online = await Promise.race([onlineMaps(STYLE), new Promise<null>((r) => setTimeout(() => r(null), 1500))]);
     const byName = new Map(maps.map((m) => [m.name, m]));
     const pool = maps.filter((m) => !online || online.get(m.name)?.ranked);
     const choose = (first: string | null | undefined): string[] => {
       const names: string[] = [];
-      const add = (n: string | null | undefined) => n && byName.has(n) && !names.includes(n) && names.length < TILES && names.push(n);
+      const add = (n: string | null | undefined) =>
+        n && byName.has(n) && !names.includes(n) && names.length < TILES && names.push(n);
       add(first);
       const cleared = new Set(maps.filter((m) => STYLE_DEFS.some((d) => getPB(m.name, d.id))).map((m) => m.name));
       for (const m of serverClears ?? []) cleared.add(m);
-      const next = suggestNextMaps(pool.map((m) => ({ name: m.name, tier: tierOf(m, online?.get(m.name)) })), cleared, TILES);
+      const next = suggestNextMaps(
+        pool.map((m) => ({ name: m.name, tier: tierOf(m, online?.get(m.name)) })),
+        cleared,
+        TILES,
+      );
       for (const x of next) add(x.map);
-      const around = clampTier(next[0]?.tier ?? tierOf(byName.get(names[0] ?? "") ?? { name: "" }, online?.get(names[0] ?? "")) ?? 1) ?? 1;
+      const around =
+        clampTier(
+          next[0]?.tier ?? tierOf(byName.get(names[0] ?? "") ?? { name: "" }, online?.get(names[0] ?? "")) ?? 1,
+        ) ?? 1;
       const popular = [...pool]
         .filter((m) => Math.abs((tierOf(m, online?.get(m.name)) ?? 9) - around) <= 1)
-        .sort((x, y) => Number(cleared.has(x.name)) - Number(cleared.has(y.name)) || (online?.get(y.name)?.runners ?? 0) - (online?.get(x.name)?.runners ?? 0));
+        .sort(
+          (x, y) =>
+            Number(cleared.has(x.name)) - Number(cleared.has(y.name)) ||
+            (online?.get(y.name)?.runners ?? 0) - (online?.get(x.name)?.runners ?? 0),
+        );
       for (const m of popular) add(m.name);
       return names;
     };
@@ -109,7 +136,20 @@ function mapsToTry(a: HomeActions, onFirst: (name: string) => void): HTMLElement
       const i = tiles.indexOf(document.activeElement as HTMLElement);
       if (i < 0) return;
       const left = i % 2 === 0;
-      const j = e.key === "ArrowRight" ? (left ? i + 1 : null) : e.key === "ArrowLeft" ? (left ? "menu" : i - 1) : e.key === "ArrowDown" ? i + 2 : e.key === "ArrowUp" ? i - 2 : null;
+      const j =
+        e.key === "ArrowRight"
+          ? left
+            ? i + 1
+            : null
+          : e.key === "ArrowLeft"
+            ? left
+              ? "menu"
+              : i - 1
+            : e.key === "ArrowDown"
+              ? i + 2
+              : e.key === "ArrowUp"
+                ? i - 2
+                : null;
       if (j === null) return;
       e.preventDefault();
       e.stopPropagation();
@@ -118,14 +158,17 @@ function mapsToTry(a: HomeActions, onFirst: (name: string) => void): HTMLElement
     });
     const observe = () =>
       void featuredArtReady(2500).then(() => {
-        const go = (n: number) => (grid.isConnected ? observeThumbs(grid) : n && requestAnimationFrame(() => go(n - 1)));
+        const go = (n: number) =>
+          grid.isConnected ? observeThumbs(grid) : n && requestAnimationFrame(() => go(n - 1));
         go(120);
       });
     observe();
     await profile;
     if (!grid.isConnected) return;
     const drawn = tiles;
-    tiles = choose(names[0]).map((n, i) => (drawn[i]?.dataset.name === n ? drawn[i] : mapTile(a, byName.get(n)!, online?.get(n) ?? null, false)));
+    tiles = choose(names[0]).map((n, i) =>
+      drawn[i]?.dataset.name === n ? drawn[i] : mapTile(a, byName.get(n)!, online?.get(n) ?? null, false),
+    );
     if (tiles.every((t, i) => t === drawn[i]) && tiles.length === drawn.length) return;
     tiles.forEach((t, i) => t !== drawn[i] && (drawn[i] ? drawn[i].replaceWith(t) : grid.append(t)));
     for (const t of drawn.slice(tiles.length)) t.remove();
@@ -135,7 +178,11 @@ function mapsToTry(a: HomeActions, onFirst: (name: string) => void): HTMLElement
 }
 
 function mapTile(a: HomeActions, m: MapEntry, o: MapSummary | null, first: boolean): HTMLElement {
-  const art = mapArt(m.name, o?.thumbnailUrl ?? m.thumbnail ?? null, { className: "home-tile-art", eager: first, priority: first });
+  const art = mapArt(m.name, o?.thumbnailUrl ?? m.thumbnail ?? null, {
+    className: "home-tile-art",
+    eager: first,
+    priority: first,
+  });
   if (first) {
     art.addEventListener("load", markFeaturedArtReady, { capture: true, once: true });
     art.addEventListener("error", markFeaturedArtReady, { capture: true, once: true });
@@ -157,11 +204,27 @@ function mapTile(a: HomeActions, m: MapEntry, o: MapSummary | null, first: boole
     h(
       "span.home-tile-text",
       null,
-      h("span.home-tile-name", null, h("b", null, m.name), h(`span.home-tile-tier.${t ? `t${t}` : "tx"}`, { title: t ? `Tier ${tierNum(t)}, ${tierName(t)}` : "Unrated" }, tierLabel(t))),
+      h(
+        "span.home-tile-name",
+        null,
+        h("b", null, m.name),
+        h(
+          `span.home-tile-tier.${t ? `t${t}` : "tx"}`,
+          { title: t ? `Tier ${tierNum(t)}, ${tierName(t)}` : "Unrated" },
+          tierLabel(t),
+        ),
+      ),
       h(
         "span.home-tile-times",
         null,
-        o?.wr ? h("span", { title: `World record by ${o.wr.player}` }, h("small", null, "WR"), h("b.wr", null, formatTime(o.wr.time))) : null,
+        o?.wr
+          ? h(
+              "span",
+              { title: `World record by ${o.wr.player}` },
+              h("small", null, "WR"),
+              h("b.wr", null, formatTime(o.wr.time)),
+            )
+          : null,
         personal,
       ),
     ),
@@ -201,7 +264,15 @@ function weeklySub(): HTMLElement {
 
 /** Profile (card, loadout, runs); a guest without an account yet gets the Loadout. */
 function profileItem(a: HomeActions): HTMLElement {
-  return item("Profile", null, () => void me().then((u) => (u ? a.profile(u.id) : a.loadout()), () => a.loadout()));
+  return item(
+    "Profile",
+    null,
+    () =>
+      void me().then(
+        (u) => (u ? a.profile(u.id) : a.loadout()),
+        () => a.loadout(),
+      ),
+  );
 }
 
 // The website's tagline says "in your browser"; this is the native game.
@@ -210,12 +281,24 @@ const TAGLINE = "Counter-Strike: Source bunnyhop.";
 /** The footer's three things people come back for: Support, the Discord and the Inbox, as real buttons. */
 function homeActs(a: HomeActions): HTMLElement {
   const inbox = api.available()
-    ? withInboxBadge(h("button.home-act.act-inbox", { type: "button", onclick: () => openInbox() }, icon("mail", { size: "1.15rem" }), h("span.mb-title", null, "Inbox")), "Inbox")
+    ? withInboxBadge(
+        h(
+          "button.home-act.act-inbox",
+          { type: "button", onclick: () => openInbox() },
+          icon("mail", { size: "1.15rem" }),
+          h("span.mb-title", null, "Inbox"),
+        ),
+        "Inbox",
+      )
     : null;
   return h(
     "div.home-acts",
     null,
-    h("button.home-act.act-support", { type: "button", onclick: () => a.web("/?support"), html: `${SUPPORT_ICON}<span>Support</span>` }),
+    h("button.home-act.act-support", {
+      type: "button",
+      onclick: () => a.web("/?support"),
+      html: `${SUPPORT_ICON}<span>Support</span>`,
+    }),
     discordLink("home-act.act-discord", "Discord"),
     inbox,
   );
@@ -223,7 +306,8 @@ function homeActs(a: HomeActions): HTMLElement {
 
 /** Everything else, as quiet text under them (the web's row; Replays, Credits and Quit are the native client's own). */
 function homeLinks(a: HomeActions, learnOnMenu: boolean): HTMLElement {
-  const link = (label: string, fn: () => void, cls = "") => h(`button.home-link${cls}`, { type: "button", onclick: fn }, label);
+  const link = (label: string, fn: () => void, cls = "") =>
+    h(`button.home-link${cls}`, { type: "button", onclick: fn }, label);
   return h(
     "div.home-links",
     null,
@@ -268,7 +352,13 @@ export function homeScreen(a: HomeActions): HTMLElement {
     learn ? item("Learn to bhop", /lessons done|Finished/.test(learnSub) ? learnSub : null, a.learn) : null,
     item("Play online", api.available() ? onlineSummary() : null, a.servers),
     api.available() ? item("Gauntlets", weeklySub(), a.gauntlets ?? (() => a.web("/gauntlets"))) : null,
-    last ? item("Continue", h("span.cont-sub", null, h("b", null, last), lastPB ? h("span", null, formatTime(lastPB.time)) : null), () => a.pick(last)) : null,
+    last
+      ? item(
+          "Continue",
+          h("span.cont-sub", null, h("b", null, last), lastPB ? h("span", null, formatTime(lastPB.time)) : null),
+          () => a.pick(last),
+        )
+      : null,
     api.available() ? profileItem(a) : item("Loadout", null, a.loadout),
     api.available() ? item("Ranks", null, a.ranks) : null,
     item("Stats", null, a.stats),
@@ -277,17 +367,33 @@ export function homeScreen(a: HomeActions): HTMLElement {
   arrowNav(menu, "button");
   menu.classList.add("hop-host");
   hopIndicator(menu, ".home-item", { inset: 4, rest: () => menu.querySelector<HTMLElement>(".home-item.primary") });
-  const right = h("aside.home-right", null, mapsToTry(a, (n) => (plateMap = n)));
-  menu.addEventListener("keydown", (e) => {
-    if (e.key !== "ArrowRight" || !(document.activeElement as HTMLElement)?.closest(".home-menu")) return;
-    const t = right.querySelector<HTMLElement>("button:not([disabled]):not([hidden])");
-    if (t) (e.preventDefault(), e.stopPropagation(), t.focus());
-  }, { capture: true });
+  const right = h(
+    "aside.home-right",
+    null,
+    mapsToTry(a, (n) => (plateMap = n)),
+  );
+  menu.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.key !== "ArrowRight" || !(document.activeElement as HTMLElement)?.closest(".home-menu")) return;
+      const t = right.querySelector<HTMLElement>("button:not([disabled]):not([hidden])");
+      if (t) (e.preventDefault(), e.stopPropagation(), t.focus());
+    },
+    { capture: true },
+  );
   void fetchMapIndex().then((maps) =>
-    setTimeout(() => void onlineMaps().then((online) => {
-      prefetchThumbs([...maps].sort((x, y) => Number(y.name === last) - Number(x.name === last)).map((m) => online?.get(m.name)?.thumbnailUrl ?? m.thumbnail));
-      prewarmMapRows(maps);
-    }), 1500),
+    setTimeout(
+      () =>
+        void onlineMaps().then((online) => {
+          prefetchThumbs(
+            [...maps]
+              .sort((x, y) => Number(y.name === last) - Number(x.name === last))
+              .map((m) => online?.get(m.name)?.thumbnailUrl ?? m.thumbnail),
+          );
+          prewarmMapRows(maps);
+        }),
+      1500,
+    ),
   );
   return h(
     "section.home",
@@ -297,7 +403,12 @@ export function homeScreen(a: HomeActions): HTMLElement {
       null,
       h("header.home-brand", null, h("div.brand-row", null, wordmark("xl"), hopTrail()), h("p.tagline", null, TAGLINE)),
       menu,
-      h("footer.home-foot", null, h("div.home-foot-row", null, accountChip({ quiet: true }), homeActs(a)), homeLinks(a, learn)),
+      h(
+        "footer.home-foot",
+        null,
+        h("div.home-foot-row", null, accountChip({ quiet: true }), homeActs(a)),
+        homeLinks(a, learn),
+      ),
     ),
     right,
   );

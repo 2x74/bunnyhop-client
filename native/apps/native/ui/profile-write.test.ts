@@ -1,6 +1,54 @@
-import {test,expect} from "bun:test";
-import {captureProfileWrite} from "../../web/src/ui/profile-write";
-test("profile write fence rejects stale queued dispatch without invoking fetch",async()=>{let generation=0,owner="alice",fetches=0;const gate=captureProfileWrite("alice",{generation:()=>generation,owner:()=>owner});generation++;owner="bob";await expect(gate(async()=>{fetches++;return new Response("{}");})).rejects.toThrow("Account changed");expect(fetches).toBe(0);expect(gate.current()).toBe(false);});
-test("profile write fence rejects replies after account switch before API side effects",async()=>{let generation=0;const gate=captureProfileWrite("alice",{generation:()=>generation,owner:()=>"alice"});let resolve!:(r:Response)=>void;const pending=gate(()=>new Promise(done=>{resolve=done;}));generation++;resolve(new Response("{}"));await expect(pending).rejects.toThrow("Account changed");});
-test("same account writes return original response without coercion",async()=>{const gate=captureProfileWrite("alice",{generation:()=>0,owner:()=>"alice"}),response=new Response("{}");expect(await gate(async()=>response)).toBe(response);});
-test("account switch during streamed JSON body is rejected before API cache side effects",async()=>{const {readOwnedJson}=await import("../../web/src/api");let generation=0,controller!:ReadableStreamDefaultController<Uint8Array>;const gate=captureProfileWrite("alice",{generation:()=>generation,owner:()=>"alice"});const stream=new ReadableStream<Uint8Array>({start(value){controller=value;}});const response=await gate(async()=>new Response(stream,{headers:{"content-type":"application/json"}}));const pending=readOwnedJson(response,gate);generation++;controller.enqueue(new TextEncoder().encode('{"user":{"id":"alice"}}'));controller.close();await expect(pending).rejects.toThrow("Account changed");});
+import { test, expect } from "bun:test";
+import { captureProfileWrite } from "../../web/src/ui/profile-write";
+test("profile write fence rejects stale queued dispatch without invoking fetch", async () => {
+  let generation = 0,
+    owner = "alice",
+    fetches = 0;
+  const gate = captureProfileWrite("alice", { generation: () => generation, owner: () => owner });
+  generation++;
+  owner = "bob";
+  await expect(
+    gate(async () => {
+      fetches++;
+      return new Response("{}");
+    }),
+  ).rejects.toThrow("Account changed");
+  expect(fetches).toBe(0);
+  expect(gate.current()).toBe(false);
+});
+test("profile write fence rejects replies after account switch before API side effects", async () => {
+  let generation = 0;
+  const gate = captureProfileWrite("alice", { generation: () => generation, owner: () => "alice" });
+  let resolve!: (r: Response) => void;
+  const pending = gate(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  generation++;
+  resolve(new Response("{}"));
+  await expect(pending).rejects.toThrow("Account changed");
+});
+test("same account writes return original response without coercion", async () => {
+  const gate = captureProfileWrite("alice", { generation: () => 0, owner: () => "alice" }),
+    response = new Response("{}");
+  expect(await gate(async () => response)).toBe(response);
+});
+test("account switch during streamed JSON body is rejected before API cache side effects", async () => {
+  const { readOwnedJson } = await import("../../web/src/api");
+  let generation = 0,
+    controller!: ReadableStreamDefaultController<Uint8Array>;
+  const gate = captureProfileWrite("alice", { generation: () => generation, owner: () => "alice" });
+  const stream = new ReadableStream<Uint8Array>({
+    start(value) {
+      controller = value;
+    },
+  });
+  const response = await gate(async () => new Response(stream, { headers: { "content-type": "application/json" } }));
+  const pending = readOwnedJson(response, gate);
+  generation++;
+  controller.enqueue(new TextEncoder().encode('{"user":{"id":"alice"}}'));
+  controller.close();
+  await expect(pending).rejects.toThrow("Account changed");
+});

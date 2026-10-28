@@ -16,14 +16,21 @@ const SECTIONS_NOT_LOADED = ["paint", "measure"];
 /** Graphics groups registered by the website's pack modules, which the native menu doesn't load. */
 const GROUPS_NOT_LOADED = ["graphics/Install/", "graphics/Sky selection/", "graphics/Install sky pack/"];
 /** Rows the website builds only in some places (another account state, the desktop link outside the app). */
-const CONDITIONAL = ["mouse/Mouse/Show DPI on profile", "account/Account/Profile flag", "account/Account/Desktop app link"];
+const CONDITIONAL = [
+  "mouse/Mouse/Show DPI on profile",
+  "account/Account/Profile flag",
+  "account/Account/Desktop app link",
+];
 
 const menu = readFile(new URL("../../../target/native-menu/menu.html", import.meta.url), "utf8");
 
 async function rows(page: Page, hostState: unknown): Promise<SeenRow[]> {
   const html = await menu;
   await page.route("**/*", (route) =>
-    route.request().url() === "https://bunnyhop.lol/coverage" ? route.fulfill({ contentType: "text/html", body: html }) : route.abort());
+    route.request().url() === "https://bunnyhop.lol/coverage"
+      ? route.fulfill({ contentType: "text/html", body: html })
+      : route.abort(),
+  );
   await page.addInitScript(() => {
     localStorage.setItem("bunnyhop:onboarded", "1");
     localStorage.setItem("bunnyhop:first-seen", String(Date.now()));
@@ -36,7 +43,8 @@ async function rows(page: Page, hostState: unknown): Promise<SeenRow[]> {
 }
 
 const key = (row: SeenRow) => `${row.section}/${row.group}/${row.label}`;
-const listed = (row: SeenRow) => [key(row), `${row.section}/*/${row.label}`, `${row.section}/${row.group}/*`].some((k) => k in WEB_ROWS);
+const listed = (row: SeenRow) =>
+  [key(row), `${row.section}/*/${row.label}`, `${row.section}/${row.group}/*`].some((k) => k in WEB_ROWS);
 
 test("every website settings row is shown, waiting for a host key, or left out with a reason", async () => {
   const browser = await chromium.launch({ headless: true });
@@ -47,15 +55,23 @@ test("every website settings row is shown, waiting for a host key, or left out w
     const seen = await rows(page, { settings: state.settings });
     const web = seen.filter((row) => !row.native);
     expect(web.filter((row) => !listed(row)).map(key)).toEqual([]);
-    expect(seen.filter((row) => row.native).map(key).filter((k) => !(k in NATIVE_GATES))).toEqual([]);
+    expect(
+      seen
+        .filter((row) => row.native)
+        .map(key)
+        .filter((k) => !(k in NATIVE_GATES)),
+    ).toEqual([]);
     // Each listed row the screen didn't build is one the native menu doesn't load, or one the website builds only
     // in some situations.
     const built = new Set(seen.map(key));
     const unbuilt = Object.keys(WEB_ROWS).filter((k) => !k.includes("/*/") && !k.endsWith("/*") && !built.has(k));
     const explained = (k: string) =>
-      SECTIONS_NOT_LOADED.includes(k.split("/")[0]) || GROUPS_NOT_LOADED.some((g) => k.startsWith(g)) || CONDITIONAL.includes(k);
+      SECTIONS_NOT_LOADED.includes(k.split("/")[0]) ||
+      GROUPS_NOT_LOADED.some((g) => k.startsWith(g)) ||
+      CONDITIONAL.includes(k);
     expect(unbuilt.filter((k) => !explained(k))).toEqual([]);
-    for (const k of unbuilt.filter((k) => !CONDITIONAL.includes(k))) expect([k, "excluded" in WEB_ROWS[k]]).toEqual([k, true]);
+    for (const k of unbuilt.filter((k) => !CONDITIONAL.includes(k)))
+      expect([k, "excluded" in WEB_ROWS[k]]).toEqual([k, true]);
     expect(errors).toEqual([]);
   } finally {
     await browser.close();

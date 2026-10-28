@@ -8,8 +8,19 @@ export const MUSIC_SOURCE = resolve(import.meta.dir, "../assets/music");
 const manifestBytes = readFileSync(join(MUSIC_SOURCE, "manifest.json"));
 export const OST = JSON.parse(manifestBytes.toString()) as {
   schema: number;
-  tracks: { id: string; title: string; role: string; duration: number; bpm: number;
-    loopStart: number; loopEnd: number; credit: string; file: string; bytes: number; sha256: string }[];
+  tracks: {
+    id: string;
+    title: string;
+    role: string;
+    duration: number;
+    bpm: number;
+    loopStart: number;
+    loopEnd: number;
+    credit: string;
+    file: string;
+    bytes: number;
+    sha256: string;
+  }[];
 };
 const metadataKeys = ["id", "title", "role", "duration", "bpm", "loopStart", "loopEnd", "credit"] as const;
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
@@ -20,17 +31,25 @@ function verifyCatalog(music: unknown): void {
   const ids = new Set<string>();
   for (let i = 0; i < OST.tracks.length; i++) {
     const track = OST.tracks[i];
-    if (!/^[a-z0-9-]+$/.test(track.id) || ids.has(track.id) || track.file !== `${track.id}.mp3` ||
-        !Number.isSafeInteger(track.bytes) || track.bytes <= 0 || track.bytes > 8 * 1024 * 1024 ||
-        !/^[a-f0-9]{64}$/.test(track.sha256)) throw new Error("Invalid bundled OST identity");
+    if (
+      !/^[a-z0-9-]+$/.test(track.id) ||
+      ids.has(track.id) ||
+      track.file !== `${track.id}.mp3` ||
+      !Number.isSafeInteger(track.bytes) ||
+      track.bytes <= 0 ||
+      track.bytes > 8 * 1024 * 1024 ||
+      !/^[a-f0-9]{64}$/.test(track.sha256)
+    )
+      throw new Error("Invalid bundled OST identity");
     ids.add(track.id);
     for (const key of metadataKeys)
       if (music[i]?.[key] !== track[key]) throw new Error(`Bundled OST metadata mismatch: ${track.id}.${key}`);
   }
 }
 
-function verifyTrack(directory: string, track: typeof OST.tracks[number]): void {
-  const file = join(directory, track.file), st = lstatSync(file);
+function verifyTrack(directory: string, track: (typeof OST.tracks)[number]): void {
+  const file = join(directory, track.file),
+    st = lstatSync(file);
   if (!st.isFile() || st.size !== track.bytes || sha(readFileSync(file)) !== track.sha256)
     throw new Error(`Bundled OST file mismatch: ${track.file}`);
 }
@@ -51,9 +70,11 @@ export function verifyMusicAssets(assets: string): void {
   verifyCatalog(JSON.parse(readFileSync(join(assets, "audio.json"), "utf8")).music);
   const directory = join(assets, "music");
   if (lstatSync(directory).isSymbolicLink()) throw new Error("Bundled OST directory must not be a symlink");
-  const expected = ["manifest.json", ...OST.tracks.map(track => track.file)].sort();
-  if (JSON.stringify(readdirSync(directory).sort()) !== JSON.stringify(expected) ||
-      !readFileSync(join(directory, "manifest.json")).equals(manifestBytes))
+  const expected = ["manifest.json", ...OST.tracks.map((track) => track.file)].sort();
+  if (
+    JSON.stringify(readdirSync(directory).sort()) !== JSON.stringify(expected) ||
+    !readFileSync(join(directory, "manifest.json")).equals(manifestBytes)
+  )
     throw new Error("Bundled OST manifest or file list mismatch");
   for (const track of OST.tracks) verifyTrack(directory, track);
 }

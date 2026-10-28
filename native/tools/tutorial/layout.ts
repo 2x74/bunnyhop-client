@@ -7,7 +7,19 @@
 // trigger_teleport on their floor that returns you to the lesson's start. Stock materials only (HL2 dev textures,
 // CS:S concrete, the HL2 sky), listed in MATERIALS with their texture sizes (read from the CS:S VPKs).
 
-import { CONTENTS_SOLID, SURF_NOLIGHT, SURF_NODRAW, SURF_SKY, SURF_TRIGGER, type Box, type BrushEntity, type FaceTex, type Lighting, type Material, type Vec3 } from "./bsp";
+import {
+  CONTENTS_SOLID,
+  SURF_NOLIGHT,
+  SURF_NODRAW,
+  SURF_SKY,
+  SURF_TRIGGER,
+  type Box,
+  type BrushEntity,
+  type FaceTex,
+  type Lighting,
+  type Material,
+  type Vec3,
+} from "./bsp";
 
 export const MAP = "bhop_lol_tutorial";
 
@@ -164,7 +176,10 @@ function slalom(x0: number, x1: number, y: number, amp: number, wl0: number, wl1
   return out;
 }
 
-const trigger = (keys: Record<string, string>, min: Vec3, max: Vec3): BrushEntity => ({ keys, boxes: [{ min, max, tex: T.trigger }] });
+const trigger = (keys: Record<string, string>, min: Vec3, max: Vec3): BrushEntity => ({
+  keys,
+  boxes: [{ min, max, tex: T.trigger }],
+});
 
 // --------------------------------------------------------------------------------------------- the course
 
@@ -208,8 +223,15 @@ export function course(): Course {
   const lessons: LessonGeometry[] = [];
   const seeds: Vec3[] = [];
   const W = (o: [number, number], x: number, y: number, z = 0): Vec3 => [o[0] + x, o[1] + y, z];
-  const dest = (name: string, s: Spot) => points.push({ classname: "info_teleport_destination", targetname: name, origin: s.position.join(" "), angles: `0 ${s.yaw} 0` });
-  const teleport = (target: string, min: Vec3, max: Vec3) => entities.push(trigger({ classname: "trigger_teleport", target, spawnflags: "1", StartDisabled: "0" }, min, max));
+  const dest = (name: string, s: Spot) =>
+    points.push({
+      classname: "info_teleport_destination",
+      targetname: name,
+      origin: s.position.join(" "),
+      angles: `0 ${s.yaw} 0`,
+    });
+  const teleport = (target: string, min: Vec3, max: Vec3) =>
+    entities.push(trigger({ classname: "trigger_teleport", target, spawnflags: "1", StartDisabled: "0" }, min, max));
   const pitTeleports = (o: [number, number], pits: Rect[], target: string) => {
     for (const p of pits) teleport(target, W(o, p.x0, p.y0, -PIT), W(o, p.x1, p.y1, -PIT + 64));
   };
@@ -228,26 +250,61 @@ export function course(): Course {
     const size: [number, number] = [2048, 768];
     const hurdles = [640, 960, 1280, 1600];
     boxes.push(
-      ...room({ origin: o, size, paint: [{ r: rect(1920, 0, 2048, 768), tex: T.accent }, { r: rect(64, 256, 320, 512), tex: T.dark }], wallSide: { e: T.exitWall } }),
+      ...room({
+        origin: o,
+        size,
+        paint: [
+          { r: rect(1920, 0, 2048, 768), tex: T.accent },
+          { r: rect(64, 256, 320, 512), tex: T.dark },
+        ],
+        wallSide: { e: T.exitWall },
+      }),
     );
-    for (const x of hurdles) boxes.push({ min: W(o, x, 0, 0), max: W(o, x + 32, 768, 24), tex: { all: T.accent, top: T.accent } });
+    for (const x of hurdles)
+      boxes.push({ min: W(o, x, 0, 0), max: W(o, x + 32, 768, 24), tex: { all: T.accent, top: T.accent } });
     const start = spot(o, 192, 384, 0);
     dest("l1_start", start);
     const exit = exitPortal(o, rect(1920, 0, 2048, 768), "l2_start");
-    lessons.push({ id: "jump", room: { min: W(o, 0, 0, 0), max: W(o, size[0], size[1], HEIGHT) }, start, exit, gaps: hurdles.map((x) => ({ axis: 0, from: o[0] + x, to: o[0] + x + 32, width: 32 })), route: [[o[0] + 2040, o[1] + 384]] });
+    lessons.push({
+      id: "jump",
+      room: { min: W(o, 0, 0, 0), max: W(o, size[0], size[1], HEIGHT) },
+      start,
+      exit,
+      gaps: hurdles.map((x) => ({ axis: 0, from: o[0] + x, to: o[0] + x + 32, width: 32 })),
+      route: [[o[0] + 2040, o[1] + 384]],
+    });
     seeds.push([start.position[0], start.position[1], 32]);
     // Spawns (CS:S needs both teams' spawns on a server); the core uses the first CT spawn.
     for (const [i, cls] of ["info_player_counterterrorist", "info_player_terrorist"].entries()) {
-      for (let k = 0; k < 4; k++) points.push({ classname: cls, origin: W(o, i === 0 && k === 0 ? 192 : 96 + 64 * k, i === 0 ? (k === 0 ? 384 : 320) : 448, 1).join(" "), angles: "0 0 0" });
+      for (let k = 0; k < 4; k++)
+        points.push({
+          classname: cls,
+          origin: W(o, i === 0 && k === 0 ? 192 : 96 + 64 * k, i === 0 ? (k === 0 ? 384 : 320) : 448, 1).join(" "),
+          angles: "0 0 0",
+        });
     }
   }
   // ---- 2. Air strafing: a big open floor.
   {
     const o: [number, number] = [-11264, -14336];
     const size: [number, number] = [2560, 2560];
-    boxes.push(...room({ origin: o, size, paint: [{ r: rect(2432, 1024, 2560, 1536), tex: T.accent }, { r: rect(128, 1152, 384, 1408), tex: T.dark }], wallSide: { e: T.wall2 } }));
+    boxes.push(
+      ...room({
+        origin: o,
+        size,
+        paint: [
+          { r: rect(2432, 1024, 2560, 1536), tex: T.accent },
+          { r: rect(128, 1152, 384, 1408), tex: T.dark },
+        ],
+        wallSide: { e: T.wall2 },
+      }),
+    );
     // A portal frame on the east wall so the exit reads from across the room.
-    boxes.push({ min: W(o, 2496, 960, 0), max: W(o, 2560, 1024, 320), tex: T.accent }, { min: W(o, 2496, 1536, 0), max: W(o, 2560, 1600, 320), tex: T.accent }, { min: W(o, 2496, 960, 320), max: W(o, 2560, 1600, 384), tex: T.accent });
+    boxes.push(
+      { min: W(o, 2496, 960, 0), max: W(o, 2560, 1024, 320), tex: T.accent },
+      { min: W(o, 2496, 1536, 0), max: W(o, 2560, 1600, 320), tex: T.accent },
+      { min: W(o, 2496, 960, 320), max: W(o, 2560, 1600, 384), tex: T.accent },
+    );
     const start = spot(o, 256, 1280, 0);
     const lane2 = slalom(o[0] + 480, o[0] + 2300, o[1] + 1280, 72, 560, 640);
     dest("l2_start", start);
@@ -271,15 +328,30 @@ export function course(): Course {
       { x: 3584, speed: 400 },
       { x: 5376, speed: 500 },
     ];
-    const paint = [{ r: rect(7040, 0, 7168, 768), tex: T.accent }, { r: rect(64, 256, 320, 512), tex: T.dark }, ...gates.map((g) => ({ r: rect(g.x, 0, g.x + 64, 768), tex: T.accent }))];
+    const paint = [
+      { r: rect(7040, 0, 7168, 768), tex: T.accent },
+      { r: rect(64, 256, 320, 512), tex: T.dark },
+      ...gates.map((g) => ({ r: rect(g.x, 0, g.x + 64, 768), tex: T.accent })),
+    ];
     boxes.push(...room({ origin: o, size, paint, wallSide: { e: T.exitWall } }));
     for (const g of gates) {
-      boxes.push({ min: W(o, g.x, 0, 0), max: W(o, g.x + 64, 64, 384), tex: T.accent }, { min: W(o, g.x, 704, 0), max: W(o, g.x + 64, 768, 384), tex: T.accent });
+      boxes.push(
+        { min: W(o, g.x, 0, 0), max: W(o, g.x + 64, 64, 384), tex: T.accent },
+        { min: W(o, g.x, 704, 0), max: W(o, g.x + 64, 768, 384), tex: T.accent },
+      );
     }
     const start = spot(o, 192, 384, 0);
     dest("l3_start", start);
     const exit = exitPortal(o, rect(7040, 0, 7168, 768), "l4_start");
-    lessons.push({ id: "speed", room: { min: W(o, 0, 0, 0), max: W(o, size[0], size[1], HEIGHT) }, start, exit, gates: gates.map((g) => ({ x: o[0] + g.x + 32, speed: g.speed })), route: [[o[0] + 7160, o[1] + 384]], lane: slalom(o[0] + 420, o[0] + 6900, o[1] + 384, 96, 520, 960) });
+    lessons.push({
+      id: "speed",
+      room: { min: W(o, 0, 0, 0), max: W(o, size[0], size[1], HEIGHT) },
+      start,
+      exit,
+      gates: gates.map((g) => ({ x: o[0] + g.x + 32, speed: g.speed })),
+      route: [[o[0] + 7160, o[1] + 384]],
+      lane: slalom(o[0] + 420, o[0] + 6900, o[1] + 384, 96, 520, 960),
+    });
     seeds.push([start.position[0], start.position[1], 32]);
   }
   // ---- 4. Put it together (the final course): a run-up, two gaps, a corner, stepping stones, the finish.
@@ -302,7 +374,17 @@ export function course(): Course {
       { r: rect(3072, 2816, 4096, 3072), tex: T.accent },
       ...stones.map((s) => ({ r: s, tex: T.dark })),
     ];
-    boxes.push(...room({ origin: o, size, pits: [gapA, gapB, bigPit], islands: stones, paint, floorTex: T.concrete, wallTex: T.concreteWall }));
+    boxes.push(
+      ...room({
+        origin: o,
+        size,
+        pits: [gapA, gapB, bigPit],
+        islands: stones,
+        paint,
+        floorTex: T.concrete,
+        wallTex: T.concreteWall,
+      }),
+    );
     // The unused corner of the L.
     boxes.push({ min: W(o, 0, 768, -PIT - 64), max: W(o, 3072, 3072, HEIGHT), tex: T.concreteWall });
     const start = spot(o, 416, 384, 0);
@@ -321,22 +403,38 @@ export function course(): Course {
       checkpoints: [{ min: W(o, 3072, 2816, 0), max: W(o, 4096, 3072, 128) }],
       pits: [gapA, gapB, bigPit].map((p) => shift(o, p)),
       islands: stones.map((p) => shift(o, p)),
-      route: [[o[0] + 3500, o[1] + 384], [o[0] + 3584, o[1] + 1100], [o[0] + 3584, o[1] + 3000]],
+      route: [
+        [o[0] + 3500, o[1] + 384],
+        [o[0] + 3584, o[1] + 1100],
+        [o[0] + 3584, o[1] + 3000],
+      ],
     });
     seeds.push([start.position[0], start.position[1], 32]);
   }
 
   // ---- zones: main track = the whole tutorial (start in lesson 1, a stage per lesson, end of the final course);
   // bonus 1 = the final course on its own (its own start pad behind the lesson-4 arrival point).
-  const zbox = (c: Vec3, half: number): { mins: Vec3; maxs: Vec3 } => ({ mins: [c[0] - half, c[1] - half, 0], maxs: [c[0] + half, c[1] + half, 128] });
+  const zbox = (c: Vec3, half: number): { mins: Vec3; maxs: Vec3 } => ({
+    mins: [c[0] - half, c[1] - half, 0],
+    maxs: [c[0] + half, c[1] + half, 128],
+  });
   const l = (id: string) => lessons.find((x) => x.id === id)!;
   const fin = l("final");
   const end = { mins: fin.checkpoints![0].min, maxs: fin.checkpoints![0].max };
   const zones: Course["zones"] = [
     { kind: "start", ...zbox(l("jump").start.position, 128) },
-    ...["strafe", "speed", "final"].map((id, i) => ({ kind: "stage" as const, index: i + 2, ...zbox(l(id).start.position, 128) })),
+    ...["strafe", "speed", "final"].map((id, i) => ({
+      kind: "stage" as const,
+      index: i + 2,
+      ...zbox(l(id).start.position, 128),
+    })),
     { kind: "end", ...end },
-    { kind: "start", track: 1, mins: [fin.room.min[0], fin.room.min[1], 0], maxs: [fin.room.min[0] + 256, fin.room.min[1] + 768, 128] },
+    {
+      kind: "start",
+      track: 1,
+      mins: [fin.room.min[0], fin.room.min[1], 0],
+      maxs: [fin.room.min[0] + 256, fin.room.min[1] + 768, 128],
+    },
     { kind: "end", track: 1, ...end },
   ];
   return { boxes, entities, points, lessons, zones, seeds, bonusStart: bonusStart! };

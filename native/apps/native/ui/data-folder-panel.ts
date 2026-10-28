@@ -1,21 +1,46 @@
-import {h} from "../../web/src/ui/dom";
-import {registerSettingsSection} from "../../web/src/ui/settings-registry";
-import type {Ui} from "./native-rows";
-import {send} from "./bridge";
+import { h } from "../../web/src/ui/dom";
+import { registerSettingsSection } from "../../web/src/ui/settings-registry";
+import type { Ui } from "./native-rows";
+import { send } from "./bridge";
 
 /** Settings -> Game data, mirrored from the host (client.cpp "dataFolder"). */
 export interface DataFolderStatus {
- path:string;defaultPath:string;isDefault:boolean;configured:string;unavailable:boolean;
- pending:string|null;picking:boolean;notice:string;choice:{path:string;problem:string}|null;
+  path: string;
+  defaultPath: string;
+  isDefault: boolean;
+  configured: string;
+  unavailable: boolean;
+  pending: string | null;
+  picking: boolean;
+  notice: string;
+  choice: { path: string; problem: string } | null;
 }
-const str=(v:unknown,max=4096):string|null=>typeof v==="string"?v.slice(0,max):null;
-export function readDataFolderStatus(value:unknown):DataFolderStatus|null {
- if(!value||typeof value!=="object")return null;const v=value as Record<string,unknown>;
- const path=str(v.path),defaultPath=str(v.defaultPath),configured=str(v.configured)??path;
- if(!path||!defaultPath||configured===null||typeof v.isDefault!=="boolean")return null;
- let choice:DataFolderStatus["choice"]=null;
- if(v.choice&&typeof v.choice==="object"){const c=v.choice as Record<string,unknown>;const cp=str(c.path),problem=str(c.problem,1000);if(cp!==null&&problem!==null)choice={path:cp,problem};}
- return {path,defaultPath,isDefault:v.isDefault,configured,unavailable:v.unavailable===true,pending:str(v.pending),picking:v.picking===true,notice:str(v.notice,1000)??"",choice};
+const str = (v: unknown, max = 4096): string | null => (typeof v === "string" ? v.slice(0, max) : null);
+export function readDataFolderStatus(value: unknown): DataFolderStatus | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  const path = str(v.path),
+    defaultPath = str(v.defaultPath),
+    configured = str(v.configured) ?? path;
+  if (!path || !defaultPath || configured === null || typeof v.isDefault !== "boolean") return null;
+  let choice: DataFolderStatus["choice"] = null;
+  if (v.choice && typeof v.choice === "object") {
+    const c = v.choice as Record<string, unknown>;
+    const cp = str(c.path),
+      problem = str(c.problem, 1000);
+    if (cp !== null && problem !== null) choice = { path: cp, problem };
+  }
+  return {
+    path,
+    defaultPath,
+    isDefault: v.isDefault,
+    configured,
+    unavailable: v.unavailable === true,
+    pending: str(v.pending),
+    picking: v.picking === true,
+    notice: str(v.notice, 1000) ?? "",
+    choice,
+  };
 }
 
 type DataAction = "pick" | "useDefault" | "reveal" | "forget" | "cancelPending" | "cancelChoice";
@@ -53,14 +78,7 @@ function dataFolderGroup(ui: Ui): HTMLElement {
   });
   const pendingRow = ui.actions("Waiting to move", [cancelPending], { keywords: "data folder move pending" });
   const missingRow = ui.actions("Folder not found", [forget], { keywords: "data folder missing drive" });
-  const group = ui.group(
-    "Game data folder",
-    folderRow,
-    defaultRow,
-    moveRow,
-    pendingRow,
-    missingRow,
-  );
+  const group = ui.group("Game data folder", folderRow, defaultRow, moveRow, pendingRow, missingRow);
   moveRow.hidden = pendingRow.hidden = missingRow.hidden = defaultRow.hidden = true;
   const paint = (s: DataFolderStatus): void => {
     path.textContent = s.path;

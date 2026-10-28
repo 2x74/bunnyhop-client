@@ -6,7 +6,7 @@ export const DEFAULT_ANGLE_SPEED_KEY = 2;
 /** Degrees per second, inclusive. The host and the replay verifier reject anything outside it. */
 export const YAW_SPEED_RANGE = { min: 60, max: 720, step: 5 } as const;
 /** The fast-turn multiplier, inclusive. */
-export const ANGLE_SPEED_KEY_RANGE = { min: 1, max: 4, step: .05 } as const;
+export const ANGLE_SPEED_KEY_RANGE = { min: 1, max: 4, step: 0.05 } as const;
 
 type Range = { readonly min: number; readonly max: number };
 

@@ -60,7 +60,7 @@ export function parseColor(value: string): Rgba | null {
   const normal = String(canvas.fillStyle);
   if (/^#[0-9a-f]{6}$/i.test(normal)) {
     const hex = parseInt(normal.slice(1), 16);
-    return [(hex >> 16 & 255) / 255, (hex >> 8 & 255) / 255, (hex & 255) / 255, 1];
+    return [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255, 1];
   }
   return normal.startsWith("rgb") ? parseColor(normal) : null;
 }

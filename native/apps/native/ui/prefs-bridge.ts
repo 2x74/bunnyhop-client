@@ -282,7 +282,17 @@ export const MAPPINGS: readonly Mapping[] = [
 const BUILD_KEYS = Object.keys(state.settings);
 /** HUD elements the native HUD draws before it lists its own ("hud:<web id>"). */
 const BUILD_ELEMENTS = [
-  "speed", "timer", "split", "stats", "keys", "graph", "jumpStats", "map", "fps", "ammo", "strafeTrainer",
+  "speed",
+  "timer",
+  "split",
+  "stats",
+  "keys",
+  "graph",
+  "jumpStats",
+  "map",
+  "fps",
+  "ammo",
+  "strafeTrainer",
 ];
 
 /** The host stores this settings key: one of the build's, or one its settings object carries. */
@@ -321,7 +331,9 @@ function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value && typeof value === "object") {
     const object = value as Record<string, unknown>;
-    const fields = Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${canonical(object[key])}`);
+    const fields = Object.keys(object)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonical(object[key])}`);
     return `{${fields.join(",")}}`;
   }
   return JSON.stringify(value) ?? "null";
@@ -461,7 +473,9 @@ const MAPPED_KEYS = new Set(MAPPINGS.flatMap((mapping) => mapping.keys));
 
 function nativeOnlySignature(): string {
   const host = effectiveHost() as Record<string, unknown>;
-  const own = Object.keys(state.settings).filter((key) => !MAPPED_KEYS.has(key)).sort();
+  const own = Object.keys(state.settings)
+    .filter((key) => !MAPPED_KEYS.has(key))
+    .sort();
   const binds = host.binds as Record<string, unknown>;
   return canonical([own.map((key) => host[key]), NATIVE_ONLY_ACTIONS.map((action) => binds[action])]);
 }

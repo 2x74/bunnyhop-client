@@ -14,8 +14,10 @@ export const CANONICAL_PHYSICS = pin.physics;
 export const CANONICAL_TIMER_RULES = pin.rules;
 const defaultPath = resolve(import.meta.dir, "../web/src/wasm/bunnyhop_core.wasm");
 function valid(bytes: Uint8Array): boolean {
-  return bytes.byteLength === CANONICAL_WASM_BYTES &&
-    new Bun.CryptoHasher("sha256").update(bytes).digest("hex") === CANONICAL_WASM_SHA256;
+  return (
+    bytes.byteLength === CANONICAL_WASM_BYTES &&
+    new Bun.CryptoHasher("sha256").update(bytes).digest("hex") === CANONICAL_WASM_SHA256
+  );
 }
 
 export async function ensureCanonicalWasm(path = defaultPath): Promise<string> {
@@ -23,7 +25,9 @@ export async function ensureCanonicalWasm(path = defaultPath): Promise<string> {
     throw new Error("Update upstream-wasm.json for the synced commit and rerun native/WASM parity.");
   }
   if (PHYSICS_VERSION !== CANONICAL_PHYSICS || TIMER_RULES !== CANONICAL_TIMER_RULES) {
-    throw new Error("Game rules changed: update the pinned native verifier and rerun native/WASM parity before building a release.");
+    throw new Error(
+      "Game rules changed: update the pinned native verifier and rerun native/WASM parity before building a release.",
+    );
   }
   const existing = await readFile(path).catch(() => null);
   if (existing && valid(existing)) return path;
@@ -33,8 +37,8 @@ export async function ensureCanonicalWasm(path = defaultPath): Promise<string> {
     if (!built || !valid(built)) {
       throw new Error(
         "Unpublished v29 verifier missing. Run bun tools/build-upstream-wasm.ts " +
-        "--upstream /path/to/upstream, then rerun the build. " +
-        `Expected SHA-256 ${CANONICAL_WASM_SHA256}`,
+          "--upstream /path/to/upstream, then rerun the build. " +
+          `Expected SHA-256 ${CANONICAL_WASM_SHA256}`,
       );
     }
     await mkdir(dirname(path), { recursive: true });
@@ -55,7 +59,10 @@ export async function ensureCanonicalWasm(path = defaultPath): Promise<string> {
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
-      if (total > CANONICAL_WASM_BYTES) { await reader.cancel(); throw new Error("oversized asset"); }
+      if (total > CANONICAL_WASM_BYTES) {
+        await reader.cancel();
+        throw new Error("oversized asset");
+      }
       chunks.push(value);
     }
     const bytes = Buffer.concat(chunks);
@@ -67,7 +74,9 @@ export async function ensureCanonicalWasm(path = defaultPath): Promise<string> {
     return path;
   } catch (error) {
     await rm(temporary, { force: true });
-    throw new Error(`Canonical WASM is missing or invalid. Connect once and run 'bun apps/native/ensure-wasm.ts', or place the exact public asset (SHA-256 ${CANONICAL_WASM_SHA256}) at apps/web/src/wasm/bunnyhop_core.wasm. Offline native compilation requires this cached verifier for identity and parity checks. ${String(error)}`);
+    throw new Error(
+      `Canonical WASM is missing or invalid. Connect once and run 'bun apps/native/ensure-wasm.ts', or place the exact public asset (SHA-256 ${CANONICAL_WASM_SHA256}) at apps/web/src/wasm/bunnyhop_core.wasm. Offline native compilation requires this cached verifier for identity and parity checks. ${String(error)}`,
+    );
   }
 }
 

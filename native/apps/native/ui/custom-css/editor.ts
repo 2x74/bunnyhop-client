@@ -31,7 +31,10 @@ export function statusLine(status: CssStatus): { text: string; tone: "ok" | "bad
   if (status.importing) notes.push("Loading the imported theme…");
   if (status.loading) notes.push(`Loading ${plural(status.loading, "link")}…`);
   if (status.failed.length) {
-    const first = status.failed.slice(0, 2).map((item) => `${short(item.url)}: ${item.why}`).join(" ");
+    const first = status.failed
+      .slice(0, 2)
+      .map((item) => `${short(item.url)}: ${item.why}`)
+      .join(" ");
     const more = status.failed.length > 2 ? ` And ${status.failed.length - 2} more.` : "";
     notes.push(first + more);
   }

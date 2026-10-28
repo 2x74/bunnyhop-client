@@ -13,13 +13,13 @@ export interface ShownRange {
   interval: number;
 }
 
-const DEFAULT_TICK_INTERVAL = .01;
+const DEFAULT_TICK_INTERVAL = 0.01;
 
 export function shownRange(playback: PlaybackState): ShownRange {
   const interval = playback.tickInterval ?? DEFAULT_TICK_INTERVAL;
   const hasRange = playback.rangeEndTick !== undefined && playback.rangeEndTick > 0;
-  const start = hasRange ? playback.rangeStartTick ?? 0 : 0;
-  const end = hasRange ? playback.rangeEndTick ?? playback.totalTicks : playback.totalTicks;
+  const start = hasRange ? (playback.rangeStartTick ?? 0) : 0;
+  const end = hasRange ? (playback.rangeEndTick ?? playback.totalTicks) : playback.totalTicks;
   return { start, end, ticks: Math.max(0, end - start), interval };
 }
 

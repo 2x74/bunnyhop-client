@@ -11,26 +11,34 @@ const web = resolve(root, "apps/web/src");
 
 // UI style labels, settings and the jump-stats rows need these values, never Core or a WASM transport.
 const coreConstantNames = [
-  "PHYSICS_V1", "PHYSICS_V7", "PHYSICS_VERSION", "DEFAULT_SETTINGS",
-  "OVERLAY_STATE_ACTIVE", "OVERLAY_STATE_VISIBLE",
-  "WEAPON_IDS", "WEAPON_EVENT_DROPPED", "WEAPON_EVENT_GIVEN",
-  "EVENT_TELEPORTED", "EVENT_JUMPED", "EVENT_LANDED",
+  "PHYSICS_V1",
+  "PHYSICS_V7",
+  "PHYSICS_VERSION",
+  "DEFAULT_SETTINGS",
+  "OVERLAY_STATE_ACTIVE",
+  "OVERLAY_STATE_VISIBLE",
+  "WEAPON_IDS",
+  "WEAPON_EVENT_DROPPED",
+  "WEAPON_EVENT_GIVEN",
+  "EVENT_TELEPORTED",
+  "EVENT_JUMPED",
+  "EVENT_LANDED",
 ];
 
 // Web module (without extension) -> native adapter in ui/.
 const adapters: Record<string, string> = {
   "gpu-info": "gpu-info.ts",
   "ui/account-panel": "account-panel.ts",
-  "audio": "audio.ts",
+  audio: "audio.ts",
   "audio/index": "audio.ts",
   "audio/ui": "audio.ts",
   "audio/announcer": "audio.ts",
   "tutorial/entry": "tutorial-entry.ts",
   "player/race": "race-bus.ts",
   "play-lock": "play-lock.ts",
-  "hud": "hud-types.ts",
+  hud: "hud-types.ts",
   // Only the command bits; importing the Input class or anything else from input.ts fails the build.
-  "input": "input-bits.ts",
+  input: "input-bits.ts",
   "net/hud": "chat-hud.ts",
   "ui/loadout-stage": "loadout-stage.ts",
   "notify/item3d": "item-emblem.ts",
@@ -47,11 +55,13 @@ const navigatingModules = ["ui/servers.ts", "net/lobby.ts", "social/state.ts", "
 // Extract the exact declarations at build time so they cannot drift from web UI.
 async function coreConstants(): Promise<string> {
   const source = await Bun.file(resolve(web, "core.ts")).text();
-  return coreConstantNames.map((name) => {
-    const match = source.match(new RegExp(`export const ${name}(?:\\s*:\\s*\\w+)?\\s*=\\s*([\\s\\S]*?);`));
-    if (!match) throw new Error(`Native menu constant extraction failed: ${name}`);
-    return `export const ${name}=${match[1]};`;
-  }).join("\n");
+  return coreConstantNames
+    .map((name) => {
+      const match = source.match(new RegExp(`export const ${name}(?:\\s*:\\s*\\w+)?\\s*=\\s*([\\s\\S]*?);`));
+      if (!match) throw new Error(`Native menu constant extraction failed: ${name}`);
+      return `export const ${name}=${match[1]};`;
+    })
+    .join("\n");
 }
 
 function resolveBoundary(args: Bun.OnResolveArgs): Bun.OnResolveResult | undefined {
@@ -72,7 +82,8 @@ function resolveBoundary(args: Bun.OnResolveArgs): Bun.OnResolveResult | undefin
 /** The settings screen renders each section inside settings-controls.ts renderingSection, so rows know their section. */
 function adaptSettingsPanel(source: string): string {
   const call = "content = d.s.render(ctxFor(d));";
-  if (!source.includes(call)) throw new Error("Native menu: web settings-panel.ts no longer renders sections as expected");
+  if (!source.includes(call))
+    throw new Error("Native menu: web settings-panel.ts no longer renders sections as expected");
   const controls = JSON.stringify(resolve(native, "settings-controls.ts"));
   const wrapped = source.replace(call, "content = renderingSection(d.s.id, () => d.s.render(ctxFor(d)));");
   return `import {renderingSection} from ${controls};\n${wrapped}`;

@@ -11,7 +11,9 @@ type Init = { storage?: Record<string, string>; me?: unknown; savedSettings?: un
 const menu = readFile(new URL("../../../target/native-menu/menu.html", import.meta.url), "utf8");
 const HOST_SETTINGS = JSON.parse(JSON.stringify(state.settings));
 
-async function open(init: Init = {}): Promise<{ page: Page; errors: string[]; uploads: unknown[]; close: () => Promise<void> }> {
+async function open(
+  init: Init = {},
+): Promise<{ page: Page; errors: string[]; uploads: unknown[]; close: () => Promise<void> }> {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
   page.setDefaultTimeout(5000);
@@ -53,7 +55,10 @@ const count = async (page: Page) => (await sent(page)).length;
 /** The settings patches sent since `from`, once the menu's short batching delay has passed. */
 async function patchesSince(page: Page, from: number): Promise<unknown[]> {
   await page.waitForTimeout(150);
-  return (await sent(page)).slice(from).filter((message) => message.type === "settings").map((message) => message.patch);
+  return (await sent(page))
+    .slice(from)
+    .filter((message) => message.type === "settings")
+    .map((message) => message.patch);
 }
 
 async function openSettings(page: Page, section?: string): Promise<void> {
@@ -118,7 +123,10 @@ test("rows follow what the host has", async () => {
     // An update adds keys overlay opacity and the spectator list: their rows appear, and the new key starts at the
     // player's website setting rather than the host's default.
     const from = await count(page);
-    await host(page, { settings: { ...HOST_SETTINGS, hudKeysOpacity: 0.6 }, capabilities: ["hud:speed", "hud:spectators"] });
+    await host(page, {
+      settings: { ...HOST_SETTINGS, hudKeysOpacity: 0.6 },
+      capabilities: ["hud:speed", "hud:spectators"],
+    });
     await poll(() => row(page, "hud", "Opacity").count(), 1);
     expect(await row(page, "hud", "Spectator list").count()).toBe(1);
     expect(await patchesSince(page, from)).toEqual([{ hudKeysOpacity: 1 }]);
@@ -217,10 +225,13 @@ test("export and import use the website's format through the host's file dialogs
     const open = (await sent(page)).filter((m) => m.type === "file").at(-1)!;
     expect(open).toMatchObject({ action: "open", purpose: "settings" });
     const old = JSON.stringify({ format: "bunnyhop-native-settings", version: 1, settings: { sensitivity: 1.5 } });
-    await page.evaluate(([id, text]) => {
-      const detail = { id, purpose: "settings", action: "open", ok: true, cancelled: false, name: "old.json", text };
-      dispatchEvent(new CustomEvent("bunnyhop:native-file", { detail }));
-    }, [open.id, old]);
+    await page.evaluate(
+      ([id, text]) => {
+        const detail = { id, purpose: "settings", action: "open", ok: true, cancelled: false, name: "old.json", text };
+        dispatchEvent(new CustomEvent("bunnyhop:native-file", { detail }));
+      },
+      [open.id, old],
+    );
     await poll(async () => (await code.inputValue()).includes("bunnyhop.lol/settings"), true);
     const from = await count(page);
     await page.getByRole("button", { name: "Import", exact: true }).last().click();
@@ -233,7 +244,9 @@ test("export and import use the website's format through the host's file dialogs
 
 test("old presets show up as profiles", async () => {
   const presets = { active: "", list: [{ name: "Practice", settings: { crosshairColor: "#ff0000" } }] };
-  const { page, errors, close } = await open({ storage: { "bunnyhop:native-settings-presets:v1": JSON.stringify(presets) } });
+  const { page, errors, close } = await open({
+    storage: { "bunnyhop:native-settings-presets:v1": JSON.stringify(presets) },
+  });
   try {
     await openSettings(page);
     expect(await page.getByLabel("Settings profile").locator("option").allTextContents()).toContain("Practice");
@@ -244,7 +257,12 @@ test("old presets show up as profiles", async () => {
 }, 30_000);
 
 test("settings kept with the account upload one document with native settings and newer website keys", async () => {
-  const remote = { format: "bunnyhop.lol/settings", version: 1, exported: "", settings: { sensitivity: 1, futureKnob: 7 } };
+  const remote = {
+    format: "bunnyhop.lol/settings",
+    version: 1,
+    exported: "",
+    settings: { sensitivity: 1, futureKnob: 7 },
+  };
   const { page, errors, uploads, close } = await open({
     me: { id: "u1", name: "Player", provider: "discord" },
     savedSettings: { doc: remote, updatedAt: 1 },

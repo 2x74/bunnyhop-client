@@ -33,11 +33,18 @@ let source: "scene" | "static" | null = null;
 let layer: HTMLElement | null = null;
 
 declare global {
-  interface Window { bunnyhopNativeBackdrop?: (source: string, map?: string) => void }
+  interface Window {
+    bunnyhopNativeBackdrop?: (source: string, map?: string) => void;
+  }
 }
 
 function root(): HTMLElement {
-  layer ??= document.getElementById("native-backdrop") ?? document.body.insertBefore(Object.assign(document.createElement("div"), { id: "native-backdrop" }), document.body.firstChild);
+  layer ??=
+    document.getElementById("native-backdrop") ??
+    document.body.insertBefore(
+      Object.assign(document.createElement("div"), { id: "native-backdrop" }),
+      document.body.firstChild,
+    );
   layer.setAttribute("aria-hidden", "true");
   return layer;
 }
@@ -63,7 +70,8 @@ function paintArt(): void {
   if (artMap === map && root().querySelector(".native-backdrop-art")) return;
   artMap = map;
   const art = mapArt(map, null, { className: "native-backdrop-art", size: "hero", eager: true, priority: true });
-  const ready = () => artMap === map && (source || art.classList.contains("loaded") || art.querySelector("img.lqip")) && live(true);
+  const ready = () =>
+    artMap === map && (source || art.classList.contains("loaded") || art.querySelector("img.lqip")) && live(true);
   art.addEventListener("load", ready, { capture: true });
   for (const old of root().querySelectorAll(".native-backdrop-art, .native-backdrop-still")) old.remove();
   root().append(art);
@@ -79,13 +87,25 @@ function setSource(next: "scene" | "static" | null): void {
 /** Home screen (no map loaded): ask the host for this map's scene. Same map again: nothing. */
 export function requestBackdrop(map: string | null, replay?: { runId: string; bytes: Uint8Array } | null): void {
   if (map !== null && !MAP_ID.test(map)) map = null;
-  if (replay !== undefined) requestedReplay = map && replay && replay.bytes.length > 0 && replay.bytes.length <= MAX_REPLAY && /^[\w-]{1,64}$/.test(replay.runId) ? replay : null;
+  if (replay !== undefined)
+    requestedReplay =
+      map &&
+      replay &&
+      replay.bytes.length > 0 &&
+      replay.bytes.length <= MAX_REPLAY &&
+      /^[\w-]{1,64}$/.test(replay.runId)
+        ? replay
+        : null;
   else if (map !== requested) requestedReplay = null;
   requested = map;
   if (!state.map && !state.loading && sent !== key(map)) {
     sent = key(map);
     const pb = map && requestedReplay ? requestedReplay : null;
-    send(pb ? { type: "menuBackdrop", map, replay: { runId: pb.runId, replayBase64: base64Bytes(pb.bytes) } } : { type: "menuBackdrop", map });
+    send(
+      pb
+        ? { type: "menuBackdrop", map, replay: { runId: pb.runId, replayBase64: base64Bytes(pb.bytes) } }
+        : { type: "menuBackdrop", map },
+    );
   }
   paintArt();
 }
@@ -111,7 +131,8 @@ export function installMenuBackdrop(): void {
       document.body.classList.remove("attract-cut");
       live(true);
     } else if (src === "cut") {
-      if (source === "scene" && !matchMedia("(prefers-reduced-motion: reduce)").matches) document.body.classList.add("attract-cut");
+      if (source === "scene" && !matchMedia("(prefers-reduced-motion: reduce)").matches)
+        document.body.classList.add("attract-cut");
     } else if (src === "none") {
       setSource(null);
       document.body.classList.remove("attract-cut");
@@ -123,7 +144,8 @@ export function installMenuBackdrop(): void {
       image.alt = "";
       image.onload = () => {
         if (target !== undefined && target !== wanted()) return;
-        for (const old of root().querySelectorAll(".native-backdrop-art, .native-backdrop-still")) if (old !== image) old.remove();
+        for (const old of root().querySelectorAll(".native-backdrop-art, .native-backdrop-still"))
+          if (old !== image) old.remove();
         artMap = null;
         root().append(image);
         setSource("static");

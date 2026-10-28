@@ -18,6 +18,8 @@ test("turn speed: an older native file or preset turns its modifier speed into a
   expect(migrateTurnSpeed({ yawSpeed: 1000, yawSpeedAlt: 90 })).toEqual({ yawSpeed: 720, angleSpeedKey: 1 });
   expect(migrateTurnSpeed({ yawSpeedAlt: 840 })).toEqual({ angleSpeedKey: 4 });
   // A file that already has the multiplier keeps it.
-  expect(migrateTurnSpeed({ yawSpeed: 210, yawSpeedAlt: 630, angleSpeedKey: 1.5 }))
-    .toEqual({ yawSpeed: 210, angleSpeedKey: 1.5 });
+  expect(migrateTurnSpeed({ yawSpeed: 210, yawSpeedAlt: 630, angleSpeedKey: 1.5 })).toEqual({
+    yawSpeed: 210,
+    angleSpeedKey: 1.5,
+  });
 });

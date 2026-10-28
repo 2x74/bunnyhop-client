@@ -11,9 +11,7 @@
 import { ACTIONS } from "../../web/src/ui/settings";
 import { KINDS } from "../../web/src/triggers/volumes";
 
-export type Gate =
-  | { needs: readonly string[]; unavailable?: string }
-  | { excluded: string };
+export type Gate = { needs: readonly string[]; unavailable?: string } | { excluded: string };
 
 const needs = (...keys: string[]): Gate => ({ needs: keys });
 const menuOnly: Gate = { needs: [] };
@@ -66,8 +64,12 @@ const ROWS: Record<string, Gate> = {
   "hud/Keys overlay/Idle": needs("hudKeysIdle"),
   "hud/Keys overlay/Rows": needs("hudKeysRowsWasd", "hudKeysRowsActions", "hudKeysRowsMouse"),
   "hud/Strafe trainer/Preset": needs(
-    "hudStrafeTrainerStyle", "hudStrafeTrainerFollow", "strafeTrainerSmoothing", "hudStrafeTrainerZone",
-    "strafeTrainerHints", "hudStrafeTrainerShowPace",
+    "hudStrafeTrainerStyle",
+    "hudStrafeTrainerFollow",
+    "strafeTrainerSmoothing",
+    "hudStrafeTrainerZone",
+    "strafeTrainerHints",
+    "hudStrafeTrainerShowPace",
   ),
   "hud/Strafe trainer/Style": needs("hudStrafeTrainerStyle"),
   "hud/Strafe trainer/Follow the turn": needs("hudStrafeTrainerFollow"),
@@ -115,10 +117,12 @@ const ROWS: Record<string, Gate> = {
   "hud/Triggers and clips/Style": needs("triggersStyle"),
   "hud/Triggers and clips/Line thickness": needs("triggersThickness"),
   "hud/Triggers and clips/Fill opacity": needs("triggersOpacity", "triggersStyle"),
-  ...Object.fromEntries(KINDS.map((kind) => {
-    const key = `triggersColors${kind.id[0].toUpperCase()}${kind.id.slice(1)}`;
-    return [`hud/Triggers and clips/${kind.label}`, needs(key)];
-  })),
+  ...Object.fromEntries(
+    KINDS.map((kind) => {
+      const key = `triggersColors${kind.id[0].toUpperCase()}${kind.id.slice(1)}`;
+      return [`hud/Triggers and clips/${kind.label}`, needs(key)];
+    }),
+  ),
   "hud/Share layout/Layout code": needs("hudLayoutWeb"),
 
   // Bind rows: one per action, in whichever group the website puts it.
@@ -155,7 +159,11 @@ const ROWS: Record<string, Gate> = {
   "ghost/More/Replay file": excluded("Race a replay file from Replays or the pause menu's Load replay file."),
 
   "graphics/Quality/Preset": needs(
-    "graphicsPotato", "graphicsAntialias", "graphicsAnisotropy", "graphicsResolutionScale", "graphicsWaterReflections",
+    "graphicsPotato",
+    "graphicsAntialias",
+    "graphicsAnisotropy",
+    "graphicsResolutionScale",
+    "graphicsWaterReflections",
   ),
   "graphics/Quality/Look": needs("sourceLook"),
   "graphics/Quality/Potato mode": needs("graphicsPotato"),

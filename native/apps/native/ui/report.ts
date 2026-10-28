@@ -7,8 +7,12 @@ import { h } from "../../web/src/ui/dom";
 
 /** A run being watched in native playback that came from the server (a leaderboard / profile Watch). */
 let watched: { runId: string; name: string; map: string; time: number | null } | null = null;
-export function setWatchedRun(run: typeof watched): void { watched = run; }
-export function watchedRun(): typeof watched { return watched; }
+export function setWatchedRun(run: typeof watched): void {
+  watched = run;
+}
+export function watchedRun(): typeof watched {
+  return watched;
+}
 
 /** Reports are an account action on the live service: never offline, never about yourself. */
 export function canReport(target: { id?: string; name?: string }): boolean {
@@ -25,5 +29,9 @@ export function openReport(target?: ReportTarget): void {
 /** The quiet "Report" button the native screens put next to a player. Null where reporting isn't possible. */
 export function reportButton(target: ReportTarget, label = "Report"): HTMLButtonElement | null {
   if (!canReport(target)) return null;
-  return h("button.btn.native-report", { type: "button", title: `Report ${target.name}`, onclick: () => openReport(target) }, label) as HTMLButtonElement;
+  return h(
+    "button.btn.native-report",
+    { type: "button", title: `Report ${target.name}`, onclick: () => openReport(target) },
+    label,
+  ) as HTMLButtonElement;
 }

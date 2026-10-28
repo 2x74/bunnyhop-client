@@ -89,7 +89,11 @@ export class Autopilot {
     const [vx, vy] = s.velocity;
     const speed = Math.hypot(vx, vy);
     const reach = this.o.reach ?? 160;
-    while (this.wp < this.o.route.length - 1 && Math.hypot(this.o.route[this.wp][0] - px, this.o.route[this.wp][1] - py) < reach) this.wp++;
+    while (
+      this.wp < this.o.route.length - 1 &&
+      Math.hypot(this.o.route[this.wp][0] - px, this.o.route[this.wp][1] - py) < reach
+    )
+      this.wp++;
     const [tx, ty] = this.o.route[Math.min(this.wp, this.o.route.length - 1)];
     if (this.wp === this.o.route.length - 1 && Math.hypot(tx - px, ty - py) < 48) this.wp++;
     const target = Math.atan2(ty - py, tx - px) * DEG;

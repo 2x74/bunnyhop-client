@@ -35,12 +35,14 @@ export function nativeKeyFor(path: string): string {
   return first + rest.map((part) => part[0].toUpperCase() + part.slice(1)).join("");
 }
 
-const requestKey = (owner: RequestedKey["owner"]) => (path: string, rule: KeyRule): RequestedKey => ({
-  path,
-  key: nativeKeyFor(path),
-  rule,
-  owner,
-});
+const requestKey =
+  (owner: RequestedKey["owner"]) =>
+  (path: string, rule: KeyRule): RequestedKey => ({
+    path,
+    key: nativeKeyFor(path),
+    rule,
+    owner,
+  });
 const hud = requestKey("hud");
 const render = requestKey("render");
 

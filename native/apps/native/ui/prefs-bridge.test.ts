@@ -29,11 +29,32 @@ test("the website's defaults stand for the native defaults", () => {
 
 test("every native value the host holds comes back unchanged through prefs", () => {
   const changed = host({
-    sensitivity: 1.37, separateVertical: true, verticalSensitivity: 0.8, fov: 104, yawSpeed: 300, angleSpeedKey: 2.5,
-    crosshairStyle: "t", crosshairColor: "#00e5ff", crosshairGap: 7, hudScale: 135, hud: false, keysStyle: "minimal",
-    keysOverlay: false, speedGraph: true, jumpStats: true, jumpStatsMode: "every", viewmodelLeftHand: true,
-    viewmodelFov: 61, ghostOpacity: 0.7, musicVolume: 0.3, muteUi: true, sourceLook: false, fpsLimit: 240,
-    practiceKeepVelocity: false, mouseDiagnostics: true, timedInput: false,
+    sensitivity: 1.37,
+    separateVertical: true,
+    verticalSensitivity: 0.8,
+    fov: 104,
+    yawSpeed: 300,
+    angleSpeedKey: 2.5,
+    crosshairStyle: "t",
+    crosshairColor: "#00e5ff",
+    crosshairGap: 7,
+    hudScale: 135,
+    hud: false,
+    keysStyle: "minimal",
+    keysOverlay: false,
+    speedGraph: true,
+    jumpStats: true,
+    jumpStatsMode: "every",
+    viewmodelLeftHand: true,
+    viewmodelFov: 61,
+    ghostOpacity: 0.7,
+    musicVolume: 0.3,
+    muteUi: true,
+    sourceLook: false,
+    fpsLimit: 240,
+    practiceKeepVelocity: false,
+    mouseDiagnostics: true,
+    timedInput: false,
     announcer: { ...state.settings.announcer, enabled: true, pb: "holyshit" },
     hudLayout: { timer: { x: 50, y: 40, visible: false }, keys: { x: 10, y: 90, scale: 1.5 } },
     binds: { jump: ["Space"], turnFast: ["ShiftLeft"], noclip: ["Backquote"] },
@@ -98,7 +119,10 @@ test("a host without a website key gets no patch for it, and its rows wait", () 
   expect(hostCan("fov")).toBe(true);
   state.settingsKeys = ["sensitivity", "hudKeysOpacity"];
   expect(hostCan("hudKeysOpacity")).toBe(true);
-  expect(patchBetween(nativeView(clone(DEFAULT_PREFS), host()), nativeView(after, host()))).toEqual({ sensitivity: 3, hudKeysOpacity: 0.5 });
+  expect(patchBetween(nativeView(clone(DEFAULT_PREFS), host()), nativeView(after, host()))).toEqual({
+    sensitivity: 3,
+    hudKeysOpacity: 0.5,
+  });
 });
 
 test("capabilities: HUD elements and bind actions", () => {
@@ -122,7 +146,9 @@ test("website settings the host adds later map by name, with the website's value
   }
   const keys = REQUESTED_KEYS.map((entry) => entry.key);
   expect(new Set(keys).size).toBe(keys.length);
-  for (const mapping of MAPPINGS) for (const key of mapping.keys) expect(key in state.settings || keys.includes(key) || key === "hudLayoutWeb").toBe(true);
+  for (const mapping of MAPPINGS)
+    for (const key of mapping.keys)
+      expect(key in state.settings || keys.includes(key) || key === "hudLayoutWeb").toBe(true);
   state.settingsKeys = [...Object.keys(state.settings), "hudKeysOpacity"];
   state.extraSettings = { hudKeysOpacity: 0.6 };
   const prefs = clone(DEFAULT_PREFS);

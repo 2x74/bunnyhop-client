@@ -1,12 +1,33 @@
-import {h} from "../../web/src/ui/dom";
-import {registerSettingsSection} from "../../web/src/ui/settings-registry";
-import type {Ui} from "./native-rows";
-import {send} from "./bridge";
-export interface UpdateStatus {status:string;message:string;currentVersion:string;version?:string;received:number;bytes?:number}
-export function readUpdateStatus(value:unknown):UpdateStatus|null {
- if(!value||typeof value!=="object")return null;const v=value as Record<string,unknown>;
- if(typeof v.status!=="string"||!["disabled","idle","checking","available","current","downloading","ready","cancelled","error"].includes(v.status))return null;
- return {status:v.status,message:typeof v.message==="string"?v.message.slice(0,1000):"",currentVersion:typeof v.currentVersion==="string"?v.currentVersion.slice(0,80):"local",version:typeof v.version==="string"?v.version.slice(0,80):undefined,received:typeof v.received==="number"&&Number.isFinite(v.received)?Math.max(0,v.received):0,bytes:typeof v.bytes==="number"&&Number.isFinite(v.bytes)&&v.bytes>0?v.bytes:undefined};
+import { h } from "../../web/src/ui/dom";
+import { registerSettingsSection } from "../../web/src/ui/settings-registry";
+import type { Ui } from "./native-rows";
+import { send } from "./bridge";
+export interface UpdateStatus {
+  status: string;
+  message: string;
+  currentVersion: string;
+  version?: string;
+  received: number;
+  bytes?: number;
+}
+export function readUpdateStatus(value: unknown): UpdateStatus | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  if (
+    typeof v.status !== "string" ||
+    !["disabled", "idle", "checking", "available", "current", "downloading", "ready", "cancelled", "error"].includes(
+      v.status,
+    )
+  )
+    return null;
+  return {
+    status: v.status,
+    message: typeof v.message === "string" ? v.message.slice(0, 1000) : "",
+    currentVersion: typeof v.currentVersion === "string" ? v.currentVersion.slice(0, 80) : "local",
+    version: typeof v.version === "string" ? v.version.slice(0, 80) : undefined,
+    received: typeof v.received === "number" && Number.isFinite(v.received) ? Math.max(0, v.received) : 0,
+    bytes: typeof v.bytes === "number" && Number.isFinite(v.bytes) && v.bytes > 0 ? v.bytes : undefined,
+  };
 }
 type UpdateAction = "check" | "download" | "cancel" | "reveal";
 const act = (action: UpdateAction) => () => send({ type: "update", action });

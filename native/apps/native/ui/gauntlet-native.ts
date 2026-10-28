@@ -11,7 +11,13 @@
 // the run service), the split line, the next map after NEXT_MAP_MS (Enter or a click goes at once), the result screen
 // after the last one. DOM-free apart from the Enter/click listener (gauntlet-native.test.ts).
 
-import { ApiError, type GauntletAttempt, type GauntletAttemptState, type GauntletDetail, type GauntletSplitResult } from "../../web/src/api";
+import {
+  ApiError,
+  type GauntletAttempt,
+  type GauntletAttemptState,
+  type GauntletDetail,
+  type GauntletSplitResult,
+} from "../../web/src/api";
 import {
   endedText,
   forgetAttempt,
@@ -35,7 +41,9 @@ import type { RunServiceStatus } from "./run-service";
 
 export interface GauntletApi {
   gauntletAttempt(id: string): Promise<GauntletAttempt>;
-  pingGauntlet(id: string): Promise<{ id: string; state: GauntletAttemptState; step: number; expiresAt: number | null }>;
+  pingGauntlet(
+    id: string,
+  ): Promise<{ id: string; state: GauntletAttemptState; step: number; expiresAt: number | null }>;
   gauntlet(slug: string): Promise<Pick<GauntletDetail, "me">>;
 }
 
@@ -65,14 +73,25 @@ export function statusOutcome(status: RunServiceStatus, maps: number): SplitOutc
   if (status.gauntlet) return splitOutcome(status.gauntlet, maps);
   // The run service sends it again (holdGauntlet): still the candidate, no later finish here takes its place.
   if (status.held) return { kind: "held" };
-  if (status.status === "rejected") return { kind: "refused", reason: status.message ? `the run was refused (${status.message})` : "the run was refused" };
+  if (status.status === "rejected")
+    return {
+      kind: "refused",
+      reason: status.message ? `the run was refused (${status.message})` : "the run was refused",
+    };
   // Given up (no connection for the grace period, the account changed, the build isn't allowed): go again here.
-  if (status.status === "kept" || status.status === "error") return { kind: "refused", reason: "the run didn't upload" };
-  if (status.status === "verified" || status.status === "pending") return splitOutcome(undefined as GauntletSplitResult | undefined, maps);
+  if (status.status === "kept" || status.status === "error")
+    return { kind: "refused", reason: "the run didn't upload" };
+  if (status.status === "verified" || status.status === "pending")
+    return splitOutcome(undefined as GauntletSplitResult | undefined, maps);
   return null;
 }
 
-export const hudProgress = (p: GauntletProgress): GauntletHudProgress => ({ idx: p.idx, maps: p.maps, before: p.before, pbSplit: p.pbSplit });
+export const hudProgress = (p: GauntletProgress): GauntletHudProgress => ({
+  idx: p.idx,
+  maps: p.maps,
+  before: p.before,
+  pbSplit: p.pbSplit,
+});
 
 export class NativeGauntlet {
   private attempt: GauntletAttempt | null = null;
@@ -100,14 +119,26 @@ export class NativeGauntlet {
 
   constructor(private h: GauntletHost) {}
 
-  private get set() { return this.h.setTimeout ?? ((fn: () => void, ms: number) => window.setTimeout(fn, ms)); }
-  private get clear() { return this.h.clearTimeout ?? ((id: number) => window.clearTimeout(id)); }
-  private get now() { return this.h.now ?? Date.now; }
+  private get set() {
+    return this.h.setTimeout ?? ((fn: () => void, ms: number) => window.setTimeout(fn, ms));
+  }
+  private get clear() {
+    return this.h.clearTimeout ?? ((id: number) => window.clearTimeout(id));
+  }
+  private get now() {
+    return this.h.now ?? Date.now;
+  }
 
   /** The attempt being played, if any. */
-  get id(): string | null { return this.attempt?.id ?? null; }
-  get map(): string | null { return this.attempt ? this.mapName : null; }
-  get modeLock(): string | null { return this.attempt ? "Gauntlets are Normal style on the main track." : null; }
+  get id(): string | null {
+    return this.attempt?.id ?? null;
+  }
+  get map(): string | null {
+    return this.attempt ? this.mapName : null;
+  }
+  get modeLock(): string | null {
+    return this.attempt ? "Gauntlets are Normal style on the main track." : null;
+  }
 
   /**
    * Opens attempt `id` (the web's ?gauntlet=<id>, with ?map= when the link had one): plays its current map, or shows
@@ -167,8 +198,13 @@ export class NativeGauntlet {
     // Only the answer to the latest account check counts: an earlier account's late reply neither binds nor ends.
     const current = () => epoch === this.epoch && check === this.accountCheck && this.attempt === a;
     this.h.api.gauntletAttempt(a.id).then(
-      (server) => { if (current() && server.id === a.id) this.owner = id; },
-      (e) => { if (current() && e instanceof ApiError && (e.status === 404 || e.status === 401)) this.end(endedText("unknown")); },
+      (server) => {
+        if (current() && server.id === a.id) this.owner = id;
+      },
+      (e) => {
+        if (current() && e instanceof ApiError && (e.status === 404 || e.status === 401))
+          this.end(endedText("unknown"));
+      },
     );
   }
 
@@ -209,7 +245,8 @@ export class NativeGauntlet {
 
   /** Your gauntlet PB's split on this map, for the HUD's delta. */
   private async loadPB(): Promise<void> {
-    const a = this.attempt, epoch = this.epoch;
+    const a = this.attempt,
+      epoch = this.epoch;
     if (!a) return;
     try {
       const d = await this.h.api.gauntlet(a.gauntlet.slug);
@@ -227,7 +264,8 @@ export class NativeGauntlet {
   }
 
   private async ping(): Promise<void> {
-    const a = this.attempt, epoch = this.epoch;
+    const a = this.attempt,
+      epoch = this.epoch;
     if (!a) return;
     try {
       const r = await this.h.api.pingGauntlet(a.id);
@@ -243,7 +281,8 @@ export class NativeGauntlet {
         if (target.kind === "result") return this.finishAttempt(now);
         if (target.kind === "play" && target.idx > this.idx) return this.begin(now, target.map, target.idx, false);
       }
-      if (r.state !== "open" && r.state !== "finished_pending" && r.state !== "complete") return this.end(endedText(r.state));
+      if (r.state !== "open" && r.state !== "finished_pending" && r.state !== "complete")
+        return this.end(endedText(r.state));
       this.save();
       if (this.offline) {
         this.offline = false;
@@ -260,7 +299,11 @@ export class NativeGauntlet {
    * The run service asks, once per finished run, what it is submitted for (gauntlet/state.ts setGauntletTag): the
    * attempt id for the candidate (this map, Normal, main track, the first finish here), else null.
    */
-  tag(run: { map: string; style: string; track: number }, generation: number, time: number | null = null): string | null {
+  tag(
+    run: { map: string; style: string; track: number },
+    generation: number,
+    time: number | null = null,
+  ): string | null {
     if (!this.attempt || !this.gate) return null;
     const id = this.gate.tag(run);
     if (id) this.awaiting = { generation, time };
@@ -269,7 +312,12 @@ export class NativeGauntlet {
 
   /** The run service may send generation's upload again: it's still this attempt's candidate on the map being played. */
   holds(attempt: string, generation: number): boolean {
-    return !!this.attempt && this.attempt.id === attempt && this.awaiting?.generation === generation && (this.gate?.state === "sent" || this.gate?.state === "held");
+    return (
+      !!this.attempt &&
+      this.attempt.id === attempt &&
+      this.awaiting?.generation === generation &&
+      (this.gate?.state === "sent" || this.gate?.state === "held")
+    );
   }
 
   /** A run service status: the tagged run's answer decides the split. */
@@ -289,15 +337,33 @@ export class NativeGauntlet {
 
   private show(outcome: SplitOutcome, time: number): void {
     const a = this.attempt!;
-    const next = outcome.kind === "split" && !outcome.last ? (a.maps.find((m) => m.idx === outcome.idx + 1)?.map ?? null) : null;
+    const next =
+      outcome.kind === "split" && !outcome.last ? (a.maps.find((m) => m.idx === outcome.idx + 1)?.map ?? null) : null;
     const line = splitLine(outcome, time, a.maps.length, next);
     this.h.line(line, outcome.kind === "split");
-    this.h.send({ type: "hudToast", key: "gauntlet", text: line, ms: outcome.kind === "split" ? NEXT_MAP_MS + 1000 : 5000, ...(outcome.kind === "split" ? { tone: "good" as const } : {}) });
+    this.h.send({
+      type: "hudToast",
+      key: "gauntlet",
+      text: line,
+      ms: outcome.kind === "split" ? NEXT_MAP_MS + 1000 : 5000,
+      ...(outcome.kind === "split" ? { tone: "good" as const } : {}),
+    });
     this.gate!.answer(outcome);
     if (outcome.kind === "ended") return this.end(null);
     if (outcome.kind !== "split") return;
     // This map is done: no more splits here (the server would refuse them), on to the next one.
-    a.splits = [...a.splits.filter((s) => s.idx !== outcome.idx), { idx: outcome.idx, map: a.maps[outcome.idx]?.map ?? "", runId: "", ticks: 0, time, arrivedAt: this.now(), verified: false }];
+    a.splits = [
+      ...a.splits.filter((s) => s.idx !== outcome.idx),
+      {
+        idx: outcome.idx,
+        map: a.maps[outcome.idx]?.map ?? "",
+        runId: "",
+        ticks: 0,
+        time,
+        arrivedAt: this.now(),
+        verified: false,
+      },
+    ];
     a.step = outcome.idx + 1;
     a.next = next ? { idx: outcome.idx + 1, map: next } : null;
     if (outcome.last) a.state = "finished_pending";
@@ -333,7 +399,8 @@ export class NativeGauntlet {
   /** Host state: once the attempt's map has been on screen, another map (or none) means the player left the attempt. */
   onHostState(): void {
     if (!this.attempt || this.goTimer) return;
-    const map = this.h.map(), loading = this.h.loading();
+    const map = this.h.map(),
+      loading = this.h.loading();
     if (map === this.mapName && !loading) this.arrived = true;
     else if (this.arrived && !loading && map !== this.mapName) this.leave();
   }

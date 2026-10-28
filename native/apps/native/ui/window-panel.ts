@@ -18,11 +18,17 @@ function windowGroup(ui: Ui): HTMLElement {
   const shortcuts = h("span.keycaps", null, ui.keycap("F10"), " Settings ", ui.keycap("Alt+Enter"), " Fullscreen");
   const group = ui.group(
     "Window",
-    nativeChoice(ui, "Window mode", "windowMode", WINDOW_MODES.map((mode) => [mode, MODE_LABELS[mode]]), {
-      hint: "Alt+Enter switches",
-      desc: "Borderless covers the screen without changing its mode. Fullscreen uses the display's desktop mode.",
-      keywords: "window fullscreen borderless windowed display mode alt enter",
-    }),
+    nativeChoice(
+      ui,
+      "Window mode",
+      "windowMode",
+      WINDOW_MODES.map((mode) => [mode, MODE_LABELS[mode]]),
+      {
+        hint: "Alt+Enter switches",
+        desc: "Borderless covers the screen without changing its mode. Fullscreen uses the display's desktop mode.",
+        keywords: "window fullscreen borderless windowed display mode alt enter",
+      },
+    ),
     nativeToggle(ui, "Always on top", "alwaysOnTop", {
       desc: "Keeps the game above other windows where the window manager allows it.",
       keywords: "window top above pin",
@@ -84,9 +90,9 @@ function replaysGroup(ui: Ui): HTMLElement {
 
 /** Registers Settings → Display (call once). */
 export function registerDisplaySection(): void {
-  registerSettingsSection(
-    "display",
-    (ui) => ({ columns: [[windowGroup(ui)], [framesGroup(ui), replaysGroup(ui)]] }),
-    { label: "Display", icon: "grid", order: 62 },
-  );
+  registerSettingsSection("display", (ui) => ({ columns: [[windowGroup(ui)], [framesGroup(ui), replaysGroup(ui)]] }), {
+    label: "Display",
+    icon: "grid",
+    order: 62,
+  });
 }

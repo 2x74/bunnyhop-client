@@ -29,11 +29,16 @@ function cssGroup(ui: Ui): HTMLElement {
     unwatchCssFile();
     setCssFile(null);
   });
-  const use = ui.toggle("Use your CSS", () => customCss().on, (on) => setCustomCss({ on }, { now: true }), {
-    readout: status,
-    desc: `Your own stylesheet over the menus and the HUD. Ctrl+Shift+V switches it off from anywhere in the menus. ${HUD_NOTE}`,
-    keywords: "css custom css theme skin style stylesheet font fonts colour color ui interface image gif mod",
-  });
+  const use = ui.toggle(
+    "Use your CSS",
+    () => customCss().on,
+    (on) => setCustomCss({ on }, { now: true }),
+    {
+      readout: status,
+      desc: `Your own stylesheet over the menus and the HUD. Ctrl+Shift+V switches it off from anywhere in the menus. ${HUD_NOTE}`,
+      keywords: "css custom css theme skin style stylesheet font fonts colour color ui interface image gif mod",
+    },
+  );
   const group = ui.group(
     "Custom CSS",
     use,

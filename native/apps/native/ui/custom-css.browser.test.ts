@@ -53,10 +53,15 @@ const rootVariable = (page: Page, name: string): Promise<string> =>
 
 /** Waits until the root variable `name` is (or, with equal false, isn't) `value`. */
 async function waitForVariable(page: Page, name: string, value: string, equal = true): Promise<void> {
-  await page.waitForFunction(([variable, wanted, same]) => {
-    const current = getComputedStyle(document.documentElement).getPropertyValue(variable as string).trim();
-    return (current === wanted) === same;
-  }, [name, value, equal] as const);
+  await page.waitForFunction(
+    ([variable, wanted, same]) => {
+      const current = getComputedStyle(document.documentElement)
+        .getPropertyValue(variable as string)
+        .trim();
+      return (current === wanted) === same;
+    },
+    [name, value, equal] as const,
+  );
 }
 
 const close = (actual: number[] | undefined, expected: number[]): void => {
@@ -89,8 +94,11 @@ test("custom CSS styles the menus and becomes the HUD theme", async () => {
     expect(theme.elements.runStats).toEqual({ opacity: 0.25 });
 
     // The image link was fetched through the proxy and applied as a blob: URL.
-    await page.waitForFunction(() => document.adoptedStyleSheets.some((sheet) =>
-      [...sheet.cssRules].some((rule) => rule.cssText.includes("blob:https://bunnyhop.lol/"))));
+    await page.waitForFunction(() =>
+      document.adoptedStyleSheets.some((sheet) =>
+        [...sheet.cssRules].some((rule) => rule.cssText.includes("blob:https://bunnyhop.lol/")),
+      ),
+    );
 
     // Ctrl+Shift+V: off, and the HUD goes back to its own colours.
     await page.locator("body").press("Control+Shift+KeyV");

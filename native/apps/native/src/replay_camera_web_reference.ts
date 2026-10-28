@@ -16,14 +16,29 @@
 // Positions are Source space (z up); three.js space is (x, z, -y).
 
 import * as THREE from "three";
-export interface RunData {n:number;tickrate:number;pos:ArrayLike<number>;flags:ArrayLike<number>}
-const F_TELEPORTED=4;
+export interface RunData {
+  n: number;
+  tickrate: number;
+  pos: ArrayLike<number>;
+  flags: ArrayLike<number>;
+}
+const F_TELEPORTED = 4;
 
 export type CamMode = "eye" | "chase" | "free" | "flyby" | "auto";
 export const CAM_MODES: { id: CamMode; label: string; key: string; title: string }[] = [
   { id: "eye", label: "In-eye", key: "1", title: "First person: the player's exact view" },
-  { id: "chase", label: "Chase", key: "2", title: "Third person behind the player (drag to orbit, wheel to zoom, double-click to reset)" },
-  { id: "free", label: "Free", key: "3", title: "Free roam: click to fly (WASD + mouse, Shift fast, Space/Ctrl up/down)" },
+  {
+    id: "chase",
+    label: "Chase",
+    key: "2",
+    title: "Third person behind the player (drag to orbit, wheel to zoom, double-click to reset)",
+  },
+  {
+    id: "free",
+    label: "Free",
+    key: "3",
+    title: "Free roam: click to fly (WASD + mouse, Shift fast, Space/Ctrl up/down)",
+  },
   { id: "flyby", label: "Flyby", key: "4", title: "Cinematic drone following the run" },
   { id: "auto", label: "Auto", key: "5", title: "Auto-director: cuts between chase, in-eye, tripod and flyby shots" },
 ];
@@ -302,7 +317,8 @@ export class FlybyCam {
         this.pos[i] += this.vel[i] * dt;
       }
       // If the spring cut through a wall, drop back to the traced point.
-      if (trace && trace(pivot, this.pos, 4) < 0.98) for (let i = 0; i < 3; i++) (this.pos[i] = want[i]), (this.vel[i] = 0);
+      if (trace && trace(pivot, this.pos, 4) < 0.98)
+        for (let i = 0; i < 3; i++) ((this.pos[i] = want[i]), (this.vel[i] = 0));
       for (let i = 0; i < 3; i++) this.look[i] += (pivot[i] - this.look[i]) * damp(9, dt);
     }
     lookFrom(camera, this.pos, this.look);
@@ -331,7 +347,7 @@ export function directShots(d: RunData, from: number, to: number, trace: TraceFn
   let t = from;
   let k = 0;
   let seed = (d.n * 2654435761) >>> 0;
-  const rnd = () => ((seed = (Math.imul(seed ^ (seed >>> 15), 2246822507) + 0x9e3779b9) >>> 0) / 4294967296);
+  const rnd = () => (seed = (Math.imul(seed ^ (seed >>> 15), 2246822507) + 0x9e3779b9) >>> 0) / 4294967296;
   while (t < to) {
     let len = Math.round((2.5 + rnd() * 2.5) * rate);
     // Cut on a teleport if one happens in the shot (a tripod can't follow it anyway).
@@ -356,7 +372,13 @@ export function directShots(d: RunData, from: number, to: number, trace: TraceFn
 }
 
 /** A fixed camera ahead of / beside the path of ticks [a, b] that sees most of it. */
-function tripod(d: RunData, a: number, b: number, trace: TraceFn | null, rnd: () => number): [number, number, number] | null {
+function tripod(
+  d: RunData,
+  a: number,
+  b: number,
+  trace: TraceFn | null,
+  rnd: () => number,
+): [number, number, number] | null {
   const P = (t: number): [number, number, number] => [d.pos[t * 3], d.pos[t * 3 + 1], d.pos[t * 3 + 2] + 40];
   const mid = Math.round(a + (b - a) * 0.62);
   const p0 = P(a);
@@ -374,7 +396,11 @@ function tripod(d: RunData, a: number, b: number, trace: TraceFn | null, rnd: ()
       // Ahead of the shot's end, raised, looking back down the path at the player coming in (works in corridors).
       const ahead = 80 + rnd() * 220;
       const off = side * rnd() * 70;
-      cand = [p1[0] + Math.cos(dir) * ahead - Math.sin(dir) * off, p1[1] + Math.sin(dir) * ahead + Math.cos(dir) * off, p1[2] + 60 + rnd() * 140];
+      cand = [
+        p1[0] + Math.cos(dir) * ahead - Math.sin(dir) * off,
+        p1[1] + Math.sin(dir) * ahead + Math.cos(dir) * off,
+        p1[2] + 60 + rnd() * 140,
+      ];
     } else {
       // Beside the path (open areas).
       const ang = dir + side * (0.6 + rnd() * 0.9);
@@ -394,7 +420,7 @@ function tripod(d: RunData, a: number, b: number, trace: TraceFn | null, rnd: ()
       if (!trace || trace(cand, P(t), 1) > 0.995) seen++;
     }
     const score = seen + rnd() * 0.5;
-    if (score > bestScore) (bestScore = score), (best = cand);
+    if (score > bestScore) ((bestScore = score), (best = cand));
   }
   return bestScore >= samples * 0.7 ? best : null;
 }

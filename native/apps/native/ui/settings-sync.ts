@@ -173,9 +173,12 @@ export function installSettingsSync(ready: () => void): void {
   installed = true;
   syncReady = ready;
   const refresh = (): void => {
-    void api.me().then((user) => {
-      if (!api.meStale()) void syncSettings(user ?? null);
-    }, () => {});
+    void api.me().then(
+      (user) => {
+        if (!api.meStale()) void syncSettings(user ?? null);
+      },
+      () => {},
+    );
   };
   addEventListener("bunnyhop:account", refresh);
   refresh();

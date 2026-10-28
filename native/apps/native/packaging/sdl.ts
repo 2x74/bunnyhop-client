@@ -102,7 +102,13 @@ export function buildPinnedSdl(): string {
   checkout(pin, source);
 
   const configure = [
-    "cmake", "-S", source, "-B", build, "-G", "Ninja",
+    "cmake",
+    "-S",
+    source,
+    "-B",
+    build,
+    "-G",
+    "Ninja",
     "-DCMAKE_BUILD_TYPE=Release",
     `-DCMAKE_INSTALL_PREFIX=${sdlInstallDir}`,
     "-DSDL_SHARED=ON",
@@ -124,12 +130,18 @@ export function buildPinnedSdl(): string {
 
 /** The SDL shared library inside a staged package, by platform layout. */
 function bundledSdlLibrary(packageDir: string, platform: string): string {
-  const dir = platform === "darwin"
-    ? join(packageDir, "Contents/Frameworks")
-    : platform === "linux"
-      ? join(packageDir, "lib")
-      : packageDir;
-  const pattern = platform === "darwin" ? /^libSDL3(\.\d+)*\.dylib$/ : platform === "linux" ? /^libSDL3\.so(\.\d+)*$/ : /^SDL3\.dll$/i;
+  const dir =
+    platform === "darwin"
+      ? join(packageDir, "Contents/Frameworks")
+      : platform === "linux"
+        ? join(packageDir, "lib")
+        : packageDir;
+  const pattern =
+    platform === "darwin"
+      ? /^libSDL3(\.\d+)*\.dylib$/
+      : platform === "linux"
+        ? /^libSDL3\.so(\.\d+)*$/
+        : /^SDL3\.dll$/i;
   const name = existsSync(dir) ? readdirSync(dir).find((file) => pattern.test(file)) : undefined;
   if (!name) throw new Error(`No bundled SDL3 library in ${dir}`);
   return join(dir, name);

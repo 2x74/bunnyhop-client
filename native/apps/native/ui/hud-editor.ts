@@ -34,12 +34,16 @@ export function hudEditor(read: () => HudLayout, save: (layout: HudLayout) => vo
     button.classList.toggle("on", position.visible !== false);
   };
   const buttons = HUD_ELEMENTS.map((item) => {
-    const button = h("button.mn-el.native-place", {
-      type: "button",
-      "data-id": item.id,
-      "aria-label": `Move ${item.label}`,
-      style: "translate:-50% -50%;width:auto;height:auto;padding:0.35cqw 0.6cqw",
-    }, item.label);
+    const button = h(
+      "button.mn-el.native-place",
+      {
+        type: "button",
+        "data-id": item.id,
+        "aria-label": `Move ${item.label}`,
+        style: "translate:-50% -50%;width:auto;height:auto;padding:0.35cqw 0.6cqw",
+      },
+      item.label,
+    );
     button.addEventListener("pointerenter", () => (say.textContent = item.label));
     button.addEventListener("pointerdown", (event) => drag(event, button, item.id));
     button.addEventListener("keydown", (event) => nudge(event, button, item.id));

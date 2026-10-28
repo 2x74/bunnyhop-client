@@ -3,8 +3,17 @@ import { chromium } from "playwright";
 import { readFile } from "node:fs/promises";
 
 const SAMPLE = {
-  active: false, seconds: 1, eventsPerSecond: 8000, events: 8000, peakBurst: 134, averageAgeMs: 4.2, maxAgeMs: 12,
-  maxPumpMs: 0.8, relative: false, systemScaling: false, sdl: "3.4.18",
+  active: false,
+  seconds: 1,
+  eventsPerSecond: 8000,
+  events: 8000,
+  peakBurst: 134,
+  averageAgeMs: 4.2,
+  maxAgeMs: 12,
+  maxPumpMs: 0.8,
+  relative: false,
+  systemScaling: false,
+  sdl: "3.4.18",
 };
 
 test("mouse diagnostics show the delivered rate without claiming the hardware polling rate", async () => {
@@ -16,7 +25,10 @@ test("mouse diagnostics show the delivered rate without claiming the hardware po
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.route("**/*", (route) =>
-      route.request().url() === "https://bunnyhop.lol/mouse-diagnostic-test" ? route.fulfill({ contentType: "text/html", body: html }) : route.abort());
+      route.request().url() === "https://bunnyhop.lol/mouse-diagnostic-test"
+        ? route.fulfill({ contentType: "text/html", body: html })
+        : route.abort(),
+    );
     await page.addInitScript(() => {
       localStorage.setItem("bunnyhop:onboarded", "1");
       localStorage.setItem("bunnyhop:first-seen", String(Date.now()));
@@ -30,14 +42,20 @@ test("mouse diagnostics show the delivered rate without claiming the hardware po
     await page.locator('details.set-adv[data-sec="mouse"] summary').click();
     await page.getByRole("switch", { name: "Show input stats", exact: true }).click();
     await page.waitForTimeout(150);
-    const settings = await page.evaluate(() => (window as unknown as { messages: { type: string; patch?: unknown }[] }).messages.filter((m) => m.type === "settings"));
+    const settings = await page.evaluate(() =>
+      (window as unknown as { messages: { type: string; patch?: unknown }[] }).messages.filter(
+        (m) => m.type === "settings",
+      ),
+    );
     expect(settings).toEqual([{ type: "settings", patch: { mouseDiagnostics: true } }]);
     await page.evaluate((detail) => dispatchEvent(new CustomEvent("bunnyhop:mouse-diagnostics", { detail })), SAMPLE);
     const sample = page.locator('.set-row[data-label="Last sample"]');
     expect(await sample.textContent()).toContain("8,000 motion events/s");
     expect(await sample.textContent()).toContain("Last sample");
     const before = await sample.textContent();
-    await page.evaluate(() => dispatchEvent(new CustomEvent("bunnyhop:mouse-diagnostics", { detail: { eventsPerSecond: Infinity } })));
+    await page.evaluate(() =>
+      dispatchEvent(new CustomEvent("bunnyhop:mouse-diagnostics", { detail: { eventsPerSecond: Infinity } })),
+    );
     expect(await sample.textContent()).toBe(before);
     expect(errors).toEqual([]);
   } finally {

@@ -15,10 +15,19 @@ import { hostHas, sendNativeSettings } from "./prefs-bridge";
 function rendererGroup(ui: Ui): HTMLElement {
   const group = ui.group(
     "Native renderer",
-    nativeChoice(ui, "Water", "waterQuality", [["simple", "Simple"], ["refracted", "Refracted"]], {
-      desc: "Refracted water bends what's under the surface, like CS:S. Simple is cheaper.",
-      keywords: "water refraction quality reflections",
-    }),
+    nativeChoice(
+      ui,
+      "Water",
+      "waterQuality",
+      [
+        ["simple", "Simple"],
+        ["refracted", "Refracted"],
+      ],
+      {
+        desc: "Refracted water bends what's under the surface, like CS:S. Simple is cheaper.",
+        keywords: "water refraction quality reflections",
+      },
+    ),
     nativeToggle(ui, "World effects", "effectsVisible", {
       desc: "Sprites, particles and ghost trails in the world.",
       keywords: "effects particles sprites trails",
@@ -29,14 +38,22 @@ function rendererGroup(ui: Ui): HTMLElement {
 }
 
 function jumpStatsGroup(ui: Ui): HTMLElement {
-  const interval = ui.range("Every N jumps", () => state.settings.jumpStatsInterval, (value) => {
-    sendNativeSettings({ jumpStatsInterval: Math.round(value) });
-  }, {
-    min: 2, max: 50, step: 1, def: 6,
-    when: () => prefs.get().hud.ssj.mode === "everySixth",
-    desc: "With Jumps on Every 6th: report jumps N, 2N, 3N…, each compared with the last one shown.",
-    keywords: "ssj jump stats interval every n",
-  });
+  const interval = ui.range(
+    "Every N jumps",
+    () => state.settings.jumpStatsInterval,
+    (value) => {
+      sendNativeSettings({ jumpStatsInterval: Math.round(value) });
+    },
+    {
+      min: 2,
+      max: 50,
+      step: 1,
+      def: 6,
+      when: () => prefs.get().hud.ssj.mode === "everySixth",
+      desc: "With Jumps on Every 6th: report jumps N, 2N, 3N…, each compared with the last one shown.",
+      keywords: "ssj jump stats interval every n",
+    },
+  );
   const group = ui.group(
     "More jump stats",
     nativeToggle(ui, "Gain colours", "jumpStatsColors", {
@@ -70,7 +87,10 @@ function positionsGroup(ui: Ui): HTMLElement | null {
 
 function packsGroup(ui: Ui): HTMLElement {
   const status = h("small.set-readout");
-  const packs: [("default" | "custom"), string][] = [["default", "bunnyhop.lol"], ["custom", "Custom"]];
+  const packs: ["default" | "custom", string][] = [
+    ["default", "bunnyhop.lol"],
+    ["custom", "Custom"],
+  ];
   const group = ui.group(
     "Sound packs",
     nativeChoice(ui, "Effects pack", "sfxPack", packs, {
@@ -223,10 +243,14 @@ function nativeBindsGroup(ui: Ui): HTMLElement {
 }
 
 function registerNativeHud(): void {
-  registerSettingsSection("native-hud", (ui) => {
-    const positions = positionsGroup(ui);
-    return positions ? [jumpStatsGroup(ui), positions] : [jumpStatsGroup(ui)];
-  }, { advancedUnder: "hud" });
+  registerSettingsSection(
+    "native-hud",
+    (ui) => {
+      const positions = positionsGroup(ui);
+      return positions ? [jumpStatsGroup(ui), positions] : [jumpStatsGroup(ui)];
+    },
+    { advancedUnder: "hud" },
+  );
 }
 
 /**

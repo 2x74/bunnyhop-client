@@ -247,19 +247,36 @@ function scenarios(): Scenario[] {
   for (const fps of [60, 100, 144, 240, 360]) {
     for (const hz of [1000, 2000, 8000]) {
       const duration = durations[hz];
-      out.push({ name: `strafe ${fps} fps ${hz} Hz`, holdbackMs: 0, holdbackMaxMs: webModule.HOLDBACK_MAX,
-        events: strafe(hz, duration, 137), frames: frames(fps, duration + 20 * MS) });
-      out.push({ name: `strafe ${fps} fps ${hz} Hz holdback 1 ms, late arrivals`, holdbackMs: 1,
-        holdbackMaxMs: webModule.HOLDBACK_MAX, events: strafe(hz, duration, 137, 23, 2_500_000),
-        frames: frames(fps, duration + 20 * MS) });
+      out.push({
+        name: `strafe ${fps} fps ${hz} Hz`,
+        holdbackMs: 0,
+        holdbackMaxMs: webModule.HOLDBACK_MAX,
+        events: strafe(hz, duration, 137),
+        frames: frames(fps, duration + 20 * MS),
+      });
+      out.push({
+        name: `strafe ${fps} fps ${hz} Hz holdback 1 ms, late arrivals`,
+        holdbackMs: 1,
+        holdbackMaxMs: webModule.HOLDBACK_MAX,
+        events: strafe(hz, duration, 137, 23, 2_500_000),
+        frames: frames(fps, duration + 20 * MS),
+      });
     }
   }
   // A slow input pipeline: every report arrives |lateNs| after its stamp (in order, as SDL's queue keeps them). At
   // 6 ms the holdback rises until reports stop being late; at 30 ms it gives up on timestamps.
-  const pipelines = [[6 * MS, 1, "raises the holdback"], [30 * MS, 7, "gives up"]] as const;
+  const pipelines = [
+    [6 * MS, 1, "raises the holdback"],
+    [30 * MS, 7, "gives up"],
+  ] as const;
   for (const [lateNs, holdbackMs, label] of pipelines) {
-    out.push({ name: `late reports ${label}`, holdbackMs, holdbackMaxMs: webModule.HOLDBACK_MAX,
-      events: strafe(2000, 1600 * MS, 137, 1, lateNs), frames: frames(240, 1700 * MS) });
+    out.push({
+      name: `late reports ${label}`,
+      holdbackMs,
+      holdbackMaxMs: webModule.HOLDBACK_MAX,
+      events: strafe(2000, 1600 * MS, 137, 1, lateNs),
+      frames: frames(240, 1700 * MS),
+    });
   }
   // Sub-tick taps (pressed and released between two boundaries) and taps on a boundary, at 100 fps where the
   // boundaries fall on whole 10 ms.
@@ -272,11 +289,20 @@ function scenarios(): Scenario[] {
     taps.push({ kind: "motion", t: base + 10 * MS, arrival: base + 10 * MS, x: 1, y: -1 });
   }
   for (const fps of [100, 144, 240]) {
-    out.push({ name: `taps ${fps} fps`, holdbackMs: 0, holdbackMaxMs: webModule.HOLDBACK_MAX, events: taps,
-      frames: frames(fps, 450 * MS) });
+    out.push({
+      name: `taps ${fps} fps`,
+      holdbackMs: 0,
+      holdbackMaxMs: webModule.HOLDBACK_MAX,
+      events: taps,
+      frames: frames(fps, 450 * MS),
+    });
   }
   // Stalls: 120 ms (under the cap) and 1 s (capped), reports and keys made during them arrive when they end.
-  for (const [fps, stallMs] of [[144, 120], [60, 1000], [240, 1000]]) {
+  for (const [fps, stallMs] of [
+    [144, 120],
+    [60, 1000],
+    [240, 1000],
+  ]) {
     const stallFrom = START_NS + 300 * MS;
     const stallTo = stallFrom + stallMs * MS;
     const events: ScriptedEvent[] = [];
@@ -289,8 +315,13 @@ function scenarios(): Scenario[] {
     events.push(key(stallFrom + 60 * MS, "KeyW", true, stallTo), key(stallFrom + 65 * MS, "KeyW", false, stallTo));
     const schedule = [...frames(fps, stallTo - START_NS + 300 * MS, [[stallFrom, stallTo]]), stallTo];
     schedule.sort((a, b) => a - b);
-    out.push({ name: `stall ${stallMs} ms at ${fps} fps`, holdbackMs: 0, holdbackMaxMs: webModule.HOLDBACK_MAX,
-      events, frames: schedule });
+    out.push({
+      name: `stall ${stallMs} ms at ${fps} fps`,
+      holdbackMs: 0,
+      holdbackMaxMs: webModule.HOLDBACK_MAX,
+      events,
+      frames: schedule,
+    });
   }
   // Fractional (trackpad) reports and pitch reversals against the clamp.
   const fractional: ScriptedEvent[] = [];
@@ -298,8 +329,13 @@ function scenarios(): Scenario[] {
     const t = START_NS + i * 500_000;
     fractional.push({ kind: "motion", t, arrival: t, x: i % 4 === 0 ? -0.125 : 0.375, y: i < 300 ? 40 : -55.5 });
   }
-  out.push({ name: "fractional and pitch clamp 144 fps", holdbackMs: 0, holdbackMaxMs: webModule.HOLDBACK_MAX,
-    events: fractional, frames: frames(144, 320 * MS) });
+  out.push({
+    name: "fractional and pitch clamp 144 fps",
+    holdbackMs: 0,
+    holdbackMaxMs: webModule.HOLDBACK_MAX,
+    events: fractional,
+    frames: frames(144, 320 * MS),
+  });
   return out;
 }
 

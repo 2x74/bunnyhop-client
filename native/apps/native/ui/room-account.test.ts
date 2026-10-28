@@ -1,5 +1,42 @@
-import {test,expect} from "bun:test";
-import {RoomAccountBoundary} from "./room-account";
-test("room identity changes close once; rename/verification refresh preserves connection",()=>{let resets=0;const account=new RoomAccountBoundary(()=>resets++);account.capture("guest");account.capture("guest");expect(resets).toBe(0);account.capture("signed-in");expect(resets).toBe(1);account.capture(null);expect(resets).toBe(2);});
-test("late account lookup cannot reset or restore a newer identity",async()=>{let resets=0;const account=new RoomAccountBoundary(()=>resets++);account.capture("a");let resolve!:(id:string)=>void;const stale=account.refresh(()=>new Promise<string>(done=>{resolve=done;}));await account.refresh(async()=>"b");resolve("a");await stale;expect(resets).toBe(1);await account.refresh(async()=>"b");expect(resets).toBe(1);await account.refresh(async()=>undefined);expect(resets).toBe(1);});
-test("failed account fetch cannot disconnect a working room",async()=>{let resets=0;const account=new RoomAccountBoundary(()=>resets++);account.capture("a");await account.refresh(async()=>{throw Error("offline");});expect(resets).toBe(0);});
+import { test, expect } from "bun:test";
+import { RoomAccountBoundary } from "./room-account";
+test("room identity changes close once; rename/verification refresh preserves connection", () => {
+  let resets = 0;
+  const account = new RoomAccountBoundary(() => resets++);
+  account.capture("guest");
+  account.capture("guest");
+  expect(resets).toBe(0);
+  account.capture("signed-in");
+  expect(resets).toBe(1);
+  account.capture(null);
+  expect(resets).toBe(2);
+});
+test("late account lookup cannot reset or restore a newer identity", async () => {
+  let resets = 0;
+  const account = new RoomAccountBoundary(() => resets++);
+  account.capture("a");
+  let resolve!: (id: string) => void;
+  const stale = account.refresh(
+    () =>
+      new Promise<string>((done) => {
+        resolve = done;
+      }),
+  );
+  await account.refresh(async () => "b");
+  resolve("a");
+  await stale;
+  expect(resets).toBe(1);
+  await account.refresh(async () => "b");
+  expect(resets).toBe(1);
+  await account.refresh(async () => undefined);
+  expect(resets).toBe(1);
+});
+test("failed account fetch cannot disconnect a working room", async () => {
+  let resets = 0;
+  const account = new RoomAccountBoundary(() => resets++);
+  account.capture("a");
+  await account.refresh(async () => {
+    throw Error("offline");
+  });
+  expect(resets).toBe(0);
+});

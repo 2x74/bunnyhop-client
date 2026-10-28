@@ -12,7 +12,12 @@ type ChoiceKey = { [K in keyof NativeSettings]: NativeSettings[K] extends string
 
 /** A switch for a native boolean setting. */
 export function nativeToggle(ui: Ui, label: string, key: BooleanKey, o: RowOpts = {}): HTMLElement {
-  return ui.toggle(label, () => state.settings[key], (value) => sendNativeSettings({ [key]: value }), o);
+  return ui.toggle(
+    label,
+    () => state.settings[key],
+    (value) => sendNativeSettings({ [key]: value }),
+    o,
+  );
 }
 
 /** A segmented choice for a native text setting. */

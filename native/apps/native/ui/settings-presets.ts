@@ -5,7 +5,12 @@
 // sensitivity or volume doesn't come along.
 
 import {
-  findProfile, loadProfiles, MAX_PROFILES, PROFILE_NAME_MAX, saveProfile, storeProfiles,
+  findProfile,
+  loadProfiles,
+  MAX_PROFILES,
+  PROFILE_NAME_MAX,
+  saveProfile,
+  storeProfiles,
 } from "../../web/src/ui/settings-profiles";
 import { DEFAULT_PREFS } from "../../web/src/ui/settings";
 import { prefsFromNative } from "./settings-transfer";

@@ -1,6 +1,11 @@
 import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
-import { buildSettingsDoc, encodeSettingsCode, parseSettingsText, planSettingsImport } from "../../web/src/ui/settings-io";
+import {
+  buildSettingsDoc,
+  encodeSettingsCode,
+  parseSettingsText,
+  planSettingsImport,
+} from "../../web/src/ui/settings-io";
 import { DEFAULT_PREFS } from "../../web/src/ui/settings";
 import { loadProfiles } from "../../web/src/ui/settings-profiles";
 import { state } from "./bridge";
@@ -15,7 +20,9 @@ const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 function memoryStorage(): Storage {
   const items = new Map<string, string>();
   return {
-    get length() { return items.size; },
+    get length() {
+      return items.size;
+    },
     clear: () => items.clear(),
     getItem: (key) => items.get(key) ?? null,
     key: (index) => [...items.keys()][index] ?? null,
@@ -55,7 +62,11 @@ test("a bhs1. code from the native client reads back the same on the website", a
 });
 
 test("an old native settings file imports through the website's dialog", async () => {
-  const old = { format: "bunnyhop-native-settings", version: 1, settings: { sensitivity: 1.5, yawSpeed: 150, yawSpeedAlt: 300, crosshair: false } };
+  const old = {
+    format: "bunnyhop-native-settings",
+    version: 1,
+    settings: { sensitivity: 1.5, yawSpeed: 150, yawSpeedAlt: 300, crosshair: false },
+  };
   const parsed = await parseSettingsText(websiteSettingsText(JSON.stringify(old)));
   if (!parsed.ok) throw new Error(parsed.error);
   const plan = planSettingsImport(parsed.doc, clone(DEFAULT_PREFS));
@@ -82,7 +93,11 @@ test("old native presets become website profiles once, without their mouse setti
   expect(presets.map((preset) => preset.name)).toEqual(["Practice", "  Racing  "]);
   expect(presetsToProfiles(presets, storage)).toEqual(["Practice", "Racing"]);
   const profiles = loadProfiles(storage);
-  const practice = profiles.list[0].settings as { crosshair: { color: string }; hud: { scale: number }; sensitivity?: number };
+  const practice = profiles.list[0].settings as {
+    crosshair: { color: string };
+    hud: { scale: number };
+    sensitivity?: number;
+  };
   expect(practice.crosshair.color).toBe("#ff0000");
   expect(practice.hud.scale).toBe(1.4);
   expect(practice.sensitivity).toBeUndefined();
