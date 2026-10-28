@@ -1,6 +1,23 @@
 use super::*;
 use serde_json::json;
 
+#[test]
+fn legit_scroll_strips_all_turn_bits() {
+    let mut filter = styles::Filter::new("scroll", 18);
+    for (grounded, on_ladder) in [(1, 0), (0, 0), (0, 1)] {
+        let command = BhCmd {
+            buttons: (1 << 6) | (1 << 7) | (1 << 8) | (1 << 3),
+            ..BhCmd::default()
+        };
+        let state = BhState {
+            grounded,
+            on_ladder,
+            ..BhState::default()
+        };
+        assert_eq!(filter.apply(command, state).buttons, 1 << 3);
+    }
+}
+
 fn sample_recording(options: BhRecordOptionsV29) -> recording::ReplayData {
     recording::ReplayData {
         options,

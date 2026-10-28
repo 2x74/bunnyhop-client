@@ -20,8 +20,7 @@ inline const std::set<std::string> styles={"autohop","legit","scroll","wonly","s
 inline bool scroll_style(const std::string &style){return style=="legit"||style=="scroll";}
 inline Json default_settings() {
     Json result={{"sensitivity",2.0},{"verticalSensitivity",2.0},{"separateVertical",false},
-        // Turnbinds (+left / +right): degrees per second, like cl_yawspeed. The alt speed is used while Turn modifier is held.
-        // 210 is CS:S's cl_yawspeed, the web's fixed turn and the only speed the server ranks.
+        // Turn rates follow cl_yawspeed and cl_anglespeedkey and freeze for each recording.
         {"invertY",false},{"holdRestart",false},{"mouseDiagnostics",false},
         // Hidden: false goes back to the per-frame proration comparator (also --legacy-input). See timed_input.hpp.
         {"timedInput",true},
@@ -30,7 +29,7 @@ inline Json default_settings() {
         {"playerModel","bunny"},{"ghostModel","same"},{"showGhost",true},{"ghostOpacity",.4},{"ghostNearFade",true},{"ghostTag",true},{"othersAudio",true},{"ghostAudio",true},
         {"sfxVolume",1.0},{"musicVolume",1.0},{"uiVolume",1.0},{"ambienceVolume",1.0},{"muteSfx",false},{"muteUi",false},{"muteMusic",false},{"muteAmbience",false},{"muteInBackground",true},{"classicSounds",false},{"perfectTick",false},{"announcer",default_announcer()},{"footsteps",true},{"weaponSounds",true},{"wind",true},
         {"colorBlind","off"},{"gainTicks",true},{"speedColors",true},{"perfectIndicator",true},{"speedGraph",false},{"keysOverlay",true},{"keysStyle","classic"},
-        {"yawSpeed",210.0},{"yawSpeedAlt",210.0},
+        {"yawSpeed",210.0},{"angleSpeedKey",2.0},
         // Source look: CS:S's auto exposure and bloom on maps with HDR lighting.
         {"capturePbScreenshots",false},{"showPlayerGlow",true},{"firstPersonGlow",true},{"waterQuality","simple"},{"zonesVisible",true},{"effectsVisible",true},{"triggersVisible",false},{"clipsVisible",false},{"fov",90.0},{"sourceLook",true},{"vsync",false},{"fpsLimit",500},{"limitQueuedFrames",true},{"volume",.65},{"muted",false},
         {"hudScale",100.0},{"practiceKeepVelocity",true},{"hud",true},{"crosshair",true},{"viewmodel",true},{"jumpStats",true},
@@ -149,7 +148,10 @@ inline Json patch_settings(const Json &current,const Json &patch) {
             if((key=="crosshairSize"||key=="crosshairGap")&&(n<0||n>40))throw std::runtime_error("Crosshair dimensions must be 0–40");
             if(key=="crosshairThickness"&&(n<.5||n>10))throw std::runtime_error("Crosshair thickness must be .5–10");
             if((key=="volume"||key=="sfxVolume"||key=="musicVolume"||key=="uiVolume"||key=="ambienceVolume"||key=="crosshairAlpha"||key=="ghostOpacity") && (n<0||n>1)) throw std::runtime_error("Volume must be 0–1");
-            if((key=="yawSpeed"||key=="yawSpeedAlt") && (n<.01||n>1000)) throw std::runtime_error("Yaw speed must be .01–1000");
+            if (key == "yawSpeed" && (n < 60 || n > 720))
+                throw std::runtime_error("Yaw speed must be 60–720");
+            if (key == "angleSpeedKey" && (n < 1 || n > 4))
+                throw std::runtime_error("Turn multiplier must be 1–4");
             if(key=="strafeTrainerSmoothing" && (n!=std::floor(n) || n<1 || n>50)) throw std::runtime_error("Strafe trainer smoothing must be a whole number 1–50");
             if(key=="jumpStatsInterval" && (n!=std::floor(n) || n<2 || n>50)) throw std::runtime_error("Jump stats interval must be a whole number 2–50");
             if(key=="fpsLimit" && (n!=std::floor(n) || (n!=0 && (n<30||n>1000)))) throw std::runtime_error("FPS limit must be 0 or 30–1000");
@@ -179,6 +181,17 @@ inline Json load_settings(const std::filesystem::path &file) {
     // Before !showclips existed, "Trigger and clip overlays" drew both groups.
     // Keep clips on for anyone who had that toggle on.
     if(saved.is_object()&&!saved.contains("clipsVisible")&&saved.value("triggersVisible",Json(false))==true)saved["clipsVisible"]=true;
+    if (saved.is_object() && saved.contains("yawSpeedAlt")) {
+        const double speed = saved.value("yawSpeed", 210.0);
+        const double alternate = saved.at("yawSpeedAlt").get<double>();
+        if (!saved.contains("angleSpeedKey") && std::isfinite(speed) && speed > 0 && std::isfinite(alternate)) {
+            saved["angleSpeedKey"] = std::clamp(alternate / speed, 1.0, 4.0);
+        }
+        saved.erase("yawSpeedAlt");
+        if (std::isfinite(speed)) {
+            saved["yawSpeed"] = std::clamp(speed, 60.0, 720.0);
+        }
+    }
     keep_saved_display(saved);
     return patch_settings(out,saved);
 }

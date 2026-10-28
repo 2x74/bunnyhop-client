@@ -1,5 +1,6 @@
 #include "native_input.hpp"
 #include "native_math.hpp"
+#include "turn_settings.hpp"
 #include "settings.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
@@ -170,9 +171,9 @@ int main() {
         in.set_angles(0,180,2);in.turn(210,.01);assert(in.look_sample()->kind==(2|128));
         in.set_yaw(10,5);in.turn(210,.01);assert(in.look_sample()->kind==(5|128));
         in.motion(.5,0);in.turn(118.888888,.01);l=in.look_sample();
-        assert(l->kind==(5|128)&&l->count==.5); // Custom rate is never passed off as canonical.
+        assert(l->kind==6&&l->count==.5); // Frozen BHTS rates describe custom turns.
         const double yaw=in.yaw();in.command();
-        in.turn(std::numeric_limits<double>::infinity(),.01);in.turn(210,0);in.turn(1001,.01);
+        in.turn(std::numeric_limits<double>::infinity(),.01);in.turn(210,0);in.turn(2881,.01);
         assert(in.yaw()==yaw&&in.command().buttons==0);
         assert(!native::turn_binds_allowed("scroll",false));
         assert(native::turn_binds_allowed("scroll",true)&&native::turn_binds_allowed("wonly",false));
@@ -185,14 +186,37 @@ int main() {
         native::TurnAdmission admission;
         assert(!admission.observe(210)&&!admission.observe(-210)&&!admission.observe(0));
         // Default turn binds are the web's fixed 210 deg/s turn: ranked, like the web's +left / +right.
-        const double defaults=native::default_settings()["yawSpeed"],modifier=native::default_settings()["yawSpeedAlt"];
-        assert(defaults==210&&modifier==210&&!admission.observe(native::configured_turn_rate(true,false,defaults))&&admission.allows_event("finish"));
+        const double defaults=native::default_settings()["yawSpeed"],modifier=native::default_settings()["angleSpeedKey"];
+        assert(defaults==210&&modifier==2&&!admission.observe(native::configured_turn_rate(true,false,defaults))&&admission.allows_event("finish"));
         assert(admission.allows_event("finish"));
         // Outside Legit Scroll any turn speed is submitted; the server decides whether it ranks.
         assert(!admission.observe(118.888888)&&!admission.observe(-720)&&admission.allows_event("finish")&&!admission.local_only);
         assert(admission.observe(210,true)&&!admission.allows_event("beat")&&!admission.allows_event("finish")); // Legit Scroll practice is local
         assert(admission.allows_event("reset")&&!admission.observe(118.888888,true)&&admission.local_only);
         admission.reset();assert(admission.allows_event("finish"));
+    }
+    {
+        native::TurnSettings turns{300, 2.5};
+        native::Input in;
+        in.set_angles(0, 359);
+        in.motion(.125, 0);
+        in.look_sample();
+        const double rate = turns.apply(in, native::turn_left | native::turn_fast, .01, true);
+        assert(rate == 750);
+        assert(in.yaw_base == native::Input::normalize(359 + 1.0 * double(300.f) * double(2.5f) * .01));
+        assert(in.yaw_counts == .125 && in.sensitivity == 2);
+        assert(in.look_sample()->kind == 6);
+        assert(in.command().buttons == (native::turn_left | native::turn_fast));
+        const double yaw = in.yaw();
+        turns.apply(in, native::turn_fast, .01, true);
+        assert(in.command().buttons == 0 && in.yaw() == yaw);
+        turns.apply(in, native::turn_left | native::turn_right | native::turn_fast, .01, true);
+        assert(in.command().buttons == 0 && in.yaw() == yaw);
+        turns.apply(in, native::turn_right | native::turn_fast, .01, false);
+        assert(in.command().buttons == 0 && in.yaw() == yaw);
+        in.set_yaw(10, 5);
+        turns.apply(in, native::turn_right | native::turn_fast, .01, true);
+        assert(in.look_sample()->kind == (5 | 0x80));
     }
     {
         using namespace std::chrono;

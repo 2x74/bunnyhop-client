@@ -138,7 +138,7 @@ impl Filter {
         }
         // Shared filter removes keyboard turn bits even on the ground and ladders.
         if self.id == "scroll" {
-            c.buttons &= !((1 << 7) | (1 << 8));
+            c.buttons &= !((1 << 6) | (1 << 7) | (1 << 8));
         }
         if s.grounded != 0 || s.on_ladder != 0 || self.from_ladder {
             return c;

@@ -95,6 +95,7 @@ public:
         }
         settle_motion();
         while (edge_head_ < edges_.size() && edges_[edge_head_].t <= first_cut_) {
+            folded_edges_ = true;
             apply_edge(edges_[edge_head_++]);
         }
         compact(edges_, edge_head_);
@@ -102,6 +103,7 @@ public:
 
     size_t motion_storage() const { return motion_.size(); }
     size_t edge_storage() const { return edges_.size(); }
+    bool take_folded_edges() { return std::exchange(folded_edges_, false); }
 
     int64_t holdback_ns() const { return int64_t(std::llround(holdback_ms * 1e6)); }
 
@@ -150,6 +152,7 @@ public:
     void add_edge(int64_t t, const std::string &code, bool down) {
         ++edges_seen;
         if (fold_cut_ && t <= *fold_cut_) {
+            folded_edges_ = true;
             apply_edge(Edge{t, code, down});
         } else {
             make_edge_room();
@@ -209,6 +212,7 @@ public:
 
     // No held movement keys and no pending edges.
     void release_keys() {
+        folded_edges_ = false;
         keys.clear();
         edges_.clear();
         edge_head_ = 0;
@@ -217,6 +221,7 @@ public:
     // The keys physically held right now become the tick state, with no edge pending for them.
     template <class Codes> void seed_keys(const Codes &codes) {
         release_keys();
+        folded_edges_ = false;
         for (const auto &code : codes) {
             keys.push_back(code);
         }
@@ -237,6 +242,7 @@ public:
 
 private:
     double fold_pitch_ = 0;
+    bool folded_edges_ = false;
     std::optional<Report> folded_;
     std::optional<int64_t> fold_cut_;
     int64_t first_cut_ = 0;

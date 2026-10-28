@@ -47,11 +47,11 @@ int main(){
     }
     const auto original=native::default_settings();
     {   // Turnbinds: yaw speeds and their binds.
-        assert(original["yawSpeed"]==210.0&&original["yawSpeedAlt"]==210.0);
+        assert(original["yawSpeed"]==210.0&&original["angleSpeedKey"]==2.0);
         assert(original["binds"]["turnLeft"][0]=="ArrowLeft"&&original["binds"]["turnRight"][0]=="ArrowRight"&&original["binds"]["turnFast"][0]=="Mouse4");
-        auto turned=native::patch_settings(original,{{"yawSpeed",170},{"yawSpeedAlt",90.5},{"binds",{{"turnFast",{"ShiftLeft"}}}}});
-        assert(turned["yawSpeed"]==170&&turned["yawSpeedAlt"]==90.5&&turned["binds"]["turnFast"][0]=="ShiftLeft");
-        for(const auto &bad:{native::Json{{"yawSpeed",0}},native::Json{{"yawSpeedAlt",1001}},native::Json{{"yawSpeed","fast"}}}){
+        auto turned=native::patch_settings(original,{{"yawSpeed",170},{"angleSpeedKey",2.5},{"binds",{{"turnFast",{"ShiftLeft"}}}}});
+        assert(turned["yawSpeed"]==170&&turned["angleSpeedKey"]==2.5&&turned["binds"]["turnFast"][0]=="ShiftLeft");
+        for(const auto &bad:{native::Json{{"yawSpeed",0}},native::Json{{"angleSpeedKey",4.1}},native::Json{{"yawSpeed","fast"}}}){
             bool threw=false;try{native::patch_settings(original,bad);}catch(const std::exception&){threw=true;}assert(threw);
         }
     }

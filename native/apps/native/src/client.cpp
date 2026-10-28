@@ -3,6 +3,7 @@
 #include "mouse_diagnostics.hpp"
 #include "raw_keyboard.hpp"
 #include "input_timeline.hpp"
+#include "recording_input.hpp"
 #include "display_defaults.hpp"
 #include "json_file_writer.hpp"
 #include "diagnostics_report.hpp"
@@ -423,6 +424,8 @@ int run(const Options &opt) {
     std::set<std::string> held_codes;
     native::InputTimeline input_timeline;
     native::FrameDiagnostics frame_diagnostics;
+    native::TurnSettings configured_turns;
+    native::RecordingInput recording_input;
     // Typed copies of settings the frame loop reads every frame (apply_preferences).
     bool diagnostics_enabled = false;
     bool limit_queued_frames = true;
@@ -443,6 +446,7 @@ int run(const Options &opt) {
         input_timeline.set_sensitivity(input, preferences.at("sensitivity").get<double>());
         input.vertical_sensitivity=preferences.at("verticalSensitivity").get<double>();input.separate_vertical=preferences.at("separateVertical").get<bool>();input.invert_y=preferences.at("invertY").get<bool>();
         input_timeline.rebuild_binds(preferences.at("binds"));
+        configured_turns = native::TurnSettings::from_settings(preferences);
         const bool timed_input = !opt.legacy_input && preferences.value("timedInput", true);
         input_timeline.set_timed(timed_input, input, held_codes);
         diagnostics_enabled = preferences.at("mouseDiagnostics").get<bool>();
@@ -594,6 +598,7 @@ int run(const Options &opt) {
     auto begin_record=[&]() {
         if(turn_admission.local_only)score_notice.clear();
         turn_admission.reset();
+        recording_input.stop();
         recording_ended=false; record_path.clear();pending_vault_capture.reset();
         ++run_generation;beat_start=beat_upto=0;beat_hash=0x811c9dc5;beat_paused=false;
         run_event({{"type","reset"}});
@@ -602,11 +607,7 @@ int run(const Options &opt) {
         record_path=(cache/"replays"/(map_id+"-"+std::to_string(stamp)+".bhr")).string();
         require(bh_record_identity(core.get(),identity.at("build").get<std::string>().c_str()),core.get(),"Setting native release identity");
         require(bh_record_begin(core.get(),"",active_style.c_str(),replay_player.c_str(),100),core.get(),"Starting native recording");
-        // TODO(v0.0.29 core sync): mark timed-input recordings with the replay header's FLAG_TIMED_INPUT (1 << 4),
-        // as the web does, so the server analyzer skips its smooth-for-fps rule for them. The vendored core's BHR
-        // writer (crates/native-bridge/src/recording.rs encode_raw) only writes the autohop, stamina and counted
-        // bits, and the C ABI has no way to set it. Add a recording flag to the core and call it here when
-        // input_timeline.timed() is true.
+        require(recording_input.begin(core.get(), configured_turns), core.get(), "Setting v29 recording input");
         bh_record_loadout(core.get(),packed_loadout.c_str());
     };
     auto reset=[&]() {
@@ -658,6 +659,7 @@ int run(const Options &opt) {
     auto practice_use=[&](const std::string &tool){
         if(!practice.active){BhRunState timing{};bh_run_state(core.get(),&timing);practice.active=true;practice.tool=tool;toast(timing.status==1?"This run is practice now. Press R to restart for a real run.":"Practice until you restart. Press R for a real run.",5000);}
         require(bh_practice_enter(core.get(),tool=="noclip"),core.get(),"Entering practice");
+        recording_input.stop();
         recording_ended=false;record_path.clear();pending_vault_capture.reset();score_notice.clear();++run_generation;beat_start=beat_upto=0;run_event({{"type","reset"}});
     };
     auto practice_action=[&](const std::string &action,bool bound=false,std::optional<bool> value=std::nullopt){
@@ -810,6 +812,7 @@ int run(const Options &opt) {
     auto open_replay=[&](const std::filesystem::path &path,const std::string &action,unsigned ghost_slot=0) {
         if(ghost_slot>=ghost_slots.size())throw std::runtime_error("Invalid ghost slot");
         if(!core)throw std::runtime_error("Load the replay map first");
+        recording_input.stop();
         practice.clear(core.get());if(tutorial)tutorial->stop();tutorial_demo=false;renderer->reset_presentation();scope.reset();
         bh_record_end(core.get());++run_generation;run_event({{"type","reset"}});beat_start=0;audio.reset();
         if(action=="ghost") {
@@ -893,15 +896,6 @@ int run(const Options &opt) {
                     if(!id.empty()){third_person=false;practice.clear(core.get());selected_style="autohop";active_track=0;if(restart)reset();}
     };
     uint32_t last_slot=3,observed_slot=3;
-    // Turnbinds: +left / +right turn at yawSpeed degrees per second (cl_yawspeed),
-    // or yawSpeedAlt while Turn modifier is held. Positive is left (yaw goes up).
-    auto turn_rate=[&]()->double {
-        if(!captured || !native::turn_binds_allowed(active_style,
-            (tutorial&&tutorial->is_active()) || practice.active || feedback.ssj_was_noclip))return 0;
-        auto held=[&](const char *action){for(const auto &key:preferences.at("binds").at(action))if(held_codes.contains(key.get<std::string>()))return true;return false;};
-        return native::configured_turn_rate(held("turnLeft"),held("turnRight"),
-            preferences.at(held("turnFast")?"yawSpeedAlt":"yawSpeed").get<double>());
-    };
     auto held_action=[&](const std::string &action){const auto &binds=preferences.at("binds");if(!binds.contains(action))return false;for(const auto &key:binds.at(action))if(held_codes.contains(key.get<std::string>()))return true;return false;};
     auto weapon_context=[&](){return native::WeaponMenuContext{settings.physics,practice.active||zones.empty(),playback,room.spectator_target.has_value(),practice.noclip};};
     auto act=[&](const std::string &action,bool wheel=false,bool instant=false) {
@@ -1697,15 +1691,20 @@ int run(const Options &opt) {
                 if(curr.tick>=playback_info.at("totalTicks").get<uint32_t>()){playback_paused=true;input_scheduler.reset(SDL_GetTicksNS());break;}
                 BhSnapshot state{};if(!bh_replay_step(core.get(),&state)){const std::string failure=bh_last_error(core.get());playback_failed=true;reset();error="Replay stopped: "+failure;std::cerr<<error<<'\n';show_menu(true);input_scheduler.reset(SDL_GetTicksNS());if(opt.frames)running=false;break;}curr=state.player;bh_last_command(core.get(),&cmd);input.set_angles(cmd.pitch,cmd.yaw,5);
             } else {
-                if(const double rate=turn_rate()) {
-                    input.turn(rate,dt);
-                    if(turn_admission.observe(rate,active_style=="scroll")) {
-                        // Invalidate any open ranked session, but keep recording the local archive.
-                        ++run_generation;run_event({{"type","reset"}});beat_start=0;
-                        score_notice="Practice turn controls: local replay only";
-                    }
+                const bool turns_allowed = captured && native::turn_binds_allowed(active_style,
+                    (tutorial && tutorial->is_active()) || practice.active || feedback.ssj_was_noclip);
+                const auto &turns = recording_input.active() ? recording_input.turns : configured_turns;
+                const double rate = turns.apply(input, input_timeline.held(held_codes), dt, turns_allowed);
+                if (turn_admission.observe(rate, active_style == "scroll")) {
+                    ++run_generation;
+                    run_event({{"type", "reset"}});
+                    beat_start = 0;
+                    score_notice = "Practice turn controls: local replay only";
                 }
-                input.held = input_timeline.held(held_codes);
+                if (!record_path.empty() && !recording_ended) {
+                    require(recording_input.mark_timed(core.get(), input_timeline.tick_contributed()),
+                            core.get(), "Marking timed input recording");
+                }
                 if(!(input.pulse&native::give_mask)) {
                     if(const auto give=kept_weapons.next()) {
                         input.pulse=(input.pulse&~native::weapon_command_mask)|(give<<native::give_shift);
@@ -1847,7 +1846,13 @@ int run(const Options &opt) {
             const double steady_seconds=std::chrono::duration<double>(now.time_since_epoch()).count();auto actors=room.actors(steady_seconds);
             auto camera_input=input_timeline.preview(input);
             // Show turnbind motion between ticks too, so turning is smooth at any frame rate.
-            if(simulation_active&&!playback&&!spectator)if(const double rate=turn_rate())camera_input.turn(rate,std::clamp(input_scheduler.seconds(),0.0,dt));std::string shown_notice=tutorial&&tutorial->is_active()&&!playback?tutorial->notice():score_notice;
+            if (simulation_active && !playback && !spectator) {
+                const auto &turns = recording_input.active() ? recording_input.turns : configured_turns;
+                const bool allowed = captured && native::turn_binds_allowed(active_style, practice.active);
+                turns.apply(camera_input, input_timeline.binds().held(held_codes),
+                            std::clamp(input_scheduler.seconds(), 0.0, dt), allowed);
+            }
+            std::string shown_notice=tutorial&&tutorial->is_active()&&!playback?tutorial->notice():score_notice;
             const auto race_notice=room_modes.notice(epoch_ms());if(!race_notice.empty())shown_notice=race_notice;
             renderer->set_player_glow(player_glow);if(!spectator)renderer->set_spectated_actor(std::nullopt);renderer->set_viewmodel_weapon(std::nullopt);renderer->set_viewmodel_visible(preferences.at("viewmodel").get<bool>()&&!opt.camera);renderer->set_source_look(preferences.at("sourceLook").get<bool>());
             if(spectator){spectated_actor=room.spectated(steady_seconds);const auto &target=spectated_actor;if(target){renderer->set_spectated_actor(*target);for(int k=0;k<3;k++){eye[k]=target->frame.position[k];state.player.position[k]=target->frame.position[k];state.player.velocity[k]=target->frame.velocity[k];}eye[2]+=target->frame.view_offset_z;state.player.tick=target->frame.tick;state.player.view_offset_z=target->frame.view_offset_z;state.player.grounded=!!(target->frame.flags&2);state.player.crouched=!!(target->frame.flags&1);camera_input.set_angles(target->frame.pitch,target->frame.yaw);renderer->set_cosmetics(target->outfit,target->loadout);renderer->set_player_glow(target->playerGlow);renderer->set_viewmodel_weapon(target->frame.weapon);shown_notice="Spectating "+target->name+" - Esc for Room controls";actors.erase(std::remove_if(actors.begin(),actors.end(),[&](const auto &a){return a.id==target->id;}),actors.end());}else{renderer->set_spectated_actor(std::nullopt);renderer->set_viewmodel_visible(false);shown_notice="Waiting for spectator target";}}

@@ -19,6 +19,9 @@ inline uint32_t movement_bit(std::string_view action) {
     if (action == "use") return use;
     if (action == "attack") return attack;
     if (action == "attack2") return attack2;
+    if (action == "turnLeft") return turn_left;
+    if (action == "turnRight") return turn_right;
+    if (action == "turnFast") return turn_fast;
     return 0;
 }
 

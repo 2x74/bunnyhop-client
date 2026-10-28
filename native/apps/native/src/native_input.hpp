@@ -14,6 +14,9 @@ constexpr uint32_t attack = 1u, jump = 1u << 1, duck = 1u << 2;
 constexpr uint32_t forward = 1u << 3, back = 1u << 4, use = 1u << 5;
 constexpr uint32_t left = 1u << 9, right = 1u << 10, attack2 = 1u << 11;
 constexpr uint32_t turn_left = 1u << 7, turn_right = 1u << 8;
+constexpr uint32_t turn_fast = 1u << 6;
+constexpr uint32_t turn_mask = turn_fast | turn_left | turn_right;
+constexpr double max_turn_rate = 720.0 * 4.0;
 constexpr uint32_t teleported = 1u, angles_changed = 1u << 4;
 // m_yaw and m_pitch: view degrees per mouse count at sensitivity 1.
 constexpr double kDegreesPerCount = 0.022;
@@ -40,10 +43,7 @@ inline double configured_turn_rate(bool left, bool right, double speed) {
     return left?speed:-speed;
 }
 
-// Turnbinds in Legit Scroll (practice only) keep the attempt local: sticky for
-// the complete attempt, including its pre-start ticks. Other styles submit any
-// turn speed; the replay still records non-210 turns as raw (see Input::turn), so
-// the server decides whether they rank.
+// Turnbinds in Legit Scroll keep the attempt local, including pre-start ticks.
 struct TurnAdmission {
     bool local_only = false;
     void reset() { local_only = false; }
@@ -81,15 +81,12 @@ struct Input {
     }
     double yaw() const { return normalize(yaw_base - yaw_counts * (sensitivity * 0.022)); }
     void set_yaw(double v,uint32_t reason=5) { yaw_base = normalize(v); yaw_counts = 0; ++epoch;kind=reason; }
-    // The shared format describes fixed 210 deg/s turns. Custom rates are
-    // conservatively RAW|WITH_TURN: retain counts and the turn buttons without
-    // claiming they were the canonical fixed turn. Never hide a prior raw set.
+    // v29 records frozen turn rates separately. Preserve provenance from any other rebase in this command.
     void turn(double rate, double dt) {
         if (!std::isfinite(rate) || !std::isfinite(dt) || rate == 0 || dt <= 0 ||
-            std::abs(rate) < .01 || std::abs(rate) > 1000 || !std::isfinite(rate * dt)) return;
+            std::abs(rate) > max_turn_rate || !std::isfinite(rate * dt)) return;
         yaw_base = normalize(yaw_base + rate * dt);
-        kind = std::abs(rate) != 210 ? 5u | 128u :
-            sampled_epoch == epoch ? 6u : kind | 128u;
+        kind = sampled_epoch == epoch ? 6u : kind | 128u;
         ++epoch;
         pulse |= rate > 0 ? turn_left : turn_right;
     }

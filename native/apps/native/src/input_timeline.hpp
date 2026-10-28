@@ -102,6 +102,7 @@ public:
     // The input for the tick starting at |sim_ns|; advances |sim_ns| to its end. --frames is deterministic with no
     // wall clock to place events on, so each of its ticks takes everything waiting.
     void take_tick(Input &input, uint64_t &sim_ns, uint64_t tick_ns, bool frames_mode) {
+        tick_contributed_ = false;
         if (frames_mode) {
             commit_pending(input);
             input.consume_all();
@@ -110,11 +111,17 @@ public:
         const uint64_t start = sim_ns;
         sim_ns += tick_ns;
         if (timed_) {
-            queue_.take(int64_t(sim_ns), [&input](const TimedInput::Report &report) { apply(input, report); });
+            const size_t edges = queue_.pending_edges();
+            const auto reports = queue_.take(int64_t(sim_ns),
+                [&input](const TimedInput::Report &report) { apply(input, report); });
+            const bool folded_edges = queue_.take_folded_edges();
+            tick_contributed_ = reports != 0 || edges != queue_.pending_edges() || folded_edges;
         } else {
             input.take_tick(start, sim_ns);
         }
     }
+
+    bool tick_contributed() const { return tick_contributed_; }
 
     // The movement buttons a tick holds: its own key state, or (legacy) the keys as last polled.
     uint32_t held(const std::set<std::string> &held_codes) const {
@@ -176,6 +183,7 @@ public:
 
 private:
     bool timed_ = true;
+    bool tick_contributed_ = false;
     TimedInput queue_;
     BindTable binds_;
     EventStamps stamps_;
