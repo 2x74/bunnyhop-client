@@ -1,36 +1,90 @@
-import { settingsPatch,type NativeSettings } from "./bridge";
+// Settings → Export / Import is the website's dialog (web ui/settings-transfer.ts): a bhs1. code or a .json file in
+// the website's format, so codes and files go both ways between the website and the desktop client. The menu can't
+// download or pick files itself, so its "Save .json file" and "Choose file…" go through the host's file dialogs.
+//
+// Files the desktop client saved before it used the website's format ("bunnyhop-native-settings") still import: they
+// are read as host settings and turned into a website settings document on the way in.
+
+import { buildSettingsDoc, stringifySettings } from "../../web/src/ui/settings-io";
+import { prefs, type Prefs } from "../../web/src/ui/settings";
+import { VERSION } from "../../web/src/version";
+import { settingsPatch } from "./bridge";
+import { openFile, saveFile } from "./native-files";
+import { hostSettings, pullHost, type HostSettings } from "./prefs-bridge";
 import { migrateTurnSpeed } from "./turn-speed";
-import { parseSettingsText } from "../../web/src/ui/settings-io";
-/** What the Import box accepts: the web's settings code ("bhs1.…", from Settings →
- * Export settings), or native/web settings JSON. Throws a message for the player. */
-export async function readSettingsText(text:string):Promise<unknown> {
-  const raw=text.trim();
-  if(!raw)throw new Error("Paste a settings code (bhs1.…) or settings JSON first.");
-  if(/\bbhs[01]\.[A-Za-z0-9_-]+/.test(raw)){const result=await parseSettingsText(raw);if(!result.ok)throw new Error(result.error);return result.doc;}
-  if(raw.length>65536)throw new Error("Settings JSON exceeds 64 KiB.");
-  try{return JSON.parse(raw);}catch{throw new Error("That isn't a settings code or settings JSON. Codes start with bhs1.");}
+
+/** The format of settings files the desktop client wrote before. */
+export const OLD_NATIVE_FORMAT = "bunnyhop-native-settings";
+
+/** Prefs as `base`, with the native settings in `settings` applied (an old native file or preset). */
+export function prefsFromNative(settings: Record<string, unknown>, base: Prefs = prefs.get()): Prefs {
+  const next = JSON.parse(JSON.stringify(base)) as Prefs;
+  const current = hostSettings();
+  const patch = settingsPatch(migrateTurnSpeed(settings));
+  const host = { ...current, ...patch, binds: { ...current.binds, ...patch.binds } } as HostSettings;
+  pullHost(next, host);
+  return next;
 }
-const object=(v:unknown):Record<string,unknown>=>v&&typeof v==="object"&&!Array.isArray(v)?v as Record<string,unknown>:{};
-/** Import only settings whose native behavior exists. Unknown web features are
- * reported rather than appearing to have been applied. No account data leaves. */
-export function importSettings(value:unknown):{patch:Partial<NativeSettings>;unsupported:string[]} {
-  const envelope=object(value),raw=object(envelope.settings??envelope.prefs??value);
-  const web=typeof raw.crosshair==="object"||typeof raw.viewmodel==="object";
-  const converted:Record<string,unknown>={...raw};
-  if(web){
-    const ghost=object(raw.ghost),crosshair=object(raw.crosshair),vm=object(raw.viewmodel),audio=object(raw.audio),hud=object(raw.hud),graphics=object(raw.graphics),practice=object(raw.practice);
-    const audioMute=object(audio.mute);
-    Object.assign(converted,{ghostOpacity:ghost.opacity,ghostNearFade:ghost.nearFade,ghostTag:ghost.tag,othersAudio:audio.others,ghostAudio:audio.ghosts,separateVertical:raw.verticalSensitivityEnabled,crosshair:crosshair.style!=="none",crosshairStyle:crosshair.style,crosshairColor:crosshair.color,crosshairSize:crosshair.size,crosshairGap:crosshair.gap,crosshairThickness:crosshair.thickness,crosshairAlpha:crosshair.alpha,crosshairOutline:crosshair.outline,
-      viewmodel:vm.show,viewmodelFov:vm.fov,viewmodelX:vm.x,viewmodelY:vm.y,viewmodelZ:vm.z,viewmodelLeftHand:vm.hand==="left",viewmodelBob:vm.bob,viewmodelSway:vm.sway,
-      hud:!hud.hidden,hudScale:typeof hud.scale==="number"?Math.round(hud.scale*100):undefined,muted:audio.muted,sfxVolume:audio.sfx,musicVolume:audio.music,uiVolume:audio.ui,ambienceVolume:audio.ambience,muteSfx:audioMute.sfx,muteMusic:audioMute.music,muteUi:audioMute.ui,muteAmbience:audioMute.ambience,muteInBackground:audio.muteInBackground,classicSounds:audio.classic,perfectTick:audio.perfectTick,announcer:audio.announcer,footsteps:audio.footsteps,wind:audio.wind,practiceKeepVelocity:practice.keepVelocity,fpsLimit:graphics.fpsLimit});
-    delete converted.hudLayout; // web anchors and offsets use a different coordinate contract
+
+/** An old native settings file as the website's settings file, or the text unchanged. */
+export function websiteSettingsText(text: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return text;
   }
-  // cl_yawspeed / cl_anglespeedkey are top-level keys on the website too; older native files carry yawSpeedAlt.
-  const patch=settingsPatch(migrateTurnSpeed(converted)),supported=new Set(Object.keys(patch));
-  if("yawSpeedAlt" in raw&&"angleSpeedKey" in patch)supported.add("yawSpeedAlt");
-  const mapped=new Set(["verticalSensitivityEnabled","crosshair","viewmodel","hud","audio","practice","graphics","ghost"]);
-  const unsupported=Object.keys(raw).filter(key=>!supported.has(key)&&!(web&&mapped.has(key)));
-  if(web){unsupported.push("web HUD anchors/layout", "graphics options other than FPS limit");}
-  return {patch,unsupported};
+  const file = parsed as { format?: unknown; settings?: unknown } | null;
+  if (!file || file.format !== OLD_NATIVE_FORMAT || !file.settings || typeof file.settings !== "object") return text;
+  const doc = buildSettingsDoc(prefsFromNative(file.settings as Record<string, unknown>), { app: VERSION });
+  return stringifySettings(doc);
 }
-export function exportSettings(settings:NativeSettings):string{return JSON.stringify({format:"bunnyhop-native-settings",version:1,settings},null,2)+"\n";}
+
+/** The export / import dialog's status line. */
+function say(dialog: Element | null, text: string, tone: "ok" | "bad" | ""): void {
+  const status = dialog?.querySelector<HTMLElement>(".xfer-status");
+  if (!status) return;
+  status.textContent = text;
+  status.dataset.tone = tone;
+}
+
+async function saveThroughHost(link: HTMLAnchorElement): Promise<void> {
+  const dialog = link.closest(".xfer-dialog");
+  const text = await (await fetch(link.href)).text();
+  const answer = await saveFile("settings", text, link.download);
+  if (answer.cancelled) say(dialog, "", "");
+  else if (!answer.ok) say(dialog, answer.error ?? "The file couldn't be saved.", "bad");
+  else say(dialog, `Saved ${answer.name ?? link.download}.`, "ok");
+}
+
+async function openThroughHost(input: HTMLInputElement): Promise<void> {
+  const answer = await openFile("settings");
+  if (answer.cancelled) return;
+  if (!answer.ok) return say(input.closest(".xfer-dialog"), answer.error ?? "That file couldn't be read.", "bad");
+  const name = answer.name ?? "settings.json";
+  const files = new DataTransfer();
+  files.items.add(new File([websiteSettingsText(answer.text ?? "")], name, { type: "application/json" }));
+  input.files = files.files;
+  input.dispatchEvent(new Event("change"));
+}
+
+function onClick(event: MouseEvent): void {
+  const target = event.target;
+  if (!(target instanceof Element) || !target.closest(".xfer-dialog")) return;
+  if (target instanceof HTMLAnchorElement && target.download) {
+    event.preventDefault();
+    void saveThroughHost(target);
+  } else if (target instanceof HTMLInputElement && target.type === "file") {
+    event.preventDefault();
+    void openThroughHost(target);
+  }
+}
+
+let installed = false;
+
+/** Sends the Export / Import dialog's files through the host (once). */
+export function installSettingsFiles(): void {
+  if (installed || typeof document === "undefined") return;
+  installed = true;
+  document.addEventListener("click", onClick, true);
+}

@@ -1,77 +1,70 @@
 import { h } from "../../../web/src/ui/dom";
+import { registerSettingsSection } from "../../../web/src/ui/settings-registry";
 import { openFile, unwatchCssFile } from "../native-files";
+import type { Ui } from "../native-rows";
 import { cssStatus, customCss, onCssStatus, setCssFile, setCustomCss } from "./custom-css";
 import { openCssEditor, statusLine } from "./editor";
 
-// Settings -> Custom CSS: the switch, the editor, and a .css file the game
-// reloads whenever it's saved (as in the desktop app).
+// Settings -> Custom CSS: the website's switch and editor, and a .css file the game reloads whenever it's saved.
 
-type Row = (name: string, control: HTMLElement, hint?: string, about?: string) => HTMLElement;
-type Group = (title: string, ...rows: HTMLElement[]) => HTMLElement;
+const HUD_NOTE =
+  "The game draws its own HUD: it takes your colours (--cream, --cream-2, --amber, --gain, --loss, --sync-ok) and " +
+  "each element's color and opacity. Fonts, images and layout apply to the menus only.";
 
-export function customCssSection(row: Row, group: Group): HTMLElement {
-  const toggleOptions = { type: "checkbox", checked: customCss().on, "aria-label": "Use your CSS" };
-  const toggle = h("input.switch", toggleOptions) as HTMLInputElement;
-  toggle.addEventListener("change", () => setCustomCss({ on: toggle.checked }, { now: true }));
-  const useRow = row("Use your CSS", toggle, "",
-    "Your own stylesheet over the menus, and colours for the HUD. " +
-      "Ctrl+Shift+V switches it off from anywhere in the menus.");
-  useRow.classList.add("nset-row-toggle");
-  useRow.addEventListener("click", (event) => {
-    if (event.target !== toggle) toggle.click();
-  });
+async function chooseFile(status: HTMLElement): Promise<void> {
+  const answer = await openFile("css");
+  if (answer.cancelled) return;
+  if (!answer.ok) {
+    status.textContent = answer.error ?? "The file couldn't be read.";
+    return;
+  }
+  setCssFile({ name: answer.name ?? "", text: answer.text ?? "", error: "" });
+}
 
-  const edit = h("button.btn", { type: "button", onclick: openCssEditor }, "Edit CSS");
-  const choose = h("button.btn", { type: "button" }, "Choose .css file…") as HTMLButtonElement;
-  const stop = h("button.btn", { type: "button" }, "Stop using") as HTMLButtonElement;
-  const fileName = h("small.nset-hint");
-  const status = h("p.nset-hint.nset-transfer-status", { role: "status" });
-
-  choose.addEventListener("click", async () => {
-    choose.disabled = true;
-    try {
-      const answer = await openFile("css");
-      if (answer.cancelled) return;
-      if (!answer.ok) throw new Error(answer.error ?? "The file couldn't be read.");
-      setCssFile({ name: answer.name ?? "", text: answer.text ?? "", error: "" });
-    } catch (error) {
-      status.textContent = (error as Error).message;
-      status.dataset.tone = "bad";
-    } finally {
-      choose.disabled = false;
-    }
-  });
-  stop.addEventListener("click", () => {
+function cssGroup(ui: Ui): HTMLElement {
+  const fileName = h("small.set-readout");
+  const status = h("small.set-readout", { role: "status" });
+  const choose = ui.button("Choose .css file…", () => void chooseFile(status));
+  const stop = ui.button("Stop using", () => {
     unwatchCssFile();
     setCssFile(null);
   });
-
-  const section = h("div", null,
-    group("Custom CSS",
-      useRow,
-      row("Your CSS", h("div.nset-actions", null, edit), "",
-        "Paste CSS or import it from a link. It applies as you type."),
-      row("CSS file", h("div.nset-actions", null, fileName, choose, stop), "",
-        "Use a .css file instead of the pasted CSS. Edit it in any editor; the game reloads it each time you save.")),
-    status,
-    h("p.nset-hint", null,
-      "The game draws its own HUD: it takes your colours (--cream, --cream-2, --amber, --gain, --loss, --sync-ok) " +
-        "and each element's color and opacity. Fonts, images and layout apply to the menus only."));
-
+  const use = ui.toggle("Use your CSS", () => customCss().on, (on) => setCustomCss({ on }, { now: true }), {
+    readout: status,
+    desc: `Your own stylesheet over the menus and the HUD. Ctrl+Shift+V switches it off from anywhere in the menus. ${HUD_NOTE}`,
+    keywords: "css custom css theme skin style stylesheet font fonts colour color ui interface image gif mod",
+  });
+  const group = ui.group(
+    "Custom CSS",
+    use,
+    ui.actions("Your CSS", [ui.button("Edit CSS", openCssEditor, { primary: true })], {
+      desc: "Paste CSS or import it from a link. It applies as you type.",
+      keywords: "css edit paste import link theme",
+    }),
+    ui.actions("CSS file", [choose, stop], {
+      readout: fileName,
+      desc: "Use a .css file instead of the pasted CSS. Edit it in any editor; the game reloads it each time you save.",
+      keywords: "css file watch reload editor theme",
+    }),
+  );
   const paint = (): void => {
     const state = cssStatus();
-    toggle.checked = customCss().on;
+    ui.syncSwitches(group);
     fileName.textContent = state.file ? state.file.name : "";
     stop.hidden = !state.file;
-    const line = statusLine(state);
-    status.textContent = line.text;
-    status.dataset.tone = line.tone;
+    status.textContent = statusLine(state).text;
   };
-  // The listener goes with the section once Settings is closed.
   const unsubscribe = onCssStatus(() => {
-    if (section.isConnected) paint();
+    if (group.isConnected || !seen) paint();
     else unsubscribe();
+    seen ||= group.isConnected;
   });
+  let seen = false;
   paint();
-  return section;
+  return group;
+}
+
+/** Registers Settings → Custom CSS (call once). */
+export function registerCustomCssSection(): void {
+  registerSettingsSection("css", (ui) => [cssGroup(ui)], { label: "Custom CSS", icon: "pen", order: 75 });
 }

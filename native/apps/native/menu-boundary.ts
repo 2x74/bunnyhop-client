@@ -34,6 +34,10 @@ const adapters: Record<string, string> = {
   "net/hud": "chat-hud.ts",
   "ui/loadout-stage": "loadout-stage.ts",
   "notify/item3d": "item-emblem.ts",
+  // The website's controls, with rows the native client can't honour left out (settings-controls.ts).
+  "ui/controls": "settings-controls.ts",
+  // Account sync with the native-only settings in the same document.
+  "platform/settings-sync": "settings-sync.ts",
 };
 // Checked after the adapters: input stays forbidden apart from its command bits.
 const forbiddenGameModules = ["main", "render", "session", "attract", "input"];
@@ -56,16 +60,39 @@ function resolveBoundary(args: Bun.OnResolveArgs): Bun.OnResolveResult | undefin
   const target = resolve(dirname(args.importer), args.path);
   const webModule = relative(web, target).replace(/\.ts$/, "").replaceAll("\\", "/");
   if (webModule === "core") return { path: "native-menu-core-constants", namespace: "native-menu" };
-  if (Object.hasOwn(adapters, webModule)) return { path: resolve(native, adapters[webModule]) };
+  // An adapter that wraps its web module imports the module itself.
+  const adapter = Object.hasOwn(adapters, webModule) ? resolve(native, adapters[webModule]) : null;
+  if (adapter && adapter !== args.importer) return { path: adapter };
   if (forbiddenGameModules.includes(webModule)) {
     throw new Error(`Gameplay module is forbidden in the native menu: ${resolve(web, webModule)}`);
   }
   return undefined;
 }
 
+/** The settings screen renders each section inside settings-controls.ts renderingSection, so rows know their section. */
+function adaptSettingsPanel(source: string): string {
+  const call = "content = d.s.render(ctxFor(d));";
+  if (!source.includes(call)) throw new Error("Native menu: web settings-panel.ts no longer renders sections as expected");
+  const controls = JSON.stringify(resolve(native, "settings-controls.ts"));
+  const wrapped = source.replace(call, "content = renderingSection(d.s.id, () => d.s.render(ctxFor(d)));");
+  return `import {renderingSection} from ${controls};\n${wrapped}`;
+}
+
+/**
+ * The jump-stats rows come with the website's !ssj, which opens a web popover. The native client registers its own
+ * !ssj (chat-service.ts: the host toggles the jump HUD), so the website's registration stays out of the menu.
+ */
+function adaptJumpStats(source: string): string {
+  const registration = /^registerChatCommand\(\{ name: "ssj",.*\}\);$/m;
+  if (!registration.test(source)) throw new Error("Native menu: web ssj/index.ts no longer registers !ssj as expected");
+  return source.replace(registration, "");
+}
+
 async function adaptedSource(path: string): Promise<string | null> {
   const webFile = relative(web, path).replaceAll("\\", "/");
   if (hasCopyFix(webFile)) return adaptCopySource(webFile, await Bun.file(path).text());
+  if (webFile === "ui/settings-panel.ts") return adaptSettingsPanel(await Bun.file(path).text());
+  if (webFile === "ssj/index.ts") return adaptJumpStats(await Bun.file(path).text());
   if (webFile === "ui/support.ts") {
     const support = await Bun.file(path).text();
     return adaptSupportSource(support, resolve(native, "support-checkout.ts"), resolve(native, "bridge.ts"));

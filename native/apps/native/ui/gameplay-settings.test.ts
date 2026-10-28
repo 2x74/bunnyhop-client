@@ -1,11 +1,8 @@
 import { describe,expect,test } from "bun:test";
 import { applyState,NATIVE_BIND_ACTIONS,settingsPatch,state } from "./bridge";
-import { importSettings,exportSettings } from "./settings-transfer";
 import { validHudLayout } from "./hud-layout";
 describe("native gameplay preferences",()=>{
-  test("all expanded defaults round trip, including layout visibility and scale",()=>{
-    const parsed=JSON.parse(exportSettings(state.settings));
-    const result=importSettings(parsed);expect(result.patch).toEqual(state.settings);expect(result.unsupported).toEqual([]);
+  test("native-only bind actions keep their defaults",()=>{
     expect(NATIVE_BIND_ACTIONS).toContain("setStart");expect(NATIVE_BIND_ACTIONS).toContain("spectatorMode");
     expect(state.settings.binds.chat).toEqual(["KeyY"]);
   });
@@ -15,11 +12,6 @@ describe("native gameplay preferences",()=>{
     expect(validHudLayout({timer:{x:50,y:30,scale:1.2,visible:false}})).toBe(true);
     expect(validHudLayout({timer:{x:50,y:30,scale:4}})).toBe(false);
     expect(validHudLayout({timer:{x:50,y:30,injected:1}})).toBe(false);
-  });
-  test("web import maps supported settings without claiming incompatible layout conversion",()=>{
-    const result=importSettings({prefs:{invertY:true,verticalSensitivityEnabled:true,sensitivity:3,crosshair:{style:"dot",color:"#00ff00",size:5,gap:2,thickness:2,alpha:.8,outline:false},viewmodel:{show:true,fov:60,x:1,y:2,z:-1,hand:"left",bob:0,sway:.5},hud:{hidden:false,scale:1.2,layout:{timer:{a:"bc",x:0,y:0}}},audio:{music:.4,sfx:.8,ui:.2,muted:false,footsteps:true,wind:false},graphics:{fpsLimit:240},practice:{keepVelocity:false},dpi:800}});
-    expect(result.patch).toMatchObject({invertY:true,separateVertical:true,crosshairStyle:"dot",viewmodelFov:60,viewmodelLeftHand:true,hudScale:120,musicVolume:.4,practiceKeepVelocity:false});
-    expect(result.patch.hudLayout).toBeUndefined();expect(result.unsupported).toContain("dpi");expect(result.unsupported).toContain("web HUD anchors/layout");
   });
   test("ghost roster keeps only four valid native slots",()=>{
     applyState({ghosts:[{slot:0,id:"a",name:"PB",enabled:true},{slot:3,id:"b",name:"WR",enabled:false},{slot:4,id:"bad",name:"bad",enabled:true},{slot:1,id:"c",name:"custom",enabled:true}]});

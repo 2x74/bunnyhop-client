@@ -1,37 +1,64 @@
-import {h} from "../../web/src/ui/dom";
-import {confirmDialog,textDialog} from "../../web/src/ui/settings-transfer";
-import {settingsPatch,type NativeSettings} from "./bridge";
-import {migrateTurnSpeed} from "./turn-speed";
-export interface SettingsPreset {name:string;settings:Partial<NativeSettings>}
-interface Store {active:string;list:SettingsPreset[]}
-const KEY="bunnyhop:native-settings-presets:v1";
-export function presetNameProblem(name:string,existing:string[],current=""):string|null {const clean=name.trim();return !clean?"Enter a name.":clean.length>40?"Use 40 characters or fewer.":existing.some(n=>n.toLowerCase()===clean.toLowerCase()&&n!==current)?"That name is already in use.":null;}
-/** Presets saved before fast turn hold the old modifier speed (turn-speed.ts). */
-const savedSettings=(value:unknown):unknown=>value&&typeof value==="object"&&!Array.isArray(value)
-  ?migrateTurnSpeed(value as Record<string,unknown>):value;
-export function parsePresets(value:unknown):Store {
- const raw=value as Partial<Store>|null;const list:SettingsPreset[]=[];
- if(Array.isArray(raw?.list))for(const p of raw.list.slice(0,30)){if(!p||typeof p.name!=="string"||presetNameProblem(p.name,list.map(p=>p.name)))continue;const settings=settingsPatch(savedSettings(p.settings));if(Object.keys(settings).length)list.push({name:p.name.trim(),settings});}
- return {active:list.some(p=>p.name===raw?.active)?raw!.active!:"",list};
+// Named presets from the desktop client's old settings screen become the website's setting profiles (web
+// ui/settings-profiles.ts, the Profile menu by Export / Import) once. The old list stays in storage untouched.
+//
+// A profile covers what the website's do: not the mouse, graphics or sound (PROFILE_EXCLUDES), so a preset's
+// sensitivity or volume doesn't come along.
+
+import {
+  findProfile, loadProfiles, MAX_PROFILES, PROFILE_NAME_MAX, saveProfile, storeProfiles,
+} from "../../web/src/ui/settings-profiles";
+import { DEFAULT_PREFS } from "../../web/src/ui/settings";
+import { prefsFromNative } from "./settings-transfer";
+
+const OLD_PRESETS = "bunnyhop:native-settings-presets:v1";
+const MIGRATED = "bunnyhop:native-settings-presets:migrated";
+
+interface OldPreset {
+  name: string;
+  settings: Record<string, unknown>;
 }
-export function settingsPresets(read:()=>NativeSettings,apply:(settings:Partial<NativeSettings>)=>void):HTMLElement {
- let store:Store;try{store=parsePresets(JSON.parse(localStorage.getItem(KEY)??"null"));}catch{store={active:"",list:[]};}
- const select=h("select",{"aria-label":"Settings preset"}) as HTMLSelectElement;
- const status=h("p.nset-hint",{role:"status"});
- const persist=()=>{try{localStorage.setItem(KEY,JSON.stringify(store));status.textContent="Preset saved on this device.";}catch{status.textContent="Presets could not be saved on this device.";}};
- const current=()=>store.list.find(p=>p.name===store.active);
- const snapshot=()=>JSON.parse(JSON.stringify(settingsPatch(read()))) as Partial<NativeSettings>;
- const modified=(p:SettingsPreset)=>JSON.stringify(p.settings)!==JSON.stringify(snapshot());
- const paint=()=>{const cur=current();select.replaceChildren(h("option",{value:""},"No preset"),...store.list.map(p=>h("option",{value:p.name},p.name+(p===cur&&modified(p)?" (modified)":""))));select.value=store.active;save.disabled=!cur;rename.disabled=!cur;remove.disabled=!cur;};
- const save=h("button.btn",{type:"button",onclick:()=>{const cur=current();if(cur){cur.settings=snapshot();persist();paint();}}},"Save changes");
- const create=h("button.btn",{type:"button",onclick:async()=>{if(store.list.length>=30){status.textContent="You can save up to 30 presets.";return;}const name=await textDialog({title:"Save settings preset",label:"Preset name",confirm:"Save",maxLength:40,problem:n=>presetNameProblem(n,store.list.map(p=>p.name))});if(name===null||!root.isConnected)return;store.active=name.trim();store.list.push({name:store.active,settings:snapshot()});persist();paint();}},"Save as new…");
- const rename=h("button.btn",{type:"button",onclick:async()=>{const cur=current();if(!cur)return;const name=await textDialog({title:"Rename preset",label:"Preset name",confirm:"Rename",value:cur.name,maxLength:40,problem:n=>presetNameProblem(n,store.list.map(p=>p.name),cur.name)});if(name===null||!root.isConnected)return;cur.name=name.trim();store.active=cur.name;persist();paint();}},"Rename…");
- const remove=h("button.btn",{type:"button",onclick:async()=>{const cur=current();if(!cur||!await confirmDialog({title:`Delete ${cur.name}?`,body:"Your current settings stay as they are.",confirm:"Delete",danger:true})||!root.isConnected)return;store.list=store.list.filter(p=>p!==cur);store.active="";persist();paint();}},"Delete…");
- // A switch waiting on its confirmation is dropped if a newer selection was made
- // meanwhile, so the latest choice always wins.
- let selection=0;
- select.addEventListener("change",async()=>{const ticket=++selection;const next=store.list.find(p=>p.name===select.value);if(!next){store.active="";persist();paint();return;}if(next===current()){paint();return;}paint();const cur=current();if((cur?modified(cur):!store.list.some(p=>!modified(p)))&&!await confirmDialog({title:`Switch to ${next.name}?`,body:"Unsaved changes to your current settings will be replaced.",confirm:"Switch"}))return;if(!root.isConnected||ticket!==selection)return;apply(JSON.parse(JSON.stringify(next.settings)));store.active=next.name;persist();paint();});
- const root=h("div",null,h("div.btn-row",null,select,save,create,rename,remove),status);
- const observer=new MutationObserver(()=>{if(!root.isConnected){window.removeEventListener("bunnyhop:host-state",sync);observer.disconnect();}});observer.observe(document.body,{childList:true,subtree:true});
- const sync=()=>{if(!root.isConnected){window.removeEventListener("bunnyhop:host-state",sync);observer.disconnect();return;}paint();};window.addEventListener("bunnyhop:host-state",sync);paint();return root;
+
+/** The old presets in `raw` (anything malformed is skipped). */
+export function parseOldPresets(raw: string | null): OldPreset[] {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw ?? "null");
+  } catch {
+    return [];
+  }
+  const list = (value as { list?: unknown } | null)?.list;
+  if (!Array.isArray(list)) return [];
+  return list.filter((item): item is OldPreset => {
+    if (!item || typeof item !== "object") return false;
+    const preset = item as Partial<OldPreset>;
+    if (typeof preset.name !== "string" || !preset.name.trim()) return false;
+    return !!preset.settings && typeof preset.settings === "object";
+  });
+}
+
+/** Saves each old preset as a profile unless one of that name exists; returns the names saved. */
+export function presetsToProfiles(presets: readonly OldPreset[], storage: Storage = localStorage): string[] {
+  const store = loadProfiles(storage);
+  const active = store.active;
+  const saved: string[] = [];
+  for (const preset of presets) {
+    const name = preset.name.trim().replace(/\s+/g, " ").slice(0, PROFILE_NAME_MAX);
+    if (findProfile(store, name) || store.list.length >= MAX_PROFILES) continue;
+    saveProfile(store, name, prefsFromNative(preset.settings, DEFAULT_PREFS));
+    saved.push(name);
+  }
+  store.active = active;
+  if (saved.length) storeProfiles(store, storage);
+  return saved;
+}
+
+/** Moves the old presets over, once. */
+export function migrateNativePresets(storage: Storage = localStorage): void {
+  try {
+    if (storage.getItem(MIGRATED)) return;
+    presetsToProfiles(parseOldPresets(storage.getItem(OLD_PRESETS)), storage);
+    storage.setItem(MIGRATED, "1");
+  } catch {
+    /* storage blocked: tried again next start */
+  }
 }
