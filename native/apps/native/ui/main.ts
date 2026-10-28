@@ -25,6 +25,7 @@ import { settingsPanel, focusSettingsSection } from "./settings-panel";
 import { replayPanel, replayViewer, watchRequest, raceRequest, gauntletWatchDeps, sendReplay, playLocalReplay } from "./replays";
 import { applyReplayHostState, applyReplayTimeline } from "./replay-host";
 import { practiceFromReplay } from "./replay-practice";
+import { applyChatFeatures } from "./chat-features";
 import { legalLinks } from "../../web/src/ui/legal";
 import { installMuteButton } from "./mute-button";
 import { installTutorialProgress } from "./tutorial-entry";
@@ -337,6 +338,7 @@ function receive(value: unknown): void {
   const pauseBefore=paused();
   const applied=applyState(value);
   applyReplayHostState(value);
+  applyChatFeatures(value);
   if(applied)applySemanticPalette(state.settings.colorBlind);
   // A newly picked map is up: the next Esc in game is the pause menu, not the browser it was picked from.
   if(applied&&state.map&&state.map!==mapBefore&&!state.playback.active&&LEAVE_FOR_GAME.has(screen)){backStack=[];screen="home";}
