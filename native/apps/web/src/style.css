@@ -641,6 +641,9 @@ body.potato #load-lift > .loading.lift-go * { animation: none !important; }
 
 /* ------------------------------------------------------------------ HUD */
 #hud { position: fixed; inset: 0; z-index: var(--z-hud); pointer-events: none; font-family: var(--hud-font); font-variant-numeric: tabular-nums; --hs: var(--hud-scale, 1); color: #fff; }
+/* For custom CSS (custom-css/): an empty full-screen layer with the HUD, under the menus. Its ::before / ::after are free
+   for images in a corner. */
+#custom-art { position: fixed; inset: 0; z-index: var(--z-hud); pointer-events: none; }
 #hud > * { position: absolute; }
 #hud { --shadow-text: 0 1px 2px rgba(0, 0, 0, 0.85), 0 0 0.6em rgba(0, 0, 0, 0.35); }
 body.menu-open #crosshair, body.menu-open #hud-endcard { visibility: hidden; }

@@ -146,7 +146,7 @@ export class BunnyProcedural {
 
   /** Advances and writes S for the CS:S bones. Returns the body yaw (degrees, Source) for the model's yaw group. */
   update(dt: number, s: PlayerPose, vel: number[], snap: boolean, _jumped: boolean, S: Float32Array): number {
-    this.time += dt;
+    this.time = s.visualTime ?? (this.time + dt);
     const [vx, vy, vz] = vel;
     const speed = Math.hypot(vx, vy);
     let dYaw = Number.isNaN(this.lastYaw) || snap || dt <= 0 ? 0 : wrap180(s.yaw - this.lastYaw) / dt;
@@ -183,6 +183,7 @@ export class BunnyProcedural {
       moveAng = wrap180(moveAng + 180);
     }
     const stride = clamp(60 + speed * 0.22, 60, 140);
+    if (snap && s.visualTime !== undefined) this.phase = (back ? -1 : 1) * (speed / stride) * Math.PI * 2 * s.visualTime;
     this.phase += (back ? -1 : 1) * ((speed / stride) * Math.PI * 2 * dt) * (0.35 + 0.65 * this.ground);
     const legYawT = speed > 30 ? clamp(moveAng, -65, 65) * this.ground : 0;
     this.legYaw = snap ? legYawT : damp(this.legYaw, legYawT, 8, dt);

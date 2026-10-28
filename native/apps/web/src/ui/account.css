@@ -34,6 +34,8 @@ dialog[open].acct-dialog { animation: acct-in 0.16s ease-out; }
 .acct-who .nf-msg { padding-left: 0.9rem; min-height: 0; }
 .acct-who .nf-msg:empty { display: none; }
 .acct-who-status { padding-left: 0.9rem; color: var(--cream-3); font-size: var(--fs-xs); }
+.acct-av-edit { padding-left: 0.9rem; font-size: var(--fs-xs); font-weight: 650; color: var(--amber); width: fit-content; }
+.acct-av-edit:hover { color: var(--amber-hi); }
 .acct-sec { border-top: 1px solid var(--line); padding: 0.85rem 0 0.4rem; display: flex; flex-direction: column; gap: 0.55rem; }
 .acct-sec h3 { margin: 0; font-size: var(--fs-sm); font-weight: 700; color: var(--text); }
 .acct-note { margin: 0; font-size: 0.85rem; line-height: 1.45; }

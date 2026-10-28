@@ -89,10 +89,7 @@ const PUBLIC_FILE = /^https:\/\/bunnyhop\.lol\/(?:api\/(?:bsp|content|content-ma
 export function installJar(): void {
   if (!WAVEDASH || typeof window === "undefined") return;
   const plainFetch = window.fetch.bind(window);
-  // This installs a browser fetch, even when shared code is checked with Bun's
-  // tool/test globals (whose global fetch also has a preconnect method).
-  const browser: Window = window;
-  browser.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     if (typeof input === "string" || input instanceof URL) {
       const url = siteUrl(String(input));
       if (PUBLIC_FILE.test(url)) return plainFetch(freshKey(url), init);

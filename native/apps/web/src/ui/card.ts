@@ -14,7 +14,7 @@ import { formatTime } from "../timer";
 import { trackName } from "../zones";
 import { badgeChip } from "./badges";
 import { LOGO_SVG } from "./brand";
-import { avatarImg } from "./avatar";
+import { avatarImg, pictureOf } from "./avatar";
 import { h } from "./dom";
 import { nameAttrs, nameMarks } from "./marks";
 import { adminLink } from "../staff-lens";
@@ -51,10 +51,11 @@ export function fmtHours(seconds: number): string {
   return `${(seconds / 3600).toFixed(seconds < 36_000 ? 1 : 0)}h`;
 }
 
-/** The card's avatar: the player's Discord picture when they show it (an animated one plays here), else their letter. */
-export function avatarEl(p: { name: string; avatarUrl: string | null }, cls = "pc-avatar"): HTMLElement {
+/** The card's avatar: the player's Discord picture when they show it (an animated one plays here), else their bunny. */
+export function avatarEl(p: { id?: string | null; name: string; avatarUrl: string | null }, cls = "pc-avatar"): HTMLElement {
   const letter = () => h(`span.${cls}.pc-plate`, { "aria-hidden": "true" }, (p.name[0] ?? "?").toUpperCase());
-  return p.avatarUrl ? avatarImg(p.avatarUrl, { cls, px: 84, letter, eager: true, animate: true }) : letter();
+  const pic = pictureOf(p);
+  return pic ? avatarImg(pic, { cls, px: 84, letter, eager: true, animate: true }) : letter();
 }
 
 /** Name of the title the player shows: the chosen title tag, else their rank title. */

@@ -163,6 +163,12 @@ const FLAG_COUNTED = 1 << 2;
  * Information for the anticheat only: the commands are the resolved ones and re-simulate as always.
  */
 export const FLAG_NULL_BINDS = 1 << 3;
+/**
+ * Timestamped input built some of the recorded commands (timed-input.ts): each tick took the mouse reports and movement
+ * keys stamped before its boundary, not the frame's view. Any version; only written when set; older decoders ignore it.
+ * Information for the anticheat only (the frame-rate measures don't apply): the commands re-simulate as always.
+ */
+export const FLAG_TIMED_INPUT = 1 << 4;
 export const DEFAULT_CHECKPOINT_INTERVAL = 100;
 export const COSMETIC_MAGIC = 0x58434842; // "BHCX" little-endian
 export const LOADOUT_MAGIC = 0x4f4c4842; // "BHLO" little-endian
@@ -205,6 +211,8 @@ export interface ReplayHeader {
   checkpointInterval: number;
   /** Null binds were on during the recording (FLAG_NULL_BINDS). Absent when off. */
   nullBinds?: boolean;
+  /** Timestamped input built some recorded command (FLAG_TIMED_INPUT). Absent when off. */
+  timedInput?: boolean;
 }
 
 export interface Checkpoint {
@@ -261,6 +269,8 @@ export class ReplayRecorder {
   inspect: CosmeticEvent[] = [];
   /** Null binds resolved some recorded command (header.nullBinds). */
   nullBinds = false;
+  /** Timestamped input built some recorded command (header.timedInput). */
+  timedInput = false;
 
   constructor(public checkpointInterval = DEFAULT_CHECKPOINT_INTERVAL) {}
 
@@ -272,6 +282,7 @@ export class ReplayRecorder {
     this.n = 0;
     this.looks = [];
     this.nullBinds = false;
+    this.timedInput = false;
     this.checkpoints = [];
     this.cosmetic = [];
     this.inspect = [];
@@ -340,7 +351,7 @@ export class ReplayRecorder {
   build(header: Omit<ReplayHeader, "totalTicks" | "checkpointInterval" | "version">): Replay {
     const n = this.n;
     return {
-      header: { ...header, version: replayVersionFor(header), totalTicks: n, checkpointInterval: this.checkpointInterval, ...(this.nullBinds ? { nullBinds: true } : {}) },
+      header: { ...header, version: replayVersionFor(header), totalTicks: n, checkpointInterval: this.checkpointInterval, ...(this.nullBinds ? { nullBinds: true } : {}), ...(this.timedInput ? { timedInput: true } : {}) },
       forward: this.forward.slice(0, n),
       side: this.side.slice(0, n),
       buttons: this.buttons.slice(0, n),
@@ -562,7 +573,7 @@ export function encodeRaw(r: Replay): Uint8Array {
   const fractional = counted?.count instanceof Float64Array;
   const version = fractional ? REPLAY_VERSION_FRACTIONAL : h.settings.stamina || h.style === "lowgrav" ? REPLAY_VERSION_STAMINA : counted ? REPLAY_VERSION_COUNTED : replayVersionFor(h);
   w.u16(version);
-  w.u16((h.settings.autohop ? FLAG_AUTOHOP : 0) | (h.settings.stamina ? FLAG_STAMINA : 0) | (version >= REPLAY_VERSION_STAMINA && counted ? FLAG_COUNTED : 0) | (h.nullBinds ? FLAG_NULL_BINDS : 0));
+  w.u16((h.settings.autohop ? FLAG_AUTOHOP : 0) | (h.settings.stamina ? FLAG_STAMINA : 0) | (version >= REPLAY_VERSION_STAMINA && counted ? FLAG_COUNTED : 0) | (h.nullBinds ? FLAG_NULL_BINDS : 0) | (h.timedInput ? FLAG_TIMED_INPUT : 0));
   w.str8(h.map);
   w.bytes(hexToBytes(h.mapSha256));
   const s = h.settings;
@@ -815,6 +826,7 @@ export function decodeRaw(buf: Uint8Array, opts: { commands?: boolean } = {}): R
       recordedAt,
       checkpointInterval,
       ...(flags & FLAG_NULL_BINDS ? { nullBinds: true } : {}),
+      ...(flags & FLAG_TIMED_INPUT ? { timedInput: true } : {}),
     },
     forward,
     side,

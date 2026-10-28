@@ -8,7 +8,7 @@ import { countryFlag } from "./country-flag";
 // so page n starts at base + (n - 1) × per. The API's ?around=<id> answers on that same grid (offset = base).
 
 import "./boards.css";
-import { avatarImg } from "./avatar";
+import { avatarImg, pictureOf } from "./avatar";
 import { h } from "./dom";
 import { landRows } from "./land";
 import { icon } from "./icons";
@@ -488,7 +488,8 @@ export function hueOf(id: string): number {
 /** Avatar (Discord picture when shown publicly) + name (opens the profile) + Verified / Creator marks + an optional quiet suffix. */
 export function playerCell(p: { id: string; name: string; avatarUrl: string | null; provider?: string; country?: string | null } & PlayerMarks, open: () => void, sub: string[] = [], href = `/u/${encodeURIComponent(p.id)}`): HTMLTableCellElement {
   const letter = () => h("span.rb-av", { "aria-hidden": "true", style: `--hue:${hueOf(p.id)}` }, (p.name.trim()[0] ?? "?").toUpperCase());
-  const av = p.avatarUrl ? avatarImg(p.avatarUrl, { cls: "rb-av", px: 24, letter }) : letter();
+  const pic = pictureOf(p);
+  const av = pic ? avatarImg(pic, { cls: "rb-av", px: 24, letter }) : letter();
   const tags = [...sub, p.provider === "guest" ? "guest" : ""].filter(Boolean);
   return h(
     "td.rb-player",

@@ -91,9 +91,11 @@ export interface TexturePayload {
 export interface Lightmap {
   width: number;
   height: number;
-  /** RGBA8, sRGB-encoded linear light multiplied by `scale`. */
+  /** RGBA8, sRGB-encoded; the decoded texel divided by `scale` is linear light. */
   data: Uint8Array;
   scale: number;
+  /** Built from the map's HDR lighting: CS:S would draw it with auto exposure and bloom. */
+  hdr: boolean;
 }
 
 export interface PlayerState {
@@ -340,6 +342,7 @@ interface Exports {
   mesh_sky_groups?: () => number;
   mesh_group_sky3d?: () => number;
   brush_states?: () => number;
+  effect_states?: () => number;
   sky_camera?: () => number;
   overlay_volumes?: () => number;
   overlay_states?: () => number;
@@ -611,9 +614,9 @@ export class Core {
   /** The lightmap atlas built for the current map. */
   lightmap(): Lightmap {
     const len = this.x.lightmap_size();
-    const [width, height] = this.u32(this.x.scratch_u32_ptr(), len);
+    const [width, height, hdr] = this.u32(this.x.scratch_u32_ptr(), len);
     const data = coreBytes(this.x, this.x.lightmap_ptr(), width * height * 4).slice();
-    return { width, height, data, scale: this.x.lightmap_scale() };
+    return { width, height, data, scale: this.x.lightmap_scale(), hdr: hdr === 1 };
   }
 
   entities(): Record<string, string>[] {
@@ -673,6 +676,16 @@ export class Core {
       ...(len > 22 ? { weapons: s[21], activeWeapon: s[22] } : {}),
       ...(len > 23 ? { jumpStatsValid: s[23] !== 0 } : {}),
     };
+  }
+
+  /** Enabled smoke/trail/local-light entities, including map I/O and Kill; null on older wasm. */
+  effectStates(): Map<number, boolean> | undefined {
+    if (!this.x.effect_states) return undefined;
+    const len = this.x.effect_states();
+    const data = this.f32(this.x.scratch_f32_ptr(), len);
+    const states = new Map<number, boolean>();
+    for (let i = 0; i + 1 < data.length; i += 2) states.set(data[i], data[i + 1] !== 0);
+    return states;
   }
 
   /** Current transforms of brush entity models: model index -> [x, y, z, pitch, yaw, roll] (Source degrees). */

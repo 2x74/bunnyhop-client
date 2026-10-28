@@ -5,6 +5,10 @@
 // MWheelUp / MWheelDown, and MouseWheel (either direction). Wheel binds pulse for one tick,
 // like `bind mwheeldown +jump` in CS:S.
 
+import { InputSampler, type SamplerOptions, type SamplerPolicy, type SampledInput, type SamplerReset, type Payload, type SamplerEvidence } from "./input-sampler";
+import { mapViewPitch } from "./input-view";
+import { validateMotion } from "./input-motion";
+import { TIMED_KEY_BITS, TimedInput } from "./timed-input";
 import type { Action } from "./ui/settings";
 import { DEFAULT_BINDS, guardSideMouseButtons, isWeaponAction, mouseCode, type BindAction } from "./binds";
 import { cursorFree, endFreeCursorAsPause, setCursorFree } from "./free-cursor";
@@ -13,7 +17,6 @@ import { IN_GIVE_SHIFT, IN_WEAPON_COMMAND_MASK } from "./weapon-rules";
 import { countedYaw, norm360, YAW_SET_RAW, YAW_SET_SENSITIVITY, YAW_SET_SPAWN, YAW_SET_TURN, YAW_WITH_TURN, type LookSample } from "./replay";
 import { IN_LEFT, IN_RIGHT, turnDelta } from "./turn-binds";
 import { resolveNullBinds } from "./null-binds";
-import { NativeMouse } from "./native-input";
 
 /**
  * Whether `unadjustedMovement` really turns raw input on here (only for the diagnostics label): Chromium does (Windows,
@@ -29,6 +32,8 @@ function rawHonoured(): boolean {
 
 /** pointerrawupdate (Chromium; Firefox 140+): one event per mouse report, not per frame. */
 const HAS_RAW_UPDATE = typeof window !== "undefined" && "onpointerrawupdate" in window;
+/** pointerrawupdate exists here (the input experiment's default source). */
+export const hasRawUpdate = (): boolean => HAS_RAW_UPDATE;
 /**
  * Above this many raw updates a second the uncapped loop goes back to pointermove for the session (Aimperion
  * RAW_MAX_HZ): an 8 kHz mouse dispatches 8,000 events a second on the main thread for frames that can't use them all.
@@ -85,6 +90,8 @@ export interface UserCmd {
   look?: LookSample;
   /** Null binds resolved this command's movement keys (null-binds.ts); the replay header records it. */
   nullBinds?: boolean;
+  /** Timestamped input built this command (timed-input.ts); the replay header records it. */
+  timed?: boolean;
 }
 
 export interface InputSettings {
@@ -114,11 +121,163 @@ export function isTextField(t: EventTarget | null): boolean {
   return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable === true);
 }
 
+export interface SamplerDelivery {
+  readonly version: 1; readonly session: number; readonly epoch: number; readonly observedChildren: number | null;
+  readonly delivery: number; readonly source: string; readonly accepted: boolean; readonly reason: string;
+  readonly reports: number; readonly eventTime: number; readonly arrivalTime: number;
+  readonly entries: readonly Readonly<{movementX:number; movementY:number; timeStamp:number; report:number; k:number; pitchK:number}>[];
+  readonly children: readonly Readonly<MotionSample>[];
+  readonly childrenTruncated: boolean;
+  readonly parentX: number; readonly parentY: number; readonly acceptedX: number; readonly acceptedY: number;
+}
+
 export class Input {
+  private sampler: InputSampler | null = null;
+  private samplerDelivery = 0;
+  private samplerSession = 0;
+  /** Latest selected/companion callback decision; bounded, separate from command consumption. */
+  samplerMotion: Readonly<SamplerDelivery> | null = null;
+  /** Optional synchronous capture sink. No retained unbounded delivery log. Must not throw. */
+  onSamplerDelivery: ((delivery: Readonly<SamplerDelivery>) => void) | null = null;
+  /** Persist each barrier immediately, including consecutive reset calls. Must not throw. */
+  onSamplerReset: ((reset: Readonly<SamplerReset>) => void) | null = null;
+  /** Local required-version codec sink; attach before enableSampler, keep through disable. */
+  onSamplerEvidence: ((event: SamplerEvidence) => void) | null = null;
+  private samplerView() {
+    return {base:this.yawBase, count:this.yawCount, k:this.yawK, epoch:this.yawEpoch, kind:this.yawKind, pitch:this.pitch};
+  }
+  enableSampler(options: SamplerOptions): void {
+    if (this.sampler) throw new Error("Sampler already enabled; disable or reset first");
+    if (options.source === "pointerrawupdate" && !HAS_RAW_UPDATE) throw new Error("pointerrawupdate is unavailable; choose an explicit supported source");
+    const sampler = new InputSampler(options, {...this.samplerView(), pitch:mapViewPitch(this.pitch)}, ++this.samplerSession, this.onSamplerEvidence ? e => this.onSamplerEvidence?.(e) : undefined);
+    this.releaseAll();
+    this.sampler = sampler;
+    this.syncSamplerPreview();
+    this.onSamplerReset?.(sampler.lastReset);
+    this.framesSince = this.eventsSince = this.reportsSince = 0;
+  }
+  disableSampler(): void {
+    this.resetSampler(performance.now(), "disable");
+    this.sampler = null;
+    this.releaseAll();
+  }
+  /** Release barrier: discard pending motion and retain the committed view. Capture stop may retain physical holds. */
+  resetSampler(now = performance.now(), reason = "integration-reset", preserveHeld = false): void {
+    if (!this.sampler) return;
+    this.sampler.reset(now, this.sampler.committedView, reason, preserveHeld);
+    this.syncSamplerPreview();
+    this.onSamplerReset?.(this.sampler.lastReset);
+    if (!preserveHeld) this.heldCodes.clear();
+    this.wheelBits = this.slot = this.weaponBits = this.give = 0;
+    this.framesSince = this.eventsSince = this.reportsSince = 0;
+  }
+  private syncSamplerPreview(): void {
+    if (!this.sampler) return;
+    const v = this.sampler.previewView;
+    this.yawBase=v.base; this.yawCount=v.count; this.yawK=v.k;
+    this.yawEpoch=v.epoch; this.yawKind=v.kind; this.pitch=v.pitch;
+  }
+  rebasePhysicsView(yaw: number, pitch: number, kind: number): void {
+    if (!this.sampler && this.timedActive) {
+      // A teleport or a pusher turn sets the view as of the last command; motion stamped after it still applies (counted
+      // with the current k, as it was received: the next motion after a sensitivity change rebases, previewLook).
+      this.yawBase = norm360(yaw);
+      this.yawCount = this.ti.pendingX;
+      this.yawEpoch++;
+      this.yawKind = kind;
+      this.cmdPitch = pitch;
+      this.viewPitch = Math.max(-89, Math.min(89, pitch + this.ti.pendingP));
+      return;
+    }
+    if (!this.sampler) { this.pitch=pitch; this.setYaw(yaw,kind); return; }
+    this.sampler.rebase(yaw,mapViewPitch(pitch),kind);
+    this.syncSamplerPreview();
+  }
+  /** A new world/attempt discards old pending input and clock, preserving legacy physical holds. */
+  restartSamplerView(yaw: number, pitch: number, kind: number): void {
+    if (!this.sampler) { this.pitch=pitch; this.setYaw(yaw,kind); return; }
+    const view={...this.sampler.committedView,base:norm360(yaw),count:0,pitch:mapViewPitch(pitch),kind,epoch:this.sampler.committedView.epoch+1};
+    this.sampler.reset(performance.now(),view,'world-restart',true);
+    this.syncSamplerPreview();
+    this.onSamplerReset?.(this.sampler.lastReset);
+    this.wheelBits=this.slot=this.weaponBits=this.give=0;
+    this.framesSince=this.eventsSince=this.reportsSince=0;
+  }
+  get samplerState() { return this.sampler ? {pending:this.sampler.pending, failed:this.sampler.failed, rejectedEpoch:this.sampler.rejectedEpoch, rejectedEpochX:this.sampler.rejectedEpochX, rejectedEpochY:this.sampler.rejectedEpochY, lastReset:this.sampler.lastReset} : null; }
+  pumpSampler(now: number, apply?: (sample: SampledInput) => void, policy: SamplerPolicy = {}): SampledInput[] {
+    if (!this.sampler) throw new Error("Sampler is not enabled");
+    this.nullBinds = !!policy.nullBinds; // the keys overlay (held) shows what the commands resolve
+    const rows = this.sampler.pump(now, {frames:this.framesSince, events:this.eventsSince, reports:this.reportsSince}, apply, policy);
+    if (rows.length) this.framesSince = this.eventsSince = this.reportsSince = 0;
+    this.syncSamplerPreview();
+    return rows;
+  }
+  private queue(payload: Payload, eventTime = performance.now(), arrivalTime = performance.now()): boolean {
+    return this.sampler?.enqueue(payload, eventTime, arrivalTime) ?? true;
+  }
+  private releaseCode(code: string, e: Event): void {
+    if (this.timedActive && this.heldCodes.has(code) && (this.codeBits.get(code) ?? 0) & TIMED_KEY_BITS) this.ti.addEdge(this.ti.stamp(e.timeStamp, performance.now()), code, false);
+    this.heldCodes.delete(code);
+    if (this.isBound(code)) this.queue({type:"key", code, down:false, bits:0}, e.timeStamp);
+  }
   settings: InputSettings = { sensitivity: 2, m_yaw: 0.022, m_pitch: 0.022 };
   /** Request raw (unaccelerated) mouse input when locking. */
   rawInput = true;
-  pitch = 0;
+  /** The view's pitch as the camera shows it (all motion so far). */
+  private viewPitch = 0;
+  get pitch(): number {
+    return this.viewPitch;
+  }
+  /** Sets the pitch (the next command's too: pending pitch motion is forgotten). */
+  set pitch(v: number) {
+    this.viewPitch = v;
+    this.cmdPitch = v;
+    this.ti.dropPitch();
+  }
+  /**
+   * Timestamped input (timed-input.ts; Settings → Mouse & view → Timestamped input): commands take the mouse motion and
+   * movement keys stamped up to their tick's boundary (sample({ at })), the camera everything. Off: as before, a command
+   * takes the view and keys as of the frame that runs it.
+   */
+  get timed(): boolean {
+    return this.timedOn;
+  }
+  set timed(v: boolean) {
+    v = !!v;
+    if (v === this.timedOn) return;
+    this.commitPending();
+    this.timedOn = v;
+    this.seedTimedKeys();
+  }
+  private timedOn = true;
+  private readonly ti = new TimedInput();
+  /** The pitch the last command took (timed input; the view's pitch otherwise). */
+  private cmdPitch = 0;
+  /** Motion event serial (timed input's per-command event count). */
+  private motionSerial = 0;
+  private get timedActive(): boolean {
+    return this.timedOn && !this.sampler;
+  }
+  /** Timed input's adapted holdback and its report counts (input stats, the experiment's sampler holdback). */
+  get timedStats(): { holdbackMs: number; reports: number; late: number; pending: number; unreliable: boolean } {
+    return { holdbackMs: this.ti.holdbackMs, reports: this.ti.reports, late: this.ti.late, pending: this.ti.pending, unreliable: this.ti.unreliable };
+  }
+  /** Everything pending goes into the next command (timed input turned off, keys released, a sensitivity change). */
+  private commitPending(): void {
+    const t = this.ti.flushMotion((_x, p) => (this.cmdPitch = Math.max(-89, Math.min(89, this.cmdPitch + p))));
+    this.cmdPitch = this.viewPitch;
+    // The next command carries this motion: it counts its events too (the anticheat's turning-without-event share).
+    this.carryEvents += t.events;
+    this.carryReports += t.reports;
+  }
+  private carryEvents = 0;
+  private carryReports = 0;
+  /** Movement keys held right now become the timed state (turned on, rebinding): no edge for them is pending. */
+  private seedTimedKeys(): void {
+    this.ti.releaseKeys();
+    for (const c of this.heldCodes) if ((this.codeBits.get(c) ?? 0) & TIMED_KEY_BITS) this.ti.keys.add(c);
+  }
+
   /**
    * The view yaw is counted (v8 replays, replay.ts countedYaw): an exact base plus the whole mouse counts since it,
    * yaw = norm360(base - count * k) with k = sensitivity * m_yaw. Anything that sets the view (spawn, teleport, a
@@ -143,6 +302,8 @@ export class Input {
   }
   /** Sets the view yaw (a new counted base): `kind` says what set it (replay.ts YAW_SET_*). */
   setYaw(v: number, kind: number): void {
+    if (this.sampler) throw new Error("Use rebasePhysicsView or restartSamplerView while sampler is enabled");
+    this.ti.dropYaw(); // a set view: motion before it is gone, as the camera shows
     this.yawBase = norm360(v);
     this.yawCount = 0;
     this.yawK = this.settings.sensitivity * this.settings.m_yaw;
@@ -195,10 +356,6 @@ export class Input {
   private give = 0;
   private heldCodes = new Set<string>();
   private wheelBits = 0;
-  private readonly nativeMouse = new NativeMouse(typeof window === "undefined" ? undefined : window.bunnyhopNativeInput);
-  private browserLockMode: "raw" | "os" = "os";
-  /** The native backend name when available; empty in ordinary browsers. */
-  get nativeBackend(): string { return this.nativeMouse.backend; }
 
   constructor(private canvas: HTMLCanvasElement) {
     this.setBinds(DEFAULT_BINDS);
@@ -209,8 +366,8 @@ export class Input {
         this.useRaw = this.rawUpdates && HAS_RAW_UPDATE && !this.rawTripped;
         this.skipNextMove = false;
         this.filter.rearm(performance.now());
+        this.resetSampler(performance.now(), "lock");
       } else {
-        this.nativeMouse.stop();
         this.releaseAll();
         this.lockMode = "none";
       }
@@ -226,7 +383,7 @@ export class Input {
     // updates come first and win the latch (Firefox 140-147 send them with zero motion: those never latch).
     document.addEventListener("pointermove", (e) => e.pointerType === "mouse" && this.motion(e, 1), { passive: true });
     document.addEventListener("mousemove", (e) => this.motion(e, 2), { passive: true });
-    if (HAS_RAW_UPDATE) document.addEventListener("pointerrawupdate" as "pointermove", (e) => this.useRaw && e.pointerType === "mouse" && this.motion(e, 3), { passive: true });
+    if (HAS_RAW_UPDATE) document.addEventListener("pointerrawupdate" as "pointermove", (e) => (this.sampler?.source === "pointerrawupdate" || this.useRaw) && e.pointerType === "mouse" && this.motion(e, 3), { passive: true });
     // Fullscreen in / out or a resize while locked can re-centre the hidden cursor (OS-accelerated locks): a jump. So
     // can the window coming back to the front with the lock kept. The view's size sizes the re-centre rule.
     const rearm = () => this.pointerLocked && this.filter.rearm(performance.now());
@@ -236,14 +393,10 @@ export class Input {
     document.addEventListener("fullscreenchange", () => (view(), rearm()));
     // Browsers can lose keyup while the window is inactive without immediately dropping pointer lock.
     // Discard held input on departure and return; subsequent key events can resume movement.
-    addEventListener("blur", () => { this.nativeMouse.stop(); this.releaseAll(); });
-    addEventListener("focus", () => {
-      this.releaseAll(); rearm();
-      if (this.pointerLocked && this.rawInput) void this.startNativeMouse();
-    });
+    addEventListener("blur", () => this.releaseAll());
+    addEventListener("focus", () => { this.releaseAll(); rearm(); });
     document.addEventListener("visibilitychange", () => {
       this.releaseAll();
-      if (document.visibilityState !== "visible") this.nativeMouse.stop();
       if (document.visibilityState === "visible") rearm();
     });
     document.addEventListener(
@@ -260,6 +413,7 @@ export class Input {
         const dir = delta < 0 ? "MWheelUp" : "MWheelDown";
         const bits = (this.codeBits.get(dir) ?? 0) | (this.codeBits.get("MouseWheel") ?? 0);
         this.wheelBits |= bits;
+        this.queue({type:"pulse", bits}, e.timeStamp);
         const code = this.codeAction.has(dir) ? dir : "MouseWheel";
         const a = this.codeAction.get(code);
         if (a) this.onAction?.(a, code);
@@ -270,23 +424,23 @@ export class Input {
     document.addEventListener("mousedown", (e) => {
       if (this.pointerLocked) this.press(mouseCode(e.button), false, e);
     });
-    document.addEventListener("mouseup", (e) => this.heldCodes.delete(mouseCode(e.button)));
+    document.addEventListener("mouseup", (e) => this.releaseCode(mouseCode(e.button), e));
     document.addEventListener("keydown", (e) => {
       // Typing into a text field (the chat, with the game still playing) never moves the player or fires binds.
       if (this.locked && !isTextField(e.target)) this.press(e.code, e.repeat, e);
     });
-    document.addEventListener("keyup", (e) => this.heldCodes.delete(e.code));
+    document.addEventListener("keyup", (e) => this.releaseCode(e.code, e));
   }
 
   /** Which event carries motion during this lock (diagnostics). */
-  get motionEvent(): "pointermove" | "mousemove" | "pointerrawupdate" | "native" | "none" {
-    if (this.nativeMouse.active) return "native";
+  get motionEvent(): "pointermove" | "mousemove" | "pointerrawupdate" | "none" {
     return this.motionSource === 1 ? "pointermove" : this.motionSource === 2 ? "mousemove" : this.motionSource === 3 ? "pointerrawupdate" : "none";
   }
 
   /** One motion event from `source` (1 pointermove, 2 mousemove, 3 pointerrawupdate): filtered, then turned into view angles. */
   private motion(e: MouseEvent, source: 1 | 2 | 3): void {
-    if (!this.pointerLocked || this.nativeMouse.active || this.nativeMouse.pending) return;
+    if (!this.pointerLocked) return;
+    if (this.sampler) { this.samplerMotionEvent(e, source); return; }
     const dx = e.movementX || 0;
     const dy = e.movementY || 0;
     if (!(dx || dy)) return;
@@ -321,19 +475,117 @@ export class Input {
     }
     const f = this.filter;
     const reports = source !== 2 ? reportsOf(e) : null;
-    f.push(dx, dy, e.timeStamp, source !== 2 && (f.enabled || this.collectReports) ? reports : null);
+    const timed = this.timedActive;
+    f.push(dx, dy, e.timeStamp, source !== 2 && (f.enabled || this.collectReports || timed) ? reports : null);
     this.eventsSince++;
     this.reportsSince += reports ? reports.length : 1;
     this.look(f.outX, f.outY);
+    if (timed && (f.outX || f.outY)) this.timedMotion(e, reports);
+  }
+
+  /** Timed input: the event's accepted motion, per report at the report's own time where the browser gives them. */
+  private timedMotion(e: MouseEvent, reports: ArrayLike<MotionSample> | null): void {
+    const f = this.filter;
+    const s = this.settings;
+    const pk = (s.verticalSensitivityEnabled ? (s.verticalSensitivity ?? s.sensitivity) : s.sensitivity) * s.m_pitch;
+    const now = performance.now();
+    const ev = ++this.motionSerial;
+    if (f.perReport && reports && f.repN === reports.length) {
+      let last = -Infinity;
+      for (let i = 0; i < f.repN; i++) {
+        // Reports are in order; a backwards stamp keeps the order (sum unchanged either way).
+        last = Math.max(last, this.ti.stamp(reports[i].timeStamp, now));
+        if (f.repX[i] || f.repY[i]) this.ti.addMotion(last, f.repX[i], f.repY[i] * pk, ev);
+      }
+      return;
+    }
+    // Unfiltered (the filter off or nothing dropped from a single-report judgement): the reports as they came, if they
+    // add up to what was accepted.
+    if (reports && reports.length > 1 && f.outX === (e.movementX || 0) && f.outY === (e.movementY || 0)) {
+      let sx = 0;
+      let sy = 0;
+      for (let i = 0; i < reports.length; i++) {
+        sx += reports[i].movementX || 0;
+        sy += reports[i].movementY || 0;
+      }
+      if (sx === f.outX && sy === f.outY) {
+        let last = -Infinity;
+        for (let i = 0; i < reports.length; i++) {
+          const x = reports[i].movementX || 0;
+          const y = reports[i].movementY || 0;
+          last = Math.max(last, this.ti.stamp(reports[i].timeStamp, now));
+          if (x || y) this.ti.addMotion(last, x, y * pk, ev);
+        }
+        return;
+      }
+    }
+    this.ti.addMotion(this.ti.stamp(e.timeStamp, now), f.outX, f.outY * pk, ev);
+  }
+
+  private samplerMotionEvent(e: MouseEvent, source: 1 | 2 | 3): void {
+    const sampler = this.sampler!;
+    const arrivalTime = performance.now();
+    const name = source === 1 ? "pointermove" : source === 2 ? "mousemove" : "pointerrawupdate";
+    const delivery = ++this.samplerDelivery;
+    let observedChildren: number | null = null;
+    let capturedChildren: readonly Readonly<MotionSample>[] = Object.freeze([]);
+    let entries: SamplerDelivery['entries'] = Object.freeze([]);
+    const recordDelivery = (accepted: boolean, reason: string, reports: number, acceptedX = 0, acceptedY = 0) => {
+      this.samplerMotion = Object.freeze({version:1, session:sampler.session, epoch:sampler.lastReset.epoch, observedChildren, entries, children:capturedChildren, childrenTruncated:observedChildren !== null && observedChildren > sampler.capacity, delivery, source:name, accepted, reason, reports, eventTime:e.timeStamp,
+        arrivalTime, parentX:e.movementX, parentY:e.movementY, acceptedX, acceptedY});
+      sampler.evidence({type:'delivery', delivery:this.samplerMotion});
+      this.onSamplerDelivery?.(this.samplerMotion);
+    };
+    if (name !== sampler.source) {
+      recordDelivery(false, "companion-source", 0);
+      return;
+    }
+    this.motionSource = source;
+    let children: ArrayLike<MotionSample> | null = null;
+    try { children = source === 2 ? null : reportsOf(e); } catch { /* Parent remains authoritative. */ }
+    observedChildren = children && Number.isSafeInteger(children.length) && children.length >= 0 ? children.length : null;
+    capturedChildren = Object.freeze(Array.from({length:Math.min(observedChildren ?? 0, sampler.capacity)}, (_,i) => {
+      const c = children![i];
+      return Object.freeze({movementX:c?.movementX, movementY:c?.movementY, timeStamp:c?.timeStamp});
+    }));
+    const validated = validateMotion(e, children, sampler.capacity);
+    if (!validated.reports.length) {
+      recordDelivery(false, validated.reason, 0);
+      return;
+    }
+    // Exactly one filter invocation per real selected callback, with the validated representation.
+    this.filter.push(e.movementX, e.movementY, e.timeStamp, validated.quality === "children" ? validated.reports : null);
+    this.eventsSince++;
+    this.reportsSince += observedChildren || 1;
+    const unchanged = this.filter.outX === e.movementX && this.filter.outY === e.movementY;
+    // A filtered event keeps its reports' own times when the filter judged them one by one (dropped ones carry 0).
+    const split = !unchanged && validated.quality === "children" && this.filter.perReport && this.filter.repN === validated.reports.length;
+    const reports = unchanged ? validated.reports
+      : split ? validated.reports.map((r, i) => ({movementX:this.filter.repX[i], movementY:this.filter.repY[i], timeStamp:r.timeStamp}))
+      : [{movementX:this.filter.outX, movementY:this.filter.outY, timeStamp:e.timeStamp}];
+    const quality = unchanged ? validated.quality : split ? "filtered-reports" : "filtered-aggregate";
+    entries = Object.freeze(reports.map((r,report) => Object.freeze({movementX:r.movementX, movementY:r.movementY, timeStamp:r.timeStamp, report, k:this.settings.sensitivity*this.settings.m_yaw, pitchK:(this.settings.verticalSensitivityEnabled ? (this.settings.verticalSensitivity ?? this.settings.sensitivity) : this.settings.sensitivity)*this.settings.m_pitch})));
+    recordDelivery(true, unchanged ? validated.reason : quality, reports.length, this.filter.outX, this.filter.outY);
+    for (const r of entries) {
+      this.queue({type:"motion", x:r.movementX, y:r.movementY, k:r.k,
+        pitchK:r.pitchK, delivery, report:r.report, quality}, r.timeStamp, arrivalTime);
+    }
+    this.syncSamplerPreview();
   }
 
   /** Mouse counts -> view angles, CS:S style: degrees = counts * sensitivity * m_yaw / m_pitch. */
   look(dx: number, dy: number): void {
+    if (this.sampler) throw new Error("Direct look is unsupported while sampler is enabled");
+    this.previewLook(dx,dy);
+  }
+
+  private previewLook(dx: number, dy: number): void {
     if (!(dx || dy)) return;
     const s = this.settings;
     // A changed sensitivity keeps the view where it is: a new base at the current yaw, counted with the new k.
     const k = s.sensitivity * s.m_yaw;
     if (k !== this.yawK) {
+      this.commitPending(); // pending motion was counted with the old k
       const at = this.yaw;
       this.yawBase = at;
       this.yawCount = 0;
@@ -342,13 +594,16 @@ export class Input {
       this.yawKind = YAW_SET_SENSITIVITY;
     }
     this.yawCount += dx;
-    this.pitch += dy * (s.verticalSensitivityEnabled ? (s.verticalSensitivity ?? s.sensitivity) : s.sensitivity) * s.m_pitch;
-    this.pitch = Math.max(-89, Math.min(89, this.pitch));
+    this.viewPitch += dy * (s.verticalSensitivityEnabled ? (s.verticalSensitivity ?? s.sensitivity) : s.sensitivity) * s.m_pitch;
+    this.viewPitch = Math.max(-89, Math.min(89, this.viewPitch));
+    if (!this.timedActive) this.cmdPitch = this.viewPitch;
   }
 
   private press(code: string, repeat: boolean, e: Event): void {
     if (this.codeBits.has(code)) {
+      if (this.timedActive && !repeat && !this.heldCodes.has(code) && this.codeBits.get(code)! & TIMED_KEY_BITS) this.ti.addEdge(this.ti.stamp(e.timeStamp, performance.now()), code, true);
       this.heldCodes.add(code);
+      this.queue({type:"key", code, down:true, bits:this.codeBits.get(code)!}, e.timeStamp);
       e.preventDefault();
       return;
     }
@@ -356,7 +611,9 @@ export class Input {
     const a = this.codeAction.get(code);
     if (a) {
       e.preventDefault();
-      this.heldCodes.add(code); // for actionHeld (no button bits: never part of a command)
+      this.heldCodes.add(code); // for actionHeld
+      if (a === "attack" || a === "attack2") this.queue({type:"key", code, down:true, bits:a === "attack" ? IN_ATTACK : IN_ATTACK2}, e.timeStamp);
+      else if (!repeat && (a === "turnLeft" || a === "turnRight")) this.queue({type:"key", code, down:true, bits:a === "turnLeft" ? IN_LEFT : IN_RIGHT}, e.timeStamp);
       this.onAction?.(a, code);
     } else this.onKey?.(code);
   }
@@ -369,6 +626,8 @@ export class Input {
   }
 
   setBinds(binds: Partial<Record<BindAction, string[]>>): void {
+    if (this.sampler) this.releaseAll();
+    this.ti.releaseKeys();
     this.codeBits.clear();
     this.codeAction.clear();
     const weapon: [BindAction, string[]][] = [];
@@ -391,16 +650,19 @@ export class Input {
   /** Requests weapon slot 1..3 (IN_SLOT_*) in the next command only. */
   requestSlot(slot: number): void {
     this.slot = slot & 3;
+    this.queue({type:"slot", value:this.slot});
   }
 
   /** Drops the active gun (IN_DROP) in the next command only. */
   requestDrop(): void {
     this.weaponBits |= IN_DROP;
+    this.queue({type:"pulse", bits:IN_DROP});
   }
 
   /** Reloads (IN_RELOAD) in the next command only. */
   requestReload(): void {
     this.weaponBits |= IN_RELOAD;
+    this.queue({type:"pulse", bits:IN_RELOAD});
   }
 
   /**
@@ -409,11 +671,15 @@ export class Input {
    */
   requestGive(id: number): void {
     this.give = id & (IN_WEAPON_COMMAND_MASK >>> IN_GIVE_SHIFT);
+    this.queue({type:"give", value:this.give});
   }
 
   /** Releases every held key (e.g. when a chat field takes the keyboard mid-strafe). */
   releaseAll(): void {
+    this.resetSampler(performance.now(), "release-all");
     this.heldCodes.clear();
+    this.commitPending(); // the view the player sees is the view the next command has
+    this.ti.releaseKeys();
     this.wheelBits = 0;
     this.slot = 0;
     this.weaponBits = 0;
@@ -457,6 +723,24 @@ export class Input {
    */
   private nullBinds = false;
 
+  /**
+   * Timed input's command buttons: the movement keys as of the command's cutoff (in press order, for null binds), every
+   * other bound key as held now (jump, duck, use: unchanged), plus a pending wheel pulse.
+   */
+  private get timedHeld(): number {
+    const pressed: number[] = [];
+    for (const c of this.heldCodes) {
+      const b = this.codeBits.get(c) ?? 0;
+      if (!(b & TIMED_KEY_BITS)) pressed.push(b);
+    }
+    for (const c of this.ti.keys) pressed.push(this.codeBits.get(c) ?? 0);
+    pressed.push(this.wheelBits);
+    if (this.nullBinds) return resolveNullBinds(pressed);
+    let b = 0;
+    for (const v of pressed) b |= v;
+    return b;
+  }
+
   /** Buttons currently held (for the keys overlay; includes a pending wheel pulse). */
   get held(): number {
     if (this.nullBinds) {
@@ -487,8 +771,7 @@ export class Input {
     if (this.rawInput && !this.rawUnsupported) {
       const refused = await this.request({ unadjustedMovement: true });
       if (!refused) {
-        this.browserLockMode = this.lockMode = rawHonoured() ? "raw" : "os";
-        await this.startNativeMouse();
+        this.lockMode = rawHonoured() ? "raw" : "os";
         return true;
       }
       this.rawError = refused;
@@ -501,49 +784,13 @@ export class Input {
     }
     const ok = !(await this.request());
     this.lockMode = ok ? "os" : "none";
-    this.browserLockMode = "os";
-    if (ok && this.rawInput) await this.startNativeMouse();
     return ok;
-  }
-
-  private async startNativeMouse(): Promise<void> {
-    const active = await this.nativeMouse.start();
-    if (!this.pointerLocked) return;
-    if (active) {
-      this.lockMode = "raw";
-      this.useRaw = false;
-      this.motionSource = 0;
-      this.filter.rearm(performance.now());
-    }
   }
 
   /** Once per rendered frame (rAF time): frame times for the input stats. */
   frame(now: number): void {
-    if (this.pointerLocked && this.nativeMouse.active) {
-      const samples = this.nativeMouse.drain(performance.now());
-      const reports: MotionSample[] = [];
-      let dx = 0, dy = 0;
-      for (const sample of samples) {
-        if (![sample.dx, sample.dy, sample.time].every(Number.isFinite)) continue;
-        if (!(sample.dx || sample.dy)) continue;
-        dx += sample.dx;
-        dy += sample.dy;
-        reports.push({ movementX: sample.dx, movementY: sample.dy, timeStamp: sample.time - performance.timeOrigin });
-      }
-      if (reports.length) {
-        this.filter.push(dx, dy, reports[reports.length - 1].timeStamp, reports);
-        this.eventsSince++;
-        this.reportsSince += reports.length;
-        this.look(this.filter.outX, this.filter.outY);
-      }
-      if (!this.nativeMouse.active) {
-        this.lockMode = this.browserLockMode;
-        this.rawError = this.nativeMouse.error;
-        this.motionSource = 1;
-        this.skipNextMove = true;
-      }
-    }
     this.framesSince++;
+    this.sampler?.evidence({type:'frame', now, arrivalTime:performance.now()});
     this.filter.stats.frame(now, performance.now(), this.locked);
   }
 
@@ -583,8 +830,18 @@ export class Input {
   }
 
   /** Builds the command for the next simulation tick. */
-  sample(o: { turnBinds?: boolean; tickInterval?: number; nullBinds?: boolean } = {}): UserCmd {
+  sample(o: { turnBinds?: boolean; tickInterval?: number; nullBinds?: boolean; at?: number } = {}): UserCmd {
+    if (this.sampler) throw new Error("Use pumpSampler(now) while the sampler is enabled");
     this.nullBinds = !!o.nullBinds;
+    // Timed input: this tick's share of the motion and key edges (`at`: its boundary, main.ts frame()).
+    const timed = this.timedActive;
+    let taken = { events: this.eventsSince, reports: this.reportsSince };
+    if (timed) {
+      taken = this.ti.take(o.at, (_x, p) => (this.cmdPitch = Math.max(-89, Math.min(89, this.cmdPitch + p))));
+      taken.events += this.carryEvents;
+      taken.reports += this.carryReports;
+    }
+    this.carryEvents = this.carryReports = 0;
     // Keep mouse counts intact: replay analysis can check the fixed turn separately from mouse movement. A spawn,
     // teleport, pusher, sensitivity or raw set in this tick retains its own reason (including unexplained raw sets).
     let turn = 0;
@@ -599,7 +856,7 @@ export class Input {
     }
     // The knife binds are actions (the viewmodel swings on them), not movement bits: add their buttons here.
     // A weapon slot request (requestSlot) goes into this one command only.
-    const buttons = this.held | turn | (this.actionHeld("attack") ? IN_ATTACK : 0) | (this.actionHeld("attack2") ? IN_ATTACK2 : 0) | (this.slot << IN_SLOT_SHIFT) | this.weaponBits | (this.give << IN_GIVE_SHIFT);
+    const buttons = (timed ? this.timedHeld : this.held) | turn | (this.actionHeld("attack") ? IN_ATTACK : 0) | (this.actionHeld("attack2") ? IN_ATTACK2 : 0) | (this.slot << IN_SLOT_SHIFT) | this.weaponBits | (this.give << IN_GIVE_SHIFT);
     this.wheelBits = 0;
     this.slot = 0;
     this.weaponBits = 0;
@@ -611,12 +868,15 @@ export class Input {
     if (buttons & IN_BACK) forwardmove -= speed;
     if (buttons & IN_MOVERIGHT) sidemove += speed;
     if (buttons & IN_MOVELEFT) sidemove -= speed;
+    // Timed: the counts this command took (the camera also shows the pending ones), the events / reports they came in.
+    const count = timed ? this.yawCount - this.ti.pendingX : this.yawCount;
     const look: LookSample = {
-      base: this.yawBase, count: this.yawCount, k: this.yawK, epoch: this.yawEpoch, kind: this.yawKind,
-      frames: this.framesSince, events: this.eventsSince, reports: this.reportsSince,
+      base: this.yawBase, count, k: this.yawK, epoch: this.yawEpoch, kind: this.yawKind,
+      frames: this.framesSince, events: taken.events, reports: taken.reports,
     };
     this.framesSince = this.eventsSince = this.reportsSince = 0;
     this.sampledYawEpoch = this.yawEpoch;
-    return { pitch: this.pitch, yaw: this.yaw, forwardmove, sidemove, buttons, look, ...(this.nullBinds ? { nullBinds: true } : {}) };
+    const pitch = timed ? this.cmdPitch : this.pitch;
+    return { pitch, yaw: countedYaw(this.yawBase, count, this.yawK), forwardmove, sidemove, buttons, look, ...(this.nullBinds ? { nullBinds: true } : {}), ...(timed ? { timed: true } : {}) };
   }
 }

@@ -1,9 +1,23 @@
-// Player avatar pictures: the Discord avatar a player chose to show (opt-in, apps/api/src/auth.ts), drawn in place of
-// their letter. One helper so every place sizes, lazy-loads and falls back the same way: the picture takes the letter's
-// exact box (the caller's class sets the size, so nothing shifts when it loads) and turns back into the letter if it
-// fails to load.
+// Player avatar pictures: the Discord avatar a player chose to show (opt-in, apps/api/src/auth.ts), else their bunny
+// avatar (avatar/spec.ts; apps/api/src/bunny-avatar.ts), drawn in place of their letter. One helper so every place
+// sizes, lazy-loads and falls back the same way: the picture takes the letter's exact box (the caller's class sets the
+// size, so nothing shifts when it loads) and turns back into the letter if it fails to load.
 
 import { h } from "./dom";
+import { defaultAvatarPath } from "../avatar/spec";
+
+const SITE = "https://bunnyhop.lol";
+/** Site files load from this origin (the site itself, local dev; elsewhere, e.g. the Wavedash build: bunnyhop.lol). */
+const siteBase = () => (typeof location !== "undefined" && (location.hostname.endsWith("bunnyhop.lol") || location.hostname === "localhost" || location.hostname === "127.0.0.1") ? "" : SITE);
+
+/**
+ * The picture a player shows: the API's avatarUrl (their Discord avatar or their bunny), else (no avatar row yet, an old
+ * cached answer) the default bunny their id picks. null without an id: the letter.
+ */
+export function pictureOf(p: { id?: string | null; avatarUrl: string | null }): string | null {
+  if (p.avatarUrl) return p.avatarUrl;
+  return p.id ? siteBase() + defaultAvatarPath(p.id, null) : null;
+}
 
 const DISCORD_AVATAR = /^https:\/\/cdn\.discordapp\.com\/avatars\/\d+\/(a_)?[0-9a-f]+\.png(\?|$)/;
 
@@ -13,7 +27,8 @@ const DISCORD_AVATAR = /^https:\/\/cdn\.discordapp\.com\/avatars\/\d+\/(a_)?[0-9
  */
 export function avatarSrc(url: string, px: number, animate = false): string {
   const m = DISCORD_AVATAR.exec(url);
-  if (!m) return url;
+  // Site files (default bunny avatars) from this origin when it's the site or local dev.
+  if (!m) return url.startsWith(`${SITE}/avatars/`) ? siteBase() + url.slice(SITE.length) : url;
   const u = new URL(url);
   const want = px * (typeof devicePixelRatio === "number" ? devicePixelRatio : 1);
   u.searchParams.set("size", want <= 64 ? "64" : "128");

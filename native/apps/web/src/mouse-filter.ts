@@ -239,6 +239,16 @@ export class MouseFilter {
   /** Accepted delta of the last `push` (counts). */
   outX = 0;
   outY = 0;
+  /**
+   * The last `push` judged its coalesced reports one by one: `repN` of them, report i's accepted motion in `repX[i]` /
+   * `repY[i]` (0 for a dropped one; a refund lands on the report that earned it). They add up to outX / outY. False:
+   * the accepted motion is the one aggregate (a single report, unreadable reports, a discard). Timestamped input
+   * (input.ts) keeps each report's own time this way instead of moving the whole event to its dispatch time.
+   */
+  perReport = false;
+  repN = 0;
+  repX = new Float64Array(64);
+  repY = new Float64Array(64);
   readonly stats = new InputStats();
   /** Magnitudes of the last WINDOW accepted reports (ring; tailHead is the oldest). */
   private tail = new Float64Array(WINDOW);
@@ -298,8 +308,8 @@ export class MouseFilter {
     this.dropN = reports;
   }
 
-  /** Gives the last drop back (see REFUND_RATIO) if a report of (`x`, `y`) says it was a hand speeding up. */
-  private refund(x: number, y: number, m: number): void {
+  /** Gives the last drop back (see REFUND_RATIO) if a report of (`x`, `y`) says it was a hand speeding up (report `at`). */
+  private refund(x: number, y: number, m: number, at = -1): void {
     if (!this.dropMag || m < REFUND_RATIO * this.dropMag) return;
     const ax = Math.abs(this.dropX) >= Math.abs(this.dropY);
     const d = ax ? this.dropX : this.dropY;
@@ -307,6 +317,10 @@ export class MouseFilter {
     if (!(d * v > 0)) return;
     this.outX += this.dropX;
     this.outY += this.dropY;
+    if (at >= 0) {
+      this.repX[at] += this.dropX;
+      this.repY[at] += this.dropY;
+    }
     this.stats.spikes = Math.max(0, this.stats.spikes - this.dropN);
     this.accept(this.dropMag);
   }
@@ -328,6 +342,8 @@ export class MouseFilter {
   push(dx: number, dy: number, t: number, reports: ArrayLike<MotionSample> | null): void {
     this.outX = dx;
     this.outY = dy;
+    this.perReport = false;
+    this.repN = 0;
     if (!(dx || dy)) return;
     const m = mag(dx, dy);
     const n = reports ? reports.length : 0;
@@ -373,9 +389,29 @@ export class MouseFilter {
     if (this.mags.length < n) this.mags = new Float64Array(Math.max(n, this.mags.length * 2));
     const mags = this.mags;
     for (let i = 0; i < n; i++) mags[i] = smag(r[i]);
+    if (this.repX.length < n) {
+      this.repX = new Float64Array(Math.max(n, this.repX.length * 2));
+      this.repY = new Float64Array(this.repX.length);
+    }
+    for (let i = 0; i < n; i++) {
+      this.repX[i] = r[i].movementX || 0;
+      this.repY[i] = r[i].movementY || 0;
+    }
+    // The event's total may differ from its reports' sum by a rounding count (addsUp): the newest report takes it, so
+    // the per-report motion still adds up to outX / outY.
+    let sx = 0;
+    let sy = 0;
+    for (let i = 0; i < n; i++) {
+      sx += this.repX[i];
+      sy += this.repY[i];
+    }
+    this.repX[n - 1] += dx - sx;
+    this.repY[n - 1] += dy - sy;
+    this.perReport = true;
+    this.repN = n;
     let worst = 0;
     for (let i = 0; i < n; ) {
-      this.refund(r[i].movementX || 0, r[i].movementY || 0, mags[i]);
+      this.refund(r[i].movementX || 0, r[i].movementY || 0, mags[i], i);
       const run = mags[i] >= SPIKE_MIN ? this.spikeRun(r, mags, i, n, dt) : 0;
       if (!run) {
         this.accept(mags[i]);
@@ -389,6 +425,7 @@ export class MouseFilter {
       for (let k = i; k < i + run; k++) {
         x += r[k].movementX || 0;
         y += r[k].movementY || 0;
+        this.repX[k] = this.repY[k] = 0;
         st.spike(mags[k]);
         if (mags[k] > big) big = mags[k];
       }

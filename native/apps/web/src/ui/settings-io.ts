@@ -212,6 +212,7 @@ const RULES: [string, Rule][] = [
   ["graphics.aspect", { oneOf: ["native", "4:3", "5:4", "16:10", "16:9"] }],
   ["graphics.aspectFit", { oneOf: ["stretch", "bars"] }],
   ["graphics.anisotropy", { oneOf: [1, 2, 4, 8, 16] }],
+  ["graphics.preset", { oneOf: ["source", "classic", "enhanced", "cinematic"] }],
   ["graphics.menuBackground", { oneOf: ["live", "still", "off"] }],
   ["viewmodel.fov", { range: [40, 90] }],
   ["viewmodel.bob", { range: [0, 1.5] }],

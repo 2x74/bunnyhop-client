@@ -1,0 +1,51 @@
+/* Static legal documents: the site's own type, one readable column, no game code. */
+.legal { max-width: 49rem; padding-top: 2.5rem; line-height: 1.7; overflow-wrap: break-word; }
+.legal h1 { font-size: clamp(2.25rem, 6vw, 3.25rem); margin-bottom: 0.6rem; }
+.legal-date { color: var(--cream-3); font-size: 0.9rem; margin: 0 0 1.5rem; }
+.legal .lede { line-height: 1.65; }
+.legal section { margin: 2.75rem 0; }
+.legal h2 { font-size: 1.45rem; line-height: 1.3; scroll-margin-top: 1.5rem; }
+.legal p, .legal li { color: var(--cream-2); }
+.legal p { margin: 0.8rem 0; }
+.legal li { margin-block: 0.5rem; }
+.legal strong { color: var(--cream); }
+.legal-contents { padding-block: 1.25rem; border-block: 1px solid var(--ink-3); }
+.legal-contents h2 { font-size: 1rem; }
+.legal-contents ol { padding-left: 1.5rem; margin-bottom: 0; columns: 2; column-gap: 2rem; }
+.legal-contents li { break-inside: avoid; font-size: 0.95rem; margin-block: 0 0.6rem; }
+.legal-request { font-weight: 700; text-underline-offset: 0.2em; }
+.legal-table-wrap { margin-top: 1.25rem; }
+.legal table { border-collapse: collapse; width: 100%; font-size: 0.875rem; line-height: 1.55; }
+.legal caption { text-align: left; font-weight: 650; margin-bottom: 0.75rem; }
+.legal th, .legal td { padding: 0.75rem 0.55rem; vertical-align: top; text-align: left; border-bottom: 1px solid var(--ink-3); }
+.legal th { color: var(--cream); }
+.legal tbody th { width: 8.5rem; hyphens: manual; }
+.legal td { color: var(--cream-2); }
+.legal a:focus-visible, .legal-table-wrap:focus-visible { outline: 2px solid var(--amber); outline-offset: 4px; }
+@media (max-width: 40rem) {
+  .legal { padding-top: 1.5rem; }
+  .top { gap: 1.25rem; flex-wrap: wrap; }
+  .top nav { gap: 1rem; font-size: 0.9rem; }
+  .legal-contents ol { columns: 1; }
+  .legal table, .legal tbody, .legal tr, .legal th, .legal td { display: block; }
+  .legal caption { display: block; width: 100%; }
+  .legal thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .legal tbody tr { padding-block: 0.75rem; border-bottom: 1px solid var(--ink-3); }
+  .legal tbody th, .legal td { padding: 0.4rem 0; border: 0; width: auto; }
+  .legal td::before { content: attr(data-label) ": "; font-weight: 650; color: var(--cream); }
+}
+
+/* Native disclosure keeps the full credits catalogue readable without JavaScript. */
+.credits-letter { border-bottom: 1px solid var(--ink-3); padding-block: 0.5rem; }
+.credits-letter summary { cursor: pointer; font-size: 1rem; font-weight: 650; }
+.credits-letter summary span { color: var(--cream-3); font-weight: 400; }
+.credits-letter summary:focus-visible { outline: 2px solid var(--amber); outline-offset: 4px; }
+.credits-letter .legal-table-wrap { margin-top: 0.5rem; }
+.credits-letter tbody th { width: 35%; overflow-wrap: anywhere; }
+.credits-letter td { overflow-wrap: anywhere; }
+.credits-letter th, .credits-letter td { padding-block: 0.5rem; }
+.credits-letter small { display: block; color: var(--cream-3); font-weight: 400; }
+.credits-disclaimer { max-width: 49rem; margin: 1.5rem 0 0; line-height: 1.7; }
+@media (max-width: 40rem) {
+  .credits-letter tbody th { width: auto; }
+}

@@ -253,3 +253,4 @@ fn cooks_is_deterministic() {
     let Some(a) = run() else { return };
     assert_eq!(Some(a), run());
 }
+

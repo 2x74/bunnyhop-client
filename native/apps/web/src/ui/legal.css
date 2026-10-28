@@ -1,0 +1,4 @@
+.menu-legal { display: flex; flex: none; flex-wrap: wrap; gap: 0.4rem 1rem; margin-top: var(--sp-3); font-size: var(--fs-xs); }
+.menu-legal a { color: var(--faint); text-decoration: none; }
+.menu-legal a:hover, .menu-legal a:focus-visible { color: var(--dim); text-decoration: underline; text-underline-offset: 0.2em; }
+.pause-foot > .menu-legal { grid-column: 1 / -1; margin-top: 0; }

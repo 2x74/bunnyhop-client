@@ -1,0 +1,59 @@
+/* Tutorial mode HUD (tutorial/mode.ts, guide.ts). Lives in #hud: no pointer events, scales with the HUD scale, uses
+   the HUD's own type (shadowed text over the world, no panels). Lesson titles and signs are painted in the map. */
+
+body.menu-open #tut-prompt, body.menu-open #tut-guide { visibility: hidden; }
+/* Lessons 1-3 are untimed practice (mode.ts): no run timer. The final course is a timed run and shows it. */
+body.tutorial-practice #hud .hud-timer { visibility: hidden; }
+/* The final course's finish opens on the title line alone; the end card comes in after it (mode.ts TITLE_MS). */
+body.tutorial-title #hud-endcard { visibility: hidden; }
+
+/* One quiet line near the bottom: the instruction or a nudge, key hints under. The title line is only for the finish. */
+#tut-prompt {
+  left: 50%; bottom: 7vh; transform: translateX(-50%); width: min(46rem, 92vw);
+  display: grid; justify-items: center; gap: 0.2em; text-align: center;
+  font-size: calc(1rem * var(--hs));
+  /* Over any floor (white grid, orange strips, sky): a dark halo, heavier than the HUD's usual shadow. */
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 0.5em rgba(0, 0, 0, 0.55), 0 0 1.2em rgba(0, 0, 0, 0.35);
+}
+#tut-prompt > * { opacity: 0; transition: opacity 0.35s var(--ease); }
+#tut-prompt > .on { opacity: 1; }
+.tp-title { font-size: 1.9em; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
+.tp-line { min-height: 1.35em; font-size: 1.15em; font-weight: 650; line-height: 1.35; }
+/* A nudge: still white for contrast, marked with the accent underline. */
+.tp-line.nudge { text-decoration: underline 0.12em var(--accent); text-underline-offset: 0.3em; text-decoration-skip-ink: none; }
+.tp-hint { min-height: 1.5em; font-size: 0.8em; color: rgba(255, 255, 255, 0.62); }
+.tp-hint kbd { text-shadow: none; }
+
+/* Strafe guide: two arcs around the crosshair, one per strafe key. */
+#tut-guide { left: 50%; top: 50%; width: calc(7rem * var(--hs)); transform: translate(-50%, -50%); }
+#tut-guide[hidden] { display: none; }
+.tg-arcs { display: block; width: 100%; overflow: visible; filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.7)); }
+.tg-arc { fill: none; stroke: rgba(255, 255, 255, 0.16); stroke-width: 2.2; stroke-linecap: round; transition: stroke 0.08s; }
+.tg-arc.on { stroke: rgba(255, 255, 255, 0.85); }
+.tg-arc.on.ground { stroke: rgba(255, 255, 255, 0.35); }
+.tg-arc.good { stroke: var(--gain); }
+.tg-arc.bad { stroke: var(--loss); }
+.tg-chev { fill: none; stroke: #fff; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; opacity: 0; transition: opacity 0.12s; }
+.tg-chev.show { opacity: 0.9; animation: tg-nudge 0.7s ease-in-out infinite alternate; }
+@keyframes tg-nudge { to { translate: var(--tg-dx, 0) 0; } }
+.tg-chev.l { --tg-dx: -3px; } .tg-chev.r { --tg-dx: 3px; }
+.tg-details { position: absolute; top: 50%; left: 100%; transform: translateY(-50%); margin-left: 0.6em; white-space: pre; font-size: 0.72em; font-weight: 650; color: rgba(255, 255, 255, 0.78); text-shadow: var(--shadow-text); }
+
+/* The final course's board on the end-of-run card (board.ts): the card's own type, your row marked the way the in-game
+   scoreboard marks it, the gold time as a line in the list. */
+.endcard-extra { margin-top: 0.65em; padding-top: 0.55em; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.endcard-extra[hidden] { display: none; }
+.tb-head { font-size: 0.9em; font-weight: 700; color: rgba(255, 255, 255, 0.72); margin-bottom: 0.25em; }
+.tb-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; text-align: left; }
+.tb-table td { padding: 0.1em 0.45em; white-space: nowrap; }
+.tb-rank { width: 2em; text-align: right; color: rgba(255, 255, 255, 0.5); }
+.tb-name { max-width: 13em; overflow: hidden; text-overflow: ellipsis; }
+.tb-name .nm-marks { margin-left: 0.3em; }
+.tb-time { text-align: right; font-weight: 650; }
+.tb-table tr.me td { background: rgba(255, 180, 58, 0.1); color: #fff; }
+.tb-table tr.me td:first-child { box-shadow: inset 3px 0 0 var(--accent); color: var(--accent); }
+.tb-table tr.gold td { color: var(--accent); font-size: 0.85em; font-weight: 650; border-top: 1px dashed color-mix(in srgb, var(--accent) 45%, transparent); }
+.tb-table tr.gap td { color: rgba(255, 255, 255, 0.4); text-align: center; line-height: 1; }
+.tb-line { margin-top: 0.4em; font-size: 0.9em; color: rgba(255, 255, 255, 0.75); }
+.tb-line b { color: #fff; }
+.tb-line.dim { color: rgba(255, 255, 255, 0.5); }

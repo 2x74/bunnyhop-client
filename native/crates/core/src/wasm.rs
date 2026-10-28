@@ -16,6 +16,7 @@ struct Ctx {
     tex_bytes: Vec<u8>,
     error: String,
     scratch_f32: Vec<f32>,
+    timing_f64: Vec<f64>,
     scratch_u32: Vec<u32>,
     scratch_str: String,
     /// Per texinfo: drawn or not (`mesh::texinfo_drawn`), kept from the map load for `overlay_volumes`.
@@ -489,6 +490,20 @@ pub extern "C" fn brush_states() -> usize {
     })
 }
 
+/// Presentation entity states [entity index, enabled], restored with simulation snapshots.
+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+pub extern "C" fn effect_states() -> usize {
+    with(|c| {
+        c.scratch_f32.clear();
+        if let Some(g) = &c.game {
+            for (entity, enabled) in g.effect_states() {
+                c.scratch_f32.extend_from_slice(&[entity as f32, enabled as u32 as f32]);
+            }
+        }
+        c.scratch_f32.len()
+    })
+}
+
 /// Server rules: bhop_block_fix (0 = stock sinking doors, 1 = block fix), grace seconds before a
 /// standing player is sent through the block's teleport, teleport_keeps_velocity (Source = 1).
 /// Resets the map.
@@ -823,6 +838,43 @@ pub extern "C" fn overlay_states() -> usize {
     })
 }
 
+// Optional observational ABI v2. Does not change commands, snapshots or ranked timing.
+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+pub extern "C" fn timing_path_version() -> u32 { playsrc_movement::accepted_path::VERSION }
+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+pub extern "C" fn timing_observe(enabled: u32) {
+    with(|c| { if let Some(g) = &mut c.game { g.observe_timing = enabled != 0; g.timing_path = None; } });
+}
+/// f64 buffer: status (0 absent, 1 supported, 2 unsupported), then 15 values per
+/// segment: t0,t1,from[3],to[3],hull.mins[3],hull.maxs[3],discrete. Copy before next call.
+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+pub extern "C" fn timing_path() -> usize {
+    with(|c| {
+        c.timing_f64.clear();
+        let path = c.game.as_ref().and_then(|g| g.timing_path.as_ref());
+        c.timing_f64.push(path.map_or(0.0, |p| if p.unsupported.is_some() { 2.0 } else { 1.0 }));
+        if let Some(p) = path {
+            for s in &p.segments {
+                c.timing_f64.extend_from_slice(&[s.t0, s.t1]);
+                for v in [s.from, s.to, s.hull.mins, s.hull.maxs] {
+                    c.timing_f64.extend(v.map(f64::from));
+                }
+                c.timing_f64.push(if s.discrete { 1.0 } else { 0.0 });
+            }
+        }
+        c.timing_f64.len()
+    })
+}
+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+pub extern "C" fn timing_path_ptr() -> *const f64 { with(|c| c.timing_f64.as_ptr()) }
+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+pub extern "C" fn timing_path_reason() -> usize {
+    with(|c| {
+        c.scratch_str = c.game.as_ref().and_then(|g| g.timing_path.as_ref())
+            .and_then(|p| p.unsupported).unwrap_or("").to_string();
+        c.scratch_str.len()
+    })
+}
 // The opt-in native adapter owns a thread per session; canonical WASM exports stay unchanged.
 #[cfg(all(feature = "native-web", not(target_arch = "wasm32")))]
 #[path = "../../native-web/core.rs"]
