@@ -1,4 +1,14 @@
 import { settingsPatch,type NativeSettings } from "./bridge";
+import { parseSettingsText } from "../../web/src/ui/settings-io";
+/** What the Import box accepts: the web's settings code ("bhs1.…", from Settings →
+ * Export settings), or native/web settings JSON. Throws a message for the player. */
+export async function readSettingsText(text:string):Promise<unknown> {
+  const raw=text.trim();
+  if(!raw)throw new Error("Paste a settings code (bhs1.…) or settings JSON first.");
+  if(/\bbhs[01]\.[A-Za-z0-9_-]+/.test(raw)){const result=await parseSettingsText(raw);if(!result.ok)throw new Error(result.error);return result.doc;}
+  if(raw.length>65536)throw new Error("Settings JSON exceeds 64 KiB.");
+  try{return JSON.parse(raw);}catch{throw new Error("That isn't a settings code or settings JSON. Codes start with bhs1.");}
+}
 const object=(v:unknown):Record<string,unknown>=>v&&typeof v==="object"&&!Array.isArray(v)?v as Record<string,unknown>:{};
 /** Import only settings whose native behavior exists. Unknown web features are
  * reported rather than appearing to have been applied. No account data leaves. */
