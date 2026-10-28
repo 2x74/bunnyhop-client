@@ -309,6 +309,30 @@ void test_replay_library_cache() {
         library.flush();
         auto unchanged = library.take();
         assert(unchanged && unchanged->decoded == 0 && unchanged->replays == first->replays);
+        assert(first->replays->at(0).at("timingPolicy").is_null());
+        BhRunState expected{};
+        check(bh_run_state(fixture.core.get(), &expected), fixture.core.get());
+        const auto header = fixture.header(source);
+        const auto map_cache = fixture.directory / "maps" / header.at("mapSha256").get<std::string>();
+        std::filesystem::create_directories(map_cache / "content");
+        std::filesystem::copy_file(fixture.directory / "fixture.bsp", map_cache / "fixture.bsp");
+        std::filesystem::copy(fixture.directory / "models", map_cache / "content" / "models",
+                              std::filesystem::copy_options::recursive);
+        library.refresh();
+        library.flush();
+        const auto retimed = library.take();
+        assert(retimed && retimed->errors.empty() && retimed->decoded == 0);
+        const auto &scored = retimed->replays->at(0);
+        assert(scored.at("timingPolicy") == 1);
+        assert(scored.at("timeMs") == native::score_ms(expected.seconds));
+        assert(scored.at("seconds").get<double>() == expected.seconds);
+        library.archive("run.bhr",
+                        {{"map", "fixture"}, {"style", "autohop"}, {"track", 0},
+                         {"timeMs", native::score_ms(expected.seconds)}, {"timingPolicy", 1},
+                         {"jumps", 2}, {"strafes", 3}, {"sync", 90}, {"finishedAt", 1234}}, false);
+        library.flush();
+        const auto archived = library.take();
+        assert(archived && archived->replays->at(0).at("timeMs") == scored.at("timeMs"));
         const auto modified = std::filesystem::last_write_time(replay);
         std::filesystem::last_write_time(replay, modified + std::chrono::seconds(1));
         library.refresh();

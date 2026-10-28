@@ -2,6 +2,7 @@
 #pragma once
 #include "bunnyhop_native.h"
 #include "replay_range.hpp"
+#include "run_timing.hpp"
 #include <filesystem>
 
 namespace native {
@@ -47,7 +48,7 @@ struct ReplaySession {
         return {
             {"tickInterval", active ? range.tick_interval : fallback_interval},
             {"active", active}, {"id", id}, {"tick", tick}, {"totalTicks", active ? range.total : 0u},
-            {"paused", paused}, {"speed", speed}, {"camera", camera}, {"seconds", run_seconds},
+            {"paused", paused}, {"speed", speed}, {"camera", camera}, {"seconds", run_seconds}, {"timeMs", score_ms(run_seconds)},
             {"rangeStartTick", active ? range.from : 0u}, {"rangeEndTick", active ? range.to : 0u},
             {"rangeTick", active ? range.relative(tick) : 0u}, {"rangeTotalTicks", active ? range.ticks() : 0u},
             {"elapsedSeconds", active ? range.relative(tick) * range.tick_interval : 0},

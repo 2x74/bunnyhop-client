@@ -26,6 +26,7 @@
 #include "activity.hpp"
 #include "weapon_menu.hpp"
 #include "start_point.hpp"
+#include "run_timing.hpp"
 #include "weapon_commands.hpp"
 #include "replay_camera.hpp"
 #include "replay_controls.hpp"
@@ -2021,7 +2022,14 @@ int run(const Options &opt) {
                 else if(type=="worldRecord") {
                     if(message.value("generation",uint64_t(-1))!=run_generation||message.value("map",std::string())!=map_id||message.value("style",std::string())!=active_style||message.value("track",~0u)!=active_track)continue;
                     known_world_record.reset();world_record_generation=run_generation;
-                    if(message.contains("seconds")&&!message["seconds"].is_null()){const double seconds=message.at("seconds").get<double>();if(!std::isfinite(seconds)||seconds<=0)throw std::runtime_error("Invalid world record time");known_world_record=seconds;}
+                    if ((message.contains("seconds") && !message["seconds"].is_null()) ||
+                        (message.contains("timeMs") && !message["timeMs"].is_null())) {
+                        const auto ms = native::score_ms(message, "seconds");
+                        if (ms <= 0 || ms > native::max_score_ms) {
+                            throw std::runtime_error("Invalid world record time");
+                        }
+                        known_world_record = native::score_seconds(ms);
+                    }
                 }
                 else if(type=="runService") {
                     if(message.value("generation",uint64_t(-1))!=run_generation)continue;
@@ -2371,6 +2379,8 @@ int run(const Options &opt) {
                              {"style", active_style},
                              {"track", run_state.track},
                              {"time", run_state.seconds},
+                             {"timeMs", native::score_ms(run_state.seconds)},
+                             {"timingPolicy", native::timing_policy},
                              {"jumps", run_state.jumps},
                              {"strafes", run_state.strafes},
                              {"sync", run_state.sync_percent},
@@ -2381,16 +2391,20 @@ int run(const Options &opt) {
                         refresh_replays();
                         if(!turn_admission.local_only&&active_style=="autohop"&&run_state.track==0){
                             const auto old=backdrop_pbs.find(map_id);
-                            if(old==backdrop_pbs.end()||!old->is_object()||run_state.seconds<old->value("seconds",std::numeric_limits<double>::infinity())){
+                            if (old == backdrop_pbs.end() || !old->is_object() ||
+                                native::score_ms(run_state.seconds) < native::score_ms(*old, "seconds")) {
                                 backdrop_pbs[map_id] = {
                                     {"id", native::data_location::utf8(
                                                native::data_location::from_utf8(record_path).filename())},
-                                    {"seconds", run_state.seconds}};
+                                    {"seconds", run_state.seconds},
+                                    {"timeMs", native::score_ms(run_state.seconds)}};
                                 json_writer.write(cache/"backdrop-pbs.json",backdrop_pbs);
                             }
                         }
                         run_event({{"type", "finish"},
                                    {"track", run_state.track},
+                                   {"timeMs", native::score_ms(run_state.seconds)},
+                                   {"timingPolicy", native::timing_policy},
                                    {"replayBase64", base64(read_text(data_location::from_utf8(record_path)))}});
                         std::cout<<"Native finish "<<run_state.seconds<<" seconds; replay "<<record_path<<'\n';
                     } catch(const std::exception &e) {
@@ -2464,7 +2478,12 @@ int run(const Options &opt) {
             if(local_scope&&simulation_active)scope.frame(frame_seconds);
             renderer->set_camera_fov(local_scope?scope.fov(preferences.at("fov").get<float>()):preferences.at("fov").get<float>());
             if(local_scope&&scope.scoped())renderer->set_viewmodel_visible(false);
-            renderer->set_zone_state(display_run.track,display_run,!playback&&!spectator&&!practice.active&&!turn_admission.local_only&&display_run.recording_valid&&world_record_generation==run_generation&&known_world_record&&display_run.seconds<*known_world_record);renderer->set_flashlight(flashlight);
+            const bool world_record_finish = !playback && !spectator && !practice.active &&
+                !turn_admission.local_only && display_run.recording_valid &&
+                world_record_generation == run_generation && known_world_record &&
+                native::score_ms(display_run.seconds) < native::score_ms(*known_world_record);
+            renderer->set_zone_state(display_run.track, display_run, world_record_finish);
+            renderer->set_flashlight(flashlight);
             audio.listener(eye,camera_input.yaw());
             if(focused&&captured&&!opt.frames){for(const auto &actor:actors)if(actor.id!="local-camera-target")audio.spatial_actor(actor,frame_seconds,actor.id.starts_with("ghost-"));if(audible_ghost)audio.spatial_actor(*audible_ghost,frame_seconds,true);if(spectated_actor&&!external_camera)audio.spatial_actor(*spectated_actor,frame_seconds,false);}
             renderer->set_room_actors(actors);
@@ -2726,6 +2745,7 @@ int run(const Options &opt) {
                     {"timer",
                      {{"status", run_state.status},
                       {"seconds", run_state.seconds},
+                      {"timeMs", native::score_ms(run_state.seconds)},
                       {"jumps", run_state.jumps},
                       {"strafes", run_state.strafes},
                       {"sync", run_state.sync_percent}}},
