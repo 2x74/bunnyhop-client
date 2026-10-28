@@ -1,4 +1,5 @@
 import { settingsPatch,type NativeSettings } from "./bridge";
+import { migrateTurnSpeed } from "./turn-speed";
 import { parseSettingsText } from "../../web/src/ui/settings-io";
 /** What the Import box accepts: the web's settings code ("bhs1.…", from Settings →
  * Export settings), or native/web settings JSON. Throws a message for the player. */
@@ -24,7 +25,9 @@ export function importSettings(value:unknown):{patch:Partial<NativeSettings>;uns
       hud:!hud.hidden,hudScale:typeof hud.scale==="number"?Math.round(hud.scale*100):undefined,muted:audio.muted,sfxVolume:audio.sfx,musicVolume:audio.music,uiVolume:audio.ui,ambienceVolume:audio.ambience,muteSfx:audioMute.sfx,muteMusic:audioMute.music,muteUi:audioMute.ui,muteAmbience:audioMute.ambience,muteInBackground:audio.muteInBackground,classicSounds:audio.classic,perfectTick:audio.perfectTick,announcer:audio.announcer,footsteps:audio.footsteps,wind:audio.wind,practiceKeepVelocity:practice.keepVelocity,fpsLimit:graphics.fpsLimit});
     delete converted.hudLayout; // web anchors and offsets use a different coordinate contract
   }
-  const patch=settingsPatch(converted),supported=new Set(Object.keys(patch));
+  // cl_yawspeed / cl_anglespeedkey are top-level keys on the website too; older native files carry yawSpeedAlt.
+  const patch=settingsPatch(migrateTurnSpeed(converted)),supported=new Set(Object.keys(patch));
+  if("yawSpeedAlt" in raw&&"angleSpeedKey" in patch)supported.add("yawSpeedAlt");
   const mapped=new Set(["verticalSensitivityEnabled","crosshair","viewmodel","hud","audio","practice","graphics","ghost"]);
   const unsupported=Object.keys(raw).filter(key=>!supported.has(key)&&!(web&&mapped.has(key)));
   if(web){unsupported.push("web HUD anchors/layout", "graphics options other than FPS limit");}

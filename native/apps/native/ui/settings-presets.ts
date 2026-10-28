@@ -1,13 +1,17 @@
 import {h} from "../../web/src/ui/dom";
 import {confirmDialog,textDialog} from "../../web/src/ui/settings-transfer";
 import {settingsPatch,type NativeSettings} from "./bridge";
+import {migrateTurnSpeed} from "./turn-speed";
 export interface SettingsPreset {name:string;settings:Partial<NativeSettings>}
 interface Store {active:string;list:SettingsPreset[]}
 const KEY="bunnyhop:native-settings-presets:v1";
 export function presetNameProblem(name:string,existing:string[],current=""):string|null {const clean=name.trim();return !clean?"Enter a name.":clean.length>40?"Use 40 characters or fewer.":existing.some(n=>n.toLowerCase()===clean.toLowerCase()&&n!==current)?"That name is already in use.":null;}
+/** Presets saved before fast turn hold the old modifier speed (turn-speed.ts). */
+const savedSettings=(value:unknown):unknown=>value&&typeof value==="object"&&!Array.isArray(value)
+  ?migrateTurnSpeed(value as Record<string,unknown>):value;
 export function parsePresets(value:unknown):Store {
  const raw=value as Partial<Store>|null;const list:SettingsPreset[]=[];
- if(Array.isArray(raw?.list))for(const p of raw.list.slice(0,30)){if(!p||typeof p.name!=="string"||presetNameProblem(p.name,list.map(p=>p.name)))continue;const settings=settingsPatch(p.settings);if(Object.keys(settings).length)list.push({name:p.name.trim(),settings});}
+ if(Array.isArray(raw?.list))for(const p of raw.list.slice(0,30)){if(!p||typeof p.name!=="string"||presetNameProblem(p.name,list.map(p=>p.name)))continue;const settings=settingsPatch(savedSettings(p.settings));if(Object.keys(settings).length)list.push({name:p.name.trim(),settings});}
  return {active:list.some(p=>p.name===raw?.active)?raw!.active!:"",list};
 }
 export function settingsPresets(read:()=>NativeSettings,apply:(settings:Partial<NativeSettings>)=>void):HTMLElement {

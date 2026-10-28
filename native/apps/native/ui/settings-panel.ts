@@ -8,11 +8,14 @@ import { updatePanel } from "./update-panel";
 import { dataFolderPanel } from "./data-folder-panel";
 import { transferPanel } from "./settings-transfer-panel";
 import { customCssSection } from "./custom-css/section";
+import {
+  ANGLE_SPEED_KEY_RANGE, DEFAULT_ANGLE_SPEED_KEY, DEFAULT_YAW_SPEED, YAW_SPEED_RANGE, roundAngleSpeedKey, roundYawSpeed,
+} from "./turn-speed";
 import { h } from "../../web/src/ui/dom";
 import { ACTIONS, keyLabel } from "../../web/src/ui/settings";
 import { mouseCode } from "../../web/src/binds";
 import { HUD_ELEMENTS, defaultPosition, type HudElementId, type HudLayout } from "./hud-layout";
-import { AUDIO_PACKS, HUD_SCALE_PERCENT, DEFAULT_YAW_SPEED, DEFAULT_YAW_SPEED_ALT, JUMP_STATS_MODES, NATIVE_BIND_ACTIONS, send, settingsPatch, state, nativeKeyCode, type AudioPack, type JumpStatsMode, type NativeSettings } from "./bridge";
+import { AUDIO_PACKS, HUD_SCALE_PERCENT, JUMP_STATS_MODES, NATIVE_BIND_ACTIONS, send, settingsPatch, state, nativeKeyCode, type AudioPack, type JumpStatsMode, type NativeSettings } from "./bridge";
 
 const DISCORD_TEXT={disabled:"Off",connecting:"Connecting…",ready:"Connected",reconnecting:"Discord not found"} as const;
 const DISCORD_TONE={disabled:"",connecting:"busy",ready:"ok",reconnecting:"bad"} as const;
@@ -29,7 +32,7 @@ interface Section { id: string; title: string; body: HTMLElement }
 type BindAction = (typeof NATIVE_BIND_ACTIONS)[number];
 
 // Labels for native-only actions the web game's list doesn't have.
-const NATIVE_LABELS: Partial<Record<string, string>> = { turnFast: "Turn modifier (alt yaw speed)", showTriggers: "Show triggers", showClips: "Show player clips" };
+const NATIVE_LABELS: Partial<Record<string, string>> = { turnFast: "Fast turn (+speed)", showTriggers: "Show triggers", showClips: "Show player clips" };
 const actionLabel = (action: string): string => NATIVE_LABELS[action] ?? ACTIONS.find(item => item.id === action)?.label ?? action;
 
 const BIND_GROUPS: readonly { title: string; actions: readonly BindAction[] }[] = [
@@ -132,23 +135,38 @@ export function settingsPanel(initialSection?:string): HTMLElement {
     return row("Show on", seg, "", "6th jump: only jump 6, compared with jump 1, like !ssj. Every jump: each jump compared with the one before. Every N: jumps N, 2N, 3N ..., each compared with the last one shown.");
   }
 
-  // A yaw speed: a slider and a box showing the same number (the box keeps any
-  // precision, the slider moves in tenths), and Default to go back.
+  // A turn speed (web Settings > Keys): a slider and a box showing the same number, and Default to go back.
+  // Values are rounded as the website stores them, so exported settings match.
+  interface TurnSpeedSpec {
+    name: string;
+    key: "yawSpeed" | "angleSpeedKey";
+    range: { readonly min: number; readonly max: number; readonly step: number };
+    fallback: number;
+    unit: string;
+    round: (value: number) => number;
+    hint: string;
+    about: string;
+    keywords: string;
+  }
   const speedSyncs: (() => void)[] = [];
-  let speedTimer = 0; const pendingSpeed: Partial<NativeSettings> = {};
-  function speed(name: string, key: "yawSpeed" | "yawSpeedAlt", fallback: number, hint: string, about: string): HTMLElement {
-    const range = h("input.nset-range", { type: "range", min: 1, max: 500, step: .1, "aria-label": `${name} slider` }) as HTMLInputElement;
-    const box = h("input.num-input", { type: "number", min: .01, max: 1000, step: "any", "aria-label": name }) as HTMLInputElement;
+  let speedTimer = 0;
+  const pendingSpeed: Partial<NativeSettings> = {};
+  const flushSpeed = (): void => {
+    speedTimer = 0;
+    if (!Object.keys(pendingSpeed).length) return;
+    save({ ...pendingSpeed });
+    for (const key of Object.keys(pendingSpeed)) delete pendingSpeed[key as keyof NativeSettings];
+  };
+  function turnSpeed(spec: TurnSpeedSpec): HTMLElement {
+    const { name, key, range: { min, max, step }, fallback } = spec;
+    const sliderLabel = `${name} slider`;
+    const sliderAttributes = { type: "range", min, max, step, "aria-label": sliderLabel };
+    const range = h("input.nset-range", sliderAttributes) as HTMLInputElement;
+    const box = h("input.num-input", { type: "number", min, max, step, "aria-label": name }) as HTMLInputElement;
     const reset = h("button.link-btn", { type: "button", title: `Back to ${fallback}` }, "Default") as HTMLButtonElement;
     // Keep the local edit until the host echoes it; older periodic state can
     // arrive both before the debounce and after the patch has been dispatched.
     let draft: number | undefined;
-    const send = (value: number, now: boolean): void => {
-      draft = value; pendingSpeed[key] = value;
-      const flush = (): void => { speedTimer = 0; if (Object.keys(pendingSpeed).length) { save({ ...pendingSpeed }); for (const k of Object.keys(pendingSpeed)) delete pendingSpeed[k as keyof NativeSettings]; } };
-      if (now) { window.clearTimeout(speedTimer); flush(); } else if (!speedTimer) speedTimer = window.setTimeout(flush, 100);
-      sync();
-    };
     const sync = (): void => {
       if (draft === state.settings[key]) draft = undefined;
       const value = draft ?? state.settings[key];
@@ -156,16 +174,34 @@ export function settingsPanel(initialSection?:string): HTMLElement {
       if (draft !== undefined || document.activeElement !== range) range.value = String(value);
       reset.disabled = value === fallback;
     };
+    const send = (value: number, now: boolean): void => {
+      draft = spec.round(value);
+      pendingSpeed[key] = draft;
+      if (now) {
+        window.clearTimeout(speedTimer);
+        flushSpeed();
+      } else if (!speedTimer) {
+        speedTimer = window.setTimeout(flushSpeed, 100);
+      }
+      sync();
+    };
     range.addEventListener("input", () => send(range.valueAsNumber, false));
     range.addEventListener("change", () => send(range.valueAsNumber, true));
     box.addEventListener("change", () => {
       const value = box.valueAsNumber;
-      if (!Number.isFinite(value) || value < .01 || value > 1000) { say(`${name}: choose .01–1000.`); box.value = String(state.settings[key]); return; }
+      if (!Number.isFinite(value) || value < min || value > max) {
+        say(`${name}: choose ${min}–${max}.`);
+        box.value = String(state.settings[key]);
+        return;
+      }
       send(value, true);
     });
     reset.addEventListener("click", () => send(fallback, true));
-    speedSyncs.push(sync); sync();
-    const el = row(name, h("div.nset-speed", null, range, h("span.num-wrap", null, box, h("span.unit", null, "°/s")), reset), hint, about, `${name} ${hint} ${about} turnbind turn yaw speed cl_yawspeed +left +right`);
+    speedSyncs.push(sync);
+    sync();
+    const boxWithUnit = h("span.num-wrap", null, box, h("span.unit", null, spec.unit));
+    const control = h("div.nset-speed", null, range, boxWithUnit, reset);
+    const el = row(name, control, spec.hint, spec.about, `${name} ${spec.hint} ${spec.about} ${spec.keywords}`);
     el.classList.add("nset-row-pos");
     return el;
   }
@@ -208,10 +244,7 @@ export function settingsPanel(initialSection?:string): HTMLElement {
       number("Mouse sensitivity", "sensitivity", .01, 100, .01, "", "Same scale as the game and CS:S: each mouse count turns sensitivity × 0.022 degrees."),
       toggle("Invert vertical look", "invertY"),
       toggle("Separate vertical sensitivity", "separateVertical", "", "Use a different sensitivity for looking up and down."),
-      number("Vertical sensitivity", "verticalSensitivity", .01, 100, .01, "", "Only used when separate vertical sensitivity is on.")),
-    group("Turnbinds",
-      speed("Yaw speed", "yawSpeed", DEFAULT_YAW_SPEED, "cl_yawspeed", "How fast Turn left / Turn right (+left / +right) turn you, in degrees per second. Bind them under Keys > Turning. Runs with any speed are submitted; the server only ranks 210°/s."),
-      h("p.nset-hint", null, "The server only ranks 210°/s turns. Runs with another speed are still submitted, and the server decides. In Legit Scroll, turn binds only work in practice.")));
+      number("Vertical sensitivity", "verticalSensitivity", .01, 100, .01, "", "Only used when separate vertical sensitivity is on.")));
   const display = h("div.nset-cols", null,
     windowPanel(save),
     group("Local replay vault",toggle("Capture device personal bests", "capturePbScreenshots", "Local result screenshots", "Saves a result screenshot when this computer records a faster completed run. Device bests are separate from account records.")),
@@ -389,17 +422,35 @@ export function settingsPanel(initialSection?:string): HTMLElement {
     buttons.set(action, [...(buttons.get(action) ?? []), button]);
     return row(label, h("div.nset-bind", null, button, add, clear), "", "Click, then press a key, mouse button or wheel direction. Escape cancels. Escape and F10 stay reserved. Up to four keys each.", `${label} ${action} key bind`);
   };
-  const keys = h("div.nset-cols", null, group("Restart protection",toggle("Hold to restart","holdRestart","500 ms","Hold restart keys for half a second. Wheel bindings act immediately.")), ...BIND_GROUPS.map(item => item.title === "Practice"
-    ? group(item.title, ...item.actions.map(bindRow), toggle("Teleport keeps speed", "practiceKeepVelocity", "", "On: a checkpoint teleport gives you back the speed you saved it with. Off: you arrive standing still."))
-    : group(item.title, ...item.actions.map(bindRow))));
-  const turnAdvanced = h("details.nset-advanced", null,
-    h("summary", null, h("span", null, "Advanced: turnbind modifier"), h("small.nset-hint", null, "A second turn speed")),
-    h("div.nset-advanced-body", null,
-      h("div.nset-advanced-bar", null, h("span.nset-hint", null, "While Turn modifier is held, turnbinds use this speed instead: faster or slower, your choice.")),
-      group("",
-        bindRow("turnFast"),
-        speed("Modifier yaw speed", "yawSpeedAlt", DEFAULT_YAW_SPEED_ALT, "While Turn modifier is held", "The speed Turn left / Turn right use while Turn modifier is held, in degrees per second. Set it above your yaw speed for a fast turn (170, 210 ...) or below it for a slow one."))));
-  const mouseBody = h("div.nset-hud", null, mouse, turnAdvanced, group("High-rate input", toggle("Input diagnostics overlay", "mouseDiagnostics", "", "Measure delivered mouse motion while playing. Polling rate is configured in your mouse software, not in the game.")), mouseDiagnosticsPanel());
+  const turningRows = (): HTMLElement[] => [
+    turnSpeed({
+      name: "Turn speed", key: "yawSpeed", range: YAW_SPEED_RANGE, fallback: DEFAULT_YAW_SPEED, unit: "°/s",
+      round: roundYawSpeed, hint: "cl_yawspeed",
+      about: "How fast Turn left and Turn right turn the view. CS:S cl_yawspeed (default 210).",
+      keywords: "turnbind turn speed yaw rate yawspeed +left +right keyboard arrow",
+    }),
+    turnSpeed({
+      name: "Fast turn", key: "angleSpeedKey", range: ANGLE_SPEED_KEY_RANGE, fallback: DEFAULT_ANGLE_SPEED_KEY,
+      unit: "×", round: roundAngleSpeedKey, hint: "cl_anglespeedkey",
+      about: "Turn speed multiplier while Fast turn is held. CS:S cl_anglespeedkey (default 2).",
+      keywords: "turnbind anglespeedkey +speed fast turn quick 180 multiplier modifier",
+    }),
+    h("p.nset-hint", null,
+      "Both are saved with each run, so during a run a change applies from your next restart. " +
+      "In Legit Scroll, turn binds only work in practice."),
+  ];
+  const practiceRows = (): HTMLElement[] => [
+    toggle("Teleport keeps speed", "practiceKeepVelocity", "",
+      "On: a checkpoint teleport gives you back the speed you saved it with. Off: you arrive standing still."),
+  ];
+  const extraRows: Partial<Record<string, () => HTMLElement[]>> = { Turning: turningRows, Practice: practiceRows };
+  const bindGroup = (item: (typeof BIND_GROUPS)[number]): HTMLElement =>
+    group(item.title, ...item.actions.map(bindRow), ...(extraRows[item.title]?.() ?? []));
+  const restartProtection = group("Restart protection",
+    toggle("Hold to restart", "holdRestart", "500 ms",
+      "Hold restart keys for half a second. Wheel bindings act immediately."));
+  const keys = h("div.nset-cols", null, restartProtection, ...BIND_GROUPS.map(bindGroup));
+  const mouseBody = h("div.nset-hud", null, mouse, group("High-rate input", toggle("Input diagnostics overlay", "mouseDiagnostics", "", "Measure delivered mouse motion while playing. Polling rate is configured in your mouse software, not in the game.")), mouseDiagnosticsPanel());
 
   const transfer = transferPanel({ row, group, save, presets: settingsPresets(() => state.settings, save) });
   const sections: Section[] = [

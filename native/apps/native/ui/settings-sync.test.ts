@@ -3,7 +3,7 @@ import { chromium } from "playwright";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-test("yaw slider edits survive stale host updates before and after dispatch", async () => {
+test("turn speed slider edits survive stale host updates before and after dispatch", async () => {
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
@@ -17,8 +17,9 @@ test("yaw slider edits survive stale host updates before and after dispatch", as
     });
     await page.goto("https://bunnyhop.lol/settings-sync");
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByLabel("Search settings").fill("yaw speed");
-    for (const [name, key, old, next] of [["Yaw speed", "yawSpeed", 210, 170], ["Modifier yaw speed", "yawSpeedAlt", 210, 90]] as const) {
+    await page.getByLabel("Search settings").fill("turnbind");
+    const speeds = [["Turn speed", "yawSpeed", 210, 170, 200], ["Fast turn", "angleSpeedKey", 2, 3.5, 1.5]] as const;
+    for (const [name, key, old, next, later] of speeds) {
       const range = page.getByLabel(`${name} slider`, { exact: true });
       await range.evaluate((element, values) => {
         const input = element as HTMLInputElement;
@@ -34,8 +35,9 @@ test("yaw slider edits survive stale host updates before and after dispatch", as
       expect(await page.evaluate(() => (window as any).messages.at(-1))).toEqual({ type: "settings", patch: { [key]: next } });
       await page.evaluate(({ key, next }) => window.bunnyhopNativeMenu.onState({ settings: { [key]: next } }), { key, next });
       await range.blur();
-      await page.evaluate(({ key }) => window.bunnyhopNativeMenu.onState({ settings: { [key]: 200 } }), { key });
-      expect(await range.inputValue()).toBe("200");
+      const echo = { key, later };
+      await page.evaluate(value => window.bunnyhopNativeMenu.onState({ settings: { [value.key]: value.later } }), echo);
+      expect(await range.inputValue()).toBe(String(later));
     }
     await page.getByLabel("Search settings").fill("music");
     // The default pack is the bundled soundtrack, not "No music".
