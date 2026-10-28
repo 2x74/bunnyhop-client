@@ -6,7 +6,7 @@ import { textDialog } from "../../../web/src/ui/settings-transfer";
 import { toast } from "../../../web/src/notify";
 import { openExternal } from "../bridge";
 import { activeCss, cssStatus, customCss, fetchCssText, onCssStatus, setCustomCss, type CssStatus } from "./custom-css";
-import { MAX_CSS_CHARS } from "./rewrite";
+import { MAX_CSS_CHARS } from "../../../web/src/custom-css/rewrite";
 
 // Settings -> Custom CSS -> Edit CSS, as on the website (custom-css/editor.ts):
 // one box that applies as you type, a line saying what loaded and what didn't,

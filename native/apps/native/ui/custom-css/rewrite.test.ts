@@ -3,8 +3,8 @@
 // bun test apps/web/test: custom CSS URL rewriting (custom-css/rewrite.ts). No URL in a player's CSS may reach the
 // browser unless it's blob:, data: or #fragment; links are listed so the game can fetch them up front.
 import { describe, expect, it } from "bun:test";
-import { expandImports, splitCondition } from "./imports";
-import { BLANK, classifyUrl, onlySafeUrls, rewriteCss } from "./rewrite";
+import { expandImports, splitCondition } from "../../../web/src/custom-css/imports";
+import { BLANK, classifyUrl, onlySafeUrls, rewriteCss } from "../../../web/src/custom-css/rewrite";
 
 const blob = (u: string) => `blob:https://bunnyhop.lol/${encodeURIComponent(u)}`;
 const B = `url("${BLANK}")`;

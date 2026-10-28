@@ -1,7 +1,7 @@
 import { API_URL } from "../../../web/src/api";
 import { toast } from "../../../web/src/notify";
-import { expandImports } from "./imports";
-import { MAX_CSS_CHARS, MAX_REMOTE, findImports, onlySafeUrls, rewriteCss } from "./rewrite";
+import { expandImports } from "../../../web/src/custom-css/imports";
+import { MAX_CSS_CHARS, MAX_REMOTE, findImports, onlySafeUrls, rewriteCss } from "../../../web/src/custom-css/rewrite";
 
 // Custom CSS in the native menu: the player's own stylesheet over the menus,
 // kept and applied as on the website (apps/web/src/custom-css/index.ts), plus
