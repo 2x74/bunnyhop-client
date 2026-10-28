@@ -29,12 +29,37 @@ TextBitmap bitmap(int width,int height){TextBitmap out;if(width<=0||height<=0||w
 // keep white RGB independent of alpha to avoid multiplying antialiasing twice.
 void white(TextBitmap &out){for(size_t i=0;i<out.rgba.size();i+=4)out.rgba[i]=out.rgba[i+1]=out.rgba[i+2]=255;}
 }
-TextBitmap raster_text(const std::string &text,float size){
+TextBitmap raster_text(const std::string &text,float size, bool tabular){
  if(text.empty()||text.size()>4096||text.find('\0')!=std::string::npos||!std::isfinite(size))return {};
- size=std::clamp(size,8.f,96.f);
+ size=std::clamp(size,8.f,192.f);
 #if defined(__APPLE__)
  const auto string=CFStringCreateWithBytes(kCFAllocatorDefault,reinterpret_cast<const UInt8 *>(text.data()),CFIndex(text.size()),kCFStringEncodingUTF8,false);if(!string)return {};
- const auto font=CTFontCreateUIFontForLanguage(kCTFontUIFontSystem,size,nullptr);if(!font){CFRelease(string);return {};}
+ auto font=CTFontCreateUIFontForLanguage(kCTFontUIFontSystem,size,nullptr);if(!font){CFRelease(string);return {};}
+ if (tabular) {
+     const int feature = kNumberSpacingType, selector = kMonospacedNumbersSelector;
+     const auto type = CFNumberCreate(nullptr, kCFNumberIntType, &feature);
+     const auto choice = CFNumberCreate(nullptr, kCFNumberIntType, &selector);
+     const void *keys[] = {kCTFontFeatureTypeIdentifierKey, kCTFontFeatureSelectorIdentifierKey};
+     const void *values[] = {type, choice};
+     const auto setting = CFDictionaryCreate(nullptr, keys, values, 2,
+         &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+     const void *settings[] = {setting};
+     const auto features = CFArrayCreate(nullptr, settings, 1, &kCFTypeArrayCallBacks);
+     const void *attribute_keys[] = {kCTFontFeatureSettingsAttribute};
+     const void *attribute_values[] = {features};
+     const auto attributes = CFDictionaryCreate(nullptr, attribute_keys, attribute_values, 1,
+         &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+     const auto descriptor = CTFontDescriptorCreateWithAttributes(attributes);
+     const auto configured = CTFontCreateCopyWithAttributes(font, size, nullptr, descriptor);
+     CFRelease(font);
+     font = configured;
+     CFRelease(descriptor);
+     CFRelease(attributes);
+     CFRelease(features);
+     CFRelease(setting);
+     CFRelease(choice);
+     CFRelease(type);
+ }
  const auto color=CGColorCreateGenericRGB(1,1,1,1);
  const void *keys[]={kCTFontAttributeName,kCTForegroundColorAttributeName};const void *values[]={font,color};
  const auto attrs=CFDictionaryCreate(kCFAllocatorDefault,keys,values,2,&kCFTypeDictionaryKeyCallBacks,&kCFTypeDictionaryValueCallBacks);
@@ -63,6 +88,13 @@ TextBitmap raster_text(const std::string &text,float size){
  ComPtr<IDWriteTextFormat> format;if(FAILED(write->CreateTextFormat(L"Segoe UI",nullptr,DWRITE_FONT_WEIGHT_NORMAL,DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_NORMAL,size,L"",&format)))return {};
  format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
  ComPtr<IDWriteTextLayout> layout;if(FAILED(write->CreateTextLayout(wide.data(),UINT32(wide.size()),format.Get(),float(max_width-pad*2),float(max_height-pad*2),&layout)))return {};
+ if (tabular) {
+     ComPtr<IDWriteTypography> typography;
+     if (SUCCEEDED(write->CreateTypography(&typography))) {
+         typography->AddFontFeature({DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES, 1});
+         layout->SetTypography(typography.Get(), {0, UINT32(wide.size())});
+     }
+ }
  DWRITE_TEXT_METRICS metrics{};DWRITE_OVERHANG_METRICS overhang{};if(FAILED(layout->GetMetrics(&metrics))||FAILED(layout->GetOverhangMetrics(&overhang)))return {};
  const int width=std::min(max_width,int(std::ceil(metrics.widthIncludingTrailingWhitespace+std::max(0.f,overhang.left)+std::max(0.f,overhang.right)))+pad*2),height=std::min(max_height,int(std::ceil(metrics.height+std::max(0.f,overhang.top)+std::max(0.f,overhang.bottom)))+pad*2);
  auto out=bitmap(width,height);if(out.rgba.empty())return {};
@@ -76,6 +108,12 @@ TextBitmap raster_text(const std::string &text,float size){
  if(!g_utf8_validate(text.data(),gssize(text.size()),nullptr))return {};
  auto *surface=cairo_image_surface_create(CAIRO_FORMAT_A8,1,1);auto *context=cairo_create(surface);auto *layout=pango_cairo_create_layout(context);
  auto *font=pango_font_description_new();pango_font_description_set_family(font,"sans-serif");pango_font_description_set_absolute_size(font,size*PANGO_SCALE);pango_layout_set_font_description(layout,font);pango_layout_set_text(layout,text.data(),int(text.size()));pango_layout_set_single_paragraph_mode(layout,TRUE);
+ if (tabular) {
+     auto *attributes = pango_attr_list_new();
+     pango_attr_list_insert(attributes, pango_attr_font_features_new("tnum=1"));
+     pango_layout_set_attributes(layout, attributes);
+     pango_attr_list_unref(attributes);
+ }
  PangoRectangle ink{},logical{};pango_layout_get_pixel_extents(layout,&ink,&logical);const int left=std::min(ink.x,logical.x),top=std::min(ink.y,logical.y);const int width=std::min(max_width,std::max(ink.x+ink.width,logical.x+logical.width)-left+pad*2),height=std::min(max_height,std::max(ink.y+ink.height,logical.y+logical.height)-top+pad*2);
  auto out=bitmap(width,height);cairo_destroy(context);cairo_surface_destroy(surface);
  if(!out.rgba.empty()){surface=cairo_image_surface_create(CAIRO_FORMAT_A8,width,height);context=cairo_create(surface);cairo_set_source_rgba(context,1,1,1,1);cairo_move_to(context,pad-left,pad-top);pango_cairo_update_layout(context,layout);pango_cairo_show_layout(context,layout);cairo_surface_flush(surface);

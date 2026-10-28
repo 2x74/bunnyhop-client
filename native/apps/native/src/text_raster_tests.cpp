@@ -5,6 +5,10 @@
 #include <cmath>
 static size_t coverage(const native::TextBitmap &b){size_t out=0;assert(b.rgba.size()==size_t(b.width)*b.height*4);for(size_t i=0;i<b.rgba.size();i+=4){assert(b.rgba[i]==255&&b.rgba[i+1]==255&&b.rgba[i+2]==255);out+=b.rgba[i+3];}return out;}
 int main(){
+ const auto ones = native::raster_text("11111", 30, true);
+ const auto eights = native::raster_text("88888", 30, true);
+ assert(ones.width == eights.width && coverage(ones) > 0 && coverage(eights) > 0);
+
  for(const auto &line:{"Hello hopper", "Ünïcødé 日本語 한국어", "مرحبا بالعالم", "שלום עולם", "e\xcc\x81\x20\xf0\x9f\x90\xb0"}){const auto b=native::raster_text(line,20);assert(b.width>8&&b.height>=20&&b.width<=4096&&b.height<=256);assert(coverage(b)>1000);bool transparent=false;for(size_t i=3;i<b.rgba.size();i+=4)transparent|=b.rgba[i]==0;assert(transparent);}
  const auto small=native::raster_text("你好",16),large=native::raster_text("你好",32);assert(large.width>small.width&&large.height>small.height);
  assert(native::raster_text("",20).rgba.empty());assert(native::raster_text(std::string(4097,'a'),20).rgba.empty());assert(native::raster_text(std::string("a\0b",3),20).rgba.empty());assert(native::raster_text(std::string("\xff"),20).rgba.empty());

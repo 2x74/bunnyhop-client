@@ -2207,9 +2207,19 @@ int run(const Options &opt) {
                         known_world_record = native::score_seconds(ms);
                     }
                 }
+                else if (type == "hudLeaderboard") {
+                    if (message.value("generation", ~uint64_t(0)) != run_generation ||
+                        message.value("map", std::string()) != map_id ||
+                        message.value("style", std::string()) != active_style ||
+                        message.value("track", ~0u) != active_track)
+                        continue;
+                    hud.extras.leaderboard(message.value("place", 0u), message.value("topPercent", 0.));
+                }
                 else if(type=="runService") {
                     if(message.value("generation",uint64_t(-1))!=run_generation)continue;
                     hud.result.service(message, run_generation);
+                    if (message.value("status", std::string()) == "verified" && message.contains("rank"))
+                        hud.extras.leaderboard(message.value("rank", 0u), message.value("topPercent", 0.));
                     if(message.value("status",std::string())=="verified"&&!practice.active&&!turn_admission.local_only){
                         const auto id=message.value("id",std::string());const auto event=message.value("announcer",std::string());
                         if(!id.empty()&&(event=="pb"||event=="wr")){audio.verified_finish(event,id);}
@@ -2628,11 +2638,23 @@ int run(const Options &opt) {
             eye[2]+=prev.view_offset_z+(curr.view_offset_z-prev.view_offset_z)*blend;
             BhSnapshot state{};bh_snapshot(core.get(),&state);
             std::optional<native_render::Actor> audible_ghost;
+            BhCmd ghost_command{};
+            const BhCmd *shown_ghost_command = nullptr;
             if (ghost_enabled && renderer->ghost_visible(0) && preferences.value("showGhost",true) && ghost_handle &&
                 !playback && !spectator && (tutorial_demo || (ghost_info.value("track",0u)==active_track &&
                 ghost_info.value("style",std::string("autohop"))==active_style))) {
-                BhGhostFrame ghost{};const uint32_t tick=ghost_info.value("startTick",0u)+(tutorial_demo?curr.tick-tutorial_demo_start:run_state.status?curr.tick-run_state.start_tick:0);
+                BhGhostFrame ghost{};
+                const auto &path = renderer->ghost_path(0);
+                const uint32_t elapsed = tutorial_demo ? curr.tick - tutorial_demo_start
+                                                      : run_state.status ? curr.tick - run_state.start_tick : 0;
+                const uint32_t tick = tutorial_demo ? ghost_info.value("startTick", 0u) + elapsed
+                                                    : std::min(path.start + elapsed, path.end);
                 if(bh_ghost_frame(core.get(),ghost_handle,tick,&ghost)){
+                    if (!tutorial_demo) {
+                        shown_ghost_command = &ghost_command;
+                        if (path.start + elapsed <= path.end)
+                            bh_ghost_command(core.get(), ghost_handle, tick, &ghost_command);
+                    }
                     const float distance=std::hypot(std::hypot(ghost.position[0]-curr.position[0],ghost.position[1]-curr.position[1]),ghost.position[2]-curr.position[2]);
                     const float opacity=preferences.value("ghostOpacity",.4f)*(preferences.value("ghostNearFade",true)?std::clamp((distance-24.f)/80.f,0.f,1.f):1.f);
                     renderer->set_replay_actor(ghost, tutorial_demo?"outfit-cream":outfit,
@@ -2641,6 +2663,7 @@ int run(const Options &opt) {
                 }
                 else{renderer->set_replay_actor(nullptr,0,0);if(tutorial_demo){ghost_enabled=false;tutorial_demo=false;}}
             } else renderer->set_replay_actor(nullptr,0,0);
+            hud.extras.ghost_progress(renderer->ghost_path(0).frames, curr, run_state, shown_ghost_command);
             BhRunState display_run=run_state;std::string display_style=playback?playback_info.value("style",active_style):active_style;std::optional<native_render::Actor> spectated_actor;
             const double steady_seconds=std::chrono::duration<double>(now.time_since_epoch()).count();auto actors=room.actors(steady_seconds);
             auto camera_input=input_timeline.preview(input);

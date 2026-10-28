@@ -3,6 +3,8 @@
 #include "longjump.hpp"
 #include "native_input.hpp"
 #include "settings.hpp"
+#include "run_timing.hpp"
+#include <span>
 #include "ssj.hpp"
 #include "strafe_trainer.hpp"
 #include <array>
@@ -375,6 +377,17 @@ inline Json movement_stat_patch(const Json &settings, const Json &message) {
     return patch;
 }
 
+inline float ghost_segment_fraction(const float *position, const BhGhostFrame &from, const BhGhostFrame &to) {
+    float dot = 0, length = 0;
+    for (unsigned axis = 0; axis < 3; ++axis) {
+        const float segment = to.position[axis] - from.position[axis];
+        dot += (position[axis] - from.position[axis]) * segment;
+        length += segment * segment;
+    }
+    constexpr float minimum_segment_squared = 1e-6f;
+    return length > minimum_segment_squared ? std::clamp(dot / length, 0.f, 1.f) : 0.f;
+}
+
 struct HudExtras {
     HudLabel<96> pb;
     HudLabel<64> place;
@@ -394,6 +407,70 @@ struct HudExtras {
                                                                                                          : std::nullopt;
     }
     HudLabel<96> ghost_delta;
+    uint32_t ghost_start = 0, ghost_end = 0, ghost_match = 0, ghost_sample_tick = ~0u;
+    double ghost_interval = legacy_tick_seconds;
+    void ghost_progress(std::span<const BhGhostFrame> frames, const BhState &state, const BhRunState &run,
+                        const BhCmd *command) {
+        have_ghost = command != nullptr;
+        ghost_buttons = command ? command->buttons : 0;
+        if (!command || !run.status || frames.empty()) {
+            ghost_delta.assign("");
+            ghost_match = ghost_start;
+            ghost_sample_tick = ~0u;
+            return;
+        }
+        if (state.tick == ghost_sample_tick)
+            return;
+        if (run.status == 2 && ghost_seconds) {
+            ghost_delta.format("%+.3fs", run.seconds - *ghost_seconds);
+            ghost_sample_tick = state.tick;
+            return;
+        }
+        constexpr uint32_t sample_interval_ticks = 4;
+        if (ghost_sample_tick != ~0u && state.tick >= ghost_sample_tick &&
+            state.tick - ghost_sample_tick < sample_interval_ticks)
+            return;
+        if (state.tick < ghost_sample_tick)
+            ghost_match = ghost_start;
+        ghost_sample_tick = state.tick;
+        const uint32_t end = std::min(ghost_end, uint32_t(frames.size() - 1));
+        constexpr uint32_t search_back_ticks = 300, search_forward_ticks = 600;
+        constexpr float match_radius_units = 128;
+        const uint32_t low = std::max(ghost_start, ghost_match > search_back_ticks ? ghost_match - search_back_ticks : 0);
+        const uint32_t high = std::min(end, ghost_match + search_forward_ticks);
+        float distance = match_radius_units * match_radius_units;
+        std::optional<uint32_t> nearest;
+        for (uint32_t tick = low; tick <= high; ++tick) {
+            float squared = 0;
+            for (unsigned axis = 0; axis < 3; ++axis) {
+                const float offset = frames[tick].position[axis] - state.position[axis];
+                squared += offset * offset;
+            }
+            if (squared < distance) {
+                distance = squared;
+                nearest = tick;
+            }
+        }
+        if (!nearest) {
+            ghost_delta.assign("");
+            return;
+        }
+        ghost_match = *nearest;
+        float fraction = *nearest < end
+                             ? ghost_segment_fraction(state.position, frames[*nearest], frames[*nearest + 1]) : 0;
+        if (!fraction && *nearest > ghost_start)
+            fraction = -ghost_segment_fraction(state.position, frames[*nearest], frames[*nearest - 1]);
+        const double ghost_elapsed = (*nearest + double(fraction) - ghost_start) * ghost_interval;
+        ghost_delta.format("%+.3fs", run.seconds - ghost_elapsed);
+    }
+    void leaderboard(unsigned rank, std::optional<double> top = std::nullopt) {
+        if (!rank)
+            place.assign("");
+        else if (top && std::isfinite(*top) && *top > 0 && *top <= 100)
+            place.format("#%u | top %.1f%%", rank, *top);
+        else
+            place.format("#%u", rank);
+    }
     void ghost(const Json &info) {
         ghost_name.assign(info.is_object() ? json_text(info, "player") : "Ghost");
         ghost_seconds.reset();
@@ -402,12 +479,24 @@ struct HudExtras {
         ghost_map.assign(json_text(info, "map"));
         ghost_style.assign(json_text(info, "style"));
         ghost_track = info.value("track", ~0u);
+        ghost_start = info.value("startTick", 0u);
+        ghost_end = info.value("endTick", 0u);
+        ghost_match = ghost_start;
+        ghost_sample_tick = ~0u;
+        ghost_interval = info.value("settings", Json::object()).value("tickInterval", .01);
+        if (!std::isfinite(ghost_interval) || ghost_interval <= 0)
+            ghost_interval = .01;
         if (info.contains("timeMs") && info["timeMs"].is_number_integer())
             ghost_seconds = info["timeMs"].get<double>() / 1000;
         else if (info.contains("time") && info["time"].is_number())
             ghost_seconds = info["time"].get<double>();
         else if (info.contains("realTime") && info["realTime"].is_number())
             ghost_seconds = info["realTime"].get<double>();
+        else if (ghost_end > ghost_start && info.contains("settings"))
+            ghost_seconds = score_seconds(legacy_replay_ms(info));
+        if (ghost_seconds && (!std::isfinite(*ghost_seconds) || *ghost_seconds <= 0 ||
+                              *ghost_seconds > max_score_seconds))
+            ghost_seconds.reset();
     }
 
     void local_pb(const Json &entries, const std::string &map, const std::string &style, unsigned track) {
@@ -455,12 +544,7 @@ struct HudExtras {
             ghost_delta.format("%+.3fs", message["ghostDelta"].get<double>());
         const auto position = message.find("place");
         if (position != message.end() && position->is_number_unsigned()) {
-            const unsigned rank = position->get<unsigned>();
-            const double top = message.value("topPercent", 0.);
-            if (top > 0 && top <= 100)
-                place.format("#%u | top %.1f%%", rank, top);
-            else
-                place.format("#%u", rank);
+            leaderboard(position->get<unsigned>(), message.value("topPercent", 0.));
         } else {
             place.assign("");
         }

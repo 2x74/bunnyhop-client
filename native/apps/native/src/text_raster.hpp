@@ -16,5 +16,5 @@ std::vector<TextRangeBox> text_range_boxes(const std::string &utf8,float pixel_s
 std::vector<TextCaret> text_carets(const std::string &utf8,float pixel_size);
 // Bounded: <=4096 UTF8 bytes, width <=4096, height <=256. Invalid input or a
 // platform allocation failure returns an empty bitmap so HUD fallback is safe.
-TextBitmap raster_text(const std::string &utf8,float pixel_size);
+TextBitmap raster_text(const std::string &utf8,float pixel_size, bool tabular = false);
 }

@@ -169,8 +169,29 @@ the attempt. An unavailable account check keeps the attempt local.
 The replay library can watch, seek, pause, change playback speed, race a ghost,
 import and export BHR files. Delete moves a replay into the local trash folder.
 Leaderboard Watch/Race downloads the existing replay into this native pipeline.
-Seeking and initial ghost preparation currently run synchronously; very long
-replays can briefly stall the UI.
+Compare and timeline preparation use separate bounded workers; replacing a request
+cancels the old work. Initial race-ghost preparation and seeking still run synchronously.
+
+## Native HUD host messages
+
+The native host reads ghost keys, progress delta and measured finish milliseconds directly
+from the simulation. Account data stays in the menu. Two optional messages carry the HUD
+fields that the menu already fetches:
+
+- `runService`: keep `generation`, `status`, `rank` and the existing verdict fields. Forward
+  the submission's `xp`, `level` and `achievements` fields on a verified result. For named
+  cosmetic unlocks, send `rewards: [{title, detail}]` after resolving the website's reward
+  catalog. This optional list overrides the raw progression fields; at most 12 entries are
+  shown, with titles limited to 95 bytes and details to 127 bytes.
+- `hudLeaderboard`: send `{type: "hudLeaderboard", generation, map, style, track, place,
+  topPercent}` after the account's board entry is fetched. `place` is the positive board
+  rank; `topPercent` is optional, in (0, 100]. Send `place: 0` to clear it. Replies for a
+  different run generation, map, style or track are ignored. A verified `runService.rank`
+  also updates placement, even when no board message is available.
+
+The current menu forwards verdict rank but omits progression and board-percent fields.
+Those two menu producers must forward the fields above to populate the full result reel
+and percentile line. They do not affect recording or server verification.
 
 ## Unsigned test releases
 

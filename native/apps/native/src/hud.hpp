@@ -28,6 +28,7 @@ class NativeHud {
         GLuint texture;
         int width, height;
         int pixels;
+        bool tabular;
         uint64_t batch;
     };
     std::map<std::string, Raster> raster_cache;
@@ -68,6 +69,7 @@ class NativeHud {
     GLuint current_texture = 0;
     size_t raster_bytes = 0;
     uint64_t raster_batch_ = 0;
+    uint64_t rasterizations_ = 0;
     void begin_batch() {
         vertices.clear();
         batches.clear();
@@ -75,29 +77,33 @@ class NativeHud {
         ++raster_batch_;
     }
     bool evict_raster() {
-        const auto stale = std::find_if(raster_cache.begin(), raster_cache.end(), [&](const auto &entry) {
-            return entry.second.batch != raster_batch_;
+        const auto stale = std::min_element(raster_cache.begin(), raster_cache.end(), [](const auto &a, const auto &b) {
+            return a.second.batch < b.second.batch;
         });
-        if (stale == raster_cache.end())
+        if (stale == raster_cache.end() || stale->second.batch == raster_batch_)
             return false;
         raster_bytes -= size_t(stale->second.width) * stale->second.height * 4;
         gl.DeleteTextures(1, &stale->second.texture);
         raster_cache.erase(stale);
         return true;
     }
-    const Raster *raster(std::string_view value, float size) {
+    const Raster *raster(std::string_view value, float size, bool tabular = false) {
+        if (value.empty())
+            return nullptr;
         const int pixels = std::max(1, int(std::round(size * 1.3f * scale * element_scale)));
         for (auto &[key, cached] : raster_cache) {
             const auto separator = key.find(':');
-            if (cached.pixels == pixels && std::string_view(key).substr(separator + 1) == value) {
+            if (cached.pixels == pixels && cached.tabular == tabular &&
+                std::string_view(key).substr(separator + 1) == value) {
                 cached.batch = raster_batch_;
                 return &cached;
             }
         }
-        const auto key = std::to_string(pixels) + ":" + std::string(value);
+        const auto key = std::to_string(pixels) + (tabular ? "t:" : "p:") + std::string(value);
         if (raster_cache.size() >= 256 && !evict_raster())
             return nullptr;
-        const auto bitmap = native::raster_text(std::string(value), float(pixels));
+        ++rasterizations_;
+        const auto bitmap = native::raster_text(std::string(value), float(pixels), tabular);
         if (bitmap.width <= 0 || bitmap.height <= 0 || bitmap.rgba.size() != size_t(bitmap.width) * bitmap.height * 4)
             return nullptr;
         constexpr size_t raster_limit_bytes = 16u * 1024 * 1024;
@@ -106,7 +112,7 @@ class NativeHud {
                 return nullptr;
         }
         raster_bytes += bitmap.rgba.size();
-        Raster result{0, bitmap.width, bitmap.height, pixels, raster_batch_};
+        Raster result{0, bitmap.width, bitmap.height, pixels, tabular, raster_batch_};
         gl.GenTextures(1, &result.texture);
         gl.BindTexture(GL_TEXTURE_2D, result.texture);
         gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -142,8 +148,21 @@ class NativeHud {
     std::vector<native::TextCaret> chat_input_carets_;
     std::string chat_input_identity_;
     float chat_input_left_=0,chat_input_top_=0,chat_input_width_=0,chat_input_height_=0;
-    void shaped(float x,float y,std::string_view value,float size,std::array<float,4> color,float from=0,float until=1e9f){
-        if(const auto glyphs=raster(value,size)){const float ratio=scale*element_scale,w=glyphs->width/ratio,h=glyphs->height/ratio;const float a=std::clamp(from,0.f,w),b=std::clamp(until,0.f,w);if(b<=a)return;current_texture=glyphs->texture;quad(x+a,y,b-a,h,a/w,0,(b-a)/w,1,color);current_texture=atlas;}else text(x,y,value,size,color);
+    void shaped(float x, float y, std::string_view value, float size, std::array<float, 4> color,
+                float from = 0, float until = 1e9f, bool tabular = false) {
+        const auto *glyphs = raster(value, size, tabular);
+        if (!glyphs) {
+            text(x, y, value, size, color);
+            return;
+        }
+        const float ratio = scale * element_scale;
+        const float width = glyphs->width / ratio, height = glyphs->height / ratio;
+        const float left = std::clamp(from, 0.f, width), right = std::clamp(until, 0.f, width);
+        if (right <= left)
+            return;
+        current_texture = glyphs->texture;
+        quad(x + left, y, right - left, height, left / width, 0, (right - left) / width, 1, color);
+        current_texture = atlas;
     }
     float scale=1;
     native::HudPreferences prefs_ = native::HudPreferences::from(native::default_settings());
@@ -236,9 +255,16 @@ class NativeHud {
     void text(float x, float y, std::string_view value, float size, Color color, bool center = false) {
         if(!element_visible)return;
         color = themed_text(color);
-        if(std::any_of(value.begin(),value.end(),[](unsigned char c){return c>=128;}))if(const auto glyphs=raster(value,size)){
-            const float ratio=scale*element_scale,w=glyphs->width/ratio,h=glyphs->height/ratio;if(center)x-=w*.5f;
-            current_texture=glyphs->texture;quad(x+1,y+1,w,h,0,0,1,1,{0,0,0,.85f});quad(x,y,w,h,0,0,1,1,color);current_texture=atlas;return;
+        if (const auto *glyphs = raster(value, size, true)) {
+            const float ratio = scale * element_scale;
+            const float width = glyphs->width / ratio, height = glyphs->height / ratio;
+            if (center)
+                x -= width * .5f;
+            current_texture = glyphs->texture;
+            quad(x + 1, y + 1, width, height, 0, 0, 1, 1, {0, 0, 0, .85f});
+            quad(x, y, width, height, 0, 0, 1, 1, color);
+            current_texture = atlas;
+            return;
         }
         // The small atlas is ASCII. Fold common UI punctuation and emit one
         // fallback per unsupported code point, not one per UTF-8 byte.
@@ -497,7 +523,10 @@ public:
         if(speed_history.empty()||s.tick!=speed_history.back().first)speed_history.emplace_back(s.tick,std::hypot(s.velocity[0],s.velocity[1]));
         while(speed_history.size()>250)speed_history.pop_front();
     }
-    // Shared SDL overlays use atlas ASCII and system-shaped Unicode line textures.
+    uint64_t rasterizations() const {
+        return rasterizations_;
+    }
+    // Gameplay and overlays use cached system-shaped sans text.
     // Failed or unavailable platform fonts retain one fallback per code point.
     void overlay_begin(int width, int height, float percent = 100) {
         begin_batch();
@@ -549,12 +578,8 @@ public:
     void overlay_name(float x, float y, std::string_view value, float size, const native::NameAppearance &look,
                       double seconds, bool center = false) {
         const float advance = size * .6f;
-        const bool unicode = std::any_of(value.begin(), value.end(), [](unsigned char c) { return c >= 128; });
-        float name_width = float(value.size()) * advance;
-        if (unicode) {
-            if (const auto bitmap = raster(value, size))
-                name_width = bitmap->width / (scale * element_scale);
-        }
+        const auto *bitmap = raster(value, size, true);
+        const float name_width = bitmap ? bitmap->width / (scale * element_scale) : float(value.size()) * advance;
         if (center)
             x -= name_width / 2;
         if (look.effect == native::NameEffect::glow) {
@@ -570,12 +595,12 @@ public:
             x += name_width;
         } else {
             // Clip the shaped name to preserve joining and ligatures across gradient slices.
-            if (unicode) {
+            if (bitmap) {
                 constexpr unsigned slices = 16;
                 for (unsigned i = 0; i < slices; ++i) {
                     const float left = name_width * float(i) / slices;
                     const float right = name_width * float(i + 1) / slices;
-                    shaped(x, y, value, size, native::name_ink(look, float(i) / slices, seconds), left, right);
+                    shaped(x, y, value, size, native::name_ink(look, float(i) / slices, seconds), left, right, true);
                 }
                 x += name_width;
             } else {
@@ -1022,7 +1047,17 @@ else{color=vec4(ink.rgb,ink.a*(uv.x<0.?1.:texture(font,uv).a));}})");
                 const auto [x, y] = at("notice", w / 2, 70);
                 text(x, y, std::string_view(notice).substr(0, 100), 15, amber, true);
             }
-            if(!split_line.empty()||!delta_line.empty()){const auto [x,y]=at("splits",w/2,h-330);if(!split_line.empty())text(x,y,split_line,14,cream,true);if(!delta_line.empty())text(x,y+22,delta_line,13,delta_good?palette.gain:palette.loss,true);}
+            const std::string_view shown_delta = delta_line.empty() ? extras.ghost_delta.view() : delta_line;
+            if (!split_line.empty() || !shown_delta.empty()) {
+                const auto [x, y] = at("splits", w / 2, h - 330);
+                if (!split_line.empty())
+                    text(x, y, split_line, 14, cream, true);
+                if (!shown_delta.empty()) {
+                    const bool good = delta_line.empty() ? shown_delta.front() == '-' : delta_good;
+                    text(x, split_line.empty() ? y : y + 22, shown_delta, 13,
+                         good ? palette.gain : palette.loss, true);
+                }
+            }
             if (prefs_.speed_graph && !speed_history.empty()) {
                 const auto [x,y]=at("speedGraph",w-300,h-180);rect(x,y,260,80,{.03f,.03f,.05f,.6f});
                 float peak=500;for(const auto &[tick,v]:speed_history)peak=std::max(peak,v);

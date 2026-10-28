@@ -48,6 +48,7 @@ struct DrawProbe {
     size_t flags = 0;
     size_t names = 0;
     size_t avatars = 0;
+    bool particle_after_text = false;
     bool has(std::string_view value) const {
         for (size_t i = 0; i < texts; ++i) {
             if (labels[i].view().find(value) != std::string_view::npos)
@@ -64,6 +65,7 @@ struct DrawProbe {
     }
     void overlay_rect(float x, float y, float width, float height, native::NameColor) {
         assert(std::isfinite(x) && std::isfinite(y) && width >= 0 && height >= 0);
+        particle_after_text |= texts > 0 && width == 3 && height == 5;
         ++rects;
     }
     void overlay_flag(float, float, std::string_view) {
@@ -433,6 +435,49 @@ void test_tags_and_race_picker() {
     assert(picker.command.view() == "/race #3 legit 0");
 }
 
+void test_ghost_progress() {
+    native::HudExtras extras;
+    extras.ghost({{"map", "test"}, {"style", "autohop"}, {"track", 0u},
+                  {"startTick", 10u}, {"endTick", 100u}, {"settings", {{"tickInterval", .01}}}});
+    assert(extras.ghost_seconds && *extras.ghost_seconds == .9);
+    extras.ghost({{"map", "test"}, {"style", "autohop"}, {"track", 0u}, {"timeMs", 895u},
+                  {"startTick", 10u}, {"endTick", 100u}, {"settings", {{"tickInterval", .01}}}});
+    assert(extras.ghost_seconds && *extras.ghost_seconds == .895);
+    assert(extras.ghost_target("test", "autohop", 0, true) == extras.ghost_seconds);
+    assert(!extras.ghost_target("other", "autohop", 0, true));
+    assert(!extras.ghost_target("test", "autohop", 0, false));
+    std::array<BhGhostFrame, 101> frames{};
+    for (size_t tick = 0; tick < frames.size(); ++tick)
+        frames[tick].position[0] = float(tick) * 10;
+    BhState state{};
+    state.tick = 40;
+    state.position[0] = 305;
+    BhRunState run{};
+    run.status = 1;
+    run.seconds = .18;
+    BhCmd command{};
+    command.buttons = native::forward | native::jump;
+    extras.ghost_progress(frames, state, run, &command);
+    assert(extras.have_ghost && extras.ghost_buttons == command.buttons);
+    assert(extras.ghost_delta.view() == "-0.025s");
+    state.tick += 4;
+    state.position[0] = 500;
+    run.seconds = .5;
+    extras.ghost_progress(frames, state, run, &command);
+    assert(extras.ghost_delta.view() == "+0.100s");
+    run.status = 2;
+    run.seconds = .9;
+    ++state.tick;
+    extras.ghost_progress(frames, state, run, &command);
+    assert(extras.ghost_delta.view() == "+0.005s");
+    extras.ghost_progress(frames, state, run, nullptr);
+    assert(!extras.have_ghost && extras.ghost_delta.empty());
+    extras.leaderboard(4, 3);
+    assert(extras.place.view() == "#4 | top 3.0%");
+    extras.leaderboard(0);
+    assert(extras.place.empty());
+}
+
 void test_results_toasts_and_room_widgets() {
     native::HudResult result;
     result.finish(4, 12.345, 1, 13, true);
@@ -450,7 +495,16 @@ void test_results_toasts_and_room_widgets() {
         native::draw_result(result_probe, 1280, 720, 100, result, 2);
     }
     assert(result_probe.has("WORLD RECORD") && result_probe.has("+120 XP") && result_probe.has("R to go again"));
+    assert(!result_probe.particle_after_text);
     assert(!result.visible(16));
+    result.service({{"generation", 4}, {"status", "verified"}, {"xp", 120u},
+                    {"level", {{"level", 12u}}}, {"achievements", native::Json::array({"First finish"})}}, 4);
+    assert(result.reward_count == 3);
+    assert(result.rewards[0].title.view() == "+120 XP");
+    assert(result.rewards[1].title.view() == "Level 12");
+    assert(result.rewards[2].detail.view() == "First finish");
+    result.service({{"generation", 3}, {"status", "verified"}, {"xp", 999u}}, 4);
+    assert(result.rewards[0].title.view() == "+120 XP");
     native::Toasts toasts;
     for (unsigned i = 0; i < 8; ++i)
         toasts.push(std::to_string(i), 1);
@@ -543,6 +597,7 @@ int main() {
     test_scoreboard_and_names();
     test_merged_menu_contracts();
     test_tags_and_race_picker();
+    test_ghost_progress();
     test_results_toasts_and_room_widgets();
     test_movement_widgets_and_restart();
     std::cout << "WS4 HUD: 8 scenario groups, all layout IDs, three trainer styles, defaults and saved settings\n";

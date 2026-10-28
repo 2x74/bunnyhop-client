@@ -35,6 +35,34 @@ class HudResult {
     bool visible(double now) const {
         return now >= started && now - started < 14;
     }
+    void submission_rewards(const nlohmann::json &message) {
+        reward_count = 0;
+        const auto xp = message.find("xp");
+        if (xp != message.end() && xp->is_number_unsigned()) {
+            auto &reward = rewards[reward_count++];
+            reward.title.format("+%u XP", xp->get<unsigned>());
+            reward.detail.assign("Run verified");
+        }
+        const auto level = message.find("level");
+        if (level != message.end() && level->is_object() && level->contains("level") &&
+            (*level)["level"].is_number_unsigned()) {
+            auto &reward = rewards[reward_count++];
+            reward.title.format("Level %u", (*level)["level"].get<unsigned>());
+            reward.detail.assign("Progress updated");
+        }
+        const auto achievements = message.find("achievements");
+        if (achievements != message.end() && achievements->is_array()) {
+            for (const auto &achievement : *achievements) {
+                if (reward_count == rewards.size())
+                    break;
+                if (!achievement.is_string())
+                    continue;
+                auto &reward = rewards[reward_count++];
+                reward.title.assign("Achievement unlocked");
+                reward.detail.assign(achievement.get_ref<const std::string &>());
+            }
+        }
+    }
     void service(const nlohmann::json &message, uint64_t attempt) {
         if (generation != attempt || message.value("generation", ~uint64_t(0)) != attempt)
             return;
@@ -49,6 +77,9 @@ class HudResult {
                     : (event == "pb" || json_flag(message, "pb")) ? ResultStamp::personal_best
                                                                   : ResultStamp::finished;
         }
+        if (status == "verified" && !message.contains("rewards") &&
+            (message.contains("xp") || message.contains("level") || message.contains("achievements")))
+            submission_rewards(message);
         const auto incoming = message.find("rewards");
         if (incoming == message.end() || !incoming->is_array())
             return;
@@ -96,6 +127,16 @@ void draw_result(Hud &hud, int width, int height, float percent, const HudResult
         gold[3] = .65f + .25f * std::sin(age * 3);
     hud.overlay_begin(width, height, percent);
     hud.overlay_rect(x - 215, y - 18, 430, result.reward_count ? 208 : 155, {.025f, .027f, .04f, .92f});
+    const bool celebrate = result.stamp == ResultStamp::personal_best || result.stamp == ResultStamp::world_record;
+    if (celebrate && age < 3) {
+        for (unsigned i = 0; i < 32; ++i) {
+            const float phase = float(i) * 2.399963f;
+            const float radius = 30 + age * (32 + i % 5 * 9);
+            const float particle_x = x + std::cos(phase) * radius;
+            const float particle_y = y + 35 + std::sin(phase) * radius + age * age * 22;
+            hud.overlay_rect(particle_x, particle_y, 3, 5, i % 2 ? gold : cream);
+        }
+    }
     HudLabel<48> time;
     // Roll only during the first 300 ms, then hold the exact server/core time.
     format_hud_time(time, age < .3f ? result.seconds * std::min(1.f, age / .3f) : result.seconds);
@@ -111,16 +152,6 @@ void draw_result(Hud &hud, int width, int height, float percent, const HudResult
         hud.overlay_rect(x - 198, y + 140, 396, 1, {.28f, .24f, .15f, 1});
         hud.overlay_text(x, y + 150, result.rewards[index].title.view(), 15, gold, true);
         hud.overlay_text(x, y + 176, result.rewards[index].detail.view(), 12, cream, true);
-    }
-    const bool celebrate = result.stamp == ResultStamp::personal_best || result.stamp == ResultStamp::world_record;
-    if (celebrate && age < 3) {
-        for (unsigned i = 0; i < 32; ++i) {
-            const float phase = float(i) * 2.399963f;
-            const float radius = 30 + age * (32 + i % 5 * 9);
-            const float particle_x = x + std::cos(phase) * radius;
-            const float particle_y = y + 35 + std::sin(phase) * radius + age * age * 22;
-            hud.overlay_rect(particle_x, particle_y, 3, 5, i % 2 ? gold : cream);
-        }
     }
     hud.overlay_end(width, height);
 }

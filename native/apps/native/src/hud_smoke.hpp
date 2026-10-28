@@ -108,6 +108,11 @@ template <class Save> void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, i
     clear();
     draw_result(hud, width, height, 100, result, 2);
     save("ws4-result-wr-reel");
+    const auto rasterizations = hud.rasterizations();
+    clear();
+    draw_result(hud, width, height, 100, result, 2);
+    if (hud.rasterizations() != rasterizations)
+        throw std::runtime_error("Unchanged result strings were rasterized again");
     clear();
     RoomState room;
     room.vote = {
@@ -157,7 +162,8 @@ template <class Save> void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, i
     preferences["hudLayout"]["sync"]["y"] = .44;
     preferences["hudLayout"]["ghostKeys"]["x"] = .30;
     preferences["hudLayout"]["ghostKeys"]["y"] = .25;
-    hud.extras.contract({{"pbTimeMs", 16731}, {"spectators", {"Watcher", "Bunny"}}, {"ghostButtons", left | jump}});
+    hud.extras.contract({{"pbTimeMs", 16731}, {"spectators", {"Watcher", "Bunny"}},
+                         {"ghostButtons", left | jump}, {"ghostDelta", -.042}});
     hud.movement.start_pre.assign("Start Pre 280");
     hud.movement.offset.assign("Offset -1 (key early)");
     hud.movement.first_jump.assign("FJT 0 ticks (0 ms)");
