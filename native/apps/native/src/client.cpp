@@ -37,6 +37,7 @@
 #include "run_vault.hpp"
 #include "replay_library.hpp"
 #include "menu_state.hpp"
+#include "menu_room_state.hpp"
 #include "map_prefetch.hpp"
 #include "recoverable_action.hpp"
 #include "app_identity.hpp"
@@ -359,6 +360,7 @@ int run(const Options &opt) {
     native::JsonFileWriter json_writer;
     auto preferences = startup_data.settings;
     native::MenuState menu_state;
+    native::MenuRoomState room_menu_state;
     const bool first_settings = startup_data.first_settings;
     if (!startup_data.error.empty()) {
         std::cerr << "Settings: " << startup_data.error << '\n';
@@ -2820,27 +2822,24 @@ int run(const Options &opt) {
                     }
                 }
             } else {
-                state = {{"map", map_id},
-                         {"style", selected_style},
-                         {"track", active_track},
-                         {"runGeneration", run_generation},
-                         {"loading", download.valid()},
-                         {"player",
-                          {{"map", map_id},
-                           {"style", active_style},
-                           {"track", active_track},
-                           {"mode", "multiplayer"},
-                           {"practice", practice.active}}},
-                         {"room",
-                          {{"id", room.id},
-                           {"map", room.map},
-                           {"spectating", spectator.has_value()},
-                           {"target", spectator ? nlohmann::json(*spectator) : nlohmann::json(nullptr)},
-                           {"raceFrozen", room_modes.frozen()}}}};
+                state = room_menu_state.update({
+                    .map = map_id,
+                    .selected_style = selected_style,
+                    .active_style = active_style,
+                    .room_id = room.id,
+                    .room_map = room.map,
+                    .track = active_track,
+                    .generation = run_generation,
+                    .target = spectator,
+                    .loading = download.valid(),
+                    .practice = practice.active,
+                    .frozen = room_modes.frozen()});
             }
-            const auto script = menu_state.publish(std::move(state), visible, preferences, replay_list);
-            if (!script.empty())
-                menu->evaluate_js(script);
+            if (!state.is_null()) {
+                const auto script = menu_state.publish(std::move(state), visible, preferences, replay_list);
+                if (!script.empty())
+                    menu->evaluate_js(script);
+            }
             ui_time=now;
         }
         if(!backdrop_call.empty()) {

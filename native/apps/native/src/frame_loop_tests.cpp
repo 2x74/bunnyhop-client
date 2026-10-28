@@ -6,6 +6,7 @@
 #include "json_file_writer.hpp"
 #include "recoverable_action.hpp"
 #include "menu_state.hpp"
+#include "menu_room_state.hpp"
 #include "start_point.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
@@ -147,6 +148,16 @@ void test_json_writer_writes_off_thread_and_keeps_the_newest() {
 }
 
 void test_menu_slices() {
+    native::MenuRoomState hidden_room;
+    native::MenuRoomView room_view{"map", "autohop", "autohop", "room", "map", 0, 1,
+                                    std::nullopt, false, false, false};
+    const auto room_state = hidden_room.update(room_view);
+    assert(room_state.is_object() && !room_state.contains("settings") && !room_state.contains("replays"));
+    assert(hidden_room.update(room_view).is_null());
+    room_view.target = 3;
+    const auto spectating = hidden_room.update(room_view);
+    assert(spectating.at("room").at("target") == 3);
+    assert(hidden_room.update(room_view).is_null());
     native::MenuState publisher;
     const native::Json settings = {{"sensitivity", 3.0}};
     const native::Json replays = native::Json::array({{{"id", "one.bhr"}}});
