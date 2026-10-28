@@ -5,6 +5,7 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -173,37 +174,74 @@ inline void keep_saved_display(Json &saved) {
         saved["fpsLimit"] = 0;
     }
 }
-inline Json load_settings(const std::filesystem::path &file) {
-    auto out=default_settings();
-    if(!std::filesystem::exists(file)) return out;
-    if(std::filesystem::file_size(file)>16384) throw std::runtime_error("Settings file is too large");
-    std::ifstream stream(file);Json saved;stream>>saved;
-    // Before !showclips existed, "Trigger and clip overlays" drew both groups.
-    // Keep clips on for anyone who had that toggle on.
-    if(saved.is_object()&&!saved.contains("clipsVisible")&&saved.value("triggersVisible",Json(false))==true)saved["clipsVisible"]=true;
-    if (saved.is_object() && saved.contains("yawSpeedAlt")) {
-        const double speed = saved.value("yawSpeed", 210.0);
-        const double alternate = saved.at("yawSpeedAlt").get<double>();
-        if (!saved.contains("angleSpeedKey") && std::isfinite(speed) && speed > 0 && std::isfinite(alternate)) {
-            saved["angleSpeedKey"] = std::clamp(alternate / speed, 1.0, 4.0);
+inline void backup_settings(const std::filesystem::path& file) {
+    auto previous = file;
+    previous += ".previous";
+    std::filesystem::copy_file(file, previous, std::filesystem::copy_options::overwrite_existing);
+}
+
+inline Json load_settings(const std::filesystem::path& file) {
+    auto out = default_settings();
+    if (!std::filesystem::exists(file))
+        return out;
+    Json saved;
+    try {
+        constexpr size_t settings_max_bytes = 16384;
+        std::ifstream stream(file, std::ios::binary);
+        std::string bytes(settings_max_bytes + 1, '\0');
+        stream.read(bytes.data(), bytes.size());
+        if (stream.bad() || (!stream.eof() && stream.fail()))
+            throw std::runtime_error("Could not read settings");
+        bytes.resize(static_cast<size_t>(stream.gcount()));
+        if (bytes.size() > settings_max_bytes)
+            throw std::runtime_error("Settings file is too large");
+        saved = Json::parse(bytes);
+        if (!saved.is_object())
+            throw std::runtime_error("Invalid settings object");
+    } catch (...) {
+        backup_settings(file);
+        throw;
+    }
+    if (!saved.contains("clipsVisible") && saved.value("triggersVisible", Json(false)) == true)
+        saved["clipsVisible"] = true;
+    if (saved.contains("yawSpeedAlt") && saved["yawSpeedAlt"].is_number()) {
+        const auto speed = saved.value("yawSpeed", Json(210.0));
+        const double alternate = saved["yawSpeedAlt"].get<double>();
+        if (speed.is_number() && std::isfinite(speed.get<double>()) && speed.get<double>() > 0) {
+            if (!saved.contains("angleSpeedKey") && std::isfinite(alternate))
+                saved["angleSpeedKey"] = std::clamp(alternate / speed.get<double>(), 1.0, 4.0);
+            saved["yawSpeed"] = std::clamp(speed.get<double>(), 60.0, 720.0);
         }
         saved.erase("yawSpeedAlt");
-        if (std::isfinite(speed)) {
-            saved["yawSpeed"] = std::clamp(speed, 60.0, 720.0);
-        }
     }
     keep_saved_display(saved);
-    return patch_settings(out,saved);
+    bool backed_up = false;
+    for (auto entry = saved.begin(); entry != saved.end(); ++entry) {
+        if (entry.key() == "binds" && entry->is_object()) {
+            for (auto bind = entry->begin(); bind != entry->end(); ++bind) {
+                try {
+                    out = patch_settings(out, {{"binds", {{bind.key(), bind.value()}}}});
+                } catch (const std::exception& error) {
+                    if (!backed_up)
+                        backup_settings(file);
+                    backed_up = true;
+                    std::cerr << "Ignoring binding " << bind.key() << ": " << error.what() << '\n';
+                }
+            }
+            continue;
+        }
+        try {
+            out = patch_settings(out, {{entry.key(), entry.value()}});
+        } catch (const std::exception& error) {
+            if (!backed_up)
+                backup_settings(file);
+            backed_up = true;
+            std::cerr << "Ignoring setting " << entry.key() << ": " << error.what() << '\n';
+        }
+    }
+    return out;
 }
 inline void save_settings(const std::filesystem::path &file,const Json &settings) {
-    auto temp = file;
-    temp += ".tmp";
-    std::ofstream out(temp, std::ios::binary | std::ios::trunc);
-    out << settings.dump(2) << '\n';
-    out.close();
-    if (!out) {
-        throw std::runtime_error("Could not save settings");
-    }
-    atomic_replace(temp, file);
+    atomic_write_file(file, settings.dump(2) + '\n');
 }
 }

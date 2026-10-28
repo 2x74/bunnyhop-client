@@ -4,6 +4,8 @@
 #include "frame_diagnostics.hpp"
 #include "frame_pacing.hpp"
 #include "json_file_writer.hpp"
+#include "recoverable_action.hpp"
+#include "start_point.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -143,6 +145,53 @@ void test_json_writer_writes_off_thread_and_keeps_the_newest() {
     std::filesystem::remove_all(dir);
 }
 
+void test_settings_recovery() {
+    const auto directory = std::filesystem::temp_directory_path() / "bunnyhop-settings-recovery";
+    std::filesystem::create_directories(directory);
+    const auto file = directory / "settings.json";
+    const native::Json saved = {{"futureOption", true}, {"fov", "bad"}, {"sensitivity", 3.5},
+        {"binds", {{"jump", {"KeyJ"}}, {"futureAction", {"KeyK"}}, {"duck", {"Invalid"}},
+                   {"forward", {"KeyZ"}}}}};
+    native::save_settings(file, saved);
+    const auto loaded = native::load_settings(file);
+    assert(loaded.at("sensitivity") == 3.5);
+    assert(loaded.at("fov") == 90);
+    assert(loaded.at("binds").at("jump") == native::Json::array({"KeyJ"}));
+    assert(loaded.at("binds").at("forward") == native::Json::array({"KeyZ"}));
+    std::ifstream backup(directory / "settings.json.previous");
+    assert(native::Json::parse(backup) == saved);
+    backup.close();
+    native::save_settings(file, loaded);
+    std::ifstream still_saved(directory / "settings.json.previous");
+    assert(native::Json::parse(still_saved) == saved);
+    still_saved.close();
+    {
+        std::ofstream broken(file);
+        broken << "{broken";
+    }
+    try {
+        native::load_settings(file);
+        assert(false);
+    } catch (const std::exception&) {
+        std::ifstream rejected(directory / "settings.json.previous");
+        std::string text;
+        rejected >> text;
+        assert(text == "{broken");
+    }
+    int notices = 0;
+    native::RecoverableAction action([](const std::string&, bool = false, bool = false) {
+        throw std::runtime_error("settings locked");
+    }, [&](const char*) { ++notices; });
+    action("mute");
+    native::RestartGuard guard;
+    guard.press("restart", 100, true, true, false);
+    const auto ready = guard.frame(5000, true, false);
+    assert(ready);
+    action(*ready, false, true);
+    assert(notices == 2);
+    std::filesystem::remove_all(directory);
+}
+
 void test_display_defaults() {
     const auto dir = std::filesystem::temp_directory_path() / "bunnyhop-display-defaults-test";
     std::filesystem::remove_all(dir);
@@ -214,6 +263,7 @@ int main() {
     test_disabled_diagnostics_record_nothing();
     test_frame_pacer_waits_for_the_previous_frame();
     test_json_writer_writes_off_thread_and_keeps_the_newest();
+    test_settings_recovery();
     test_display_defaults();
     test_settings_replace_has_no_missing_destination();
     std::puts("frame loop: all tests passed");

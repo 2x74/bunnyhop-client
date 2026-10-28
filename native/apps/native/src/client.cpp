@@ -35,6 +35,7 @@
 #include "audio.hpp"
 #include "client_util.hpp"
 #include "run_vault.hpp"
+#include "recoverable_action.hpp"
 #include "app_identity.hpp"
 #include "room_state.hpp"
 #include "room_modes.hpp"
@@ -961,7 +962,7 @@ int run(const Options &opt) {
     uint32_t last_slot=3,observed_slot=3;
     auto held_action=[&](const std::string &action){const auto &binds=preferences.at("binds");if(!binds.contains(action))return false;for(const auto &key:binds.at(action))if(held_codes.contains(key.get<std::string>()))return true;return false;};
     auto weapon_context=[&](){return native::WeaponMenuContext{settings.physics,practice.active||zones.empty(),playback,room.spectator_target.has_value(),practice.noclip};};
-    auto act=[&](const std::string &action,bool wheel=false,bool instant=false) {
+    auto act=native::RecoverableAction([&](const std::string &action,bool wheel=false,bool instant=false) {
         if(action=="chat"||action=="commandChat"){open_chat(action=="commandChat");return;}
         if(action=="scoreboard")return;
         if(action=="spectatorNext"||action=="spectatorPrevious"){room_control({{"action",action=="spectatorNext"?"next":"previous"}});return;}
@@ -1033,8 +1034,8 @@ int run(const Options &opt) {
         else if(action=="reload")input.pulse|=1u<<13;
         else if(action=="giveUsp"||action=="giveGlock"){kept_weapons.cancel();input.pulse=(input.pulse&~native::weapon_command_mask)|((action=="giveUsp"?3u:2u)<<native::give_shift);}
 
-    };
-    auto handle_code=[&](const std::string &code,bool down,bool repeat=false,bool wheel=false,uint64_t stamp=0) {
+    }, toast);
+    auto handle_code=native::RecoverableAction([&](const std::string &code,bool down,bool repeat=false,bool wheel=false,uint64_t stamp=0) {
         if(code.empty())return;
         if(down&&!repeat)for(const char *action:{"chat","commandChat"})for(const auto &key:preferences.at("binds").at(action))if(key==code){open_chat(std::string(action)=="commandChat");return;}
         if(gun_menu.open&&down&&!repeat&&code.size()==6&&code.starts_with("Digit")){const auto picked=gun_menu.key(code.back()-'0',weapon_context());if(!picked.refusal.empty())toast(picked.refusal);if(picked.weapon){kept_weapons.cancel();input.pulse=(input.pulse&~native::weapon_command_mask)|(*picked.weapon<<native::give_shift);}if(picked.handled)return;}
@@ -1060,7 +1061,7 @@ int run(const Options &opt) {
         bool inspect=false;for(const auto &key:preferences["binds"]["inspect"])inspect|=held_codes.contains(key.get<std::string>());
         if(renderer)renderer->inspect_held(inspect);
         if(core&&std::find(preferences["binds"]["inspect"].begin(),preferences["binds"]["inspect"].end(),code)!=preferences["binds"]["inspect"].end())bh_record_inspect(core.get(),down?3:4);
-    };
+    }, toast);
     refresh_replays();
     if(!opt.map.empty()) {
         nlohmann::json detail;
