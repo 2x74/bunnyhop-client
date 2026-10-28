@@ -97,7 +97,9 @@ test("the account copy keeps what this build doesn't know and carries native-onl
   expect(merged).toEqual({ sensitivity: 2, graphics: { preset: "classic", futureKnob: 3 }, futureTop: { on: true } });
   const native = nativeOnlySettings();
   expect(native).toMatchObject({ discordJoin: state.settings.discordJoin, sfxPack: "default", waterQuality: "simple" });
-  for (const device of ["windowMode", "alwaysOnTop", "mouseDiagnostics", "sensitivity"]) expect(device in native).toBe(false);
+  for (const left of ["windowMode", "alwaysOnTop", "mouseDiagnostics", "sensitivity", "playerModel", "ghostModel"]) {
+    expect(left in native).toBe(false);
+  }
   const doc = syncDocument({ format: "bunnyhop.lol/settings", version: 1, exported: "", settings: remote as never });
   expect(doc.settings.native).toEqual(native);
   expect((doc.settings as Record<string, unknown>).futureTop).toEqual({ on: true });

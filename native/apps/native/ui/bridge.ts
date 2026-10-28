@@ -95,7 +95,8 @@ export const WINDOW_MODES=["windowed","borderless","fullscreen"] as const;
 export type WindowMode=(typeof WINDOW_MODES)[number];
 export interface NativeAudioState {classicLoading:boolean;classicActive:boolean;classicStatus:string;sfxStatus:string;error:string}
 export interface NativeSettings {
-  playerModel:"bunny"|"runner";ghostModel:"same"|"bunny"|"runner";
+  /** The runner is retired, as on the website: the menu never offers or sends it (the host still reads old files). */
+  playerModel:"bunny";ghostModel:"same"|"bunny";
   mouseDiagnostics:boolean;
   windowMode:WindowMode;alwaysOnTop:boolean;rememberWindowBounds:boolean;minimizeOnFocusLoss:boolean;
   capturePbScreenshots:boolean;showPlayerGlow:boolean;firstPersonGlow:boolean;
@@ -326,8 +327,8 @@ export function settingsPatch(value:unknown):Partial<NativeSettings> {
   for(const key of ["mouseDiagnostics","capturePbScreenshots","alwaysOnTop","rememberWindowBounds","minimizeOnFocusLoss","showPlayerGlow","firstPersonGlow","gainTicks","speedColors","perfectIndicator","showGhost","ghostNearFade","ghostTag","othersAudio","ghostAudio","zonesVisible","effectsVisible","triggersVisible","clipsVisible","invertY","holdRestart","crosshairOutline","viewmodelLeftHand","muteSfx","muteMusic","muteUi","muteAmbience","muteInBackground","classicSounds","perfectTick","footsteps","weaponSounds","wind","speedGraph","keysOverlay","separateVertical","sourceLook","vsync","limitQueuedFrames","muted","hud","crosshair","viewmodel","jumpStats","jumpStatsColors","strafeTrainer","strafeTrainerHints","discordRichPresence","discordShowMap","discordJoin","discordJoinLobbies","privacyMode","timedInput"]) if(typeof input[key]==="boolean") out[key]=input[key];
   if(input.waterQuality==="simple"||input.waterQuality==="refracted")out.waterQuality=input.waterQuality;
   if(typeof input.crosshairStyle==="string"&&["cross","cross-dot","dot","t","circle","none"].includes(input.crosshairStyle))out.crosshairStyle=input.crosshairStyle;
-  if(input.playerModel==="bunny"||input.playerModel==="runner")out.playerModel=input.playerModel;
-  if(input.ghostModel==="same"||input.ghostModel==="bunny"||input.ghostModel==="runner")out.ghostModel=input.ghostModel;
+  if(input.playerModel==="bunny")out.playerModel=input.playerModel;
+  if(input.ghostModel==="same"||input.ghostModel==="bunny")out.ghostModel=input.ghostModel;
   if(typeof input.colorBlind==="string"&&["off","redGreen","blueYellow"].includes(input.colorBlind))out.colorBlind=input.colorBlind;
   if(typeof input.keysStyle==="string"&&["classic","minimal","keycaps"].includes(input.keysStyle))out.keysStyle=input.keysStyle;
   if(typeof input.crosshairColor==="string"&&/^#[0-9a-f]{6}$/i.test(input.crosshairColor))out.crosshairColor=input.crosshairColor;

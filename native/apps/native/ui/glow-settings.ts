@@ -11,5 +11,6 @@ export function installGlowSettings(): void {
   installPrefsBridge();
   migrateNativePresets();
   installSettingsFiles();
-  installSettingsSync();
+  // Loaded when sync starts: the account panel brings the whole account UI, which this module's importers don't need.
+  installSettingsSync(() => void import("./account-panel").then((panel) => panel.enableSettingsSync()));
 }

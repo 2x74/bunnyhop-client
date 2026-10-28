@@ -256,6 +256,10 @@ test("settings kept with the account upload one document with native settings an
     expect(doc.settings.futureKnob).toBe(7);
     expect(doc.settings.native).toMatchObject({ discordJoin: true, sfxPack: "default" });
     expect("windowMode" in (doc.settings.native as object)).toBe(false);
+    // With sync running, the account panel offers its switch.
+    await openSettings(page, "account");
+    await row(page, "account", "Name and sign-in").getByRole("button", { name: "Open account" }).click();
+    await page.getByText("Keep settings with my account").waitFor();
     expect(errors).toEqual([]);
   } finally {
     await close();

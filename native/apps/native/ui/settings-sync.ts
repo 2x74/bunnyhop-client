@@ -6,7 +6,7 @@
 //
 // - The account's document can hold settings this build doesn't know (a newer website). They stay in the upload.
 // - Settings only the desktop client has ride along under `native` (the website ignores the key). The window and the
-//   diagnostics overlay stay with the device.
+//   diagnostics overlay stay with the device; the retired player and ghost models don't travel.
 
 import { api, type User } from "../../web/src/api";
 import { WAVEDASH } from "../../web/src/platform/env";
@@ -21,6 +21,8 @@ const OPT_KEY = "bunnyhop:settings-sync";
 const SAVE_DELAY_MS = 4000;
 /** Native-only settings that belong to this computer, not the player. */
 const DEVICE_KEYS = ["windowMode", "alwaysOnTop", "rememberWindowBounds", "minimizeOnFocusLoss", "mouseDiagnostics"];
+/** Retired like on the website: everyone is shown in their loadout. */
+const RETIRED_KEYS = ["playerModel", "ghostModel"];
 
 type Obj = Record<string, unknown>;
 const isObj = (value: unknown): value is Obj => !!value && typeof value === "object" && !Array.isArray(value);
@@ -49,7 +51,7 @@ export function nativeOnlySettings(): Obj {
   const mapped = new Set(MAPPINGS.flatMap((mapping) => mapping.keys));
   const out: Obj = {};
   for (const [key, value] of Object.entries(state.settings)) {
-    if (!mapped.has(key) && !DEVICE_KEYS.includes(key)) out[key] = value;
+    if (!mapped.has(key) && !DEVICE_KEYS.includes(key) && !RETIRED_KEYS.includes(key)) out[key] = value;
   }
   return out;
 }
@@ -73,6 +75,7 @@ export function syncDocument(remote: SettingsDoc | null): SettingsDoc {
 }
 
 let player: User | null = null;
+let syncReady: () => void = () => {};
 let remoteDoc: SettingsDoc | null = null;
 let applying = false;
 let timer = 0;
@@ -126,6 +129,8 @@ function applyRemote(doc: SettingsDoc): void {
 export async function syncSettings(user: User | null): Promise<void> {
   player = user;
   watchChanges();
+  // The account panel's "Keep settings with my account" switch shows from now on: the document it keeps is this one.
+  syncReady();
   if (!settingsSyncOn() || !eligible(user)) return;
   let saved: { doc: unknown; updatedAt?: number };
   try {
@@ -159,10 +164,14 @@ export function setSettingsSync(on: boolean): void {
 
 let installed = false;
 
-/** Syncs for the signed-in player now and whenever the account changes (once). */
-export function installSettingsSync(): void {
+/**
+ * Syncs for the signed-in player now and whenever the account changes (once). `ready` runs when syncing starts, to
+ * show the account panel's switch.
+ */
+export function installSettingsSync(ready: () => void): void {
   if (installed || typeof window === "undefined") return;
   installed = true;
+  syncReady = ready;
   const refresh = (): void => {
     void api.me().then((user) => {
       if (!api.meStale()) void syncSettings(user ?? null);

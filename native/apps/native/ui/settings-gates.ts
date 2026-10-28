@@ -292,8 +292,6 @@ export const NATIVE_GATES: Readonly<Record<string, Gate>> = {
   "mouse/Mouse diagnostics/Last sample": needs("mouseDiagnostics"),
   "graphics/Native renderer/Water": needs("waterQuality"),
   "graphics/Native renderer/World effects": needs("effectsVisible"),
-  "ghost/Models/Player model": needs("playerModel"),
-  "ghost/Models/Ghost model": needs("ghostModel"),
   "hud/More jump stats/Gain colours": needs("jumpStatsColors"),
   "hud/More jump stats/Every N jumps": needs("jumpStatsInterval"),
   "hud/Positions/Drag to place": needs("hudLayout"),

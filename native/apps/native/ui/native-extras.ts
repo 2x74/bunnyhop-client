@@ -28,24 +28,6 @@ function rendererGroup(ui: Ui): HTMLElement {
   return group;
 }
 
-function modelsGroup(ui: Ui): HTMLElement {
-  const group = ui.group(
-    "Models",
-    nativeChoice(ui, "Player model", "playerModel", [["bunny", "Bunny"], ["runner", "Runner"]], {
-      desc:
-        "Players in third person, replays and the menu. The runner is the classic model; the website shows everyone " +
-        "as a bunny.",
-      keywords: "player model bunny runner",
-    }),
-    nativeChoice(ui, "Ghost model", "ghostModel", [["same", "Same"], ["bunny", "Bunny"], ["runner", "Runner"]], {
-      desc: "Same uses the player model.",
-      keywords: "ghost model bunny runner",
-    }),
-  );
-  followHost(group, ui);
-  return group;
-}
-
 function jumpStatsGroup(ui: Ui): HTMLElement {
   const interval = ui.range("Every N jumps", () => state.settings.jumpStatsInterval, (value) => {
     sendNativeSettings({ jumpStatsInterval: Math.round(value) });
@@ -256,7 +238,6 @@ export const redrawSettings = registerNativeHud;
 /** Registers the native rows under the website's sections (call once). */
 export function registerNativeExtras(): void {
   registerSettingsSection("native-graphics", (ui) => [rendererGroup(ui)], { advancedUnder: "graphics" });
-  registerSettingsSection("native-ghost", (ui) => [modelsGroup(ui)], { advancedUnder: "ghost" });
   registerNativeHud();
   registerSettingsSection("native-audio", (ui) => [packsGroup(ui)], { advancedUnder: "audio" });
   registerSettingsSection("native-keys", (ui) => [nativeBindsGroup(ui)], { advancedUnder: "keys" });
