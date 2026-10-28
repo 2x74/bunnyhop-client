@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 import { packageIdentity, treeHash } from "./package";
 import { executableHash, MACHO_MODE } from "./packaging/executable-identity";
 import { ensureCanonicalWasm } from "./ensure-wasm";
+import { pinnedSdlInstall, sdlConfigDir } from "./packaging/sdl";
 const root = resolve(import.meta.dir, "../..");
 await ensureCanonicalWasm();
 const {values}=parseArgs({args:Bun.argv.slice(2),options:{"prebuilt-resources":{type:"boolean"}}});
@@ -23,7 +24,12 @@ if(values["prebuilt-resources"]){
   run(["bun", "apps/native/src/export-viewmodels.ts"]);
   run(["bun", "apps/native/src/export-presentation.ts"]);
 }
-run(["cmake", "-S", "apps/native", "-B", "apps/native/build", "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release"]);
+// Use the pinned SDL when packaging/sdl.ts has built it; otherwise CMake finds a system SDL3 >= 3.4.
+const sdl = pinnedSdlInstall();
+const configure = ["cmake", "-S", "apps/native", "-B", "apps/native/build", "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release"];
+// SDL3_DIR is explicit so a cached or vcpkg SDL from an earlier configure can't win.
+if (sdl) configure.push(`-DCMAKE_PREFIX_PATH=${sdl}`, `-DSDL3_DIR=${sdlConfigDir(sdl)}`);
+run(configure);
 run(["cmake", "--build", "apps/native/build", "--parallel"]);
 // Local and packaged binaries must use the same identity schema and executable
 // hash convention; otherwise the runtime rejects every development manifest.

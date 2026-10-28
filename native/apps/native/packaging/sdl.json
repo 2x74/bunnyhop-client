@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/libsdl-org/SDL.git",
+  "branch": "release-3.4.x",
+  "commit": "fc305ea8ebe117ec9bbc54f08cb2a2c75dba8ae8",
+  "version": "3.4.19-dev",
+  "macosDeploymentTarget": "13.0",
+  "notes": "3.4.18 plus the 3.4.x maintenance fixes, including raw keyboard key-down detection (ea764208b) and DPI-unaware focus flapping on Windows (be9f6fb99). Move to the release-3.4.20 tag when it ships."
+}
