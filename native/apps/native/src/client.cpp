@@ -64,8 +64,8 @@
 #include "native_update.hpp"
 #include "update_config.hpp"
 #include "video_capture.hpp"
-#include "presentation_smoke.hpp"
-#include "hud_smoke.hpp"
+#include "client_smoke.hpp"
+#include "runtime_smoke.hpp"
 #include "window_sdl.hpp"
 #include "window_mode_driver.hpp"
 #include "menu_scripts.hpp"
@@ -205,9 +205,9 @@ int run(const native::Options &opt) {
     };
     // Home-screen backdrop: the web map tour over the map the menu picked,
     // from its own native context. Released as soon as a gameplay map loads.
-    std::unique_ptr<MenuBackdrop> backdrop;
+    std::unique_ptr<native::MenuBackdrop> backdrop;
     if (menu)
-        backdrop = std::make_unique<MenuBackdrop>(
+        backdrop = std::make_unique<native::MenuBackdrop>(
                 gl, assets, [&lock_cache, cache](const std::string &id, const std::atomic_bool &cancel) {
                     const auto lock = lock_cache(cancel);
                     native::DownloadLimits limits;
@@ -220,8 +220,10 @@ int run(const native::Options &opt) {
     bool menu_reduced_motion = true, backdrop_cut = false, gameplay_backdrop_due = false;
     std::string backdrop_source, backdrop_shown, backdrop_failed, backdrop_png;
     auto backdrop_clock = std::chrono::steady_clock::now();
-    bool captured = false, focused = true, running = true, menu_ready = false, smoke_requested = false,
-         smoke_pass = false, smoke_snapshot = false, resume_wanted = false;
+    native::MenuSmoke menu_smoke(opt);
+    auto &smoke_requested = menu_smoke.requested;
+    auto &smoke_pass = menu_smoke.passed;
+    bool captured = false, focused = true, running = true, menu_ready = false, resume_wanted = false;
     // Settings and other small JSON files are written off the frame loop.
     native::JsonFileWriter json_writer;
     auto preferences = startup_data.settings;
@@ -310,7 +312,6 @@ int run(const native::Options &opt) {
     native::GraphicsMenuPacer graphics_menu_pacer;
     auto &video = game.video;
     auto &video_encoder = video.encoder;
-    auto &video_available = video.available;
 
     auto &video_capture = video.capture;
     auto &director_job = video.director_job;
@@ -1097,6 +1098,21 @@ int run(const native::Options &opt) {
             show_menu,
             refresh_playback_pose
     );
+    menu_smoke.bind(
+            {window.get(),
+             game,
+             curr,
+             menu,
+             backdrop,
+             backdrop_source,
+             backdrop_shown,
+             backdrop_png,
+             gameplay_backdrop_due,
+             menu_ready,
+             download,
+             error,
+             running}
+    );
     auto request_video = std::bind_front(&native::VideoController::request, &video);
     auto request_replay = [&](const std::filesystem::path &path,
                               const std::string &action,
@@ -1510,286 +1526,49 @@ int run(const native::Options &opt) {
         capture(true);
     if (!opt.replay.empty() && opt.runtime_smoke.empty()) request_replay(data_location::from_utf8(opt.replay), "play");
     if (!opt.runtime_smoke.empty()) {
-        const auto output = data_location::from_utf8(opt.runtime_smoke);
-        std::filesystem::create_directories(output);
-        auto check = [](bool ok, const char *why) {
-            if (!ok) throw std::runtime_error(std::string("Runtime smoke: ") + why);
-        };
-        check(core && renderer && !menu, "needs a local BSP and no menu");
-        check(!opt.replay.empty(), "needs a completed replay for the supplied BSP");
-        nlohmann::json detail;
-        const auto sidecar = native::data_location::from_utf8(opt.map).replace_extension(".zones.json");
-        if (std::filesystem::exists(sidecar)) detail["zones"] = nlohmann::json::parse(native::read_text(sidecar));
-        // A neutral host id allows tools on the tutorial fixture without enabling its lesson controller.
-        load_map(opt.map, opt.content_root, "native-runtime-fixture", detail);
-        check(practice_reason().empty(), "solo practice unavailable");
-        act("thirdPerson");
-        check(third_person && practice.active && practice.tool == "camera",
-              "third person did not invalidate ranked admission");
-        reset();
-        check(practice.active && third_person, "restart lost third-person practice admission");
-        act("thirdPerson");
-        check(!third_person && !practice.active, "pre-start first person did not restore clean attempt");
-        BhRunState before{};
-        bh_run_state(core.get(), &before);
-        const auto saved_tick = curr.tick;
-        practice_action("save");
-        BhRunState after{};
-        bh_run_state(core.get(), &after);
-        check(practice.number() == 1 && !practice.active && curr.tick == saved_tick,
-              "save tainted attempt or advanced simulation");
-        check(before.recording == after.recording && before.total_commands == after.total_commands,
-              "save changed recording");
-        // Gate exactly like a live timed run, without altering canonical movement.
-        check(!practice.key_allowed("tele", true) && practice.key_allowed("save", true), "timed key guard");
-        practice_action("menu");
-        check(practice.menu_open && practice.key_allowed("noclip", true), "checkpoint menu guard");
-        practice_action("tele");
-        check(practice.active && practice.tool == "teleport", "teleport not practice");
-        check(!native::practice_allows_event(practice.active, "beat")
-                      && !native::practice_allows_event(practice.active, "finish"),
-              "practice admission");
-        const auto count = practice.checkpoints.size();
-        reset();
-        check(!practice.active && practice.checkpoints.size() == count && !practice.noclip,
-              "restart did not clean attempt/preserve checkpoints");
-        practice_action("toggle");
-        reset();
-        check(practice.mode && practice.active, "practice mode lost across restart");
-        practice_action("toggle");
-        check(!practice.mode && !practice.active, "leaving practice did not reset");
-        practice_action("noclip");
-        check(practice.noclip && practice.active, "noclip entry");
-        BhCmd command{};
-        command.forward = 450;
-        BhSnapshot snapshot{};
-        require(bh_noclip_move(&practice.flight, &command, dt), core.get(), "Smoke flight");
-        require(bh_practice_noclip_tick(core.get(), &practice.flight, &snapshot), core.get(), "Smoke noclip tick");
-        curr = prev = snapshot.player;
-        practice_action("noclip");
-        check(!practice.noclip && practice.active, "noclip exit cleared practice");
-        practice_action("menu");
-        if (!practice.menu_open) practice_action("menu");
-        int w = 0, h = 0;
-        SDL_GetWindowSizeInPixels(window.get(), &w, &h);
-        for (const float percent : {50.f, 100.f, 175.f}) {
-            bh_snapshot(core.get(), &snapshot);
-            BhRunState timing{};
-            bh_run_state(core.get(), &timing);
-            BhWeaponReport weapon{};
-            bh_weapon_report(core.get(), &weapon);
-            const float eye[] = {curr.position[0], curr.position[1], curr.position[2] + curr.view_offset_z};
-            renderer->draw(w, h, eye, input, &snapshot, 0);
-            hud.draw(
-                    w,
-                    h,
-                    snapshot,
-                    timing,
-                    command,
-                    map_id,
-                    active_style,
-                    "",
-                    60,
-                    true,
-                    true,
-                    false,
-                    weapon,
-                    "",
-                    std::nullopt,
-                    std::nullopt,
-                    true,
-                    nullptr,
-                    percent,
-                    &practice,
-                    true,
-                    "Gauntlet 1/3 | 00:01.000",
-                    "-0.500s",
-                    true,
-                    .5f
-            );
-            const auto png = backbuffer_png(gl, w, h);
-            std::ofstream image(output / ("hud-" + std::to_string(int(percent)) + ".png"), std::ios::binary);
-            image.write(png.data(), png.size());
-        }
-        gauntlet_action(
-                {{"id", "offline-smoke"},
-                 {"map", "native-runtime-fixture"},
-                 {"progress", {{"idx", 0}, {"maps", 2}, {"before", 0.0}, {"pbSplit", nullptr}}}}
-        );
-        check(!practice.active && !practice.mode && selected_style == "autohop" && active_track == 0,
-              "gauntlet did not reset practice/style/track");
-        check(practice_reason() == "No practice during a gauntlet.", "gauntlet permits practice");
-        act("thirdPerson");
-        check(!third_person && !practice.active, "third person escaped gauntlet admission");
-        act("cycleStyle");
-        act("restartBonus");
-        check(selected_style == "autohop" && active_track == 0, "gauntlet bindings escaped lock");
-        load_map(opt.map, opt.content_root, "native-runtime-fixture-next", detail);
-        check(gauntlet_id == "offline-smoke" && !practice.active, "gauntlet map progression lost lock");
-        gauntlet_action({{"id", nullptr}});
-        check(practice_reason().empty(), "gauntlet clear left practice blocked");
-        practice_action("save");
-        practice_action("tele");
-        open_replay(data_location::from_utf8(opt.replay), "play", 0, true);
-        check(viewer.active && !practice.active && !practice.mode && practice.checkpoints.empty(),
-              "replay retained practice state");
-        viewer.camera.set_mode("free");
-        viewer.camera.initialized = true;
-        viewer.camera.position = {11, 22, 33};
-        viewer.camera.yaw = 42;
-        viewer.camera.pitch = 17;
-        viewer.paused = true;
-        seek_playback(0);
-        check(curr.tick == 0 && viewer.paused, "replay seek start/pause");
-        const auto replay_total = viewer.session.info.at("totalTicks").get<uint32_t>();
-        seek_playback(replay_total);
-        check(curr.tick == replay_total && viewer.paused, "replay seek end/pause");
-        for (uint32_t tick = 0; tick < std::min(10u, replay_total); ++tick)
-            viewer.controls.pending = tick;
-        viewer.controls.pending = std::min(10u, replay_total);
-        if (auto target = viewer.controls.take()) seek_playback(*target);
-        check(curr.tick == std::min(10u, replay_total) && !viewer.controls.take(),
-              "replay rapid seeks did not coalesce latest");
-        check(viewer.camera.initialized && viewer.camera.position == std::array<float, 3>{11, 22, 33}
-                      && viewer.camera.yaw == 42 && viewer.camera.pitch == 17,
-              "seek lost free camera");
-        viewer.camera.set_mode("eye");
-        BhSnapshot replay_snapshot{};
-        bh_snapshot(core.get(), &replay_snapshot);
-        const float replay_eye[] = {curr.position[0], curr.position[1], curr.position[2] + curr.view_offset_z};
-        renderer->draw(w, h, replay_eye, input, &replay_snapshot, 0);
-        native::draw_replay_controls(
-                hud,
-                w,
-                h,
-                native::HudGeometry(w, h, 100).scale,
-                viewer.controls,
-                curr.tick,
-                replay_total,
-                dt,
-                viewer.paused,
-                viewer.speed,
-                viewer.camera.mode
-        );
-        {
-            const auto png = backbuffer_png(gl, w, h);
-            std::ofstream image(output / "replay-controls.png", std::ios::binary);
-            image.write(png.data(), png.size());
-        }
-        reset();
-        check(!viewer.active && !practice.active, "replay restart not clean");
-        auto start_timed_practice = [&]() {
-            practice_action("toggle");
-            check(practice.active, "timed practice setup");
-            BhRunOptions options{};
-            bh_default_run_options(&options);
-            options.rules = 1;
-            BhZone start{};
-            for (int k = 0; k < 3; ++k) {
-                start.mins[k] = curr.position[k] - 32;
-                start.maxs[k] = curr.position[k] + 32;
-            }
-            BhZone end = start;
-            end.kind = 1;
-            end.mins[2] += 4096;
-            end.maxs[2] += 4096;
-            const BhZone test_zones[] = {start, end};
-            require(bh_run_configure(core.get(), &options, test_zones, 2),
-                    core.get(),
-                    "Smoke timed practice configuration");
-            BhCmd command{};
-            require(bh_step(core.get(), &command, &curr), core.get(), "Smoke enter start");
-            require(bh_set_position(core.get(), curr.position[0] + 256, curr.position[1], curr.position[2], 0),
-                    core.get(),
-                    "Smoke leave start");
-            require(bh_step(core.get(), &command, &curr), core.get(), "Smoke start practice timer");
-            BhRunState timing{};
-            require(bh_run_state(core.get(), &timing), core.get(), "Smoke read practice timer");
-            check(timing.status == 1, "practice timer did not start");
-        };
-        start_timed_practice();
-        act("mainMenu");
-        check(core && leave_hold.started >= 0, "timed practice skipped leave hold");
-        const auto held_at = leave_hold.started;
-        check(leave_hold.frame(held_at + 599, true, false) == native::LeaveHold::Result::none,
-              "practice leave fired early");
-        check(leave_hold.frame(held_at + 600, true, false) == native::LeaveHold::Result::leave,
-              "practice leave did not fire at 600ms");
-        leave_map();
-        load_map(opt.map, opt.content_root, "native-runtime-fixture-wheel", detail);
-        start_timed_practice();
-        act("mainMenu", true);
-        check(core && renderer, "first timed practice wheel press left the map");
-        act("mainMenu", true);
-        check(!core && !renderer, "second timed practice wheel press did not leave");
-        load_map(opt.map, opt.content_root, "native-runtime-fixture-room", detail);
-        const nlohmann::json welcome = {
-                {"t", "welcome"}, {"you", 1}, {"map", {{"name", map_id}}}, {"players", nlohmann::json::array()}
-        };
-        apply_room_event({{"generation", 7}, {"id", "old-room"}, {"event", welcome}});
-        check(room.id == "old-room", "room setup");
-        pending_replay = "stale";
-        pending_action = "play";
-        pending_room_map = "stale";
-        pending_tutorial = "jump";
-        std::atomic_bool entered = false, stopped = false;
-        download.start([&](const std::atomic_bool &cancel) -> native::DownloadedMap {
-            entered = true;
-            while (!cancel)
-                std::this_thread::yield();
-            {
-                std::lock_guard lock(progress_mutex);
-                if (!cancel) loading = "stale";
-            }
-            stopped = true;
-            throw std::runtime_error("cancelled");
-        });
-        while (!entered)
-            std::this_thread::yield();
-        const auto generation = heartbeat.generation;
-        leave_map();
-        const auto deadline = Clock::now() + std::chrono::seconds(1);
-        while (!stopped && Clock::now() < deadline)
-            std::this_thread::yield();
-        download.poll();
-        check(stopped && !core && !renderer && !download.valid() && map_id.empty() && zones.empty(),
-              "leave-map core/worker shutdown");
-        apply_room_event(
-                {{"generation", 7}, {"id", "old-room"}, {"event", {{"t", "nativeMap"}, {"map", "bhop_late"}}}}
-        );
-        apply_room_event({{"generation", 7}, {"id", "old-room"}, {"event", welcome}});
-        check(room.generation == 7 && room.id.empty() && room.map.empty() && !download.valid(),
-              "late room callback revived map after leave");
-        check(pending_replay.empty() && pending_room_map.empty() && pending_tutorial.empty() && loading.empty()
-                      && heartbeat.generation > generation,
-              "leave-map stale work/generation");
-        load_map(opt.map, opt.content_root, "native-runtime-fixture-new", detail);
-        check(core && renderer && !practice.active && practice.checkpoints.empty(), "new map after leave failed");
-        check(gl.GetError() == GL_NO_ERROR, "OpenGL error");
-        const nlohmann::json result = {
-                {"pass", true},
-                {"practice", true},
-                {"restart", true},
-                {"newMap", true},
-                {"replay", true},
-                {"replayScrub", true},
-                {"replaySeekPreservesFreeCamera", true},
-                {"replaySeekEndpointsPaused", true},
-                {"replaySeekCoalesced", true},
-                {"checkpointMenu", true},
-                {"hudScales", {50, 100, 175}},
-                {"gauntlet", true},
-                {"leaveMapWorkerShutdown", true},
-                {"closedRoomGeneration", true},
-                {"thirdPersonPracticeAdmission", true},
-                {"timedPracticeLeaveHold", true},
-                {"timedPracticeLeaveWheel", true},
-                {"networkWrites", 0},
-                {"webglContexts", 0}
-        };
-        std::ofstream(output / "result.json") << result.dump(2) << '\n';
-        std::cout << "Native runtime lifecycle smoke: " << result.dump() << '\n';
-        return 0;
+        return native::RuntimeSmoke(
+                       {opt,
+                        core,
+                        renderer,
+                        menu,
+                        gl,
+                        hud,
+                        window.get(),
+                        input,
+                        curr,
+                        prev,
+                        practice,
+                        third_person,
+                        map_id,
+                        active_style,
+                        selected_style,
+                        active_track,
+                        gauntlet_id,
+                        viewer,
+                        leave_hold,
+                        download,
+                        progress_mutex,
+                        loading,
+                        heartbeat,
+                        room,
+                        zones,
+                        pending_replay,
+                        pending_action,
+                        pending_room_map,
+                        pending_tutorial,
+                        dt},
+                       {load_map,
+                        practice_reason,
+                        act,
+                        reset,
+                        practice_action,
+                        gauntlet_action,
+                        open_replay,
+                        seek_playback,
+                        leave_map,
+                        apply_room_event}
+        )
+                .run();
     }
     auto title_time = Clock::now(), ui_time = title_time, started = title_time;
     uint64_t frame = 0, title_frames = 0;
@@ -1810,46 +1589,12 @@ int run(const native::Options &opt) {
     auto &discord = room_bridge.discord;
     const bool discord_allowed = room_bridge.discord_allowed;
     if (!opt.presentation_smoke.empty()) {
-        if (!renderer || !core) throw std::runtime_error("Presentation smoke requires a local map");
-        bh_record_end(core.get());
-        int width = 0, height = 0;
-        SDL_GetWindowSizeInPixels(window.get(), &width, &height);
-        const auto result = native::presentation_smoke(
-                gl, core.get(), *renderer, hud, width, height, opt.presentation_smoke, map_id
-        );
-        native::hud_parity_smoke(gl, hud, width, height, std::filesystem::path(opt.presentation_smoke));
-        std::cout << result.dump() << '\n';
-        return 0;
+        return native::run_presentation_smoke(opt, window.get(), gl, game, hud);
     }
-    if (!opt.video_smoke.empty()) {
-        // The viewer now plays with a free cursor too. Hold the fixture paused
-        // so restoration can be inspected after each asynchronous export phase.
-        viewer.paused = true;
-        BhSnapshot restored{};
-        require(bh_replay_seek(core.get(), 37, &restored), core.get(), "Video smoke initial seek");
-        curr = prev = restored.player;
-        viewer.camera.set_mode("free");
-        viewer.camera.initialized = true;
-        viewer.camera.position = {11, 22, 33};
-        viewer.camera.yaw = 42;
-        viewer.camera.pitch = 17;
-        camera_controls.set_angles(17, 42);
-        video.wait_probe();
-        native::VideoOptions options;
-        options.full_recording = true;
-        options.to = std::min(200u, viewer.session.range.total);
-        options.camera = "auto";
-        request_video(options);
-    }
-    int video_smoke_stage = 0;
-    std::string video_smoke_encoder = video_available.encoder;
-    auto check_video_restored = [&]() {
-        if (!viewer.paused || curr.tick != 37 || viewer.camera.mode != "free" || !viewer.camera.initialized
-            || viewer.camera.position != std::array<float, 3>{11, 22, 33} || std::abs(viewer.camera.yaw - 42) > .0001
-            || std::abs(viewer.camera.pitch - 17) > .0001)
-            throw std::runtime_error("Video export did not restore the viewer state");
-    };
-    const auto video_smoke_started = Clock::now();
+    native::VideoSmoke video_smoke(
+            {opt, game, viewer, curr, prev, camera_controls, preferences}, refresh_playback_pose
+    );
+    video_smoke.begin();
     while (running) {
         frame_diagnostics.start_frame(SDL_GetTicksNS(), prefs.mouse_diagnostics);
         if (const auto failure = json_writer.take_error()) {
@@ -2903,52 +2648,9 @@ int run(const native::Options &opt) {
                     } else if (type == "quit")
                         running = false;
                     else if (type == "smoke" && !opt.menu_smoke.empty()) {
-                        message["engine"] = "native";
-                        message["renderer"] = "opengl";
-                        message["map"] = map_id;
-                        message["nativeTick"] = curr.tick;
-                        message["backdropHost"] = backdrop ? backdrop->state(backdrop_source) : nlohmann::json(nullptr);
-                        message["backdropShown"] = backdrop_shown;
-                        const auto ui_backdrop = message.value("backdrop", std::string());
-                        // Home: the real map tour the menu asked for is on screen
-                        // behind the web home. Pause: the loaded map itself.
-                        const bool matches_screen =
-                                opt.menu_home_smoke
-                                        ? map_id.empty() && message.value("screen", std::string()) == "home"
-                                                  && message.value("uiMap", std::string()).empty()
-                                                  && message.value("tiles", 0) >= 1
-                                                  && message.value("attractLive", false) && backdrop
-                                                  && backdrop->status() == MenuBackdrop::Status::ready
-                                                  && !backdrop_shown.empty() && backdrop_shown == backdrop->map()
-                                                  && backdrop->shots() > 0
-                                        : !map_id.empty() && message.value("screen", std::string()) == "pause"
-                                                  && message.value("uiMap", std::string()) == map_id
-                                                  && backdrop_shown == map_id && bool(renderer);
-                        smoke_pass = message.value("apiStatus", 0) == 200
-                                     && message.value("origin", std::string()) == "https://bunnyhop.lol"
-                                     && message.value("webglAttempts", 1) == 0 && message.value("webglContexts", 1) == 0
-                                     && message.value("canvasCount", 1) == 0 && message.value("controlsVisible", false)
-                                     && matches_screen
-                                     && (ui_backdrop == "scene"
-                                         || (ui_backdrop == "static" && message.value("stillShown", false)));
-                        message["pass"] = smoke_pass;
-                        std::ofstream(opt.menu_smoke + ".json") << message.dump(2) << '\n';
-                        std::cout << "Native menu smoke: " << message.dump() << '\n';
-                        int w = 0, h = 0;
-                        SDL_GetWindowSizeInPixels(window.get(), &w, &h);
-                        if (renderer) renderer->screenshot(opt.menu_smoke + "-game.ppm", w, h);
-                        // The exact native frame the menu was handed.
-                        if (!backdrop_png.empty())
-                            std::ofstream(opt.menu_smoke + "-scene.png", std::ios::binary)
-                                    .write(backdrop_png.data(), backdrop_png.size());
-                        smoke_snapshot = menu->screenshot(opt.menu_smoke + ".png");
-                        if (!smoke_snapshot) {
-                            smoke_pass = false;
-                            running = false;
-                        }
-                    } else if (type == "menuSnapshot" && smoke_snapshot) {
-                        smoke_pass = smoke_pass && message.value("ok", false);
-                        running = false;
+                        menu_smoke.receive(message);
+                    } else if (type == "menuSnapshot" && menu_smoke.snapshot_pending) {
+                        menu_smoke.snapshot(message);
                     }
                 } catch (const std::exception &e) {
                     error = e.what();
@@ -3865,7 +3567,7 @@ int run(const native::Options &opt) {
                            && backdrop->cut(backdrop_still) != backdrop_cut) {
                     backdrop_cut = !backdrop_cut;
                     backdrop_call = call(backdrop_cut ? "cut" : "native", backdrop_shown);
-                } else if (!renderer && backdrop && backdrop->status() == MenuBackdrop::Status::failed
+                } else if (!renderer && backdrop && backdrop->status() == native::MenuBackdrop::Status::failed
                            && backdrop_failed != backdrop->map()) {
                     backdrop_failed = backdrop->map();
                     std::cerr << "Menu backdrop " << backdrop_failed << ": " << backdrop->error() << '\n';
@@ -3888,54 +3590,7 @@ int run(const native::Options &opt) {
                 run_state,
                 active_style
         );
-        if (!opt.video_smoke.empty()) {
-            const auto result = video_state();
-            const auto phase = result.value("state", std::string());
-            if (video_smoke_stage == 0 && phase == "capturing" && result.value("frames", 0) >= 3) {
-                cancel_video();
-                refresh_playback_pose();
-                check_video_restored();
-                video_smoke_stage = 1;
-            } else if (video_smoke_stage == 1 && !video_encoder.busy()) {
-                check_video_restored();
-                video_available.encoder = "/bunnyhop-test-missing-encoder";
-                native::VideoOptions options;
-                options.full_recording = true;
-                options.to = 100;
-                request_video(options);
-                video_smoke_stage = 2;
-            } else if (video_smoke_stage == 2 && phase == "error" && !video_encoder.busy()) {
-                check_video_restored();
-                video_available.encoder = video_smoke_encoder;
-                native::VideoOptions options;
-                options.full_recording = true;
-                options.to = 200;
-                options.camera = "auto";
-                options.music = "game-airstrafe";
-                options.music_offset = 12;
-                // Smoke-only soundtrack. Regular exports keep the explicit No music default.
-                preferences["musicPack"] = "default";
-                preferences["muted"] = false;
-                preferences["muteMusic"] = false;
-                preferences["musicVolume"] = 1.;
-                preferences["volume"] = .65;
-                request_video(options);
-                video_smoke_stage = 3;
-            } else if (video_smoke_stage == 3 && phase == "completed") {
-                check_video_restored();
-                auto proof = result;
-                proof["restoredTick"] = curr.tick;
-                proof["restoredFreeCamera"] = true;
-                proof["cancelRestored"] = true;
-                proof["encoderFailureRestored"] = true;
-                std::ofstream(native::data_location::from_utf8(opt.video_smoke) / "result.json")
-                        << proof.dump(2) << '\n';
-                running = false;
-            } else if (video_smoke_stage == 3 && (phase == "error" || phase == "canceled"))
-                throw std::runtime_error("Video smoke failed: " + result.dump());
-            else if (Clock::now() - video_smoke_started > std::chrono::minutes(3))
-                throw std::runtime_error("Video smoke timed out");
-        }
+        video_smoke.frame(running);
         ++frame;
         ++title_frames;
         if (simulation_active && !viewer.active) input.frame();
@@ -4192,69 +3847,7 @@ int run(const native::Options &opt) {
                           << " (live=" << backdrop_live << ")" << std::endl;
         }
         frame_diagnostics.mark(native::FrameDiagnostics::kMenu, SDL_GetTicksNS());
-        const bool smoke_backdrop =
-                opt.menu_home_smoke ? !renderer && backdrop
-                                              && ((backdrop->status() == MenuBackdrop::Status::ready
-                                                   && !backdrop_shown.empty() && backdrop_shown == backdrop->map())
-                                                  || backdrop->status() == MenuBackdrop::Status::failed)
-                                    : renderer && !map_id.empty() && backdrop_shown == map_id && !gameplay_backdrop_due;
-        if (menu && menu_ready && smoke_backdrop && !download.valid() && !opt.menu_smoke.empty() && !smoke_requested) {
-            smoke_requested = true;
-            std::cout << "Native menu smoke: checking " << (opt.menu_home_smoke ? "home" : map_id) << std::endl;
-            // App-owned integration check: reads the same live account API as the menu; never submits a run.
-            menu->evaluate_js(
-                    "(()=>{const home=" + std::string(opt.menu_home_smoke ? "true" : "false")
-                    + ",expected=" + nlohmann::json(map_id).dump() + R"JS(;
-                const post=value=>window.webkit.messageHandlers.bunnyhop.postMessage(JSON.stringify({type:'smoke',...value}));
-                let attempts=0;
-                // Painted, not merely present: on screen, and no ancestor hidden,
-                // collapsed or still faded in (an entrance stuck at opacity 0).
-                const visible=element=>{
-                    if(!element?.isConnected || element.disabled) return false;
-                    const rect=element.getBoundingClientRect();
-                    if(rect.width<=0 || rect.height<=0 || rect.right<=0 || rect.bottom<=0 || rect.left>=innerWidth || rect.top>=innerHeight) return false;
-                    let opacity=1;
-                    for(let node=element;node;node=node.parentElement) {
-                        const style=getComputedStyle(node);
-                        if(style.display==='none' || style.visibility!=='visible' || style.contentVisibility==='hidden') return false;
-                        opacity*=Number(style.opacity);
-                    }
-                    return opacity>.95;
-                };
-                const check=()=>{
-                    const screen=document.body.dataset.screen??'';
-                    const uiMap=document.body.dataset.map??'';
-                    const buttons=[...document.querySelectorAll('.home-menu button, .rail-list button')].filter(visible);
-                    const primary=document.querySelector(home?'.home-menu .home-item.primary':'.rail-list .rail-item.primary');
-                    const tiles=[...document.querySelectorAll('.home-tile')].filter(visible).length;
-                    const backdrop=document.documentElement.dataset.nativeBackdrop??'';
-                    // A static backdrop is the host's PNG, decoded and showing (the scrim sits above it, not around it).
-                    const still=document.querySelector('#native-backdrop > img.native-backdrop-still');
-                    const stillShown=backdrop!=='static' || (!!still && still.complete && still.naturalWidth>0 && visible(still));
-                    const attractLive=document.body.classList.contains('attract-live');
-                    const status=document.getElementById('native-status')?.textContent??'';
-                    const matchesScreen=home?screen==='home' && uiMap==='' && tiles>=1 && attractLive:screen==='pause' && uiMap===expected;
-                    const controlsVisible=buttons.length>=3 && !!primary && visible(primary);
-                    const facts={screen,uiMap,tiles,attractLive,controlsVisible,controls:buttons.length,backdrop,stillShown,status};
-                    if(!matchesScreen || !controlsVisible || !backdrop || !stillShown || status) {
-                        if(++attempts<100) {setTimeout(check,100);return;}
-                        post({error:(home?'Home':'Loaded-map')+' controls did not become ready',...facts});return;
-                    }
-                    fetch('/api/me',{credentials:'include'}).then(async r=>{await window.bunnyhopNativeMenu?.settle?.();post({apiStatus:r.status,origin:location.origin,
-                        canvasCount:document.querySelectorAll('canvas').length,webglAttempts:window.__nativeMenuGraphics?.attempts,webglContexts:window.__nativeMenuGraphics?.contexts,
-                        ...facts});}).catch(e=>post({error:String(e)}));
-                };
-                setTimeout(check,300);
-            })())JS"
-            );
-        }
-        if (!opt.menu_smoke.empty() && now - started > std::chrono::seconds(90))
-            throw std::runtime_error(
-                    "Native menu smoke timed out (ready=" + std::to_string(menu_ready)
-                    + ", backdrop=" + (backdrop ? backdrop->state(backdrop_source).dump() : std::string("none"))
-                    + ", shown=" + backdrop_shown + ", requested=" + std::to_string(smoke_requested)
-                    + ", snapshot=" + std::to_string(smoke_snapshot) + "): " + error
-            );
+        menu_smoke.frame(now, started);
         const double elapsed = std::chrono::duration<double>(now - title_time).count();
         if (elapsed >= .5) {
             display_fps = title_frames / elapsed;

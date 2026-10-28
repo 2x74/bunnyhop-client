@@ -1,5 +1,7 @@
 #include "data_location.hpp"
 #pragma once
+#include "renderer.hpp"
+#include "online.hpp"
 // The home-screen backdrop: the web attract tour (menu_tour.hpp) over a real
 // map, or a stored PB replay, drawn by the native native::Renderer from its own
 // BhContext. Only that private context is stepped for PB playback: nothing here
@@ -16,7 +18,7 @@
 #include <list>
 #include <zlib.h>
 
-namespace {
+namespace native {
 struct BackdropMap {
     std::unique_ptr<BhContext, decltype(&bh_destroy)> core{nullptr, &bh_destroy};
     std::vector<native::tour::Shot> shots;
@@ -387,4 +389,4 @@ private:
     std::string wanted, wanted_replay, error_, replay_error, interrupted, interrupted_replay;
     double seconds = 0;
 };
-}  // namespace
+}  // namespace native

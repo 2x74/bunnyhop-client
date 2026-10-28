@@ -1,5 +1,5 @@
 // Framebuffer evidence for the home backdrop: a real local BSP through the
-// same MenuBackdrop the client uses (own context, native native::Renderer, web tour).
+// same native::MenuBackdrop the client uses (own context, native native::Renderer, web tour).
 // No network, menu, gameplay context, live timer or recording.
 #include "renderer.hpp"
 #include "online.hpp"
@@ -53,7 +53,7 @@ int main(int argc, char **argv) {
         }
         bool bounded_bsp = false;
         try {
-            load_backdrop_map(oversized, {});
+            native::load_backdrop_map(oversized, {});
         } catch (const std::exception &e) {
             bounded_bsp = std::string(e.what()) == "Backdrop BSP exceeds 32 MiB";
         }
@@ -90,7 +90,7 @@ int main(int argc, char **argv) {
         SDL_GetWindowSizeInPixels(window.get(), &width, &height);
         std::atomic_int loads{0}, cancelled{0};
         std::atomic_bool cancelling_started{false};
-        MenuBackdrop backdrop(
+        native::MenuBackdrop backdrop(
                 gl, BUNNYHOP_NATIVE_ASSET_ROOT, [&](const std::string &id, const std::atomic_bool &cancel) {
                     ++loads;
                     if (id == "cancelled") {
@@ -104,7 +104,7 @@ int main(int argc, char **argv) {
                 }
         );
         auto settle = [&] {
-            for (int i = 0; i < 2000 && backdrop.status() == MenuBackdrop::Status::loading; ++i) {
+            for (int i = 0; i < 2000 && backdrop.status() == native::MenuBackdrop::Status::loading; ++i) {
                 backdrop.poll(true);
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
             }
@@ -120,20 +120,21 @@ int main(int argc, char **argv) {
             throw std::runtime_error("request blocked on retired worker");
         // A gameplay download interrupts the loading tour; when it fails, the same tour resumes once.
         if (backdrop.resume()) throw std::runtime_error("resumed a tour nothing interrupted");
-        if (!backdrop.cancel_loading() || backdrop.status() != MenuBackdrop::Status::idle || !backdrop.map().empty())
+        if (!backdrop.cancel_loading() || backdrop.status() != native::MenuBackdrop::Status::idle
+            || !backdrop.map().empty())
             throw std::runtime_error("gameplay download did not interrupt the tour");
-        if (!backdrop.resume() || backdrop.status() != MenuBackdrop::Status::loading || backdrop.map() != "smoke"
-            || backdrop.resume())
+        if (!backdrop.resume() || backdrop.status() != native::MenuBackdrop::Status::loading
+            || backdrop.map() != "smoke" || backdrop.resume())
             throw std::runtime_error("interrupted tour did not resume exactly once");
         // Held back while a gameplay download would own the cache.
         for (int i = 0; i < 100; ++i) {
             backdrop.poll(false);
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
-        if (backdrop.status() != MenuBackdrop::Status::loading)
+        if (backdrop.status() != native::MenuBackdrop::Status::loading)
             throw std::runtime_error("backdrop built during a gameplay download");
         settle();
-        if (backdrop.status() != MenuBackdrop::Status::ready)
+        if (backdrop.status() != native::MenuBackdrop::Status::ready)
             throw std::runtime_error("backdrop did not load: " + backdrop.error());
         if (cancelled != 1 || backdrop.state("native").at("kind") != "tour")
             throw std::runtime_error("cancelled replay worker replaced current tour");
@@ -159,7 +160,7 @@ int main(int argc, char **argv) {
         if (!backdrop.request("smoke", output + ".missing.bhr"))
             throw std::runtime_error("same-map changed PB did not reload");
         settle();
-        if (backdrop.status() != MenuBackdrop::Status::ready || backdrop.state("native").at("kind") != "tour"
+        if (backdrop.status() != native::MenuBackdrop::Status::ready || backdrop.state("native").at("kind") != "tour"
             || backdrop.state("native").at("replayError") == "")
             throw std::runtime_error("invalid PB did not fall back to tour");
         if (frame(0, true) != frame(5, true)) throw std::runtime_error("fallback tour reduced motion changed");
@@ -170,8 +171,8 @@ int main(int argc, char **argv) {
                 throw std::runtime_error("late-checkpoint fixture failed during init");
             for (int i = 0; i < 20 && backdrop.state("native").at("kind") == "pb"; ++i)
                 frame(.1, false);
-            if (backdrop.status() != MenuBackdrop::Status::ready || backdrop.state("native").at("kind") != "tour"
-                || backdrop.state("native").at("replayError") == "")
+            if (backdrop.status() != native::MenuBackdrop::Status::ready
+                || backdrop.state("native").at("kind") != "tour" || backdrop.state("native").at("replayError") == "")
                 throw std::runtime_error("late checkpoint failure did not restore tour");
             if (frame(0, true) != frame(5, true)) throw std::runtime_error("runtime-fallback tour is unstable");
         }
@@ -182,7 +183,7 @@ int main(int argc, char **argv) {
             if (!backdrop.cancel_loading() || !backdrop.resume() || backdrop.request("smoke", replay))
                 throw std::runtime_error("resume lost PB path");
             settle();
-            if (backdrop.status() != MenuBackdrop::Status::ready || backdrop.state("native").at("kind") != "pb")
+            if (backdrop.status() != native::MenuBackdrop::Status::ready || backdrop.state("native").at("kind") != "pb")
                 throw std::runtime_error("valid PB failed: " + backdrop.state("native").dump());
             const auto initial = frame(0, true);
             if (initial != frame(5, true) || backdrop.cut(false))
@@ -224,7 +225,7 @@ int main(int argc, char **argv) {
         if (!out) throw std::runtime_error("could not write PNG");
         const auto shots = backdrop.shots();
         backdrop.release();
-        if (backdrop.status() != MenuBackdrop::Status::idle || backdrop.draw(width, height, 0, false))
+        if (backdrop.status() != native::MenuBackdrop::Status::idle || backdrop.draw(width, height, 0, false))
             throw std::runtime_error("release kept the scene");
         std::cout << "Menu backdrop: " << map << ", " << shots << " tour shots, " << loads
                   << " loads, still stable, camera moves, PNG " << png.size()
