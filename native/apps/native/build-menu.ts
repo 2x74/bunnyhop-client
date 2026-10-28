@@ -1,74 +1,22 @@
 // The embedded WKWebView loads exactly this one menu document. No web-game
 // entry point, Three module, renderer, WASM asset or network script is permitted.
 import { mkdir, writeFile } from "node:fs/promises";
-import { adaptSocialSource } from "./ui/adapt-social";
-import { adaptSupportSource } from "./ui/adapt-support";
-import { adaptCopySource, hasCopyFix } from "./ui/adapt-copy";
 import { dirname, resolve, relative } from "node:path";
 import { parseArgs } from "node:util";
+import { nativeMenuBoundary } from "./menu-boundary";
 
 const root = resolve(import.meta.dir, "../..");
 const { values } = parseArgs({ args: Bun.argv.slice(2), options: { out: { type: "string", default: resolve(root,"target/native-menu/menu.html") } } });
 const out = resolve(values.out!);
 const modules = new Set<string>();
 const native = resolve(import.meta.dir,"ui");
-const web = resolve(root,"apps/web/src");
-// UI style labels/settings need these values, never Core or a WASM transport.
-// Extract the exact declarations at build time so they cannot drift from web UI.
-const coreSource = await Bun.file(resolve(web,"core.ts")).text();
-const constantNames = ["PHYSICS_V1","PHYSICS_V7","PHYSICS_VERSION","DEFAULT_SETTINGS","OVERLAY_STATE_ACTIVE","OVERLAY_STATE_VISIBLE","WEAPON_IDS","WEAPON_EVENT_DROPPED","WEAPON_EVENT_GIVEN"];
-const coreConstants = constantNames.map(name=>{
-  const match=coreSource.match(new RegExp(`export const ${name}(?:\\s*:\\s*\\w+)?\\s*=\\s*([\\s\\S]*?);`));
-  if(!match) throw new Error(`Native menu constant extraction failed: ${name}`);
-  return `export const ${name}=${match[1]};`;
-}).join("\n");
 const result = await Bun.build({
   entrypoints: [resolve(native,"main.ts")], target: "browser", format: "iife", splitting: false,
   minify: true, sourcemap: "none",
   define: { "import.meta.env.VITE_API_URL": JSON.stringify("/api"), "import.meta.env.DEV": "false", "import.meta.env": JSON.stringify({VITE_API_URL:"/api",DEV:false}) },
   // Bun 1.4.3 supports dataurl; its Loader type omits this literal.
   loader: { ".svg": "dataurl" as Bun.Loader, ".png": "dataurl" as Bun.Loader, ".webp": "dataurl" as Bun.Loader, ".woff2": "dataurl" as Bun.Loader },
-  plugins: [{ name: "native-menu-boundary", setup(build) {
-    build.onResolve({filter: /./}, (args) => {
-      if (/^three(?:\/|$)/.test(args.path)) throw new Error(`Three is forbidden in the native menu: ${args.importer}`);
-      const path = args.path.startsWith(".") ? resolve(dirname(args.importer),args.path).replace(/\.ts$/,"") : args.path;
-      if(path===resolve(web,"core")) return {path:"native-menu-core-constants",namespace:"native-menu"};
-      const adapters: Record<string,string> = {
-        [resolve(web,"gpu-info")]: "gpu-info.ts",
-        [resolve(web,"ui/account-panel")]: "account-panel.ts",
-        [resolve(web,"audio")]: "audio.ts",
-        [resolve(web,"audio/index")]: "audio.ts",
-        [resolve(web,"audio/ui")]: "audio.ts",
-        [resolve(web,"audio/announcer")]: "audio.ts",
-        [resolve(web,"tutorial/entry")]: "tutorial-entry.ts",
-        [resolve(web,"player/race")]: "race-bus.ts",
-        [resolve(web,"play-lock")]: "play-lock.ts",
-        [resolve(web,"hud")]: "hud-types.ts",
-        [resolve(web,"net/hud")]: "chat-hud.ts",
-        [resolve(web,"ui/loadout-stage")]: "loadout-stage.ts",
-        [resolve(web,"notify/item3d")]: "item-emblem.ts",
-      };
-      if(adapters[path]) return {path:resolve(native,adapters[path])};
-      if (["main","render","session","attract","input"].some(name=>path===resolve(web,name))) throw new Error(`Gameplay module is forbidden in the native menu: ${path}`);
-    });
-    build.onLoad({filter:/.*/,namespace:"native-menu"},()=>({contents:coreConstants,loader:"ts"}));
-    build.onLoad({filter:/\.[cm]?[jt]sx?$/}, async (args) => {
-      modules.add(args.path);
-      const webFile = relative(web, args.path).replaceAll("\\", "/");
-      if (hasCopyFix(webFile)) {
-        const source = adaptCopySource(webFile, await Bun.file(args.path).text());
-        return { contents: source, loader: "ts", resolveDir: dirname(args.path) };
-      }
-      if(args.path===resolve(web,"ui/support.ts"))return {contents:adaptSupportSource(await Bun.file(args.path).text(),resolve(native,"support-checkout.ts"),resolve(native,"bridge.ts")),loader:"ts",resolveDir:dirname(args.path)};
-      if(["ui/servers.ts","net/lobby.ts","social/state.ts","social/dock.ts","ui/gauntlets.ts"].some(path=>args.path===resolve(web,path))) {
-        let source=await Bun.file(args.path).text();
-        if(args.path===resolve(web,"social/state.ts"))source=adaptSocialSource(source);
-        if(args.path===resolve(web,"social/dock.ts"))source+=`\nwindow.addEventListener("bunnyhop:account",()=>close());`;
-        return {contents:`import {nativeLocation as location} from ${JSON.stringify(resolve(native,"navigation.ts"))};\n${source}`,loader:"ts",resolveDir:dirname(args.path)};
-      }
-      return undefined;
-    });
-  } }],
+  plugins: [await nativeMenuBoundary(modules)],
 });
 if (!result.success) { for (const log of result.logs) console.error(log); process.exit(1); }
 const scripts: string[] = [], styles: string[] = [];
