@@ -541,6 +541,11 @@ int run(const Options &opt) {
         record_path=(cache/"replays"/(map_id+"-"+std::to_string(stamp)+".bhr")).string();
         require(bh_record_identity(core.get(),identity.at("build").get<std::string>().c_str()),core.get(),"Setting native release identity");
         require(bh_record_begin(core.get(),"",active_style.c_str(),replay_player.c_str(),100),core.get(),"Starting native recording");
+        // TODO(v0.0.29 core sync): mark timed-input recordings with the replay header's FLAG_TIMED_INPUT (1 << 4),
+        // as the web does, so the server analyzer skips its smooth-for-fps rule for them. The vendored core's BHR
+        // writer (crates/native-bridge/src/recording.rs encode_raw) only writes the autohop, stamina and counted
+        // bits, and the C ABI has no way to set it. Add a recording flag to the core and call it here when
+        // input_timeline.timed() is true.
         bh_record_loadout(core.get(),packed_loadout.c_str());
     };
     auto reset=[&]() {
