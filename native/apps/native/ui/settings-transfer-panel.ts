@@ -1,3 +1,4 @@
+import { api } from "../../web/src/api";
 import { h } from "../../web/src/ui/dom";
 import { settingsFilename } from "../../web/src/ui/settings-io";
 import { state, type NativeSettings } from "./bridge";
@@ -16,6 +17,19 @@ export interface TransferPanelParts {
   group: Group;
   presets: HTMLElement;
   save: (patch: Partial<NativeSettings>) => void;
+}
+
+/** The settings document saved with the player's account on the website, as text for the box. */
+export async function accountSettingsText(): Promise<{ text: string; note: string }> {
+  const user = await api.me();
+  if (!user || user.provider === "guest") throw new Error("Sign in to load the settings saved with your account.");
+  const saved = await api.savedSettings();
+  if (!saved.doc) {
+    const hint = "Turn on \"Save settings with your account\" on the website.";
+    throw new Error(`Your account has no saved settings yet. ${hint}`);
+  }
+  const when = saved.updatedAt ? ` (saved ${new Date(saved.updatedAt).toLocaleDateString()})` : "";
+  return { text: JSON.stringify(saved.doc, null, 2), note: `Loaded the settings saved with your account${when}.` };
 }
 
 /** What Apply reports for a successful import. */
@@ -84,6 +98,21 @@ export function transferPanel(parts: TransferPanelParts): HTMLElement {
     }
   });
 
+  const account = h("button.btn", { type: "button" }, "Load from account") as HTMLButtonElement;
+  account.addEventListener("click", async () => {
+    account.disabled = true;
+    try {
+      const loaded = await accountSettingsText();
+      box.value = loaded.text;
+      say(`${loaded.note} Press Apply to use them.`);
+      apply.focus();
+    } catch (error) {
+      say((error as Error).message, "bad");
+    } finally {
+      account.disabled = false;
+    }
+  });
+
   const copy = h("button.btn", { type: "button" }, "Show JSON") as HTMLButtonElement;
   copy.addEventListener("click", () => {
     box.value = exportSettings(state.settings);
@@ -98,6 +127,8 @@ export function transferPanel(parts: TransferPanelParts): HTMLElement {
       row("File", h("div.nset-actions", null, load, saveButton), "",
         "Load a settings file saved here or on the website (.json), or a text file with a settings code. " +
           "Save writes yours to a .json file."),
+      row("Account", h("div.nset-actions", null, account), "",
+        "Load the settings saved with your account on the website. Nothing is uploaded from here."),
       row("Code or JSON", h("div.nset-actions", null, apply, copy), "",
         "Paste a website settings code (bhs1.…) or settings JSON in the box, then Apply.")),
     box, status);

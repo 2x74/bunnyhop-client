@@ -20,11 +20,17 @@ interface FileMessage {
 
 const PAGE = "https://bunnyhop.lol/settings-file";
 
-async function openTransfer(page: Page): Promise<void> {
+/** API answers by path; everything else is refused. */
+type Api = Record<string, unknown>;
+
+async function openTransfer(page: Page, apiAnswers: Api = {}): Promise<void> {
   const html = await readFile(new URL("../../../target/native-menu/menu.html", import.meta.url), "utf8");
   await page.route("**/*", (route) => {
-    if (route.request().url() !== PAGE) return route.abort();
-    return route.fulfill({ contentType: "text/html", body: html });
+    const url = new URL(route.request().url());
+    if (url.href === PAGE) return route.fulfill({ contentType: "text/html", body: html });
+    const answer = apiAnswers[url.pathname];
+    if (answer !== undefined) return route.fulfill({ contentType: "application/json", body: JSON.stringify(answer) });
+    return route.abort();
   });
   await page.addInitScript(() => {
     localStorage.setItem("bunnyhop:onboarded", "1");
@@ -103,6 +109,25 @@ test("a settings file loads into the box, applies with one press, and saves thro
     await answer(page, save, { ok: true, name: save.name });
     await page.getByText(`Saved ${save.name}.`).waitFor();
     expect(errors).toEqual([]);
+  } finally {
+    await browser.close();
+  }
+}, 30000);
+
+test("settings saved with the account load into the box", async () => {
+  const doc = buildSettingsDoc({ ...DEFAULT_PREFS, sensitivity: 1.85 });
+  const me = { id: "alice", name: "alice", provider: "discord", avatarUrl: null };
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+    page.setDefaultTimeout(5000);
+    await openTransfer(page, { "/api/me": me, "/api/me/settings": { doc, updatedAt: Date.UTC(2026, 9, 27) } });
+    await page.getByRole("button", { name: "Load from account", exact: true }).click();
+    await page.getByText(/^Loaded the settings saved with your account \(saved .+\)\. Press Apply/).waitFor();
+    expect(await sent(page, "settings")).toEqual([]);
+    await page.getByRole("button", { name: "Apply", exact: true }).click();
+    await page.getByText(/^Imported \d+ settings\./).waitFor();
+    expect((await sent(page, "settings")).at(-1)?.patch?.sensitivity).toBe(1.85);
   } finally {
     await browser.close();
   }
