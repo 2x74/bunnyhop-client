@@ -1,7 +1,6 @@
 // Reused web account dialog; native substitutes OAuth and account refresh without navigating the game document.
 import { openAuth, LIVE_ORIGIN } from "./bridge";
 import { profileWriteGuard } from "../../web/src/ui/profile-write";
-import { navigate } from "../../web/src/ui/nav";
 import { SIGN_IN_HELP } from "../../web/src/ui/account-copy";
 // Account panel (a modal sheet opened from the account chip, the pause menu or onboarding). Its top is your name plate:
 // the name as players see it (avatar, flag, colour, marks), edited in place (Enter or leaving the field saves it, with
@@ -25,9 +24,21 @@ import "../../web/src/ui/account.css";
 import { toast as notifyToast } from "../../web/src/notify";
 import { dismissOutside } from "../../web/src/ui/dismiss";
 import { WAVEDASH } from "../../web/src/platform/env";
+import { platformSections } from "../../web/src/ui/account-platform";
+import { openPrivacyDialog } from "../../web/src/ui/privacy";
 
 
 export type AccountSection = "name" | "save" | "support" | null;
+
+/**
+ * "Keep settings with my account" (web platform/settings-sync.ts) uploads the web settings document. The menu's
+ * settings become that document in prefs-bridge.ts, which calls this once it runs syncSettings for the account; until
+ * then the switch stays hidden, so it can't upload a document the game doesn't use.
+ */
+let settingsSyncReady = false;
+export function enableSettingsSync(): void {
+  settingsSyncReady = true;
+}
 
 let open: HTMLDialogElement | null = null;
 
@@ -143,6 +154,8 @@ async function render(d: HTMLDialogElement, body: HTMLElement, section: AccountS
       plate,
       nameMsg,
       h("small.acct-who-status", null, status, left && !left.isDefault ? ` ${left.changesLeft > 0 ? `${left.changesLeft} of ${left.limit} name changes left today.` : "No name changes left today."}` : ""),
+      // The avatar editor is the website's /avatar page: it needs WebGL, which the menu doesn't have.
+      h("a.acct-av-edit", { href: "/avatar", title: "Opens in your browser" }, "Edit avatar"),
     ),
   );
   const nameSec = who;
@@ -246,8 +259,8 @@ async function render(d: HTMLDialogElement, body: HTMLElement, section: AccountS
               blocked
                 ? "A moderator removed your Discord avatar, so it can't be turned on."
                 : !u.discordAvatarUrl
-                  ? "Your Discord account has no picture of its own, so your letter shows."
-                  : "Instead of your letter, on your profile and the leaderboards.",
+                  ? "Your Discord account has no picture of its own, so your bunny shows."
+                  : "Instead of your bunny, on your profile and the leaderboards.",
             ),
           ),
         )
@@ -268,12 +281,13 @@ async function render(d: HTMLDialogElement, body: HTMLElement, section: AccountS
 
   // --- support (apps/api src/supporters.ts): the thank-you for supporters (payments aren't open yet: the Support page).
   const since = support?.supporter ? new Date(support.supporter.since).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : null;
-  const supportSec=h("section.acct-sec.acct-support",{id:"acct-support"},h("h3",null,"Support"),h("p.acct-note",null,since?`Supporter since ${since}. Thank you.`:"One-time support keeps the game free."),h("button.btn",{type:"button",onclick:()=>{d.close();navigate({screen:"support"});}},"Open Support"));
+  const supportSec = since ? h("section.acct-sec.acct-support", { id: "acct-support" }, h("h3", null, "Support"), h("p.acct-note", null, `Supporter since ${since}. Thank you.`)) : null;
 
   // --- the foot: replay the intro, sign out (held)
   const more = h(
     "footer.acct-foot",
     null,
+    h("button.link-btn", { type: "button", onclick: () => { d.close(); openPrivacyDialog(); } }, "Privacy & data"),
     getReplayIntro() ? h("button.link-btn", { type: "button", onclick: () => (d.close(), getReplayIntro()!()) }, "Replay the intro") : null,
     h("span.acct-foot-gap"),
     // The Wavedash build is always its Wavedash player: no signing out there.
@@ -283,7 +297,7 @@ async function render(d: HTMLDialogElement, body: HTMLElement, section: AccountS
   );
 
   // Settings with the account (site), bringing a site account along (Wavedash build): ui/account-platform.ts.
-  const extra:HTMLElement[] = [];
+  const extra = online && user && settingsSyncReady ? platformSections({ guest, hasEmail: !!has("email") }) : [];
   body.replaceChildren(nameSec, ...(saveSec ? [saveSec] : []), ...extra, ...(supportSec ? [supportSec] : []), more);
   if (section === "save") (saveSec ?? nameSec).scrollIntoView({ block: "start" });
   if (section === "support") supportSec?.scrollIntoView({ block: "start" });
