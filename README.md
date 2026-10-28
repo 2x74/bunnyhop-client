@@ -3,79 +3,34 @@
 
 # bunnyhop.lol - Native
 
-A native desktop fork of [bunnyhop.lol](https://bunnyhop.lol), maintained in
-[2x74/bunnyhop-client](https://github.com/2x74/bunnyhop-client).
-
-**Native releases are unsigned previews.** Get available packages and their checksums from
-[Releases](https://github.com/2x74/bunnyhop-client/releases). macOS ARM64 has been
-built and smoke-tested. Linux x64 and Windows x64 are automated build targets;
-automation alone does not establish interactive gameplay or physical input
-validation. Check each release's notes for the artifacts and checks that actually
-completed.
-
-Current source targets production v0.0.28, physics **18**, timer rules **2**, and canonical verifier
-`bunnyhop-web/21d3cc6347ca`. See [current compatibility and qualification](docs/current-compatibility.md).
-Published archives have their own source/build identity and admission status.
-
-## Native gameplay, shared game rules
-
-C++20 and SDL3 own the window, relative mouse input, simulation scheduling and
-OpenGL rendering. The shared Rust core supplies movement, collision, timer rules
-and replay data through a C ABI. Gameplay does not run inside Chromium or a web
-game canvas.
-
-The embedded web view is for menus, account sign-in, map browsing, leaderboards
-and network services. It reuses the website UI while refusing the web game entry
-point, Three renderer and live JavaScript simulation. macOS uses WKWebView,
-Linux uses WebKitGTK, and Windows uses WebView2. The native client has no
-Electron dependency.
-
-Native features include eight movement styles, persistent settings and binds,
-named settings presets, searchable settings, draggable HUD placement, first-visit
-onboarding and controller menu navigation. Shared profiles include stats, runs,
-card editing and Loadout. The Loadout preview renders combined cosmetics natively,
-with rotation, close-up and inspect controls.
-
-Gameplay includes local BHR recording and Replay Vault playback/scrubbing, ghosts,
-tutorial coaching, native HUD/audio, practice checkpoints and noclip, Gauntlets,
-player reports, animated cosmetics, multiplayer rooms and shared scoreboard/map
-leaderboards. Maps are cached for offline use, with loading progress, retry and
-cancellation. Replay clips can be exported as MP4 through FFmpeg with gameplay audio and optional
-OST/custom-pack music, or as video only.
-The eleven-track bunnyhop.lol OST is bundled for offline playback. See the
-[native guide](native/apps/native/README.md) for the detailed scope and remaining
-parity work.
+A native desktop client for [bunnyhop.lol](https://bunnyhop.lol). The game runs in C++ with SDL3 and OpenGL on
+the same Rust movement, collision and timer code as the website. Menus, accounts, maps and leaderboards are the
+website's own UI in an embedded web view (WKWebView, WebKitGTK or WebView2). There is no Electron.
 
 ## Play
 
-Download the archive for your platform from
-[Releases](https://github.com/2x74/bunnyhop-client/releases), verify its SHA-256
-against the accompanying package report, extract it, and launch **bunnyhop.lol - Native**.
-macOS packages are ad-hoc signed, without Developer ID or notarization. Windows
-packages are unsigned. Expect the platform's usual first-launch warnings; these
-packages do not provide a signed automatic update channel. See
-[release and installation notes](docs/releases.md).
+1. Download the archive for your platform from [Releases](https://github.com/2x74/bunnyhop-client/releases).
+2. Check its SHA-256 against the release's package report, extract it and open **bunnyhop.lol - Native**.
+3. Sign in from the menu to use your bunnyhop.lol account. The app keeps its own session.
 
-Choose a map from **Play**. WASD moves, Space or the mouse wheel jumps, Ctrl ducks,
-E uses, R restarts, Escape opens the menu, and F10 opens Display settings. Sensitivity, separate
-vertical sensitivity, FOV, frame/audio settings and key bindings are available in
-the menu. Downloaded maps and shared content are checked against SHA-256 hashes
-and cached locally.
+Packages are unsigned previews, so expect your OS's first-launch warning. macOS builds are ad-hoc signed, without
+notarization. Updates are manual. See [release and installation notes](docs/releases.md).
 
-Sign in through the native menu to use your Bunnyhop account. The app keeps its
-own session; it does not import another browser's cookies. Replays are saved
-locally before upload. Ranked upload requires an exact, unexpired server
-allowlist entry for the executable/menu/assets and canonical verifier identity.
-The server still verifies every submitted replay. A source build or an unknown,
-stale or expired release keeps its replay locally; installing this preview does
-not itself enable ranked scores.
+Default keys match the website: WASD, Space or wheel to jump, Ctrl to duck, E to use, R to restart, T for third
+person, Escape for the menu. Alt+Enter toggles fullscreen. Settings, binds, HUD layout and cosmetics use the
+website's screens, so they carry over.
+
+## Ranked runs
+
+Every finished run is saved locally first. A run uploads for ranking only from a build the server has admitted;
+the server then re-simulates the replay like any other. Other builds, including ones you compile yourself, keep
+their replays on your machine. See [current compatibility](docs/current-compatibility.md) for what this source
+targets and which builds are admitted.
 
 ## Build from source
 
-Install Bun, CMake 3.24+, Ninja, a C++20 compiler, the pinned Rust toolchain,
-SDL3, libcurl/zlib development libraries and ffmpeg. Linux menus also need GTK3
-and WebKitGTK 4.1 >= 2.40; Windows needs the WebView2 runtime. Full platform
-instructions are in the [native guide](native/apps/native/README.md).
+You need Bun, CMake 3.24+, Ninja, a C++20 compiler, the pinned Rust toolchain, libcurl/zlib and ffmpeg. Linux
+menus also need GTK3 and WebKitGTK 4.1; Windows needs the WebView2 runtime.
 
 ```sh
 cd native
@@ -85,53 +40,19 @@ bun run check
 apps/native/build/bunnyhop-native
 ```
 
-The first build downloads a pinned public WASM verifier and checks its SHA-256.
-It is cached for later offline builds and is not committed or included in native
-release archives. Build outputs, downloaded maps, content caches and local replays stay
-out of Git.
-
-```sh
-# Load a specific hosted map, or a BSP you already have.
-apps/native/build/bunnyhop-native --online-map bhop_eazy
-apps/native/build/bunnyhop-native --map /path/to/map.bsp --no-menu
-
-# Create an unsigned/ad-hoc package on the target OS.
-bun run package --version 0.4.0
-```
-
-## Preview limits
-
-A human native sign-in/finish/verified-score flow still needs end-to-end
-confirmation. Physical Linux input and Wayland behavior require testing on a
-real desktop; headless checks cannot establish them. Windows runtime and
-interactive validation must be reported separately from compilation. Correctness
-tests establish no FPS or latency advantage. The [controlled renderer comparison](docs/performance/README.md)
-records measured scene throughput and frame times on one Mac; it does not establish
-Windows performance, displayed gameplay FPS or input latency.
-
-Website parity remains incomplete. Exact animation/presentation and accessibility
-differences are tracked in the [implementation record](docs/native-parity-2026-10-26.md).
-Custom CSS is intentionally excluded from the native menu. In-app update checks
-and verified downloads require release keys and a manifest origin; installation
-is manual. Real account, multiplayer and platform qualification remains separate
-from local fixtures. See the native guide for recording limits and verification details.
+The [native guide](native/apps/native/README.md) has the full requirements, how the verifier and SDL are pinned,
+command-line options and the test suite.
 
 ## Contribute
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and
-[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Report reproducible bugs at
-[2x74/bunnyhop-client/issues](https://github.com/2x74/bunnyhop-client/issues), with
-the package version, OS/architecture and steps. Review logs and replay files for
+Read [CONTRIBUTING.md](CONTRIBUTING.md), [AGENTS.md](AGENTS.md) for code style, [SECURITY.md](SECURITY.md) and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Report bugs at
+[issues](https://github.com/2x74/bunnyhop-client/issues) with the version, OS and steps. Check logs and replays for
 personal information before sharing them.
 
-The older Electron shell remains in `electron/`, with its npm scripts at the
-repository root. It loads the live website and is separate from native
-`bun` commands. Its
-[original documentation](https://github.com/2x74/bunnyhop-client/blob/321e746/README.md)
-is retained in repository history; native v0.0.1 releases use the native path.
+The older Electron shell is in `electron/` with its npm scripts at the repository root; it loads the live website.
 
-The project retains the original Aeperion attribution under the
-[MIT license](LICENSE). Native packages include dependency and Source-related
-notices. See [CHANGELOG.md](CHANGELOG.md) and [release setup](docs/releases.md).
+Original Aeperion attribution is kept under the [MIT license](LICENSE). Packages include dependency and
+Source-related notices. See [CHANGELOG.md](CHANGELOG.md).
 
 <sub> luna says hi... </sub>
