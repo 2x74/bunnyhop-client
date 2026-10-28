@@ -40,18 +40,60 @@ test("native account changes close old social transport and replace friend data 
  }finally{await browser.close();}
 },10_000);
 
-test("credits screen renders and its links go to the system browser",async()=>{
- const browser=await chromium.launch({headless:true});try{const page=await browser.newPage({viewport:{width:1280,height:900}}),errors:string[]=[];page.on("pageerror",error=>errors.push(error.message));const html=await readFile(resolve(import.meta.dir,"../../../target/native-menu/menu.html"),"utf8");
- await page.route("**/*",route=>route.request().url()==="https://bunnyhop.lol/native-credits-unit"?route.fulfill({status:200,contentType:"text/html",body:html}):route.abort());
- await page.addInitScript(()=>{localStorage.setItem("bunnyhop:onboarded","1");localStorage.setItem("bunnyhop:first-seen",String(Date.now()));(window as unknown as {messages:unknown[]}).messages=[];window.addEventListener("bunnyhop:native-message",event=>(window as unknown as {messages:unknown[]}).messages.push((event as CustomEvent).detail));});
- await page.goto("https://bunnyhop.lol/native-credits-unit",{waitUntil:"domcontentloaded"});
- await page.getByRole("button",{name:"Credits",exact:true}).click();
- expect(await page.locator(".native-credits .credits-people li").count()).toBe(2);
- await page.getByRole("button",{name:"bunnyhop.lol",exact:true}).click();
- expect(await page.evaluate(()=>(window as unknown as {messages:unknown[]}).messages.at(-1))).toEqual({type:"openExternal",url:"https://bunnyhop.lol/"});
- expect(errors).toEqual([]);
- }finally{await browser.close();}
-},15_000);
+test("credits are the website's page, with the map credits from the index and the client's own libraries", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    const html = await readFile(resolve(import.meta.dir, "../../../target/native-menu/menu.html"), "utf8");
+    const index = { maps: [
+      { name: "bhop_arcane", author: "Arcane Mapper", url: "https://gamebanana.com/mods/1", license: "CC-BY-4.0" },
+      { name: "bhop_lol_meadow", author: "bunnyhop.lol", url: "https://bunnyhop.lol/maps/meadow", source: "original" },
+    ] };
+    await page.route("**/*", (route) => {
+      const url = route.request().url();
+      if (url === "https://bunnyhop.lol/native-credits-unit") return route.fulfill({ contentType: "text/html", body: html });
+      if (url === "https://bunnyhop.lol/index.json") return route.fulfill({ contentType: "application/json", body: JSON.stringify(index) });
+      return route.abort();
+    });
+    await page.addInitScript(() => {
+      localStorage.setItem("bunnyhop:onboarded", "1");
+      localStorage.setItem("bunnyhop:first-seen", String(Date.now()));
+      const messages: unknown[] = [];
+      Object.assign(window, { messages });
+      window.addEventListener("bunnyhop:native-message", (event) => messages.push((event as CustomEvent).detail));
+    });
+    // (Clicks also play UI sounds: audioCue messages aren't what a link sends.)
+    type Message = { type: string; [key: string]: unknown };
+    const links = () => page.evaluate(() => (window as unknown as { messages: Message[] }).messages
+      .filter((message) => message.type !== "audioCue"));
+    const last = async () => (await links()).at(-1);
+    await page.goto("https://bunnyhop.lol/native-credits-unit", { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "Credits", exact: true }).click();
+    const credits = page.locator(".native-credits");
+    const headings = await credits.locator(".native-credits-body h2").allTextContents();
+    expect(headings).toEqual(["On this page", "Contributors", "Maps", "Zones and tiers", "Engine and code", "Desktop client",
+      "Fonts", "Art and audio"]);
+    // The map table is the web's, filled from the index once it loads.
+    await credits.getByText("2 maps from our public catalogue", { exact: false }).waitFor();
+    await credits.getByText("A (1 maps)").click();
+    expect(await credits.getByRole("row", { name: /bhop_arcane/ }).textContent()).toContain("Uploaded by Arcane Mapper");
+    // Links go to the browser; the contents scroll within the page.
+    await credits.getByRole("link", { name: "native desktop client" }).click();
+    expect(await last()).toEqual({ type: "openExternal", url: "https://github.com/2x74/bunnyhop-client" });
+    const sent = (await links()).length;
+    await credits.getByRole("link", { name: "Fonts", exact: true }).click();
+    expect((await links()).length).toBe(sent);
+    expect(await credits.locator("#fonts").isVisible()).toBe(true);
+    // Under every panel screen: Privacy · Terms · Credits. Privacy opens the site's page in the browser.
+    await credits.locator(".menu-legal").getByRole("link", { name: "Privacy" }).click();
+    expect(await last()).toEqual({ type: "openExternal", url: "https://bunnyhop.lol/privacy" });
+    expect(errors).toEqual([]);
+  } finally {
+    await browser.close();
+  }
+}, 15_000);
 
 test("settings search, HUD positions and strafe trainer options",async()=>{
  const browser=await chromium.launch({headless:true});try{const page=await browser.newPage({viewport:{width:1600,height:900}}),errors:string[]=[];page.on("pageerror",error=>errors.push(error.message));const html=await readFile(resolve(import.meta.dir,"../../../target/native-menu/menu.html"),"utf8");

@@ -395,6 +395,12 @@ document.addEventListener("click", (event) => {
   const anchor = (event.target as Element | null)?.closest<HTMLAnchorElement>("a[href]");
   if (!anchor) return;
   event.preventDefault();
+  // A link within the page (the credits' contents): scroll to it.
+  const hash = anchor.getAttribute("href") ?? "";
+  if (hash.startsWith("#")) {
+    document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView({ block: "start" });
+    return;
+  }
   nativeNavigate(anchor.href);
 }, true);
 document.addEventListener("keydown", (event) => {
@@ -428,6 +434,7 @@ window.addEventListener("bunnyhop:navigate",event=>{
   if(url.searchParams.has("support")){show("support");return;}
   const user=url.searchParams.get("u");if(user){openProfile(user,url.searchParams.get("tab"),url.searchParams.get("slot"));return;}
   const map=url.searchParams.get("map");if(map){if(isStyleId(url.searchParams.get("style")))setSelectedStyle(url.searchParams.get("style") as typeof state.style);selectMap(map);return;}
+  if(url.pathname==="/credits"){show("credits");return;}
   if(url.pathname==="/servers")show("servers");else if(url.pathname==="/ranks")show("ranks");else if(url.pathname==="/stats")show("stats");else if(url.pathname.startsWith("/maps")){focusMap=url.pathname.split("/")[2];show("maps");}
   else if(url.pathname==="/"&&!url.search)show("home");
   // A page only the website has (About, Support): opened there.
