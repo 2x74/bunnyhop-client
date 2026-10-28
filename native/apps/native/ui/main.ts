@@ -1,6 +1,7 @@
 import { applySemanticPalette } from "./semantic-palette";
 import { NativeWorldRecord } from "./world-record";
-import { worldRecord } from "../../web/src/shared-reads";
+import { NativeHudLeaderboard, type BoardContext } from "./hud-leaderboard";
+import { forgetBoards, placeBoard, worldRecord } from "../../web/src/shared-reads";
 import "../../web/src/style.css";
 import "./native.css";
 import {paintLoading} from "./loading-panel";
@@ -322,9 +323,30 @@ void activityService.refreshAccount();
 window.addEventListener("bunnyhop:account",()=>{void activityService.refreshAccount();});
 function refreshAccount(): void { accountChanged(); }
 const nativeWorldRecord=new NativeWorldRecord(worldRecord,(context,seconds)=>send({type:"worldRecord",...context,seconds}));
+const hudLeaderboard=new NativeHudLeaderboard(placeBoard,message=>send(message));
+/** After your own verified run or an account change the cached board's `me` row is out of date. */
+function refreshHudLeaderboard(): void {
+  forgetBoards();
+  hudLeaderboard.refresh();
+}
+// Also after your own verified run: the run service's refreshAccount fires this event.
+window.addEventListener("bunnyhop:account",refreshHudLeaderboard);
+/** The board and attempt a host report names: null with no map or no service, undefined if it doesn't say. */
+function reportedBoard(report: Record<string,unknown>): BoardContext|null|undefined {
+  const {map,style,track,runGeneration}=report;
+  if(typeof map!=="string"||typeof style!=="string") return undefined;
+  if(!Number.isSafeInteger(track)||!Number.isSafeInteger(runGeneration)) return undefined;
+  if(!map||report.loading||!api.available()) return null;
+  return {map,style,track:Number(track),generation:Number(runGeneration)};
+}
 function receive(value: unknown): void {
   const report=value as Record<string,unknown>|null;
-  if(report&&typeof report.map==="string"&&typeof report.style==="string"&&Number.isSafeInteger(report.track)&&Number.isSafeInteger(report.runGeneration)){nativeWorldRecord.update(report.map&&!report.loading&&api.available()?{map:report.map,style:report.style,track:Number(report.track),generation:Number(report.runGeneration)}:null);}
+  const board=report?reportedBoard(report):undefined;
+  if(board!==undefined){
+    nativeWorldRecord.update(board);
+    // The tutorial has no board (the website's HUD skips it too).
+    hudLeaderboard.update(board&&board.map!=="bhop_lol_tutorial"?board:null);
+  }
 
   if (value && typeof value === "object" && (value as { type?: string }).type === "auth") { refreshAccount(); return; }
   const structural=()=>JSON.stringify({map:state.map,loading:state.loading,error:state.error,paused:state.paused,style:state.style,track:state.track,playback:state.playback.active});
