@@ -48,7 +48,7 @@ inline nlohmann::json presentation_smoke(Gl &gl,BhContext *core,Renderer &render
     checked(bh_reset(core),"knife reset");renderer.reset_presentation();cmd={};step(0);
     renderer.inspect_press();for(int i=0;i<35;i++)step(0);evidence["knifeInspectImage"]=save("knife-inspect");
     Chat chat;chat.active=true;
-    chat.push("Native Unicode: café 日本語 한국어 العربية 🐇", "Bunny", "player",seconds,120,{"#55ddff","★","JP","1","native-proof"});
+    chat.push("Native Unicode: café 日本語 한국어 العربية 🐇", "Bunny", "player",seconds,120,{"#55ddff","★","JP","1","native-proof", {}, {}, {}, {}});
     chat.push("Clickable profile https://bunnyhop.lol/u/native-proof", "Guide", "system",seconds,120);
     chat.input="Unicode input 日本語 🐇";chat.cursor=chat.input.size();chat.composition="入力";chat.suggestions={"/help","/restart"};
     draw("Canonical shots / reload / inspect / Unicode");

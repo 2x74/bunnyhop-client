@@ -1,0 +1,6 @@
+native/apps/native/vendor/**
+native/apps/web/**
+native/crates/**
+native/apps/native/src/unicode_grapheme_data.hpp
+native/apps/native/build/**
+electron/**

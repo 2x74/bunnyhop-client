@@ -7,8 +7,8 @@ int main(){
     assert(native::Chat::clean(std::string("\xc0\xaf\xed\xa0\x80",5)).empty());assert(native::Chat::clean("ok\r\nline")=="ok line");
     chat.close();for(int i=0;i<110;++i)chat.push(std::to_string(i),"player","chat",0);assert(chat.lines.size()==100);assert(chat.visible(1).size()==8);assert(chat.visible(13).empty());chat.open();assert(chat.visible(13).size()==8);
     auto before=chat.visible(13);chat.scroll(5);assert(chat.scroll_offset()==5&&chat.visible(13).back().text=="104");chat.push("110","other","chat",14);assert(chat.visible(14).back().text=="104");chat.scroll(-100);assert(chat.scroll_offset()==0&&chat.visible(14).back().text=="110");chat.scroll(1000);assert(chat.visible(14).size()==8);chat.close();assert(chat.scroll_offset()==0);
-    chat.push("decorated","runner","chat",14,12,{"#00ffAA","SUPPORTER","US","Gold","player-1"});const auto decorated=chat.visible(14).back();assert(decorated.decoration.color=="#00ffAA"&&decorated.decoration.badge=="SUPPORTER");
-    chat.push("unsafe","runner","error",14,12,{"red;bad","badge\nline","USAUSAUSA","rank",""});assert(chat.visible(14).back().decoration.color.empty()&&chat.visible(14).back().decoration.country.size()==8);
+    chat.push("decorated","runner","chat",14,12,{"#00ffAA","SUPPORTER","US","Gold","player-1", {}, {}, {}, {}});const auto decorated=chat.visible(14).back();assert(decorated.decoration.color=="#00ffAA"&&decorated.decoration.badge=="SUPPORTER");
+    chat.push("unsafe","runner","error",14,12,{"red;bad","badge\nline","USAUSAUSA","rank","", {}, {}, {}, {}});assert(chat.visible(14).back().decoration.color.empty()&&chat.visible(14).back().decoration.country.size()==8);
     chat.open();chat.clear_input();chat.insert("selected😀");chat.select_all();chat.insert("replacement");assert(chat.input=="replacement");chat.select_all();chat.backspace();assert(chat.input.empty());
     chat.suggestions={"!restart"};chat.complete();assert(chat.input=="!restart");assert(chat.cursor==8);
     // Editing follows extended graphemes, not codepoints: accent, family emoji,

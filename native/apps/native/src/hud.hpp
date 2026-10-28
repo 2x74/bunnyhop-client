@@ -548,7 +548,7 @@ public:
     void overlay_flag(float x, float y, std::string_view country) {
         glyph(x, y, native::flag_glyph(country), 22, 18, {1, 1, 1, 1}, true);
     }
-    void overlay_avatar(float x, float y, unsigned slot, Color color) {
+    void overlay_avatar(float x, float y, unsigned /*slot*/, Color color) {
         // The room protocol has no avatar image. Keep the website's bunny silhouette as the fallback.
         rect(x, y, 23, 25, {.12f, .13f, .16f, 1});
         rect(x + 5, y + 3, 4, 9, color);
@@ -904,7 +904,7 @@ else{color=vec4(ink.rgb,ink.a*(uv.x<0.?1.:texture(font,uv).a));}})");
     // ui/hud-layout.ts mirrors the ids and built-in places for the settings
     // screen; keep the two in step.
     using Layout=std::map<std::string,std::array<float,2>>;
-    void draw(int width, int height, const BhSnapshot &s, const BhRunState &run, const BhCmd &cmd,
+    void draw(int width, int height, const BhSnapshot &s, const BhRunState &run, const BhCmd & /*cmd*/,
               const std::string &map, const std::string &style, const std::string &notice, double fps, bool visible,
               bool crosshair, bool playback, const BhWeaponReport &weapon, std::string_view jump_stats = "",
               std::optional<float> jump_stats_gain = std::nullopt,

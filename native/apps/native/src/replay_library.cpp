@@ -69,7 +69,7 @@ void ReplayLibrary::enqueue(Job job) {
 }
 
 void ReplayLibrary::archive(std::string id, nlohmann::json summary, bool capture) {
-    enqueue({Job::Kind::archive, std::move(id), std::move(summary), capture});
+    enqueue({Job::Kind::archive, std::move(id), std::move(summary), capture, {}});
 }
 
 void ReplayLibrary::attach(std::string id, std::string png) {
@@ -77,7 +77,7 @@ void ReplayLibrary::attach(std::string id, std::string png) {
 }
 
 void ReplayLibrary::trash(std::string id) {
-    enqueue({Job::Kind::trash, std::move(id)});
+    enqueue({Job::Kind::trash, std::move(id), {}, false, {}});
 }
 
 std::optional<ReplayLibrary::Update> ReplayLibrary::take() {

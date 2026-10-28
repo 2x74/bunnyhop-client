@@ -50,7 +50,8 @@ class Audio {
             const auto file=data_root/"classic"/rel;if(!std::filesystem::is_regular_file(file))continue;DecodedAudio decoded;std::string error;
             if(!decode_sfx_file(file,&decoded,&error,budget,true))continue;auto mono=to_mono(decoded);if(decoded.rate!=mixer_rate)mono=resample_mono(mono,decoded.rate,mixer_rate,budget);
             if(mono.empty()||mono.size()>budget)continue;budget-=mono.size();result.bank[id].push_back(std::move(mono));
-        }return result;
+        }
+        return result;
     }
     void install_classic(ClassicLoaded result){
         {Lock lock(stream);for(auto &v:voices)v=Voice{};classic_bank=std::move(result.bank);movement.classic=classic_wanted&&!classic_bank.empty();}

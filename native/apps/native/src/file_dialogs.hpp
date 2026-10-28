@@ -112,7 +112,7 @@ public:
           if (shared.open || shared.done)
               return false;
           shared.open = true;
-          shared.asked = FileDialogResult{id, purpose, action};
+          shared.asked = FileDialogResult{id, purpose, action, false, false, {}, {}, {}};
           shared.asked.text = std::move(text);
       }
       if (launcher_) {

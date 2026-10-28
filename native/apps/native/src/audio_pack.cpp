@@ -24,7 +24,15 @@
 #include "dr_libs/dr_flac.h"
 #define STB_VORBIS_NO_STDIO
 #define STB_VORBIS_NO_PUSHDATA_API
+// stb_vorbis compares its fixed-size array with null; leave third-party code intact.
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wtautological-compare"
+#endif
 #include "stb/stb_vorbis.c"
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
 namespace native {
 namespace {

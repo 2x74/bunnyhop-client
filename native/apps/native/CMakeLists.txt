@@ -3,6 +3,12 @@ project(bunnyhop_native VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+# Keep diagnostics on native code, including Objective-C++ platform adapters.
+if(MSVC)
+    add_compile_options(/W4)
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    add_compile_options(-Wall -Wextra)
+endif()
 if(WIN32)
     # Windows headers pulled in by SDL/cURL must not replace C++ min/max calls.
     add_compile_definitions(NOMINMAX)

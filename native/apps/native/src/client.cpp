@@ -157,14 +157,6 @@ Options options(int argc, char **argv) {
     return out;
 }
 
-uint32_t key_bit(SDL_Scancode key) {
-    switch(key) {
-        case SDL_SCANCODE_W: return native::forward; case SDL_SCANCODE_S: return native::back;
-        case SDL_SCANCODE_A: return native::left; case SDL_SCANCODE_D: return native::right;
-        case SDL_SCANCODE_SPACE: return native::jump; case SDL_SCANCODE_LCTRL: case SDL_SCANCODE_RCTRL: return native::duck;
-        case SDL_SCANCODE_E: return native::use; default: return 0;
-    }
-}
 void require(bool ok,BhContext *ctx,const char *operation) {
     if (!ok) { const char *error=bh_last_error(ctx); throw std::runtime_error(std::string(operation)+": "+(error&&*error?error:"native core failed")); }
 }

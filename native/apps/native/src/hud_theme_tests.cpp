@@ -184,7 +184,7 @@ void test_web_settings_schema() {
     std::filesystem::remove(file);
     assert(native::patch_settings(settings, legacy).at("hudLayout") == legacy.at("hudLayout"));
     const auto capabilities = native::native_capabilities();
-    for (const auto id : native::web_hud_elements)
+    for (const auto &id : native::web_hud_elements)
         assert(std::find(capabilities.begin(), capabilities.end(), "hud:" + std::string(id)) != capabilities.end());
     std::cout << "Web settings schema: 44 exact defaults, choices and numeric/color/boolean boundaries\n";
 }
@@ -248,14 +248,14 @@ void test_layouts_and_options() {
         assert(std::abs(rect.x + horizontal * rect.width - (horizontal + .01f) * 1000) < .001f);
         assert(std::abs(rect.y + vertical * rect.height - (vertical - .02f) * 800) < .001f);
     }
-    for (const auto id : native::hud_elements) {
+    for (const auto &id : native::hud_elements) {
         const auto changed = native::patch_settings(
             defaults, {{"hudLayout", {{id, {{"a", 7}, {"x", -.1}, {"y", -.2}, {"s", 1.25}, {"on", false}}}}}});
         const auto options = native::HudPreferences::from(changed);
         const auto &place = options.layout[native::hud_index(id)];
         assert(place && place->anchored && !place->visible && place->scale == 1.25f);
     }
-    for (const auto invalid :
+    for (const auto &invalid :
          native::Json::array({{{"hudLayout", {{"timer", {{"a", 9}, {"x", 0}, {"y", 0}}}}}},
                               {{"hudLayout", {{"timer", {{"a", 4}, {"x", 0}, {"y", 0}, {"s", 0}}}}}},
                               {{"hudHiddenKeeps", "all"}},
@@ -424,7 +424,7 @@ void test_tags_and_race_picker() {
     board.rows[0].name = "Opponent";
     board.rows[0].slot = 3;
     native::RacePicker picker;
-    const std::array<BhZone, 2> zones = {BhZone{}, BhZone{0, 1}};
+    const std::array<BhZone, 2> zones = {BhZone{}, BhZone{0, 1, 0, {}, {}}};
     picker.open(board, zones);
     assert(picker.step == native::RacePicker::Step::player);
     assert(picker.key("Digit1", true, false));

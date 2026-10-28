@@ -263,7 +263,7 @@ void MenuWebView::evaluate_js(const std::string &script) {
     const auto state = impl_->state;
     // Host replies are statements; discard functions/promises returned by menu
     // helpers so WebKit does not report an unsupported result after success.
-    [impl_->menu evaluateJavaScript:text(script + "\n;null;") completionHandler:^(id result, NSError *error) {
+    [impl_->menu evaluateJavaScript:text(script + "\n;null;") completionHandler:^(id, NSError *error) {
         if (error) state->push(@{@"type": @"menuError", @"error": error.localizedDescription});
     }];
 }

@@ -44,7 +44,7 @@ inline bool practice_allows_event(bool active,const std::string &type) {
     return !active || (type!="beat" && type!="finish");
 }
 template <class Hud>
-void draw_checkpoint_menu(Hud &hud, float width, float height, const Practice &practice, bool keep_velocity) {
+void draw_checkpoint_menu(Hud &hud, float /*width*/, float height, const Practice &practice, bool keep_velocity) {
     const float x = 26;
     const float y = height * .30f;
     constexpr std::array<float, 4> cream = {.94f, .91f, .86f, 1};

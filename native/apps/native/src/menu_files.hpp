@@ -69,7 +69,7 @@ public:
                 throw std::runtime_error("Too much to save.");
         }
         if (!dialogs_.show(window, action, purpose, id, start, std::move(saving)))
-            push(failure({id, purpose, action}, "A file dialog is already open."));
+            push(failure({id, purpose, action, false, false, {}, {}, {}}, "A file dialog is already open."));
     }
 
     // The menu document (re)loaded: it gets the watched file again.
