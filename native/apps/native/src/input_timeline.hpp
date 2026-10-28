@@ -39,6 +39,8 @@ public:
     // Whether a key event is a repeat as far as the game is concerned (KeyPresses).
     bool key_repeat(size_t scancode, bool down, bool sdl_repeat) { return presses_.repeat(scancode, down, sdl_repeat); }
 
+    void keyboard_focus_lost() { presses_.clear(); }
+
     void rebuild_binds(const nlohmann::json &binds) { binds_.rebuild(binds); }
 
     // Switching paths hands everything pending to the view first; the keys held now carry over.
@@ -144,11 +146,10 @@ public:
     // ---- barriers: every client transition uses one; none may leave a released key held -----------------------
 
     // Capture on or off (menu, focus change, replay controls), chat open or close: nothing held, nothing pending.
-    // Key-ups that arrive afterwards are no-ops, and the first press afterwards counts even if SDL calls it a repeat.
+    // Action repeat suppression survives capture changes; losing keyboard ownership resets it separately.
     // Held keys are cleared rather than resynced from SDL_GetKeyboardState: a key-up lost while the menu had focus or
     // while SDL restarted its raw-input thread is missing from SDL's state too, so a resync would invent a hold.
     void release(Input &input, std::set<std::string> &held_codes) {
-        presses_.clear();
         held_codes.clear();
         input.clear();
         queue_.reset();

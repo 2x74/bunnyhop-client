@@ -147,7 +147,8 @@ void test_display_defaults() {
     const auto dir = std::filesystem::temp_directory_path() / "bunnyhop-display-defaults-test";
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);
-    auto fresh = native::startup_settings(dir);
+    auto fresh = native::initialize_data_directory(dir).settings;
+    assert(std::filesystem::is_directory(dir / "replays"));
     assert(fresh.at("vsync") == false);
     assert(fresh.at("fpsLimit") == 500);
     assert(fresh.at("limitQueuedFrames") == true);

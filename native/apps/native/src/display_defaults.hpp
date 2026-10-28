@@ -40,4 +40,27 @@ inline Json startup_settings(const std::filesystem::path &data_dir) {
     return settings;
 }
 
+struct StartupData {
+    Json settings = default_settings();
+    bool first_settings = true;
+    std::string error;
+};
+
+inline StartupData initialize_data_directory(const std::filesystem::path &data_dir) {
+    StartupData startup;
+    startup.first_settings = !std::filesystem::exists(data_dir / "settings.json");
+    try {
+        startup.settings = startup_settings(data_dir);
+    } catch (const std::exception &error) {
+        startup.error = error.what();
+    }
+    // Detect the install before creating anything that counts as a previous launch.
+    std::filesystem::create_directories(data_dir / "replays");
+    for (const char *folder : {"sound", "bgm"}) {
+        std::error_code error;
+        std::filesystem::create_directories(data_dir / folder, error);
+    }
+    return startup;
+}
+
 }  // namespace native

@@ -9,6 +9,14 @@ namespace native {
 struct ReplayControls {
  bool visible=true,dragging=false;std::optional<uint32_t> pending;
  enum class Action {none,start,back,pause,forward,end,slower,faster,camera};
+ bool toggle_from_key(bool down, bool repeat) {
+     if (!down || repeat) {
+         return false;
+     }
+     visible = !visible;
+     dragging = false;
+     return true;
+ }
  static uint32_t offset(uint32_t tick,int seconds,double interval,uint32_t total){if(!std::isfinite(interval)||interval<=0)return tick;return uint32_t(std::clamp(std::round(double(tick)+seconds/interval),0.,double(total)));}
  static double speed(double current,bool faster){constexpr double values[]={.1,.25,.5,1,1.5,2,4,8};if(faster){for(auto v:values)if(v>current+.001)return v;return 8;}for(int i=7;i>=0;--i)if(values[i]<current-.001)return values[i];return .1;}
  struct Layout{float x,y,width;};

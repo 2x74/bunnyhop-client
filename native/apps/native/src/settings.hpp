@@ -10,6 +10,7 @@
 #include <string>
 #include "window_settings.hpp"
 #include "announcer.hpp"
+#include "atomic_replace.hpp"
 
 namespace native {
 using Json = nlohmann::json;
@@ -184,11 +185,6 @@ inline Json load_settings(const std::filesystem::path &file) {
 inline void save_settings(const std::filesystem::path &file,const Json &settings) {
     auto temp=file;temp+=".tmp";
     {std::ofstream out(temp,std::ios::binary|std::ios::trunc);out<<settings.dump(2)<<'\n';if(!out)throw std::runtime_error("Could not save settings");}
-    // Windows rename cannot replace an existing destination. Keep a rollback copy until replacement succeeds.
-    auto backup=file;backup+=".previous";
-    std::error_code ec;
-    if(std::filesystem::exists(file)) {std::filesystem::remove(backup,ec);std::filesystem::rename(file,backup);}
-    try {std::filesystem::rename(temp,file);}catch(...) {if(std::filesystem::exists(backup))std::filesystem::rename(backup,file);throw;}
-    std::filesystem::remove(backup,ec);
+    atomic_replace(temp, file);
 }
 }

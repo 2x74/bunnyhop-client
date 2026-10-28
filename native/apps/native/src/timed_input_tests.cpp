@@ -1,5 +1,6 @@
 // Timestamped input (timed_input.hpp, input_timeline.hpp) through the client's frame-loop input path.
 #include "timed_input_harness.hpp"
+#include "replay_controls.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -494,11 +495,13 @@ void test_first_press_after_a_barrier_counts() {
     assert(!presses.repeat(w, false, false));
     assert(!presses.repeat(w, true, false));
 
-    // The client's release barrier (capture toggle, menu, chat) clears it.
+    // Losing keyboard ownership resets stale SDL state; capture alone preserves action holds.
     LoopHarness loop;
     assert(!loop.timeline.key_repeat(w, true, false));
     assert(loop.timeline.key_repeat(w, true, true));
     loop.timeline.release(loop.input, loop.held_codes);
+    assert(loop.timeline.key_repeat(w, true, true));
+    loop.timeline.keyboard_focus_lost();
     assert(!loop.timeline.key_repeat(w, true, true));
 }
 
@@ -507,6 +510,26 @@ void test_embedded_menu_owns_the_keyboard() {
     assert(!native::game_owns_keyboard(true, true));
     assert(native::game_owns_keyboard(true, false));
     assert(native::game_owns_keyboard(false, false));
+}
+
+void test_held_tab_through_replay_routing() {
+    LoopHarness loop;
+    native::ReplayControls controls;
+    constexpr size_t tab_scancode = 43;
+    int transitions = 0;
+    for (int event = 0; event < 100; ++event) {
+        const bool repeat = loop.timeline.key_repeat(tab_scancode, true, event != 0);
+        if (controls.toggle_from_key(true, repeat)) {
+            ++transitions;
+            loop.timeline.release(loop.input, loop.held_codes);
+        }
+    }
+    assert(transitions == 1);
+    assert(!controls.visible);
+    loop.timeline.key_repeat(tab_scancode, false, false);
+    const bool repeat = loop.timeline.key_repeat(tab_scancode, true, false);
+    assert(controls.toggle_from_key(true, repeat));
+    assert(controls.visible);
 }
 
 void test_event_stamps_per_backend() {
@@ -552,6 +575,7 @@ void test_x11_motion_uses_arrival_time() {
 }  // namespace
 
 int main() {
+    test_held_tab_through_replay_routing();
     test_each_tick_takes_exactly_its_reports();
     test_fractional_reports_stay_exact();
     test_pitch_clamps_in_report_order();

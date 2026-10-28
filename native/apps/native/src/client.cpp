@@ -302,10 +302,7 @@ int run(const Options &opt) {
     }
     const std::filesystem::path cache=!isolated.empty()?std::filesystem::path(isolated)/"data":data_unavailable?default_root:location.active;
     std::optional<data_location::Choice> data_choice;std::string data_notice,last_data_state;
-    std::filesystem::create_directories(cache/"replays");
-    // Created empty so a player looking for where their own audio goes finds
-    // the folders already there rather than having to guess the names.
-    {std::error_code ec;std::filesystem::create_directories(cache/"sound",ec);std::filesystem::create_directories(cache/"bgm",ec);}
+    const auto startup_data = native::initialize_data_directory(cache);
     native::Audio audio(assets,cache,!opt.hidden&&!opt.frames);
     std::unique_ptr<native::MenuWebView> menu;
     std::string menu_failure;
@@ -347,12 +344,10 @@ int run(const Options &opt) {
     bool recording_ended=false;
     // Settings and other small JSON files are written off the frame loop.
     native::JsonFileWriter json_writer;
-    auto preferences=native::default_settings();
-    const bool first_settings = !std::filesystem::exists(cache / "settings.json");
-    try {
-        preferences = native::startup_settings(cache);
-    } catch (const std::exception &e) {
-        std::cerr << "Settings: " << e.what() << '\n';
+    auto preferences = startup_data.settings;
+    const bool first_settings = startup_data.first_settings;
+    if (!startup_data.error.empty()) {
+        std::cerr << "Settings: " << startup_data.error << '\n';
     }
     if(opt.sensitivity_set)preferences["sensitivity"]=opt.sensitivity;
     // Recovery: --windowed resets a display mode the player cannot leave and keeps it.
@@ -536,6 +531,8 @@ int run(const Options &opt) {
     };
     // from_focus_loss: the window mode change waits until focus returns.
     auto show_menu=[&](bool on, bool from_focus_loss = false) {
+        if (on)
+            input_timeline.keyboard_focus_lost();
         if(on){replay_controls.dragging=false;replay_orbit_drag=false;}
         SDL_SetWindowAlwaysOnTop(window.get(),!on&&preferences.value("alwaysOnTop",false));
         // Hidden before the window goes exclusive, shown once it is composited.
@@ -1249,8 +1246,13 @@ int run(const Options &opt) {
                         }
                         break;
                     }
+                    if (playback && !menu_shown && event.key.scancode == SDL_SCANCODE_TAB) {
+                        if (replay_controls.toggle_from_key(down, repeat)) {
+                            capture(!replay_controls.visible);
+                        }
+                        break;
+                    }
                     if(down && !repeat) {
-                        if(playback&&(!menu||!menu->visible())&&event.key.scancode==SDL_SCANCODE_TAB){replay_controls.visible=!replay_controls.visible;replay_controls.dragging=false;capture(!replay_controls.visible);break;}
                         if(playback&&(!menu||!menu->visible())&&event.key.scancode==SDL_SCANCODE_SPACE){replay_action(native::ReplayControls::Action::pause);break;}
                         if(playback&&(!menu||!menu->visible())&&(event.key.scancode==SDL_SCANCODE_LEFT||event.key.scancode==SDL_SCANCODE_RIGHT)){playback_paused=true;replay_controls.pending=event.key.scancode==SDL_SCANCODE_LEFT?(curr.tick?curr.tick-1:0):std::min(curr.tick+1,playback_info.value("totalTicks",0u));break;}
                         if(event.key.scancode==SDL_SCANCODE_ESCAPE) show_menu(!menu||!menu->visible());
