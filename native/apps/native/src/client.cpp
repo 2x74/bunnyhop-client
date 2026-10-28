@@ -10,7 +10,7 @@
 #include "run_session.hpp"
 #include "base64.hpp"
 #include "replay_practice.hpp"
-#include "replay_session.hpp"
+#include "ghost_slots.hpp"
 #include "video_request.hpp"
 #include "display_defaults.hpp"
 #include "json_file_writer.hpp"
@@ -20,6 +20,7 @@
 #include "menu_webview.hpp"
 #include "online.hpp"
 #include "renderer.hpp"
+#include "replay_player.hpp"
 #include "menu_backdrop.hpp"
 #include "loadout_preview.hpp"
 #include "menu_gamepad.hpp"
@@ -317,40 +318,26 @@ int run(const native::Options &opt) {
     };
     uint32_t room_events = 8;
     auto room_time = std::chrono::steady_clock::now();
-    uint32_t active_track = 0, ghost_handle = 0;
-
-    struct GhostSlot {
-        uint32_t handle = 0;
-        std::string id;
-        bool enabled = false;
-        nlohmann::json info;
-    };
-
-    std::array<GhostSlot, 4> ghost_slots;
-    std::array<native_render::GhostSource, 4> ghost_sources{};
+    uint32_t active_track = 0;
+    native::GhostSlots ghosts;
     unsigned pending_ghost_slot = 0;
-    std::string ghost_id, playback_id, pending_replay, pending_action, score_notice;
+    std::string pending_replay, pending_action, score_notice;
     std::optional<double> known_world_record;
     uint64_t world_record_generation = ~uint64_t(0);
-    nlohmann::json replay_list = nlohmann::json::array(), ghost_info;
-    native::ReplaySession playback_session;
-    auto &playback_info = playback_session.info;
-    auto &playback_range = playback_session.range;
+    nlohmann::json replay_list = nlohmann::json::array();
+    native::ReplayPlayer viewer;
     bool pending_full_recording = false;
-    bool playback = false, playback_paused = false, ghost_enabled = false, playback_failed = false;
-    native::ReplayControls replay_controls;
     native::ReplayCompare replay_compare;
     native::ReplayTimelineService replay_timeline;
     native::ReplayCompareImportService replay_compare_import;
     native::GraphicsMenuPacer graphics_menu_pacer;
-    bool replay_orbit_drag = false;
     native::NativeVideoExport video_encoder;
     native::VideoAvailability video_available{false, "Checking FFmpeg availability…", "ffmpeg"};
     auto video_probe = std::async(std::launch::async, [] { return native::NativeVideoExport::probe(); });
     std::unique_ptr<native::VideoCapture> video_capture;
     std::unique_ptr<native::ReplayDirectorJob> director_job;
     std::optional<native::VideoOptions> pending_video;
-    native::ReplayCamera prepared_camera, replay_camera, third_camera;
+    native::ReplayCamera prepared_camera, third_camera;
     bool director_only = false;
     std::string video_error;
     nlohmann::json video_music_catalog = nlohmann::json::array();
@@ -359,7 +346,7 @@ int run(const native::Options &opt) {
         pending_video.reset();
         director_job.reset();
         prepared_camera.cancel_direct();
-        replay_camera.cancel_direct();
+        viewer.camera.cancel_direct();
         video_capture.reset();
         video_error.clear();
     };
@@ -380,7 +367,7 @@ int run(const native::Options &opt) {
         return result;
     };
     std::string pending_room_map;
-    double playback_speed = 1, display_fps = 0;
+    double display_fps = 0;
     constexpr const char *tutorial_map = "bhop_lol_tutorial";
     std::unique_ptr<native::Tutorial> tutorial;
     nlohmann::json tutorial_completed = nlohmann::json::array();
@@ -582,8 +569,8 @@ int run(const native::Options &opt) {
         if (on) menu_state.reset();
         if (on) input_timeline.keyboard_focus_lost();
         if (on) {
-            replay_controls.dragging = false;
-            replay_orbit_drag = false;
+            viewer.controls.dragging = false;
+            viewer.orbit_drag = false;
         }
         SDL_SetWindowAlwaysOnTop(window.get(), !on && prefs.always_on_top);
         // Hidden before the window goes exclusive, shown once it is composited.
@@ -596,7 +583,7 @@ int run(const native::Options &opt) {
         if (on) audio.pause();
         resume_wanted = !on && bool(core);
         if (resume_wanted) SDL_RaiseWindow(window.get());
-        capture(resume_wanted && focused && !(playback && replay_controls.visible));
+        capture(resume_wanted && focused && !(viewer.active && viewer.controls.visible));
         input_scheduler.reset(SDL_GetTicksNS());
         prev = curr;
     };
@@ -610,7 +597,7 @@ int run(const native::Options &opt) {
             );
     };
     auto open_chat = [&](bool command) {
-        if (!core || playback || !captured || !menu || !menu_ready) return;
+        if (!core || viewer.active || !captured || !menu || !menu_ready) return;
         input_timeline.release(input, held_codes);
         camera_controls.clear();
         leave_hold.cancel();
@@ -668,8 +655,8 @@ int run(const native::Options &opt) {
         const auto event = heartbeat.invalidate();
         heartbeat.restart();
         run_event(event);
-        if (practice.active || playback || room.spectator_target || tutorial_practice() || zones.empty() || opt.frames
-            || !opt.menu_smoke.empty())
+        if (practice.active || viewer.active || room.spectator_target || tutorial_practice() || zones.empty()
+            || opt.frames || !opt.menu_smoke.empty())
             return;
         recorder.begin(
                 core.get(),
@@ -684,9 +671,9 @@ int run(const native::Options &opt) {
     };
     auto reset = [&]() {
         cancel_video();
-        replay_controls = {};
-        replay_controls.pending.reset();
-        replay_orbit_drag = false;
+        viewer.controls = {};
+        viewer.controls.pending.reset();
+        viewer.orbit_drag = false;
         if (!core) return;
         if (pending_action != "play") cancel_prefetch();
         gun_menu.close();
@@ -698,10 +685,10 @@ int run(const native::Options &opt) {
             practice.active = true;
             if (practice.tool.empty()) practice.tool = "camera";
         }
-        if (playback) {
+        if (viewer.active) {
             require(bh_replay_stop(core.get()), core.get(), "Stopping replay");
-            playback = false;
-            playback_id.clear();
+            viewer.active = false;
+            viewer.id.clear();
         }
         BhRunOptions canonical{};
         bh_default_run_options(&canonical);
@@ -741,7 +728,7 @@ int run(const native::Options &opt) {
         }
         audio.reset();
         hud.reset_history();
-        replay_camera.reset();
+        viewer.camera.reset();
         prev = curr;
         reset_input_timing();
         input.set_angles(restart.pitch.value_or(curr.teleport_angles[0]), curr.teleport_angles[1]);
@@ -761,7 +748,7 @@ int run(const native::Options &opt) {
     };
     auto practice_reason = [&]() {
         return native::practice_unavailable(
-                bool(core), playback, !room.id.empty(), map_id == tutorial_map, !gauntlet_id.empty()
+                bool(core), viewer.active, !room.id.empty(), map_id == tutorial_map, !gauntlet_id.empty()
         );
     };
     auto toast = [&](const std::string &text, unsigned ms = 3000) {
@@ -908,9 +895,9 @@ int run(const native::Options &opt) {
     };
     auto leave_map = [&]() {
         cancel_video();
-        replay_controls = {};
-        replay_controls.pending.reset();
-        replay_orbit_drag = false;
+        viewer.controls = {};
+        viewer.controls.pending.reset();
+        viewer.orbit_drag = false;
         show_menu(true);
         if (menu && menu_ready) menu->evaluate_js("window.bunnyhopNativeMenu?.onLeaveMap?.()");
         download.cancel();
@@ -932,15 +919,15 @@ int run(const native::Options &opt) {
         renderer.reset();
         core.reset();
         tutorial.reset();
-        playback = false;
-        playback_paused = false;
-        playback_id.clear();
-        playback_info = nullptr;
-        ghost_handle = 0;
-        ghost_enabled = false;
-        ghost_id.clear();
-        ghost_info = nullptr;
-        ghost_slots = {};
+        viewer.active = false;
+        viewer.paused = false;
+        viewer.id.clear();
+        viewer.session.info = nullptr;
+        ghosts.handle = 0;
+        ghosts.enabled = false;
+        ghosts.id.clear();
+        ghosts.info = nullptr;
+        ghosts.slots = {};
         gauntlet_id.clear();
         gauntlet_map.clear();
         gauntlet_progress = nullptr;
@@ -1034,19 +1021,19 @@ int run(const native::Options &opt) {
         if (pending_action != "play" && opt.replay.empty() && !opt.frames && opt.runtime_smoke.empty())
             activity.loaded(id);
         kept_weapons.forget();
-        ghost_slots = {};
+        ghosts.slots = {};
         zones = next_zones;
         renderer->set_zones(zones);
-        replay_camera.reset();
+        viewer.camera.reset();
         hud.reset_history();
         tutorial = std::move(next_tutorial);
         tutorial_demo = false;
         map_id = id;
         error.clear();
-        playback = false;
-        ghost_handle = 0;
-        ghost_enabled = false;
-        ghost_id.clear();
+        viewer.active = false;
+        ghosts.handle = 0;
+        ghosts.enabled = false;
+        ghosts.id.clear();
         reset();
         apply_preferences();
         renderer->set_cosmetics(outfit, packed_loadout);
@@ -1125,13 +1112,7 @@ int run(const native::Options &opt) {
             }
         }
     };
-    CorePtr metadata_core(bh_create(), &bh_destroy);
-    auto replay_metadata = [&](const std::filesystem::path &path) {
-        size_t bytes = 0;
-        const char *json = bh_replay_header(metadata_core.get(), native::data_location::utf8(path).c_str(), &bytes);
-        require(json != nullptr, metadata_core.get(), "Reading replay header");
-        return nlohmann::json::parse(json, json + bytes);
-    };
+    native::ReplayMetadata replay_metadata;
     // Only clean finishes archived by this host enter its local PB registry.
     // Old/unclassified and deliberately local-only archives remain replayable,
     // but must not silently become a personal best or an attract PB.
@@ -1149,7 +1130,7 @@ int run(const native::Options &opt) {
         if (!std::filesystem::is_regular_file(path) || std::filesystem::is_symlink(path)
             || std::filesystem::file_size(path) > 8 * 1024 * 1024)
             throw std::runtime_error("Invalid backdrop replay file");
-        const auto info = replay_metadata(path);
+        const auto info = replay_metadata.read(path);
         if (info.at("map") != map || info.value("style", std::string("autohop")) != "autohop"
             || info.value("track", 0) != 0
             || info.at("endTick").get<uint32_t>() <= info.at("startTick").get<uint32_t>())
@@ -1176,7 +1157,7 @@ int run(const native::Options &opt) {
                            const std::string &action,
                            unsigned ghost_slot = 0,
                            bool full_recording = false) {
-        if (ghost_slot >= ghost_slots.size()) throw std::runtime_error("Invalid ghost slot");
+        if (ghost_slot >= ghosts.slots.size()) throw std::runtime_error("Invalid ghost slot");
         if (action != "ghost") {
             replay_compare.clear();
             replay_compare_import.reset();
@@ -1192,29 +1173,12 @@ int run(const native::Options &opt) {
         run_event(heartbeat.invalidate(native::RunHeartbeat::Reset::start));
         audio.reset();
         if (action == "ghost") {
-            auto &slot = ghost_slots[ghost_slot];
-            if (slot.handle) bh_ghost_free(core.get(), slot.handle);
-            slot = {};
+            ghosts.load(core.get(), path, ghost_slot);
+            const auto &slot = ghosts.slots[ghost_slot];
+            renderer->register_ghost(ghost_slot, slot.handle, slot.info, ghosts.sources[ghost_slot]);
             if (ghost_slot == 0) {
-                ghost_handle = 0;
-                ghost_enabled = false;
-                ghost_id.clear();
-            }
-            const auto handle = bh_ghost_load(core.get(), native::data_location::utf8(path).c_str());
-            require(handle != 0, core.get(), "Loading ghost");
-            size_t bytes = 0;
-            const auto raw = bh_ghost_info(core.get(), handle, &bytes);
-            require(raw != nullptr, core.get(), "Reading ghost");
-            slot = {
-                    handle, native::data_location::utf8(path.filename()), true, nlohmann::json::parse(raw, raw + bytes)
-            };
-            renderer->register_ghost(ghost_slot, handle, slot.info, ghost_sources[ghost_slot]);
-            if (ghost_slot == 0) {
-                ghost_handle = handle;
-                ghost_info = slot.info;
-                hud.extras.ghost(ghost_info);
-                ghost_id = slot.id;
-                ghost_enabled = true;
+                ghosts.select_primary();
+                hud.extras.ghost(ghosts.info);
             }
             active_track = slot.info.value("track", 0u);
             selected_style = slot.info.value("style", std::string("autohop"));
@@ -1222,36 +1186,29 @@ int run(const native::Options &opt) {
             show_menu(false);
         } else {
             try {
-                playback_session = native::ReplaySession::open(core.get(), path, full_recording);
+                viewer.session = native::ReplaySession::open(core.get(), path, full_recording);
             } catch (const std::exception &error) {
                 reset();
                 throw std::runtime_error(std::string("Loading native replay: ") + error.what());
             }
             renderer->set_cosmetics(
                     outfit,
-                    playback_info.value("packedLoadout", nlohmann::json()).is_string()
-                            ? playback_info.at("packedLoadout").get<std::string>()
+                    viewer.session.info.value("packedLoadout", nlohmann::json()).is_string()
+                            ? viewer.session.info.at("packedLoadout").get<std::string>()
                             : std::string()
             );
-            playback = true;
-            playback_paused = false;
-            playback_speed = 1;
-            replay_controls = {};
-            replay_controls.first_tick = playback_range.from;
-            replay_camera.set_mode("eye");
-            replay_orbit_drag = false;
-            playback_id = native::data_location::utf8(path.filename());
-            replay_timeline.request(path, playback_id);
+            viewer.begin(path);
+            replay_timeline.request(path, viewer.id);
             recorder.clear(true);
-            curr = prev = playback_session.initial.snapshot.player;
-            input.set_angles(playback_session.initial.view.pitch, playback_session.initial.view.yaw);
+            curr = prev = viewer.session.initial.snapshot.player;
+            input.set_angles(viewer.session.initial.view.pitch, viewer.session.initial.view.yaw);
             reset_feedback();
             reset_input_timing();
             show_menu(false);
         }
     };
     auto refresh_playback_pose = [&]() {
-        if (core && playback) {
+        if (core && viewer.active) {
             bh_state(core.get(), &curr);
             prev = curr;
             BhCmd cmd{};
@@ -1264,10 +1221,10 @@ int run(const native::Options &opt) {
         }
     };
     auto seek_playback = [&](uint32_t tick) {
-        if (!core || !playback) return;
+        if (!core || !viewer.active) return;
         native::ReplayPose pose;
         try {
-            pose = playback_session.seek(core.get(), tick);
+            pose = viewer.session.seek(core.get(), tick);
         } catch (const std::exception &failure) {
             reset();
             show_menu(true);
@@ -1279,21 +1236,16 @@ int run(const native::Options &opt) {
         scope.reset();
         audio.reset();
         hud.reset_history();
-        if (replay_camera.mode != "free") replay_camera.reset();
+        if (viewer.camera.mode != "free") viewer.camera.reset();
         camera_controls.clear();
         reset_feedback(curr.tick != 0);
         reset_input_timing();
     };
     auto replay_action = [&](native::ReplayControls::Action action) {
-        if (replay_controls.action(action, curr.tick, playback_range, playback_paused, playback_speed)) {
-            const auto mode = replay_camera.mode == "eye" ? "chase" : replay_camera.mode == "chase" ? "free" : "eye";
-            replay_camera.set_mode(mode);
-            camera_controls.set_angles(replay_camera.pitch, replay_camera.yaw);
-            camera_controls.clear();
-        }
+        viewer.action(action, curr.tick, camera_controls);
     };
     auto begin_video = [&](const native::VideoOptions &options) {
-        const auto timeline = native::VideoTimeline::make(options, playback_range.total);
+        const auto timeline = native::VideoTimeline::make(options, viewer.session.range.total);
         const char *downloads = SDL_GetUserFolder(SDL_FOLDER_DOWNLOADS);
         if (opt.video_smoke.empty() && !downloads) throw std::runtime_error("Downloads folder unavailable");
         const auto directory = opt.video_smoke.empty() ? native::data_location::from_utf8(downloads)
@@ -1307,14 +1259,14 @@ int run(const native::Options &opt) {
                 hud,
                 video_encoder,
                 options,
-                playback_info.at("totalTicks").get<uint32_t>(),
+                viewer.session.info.at("totalTicks").get<uint32_t>(),
                 curr.tick,
                 preferences,
                 map_id,
-                playback_info.value("style", active_style),
+                viewer.session.info.value("style", active_style),
                 outfit,
-                (playback_info.contains("packedLoadout") && playback_info["packedLoadout"].is_string()
-                         ? playback_info["packedLoadout"].get<std::string>()
+                (viewer.session.info.contains("packedLoadout") && viewer.session.info["packedLoadout"].is_string()
+                         ? viewer.session.info["packedLoadout"].get<std::string>()
                          : std::string()),
                 prepared_camera,
                 assets,
@@ -1329,14 +1281,14 @@ int run(const native::Options &opt) {
         audio.pause();
     };
     auto request_video = [&](native::VideoOptions options) {
-        if (!playback || !renderer || !core || download.valid())
+        if (!viewer.active || !renderer || !core || download.valid())
             throw std::runtime_error("Open a replay before exporting video");
         if (video_capture || director_job || video_encoder.busy())
             throw std::runtime_error("A video export is already running");
         if (!video_available.available) throw std::runtime_error(video_available.reason);
-        options.tick_interval = playback_range.tick_interval;
-        native::ReplayRange::make(playback_info).export_bounds(options);
-        native::VideoTimeline::make(options, playback_range.total);
+        options.tick_interval = viewer.session.range.tick_interval;
+        native::ReplayRange::make(viewer.session.info).export_bounds(options);
+        native::VideoTimeline::make(options, viewer.session.range.total);
         video_error.clear();
         show_menu(true);
         prepared_camera = {};
@@ -1345,7 +1297,7 @@ int run(const native::Options &opt) {
             pending_video = options;
             director_only = false;
             director_job = std::make_unique<native::ReplayDirectorJob>(
-                    core.get(), playback_info.at("totalTicks").get<uint32_t>(), curr.tick
+                    core.get(), viewer.session.info.at("totalTicks").get<uint32_t>(), curr.tick
             );
         } else
             begin_video(options);
@@ -1354,8 +1306,8 @@ int run(const native::Options &opt) {
                               const std::string &action,
                               unsigned ghost_slot = 0,
                               bool full_recording = false) {
-        if (ghost_slot >= ghost_slots.size()) throw std::runtime_error("Invalid ghost slot");
-        const auto info = replay_metadata(path);
+        if (ghost_slot >= ghosts.slots.size()) throw std::runtime_error("Invalid ghost slot");
+        const auto info = replay_metadata.read(path);
         const auto id = info.at("map").get<std::string>();
         if (!native::valid_map_id(id)) throw std::runtime_error("Replay has invalid map name");
         if (map_id != id || !core) {
@@ -1371,14 +1323,7 @@ int run(const native::Options &opt) {
     start_tutorial = [&](const std::string &lesson, bool demo) {
         if (!core || map_id != tutorial_map || !tutorial)
             throw std::runtime_error("Load the tutorial map before starting a lesson");
-        for (size_t i = 1; i < ghost_slots.size(); ++i)
-            if (ghost_slots[i].handle) bh_ghost_free(core.get(), ghost_slots[i].handle);
-        ghost_slots = {};
-        if (ghost_handle) {
-            bh_ghost_free(core.get(), ghost_handle);
-            ghost_handle = 0;
-        }
-        ghost_enabled = false;
+        ghosts.clear_for_tutorial(core.get());
         tutorial_demo = false;
         tutorial_stopped = false;
         tutorial_final_saved = false;
@@ -1405,18 +1350,18 @@ int run(const native::Options &opt) {
             const auto file = meta.at(key).get<std::string>();
             if (file.find_first_of("/\\") != std::string::npos)
                 throw std::runtime_error("Invalid bundled tutorial replay path");
-            ghost_handle = bh_ghost_load(core.get(), data_location::utf8(assets / "tutorial" / file).c_str());
-            require(ghost_handle != 0, core.get(), "Loading native tutorial demonstration");
+            ghosts.handle = bh_ghost_load(core.get(), data_location::utf8(assets / "tutorial" / file).c_str());
+            require(ghosts.handle != 0, core.get(), "Loading native tutorial demonstration");
             size_t bytes = 0;
-            const auto *raw = bh_ghost_info(core.get(), ghost_handle, &bytes);
+            const auto *raw = bh_ghost_info(core.get(), ghosts.handle, &bytes);
             require(raw != nullptr, core.get(), "Reading tutorial demonstration");
-            ghost_info = nlohmann::json::parse(raw, raw + bytes);
-            renderer->register_ghost(0, ghost_handle, ghost_info);
-            hud.extras.ghost(ghost_info);
-            ghost_enabled = true;
+            ghosts.info = nlohmann::json::parse(raw, raw + bytes);
+            renderer->register_ghost(0, ghosts.handle, ghosts.info);
+            hud.extras.ghost(ghosts.info);
+            ghosts.enabled = true;
             tutorial_demo = true;
             tutorial_demo_start = curr.tick;
-            ghost_id = "tutorial-" + lesson;
+            ghosts.id = "tutorial-" + lesson;
         }
         std::cout << "Native tutorial " << lesson << (demo ? " demonstration" : " lesson")
                   << (lesson == "final" ? "; ranked final course\n" : "; ranked recording disabled\n");
@@ -1439,8 +1384,8 @@ int run(const native::Options &opt) {
                 if (!std::isfinite(pb) || pb < 0) throw std::runtime_error("Invalid gauntlet split");
             }
         }
-        const bool restart =
-                !id.empty() && core && (practice.active || playback || active_style != "autohop" || active_track != 0);
+        const bool restart = !id.empty() && core
+                             && (practice.active || viewer.active || active_style != "autohop" || active_track != 0);
         gauntlet_id = id;
         gauntlet_map = id.empty() ? std::string() : map;
         gauntlet_progress = id.empty() ? nlohmann::json(nullptr) : progress;
@@ -1460,7 +1405,7 @@ int run(const native::Options &opt) {
         return native::WeaponMenuContext{
                 settings.physics,
                 practice.active || zones.empty(),
-                playback,
+                viewer.active,
                 room.spectator_target.has_value(),
                 practice.noclip
         };
@@ -1481,8 +1426,8 @@ int run(const native::Options &opt) {
                     return;
                 }
                 if (action == "thirdPerson") {
-                    if (playback) {
-                        replay_camera.set_mode(replay_camera.mode == "eye" ? "chase" : "eye");
+                    if (viewer.active) {
+                        viewer.camera.set_mode(viewer.camera.mode == "eye" ? "chase" : "eye");
                         return;
                     }
                     if (room.spectator_target) {
@@ -1564,7 +1509,7 @@ int run(const native::Options &opt) {
                     if (core) bh_run_state(core.get(), &timing);
                     const auto result = leave_hold.press(
                             epoch_ms(),
-                            !playback
+                            !viewer.active
                                     && native::leave_requires_confirmation(
                                             timing.status, room.spectator_target.has_value()
                                     ),
@@ -1576,7 +1521,7 @@ int run(const native::Options &opt) {
                         toast("Main menu key again to leave");
                     return;
                 }
-                if (playback) return;
+                if (viewer.active) return;
                 if (action == "setStart" || action == "clearStart") {
                     if (!core) return;
                     if (action == "clearStart") {
@@ -1753,7 +1698,7 @@ int run(const native::Options &opt) {
                         held |= held_codes.contains(key);
                     }
                     if (bit) {
-                        if (bit == native::attack2 && matching && down && !repeat && core && !playback
+                        if (bit == native::attack2 && matching && down && !repeat && core && !viewer.active
                             && !room.spectator_target) {
                             BhWeaponReport weapon{};
                             if (bh_weapon_report(core.get(), &weapon)) scope.secondary(weapon.active);
@@ -1919,29 +1864,29 @@ int run(const native::Options &opt) {
         practice_action("save");
         practice_action("tele");
         open_replay(data_location::from_utf8(opt.replay), "play", 0, true);
-        check(playback && !practice.active && !practice.mode && practice.checkpoints.empty(),
+        check(viewer.active && !practice.active && !practice.mode && practice.checkpoints.empty(),
               "replay retained practice state");
-        replay_camera.set_mode("free");
-        replay_camera.initialized = true;
-        replay_camera.position = {11, 22, 33};
-        replay_camera.yaw = 42;
-        replay_camera.pitch = 17;
-        playback_paused = true;
+        viewer.camera.set_mode("free");
+        viewer.camera.initialized = true;
+        viewer.camera.position = {11, 22, 33};
+        viewer.camera.yaw = 42;
+        viewer.camera.pitch = 17;
+        viewer.paused = true;
         seek_playback(0);
-        check(curr.tick == 0 && playback_paused, "replay seek start/pause");
-        const auto replay_total = playback_info.at("totalTicks").get<uint32_t>();
+        check(curr.tick == 0 && viewer.paused, "replay seek start/pause");
+        const auto replay_total = viewer.session.info.at("totalTicks").get<uint32_t>();
         seek_playback(replay_total);
-        check(curr.tick == replay_total && playback_paused, "replay seek end/pause");
+        check(curr.tick == replay_total && viewer.paused, "replay seek end/pause");
         for (uint32_t tick = 0; tick < std::min(10u, replay_total); ++tick)
-            replay_controls.pending = tick;
-        replay_controls.pending = std::min(10u, replay_total);
-        if (auto target = replay_controls.take()) seek_playback(*target);
-        check(curr.tick == std::min(10u, replay_total) && !replay_controls.take(),
+            viewer.controls.pending = tick;
+        viewer.controls.pending = std::min(10u, replay_total);
+        if (auto target = viewer.controls.take()) seek_playback(*target);
+        check(curr.tick == std::min(10u, replay_total) && !viewer.controls.take(),
               "replay rapid seeks did not coalesce latest");
-        check(replay_camera.initialized && replay_camera.position == std::array<float, 3>{11, 22, 33}
-                      && replay_camera.yaw == 42 && replay_camera.pitch == 17,
+        check(viewer.camera.initialized && viewer.camera.position == std::array<float, 3>{11, 22, 33}
+                      && viewer.camera.yaw == 42 && viewer.camera.pitch == 17,
               "seek lost free camera");
-        replay_camera.set_mode("eye");
+        viewer.camera.set_mode("eye");
         BhSnapshot replay_snapshot{};
         bh_snapshot(core.get(), &replay_snapshot);
         const float replay_eye[] = {curr.position[0], curr.position[1], curr.position[2] + curr.view_offset_z};
@@ -1951,13 +1896,13 @@ int run(const native::Options &opt) {
                 w,
                 h,
                 native::HudGeometry(w, h, 100).scale,
-                replay_controls,
+                viewer.controls,
                 curr.tick,
                 replay_total,
                 dt,
-                playback_paused,
-                playback_speed,
-                replay_camera.mode
+                viewer.paused,
+                viewer.speed,
+                viewer.camera.mode
         );
         {
             const auto png = backbuffer_png(gl, w, h);
@@ -1965,7 +1910,7 @@ int run(const native::Options &opt) {
             image.write(png.data(), png.size());
         }
         reset();
-        check(!playback && !practice.active, "replay restart not clean");
+        check(!viewer.active && !practice.active, "replay restart not clean");
         auto start_timed_practice = [&]() {
             practice_action("toggle");
             check(practice.active, "timed practice setup");
@@ -2121,29 +2066,29 @@ int run(const native::Options &opt) {
     if (!opt.video_smoke.empty()) {
         // The viewer now plays with a free cursor too. Hold the fixture paused
         // so restoration can be inspected after each asynchronous export phase.
-        playback_paused = true;
+        viewer.paused = true;
         BhSnapshot restored{};
         require(bh_replay_seek(core.get(), 37, &restored), core.get(), "Video smoke initial seek");
         curr = prev = restored.player;
-        replay_camera.set_mode("free");
-        replay_camera.initialized = true;
-        replay_camera.position = {11, 22, 33};
-        replay_camera.yaw = 42;
-        replay_camera.pitch = 17;
+        viewer.camera.set_mode("free");
+        viewer.camera.initialized = true;
+        viewer.camera.position = {11, 22, 33};
+        viewer.camera.yaw = 42;
+        viewer.camera.pitch = 17;
         camera_controls.set_angles(17, 42);
         if (video_probe.valid()) video_available = video_probe.get();
         native::VideoOptions options;
         options.full_recording = true;
-        options.to = std::min(200u, playback_range.total);
+        options.to = std::min(200u, viewer.session.range.total);
         options.camera = "auto";
         request_video(options);
     }
     int video_smoke_stage = 0;
     std::string video_smoke_encoder = video_available.encoder;
     auto check_video_restored = [&]() {
-        if (!playback_paused || curr.tick != 37 || replay_camera.mode != "free" || !replay_camera.initialized
-            || replay_camera.position != std::array<float, 3>{11, 22, 33} || std::abs(replay_camera.yaw - 42) > .0001
-            || std::abs(replay_camera.pitch - 17) > .0001)
+        if (!viewer.paused || curr.tick != 37 || viewer.camera.mode != "free" || !viewer.camera.initialized
+            || viewer.camera.position != std::array<float, 3>{11, 22, 33} || std::abs(viewer.camera.yaw - 42) > .0001
+            || std::abs(viewer.camera.pitch - 17) > .0001)
             throw std::runtime_error("Video export did not restore the viewer state");
     };
     const auto video_smoke_started = Clock::now();
@@ -2157,13 +2102,13 @@ int run(const native::Options &opt) {
         if (video_probe.valid() && video_probe.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
             video_available = video_probe.get();
         const uint64_t mouse_pump_start = SDL_GetTicksNS();
-        const double pump_tick_seconds = playback ? playback_range.tick_interval : dt;
+        const double pump_tick_seconds = viewer.active ? viewer.session.range.tick_interval : dt;
         const uint64_t pump_tick_ns = uint64_t(std::llround(pump_tick_seconds * 1e9));
         auto pump_schedule = input_scheduler;
         pump_schedule.frame(mouse_pump_start, true, pump_tick_ns);
         input_timeline.begin_pump(input, mouse_pump_start, pump_schedule, pump_tick_ns);
         mouse_diagnostics.begin(
-                mouse_pump_start, prefs.mouse_diagnostics && captured && focused && !chat.active && !playback
+                mouse_pump_start, prefs.mouse_diagnostics && captured && focused && !chat.active && !viewer.active
         );
         bool had_input_activity = false;
         SDL_Event event;
@@ -2203,7 +2148,8 @@ int run(const native::Options &opt) {
                     window_modes.resumed(preferences);
                     // Keyboard focus back to the open menu.
                     if (menu && menu->visible()) menu->set_visible(true);
-                    if (resume_wanted && (!menu || !menu->visible())) capture(!(playback && replay_controls.visible));
+                    if (resume_wanted && (!menu || !menu->visible()))
+                        capture(!(viewer.active && viewer.controls.visible));
                     break;
                 case SDL_EVENT_WINDOW_MINIMIZED:
                     window_modes.minimized();
@@ -2329,24 +2275,24 @@ int run(const native::Options &opt) {
                         }
                         break;
                     }
-                    if (playback && !menu_shown && event.key.scancode == SDL_SCANCODE_TAB) {
-                        if (replay_controls.toggle_from_key(down, repeat)) {
-                            capture(!replay_controls.visible);
+                    if (viewer.active && !menu_shown && event.key.scancode == SDL_SCANCODE_TAB) {
+                        if (viewer.controls.toggle_from_key(down, repeat)) {
+                            capture(!viewer.controls.visible);
                         }
                         break;
                     }
                     if (down && !repeat) {
-                        if (playback && (!menu || !menu->visible()) && event.key.scancode == SDL_SCANCODE_SPACE) {
+                        if (viewer.active && (!menu || !menu->visible()) && event.key.scancode == SDL_SCANCODE_SPACE) {
                             replay_action(native::ReplayControls::Action::pause);
                             break;
                         }
-                        if (playback && !menu_shown
+                        if (viewer.active && !menu_shown
                             && (event.key.scancode == SDL_SCANCODE_LEFT || event.key.scancode == SDL_SCANCODE_RIGHT)) {
-                            playback_paused = true;
+                            viewer.paused = true;
                             const uint32_t target = event.key.scancode == SDL_SCANCODE_LEFT
                                                             ? (curr.tick ? curr.tick - 1 : 0)
                                                             : curr.tick + 1;
-                            replay_controls.pending = playback_range.clamp(target);
+                            viewer.controls.pending = viewer.session.range.clamp(target);
                             break;
                         }
                         if (event.key.scancode == SDL_SCANCODE_ESCAPE) show_menu(!menu || !menu->visible());
@@ -2372,18 +2318,20 @@ int run(const native::Options &opt) {
                         mouse_diagnostics.motion(event.motion.timestamp, received);
                     }
                     if (video_capture || director_job || video_encoder.busy()) {
-                        replay_controls.dragging = false;
-                        replay_orbit_drag = false;
+                        viewer.controls.dragging = false;
+                        viewer.orbit_drag = false;
                         break;
                     }
-                    if (playback && replay_controls.dragging && !chat.active && (!menu || !menu->visible())) {
+                    if (viewer.active && viewer.controls.dragging && !chat.active && (!menu || !menu->visible())) {
                         int width = 0;
                         int height = 0;
                         SDL_GetWindowSizeInPixels(window.get(), &width, &height);
                         const auto geometry = native::HudGeometry(width, height, 100);
                         const float x = event.motion.x * SDL_GetWindowPixelDensity(window.get()) / geometry.scale;
-                        replay_controls.motion(
-                                native::ReplayControls::layout(geometry.width, geometry.height), x, playback_range.to
+                        viewer.controls.motion(
+                                native::ReplayControls::layout(geometry.width, geometry.height),
+                                x,
+                                viewer.session.range.to
                         );
                         break;
                     }
@@ -2394,11 +2342,11 @@ int run(const native::Options &opt) {
                             chat.position(*byte, true);
                     }
                     if (captured && focused && !chat.active) {
-                        if (playback && replay_camera.mode == "free")
+                        if (viewer.active && viewer.camera.mode == "free")
                             camera_controls.accumulate(event.motion.xrel, event.motion.yrel);
-                        else if (playback && replay_camera.mode == "chase")
-                            replay_camera.orbit(event.motion.xrel, event.motion.yrel);
-                        else if (!playback) {
+                        else if (viewer.active && viewer.camera.mode == "chase")
+                            viewer.camera.orbit(event.motion.xrel, event.motion.yrel);
+                        else if (!viewer.active) {
                             const auto &motion = event.motion;
                             input_timeline.motion(input, motion.timestamp, received, motion.xrel, motion.yrel);
                         }
@@ -2408,29 +2356,29 @@ int run(const native::Options &opt) {
                 case SDL_EVENT_MOUSE_BUTTON_DOWN:
                 case SDL_EVENT_MOUSE_BUTTON_UP: {
                     if (video_capture || director_job || video_encoder.busy()) {
-                        replay_controls.dragging = false;
-                        replay_orbit_drag = false;
+                        viewer.controls.dragging = false;
+                        viewer.orbit_drag = false;
                         break;
                     }
                     const bool down = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
-                    if (playback && !chat.active && (!menu || !menu->visible())
-                        && event.button.button == SDL_BUTTON_RIGHT && (replay_controls.visible || replay_orbit_drag)) {
-                        replay_orbit_drag = down;
+                    if (viewer.active && !chat.active && (!menu || !menu->visible())
+                        && event.button.button == SDL_BUTTON_RIGHT && (viewer.controls.visible || viewer.orbit_drag)) {
+                        viewer.orbit_drag = down;
                         capture(down);
                         break;
                     }
-                    if (playback && replay_controls.visible && !chat.active && (!menu || !menu->visible())
+                    if (viewer.active && viewer.controls.visible && !chat.active && (!menu || !menu->visible())
                         && event.button.button == SDL_BUTTON_LEFT) {
                         int width = 0;
                         int height = 0;
                         SDL_GetWindowSizeInPixels(window.get(), &width, &height);
                         const auto geometry = native::HudGeometry(width, height, 100);
                         const float scale = SDL_GetWindowPixelDensity(window.get()) / geometry.scale;
-                        replay_action(replay_controls.pointer(
+                        replay_action(viewer.controls.pointer(
                                 native::ReplayControls::layout(geometry.width, geometry.height),
                                 event.button.x * scale,
                                 event.button.y * scale,
-                                playback_range.to,
+                                viewer.session.range.to,
                                 down
                         ));
                         break;
@@ -2481,8 +2429,8 @@ int run(const native::Options &opt) {
                         chat.scroll(event.wheel.y > 0 ? 3 : event.wheel.y < 0 ? -3 : 0);
                         break;
                     }
-                    if (captured && playback && replay_camera.mode == "chase" && event.wheel.y != 0) {
-                        replay_camera.zoom_by(std::pow(1.12, -event.wheel.y));
+                    if (captured && viewer.active && viewer.camera.mode == "chase" && event.wheel.y != 0) {
+                        viewer.camera.zoom_by(std::pow(1.12, -event.wheel.y));
                         break;
                     }
                     if (captured && !chat.active && event.wheel.y != 0)
@@ -2550,7 +2498,7 @@ int run(const native::Options &opt) {
                         if (!native::valid_map_id(map) || sha.size() != 64
                             || sha.find_first_not_of("0123456789abcdef") != std::string::npos)
                             throw std::runtime_error("Invalid map prefetch");
-                        if (!opt.runtime_smoke.empty() || opt.frames || (!playback && pending_action != "play"))
+                        if (!opt.runtime_smoke.empty() || opt.frames || (!viewer.active && pending_action != "play"))
                             continue;
                         const auto key = map + ":" + sha;
                         if (key == prefetch_active || key == prefetch_done) continue;
@@ -2699,7 +2647,7 @@ int run(const native::Options &opt) {
                                     if (const auto reason = native::NativeWeaponMenu::refusal(id, weapon_context());
                                         !reason.empty())
                                         throw std::runtime_error(reason);
-                                    if (!playback && !room.spectator_target) {
+                                    if (!viewer.active && !room.spectator_target) {
                                         kept_weapons.cancel();
                                         input.pulse = (input.pulse & ~native::weapon_command_mask)
                                                       | (id << native::give_shift);
@@ -2742,14 +2690,14 @@ int run(const native::Options &opt) {
                         leave_map();
                     else if (type == "practiceFromReplay") {
                         try {
-                            if (!core || !playback || download.valid())
+                            if (!core || !viewer.active || download.valid())
                                 throw std::runtime_error("Open a replay before continuing as practice.");
                             const auto tick = message.contains("tick")
                                                       ? std::optional<uint32_t>(message.at("tick").get<uint32_t>())
                                                       : std::nullopt;
                             const auto takeover = native::ReplayTakeover::take(
                                     core.get(),
-                                    playback_info,
+                                    viewer.session.info,
                                     zones,
                                     selected_style,
                                     !gauntlet_id.empty(),
@@ -2761,9 +2709,9 @@ int run(const native::Options &opt) {
                             curr = prev = takeover.snapshot.player;
                             active_style = takeover.style;
                             active_track = takeover.track;
-                            playback = false;
-                            playback_id.clear();
-                            replay_controls = {};
+                            viewer.active = false;
+                            viewer.id.clear();
+                            viewer.controls = {};
                             recorder.input.stop();
                             recorder.clear(true);
                             run_event(heartbeat.invalidate());
@@ -2881,51 +2829,29 @@ int run(const native::Options &opt) {
                         refresh_replays();
                     else if ((type == "paint" || type == "measure") && renderer) {
                         score_notice = renderer->tool_message(message, curr, input);
-                    } else if (type == "replayCompare" && playback) {
+                    } else if (type == "replayCompare" && viewer.active) {
                         replay_compare_import.message(
                                 replay_compare,
                                 core.get(),
                                 cache / "replays",
                                 message,
-                                playback_info,
-                                playback_id,
+                                viewer.session.info,
+                                viewer.id,
                                 native::decode_base64
                         );
                     } else if (type == "ghost") {
-                        ghost_enabled = ghost_handle && message.at("enabled").get<bool>();
-                        ghost_slots[0].enabled = ghost_enabled;
-                        if (renderer) renderer->ghost_enabled(0, ghost_enabled);
+                        ghosts.toggle(message);
+                        if (renderer) renderer->ghost_enabled(0, ghosts.enabled);
                     } else if (type == "ghostControl") {
-                        const auto action = message.at("action").get<std::string>();
-                        const unsigned slot = message.value("slot", 0u);
-                        if (slot >= 4) throw std::runtime_error("Invalid ghost slot");
-                        if (action != "remove" && action != "clear" && action != "toggle")
-                            throw std::runtime_error("Invalid ghost action");
-                        for (unsigned i = 0; i < 4; i++)
-                            if (action == "clear" || i == slot) {
-                                auto &ghost = ghost_slots[i];
-                                if (action == "toggle")
-                                    ghost.enabled = ghost.handle && message.value("enabled", !ghost.enabled);
-                                else {
-                                    if (core && ghost.handle) bh_ghost_free(core.get(), ghost.handle);
-                                    ghost = {};
-                                }
-                                if (i == 0) {
-                                    ghost_handle = ghost.handle;
-                                    ghost_enabled = ghost.enabled;
-                                    ghost_id = ghost.id;
-                                    ghost_info = ghost.info;
-                                    hud.extras.ghost(ghost_info);
-                                }
-                            }
-                        if (renderer) native::sync_ghost_visibility(*renderer, ghost_slots);
+                        if (ghosts.control(core.get(), message)) hud.extras.ghost(ghosts.info);
+                        if (renderer) native::sync_ghost_visibility(*renderer, ghosts.slots);
                         if (renderer) renderer->reset_presentation();
                         scope.reset();
                     } else if (type == "replay") {
                         const auto path = native::replay_file(cache / "replays", message.at("id").get<std::string>());
                         const auto action = message.at("action").get<std::string>();
                         if (action == "play" || action == "ghost") {
-                            native::set_requested_ghost_source(ghost_sources, message);
+                            native::set_requested_ghost_source(ghosts.sources, message);
                             request_replay(
                                     path, action, message.value("ghostSlot", 0u), message.value("fullRecording", false)
                             );
@@ -2955,7 +2881,7 @@ int run(const native::Options &opt) {
                         } else
                             throw std::runtime_error("Unknown replay action");
                     } else if (type == "replayData" && message.value("action", std::string()) == "compare"
-                               && playback) {
+                               && viewer.active) {
                         auto request = message;
                         request["action"] = "set";
                         request["kind"] = message.value("source", std::string("custom"));
@@ -2964,8 +2890,8 @@ int run(const native::Options &opt) {
                                 core.get(),
                                 cache / "replays",
                                 request,
-                                playback_info,
-                                playback_id,
+                                viewer.session.info,
+                                viewer.id,
                                 native::decode_base64
                         );
                     } else if (type == "replayData") {
@@ -2981,7 +2907,7 @@ int run(const native::Options &opt) {
                         const auto action = message.at("action").get<std::string>();
                         if (action != "play" && action != "ghost")
                             throw std::runtime_error("Invalid replay import action");
-                        native::set_requested_ghost_source(ghost_sources, message);
+                        native::set_requested_ghost_source(ghosts.sources, message);
                         request_replay(
                                 path, action, message.value("ghostSlot", 0u), message.value("fullRecording", false)
                         );
@@ -2992,10 +2918,10 @@ int run(const native::Options &opt) {
                             tutorial_stopped = true;
                             pending_tutorial.clear();
                             if (tutorial) tutorial->stop();
-                            if (tutorial_demo && ghost_handle) {
-                                bh_ghost_free(core.get(), ghost_handle);
-                                ghost_handle = 0;
-                                ghost_enabled = false;
+                            if (tutorial_demo && ghosts.handle) {
+                                bh_ghost_free(core.get(), ghosts.handle);
+                                ghosts.handle = 0;
+                                ghosts.enabled = false;
                             }
                             tutorial_demo = false;
                             score_notice.clear();
@@ -3030,35 +2956,35 @@ int run(const native::Options &opt) {
                             refresh_playback_pose();
                             video_error = failure.what();
                         }
-                    } else if (type == "replayControl" && playback) {
+                    } else if (type == "replayControl" && viewer.active) {
                         const auto action = message.at("action").get<std::string>();
                         if (action == "camera") {
-                            if (!replay_camera.set_mode(message.at("camera").get<std::string>()))
+                            if (!viewer.camera.set_mode(message.at("camera").get<std::string>()))
                                 throw std::runtime_error("Invalid replay camera");
-                            camera_controls.set_angles(replay_camera.pitch, replay_camera.yaw);
+                            camera_controls.set_angles(viewer.camera.pitch, viewer.camera.yaw);
                             camera_controls.clear();
-                            if (replay_camera.mode == "auto") {
+                            if (viewer.camera.mode == "auto") {
                                 director_only = true;
                                 director_job = std::make_unique<native::ReplayDirectorJob>(
-                                        core.get(), playback_info.at("totalTicks").get<uint32_t>(), curr.tick
+                                        core.get(), viewer.session.info.at("totalTicks").get<uint32_t>(), curr.tick
                                 );
                             }
                         } else if (action == "pause")
-                            playback_paused = message.value("paused", !playback_paused);
+                            viewer.paused = message.value("paused", !viewer.paused);
                         else if (action == "speed") {
                             const double value = message.at("speed").get<double>();
                             if (!std::isfinite(value) || value < .1 || value > 4)
                                 throw std::runtime_error("Replay speed must be 0.1–4");
-                            playback_speed = value;
+                            viewer.speed = value;
                         } else if (action == "fullRecording") {
-                            playback_session.set_full_recording(message.at("value").get<bool>());
-                            replay_controls.first_tick = playback_range.from;
-                            replay_controls.pending = playback_range.clamp(curr.tick);
+                            viewer.session.set_full_recording(message.at("value").get<bool>());
+                            viewer.controls.first_tick = viewer.session.range.from;
+                            viewer.controls.pending = viewer.session.range.clamp(curr.tick);
                         } else if (action == "seek") {
                             const auto tick = message.at("tick").get<uint32_t>();
-                            if (tick < playback_range.from || tick > playback_range.to)
+                            if (tick < viewer.session.range.from || tick > viewer.session.range.to)
                                 throw std::runtime_error("Replay tick outside playback range");
-                            replay_controls.pending = tick;
+                            viewer.controls.pending = tick;
                         } else if (action == "stop")
                             reset();
                     } else if (type == "sensitivity") {
@@ -3304,7 +3230,7 @@ int run(const native::Options &opt) {
             prefetch_map.clear();
             prefetch_sha.clear();
         }
-        if (!prefetch.valid() && !prefetch_map.empty() && !download.valid() && playback) {
+        if (!prefetch.valid() && !prefetch_map.empty() && !download.valid() && viewer.active) {
             const auto id = prefetch_map;
             prefetch_active = id + ":" + prefetch_sha;
             prefetch.start([&, id, sha = prefetch_sha](const std::atomic_bool &cancel) {
@@ -3393,8 +3319,8 @@ int run(const native::Options &opt) {
             if (!menu && core && !opt.hidden) capture(true);
         }
         if (!running) break;
-        replay_timeline.poll(menu.get(), menu_ready, playback_id, playback);
-        replay_compare_import.poll(replay_compare, playback_id, playback, chat, epoch_ms() / 1000.);
+        replay_timeline.poll(menu.get(), menu_ready, viewer.id, viewer.active);
+        replay_compare_import.poll(replay_compare, viewer.id, viewer.active, chat, epoch_ms() / 1000.);
         if (menu && menu_ready) {
             if (const auto state = menu_gamepad.sample(menu->visible() && focused))
                 menu->evaluate_js("window.bunnyhopNativeMenu?.onGamepad?.(" + state->dump() + ")");
@@ -3420,7 +3346,7 @@ int run(const native::Options &opt) {
         const auto now = Clock::now();
         const uint64_t now_ns = SDL_GetTicksNS();
         const bool leave_held = input_timeline.binds().held_action("mainMenu", held_codes);
-        const auto leave_result = leave_hold.frame(epoch_ms(), leave_held, !captured || playback);
+        const auto leave_result = leave_hold.frame(epoch_ms(), leave_held, !captured || viewer.active);
         if (leave_result == native::LeaveHold::Result::leave)
             leave_map();
         else if (leave_result == native::LeaveHold::Result::tap)
@@ -3452,10 +3378,10 @@ int run(const native::Options &opt) {
                 };
                 native::discord::Status status;
                 status.kind = map_id.empty()                             ? "menu"
-                              : playback                                 ? "replay"
+                              : viewer.active                            ? "replay"
                               : (!captured || (menu && menu->visible())) ? "paused"
                                                                          : "playing";
-                status.mode = playback              ? "replay"
+                status.mode = viewer.active         ? "replay"
                               : !room.id.empty()    ? "multiplayer"
                               : tutorial_practice() ? "practice"
                                                     : "solo";
@@ -3488,19 +3414,21 @@ int run(const native::Options &opt) {
                 renderer->reset_presentation();
                 scope.reset();
                 show_menu(false);
-            } else if (observed_spectator && core && !playback)
+            } else if (observed_spectator && core && !viewer.active)
                 reset();
             observed_spectator = spectator;
         }
         if (const auto ready = restart_guard.frame(
-                    epoch_ms(), held_action(restart_guard.action), !captured || chat.active || playback
+                    epoch_ms(), held_action(restart_guard.action), !captured || chat.active || viewer.active
             ))
             act(*ready, false, true);
         if (director_job) try {
                 if (director_job->step()) {
-                    const double interval = playback_range.tick_interval;
+                    const double interval = viewer.session.range.tick_interval;
                     if (director_only) {
-                        if (director_job->plan(replay_camera, interval, playback_range.from, playback_range.to)) {
+                        if (director_job->plan(
+                                    viewer.camera, interval, viewer.session.range.from, viewer.session.range.to
+                            )) {
                             director_job.reset();
                             refresh_playback_pose();
                         }
@@ -3535,30 +3463,30 @@ int run(const native::Options &opt) {
                 video_error = e.what();
             }
         if (!video_capture && !director_job && !video_encoder.busy())
-            if (const auto seek = replay_controls.take()) try {
+            if (const auto seek = viewer.controls.take()) try {
                     seek_playback(*seek);
                 } catch (const std::exception &e) {
                     error = e.what();
-                    playback_paused = true;
+                    viewer.paused = true;
                 }
         const bool simulation_active =
                 !video_capture && !director_job && !video_encoder.busy() && core && !spectator && !room_modes.frozen()
                 && !download.valid()
-                && ((focused && (captured || (playback && (!menu || !menu->visible())))) || opt.frames)
-                && (!playback || (!playback_paused && !replay_controls.dragging));
+                && ((focused && (captured || (viewer.active && (!menu || !menu->visible())))) || opt.frames)
+                && (!viewer.active || (!viewer.paused && !viewer.controls.dragging));
         if (heartbeat.start && !simulation_active) heartbeat.paused = true;
         const double frame_seconds = input_clock.elapsed(now);
-        const bool activity_active = core && !download.valid() && focused && captured && !playback && !spectator
+        const bool activity_active = core && !download.valid() && focused && captured && !viewer.active && !spectator
                                      && !opt.frames && opt.runtime_smoke.empty();
         activity.frame(
                 map_id, frame_seconds, std::chrono::duration<double>(now.time_since_epoch()).count(), activity_active
         );
         ++input_frame;
         input_frame_ms = frame_seconds * 1000;
-        const double step_dt = playback ? playback_range.tick_interval : dt;
+        const double step_dt = viewer.active ? viewer.session.range.tick_interval : dt;
         const uint64_t tick_ns = uint64_t(std::llround(step_dt * 1e9));
         input_scheduler.frame(
-                mouse_pump_start, simulation_active, tick_ns, playback ? playback_speed : 1, opt.frames != 0
+                mouse_pump_start, simulation_active, tick_ns, viewer.active ? viewer.speed : 1, opt.frames != 0
         );
         frame_diagnostics.mark(native::FrameDiagnostics::kOther, SDL_GetTicksNS());
         uint64_t &sim_ns = input_scheduler.sim_ns;
@@ -3570,16 +3498,16 @@ int run(const native::Options &opt) {
             prev = curr;
             const BhState tutorial_pre = curr;
             BhCmd cmd{};
-            if (playback) {
-                if (curr.tick >= playback_range.to) {
-                    playback_paused = true;
+            if (viewer.active) {
+                if (curr.tick >= viewer.session.range.to) {
+                    viewer.paused = true;
                     input_scheduler.reset(SDL_GetTicksNS());
                     break;
                 }
                 BhSnapshot state{};
                 if (!bh_replay_step(core.get(), &state)) {
                     const std::string failure = bh_last_error(core.get());
-                    playback_failed = true;
+                    viewer.failed = true;
                     reset();
                     error = "Replay stopped: " + failure;
                     std::cerr << error << '\n';
@@ -3641,7 +3569,7 @@ int run(const native::Options &opt) {
             renderer->simulation_tick();
             hud.tick(curr);
             hud.command_tick(cmd, curr.tick);
-            if (input_log && !playback) {
+            if (input_log && !viewer.active) {
                 const double moved = mouse_counts;
                 input_log << curr.tick << ',' << input_frame << ',' << input_frame_ms << ',' << double(sim_ns) / 1e6
                           << ',' << moved << ',' << input_timeline.pending_counts(input) << ',' << cmd.buttons
@@ -3659,9 +3587,9 @@ int run(const native::Options &opt) {
             if (curr.events & (1u << 5)) {
                 const bool stab = cmd.buttons & native::attack2;
                 room_events |= stab ? 32 : 16;
-                if (!playback) bh_record_cosmetic(core.get(), stab ? 2 : 1);
+                if (!viewer.active) bh_record_cosmetic(core.get(), stab ? 2 : 1);
             }
-            if (playback) {
+            if (viewer.active) {
                 BhReplayEvents e{};
                 if (bh_replay_events(core.get(), prev.tick, curr.tick, &e)) {
                     if (e.inspect_signal) renderer->inspect_press();
@@ -3675,7 +3603,8 @@ int run(const native::Options &opt) {
             BhWeaponReport weapon{};
             bh_weapon_report(core.get(), &weapon);
             BhAttackReport attack{};
-            if (!playback && !practice.active && !tutorial_practice() && !opt.frames && opt.runtime_smoke.empty()) {
+            if (!viewer.active && !practice.active && !tutorial_practice() && !opt.frames
+                && opt.runtime_smoke.empty()) {
                 if (curr.events & 2) activity.jump(map_id);
                 if (timing.update_flags & 1) activity.attempt(map_id);
             }
@@ -3729,8 +3658,8 @@ int run(const native::Options &opt) {
                     surface_found ? surface.water_z - curr.position[2] : std::numeric_limits<double>::quiet_NaN();
             static const std::array<const char *, 6> surfaces = {"concrete", "metal", "wood", "grass", "tile", "water"};
             const bool attacked = bh_attack_report(core.get(), &attack);
-            if (!playback) scope.observe(weapon, attacked ? &attack : nullptr);
-            audio.set_style(playback ? playback_info.value("style", active_style) : active_style);
+            if (!viewer.active) scope.observe(weapon, attacked ? &attack : nullptr);
+            audio.set_style(viewer.active ? viewer.session.info.value("style", active_style) : active_style);
             BhJumpObservation jump_observation{};
             const bool observed_jump = bh_jump_observation(core.get(), &jump_observation) != 0;
             hud.movement.feed(observed_jump ? &jump_observation : nullptr, timing, step_dt, active_style);
@@ -3751,7 +3680,7 @@ int run(const native::Options &opt) {
                 std::snprintf(split, sizeof(split), "Split %u  %.3fs", timing.split_count, timing.seconds);
                 hud.set_run_comparison(split, "");
             }
-            if (!playback) kept_weapons.observe(weapon);
+            if (!viewer.active) kept_weapons.observe(weapon);
             const uint32_t slot = weapon.active == weapon.primary ? 1 : weapon.active == weapon.secondary ? 2 : 3;
             if (slot != observed_slot) {
                 last_slot = observed_slot;
@@ -3760,9 +3689,9 @@ int run(const native::Options &opt) {
             if (curr.events & native::teleported) prev = curr;
             input_scheduler.consume(tick_ns);
             BhRunState tick_run{};
-            if (playback || !zones.empty())
+            if (viewer.active || !zones.empty())
                 require(bh_run_state(core.get(), &tick_run), core.get(), "Reading native timer");
-            if (tutorial && tutorial->is_active() && !playback) {
+            if (tutorial && tutorial->is_active() && !viewer.active) {
                 BhCmd filtered = cmd;
                 bh_last_command(core.get(), &filtered);
                 const auto result = tutorial->tick(tutorial_pre, curr, filtered, curr.events, dt);
@@ -3781,7 +3710,7 @@ int run(const native::Options &opt) {
             }
 
             // Finish the recording on the exact native tick, before any further catch-up steps.
-            if (!playback && tick_run.status == 2 && !recorder.ended) {
+            if (!viewer.active && tick_run.status == 2 && !recorder.ended) {
                 reset_input_timing();
                 break;
             }
@@ -3791,9 +3720,9 @@ int run(const native::Options &opt) {
         frame_diagnostics.input(input_timeline.queue());
         BhRunState run_state{};
         if (core) {
-            if (playback || !zones.empty())
+            if (viewer.active || !zones.empty())
                 require(bh_run_state(core.get(), &run_state), core.get(), "Reading native timer");
-            if (!practice.active && !playback && run_state.status == 1 && run_state.recording) {
+            if (!practice.active && !viewer.active && run_state.status == 1 && run_state.recording) {
                 const bool started_run = heartbeat.start != run_state.start_tick;
                 if (started_run) {
                     run_event(heartbeat.invalidate(native::RunHeartbeat::Reset::generation));
@@ -3806,7 +3735,7 @@ int run(const native::Options &opt) {
             } else if (run_state.status == 0 && heartbeat.start) {
                 run_event(heartbeat.invalidate(native::RunHeartbeat::Reset::start));
             }
-            if (!playback && run_state.status == 2 && !recorder.ended)
+            if (!viewer.active && run_state.status == 2 && !recorder.ended)
                 hud.result.finish(
                         heartbeat.generation,
                         run_state.seconds,
@@ -3814,10 +3743,10 @@ int run(const native::Options &opt) {
                         hud.extras.personal_best,
                         !practice.active && !turn_admission.local_only
                 );
-            if (practice.active && !playback && run_state.status == 2 && !recorder.ended) {
+            if (practice.active && !viewer.active && run_state.status == 2 && !recorder.ended) {
                 recorder.ended = true;
             }
-            if (!practice.active && !playback && run_state.status == 2 && !recorder.ended) {
+            if (!practice.active && !viewer.active && run_state.status == 2 && !recorder.ended) {
                 recorder.ended = true;
                 if (!recorder.path.empty()) {
                     try {
@@ -3874,8 +3803,8 @@ int run(const native::Options &opt) {
                         heartbeat.generation,
                         run_state,
                         world_record_generation == heartbeat.generation ? known_world_record : std::nullopt,
-                        hud.extras.ghost_target(map_id, active_style, active_track, ghost_enabled && ghost_handle),
-                        practice.active || turn_admission.local_only || playback || room_modes.has_race()
+                        hud.extras.ghost_target(map_id, active_style, active_track, ghosts.enabled && ghosts.handle),
+                        practice.active || turn_admission.local_only || viewer.active || room_modes.has_race()
                                 || (tutorial && tutorial->is_active()) || !captured
                 )) {
                 if (hud.preferences().auto_restart_sound)
@@ -3897,31 +3826,26 @@ int run(const native::Options &opt) {
             std::optional<native_render::Actor> audible_ghost;
             BhCmd ghost_command{};
             const BhCmd *shown_ghost_command = nullptr;
-            if (ghost_enabled && renderer->ghost_visible(0) && prefs.show_ghost && ghost_handle && !playback
+            if (ghosts.enabled && renderer->ghost_visible(0) && prefs.show_ghost && ghosts.handle && !viewer.active
                 && !spectator
                 && (tutorial_demo
-                    || (ghost_info.value("track", 0u) == active_track
-                        && ghost_info.value("style", std::string("autohop")) == active_style))) {
+                    || (ghosts.info.value("track", 0u) == active_track
+                        && ghosts.info.value("style", std::string("autohop")) == active_style))) {
                 BhGhostFrame ghost{};
                 const auto &path = renderer->ghost_path(0);
                 const uint32_t elapsed = tutorial_demo      ? curr.tick - tutorial_demo_start
                                          : run_state.status ? curr.tick - run_state.start_tick
                                                             : 0;
-                const uint32_t tick = tutorial_demo ? ghost_info.value("startTick", 0u) + elapsed
+                const uint32_t tick = tutorial_demo ? ghosts.info.value("startTick", 0u) + elapsed
                                                     : std::min(path.start + elapsed, path.end);
-                if (bh_ghost_frame(core.get(), ghost_handle, tick, &ghost)) {
+                if (bh_ghost_frame(core.get(), ghosts.handle, tick, &ghost)) {
                     if (!tutorial_demo) {
                         shown_ghost_command = &ghost_command;
                         if (path.start + elapsed <= path.end)
-                            bh_ghost_command(core.get(), ghost_handle, tick, &ghost_command);
+                            bh_ghost_command(core.get(), ghosts.handle, tick, &ghost_command);
                     }
-                    const float distance = std::hypot(
-                            std::hypot(ghost.position[0] - curr.position[0], ghost.position[1] - curr.position[1]),
-                            ghost.position[2] - curr.position[2]
-                    );
                     const float opacity =
-                            prefs.ghost_opacity
-                            * (prefs.ghost_near_fade ? std::clamp((distance - 24.f) / 80.f, 0.f, 1.f) : 1.f);
+                            native::GhostSlots::opacity(curr, ghost, prefs.ghost_opacity, prefs.ghost_near_fade);
                     renderer->set_replay_actor(
                             ghost, tutorial_demo ? "outfit-cream" : outfit, renderer->ghost_loadout(0), opacity
                     );
@@ -3933,7 +3857,7 @@ int run(const native::Options &opt) {
                 } else {
                     renderer->set_replay_actor(nullptr, 0, 0);
                     if (tutorial_demo) {
-                        ghost_enabled = false;
+                        ghosts.enabled = false;
                         tutorial_demo = false;
                     }
                 }
@@ -3941,13 +3865,13 @@ int run(const native::Options &opt) {
                 renderer->set_replay_actor(nullptr, 0, 0);
             hud.extras.ghost_progress(renderer->ghost_path(0).frames, curr, run_state, shown_ghost_command);
             BhRunState display_run = run_state;
-            std::string display_style = playback ? playback_info.value("style", active_style) : active_style;
+            std::string display_style = viewer.active ? viewer.session.info.value("style", active_style) : active_style;
             std::optional<native_render::Actor> spectated_actor;
             const double steady_seconds = std::chrono::duration<double>(now.time_since_epoch()).count();
             auto actors = room.actors(steady_seconds);
             auto camera_input = input_timeline.preview(input);
             // Show turnbind motion between ticks too, so turning is smooth at any frame rate.
-            if (simulation_active && !playback && !spectator) {
+            if (simulation_active && !viewer.active && !spectator) {
                 const auto &turns = recorder.input.active() ? recorder.input.turns : configured_turns;
                 const bool allowed = captured && native::turn_binds_allowed(active_style, practice.active);
                 turns.apply(
@@ -3958,7 +3882,7 @@ int run(const native::Options &opt) {
                 );
             }
             std::string shown_notice =
-                    tutorial && tutorial->is_active() && !playback ? tutorial->notice() : score_notice;
+                    tutorial && tutorial->is_active() && !viewer.active ? tutorial->notice() : score_notice;
 
             renderer->set_player_glow(player_glow);
             if (!spectator) renderer->set_spectated_actor(std::nullopt);
@@ -3998,16 +3922,16 @@ int run(const native::Options &opt) {
                 }
             }
             bool external_camera = false;
-            if (playback) {
+            if (viewer.active) {
                 camera_controls.consume_all();
                 camera_controls.held = chat.active ? 0 : input.held;
-                if (replay_camera.mode == "free")
-                    replay_camera.move(
+                if (viewer.camera.mode == "free")
+                    viewer.camera.move(
                             camera_controls,
                             frame_seconds,
                             held_codes.contains("ShiftLeft") || held_codes.contains("ShiftRight")
                     );
-                replay_camera.sample(
+                viewer.camera.sample(
                         core.get(),
                         state.player,
                         camera_input.yaw(),
@@ -4017,7 +3941,7 @@ int run(const native::Options &opt) {
                         camera_input,
                         frame_seconds
                 );
-                external_camera = replay_camera.third_person();
+                external_camera = viewer.camera.third_person();
             } else if (third_person) {
                 third_camera.sample(
                         core.get(),
@@ -4033,9 +3957,9 @@ int run(const native::Options &opt) {
             }
             if (spectator) room.spectator_run(display_run, display_style, *spectator, steady_seconds, epoch_ms());
             if (hide_players) actors.clear();
-            if (!playback && !spectator && !tutorial_demo && prefs.show_ghost)
+            if (!viewer.active && !spectator && !tutorial_demo && prefs.show_ghost)
                 for (unsigned i = 1; i < 4; i++) {
-                    const auto &slot = ghost_slots[i];
+                    const auto &slot = ghosts.slots[i];
                     if (!slot.handle || !slot.enabled || !renderer->ghost_visible(i)
                         || slot.info.value("track", 0u) != active_track
                         || slot.info.value("style", std::string("autohop")) != active_style)
@@ -4049,15 +3973,8 @@ int run(const native::Options &opt) {
                     actor.outfit = outfit;
                     actor.loadout = renderer->ghost_loadout(i);
                     renderer->decorate_ghost(actor, i);
-                    const float distance = std::hypot(
-                            std::hypot(
-                                    actor.frame.position[0] - curr.position[0],
-                                    actor.frame.position[1] - curr.position[1]
-                            ),
-                            actor.frame.position[2] - curr.position[2]
-                    );
-                    actor.opacity = prefs.ghost_opacity
-                                    * (prefs.ghost_near_fade ? std::clamp((distance - 24.f) / 80.f, 0.f, 1.f) : 1.f);
+                    actor.opacity =
+                            native::GhostSlots::opacity(curr, actor.frame, prefs.ghost_opacity, prefs.ghost_near_fade);
                     actors.push_back(actor);
                 }
             if (external_camera) {
@@ -4093,12 +4010,12 @@ int run(const native::Options &opt) {
                     eye[k] = (*opt.camera)[k];
                 camera_input.set_angles((*opt.camera)[3], (*opt.camera)[4]);
             }
-            const bool local_scope = !playback && !spectator && !external_camera && !opt.camera;
+            const bool local_scope = !viewer.active && !spectator && !external_camera && !opt.camera;
             if (local_scope && simulation_active) scope.frame(frame_seconds);
             renderer->set_camera_fov(local_scope ? scope.fov(prefs.fov) : prefs.fov);
             if (local_scope && scope.scoped()) renderer->set_viewmodel_visible(false);
             const bool world_record_finish =
-                    !playback && !spectator && !practice.active && !turn_admission.local_only
+                    !viewer.active && !spectator && !practice.active && !turn_admission.local_only
                     && display_run.recording_valid && world_record_generation == heartbeat.generation
                     && known_world_record
                     && native::score_ms(display_run.seconds) < native::score_ms(*known_world_record);
@@ -4112,10 +4029,10 @@ int run(const native::Options &opt) {
                 if (audible_ghost) audio.spatial_actor(*audible_ghost, frame_seconds, true);
                 if (spectated_actor && !external_camera) audio.spatial_actor(*spectated_actor, frame_seconds, false);
             }
-            native::update_compare_actor(*renderer, replay_compare, curr.tick, playback_range, playback);
-            renderer->route_context(active_track, active_style, !playback && !spectator && !tutorial_demo);
+            native::update_compare_actor(*renderer, replay_compare, curr.tick, viewer.session.range, viewer.active);
+            renderer->route_context(active_track, active_style, !viewer.active && !spectator && !tutorial_demo);
             renderer->surface_tools_frame(
-                    curr, input, simulation_active && captured && !playback && !spectator, steady_seconds
+                    curr, input, simulation_active && captured && !viewer.active && !spectator, steady_seconds
             );
             renderer->set_room_actors(actors);
             renderer->draw(
@@ -4124,8 +4041,8 @@ int run(const native::Options &opt) {
                     eye,
                     camera_input,
                     &state,
-                    (playback || opt.frames) ? curr.tick * step_dt
-                                             : std::chrono::duration<double>(now - started).count()
+                    (viewer.active || opt.frames) ? curr.tick * step_dt
+                                                  : std::chrono::duration<double>(now - started).count()
             );
             renderer->draw_measure_label(
                     hud,
@@ -4202,11 +4119,11 @@ int run(const native::Options &opt) {
                         display_fps,
                         prefs.hud,
                         prefs.crosshair,
-                        playback,
+                        viewer.active,
                         weapon,
                         prefs.jump_stats ? hud.ssj_line() : std::string_view(),
                         feedback.ssj_gain,
-                        prefs.strafe_trainer && !playback ? feedback.strafe_reading : std::nullopt,
+                        prefs.strafe_trainer && !viewer.active ? feedback.strafe_reading : std::nullopt,
                         prefs.strafe_trainer_hints,
                         &hud_layout,
                         prefs.hud_scale,
@@ -4218,7 +4135,7 @@ int run(const native::Options &opt) {
                         leave_hold.progress(epoch_ms())
                 );
             if ((!menu || !menu->visible()) && !opt.camera) {
-                if (prefs.mouse_diagnostics && !playback) {
+                if (prefs.mouse_diagnostics && !viewer.active) {
                     const auto &m = mouse_diagnostics.last;
                     char label[220];
                     std::snprintf(
@@ -4246,19 +4163,19 @@ int run(const native::Options &opt) {
                     hud.overlay_text(24, 82, frame_line, 14, {1, 1, 1, 1});
                     hud.overlay_end(width, height);
                 }
-                if (playback && !chat.active && !video_capture && !director_job) {
+                if (viewer.active && !chat.active && !video_capture && !director_job) {
                     native::draw_replay_controls(
                             hud,
                             width,
                             height,
                             native::HudGeometry(width, height, 100).scale,
-                            replay_controls,
+                            viewer.controls,
                             curr.tick,
-                            playback_range.to,
-                            playback_range.tick_interval,
-                            playback_paused,
-                            playback_speed,
-                            replay_camera.mode
+                            viewer.session.range.to,
+                            viewer.session.range.tick_interval,
+                            viewer.paused,
+                            viewer.speed,
+                            viewer.camera.mode
                     );
                 }
                 if (chat.active || prefs.hud)
@@ -4379,7 +4296,7 @@ int run(const native::Options &opt) {
             } catch (const std::exception &e) {
                 std::cerr << "Menu backdrop: " << e.what() << '\n';
             }
-        if (menu && menu_ready && core && !playback && !spectator && !room.id.empty() && room.map == map_id
+        if (menu && menu_ready && core && !viewer.active && !spectator && !room.id.empty() && room.map == map_id
             && now - room_time >= std::chrono::milliseconds(50)) {
             BhWeaponReport weapon{};
             bh_weapon_report(core.get(), &weapon);
@@ -4469,11 +4386,11 @@ int run(const native::Options &opt) {
         }
         ++frame;
         ++title_frames;
-        if (simulation_active && !playback) input.frame();
+        if (simulation_active && !viewer.active) input.frame();
         audio.set_music_scene(bool(core) && (!menu || !menu->visible()));
         audio.pump();  // advances the music playlist; decoding cannot run on the audio thread
         if (opt.frames && renderer && !opt.screenshot.empty()
-            && (curr.tick >= opt.frames || (playback && playback_paused && curr.tick >= playback_range.to))) {
+            && (curr.tick >= opt.frames || (viewer.active && viewer.paused && curr.tick >= viewer.session.range.to))) {
             renderer->screenshot(opt.screenshot, width, height);
         }
         const GLenum gl_error = gl.GetError();
@@ -4538,10 +4455,10 @@ int run(const native::Options &opt) {
                         {"recordingPath", recorder.path},
                         {"player",
                          {{"map", map_id},
-                          {"style", playback ? playback_info.value("style", active_style) : active_style},
-                          {"track", playback ? playback_info.value("track", active_track) : active_track},
+                          {"style", viewer.active ? viewer.session.info.value("style", active_style) : active_style},
+                          {"track", viewer.active ? viewer.session.info.value("track", active_track) : active_track},
                           {"mode",
-                           playback                                   ? "replay"
+                           viewer.active                              ? "replay"
                            : !room.id.empty()                         ? "multiplayer"
                            : !gauntlet_id.empty()                     ? "gauntlet"
                            : (practice.active || tutorial_practice()) ? "practice"
@@ -4553,7 +4470,7 @@ int run(const native::Options &opt) {
                            practice_reason().empty() ? nlohmann::json(nullptr) : nlohmann::json(practice_reason())},
                           {"mode", practice.mode},
                           {"active", practice.active},
-                          {"thirdPerson", third_person && !playback && !room.spectator_target},
+                          {"thirdPerson", third_person && !viewer.active && !room.spectator_target},
                           {"tool", practice.tool.empty() ? nlohmann::json(nullptr) : nlohmann::json(practice.tool)},
                           {"noclip", practice.noclip},
                           {"menuOpen", practice.menu_open},
@@ -4577,22 +4494,12 @@ int run(const native::Options &opt) {
                                             json{{"active", false},
                                                  {"lesson", "jump"},
                                                  {"completed", tutorial_completed}}},
-                        {"playback",
-                         playback_session.state(
-                                 playback,
-                                 playback_id,
-                                 curr.tick,
-                                 playback_paused,
-                                 playback_speed,
-                                 replay_camera.mode,
-                                 run_state.seconds,
-                                 dt
-                         )},
+                        {"playback", viewer.state(curr.tick, run_state.seconds, dt)},
                         {"ghost",
-                         {{"enabled", ghost_enabled},
-                          {"id", ghost_id},
+                         {{"enabled", ghosts.enabled},
+                          {"id", ghosts.id},
                           {"name",
-                           ghost_info.is_object() ? ghost_info.value("player", std::string("Ghost")) : "Ghost"}}},
+                           ghosts.info.is_object() ? ghosts.info.value("player", std::string("Ghost")) : "Ghost"}}},
                         {"replayCompare", replay_compare.state()},
                         {"surfaceTools", renderer ? renderer->surface_tools_state() : nlohmann::json(nullptr)},
                         {"graphicsLimits", renderer ? renderer->graphics_limits() : nlohmann::json(nullptr)},
@@ -4621,10 +4528,10 @@ int run(const native::Options &opt) {
                                             {"error", ""}
                                     }}
                 };
-                native::render_playback_state(state, replay_compare, playback_range.tick_interval);
+                native::render_playback_state(state, replay_compare, viewer.session.range.tick_interval);
                 state["ghosts"] = nlohmann::json::array();
                 for (unsigned slot = 0; slot < 4; slot++) {
-                    const auto &g = ghost_slots[slot];
+                    const auto &g = ghosts.slots[slot];
                     if (g.handle)
                         state["ghosts"].push_back(
                                 {{"slot", slot},
@@ -4823,7 +4730,7 @@ int run(const native::Options &opt) {
             title_frames = 0;
         }
         if (opt.frames && renderer
-            && (curr.tick >= opt.frames || (playback && playback_paused && curr.tick >= playback_range.to))) {
+            && (curr.tick >= opt.frames || (viewer.active && viewer.paused && curr.tick >= viewer.session.range.to))) {
             running = false;
         }
         frame_diagnostics.mark(native::FrameDiagnostics::kOther, SDL_GetTicksNS());
@@ -4847,7 +4754,7 @@ int run(const native::Options &opt) {
     std::cout << "Rendered " << frame << " frames; simulation tick " << curr.tick << "; position " << curr.position[0]
               << ' ' << curr.position[1] << ' ' << curr.position[2]
               << (renderer ? "; exposure " + std::to_string(renderer->exposure()) : std::string()) << '\n';
-    return playback_failed || (!opt.menu_smoke.empty() && !smoke_pass) ? 1 : 0;
+    return viewer.failed || (!opt.menu_smoke.empty() && !smoke_pass) ? 1 : 0;
 }
 }  // namespace
 

@@ -1,4 +1,6 @@
 #include "run_session.hpp"
+#include "ghost_slots.hpp"
+#include "replay_player.hpp"
 #include "data_location.hpp"
 #include "test_bsp.hpp"
 #ifdef NDEBUG
@@ -96,6 +98,32 @@ void recording(const std::filesystem::path &root) {
     assert(recorder.finish_event(1, 1.234, "Ma").at("replayBase64") == "TWE=");
     const auto event = recorder.finish_event(1, 1.234, "Man");
     assert(event.at("replayBase64") == "TWFu" && event.at("timeMs") == 1234 && event.at("track") == 1);
+    native::GhostSlots ghosts;
+    ghosts.toggle(nlohmann::json::object());
+    for (unsigned slot = 0; slot < native::GhostSlots::slot_count; ++slot) {
+        ghosts.load(core.get(), direct, slot);
+        assert(ghosts.slots[slot].enabled && ghosts.slots[slot].handle);
+    }
+    ghosts.select_primary();
+    assert(ghosts.handle == ghosts.slots[0].handle);
+    assert(ghosts.control(core.get(), {{"action", "toggle"}, {"slot", 0}, {"enabled", false}}));
+    assert(!ghosts.enabled && ghosts.slots[1].enabled);
+    ghosts.clear_for_tutorial(core.get());
+    assert(!ghosts.handle && !ghosts.enabled && !ghosts.slots[1].handle);
+    native::ReplayMetadata metadata;
+    assert(metadata.read(direct).at("map") == "fixture");
+    native::ReplayPlayer viewer;
+    viewer.session = native::ReplaySession::open(core.get(), direct, true);
+    viewer.begin(direct);
+    assert(viewer.active && !viewer.paused && viewer.speed == 1);
+    native::Input camera_controls;
+    viewer.action(native::ReplayControls::Action::end, 0, camera_controls);
+    assert(viewer.paused && viewer.controls.take() == viewer.session.range.to);
+    const auto pose = viewer.session.seek(core.get(), viewer.session.range.to);
+    assert(pose.snapshot.player.tick == viewer.session.range.to);
+    viewer.action(native::ReplayControls::Action::camera, pose.snapshot.player.tick, camera_controls);
+    assert(viewer.camera.mode == "chase");
+    assert(viewer.state(pose.snapshot.player.tick, run.seconds, .01).at("paused") == true);
     recorder.pending_capture = {"fixture.bhr", "fixture"};
     recorder.clear(true);
     assert(recorder.ended && recorder.path.empty() && !recorder.pending_capture);
