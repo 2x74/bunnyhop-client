@@ -538,7 +538,7 @@ int run(const Options &opt) {
         std::optional<float> custom_pitch;bool outside_spawn=false;
         if(!(tutorial&&tutorial->is_active()))if(const auto point=start_points.get(map_id,active_track)){
             const BhState fallback=curr;
-            if(bh_set_position(core.get(),point->position[0],point->position[1],point->position[2],point->yaw)&&bh_state(core.get(),&curr)&&native::start_point_problem(curr,false).empty()&&curr.position[0]==point->position[0]&&curr.position[1]==point->position[1]&&std::abs(curr.position[2]-point->position[2])<=4){custom_pitch=point->pitch;outside_spawn=!native::start_point_in_zone(curr,zones,active_track);}
+            if(bh_set_position(core.get(),point->position[0],point->position[1],point->position[2],point->yaw)&&bh_state(core.get(),&curr)&&native::start_point_landed(curr,*point)){custom_pitch=point->pitch;outside_spawn=!native::start_point_in_zone(curr,zones,active_track);}
             else{require(bh_set_position(core.get(),fallback.position[0],fallback.position[1],fallback.position[2],fallback.teleport_angles[1]),core.get(),"Restoring default start");require(bh_state(core.get(),&curr),core.get(),"Reading default start");}
         }
         if(tutorial&&tutorial->is_active()){

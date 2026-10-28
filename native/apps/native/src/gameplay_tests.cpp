@@ -47,6 +47,15 @@ int main(){
     assert(!native::start_point_problem(player,true).empty()); // noclip refuses
     player.velocity[0]=2;assert(!native::start_point_problem(player,false).empty());player.velocity[0]=0;
     player.grounded=0;assert(!native::start_point_problem(player,false).empty());player.grounded=1;
+    {   // A restart lands the player at the saved point; right after bh_set_position the core reports
+        // grounded=0 and no velocity until the first tick (bhop_furame probe), which the old check rejected.
+        native::StartPoint saved{};saved.position[0]=297.855652f;saved.position[1]=221.637680f;saved.position[2]=256.03125f;
+        BhState fresh{};fresh.position[0]=saved.position[0];fresh.position[1]=saved.position[1];fresh.position[2]=saved.position[2];fresh.grounded=0;
+        assert(native::start_point_landed(fresh,saved));
+        fresh.position[2]=saved.position[2]-3.5f;assert(native::start_point_landed(fresh,saved));   // settled onto the same floor
+        fresh.position[2]=saved.position[2]-40;assert(!native::start_point_landed(fresh,saved));   // fell to another floor
+        fresh.position[2]=saved.position[2];fresh.position[0]+=1;assert(!native::start_point_landed(fresh,saved)); // pushed out of solid
+    }
     native::StartPoints points;points.save("map",0,player,90,-5);native::StartPoints restored;assert(restored.load(native::Json::parse(points.points.dump())));assert(restored.get("map",0)->yaw==90);assert(!restored.get("map",1));
     assert(!restored.load({{"bad",{{"position",{1,2,3}},{"yaw",0},{"pitch",100}}}}));
     native::ReplayCamera camera;native::Input view;float eye[3]{};player.view_offset_z=64;
