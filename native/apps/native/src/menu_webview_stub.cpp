@@ -11,6 +11,7 @@ bool MenuWebView::supports_backdrop() const { return false; }
 const std::string &MenuWebView::error() const { return impl_->error; }
 void MenuWebView::set_visible(bool) {}
 bool MenuWebView::visible() const { return false; }
+bool MenuWebView::has_keyboard_focus() const { return false; }
 std::vector<std::string> MenuWebView::drain_messages() { return {}; }
 void MenuWebView::evaluate_js(const std::string &) {}
 bool MenuWebView::open_auth(const std::string &) { return false; }

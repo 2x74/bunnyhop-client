@@ -204,7 +204,32 @@ bool MenuWebView::available()const{return impl_->menu&&!impl_->failed;}
 bool MenuWebView::supports_backdrop()const{return available()&&impl_->backdrop;}
 const std::string &MenuWebView::error()const{return impl_->state->error;}
 bool MenuWebView::visible()const{return impl_->shown;}
-void MenuWebView::set_visible(bool visible){if(!available())return;impl_->shown=visible;impl_->controller->put_IsVisible(visible);if(impl_->auth_window)ShowWindow(impl_->auth_window,visible?SW_SHOW:SW_HIDE);if(visible)(impl_->auth_controller?impl_->auth_controller:impl_->controller)->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);else SetFocus(impl_->window);}
+bool MenuWebView::has_keyboard_focus() const {
+    if (!impl_->shown)
+        return false;
+    const HWND focus = GetFocus();
+    return focus != impl_->window;
+}
+// Keyboard focus follows the menu: into the web view when it opens (and again
+// when the game window is activated with it open), back to the SDL window
+// before the web view hides, so focus never rests in a hidden child.
+void MenuWebView::set_visible(bool visible) {
+    if (!available())
+        return;
+    impl_->shown = visible;
+    if (!visible) {
+        SetFocus(impl_->window);
+        impl_->controller->put_IsVisible(FALSE);
+        if (impl_->auth_window)
+            ShowWindow(impl_->auth_window, SW_HIDE);
+        return;
+    }
+    impl_->controller->put_IsVisible(TRUE);
+    if (impl_->auth_window)
+        ShowWindow(impl_->auth_window, SW_SHOW);
+    auto& focus = impl_->auth_controller ? impl_->auth_controller : impl_->controller;
+    focus->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+}
 std::vector<std::string> MenuWebView::drain_messages(){std::vector<std::string> out;out.swap(impl_->state->messages);return out;}
 void MenuWebView::evaluate_js(const std::string &script){if(available()){const auto life=impl_->state;impl_->menu->ExecuteScript(wide(script+"\n;null;").c_str(),Callback<ICoreWebView2ExecuteScriptCompletedHandler>([life](HRESULT hr,LPCWSTR)->HRESULT{if(FAILED(hr))life->fail("WebView2 host reply failed");return S_OK;}).Get());}}
 bool MenuWebView::open_auth(const std::string &url){return impl_->open_auth(wide(url).c_str());}
