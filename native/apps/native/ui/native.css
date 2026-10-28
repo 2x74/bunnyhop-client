@@ -81,13 +81,14 @@ html.native-clock-stopped *, html.native-clock-stopped *::before, html.native-cl
 .native-identity p { margin: .3rem 0 0; }
 .native-account-note { margin: 0; }
 .native-replay-screen { display:flex;flex-direction:column;max-height:100%;min-height:0; }
-.native-profile { width: min(78rem,100%); }
+/* (No notice: no line, and no margins pushing the profile down.) */
+.native-profile-notice:empty { display: none; }
 .native-profile-body {display:flex;flex-direction:column;flex:1;}
 .native-profile-body>.profile {flex:1;min-height:0;}
 /* The web stacks the profile on narrow/short windows and scrolls the page (profile.css); here the body scrolls, so the
    stacked layout must keep its content height instead of squeezing the card over the runs column. */
 @media (max-width: 60rem), (max-height: 31rem) { .native-profile-body>.profile,.native-profile-body .pf-layout {flex:none;min-height:auto;} }
-.native-support {display:flex;flex-direction:column;width:min(78rem,100%);max-height:100%;min-height:0;}
+.native-support {display:flex;flex-direction:column;max-height:100%;min-height:0;}
 .native-support-screen {flex:1;min-height:0;overflow:auto;}
 .native-replays { overflow:auto;min-height:0;padding-right:.5rem; }
 .native-bind-buttons,.native-toolbar,.native-playback { display:flex;align-items:center;gap:.6rem;flex-wrap:wrap; }
@@ -109,7 +110,6 @@ html.native-clock-stopped *, html.native-clock-stopped *::before, html.native-cl
 .native-room-chat-form { display:flex;gap:.6rem;margin-top:.6rem; }
 .native-room-chat-form input { flex:1;min-width:0; }
 .native-room-vote { display:flex;gap:.5rem;align-items:center;flex-wrap:wrap; }
-.native-loadout,.native-tutorial-screen { width:min(76rem,100%); }
 .native-cosmetic-items { display:grid;grid-template-columns:repeat(auto-fill,minmax(10rem,1fr));gap:.7rem;margin-top:1rem; }
 .native-cosmetic-card { display:flex;flex-direction:column;align-items:flex-start;gap:.5rem;padding:1rem;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-2);text-align:left; }
 .native-cosmetic-card[aria-pressed=true] { border-color:var(--amber); }

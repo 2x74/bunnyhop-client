@@ -7,6 +7,7 @@
 
 import { api } from "../../web/src/api";
 import { getPB } from "../../web/src/pb";
+import { legalLinks } from "../../web/src/ui/legal";
 import { formatTime } from "../../web/src/timer";
 import { accountChip, me } from "../../web/src/ui/account";
 import { STYLE_DEFS, styleForTrack, styleLabel, type StyleId } from "../../web/src/styles";
@@ -259,7 +260,7 @@ export function pauseScreen(a: PauseActions): HTMLElement {
     null,
     h("header.pause-head", null, h("div.pause-top", null, wordmark("sm")), h("h2.pause-map", { title: a.map }, a.map), meta),
     rail,
-    h("footer.pause-foot", null, accountChip({ quiet: true }), versionButton(), support),
+    h("footer.pause-foot", null, accountChip({ quiet: true }), versionButton(), support, legalLinks()),
   );
   const screen = h("section.pause", null, left, panel);
 

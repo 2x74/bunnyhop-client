@@ -23,6 +23,8 @@ import { isStyleId } from "../../web/src/styles";
 import { onStyleChange, setSelectedStyle } from "../../web/src/ui/style-picker";
 import { settingsPanel, focusSettingsSection } from "./settings-panel";
 import { replayPanel, watchRequest, raceRequest, gauntletWatchDeps, sendReplay, playLocalReplay } from "./replays";
+import { legalLinks } from "../../web/src/ui/legal";
+import { installMuteButton } from "./mute-button";
 import { watchGauntletSplit } from "./gauntlet-watch";
 import { NativeRoomService } from "./room-service";
 import { RoomConnection } from "../../web/src/net/room";
@@ -235,7 +237,7 @@ function render(): void {
     const maps = mapBrowser({ current: state.map, style: state.style, onPick: selectMap,focus:focusMap,gauntlets:api.available()?()=>show("gauntlets"):null });
     browser = maps;
     focusMap=undefined;
-    app.replaceChildren(h("section.panel.panel-wide.native-maps", null, heading("Choose a map",state.map?`playing ${state.map}`:null,()=>closeMapPanel(maps)), maps));
+    app.replaceChildren(h("section.panel.panel-wide.panel-maps.native-maps", null, heading("Choose a map",state.map?`playing ${state.map}`:null,()=>closeMapPanel(maps)), maps));
   } else if (screen === "gauntlets") {
     app.replaceChildren(h("section.panel.panel-wide.panel-gauntlets", null, heading("Gauntlets"), gauntletsScreen(gauntletActions)));
   } else if (screen === "gauntlet") {
@@ -250,7 +252,7 @@ function render(): void {
       loadout: () => void ownProfile("loadout"),
       editCard: () => void ownProfile("card"),
     });
-    app.replaceChildren(h("section.panel.panel-wide.native-support", null, head, support));
+    app.replaceChildren(h("section.panel.panel-wide.panel-support.native-support", null, head, support));
   } else if (screen === "settings") {
     app.replaceChildren(h("section.panel.native-settings", null, heading("Settings"),settingsPanel()));
   } else if (screen === "credits") {
@@ -266,19 +268,26 @@ function render(): void {
   } else if(screen==="stats") {
     const { head, tabs } = tabbedHeading("Stats");
     const stats = statsScreen({ tabsHost: tabs, play: () => show("maps") });
-    app.replaceChildren(h("section.panel.panel-wide.native-stats", null, head, stats));
+    app.replaceChildren(h("section.panel.panel-wide.panel-stats.native-stats", null, head, stats));
   } else if(screen==="loadout") {
     // The web's Loadout is your profile's Loadout tab (signed out: that tab alone), under "Profile".
     const { head, tabs } = tabbedHeading("Profile");
-    app.replaceChildren(h("section.panel.native-loadout", null, head, cosmeticsPanel(playMap, loadoutSlot, tabs)));
+    app.replaceChildren(h("section.panel.panel-wide.panel-profile.native-loadout", null, head, cosmeticsPanel(playMap, loadoutSlot, tabs)));
   } else if(screen==="tutorial") {
-    app.replaceChildren(h("section.panel.native-tutorial-screen",null,heading("Tutorial"),tutorialPanel()));
+    app.replaceChildren(h("section.panel.panel-wide.native-tutorial-screen",null,heading("Tutorial"),tutorialPanel()));
   } else {
     const { head, tabs } = tabbedHeading("Profile");
     const profile = profilePanel(profileId, playMap, () => show("loadout"), { ...profileOpen, tabsHost: tabs });
-    app.replaceChildren(h("section.panel.panel-wide.native-profile", null, head, profile));
+    app.replaceChildren(h("section.panel.panel-wide.panel-profile.native-profile", null, head, profile));
   }
-
+  // Privacy · Terms · Credits under every panel screen (web menu.ts render).
+  if(screen!=="home")app.querySelector(":scope > .panel")?.append(legalLinks());
+  if(screen!=="home"&&screen!=="maps"&&!app.classList.contains("native-steady"))focusFirstControl();
+}
+/** A screen opens with its first control focused, as on the web (menu.ts render): the keyboard and pad start there. */
+function focusFirstControl():void {
+  const first=app.querySelector<HTMLElement>("[data-autofocus]")??app.querySelector<HTMLElement>("button:not([disabled]), [href], input, select");
+  first?.focus({preventScroll:true});
 }
 
 const activityService=new NativeActivityService({store:{read:()=>JSON.parse(localStorage.getItem("bunnyhop:native-playtime-pending")??"null"),write:value=>{if(value)localStorage.setItem("bunnyhop:native-playtime-pending",JSON.stringify(value));else localStorage.removeItem("bunnyhop:native-playtime-pending");}},now:()=>Date.now(),generation:accountGeneration,account:async()=>{const user=await api.me();return api.meStale()?undefined:user?.id??null;},report:(seconds,dispatch)=>api.reportPlaytime(seconds,dispatch),local:delta=>{if(delta.loaded)recordMapPlayed(delta.map);for(let i=0;i<delta.jumps;i++)countJump();if(delta.map!=="bhop_lol_tutorial"){mapTime.played(delta.map,delta.seconds);for(let i=0;i<delta.attempts;i++)mapTime.attempt(delta.map);}}});
@@ -476,6 +485,7 @@ setGameInfo(()=>({inGame:!!state.map,client:"native",...(state.map?{map:state.ma
   // Mouse, frame-time and input-queue diagnostics, when the overlay has produced a sample.
   ...(latestMouseDiagnostics()?{inputDiagnostics:latestMouseDiagnostics()}:{})}));
 initSocial();initDock();initCosmetics();installNowPlaying();installNativeUiAudio();
+installMuteButton();
 installHudTheme();
 initCustomCss();
 installMenuBackdrop();
