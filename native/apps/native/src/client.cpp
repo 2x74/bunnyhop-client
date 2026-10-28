@@ -26,7 +26,7 @@
 #include "menu_gamepad.hpp"
 #include "hud.hpp"
 #include "capabilities.hpp"
-#include "practice.hpp"
+#include "practice_controller.hpp"
 #include "leave_hold.hpp"
 #include "native_chat.hpp"
 #include "sniper_zoom.hpp"
@@ -54,7 +54,7 @@
 #include "app_identity.hpp"
 #include "room_state.hpp"
 #include "room_modes.hpp"
-#include "tutorial.hpp"
+#include "tutorial_runner.hpp"
 #include "discord_rpc.hpp"
 #include "data_location.hpp"
 #include "relaunch.hpp"
@@ -368,28 +368,11 @@ int run(const native::Options &opt) {
     };
     std::string pending_room_map;
     double display_fps = 0;
-    constexpr const char *tutorial_map = "bhop_lol_tutorial";
-    std::unique_ptr<native::Tutorial> tutorial;
-    nlohmann::json tutorial_completed = nlohmann::json::array();
-    try {
-        if (std::filesystem::exists(cache / "tutorial-progress.json")
-            && std::filesystem::file_size(cache / "tutorial-progress.json") <= 4096) {
-            const auto saved = nlohmann::json::parse(native::read_text(cache / "tutorial-progress.json"));
-            if (saved.is_array()) tutorial_completed = saved;
-        }
-    } catch (const std::exception &e) {
-        std::cerr << "Tutorial progress: " << e.what() << '\n';
-    }
+    native::TutorialRunner tutorial_runner;
+    tutorial_runner.load_progress(cache);
     std::string pending_tutorial = opt.tutorial_lesson;
-    bool pending_tutorial_demo = opt.tutorial_demo, tutorial_demo = false, tutorial_stopped = false,
-         tutorial_final_saved = false;
-    uint32_t tutorial_demo_start = 0;
+    bool pending_tutorial_demo = opt.tutorial_demo;
     std::function<void(const std::string &, bool)> start_tutorial;
-    auto save_tutorial = [&]() {
-        if (!tutorial) return;
-        tutorial_completed = tutorial->stateJSON().at("completed");
-        json_writer.write(cache / "tutorial-progress.json", tutorial_completed);
-    };
     // Keys as last polled (actions, turnbinds, overlays). Timed ticks use their own key state (input.queue.keys).
     std::set<std::string> held_codes;
     native::InputTimeline input_timeline;
@@ -493,7 +476,7 @@ int run(const native::Options &opt) {
     // events the simulation already produced and never feeds anything back.
     native::MovementFeedback feedback;
     native::TurnAdmission turn_admission;
-    native::Practice practice;
+    native::PracticeController practice;
     native::LeaveHold leave_hold;
     std::string gauntlet_id, gauntlet_map;
     nlohmann::json gauntlet_progress;
@@ -640,10 +623,8 @@ int run(const native::Options &opt) {
         event["wasm"] = identity.value("wasm", std::string());
         menu->evaluate_js("window.bunnyhopNativeMenu?.onRunEvent?.(" + event.dump() + ")");
     };
-    // The tutorial's lessons are practice; its final course (bonus 1) is a ranked run with its own board, as on the
-    // web (tutorial/flow.ts FINAL_TRACK) and the server.
     auto tutorial_practice = [&]() {
-        return map_id == tutorial_map && !(tutorial && tutorial->is_active() && tutorial->lesson_id() == "final");
+        return tutorial_runner.practice(map_id);
     };
     // The signed-in account's display name for replay headers (menu "playerName"), "player" until it says.
     std::string replay_player = "player";
@@ -699,27 +680,23 @@ int run(const native::Options &opt) {
                     core.get(),
                     "Restoring canonical map timer");
         active_style = active_track ? "autohop" : selected_style;
-        if (tutorial && tutorial->is_active() && active_style != "legit" && active_style != "scroll")
+        if (tutorial_runner.lesson && tutorial_runner.lesson->is_active() && active_style != "legit"
+            && active_style != "scroll")
             active_style = "autohop";
         hud.context(replay_list, map_id, active_style, active_track);
         room.solo_display(map_id, replay_player, active_style);
         require(bh_style_set(core.get(), active_style.c_str()), core.get(), "Applying movement style");
         require(bh_reset(core.get()), core.get(), "Restarting map");
         const auto restart = native::RestartPlacement::place(
-                core.get(), map_id, active_track, zones, tutorial && tutorial->is_active() ? nullptr : &start_points
+                core.get(),
+                map_id,
+                active_track,
+                zones,
+                tutorial_runner.lesson && tutorial_runner.lesson->is_active() ? nullptr : &start_points
         );
         curr = restart.state;
-        if (tutorial && tutorial->is_active()) {
-            tutorial->set_legit(active_style == "legit" || active_style == "scroll");
-            tutorial->start(tutorial->lesson_index());
-            const auto spawn = tutorial->spawn();
-            require(bh_set_position(core.get(), spawn.position[0], spawn.position[1], spawn.position[2], spawn.yaw),
-                    core.get(),
-                    "Placing tutorial player");
-            require(bh_set_velocity(core.get(), 0, 0, 0), core.get(), "Stopping tutorial player");
-            require(bh_state(core.get(), &curr), core.get(), "Reading tutorial restart");
-            if (tutorial_demo) tutorial_demo_start = curr.tick;
-        }
+        if (tutorial_runner.lesson && tutorial_runner.lesson->is_active())
+            tutorial_runner.restart(core.get(), active_style, curr);
         if (renderer) {
             renderer->reset_presentation();
             scope.reset();
@@ -748,7 +725,11 @@ int run(const native::Options &opt) {
     };
     auto practice_reason = [&]() {
         return native::practice_unavailable(
-                bool(core), viewer.active, !room.id.empty(), map_id == tutorial_map, !gauntlet_id.empty()
+                bool(core),
+                viewer.active,
+                !room.id.empty(),
+                map_id == native::TutorialRunner::map_id,
+                !gauntlet_id.empty()
         );
     };
     auto toast = [&](const std::string &text, unsigned ms = 3000) {
@@ -756,143 +737,95 @@ int run(const native::Options &opt) {
     };
     native::PendingMenuScript menu_script;
     auto practice_use = [&](const std::string &tool) {
-        if (!practice.active) {
-            BhRunState timing{};
-            bh_run_state(core.get(), &timing);
-            practice.active = true;
-            practice.tool = tool;
-            toast(timing.status == 1 ? "This run is practice now. Press R to restart for a real run."
-                                     : "Practice until you restart. Press R for a real run.",
-                  5000);
-        }
-        require(bh_practice_enter(core.get(), tool == "noclip"), core.get(), "Entering practice");
-        recorder.input.stop();
-        recorder.clear(false);
-        score_notice.clear();
-        run_event(heartbeat.invalidate());
+        if (const auto notice = practice.activate(core.get(), tool)) toast(*notice, 5000);
+        run_event(practice.enter(core.get(), tool, recorder, heartbeat, score_notice));
     };
-    auto practice_action = [&](const std::string &action,
-                               bool bound = false,
-                               std::optional<bool> value = std::nullopt) {
-        const auto unavailable = practice_reason();
-        if (!unavailable.empty()) {
-            toast(unavailable);
-            return;
-        }
-        BhRunState timing{};
-        bh_run_state(core.get(), &timing);
-        if (bound && action != "toggle" && !practice.key_allowed(action, timing.status == 1)) {
-            if (practice.hinted_run != timing.start_tick) {
-                practice.hinted_run = timing.start_tick;
-                toast("Type !cp to use checkpoints and noclip during a run.", 3500);
-            }
-            return;
-        }
-        if (action == "menu") {
-            practice.menu_open = !practice.menu_open;
-            return;
-        }
-        if (action == "keepVelocity") {
-            preferences["practiceKeepVelocity"] = value.value_or(!prefs.practice_keep_velocity);
-            prefs = native::Preferences::from_settings(preferences);
-            menu_state.settings_changed();
-            json_writer.write(cache / "settings.json", preferences);
-            return;
-        }
-        if (action == "toggle") {
-            practice.mode = !practice.mode;
-            if (practice.mode) {
-                practice.tool.clear();
-                practice_use("");
-                const auto bound = [&](const char *action) -> std::string {
-                    const auto &keys = input_timeline.binds().codes(action);
-                    if (keys.empty()) {
-                        const std::string_view a(action);
-                        return a == "cpSave" ? "!save" : a == "cpTeleport" ? "!tele" : "!nc";
-                    }
-                    std::string k = keys[0];
-                    if (k == "Backquote") return "`";
-                    if (k.starts_with("Key") || k.starts_with("Digit")) return k.substr(k.starts_with("Key") ? 3 : 5);
-                    if (k.starts_with("Mouse")) return "M" + k.substr(5);
-                    return k;
-                };
-                toast("Practice: no scores. " + bound("noclip") + ": noclip | " + bound("cpSave")
-                              + ": save checkpoint | " + bound("cpTeleport") + ": teleport.",
-                      6000);
-            } else {
-                reset();
-                toast("Practice mode off. You're back at the start.");
-            }
-            return;
-        }
-        if (action == "save") {
-            auto handle = bh_practice_save(core.get(), float(input.yaw()), float(input.pitch));
-            // Retain the newest 100 snapshots within the bridge's 128 MiB cap.
-            // On large maps evict the oldest and retry, as the web checkpoint store does.
-            while (!handle && !practice.checkpoints.empty()) {
-                bh_practice_free(core.get(), practice.checkpoints.front().handle);
-                practice.checkpoints.erase(practice.checkpoints.begin());
-                handle = bh_practice_save(core.get(), float(input.yaw()), float(input.pitch));
-            }
-            require(handle != 0, core.get(), "Saving checkpoint");
-            practice.retain({handle, selected_style, active_style, active_track});
-            toast("Checkpoint " + std::to_string(practice.number()) + " saved");
-            return;
-        }
-        if (action == "noclip") {
-            if (!practice.noclip) {
-                BhRunState before{};
-                bh_run_state(core.get(), &before);
-                practice_use("noclip");
-                practice.noclip = true;
-                if (before.status == 1) toast("Noclip: timer stopped. Press R for a real run.", 3500);
-                for (int k = 0; k < 3; k++) {
-                    practice.flight.position[k] = curr.position[k];
-                    practice.flight.velocity[k] = curr.velocity[k];
+    auto practice_action =
+            [&](const std::string &action, bool bound = false, std::optional<bool> value = std::nullopt) {
+                const auto unavailable = practice_reason();
+                if (!unavailable.empty()) {
+                    toast(unavailable);
+                    return;
                 }
-            } else {
-                BhSnapshot snapshot{};
-                const auto result = bh_practice_noclip_exit(
-                        core.get(), &practice.flight, float(input.yaw()), float(input.pitch), &snapshot
-                );
-                practice.noclip = false;
-                curr = prev = snapshot.player;
-                if (!result) toast("You're stuck in a wall. Noclip again, or teleport to a checkpoint.", 4000);
-            }
-        } else if (action == "tele" || action == "prev" || action == "next") {
-            if (practice.checkpoints.empty()) {
-                toast("No checkpoint yet. Press C to save one.");
-                return;
-            }
-            if (action != "tele") practice.step(action == "prev" ? -1 : 1);
-            const auto &cp = practice.checkpoints[practice.current];
-            if (cp.selected != selected_style) {
-                toast("That checkpoint was saved in another style.");
-                return;
-            }
-            BhSnapshot snapshot{};
-            BhCmd view{};
-            require(bh_practice_restore(core.get(), cp.handle, &view, &snapshot), core.get(), "Restoring checkpoint");
-            practice_use("teleport");
-            practice.noclip = false;
-            active_style = cp.style;
-            active_track = cp.track;
-            if (!prefs.practice_keep_velocity)
-                require(bh_set_velocity(core.get(), 0, 0, 0), core.get(), "Clearing checkpoint speed");
-            require(bh_state(core.get(), &curr), core.get(), "Reading checkpoint");
-            prev = curr;
-            input.set_angles(view.pitch, view.yaw);
-            toast("Checkpoint " + std::to_string(practice.number()) + " of "
-                  + std::to_string(practice.checkpoints.size()));
-        } else
-            throw std::runtime_error("Unknown practice action");
-        if (renderer) renderer->reset_presentation();
-        scope.reset();
-        audio.reset();
-        reset_feedback(true);
-        reset_input_timing();
-        room_events |= 8;
-    };
+                BhRunState timing{};
+                bh_run_state(core.get(), &timing);
+                if (bound && action != "toggle" && !practice.key_allowed(action, timing.status == 1)) {
+                    if (practice.hinted_run != timing.start_tick) {
+                        practice.hinted_run = timing.start_tick;
+                        toast("Type !cp to use checkpoints and noclip during a run.", 3500);
+                    }
+                    return;
+                }
+                if (action == "menu") {
+                    practice.menu_open = !practice.menu_open;
+                    return;
+                }
+                if (action == "keepVelocity") {
+                    preferences["practiceKeepVelocity"] = value.value_or(!prefs.practice_keep_velocity);
+                    prefs = native::Preferences::from_settings(preferences);
+                    menu_state.settings_changed();
+                    json_writer.write(cache / "settings.json", preferences);
+                    return;
+                }
+                if (action == "toggle") {
+                    practice.mode = !practice.mode;
+                    if (practice.mode) {
+                        practice.tool.clear();
+                        practice_use("");
+                        toast(native::PracticeController::help(input_timeline.binds()), 6000);
+                    } else {
+                        reset();
+                        toast("Practice mode off. You're back at the start.");
+                    }
+                    return;
+                }
+                if (action == "save") {
+                    practice.save(core.get(), input, selected_style, active_style, active_track);
+                    toast("Checkpoint " + std::to_string(practice.number()) + " saved");
+                    return;
+                }
+                if (action == "noclip") {
+                    if (!practice.noclip) {
+                        BhRunState before{};
+                        bh_run_state(core.get(), &before);
+                        practice_use("noclip");
+                        practice.noclip = true;
+                        if (before.status == 1) toast("Noclip: timer stopped. Press R for a real run.", 3500);
+                        practice.begin_flight(curr);
+                    } else {
+                        const auto result = practice.exit_flight(core.get(), input, curr, prev);
+                        if (!result) toast("You're stuck in a wall. Noclip again, or teleport to a checkpoint.", 4000);
+                    }
+                } else if (action == "tele" || action == "prev" || action == "next") {
+                    if (practice.checkpoints.empty()) {
+                        toast("No checkpoint yet. Press C to save one.");
+                        return;
+                    }
+                    if (action != "tele") practice.step(action == "prev" ? -1 : 1);
+                    const auto &cp = practice.checkpoints[practice.current];
+                    if (cp.selected != selected_style) {
+                        toast("That checkpoint was saved in another style.");
+                        return;
+                    }
+                    const auto view = practice.restore(core.get());
+                    practice_use("teleport");
+                    practice.noclip = false;
+                    active_style = cp.style;
+                    active_track = cp.track;
+                    curr = practice.restore_velocity(core.get(), prefs.practice_keep_velocity);
+                    prev = curr;
+                    input.set_angles(view.pitch, view.yaw);
+                    toast("Checkpoint " + std::to_string(practice.number()) + " of "
+                          + std::to_string(practice.checkpoints.size()));
+                } else
+                    throw std::runtime_error("Unknown practice action");
+                if (renderer) renderer->reset_presentation();
+                scope.reset();
+                audio.reset();
+                reset_feedback(true);
+                reset_input_timing();
+                room_events |= 8;
+            };
     auto leave_map = [&]() {
         cancel_video();
         viewer.controls = {};
@@ -911,14 +844,14 @@ int run(const native::Options &opt) {
         pending_action.clear();
         pending_room_map.clear();
         pending_tutorial.clear();
-        tutorial_stopped = true;
+        tutorial_runner.stopped = true;
         replay_compare.clear();
         replay_compare_import.reset();
         if (core) bh_record_end(core.get());
         practice.clear(core.get());
         renderer.reset();
         core.reset();
-        tutorial.reset();
+        tutorial_runner.lesson.reset();
         viewer.active = false;
         viewer.paused = false;
         viewer.id.clear();
@@ -962,8 +895,8 @@ int run(const native::Options &opt) {
         if (action.stop_spectating && menu && menu_ready)
             menu->evaluate_js("window.bunnyhopNativeMenu?.onRoomCommand?.({t:'spec',target:null})");
         if (action.restart && core) {
-            if (tutorial) tutorial->stop();
-            tutorial_demo = false;
+            if (tutorial_runner.lesson) tutorial_runner.lesson->stop();
+            tutorial_runner.demo = false;
             if (!action.style.empty()) selected_style = action.style;
             active_track = action.track;
             reset();
@@ -991,17 +924,8 @@ int run(const native::Options &opt) {
                     next.get(),
                     "Configuring timer");
         std::unique_ptr<native::Tutorial> next_tutorial;
-        if (id == tutorial_map) {
-            const auto metadata = nlohmann::json::parse(native::read_text(assets / "tutorial.json"));
-            if (native::file_hash(data_location::from_utf8(path)) != metadata.at("bspSha256").get<std::string>())
-                throw std::runtime_error(
-                        "Tutorial BSP does not match bundled lessons; update the tutorial assets and map together"
-                );
-            next_tutorial = std::make_unique<native::Tutorial>(
-                    metadata, selected_style == "legit" || selected_style == "scroll"
-            );
-            next_tutorial->set_completed(tutorial_completed);
-        }
+        if (id == native::TutorialRunner::map_id)
+            next_tutorial = tutorial_runner.prepare(data_location::from_utf8(path), assets, selected_style);
         audio.set_classic_loader([content, cache]() {
             if (!content.empty()) native::download_classic_sounds(data_location::from_utf8(content), cache);
         });
@@ -1026,8 +950,8 @@ int run(const native::Options &opt) {
         renderer->set_zones(zones);
         viewer.camera.reset();
         hud.reset_history();
-        tutorial = std::move(next_tutorial);
-        tutorial_demo = false;
+        tutorial_runner.lesson = std::move(next_tutorial);
+        tutorial_runner.demo = false;
         map_id = id;
         error.clear();
         viewer.active = false;
@@ -1165,8 +1089,8 @@ int run(const native::Options &opt) {
         if (!core) throw std::runtime_error("Load the replay map first");
         recorder.input.stop();
         practice.clear(core.get());
-        if (tutorial) tutorial->stop();
-        tutorial_demo = false;
+        if (tutorial_runner.lesson) tutorial_runner.lesson->stop();
+        tutorial_runner.demo = false;
         renderer->reset_presentation();
         scope.reset();
         bh_record_end(core.get());
@@ -1321,47 +1245,18 @@ int run(const native::Options &opt) {
         }
     };
     start_tutorial = [&](const std::string &lesson, bool demo) {
-        if (!core || map_id != tutorial_map || !tutorial)
+        if (!core || map_id != native::TutorialRunner::map_id || !tutorial_runner.lesson)
             throw std::runtime_error("Load the tutorial map before starting a lesson");
-        ghosts.clear_for_tutorial(core.get());
-        tutorial_demo = false;
-        tutorial_stopped = false;
-        tutorial_final_saved = false;
-        tutorial->start(lesson);
+        tutorial_runner.start(lesson, core.get(), ghosts);
         active_track = lesson == "final" ? 1 : 0;
         reset();
-        std::array<std::string, 4> labels{"Space", "W", "A", "D"};
-        const char *actions[] = {"jump", "forward", "left", "right"};
-        for (int k = 0; k < 4; k++) {
-            const auto &bound = input_timeline.binds().codes(actions[k]);
-            if (!bound.empty()) {
-                labels[k] = bound[0];
-                if (labels[k].rfind("Key", 0) == 0) labels[k].erase(0, 3);
-            }
-        }
-        tutorial->set_keys(labels);
+        tutorial_runner.set_keys(input_timeline.binds());
         score_notice.clear();
         if (demo) {
-            const auto &meta = tutorial->lesson_data();
-            const auto key = (active_style == "legit" || active_style == "scroll") && meta.contains("nativeDemoLegit")
-                                     ? "nativeDemoLegit"
-                                     : "nativeDemo";
-            if (!meta.contains(key)) throw std::runtime_error("Tutorial demonstration is absent");
-            const auto file = meta.at(key).get<std::string>();
-            if (file.find_first_of("/\\") != std::string::npos)
-                throw std::runtime_error("Invalid bundled tutorial replay path");
-            ghosts.handle = bh_ghost_load(core.get(), data_location::utf8(assets / "tutorial" / file).c_str());
-            require(ghosts.handle != 0, core.get(), "Loading native tutorial demonstration");
-            size_t bytes = 0;
-            const auto *raw = bh_ghost_info(core.get(), ghosts.handle, &bytes);
-            require(raw != nullptr, core.get(), "Reading tutorial demonstration");
-            ghosts.info = nlohmann::json::parse(raw, raw + bytes);
+            tutorial_runner.load_demo(core.get(), assets, active_style, ghosts);
             renderer->register_ghost(0, ghosts.handle, ghosts.info);
             hud.extras.ghost(ghosts.info);
-            ghosts.enabled = true;
-            tutorial_demo = true;
-            tutorial_demo_start = curr.tick;
-            ghosts.id = "tutorial-" + lesson;
+            tutorial_runner.begin_demo(lesson, curr.tick, ghosts);
         }
         std::cout << "Native tutorial " << lesson << (demo ? " demonstration" : " lesson")
                   << (lesson == "final" ? "; ranked final course\n" : "; ranked recording disabled\n");
@@ -1528,7 +1423,7 @@ int run(const native::Options &opt) {
                         start_points.clear(map_id, active_track);
                         toast("Start point cleared");
                     } else {
-                        if (tutorial && tutorial->is_active()) {
+                        if (tutorial_runner.lesson && tutorial_runner.lesson->is_active()) {
                             toast("Start points are unavailable in tutorial lessons");
                             return;
                         }
@@ -1592,8 +1487,8 @@ int run(const native::Options &opt) {
                     return;
                 }
                 if (action == "restart" || action == "restartMain") {
-                    if (tutorial && tutorial->is_active())
-                        start_tutorial(tutorial->lesson_id(), tutorial_demo);
+                    if (tutorial_runner.lesson && tutorial_runner.lesson->is_active())
+                        start_tutorial(tutorial_runner.lesson->lesson_id(), tutorial_runner.demo);
                     else {
                         if (action == "restartMain") active_track = 0;
                         reset();
@@ -1732,7 +1627,7 @@ int run(const native::Options &opt) {
         );
     }
     if (!opt.online_map.empty()) request_map(opt.online_map);
-    if (tutorial) {
+    if (tutorial_runner.lesson) {
         const auto lesson = pending_tutorial.empty() ? "jump" : pending_tutorial;
         start_tutorial(lesson, pending_tutorial_demo);
         pending_tutorial.clear();
@@ -2774,7 +2669,7 @@ int run(const native::Options &opt) {
                             && (style != "autohop" || message.value("track", 0u) != 0
                                 || (!gauntlet_map.empty() && message.at("id").get<std::string>() != gauntlet_map)))
                             throw std::runtime_error("Gauntlets are Normal style on the main track.");
-                        tutorial_stopped = false;
+                        tutorial_runner.stopped = false;
                         selected_style = style;
                         active_track = message.value("track", 0u);
                         if (active_track > 64) throw std::runtime_error("Invalid track");
@@ -2915,30 +2810,30 @@ int run(const native::Options &opt) {
                     } else if (type == "tutorial") {
                         const auto action = message.at("action").get<std::string>();
                         if (action == "stop") {
-                            tutorial_stopped = true;
+                            tutorial_runner.stopped = true;
                             pending_tutorial.clear();
-                            if (tutorial) tutorial->stop();
-                            if (tutorial_demo && ghosts.handle) {
+                            if (tutorial_runner.lesson) tutorial_runner.lesson->stop();
+                            if (tutorial_runner.demo && ghosts.handle) {
                                 bh_ghost_free(core.get(), ghosts.handle);
                                 ghosts.handle = 0;
                                 ghosts.enabled = false;
                             }
-                            tutorial_demo = false;
+                            tutorial_runner.demo = false;
                             score_notice.clear();
                             show_menu(true);
                         } else if (action == "start" || action == "demo") {
                             const auto lesson = message.at("lesson").get<std::string>();
                             if (lesson != "jump" && lesson != "strafe" && lesson != "speed" && lesson != "final")
                                 throw std::runtime_error("Unknown tutorial lesson");
-                            if (map_id == tutorial_map && core && tutorial)
+                            if (map_id == native::TutorialRunner::map_id && core && tutorial_runner.lesson)
                                 start_tutorial(lesson, action == "demo");
                             else {
-                                tutorial_stopped = false;
+                                tutorial_runner.stopped = false;
                                 pending_tutorial = lesson;
                                 pending_tutorial_demo = action == "demo";
                                 selected_style = "autohop";
                                 active_track = 0;
-                                request_map(tutorial_map);
+                                request_map(native::TutorialRunner::map_id);
                             }
                         } else
                             throw std::runtime_error("Unknown tutorial action");
@@ -3289,7 +3184,7 @@ int run(const native::Options &opt) {
                     load_progress["message"] = error;
                 }
             }
-            if (tutorial && !tutorial_stopped && error.empty() && pending_replay.empty()) {
+            if (tutorial_runner.lesson && !tutorial_runner.stopped && error.empty() && pending_replay.empty()) {
                 const auto lesson = pending_tutorial.empty() ? "jump" : pending_tutorial;
                 try {
                     start_tutorial(lesson, pending_tutorial_demo);
@@ -3385,7 +3280,7 @@ int run(const native::Options &opt) {
                               : !room.id.empty()    ? "multiplayer"
                               : tutorial_practice() ? "practice"
                                                     : "solo";
-                status.map = map_id == tutorial_map ? "the tutorial" : map_id;
+                status.map = map_id == native::TutorialRunner::map_id ? "the tutorial" : map_id;
                 const auto named = style_names.find(active_style);
                 status.style = named == style_names.end() ? active_style : named->second;
                 status.started_at = presence_started;
@@ -3520,12 +3415,12 @@ int run(const native::Options &opt) {
                 bh_last_command(core.get(), &cmd);
                 input.set_angles(cmd.pitch, cmd.yaw, 5);
             } else {
-                const bool turns_allowed =
-                        captured
-                        && native::turn_binds_allowed(
-                                active_style,
-                                (tutorial && tutorial->is_active()) || practice.active || feedback.ssj_was_noclip
-                        );
+                const bool turns_allowed = captured
+                                           && native::turn_binds_allowed(
+                                                   active_style,
+                                                   (tutorial_runner.lesson && tutorial_runner.lesson->is_active())
+                                                           || practice.active || feedback.ssj_was_noclip
+                                           );
                 const auto &turns = recorder.input.active() ? recorder.input.turns : configured_turns;
                 const double rate = turns.apply(input, input_timeline.held(held_codes), dt, turns_allowed);
                 if (turn_admission.observe(rate, active_style == "scroll")) {
@@ -3691,16 +3586,12 @@ int run(const native::Options &opt) {
             BhRunState tick_run{};
             if (viewer.active || !zones.empty())
                 require(bh_run_state(core.get(), &tick_run), core.get(), "Reading native timer");
-            if (tutorial && tutorial->is_active() && !viewer.active) {
+            if (tutorial_runner.lesson && tutorial_runner.lesson->is_active() && !viewer.active) {
                 BhCmd filtered = cmd;
                 bh_last_command(core.get(), &filtered);
-                const auto result = tutorial->tick(tutorial_pre, curr, filtered, curr.events, dt);
-                if (result.completed) save_tutorial();
-                if (tick_run.status == 2 && tutorial->lesson_id() == "final" && !tutorial_final_saved) {
-                    tutorial->finish(tick_run.seconds);
-                    save_tutorial();
-                    tutorial_final_saved = true;
-                }
+                const auto result = tutorial_runner.tick(
+                        tutorial_pre, curr, filtered, curr.events, dt, tick_run, cache, json_writer
+                );
                 if (result.next_lesson >= 0 && result.next_lesson < 4) {
                     constexpr const char *ids[] = {"jump", "strafe", "speed", "final"};
                     start_tutorial(ids[result.next_lesson], false);
@@ -3805,7 +3696,7 @@ int run(const native::Options &opt) {
                         world_record_generation == heartbeat.generation ? known_world_record : std::nullopt,
                         hud.extras.ghost_target(map_id, active_style, active_track, ghosts.enabled && ghosts.handle),
                         practice.active || turn_admission.local_only || viewer.active || room_modes.has_race()
-                                || (tutorial && tutorial->is_active()) || !captured
+                                || (tutorial_runner.lesson && tutorial_runner.lesson->is_active()) || !captured
                 )) {
                 if (hud.preferences().auto_restart_sound)
                     audio.play("countdown_tick");
@@ -3828,18 +3719,18 @@ int run(const native::Options &opt) {
             const BhCmd *shown_ghost_command = nullptr;
             if (ghosts.enabled && renderer->ghost_visible(0) && prefs.show_ghost && ghosts.handle && !viewer.active
                 && !spectator
-                && (tutorial_demo
+                && (tutorial_runner.demo
                     || (ghosts.info.value("track", 0u) == active_track
                         && ghosts.info.value("style", std::string("autohop")) == active_style))) {
                 BhGhostFrame ghost{};
                 const auto &path = renderer->ghost_path(0);
-                const uint32_t elapsed = tutorial_demo      ? curr.tick - tutorial_demo_start
-                                         : run_state.status ? curr.tick - run_state.start_tick
-                                                            : 0;
-                const uint32_t tick = tutorial_demo ? ghosts.info.value("startTick", 0u) + elapsed
-                                                    : std::min(path.start + elapsed, path.end);
+                const uint32_t elapsed = tutorial_runner.demo ? curr.tick - tutorial_runner.demo_start
+                                         : run_state.status   ? curr.tick - run_state.start_tick
+                                                              : 0;
+                const uint32_t tick = tutorial_runner.demo ? ghosts.info.value("startTick", 0u) + elapsed
+                                                           : std::min(path.start + elapsed, path.end);
                 if (bh_ghost_frame(core.get(), ghosts.handle, tick, &ghost)) {
-                    if (!tutorial_demo) {
+                    if (!tutorial_runner.demo) {
                         shown_ghost_command = &ghost_command;
                         if (path.start + elapsed <= path.end)
                             bh_ghost_command(core.get(), ghosts.handle, tick, &ghost_command);
@@ -3847,7 +3738,7 @@ int run(const native::Options &opt) {
                     const float opacity =
                             native::GhostSlots::opacity(curr, ghost, prefs.ghost_opacity, prefs.ghost_near_fade);
                     renderer->set_replay_actor(
-                            ghost, tutorial_demo ? "outfit-cream" : outfit, renderer->ghost_loadout(0), opacity
+                            ghost, tutorial_runner.demo ? "outfit-cream" : outfit, renderer->ghost_loadout(0), opacity
                     );
                     native_render::Actor actor;
                     actor.id = "replay-ghost";
@@ -3856,9 +3747,9 @@ int run(const native::Options &opt) {
                     audible_ghost = actor;
                 } else {
                     renderer->set_replay_actor(nullptr, 0, 0);
-                    if (tutorial_demo) {
+                    if (tutorial_runner.demo) {
                         ghosts.enabled = false;
-                        tutorial_demo = false;
+                        tutorial_runner.demo = false;
                     }
                 }
             } else
@@ -3881,8 +3772,9 @@ int run(const native::Options &opt) {
                         allowed
                 );
             }
-            std::string shown_notice =
-                    tutorial && tutorial->is_active() && !viewer.active ? tutorial->notice() : score_notice;
+            std::string shown_notice = tutorial_runner.lesson && tutorial_runner.lesson->is_active() && !viewer.active
+                                               ? tutorial_runner.lesson->notice()
+                                               : score_notice;
 
             renderer->set_player_glow(player_glow);
             if (!spectator) renderer->set_spectated_actor(std::nullopt);
@@ -3957,7 +3849,7 @@ int run(const native::Options &opt) {
             }
             if (spectator) room.spectator_run(display_run, display_style, *spectator, steady_seconds, epoch_ms());
             if (hide_players) actors.clear();
-            if (!viewer.active && !spectator && !tutorial_demo && prefs.show_ghost)
+            if (!viewer.active && !spectator && !tutorial_runner.demo && prefs.show_ghost)
                 for (unsigned i = 1; i < 4; i++) {
                     const auto &slot = ghosts.slots[i];
                     if (!slot.handle || !slot.enabled || !renderer->ghost_visible(i)
@@ -4030,7 +3922,7 @@ int run(const native::Options &opt) {
                 if (spectated_actor && !external_camera) audio.spatial_actor(*spectated_actor, frame_seconds, false);
             }
             native::update_compare_actor(*renderer, replay_compare, curr.tick, viewer.session.range, viewer.active);
-            renderer->route_context(active_track, active_style, !viewer.active && !spectator && !tutorial_demo);
+            renderer->route_context(active_track, active_style, !viewer.active && !spectator && !tutorial_runner.demo);
             renderer->surface_tools_frame(
                     curr, input, simulation_active && captured && !viewer.active && !spectator, steady_seconds
             );
@@ -4463,20 +4355,13 @@ int run(const native::Options &opt) {
                            : !gauntlet_id.empty()                     ? "gauntlet"
                            : (practice.active || tutorial_practice()) ? "practice"
                                                                       : "solo"},
-                          {"practice", practice.active || map_id == tutorial_map}}},
+                          {"practice", practice.active || map_id == native::TutorialRunner::map_id}}},
                         {"practice",
-                         {{"available", practice_reason().empty()},
-                          {"unavailable",
-                           practice_reason().empty() ? nlohmann::json(nullptr) : nlohmann::json(practice_reason())},
-                          {"mode", practice.mode},
-                          {"active", practice.active},
-                          {"thirdPerson", third_person && !viewer.active && !room.spectator_target},
-                          {"tool", practice.tool.empty() ? nlohmann::json(nullptr) : nlohmann::json(practice.tool)},
-                          {"noclip", practice.noclip},
-                          {"menuOpen", practice.menu_open},
-                          {"count", practice.checkpoints.size()},
-                          {"current", practice.number()},
-                          {"keepVelocity", prefs.practice_keep_velocity}}},
+                         practice.state(
+                                 practice_reason(),
+                                 third_person && !viewer.active && !room.spectator_target,
+                                 prefs.practice_keep_velocity
+                         )},
                         {"gauntlet",
                          {{"id", gauntlet_id.empty() ? nlohmann::json(nullptr) : nlohmann::json(gauntlet_id)},
                           {"map", gauntlet_map.empty() ? nlohmann::json(nullptr) : nlohmann::json(gauntlet_map)}}},
@@ -4489,11 +4374,11 @@ int run(const native::Options &opt) {
                           {"target", spectator ? nlohmann::json(*spectator) : nlohmann::json(nullptr)},
                           {"raceFrozen", room_modes.frozen()}}},
                         {"tutorial",
-                         tutorial ? tutorial->stateJSON()
-                                  : nlohmann::
-                                            json{{"active", false},
-                                                 {"lesson", "jump"},
-                                                 {"completed", tutorial_completed}}},
+                         tutorial_runner.lesson ? tutorial_runner.lesson->stateJSON()
+                                                : nlohmann::
+                                                          json{{"active", false},
+                                                               {"lesson", "jump"},
+                                                               {"completed", tutorial_runner.completed}}},
                         {"playback", viewer.state(curr.tick, run_state.seconds, dt)},
                         {"ghost",
                          {{"enabled", ghosts.enabled},
