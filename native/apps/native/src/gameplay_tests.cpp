@@ -38,6 +38,17 @@ int main() {
     assert(migrated["binds"]["jump"][0] == "MWheelDown" && migrated["binds"].contains("setStart"));
     // A full serialized configuration must remain loadable after the schema grows.
     assert(native::patch_settings(defaults, native::Json::parse(migrated.dump())) == migrated);
+    // v0.0.29's wider viewmodel: an untouched old framing moves to it, a player's own framing stays.
+    native::Json untouched = {{"viewmodelFov", 54}, {"viewmodelX", .6}, {"viewmodelZ", -.9}};
+    native::migrate_viewmodel(untouched);
+    assert(!untouched.contains("viewmodelFov") && !untouched.contains("viewmodelZ") && untouched["viewmodelRev"] == 3);
+    native::Json own = {{"viewmodelFov", 54}, {"viewmodelX", 2}};
+    native::migrate_viewmodel(own);
+    assert(own["viewmodelFov"] == 54 && own["viewmodelX"] == 2 && own["viewmodelRev"] == 3);
+    native::Json chosen = {{"viewmodelFov", 54}, {"viewmodelX", .6}, {"viewmodelZ", -.9}, {"viewmodelRev", 3}};
+    native::migrate_viewmodel(chosen);
+    assert(chosen["viewmodelFov"] == 54 && chosen["viewmodelZ"] == -.9);
+    assert(defaults["viewmodelFov"] == 64 && defaults["viewmodelX"] == .5 && defaults["viewmodelZ"] == 0);
     rejects([&] { native::patch_settings(defaults, {{"crosshairColor", "#fff;"}}); });
     rejects([&] { native::patch_settings(defaults, {{"crosshairColor", "#gg0000"}}); });
     rejects([&] { native::patch_settings(defaults, {{"viewmodelFov", 101}}); });
