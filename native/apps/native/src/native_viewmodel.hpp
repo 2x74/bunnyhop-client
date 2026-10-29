@@ -990,22 +990,23 @@ public:
     }
 
     // Avatar pictures (avatar_stage.hpp): what a posed actor is made of, for framing it.
-    static constexpr size_t vertex_floats = 22;
-
     std::span<const std::string> actor_parts(const native_render::Actor &actor) {
         return parts_for(actor, look(actor.outfit, actor.loadout));
     }
 
-    // A mesh's vertices, `vertex_floats` each: position, normal, colour, then four bone ids. Empty when absent.
+    static constexpr size_t mesh_vertex_floats = vertex_floats;
+
+    // A mesh's vertices, `mesh_vertex_floats` each: position, normal, colour, then four bone ids first. Empty when
+    // absent.
     std::span<const float> mesh_vertices(const std::string &name) const {
         const auto at = meshes.find(name);
         if (at == meshes.end()) return {};
         return {data.data() + at->second.offset, at->second.vertices * vertex_floats};
     }
 
-    native_render::HatFit actor_hat_fit(const native_render::Actor &actor) {
-        const auto &l = look(actor.outfit, actor.loadout);
-        return native_render::hat_fit(l.outfit, l.hat);
+    // The website's per-body hat fit (fit_headwear), so framing matches how the headwear is drawn.
+    const HeadwearFit &actor_hat_fit(const native_render::Actor &actor) {
+        return look(actor.outfit, actor.loadout).fit;
     }
 
     const std::vector<float> &actor_pose() const { return pose; }

@@ -183,12 +183,12 @@ class NativeAvatarStage {
     // before the feet's yaw. Each vertex is carried by its first bone.
     std::vector<Point> body_points(const native_render::Actor &actor, const std::vector<float> &bones) {
         std::vector<Point> out;
-        const auto fit = models.actor_hat_fit(actor);
+        const auto &fit = models.actor_hat_fit(actor);
         for (const auto &part : models.actor_parts(actor)) {
             if (part.starts_with("tpgun:") || part.starts_with("tpsilencer:")) continue;
             const bool headwear = part.starts_with("hat-") || part.starts_with("crown:");
             const auto vertices = models.mesh_vertices(part);
-            const size_t stride = native::NativeViewmodel::vertex_floats;
+            const size_t stride = native::NativeViewmodel::mesh_vertex_floats;
             for (size_t v = 0; v * stride < vertices.size(); v += vertex_sample_step) {
                 const float *vertex = vertices.data() + v * stride;
                 double p[3] = {vertex[0], vertex[1], vertex[2]};
