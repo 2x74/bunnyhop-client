@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.6.1 — Native
+
+**Fixes**
+- Frame rate is back up while you play. The timer, speed, FPS counter and run stats no longer redraw their text from
+  scratch every frame; in 0.6.0 that cost most of the frame on Windows.
+
 ## v0.6.0 — Native
 
 **Input**

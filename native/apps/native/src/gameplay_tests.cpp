@@ -180,6 +180,14 @@ int main() {
     const auto wrapped = native::wrap_text("猫狗猫", 2);
     assert(wrapped.size() == 3 && wrapped[1] == "狗");
     assert(native::text_clusters("🇺🇸!").size() == 2);
+    native::HudTextPieces<8> pieces;
+    assert(native::split_numeric_text("1:05.20", pieces) && pieces.count == 7);
+    assert(pieces.pieces[1].begin == 1 && pieces.pieces[1].length == 1 && pieces.pieces[6].begin == 6);
+    assert(native::split_numeric_text("812 u/s", pieces) && pieces.count == 4);
+    assert(pieces.pieces[3].begin == 3 && pieces.pieces[3].length == 4);
+    assert(!native::split_numeric_text("PERFECT", pieces));
+    assert(!native::split_numeric_text("12 · 3", pieces));
+    assert(!native::split_numeric_text("123456789", pieces));
     native::KeptWeapons kept;
     BhWeaponReport report{};
     report.active = report.secondary = 3;

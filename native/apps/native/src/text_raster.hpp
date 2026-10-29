@@ -10,6 +10,10 @@ namespace native {
 struct TextBitmap {
     int width = 0, height = 0;
     std::vector<uint8_t> rgba;
+    // Pixel position of the layout box's top-left corner inside the bitmap, and the pen
+    // advance after the text. They let callers line up separately rasterized runs.
+    float origin_x = 0, origin_y = 0;
+    float advance = 0;
 };
 
 struct TextCaret {

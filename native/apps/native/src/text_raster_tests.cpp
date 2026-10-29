@@ -18,6 +18,14 @@ int main() {
     const auto ones = native::raster_text("11111", 30, true);
     const auto eights = native::raster_text("88888", 30, true);
     assert(ones.width == eights.width && coverage(ones) > 0 && coverage(eights) > 0);
+    // The HUD lines up per-digit rasters by these metrics, so tabular digits must share one
+    // advance and every run must share the layout top.
+    const auto one = native::raster_text("1", 30, true), eight = native::raster_text("8", 30, true);
+    const auto units = native::raster_text(" u/s", 30, true);
+    assert(one.advance > 0 && std::abs(one.advance - eight.advance) < .01f);
+    assert(std::abs(ones.advance - 5 * one.advance) < .5f);
+    assert(std::abs(one.origin_y - units.origin_y) < .5f && units.advance > 0);
+    assert(one.origin_x >= 0 && one.origin_x < one.width);
 
     for (const auto &line :
          {"Hello hopper", "Ünïcødé 日本語 한국어", "مرحبا بالعالم", "שלום עולם", "e\xcc\x81\x20\xf0\x9f\x90\xb0"}) {

@@ -40,6 +40,54 @@ void white(TextBitmap &out) {
     for (size_t i = 0; i < out.rgba.size(); i += 4)
         out.rgba[i] = out.rgba[i + 1] = out.rgba[i + 2] = 255;
 }
+
+#if defined(_WIN32)
+// Creating the Direct2D and WIC factories costs far more than drawing a short HUD string,
+// so each thread that rasterizes keeps one set. The client already initializes COM for
+// WebView2; balance only our own successful initialization, never another owner's.
+struct WindowsTextFactories {
+    HRESULT com = E_FAIL;
+    Microsoft::WRL::ComPtr<IDWriteFactory> write;
+    Microsoft::WRL::ComPtr<ID2D1Factory> draw;
+    Microsoft::WRL::ComPtr<IWICImagingFactory> imaging;
+
+    WindowsTextFactories() {
+        com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        const bool created =
+                SUCCEEDED(DWriteCreateFactory(
+                        DWRITE_FACTORY_TYPE_SHARED,
+                        __uuidof(IDWriteFactory),
+                        reinterpret_cast<IUnknown **>(write.GetAddressOf())
+                ))
+                && SUCCEEDED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, draw.GetAddressOf()))
+                && SUCCEEDED(CoCreateInstance(
+                        CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(imaging.GetAddressOf())
+                ));
+        if (!created) release();
+    }
+
+    ~WindowsTextFactories() {
+        release();
+        if (SUCCEEDED(com)) CoUninitialize();
+    }
+
+    WindowsTextFactories(const WindowsTextFactories &) = delete;
+    WindowsTextFactories &operator=(const WindowsTextFactories &) = delete;
+
+    bool ready() const { return write && draw && imaging; }
+
+    void release() {
+        imaging.Reset();
+        draw.Reset();
+        write.Reset();
+    }
+};
+
+WindowsTextFactories &text_factories() {
+    thread_local WindowsTextFactories factories;
+    return factories;
+}
+#endif
 }  // namespace
 
 TextBitmap raster_text(const std::string &text, float size, bool tabular) {
@@ -127,6 +175,9 @@ TextBitmap raster_text(const std::string &text, float size, bool tabular) {
         // CGBitmapContext already exposes top-down scanlines for this bitmap.
         // HUD UV0 is the top edge; reversing these rows would invert every glyph.
         white(out);
+        out.origin_x = float(pad - left);
+        out.origin_y = float(height - pad - descent - ascent);
+        out.advance = float(advance);
     } else
         out = {};
     CGColorSpaceRelease(space);
@@ -143,31 +194,11 @@ TextBitmap raster_text(const std::string &text, float size, bool tabular) {
     if (count <= 0) return {};
     std::wstring wide(size_t(count), L'\0');
     MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), int(text.size()), wide.data(), count);
-    // The client already initializes COM for WebView2. A standalone caller also
-    // works: balance only our own successful initialization, never another owner's.
-    const HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-
-    struct ComScope {
-        HRESULT result;
-
-        ~ComScope() {
-            if (SUCCEEDED(result)) CoUninitialize();
-        }
-    } scope{initialized};
-
-    ComPtr<IDWriteFactory> write;
-    ComPtr<ID2D1Factory> draw;
-    ComPtr<IWICImagingFactory> imaging;
-    if (FAILED(DWriteCreateFactory(
-                DWRITE_FACTORY_TYPE_SHARED,
-                __uuidof(IDWriteFactory),
-                reinterpret_cast<IUnknown **>(write.GetAddressOf())
-        ))
-        || FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, draw.GetAddressOf()))
-        || FAILED(CoCreateInstance(
-                CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(imaging.GetAddressOf())
-        )))
-        return {};
+    auto &factories = text_factories();
+    if (!factories.ready()) return {};
+    IDWriteFactory *write = factories.write.Get();
+    ID2D1Factory *draw = factories.draw.Get();
+    IWICImagingFactory *imaging = factories.imaging.Get();
     ComPtr<IDWriteTextFormat> format;
     if (FAILED(write->CreateTextFormat(
                 L"Segoe UI",
@@ -242,6 +273,9 @@ TextBitmap raster_text(const std::string &text, float size, bool tabular) {
     if (FAILED(target->EndDraw())) return {};
     if (FAILED(image->CopyPixels(nullptr, UINT(width * 4), UINT(out.rgba.size()), out.rgba.data()))) return {};
     white(out);
+    out.origin_x = float(pad) + std::max(0.f, overhang.left);
+    out.origin_y = float(pad) + std::max(0.f, overhang.top);
+    out.advance = metrics.widthIncludingTrailingWhitespace;
     return out;
 #else
     if (!g_utf8_validate(text.data(), gssize(text.size()), nullptr)) return {};
@@ -283,6 +317,9 @@ TextBitmap raster_text(const std::string &text, float size, bool tabular) {
                 for (int x = 0; x < width; x++)
                     out.rgba[(size_t(y) * width + x) * 4 + 3] = pixels[y * stride + x];
             white(out);
+            out.origin_x = float(pad - left);
+            out.origin_y = float(pad - top);
+            out.advance = float(logical.x + logical.width);
         } else
             out = {};
         cairo_destroy(context);

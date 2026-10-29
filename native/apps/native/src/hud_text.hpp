@@ -125,3 +125,50 @@ struct HudLabel {
     bool empty() const { return bytes[0] == '\0'; }
 };
 }  // namespace native
+
+namespace native {
+// Numeric HUD text (timer, speed, FPS, run stats) changes every frame, and shaping a new string
+// means a system-font rasterization. Such strings are drawn from cached pieces instead: one
+// piece per digit and one per run of other characters. Tabular figures have equal advances and
+// no kerning, so the pieces line up like the shaped string.
+struct HudTextPiece {
+    size_t begin = 0;
+    size_t length = 0;
+};
+
+template <size_t Capacity>
+struct HudTextPieces {
+    std::array<HudTextPiece, Capacity> pieces{};
+    size_t count = 0;
+};
+
+inline bool hud_digit(char character) {
+    return character >= '0' && character <= '9';
+}
+
+inline bool hud_printable_ascii(char character) {
+    return character >= ' ' && character <= '~';
+}
+
+// Returns false for text that should be shaped whole: no digits, anything outside printable
+// ASCII (scripts that join or reorder), or more pieces than fit.
+template <size_t Capacity>
+bool split_numeric_text(std::string_view text, HudTextPieces<Capacity> &out) {
+    out.count = 0;
+    if (!std::any_of(text.begin(), text.end(), hud_digit)) return false;
+    if (!std::all_of(text.begin(), text.end(), hud_printable_ascii)) return false;
+    size_t begin = 0;
+    while (begin < text.size()) {
+        size_t end = begin + 1;
+        if (!hud_digit(text[begin])) {
+            while (end < text.size() && !hud_digit(text[end]))
+                ++end;
+        }
+        if (out.count == Capacity) return false;
+        out.pieces[out.count] = {begin, end - begin};
+        ++out.count;
+        begin = end;
+    }
+    return true;
+}
+}  // namespace native
