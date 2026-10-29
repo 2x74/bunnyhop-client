@@ -14,6 +14,11 @@ const SAMPLE = {
   relative: false,
   systemScaling: false,
   sdl: "3.4.18",
+  backend: "IOHID",
+  timestampKind: "device event",
+  motionRateHz: 8000,
+  timestampJitterMs: 0.012,
+  droppedReports: 0,
 };
 
 test("mouse diagnostics show the delivered rate without claiming the hardware polling rate", async () => {
@@ -52,6 +57,17 @@ test("mouse diagnostics show the delivered rate without claiming the hardware po
     const sample = page.locator('.set-row[data-label="Last sample"]');
     expect(await sample.textContent()).toContain("8,000 motion events/s");
     expect(await sample.textContent()).toContain("Last sample");
+    expect(await sample.textContent()).toContain("IOHID · device event timestamps");
+    expect(await sample.textContent()).toContain("8000 Hz moving · 0.012 ms timestamp jitter");
+    const backendRow = page.locator('.set-row[data-label="Mouse backend"]');
+    await backendRow.getByRole("radio", { name: "Raw", exact: true }).click();
+    await page.waitForTimeout(150);
+    const patches = await page.evaluate(() =>
+      (window as unknown as { messages: { type: string; patch?: unknown }[] }).messages.filter(
+        (message) => message.type === "settings",
+      ),
+    );
+    expect(patches.at(-1)).toEqual({ type: "settings", patch: { inputBackend: "raw" } });
     const before = await sample.textContent();
     await page.evaluate(() =>
       dispatchEvent(new CustomEvent("bunnyhop:mouse-diagnostics", { detail: { eventsPerSecond: Infinity } })),

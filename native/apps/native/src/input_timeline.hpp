@@ -66,8 +66,8 @@ public:
         queue_.begin_pump(int64_t(scheduler.first_boundary(tick_ns)), int64_t(tick_ns), scheduler.capped, input.pitch);
     }
 
-    // A gameplay SDL motion event, stamped |stamp| and read from SDL's queue at |received|.
-    void motion(Input &input, uint64_t stamp, uint64_t received, double x, double y) {
+    // Native clocks are mapped before delivery; only SDL stamps need the video-driver trust policy.
+    void motion(Input &input, uint64_t stamp, uint64_t received, double x, double y, bool native_clock = false) {
         if (!timed_) {
             input.accumulate(x, y);
             return;
@@ -75,7 +75,7 @@ public:
         if (!std::isfinite(x) || !std::isfinite(y)) {
             return;
         }
-        const uint64_t event_time = stamps_.time(EventStamps::kMotion, stamp, received);
+        const uint64_t event_time = native_clock ? stamp : stamps_.time(EventStamps::kMotion, stamp, received);
         const int64_t at = queue_.stamp(int64_t(event_time), int64_t(received), queue_.motion_tail());
         queue_.add_motion(at, x, input.pitch_degrees(y));
     }

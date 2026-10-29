@@ -156,6 +156,29 @@ void clear_and_burst() {
     close(input.yaw_counts, yaw + .125);
     assert(input.motion_events == 1);
 }
+
+void timestamp_jitter_and_clock_faults() {
+    native::MouseDiagnostics diagnostic;
+    diagnostic.begin(1, true);
+    constexpr uint64_t first_ns = 1'000'000;
+    constexpr uint64_t arrival_age_ns = 200'000;
+    constexpr uint64_t interval_ns = 125'000;
+    constexpr uint64_t deviation_ns = 62'500;
+    uint64_t stamp = first_ns;
+    diagnostic.motion(stamp, stamp + arrival_age_ns);
+    for (unsigned index = 0; index < 8000; ++index) {
+        stamp += index % 2 ? interval_ns + deviation_ns : interval_ns - deviation_ns;
+        diagnostic.motion(stamp, stamp + arrival_age_ns);
+    }
+    diagnostic.motion(stamp, stamp + arrival_age_ns);
+    diagnostic.motion(stamp - 1, stamp + arrival_age_ns);
+    diagnostic.end(second + first_ns, second);
+    close(diagnostic.last.motion_rate_hz, 8000);
+    close(diagnostic.last.timestamp_jitter_ms, .0625);
+    assert(diagnostic.last.repeated_stamps == 1 && diagnostic.last.reversed_stamps == 1);
+    diagnostic.source(second + first_ns, "IOHID", "device event");
+    assert(diagnostic.last.seconds == 0 && diagnostic.count == 0);
+}
 }  // namespace
 
 int main() {
@@ -163,6 +186,7 @@ int main() {
         std::cerr << "SDL events unavailable: " << SDL_GetError() << '\n';
         return 77;
     }
+    timestamp_jitter_and_clock_faults();
     native::MouseDiagnostics diagnostic;
     diagnostic.begin(1, true);
     for (uint64_t i = 1; i <= 8000; ++i)
@@ -171,6 +195,9 @@ int main() {
     assert(diagnostic.last.events == 8000 && diagnostic.last.peak_burst == 8000);
     close(diagnostic.last.events_per_second, 8000);
     close(diagnostic.last.average_age_ms, .2);
+    close(diagnostic.last.motion_rate_hz, 8000);
+    close(diagnostic.last.timestamp_jitter_ms, 0);
+    assert(diagnostic.last.repeated_stamps == 0 && diagnostic.last.reversed_stamps == 0);
     close(diagnostic.last.max_pump_ms, .5);
     diagnostic.begin(second + 2, false);
     diagnostic.motion(second + 2, second + 3);

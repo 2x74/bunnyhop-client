@@ -146,6 +146,7 @@ if(BUNNYHOP_BUILD_CLIENT)
     endif()
     add_executable(bunnyhop-native
         src/client.cpp
+        src/input_backend.cpp
         src/game_session.cpp
         src/video_controller.cpp
         src/hud_frame.cpp
@@ -168,6 +169,25 @@ if(BUNNYHOP_BUILD_CLIENT)
         src/avatar_picture.cpp
         src/webp_lossless.cpp
     )
+    if(APPLE)
+        target_sources(bunnyhop-native PRIVATE src/raw_mouse_macos.cpp)
+        target_link_libraries(bunnyhop-native PRIVATE "-framework IOKit" "-framework CoreFoundation")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_sources(bunnyhop-native PRIVATE src/raw_mouse_linux.cpp)
+    endif()
+    if(BUILD_TESTING)
+        add_executable(bunnyhop-native-raw-mouse-tests src/raw_mouse_tests.cpp src/input_backend.cpp)
+        target_include_directories(bunnyhop-native-raw-mouse-tests PRIVATE include vendor src)
+        target_link_libraries(bunnyhop-native-raw-mouse-tests PRIVATE SDL3::SDL3 Threads::Threads)
+        if(APPLE)
+            target_sources(bunnyhop-native-raw-mouse-tests PRIVATE src/raw_mouse_macos.cpp)
+            target_link_libraries(bunnyhop-native-raw-mouse-tests PRIVATE "-framework IOKit" "-framework CoreFoundation")
+        elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            target_sources(bunnyhop-native-raw-mouse-tests PRIVATE src/raw_mouse_linux.cpp)
+        endif()
+        add_test(NAME native_raw_mouse COMMAND bunnyhop-native-raw-mouse-tests)
+        set_tests_properties(native_raw_mouse PROPERTIES TIMEOUT 30)
+    endif()
     add_executable(bunnyhop-native-export-previews EXCLUDE_FROM_ALL src/export_previews.cpp)
     add_executable(bunnyhop-native-loadout-preview-smoke EXCLUDE_FROM_ALL src/loadout_preview_smoke.cpp)
     target_include_directories(bunnyhop-native-loadout-preview-smoke PRIVATE include vendor src)
