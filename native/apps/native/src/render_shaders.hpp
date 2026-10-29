@@ -57,6 +57,15 @@ void main(){vec4 w=model*vec4(position,1);gl_ClipDistance[0]=w.z-clipHeight;gl_P
 inline const char *depth_fragment = R"(#version 330 core
 void main(){}
 )";
+// Cut-out surfaces (leaves, fences) in the sun's depth map: depth only where the texture is solid.
+inline const char *cutout_depth_vertex = R"(#version 330 core
+layout(location=0)in vec3 position;layout(location=2)in vec2 baseUV;uniform mat4 viewProjection,model;out vec2 uv;
+void main(){uv=baseUV;gl_Position=viewProjection*model*vec4(position,1);}
+)";
+inline const char *cutout_depth_fragment = R"(#version 330 core
+in vec2 uv;uniform sampler2D baseTexture;uniform float cutoff;
+void main(){if(texture(baseTexture,uv).a<cutoff)discard;}
+)";
 inline const char *world_vertex = R"(#version 330 core
 layout(location=0) in vec3 position;layout(location=1) in vec3 normal;
 layout(location=2) in vec2 baseUV;layout(location=3) in vec2 lightUV;layout(location=4) in float blendAlpha;
@@ -128,6 +137,31 @@ vec4 glassSurface(vec3 n,vec3 v){
 }
 )";
 
+// The Enhanced and Cinematic looks' sun over the baked lighting (web graphics/shadows.ts): shadows of the sun's depth
+// map darken it, and a lighting profile adds sky fill and direct sun. Off in every other look (sunActive false).
+inline const std::string sun_light_shader = R"(
+uniform bool sunActive,sunShadowActive;uniform sampler2DShadow sunShadowMap;uniform mat4 sunShadowMatrix;
+uniform float sunShadowStrength,sunDirectStrength,sunBakedScale,sunSkyFill,sunShadowTexel,sunShadowBias,sunShadowRadius;
+uniform vec3 sunLightDirection,sunLightColor,sunAmbientColor;
+float sunVisibility(vec3 p){
+ float sum=0.;
+ for(int y=0;y<2;y++)for(int x=0;x<2;x++){
+  vec2 o=(vec2(x,y)-.5)*sunShadowTexel*sunShadowRadius;sum+=texture(sunShadowMap,vec3(p.xy+o,p.z-sunShadowBias));
+ }
+ return sum*.25;
+}
+vec3 sunLight(vec3 lit,vec3 albedo,vec3 n){
+ if(!sunShadowActive)return lit*sunBakedScale+albedo*sunAmbientColor*sunSkyFill;
+ vec4 q=sunShadowMatrix*vec4(world,1);vec3 p=q.xyz/q.w*.5+.5;
+ float border=min(min(p.x,1.-p.x),min(p.y,1.-p.y));
+ if(border<=0.||p.z<=0.||p.z>=1.)return lit;
+ float fade=smoothstep(0.,.06,border),visible=sunVisibility(p),baked=dot(lit,vec3(.2126,.7152,.0722));
+ lit*=mix(1.,sunBakedScale,fade)*(1.-(1.-visible)*sunShadowStrength*fade*smoothstep(.005,.08,baked));
+ lit+=albedo*sunAmbientColor*sunSkyFill*fade;
+ return lit+albedo*sunLightColor*max(0.,dot(n,sunLightDirection))*visible*sunDirectStrength*fade;
+}
+)";
+
 inline std::string world_fragment() {
     return std::string("#version 330 core\n") + water + R"(
 in vec2 uv,lm;in vec3 world,normalWorld;in float blend,depth;
@@ -139,8 +173,8 @@ uniform int kind;uniform bool unlit,props,hasSecondary,hasDetail,aboveWater,skyP
 uniform bool flashlight;uniform vec3 flashDirection;
 uniform vec3 skyFogColor;uniform vec3 skyFogRange;
 out vec4 color;
-)" + water_surface_shader
-           + R"(
+)" + sun_light_shader
+           + water_surface_shader + R"(
 void main(){
  vec3 n=normalize(normalWorld);vec3 v=normalize(cameraPosition-world);vec4 base=texture(baseTexture,uv);
  if(potato&&cutoff<=0.){
@@ -159,7 +193,9 @@ void main(){
  if(fullbright)lighting=vec3(1);
  if(hasNormal&&!potato&&!fullbright){vec3 flatN=n*(gl_FrontFacing?1.:-1.);vec3 q0=dFdx(world),q1=dFdy(world);vec2 st0=dFdx(uv),st1=dFdy(uv);vec3 q1p=cross(q1,flatN),q0p=cross(flatN,q0);vec3 t=q1p*st0.x+q0p*st1.x,b=q1p*st0.y+q0p*st1.y;float len=max(dot(t,t),dot(b,b));if(len>1e-12){vec3 sampled=texture(normalTexture,uv).xyz*2.-1.;vec3 mapped=normalize((t*sampled.x+b*sampled.y)*inversesqrt(len)+flatN*sampled.z);lighting*=clamp(1.+.35*(dot(mapped,sunDirection)-dot(flatN,sunDirection)),.65,1.35);}}
  if(flashlight){vec3 delta=world-cameraPosition;float dist=length(delta);float cone=smoothstep(.90,.975,dot(normalize(delta),flashDirection));lighting+=vec3(2.8,2.65,2.4)*cone*max(.12,dot(n,-normalize(delta)))/(1.+dist*dist/180000.);}
- vec3 col=encode(base.rgb*lighting);float alpha=base.a;
+ vec3 lit=base.rgb*lighting;
+ if(sunActive&&!unlit&&!potato&&!fullbright&&!skyPass&&kind<2&&base.a>.99)lit=sunLight(lit,base.rgb,n*(gl_FrontFacing?1.:-1.));
+ vec3 col=encode(lit);float alpha=base.a;
  if(kind==2&&!potato){vec4 surface=waterSurface(n,v);col=surface.rgb;alpha=surface.a;}
  else if(kind==3&&!potato){vec4 surface=glassSurface(n,v);col=surface.rgb;alpha=surface.a;}
  if(!potato)col=waterFog(col,world);

@@ -153,4 +153,55 @@ project_sun(const Matrix &vp, const float eye[3], const float forward[3], const 
     return std::array<float, 2>{x, y};
 }
 
+// The sun's orthographic view: `range` units each way around `center`, looking along -direction (direction points
+// toward the sun), with the center snapped to whole texels of a `size` map.
+inline Matrix sun_view_projection(std::array<float, 3> center, std::array<float, 3> direction, float range, int size) {
+    const float length = std::hypot(std::hypot(direction[0], direction[1]), direction[2]);
+    for (auto &axis : direction)
+        axis /= length;
+    const std::array<float, 3> helper =
+            std::abs(direction[2]) > .98f ? std::array<float, 3>{1, 0, 0} : std::array<float, 3>{0, 0, 1};
+    std::array<float, 3> right{
+            helper[1] * direction[2] - helper[2] * direction[1],
+            helper[2] * direction[0] - helper[0] * direction[2],
+            helper[0] * direction[1] - helper[1] * direction[0]
+    };
+    const float rightLength = std::hypot(std::hypot(right[0], right[1]), right[2]);
+    for (auto &axis : right)
+        axis /= rightLength;
+    const std::array<float, 3> up{
+            direction[1] * right[2] - direction[2] * right[1],
+            direction[2] * right[0] - direction[0] * right[2],
+            direction[0] * right[1] - direction[1] * right[0]
+    };
+    const float texel = range * 2 / float(size);
+    auto dot = [](const std::array<float, 3> &a, const std::array<float, 3> &b) {
+        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    };
+    for (const auto &axis : {right, up, direction}) {
+        const float value = dot(center, axis), snapped = std::round(value / texel) * texel;
+        for (int k = 0; k < 3; k++)
+            center[size_t(k)] += axis[size_t(k)] * (snapped - value);
+    }
+    // View: x along right, y along up, looking down -direction from 2 * range above the center.
+    const float depthRange = range * 4;
+    const std::array<float, 3> eye{
+            center[0] + direction[0] * range * 2,
+            center[1] + direction[1] * range * 2,
+            center[2] + direction[2] * range * 2
+    };
+    const float sx = 1 / range, sy = 1 / range, sz = -2 / depthRange;
+    Matrix m{};
+    for (int k = 0; k < 3; k++) {
+        m[size_t(k * 4)] = right[size_t(k)] * sx;
+        m[size_t(k * 4 + 1)] = up[size_t(k)] * sy;
+        m[size_t(k * 4 + 2)] = direction[size_t(k)] * sz;
+    }
+    m[12] = -dot(right, eye) * sx;
+    m[13] = -dot(up, eye) * sy;
+    m[14] = -dot(direction, eye) * sz - 1;
+    m[15] = 1;
+    return m;
+}
+
 }  // namespace native
