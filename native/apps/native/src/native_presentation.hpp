@@ -3,6 +3,9 @@
 // Included after GL declarations. All geometry stays native; effects use a bounded streaming buffer.
 class NativePresentation {
 public:
+    static constexpr int paint_decal = 4;
+    static constexpr float paint_uv_offset = 6;
+
     struct Vertex {
         float p[3], c[4], uv[2];
     };
@@ -12,6 +15,7 @@ public:
         std::array<float, 4> color;
         int soft = 0;
         float distance = 0;
+        std::array<std::array<float, 2>, 4> texcoords{};
     };
 
 private:
@@ -31,7 +35,12 @@ void main(){world=position;vColor=tint;uv=texcoord;gl_Position=viewProjection*ve
 in vec4 vColor;in vec2 uv;in vec3 world;out vec4 color;
 float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1)),f.x),f.y);}
-void main(){float a=vColor.a;if(uv.y>=4.){float h=1.-(uv.y-4.);a*=h*h;}else if(uv.x>=0.){bool smoke=uv.y>1.;vec2 st=vec2(uv.x,smoke?uv.y-2.:uv.y);vec2 p=st*2.-1.;float r=dot(p,p);a*=pow(max(0.,1.-r),smoke?1.2:2.);if(smoke){float n=noise(st*5.)*.6+noise(st*11.+3.)*.3+noise(st*23.+7.)*.1;a*=smoothstep(.18,.65,n);}if(a<.003)discard;}color=vec4(waterFog(vColor.rgb,world),a);}
+const float paintUvOffset=6.,paintEdgeScale=10.;
+void main(){float a=vColor.a;if(uv.y>=paintUvOffset){
+    vec2 point=vec2(uv.x,uv.y-paintUvOffset)*2.-1.;
+    a*=clamp((1.-length(point))*paintEdgeScale,0.,1.);
+    if(a<.003)discard;
+}else if(uv.y>=4.){float h=1.-(uv.y-4.);a*=h*h;}else if(uv.x>=0.){bool smoke=uv.y>1.;vec2 st=vec2(uv.x,smoke?uv.y-2.:uv.y);vec2 p=st*2.-1.;float r=dot(p,p);a*=pow(max(0.,1.-r),smoke?1.2:2.);if(smoke){float n=noise(st*5.)*.6+noise(st*11.+3.)*.3+noise(st*23.+7.)*.1;a*=smoothstep(.18,.65,n);}if(a<.003)discard;}color=vec4(waterFog(vColor.rgb,world),a);}
 )";
         program = link_program(gl, vs, fs.c_str());
         gl.GenVertexArrays(1, &vao);
@@ -67,6 +76,13 @@ void main(){float a=vColor.a;if(uv.y>=4.){float h=1.-(uv.y-4.);a*=h*h;}else if(u
 
     void quad(const std::array<native_render::Vec3, 4> &p, const std::array<float, 4> &c, int soft = 0) {
         if (quads.size() < 8192 && c[3] > .001f) quads.push_back({p, c, soft, 0});
+    }
+
+    void
+    decal(const std::array<native_render::Vec3, 4> &points,
+          const std::array<float, 4> &color,
+          const std::array<std::array<float, 2>, 4> &uv) {
+        if (quads.size() < 8192) quads.push_back({points, color, paint_decal, 0, uv});
     }
 
     void billboard(
@@ -131,8 +147,13 @@ void main(){float a=vColor.a;if(uv.y>=4.){float h=1.-(uv.y-4.);a*=h*h;}else if(u
                 Vertex v{};
                 std::copy(q.p[i].begin(), q.p[i].end(), v.p);
                 std::copy(q.color.begin(), q.color.end(), v.c);
-                v.uv[0] = q.soft ? uv[i][0] : -1;
-                v.uv[1] = uv[i][1] + (q.soft == 3 ? 4 : q.soft == 2 ? 2 : 0);
+                if (q.soft == paint_decal) {
+                    v.uv[0] = q.texcoords[i][0];
+                    v.uv[1] = q.texcoords[i][1] + paint_uv_offset;
+                } else {
+                    v.uv[0] = q.soft ? uv[i][0] : -1;
+                    v.uv[1] = uv[i][1] + (q.soft == 3 ? 4 : q.soft == 2 ? 2 : 0);
+                }
                 vertices.push_back(v);
             }
         gl.UseProgram(program);

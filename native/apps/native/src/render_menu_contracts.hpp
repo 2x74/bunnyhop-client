@@ -23,11 +23,14 @@ void reply_surface_chat(
         const BhState &state,
         const Input &input,
         Chat &chat,
-        double seconds
+        double seconds,
+        bool can_paint
 ) {
     const char *reply = "Load a map to use surface tools.";
     if (action == "paintOptions")
         reply = "Paint colour and size are in Settings > Paint.";
+    else if (action == "paint" && !can_paint)
+        reply = "Paint is unavailable while spectating or watching a replay.";
     else if (renderer) {
         const auto tool = action == "paint" ? "paintOnce" : action == "measure" ? "measurePoint" : action;
         reply = renderer->surface_tool(tool, state, input);

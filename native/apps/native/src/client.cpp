@@ -1498,7 +1498,10 @@ int run(const native::Options &opt) {
                     } else if (matching && down && !repeat)
                         act(binding.action, wheel);
                 }
-                if (renderer) native_render::surface_tool_key(*renderer, code, down, repeat, curr, input, toast);
+                if (renderer)
+                    native_render::surface_tool_key(
+                            *renderer, code, down, repeat, curr, input, !viewer.active && !room.spectator_target, toast
+                    );
                 if (wheel) held_codes.erase(code);
                 const bool inspect = input_timeline.binds().held_action("inspect", held_codes);
                 if (renderer) renderer->inspect_held(inspect);
@@ -2094,7 +2097,15 @@ int run(const native::Options &opt) {
                     } else if (type == "chatAction") {
                         const auto action = message.at("action").get<std::string>();
                         if (native::surface_chat_action(action)) {
-                            native::reply_surface_chat(renderer.get(), action, curr, input, chat, epoch_ms() / 1000.);
+                            native::reply_surface_chat(
+                                    renderer.get(),
+                                    action,
+                                    curr,
+                                    input,
+                                    chat,
+                                    epoch_ms() / 1000.,
+                                    !viewer.active && !room.spectator_target
+                            );
                             if (action == "paintOptions") {
                                 show_menu(true);
                                 menu_script.open(
@@ -2341,7 +2352,8 @@ int run(const native::Options &opt) {
                     else if (type == "replays")
                         refresh_replays();
                     else if ((type == "paint" || type == "measure") && renderer) {
-                        score_notice = renderer->tool_message(message, curr, input);
+                        score_notice =
+                                renderer->tool_message(message, curr, input, !viewer.active && !room.spectator_target);
                     } else if (type == "replayCompare" && viewer.active) {
                         replay_compare_import.message(
                                 replay_compare,
@@ -3420,7 +3432,7 @@ int run(const native::Options &opt) {
             native::update_compare_actor(*renderer, replay_compare, curr.tick, viewer.session.range, viewer.active);
             renderer->route_context(active_track, active_style, !viewer.active && !spectator && !tutorial_runner.demo);
             renderer->surface_tools_frame(
-                    curr, input, simulation_active && captured && !viewer.active && !spectator, steady_seconds
+                    curr, input, simulation_active && captured && !viewer.active && !spectator, spectator.has_value()
             );
             renderer->set_room_actors(actors);
             renderer->draw(
