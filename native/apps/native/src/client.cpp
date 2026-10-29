@@ -63,8 +63,7 @@
 #include "discord_rpc.hpp"
 #include "data_location.hpp"
 #include "relaunch.hpp"
-#include "native_update.hpp"
-#include "update_config.hpp"
+#include "update_host.hpp"
 #include "video_capture.hpp"
 #include "client_smoke.hpp"
 #include "runtime_smoke.hpp"
@@ -109,6 +108,9 @@ void require(bool ok, BhContext *ctx, const char *operation) {
 // Settings -> Game data: set by "Move now"; main() starts a fresh copy once run()
 // has returned and every file in the old data folder is closed.
 static bool relaunch_requested = false;
+
+// Settings -> Updates -> "Restart to update": main() starts the update helper with this plan once run() returned.
+static std::optional<std::filesystem::path> update_plan;
 
 // The system folder picker answers on its own schedule (possibly another thread);
 // static so a late answer during shutdown never lands in freed memory.
@@ -424,13 +426,7 @@ int run(const native::Options &opt) {
     native::ReplayLibrary replay_library(cache);
     native::RunVault run_vault(cache / "run-vault");
     const auto identity = native::load_release_identity(manifest_path, menu_path, assets);
-    native::updates::Service updater(
-            nlohmann::json::parse(native::update_config_json),
-            cache / "updates",
-            identity.value("version", std::string("local")),
-            identity.value("build", std::string("bunnyhop-native/local"))
-    );
-    std::string last_update;
+    native::updates::Host updater(cache, default_root, identity, native::executable_path());
     // Jump stats (!ssj). Display only — it reads the same pre-state, command and
     // events the simulation already produced and never feeds anything back.
     native::MovementFeedback feedback;
@@ -443,6 +439,9 @@ int run(const native::Options &opt) {
         hud.toasts.push(data_startup_notice, double(SDL_GetTicksNS()) / 1e9, 8);
         data_notice = data_startup_notice;
     }
+    if (const auto update_notice = updater.startup_notice(); !update_notice.empty())
+        hud.toasts.push(update_notice, double(SDL_GetTicksNS()) / 1e9, 8);
+    if (!opt.frames && opt.menu_smoke.empty() && opt.runtime_smoke.empty()) updater.check_if_due();
 
     auto reset_feedback = [&](bool incomplete_history = false, bool keep_jump_stats = false) {
         hud.reset_history(keep_jump_stats);
@@ -2512,16 +2511,17 @@ int run(const native::Options &opt) {
                     } else if (type == "openAuth")
                         menu->open_auth(message.at("url").get<std::string>());
                     else if (type == "update") {
-                        const auto action = message.value("action", std::string());
-                        if (action == "check")
-                            updater.check();
-                        else if (action == "download")
-                            updater.download();
-                        else if (action == "cancel")
-                            updater.cancel();
-                        else if (action == "reveal")
-                            updater.reveal();
-                        last_update.clear();
+                        BhRunState timing{};
+                        if (core) bh_run_state(core.get(), &timing);
+                        const bool exporting = video_capture || director_job || video_encoder.busy();
+                        const auto reply = updater.handle(
+                                message, {timing.status, timing.in_start != 0, heartbeat.generation, exporting}
+                        );
+                        if (!reply.notice.empty()) toast(reply.notice);
+                        if (reply.quit) {
+                            update_plan = updater.plan();
+                            running = false;
+                        }
                     } else if (type == "dataFolder") {
                         // The host only ever moves to a folder it validated from its own
                         // picker (data_choice); the menu never supplies a path.
@@ -2625,6 +2625,9 @@ int run(const native::Options &opt) {
                             continue;
                         hud.extras.leaderboard(message.value("place", 0u), message.value("topPercent", 0.));
                     } else if (type == "runService") {
+                        updater.service_status(
+                                message.value("generation", uint64_t(-1)), message.value("status", std::string())
+                        );
                         if (message.value("generation", uint64_t(-1)) != heartbeat.generation) continue;
                         hud.result.service(message, heartbeat.generation, double(SDL_GetTicksNS()) / 1e9);
                         if (message.value("status", std::string()) == "verified" && message.contains("rank"))
@@ -3759,13 +3762,7 @@ int run(const native::Options &opt) {
                 const std::string diagnostics_event =
                         "new CustomEvent('bunnyhop:mouse-diagnostics',{detail:" + diagnostics_state.dump() + "})";
                 menu->evaluate_js("window.dispatchEvent(" + diagnostics_event + ")");
-                const auto update_state = updater.state().dump();
-                if (update_state != last_update) {
-                    menu->evaluate_js(
-                            "window.dispatchEvent(new CustomEvent('bunnyhop:update',{detail:" + update_state + "}))"
-                    );
-                    last_update = update_state;
-                }
+                if (const auto update_script = updater.state_script()) menu->evaluate_js(*update_script);
                 {  // Settings -> Game data
                     std::optional<std::string> picked;
                     std::string pick_error;
@@ -3893,6 +3890,11 @@ int run(const native::Options &opt) {
 }  // namespace
 
 int main(int argc, char **argv) {
+    if (const auto plan = native::update_helper::plan_argument(argc, argv)) return native::update_helper::run(*plan);
+#ifdef BUNNYHOP_UPDATE_TEST_HOOKS
+    if (argc == 3 && std::string(argv[1]) == "--update-smoke")
+        return native::updates::run_smoke(native::data_location::from_utf8(argv[2]));
+#endif
     bool interactive_errors = true;
     // Scripted checks must also exit on failure without a modal alert. Inspect
     // flags before parsing so malformed smoke invocations cannot wait for input.
@@ -3909,6 +3911,8 @@ int main(int argc, char **argv) {
         const int code = run(opt);
         if (relaunch_requested && !native::relaunch(native::executable_path()))
             std::cerr << "Bunnyhop native: could not restart; start the game again to move your data\n";
+        if (update_plan && !native::updates::start_helper(native::executable_path(), *update_plan))
+            std::cerr << "Bunnyhop native: could not start the update; update again from Settings -> Updates\n";
         return code;
     } catch (const std::exception &error) {
         std::cerr << "Bunnyhop native: " << error.what() << '\n';

@@ -14,9 +14,9 @@ release must identify the checks actually completed and the remaining limits.
 
 The default macOS package is ad-hoc signed, without Developer ID or notarization.
 Windows and Linux archives are unsigned. SHA-256 checksums detect changes to the
-published files; they do not replace a publisher signature. The menu supports signed update checks and verified package downloads when
-release keys and a manifest origin are configured. Installation is manual; an
-unconfigured build must not claim automatic update availability.
+published files; they do not replace a publisher signature. From 0.6.2 the game checks a signed update manifest,
+downloads the package for its platform, verifies it and installs it in place when the player chooses
+"Restart to update". The release key stays on the signing server; see [Signed updates](#signed-updates).
 
 A release archive's existence does not admit ranked scores. Ranked submission
 still requires an exact, unexpired server allowlist entry for the packaged native
@@ -125,6 +125,17 @@ server changes. A maintainer publishes the reviewed preview explicitly:
    attach Linux/Windows only after those platform checks pass.
 5. Record the actual validation and unresolved limits in the release notes.
    Adding a later platform must not replace an existing archive silently.
+
+## Signed updates
+
+The signing server runs `sign-release.ts --pending --upload` every few minutes. Once a published release from 0.6.2
+on has all three platform archives and their package reports, it checks them, attaches a signed
+`update-manifest.json` to the release and points the update channel at it; players get it at their next check.
+Nothing else is needed at release time. A release published as a draft, or missing a platform, is left alone until
+it is complete. Details are in the [packaging notes](../native/apps/native/packaging/README.md#updates).
+
+Before attaching packages, check the new build is admitted for ranked runs, or say in the notes that it isn't yet:
+the update notice tells players whether the server lists the build, and runs from an unlisted build stay local.
 
 Optional Developer ID/notarization or Windows signing configuration must remain
 outside Git. Signing is not required for this explicitly unsigned preview, and

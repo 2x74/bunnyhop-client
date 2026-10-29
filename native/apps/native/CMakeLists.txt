@@ -16,6 +16,9 @@ if(WIN32)
 endif()
 option(BUNNYHOP_BUILD_CLIENT "Build the SDL3/OpenGL desktop client" ON)
 option(BUNNYHOP_TEST_GTK "Run GTK lifecycle tests under Xvfb and D-Bus" OFF)
+# Lets the updater use a loopback HTTP server and a trust file from the environment, for the end-to-end update test.
+# package.ts refuses to make a release package from a binary built this way.
+option(BUNNYHOP_UPDATE_TEST_HOOKS "Build the update end-to-end test hooks into the client" OFF)
 get_filename_component(BUNNYHOP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 find_program(CARGO_EXECUTABLE cargo REQUIRED)
 # Keep release executables free of local checkout / Cargo-cache paths. Preserve
@@ -305,6 +308,9 @@ if(BUNNYHOP_BUILD_CLIENT)
         BUNNYHOP_MENU_HTML="target/native-menu/menu.html"
         BUNNYHOP_NATIVE_MANIFEST="target/native-menu/native-manifest.json"
         BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
+    if(BUNNYHOP_UPDATE_TEST_HOOKS)
+        target_compile_definitions(bunnyhop-native PRIVATE BUNNYHOP_UPDATE_TEST_HOOKS)
+    endif()
     # Explicit framebuffer check of the home backdrop over a local BSP: run on a
     # desktop or under Xvfb/Mesa, not in ordinary headless CTest. No network,
     # menu or gameplay context.
@@ -409,7 +415,14 @@ if(BUILD_TESTING)
         add_executable(bunnyhop-native-update-tests src/native_update_tests.cpp)
         target_include_directories(bunnyhop-native-update-tests PRIVATE include vendor src)
         target_link_libraries(bunnyhop-native-update-tests PRIVATE bunnyhop_core_native SDL3::SDL3 CURL::libcurl Threads::Threads)
-        foreach(target bunnyhop-native-video-tests bunnyhop-native-update-tests)
+        # The tests serve signed releases from a loopback server.
+        target_compile_definitions(bunnyhop-native-update-tests PRIVATE BUNNYHOP_UPDATE_TEST_HOOKS)
+        add_executable(bunnyhop-native-update-install-tests src/update_install_tests.cpp)
+        target_include_directories(bunnyhop-native-update-install-tests PRIVATE include vendor src)
+        target_link_libraries(bunnyhop-native-update-install-tests PRIVATE bunnyhop_core_native Threads::Threads)
+        add_test(NAME native_update_install COMMAND bunnyhop-native-update-install-tests)
+        set_tests_properties(native_update_install PROPERTIES TIMEOUT 60)
+        foreach(target bunnyhop-native-video-tests bunnyhop-native-update-tests bunnyhop-native-update-install-tests)
             target_compile_options(${target} PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
         endforeach()
     endif()

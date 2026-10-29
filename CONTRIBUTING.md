@@ -48,8 +48,8 @@ and architecture. Report untested platforms honestly.
 
 Do not commit credentials, certificates, account data, local replays, downloaded
 maps, content caches or generated packages. Preserve dependency/license notices.
-Release keys belong outside Git; the optional update trust list is empty by
-default. A package being downloadable does not authorize it for ranked scores.
+Release private keys belong outside Git; `release-keys.json` holds only public keys. A package
+being downloadable or installable through the updater does not authorize it for ranked scores.
 
 The legacy Electron project still uses Node.js 22+ and `npm ci` /
 `npm run verify` from the repository root. Its policy, IPC sandbox and optional
