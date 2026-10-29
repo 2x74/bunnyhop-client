@@ -24,6 +24,8 @@ template <class T>
 class MapJobs;
 
 int run_presentation_smoke(const Options &opt, SDL_Window *window, Gl &gl, GameSession &game, NativeHud &hud);
+// Replays a recorded room session (DIR/room.jsonl) and saves the frames in DIR/shots.json.
+int run_room_smoke(const Options &opt, SDL_Window *window, Gl &gl, GameSession &game, NativeHud &hud);
 
 struct VideoSmokeState {
     const Options &opt;

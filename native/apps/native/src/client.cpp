@@ -1565,6 +1565,7 @@ int run(const native::Options &opt) {
     room_bridge.bind_presence(opt, menu.get(), menu_ready, show_menu);
     auto &discord = room_bridge.discord;
     const bool discord_allowed = room_bridge.discord_allowed;
+    if (!opt.room_smoke.empty()) return native::run_room_smoke(opt, window.get(), gl, game, hud);
     if (!opt.presentation_smoke.empty()) {
         return native::run_presentation_smoke(opt, window.get(), gl, game, hud);
     }

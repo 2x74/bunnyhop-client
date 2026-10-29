@@ -153,6 +153,7 @@ if(BUNNYHOP_BUILD_CLIENT)
         src/room_bridge.cpp
         src/runtime_smoke.cpp
         src/client_smoke.cpp
+        src/room_smoke.cpp
         src/practice_controller.cpp
         src/tutorial_runner.cpp
         src/ghost_slots.cpp
