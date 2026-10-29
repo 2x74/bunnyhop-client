@@ -42,6 +42,10 @@ public:
     // Whether a key event is a repeat as far as the game is concerned (KeyPresses).
     bool key_repeat(size_t scancode, bool down, bool sdl_repeat) { return presses_.repeat(scancode, down, sdl_repeat); }
 
+    std::optional<bool> key_event(size_t scancode, bool down, bool sdl_repeat, bool owns_keyboard) {
+        return presses_.route(scancode, down, sdl_repeat, owns_keyboard);
+    }
+
     void keyboard_focus_lost() { presses_.clear(); }
 
     void rebuild_binds(const nlohmann::json &binds) { binds_.rebuild(binds); }

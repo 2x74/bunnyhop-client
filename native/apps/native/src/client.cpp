@@ -560,11 +560,11 @@ int run(const native::Options &opt) {
     auto close_chat = [&]() {
         chat_drag = false;
         chat.close();
+        SDL_StopTextInput(window.get());
         if (captured && focused && (!menu || !menu->visible())) {
             SDL_SetWindowRelativeMouseMode(window.get(), true);
             native::set_raw_keyboard(true);
         }
-        SDL_StopTextInput(window.get());
         input_timeline.release(input, held_codes);
         camera_controls.clear();
     };
@@ -1678,11 +1678,15 @@ int run(const native::Options &opt) {
                 case SDL_EVENT_KEY_DOWN:
                 case SDL_EVENT_KEY_UP: {
                     const bool down = event.type == SDL_EVENT_KEY_DOWN;
-                    const bool repeat = input_timeline.key_repeat(event.key.scancode, down, event.key.repeat);
                     const bool menu_shown = menu && menu->visible();
-                    if (!native::game_owns_keyboard(menu_shown, menu && menu->supports_backdrop())) {
-                        break;
-                    }
+                    const auto routed = input_timeline.key_event(
+                            event.key.scancode,
+                            down,
+                            event.key.repeat,
+                            native::game_owns_keyboard(menu_shown, menu && menu->supports_backdrop())
+                    );
+                    if (!routed) break;
+                    const bool repeat = *routed;
                     if (down && !repeat && event.key.scancode == SDL_SCANCODE_F10) {
                         show_menu(true);
                         if (!menu) toast(native::menu_unavailable_text(menu_failure), 6000);
