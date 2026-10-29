@@ -562,11 +562,11 @@ int run(const native::Options &opt) {
     auto close_chat = [&]() {
         chat_drag = false;
         chat.close();
+        SDL_StopTextInput(window.get());
         if (captured && focused && (!menu || !menu->visible())) {
             SDL_SetWindowRelativeMouseMode(window.get(), true);
             native::set_raw_keyboard(true);
         }
-        SDL_StopTextInput(window.get());
         input_timeline.release(input, held_codes);
         camera_controls.clear();
     };
@@ -1608,6 +1608,7 @@ int run(const native::Options &opt) {
     );
     video_smoke.begin();
     while (running) {
+        const auto frame_started = Clock::now();
         frame_diagnostics.start_frame(SDL_GetTicksNS(), prefs.mouse_diagnostics);
         recorder.diagnostics.frame(SDL_GetTicksNS(), input_timeline.queue());
         if (const auto failure = json_writer.take_error()) {
@@ -1679,11 +1680,15 @@ int run(const native::Options &opt) {
                 case SDL_EVENT_KEY_DOWN:
                 case SDL_EVENT_KEY_UP: {
                     const bool down = event.type == SDL_EVENT_KEY_DOWN;
-                    const bool repeat = input_timeline.key_repeat(event.key.scancode, down, event.key.repeat);
                     const bool menu_shown = menu && menu->visible();
-                    if (!native::game_owns_keyboard(menu_shown, menu && menu->supports_backdrop())) {
-                        break;
-                    }
+                    const auto routed = input_timeline.key_event(
+                            event.key.scancode,
+                            down,
+                            event.key.repeat,
+                            native::game_owns_keyboard(menu_shown, menu && menu->supports_backdrop())
+                    );
+                    if (!routed) break;
+                    const bool repeat = *routed;
                     if (down && !repeat && event.key.scancode == SDL_SCANCODE_F10) {
                         show_menu(true);
                         if (!menu) toast(native::menu_unavailable_text(menu_failure), 6000);
@@ -3939,8 +3944,9 @@ int run(const native::Options &opt) {
                 bool(opt.frames),
                 captured,
                 menu && menu->visible(),
-                std::chrono::duration<double>(Clock::now() - now).count(),
-                SDL_DelayNS
+                std::chrono::duration<double>(Clock::now() - frame_started).count(),
+                SDL_DelayNS,
+                SDL_DelayPrecise
         );
         frame_diagnostics.mark(native::FrameDiagnostics::kSleep, SDL_GetTicksNS());
     }
