@@ -11,6 +11,31 @@ import { DEFAULT_BINDS, nativeKeyCode, state } from "./bridge";
 import { followHost, nativeChoice, nativeToggle, type Ui } from "./native-rows";
 import { sendNativeSettings } from "./prefs-bridge";
 
+function inputGroup(ui: Ui): HTMLElement {
+  const group = ui.group(
+    "Native input",
+    nativeChoice(
+      ui,
+      "Mouse backend",
+      "inputBackend",
+      [
+        ["auto", "Auto"],
+        ["sdl", "SDL"],
+        ["raw", "Raw"],
+      ],
+      {
+        desc:
+          "Auto uses SDL. Raw tries IOHID on macOS (Input Monitoring permission) or evdev on Linux (device access). " +
+          "Windows keeps SDL raw input. SDL is the fallback. After changing permissions or reconnecting a mouse, " +
+          "select SDL then Raw to retry. Raw is experimental; check sensitivity before playing.",
+        keywords: "mouse raw input backend hid evdev permission",
+      },
+    ),
+  );
+  followHost(group, ui);
+  return group;
+}
+
 function rendererGroup(ui: Ui): HTMLElement {
   const group = ui.group(
     "Native renderer",
@@ -236,6 +261,7 @@ export const redrawSettings = registerNativeHud;
 
 /** Registers the native rows under the website's sections (call once). */
 export function registerNativeExtras(): void {
+  registerSettingsSection("native-input", (ui) => [inputGroup(ui)], { advancedUnder: "mouse" });
   registerSettingsSection("native-graphics", (ui) => [rendererGroup(ui)], { advancedUnder: "graphics" });
   registerNativeHud();
   registerSettingsSection("native-audio", (ui) => [packsGroup(ui)], { advancedUnder: "audio" });

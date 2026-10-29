@@ -56,7 +56,15 @@ still shows new motion at once. `--legacy-input` restores per-frame input for co
 reads the keyboard through raw input.
 
 Settings → Mouse → Show input stats overlays delivered reports per second, peak reports per frame, event age and
-frame time per phase, and flags stalls over 50 ms. It is off by default and does no per-event allocation.
+frame time per phase, and flags stalls over 50 ms. It also names the backend and reports motion timestamp jitter.
+These measure delivered motion, including SDL timestamp estimates, rather than the USB polling rate.
+
+Mouse → Advanced → Native input selects Auto, SDL or experimental Raw. Auto keeps SDL. Raw reads relative HID
+counts with device timestamps on macOS (requires Input Monitoring) or evdev packets with monotonic kernel times on
+Linux (requires access to the mouse device nodes). Buttons and keys keep SDL. Windows keeps SDL's raw-input thread;
+its packet timestamps are estimates spread across each read batch. Missing permission, a disconnected device or a
+raw queue overrun returns to SDL. After changing permission or reconnecting on Linux, select SDL then Raw to retry.
+Check sensitivity with a physical mouse before using Raw; it has not completed target-OS hardware validation.
 
 ## Replays and scores
 

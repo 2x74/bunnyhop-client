@@ -28,6 +28,18 @@ void preference_changes() {
     assert(cached.fov == 110 && cached.hud_scale == 175 && cached.sensitivity == 1.25);
     assert(!cached.practice_keep_velocity && !cached.show_ghost && cached.ghost_opacity == .25f);
     assert(cached.mouse_diagnostics && cached.hold_restart && cached.fps_limit == 144);
+    assert(cached.input_backend == native::InputBackendChoice::automatic);
+    for (const auto *choice : {"auto", "sdl", "raw"}) {
+        const auto changed = native::patch_settings(original, {{"inputBackend", choice}});
+        assert(native::Preferences::from_settings(changed).input_backend == native::input_backend_choice(choice));
+    }
+    bool rejected = false;
+    try {
+        native::patch_settings(original, {{"inputBackend", "unknown"}});
+    } catch (const std::runtime_error &) {
+        rejected = true;
+    }
+    assert(rejected);
     assert(original == native::default_settings());
     assert(native::patch_settings(original, settings) == settings);
 }
