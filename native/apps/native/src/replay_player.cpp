@@ -4,7 +4,7 @@
 
 namespace native {
 
-void ReplayPlayer::begin(const std::filesystem::path &path) {
+void ReplayPlayer::begin(const std::filesystem::path &file) {
     active = true;
     paused = false;
     speed = 1;
@@ -12,7 +12,8 @@ void ReplayPlayer::begin(const std::filesystem::path &path) {
     controls.first_tick = session.range.from;
     camera.set_mode("eye");
     orbit_drag = false;
-    id = data_location::utf8(path.filename());
+    id = data_location::utf8(file.filename());
+    path = file;
 }
 
 void ReplayPlayer::action(ReplayControls::Action action, uint32_t tick, Input &camera_controls) {

@@ -1,16 +1,47 @@
 #include "video_controller.hpp"
 #include "game_session.hpp"
-#include "renderer.hpp"
-#include "hud.hpp"
 #include "video_capture.hpp"
 #include "replay_player.hpp"
-#include "audio.hpp"
 #include "options.hpp"
-#include "map_download.hpp"
 #include "data_location.hpp"
+#include "startup.hpp"
+#include "online.hpp"
+#include "video_request.hpp"
 #include <stdexcept>
 
 namespace native {
+namespace {
+
+// While a run is being played the export renders this many frames a second: progress continues without taking GPU
+// time the game needs.
+constexpr double playing_export_fps = 8;
+
+const char *item_state(const std::string &state) {
+    if (state == "queued" || state == "loading" || state == "rendering") return "capturing";
+    return state.c_str();
+}
+
+nlohmann::json item_json(const VideoQueue::Item &item) {
+    return {{"id", item.id},
+            {"title", item.title},
+            {"map", item.map},
+            {"state", item.state},
+            {"frame", item.frame},
+            {"frames", item.frames},
+            {"eta", item.eta},
+            {"fps", item.fps},
+            {"path", item.path},
+            {"bytes", item.bytes},
+            {"error", item.error},
+            {"encoder", item.encoder},
+            {"codec", item.codec},
+            {"hardware", item.hardware},
+            {"note", item.note},
+            {"elapsed", item.elapsed},
+            {"seconds", item.seconds}};
+}
+
+}  // namespace
 
 VideoController::VideoController(ReplayCamera &playback_camera)
     : playback_camera_(playback_camera)
@@ -18,36 +49,55 @@ VideoController::VideoController(ReplayCamera &playback_camera)
 }
 
 VideoController::~VideoController() {
-    cancel();
+    cancel_preparation();
 }
 
-void VideoController::bind(
-        Context context, std::function<void(bool)> show_menu, std::function<void()> refresh_playback_pose
-) {
+void VideoController::bind(Context context, std::function<void()> refresh_playback_pose) {
     context_.emplace(context);
-    show_menu_ = std::move(show_menu);
     refresh_playback_pose_ = std::move(refresh_playback_pose);
 }
 
-void VideoController::cancel() {
-    encoder.cancel();
-    pending_video.reset();
-    director_job.reset();
-    prepared_camera.cancel_direct();
-    playback_camera_.cancel_direct();
-    capture.reset();
+void VideoController::cancel(uint64_t id) {
+    queue_.cancel(id);
     error.clear();
 }
 
+void VideoController::clear_finished() {
+    queue_.clear_finished();
+    error.clear();
+}
+
+void VideoController::cancel_preparation() {
+    director_job.reset();
+    playback_camera_.cancel_direct();
+}
+
+// The dialog's fields describe the newest export; "queue" lists them all.
 nlohmann::json VideoController::state() const {
-    auto result = encoder.status();
+    const auto items = queue_.items();
+    nlohmann::json result = {
+            {"state", "idle"}, {"frames", 0}, {"totalFrames", 0}, {"progress", 0}, {"path", ""}, {"error", ""}
+    };
+    if (!items.empty()) {
+        const auto &latest = items.back();
+        result = item_json(latest);
+        result["state"] = item_state(latest.state);
+        result["frames"] = latest.frame;
+        result["totalFrames"] = latest.frames;
+        result["progress"] = latest.frames ? double(latest.frame) / double(latest.frames) : 0.;
+        if (latest.state == "encoding") result["state"] = "encoding";
+    }
+    auto queue = nlohmann::json::array();
+    for (const auto &item : items)
+        queue.push_back(item_json(item));
+    result["queue"] = std::move(queue);
     result["available"] = available.available;
     result["reason"] = available.reason;
+    result["codecs"] = describe_video_encoders(available.encoders);
     result["musicTracks"] = music_catalog;
     if (director_job) {
-        result["state"] = "capturing";
+        result["preparing"] = true;
         result["reason"] = "Preparing cinematic cameras…";
-        result["progress"] = 0;
     }
     if (!error.empty()) {
         result["state"] = "error";
@@ -56,130 +106,101 @@ nlohmann::json VideoController::state() const {
     return result;
 }
 
-void VideoController::begin(const VideoOptions &options) {
-    auto &context = *context_;
-    const auto timeline = native::VideoTimeline::make(options, context.viewer.session.range.total);
+std::filesystem::path VideoController::output_folder() const {
+    const auto &opt = context_->opt;
+    if (!opt.video_smoke.empty()) return std::filesystem::absolute(data_location::from_utf8(opt.video_smoke));
     const char *downloads = SDL_GetUserFolder(SDL_FOLDER_DOWNLOADS);
-    if (context.opt.video_smoke.empty() && !downloads) throw std::runtime_error("Downloads folder unavailable");
-    const auto directory = context.opt.video_smoke.empty() ? native::data_location::from_utf8(downloads)
-                                                           : std::filesystem::absolute(context.opt.video_smoke);
-    std::filesystem::create_directories(directory);
-    const auto destination =
-            directory / ("bunnyhop-" + context.game.map_id + "-" + std::to_string(SDL_GetTicksNS()) + ".mp4");
-    capture = std::make_unique<native::VideoCapture>(
-            context.gl,
-            context.game.core.get(),
-            *context.game.renderer,
-            context.hud,
-            encoder,
-            options,
-            context.viewer.session.info.at("totalTicks").get<uint32_t>(),
-            context.curr.tick,
-            context.preferences,
-            context.game.map_id,
-            context.viewer.session.info.value("style", context.active_style),
-            context.outfit,
-            (context.viewer.session.info.contains("packedLoadout")
-                             && context.viewer.session.info["packedLoadout"].is_string()
-                     ? context.viewer.session.info["packedLoadout"].get<std::string>()
-                     : std::string()),
-            prepared_camera,
-            context.assets,
-            context.cache
-    );
-    try {
-        encoder.start(options, destination, timeline.frames, available.encoder);
-    } catch (...) {
-        capture.reset();
-        throw;
-    }
-    context.audio.pause();
+    if (!downloads) throw std::runtime_error("Downloads folder unavailable");
+    return data_location::from_utf8(downloads);
 }
 
-void VideoController::request(VideoOptions options) {
+VideoQueue::Context VideoController::queue_context() const {
+    const auto &context = *context_;
+    return {executable_path(), context.assets, context.cache, context.preferences, context.outfit, available};
+}
+
+void VideoController::request(VideoOptions options, const std::string &title) {
     auto &context = *context_;
-    if (!context.viewer.active || !context.game.renderer || !context.game.core || context.download.valid())
-        throw std::runtime_error("Open a replay before exporting video");
-    if (capture || director_job || encoder.busy()) throw std::runtime_error("A video export is already running");
+    if (!context.viewer.active || !context.game.core) throw std::runtime_error("Open a replay before exporting video");
     if (!available.available) throw std::runtime_error(available.reason);
-    options.tick_interval = context.viewer.session.range.tick_interval;
-    native::ReplayRange::make(context.viewer.session.info).export_bounds(options);
-    native::VideoTimeline::make(options, context.viewer.session.range.total);
+    const auto &range = context.viewer.session.range;
+    options.tick_interval = range.tick_interval;
+    range.export_bounds(options);
+    VideoTimeline::make(options, range.total);
+    VideoQueue::Request request;
+    request.replay = context.viewer.path;
+    request.map = context.game.map_id;
+    request.bsp = data_location::from_utf8(context.game.map_path);
+    request.content = data_location::from_utf8(context.game.content_root);
+    request.detail = context.game.map_detail;
+    request.output = output_folder();
+    request.title = title.empty() ? context.game.map_id : title;
+    request.options = std::move(options);
     error.clear();
-    show_menu_(true);
-    prepared_camera = {};
-    prepared_camera.set_mode(options.camera);
-    if (options.camera == "auto") {
-        pending_video = options;
-        director_only = false;
-        director_job = std::make_unique<native::ReplayDirectorJob>(
-                context.game.core.get(), context.viewer.session.info.at("totalTicks").get<uint32_t>(), context.curr.tick
-        );
-    } else
-        begin(options);
+    queue_.add(std::move(request), queue_context());
+}
+
+void VideoController::request_file(const std::filesystem::path &replay, const std::string &map, VideoOptions options) {
+    if (!available.available) throw std::runtime_error(available.reason);
+    if (!valid_map_id(map)) throw std::runtime_error("Invalid map name");
+    VideoQueue::Request request;
+    request.replay = replay;
+    request.map = map;
+    request.output = output_folder();
+    request.title = data_location::utf8(replay.filename());
+    request.options = std::move(options);
+    error.clear();
+    queue_.add(std::move(request), queue_context());
+}
+
+void VideoController::message(const nlohmann::json &message, const std::filesystem::path &replays) {
+    try {
+        const auto action = message.value("action", std::string());
+        if (action == "start") {
+            request(parse_video_options(message.at("options")), message.value("title", std::string()));
+        } else if (action == "file") {
+            const auto id = message.at("id").get<std::string>();
+            const auto file = std::filesystem::path(id);
+            if (id.empty() || id.size() > 200 || file.filename() != file || file.extension() != ".bhr")
+                throw std::runtime_error("Invalid replay id");
+            request_file(
+                    replays / file, message.at("map").get<std::string>(), parse_video_options(message.at("options"))
+            );
+        } else if (action == "cancel") {
+            cancel(message.value("id", uint64_t(0)));
+        } else if (action == "clear") {
+            clear_finished();
+        } else {
+            throw std::runtime_error("Unknown video export action");
+        }
+    } catch (const std::exception &failure) {
+        error = failure.what();
+    }
 }
 
 void VideoController::prepare_viewer_camera() {
     auto &context = *context_;
-    director_only = true;
     director_job = std::make_unique<ReplayDirectorJob>(
             context.game.core.get(), context.viewer.session.info.at("totalTicks").get<uint32_t>(), context.curr.tick
     );
 }
 
-void VideoController::step_director() {
+void VideoController::step(bool playing) {
+    queue_.set_pace(playing ? playing_export_fps : 0);
+    if (!director_job) return;
     auto &context = *context_;
-    if (director_job) try {
-            if (director_job->step()) {
-                const double interval = context.viewer.session.range.tick_interval;
-                if (director_only) {
-                    if (director_job->plan(
-                                context.viewer.camera,
-                                interval,
-                                context.viewer.session.range.from,
-                                context.viewer.session.range.to
-                        )) {
-                        director_job.reset();
-                        refresh_playback_pose_();
-                    }
-                } else {
-                    const auto options = *pending_video;
-                    if (director_job->plan(prepared_camera, interval, options.from, options.to)) {
-                        director_job.reset();
-                        pending_video.reset();
-                        begin(options);
-                    }
-                }
-            }
-        } catch (const std::exception &e) {
-            cancel();
+    try {
+        if (!director_job->step()) return;
+        const auto &range = context.viewer.session.range;
+        if (director_job->plan(context.viewer.camera, range.tick_interval, range.from, range.to)) {
+            director_job.reset();
             refresh_playback_pose_();
-            error = e.what();
         }
-}
-
-void VideoController::step_capture() {
-    if (capture) try {
-            if (!encoder.busy()) {
-                capture.reset();
-                refresh_playback_pose_();
-            } else {
-                capture->step();
-                if (capture->done()) {
-                    capture.reset();
-                    refresh_playback_pose_();
-                }
-            }
-        } catch (const std::exception &e) {
-            cancel();
-            refresh_playback_pose_();
-            error = e.what();
-        }
-}
-
-void VideoController::step() {
-    step_director();
-    step_capture();
+    } catch (const std::exception &e) {
+        cancel_preparation();
+        refresh_playback_pose_();
+        error = e.what();
+    }
 }
 
 void VideoController::wait_probe() {

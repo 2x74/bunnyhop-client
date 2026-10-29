@@ -11,10 +11,13 @@ struct ReplayPlayer {
     ReplayControls controls;
     ReplayCamera camera;
     std::string id;
+    std::filesystem::path path;
+    // The runner's look, shown on the player model in third person.
+    std::string runner_outfit, runner_loadout;
     bool active = false, paused = false, failed = false, orbit_drag = false;
     double speed = 1;
 
-    void begin(const std::filesystem::path &path);
+    void begin(const std::filesystem::path &file);
     void action(ReplayControls::Action action, uint32_t tick, Input &camera_controls);
     nlohmann::json state(uint32_t tick, double seconds, double fallback_interval) const;
 };

@@ -74,8 +74,11 @@ GameSession::PreparedMap GameSession::prepare(
     return next;
 }
 
-void GameSession::prepare_workers(const std::string &path, const std::string &content) {
-    video.cancel();
+void GameSession::prepare_workers(const std::string &path, const std::string &content, const nlohmann::json &detail) {
+    video.cancel_preparation();
+    map_path = path;
+    content_root = content;
+    map_detail = detail;
     replay_timeline.map(data_location::from_utf8(path), data_location::from_utf8(content));
     replay_compare_import.map(data_location::from_utf8(path), data_location::from_utf8(content));
 }
@@ -115,8 +118,8 @@ void GameSession::leave(PracticeController &practice) {
 }
 
 void GameSession::release() {
-    // Capture and camera preparation restore borrowed replay state during teardown.
-    video.cancel();
+    // Camera preparation restores borrowed replay state during teardown. Exports run on in their own process.
+    video.cancel_preparation();
     replay_timeline.reset();
     replay_compare_import.reset();
     replay_compare.clear();

@@ -35,6 +35,9 @@ public:
     std::unique_ptr<Renderer> renderer;
     std::vector<BhZone> zones;
     std::string map_id;
+    // Where the loaded map came from, for exports that load it again in their own process.
+    std::string map_path, content_root;
+    nlohmann::json map_detail = nlohmann::json::object();
     ReplayCompare replay_compare;
     ReplayTimelineService replay_timeline;
     ReplayCompareImportService replay_compare_import;
@@ -45,7 +48,7 @@ public:
             const std::string &content,
             const BhSettings &settings,
             const nlohmann::json &detail);
-    void prepare_workers(const std::string &path, const std::string &content);
+    void prepare_workers(const std::string &path, const std::string &content, const nlohmann::json &detail);
     void install(CorePtr next, std::unique_ptr<Renderer> next_renderer, PracticeController &practice, Audio &audio);
     void configure_timer();
     void restart(const std::string &style);
