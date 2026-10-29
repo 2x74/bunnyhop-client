@@ -50,11 +50,22 @@ test("expired/future releases, unsafe URLs/filenames, duplicate platforms are re
     (b: any) => (b.artifacts[0].filename = "../payload.zip"),
     (b: any) => b.artifacts.push(b.artifacts[0]),
     (b: any) => (b.artifacts[0].bytes = 1024 ** 3),
+    (b: any) => (b.artifacts[0].wasm = "bunnyhop-web/not-a-hash"),
+    (b: any) => (b.notes = 42),
+    (b: any) => (b.notes = "x".repeat(8 * 1024 + 1)),
   ]) {
     const b = body();
     mutate(b);
     expect(() => verifiedManifest(envelope(b), trust, now)).toThrow();
   }
+});
+test("release notes and the verifier identity ride along", () => {
+  const b: any = body();
+  b.notes = "**Fixes**\n- Frame rate is back up.";
+  b.artifacts[0].wasm = "bunnyhop-web/3cd68ab1a59f";
+  const manifest = verifiedManifest(envelope(b), trust, now);
+  expect(manifest.notes).toBe(b.notes);
+  expect(manifest.artifacts[0].wasm).toBe("bunnyhop-web/3cd68ab1a59f");
 });
 test("bounded stream rejects response growth", async () => {
   expect(Buffer.from(await readBounded(new Response("abc"), 3)).toString()).toBe("abc");

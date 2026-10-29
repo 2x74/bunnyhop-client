@@ -1,5 +1,15 @@
 {
   "schema": 1,
-  "keys": [],
-  "downloadOrigins": ["https://downloads.bunnyhop.lol", "https://bunnyhop.lol"]
+  "keys": [
+    {
+      "id": "native-k8plus-2026-10",
+      "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAVYjSwITPzU3AUwGh/nm5oqdrnnGHpo6o9ipqHVvLJJI=\n-----END PUBLIC KEY-----\n"
+    }
+  ],
+  "manifestUrl": "https://raw.githubusercontent.com/2x74/bunnyhop-client/native-update-channel/update-manifest.json",
+  "downloadOrigins": [
+    "https://raw.githubusercontent.com",
+    "https://github.com",
+    "https://release-assets.githubusercontent.com"
+  ]
 }

@@ -1,4 +1,5 @@
-// Signed-download preparation only. Never extracts, executes or silently replaces an installed client.
+// Checks a signed release manifest and downloads a verified package from the command line. Installing in place is
+// the client's job (src/update_install.hpp); this tool never extracts, runs or replaces an installed client.
 import { createPublicKey, createHash, verify } from "node:crypto";
 import {
   readFileSync,
@@ -21,19 +22,25 @@ export interface ReleaseArtifact {
   bytes: number;
   sha256: string;
   build: string;
+  /** The verifier the build pairs with, so the menu can tell whether it is on the ranked allowlist. */
+  wasm?: string;
 }
 export interface ReleaseManifest {
   schema: 1;
   version: string;
   createdAt: string;
   expiresAt: string;
+  /** The release notes, shown in Settings → Updates. */
+  notes?: string;
   artifacts: ReleaseArtifact[];
 }
 export interface Trust {
   schema: 1;
   keys: { id: string; publicKey: string }[];
   downloadOrigins: string[];
+  manifestUrl?: string;
 }
+const MAX_NOTES_BYTES = 8 * 1024;
 export function verifiedManifest(envelope: Uint8Array, trust: Trust, now = Date.now()): ReleaseManifest {
   if (envelope.length > 128 * 1024) throw new Error("Release envelope exceeds128KiB");
   const e = JSON.parse(Buffer.from(envelope).toString("utf8"));
@@ -70,6 +77,8 @@ export function verifiedManifest(envelope: Uint8Array, trust: Trust, now = Date.
     expires - created > 31 * 86400000
   )
     throw new Error("Release manifest invalid or expired");
+  if (m.notes !== undefined && (typeof m.notes !== "string" || Buffer.byteLength(m.notes) > MAX_NOTES_BYTES))
+    throw new Error("Invalid release notes");
   if (!Array.isArray(m.artifacts) || !m.artifacts.length || m.artifacts.length > 12)
     throw new Error("Invalid release artifact count");
   const platforms = new Set<string>();
@@ -104,7 +113,8 @@ export function verifiedManifest(envelope: Uint8Array, trust: Trust, now = Date.
       typeof a.sha256 !== "string" ||
       !/^[a-f0-9]{64}$/.test(a.sha256) ||
       typeof a.build !== "string" ||
-      !/^bunnyhop-native\/[a-f0-9]{24}$/.test(a.build)
+      !/^bunnyhop-native\/[a-f0-9]{24}$/.test(a.build) ||
+      (a.wasm !== undefined && (typeof a.wasm !== "string" || !/^bunnyhop-web\/[a-f0-9]{12}$/.test(a.wasm)))
     )
       throw new Error("Invalid artifact metadata");
   }
