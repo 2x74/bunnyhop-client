@@ -1,15 +1,27 @@
 #pragma once
+#include "display_modes.hpp"
+#include "display_scaling.hpp"
 #include "window_settings.hpp"
 #include <SDL3/SDL.h>
 #include <string>
+#include <vector>
 
 namespace native {
 // SDL window operations stay on the event/context thread. Preferences are only
 // committed after apply() succeeds; failure rolls back the prior native mode.
 class WindowController {
+    // What exclusive fullscreen shows: the chosen mode and how a mode of another shape fills the monitor.
+    struct ExclusiveTarget {
+        FullscreenMode mode;
+        std::string scaling = "stretch";
+
+        bool operator==(const ExclusiveTarget &) const = default;
+    };
+
     SDL_Window *window_;
     std::optional<WindowBounds> normal_;
     std::string desired_ = "windowed", error_;
+    ExclusiveTarget exclusive_;
 
     static std::vector<WindowArea> areas() {
         std::vector<WindowArea> out;
@@ -23,7 +35,7 @@ class WindowController {
         return out;
     }
 
-    bool set_mode(const std::string &mode) {
+    bool set_mode(const std::string &mode, const ExclusiveTarget &target) {
         if (mode == "windowed")
             return SDL_SetWindowFullscreen(window_, false) && SDL_SetWindowFullscreenMode(window_, nullptr)
                    && SDL_SetWindowBordered(window_, true);
@@ -46,14 +58,93 @@ class WindowController {
             return SDL_SetWindowFullscreenMode(window_, nullptr) && SDL_SetWindowFullscreen(window_, true);
 #endif
         }
-        SDL_SetWindowBordered(window_, true);
-        const auto *desktop = SDL_GetDesktopDisplayMode(SDL_GetDisplayForWindow(window_));
-        if (!desktop) {
-            error_ = SDL_GetError();
-            return false;
+        return set_exclusive(target);
+    }
+
+    static SDL_DisplayID display_at(int index) {
+        int count = 0;
+        auto *displays = SDL_GetDisplays(&count);
+        const SDL_DisplayID id = displays && index >= 0 && index < count ? displays[index] : 0;
+        SDL_free(displays);
+        return id;
+    }
+
+    // The monitor the settings name, or the one the window is on.
+    SDL_DisplayID target_display(const FullscreenMode &mode) const {
+        int count = 0;
+        auto *displays = SDL_GetDisplays(&count);
+        std::vector<DisplayIdentity> known;
+        std::vector<std::string> names;
+        names.reserve(size_t(std::max(count, 0)));
+        for (int i = 0; displays && i < count; i++) {
+            const char *name = SDL_GetDisplayName(displays[i]);
+            names.emplace_back(name ? name : "");
         }
-        const auto modeCopy = *desktop;
-        return SDL_SetWindowFullscreenMode(window_, &modeCopy) && SDL_SetWindowFullscreen(window_, true);
+        for (int i = 0; i < int(names.size()); i++)
+            known.push_back({names[size_t(i)], i});
+        SDL_free(displays);
+        if (const auto found = matching_display(known, mode)) return display_at(int(*found));
+        return SDL_GetDisplayForWindow(window_);
+    }
+
+    // The display mode to switch to: the chosen size and refresh rate, or the desktop mode.
+    std::optional<SDL_DisplayMode> exclusive_mode(const FullscreenMode &mode) {
+        const SDL_DisplayID display = target_display(mode);
+        if (!mode.width) {
+            const auto *desktop = SDL_GetDesktopDisplayMode(display);
+            if (!desktop) {
+                error_ = SDL_GetError();
+                return std::nullopt;
+            }
+            return *desktop;
+        }
+        int count = 0;
+        auto **offered = SDL_GetFullscreenDisplayModes(display, &count);
+        std::vector<DisplayModeOption> options;
+        for (int i = 0; offered && i < count; i++) {
+            const auto &m = *offered[i];
+            options.push_back(
+                    {int(std::lround(m.w * m.pixel_density)),
+                     int(std::lround(m.h * m.pixel_density)),
+                     double(m.refresh_rate)}
+            );
+        }
+        std::optional<SDL_DisplayMode> result;
+        if (const auto found = matching_mode(options, mode)) result = *offered[*found];
+        SDL_free(offered);
+        if (!result)
+            error_ = "This monitor doesn't offer " + std::to_string(mode.width) + "×" + std::to_string(mode.height);
+        return result;
+    }
+
+    // Exclusive fullscreen moves to another monitor from windowed: SDL puts a fullscreen window on the display
+    // it is on.
+    bool move_to_display(SDL_DisplayID display) {
+        if (SDL_GetDisplayForWindow(window_) == display) return true;
+        if (SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN) {
+            if (!SDL_SetWindowFullscreen(window_, false) || !SDL_SyncWindow(window_)) return false;
+        }
+        return SDL_SetWindowPosition(
+                       window_,
+                       int(SDL_WINDOWPOS_CENTERED_DISPLAY(display)),
+                       int(SDL_WINDOWPOS_CENTERED_DISPLAY(display))
+               )
+               && SDL_SyncWindow(window_);
+    }
+
+    bool set_exclusive(const ExclusiveTarget &target) {
+        SDL_SetWindowBordered(window_, true);
+        const auto mode = exclusive_mode(target.mode);
+        if (!mode) return false;
+        if (!move_to_display(mode->displayID)) return false;
+        if (!SDL_SetWindowFullscreenMode(window_, &*mode) || !SDL_SetWindowFullscreen(window_, true)) return false;
+        if (!SDL_SyncWindow(window_)) return false;
+        request_display_scaling(window_, target.scaling == "bars" ? DisplayScaling::bars : DisplayScaling::stretch);
+        return true;
+    }
+
+    static ExclusiveTarget exclusive_target(const WindowJson &settings) {
+        return {fullscreen_mode_setting(settings), fullscreen_scaling_setting(settings)};
     }
 
     // Windows borderless: the display the window is on, one row taller (see set_mode).
@@ -112,9 +203,12 @@ public:
                 return false;
             }
         }
-        const bool changed = old != requested;
+        const auto oldExclusive = exclusive_;
+        const auto wantExclusive = exclusive_target(settings);
+        const bool changed = old != requested || (requested == "fullscreen" && wantExclusive != exclusive_);
         bool ok = true;
-        if (changed) ok = set_mode(requested);
+        if (changed) ok = set_mode(requested, wantExclusive);
+        if (ok && changed && requested == "fullscreen") exclusive_ = wantExclusive;
         if (ok && changed) ok = SDL_SyncWindow(window_);
         if (ok) ok = SDL_SetWindowAlwaysOnTop(window_, settings.value("alwaysOnTop", false));
         // Back to windowed: this session's last windowed bounds (saved ones only when
@@ -127,7 +221,8 @@ public:
         if (!ok) {
             error_ = SDL_GetError();
             if (error_.empty()) error_ = "The window manager rejected this display mode";
-            set_mode(old);
+            set_mode(old, oldExclusive);
+            exclusive_ = oldExclusive;
             SDL_SetWindowAlwaysOnTop(window_, oldTop);
             normal_ = oldNormal;
             if (old == "windowed" && oldNormal) restore_bounds(*oldNormal);

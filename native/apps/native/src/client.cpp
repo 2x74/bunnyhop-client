@@ -71,6 +71,8 @@
 #include "runtime_smoke.hpp"
 #include "window_sdl.hpp"
 #include "window_mode_driver.hpp"
+#include "display_catalog.hpp"
+#include "display_mode_tryout.hpp"
 #include "menu_scripts.hpp"
 #include "menu_files.hpp"
 #include "menu_messages.hpp"
@@ -278,6 +280,10 @@ int run(const native::Options &opt) {
         std::cerr << "Window: " << window_controller.error() << '\n';
         preferences["windowMode"] = window_controller.mode();
     }
+    // Monitors and their modes for Settings → Display, and the ten-second trial of a new exclusive mode.
+    native::DisplayCatalog display_catalog;
+    display_catalog.refresh(window.get());
+    native::DisplayModeTryout display_tryout;
     auto prefs = native::Preferences::from_settings(preferences);
     bool window_dirty = false;
     auto window_save_due = std::chrono::steady_clock::now();
@@ -1598,6 +1604,7 @@ int run(const native::Options &opt) {
                 || event.type == SDL_EVENT_MOUSE_MOTION || event.type == SDL_EVENT_MOUSE_WHEEL
                 || event.type == SDL_EVENT_TEXT_INPUT)
                 had_input_activity = true;
+            if (display_tryout.event(event)) continue;
             if (hud_editor.active()
                 && hud_editor.event(event, hud, SDL_GetWindowPixelDensity(window.get()), hud_editor_bind))
                 continue;
@@ -1644,6 +1651,11 @@ int run(const native::Options &opt) {
                 case SDL_EVENT_DISPLAY_ADDED:
                 case SDL_EVENT_DISPLAY_REMOVED:
                     window_modes.display_changed();
+                    display_catalog.refresh(window.get());
+                    break;
+                case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+                case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
+                    display_catalog.refresh(window.get());
                     break;
                 case SDL_EVENT_KEY_DOWN:
                 case SDL_EVENT_KEY_UP: {
@@ -1946,6 +1958,12 @@ int run(const native::Options &opt) {
         }
         if (hud_editor.take_closed() && focused && (!menu || !menu->visible()))
             capture(!(viewer.active && viewer.controls.visible));
+        if (auto display = display_tryout.finish_due(preferences, window_modes, menu.get(), SDL_GetTicksNS())) {
+            preferences = std::move(*display);
+            json_writer.write(cache / "settings.json", preferences);
+            apply_preferences();
+            display_catalog.refresh(window.get());
+        }
         if (had_input_activity) activity.input(std::chrono::duration<double>(Clock::now().time_since_epoch()).count());
         if (menu)
             for (const auto &raw : menu->drain_messages()) {
@@ -2310,7 +2328,12 @@ int run(const native::Options &opt) {
                         save_window();
                         auto changed = native::patch_settings(preferences, message.at("patch"));
                         if (!window_modes.choose(changed)) throw std::runtime_error(window_controller.error());
-                        json_writer.write(cache / "settings.json", changed);
+                        // A new exclusive mode is shown now and saved once the player keeps it.
+                        const bool trying = display_tryout.start(
+                                preferences, changed, window_modes, menu.get(), window.get(), SDL_GetTicksNS()
+                        );
+                        if (!display_tryout.error().empty()) toast(display_tryout.error(), 5000);
+                        if (!trying) json_writer.write(cache / "settings.json", changed);
                         preferences = std::move(changed);
                         input_timeline.settings_changed(input, held_codes);
                         apply_preferences();
@@ -3641,6 +3664,7 @@ int run(const native::Options &opt) {
             && (curr.tick >= opt.frames || (viewer.active && viewer.paused && curr.tick >= viewer.session.range.to))) {
             renderer->screenshot(opt.screenshot, width, height);
         }
+        display_tryout.draw(hud, width, height, SDL_GetTicksNS());
         const GLenum gl_error = gl.GetError();
         if (gl_error != GL_NO_ERROR) throw std::runtime_error("OpenGL error " + std::to_string(gl_error));
         frame_diagnostics.mark(native::FrameDiagnostics::kRender, SDL_GetTicksNS());
@@ -3742,6 +3766,7 @@ int run(const native::Options &opt) {
                           {"name",
                            ghosts.info.is_object() ? ghosts.info.value("player", std::string("Ghost")) : "Ghost"}}},
                         {"replayCompare", replay_compare.state()},
+                        {"displays", display_catalog.json()},
                         {"surfaceTools", renderer ? renderer->surface_tools_state() : nlohmann::json(nullptr)},
                         {"graphicsLimits", renderer ? renderer->graphics_limits() : nlohmann::json(nullptr)},
                         {"runGeneration", heartbeat.generation},

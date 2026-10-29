@@ -243,6 +243,35 @@ export const JUMP_STATS_MODES: readonly JumpStatsMode[] = ["sixth", "every", "in
 export const AUDIO_PACKS: readonly AudioPack[] = ["default", "custom"];
 export const WINDOW_MODES = ["windowed", "borderless", "fullscreen"] as const;
 export type WindowMode = (typeof WINDOW_MODES)[number];
+export const FULLSCREEN_SCALINGS = ["stretch", "bars"] as const;
+export type FullscreenScaling = (typeof FULLSCREEN_SCALINGS)[number];
+/** Exclusive fullscreen's mode (window_settings.hpp). Width 0 is the desktop mode; refresh 0 the highest. */
+export interface FullscreenMode {
+  display: string;
+  displayIndex: number;
+  width: number;
+  height: number;
+  refreshHz: number;
+}
+export interface DisplayModeInfo {
+  width: number;
+  height: number;
+  refreshHz: number;
+}
+/** A monitor and the exclusive modes it offers (display_catalog.hpp). */
+export interface DisplayInfo {
+  name: string;
+  index: number;
+  window: boolean;
+  primary: boolean;
+  desktop: DisplayModeInfo | null;
+  modes: DisplayModeInfo[];
+}
+export interface DisplayCatalog {
+  displays: DisplayInfo[];
+  /** The mode exclusive fullscreen shows now, or null. */
+  exclusive: DisplayModeInfo | null;
+}
 export interface NativeAudioState {
   classicLoading: boolean;
   classicActive: boolean;
@@ -259,6 +288,8 @@ export interface NativeSettings {
   alwaysOnTop: boolean;
   rememberWindowBounds: boolean;
   minimizeOnFocusLoss: boolean;
+  fullscreenMode: FullscreenMode;
+  fullscreenScaling: FullscreenScaling;
   capturePbScreenshots: boolean;
   showPlayerGlow: boolean;
   firstPersonGlow: boolean;
@@ -534,6 +565,8 @@ export interface NativeMenuState {
   capabilities: string[] | null;
   /** Values of website settings the host has added (settings-keys.ts), and its web HUD layout. */
   extraSettings: Record<string, unknown>;
+  /** Monitors and their fullscreen modes; null until the host sends them. */
+  displays: DisplayCatalog | null;
 }
 
 declare global {
@@ -657,6 +690,8 @@ function defaultSettings(): NativeSettings {
     alwaysOnTop: false,
     rememberWindowBounds: true,
     minimizeOnFocusLoss: false,
+    fullscreenMode: { display: "", displayIndex: -1, width: 0, height: 0, refreshHz: 0 },
+    fullscreenScaling: "stretch",
     showPlayerGlow: web.showPlayerGlow,
     firstPersonGlow: web.firstPersonGlow,
     waterQuality: "simple",
@@ -797,6 +832,7 @@ export const state: NativeMenuState = {
   bindActions: null,
   capabilities: null,
   extraSettings: {},
+  displays: null,
 };
 
 export const nativeKeyCode = (code: unknown): code is string =>
@@ -814,11 +850,72 @@ function paintPatch(value: unknown): PaintPrefs | null {
   return { color: color as string, size: size as PaintSize };
 }
 
+const MODE_SIDE_MAX = 16384;
+const MODE_REFRESH_MAX = 1000;
+
+const modeSide = (value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value) && (value === 0 || (value >= 240 && value <= MODE_SIDE_MAX));
+const refreshRate = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= MODE_REFRESH_MAX;
+
+/** A fullscreen mode the host takes (window_settings.hpp read_fullscreen_mode). */
+export function fullscreenModePatch(value: unknown): FullscreenMode | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { display, displayIndex, width, height, refreshHz } = value as Record<string, unknown>;
+  if (typeof display !== "string" || display.length > 128) return null;
+  if (typeof displayIndex !== "number" || !Number.isInteger(displayIndex) || displayIndex < -1 || displayIndex > 64)
+    return null;
+  if (!modeSide(width) || !modeSide(height) || (width === 0) !== (height === 0) || !refreshRate(refreshHz)) return null;
+  return { display, displayIndex, width, height, refreshHz };
+}
+
+function displayModeInfo(value: unknown): DisplayModeInfo | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { width, height, refreshHz } = value as Record<string, unknown>;
+  if (!modeSide(width) || !modeSide(height) || !width || !height || !refreshRate(refreshHz)) return null;
+  return { width, height, refreshHz };
+}
+
+function displayInfo(value: unknown): DisplayInfo | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const item = value as Record<string, unknown>;
+  if (typeof item.name !== "string" || !Number.isInteger(item.index) || !Array.isArray(item.modes)) return null;
+  return {
+    name: item.name.slice(0, 128),
+    index: item.index as number,
+    window: item.window === true,
+    primary: item.primary === true,
+    desktop: displayModeInfo(item.desktop),
+    modes: item.modes
+      .slice(0, 160)
+      .map(displayModeInfo)
+      .filter((mode): mode is DisplayModeInfo => mode !== null),
+  };
+}
+
+/** The host's monitors and modes (display_catalog.hpp), or null when it sent something else. */
+export function displayCatalog(value: unknown): DisplayCatalog | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { displays, exclusive } = value as Record<string, unknown>;
+  if (!Array.isArray(displays)) return null;
+  return {
+    displays: displays
+      .slice(0, 16)
+      .map(displayInfo)
+      .filter((display): display is DisplayInfo => display !== null),
+    exclusive: displayModeInfo(exclusive),
+  };
+}
+
 export function settingsPatch(value: unknown): Partial<NativeSettings> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const input = value as Record<string, unknown>,
     out: Record<string, unknown> = {};
   if (WINDOW_MODES.includes(input.windowMode as WindowMode)) out.windowMode = input.windowMode;
+  const fullscreenMode = fullscreenModePatch(input.fullscreenMode);
+  if (fullscreenMode) out.fullscreenMode = fullscreenMode;
+  if (FULLSCREEN_SCALINGS.includes(input.fullscreenScaling as FullscreenScaling))
+    out.fullscreenScaling = input.fullscreenScaling;
   for (const [key, min, max] of [
     ["ghostOpacity", 0, 1],
     ["crosshairSize", 0, 40],
@@ -1015,6 +1112,7 @@ export function applyState(value: unknown): boolean {
     state.sensitivity = state.settings.sensitivity;
     readHostSettings(next.settings);
   } else state.settings.sensitivity = state.sensitivity;
+  if (next.displays !== undefined) state.displays = displayCatalog(next.displays);
   if (Array.isArray(next.capabilities))
     state.capabilities = next.capabilities
       .filter((item): item is string => typeof item === "string" && item.length <= 64)

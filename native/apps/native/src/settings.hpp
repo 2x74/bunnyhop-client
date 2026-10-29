@@ -394,6 +394,14 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
         } else if (key == "windowMode") {
             if (!v.is_string() || !valid_window_mode(v.get<std::string>()))
                 throw std::runtime_error("Invalid window mode");
+        } else if (key == "fullscreenMode") {
+            const auto mode = read_fullscreen_mode(v);
+            if (!mode) throw std::runtime_error("Invalid fullscreen mode");
+            out[key] = fullscreen_mode_json(*mode);
+            continue;
+        } else if (key == "fullscreenScaling") {
+            if (!v.is_string() || !valid_fullscreen_scaling(v.get<std::string>()))
+                throw std::runtime_error("Invalid fullscreen scaling");
         } else if (defaults[key].is_boolean()) {
             if (!v.is_boolean()) throw std::runtime_error("Setting must be true or false: " + key);
         } else if (key == "binds") {

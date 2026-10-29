@@ -3,6 +3,7 @@
 import { h } from "../../web/src/ui/dom";
 import { registerSettingsSection } from "../../web/src/ui/settings-registry";
 import { send, state, WINDOW_MODES, type WindowMode } from "./bridge";
+import { fullscreenGroup } from "./fullscreen-modes";
 import { followHost, nativeChoice, nativeToggle, type Ui } from "./native-rows";
 
 const MODE_LABELS: Record<WindowMode, string> = {
@@ -25,7 +26,9 @@ function windowGroup(ui: Ui): HTMLElement {
       WINDOW_MODES.map((mode) => [mode, MODE_LABELS[mode]]),
       {
         hint: "Alt+Enter switches",
-        desc: "Borderless covers the screen without changing its mode. Fullscreen uses the display's desktop mode.",
+        desc:
+          "Borderless covers the screen without changing its mode. Fullscreen is exclusive and uses the resolution " +
+          "below. While the menu is open it shows as Borderless.",
         keywords: "window fullscreen borderless windowed display mode alt enter",
       },
     ),
@@ -90,9 +93,18 @@ function replaysGroup(ui: Ui): HTMLElement {
 
 /** Registers Settings → Display (call once). */
 export function registerDisplaySection(): void {
-  registerSettingsSection("display", (ui) => ({ columns: [[windowGroup(ui)], [framesGroup(ui), replaysGroup(ui)]] }), {
-    label: "Display",
-    icon: "grid",
-    order: 62,
-  });
+  registerSettingsSection(
+    "display",
+    (ui) => ({
+      columns: [
+        [windowGroup(ui), fullscreenGroup(ui)],
+        [framesGroup(ui), replaysGroup(ui)],
+      ],
+    }),
+    {
+      label: "Display",
+      icon: "grid",
+      order: 62,
+    },
+  );
 }
