@@ -227,9 +227,6 @@ class NativeHud {
     bool element_visible = true;
     float element_scale = 1, pivot_x = 0, pivot_y = 0;
     native::HudSamples<std::pair<uint32_t, float>, 250> speed_history;
-    float jump_speed = 0, gain_delta = 0;
-    uint32_t gain_tick = 0;
-    bool have_jump = false;
     std::string split_line, delta_line;
     bool delta_good = false;
 
@@ -275,21 +272,7 @@ class NativeHud {
     }
 
     Color jump_stats_color(std::optional<float> gain) const {
-        if (!gain) return dim;
-        if (!prefs_.jump_stats_colors) return *gain >= native::good_gain ? amber : dim;
-        switch (native::gain_band(*gain)) {
-            case native::GainBand::red:
-                return {1, 0, 0, 1};  // #FF0000
-            case native::GainBand::orange:
-                return {1, 165.f / 255, 0, 1};  // #FFA500
-            case native::GainBand::green:
-                return {0, 1, 0, 1};  // #00FF00
-            case native::GainBand::blue:
-                return {0, 1, 1, 1};  // #00FFFF
-            case native::GainBand::white:
-                return {1, 1, 1, 1};  // #FFFFFF
-        }
-        return dim;
+        return native::ssj_gain_color(gain, prefs_.ssj_fields, prefs_.palette).value_or(native::semantic_rgb(0xffffff));
     }
 
     void quad(float x, float y, float w, float h, float u, float v, float uw, float vh, Color c) {
@@ -479,6 +462,11 @@ class NativeHud {
 public:
     void preferences(const native::Json &value) {
         prefs_ = native::HudPreferences::from(value);
+        if (ssj_last_) {
+            const auto labels = native::ssj_labels(*ssj_last_, prefs_.ssj_fields);
+            ssj_line_ = labels.hud;
+            ssj_chat_line_ = labels.chat;
+        }
         chat_layout_hash_ = ~uint64_t(0);
         const auto &restart = value.at("binds").at("restart");
         result.restart_bind(restart.empty() ? "" : restart[0].get_ref<const std::string &>());
@@ -498,6 +486,7 @@ private:
     native::HudLabel<512> ssj_line_;
     native::HudLabel<512> ssj_chat_line_;
     bool ssj_pending_ = false;
+    std::optional<native::SsjReport> ssj_last_;
 
 public:
     std::string_view ssj_line() const { return ssj_line_.view(); }
@@ -520,54 +509,17 @@ public:
     }
 
     void ssj_report(const native::SsjReport &report) {
-        const auto &fields = prefs_.ssj_fields;
-        native::HudLabel<128> part;
-        ssj_line_.format("Jump %u", report.jump);
-        if (fields.speed) {
-            part.format(" | %d u/s", report.speed);
-            ssj_line_.append(part.view());
-        }
-        if (fields.diff && report.diff) {
-            part.format(" (%+d)", *report.diff);
-            ssj_line_.append(part.view());
-        }
-        ssj_line_.append("\n");
-        if (fields.gain && report.gain) {
-            part.format("Gain %.1f%%  ", std::trunc(double(*report.gain) * 10) / 10);
-            ssj_line_.append(part.view());
-        }
-        if (fields.sync && report.sync) {
-            part.format("Sync %.0f%%  ", std::trunc(*report.sync));
-            ssj_line_.append(part.view());
-        }
-        if (fields.strafes && report.strafes) {
-            part.format("%u str  ", *report.strafes);
-            ssj_line_.append(part.view());
-        }
-        if (fields.eff && report.eff) {
-            part.format("Eff %.0f%%  ", std::trunc(*report.eff));
-            ssj_line_.append(part.view());
-        }
-        if (fields.height && report.height) {
-            part.format("Height %+d  ", *report.height);
-            ssj_line_.append(part.view());
-        }
-        if (fields.time && report.time) {
-            part.format("%.3fs  ", *report.time);
-            ssj_line_.append(part.view());
-        }
-        if (fields.start_pre && !movement.start_pre.empty()) ssj_line_.append(movement.start_pre.view());
-        ssj_chat_line_ = ssj_line_;
-        for (char &character : ssj_chat_line_.bytes) {
-            if (character == '\n') character = ' ';
-        }
+        ssj_last_ = report;
+        const auto labels = native::ssj_labels(report, prefs_.ssj_fields);
+        ssj_line_ = labels.hud;
+        ssj_chat_line_ = labels.chat;
         ssj_pending_ = prefs_.ssj_chat;
     }
 
     void publish_movement_chat(native::Chat &chat, double now) {
         if (ssj_pending_) chat.push(std::string(ssj_chat_line_.view()), "", "system", now);
         if (movement.new_first && prefs_.first_jump_chat)
-            chat.push(std::string(movement.first_jump.view()), "", "system", now);
+            chat.push(std::string(movement.first_jump_chat.view()), "", "system", now);
         if (movement.new_long_jump && prefs_.long_jump && prefs_.long_jump_chat)
             chat.push(
                     std::string(movement.long_jump.view()) + " | " + std::string(movement.long_jump_details.view()),
@@ -684,16 +636,17 @@ public:
         amber = theme_.accent.value_or(kAmber);
     }
 
-    void reset_history() {
-        ssj_line_.assign("");
+    void reset_history(bool keep_jump_stats = false) {
+        if (!keep_jump_stats) {
+            ssj_last_.reset();
+            ssj_line_.assign("");
+        }
         ssj_pending_ = false;
         movement.reset();
         result.reset();
         keys_latest_ = keys_edges_ = 0;
         have_keys_yaw_ = false;
         speed_history.clear();
-        have_jump = false;
-        gain_tick = 0;
         split_line.clear();
         delta_line.clear();
     }
@@ -708,19 +661,6 @@ public:
         if (!speed_history.empty()
             && (s.tick < speed_history.back().first || s.tick > speed_history.back().first + 100))
             speed_history.clear();
-        if (s.events & native::teleported) {
-            have_jump = false;
-            gain_tick = 0;
-        }
-        if ((s.events & native::jump) && (speed_history.empty() || s.tick != speed_history.back().first)) {
-            const float speed = std::hypot(s.velocity[0], s.velocity[1]);
-            if (have_jump) {
-                gain_delta = speed - jump_speed;
-                gain_tick = s.tick;
-            }
-            jump_speed = speed;
-            have_jump = true;
-        }
         if (speed_history.empty() || s.tick != speed_history.back().first)
             speed_history.emplace_back(s.tick, std::hypot(s.velocity[0], s.velocity[1]));
         while (speed_history.size() > 250)
@@ -1400,19 +1340,21 @@ else{color=vec4(ink.rgb,ink.a*(uv.x<-1.?1.:texture(font,uv).a));}})"
                                          : speed > 270        ? palette.gain
                                                               : cream;
                 text(x, y, buf, 25, speedColor, true);
-                if (prefs_.gain_ticks && gain_tick && s.player.tick >= gain_tick && s.player.tick - gain_tick < 70) {
+                if (prefs_.gain_ticks && movement.gain_tick && s.player.tick >= movement.gain_tick
+                    && (s.player.tick - movement.gain_tick) * movement.tick_interval < .45) {
                     char gain[32];
-                    std::snprintf(gain, sizeof(gain), "%+.0f", gain_delta);
+                    std::snprintf(gain, sizeof(gain), "%s", native::jump_gain_text(movement.gain_delta).bytes.data());
                     text(x + 100,
-                         y - 10 - float(s.player.tick - gain_tick) * .25f,
+                         y - 10 - float(s.player.tick - movement.gain_tick) * .25f,
                          gain,
                          16,
-                         gain_delta >= 0 ? palette.gain : palette.loss);
+                         movement.gain_delta > 0 ? palette.gain : palette.loss);
                 }
-                if (native::scroll_style(style) && prefs_.perfect_indicator && run.last_perfect_tick >= 0
-                    && s.player.tick >= uint32_t(run.last_perfect_tick)
-                    && s.player.tick - uint32_t(run.last_perfect_tick) < 35)
-                    text(x - 160, y + 5, "PERFECT", 12, amber);
+                if (prefs_.perfect_indicator
+                    && native::perfect_hop_visible(
+                            style, run, s.player.tick, movement.tick_interval, practice && practice->active
+                    ))
+                    text(x - 160, y + 5, "Perfect", 12, native::semantic_rgb(0xffffff, .7f));
             }
             {
                 const auto [x, y] = at("runStats", w / 2, h - 68);
@@ -1420,11 +1362,11 @@ else{color=vec4(ink.rgb,ink.a*(uv.x<-1.?1.:texture(font,uv).a));}})"
                     std::snprintf(
                             buf,
                             sizeof(buf),
-                            "%u jumps  %u strafes  %.1f%% sync  %.1f%% perf",
+                            "%u jumps  %u strafes  %.1f%% sync  %s",
                             run.jumps,
                             run.strafes,
                             run.sync_percent,
-                            run.perf_percent
+                            native::perf_text(run).bytes.data()
                     );
                 else
                     std::snprintf(

@@ -20,6 +20,8 @@
 // confines itself to IEEE-exact operations and this file does not have to.
 // Every reported field is truncated or rounded to two decimals, so a last-bit
 // difference does not reach the HUD.
+#include "hud_text.hpp"
+#include "semantic_palette.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -38,18 +40,6 @@ inline constexpr unsigned bhop_frames = 10;
 inline constexpr float air_wish_cap = 30.0f;
 /** Gain this high gets the accent colour (bhop-get-stats calls 80-90 good). */
 inline constexpr float good_gain = 80.0f;
-/** JHUD colours (Settings -> Jump stats colours, on by default), by the gain the
- *  line shows: red 0-59%, orange 60-69%, green 70-79%, blue 80-89%, white 90%+. */
-enum class GainBand { red, orange, green, blue, white };
-
-inline GainBand gain_band(float gain) {
-    return gain < 60   ? GainBand::red
-           : gain < 70 ? GainBand::orange
-           : gain < 80 ? GainBand::green
-           : gain < 90 ? GainBand::blue
-                       : GainBand::white;
-}
-
 // Source IN_* bits. The same values native_input.hpp uses.
 inline constexpr std::uint32_t ssj_in_jump = 1u << 1;
 inline constexpr std::uint32_t ssj_in_forward = 1u << 3;
@@ -284,48 +274,112 @@ struct SsjFields {
     bool eff = false, height = false, time = false, start_pre = false;
 };
 
-namespace ssj_detail {
-/** Shown precision is truncated, never rounded up: 99.96% sync is not "100%". */
-inline std::string trunc1(float v) {
-    char buffer[32];
-    std::snprintf(buffer, sizeof(buffer), "%.1f", std::trunc(double(v) * 10.0) / 10.0);
-    return buffer;
+inline std::optional<SemanticColor>
+ssj_gain_color(std::optional<float> gain, const SsjFields &fields, const SemanticPalette &palette) {
+    if (fields.gain && gain && *gain >= good_gain) return palette.gain;
+    return std::nullopt;
 }
 
-inline std::string signed_value(int v) {
-    return (v > 0 ? "+" : "") + std::to_string(v);
-}
-}  // namespace ssj_detail
+struct SsjText {
+    HudLabel<512> chat;
+    HudLabel<512> hud;
+};
 
-/**
- * The report as one line: "Jump 6 · 1013 u/s (+87) · Gain 87.5% · Sync 92% · 5 strafes".
- * Fields without a value are left out.
- */
-inline std::string ssj_text(const SsjReport &r, const SsjFields &fields) {
-    static const std::string separator = " \xC2\xB7 ";  // " · "
-    std::string out = "Jump " + std::to_string(r.jump);
-    auto add = [&out](const std::string &item) {
-        out += separator;
-        out += item;
+inline HudLabel<48> ssj_time(double seconds) {
+    constexpr int64_t milliseconds_per_minute = 60000;
+    const auto milliseconds = int64_t(std::floor(std::abs(seconds) * 1000 + .5));
+    HudLabel<48> result;
+    result.format(
+            "%s%02lld:%02lld.%03lld",
+            seconds < 0 ? "-" : "",
+            static_cast<long long>(milliseconds / milliseconds_per_minute),
+            static_cast<long long>(milliseconds / 1000 % 60),
+            static_cast<long long>(milliseconds % 1000)
+    );
+    return result;
+}
+
+inline SsjText ssj_labels(const SsjReport &report, const SsjFields &fields) {
+    constexpr std::string_view separator = " · ";
+    SsjText result;
+    result.chat.format("Jump %u", report.jump);
+    result.hud = result.chat;
+    bool rest = false;
+    const auto add = [&](std::string_view item, bool head = false) {
+        result.chat.append(separator);
+        result.chat.append(item);
+        result.hud.append(head || rest ? separator : "\n");
+        result.hud.append(item);
+        if (!head) rest = true;
     };
+    HudLabel<128> part;
     if (fields.speed) {
-        std::string item = std::to_string(r.speed) + " u/s";
-        if (fields.diff && r.diff) item += " (" + ssj_detail::signed_value(*r.diff) + ")";
-        add(item);
-    } else if (fields.diff && r.diff) {
-        add(ssj_detail::signed_value(*r.diff) + " u/s");
+        part.format("%d u/s", report.speed);
+        if (fields.diff && report.diff) {
+            HudLabel<32> difference;
+            difference.format(" (%s%d)", *report.diff > 0 ? "+" : "", *report.diff);
+            part.append(difference.view());
+        }
+        add(part.view(), true);
+    } else if (fields.diff && report.diff) {
+        part.format("%s%d u/s", *report.diff > 0 ? "+" : "", *report.diff);
+        add(part.view(), true);
     }
-    if (fields.gain && r.gain) add("Gain " + ssj_detail::trunc1(*r.gain) + "%");
-    if (fields.sync && r.sync) add("Sync " + std::to_string(int(std::trunc(double(*r.sync)))) + "%");
-    if (fields.strafes && r.strafes) add(std::to_string(*r.strafes) + (*r.strafes == 1 ? " strafe" : " strafes"));
-    if (fields.eff && r.eff) add("Eff " + std::to_string(int(std::trunc(double(*r.eff)))) + "%");
-    if (fields.height && r.height) add("Height " + ssj_detail::signed_value(*r.height));
-    if (fields.time && r.time) {
-        char time[48];
-        std::snprintf(time, sizeof(time), "Time %.3fs", *r.time);
-        add(time);
+    if (fields.gain && report.gain) {
+        const double truncated = std::trunc(double(*report.gain) * 10) / 10;
+        part.format("Gain %.1f%%", truncated == 0 ? 0 : truncated);
+        add(part.view());
     }
-    return out;
+    if (fields.sync && report.sync) {
+        part.format("Sync %d%%", int(std::trunc(*report.sync)));
+        add(part.view());
+    }
+    if (fields.strafes && report.strafes) {
+        part.format("%u strafe%s", *report.strafes, *report.strafes == 1 ? "" : "s");
+        add(part.view());
+    }
+    if (fields.eff && report.eff) {
+        part.format("Eff %d%%", int(std::trunc(*report.eff)));
+        add(part.view());
+    }
+    if (fields.height && report.height) {
+        part.format("Height %s%d", *report.height > 0 ? "+" : "", *report.height);
+        add(part.view());
+    }
+    if (fields.time && report.time) {
+        part.format("Time %s", ssj_time(*report.time).bytes.data());
+        add(part.view());
+    }
+    return result;
 }
+
+inline std::string ssj_text(const SsjReport &report, const SsjFields &fields) {
+    return std::string(ssj_labels(report, fields).chat.view());
+}
+
+class StartPreTracker {
+    bool was_in_start_ = false;
+    bool captured_ = false;
+
+public:
+    void reset() { *this = {}; }
+
+    // Outer optional: update the label. Inner optional: a value, or clear it.
+    std::optional<std::optional<int>> tick(const SsjState &pre, const SsjTick &info) {
+        if (info.teleported || info.noclip) {
+            reset();
+            return std::optional<int>{};
+        }
+        const bool entered = info.in_start && !was_in_start_;
+        was_in_start_ = info.in_start;
+        if (entered) captured_ = false;
+        if (info.in_start && pre.grounded && info.jumped && !captured_) {
+            captured_ = true;
+            return std::optional<int>{int(std::floor(std::hypot(double(pre.velocity[0]), double(pre.velocity[1]))))};
+        }
+        if (entered) return std::optional<int>{};
+        return std::nullopt;
+    }
+};
 
 }  // namespace native
