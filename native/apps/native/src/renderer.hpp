@@ -12,6 +12,7 @@
 #include "paint.hpp"
 #include "measure.hpp"
 #include "zone_effects.hpp"
+#include "resource_loading.hpp"
 #include "actor_anim.hpp"
 #include "tp_inspect.hpp"
 #include <span>
@@ -23,6 +24,8 @@
 #include <zlib.h>
 #include <memory>
 #include <optional>
+#include <future>
+#include <thread>
 #include <array>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
@@ -133,13 +136,16 @@ struct Gl {
     GL_FUNCTIONS(DECLARE)
 #undef DECLARE
 
-    void load() {
+    template <class Resolve>
+    void load(Resolve resolve) {
 #define LOAD(ret, name, args) \
-    name = reinterpret_cast<decltype(name)>(SDL_GL_GetProcAddress("gl" #name)); \
+    name = reinterpret_cast<decltype(name)>(resolve("gl" #name)); \
     if (!name) throw std::runtime_error("Missing OpenGL function gl" #name);
         GL_FUNCTIONS(LOAD)
 #undef LOAD
     }
+
+    void load() { load(SDL_GL_GetProcAddress); }
 };
 
 inline GLuint shader(Gl &gl, GLenum kind, const char *source) {
@@ -512,15 +518,36 @@ class Renderer {
         return found == textures.end() ? checker : found->second;
     }
 
-    void cache_texture(int32_t index, bool raw = false) {
-        if (index < 0) return;
+    ResourceLoading cache_texture(int32_t index, bool raw = false) {
+        if (index < 0) co_return;
         const uint64_t key = uint32_t(index) | (uint64_t(raw) << 32);
-        if (textures.count(key)) return;
+        if (textures.count(key)) co_return;
         BhImage image{};
         GLuint id = checker;
         if (bh_texture(core, index, &image)) {
             textureSizes[index] = {image.width, image.height};
-            id = !raw && cutoutTextures.count(index) ? upload_cutout(image) : upload(image, true, true, !raw);
+            std::vector<uint8_t> pixels;
+            if (!raw && cutoutTextures.count(index)) {
+                pixels.assign(image.rgba, image.rgba + image.byte_count);
+                const auto width = image.width, height = image.height;
+                std::packaged_task<std::vector<uint8_t>()> prepare(
+                        [pixels = std::move(pixels), width, height]() mutable {
+                            if (native_render::has_transparent_texels(pixels))
+                                native_render::bleed_transparent_texels(pixels, width, height);
+                            return std::move(pixels);
+                        }
+                );
+                auto result = prepare.get_future();
+                std::thread(std::move(prepare)).detach();
+                while (result.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+                    co_yield "cutout pixels";
+                pixels = result.get();
+            }
+            co_yield "upload texture";
+            const BhImage prepared{
+                    pixels.empty() ? image.rgba : pixels.data(), image.byte_count, image.width, image.height
+            };
+            id = upload(prepared, true, true, !raw);
             if (!raw) {
                 std::array<float, 3> average{};
                 const size_t pixels = size_t(image.width) * image.height;
@@ -544,15 +571,6 @@ class Renderer {
     static constexpr uint32_t material_translucent = 1, material_alpha_test = 2;
     // Textures a cutout or translucent material reads alpha from (texture_bleed.hpp).
     std::unordered_set<int32_t> cutoutTextures;
-
-    GLuint upload_cutout(const BhImage &image) {
-        const size_t bytes = size_t(image.width) * image.height * 4;
-        const std::span<const uint8_t> source(image.rgba, std::min(bytes, image.byte_count));
-        if (!native_render::has_transparent_texels(source)) return upload(image, true, true);
-        std::vector<uint8_t> bled(source.begin(), source.end());
-        native_render::bleed_transparent_texels(bled, image.width, image.height);
-        return upload({bled.data(), bled.size(), image.width, image.height}, true, true);
-    }
 
     std::string normal_path(std::string name, int depth = 0) {
         if (depth > 6) return {};
@@ -585,7 +603,7 @@ class Renderer {
         return {};
     }
 
-    void load_normals() {
+    ResourceLoading load_normals() {
         size_t count = 0;
         const char *raw = bh_entities_json(core, &count);
         if (raw && count) {
@@ -612,12 +630,13 @@ class Renderer {
             }
         }
         normals.resize(materials.size());
-        if (!hasSun) return;
+        if (!hasSun) co_return;
         raw = bh_material_names_json(core, &count);
-        if (!raw || !count) return;
+        if (!raw || !count) co_return;
         const auto names = nlohmann::json::parse(raw, raw + count);
         std::unordered_map<std::string, GLuint> cached;
         for (size_t i = 0; i < normals.size() && i < names.size(); i++) {
+            co_yield "normal texture";
             const auto path = normal_path(names[i]);
             if (path.empty()) continue;
             if (cached.count(path)) {
@@ -1593,14 +1612,35 @@ public:
         if (viewmodel) viewmodel->set_bob(value);
     }
 
-    Renderer(Gl &g, BhContext *c, const std::filesystem::path &assetRoot = BUNNYHOP_NATIVE_ASSET_ROOT)
+    ResourceLoading loading;
+
+    Renderer(
+            Gl &g,
+            BhContext *c,
+            const std::filesystem::path &assetRoot = BUNNYHOP_NATIVE_ASSET_ROOT,
+            bool deferred = false,
+            std::unique_ptr<NativeViewmodel> prepared_viewmodel = {}
+    )
         : gl(g)
         , core(c) {
-        measureLabel.reserve(100);
-        program = link_program(gl, native_render::world_vertex, native_render::world_fragment().c_str());
-        materialUniforms.read(gl, program);
-        skyProgram = link_program(gl, native_render::sky_vertex, native_render::sky_fragment().c_str());
-        depthProgram = link_program(gl, native_render::depth_vertex, native_render::depth_fragment);
+        viewmodel = std::move(prepared_viewmodel);
+        loading = prepare_resources(assetRoot);
+        if (!deferred) {
+            while (!poll_loading()) {
+            }
+        }
+    }
+
+    bool poll_loading() {
+        constexpr auto frame_budget = std::chrono::milliseconds(2);
+        const auto start = std::chrono::steady_clock::now();
+        do {
+            if (loading.step()) return true;
+        } while (std::chrono::steady_clock::now() - start < frame_budget);
+        return false;
+    }
+
+    void prepare_fallback_textures() {
         gl.GenVertexArrays(1, &emptyVao);
         const uint8_t blank[4] = {255, 255, 255, 255};
         white = upload({blank, 4, 1, 1}, true, false);
@@ -1613,6 +1653,38 @@ public:
                 fallback[at + 3] = 255;
             }
         checker = upload({fallback, sizeof(fallback), 8, 8}, true, true);
+    }
+
+    void record_group_bounds(
+            uint64_t key,
+            uint32_t first,
+            uint32_t count,
+            const float *v,
+            size_t floats,
+            int stride,
+            const uint32_t *ix,
+            size_t n
+    ) {
+        if (uint64_t(first) + count > n) throw std::runtime_error("Native draw range exceeds index buffer");
+        native_render::Bounds bounds;
+        bounds.lo.fill(1e30f);
+        bounds.hi.fill(-1e30f);
+        for (size_t i = first; i < size_t(first) + count; i++) {
+            const size_t at = size_t(ix[i]) * stride;
+            if (at + 2 >= floats) throw std::runtime_error("Native group vertex invalid");
+            for (int k = 0; k < 3; k++) {
+                bounds.lo[k] = std::min(bounds.lo[k], v[at + k]);
+                bounds.hi[k] = std::max(bounds.hi[k], v[at + k]);
+            }
+        }
+        std::array<float, 3> mid{};
+        for (int k = 0; k < 3; k++)
+            mid[k] = (bounds.lo[k] + bounds.hi[k]) * .5f;
+        centers[key] = mid;
+        groupBounds[key] = bounds;
+    }
+
+    ResourceLoading prepare_world() {
         size_t nv = 0, ni = 0, ng = 0, nm = 0, ne = 0, nb = 0;
         const float *verts = bh_vertices(core, &nv);
         const uint32_t *indices = bh_indices(core, &ni);
@@ -1629,43 +1701,25 @@ public:
                 std::any_of(materials.begin(), materials.end(), [](const BhMaterial &m) { return m.kind == 2; });
         for (size_t i = 0; i < materials.size() && i < extras.size(); i++)
             waterBeneathFaces |= materials[i].kind == 2 && !extras[i].above_water;
+        co_yield "geometry";
         worldMesh = geometry(verts, nv, 10, indices, ni, blend, nb);
-        auto group_center = [&](uint64_t key,
-                                uint32_t first,
-                                uint32_t count,
-                                const float *v,
-                                size_t floats,
-                                int stride,
-                                const uint32_t *ix,
-                                size_t n) {
-            if (uint64_t(first) + count > n) throw std::runtime_error("Native draw range exceeds index buffer");
-            native_render::Bounds bounds;
-            bounds.lo.fill(1e30f);
-            bounds.hi.fill(-1e30f);
-            for (size_t i = first; i < size_t(first) + count; i++) {
-                const size_t at = size_t(ix[i]) * stride;
-                if (at + 2 >= floats) throw std::runtime_error("Native group vertex invalid");
-                for (int k = 0; k < 3; k++) {
-                    bounds.lo[k] = std::min(bounds.lo[k], v[at + k]);
-                    bounds.hi[k] = std::max(bounds.hi[k], v[at + k]);
-                }
-            }
-            std::array<float, 3> mid{};
-            for (int k = 0; k < 3; k++)
-                mid[k] = (bounds.lo[k] + bounds.hi[k]) * .5f;
-            centers[key] = mid;
-            groupBounds[key] = bounds;
-        };
-        for (const auto &item : groups)
-            group_center(item.first_index, item.first_index, item.index_count, verts, nv, 10, indices, ni);
+        co_yield "resource";
+        for (const auto &item : groups) {
+            record_group_bounds(item.first_index, item.first_index, item.index_count, verts, nv, 10, indices, ni);
+            co_yield "resource";
+        }
+    }
+
+    ResourceLoading prepare_props() {
         size_t pv = 0, pi = 0, pg = 0;
         const float *propVertices = bh_prop_vertices(core, &pv);
         const auto *propIndices = bh_prop_indices(core, &pi);
         const auto *rawProps = bh_prop_groups(core, &pg);
         propMesh = geometry(propVertices, pv, 8, propIndices, pi);
         if (rawProps && pg) propGroups.assign(rawProps, rawProps + pg);
-        for (const auto &item : propGroups)
-            group_center(
+        co_yield "resource";
+        for (const auto &item : propGroups) {
+            record_group_bounds(
                     (uint64_t(1) << 63) | item.first_index,
                     item.first_index,
                     item.index_count,
@@ -1675,6 +1729,11 @@ public:
                     propIndices,
                     pi
             );
+            co_yield "resource";
+        }
+    }
+
+    void prepare_sky() {
         size_t sv = 0, si = 0, sg = 0;
         const float *skyVertices = bh_sky_vertices(core, &sv);
         const auto *skyIndices = bh_sky_indices(core, &si);
@@ -1689,14 +1748,29 @@ public:
         BhImage image{};
         lightmap = bh_lightmap(core, &image) ? upload(image, false, false, true) : white;
         if (lightmap == white || !bh_lightmap_info(core, &lightmapInfo)) lightmapInfo = {1, 0};
+    }
+
+    ResourceLoading prepare_textures() {
         for (const auto &m : materials)
             if (m.flags & (material_translucent | material_alpha_test)) cutoutTextures.insert(m.texture);
-        for (const auto &m : materials)
-            cache_texture(m.texture);
-        for (const auto &e : extras) {
-            cache_texture(e.texture2);
-            cache_texture(e.detail, true);
+        co_yield "resource";
+        for (const auto &m : materials) {
+            auto texture_loading = cache_texture(m.texture);
+            while (!texture_loading.step())
+                co_yield "texture";
+            co_yield "texture";
         }
+        for (const auto &e : extras) {
+            auto secondary_loading = cache_texture(e.texture2);
+            while (!secondary_loading.step())
+                co_yield "secondary texture";
+            auto detail_loading = cache_texture(e.detail, true);
+            while (!detail_loading.step())
+                co_yield "detail texture";
+        }
+    }
+
+    std::vector<native_render::WaterSurface> water_surfaces(const float *verts, const uint32_t *indices) {
         std::vector<native_render::WaterSurface> waterSurfaces;
         for (const auto &g : groups) {
             if (g.material >= materials.size() || materials[g.material].kind != 2 || g.material >= extras.size()
@@ -1716,7 +1790,29 @@ public:
                 waterSurfaces.push_back(surface);
             }
         }
+        return waterSurfaces;
+    }
+
+    void upload_water_planes(std::vector<float> planes) {
+        if (planes.empty()) planes.resize(4);
+        GLint limit = 0;
+        gl.GetIntegerv(GL_MAX_TEXTURE_SIZE, &limit);
+        if (planes.size() / 4 > size_t(limit)) throw std::runtime_error("Native water plane texture exceeds GPU size");
+        gl.GenTextures(1, &planesTexture);
+        gl.BindTexture(GL_TEXTURE_2D, planesTexture);
+        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, planes.size() / 4, 1, 0, GL_RGBA, GL_FLOAT, planes.data());
+    }
+
+    ResourceLoading prepare_water() {
+        size_t vertex_count = 0, index_count = 0;
+        const auto *verts = bh_vertices(core, &vertex_count);
+        const auto *indices = bh_indices(core, &index_count);
+        const auto waterSurfaces = water_surfaces(verts, indices);
+        co_yield "resource";
         load_water_cells(verts, indices);
+        co_yield "resource";
         std::vector<float> planes;
         size_t waterBytes = 0;
         const auto *water = bh_water_json(core, &waterBytes);
@@ -1745,15 +1841,10 @@ public:
                 volumes.push_back(volume);
             }
         }
-        if (planes.empty()) planes.resize(4);
-        GLint limit = 0;
-        gl.GetIntegerv(GL_MAX_TEXTURE_SIZE, &limit);
-        if (planes.size() / 4 > size_t(limit)) throw std::runtime_error("Native water plane texture exceeds GPU size");
-        gl.GenTextures(1, &planesTexture);
-        gl.BindTexture(GL_TEXTURE_2D, planesTexture);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, planes.size() / 4, 1, 0, GL_RGBA, GL_FLOAT, planes.data());
+        upload_water_planes(std::move(planes));
+    }
+
+    void prepare_uniforms() {
         gl.UseProgram(program);
         gl.Uniform1i(loc(program, "baseTexture"), 0);
         gl.Uniform1i(loc(program, "lightTexture"), 1);
@@ -1764,7 +1855,52 @@ public:
         gl.Uniform1i(loc(program, "reflectionTexture"), 8);
         gl.Uniform2f(loc(program, "cameraNearFar"), native::camera_near_plane, native::camera_far_plane);
         gl.Uniform1f(loc(program, "lightmapScale"), lightmapInfo.scale);
-        load_normals();
+    }
+
+    ResourceLoading prepare_scene() {
+        prepare_fallback_textures();
+        auto world = prepare_world();
+        while (!world.step())
+            co_yield "world geometry";
+        auto props = prepare_props();
+        while (!props.step())
+            co_yield "prop geometry";
+        prepare_sky();
+        co_yield "lightmap";
+        auto textures = prepare_textures();
+        while (!textures.step())
+            co_yield "texture";
+        auto water = prepare_water();
+        while (!water.step())
+            co_yield "water";
+        prepare_uniforms();
+    }
+
+    void print_geometry() {
+        size_t nv = 0, pv = 0, sv = 0;
+        bh_vertices(core, &nv);
+        bh_prop_vertices(core, &pv);
+        bh_sky_vertices(core, &sv);
+        std::cout << "Native renderer: " << nv / 10 << " BSP vertices, " << pv / 8 << " prop vertices, " << sv / 3
+                  << " sky vertices, " << volumes.size() << " water volumes, 3D sky=" << hasSky << "\n";
+    }
+
+    ResourceLoading prepare_resources(std::filesystem::path assetRoot) {
+        measureLabel.reserve(100);
+        program = link_program(gl, native_render::world_vertex, native_render::world_fragment().c_str());
+        materialUniforms.read(gl, program);
+        co_yield "world shader";
+        skyProgram = link_program(gl, native_render::sky_vertex, native_render::sky_fragment().c_str());
+        depthProgram = link_program(gl, native_render::depth_vertex, native_render::depth_fragment);
+        co_yield "sky shader";
+        auto scene = prepare_scene();
+        while (!scene.step())
+            co_yield "scene";
+        co_yield "normals";
+        auto normal_loading = load_normals();
+        while (!normal_loading.step())
+            co_yield "normal texture";
+        co_yield "resource";
         gl.UseProgram(program);
         gl.Uniform1i(loc(program, "normalTexture"), 7);
         gl.Uniform3fv(loc(program, "sunDirection"), 1, sunDirection.data());
@@ -1772,16 +1908,21 @@ public:
         mapEffects.load(core);
 
         anisotropySupported = SDL_GL_ExtensionSupported("GL_EXT_texture_filter_anisotropic");
-        viewmodel = std::make_unique<NativeViewmodel>(gl, assetRoot);
+        co_yield "viewmodel";
+        if (viewmodel)
+            viewmodel->prepare_graphics();
+        else
+            viewmodel = std::make_unique<NativeViewmodel>(gl, assetRoot);
+        co_yield "resource";
         gl.Enable(GL_DEPTH_TEST);
         gl.DepthFunc(GL_LEQUAL);
         gl.CullFace(GL_BACK);
         gl.FrontFace(GL_CCW);
-        std::cout << "Native renderer: " << nv / 10 << " BSP vertices, " << pv / 8 << " prop vertices, " << sv / 3
-                  << " sky vertices, " << volumes.size() << " water volumes, 3D sky=" << hasSky << "\n";
+        print_geometry();
     }
 
     ~Renderer() {
+        loading = {};
         ghostRoutes.reset();
         graphicsTarget.reset();
         presentation.reset();

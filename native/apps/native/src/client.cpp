@@ -34,6 +34,7 @@
 #include "hud_demo.hpp"
 #include "capabilities.hpp"
 #include "practice_controller.hpp"
+#include "practice_mode.hpp"
 #include "leave_hold.hpp"
 #include "native_chat.hpp"
 #include "sniper_zoom.hpp"
@@ -48,6 +49,7 @@
 #include "render_menu_contracts.hpp"
 #include "render_capabilities.hpp"
 #include "map_download.hpp"
+#include "map_preparation.hpp"
 #include "ssj.hpp"
 #include "strafe_trainer.hpp"
 #include "audio.hpp"
@@ -427,6 +429,7 @@ int run(const native::Options &opt) {
     };
     apply_preferences();
     native::MapDownload map_download;
+    native::MapPreparation map_preparation;
     auto &loading = map_download.loading;
     auto &last_requested_map = map_download.requested;
     auto &load_progress = map_download.progress;
@@ -735,14 +738,16 @@ int run(const native::Options &opt) {
                     json_writer.write(cache / "settings.json", preferences);
                     return;
                 }
-                if (action == "toggle") {
-                    practice.mode = !practice.mode;
-                    if (practice.mode) {
-                        practice.tool.clear();
-                        practice_use("");
-                        toast(native::PracticeController::help(input_timeline.binds()), 6000);
-                    } else {
-                        reset();
+                if (action == "toggle" || action == "on" || action == "off") {
+                    const auto requested = action == "toggle" ? std::optional<bool>{} : action == "on";
+                    const auto change =
+                            native::PracticeMode::apply(practice, start_points, map_id, requested, practice_use, reset);
+                    using Change = native::PracticeMode::Change;
+                    if (change == Change::on) toast(native::PracticeController::help(input_timeline.binds()), 6000);
+                    if (change == Change::cleared_spawns) {
+                        json_writer.write(cache / "start-points.json", start_points.points);
+                        toast("Practice mode off. Practice spawns cleared. You're back at the start.");
+                    } else if (change == Change::off) {
                         toast("Practice mode off. You're back at the start.");
                     }
                     return;
@@ -802,6 +807,7 @@ int run(const native::Options &opt) {
         show_menu(true);
         if (menu && menu_ready) menu->evaluate_js("window.bunnyhopNativeMenu?.onLeaveMap?.()");
         map_download.cancel();
+        map_preparation.cancel();
         cancel_prefetch();
         pending_replay.clear();
         pending_action.clear();
@@ -867,7 +873,7 @@ int run(const native::Options &opt) {
                         const std::string &id,
                         const nlohmann::json &detail) {
         game.prepare_workers(path, content);
-        auto next = native::GameSession::prepare(path, content, settings, detail);
+        auto next = map_preparation.take(path, content, settings, detail);
         const auto &next_zones = next.zones;
         std::unique_ptr<native::Tutorial> next_tutorial;
         if (id == native::TutorialRunner::map_id)
@@ -875,7 +881,8 @@ int run(const native::Options &opt) {
         audio.set_classic_loader([content, cache]() {
             if (!content.empty()) native::download_classic_sounds(data_location::from_utf8(content), cache);
         });
-        auto next_renderer = std::make_unique<native::Renderer>(gl, next.core.get(), assets);
+        auto next_renderer = map_preparation.renderer ? std::move(map_preparation.renderer)
+                                                      : std::make_unique<native::Renderer>(gl, next.core.get(), assets);
         game.install(std::move(next.core), std::move(next_renderer), practice, audio);
         // The pause screen shows this map itself, never the home tour.
         if (backdrop) backdrop->release();
@@ -917,6 +924,7 @@ int run(const native::Options &opt) {
         // A background still downloading gives way; one already on screen
         // stays until this map has loaded.
         if (backdrop) backdrop->cancel_loading();
+        map_preparation.cancel();
         map_download.start(id, cache, lock_cache);
     };
     auto apply_room_event = [&](const nlohmann::json &message) {
@@ -2202,6 +2210,7 @@ int run(const native::Options &opt) {
                         const auto action = message.at("action").get<std::string>();
                         if (action == "cancel") {
                             map_download.cancel();
+                            map_preparation.cancel();
                             pending_replay.clear();
                             pending_action.clear();
                             pending_tutorial.clear();
@@ -2755,6 +2764,7 @@ int run(const native::Options &opt) {
         if (download.valid() && download.wait_for(std::chrono::seconds(0)) == std::future_status::ready
             && !map_preparing) {
             map_preparing = true;
+            map_preparation.start(download.get(), settings, gl, assets);
             nlohmann::json update;
             {
                 std::lock_guard lock(progress_mutex);
@@ -2764,11 +2774,11 @@ int run(const native::Options &opt) {
                 update = {{"loading", loading}, {"loadProgress", load_progress}, {"error", ""}};
             }
             if (menu && menu_ready) menu->evaluate_js("window.bunnyhopNativeMenu?.onState?.(" + update.dump() + ")");
-        } else if (download.valid() && map_preparing) {
+        } else if (map_preparing && map_preparation.poll(gl, assets)) {
             map_preparing = false;
             try {
-                auto result = download.get();
-                if (result.map)
+                auto &result = map_preparation.download;
+                if (result.map && result.error.empty())
                     load_map(
                             native::data_location::utf8(result.map->bsp),
                             native::data_location::utf8(result.map->content_root),
@@ -2780,6 +2790,7 @@ int run(const native::Options &opt) {
             } catch (const std::exception &e) {
                 error = e.what();
             }
+            map_preparation.cancel();
             if (!error.empty()) {
                 pending_replay.clear();
                 pending_action.clear();

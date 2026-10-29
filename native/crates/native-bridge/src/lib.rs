@@ -13,6 +13,8 @@ use std::ptr;
 use std::rc::Rc;
 use std::thread::{self, ThreadId};
 
+mod map_load;
+pub use map_load::{bh_load_map_begin, bh_load_map_poll, bh_load_map_cancel};
 mod release_crypto;
 mod assets;
 mod look;
@@ -267,6 +269,7 @@ struct Map {
     physics_files: HashMap<String, Rc<[u8]>>,
     attempted: HashSet<String>,
     texture: Vec<u8>,
+    prepared_textures: HashMap<String, map_load::PreparedTexture>,
     model_count: usize,
     transforms: Vec<BhTransform>,
     transforms_dirty: bool,
@@ -308,6 +311,9 @@ impl Map {
         if root.as_ref().is_some_and(|p| !p.is_dir()) {
             return Err("content root is not a directory".into());
         }
+        const MAX_BSP_BYTES: u64 = 768 * 1024 * 1024;
+        let size = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?.len();
+        if size > MAX_BSP_BYTES { return Err("native BSP exceeds 768 MiB".into()); }
         let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
         check()?;
         let map_sha256 = recording::sha(&bytes);
@@ -567,6 +573,7 @@ impl Map {
             physics_files,
             attempted,
             texture: Vec::new(),
+            prepared_textures: HashMap::new(),
             model_count,
             transforms: Vec::new(),
             transforms_dirty: true,
@@ -601,7 +608,7 @@ impl Map {
             self.transforms.resize(
                 self.model_count,
                 BhTransform {
-                    visible: 1,
+                    visible: 2,
                     ..BhTransform::default()
                 },
             );
@@ -616,13 +623,24 @@ impl Map {
             for (model, visible, _) in self.game.brush_states() {
                 if model != 0 {
                     if let Some(t) = self.transforms.get_mut(model as usize) {
-                        t.visible = u32::from(visible);
+                        // Core.brushOrigins keeps the first visibility row for each model slot, even when
+                        // a later template instance supplied that slot's transform.
+                        if t.visible == 2 { t.visible = u32::from(visible); }
                     }
                 }
+            }
+            for transform in &mut self.transforms {
+                if transform.visible == 2 { transform.visible = 1; }
             }
             self.transforms_dirty = false;
         }
         Ok(self.transforms[model as usize])
+    }
+    fn take_prepared_texture(&mut self, path: &str) -> Option<BhImage> {
+        let image = self.prepared_textures.remove(path)?;
+        self.texture = image.rgba;
+        Some(BhImage { rgba: self.texture.as_ptr(), byte_count: self.texture.len(),
+            width: image.width, height: image.height })
     }
     fn texture(&mut self, index: u32) -> Result<BhImage, String> {
         self.texture.clear();
@@ -632,6 +650,7 @@ impl Map {
             .get(index as usize)
             .ok_or("texture index out of range")?
             .clone();
+        if let Some(image) = self.take_prepared_texture(&path) { return Ok(image); }
         if self.vfs.read(&path).is_none() {
             if let Some(root) = &self.root {
                 if self.attempted.insert(path.clone()) {
@@ -692,6 +711,7 @@ fn read_loose(root: &Path, name: &str) -> Option<Vec<u8>> {
 
 pub struct BhContext {
     owner: ThreadId,
+    loading: Option<map_load::MapLoad>,
     map: Option<Map>,
     settings: BhSettings,
     error: CString,
@@ -703,6 +723,7 @@ impl BhContext {
     fn new() -> Self {
         Self {
             owner: thread::current().id(),
+            loading: None,
             map: None,
             settings: BhSettings::default(),
             error: CString::default(),
@@ -851,6 +872,7 @@ pub unsafe extern "C" fn bh_load_map_cancellable(
     unsafe {
         call(ctx, |c| {
             check_cancel(cancel, data)?;
+            c.loading = None;
             if let Some(mut old) = c.map.take() {
                 let _ = old.finish_record(false, "map_reload");
             }

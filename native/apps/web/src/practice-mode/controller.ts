@@ -128,6 +128,11 @@ export class Practice {
     const plan = practiceCommandPlan({ cmd, unavailable: !!this.unavailable });
     if (plan === "unavailable") return reply(this.unavailable!);
     if (plan === "toggle") return this.toggle();
+    if (cmd === "off") return this.leave();
+    if (cmd === "on") {
+      if (!this.on) this.enter();
+      return;
+    }
     if (cmd === "menu") return this.toggleMenu();
     if (cmd === "noclip") this.toggleNoclip();
     else if (cmd === "save") this.save();
@@ -139,9 +144,9 @@ export class Practice {
   private leave(): void {
     this.endNoclip();
     this.h.session.setPracticeMode(false);
+    const cleared = this.h.session.clearPracticeSpawns();
     this.h.restart();
-    // (A practice spawn, start-point.ts, keeps restarts practice until it's cleared.)
-    this.toast(this.h.session.practicing ? "Practice mode off. Your spawn keeps restarts practice. !clearstart removes it." : "Practice mode off. You're back at the start.", 3000);
+    this.toast(`Practice mode off. ${cleared ? "Practice spawns cleared. " : ""}You're back at the start.`, 3000);
     void this.h.session.refreshMenu();
   }
 

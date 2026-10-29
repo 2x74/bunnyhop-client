@@ -90,7 +90,7 @@ export interface RoomChat {
 }
 
 /** Practice from chat: practice mode, checkpoints, noclip (practice-mode/controller.ts command). */
-export type PracticeCommand = "toggle" | "menu" | "noclip" | "save" | "tele" | "prev" | "next";
+export type PracticeCommand = "toggle" | "on" | "off" | "menu" | "noclip" | "save" | "tele" | "prev" | "next";
 
 /** What main.ts gives the commands that need the live game. Same object in solo and rooms. */
 export interface ChatGame {
@@ -393,11 +393,16 @@ const BUILT_IN: ChatCommand[] = [
     name: "practice",
     aliases: ["prac"],
     help: "practice mode on / off",
-    about: "every run is practice until you turn it off. Leaving puts you back at the start.",
+    about: "every run is practice until you turn it off. Leaving clears this map's practice spawns and puts you back at the start.",
     group: "practice",
     key: "practice",
     where: "both",
-    run: practice("toggle"),
+    args: "[on|off]",
+    run: (ctx, arg) => {
+      const mode = arg.trim().toLowerCase();
+      if (mode && mode !== "on" && mode !== "off") return ctx.reply("Use !practice [on|off]");
+      return practice(mode === "on" || mode === "off" ? mode : "toggle")(ctx);
+    },
   },
   {
     name: "noclip",

@@ -69,6 +69,8 @@ pub struct Limits {
     pub max_decoded_bytes_per_lump: usize,
     pub max_compression_ratio: usize,
     pub max_records_per_lump: usize,
+    /// Four-byte RGBExp samples have a separate budget from geometry records.
+    pub max_light_samples: usize,
     pub max_pak_entries: usize,
     pub max_decoded_pak_bytes: usize,
     pub max_decoded_bytes_per_pak_entry: usize,
@@ -83,6 +85,7 @@ impl Default for Limits {
             max_decoded_bytes_per_lump: 512 * 1024 * 1024,
             max_compression_ratio: 1_024,
             max_records_per_lump: 16 * 1024 * 1024,
+            max_light_samples: 16 * 1024 * 1024,
             max_pak_entries: 65_535,
             max_decoded_pak_bytes: 512 * 1024 * 1024,
             max_decoded_bytes_per_pak_entry: 256 * 1024 * 1024,
@@ -533,7 +536,8 @@ pub fn parse(source: &[u8], profile: Profile, limits: Limits) -> Result<Bsp, Par
         {
             LumpData::Opaque
         } else {
-            records::parse_lump(lump.index, lump.version, bytes, limits.max_records_per_lump)?
+            records::parse_lump(lump.index, lump.version, bytes,
+                if matches!(lump.index, LIGHTING | LIGHTING_HDR) { limits.max_light_samples } else { limits.max_records_per_lump })?
         };
         lump.coverage = if bytes.is_empty() {
             LumpCoverage::IntentionallyInert
@@ -758,6 +762,26 @@ mod tests {
         bytes[header + 4..header + 8].copy_from_slice(&length.to_le_bytes());
         bytes[header + 8..header + 12].copy_from_slice(&version.to_le_bytes());
         bytes[header + 12..header + 16].copy_from_slice(&fourth.to_le_bytes());
+    }
+
+    #[test]
+    fn light_sample_budget_does_not_relax_geometry_record_budget() {
+        let mut bytes = empty_bsp();
+        let start = bytes.len(); bytes.extend_from_slice(&[0; 8]);
+        let h = 8 + LIGHTING * 16;
+        bytes[h..h+4].copy_from_slice(&(start as i32).to_le_bytes());
+        bytes[h+4..h+8].copy_from_slice(&8_i32.to_le_bytes());
+        bytes[h+8..h+12].copy_from_slice(&1_i32.to_le_bytes());
+        let limits = Limits { max_records_per_lump: 1, max_light_samples: 2, ..Default::default() };
+        assert!(parse(&bytes, Profile::Source2013V20, limits).is_ok());
+        let limited = Limits { max_light_samples: 1, ..limits };
+        assert_eq!(parse(&bytes, Profile::Source2013V20, limited).unwrap_err().code, ErrorCode::RecordBudget);
+        bytes[h..h+16].fill(0);
+        let h = 8 + VERTEXES * 16;
+        bytes.truncate(start); bytes.extend_from_slice(&[0; 24]);
+        bytes[h..h+4].copy_from_slice(&(start as i32).to_le_bytes());
+        bytes[h+4..h+8].copy_from_slice(&24_i32.to_le_bytes());
+        assert_eq!(parse(&bytes, Profile::Source2013V20, limits).unwrap_err().code, ErrorCode::RecordBudget);
     }
 
     #[test]

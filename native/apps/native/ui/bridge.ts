@@ -151,7 +151,18 @@ export type MenuMessage =
   | import("./avatar-host").AvatarHostMessage
   | RunServiceStatus;
 
-export const PRACTICE_ACTIONS = ["toggle", "menu", "noclip", "save", "tele", "prev", "next", "keepVelocity"] as const;
+export const PRACTICE_ACTIONS = [
+  "toggle",
+  "on",
+  "off",
+  "menu",
+  "noclip",
+  "save",
+  "tele",
+  "prev",
+  "next",
+  "keepVelocity",
+] as const;
 export type PracticeAction = (typeof PRACTICE_ACTIONS)[number];
 /** gauntlet/state.ts GauntletProgress: this map's index, the map count, the earlier splits' sum, your PB's split here. */
 export interface GauntletHudProgress {
