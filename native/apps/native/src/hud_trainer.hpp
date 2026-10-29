@@ -48,7 +48,26 @@ inline NameColor with_alpha(NameColor color, float alpha) {
     return color;
 }
 
-// Detailed and minimal: red at the ends, amber, then green around 100%.
+// A bar whose left and / or right end is round, like the website's pill-shaped rail: the end's rows are cut to the
+// circle, one HUD unit at a time.
+template <class Hud>
+void draw_rounded_rect(
+        Hud &hud, float x, float y, float width, float height, NameColor color, bool round_left, bool round_right
+) {
+    const float radius = std::min(height, width) / 2;
+    const float inner_left = round_left ? x + radius : x, inner_right = round_right ? x + width - radius : x + width;
+    hud.overlay_rect(inner_left, y, inner_right - inner_left, height, color);
+    const int rows = std::max(1, int(std::ceil(height)));
+    for (int row = 0; row < rows; ++row) {
+        const float row_height = std::min(1.f, height - float(row));
+        const float from_middle = std::abs(float(row) + row_height / 2 - height / 2);
+        const float reach = std::sqrt(std::max(0.f, radius * radius - from_middle * from_middle));
+        if (round_left) hud.overlay_rect(inner_left - reach, y + float(row), reach, row_height, color);
+        if (round_right) hud.overlay_rect(inner_right, y + float(row), reach, row_height, color);
+    }
+}
+
+// Detailed and minimal: red at the ends, amber, then green around 100%. Detailed's rail has round ends.
 template <class Hud>
 void draw_trainer_zones(
         Hud &hud,
@@ -66,11 +85,12 @@ void draw_trainer_zones(
     const float middle = left + width / 2;
     const NameColor bad_color = with_alpha(palette.trainer[2], TrainerLayout::bad_zone_alpha * alpha);
     const NameColor near_color = with_alpha(palette.trainer[1], alpha);
-    hud.overlay_rect(left, top, width / 2 - near, rail, bad_color);
+    const bool round = look.style == "detailed";
+    draw_rounded_rect(hud, left, top, width / 2 - near, rail, bad_color, round, false);
     hud.overlay_rect(middle - near, top, near - good, rail, near_color);
     hud.overlay_rect(middle - good, top, 2 * good, rail, with_alpha(palette.trainer[0], alpha));
     hud.overlay_rect(middle + good, top, near - good, rail, near_color);
-    hud.overlay_rect(middle + near, top, width / 2 - near, rail, bad_color);
+    draw_rounded_rect(hud, middle + near, top, width / 2 - near, rail, bad_color, false, round);
 }
 
 template <class Hud>
@@ -86,7 +106,9 @@ void draw_trainer_rail(
     const float left = x - TrainerLayout::width / 2;
     const float rail = trainer_rail_height(look);
     const NameColor shadow = {0, 0, 0, TrainerLayout::shadow_alpha * alpha};
-    hud.overlay_rect(left, top + 1, TrainerLayout::width, rail, shadow);
+    draw_rounded_rect(
+            hud, left, top + 1, TrainerLayout::width, rail, shadow, look.style == "detailed", look.style == "detailed"
+    );
     if (look.style == "classic") {
         const float good = float(look.zone / trainer_pace_max) * TrainerLayout::width;
         hud.overlay_rect(left, top, TrainerLayout::width, rail, with_alpha(ink, TrainerLayout::classic_rail_alpha));
