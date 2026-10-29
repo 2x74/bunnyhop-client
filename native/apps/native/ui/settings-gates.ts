@@ -24,7 +24,7 @@ const BROWSER_FRAMES =
   "A browser frame-loop option. The desktop client paces frames with FPS limit and Display → VSync.";
 const WEB_LIGHTING = "Lighting of the website's Enhanced and Cinematic looks; the native renderer has no equivalent.";
 const PACKS = "Texture and sky packs install into the browser's storage. The desktop client uses each map's own.";
-const PAINT_MEASURE = "These sections draw with the website's 3D engine. They come back once the native client paints.";
+const MEASURE = "Measuring draws with the website's 3D engine. It comes back once the native client draws it.";
 
 const ROWS: Record<string, Gate> = {
   "mouse/Mouse/Sensitivity": needs("sensitivity"),
@@ -136,10 +136,10 @@ const ROWS: Record<string, Gate> = {
   "keys/Run/When it passes": needs("autoRestartWhen", "autoRestartAction"),
   "keys/Tools/Pause / menu": menuOnly,
 
-  "paint/Surface paint/Colour": excluded(PAINT_MEASURE),
-  "paint/Surface paint/Size": excluded(PAINT_MEASURE),
-  "paint/Surface paint/Marks": excluded(PAINT_MEASURE),
-  "measure/Distance measurement/Measurement": excluded(PAINT_MEASURE),
+  "paint/Surface paint/Colour": needs("paint"),
+  "paint/Surface paint/Size": needs("paint"),
+  "paint/Surface paint/Marks": menuOnly,
+  "measure/Distance measurement/Measurement": excluded(MEASURE),
 
   "ghost/Race/Show ghosts": needs("showGhost"),
   "ghost/Race/Your PB": needs("ghostPb"),
@@ -286,6 +286,10 @@ export const NATIVE_GATES: Readonly<Record<string, Gate>> = {
   "keys/Desktop client/Show triggers": needs("bind:showTriggers"),
   "keys/Desktop client/Show player clips": needs("bind:showClips"),
   "css/Custom CSS/CSS file": menuOnly,
+  "paint/Keys/Paint (hold)": needs("bind:paint"),
+  "paint/Keys/Place paint mark": needs("bind:paintOnce"),
+  "paint/Keys/Clear paint": needs("bind:clearPaint"),
+  "paint/Keys/Change keys": menuOnly,
 };
 
 /** The gate of a row, or null when the table doesn't place it. */

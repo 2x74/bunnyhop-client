@@ -9,3 +9,5 @@
 .settings.sky-drop .set-scroll {
   outline: none;
 }
+/* Settings → Paint: the paint keys, as keycaps in a row. */
+.native-paint-keys { display: flex; gap: 0.35rem; flex-wrap: wrap; justify-content: flex-end; }

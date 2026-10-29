@@ -100,6 +100,22 @@ test("a change sends only the native keys it touches, binds action by action", (
   expect(patch).toEqual({ fov: 100, binds: { thirdPerson: ["KeyY"], chat: [] } });
 });
 
+test("paint colour, size and paint keys reach the host", () => {
+  const after = clone(DEFAULT_PREFS);
+  after.paint = { color: "#40dcff", size: "large" };
+  after.binds.paint = ["Mouse4"];
+  after.binds.clearPaint = ["KeyX"];
+  const patch = patchBetween(nativeView(clone(DEFAULT_PREFS), host()), nativeView(after, host()));
+  expect(patch).toEqual({
+    paint: { color: "#40dcff", size: "large" },
+    binds: { paint: ["Mouse4"], clearPaint: ["KeyX"] },
+  });
+  // A colour outside the website's palette never reaches the host.
+  after.paint = { color: "#123456", size: "large" };
+  const off = patchBetween(nativeView(clone(DEFAULT_PREFS), host()), nativeView(after, host()));
+  expect(off.paint).toEqual({ color: "#ff4040", size: "large" });
+});
+
 test("keys the native client can't read never reach the host", () => {
   const before = clone(DEFAULT_PREFS);
   const after = clone(DEFAULT_PREFS);
@@ -129,13 +145,13 @@ test("capabilities: HUD elements and bind actions", () => {
   expect(hostCan("hud:timer")).toBe(true);
   expect(hostCan("hud:spectators")).toBe(false);
   expect(hostCan("bind:chat")).toBe(true);
-  expect(hostCan("bind:paint")).toBe(false);
+  expect(hostCan("bind:paint")).toBe(true);
   state.capabilities = ["hud:timer", "hud:spectators"];
   expect(hostCan("hud:spectators")).toBe(true);
   expect(hostCan("hud:fps")).toBe(false);
-  state.bindActions = ["jump", "paint"];
-  expect(hostCan("bind:paint")).toBe(true);
-  expect(hostCan("bind:chat")).toBe(false);
+  state.bindActions = ["jump", "chat"];
+  expect(hostCan("bind:chat")).toBe(true);
+  expect(hostCan("bind:paint")).toBe(false);
 });
 
 test("website settings the host adds later map by name, with the website's values and defaults", () => {

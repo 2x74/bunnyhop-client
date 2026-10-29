@@ -10,6 +10,7 @@
 import { CLASSIC, type HudLayout as WebHudLayout } from "../../web/src/hud/layout";
 import { DEFAULT_PREFS, keyLabel, prefs, type Action, type Prefs } from "../../web/src/ui/settings";
 import { toast } from "../../web/src/notify";
+import { paintPrefs } from "../../web/src/paint/prefs";
 import { NATIVE_BIND_ACTIONS, nativeKeyCode, send, settingsPatch, state, type SettingsPatch } from "./bridge";
 import { defaultPosition, type HudElementId, type HudLayout as NativeHudLayout } from "./hud-layout";
 import { REQUESTED_KEYS, readPath, requestedPatch, writePath } from "./settings-keys";
@@ -134,6 +135,15 @@ const hand: Mapping = {
   toNative: (p) => ({ viewmodelLeftHand: p.viewmodel.hand === "left" }),
   toPrefs: (p, host) => {
     p.viewmodel.hand = host.viewmodelLeftHand ? "left" : "right";
+  },
+};
+
+/** Surface paint's colour and size: one native object, as the website keeps them. */
+const paint: Mapping = {
+  keys: ["paint"],
+  toNative: (p) => ({ paint: paintPrefs(p.paint) }),
+  toPrefs: (p, host) => {
+    p.paint = paintPrefs(host.paint);
   },
 };
 
@@ -266,6 +276,7 @@ export const MAPPINGS: readonly Mapping[] = [
   crosshairStyle,
   jumpStatsMode,
   hand,
+  paint,
   hideUi,
   hudScale,
   look,

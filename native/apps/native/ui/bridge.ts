@@ -13,6 +13,7 @@ import { LESSON_IDS, type LessonId } from "../../web/src/tutorial/data";
 import { DEFAULT_BINDS as WEB_DEFAULT_BINDS } from "../../web/src/binds";
 import { ANGLE_SPEED_KEY_RANGE, YAW_SPEED_RANGE } from "./turn-speed";
 import { DEFAULT_PREFS } from "../../web/src/ui/settings";
+import { PAINT_COLORS, PAINT_SIZES, type PaintPrefs, type PaintSize } from "../../web/src/paint/prefs";
 import { requestedPatch } from "./settings-keys";
 export const LIVE_ORIGIN = "https://bunnyhop.lol";
 export interface VideoExportOptions {
@@ -81,6 +82,8 @@ export type MenuMessage =
       name?: string;
     }
   | { type: "replays"; action: "list" }
+  /** Clears the player's paint on the loaded map (renderer.hpp tool_message). */
+  | { type: "paint"; action: "clear" }
   | {
       type: "replay";
       action: "play" | "ghost" | "export" | "delete" | "screenshot";
@@ -205,6 +208,11 @@ export const NATIVE_BIND_ACTIONS = [
   "spectatorNext",
   "spectatorPrevious",
   "spectatorMode",
+  "paint",
+  "paintOnce",
+  "clearPaint",
+  "measurePoint",
+  "clearMeasure",
 ] as const;
 type NativeBindAction = (typeof NATIVE_BIND_ACTIONS)[number];
 /** The web game's defaults, plus native-only actions and defaults (settings.hpp keeps the same list). */
@@ -248,6 +256,8 @@ export interface NativeSettings {
   showPlayerGlow: boolean;
   firstPersonGlow: boolean;
   waterQuality: "simple" | "refracted";
+  /** Private surface paint: one of the website's colours and sizes (paint/prefs.ts). */
+  paint: PaintPrefs;
   zonesVisible: boolean;
   effectsVisible: boolean;
   triggersVisible: boolean;
@@ -643,6 +653,7 @@ function defaultSettings(): NativeSettings {
     showPlayerGlow: web.showPlayerGlow,
     firstPersonGlow: web.firstPersonGlow,
     waterQuality: "simple",
+    paint: { ...web.paint },
     showGhost: web.showGhost,
     ghostOpacity: web.ghost.opacity,
     ghostNearFade: web.ghost.nearFade,
@@ -787,6 +798,15 @@ export const nativeKeyCode = (code: unknown): code is string =>
     code,
   );
 
+/** A paint colour and size the host takes: the website's palette and sizes only (graphics_settings.hpp). */
+function paintPatch(value: unknown): PaintPrefs | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { color, size } = value as Record<string, unknown>;
+  if (!PAINT_COLORS.some(([known]) => known === color)) return null;
+  if (typeof size !== "string" || !Object.hasOwn(PAINT_SIZES, size)) return null;
+  return { color: color as string, size: size as PaintSize };
+}
+
 export function settingsPatch(value: unknown): Partial<NativeSettings> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const input = value as Record<string, unknown>,
@@ -885,6 +905,8 @@ export function settingsPatch(value: unknown): Partial<NativeSettings> {
   ])
     if (typeof input[key] === "boolean") out[key] = input[key];
   if (input.waterQuality === "simple" || input.waterQuality === "refracted") out.waterQuality = input.waterQuality;
+  const paint = paintPatch(input.paint);
+  if (paint) out.paint = paint;
   if (
     typeof input.crosshairStyle === "string" &&
     ["cross", "cross-dot", "dot", "t", "circle", "none"].includes(input.crosshairStyle)

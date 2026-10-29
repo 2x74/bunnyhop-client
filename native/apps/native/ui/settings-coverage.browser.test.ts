@@ -11,8 +11,9 @@ import { REQUESTED_KEYS, requestedDefault } from "./settings-keys";
 // Every row of the website's settings screen is in the native one, waiting for a host key (with the key it needs),
 // or left out with a reason (settings-gates.ts). A row the website adds fails here until it is placed.
 
-/** Website sections the native menu doesn't load: their rows are all excluded in the table. */
-const SECTIONS_NOT_LOADED = ["paint", "measure"];
+/** Website sections the native menu doesn't load: their rows are all excluded in the table. Paint is the native
+ * client's own section (paint-section.ts) with the website's rows. */
+const SECTIONS_NOT_LOADED = ["measure"];
 /** Graphics groups registered by the website's pack modules, which the native menu doesn't load. */
 const GROUPS_NOT_LOADED = ["graphics/Install/", "graphics/Sky selection/", "graphics/Install sky pack/"];
 /** Rows the website builds only in some places (another account state, the desktop link outside the app). */

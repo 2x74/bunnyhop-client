@@ -14,6 +14,7 @@ import { registerCustomCssSection } from "./custom-css/section";
 import { registerDataFolderSection } from "./data-folder-panel";
 import { registerDiscordSection } from "./discord-section";
 import { registerMouseDiagnostics } from "./mouse-diagnostics";
+import { registerPaintSection } from "./paint-section";
 import { redrawSettings, registerNativeExtras } from "./native-extras";
 import { installGlowSettings } from "./glow-settings";
 import { flushSettings, onHostSettings } from "./prefs-bridge";
@@ -38,6 +39,7 @@ function install(): void {
   registerDataFolderSection();
   registerUpdatesSection();
   registerCustomCssSection();
+  registerPaintSection();
   registerMouseDiagnostics();
   registerNativeExtras();
   decorateNativeRows();
