@@ -5,6 +5,7 @@
 #include "render_shaders.hpp"
 #include "render_math.hpp"
 #include "water_capture.hpp"
+#include "texture_bleed.hpp"
 #include "ghost_trails.hpp"
 #include "graphics_settings.hpp"
 #include "paint.hpp"
@@ -34,6 +35,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace native {
@@ -448,7 +450,7 @@ class Renderer {
         GLuint id = checker;
         if (bh_texture(core, index, &image)) {
             textureSizes[index] = {image.width, image.height};
-            id = upload(image, true, true, !raw);
+            id = !raw && cutoutTextures.count(index) ? upload_cutout(image) : upload(image, true, true, !raw);
             if (!raw) {
                 std::array<float, 3> average{};
                 const size_t pixels = size_t(image.width) * image.height;
@@ -466,6 +468,20 @@ class Renderer {
             }
         }
         textures.emplace(key, id);
+    }
+
+    // BhMaterial flags (bunnyhop_core's MAT_TRANSLUCENT, MAT_ALPHATEST).
+    static constexpr uint32_t material_translucent = 1, material_alpha_test = 2;
+    // Textures a cutout or translucent material reads alpha from (texture_bleed.hpp).
+    std::unordered_set<int32_t> cutoutTextures;
+
+    GLuint upload_cutout(const BhImage &image) {
+        const size_t bytes = size_t(image.width) * image.height * 4;
+        const std::span<const uint8_t> source(image.rgba, std::min(bytes, image.byte_count));
+        if (!native_render::has_transparent_texels(source)) return upload(image, true, true);
+        std::vector<uint8_t> bled(source.begin(), source.end());
+        native_render::bleed_transparent_texels(bled, image.width, image.height);
+        return upload({bled.data(), bled.size(), image.width, image.height}, true, true);
     }
 
     std::string normal_path(std::string name, int depth = 0) {
@@ -1610,6 +1626,8 @@ public:
         BhImage image{};
         lightmap = bh_lightmap(core, &image) ? upload(image, false, false, true) : white;
         if (lightmap == white || !bh_lightmap_info(core, &lightmapInfo)) lightmapInfo = {1, 0};
+        for (const auto &m : materials)
+            if (m.flags & (material_translucent | material_alpha_test)) cutoutTextures.insert(m.texture);
         for (const auto &m : materials)
             cache_texture(m.texture);
         for (const auto &e : extras) {
