@@ -654,6 +654,10 @@ if(BUNNYHOP_BUILD_CLIENT)
     target_include_directories(bunnyhop-native-effects-render-smoke PRIVATE include vendor src)
     target_link_libraries(bunnyhop-native-effects-render-smoke PRIVATE
         bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
+    add_executable(bunnyhop-native-display-modes-smoke EXCLUDE_FROM_ALL src/display_modes_smoke.cpp)
+    target_include_directories(bunnyhop-native-display-modes-smoke PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-display-modes-smoke PRIVATE
+        bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB bunnyhop-native-text)
 endif()
 
 if(BUILD_TESTING)

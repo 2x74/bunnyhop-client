@@ -73,6 +73,7 @@
 #include "window_mode_driver.hpp"
 #include "display_catalog.hpp"
 #include "display_mode_tryout.hpp"
+#include "hud_area.hpp"
 #include "menu_scripts.hpp"
 #include "menu_files.hpp"
 #include "menu_messages.hpp"
@@ -1605,9 +1606,16 @@ int run(const native::Options &opt) {
                 || event.type == SDL_EVENT_TEXT_INPUT)
                 had_input_activity = true;
             if (display_tryout.event(event)) continue;
-            if (hud_editor.active()
-                && hud_editor.event(event, hud, SDL_GetWindowPixelDensity(window.get()), hud_editor_bind))
-                continue;
+            if (hud_editor.active()) {
+                int pixels_w = 0, pixels_h = 0;
+                SDL_GetWindowSizeInPixels(window.get(), &pixels_w, &pixels_h);
+                const float density = SDL_GetWindowPixelDensity(window.get());
+                const auto area =
+                        renderer ? native::hud_area(renderer->output_view(pixels_w, pixels_h), pixels_w, pixels_h)
+                                 : native::HudArea{0, 0, pixels_w, pixels_h};
+                if (hud_editor.event(native::hud_area_event(event, area, density), hud, density, hud_editor_bind))
+                    continue;
+            }
             switch (event.type) {
                 case SDL_EVENT_QUIT:
                     running = false;
@@ -3528,6 +3536,8 @@ int run(const native::Options &opt) {
             }
             // The crosshair is sized in CSS pixels, like the website's: the display's scale, not the HUD's.
             hud.set_display_scale(SDL_GetWindowDisplayScale(window.get()));
+            const auto area = native::hud_area(renderer->output_view(width, height), width, height);
+            native::HudViewport hud_viewport(gl, area, width, height);
             native::HudFrame{
                     core.get(),
                     hud,
@@ -3558,8 +3568,8 @@ int run(const native::Options &opt) {
                     gauntlet_good,
                     display_fps,
                     steady_seconds,
-                    width,
-                    height,
+                    area.width,
+                    area.height,
                     (!menu || !menu->visible()) && !opt.camera,
                     bool(video_capture) || bool(director_job),
                     held_action("scoreboard") || show_scores,
