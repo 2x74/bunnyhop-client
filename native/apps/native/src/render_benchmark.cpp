@@ -1,5 +1,6 @@
 // Matched scene throughput, not gameplay FPS. Every frame waits for a one-pixel GPU readback.
 #include "renderer.hpp"
+#include "sky_image.hpp"
 #include <chrono>
 #include <filesystem>
 
@@ -79,6 +80,16 @@ int main(int argc, char **argv) {
         renderer.set_water_quality(spec.value("waterQuality", 0));
         if (spec.contains("graphics")) renderer.graphics_settings(spec.at("graphics"));
         renderer.set_source_look(sourceLook);
+        renderer.set_map_identity(spec.value("map", std::string()), "");
+        if (spec.contains("sky")) {
+            const auto skyPath = spec.at("sky").get<std::string>();
+            std::ifstream file(skyPath, std::ios::binary);
+            const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            auto sky = native::decode_sky(bytes, native::sky_file_kind(skyPath), native::SkyClouds::photographic);
+            if (!sky.picture) throw std::runtime_error("sky: " + sky.error);
+            const auto id = spec.value("graphics", nlohmann::json::object()).value("graphicsSkyPackId", std::string());
+            renderer.use_sky(id, &*sky.picture);
+        }
         renderer.set_effects_visible(effects);
         renderer.set_profiling(profiling);
         renderer.set_floor_weapons_visible(floorWeapons);

@@ -1,4 +1,5 @@
 #pragma once
+#include "look_settings.hpp"
 #include "nlohmann/json.hpp"
 #include <algorithm>
 #include <array>
@@ -10,7 +11,8 @@
 
 namespace native {
 inline nlohmann::json default_graphics_settings() {
-    return {{"ghostPb", true},
+    nlohmann::json settings = {
+            {"ghostPb", true},
             {"ghostWr", true},
             {"ghostCustom", true},
             {"ghostTrail", true},
@@ -37,7 +39,10 @@ inline nlohmann::json default_graphics_settings() {
             {"graphicsBloom", true},
             {"graphicsMaterialResponse", true},
             {"graphicsSkyExposure", 0.},
-            {"paint", {{"color", "#ff4040"}, {"size", "medium"}}}};
+            {"paint", {{"color", "#ff4040"}, {"size", "medium"}}}
+    };
+    settings.update(default_look_settings());
+    return settings;
 }
 
 inline nlohmann::json default_graphics_binds() {
@@ -96,6 +101,7 @@ inline void apply_graphics_quality(nlohmann::json &settings, const std::string &
 
 // settings.hpp calls this before scalar validation. Keys/defaults match settings-keys.ts owned by the menu.
 inline bool patch_graphics_setting(nlohmann::json &out, const std::string &key, const nlohmann::json &value) {
+    if (patch_look_setting(out, key, value)) return true;
     const auto defaults = default_graphics_settings();
     if (!defaults.contains(key)) return false;
     if (key == "paint") {
@@ -159,6 +165,7 @@ struct GraphicsSettings {
     bool bloom = true, material_response = true, flashlight = false, tags_players = true, tags_through_walls = false;
     bool water_reflections = true;
     enum class Background { live, still, off } background = Background::live;
+    LookSettings look;
 
     static GraphicsSettings read(const nlohmann::json &settings) {
         auto values = default_graphics_settings();
@@ -177,6 +184,7 @@ struct GraphicsSettings {
         result.fullbright = values.at("graphicsFullbright");
         result.potato = values.at("graphicsPotato");
         result.source = settings.value("sourceLook", true);
+        result.look = LookSettings::read(values, result.source);
         result.bloom = values.at("graphicsBloom");
         result.water_reflections = values.at("graphicsWaterReflections");
         result.material_response = values.at("graphicsMaterialResponse");

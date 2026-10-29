@@ -163,6 +163,8 @@ if(BUNNYHOP_BUILD_CLIENT)
         src/preferences.cpp
         src/replay_library.cpp
         src/online.cpp
+        src/sky_image.cpp
+        src/sky_library.cpp
         src/audio_pack.cpp
         src/video_export.cpp
         src/avatar_picture.cpp
@@ -320,7 +322,7 @@ if(BUNNYHOP_BUILD_CLIENT)
     target_link_libraries(bunnyhop-native-menu-backdrop-smoke PRIVATE bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
     target_compile_definitions(bunnyhop-native-menu-backdrop-smoke PRIVATE
         BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
-    add_executable(bunnyhop-native-render-smoke src/render_smoke.cpp)
+    add_executable(bunnyhop-native-render-smoke src/render_smoke.cpp src/sky_image.cpp)
     # Avatar pictures through the menu's render service, into files: `ASSETS JOBS.json OUTPUT_DIR`.
     add_executable(bunnyhop-native-avatar-smoke EXCLUDE_FROM_ALL
         src/avatar_smoke.cpp src/avatar_picture.cpp src/webp_lossless.cpp)
@@ -336,7 +338,7 @@ if(BUNNYHOP_BUILD_CLIENT)
         bunnyhop_core_native bunnyhop-native-text SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
     target_compile_definitions(bunnyhop-native-gameplay-benchmark PRIVATE
         BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
-    add_executable(bunnyhop-native-render-benchmark src/render_benchmark.cpp)
+    add_executable(bunnyhop-native-render-benchmark src/render_benchmark.cpp src/sky_image.cpp)
     target_include_directories(bunnyhop-native-render-benchmark PRIVATE vendor)
     target_link_libraries(bunnyhop-native-render-benchmark PRIVATE bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
     target_compile_definitions(bunnyhop-native-render-benchmark PRIVATE BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")

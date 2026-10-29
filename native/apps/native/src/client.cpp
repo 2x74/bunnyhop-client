@@ -73,6 +73,7 @@
 #include "window_mode_driver.hpp"
 #include "menu_scripts.hpp"
 #include "menu_files.hpp"
+#include "sky_library.hpp"
 #include "menu_messages.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
@@ -189,6 +190,7 @@ int run(const native::Options &opt) {
     std::unique_ptr<native::MenuWebView> menu;
     std::string menu_failure;
     native::MenuFiles menu_files(cache);
+    native::SkyLibrary sky_library(cache);
     const bool wants_menu = !opt.no_menu && (!opt.frames || !opt.menu_smoke.empty());
     if (wants_menu) {
         menu = std::make_unique<native::MenuWebView>(window.get(), native::read_text(menu_path));
@@ -392,6 +394,8 @@ int run(const native::Options &opt) {
         audio.set_sfx_pack(preferences.at("sfxPack").get<std::string>() == "custom");
         audio.set_music_pack(preferences.at("musicPack").get<std::string>() == "custom");
         video_music_catalog = audio.export_music_catalog(preferences.at("musicPack").get<std::string>() == "custom");
+        const auto graphics_now = native::GraphicsSettings::read(preferences);
+        sky_library.select(native::picked_sky(graphics_now.look, graphics_now.potato));
         if (renderer) {
             renderer->graphics_settings(preferences);
             renderer->set_player_glow(player_glow);
@@ -872,6 +876,7 @@ int run(const native::Options &opt) {
             if (!content.empty()) native::download_classic_sounds(data_location::from_utf8(content), cache);
         });
         auto next_renderer = std::make_unique<native::Renderer>(gl, next.core.get(), assets);
+        next_renderer->set_map_identity(id, detail.is_object() ? detail.value("sha256", std::string()) : std::string());
         game.install(std::move(next.core), std::move(next_renderer), practice, audio);
         // The pause screen shows this map itself, never the home tour.
         if (backdrop) backdrop->release();
@@ -2358,6 +2363,8 @@ int run(const native::Options &opt) {
                         }
                     } else if (type == "file")
                         menu_files.handle(window.get(), message);
+                    else if (type == "sky")
+                        sky_library.message(message);
                     else if (type == "hudTheme")
                         hud.set_theme(native::parse_hud_theme(message.at("theme")));
                     else if (type == "replays")
@@ -3649,6 +3656,8 @@ int run(const native::Options &opt) {
         frame_diagnostics.mark(native::FrameDiagnostics::kSwap, SDL_GetTicksNS());
         frame_pacer.after_swap(gl, prefs.limit_queued_frames && !opt.frames);
         frame_diagnostics.mark(native::FrameDiagnostics::kGpuWait, SDL_GetTicksNS());
+        sky_library.frame(menu && menu->visible());
+        if (renderer) renderer->use_sky(sky_library.current_id(), sky_library.current());
         // Answers from file dialogs and the watched Custom CSS file.
         if (menu && menu_ready) {
             for (const auto &script : menu_files.poll())
@@ -3744,6 +3753,7 @@ int run(const native::Options &opt) {
                         {"replayCompare", replay_compare.state()},
                         {"surfaceTools", renderer ? renderer->surface_tools_state() : nlohmann::json(nullptr)},
                         {"graphicsLimits", renderer ? renderer->graphics_limits() : nlohmann::json(nullptr)},
+                        {"skies", sky_library.state()},
                         {"runGeneration", heartbeat.generation},
                         {"timer",
                          {{"status", run_state.status},

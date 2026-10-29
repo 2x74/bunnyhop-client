@@ -62,11 +62,8 @@ int transfer(void *context, curl_off_t total, curl_off_t received, curl_off_t, c
     return 0;
 }
 
-Bytes get(
-        const std::string &route,
-        size_t limit,
-        const std::atomic_bool *cancel,
-        const LoadProgressCallback &progress = {}
+Bytes fetch(
+        const std::string &url, size_t limit, const std::atomic_bool *cancel, const LoadProgressCallback &progress = {}
 ) {
     if (cancel && cancel->load()) throw std::runtime_error("Map download cancelled");
     Transfer transfer_state{cancel, progress};
@@ -74,7 +71,6 @@ Bytes get(
     Curl handle(curl_easy_init(), curl_easy_cleanup);
     if (!handle) throw std::runtime_error("Cannot initialize HTTPS");
     Response r{{}, limit};
-    const auto url = origin + route;
     char error[CURL_ERROR_SIZE]{};
     curl_easy_setopt(handle.get(), CURLOPT_URL, url.c_str());
     curl_easy_setopt(handle.get(), CURLOPT_USERAGENT, "bunnyhop-native/0.1");
@@ -106,9 +102,18 @@ Bytes get(
         );
     if (result != CURLE_OK || status != 200)
         throw std::runtime_error(
-                "Download " + route + ": " + (error[0] ? std::string(error) : "HTTP " + std::to_string(status))
+                "Download " + url + ": " + (error[0] ? std::string(error) : "HTTP " + std::to_string(status))
         );
     return std::move(r.bytes);
+}
+
+Bytes get(
+        const std::string &route,
+        size_t limit,
+        const std::atomic_bool *cancel,
+        const LoadProgressCallback &progress = {}
+) {
+    return fetch(origin + route, limit, cancel, progress);
 }
 
 bool hash_id(const std::string &s) {
@@ -158,6 +163,12 @@ asset(const std::filesystem::path &cache,
     return file;
 }
 }  // namespace
+
+std::vector<uint8_t> fetch_https(
+        const std::string &url, size_t limit, const std::atomic_bool *cancel, const LoadProgressCallback &progress
+) {
+    return fetch(url, limit, cancel, progress);
+}
 
 bool valid_map_id(const std::string &id) {
     return !id.empty() && id.size() <= 160 && id != "." && id != ".."

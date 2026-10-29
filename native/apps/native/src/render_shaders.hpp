@@ -179,8 +179,9 @@ out vec2 ndc;void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);ndc=p*2.-
 inline std::string sky_fragment() {
     return std::string("#version 330 core\n") + water + R"(
 in vec2 ndc;uniform vec3 forward,right,up;uniform float aspect,cot,skyExposure;
-uniform sampler2D sky0,sky1,sky2,sky3,sky4,sky5;
-uniform int skyPresent[6],skyHalf[6];out vec4 color;
+uniform sampler2D sky0,sky1,sky2,sky3,sky4,sky5,panorama;
+uniform int skyPresent[6],skyHalf[6];uniform bool panoramaShown;uniform float panoramaYaw,panoramaExposure;
+uniform vec3 proceduralSun;out vec4 color;
 vec3 skyTexture(int f,vec2 uv,vec2 dx,vec2 dy){
  if(f==0)return textureGrad(sky0,uv,dx,dy).rgb;
  if(f==1)return textureGrad(sky1,uv,dx,dy).rgb;
@@ -204,10 +205,17 @@ vec3 faceColor(vec3 ray){
  if(skyPresent[f]!=0)return skyTexture(f,uv,dx*scale,dy*scale);
  vec3 d=normalize(ray);
  vec3 c=d.z>0.?mix(linearize(vec3(.788,.863,.925)),linearize(vec3(.247,.435,.710)),pow(d.z,.55)):mix(linearize(vec3(.788,.863,.925)),linearize(vec3(.49,.541,.588)),pow(min(-d.z*3.,1.),.7));
- float sun=max(dot(d,normalize(vec3(.45,.6,.35))),0.);
+ float sun=max(dot(d,proceduralSun),0.);
  return c+vec3(1,.92,.75)*(pow(sun,600.)*1.5+pow(sun,12.)*.18);
 }
-void main(){vec3 ray=forward+right*ndc.x*aspect/cot+up*ndc.y/cot;vec3 c=faceColor(ray);
+// A sky pack's equirect panorama (web graphics/sky-background.ts), in its three.js frame: Source (x,y,z) is (x,z,-y).
+vec3 panoramaColor(vec3 ray){
+ vec3 t=normalize(vec3(ray.x,ray.z,-ray.y));float c=cos(panoramaYaw),s=sin(panoramaYaw);
+ vec3 p=vec3(c*t.x-s*t.z,t.y,s*t.x+c*t.z);
+ vec2 uv=vec2(atan(p.z,p.x)*.159154943+.5,.5-asin(clamp(p.y,-1.,1.))*.318309886);
+ return textureLod(panorama,uv,0.).rgb*panoramaExposure;
+}
+void main(){vec3 ray=forward+right*ndc.x*aspect/cot+up*ndc.y/cot;vec3 c=panoramaShown?panoramaColor(ray):faceColor(ray);
  color=vec4(waterFog(encode(c*exp2(skyExposure)),cameraPosition+normalize(ray)*1e5),1);
 }
 )";

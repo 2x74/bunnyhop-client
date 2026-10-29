@@ -11,6 +11,8 @@
 #include "graphics_settings.hpp"
 #include "paint.hpp"
 #include "measure.hpp"
+#include "scene_lighting.hpp"
+#include "sky_image.hpp"
 #include "zone_effects.hpp"
 #include "actor_anim.hpp"
 #include "tp_inspect.hpp"
@@ -189,6 +191,7 @@ inline GLuint link_program(Gl &gl, const char *vertex_source, const char *fragme
 #include "native_map_effects.hpp"
 // Standard headers must be included at file scope before these GL-dependent definitions.
 #include "source_hdr.hpp"
+#include "enhanced_look.hpp"
 #include "water_reflection.hpp"
 
 // The website's route guide (apps/web/src/ghost-route.ts): the path in the ghost's colour and a white wire box on
@@ -429,7 +432,9 @@ class Renderer {
     std::unique_ptr<SourceHdr> hdr;
     double lastSeconds = -1;
 
-    SourceHdr *hdr_pass() {
+    // CS:S's exposure and bloom on maps with HDR lighting: the Source look's own pass, and the first step of the
+    // Enhanced and Cinematic looks.
+    SourceHdr *hdr_object() {
         if (!sourceLook || graphics.potato || graphics.fullbright || !lightmapInfo.hdr || hdrUnavailable)
             return nullptr;
         if (!hdr) try {
@@ -441,6 +446,41 @@ class Renderer {
             }
         if (hdr) hdr->bloom = graphics.bloom;
         return hdr.get();
+    }
+
+    SourceHdr *hdr_pass() { return graphics.look.composer() ? nullptr : hdr_object(); }
+
+    // The Enhanced and Cinematic looks (enhanced_look.hpp). Potato draws plainly, as on the website.
+    std::unique_ptr<EnhancedLook> enhanced;
+    bool enhancedUnavailable = false;
+    // The pass drawing this frame's world, for the water's refraction copy.
+    EnhancedLook *frameLook = nullptr;
+
+    EnhancedLook *enhanced_pass() {
+        if (!graphics.look.composer() || graphics.potato || enhancedUnavailable) return nullptr;
+        if (!enhanced) try {
+                enhanced = std::make_unique<EnhancedLook>(gl, emptyVao);
+            } catch (const std::exception &e) {
+                enhancedUnavailable = true;
+                std::cerr << "Enhanced look unavailable, drawing the Source look: " << e.what() << '\n';
+                return nullptr;
+            }
+        return enhanced.get();
+    }
+
+    // The picked sky pack (sky_library.hpp), uploaded once per sky.
+    GLuint skyPanorama = 0;
+    std::string skyPanoramaId;
+    native::SkyPicture skyPanoramaInfo;
+    std::string mapName, mapSha;
+    native::MapSun mapSun;
+    native::SceneSun frameSun;
+    float frameSkyYaw = 0;
+    static constexpr GLint sky_panorama_unit = 10;
+
+    bool panorama_drawn() const {
+        return graphics.look.composer() && !graphics.potato && graphics.look.sky_mode == native::SkyMode::pack
+               && skyPanorama && skyPanoramaId == graphics.look.sky_pack_id;
     }
 
     static constexpr double paint_second_ns = 1'000'000'000;
@@ -610,6 +650,7 @@ class Renderer {
                 }
                 break;
             }
+            mapSun = native::read_map_sun(entities, sunDirection, hasSun);
         }
         normals.resize(materials.size());
         if (!hasSun) return;
@@ -870,7 +911,9 @@ class Renderer {
         GLint read_target = 0, draw_target = 0;
         gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_target);
         gl.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw_target);
-        if (auto *hdr = hdr_pass())
+        if (frameLook)
+            frameLook->refraction_source();
+        else if (auto *hdr = hdr_pass())
             hdr->refraction_source(viewportWidth, viewportHeight);
         else if (graphics.target_needed())
             graphicsTarget->refraction_source();
@@ -1829,7 +1872,53 @@ public:
         }
     }
 
-    void set_source_look(bool value) { sourceLook = value; }
+    // The Source look on or off (the Plain look). The Enhanced and Cinematic looks build on the Source look.
+    void set_source_look(bool value) {
+        sourceLook = value;
+        if (!value)
+            graphics.look.look = native::Look::classic;
+        else if (graphics.look.look == native::Look::classic)
+            graphics.look.look = native::Look::source;
+    }
+
+    // The map's name and build hash, for the looks' per-map lighting profiles (look_settings.hpp).
+    void set_map_identity(std::string name, std::string sha) {
+        mapName = std::move(name);
+        mapSha = std::move(sha);
+    }
+
+    // The sky pack to draw when the look shows one (sky_library.hpp). Uploads once per sky.
+    void use_sky(const std::string &id, const native::SkyPicture *picture) {
+        if (id == skyPanoramaId || !picture || picture->pixels.empty()) return;
+        if (!skyPanorama) {
+            gl.GenTextures(1, &skyPanorama);
+            ownedTextures.push_back(skyPanorama);
+        }
+        gl.BindTexture(GL_TEXTURE_2D, skyPanorama);
+        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        gl.PixelStorei(GL_UNPACK_ALIGNMENT, 2);
+        gl.TexImage2D(
+                GL_TEXTURE_2D,
+                0,
+                GL_RGB16F,
+                picture->width,
+                picture->height,
+                0,
+                GL_RGB,
+                GL_HALF_FLOAT,
+                picture->pixels.data()
+        );
+        gl.PixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        skyPanoramaInfo.width = picture->width;
+        skyPanoramaInfo.height = picture->height;
+        skyPanoramaInfo.lighting = picture->lighting;
+        skyPanoramaInfo.rotation = picture->rotation;
+        skyPanoramaInfo.exposure = picture->exposure;
+        skyPanoramaId = id;
+    }
 
     void set_pixel_density(float value) { pixelDensity = std::isfinite(value) && value > 0 ? value : 1; }
 
@@ -2028,6 +2117,21 @@ public:
         if (!water_reflections_enabled()) waterPlan.reflection_height.reset();
     }
 
+    void sky_panorama_uniforms() {
+        static constexpr std::array<float, 3> default_sun{.45f, .6f, .35f};
+        const auto sun = hasSun ? sunDirection : default_sun;
+        const float length = std::hypot(std::hypot(sun[0], sun[1]), sun[2]);
+        gl.Uniform3f(loc(skyProgram, "proceduralSun"), sun[0] / length, sun[1] / length, sun[2] / length);
+        const bool shown = panorama_drawn();
+        gl.Uniform1i(loc(skyProgram, "panoramaShown"), shown);
+        gl.Uniform1f(loc(skyProgram, "panoramaYaw"), frameSkyYaw);
+        gl.Uniform1f(loc(skyProgram, "panoramaExposure"), skyPanoramaInfo.exposure);
+        gl.ActiveTexture(GL_TEXTURE0 + sky_panorama_unit);
+        gl.BindTexture(GL_TEXTURE_2D, shown ? skyPanorama : white);
+        gl.Uniform1i(loc(skyProgram, "panorama"), sky_panorama_unit);
+        gl.ActiveTexture(GL_TEXTURE0);
+    }
+
     // The 2D skybox, or the procedural sky, behind everything. mirrored: as the water reflection sees it.
     void draw_sky_backdrop(const float eye[3], const native::Matrix &vp, float aspect, bool mirrored) {
         static constexpr const char *face_uniforms[6] = {"sky0", "sky1", "sky2", "sky3", "sky4", "sky5"};
@@ -2048,9 +2152,11 @@ public:
         gl.Uniform1f(loc(skyProgram, "aspect"), aspect);
         gl.Uniform1f(loc(skyProgram, "cot"), (4.f / 3.f) / std::tan(float(fieldOfView * native::radians * .5)));
         GLint present[6]{}, half[6]{};
+        // Procedural daylight (Enhanced and Cinematic) draws the fallback sky in place of the map's faces.
+        const bool procedural = graphics.look.composer() && graphics.look.sky_mode == native::SkyMode::procedural;
         for (int i = 0; i < 6; i++) {
             GLuint id = white;
-            const int32_t m = skyMaterials[i];
+            const int32_t m = procedural ? -1 : skyMaterials[i];
             if (m >= 0 && size_t(m) < materials.size()) {
                 const auto t = materials[m].texture;
                 if (t >= 0 && texture(t) != checker) {
@@ -2068,6 +2174,7 @@ public:
         }
         gl.Uniform1iv(loc(skyProgram, "skyPresent"), 6, present);
         gl.Uniform1iv(loc(skyProgram, "skyHalf"), 6, half);
+        sky_panorama_uniforms();
         if (!graphics.potato) gl.DrawArrays(GL_TRIANGLES, 0, 3);
         gl.Enable(GL_DEPTH_TEST);
         gl.DepthMask(GL_TRUE);
@@ -2119,6 +2226,65 @@ public:
         gl.Disable(GL_POLYGON_OFFSET_FILL);
     }
 
+    native::VisualProfile visual_profile() const {
+        return native::resolve_visual_profile(graphics.look, mapName, mapSha, mapSun.present);
+    }
+
+    // This frame's sky turn and sun for the composer looks; material detail follows the pack's sun when it lights.
+    void resolve_look_lighting() {
+        const bool panorama = panorama_drawn();
+        const bool lit =
+                graphics.look.composer() && native::pack_lights_scene(graphics.look, visual_profile(), panorama);
+        frameSkyYaw = panorama ? native::sky_yaw(graphics.look, lit, skyPanoramaInfo, mapSun) : 0;
+        const float exposure = skyPanoramaInfo.exposure * std::exp2(std::clamp(graphics.sky_exposure, -4.f, 4.f));
+        frameSun = native::resolve_scene_sun(mapSun, panorama ? &skyPanoramaInfo : nullptr, lit, frameSkyYaw, exposure);
+        gl.UseProgram(program);
+        gl.Uniform3fv(loc(program, "sunDirection"), 1, (frameSun.from_pack ? frameSun.direction : sunDirection).data());
+    }
+
+    // The post-processing of one Enhanced or Cinematic frame (web composer-pipeline.ts applyAppearance).
+    LookFrame look_frame(const native::Matrix &vp, const float eye[3], float aspect) const {
+        static constexpr float contact_shading_strength = .22f, sun_shafts_strength = .006f, default_haze = .08f;
+        const auto config = native::look_config(graphics.look.look);
+        const auto profile = visual_profile();
+        LookFrame frame;
+        frame.bloom_strength = graphics.bloom ? config.bloom * profile.bloom_scale : 0;
+        frame.saturation = profile.saturation >= 0 ? profile.saturation : config.saturation;
+        frame.contrast = profile.contrast >= 0 ? profile.contrast : config.contrast;
+        frame.exposure = profile.exposure;
+        frame.shoulder = profile.highlight_shoulder;
+        frame.haze = graphics.look.atmosphere ? (profile.haze >= 0 ? profile.haze : default_haze) : 0;
+        frame.haze_distance = profile.haze_distance;
+        frame.contact_strength = graphics.look.contact_shading ? contact_shading_strength : 0;
+        frame.spatial_aa = graphics.look.spatial_aa;
+        const float scale = 1 / std::tan(float(fieldOfView * native::radians * .5));
+        const float cot = 4.f / 3.f * scale, shownAspect = graphics.aspect > 0 ? graphics.aspect : aspect;
+        frame.projection_scale = {cot / shownAspect, cot};
+        if (graphics.look.sun_shafts && frameSun.present) {
+            const float cp = std::cos(lastPitch * native::radians), sp = std::sin(lastPitch * native::radians);
+            const float forward[3] = {
+                    cp * float(std::cos(lastYaw * native::radians)),
+                    cp * float(std::sin(lastYaw * native::radians)),
+                    -sp
+            };
+            if (const auto at = native::project_sun(vp, eye, forward, frameSun.direction)) {
+                frame.sun_uv = *at;
+                frame.sun_color = frameSun.color;
+                frame.shafts = sun_shafts_strength;
+            }
+        }
+        return frame;
+    }
+
+    // Players, ghosts and the replay runner in the water's mirror, as the website's scene capture shows them.
+    void draw_reflected_actors(const native::Matrix &vp, const float eye[3], double seconds) {
+        if (!viewmodel) return;
+        if (replayActor) viewmodel->draw_actor(*replayActor, vp, eye, seconds);
+        if (compareActor) viewmodel->draw_actor(*compareActor, vp, eye, seconds);
+        for (const auto &actor : roomActors)
+            viewmodel->draw_actor(actor, vp, eye, seconds);
+    }
+
     // The world mirrored through the chosen water plane, clipped to what is above it, into the half-size reflection
     // target. Restores the frame's framebuffer and viewport size.
     void draw_water_reflection(const float eye[3], float aspect, int width, int height, double seconds) {
@@ -2144,6 +2310,7 @@ public:
         draw_sky_depth(vp);
         draw_scene(vp, mirroredEye, false, seconds, true);
         gl.Disable(GL_CLIP_DISTANCE0);
+        draw_reflected_actors(vp, mirroredEye, seconds);
         gl.FrontFace(GL_CCW);
         clipHeight = no_clip_height;
         viewportWidth = width;
@@ -2213,13 +2380,18 @@ public:
         lastSeconds = seconds;
         const float aspect = float(width) / height;
         const auto vp = camera(eye, lastYaw, lastPitch, aspect);
+        resolve_look_lighting();
         plan_water(eye, vp);
         if (waterPlan.reflection_height) draw_water_reflection(eye, aspect, width, height, seconds);
         GLint frameTarget = 0;
         gl.GetIntegerv(GL_FRAMEBUFFER_BINDING, &frameTarget);
         SourceHdr *pass = hdr_pass();
-        if (profiling) frameProfile.hdrEffective = pass != nullptr;
-        if (pass) {
+        frameLook = enhanced_pass();
+        if (profiling) frameProfile.hdrEffective = pass != nullptr || (frameLook && hdr_object());
+        if (frameLook) {
+            frameLook->samples(graphics.samples);
+            frameLook->begin(width, height);
+        } else if (pass) {
             pass->samples(graphics.samples);
             pass->begin(width, height);
         }
@@ -2263,7 +2435,11 @@ public:
         draw_presentation(vp, eye, seconds);
         profile_elapsed(frameProfile.presentation, phaseStart);
         phaseStart = profile_now();
-        if (pass) pass->finish(GLuint(frameTarget), width, height, dt);
+        if (frameLook)
+            frameLook->finish(GLuint(frameTarget), look_frame(vp, eye, aspect), hdr_object(), dt);
+        else if (pass)
+            pass->finish(GLuint(frameTarget), width, height, dt);
+        frameLook = nullptr;
         profile_elapsed(frameProfile.hdrFinish, phaseStart);
         phaseStart = profile_now();
         auto viewmodelStart = profile_now();
