@@ -22,8 +22,6 @@ From `native/`:
 
 ```sh
 bun install --frozen-lockfile
-# Until the v0.0.29 verifier is published, build it from the pinned upstream commit once:
-bun tools/build-upstream-wasm.ts --upstream /path/to/bunnyhop
 bun apps/native/packaging/sdl.ts   # optional: the SDL3 commit releases use
 bun apps/native/build.ts
 apps/native/build/bunnyhop-native
