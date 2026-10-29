@@ -18,7 +18,7 @@ import { base64Bytes } from "./base64";
 import { REPLAY_CAMERAS, runSeconds, send, state, type ReplayCamera } from "./bridge";
 import { watchingSplit } from "./gauntlet-watch";
 import { ReplayExportDialog } from "./replay-export";
-import { hostSupports, replayCompare, replayTimeline } from "./replay-host";
+import { hostSupports, replayCompare, replayHud, replayLoop, replayTimeline, replayWeapon } from "./replay-host";
 import { practiceFromReplay } from "./replay-practice";
 import { clampToRange, shownRange, shownSeconds } from "./replay-range";
 import { ReplayScrubber } from "./replay-scrubber";
@@ -34,19 +34,28 @@ const CAMERA_LABELS: Record<ReplayCamera, { label: string; title: string }> = {
   free: { label: "Free", title: "Free roam (3)" },
   flyby: { label: "Flyby", title: "Free path: a drone following the run (4)" },
   auto: { label: "Auto", title: "Auto-director: cuts between shots (5)" },
+  orbit: { label: "Orbit", title: "Orbit: a slow turn around the player (6)" },
 };
 const SEEK_SECONDS = 5;
 const FINE_SEEK_SECONDS = 1;
 /** How long a seek waits for the host to show it before the host's tick counts again. */
 const PENDING_SEEK_MS = 1500;
 const MAX_REPLAY_BYTES = 8 << 20;
+/** Seeking to a jump starts this long before it, like the website's ?jump= links. */
+const JUMP_LEAD_SECONDS = 0.5;
 const HELP: readonly [string, string][] = [
   ["Space", "play / pause"],
   [", / .", "step one tick back / forward"],
   ["← / →", "±5 s (Shift ±1 s)"],
   ["Home / End", "start / end"],
+  ["J / Shift+J", "next / previous jump"],
+  ["N / Shift+N", "next / previous split"],
+  ["G", "go to a jump or split"],
+  ["L", "loop: mark A, then B; again to stop"],
   ["[ / ]", "slower / faster"],
-  ["1–5 or F", "in-eye · chase · free · flyby · auto"],
+  ["1–6 or F", "in-eye · chase · free · flyby · auto · orbit"],
+  ["V", "weapon in hand on / off"],
+  ["H", "HUD on / off"],
   ["C", "compare with another replay"],
   ["E", "export video"],
   ["P", "practice from this moment"],
@@ -88,6 +97,11 @@ export class ReplayViewer {
   private readonly fullButton: Button;
   private readonly compareButton: Button;
   private readonly compareMenu = h("div.rv-menu", { hidden: true, role: "menu" });
+  private readonly gotoButton: Button;
+  private readonly gotoMenu = h("div.rv-menu", { hidden: true, role: "menu" });
+  private readonly loopButton: Button;
+  private readonly weaponButton: Button;
+  private loopStart: number | null = null;
   private readonly practiceButton: Button;
   private readonly shareButton: Button;
   private readonly reportButton: Button;
@@ -109,7 +123,14 @@ export class ReplayViewer {
       seek: (tick) => send({ type: "replayControl", action: "seek", tick }),
       pause: (paused) => send({ type: "replayControl", action: "pause", paused }),
     });
-    this.exporter = new ReplayExportDialog({ notice: hooks.notice, title: () => this.exportTitle() });
+    this.exporter = new ReplayExportDialog({
+      notice: hooks.notice,
+      title: () => this.exportTitle(),
+      loop: () => replayLoop(),
+    });
+    this.gotoButton = button("Go to", "Go to a jump or split (G)", () => this.toggleGotoMenu(), ".rv-chip");
+    this.loopButton = button("Loop", "Loop a part: mark A, then B (L)", () => this.markLoop(), ".rv-chip");
+    this.weaponButton = button("Weapon", "Weapon in hand (V)", () => this.toggleWeapon(), ".rv-chip");
     this.playButton = button("▶", "Play / pause (Space)", () => this.togglePlay(), ".rv-play");
     this.fullButton = button(
       "Full recording",
@@ -186,9 +207,11 @@ export class ReplayViewer {
       "div.rv-group",
       null,
       button("⏮", "Start (Home)", () => this.seek(shownRange(state.playback).start)),
+      button("⇠", "Previous jump (Shift+J)", () => this.seekJump(-1)),
       button("‹", "Previous tick (,)", step(-1)),
       this.playButton,
       button("›", "Next tick (.)", step(1)),
+      button("⇢", "Next jump (J)", () => this.seekJump(1)),
       button("⏭", "End (End)", () => this.seek(shownRange(state.playback).end)),
       h("div.rv-clock.native-playback-position", null, this.timeEl, this.tickEl),
     );
@@ -230,6 +253,9 @@ export class ReplayViewer {
       "div.rv-group.rv-right",
       null,
       this.fullButton,
+      h("div.rv-menu-wrap", null, this.gotoButton, this.gotoMenu),
+      this.loopButton,
+      this.weaponButton,
       h("div.rv-menu-wrap", null, this.compareButton, this.compareMenu),
       this.practiceButton,
       exportButton,
@@ -317,9 +343,12 @@ export class ReplayViewer {
     if (state.playback.id) send({ type: "replay", action: "export", id: state.playback.id });
   }
 
+  /** The run's link at the shown moment: the website opens it paused at `?t=` (staff-lens.ts replayDeepLink). */
   private shareData(): { url: string; title: string } {
     const run = serverRun();
-    return { url: runUrl(run?.runId ?? ""), title: `${run?.name ?? "Replay"} · ${state.map ?? ""} · bunnyhop.lol` };
+    const tick = this.shownTick();
+    const url = runUrl(run?.runId ?? "") + (tick > shownRange(state.playback).start ? `?t=${tick}` : "");
+    return { url, title: `${run?.name ?? "Replay"} · ${state.map ?? ""} · bunnyhop.lol` };
   }
 
   private exportTitle(): string {
@@ -327,6 +356,127 @@ export class ReplayViewer {
     const replay = state.replays.find((item) => item.id === playback.id);
     const name = playback.player?.name ?? serverRun()?.name ?? replay?.name ?? "Replay";
     return `${name} · ${state.map ?? replay?.map ?? ""}`;
+  }
+
+  // Jumps, splits and the loop
+
+  /** The timed run's jumps (from the start zone to the finish), as the website counts them for ?jump=. */
+  private timedJumps(): number[] {
+    const data = replayTimeline(state.playback.id);
+    if (!data) return [];
+    return data.jumps.filter((tick) => tick >= data.startTick && (!data.endTick || tick <= data.endTick));
+  }
+
+  private leadTicks(): number {
+    return Math.round(JUMP_LEAD_SECONDS / shownRange(state.playback).interval);
+  }
+
+  private seekJump(direction: -1 | 1): void {
+    const data = replayTimeline(state.playback.id);
+    if (!data) return;
+    const now = this.shownTick() + this.leadTicks();
+    const jumps = direction > 0 ? data.jumps.filter((t) => t > now + 1) : data.jumps.filter((t) => t < now - 1);
+    const target = direction > 0 ? jumps[0] : jumps.at(-1);
+    if (target !== undefined) this.seek(Math.max(0, target - this.leadTicks()));
+  }
+
+  private seekSplit(direction: -1 | 1): void {
+    const data = replayTimeline(state.playback.id);
+    if (!data) return;
+    const marks = [data.startTick, ...data.splits.map((split) => split.tick), data.endTick].filter(Boolean);
+    const now = this.shownTick();
+    const target = direction > 0 ? marks.find((t) => t > now + 1) : marks.filter((t) => t < now - 1).at(-1);
+    if (target !== undefined) this.seek(target);
+  }
+
+  /** The n-th timed jump (1-based), half a second before it. */
+  private gotoJump(n: number): void {
+    const tick = this.timedJumps()[n - 1];
+    if (tick === undefined) {
+      this.flash(`This run has ${this.timedJumps().length} jumps.`);
+      return;
+    }
+    this.seek(Math.max(0, tick - this.leadTicks()));
+  }
+
+  private toggleGotoMenu(): void {
+    if (!this.gotoMenu.hidden) {
+      this.gotoMenu.hidden = true;
+      return;
+    }
+    const data = replayTimeline(state.playback.id);
+    const range = shownRange(state.playback);
+    const at = (tick: number) => formatTime((tick - range.start) * range.interval);
+    const choose = (tick: number) => () => {
+      this.gotoMenu.hidden = true;
+      this.seek(tick);
+    };
+    const item = (label: string, sub: string, tick: number) =>
+      h(
+        "button.rv-menu-item",
+        { type: "button", role: "menuitem", onclick: choose(tick) },
+        h("span", null, label),
+        h("small", null, sub),
+      );
+    const jump = h("input", {
+      type: "number",
+      min: 1,
+      step: 1,
+      placeholder: "#",
+      "aria-label": "Jump number",
+    }) as HTMLInputElement;
+    const go = () => {
+      this.gotoMenu.hidden = true;
+      this.gotoJump(Math.floor(jump.valueAsNumber));
+    };
+    jump.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") go();
+    });
+    const splits = data?.splits ?? [];
+    this.gotoMenu.replaceChildren(
+      h(
+        "div.rv-menu-row",
+        null,
+        h("span", null, `Jump (of ${this.timedJumps().length})`),
+        jump,
+        button("Go", "Go to that jump", go),
+      ),
+      ...(data?.startTick ? [item("Run start", at(data.startTick), data.startTick)] : []),
+      ...splits.map((split) =>
+        item(split.kind === "stage" ? `Stage ${split.index}` : `Checkpoint ${split.index}`, at(split.tick), split.tick),
+      ),
+      ...(data?.endTick ? [item("Finish", at(data.endTick), data.endTick)] : []),
+    );
+    this.gotoMenu.hidden = false;
+    jump.focus();
+  }
+
+  /** L: the first press marks A, the second B and starts looping, the third stops. */
+  private markLoop(): void {
+    if (replayLoop()) {
+      send({ type: "replayControl", action: "loop", value: null });
+      this.loopStart = null;
+      return;
+    }
+    const tick = this.shownTick();
+    if (this.loopStart === null || tick === this.loopStart) {
+      this.loopStart = tick;
+      this.flash("Loop from here: press L again where it ends.");
+      return;
+    }
+    const from = Math.min(this.loopStart, tick);
+    const to = Math.max(this.loopStart, tick);
+    this.loopStart = null;
+    this.flash("");
+    send({ type: "replayControl", action: "loop", value: { from, to } });
+  }
+
+  private toggleWeapon(): void {
+    send({ type: "replayControl", action: "weapon" });
+  }
+
+  private toggleHud(): void {
+    send({ type: "replayControl", action: "hud", value: !replayHud() });
   }
 
   private report(): void {
@@ -431,7 +581,7 @@ export class ReplayViewer {
   private handleKey(event: KeyboardEvent): boolean {
     const range = shownRange(state.playback);
     const jump = (event.shiftKey ? FINE_SEEK_SECONDS : SEEK_SECONDS) / range.interval;
-    const camera = /^Digit([1-5])$/.exec(event.code);
+    const camera = /^Digit([1-6])$/.exec(event.code);
     if (camera) {
       this.setCamera(REPLAY_CAMERAS[Number(camera[1]) - 1]);
       return true;
@@ -451,6 +601,18 @@ export class ReplayViewer {
         if (!this.compareButton.hidden) this.toggleCompareMenu();
       },
       KeyE: () => this.exporter.open(),
+      KeyJ: () => this.seekJump(event.shiftKey ? -1 : 1),
+      KeyN: () => this.seekSplit(event.shiftKey ? -1 : 1),
+      KeyG: () => this.toggleGotoMenu(),
+      KeyL: () => {
+        if (hostSupports("loop")) this.markLoop();
+      },
+      KeyV: () => {
+        if (hostSupports("weapon")) this.toggleWeapon();
+      },
+      KeyH: () => {
+        if (hostSupports("hud")) this.toggleHud();
+      },
       KeyP: () => {
         if (!this.practiceButton.hidden) this.practice();
       },
@@ -459,8 +621,9 @@ export class ReplayViewer {
       },
     };
     const action = actions[event.code];
-    if (event.code === "Escape" && !this.compareMenu.hidden) {
+    if (event.code === "Escape" && (!this.compareMenu.hidden || !this.gotoMenu.hidden)) {
       this.compareMenu.hidden = true;
+      this.gotoMenu.hidden = true;
       return true;
     }
     if (!action || (event.repeat && event.code !== "ArrowLeft" && event.code !== "ArrowRight")) return false;
@@ -508,9 +671,17 @@ export class ReplayViewer {
       control.classList.toggle("on", camera === (playback.camera ?? "eye"));
     this.fullButton.classList.toggle("on", !!playback.fullRecording);
     this.fullButton.setAttribute("aria-pressed", String(!!playback.fullRecording));
+    this.paintLoop();
+    this.weaponButton.hidden = !hostSupports("weapon");
+    this.weaponButton.classList.toggle("on", replayWeapon());
+    this.weaponButton.setAttribute("aria-pressed", String(replayWeapon()));
+    this.gotoButton.hidden = !replayTimeline(playback.id);
     const compare = replayCompare();
     this.compareButton.hidden = !hostSupports("compare");
-    this.compareButton.textContent = compare ? `vs ${compare.name}` : "Compare";
+    const delta = compare?.delta;
+    const deltaText =
+      delta === null || delta === undefined ? "" : ` ${delta > 0 ? "+" : "−"}${Math.abs(delta).toFixed(3)}`;
+    this.compareButton.textContent = compare ? `vs ${compare.name}${deltaText}` : "Compare";
     this.compareButton.classList.toggle("on", !!compare);
     if (compare) this.compareButton.style.setProperty("--chip", GHOST_CSS[compare.kind]);
     else this.compareButton.style.removeProperty("--chip");
@@ -518,6 +689,16 @@ export class ReplayViewer {
     this.shareButton.hidden = !run;
     const mine = !!run && (run.id ? run.id === lastKnownMe()?.id : run.name === lastKnownMe()?.name);
     this.reportButton.hidden = !run || mine || !canReport({ ...(run.id ? { id: run.id } : {}), name: run.name });
+  }
+
+  private paintLoop(): void {
+    const loop = replayLoop();
+    const range = shownRange(state.playback);
+    const at = (tick: number) => formatTime((tick - range.start) * range.interval);
+    this.loopButton.hidden = !hostSupports("loop");
+    this.loopButton.classList.toggle("on", !!loop || this.loopStart !== null);
+    if (loop) this.loopButton.textContent = `Loop ${at(loop.from)}–${at(loop.to)}`;
+    else this.loopButton.textContent = this.loopStart === null ? "Loop" : `Loop from ${at(this.loopStart)}…`;
   }
 
   /** Counts a view of a server run once enough of it has played (web viewer watch-count.ts). */
@@ -550,7 +731,10 @@ export class ReplayViewer {
   /** Call on every host state. */
   update(): void {
     const playback = state.playback;
-    if (playback.id !== this.replayId) this.scrubber.cancel(false);
+    if (playback.id !== this.replayId) {
+      this.scrubber.cancel(false);
+      this.loopStart = null;
+    }
     this.countWatching();
     if (this.pendingTick !== null) {
       const caughtUp = Math.abs(playback.tick - this.pendingTick) <= 2 || performance.now() > this.pendingUntil;
@@ -559,6 +743,7 @@ export class ReplayViewer {
     const range = shownRange(playback);
     this.timeline.setRange(range);
     this.timeline.setData(replayTimeline(playback.id));
+    this.timeline.setLoop(replayLoop());
     const compare = replayCompare();
     this.timeline.setCompare(compare?.endTick ?? null, compare ? GHOST_CSS[compare.kind] : "");
     practiceFromReplay.update();

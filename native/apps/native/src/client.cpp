@@ -1015,7 +1015,9 @@ int run(const native::Options &opt) {
             const auto runner_loadout = viewer.session.info.value("packedLoadout", nlohmann::json()).is_string()
                                                 ? viewer.session.info.at("packedLoadout").get<std::string>()
                                                 : std::string();
-            renderer->set_cosmetics(native_render::packed_outfit(runner_loadout).value_or(outfit), runner_loadout);
+            viewer.runner_outfit = native_render::packed_outfit(runner_loadout).value_or(outfit);
+            viewer.runner_loadout = runner_loadout;
+            renderer->set_cosmetics(viewer.runner_outfit, runner_loadout);
             viewer.begin(path);
             replay_timeline.request(path, viewer.id);
             recorder.clear(true);
@@ -2494,7 +2496,13 @@ int run(const native::Options &opt) {
                             if (tick < viewer.session.range.from || tick > viewer.session.range.to)
                                 throw std::runtime_error("Replay tick outside playback range");
                             viewer.controls.pending = tick;
-                        } else if (action == "stop")
+                        } else if (action == "loop")
+                            viewer.set_loop(message.at("value"));
+                        else if (action == "weapon")
+                            viewer.toggle_weapon();
+                        else if (action == "hud")
+                            viewer.hud = message.value("value", !viewer.hud);
+                        else if (action == "stop")
                             reset();
                     } else if (type == "sensitivity") {
                         preferences = native::patch_settings(preferences, {{"sensitivity", message.at("value")}});
@@ -2848,6 +2856,7 @@ int run(const native::Options &opt) {
             ))
             act(*ready, false, true);
         video.step(captured && !viewer.active);
+        viewer.wrap_loop(curr.tick);
         if (!video.preparing())
             if (const auto seek = viewer.controls.take()) try {
                     seek_playback(*seek);
@@ -2909,6 +2918,7 @@ int run(const native::Options &opt) {
                 curr = state.player;
                 bh_last_command(core.get(), &cmd);
                 input.set_angles(cmd.pitch, cmd.yaw, 5);
+                viewer.record_view(cmd, curr.tick);
             } else {
                 const bool turns_allowed = captured
                                            && native::turn_binds_allowed(
@@ -3261,7 +3271,7 @@ int run(const native::Options &opt) {
             renderer->set_player_glow(player_glow);
             if (!spectator) renderer->set_spectated_actor(std::nullopt);
             renderer->set_viewmodel_weapon(std::nullopt);
-            renderer->set_viewmodel_visible(prefs.viewmodel && !opt.camera);
+            renderer->set_viewmodel_visible(prefs.viewmodel && !opt.camera && (!viewer.active || viewer.weapon_eye));
             renderer->set_source_look(prefs.source_look);
             if (spectator) {
                 spectated_actor = room.spectated(steady_seconds);
@@ -3305,6 +3315,7 @@ int run(const native::Options &opt) {
                             frame_seconds,
                             held_codes.contains("ShiftLeft") || held_codes.contains("ShiftRight")
                     );
+                viewer.smooth(state.player, prev, curr, blend, camera_input);
                 viewer.camera.sample(
                         core.get(),
                         state.player,
@@ -3357,8 +3368,9 @@ int run(const native::Options &opt) {
                 native_render::Actor self;
                 self.id = "local-camera-target";
                 self.opacity = 1;
-                self.outfit = outfit;
-                self.loadout = packed_loadout;
+                self.outfit = viewer.active ? viewer.runner_outfit : outfit;
+                self.loadout = viewer.active ? viewer.runner_loadout : packed_loadout;
+                self.emptyHand = viewer.active && !viewer.weapon_third;
                 self.playerGlow = player_glow;
                 for (int k = 0; k < 3; k++) {
                     self.frame.position[k] = state.player.position[k];
@@ -3744,7 +3756,7 @@ int run(const native::Options &opt) {
                                             {"error", ""}
                                     }}
                 };
-                native::render_playback_state(state, replay_compare, viewer.session.range.tick_interval);
+                native::render_playback_state(state, replay_compare, viewer.session.range.tick_interval, curr);
                 state["ghosts"] = nlohmann::json::array();
                 for (unsigned slot = 0; slot < 4; slot++) {
                     const auto &g = ghosts.slots[slot];

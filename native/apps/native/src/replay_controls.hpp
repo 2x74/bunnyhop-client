@@ -324,8 +324,35 @@ public:
         actor_.name = value;
     }
 
-    nlohmann::json menu_state(double playback_interval) const {
+    // Seconds this replay is behind (positive) or ahead of the compared run where it stands at `tick`: the compared
+    // run's time at the point of its path nearest to `position`, as the website's viewer measures it (ghost.ts split).
+    std::optional<double> delta(uint32_t tick, double playback_interval, const float position[3]) const {
+        constexpr uint32_t search_ticks = 300;
+        constexpr float match_radius_units = 128;
+        if (frames_.empty() || tick < playback_start_ || playback_interval <= 0) return std::nullopt;
+        const uint32_t expected = compare_tick(tick, playback_start_, playback_interval, start_, end_, interval_);
+        const uint32_t low = std::max(start_, expected > search_ticks ? expected - search_ticks : 0);
+        const uint32_t high = std::min(uint32_t(frames_.size() - 1), std::min(end_, expected + search_ticks));
+        float best = match_radius_units * match_radius_units;
+        std::optional<uint32_t> nearest;
+        for (uint32_t at = low; at <= high; ++at) {
+            float squared = 0;
+            for (int axis = 0; axis < 3; ++axis) {
+                const float offset = frames_[at].position[axis] - position[axis];
+                squared += offset * offset;
+            }
+            if (squared < best) {
+                best = squared;
+                nearest = at;
+            }
+        }
+        if (!nearest) return std::nullopt;
+        return (tick - playback_start_) * playback_interval - (*nearest - start_) * interval_;
+    }
+
+    nlohmann::json menu_state(double playback_interval, uint32_t tick = 0, const float *position = nullptr) const {
         if (!active()) return nullptr;
+        const auto difference = position ? delta(tick, playback_interval, position) : std::nullopt;
         const double finish =
                 playback_interval > 0 ? playback_start_ + (end_ - start_) * interval_ / playback_interval : 0;
         return {{"kind",
@@ -334,7 +361,8 @@ public:
                                                                    : "custom"},
                 {"name", actor_.name},
                 {"endTick",
-                 finished_ ? nlohmann::json(uint32_t(std::max(0., std::round(finish)))) : nlohmann::json(nullptr)}};
+                 finished_ ? nlohmann::json(uint32_t(std::max(0., std::round(finish)))) : nlohmann::json(nullptr)},
+                {"delta", difference ? nlohmann::json(*difference) : nlohmann::json(nullptr)}};
     }
 
     bool active() const { return handle_ != 0 || !frames_.empty(); }

@@ -128,6 +128,9 @@ export type MenuMessage =
       speed?: number;
     }
   | { type: "replayControl"; action: "fullRecording"; value: boolean }
+  | { type: "replayControl"; action: "loop"; value: { from: number; to: number } | null }
+  | { type: "replayControl"; action: "weapon" }
+  | { type: "replayControl"; action: "hud"; value: boolean }
   | { type: "practiceFromReplay"; tick?: number }
   /** A second replay as a ghost on the one being watched (replay-host.ts); needs the host's "compare" feature. */
   | { type: "replayCompare"; action: "set"; kind: "pb" | "wr" | "custom"; name: string; replayBase64: string }
@@ -411,7 +414,7 @@ export function runSeconds(run: { seconds?: number; timeMs?: unknown }): number 
   if (Number.isSafeInteger(run.timeMs) && Number(run.timeMs) > 0) return Number(run.timeMs) / 1000;
   return typeof run.seconds === "number" && Number.isFinite(run.seconds) && run.seconds > 0 ? run.seconds : null;
 }
-export const REPLAY_CAMERAS = ["eye", "chase", "free", "flyby", "auto"] as const;
+export const REPLAY_CAMERAS = ["eye", "chase", "free", "flyby", "auto", "orbit"] as const;
 export type ReplayCamera = (typeof REPLAY_CAMERAS)[number];
 export interface NativeGhost {
   slot: number;

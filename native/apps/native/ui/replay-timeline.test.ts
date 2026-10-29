@@ -1,6 +1,15 @@
 import { expect, test } from "bun:test";
 import { readTimelineData } from "./replay-timeline";
-import { applyReplayHostState, applyReplayTimeline, hostSupports, replayCompare, replayTimeline } from "./replay-host";
+import {
+  applyReplayHostState,
+  applyReplayTimeline,
+  hostSupports,
+  replayCompare,
+  replayHud,
+  replayLoop,
+  replayTimeline,
+  replayWeapon,
+} from "./replay-host";
 
 const TIMELINE = {
   id: "bh_aztec-1.bhr",
@@ -8,6 +17,7 @@ const TIMELINE = {
   step: 2,
   speed: [0, 250.5, 300],
   jumps: [120, 160],
+  strafes: [125, 150],
   splits: [{ tick: 140, kind: "stage", index: 2 }],
   startTick: 110,
   endTick: 150,
@@ -47,16 +57,27 @@ test("the viewer's host extras: features, the compare ghost, and the timeline fo
     playback: { active: true, features: ["compare", 7], compare: { kind: "wr", name: "WR · oiwa", endTick: 900 } },
   });
   expect(hostSupports("compare")).toBe(true);
-  expect(replayCompare()).toEqual({ kind: "wr", name: "WR · oiwa", endTick: 900 });
+  expect(replayCompare()).toEqual({ kind: "wr", name: "WR · oiwa", endTick: 900, delta: null });
   // A state without the fields keeps them; an unknown ghost kind clears the compare; leaving the replay ends it.
   applyReplayHostState({ playback: { tick: 5 } });
   expect(replayCompare()?.kind).toBe("wr");
   applyReplayHostState({ playback: { compare: { kind: "rival", name: "x" } } });
   expect(replayCompare()).toBeNull();
   applyReplayHostState({ playback: { compare: { kind: "pb", name: "Your PB", endTick: -2 } } });
-  expect(replayCompare()).toEqual({ kind: "pb", name: "Your PB", endTick: null });
+  expect(replayCompare()).toEqual({ kind: "pb", name: "Your PB", endTick: null, delta: null });
+  applyReplayHostState({ playback: { compare: { kind: "pb", name: "Your PB", endTick: 40, delta: -0.125 } } });
+  expect(replayCompare()?.delta).toBe(-0.125);
+  // The loop and the viewer's switches; a backwards loop is dropped.
+  applyReplayHostState({ playback: { loop: { from: 100, to: 300 }, weapon: false, hud: false } });
+  expect(replayLoop()).toEqual({ from: 100, to: 300 });
+  expect(replayWeapon()).toBe(false);
+  expect(replayHud()).toBe(false);
+  applyReplayHostState({ playback: { loop: { from: 300, to: 100 } } });
+  expect(replayLoop()).toBeNull();
+  applyReplayHostState({ playback: { loop: { from: 1, to: 2 } } });
   applyReplayHostState({ playback: { active: false } });
   expect(replayCompare()).toBeNull();
+  expect(replayLoop()).toBeNull();
 
   applyReplayTimeline(TIMELINE);
   expect(replayTimeline("bh_aztec-1.bhr")?.startTick).toBe(110);

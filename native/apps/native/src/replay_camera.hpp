@@ -28,7 +28,9 @@ struct ReplayCamera {
 private:
     static constexpr double rad = 3.14159265358979323846 / 180;
     double last_seconds = NAN, chase_yaw = NAN, chase_pitch = 0, chase_dist = NAN, chase_height = 0, chase_z = NAN;
-    double eye_last_z = NAN, eye_last_view = 0, eye_error = 0;
+    double eye_last_z = NAN, eye_last_view = 0, eye_error = 0, orbit_angle = NAN;
+    // Orbit: a slow turn around the runner, at a fixed distance and height, that walls pull in like the chase camera.
+    static constexpr double orbit_degrees_per_second = 24, orbit_distance_units = 150, orbit_height_degrees = 16;
     bool eye_last_crouch = false;
     Point fly_pos = {NAN, 0, 0}, fly_vel{}, fly_look{}, tripod_look{};
     double heading = NAN;
@@ -78,7 +80,7 @@ private:
     }
 
     void snap() {
-        chase_yaw = chase_z = chase_dist = NAN;
+        chase_yaw = chase_z = chase_dist = orbit_angle = NAN;
         eye_last_z = NAN;
         eye_error = 0;
         fly_pos[0] = heading = NAN;
@@ -95,7 +97,7 @@ private:
 public:
     bool set_mode(const std::string &value) {
         if (value != "eye" && value != "chase" && value != "free" && value != "flyby" && value != "auto"
-            && value != "path" && value != "freePath")
+            && value != "orbit" && value != "path" && value != "freePath")
             return false;
         const bool keep_free = value == "free" && initialized;
         mode = (value == "path" || value == "freePath") ? "flyby" : value;
@@ -280,6 +282,23 @@ public:
         };
     }
 
+    void sample_orbit(BhContext *core, const BhState &s, double view_yaw, double dt) {
+        orbit_angle = std::isfinite(orbit_angle) ? wrap(orbit_angle + orbit_degrees_per_second * dt) : view_yaw;
+        const double a = (orbit_angle + orbit_yaw) * rad,
+                     p = std::clamp(orbit_height_degrees + orbit_pitch, -60., 80.) * rad,
+                     ideal = orbit_distance_units * zoom;
+        const Point pivot = {s.position[0], s.position[1], s.position[2] + s.view_offset_z - 8};
+        Point want = {
+                pivot[0] - std::cos(a) * std::cos(p) * ideal,
+                pivot[1] - std::sin(a) * std::cos(p) * ideal,
+                pivot[2] + std::sin(p) * ideal
+        };
+        const double reach = std::max(4., ideal * trace(core, pivot, want, 6) - 2);
+        for (int j = 0; j < 3; ++j)
+            want[j] = pivot[j] + (want[j] - pivot[j]) * reach / ideal;
+        look(want, pivot);
+    }
+
     void move(const Input &input, double dt, bool fast = false, bool slow = false) {
         if (mode != "free" || !initialized) return;
         dt = std::clamp(dt, 0., .1);
@@ -390,6 +409,8 @@ public:
                     fly_look[j] += (pivot[j] - fly_look[j]) * damp(9, dt);
             }
             look(fly_pos, fly_look);
+        } else if (active_mode == "orbit") {
+            sample_orbit(core, s, view_yaw, dt);
         } else if (active_mode != "free") {
             const bool fresh = !std::isfinite(chase_yaw);
             const double height = s.view_offset_z - 8 + eye_error;

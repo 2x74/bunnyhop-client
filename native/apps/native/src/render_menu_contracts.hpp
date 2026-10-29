@@ -152,8 +152,9 @@ public:
     }
 };
 
-inline void render_playback_state(nlohmann::json &state, const ReplayCompare &compare, double interval) {
-    state["playback"]["features"] = {"compare"};
-    state["playback"]["compare"] = compare.menu_state(interval);
+inline void
+render_playback_state(nlohmann::json &state, const ReplayCompare &compare, double interval, const BhState &shown) {
+    state["playback"]["features"] = {"compare", "loop", "weapon", "hud", "orbit", "strafes", "exportQueue"};
+    state["playback"]["compare"] = compare.menu_state(interval, shown.tick, shown.position);
 }
 }  // namespace native
