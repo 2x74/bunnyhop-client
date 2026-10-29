@@ -94,8 +94,23 @@ if(BUILD_TESTING)
     target_compile_options(bunnyhop-native-preferences-tests PRIVATE
         $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
     add_test(NAME native_preferences COMMAND bunnyhop-native-preferences-tests)
-    add_test(NAME native_format
-        COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckFormat.cmake")
+    # The code is formatted with clang-format 21; older versions reject or reinterpret .clang-format keys.
+    find_program(NATIVE_CLANG_FORMAT NAMES clang-format-21 clang-format
+        HINTS /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin)
+    set(NATIVE_CLANG_FORMAT_MAJOR 0)
+    if(NATIVE_CLANG_FORMAT)
+        execute_process(COMMAND "${NATIVE_CLANG_FORMAT}" --version OUTPUT_VARIABLE NATIVE_CLANG_FORMAT_VERSION)
+        if(NATIVE_CLANG_FORMAT_VERSION MATCHES "version ([0-9]+)")
+            set(NATIVE_CLANG_FORMAT_MAJOR "${CMAKE_MATCH_1}")
+        endif()
+    endif()
+    if(NATIVE_CLANG_FORMAT_MAJOR GREATER_EQUAL 21)
+        add_test(NAME native_format
+            COMMAND "${CMAKE_COMMAND}" -DCLANG_FORMAT=${NATIVE_CLANG_FORMAT}
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckFormat.cmake")
+    else()
+        message(STATUS "Format check skipped: it needs clang-format 21")
+    endif()
 endif()
 if(BUNNYHOP_BUILD_CLIENT)
     find_package(SDL3 3.4 CONFIG REQUIRED)

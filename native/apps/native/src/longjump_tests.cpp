@@ -18,7 +18,7 @@ static BhState state(const json &s) {
     return p;
 }
 
-static void near(double a, double b) {
+static void expect_close(double a, double b) {
     if (std::abs(a - b) > 1e-8) {
         std::cerr << a << " != " << b << '\n';
         std::abort();
@@ -52,29 +52,29 @@ int main(int argc, char **argv) {
             bool should_call = false;
             if (r) {
                 ++reported;
-                near(r->distance, expected.at("distance"));
-                near(r->displacement, expected.at("displacement"));
-                near(r->pre, expected.at("pre"));
-                near(r->max, expected.at("max"));
-                near(r->sync, expected.at("sync"));
-                near(r->airtime, expected.at("airtime"));
+                expect_close(r->distance, expected.at("distance"));
+                expect_close(r->displacement, expected.at("displacement"));
+                expect_close(r->pre, expected.at("pre"));
+                expect_close(r->max, expected.at("max"));
+                expect_close(r->sync, expected.at("sync"));
+                expect_close(r->airtime, expected.at("airtime"));
                 assert(r->standing == (expected.at("kind") == "LJ"));
                 assert(r->failed == expected.value("failed", false));
                 assert(r->crouched == expected.at("crouched"));
                 assert(r->strafes.size() == expected.at("strafes"));
                 assert(r->path.size() == expected.at("path").size());
                 for (size_t i = 0; i < r->path.size(); ++i) {
-                    near(r->path[i].d, expected["path"][i]["d"]);
-                    near(r->path[i].z, expected["path"][i]["z"]);
-                    near(r->path[i].v, expected["path"][i]["v"]);
+                    expect_close(r->path[i].d, expected["path"][i]["d"]);
+                    expect_close(r->path[i].z, expected["path"][i]["z"]);
+                    expect_close(r->path[i].v, expected["path"][i]["v"]);
                 }
                 for (size_t i = 0; i < r->strafes.size(); ++i) {
                     const auto &s = r->strafes[i];
                     const auto &e = expected["strafeStats"][i];
                     assert(s.side == e["side"] && s.ticks == e["ticks"]);
-                    near(s.gain, e["gain"]);
-                    near(s.loss, e["loss"]);
-                    near(100. * s.synced / s.ticks, e["sync"]);
+                    expect_close(s.gain, e["gain"]);
+                    expect_close(s.loss, e["loss"]);
+                    expect_close(100. * s.synced / s.ticks, e["sync"]);
                 }
                 should_call = r->standing && !r->failed && r->distance >= 250;
             }

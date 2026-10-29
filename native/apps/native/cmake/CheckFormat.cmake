@@ -1,10 +1,13 @@
 # Run with cmake -P apps/native/cmake/CheckFormat.cmake from native/.
-find_program(CLANG_FORMAT NAMES clang-format clang-format-21
-    HINTS /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin
-    REQUIRED)
+# Pass -DCLANG_FORMAT=/path/to/clang-format to pick one; CTest passes the one CMake found.
+if(NOT CLANG_FORMAT)
+    find_program(CLANG_FORMAT NAMES clang-format-21 clang-format
+        HINTS /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin
+        REQUIRED)
+endif()
 execute_process(COMMAND "${CLANG_FORMAT}" --version OUTPUT_VARIABLE FORMAT_VERSION)
-if(NOT FORMAT_VERSION MATCHES "version ([0-9]+)" OR CMAKE_MATCH_1 LESS 18)
-    message(FATAL_ERROR "clang-format 18 or newer is required")
+if(NOT FORMAT_VERSION MATCHES "version ([0-9]+)" OR CMAKE_MATCH_1 LESS 21)
+    message(FATAL_ERROR "clang-format 21 or newer is required")
 endif()
 get_filename_component(NATIVE_SOURCE "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 file(GLOB_RECURSE FORMAT_FILES
