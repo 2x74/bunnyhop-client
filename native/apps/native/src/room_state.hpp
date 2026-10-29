@@ -69,8 +69,16 @@ class RoomState {
         bool silenced = false;
     };
 
+    // A peer's run as the snapshots report it (protocol.ts NetMeta), read once when it arrives.
+    struct WireMeta {
+        bool known = false;
+        unsigned style = 0, timer = 0;
+        double timer_ticks = 0;
+    };
+
     struct Peer {
         native_render::Actor actor;
+        WireMeta wire;
         std::deque<Sample> samples;
         double arrived = 0, offset = 0, batch = .1, jitter = 0, meta_at = 0;
         bool clock = false, spectator = false;
@@ -130,6 +138,16 @@ class RoomState {
                 }
             }
         }
+    }
+
+    static WireMeta wire_meta(const nlohmann::json &meta) {
+        WireMeta wire;
+        wire.known = meta.is_object();
+        if (!wire.known) return wire;
+        wire.style = meta.value("style", 0u);
+        wire.timer = meta.value("timer", 0u);
+        wire.timer_ticks = meta.value("timerTicks", 0.);
+        return wire;
     }
 
     std::string change_map(const std::string &next) {
@@ -384,7 +402,10 @@ public:
                 for (auto it = e["metas"].begin(); it != e["metas"].end(); ++it) {
                     try {
                         const unsigned slot = unsigned(std::stoul(it.key()));
-                        if (slot < 256) peers[slot].meta = it.value();
+                        if (slot < 256) {
+                            peers[slot].meta = it.value();
+                            peers[slot].wire = wire_meta(it.value());
+                        }
                     } catch (const std::exception &) {
                     }
                 }
@@ -425,6 +446,7 @@ public:
             auto &p = peers[slot];
             if (block.contains("meta") && block["meta"].is_object()) {
                 p.meta = block["meta"];
+                p.wire = wire_meta(p.meta);
                 p.meta_at = now;
             }
             p.actor.id = std::to_string(slot);
@@ -553,6 +575,30 @@ public:
             out.push_back(p.actor);
         }
         return out;
+    }
+
+    // What a player's tag shows after the name (net/players.ts): their time while running or finished, "start" in the
+    // start zone, preceded by the style's short name unless it is Normal.
+    void tag_detail(unsigned slot, double now, HudLabel<48> &out) const {
+        constexpr std::array<std::string_view, 8> short_styles = {"NM", "EZ", "W", "SW", "HSW", "AS", "SCR", "LG"};
+        constexpr unsigned timer_start = 1, timer_running = 2, timer_finished = 3;
+        out.assign("");
+        const auto found = peers.find(slot);
+        if (found == peers.end() || !found->second.wire.known) return;
+        const auto &peer = found->second;
+        const auto &wire = peer.wire;
+        if (wire.style != 0 && wire.style < short_styles.size()) out.assign(short_styles[wire.style]);
+        if (wire.timer == timer_running || wire.timer == timer_finished) {
+            const double running =
+                    wire.timer == timer_running && peer.meta_at > 0 ? std::max(0., now - peer.meta_at) : 0;
+            HudLabel<48> time;
+            format_hud_time(time, wire.timer_ticks * .01 + running);
+            if (!out.empty()) out.append(" · ");
+            out.append(time.view());
+        } else if (wire.timer == timer_start) {
+            if (!out.empty()) out.append(" · ");
+            out.append("start");
+        }
     }
 
     std::optional<std::pair<unsigned, double>> timer(unsigned slot, double now) const {

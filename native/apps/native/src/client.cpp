@@ -3455,6 +3455,7 @@ int run(const native::Options &opt) {
                 const auto matrix = renderer->camera(
                         eye, camera_input.yaw(), camera_input.pitch, float(width) / std::max(height, 1)
                 );
+                room_bridge.tag_sights.begin(steady_seconds, eye);
                 native::draw_name_tags(
                         hud,
                         width,
@@ -3463,6 +3464,7 @@ int run(const native::Options &opt) {
                         matrix.data(),
                         actors,
                         room,
+                        room_bridge.tag_sights,
                         hud.preferences().tags_players,
                         prefs.ghost_tag,
                         hud.preferences().tags_through_walls,

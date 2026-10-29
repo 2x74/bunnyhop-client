@@ -421,7 +421,7 @@ void draw_host_tag(Hud &hud, float x, float y) {
 template <class Hud>
 void draw_score_player(Hud &hud, float x, float right, float y, const ScoreRow &row, double now) {
     using namespace scoreboard_look;
-    hud.overlay_avatar(x, y - 3, row.slot, row.look.color);
+    hud.overlay_avatar(x, y - 3, row.slot, slot_color(row.slot));
     x += avatar_width;
     x = draw_rank_tag(hud, x, y, row);
     hud.overlay_flag(x, y + 1, row.country);
