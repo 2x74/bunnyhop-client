@@ -677,14 +677,16 @@ void draw_movement_widgets(
         float width,
         float height,
         bool practice,
-        unsigned checkpoint
+        unsigned checkpoint,
+        bool editing = false
 ) {
     constexpr NameColor cream = {.94f, .91f, .86f, 1};
     constexpr NameColor dim = {.63f, .65f, .70f, 1};
     constexpr NameColor amber = {1, .71f, .24f, 1};
+    // The layout editor draws every element; the HUD fades the ones that are off.
     const auto wanted = [&](std::string_view id, bool fallback) {
         const auto &place = prefs.layout[hud_index(id)];
-        return place ? place->visible : fallback;
+        return editing || (place ? place->visible : fallback);
     };
     const auto line = [&](const char *id,
                           std::string_view text,
@@ -708,7 +710,7 @@ void draw_movement_widgets(
     };
     HudLabel<> label;
     // The map line already names the bonus; a separate line only where the player put one.
-    if (run.track && placed("track")) {
+    if (run.track && (placed("track") || editing)) {
         label.format("Bonus %u", run.track);
         line("track", label.view(), width / 2, height / 2, true);
     }
@@ -751,10 +753,15 @@ void draw_movement_widgets(
         const auto point = at("ghostKeys", width / 2 + 140, height / 2 + 100);
         constexpr std::array<uint32_t, 6> bits = {forward, left, back, right, duck, jump};
         constexpr std::array<std::string_view, 6> names = {"W", "A", "S", "D", "DUCK", "JUMP"};
-        hud.overlay_text(point[0], point[1] - 19, "Ghost", 11, dim);
+        constexpr float keys_below_label = 19;
+        hud.overlay_text(point[0], point[1], "Ghost", 11, dim);
         for (size_t i = 0; i < bits.size(); ++i)
             hud.overlay_text(
-                    point[0] + float(i) * 30, point[1], names[i], 10, extras.ghost_buttons & bits[i] ? cream : dim
+                    point[0] + float(i) * 30,
+                    point[1] + keys_below_label,
+                    names[i],
+                    10,
+                    extras.ghost_buttons & bits[i] ? cream : dim
             );
     }
 }

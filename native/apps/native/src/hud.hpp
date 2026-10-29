@@ -247,6 +247,9 @@ class NativeHud {
         const auto &style = element_styles_[index];
         element_alpha = style.opacity;
         element_color = style.color;
+        // The layout editor shows every element, the hidden ones faint, so each can be picked and switched on.
+        if (editing_ && !element_visible) element_alpha *= hidden_while_editing_alpha;
+        if (editing_) element_visible = true;
     }
 
     void clear_element_style() {
@@ -279,6 +282,10 @@ class NativeHud {
         return native::ssj_gain_color(gain, prefs_.ssj_fields, prefs_.palette).value_or(native::semantic_rgb(0xffffff));
     }
 
+    static constexpr float hidden_while_editing_alpha = .35f;
+    bool editing_ = false;
+    // Each element's box (element_size at its place and scale), in pixels, from the last frame.
+    std::array<native::HudRect, native::hud_ids.size()> layout_boxes_{};
     // Where each element was drawn last frame, in pixels. The layout smoke checks that no two overlap.
     static constexpr size_t untracked_element = native::hud_ids.size();
     // The board place shares the split's layout entry but has its own place, so it has its own box.
@@ -286,7 +293,10 @@ class NativeHud {
     std::array<native::HudRect, native::hud_ids.size() + 2> drawn_{};
     size_t drawn_index_ = untracked_element;
 
+    bool noting_drawn_ = true;
+
     void note_drawn(float x, float y, float w, float h) {
+        if (!noting_drawn_) return;
         auto &box = drawn_[drawn_index_];
         const float left = x * scale, top = y * scale, right = (x + w) * scale, bottom = (y + h) * scale;
         if (box.width <= 0 && box.height <= 0) {
@@ -370,6 +380,15 @@ class NativeHud {
     void atlas_text(float x, float y, std::string_view value, float size, Color color) {
         const float advance = size * atlas_advance_per_size;
         const float height = size * atlas_height_per_size;
+        // A glyph's cell is wider than its advance; the text's box is what it inks, shadow included.
+        if (element_visible)
+            note_drawn(
+                    element_x(x),
+                    element_y(y),
+                    (float(value.size()) * advance + 1) * element_scale,
+                    (height + 1) * element_scale
+            );
+        noting_drawn_ = false;
         for (const char character : value) {
             const unsigned index = unsigned(character) - ' ';
             const float u = float(index % atlas_columns) * atlas_cell_u;
@@ -378,6 +397,7 @@ class NativeHud {
             quad(x, y, size, height, u, v, atlas_cell_u, atlas_cell_v, color);
             x += advance;
         }
+        noting_drawn_ = true;
     }
 
     // Text that needs the system font (other scripts, emoji) as one shaped raster, or one '?' per code point when
@@ -713,6 +733,9 @@ public:
 
     void overlay_rect(float x, float y, float w, float h, std::array<float, 4> color) { rect(x, y, w, h, color); }
 
+    // How wide overlay_text draws `value` (bitmap-font text is exact; shaped text is rasterized once to measure).
+    float overlay_text_width(std::string_view value, float size) { return text_width(value, size); }
+
     void overlay_mark(float x, float y, native::NameMark mark, Color color) {
         glyph(x,
               y,
@@ -1020,19 +1043,29 @@ public:
         }
         const float top = h - 110 - float(rows.size()) * step - (typing ? 70.f : 0.f);
         const auto &place = prefs_.layout[native::hud_index("chat")];
+        const float box_height =
+                float(std::max<size_t>(rows.size(), editing_ ? 1 : 0)) * step + (typing ? 75.f : 0.f) + 18;
+        pivot_x = 16;
+        pivot_y = top - 10;
         if (place) {
-            const float box_height = float(rows.size()) * step + (typing ? 75.f : 0.f) + 18;
-            const auto bounds = place->rect(w, h, box, box_height);
-            pivot_x = 16;
-            pivot_y = top - 10;
             element_scale = place->scale;
+            element_visible = typing || editing_ || place->visible;
+            if (editing_ && !place->visible) element_alpha = hidden_while_editing_alpha;
+        }
+        if (place && place->placed) {
+            const auto bounds = place->rect(w, h, box, box_height);
             element_shift_x_ = bounds.x - pivot_x;
             element_shift_y_ = bounds.y - pivot_y;
-            element_visible = typing || place->visible;
         }
+        layout_boxes_[native::hud_index("chat")] = {
+                element_x(16) * scale,
+                element_y(top - 10) * scale,
+                box * element_scale * scale,
+                box_height * element_scale * scale
+        };
         const bool has_text =
                 std::any_of(rows.begin(), rows.end(), [](const ChatRow &row) { return !row.text.empty(); });
-        if (has_text || typing)
+        if (has_text || typing || editing_)
             rect(16,
                  top - 10,
                  box,
@@ -1292,7 +1325,7 @@ else{color=vec4(ink.rgb,ink.a*(uv.x<-1.?1.:texture(font,uv).a));}})"
             draw_run_stats(run, style);
             draw_jump_stats(jump_stats, jump_stats_gain);
             if (strafe) draw_strafe_trainer(*strafe, strafe_hints);
-            if (prefs_.keys_overlay) draw_keys();
+            if (prefs_.keys_overlay || editing_) draw_keys();
             draw_health(s.health, weapon);
             if (!notice.empty()) {
                 const auto [x, y] = place("notice", frame_width_ / 2, notice_top);
@@ -1313,8 +1346,9 @@ else{color=vec4(ink.rgb,ink.a*(uv.x<-1.?1.:texture(font,uv).a));}})"
                     run,
                     frame_width_,
                     frame_height_,
-                    practising,
-                    practice ? practice->number() : 0
+                    practising || editing_,
+                    practice ? practice->number() : 0,
+                    editing_
             );
             element_visible = true;
             element_scale = 1;
@@ -1335,6 +1369,25 @@ else{color=vec4(ink.rgb,ink.a*(uv.x<-1.?1.:texture(font,uv).a));}})"
     // box is the "chat" entry after draw_chat_overlay.
     const native::HudRect &drawn_bounds(std::string_view id) const {
         return id == "boardPlace" ? drawn_[board_place_slot] : drawn_[native::hud_index(id)];
+    }
+
+    // Each element's box in pixels as last placed: what the layout editor outlines, picks and moves.
+    const native::HudRect &layout_box(std::string_view id) const { return layout_boxes_[native::hud_index(id)]; }
+
+    std::array<float, 2> layout_size(std::string_view id) const { return element_size(id); }
+
+    // The layout editor's view: every element drawn, the hidden ones faint.
+    void set_editing(bool on) { editing_ = on; }
+
+    bool editing() const { return editing_; }
+
+    // Puts the layout editor's sample values in place of the run's (hud_demo.hpp), and back.
+    template <class Demo>
+    void swap_demo(Demo &demo) {
+        std::swap(extras, demo.extras);
+        std::swap(movement, demo.movement);
+        std::swap(split_line, demo.split_line);
+        std::swap(delta_line, demo.delta_line);
     }
 
     // The display's scale (CSS pixels to screen pixels), for the crosshair.
@@ -1377,12 +1430,6 @@ private:
     static constexpr float gauntlet_delta_from_bottom = 15;
     static constexpr size_t max_notice_bytes = 100;
     static constexpr float timer_size = 34;
-    // The website's timer is smaller; a timer placed with its layout keeps that size so it fits the box it was given.
-    static constexpr float web_timer_size = 20;
-    static constexpr float timer_height_per_size = 1.3f;
-    static constexpr float start_line_thickness = 2;
-    static constexpr float in_start_timer_alpha = .6f;
-    static constexpr float idle_timer_alpha = .5f;
 
     float frame_width_ = 0;
     float frame_height_ = 0;
@@ -1390,6 +1437,14 @@ private:
     native::SemanticPalette palette_;
     native::CrosshairShape crosshair_shape_;
     float display_scale_ = 1;
+
+    // The keys row and the strafe trainer are as big as their settings make them; every other element has a fixed box.
+    std::array<float, 2> element_size(std::string_view id) const {
+        id = native::canonical_hud_id(id);
+        if (id == "keys") return {keys_row_width(), keys_row_height};
+        if (id == "strafeTrainer") return {native::TrainerLayout::width, native::trainer_height(prefs_.trainer)};
+        return native::hud_element_size(id);
+    }
 
     const std::optional<native::HudPlace> &layout_place(std::string_view id) const {
         return prefs_.layout[native::hud_index(id)];
@@ -1400,17 +1455,11 @@ private:
         return entry && entry->placed;
     }
 
-    // Placed with the website's anchored layout (a preset, a layout code, the website's editor).
-    bool web_placed(std::string_view id) const {
-        const auto &entry = layout_place(id);
-        return entry && entry->placed && entry->anchored;
-    }
-
     // Where element `id` goes: its built-in point (x, y) unless the player placed it, then sets it up for drawing.
     std::array<float, 2> place(std::string_view id, float x, float y) {
         if (const auto &entry = layout_place(id); entry && entry->placed) {
             if (entry->anchored) {
-                const auto size = native::hud_element_size(id);
+                const auto size = element_size(id);
                 const auto bounds = entry->rect(frame_width_, frame_height_, size[0], size[1]);
                 x = bounds.x + (native::hud_centred(id) ? bounds.width / 2 : 0);
                 y = bounds.y + (id == "crosshair" ? bounds.height / 2 : 0);
@@ -1427,7 +1476,15 @@ private:
             }
         }
         element(id, x, y);
+        note_layout_box(id, x, y);
         return {x, y};
+    }
+
+    void note_layout_box(std::string_view id, float x, float y) {
+        const auto size = element_size(id);
+        const float width = size[0] * element_scale, height = size[1] * element_scale;
+        const float left = native::hud_centred(id) ? x - width / 2 : x;
+        layout_boxes_[native::hud_index(id)] = {left * scale, y * scale, width * scale, height * scale};
     }
 
     void draw_edge_glow(float speed) {
@@ -1503,8 +1560,7 @@ private:
         }
     }
 
-    // v0.5.1: the map, and under it the style in the accent colour. Placed with the website's layout it is the
-    // website's single line, so whatever sits under it there stays clear.
+    // v0.5.1: the map, and under it the style in the accent colour.
     void draw_map_line(std::string_view map, std::string_view style, unsigned track) {
         const auto [x, y] = place("map", edge_margin, map_top);
         native::HudLabel<128> label;
@@ -1514,12 +1570,6 @@ private:
             bonus.format(" / BONUS %u", track);
             label.append(bonus.view());
         }
-        if (web_placed("map")) {
-            constexpr float word_gap = 10;
-            text(x, y, map, 14, cream);
-            text(x + text_width(map, 14) + word_gap, y + 1, label.view(), 12, amber);
-            return;
-        }
         text(x, y, map, 17, cream);
         text(x, y + style_below_map, label.view(), 14, amber);
     }
@@ -1527,7 +1577,7 @@ private:
     void draw_fps_and_pb(double fps) {
         const float w = frame_width_;
         const auto &fps_place = layout_place("fps");
-        const bool fps_shown = !fps_place || fps_place->visible;
+        const bool fps_shown = !fps_place || fps_place->visible || editing_;
         {
             const auto [x, y] = place("fps", w - fps_from_right, fps_top);
             native::HudLabel<32> label;
@@ -1540,34 +1590,22 @@ private:
         text(x, y, extras.pb.view(), 13, dim);
     }
 
-    // The run status ("IN START", "READY") sits over the timer at the built-in place, as in v0.5.1. A timer placed
-    // with the website's layout has the website's cue instead: dimmed until the run starts, a start-zone line under
-    // it while in the zone.
+    // The run status ("IN START", "READY") sits over the timer, as in v0.5.1, and follows it unless it has a place
+    // of its own.
     void draw_timer(const BhRunState &run, bool practising) {
         const float w = frame_width_, h = frame_height_;
         const auto [x, y] = place("timer", w / 2, h - timer_from_bottom);
-        const float size = web_placed("timer") ? web_timer_size : timer_size;
         native::HudLabel<48> time;
         native::format_hud_time(time, run.seconds);
-        Color color = (run.status == 2 || practising) ? amber : cream;
-        const bool waiting = run.status == 0;
-        if (!placed("timer")) {
-            text(x, y, time.view(), size, color, true);
-            draw_status(run, x, y - status_above_timer);
-            return;
-        }
-        if (waiting) color[3] *= run.in_start ? in_start_timer_alpha : idle_timer_alpha;
-        text(x, y, time.view(), size, color, true);
-        if (waiting && run.in_start) {
-            const float width = text_width(time.view(), size);
-            rect(x - width / 2, y + size * timer_height_per_size, width, start_line_thickness, palette_.zones[0]);
-        }
+        const Color color = (run.status == 2 || practising) ? amber : cream;
+        text(x, y, time.view(), timer_size, color, true);
+        draw_status(run, x, y - status_above_timer);
     }
 
     void draw_status(const BhRunState &run, float x, float y) {
-        if (run.status == 1) return;
+        if (run.status == 1 && !editing_) return;
         const auto [status_x, status_y] = place("status", x, y);
-        if (run.status == 0) text(status_x, status_y, run.in_start ? "IN START" : "READY", 13, amber, true);
+        if (run.status != 2) text(status_x, status_y, run.in_start ? "IN START" : "READY", 13, amber, true);
         if (run.status == 2) text(status_x, status_y, "FINISHED", 15, amber, true);
     }
 
@@ -1658,21 +1696,25 @@ private:
         auto shown = extras.place.view();
         if (prefs_.place == "place") shown = shown.substr(0, shown.find(" \xC2\xB7"));
         const float x = frame_width_ / 2 + beside_timer, y = frame_height_ - timer_line_from_bottom;
+        // The split's box is the split's: the place line only borrows its visibility and placement.
+        const auto split_box = layout_boxes_[native::hud_index("splits")];
         const auto [place_x, place_y] = place("splits", x, y);
+        layout_boxes_[native::hud_index("splits")] = split_box;
         drawn_index_ = board_place_slot;
+        // Placed, it goes under the split's two lines, as the website shows it with the split.
         text(place_x, placed("splits") ? place_y + 2 * split_line_gap : place_y, shown, 13, dim, true);
     }
 
     // Nothing to draw while standing still: an empty graph would just be a dark box.
     void draw_speed_graph() {
-        if (!prefs_.speed_graph || speed_history.empty()) return;
+        if (!(prefs_.speed_graph || editing_)) return;
         constexpr float slowest_peak = 500;
         constexpr float bar_width = 1.2f;
         constexpr float still_speed = 1;
         float fastest = 0;
         for (const auto &[tick, value] : speed_history)
             fastest = std::max(fastest, value);
-        if (fastest < still_speed) return;
+        if (fastest < still_speed && !editing_) return;
         const auto [x, y] = place("speedGraph", frame_width_ - graph_from_right, frame_height_ - graph_from_bottom);
         rect(x, y, graph_width, graph_height, {.03f, .03f, .05f, .6f});
         const float peak = std::max(slowest_peak, fastest);
@@ -1685,17 +1727,10 @@ private:
         }
     }
 
-    // v0.5.1: "HP 100  AMMO 12/36" at the bottom right. Placed with the website's layout it is the website's ammo
-    // counter, shown only with a gun out.
+    // v0.5.1: "HP 100  AMMO 12/36" at the bottom right.
     void draw_health(float health, const BhWeaponReport &weapon) {
         const auto [x, y] = place("health", frame_width_ - health_from_right, frame_height_ - health_from_bottom);
         native::HudLabel<64> label;
-        if (web_placed("health")) {
-            if (!weapon.clip_size) return;
-            label.format("%u / %u", weapon.clip, weapon.clip_size);
-            text(x, y, label.view(), 18, cream);
-            return;
-        }
         if (weapon.clip_size)
             label.format("HP %.0f  AMMO %u/%u", health, weapon.clip, weapon.clip_size);
         else
@@ -1781,54 +1816,38 @@ private:
         text(left + width / 2, label_top, label, size, look.label, true);
     }
 
-    // v0.5.1: one row of keys at the bottom left, W A S D then jump and duck, then the turn arrows.
-    void draw_keys_row(float x, float y) {
-        constexpr float key_height = 27;
-        constexpr float key_gap = 4;
-        constexpr float label_size = 14;
+    static constexpr float keys_row_height = 27;
+    static constexpr float key_gap = 4;
+    static constexpr float key_label_size = 14;
+
+    float key_width(size_t i) const {
         constexpr float narrowest_key = 28;
         constexpr float label_padding = 10;
-        for (size_t i = 0; i < key_bits.size(); ++i) {
-            if (!key_row_shown(i)) continue;
-            const auto label = key_text(i);
-            const float width =
-                    std::max(narrowest_key, float(label.size()) * label_size * atlas_advance_per_size + label_padding);
-            draw_key(x, y, width, key_height, label, label_size, key_pressed(i));
-            x += width + key_gap;
-        }
+        const float label = float(key_text(i).size()) * key_label_size * atlas_advance_per_size;
+        return std::max(narrowest_key, label + label_padding);
     }
 
-    // The website's keys block (W over A S D, then jump and duck, then the turn arrows), for keys placed with the
-    // website's layout: it fits the box that layout gives them.
-    void draw_keys_block(float x, float y) {
-        constexpr std::array<float, 8> left = {26, 0, 26, 52, 40, 0, 0, 40};
-        constexpr std::array<float, 8> top = {0, 23, 23, 23, 46, 46, 69, 69};
-        constexpr float key_height = 19;
-        constexpr float letter_width = 22;
-        constexpr float wide_width = 38;
-        constexpr float letter_size = 11;
-        constexpr float wide_size = 8.5f;
+    float keys_row_width() const {
+        float width = 0;
+        for (size_t i = 0; i < key_bits.size(); ++i) {
+            if (key_row_shown(i)) width += key_width(i) + key_gap;
+        }
+        return std::max(key_gap, width - key_gap);
+    }
+
+    // v0.5.1: one row of keys at the bottom left, W A S D then jump and duck, then the turn arrows.
+    void draw_keys_row(float x, float y) {
         for (size_t i = 0; i < key_bits.size(); ++i) {
             if (!key_row_shown(i)) continue;
-            const bool letter = i < 4;
-            draw_key(
-                    x + left[i],
-                    y + top[i],
-                    letter ? letter_width : wide_width,
-                    key_height,
-                    key_text(i),
-                    letter ? letter_size : wide_size,
-                    key_pressed(i)
-            );
+            const float width = key_width(i);
+            draw_key(x, y, width, keys_row_height, key_text(i), key_label_size, key_pressed(i));
+            x += width + key_gap;
         }
     }
 
     void draw_keys() {
         const auto [x, y] = place("keys", edge_margin, frame_height_ - keys_from_bottom);
-        if (web_placed("keys"))
-            draw_keys_block(x, y);
-        else
-            draw_keys_row(x, y);
+        draw_keys_row(x, y);
         keys_edges_ = 0;
     }
 

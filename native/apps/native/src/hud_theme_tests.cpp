@@ -2,6 +2,7 @@
 #include "movement_hud.hpp"
 #include "hud_trainer.hpp"
 #include "crosshair_shape.hpp"
+#include "hud_editor_layout.hpp"
 #include "hud_result.hpp"
 #include "toasts.hpp"
 #include "room_modes.hpp"
@@ -761,6 +762,62 @@ void test_crosshair_pixels() {
     assert(native::CrosshairShape::centre_px(1441) == native::CrosshairShape::centre_px(1440));
 }
 
+// Layout codes made by the website's encodeLayout (hud/layout.ts): its Classic layout, and one with a moved timer,
+// the FPS counter on and a minimal keys overlay.
+constexpr const char *web_classic_code =
+        "bhl1.CIcAAPXEMocAAPdoMocC0PdULYcAAPPkK4cAAPmOMocAAPiUMgcAAPq6MoQAAAR-MgQDUgR-KAYAlv7UMgQAAP2oMoAAeACgMoL_"
+        "iACgMgAA"
+        "eAHCMoYAePgwMoj_dP8kMgEAAAiYOQf9EvXEMgQAAPrsKwQAAPvwKwQAAPjGMoMAeP2oMoQAAAFAMgFkB____5qjsg";
+constexpr const char *web_custom_code =
+        "bhl1.CIcAAPXEMoEE0gH0RocC0PdULYcAAPPkK4cAAPmOMocAAPiUMgcAAPq6MoQAAAR-MgQDUgR-KAYAlv7UMgQAAP2oMoAAeACgMoL_"
+        "iACgMoAA"
+        "eAHCMoYAePgwMoj_dP8kMgEAAAiYOQf9EvXEMgQAAPrsKwQAAPvwKwQAAPjGMoMAeP2oMoQAAAFAMgI8Bf-2PZqjsg";
+
+void test_layout_codes() {
+    const auto defaults = native::default_settings();
+    assert(native::encode_hud_layout(defaults) == web_classic_code);
+    // The website's Classic code leaves every element at the native HUD's own place.
+    const auto classic = native::decode_hud_layout(web_classic_code);
+    assert(classic);
+    const auto imported = native::patch_settings(defaults, *classic, false);
+    for (const auto &place : native::HudPreferences::from(imported).layout)
+        assert(!place || !place->placed);
+    const auto custom = native::decode_hud_layout(std::string("  ") + web_custom_code + "\n");
+    assert(custom);
+    const auto &timer = custom->at("hudLayoutWeb").at("timer");
+    assert(timer.at("a") == 1 && std::abs(timer.at("x").get<double>() - .1234) < 1e-9 && timer.at("s") == 1.4);
+    assert(custom->at("hudLayoutWeb").at("fps").at("on") == true && custom->at("keysStyle") == "minimal");
+    assert(custom->at("hudKeysRowsActions") == false && custom->at("hudKeysPressed") == "#ffb63d");
+    const auto settings = native::patch_settings(defaults, *custom, false);
+    assert(native::encode_hud_layout(settings) == web_custom_code);
+    assert(!native::decode_hud_layout("bhl1.???") && !native::decode_hud_layout("bhl2.CIcA"));
+    assert(!native::decode_hud_layout("bhl1.CA"));
+}
+
+void test_layout_editor_math() {
+    // A box in the bottom centre cell anchors to the screen's bottom centre, and HudPlace::rect puts it back.
+    const native::HudRect box{900, 900, 120, 30};
+    const auto place = native::hud_place_from_box(box, 1920, 1080, true, 1.25);
+    assert(place.at("a") == 7 && place.at("s") == 1.25);
+    const native::HudPlace stored{true, true, 7, place.at("x").get<float>(), place.at("y").get<float>(), 1, true};
+    const auto back = stored.rect(1920, 1080, 120, 30);
+    assert(std::abs(back.x - box.x) < .2f && std::abs(back.y - box.y) < .2f);
+    // Snapping: the centre line within 8 px, otherwise the anchor-side edge to the grid.
+    const auto centred = native::snap_box({893, 500, 120, 30}, 1920, 1080, 8, 8);
+    assert(centred.vertical_guide && std::abs(centred.box.x - 900) < 1e-3f);
+    const auto gridded = native::snap_box({13, 21, 50, 20}, 1920, 1080, 8, 8);
+    assert(!gridded.vertical_guide && gridded.box.x == 16 && gridded.box.y == 24);
+    // Each preset is a valid settings patch, and Classic is the built-in layout.
+    for (const auto id : native::hud_preset_ids) {
+        const auto settings = native::patch_settings(native::default_settings(), native::hud_preset(id), false);
+        assert(native::hud_layout_is_preset(settings, id));
+    }
+    assert(native::hud_layout_is_preset(native::default_settings(), "classic"));
+    std::set<std::string_view> ids;
+    for (const auto &element : native::hud_editor_elements)
+        assert(ids.insert(element.id).second && native::hud_index(element.id) != 0);
+}
+
 int main() {
     test_web_settings_schema();
     test_defaults_and_saved_settings();
@@ -772,6 +829,8 @@ int main() {
     test_results_toasts_and_room_widgets();
     test_movement_widgets_and_restart();
     test_crosshair_pixels();
+    test_layout_codes();
+    test_layout_editor_math();
     std::cout << "HUD: 8 scenario groups, all layout IDs, three trainer styles, defaults and saved settings\n";
     using native::parse_hud_theme;
 

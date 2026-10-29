@@ -126,19 +126,34 @@ inline size_t hud_index(std::string_view id) {
     return 0;
 }
 
+// The box each element draws at element scale 1, in HUD units: anchoring, the layout editor's outlines and its
+// snapping all use it. The keys row and the strafe trainer change with their settings (NativeHud::element_size).
 inline std::array<float, 2> hud_element_size(std::string_view id) {
     id = canonical_hud_id(id);
-    if (id == "keys") return {78, 88};
-    if (id == "timer") return {108, 26};
-    if (id == "speed") return {130, 33};
-    if (id == "runStats") return {430, 18};
-    if (id == "strafeTrainer") return {240, 65};
+    if (id == "map") return {340, 44};
+    if (id == "fps") return {70, 19};
+    if (id == "pb") return {100, 18};
+    if (id == "timer") return {186, 46};
+    if (id == "status") return {74, 20};
+    if (id == "speed") return {124, 34};
+    if (id == "runStats") return {300, 19};
+    if (id == "jumpStats") return {300, 38};
+    if (id == "strafeTrainer") return {240, 30};
+    if (id == "splits") return {170, 40};
+    if (id == "keys") return {292, 28};
+    if (id == "health") return {154, 19};
     if (id == "speedGraph") return {260, 80};
-    if (id == "map") return {340, 48};
-    if (id == "fps" || id == "health") return {110, 24};
+    if (id == "notice") return {360, 21};
+    if (id == "replay") return {288, 19};
     if (id == "sync") return {180, 4};
-    if (id == "spectators") return {200, 90};
-    if (id == "longJump" || id == "jumpStats") return {450, 44};
+    if (id == "spectators") return {150, 56};
+    if (id == "longJump") return {260, 40};
+    if (id == "ghostKeys") return {180, 34};
+    if (id == "strafeOffsets") return {200, 18};
+    if (id == "firstJump") return {170, 18};
+    if (id == "practice") return {190, 18};
+    if (id == "stage" || id == "startPre") return {104, 18};
+    if (id == "track") return {64, 18};
     return {240, 26};
 }
 

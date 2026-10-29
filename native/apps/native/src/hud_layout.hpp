@@ -79,6 +79,6 @@ inline std::string hud_key_label(std::string_view code) {
 inline bool hud_centred(std::string_view id) {
     id = canonical_hud_id(id);
     return id != "map" && id != "fps" && id != "pb" && id != "keys" && id != "health" && id != "speedGraph"
-           && id != "spectators" && id != "chat";
+           && id != "spectators" && id != "chat" && id != "ghostKeys";
 }
 }  // namespace native

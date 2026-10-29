@@ -3,7 +3,6 @@
 .settings .set-row.native-unavailable .set-control { visibility: hidden; }
 .settings .set-adv:not(:has(.set-group:not([hidden]))) { display: none; }
 .settings .native-data-path { font-family: var(--mono); font-size: var(--fs-sm); overflow-wrap: anywhere; }
-.settings .native-place { font-size: calc(1.2cqw * var(--s, 1)); }
 
 /* No sky files are accepted (sky-settings.ts), so dragging a file over Graphics shows no drop target. */
 .settings.sky-drop .set-scroll {

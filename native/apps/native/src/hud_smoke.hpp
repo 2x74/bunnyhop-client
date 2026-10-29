@@ -1,5 +1,6 @@
 #pragma once
 #include "hud.hpp"
+#include "hud_editor_layout.hpp"
 #include "room_state.hpp"
 #include "room_modes.hpp"
 #include "weapon_menu.hpp"
@@ -52,10 +53,12 @@ inline void numeric_hud_smoke(NativeHud &hud, int width, int height) {
 struct HudLayoutFixture {
     bool running = false;
     float percent = 100;
+    std::string_view preset = "classic";
 };
 
-inline Json hud_layout_fixture_settings(float percent) {
+inline Json hud_layout_fixture_settings(float percent, std::string_view preset = "classic") {
     auto settings = default_settings();
+    settings.update(hud_preset(preset));
     settings["hudScale"] = percent;
     settings["jumpStats"] = true;
     settings["strafeTrainer"] = true;
@@ -70,7 +73,7 @@ inline Json hud_layout_fixture_settings(float percent) {
 
 inline void
 draw_hud_layout_fixture(NativeHud &hud, Chat &chat, int width, int height, const HudLayoutFixture &fixture) {
-    hud.preferences(hud_layout_fixture_settings(fixture.percent));
+    hud.preferences(hud_layout_fixture_settings(fixture.percent, fixture.preset));
     hud.extras.contract(
             {{"pbTimeMs", 16731}, {"place", 4u}, {"topPercent", 3}, {"spectators", {"Watcher"}}, {"ghostDelta", -.042}}
     );
@@ -136,40 +139,78 @@ draw_hud_layout_fixture(NativeHud &hud, Chat &chat, int width, int height, const
 
 // Fails when two elements overlap or one leaves the screen, at the sizes and HUD scales players use (2560x1441 is a
 // Windows borderless window). Boxes touching at their shadows are allowed.
+// The hud_ids that name an element (not an alias), and the board place's own box.
+inline std::array<std::string_view, hud_ids.size() + 1> hud_layout_ids() {
+    std::array<std::string_view, hud_ids.size() + 1> ids{};
+    std::copy(hud_ids.begin(), hud_ids.end(), ids.begin());
+    ids.back() = "boardPlace";
+    return ids;
+}
+
+inline void check_hud_apart(const NativeHud &hud, int width, int height, const std::string &where) {
+    constexpr float shadow_px = 2;
+    const auto ids = hud_layout_ids();
+    for (size_t a = 0; a < ids.size(); ++a) {
+        const auto &box = hud.drawn_bounds(ids[a]);
+        if (box.width <= 0 || canonical_hud_id(ids[a]) != ids[a]) continue;
+        if (box.x < 0 || box.y < 0 || box.x + box.width > float(width) + shadow_px
+            || box.y + box.height > float(height) + shadow_px)
+            throw std::runtime_error("HUD element leaves the screen at " + where + ": " + std::string(ids[a]));
+        for (size_t b = a + 1; b < ids.size(); ++b) {
+            const auto &other = hud.drawn_bounds(ids[b]);
+            if (other.width <= 0 || canonical_hud_id(ids[b]) != ids[b]) continue;
+            const bool apart = box.x + box.width <= other.x + shadow_px || other.x + other.width <= box.x + shadow_px
+                               || box.y + box.height <= other.y + shadow_px
+                               || other.y + other.height <= box.y + shadow_px;
+            if (!apart)
+                throw std::runtime_error(
+                        "HUD elements overlap at " + where + ": " + std::string(ids[a]) + " and " + std::string(ids[b])
+                );
+        }
+    }
+}
+
+// What an element draws stays inside the box the layout editor outlines and anchors (a few pixels of shadow and the
+// gain tick beside the speed aside).
+inline void check_hud_boxes(const NativeHud &hud, const std::string &where) {
+    constexpr float slack_px = 6;
+    for (const auto id : hud_ids) {
+        if (canonical_hud_id(id) != id || id == "crosshair" || id == "speed" || id == "result") continue;
+        const auto &drawn = hud.drawn_bounds(id);
+        const auto &box = hud.layout_box(id);
+        if (drawn.width <= 0 || box.width <= 0) continue;
+        if (drawn.x < box.x - slack_px || drawn.y < box.y - slack_px
+            || drawn.x + drawn.width > box.x + box.width + slack_px
+            || drawn.y + drawn.height > box.y + box.height + slack_px)
+            throw std::runtime_error(
+                    "HUD element draws outside its layout box at " + where + ": " + std::string(id) + " drew "
+                    + std::to_string(int(drawn.x)) + "," + std::to_string(int(drawn.y)) + " "
+                    + std::to_string(int(drawn.width)) + "x" + std::to_string(int(drawn.height)) + ", box "
+                    + std::to_string(int(box.x)) + "," + std::to_string(int(box.y)) + " "
+                    + std::to_string(int(box.width)) + "x" + std::to_string(int(box.height))
+            );
+    }
+}
+
+// Fails when two elements overlap or one leaves the screen, at the sizes and HUD scales players use (2560x1441 is a
+// Windows borderless window), for the built-in layout and the presets.
 inline void hud_layout_smoke(NativeHud &hud) {
     constexpr std::array<std::array<int, 2>, 4> sizes = {{{2560, 1441}, {1920, 1080}, {1280, 720}, {746, 997}}};
     constexpr std::array<float, 3> percents = {75, 100, 150};
-    constexpr float shadow_px = 2;
     Chat chat;
     for (const auto *line : {"Bunny: gg", "Runner: one more", "Watcher: nice route through the second room"})
         chat.push(line, "", "player", 1, 60);
-    for (const auto [width, height] : sizes) {
-        for (const float percent : percents) {
-            for (const bool running : {false, true}) {
-                draw_hud_layout_fixture(hud, chat, width, height, {running, percent});
-                std::array<std::string_view, hud_ids.size() + 1> ids{};
-                std::copy(hud_ids.begin(), hud_ids.end(), ids.begin());
-                ids.back() = "boardPlace";
-                for (size_t a = 0; a < ids.size(); ++a) {
-                    const auto &box = hud.drawn_bounds(ids[a]);
-                    if (box.width <= 0 || canonical_hud_id(ids[a]) != ids[a]) continue;
-                    if (box.x < 0 || box.y < 0 || box.x + box.width > float(width) + shadow_px
-                        || box.y + box.height > float(height) + shadow_px)
-                        throw std::runtime_error("HUD element leaves the screen: " + std::string(ids[a]));
-                    for (size_t b = a + 1; b < ids.size(); ++b) {
-                        const auto &other = hud.drawn_bounds(ids[b]);
-                        if (other.width <= 0 || canonical_hud_id(ids[b]) != ids[b]) continue;
-                        const bool apart = box.x + box.width <= other.x + shadow_px
-                                           || other.x + other.width <= box.x + shadow_px
-                                           || box.y + box.height <= other.y + shadow_px
-                                           || other.y + other.height <= box.y + shadow_px;
-                        if (!apart)
-                            throw std::runtime_error(
-                                    "HUD elements overlap at " + std::to_string(width) + "x" + std::to_string(height)
-                                    + " " + std::to_string(int(percent)) + "%: " + std::string(ids[a]) + " and "
-                                    + std::string(ids[b])
-                            );
-                    }
+    for (const auto preset : hud_preset_ids) {
+        for (const auto [width, height] : sizes) {
+            // The presets are for landscape screens; the built-in layout also fits a portrait window.
+            if (preset != "classic" && width < height) continue;
+            for (const float percent : percents) {
+                for (const bool running : {false, true}) {
+                    draw_hud_layout_fixture(hud, chat, width, height, {running, percent, preset});
+                    const std::string where = std::string(preset) + " " + std::to_string(width) + "x"
+                                              + std::to_string(height) + " " + std::to_string(int(percent)) + "%";
+                    check_hud_apart(hud, width, height, where);
+                    check_hud_boxes(hud, where);
                 }
             }
         }

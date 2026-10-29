@@ -84,6 +84,8 @@ export type MenuMessage =
   | { type: "replays"; action: "list" }
   /** Clears the player's paint on the loaded map (renderer.hpp tool_message). */
   | { type: "paint"; action: "clear" }
+  /** Opens the HUD layout editor over the game (hud_editor.cpp); the menu closes. */
+  | { type: "hudEditor" }
   | {
       type: "replay";
       action: "play" | "ghost" | "export" | "delete" | "screenshot";

@@ -29,6 +29,8 @@
 #include "menu_gamepad.hpp"
 #include "hud.hpp"
 #include "hud_frame.hpp"
+#include "hud_editor.hpp"
+#include "hud_demo.hpp"
 #include "capabilities.hpp"
 #include "practice_controller.hpp"
 #include "leave_hold.hpp"
@@ -160,6 +162,9 @@ int run(const native::Options &opt) {
                                                                : native::data_location::from_utf8(opt.menu_html);
     const auto manifest_path = native::resource("native-manifest.json", BUNNYHOP_NATIVE_MANIFEST);
     native::NativeHud hud(gl, assets);
+    native::HudLayoutEditor hud_editor;
+    native::HudDemoState hud_demo;
+    std::vector<std::string> hud_editor_bind;
     native::MenuGamepad menu_gamepad;
     std::unique_ptr<NativeLoadoutPreview> loadout_preview;
     std::optional<nlohmann::json> preview_request;
@@ -370,6 +375,7 @@ int run(const native::Options &opt) {
         input.separate_vertical = prefs.separate_vertical;
         input.invert_y = prefs.invert_y;
         input_timeline.rebuild_binds(preferences.at("binds"));
+        hud_editor_bind = preferences.at("binds").at("hudEditor").get<std::vector<std::string>>();
         configured_turns = native::TurnSettings::from_settings(preferences);
         const bool timed_input = !opt.legacy_input && prefs.timed_input;
         input_timeline.set_timed(timed_input, input, held_codes);
@@ -513,6 +519,7 @@ int run(const native::Options &opt) {
     };
     // from_focus_loss: the window mode change waits until focus returns.
     auto show_menu = [&](bool on, bool from_focus_loss = false) {
+        if (on) hud_editor.close();
         if (on) menu_state.reset();
         if (on) input_timeline.keyboard_focus_lost();
         if (on) {
@@ -1219,11 +1226,12 @@ int run(const native::Options &opt) {
                     return;
                 }
                 if (action == "hudEditor") {
-                    show_menu(true);
-                    if (!menu) toast(native::menu_unavailable_text(menu_failure), 6000);
-                    menu_script.open(
-                            menu.get(), menu_ready, "window.bunnyhopNativeMenu?.open?.('settings','hud-editor')"
-                    );
+                    if (!core) {
+                        toast("Load a map to edit the HUD layout");
+                    } else {
+                        hud_editor.open(preferences);
+                        capture(false);
+                    }
                     return;
                 }
                 if (action == "gunMenu") {
@@ -1592,6 +1600,9 @@ int run(const native::Options &opt) {
                 || event.type == SDL_EVENT_MOUSE_MOTION || event.type == SDL_EVENT_MOUSE_WHEEL
                 || event.type == SDL_EVENT_TEXT_INPUT)
                 had_input_activity = true;
+            if (hud_editor.active()
+                && hud_editor.event(event, hud, SDL_GetWindowPixelDensity(window.get()), hud_editor_bind))
+                continue;
             switch (event.type) {
                 case SDL_EVENT_QUIT:
                     running = false;
@@ -1926,6 +1937,17 @@ int run(const native::Options &opt) {
         }
         mouse_diagnostics.end(SDL_GetTicksNS(), mouse_pump_start);
         frame_diagnostics.mark(native::FrameDiagnostics::kPump, SDL_GetTicksNS());
+        if (auto layout = hud_editor.take_patch()) {
+            try {
+                preferences = native::patch_settings(preferences, *layout, false);
+                json_writer.write(cache / "settings.json", preferences);
+                apply_preferences();
+            } catch (const std::exception &e) {
+                toast(std::string("HUD layout: ") + e.what());
+            }
+        }
+        if (hud_editor.take_closed() && focused && (!menu || !menu->visible()))
+            capture(!(viewer.active && viewer.controls.visible));
         if (had_input_activity) activity.input(std::chrono::duration<double>(Clock::now().time_since_epoch()).count());
         if (menu)
             for (const auto &raw : menu->drain_messages()) {
@@ -2319,6 +2341,15 @@ int run(const native::Options &opt) {
                         if (!ok) throw std::runtime_error(window_controller.error());
                         window_dirty = true;
                         window_save_due = Clock::now() + std::chrono::milliseconds(500);
+                    } else if (type == "hudEditor") {
+                        // Settings → HUD → Edit layout: the editor works over the game, so the menu closes.
+                        if (!core) {
+                            toast("Load a map to edit the HUD layout");
+                        } else {
+                            show_menu(false);
+                            hud_editor.open(preferences);
+                            capture(false);
+                        }
                     } else if (type == "file")
                         menu_files.handle(window.get(), message);
                     else if (type == "hudTheme")
@@ -3526,7 +3557,11 @@ int run(const native::Options &opt) {
                     (!menu || !menu->visible()) && !opt.camera,
                     bool(video_capture) || bool(director_job),
                     held_action("scoreboard") || show_scores,
-                    weapon_context()
+                    weapon_context(),
+                    hud_editor,
+                    hud_demo,
+                    SDL_GetWindowDisplayScale(window.get()),
+                    hud_editor_bind.empty() ? std::string() : native::hud_key_label(hud_editor_bind.front())
             }
                     .draw();
         }
