@@ -2943,10 +2943,8 @@ int run(const native::Options &opt) {
                 }
                 if (native::apply_null_binds(
                             input, input_timeline, hud.preferences().null_binds, active_style, practice.active
-                    )
-                    && turn_admission.observe(1, true)) {
-                    run_event(heartbeat.invalidate(native::RunHeartbeat::Reset::generation));
-                    score_notice = "Null binds: local replay only";
+                    )) {
+                    require(recorder.input.mark_null_binds(core.get()), core.get(), "Marking null binds recording");
                 }
                 cmd = input.command();
                 if (practice.noclip) {
