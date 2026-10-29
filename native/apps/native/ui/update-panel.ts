@@ -49,7 +49,7 @@ function updatesGroups(ui: Ui): HTMLElement[] {
     { desc: "Checks once a day when the game starts. Nothing downloads until you press Update." },
   );
   const group = ui.group(
-    "Desktop app",
+    "Native client",
     ui.row("Version", installed, { keywords: "version release build" }),
     ui.actions("Updates", [check, update, restart, cancel, reveal, progress], {
       readout: message,
