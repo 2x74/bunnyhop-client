@@ -571,7 +571,10 @@ class NativeViewmodel {
     }
 
 public:
-    explicit NativeViewmodel(Gl &g, const std::filesystem::path &assetRoot = BUNNYHOP_NATIVE_ASSET_ROOT) : gl(g) {
+    explicit NativeViewmodel(
+            Gl &g, const std::filesystem::path &assetRoot = BUNNYHOP_NATIVE_ASSET_ROOT, bool cpu_only = false
+    )
+        : gl(g) {
         if (std::filesystem::exists(assetRoot / "actor-animations.json"))
             actorAnimationData = std::make_shared<native_actor_anim::Data>(assetRoot.string());
         std::ifstream file(assetRoot / "viewmodels.json");
@@ -645,6 +648,10 @@ public:
         }
 
         shaders = std::make_unique<native_render::PlayerShaderSources>(assetRoot);
+        if (!cpu_only) prepare_graphics();
+    }
+
+    void prepare_graphics() {
         gl.GenTextures(1, &reflectionCube);
         gl.BindTexture(GL_TEXTURE_CUBE_MAP, reflectionCube);
         const uint8_t black[4] = {0, 0, 0, 255};

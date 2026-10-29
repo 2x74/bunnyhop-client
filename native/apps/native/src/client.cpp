@@ -6,6 +6,7 @@
 #include "native_input.hpp"
 #include "mouse_diagnostics.hpp"
 #include "raw_keyboard.hpp"
+#include "input_backend.hpp"
 #include "input_timeline.hpp"
 #include "run_session.hpp"
 #include "run_history.hpp"
@@ -33,6 +34,7 @@
 #include "hud_demo.hpp"
 #include "capabilities.hpp"
 #include "practice_controller.hpp"
+#include "practice_mode.hpp"
 #include "leave_hold.hpp"
 #include "native_chat.hpp"
 #include "sniper_zoom.hpp"
@@ -47,6 +49,7 @@
 #include "render_menu_contracts.hpp"
 #include "render_capabilities.hpp"
 #include "map_download.hpp"
+#include "map_preparation.hpp"
 #include "ssj.hpp"
 #include "strafe_trainer.hpp"
 #include "audio.hpp"
@@ -347,6 +350,7 @@ int run(const native::Options &opt) {
     auto &discord_settings = room_bridge.discord_settings;
     const char *video_driver = SDL_GetCurrentVideoDriver();
     input_timeline.configure_stamps(video_driver ? video_driver : "");
+    native::InputBackend input_backend(video_driver ? video_driver : "");
     native::Chat chat;
     native::RestartGuard restart_guard;
     native::AutoRestart auto_restart;
@@ -429,6 +433,7 @@ int run(const native::Options &opt) {
     };
     apply_preferences();
     native::MapDownload map_download;
+    native::MapPreparation map_preparation;
     auto &loading = map_download.loading;
     auto &last_requested_map = map_download.requested;
     auto &load_progress = map_download.progress;
@@ -496,11 +501,13 @@ int run(const native::Options &opt) {
         input_timeline.restart(input, held_codes);
         camera_controls.clear();
         SDL_FlushEvent(SDL_EVENT_MOUSE_MOTION);
+        input_backend.barrier();
         input_clock.reset();
         leave_hold.cancel();
         restart_guard.cancel();
     };
     auto capture = [&](bool on) {
+        input_backend.capture(false);
         if (chat.active) {
             chat.close();
             SDL_StopTextInput(window.get());
@@ -735,14 +742,16 @@ int run(const native::Options &opt) {
                     json_writer.write(cache / "settings.json", preferences);
                     return;
                 }
-                if (action == "toggle") {
-                    practice.mode = !practice.mode;
-                    if (practice.mode) {
-                        practice.tool.clear();
-                        practice_use("");
-                        toast(native::PracticeController::help(input_timeline.binds()), 6000);
-                    } else {
-                        reset();
+                if (action == "toggle" || action == "on" || action == "off") {
+                    const auto requested = action == "toggle" ? std::optional<bool>{} : action == "on";
+                    const auto change =
+                            native::PracticeMode::apply(practice, start_points, map_id, requested, practice_use, reset);
+                    using Change = native::PracticeMode::Change;
+                    if (change == Change::on) toast(native::PracticeController::help(input_timeline.binds()), 6000);
+                    if (change == Change::cleared_spawns) {
+                        json_writer.write(cache / "start-points.json", start_points.points);
+                        toast("Practice mode off. Practice spawns cleared. You're back at the start.");
+                    } else if (change == Change::off) {
                         toast("Practice mode off. You're back at the start.");
                     }
                     return;
@@ -802,6 +811,7 @@ int run(const native::Options &opt) {
         show_menu(true);
         if (menu && menu_ready) menu->evaluate_js("window.bunnyhopNativeMenu?.onLeaveMap?.()");
         map_download.cancel();
+        map_preparation.cancel();
         cancel_prefetch();
         pending_replay.clear();
         pending_action.clear();
@@ -867,7 +877,7 @@ int run(const native::Options &opt) {
                         const std::string &id,
                         const nlohmann::json &detail) {
         game.prepare_workers(path, content);
-        auto next = native::GameSession::prepare(path, content, settings, detail);
+        auto next = map_preparation.take(path, content, settings, detail);
         const auto &next_zones = next.zones;
         std::unique_ptr<native::Tutorial> next_tutorial;
         if (id == native::TutorialRunner::map_id)
@@ -875,7 +885,8 @@ int run(const native::Options &opt) {
         audio.set_classic_loader([content, cache]() {
             if (!content.empty()) native::download_classic_sounds(data_location::from_utf8(content), cache);
         });
-        auto next_renderer = std::make_unique<native::Renderer>(gl, next.core.get(), assets);
+        auto next_renderer = map_preparation.renderer ? std::move(map_preparation.renderer)
+                                                      : std::make_unique<native::Renderer>(gl, next.core.get(), assets);
         next_renderer->set_map_identity(id, detail.is_object() ? detail.value("sha256", std::string()) : std::string());
         game.install(std::move(next.core), std::move(next_renderer), practice, audio);
         // The pause screen shows this map itself, never the home tour.
@@ -918,6 +929,7 @@ int run(const native::Options &opt) {
         // A background still downloading gives way; one already on screen
         // stays until this map has loaded.
         if (backdrop) backdrop->cancel_loading();
+        map_preparation.cancel();
         map_download.start(id, cache, lock_cache);
     };
     auto apply_room_event = [&](const nlohmann::json &message) {
@@ -1588,6 +1600,12 @@ int run(const native::Options &opt) {
         if (window_dirty && Clock::now() >= window_save_due) save_window();
         video.poll_probe();
         const uint64_t mouse_pump_start = SDL_GetTicksNS();
+        if (input_backend.begin(
+                    prefs.input_backend, captured && focused && !chat.active && !viewer.active && !room.spectator_target
+            )) {
+            SDL_FlushEvent(SDL_EVENT_MOUSE_MOTION);
+        }
+        mouse_diagnostics.source(mouse_pump_start, input_backend.name(), input_backend.timestamp_kind());
         const double pump_tick_seconds = viewer.active ? viewer.session.range.tick_interval : dt;
         const uint64_t pump_tick_ns = uint64_t(std::llround(pump_tick_seconds * 1e9));
         auto pump_schedule = input_scheduler;
@@ -1598,7 +1616,7 @@ int run(const native::Options &opt) {
         );
         bool had_input_activity = false;
         SDL_Event event;
-        while (SDL_PollEvent(&event)) {
+        while (input_backend.poll(event)) {
             if (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
                 || event.type == SDL_EVENT_MOUSE_MOTION || event.type == SDL_EVENT_MOUSE_WHEEL
                 || event.type == SDL_EVENT_TEXT_INPUT)
@@ -1807,13 +1825,15 @@ int run(const native::Options &opt) {
                     break;
                 case SDL_EVENT_MOUSE_MOTION: {
                     const uint64_t received = SDL_GetTicksNS();
+                    const bool native_motion = input_backend.native_event();
+                    const bool trusted_stamp =
+                            native_motion || input_timeline.stamps().source(native::EventStamps::kMotion).trusted;
+                    const uint64_t motion_stamp = trusted_stamp ? event.motion.timestamp : received;
                     if (captured && focused && !chat.active && !viewer.active && !room.spectator_target) {
-                        recorder.diagnostics.motion(
-                                event.motion.timestamp, received, event.motion.xrel, event.motion.yrel
-                        );
+                        recorder.diagnostics.motion(motion_stamp, received, event.motion.xrel, event.motion.yrel);
                     }
                     if (mouse_diagnostics.active && captured && focused && !chat.active) {
-                        mouse_diagnostics.motion(event.motion.timestamp, received);
+                        mouse_diagnostics.motion(motion_stamp, received);
                     }
                     if (video_capture || director_job || video_encoder.busy()) {
                         viewer.controls.dragging = false;
@@ -1846,7 +1866,14 @@ int run(const native::Options &opt) {
                             viewer.camera.orbit(event.motion.xrel, event.motion.yrel);
                         else if (!viewer.active) {
                             const auto &motion = event.motion;
-                            input_timeline.motion(input, motion.timestamp, received, motion.xrel, motion.yrel);
+                            input_timeline.motion(
+                                    input,
+                                    motion.timestamp,
+                                    received,
+                                    motion.xrel,
+                                    motion.yrel,
+                                    input_backend.native_event()
+                            );
                         }
                     }
                     break;
@@ -2188,6 +2215,7 @@ int run(const native::Options &opt) {
                         const auto action = message.at("action").get<std::string>();
                         if (action == "cancel") {
                             map_download.cancel();
+                            map_preparation.cancel();
                             pending_replay.clear();
                             pending_action.clear();
                             pending_tutorial.clear();
@@ -2743,6 +2771,7 @@ int run(const native::Options &opt) {
         if (download.valid() && download.wait_for(std::chrono::seconds(0)) == std::future_status::ready
             && !map_preparing) {
             map_preparing = true;
+            map_preparation.start(download.get(), settings, gl, assets);
             nlohmann::json update;
             {
                 std::lock_guard lock(progress_mutex);
@@ -2752,11 +2781,11 @@ int run(const native::Options &opt) {
                 update = {{"loading", loading}, {"loadProgress", load_progress}, {"error", ""}};
             }
             if (menu && menu_ready) menu->evaluate_js("window.bunnyhopNativeMenu?.onState?.(" + update.dump() + ")");
-        } else if (download.valid() && map_preparing) {
+        } else if (map_preparing && map_preparation.poll(gl, assets)) {
             map_preparing = false;
             try {
-                auto result = download.get();
-                if (result.map)
+                auto &result = map_preparation.download;
+                if (result.map && result.error.empty())
                     load_map(
                             native::data_location::utf8(result.map->bsp),
                             native::data_location::utf8(result.map->content_root),
@@ -2768,6 +2797,7 @@ int run(const native::Options &opt) {
             } catch (const std::exception &e) {
                 error = e.what();
             }
+            map_preparation.cancel();
             if (!error.empty()) {
                 pending_replay.clear();
                 pending_action.clear();
@@ -3798,6 +3828,14 @@ int run(const native::Options &opt) {
                 const int sdl_version = SDL_GetVersion();
                 const nlohmann::json mouse_state = {
                         {"active", mouse_diagnostics.active},
+                        {"backend", input_backend.name()},
+                        {"timestampKind", input_backend.timestamp_kind()},
+                        {"fallbackReason", input_backend.fallback_reason()},
+                        {"motionRateHz", m.motion_rate_hz},
+                        {"timestampJitterMs", m.timestamp_jitter_ms},
+                        {"repeatedStamps", m.repeated_stamps},
+                        {"reversedStamps", m.reversed_stamps},
+                        {"droppedReports", input_backend.dropped()},
                         {"seconds", m.seconds},
                         {"eventsPerSecond", m.events_per_second},
                         {"events", m.events},

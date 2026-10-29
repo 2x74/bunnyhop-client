@@ -171,6 +171,7 @@ pub(super) enum KinKind {
     Motor(Motor),
     PropDoor(super::propdoor::PropDoor),
     RotButton(super::propdoor::RotButton),
+    Momentary(super::momentary::Momentary),
     Fall(Fall),
 }
 
@@ -357,7 +358,7 @@ const SF_DOOR_LOCKED: i64 = 2048;
 // ------------------------------------------------------------------ spawn
 
 impl Kin {
-    fn new(kind: KinKind) -> Self {
+    pub(super) fn new(kind: KinKind) -> Self {
         Self { push: Push { move_done: -1.0, fixangle: true, ..Push::default() }, kind }
     }
 }
@@ -1200,6 +1201,7 @@ impl Game {
             },
             KinKind::Motor(_) => self.motor_think(i),
             KinKind::PropDoor(_) => self.prop_door_anim_think(i),
+            KinKind::Momentary(_) => self.momentary_think(i),
             KinKind::RotButton(b) => {
                 if b.return_think {
                     self.rot_button_return(i);
@@ -1240,6 +1242,7 @@ impl Game {
             KinKind::Motor(_) => {}
             KinKind::PropDoor(_) => self.prop_door_move_done(i),
             KinKind::RotButton(_) => self.rot_button_move_done(i),
+            KinKind::Momentary(_) => self.momentary_move_done(i),
             KinKind::Fall(_) => {}
         }
     }
@@ -1302,7 +1305,7 @@ impl Game {
                     self.damage_player(dmg);
                 }
             }
-            KinKind::Motor(_) | KinKind::PropDoor(_) | KinKind::RotButton(_) | KinKind::Fall(_) => {}
+            KinKind::Motor(_) | KinKind::PropDoor(_) | KinKind::RotButton(_) | KinKind::Momentary(_) | KinKind::Fall(_) => {}
         }
     }
 
@@ -1521,6 +1524,7 @@ impl Game {
             KinKind::Motor(_) => false,
             KinKind::PropDoor(_) => self.prop_door_input(i, input, param, activator),
             KinKind::RotButton(_) => self.rot_button_input(i, input, activator),
+            KinKind::Momentary(_) => self.momentary_input(i, input, param),
             KinKind::Fall(f) => {
                 let active = match input {
                     // CPhysBox::InputEnableMotion / InputWake / InputDisableMotion / InputSleep.

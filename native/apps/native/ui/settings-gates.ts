@@ -291,6 +291,7 @@ export const NATIVE_GATES: Readonly<Record<string, Gate>> = {
   "updates/Native client/Ranked": menuOnly,
   "updates/Native client/What's new": menuOnly,
   "updates/Native client/Check automatically": menuOnly,
+  "mouse/Native input/Mouse backend": needs("inputBackend"),
   "mouse/Mouse diagnostics/Last sample": needs("mouseDiagnostics"),
   "graphics/Native renderer/Water": needs("waterQuality"),
   "graphics/Native renderer/World effects": needs("effectsVisible"),

@@ -1,13 +1,18 @@
 // Runs the website's own trackers and views from a git revision, without loading the game or network code.
 // Usage: bun tools/movement-hud/generate-vectors.ts --web /path/to/bunnyhop [--ref origin/main]
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { parseArgs } from "node:util";
 
 const { values } = parseArgs({
   args: Bun.argv.slice(2),
-  options: { web: { type: "string" }, ref: { type: "string", default: "origin/main" }, out: { type: "string" } },
+  options: {
+    vendored: { type: "boolean" },
+    web: { type: "string" },
+    ref: { type: "string", default: "origin/main" },
+    out: { type: "string" },
+  },
 });
 if (!values.web) throw new Error("Pass --web /path/to/bunnyhop");
 const web = resolve(values.web);
@@ -16,9 +21,9 @@ const output = resolve(values.out ?? resolve(import.meta.dir, "../../apps/native
 const mirror = resolve(import.meta.dir, "../../target/movement-hud-oracle");
 const hashes: Record<string, string> = {};
 function source(path: string): string {
-  const result = Bun.spawnSync(["git", "-C", web, "show", `${revision}:apps/web/src/${path}`]);
-  if (result.exitCode) throw new Error(result.stderr.toString());
-  const text = result.stdout.toString();
+  const result = values.vendored ? null : Bun.spawnSync(["git", "-C", web, "show", `${revision}:apps/web/src/${path}`]);
+  if (result?.exitCode) throw new Error(result.stderr.toString());
+  const text = result ? result.stdout.toString() : readFileSync(resolve(web, "apps/web/src", path), "utf8");
   hashes[path] = createHash("sha256").update(text).digest("hex");
   return text;
 }
@@ -436,7 +441,9 @@ const reports: Report[] = [0, -0.01, 59.99, 60, 70, 79.99, 80, 89.99, 90, 99.96,
   strafes: 1,
   time: 72.3455,
 }));
-const commit = Bun.spawnSync(["git", "-C", web, "rev-parse", revision]).stdout.toString().trim();
+const commit = values.vendored
+  ? JSON.parse(readFileSync(resolve(web, "upstream-manifest.json"), "utf8")).commit
+  : Bun.spawnSync(["git", "-C", web, "rev-parse", revision]).stdout.toString().trim();
 writeFileSync(
   output,
   Bun.gzipSync(

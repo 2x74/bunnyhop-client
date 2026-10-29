@@ -17,7 +17,7 @@ struct DownloadedMap {
 // Byte budgets for one map download. The defaults are the gameplay limits; the
 // menu backdrop passes smaller ones so a background never fetches a huge map.
 struct DownloadLimits {
-    size_t bsp = size_t(512) * 1024 * 1024;
+    size_t bsp = size_t(768) * 1024 * 1024;
     size_t content_file = size_t(256) * 1024 * 1024;
     size_t content_total = size_t(1024) * 1024 * 1024;
 };

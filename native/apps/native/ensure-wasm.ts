@@ -36,7 +36,7 @@ export async function ensureCanonicalWasm(path = defaultPath): Promise<string> {
     const built = await readFile(local).catch(() => null);
     if (!built || !valid(built)) {
       throw new Error(
-        "Unpublished v29 verifier missing. Run bun tools/build-upstream-wasm.ts " +
+        "Unpublished verifier missing. Run bun tools/build-upstream-wasm.ts " +
           "--upstream /path/to/upstream, then rerun the build. " +
           `Expected SHA-256 ${CANONICAL_WASM_SHA256}`,
       );

@@ -98,6 +98,7 @@ impl Map {
             .ok_or_else(|| format!("content unavailable: {path}"))
     }
     pub fn texture_path(&mut self, path: &str) -> Result<BhImage, String> {
+        if let Some(image) = self.take_prepared_texture(path) { return Ok(image); }
         self.texture.clear();
         let bytes = self.content(path)?;
         let payload = materials::texture_payload(&bytes, false, true)?;

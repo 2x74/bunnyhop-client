@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { exportMusic, OST, verifyMusicAssets } from "../src/export-music";
+import { bundledMusic, exportMusic, OST, verifyMusicAssets } from "../src/export-music";
 
 test("the pinned OST manifest keeps exact LF bytes in an autocrlf checkout", () => {
   const dir = mkdtempSync(join(tmpdir(), "bunnyhop-ost-checkout-"));
@@ -37,13 +37,14 @@ test("the pinned OST manifest keeps exact LF bytes in an autocrlf checkout", () 
   }
 });
 
-test("the complete production OST is copied, credited and verified offline", () => {
+test("the bundled OST stays complete when the web catalogue adds tracks", () => {
   const dir = mkdtempSync(join(tmpdir(), "bunnyhop-ost-"));
-  const catalog = JSON.parse(
+  const upstream = JSON.parse(
     readFileSync(new URL("../../web/src/assets/audio/manifest.json", import.meta.url), "utf8"),
   ).music;
+  const catalog = bundledMusic(upstream);
   try {
-    exportMusic(dir, catalog);
+    exportMusic(dir, upstream);
     writeFileSync(join(dir, "audio.json"), JSON.stringify({ music: catalog }));
     verifyMusicAssets(dir);
     expect(OST.tracks).toHaveLength(11);
