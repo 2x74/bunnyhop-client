@@ -109,19 +109,42 @@ inline const char *sky_vertex = R"(#version 330 core
 out vec2 ndc;void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);ndc=p*2.-1.;gl_Position=vec4(ndc,1,1);}
 )";
 
+// Face (s, t) is (dot(sAxis, ray), dot(tAxis, ray)) / dot(faceAxis, ray). Texture gradients come from the view ray,
+// which is smooth across the cube's edges: screen derivatives of (s, t) jump there and picked the smallest mip, which
+// drew every face edge as a seam line.
 inline std::string sky_fragment() {
     return std::string("#version 330 core\n") + water + R"(
 in vec2 ndc;uniform vec3 forward,right,up;uniform float aspect,cot,skyExposure;
 uniform sampler2D sky0,sky1,sky2,sky3,sky4,sky5;
 uniform int skyPresent[6],skyHalf[6];out vec4 color;
-void main(){vec3 d=normalize(forward+right*ndc.x*aspect/cot+up*ndc.y/cot),a=abs(d);int f;vec2 st;
- if(a.x>=a.y&&a.x>=a.z){if(d.x>0.){f=0;st=vec2(-d.y,d.z)/a.x;}else{f=1;st=vec2(d.y,d.z)/a.x;}}
- else if(a.y>=a.z){if(d.y>0.){f=2;st=vec2(d.x,d.z)/a.y;}else{f=3;st=vec2(-d.x,d.z)/a.y;}}
- else{if(d.z>0.){f=4;st=vec2(-d.y,-d.x)/a.z;}else{f=5;st=vec2(-d.y,d.x)/a.z;}}
- vec3 c;vec2 uv=vec2((st.x+1.)*.5,skyHalf[f]!=0?1.-st.y:(1.-st.y)*.5);
- if(skyPresent[f]!=0){if(f==0)c=texture(sky0,uv).rgb;else if(f==1)c=texture(sky1,uv).rgb;else if(f==2)c=texture(sky2,uv).rgb;else if(f==3)c=texture(sky3,uv).rgb;else if(f==4)c=texture(sky4,uv).rgb;else c=texture(sky5,uv).rgb;}
- else{c=d.z>0.?mix(linearize(vec3(.788,.863,.925)),linearize(vec3(.247,.435,.710)),pow(d.z,.55)):mix(linearize(vec3(.788,.863,.925)),linearize(vec3(.49,.541,.588)),pow(min(-d.z*3.,1.),.7));float sun=max(dot(d,normalize(vec3(.45,.6,.35))),0.);c+=vec3(1,.92,.75)*(pow(sun,600.)*1.5+pow(sun,12.)*.18);}
- color=vec4(waterFog(encode(c*exp2(skyExposure)),cameraPosition+d*1e5),1);
+vec3 skyTexture(int f,vec2 uv,vec2 dx,vec2 dy){
+ if(f==0)return textureGrad(sky0,uv,dx,dy).rgb;
+ if(f==1)return textureGrad(sky1,uv,dx,dy).rgb;
+ if(f==2)return textureGrad(sky2,uv,dx,dy).rgb;
+ if(f==3)return textureGrad(sky3,uv,dx,dy).rgb;
+ if(f==4)return textureGrad(sky4,uv,dx,dy).rgb;
+ return textureGrad(sky5,uv,dx,dy).rgb;
+}
+vec2 faceGradient(vec3 sAxis,vec3 tAxis,vec3 faceAxis,vec3 ray,vec3 step,vec2 st){
+ return (vec2(dot(sAxis,step),dot(tAxis,step))-st*dot(faceAxis,step))/dot(faceAxis,ray);
+}
+vec3 faceColor(vec3 ray){
+ vec3 a=abs(ray),sAxis,tAxis,faceAxis;int f;
+ if(a.x>=a.y&&a.x>=a.z){f=ray.x>0.?0:1;faceAxis=vec3(sign(ray.x),0,0);sAxis=vec3(0,-faceAxis.x,0);tAxis=vec3(0,0,1);}
+ else if(a.y>=a.z){f=ray.y>0.?2:3;faceAxis=vec3(0,sign(ray.y),0);sAxis=vec3(faceAxis.y,0,0);tAxis=vec3(0,0,1);}
+ else{f=ray.z>0.?4:5;faceAxis=vec3(0,0,sign(ray.z));sAxis=vec3(0,-1,0);tAxis=vec3(-faceAxis.z,0,0);}
+ vec2 st=vec2(dot(sAxis,ray),dot(tAxis,ray))/dot(faceAxis,ray);
+ vec2 dx=faceGradient(sAxis,tAxis,faceAxis,ray,dFdx(ray),st),dy=faceGradient(sAxis,tAxis,faceAxis,ray,dFdy(ray),st);
+ vec2 scale=vec2(.5,skyHalf[f]!=0?-1.:-.5);
+ vec2 uv=vec2((st.x+1.)*.5,skyHalf[f]!=0?1.-st.y:(1.-st.y)*.5);
+ if(skyPresent[f]!=0)return skyTexture(f,uv,dx*scale,dy*scale);
+ vec3 d=normalize(ray);
+ vec3 c=d.z>0.?mix(linearize(vec3(.788,.863,.925)),linearize(vec3(.247,.435,.710)),pow(d.z,.55)):mix(linearize(vec3(.788,.863,.925)),linearize(vec3(.49,.541,.588)),pow(min(-d.z*3.,1.),.7));
+ float sun=max(dot(d,normalize(vec3(.45,.6,.35))),0.);
+ return c+vec3(1,.92,.75)*(pow(sun,600.)*1.5+pow(sun,12.)*.18);
+}
+void main(){vec3 ray=forward+right*ndc.x*aspect/cot+up*ndc.y/cot;vec3 c=faceColor(ray);
+ color=vec4(waterFog(encode(c*exp2(skyExposure)),cameraPosition+normalize(ray)*1e5),1);
 }
 )";
 }
