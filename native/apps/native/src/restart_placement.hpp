@@ -59,7 +59,7 @@ struct RestartPlacement {
         }
         if (points) {
             if (const auto point = points->get(map, track)) {
-                result.custom(core, *point, zones, track, names);
+                result.custom(core, map, *point, zones, track, names);
             }
         }
         return result;
@@ -67,27 +67,21 @@ struct RestartPlacement {
 
     void
     custom(BhContext *core,
+           const std::string &map,
            const StartPoint &point,
            const std::vector<BhZone> &zones,
            uint32_t track,
            const std::optional<RestartNames> &names) {
-        const BhState fallback = state;
         if (bh_set_position(core, point.position[0], point.position[1], point.position[2], point.yaw)
             && bh_state(core, &state) && start_point_landed(state, point)) {
             pitch = point.pitch;
             practice = start_point_practice(point, state, zones, track);
             apply_names(core, practice ? std::nullopt : names);
         } else {
-            check(core,
-                  bh_set_position(
-                          core,
-                          fallback.position[0],
-                          fallback.position[1],
-                          fallback.position[2],
-                          fallback.teleport_angles[1]
-                  ));
-            if (names) apply_names(core, names);
-            check(core, bh_state(core, &state));
+            // A map spawn can overlap the start zone while its centre lies outside
+            // it. Re-applying that spawn would record an invalid restart override.
+            check(core, bh_reset(core));
+            *this = place(core, map, track, zones, nullptr);
         }
     }
 };

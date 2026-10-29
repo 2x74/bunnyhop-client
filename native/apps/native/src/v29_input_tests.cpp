@@ -497,10 +497,42 @@ void test_bonus_takeover_uses_normal_style() {
     assert(takeover.track == 1 && takeover.style == "autohop");
 }
 
+void test_invalid_start_point_preserves_default_spawn() {
+    Fixture fixture;
+    fixture.zones[0] = {0, 0, 0, {-100, -100, 64}, {5, 100, 200}};
+    BhRunOptions options{};
+    bh_default_run_options(&options);
+    check(bh_run_configure(fixture.core.get(), &options, fixture.zones.data(), fixture.zones.size()),
+          fixture.core.get());
+    check(bh_reset(fixture.core.get()), fixture.core.get());
+    BhState spawn{};
+    check(bh_state(fixture.core.get(), &spawn), fixture.core.get());
+    native::StartPoints points;
+    BhState obstructed = spawn;
+    obstructed.position[2] = 32;
+    points.save("fixture", 0, obstructed, 90, 20);
+    const auto restart = native::RestartPlacement::place(
+            fixture.core.get(), "fixture", 0, std::vector<BhZone>(fixture.zones.begin(), fixture.zones.end()), &points
+    );
+    assert(!restart.practice && !restart.pitch);
+    for (size_t axis = 0; axis < 3; ++axis) {
+        assert(restart.state.position[axis] == spawn.position[axis]);
+    }
+    const auto evidence = fixture.directory / "fallback.jsonl";
+    check(bh_record_begin(fixture.core.get(), native::data_location::utf8(evidence).c_str(), "autohop", "test", 100),
+          fixture.core.get());
+    check(bh_record_end(fixture.core.get()), fixture.core.get());
+    std::ifstream input(evidence);
+    Json header;
+    input >> header;
+    assert(header.at("spawn").is_null());
+}
+
 }  // namespace
 
 int main() {
     test_restart_placement_and_recorded_names();
+    test_invalid_start_point_preserves_default_spawn();
     test_replay_library_cache();
     test_recording_options_roundtrip();
     test_turn_settings_validation();
