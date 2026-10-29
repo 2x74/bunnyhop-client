@@ -136,6 +136,7 @@ class NativeViewmodel {
         int inspectIndex = -1;
         unsigned inspectLoops = 0;
         native_render::AccessoryMotion accessory;
+        native_render::PonytailMotion ponytail;
     };
 
     std::unordered_map<std::string, ActorAction> actorActions;
@@ -456,6 +457,9 @@ class NativeViewmodel {
                 std::hypot(actor.frame.velocity[0], actor.frame.velocity[1]),
                 bool(actor.frame.flags & 2),
                 actor.snapped
+        );
+        native_render::advance_ponytail(
+                state.ponytail, actor.frame.velocity, actor.frame.yaw, dt, actor.snapped || dt <= 0, look.hairLength
         );
         gl.ActiveTexture(GL_TEXTURE0);
         gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
@@ -1043,6 +1047,9 @@ public:
         const float capy[4] = {motion.alert, motion.squash, motion.lean, float(seconds)};
         gl.Uniform4fv(actorProgram.capybara, 1, capy);
         gl.Uniform1f(actorProgram.propellerAngle, float(motion.angle));
+        const auto &tail = actorActions[actor.id].ponytail;
+        const float ponytail[4] = {float(tail.pitch), float(tail.side), l.hairLength, 0};
+        gl.Uniform4fv(actorProgram.ponytail, 1, ponytail);
         if (source != native_render::GhostSource::none) ghost_uniforms(actorProgram, actor, source);
         const auto visibleParts = parts_for(actor, l);
         gl.Enable(GL_DEPTH_TEST);
