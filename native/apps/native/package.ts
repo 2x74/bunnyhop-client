@@ -381,6 +381,7 @@ if (import.meta.main) {
       "tp-inspects.json",
       "runner.json",
       "runner.bin",
+      "avatar.json",
     ]) {
       if (!existsSync(join(assets, file))) throw new Error(`Required hosted actor animation asset missing: ${file}`);
     }

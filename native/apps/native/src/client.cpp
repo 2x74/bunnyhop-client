@@ -24,6 +24,7 @@
 #include "replay_player.hpp"
 #include "menu_backdrop.hpp"
 #include "loadout_preview.hpp"
+#include "avatar_service.hpp"
 #include "menu_gamepad.hpp"
 #include "hud.hpp"
 #include "hud_frame.hpp"
@@ -161,6 +162,7 @@ int run(const native::Options &opt) {
     native::MenuGamepad menu_gamepad;
     std::unique_ptr<NativeLoadoutPreview> loadout_preview;
     std::optional<nlohmann::json> preview_request;
+    native::avatar::AvatarService avatar_service(gl, assets);
     native::NativeHud::Layout hud_layout;
     // Resolved before the audio device so the custom sound/ and bgm/ folders
     // are known at the point the packs are first applied.
@@ -1955,6 +1957,14 @@ int run(const native::Options &opt) {
                         if (menu->visible() && raw.size() <= 8192) preview_request = std::move(message);
                         continue;
                     }
+                    if (type == "avatarRender") {
+                        avatar_service.request(message);
+                        continue;
+                    }
+                    if (type == "avatarClose") {
+                        avatar_service.close();
+                        continue;
+                    }
                     if (type == "practiceFromReplay" && (video_capture || director_job || video_encoder.busy())) {
                         menu->evaluate_js(
                                 "window.bunnyhopNativeMenu?.onPracticeFromReplayResult?.("
@@ -2798,6 +2808,9 @@ int run(const native::Options &opt) {
                 };
                 menu->evaluate_js("window.bunnyhopNativeLoadoutPreview?.(" + result.dump() + ")");
             }
+            if (menu->visible()) avatar_service.frame();
+            for (const auto &reply : avatar_service.take_replies())
+                menu->evaluate_js(reply);
         }
         const auto now = Clock::now();
         const uint64_t now_ns = SDL_GetTicksNS();

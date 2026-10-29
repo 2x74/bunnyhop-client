@@ -67,7 +67,7 @@ class NativeViewmodel {
     struct ActorParts {
         std::string id, outfit, loadout;
         uint32_t weapon = 0;
-        bool silenced = false, used = false;
+        bool silenced = false, emptyHand = false, used = false;
         std::array<std::string, 5> names;
         size_t count = 0;
     };
@@ -84,7 +84,8 @@ class NativeViewmodel {
             }
         }
         if (parts && parts->outfit == actor.outfit && parts->loadout == actor.loadout
-            && parts->weapon == actor.frame.weapon && parts->silenced == actor.silenced) {
+            && parts->weapon == actor.frame.weapon && parts->silenced == actor.silenced
+            && parts->emptyHand == actor.emptyHand) {
             return {parts->names.data(), parts->count};
         }
         if (!parts) parts = &actorParts[nextActorParts++ % actorParts.size()];
@@ -94,6 +95,7 @@ class NativeViewmodel {
         parts->loadout = actor.loadout;
         parts->weapon = actor.frame.weapon;
         parts->silenced = actor.silenced;
+        parts->emptyHand = actor.emptyHand;
         parts->count = 0;
         const std::string body = look.outfit == "outfit-tek"     ? "tek"
                                  : look.outfit == "outfit-plush" ? "plush"
@@ -104,6 +106,7 @@ class NativeViewmodel {
         if (look.crown && look.hat.empty()) parts->names[parts->count++] = "crown:" + std::to_string(look.crown);
         if (!look.hat.empty()) parts->names[parts->count++] = look.hat;
         const auto &gun = weapons[std::min(size_t(actor.frame.weapon), weapons.size() - 1)];
+        if (actor.emptyHand) return {parts->names.data(), parts->count};
         parts->names[parts->count++] = gun.empty() || gun == "knife" ? "tpknife:" + look.knife : "tpgun:" + gun;
         if (actor.silenced && !gun.empty() && gun != "knife") parts->names[parts->count++] = "tpsilencer:" + gun;
         return {parts->names.data(), parts->count};
@@ -865,12 +868,69 @@ public:
             float squash = 0,
             float spin = 0
     ) {
-        if (!std::isfinite(actor.opacity) || actor.opacity <= 0) return;
+        const float actorYaw = pose_actor(actor, seconds, acting);
+        if (std::isfinite(actorYaw)) draw_posed_actor(actor, projection, eye, seconds, actorYaw, squash, spin);
+    }
+
+    // Avatar pictures (avatar_stage.hpp): what a posed actor is made of, for framing it.
+    static constexpr size_t vertex_floats = 22;
+
+    std::span<const std::string> actor_parts(const native_render::Actor &actor) {
+        return parts_for(actor, look(actor.outfit, actor.loadout));
+    }
+
+    // A mesh's vertices, `vertex_floats` each: position, normal, colour, then four bone ids. Empty when absent.
+    std::span<const float> mesh_vertices(const std::string &name) const {
+        const auto at = meshes.find(name);
+        if (at == meshes.end()) return {};
+        return {data.data() + at->second.offset, at->second.vertices * vertex_floats};
+    }
+
+    native_render::HatFit actor_hat_fit(const native_render::Actor &actor) {
+        const auto &l = look(actor.outfit, actor.loadout);
+        return native_render::hat_fit(l.outfit, l.hat);
+    }
+
+    const std::vector<float> &actor_pose() const { return pose; }
+
+    void upload_actor_pose(const std::vector<float> &bones) {
+        pose = bones;
+        gl.ActiveTexture(GL_TEXTURE0);
+        gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
+        gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 3, GLsizei(pose.size() / 12), 0, GL_RGBA, GL_FLOAT, pose.data());
+    }
+
+    int actor_bone(const std::string &name) const {
+        const auto at = std::find(actorNames.begin(), actorNames.end(), name);
+        return at == actorNames.end() ? -1 : int(at - actorNames.begin());
+    }
+
+    std::span<const float> actor_bind() const { return actorBind; }
+
+    // Drops an actor's animation and gesture state, so its next pose starts from scratch.
+    void forget_actor(const std::string &id) {
+        actorAnimationStates.erase(id);
+        actorActions.erase(id);
+    }
+
+    // The weapon slot that holds gun `id` ("usp", "awp"), or 0.
+    uint32_t gun_slot(const std::string &id) const {
+        for (size_t slot = 2; slot < weapons.size(); ++slot)
+            if (weapons[slot] == id) return uint32_t(slot);
+        return 0;
+    }
+
+    // Poses `actor` at `seconds` and uploads its bones without drawing it (avatar_stage.hpp steps a pose this way).
+    // Returns the feet's yaw, or NaN when the actor can't be drawn.
+    float
+    pose_actor(const native_render::Actor &actor, double seconds, const native_actor_anim::Acting *acting = nullptr) {
+        constexpr float not_posed = std::numeric_limits<float>::quiet_NaN();
+        if (!std::isfinite(actor.opacity) || actor.opacity <= 0) return not_posed;
         for (float v : actor.frame.position)
-            if (!std::isfinite(v)) return;
+            if (!std::isfinite(v)) return not_posed;
         for (float v : actor.frame.velocity)
-            if (!std::isfinite(v)) return;
-        if (!std::isfinite(actor.frame.yaw) || !std::isfinite(actor.frame.pitch)) return;
+            if (!std::isfinite(v)) return not_posed;
+        if (!std::isfinite(actor.frame.yaw) || !std::isfinite(actor.frame.pitch)) return not_posed;
         const auto &l = look(actor.outfit, actor.loadout);
         const auto &frame = actor.frame;
         float actorYaw = frame.yaw;
@@ -883,7 +943,7 @@ public:
                                                           : "idle";
             const double phase = seconds * (gait == "run" ? std::clamp(speed / 250.f, .1f, 3.f) : 1);
             const auto *c = clip(entry, gait + ":0");
-            if (!c) return;
+            if (!c) return not_posed;
             sample(entry, *c, phase, true);
             if (std::isfinite(frame.pitch) && std::abs(frame.pitch) > .01) {
                 basePose = pose;
@@ -910,6 +970,21 @@ public:
             }
             actor_actions(actor, l, seconds);
         }
+        return actorYaw;
+    }
+
+    // Draws `actor` in the pose the last pose_actor call uploaded.
+    void draw_posed_actor(
+            const native_render::Actor &actor,
+            const native::Matrix &projection,
+            const float eye[3],
+            double seconds,
+            float actorYaw,
+            float squash = 0,
+            float spin = 0
+    ) {
+        const auto &l = look(actor.outfit, actor.loadout);
+        const auto &frame = actor.frame;
         BhTransform t{};
         std::copy(frame.position, frame.position + 3, t.origin);
         t.angles[1] = actorYaw + spin;
