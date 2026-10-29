@@ -370,9 +370,10 @@ class Renderer {
         return hdr.get();
     }
 
-    bool toolsVisible = true, paintHeld = false;
+    static constexpr double paint_second_ns = 1'000'000'000;
+    bool toolsVisible = true, paintHeld = false, paintVisible = true;
+    std::string paintHeldCode;
     std::string measureLabel;
-    double lastPaintSeconds = -1;
     native_render::SurfaceToolBindings toolBindings;
     native_render::Paint paint;
     native_render::Measure measure;
@@ -1057,10 +1058,8 @@ class Renderer {
             }
         }
         draw_ghost_route(vp);
-        if (toolsVisible) {
-            paint.draw(core, *presentation);
-            measure.draw(core, *presentation, eye);
-        }
+        if (paintVisible) paint.draw(core, *presentation);
+        if (toolsVisible) measure.draw(core, *presentation, eye);
         // Overlay kinds follow crates/core/src/game/overlay.rs: 0-3 are triggers
         // (!showtriggers), 4 player clips and 5 invisible walls (!showclips).
         if (triggersVisible || clipsVisible) {
@@ -1173,6 +1172,8 @@ public:
             measure.clear();
             return "Measurement cleared.";
         }
+        const bool painting = action == "paint" || action == "paintOnce";
+        if (painting && !paint.request(double(SDL_GetTicksNS()) / paint_second_ns, held)) return "Paint mark skipped.";
         const native_render::Vec3 eye = {state.position[0], state.position[1], state.position[2] + state.view_offset_z};
         const auto hit = native_render::pick_surface(core, eye, input.yaw(), input.pitch);
         if (!hit) return "No surface in range. Aim at a nearby wall or floor.";
@@ -1180,34 +1181,54 @@ public:
             measure.pick(core, *hit);
             return measure.text(core);
         }
-        return paint.stamp(core, *hit, double(SDL_GetTicksNS()) / 1e9, held) ? "Paint mark placed."
-                                                                             : "Paint mark skipped.";
+        return paint.stamp(core, *hit, held) ? "Paint mark placed." : "Paint mark skipped.";
     }
 
-    const char *
-    tool_key(std::string_view code, bool down, bool repeat, const BhState &state, const native::Input &input) {
+    const char *tool_key(
+            std::string_view code,
+            bool down,
+            bool repeat,
+            const BhState &state,
+            const native::Input &input,
+            bool can_paint
+    ) {
+        if (!down && code == paintHeldCode) {
+            paintHeld = false;
+            paintHeldCode.clear();
+        }
         const int action = toolBindings.match(code);
         if (action < 0) return nullptr;
-        if (action == 0) paintHeld = down;
+        if (action < 2 && !can_paint) {
+            paintHeld = false;
+            return nullptr;
+        }
+        if (action == 0 && down && !repeat) {
+            paintHeld = true;
+            paintHeldCode = code;
+        }
         if (!down || repeat) return nullptr;
         return surface_tool(native_render::SurfaceToolBindings::actions[size_t(action)], state, input);
     }
 
-    void surface_tools_frame(const BhState &state, const native::Input &input, bool active, double seconds) {
+    void surface_tools_frame(const BhState &state, const native::Input &input, bool active, bool spectating) {
+        paintVisible = !spectating;
         if (!active) {
             paintHeld = false;
+            paintHeldCode.clear();
             return;
         }
-        constexpr double paintInterval = .1;
-        if (paintHeld && seconds - lastPaintSeconds >= paintInterval) {
-            lastPaintSeconds = seconds;
+        const double seconds = double(SDL_GetTicksNS()) / paint_second_ns;
+        if (paintHeld && paint.ready(seconds, true)) {
             surface_tool("paint", state, input, true);
         }
     }
 
-    std::string tool_message(const nlohmann::json &message, const BhState &state, const native::Input &input) {
+    std::string
+    tool_message(const nlohmann::json &message, const BhState &state, const native::Input &input, bool can_paint) {
         const auto type = message.at("type").get<std::string>();
         const auto action = message.at("action").get<std::string>();
+        if (type == "paint" && action != "clear" && !can_paint)
+            return "Paint is unavailable while spectating or watching a replay.";
         if (action != "clear" && action != (type == "paint" ? "stamp" : "point")) {
             throw std::runtime_error("Unknown surface tool action");
         }
@@ -1618,7 +1639,6 @@ public:
         }
         paint.settings(settings);
         toolBindings.read(settings);
-        paintHeld = false;
         toolsVisible = settings.value("hud", true);
         hdr_pass();
         if (graphics.target_needed() && !graphicsTarget)

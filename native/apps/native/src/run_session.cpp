@@ -49,6 +49,7 @@ void RunHeartbeat::sent(std::chrono::steady_clock::time_point now) {
 }
 
 void RunRecorder::clear(bool recording_ended) {
+    diagnostics.reset();
     ended = recording_ended;
     path.clear();
     pending_capture.reset();
@@ -79,11 +80,19 @@ void RunRecorder::write(BhContext *core) {
     require(bh_record_write_bhr(core, path.c_str()), core, "Writing native replay");
 }
 
-nlohmann::json RunRecorder::finish_event(uint32_t track, double seconds, const std::string &bytes) const {
+nlohmann::json RunRecorder::finish_event(
+        uint32_t track,
+        double seconds,
+        const std::string &bytes,
+        const nlohmann::json &play,
+        const nlohmann::json &mouse
+) const {
     return {{"type", "finish"},
             {"track", track},
             {"timeMs", score_ms(seconds)},
             {"timingPolicy", timing_policy},
+            {"diagnostics", diagnostics.serialize(play)},
+            {"mouse", mouse},
             {"replayBase64", base64(bytes)}};
 }
 
