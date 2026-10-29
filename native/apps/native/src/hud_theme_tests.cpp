@@ -11,6 +11,7 @@
 #include <iostream>
 #include <filesystem>
 #include <fstream>
+#include <vector>
 
 #include <cstdlib>
 #include <new>
@@ -45,7 +46,8 @@ struct NoAllocations {
 };
 
 struct DrawProbe {
-    std::array<native::HudLabel<512>, 256> labels;
+    // On the heap: several probes share one test function, and Windows gives the main thread a 1 MB stack.
+    std::vector<native::HudLabel<512>> labels = std::vector<native::HudLabel<512>>(256);
     size_t texts = 0;
     size_t rects = 0;
     size_t flags = 0;

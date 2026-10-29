@@ -7,6 +7,7 @@
 #include <string_view>
 #include <stdexcept>
 #include <system_error>
+#include <thread>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -15,8 +16,18 @@ namespace native {
 
 inline void atomic_replace(const std::filesystem::path &source, const std::filesystem::path &destination) {
 #ifdef _WIN32
-    if (!MoveFileExW(source.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        throw std::system_error(int(GetLastError()), std::system_category(), "Replacing file");
+    // Windows refuses to replace a file while another save, an antivirus scan or the indexer briefly holds it.
+    // Those holds clear within milliseconds, so retry before reporting a failure.
+    constexpr int replace_attempts = 40;
+    constexpr auto replace_retry_delay = std::chrono::milliseconds(5);
+    for (int attempt = 1;; ++attempt) {
+        if (MoveFileExW(source.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+            return;
+        const DWORD error = GetLastError();
+        const bool held = error == ERROR_ACCESS_DENIED || error == ERROR_SHARING_VIOLATION;
+        if (!held || attempt == replace_attempts)
+            throw std::system_error(int(error), std::system_category(), "Replacing file");
+        std::this_thread::sleep_for(replace_retry_delay);
     }
 #else
     std::filesystem::rename(source, destination);

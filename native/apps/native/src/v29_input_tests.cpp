@@ -139,7 +139,12 @@ struct Fixture {
 };
 
 std::vector<uint8_t> decompress(const std::filesystem::path &path) {
-    gzFile file = gzopen(native::data_location::utf8(path).c_str(), "rb");
+#ifdef _WIN32
+    // gzopen reads a narrow path in the ANSI code page; the wide version keeps non-ASCII folders working.
+    gzFile file = gzopen_w(path.c_str(), "rb");
+#else
+    gzFile file = gzopen(path.c_str(), "rb");
+#endif
     assert(file);
     std::vector<uint8_t> result;
     std::array<uint8_t, 4096> buffer{};
