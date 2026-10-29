@@ -122,6 +122,42 @@ apps/native/build/bunnyhop-native --map /path/to/map.bsp --hidden --frames 30 --
 apps/native/build/bunnyhop-native --map /path/to/map.bsp --no-menu --hidden --presentation-smoke /tmp/hud
 ```
 
+Profile a full offline gameplay workload without capturing the mouse or opening a menu:
+
+```sh
+# Run from native/. Build with CMake or the regular build above.
+apps/native/build/bunnyhop-native-gameplay-benchmark /path/to/spec.json
+```
+
+The spec is JSON, for example:
+
+```json
+{
+  "path": "/path/to/bhop_neonlaser.bsp",
+  "out": "target/gameplay-profile.json",
+  "width": 1920,
+  "height": 1080,
+  "eye": [-8480, 32, 96],
+  "yaw": 0,
+  "frames": 3000,
+  "warmup": 300,
+  "mouseHz": 2000,
+  "ghosts": 3,
+  "fpsLimit": 0,
+  "vsync": false,
+  "limitQueuedFrames": true
+}
+```
+
+Use a camera inside the supplied map; omit `eye` and `yaw` to use its spawn. Optional `contentRoot` supplies loose
+Source assets. The report includes p50/p99/max/mean milliseconds and reciprocal mean FPS for each phase, frame
+samples, renderer counters, rasterizations, GPU/driver and SDL version. Warmup frames are excluded. Pump time
+includes synthetic input and per-report diagnostics; simulation includes recording; feedback includes SSJ and the
+trainer. The HUD, chat, 12-player scoreboard, three cached ghost fixtures, frame diagnostics, swap and GPU fence
+are active. Rendering uses Source look, simple water and no MSAA. `ordinarySleep: true` compares the old sleep
+method when capped. No menu, audio or network is created, and no replay is saved or submitted. Hidden-window swap
+measures throughput and pacing; a real display and mouse are needed for input latency and focus checks.
+
 Check the recorder against the shared verifier with an offline fixture. It never posts to the live server:
 
 ```sh
