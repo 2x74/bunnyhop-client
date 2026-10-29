@@ -11,3 +11,24 @@
 }
 /* Settings → Paint: the paint keys, as keycaps in a row. */
 .native-paint-keys { display: flex; gap: 0.35rem; flex-wrap: wrap; justify-content: flex-end; }
+
+/* The native client's own settings look (v0.5.1): the search box over a plain rail of sections, the tools in one quiet
+   line to the right, plain sliders without notches. The rows and controls are the website's. */
+/* Wide windows only: under 52rem the website's screen puts the rail across the top, and that stays. */
+@media (min-width: 52.01rem) {
+  .native-menu .settings { grid-template-columns: 11rem minmax(0, 1fr); gap: 0.75rem 1.5rem; }
+  .native-menu .settings .set-top { display: contents; }
+  .native-menu .settings .set-search { grid-column: 1; grid-row: 1; }
+  .native-menu .settings .set-actions { grid-column: 2; grid-row: 1; justify-self: end; }
+}
+.native-menu .settings .set-q { padding: 0.5rem 2.2rem 0.5rem 0.75rem; border: 1px solid var(--line); background: var(--raise); }
+.native-menu .settings .set-q:focus { outline: none; border-color: var(--amber); background: var(--raise-2); }
+.native-menu .settings .set-q-icon,
+.native-menu .settings .set-q-kbd { display: none; }
+.native-menu .settings .set-q-count { right: 2.2rem; }
+.native-menu .settings .set-rail-icon { display: none; }
+.native-menu .settings .set-rail-item { gap: 0; }
+.native-menu .settings .set-act { color: var(--dim); }
+.native-menu .settings .set-act:hover { color: var(--text); }
+/* The notches come from an inline --tk (controls.ts rangeTicks), so only an important rule moves them off the track. */
+.native-menu .settings input[type="range"] { --tk: 100 !important; --tk0: -9 !important; }

@@ -54,6 +54,9 @@ export function settingsPanel(initialSection?: string): HTMLElement {
   install();
   if (initialSection) sessionStorage.setItem(LAST_SECTION, sectionId(initialSection));
   const panel = webSettingsPanel();
+  // The search box sits over the rail here (settings-native.css): a short placeholder fits it.
+  const search = panel.querySelector<HTMLInputElement>("input.set-q");
+  if (search) search.placeholder = "Search settings";
   watchClose(panel);
   return panel;
 }
