@@ -50,11 +50,13 @@ int main() {
     assert(prefs["binds"]["cpPrev"].empty() && prefs["binds"]["cpNext"].empty() && prefs["binds"]["mainMenu"].empty());
     for (float percent : {50.f, 100.f, 175.f}) {
         const native::HudGeometry g(1280, 720, percent);
-        assert(std::abs(g.scale - .8f * percent / 100) < 1e-6f);
+        // 720 px tall holds 800 HUD units at most, so past 112.5% the HUD stops growing instead of overlapping.
+        const float expected = std::min(.8f * percent / 100, 720.f / native::hud_min_height_units);
+        assert(std::abs(g.scale - expected) < 1e-6f);
+        assert(g.height >= native::hud_min_height_units - .001f && g.width >= native::hud_min_width_units - .001f);
         // The centre remains fixed; default bottom spacing and glyph/key gaps all scale together.
         assert(std::abs(g.width * .5f * g.scale - 640) < .001f);
         assert(std::abs((g.height - 154) * g.scale - (720 - 154 * g.scale)) < .001f);
-        assert(std::abs(4 * g.scale / (.8f * percent / 100) - 4) < 1e-6f);
         auto patch = native::patch_settings(prefs, {{"hudScale", int(percent)}});
         assert(patch["hudScale"] == int(percent));
     }

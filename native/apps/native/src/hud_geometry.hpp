@@ -52,16 +52,27 @@ private:
     size_t count_ = 0;
 };
 
+// HUD units are 1/900 of the screen height at 100% (never under .6 px), so the built-in places are the same
+// fraction of the screen at any size. The HUD scale grows them only while the screen still holds the whole layout:
+// past that the elements would overlap, so the scale stops there.
+inline constexpr float hud_reference_height_units = 900;
+inline constexpr float hud_smallest_unit_px = .6f;
+inline constexpr float hud_min_width_units = 1060;
+inline constexpr float hud_min_height_units = 800;
+
+inline float hud_scale(int width_px, int height_px, float percent) {
+    const float wanted = std::clamp(std::isfinite(percent) ? percent : 100.f, 50.f, 175.f) / 100.f;
+    const float base = std::max(hud_smallest_unit_px, float(height_px) / hud_reference_height_units);
+    const float fits = std::min(float(width_px) / hud_min_width_units, float(height_px) / hud_min_height_units);
+    return std::min(base * wanted, fits);
+}
+
 struct HudGeometry {
     float scale;
     float width;
     float height;
 
-    HudGeometry(int w, int h, float percent)
-        : scale(std::max(.6f, float(h) / 900.f) * std::clamp(std::isfinite(percent) ? percent : 100.f, 50.f, 175.f)
-                / 100.f)
-        , width(w / scale)
-        , height(h / scale) {}
+    HudGeometry(int w, int h, float percent) : scale(hud_scale(w, h, percent)), width(w / scale), height(h / scale) {}
 };
 
 struct HudRect {
@@ -78,6 +89,8 @@ struct HudPlace {
     float x = 0;
     float y = 0;
     float scale = 1;
+    // False while the element sits at the native HUD's own place: only its visibility and scale come from here.
+    bool placed = true;
 
     HudRect rect(float viewport_width, float viewport_height, float element_width, float element_height) const {
         const float horizontal = float(anchor % 3) / 2;

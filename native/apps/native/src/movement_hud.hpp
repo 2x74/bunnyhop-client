@@ -1,5 +1,6 @@
 #pragma once
 #include "hud_scoreboard.hpp"
+#include "hud_layout.hpp"
 #include "longjump.hpp"
 #include "jump_hud.hpp"
 #include "native_input.hpp"
@@ -88,22 +89,7 @@ struct HudPreferences {
 
     static HudPreferences from(const Json &settings) {
         HudPreferences result;
-        for (const char *key : {"hudLayoutWeb", "hudLayout"}) {
-            for (const auto &[id, value] : settings.at(key).items()) {
-                const size_t index = hud_index(id);
-                HudPlace place = result.layout[index].value_or(HudPlace{});
-                const bool anchored = value.contains("a");
-                if (value.contains("x") && value.contains("y")) {
-                    place.anchored = anchored;
-                    place.anchor = value.value("a", 0u);
-                    place.x = value.at("x");
-                    place.y = value.at("y");
-                }
-                place.visible = value.value(anchored ? "on" : "visible", place.visible);
-                place.scale = value.value(anchored ? "s" : "scale", place.scale);
-                result.layout[index] = place;
-            }
-        }
+        result.layout = read_hud_layout(settings);
         result.crosshair_style = settings.at("crosshairStyle");
         result.crosshair_color = name_color(settings.at("crosshairColor").get<std::string>());
         result.crosshair_color[3] = settings.at("crosshairAlpha");
@@ -127,16 +113,7 @@ struct HudPreferences {
         constexpr std::array<const char *, 6> actions = {"forward", "left", "back", "right", "duck", "jump"};
         for (size_t i = 0; i < actions.size(); ++i) {
             const auto &codes = settings.at("binds").at(actions[i]);
-            auto &label = result.key_labels[i];
-            label = codes.empty() ? "-" : codes[0].get<std::string>();
-            if (label.starts_with("Key"))
-                label.erase(0, 3);
-            else if (label.starts_with("Digit"))
-                label.erase(0, 5);
-            else if (label.starts_with("Control"))
-                label = "DUCK";
-            else if (label == "Space")
-                label = "JUMP";
+            result.key_labels[i] = hud_key_label(codes.empty() ? "" : codes[0].get_ref<const std::string &>());
         }
         result.color_blind = settings.at("colorBlind");
         result.palette = semantic_palette(result.color_blind);
@@ -719,17 +696,28 @@ void draw_movement_widgets(
         const auto point = at(id, x, y);
         hud.overlay_text(point[0], point[1], text, 13, color.value_or(dim), true);
     };
+    // Built-in places beside the native HUD's run column (hud.hpp): stage and start speed to the left of the timer
+    // and speed, the sync bar under the run stats. The board place, right of the timer, is drawn by hud.hpp.
+    constexpr float beside_column = 175;
+    constexpr float timer_line_from_bottom = 141;
+    constexpr float speed_line_from_bottom = 100;
+    constexpr float sync_bar_from_bottom = 44;
+    const auto placed = [&](std::string_view id) {
+        const auto &place = prefs.layout[hud_index(id)];
+        return place && place->placed;
+    };
     HudLabel<> label;
-    if (run.track) {
+    // The map line already names the bonus; a separate line only where the player put one.
+    if (run.track && placed("track")) {
         label.format("Bonus %u", run.track);
-        line("track", label.view(), width / 2, height - 298, true);
+        line("track", label.view(), width / 2, height / 2, true);
     }
     if (run.split_count) {
         label.format("Stage / CP %u", run.split_count);
-        line("stage", label.view(), width / 2, height - 43, true);
+        line("stage", label.view(), width / 2 - beside_column, height - timer_line_from_bottom, true);
     }
     if (wanted("sync", false)) {
-        const auto point = at("sync", width / 2, height - 32);
+        const auto point = at("sync", width / 2, height - sync_bar_from_bottom);
         hud.overlay_rect(point[0] - 90, point[1], 180, 4, {.08f, .08f, .10f, .7f});
         hud.overlay_rect(
                 point[0] - 90,
@@ -739,7 +727,7 @@ void draw_movement_widgets(
                 jump_sync_color(movement.jump_sync, prefs.palette)
         );
     }
-    line("startPre", movement.start_pre.view(), width / 2 - 160, height - 105, false);
+    line("startPre", movement.start_pre.view(), width / 2 - beside_column, height - speed_line_from_bottom, false);
     line("strafeOffsets", movement.offset.view(), width / 2, height * .37f, false);
     line("firstJump", movement.first_jump.view(), width / 2, height * .396f, false);
     if (prefs.long_jump) {
@@ -749,14 +737,6 @@ void draw_movement_widgets(
             hud.overlay_text(point[0], point[1] + 23, movement.long_jump_details.view(), 12, dim, true);
         }
     }
-    line("pb", extras.pb.view(), width - 130, 18, true);
-    if (prefs.place != "off")
-        line("splits",
-             prefs.place == "place" ? extras.place.view().substr(0, extras.place.view().find(" |"))
-                                    : extras.place.view(),
-             width / 2 + 160,
-             height - 154,
-             true);
     if (wanted("spectators", true) && extras.spectator_count) {
         const auto point = at("spectators", 26, height * .44f);
         hud.overlay_text(point[0], point[1], "Spectators", 12, amber);
@@ -779,46 +759,4 @@ void draw_movement_widgets(
     }
 }
 
-template <class Hud>
-void draw_trainer(
-        Hud &hud,
-        float x,
-        float y,
-        const StrafeReading &reading,
-        const TrainerAppearance &look,
-        bool hints,
-        const SemanticPalette &palette,
-        int /* turn_direction */
-) {
-    const double pace = std::floor(reading.percent + .5);
-    const unsigned band = trainer_band(pace, look.zone);
-    // SemanticPalette stores the default trainer colours good, near, bad.
-    auto tone = palette.trainer[2 - band];
-    tone[3] *= look.dim_below > 0 && (!reading.has_pace || pace < look.dim_below) ? .25f : 1;
-    auto ink = look.color;
-    ink[3] = tone[3];
-    if (look.show_pace) {
-        const auto label = trainer_text(reading);
-        hud.overlay_text(x, y, label.view(), 14, ink, true);
-    }
-    const bool minimal = look.style == "minimal";
-    const float bar = minimal ? 150 : 240;
-    const float thickness = (minimal ? 3 : look.style == "detailed" ? 12 : 6) * look.height;
-    const float top = y + (look.show_pace ? 24 : 0);
-    const float left = x - bar / 2;
-    hud.overlay_rect(left, top, bar, thickness, {.05f, .05f, .07f, .6f * tone[3]});
-    hud.overlay_rect(
-            x - look.zone / 200 * bar, top, look.zone / 100 * bar, thickness, {tone[0], tone[1], tone[2], .2f * tone[3]}
-    );
-    hud.overlay_rect(x - 1, top - 3, 2, thickness + 6, ink);
-    const float position = float(trainer_position(pace, reading.side, look.follow) - .5);
-    if (reading.has_pace) hud.overlay_rect(x + position * bar - 2, top - 2, 4, thickness + 4, ink);
-    if (look.style == "detailed") {
-        hud.overlay_text(left, top + thickness + 5, "0", 10, ink);
-        hud.overlay_text(x, top + thickness + 5, "100", 10, ink, true);
-        hud.overlay_text(left + bar - 18, top + thickness + 5, "200", 10, ink);
-    }
-    if (hints && reading.hint)
-        hud.overlay_text(x, top + thickness + 23, strafe_hint_text(*reading.hint), 12, ink, true);
-}
 }  // namespace native

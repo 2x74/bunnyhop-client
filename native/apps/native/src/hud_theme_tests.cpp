@@ -1,5 +1,7 @@
 #include "hud_theme.hpp"
 #include "movement_hud.hpp"
+#include "hud_trainer.hpp"
+#include "crosshair_shape.hpp"
 #include "hud_result.hpp"
 #include "toasts.hpp"
 #include "room_modes.hpp"
@@ -8,6 +10,7 @@
 #include "native_chat.hpp"
 #include "capabilities.hpp"
 #include <cassert>
+#include <set>
 #include <iostream>
 #include <filesystem>
 #include <fstream>
@@ -170,18 +173,27 @@ void test_web_settings_schema() {
             assert(rejects_setting(settings, key, 1));
         }
     }
+    // The website's default places leave every element at the native HUD's own place, at the native size.
     const auto classic = native::HudPreferences::from(settings);
-    const auto keys_size = native::hud_element_size("keys");
-    const auto track_size = native::hud_element_size("track");
-    const auto keys_rect = classic.layout[native::hud_index("keys")]->rect(1600, 900, keys_size[0], keys_size[1]);
-    const auto track_rect = classic.layout[native::hud_index("track")]->rect(1600, 900, track_size[0], track_size[1]);
-    assert(keys_rect.y + keys_rect.height <= track_rect.y);
-    auto legacy = native::patch_settings(settings, {{"hudLayout", {{"fps", {{"visible", true}}}}}});
+    for (const auto id : native::web_hud_elements) {
+        const auto &place = classic.layout[native::hud_index(id)];
+        assert(place && !place->placed && std::abs(place->scale - 1) < 1e-6f);
+    }
+    auto legacy = native::patch_settings(
+            settings, {{"hudLayout", {{"fps", {{"visible", true}}}, {"timer", {{"x", 50}, {"y", 70}}}}}}
+    );
     assert(native::HudPreferences::from(legacy).layout[native::hud_index("fps")]->visible);
+    assert(native::HudPreferences::from(legacy).layout[native::hud_index("timer")]->placed);
+    // Showing an element keeps a v0.5.1 placement; moving the timer with the website's layout replaces its own.
     auto web = settings.at("hudLayoutWeb");
+    web["graph"]["on"] = true;
+    assert(native::patch_settings(legacy, {{"hudLayoutWeb", web}}).at("hudLayout") == legacy.at("hudLayout"));
     web["timer"]["x"] = -.05;
     const auto modern = native::patch_settings(legacy, {{"hudLayoutWeb", web}});
-    assert(modern.at("hudLayoutWeb") == web && modern.at("hudLayout").empty());
+    assert(modern.at("hudLayoutWeb") == web && !modern.at("hudLayout").contains("timer"));
+    assert(modern.at("hudLayout").contains("fps"));
+    const auto moved = native::HudPreferences::from(modern).layout[native::hud_index("timer")];
+    assert(moved && moved->placed && moved->anchored);
     const auto file = std::filesystem::temp_directory_path() / "bunnyhop-polish-settings.json";
     native::save_settings(file, legacy);
     const auto reloaded = native::load_settings(file);
@@ -648,23 +660,32 @@ void test_movement_widgets_and_restart() {
             true,
             2
     );
-    for (const auto label :
-         {"Start Pre", "Offset -1", "FJT", "LJ 275.50", "PB", "Watcher", "Practice", "Bonus", "Stage", "Ghost"})
+    for (const auto label : {"Start Pre", "Offset -1", "FJT", "LJ 275.50", "Watcher", "Practice", "Stage", "Ghost"})
         assert(probe.has(label));
+    // The map line names the bonus; its own line only shows where the player put it.
+    assert(!probe.has("Bonus"));
+    settings["hudLayout"]["track"] = {{"x", 50}, {"y", 30}};
+    DrawProbe placed_track;
+    native::draw_movement_widgets(
+            placed_track,
+            [](const char *, float x, float y) { return std::array{x, y}; },
+            native::HudPreferences::from(settings),
+            movement,
+            extras,
+            run,
+            1600,
+            900,
+            false,
+            0
+    );
+    assert(placed_track.has("Bonus"));
     for (const char *style : {"classic", "detailed", "minimal"}) {
         options.trainer.style = style;
         DrawProbe trainer;
         {
             NoAllocations no_allocations;
             native::draw_trainer(
-                    trainer,
-                    500,
-                    200,
-                    {105, native::StrafeHint::strafe_more},
-                    options.trainer,
-                    true,
-                    options.palette,
-                    -1
+                    trainer, 500, 200, {105, native::StrafeHint::strafe_more}, options.trainer, true, options.palette
             );
         }
         assert(trainer.rects >= 4 && trainer.has("105%") && trainer.has("turn more"));
@@ -692,6 +713,54 @@ void test_movement_widgets_and_restart() {
 }
 }  // namespace
 
+// Filled pixels of a crosshair, relative to its middle.
+std::set<std::pair<int, int>> crosshair_pixels(const native::CrosshairShape &shape, bool outline) {
+    std::set<std::pair<int, int>> pixels;
+    for (const auto &run : shape.runs()) {
+        if (run.outline != outline) continue;
+        for (int x = run.x; x < run.x + run.width; ++x)
+            assert(pixels.emplace(x, run.y).second);
+    }
+    return pixels;
+}
+
+void test_crosshair_pixels() {
+    native::CrosshairShape shape;
+    // Even thickness: the arms mirror around the line between the two middle pixels; gap and size are exact.
+    shape.build("cross", 6, 4, 2, true, 1);
+    auto fill = crosshair_pixels(shape, false);
+    assert(fill.size() == 4 * 6 * 2);
+    for (const auto &[x, y] : fill)
+        assert(fill.contains({-1 - x, y}) && fill.contains({x, -1 - y}));
+    assert(fill.contains({-5, 0}) && !fill.contains({-4, 0}) && fill.contains({4, 0}) && fill.contains({9, -1}));
+    const auto outline = crosshair_pixels(shape, true);
+    for (const auto &pixel : outline)
+        assert(!fill.contains(pixel));
+    assert(outline.contains({-11, 0}) && outline.contains({10, 0}) && outline.contains({-5, -2}));
+    // Odd thickness centres on one pixel; fractional settings round to whole pixels.
+    shape.build("cross", 5.6f, 3.4f, 2.6f, false, 1);
+    fill = crosshair_pixels(shape, false);
+    assert(fill.size() == 4 * 6 * 3 && crosshair_pixels(shape, true).empty());
+    for (const auto &[x, y] : fill)
+        assert(fill.contains({-x, y}) && fill.contains({x, -y}));
+    // CSS pixels times the display scale, as on the website.
+    shape.build("cross", 6, 4, 2, false, 2);
+    assert(crosshair_pixels(shape, false).size() == 4 * 12 * 4);
+    // The website's dot is a circle 1.6 times the thickness wide; T has no top arm.
+    shape.build("dot", 6, 4, 5, false, 1);
+    fill = crosshair_pixels(shape, false);
+    assert(fill.contains({-4, 0}) && fill.contains({3, 0}) && !fill.contains({4, 0}) && !fill.contains({3, 3}));
+    shape.build("t", 6, 4, 2, false, 1);
+    for (const auto &[x, y] : crosshair_pixels(shape, false))
+        assert(y >= -1);
+    // Circle: the ring's outer edge is size + gap from the middle, with a centre dot.
+    shape.build("circle", 6, 4, 2, false, 1);
+    fill = crosshair_pixels(shape, false);
+    assert(fill.contains({9, 0}) && !fill.contains({10, 0}) && !fill.contains({7, 0}) && fill.contains({0, 0}));
+    // Windows' borderless window is one row taller; the middle stays on the same pixel.
+    assert(native::CrosshairShape::centre_px(1441) == native::CrosshairShape::centre_px(1440));
+}
+
 int main() {
     test_web_settings_schema();
     test_defaults_and_saved_settings();
@@ -702,6 +771,7 @@ int main() {
     test_ghost_progress();
     test_results_toasts_and_room_widgets();
     test_movement_widgets_and_restart();
+    test_crosshair_pixels();
     std::cout << "HUD: 8 scenario groups, all layout IDs, three trainer styles, defaults and saved settings\n";
     using native::parse_hud_theme;
 

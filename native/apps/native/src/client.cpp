@@ -3516,6 +3516,8 @@ int run(const native::Options &opt) {
                     gauntlet_good = delta < 0;
                 }
             }
+            // The crosshair is sized in CSS pixels, like the website's: the display's scale, not the HUD's.
+            hud.set_display_scale(SDL_GetWindowDisplayScale(window.get()));
             native::HudFrame{
                     core.get(),
                     hud,
