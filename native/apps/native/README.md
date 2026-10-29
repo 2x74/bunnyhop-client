@@ -87,7 +87,14 @@ in the menu, which forwards what the HUD shows:
   Replies for another run, map, style or track are ignored.
 
 The menu sends these from `ui/run-rewards.ts` and `ui/hud-leaderboard.ts`. Neither affects recording or
-verification. The v0.0.29 integration notes list the settings, practice, replay and video messages.
+verification.
+
+Account → Edit avatar is the website's avatar editor (`ui/avatar-editor.ts`). The menu has no WebGL, so it sends
+`avatarRender` with the spec, its packed loadout and backdrop, and the host poses and draws the bunny offscreen
+(`src/avatar_service.hpp`), answering `bunnyhopNativeAvatar({id, png | webp | saved | error})`. The saved picture is a
+256 px lossless WebP that the menu posts with the game's own session; Download PNG writes to the Downloads folder.
+Pose data comes from the vendored `avatar/stage.ts` (`src/export-avatar.ts`); `ui/avatar-stage-sync.test.ts` flags
+the numbers native mirrors when a re-sync changes them. The v0.0.29 integration notes list the settings, practice, replay and video messages.
 
 Settings are the website's settings screen. `ui/settings-gates.ts` places every website row: shown, waiting for a
 host setting, switched off where the native renderer has its own version, or left out with the reason.

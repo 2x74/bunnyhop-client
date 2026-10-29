@@ -1,0 +1,17 @@
+/* Account -> Edit avatar (avatar-editor.ts): the website's editor (web avatar/avatar.css) in a menu dialog, with the
+   account dialog's header (ui/account.css). Only the frame is native: the dialog, its two scrolling columns, and the
+   host's picture filling the preview. */
+dialog.av-dialog {
+  width: min(66rem, 96vw); max-height: 94vh; padding: 0; overflow: hidden;
+  color: var(--text); background: var(--panel-solid); border: 1px solid var(--line-2);
+  border-radius: var(--radius-lg, var(--radius)); box-shadow: var(--shadow);
+}
+dialog.av-dialog::backdrop { background: var(--scrim); }
+.av-dialog .av { gap: 2rem; padding: 0.4rem 1.2rem 1.2rem; }
+.av-dialog .av-stage { position: static; }
+.av-dialog .av-view { max-width: 30rem; }
+.av-dialog .av-picture { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+.av-dialog .av-controls { max-height: calc(94vh - 4.5rem); overflow-y: auto; padding-right: 0.5rem; scrollbar-width: thin; }
+.av-dialog .av-status { overflow-wrap: anywhere; }
+/* The account panel's "Edit avatar" opens this dialog, so it's a button dressed as the link it was. */
+button.acct-av-edit { background: none; border: 0; cursor: pointer; font-family: inherit; text-align: left; }

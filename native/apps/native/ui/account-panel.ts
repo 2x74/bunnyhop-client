@@ -1,5 +1,6 @@
 // Reused web account dialog; native substitutes OAuth and account refresh without navigating the game document.
 import { openAuth, LIVE_ORIGIN } from "./bridge";
+import { openAvatarEditor } from "./avatar-editor";
 import { profileWriteGuard } from "../../web/src/ui/profile-write";
 import { SIGN_IN_HELP } from "../../web/src/ui/account-copy";
 // Account panel (a modal sheet opened from the account chip, the pause menu or onboarding). Its top is your name plate:
@@ -186,8 +187,8 @@ async function render(d: HTMLDialogElement, body: HTMLElement, section: AccountS
           ? ` ${left.changesLeft > 0 ? `${left.changesLeft} of ${left.limit} name changes left today.` : "No name changes left today."}`
           : "",
       ),
-      // The avatar editor is the website's /avatar page: it needs WebGL, which the menu doesn't have.
-      h("a.acct-av-edit", { href: "/avatar", title: "Opens in your browser" }, "Edit avatar"),
+      // The website's avatar editor, drawn by the game (avatar-editor.ts), saving to this account.
+      h("button.acct-av-edit", { type: "button", onclick: () => openAvatarEditor() }, "Edit avatar"),
     ),
   );
   const nameSec = who;

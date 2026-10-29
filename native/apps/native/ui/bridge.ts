@@ -139,6 +139,8 @@ export type MenuMessage =
   | { type: "worldRecord"; map: string; style: string; track: number; generation: number; seconds: number | null }
   /** The player's own board place for the HUD's place line (hud-leaderboard.ts). */
   | import("./hud-leaderboard").HudLeaderboardMessage
+  /** Avatar editor pictures (avatar-host.ts). */
+  | import("./avatar-host").AvatarHostMessage
   | RunServiceStatus;
 
 export const PRACTICE_ACTIONS = ["toggle", "menu", "noclip", "save", "tele", "prev", "next", "keepVelocity"] as const;

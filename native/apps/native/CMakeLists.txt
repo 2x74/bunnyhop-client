@@ -155,6 +155,8 @@ if(BUNNYHOP_BUILD_CLIENT)
         src/online.cpp
         src/audio_pack.cpp
         src/video_export.cpp
+        src/avatar_picture.cpp
+        src/webp_lossless.cpp
     )
     add_executable(bunnyhop-native-export-previews EXCLUDE_FROM_ALL src/export_previews.cpp)
     add_executable(bunnyhop-native-loadout-preview-smoke EXCLUDE_FROM_ALL src/loadout_preview_smoke.cpp)
@@ -300,6 +302,11 @@ if(BUNNYHOP_BUILD_CLIENT)
     target_compile_definitions(bunnyhop-native-menu-backdrop-smoke PRIVATE
         BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
     add_executable(bunnyhop-native-render-smoke src/render_smoke.cpp)
+    # Avatar pictures through the menu's render service, into files: `ASSETS JOBS.json OUTPUT_DIR`.
+    add_executable(bunnyhop-native-avatar-smoke EXCLUDE_FROM_ALL
+        src/avatar_smoke.cpp src/avatar_picture.cpp src/webp_lossless.cpp)
+    target_include_directories(bunnyhop-native-avatar-smoke PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-avatar-smoke PRIVATE bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB Threads::Threads)
     add_executable(bunnyhop-native-floor-pose-smoke EXCLUDE_FROM_ALL src/floor_pose_smoke.cpp)
     target_include_directories(bunnyhop-native-floor-pose-smoke PRIVATE vendor)
     target_link_libraries(bunnyhop-native-floor-pose-smoke PRIVATE bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
@@ -332,6 +339,22 @@ if(BUILD_TESTING)
         target_compile_options(bunnyhop-native-${parity_test}-tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
         add_test(NAME native_${parity_test}_parity COMMAND bunnyhop-native-${parity_test}-tests)
     endforeach()
+    # Avatar pictures: the WebP the server reads (round-tripped through libwebp's dwebp when it's installed),
+    # backdrops, request parsing and the pose scripts.
+    add_executable(bunnyhop-native-webp-tests src/webp_lossless_tests.cpp src/webp_lossless.cpp)
+    target_compile_options(bunnyhop-native-webp-tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    find_program(DWEBP_EXECUTABLE dwebp)
+    if(DWEBP_EXECUTABLE)
+        add_test(NAME native_webp_lossless COMMAND bunnyhop-native-webp-tests "${DWEBP_EXECUTABLE}")
+    else()
+        add_test(NAME native_webp_lossless COMMAND bunnyhop-native-webp-tests)
+    endif()
+    add_executable(bunnyhop-native-avatar-tests src/avatar_tests.cpp src/avatar_picture.cpp src/webp_lossless.cpp)
+    target_include_directories(bunnyhop-native-avatar-tests PRIVATE include vendor src)
+    target_compile_options(bunnyhop-native-avatar-tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    find_package(ZLIB REQUIRED)
+    target_link_libraries(bunnyhop-native-avatar-tests PRIVATE ZLIB::ZLIB)
+    add_test(NAME native_avatar COMMAND bunnyhop-native-avatar-tests "${CMAKE_CURRENT_SOURCE_DIR}/../../target/native-assets")
     # hud_theme.hpp inflates gzip data; Windows finds zlib.h only through the vcpkg target.
     find_package(ZLIB REQUIRED)
     target_link_libraries(bunnyhop-native-hud_theme-tests PRIVATE ZLIB::ZLIB)

@@ -447,6 +447,12 @@ const gestureExport = Bun.spawnSync([process.execPath, resolve(import.meta.dir, 
 });
 if (gestureExport.exitCode) throw new Error("Third-person inspect export failed");
 
+const avatarExport = Bun.spawnSync([process.execPath, resolve(import.meta.dir, "export-avatar.ts"), directory], {
+  stdout: "inherit",
+  stderr: "inherit",
+});
+if (avatarExport.exitCode) throw new Error("Avatar pose export failed");
+
 const runnerExport = Bun.spawnSync([process.execPath, resolve(import.meta.dir, "export-runner.ts"), directory], {
   stdout: "inherit",
   stderr: "inherit",
