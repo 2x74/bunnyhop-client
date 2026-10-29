@@ -6,6 +6,7 @@
 #endif
 #include <cassert>
 #include <memory>
+#include <regex>
 #include <set>
 
 namespace {
@@ -23,7 +24,14 @@ Json sanitize(const Json &body) {
         assert(problem.is_string() && !problem.get<std::string>().empty());
         if (result["problems"].size() < 3) result["problems"].push_back(problem.get<std::string>().substr(0, 160));
     }
-    if (body.at("client").at("kind") == "native") result["client"] = {{"kind", "native"}};
+    if (body.at("client").at("kind") == "native") {
+        result["client"] = {{"kind", "native"}};
+        const auto &client = body.at("client");
+        static const std::regex version_pattern(R"(^[\w.+-]{1,32}$)");
+        if (client.contains("version") && client.at("version").is_string()
+            && std::regex_match(client.at("version").get<std::string>(), version_pattern))
+            result["client"]["version"] = client.at("version");
+    }
     const double fps = body.at("fps");
     if (std::isfinite(fps)) result["fps"] = std::clamp(std::round(fps * 100) / 100, 0., 1000.);
     const std::set<std::string> numbers = {"pollHz",     "reportHz",    "eventHz",    "fps",         "events",
@@ -182,6 +190,21 @@ void history() {
     server_accepts(native::RunDiagnostics{}.serialize(play));
 }
 
+// Hover cards show "Native client 0.6.2": the release version survives each run's reset; a local build sends none.
+void client_version() {
+    native::TimedInput queue;
+    native::RunDiagnostics diagnostics;
+    diagnostics.set_client_version("0.6.2");
+    diagnostics.start(second_ns, queue, true);
+    diagnostics.stop(2 * second_ns, queue);
+    const auto released = diagnostics.serialize(Json::object());
+    assert(released.at("client") == Json({{"kind", "native"}, {"version", "0.6.2"}}));
+    server_accepts(released);
+    native::RunDiagnostics local;
+    local.set_client_version("local");
+    assert(local.serialize(Json::object()).at("client") == Json({{"kind", "native"}}));
+}
+
 void polling() {
     constexpr unsigned rates[] = {125, 250, 500, 1000, 2000, 4000, 8000};
     for (unsigned rate : rates) {
@@ -227,5 +250,6 @@ int main() {
     recorded_run();
     history();
     polling();
+    client_version();
     bounds_and_reset();
 }

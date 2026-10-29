@@ -5,6 +5,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <string>
 
 namespace native {
 
@@ -49,6 +50,7 @@ class RunDiagnostics {
     unsigned poll_samples_ = 0;
     double max_delta_ = 0, holdback_ms_ = 0;
     bool timed_ = false, timed_off_ = false;
+    std::string client_version_;
     Samples frame_ms_, age_ms_;
 
     static double number(double value) {
@@ -83,10 +85,17 @@ class RunDiagnostics {
     }
 
 public:
+    // The release's version ("0.6.2"), shown on leaderboard hover cards. Development builds send none.
+    void set_client_version(std::string version) {
+        client_version_ = version == "local" ? std::string() : std::move(version);
+    }
+
     void reset() { running_ = false; }
 
     void start(uint64_t now, const TimedInput &queue, bool timed) {
+        auto version = std::move(client_version_);
         *this = RunDiagnostics{};
+        client_version_ = std::move(version);
         running_ = true;
         started_ = last_frame_ = poll_at_ = now;
         reports_start_ = queue.reports;
@@ -132,6 +141,12 @@ public:
         running_ = false;
     }
 
+    nlohmann::json client_json() const {
+        nlohmann::json client = {{"kind", "native"}};
+        if (!client_version_.empty()) client["version"] = client_version_;
+        return client;
+    }
+
     nlohmann::json serialize(const nlohmann::json &play) const {
         const double seconds = stopped_ > started_ ? double(stopped_ - started_) / second_ns : 0;
         const double fps = seconds > 0 ? double(frames_) / seconds : 0;
@@ -161,7 +176,7 @@ public:
         auto result = nlohmann::json{
                 {"selfCheck", "error"},
                 {"problems", {"Native client self-check is unavailable"}},
-                {"client", {{"kind", "native"}}},
+                {"client", client_json()},
                 {"fps", number(std::min(fps, fps_limit))},
                 {"input", std::move(input)},
                 {"play", play}

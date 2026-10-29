@@ -433,6 +433,7 @@ int run(const native::Options &opt) {
     native::RunVault run_vault(cache / "run-vault");
     const auto identity = native::load_release_identity(manifest_path, menu_path, assets);
     native::updates::Host updater(cache, default_root, identity, native::executable_path());
+    recorder.diagnostics.set_client_version(identity.value("version", std::string("local")));
     // Jump stats (!ssj). Display only — it reads the same pre-state, command and
     // events the simulation already produced and never feeds anything back.
     native::MovementFeedback feedback;
