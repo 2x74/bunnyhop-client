@@ -25,4 +25,9 @@ int main() {
     assert(motion.angle == 0 && motion.squash == 0);
     advance_accessory(motion, .1, std::numeric_limits<float>::quiet_NaN(), true);
     assert(std::isfinite(motion.angle));
+    assert(packed_outfit("2;knife-carrot;fin-garden;glove-knit;;hat-ponytail;;outfit-neon;f29bbf;120")
+           == "outfit-neon");
+    assert(packed_outfit("2;knife-carrot;fin-garden;glove-knit;;;;outfit-bune") == "outfit-bune");
+    assert(!packed_outfit("2;knife-carrot;fin-garden;glove-knit;1;hat-tophat"));
+    assert(!packed_outfit("2;knife-carrot;fin-garden;glove-knit;;;;;f29bbf"));
 }

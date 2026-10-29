@@ -1040,12 +1040,10 @@ int run(const native::Options &opt) {
                 reset();
                 throw std::runtime_error(std::string("Loading native replay: ") + error.what());
             }
-            renderer->set_cosmetics(
-                    outfit,
-                    viewer.session.info.value("packedLoadout", nlohmann::json()).is_string()
-                            ? viewer.session.info.at("packedLoadout").get<std::string>()
-                            : std::string()
-            );
+            const auto runner_loadout = viewer.session.info.value("packedLoadout", nlohmann::json()).is_string()
+                                                ? viewer.session.info.at("packedLoadout").get<std::string>()
+                                                : std::string();
+            renderer->set_cosmetics(native_render::packed_outfit(runner_loadout).value_or(outfit), runner_loadout);
             viewer.begin(path);
             replay_timeline.request(path, viewer.id);
             recorder.clear(true);

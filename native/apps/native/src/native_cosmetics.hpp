@@ -86,6 +86,22 @@ inline std::optional<Glow> parse_glow(const nlohmann::json &value) {
     return glow;
 }
 
+// The colourway a replay was run in: field 7 of its packed loadout (loadout.ts packLoadout), absent in older replays.
+inline std::optional<std::string> packed_outfit(std::string_view packed) {
+    constexpr size_t outfit_field = 7, packed_max_bytes = 200;
+    if (packed.size() > packed_max_bytes || !packed.starts_with("2;")) return std::nullopt;
+    size_t start = 0;
+    for (size_t field = 0; field < outfit_field; ++field) {
+        start = packed.find(';', start);
+        if (start == std::string_view::npos) return std::nullopt;
+        ++start;
+    }
+    const auto end = packed.find(';', start);
+    const auto outfit = packed.substr(start, end == std::string_view::npos ? std::string_view::npos : end - start);
+    if (!outfit.starts_with("outfit-") || outfit.size() > 64) return std::nullopt;
+    return std::string(outfit);
+}
+
 struct AccessoryMotion {
     double last = -1, angle = 0;
     float alert = 0, squash = 0, lean = 0;
