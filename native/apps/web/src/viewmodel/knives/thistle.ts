@@ -8,9 +8,9 @@ import { ring, smoothstep, type Paint } from "../../player/bunny/builder";
 import type { V3 } from "../../player/bunny/rig";
 import { ACCENT, fixed, LEAF, LEAF_DARK, type KnifeCtx } from "./ctx";
 import { attackFlavour, bayonetBlade, bayonetGrip, bayonetHold, hump, idleSway, localXf, palmNormalLocal, plate, reducedMotion, rise, X, Y, type BayonetBladeSpec } from "./bayonet";
-import { PART, type KnifeDef } from "./types";
+import { KMAT, PART, type KnifeDef } from "./types";
 
-const SILVER = fixed(0x8e99a4), WRAP = fixed(0x5b2a6e), WRAP_DARK = fixed(0x45215a), TUFT = fixed(0xb46ad8), TUFT_DARK = fixed(0x8442b0);
+const SILVER = fixed(0x8e99a4, KMAT.polished), WRAP = fixed(0x5b2a6e, KMAT.grip), WRAP_DARK = fixed(0x45215a, KMAT.grip), TUFT = fixed(0xb46ad8, KMAT.veg), TUFT_DARK = fixed(0x8442b0, KMAT.veg);
 const G0 = -2.25, G1 = 1.3, Q0 = 1.42, Q1 = 1.74, TIP = 8.2;
 
 export const THISTLE_BLADE: BayonetBladeSpec = {

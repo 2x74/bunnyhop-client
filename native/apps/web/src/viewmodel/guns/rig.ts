@@ -9,6 +9,7 @@
 //   Gun_Pump   the shotgun's fore-end (pumps; the left hand rides on it)
 //   Gun_Aux    whatever the left hand brings in (a shotgun shell)
 //   Gun_Sil    a silencer (GunDef.silencer: the Cottontail's), built seated on the muzzle; collapsed while it's off
+//   Gun_Trig   the trigger (swings back about GunDef.trigger with the squeeze)
 
 import * as THREE from "three";
 import { Builder } from "../../player/bunny/builder";
@@ -16,10 +17,11 @@ import type { GloveStyleId } from "../../loadout";
 import { buildFpHands } from "../gloves/fp";
 import { KnifeCtx } from "../knives/ctx";
 import { vmRig, type VmRig } from "../rig";
+import { bakeGunAO } from "./ao";
 import type { GunDef, GunPart } from "./types";
 
-export const GUN_BONES = ["Gun_Body", "Gun_Slide", "Gun_Mag", "Gun_Pump", "Gun_Aux", "Gun_Sil"] as const;
-const PART_BONE: Record<GunPart, number> = { Gun: 0, Slide: 1, Mag: 2, Pump: 3, Aux: 4, Sil: 5 };
+export const GUN_BONES = ["Gun_Body", "Gun_Slide", "Gun_Mag", "Gun_Pump", "Gun_Aux", "Gun_Sil", "Gun_Trig"] as const;
+const PART_BONE: Record<GunPart, number> = { Gun: 0, Slide: 1, Mag: 2, Pump: 3, Aux: 4, Sil: 5, Trig: 6 };
 
 export interface GunRig {
   /** The hands' rig (bones 0 .. hands.names.length - 1). */
@@ -62,6 +64,9 @@ function build(def: GunDef, glove: GloveStyleId): THREE.BufferGeometry {
   def.silencer?.build(k);
   def.tris ??= k.tris;
   const g = b.geometry();
+  // Soft AO in the gun's recesses (guns/ao.ts), the hands untouched.
+  const SI = g.getAttribute("skinIndex"), firstGun = gunRig().hands.names.length;
+  bakeGunAO(g, (v) => SI.getX(v) >= firstGun);
   g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 60);
   return g;
 }

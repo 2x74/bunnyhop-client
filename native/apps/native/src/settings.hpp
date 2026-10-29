@@ -58,6 +58,10 @@ inline Json default_hud_layout_web() {
             {"practice", place(true, 4, 0, .032)}};
 }
 
+// Revision of the default viewmodel framing (viewmodel/defaults.ts VIEWMODEL_REV): 3 is v0.0.29's wider framing, with
+// the gloves, cuffs and some sleeve in view. The website's CS:S preset keeps the old one.
+inline constexpr int viewmodel_revision = 3;
+
 inline Json default_settings() {
     Json result = {
             {"sensitivity", 2.0},
@@ -76,10 +80,11 @@ inline Json default_settings() {
             {"crosshairThickness", 2.0},
             {"crosshairAlpha", 1.0},
             {"crosshairOutline", true},
-            {"viewmodelFov", 54.0},
-            {"viewmodelX", .6},
+            {"viewmodelFov", 64.0},
+            {"viewmodelX", .5},
             {"viewmodelY", 1.5},
-            {"viewmodelZ", -.9},
+            {"viewmodelZ", 0.0},
+            {"viewmodelRev", viewmodel_revision},
             {"viewmodelLeftHand", false},
             {"viewmodelBob", 1.0},
             {"viewmodelSway", 1.0},
@@ -546,6 +551,26 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
     return out;
 }
 
+// The website's viewmodel framing migration (ui/settings.ts migrateViewmodel): a saved framing still equal to the
+// default it was saved under is one the player never changed, so it moves to the current default. Any change of theirs
+// stays. Either way the file is marked current, so picking the CS:S preset (the old default) later sticks.
+inline void migrate_viewmodel(Json &saved) {
+    if (!saved.is_object()) return;
+    const auto revision = saved.find("viewmodelRev");
+    if (revision != saved.end() && revision->is_number() && revision->get<double>() >= viewmodel_revision) return;
+    const std::pair<const char *, double> previous[] = {
+            {"viewmodelFov", 54}, {"viewmodelX", .6}, {"viewmodelY", 1.5}, {"viewmodelZ", -.9}
+    };
+    const bool unchanged = std::all_of(std::begin(previous), std::end(previous), [&](const auto &field) {
+        return !saved.contains(field.first)
+               || (saved[field.first].is_number() && saved[field.first].template get<double>() == field.second);
+    });
+    if (unchanged)
+        for (const auto &field : previous)
+            saved.erase(field.first);
+    saved["viewmodelRev"] = viewmodel_revision;
+}
+
 // New installs start with VSync off and a 1000 FPS cap (lowest input latency; see display_defaults.hpp). A settings
 // file from before that keeps what it had: VSync on and no cap were the defaults then.
 inline void keep_saved_display(Json &saved) {
@@ -600,6 +625,7 @@ inline Json load_settings(const std::filesystem::path &file) {
     migrate_retired_models(saved);
 #endif
     keep_saved_display(saved);
+    migrate_viewmodel(saved);
     bool backed_up = false;
     for (auto entry = saved.begin(); entry != saved.end(); ++entry) {
         if (entry.key() == "binds" && entry->is_object()) {

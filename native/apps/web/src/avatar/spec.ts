@@ -8,7 +8,7 @@
 // default: their colourway in one of a few poses (picked from their id), pre-rendered into the site
 // (public-site/avatars/default/<outfit>-<n>.webp, tools/avatar/render-defaults.ts).
 
-import { cosmetic, DEFAULT_COSMETICS, type CosmeticSlot } from "../progression";
+import { cosmetic, DEFAULT_COSMETICS, hairLengthOf, type CosmeticSlot } from "../progression";
 
 export type AvatarPose =
   | "holdup" | "idle" | "showoff" | "hop" | "strafe" | "crouch" | "lookup" | "swing" | "run"
@@ -72,6 +72,9 @@ export interface AvatarSpec {
   body: string;
   /** progression.ts "hat-*" id, or null. */
   hat: string | null;
+  /** A wig's colour ("#rrggbb") and the ponytail's length (a percent, HAIR_LENGTH), checked like the saved cosmetics; absent = the defaults. */
+  hairColor?: string;
+  hairLength?: number;
   hand: AvatarHand;
   /** progression.ts "knife-*" / "fin-*" / "glove-*" ids. */
   knife: string;
@@ -152,6 +155,8 @@ export function cleanAvatar(raw: unknown): AvatarSpec {
     outfit,
     body: r.body === "body-b" ? "body-b" : "body-a",
     hat: r.hat === null || r.hat === undefined ? null : item("hat", r.hat, "") || null,
+    ...(typeof r.hairColor === "string" && HEX.test(r.hairColor.toLowerCase()) ? { hairColor: r.hairColor.toLowerCase() } : {}),
+    ...(hairLengthOf(r.hairLength) !== null ? { hairLength: hairLengthOf(r.hairLength)! } : {}),
     hand: pick(r.hand, ["knife", "gun", "none"] as const, "knife"),
     knife: item("knife", r.knife, DEFAULT_COSMETICS.knife!),
     finish: item("finish", r.finish, DEFAULT_COSMETICS.finish!),
@@ -169,11 +174,13 @@ export function cleanAvatar(raw: unknown): AvatarSpec {
 }
 
 /** The cosmetics an avatar wears, as a POST /me/cosmetics-shaped object (for progression.ts cosmeticsProblem). */
-export function avatarCosmetics(s: AvatarSpec): Record<string, string | null> {
+export function avatarCosmetics(s: AvatarSpec): Record<string, string | number | null> {
   return {
     outfit: s.outfit,
     body: s.body,
     hat: s.hat,
+    ...(s.hairColor ? { hairColor: s.hairColor } : {}),
+    ...(s.hairLength !== undefined ? { hairLength: s.hairLength } : {}),
     // A hidden knife (gun or empty hand) still names one; the default is always owned.
     knife: s.hand === "knife" ? s.knife : DEFAULT_COSMETICS.knife!,
     finish: s.hand === "knife" ? s.finish : DEFAULT_COSMETICS.finish!,
@@ -192,6 +199,42 @@ export function unpackAvatar(s: string | null | undefined): AvatarSpec | null {
   if (!s || s.length > 1000) return null;
   try {
     return cleanAvatar(JSON.parse(s));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Which look a saved picture was drawn with. Bump it whenever the bunny, its cosmetics, the renderer (avatar/stage.ts:
+ * AVATAR_LOOK, poses, framing) change in a way saved pictures should pick up; every saved avatar then gets re-drawn from
+ * its spec, without the player doing anything:
+ *   - by the player's own browser (avatar/refresh.ts): on the game or this page, signed in, a saved avatar older than
+ *     this is re-rendered offscreen and re-saved through POST /me/avatar/bunny (the same checks and limits);
+ *   - at deploy, by tools/avatar/rerender-saved.ts for everyone (research/avatar-refresh/DEPLOY.md).
+ * The version is stored with the spec ("r" in users.bunny_avatar; absent = 1, every picture saved before versions
+ * existed) and goes into the picture's file hash, so a re-render is always a new URL (caches, Discord embeds).
+ *   1  up to v0.0.28 (and v0.0.29 before the cosmetics)
+ *   2  v0.0.29: the 1.15x head with the softer face, garment / glove / knife / hat materials at the Enhanced tiers,
+ *      Space Buns / Ponytail / Half Oni Mask, the metal finishes; hands kept clear of the bigger hood; framing fitted
+ *      to the ears and hats
+ */
+export const AVATAR_RENDER_VERSION = 2;
+
+/** A stored render version (users.bunny_avatar "r", a POST's `render`): 1..AVATAR_RENDER_VERSION, else 1. */
+export const renderVersionOf = (v: unknown): number =>
+  typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= AVATAR_RENDER_VERSION ? v : 1;
+
+/** The stored form of a saved avatar: packAvatar's JSON with the render version its picture was drawn with. */
+export function packStoredAvatar(s: AvatarSpec, render: number): string {
+  return packAvatar(s).replace(/}$/, `,"r":${renderVersionOf(render)}}`);
+}
+
+/** The render version of a stored avatar (users.bunny_avatar), 1 for older rows; null when there's none. */
+export function storedRenderVersion(s: string | null | undefined): number | null {
+  if (!s || s.length > 1000) return null;
+  try {
+    const r = JSON.parse(s) as { r?: unknown } | null;
+    return r && typeof r === "object" ? renderVersionOf(r.r) : null;
   } catch {
     return null;
   }

@@ -11,6 +11,9 @@ interface PickerOptions {
   preview: (color: HexGlowColor) => void;
   apply: (color: HexGlowColor) => void;
   closed: () => void;
+  /** Dialog title and intro line (defaults: the player glow's). */
+  title?: string;
+  intro?: string;
 }
 /** Draft previews never write an account preference. Escape, close and Cancel discard the draft. */
 export function glowColorPicker(options: PickerOptions): HTMLDialogElement {
@@ -93,7 +96,7 @@ export function glowColorPicker(options: PickerOptions): HTMLDialogElement {
     close();
     options.apply(value);
   } },
-    h("p.dim.gc-intro", null, "Choose a color for your outline and aura."),
+    h("p.dim.gc-intro", null, options.intro ?? "Choose a color for your outline and aura."),
     field,
     h("p.dim.gc-field-help", { id: `${id}-field-help` }, "Arrow keys move the colour: left and right for saturation, up and down for brightness. Hold Shift for bigger steps."),
     h("label.gc-hue-label", null, h("span", null, "Hue"), hue),
@@ -103,7 +106,7 @@ export function glowColorPicker(options: PickerOptions): HTMLDialogElement {
     error,
     h("div.gc-actions", null, h("button.btn", { type: "button", onclick: close }, "Cancel"), apply),
   );
-  dialog.append(h("header.acct-head", null, h("h2", { id: `${id}-title` }, "Glow color"), h("button.acct-close", { type: "button", "aria-label": "Close color picker", onclick: close }, "×")), form);
+  dialog.append(h("header.acct-head", null, h("h2", { id: `${id}-title` }, options.title ?? "Glow color"), h("button.acct-close", { type: "button", "aria-label": "Close color picker", onclick: close }, "×")), form);
   dialog.addEventListener("keydown", event => event.stopPropagation());
   dismissOutside(dialog, close);
   dialog.addEventListener("close", () => { options.closed(); dialog.remove(); }, { once: true });

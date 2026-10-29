@@ -26,9 +26,10 @@ export type GunClass = "pistol" | "shotgun" | "smg" | "rifle" | "sniper";
 
 /**
  * Moving parts (extra bones after the hands' rig, guns/rig.ts). Every part's bind is the identity at the gun origin.
- * Sil: a silencer (GunDef.silencer), built seated on the muzzle; hidden while it's off.
+ * Sil: a silencer (GunDef.silencer), built seated on the muzzle; hidden while it's off. Trig: the trigger, pivoting
+ * back about GunDef.trigger as the index finger squeezes.
  */
-export type GunPart = "Gun" | "Slide" | "Mag" | "Pump" | "Aux" | "Sil";
+export type GunPart = "Gun" | "Slide" | "Mag" | "Pump" | "Aux" | "Sil" | "Trig";
 
 /**
  * A hand placement relative to the gun: the hand's "held object" frame (knives/hold.ts HandFrame.carrot: origin in the
@@ -152,16 +153,28 @@ export interface GunDef {
   left: HandGrip;
   /** Rest framing in view space (before the viewmodel offsets). */
   frame: Framing;
+  /**
+   * The most each wrist may bend (deg) between the hand's line and its forearm (guns/pose.ts ARM.bendR / bendL by
+   * default): a grip that needs the wrist turned (a bullpup's thumbhole) allows more, so its forearm leaves the screen.
+   */
+  wrist?: { R?: number; L?: number };
   /** Elbow anchors (view space) the forearms aim toward; default guns/viewmodel.ts ELBOW (the pistols'). */
   elbows?: { R: V3; L: V3 };
   /**
    * Left-hand targets on the gun (reloads, racks, inspects; guns/anim.ts leftT): "mag" (holding the magazine as it
    * sits seated), "rack" (pinching the slide / bolt / charging handle), "port" (a shotgun's loading port, the shell's
-   * seated position is Aux's), "tail" (the Cottontail's tail).
+   * seated position is Aux's), "tail" (the Cottontail's tail). "bolt" is the RIGHT hand's: a bolt action's knob.
    */
-  places: Partial<Record<"mag" | "rack" | "port" | "tail", HandPlace>>;
+  places: Partial<Record<"mag" | "rack" | "port" | "tail" | "bolt", HandPlace>>;
   /** A screw-on silencer (the Cottontail): its model, thread, tip and the support hand's grip on it. */
   silencer?: SilencerSpec;
+  /** The trigger's pivot (gun-local, the top of its blade): the Trig bone swings back about it with the squeeze. */
+  trigger?: V3;
+  /**
+   * The bolt turns up about the bore before it comes back (a bolt action: the Beanpole). Its axis (gun-local y, z) and
+   * the side its handle is on (-1 right): the firing hand leaves the grip and works it (GunDef.places.bolt, riding it).
+   */
+  bolt?: { axis: [number, number]; side: 1 | -1 };
   /** Muzzle point and the ejection port + its throw direction (gun-local). */
   muzzle: V3;
   eject: { p: V3; dir: V3 };

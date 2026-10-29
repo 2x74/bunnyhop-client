@@ -1047,6 +1047,15 @@ export const COSMETICS: CosmeticDef[] = [
   // rippling along a night-blue blade over faint stars. Both animated.
   { id: "fin-goldleaf", slot: "finish", name: "Gold Leaf", unlock: ach(SUPPORTER), color: "#e0b13a", rarity: 4 },
   { id: "fin-aurora", slot: "finish", name: "Aurora", unlock: ach(SUPPORTER), color: "#3ff0a0", rarity: 4 },
+  // Supporter metals (asked for in ┃supporters, 2026-10-28), standalone like the bayonets: polished metal and nothing
+  // else, no pattern. Three deep tinted steels (coloured chrome, not gemstones), a white pearl metal whose sheen turns
+  // with the angle, a chrome washed in a rainbow that turns with the angle and drifts slowly, and plain chrome.
+  { id: "fin-emerald-steel", slot: "finish", name: "Emerald Steel", unlock: ach(SUPPORTER), color: "#12a058", rarity: 4 },
+  { id: "fin-ruby-steel", slot: "finish", name: "Ruby Steel", unlock: ach(SUPPORTER), color: "#c8183a", rarity: 4 },
+  { id: "fin-sapphire-steel", slot: "finish", name: "Sapphire Steel", unlock: ach(SUPPORTER), color: "#2456d8", rarity: 4 },
+  { id: "fin-pearl", slot: "finish", name: "Pearl", unlock: ach(SUPPORTER), color: "#efe6ee", rarity: 4 },
+  { id: "fin-chromatic", slot: "finish", name: "Chromatic", unlock: ach(SUPPORTER), color: "#b07cff", rarity: 4 },
+  { id: "fin-chrome", slot: "finish", name: "Chrome", unlock: ach(SUPPORTER), color: "#d4d9e0", rarity: 4 },
   // Gloves: a style (its own shape and materials on the hands, loadout.ts GLOVE_STYLE / viewmodel/gloves/) in a
   // colourway. Knit follows your bunny colourway. Ids are `glove-<style>-<colourway>` and never change.
   { id: "glove-knit", slot: "glove", name: "Knit", unlock: free, color: "#2a2e38", rarity: 1 },
@@ -1161,6 +1170,11 @@ COSMETICS.push(
   { id: "hat-propeller", slot: "hat", name: "Propeller Cap", unlock: ach(SUPPORTER), color: "#ffd052", rarity: 4 },
   { id: "hat-capybara", slot: "hat", name: "Capybara", unlock: ach(SUPPORTER), color: "#b88955", rarity: 4 },
   { id: "hat-maxwell", slot: "hat", name: "Maxwell", unlock: ach(SUPPORTER), color: "#2b2c38", rarity: 4 },
+  // Wigs worn with the hood up (player/bunny/wigs.ts): a fringe under the rim, and two buns or a swaying ponytail.
+  { id: "hat-space-buns", slot: "hat", name: "Space Buns", unlock: ach(SUPPORTER), color: "#f29bbf", rarity: 4 },
+  { id: "hat-ponytail", slot: "hat", name: "Ponytail", unlock: ach(SUPPORTER), color: "#f29bbf", rarity: 4 },
+  // A red lacquer oni mask over the lower face, under the visor (player/bunny/oni-mask.ts).
+  { id: "hat-oni-mask", slot: "hat", name: "Half Oni Mask", unlock: ach(SUPPORTER), color: "#c8202c", rarity: 4 },
   // A band of dark amethyst glass round the hood, a light sweeping the aqua line across its forehead plate.
   { id: "hat-circlet", slot: "hat", name: "Circlet", unlock: ach(SUPPORTER), color: "#342a78", rarity: 4 },
   // High Roller: a dealer's green eyeshade on a black band with gold piping; four gold coins flipping round the head.
@@ -1333,8 +1347,31 @@ export function rankHint(u: { max: number; scope: "all" | "style" }): string {
   return u.max === 1 ? "Hold overall #1" : `Hold overall top ${u.max}`;
 }
 
-/** Card + ghost cosmetics a player has chosen (ids), as stored and served by the API. */
-export type CosmeticChoice = Record<CosmeticSlot, string | null>;
+/**
+ * Card + ghost cosmetics a player has chosen (ids), as stored and served by the API; plus `hairColor` ("#rrggbb"), the
+ * colour of a wig hat (loadout.ts WIGS), and `hairLength` (a percent, HAIR_LENGTH), the ponytail's length, both kept
+ * only for players who own a wig (absent = the default).
+ */
+export type CosmeticChoice = Record<CosmeticSlot, string | null> & { hairColor?: string | null; hairLength?: number | null };
+
+/** Hats that are hair (player/bunny/wigs.ts): the player picks their colour (CosmeticChoice.hairColor). */
+export const HAIR_HATS: readonly string[] = ["hat-space-buns", "hat-ponytail"];
+/** Hats whose length the player sets (CosmeticChoice.hairLength). */
+export const LENGTH_HATS: readonly string[] = ["hat-ponytail"];
+/**
+ * The ponytail's length, a whole percent of the built length (player/bunny/wigs.ts; the shader stretches it, hat-fx.ts):
+ * from a short tuft to about the middle of the back. 100 = as built.
+ */
+export const HAIR_LENGTH = { min: 40, max: 200, default: 100 } as const;
+const hairHexOf = (v: unknown): string | null => (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : null);
+/** A saved / carried hair length (a whole percent in range), else null. */
+export const hairLengthOf = (v: unknown): number | null =>
+  typeof v === "number" && Number.isInteger(v) && v >= HAIR_LENGTH.min && v <= HAIR_LENGTH.max ? v : null;
+const ownsHair = (level: number, achievements: readonly string[], ranks: HeldRanks, staff: StaffRole | null) =>
+  HAIR_HATS.some((id) => {
+    const c = cosmetic(id);
+    return !!c && isUnlocked(c, level, achievements, ranks, staff);
+  });
 
 /**
  * Validates a choice. strict (on save): returns the first bad slot. lenient (on read): falls back to defaults for
@@ -1342,17 +1379,33 @@ export type CosmeticChoice = Record<CosmeticSlot, string | null>;
  */
 export function cleanCosmetics(raw: unknown, level: number, achievements: readonly string[], ranks: HeldRanks = {}, staff: StaffRole | null = null): CosmeticChoice {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-  const out = { ...DEFAULT_COSMETICS };
+  const out: CosmeticChoice = { ...DEFAULT_COSMETICS };
   for (const slot of Object.keys(DEFAULT_COSMETICS) as CosmeticSlot[]) {
     const c = cosmetic(typeof r[slot] === "string" ? (r[slot] as string) : null);
     if (c && c.slot === slot && isUnlocked(c, level, achievements, ranks, staff)) out[slot] = c.id;
   }
+  const hair = hairHexOf(r.hairColor);
+  if (hair && ownsHair(level, achievements, ranks, staff)) out.hairColor = hair;
+  const length = hairLengthOf(r.hairLength);
+  if (length !== null && length !== HAIR_LENGTH.default && ownsHair(level, achievements, ranks, staff)) out.hairLength = length;
   return out;
 }
 
 export function cosmeticsProblem(raw: unknown, level: number, achievements: readonly string[], ranks: HeldRanks = {}, staff: StaffRole | null = null): { slot: string; reason: string } | null {
   if (!raw || typeof raw !== "object") return { slot: "*", reason: "expected an object" };
   for (const [slot, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (slot === "hairColor") {
+      if (v === null) continue;
+      if (!hairHexOf(v)) return { slot, reason: "expected a colour like #5a3426" };
+      if (!ownsHair(level, achievements, ranks, staff)) return { slot, reason: `locked (${unlockHint(cosmetic(HAIR_HATS[0])!)})` };
+      continue;
+    }
+    if (slot === "hairLength") {
+      if (v === null) continue;
+      if (hairLengthOf(v) === null) return { slot, reason: `expected a whole number from ${HAIR_LENGTH.min} to ${HAIR_LENGTH.max}` };
+      if (!ownsHair(level, achievements, ranks, staff)) return { slot, reason: `locked (${unlockHint(cosmetic(HAIR_HATS[0])!)})` };
+      continue;
+    }
     if (!(slot in DEFAULT_COSMETICS)) return { slot, reason: "unknown slot" };
     if (v === null && (slot === "title" || slot === "hat")) continue;
     const c = typeof v === "string" ? cosmetic(v) : null;

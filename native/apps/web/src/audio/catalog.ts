@@ -80,6 +80,11 @@ export type SfxId =
   | "gun_broadfork_fire"
   | "gun_hedgerow_fire"
   | "gun_seeddrill_fire"
+  | "gun_furrow_fire"
+  | "gun_beanpole_fire"
+  | "gun_beanpole_bolt"
+  | "gun_case_metal"
+  | "gun_case_shell"
   | "gun_pump"
   | "gun_shell_in"
   | "gun_mag_out"
@@ -189,27 +194,37 @@ export const SFX: Record<SfxId, SfxDef> = {
   impact_tile: d("sfx", 0.45, 3, 0.06),
   shot_pistol: d("sfx", 0.55, 3, 0.04),
   shot_sniper: d("sfx", 0.7, 2, 0.03),
-  gun_draw: d("sfx", 0.4, 1, 0.03, 0.1),
-  // Our guns (viewmodel/guns/sounds.ts): fire under the impacts' peak level so a spray doesn't dominate the mix; the Seed
-  // Drill fires 14 a second, so it is quieter, shorter and allows more overlapping voices.
+  gun_draw: d("sfx", 0.25, 1, 0.03, 0.1),
+  // Our guns (viewmodel/guns/sounds.ts; files from tools/audio/gun-sfx.ts): fire under the impacts' peak level so a spray
+  // doesn't dominate the mix. Gains are matched to the sounds they replaced on the loudest 100 ms (K-weighted), the Furrow
+  // and Beanpole to the Seed Drill / Jackrabbit shots they used to borrow. Variations are level-matched in the files.
+  // Automatic fire stays clean because the shots are short (tails tightened to ~0.15-0.3 s; the Seed Drill's 0.15 s).
   gun_thumper_fire: d("sfx", 0.5, 4, 0.04),
-  gun_cottontail_fire: d("sfx", 0.5, 3, 0.04),
-  gun_jackrabbit_fire: d("sfx", 0.58, 3, 0.03),
-  gun_broadfork_fire: d("sfx", 0.62, 2, 0.03),
-  gun_hedgerow_fire: d("sfx", 0.58, 3, 0.03),
-  gun_seeddrill_fire: d("sfx", 0.36, 5, 0.05),
-  gun_pump: d("sfx", 0.45, 1, 0.03, 0.1),
+  gun_cottontail_fire: d("sfx", 0.6, 3, 0.04),
+  gun_jackrabbit_fire: d("sfx", 0.5, 3, 0.03),
+  gun_broadfork_fire: d("sfx", 0.58, 2, 0.03),
+  gun_hedgerow_fire: d("sfx", 0.75, 3, 0.03),
+  gun_seeddrill_fire: d("sfx", 0.45, 4, 0.04),
+  gun_furrow_fire: d("sfx", 0.6, 4, 0.03),
+  gun_beanpole_fire: d("sfx", 0.55, 2, 0.03),
+  // The pump (back ~0.12 s, home ~0.40 s) and the Beanpole's bolt (lift, back, home, lock) are fitted to their clips'
+  // beats (guns/anim.ts pumpClip / BOLT); gun_slide and gun_bolt (the charging handle) hit 0.1 s in (anim.ts SLIDE_HIT).
+  gun_pump: d("sfx", 0.62, 1, 0.03, 0.1),
+  gun_beanpole_bolt: d("sfx", 0.7, 1, 0.02, 0.1),
   gun_shell_in: d("sfx", 0.42, 2, 0.05, 0.05),
-  gun_mag_out: d("sfx", 0.4, 1, 0.03, 0.1),
-  gun_mag_in: d("sfx", 0.45, 1, 0.03, 0.1),
-  gun_slide: d("sfx", 0.42, 1, 0.03, 0.08),
-  gun_bolt: d("sfx", 0.42, 1, 0.03, 0.08),
-  gun_pod_out: d("sfx", 0.4, 1, 0.03, 0.1),
-  gun_pod_in: d("sfx", 0.45, 1, 0.03, 0.1),
-  gun_dry: d("sfx", 0.4, 2, 0.04, 0.06),
-  gun_pickup: d("sfx", 0.45, 1, 0.03, 0.2),
-  gun_mode: d("sfx", 0.35, 1, 0.02, 0.05),
-  gun_cottontail_silenced: d("sfx", 0.34, 3, 0.04),
+  gun_mag_out: d("sfx", 0.3, 1, 0.03, 0.1),
+  gun_mag_in: d("sfx", 0.55, 1, 0.03, 0.1),
+  gun_slide: d("sfx", 0.45, 1, 0.03, 0.08),
+  gun_bolt: d("sfx", 0.6, 1, 0.03, 0.08),
+  gun_pod_out: d("sfx", 0.5, 1, 0.03, 0.1),
+  gun_pod_in: d("sfx", 0.65, 1, 0.03, 0.1),
+  gun_dry: d("sfx", 0.6, 2, 0.04, 0.06),
+  gun_pickup: d("sfx", 0.55, 1, 0.03, 0.2),
+  gun_mode: d("sfx", 0.45, 1, 0.02, 0.05),
+  // Spent cases hitting the floor (no cue plays them yet): brass for the pistols / rifles, a plastic hull for the shotguns.
+  gun_case_metal: d("sfx", 0.16, 4, 0.08, 0.03),
+  gun_case_shell: d("sfx", 0.35, 3, 0.06, 0.03),
+  gun_cottontail_silenced: d("sfx", 0.45, 3, 0.04),
   gun_silencer_twist: d("sfx", 0.32, 2, 0.07, 0.05),
   gun_silencer_seat: d("sfx", 0.42, 1, 0.03, 0.08),
   gun_silencer_crack: d("sfx", 0.42, 1, 0.03, 0.08),

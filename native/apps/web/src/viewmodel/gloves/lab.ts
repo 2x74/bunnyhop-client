@@ -177,7 +177,7 @@ function openHand(): void {
   const cw = colourway(outfit);
   u.uPalette.value.forEach((c, i) => c.set(paletteOf(cw)[i]));
   u.uAccent.value.set(cw.accent);
-  const look = applyLoadoutUniforms(u, loadoutOf(glove, knifeOf("carrot")));
+  const look = applyLoadoutUniforms(u, loadoutOf(glove, knifeOf("carrot")), undefined, true);
   const mesh = new THREE.SkinnedMesh(geo, solidMaterial(u, look));
   mesh.bindMode = THREE.DetachedBindMode;
   mesh.bind(skeleton, new THREE.Matrix4());
@@ -492,6 +492,8 @@ else if (mode === "frame" || mode === "play") await framing();
 else await firstPerson();
 info.textContent = `glove lab · ${mode}`;
 layout();
+// Screenshot harnesses (research/*/shot.cjs) wait for this; play mode sets its own (with step()).
+if (!(window as unknown as { __lab?: unknown }).__lab) Object.assign(window, { __lab: { ready: true } });
 addEventListener("resize", layout);
 const loop = () => {
   frame();

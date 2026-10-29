@@ -6,11 +6,11 @@ import { add, ring, scale, type Paint } from "../../player/bunny/builder";
 import type { V3 } from "../../player/bunny/rig";
 import { ACCENT, fixed, LEAF, LEAF_DARK, type KnifeCtx } from "./ctx";
 import { SLIM_THUMB, straightHold } from "./hold";
-import { PART, type KnifeDef } from "./types";
+import { KMAT, PART, type KnifeDef } from "./types";
 
 const X: V3 = [1, 0, 0], Y: V3 = [0, 1, 0];
-const DAIKON = fixed(0xf4f1e8), DAIKON_RING = fixed(0xe2ddcf), DAIKON_SHOULDER = fixed(0xd5e8b8), DAIKON_EDGE = fixed(0xffffff);
-const WRAP = fixed(0x2c5e33), SAME = fixed(0xeae2cc);
+const DAIKON = fixed(0xf4f1e8, KMAT.veg), DAIKON_RING = fixed(0xe2ddcf, KMAT.veg), DAIKON_SHOULDER = fixed(0xd5e8b8, KMAT.veg), DAIKON_EDGE = fixed(0xffffff, KMAT.veg);
+const WRAP = fixed(0x2c5e33, KMAT.grip), SAME = fixed(0xeae2cc, KMAT.grip);
 /** Blade from the habaki to the tip; grip below the tsuba. */
 const B0 = 2.45, B1 = 12.2, G0 = -2.7, G1 = 1.75;
 

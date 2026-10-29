@@ -7,7 +7,7 @@
 // Presentation only: guns/presenter.ts drives it from the core's weapon reports.
 
 import * as THREE from "three";
-import { playerUniforms, solidMaterial, type PlayerUniforms } from "../../player/materials";
+import { playerUniforms, type PlayerUniforms } from "../../player/materials";
 import { colourway, paletteOf } from "../../player/bunny/palettes";
 import { getLoadout, getOutfit, onLoadout, onOutfit } from "../../player/cosmetics";
 import { gloveStyle, type CosmeticLoadout, type GloveStyleId } from "../../loadout";
@@ -19,6 +19,8 @@ import { prewarmGunHolds } from "./hold";
 import { clampFeel, GunPoser } from "./pose";
 import { gunGeometry, gunRig } from "./rig";
 import { GunFx } from "./fx";
+import { gunMaterial } from "./material";
+import { GunMotion, type GunMotionInput } from "./motion";
 import type { GunDef, GunPart } from "./types";
 
 class DirectSkeleton extends THREE.Skeleton {
@@ -44,7 +46,7 @@ export class GunViewmodel {
   /** Muzzle flash + shells (created at the first render or shot). */
   private fxImpl: GunFx | null = null;
   /** Sounds of this viewmodel's actions (presenter: guns/sounds.ts gunSound); null = silent (previews). */
-  onSound: ((kind: "fire" | "silenced" | "dry" | Cue, gain: number) => void) | null = null;
+  onSound: ((kind: "fire" | "silenced" | "dry" | Cue, gain: number, rate?: number) => void) | null = null;
   /** Perf: ms spent in the last update. */
   lastUpdateMs = 0;
   /** Animation time scale (dev / screenshots: 0 freezes). */
@@ -59,6 +61,8 @@ export class GunViewmodel {
   private loadout: CosmeticLoadout;
   private glove: GloveStyleId = "knit";
   private look: MaterialLook = NO_LOOK;
+  /** Potato graphics: the gun material without its shading (guns/material.ts GUN_CHEAP). */
+  private cheap = false;
   private visible = true;
   private unsub: (() => void)[] = [];
   private conv = new THREE.Matrix4();
@@ -66,6 +70,22 @@ export class GunViewmodel {
   /** Camera space <- viewmodel root (offset, feel, hand mirror): where fx spawn. */
   readonly camRel = new THREE.Matrix4();
   private V = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]);
+  /** The knife viewmodel's feel (clamped for a gun), before the gun's own (guns/motion.ts). */
+  private Vf = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]);
+  /** The gun's own feel: idle drift, the response to speed, jumps, landings and strafes. */
+  readonly motion = new GunMotion();
+  private piv = new Float32Array(3);
+  private flashPos = new THREE.Vector3();
+  private soft = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /** The viewmodel FOV kick of the last shot (fraction of the FOV): a 30 ms punch, a quick ease back. */
+  private fovKick(): number {
+    const t = this.anim.sinceShot;
+    if (t > 0.4 || !this.def) return 0;
+    const c = this.def.cls;
+    const a = (c === "shotgun" || c === "sniper" ? 0.035 : c === "smg" || c === "rifle" ? 0.012 : 0.022) * (this.soft ? 0.45 : 1);
+    return a * (t < 0.03 ? t / 0.03 : Math.exp(-(t - 0.03) * 12));
+  }
   private hidden: Set<number> | null = null;
   /** The M3 ejects its shell when the pump comes back. */
   private lastPump = 0;
@@ -76,7 +96,8 @@ export class GunViewmodel {
     this.skeleton = new DirectSkeleton(r.count);
     this.loadout = o.loadout ?? getLoadout();
     this.glove = gloveStyle(this.loadout.glove).style;
-    this.mesh = new THREE.SkinnedMesh(new THREE.BufferGeometry(), solidMaterial(this.uniforms));
+    this.cheap = prefs.get().graphics.potato;
+    this.mesh = new THREE.SkinnedMesh(new THREE.BufferGeometry(), gunMaterial(this.uniforms, NO_LOOK, { cheap: this.cheap, flash: true }));
     this.mesh.bindMode = THREE.DetachedBindMode;
     this.mesh.bind(this.skeleton, new THREE.Matrix4());
     this.mesh.frustumCulled = false;
@@ -127,12 +148,13 @@ export class GunViewmodel {
     this.refreshLook();
   }
 
-  private refreshLook(): void {
-    const look = applyLoadoutUniforms(this.uniforms, { ...this.loadout, finish: "fin-garden" });
-    if (sameLook(look, this.look)) return;
+  private refreshLook(force = false): void {
+    // The first-person detail shading (finishes/detail.ts) on the gloves, as on the knife viewmodel.
+    const look = applyLoadoutUniforms(this.uniforms, { ...this.loadout, finish: "fin-garden" }, undefined, true);
+    if (sameLook(look, this.look) && !force) return;
     this.look = look;
     (this.mesh.material as THREE.Material).dispose();
-    this.mesh.material = solidMaterial(this.uniforms, look);
+    this.mesh.material = gunMaterial(this.uniforms, look, { cheap: this.cheap, flash: true });
   }
 
   /** The gun in hand (null hides the viewmodel). Builds / solves on first use per gun + glove (cached). */
@@ -148,6 +170,17 @@ export class GunViewmodel {
   /** Solves these guns' holds in the current gloves when the browser is idle (switching never solves on the spot). */
   prewarm(defs: readonly GunDef[]): void {
     prewarmGunHolds(defs, this.glove);
+    // The geometries too (hands + gun, with the baked AO: tens of ms each), one per idle callback.
+    const queue = [...defs];
+    const g = globalThis as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number };
+    const idle: (cb: () => void) => void = typeof g.requestIdleCallback === "function" ? (cb) => g.requestIdleCallback!(cb, { timeout: 3000 }) : (cb) => setTimeout(cb, 80);
+    const step = () => {
+      const d = queue.shift();
+      if (!d) return;
+      gunGeometry(d, this.glove);
+      idle(step);
+    };
+    idle(step);
   }
 
   // -------------------------------------------------------------------------------------------
@@ -197,6 +230,9 @@ export class GunViewmodel {
   get fx(): GunFx {
     if (!this.fxImpl) {
       this.fxImpl = new GunFx(this.scene, this.root);
+      // A case landing: "caseMetal" (brass: very bright, so a little slower and quiet) or "caseShell" (a hull).
+      // guns/sounds.ts maps them (gun_case_metal / gun_case_shell); nothing plays until it does.
+      this.fxImpl.onBounce = (hull) => (hull ? this.onSound?.("caseShell", 0.55) : this.onSound?.("caseMetal", 0.4, 0.85 + Math.random() * 0.08));
       if (this.def) this.fxImpl.setGun(this.def);
     }
     return this.fxImpl;
@@ -205,14 +241,28 @@ export class GunViewmodel {
   // -------------------------------------------------------------------------------------------
   // Per frame
 
-  /** Advances the animation and poses the bones. `feel`: the knife viewmodel's bob / sway matrix (3x4), or null. */
-  update(dt: number, feel: ArrayLike<number> | null = null): void {
+  /**
+   * Advances the animation and poses the bones. `feel`: the knife viewmodel's bob / sway matrix (3x4), or null;
+   * `input`: the player's movement for the gun's own feel (null: idle drift only).
+   */
+  update(dt: number, feel: ArrayLike<number> | null = null, input: GunMotionInput | null = null): void {
     const t0 = performance.now();
     dt = Math.min(0.1, Math.max(0, dt)) * this.timeScale;
-    if (feel) clampFeel(feel, this.V);
+    if (feel) clampFeel(feel, this.Vf);
     const def = this.def;
     if (!def) return;
     this.poser.update(dt);
+    // The gun's own feel about its right grip (where it is now, viewmodel space), on top of the knife's.
+    const vp = prefs.get().viewmodel;
+    this.motion.bob = vp.bob;
+    this.motion.sway = vp.sway;
+    const W = this.poser.bonesW, o = this.poser.partIndex("Gun") * 12, g = def.right.o;
+    this.piv[0] = W[o] * g[0] + W[o + 1] * g[1] + W[o + 2] * g[2] + W[o + 3];
+    this.piv[1] = W[o + 4] * g[0] + W[o + 5] * g[1] + W[o + 6] * g[2] + W[o + 7];
+    this.piv[2] = W[o + 8] * g[0] + W[o + 9] * g[1] + W[o + 10] * g[2] + W[o + 11];
+    this.motion.update(dt, def, input, this.piv);
+    if (this.fxImpl) this.fxImpl.grounded = input ? input.grounded : true;
+    concat(this.Vf, 0, this.motion.M, 0, this.V, 0);
     this.skin();
     this.fxImpl?.update(dt);
     const pump = this.anim.pose.pump;
@@ -277,13 +327,20 @@ export class GunViewmodel {
   /** Draws the gun viewmodel over the frame just rendered with `world` (depth cleared first). */
   render(renderer: THREE.WebGLRenderer, world: THREE.PerspectiveCamera): void {
     if (!this.visible || !this.def) return;
+    const potato = prefs.get().graphics.potato;
+    if (potato !== this.cheap) {
+      this.cheap = potato;
+      this.refreshLook(true);
+    }
     const vp = prefs.get().viewmodel;
     const cam = this.camera;
     world.updateMatrixWorld();
     cam.position.copy(world.position);
     cam.quaternion.copy(world.quaternion);
     cam.aspect = world.aspect;
-    cam.fov = verticalFov(vp.fov);
+    // The shot's kick on the viewmodel's own FOV (narrower for a moment: the gun punches toward you). The world camera,
+    // the crosshair and the aim never move; Bob amount and reduced motion scale it.
+    cam.fov = verticalFov(vp.fov) * (1 - this.fovKick() * Math.min(1, vp.bob));
     cam.updateProjectionMatrix();
     cam.updateMatrixWorld();
     // root = camera * conv * (offset + V) (* mirror for the left hand), exactly like the knife viewmodel.
@@ -295,7 +352,20 @@ export class GunViewmodel {
     const m = this.root.matrix;
     m.multiplyMatrices(cam.matrixWorld, this.camRel);
     this.root.matrixWorldNeedsUpdate = true;
+    this.fx.cheap = this.cheap;
     this.fx.beforeRender(this, cam);
+    // The muzzle's light for this frame (world position of the muzzle, strength from the flash).
+    const fl = this.fx.flashLight();
+    const uu = this.uniforms as unknown as { uGunFlash?: THREE.IUniform<THREE.Vector4>; uGunFlashPos?: THREE.IUniform<THREE.Vector3> };
+    if (uu.uGunFlash && uu.uGunFlashPos) {
+      uu.uGunFlash.value.w = fl;
+      if (fl > 0) {
+        const def = this.def;
+        const part = def.cls === "pistol" ? "Slide" : "Gun";
+        this.pointOn(part, def.muzzle, this.flashPos).applyMatrix4(this.root.matrix);
+        uu.uGunFlashPos.value.copy(this.flashPos);
+      }
+    }
     const auto = renderer.autoClear;
     renderer.autoClear = false;
     renderer.clearDepth();

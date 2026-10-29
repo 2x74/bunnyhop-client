@@ -8,9 +8,9 @@ import { smoothstep } from "../../player/bunny/builder";
 import type { V3 } from "../../player/bunny/rig";
 import { ACCENT, fixed, type KnifeCtx } from "./ctx";
 import { attackFlavour, bayonetBlade, bayonetGrip, bayonetHold, hump, idleSway, localXf, palmNormalLocal, plate, reducedMotion, rise, sawback, type BayonetBladeSpec } from "./bayonet";
-import { PART, type KnifeDef } from "./types";
+import { KMAT, PART, type KnifeDef } from "./types";
 
-const GUN = fixed(0x3b434c), GRIP = fixed(0x1d4a50), GRIP_RIB = fixed(0x2b6870), TEETH = fixed(0xaab6bf);
+const GUN = fixed(0x3b434c, KMAT.satin), GRIP = fixed(0x1d4a50, KMAT.grip), GRIP_RIB = fixed(0x2b6870, KMAT.grip), TEETH = fixed(0xaab6bf, KMAT.polished);
 /** Grip (pommel end .. guard), crossguard plate, blade tip. */
 const G0 = -2.42, G1 = 1.5, Q1 = 1.86, TIP = 9.25;
 

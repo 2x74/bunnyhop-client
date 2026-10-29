@@ -88,6 +88,8 @@ import { startPlaytime } from "./playtime";
 import { mapTime } from "./map-time";
 import { deviceIdSettled } from "./device";
 import { setCosmeticsStill } from "./viewmodel/finishes/shader";
+import { setCosmeticsTier, tierOf } from "./viewmodel/finishes/detail";
+import { lookTierOf, setPlayerLookTier } from "./player/look-tier";
 import { PotatoHint } from "./potato-hint";
 import { CanvasVideoGrade } from "./video-grade";
 import { initTriggerOverlay, triggerOverlayFrame } from "./triggers";
@@ -207,6 +209,8 @@ prefs.watch((p) => {
   resize();
   if (applyPalette(p.colorBlind)) run?.view.recolor(); // colour-blind palette (palette.ts): CSS variables, then the zones
   setCosmeticsStill(p.graphics.potato); // animated finishes and hats hold still in Potato mode
+  setCosmeticsTier(tierOf(p.graphics)); // glove + knife hardware detail per look (viewmodel/finishes/detail.ts)
+  setPlayerLookTier(lookTierOf(p.graphics)); // garment detail on the bunnies and the sleeves (player/look-tier.ts)
   document.body.classList.toggle("potato", p.graphics.potato); // and the HUD drops its blurs (hud.css)
   if (world) {
     world.setPotato(p.graphics.potato);
@@ -545,6 +549,8 @@ setPlayAttempt(() => session.timer.status === "running");
 setUpdateBusy(() => session.timer.status === "running");
 viewmodel = new Viewmodel();
 const vm = viewmodel;
+// Dev hook (as `bunnyhop` above): the viewmodel, for in-game knife / finish captures (research/knife-finishes/).
+if (import.meta.env.DEV) Object.assign((window as unknown as { bunnyhop: object }).bunnyhop, { vm });
 vm.onAttack = (kind) => {
   session.recordCosmetic(kind); // replay cosmetic trailer (ghosts / replays show the swing)
   mp?.onAttack(kind); // other players see it
@@ -1029,6 +1035,8 @@ function applyTick(sample: UserCmd, diagnostic?: SampledInput, generatedGive = 0
   const attackNow = events & EVENT_ATTACK ? attackReport(core) : null;
   gunView.tick(weaponNow, attackNow);
   if (attackNow && attackNow.weapon >= 2) mp?.onShot(); // other players see the shot (the knife's swings: vm.onAttack)
+  // Your third-person bunny's kick / reload gestures; others see the reload too (protocol.ts SF_STAB with a gun).
+  if (thirdPerson.weaponTick(weaponNow, attackNow, session.settings.tickInterval)) mp?.onGunReload();
   arms.tick(curr, events); // weapon switches + EVENT_ATTACK: the swing / shot, its impact
   session.hud.setAmmo(gunView.ammo());
   tutorial?.tick(cmd, prev, curr, events);
@@ -1183,23 +1191,24 @@ function frame(now: number) {
   // Viewmodel: animate always (swings stay in step), draw only in first person on your own player.
   // (Hidden with a gun out: no knife that shoots.)
   vm.setVisible(p.viewmodel.show && !thirdPerson.active && !mp?.isSpectating && arms.knifeOut);
+  const vmInput = {
+    velocity: [lerp(prev.velocity[0], curr.velocity[0]), lerp(prev.velocity[1], curr.velocity[1]), lerp(prev.velocity[2], curr.velocity[2])],
+    grounded: curr.grounded,
+    viewOffsetZ: lerp(prev.viewOffsetZ, curr.viewOffsetZ),
+    sidemove: lastCmd.side,
+    yaw: input.yaw,
+    pitch: input.pitch,
+    landed: landVz,
+  };
   vm.update(
     frameDt,
-    {
-      velocity: [lerp(prev.velocity[0], curr.velocity[0]), lerp(prev.velocity[1], curr.velocity[1]), lerp(prev.velocity[2], curr.velocity[2])],
-      grounded: curr.grounded,
-      viewOffsetZ: lerp(prev.viewOffsetZ, curr.viewOffsetZ),
-      sidemove: lastCmd.side,
-      yaw: input.yaw,
-      pitch: input.pitch,
-      landed: landVz,
-    },
+    vmInput,
     { primary: arms.knifeOut && input.actionHeld("attack"), secondary: arms.knifeOut && input.actionHeld("attack2"), inspect: arms.knifeOut && input.actionHeld("inspect") },
   );
   landVz = 0;
   // The gun viewmodel rides the knife viewmodel's bob / sway (which keeps animating while hidden); hidden while scoped.
   gunView.setVisible(p.viewmodel.show && !thirdPerson.active && !mp?.isSpectating && !arms.scoped);
-  gunView.frame(frameDt, vm.feelMatrix, origins);
+  gunView.frame(frameDt, vm.feelMatrix, origins, vmInput);
   if (vm.inspects.holding !== inspectHeld) {
     inspectHeld = vm.inspects.holding;
     session.recordInspect(inspectHeld ? INSPECT_HOLD : INSPECT_RELEASE);

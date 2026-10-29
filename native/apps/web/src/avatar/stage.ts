@@ -7,6 +7,13 @@
 // there, procedural otherwise) for a short scripted moment: standing, a hop, an air strafe, a knife swing, the knife's
 // first inspect trick. `moment` picks where in it the picture is taken. Head tilt and ears are the bunny's acting
 // layer (BunnyModel.setActing) on top.
+//
+// The look (AVATAR_LOOK): every picture (the editor's preview, the saved WebP, the defaults, the background refresh)
+// draws at the Enhanced cosmetics and garment tiers with the finishes' clock held (shader.ts setCosmeticsStudio), set
+// around each pose and draw and put back after, so the game page's own graphics settings neither leak in nor get
+// touched. No scene capture (viewmodel/finishes/environment.ts): the backdrop is painted in 2D, there is no scene to
+// reflect, so the metals and the visor show their view-locked studio, which is also what makes every browser and the
+// headless renders agree. Changing any of this changes saved pictures: bump spec.ts AVATAR_RENDER_VERSION.
 
 import * as THREE from "three";
 import { PlayerModel, type PlayerPose } from "../player/model";
@@ -14,8 +21,29 @@ import { loadoutFor } from "../loadout";
 import { cosmetic } from "../progression";
 import { inspectSetFor } from "../viewmodel/inspects/index";
 import { knifeById } from "../viewmodel/knives/index";
+import { cosmeticsTier, setCosmeticsTier, type CosTier } from "../viewmodel/finishes/detail";
+import { cosmeticsStudio, setCosmeticsStudio } from "../viewmodel/finishes/shader";
+import { playerLookTier, setPlayerLookTier, type PlayerLookTier } from "../player/look-tier";
 import { BACKDROPS, type AvatarPose, type AvatarSpec } from "./spec";
-import type { ArmReach, ArmTurn } from "../player/bunny/model";
+import type { ArmReach, ArmTurn, BunnyModel } from "../player/bunny/model";
+
+/** The graphics look avatar pictures are drawn at: Enhanced detail for the cosmetics and the garments (see above). */
+export const AVATAR_LOOK: { cosmetics: CosTier; player: PlayerLookTier } = { cosmetics: 3, player: 2 };
+
+/** Runs `fn` (synchronous: a pose, a draw) at the avatar look, then puts the page's look back. Re-entrant. */
+export function atAvatarLook<T>(fn: () => T): T {
+  const cos = cosmeticsTier(), player = playerLookTier(), studio = cosmeticsStudio();
+  setCosmeticsTier(AVATAR_LOOK.cosmetics);
+  setPlayerLookTier(AVATAR_LOOK.player);
+  setCosmeticsStudio(true);
+  try {
+    return fn();
+  } finally {
+    setCosmeticsTier(cos);
+    setPlayerLookTier(player);
+    setCosmeticsStudio(studio);
+  }
+}
 
 const D2R = Math.PI / 180;
 const DT = 1 / 120;
@@ -29,9 +57,13 @@ const SETTLE = 1.2;
 /**
  * Gestures on the acting layer (BunnyActing), on top of the standing animation. Arms are placed by reach (two-bone IK:
  * where the wrist goes and which way the elbow points, in the bunny's bind space carried by the chest: x its left, -y
- * its front, z up; shoulders at (±8, 2, 61), the head bone at (0, 1, 67), the hood's front at y ≈ -7), so the hand
- * lands on the body from every angle. "Hold up" keeps its tuned turns (BunnyActing.arm). Hands open or point; the chest
- * and head lean [pitch, yaw, roll] degrees. Checked from several turns in the editor.
+ * its front, z up; shoulders at (±8, 2, 61), the head bone at (0, 1, 67), the hood's front at y ≈ -8.2 since the
+ * v0.0.29 head, 1.15x about (0, 1.2, 64.2): player/bunny/head-shape.ts), so the hand lands on the body from every angle.
+ * "Hold up" keeps its tuned turns (BunnyActing.arm). Hands open or point; the chest and head lean [pitch, yaw, roll]
+ * degrees. Checked from several turns in the editor, and measured: research/avatar-refresh/clearance.cjs (the hands and
+ * the knife keep the same gap to the hood as on the old head, every knife: Hold up's upper arm out a little, no twist,
+ * the salute and the chin rest moved out with the face; "Show off" steps off a moment whose trick goes through the
+ * face, AvatarStage.pose).
  */
 export interface Gesture {
   arm?: ArmTurn;
@@ -49,14 +81,14 @@ export interface Gesture {
 /** The free arm in one-arm gestures: hanging relaxed at the side, the elbow back. */
 const REST_L: ArmReach = { hand: [11.5, 1.5, 39], pole: [0.4, 1, 0] };
 export const GESTURES: Partial<Record<AvatarPose, Gesture>> = {
-  holdup: { arm: { shoulder: [-32, 6, -22], elbow: [-104, 0, 0] }, pitch: 6 },
+  holdup: { arm: { shoulder: [-32, 0, -17], elbow: [-104, 0, 0] }, pitch: 6 },
   wave: { reachR: { hand: [-18, -3, 76], pole: [-1, 0.3, -0.8] }, reachL: REST_L, handR: "open", head: [0, 0, -6], pitch: 4 },
   point: { reachR: { hand: [-6, -26, 62], pole: [-0.4, 0.2, -1] }, reachL: REST_L, handR: "point", pitch: 4 },
   cheer: { reachR: { hand: [-15, -3, 84], pole: [-1, 0, -0.2] }, reachL: { hand: [15, -3, 84], pole: [1, 0, -0.2] }, head: [-10, 0, 0], pitch: 2 },
   crossed: { reachR: { hand: [2, -10, 57], pole: [-1, -0.1, -0.7], wrist: [30, 0, 0] }, reachL: { hand: [-2, -12.5, 55.5], pole: [1, -0.1, -0.7], wrist: [30, 0, 0] }, head: [0, 0, 5], pitch: 6 },
   hips: { reachR: { hand: [-10, -1, 41], pole: [-1, 0.5, 0] }, reachL: { hand: [10, -1, 41], pole: [1, 0.5, 0] }, pitch: 6 },
-  salute: { reachR: { hand: [-9.5, -8, 71], pole: [-1, -0.2, -0.5] }, reachL: REST_L, handR: "open", head: [-4, 0, 0], pitch: 4 },
-  think: { reachR: { hand: [-1, -10, 61], pole: [-0.5, 0.1, -1] }, reachL: { hand: [-5, -9, 50], pole: [1, 0, -0.6] }, head: [7, 0, 6], pitch: 8 },
+  salute: { reachR: { hand: [-10.2, -8.7, 71.5], pole: [-1, -0.2, -0.5] }, reachL: REST_L, handR: "open", head: [-4, 0, 0], pitch: 4 },
+  think: { reachR: { hand: [-1.1, -10.9, 60.8], pole: [-0.5, 0.1, -1] }, reachL: { hand: [-5, -9, 50], pole: [1, 0, -0.6] }, head: [7, 0, 6], pitch: 8 },
   shrug: { reachR: { hand: [-18, -9, 52], pole: [-0.4, 0.4, -1] }, reachL: { hand: [18, -9, 52], pole: [0.4, 0.4, -1] }, handR: "open", handL: "open", chest: [-5, 0, 0], head: [0, 0, 12], pitch: 4 },
 };
 
@@ -210,6 +242,11 @@ function hexA(hex: string, a: number): string {
 const _box = new THREE.Box3();
 const _v = new THREE.Vector3();
 const _head = new THREE.Vector3();
+/** NDC height the head frames keep the top of the bunny under, and the share of the picture full body fills. */
+const FIT_TOP = 0.92;
+const FIT_FULL = 0.88;
+/** The gap (units) a knife caught mid-trick keeps from the head (BunnyModel.knifeHeadDepth). */
+const KNIFE_GAP = 0.6;
 
 /** Thumbnail close-ups (the editor's picker): a knife in the raised hand, or a glove. */
 export type Focus = "hand" | "glove";
@@ -227,7 +264,7 @@ export class AvatarStage {
     this.canvas = canvas ?? document.createElement("canvas");
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
     this.renderer.setClearColor(0x000000, 0);
-    this.model = new PlayerModel({ model: "bunny", style: "solid", playerGlow: null, outfit: "outfit-cream", loadout: loadoutFor({}) });
+    this.model = atAvatarLook(() => new PlayerModel({ model: "bunny", style: "solid", playerGlow: null, outfit: "outfit-cream", loadout: loadoutFor({}) }));
     this.model.setNearFade(0, 0);
     this.model.setOpacity(1);
     this.scene.add(this.model.root);
@@ -239,20 +276,26 @@ export class AvatarStage {
 
   /** Dresses and poses the bunny for `spec` (cheap when only the camera-side fields changed). */
   set(spec: AvatarSpec): void {
+    atAvatarLook(() => this.dress(spec));
+  }
+
+  private dress(spec: AvatarSpec): void {
     const prev = this.spec;
     this.spec = spec;
     const bm = this.model.bunnyModel;
     if (!prev || prev.outfit !== spec.outfit) bm?.setOutfit(spec.outfit);
-    const look = [spec.knife, spec.finish, spec.glove, spec.hat, spec.body, spec.hand, spec.gun].join("|");
-    const prevLook = prev ? [prev.knife, prev.finish, prev.glove, prev.hat, prev.body, prev.hand, prev.gun].join("|") : "";
+    const look = [spec.knife, spec.finish, spec.glove, spec.hat, spec.body, spec.hand, spec.gun, spec.hairColor, spec.hairLength].join("|");
+    const prevLook = prev ? [prev.knife, prev.finish, prev.glove, prev.hat, prev.body, prev.hand, prev.gun, prev.hairColor, prev.hairLength].join("|") : "";
     if (look !== prevLook) {
-      this.model.setLoadout(loadoutFor({ knife: spec.knife, finish: spec.finish, glove: spec.glove, hat: spec.hat, body: spec.body }));
+      this.model.setLoadout(loadoutFor({ knife: spec.knife, finish: spec.finish, glove: spec.glove, hat: spec.hat, body: spec.body, hairColor: spec.hairColor, hairLength: spec.hairLength }));
       this.model.setGun(spec.hand === "gun" ? spec.gun : null);
       bm?.setKnifeHidden(spec.hand === "none");
     }
     // The pose depends only on what's in hand (the knife's inspect, a gun) and the pose fields: colourway, hat, finish,
-    // gloves and build are restyles of the same pose (cheap: the picker's thumbnails swap them without re-posing).
-    const key = [spec.knife, spec.hand, spec.gun, spec.pose, spec.moment.toFixed(3), spec.tilt.toFixed(3), spec.ears.toFixed(3), spec.turn.toFixed(1), this.animSource, JSON.stringify(GESTURES[spec.pose] ?? null)].join("|");
+    // gloves and build are restyles of the same pose (cheap: the picker's thumbnails swap them without re-posing). The
+    // Ponytail is the exception: its pendulum (hat-fx.ts) is simulated with the pose, and its length changes the swing.
+    const pony = spec.hat === "hat-ponytail" ? `pony${spec.hairLength ?? ""}` : "";
+    const key = [spec.knife, spec.hand, spec.gun, spec.pose, spec.moment.toFixed(3), spec.tilt.toFixed(3), spec.ears.toFixed(3), spec.turn.toFixed(1), pony, this.animSource, JSON.stringify(GESTURES[spec.pose] ?? null)].join("|");
     if (key !== this.posed) {
       this.posed = key;
       this.pose(spec);
@@ -275,6 +318,21 @@ export class AvatarStage {
       earL: spec.ears, earR: spec.ears,
       ...(g ? { arm: g.arm, reachR: g.reachR, reachL: g.reachL, handR: g.handR, handL: g.handL, square: g.square ?? (g.reachR || g.reachL ? 1 : 0) } : {}),
     });
+    this.simulate(spec);
+    // A knife trick caught mid-flight can pass the blade through the face (Thornback's inspect, worse with the bigger
+    // v0.0.29 head): take the nearest moment where it's clear instead, the same one every time for the same spec.
+    if (bm && spec.pose === "showoff" && spec.hand === "knife" && bm.knifeHeadDepth() > -KNIFE_GAP) {
+      for (let k = 1; k <= 8; k++) {
+        const near = [spec.moment + 0.03 * k, spec.moment - 0.03 * k].filter((m) => m >= 0 && m <= 1);
+        const clear = near.find((m) => (this.simulate({ ...spec, moment: m }), bm.knifeHeadDepth() <= -KNIFE_GAP));
+        if (clear !== undefined) return;
+      }
+      this.simulate(spec);
+    }
+  }
+
+  /** Runs the pose's scripted moment from rest (BunnyModel's acting already set). */
+  private simulate(spec: AvatarSpec): void {
     const s = script(spec);
     const yaw = BASE_YAW + spec.turn;
     let t = 0;
@@ -305,12 +363,36 @@ export class AvatarStage {
     return { head: bm.headPoint(new THREE.Vector3()).toArray(), box: [box.min.toArray(), box.max.toArray()], feetYaw: bm.feetYaw, root: this.model.root.position.toArray(), cam: this.camera.position.toArray() };
   }
 
-  /** Points the camera for the spec's framing at the given aspect (w/h), or on the right hand for a thumbnail `focus`. */
+  /** The camera at `target`, framing `height` units, slightly above and looking a touch down (`elev` degrees). */
+  private place(target: THREE.Vector3, height: number, elev: number): void {
+    const dist = height / 2 / Math.tan((this.camera.fov * D2R) / 2);
+    this.camera.position.set(target.x, target.y + Math.sin(elev * D2R) * dist, target.z + Math.cos(elev * D2R) * dist);
+    this.camera.lookAt(target);
+    this.camera.updateMatrixWorld();
+  }
+
+  /** The posed body's sampled points (BunnyModel.bodyPoints) in world space. */
+  private worldPoints(bm: BunnyModel): THREE.Vector3[] {
+    const out: THREE.Vector3[] = [];
+    const a = bm.feetYaw * D2R, ca = Math.cos(a), sa = Math.sin(a);
+    const root = this.model.root.position;
+    bm.bodyPoints((p) => out.push(new THREE.Vector3(root.x + p.x * ca - p.y * sa, root.y + p.z, root.z - (p.x * sa + p.y * ca))));
+    return out;
+  }
+
+  /**
+   * Points the camera for the spec's framing at the given aspect (w/h), or on the right hand for a thumbnail `focus`.
+   *
+   * Head frames reach a set way down from the head bone (what each frame shows of the body) and up to the ear tips or
+   * the hat (a raised hand too, up to a cap); then the top is fitted to what the camera actually sees (it looks a touch
+   * down, so ears leaning back and a halo above them sit higher in the picture than their height says), so the bigger
+   * v0.0.29 head and the tall hats stay in the frame. Full body fits every point, both ways. Zoom scales the result.
+   */
   private frame(spec: AvatarSpec, focus?: Focus): void {
     const bm = this.model.bunnyModel;
     this.scene.updateMatrixWorld(true);
     // The posed body's box (model space, before the feet's yaw) -> world: its middle and its top.
-    let cx = 0, cy = 34, cz = 0, top = 78, feet = 0;
+    let cx = 0, cz = 0, top = 78, feet = 0;
     if (bm) {
       const box = bm.bodyBox(_box);
       if (!box.isEmpty()) {
@@ -320,12 +402,12 @@ export class AvatarStage {
         const root = this.model.root.position;
         cx = root.x + x;
         cz = root.z - y;
-        cy = root.y + c.z;
         top = root.y + box.max.z;
         feet = root.y + box.min.z;
       }
       bm.headPoint(_head);
     } else _head.set(0, 60, 0);
+    const elev = spec.frame === "full" ? 8 : 5;
     let target: THREE.Vector3, height: number;
     if (focus && bm) {
       // "hand": the wrist and the blade above it (a raised knife: "Hold up"); "glove": the raised open hand (a wave).
@@ -333,48 +415,82 @@ export class AvatarStage {
       target = new THREE.Vector3(_v.x, _v.y + (focus === "hand" ? 8 : 3), _v.z);
       height = focus === "hand" ? 34 : 17;
     } else if (spec.frame !== "full") {
-      // Around the head bone (high in the hood, ~62 of the bunny's 78 units; the ear tips ~18 above it). A hat raises
-      // the top a little; folded ears (mid-hop) never shrink the frame. How far down each frame reaches:
-      const down = spec.frame === "face" ? 12 : spec.frame === "close" ? 21 : 32;
-      const lo = _head.y - down, hi = Math.max(_head.y + 18, Math.min(top + 2, _head.y + 36));
+      // Around the head bone (high in the hood, ~62 of the bunny's 78 units; the ear tips ~19 above it). A hat raises
+      // the top; folded ears (mid-hop) never shrink the frame. How far down each frame reaches (the face frame a little
+      // further than before v0.0.29, with the bigger face):
+      const down = spec.frame === "face" ? 13.5 : spec.frame === "close" ? 21 : 32;
+      const k = spec.frame === "face" ? 1.14 : 1.1;
+      const lo = _head.y - down, cap = _head.y + 40;
+      let hi = Math.max(_head.y + 20, Math.min(top + 2, cap));
       target = new THREE.Vector3(spec.frame === "bust" ? (_head.x + cx) / 2 : _head.x, (lo + hi) / 2, spec.frame === "bust" ? (_head.z + cz) / 2 : _head.z);
-      height = (hi - lo) * (spec.frame === "face" ? 1.14 : 1.1);
+      height = (hi - lo) * k;
+      if (bm) {
+        // Raise the top until everything between the frame's bottom and the cap is inside it (a 4% margin).
+        const pts = this.worldPoints(bm).filter((p) => p.y > lo && p.y <= cap);
+        for (let i = 0; i < 6; i++) {
+          this.place(target, height, elev);
+          let maxY = -Infinity;
+          for (const p of pts) maxY = Math.max(maxY, _v.copy(p).project(this.camera).y);
+          if (maxY <= FIT_TOP) break;
+          hi += ((maxY - FIT_TOP) * height) / 2 / k + 0.25;
+          target.y = (lo + hi) / 2;
+          height = (hi - lo) * k;
+        }
+      }
     } else {
       target = new THREE.Vector3(cx, (feet + top) / 2, cz);
       height = (top - feet) * 1.14;
+      if (bm) {
+        // Every point inside, both ways (arms out, a knife held high), centred.
+        const pts = this.worldPoints(bm);
+        for (let i = 0; i < 6; i++) {
+          this.place(target, height, elev);
+          let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+          for (const p of pts) {
+            _v.copy(p).project(this.camera);
+            x0 = Math.min(x0, _v.x), x1 = Math.max(x1, _v.x), y0 = Math.min(y0, _v.y), y1 = Math.max(y1, _v.y);
+          }
+          const need = Math.max((y1 - y0) / 2, (x1 - x0) / 2) / FIT_FULL;
+          const mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+          if (Math.abs(need - 1) < 0.01 && Math.abs(mx) < 0.01 && Math.abs(my) < 0.01) break;
+          // Recentre (camera right is world +x; up is about world +y at this small elevation), then rescale.
+          target.x += (mx * height * this.camera.aspect) / 2;
+          target.y += (my * height) / 2;
+          height *= need;
+        }
+      }
     }
-    height *= spec.zoom;
-    const fov = this.camera.fov * D2R;
-    const dist = height / 2 / Math.tan(fov / 2);
-    // Slightly above, looking a touch down.
-    const elev = spec.frame === "full" ? 8 : 5;
-    this.camera.position.set(target.x, target.y + Math.sin(elev * D2R) * dist, target.z + Math.cos(elev * D2R) * dist);
-    this.camera.lookAt(target);
+    this.place(target, height * spec.zoom, elev);
   }
 
   /** Draws the bunny (no backdrop: transparent) into the stage canvas at w×h device pixels. */
   draw(w: number, h: number, focus?: Focus): void {
     if (!this.spec) return;
-    if (this.canvas.width !== w || this.canvas.height !== h) this.renderer.setSize(w, h, false);
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
-    this.frame(this.spec, focus);
-    this.renderer.render(this.scene, this.camera);
+    const spec = this.spec;
+    atAvatarLook(() => {
+      if (this.canvas.width !== w || this.canvas.height !== h) this.renderer.setSize(w, h, false);
+      this.camera.aspect = w / h;
+      this.camera.updateProjectionMatrix();
+      this.frame(spec, focus);
+      this.renderer.render(this.scene, this.camera);
+    });
   }
 
   /**
    * A finished square picture of `spec` (backdrop + bunny), size px. Rendered at 2× and scaled down for clean edges.
+   * The backdrop (a map shot may load first) is painted before the bunny is drawn, and the bunny is copied out in the
+   * same task, so the editor's own redraws on this canvas can't land in between.
    */
   async render(spec: AvatarSpec, size: number, maps: MapShots | null, focus?: Focus): Promise<HTMLCanvasElement> {
+    const out = document.createElement("canvas");
+    out.width = out.height = size;
+    const ctx = out.getContext("2d")!;
+    await paintBackdrop(ctx, spec.bg, size, maps);
     this.set(spec);
     const ss = Math.min(2, Math.max(1, Math.floor(4096 / size)));
     const big = size * ss;
     const prevW = this.canvas.width, prevH = this.canvas.height;
     this.draw(big, big, focus);
-    const out = document.createElement("canvas");
-    out.width = out.height = size;
-    const ctx = out.getContext("2d")!;
-    await paintBackdrop(ctx, spec.bg, size, maps);
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(this.canvas, 0, 0, big, big, 0, 0, size, size);
     if (prevW && prevH) this.draw(prevW, prevH);
@@ -384,5 +500,6 @@ export class AvatarStage {
   dispose(): void {
     this.model.dispose();
     this.renderer.dispose();
+    this.renderer.forceContextLoss();
   }
 }

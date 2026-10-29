@@ -6,6 +6,10 @@ import { normalizeGlowColor, DEFAULT_PLAYER_GLOW } from "./glow-config";
 //   rank crown under every hat, to check the hat wins)
 //   ?poses=neutral,run,walk,hop,air,strafe,crouch,crouchwalk,crouchjump,look,turn   ?t=<seconds> (freeze at a time)
 //   ?yaw=<deg> model facing (default 3/4 view)   ?cam=x,y,z&look=x,y,z&fov=deg close-ups   ?still=1 animated cosmetics held still   ?bench=N (time update() for N CS:S models)   ?map=<name> (content source)
+//   ?gun=<id> every bunny holds that gun (a core weapon id: glock, usp, fiveseven, m3, xm1014, p90, ak47, awp)
+//   ?guns=<id,id,...> one bunny column per gun (poses cycled)   ?pitch=<deg> overrides the poses' view pitch
+//   ?body=feminine Model B for every column   ?potato=1 cosmetic motion held still (Potato)
+//   window.preview.gunEvent(kind, seconds?, column?) plays "shot" / "reload" / "shell" (PlayerPose.gunShot, gunReload)
 // Drag to orbit, wheel to zoom. window.preview exposes the scene for screenshots / tests.
 
 import * as THREE from "three";
@@ -17,6 +21,8 @@ import { hasSkin, loadAnimRig, loadCsAsset, SKIN_LABEL, type CsSkin } from "./st
 import { cosmetic } from "../progression";
 import { loadoutFor } from "../loadout";
 import { resolveSkin } from "./model";
+import { gunById } from "../viewmodel/guns/index";
+import { setCosmeticsStill } from "../viewmodel/finishes/shader";
 
 const q = new URLSearchParams(location.search);
 const canvas = document.getElementById("c") as HTMLCanvasElement;
@@ -112,7 +118,10 @@ const headwear = (w: string) => {
   const crown = /^crown[123]$/.test(w) ? (Number(w.slice(5)) as 1 | 2 | 3) : [1, 2, 3].includes(crownQ) ? crownQ : null;
   return loadoutFor({ hat: w }, crown);
 };
-const columns: { pose: string; model?: string; outfit?: string; hat?: string; body?: string; label: string }[] = bodyList
+const gunList = q.get("guns")?.split(",").filter(Boolean) ?? null;
+const columns: { pose: string; model?: string; outfit?: string; hat?: string; body?: string; gun?: string; label: string }[] = gunList
+  ? gunList.map((g, i) => ({ pose: poseNames[i % poseNames.length], model: "bunny", gun: g, body: q.get("body") ?? undefined, label: gunById(g)?.name ?? g }))
+  : bodyList
   ? bodyList.map((body, i) => ({ pose: poseNames[i % poseNames.length], model: "bunny", body, label: body === "feminine" ? "Model B" : "Model A" }))
   : hatList
   ? hatList.map((w, i) => ({ pose: poseNames[i % poseNames.length], model: "bunny", hat: w, label: cosmetic(w)?.name ?? w }))
@@ -156,6 +165,8 @@ async function setup(): Promise<void> {
       const x = (i - (columns.length - 1) / 2) * spacing;
       const ghost = row.style === "ghost";
       const model = new PlayerModel({ playerGlow: normalizeGlowColor(q.get("glow")) ? { ...DEFAULT_PLAYER_GLOW, enabled: true, color: normalizeGlowColor(q.get("glow"))! } : null, previewGlow: true, style: ghost ? "ghost" : "solid", color: ghost ? ghostColors[i % 4] : undefined, model: (col.model ?? row.model) as PlayerModelKind, outfit: col.outfit ?? q.get("outfit") ?? undefined, ...(col.body ? { loadout: loadoutFor({ body: col.body === "feminine" ? "body-b" : "body-a" }), knife: null, outfit: col.outfit ?? q.get("outfit") ?? "outfit-cream" } : col.hat ? { loadout: headwear(col.hat) } : {}) });
+      const gun = col.gun ?? q.get("gun");
+      if (gun) model.setGun(gun);
       model.setOpacity(0.7);
       model.setNearFade(0, 0);
       model.setRenderOrder(20 + (r * columns.length + i) * 2);
@@ -167,9 +178,10 @@ async function setup(): Promise<void> {
       const rowx = Number(q.get("rowx") ?? 0);
       const back = rowx ? 0 : r * 70;
       const right = r * rowx;
+      const pitch = q.has("pitch") ? Number(q.get("pitch")) : null;
       const drive: Driver = (t) => {
         const p = d(t);
-        return { ...p, position: [p.position[0] + right, p.position[1] + back, p.position[2]] };
+        return { ...p, pitch: pitch ?? p.pitch, position: [p.position[0] + right, p.position[1] + back, p.position[2]] };
       };
       entries.push({ model, drive, label });
       scene.add(model.root);
@@ -202,13 +214,29 @@ resize();
 
 let simT = 0;
 const DT = 1 / 120;
+/** Gun events waiting for the next step, per entry (window.preview.gunEvent). */
+const gunEvents = new Map<Entry, Partial<PlayerPose>>();
 function step(dt: number) {
   simT += dt;
   for (const e of entries) {
-    e.model.setState(e.drive(simT));
+    const ev = gunEvents.get(e);
+    e.model.setState(ev ? { ...e.drive(simT), ...ev } : e.drive(simT));
+    gunEvents.delete(e);
     e.model.update(dt);
   }
 }
+
+/** A gun event on the next step: a shot, a reload of `seconds`, or a shell going in (one column, or all). */
+function gunEvent(kind: "shot" | "reload" | "shell", seconds = 2, column?: number): void {
+  entries.forEach((e, i) => {
+    if (column !== undefined && column !== i) return;
+    const ev = gunEvents.get(e) ?? {};
+    if (kind === "shot") ev.gunShot = true;
+    else ev.gunReload = { seconds, shell: kind === "shell" };
+    gunEvents.set(e, ev);
+  });
+}
+if (q.get("potato") === "1") setCosmeticsStill(true);
 
 /** Steps the simulation to time t (seconds) at 1/120 s (for frame sheets). */
 function seek(t: number): void {
@@ -276,6 +304,8 @@ Object.assign(window, {
     renderer,
     entries,
     seek,
+    step,
+    gunEvent,
     pause: (p: boolean) => (paused = p),
     get t() {
       return simT;

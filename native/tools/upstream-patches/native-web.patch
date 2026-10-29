@@ -1,7 +1,8 @@
 diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
+index 05a50f7..9280040 100644
 --- a/apps/web/src/api.ts
 +++ b/apps/web/src/api.ts
-@@ -726,11 +726,23 @@
+@@ -761,11 +761,23 @@ const countWrite = (init: RequestInit) => {
    if (m !== "GET" && m !== "HEAD") writes++;
  };
  
@@ -27,7 +28,7 @@ diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
    } catch (e) {
      if (e instanceof ApiUnavailable) throw e;
      throw new ApiUnavailable();
-@@ -739,24 +751,26 @@
+@@ -774,24 +786,26 @@ async function request(path: string, init: ApiRequestInit = {}): Promise<Respons
    return res;
  }
  
@@ -60,7 +61,7 @@ diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
    if (!res.ok) {
      if (!body?.error) throw new ApiUnavailable();
      throw new ApiError(res.status, body.error, body.message ?? `HTTP ${res.status}`, body as Record<string, unknown>);
-@@ -925,19 +939,19 @@
+@@ -960,19 +974,19 @@ export const api = {
     * reserved, ...), 409 "taken" (body.suggestion; registered players), 429 "rename_limit". Guests asking for a taken
     * name get a numbered variant: the result has nameAdjusted.
     */
@@ -86,7 +87,7 @@ diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
      setMe(user);
      return user;
    },
-@@ -961,12 +975,12 @@
+@@ -996,12 +1010,12 @@ export const api = {
      return json("/me/links", { cache: "no-cache" });
    },
    /** Strict: 400 bad_links names the platform (`body.platform`) and what's wrong. */
@@ -103,7 +104,7 @@ diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
    },
    /** Your support (Settings → Account, the Support page). 401 without a session. */
    async mySupport(): Promise<MySupport> {
-@@ -975,29 +989,29 @@
+@@ -1010,29 +1024,29 @@ export const api = {
    async giftWallet(): Promise<GiftWallet> {
      return json("/me/gifts", { cache: "no-store" });
    },
@@ -143,7 +144,7 @@ diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
    },
    /** The About page's thank-you list (names of supporters who opted in). */
    async supporters(): Promise<{ names: string[]; top: TopSupporter[] }> {
-@@ -1008,8 +1022,8 @@
+@@ -1043,8 +1057,8 @@ export const api = {
      return json<AccountView>("/me/account", { cache: "no-store" });
    },
    /** Removes a sign-in method (refused for the last one: ApiError 400 "last_method"). */
@@ -154,7 +155,7 @@ diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
      setMe(v.user);
      return v;
    },
-@@ -1042,23 +1056,28 @@
+@@ -1077,23 +1091,28 @@ export const api = {
      return json<OnboardingState>("/me/onboarding", post(o));
    },
    /** Discord-linked players: show (or hide) their Discord avatar publicly. Off by default; there are no uploads. */
@@ -189,7 +190,7 @@ diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
    async playerStats(id: string): Promise<{ totals: { verifiedRuns: number; jumps: number; playtimeSeconds: number; runTimeMs: number; mapsCompleted: number }; styles: { style: string; runs: number; maps: number }[]; maps: { map: string; runs: number }[]; activity: { at: number; runs: number }[] }> {
      return json(`/players/${encodeURIComponent(id)}/stats`);
    },
-@@ -1101,7 +1120,7 @@
+@@ -1136,7 +1155,7 @@ export const api = {
     * Uploads the server refuses outright (unranked map, zone/build mismatch, rate limit, ...) resolve to
     * { id: "", status: "rejected", reason, code } rather than throwing.
     */
@@ -198,7 +199,7 @@ diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
      // ?room=<id>: played in a multiplayer room, so the room announces the verified result (PB / top 10 / SR / WR).
      // &race=<id>: a run for the room's race you're in (net/race.ts): the room ties it to the race.
      // ?gauntlet=<attemptId>: a run in a gauntlet attempt (gauntlet/): the reply says whether it became the next split.
-@@ -1120,15 +1139,15 @@
+@@ -1155,15 +1174,15 @@ export const api = {
        if (opts.mouse) form.append("mouse", JSON.stringify(opts.mouse));
        init = { method: "POST", body: form };
      }
@@ -217,7 +218,7 @@ diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
    },
    // --- gauntlets
    async gauntlets(): Promise<GauntletHub> {
-@@ -1244,16 +1263,16 @@
+@@ -1282,16 +1301,16 @@ export const api = {
      return json("/me/cosmetics", { cache: "no-cache" });
    },
    /** Partial update; throws ApiError(400, "bad_cosmetic") naming the slot when an item is locked or unknown. */
@@ -241,13 +242,13 @@ diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
    /** Public URL of a verified run's replay (watch links: ?replay=<url>). */
    replayUrl(runId: string): string {
 diff --git a/apps/web/src/assets/audio/manifest.json b/apps/web/src/assets/audio/manifest.json
+index b602744..d85fc9f 100644
 --- a/apps/web/src/assets/audio/manifest.json
 +++ b/apps/web/src/assets/audio/manifest.json
-@@ -734,24 +734,6 @@
-       "loop": false,
+@@ -740,24 +740,6 @@
        "loopStart": 0,
        "loopEnd": 0
--    },
+     },
 -    "announcer_perfect": {
 -      "variants": 1,
 -      "durations": [
@@ -265,10 +266,11 @@ diff --git a/apps/web/src/assets/audio/manifest.json b/apps/web/src/assets/audio
 -      "durations": [
 -        3.630794
 -      ]
-     },
+-    },
      "ui_press": {
        "variants": 1,
-@@ -913,7 +895,14 @@
+       "durations": [
+@@ -969,7 +951,14 @@
    ],
    "credits": [
      "Sound effects: original, generated with ElevenLabs Sound Effects for bunnyhop.lol",
@@ -287,6 +289,7 @@ diff --git a/apps/web/src/assets/audio/manifest.json b/apps/web/src/assets/audio
 +  }
  }
 diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
+index 12efbce..618cd63 100644
 --- a/apps/web/src/core.ts
 +++ b/apps/web/src/core.ts
 @@ -1,5 +1,6 @@
@@ -296,7 +299,7 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
  
  export interface MeshGroup {
    model: number;
-@@ -294,6 +295,8 @@
+@@ -294,6 +295,8 @@ export const EVENT_WEAPON = 1 << 6;
  
  interface Exports {
    memory: WebAssembly.Memory;
@@ -305,7 +308,7 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
    alloc(len: number): number;
    load_map(ptr: number, len: number): number;
    load_map_physics?: (ptr: number, len: number) => number;
-@@ -357,6 +360,27 @@
+@@ -357,6 +360,27 @@ const wasmLoaders = WebAssembly as unknown as WasmLoaders;
  
  export class Core {
    private constructor(private x: Exports) {}
@@ -333,7 +336,7 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
  
    /** From wasm bytes, a fetch Response, or an already compiled module (Workers can't compile bytes at runtime). */
    static async create(source: BufferSource | WebAssembly.Module | Response | Promise<Response>): Promise<Core> {
-@@ -368,21 +392,21 @@
+@@ -368,21 +392,21 @@ export class Core {
    }
  
    private str(ptr: number, len: number): string {
@@ -359,7 +362,7 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
      if (!this.x.load_map(ptr, bsp.length)) throw new Error(this.lastError());
    }
  
-@@ -393,7 +417,7 @@
+@@ -393,7 +417,7 @@ export class Core {
    loadMapPhysics(bsp: Uint8Array): void {
      this.addPhysicsContent();
      const ptr = this.x.alloc(bsp.length);
@@ -368,7 +371,7 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
      this.commitPhysics(ptr, bsp.length);
    }
  
-@@ -409,7 +433,7 @@
+@@ -409,7 +433,7 @@ export class Core {
          if (done) break;
          if (off + value.length > len) throw new Error(`map stream longer than ${len} bytes`);
          // Re-take the view each chunk: memory.buffer is detached if the wasm memory grew.
@@ -377,7 +380,7 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
          off += value.length;
        }
        if (off !== len) throw new Error(`map stream ended at ${off} of ${len} bytes`);
-@@ -513,7 +537,8 @@
+@@ -513,7 +537,8 @@ export class Core {
      if (!x.mesh_sky_vertices_ptr || !x.mesh_sky_vertices_len || !x.mesh_sky_indices_ptr || !x.mesh_sky_indices_len || !x.mesh_sky_groups) return null;
      const vertices = this.f32(x.mesh_sky_vertices_ptr(), x.mesh_sky_vertices_len()).slice();
      const indices = this.u32(x.mesh_sky_indices_ptr(), x.mesh_sky_indices_len()).slice();
@@ -387,7 +390,7 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
      const groups = [];
      for (let i = 0; i + 3 <= g.length; i += 3) groups.push({ model: g[i], firstIndex: g[i + 1], indexCount: g[i + 2] });
      return { vertices, indices, groups };
-@@ -581,7 +606,7 @@
+@@ -581,7 +606,7 @@ export class Core {
      const levels: TextureLevel[] = [];
      for (let i = 0; i < h[1]; i++) {
        const [width, height, offset, size] = h.subarray(2 + i * 4, 6 + i * 4);
@@ -396,7 +399,7 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
      }
      return { format: h[0] as TextureFormat, levels };
    }
-@@ -590,7 +615,7 @@
+@@ -590,7 +615,7 @@ export class Core {
    lightmap(): Lightmap {
      const len = this.x.lightmap_size();
      const [width, height, hdr] = this.u32(this.x.scratch_u32_ptr(), len);
@@ -405,7 +408,7 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
      return { width, height, data, scale: this.x.lightmap_scale(), hdr: hdr === 1 };
    }
  
-@@ -608,7 +633,7 @@
+@@ -608,7 +633,7 @@ export class Core {
    /** The BSP pakfile lump (a store-only zip of embedded content). */
    pakfile(): Uint8Array {
      const len = this.x.pak_len();
@@ -414,7 +417,7 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
    }
  
    /** Physics settings and version (call after loading the map). Throws if this wasm build can't simulate the version. */
-@@ -718,7 +743,7 @@
+@@ -718,7 +743,7 @@ export class Core {
    /** Copies bytes into a fresh wasm allocation (ownership passes to the callee). */
    private give(bytes: Uint8Array): [number, number] {
      const ptr = this.x.alloc(bytes.length);
@@ -423,7 +426,7 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
      return [ptr, bytes.length];
    }
  
-@@ -755,7 +780,7 @@
+@@ -755,7 +780,7 @@ export class Core {
    /** Bytes of a file fetched via `contentProvide`/`contentAddFile` (assembled, CRC-checked), or null. */
    contentFile(path: string): Uint8Array | null {
      const len = this.cx.content_file(...this.giveStr(path));
@@ -432,7 +435,7 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
    }
  
    /** Supplies bytes for a pending request (archive chunk for VPKs, whole file for listings). */
-@@ -803,7 +828,7 @@
+@@ -803,7 +828,7 @@ export class Core {
    /** Reads a file through the current VFS (pakfile → fetched → mounts), or null (a mount hit becomes pending). */
    contentRead(path: string): Uint8Array | null {
      if (!this.cx.content_read(...this.giveStr(path))) return null;
@@ -441,7 +444,7 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
    }
  
    /** Pending requests of the current VFS (materials and anything read since the last `contentResolve`). */
-@@ -968,7 +993,7 @@
+@@ -968,7 +993,7 @@ export class Core {
      const levels: TextureLevel[] = [];
      for (let i = 0; i < h[1]; i++) {
        const [width, height, offset, size] = h.subarray(2 + i * 4, 6 + i * 4);
@@ -450,7 +453,7 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
      }
      return { format: h[0] as TextureFormat, levels };
    }
-@@ -1050,6 +1075,8 @@
+@@ -1050,6 +1075,8 @@ interface ContentExports {
  
  interface RestartExports {
    memory: WebAssembly.Memory;
@@ -459,7 +462,7 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
    scratch_f32_ptr(): number;
    set_position?: (x: number, y: number, z: number, yaw: number) => void;
    restart_point?: () => number;
-@@ -1098,9 +1125,10 @@
+@@ -1098,9 +1125,10 @@ export function setRestartNames(core: Core, targetname: string, classname: strin
    const name = new TextEncoder().encode(targetname);
    const cls = new TextEncoder().encode(classname);
    const ptr = e.alloc(name.length + cls.length);
@@ -471,7 +474,7 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
    e.set_restart_names(ptr, name.length, cls.length);
    RESTART_NAMES.set(core, { targetname, classname });
  }
-@@ -1117,7 +1145,7 @@
+@@ -1117,7 +1145,7 @@ export function restartPoint(core: Core): RestartPoint | null {
    if (!e.restart_point) return null;
    const len = e.restart_point();
    if (len < 4) return null;
@@ -480,7 +483,7 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
    const names = RESTART_NAMES.get(core);
    const p: RestartPoint = { position: [s[0], s[1], s[2]], yaw: s[3] };
    if (names?.targetname) p.targetname = names.targetname;
-@@ -1145,7 +1173,7 @@
+@@ -1145,7 +1173,7 @@ export function propCollisionMesh(core: Core): Float32Array {
    const e = restartExports(core);
    if (!e.prop_collision_mesh) return new Float32Array(0);
    const len = e.prop_collision_mesh();
@@ -489,7 +492,7 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
  }
  
  // ---- replay viewer wrappers (appended; exports at the end of crates/core/src/wasm.rs) ----
-@@ -1254,7 +1282,7 @@
+@@ -1254,7 +1282,7 @@ export function attackReport(core: Core): AttackReport | null {
    if (!x.attack_report) return null;
    const len = x.attack_report();
    if (len < 13) return null;
@@ -498,7 +501,7 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
    return {
      weapon: s[0],
      mode: s[1] === 2 ? 2 : 1,
-@@ -1352,7 +1380,7 @@
+@@ -1352,7 +1380,7 @@ export function weaponReport(core: Core): WeaponReport | null {
    if (!x.weapon_report) return null;
    const len = x.weapon_report();
    if (len < 9) return null;
@@ -507,7 +510,7 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
    return { flags: s[0], active: s[1], primary: s[2], secondary: s[3], knife: s[4] !== 0, clip: s[5], clipSize: s[6], reloadTicks: s[7], burst: s[8] !== 0, floorChanged: len > 9 && s[9] !== 0, silencer: len > 10 && s[10] !== 0, silencerTicks: len > 11 ? s[11] : 0 };
  }
  
-@@ -1379,6 +1407,7 @@
+@@ -1379,6 +1407,7 @@ export function floorWeapons(core: Core): Float32Array {
    const len = x.floor_weapons ? x.floor_weapons() : 0;
    if (len === 0) return EMPTY_F32;
    const ptr = x.scratch_f32_ptr();
@@ -516,9 +519,10 @@ diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
    if (!v || v.buffer !== x.memory.buffer || v.byteOffset !== ptr || v.length !== len) floorViews.set(core, (v = new Float32Array(x.memory.buffer, ptr, len)));
    return v;
 diff --git a/apps/web/src/feedback/modal.ts b/apps/web/src/feedback/modal.ts
+index adeb3ac..16348cc 100644
 --- a/apps/web/src/feedback/modal.ts
 +++ b/apps/web/src/feedback/modal.ts
-@@ -114,8 +114,28 @@
+@@ -114,8 +114,28 @@ export function gameContext(fps: number | null): Record<string, unknown> {
    const room = currentRoom();
    // The hashed entry chunk of this deploy (/assets/index-<hash>.js); "dev" under Vite.
    const script = [...document.scripts].map((x) => x.getAttribute("src")).find((src) => !!src && src.includes("/assets/")) ?? (import.meta.env.DEV ? "dev" : null);
@@ -549,9 +553,10 @@ diff --git a/apps/web/src/feedback/modal.ts b/apps/web/src/feedback/modal.ts
      ...(room ? { room } : {}),
      screen: document.body.dataset.screen || null,
 diff --git a/apps/web/src/feedback/state.ts b/apps/web/src/feedback/state.ts
+index 2da6be3..0e8a687 100644
 --- a/apps/web/src/feedback/state.ts
 +++ b/apps/web/src/feedback/state.ts
-@@ -38,11 +38,11 @@
+@@ -38,11 +38,11 @@ let installed = false;
  function install(): void {
    if (installed || typeof window === "undefined") return;
    installed = true;
@@ -567,6 +572,7 @@ diff --git a/apps/web/src/feedback/state.ts b/apps/web/src/feedback/state.ts
    const orig = console.error;
 diff --git a/apps/web/src/native-input.ts b/apps/web/src/native-input.ts
 new file mode 100644
+index 0000000..85be589
 --- /dev/null
 +++ b/apps/web/src/native-input.ts
 @@ -0,0 +1,75 @@
@@ -647,6 +653,7 @@ new file mode 100644
 +}
 diff --git a/apps/web/src/native-runtime.ts b/apps/web/src/native-runtime.ts
 new file mode 100644
+index 0000000..d8c4428
 --- /dev/null
 +++ b/apps/web/src/native-runtime.ts
 @@ -0,0 +1,40 @@
@@ -692,6 +699,7 @@ new file mode 100644
 +}
 diff --git a/apps/web/src/net/scoreboard.ts b/apps/web/src/net/scoreboard.ts
 new file mode 100644
+index 0000000..782ca90
 --- /dev/null
 +++ b/apps/web/src/net/scoreboard.ts
 @@ -0,0 +1,106 @@
@@ -803,6 +811,7 @@ new file mode 100644
 +}
 diff --git a/apps/web/src/player/model.d.ts b/apps/web/src/player/model.d.ts
 new file mode 100644
+index 0000000..b8e4e12
 --- /dev/null
 +++ b/apps/web/src/player/model.d.ts
 @@ -0,0 +1,38 @@
@@ -845,9 +854,10 @@ new file mode 100644
 +  inspectHeld?: boolean;
 +}
 diff --git a/apps/web/src/social/dock.ts b/apps/web/src/social/dock.ts
+index d9af2ae..6d8e418 100644
 --- a/apps/web/src/social/dock.ts
 +++ b/apps/web/src/social/dock.ts
-@@ -633,7 +633,7 @@
+@@ -633,7 +633,7 @@ export function initDock(): void {
    new MutationObserver(sync).observe(document.body, { attributes: true, attributeFilter: ["class", "data-screen"] });
    sync();
    // Esc closes the panel before the menu sees it.
@@ -857,6 +867,7 @@ diff --git a/apps/web/src/social/dock.ts b/apps/web/src/social/dock.ts
      (e) => {
        if (e.key !== "Escape" || !view || root!.hidden) return;
 diff --git a/apps/web/src/ui/account-name.ts b/apps/web/src/ui/account-name.ts
+index 4af9634..95a98be 100644
 --- a/apps/web/src/ui/account-name.ts
 +++ b/apps/web/src/ui/account-name.ts
 @@ -5,7 +5,7 @@
@@ -868,7 +879,7 @@ diff --git a/apps/web/src/ui/account-name.ts b/apps/web/src/ui/account-name.ts
  import { cleanName, nameProblem, NAME_MAX, NAME_MESSAGES, suggestName, type NameError } from "../moderation/names";
  import { h } from "./dom";
  import { sfx } from "../audio";
-@@ -37,7 +37,7 @@
+@@ -37,7 +37,7 @@ export function nameErrorMessage(e: unknown): string {
    return "Couldn't reach the server. Try again.";
  }
  
@@ -877,7 +888,7 @@ diff --git a/apps/web/src/ui/account-name.ts b/apps/web/src/ui/account-name.ts
    const id = `name-field-${++uid}`;
    const input = h("input.nf-input", {
      id,
-@@ -150,7 +150,7 @@
+@@ -150,7 +150,7 @@ export function nameField(o: { initial?: string; label?: string; autofocus?: boo
          return name;
        }
        try {
@@ -886,7 +897,22 @@ diff --git a/apps/web/src/ui/account-name.ts b/apps/web/src/ui/account-name.ts
          localStorage.setItem(NAME_LOCAL_KEY, u.name);
          input.value = u.name;
          set(u.nameAdjusted ? `That one was taken. You're ${u.name}.` : "Saved.", u.nameAdjusted ? "warn" : "ok");
+diff --git a/apps/web/src/ui/account-state.ts b/apps/web/src/ui/account-state.ts
+index f4ce771..3c1233e 100644
+--- a/apps/web/src/ui/account-state.ts
++++ b/apps/web/src/ui/account-state.ts
+@@ -50,8 +50,7 @@ export function me(): Promise<User | null> {
+     if (epoch !== accountEpoch) return;
+     setPBAccount(u);
+     if (!api.meStale()) void syncPBs();
+-    // A saved bunny avatar drawn with an older look: re-rendered in the background, out of play (avatar/refresh.ts).
+-    if (u?.bunnyAvatarStale && !api.meStale()) void import("../avatar/refresh").then((m) => m.scheduleAvatarRefresh(u)).catch(() => undefined);
++    // Native menus carry no Three renderer: a stale bunny avatar is re-rendered by the website on the next visit.
+     if (api.meStale()) recheckLater(u);
+   });
+   return p;
 diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
+index 7a1b2a8..b4eb5bb 100644
 --- a/apps/web/src/ui/card-editor.ts
 +++ b/apps/web/src/ui/card-editor.ts
 @@ -1,3 +1,4 @@
@@ -894,7 +920,7 @@ diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
  import { NewTracker as IndicatorTracker } from "./new-tracker";
  // Your profile card, edited in place (v0.0.9: no Customise tab). cardEditor() is the small editor under the card in
  // ui/profile.ts's "Edit card" mode: background, frame, title, name (supporters), badges and links; one click equips and
-@@ -17,7 +18,7 @@
+@@ -17,7 +18,7 @@ import { arrowNav, h } from "./dom";
  import { isLoadoutSlot, listedCosmetic, loadoutSwatch, shownCosmetic } from "./loadout-ui";
  import { availableNow } from "./community";
  import { CARD_PARTS, type CardPart } from "./cosmetic-slots";
@@ -903,7 +929,7 @@ diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
  import { nameMarks } from "./marks";
  import { SPECIAL_BADGES, GIFTER_TIERS } from "../creators";
  import { linkIcon } from "./marks";
-@@ -41,6 +42,8 @@
+@@ -41,6 +42,8 @@ export class Loadout {
    readonly owned: Set<string>;
    readonly earned: Set<string>;
    status: Status = { kind: "idle", text: "" };
@@ -912,7 +938,7 @@ diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
    private saved: CosmeticChoice;
    private pending: Partial<CosmeticChoice> = {};
    private timer = 0;
-@@ -48,6 +51,7 @@
+@@ -48,6 +51,7 @@ export class Loadout {
    private listeners = new Set<() => void>();
  
    constructor(readonly p: Profile) {
@@ -920,7 +946,7 @@ diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
      this.choice = { ...DEFAULT_COSMETICS, ...p.cosmetics };
      this.saved = { ...this.choice };
      this.badges = [...p.badges];
-@@ -65,7 +69,7 @@
+@@ -65,7 +69,7 @@ export class Loadout {
  
    /** Your equipped knife / finish / gloves -> the viewmodel, your bunny, replays. */
    private syncLoadout(): void {
@@ -929,7 +955,7 @@ diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
      const l = loadoutFor(this.choice, crownOf(profileRanks(this.p)));
      if (!sameLoadout(l, getLoadout())) setLoadout(l);
    }
-@@ -92,6 +96,7 @@
+@@ -92,6 +96,7 @@ export class Loadout {
    }
  
    equip(slot: CosmeticSlot, id: string | null): void {
@@ -937,7 +963,7 @@ diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
      const c = id ? COSMETICS.find((x) => x.id === id) : null;
      if (id && (!c || !this.owned.has(id) || !listedCosmetic(c))) return;
      if (this.choice[slot] === id) return;
-@@ -100,6 +105,7 @@
+@@ -100,6 +105,7 @@ export class Loadout {
  
    /** Changes several slots at once (Randomise / Reset); `label` + undo in the status line. */
    apply(patch: Partial<CosmeticChoice>, label?: string): void {
@@ -945,7 +971,7 @@ diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
      const before = { ...this.choice };
      this.choice = { ...this.choice, ...patch };
      Object.assign(this.pending, patch);
-@@ -113,12 +119,14 @@
+@@ -113,12 +119,14 @@ export class Loadout {
  
    private async flush(label?: string, undo?: () => void): Promise<void> {
      if (this.inflight) await this.inflight;
@@ -961,7 +987,7 @@ diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
          this.saved = res;
          // What's saved is the profile now (the Loadout screen builds from it); the page's cached own profile refetches.
          this.p.cosmetics = { ...res };
-@@ -130,6 +138,7 @@
+@@ -130,6 +138,7 @@ export class Loadout {
          this.syncLoadout();
          this.setStatus({ kind: "saved", text: label ? `${label} saved` : "Saved", undo });
        } catch (e) {
@@ -969,7 +995,7 @@ diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
          this.choice = { ...this.saved };
          this.pending = {};
          this.syncLoadout();
-@@ -149,13 +158,15 @@
+@@ -149,13 +158,15 @@ export class Loadout {
    }
  
    setBadges(next: string[]): void {
@@ -987,7 +1013,7 @@ diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
          this.badges = before;
          this.setStatus({ kind: "error", text: e instanceof ApiError ? e.message : "Couldn't save" });
        },
-@@ -447,6 +458,7 @@
+@@ -447,6 +458,7 @@ export function cardEditor(p: Profile, lo: Loadout, news: NewTracker, o: CardEdi
  // boosts the Discord server (the API sends boosterSettings then); the server decides who has the badge.
  
  function boosterSwitch(p: Profile, onBooster?: (show: boolean) => void): HTMLElement | null {
@@ -995,7 +1021,7 @@ diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
    if (!p.boosterSettings) return null;
    let show = p.boosterSettings.show;
    const toggle = h("input.switch", { type: "checkbox", checked: show }) as HTMLInputElement;
-@@ -456,7 +468,8 @@
+@@ -456,7 +468,8 @@ function boosterSwitch(p: Profile, onBooster?: (show: boolean) => void): HTMLEle
      status.className = "pf-status saving";
      status.textContent = "Saving…";
      try {
@@ -1005,7 +1031,7 @@ diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
        p.boosterSettings = { show };
        status.className = "pf-status saved";
        status.replaceChildren(h("span.pf-status-ok", { html: CHECK_SVG }), "Saved");
-@@ -484,6 +497,7 @@
+@@ -484,6 +497,7 @@ interface SupporterEditor {
  }
  
  function supporterEditor(p: Profile, onSaved?: (s: SupporterSettings) => void): SupporterEditor | null {
@@ -1013,7 +1039,7 @@ diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
    if (!p.supporterSettings) return null;
    const status = () => h("span.pf-status", { role: "status", "aria-live": "polite" });
    const badgeStatus = status();
-@@ -497,7 +511,8 @@
+@@ -497,7 +511,8 @@ function supporterEditor(p: Profile, onSaved?: (s: SupporterSettings) => void):
    const save = async (patch: SupporterPatch, el: HTMLElement | null = null): Promise<void> => {
      if (el) say(el, "saving", "Saving…");
      try {
@@ -1023,7 +1049,7 @@ diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
        p.supporterSettings = s;
        badge.checked = s.showBadge;
        board.checked = s.showOnBoard;
-@@ -533,6 +548,7 @@
+@@ -533,6 +548,7 @@ function supporterEditor(p: Profile, onSaved?: (s: SupporterSettings) => void):
  const LINK_PLACEHOLDER: Record<LinkPlatform, string> = { youtube: "@yourchannel", twitch: "yourchannel", x: "@yourhandle", tiktok: "@yourhandle" };
  
  function linksEditor(p: Profile, onLinks?: (links: ProfileLinks, show: boolean) => void): { el: HTMLElement; count: () => string; onCount: () => void } {
@@ -1031,7 +1057,7 @@ diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
    let saved: ProfileLinks = { ...(p.linkSettings?.links ?? {}) };
    let show = p.linkSettings?.show ?? false;
    const out = { el: h("div.lk-editor"), count: () => (Object.keys(saved).length ? `${Object.keys(saved).length}${show ? "" : " · off"}` : "none"), onCount: () => {} };
-@@ -549,7 +565,8 @@
+@@ -549,7 +565,8 @@ function linksEditor(p: Profile, onLinks?: (links: ProfileLinks, show: boolean)
      say("saving", "Saving…");
      for (const r of rows.values()) r.err.textContent = "";
      try {
@@ -1041,7 +1067,7 @@ diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
        saved = { ...r.links };
        show = r.show;
        toggle.checked = show;
-@@ -617,6 +634,7 @@
+@@ -617,6 +634,7 @@ function linksEditor(p: Profile, onLinks?: (links: ProfileLinks, show: boolean)
  
  /** The badges after your name (Edit card → Badges): Verified, Creator, Server Booster, Supporter, your Gifter tier. */
  function nameBadgeEditor(p: Profile, changed: () => void): HTMLElement {
@@ -1049,7 +1075,7 @@ diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
    const root = h("section.ce-name-badges", { "aria-label": "Badges after your name" });
    let busy = false;
    let feedback = "";
-@@ -656,7 +674,8 @@
+@@ -656,7 +674,8 @@ function nameBadgeEditor(p: Profile, changed: () => void): HTMLElement {
      const status = root.querySelector(".ce-name-status");
      if (status) status.textContent = feedback;
      try {
@@ -1060,6 +1086,7 @@ diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
        Object.assign(p.player, next, {
          supporter: next.nameBadges.includes("supporter") && next.owned.includes("supporter"),
 diff --git a/apps/web/src/ui/country-picker.ts b/apps/web/src/ui/country-picker.ts
+index 44897ca..7b7686c 100644
 --- a/apps/web/src/ui/country-picker.ts
 +++ b/apps/web/src/ui/country-picker.ts
 @@ -1,4 +1,5 @@
@@ -1069,7 +1096,7 @@ diff --git a/apps/web/src/ui/country-picker.ts b/apps/web/src/ui/country-picker.
  import { COUNTRIES, countryCode } from "../countries";
  import { countryFlag } from "./country-flag";
  import { arrowNav, h } from "./dom";
-@@ -6,6 +7,7 @@
+@@ -6,6 +7,7 @@ import { dismissOutside } from "./dismiss";
  
  /** Detection is a shortcut only; nothing is published until Save. */
  export function countryPicker(current: string | null | undefined, saved: (code: string | null) => void): void {
@@ -1077,7 +1104,7 @@ diff --git a/apps/web/src/ui/country-picker.ts b/apps/web/src/ui/country-picker.
    let selected = countryCode(current);
    let busy = false;
    const countries = Object.entries(COUNTRIES).sort((a, b) => a[1].localeCompare(b[1]));
-@@ -56,8 +58,9 @@
+@@ -56,8 +58,9 @@ export function countryPicker(current: string | null | undefined, saved: (code:
      controls.disabled = save.disabled = true;
      status.textContent = "Saving…";
      try {
@@ -1089,9 +1116,10 @@ diff --git a/apps/web/src/ui/country-picker.ts b/apps/web/src/ui/country-picker.
      } catch (error) {
        status.textContent = error instanceof Error ? error.message : "Couldn't save your flag. Try again.";
 diff --git a/apps/web/src/ui/gifting.ts b/apps/web/src/ui/gifting.ts
+index c2de027..a94cc83 100644
 --- a/apps/web/src/ui/gifting.ts
 +++ b/apps/web/src/ui/gifting.ts
-@@ -3,8 +3,9 @@
+@@ -3,8 +3,9 @@ import "./account.css";
  import { api, ApiError } from "../api";
  import { GIFTER_BOW, GIFTER_PATH, GIFTER_TIERS } from "../creators";
  import { GIFT_MAX_RECIPIENTS, type GiftPreview, type GiftTarget, type GiftWallet } from "../gifting";
@@ -1102,7 +1130,7 @@ diff --git a/apps/web/src/ui/gifting.ts b/apps/web/src/ui/gifting.ts
  import { dismissOutside } from "./dismiss";
  
  /** A small credit coin, distinct from the transparent earned Gifter badge. */
-@@ -48,11 +49,14 @@
+@@ -48,11 +49,14 @@ export function openGiftDialog(o: GiftDialogOptions = {}): void {
    document.exitPointerLock?.();
    const dialog = h("dialog.acct-dialog.gift-dialog", { "aria-labelledby": "gift-title" });
    current = dialog;
@@ -1117,7 +1145,7 @@ diff --git a/apps/web/src/ui/gifting.ts b/apps/web/src/ui/gifting.ts
    let wallet: GiftWallet | null = null;
    const status = h("p.gift-status", { role: "status", "aria-live": "polite" }, "Loading your gift credits…");
    const balance = h("span.gift-balance", { "aria-label": "Available gift credits" });
-@@ -137,14 +141,15 @@
+@@ -137,14 +141,15 @@ export function openGiftDialog(o: GiftDialogOptions = {}): void {
    };
    quantity.addEventListener("input", invalidate);
    choose.addEventListener("click", async () => {
@@ -1135,7 +1163,7 @@ diff --git a/apps/web/src/ui/gifting.ts b/apps/web/src/ui/gifting.ts
        reviewed = wanted;
        balance.replaceChildren(giftCreditCoin(), `${preview.credits} credit${preview.credits === 1 ? "" : "s"} available`);
        const players = `${preview.cost} ${wanted.mode === "random" ? "random " : ""}player${preview.cost === 1 ? "" : "s"}`;
-@@ -163,6 +168,7 @@
+@@ -163,6 +168,7 @@ export function openGiftDialog(o: GiftDialogOptions = {}): void {
      } finally { setBusy(false); }
    });
    send.addEventListener("click", async () => {
@@ -1143,7 +1171,7 @@ diff --git a/apps/web/src/ui/gifting.ts b/apps/web/src/ui/gifting.ts
      if (busy || !reviewed || !preview?.canDeliver || !userId) return;
      const key = operationKey(reviewed);
      const operation = pendingGift(key) ?? { id: crypto.randomUUID(), maxCost: preview.cost };
-@@ -170,7 +176,8 @@
+@@ -170,7 +176,8 @@ export function openGiftDialog(o: GiftDialogOptions = {}): void {
      setBusy(true);
      status.textContent = "Sending…";
      try {
@@ -1153,7 +1181,7 @@ diff --git a/apps/web/src/ui/gifting.ts b/apps/web/src/ui/gifting.ts
        rememberGift(key, null);
        showWallet(delivered.wallet);
        review.replaceChildren(h("strong", null, `${delivered.cost === 1 ? "Gift" : `${delivered.cost} gifts`} sent. Thank you!`), h("p", null, delivered.delivered.map((p) => p.name).join(", ")));
-@@ -222,13 +229,15 @@
+@@ -222,13 +229,15 @@ export function openGiftDialog(o: GiftDialogOptions = {}): void {
    dismissOutside(dialog, () => { if (!busy) dialog.close(); });
    dialog.addEventListener("close", () => { revision++; current = null; dialog.remove(); });
    document.body.append(dialog);
@@ -1171,7 +1199,7 @@ diff --git a/apps/web/src/ui/gifting.ts b/apps/web/src/ui/gifting.ts
      showWallet(w);
      controls.disabled = false;
      invalidate();
-@@ -245,7 +254,9 @@
+@@ -245,7 +254,9 @@ export function giftWalletPanel(): HTMLElement {
    const detail = h("p.gift-wallet-note", null, "Loading…");
    const open = h("button.btn.primary", { type: "button", disabled: true, onclick: () => openGiftDialog() }, "Gift Supporter");
    const panel = h("section.sp-gifts", { "aria-label": "Your gift credits" }, h("div.sp-gifts-top", null, amount, open), track, detail);
@@ -1182,7 +1210,7 @@ diff --git a/apps/web/src/ui/gifting.ts b/apps/web/src/ui/gifting.ts
      if (!w) { track.hidden = true; detail.hidden = false; detail.textContent = "Sign in to see your gift credits."; return; }
      amount.replaceChildren(giftCreditCoin(), `${w.credits} gift credit${w.credits === 1 ? "" : "s"}`);
      const next = GIFTER_TIERS.find(t => t.goal === w.nextTier);
-@@ -257,9 +268,10 @@
+@@ -257,9 +268,10 @@ export function giftWalletPanel(): HTMLElement {
      track.hidden = false;
      detail.hidden = true;
      open.disabled = false;
@@ -1195,9 +1223,10 @@ diff --git a/apps/web/src/ui/gifting.ts b/apps/web/src/ui/gifting.ts
    return panel;
  }
 diff --git a/apps/web/src/ui/loadout-ui.ts b/apps/web/src/ui/loadout-ui.ts
+index 2224a5d..5a6624c 100644
 --- a/apps/web/src/ui/loadout-ui.ts
 +++ b/apps/web/src/ui/loadout-ui.ts
-@@ -8,7 +8,7 @@
+@@ -8,7 +8,7 @@ import { getOutfit } from "../player/cosmetics";
  import { achievement, cosmetic, RARITY, type CosmeticDef } from "../progression";
  import { availableNow } from "./community";
  import { finishStyle, gloveStyle, type CosmeticLoadout } from "../loadout";
@@ -1207,6 +1236,7 @@ diff --git a/apps/web/src/ui/loadout-ui.ts b/apps/web/src/ui/loadout-ui.ts
  
  /** Knives the registry hasn't built yet stay hidden everywhere (they appear, as new, once they ship). */
 diff --git a/apps/web/src/ui/player-glow-controls.ts b/apps/web/src/ui/player-glow-controls.ts
+index b07c51a..c3f82f5 100644
 --- a/apps/web/src/ui/player-glow-controls.ts
 +++ b/apps/web/src/ui/player-glow-controls.ts
 @@ -1,7 +1,8 @@
@@ -1220,7 +1250,7 @@ diff --git a/apps/web/src/ui/player-glow-controls.ts b/apps/web/src/ui/player-gl
  import { getPlayerGlow, playerGlowRevision, setPlayerGlow } from "../player/cosmetics";
  import { accountGeneration, onAccountChange } from "./account-state";
  import { h } from "./dom";
-@@ -31,13 +32,14 @@
+@@ -33,13 +34,14 @@ export function playerGlowControls(o: { root: () => HTMLElement; preview: () =>
      clearTimeout(glowTimer);
      const seq = ++glowSeq;
      const generation = accountGeneration();
@@ -1238,6 +1268,7 @@ diff --git a/apps/web/src/ui/player-glow-controls.ts b/apps/web/src/ui/player-gl
            savedGlow = { ...s.playerGlow };
 diff --git a/apps/web/src/ui/profile-write.ts b/apps/web/src/ui/profile-write.ts
 new file mode 100644
+index 0000000..dfd1a56
 --- /dev/null
 +++ b/apps/web/src/ui/profile-write.ts
 @@ -0,0 +1,9 @@
@@ -1251,6 +1282,7 @@ new file mode 100644
 + * API can apply response side effects. Native keeps its document across logins. */
 +export function profileWriteGuard(owner:string):RequestDispatch&{current():boolean} {return captureProfileWrite(owner,{generation:accountGeneration,owner:()=>lastKnownMe()?.id??null});}
 diff --git a/apps/web/src/ui/profile.ts b/apps/web/src/ui/profile.ts
+index 79f8bef..5dddb77 100644
 --- a/apps/web/src/ui/profile.ts
 +++ b/apps/web/src/ui/profile.ts
 @@ -1,3 +1,4 @@
@@ -1258,7 +1290,7 @@ diff --git a/apps/web/src/ui/profile.ts b/apps/web/src/ui/profile.ts
  import { whisper } from "../notify";
  import { playerGlowControls } from "./player-glow-controls";
  import { DOTS } from "../social/dock";
-@@ -35,7 +36,7 @@
+@@ -35,7 +36,7 @@ import "./profile.css";
  import { mouseFromPrefs } from "../mouse-settings";
  import { prefs } from "./settings";
  import { mouseProfileEditor, mouseProfileStats } from "./mouse-profile";
@@ -1267,7 +1299,7 @@ diff --git a/apps/web/src/ui/profile.ts b/apps/web/src/ui/profile.ts
  import { countryPicker } from "./country-picker";
  import { api, ApiError, ApiUnavailable, lastKnownMe, type PlayerGauntlets, type PointsRecord, type Profile, type RunCard } from "../api";
  import { COSMETICS, supporterItem, type CosmeticChoice } from "../progression";
-@@ -169,11 +170,14 @@
+@@ -169,11 +170,14 @@ export function profileScreen(id: string, a: ProfileActions, open: ProfileOpen =
      root.removeAttribute("aria-busy");
      return root;
    }
@@ -1282,7 +1314,7 @@ diff --git a/apps/web/src/ui/profile.ts b/apps/web/src/ui/profile.ts
        render(root, p, a, open, tabs, p.player.id === early.id ? early : { id: p.player.id });
        if (ownTabs) root.prepend(tabs);
      })
-@@ -191,6 +195,7 @@
+@@ -191,6 +195,7 @@ export function profileScreen(id: string, a: ProfileActions, open: ProfileOpen =
  // ---------------------------------------------------------------------------------------------
  
  function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileOpen, tabsHost: HTMLElement, early: EarlyReads): void {
@@ -1290,7 +1322,7 @@ diff --git a/apps/web/src/ui/profile.ts b/apps/web/src/ui/profile.ts
    const lo = new Loadout(p);
    const news = NewTracker.forProfile(p);
    let featuredIds = p.featuredAuto ? [] : p.featured.map((r) => r.runId);
-@@ -472,9 +477,11 @@
+@@ -472,9 +477,11 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
      known.set(run.runId, run);
      const next = featuredIds.includes(run.runId) ? featuredIds.filter((x) => x !== run.runId) : [...featuredIds, run.runId].slice(-5);
      try {
@@ -1304,9 +1336,10 @@ diff --git a/apps/web/src/ui/profile.ts b/apps/web/src/ui/profile.ts
        drawFeatured();
        runs?.refresh();
 diff --git a/apps/web/src/ui/run-stats.ts b/apps/web/src/ui/run-stats.ts
+index 5bdbcd2..341c45c 100644
 --- a/apps/web/src/ui/run-stats.ts
 +++ b/apps/web/src/ui/run-stats.ts
-@@ -200,7 +200,7 @@
+@@ -201,7 +201,7 @@ function bindGlobal(): void {
    if (globalBound) return;
    globalBound = true;
    // Escape closes the card first (not the dialog or menu under it).
@@ -1315,7 +1348,7 @@ diff --git a/apps/web/src/ui/run-stats.ts b/apps/web/src/ui/run-stats.ts
      "keydown",
      (e) => {
        if (e.key !== "Escape" || !card || card.hidden) return;
-@@ -213,13 +213,13 @@
+@@ -214,13 +214,13 @@ function bindGlobal(): void {
    );
    // Any other key (paging the board, typing in its search) or a press anywhere closes it too; Tab moves focus, which
    // moves the card itself (focusin / focusout).
@@ -1335,9 +1368,10 @@ diff --git a/apps/web/src/ui/run-stats.ts b/apps/web/src/ui/run-stats.ts
  
  const rowOf = (t: EventTarget | null): HTMLElement | null => (t instanceof Element ? t.closest<HTMLElement>("tr[data-run]") : null);
 diff --git a/apps/web/src/ui/support.ts b/apps/web/src/ui/support.ts
+index 7074f88..b073769 100644
 --- a/apps/web/src/ui/support.ts
 +++ b/apps/web/src/ui/support.ts
-@@ -24,7 +24,7 @@
+@@ -24,7 +24,7 @@ import { playerGlowControls } from "./player-glow-controls";
  import { WAVEDASH } from "../platform/env";
  import { wavedashCopy } from "../platform/wavedash";
  import "./support.css";
@@ -1346,7 +1380,7 @@ diff --git a/apps/web/src/ui/support.ts b/apps/web/src/ui/support.ts
  import { NAME_COLORS, NAME_EFFECTS, type NameColorId, type NameEffect, type NameLook } from "../creators";
  import { cosmetic, DEFAULT_COSMETICS, supporterItem, SUPPORTER_MIN_USD, SUPPORTER_SETS, type SupporterSetId } from "../progression";
  import { UNRANKED } from "../ranking";
-@@ -38,6 +38,7 @@
+@@ -38,6 +38,7 @@ import { hopIndicator } from "./hop";
  import { loadoutView, type LoadoutChoice, type LoadoutModel } from "./loadout-view";
  import { nameAttrs, supporterMark } from "./marks";
  import { navigate } from "./nav";
@@ -1354,7 +1388,7 @@ diff --git a/apps/web/src/ui/support.ts b/apps/web/src/ui/support.ts
  import { supportGifting } from "./support-gifting";
  
  /**
-@@ -156,11 +157,12 @@
+@@ -164,11 +165,12 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
    look.on(() => {
      if (!savedLook || (look.color === savedLook.color && look.effect === savedLook.effect)) return;
      clearTimeout(saveTimer);
@@ -1368,7 +1402,7 @@ diff --git a/apps/web/src/ui/support.ts b/apps/web/src/ui/support.ts
          (s) => {
            if (seq !== saveSeq) return;
            savedLook = { color: s.nameColor, effect: s.nameEffect };
-@@ -439,13 +441,16 @@
+@@ -447,13 +449,16 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
  
  /** A supporter's "Show me in Top supporters" switch (also the About page's thank-you list). */
  function boardSwitch(s: MySupport): HTMLElement {
@@ -1387,9 +1421,10 @@ diff --git a/apps/web/src/ui/support.ts b/apps/web/src/ui/support.ts
        status.textContent = "Saved";
      } catch {
 diff --git a/apps/web/src/viewmodel/inspects/third.ts b/apps/web/src/viewmodel/inspects/third.ts
+index bab207f..e48f15c 100644
 --- a/apps/web/src/viewmodel/inspects/third.ts
 +++ b/apps/web/src/viewmodel/inspects/third.ts
-@@ -60,7 +60,7 @@
+@@ -60,7 +60,7 @@ function quatOf(m: ArrayLike<number>, q: Float32Array, o: number): void {
  }
  
  /** Samples a first-person clip's knife-in-hand motion (relative to the held knife), for knife `def`. */
@@ -1398,7 +1433,7 @@ diff --git a/apps/web/src/viewmodel/inspects/third.ts b/apps/web/src/viewmodel/i
    let m = tracks.get(clip);
    if (!m) tracks.set(clip, (m = new Map()));
    const key = def?.id ?? "carrot";
-@@ -239,11 +239,11 @@
+@@ -239,11 +239,11 @@ export class TpInspect {
      // Presented amount and knife motion (crossfaded like the first person).
      const cc = clips[pz.cur.trick];
      let p = presented(pz.cur.t, cc.enter, cc.exit, cc.len);
@@ -1414,6 +1449,7 @@ diff --git a/apps/web/src/viewmodel/inspects/third.ts b/apps/web/src/viewmodel/i
      p *= w;
 diff --git a/apps/web/src/wasm/.gitignore b/apps/web/src/wasm/.gitignore
 new file mode 100644
+index 0000000..f3fae4a
 --- /dev/null
 +++ b/apps/web/src/wasm/.gitignore
 @@ -0,0 +1,2 @@

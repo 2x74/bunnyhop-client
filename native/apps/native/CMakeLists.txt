@@ -456,7 +456,18 @@ if(BUILD_TESTING)
             WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP ssj_oracle TIMEOUT 120)
         add_test(NAME native_ssj COMMAND bunnyhop-native-ssj-tests "${SSJ_ORACLE}")
         set_tests_properties(native_ssj PROPERTIES FIXTURES_REQUIRED ssj_oracle)
+        set(PONYTAIL_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/ponytail-oracle.json")
+        add_test(NAME native_ponytail_oracle
+            COMMAND "${BUN_EXECUTABLE}" apps/native/src/ponytail-oracle.ts "${PONYTAIL_ORACLE}")
+        set_tests_properties(native_ponytail_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP ponytail_oracle TIMEOUT 60)
+        add_test(NAME native_ponytail COMMAND bunnyhop-native-ponytail-tests "${PONYTAIL_ORACLE}")
+        set_tests_properties(native_ponytail PROPERTIES FIXTURES_REQUIRED ponytail_oracle)
     endif()
+    add_executable(bunnyhop-native-ponytail-tests src/ponytail_tests.cpp)
+    target_include_directories(bunnyhop-native-ponytail-tests PRIVATE vendor)
+    target_compile_options(bunnyhop-native-ponytail-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
     add_executable(bunnyhop-native-ssj-tests src/ssj_tests.cpp)
     target_include_directories(bunnyhop-native-ssj-tests PRIVATE vendor src)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
