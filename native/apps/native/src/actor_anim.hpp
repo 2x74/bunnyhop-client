@@ -412,8 +412,10 @@ struct Acting {
 };
 
 struct Ear {
-    int bone = -1;
+    int bone = -1, carrier = -1;
     double side = 1;
+    // Hanging from the lowered hood (a wig on): stiffer, swings less and never acts.
+    bool hang = false;
     std::array<double, 3> base{}, mid{}, dir{}, p{}, v{}, wb{};
     bool has = false;
 };
@@ -423,6 +425,7 @@ swing(const std::array<double, 3> &a,
       const std::array<double, 3> &b,
       const std::array<double, 3> &pivot,
       double frac,
+      double max_angle,
       float *out) {
     double x = a[1] * b[2] - a[2] * b[1], y = a[2] * b[0] - a[0] * b[2], z = a[0] * b[1] - a[1] * b[0],
            len = std::sqrt(x * x + y * y + z * z), angle = std::atan2(len, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]);
@@ -434,7 +437,7 @@ swing(const std::array<double, 3> &a,
         y /= len;
         z /= len;
     }
-    angle = std::min(angle, 1.1) * frac;
+    angle = std::min(angle, max_angle) * frac;
     double c = std::cos(angle), sn = std::sin(angle), t = 1 - c;
     float r[9] = {
             float(t * x * x + c),
@@ -462,6 +465,9 @@ struct State {
     double lastJump = -1;
     bool wasGrounded = true;
     std::array<Ear, 2> ears;
+    V bind;
+    int head = -1, upperSpine = -1;
+    bool hoodDown = false;
     double earTwitch = 3;
     unsigned randomState = 0x12345678;
     const Data &d;
@@ -483,22 +489,43 @@ struct State {
         , py(d.param("move_y"))
         , pYaw(d.param("body_yaw"))
         , pPitch(d.param("body_pitch")) {
-        if (d.rig.contains("bind")) {
-            const auto bind = d.rig["bind"].get<V>();
-            for (int side = 0; side < 2; side++) {
-                auto &e = ears[side];
-                e.side = side ? -1 : 1;
-                const std::string name = side ? "bunny.EarR" : "bunny.EarL";
-                for (size_t i = 0; i < d.rig["names"].size(); i++)
-                    if (d.rig["names"][i] == name) e.bone = int(i);
-                if (e.bone < 0) continue;
-                e.dir = {.27 * e.side, .36, .893};
-                for (int k = 0; k < 3; k++) {
-                    e.base[k] = bind[e.bone * 12 + k * 4 + 3];
-                    e.mid[k] = e.base[k] + e.dir[k] * 4.4;
-                }
-            }
+        for (size_t i = 0; i < d.rig["names"].size(); i++) {
+            const auto &name = d.rig["names"][i];
+            if (name == "ValveBiped.Bip01_Head1") head = int(i);
+            if (name == "ValveBiped.Bip01_Spine4") upperSpine = int(i);
+            if (name == "bunny.EarL") ears[0].bone = int(i);
+            if (name == "bunny.EarR") ears[1].bone = int(i);
         }
+        ears[0].side = 1;
+        ears[1].side = -1;
+        if (d.rig.contains("bind")) bind = d.rig["bind"].get<V>();
+        place_ears(false);
+    }
+
+    // The ears' pivots (player/bunny/model.ts makeEars): on the head, or with the hood down hanging from the upper
+    // spine (rig.ts EAR_DOWN).
+    void place_ears(bool down) {
+        constexpr std::array<double, 3> up_dir = {.27, .36, .893}, down_base = {2.3, 9.9, 60.2},
+                                        down_dir = {.3, .62, -.72};
+        constexpr double segment = 4.4;
+        hoodDown = down;
+        for (auto &e : ears) {
+            if (e.bone < 0 || bind.size() < size_t(e.bone + 1) * 12) continue;
+            e.hang = down;
+            e.carrier = down ? upperSpine : head;
+            e.dir = down ? down_dir : up_dir;
+            e.dir[0] *= e.side;
+            for (int k = 0; k < 3; k++)
+                e.base[k] = down ? down_base[size_t(k)] : bind[size_t(e.bone) * 12 + size_t(k) * 4 + 3];
+            if (down) e.base[0] *= e.side;
+            for (int k = 0; k < 3; k++)
+                e.mid[k] = e.base[k] + e.dir[k] * segment;
+            e.has = false;
+        }
+    }
+
+    void hood(bool down) {
+        if (down != hoodDown) place_ears(down);
     }
 
     void reset(double time) {
@@ -762,11 +789,6 @@ struct State {
     }
 
     void earPose(const Input &s, double dt, bool snap, V &out, const Acting *acting = nullptr) {
-        int head = -1;
-        for (size_t i = 0; i < d.rig["names"].size(); i++)
-            if (d.rig["names"][i] == "ValveBiped.Bip01_Head1") head = int(i);
-        if (head < 0) return;
-        const float *H = out.data() + head * 12;
         const double cy = std::cos(feetYaw * 3.141592653589793 / 180), sy = std::sin(feetYaw * 3.141592653589793 / 180);
         earTwitch -= dt;
         double twitch = 0;
@@ -779,9 +801,10 @@ struct State {
             if (speed < 40) twitch = random() < .5 ? 1 : -1;
         }
         for (auto &e : ears) {
-            if (e.bone < 0) continue;
+            if (e.bone < 0 || e.carrier < 0) continue;
+            const float *H = out.data() + e.carrier * 12;
             std::array<double, 3> mb{}, md{}, wb{}, wd{}, target{}, bv{}, want = e.dir;
-            const double perk = acting ? (e.side > 0 ? acting->earL : acting->earR) : 0;
+            const double perk = acting && !e.hang ? (e.side > 0 ? acting->earL : acting->earR) : 0;
             if (perk) {
                 std::array<double, 3> to =
                         perk > 0 ? std::array<double, 3>{.08, .06, 1} : std::array<double, 3>{.32, .95, -.02};
@@ -820,9 +843,11 @@ struct State {
                     e.v[0] += -wd[1] * 70 * twitch * e.side;
                     e.v[1] += wd[0] * 70 * twitch * e.side;
                 }
+                const double stiffness = e.hang ? 640 : 320, damping = e.hang ? 34 : 21;
                 for (int it = 0; it < steps; it++)
                     for (int k = 0; k < 3; k++) {
-                        double a = 320 * (target[k] - e.p[k]) - 21 * (e.v[k] - bv[k]) - e.v[k] - (k == 2 ? 30 : 0);
+                        double a = stiffness * (target[k] - e.p[k]) - damping * (e.v[k] - bv[k]) - e.v[k]
+                                   - (k == 2 ? 30 : 0);
                         e.v[k] += a * h;
                         e.p[k] += e.v[k] * h;
                     }
@@ -846,9 +871,10 @@ struct State {
                     H[2] * mx + H[6] * my + H[10] * dz
             };
             float m[12];
-            swing(e.dir, bd, e.base, 1, m);
+            const double max_angle = e.hang ? .5 : 1.1;
+            swing(e.dir, bd, e.base, e.hang ? .55 : 1, max_angle, m);
             concat(H, m, out.data() + e.bone * 12);
-            swing(e.dir, bd, e.mid, .5, m);
+            swing(e.dir, bd, e.mid, e.hang ? .3 : .5, max_angle, m);
             concat(out.data() + e.bone * 12, m, out.data() + (e.bone + 1) * 12);
         }
     }

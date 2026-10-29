@@ -26,13 +26,22 @@ class NativeViewmodel {
         GLuint glowVbo = 0;
     };
 
+    struct HeadwearFit {
+        std::array<float, 3> scale{1, 1, 1}, offset{}, faceScale{1, 1, 1}, faceOffset{};
+    };
+
     struct Look {
         std::string outfit = "outfit-cream", knife = "carrot", glove = "knit", gloveId = "glove-knit", hat,
-                    body = "classic";
+                    body = "classic", bodyLook = "bunny", hatMesh;
         int finish = 0, crown = 0;
+        // The standard bunny lowers its hood for a wig (loadout.ts isWig).
+        bool hoodDown = false;
         std::array<float, 24> palette{};
         std::array<float, 15> gloveColors{};
-        std::array<float, 3> accent{};
+        std::array<float, 3> accent{}, hairColor{};
+        // The ponytail's length over the built one (loadout.hairLength / 100).
+        float hairLength = 1;
+        HeadwearFit fit;
     };
 
     struct CachedLook {
@@ -49,17 +58,23 @@ class NativeViewmodel {
     std::shared_ptr<native_actor_anim::Data> actorAnimationData;
     std::unordered_map<std::string, std::unique_ptr<native_actor_anim::State>> actorAnimationStates;
     Gl &gl;
-    GLuint boundProgram = 0, bonesTexture = 0, identityBonesTexture = 0;
-    std::unordered_map<int, GLuint> programs;
+    using PlayerProgram = native_render::PlayerProgram;
+    using PlayerMaterial = native_render::PlayerMaterial;
+    static constexpr size_t vertex_floats = 23;
+    // The metals' scene reflection sampler: a black cube on its own unit, read only when a look turns reflections on.
+    static constexpr GLint reflection_unit = 9;
+    GLuint bonesTexture = 0, identityBonesTexture = 0, reflectionCube = 0;
+    std::unordered_map<int, PlayerProgram> programs;
+    std::unique_ptr<native_render::PlayerShaderSources> shaders;
+    // Detail by graphics look (finishes/detail.ts tierOf, player/look-tier.ts lookTierOf): Potato, Plain, Source.
+    int cosmeticsTier = 2, playerLookTier = 1;
     std::unordered_map<std::string, Entry> entries;
     std::unordered_map<std::string, Mesh> meshes;
     std::vector<std::string> weapons;
     std::vector<float> data, pose;
     nlohmann::json metadata;
-    std::string hatVp, hatVn, hatVt, hatFp, hatFs;
     std::optional<native_render::Glow> localGlow;
     bool showGlow = true, firstPersonGlow = true;
-    std::string vp, vm, fp, fa, fl, glowNoise, glowFragment;
     Look equipped;
     std::string previewLoadout;
     std::array<float, 3> ghostColor{1, .54f, .047f}, ghostRim{1, .54f, .047f};
@@ -95,14 +110,10 @@ class NativeViewmodel {
         parts->weapon = actor.frame.weapon;
         parts->silenced = actor.silenced;
         parts->count = 0;
-        const std::string body = look.outfit == "outfit-tek"     ? "tek"
-                                 : look.outfit == "outfit-plush" ? "plush"
-                                 : look.outfit == "outfit-bune"  ? "bune"
-                                                                 : "bunny";
-        parts->names[parts->count++] =
-                "body:" + body + ":" + (body == "bunny" ? look.body : "classic") + ":" + look.glove;
-        if (look.crown && look.hat.empty()) parts->names[parts->count++] = "crown:" + std::to_string(look.crown);
-        if (!look.hat.empty()) parts->names[parts->count++] = look.hat;
+        const auto &body = look.bodyLook;
+        parts->names[parts->count++] = "body:" + body + ":" + (body == "bunny" ? look.body : "classic") + ":"
+                                       + look.glove + (look.hoodDown ? ":down" : "");
+        if (!look.hatMesh.empty()) parts->names[parts->count++] = look.hatMesh;
         const auto &gun = weapons[std::min(size_t(actor.frame.weapon), weapons.size() - 1)];
         parts->names[parts->count++] = gun.empty() || gun == "knife" ? "tpknife:" + look.knife : "tpgun:" + gun;
         if (actor.silenced && !gun.empty() && gun != "knife") parts->names[parts->count++] = "tpsilencer:" + gun;
@@ -150,10 +161,58 @@ class NativeViewmodel {
         return entry.clips.empty() ? nullptr : &entry.clips.front();
     }
 
-    static std::string textFile(const std::filesystem::path &path) {
-        std::ifstream file(path);
-        if (!file) throw std::runtime_error("Native cosmetic shader absent: " + path.string());
-        return std::string(std::istreambuf_iterator<char>(file), {});
+    static std::string body_look(const std::string &outfit) {
+        return outfit == "outfit-tek"     ? "tek"
+               : outfit == "outfit-plush" ? "plush"
+               : outfit == "outfit-bune"  ? "bune"
+                                          : "bunny";
+    }
+
+    static bool listed(const nlohmann::json &list, const std::string &id) {
+        return std::find(list.begin(), list.end(), id) != list.end();
+    }
+
+    // Packed loadout fields 8 and 9 (loadout.ts packLoadout): a wig's colour as six hex digits, the ponytail's length
+    // as a whole percent. Both only count for the hats that take them.
+    void read_hair(const std::vector<std::string> &fields, Look &out) const {
+        const auto &hair = metadata.at("hair");
+        linearColor(hair.at("defaultColor").get<uint32_t>(), out.hairColor.data());
+        if (out.hat.empty() || !listed(hair.at("hats"), out.hat)) return;
+        const auto &color = fields.size() > 8 ? fields[8] : std::string();
+        if (color.size() == 6 && color.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos)
+            linearColor(uint32_t(std::stoul(color, nullptr, 16)), out.hairColor.data());
+        const auto &length = fields.size() > 9 ? fields[9] : std::string();
+        if (!listed(hair.at("lengthHats"), out.hat) || length.empty() || length.size() > 3
+            || length.find_first_not_of("0123456789") != std::string::npos)
+            return;
+        const auto &limits = hair.at("length");
+        const int percent = std::clamp(std::stoi(length), limits.at("min").get<int>(), limits.at("max").get<int>());
+        out.hairLength = float(percent) / 100;
+    }
+
+    static std::array<float, 3> vector3(const nlohmann::json &value) {
+        return {value.at(0).get<float>(), value.at(1).get<float>(), value.at(2).get<float>()};
+    }
+
+    // The website's hat fit for this body (player/bunny/hat-fit.ts, exported per look and hat) and which mesh it wears.
+    void fit_headwear(Look &out) const {
+        out.bodyLook = body_look(out.outfit);
+        if (!out.hat.empty()) {
+            const auto &byLook = metadata.at("hats").at(out.hat);
+            if (byLook.contains(out.bodyLook)) out.hatMesh = byLook.at(out.bodyLook);
+            out.hoodDown = out.bodyLook == "bunny" && listed(metadata.at("hair").at("hats"), out.hat);
+        } else if (out.crown)
+            out.hatMesh = "crown:" + std::to_string(out.crown);
+        const auto &fits = metadata.at("hatFits").at(out.bodyLook);
+        const auto &fit = fits.contains(out.hat) ? fits.at(out.hat) : fits.at("");
+        out.fit.scale = vector3(fit.at("scale"));
+        out.fit.offset = vector3(fit.at("offset"));
+        out.fit.faceScale = out.fit.scale;
+        out.fit.faceOffset = out.fit.offset;
+        if (fit.contains("face")) {
+            out.fit.faceScale = vector3(fit.at("face").at("scale"));
+            out.fit.faceOffset = vector3(fit.at("face").at("offset"));
+        }
     }
 
     const Look &look(const std::string &outfit, const std::string &packed) {
@@ -184,8 +243,9 @@ class NativeViewmodel {
             if (f.size() > crown && f[crown].size() == 1 && f[crown][0] >= '1' && f[crown][0] <= '3')
                 out.crown = f[crown][0] - '0';
             if (f[0] == "2") {
-                if (f.size() > 5 && meshes.count(f[5])) out.hat = f[5];
+                if (f.size() > 5 && metadata.at("hats").contains(f[5])) out.hat = f[5];
                 if (f.size() > 6 && f[6] == "body-b") out.body = "feminine";
+                read_hair(f, out);
             }
         }
         // These two character outfits ship with matching paws in the site's default loadout.
@@ -202,84 +262,87 @@ class NativeViewmodel {
         const char *gloveSlots[] = {"base", "fingers", "tips", "strap", "detail"};
         for (size_t slot = 0; slot < 5; ++slot)
             linearColor(glove.at(gloveSlots[slot]), out.gloveColors.data() + slot * 3);
+        fit_headwear(out);
         cached.look = std::move(out);
         return cached.look;
     }
 
-    GLuint program(const Look &look) {
-        const int key = look.finish + (look.glove != "knit" ? 32 : 0);
-        if (programs.count(key)) return programs.at(key);
-        std::string defs = "#version 330 core\n";
-        if (look.finish) defs += "#define FINISH " + std::to_string(look.finish) + "\n";
-        if (look.glove != "knit") defs += "#define GLOVE\n";
-        const std::string vs = defs + R"(
-layout(location=0)in vec3 position;layout(location=1)in vec3 normal;layout(location=2)in vec3 partColor;layout(location=3)in vec4 boneIds;layout(location=4)in vec4 weights;layout(location=5)in float accent;
-uniform sampler2D boneMatrices;uniform mat4 projection,model;uniform vec3 offset,uPalette[8],uAccent;uniform float mirror,auraPass,auraSize;uniform float glowTime;uniform bool headwear;uniform vec3 headwearScale,headwearOffset;
-layout(location=7)in vec3 glowNormal;out vec3 vColor,normalV,positionV;out float vGlow,vGlowAlpha,vHalo;out vec2 vAuraCoord;
-)" + vp + hatVp + glowNoise + R"(
-mat4 bone(int i){vec4 a=texelFetch(boneMatrices,ivec2(0,i),0),b=texelFetch(boneMatrices,ivec2(1,i),0),c=texelFetch(boneMatrices,ivec2(2,i),0);return transpose(mat4(a,b,c,vec4(0,0,0,1)));}
-void main(){vec3 transformed=position,objectNormal=auraPass>.5?glowNormal:normal;
-)" + hatVn + hatVt + R"(
-vHalo=auraPass>1.5?1.:0.;vGlowAlpha=1.5;vAuraCoord=vec2(transformed.x+transformed.y*.47,transformed.z);
-if(auraPass>1.5){
- float width=.85+float(gl_InstanceID)*.52;
- vec2 flow=vAuraCoord*vec2(.27,.13)-vec2(0,glowTime*2.4);
- flow.x+=sin(flow.y*1.7+glowTime*.9)*.32;
- float tongue=smoothstep(.27,.78,auraFlow(flow));
- transformed+=normalize(objectNormal)*width*(.5+tongue*.75)*auraSize;
- transformed.z+=width*(.15+tongue*1.4)*auraSize;
- transformed.x+=sin(flow.y*2.1+glowTime)*width*.16*tongue*auraSize;
- vGlowAlpha=.08*pow(1.-float(gl_InstanceID)/8.,1.15);
-}else if(auraPass>.5){transformed+=normalize(objectNormal)*.45*auraSize;}
-if(headwear){transformed=transformed*headwearScale+headwearOffset;objectNormal=normalize(objectNormal/headwearScale);}
-mat4 m=bone(int(boneIds.x))*weights.x+bone(int(boneIds.y))*weights.y+bone(int(boneIds.z))*weights.z+bone(int(boneIds.w))*weights.w;vec3 p=(m*vec4(transformed,1)).xyz+offset;p.y*=mirror;vec3 n=mat3(m)*objectNormal;n.y*=mirror;normalV=mat3(model)*n;positionV=(model*vec4(p,1)).xyz;
-vGlow=accent>1.5&&accent<2.5?1.:0.;vColor=accent>15.5?uPalette[6]:accent>10.5?partColor:accent>2.5?uPalette[int(accent-2.5)]:accent>.5?uAccent:partColor;
-)" + vm + R"(
-gl_Position=projection*vec4(positionV,1);}
-)";
-        const std::string fs = defs + R"(
-in vec3 vColor,normalV,positionV;in float vGlow,vGlowAlpha,vHalo;uniform bool ghostStyle;in vec2 vAuraCoord;out vec4 color;vec3 encodeGlow(vec3 c){return mix(c*12.92,1.055*pow(max(c,vec3(0)),vec3(1./2.4))-.055,step(vec3(.0031308),c));}uniform vec3 cameraPosition,ghostColor,ghostRim;uniform float opacity;uniform bool playerGlowEnabled;uniform vec3 playerGlowColor;uniform float playerGlowIntensity,auraPass,glowTime;uniform float uGlowDistance;uniform vec3 uAxisA,uAxisB;uniform vec2 uNearFade;
-)" + fp + hatFp + glowNoise + glowFragment
-                               +
-                               R"(
-float ghostNearFade(){
- if(uNearFade.y<=uNearFade.x)return 1.;
- vec3 ab=uAxisB-uAxisA;float h=clamp(dot(cameraPosition-uAxisA,ab)/max(dot(ab,ab),1e-3),0.,1.);
- return smoothstep(uNearFade.x,uNearFade.y,length(cameraPosition-(uAxisA+ab*h)));
-}
-void main(){vec3 n=normalize(normalV);float back=gl_FrontFacing?1.:.38;if(!gl_FrontFacing)n=-n;vec3 V=normalize(cameraPosition-positionV),L=normalize(vec3(.42,-.46,.78));float key=smoothstep(-.05,.55,dot(n,L));vec3 ambient=mix(vec3(.30,.27,.26),vec3(.70,.76,.88),n.z*.5+.5)*.62;vec3 albedo=vColor;
-)" + fa + R"(
-vec3 col=albedo*(ambient+key*vec3(.78,.74,.68));col+=pow(1.-max(dot(n,V),0.),3.)*.22*vec3(1,.86,.65);col*=back;
-)" + fl + hatFs + R"(
-#ifdef FINISH
-if(abs(vFin.z-1.)<.5)col=finishShade(vec3(n.x,n.z,-n.y),vec3(V.x,V.z,-V.y),vec3(L.x,L.z,-L.y),ambient,key)*back;
-#endif
-if(playerGlowEnabled&&auraPass>.5){color=glowShade();return;}
-float alpha=opacity;
-if(ghostStyle){
- float fres=pow(1.-clamp(abs(dot(n,V)),0.,1.),2.2);
- float lum=dot(vColor,vec3(.2126,.7152,.0722));
- float up=n.z*.5+.5;
- col=ghostColor*(.3+.7*sqrt(max(lum,0.)))*(.7+.45*up);
- vec3 rimC=ghostRim+(ghostRim-ghostColor)*.6;
- col=max(col+rimC*fres*1.6,0.)+vec3(1)*fres*fres*.35;
- col+=mix(ghostColor,vec3(1),.45)*vGlow*1.1;
- alpha=clamp((opacity*(.38+.62*fres)+vGlow*.35*opacity)*ghostNearFade(),0.,1.);
- if(alpha<.004)discard;
-}
-col=max(col,vec3(0));color=vec4(mix(col*12.92,1.055*pow(col,vec3(1./2.4))-.055,step(vec3(.0031308),col)),alpha);}
-)";
-        GLuint id = link_program(gl, vs.c_str(), fs.c_str());
-        programs.emplace(key, id);
-        return id;
+    PlayerProgram link_player_program(int finish, bool glove, bool detail, PlayerMaterial material) {
+        const auto defines = native_render::player_defines(finish, glove, detail, material);
+        const bool gun = material == PlayerMaterial::gun || material == PlayerMaterial::world_gun;
+        const auto vertex = defines + (gun ? shaders->gunVertex : shaders->vertex);
+        const auto fragment = defines
+                              + (material == PlayerMaterial::ghost ? shaders->ghost
+                                 : gun                             ? shaders->gun
+                                                                   : shaders->solid);
+        PlayerProgram p;
+        p.id = link_program(gl, vertex.c_str(), fragment.c_str());
+        auto at = [&](const char *name) {
+            return gl.GetUniformLocation(p.id, name);
+        };
+        p.projection = at("projection");
+        p.model = at("model");
+        p.modelMatrix = at("modelMatrix");
+        p.viewMatrix = at("viewMatrix");
+        p.cameraPosition = at("cameraPosition");
+        p.offset = at("offset");
+        p.mirror = at("mirror");
+        p.auraPass = at("auraPass");
+        p.auraSize = at("auraSize");
+        p.glowTime = at("glowTime");
+        p.boneMatrices = at("boneMatrices");
+        p.palette = at("uPalette");
+        p.accent = at("uAccent");
+        p.glove = at("uGlove");
+        p.finTime = at("uFinTime");
+        p.cosTier = at("uCosTier");
+        p.playerLook = at("uPlayerLook");
+        p.fabric = at("uFabric");
+        p.headwearScale = at("uHeadwearScale");
+        p.headwearOffset = at("uHeadwearOffset");
+        p.headwearFaceScale = at("uHeadwearFaceScale");
+        p.headwearFaceOffset = at("uHeadwearFaceOffset");
+        p.hairColor = at("uHairColor");
+        p.propellerAngle = at("uPropellerAngle");
+        p.capybara = at("uCapybara");
+        p.ponytail = at("uPonytail");
+        p.finEnvOn = at("uFinEnvOn");
+        p.cosEnvOn = at("uCosEnvOn");
+        p.playerEnvOn = at("uPlayerEnvOn");
+        p.finSunDir = at("uFinSunDir");
+        p.finSunColor = at("uFinSunColor");
+        p.finEnv = at("uFinEnv");
+        p.cosEnv = at("uCosEnv");
+        p.playerEnv = at("uPlayerEnv");
+        p.gunFlash = at("uGunFlash");
+        p.gunFlashPos = at("uGunFlashPos");
+        p.glowEnabled = at("playerGlowEnabled");
+        p.glowColor = at("playerGlowColor");
+        p.glowIntensity = at("playerGlowIntensity");
+        p.glowOpacity = at("glowOpacity");
+        p.glowAxisA = at("glowAxisA");
+        p.glowAxisB = at("glowAxisB");
+        p.glowNearFade = at("glowNearFade");
+        p.glowDistance = at("uGlowDistance");
+        p.ghost = at("uGhost");
+        p.ghostRim = at("uGhostRim");
+        p.opacity = at("uOpacity");
+        p.axisA = at("uAxisA");
+        p.axisB = at("uAxisB");
+        p.nearFade = at("uNearFade");
+        return p;
+    }
+
+    const PlayerProgram &program(const Look &look, PlayerMaterial material, bool detail = false) {
+        const bool glove = look.glove != "knit";
+        // Guns take no finish (the knife's finish stays on the knife), as on the website.
+        const int finish = material == PlayerMaterial::solid ? look.finish : 0;
+        const int key = native_render::player_program_key(finish, glove, detail, material);
+        if (const auto found = programs.find(key); found != programs.end()) return found->second;
+        return programs.emplace(key, link_player_program(finish, glove, detail, material)).first->second;
     }
 
     void mesh(const std::string &name, int instances = 1) {
-        if (boundProgram)
-            gl.Uniform1i(
-                    gl.GetUniformLocation(boundProgram, "headwear"),
-                    name.rfind("hat-", 0) == 0 || name.rfind("crown:", 0) == 0
-            );
         auto at = meshes.find(name);
         if (at == meshes.end()) return;
         auto &m = at->second;
@@ -288,16 +351,21 @@ col=max(col,vec3(0));color=vec4(mix(col*12.92,1.055*pow(col,vec3(1./2.4))-.055,s
             gl.BindVertexArray(m.vao);
             gl.GenBuffers(1, &m.vbo);
             gl.BindBuffer(GL_ARRAY_BUFFER, m.vbo);
-            gl.BufferData(GL_ARRAY_BUFFER, m.vertices * 22 * sizeof(float), data.data() + m.offset, GL_STATIC_DRAW);
-            for (int a = 0; a < 7; a++) {
-                const int size[7] = {3, 3, 3, 4, 4, 1, 4}, offset[7] = {0, 3, 6, 9, 13, 17, 18};
-                gl.EnableVertexAttribArray(a);
+            gl.BufferData(
+                    GL_ARRAY_BUFFER, m.vertices * vertex_floats * sizeof(float), data.data() + m.offset, GL_STATIC_DRAW
+            );
+            // position, normal, partColor, skinIndex, skinWeight, accent, finishUV, then headwear at location 8
+            // (location 7 is the glow's smooth normal, in its own buffer).
+            constexpr std::array<GLuint, 8> location = {0, 1, 2, 3, 4, 5, 6, 8};
+            constexpr std::array<int, 8> size = {3, 3, 3, 4, 4, 1, 4, 1}, offset = {0, 3, 6, 9, 13, 17, 18, 22};
+            for (size_t a = 0; a < location.size(); a++) {
+                gl.EnableVertexAttribArray(location[a]);
                 gl.VertexAttribPointer(
-                        a,
+                        location[a],
                         size[a],
                         GL_FLOAT,
                         GL_FALSE,
-                        22 * sizeof(float),
+                        vertex_floats * sizeof(float),
                         reinterpret_cast<void *>(size_t(offset[a]) * 4)
                 );
             }
@@ -306,7 +374,6 @@ col=max(col,vec3(0));color=vec4(mix(col*12.92,1.055*pow(col,vec3(1./2.4))-.055,s
             gl.BufferData(GL_ARRAY_BUFFER, m.vertices * 3 * sizeof(float), data.data() + m.glowOffset, GL_STATIC_DRAW);
             gl.EnableVertexAttribArray(7);
             gl.VertexAttribPointer(7, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
-            // finishUV is declared by generated shader source, so bind its named location separately.
             if (m.indices) {
                 gl.GenBuffers(1, &m.ebo);
                 gl.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, m.ebo);
@@ -325,24 +392,24 @@ col=max(col,vec3(0));color=vec4(mix(col*12.92,1.055*pow(col,vec3(1./2.4))-.055,s
             gl.DrawArrays(GL_TRIANGLES, 0, m.vertices);
     }
 
-    void draw_glow(std::span<const std::string> parts, GLuint program, bool aura, float scale) {
-        gl.Uniform1f(gl.GetUniformLocation(program, "auraSize"), scale);
+    void draw_glow(std::span<const std::string> parts, const PlayerProgram &program, bool aura, float scale) {
+        gl.Uniform1f(program.auraSize, scale);
         gl.Enable(GL_BLEND);
         gl.BlendFunc(GL_SRC_ALPHA, GL_ONE);
         gl.DepthMask(GL_FALSE);
         gl.Enable(GL_CULL_FACE);
         gl.CullFace(GL_FRONT);
-        gl.Uniform1f(gl.GetUniformLocation(program, "auraPass"), 1);
+        gl.Uniform1f(program.auraPass, 1);
         for (const auto &part : parts) {
             mesh(part);
         }
         if (aura && !parts.empty()) {
-            gl.Uniform1f(gl.GetUniformLocation(program, "auraPass"), 2);
+            gl.Uniform1f(program.auraPass, 2);
             mesh(parts.front(), native_render::glow_halo_layers);
         }
         gl.CullFace(GL_BACK);
         gl.Disable(GL_CULL_FACE);
-        gl.Uniform1f(gl.GetUniformLocation(program, "auraPass"), 0);
+        gl.Uniform1f(program.auraPass, 0);
         gl.Disable(GL_BLEND);
         gl.DepthMask(GL_TRUE);
     }
@@ -406,56 +473,93 @@ col=max(col,vec3(0));color=vec4(mix(col*12.92,1.055*pow(col,vec3(1./2.4))-.055,s
         }
     }
 
-    GLuint
+    struct BindOptions {
+        PlayerMaterial material = PlayerMaterial::solid;
+        bool detail = false;
+        float opacity = 1, mirror = 1;
+        std::array<float, 3> offset{};
+        const native_render::Glow *glow = nullptr;
+        GLuint poseTexture = 0;
+    };
+
+    // Uniforms every player program reads, the same for each draw of a frame.
+    void bind_shared(const PlayerProgram &p, double seconds) {
+        constexpr float sun_direction[3] = {.4196f, .7792f, .4596f}, sun_color[3] = {1, .96f, .9f};
+        gl.Uniform1i(p.boneMatrices, 0);
+        gl.Uniform1f(p.auraPass, 0);
+        gl.Uniform1f(p.auraSize, 1);
+        gl.Uniform1f(p.glowTime, float(seconds));
+        gl.Uniform1f(p.finTime, float(std::fmod(seconds, 3600.)));
+        gl.Uniform1f(p.cosTier, float(cosmeticsTier));
+        gl.Uniform1f(p.playerLook, float(playerLookTier));
+        gl.Uniform1f(p.fabric, 0);
+        // The scene reflections of the Enhanced and Cinematic looks have no native equivalent: metals keep the studio.
+        gl.Uniform1f(p.finEnvOn, 0);
+        gl.Uniform1f(p.cosEnvOn, 0);
+        gl.Uniform1f(p.playerEnvOn, 0);
+        gl.Uniform3fv(p.finSunDir, 1, sun_direction);
+        gl.Uniform3fv(p.finSunColor, 1, sun_color);
+        gl.Uniform1i(p.finEnv, reflection_unit);
+        gl.Uniform1i(p.cosEnv, reflection_unit);
+        gl.Uniform1i(p.playerEnv, reflection_unit);
+        const float noFlash[4] = {1, .72f, .4f, 0}, origin[3] = {};
+        gl.Uniform4fv(p.gunFlash, 1, noFlash);
+        gl.Uniform3fv(p.gunFlashPos, 1, origin);
+        gl.Uniform1f(p.glowDistance, 1);
+        gl.Uniform2f(p.glowNearFade, 0, 0);
+        gl.Uniform2f(p.nearFade, 0, 0);
+    }
+
+    void bind_look(const PlayerProgram &p, const Look &look) {
+        gl.Uniform3fv(p.palette, 8, look.palette.data());
+        gl.Uniform3fv(p.accent, 1, look.accent.data());
+        gl.Uniform3fv(p.glove, 5, look.gloveColors.data());
+        gl.Uniform3fv(p.hairColor, 1, look.hairColor.data());
+        gl.Uniform3fv(p.headwearScale, 1, look.fit.scale.data());
+        gl.Uniform3fv(p.headwearOffset, 1, look.fit.offset.data());
+        gl.Uniform3fv(p.headwearFaceScale, 1, look.fit.faceScale.data());
+        gl.Uniform3fv(p.headwearFaceOffset, 1, look.fit.faceOffset.data());
+        const float ponytail[4] = {0, 0, look.hairLength, 0};
+        gl.Uniform4fv(p.ponytail, 1, ponytail);
+    }
+
+    void bind_glow(const PlayerProgram &p, const native_render::Glow *glow, float opacity) {
+        gl.Uniform1i(p.glowEnabled, showGlow && glow && glow->enabled);
+        gl.Uniform1f(p.glowOpacity, opacity);
+        if (!glow) return;
+        float rgb[3];
+        for (int k = 0; k < 3; k++)
+            rgb[k] = native_render::srgb_linear(glow->color[k]);
+        gl.Uniform3fv(p.glowColor, 1, rgb);
+        gl.Uniform1f(p.glowIntensity, glow->intensity);
+    }
+
+    const PlayerProgram &
     bind(const Look &look,
          const native::Matrix &projection,
          const native::Matrix &model,
          const float eye[3],
          double seconds,
-         float opacity,
-         const float offset[3],
-         float mirror,
-         const native_render::Glow *glow = nullptr,
-         GLuint poseTexture = 0) {
+         const BindOptions &options) {
+        gl.ActiveTexture(GL_TEXTURE0 + reflection_unit);
+        gl.BindTexture(GL_TEXTURE_CUBE_MAP, reflectionCube);
         gl.ActiveTexture(GL_TEXTURE0);
-        gl.BindTexture(GL_TEXTURE_2D, poseTexture ? poseTexture : bonesTexture);
-        GLuint p = program(look);
-        boundProgram = p;
-        gl.UseProgram(p);
-        auto loc = [&](const char *n) {
-            return gl.GetUniformLocation(p, n);
-        };
-        gl.UniformMatrix4fv(loc("projection"), 1, GL_FALSE, projection.data());
-        gl.UniformMatrix4fv(loc("model"), 1, GL_FALSE, model.data());
-        gl.Uniform3fv(loc("offset"), 1, offset);
-        gl.Uniform3fv(loc("cameraPosition"), 1, eye);
-        gl.Uniform1f(loc("mirror"), mirror);
-        gl.Uniform1f(loc("auraPass"), 0);
-        gl.Uniform1i(loc("ghostStyle"), 0);
-        gl.Uniform1f(loc("auraSize"), 1);
-        gl.Uniform1f(loc("uGlowDistance"), 1);
-        gl.Uniform2f(loc("uNearFade"), 0, 0);
-        const auto fit = native_render::hat_fit(look.outfit, look.hat);
-        gl.Uniform3fv(loc("headwearScale"), 1, fit.scale.data());
-        gl.Uniform3fv(loc("headwearOffset"), 1, fit.offset.data());
-        gl.Uniform1i(loc("playerGlowEnabled"), showGlow && glow && glow->enabled);
-        if (glow) {
-            float rgb[3];
-            for (int k = 0; k < 3; k++)
-                rgb[k] = glow->color[k] <= .04045f ? glow->color[k] / 12.92f
-                                                   : std::pow((glow->color[k] + .055f) / 1.055f, 2.4f);
-            gl.Uniform3fv(loc("playerGlowColor"), 1, rgb);
-            gl.Uniform1f(loc("playerGlowIntensity"), glow->intensity);
-        }
-        gl.Uniform1f(loc("opacity"), opacity);
-        gl.Uniform3fv(loc("ghostColor"), 1, ghostColor.data());
-        gl.Uniform3fv(loc("ghostRim"), 1, ghostRim.data());
-        gl.Uniform1f(loc("uFinTime"), seconds);
-        gl.Uniform1f(loc("glowTime"), seconds);
-        gl.Uniform1i(loc("boneMatrices"), 0);
-        gl.Uniform3fv(loc("uPalette"), 8, look.palette.data());
-        gl.Uniform3fv(loc("uAccent"), 1, look.accent.data());
-        gl.Uniform3fv(loc("uGlove"), 5, look.gloveColors.data());
+        gl.BindTexture(GL_TEXTURE_2D, options.poseTexture ? options.poseTexture : bonesTexture);
+        const auto &p = program(look, options.material, options.detail);
+        gl.UseProgram(p.id);
+        const auto webModel = native_render::web_model(model), webView = native_render::web_view(projection);
+        const auto camera = native_render::to_web_space(eye);
+        gl.UniformMatrix4fv(p.projection, 1, GL_FALSE, projection.data());
+        gl.UniformMatrix4fv(p.model, 1, GL_FALSE, model.data());
+        gl.UniformMatrix4fv(p.modelMatrix, 1, GL_FALSE, webModel.data());
+        gl.UniformMatrix4fv(p.viewMatrix, 1, GL_FALSE, webView.data());
+        gl.Uniform3fv(p.cameraPosition, 1, camera.data());
+        gl.Uniform3fv(p.offset, 1, options.offset.data());
+        gl.Uniform1f(p.mirror, options.mirror);
+        gl.Uniform1f(p.opacity, options.opacity);
+        bind_shared(p, seconds);
+        bind_look(p, look);
+        bind_glow(p, options.glow, options.opacity);
         return p;
     }
 
@@ -466,7 +570,7 @@ public:
         std::ifstream file(assetRoot / "viewmodels.json");
         if (!file) throw std::runtime_error("Native asset bundle absent; run native asset compiler");
         file >> metadata;
-        if (metadata.at("version") != 2 || metadata.at("stride") != 22)
+        if (metadata.at("version") != 3 || metadata.at("stride") != vertex_floats)
             throw std::runtime_error("Unsupported native asset format");
         const size_t bytes = metadata.value("bytes", size_t(0));
         if (bytes) {
@@ -514,7 +618,7 @@ public:
             m.indices = raw.value("indices", size_t(0));
             m.indexOffset = raw.value("indexOffset", size_t(0)) / 4;
             if (m.glowOffset + m.vertices * 3 > data.size() || !m.vertices || m.vertices > 4000000
-                || m.offset + m.vertices * 22 > data.size() || m.indexOffset + m.indices > data.size())
+                || m.offset + m.vertices * vertex_floats > data.size() || m.indexOffset + m.indices > data.size())
                 throw std::runtime_error("Invalid native mesh range");
             meshes.emplace(name, m);
         }
@@ -533,42 +637,16 @@ public:
             entries.emplace(name, std::move(e));
         }
 
-        glowNoise = textFile(assetRoot / "glow-noise.glsl");
-        glowFragment = textFile(assetRoot / "glow-fragment.glsl");
-        const auto main = glowFragment.find("void main()");
-        glowFragment = glowFragment.substr(main);
-        const std::pair<std::string, std::string> substitutions[] = {
-                {"void main()", "vec4 glowShade()"},
-                {"vNormalW", "normalV"},
-                {"vWorldPos", "positionV"},
-                {"uFinTime", "glowTime"},
-                {"uGlowStrength", "playerGlowIntensity"},
-                {"uOpacity", "opacity"},
-                {"uGlowColor", "playerGlowColor"},
-                {"gl_FragColor=", "return "}
-        };
-        for (const auto &[from, to] : substitutions) {
-            size_t at = 0;
-            while ((at = glowFragment.find(from, at)) != std::string::npos) {
-                glowFragment.replace(at, from.size(), to);
-                at += to.size();
-            }
-        }
-        vp = textFile(assetRoot / "cosmetic-vertex-pars.glsl");
-        vp = std::string(vp).replace(vp.find("in vec4 finishUV;"), 17, "layout(location=6)in vec4 finishUV;");
-        vm = textFile(assetRoot / "cosmetic-vertex-main.glsl");
-        fp = textFile(assetRoot / "cosmetic-fragment-pars.glsl");
-        fa = textFile(assetRoot / "cosmetic-fragment-albedo.glsl");
-        fl = textFile(assetRoot / "cosmetic-fragment-light.glsl");
-        const auto optionalShader = [&](const char *name) {
-            const auto path = assetRoot / name;
-            return std::filesystem::exists(path) ? textFile(path) : std::string();
-        };
-        hatVp = optionalShader("hat-vertex-pars.glsl");
-        hatVn = optionalShader("hat-vertex-normal.glsl");
-        hatVt = optionalShader("hat-vertex-position.glsl");
-        hatFp = optionalShader("hat-fragment-pars.glsl");
-        hatFs = optionalShader("hat-fragment-solid.glsl");
+        shaders = std::make_unique<native_render::PlayerShaderSources>(assetRoot);
+        gl.GenTextures(1, &reflectionCube);
+        gl.BindTexture(GL_TEXTURE_CUBE_MAP, reflectionCube);
+        const uint8_t black[4] = {0, 0, 0, 255};
+        for (GLenum face = 0; face < 6; ++face)
+            gl.TexImage2D(
+                    GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, black
+            );
+        gl.TexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        gl.TexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         gunFx = std::make_unique<NativePresentation>(gl);
         gl.GenTextures(1, &bonesTexture);
         gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
@@ -586,7 +664,7 @@ public:
         pose.reserve(256 * 12);
         basePose.reserve(256 * 12);
         equipped = look("outfit-cream", "");
-        program(equipped);
+        program(equipped, PlayerMaterial::solid);
         std::cout << "Native models: " << meshes.size() << " original meshes, " << entries.size()
                   << " pose sets, GPU skinning/cosmetics\n";
     }
@@ -599,8 +677,9 @@ public:
             if (m.vbo) gl.DeleteBuffers(1, &m.vbo);
             if (m.vao) gl.DeleteVertexArrays(1, &m.vao);
         }
-        for (auto [key, p] : programs)
-            gl.DeleteProgram(p);
+        for (const auto &[key, p] : programs)
+            gl.DeleteProgram(p.id);
+        if (reflectionCube) gl.DeleteTextures(1, &reflectionCube);
         if (bonesTexture) gl.DeleteTextures(1, &bonesTexture);
         if (identityBonesTexture) gl.DeleteTextures(1, &identityBonesTexture);
     }
@@ -849,9 +928,11 @@ public:
         BhTransform t{};
         std::copy(weapon.position, weapon.position + 3, t.origin);
         std::copy(weapon.angles, weapon.angles + 3, t.angles);
-        const float zero[3] = {};
         const auto &plain = look("outfit-cream", "");
-        bind(plain, projection, native::model_matrix(t), eye, seconds, 1, zero, 1, nullptr, identityBonesTexture);
+        BindOptions options;
+        options.material = PlayerMaterial::world_gun;
+        options.poseTexture = identityBonesTexture;
+        bind(plain, projection, native::model_matrix(t), eye, seconds, options);
         gl.Enable(GL_DEPTH_TEST);
         gl.DepthMask(GL_TRUE);
         gl.Disable(GL_BLEND);
@@ -863,16 +944,29 @@ public:
 
     // The website's ghost near fade (player/materials.ts nearFade): hidden within 14 units of the camera, measured to
     // the body's feet-to-head axis, fully shown from 64.
-    void ghost_near_fade(GLuint actorProgram, const native_render::Actor &actor) {
+    void ghost_uniforms(const PlayerProgram &p, const native_render::Actor &actor, native_render::GhostSource source) {
         constexpr float hidden_units = 14, shown_units = 64, body_height_units = 64;
+        const auto color = source == native_render::GhostSource::pb
+                                   ? ghostColor
+                                   : native_render::linear_color(native_render::ghost_source_color(source));
+        const auto rim = source == native_render::GhostSource::pb ? ghostRim : color;
+        gl.Uniform3fv(p.ghost, 1, color.data());
+        gl.Uniform3fv(p.ghostRim, 1, rim.data());
         const auto &position = actor.frame.position;
         const float top[3] = {position[0], position[1], position[2] + body_height_units};
-        gl.Uniform3fv(gl.GetUniformLocation(actorProgram, "uAxisA"), 1, position);
-        gl.Uniform3fv(gl.GetUniformLocation(actorProgram, "uAxisB"), 1, top);
+        const auto feet = native_render::to_web_space(position), head = native_render::to_web_space(top);
+        gl.Uniform3fv(p.axisA, 1, feet.data());
+        gl.Uniform3fv(p.axisB, 1, head.data());
         if (actor.near_fade)
-            gl.Uniform2f(gl.GetUniformLocation(actorProgram, "uNearFade"), hidden_units, shown_units);
+            gl.Uniform2f(p.nearFade, hidden_units, shown_units);
         else
-            gl.Uniform2f(gl.GetUniformLocation(actorProgram, "uNearFade"), 0, 0);
+            gl.Uniform2f(p.nearFade, 0, 0);
+    }
+
+    static native_render::GhostSource ghost_source_of(const native_render::Actor &actor) {
+        const bool ghostId = actor.id == "replay" || actor.id.starts_with("ghost-");
+        return actor.source == native_render::GhostSource::none && ghostId ? native_render::GhostSource::custom
+                                                                           : actor.source;
     }
 
     void draw_actor(
@@ -924,6 +1018,7 @@ public:
                 input.ducking = bool(frame.flags & 1);
                 input.grounded = bool(frame.flags & 2);
                 input.jumped = actor.jumped;
+                state->hood(l.hoodDown);
                 state->pose(input, seconds, actor.snapped, actor.attack != 0, pose, acting);
                 actorYaw = float(state->feetYaw);
             }
@@ -938,35 +1033,17 @@ public:
             model[4 + r] *= 1 - squash * .5f;
             model[8 + r] *= 1 + squash;
         }
-        const float zero[3] = {};
-        bind(l,
-             projection,
-             model,
-             eye,
-             seconds,
-             std::clamp(actor.opacity, 0.f, 1.f),
-             zero,
-             1,
-             actor.playerGlow ? &*actor.playerGlow : nullptr);
-        const auto actorProgram = program(l);
+        const auto source = ghost_source_of(actor);
+        BindOptions options;
+        options.material = source == native_render::GhostSource::none ? PlayerMaterial::solid : PlayerMaterial::ghost;
+        options.opacity = std::clamp(actor.opacity, 0.f, 1.f);
+        options.glow = actor.playerGlow ? &*actor.playerGlow : nullptr;
+        const auto &actorProgram = bind(l, projection, model, eye, seconds, options);
         const auto &motion = actorActions[actor.id].accessory;
         const float capy[4] = {motion.alert, motion.squash, motion.lean, float(seconds)};
-        gl.Uniform4fv(gl.GetUniformLocation(actorProgram, "uCapybara"), 1, capy);
-        gl.Uniform1f(gl.GetUniformLocation(actorProgram, "uPropellerAngle"), float(motion.angle));
-        const auto source = actor.source == native_render::GhostSource::none
-                                            && (actor.id == "replay" || actor.id.starts_with("ghost-"))
-                                    ? native_render::GhostSource::custom
-                                    : actor.source;
-        gl.Uniform1i(gl.GetUniformLocation(actorProgram, "ghostStyle"), source != native_render::GhostSource::none);
-        if (source != native_render::GhostSource::none) {
-            const auto color = source == native_render::GhostSource::pb
-                                       ? ghostColor
-                                       : native_render::linear_color(native_render::ghost_source_color(source));
-            const auto rim = source == native_render::GhostSource::pb ? ghostRim : color;
-            gl.Uniform3fv(gl.GetUniformLocation(actorProgram, "ghostColor"), 1, color.data());
-            gl.Uniform3fv(gl.GetUniformLocation(actorProgram, "ghostRim"), 1, rim.data());
-            ghost_near_fade(actorProgram, actor);
-        }
+        gl.Uniform4fv(actorProgram.capybara, 1, capy);
+        gl.Uniform1f(actorProgram.propellerAngle, float(motion.angle));
+        if (source != native_render::GhostSource::none) ghost_uniforms(actorProgram, actor, source);
         const auto visibleParts = parts_for(actor, l);
         gl.Enable(GL_DEPTH_TEST);
         gl.Disable(GL_CULL_FACE);
@@ -975,11 +1052,12 @@ public:
             const float distance = std::hypot(
                     std::hypot(eye[0] - frame.position[0], eye[1] - frame.position[1]), eye[2] - frame.position[2]
             );
-            gl.Uniform2f(gl.GetUniformLocation(actorProgram, "uNearFade"), 14, 60);
-            gl.Uniform1f(gl.GetUniformLocation(actorProgram, "uGlowDistance"), native_render::glow_distance(distance));
-            gl.Uniform3fv(gl.GetUniformLocation(actorProgram, "uAxisA"), 1, frame.position);
+            gl.Uniform2f(actorProgram.glowNearFade, 14, 60);
+            gl.Uniform1f(actorProgram.glowDistance, native_render::glow_distance(distance));
             const float top[3] = {frame.position[0], frame.position[1], frame.position[2] + 64};
-            gl.Uniform3fv(gl.GetUniformLocation(actorProgram, "uAxisB"), 1, top);
+            const auto feet = native_render::to_web_space(frame.position), head = native_render::to_web_space(top);
+            gl.Uniform3fv(actorProgram.glowAxisA, 1, feet.data());
+            gl.Uniform3fv(actorProgram.glowAxisB, 1, head.data());
             draw_glow(visibleParts, actorProgram, actor.playerGlow->aura && distance < 650, 1);
         }
         if (actor.opacity < 1) {
@@ -1138,27 +1216,24 @@ public:
                  -offsetX + swayYaw * swayScale + float(std::sin(seconds * 7)) * .15f * bob,
                  offsetZ + swayPitch * swayScale + float(std::abs(std::sin(seconds * 7))) * .28f * bob},
                     eye[3] = {};
-        bind(
-                equipped,
-                native::multiply(perspective, sourceView),
-                [&] {
-                    BhTransform turn{};
-                    turn.angles[1] = previewYaw;
-                    turn.angles[0] = previewPitch;
-                    return native::model_matrix(turn);
-                }(),
-                eye,
-                seconds,
-                1,
-                offset,
-                leftHand ? -1 : 1,
-                firstPersonGlow && localGlow ? &*localGlow : nullptr
+        BhTransform turn{};
+        turn.angles[1] = previewYaw;
+        turn.angles[0] = previewPitch;
+        BindOptions options;
+        options.material = active == 1 ? PlayerMaterial::solid : PlayerMaterial::gun;
+        // First-person detail shading (finishes/detail.ts VM_DETAIL), as the website's viewmodels compile.
+        options.detail = true;
+        options.offset = {offset[0], offset[1], offset[2]};
+        options.mirror = leftHand ? -1.f : 1.f;
+        options.glow = firstPersonGlow && localGlow ? &*localGlow : nullptr;
+        const auto &handsProgram = bind(
+                equipped, native::multiply(perspective, sourceView), native::model_matrix(turn), eye, seconds, options
         );
         gl.FrontFace(leftHand ? GL_CW : GL_CCW);
         for (const auto &part : entry.meshes)
             mesh(part);
         if (showGlow && firstPersonGlow && localGlow && localGlow->enabled) {
-            draw_glow(entry.meshes, program(equipped), localGlow->aura, .2f);
+            draw_glow(entry.meshes, handsProgram, localGlow->aura, .2f);
         }
         gl.FrontFace(GL_CCW);
         const double flashAge = seconds - gunFlashStarted;
