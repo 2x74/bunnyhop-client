@@ -3,6 +3,7 @@
 #include "native_input.hpp"
 #include "native_math.hpp"
 #include "render_shaders.hpp"
+#include "scene_draw_list.hpp"
 #include "render_math.hpp"
 #include "ghost_trails.hpp"
 #include "graphics_settings.hpp"
@@ -382,7 +383,15 @@ class Renderer {
     bool anisotropySupported = false;
     uint32_t queuedWeaponFlags = 0, queuedAttackMode = 0;
     bool queuedAttack = false;
-    std::unordered_map<GLuint, std::unordered_map<std::string, GLint>> uniformLocations;
+
+    struct UniformNameHash {
+        using is_transparent = void;
+
+        size_t operator()(std::string_view name) const { return std::hash<std::string_view>{}(name); }
+    };
+
+    using UniformMap = std::unordered_map<std::string, GLint, UniformNameHash, std::equal_to<>>;
+    std::unordered_map<GLuint, UniformMap> uniformLocations;
 
     GLint loc(GLuint p, const char *name) {
         auto &locations = uniformLocations[p];
@@ -744,6 +753,30 @@ class Renderer {
         gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, GLuint(draw_target));
     }
 
+    struct SceneTransform {
+        BhTransform value{};
+        uint64_t scene = 0;
+    };
+
+    native_render::SceneDrawList sceneDrawList;
+    std::unordered_map<uint64_t, SceneTransform> sceneTransforms;
+    uint64_t sceneNumber = 0;
+
+    const BhTransform &scene_transform(bool prop, int32_t entity, uint32_t model) {
+        const uint64_t key = (uint64_t(prop) << 63) | uint32_t(prop ? entity : model);
+        auto &cached = sceneTransforms[key];
+        if (cached.scene != sceneNumber) {
+            cached.value = {};
+            cached.value.visible = 1;
+            if (prop && entity >= 0)
+                bh_prop_transform(core, entity, &cached.value);
+            else if (!prop && model)
+                bh_model_transform(core, model, &cached.value);
+            cached.scene = sceneNumber;
+        }
+        return cached.value;
+    }
+
     void draw_scene(const native::Matrix &vp, const float eye[3], bool sky, double time) {
         auto phaseStart = profile_now();
         gl.UseProgram(program);
@@ -789,43 +822,23 @@ class Renderer {
         );
         gl.ActiveTexture(GL_TEXTURE1);
         gl.BindTexture(GL_TEXTURE_2D, lightmap);
-        std::unordered_map<uint64_t, BhTransform> transforms;
-
-        struct Draw {
-            uint32_t material, first, count;
-            bool prop;
-            int32_t entity;
-            uint32_t model;
-            float distance;
-        };
-
-        std::vector<Draw> draws;
+        ++sceneNumber;
+        sceneDrawList.begin(groups.size() + propGroups.size());
+        auto &draws = sceneDrawList.draws;
         for (const auto &g : groups)
-            if (bool(g.sky3d) == sky)
-                draws.push_back({g.material, g.first_index, g.index_count, false, -1, g.model, 0});
+            if (bool(g.sky3d) == sky) sceneDrawList.add({g.material, g.first_index, g.index_count, false, -1, g.model});
         for (const auto &g : propGroups)
-            if (bool(g.sky3d) == sky) draws.push_back({g.material, g.first_index, g.index_count, true, g.entity, 0, 0});
+            if (bool(g.sky3d) == sky) sceneDrawList.add({g.material, g.first_index, g.index_count, true, g.entity, 0});
         if (profiling) frameProfile.groups += draws.size();
         // Cull transformed bounds before submission; sort translucency from current, transformed centres.
         draws.erase(
                 std::remove_if(
                         draws.begin(),
                         draws.end(),
-                        [&](Draw &d) {
-                            const uint64_t transformKey =
-                                    (uint64_t(d.prop) << 63) | uint32_t(d.prop ? d.entity : d.model);
-                            auto found = transforms.find(transformKey);
-                            if (found == transforms.end()) {
-                                BhTransform t{};
-                                t.visible = 1;
-                                if (d.prop && d.entity >= 0)
-                                    bh_prop_transform(core, d.entity, &t);
-                                else if (!d.prop && d.model)
-                                    bh_model_transform(core, d.model, &t);
-                                found = transforms.emplace(transformKey, t).first;
-                            }
-                            if (!found->second.visible) return true;
-                            const auto model = native::model_matrix(found->second);
+                        [&](native_render::SceneDraw &d) {
+                            const auto &transform = scene_transform(d.prop, d.entity, d.model);
+                            if (!transform.visible) return true;
+                            const auto model = native::model_matrix(transform);
                             const uint64_t key = (uint64_t(d.prop) << 63) | d.first;
                             const auto at = groupBounds.find(key);
                             if (at != groupBounds.end()) {
@@ -844,9 +857,10 @@ class Renderer {
         );
         if (profiling) frameProfile.survivors += draws.size();
         profile_elapsed(frameProfile.buildCull, phaseStart);
-        const bool visibleWater = hasWaterMaterials && std::any_of(draws.begin(), draws.end(), [&](const Draw &d) {
-                                      return d.material < materials.size() && materials[d.material].kind == 2;
-                                  });
+        const bool visibleWater =
+                hasWaterMaterials && std::any_of(draws.begin(), draws.end(), [&](const native_render::SceneDraw &d) {
+                    return d.material < materials.size() && materials[d.material].kind == 2;
+                });
         for (int pass = 0; pass < 2; pass++) {
             const double sortBefore = frameProfile.sort;
             phaseStart = profile_now();
@@ -855,9 +869,7 @@ class Renderer {
                 gl.Enable(GL_BLEND);
                 gl.DepthMask(GL_FALSE);
                 auto sortStart = profile_now();
-                std::stable_sort(draws.begin(), draws.end(), [](const Draw &a, const Draw &b) {
-                    return a.distance > b.distance;
-                });
+                sceneDrawList.back_to_front();
                 profile_elapsed(frameProfile.sort, sortStart);
             } else {
                 gl.Disable(GL_BLEND);
@@ -866,19 +878,9 @@ class Renderer {
             for (const auto &d : draws) {
                 const auto &m = d.material < materials.size() ? materials[d.material] : materials.front();
                 if (transparent(m) != (pass != 0)) continue;
-                const uint64_t transformKey = (uint64_t(d.prop) << 63) | uint32_t(d.prop ? d.entity : d.model);
-                auto found = transforms.find(transformKey);
-                if (found == transforms.end()) {
-                    BhTransform t{};
-                    t.visible = 1;
-                    if (d.prop && d.entity >= 0)
-                        bh_prop_transform(core, d.entity, &t);
-                    else if (!d.prop && d.model)
-                        bh_model_transform(core, d.model, &t);
-                    found = transforms.emplace(transformKey, t).first;
-                }
-                if (!found->second.visible) continue;
-                const auto model = native::model_matrix(found->second);
+                const auto &transform = scene_transform(d.prop, d.entity, d.model);
+                if (!transform.visible) continue;
+                const auto model = native::model_matrix(transform);
                 gl.UniformMatrix4fv(loc(program, "model"), 1, GL_FALSE, model.data());
                 bind_material(d.material, d.prop);
                 gl.BindVertexArray(d.prop ? propMesh.vao : worldMesh.vao);
