@@ -10,7 +10,7 @@ import { uiSound } from "./audio";
 import { DEFAULT_BINDS, nativeKeyCode, state } from "./bridge";
 import { hudEditor } from "./hud-editor";
 import { followHost, nativeChoice, nativeToggle, type Ui } from "./native-rows";
-import { hostHas, sendNativeSettings } from "./prefs-bridge";
+import { sendNativeSettings } from "./prefs-bridge";
 
 function rendererGroup(ui: Ui): HTMLElement {
   const group = ui.group(
@@ -68,9 +68,11 @@ function jumpStatsGroup(ui: Ui): HTMLElement {
   return group;
 }
 
-/** The native HUD's placement canvas, until the host takes the website's layout (and its in-game editor). */
+/**
+ * The native HUD's placement canvas (v0.5.1's HUD editor). A place set here wins over the website's layout until a
+ * preset or layout code moves that element.
+ */
 function positionsGroup(ui: Ui): HTMLElement | null {
-  if (hostHas("hudLayoutWeb")) return null;
   const canvas = hudEditor(
     () => state.settings.hudLayout,
     (layout) => sendNativeSettings({ hudLayout: layout }),
