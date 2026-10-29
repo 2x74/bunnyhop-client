@@ -264,6 +264,7 @@ struct Map {
     vfs: vfs::Vfs,
     root: Option<PathBuf>,
     loose: HashMap<String, Rc<[u8]>>,
+    physics_files: HashMap<String, Rc<[u8]>>,
     attempted: HashSet<String>,
     texture: Vec<u8>,
     model_count: usize,
@@ -343,6 +344,14 @@ impl Map {
                 vfs::Listing::everything_under("disk", ""),
             )));
         }
+        // Match the verifier's physics manifest: loose collision models belong to
+        // the simulation, but render VMTs must not change the BSP's surface properties.
+        let physics_files = loose.clone();
+        let physics_content = if root.is_some() {
+            Some(vfs::Source::loose("content", physics_files.clone()))
+        } else {
+            content::cached_physics_content(path)
+        };
         check()?;
         let mesh = mesh::build(&bsp);
         let mut names = mesh
@@ -372,12 +381,6 @@ impl Map {
             }
             remount(&mut fs, &loose);
         }
-        // Include loose VMTs too: the simulation reads $surfaceprop from these same materials.
-        let physics_content = if root.is_some() {
-            Some(vfs::Source::loose("content", loose.clone()))
-        } else {
-            content::cached_physics_content(path)
-        };
         check()?;
         let mut game = Game::load_with_content(&bsp, physics_content)?;
         game.set_settings(settings.checked()?);
@@ -561,6 +564,7 @@ impl Map {
             vfs: fs,
             root,
             loose,
+            physics_files,
             attempted,
             texture: Vec::new(),
             model_count,
