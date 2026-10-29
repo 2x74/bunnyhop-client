@@ -12,6 +12,10 @@ export function syncProfileMouse(): void {
       p.sensitivity = state.settings.sensitivity;
     });
 }
+/** The DPI sent with a run, by the same rule as the website's (mouseFromPrefs). */
+export function profileDpi(): number | null {
+  return mouseFromPrefs(prefs.get()).dpi;
+}
 export function bindProfileMouse(owner: HTMLElement): void {
   let syncing = false;
   const publisher = new ProfileMousePublisher({

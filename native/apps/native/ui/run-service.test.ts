@@ -41,7 +41,7 @@ function deferred<T>() {
   });
   return { promise, resolve, reject };
 }
-function fixture(policy: () => Promise<VersionPolicy> = async () => allowed) {
+function fixture(policy: () => Promise<VersionPolicy> = async () => allowed, dpi?: () => number | null) {
   const statuses: RunServiceStatus[] = [],
     bodies: Parameters<RunApi["runBeat"]>[0][] = [],
     uploads: { bytes: Uint8Array; beats: string[] }[] = [];
@@ -64,6 +64,7 @@ function fixture(policy: () => Promise<VersionPolicy> = async () => allowed) {
     version: policy,
     origin: () => "https://bunnyhop.lol",
     send: (status) => statuses.push(status),
+    dpi,
   });
   return { service, api, statuses, bodies, uploads, requests };
 }
@@ -88,6 +89,54 @@ describe("native run service, mocked network only", () => {
     expect(f.uploads[0].beats).toEqual(["t0", "t1", "t2"]);
     expect(f.bodies.slice(1).every((body) => body.sid === "session")).toBe(true);
     expect(f.statuses.at(-1)?.status).toBe("verified");
+  });
+  test("the run's mouse settings go with the upload and its diagnostics follow the stored run", async () => {
+    const f = fixture();
+    const mice: unknown[] = [];
+    const attached: { id: string; diagnostics: object }[] = [];
+    f.api.submitRun = async (_bytes, options) => {
+      mice.push(options.mouse);
+      return { id: "stored-run", status: "verified", rank: 3 };
+    };
+    f.api.runDiagnostics = async (id, diagnostics) => {
+      attached.push({ id, diagnostics });
+    };
+    await reset(f.service);
+    const first = f.service.receive(beat(1, 0));
+    f.requests[0].resolve({ sid: "session", token: "t0" });
+    await first;
+    const diagnostics = { fps: 997, client: { kind: "native" } };
+    await f.service.receive({ ...finish(1), diagnostics, mouse: { sensitivity: 1.2 } });
+    expect(mice).toEqual([{ sensitivity: 1.2, dpi: null }]);
+    expect(attached).toEqual([{ id: "stored-run", diagnostics }]);
+  });
+  test("the DPI entered in Settings goes with the host's sensitivity", async () => {
+    const f = fixture(undefined, () => 1600);
+    const mice: unknown[] = [];
+    f.api.submitRun = async (_bytes, options) => {
+      mice.push(options.mouse);
+      return { id: "stored-run", status: "verified" };
+    };
+    await reset(f.service);
+    const first = f.service.receive(beat(1, 0));
+    f.requests[0].resolve({ sid: "session", token: "t0" });
+    await first;
+    await f.service.receive({ ...finish(1), mouse: { sensitivity: 0.9 } });
+    expect(mice).toEqual([{ sensitivity: 0.9, dpi: 1600 }]);
+  });
+  test("a refused upload has no run to attach diagnostics to", async () => {
+    const f = fixture();
+    const attached: string[] = [];
+    f.api.submitRun = async () => ({ id: "", status: "rejected", reason: "refused" });
+    f.api.runDiagnostics = async (id) => {
+      attached.push(id);
+    };
+    await reset(f.service);
+    const first = f.service.receive(beat(1, 0));
+    f.requests[0].resolve({ sid: "session", token: "t0" });
+    await first;
+    await f.service.receive({ ...finish(1), diagnostics: { fps: 60 } });
+    expect(attached).toEqual([]);
   });
   test("initial handshake shares a session with a beat queued before its reply", async () => {
     const f = fixture();

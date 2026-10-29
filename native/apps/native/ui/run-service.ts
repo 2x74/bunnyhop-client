@@ -2,6 +2,7 @@
 // heartbeat cadence, replay bytes and the local replay archive. This module
 // never owns the gameplay clock, simulation, WebGL context or WASM verifier.
 import type { Submission, RequestDispatch, GauntletSplitResult } from "../../web/src/api";
+import { parseMouseSettings, type MouseSettings } from "../../web/src/mouse-settings";
 import { isStyleId, type StyleId } from "../../web/src/styles";
 import { runProgression, type RunProgression } from "./run-rewards";
 
@@ -18,7 +19,11 @@ interface Generation {
 export type NativeRunEvent =
   | (Generation & { type: "reset" })
   | (Generation & Identity & { type: "beat"; tick: number; hash: string; paused: boolean })
-  | (Generation & Identity & { type: "finish"; replayBase64: string });
+  | (Generation & Identity & { type: "finish"; replayBase64: string; diagnostics?: RunDiagnostics; mouse?: RunMouse });
+/** What the leaderboard hover card shows about a run (apps/api src/diagnostics.ts), built by the host's recorder. */
+export type RunDiagnostics = Record<string, unknown>;
+/** The mouse settings sent with the replay, as the website sends them (`mouse` in api.submitRun). */
+export type RunMouse = MouseSettings;
 export interface RunServiceStatus extends RunProgression {
   type: "runService";
   generation: number;
@@ -63,10 +68,13 @@ export interface RunApi {
       room?: string | null;
       race?: string | null;
       gauntlet?: string | null;
+      mouse?: RunMouse | null;
       dispatch?: RequestDispatch;
     },
   ): Promise<Submission>;
   submission(id: string): Promise<Submission>;
+  /** Best effort, like the website's: never throws. */
+  runDiagnostics?(id: string, diagnostics: RunDiagnostics): Promise<void>;
 }
 export interface VersionPolicy {
   wasm?: unknown;
@@ -81,6 +89,8 @@ export interface RunServiceDependencies {
   sleep?: (ms: number) => Promise<void>;
   pollLimitMs?: number;
   pollDelayMs?: number;
+  /** The DPI the player entered in Settings (self-reported, null when unset or hidden), sent with the replay. */
+  dpi?: () => number | null;
   /** Called once per finished run, with its generation: a gauntlet tag is spent here. */
   context?: (identity: Identity, generation: number) => RunContext;
   /**
@@ -331,7 +341,7 @@ export class NativeRunService {
       }
       this.completed.add(session);
       try {
-        await this.finish(session, event.replayBase64);
+        await this.finish(session, event.replayBase64, plainObject(event.diagnostics), this.runMouse(event.mouse));
       } finally {
         this.completed.delete(session);
       }
@@ -412,7 +422,12 @@ export class NativeRunService {
       if (session.handshake === request) session.handshake = null;
     } else await request;
   }
-  private async finish(session: Session, base64: unknown): Promise<void> {
+  private async finish(
+    session: Session,
+    base64: unknown,
+    diagnostics: RunDiagnostics | null,
+    mouse: RunMouse | null,
+  ): Promise<void> {
     const event = session.identity!;
     const context = this.dependencies.context?.(event, session.generation);
     if (this.dependencies.account && (await this.ownsAccount(session)) === null) return;
@@ -466,6 +481,7 @@ export class NativeRunService {
         result = await bounded(
           this.dependencies.api.submitRun(bytes, {
             beats: tokens,
+            ...(mouse ? { mouse } : {}),
             ...context,
             ...(this.dependencies.account ? { dispatch: this.accountDispatch(session, true) } : {}),
           }),
@@ -506,6 +522,7 @@ export class NativeRunService {
       }
     }
     if (!this.active(session)) return;
+    this.attachDiagnostics(result.id, diagnostics);
     this.verdict(session, result);
     const deadline = this.now() + this.pollLimit;
     while (this.active(session) && (result.status === "queued" || result.status === "verifying")) {
@@ -529,6 +546,16 @@ export class NativeRunService {
         local: true,
       });
   }
+  // The host sends the sensitivity; DPI is the menu's, as on the website.
+  private runMouse(value: unknown): MouseSettings | null {
+    const sent = plainObject(value);
+    return sent ? parseMouseSettings({ dpi: this.dependencies.dpi?.() ?? null, ...sent }) : null;
+  }
+  // Sent once the server has stored the run, as the website does after an upload (selfcheck.ts reportRun).
+  private attachDiagnostics(id: string | undefined, diagnostics: RunDiagnostics | null): void {
+    if (!id || !diagnostics) return;
+    void this.dependencies.api.runDiagnostics?.(id, diagnostics);
+  }
   private verdict(session: Session, result: Submission): void {
     const status = result.status === "queued" || result.status === "verifying" ? "pending" : result.status;
     // XP, the level and unlocks feed the finish card's reward reel; only a verified run has earned them.
@@ -547,4 +574,9 @@ export class NativeRunService {
       ...(result.gauntlet ? { gauntlet: result.gauntlet } : {}),
     });
   }
+}
+
+function plainObject(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
 }

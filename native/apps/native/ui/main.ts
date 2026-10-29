@@ -19,6 +19,7 @@ import { accountGeneration } from "../../web/src/ui/account-state";
 import { countJump, recordMapPlayed } from "../../web/src/ui/stats";
 import { mapTime } from "../../web/src/map-time";
 import { NativeRunService } from "./run-service";
+import { profileDpi } from "./profile-mouse";
 import { formatTime } from "../../web/src/timer";
 import { isStyleId } from "../../web/src/styles";
 import { onStyleChange, setSelectedStyle } from "../../web/src/ui/style-picker";
@@ -832,6 +833,7 @@ const gauntlet = new NativeGauntlet({
 });
 const runService = new NativeRunService({
   api,
+  dpi: profileDpi,
   account: async () => {
     const user = await api.me();
     return api.meStale() ? null : (user?.id ?? null);
