@@ -110,7 +110,7 @@ export class Loadout {
     this.choice = { ...this.choice, ...patch };
     Object.assign(this.pending, patch);
     // Loadout items show at once (the preview stage and the game follow it); a refused save puts it back.
-    if (Object.keys(patch).some((k) => isLoadoutSlot(k) || k === "hat" || k === "body")) this.syncLoadout();
+    if (Object.keys(patch).some((k) => isLoadoutSlot(k) || k === "hat" || k === "body" || k === "hairColor" || k === "hairLength")) this.syncLoadout();
     this.status = { kind: "saving", text: "Saving…" };
     this.emit();
     clearTimeout(this.timer);

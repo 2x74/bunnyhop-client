@@ -48,6 +48,8 @@ export interface InterpState {
   weapon: number;
   /** The weapon `attack` was made with (a gun: a shot). */
   attackWeapon: number;
+  /** The gun in hand started a reload or took a shell since the previous sample() call (protocol.ts SF_STAB with a gun). */
+  reload: boolean;
   /** The gun in hand has its silencer on (0.0.12, protocol.ts EXT_SILENCED), and whether `attack` was a silenced shot. */
   silenced: boolean;
   attackSilenced: boolean;
@@ -60,7 +62,7 @@ export interface InterpState {
 const wrap180 = (a: number) => ((((a + 180) % 360) + 360) % 360) - 180;
 
 export function blankState(): InterpState {
-  return { pos: [0, 0, 0], vel: [0, 0, 0], yaw: 0, pitch: 0, crouched: false, grounded: true, snapped: true, jumped: false, attack: 0, inspect: 0, inspectHeld: false, weapon: -1, attackWeapon: -1, silenced: false, attackSilenced: false, weaponChanged: false, age: 0 };
+  return { pos: [0, 0, 0], vel: [0, 0, 0], yaw: 0, pitch: 0, crouched: false, grounded: true, snapped: true, jumped: false, attack: 0, inspect: 0, inspectHeld: false, weapon: -1, attackWeapon: -1, reload: false, silenced: false, attackSilenced: false, weaponChanged: false, age: 0 };
 }
 
 /** A weapon timeline code: the id, plus this bit when the gun's silencer is on (ids are <= 31). */
@@ -205,6 +207,7 @@ export class RemoteTrack {
     while (i + 1 < b.length && b[i + 1].tick <= t) i++;
     out.jumped = false;
     out.attack = 0;
+    out.reload = false;
     out.inspect = 0;
     out.weaponChanged = false;
     for (let k = 0; k <= i; k++) {
@@ -214,10 +217,20 @@ export class RemoteTrack {
         this.lastJump = s.tick;
       }
       if (s.flags & (SF_SLASH | SF_STAB) && s.tick <= t && s.tick > this.lastAttack) {
-        out.attack = s.flags & SF_STAB ? 2 : 1;
         const w = this.weaponBefore(s.tick);
-        out.attackWeapon = codeWeapon(w);
-        out.attackSilenced = w >= 0 && (w & SILENCED_BIT) !== 0;
+        if (codeWeapon(w) >= 2) {
+          // A gun: SF_SLASH a shot, SF_STAB a reload / shell (protocol.ts SF_STAB). A reload keeps the last shot's report.
+          if (s.flags & SF_SLASH) {
+            out.attack = 1;
+            out.attackWeapon = codeWeapon(w);
+            out.attackSilenced = (w & SILENCED_BIT) !== 0;
+          }
+          if (s.flags & SF_STAB) out.reload = true;
+        } else {
+          out.attack = s.flags & SF_STAB ? 2 : 1;
+          out.attackWeapon = codeWeapon(w);
+          out.attackSilenced = w >= 0 && (w & SILENCED_BIT) !== 0;
+        }
         this.lastAttack = s.tick;
       }
       if (s.tick <= t && s.tick > this.lastInspect) {

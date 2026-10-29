@@ -10,13 +10,15 @@
 import { add, Builder, clamp, cross, dot, len, norm, ring, scale, smoothstep, sub, type Paint, type Wt } from "../../player/bunny/builder";
 import { KNIFE_BONE, rig as bunnyRig, xform, type V3 } from "../../player/bunny/rig";
 import { vmRig } from "../rig";
-import { PART, type TpSpec } from "./types";
+import { KMAT, PART, type KMat, type TpSpec } from "./types";
 
-export const fixed = (color: number): Paint => ({ code: 0, color });
-export const ACCENT: Paint = { code: 1 };
+/** A fixed colour, optionally with a hardware material (types.ts KMAT: how the first-person view shades it). */
+export const fixed = (color: number, mat?: KMat): Paint => (mat ? { code: 0, color, mat } : { code: 0, color });
+/** The style accent (guard rings, collars): glossy enamel in first person. */
+export const ACCENT: Paint = { code: 1, mat: KMAT.lacquer };
 export const GLOW: Paint = { code: 2 };
-/** The carrot palette (same as the third-person blade, player/bunny/mesh.ts). */
-export const CARROT = fixed(0xff7a1a), CARROT_DARK = fixed(0xd95a0c), LEAF = fixed(0x58c64a), LEAF_DARK = fixed(0x2f7d34);
+/** The carrot palette (same as the third-person blade, player/bunny/mesh.ts): waxy vegetable skin in first person. */
+export const CARROT = fixed(0xff7a1a, KMAT.veg), CARROT_DARK = fixed(0xd95a0c, KMAT.veg), LEAF = fixed(0x58c64a, KMAT.veg), LEAF_DARK = fixed(0x2f7d34, KMAT.veg);
 
 export type Fin = readonly [number, number, number, number];
 

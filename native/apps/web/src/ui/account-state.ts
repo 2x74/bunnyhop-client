@@ -50,6 +50,7 @@ export function me(): Promise<User | null> {
     if (epoch !== accountEpoch) return;
     setPBAccount(u);
     if (!api.meStale()) void syncPBs();
+    // Native menus carry no Three renderer: a stale bunny avatar is re-rendered by the website on the next visit.
     if (api.meStale()) recheckLater(u);
   });
   return p;

@@ -6,10 +6,10 @@ import { ring, type Paint } from "../../player/bunny/builder";
 import type { V3 } from "../../player/bunny/rig";
 import { fixed, type KnifeCtx } from "./ctx";
 import { SLIM_THUMB, straightHold } from "./hold";
-import { PART, type KnifeDef } from "./types";
+import { KMAT, PART, type KnifeDef } from "./types";
 
 const X: V3 = [1, 0, 0], Y: V3 = [0, 1, 0];
-const RED = fixed(0xe02a36), WHITE = fixed(0xf8f4ee), MINT = fixed(0x47cf94);
+const RED = fixed(0xe02a36, KMAT.lacquer), WHITE = fixed(0xf8f4ee, KMAT.lacquer), MINT = fixed(0x47cf94, KMAT.lacquer);
 /** Stripe colour of column k of m (rings are twisted per row, so columns run in spirals): red, white, a mint line. */
 const stripe = (k: number, m: number): Paint => {
   const ph = ((k / m) * 2) % 1;

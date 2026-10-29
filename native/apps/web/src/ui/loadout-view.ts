@@ -19,8 +19,9 @@ import { getPlayerGlow, onPlayerGlow } from "../player/cosmetics";
 import "./loadout-view.css";
 import { fixedModel } from "../player/bunny/look";
 import type { Profile } from "../api";
-import { SUPPORTER_MIN_USD, COSMETICS, cosmetic, crownOf, DEFAULT_COSMETICS, isUnlocked, secretCosmetic, SUPPORTER_SETS, supporterItem, type CosmeticDef } from "../progression";
-import { loadoutFor, packLoadout, type CosmeticLoadout } from "../loadout";
+import { SUPPORTER_MIN_USD, COSMETICS, cosmetic, HAIR_HATS, crownOf, DEFAULT_COSMETICS, isUnlocked, secretCosmetic, SUPPORTER_SETS, supporterItem, type CosmeticDef } from "../progression";
+import { HAIR_DEFAULT, HAIR_LENGTH, HAIR_PRESETS, LENGTH_HATS, hairColorOf, hairHex, hairLengthOf, isWig, loadoutFor, packLoadout, type CosmeticLoadout } from "../loadout";
+import { glowColorPicker } from "./glow-color-picker";
 import { getGhostCosmetics, getLoadout, getOutfit, onGhostCosmetics, onLoadout, onOutfit, setGhostCosmetics, setLoadout, setOutfit } from "../player/cosmetics";
 import { previewOf } from "../notify/item-preview";
 import type { Loadout, NewTracker } from "./card-editor";
@@ -36,7 +37,8 @@ import { sfx } from "../audio";
 import { uiSound } from "../audio/ui";
 
 export type LoadoutSlot = LoadoutCategory;
-export type LoadoutChoice = Record<LoadoutCategory | "body", string | null>;
+/** The worn ids per category, plus a wig's colour ("#rrggbb") and the ponytail's length (a percent); absent = the defaults. */
+export type LoadoutChoice = Record<LoadoutCategory | "body", string | null> & { hairColor?: string | null; hairLength?: number | null };
 
 /** What the view needs from whoever saves the choice (the profile's Loadout, or this device when offline). */
 export interface LoadoutModel {
@@ -51,6 +53,10 @@ export interface LoadoutModel {
   /** How an owned item was earned ("Cleared a T3 map · Oct 5 on bhop_eazy", "Free"). */
   earned(c: CosmeticDef): string;
   equip(slot: LoadoutCategory | "body", id: string | null): void;
+  /** A wig's hair colour ("#rrggbb"; null = the default). */
+  setHairColor(hex: string | null): void;
+  /** The ponytail's length (a percent, HAIR_LENGTH; null = the default). */
+  setHairLength(n: number | null): void;
   status(): { kind: "idle" | "saving" | "saved" | "error"; text: string };
   isNew(id: string): boolean;
   see(ids: string[]): void;
@@ -58,15 +64,17 @@ export interface LoadoutModel {
   on(fn: () => void): () => void;
 }
 
-const pick = (c: Record<string, string | null | undefined>): LoadoutChoice => ({
-  knife: c.knife ?? DEFAULT_COSMETICS.knife,
-  finish: c.finish ?? DEFAULT_COSMETICS.finish,
-  glove: c.glove ?? DEFAULT_COSMETICS.glove,
-  outfit: c.outfit ?? DEFAULT_COSMETICS.outfit,
-  body: c.body ?? DEFAULT_COSMETICS.body,
-  hat: c.hat ?? null,
-  ghost: c.ghost ?? DEFAULT_COSMETICS.ghost,
-  trail: c.trail ?? DEFAULT_COSMETICS.trail,
+const pick = (c: Record<string, string | number | null | undefined>): LoadoutChoice => ({
+  knife: (c.knife as string | null | undefined) ?? DEFAULT_COSMETICS.knife,
+  finish: (c.finish as string | null | undefined) ?? DEFAULT_COSMETICS.finish,
+  glove: (c.glove as string | null | undefined) ?? DEFAULT_COSMETICS.glove,
+  outfit: (c.outfit as string | null | undefined) ?? DEFAULT_COSMETICS.outfit,
+  body: (c.body as string | null | undefined) ?? DEFAULT_COSMETICS.body,
+  hat: (c.hat as string | null | undefined) ?? null,
+  ghost: (c.ghost as string | null | undefined) ?? DEFAULT_COSMETICS.ghost,
+  trail: (c.trail as string | null | undefined) ?? DEFAULT_COSMETICS.trail,
+  hairColor: (c.hairColor as string | null | undefined) ?? null,
+  hairLength: hairLengthOf(c.hairLength),
 });
 
 /** The profile owner's loadout (saved to the account as you go). */
@@ -80,6 +88,8 @@ export function profileModel(p: Profile, lo: Loadout, news: NewTracker): Loadout
     lock: (c) => lockInfo(c, p.level, p.progress, profileRanks(p), p.role),
     earned: (c) => earnedLine(c, p),
     equip: (slot, id) => lo.equip(slot, id),
+    setHairColor: (hex) => lo.apply({ hairColor: hex }),
+    setHairLength: (n) => lo.apply({ hairLength: n }),
     status: () => lo.status,
     isNew: (id) => news.isNew(id),
     see: (ids) => news.see(ids),
@@ -97,7 +107,8 @@ export function localModel(): LoadoutModel {
   const level = { level: 1, xp: 0, into: 0, need: 100, fraction: 0 };
   const choice = (): LoadoutChoice => {
     const g = getGhostCosmetics();
-    return pick({ ...(getLoadout() as unknown as Record<string, string>), outfit: getOutfit(), ghost: g.ghostId, trail: g.trailId });
+    const l = getLoadout();
+    return pick({ ...(l as unknown as Record<string, string>), hairColor: l.hairColor !== undefined ? hairHex(l.hairColor) : null, hairLength: l.hairLength ?? null, outfit: getOutfit(), ghost: g.ghostId, trail: g.trailId });
   };
   return {
     userId: null,
@@ -111,6 +122,14 @@ export function localModel(): LoadoutModel {
       if (slot === "outfit") setOutfit(id);
       else if (slot === "ghost" || slot === "trail") setGhostCosmetics(slot === "ghost" ? id : c.ghost, slot === "trail" ? id : c.trail);
       else setLoadout(loadoutFor({ ...c, [slot]: id }));
+      status = { kind: "saved", text: "Saved on this device" };
+    },
+    setHairColor: (hex) => {
+      setLoadout(loadoutFor({ ...choice(), hairColor: hex }));
+      status = { kind: "saved", text: "Saved on this device" };
+    },
+    setHairLength: (n) => {
+      setLoadout(loadoutFor({ ...choice(), hairLength: n }));
       status = { kind: "saved", text: "Saved on this device" };
     },
     status: () => status,
@@ -177,6 +196,10 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
   const cats = loadoutCategories((s) => listed(s).length).filter((s) => !o.only || listed(s).length > 0);
   let slot: LoadoutCategory = isLoadoutCategory(o.slot) && cats.includes(o.slot) ? o.slot : cats.includes(lastSlot) ? lastSlot : "knife";
   let preview: string | null = null;
+  /** A hair colour being tried in the custom picker (shown on the stage, not saved). */
+  let hairDraft: string | null = null;
+  /** A ponytail length being dragged (shown on the stage; saved when the slider is let go). */
+  let lengthDraft: number | null = null;
   let stage: LoadoutStage | null = null;
   let revertTimer = 0;
   let applyRaf = 0;
@@ -186,6 +209,8 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
   const shownChoice = (): LoadoutChoice => {
     const c = choice();
     if (preview !== null) c[slot] = preview || null;
+    if (hairDraft) c.hairColor = hairDraft;
+    if (lengthDraft !== null) c.hairLength = lengthDraft;
     return c;
   };
   const loadoutOf = (c: LoadoutChoice): CosmeticLoadout => loadoutFor(c, m.crown());
@@ -278,11 +303,86 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     m.equip("body", choice().body === "body-b" ? "body-a" : "body-b");
     drawBody(); apply(); bodySeg.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
   });
-  const root = h("section.lo", { "aria-label": "Loadout" }, h("div.lo-head", null, tabs, clearIndicators, status), bodyRow, h("div.lo-body", null, stageHost, grid));
+  /**
+   * A row that belongs to some hats (hair colour, ponytail length): on the Hat tab it keeps its place whenever you own
+   * such a hat and is only blanked (and inert) while the hat on the stage isn't one. Hovering a card puts that hat on
+   * the stage, so a row that came and went with it pushed the grid down under the cursor, onto the next card, which
+   * took the row away again: the grid jittered between two cards (syl, 2026-10-29).
+   */
+  function reserveRow(row: HTMLElement, show: boolean, keep: boolean): void {
+    row.hidden = !keep;
+    row.classList.toggle("lo-row-idle", keep && !show);
+    row.inert = keep && !show;
+  }
+  // Hair colour: under the tabs while a wig is on the stage (worn or hovered) and yours. Presets and a custom colour.
+  const hairSw = h("div.lo-hair-sw", { role: "radiogroup", "aria-label": "Hair colour" });
+  const hairDot = h("span.lo-hair-dot", { "aria-hidden": "true" });
+  let hairDialog: HTMLDialogElement | null = null;
+  const hairCustom = h("button.btn.btn-sm.lo-hair-custom", { type: "button", "aria-haspopup": "dialog", onclick: () => {
+    if (hairDialog) return hairDialog.focus();
+    hairDialog = glowColorPicker({
+      title: "Hair colour",
+      intro: "Choose a colour for your hair.",
+      current: hairHex(hairColorOf(choice().hairColor) ?? HAIR_DEFAULT) as `#${string}`,
+      preview: (hex) => ((hairDraft = hex), apply()),
+      apply: (hex) => ((hairDraft = null), m.setHairColor(hex), drawHair(), apply()),
+      closed: () => ((hairDialog = null), (hairDraft = null), apply()),
+    });
+  } }, hairDot, "Custom…");
+  const hairRow = h("div.lo-model-row.lo-hair-row", null, h("span.lo-model-label", null, "Hair colour"), hairSw, hairCustom);
+  function drawHair(): void {
+    const shown = shownChoice().hat;
+    const wig = shown ? cosmetic(shown) : null;
+    const show = slot === "hat" && isWig(shown) && !!wig && m.owns(wig);
+    reserveRow(hairRow, show, show || (slot === "hat" && HAIR_HATS.some((id) => { const c = cosmetic(id); return !!c && m.owns(c); })));
+    if (!show) return;
+    const cur = hairHex(hairColorOf(choice().hairColor) ?? HAIR_DEFAULT);
+    const preset = HAIR_PRESETS.some((p) => p.hex === cur);
+    hairSw.replaceChildren(...HAIR_PRESETS.map((p) => {
+      const on = p.hex === cur;
+      return h(`button.lo-hair-swatch${on ? ".on" : ""}`, { type: "button", role: "radio", "aria-checked": String(on), "aria-label": p.name, title: p.name, tabindex: on || (!preset && p === HAIR_PRESETS[0]) ? "0" : "-1", style: `--sw:${p.hex}`,
+        onmouseenter: () => ((hairDraft = p.hex), apply()), onmouseleave: () => ((hairDraft = null), apply()),
+        onclick: () => ((hairDraft = null), m.setHairColor(p.hex === hairHex(HAIR_DEFAULT) ? null : p.hex), drawHair(), apply()),
+      });
+    }));
+    hairDot.style.setProperty("--sw", cur);
+    hairCustom.classList.toggle("on", !preset);
+    hairCustom.title = preset ? "Choose any colour" : `Custom colour ${cur.toUpperCase()}`;
+  }
+  arrowNav(hairSw, "button");
+  // Ponytail length: under the hair colour while the Ponytail is on the stage and yours. Dragging shows it on the stage;
+  // letting go saves it.
+  const lengthValue = h("output");
+  const lengthInput = h("input", { type: "range", min: String(HAIR_LENGTH.min), max: String(HAIR_LENGTH.max), step: "5", "aria-label": "Ponytail length",
+    oninput: () => ((lengthDraft = Number(lengthInput.value)), drawLength(), apply()),
+    onchange: () => {
+      const n = Number(lengthInput.value);
+      lengthDraft = null;
+      m.setHairLength(n === HAIR_LENGTH.default ? null : n);
+      drawLength();
+      apply();
+    },
+  }) as HTMLInputElement;
+  const lengthRow = h("div.lo-model-row.lo-length-row", null, h("label.lo-length", null, h("span.lo-model-label", null, "Length"), lengthInput, lengthValue));
+  function drawLength(): void {
+    const shown = shownChoice().hat;
+    const pony = shown ? cosmetic(shown) : null;
+    const show = slot === "hat" && !!shown && LENGTH_HATS.includes(shown) && !!pony && m.owns(pony);
+    reserveRow(lengthRow, show, show || (slot === "hat" && LENGTH_HATS.some((id) => { const c = cosmetic(id); return !!c && m.owns(c); })));
+    if (!show) return;
+    const n = lengthDraft ?? hairLengthOf(choice().hairLength) ?? HAIR_LENGTH.default;
+    lengthInput.value = String(n);
+    // The track's filled part (style.css input[type=range] reads --p, 0..1 along min..max).
+    lengthInput.style.setProperty("--p", String((n - HAIR_LENGTH.min) / (HAIR_LENGTH.max - HAIR_LENGTH.min)));
+    lengthValue.textContent = `${n}%`;
+  }
+  const root = h("section.lo", { "aria-label": "Loadout" }, h("div.lo-head", null, tabs, clearIndicators, status), bodyRow, hairRow, lengthRow, h("div.lo-body", null, stageHost, grid));
 
   function drawTabs(): void {
     clearIndicators.disabled = !COSMETICS.some((c) => isLoadoutCategory(c.slot) && m.owns(c) && m.isNew(c.id));
     drawBody();
+    drawHair();
+    drawLength();
     tabs.replaceChildren(
       ...cats.map((s) => {
         const fresh = s !== slot && listed(s).some((c) => m.isNew(c.id));
@@ -500,6 +600,8 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
 
   function apply(): void {
     applyRaf = 0;
+    if (!hairDraft) drawHair();
+    if (lengthDraft === null) drawLength();
     const c = shownChoice();
     stage?.display(loadoutOf(c), lookOf(c));
     drawCaption(c);

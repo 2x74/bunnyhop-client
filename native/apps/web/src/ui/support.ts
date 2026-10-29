@@ -71,6 +71,14 @@ export function previewModel(mine: () => boolean): LoadoutModel & { changed(): v
     owns: (c) => supporterItem(c),
     lock: () => ({ hint: "Supporter item", goal: "Supporter item", fraction: null }),
     earned: () => (mine() ? "Yours" : ""),
+    setHairColor: (hex) => {
+      choice.hairColor = hex;
+      fns.forEach((f) => f());
+    },
+    setHairLength: (n) => {
+      choice.hairLength = n;
+      fns.forEach((f) => f());
+    },
     equip: (slot, id) => {
       choice[slot] = id;
       equipped.forEach((f) => f(id));

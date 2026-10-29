@@ -11,7 +11,9 @@
 //           knife hides while a gun is out)
 
 import * as THREE from "three";
-import { playerUniforms, solidMaterial } from "../../player/materials";
+import { playerUniforms } from "../../player/materials";
+import { NO_LOOK } from "../finishes/shader";
+import { gunMaterial } from "./material";
 import { FLOOR_PRESENT, FLOOR_STRIDE, WEAPON_IDS } from "../../core";
 import { worldGunGeometry } from "./meshes";
 import { gunById } from "./index";
@@ -19,13 +21,16 @@ import type { GunDef } from "./types";
 
 let worldMat: THREE.Material | null = null;
 
-/** The shared material of world guns (the solid player material; accent = carrot orange; no near fade). */
+/**
+ * The shared material of world guns (the gun material, guns/material.ts: studio only, never the scene cube, which sees
+ * these; accent = carrot orange; no near fade).
+ */
 export function worldGunMaterial(): THREE.Material {
   if (worldMat) return worldMat;
   const u = playerUniforms();
   u.uAccent.value.set(0xff7a1a);
   u.uNearFade.value.set(0, 0);
-  return (worldMat = solidMaterial(u));
+  return (worldMat = gunMaterial(u, NO_LOOK, { noEnv: true }));
 }
 
 /**

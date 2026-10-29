@@ -16,21 +16,28 @@ import {
   onLoadout,
   onGhostCosmetics,
 } from "../../web/src/player/cosmetics";
-import { loadoutFor, packLoadout } from "../../web/src/loadout";
+import { hairHex, loadoutFor, packLoadout } from "../../web/src/loadout";
 import { h } from "../../web/src/ui/dom";
 import { send } from "./bridge";
 export interface CosmeticApi {
   myCosmetics(): Promise<{ choice: CosmeticChoice; unlocked: string[] }>;
   saveCosmetics(patch: Partial<CosmeticChoice>): Promise<CosmeticChoice>;
 }
-export class NativeCosmetics {
-  choice: CosmeticChoice = {
-    ...DEFAULT_COSMETICS,
-    ...getLoadout(),
+/** The equipped look as a saved choice: the loadout carries a wig's hair colour as a number, the account as "#rrggbb". */
+function localChoice(base: CosmeticChoice): CosmeticChoice {
+  const loadout = getLoadout();
+  return {
+    ...base,
+    ...loadout,
+    hairColor: loadout.hairColor === undefined ? base.hairColor : hairHex(loadout.hairColor),
     outfit: getOutfit(),
     ghost: getGhostCosmetics().ghostId,
     trail: getGhostCosmetics().trailId,
   };
+}
+
+export class NativeCosmetics {
+  choice: CosmeticChoice = localChoice({ ...DEFAULT_COSMETICS });
   unlocked = new Set(COSMETICS.filter((c) => isUnlocked(c, 1, [])).map((c) => c.id));
   online = false;
   status = "";
@@ -61,13 +68,7 @@ export class NativeCosmetics {
   observeLocal(): void {
     if (this.syncing) return;
     this.epoch++;
-    this.choice = {
-      ...this.choice,
-      ...getLoadout(),
-      outfit: getOutfit(),
-      ghost: getGhostCosmetics().ghostId,
-      trail: getGhostCosmetics().trailId,
-    };
+    this.choice = localChoice(this.choice);
     this.changed();
   }
   async refresh(): Promise<void> {

@@ -19,7 +19,7 @@ interface CJob {
 for (const c of COSMETICS) {
   if (!["knife", "finish", "glove", "outfit", "hat", "body", "ghost"].includes(c.slot)) continue;
   if (c.slot === "knife" && !metadata.meshes["fpknife:" + c.id.replace(/^knife-/, "")]) continue;
-  if (c.slot === "hat" && !metadata.meshes[c.id]) continue;
+  if (c.slot === "hat" && !metadata.hats[c.id]) continue;
   const outfit = c.slot === "outfit" ? c.id : "outfit-cream",
     knife = c.slot === "knife" ? c.id : "knife-carrot",
     finish = c.slot === "finish" ? c.id : "fin-garden",

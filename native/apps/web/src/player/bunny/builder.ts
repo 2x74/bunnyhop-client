@@ -3,12 +3,17 @@
 // materials read (player/materials.ts):
 //   partColor vec3   fixed colour (linear), used when accent == 0
 //   accent    float  -1 = spinning propeller (partColor), 0 = partColor, 1 = style accent, 2 = accent + glow, 3 + k = colourway palette slot k,
-//                    -2 capybara body, -3 eyes, -4 mouth; -5 maxwell body, -6 eyes, -7 mouth, -8 tail (partColor, movement reactions);
+//                    -2 capybara body, -3 eyes, -4 mouth; -5 maxwell body, -6 eyes, -7 mouth, -8 tail; -9 ponytail
+//                    (partColor, movement reactions);
 //                    12..15 hat crystal (player/hat-fx.ts: partColor, moving / lit), >= 16 glove faces
 //   skinIndex / skinWeight (4 influences)
 //   finishUV  vec4   only when a section set `finish` (knife blades, viewmodel/knives/): x along the blade 0 (guard)
 //                    .. 1 (tip), y across it -1..1, z part id (viewmodel/knives/types.ts PART: 0 none, 1 blade, 2 guard,
-//                    3 grip, 4 glove shell, 5 cuff), w edge / tip weight 0..1 (wear mask). (0, 0, 0, 0) elsewhere.
+//                    3 grip, 4 glove shell, 5 cuff) plus a fraction (< 0.5, so the part still rounds the same): knife
+//                    parts Paint.mat / 16 (hardware material, viewmodel/finishes/detail.ts KMAT), glove shells 0.45 *
+//                    knuckle crease (gloves/glsl.ts); w edge / tip weight 0..1 (wear mask). (0, 0, 0, 0) elsewhere.
+//                    Garments (player/fabric.ts: hoodie, sleeves, joggers, shoes, visor, face) write z >= 8 per grid
+//                    point through surface()'s `fin` option instead.
 
 import * as THREE from "three";
 import type { V3 } from "./rig";
@@ -16,7 +21,13 @@ import type { V3 } from "./rig";
 /** Weights: [bone, weight] pairs (normalised and truncated to the 4 largest on emit). */
 export type Wt = [number, number][];
 /** Paint: accent code (see header) and a fixed colour for code 0. */
-export type Paint = { code: number; color?: number };
+/**
+ * Paint: accent code (see header) and a fixed colour for code 0. `mat`: a knife hardware material
+ * (viewmodel/finishes/detail.ts KMAT, 1..6), added to finishUV.z as mat / 16 on sections that write finishUV.
+ */
+export type Paint = { code: number; color?: number; mat?: number };
+/** A finishUV value (see header). */
+export type Fin = readonly [number, number, number, number];
 
 export const add = (a: V3, b: V3): V3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 export const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -98,16 +109,22 @@ export class Builder {
   private col = new THREE.Color();
   /** finishUV for the vertices emitted while set (from the bind-pose position; see the header). null = zeros. */
   finish: ((p: V3) => readonly [number, number, number, number]) | null = null;
+  /**
+   * Multiplies partColor of the vertices emitted while set (from the bind-pose position). Glove faces don't use
+   * partColor for their colour, so the glove builders bake a soft occlusion into it (gloves/fp.ts emit, gloves/glsl.ts).
+   */
+  tint: ((p: V3) => number) | null = null;
 
-  private vert(p: V3, n: V3, paint: Paint, w: Wt): void {
+  private vert(p: V3, n: V3, paint: Paint, w: Wt, fe?: Fin): void {
     this.P.push(p[0], p[1], p[2]);
     this.N.push(n[0], n[1], n[2]);
     this.col.set(paint.color ?? 0xffffff);
-    this.C.push(this.col.r, this.col.g, this.col.b);
+    const t = this.tint ? this.tint(p) : 1;
+    this.C.push(this.col.r * t, this.col.g * t, this.col.b * t);
     this.A.push(paint.code);
-    if (this.finish) {
-      const f = this.finish(p);
-      this.F.push(f[0], f[1], f[2], f[3]);
+    if (fe || this.finish) {
+      const f = fe ?? this.finish!(p);
+      this.F.push(f[0], f[1], f[2] + (paint.mat ? paint.mat / 16 : 0), f[3]);
       this.hasF = true;
     } else this.F.push(0, 0, 0, 0);
     const ws = w.filter(([, x]) => x > 1e-4).sort((a, b) => b[1] - a[1]).slice(0, 4);
@@ -118,7 +135,8 @@ export class Builder {
     }
   }
 
-  tri(a: V3, b: V3, c: V3, na: V3, nb: V3, nc: V3, paint: Paint, wa: Wt, wb: Wt, wc: Wt): void {
+  /** One triangle; fa / fb / fc: explicit finishUV values (else `finish`, else zeros). */
+  tri(a: V3, b: V3, c: V3, na: V3, nb: V3, nc: V3, paint: Paint, wa: Wt, wb: Wt, wc: Wt, fa?: Fin, fb?: Fin, fc?: Fin): void {
     const fn = cross(sub(b, a), sub(c, a));
     if (len(fn) < 1e-7) return;
     // Wind counter-clockwise as seen from the side the (averaged) normal points to.
@@ -126,16 +144,21 @@ export class Builder {
       [b, c] = [c, b];
       [nb, nc] = [nc, nb];
       [wb, wc] = [wc, wb];
+      [fb, fc] = [fc, fb];
     }
-    this.vert(a, na, paint, wa);
-    this.vert(b, nb, paint, wb);
-    this.vert(c, nc, paint, wc);
+    this.vert(a, na, paint, wa, fa);
+    this.vert(b, nb, paint, wb, fb);
+    this.vert(c, nc, paint, wc, fc);
   }
 
   /**
    * Smooth surface through rows of points (rows[i][k]); columns wrap when `closed`. Normals are the grid's central
    * differences, oriented away from each row's centroid (or along `out(i, k)` when given). paint / weights per face /
-   * vertex. Optional flat caps at the first / last row.
+   * vertex. Optional flat caps at the first / last row. `fin`: a finishUV value per grid point and face (garments,
+   * player/fabric.ts): (i, k) the point, (fi, fk) the quad it is emitted for, so a material can change from one row of
+   * quads to the next (like paint) with no blend across the row between. On a closed surface the quads that wrap round
+   * ask for column K (= column 0's point, one turn on), so a coordinate running round the ring keeps counting instead
+   * of jumping back. Caps: the rim's values (centre: column 0's), as the first / last row of quads.
    */
   surface(
     rows: V3[][],
@@ -147,6 +170,7 @@ export class Builder {
       capEnd?: Paint | null;
       out?: (i: number, k: number) => V3;
       flat?: boolean;
+      fin?: (i: number, k: number, fi: number, fk: number) => Fin;
     },
   ): void {
     const R = rows.length;
@@ -168,6 +192,7 @@ export class Builder {
       }),
     );
     const kmax = closed ? K : K - 1;
+    const F = o.fin;
     for (let i = 0; i + 1 < R; i++) {
       for (let k = 0; k < kmax; k++) {
         const k1 = (k + 1) % K;
@@ -179,18 +204,26 @@ export class Builder {
           na = nb = nc = nd = fn;
         }
         const p = o.paint(i, k);
-        this.tri(a, b, c, na, nb, nc, p, W[i][k], W[i][k1], W[i + 1][k1]);
-        this.tri(a, c, d, na, nc, nd, p, W[i][k], W[i + 1][k1], W[i + 1][k]);
+        if (F) {
+          const fa = F(i, k, i, k), fb = F(i, k + 1, i, k), fc = F(i + 1, k + 1, i, k), fd = F(i + 1, k, i, k);
+          this.tri(a, b, c, na, nb, nc, p, W[i][k], W[i][k1], W[i + 1][k1], fa, fb, fc);
+          this.tri(a, c, d, na, nc, nd, p, W[i][k], W[i + 1][k1], W[i + 1][k], fa, fc, fd);
+        } else {
+          this.tri(a, b, c, na, nb, nc, p, W[i][k], W[i][k1], W[i + 1][k1]);
+          this.tri(a, c, d, na, nc, nd, p, W[i][k], W[i + 1][k1], W[i + 1][k]);
+        }
       }
     }
     const cap = (i: number, j: number, paint: Paint) => {
       const c = cen[i];
       const n = norm(sub(cen[i], cen[j]));
       const wc = o.weight(c, i, 0);
+      const fi = Math.min(i, R - 2);
       for (let k = 0; k < K; k++) {
         const k1 = (k + 1) % K;
         if (!closed && k1 === 0) break;
-        this.tri(c, rows[i][k], rows[i][k1], n, n, n, paint, wc, W[i][k], W[i][k1]);
+        if (F) this.tri(c, rows[i][k], rows[i][k1], n, n, n, paint, wc, W[i][k], W[i][k1], F(i, 0, fi, k), F(i, k, fi, k), F(i, k + 1, fi, k));
+        else this.tri(c, rows[i][k], rows[i][k1], n, n, n, paint, wc, W[i][k], W[i][k1]);
       }
     };
     if (o.capStart) cap(0, 1, o.capStart);
@@ -215,14 +248,14 @@ export class Builder {
   }
 
   /** Tube along an open polyline (rings perpendicular to the path, closed ends). */
-  tube(path: V3[], radius: number | ((i: number) => number), sides: number, ref: V3, paint: (i: number) => Paint, weight: (p: V3, i: number) => Wt, caps = true): void {
+  tube(path: V3[], radius: number | ((i: number) => number), sides: number, ref: V3, paint: (i: number) => Paint, weight: (p: V3, i: number) => Wt, caps = true, fin?: (i: number, k: number, fi: number, fk: number) => Fin): void {
     const rows = path.map((p, i) => {
       const d = norm(sub(path[Math.min(path.length - 1, i + 1)], path[Math.max(0, i - 1)]));
       const [, u, v] = frame(d, ref);
       const r = typeof radius === "number" ? radius : radius(i);
       return ring(p, u, v, r, r, sides);
     });
-    this.surface(rows, { paint: (i) => paint(i), weight: (p, i) => weight(p, i), capStart: caps ? paint(0) : null, capEnd: caps ? paint(path.length - 2) : null });
+    this.surface(rows, { paint: (i) => paint(i), weight: (p, i) => weight(p, i), capStart: caps ? paint(0) : null, capEnd: caps ? paint(path.length - 2) : null, fin });
   }
 
   /** Uniformly resize a newly emitted section around a bind-space anchor. */

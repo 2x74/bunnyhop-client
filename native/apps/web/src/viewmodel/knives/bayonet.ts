@@ -20,10 +20,10 @@ import type { V3 } from "../../player/bunny/rig";
 import type { VmAction } from "../procedural";
 import { edgeWeight, fixed, type KnifeCtx } from "./ctx";
 import { handFrame, holdKnife, SLIM_THUMB, straightHold } from "./hold";
-import { PART, type HoldSpec, type KnifeDef, type KnifeState } from "./types";
+import { KMAT, PART, type HoldSpec, type KnifeDef, type KnifeState } from "./types";
 
 export const X: V3 = [1, 0, 0], Y: V3 = [0, 1, 0];
-export const STEEL = fixed(0xc9d3da), STEEL_DARK = fixed(0x96a3ad), BEVEL = fixed(0xf1f5f8), FULLER = fixed(0xa7b3bc);
+export const STEEL = fixed(0xc9d3da, KMAT.polished), STEEL_DARK = fixed(0x96a3ad, KMAT.polished), BEVEL = fixed(0xf1f5f8, KMAT.polished), FULLER = fixed(0xa7b3bc, KMAT.polished);
 
 /** The carrot blade's half width at u (finishes/shader.ts finRad): pattern units across per unit of v. */
 const finRad = (u: number) => 0.8 * Math.pow(Math.max(1 - u, 0), 0.85) + 0.04;
@@ -191,8 +191,19 @@ export function bayonetGrip(k: KnifeCtx, o: { z0: number; z1: number; rx: number
 
 /** A plate (crossguard / pommel cap): superellipse sections at the given z rows (rx, ry per row), centre y cy. */
 export function plate(k: KnifeCtx, zs: number[], rx: number[], ry: number[], cy: number, paint: Paint, part: (typeof PART)[keyof typeof PART] = PART.guard, ex = 3.2): void {
-  const seg = k.view === "fp" ? 16 : 10;
-  const rows = zs.map((z, i) => ring([0, cy, z], X, Y, rx[i], ry[i], seg, ex));
+  const fp = k.view === "fp";
+  const seg = fp ? 20 : 10;
+  // First person: each chamfer becomes a rounded bevel (a row between, pushed out along the arc), so the plate's edges
+  // catch a soft highlight instead of a hard crease.
+  const Z: number[] = [], RX: number[] = [], RY: number[] = [];
+  zs.forEach((z, i) => {
+    if (fp && i > 0 && Math.abs(rx[i] - rx[i - 1]) + Math.abs(ry[i] - ry[i - 1]) > 0.02) {
+      const round = (a: number, b: number) => a + (b - a) * (b > a ? 0.72 : 0.28);
+      Z.push((zs[i - 1] + z) / 2), RX.push(round(rx[i - 1], rx[i])), RY.push(round(ry[i - 1], ry[i]));
+    }
+    Z.push(z), RX.push(rx[i]), RY.push(ry[i]);
+  });
+  const rows = Z.map((z, i) => ring([0, cy, z], X, Y, RX[i], RY[i], seg, ex));
   k.surface(rows, { paint: () => paint, part, capStart: paint, capEnd: paint });
 }
 

@@ -40,13 +40,13 @@ const BAND: Record<GloveStyleId, [number, number, number] | null> = {
   knit: null,
   plush: [.16, .5, 1.2],
   bune: null,
-  sport: [0.14, 0.6, 1.28],
-  driver: [0.09, 0.5, 0.68],
-  wraps: [0.2, 0.5, 1.25],
+  sport: [0.2, 0.6, 1.28],
+  driver: [0.12, 0.5, 0.68],
+  wraps: [0.25, 0.5, 1.25],
   moto: null,
   specialist: null,
   paws: [0.39, 0.45, 1.22],
-  garden: [0.13, 0.5, 1.18],
+  garden: [0.18, 0.5, 1.18],
 };
 
 /** gloves/fp.ts PALM: half width / half thickness of the palm block at s (superellipse, exponent 2.7). */
@@ -104,9 +104,9 @@ export function gloveCapsules(W: ArrayLike<number>, r: VmRig, style: GloveStyleI
   if (style === "moto" || style === "specialist") {
     // Gauntlet cuff over the sleeve (radius ~2.3 * 0.86), tapering onto the hand.
     // It ends with the sleeve's trim (0.62 past the wrist), a little over it.
-    out.push({ name: "glove:cuff", a: add(wrist, mul(fore, -1.9)), b: add(wrist, mul(fore, 0.68)), r: 2.0, base: 1.82 });
+    out.push({ name: "glove:cuff", a: add(wrist, mul(fore, -1.9)), b: add(wrist, mul(fore, 0.68)), r: 2.18, base: 1.82 });
   }
-  if (style === "moto") out.push({ name: "glove:plate", a: at(palmL - 0.12, -1.2, 0.84), b: at(palmL - 0.12, 1.2, 0.84), r: 0.3, base: 0 });
+  if (style === "moto") out.push({ name: "glove:plate", a: at(palmL - 0.12, -1.2, 0.96), b: at(palmL - 0.12, 1.2, 0.96), r: 0.32, base: 0 });
   if (style === "wraps")
     // Two tails off the pinky side of the wrist wrap, flying off it and hanging down.
     out.push({ name: "glove:tail", a: at(0.95, -1.4, 0.9), b: add(at(0.95, -1.4, 0.9), add(add(mul(ax, -0.55), mul(w, -0.9)), mul(n, 1.05))), r: 0.28, base: 0 });

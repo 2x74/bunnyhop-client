@@ -40,7 +40,7 @@ ctx.onmessage = (e) => {
     const transfer: Transferable[] = [];
     let body: PlainGeometry | null = null;
     if (m.body) {
-      const g = bunnyGeometry(p.knife, p.glove, p.look, p.body);
+      const g = bunnyGeometry(p.knife, p.glove, p.look, p.body, p.hood);
       ensureBunnyLayout(g); // BunnyModel.applyLook does this on the main thread; done here it's a no-op there
       body = plain(g, transfer);
     }

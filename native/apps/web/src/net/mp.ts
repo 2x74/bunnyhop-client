@@ -127,6 +127,8 @@ export class Multiplayer {
   private jumped = false;
   /** SF_SLASH / SF_STAB since the last sample. */
   private attackFlags = 0;
+  /** A gun reload (or a shell going in) waiting for a sample without a shot (onGunReload). */
+  private gunReload = false;
   /** Inspect field for the next sample (protocol.ts SF_INSPECT_*): a start / next event, else the held level. */
   private inspectSig = 0;
   private inspectHeld = false;
@@ -245,6 +247,8 @@ export class Multiplayer {
     if (this.spectating !== null) return;
     this.weapon = weapon;
     this.silenced = silenced;
+    // (A reload still waiting when the gun went away is dropped: SF_STAB with the knife would be a stab.)
+    if (weapon === null || weapon < 2) this.gunReload = false;
     this.netTick++;
     if (events & EVENT_JUMPED) this.jumped = true;
     if (events & EVENT_TELEPORTED) this.teleported = true;
@@ -252,6 +256,12 @@ export class Multiplayer {
       const p = s.position;
       const v = s.velocity;
       const prev = this.lastSample;
+      // A gun reload rides SF_STAB on a sample without a shot (protocol.ts SF_STAB: older clients ignore SF_STAB with a
+      // gun in hand, and one carrying both bits would read as a stab to them, losing the shot); else the next sample.
+      if (this.gunReload && !(this.attackFlags & (SF_SLASH | SF_STAB))) {
+        this.attackFlags |= SF_STAB;
+        this.gunReload = false;
+      }
       let flags = (s.grounded ? SF_GROUNDED : 0) | (s.crouched ? SF_CROUCHED : 0) | (this.jumped ? SF_JUMPED : 0) | this.attackFlags | ((this.inspectSig || (this.inspectHeld ? 3 : 0)) << SF_INSPECT_SHIFT);
       // Restarts reset the core without an event: catch any jump the movement can't explain.
       if (this.teleported || !prev || Math.hypot(p[0] - prev.x, p[1] - prev.y, p[2] - prev.z) > Math.hypot(v[0], v[1], v[2]) * 0.05 + 48) flags |= SF_TELEPORT;
@@ -324,6 +334,15 @@ export class Multiplayer {
   onShot(): void {
     if (this.spectating !== null) return;
     this.attackFlags |= SF_SLASH;
+  }
+
+  /**
+   * Your gun started a reload, or a tube gun's shell went in: SF_STAB on the next sample without a shot, which receivers
+   * read as a reload when the sample's weapon is a gun (protocol.ts SF_STAB). Only ever with a gun in hand.
+   */
+  onGunReload(): void {
+    if (this.spectating !== null) return;
+    this.gunReload = true;
   }
 
   /** An inspect trick started (combo.ts SIG_START / SIG_NEXT): sent with the next sample (SF_INSPECT_*). */

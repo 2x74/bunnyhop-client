@@ -205,7 +205,7 @@ const ROWS: Record<string, Gate> = {
   "viewmodel/Position/Offset X": needs("viewmodelX"),
   "viewmodel/Position/Offset Y": needs("viewmodelY"),
   "viewmodel/Position/Offset Z": needs("viewmodelZ"),
-  "viewmodel/Position/Reset position": needs("viewmodelX", "viewmodelY", "viewmodelZ"),
+  "viewmodel/Position/Reset to default": needs("viewmodelFov", "viewmodelX", "viewmodelY", "viewmodelZ"),
   "viewmodel/Movement feel/Bob": needs("viewmodelBob"),
   "viewmodel/Movement feel/Sway": needs("viewmodelSway"),
 

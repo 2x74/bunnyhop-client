@@ -592,12 +592,15 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
   function content(t: ProfileTab): HTMLElement {
     if (t === "loadout") {
       let view: HTMLElement;
-      const glow = playerGlowControls({ root: () => view, preview: () => view?.dispatchEvent(new Event("playerglowpreview")), support: true });
-      view = loadoutView(profileModel(p, lo, news), { slot: loSlot, playerGlow: () => glow.get() });
+      // The stage shows the glow only while its settings are open (a preview you ask for, off by default).
+      let glowOpen = false;
+      const glow = playerGlowControls({ root: () => view, preview: () => view?.dispatchEvent(new Event("playerglowpreview")), support: true, startOff: true });
+      view = loadoutView(profileModel(p, lo, news), { slot: loSlot, playerGlow: () => (glowOpen ? glow.get() : null) });
       const glowSettings = h("details.lo-glow-settings", null,
         h("summary", null, "Player glow", h("small.dim", null, "Supporter")), glow.panel);
       glowSettings.addEventListener("toggle", () => {
-        if (glowSettings.open) view.dispatchEvent(new Event("playerglowpreview"));
+        glowOpen = glowSettings.open;
+        view.dispatchEvent(new Event("playerglowpreview"));
       });
       view.insertBefore(glowSettings, view.querySelector(".lo-body"));
       // Fetch after this tab is attached; saving is available only to an active supporter.

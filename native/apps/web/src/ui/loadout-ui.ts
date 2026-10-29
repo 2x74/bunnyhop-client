@@ -62,6 +62,19 @@ export function finishBackground(id: string | null | undefined): string {
       return "radial-gradient(ellipse 30% 40% at 30% 50%, #ffd36a 0 60%, transparent 62%), radial-gradient(ellipse 22% 35% at 70% 40%, #e7a92e 0 60%, transparent 62%), radial-gradient(ellipse 14% 25% at 88% 64%, #ffd36a 0 60%, transparent 62%), linear-gradient(90deg, #0d0b0a, #1a1410)";
     case "aurora":
       return "repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.07) 0 1px, transparent 1px 4px), linear-gradient(0deg, #3ff0a0 0%, rgba(63, 240, 160, 0.55) 30%, rgba(154, 107, 255, 0.45) 60%, transparent 85%), #070d22";
+    // The Supporter metals: a polished face (bright horizon line along the blade, a dark band under it).
+    case "emerald":
+      return "linear-gradient(180deg, #0a3a1e 0%, #1a9a54 34%, #b8ffd8 44%, #021208 49%, #06301a 70%, #0f5a32 100%)";
+    case "ruby":
+      return "linear-gradient(180deg, #4a0612 0%, #c0183a 34%, #ffc2cc 44%, #16020a 49%, #3a0612 70%, #6e0c22 100%)";
+    case "sapphire":
+      return "linear-gradient(180deg, #0a1c52 0%, #2456d8 34%, #c4d6ff 44%, #030820 49%, #0b1c4e 70%, #163488 100%)";
+    case "pearl":
+      return "linear-gradient(100deg, rgba(255, 196, 222, 0.5), transparent 30%, transparent 70%, rgba(170, 230, 220, 0.5)), linear-gradient(180deg, #e6e0ea 0%, #fbf8fb 40%, #d8d2dc 52%, #efe9ee 100%)";
+    case "chromatic":
+      return "linear-gradient(180deg, rgba(255, 255, 255, 0.0) 38%, rgba(255, 255, 255, 0.75) 44%, rgba(0, 0, 0, 0.55) 49%, rgba(0, 0, 0, 0) 62%), linear-gradient(90deg, #ff6aa8, #ffc85a 22%, #7af0a0 42%, #5ad2ff 62%, #9a7cff 82%, #ff6aa8)";
+    case "chrome":
+      return "linear-gradient(180deg, #5a606a 0%, #c4cad2 34%, #ffffff 44%, #101216 49%, #4a4e56 70%, #8a9098 100%)";
     case "geode":
       return "linear-gradient(180deg, #141218 0 13%, #d6cff5 13% 16%, transparent 16% 84%, #d6cff5 84% 87%, #141218 87%), repeating-linear-gradient(58deg, rgba(255, 255, 255, 0.2) 0 5px, transparent 5px 11px), repeating-linear-gradient(-62deg, rgba(0, 0, 0, 0.25) 0 6px, transparent 6px 13px), linear-gradient(90deg, #3fe6d2, #3fa6e8 55%, #6a4be0)";
     case "rift":

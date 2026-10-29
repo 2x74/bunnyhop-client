@@ -11,7 +11,8 @@
 // - Wire forms: the room roster carries the object (`CosmeticLoadout`, JSON), replays carry `packLoadout()` text in an
 //   optional trailer (replay.ts). Both are read leniently: anything unknown falls back to the defaults, never an error.
 
-import { cosmetic, DEFAULT_COSMETICS, type CosmeticSlot } from "./progression";
+import { cosmetic, DEFAULT_COSMETICS, HAIR_HATS, HAIR_LENGTH, LENGTH_HATS, hairLengthOf, type CosmeticSlot } from "./progression";
+export { HAIR_LENGTH, LENGTH_HATS, hairLengthOf };
 
 export interface CosmeticLoadout {
   /** progression.ts "knife-*" id. */
@@ -39,11 +40,48 @@ export interface CosmeticLoadout {
    */
   outfit?: string;
   /**
+   * The wig's hair colour (sRGB 0xRRGGBB), only while a wig is the hat (isWig; Supporter items, so the saved choice is
+   * checked like the hat). Absent = HAIR_DEFAULT. Older readers drop it and draw the default.
+   */
+  hairColor?: number;
+  /**
+   * The ponytail's length (a whole percent of the built length, progression.ts HAIR_LENGTH), only while the Ponytail is
+   * the hat (LENGTH_HATS) and not the default. Absent = 100. Older readers drop it and draw the built length.
+   */
+  hairLength?: number;
+  /**
    * RESERVED, not implemented: a player-picked colour (sRGB 0xRRGGBB) for finishes that offer one (FinishStyle.tintable).
    * Nothing writes, reads, validates or sends it yet; cleanLoadout drops it. Plan: research/COSMETICS-PLAN.md §4.1.
    */
   tint?: number;
 }
+
+/** Hats that are hair (player/bunny/wigs.ts): the standard bunny wears its hood down for them, and they take hairColor. */
+export const WIGS = HAIR_HATS;
+export const isWig = (hat: string | null | undefined): boolean => !!hat && WIGS.includes(hat);
+/** Hair colour when none is picked (dark chestnut). */
+export const HAIR_DEFAULT = 0x5a3426;
+/** Hair colour presets for the picker (sRGB). Any other colour is allowed. */
+export const HAIR_PRESETS: readonly { name: string; hex: string }[] = [
+  { name: "Black", hex: "#1f1b1d" },
+  { name: "Dark brown", hex: "#3d2620" },
+  { name: "Chestnut", hex: "#5a3426" },
+  { name: "Copper", hex: "#a2512b" },
+  { name: "Blonde", hex: "#d9b46c" },
+  { name: "Platinum", hex: "#e8e2d4" },
+  { name: "Pink", hex: "#f29bbf" },
+  { name: "Lavender", hex: "#a98be0" },
+  { name: "Teal", hex: "#2fa59a" },
+  { name: "Red", hex: "#b8262f" },
+];
+
+/** A colour as saved ("#rrggbb", any case) or carried (0xRRGGBB) -> 0xRRGGBB, else null. */
+export function hairColorOf(v: unknown): number | null {
+  if (typeof v === "number") return Number.isInteger(v) && v >= 0 && v <= 0xffffff ? v : null;
+  if (typeof v === "string" && /^#?[0-9a-f]{6}$/i.test(v)) return parseInt(v.replace("#", ""), 16);
+  return null;
+}
+export const hairHex = (c: number): string => `#${c.toString(16).padStart(6, "0")}`;
 
 export const DEFAULT_KNIFE = DEFAULT_COSMETICS.knife!;
 export const DEFAULT_FINISH = DEFAULT_COSMETICS.finish!;
@@ -57,7 +95,7 @@ export const DEFAULT_LOADOUT: CosmeticLoadout = Object.freeze({ knife: DEFAULT_K
  * Shader finish designs (viewmodel/finishes/shader.ts FINISH_CODE): one per finish, each a fixed design baked into its
  * GLSL. "founder": Founder's Gold, the owner's finish (role-held in progression.ts).
  */
-export type FinishKind = "none" | "sunset" | "ember" | "tigerlily" | "nebula" | "dewweb" | "frost" | "heartbeet" | "fourleaf" | "founder" | "geode" | "rift" | "spectrum" | "goldleaf" | "aurora" | "contour" | "meteor" | "hourglass" | "lantern" | "wildflower" | "tally" | "devgrid";
+export type FinishKind = "none" | "sunset" | "ember" | "tigerlily" | "nebula" | "dewweb" | "frost" | "heartbeet" | "fourleaf" | "founder" | "geode" | "rift" | "spectrum" | "goldleaf" | "aurora" | "contour" | "meteor" | "hourglass" | "lantern" | "wildflower" | "tally" | "devgrid" | "emerald" | "ruby" | "sapphire" | "pearl" | "chromatic" | "chrome";
 
 export interface FinishStyle {
   kind: FinishKind;
@@ -81,6 +119,13 @@ export const FINISH_STYLE: Record<string, FinishStyle> = {
   "fin-spectrum": { kind: "spectrum" },
   "fin-goldleaf": { kind: "goldleaf" },
   "fin-aurora": { kind: "aurora" },
+  // Supporter metals (v0.0.29, standalone: polished metal, no pattern).
+  "fin-emerald-steel": { kind: "emerald" },
+  "fin-ruby-steel": { kind: "ruby" },
+  "fin-sapphire-steel": { kind: "sapphire" },
+  "fin-pearl": { kind: "pearl" },
+  "fin-chromatic": { kind: "chromatic" },
+  "fin-chrome": { kind: "chrome" },
   // Batch 1 (progression.ts, research/PROGRESSION-BATCH1.md), earned by playing.
   "fin-contour": { kind: "contour" },
   "fin-meteor": { kind: "meteor" },
@@ -194,13 +239,17 @@ const slotId = (slot: CosmeticSlot, v: unknown, fallback: string): string => {
  * fall back to the defaults, retired ids read as their replacement). Unlocks are checked where choices are saved and
  * read (the API).
  */
-export function loadoutFor(choice: { knife?: unknown; finish?: unknown; glove?: unknown; hat?: unknown; body?: unknown } | null | undefined, crown: 1 | 2 | 3 | null = null): CosmeticLoadout {
+export function loadoutFor(choice: { knife?: unknown; finish?: unknown; glove?: unknown; hat?: unknown; body?: unknown; hairColor?: unknown; hairLength?: unknown } | null | undefined, crown: 1 | 2 | 3 | null = null): CosmeticLoadout {
   const c = choice ?? {};
   const l: CosmeticLoadout = { knife: slotId("knife", c.knife, DEFAULT_KNIFE), finish: slotId("finish", c.finish, DEFAULT_FINISH), glove: slotId("glove", c.glove, DEFAULT_GLOVE) };
   if (crown) l.crown = crown;
   const hat = slotId("hat", c.hat, "");
   if (hat) l.hat = hat;
   if (c.body === "body-b") l.body = "body-b";
+  const hair = isWig(hat) ? hairColorOf(c.hairColor) : null;
+  if (hair !== null) l.hairColor = hair;
+  const length = LENGTH_HATS.includes(hat) ? hairLengthOf(c.hairLength) : null;
+  if (length !== null && length !== HAIR_LENGTH.default) l.hairLength = length;
   return l;
 }
 
@@ -217,21 +266,23 @@ export function cleanLoadout(raw: unknown): CosmeticLoadout | null {
 }
 
 export const sameLoadout = (a: CosmeticLoadout | null | undefined, b: CosmeticLoadout | null | undefined) =>
-  !!a && !!b && a.knife === b.knife && a.finish === b.finish && a.glove === b.glove && (a.crown ?? null) === (b.crown ?? null) && (a.hat ?? null) === (b.hat ?? null) && (a.body ?? "body-a") === (b.body ?? "body-a") && (a.outfit ?? null) === (b.outfit ?? null);
+  !!a && !!b && a.knife === b.knife && a.finish === b.finish && a.glove === b.glove && (a.crown ?? null) === (b.crown ?? null) && (a.hat ?? null) === (b.hat ?? null) && (a.body ?? "body-a") === (b.body ?? "body-a") && (a.outfit ?? null) === (b.outfit ?? null) && (a.hairColor ?? null) === (b.hairColor ?? null) && (a.hairLength ?? null) === (b.hairLength ?? null);
 
 export const isDefaultLoadout = (l: CosmeticLoadout) => l.knife === DEFAULT_KNIFE && l.finish === DEFAULT_FINISH && l.glove === DEFAULT_GLOVE && l.body !== "body-b";
 
 // ---------------------------------------------------------------------------------------------
-// Packed text form: "2;<knife>;<finish>;<glove>[;<crown>[;<hat>[;<body>[;<outfit>]]]]". Empty tail fields are placeholders;
-// absent body means Model A, absent outfit an unknown colourway. Older readers ignore new fields (a v2 reader takes
-// fields 1-6 and stops), so every build keeps the v2 replay format.
+// Packed text form: "2;<knife>;<finish>;<glove>[;<crown>[;<hat>[;<body>[;<outfit>[;<hair>[;<length>]]]]]]". Empty tail
+// fields are placeholders; absent body means Model A, absent outfit an unknown colourway; hair is the wig's colour as 6
+// hex digits, length the ponytail's length as a whole percent (absent = the defaults). Older readers ignore new fields
+// (a v2 reader takes the fields it knows and stops), so every build keeps the v2 replay format.
 // v1 (v0.0.5 replays) was "1;<knife>;<finish>;<seed>;<wear × 10000>;<glove>[;<crown>]": still read, seed / wear ignored.
 
 const PACK_VERSION = "2";
 
 export function packLoadout(l: CosmeticLoadout): string {
   const outfit = outfitId(l.outfit);
-  const tail = outfit ? [l.crown ?? "", l.hat ?? "", l.body === "body-b" ? l.body : "", outfit] : l.body === "body-b" ? [l.crown ?? "", l.hat ?? "", l.body] : l.hat ? [l.crown ?? "", l.hat] : l.crown ? [l.crown] : [];
+  const tail: (string | number)[] = [l.crown ?? "", l.hat ?? "", l.body === "body-b" ? l.body : "", outfit ?? "", l.hairColor !== undefined ? hairHex(l.hairColor).slice(1) : "", l.hairLength ?? ""];
+  while (tail.length && tail[tail.length - 1] === "") tail.pop();
   return [PACK_VERSION, l.knife, l.finish, l.glove, ...tail].join(";");
 }
 
@@ -246,7 +297,7 @@ export function unpackLoadout(s: string | null | undefined): CosmeticLoadout | n
   if (!s || s.length > 200) return null;
   const f = s.split(";");
   if (f[0] === "2" && f.length >= 4) {
-    const l = cleanLoadout({ knife: f[1], finish: f[2], glove: f[3], crown: f[4] ? Number(f[4]) : null, hat: f[5], body: f[6] })!;
+    const l = cleanLoadout({ knife: f[1], finish: f[2], glove: f[3], crown: f[4] ? Number(f[4]) : null, hat: f[5], body: f[6], hairColor: f[8] ? `#${f[8]}` : undefined, hairLength: f[9] && /^\d+$/.test(f[9]) ? Number(f[9]) : undefined })!;
     const outfit = outfitId(f[7]);
     return outfit ? { ...l, outfit } : l;
   }

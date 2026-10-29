@@ -3,8 +3,9 @@
 // (session.ts doesn't submit them or save them as PBs).
 
 import type * as THREE from "three";
-import { traceRay, type Core, type PlayerState } from "../core";
+import { traceRay, WEAPON_EVENT_RELOAD_STARTED, type AttackReport, type Core, type PlayerState, type WeaponReport } from "../core";
 import { PlayerModel } from "../player/model";
+import { gunForWeapon } from "../viewmodel/guns/presenter";
 import { SpectatorCamera, type SpectatorTarget } from "./cameras";
 
 export class ThirdPerson {
@@ -12,6 +13,10 @@ export class ThirdPerson {
   get shadowRoot(): THREE.Object3D { return this.model.root; }
   private pendingAttack = 0;
   private pendingInspect = 0;
+  private pendingShot = false;
+  private pendingReload: { seconds: number; shell?: boolean; empty?: boolean } | null = null;
+  private lastActive = 0;
+  private lastClip = 0;
   private inspectHeld = false;
   private spec: SpectatorCamera;
   private model = new PlayerModel({ style: "solid" });
@@ -57,6 +62,29 @@ export class ThirdPerson {
     this.pendingAttack = kind;
   }
 
+  /**
+   * One sim tick of your weapons (core weaponReport / attackReport): a gun shot, a reload starting (its length from the
+   * core) or a tube gun's shell going in, for the third-person bunny next frame. Returns true on a reload / shell, for
+   * the room (mp.onGunReload).
+   */
+  weaponTick(r: WeaponReport | null, a: AttackReport | null, tickS: number): boolean {
+    if (!r) return false;
+    let reload = false;
+    if (a && a.weapon >= 2 && a.weapon === r.active) this.pendingShot = true;
+    if (r.active >= 2 && r.active === this.lastActive) {
+      if (r.flags & WEAPON_EVENT_RELOAD_STARTED) {
+        this.pendingReload = { seconds: Math.max(0.2, r.reloadTicks * tickS), empty: r.clip === 0 };
+        reload = true;
+      } else if (r.clip > this.lastClip && gunForWeapon(r.active)?.timing.shells) {
+        this.pendingReload = { seconds: Math.max(0.2, r.reloadTicks * tickS), shell: true };
+        reload = true;
+      }
+    }
+    this.lastActive = r.active;
+    this.lastClip = r.clip;
+    return reload;
+  }
+
   /** An inspect signal (viewmodel/inspects/combo.ts SIG_*) to play on the third-person model next frame. */
   inspect(sig: number): void {
     this.pendingInspect = sig;
@@ -89,9 +117,11 @@ export class ThirdPerson {
     s.crouched = curr.crouched;
     s.grounded = curr.grounded || prev.grounded;
     if (this.active) this.spec.update(camera, s, dt, "chase");
-    this.model.setState({ visualTime, position: s.pos, velocity: s.vel, yaw, pitch, crouched: s.crouched, grounded: s.grounded, forwardmove: cmd.forward, sidemove: cmd.side, attack: this.pendingAttack, inspect: this.pendingInspect, inspectHeld: this.inspectHeld });
+    this.model.setState({ visualTime, position: s.pos, velocity: s.vel, yaw, pitch, crouched: s.crouched, grounded: s.grounded, forwardmove: cmd.forward, sidemove: cmd.side, attack: this.pendingAttack, inspect: this.pendingInspect, inspectHeld: this.inspectHeld, gunShot: this.pendingShot, gunReload: this.pendingReload });
     this.pendingAttack = 0;
     this.pendingInspect = 0;
+    this.pendingShot = false;
+    this.pendingReload = null;
     this.model.update(dt);
     return this.active;
   }

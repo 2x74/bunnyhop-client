@@ -1,6 +1,7 @@
 #pragma once
 #include "bunnyhop_native.h"
-#include "ghost_trails.hpp"
+#include "ghost_playback.hpp"
+#include "render_shaders.hpp"
 #include <nlohmann/json.hpp>
 #include <array>
 #include <filesystem>
@@ -29,7 +30,15 @@ struct GhostSlots {
     void clear_for_tutorial(BhContext *core);
     bool control(BhContext *core, const nlohmann::json &message);
     void toggle(const nlohmann::json &message);
-    static float opacity(const BhState &player, const BhGhostFrame &ghost, float opacity, bool near_fade);
+    std::array<native_render::GhostEventCursor, slot_count> cursors;
+
+    // Poses slot `index` for this frame and adds the swings and inspects it played since the last one.
+    bool
+    present(BhContext *core,
+            unsigned index,
+            const native_render::GhostPath &path,
+            std::optional<double> elapsed,
+            native_render::Actor &actor);
 };
 
 }  // namespace native

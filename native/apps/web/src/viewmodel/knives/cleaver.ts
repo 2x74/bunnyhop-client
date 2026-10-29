@@ -6,10 +6,10 @@ import { add, ring, scale, type Paint } from "../../player/bunny/builder";
 import type { V3 } from "../../player/bunny/rig";
 import { ACCENT, CARROT, CARROT_DARK, fixed, LEAF, LEAF_DARK, type KnifeCtx } from "./ctx";
 import { straightHold } from "./hold";
-import { PART, type KnifeDef } from "./types";
+import { KMAT, PART, type KnifeDef } from "./types";
 
 const X: V3 = [1, 0, 0], Y: V3 = [0, 1, 0];
-const STEEL = fixed(0xcfe2d8), STEEL_DARK = fixed(0xa9c2b6), BEVEL = fixed(0xf4fbf7), HOLE = fixed(0x10161c);
+const STEEL = fixed(0xcfe2d8, KMAT.polished), STEEL_DARK = fixed(0xa9c2b6, KMAT.polished), BEVEL = fixed(0xf4fbf7, KMAT.polished), HOLE = fixed(0x10161c);
 /** Blade slab: z from the ferrule to the nose, spine at +y, edge at -y. */
 const Z0 = 1.95, Z1 = 8.6, SPINE = 0.42, EDGE = -2.05;
 /** Clover cut centre (near the spine, toward the nose) and leaf size. */

@@ -26,6 +26,7 @@ import type { HybridGI } from "./hybrid-gi/index";
 import { WaterCapture } from "../water-capture";
 import { hdrWorld } from "./source-hdr";
 import { SourceHdrPass } from "./source-hdr-pass";
+import { captureFinishEnvironment } from "../viewmodel/finishes/environment";
 
 
 /**
@@ -167,7 +168,11 @@ export class ComposerPipeline {
       cloud.update(view,{direction:this.lighting!.sun?.direction??new THREE.Vector3(0,1,0),color:this.lighting!.sun?.irradianceColor??this.lighting!.sun?.color??new THREE.Color(0,0,0),ambient:this.lighting!.ambient??new THREE.Color(.18,.2,.22)},timeSeconds,{enabled:true,quality:this.options.cloudQuality,coverage:this.options.cloudCoverage,density:this.options.cloudDensity,baseHeight:Math.max(16384,this.worldTop+2048),seed:1});
     };
     if(cloudOn){(this.clouds??=new CloudRenderer(this.renderer)).resetFrameStats();prepare(camera);}else{this.clouds?.dispose();this.clouds=null;}
-    this.skyBackground.run(scene,asset,{mode:this.skyMode,yaw:this.skyYaw,exposure:this.skyExposure,sun:this.lighting.sun,clouds:cloudOn&&this.clouds?{uniforms:this.clouds.getUniforms(),prepare}:undefined},()=>this.renderFrame(scene,camera,timeSeconds));
+    this.skyBackground.run(scene,asset,{mode:this.skyMode,yaw:this.skyYaw,exposure:this.skyExposure,sun:this.lighting.sun,clouds:cloudOn&&this.clouds?{uniforms:this.clouds.getUniforms(),prepare}:undefined},()=>{
+      // The metal knife finishes' scene reflection (viewmodel/finishes/environment.ts): one cube face, with this frame's sky.
+      if(enabled)captureFinishEnvironment(this.renderer,scene,camera,this.lighting?.sun);
+      this.renderFrame(scene,camera,timeSeconds);
+    });
   }
   private renderFrame(scene: THREE.Scene, camera: THREE.Camera, _timeSeconds = 0): void {
     const config = presetConfig(this.options);

@@ -220,9 +220,13 @@ export class RemotePlayers {
       // An attack with a gun is a shot (no knife swing); with the knife (or an older client: unknown) a swing.
       const gunAttack = s.attack !== 0 && s.attackWeapon >= 2;
       const swing = gunAttack ? 0 : s.attack;
-      m.setState({ position: s.pos, velocity: s.vel, yaw: s.yaw, pitch: s.pitch, crouched: s.crouched, grounded: s.grounded, jumped: s.jumped, attack: swing, inspect: s.inspect, inspectHeld: s.inspectHeld });
+      // Their gun in third person (player/bunny/gun-hold.ts): the kick and flash per shot, the reload gesture (its length
+      // from the gun's own timing: the sender's core isn't ours), a shell per tube-gun event.
+      const held = s.weapon >= 2 ? gunForWeapon(s.weapon) : undefined;
+      const gunReload = s.reload && held ? (held.timing.shells ? { seconds: held.timing.shells.each, shell: true } : { seconds: held.timing.reload ?? 2 }) : null;
+      m.setState({ position: s.pos, velocity: s.vel, yaw: s.yaw, pitch: s.pitch, crouched: s.crouched, grounded: s.grounded, jumped: s.jumped, attack: swing, inspect: s.inspect, inspectHeld: s.inspectHeld, gunShot: gunAttack && s.attack === 1, gunReload });
       if (swing) emitWeaponEvent({ type: swing === 2 ? "stab" : "slash", source: "remote", slot: p.slot, position: [s.pos[0], s.pos[1], s.pos[2]] });
-      if (gunAttack && s.attack === 1) this.shot(s, hear);
+      if (gunAttack && s.attack === 1) this.shot(s, hear, m);
       // Drew a gun (a switch or a pickup): its draw sound at them.
       if (s.weaponChanged && s.weapon >= 2 && hear && !s.snapped) gunSound(gunForWeapon(s.weapon) ?? null, "draw", { at: s.pos, gain: 0.7 });
       if (s.inspect) emitWeaponEvent({ type: "inspect", source: "remote", slot: p.slot, position: [s.pos[0], s.pos[1], s.pos[2]], trick: s.inspect === 1 ? 0 : undefined });
@@ -258,7 +262,7 @@ export class RemotePlayers {
   }
 
   /** A remote shot: their gun's sound at them and a tracer from about their muzzle along their view. */
-  private shot(s: InterpState, hear: boolean): void {
+  private shot(s: InterpState, hear: boolean, m?: PlayerModel): void {
     if (hear) GunPresenter.remoteShot(s.attackWeapon, s.pos, s.attackSilenced);
     if (!this.impacts) return;
     const cp = Math.cos(s.pitch * D2R);
@@ -267,11 +271,11 @@ export class RemotePlayers {
     const far = [0, 1, 2].map((k) => eye[k] + fwd[k] * SHOT_RANGE);
     const f = this.trace ? this.trace(eye, far) : 1;
     const end = [0, 1, 2].map((k) => eye[k] + fwd[k] * SHOT_RANGE * f);
-    // The tracer leaves from about the muzzle of the gun in the bunny's right hand (chest height, ahead and right).
+    // The tracer leaves from their gun's muzzle (the bunny's posed gun as of the last frame), else about where it would be.
     const rl = Math.hypot(fwd[0], fwd[1]) || 1;
     const right = [fwd[1] / rl, -fwd[0] / rl, 0];
     const hand = s.crouched ? 30 : 46;
-    const from = [s.pos[0] + (fwd[0] / rl) * 26 + right[0] * 7, s.pos[1] + (fwd[1] / rl) * 26 + right[1] * 7, s.pos[2] + hand];
+    const from = m?.gunMuzzle(tmp) ? [tmp.x, -tmp.z, tmp.y] : [s.pos[0] + (fwd[0] / rl) * 26 + right[0] * 7, s.pos[1] + (fwd[1] / rl) * 26 + right[1] * 7, s.pos[2] + hand];
     this.impacts.hit(end, [0, 0, 0], "concrete", { from });
   }
 
