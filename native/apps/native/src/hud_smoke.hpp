@@ -7,6 +7,46 @@
 #include <fstream>
 
 namespace native {
+// The timer, speed, FPS and run stats change every frame while running. Once each digit has
+// been drawn, new values must not reach the system rasterizer.
+inline void numeric_hud_smoke(NativeHud &hud, int width, int height) {
+    constexpr int frames_per_pass = 120;
+    BhSnapshot snapshot{};
+    snapshot.health = 100;
+    BhRunState run{};
+    run.status = 1;
+    BhCmd command{};
+    const auto draw_frames = [&](int first_frame) {
+        for (int frame = first_frame; frame < first_frame + frames_per_pass; ++frame) {
+            snapshot.player.velocity[0] = 250.f + float(frame) * 7.3f;
+            snapshot.player.tick = uint32_t(frame);
+            run.seconds = double(frame) * .0137;
+            run.jumps = uint32_t(frame / 9);
+            run.strafes = uint32_t(frame / 4);
+            run.sync_percent = 80 + double(frame % 200) * .1;
+            hud.draw(
+                    width,
+                    height,
+                    snapshot,
+                    run,
+                    command,
+                    "bhop_lol_tutorial",
+                    "autohop",
+                    "",
+                    900.f + float(frame),
+                    true,
+                    true,
+                    false,
+                    BhWeaponReport{}
+            );
+        }
+    };
+    draw_frames(0);
+    const auto warmed = hud.rasterizations();
+    draw_frames(frames_per_pass);
+    if (hud.rasterizations() != warmed) throw std::runtime_error("Changing HUD numbers were rasterized again");
+}
+
 // Uses the existing presentation-smoke context. Fixtures never connect to a room or submit a run.
 template <class Save>
 void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) {
@@ -278,6 +318,7 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
     );
     save("hud-hidden-nothing");
     hud.preferences(default_settings());
+    numeric_hud_smoke(hud, width, height);
 }
 
 inline void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, const std::filesystem::path &output) {

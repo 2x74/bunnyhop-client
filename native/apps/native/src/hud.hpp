@@ -37,6 +37,8 @@ class NativeHud {
         int pixels;
         bool tabular;
         uint64_t batch;
+        float origin_x, origin_y;
+        float advance;
     };
 
     std::map<std::string, Raster> raster_cache;
@@ -125,7 +127,17 @@ class NativeHud {
             if (!evict_raster()) return nullptr;
         }
         raster_bytes += bitmap.rgba.size();
-        Raster result{0, bitmap.width, bitmap.height, pixels, tabular, raster_batch_};
+        Raster result{
+                0,
+                bitmap.width,
+                bitmap.height,
+                pixels,
+                tabular,
+                raster_batch_,
+                bitmap.origin_x,
+                bitmap.origin_y,
+                bitmap.advance
+        };
         gl.GenTextures(1, &result.texture);
         gl.BindTexture(GL_TEXTURE_2D, result.texture);
         gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -306,15 +318,78 @@ class NativeHud {
     // still samples the texture.
     void rect(float x, float y, float w, float h, Color c) { quad(x, y, w, h, -2, -2, 0, 0, c); }
 
+    static constexpr Color text_shadow{0, 0, 0, .85f};
+    static constexpr size_t max_numeric_pieces = 48;
+
+    struct NumericLayout {
+        std::array<const Raster *, max_numeric_pieces> rasters{};
+        std::array<float, max_numeric_pieces> left_pixels{};
+        std::array<float, max_numeric_pieces> top_pixels{};
+        size_t count = 0;
+        float width_pixels = 0;
+    };
+
+    // Places cached digit and label rasters where the shaped string would put them. Offsets
+    // are whole pixels so every piece samples its texture without blur.
+    bool layout_numeric(std::string_view value, float size, NumericLayout &layout) {
+        native::HudTextPieces<max_numeric_pieces> pieces;
+        if (!native::split_numeric_text(value, pieces)) return false;
+        for (size_t i = 0; i < pieces.count; ++i) {
+            const auto &piece = pieces.pieces[i];
+            layout.rasters[i] = raster(value.substr(piece.begin, piece.length), size, true);
+            if (!layout.rasters[i]) return false;
+        }
+        const Raster &first = *layout.rasters[0];
+        float pen = first.origin_x;
+        for (size_t i = 0; i < pieces.count; ++i) {
+            const Raster &piece = *layout.rasters[i];
+            layout.left_pixels[i] = std::round(pen - piece.origin_x);
+            layout.top_pixels[i] = std::round(first.origin_y - piece.origin_y);
+            pen += piece.advance;
+        }
+        const Raster &last = *layout.rasters[pieces.count - 1];
+        layout.width_pixels = pen + float(last.width) - last.origin_x - last.advance;
+        layout.count = pieces.count;
+        return true;
+    }
+
+    void draw_numeric(float x, float y, const NumericLayout &layout, Color color) {
+        const float ratio = scale * element_scale;
+        for (size_t i = 0; i < layout.count; ++i) {
+            const Raster &piece = *layout.rasters[i];
+            current_texture = piece.texture;
+            quad(x + layout.left_pixels[i] / ratio,
+                 y + layout.top_pixels[i] / ratio,
+                 piece.width / ratio,
+                 piece.height / ratio,
+                 0,
+                 0,
+                 1,
+                 1,
+                 color);
+        }
+        current_texture = atlas;
+    }
+
+    bool numeric_text(float x, float y, std::string_view value, float size, Color color, bool center) {
+        NumericLayout layout;
+        if (!layout_numeric(value, size, layout)) return false;
+        if (center) x -= layout.width_pixels / (scale * element_scale) * .5f;
+        draw_numeric(x + 1, y + 1, layout, text_shadow);
+        draw_numeric(x, y, layout, color);
+        return true;
+    }
+
     void text(float x, float y, std::string_view value, float size, Color color, bool center = false) {
         if (!element_visible) return;
         color = themed_text(color);
+        if (numeric_text(x, y, value, size, color, center)) return;
         if (const auto *glyphs = raster(value, size, true)) {
             const float ratio = scale * element_scale;
             const float width = glyphs->width / ratio, height = glyphs->height / ratio;
             if (center) x -= width * .5f;
             current_texture = glyphs->texture;
-            quad(x + 1, y + 1, width, height, 0, 0, 1, 1, {0, 0, 0, .85f});
+            quad(x + 1, y + 1, width, height, 0, 0, 1, 1, text_shadow);
             quad(x, y, width, height, 0, 0, 1, 1, color);
             current_texture = atlas;
             return;
