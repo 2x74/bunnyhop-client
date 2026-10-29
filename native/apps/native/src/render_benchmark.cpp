@@ -76,7 +76,8 @@ int main(int argc, char **argv) {
         renderer.set_zones_visible(false);
         renderer.set_triggers_visible(false);
         renderer.set_fov(90);
-        renderer.set_water_quality(0);
+        renderer.set_water_quality(spec.value("waterQuality", 0));
+        if (spec.contains("graphics")) renderer.graphics_settings(spec.at("graphics"));
         renderer.set_source_look(sourceLook);
         renderer.set_effects_visible(effects);
         renderer.set_profiling(profiling);
@@ -162,7 +163,12 @@ int main(int argc, char **argv) {
                  "fixed-camera world render + glFinish + one-pixel readback; no presentation, simulation, UI or "
                  "network"},
                 {"settings",
-                 {{"fovDesired", 90}, {"water", "simple"}, {"viewmodel", false}, {"zones", false}, {"triggers", false}}}
+                 {{"fovDesired", 90},
+                  {"waterQuality", spec.value("waterQuality", 0)},
+                  {"graphics", spec.value("graphics", nlohmann::json::object())},
+                  {"viewmodel", false},
+                  {"zones", false},
+                  {"triggers", false}}}
         };
         for (auto &[key, value] : profileSums.items())
             value = value.get<double>() / frames;
