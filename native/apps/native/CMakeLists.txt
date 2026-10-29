@@ -149,6 +149,7 @@ if(BUNNYHOP_BUILD_CLIENT)
         src/game_session.cpp
         src/video_controller.cpp
         src/hud_frame.cpp
+        src/hud_editor.cpp
         src/room_bridge.cpp
         src/runtime_smoke.cpp
         src/client_smoke.cpp

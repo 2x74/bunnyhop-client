@@ -1,8 +1,8 @@
 // The HUD elements the player can move, and where hud.hpp draws each one when
 // it hasn't been moved. Positions are percent of the screen; hud.hpp keeps its
-// built-in places in HUD units (1/900 of the screen height above 540 px), so
-// the same formulas are repeated here to show those places as percentages.
-// Keep the ids and formulas in step with NativeHud::draw and settings.hpp.
+// built-in places in HUD units (hud_geometry.hpp), so the same formulas are
+// repeated here to show those places as percentages. Keep the ids and formulas
+// in step with NativeHud::draw and settings.hpp.
 
 type Place = (w: number, h: number) => number;
 export interface HudElement {
@@ -20,9 +20,10 @@ export const HUD_ELEMENTS = [
   { id: "speed", label: "Speed", x: (w) => w / 2, y: (_, h) => h - 105 },
   { id: "runStats", label: "Run stats", x: (w) => w / 2, y: (_, h) => h - 68 },
   { id: "status", label: "Run status", x: (w) => w / 2, y: (_, h) => h - 186 },
-  { id: "jumpStats", label: "Jump stats", x: (w) => w / 2, y: (_, h) => h - 222 },
-  { id: "strafeTrainer", label: "Strafe trainer", x: (w) => w / 2, y: (_, h) => h - 276 },
-  { id: "splits", label: "Split comparison", x: (w) => w / 2, y: (_, h) => h - 330 },
+  { id: "jumpStats", label: "Jump stats", x: (w) => w / 2, y: (_, h) => h - 232 },
+  // The classic trainer's top; its bottom stays 250 up whatever its style (hud_trainer.hpp).
+  { id: "strafeTrainer", label: "Strafe trainer", x: (w) => w / 2, y: (_, h) => h - 279 },
+  { id: "splits", label: "Split comparison", x: (w) => w / 2, y: (_, h) => h - 350 },
   { id: "speedGraph", label: "Speed graph", x: (w) => w - 300, y: (_, h) => h - 180 },
   { id: "keys", label: "Keys", x: () => 26, y: (_, h) => h - 65 },
   { id: "health", label: "Health and ammo", x: (w) => w - 275, y: (_, h) => h - 62 },
@@ -42,10 +43,16 @@ export const HUD_ELEMENT_IDS: readonly HudElementId[] = HUD_ELEMENTS.map((item) 
 
 const round = (value: number): number => Math.round(Math.min(100, Math.max(0, value)) * 10) / 10;
 
+/** Pixels per HUD unit at 100% (hud_geometry.hpp hud_scale): 1/900 of the height, and never more than fits the layout. */
+export function hudUnit(width: number, height: number): number {
+  const fits = Math.min(width / 1060, height / 800);
+  return Math.min(Math.max(0.6, height / 900), fits);
+}
+
 /** Where |id| sits by default on a |width| × |height| window, in percent. */
 export function defaultPosition(id: HudElementId, width = window.innerWidth, height = window.innerHeight): HudPosition {
   const element: HudElement = HUD_ELEMENTS.find((item) => item.id === id)!;
-  const scale = Math.max(0.6, height / 900);
+  const scale = hudUnit(width, height);
   const w = width / scale,
     h = height / scale;
   return { x: round((element.x(w, h) / w) * 100), y: round((element.y(w, h) / h) * 100) };

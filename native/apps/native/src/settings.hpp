@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include "window_settings.hpp"
+#include "hud_geometry.hpp"
 #if __has_include("graphics_settings.hpp")
 #include "graphics_settings.hpp"
 #endif
@@ -357,6 +358,24 @@ inline bool valid_bind_code(const std::string &code) {
     return other.contains(code);
 }
 
+// A website layout change that moves an element (a preset, a layout code) replaces a v0.5.1 placement of that
+// element. Showing or hiding one moves nothing, so placements made in v0.5.1 stay.
+inline void drop_moved_legacy_places(Json &legacy, const Json &before, const Json &after) {
+    for (const auto &[id, place] : after.items()) {
+        const auto old = before.find(id);
+        bool moved = old == before.end();
+        for (const char *field : {"a", "x", "y", "s"})
+            moved = moved || !old->contains(field) || old->at(field) != place.value(field, Json());
+        if (!moved) continue;
+        for (auto entry = legacy.begin(); entry != legacy.end();) {
+            if (canonical_hud_id(entry.key()) == canonical_hud_id(id))
+                entry = legacy.erase(entry);
+            else
+                ++entry;
+        }
+    }
+}
+
 // A patch is atomic. Invalid persisted input never silently changes half the controls.
 inline Json patch_settings(const Json &current, const Json &patch, bool switch_layout = true) {
     if (!patch.is_object() || patch.size() > 256) throw std::runtime_error("Invalid settings object");
@@ -426,7 +445,8 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
                     || (!place.contains("x") && !place.contains("visible") && !place.contains("scale")))
                     throw std::runtime_error("HUD position needs both axes");
             }
-            if (web_schema && switch_layout && !patch.contains("hudLayout")) out["hudLayout"] = Json::object();
+            if (web_schema && switch_layout && !patch.contains("hudLayout"))
+                drop_moved_legacy_places(out["hudLayout"], current.at("hudLayoutWeb"), v);
         } else if (key == "triggersStyle" || key == "audioMusicMode") {
             const auto choices = key == "triggersStyle" ? std::set<std::string>{"filled", "outline", "bottom"}
                                                         : std::set<std::string>{"always", "menus", "off"};

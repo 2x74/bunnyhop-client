@@ -42,12 +42,25 @@ void HudFrame::draw() const {
     BhWeaponReport weapon{};
     bh_weapon_report(core, &weapon);
     if (!visible) return;
+    if (layout_editor.active()) {
+        draw_layout_editor();
+        return;
+    }
     draw_status(shown, weapon);
     draw_diagnostics();
     draw_playback();
     draw_chat();
     draw_panels();
     draw_notifications();
+}
+
+// Every element with sample values, at the layout being edited, under the editor's outlines and bar.
+void HudFrame::draw_layout_editor() const {
+    if (layout_editor.take_preview()) hud.preferences(layout_editor.working_settings());
+    hud.set_editing(true);
+    draw_hud_demo(hud, layout_demo, width, height, prefs.hud_scale, map_id, display_style, display_fps);
+    hud.set_editing(false);
+    layout_editor.draw(hud, width, height, display_scale, layout_editor_key);
 }
 
 void HudFrame::draw_status(const BhCmd &shown, const BhWeaponReport &weapon) const {

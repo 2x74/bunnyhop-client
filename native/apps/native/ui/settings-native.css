@@ -3,9 +3,56 @@
 .settings .set-row.native-unavailable .set-control { visibility: hidden; }
 .settings .set-adv:not(:has(.set-group:not([hidden]))) { display: none; }
 .settings .native-data-path { font-family: var(--mono); font-size: var(--fs-sm); overflow-wrap: anywhere; }
-.settings .native-place { font-size: calc(1.2cqw * var(--s, 1)); }
 
 /* No sky files are accepted (sky-settings.ts), so dragging a file over Graphics shows no drop target. */
 .settings.sky-drop .set-scroll {
   outline: none;
 }
+/* Settings → Paint: the paint keys, as keycaps in a row. */
+.native-paint-keys { display: flex; gap: 0.35rem; flex-wrap: wrap; justify-content: flex-end; }
+
+/* The native client's own settings look (v0.5.1): the search box over a plain rail of sections, the tools in one quiet
+   line to the right, plain sliders without notches. The rows and controls are the website's. */
+/* Wide windows only: under 52rem the website's screen puts the rail across the top, and that stays. */
+@media (min-width: 52.01rem) {
+  .native-menu .settings { grid-template-columns: 11rem minmax(0, 1fr); gap: 0.75rem 1.5rem; }
+  .native-menu .settings .set-top { display: contents; }
+  .native-menu .settings .set-search { grid-column: 1; grid-row: 1; }
+  .native-menu .settings .set-actions { grid-column: 2; grid-row: 1; justify-self: end; }
+}
+.native-menu .settings .set-q { padding: 0.5rem 2.2rem 0.5rem 0.75rem; border: 1px solid var(--line); background: var(--raise); }
+.native-menu .settings .set-q:focus { outline: none; border-color: var(--amber); background: var(--raise-2); }
+.native-menu .settings .set-q-icon,
+.native-menu .settings .set-q-kbd { display: none; }
+.native-menu .settings .set-q-count { right: 2.2rem; }
+.native-menu .settings .set-rail-icon { display: none; }
+.native-menu .settings .set-rail-item { gap: 0; }
+.native-menu .settings .set-act { color: var(--dim); }
+.native-menu .settings .set-act:hover { color: var(--text); }
+/* The notches come from an inline --tk (controls.ts rangeTicks), so only an important rule moves them off the track. */
+.native-menu .settings input[type="range"] { --tk: 100 !important; --tk0: -9 !important; }
+
+/* One column of rows, as in v0.5.1, at a width the eye can follow from label to control. */
+.native-menu .settings .set-cols { grid-template-columns: minmax(0, 1fr); }
+.native-menu .settings .set-cols.auto { display: flex; flex-direction: column; columns: auto; gap: var(--sp-5); }
+.native-menu .settings .set-cols.auto > * { margin-bottom: 0; }
+.native-menu .settings .set-sec { max-width: 52rem; }
+/* The mouse readouts (cm/360, eDPI, horizontal FOV) as one quiet line under the rows, not tiles. */
+.native-menu .settings .set-stats { display: flex; flex-wrap: wrap; gap: 0.25rem 1.5rem; padding: 0.15rem 0.85rem 0.4rem; }
+.native-menu .settings .set-stat { flex-direction: row; align-items: baseline; gap: 0.4rem; padding: 0; border: 0; background: none; }
+.native-menu .settings .set-stat b { font-size: var(--fs-md); font-weight: 650; letter-spacing: 0; }
+/* The previews are the website's HUD; the desktop client's is drawn over the game (Edit layout shows it). The
+   crosshair keeps its style picker. */
+.native-menu .settings .keys-preview,
+.native-menu .settings .xh-stage > :not(.xh-styles) { display: none; }
+.native-menu .settings .xh-stage { padding: 0 0.6rem 0.4rem; }
+/* The tools line ends where the rows end. */
+@media (min-width: 52.01rem) {
+  .native-menu .settings .set-actions { justify-self: start; width: min(52rem, 100%); justify-content: flex-end; }
+}
+/* Crosshair styles as one row of small picks. */
+.native-menu .settings .xh-tile { gap: 0.15rem; padding: 0.3rem 0.2rem 0.25rem; }
+.native-menu .settings .xh-tile .xh-mini { height: 1.7rem; background: none; }
+/* Settings → Updates: the release notes as compact lines under the rows. */
+.native-menu .settings .update-notes { display: flex; flex-direction: column; gap: 0.2rem; padding: 0 0.85rem; }
+.native-menu .settings .update-notes p { margin: 0; font-size: var(--fs-sm); line-height: 1.4; }

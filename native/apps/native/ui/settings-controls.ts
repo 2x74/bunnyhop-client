@@ -24,6 +24,7 @@ let section = "";
 /** Every row the settings screen built since the last reset (the coverage test reads it). */
 export const seenRows = new Map<string, SeenRow>();
 const decorators = new Map<string, (row: HTMLElement) => void>();
+const extenders = new Map<string, { rows: () => HTMLElement[]; first: boolean }>();
 
 /** Renders a settings section's content with `id` as the section its rows belong to. */
 export function renderingSection<T>(id: string, render: () => T): T {
@@ -34,6 +35,11 @@ export function renderingSection<T>(id: string, render: () => T): T {
   } finally {
     section = outer;
   }
+}
+
+/** Adds the native client's own rows to a website group ("section/group"), gated like the rest. */
+export function extendGroup(key: string, rows: () => HTMLElement[], first = false): void {
+  extenders.set(key, { rows, first });
 }
 
 /** Adjusts a row once it's built, e.g. an option the native client can't offer ("section/group/label"). */
@@ -97,7 +103,9 @@ function gateRows(parent: HTMLElement, title: string): boolean {
 
 /** A titled block of rows (web controls.ts group), without the rows the native client leaves out. */
 export function group(title: string | null, ...children: (HTMLElement | null | false | undefined)[]): HTMLElement {
-  const element = web.group(title, ...children);
+  const extender = section ? extenders.get(`${section}/${title ?? ""}`) : undefined;
+  const extra = extender?.rows() ?? [];
+  const element = extender?.first ? web.group(title, ...extra, ...children) : web.group(title, ...children, ...extra);
   if (!section) return element;
   if (section === "graphics") for (const note of element.querySelectorAll(WEB_RENDERER_NOTES)) note.remove();
   if (!gateRows(element, title ?? "")) element.hidden = true;

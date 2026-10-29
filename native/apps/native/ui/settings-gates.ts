@@ -24,7 +24,7 @@ const BROWSER_FRAMES =
   "A browser frame-loop option. The desktop client paces frames with FPS limit and Display → VSync.";
 const WEB_LIGHTING = "Lighting of the website's Enhanced and Cinematic looks; the native renderer has no equivalent.";
 const PACKS = "Texture and sky packs install into the browser's storage. The desktop client uses each map's own.";
-const PAINT_MEASURE = "These sections draw with the website's 3D engine. They come back once the native client paints.";
+const MEASURE = "Measuring draws with the website's 3D engine. It comes back once the native client draws it.";
 
 const ROWS: Record<string, Gate> = {
   "mouse/Mouse/Sensitivity": needs("sensitivity"),
@@ -47,15 +47,18 @@ const ROWS: Record<string, Gate> = {
   "crosshair/Look/Opacity": needs("crosshairAlpha"),
   "crosshair/Look/Outline": needs("crosshairOutline"),
 
-  "hud/Show on screen/Show on screen": menuOnly,
+  "hud/Show on screen/Show on screen": excluded(
+    "A picture of the website's layout. The desktop client's HUD has its own places: the switches below turn " +
+      "elements on and off, and Edit layout moves them over the game.",
+  ),
   "hud/Show on screen/Leaderboard place": needs("hudPlace"),
   "hud/Show on screen/Spectator list": needs("hud:spectators"),
   "hud/Show on screen/Practice": needs("hud:practice"),
   "hud/Hide UI/Hide UI": needs("hud"),
   "hud/Hide UI/Hidden UI keeps": needs("hudHiddenKeeps"),
   "hud/Colours/Colour blind": needs("colorBlind"),
-  "hud/Layout/Edit layout": needs("hudLayoutWeb", "hudEditor"),
-  "hud/Layout/Preset": needs("hudLayoutWeb"),
+  "hud/Layout/Edit layout": needs("hudLayoutWeb", "bind:hudEditor"),
+  "hud/Layout/Preset": excluded("The website's presets fit its HUD; the desktop client's are under Layout preset."),
   "hud/Layout/HUD scale": needs("hudScale"),
   "hud/Keys overlay/Style": needs("keysStyle"),
   "hud/Keys overlay/Size": needs("hudLayout|hudLayoutWeb"),
@@ -136,10 +139,10 @@ const ROWS: Record<string, Gate> = {
   "keys/Run/When it passes": needs("autoRestartWhen", "autoRestartAction"),
   "keys/Tools/Pause / menu": menuOnly,
 
-  "paint/Surface paint/Colour": excluded(PAINT_MEASURE),
-  "paint/Surface paint/Size": excluded(PAINT_MEASURE),
-  "paint/Surface paint/Marks": excluded(PAINT_MEASURE),
-  "measure/Distance measurement/Measurement": excluded(PAINT_MEASURE),
+  "paint/Surface paint/Colour": needs("paint"),
+  "paint/Surface paint/Size": needs("paint"),
+  "paint/Surface paint/Marks": menuOnly,
+  "measure/Distance measurement/Measurement": excluded(MEASURE),
 
   "ghost/Race/Show ghosts": needs("showGhost"),
   "ghost/Race/Your PB": needs("ghostPb"),
@@ -263,17 +266,16 @@ export const NATIVE_GATES: Readonly<Record<string, Gate>> = {
   "data/Game data folder/Move game data": menuOnly,
   "data/Game data folder/Waiting to move": menuOnly,
   "data/Game data folder/Folder not found": menuOnly,
-  "updates/Desktop app/Version": menuOnly,
-  "updates/Desktop app/Updates": menuOnly,
-  "updates/Desktop app/Ranked": menuOnly,
-  "updates/Desktop app/What's new": menuOnly,
-  "updates/Desktop app/Check automatically": menuOnly,
+  "updates/Native client/Version": menuOnly,
+  "updates/Native client/Updates": menuOnly,
+  "updates/Native client/Ranked": menuOnly,
+  "updates/Native client/What's new": menuOnly,
+  "updates/Native client/Check automatically": menuOnly,
   "mouse/Mouse diagnostics/Last sample": needs("mouseDiagnostics"),
   "graphics/Native renderer/Water": needs("waterQuality"),
   "graphics/Native renderer/World effects": needs("effectsVisible"),
   "hud/More jump stats/Gain colours": needs("jumpStatsColors"),
   "hud/More jump stats/Every N jumps": needs("jumpStatsInterval"),
-  "hud/Positions/Drag to place": needs("hudLayout"),
   "audio/Sound packs/Effects pack": needs("sfxPack"),
   "audio/Sound packs/Music pack": needs("musicPack"),
   "audio/Sound packs/Weapon sounds": needs("weaponSounds"),
@@ -286,6 +288,20 @@ export const NATIVE_GATES: Readonly<Record<string, Gate>> = {
   "keys/Desktop client/Show triggers": needs("bind:showTriggers"),
   "keys/Desktop client/Show player clips": needs("bind:showClips"),
   "css/Custom CSS/CSS file": menuOnly,
+  "hud/Show on screen/Speed": needs("hudLayoutWeb"),
+  "hud/Show on screen/Timer": needs("hudLayoutWeb"),
+  "hud/Show on screen/Run stats": needs("hudLayoutWeb"),
+  "hud/Show on screen/Split vs PB": needs("hudLayoutWeb"),
+  "hud/Show on screen/Sync bar": needs("hudLayoutWeb"),
+  "hud/Show on screen/Keys overlay": needs("keysOverlay"),
+  "hud/Show on screen/Strafe trainer": needs("strafeTrainer"),
+  "hud/Show on screen/FPS counter": needs("hudLayoutWeb"),
+  "hud/Show on screen/Chat": needs("hudLayoutWeb"),
+  "hud/Layout/Layout preset": needs("hudLayoutWeb"),
+  "paint/Keys/Paint (hold)": needs("bind:paint"),
+  "paint/Keys/Place paint mark": needs("bind:paintOnce"),
+  "paint/Keys/Clear paint": needs("bind:clearPaint"),
+  "paint/Keys/Change keys": menuOnly,
 };
 
 /** The gate of a row, or null when the table doesn't place it. */

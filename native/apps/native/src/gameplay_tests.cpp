@@ -190,6 +190,12 @@ int main() {
     assert(emoji.size() == 2 && emoji[0].text == "👩🏽‍💻");
     const auto wrapped = native::wrap_text("猫狗猫", 2);
     assert(wrapped.size() == 3 && wrapped[1] == "狗");
+    // Chat lines break between words when they can, inside a word only when it is longer than a line.
+    const auto words = native::wrap_text("Watcher: nice route through the second room", 20);
+    assert(words.size() == 3 && words[0] == "Watcher: nice route " && words[1] == "through the second "
+           && words[2] == "room");
+    const auto long_word = native::wrap_text("abcdefghij klm", 4);
+    assert(long_word.size() == 4 && long_word[0] == "abcd" && long_word[2] == "ij " && long_word[3] == "klm");
     assert(native::text_clusters("🇺🇸!").size() == 2);
     native::HudTextPieces<8> pieces;
     assert(native::split_numeric_text("1:05.20", pieces) && pieces.count == 7);

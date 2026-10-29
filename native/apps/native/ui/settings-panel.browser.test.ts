@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { chromium, type Page } from "playwright";
+import { CLASSIC } from "../../web/src/hud/layout";
 import { state } from "./bridge";
 
 // The settings screen is the website's, in the native menu with no host: the tests play the host through
@@ -283,3 +284,26 @@ test("settings kept with the account upload one document with native settings an
     await close();
   }
 }, 30_000);
+
+test("Edit layout and Paint reach the host", async () => {
+  const { page, errors, close } = await open();
+  try {
+    // A host with the website's layout model has the website's Edit layout row; the host runs the editor.
+    await host(page, { settings: { ...HOST_SETTINGS, hudLayoutWeb: CLASSIC } });
+    await openSettings(page, "hud");
+    const from = await count(page);
+    await page.getByRole("button", { name: "Edit layout" }).click();
+    await poll(async () => (await sent(page)).slice(from).some((message) => message.type === "hudEditor"), true);
+    await page.locator('.set-rail-item[data-sec="paint"]').click();
+    const before = await count(page);
+    const paint = page.locator('section[data-sec="paint"]');
+    await paint.getByRole("radio", { name: "Cyan" }).click();
+    await paint.locator(".set-row", { hasText: "Marks" }).getByRole("button", { name: "Clear paint" }).click();
+    const messages = (await sent(page)).slice(before);
+    expect(messages).toContainEqual({ type: "paint", action: "clear" });
+    expect(await patchesSince(page, before)).toContainEqual({ paint: { color: "#40dcff", size: "medium" } });
+    expect(errors).toEqual([]);
+  } finally {
+    await close();
+  }
+});

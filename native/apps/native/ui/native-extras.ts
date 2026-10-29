@@ -8,9 +8,8 @@ import { keyLabel, prefs } from "../../web/src/ui/settings";
 import { registerSettingsSection } from "../../web/src/ui/settings-registry";
 import { uiSound } from "./audio";
 import { DEFAULT_BINDS, nativeKeyCode, state } from "./bridge";
-import { hudEditor } from "./hud-editor";
 import { followHost, nativeChoice, nativeToggle, type Ui } from "./native-rows";
-import { hostHas, sendNativeSettings } from "./prefs-bridge";
+import { sendNativeSettings } from "./prefs-bridge";
 
 function rendererGroup(ui: Ui): HTMLElement {
   const group = ui.group(
@@ -65,23 +64,6 @@ function jumpStatsGroup(ui: Ui): HTMLElement {
     interval,
   );
   followHost(group, ui);
-  return group;
-}
-
-/** The native HUD's placement canvas, until the host takes the website's layout (and its in-game editor). */
-function positionsGroup(ui: Ui): HTMLElement | null {
-  if (hostHas("hudLayoutWeb")) return null;
-  const canvas = hudEditor(
-    () => state.settings.hudLayout,
-    (layout) => sendNativeSettings({ hudLayout: layout }),
-  );
-  const row = ui.row("Drag to place", canvas, {
-    desc: "Drag an element to move it. Arrow keys move the selected one; Shift moves it less. Dim ones are hidden.",
-    keywords: "hud layout position move drag editor place",
-  });
-  row.classList.add("mn-row");
-  const group = ui.group("Positions", row);
-  followHost(group, ui, () => (canvas as HTMLElement & { paint?: () => void }).paint?.());
   return group;
 }
 
@@ -243,14 +225,7 @@ function nativeBindsGroup(ui: Ui): HTMLElement {
 }
 
 function registerNativeHud(): void {
-  registerSettingsSection(
-    "native-hud",
-    (ui) => {
-      const positions = positionsGroup(ui);
-      return positions ? [jumpStatsGroup(ui), positions] : [jumpStatsGroup(ui)];
-    },
-    { advancedUnder: "hud" },
-  );
+  registerSettingsSection("native-hud", (ui) => [jumpStatsGroup(ui)], { advancedUnder: "hud" });
 }
 
 /**

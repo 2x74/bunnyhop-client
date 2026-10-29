@@ -89,6 +89,11 @@ in the menu, which forwards what the HUD shows:
 The menu sends these from `ui/run-rewards.ts` and `ui/hud-leaderboard.ts`. Neither affects recording or
 verification.
 
+The HUD layout editor runs in the host, over the game (`src/hud_editor.cpp`): F2 or Settings → HUD → Edit layout
+(`hudEditor`) opens it. Places are the website's anchored `hudLayoutWeb` entries, so a `bhl1.` layout code imports on
+either side; the run status, notices and replay banner, which the website doesn't have, are anchored `hudLayout`
+entries. Settings → HUD → Layout preset sends `hudPreset` with `classic`, `minimal` or `streamer`.
+
 Account → Edit avatar is the website's avatar editor (`ui/avatar-editor.ts`). The menu has no WebGL, so it sends
 `avatarRender` with the spec, its packed loadout and backdrop, and the host poses and draws the bunny offscreen
 (`src/avatar_service.hpp`), answering `bunnyhopNativeAvatar({id, png | webp | saved | error})`. The saved picture is a

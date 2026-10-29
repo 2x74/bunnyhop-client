@@ -14,6 +14,8 @@
 #include "native_chat.hpp"
 #include "hud_theme.hpp"
 #include "movement_hud.hpp"
+#include "hud_trainer.hpp"
+#include "crosshair_shape.hpp"
 #include "hud_result.hpp"
 #include "toasts.hpp"
 
@@ -215,7 +217,6 @@ class NativeHud {
     uint32_t keys_edges_ = 0;
     float keys_yaw_ = 0;
     bool have_keys_yaw_ = false;
-    int turn_direction_ = 1;
     bool hidden_ = false;
     float element_shift_x_ = 0;
     float element_shift_y_ = 0;
@@ -226,7 +227,8 @@ class NativeHud {
 
     bool element_visible = true;
     float element_scale = 1, pivot_x = 0, pivot_y = 0;
-    native::HudSamples<std::pair<uint32_t, float>, 250> speed_history;
+    static constexpr size_t speed_history_capacity = 250;
+    native::HudSamples<std::pair<uint32_t, float>, speed_history_capacity> speed_history;
     std::string split_line, delta_line;
     bool delta_good = false;
 
@@ -236,6 +238,7 @@ class NativeHud {
         pivot_x = x;
         pivot_y = y;
         const size_t index = native::hud_index(id);
+        drawn_index_ = index;
         if (const auto &place = prefs_.layout[index]) {
             element_visible = place->visible;
             element_scale = place->scale;
@@ -244,11 +247,15 @@ class NativeHud {
         const auto &style = element_styles_[index];
         element_alpha = style.opacity;
         element_color = style.color;
+        // The layout editor shows every element, the hidden ones faint, so each can be picked and switched on.
+        if (editing_ && !element_visible) element_alpha *= hidden_while_editing_alpha;
+        if (editing_) element_visible = true;
     }
 
     void clear_element_style() {
         element_alpha = 1;
         element_color.reset();
+        drawn_index_ = untracked_element;
     }
 
     using Color = std::array<float, 4>;
@@ -275,6 +282,34 @@ class NativeHud {
         return native::ssj_gain_color(gain, prefs_.ssj_fields, prefs_.palette).value_or(native::semantic_rgb(0xffffff));
     }
 
+    static constexpr float hidden_while_editing_alpha = .35f;
+    bool editing_ = false;
+    // Each element's box (element_size at its place and scale), in pixels, from the last frame.
+    std::array<native::HudRect, native::hud_ids.size()> layout_boxes_{};
+    // Where each element was drawn last frame, in pixels. The layout smoke checks that no two overlap.
+    static constexpr size_t untracked_element = native::hud_ids.size();
+    // The board place shares the split's layout entry but has its own place, so it has its own box.
+    static constexpr size_t board_place_slot = native::hud_ids.size() + 1;
+    std::array<native::HudRect, native::hud_ids.size() + 2> drawn_{};
+    size_t drawn_index_ = untracked_element;
+
+    bool noting_drawn_ = true;
+
+    void note_drawn(float x, float y, float w, float h) {
+        if (!noting_drawn_) return;
+        auto &box = drawn_[drawn_index_];
+        const float left = x * scale, top = y * scale, right = (x + w) * scale, bottom = (y + h) * scale;
+        if (box.width <= 0 && box.height <= 0) {
+            box = {left, top, right - left, bottom - top};
+            return;
+        }
+        const float box_right = std::max(box.x + box.width, right), box_bottom = std::max(box.y + box.height, bottom);
+        box.x = std::min(box.x, left);
+        box.y = std::min(box.y, top);
+        box.width = box_right - box.x;
+        box.height = box_bottom - box.y;
+    }
+
     void quad(float x, float y, float w, float h, float u, float v, float uw, float vh, Color c) {
         if (!element_visible) return;
         c[3] *= element_alpha;
@@ -290,6 +325,7 @@ class NativeHud {
                 {x + w, y + h, u + uw, v + vh},
                 {x, y + h, u, v + vh}
         };
+        note_drawn(x, y, w, h);
         if (batches.empty() || batches.back().texture != current_texture)
             batches.push_back({current_texture, vertices.size() / 8, 0});
         batches.back().count += 6;
@@ -302,71 +338,71 @@ class NativeHud {
     void rect(float x, float y, float w, float h, Color c) { quad(x, y, w, h, -2, -2, 0, 0, c); }
 
     static constexpr Color text_shadow{0, 0, 0, .85f};
-    static constexpr size_t max_numeric_pieces = 48;
+    static constexpr float atlas_advance_per_size = .6f;
+    static constexpr float atlas_height_per_size = 1.3f;
+    static constexpr unsigned atlas_columns = 16;
+    static constexpr float atlas_cell_u = 1.f / atlas_columns;
+    static constexpr float atlas_cell_v = 1.f / 6;
+    native::HudLabel<512> folded_;
 
-    struct NumericLayout {
-        std::array<const Raster *, max_numeric_pieces> rasters{};
-        std::array<float, max_numeric_pieces> left_pixels{};
-        std::array<float, max_numeric_pieces> top_pixels{};
-        size_t count = 0;
-        float width_pixels = 0;
-    };
+    // A few marks the menu and server use, folded so a line keeps the bitmap font.
+    static std::string_view ascii_fold(std::string_view bytes) {
+        if (bytes == "\xC2\xB7") return "|";
+        if (bytes == "\xE2\x80\x94" || bytes == "\xE2\x80\x93" || bytes == "\xE2\x88\x92") return "-";
+        if (bytes == "\xE2\x80\xA6") return "...";
+        if (bytes == "\xC3\x97") return "x";
+        if (bytes == "\xE2\x80\x98" || bytes == "\xE2\x80\x99") return "'";
+        if (bytes == "\xE2\x80\x9C" || bytes == "\xE2\x80\x9D") return "\"";
+        return {};
+    }
 
-    // Places cached digit and label rasters where the shaped string would put them. Offsets
-    // are whole pixels so every piece samples its texture without blur.
-    bool layout_numeric(std::string_view value, float size, NumericLayout &layout) {
-        native::HudTextPieces<max_numeric_pieces> pieces;
-        if (!native::split_numeric_text(value, pieces)) return false;
-        for (size_t i = 0; i < pieces.count; ++i) {
-            const auto &piece = pieces.pieces[i];
-            layout.rasters[i] = raster(value.substr(piece.begin, piece.length), size, true);
-            if (!layout.rasters[i]) return false;
+    // v0.5.1's HUD font: printable ASCII from the JetBrains Mono atlas (hud.rgba). It never rasterizes, so a timer
+    // or speed that changes every frame costs no font work. Returns false for text only the system font can shape.
+    bool fold_to_atlas(std::string_view value) {
+        folded_.assign("");
+        if (value.size() >= sizeof(folded_.bytes)) return false;
+        for (size_t i = 0; i < value.size();) {
+            const auto byte = uint8_t(value[i]);
+            if (byte >= ' ' && byte <= '~') {
+                folded_.append(value.substr(i, 1));
+                ++i;
+                continue;
+            }
+            const size_t length = byte >= 0xF0 ? 4 : byte >= 0xE0 ? 3 : byte >= 0xC0 ? 2 : 1;
+            const auto fold = ascii_fold(value.substr(i, length));
+            if (fold.empty()) return false;
+            folded_.append(fold);
+            i += length;
         }
-        const Raster &first = *layout.rasters[0];
-        float pen = first.origin_x;
-        for (size_t i = 0; i < pieces.count; ++i) {
-            const Raster &piece = *layout.rasters[i];
-            layout.left_pixels[i] = std::round(pen - piece.origin_x);
-            layout.top_pixels[i] = std::round(first.origin_y - piece.origin_y);
-            pen += piece.advance;
-        }
-        const Raster &last = *layout.rasters[pieces.count - 1];
-        layout.width_pixels = pen + float(last.width) - last.origin_x - last.advance;
-        layout.count = pieces.count;
         return true;
     }
 
-    void draw_numeric(float x, float y, const NumericLayout &layout, Color color) {
-        const float ratio = scale * element_scale;
-        for (size_t i = 0; i < layout.count; ++i) {
-            const Raster &piece = *layout.rasters[i];
-            current_texture = piece.texture;
-            quad(x + layout.left_pixels[i] / ratio,
-                 y + layout.top_pixels[i] / ratio,
-                 piece.width / ratio,
-                 piece.height / ratio,
-                 0,
-                 0,
-                 1,
-                 1,
-                 color);
+    void atlas_text(float x, float y, std::string_view value, float size, Color color) {
+        const float advance = size * atlas_advance_per_size;
+        const float height = size * atlas_height_per_size;
+        // A glyph's cell is wider than its advance; the text's box is what it inks, shadow included.
+        if (element_visible)
+            note_drawn(
+                    element_x(x),
+                    element_y(y),
+                    (float(value.size()) * advance + 1) * element_scale,
+                    (height + 1) * element_scale
+            );
+        noting_drawn_ = false;
+        for (const char character : value) {
+            const unsigned index = unsigned(character) - ' ';
+            const float u = float(index % atlas_columns) * atlas_cell_u;
+            const float v = float(index / atlas_columns) * atlas_cell_v;
+            quad(x + 1, y + 1, size, height, u, v, atlas_cell_u, atlas_cell_v, text_shadow);
+            quad(x, y, size, height, u, v, atlas_cell_u, atlas_cell_v, color);
+            x += advance;
         }
-        current_texture = atlas;
+        noting_drawn_ = true;
     }
 
-    bool numeric_text(float x, float y, std::string_view value, float size, Color color, bool center) {
-        NumericLayout layout;
-        if (!layout_numeric(value, size, layout)) return false;
-        if (center) x -= layout.width_pixels / (scale * element_scale) * .5f;
-        draw_numeric(x + 1, y + 1, layout, text_shadow);
-        draw_numeric(x, y, layout, color);
-        return true;
-    }
-
-    void text(float x, float y, std::string_view value, float size, Color color, bool center = false) {
-        if (!element_visible) return;
-        color = themed_text(color);
-        if (numeric_text(x, y, value, size, color, center)) return;
+    // Text that needs the system font (other scripts, emoji) as one shaped raster, or one '?' per code point when
+    // no platform font can draw it.
+    void shaped_text(float x, float y, std::string_view value, float size, Color color, bool center) {
         if (const auto *glyphs = raster(value, size, true)) {
             const float ratio = scale * element_scale;
             const float width = glyphs->width / ratio, height = glyphs->height / ratio;
@@ -377,25 +413,34 @@ class NativeHud {
             current_texture = atlas;
             return;
         }
-        // The small atlas is ASCII. Fold common UI punctuation and emit one
-        // fallback per unsupported code point, not one per UTF-8 byte.
-        const float advance = size * .6f;
-        if (center) x -= float(value.size()) * advance * .5f;
-        for (size_t i = 0; i < value.size();) {
-            unsigned char character = value[i++];
-            if (character >= 128) {
-                while (i < value.size() && (uint8_t(value[i]) & 0xc0) == 0x80)
-                    ++i;
-                character = '?';
-            }
-            if (character < 32 || character > 126) character = ' ';
-            const unsigned index = character - 32;
-            const float u = (index % 16) * 40.f / 640;
-            const float v = (index / 16) * 52.f / 312;
-            quad(x + 1, y + 1, size, size * 1.3f, u, v, 40.f / 640, 52.f / 312, {0, 0, 0, .85f});
-            quad(x, y, size, size * 1.3f, u, v, 40.f / 640, 52.f / 312, color);
-            x += advance;
+        size_t points = 0;
+        for (const char byte : value) {
+            if ((uint8_t(byte) & 0xc0) != 0x80) ++points;
         }
+        folded_.assign("");
+        for (size_t i = 0; i < points && i + 1 < sizeof(folded_.bytes); ++i)
+            folded_.append("?");
+        const float width = float(folded_.view().size()) * size * atlas_advance_per_size;
+        atlas_text(center ? x - width / 2 : x, y, folded_.view(), size, color);
+    }
+
+    // How wide text() draws `value`, in HUD units at the current element scale.
+    float text_width(std::string_view value, float size) {
+        if (fold_to_atlas(value)) return float(folded_.view().size()) * size * atlas_advance_per_size;
+        const auto *glyphs = raster(value, size, true);
+        return glyphs ? glyphs->width / (scale * element_scale) : float(value.size()) * size * atlas_advance_per_size;
+    }
+
+    void text(float x, float y, std::string_view value, float size, Color color, bool center = false) {
+        if (!element_visible) return;
+        color = themed_text(color);
+        if (!fold_to_atlas(value)) {
+            shaped_text(x, y, value, size, color, center);
+            return;
+        }
+        const auto ascii = folded_.view();
+        if (center) x -= float(ascii.size()) * size * atlas_advance_per_size * .5f;
+        atlas_text(x, y, ascii, size, color);
     }
 
     void prepare_glyph_atlas() {
@@ -462,6 +507,7 @@ class NativeHud {
 public:
     void preferences(const native::Json &value) {
         prefs_ = native::HudPreferences::from(value);
+        rebuild_crosshair();
         if (ssj_last_) {
             const auto labels = native::ssj_labels(*ssj_last_, prefs_.ssj_fields);
             ssj_line_ = labels.hud;
@@ -603,11 +649,9 @@ public:
             const float delta = std::remainder(command.yaw - keys_yaw_, 360.f);
             if (delta > 0) {
                 key_until_[6] = tick + 3;
-                turn_direction_ = -1;
             }
             if (delta < 0) {
                 key_until_[7] = tick + 3;
-                turn_direction_ = 1;
             }
         }
         keys_yaw_ = command.yaw;
@@ -663,7 +707,7 @@ public:
             speed_history.clear();
         if (speed_history.empty() || s.tick != speed_history.back().first)
             speed_history.emplace_back(s.tick, std::hypot(s.velocity[0], s.velocity[1]));
-        while (speed_history.size() > 250)
+        while (speed_history.size() > speed_history_capacity)
             speed_history.pop_front();
     }
 
@@ -688,6 +732,9 @@ public:
     }
 
     void overlay_rect(float x, float y, float w, float h, std::array<float, 4> color) { rect(x, y, w, h, color); }
+
+    // How wide overlay_text draws `value` (bitmap-font text is exact; shaped text is rasterized once to measure).
+    float overlay_text_width(std::string_view value, float size) { return text_width(value, size); }
 
     void overlay_mark(float x, float y, native::NameMark mark, Color color) {
         glyph(x,
@@ -742,9 +789,10 @@ public:
             double seconds,
             bool center = false
     ) {
-        const float advance = size * .6f;
-        const auto *bitmap = raster(value, size, true);
-        const float name_width = bitmap ? bitmap->width / (scale * element_scale) : float(value.size()) * advance;
+        const float advance = size * atlas_advance_per_size;
+        const bool bitmap_font = fold_to_atlas(value);
+        const auto *bitmap = bitmap_font ? nullptr : raster(value, size, true);
+        const float name_width = text_width(value, size);
         if (center) x -= name_width / 2;
         if (look.effect == native::NameEffect::glow) {
             auto halo = look.color;
@@ -758,7 +806,7 @@ public:
             text(x, y, value, size, look.color);
             x += name_width;
         } else {
-            // Clip the shaped name to preserve joining and ligatures across gradient slices.
+            // A shaped name is clipped into slices to keep joining and ligatures; a bitmap one goes letter by letter.
             if (bitmap) {
                 constexpr unsigned slices = 16;
                 for (unsigned i = 0; i < slices; ++i) {
@@ -842,6 +890,18 @@ public:
         flush(width, height);
     }
 
+    // At most 680 wide, and clear of the run column's widest lines (jump stats, the stage beside the timer).
+    static float chat_box_width(float width) {
+        constexpr float widest = 680;
+        constexpr float narrowest = 260;
+        constexpr float column_half_width = 240;
+        constexpr float left = 16;
+        return std::clamp(width / 2 - column_half_width - left, narrowest, widest);
+    }
+
+    static constexpr float max_chat_rows = 8;
+    static constexpr float max_chat_rows_typing = 14;
+
     std::optional<native::ChatTarget> chat_hit(float xPixels, float yPixels, uint64_t viewportHash) const {
         return chat_hits_.hit(xPixels, yPixels, viewportHash);
     }
@@ -888,7 +948,9 @@ public:
     ) {
         overlay_begin(width, height, percent);
         chat_input_carets_.clear();
-        const float h = height / scale, w = width / scale, box = std::min(680.f, w - 40), font = 14, step = 30;
+        drawn_index_ = native::hud_index("chat");
+        drawn_[drawn_index_] = {};
+        const float h = height / scale, w = width / scale, box = chat_box_width(w), font = 14, step = 30;
         const float pixels = float(std::max(1, int(std::round(font * 1.3f * scale))));
         using Span = ChatSpan;
         auto &rows = chat_rows_;
@@ -975,22 +1037,35 @@ public:
                     offset += part.size();
                 }
             }
-            const size_t maximum = size_t(std::max(1.f, std::min(14.f, (h - 230) / step)));
+            const float most_rows = typing ? max_chat_rows_typing : max_chat_rows;
+            const size_t maximum = size_t(std::max(1.f, std::min(most_rows, (h - 230) / step)));
             if (rows.size() > maximum) rows.erase(rows.begin(), rows.end() - maximum);
         }
         const float top = h - 110 - float(rows.size()) * step - (typing ? 70.f : 0.f);
         const auto &place = prefs_.layout[native::hud_index("chat")];
+        const float box_height =
+                float(std::max<size_t>(rows.size(), editing_ ? 1 : 0)) * step + (typing ? 75.f : 0.f) + 18;
+        pivot_x = 16;
+        pivot_y = top - 10;
         if (place) {
-            const float box_height = float(rows.size()) * step + (typing ? 75.f : 0.f) + 18;
-            const auto bounds = place->rect(w, h, box, box_height);
-            pivot_x = 16;
-            pivot_y = top - 10;
             element_scale = place->scale;
+            element_visible = typing || editing_ || place->visible;
+            if (editing_ && !place->visible) element_alpha = hidden_while_editing_alpha;
+        }
+        if (place && place->placed) {
+            const auto bounds = place->rect(w, h, box, box_height);
             element_shift_x_ = bounds.x - pivot_x;
             element_shift_y_ = bounds.y - pivot_y;
-            element_visible = typing || place->visible;
         }
-        if (!rows.empty() || typing)
+        layout_boxes_[native::hud_index("chat")] = {
+                element_x(16) * scale,
+                element_y(top - 10) * scale,
+                box * element_scale * scale,
+                box_height * element_scale * scale
+        };
+        const bool has_text =
+                std::any_of(rows.begin(), rows.end(), [](const ChatRow &row) { return !row.text.empty(); });
+        if (has_text || typing || editing_)
             rect(16,
                  top - 10,
                  box,
@@ -1229,237 +1304,60 @@ else{color=vec4(ink.rgb,ink.a*(uv.x<-1.?1.:texture(font,uv).a));}})"
         hidden_ = !visible;
         element_shift_x_ = element_shift_y_ = 0;
         begin_batch();
+        drawn_.fill({});
         const native::HudGeometry geometry(width, height, hud_percent);
         scale = geometry.scale;
-        const float w = geometry.width, h = geometry.height;
-        // HUD units are 1/900 of the screen height (above 540 px), so the
-        // built-in places below are the same fraction of the screen at any size.
-        if (visible && prefs_.edge_glow) {
-            const float speed = std::hypot(s.player.velocity[0], s.player.velocity[1]);
-            const float intensity = std::clamp((speed - 600) / 800, 0.f, 1.f);
-            for (unsigned strip = 0; strip < 8; ++strip) {
-                const float inset = float(strip) * 5;
-                const Color glow = {.3f, .65f, 1, intensity * .05f * (1 - float(strip) / 8)};
-                rect(inset, 0, 5, h, glow);
-                rect(w - inset - 5, 0, 5, h, glow);
-                rect(0, inset, w, 5, glow);
-                rect(0, h - inset - 5, w, 5, glow);
-            }
-        }
-        auto at = [&](const char *id, float x, float y) -> std::array<float, 2> {
-            const auto &place = prefs_.layout[native::hud_index(id)];
-            if (place) {
-                const bool centered = std::string_view(id) != "map" && std::string_view(id) != "fps"
-                                      && std::string_view(id) != "keys" && std::string_view(id) != "health"
-                                      && std::string_view(id) != "speedGraph" && std::string_view(id) != "spectators";
-                const auto size = native::hud_element_size(id);
-                const auto bounds = place->rect(w, h, size[0], size[1]);
-                x = bounds.x + (centered ? size[0] * place->scale / 2 : 0);
-                y = bounds.y;
-            } else if (layout) {
-                const auto found = layout->find(id);
-                if (found != layout->end()) {
-                    x = found->second[0] / 100 * w;
-                    y = found->second[1] / 100 * h;
-                }
-            }
-            element(id, x, y);
-            return {x, y};
-        };
-        if (crosshair && prefs_.crosshair_style != "none") {
-            const auto [x, y] = at("crosshair", w / 2, h / 2);
-            const Color color = prefs_.crosshair_color;
-            const auto &style = prefs_.crosshair_style;
-            const float n = prefs_.crosshair_size;
-            const float gap = prefs_.crosshair_gap;
-            const float t = prefs_.crosshair_thickness;
-            auto stroke = [&](float a, float b, float c, float d) {
-                if (prefs_.crosshair_outline) rect(a - 1, b - 1, c + 2, d + 2, {0, 0, 0, color[3]});
-                rect(a, b, c, d, color);
-            };
-            if (style == "circle") {
-                for (int i = 0; i < 64; ++i) {
-                    const double a = i * 6.283185307 / 64;
-                    stroke(
-                            x + float(std::cos(a)) * (gap + n) - t / 2, y + float(std::sin(a)) * (gap + n) - t / 2, t, t
-                    );
-                }
-            } else if (style != "dot") {
-                stroke(x - gap - n, y - t / 2, n, t);
-                stroke(x + gap, y - t / 2, n, t);
-                if (style != "t") stroke(x - t / 2, y - gap - n, t, n);
-                stroke(x - t / 2, y + gap, t, n);
-            }
-            if (style == "dot" || style == "cross-dot") stroke(x - t / 2, y - t / 2, t, t);
-        }
-        if (leave_progress >= 0) {
-            const auto [x, y] = at("crosshair", w / 2, h / 2);
-            for (int i = 0; i < 48; ++i) {
-                const float a = float(i) / 48 * 6.2831853f - 1.5707963f;
-                rect(x + std::cos(a) * 26 - 2,
-                     y + std::sin(a) * 26 - 2,
-                     4,
-                     4,
-                     float(i) / 48 <= leave_progress ? amber : dim);
-            }
-        }
+        frame_width_ = geometry.width;
+        frame_height_ = geometry.height;
+        legacy_layout_ = layout;
+        const float speed = std::hypot(s.player.velocity[0], s.player.velocity[1]);
+        if (visible && prefs_.edge_glow) draw_edge_glow(speed);
+        if (crosshair && prefs_.crosshair_style != "none") draw_crosshair(width, height);
+        if (leave_progress >= 0) draw_leave_progress(width, height, leave_progress);
         if (visible || prefs_.hidden_speed_keys) {
-            auto palette = prefs_.palette;
-            theme_.apply(palette);
-            {
-                const auto [x, y] = at("map", 26, 18);
-                text(x, y, map, 17, cream);
-                native::HudLabel<128> label;
-                label.assign(style);
-                if (run.track) {
-                    native::HudLabel<32> bonus;
-                    bonus.format(" / BONUS %u", run.track);
-                    label.append(bonus.view());
-                }
-                text(x, y + 24, label.view(), 14, amber);
-            }
-            char buf[160];
-            {
-                const auto [x, y] = at("fps", w - 135, 20);
-                std::snprintf(buf, sizeof(buf), "%.0f FPS", fps);
-                text(x, y, buf, 14, dim);
-            }
-            {
-                const auto [x, y] = at("timer", w / 2, h - 154);
-                native::HudLabel<48> time;
-                native::format_hud_time(time, run.seconds);
-                text(x, y, time.view(), 20, (run.status == 2 || (practice && practice->active)) ? amber : cream, true);
-            }
-            {
-                const auto [x, y] = at("speed", w / 2, h - 105);
-                std::snprintf(buf, sizeof(buf), "%.0f u/s", std::hypot(s.player.velocity[0], s.player.velocity[1]));
-                const double speed = std::hypot(s.player.velocity[0], s.player.velocity[1]);
-                const Color speedColor = !prefs_.speed_colors ? cream
-                                         : speed > 800        ? palette.loss
-                                         : speed > 500        ? palette.sync
-                                         : speed > 270        ? palette.gain
-                                                              : cream;
-                text(x, y, buf, 25, speedColor, true);
-                if (prefs_.gain_ticks && movement.gain_tick && s.player.tick >= movement.gain_tick
-                    && (s.player.tick - movement.gain_tick) * movement.tick_interval < .45) {
-                    char gain[32];
-                    std::snprintf(gain, sizeof(gain), "%s", native::jump_gain_text(movement.gain_delta).bytes.data());
-                    text(x + 100,
-                         y - 10 - float(s.player.tick - movement.gain_tick) * .25f,
-                         gain,
-                         16,
-                         movement.gain_delta > 0 ? palette.gain : palette.loss);
-                }
-                if (prefs_.perfect_indicator
-                    && native::perfect_hop_visible(
-                            style, run, s.player.tick, movement.tick_interval, practice && practice->active
-                    ))
-                    text(x - 160, y + 5, "Perfect", 12, native::semantic_rgb(0xffffff, .7f));
-            }
-            {
-                const auto [x, y] = at("runStats", w / 2, h - 68);
-                if (native::scroll_style(style) && prefs_.perf_hud)
-                    std::snprintf(
-                            buf,
-                            sizeof(buf),
-                            "%u jumps  %u strafes  %.1f%% sync  %s",
-                            run.jumps,
-                            run.strafes,
-                            run.sync_percent,
-                            native::perf_text(run).bytes.data()
-                    );
-                else
-                    std::snprintf(
-                            buf,
-                            sizeof(buf),
-                            "%u jumps  %u strafes  %.1f%% sync",
-                            run.jumps,
-                            run.strafes,
-                            run.sync_percent
-                    );
-                text(x, y, buf, 13, dim, true);
-            }
-            // Jump stats sit above the run status, clear of the timer and speed.
-            // The accent marks a gain the plugin would call good.
-            if (!jump_stats.empty()) {
-                const auto [x, y] = at("jumpStats", w / 2, h - 222);
-                const auto newline = jump_stats.find('\n');
-                text(x, y, jump_stats.substr(0, newline), 14, jump_stats_color(jump_stats_gain), true);
-                if (newline != std::string_view::npos)
-                    text(x, y + 21, jump_stats.substr(newline + 1), 12, jump_stats_color(jump_stats_gain), true);
-            }
-            // Strafe trainer above that: the percentage, a bar whose centre line
-            // is 100% (either end being 0% and 200%), and a hint under the bar.
-            if (strafe) {
-                const auto [x, y] = at("strafeTrainer", w / 2, h - 276);
-                native::draw_trainer(*this, x, y, *strafe, prefs_.trainer, strafe_hints, palette, turn_direction_);
-            }
-            {
-                const auto [x, y] = at("status", w / 2, h - 186);
-                if (run.status == 0) text(x, y, run.in_start ? "IN START" : "READY", 13, amber, true);
-                if (run.status == 2) text(x, y, "FINISHED", 15, amber, true);
-            }
-            if (prefs_.keys_overlay) {
-                const auto [x, y] = at("keys", 26, h - 138);
-                draw_keys(x, y);
-            }
-            if (weapon.clip_size) {
-                const auto [x, y] = at("health", w - 160, h - 62);
-                std::snprintf(buf, sizeof(buf), "%u / %u", weapon.clip, weapon.clip_size);
-                text(x, y, buf, 18, cream);
-            }
+            palette_ = prefs_.palette;
+            theme_.apply(palette_);
+            const bool practising = practice && practice->active;
+            draw_map_line(map, style, run.track);
+            draw_fps_and_pb(fps);
+            draw_timer(run, practising);
+            draw_speed(s.player.tick, speed, run, style, practising);
+            draw_run_stats(run, style);
+            draw_jump_stats(jump_stats, jump_stats_gain);
+            if (strafe) draw_strafe_trainer(*strafe, strafe_hints);
+            if (prefs_.keys_overlay || editing_) draw_keys();
+            draw_health(s.health, weapon);
             if (!notice.empty()) {
-                const auto [x, y] = at("notice", w / 2, 70);
-                text(x, y, std::string_view(notice).substr(0, 100), 15, amber, true);
+                const auto [x, y] = place("notice", frame_width_ / 2, notice_top);
+                text(x, y, std::string_view(notice).substr(0, max_notice_bytes), 15, amber, true);
             }
-            const std::string_view shown_delta = delta_line.empty() ? extras.ghost_delta.view() : delta_line;
-            if (!split_line.empty() || !shown_delta.empty()) {
-                const auto [x, y] = at("splits", w / 2, h - 330);
-                if (!split_line.empty()) text(x, y, split_line, 14, cream, true);
-                if (!shown_delta.empty()) {
-                    const bool good = delta_line.empty() ? shown_delta.front() == '-' : delta_good;
-                    text(x, split_line.empty() ? y : y + 22, shown_delta, 13, good ? palette.gain : palette.loss, true);
-                }
-            }
-            if (prefs_.speed_graph && !speed_history.empty()) {
-                const auto [x, y] = at("speedGraph", w - 300, h - 180);
-                rect(x, y, 260, 80, {.03f, .03f, .05f, .6f});
-                float peak = 500;
-                for (const auto &[tick, v] : speed_history)
-                    peak = std::max(peak, v);
-                for (size_t i = 0; i < speed_history.size(); ++i) {
-                    const float bar = speed_history[i].second / peak * 65;
-                    rect(x + float(i) * 260 / 250, y + 75 - bar, 1.2f, bar, amber);
-                }
-            }
+            draw_splits();
+            draw_board_place();
+            draw_speed_graph();
             element_visible = true;
             element_scale = 1;
             clear_element_style();
             native::draw_movement_widgets(
                     *this,
-                    at,
+                    [this](const char *id, float x, float y) { return place(id, x, y); },
                     prefs_,
                     movement,
                     extras,
                     run,
-                    w,
-                    h,
-                    practice && practice->active,
-                    practice ? practice->number() : 0
+                    frame_width_,
+                    frame_height_,
+                    practising || editing_,
+                    practice ? practice->number() : 0,
+                    editing_
             );
-            if (visible && practice && practice->menu_open) {
-                element_visible = true;
-                element_scale = 1;
-                clear_element_style();
-                native::draw_checkpoint_menu(*this, w, h, *practice, keep_velocity);
-            }
-            if (visible && !gauntlet_line.empty()) {
-                text(w / 2, h - 32, gauntlet_line, 13, cream, true);
-                if (!gauntlet_delta.empty())
-                    text(w / 2, h - 15, gauntlet_delta, 12, gauntlet_good ? Color{.47f, .9f, .47f, 1} : amber, true);
-            }
+            element_visible = true;
+            element_scale = 1;
+            clear_element_style();
+            if (visible && practice && practice->menu_open)
+                native::draw_checkpoint_menu(*this, frame_width_, frame_height_, *practice, keep_velocity);
+            if (visible) draw_gauntlet(gauntlet_line, gauntlet_delta, gauntlet_good);
             if (visible && playback) {
-                const auto [x, y] = at("replay", w / 2, 22);
+                const auto [x, y] = place("replay", frame_width_ / 2, replay_banner_top);
                 text(x, y, "REPLAY - ESC FOR PLAYBACK CONTROLS", 14, amber, true);
             }
         }
@@ -1467,31 +1365,489 @@ else{color=vec4(ink.rgb,ink.a*(uv.x<-1.?1.:texture(font,uv).a));}})"
         flush(width, height);
     }
 
+    // Each element's box, in pixels, from the last draw(); an element that drew nothing has an empty box. The chat
+    // box is the "chat" entry after draw_chat_overlay.
+    const native::HudRect &drawn_bounds(std::string_view id) const {
+        return id == "boardPlace" ? drawn_[board_place_slot] : drawn_[native::hud_index(id)];
+    }
+
+    // Each element's box in pixels as last placed: what the layout editor outlines, picks and moves.
+    const native::HudRect &layout_box(std::string_view id) const { return layout_boxes_[native::hud_index(id)]; }
+
+    std::array<float, 2> layout_size(std::string_view id) const { return element_size(id); }
+
+    // The layout editor's view: every element drawn, the hidden ones faint.
+    void set_editing(bool on) { editing_ = on; }
+
+    bool editing() const { return editing_; }
+
+    // Puts the layout editor's sample values in place of the run's (hud_demo.hpp), and back.
+    template <class Demo>
+    void swap_demo(Demo &demo) {
+        std::swap(extras, demo.extras);
+        std::swap(movement, demo.movement);
+        std::swap(split_line, demo.split_line);
+        std::swap(delta_line, demo.delta_line);
+    }
+
+    // The display's scale (CSS pixels to screen pixels), for the crosshair.
+    void set_display_scale(float value) {
+        if (value == display_scale_) return;
+        display_scale_ = value;
+        rebuild_crosshair();
+    }
+
 private:
-    void draw_keys(float x, float y) {
-        constexpr std::array<uint32_t, 8> bits = {
-                native::forward, native::left, native::back, native::right, native::duck, native::jump, 0, 0
-        };
-        constexpr std::array<float, 8> horizontal = {26, 0, 26, 52, 0, 40, 0, 40};
-        constexpr std::array<float, 8> vertical = {0, 23, 23, 23, 46, 46, 69, 69};
-        for (size_t i = 0; i < bits.size(); ++i) {
-            const size_t row = i < 4 ? 0 : i < 6 ? 1 : 2;
-            if (!prefs_.keys_rows[row]) continue;
-            const bool pressed = i < 6 ? (((keys_latest_ | keys_edges_) & bits[i]) || key_until_[i] > keys_tick_)
-                                       : key_until_[i] > keys_tick_;
-            auto color = pressed ? prefs_.keys_pressed : prefs_.keys_idle;
-            color[3] *= prefs_.keys_opacity;
-            const float left = x + horizontal[i];
-            const float top = y + vertical[i];
-            const float width = i < 4 ? 22 : 38;
-            if (prefs_.keys_style != "minimal") {
-                rect(left, top, width, 19, {.04f, .045f, .06f, .75f * prefs_.keys_opacity});
-                if (pressed) rect(left + 1, top + 1, width - 2, 16, {color[0], color[1], color[2], .25f * color[3]});
-                if (prefs_.keys_style == "keycaps") rect(left + 2, top + 17, width - 4, 1, color);
+    // v0.5.1's places, in HUD units from the screen's edges: the map line at the top left, FPS at the top right, the
+    // run column at the bottom centre (timer, speed, stats with the run status above), keys at the bottom left and
+    // health at the bottom right. Feedback the player turns on stacks above the run column.
+    static constexpr float edge_margin = 26;
+    static constexpr float map_top = 18;
+    static constexpr float style_below_map = 24;
+    static constexpr float fps_from_right = 135;
+    static constexpr float fps_top = 20;
+    static constexpr float pb_below_fps = 22;
+    static constexpr float timer_from_bottom = 154;
+    static constexpr float status_above_timer = 32;
+    static constexpr float speed_from_bottom = 105;
+    static constexpr float run_stats_from_bottom = 68;
+    static constexpr float jump_stats_from_bottom = 232;
+    static constexpr float jump_stats_line_gap = 21;
+    static constexpr float trainer_bottom_from_bottom = 250;
+    static constexpr float splits_from_bottom = 350;
+    static constexpr float split_line_gap = 22;
+    static constexpr float keys_from_bottom = 65;
+    static constexpr float health_from_right = 275;
+    static constexpr float health_from_bottom = 62;
+    static constexpr float graph_from_right = 300;
+    static constexpr float graph_from_bottom = 180;
+    static constexpr float graph_width = 260;
+    static constexpr float graph_height = 80;
+    static constexpr float graph_bar_height = 65;
+    static constexpr float notice_top = 70;
+    static constexpr float replay_banner_top = 22;
+    static constexpr float gauntlet_from_bottom = 32;
+    static constexpr float gauntlet_delta_from_bottom = 15;
+    static constexpr size_t max_notice_bytes = 100;
+    static constexpr float timer_size = 34;
+
+    float frame_width_ = 0;
+    float frame_height_ = 0;
+    const Layout *legacy_layout_ = nullptr;
+    native::SemanticPalette palette_;
+    native::CrosshairShape crosshair_shape_;
+    float display_scale_ = 1;
+
+    // The keys row and the strafe trainer are as big as their settings make them; every other element has a fixed box.
+    std::array<float, 2> element_size(std::string_view id) const {
+        id = native::canonical_hud_id(id);
+        if (id == "keys") return {keys_row_width(), keys_row_height};
+        if (id == "strafeTrainer") return {native::TrainerLayout::width, native::trainer_height(prefs_.trainer)};
+        return native::hud_element_size(id);
+    }
+
+    const std::optional<native::HudPlace> &layout_place(std::string_view id) const {
+        return prefs_.layout[native::hud_index(id)];
+    }
+
+    bool placed(std::string_view id) const {
+        const auto &entry = layout_place(id);
+        return entry && entry->placed;
+    }
+
+    // Where element `id` goes: its built-in point (x, y) unless the player placed it, then sets it up for drawing.
+    std::array<float, 2> place(std::string_view id, float x, float y) {
+        if (const auto &entry = layout_place(id); entry && entry->placed) {
+            if (entry->anchored) {
+                const auto size = element_size(id);
+                const auto bounds = entry->rect(frame_width_, frame_height_, size[0], size[1]);
+                x = bounds.x + (native::hud_centred(id) ? bounds.width / 2 : 0);
+                y = bounds.y + (id == "crosshair" ? bounds.height / 2 : 0);
+            } else {
+                // v0.5.1's editor: the element's own point, in percent of the screen.
+                x = entry->x / 100 * frame_width_;
+                y = entry->y / 100 * frame_height_;
             }
-            const std::string_view label = i < 6 ? std::string_view(prefs_.key_labels[i]) : i == 6 ? "<" : ">";
-            text(left + width / 2, top + 3, label, i < 4 ? 11 : 8.5f, color, true);
+        } else if (legacy_layout_) {
+            const auto found = legacy_layout_->find(std::string(id));
+            if (found != legacy_layout_->end()) {
+                x = found->second[0] / 100 * frame_width_;
+                y = found->second[1] / 100 * frame_height_;
+            }
         }
+        element(id, x, y);
+        note_layout_box(id, x, y);
+        return {x, y};
+    }
+
+    void note_layout_box(std::string_view id, float x, float y) {
+        const auto size = element_size(id);
+        const float width = size[0] * element_scale, height = size[1] * element_scale;
+        const float left = native::hud_centred(id) ? x - width / 2 : x;
+        layout_boxes_[native::hud_index(id)] = {left * scale, y * scale, width * scale, height * scale};
+    }
+
+    void draw_edge_glow(float speed) {
+        constexpr float glow_from_speed = 600;
+        constexpr float glow_full_speed_span = 800;
+        constexpr unsigned strips = 8;
+        constexpr float strip_width = 5;
+        constexpr float strip_alpha = .05f;
+        const float intensity = std::clamp((speed - glow_from_speed) / glow_full_speed_span, 0.f, 1.f);
+        const float w = frame_width_, h = frame_height_;
+        for (unsigned strip = 0; strip < strips; ++strip) {
+            const float inset = float(strip) * strip_width;
+            const Color glow = {.3f, .65f, 1, intensity * strip_alpha * (1 - float(strip) / strips)};
+            rect(inset, 0, strip_width, h, glow);
+            rect(w - inset - strip_width, 0, strip_width, h, glow);
+            rect(0, inset, w, strip_width, glow);
+            rect(0, h - inset - strip_width, w, strip_width, glow);
+        }
+    }
+
+    void rebuild_crosshair() {
+        crosshair_shape_.build(
+                prefs_.crosshair_style,
+                prefs_.crosshair_size,
+                prefs_.crosshair_gap,
+                prefs_.crosshair_thickness,
+                prefs_.crosshair_outline,
+                display_scale_
+        );
+    }
+
+    // The crosshair's middle in whole pixels: the screen's middle, or the middle of the place the player gave it.
+    std::array<int, 2> crosshair_centre_px(int width, int height) {
+        const auto [x, y] = place("crosshair", frame_width_ / 2, frame_height_ / 2);
+        if (!placed("crosshair") && !legacy_layout_)
+            return {native::CrosshairShape::centre_px(width), native::CrosshairShape::centre_px(height)};
+        return {int(std::floor(x * scale)), int(std::floor(y * scale))};
+    }
+
+    // Drawn in screen pixels, not HUD units: the crosshair keeps the website's size at any HUD scale. The runs
+    // never overlap, so the opacity setting fades the whole crosshair the way the website's does.
+    void draw_crosshair(int width, int height) {
+        constexpr float outline_alpha = .85f;
+        const auto [centre_x, centre_y] = crosshair_centre_px(width, height);
+        element_scale = 1;
+        Color fill = prefs_.crosshair_color;
+        const Color outline = {0, 0, 0, outline_alpha * fill[3]};
+        for (const auto &run : crosshair_shape_.runs()) {
+            rect(float(centre_x + run.x) / scale,
+                 float(centre_y + run.y) / scale,
+                 float(run.width) / scale,
+                 1 / scale,
+                 run.outline ? outline : fill);
+        }
+    }
+
+    void draw_leave_progress(int width, int height, float progress) {
+        constexpr int ring_dots = 48;
+        constexpr float ring_radius = 26;
+        constexpr float dot_size = 4;
+        constexpr float full_turn = 6.2831853f;
+        constexpr float start_at_top = -1.5707963f;
+        const auto [centre_x, centre_y] = crosshair_centre_px(width, height);
+        const float x = float(centre_x) / scale, y = float(centre_y) / scale;
+        for (int i = 0; i < ring_dots; ++i) {
+            const float angle = float(i) / ring_dots * full_turn + start_at_top;
+            const Color color = float(i) / ring_dots <= progress ? amber : dim;
+            rect(x + std::cos(angle) * ring_radius - dot_size / 2,
+                 y + std::sin(angle) * ring_radius - dot_size / 2,
+                 dot_size,
+                 dot_size,
+                 color);
+        }
+    }
+
+    // v0.5.1: the map, and under it the style in the accent colour.
+    void draw_map_line(std::string_view map, std::string_view style, unsigned track) {
+        const auto [x, y] = place("map", edge_margin, map_top);
+        native::HudLabel<128> label;
+        label.assign(style);
+        if (track) {
+            native::HudLabel<32> bonus;
+            bonus.format(" / BONUS %u", track);
+            label.append(bonus.view());
+        }
+        text(x, y, map, 17, cream);
+        text(x, y + style_below_map, label.view(), 14, amber);
+    }
+
+    void draw_fps_and_pb(double fps) {
+        const float w = frame_width_;
+        const auto &fps_place = layout_place("fps");
+        const bool fps_shown = !fps_place || fps_place->visible || editing_;
+        {
+            const auto [x, y] = place("fps", w - fps_from_right, fps_top);
+            native::HudLabel<32> label;
+            label.format("%.0f FPS", fps);
+            text(x, y, label.view(), 14, dim);
+        }
+        if (extras.pb.empty()) return;
+        // The best time sits under the FPS counter, or in its place when the counter is off.
+        const auto [x, y] = place("pb", w - fps_from_right, fps_top + (fps_shown ? pb_below_fps : 0));
+        text(x, y, extras.pb.view(), 13, dim);
+    }
+
+    // The run status ("IN START", "READY") sits over the timer, as in v0.5.1, and follows it unless it has a place
+    // of its own.
+    void draw_timer(const BhRunState &run, bool practising) {
+        const float w = frame_width_, h = frame_height_;
+        const auto [x, y] = place("timer", w / 2, h - timer_from_bottom);
+        native::HudLabel<48> time;
+        native::format_hud_time(time, run.seconds);
+        const Color color = (run.status == 2 || practising) ? amber : cream;
+        text(x, y, time.view(), timer_size, color, true);
+        draw_status(run, x, y - status_above_timer);
+    }
+
+    void draw_status(const BhRunState &run, float x, float y) {
+        if (run.status == 1 && !editing_) return;
+        const auto [status_x, status_y] = place("status", x, y);
+        if (run.status != 2) text(status_x, status_y, run.in_start ? "IN START" : "READY", 13, amber, true);
+        if (run.status == 2) text(status_x, status_y, "FINISHED", 15, amber, true);
+    }
+
+    void draw_speed(uint32_t tick, float speed, const BhRunState &run, std::string_view style, bool practising) {
+        constexpr double gain_shown_seconds = .45;
+        constexpr float gain_left = 100;
+        constexpr float gain_rise_per_tick = .25f;
+        constexpr float perfect_left = 75;
+        constexpr float perfect_below = 14;
+        const auto [x, y] = place("speed", frame_width_ / 2, frame_height_ - speed_from_bottom);
+        native::HudLabel<32> label;
+        label.format("%.0f u/s", speed);
+        const Color color = !prefs_.speed_colors ? cream
+                            : speed > 800        ? palette_.loss
+                            : speed > 500        ? palette_.sync
+                            : speed > 270        ? palette_.gain
+                                                 : cream;
+        text(x, y, label.view(), 25, color, true);
+        if (prefs_.gain_ticks && movement.gain_tick && tick >= movement.gain_tick
+            && (tick - movement.gain_tick) * movement.tick_interval < gain_shown_seconds) {
+            const float rise = float(tick - movement.gain_tick) * gain_rise_per_tick;
+            text(x + gain_left,
+                 y - 10 - rise,
+                 native::jump_gain_text(movement.gain_delta).view(),
+                 16,
+                 movement.gain_delta > 0 ? palette_.gain : palette_.loss);
+        }
+        if (prefs_.perfect_indicator
+            && native::perfect_hop_visible(std::string(style), run, tick, movement.tick_interval, practising))
+            text(x + perfect_left, y + perfect_below, "Perfect", 12, native::semantic_rgb(0xffffff, .7f));
+    }
+
+    void draw_run_stats(const BhRunState &run, std::string_view style) {
+        const auto [x, y] = place("runStats", frame_width_ / 2, frame_height_ - run_stats_from_bottom);
+        native::HudLabel<160> label;
+        if (native::scroll_style(std::string(style)) && prefs_.perf_hud)
+            label.format(
+                    "%u jumps  %u strafes  %.1f%% sync  %s",
+                    run.jumps,
+                    run.strafes,
+                    run.sync_percent,
+                    native::perf_text(run).bytes.data()
+            );
+        else
+            label.format("%u jumps  %u strafes  %.1f%% sync", run.jumps, run.strafes, run.sync_percent);
+        text(x, y, label.view(), 13, dim, true);
+    }
+
+    // Jump stats sit above the run status, clear of the timer and speed. The colour follows the gain bands.
+    void draw_jump_stats(std::string_view stats, std::optional<float> gain) {
+        if (stats.empty()) return;
+        const auto [x, y] = place("jumpStats", frame_width_ / 2, frame_height_ - jump_stats_from_bottom);
+        const auto newline = stats.find('\n');
+        const Color color = jump_stats_color(gain);
+        text(x, y, stats.substr(0, newline), 14, color, true);
+        if (newline != std::string_view::npos)
+            text(x, y + jump_stats_line_gap, stats.substr(newline + 1), 12, color, true);
+    }
+
+    // Above the jump stats; its bottom stays put whatever style and height the trainer has.
+    void draw_strafe_trainer(const native::StrafeReading &reading, bool hints) {
+        const float height = native::trainer_height(prefs_.trainer);
+        const float bottom = frame_height_ - trainer_bottom_from_bottom;
+        const auto [x, y] = place("strafeTrainer", frame_width_ / 2, bottom - height);
+        native::draw_trainer(*this, x, y, reading, prefs_.trainer, hints, palette_);
+    }
+
+    void draw_splits() {
+        const std::string_view shown_delta = delta_line.empty() ? extras.ghost_delta.view() : delta_line;
+        if (split_line.empty() && shown_delta.empty()) return;
+        const auto [x, y] = place("splits", frame_width_ / 2, frame_height_ - splits_from_bottom);
+        if (!split_line.empty()) text(x, y, split_line, 14, cream, true);
+        if (shown_delta.empty()) return;
+        const bool good = delta_line.empty() ? shown_delta.front() == '-' : delta_good;
+        text(x,
+             split_line.empty() ? y : y + split_line_gap,
+             shown_delta,
+             13,
+             good ? palette_.gain : palette_.loss,
+             true);
+    }
+
+    // "#4 | top 3%" right of the timer, as the website puts it beside the split.
+    void draw_board_place() {
+        constexpr float beside_timer = 175;
+        constexpr float timer_line_from_bottom = 141;
+        if (prefs_.place == "off" || extras.place.empty()) return;
+        auto shown = extras.place.view();
+        if (prefs_.place == "place") shown = shown.substr(0, shown.find(" \xC2\xB7"));
+        const float x = frame_width_ / 2 + beside_timer, y = frame_height_ - timer_line_from_bottom;
+        // The split's box is the split's: the place line only borrows its visibility and placement.
+        const auto split_box = layout_boxes_[native::hud_index("splits")];
+        const auto [place_x, place_y] = place("splits", x, y);
+        layout_boxes_[native::hud_index("splits")] = split_box;
+        drawn_index_ = board_place_slot;
+        // Placed, it goes under the split's two lines, as the website shows it with the split.
+        text(place_x, placed("splits") ? place_y + 2 * split_line_gap : place_y, shown, 13, dim, true);
+    }
+
+    // Nothing to draw while standing still: an empty graph would just be a dark box.
+    void draw_speed_graph() {
+        if (!(prefs_.speed_graph || editing_)) return;
+        constexpr float slowest_peak = 500;
+        constexpr float bar_width = 1.2f;
+        constexpr float still_speed = 1;
+        float fastest = 0;
+        for (const auto &[tick, value] : speed_history)
+            fastest = std::max(fastest, value);
+        if (fastest < still_speed && !editing_) return;
+        const auto [x, y] = place("speedGraph", frame_width_ - graph_from_right, frame_height_ - graph_from_bottom);
+        rect(x, y, graph_width, graph_height, {.03f, .03f, .05f, .6f});
+        const float peak = std::max(slowest_peak, fastest);
+        const float step = graph_width / float(speed_history_capacity);
+        constexpr float graph_floor = 75;
+        const float floor_y = y + graph_floor;
+        for (size_t i = 0; i < speed_history.size(); ++i) {
+            const float bar = speed_history[i].second / peak * graph_bar_height;
+            rect(x + float(i) * step, floor_y - bar, bar_width, bar, amber);
+        }
+    }
+
+    // v0.5.1: "HP 100  AMMO 12/36" at the bottom right.
+    void draw_health(float health, const BhWeaponReport &weapon) {
+        const auto [x, y] = place("health", frame_width_ - health_from_right, frame_height_ - health_from_bottom);
+        native::HudLabel<64> label;
+        if (weapon.clip_size)
+            label.format("HP %.0f  AMMO %u/%u", health, weapon.clip, weapon.clip_size);
+        else
+            label.format("HP %.0f", health);
+        text(x, y, label.view(), 14, cream);
+    }
+
+    void draw_gauntlet(const std::string &line, const std::string &delta, bool good) {
+        if (line.empty()) return;
+        constexpr Color gauntlet_ahead{.47f, .9f, .47f, 1};
+        const float x = frame_width_ / 2;
+        text(x, frame_height_ - gauntlet_from_bottom, line, 13, cream, true);
+        if (!delta.empty())
+            text(x, frame_height_ - gauntlet_delta_from_bottom, delta, 12, good ? gauntlet_ahead : amber, true);
+    }
+
+    static constexpr std::array<uint32_t, 8> key_bits = {
+            native::forward, native::left, native::back, native::right, native::jump, native::duck, 0, 0
+    };
+    // key_until_ slots: the six keys in prefs_.key_labels order (forward, left, back, right, duck, jump), then the
+    // two turn arrows.
+    static constexpr std::array<size_t, 8> key_flash_slot = {0, 1, 2, 3, 5, 4, 6, 7};
+
+    bool key_pressed(size_t i) const {
+        const size_t slot = key_flash_slot[i];
+        if (i >= 6) return key_until_[slot] > keys_tick_;
+        return ((keys_latest_ | keys_edges_) & key_bits[i]) || key_until_[slot] > keys_tick_;
+    }
+
+    bool key_row_shown(size_t i) const {
+        const size_t row = i < 4 ? 0 : i < 6 ? 1 : 2;
+        return prefs_.keys_rows[row];
+    }
+
+    std::string_view key_text(size_t i) const {
+        if (i == 6) return "<";
+        if (i == 7) return ">";
+        return prefs_.key_labels[key_flash_slot[i]];
+    }
+
+    struct KeyLook {
+        Color box;
+        Color label;
+        std::optional<Color> cap;
+    };
+
+    KeyLook key_look(bool pressed) const {
+        constexpr Color idle_box{.05f, .05f, .07f, .6f};
+        constexpr Color pressed_label{.08f, .07f, .06f, 1};
+        constexpr Color idle_cap{.4f, .4f, .43f, 1};
+        constexpr float pressed_box_alpha = .85f;
+        constexpr float pressed_cap_shade = .6f;
+        const float opacity = prefs_.keys_opacity;
+        const bool minimal = prefs_.keys_style == "minimal";
+        auto pressed_color = prefs_.keys_pressed;
+        KeyLook look;
+        look.box = pressed ? Color{pressed_color[0], pressed_color[1], pressed_color[2], pressed_box_alpha * opacity}
+                           : Color{idle_box[0], idle_box[1], idle_box[2], idle_box[3] * opacity};
+        look.label = minimal   ? (pressed ? pressed_color : prefs_.keys_idle)
+                     : pressed ? pressed_label
+                               : prefs_.keys_idle;
+        look.label[3] *= opacity;
+        if (minimal) look.box[3] = 0;
+        if (prefs_.keys_style == "keycaps") {
+            Color cap = pressed ? Color{pressed_color[0] * pressed_cap_shade,
+                                        pressed_color[1] * pressed_cap_shade,
+                                        pressed_color[2] * pressed_cap_shade,
+                                        opacity}
+                                : Color{idle_cap[0], idle_cap[1], idle_cap[2], opacity};
+            look.cap = cap;
+        }
+        return look;
+    }
+
+    void draw_key(float left, float top, float width, float height, std::string_view label, float size, bool pressed) {
+        constexpr float cap_inset = 2;
+        constexpr float cap_height = 2;
+        const KeyLook look = key_look(pressed);
+        if (look.box[3] > 0) rect(left, top, width, height, look.box);
+        if (look.cap)
+            rect(left + cap_inset, top + height - cap_height - 1, width - 2 * cap_inset, cap_height, *look.cap);
+        const float label_top = top + (height - size * atlas_height_per_size) / 2;
+        text(left + width / 2, label_top, label, size, look.label, true);
+    }
+
+    static constexpr float keys_row_height = 27;
+    static constexpr float key_gap = 4;
+    static constexpr float key_label_size = 14;
+
+    float key_width(size_t i) const {
+        constexpr float narrowest_key = 28;
+        constexpr float label_padding = 10;
+        const float label = float(key_text(i).size()) * key_label_size * atlas_advance_per_size;
+        return std::max(narrowest_key, label + label_padding);
+    }
+
+    float keys_row_width() const {
+        float width = 0;
+        for (size_t i = 0; i < key_bits.size(); ++i) {
+            if (key_row_shown(i)) width += key_width(i) + key_gap;
+        }
+        return std::max(key_gap, width - key_gap);
+    }
+
+    // v0.5.1: one row of keys at the bottom left, W A S D then jump and duck, then the turn arrows.
+    void draw_keys_row(float x, float y) {
+        for (size_t i = 0; i < key_bits.size(); ++i) {
+            if (!key_row_shown(i)) continue;
+            const float width = key_width(i);
+            draw_key(x, y, width, keys_row_height, key_text(i), key_label_size, key_pressed(i));
+            x += width + key_gap;
+        }
+    }
+
+    void draw_keys() {
+        const auto [x, y] = place("keys", edge_margin, frame_height_ - keys_from_bottom);
+        draw_keys_row(x, y);
         keys_edges_ = 0;
     }
 
