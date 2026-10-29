@@ -244,7 +244,7 @@ function key(t: number, code: string, down: boolean, arrival = t): KeyEvent {
 function scenarios(): Scenario[] {
   const out: Scenario[] = [];
   const durations: Record<number, number> = { 1000: 600 * MS, 2000: 320 * MS, 8000: 120 * MS };
-  for (const fps of [60, 100, 144, 240, 360]) {
+  for (const fps of [60, 100, 144, 240, 360, 500, 1000]) {
     for (const hz of [1000, 2000, 8000]) {
       const duration = durations[hz];
       out.push({
@@ -260,6 +260,24 @@ function scenarios(): Scenario[] {
         holdbackMaxMs: webModule.HOLDBACK_MAX,
         events: strafe(hz, duration, 137, 23, 2_500_000),
         frames: frames(fps, duration + 20 * MS),
+      });
+    }
+  }
+  // Alternating short/long frames exercise high-rate attribution across uneven pump boundaries.
+  for (const hz of [2000, 4000, 8000]) {
+    for (const fps of [60, 240, 1000]) {
+      const duration = 600 * MS;
+      const schedule: number[] = [];
+      for (let index = 1, time = START_NS; time < START_NS + duration + 20 * MS; index++) {
+        time += Math.round((1e9 / fps) * (index % 2 ? 0.35 : 1.65));
+        schedule.push(time);
+      }
+      out.push({
+        name: `uneven ${fps} fps ${hz} Hz`,
+        holdbackMs: 1,
+        holdbackMaxMs: webModule.HOLDBACK_MAX,
+        events: strafe(hz, duration, 137),
+        frames: schedule,
       });
     }
   }

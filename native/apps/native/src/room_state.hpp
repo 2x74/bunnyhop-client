@@ -132,6 +132,12 @@ class RoomState {
         }
     }
 
+    std::string change_map(const std::string &next) {
+        if (map == next) return "";
+        map = next;
+        return map;
+    }
+
 public:
     NameAppearance appearance(unsigned slot) const {
         for (size_t i = 0; i < display_.count; ++i) {
@@ -382,8 +388,7 @@ public:
                     } catch (const std::exception &) {
                     }
                 }
-            map = e.at("map").at("name").get<std::string>();
-            return map;
+            return change_map(e.at("map").at("name").get<std::string>());
         }
         if (type == "join")
             player(e.at("player"));
@@ -397,14 +402,14 @@ public:
             player(p, true);
         } else if (type == "map" || type == "nativeMap") {
             const auto &m = e.at("map");
-            map = m.is_string() ? m.get<std::string>() : m.at("name").get<std::string>();
+            const auto next_map = m.is_string() ? m.get<std::string>() : m.at("name").get<std::string>();
             change = nullptr;
             vote = nullptr;
             for (auto &[slot, p] : peers) {
                 p.samples.clear();
                 p.clock = false;
             }
-            return map;
+            return change_map(next_map);
         } else if (type == "chat")
             notice = e.value("name", std::string("Server")) + ": " + e.value("text", std::string());
         return "";

@@ -381,6 +381,7 @@ if (import.meta.main) {
       "tp-inspects.json",
       "runner.json",
       "runner.bin",
+      "avatar.json",
     ]) {
       if (!existsSync(join(assets, file))) throw new Error(`Required hosted actor animation asset missing: ${file}`);
     }
@@ -504,8 +505,10 @@ if (import.meta.main) {
       archive = join(out, `${tag}.${extension}`);
     if (existsSync(archive)) throw new Error(`Archive exists: ${archive}`);
     if (platform === "darwin") run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", packageRoot, archive]);
-    else if (platform === "win32") run(["tar", "-a", "-c", "-f", archive, "-C", stage, "."]);
+    // Archiving "." names every entry "./…", and Windows Explorer shows such a zip as empty until it's extracted.
+    else if (platform === "win32") run(["tar", "-a", "-c", "-f", archive, "-C", stage, ...readdirSync(stage).sort()]);
     else run(["tar", "-czf", archive, "-C", stage, "."]);
+    if (platform === "win32") verifyZipEntryNames(run(["tar", "-tf", archive]));
     if (platform === "darwin" && values["notary-profile"]) {
       if (signing !== "developer-id") throw new Error("Notarization requires Developer ID signing");
       console.log(
@@ -547,4 +550,9 @@ if (import.meta.main) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
+}
+
+function verifyZipEntryNames(listing: string): void {
+  const bad = listing.split(/\r?\n/).find((name) => name.startsWith("./") || name.startsWith("/"));
+  if (bad !== undefined) throw new Error(`Windows zip entry must be a plain relative name: ${bad}`);
 }

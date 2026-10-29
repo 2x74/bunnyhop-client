@@ -3,6 +3,8 @@ use super::*;
 use std::mem::size_of;
 
 pub const TURN_SPEED_MAGIC: u32 = 0x53544842;
+// The website's replay.ts header flags: null binds were on, timestamped input built a command.
+pub const FLAG_NULL_BINDS: u16 = 1 << 3;
 pub const FLAG_TIMED_INPUT: u16 = 1 << 4;
 
 #[repr(C)]
@@ -13,6 +15,7 @@ pub struct BhRecordOptionsV29 {
     pub yaw_speed: f32,
     pub angle_speed_key: f32,
     pub timed_input: u32,
+    pub null_binds: u32,
 }
 impl Default for BhRecordOptionsV29 {
     fn default() -> Self {
@@ -22,6 +25,7 @@ impl Default for BhRecordOptionsV29 {
             yaw_speed: 210.0,
             angle_speed_key: 2.0,
             timed_input: 0,
+            null_binds: 0,
         }
     }
 }
@@ -35,8 +39,9 @@ impl BhRecordOptionsV29 {
             || !self.angle_speed_key.is_finite()
             || !(1.0..=4.0).contains(&self.angle_speed_key)
             || self.timed_input > 1
+            || self.null_binds > 1
         {
-            return Err("invalid turn rates or timed-input flag".into());
+            return Err("invalid turn rates or input flags".into());
         }
         Ok(self)
     }
@@ -50,7 +55,7 @@ pub extern "C" fn bh_v29_check_abi(version: u32, record_size: usize, segment_siz
         && segment_size == size_of::<BhTimingSegmentV2>()) as c_int
 }
 
-/// Rates freeze at the first command. timed_input is sticky and may be marked later.
+/// Rates freeze at the first command. timed_input and null_binds are sticky and may be marked later.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_record_options_v29(
     ctx: *mut BhContext,
@@ -81,6 +86,7 @@ pub unsafe extern "C" fn bh_record_options_v29(
             recorder.data.options.yaw_speed = options.yaw_speed;
             recorder.data.options.angle_speed_key = options.angle_speed_key;
             recorder.data.options.timed_input |= options.timed_input;
+            recorder.data.options.null_binds |= options.null_binds;
             Ok(())
         })
     }

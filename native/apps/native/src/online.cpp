@@ -151,6 +151,7 @@ asset(const std::filesystem::path &cache,
     }
     if (offline) throw std::runtime_error("Cached map data is missing or corrupt; reconnect and retry");
     const auto bytes = fetch ? fetch(route, max_size, cancel, progress) : get(route, max_size, cancel, progress);
+    if (cancel && cancel->load()) throw std::runtime_error("Map download cancelled");
     if (bytes.size() > max_size) throw std::runtime_error("Downloaded content exceeds size budget");
     if (hash(bytes) != sha) throw std::runtime_error("Content checksum mismatch: " + route);
     save(file, bytes);
@@ -172,6 +173,202 @@ bool safe_content_path(const std::string &path) {
     return true;
 }
 
+namespace {
+Bytes read_cached(const std::filesystem::path &path, size_t limit) {
+    if (!std::filesystem::is_regular_file(path) || std::filesystem::file_size(path) > limit)
+        throw std::runtime_error("Cached metadata unavailable; reconnect and retry");
+    std::ifstream file(path, std::ios::binary);
+    return Bytes(std::istreambuf_iterator<char>(file), {});
+}
+
+Bytes cached_detail(const std::filesystem::path &cache, const std::string &id, const std::atomic_bool *cancel) {
+    const auto index = cache / "index" / (id + ".json");
+    try {
+        return read_cached(index, 4 * MiB);
+    } catch (const std::exception &) {
+    }
+    // Migrate completed downloads made before the per-map index existed.
+    Bytes newest;
+    auto date = (std::filesystem::file_time_type::min)();
+    const auto maps = cache / "maps";
+    if (std::filesystem::is_directory(maps)) {
+        for (const auto &entry : std::filesystem::directory_iterator(maps)) {
+            if (cancel && cancel->load()) throw std::runtime_error("Map download cancelled");
+            if (!entry.is_directory() || !hash_id(entry.path().filename().string())
+                || !std::filesystem::is_regular_file(entry.path() / (id + ".bsp"))
+                || !std::filesystem::is_regular_file(entry.path() / "manifest.json"))
+                continue;
+            try {
+                auto bytes = read_cached(entry.path() / "detail.json", 4 * MiB);
+                const auto detail = nlohmann::json::parse(bytes);
+                if (detail.at("sha256") != entry.path().filename().string()) continue;
+                const auto modified = std::filesystem::last_write_time(entry.path() / "detail.json");
+                if (newest.empty() || modified > date) {
+                    date = modified;
+                    newest = std::move(bytes);
+                }
+            } catch (const std::exception &) {
+            }
+        }
+    }
+    if (newest.empty()) throw std::runtime_error("Map is not downloaded; connect to download it first");
+    return newest;
+}
+
+struct MapTransfer {
+    const std::string &id;
+    const std::filesystem::path &cache;
+    const std::function<void(const std::string &)> &progress;
+    const std::atomic_bool *cancel;
+    const DownloadLimits &limits;
+    const LoadProgressCallback &detail_progress;
+    const DownloadFetch &fetch;
+    bool offline = false;
+    LoadProgress current;
+
+    void emit(LoadProgress value) const {
+        value.offline = offline;
+        if (detail_progress) detail_progress(value);
+    }
+
+    void phase(LoadProgress value) {
+        current = std::move(value);
+        progress(current.message);
+        emit(current);
+    }
+
+    LoadProgressCallback transfer_progress() const {
+        return [this](const LoadProgress &value) {
+            auto update = current;
+            update.received = value.received;
+            update.total = value.total;
+            update.cached = value.cached;
+            emit(update);
+        };
+    }
+
+    Bytes request(const std::string &route, size_t limit) const {
+        if (cancel && cancel->load()) throw std::runtime_error("Map download cancelled");
+        auto bytes = fetch ? fetch(route, limit, cancel, transfer_progress())
+                           : get(route, limit, cancel, transfer_progress());
+        if (bytes.size() > limit) throw std::runtime_error("Metadata exceeds size budget");
+        return bytes;
+    }
+
+    Bytes detail() {
+        phase({"metadata", "Checking latest map version: " + id});
+        try {
+            return request("/api/maps/" + id, 4 * MiB);
+        } catch (const DownloadNetworkError &) {
+            if (cancel && cancel->load()) throw;
+            auto bytes = cached_detail(cache, id, cancel);
+            offline = true;
+            phase({"metadata", "Using previously downloaded map (offline)", 0, 0, 0, 0, true, true});
+            return bytes;
+        }
+    }
+
+    Bytes manifest(const std::filesystem::path &directory, const std::string &sha) {
+        phase({"manifest", "Checking latest map content manifest"});
+        // Content can change without a BSP change. Only an offline load uses
+        // the old manifest; a retry must be able to repair stale metadata.
+        if (!offline) {
+            try {
+                return request("/content-manifests/" + sha + ".json", 16 * MiB);
+            } catch (const DownloadNetworkError &) {
+                if (cancel && cancel->load()) throw;
+                offline = true;
+            }
+        }
+        return read_cached(directory / "manifest.json", 16 * MiB);
+    }
+
+    nlohmann::json content_files(const Bytes &bytes, const std::string &sha) const {
+        const auto manifest = nlohmann::json::parse(bytes);
+        if (manifest.at("mapSha256") != sha) throw std::runtime_error("Content manifest belongs to another map");
+        auto files = manifest.value("files", nlohmann::json::object());
+        const auto physics =
+                manifest.value("physics", nlohmann::json::object()).value("files", nlohmann::json::object());
+        constexpr size_t content_file_limit = 40'000;
+        if (!files.is_object() || !physics.is_object() || files.size() + physics.size() > content_file_limit)
+            throw std::runtime_error("Invalid map content manifest");
+        for (const auto &[path, info] : physics.items())
+            files[path] = info;
+        return files;
+    }
+
+    void content_file(
+            const std::filesystem::path &content, const std::string &path, const nlohmann::json &info, size_t size
+    ) const {
+        try {
+            const auto sha = info.at("sha256").get<std::string>();
+            const auto object = asset(cache, sha, "/content/" + sha, size, cancel, transfer_progress(), offline, fetch);
+            if (std::filesystem::file_size(object) != size) throw std::runtime_error("Content size mismatch");
+            const auto destination = content / data_location::from_utf8(path);
+            std::filesystem::create_directories(destination.parent_path());
+            std::filesystem::copy_file(object, destination, std::filesystem::copy_options::overwrite_existing);
+        } catch (const std::exception &error) {
+            throw std::runtime_error("Map content " + path + ": " + error.what());
+        }
+    }
+
+    void content(const std::filesystem::path &directory, const nlohmann::json &files) {
+        const auto content = directory / "content";
+        std::filesystem::create_directories(content);
+        size_t count = 0, total = 0;
+        for (const auto &[path, info] : files.items()) {
+            if (cancel && cancel->load()) throw std::runtime_error("Map download cancelled");
+            if (!safe_content_path(path)) throw std::runtime_error("Unsafe content path");
+            const auto size = info.at("size").get<size_t>();
+            if (size > limits.content_file || size > limits.content_total - total)
+                throw std::runtime_error("Map content is too large");
+            total += size;
+            phase({"content",
+                   "Map content " + std::to_string(count + 1) + "/" + std::to_string(files.size()) + ": " + path,
+                   0,
+                   size,
+                   count,
+                   files.size()});
+            content_file(content, path, info, size);
+            ++count;
+            current.filesDone = count;
+            current.received = size;
+            emit(current);
+        }
+    }
+
+    DownloadedMap run() {
+        if (!valid_map_id(id)) throw std::runtime_error("Invalid map name");
+        const auto detail_bytes = detail();
+        auto map_detail = nlohmann::json::parse(detail_bytes);
+        const auto sha = map_detail.at("sha256").get<std::string>();
+        if (!hash_id(sha)) throw std::runtime_error("Invalid map checksum");
+        phase({"bsp", "Downloading BSP: " + id});
+        const auto object =
+                asset(cache, sha, "/api/bsp/" + sha + ".bsp", limits.bsp, cancel, transfer_progress(), offline, fetch);
+        const auto directory = cache / "maps" / sha;
+        std::filesystem::create_directories(directory);
+        const auto bsp = directory / (id + ".bsp");
+        std::filesystem::copy_file(object, bsp, std::filesystem::copy_options::overwrite_existing);
+        save(directory / "detail.json", detail_bytes);
+        const auto manifest_bytes = manifest(directory, sha);
+        const auto files = content_files(manifest_bytes, sha);
+        content(directory, files);
+        save(directory / "manifest.json", manifest_bytes);
+        save(cache / "index" / (id + ".json"), detail_bytes);
+        phase({"renderer",
+               offline ? "Loading cached map into renderer" : "Loading native renderer",
+               0,
+               0,
+               files.size(),
+               files.size(),
+               offline,
+               offline});
+        return {id, bsp, directory / "content", std::move(map_detail)};
+    }
+};
+}  // namespace
+
 DownloadedMap download_map(
         const std::string &id,
         const std::filesystem::path &cache,
@@ -181,126 +378,8 @@ DownloadedMap download_map(
         const LoadProgressCallback &detail_progress,
         const DownloadFetch &fetch
 ) {
-    if (!valid_map_id(id)) throw std::runtime_error("Invalid map name");
-    progress("Reading " + id);
-    auto request =
-            [&](const std::string &route, size_t limit, const LoadProgressCallback &cb = LoadProgressCallback{}) {
-                auto bytes = fetch ? fetch(route, limit, cancel, cb) : get(route, limit, cancel, cb);
-                if (bytes.size() > limit) throw std::runtime_error("Metadata exceeds size budget");
-                return bytes;
-            };
-    bool offline = false;
-    auto emit = [&](LoadProgress value) {
-        value.offline = offline;
-        if (detail_progress) detail_progress(value);
-    };
-    auto read = [&](const std::filesystem::path &path, size_t limit) {
-        if (!std::filesystem::is_regular_file(path) || std::filesystem::file_size(path) > limit)
-            throw std::runtime_error("Cached metadata unavailable");
-        std::ifstream file(path, std::ios::binary);
-        return Bytes(std::istreambuf_iterator<char>(file), {});
-    };
-    const auto index = cache / "index" / (id + ".json");
-    Bytes detail_bytes;
-    auto offline_detail = [&]() {
-        try {
-            return read(index, 4 * MiB);
-        } catch (...) {
-        }
-        // Migrate completed downloads made before the per-map index existed.
-        Bytes newest;
-        std::filesystem::file_time_type date = (std::filesystem::file_time_type::min)();
-        const auto maps = cache / "maps";
-        if (std::filesystem::is_directory(maps))
-            for (const auto &entry : std::filesystem::directory_iterator(maps)) {
-                if (cancel && cancel->load()) throw std::runtime_error("Map download cancelled");
-                if (!entry.is_directory() || !hash_id(entry.path().filename().string())
-                    || !std::filesystem::is_regular_file(entry.path() / (id + ".bsp"))
-                    || !std::filesystem::is_regular_file(entry.path() / "manifest.json"))
-                    continue;
-                try {
-                    auto bytes = read(entry.path() / "detail.json", 4 * MiB);
-                    const auto detail = nlohmann::json::parse(bytes);
-                    if (detail.at("sha256") != entry.path().filename().string()) continue;
-                    const auto modified = std::filesystem::last_write_time(entry.path() / "detail.json");
-                    if (newest.empty() || modified > date) {
-                        date = modified;
-                        newest = std::move(bytes);
-                    }
-                } catch (...) {
-                }
-            }
-        if (newest.empty()) throw std::runtime_error("Map is not downloaded; connect to download it first");
-        return newest;
-    };
-    emit({"metadata", "Checking latest map version"});
-    try {
-        detail_bytes = request("/api/maps/" + id, 4 * MiB);
-    } catch (const DownloadNetworkError &) {
-        if (cancel && cancel->load()) throw;
-        detail_bytes = offline_detail();
-        offline = true;
-        emit({"metadata", "Using previously downloaded map (offline)", 0, 0, 0, 0, true, true});
-    }
-    auto detail = nlohmann::json::parse(detail_bytes);
-    const auto sha = detail.at("sha256").get<std::string>();
-    if (!hash_id(sha)) throw std::runtime_error("Invalid map checksum");
-    progress("Downloading " + id);
-    const auto bsp_object = asset(cache, sha, "/api/bsp/" + sha + ".bsp", limits.bsp, cancel, emit, offline, fetch);
-    const auto directory = cache / "maps" / sha;
-    std::filesystem::create_directories(directory);
-    const auto bsp = directory / (id + ".bsp");
-    std::filesystem::copy_file(bsp_object, bsp, std::filesystem::copy_options::overwrite_existing);
-    save(directory / "detail.json", detail_bytes);
-    progress("Reading map content");
-    Bytes manifest_bytes;
-    try {
-        manifest_bytes = read(directory / "manifest.json", 16 * MiB);
-        auto cached = nlohmann::json::parse(manifest_bytes);
-        if (cached.at("mapSha256") != sha) throw std::runtime_error("Stale manifest");
-    } catch (...) {
-        if (offline) throw std::runtime_error("Offline map content is incomplete; reconnect and retry");
-        manifest_bytes = request("/content-manifests/" + sha + ".json", 16 * MiB, emit);
-    }
-    auto manifest = nlohmann::json::parse(manifest_bytes);
-    if (manifest.at("mapSha256") != sha) throw std::runtime_error("Content manifest belongs to another map");
-    auto files = manifest.value("files", nlohmann::json::object());
-    const auto physics = manifest.value("physics", nlohmann::json::object()).value("files", nlohmann::json::object());
-    if (!files.is_object() || !physics.is_object() || files.size() + physics.size() > 40'000)
-        throw std::runtime_error("Invalid map content manifest");
-    for (auto &[path, info] : physics.items())
-        files[path] = info;
-    const auto content = directory / "content";
-    std::filesystem::create_directories(content);
-    size_t count = 0, total = 0;
-    for (const auto &[path, info] : files.items()) {
-        if (cancel && cancel->load()) throw std::runtime_error("Map download cancelled");
-        if (!safe_content_path(path)) throw std::runtime_error("Unsafe content path");
-        const auto size = info.at("size").get<size_t>();
-        if (size > limits.content_file || size > limits.content_total - total)
-            throw std::runtime_error("Map content is too large");
-        total += size;
-        const auto file_sha = info.at("sha256").get<std::string>();
-        progress("Map content " + std::to_string(++count) + "/" + std::to_string(files.size()));
-        emit({"content", "Checking map content", 0, size, count, files.size()});
-        const auto object = asset(cache, file_sha, "/content/" + file_sha, size, cancel, emit, offline, fetch);
-        if (std::filesystem::file_size(object) != size) throw std::runtime_error("Content size mismatch");
-        const auto destination = content / data_location::from_utf8(path);
-        std::filesystem::create_directories(destination.parent_path());
-        std::filesystem::copy_file(object, destination, std::filesystem::copy_options::overwrite_existing);
-    }
-    save(directory / "manifest.json", manifest_bytes);
-    save(index, detail_bytes);
-    emit({"renderer",
-          offline ? "Loading cached map into renderer" : "Loading native renderer",
-          0,
-          0,
-          files.size(),
-          files.size(),
-          offline,
-          offline});
-    progress("Loading native renderer");
-    return {id, bsp, content, std::move(detail)};
+    MapTransfer transfer{id, cache, progress, cancel, limits, detail_progress, fetch, false, {}};
+    return transfer.run();
 }
 
 // Optional Valve sound content stays in the verified object cache, outside the

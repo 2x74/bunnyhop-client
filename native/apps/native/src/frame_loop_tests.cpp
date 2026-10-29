@@ -8,6 +8,7 @@
 #include "menu_state.hpp"
 #include "menu_room_state.hpp"
 #include "start_point.hpp"
+#include "graphics_settings.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -89,6 +90,36 @@ void test_disabled_diagnostics_record_nothing() {
         diagnostics.mark(native::FrameDiagnostics::kPump, now + ms);
     }
     assert(diagnostics.last().frames == 0);
+}
+
+void test_game_cap_uses_precise_sleep_only_while_playing() {
+    native::GraphicsMenuPacer pacer;
+    pacer.game_limit = 1000;
+    uint64_t ordinary = 0, precise = 0;
+    const auto delay = [&](uint64_t ns) {
+        ordinary += ns;
+    };
+    const auto precise_delay = [&](uint64_t ns) {
+        precise += ns;
+    };
+    // The caller includes pump, menu, simulation and rendering in the spent time.
+    pacer.frame(true, false, true, false, false, true, false, .0008, delay, precise_delay);
+    assert(precise >= 199999 && precise <= 200001 && ordinary == 0);
+    precise = 0;
+    pacer.frame(true, false, true, false, false, true, false, .0011, delay, precise_delay);
+    assert(precise == 0 && ordinary == 0);
+    pacer.frame(true, false, false, false, false, false, false, 0, delay, precise_delay);
+    assert(ordinary == 10000000 && precise == 0);
+    ordinary = 0;
+    pacer.limit = 30;
+    pacer.frame(true, false, true, false, false, false, true, 0, delay, precise_delay);
+    assert(ordinary > 33000000 && precise == 0);
+    ordinary = 0;
+    pacer.frame(true, false, true, false, true, true, false, 0, delay, precise_delay);
+    assert(ordinary == 0 && precise == 0);
+    pacer.game_limit = 0;
+    pacer.frame(true, false, true, false, false, true, false, 0, delay, precise_delay);
+    assert(ordinary == 0 && precise == 0);
 }
 
 struct FakeGl {
@@ -315,6 +346,7 @@ void test_settings_replace_has_no_missing_destination() {
 
 int main() {
     test_frame_phases_and_stalls();
+    test_game_cap_uses_precise_sleep_only_while_playing();
     test_input_window_counts();
     test_disabled_diagnostics_record_nothing();
     test_frame_pacer_waits_for_the_previous_frame();

@@ -472,6 +472,9 @@ impl Decoded {
         if flags & crate::v29::FLAG_TIMED_INPUT != 0 {
             metadata["timedInput"] = true.into();
         }
+        if flags & crate::v29::FLAG_NULL_BINDS != 0 {
+            metadata["nullBinds"] = true.into();
+        }
         let info = CString::new(metadata.to_string()).map_err(|e| e.to_string())?;
         let options = BhRunOptions {
             prespeed_cap: cap.max(0.0),

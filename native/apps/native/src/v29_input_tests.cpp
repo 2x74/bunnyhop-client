@@ -71,7 +71,7 @@ struct Fixture {
         std::filesystem::remove_all(directory, error);
     }
 
-    std::filesystem::path record(const char *name, bool timed, bool contribute) {
+    std::filesystem::path record(const char *name, bool timed, bool contribute, bool null_binds = false) {
         BhRunOptions options{};
         bh_default_run_options(&options);
         check(bh_run_configure(core.get(), &options, zones.data(), zones.size()), core.get());
@@ -80,6 +80,9 @@ struct Fixture {
         check(bh_record_begin(core.get(), "", "autohop", "test", 100), core.get());
         native::RecordingInput recording;
         check(recording.begin(core.get(), {300, 2.5}), core.get());
+        if (null_binds) {
+            check(recording.mark_null_binds(core.get()), core.get());
+        }
         native::Input input;
         input.set_angles(0, 0);
         native::InputTimeline timeline;
@@ -125,7 +128,7 @@ struct Fixture {
         BhState state{};
         check(bh_step_look_v2(core.get(), &command, &*look, &state), core.get());
         if (tick == 1) {
-            BhRecordOptionsV29 changed{1, sizeof(BhRecordOptionsV29), 301, 2.5, 0};
+            BhRecordOptionsV29 changed{1, sizeof(BhRecordOptionsV29), 301, 2.5, 0, 0};
             assert(!bh_record_options_v29(core.get(), &changed));
         }
     }
@@ -172,6 +175,17 @@ void test_recording_options_roundtrip() {
             assert(bool(raw.at(6) & BH_FLAG_TIMED_INPUT) == (timed && contribute));
         }
     }
+}
+
+// A run with null binds stays ranked, as on the website: only the header flag records them.
+void test_null_binds_recorded_in_header() {
+    Fixture fixture;
+    const auto plain = fixture.record("plain.bhr", true, true);
+    assert(!fixture.header(plain).contains("nullBinds"));
+    assert(!(decompress(plain).at(6) & BH_FLAG_NULL_BINDS));
+    const auto nulls = fixture.record("nulls.bhr", true, true, true);
+    assert(fixture.header(nulls).value("nullBinds", false));
+    assert(decompress(nulls).at(6) & BH_FLAG_NULL_BINDS);
 }
 
 void test_turn_settings_validation() {
@@ -535,6 +549,7 @@ int main() {
     test_invalid_start_point_preserves_default_spawn();
     test_replay_library_cache();
     test_recording_options_roundtrip();
+    test_null_binds_recorded_in_header();
     test_turn_settings_validation();
     test_practice_takeover();
     test_practice_rejection_replies();

@@ -2,6 +2,7 @@
 // Runtime Source animation evaluator. Mirrors web player/studio/{pose,animstate}.ts.
 // Original decoded animations are shared; every actor keeps independent transition/feet/fire state.
 #include "nlohmann/json.hpp"
+#include "actor_gestures.hpp"
 #include <vector>
 #include <array>
 #include <string>
@@ -9,6 +10,7 @@
 #include <cmath>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 
 namespace native_actor_anim {
@@ -406,9 +408,10 @@ struct Input {
     bool ducking = false, grounded = true, jumped = false;
 };
 
-// Onboarding-only acting, in degrees. Gameplay callers leave it null.
+// Acting for the onboarding scenes and avatar pictures, in degrees. Gameplay callers leave it null.
 struct Acting {
     double chestPitch = 0, chestYaw = 0, chestRoll = 0, headPitch = 0, headYaw = 0, headRoll = 0, earL = 0, earR = 0;
+    native_gestures::Gesture gesture;
 };
 
 struct Ear {
@@ -474,6 +477,7 @@ struct State {
     bool jumping = false, firstJump = false, feetInit = false;
     Transition main, idle, run;
     std::array<Blend, 4> layers;
+    std::optional<native_gestures::Rig> gestureRig;
     int px, py, pYaw, pPitch;
 
     explicit State(const Data &d)
@@ -678,87 +682,14 @@ struct State {
     }
 
     void actingPose(const Acting &a, V &out) {
-        const auto bind = d.rig["bind"].get<V>();
-        const auto parents = d.rig["parent"].get<std::vector<int>>();
-        const int count = d.rig["csBones"];
-        auto turn = [&](const char *name, double pitch, double yaw, double roll) {
-            int bone = -1;
-            for (int i = 0; i < count; i++)
-                if (d.rig["names"][i] == name) bone = i;
-            if (bone < 0 || (!pitch && !yaw && !roll)) return;
-            const double rad = 3.141592653589793 / 180, x = pitch * rad, y = -roll * rad, z = yaw * rad;
-            const float X[12] = {
-                    1,
-                    0,
-                    0,
-                    0,
-                    0,
-                    float(std::cos(x)),
-                    float(-std::sin(x)),
-                    0,
-                    0,
-                    float(std::sin(x)),
-                    float(std::cos(x)),
-                    0
-            };
-            const float Y[12] = {
-                    float(std::cos(y)),
-                    0,
-                    float(std::sin(y)),
-                    0,
-                    0,
-                    1,
-                    0,
-                    0,
-                    float(-std::sin(y)),
-                    0,
-                    float(std::cos(y)),
-                    0
-            };
-            const float Z[12] = {
-                    float(std::cos(z)),
-                    float(-std::sin(z)),
-                    0,
-                    0,
-                    float(std::sin(z)),
-                    float(std::cos(z)),
-                    0,
-                    0,
-                    0,
-                    0,
-                    1,
-                    0
-            };
-            float local[12], tmp[12], T[12]{}, M[12]{};
-            concat(Z, X, tmp);
-            concat(tmp, Y, local);
-            const float *S = out.data() + bone * 12;
-            for (int r = 0; r < 3; r++)
-                for (int c = 0; c < 3; c++)
-                    for (int k = 0; k < 3; k++)
-                        T[r * 4 + c] += S[r * 4 + k] * local[k * 4 + c];
-            for (int r = 0; r < 3; r++)
-                for (int c = 0; c < 3; c++)
-                    for (int k = 0; k < 3; k++)
-                        M[r * 4 + c] += T[r * 4 + k] * S[c * 4 + k];
-            double pivot[3];
-            for (int r = 0; r < 3; r++)
-                pivot[r] = S[r * 4] * bind[bone * 12 + 3] + S[r * 4 + 1] * bind[bone * 12 + 7]
-                           + S[r * 4 + 2] * bind[bone * 12 + 11] + S[r * 4 + 3];
-            for (int r = 0; r < 3; r++) {
-                M[r * 4 + 3] = float(pivot[r]);
-                for (int k = 0; k < 3; k++)
-                    M[r * 4 + 3] -= float(M[r * 4 + k] * pivot[k]);
-            }
-            for (int i = 0; i < count; i++) {
-                int parent = i;
-                while (parent >= 0 && parent != bone)
-                    parent = parents[parent];
-                if (parent == bone) concat(M, out.data() + i * 12, out.data() + i * 12);
-            }
-        };
-        turn("ValveBiped.Bip01_Spine2", a.chestPitch, a.chestYaw, a.chestRoll);
-        turn("ValveBiped.Bip01_Head1", a.headPitch, a.headYaw, a.headRoll);
+        if (!gestureRig) gestureRig.emplace(d.rig);
+        const auto &rig = *gestureRig;
+        if (!rig.valid()) return;
+        const double lookYaw = eyeYaw - feetYaw;
+        native_gestures::square_chest(rig, a.gesture.square, lookYaw, out);
+        native_gestures::turn_about(rig, rig.chest, a.chestPitch, a.chestYaw, a.chestRoll, rig.chest_subtree, out);
+        native_gestures::turn_about(rig, rig.head, a.headPitch, a.headYaw, a.headRoll, rig.head_subtree, out);
+        native_gestures::pose_arms(rig, a.gesture, lookYaw, out);
     }
 
     void earPose(const Input &s, double dt, bool snap, V &out, const Acting *acting = nullptr) {

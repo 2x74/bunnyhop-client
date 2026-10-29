@@ -9,7 +9,7 @@
 #include "hud_smoke.hpp"
 #include "replay_player.hpp"
 #include "menu_webview.hpp"
-#include "map_jobs.hpp"
+#include "map_download.hpp"
 #include "data_location.hpp"
 #include <fstream>
 #include <iostream>
@@ -206,6 +206,8 @@ void MenuSmoke::snapshot(const nlohmann::json &message) {
 
 void MenuSmoke::frame(Clock::time_point now, Clock::time_point started) {
     auto &context = *context_;
+    if (!opt.menu_smoke.empty() && !opt.online_map.empty() && context.menu && context.menu_ready && !map_requested)
+        request_map();
     const bool smoke_backdrop = opt.menu_home_smoke
                                         ? !context.game.renderer && context.backdrop
                                                   && ((context.backdrop->status() == MenuBackdrop::Status::ready
@@ -227,6 +229,14 @@ void MenuSmoke::frame(Clock::time_point now, Clock::time_point started) {
                 + ", shown=" + context.backdrop_shown + ", requested=" + std::to_string(requested)
                 + ", snapshot=" + std::to_string(snapshot_pending) + "): " + context.error
         );
+}
+
+void MenuSmoke::request_map() {
+    map_requested = true;
+    const nlohmann::json message = {{"type", "selectMap"}, {"id", opt.online_map}, {"style", opt.style}, {"track", 0}};
+    context_->menu->evaluate_js(
+            "window.webkit.messageHandlers.bunnyhop.postMessage(" + nlohmann::json(message.dump()).dump() + ")"
+    );
 }
 
 void MenuSmoke::request() {

@@ -62,6 +62,11 @@ impl ReplayData {
         } else {
             0
         };
+        let null_binds_flag = if options.null_binds != 0 {
+            crate::v29::FLAG_NULL_BINDS
+        } else {
+            0
+        };
         let h = &self.header;
         let settings = &h["settings"];
         let flag = |key: &str| settings[key].as_bool().unwrap_or(false);
@@ -104,6 +109,7 @@ impl ReplayData {
             u16::from(flag("autohop"))
                 | (u16::from(flag("stamina")) << 1)
                 | (u16::from(version >= 9 && counted.is_some()) << 2)
+                | null_binds_flag
                 | timed_input_flag,
         );
         w.str8(h["map"].as_str().ok_or("missing map")?)?;

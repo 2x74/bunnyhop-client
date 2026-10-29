@@ -9,6 +9,8 @@ struct Actor {
     std::string outfit, loadout;
     float opacity = .45f;
     bool silenced = false, jumped = false, inspectHeld = false, snapped = false;
+    // Nothing in the right hand (an avatar gesture): no knife or gun drawn.
+    bool emptyHand = false;
     unsigned attack = 0, inspect = 0;
     std::optional<Glow> playerGlow;
     GhostSource source = GhostSource::none;

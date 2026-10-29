@@ -87,7 +87,14 @@ in the menu, which forwards what the HUD shows:
   Replies for another run, map, style or track are ignored.
 
 The menu sends these from `ui/run-rewards.ts` and `ui/hud-leaderboard.ts`. Neither affects recording or
-verification. The v0.0.29 integration notes list the settings, practice, replay and video messages.
+verification.
+
+Account → Edit avatar is the website's avatar editor (`ui/avatar-editor.ts`). The menu has no WebGL, so it sends
+`avatarRender` with the spec, its packed loadout and backdrop, and the host poses and draws the bunny offscreen
+(`src/avatar_service.hpp`), answering `bunnyhopNativeAvatar({id, png | webp | saved | error})`. The saved picture is a
+256 px lossless WebP that the menu posts with the game's own session; Download PNG writes to the Downloads folder.
+Pose data comes from the vendored `avatar/stage.ts` (`src/export-avatar.ts`); `ui/avatar-stage-sync.test.ts` flags
+the numbers native mirrors when a re-sync changes them. The v0.0.29 integration notes list the settings, practice, replay and video messages.
 
 Settings are the website's settings screen. `ui/settings-gates.ts` places every website row: shown, waiting for a
 host setting, switched off where the native renderer has its own version, or left out with the reason.
@@ -122,6 +129,42 @@ apps/native/build/bunnyhop-native --map /path/to/map.bsp --hidden --frames 30 --
 apps/native/build/bunnyhop-native --map /path/to/map.bsp --no-menu --hidden --presentation-smoke /tmp/hud
 ```
 
+Profile a full offline gameplay workload without capturing the mouse or opening a menu:
+
+```sh
+# Run from native/. Build with CMake or the regular build above.
+apps/native/build/bunnyhop-native-gameplay-benchmark /path/to/spec.json
+```
+
+The spec is JSON, for example:
+
+```json
+{
+  "path": "/path/to/bhop_neonlaser.bsp",
+  "out": "target/gameplay-profile.json",
+  "width": 1920,
+  "height": 1080,
+  "eye": [-8480, 32, 96],
+  "yaw": 0,
+  "frames": 3000,
+  "warmup": 300,
+  "mouseHz": 2000,
+  "ghosts": 3,
+  "fpsLimit": 0,
+  "vsync": false,
+  "limitQueuedFrames": true
+}
+```
+
+Use a camera inside the supplied map; omit `eye` and `yaw` to use its spawn. Optional `contentRoot` supplies loose
+Source assets. The report includes p50/p99/max/mean milliseconds and reciprocal mean FPS for each phase, frame
+samples, renderer counters, rasterizations, GPU/driver and SDL version. Warmup frames are excluded. Pump time
+includes synthetic input and per-report diagnostics; simulation includes recording; feedback includes SSJ and the
+trainer. The HUD, chat, 12-player scoreboard, three cached ghost fixtures, frame diagnostics, swap and GPU fence
+are active. Rendering uses Source look, simple water and no MSAA. `ordinarySleep: true` compares the old sleep
+method when capped. No menu, audio or network is created, and no replay is saved or submitted. Hidden-window swap
+measures throughput and pacing; a real display and mouse are needed for input latency and focus checks.
+
 Check the recorder against the shared verifier with an offline fixture. It never posts to the live server:
 
 ```sh
@@ -131,6 +174,9 @@ bun apps/native/tools/record-proof.ts --map /path/to/map.bsp --replay /path/to/r
 
 Linux checks run in Docker with `apps/native/tools/verify-linux.sh` (`WITH_CLIENT=1` adds SDL/OpenGL under Xvfb).
 Headless runs don't test a real mouse; input changes need a check on the target OS.
+
+`--menu-smoke OUTPUT_PREFIX --online-map NAME --hidden` sends the map selection through the menu's host bridge.
+It uses a private data folder at `OUTPUT_PREFIX/data` and never submits scores.
 
 ## Notices
 

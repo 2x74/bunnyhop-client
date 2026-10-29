@@ -25,6 +25,7 @@
 #include "replay_player.hpp"
 #include "menu_backdrop.hpp"
 #include "loadout_preview.hpp"
+#include "avatar_service.hpp"
 #include "menu_gamepad.hpp"
 #include "hud.hpp"
 #include "hud_frame.hpp"
@@ -43,7 +44,7 @@
 #include "replay_controls.hpp"
 #include "render_menu_contracts.hpp"
 #include "render_capabilities.hpp"
-#include "map_jobs.hpp"
+#include "map_download.hpp"
 #include "ssj.hpp"
 #include "strafe_trainer.hpp"
 #include "audio.hpp"
@@ -162,6 +163,7 @@ int run(const native::Options &opt) {
     native::MenuGamepad menu_gamepad;
     std::unique_ptr<NativeLoadoutPreview> loadout_preview;
     std::optional<nlohmann::json> preview_request;
+    native::avatar::AvatarService avatar_service(gl, assets);
     native::NativeHud::Layout hud_layout;
     // Resolved before the audio device so the custom sound/ and bgm/ folders
     // are known at the point the packs are first applied.
@@ -191,8 +193,8 @@ int run(const native::Options &opt) {
     }
     if (!menu && opt.map.empty() && opt.online_map.empty())
         throw std::runtime_error("Menus are unavailable on this build; use --map PATH or --online-map NAME");
-    // Every download_map call shares one content cache whose temporary names
-    // are deterministic, so downloads take turns. Waiting gives up once its
+    // Every download_map call materializes files in the same content cache,
+    // so downloads take turns. Waiting gives up once its
     // own download is cancelled, so neither worker can hold up shutdown.
     std::mutex cache_mutex;
     auto lock_cache = [&cache_mutex](const std::atomic_bool &cancel) {
@@ -321,7 +323,6 @@ int run(const native::Options &opt) {
     auto &video_music_catalog = video.music_catalog;
     auto cancel_video = std::bind_front(&native::VideoController::cancel, &video);
     auto video_state = std::bind_front(&native::VideoController::state, &video);
-    std::string pending_room_map;
     double display_fps = 0;
     native::TutorialRunner tutorial_runner;
     tutorial_runner.load_progress(cache);
@@ -415,10 +416,13 @@ int run(const native::Options &opt) {
         }
     };
     apply_preferences();
-    std::string loading, error, last_requested_map;
+    native::MapDownload map_download;
+    auto &loading = map_download.loading;
+    auto &last_requested_map = map_download.requested;
+    auto &load_progress = map_download.progress;
+    std::string error;
     native::ReplayLibrary replay_library(cache);
     native::RunVault run_vault(cache / "run-vault");
-    nlohmann::json load_progress = nullptr;
     const auto identity = native::load_release_identity(manifest_path, menu_path, assets);
     native::updates::Service updater(
             nlohmann::json::parse(native::update_config_json),
@@ -454,10 +458,10 @@ int run(const native::Options &opt) {
     };
     native::RunHeartbeat heartbeat;
     auto &zones = game.zones;
-    std::mutex progress_mutex;
-    native::MapJobs<native::DownloadedMap> download;
+    auto &progress_mutex = map_download.mutex;
+    auto &download = map_download.jobs;
     native::MapJobs<bool> prefetch;
-    bool map_preparing = false;
+    auto &map_preparing = map_download.preparing;
     std::string prefetch_map, prefetch_sha, prefetch_active, prefetch_done;
     auto cancel_prefetch = [&]() {
         prefetch.cancel();
@@ -560,11 +564,11 @@ int run(const native::Options &opt) {
     auto close_chat = [&]() {
         chat_drag = false;
         chat.close();
+        SDL_StopTextInput(window.get());
         if (captured && focused && (!menu || !menu->visible())) {
             SDL_SetWindowRelativeMouseMode(window.get(), true);
             native::set_raw_keyboard(true);
         }
-        SDL_StopTextInput(window.get());
         input_timeline.release(input, held_codes);
         camera_controls.clear();
     };
@@ -786,16 +790,10 @@ int run(const native::Options &opt) {
         viewer.orbit_drag = false;
         show_menu(true);
         if (menu && menu_ready) menu->evaluate_js("window.bunnyhopNativeMenu?.onLeaveMap?.()");
-        download.cancel();
+        map_download.cancel();
         cancel_prefetch();
-        {
-            std::lock_guard lock(progress_mutex);
-            loading.clear();
-            load_progress = nullptr;
-        }
         pending_replay.clear();
         pending_action.clear();
-        pending_room_map.clear();
         pending_tutorial.clear();
         tutorial_runner.stopped = true;
         replay_compare.clear();
@@ -898,7 +896,7 @@ int run(const native::Options &opt) {
     };
     auto request_map = [&](const std::string &id) {
         if (!opt.runtime_smoke.empty()) throw std::runtime_error("Offline runtime smoke attempted a map download");
-        if (download.valid()) throw std::runtime_error("A map is already loading");
+        if (map_download.loading_map(id)) return;
         if (!native::valid_map_id(id)) throw std::runtime_error("Invalid map name");
         cancel_prefetch();
         error.clear();
@@ -908,42 +906,7 @@ int run(const native::Options &opt) {
         // A background still downloading gives way; one already on screen
         // stays until this map has loaded.
         if (backdrop) backdrop->cancel_loading();
-        last_requested_map = id;
-        map_preparing = false;
-        {
-            std::lock_guard lock(progress_mutex);
-            loading = "Reading " + id;
-            load_progress = {{"map", id}, {"stage", "metadata"}, {"message", loading}};
-        }
-        download.start([&, id](const std::atomic_bool &cancel) {
-            const auto lock = lock_cache(cancel);
-            return native::download_map(
-                    id,
-                    cache,
-                    [&](const std::string &message) {
-                        std::lock_guard lock(progress_mutex);
-                        if (!cancel) loading = message;
-                    },
-                    &cancel,
-                    {},
-                    [&, id](const native::LoadProgress &p) {
-                        std::lock_guard lock(progress_mutex);
-                        if (cancel) return;
-                        loading = p.message;
-                        load_progress = {
-                                {"map", id},
-                                {"stage", p.stage},
-                                {"message", p.message},
-                                {"received", p.received},
-                                {"total", p.total},
-                                {"filesDone", p.filesDone},
-                                {"filesTotal", p.filesTotal},
-                                {"cached", p.cached},
-                                {"offline", p.offline}
-                        };
-                    }
-            );
-        });
+        map_download.start(id, cache, lock_cache);
     };
     auto apply_room_event = [&](const nlohmann::json &message) {
         const auto next = room.event(message);
@@ -958,14 +921,13 @@ int run(const native::Options &opt) {
             if (tainted && core) reset();
         }
         apply_room_mode(room_modes.event(message, map_id, room.spectator_target.has_value(), epoch_ms()));
-        if (room.id.empty()) pending_room_map.clear();
-        if (!next.empty() && native::valid_map_id(next) && next != map_id) {
-            if (download.valid())
-                pending_room_map = next;
-            else {
-                active_track = 0;
-                request_map(next);
-            }
+        if (!next.empty() && native::valid_map_id(next) && (next != map_id || download.valid())) {
+            pending_replay.clear();
+            pending_action.clear();
+            pending_tutorial.clear();
+            pending_tutorial_demo = false;
+            active_track = 0;
+            request_map(next);
         }
     };
     native::ReplayMetadata replay_metadata;
@@ -1524,7 +1486,7 @@ int run(const native::Options &opt) {
                 detail
         );
     }
-    if (!opt.online_map.empty()) request_map(opt.online_map);
+    if (!opt.online_map.empty() && opt.menu_smoke.empty()) request_map(opt.online_map);
     if (tutorial_runner.lesson) {
         const auto lesson = pending_tutorial.empty() ? "jump" : pending_tutorial;
         start_tutorial(lesson, pending_tutorial_demo);
@@ -1564,7 +1526,6 @@ int run(const native::Options &opt) {
                         zones,
                         pending_replay,
                         pending_action,
-                        pending_room_map,
                         pending_tutorial,
                         dt},
                        {load_map,
@@ -1606,6 +1567,7 @@ int run(const native::Options &opt) {
     );
     video_smoke.begin();
     while (running) {
+        const auto frame_started = Clock::now();
         frame_diagnostics.start_frame(SDL_GetTicksNS(), prefs.mouse_diagnostics);
         recorder.diagnostics.frame(SDL_GetTicksNS(), input_timeline.queue());
         if (const auto failure = json_writer.take_error()) {
@@ -1677,11 +1639,15 @@ int run(const native::Options &opt) {
                 case SDL_EVENT_KEY_DOWN:
                 case SDL_EVENT_KEY_UP: {
                     const bool down = event.type == SDL_EVENT_KEY_DOWN;
-                    const bool repeat = input_timeline.key_repeat(event.key.scancode, down, event.key.repeat);
                     const bool menu_shown = menu && menu->visible();
-                    if (!native::game_owns_keyboard(menu_shown, menu && menu->supports_backdrop())) {
-                        break;
-                    }
+                    const auto routed = input_timeline.key_event(
+                            event.key.scancode,
+                            down,
+                            event.key.repeat,
+                            native::game_owns_keyboard(menu_shown, menu && menu->supports_backdrop())
+                    );
+                    if (!routed) break;
+                    const bool repeat = *routed;
                     if (down && !repeat && event.key.scancode == SDL_SCANCODE_F10) {
                         show_menu(true);
                         if (!menu) toast(native::menu_unavailable_text(menu_failure), 6000);
@@ -1971,6 +1937,14 @@ int run(const native::Options &opt) {
                         if (menu->visible() && raw.size() <= 8192) preview_request = std::move(message);
                         continue;
                     }
+                    if (type == "avatarRender") {
+                        avatar_service.request(message);
+                        continue;
+                    }
+                    if (type == "avatarClose") {
+                        avatar_service.close();
+                        continue;
+                    }
                     if (type == "practiceFromReplay" && (video_capture || director_job || video_encoder.busy())) {
                         menu->evaluate_js(
                                 "window.bunnyhopNativeMenu?.onPracticeFromReplayResult?.("
@@ -2188,17 +2162,11 @@ int run(const native::Options &opt) {
                     } else if (type == "mapLoad") {
                         const auto action = message.at("action").get<std::string>();
                         if (action == "cancel") {
-                            download.cancel();
+                            map_download.cancel();
                             pending_replay.clear();
                             pending_action.clear();
                             pending_tutorial.clear();
                             pending_tutorial_demo = false;
-                            pending_room_map.clear();
-                            {
-                                std::lock_guard lock(progress_mutex);
-                                loading.clear();
-                                load_progress = nullptr;
-                            }
                             error.clear();
                             if (core) reset();
                             if (backdrop && !core && backdrop->resume()) {
@@ -2304,6 +2272,10 @@ int run(const native::Options &opt) {
                         selected_style = style;
                         active_track = message.value("track", 0u);
                         if (active_track > 64) throw std::runtime_error("Invalid track");
+                        pending_replay.clear();
+                        pending_action.clear();
+                        pending_tutorial.clear();
+                        pending_tutorial_demo = false;
                         request_map(message.at("id").get<std::string>());
                     } else if (type == "style") {
                         if (!gauntlet_id.empty())
@@ -2736,22 +2708,29 @@ int run(const native::Options &opt) {
             map_preparing = false;
             try {
                 auto result = download.get();
-                load_map(
-                        native::data_location::utf8(result.bsp),
-                        native::data_location::utf8(result.content_root),
-                        result.id,
-                        result.detail
-                );
+                if (result.map)
+                    load_map(
+                            native::data_location::utf8(result.map->bsp),
+                            native::data_location::utf8(result.map->content_root),
+                            result.map->id,
+                            result.map->detail
+                    );
+                else
+                    error = result.error;
             } catch (const std::exception &e) {
+                error = e.what();
+            }
+            if (!error.empty()) {
                 pending_replay.clear();
                 pending_action.clear();
                 pending_tutorial.clear();
                 pending_tutorial_demo = false;
-                const std::string failure = e.what();
+                const auto failure = error;
                 if (core) reset();
                 error = failure;
-                std::cerr << error << '\n';
-                if (!menu || opt.frames) throw;
+                std::cerr << "Map load " << last_requested_map << ": " << error << '\n';
+                toast(error);
+                if (!menu || opt.frames) throw std::runtime_error(error);
                 // Back on the home screen: restart the tour this download interrupted.
                 if (backdrop && !core && backdrop->resume()) {
                     backdrop_shown.clear();
@@ -2790,13 +2769,6 @@ int run(const native::Options &opt) {
                     error = failure.what();
                 }
             }
-            if (!pending_room_map.empty() && pending_room_map != map_id) {
-                const auto next = pending_room_map;
-                pending_room_map.clear();
-                active_track = 0;
-                request_map(next);
-            } else
-                pending_room_map.clear();
             if (!menu && core && !opt.hidden) capture(true);
         }
         if (!running) break;
@@ -2823,6 +2795,9 @@ int run(const native::Options &opt) {
                 };
                 menu->evaluate_js("window.bunnyhopNativeLoadoutPreview?.(" + result.dump() + ")");
             }
+            if (menu->visible()) avatar_service.frame();
+            for (const auto &reply : avatar_service.take_replies())
+                menu->evaluate_js(reply);
         }
         const auto now = Clock::now();
         const uint64_t now_ns = SDL_GetTicksNS();
@@ -2943,10 +2918,8 @@ int run(const native::Options &opt) {
                 }
                 if (native::apply_null_binds(
                             input, input_timeline, hud.preferences().null_binds, active_style, practice.active
-                    )
-                    && turn_admission.observe(1, true)) {
-                    run_event(heartbeat.invalidate(native::RunHeartbeat::Reset::generation));
-                    score_notice = "Null binds: local replay only";
+                    )) {
+                    require(recorder.input.mark_null_binds(core.get()), core.get(), "Marking null binds recording");
                 }
                 cmd = input.command();
                 if (practice.noclip) {
@@ -3930,8 +3903,9 @@ int run(const native::Options &opt) {
                 bool(opt.frames),
                 captured,
                 menu && menu->visible(),
-                std::chrono::duration<double>(Clock::now() - now).count(),
-                SDL_DelayNS
+                std::chrono::duration<double>(Clock::now() - frame_started).count(),
+                SDL_DelayNS,
+                SDL_DelayPrecise
         );
         frame_diagnostics.mark(native::FrameDiagnostics::kSleep, SDL_GetTicksNS());
     }
