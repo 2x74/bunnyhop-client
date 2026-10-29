@@ -161,7 +161,11 @@ function validIdentity(value: Record<string, unknown>): value is Record<string, 
     /^bunnyhop-web\/[0-9a-f]{12}$/.test(value.wasm)
   );
 }
-export function nativeBuildAllowed(policy: VersionPolicy, event: Identity, now: number): boolean {
+export function nativeBuildAllowed(
+  policy: VersionPolicy,
+  event: Pick<Identity, "build" | "wasm">,
+  now: number,
+): boolean {
   if (policy.wasm !== event.wasm || !Array.isArray(policy.native)) return false;
   const entries = policy.native.filter((value) => value && typeof value === "object" && value.build === event.build);
   if (entries.length !== 1) return false; // ambiguous identities fail closed

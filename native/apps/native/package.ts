@@ -324,6 +324,7 @@ if (import.meta.main) {
       licenses: { type: "string", multiple: true },
       release: { type: "boolean" },
       "require-platform-signing": { type: "boolean" },
+      "update-test-hooks": { type: "boolean" },
     },
   });
   try {
@@ -356,6 +357,9 @@ if (import.meta.main) {
       root,
       values.binary ?? `apps/native/build/bunnyhop-native${platform === "win32" ? ".exe" : ""}`,
     );
+    const testHooks = hasUpdateTestHooks(sourceBinary);
+    if (testHooks && !values["update-test-hooks"])
+      throw new Error("This binary was built with BUNNYHOP_UPDATE_TEST_HOOKS and can't be released");
     const packageRoot = platform === "darwin" ? join(stage, MAC_APP) : stage;
     const executable =
       platform === "darwin"
@@ -540,7 +544,7 @@ if (import.meta.main) {
       signing,
       notarized,
       ...(minimumSupportedOS ? { minimumSupportedOS } : {}),
-      releaseEligible: true,
+      releaseEligible: !testHooks,
       platformSigned:
         platform === "darwin" ? signing === "developer-id" : platform === "win32" ? signing === "authenticode" : false,
     };
@@ -550,6 +554,11 @@ if (import.meta.main) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
+}
+
+// A test-hook build reads its update trust from the environment; the variable's name is in the binary.
+export function hasUpdateTestHooks(binary: string): boolean {
+  return readFileSync(binary).includes("BUNNYHOP_UPDATE_TEST_TRUST");
 }
 
 function verifyZipEntryNames(listing: string): void {
