@@ -4,6 +4,7 @@
 #include "native_math.hpp"
 #include "render_shaders.hpp"
 #include "render_math.hpp"
+#include "water_capture.hpp"
 #include "ghost_trails.hpp"
 #include "graphics_settings.hpp"
 #include "paint.hpp"
@@ -183,6 +184,7 @@ inline GLuint link_program(Gl &gl, const char *vertex_source, const char *fragme
 #include "native_map_effects.hpp"
 // Standard headers must be included at file scope before these GL-dependent definitions.
 #include "source_hdr.hpp"
+#include "water_reflection.hpp"
 
 class GhostRouteGeometry {
     Gl &gl;
@@ -296,7 +298,7 @@ class Renderer {
 
     struct FrameProfile {
         double lightmapRefresh = 0, lightmapUpload = 0, sky = 0, buildCull = 0, sort = 0, submit = 0, presentation = 0,
-               hdrFinish = 0;
+               hdrFinish = 0, waterReflection = 0;
         double floorReport = 0, floorDraw = 0, actorDraw = 0, presentationBuild = 0, presentationWaterUniforms = 0,
                presentationSubmit = 0, viewmodel = 0;
         uint64_t groups = 0, survivors = 0, drawCalls = 0, triangles = 0, atlasUpdateBytes = 0, floorCount = 0;
@@ -324,6 +326,13 @@ class Renderer {
     GLuint refractColor = 0, refractDepth = 0;
     int refractWidth = 0, refractHeight = 0, waterQuality = 1;
     bool hasWaterMaterials = false, waterBeneathFaces = false;
+    // The Source look's water captures (water_capture.hpp). sceneCaptured: the scene pass being drawn has refraction.
+    native_render::WaterCapturePlanner waterPlanner;
+    native_render::WaterCapturePlan waterPlan;
+    std::unique_ptr<WaterReflectionTarget> waterReflection;
+    bool reflectionDrawn = false, sceneCaptured = false;
+    static constexpr float no_clip_height = -1e30f;
+    float clipHeight = no_clip_height;
     GLuint program = 0, skyProgram = 0, depthProgram = 0, emptyVao = 0, lightmap = 0, white = 0, checker = 0,
            planesTexture = 0;
     std::vector<GLuint> ownedTextures;
@@ -546,6 +555,25 @@ class Renderer {
         std::cout << "Native embedded normal textures: " << cached.size() << "\n";
     }
 
+    // Upward-facing world water, per cell, for the capture distance and plane choice (water_capture.hpp).
+    void load_water_cells(const float *vertices, const uint32_t *indices) {
+        constexpr size_t stride = 10, normal_z = 5;
+        native_render::WaterCellBuilder builder;
+        for (const auto &g : groups) {
+            if (g.sky3d || g.model || g.material >= materials.size() || g.material >= extras.size()) continue;
+            if (materials[g.material].kind != 2 || !extras[g.material].above_water) continue;
+            for (size_t t = g.first_index; t + 2 < size_t(g.first_index) + g.index_count; t += 3) {
+                std::array<native_render::Vec3, 3> corners;
+                for (int c = 0; c < 3; c++) {
+                    const size_t at = size_t(indices[t + c]) * stride;
+                    corners[c] = {vertices[at], vertices[at + 1], vertices[at + 2]};
+                }
+                builder.add_triangle(g.material, corners, vertices[size_t(indices[t]) * stride + normal_z]);
+            }
+        }
+        waterPlanner.load(builder.cells(), materials.size());
+    }
+
     Geometry geometry(
             const float *vertices,
             size_t floats,
@@ -612,6 +640,37 @@ class Renderer {
         return (m.flags & (1 | 8)) || m.kind == 2 || m.kind == 3 || m.alpha < 1;
     }
 
+    // Per-draw uniforms of the world program, looked up once: bind_material runs for every draw of every pass.
+    struct MaterialUniforms {
+        GLint model = -1, flatColor = -1, hasNormal = -1, hasSecondary = -1, hasDetail = -1, detailScale = -1;
+        GLint detailBlend = -1, tint = -1, opacity = -1, cutoff = -1, unlit = -1, props = -1, kind = -1;
+        GLint aboveWater = -1, captureReady = -1, waterFogEnd = -1, additive = -1;
+
+        void read(Gl &gl, GLuint program) {
+            const std::pair<GLint *, const char *> uniforms[] = {
+                    {&model, "model"},
+                    {&flatColor, "flatColor"},
+                    {&hasNormal, "hasNormal"},
+                    {&hasSecondary, "hasSecondary"},
+                    {&hasDetail, "hasDetail"},
+                    {&detailScale, "detailScale"},
+                    {&detailBlend, "detailBlend"},
+                    {&tint, "tint"},
+                    {&opacity, "opacity"},
+                    {&cutoff, "cutoff"},
+                    {&unlit, "unlit"},
+                    {&props, "props"},
+                    {&kind, "kind"},
+                    {&aboveWater, "aboveWater"},
+                    {&captureReady, "captureReady"},
+                    {&waterFogEnd, "waterFogEnd"},
+                    {&additive, "additive"},
+            };
+            for (const auto &[location, name] : uniforms)
+                *location = gl.GetUniformLocation(program, name);
+        }
+    } materialUniforms;
+
     void bind_material(uint32_t index, bool prop) {
         const BhMaterial fallback = {-1, 1, 0, 1, .5f, {1, 1, 1}};
         const auto &m = index < materials.size() ? materials[index] : fallback;
@@ -619,7 +678,7 @@ class Renderer {
             const auto found = textureAverages.find(m.texture);
             const std::array<float, 3> fallbackColor = {.5f, .5f, .5f};
             gl.Uniform3fv(
-                    loc(program, "flatColor"),
+                    materialUniforms.flatColor,
                     1,
                     found == textureAverages.end() ? fallbackColor.data() : found->second.data()
             );
@@ -634,19 +693,24 @@ class Renderer {
         gl.BindTexture(GL_TEXTURE_2D, texture(e.detail, true));
         gl.ActiveTexture(GL_TEXTURE7);
         gl.BindTexture(GL_TEXTURE_2D, index < normals.size() && normals[index] ? normals[index] : white);
-        gl.Uniform1i(loc(program, "hasNormal"), graphics.material_response && index < normals.size() && normals[index]);
-        gl.Uniform1i(loc(program, "hasSecondary"), e.texture2 >= 0);
-        gl.Uniform1i(loc(program, "hasDetail"), e.detail >= 0 && !graphics.potato);
-        gl.Uniform1f(loc(program, "detailScale"), e.detail_scale);
-        gl.Uniform1f(loc(program, "detailBlend"), e.detail_blend);
-        gl.Uniform3fv(loc(program, "tint"), 1, m.color);
-        gl.Uniform1f(loc(program, "opacity"), m.alpha);
-        gl.Uniform1f(loc(program, "cutoff"), (m.flags & 2) ? m.alpha_ref : 0);
-        gl.Uniform1i(loc(program, "unlit"), (m.flags & 16) != 0 || (!prop && lightmap == white));
-        gl.Uniform1i(loc(program, "props"), prop);
-        gl.Uniform1i(loc(program, "kind"), m.kind);
-        gl.Uniform1i(loc(program, "aboveWater"), e.above_water);
-        gl.Uniform1i(loc(program, "additive"), (m.flags & 8) != 0);
+        const bool hasNormal = graphics.material_response && index < normals.size() && normals[index];
+        gl.Uniform1i(materialUniforms.hasNormal, hasNormal);
+        gl.Uniform1i(materialUniforms.hasSecondary, e.texture2 >= 0);
+        gl.Uniform1i(materialUniforms.hasDetail, e.detail >= 0 && !graphics.potato);
+        gl.Uniform1f(materialUniforms.detailScale, e.detail_scale);
+        gl.Uniform1f(materialUniforms.detailBlend, e.detail_blend);
+        gl.Uniform3fv(materialUniforms.tint, 1, m.color);
+        gl.Uniform1f(materialUniforms.opacity, m.alpha);
+        gl.Uniform1f(materialUniforms.cutoff, (m.flags & 2) ? m.alpha_ref : 0);
+        gl.Uniform1i(materialUniforms.unlit, (m.flags & 16) != 0 || (!prop && lightmap == white));
+        gl.Uniform1i(materialUniforms.props, prop);
+        gl.Uniform1i(materialUniforms.kind, m.kind);
+        gl.Uniform1i(materialUniforms.aboveWater, e.above_water);
+        if (m.kind == 2) {
+            gl.Uniform1i(materialUniforms.captureReady, sceneCaptured && waterPlanner.ready(index));
+            gl.Uniform1f(materialUniforms.waterFogEnd, std::max(1.f, e.fog_end));
+        }
+        gl.Uniform1i(materialUniforms.additive, (m.flags & 8) != 0);
         const bool doubleSided = m.kind == 2 ? native_render::water_face_double_sided(waterBeneathFaces, e.above_water)
                                              : (m.flags & 4) != 0;
         if (doubleSided)
@@ -663,11 +727,12 @@ class Renderer {
 
     int viewportWidth = 1, viewportHeight = 1;
 
-    void water_uniforms(GLuint target, const float eye[3]) {
+    void water_uniforms(GLuint target, const float eye[3], const native::Matrix &vp) {
         gl.Uniform3fv(loc(target, "cameraPosition"), 1, eye);
-        std::vector<size_t> order;
-        std::vector<std::array<float, 4>> rects(volumes.size());
-        const auto vp = camera(eye, lastYaw, lastPitch, float(viewportWidth) / viewportHeight);
+        auto &order = waterOrder;
+        auto &rects = waterRects;
+        order.clear();
+        rects.resize(volumes.size());
         for (size_t i = 0; i < volumes.size(); i++)
             if (native_render::screen_rect({volumes[i].lo, volumes[i].hi}, vp, rects[i])) order.push_back(i);
         auto distance = [&](size_t i) {
@@ -746,13 +811,33 @@ class Renderer {
         gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, GLuint(draw_target));
     }
 
-    void draw_scene(const native::Matrix &vp, const float eye[3], bool sky, double time) {
+    struct Draw {
+        uint32_t material, first, count;
+        bool prop;
+        int32_t entity;
+        uint32_t model;
+        float distance;
+    };
+
+    // Reused by every scene pass (3D sky, reflection, world) so drawing doesn't allocate each frame.
+    std::vector<Draw> sceneDraws;
+    std::unordered_map<uint64_t, BhTransform> sceneTransforms;
+    std::vector<size_t> waterOrder;
+    std::vector<std::array<float, 4>> waterRects;
+
+    // reflection: the mirrored scene for the water reflection, without the water itself.
+    void draw_scene(const native::Matrix &vp, const float eye[3], bool sky, double time, bool reflection = false) {
         auto phaseStart = profile_now();
+        sceneCaptured = false;
         gl.UseProgram(program);
         gl.UniformMatrix4fv(loc(program, "viewProjection"), 1, GL_FALSE, vp.data());
-        water_uniforms(program, eye);
+        gl.Uniform1f(loc(program, "clipHeight"), clipHeight);
+        water_uniforms(program, eye, vp);
         gl.Uniform1f(loc(program, "timeSeconds"), time);
-        gl.Uniform1i(loc(program, "detailedWater"), waterQuality > 0 && !graphics.potato && !sky && hasWaterMaterials);
+        gl.Uniform1i(loc(program, "reflectionReady"), !sky && !reflection && reflectionDrawn);
+        gl.Uniform1f(loc(program, "reflectionHeight"), waterPlan.reflection_height.value_or(0));
+        gl.ActiveTexture(GL_TEXTURE8);
+        gl.BindTexture(GL_TEXTURE_2D, reflectionDrawn ? waterReflection->texture() : white);
         gl.Uniform1i(loc(program, "fullbright"), graphics.fullbright);
         gl.Uniform1i(loc(program, "potato"), graphics.potato);
         gl.Uniform1i(loc(program, "skyPass"), sky && hasSky && skyInfo.fog_enable);
@@ -791,17 +876,10 @@ class Renderer {
         );
         gl.ActiveTexture(GL_TEXTURE1);
         gl.BindTexture(GL_TEXTURE_2D, lightmap);
-        std::unordered_map<uint64_t, BhTransform> transforms;
-
-        struct Draw {
-            uint32_t material, first, count;
-            bool prop;
-            int32_t entity;
-            uint32_t model;
-            float distance;
-        };
-
-        std::vector<Draw> draws;
+        auto &transforms = sceneTransforms;
+        auto &draws = sceneDraws;
+        transforms.clear();
+        draws.clear();
         for (const auto &g : groups)
             if (bool(g.sky3d) == sky)
                 draws.push_back({g.material, g.first_index, g.index_count, false, -1, g.model, 0});
@@ -832,6 +910,8 @@ class Renderer {
                             const auto at = groupBounds.find(key);
                             if (at != groupBounds.end()) {
                                 const auto bounds = native_render::transformed_bounds(at->second, model);
+                                // The reflection clips away everything below its plane.
+                                if (reflection && bounds.hi[2] < clipHeight) return true;
                                 std::array<float, 4> rect;
                                 if (!native_render::screen_rect(bounds, vp, rect)) return true;
                                 for (int k = 0; k < 3; k++) {
@@ -853,7 +933,10 @@ class Renderer {
             const double sortBefore = frameProfile.sort;
             phaseStart = profile_now();
             if (pass) {
-                if (!sky && waterQuality > 0 && !graphics.potato && visibleWater) capture_refraction();
+                if (!sky && !reflection && waterPlan.refract && visibleWater) {
+                    capture_refraction();
+                    sceneCaptured = true;
+                }
                 gl.Enable(GL_BLEND);
                 gl.DepthMask(GL_FALSE);
                 auto sortStart = profile_now();
@@ -867,7 +950,7 @@ class Renderer {
             }
             for (const auto &d : draws) {
                 const auto &m = d.material < materials.size() ? materials[d.material] : materials.front();
-                if (transparent(m) != (pass != 0)) continue;
+                if (transparent(m) != (pass != 0) || (reflection && m.kind == 2)) continue;
                 const uint64_t transformKey = (uint64_t(d.prop) << 63) | uint32_t(d.prop ? d.entity : d.model);
                 auto found = transforms.find(transformKey);
                 if (found == transforms.end()) {
@@ -881,7 +964,7 @@ class Renderer {
                 }
                 if (!found->second.visible) continue;
                 const auto model = native::model_matrix(found->second);
-                gl.UniformMatrix4fv(loc(program, "model"), 1, GL_FALSE, model.data());
+                gl.UniformMatrix4fv(materialUniforms.model, 1, GL_FALSE, model.data());
                 bind_material(d.material, d.prop);
                 gl.BindVertexArray(d.prop ? propMesh.vao : worldMesh.vao);
                 gl.DrawElements(
@@ -1091,7 +1174,7 @@ class Renderer {
         profile_elapsed(frameProfile.presentationBuild, presentationStart);
         presentationStart = profile_now();
         gl.UseProgram(presentation->shader());
-        water_uniforms(presentation->shader(), eye);
+        water_uniforms(presentation->shader(), eye, vp);
         profile_elapsed(frameProfile.presentationWaterUniforms, presentationStart);
         presentationStart = profile_now();
         presentation->draw(vp, eye);
@@ -1342,6 +1425,7 @@ public:
         return {{"lightmapRefreshMs", p.lightmapRefresh},
                 {"lightmapUploadMs", p.lightmapUpload},
                 {"skyMs", p.sky},
+                {"waterReflectionMs", p.waterReflection},
                 {"drawSceneBuildCullMs", p.buildCull},
                 {"drawSceneSortMs", p.sort},
                 {"drawSceneSubmitMs", p.submit},
@@ -1435,6 +1519,7 @@ public:
         , core(c) {
         measureLabel.reserve(100);
         program = link_program(gl, native_render::world_vertex, native_render::world_fragment().c_str());
+        materialUniforms.read(gl, program);
         skyProgram = link_program(gl, native_render::sky_vertex, native_render::sky_fragment().c_str());
         depthProgram = link_program(gl, native_render::depth_vertex, native_render::depth_fragment);
         gl.GenVertexArrays(1, &emptyVao);
@@ -1550,6 +1635,7 @@ public:
                 waterSurfaces.push_back(surface);
             }
         }
+        load_water_cells(verts, indices);
         std::vector<float> planes;
         size_t waterBytes = 0;
         const auto *water = bh_water_json(core, &waterBytes);
@@ -1594,6 +1680,8 @@ public:
         gl.Uniform1i(loc(program, "detailTexture"), 3);
         gl.Uniform1i(loc(program, "sceneColor"), 4);
         gl.Uniform1i(loc(program, "sceneDepth"), 5);
+        gl.Uniform1i(loc(program, "reflectionTexture"), 8);
+        gl.Uniform2f(loc(program, "cameraNearFar"), native::camera_near_plane, native::camera_far_plane);
         gl.Uniform1f(loc(program, "lightmapScale"), lightmapInfo.scale);
         load_normals();
         gl.UseProgram(program);
@@ -1838,6 +1926,156 @@ public:
         reset_presentation();
     }
 
+    // Source look with Water reflections, like the website's SOURCE_WATER. The native Water: Refracted setting still
+    // refracts in either look.
+    bool water_reflections_enabled() const { return sourceLook && graphics.water_reflections && !graphics.potato; }
+
+    bool water_captures_enabled() const {
+        return hasWaterMaterials && !graphics.potato && (water_reflections_enabled() || waterQuality > 0);
+    }
+
+    void plan_water(const float eye[3], const native::Matrix &vp) {
+        reflectionDrawn = false;
+        if (!water_captures_enabled()) {
+            waterPlanner.clear();
+            waterPlan = {};
+            return;
+        }
+        waterPlan = waterPlanner.plan({eye[0], eye[1], eye[2]}, vp);
+        if (!water_reflections_enabled()) waterPlan.reflection_height.reset();
+    }
+
+    // The 2D skybox, or the procedural sky, behind everything. mirrored: as the water reflection sees it.
+    void draw_sky_backdrop(const float eye[3], const native::Matrix &vp, float aspect, bool mirrored) {
+        static constexpr const char *face_uniforms[6] = {"sky0", "sky1", "sky2", "sky3", "sky4", "sky5"};
+        gl.Disable(GL_BLEND);
+        gl.Disable(GL_CULL_FACE);
+        gl.Disable(GL_DEPTH_TEST);
+        gl.DepthMask(GL_FALSE);
+        gl.UseProgram(skyProgram);
+        gl.BindVertexArray(emptyVao);
+        water_uniforms(skyProgram, eye, vp);
+        const float cy = std::cos(lastYaw * native::radians), sy = std::sin(lastYaw * native::radians),
+                    cp = std::cos(lastPitch * native::radians), sp = std::sin(lastPitch * native::radians);
+        const float flip = mirrored ? -1.f : 1.f;
+        gl.Uniform3f(loc(skyProgram, "forward"), cp * cy, cp * sy, -sp * flip);
+        gl.Uniform3f(loc(skyProgram, "right"), sy, -cy, 0);
+        gl.Uniform3f(loc(skyProgram, "up"), sp * cy, sp * sy, cp * flip);
+        gl.Uniform1f(loc(skyProgram, "skyExposure"), graphics.sky_exposure);
+        gl.Uniform1f(loc(skyProgram, "aspect"), aspect);
+        gl.Uniform1f(loc(skyProgram, "cot"), (4.f / 3.f) / std::tan(float(fieldOfView * native::radians * .5)));
+        GLint present[6]{}, half[6]{};
+        for (int i = 0; i < 6; i++) {
+            GLuint id = white;
+            const int32_t m = skyMaterials[i];
+            if (m >= 0 && size_t(m) < materials.size()) {
+                const auto t = materials[m].texture;
+                if (t >= 0 && texture(t) != checker) {
+                    id = texture(t);
+                    present[i] = 1;
+                    const auto wh = textureSizes[t];
+                    half[i] = i < 4 && wh.first == wh.second * 2;
+                }
+            }
+            gl.ActiveTexture(GL_TEXTURE0 + i);
+            gl.BindTexture(GL_TEXTURE_2D, id);
+            gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            gl.Uniform1i(loc(skyProgram, face_uniforms[i]), i);
+        }
+        gl.Uniform1iv(loc(skyProgram, "skyPresent"), 6, present);
+        gl.Uniform1iv(loc(skyProgram, "skyHalf"), 6, half);
+        if (!graphics.potato) gl.DrawArrays(GL_TRIANGLES, 0, 3);
+        gl.Enable(GL_DEPTH_TEST);
+        gl.DepthMask(GL_TRUE);
+        gl.DepthFunc(GL_LEQUAL);
+    }
+
+    // The 3D skybox (sky_camera) around its origin. mirror_height: the water reflection's plane in world units.
+    void draw_3d_sky(const float eye[3], float aspect, double seconds, std::optional<float> mirror_height = {}) {
+        if (!hasSky || graphics.potato || skyInfo.scale <= 0) return;
+        float skyEye[3];
+        for (int k = 0; k < 3; k++)
+            skyEye[k] = skyInfo.origin[k] + eye[k] / skyInfo.scale;
+        auto vp = camera(skyEye, lastYaw, lastPitch, aspect);
+        if (mirror_height) {
+            const float skyHeight = skyInfo.origin[2] + *mirror_height / skyInfo.scale;
+            vp = native::multiply(vp, native_render::mirror_matrix(skyHeight));
+            skyEye[2] = 2 * skyHeight - skyEye[2];
+            clipHeight = skyHeight;
+        }
+        draw_scene(vp, skyEye, true, seconds, mirror_height.has_value());
+        gl.Clear(GL_DEPTH_BUFFER_BIT);
+    }
+
+    // Sky brush faces only write depth, so the world behind them stays hidden as in Source.
+    void draw_sky_depth(const native::Matrix &vp) {
+        if (!skyMesh.vao) return;
+        gl.Disable(GL_BLEND);
+        gl.DepthMask(GL_TRUE);
+        gl.UseProgram(depthProgram);
+        gl.UniformMatrix4fv(loc(depthProgram, "viewProjection"), 1, GL_FALSE, vp.data());
+        gl.Uniform1f(loc(depthProgram, "clipHeight"), clipHeight);
+        gl.ColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        gl.Disable(GL_CULL_FACE);
+        gl.Enable(GL_POLYGON_OFFSET_FILL);
+        gl.PolygonOffset(1, 2);
+        gl.BindVertexArray(skyMesh.vao);
+        for (const auto &item : skyGroups) {
+            if (item.sky3d) continue;
+            BhTransform t{};
+            t.visible = 1;
+            if (item.model) bh_model_transform(core, item.model, &t);
+            if (!t.visible) continue;
+            const auto model = native::model_matrix(t);
+            gl.UniformMatrix4fv(loc(depthProgram, "model"), 1, GL_FALSE, model.data());
+            const auto first = reinterpret_cast<void *>(uintptr_t(item.first_index) * sizeof(uint32_t));
+            gl.DrawElements(GL_TRIANGLES, item.index_count, GL_UNSIGNED_INT, first);
+        }
+        gl.ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        gl.Disable(GL_POLYGON_OFFSET_FILL);
+    }
+
+    // The world mirrored through the chosen water plane, clipped to what is above it, into the half-size reflection
+    // target. Restores the frame's framebuffer and viewport size.
+    void draw_water_reflection(const float eye[3], float aspect, int width, int height, double seconds) {
+        auto phaseStart = profile_now();
+        const double scenePhases = frameProfile.buildCull + frameProfile.sort + frameProfile.submit;
+        if (!waterReflection) waterReflection = std::make_unique<WaterReflectionTarget>(gl);
+        GLint drawTarget = 0, readTarget = 0;
+        gl.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawTarget);
+        gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &readTarget);
+        const float plane = *waterPlan.reflection_height;
+        const float mirroredEye[3] = {eye[0], eye[1], 2 * plane - eye[2]};
+        const auto vp = native::multiply(camera(eye, lastYaw, lastPitch, aspect), native_render::mirror_matrix(plane));
+        waterReflection->begin(width, height);
+        viewportWidth = waterReflection->width();
+        viewportHeight = waterReflection->height();
+        gl.FrontFace(GL_CW);
+        draw_sky_backdrop(mirroredEye, vp, aspect, true);
+        gl.Enable(GL_CLIP_DISTANCE0);
+        draw_3d_sky(eye, aspect, seconds, plane);
+        clipHeight = plane;
+        gl.ActiveTexture(GL_TEXTURE7);
+        gl.BindTexture(GL_TEXTURE_2D, white);
+        draw_sky_depth(vp);
+        draw_scene(vp, mirroredEye, false, seconds, true);
+        gl.Disable(GL_CLIP_DISTANCE0);
+        gl.FrontFace(GL_CCW);
+        clipHeight = no_clip_height;
+        viewportWidth = width;
+        viewportHeight = height;
+        gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, GLuint(drawTarget));
+        gl.BindFramebuffer(GL_READ_FRAMEBUFFER, GLuint(readTarget));
+        gl.Viewport(0, 0, width, height);
+        reflectionDrawn = true;
+        profile_elapsed(frameProfile.waterReflection, phaseStart);
+        if (profiling) {
+            const double sceneTime = frameProfile.buildCull + frameProfile.sort + frameProfile.submit - scenePhases;
+            frameProfile.waterReflection -= sceneTime;
+        }
+    }
+
     void
     draw(int width,
          int height,
@@ -1890,6 +2128,10 @@ public:
         profile_elapsed(frameProfile.lightmapUpload, phaseStart);
         const double dt = lastSeconds < 0 ? 0 : std::max(0., seconds - lastSeconds);
         lastSeconds = seconds;
+        const float aspect = float(width) / height;
+        const auto vp = camera(eye, lastYaw, lastPitch, aspect);
+        plan_water(eye, vp);
+        if (waterPlan.reflection_height) draw_water_reflection(eye, aspect, width, height, seconds);
         GLint frameTarget = 0;
         gl.GetIntegerv(GL_FRAMEBUFFER_BINDING, &frameTarget);
         SourceHdr *pass = hdr_pass();
@@ -1907,87 +2149,12 @@ public:
         else
             gl.ClearColor(.24, .34, .45, 1);
         gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        gl.Disable(GL_BLEND);
-        gl.Disable(GL_CULL_FACE);
-        gl.Disable(GL_DEPTH_TEST);
-        gl.DepthMask(GL_FALSE);
-        gl.UseProgram(skyProgram);
-        gl.BindVertexArray(emptyVao);
-        water_uniforms(skyProgram, eye);
-        const float cy = std::cos(lastYaw * native::radians), sy = std::sin(lastYaw * native::radians),
-                    cp = std::cos(lastPitch * native::radians), sp = std::sin(lastPitch * native::radians);
-        gl.Uniform3f(loc(skyProgram, "forward"), cp * cy, cp * sy, -sp);
-        gl.Uniform3f(loc(skyProgram, "right"), sy, -cy, 0);
-        gl.Uniform3f(loc(skyProgram, "up"), sp * cy, sp * sy, cp);
-        gl.Uniform1f(loc(skyProgram, "skyExposure"), graphics.sky_exposure);
-        gl.Uniform1f(loc(skyProgram, "aspect"), float(width) / height);
-        gl.Uniform1f(loc(skyProgram, "cot"), (4.f / 3.f) / std::tan(float(fieldOfView * native::radians * .5)));
-        GLint present[6]{}, half[6]{};
-        for (int i = 0; i < 6; i++) {
-            GLuint id = white;
-            const int32_t m = skyMaterials[i];
-            if (m >= 0 && size_t(m) < materials.size()) {
-                const auto t = materials[m].texture;
-                if (t >= 0 && texture(t) != checker) {
-                    id = texture(t);
-                    present[i] = 1;
-                    const auto wh = textureSizes[t];
-                    half[i] = i < 4 && wh.first == wh.second * 2;
-                }
-            }
-            gl.ActiveTexture(GL_TEXTURE0 + i);
-            gl.BindTexture(GL_TEXTURE_2D, id);
-            gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-            const auto name = "sky" + std::to_string(i);
-            gl.Uniform1i(loc(skyProgram, name.c_str()), i);
-        }
-        gl.Uniform1iv(loc(skyProgram, "skyPresent"), 6, present);
-        gl.Uniform1iv(loc(skyProgram, "skyHalf"), 6, half);
-        if (!graphics.potato) gl.DrawArrays(GL_TRIANGLES, 0, 3);
-        gl.Enable(GL_DEPTH_TEST);
-        gl.DepthMask(GL_TRUE);
-        gl.DepthFunc(GL_LEQUAL);
+        draw_sky_backdrop(eye, vp, aspect, false);
         const double skySceneBefore = frameProfile.buildCull + frameProfile.sort + frameProfile.submit;
-        if (hasSky && !graphics.potato && skyInfo.scale > 0) {
-            float skyEye[3];
-            for (int k = 0; k < 3; k++)
-                skyEye[k] = skyInfo.origin[k] + eye[k] / skyInfo.scale;
-            const auto vp = camera(skyEye, lastYaw, lastPitch, float(width) / height);
-            draw_scene(vp, skyEye, true, seconds);
-            gl.Clear(GL_DEPTH_BUFFER_BIT);
-        }
-        const auto vp = camera(eye, lastYaw, lastPitch, float(width) / height);
+        draw_3d_sky(eye, aspect, seconds);
         gl.ActiveTexture(GL_TEXTURE7);
         gl.BindTexture(GL_TEXTURE_2D, white);
-        if (skyMesh.vao) {
-            gl.Disable(GL_BLEND);
-            gl.DepthMask(GL_TRUE);
-            gl.UseProgram(depthProgram);
-            gl.UniformMatrix4fv(loc(depthProgram, "viewProjection"), 1, GL_FALSE, vp.data());
-            gl.ColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-            gl.Disable(GL_CULL_FACE);
-            gl.Enable(GL_POLYGON_OFFSET_FILL);
-            gl.PolygonOffset(1, 2);
-            gl.BindVertexArray(skyMesh.vao);
-            for (const auto &item : skyGroups) {
-                if (item.sky3d) continue;
-                BhTransform t{};
-                t.visible = 1;
-                if (item.model) bh_model_transform(core, item.model, &t);
-                if (!t.visible) continue;
-                const auto model = native::model_matrix(t);
-                gl.UniformMatrix4fv(loc(depthProgram, "model"), 1, GL_FALSE, model.data());
-                gl.DrawElements(
-                        GL_TRIANGLES,
-                        item.index_count,
-                        GL_UNSIGNED_INT,
-                        reinterpret_cast<void *>(uintptr_t(item.first_index) * 4)
-                );
-            }
-            gl.ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-            gl.Disable(GL_POLYGON_OFFSET_FILL);
-        }
+        draw_sky_depth(vp);
         profile_elapsed(frameProfile.sky, phaseStart);
         if (profiling)
             frameProfile.sky -= frameProfile.buildCull + frameProfile.sort + frameProfile.submit - skySceneBefore;

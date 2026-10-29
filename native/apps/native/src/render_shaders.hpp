@@ -43,9 +43,10 @@ vec3 waterFog(vec3 color,vec3 p){
  if(total<=0.)return color;range/=total;return mix(color,fog/total,clamp((total-range.x)/max(range.y-range.x,1.),0.,1.));
 }
 )";
+// clipHeight only takes effect while GL_CLIP_DISTANCE0 is on: the water reflection keeps what is above its plane.
 inline const char *depth_vertex = R"(#version 330 core
-layout(location=0)in vec3 position;uniform mat4 viewProjection,model;
-void main(){gl_Position=viewProjection*model*vec4(position,1);}
+layout(location=0)in vec3 position;uniform mat4 viewProjection,model;uniform float clipHeight;
+void main(){vec4 w=model*vec4(position,1);gl_ClipDistance[0]=w.z-clipHeight;gl_Position=viewProjection*w;}
 )";
 inline const char *depth_fragment = R"(#version 330 core
 void main(){}
@@ -53,21 +54,87 @@ void main(){}
 inline const char *world_vertex = R"(#version 330 core
 layout(location=0) in vec3 position;layout(location=1) in vec3 normal;
 layout(location=2) in vec2 baseUV;layout(location=3) in vec2 lightUV;layout(location=4) in float blendAlpha;
-uniform mat4 viewProjection,model;
+uniform mat4 viewProjection,model;uniform float clipHeight;
 out vec2 uv,lm;out vec3 world,normalWorld;out float blend,depth;
-void main(){vec4 w=model*vec4(position,1);world=w.xyz;normalWorld=mat3(model)*normal;uv=baseUV;lm=lightUV;blend=blendAlpha;gl_Position=viewProjection*w;depth=gl_Position.w;}
+void main(){
+ vec4 w=model*vec4(position,1);world=w.xyz;normalWorld=mat3(model)*normal;uv=baseUV;lm=lightUV;blend=blendAlpha;
+ gl_ClipDistance[0]=w.z-clipHeight;gl_Position=viewProjection*w;depth=gl_Position.w;
+}
+)";
+
+// The website's water.ts surfaces, in Source space (its xz is our (x, -y)). Like the website these return display
+// (gamma) values: the tint and sky constants are its linear colours shown as they are. Water from above blends the
+// refracted scene and the planar reflection when this frame captured them (water_capture.hpp), otherwise the plain
+// translucent tint; from below it shows Snell's window.
+inline const std::string water_surface_shader = R"(
+vec3 waterSky(){return linearize(vec3(.663,.757,.827));}
+vec3 waterTint(){return mix(linearize(vec3(.239,.435,.549)),tint,.45)+vec3(.06);}
+float viewDepth(float z){return cameraNearFar.x*cameraNearFar.y/(cameraNearFar.y-z*(cameraNearFar.y-cameraNearFar.x));}
+vec2 rippleWave(vec2 p,vec2 direction,float frequency,float speed,float amplitude){
+ return direction*cos(dot(p,direction)*frequency+timeSeconds*speed)*amplitude;
+}
+vec3 ripple(vec3 n){
+ vec2 p=vec2(world.x,-world.y);
+ vec2 g=rippleWave(p,vec2(.8,.6),.045,1.3,.5)+rippleWave(p,vec2(-.5,.86),.071,1.7,.35);
+ g+=rippleWave(p,vec2(.2,-.98),.113,2.3,.2);
+ if(captureReady){
+  // Short waves fade over the pixel footprint instead of aliasing into distant glints.
+  float footprint=max(length(dFdx(p)),length(dFdy(p)));
+  g+=rippleWave(p,vec2(.91,-.41),.21,-1.1,.11*exp(-.5*pow(footprint*.21,2.)));
+  g+=rippleWave(p,vec2(-.72,-.69),.36,2.8,.06*exp(-.5*pow(footprint*.36,2.)));
+ }
+ return normalize(n+vec3(g.x,-g.y,0)*.08);
+}
+vec3 refracted(vec3 n,vec3 tintColor){
+ vec2 screen=gl_FragCoord.xy/viewportSize;
+ vec2 at=clamp(screen+vec2(n.x,-n.y)*.012,vec2(.001),vec2(.999));
+ float surface=viewDepth(gl_FragCoord.z);
+ // Offsets that land on geometry in front of the surface fall back to the straight view.
+ if(viewDepth(texture(sceneDepth,at).r)<surface)at=screen;
+ float thickness=max(0.,viewDepth(texture(sceneDepth,at).r)-surface);
+ return mix(texture(sceneColor,at).rgb,tintColor,.12+.7*(1.-exp(-thickness/waterFogEnd)));
+}
+vec3 reflected(vec3 n){
+ if(!reflectionReady||abs(world.z-reflectionHeight)>=.2)return waterSky();
+ vec2 at=gl_FragCoord.xy/viewportSize+vec2(n.x,-n.y)*.009;
+ if(any(lessThanEqual(at,vec2(0)))||any(greaterThanEqual(at,vec2(1))))return waterSky();
+ return texture(reflectionTexture,at).rgb;
+}
+vec4 waterSurface(vec3 n,vec3 v){
+ bool above=aboveWater&&gl_FrontFacing;
+ if(!gl_FrontFacing)n=-n;
+ n=ripple(n);
+ float c=clamp(abs(dot(n,v)),0.,1.),fres=.02+.98*pow(1.-c,5.);
+ vec3 t=waterTint(),sky=waterSky();
+ if(!above){float window=smoothstep(.55,.85,c);return vec4(mix(tint*1.6+t*.3,sky*.9+t*.2,window),mix(.92,.35,window));}
+ if(!captureReady){
+  vec3 col=mix(t,sky,clamp(fres*.85,0.,1.))+vec3(.05)*smoothstep(.985,1.,dot(n,normalize(v+vec3(.3,-.2,.8))));
+  return vec4(col,mix(.38,.9,fres));
+ }
+ // Fresnel weights radiance, so the blend happens in linear light.
+ vec3 col=mix(linearize(refracted(n,t)),linearize(reflected(n)),clamp(fres*.95,0.,1.));
+ return vec4(encode(col),1);
+}
+vec4 glassSurface(vec3 n,vec3 v){
+ float f=pow(1.-clamp(abs(dot(n,v)),0.,1.),3.);
+ vec3 t=all(greaterThan(tint,vec3(.97)))?linearize(vec3(.847,.91,.941)):tint;
+ return vec4(mix(t,vec3(1),f*.35),mix(.28,.6,f));
+}
 )";
 
 inline std::string world_fragment() {
     return std::string("#version 330 core\n") + water + R"(
 in vec2 uv,lm;in vec3 world,normalWorld;in float blend,depth;
 uniform sampler2D baseTexture,lightTexture,secondaryTexture,detailTexture,normalTexture;uniform bool hasNormal,fullbright,potato;uniform vec3 sunDirection;
-uniform sampler2D sceneColor,sceneDepth;uniform bool detailedWater;
+uniform sampler2D sceneColor,sceneDepth,reflectionTexture;uniform bool captureReady,reflectionReady;
+uniform float reflectionHeight,waterFogEnd;uniform vec2 cameraNearFar;
 uniform vec3 tint,flatColor;uniform float opacity,cutoff,lightmapScale,detailScale,detailBlend,timeSeconds;
 uniform int kind;uniform bool unlit,props,hasSecondary,hasDetail,aboveWater,skyPass,additive;
 uniform bool flashlight;uniform vec3 flashDirection;
 uniform vec3 skyFogColor;uniform vec3 skyFogRange;
 out vec4 color;
+)" + water_surface_shader
+           + R"(
 void main(){
  vec3 n=normalize(normalWorld);vec3 v=normalize(cameraPosition-world);vec4 base=texture(baseTexture,uv);
  if(potato&&cutoff<=0.){
@@ -87,17 +154,8 @@ void main(){
  if(hasNormal&&!potato&&!fullbright){vec3 flatN=n*(gl_FrontFacing?1.:-1.);vec3 q0=dFdx(world),q1=dFdy(world);vec2 st0=dFdx(uv),st1=dFdy(uv);vec3 q1p=cross(q1,flatN),q0p=cross(flatN,q0);vec3 t=q1p*st0.x+q0p*st1.x,b=q1p*st0.y+q0p*st1.y;float len=max(dot(t,t),dot(b,b));if(len>1e-12){vec3 sampled=texture(normalTexture,uv).xyz*2.-1.;vec3 mapped=normalize((t*sampled.x+b*sampled.y)*inversesqrt(len)+flatN*sampled.z);lighting*=clamp(1.+.35*(dot(mapped,sunDirection)-dot(flatN,sunDirection)),.65,1.35);}}
  if(flashlight){vec3 delta=world-cameraPosition;float dist=length(delta);float cone=smoothstep(.90,.975,dot(normalize(delta),flashDirection));lighting+=vec3(2.8,2.65,2.4)*cone*max(.12,dot(n,-normalize(delta)))/(1.+dist*dist/180000.);}
  vec3 col=encode(base.rgb*lighting);float alpha=base.a;
- if(kind==2&&!potato){
-  bool above=aboveWater&&gl_FrontFacing;if(!gl_FrontFacing)n=-n;
-  vec2 p=world.xy;vec2 g=vec2(.8,.6)*cos(dot(p,vec2(.8,.6))*.045+timeSeconds*1.3)*.5;
-  g+=vec2(-.5,.86)*cos(dot(p,vec2(-.5,.86))*.071+timeSeconds*1.7)*.35;
-  g+=vec2(.2,-.98)*cos(dot(p,vec2(.2,-.98))*.113+timeSeconds*2.3)*.2;n=normalize(n+vec3(g*.08,0));
-  float c=clamp(abs(dot(n,v)),0.,1.);vec3 sky=linearize(vec3(.663,.757,.827));vec3 t=mix(linearize(vec3(.239,.435,.549)),tint,.45)+vec3(.06);
-  if(above){float f=.02+.98*pow(1.-c,5.);col=mix(t,sky,clamp(f*.85,0.,1.));col+=vec3(.05)*smoothstep(.985,1.,dot(n,normalize(v+vec3(.3,-.2,.8))));alpha=mix(.38,.9,f);}
-  else {float win=smoothstep(.55,.85,c);col=mix(tint*1.6+t*.3,sky*.9+t*.2,win);alpha=mix(.92,.35,win);}
-  if(detailedWater){vec2 screen=gl_FragCoord.xy/viewportSize;vec2 offset=g*.006*clamp(32./max(depth,1.),.15,1.);vec2 at=clamp(screen+offset,vec2(.001),vec2(.999));float background=texture(sceneDepth,at).r;if(background<=gl_FragCoord.z+.00001)at=screen;vec3 transmitted=linearize(texture(sceneColor,at).rgb);float thickness=max(0.,texture(sceneDepth,at).r-gl_FragCoord.z);float absorb=clamp(thickness*350.,.05,.8);transmitted=mix(transmitted,t,absorb*.55);float fres=.02+.98*pow(1.-c,5.);col=mix(transmitted,col,above?clamp(fres,.06,.85):.25);alpha=above?mix(.2,.85,fres):mix(.85,.25,smoothstep(.55,.85,c));}
- } else if(kind==3&&!potato){float f=pow(1.-clamp(abs(dot(n,v)),0.,1.),3.);vec3 t=tint;if(all(greaterThan(t,vec3(.97))))t=linearize(vec3(.847,.91,.941));col=mix(t,vec3(1),f*.35);alpha=mix(.28,.6,f);}
- if(kind==2||kind==3)col=encode(col);
+ if(kind==2&&!potato){vec4 surface=waterSurface(n,v);col=surface.rgb;alpha=surface.a;}
+ else if(kind==3&&!potato){vec4 surface=glassSurface(n,v);col=surface.rgb;alpha=surface.a;}
  if(!potato)col=waterFog(col,world);
  if(skyPass){float f=clamp(min(skyFogRange.z,(depth-skyFogRange.x)/max(skyFogRange.y-skyFogRange.x,.001)),0.,1.);col=mix(col,additive?vec3(0):skyFogColor,f);}
  color=vec4(col,alpha);

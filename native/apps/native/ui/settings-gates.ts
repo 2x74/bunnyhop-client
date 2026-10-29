@@ -168,10 +168,7 @@ const ROWS: Record<string, Gate> = {
   "graphics/Quality/Look": needs("sourceLook"),
   "graphics/Quality/Potato mode": needs("graphicsPotato"),
   "graphics/Quality/Antialiasing": needs("graphicsAntialias"),
-  "graphics/Quality/Water reflections": ownVersion(
-    "The native client refracts water instead: Advanced → Water.",
-    "graphicsWaterReflections",
-  ),
+  "graphics/Quality/Water reflections": needs("graphicsWaterReflections"),
   "graphics/Quality/Anisotropic filtering": needs("graphicsAnisotropy"),
   "graphics/Colour & visibility/Brightness": needs("graphicsBrightness"),
   "graphics/Colour & visibility/Gamma": needs("graphicsGamma"),

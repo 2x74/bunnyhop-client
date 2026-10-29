@@ -157,6 +157,7 @@ struct GraphicsSettings {
     int samples = 0, anisotropy = 8, menu_fps = 0;
     bool bars = false, pixelated = false, fullbright = false, potato = false, source = true;
     bool bloom = true, material_response = true, flashlight = false, tags_players = true, tags_through_walls = false;
+    bool water_reflections = true;
     enum class Background { live, still, off } background = Background::live;
 
     static GraphicsSettings read(const nlohmann::json &settings) {
@@ -177,6 +178,7 @@ struct GraphicsSettings {
         result.potato = values.at("graphicsPotato");
         result.source = settings.value("sourceLook", true);
         result.bloom = values.at("graphicsBloom");
+        result.water_reflections = values.at("graphicsWaterReflections");
         result.material_response = values.at("graphicsMaterialResponse");
         result.flashlight = values.at("graphicsFlashlight");
         result.sky_exposure = values.at("graphicsSkyExposure");
