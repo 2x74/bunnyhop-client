@@ -45,7 +45,7 @@ int main() {
     assert(second.x == -1500 && second.y == 100 && second.width == 1280);
     const auto disconnected = clamp_window_bounds({4000, 2000, 2560, 1440, false}, screens);
     assert(disconnected.x == 0 && disconnected.y == 0 && disconnected.width == 1920 && disconnected.height == 1040);
-    const auto small = clamp_window_bounds({-500, -500, 100, 100, false}, {{0, 30, 480, 300}});
-    assert(small.x == 0 && small.y == 30 && small.width == 480 && small.height == 300);
+    const auto small_screen = clamp_window_bounds({-500, -500, 100, 100, false}, {{0, 30, 480, 300}});
+    assert(small_screen.x == 0 && small_screen.y == 30 && small_screen.width == 480 && small_screen.height == 300);
     assert(toggled_window_mode("windowed") == "borderless" && toggled_window_mode("fullscreen") == "windowed");
 }

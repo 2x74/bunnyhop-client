@@ -46,13 +46,13 @@ void launch_into_borderless() {
         native::WindowController controller(window);
         auto settings = native::default_window_settings();
         settings["windowMode"] = "borderless";
-        const native::WindowBounds saved{40, 60, 900, 700, false};
+        const native::WindowBounds saved{40, 60, 640, 480, false};
         if (controller.apply(settings, true, saved) && controller.mode() == "borderless") {
             settings["windowMode"] = "windowed";
             assert(controller.apply(settings));
             int width = 0, height = 0;
             window_size(window, width, height);
-            assert(width == 900 && height == 700);
+            assert(width == 640 && height == 480);
         } else {
             std::cout << "Launch into borderless unavailable for a hidden window here\n";
         }

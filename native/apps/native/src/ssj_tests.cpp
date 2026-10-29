@@ -48,7 +48,7 @@ void same(const std::string &where, const char *field, const nlohmann::json &exp
 // Gain and efficiency are the only values that pass through cos and sin, whose last bit is not
 // portable between implementations (see the note atop ssj.hpp). Both are rounded to two decimals
 // before anyone sees them, so they are compared at that resolution rather than bit for bit.
-void near(
+void expect_close(
         const std::string &where, const char *field, const nlohmann::json &expected, const std::optional<float> &actual
 ) {
     if (expected.is_null()) {
@@ -136,8 +136,8 @@ int main(int argc, char **argv) {
             same(where, "height", expected.at("height"), actual->height);
             same(where, "strafes", expected.at("strafes"), actual->strafes);
             same(where, "sync", expected.at("sync"), actual->sync);
-            near(where, "gain", expected.at("gain"), actual->gain);
-            near(where, "eff", expected.at("eff"), actual->eff);
+            expect_close(where, "gain", expected.at("gain"), actual->gain);
+            expect_close(where, "eff", expected.at("eff"), actual->eff);
             same(where, "time", expected.at("time"), actual->time);
         }
     }

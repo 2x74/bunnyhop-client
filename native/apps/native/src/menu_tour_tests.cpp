@@ -17,12 +17,12 @@ void check(bool ok, const char *what) {
     }
 }
 
-bool near(double a, double b, double e = 1e-6) {
+bool close_to(double a, double b, double e = 1e-6) {
     return std::abs(a - b) <= e;
 }
 
-bool near(const native::tour::Vec &a, const native::tour::Vec &b) {
-    return near(a[0], b[0]) && near(a[1], b[1]) && near(a[2], b[2]);
+bool close_to(const native::tour::Vec &a, const native::tour::Vec &b) {
+    return close_to(a[0], b[0]) && close_to(a[1], b[1]) && close_to(a[2], b[2]);
 }
 
 nlohmann::json entity(const char *cls, const char *name, const char *origin, const char *angles = "0 0 0") {
@@ -50,9 +50,9 @@ int main() {
     });
     const auto list = anchors(course);
     check(list.size() == 3, "anchor count");
-    check(near(list[0].pos, {0, 0, 0}) && near(list[1].pos, {500, 0, 0}) && near(list[2].pos, {1000, 0, 0}),
+    check(close_to(list[0].pos, {0, 0, 0}) && close_to(list[1].pos, {500, 0, 0}) && close_to(list[2].pos, {1000, 0, 0}),
           "anchor order");
-    check(near(list[1].yaw, 180) && near(list[2].yaw, 90), "anchor yaw from angles[1]");
+    check(close_to(list[1].yaw, 180) && close_to(list[2].yaw, 90), "anchor yaw from angles[1]");
 
     // Fewer than two checkpoints: spawns lead, then the checkpoint.
     const auto spawned =
@@ -62,8 +62,8 @@ int main() {
                     entity("info_player_counterterrorist", "", "50 0 0"),
                     entity("func_button", "", "4000 0 0"),
             }));
-    check(spawned.size() == 2 && near(spawned[0].pos, {0, 0, 0}) && near(spawned[0].yaw, 45)
-                  && near(spawned[1].pos, {2000, 0, 0}),
+    check(spawned.size() == 2 && close_to(spawned[0].pos, {0, 0, 0}) && close_to(spawned[0].yaw, 45)
+                  && close_to(spawned[1].pos, {2000, 0, 0}),
           "spawn fallback");
 
     // Open space: every bound saturates exactly as on the web.
@@ -73,37 +73,40 @@ int main() {
         return max;
     });
     check(open.size() == 2 && probes.size() == 6, "probe per direction");
-    check(near(probes[0].first, {10, 20, 94}), "probe from eye height");
-    check(near(probes[0].second, {std::cos(pi / 2), 1, 0}) && near(probes[1].second, {-std::cos(pi / 2), -1, 0})
-                  && near(probes[2].second, {0, 0, 1}),
+    check(close_to(probes[0].first, {10, 20, 94}), "probe from eye height");
+    check(close_to(probes[0].second, {std::cos(pi / 2), 1, 0}) && close_to(probes[1].second, {-std::cos(pi / 2), -1, 0})
+                  && close_to(probes[2].second, {0, 0, 1}),
           "probe directions");
-    check(near(open[0].from, {10, 20 - 56, 94 + 18}) && near(open[0].to, {10, 20 + 560, 94 + 110}), "open shot bounds");
-    check(near(open[0].sway, -.12) && near(open[1].sway, .12) && near(open[0].yaw, pi / 2), "sway alternates");
+    check(close_to(open[0].from, {10, 20 - 56, 94 + 18}) && close_to(open[0].to, {10, 20 + 560, 94 + 110}),
+          "open shot bounds");
+    check(close_to(open[0].sway, -.12) && close_to(open[1].sway, .12) && close_to(open[0].yaw, pi / 2),
+          "sway alternates");
 
     // Walls close: the camera never leaves the anchor's eye.
     const auto closed = shots({{{0, 0, 0}, 0}}, [](const Vec &, const Vec &, double) { return 10.0; });
-    check(near(closed[0].from, {0, 0, 64}) && near(closed[0].to, {0, 0, 64}), "closed shot stays put");
+    check(close_to(closed[0].from, {0, 0, 64}) && close_to(closed[0].to, {0, 0, 64}), "closed shot stays put");
     // Partial room: ahead 400 -> 250 travel, behind 50 -> 26 back, ceiling 100 -> 72 rise.
     const auto room = shots({{{0, 0, 0}, 0}}, [](const Vec &, const Vec &dir, double max) {
         return dir[2] > 0 ? 100.0 : dir[0] > 0 ? 400.0 : max == 120 ? 50.0 : max;
     });
-    check(near(room[0].from, {-26, 0, 64 + 18}) && near(room[0].to, {250, 0, 64 + 72}), "bounded shot");
+    check(close_to(room[0].from, {-26, 0, 64 + 18}) && close_to(room[0].to, {250, 0, 64 + 72}), "bounded shot");
 
     // No entities: the web's slow pass over the origin.
     const auto none = shots(anchors(nlohmann::json::array()), {});
-    check(none.size() == 1 && near(none[0].from, {-400, 0, 200}) && near(none[0].to, {400, 0, 280}), "fallback pass");
+    check(none.size() == 1 && close_to(none[0].from, {-400, 0, 200}) && close_to(none[0].to, {400, 0, 280}),
+          "fallback pass");
 
     // Camera path: lerp, yaw sway around the middle, pitch easing down.
     const auto start = place(open[0], 0), end = place(open[0], 1);
-    check(near(start.eye, open[0].from) && near(end.eye, open[0].to), "camera lerp");
-    check(near(start.yaw, 90 + .06 * 180 / pi) && near(end.yaw, 90 - .06 * 180 / pi), "yaw sway");
-    check(near(start.pitch, .1 * 180 / pi) && near(end.pitch, .16 * 180 / pi), "pitch looks down");
+    check(close_to(start.eye, open[0].from) && close_to(end.eye, open[0].to), "camera lerp");
+    check(close_to(start.yaw, 90 + .06 * 180 / pi) && close_to(end.yaw, 90 - .06 * 180 / pi), "yaw sway");
+    check(close_to(start.pitch, .1 * 180 / pi) && close_to(end.pitch, .16 * 180 / pi), "pitch looks down");
 
     // Director: fade around cuts, wrap to the next shot, still never moves.
     Director director(open);
     check(director.cut(), "fade in at the first frame");
     const auto still = director.still();
-    check(near(still.eye, place(open[1], .35).eye), "still is shot 2 at 35%");
+    check(close_to(still.eye, place(open[1], .35).eye), "still is shot 2 at 35%");
     director.advance(.05);
     director.advance(.05);
     check(!director.cut(), "fade in ends");
@@ -121,11 +124,12 @@ int main() {
                   < 1e-6,
           "wraps to the next shot");
     director.advance(std::nan(""));
-    check(near(director.still().eye, still.eye) && near(director.still().yaw, still.yaw), "still independent of time");
+    check(close_to(director.still().eye, still.eye) && close_to(director.still().yaw, still.yaw),
+          "still independent of time");
     Director single(closed);
     check(!single.cut(), "one shot never fades");
 
     // THREE.PerspectiveCamera(62) vertical lens in Renderer's Source FOV terms.
-    check(near(renderer_fov(), 77.3, .1), "lens");
+    check(close_to(renderer_fov(), 77.3, .1), "lens");
     std::cout << "menu tour: anchors, bounds, path, cuts, still and lens match the web director\n";
 }

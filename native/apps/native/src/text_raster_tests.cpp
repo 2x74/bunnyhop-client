@@ -29,8 +29,8 @@ int main() {
             transparent |= b.rgba[i] == 0;
         assert(transparent);
     }
-    const auto small = native::raster_text("你好", 16), large = native::raster_text("你好", 32);
-    assert(large.width > small.width && large.height > small.height);
+    const auto small_text = native::raster_text("你好", 16), large = native::raster_text("你好", 32);
+    assert(large.width > small_text.width && large.height > small_text.height);
     assert(native::raster_text("", 20).rgba.empty());
     assert(native::raster_text(std::string(4097, 'a'), 20).rgba.empty());
     assert(native::raster_text(std::string("a\0b", 3), 20).rgba.empty());

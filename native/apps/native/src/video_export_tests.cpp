@@ -476,9 +476,9 @@ int main(int argc, char **argv) {
         audio_options.fps = fps;
         const auto plan = native::VideoTimeline::make(audio_options, 120);
         const auto path = directory / ("audio-" + std::to_string(fps) + ".mp4");
-        auto small = audio_options;
-        small.width = small.height = 64;
-        encoder.start(small, path, plan.frames, available.encoder);
+        auto small_frames = audio_options;
+        small_frames.width = small_frames.height = 64;
+        encoder.start(small_frames, path, plan.frames, available.encoder);
         size_t at = 0;
         for (uint64_t i = 0; i < plan.frames; ++i) {
             const size_t end = expected.size() * (i + 1) / plan.frames / 2 * 2;
@@ -520,9 +520,9 @@ int main(int argc, char **argv) {
                  {"decodedEnergy", energy(decoded)},
                  {"waveformCorrelation", correlation}}
         );
-        small.audio = false;
+        small_frames.audio = false;
         const auto video_only = directory / ("audio-off-" + std::to_string(fps) + ".mp4");
-        encoder.start(small, video_only, plan.frames, available.encoder);
+        encoder.start(small_frames, video_only, plan.frames, available.encoder);
         for (uint64_t i = 0; i < plan.frames; ++i) {
             while (!encoder.can_submit() && encoder.busy())
                 SDL_Delay(2);
