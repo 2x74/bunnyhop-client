@@ -6,6 +6,8 @@
 #include "run_session.hpp"
 #include "frame_pacing.hpp"
 #include "frame_diagnostics.hpp"
+#include "low_latency.hpp"
+#include "play_priority.hpp"
 #include <iomanip>
 
 namespace {
@@ -53,7 +55,8 @@ struct Spec {
     Json json;
     std::string path, content, output;
     int width, height, frames, warmup, fps, hz, ghosts;
-    bool vsync, queued, ordinary_sleep;
+    bool vsync, queued, ordinary_sleep, play_priority;
+    std::string low_latency;
 
     explicit Spec(const char *file) {
         std::ifstream input(file);
@@ -71,6 +74,10 @@ struct Spec {
         vsync = json.value("vsync", false);
         queued = json.value("limitQueuedFrames", true);
         ordinary_sleep = json.value("ordinarySleep", false);
+        // Windows: the play-time process settings, and presenting through DXGI ("on" or "boost").
+        play_priority = json.value("playPriority", false);
+        low_latency = json.value("lowLatency", std::string("off"));
+        if (!native::valid_low_latency_mode(low_latency)) throw std::runtime_error("Invalid lowLatency");
         if (width < 64 || height < 64 || width > 4096 || height > 4096 || frames < 1 || frames > 100000 || warmup < 0
             || warmup > 10000 || fps < 0 || fps > 10000 || hz < 125 || hz > 8000 || ghosts < 0 || ghosts > 4)
             throw std::runtime_error("Invalid gameplay benchmark bounds");
@@ -156,22 +163,30 @@ public:
         report_at_ = started;
         diagnostics_.start(started, timeline_.queue(), true);
         uint64_t rasterized = 0;
+        play_priority_.update(spec_.play_priority);
+        if (!presenter_.configure(surface_.window, native::low_latency_mode(spec_.low_latency), spec_.fps, false))
+            throw std::runtime_error("Low latency mode: " + presenter_.error());
         for (int frame = -spec_.warmup; frame < spec_.frames; ++frame) {
             const auto start = Clock::now();
             mark_ = start;
             current_.fill(0);
             frame_diagnostics_.start_frame(SDL_GetTicksNS(), true);
+            presenter_.frame_start();
             frame_input();
             frame_ticks();
             frame_diagnostics();
             frame_heartbeat();
             frame_actors();
+            presenter_.render_start(spec_.width, spec_.height);
             renderer_->draw(spec_.width, spec_.height, eye_.data(), view_, &snapshot_);
             mark(world);
             frame_hud();
             mark(hud);
             frame_diagnostics_.mark(native::FrameDiagnostics::kRender, SDL_GetTicksNS());
-            SDL_GL_SwapWindow(surface_.window);
+            if (presenter_.active())
+                presenter_.present(spec_.vsync);
+            else
+                SDL_GL_SwapWindow(surface_.window);
             mark(swap);
             frame_diagnostics_.mark(native::FrameDiagnostics::kSwap, SDL_GetTicksNS());
             pacer_.after_swap(gl_, spec_.queued);
@@ -216,6 +231,8 @@ private:
     native::MovementFeedback feedback_;
     native::FramePacer<native::Gl> pacer_;
     native::GraphicsMenuPacer limiter_;
+    native::PlayPriority play_priority_;
+    native::LowLatencyPresenter presenter_;
     native::Chat chat_;
     native::HudScoreboard board_;
     native::RunHeartbeat heartbeat_;
@@ -447,6 +464,7 @@ private:
                 {"schema", 1},
                 {"recording", recording},
                 {"spec", spec_.json},
+                {"presenter", presenter_.active() ? std::string(presenter_.technique()) : std::string("OpenGL swap")},
                 {"gpu", string(GL_RENDERER)},
                 {"driver", string(GL_VERSION)},
                 {"sdl", SDL_GetVersion()},

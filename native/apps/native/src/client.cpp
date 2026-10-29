@@ -75,6 +75,8 @@
 #include "display_catalog.hpp"
 #include "display_mode_tryout.hpp"
 #include "hud_area.hpp"
+#include "low_latency.hpp"
+#include "play_priority.hpp"
 #include "menu_scripts.hpp"
 #include "menu_files.hpp"
 #include "menu_messages.hpp"
@@ -286,6 +288,11 @@ int run(const native::Options &opt) {
     native::DisplayCatalog display_catalog;
     display_catalog.refresh(window.get());
     native::DisplayModeTryout display_tryout;
+    // Windows: DXGI presentation with Reflex or Anti-Lag 2, and process settings held only while playing.
+    native::LowLatencyPresenter low_latency;
+    native::LowLatencyControl low_latency_control;
+    const auto low_latency_support = low_latency.support(window.get());
+    native::PlayPriority play_priority;
     auto prefs = native::Preferences::from_settings(preferences);
     bool window_dirty = false;
     auto window_save_due = std::chrono::steady_clock::now();
@@ -1593,6 +1600,19 @@ int run(const native::Options &opt) {
         }
         if (window_dirty && Clock::now() >= window_save_due) save_window();
         video.poll_probe();
+        if (const auto refused = low_latency_control.update(
+                    low_latency,
+                    window.get(),
+                    prefs.low_latency_mode,
+                    prefs.fps_limit,
+                    prefs.reflex_flash,
+                    opt.frames || !opt.runtime_smoke.empty()
+            ))
+            toast(*refused, 6000);
+        if (const auto failure = low_latency.take_failure()) toast("Low latency mode is off: " + *failure, 6000);
+        play_priority.update(core && captured && focused && (!menu || !menu->visible()));
+        // Reflex sleeps here, before input is read, and marks the input sample; InputTimeline reads it as before.
+        low_latency.frame_start();
         const uint64_t mouse_pump_start = SDL_GetTicksNS();
         if (input_backend.begin(
                     prefs.input_backend, captured && focused && !chat.active && !viewer.active && !room.spectator_target
@@ -1616,6 +1636,8 @@ int run(const native::Options &opt) {
                 || event.type == SDL_EVENT_TEXT_INPUT)
                 had_input_activity = true;
             if (display_tryout.event(event)) continue;
+            if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT && captured)
+                low_latency.trigger_flash();
             if (hud_editor.active()) {
                 int pixels_w = 0, pixels_h = 0;
                 SDL_GetWindowSizeInPixels(window.get(), &pixels_w, &pixels_h);
@@ -3292,6 +3314,7 @@ int run(const native::Options &opt) {
         }
         int width = 0, height = 0;
         SDL_GetWindowSizeInPixels(window.get(), &width, &height);
+        low_latency.render_start(width, height);
         if (renderer && !video_capture && !director_job) {
             const float blend = (opt.frames || !simulation_active) ? 1.0f : float(input_scheduler.seconds() / step_dt);
             float eye[3];
@@ -3697,7 +3720,9 @@ int run(const native::Options &opt) {
         const GLenum gl_error = gl.GetError();
         if (gl_error != GL_NO_ERROR) throw std::runtime_error("OpenGL error " + std::to_string(gl_error));
         frame_diagnostics.mark(native::FrameDiagnostics::kRender, SDL_GetTicksNS());
-        if (!SDL_GL_SwapWindow(window.get()))
+        if (low_latency.active())
+            low_latency.present(prefs.vsync);
+        else if (!SDL_GL_SwapWindow(window.get()))
             throw std::runtime_error(std::string("Swapping framebuffer failed: ") + SDL_GetError());
         frame_diagnostics.mark(native::FrameDiagnostics::kSwap, SDL_GetTicksNS());
         frame_pacer.after_swap(gl, prefs.limit_queued_frames && !opt.frames);
@@ -3796,6 +3821,11 @@ int run(const native::Options &opt) {
                            ghosts.info.is_object() ? ghosts.info.value("player", std::string("Ghost")) : "Ghost"}}},
                         {"replayCompare", replay_compare.state()},
                         {"displays", display_catalog.json()},
+                        {"lowLatency",
+                         {{"dxgi", low_latency_support.dxgi},
+                          {"reflex", low_latency_support.reflex},
+                          {"antiLag", low_latency_support.anti_lag},
+                          {"active", low_latency.technique()}}},
                         {"surfaceTools", renderer ? renderer->surface_tools_state() : nlohmann::json(nullptr)},
                         {"graphicsLimits", renderer ? renderer->graphics_limits() : nlohmann::json(nullptr)},
                         {"runGeneration", heartbeat.generation},

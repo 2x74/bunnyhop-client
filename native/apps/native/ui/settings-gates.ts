@@ -259,6 +259,8 @@ export const NATIVE_GATES: Readonly<Record<string, Gate>> = {
   "display/Fullscreen/Scaling": needs("fullscreenScaling"),
   "display/Frame pacing/VSync": needs("vsync"),
   "display/Frame pacing/GPU frame limit": needs("limitQueuedFrames"),
+  "display/Frame pacing/Low latency mode": needs("lowLatencyMode"),
+  "display/Frame pacing/Reflex flash indicator": needs("reflexFlash"),
   "display/Local replays/Capture device personal bests": needs("capturePbScreenshots"),
   "discord/Rich Presence/Show on Discord": needs("discordRichPresence"),
   "discord/Rich Presence/Show the map": needs("discordShowMap"),

@@ -243,6 +243,15 @@ export const JUMP_STATS_MODES: readonly JumpStatsMode[] = ["sixth", "every", "in
 export const AUDIO_PACKS: readonly AudioPack[] = ["default", "custom"];
 export const WINDOW_MODES = ["windowed", "borderless", "fullscreen"] as const;
 export type WindowMode = (typeof WINDOW_MODES)[number];
+export const LOW_LATENCY_MODES = ["off", "on", "boost"] as const;
+export type LowLatencyMode = (typeof LOW_LATENCY_MODES)[number];
+/** What low latency presentation this computer has (low_latency.hpp), and the technique in use. */
+export interface LowLatencyInfo {
+  dxgi: boolean;
+  reflex: boolean;
+  antiLag: boolean;
+  active: "" | "Reflex" | "Anti-Lag 2" | "DXGI";
+}
 export const FULLSCREEN_SCALINGS = ["stretch", "bars"] as const;
 export type FullscreenScaling = (typeof FULLSCREEN_SCALINGS)[number];
 /** Exclusive fullscreen's mode (window_settings.hpp). Width 0 is the desktop mode; refresh 0 the highest. */
@@ -291,6 +300,8 @@ export interface NativeSettings {
   minimizeOnFocusLoss: boolean;
   fullscreenMode: FullscreenMode;
   fullscreenScaling: FullscreenScaling;
+  lowLatencyMode: LowLatencyMode;
+  reflexFlash: boolean;
   capturePbScreenshots: boolean;
   showPlayerGlow: boolean;
   firstPersonGlow: boolean;
@@ -568,6 +579,8 @@ export interface NativeMenuState {
   extraSettings: Record<string, unknown>;
   /** Monitors and their fullscreen modes; null until the host sends them. */
   displays: DisplayCatalog | null;
+  /** Low latency presentation; null until the host sends it (or on a host without it). */
+  lowLatency: LowLatencyInfo | null;
 }
 
 declare global {
@@ -694,6 +707,8 @@ function defaultSettings(): NativeSettings {
     minimizeOnFocusLoss: false,
     fullscreenMode: { display: "", displayIndex: -1, width: 0, height: 0, refreshHz: 0 },
     fullscreenScaling: "stretch",
+    lowLatencyMode: "off",
+    reflexFlash: false,
     showPlayerGlow: web.showPlayerGlow,
     firstPersonGlow: web.firstPersonGlow,
     waterQuality: "simple",
@@ -835,6 +850,7 @@ export const state: NativeMenuState = {
   capabilities: null,
   extraSettings: {},
   displays: null,
+  lowLatency: null,
 };
 
 export const nativeKeyCode = (code: unknown): code is string =>
@@ -895,6 +911,22 @@ function displayInfo(value: unknown): DisplayInfo | null {
   };
 }
 
+const LOW_LATENCY_TECHNIQUES = ["", "Reflex", "Anti-Lag 2", "DXGI"] as const;
+
+/** The host's low latency support (client.cpp state `lowLatency`), or null. */
+export function lowLatencyInfo(value: unknown): LowLatencyInfo | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { dxgi, reflex, antiLag, active } = value as Record<string, unknown>;
+  return {
+    dxgi: dxgi === true,
+    reflex: reflex === true,
+    antiLag: antiLag === true,
+    active: LOW_LATENCY_TECHNIQUES.includes(active as LowLatencyInfo["active"])
+      ? (active as LowLatencyInfo["active"])
+      : "",
+  };
+}
+
 /** The host's monitors and modes (display_catalog.hpp), or null when it sent something else. */
 export function displayCatalog(value: unknown): DisplayCatalog | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -918,6 +950,7 @@ export function settingsPatch(value: unknown): Partial<NativeSettings> {
   if (fullscreenMode) out.fullscreenMode = fullscreenMode;
   if (FULLSCREEN_SCALINGS.includes(input.fullscreenScaling as FullscreenScaling))
     out.fullscreenScaling = input.fullscreenScaling;
+  if (LOW_LATENCY_MODES.includes(input.lowLatencyMode as LowLatencyMode)) out.lowLatencyMode = input.lowLatencyMode;
   for (const [key, min, max] of [
     ["ghostOpacity", 0, 1],
     ["crosshairSize", 0, 40],
@@ -960,6 +993,7 @@ export function settingsPatch(value: unknown): Partial<NativeSettings> {
     "alwaysOnTop",
     "rememberWindowBounds",
     "minimizeOnFocusLoss",
+    "reflexFlash",
     "showPlayerGlow",
     "firstPersonGlow",
     "gainTicks",
@@ -1118,6 +1152,7 @@ export function applyState(value: unknown): boolean {
     readHostSettings(next.settings);
   } else state.settings.sensitivity = state.sensitivity;
   if (next.displays !== undefined) state.displays = displayCatalog(next.displays);
+  if (next.lowLatency !== undefined) state.lowLatency = lowLatencyInfo(next.lowLatency);
   if (Array.isArray(next.capabilities))
     state.capabilities = next.capabilities
       .filter((item): item is string => typeof item === "string" && item.length <= 64)

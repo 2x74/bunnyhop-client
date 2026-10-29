@@ -27,6 +27,8 @@ const DEVICE_KEYS = [
   "minimizeOnFocusLoss",
   "fullscreenMode",
   "fullscreenScaling",
+  "lowLatencyMode",
+  "reflexFlash",
   "mouseDiagnostics",
 ];
 /** Retired like on the website: everyone is shown in their loadout. */

@@ -233,6 +233,9 @@ public:
 
     SourceHdr(Gl &g, GLuint vao) : gl(g), emptyVao(vao) {
         using namespace native_hdr;
+        // Created mid-frame: the frame's own target (DXGI's shared frame on Windows) stays bound afterwards.
+        GLint frameTarget = 0;
+        gl.GetIntegerv(GL_FRAMEBUFFER_BINDING, &frameTarget);
         downsample = link_program(gl, hdr_vertex, hdr_downsample.c_str());
         blur = link_program(gl, hdr_vertex, hdr_blur);
         composite = link_program(gl, hdr_vertex, hdr_composite.c_str());
@@ -242,7 +245,7 @@ public:
         gl.BindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
         gl.BufferData(GL_PIXEL_PACK_BUFFER, lumWidth * lumHeight * 4, nullptr, GL_STREAM_READ);
         gl.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-        gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
+        gl.BindFramebuffer(GL_FRAMEBUFFER, GLuint(frameTarget));
     }
 
     ~SourceHdr() {

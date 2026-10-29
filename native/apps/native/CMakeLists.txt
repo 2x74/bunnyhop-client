@@ -263,7 +263,11 @@ if(BUNNYHOP_BUILD_CLIENT)
         file(TO_CMAKE_PATH "${BUNNYHOP_ICON_DIR}/icon.ico" BUNNYHOP_WINDOWS_ICON)
         configure_file(packaging/windows/app.rc.in generated/app.rc @ONLY)
         target_sources(bunnyhop-native PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated/app.rc"
-            src/display_scaling_windows.cpp)
+            src/display_scaling_windows.cpp src/low_latency_windows.cpp src/anti_lag_windows.cpp
+            src/play_priority_windows.cpp)
+        # AMD's Anti-Lag 2 header uses an MSVC extension that C++20's conformance mode refuses.
+        set_source_files_properties(src/anti_lag_windows.cpp PROPERTIES COMPILE_OPTIONS "/permissive")
+        target_link_libraries(bunnyhop-native PRIVATE d3d11 dxgi winmm avrt)
         include(packaging/WebView2.cmake)
         bunnyhop_windows_menu(bunnyhop-native)
     elseif(UNIX)
@@ -357,6 +361,11 @@ if(BUNNYHOP_BUILD_CLIENT)
         bunnyhop_core_native bunnyhop-native-text SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
     target_compile_definitions(bunnyhop-native-gameplay-benchmark PRIVATE
         BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
+    if(WIN32)
+        target_sources(bunnyhop-native-gameplay-benchmark PRIVATE
+            src/low_latency_windows.cpp src/anti_lag_windows.cpp src/play_priority_windows.cpp)
+        target_link_libraries(bunnyhop-native-gameplay-benchmark PRIVATE d3d11 dxgi winmm avrt)
+    endif()
     add_executable(bunnyhop-native-render-benchmark src/render_benchmark.cpp)
     target_include_directories(bunnyhop-native-render-benchmark PRIVATE vendor)
     target_link_libraries(bunnyhop-native-render-benchmark PRIVATE bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)

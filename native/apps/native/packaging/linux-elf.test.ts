@@ -116,6 +116,8 @@ function releaseResources(stage: string, exe: string) {
     "licenses/SDL3.txt",
     "licenses/dr_libs.txt",
     "licenses/stb.txt",
+    "licenses/nvapi.txt",
+    "licenses/amd.txt",
     "licenses/LDNOOBW-CC-BY-4.0.txt",
     "licenses/Announcer-CC-BY-4.0.txt",
     "licenses/Unicode.txt",
