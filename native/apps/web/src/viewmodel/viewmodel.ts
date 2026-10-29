@@ -31,6 +31,7 @@ import { getLoadout, getOutfit, getPlayerGlow, onLoadout, onOutfit } from "../pl
 import { PlayerGlowShell } from "../player/glow";
 import { DEFAULT_LOADOUT, gloveStyle, type CosmeticLoadout } from "../loadout";
 import { applyLoadoutUniforms, NO_LOOK, sameLook, type FinishSpec, type MaterialLook } from "./finishes/shader";
+import { wantsReflection } from "./finishes/detail";
 import { ensureViewmodelLayout } from "./finishes/layout";
 import { followLoadout } from "./equip";
 import { concat } from "../player/bunny/rig";
@@ -268,7 +269,10 @@ export class Viewmodel {
     const g = this.geometryFor(this.knifeDef);
     if (this.mesh.geometry !== g) this.mesh.geometry = g;
     ensureViewmodelLayout(this.mesh.geometry);
-    const look = applyLoadoutUniforms(this.uniforms, this.loadout, this.finishOverride);
+    // The first-person detail shading (finishes/detail.ts); the scene reflection only runs for reflective hardware or a
+    // painted finish (its metallic / glossy parts; the metal finishes, 22+, keep their own capture alive).
+    const look = applyLoadoutUniforms(this.uniforms, this.loadout, this.finishOverride, true);
+    this.uniforms.uCosEnv.want = wantsReflection(g) || (look.finish > 0 && look.finish < 22);
     if (sameLook(look, this.look)) return;
     this.look = look;
     (this.mesh.material as THREE.Material).dispose();

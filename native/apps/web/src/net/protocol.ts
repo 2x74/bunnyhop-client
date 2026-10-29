@@ -94,7 +94,12 @@ export const SF_TELEPORT = 8;
  * (EXT_WEAPONS) a shot. Older clients ignore it.
  */
 export const SF_SLASH = 16;
-/** Cosmetic: a carrot stab (secondary attack) since the previous sample. */
+/**
+ * Cosmetic: a carrot stab (secondary attack) since the previous sample; with a gun in hand (EXT_WEAPONS, 0.0.29) a
+ * reload started or a tube gun's shell went in (third-person reload gesture). Sent only on samples without SF_SLASH.
+ * Older clients ignore SF_STAB with a gun (a gun "attack" that isn't primary plays nothing), and the room relays it
+ * like any attack flag (rate limited with the shots), so no room change.
+ */
 export const SF_STAB = 32;
 /**
  * Cosmetic: the inspect (viewmodel/inspects/combo.ts), a 2-bit field in bits 6-7 (SF_INSPECT_MASK): 1 = an inspect

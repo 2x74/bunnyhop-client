@@ -1,6 +1,6 @@
 # Current native compatibility
 
-The vendored game sources come from web `release-0.0.29` at `b29f5037`: physics **18**, timer rules **2**, and
+The vendored game sources come from web `main` at `59fd424c` (v0.0.29 and its hotfixes): physics **18**, timer rules **2**, and
 millisecond scores (timing policy 1). The build makes the WASM verifier from that commit's core and checks its
 SHA-256 (`3cd68ab1a59fb71b32f448a1be195f9ceaf3074ccb5ccb89b72ed2014f563242`). See
 [the v0.0.29 integration notes](../native/docs/v0.0.29-native-integration.md) and

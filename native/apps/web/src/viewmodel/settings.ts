@@ -5,7 +5,7 @@
 
 import { registerSettingsSection } from "../ui/settings-registry";
 import { DEFAULT_PREFS, horizontalFovAt, keyLabel, prefs, type Action, type Prefs, type ViewmodelHand } from "../ui/settings";
-import { VIEWMODEL_POS } from "./defaults";
+import { VIEWMODEL_POS, VIEWMODEL_POS_V2 } from "./defaults";
 import { getLoadout, onLoadout } from "../player/cosmetics";
 import { h } from "../ui/dom";
 import { loadoutSummary } from "../ui/loadout-ui";
@@ -28,13 +28,16 @@ function keycaps(ui: { keycap: (t: string) => HTMLElement }, keys: string[]): HT
 
 /**
  * Position presets (viewmodel_fov + viewmodel_offset_x / _y / _z). Our offsets are Source units like CS:GO's (the rig
- * is the CS:S knife viewmodel skeleton), so CS:GO numbers carry over. Classic = the default (viewmodel/defaults.ts
- * VIEWMODEL_POS): CS:S's FOV 54 and its knife's footprint, low on the right (offsets 0 / 0 / 0 is CS:S's own pose,
- * which with the bunny's bigger hands and longer blades covers more of the screen than CS:S's knife did).
+ * is the CS:S knife viewmodel skeleton), so CS:GO numbers carry over, but the bunny's hands and blades are bigger than
+ * CS's, so the same numbers frame them differently. Default (viewmodel/defaults.ts VIEWMODEL_POS): CS:GO's "you can see
+ * your hands" framing, gloves, cuffs and some sleeve in view. CS:S: the v0.0.6-v0.0.28 default, CS:S's FOV 54 and its
+ * knife's small footprint, low on the right (offsets 0 / 0 / 0 is CS:S's own pose, which with the bunny's bigger hands
+ * and longer blades covers more of the screen than CS:S's knife did).
  */
-type PresetId = "classic" | "csgo" | "minimal";
+type PresetId = "default" | "css" | "csgo" | "minimal";
 const PRESETS: Record<PresetId, { label: string; fov: number; x: number; y: number; z: number }> = {
-  classic: { label: "Classic", ...VIEWMODEL_POS },
+  default: { label: "Default", ...VIEWMODEL_POS },
+  css: { label: "CS:S", ...VIEWMODEL_POS_V2 },
   // CS:GO's defaults (viewmodel_presetpos 1, "Desktop").
   csgo: { label: "CS:GO default", fov: 60, x: 1, y: 1, z: -1 },
   // Hands out wide, pulled back and down: as little of the screen covered as the sliders allow.
@@ -70,8 +73,8 @@ registerSettingsSection(
       prefs.update((q) => Object.assign(q.viewmodel, { fov: p.fov, x: p.x, y: p.y, z: p.z }));
       ctx.refresh();
     }, (Object.entries(PRESETS) as [PresetId, (typeof PRESETS)[PresetId]][]).map(([id, p]) => [id, p.label]), {
-      desc: `Classic (the default): CS:S's FOV 54 and its knife's place on screen, low on the right (offsets ${VIEWMODEL_POS.x} / ${VIEWMODEL_POS.y} / ${VIEWMODEL_POS.z}). CS:GO default: FOV 60, 1 / 1 / -1. Minimal: FOV 68, hands out wide, back and down.`,
-      keywords: "viewmodel_presetpos classic csgo cs:go minimal",
+      desc: `Default: your gloves, cuffs and a bit of sleeve in view, the weapon low on the right (FOV ${VIEWMODEL_POS.fov}, offsets ${VIEWMODEL_POS.x} / ${VIEWMODEL_POS.y} / ${VIEWMODEL_POS.z}). CS:S: smaller and lower, about CS:S's knife on screen (the default before v0.0.29: FOV ${VIEWMODEL_POS_V2.fov}, ${VIEWMODEL_POS_V2.x} / ${VIEWMODEL_POS_V2.y} / ${VIEWMODEL_POS_V2.z}). CS:GO default: FOV 60, 1 / 1 / -1. Minimal: FOV 68, hands out wide, back and down.`,
+      keywords: "viewmodel_presetpos default classic css cs:s csgo cs:go minimal",
     }) as HTMLElement & { repaint?: () => void };
     /** Slider setter that also re-highlights the matching preset (or none: custom). */
     const live = <K extends "fov" | "x" | "y" | "z">(k: K) => (v: number) => (set(k)(v), preset.repaint?.());
@@ -97,7 +100,7 @@ registerSettingsSection(
               max: 90,
               step: 1,
               unit: "°",
-              desc: () => `viewmodel_fov: horizontal at 4:3 like your FOV (CS:S 54). Your screen: ${horizontalFovAt(P().viewmodel.fov, innerWidth / innerHeight).toFixed(0)}° horizontal.`,
+              desc: () => `viewmodel_fov: horizontal at 4:3 like your FOV (default ${VIEWMODEL_POS.fov}; CS:S 54, CS:GO 60). Your screen: ${horizontalFovAt(P().viewmodel.fov, innerWidth / innerHeight).toFixed(0)}° horizontal.`,
               hint: "Lower is bigger",
               peek: true,
               keywords: "viewmodel_fov fov hands size bigger smaller",
@@ -117,9 +120,9 @@ registerSettingsSection(
           offset("x", "Offset X", -2, 2.5, "viewmodel_offset_x: sideways, + = outward (away from the centre, for either hand). Units like CS:GO.", "right left side"),
           offset("y", "Offset Y", -2, 2, "viewmodel_offset_y: + = forward (further from you), - = closer.", "forward back"),
           offset("z", "Offset Z", -2, 2, "viewmodel_offset_z: + = up, - = down.", "up down height"),
-          ui.actions("Reset position", [ui.button("Reset", () => (prefs.update((q) => Object.assign(q.viewmodel, { x: VIEWMODEL_POS.x, y: VIEWMODEL_POS.y, z: VIEWMODEL_POS.z })), ctx.refresh()))], {
-            desc: "Offsets back to the default (Classic); keeps your FOV. 0 / 0 / 0 is CS:S's own pose.",
-            keywords: "reset offset position default",
+          ui.actions("Reset to default", [ui.button("Reset", () => (prefs.update((q) => Object.assign(q.viewmodel, { fov: VIEWMODEL_POS.fov, x: VIEWMODEL_POS.x, y: VIEWMODEL_POS.y, z: VIEWMODEL_POS.z })), ctx.refresh()))], {
+            desc: `Viewmodel FOV and offsets back to the default (FOV ${VIEWMODEL_POS.fov}, ${VIEWMODEL_POS.x} / ${VIEWMODEL_POS.y} / ${VIEWMODEL_POS.z}); keeps your hand, bob and sway. 0 / 0 / 0 is CS:S's own pose.`,
+            keywords: "reset offset position fov default",
           }),
         ),
         ui.group(

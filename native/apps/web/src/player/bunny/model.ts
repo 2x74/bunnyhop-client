@@ -22,25 +22,34 @@ import type { PlayerModelImpl, PlayerModelOptions, PlayerPose, PlayerStyle } fro
 import { CsAnimState } from "../studio/animstate";
 import type { StudioData } from "../studio/data";
 import { BoneSetup } from "../studio/pose";
-import { bunnyGeometry } from "./mesh";
+import { bunnyGeometry, type BunnyHood } from "./mesh";
+import { hoodOf } from "./prebuild-parts";
 import type { KnifeDef } from "../../viewmodel/knives/types";
 import { colourway, paletteOf, type Colourway } from "./palettes";
 import { BunnyProcedural } from "./procedural";
-import { concat, EAR, invert34, KNIFE_BONE, rig, type Rig } from "./rig";
+import { concat, EAR, EAR_DOWN, invert34, KNIFE_BONE, rig, type Rig } from "./rig";
 import { TpInspect, type TpBones } from "../../viewmodel/inspects/third";
 import { TP_CARROT } from "../../viewmodel/knives/ctx";
-import { gloveStyle, type CosmeticLoadout } from "../../loadout";
+import { gloveStyle, HAIR_DEFAULT, HAIR_LENGTH, type CosmeticLoadout } from "../../loadout";
 import { applyLoadoutUniforms, cosmeticsStill, NO_LOOK, sameLook, type MaterialLook } from "../../viewmodel/finishes/shader";
-import { advanceCapybara, capybaraMotion, advancePropeller } from "../hat-fx";
+import { advanceCapybara, advancePonytail, capybaraMotion, advancePropeller, ponytailMotion } from "../hat-fx";
 import { ensureBunnyLayout } from "../../viewmodel/finishes/layout";
 import { headwear } from "./hats";
+import { ensureHeadwear } from "../hat-detail";
 import { hatFit } from "./hat-fit";
 import { lookOf, type BunnyLook } from "./look";
 import { gunById } from "../../viewmodel/guns/index";
-import { bunnyGunGeometry, bunnySilencerGeometry } from "../../viewmodel/guns/meshes";
+
+/** The ponytail's length over the built one (loadout.hairLength, a percent; absent = 1). */
+const ponyLength = (l: CosmeticLoadout | null | undefined): number => (l?.hairLength ?? HAIR_LENGTH.default) / 100;
+import { bunnyGunGeometry, bunnyHold, bunnySilencerGeometry } from "../../viewmodel/guns/meshes";
+import { GunHold } from "./gun-hold";
+import { BunnyGunFx } from "./gun-fx";
 
 const D2R = Math.PI / 180;
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
+/** Third-person muzzle flash size per gun class (the first-person quads, scaled for distance). */
+const FLASH_SIZE = { pistol: 1.7, smg: 1.5, rifle: 2.0, shotgun: 2.5, sniper: 2.3 } as const;
 const _pt = new THREE.Vector3();
 
 class DirectSkeleton extends THREE.Skeleton {
@@ -107,6 +116,8 @@ function earWant(dir0: number[], sx: number, perk: number, out: number[]): numbe
 interface Ear {
   /** First ear bone; the second follows it. */
   bone: number;
+  /** The bone that carries the ear: the head (hood up) or the upper spine (hood down, rig.ts EAR_DOWN). */
+  carrier: number;
   /** Bind-pose base / mid joint and rest direction. */
   base: number[];
   mid: number[];
@@ -208,17 +219,22 @@ export class BunnyModel implements PlayerModelImpl {
   /** Cosmetic loadout look (blade finish, glove style) compiled into the solid material (viewmodel/finishes/shader.ts). */
   private loadout: CosmeticLoadout | null = null;
   private capyMotion = capybaraMotion();
+  private ponyMotion = ponytailMotion();
   /**
    * Headwear (hats.ts headwear): the owner's hat (loadout.hat) or else the rank crown (loadout.crown: overall #1 / #2 /
    * #3), sharing the skeleton and the body's material.
    */
   private crown: THREE.SkinnedMesh | null = null;
   /**
-   * A map-given gun in the right hand (viewmodel/guns/world.ts bunnyGunGeometry: skinned to R_Hand on this skeleton,
-   * the body's material); the knife hides (its bone collapses) while one is out. null = the knife.
+   * A map-given gun in both hands (guns/meshes.ts bunnyGunGeometry, the body's material) on its own two-bone skeleton
+   * (gun, magazine) that the hold writes (gun-hold.ts: the gun on the aim, both arms on it, kick / reload / draw); the
+   * knife hides (its bone collapses) while one is out. null = the knife.
    */
   private gun: THREE.SkinnedMesh | null = null;
   private gunId: string | null = null;
+  private gunSkel: DirectSkeleton | null = null;
+  private hold: GunHold | null = null;
+  private gunFx: BunnyGunFx | null = null;
   /** The gun's silencer (the USP's), shown while setGunSilencer(true). */
   private silencer: THREE.SkinnedMesh | null = null;
   private silencerOn = false;
@@ -241,14 +257,21 @@ export class BunnyModel implements PlayerModelImpl {
   private wasGrounded = true;
   private yaw = 0;
   private head = this.r.bone("Head1");
-  private ears: Ear[] = [1, -1].map((side) => {
-    const bone = this.r.index(side > 0 ? "bunny.EarL" : "bunny.EarR");
-    const b = this.r.bind;
-    const base = [b[bone * 12 + 3], b[bone * 12 + 7], b[bone * 12 + 11]];
-    const dir0 = [EAR.dir[0] * side, EAR.dir[1], EAR.dir[2]];
-    const mid = base.map((x, k) => x + dir0[k] * EAR.seg);
-    return { bone, base, mid, dir0, p: new Float64Array(3), v: new Float64Array(3), wb: new Float64Array(3), hasBase: false, side };
-  });
+  private hood: BunnyHood = "up";
+  private ears: Ear[] = this.makeEars("up");
+  /** The ears' pivots for the hood: on the head (rig bind) or hanging from the lowered hood (rig.ts EAR_DOWN). */
+  private makeEars(hood: BunnyHood): Ear[] {
+    return [1, -1].map((side) => {
+      const bone = this.r.index(side > 0 ? "bunny.EarL" : "bunny.EarR");
+      const b = this.r.bind;
+      const down = hood === "down";
+      const base = down ? [EAR_DOWN.base[0] * side, EAR_DOWN.base[1], EAR_DOWN.base[2]] : [b[bone * 12 + 3], b[bone * 12 + 7], b[bone * 12 + 11]];
+      const dir0 = down ? [EAR_DOWN.dir[0] * side, EAR_DOWN.dir[1], EAR_DOWN.dir[2]] : [EAR.dir[0] * side, EAR.dir[1], EAR.dir[2]];
+      const mid = base.map((x, k) => x + dir0[k] * EAR.seg);
+      const carrier = down ? this.r.bone(EAR_DOWN.carrier) : this.r.bone("Head1");
+      return { bone, carrier, base, mid, dir0, p: new Float64Array(3), v: new Float64Array(3), wb: new Float64Array(3), hasBase: false, side };
+    });
+  }
   private earTwitch = 3;
   private tmp = new Float32Array(12);
   private tmp2 = new Float32Array(12);
@@ -274,7 +297,11 @@ export class BunnyModel implements PlayerModelImpl {
     this.knife = o.knife ?? null;
     this.bodyLook = lookOf(o.outfit);
 
-    const geo = bunnyGeometry(this.knife, gloveStyle(o.loadout?.glove).style, this.bodyLook, o.loadout?.body === "body-b" ? "feminine" : "classic");
+    this.hood = hoodOf(this.bodyLook, o.loadout?.hat);
+    this.ears = this.makeEars(this.hood);
+    this.uniforms.uHairColor.value.setHex(o.loadout?.hairColor ?? HAIR_DEFAULT);
+    this.uniforms.uPonytail.value.z = ponyLength(o.loadout);
+    const geo = bunnyGeometry(this.knife, gloveStyle(o.loadout?.glove).style, this.bodyLook, o.loadout?.body === "body-b" ? "feminine" : "classic", this.hood);
     const n = this.r.names.length;
     this.S = new Float32Array(n * 12);
     for (let i = 0; i < n; i++) this.S.set([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0], i * 12);
@@ -329,23 +356,85 @@ export class BunnyModel implements PlayerModelImpl {
    */
   bodyBox(out: THREE.Box3): THREE.Box3 {
     out.makeEmpty();
+    this.bodyPoints((p) => out.expandByPoint(p));
+    return out;
+  }
+
+  /**
+   * How deep the knife reaches into the head and hood as posed now (units; <= 0: clear): for each sampled knife vertex,
+   * the head's radius toward it (its farthest vertex within 10 degrees of the ray from the head's middle) minus its
+   * distance. The ears don't count. For the avatar's stills (avatar/stage.ts), where an inspect caught mid-trick can
+   * pass the blade through the face; research/avatar-refresh/clearance.cjs measures the same.
+   */
+  knifeHeadDepth(): number {
+    if (this.gun || this.knifeHidden || this.knifeBone < 0) return -Infinity;
+    const r = this.r, S = this.S;
+    if (!this.headBones) {
+      const set = new Set<number>();
+      for (let i = 0; i < r.names.length; i++) {
+        if (/Ear/.test(r.names[i])) continue;
+        for (let k = i; k >= 0; k = r.parent[k]) {
+          if (/Ear/.test(r.names[k])) break;
+          if (k === this.head) {
+            set.add(i);
+            break;
+          }
+        }
+      }
+      this.headBones = set;
+    }
+    const P = this.mesh.geometry.getAttribute("position"), SI = this.mesh.geometry.getAttribute("skinIndex");
+    const head: number[] = [], knife: number[] = [];
+    const at = (i: number, b: number, out: number[]) => {
+      const o = b * 12, x = P.getX(i), y = P.getY(i), z = P.getZ(i);
+      out.push(S[o] * x + S[o + 1] * y + S[o + 2] * z + S[o + 3], S[o + 4] * x + S[o + 5] * y + S[o + 6] * z + S[o + 7], S[o + 8] * x + S[o + 9] * y + S[o + 10] * z + S[o + 11]);
+    };
+    for (let i = 0; i < P.count; i += 3) {
+      const b = SI.getX(i);
+      if (b === this.knifeBone) at(i, b, knife);
+      else if (this.headBones.has(b)) at(i, b, head);
+    }
+    const n = head.length / 3;
+    if (!n || !knife.length) return -Infinity;
+    let cx = 0, cy = 0, cz = 0;
+    for (let i = 0; i < head.length; i += 3) (cx += head[i]), (cy += head[i + 1]), (cz += head[i + 2]);
+    (cx /= n), (cy /= n), (cz /= n);
+    const cos = Math.cos((10 * Math.PI) / 180);
+    let worst = -Infinity;
+    for (let k = 0; k < knife.length; k += 3) {
+      const dx = knife[k] - cx, dy = knife[k + 1] - cy, dz = knife[k + 2] - cz, l = Math.hypot(dx, dy, dz);
+      if (l > 20 || l < 1e-6) continue;
+      let rad = 0;
+      for (let i = 0; i < head.length; i += 3) {
+        const hx = head[i] - cx, hy = head[i + 1] - cy, hz = head[i + 2] - cz, hl = Math.hypot(hx, hy, hz);
+        if (hx * dx + hy * dy + hz * dz > cos * l * hl) rad = Math.max(rad, hl);
+      }
+      if (rad) worst = Math.max(worst, rad - l);
+    }
+    return worst;
+  }
+  private headBones: Set<number> | null = null;
+
+  /** The sample of posed vertices bodyBox is made of (same space), one at a time: the avatar's framing fits them. */
+  bodyPoints(fn: (p: THREE.Vector3) => void): void {
     const S = this.S;
     for (const m of [this.mesh, this.crown]) {
       if (!m) continue;
-      const P = m.geometry.getAttribute("position"), SI = m.geometry.getAttribute("skinIndex");
+      const P = m.geometry.getAttribute("position"), SI = m.geometry.getAttribute("skinIndex"), HW = m.geometry.getAttribute("headwear");
       for (let i = 0; i < P.count; i += 5) {
         const b = SI.getX(i);
         if ((this.gun || this.knifeHidden) && b === this.knifeBone) continue;
         const o = b * 12;
         let x = P.getX(i), y = P.getY(i), z = P.getZ(i);
         if (m === this.crown) {
-          const s = this.uniforms.uHeadwearScale.value, t = this.uniforms.uHeadwearOffset.value;
+          const face = (HW?.getX(i) ?? 1) > 1.5;
+          const s = face ? this.uniforms.uHeadwearFaceScale.value : this.uniforms.uHeadwearScale.value;
+          const t = face ? this.uniforms.uHeadwearFaceOffset.value : this.uniforms.uHeadwearOffset.value;
           x = x * s.x + t.x; y = y * s.y + t.y; z = z * s.z + t.z;
         }
-        out.expandByPoint(_pt.set(S[o] * x + S[o + 1] * y + S[o + 2] * z + S[o + 3], S[o + 4] * x + S[o + 5] * y + S[o + 6] * z + S[o + 7], S[o + 8] * x + S[o + 9] * y + S[o + 10] * z + S[o + 11]));
+        fn(_pt.set(S[o] * x + S[o + 1] * y + S[o + 2] * z + S[o + 3], S[o + 4] * x + S[o + 5] * y + S[o + 6] * z + S[o + 7], S[o + 8] * x + S[o + 9] * y + S[o + 10] * z + S[o + 11]));
       }
     }
-    return out;
   }
 
   /** The head bone's origin in three.js world space, as of the last update. For framing. */
@@ -366,6 +455,15 @@ export class BunnyModel implements PlayerModelImpl {
     return out
       .set(S[o] * x + S[o + 1] * y + S[o + 2] * z + S[o + 3], S[o + 4] * x + S[o + 5] * y + S[o + 6] * z + S[o + 7], S[o + 8] * x + S[o + 9] * y + S[o + 10] * z + S[o + 11])
       .applyMatrix4(this.yawG.matrixWorld);
+  }
+
+  /** The gun's muzzle (or the silencer's tip) in three.js world space as of the last update; false without a gun. */
+  gunMuzzle(out: THREE.Vector3): boolean {
+    const m = this.hold?.data && this.gun ? this.hold.muzzle : null;
+    if (!m) return false;
+    this.yawG.updateWorldMatrix(true, false);
+    out.set(m[0], m[1], m[2]).applyMatrix4(this.yawG.matrixWorld);
+    return true;
   }
 
   /** Hides the knife (an empty hand: the avatar editor). A gun hides it anyway. */
@@ -405,7 +503,7 @@ export class BunnyModel implements PlayerModelImpl {
 
   /** Headwear for the loadout (hats.ts headwear): none on Tek, whose temple wings are its helmet. */
   private headwear(): THREE.BufferGeometry | null {
-    return this.bodyLook === "tek" ? null : headwear(this.loadout);
+    return this.bodyLook === "tek" ? null : headwear(this.loadout, this.bodyLook);
   }
 
   private applyColours(): void {
@@ -433,9 +531,13 @@ export class BunnyModel implements PlayerModelImpl {
     if (this.loadout?.hat !== l?.hat) {
       this.capyMotion = capybaraMotion();
       this.uniforms.uCapybara.value.set(0, 0, 0, 0);
+      this.ponyMotion = ponytailMotion();
+      this.uniforms.uPonytail.value.set(0, 0, 1, 0);
       this.uniforms.uPropellerAngle.value = 0;
     }
     this.loadout = l;
+    this.uniforms.uHairColor.value.setHex(l?.hairColor ?? HAIR_DEFAULT);
+    this.uniforms.uPonytail.value.z = ponyLength(l);
     this.applyLook();
     this.setCrown(this.headwear());
   }
@@ -449,12 +551,16 @@ export class BunnyModel implements PlayerModelImpl {
     this.silencer?.removeFromParent();
     this.silencer = null;
     const def = id ? gunById(id) : undefined;
+    this.gunFx?.clear();
+    // A switch or pickup draws (not a model appearing with a gun, or a snap).
+    (this.hold ??= new GunHold(this.r)).setGun(def ? bunnyHold(def) : null, this.hasLast && !this.snapNext);
     if (!def) return;
-    this.gun = this.handMesh(bunnyGunGeometry(def, this.handBone));
+    this.gunSkel ??= new DirectSkeleton(2);
+    this.gun = this.handMesh(bunnyGunGeometry(def), this.gunSkel);
     this.yawG.add(this.gun);
-    const sil = bunnySilencerGeometry(def, this.handBone);
+    const sil = bunnySilencerGeometry(def);
     if (sil) {
-      this.silencer = this.handMesh(sil);
+      this.silencer = this.handMesh(sil, this.gunSkel);
       this.silencer.visible = this.silencerOn;
       this.yawG.add(this.silencer);
     }
@@ -469,10 +575,10 @@ export class BunnyModel implements PlayerModelImpl {
     if (this.silencer) this.silencer.visible = on;
   }
 
-  private handMesh(geo: THREE.BufferGeometry): THREE.SkinnedMesh {
+  private handMesh(geo: THREE.BufferGeometry, skeleton: THREE.Skeleton = this.skeleton): THREE.SkinnedMesh {
     const m = new THREE.SkinnedMesh(geo, this.mesh.material);
     m.bindMode = THREE.DetachedBindMode;
-    m.bind(this.skeleton, new THREE.Matrix4());
+    m.bind(skeleton, new THREE.Matrix4());
     m.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 38), 58);
     m.renderOrder = this.mesh.renderOrder;
     return m;
@@ -482,11 +588,14 @@ export class BunnyModel implements PlayerModelImpl {
     const fit = hatFit(this.bodyLook, this.loadout?.hat);
     this.uniforms.uHeadwearScale.value.fromArray(fit.scale);
     this.uniforms.uHeadwearOffset.value.fromArray(fit.offset);
+    this.uniforms.uHeadwearFaceScale.value.fromArray(fit.face?.scale ?? fit.scale);
+    this.uniforms.uHeadwearFaceOffset.value.fromArray(fit.face?.offset ?? fit.offset);
     if (this.crown?.geometry === geo) return;
     this.crown?.removeFromParent();
     this.crown = null;
     if (!geo) return;
-    if (!geo.hasAttribute("headwear")) geo.setAttribute("headwear", new THREE.Float32BufferAttribute(new Float32Array(geo.getAttribute("position").count).fill(1), 1));
+    // The head-fit flag, carrying each face's hat material (player/hat-detail.ts).
+    ensureHeadwear(geo);
     const m = new THREE.SkinnedMesh(geo, this.mesh.material);
     m.bindMode = THREE.DetachedBindMode;
     m.bind(this.skeleton, new THREE.Matrix4());
@@ -497,8 +606,11 @@ export class BunnyModel implements PlayerModelImpl {
   }
 
   private applyLook(): void {
-    // Geometry per knife + glove style (mesh.ts bunnyGeometry, cached).
-    const g = bunnyGeometry(this.knife, gloveStyle(this.loadout?.glove).style, this.bodyLook, this.loadout?.body === "body-b" ? "feminine" : "classic");
+    // Geometry per knife + glove style + look + build + hood (mesh.ts bunnyGeometry, cached). A wig lowers the hood,
+    // and the ears move with it (their springs restart from rest).
+    const hood = hoodOf(this.bodyLook, this.loadout?.hat);
+    if (hood !== this.hood) (this.hood = hood), (this.ears = this.makeEars(hood));
+    const g = bunnyGeometry(this.knife, gloveStyle(this.loadout?.glove).style, this.bodyLook, this.loadout?.body === "body-b" ? "feminine" : "classic", hood);
     if (this.mesh.geometry !== g) {
       this.mesh.geometry = g;
       this.depthMesh.geometry = g;
@@ -729,6 +841,13 @@ export class BunnyModel implements PlayerModelImpl {
       // airborne movement is included, with no dependence on gait, grounded state or leg playback.
       this.uniforms.uPropellerAngle.value = advancePropeller(this.uniforms.uPropellerAngle.value, Math.hypot(this.vel[0], this.vel[1]), dt);
     }
+    if (this.loadout?.hat === "hat-ponytail") {
+      // The tail's pendulum: the body's acceleration (hops, landings, strafes), wind from its speed, the head's turn.
+      const p = this.ponyMotion;
+      const len = ponyLength(this.loadout);
+      advancePonytail(p, this.vel, s.yaw, dt, snap, cosmeticsStill(), len);
+      this.uniforms.uPonytail.value.set(p.pitch, p.side, len, 0);
+    }
     if (this.loadout?.hat === "hat-capybara" || this.loadout?.hat === "hat-maxwell") {
       const c = this.capyMotion;
       advanceCapybara(c, Math.hypot(this.vel[0], this.vel[1]), s.grounded, dt, snap, cosmeticsStill());
@@ -765,10 +884,12 @@ export class BunnyModel implements PlayerModelImpl {
       this.yaw = this.proc.update(snap ? 0 : dt, s, this.vel, snap, jumped, S);
     }
     if (this.acting) this.applyActing(this.acting);
+    // The gun in both hands (before the ears: its stance turns the chest and the head).
+    if (this.gun) this.gunLayer(s, snap, dt);
     this.updateEars(dt, snap, s);
     // The knife bone follows the hand (same bind), then the inspect gesture may move the arm and the knife.
     if (this.knifeBone >= 0) S.copyWithin(this.knifeBone * 12, this.handBone * 12, this.handBone * 12 + 12);
-    this.inspectLayer(s, snap, dt);
+    if (!this.gun) this.inspectLayer(s, snap, dt);
     // A gun out (or an empty hand): the knife collapses to nothing (its geometry stays in the body's mesh; no swap).
     if ((this.gun || this.knifeHidden) && this.knifeBone >= 0) S.fill(0, this.knifeBone * 12, this.knifeBone * 12 + 12);
 
@@ -801,14 +922,13 @@ export class BunnyModel implements PlayerModelImpl {
   }
 
   /**
-   * Ear secondary motion: each ear is a damped spring pendulum in world space hanging off the head. The tip proxy
-   * follows the ear's rest direction (carried by the head) with lag: hops flick the ears down then up, landings
+   * Ear secondary motion: each ear is a damped spring pendulum in world space hanging off the head (off the upper spine
+   * with the hood down: rig.ts EAR_DOWN). The tip proxy follows the ear's rest direction (carried by that bone) with lag: hops flick the ears down then up, landings
    * flop them forward, speed streams them back, turns swing them sideways. The result is applied as a swing about
    * the ear base (first bone) and a softer extra bend at the mid joint (second bone).
    */
   private updateEars(dt: number, snap: boolean, s: PlayerPose): void {
     const S = this.S;
-    const H = this.head * 12;
     const cy = Math.cos(this.yaw * D2R), sy = Math.sin(this.yaw * D2R);
     const P = s.position;
     const Lp = 6.5; // pendulum length
@@ -821,10 +941,12 @@ export class BunnyModel implements PlayerModelImpl {
     for (const e of this.ears) {
       const sx = e.side;
       const { bone: bIdx, base } = e;
-      // Acting: the ear's wanted direction leans toward pricked-up or laid-back (the swing below is still from rest).
-      const perk = this.acting ? (sx > 0 ? this.acting.earL : this.acting.earR) : 0;
+      const H = e.carrier * 12;
+      // Acting: the ear's wanted direction leans toward pricked-up or laid-back (the swing below is still from rest;
+      // hanging ears from a lowered hood don't act).
+      const perk = this.acting && this.hood === "up" ? (sx > 0 ? this.acting.earL : this.acting.earR) : 0;
       const want = perk ? earWant(e.dir0, sx, perk, this.earWant) : e.dir0;
-      // Head-carried base and rest direction, model space then world (Source).
+      // Carried base and rest direction, model space then world (Source).
       const mb = [0, 0, 0], md = [0, 0, 0];
       for (let k = 0; k < 3; k++) {
         mb[k] = S[H + k * 4] * base[0] + S[H + k * 4 + 1] * base[1] + S[H + k * 4 + 2] * base[2] + S[H + k * 4 + 3];
@@ -840,7 +962,9 @@ export class BunnyModel implements PlayerModelImpl {
       } else {
         const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
         const h = dt / steps;
-        const K = 320, Crel = 21, Cabs = 1.0, G = 30;
+        // Hanging from the lowered hood the ears are stiffer (they lie against the back rather than stand on the head).
+        const hang = this.hood === "down";
+        const K = hang ? 640 : 320, Crel = hang ? 34 : 21, Cabs = 1.0, G = 30;
         // Idle twitch: a little sideways flick (perpendicular to the ear, in the horizontal plane).
         if (twitch) (e.v[0] += -wd[1] * 70 * twitch * sx), (e.v[1] += wd[0] * 70 * twitch * sx);
         for (let it = 0; it < steps; it++) {
@@ -858,7 +982,7 @@ export class BunnyModel implements PlayerModelImpl {
       for (let k = 0; k < 3; k++) e.p[k] = wb[k] + [dx, dy, dz][k] * Lp;
       for (let k = 0; k < 3; k++) e.wb[k] = wb[k];
       e.hasBase = true;
-      // World direction -> bind space (undo yaw, then the head's rotation: transpose of S_head's 3x3).
+      // World direction -> bind space (undo yaw, then the carrier's rotation: transpose of its 3x3).
       const mx = cy * dx + sy * dy, my = -sy * dx + cy * dy, mz = dz;
       const bd = [
         S[H] * mx + S[H + 4] * my + S[H + 8] * mz,
@@ -866,9 +990,11 @@ export class BunnyModel implements PlayerModelImpl {
         S[H + 2] * mx + S[H + 6] * my + S[H + 10] * mz,
       ];
       const m1 = this.tmp, m2 = this.tmp2;
-      swing(e.dir0, bd, base, 1, 1.1, m1);
+      // Hanging ears swing less far and bend less at the mid joint, so hops don't flare them out from the back.
+      const hangs = this.hood === "down";
+      swing(e.dir0, bd, base, hangs ? 0.55 : 1, hangs ? 0.5 : 1.1, m1);
       concat(S, H, m1, 0, S, bIdx * 12);
-      swing(e.dir0, bd, e.mid, 0.5, 1.1, m2);
+      swing(e.dir0, bd, e.mid, hangs ? 0.3 : 0.5, hangs ? 0.5 : 1.1, m2);
       concat(S, bIdx * 12, m2, 0, S, (bIdx + 1) * 12);
     }
   }
@@ -900,6 +1026,35 @@ export class BunnyModel implements PlayerModelImpl {
     tp.apply(this.tpBones!, this.r, KNIFE_BONE, this.knife?.tp ?? TP_CARROT);
   }
 
+  /**
+   * The gun in both hands (gun-hold.ts): the shot / reload events in, the arms posed on the gun, its two bones written,
+   * the flash and the cases. The avatar editor's arm gestures (acting arms) keep the arms; the gun rides the right hand.
+   */
+  private gunLayer(s: PlayerPose, snap: boolean, dt: number): void {
+    const hold = this.hold!, d = hold.data;
+    if (!d) return;
+    const still = cosmeticsStill();
+    if (s.gunShot) hold.shot();
+    if (s.gunReload) hold.reload(s.gunReload.seconds, !!s.gunReload.shell, !!s.gunReload.empty);
+    const a = this.acting;
+    hold.silenced = this.silencerOn && !!d.def.silencer;
+    hold.apply(this.S, { yaw: s.yaw - this.yaw, pitch: s.pitch, crouched: s.crouched, grounded: s.grounded, speed: Math.hypot(this.vel[0], this.vel[1]), dt, snap, still }, !!a && !!(a.arm || a.armL || a.reachR || a.reachL));
+    const bm = this.gunSkel!.boneMatrices!, K = hold.skin;
+    for (let i = 0; i < 2; i++) {
+      const o = i * 12, q = i * 16;
+      bm[q] = K[o], bm[q + 1] = K[o + 4], bm[q + 2] = K[o + 8], bm[q + 3] = 0;
+      bm[q + 4] = K[o + 1], bm[q + 5] = K[o + 5], bm[q + 6] = K[o + 9], bm[q + 7] = 0;
+      bm[q + 8] = K[o + 2], bm[q + 9] = K[o + 6], bm[q + 10] = K[o + 10], bm[q + 11] = 0;
+      bm[q + 12] = K[o + 3], bm[q + 13] = K[o + 7], bm[q + 14] = K[o + 11], bm[q + 15] = 1;
+    }
+    // Flash and cases (solid bunnies only: ghosts and silhouettes don't fire).
+    const fx = (this.gunFx ??= new BunnyGunFx(this.yawG));
+    if (snap) fx.clear();
+    if (s.gunShot && this.style === "solid" && !this.silhouette)
+      fx.shot(hold.muzzle, hold.barrel, FLASH_SIZE[d.def.cls] * (hold.silenced ? 0.4 : 1), hold.port, hold.throwDir, d.def.shell === "shotgun", still);
+    fx.update(snap ? 0 : dt, hold.muzzle, hold.barrel);
+  }
+
   /** PLAYERANIMEVENT_JUMP from state alone (see studio/csmodel.ts). */
   private detectJump(s: PlayerPose, snap: boolean): boolean {
     const vz = this.vel[2];
@@ -924,6 +1079,7 @@ export class BunnyModel implements PlayerModelImpl {
   }
 
   dispose(): void {
+    this.gunFx?.dispose();
     this.glow.dispose();
     this.root.removeFromParent();
     (this.mesh.material as THREE.Material).dispose();

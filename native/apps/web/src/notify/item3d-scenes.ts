@@ -12,7 +12,7 @@ import * as THREE from "three";
 import { cleanLoadout, DEFAULT_LOADOUT, gloveStyle, loadoutFor } from "../loadout";
 import { achievement } from "../progression";
 import { colourway, paletteOf } from "../player/bunny/palettes";
-import { hatGeometry } from "../player/bunny/hats";
+import { hatGeometry, headwearKey } from "../player/bunny/hats";
 import { playerUniforms, solidMaterial, type PlayerUniforms } from "../player/materials";
 import { PlayerModel } from "../player/model";
 import { Trail } from "../player/trail";
@@ -142,7 +142,8 @@ function gloveScene(spec: PreviewSpec): ItemScene {
 // Hats
 
 function hatScene(spec: PreviewSpec): ItemScene {
-  const geo = spec.hat ? hatGeometry(spec.hat) : null;
+  // As the standard bunny wears it (a wig: the whole head of hair, not the fringe under a hood).
+  const geo = spec.hat ? hatGeometry(headwearKey(spec.hat, "bunny")) : null;
   if (!geo) throw new Error(`no hat ${spec.hat}`);
   const { scene, pivot } = base();
   const u = playerUniforms();

@@ -47,6 +47,8 @@ import { hasBunnyGeometry } from "../player/bunny/mesh";
 import { hasHatGeometry } from "../player/bunny/hats";
 import { loadoutFor } from "../loadout";
 import { menuIdleAllowed, onMenuMapStart } from "./menu-work";
+import { loadThumb, saveThumb } from "./thumb-store";
+import { playerLookTier } from "../player/look-tier";
 
 /** First person and close-up (hands), your bunny, your ghost. */
 export type StageView = "fp" | "close" | "bunny" | "ghost";
@@ -74,6 +76,17 @@ const IDLE_LOOP = 4.6;
 /** Thumbnails, per page: they only depend on what they show. */
 const thumbCache = new Map<string, HTMLCanvasElement>();
 const MAX_THUMBS = 240;
+/**
+ * Thumbnails are also kept across page loads (thumb-store.ts), as long as this chunk is the same build: its hashed URL
+ * changes whenever this file or any model code it imports changes. Not in dev (one URL for every edit).
+ */
+const THUMB_STORE = import.meta.env.DEV ? null : new URL(import.meta.url).pathname;
+/** A stored thumbnail's key: the job's, plus what else the drawing depends on (the player-material look; for gloves,
+ * the viewmodel settings that place the hand). */
+function storedKey(job: ThumbJob): string {
+  const vm = job.kind === "glove" ? `|${JSON.stringify(prefs.get().viewmodel)}` : "";
+  return `${job.key}|t${playerLookTier()}${vm}`;
+}
 
 /** How long a stage whose view closed waits to be taken over before it frees its GL context. */
 const PARK_MS = 60_000;
@@ -199,6 +212,8 @@ export class LoadoutStage {
   /** The last item model drawn per kind (see runJob). */
   private lastItem = new Map<string, ItemScene>();
   private waiting = new Map<string, ((c: HTMLCanvasElement) => void)[]>();
+  /** Thumbnails being looked up in the store (thumb-store.ts). */
+  private looking = new Set<string>();
 
   /**
    * The Loadout's stage in `host`: a parked one (its canvas left the page: a closed Loadout, the screen being replaced)
@@ -419,8 +434,29 @@ export class LoadoutStage {
     const list = this.waiting.get(job.key);
     if (list) return void list.push(done);
     this.waiting.set(job.key, [done]);
+    if (!THUMB_STORE) return this.queueThumb(job);
+    // Stored from an earlier visit: shown without drawing anything; else queued to draw.
+    this.looking.add(job.key);
+    void loadThumb(THUMB_STORE, storedKey(job)).then((c) => {
+      this.looking.delete(job.key);
+      if (this.disposed || !this.waiting.has(job.key)) return;
+      if (!c) return this.queueThumb(job);
+      this.deliver(job.key, c);
+    });
+  }
+
+  private queueThumb(job: ThumbJob): void {
     this.jobs.push(job);
     this.kick();
+  }
+
+  /** A finished thumbnail: cached for the page and handed to the tiles waiting for it. */
+  private deliver(key: string, c: HTMLCanvasElement): void {
+    if (thumbCache.size >= MAX_THUMBS) thumbCache.delete(thumbCache.keys().next().value!);
+    thumbCache.set(key, c);
+    const cbs = this.waiting.get(key) ?? [];
+    this.waiting.delete(key);
+    for (const cb of cbs) cb(c);
   }
 
   /** Builds the next queued item models (two at a time, in idle time); their thumbnails draw once they're ready. */
@@ -452,6 +488,7 @@ export class LoadoutStage {
 
   /** Drops queued thumbnails nobody shows any more (slot switched). */
   cancelThumbs(keep: (key: string) => boolean): void {
+    for (const k of this.looking) if (!keep(k)) this.waiting.delete(k);
     this.jobs = this.jobs.filter((j) => keep(j.key) || (this.waiting.delete(j.key), j.kind === "item" && j.scene?.dispose(), false));
   }
 
@@ -491,11 +528,8 @@ export class LoadoutStage {
     out.getContext("2d", { willReadFrequently: true })!.drawImage(this.canvas, 0, bh - th, tw, th, 0, 0, tw, th);
     r.setScissorTest(false);
     r.setViewport(0, 0, bw / pr, bh / pr);
-    if (thumbCache.size >= MAX_THUMBS) thumbCache.delete(thumbCache.keys().next().value!);
-    thumbCache.set(job.key, out);
-    const cbs = this.waiting.get(job.key) ?? [];
-    this.waiting.delete(job.key);
-    for (const cb of cbs) cb(out);
+    if (THUMB_STORE) saveThumb(THUMB_STORE, storedKey(job), out);
+    this.deliver(job.key, out);
   }
 
   /** The knife alone, tip up and to the right, its face turned a little to the light. */

@@ -107,7 +107,7 @@ export class KnifeShowcase {
 
   private material(code: number): THREE.ShaderMaterial {
     let m = this.mats.get(code);
-    if (!m) this.mats.set(code, (m = solidMaterial(this.uniforms, { finish: code, glove: false })));
+    if (!m) this.mats.set(code, (m = solidMaterial(this.uniforms, { finish: code, glove: false, detail: true })));
     return m;
   }
 

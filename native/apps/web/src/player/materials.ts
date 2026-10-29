@@ -9,15 +9,23 @@
 //    hint of the real colours (no CSS filter to switch off).
 // All of them share one skinned vertex shader and a per-model uniform block.
 //
+// Garments (fabric.ts): the solid material shades the bunny's clothes by what they are (fleece, rib knit, jersey,
+// leather, rubber, the visor's glass, the face's cloth), from finishUV, at the detail the graphics look asks for
+// (look-tier.ts uPlayerLook, a shared uniform: no program variants). Surfaces without garment ids shade as before.
+//
 // Cosmetic loadout (viewmodel/finishes/shader.ts): the solid material compiles a blade finish (`#define FINISH n`) and
 // glove recolouring (`#define GLOVE`) into the same program when a look asks for them, so a finished knife is still
 // one material and one draw call; without a look the program is exactly the plain one.
 
 import * as THREE from "three";
+import { HAIR_DEFAULT } from "../loadout";
 import { HAT_FX_FRAGMENT_GHOST, HAT_FX_FRAGMENT_PARS, HAT_FX_FRAGMENT_SOLID, HAT_FX_VERTEX_NORMAL, HAT_FX_VERTEX_PARS, HAT_FX_VERTEX_POSITION } from "./hat-fx";
+import { FABRIC_FRAGMENT_PARS, FABRIC_VERTEX_MAIN, FABRIC_VERTEX_PARS } from "./fabric";
+import { PLAYER_LOOK_UNIFORMS, type PlayerLookUniforms } from "./look-tier";
+import { HAT_DETAIL_FRAGMENT_PARS, HAT_DETAIL_FRAGMENT_SOLID } from "./hat-detail";
 import { finishUniforms, FRAGMENT_IS_BLADE, FRAGMENT_PARS, GLOVE_FRAGMENT_ALBEDO, GLOVE_FRAGMENT_LIGHT, lookDefines, NO_LOOK, VERTEX_MAIN, VERTEX_PARS, type FinishUniforms, type MaterialLook } from "../viewmodel/finishes/shader";
 
-export interface PlayerUniforms extends FinishUniforms {
+export interface PlayerUniforms extends FinishUniforms, PlayerLookUniforms {
   [name: string]: THREE.IUniform;
   uAccent: THREE.IUniform<THREE.Color>;
   uGhost: THREE.IUniform<THREE.Color>;
@@ -34,9 +42,16 @@ export interface PlayerUniforms extends FinishUniforms {
   /** Per-player rotor phase, integrated from horizontal movement speed. */
   uPropellerAngle: THREE.IUniform<number>;
   uCapybara: THREE.IUniform<THREE.Vector4>;
+  /** The Ponytail's pendulum (hat-fx.ts advancePonytail): x pitch, y side. */
+  uPonytail: THREE.IUniform<THREE.Vector4>;
   /** Bind-space headwear fit, applied after its animation and before skinning. */
   uHeadwearScale: THREE.IUniform<THREE.Vector3>;
   uHeadwearOffset: THREE.IUniform<THREE.Vector3>;
+  /** The same for headwear's face parts (headwear attribute 2; bunny/hat-fit.ts HatFit.face). */
+  uHeadwearFaceScale: THREE.IUniform<THREE.Vector3>;
+  uHeadwearFaceOffset: THREE.IUniform<THREE.Vector3>;
+  /** A wig's hair colour (linear; loadout.hairColor), for hair faces (hat-fx.ts codes -9..-11). */
+  uHairColor: THREE.IUniform<THREE.Color>;
 }
 
 export function playerUniforms(): PlayerUniforms {
@@ -44,6 +59,9 @@ export function playerUniforms(): PlayerUniforms {
     uFabric: { value: 0 },
     uHeadwearScale: { value: new THREE.Vector3(1, 1, 1) },
     uHeadwearOffset: { value: new THREE.Vector3() },
+    uHeadwearFaceScale: { value: new THREE.Vector3(1, 1, 1) },
+    uHeadwearFaceOffset: { value: new THREE.Vector3() },
+    uHairColor: { value: new THREE.Color(HAIR_DEFAULT) },
     uAccent: { value: new THREE.Color(0xffb43a) },
     uGhost: { value: new THREE.Color(0xffc542) },
     uGhostRim: { value: new THREE.Color(0xffc542) },
@@ -54,7 +72,9 @@ export function playerUniforms(): PlayerUniforms {
     uPalette: { value: Array.from({ length: 8 }, () => new THREE.Color(0xffffff)) },
     uPropellerAngle: { value: 0 },
     uCapybara: { value: new THREE.Vector4() },
+    uPonytail: { value: new THREE.Vector4() },
     ...finishUniforms(),
+    ...PLAYER_LOOK_UNIFORMS,
   };
 }
 
@@ -62,7 +82,8 @@ export const playerVertex = /* glsl */ `
 attribute vec3 partColor;
 attribute float accent;
 attribute float headwear;
-uniform vec3 uHeadwearScale, uHeadwearOffset;
+uniform vec3 uHeadwearScale, uHeadwearOffset, uHeadwearFaceScale, uHeadwearFaceOffset;
+uniform vec3 uHairColor;
 uniform vec3 uAccent;
 uniform vec3 uPalette[8];
 varying vec3 vFabricPos;
@@ -72,21 +93,25 @@ varying float vGlow;
 varying vec3 vNormalW;
 varying vec3 vWorldPos;
 ${VERTEX_PARS}
+${FABRIC_VERTEX_PARS}
 ${HAT_FX_VERTEX_PARS}
+varying float vHw;
 #include <common>
 #include <skinning_pars_vertex>
 void main() {
   #include <beginnormal_vertex>
 ${HAT_FX_VERTEX_NORMAL}
-  if (headwear > .5) objectNormal = normalize(objectNormal / uHeadwearScale);
+  if (headwear > .5) objectNormal = normalize(objectNormal / (headwear > 1.5 ? uHeadwearFaceScale : uHeadwearScale));
   #include <skinbase_vertex>
   #include <skinnormal_vertex>
   #include <begin_vertex>
 ${HAT_FX_VERTEX_POSITION}
-  if (headwear > .5) transformed = transformed * uHeadwearScale + uHeadwearOffset;
+  if (headwear > 1.5) transformed = transformed * uHeadwearFaceScale + uHeadwearFaceOffset;
+  else if (headwear > .5) transformed = transformed * uHeadwearScale + uHeadwearOffset;
   #include <skinning_vertex>
   #include <project_vertex>
   vFabricPos = position;
+  vHw = headwear; // hat material (player/hat-detail.ts)
   vFabricMask = accent > 2.5 && accent < 10.5 ? 1.0 : 0.0;
   vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
   vNormalW = normalize(mat3(modelMatrix) * objectNormal);
@@ -94,7 +119,14 @@ ${HAT_FX_VERTEX_POSITION}
   // (player/hat-fx.ts), >= 16 a glove style's face
   // (viewmodel/gloves/paint.ts; VERTEX_MAIN recolours it under GLOVE, else it reads as the colourway's glove slot).
   vColor = accent > 15.5 ? uPalette[6] : accent > 10.5 ? partColor : accent > 2.5 ? uPalette[int(accent - 2.5)] : accent > 0.5 ? uAccent : partColor;
+  // A palette slot code with a fraction (3 + k + f, f < 0.5) is that slot darkened by 2f: shadowed cloth, like the inside
+  // of the lowered hood (mesh.ts), in the outfit's own colour.
+  if (accent > 2.5 && accent < 10.5) vColor *= 1.0 - 2.0 * max(0.0, accent - floor(accent + 0.5));
+  // Hair (hat-fx.ts codes -9..-11): the player's hair colour, at the face's tone (partColor.r: 0.5 = the colour itself,
+  // under = shade toward the roots / underside, over = a sheen on top).
+  if (fxHair()) vColor = fxHairTone(uHairColor, partColor.r);
   vGlow = accent > 1.5 && accent < 2.5 ? 1.0 : 0.0;
+${FABRIC_VERTEX_MAIN}
 ${VERTEX_MAIN}
 }`;
 
@@ -125,31 +157,46 @@ varying float vGlow;
 varying vec3 vNormalW;
 varying vec3 vWorldPos;
 ${FRAGMENT_PARS}
+${FABRIC_FRAGMENT_PARS}
 ${HAT_FX_FRAGMENT_PARS}
+${HAT_DETAIL_FRAGMENT_PARS}
 void main() {
   vec3 n = normalize(vNormalW);
   float back = gl_FrontFacing ? 1.0 : 0.0;
   if (!gl_FrontFacing) n = -n;
   vec3 V = normalize(cameraPosition - vWorldPos);
   vec3 L = normalize(vec3(0.42, 0.78, 0.46));
-  float ndl = dot(n, L);
-  float key = smoothstep(-0.05, 0.55, ndl);
-  vec3 sky = vec3(0.70, 0.76, 0.88), ground = vec3(0.30, 0.27, 0.26);
-  vec3 ambient = mix(ground, sky, n.y * 0.5 + 0.5) * 0.62;
   vec3 albedo = vColor;
   if (uFabric > .5 && vFabricMask > .5) {
     vec3 cell = floor(vFabricPos * 13.0);
     float fleck = fract(sin(dot(cell, vec3(12.9898,78.233,37.719))) * 43758.5453);
     albedo *= .91 + .16 * fleck;
   }
+  // Garments (fabric.ts): material detail, a bumped normal, baked occlusion; identity elsewhere. The derivatives are
+  // taken here, in uniform control flow, and only for the looks that draw detail.
+  vec3 gdx = vec3(0.0), gdy = vec3(0.0);
+  vec2 ggx = vec2(0.0), ggy = vec2(0.0);
+  if (uPlayerLook > 0.5) {
+    gdx = dFdx(vWorldPos); gdy = dFdy(vWorldPos);
+    ggx = dFdx(vGarm.xy); ggy = dFdy(vGarm.xy);
+  }
+  Garment gm = garmentOf(n, albedo, gdx, gdy, ggx, ggy);
+  n = gm.n;
+  albedo = gm.alb;
+  float ndl = dot(n, L);
+  float key = smoothstep(-0.05, 0.55, ndl);
+  vec3 sky = vec3(0.70, 0.76, 0.88), ground = vec3(0.30, 0.27, 0.26);
+  vec3 ambient = mix(ground, sky, n.y * 0.5 + 0.5) * 0.62;
 ${GLOVE_FRAGMENT_ALBEDO}
-  vec3 col = albedo * (ambient + key * vec3(0.78, 0.74, 0.68));
+  vec3 col = albedo * (ambient * gm.aoA + key * vec3(0.78, 0.74, 0.68) * gm.aoK);
   float rim = pow(1.0 - max(dot(n, V), 0.0), 3.0);
-  col += rim * 0.22 * mix(vec3(1.0), uAccent, 0.35);
+  col += rim * 0.22 * mix(vec3(1.0), uAccent, 0.35) * gm.aoA;
+  col += garmentLight(gm, n, V, L, key, ambient);
 ${GLOVE_FRAGMENT_LIGHT}
   col = mix(col * 0.38, col, back); // inside of the hood
   col = mix(col, vColor * 1.6 + 0.15, vGlow);
 ${HAT_FX_FRAGMENT_SOLID}
+${HAT_DETAIL_FRAGMENT_SOLID}
 #ifdef FINISH
   if (${FRAGMENT_IS_BLADE}) col = finishShade(n, V, L, ambient, key);
 #endif

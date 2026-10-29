@@ -41,6 +41,18 @@ export const EAR = {
   length: 9.6,
 };
 
+/**
+ * The ears with the hood down (a wig on: mesh.ts hoodDown): coming off the outside of the lowered hood on the upper
+ * back, out and down, then drooping; carried by the upper spine instead of the head. Base and rest direction of the left
+ * ear (mirror x); the tip direction it droops to. Same lengths as EAR.
+ */
+export const EAR_DOWN = {
+  base: [2.3, 9.9, 60.2] as V3,
+  dir: [0.3, 0.62, -0.72] as V3,
+  tip: [0.3, 0.06, -0.95] as V3,
+  carrier: "Spine4",
+};
+
 /** 3x4 from a quaternion (xyzw) and position. */
 export function quatMat(q: ArrayLike<number>, p: ArrayLike<number>, out: Float32Array | number[], o = 0): void {
   const [x, y, z, w] = [q[0], q[1], q[2], q[3]];

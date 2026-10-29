@@ -8,7 +8,7 @@ window) and WebView2 on Windows. The menu bundle refuses the web game entry poin
 (`build-menu.ts`, `menu-boundary.ts`). There is no Electron dependency; the old Electron client lives at the
 repository root.
 
-The vendored game sources come from web `release-0.0.29` at `b29f5037`, physics 18, timer rules 2. See
+The vendored game sources come from web `main` at `59fd424c` (v0.0.29 and its hotfixes), physics 18, timer rules 2. See
 [the v0.0.29 integration notes](../../docs/v0.0.29-native-integration.md).
 
 ## Build and play

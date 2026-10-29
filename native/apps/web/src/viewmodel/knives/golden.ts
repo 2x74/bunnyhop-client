@@ -6,9 +6,9 @@ import { ring } from "../../player/bunny/builder";
 import type { V3 } from "../../player/bunny/rig";
 import { buildCarrotFp, buildCarrotTp, carrot, type CarrotPalette } from "./carrot";
 import { fixed, type KnifeCtx } from "./ctx";
-import { PART, type KnifeDef } from "./types";
+import { KMAT, PART, type KnifeDef } from "./types";
 
-const GOLD = fixed(0xffc23a), GOLD_RING = fixed(0xfff3b0), GOLD_DARK = fixed(0xd9901a), GRIP = fixed(0x1f4a2a);
+const GOLD = fixed(0xffc23a, KMAT.polished), GOLD_RING = fixed(0xfff3b0, KMAT.veg), GOLD_DARK = fixed(0xd9901a, KMAT.polished), GRIP = fixed(0x1f4a2a, KMAT.grip);
 const PALETTE: CarrotPalette = { blade: GOLD, ring: GOLD_RING, grip: GRIP, guard: GOLD_DARK, leaf: GOLD, leafDark: GOLD_DARK };
 
 function build(k: KnifeCtx): void {

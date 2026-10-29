@@ -3,7 +3,8 @@
 
 import * as THREE from "three";
 import { Builder } from "../../player/bunny/builder";
-import { rig as bunnyRig, xform, type V3 } from "../../player/bunny/rig";
+import { xform, type V3 } from "../../player/bunny/rig";
+import { gunHoldData, type GunHoldData } from "../../player/bunny/gun-hold";
 import { KnifeCtx } from "../knives/ctx";
 import type { GunDef } from "./types";
 
@@ -21,54 +22,49 @@ export function worldGunGeometry(def: GunDef): THREE.BufferGeometry {
   return g;
 }
 
+/** The gun's extent in gun-local units (the world model's box), for the bunny's hold (the butt of the stock). */
+export function gunExtent(def: GunDef): { min: V3; max: V3 } {
+  const g = worldGunGeometry(def);
+  if (!g.boundingBox) g.computeBoundingBox();
+  const b = g.boundingBox!;
+  return { min: [b.min.x, b.min.y, b.min.z], max: [b.max.x, b.max.y, b.max.z] };
+}
+
+/** The bunny's hold data of a gun (player/bunny/gun-hold.ts), its butt from the world model's extent. */
+export function bunnyHold(def: GunDef): GunHoldData {
+  return gunHoldData(def, () => gunExtent(def));
+}
+
 const tpGeos = new Map<string, THREE.BufferGeometry>();
 
 /**
- * The gun on the bunny's right hand (bunny bind space through GunDef.tp, skinned 100% to `bone`): a SkinnedMesh on the
- * bunny's skeleton follows the hand with no per-frame work. Cached per gun + bone.
+ * The gun in the bunny's hands: built into the bunny's bind space with the right fist on its grip (gun-hold.ts
+ * gunHoldData bake), skinned to the gun mesh's own two bones: 0 the gun (= R_Hand's skinning matrix while the hand
+ * grips it), 1 the magazine (it rides in the left hand during a reload). A SkinnedMesh on a two-bone skeleton the
+ * bunny writes each frame (player/bunny/model.ts). Cached per gun.
  */
-export function bunnyGunGeometry(def: GunDef, bone: number): THREE.BufferGeometry {
-  return bunnyGeometry(def, bone, def.build, "");
+export function bunnyGunGeometry(def: GunDef, _bone?: number): THREE.BufferGeometry {
+  // (`_bone`: the hand bone the gun used to be skinned to; ignored, kept so older callers still type-check.)
+  return bunnyGeometry(def, def.build, "");
 }
 
 /**
- * The gun's silencer on the bunny's right hand, seated at the muzzle (same placement and skinning as bunnyGunGeometry):
- * a separate small mesh the bunny shows while it's on (PlayerModel.setGunSilencer). Null for a gun without one.
+ * The gun's silencer on the bunny, seated at the muzzle (same placement as bunnyGunGeometry, bone 0): a separate small
+ * mesh the bunny shows while it's on (PlayerModel.setGunSilencer). Null for a gun without one.
  */
-export function bunnySilencerGeometry(def: GunDef, bone: number): THREE.BufferGeometry | null {
-  return def.silencer ? bunnyGeometry(def, bone, def.silencer.build, "|sil") : null;
+export function bunnySilencerGeometry(def: GunDef): THREE.BufferGeometry | null {
+  return def.silencer ? bunnyGeometry(def, def.silencer.build, "|sil") : null;
 }
 
-function bunnyGeometry(def: GunDef, bone: number, build: GunDef["build"], tag: string): THREE.BufferGeometry {
-  const key = `${def.id}|${bone}${tag}`;
+function bunnyGeometry(def: GunDef, build: GunDef["build"], tag: string): THREE.BufferGeometry {
+  const key = `${def.id}${tag}`;
   let g = tpGeos.get(key);
   if (g) return g;
-  const r = bunnyRig();
-  const hand = r.bone("R_Hand");
-  const H = r.bind.subarray(hand * 12, hand * 12 + 12);
-  const tp = def.tp;
-  const x = norm(tp.x);
-  const z0 = norm(tp.z);
-  // z ⟂ x
-  const d = x[0] * z0[0] + x[1] * z0[1] + x[2] * z0[2];
-  const z = norm([z0[0] - x[0] * d, z0[1] - x[1] * d, z0[2] - x[2] * d]);
-  const y: V3 = [z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]];
-  const s = tp.s;
+  const bake = bunnyHold(def).bake;
   const b = new Builder();
-  build(
-    new KnifeCtx(
-      b,
-      "tp",
-      (p) => xform(H, 0, [tp.o[0] + (x[0] * p[0] + y[0] * p[1] + z[0] * p[2]) * s, tp.o[1] + (x[1] * p[0] + y[1] * p[1] + z[1] * p[2]) * s, tp.o[2] + (x[2] * p[0] + y[2] * p[1] + z[2] * p[2]) * s]),
-      () => [[bone, 1]],
-    ),
-  );
+  // (Builders name parts' bones through guns/shapes.ts boneOf: the magazine's is "Gun_Mag".)
+  build(new KnifeCtx(b, "tp", (p) => xform(bake, 0, p), (bone) => [[bone === "Gun_Mag" || bone === "Mag" ? 1 : 0, 1]]));
   g = b.geometry();
   tpGeos.set(key, g);
   return g;
-}
-
-function norm(v: V3): V3 {
-  const l = Math.hypot(v[0], v[1], v[2]) || 1;
-  return [v[0] / l, v[1] / l, v[2] / l];
 }
