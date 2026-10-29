@@ -109,10 +109,10 @@ test(
       expect(await page.locator("#rv .rv-sub").textContent()).toContain("bhop_arcane · Normal");
       // The page under it is hidden (web viewer.css body.viewer-open).
       expect(await page.locator("#overlay").isHidden()).toBe(true);
-      for (const name of ["Play / pause (Space)", "Export MP4", "Practice from here", "Close replay viewer"]) {
+      for (const name of ["Play / pause (Space)", "Export video", "Practice from here", "Close replay viewer"]) {
         const label =
-          name === "Export MP4"
-            ? "Render this replay to an MP4 video (E)"
+          name === "Export video"
+            ? "Render this replay to a video (E)"
             : name === "Practice from here"
               ? "Take over from this moment, in practice (P)"
               : name;
@@ -282,43 +282,92 @@ test(
 );
 
 test(
-  "replay video export: the default range unless Full recording or a clip is chosen",
+  "replay video export: presets, codecs and the clip, queued while the game keeps running",
   () =>
     withViewer(async (page) => {
-      await page.getByRole("button", { name: "Render this replay to an MP4 video (E)" }).click();
-      const card = page.getByRole("dialog", { name: "Export MP4" });
+      await host(page, {
+        videoExport: {
+          available: true,
+          state: "idle",
+          codecs: [
+            { id: "h264", label: "H.264", software: "libx264", hardware: "h264_videotoolbox" },
+            { id: "hevc", label: "HEVC", software: "libx265", hardware: "" },
+            { id: "av1", label: "AV1", software: "", hardware: "" },
+            { id: "prores", label: "ProRes", software: "prores_ks", hardware: "" },
+          ],
+        },
+      });
+      await page.getByRole("button", { name: "Render this replay to a video (E)" }).click();
+      const card = page.getByRole("dialog", { name: "Export video" });
       expect(await card.isVisible()).toBe(true);
-      const save = card.getByRole("button", { name: "Save MP4 to Downloads", exact: true });
+      const save = card.getByRole("button", { name: "Export", exact: true });
       const clipStart = card.getByLabel("Video clip start seconds", { exact: true });
       const clipEnd = card.getByLabel("Video clip end seconds", { exact: true });
       expect(await clipStart.inputValue()).toBe("0");
       expect(await clipEnd.inputValue()).toBe("25.6");
+      expect(await card.locator(".rv-ex-info").textContent()).toContain("h264_videotoolbox (hardware)");
 
-      // Untouched: no from / to, so the host exports 1 s before the start to 1.5 s after the finish.
+      // Untouched: the website's Standard export, no from / to, so the host exports 1 s before the start to 1.5 s
+      // after the finish.
       await save.click();
-      const trimmed = (await lastSent(page, "videoExport"))?.options;
-      expect(trimmed).toMatchObject({
-        width: 1280,
-        height: 720,
+      const standard = await lastSent(page, "videoExport");
+      expect(standard).toMatchObject({ action: "start", title: "Profile Hopper · bhop_arcane" });
+      expect(standard?.options).toMatchObject({
+        width: 1920,
+        height: 1080,
         fps: 60,
         quality: "high",
-        camera: "eye",
+        camera: "chase",
+        codec: "h264",
+        encoder: "auto",
+        samples: 1,
+        shutter: 0,
+        supersample: 1,
+        speed: true,
+        keys: true,
         fullRecording: false,
       });
-      expect(trimmed && "from" in trimmed).toBe(false);
-      expect(trimmed && "to" in trimmed).toBe(false);
+      expect(standard?.options && "from" in standard.options).toBe(false);
 
-      // The web card's segments pick the size and camera.
+      // Segments pick the size, camera, codec and motion blur; an encoder FFmpeg lacks can't be picked.
       await card.getByRole("radio", { name: "Portrait 9:16" }).click();
-      await card.getByRole("radio", { name: "1080p" }).click();
+      await card.getByRole("radio", { name: "8K" }).click();
       await card.getByRole("radio", { name: "Free path (flyby)" }).click();
+      await card.getByRole("radio", { name: "HEVC" }).click();
+      await card.getByRole("radio", { name: "Strong" }).click();
+      expect(await card.getByRole("radio", { name: "AV1" }).isDisabled()).toBe(true);
       await card.getByLabel("Export full recording", { exact: true }).check();
       await save.click();
-      const whole = (await lastSent(page, "videoExport"))?.options;
-      expect(whole).toMatchObject({ width: 1080, height: 1920, camera: "flyby", fullRecording: true });
-      expect(whole && "from" in whole).toBe(false);
+      expect((await lastSent(page, "videoExport"))?.options).toMatchObject({
+        width: 4320,
+        height: 7680,
+        camera: "flyby",
+        codec: "hevc",
+        samples: 8,
+        shutter: 180,
+        fullRecording: true,
+      });
 
-      // A clip is times on the timeline, sent as absolute ticks.
+      // Presets: Shorts is a portrait in-eye clip; Editing a clean ProRes intermediate with the sound as a WAV.
+      await card.getByRole("button", { name: "Shorts", exact: true }).click();
+      await save.click();
+      expect((await lastSent(page, "videoExport"))?.options).toMatchObject({
+        width: 1080,
+        height: 1920,
+        camera: "eye",
+        keys: false,
+      });
+      await card.getByRole("button", { name: "Editing", exact: true }).click();
+      await save.click();
+      expect((await lastSent(page, "videoExport"))?.options).toMatchObject({
+        quality: "edit",
+        codec: "prores",
+        hud: false,
+        speed: false,
+        audioFile: true,
+      });
+
+      // A clip is times on the timeline, sent as absolute ticks; a backwards clip isn't sent.
       await card.getByLabel("Export full recording", { exact: true }).uncheck();
       await clipStart.fill("2");
       await clipEnd.fill("10");
@@ -330,22 +379,35 @@ test(
       });
       const exports = (await sent(page, "videoExport")).length;
       await clipEnd.fill("30");
-      await save.click();
+      expect(await save.isDisabled()).toBe(true);
       expect((await sent(page, "videoExport")).length).toBe(exports);
 
       // A different range (Full recording in the viewer) fills the clip in again.
       await host(page, { playback: FULL });
       expect(await clipEnd.inputValue()).toBe("43");
-      await save.click();
-      expect((await lastSent(page, "videoExport"))?.options).not.toHaveProperty("to");
 
-      // Exporting: Close becomes Cancel export; Esc closes the card once it's done.
+      // Running exports show in the queue with their progress; more can be queued, and each can be canceled.
       await host(page, {
-        videoExport: { available: true, state: "capturing", frames: 10, totalFrames: 100, progress: 0.1 },
+        videoExport: {
+          available: true,
+          state: "capturing",
+          queue: [
+            {
+              id: 4,
+              title: "Profile Hopper · bhop_arcane",
+              state: "rendering",
+              frame: 10,
+              frames: 100,
+              eta: 12,
+              fps: 30,
+            },
+          ],
+        },
       });
-      await card.getByRole("button", { name: "Cancel export" }).click();
-      expect(await lastSent(page, "videoExport")).toEqual({ type: "videoExport", action: "cancel" });
-      await host(page, { videoExport: { available: true, state: "canceled", frames: 0, totalFrames: 0, progress: 0 } });
+      expect(await card.getByRole("status").first().textContent()).toBe("Frame 10 / 100 · 10% · 0:12 left · 30 fps");
+      expect(await card.getByRole("button", { name: "Add to queue", exact: true }).isEnabled()).toBe(true);
+      await card.getByRole("button", { name: "Cancel", exact: true }).click();
+      expect(await lastSent(page, "videoExport")).toEqual({ type: "videoExport", action: "cancel", id: 4 });
       await page.keyboard.press("Escape");
       expect(await card.isHidden()).toBe(true);
     }),

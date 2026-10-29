@@ -20,10 +20,22 @@ export interface VideoExportOptions {
   width: number;
   height: number;
   fps: number;
-  quality: "standard" | "high" | "max";
-  camera: "eye" | "chase" | "flyby" | "auto";
+  quality: "standard" | "high" | "max" | "edit";
+  camera: "eye" | "chase" | "flyby" | "orbit" | "auto";
   hud: boolean;
+  codec?: "h264" | "hevc" | "av1" | "prores" | "dnxhr" | "ffv1" | "png";
+  encoder?: "auto" | "hardware" | "software";
+  look?: "settings" | "source" | "plain";
+  supersample?: 1 | 2;
+  samples?: 1 | 2 | 4 | 8 | 16;
+  shutter?: number;
+  speed?: boolean;
+  keys?: boolean;
+  graph?: boolean;
+  crosshair?: boolean;
+  weapon?: boolean;
   audio?: boolean;
+  audioFile?: boolean;
   music?: string;
   musicOffset?: number;
   musicLevel?: number;
@@ -55,7 +67,10 @@ export type MenuMessage =
       action: "status" | "pick" | "useDefault" | "cancelChoice" | "cancelPending" | "forget" | "reveal";
     }
   | { type: "dataFolder"; action: "move"; when: "now" | "later" }
-  | { type: "videoExport"; action: "start" | "cancel"; options?: VideoExportOptions }
+  | { type: "videoExport"; action: "start"; options: VideoExportOptions; title?: string }
+  | { type: "videoExport"; action: "file"; id: string; map: string; options: VideoExportOptions }
+  | { type: "videoExport"; action: "cancel"; id?: number }
+  | { type: "videoExport"; action: "clear" }
   | { type: "ready"; origin: string; webglContexts: number; webglAttempts: number }
   | { type: "resume" | "restart" | "quit" }
   | { type: "prefetchMap"; map: string | null; sha?: string }

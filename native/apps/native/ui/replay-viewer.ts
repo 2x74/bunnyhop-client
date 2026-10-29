@@ -48,7 +48,7 @@ const HELP: readonly [string, string][] = [
   ["[ / ]", "slower / faster"],
   ["1–5 or F", "in-eye · chase · free · flyby · auto"],
   ["C", "compare with another replay"],
-  ["E", "export MP4"],
+  ["E", "export video"],
   ["P", "practice from this moment"],
   ["Esc", "back"],
 ];
@@ -109,7 +109,7 @@ export class ReplayViewer {
       seek: (tick) => send({ type: "replayControl", action: "seek", tick }),
       pause: (paused) => send({ type: "replayControl", action: "pause", paused }),
     });
-    this.exporter = new ReplayExportDialog(hooks.notice);
+    this.exporter = new ReplayExportDialog({ notice: hooks.notice, title: () => this.exportTitle() });
     this.playButton = button("▶", "Play / pause (Space)", () => this.togglePlay(), ".rv-play");
     this.fullButton = button(
       "Full recording",
@@ -218,8 +218,8 @@ export class ReplayViewer {
 
   private actions(): HTMLElement {
     const exportButton = button(
-      "Export MP4",
-      "Render this replay to an MP4 video (E)",
+      "Export video",
+      "Render this replay to a video (E)",
       () => this.exporter.open(),
       ".rv-chip.rv-accent",
     );
@@ -320,6 +320,13 @@ export class ReplayViewer {
   private shareData(): { url: string; title: string } {
     const run = serverRun();
     return { url: runUrl(run?.runId ?? ""), title: `${run?.name ?? "Replay"} · ${state.map ?? ""} · bunnyhop.lol` };
+  }
+
+  private exportTitle(): string {
+    const playback = state.playback;
+    const replay = state.replays.find((item) => item.id === playback.id);
+    const name = playback.player?.name ?? serverRun()?.name ?? replay?.name ?? "Replay";
+    return `${name} · ${state.map ?? replay?.map ?? ""}`;
   }
 
   private report(): void {
@@ -562,6 +569,6 @@ export class ReplayViewer {
     this.paintTitle();
     this.paintClock();
     this.paintControls();
-    this.exporter.refresh();
+    if (this.exporter.isOpen) this.exporter.refresh();
   }
 }

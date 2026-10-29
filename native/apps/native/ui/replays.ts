@@ -20,6 +20,8 @@ import {
   type GauntletWatchDeps,
 } from "./gauntlet-watch";
 import { ReplayViewer } from "./replay-viewer";
+import { ReplayExportDialog, type ExportFile } from "./replay-export";
+import { VideoQueuePanel } from "./video-queue";
 
 const serverReplays = new ReplayCache((id) => api.replay(id));
 let watchingInstalled = false;
@@ -192,7 +194,12 @@ function confirmDelete(replay: NativeReplay): void {
   dialog.showModal();
 }
 
-function replayRow(replay: NativeReplay): HTMLElement {
+/** The most replays one batch export queues. */
+const MAX_BATCH = 50;
+
+const exportFile = (replay: NativeReplay): ExportFile => ({ id: replay.id, map: replay.map, name: replay.name });
+
+function replayRow(replay: NativeReplay, video: (files: ExportFile[]) => void): HTMLElement {
   const action = (label: string, type: "play" | "ghost" | "export") =>
     h(
       "button.btn.btn-sm",
@@ -250,7 +257,8 @@ function replayRow(replay: NativeReplay): HTMLElement {
       null,
       action("Watch", "play"),
       action("Ghost", "ghost"),
-      action("Export", "export"),
+      h("button.btn.btn-sm", { type: "button", onclick: () => video([exportFile(replay)]) }, "Video"),
+      action("Save .bhr", "export"),
       ...screenshot,
       remove,
     ),
@@ -344,6 +352,25 @@ export function replayPanel(notice: (value: string) => void): HTMLElement {
     h("option", { value: "map" }, "Map"),
   ) as HTMLSelectElement;
   const summary = h("p.dim.native-replay-summary");
+  // The export card opens in its own #rv layer so it looks like the viewer's; the layer goes when the card closes.
+  const layer = h("div#rv.native-rv-export");
+  const videos = new ReplayExportDialog({ notice, closed: () => layer.remove() });
+  layer.append(videos.el);
+  const queue = new VideoQueuePanel();
+  const video = (files: ExportFile[]) => {
+    document.body.append(layer);
+    videos.open(files);
+  };
+  let shownReplays: NativeReplay[] = [];
+  const batch = h(
+    "button.btn",
+    {
+      type: "button",
+      title: `Queue a video of each replay listed (up to ${MAX_BATCH})`,
+      onclick: () => video(shownReplays.slice(0, MAX_BATCH).map(exportFile)),
+    },
+    "Videos of listed",
+  ) as HTMLButtonElement;
   for (const control of [search, filter, sort])
     control.addEventListener("input", () => {
       previous = "";
@@ -353,7 +380,7 @@ export function replayPanel(notice: (value: string) => void): HTMLElement {
     h(
       "p.dim.native-replay-lead",
       null,
-      "Finished runs and imported replays on this computer. Watch, race as a ghost, or save the file.",
+      "Finished runs and imported replays on this computer. Watch, race as a ghost, make a video, or save the file.",
     ),
     h("div.native-toolbar", null, search, filter, sort, summary),
     h(
@@ -370,10 +397,12 @@ export function replayPanel(notice: (value: string) => void): HTMLElement {
         "Clear ghosts",
       ),
       h("button.btn", { type: "button", onclick: () => send({ type: "replays", action: "list" }) }, "Refresh"),
+      batch,
       ghost,
     ),
     input,
     ghostRows,
+    queue.el,
     list,
   );
   let previous = "",
@@ -422,6 +451,10 @@ export function replayPanel(notice: (value: string) => void): HTMLElement {
     paintGhosts();
     paintStyles();
     const shown = replayLibrary(state.replays, search.value, filter.value, sort.value as ReplaySort);
+    shownReplays = shown;
+    batch.disabled = shown.length === 0;
+    queue.refresh();
+    if (videos.isOpen) videos.refresh();
     const megabytes = (state.replays.reduce((total, replay) => total + replay.bytes, 0) / 1048576).toFixed(1);
     summary.textContent = `${shown.length} of ${state.replays.length} replays · ${megabytes} MB`;
     const key = JSON.stringify([state.replays, search.value, filter.value, sort.value]);
@@ -430,10 +463,12 @@ export function replayPanel(notice: (value: string) => void): HTMLElement {
     const empty = state.replays.length
       ? "No replays match these filters."
       : "No local replays yet. Finish a run or import a .bhr file.";
-    list.replaceChildren(...(shown.length ? shown.map(replayRow) : [h("p.dim", null, empty)]));
+    const rows = shown.map((replay) => replayRow(replay, video));
+    list.replaceChildren(...(rows.length ? rows : [h("p.dim", null, empty)]));
   };
   const update = () => {
     if (!root.isConnected) {
+      layer.remove();
       window.removeEventListener("bunnyhop:host-state", update);
       return;
     }
