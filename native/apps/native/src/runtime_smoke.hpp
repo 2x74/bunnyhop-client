@@ -24,7 +24,7 @@ struct ReplayPlayer;
 struct LeaveHold;
 struct RunHeartbeat;
 class RoomState;
-struct DownloadedMap;
+struct MapDownloadResult;
 template <class T>
 class MapJobs;
 
@@ -48,7 +48,7 @@ struct RuntimeSmokeState {
     const std::string &gauntlet_id;
     ReplayPlayer &viewer;
     LeaveHold &leave_hold;
-    MapJobs<DownloadedMap> &download;
+    MapJobs<MapDownloadResult> &download;
     std::mutex &progress_mutex;
     std::string &loading;
     RunHeartbeat &heartbeat;
@@ -56,7 +56,6 @@ struct RuntimeSmokeState {
     std::vector<BhZone> &zones;
     std::string &pending_replay;
     std::string &pending_action;
-    std::string &pending_room_map;
     std::string &pending_tutorial;
     double tick_interval_seconds;
 };

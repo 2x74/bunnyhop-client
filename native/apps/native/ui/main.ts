@@ -720,7 +720,7 @@ function receive(value: unknown): void {
   paintLoading();
   if (finishChanged && !finishSummary) gauntletLine = null;
   gauntlet.onHostState();
-  roomService.hostMap(state.map);
+  roomService.hostMap(state.map, !!state.loading);
   syncingStyle = true;
   setSelectedStyle(state.style);
   syncingStyle = false;

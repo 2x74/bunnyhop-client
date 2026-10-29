@@ -175,6 +175,9 @@ bun apps/native/tools/record-proof.ts --map /path/to/map.bsp --replay /path/to/r
 Linux checks run in Docker with `apps/native/tools/verify-linux.sh` (`WITH_CLIENT=1` adds SDL/OpenGL under Xvfb).
 Headless runs don't test a real mouse; input changes need a check on the target OS.
 
+`--menu-smoke OUTPUT_PREFIX --online-map NAME --hidden` sends the map selection through the menu's host bridge.
+It uses a private data folder at `OUTPUT_PREFIX/data` and never submits scores.
+
 ## Notices
 
 The movengine project was read as a reference for input and BSP rendering; none of its GPL-3.0 code is used. Keep

@@ -353,7 +353,6 @@ export class NativeRoomService {
     if (this.changeTimer) clearTimeout(this.changeTimer);
     this.changeTimer = null;
     if (!change) return;
-    this.pendingMap = change.map;
     const generation = this.view.generation,
       id = this.view.id;
     const at = this.transport?.toLocal?.(change.at) ?? change.at;
@@ -368,14 +367,15 @@ export class NativeRoomService {
         this.pendingSnapshot = null;
         this.view.status = "connecting";
         this.view.detail = `Loading ${change.map}…`;
+        this.pendingMap = change.map;
         this.event({ t: "nativeMap", map: change.map });
         this.changed();
       },
       Math.max(0, Math.min(86_400_000, at - Date.now() + 250)),
     );
   }
-  hostMap(map: string | null): void {
-    if (!map || map !== this.pendingMap || !this.view.id || this.view.status === "closed") return;
+  hostMap(map: string | null, loading = false): void {
+    if (loading || !map || map !== this.pendingMap || !this.view.id || this.view.status === "closed") return;
     this.pendingMap = null;
     const { id, generation } = this.view;
     this.connectionEpoch++;

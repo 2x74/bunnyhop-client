@@ -16,7 +16,7 @@ class VideoCapture;
 class ReplayDirectorJob;
 struct ReplayPlayer;
 struct Options;
-struct DownloadedMap;
+struct MapDownloadResult;
 template <class T>
 class MapJobs;
 
@@ -35,7 +35,7 @@ public:
         const std::filesystem::path &cache;
         const Options &opt;
         Audio &audio;
-        const MapJobs<DownloadedMap> &download;
+        const MapJobs<MapDownloadResult> &download;
     };
 
     explicit VideoController(ReplayCamera &playback_camera);
