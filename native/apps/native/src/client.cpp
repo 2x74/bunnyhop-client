@@ -8,6 +8,7 @@
 #include "raw_keyboard.hpp"
 #include "input_timeline.hpp"
 #include "run_session.hpp"
+#include "run_history.hpp"
 #include "game_session.hpp"
 #include "base64.hpp"
 #include "replay_practice.hpp"
@@ -466,6 +467,9 @@ int run(const native::Options &opt) {
     input_scheduler.reset(SDL_GetTicksNS());
     using Clock = std::chrono::steady_clock;
     native::ActivityCounter activity;
+    constexpr double run_second_ns = 1'000'000'000;
+    native::RunHistory run_history;
+    run_history.load(cache / "run-history.json");
     activity.input(std::chrono::duration<double>(Clock::now().time_since_epoch()).count());
     auto activity_time = Clock::now();
     native::InputClock input_clock;
@@ -603,6 +607,7 @@ int run(const native::Options &opt) {
                 configured_turns,
                 packed_loadout
         );
+        run_history.select(map_id, active_track, active_style, double(SDL_GetTicksNS()) / run_second_ns);
     };
     auto reset = [&]() {
         cancel_video();
@@ -1597,6 +1602,7 @@ int run(const native::Options &opt) {
     video_smoke.begin();
     while (running) {
         frame_diagnostics.start_frame(SDL_GetTicksNS(), prefs.mouse_diagnostics);
+        recorder.diagnostics.frame(SDL_GetTicksNS(), input_timeline.queue());
         if (const auto failure = json_writer.take_error()) {
             std::cerr << "Could not save " << *failure << '\n';
             toast("Could not save " + *failure);
@@ -1816,6 +1822,11 @@ int run(const native::Options &opt) {
                     break;
                 case SDL_EVENT_MOUSE_MOTION: {
                     const uint64_t received = SDL_GetTicksNS();
+                    if (captured && focused && !chat.active && !viewer.active && !room.spectator_target) {
+                        recorder.diagnostics.motion(
+                                event.motion.timestamp, received, event.motion.xrel, event.motion.yrel
+                        );
+                    }
                     if (mouse_diagnostics.active && captured && focused && !chat.active) {
                         mouse_diagnostics.motion(event.motion.timestamp, received);
                     }
@@ -2850,6 +2861,9 @@ int run(const native::Options &opt) {
         activity.frame(
                 map_id, frame_seconds, std::chrono::duration<double>(now.time_since_epoch()).count(), activity_active
         );
+        if (!opt.frames && opt.runtime_smoke.empty()) {
+            run_history.persist(json_writer, cache, activity, double(SDL_GetTicksNS()) / run_second_ns);
+        }
         ++input_frame;
         input_frame_ms = frame_seconds * 1000;
         const double step_dt = viewer.active ? viewer.session.range.tick_interval : dt;
@@ -2976,6 +2990,11 @@ int run(const native::Options &opt) {
                 && opt.runtime_smoke.empty()) {
                 if (curr.events & 2) activity.jump(map_id);
                 if (timing.update_flags & 1) activity.attempt(map_id);
+                if ((timing.update_flags & 1) && !recorder.path.empty()) {
+                    const uint64_t started = SDL_GetTicksNS();
+                    run_history.start(double(started) / run_second_ns);
+                    recorder.diagnostics.start(started, input_timeline.queue(), input_timeline.timed());
+                }
             }
             {
                 // Jump stats. |prev| is the state before this tick, which is what the
@@ -3076,6 +3095,7 @@ int run(const native::Options &opt) {
 
             // Finish the recording on the exact native tick, before any further catch-up steps.
             if (!viewer.active && tick_run.status == 2 && !recorder.ended) {
+                recorder.diagnostics.stop(SDL_GetTicksNS(), input_timeline.queue());
                 reset_input_timing();
                 break;
             }
@@ -3153,7 +3173,9 @@ int run(const native::Options &opt) {
                         run_event(recorder.finish_event(
                                 run_state.track,
                                 run_state.seconds,
-                                native::read_text(data_location::from_utf8(recorder.path))
+                                native::read_text(data_location::from_utf8(recorder.path)),
+                                run_history.play(activity, map_id, prefs, recorder.input.turns),
+                                {{"sensitivity", prefs.sensitivity}}
                         ));
                         std::cout << "Native finish " << run_state.seconds << " seconds; replay " << recorder.path
                                   << '\n';
@@ -3886,6 +3908,9 @@ int run(const native::Options &opt) {
         frame_diagnostics.mark(native::FrameDiagnostics::kSleep, SDL_GetTicksNS());
     }
     save_window();
+    if (!opt.frames && opt.runtime_smoke.empty()) {
+        run_history.persist(json_writer, cache, activity, double(SDL_GetTicksNS()) / run_second_ns, true);
+    }
     frame_pacer.release(gl);
     if (core) bh_record_end(core.get());
     capture(false);

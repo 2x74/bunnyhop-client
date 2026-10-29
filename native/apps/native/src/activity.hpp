@@ -10,11 +10,13 @@ namespace native {
 // Real active time, independent of simulation speed. Public replay/score stats
 // remain server-owned; these counters feed the web's playtime and device stats.
 class ActivityCounter {
+public:
     struct Map {
         double seconds = 0;
         uint64_t jumps = 0, attempts = 0;
     };
 
+private:
     std::map<std::string, Map> maps;
     double seconds_ = 0, last_input = 0;
     uint64_t jumps_ = 0;
@@ -28,6 +30,11 @@ class ActivityCounter {
     }
 
 public:
+    Map on_map(const std::string &map) const {
+        const auto found = maps.find(map);
+        return found == maps.end() ? Map{} : found->second;
+    }
+
     void input(double now) {
         if (std::isfinite(now)) last_input = now;
     }
