@@ -1606,6 +1606,7 @@ int run(const native::Options &opt) {
     );
     video_smoke.begin();
     while (running) {
+        const auto frame_started = Clock::now();
         frame_diagnostics.start_frame(SDL_GetTicksNS(), prefs.mouse_diagnostics);
         recorder.diagnostics.frame(SDL_GetTicksNS(), input_timeline.queue());
         if (const auto failure = json_writer.take_error()) {
@@ -3928,8 +3929,9 @@ int run(const native::Options &opt) {
                 bool(opt.frames),
                 captured,
                 menu && menu->visible(),
-                std::chrono::duration<double>(Clock::now() - now).count(),
-                SDL_DelayNS
+                std::chrono::duration<double>(Clock::now() - frame_started).count(),
+                SDL_DelayNS,
+                SDL_DelayPrecise
         );
         frame_diagnostics.mark(native::FrameDiagnostics::kSleep, SDL_GetTicksNS());
     }

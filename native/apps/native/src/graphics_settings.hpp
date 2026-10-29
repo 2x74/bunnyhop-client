@@ -227,7 +227,7 @@ struct GraphicsMenuPacer {
         game_limit = settings.value("fpsLimit", 500);
     }
 
-    template <class Delay>
+    template <class Delay, class PreciseDelay>
     void
     frame(bool has_core,
           bool live_backdrop,
@@ -237,7 +237,8 @@ struct GraphicsMenuPacer {
           bool captured,
           bool menu_visible,
           double spent,
-          Delay delay) const {
+          Delay delay,
+          PreciseDelay precise_delay) const {
         if (pace(menu_visible, spent, delay)) return;
         constexpr double home_frame_seconds = 1. / 62;
         constexpr uint64_t idle_delay_ns = 10000000;
@@ -247,7 +248,7 @@ struct GraphicsMenuPacer {
             delay(idle_delay_ns);
         else if (!scripted && game_limit > 0) {
             const double target = 1. / game_limit;
-            if (spent < target) delay(uint64_t((target - spent) * 1e9));
+            if (spent < target) precise_delay(uint64_t((target - spent) * 1e9));
         }
     }
 
