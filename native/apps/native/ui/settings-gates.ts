@@ -22,9 +22,10 @@ const RAW_INPUT = "The desktop client always reads raw mouse motion; there's no 
 const SPIKES = "It drops browser pointer-lock jumps, which the desktop client never gets.";
 const BROWSER_FRAMES =
   "A browser frame-loop option. The desktop client paces frames with FPS limit and Display → VSync.";
-const WEB_LIGHTING = "Lighting of the website's Enhanced and Cinematic looks; the native renderer has no equivalent.";
-const PACKS = "Texture and sky packs install into the browser's storage. The desktop client uses each map's own.";
-const MEASURE = "Measuring draws with the website's 3D engine. It comes back once the native client draws it.";
+const NEARBY_LIGHTS =
+  "The map's lamps as real lights. The desktop client's Enhanced and Cinematic looks don't draw them yet.";
+const BOUNCE = "Bounced light. The desktop client's Enhanced and Cinematic looks don't draw it yet.";
+const CLOUDS = "Volumetric clouds. The desktop client's Enhanced and Cinematic looks don't draw them yet.";
 
 const ROWS: Record<string, Gate> = {
   "mouse/Mouse/Sensitivity": needs("sensitivity"),
@@ -142,7 +143,7 @@ const ROWS: Record<string, Gate> = {
   "paint/Surface paint/Colour": needs("paint"),
   "paint/Surface paint/Size": needs("paint"),
   "paint/Surface paint/Marks": menuOnly,
-  "measure/Distance measurement/Measurement": excluded(MEASURE),
+  "measure/Distance measurement/Measurement": needs("bind:measurePoint"),
 
   "ghost/Race/Show ghosts": needs("showGhost"),
   "ghost/Race/Your PB": needs("ghostPb"),
@@ -188,13 +189,32 @@ const ROWS: Record<string, Gate> = {
   "graphics/Frame rate/Exceed monitor FPS": excluded(BROWSER_FRAMES),
   "graphics/Frame rate/Low-latency canvas": excluded("A browser canvas mode. The desktop client draws to its window."),
   "graphics/Frame rate/FPS limit in menus": needs("graphicsMenuFps"),
-  "graphics/Effects/Bloom": ownVersion("Bloom is part of the Source look.", "graphicsBloom"),
+  "graphics/Effects/Bloom": needs("graphicsBloom"),
+  "graphics/Effects/Map visual profiles": needs("graphicsMapProfiles"),
   "graphics/Effects/Material detail": needs("graphicsMaterialResponse"),
-  "graphics/Effects/Edge smoothing": excluded("A post-process of the website's renderer."),
-  "graphics/Effects/*": excluded(WEB_LIGHTING),
-  "graphics/Lighting/*": excluded(WEB_LIGHTING),
-  "graphics/Clouds/*": excluded(WEB_LIGHTING),
+  "graphics/Effects/Edge smoothing": needs("graphicsSpatialAA"),
+  "graphics/Effects/Contact shading": needs("graphicsContactShading"),
+  "graphics/Effects/Atmospheric haze": needs("graphicsAtmosphere"),
+  "graphics/Effects/Sun shafts": needs("graphicsSunShafts"),
+  "graphics/Effects/Volumetric light": excluded(
+    "Light scattering through the sun's shadows. The desktop client's Enhanced and Cinematic looks don't draw it yet.",
+  ),
+  "graphics/Lighting/Lighting profile": needs("graphicsLightingProfile", "graphicsAmbienceShowcase", "graphicsPreset"),
+  "graphics/Lighting/Sun strength": needs("graphicsDirectContribution"),
+  "graphics/Lighting/Ambient strength": needs("graphicsAmbientContribution"),
+  "graphics/Lighting/Sun shadows": needs("graphicsDynamicShadows", "graphicsShadowQuality"),
+  "graphics/Lighting/Shadow strength": needs("graphicsShadowStrength"),
+  "graphics/Lighting/Shadow range": needs("graphicsShadowDistance"),
+  "graphics/Lighting/Nearby light shadows": excluded(NEARBY_LIGHTS),
+  "graphics/Lighting/Nearby lights": excluded(NEARBY_LIGHTS),
+  "graphics/Lighting/Nearby light strength": excluded(NEARBY_LIGHTS),
+  "graphics/Lighting/*": excluded(BOUNCE),
+  "graphics/Clouds/*": excluded(CLOUDS),
+  "graphics/Sky/Sky": needs("graphicsSkyMode", "graphicsSkyPackId"),
+  "graphics/Sky/Sky rotation": needs("graphicsSkyRotation"),
   "graphics/Sky/Sky brightness": needs("graphicsSkyExposure"),
+  "graphics/Sky/Sky lighting": needs("graphicsLightingSource"),
+  "graphics/Sky packs/*": needs("graphicsSkyPackId"),
 
   "viewmodel/Viewmodel/Show viewmodel": needs("viewmodel"),
   "viewmodel/Viewmodel/Viewmodel FOV": needs("viewmodelFov"),

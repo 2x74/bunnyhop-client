@@ -134,9 +134,10 @@ test("rows follow what the host has", async () => {
     // From then on the host's value shows.
     await host(page, { settings: { ...HOST_SETTINGS, hudKeysOpacity: 0.6 } });
     await poll(() => row(page, "hud", "Opacity").getByLabel("Opacity value").inputValue(), "60");
-    // Graphics the native renderer does its own way say so.
-    const bloom = row(page, "graphics", "Bloom");
-    expect(await bloom.locator(".set-hint").textContent()).toBe("Not available in the native client");
+    // Bloom drives the Source look's bloom and the Enhanced and Cinematic glow alike: it shows once the host has it.
+    expect(await row(page, "graphics", "Bloom").count()).toBe(0);
+    await host(page, { settings: { ...HOST_SETTINGS, hudKeysOpacity: 0.6, graphicsBloom: true } });
+    await poll(() => row(page, "graphics", "Bloom").count(), 1);
     expect(errors).toEqual([]);
   } finally {
     await close();
