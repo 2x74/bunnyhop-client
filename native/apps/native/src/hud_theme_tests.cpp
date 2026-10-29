@@ -87,6 +87,8 @@ struct DrawProbe {
 
     void overlay_avatar(float, float, unsigned, native::NameColor) { ++avatars; }
 
+    float overlay_text_width(std::string_view text, float size) const { return float(text.size()) * size * .6f; }
+
     void overlay_name(float, float, std::string_view, float, const native::NameAppearance &, double, bool = false) {
         ++names;
     }
@@ -338,8 +340,10 @@ void test_scoreboard_and_names() {
             NoAllocations no_allocations;
             native::draw_scoreboard(probe, size.first, size.second, 100, board, 1, 0);
         }
-        assert(probe.has("Test room") && probe.has("T7+") && probe.has("00:12.345"));
-        assert(probe.has("SPEC -> First") && probe.flags == 2 && probe.names == 2 && probe.avatars == 2);
+        assert(probe.has("Test room") && probe.has("T7+") && probe.has("00:12.345") && probe.has("Normal"));
+        // Spectators are listed under the table, as on the website.
+        assert(probe.has("Spectating: ") && probe.has("Spectator -> First"));
+        assert(probe.flags == 1 && probe.names == 1 && probe.avatars == 1);
     }
     native::HudLabel<48> time;
     native::format_hud_time(time, 16.731);

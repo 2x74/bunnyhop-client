@@ -588,7 +588,7 @@ public:
             const BhRunState &run,
             std::string_view style
     ) {
-        const native::ScoreLocal local{run.status, run.seconds};
+        const native::ScoreLocal local{run.status, run.seconds, run.in_start != 0};
         native::draw_scoreboard(*this, width, height, percent, board, now, epoch_ms, &local, style);
     }
 

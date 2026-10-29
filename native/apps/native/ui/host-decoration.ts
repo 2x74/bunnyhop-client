@@ -69,6 +69,8 @@ export interface HostScoreRow {
   pb: number | null;
   ping: number | null;
   host: boolean;
+  /** Idle past the room's limit (the roster's `afk`): shown as AFK in the Time column. */
+  afk: boolean;
 }
 
 const MAX_BADGES = 16;
@@ -135,7 +137,7 @@ export function hostMarks(marks: PlayerMarks): HostMark[] {
 }
 
 /** `seconds`: the run time while it runs; `at`: when that was (Unix ms). */
-export function hostScoreRow(row: ScoreRow, seconds: number | null, at: number): HostScoreRow {
+export function hostScoreRow(row: ScoreRow, seconds: number | null, at: number, afk = false): HostScoreRow {
   return {
     slot: row.slot,
     you: row.you,
@@ -151,6 +153,7 @@ export function hostScoreRow(row: ScoreRow, seconds: number | null, at: number):
     pb: row.pb,
     ping: row.ping,
     host: !!row.host,
+    afk,
   };
 }
 
@@ -170,7 +173,10 @@ export function hostScoreboard(
 ): HostScoreboard {
   if (!view?.id) return { type: "scoreboard", head: null, rows: [] };
   const board = roomScoreboard(view, clock.now, clock.server, clock.ping);
-  const rows = board.rows.map((row) => hostScoreRow(row, runningSeconds(view, row.slot, clock.now), clock.at));
+  const idle = new Set(view.players.filter((player) => player.afk === true).map((player) => player.slot));
+  const rows = board.rows.map((row) =>
+    hostScoreRow(row, runningSeconds(view, row.slot, clock.now), clock.at, idle.has(row.slot)),
+  );
   return { type: "scoreboard", head: board.head, rows };
 }
 

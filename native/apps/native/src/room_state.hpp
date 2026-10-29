@@ -272,7 +272,7 @@ public:
                 const auto spec = peer.info.find("spec");
                 if (spec != peer.info.end() && spec->is_number_unsigned()) {
                     const auto target = peers.find(spec->get<unsigned>());
-                    if (target != peers.end()) row.status += " -> " + target->second.actor.name;
+                    if (target != peers.end()) row.status += " \u2192 " + target->second.actor.name;
                 }
             }
         }
