@@ -9,7 +9,7 @@ SHA-256 (`3cd68ab1a59fb71b32f448a1be195f9ceaf3074ccb5ccb89b72ed2014f563242`). Se
 ## Ranked admission
 
 The server accepts native runs only from builds on its allowlist: an exact build, WASM, physics and rules identity
-with an expiry. Native 0.4.0 is admitted until November 9, 2026 at 22:00 UTC. Later builds and source builds keep
+with an expiry. Native 0.6.1 is admitted for Windows, macOS and Linux until November 12, 2026. Later builds and source builds keep
 their replays locally until they are admitted. Every submitted replay is still re-simulated by the server.
 
 ## Input
