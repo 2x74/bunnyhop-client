@@ -695,7 +695,7 @@ pub unsafe extern "C" fn bh_ghost_load_cancellable(
             let bsp = bunnyhop_core::parse_bsp(&bytes)?;
             drop(bytes);
             let source = if m.root.is_some() {
-                Some(vfs::Source::loose("content", m.loose.clone()))
+                Some(vfs::Source::loose("content", m.physics_files.clone()))
             } else {
                 bunnyhop_core::content::cached_physics_content(&m.map_path)
             };
