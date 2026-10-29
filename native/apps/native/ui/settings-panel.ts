@@ -16,6 +16,7 @@ import { registerDiscordSection } from "./discord-section";
 import { registerMouseDiagnostics } from "./mouse-diagnostics";
 import { registerPaintSection } from "./paint-section";
 import { installHostHudEditor } from "./hud-editor-opener";
+import { registerHudRows } from "./hud-section";
 import { redrawSettings, registerNativeExtras } from "./native-extras";
 import { installGlowSettings } from "./glow-settings";
 import { flushSettings, onHostSettings } from "./prefs-bridge";
@@ -42,6 +43,7 @@ function install(): void {
   registerCustomCssSection();
   registerPaintSection();
   installHostHudEditor();
+  registerHudRows();
   registerMouseDiagnostics();
   registerNativeExtras();
   decorateNativeRows();

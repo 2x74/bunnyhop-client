@@ -31,3 +31,23 @@
 .native-menu .settings .set-act:hover { color: var(--text); }
 /* The notches come from an inline --tk (controls.ts rangeTicks), so only an important rule moves them off the track. */
 .native-menu .settings input[type="range"] { --tk: 100 !important; --tk0: -9 !important; }
+
+/* One column of rows, as in v0.5.1, at a width the eye can follow from label to control. */
+.native-menu .settings .set-cols { grid-template-columns: minmax(0, 1fr); }
+.native-menu .settings .set-sec { max-width: 52rem; }
+/* The mouse readouts (cm/360, eDPI, horizontal FOV) as one quiet line under the rows, not tiles. */
+.native-menu .settings .set-stats { display: flex; flex-wrap: wrap; gap: 0.25rem 1.5rem; padding: 0.15rem 0.85rem 0.4rem; }
+.native-menu .settings .set-stat { flex-direction: row; align-items: baseline; gap: 0.4rem; padding: 0; border: 0; background: none; }
+.native-menu .settings .set-stat b { font-size: var(--fs-md); font-weight: 650; letter-spacing: 0; }
+/* The previews are the website's HUD; the desktop client's is drawn over the game (Edit layout shows it). The
+   crosshair keeps its style picker. */
+.native-menu .settings .keys-preview,
+.native-menu .settings .xh-stage > :not(.xh-styles) { display: none; }
+.native-menu .settings .xh-stage { padding: 0 0.6rem 0.4rem; }
+/* The tools line ends where the rows end. */
+@media (min-width: 52.01rem) {
+  .native-menu .settings .set-actions { justify-self: start; width: min(52rem, 100%); justify-content: flex-end; }
+}
+/* Crosshair styles as one row of small picks. */
+.native-menu .settings .xh-tile { gap: 0.15rem; padding: 0.3rem 0.2rem 0.25rem; }
+.native-menu .settings .xh-tile .xh-mini { height: 1.7rem; background: none; }

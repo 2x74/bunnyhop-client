@@ -2341,6 +2341,14 @@ int run(const native::Options &opt) {
                         if (!ok) throw std::runtime_error(window_controller.error());
                         window_dirty = true;
                         window_save_due = Clock::now() + std::chrono::milliseconds(500);
+                    } else if (type == "hudPreset") {
+                        const auto id = message.at("id").get<std::string>();
+                        if (std::find(native::hud_preset_ids.begin(), native::hud_preset_ids.end(), id)
+                            == native::hud_preset_ids.end())
+                            throw std::runtime_error("Unknown HUD preset");
+                        preferences = native::patch_settings(preferences, native::hud_preset(id), false);
+                        json_writer.write(cache / "settings.json", preferences);
+                        apply_preferences();
                     } else if (type == "hudEditor") {
                         // Settings → HUD → Edit layout: the editor works over the game, so the menu closes.
                         if (!core) {

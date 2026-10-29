@@ -86,6 +86,8 @@ export type MenuMessage =
   | { type: "paint"; action: "clear" }
   /** Opens the HUD layout editor over the game (hud_editor.cpp); the menu closes. */
   | { type: "hudEditor" }
+  /** Moves the HUD to one of the host's layout presets (hud_editor_layout.hpp). */
+  | { type: "hudPreset"; id: "classic" | "minimal" | "streamer" }
   | {
       type: "replay";
       action: "play" | "ghost" | "export" | "delete" | "screenshot";
