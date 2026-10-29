@@ -1,6 +1,9 @@
 #pragma once
 #include "bunnyhop_native.h"
 #include "client_util.hpp"
+#include "update_helper.hpp"
+#include "update_install.hpp"
+#include "update_schedule.hpp"
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
 #include <atomic>
@@ -8,6 +11,7 @@
 #include <fstream>
 #include <future>
 #include <mutex>
+#include <optional>
 #include <regex>
 #include <set>
 
@@ -29,18 +33,28 @@ inline std::string platform() {
 #endif
 }
 
+// Test builds (BUNNYHOP_UPDATE_TEST_HOOKS) may also use a loopback HTTP server; release packaging refuses them.
+inline std::string url_scheme([[maybe_unused]] const std::string &url) {
+#ifdef BUNNYHOP_UPDATE_TEST_HOOKS
+    if (url.starts_with("http://127.0.0.1:")) return "http://";
+#endif
+    return "https://";
+}
+
 inline std::string origin(const std::string &url) {
-    if (!url.starts_with("https://") || url.size() > 4096 || url.find_first_of("\\\r\n\t ") != std::string::npos
+    const auto scheme = url_scheme(url);
+    if (!url.starts_with(scheme) || url.size() > 4096 || url.find_first_of("\\\r\n\t ") != std::string::npos
         || url.find('\0') != std::string::npos || url.find('#') != std::string::npos)
         throw std::runtime_error("Update URL must use HTTPS");
-    const auto end = url.find_first_of("/?", 8);
-    auto host = url.substr(8, end == std::string::npos ? end : end - 8);
+    const auto end = url.find_first_of("/?", scheme.size());
+    auto host = url.substr(scheme.size(), end == std::string::npos ? end : end - scheme.size());
     if (host.empty() || host.find('@') != std::string::npos
         || host.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789.-:") != std::string::npos)
         throw std::runtime_error("Invalid update host");
+    if (scheme == "http://") return scheme + host;
     if (host.ends_with(":443")) host.resize(host.size() - 4);
     if (host.find(':') != std::string::npos) throw std::runtime_error("Update URL must use port 443");
-    return "https://" + host;
+    return scheme + host;
 }
 
 inline void allowed(const std::string &url, const Json &trust) {
@@ -85,8 +99,11 @@ inline std::vector<uint8_t> public_key(const std::string &pem) {
     return {bytes.begin() + 12, bytes.end()};
 }
 
+inline constexpr size_t max_notes_bytes = 8 * 1024;
+inline constexpr size_t max_envelope_bytes = 128 * 1024;
+
 inline Json verify_manifest(const std::string &text, const Json &trust, int64_t now = unix_time()) {
-    if (text.size() > 128 * 1024 || trust.value("schema", 0) != 1)
+    if (text.size() > max_envelope_bytes || trust.value("schema", 0) != 1)
         throw std::runtime_error("Invalid release envelope/configuration");
     const auto e = Json::parse(text);
     const auto id = e.at("keyId").get<std::string>();
@@ -125,7 +142,13 @@ inline Json verify_manifest(const std::string &text, const Json &trust, int64_t 
             || a.at("bytes").get<uint64_t>() == 0 || a.at("bytes").get<uint64_t>() > 512 * 1024 * 1024)
             throw std::runtime_error("Invalid release artifact metadata");
         allowed(a.at("url").get<std::string>(), trust);
+        static const std::regex wasm_re("^bunnyhop-web/[a-f0-9]{12}$");
+        if (a.contains("wasm") && !std::regex_match(a.at("wasm").get<std::string>(), wasm_re))
+            throw std::runtime_error("Invalid release artifact metadata");
     }
+    if (m.contains("notes")
+        && (!m.at("notes").is_string() || m.at("notes").get<std::string>().size() > max_notes_bytes))
+        throw std::runtime_error("Invalid release notes");
     return m;
 }
 
@@ -209,7 +232,7 @@ inline void fetch(std::string url, const Json &trust, Transfer &transfer) {
         std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> handle(curl_easy_init(), curl_easy_cleanup);
         if (!handle) throw std::runtime_error("Cannot initialize update download");
         curl_easy_setopt(handle.get(), CURLOPT_URL, url.c_str());
-        curl_easy_setopt(handle.get(), CURLOPT_PROTOCOLS_STR, "https");
+        curl_easy_setopt(handle.get(), CURLOPT_PROTOCOLS_STR, url_scheme(url) == "http://" ? "http" : "https");
         curl_easy_setopt(handle.get(), CURLOPT_FOLLOWLOCATION, 0L);
         curl_easy_setopt(handle.get(), CURLOPT_FAILONERROR, 1L);
         curl_easy_setopt(handle.get(), CURLOPT_NOSIGNAL, 1L);
@@ -269,15 +292,25 @@ inline void fetch(std::string url, const Json &trust, Transfer &transfer) {
     throw std::runtime_error("Too many update redirects");
 }
 
+// Where this copy is installed and which folders hold game data, for updating in place.
+struct InstallTarget {
+    update_install::Detection detection;
+    std::vector<std::filesystem::path> data_folders;
+};
+
 class Service {
     Json trust_, state_, manifest_, artifact_;
     std::filesystem::path directory_, downloaded_;
     std::string current_version_, build_;
+    InstallTarget install_;
+    std::optional<update_install::StagedPackage> staged_;
+    CheckSchedule schedule_;
     std::mutex mutex_;
     std::future<void> worker_;
     std::atomic_bool cancel_{false};
     std::atomic_uint64_t received_{0};
     bool busy_ = false;
+    bool enabled_ = false;
 
     void set(Json value) {
         std::lock_guard lock(mutex_);
@@ -293,6 +326,7 @@ class Service {
 
     template <class Work>
     void launch(Work work) {
+        busy_ = true;
         try {
             worker_ = std::async(std::launch::async, std::move(work));
         } catch (const std::exception &e) {
@@ -306,19 +340,170 @@ class Service {
              {"message", cancel_.load() ? "Update cancelled." : e.what()}});
     }
 
+    std::filesystem::path schedule_file() const { return directory_ / "schedule.json"; }
+
+    Json release_state(const char *status, const std::string &message) const {
+        return {{"status", status},
+                {"message", message},
+                {"version", manifest_.at("version")},
+                {"notes", manifest_.value("notes", std::string())},
+                {"bytes", artifact_.at("bytes")},
+                {"build", artifact_.at("build")},
+                {"wasm", artifact_.value("wasm", std::string())}};
+    }
+
+    void record_check() {
+        std::lock_guard lock(mutex_);
+        schedule_.last_check = unix_time();
+        schedule_.save(schedule_file());
+    }
+
+    void find_release() {
+        Transfer transfer{{}, nullptr, max_envelope_bytes, 0, &cancel_, nullptr};
+        fetch(trust_.at("manifestUrl"), trust_, transfer);
+        const auto manifest = verify_manifest(transfer.bytes, trust_);
+        Json artifact;
+        for (const auto &entry : manifest.at("artifacts"))
+            if (entry.at("platform") == platform()) artifact = entry;
+        if (artifact.is_null()) throw std::runtime_error("No release is available for this platform.");
+        if (cancel_) throw std::runtime_error("Update cancelled");
+        manifest_ = manifest;
+        artifact_ = artifact;
+        record_check();
+        const bool available = artifact.at("build") != build_ && newer(manifest.at("version"), current_version_);
+        const auto version = manifest.at("version").get<std::string>();
+        set(available ? release_state("available", "Version " + version + " is available.")
+                      : release_state("current", "You have the latest version."));
+    }
+
+    void require_unexpired() const {
+        if (timestamp(manifest_.at("expiresAt")) <= unix_time())
+            throw std::runtime_error("The release check expired. Check for updates again.");
+    }
+
+    std::filesystem::path new_download_folder() const {
+        constexpr int attempts = 32;
+        for (int attempt = 0; attempt < attempts; attempt++) {
+            const auto name = "download-" + std::to_string(SDL_GetTicksNS()) + "-" + std::to_string(attempt);
+            if (std::filesystem::create_directory(directory_ / name)) return directory_ / name;
+        }
+        throw std::runtime_error("Cannot create update download directory");
+    }
+
+    // A package left by an earlier download is reused only if it still matches the signed size and hash.
+    bool reuse_existing(const std::filesystem::path &target, const Json &artifact) const {
+        if (!std::filesystem::exists(target)) return false;
+        const auto bytes = artifact.at("bytes").get<uint64_t>();
+        char existing_hash[65]{};
+        const auto utf8 = target.u8string();
+        if (std::filesystem::is_symlink(target) || !std::filesystem::is_regular_file(target)
+            || std::filesystem::file_size(target) != bytes
+            || !bh_sha256_file(reinterpret_cast<const char *>(utf8.c_str()), bytes, existing_hash)
+            || artifact.at("sha256") != existing_hash)
+            throw std::runtime_error(
+                    "An unverified file already uses this package name. Move it out of the updates folder, then retry."
+            );
+        return true;
+    }
+
+    // Downloads into a private folder, checks size and hash, then links the file to its final name.
+    void download_verified(const std::filesystem::path &target, const Json &artifact) {
+        const auto folder = new_download_folder();
+        try {
+            const auto part = folder / "package.partial";
+            std::ofstream file(part, std::ios::binary);
+            if (!file) throw std::runtime_error("Cannot save update package");
+            Transfer transfer{{}, &file, artifact.at("bytes").get<uint64_t>(), 0, &cancel_, &received_};
+            fetch(artifact.at("url"), trust_, transfer);
+            file.close();
+            if (!file || transfer.total != transfer.limit)
+                throw std::runtime_error("Update size differs from the signed release");
+            const auto utf8 = part.u8string();
+            char hash[65]{};
+            if (!bh_sha256_file(reinterpret_cast<const char *>(utf8.c_str()), transfer.limit, hash)
+                || artifact.at("sha256") != hash)
+                throw std::runtime_error("Update hash differs from the signed release");
+            if (cancel_) throw std::runtime_error("Update cancelled");
+            require_unexpired();
+            std::filesystem::create_hard_link(part, target);
+        } catch (...) {
+            std::error_code ec;
+            std::filesystem::remove_all(folder, ec);
+            throw;
+        }
+        std::error_code ec;
+        std::filesystem::remove_all(folder, ec);
+    }
+
+    void stage_downloaded(const std::string &version) {
+        set(release_state("staging", "Unpacking and checking the update…"));
+        staged_ = update_install::stage(
+                downloaded_, *install_.detection.layout, artifact_.at("build").get<std::string>(), version
+        );
+        if (cancel_) {
+            staged_.reset();
+            throw std::runtime_error("Update cancelled");
+        }
+        set(release_state("staged", "Version " + version + " is ready. Restart the game to finish updating."));
+    }
+
+    void obtain_and_stage() {
+        require_unexpired();
+        std::filesystem::create_directories(directory_);
+        const auto target = directory_ / artifact_.at("filename").get<std::string>();
+        if (!reuse_existing(target, artifact_)) download_verified(target, artifact_);
+        downloaded_ = target;
+        const auto version = manifest_.at("version").get<std::string>();
+        if (!install_.detection.layout) {
+            set(release_state(
+                    "ready",
+                    install_.detection.reason
+                            + " The verified package is in the updates folder: close the game, "
+                              "then install it."
+            ));
+            return;
+        }
+        try {
+            stage_downloaded(version);
+        } catch (const std::exception &e) {
+            if (cancel_) throw;
+            set(release_state(
+                    "ready",
+                    std::string(e.what())
+                            + ". The verified package is in the updates folder: close the game, "
+                              "then install it."
+            ));
+        }
+    }
+
+    void begin(Json state) {
+        cancel_ = false;
+        received_ = 0;
+        set(std::move(state));
+    }
+
 public:
-    Service(Json trust, std::filesystem::path directory, std::string version, std::string build)
+    Service(Json trust,
+            std::filesystem::path directory,
+            std::string version,
+            std::string build,
+            InstallTarget install = {})
         : trust_(std::move(trust))
         , directory_(std::move(directory))
         , current_version_(std::move(version))
-        , build_(std::move(build)) {
+        , build_(std::move(build))
+        , install_(std::move(install)) {
+        if (install_.detection.layout == std::nullopt && install_.detection.reason.empty())
+            install_.detection.reason = "This copy can't update itself.";
+        schedule_ = CheckSchedule::load(schedule_file());
         try {
             if (trust_.value("schema", 0) != 1 || trust_.at("keys").empty() || !trust_.contains("manifestUrl"))
                 throw std::runtime_error("Updates are not configured for this build.");
             allowed(trust_.at("manifestUrl"), trust_);
             for (const auto &k : trust_.at("keys"))
                 public_key(k.at("publicKey"));
-            set({{"status", "idle"}, {"message", "Check for a signed release."}});
+            enabled_ = true;
+            set({{"status", "idle"}, {"message", "Check for a new version."}});
         } catch (const std::exception &e) {
             set({{"status", "disabled"}, {"message", e.what()}});
         }
@@ -336,153 +521,88 @@ public:
         result["currentVersion"] = current_version_;
         result["platform"] = platform();
         result["received"] = received_.load();
+        result["inPlace"] = install_.detection.layout.has_value();
+        result["inPlaceReason"] = install_.detection.reason;
+        result["packageSaved"] = !busy_ && !downloaded_.empty();
+        result["automatic"] = schedule_.automatic;
+        result["lastCheck"] = schedule_.last_check;
         return result;
     }
 
     void cancel() { cancel_ = true; }
 
-    void check() {
+    // `automatic` checks (at startup) stay quiet when they fail: the panel goes back to idle.
+    void check(bool automatic = false) {
         reap();
-        if (busy_ || state().value("status", "") == "disabled") return;
-        cancel_ = false;
-        busy_ = true;
-        received_ = 0;
+        if (busy_ || !enabled_) return;
+        begin({{"status", "checking"}, {"message", "Checking for updates…"}});
         downloaded_.clear();
+        staged_.reset();
         manifest_ = artifact_ = nullptr;
-        set({{"status", "checking"}, {"message", "Checking signed releases…"}});
+        launch([this, automatic] {
+            try {
+                find_release();
+            } catch (const std::exception &e) {
+                if (automatic)
+                    set({{"status", "idle"}, {"message", "Check for a new version."}});
+                else
+                    fail(e);
+            }
+        });
+    }
+
+    void check_if_due() {
+        bool due = false;
+        {
+            std::lock_guard lock(mutex_);
+            due = schedule_.due(unix_time());
+        }
+        if (due) check(true);
+    }
+
+    void set_automatic(bool automatic) {
+        std::lock_guard lock(mutex_);
+        schedule_.automatic = automatic;
+        schedule_.save(schedule_file());
+    }
+
+    // "Update": download, verify and, when this copy can update itself, unpack and check the new version.
+    void download() {
+        reap();
+        if (busy_ || state().value("status", "") != "available") return;
+        begin(release_state("downloading", "Downloading and verifying…"));
         launch([this] {
             try {
-                Transfer t{{}, nullptr, 128 * 1024, 0, &cancel_, nullptr};
-                fetch(trust_.at("manifestUrl"), trust_, t);
-                auto m = verify_manifest(t.bytes, trust_);
-                Json a;
-                for (const auto &entry : m.at("artifacts"))
-                    if (entry.at("platform") == platform()) a = entry;
-                if (a.is_null()) throw std::runtime_error("No release is available for this platform.");
-                if (cancel_) throw std::runtime_error("Update cancelled");
-                manifest_ = m;
-                artifact_ = a;
-                const bool available = a.at("build") != build_ && newer(m.at("version"), current_version_);
-                set({{"status", available ? "available" : "current"},
-                     {"version", m.at("version")},
-                     {"bytes", a.at("bytes")},
-                     {"message", available ? "A signed update is available." : "This build is up to date."}});
+                obtain_and_stage();
             } catch (const std::exception &e) {
                 fail(e);
             }
         });
     }
 
-    void download() {
+    // The plan the update helper carries out once the game has closed, or nothing if no update is staged.
+    std::optional<update_helper::Plan>
+    restart_plan(uint64_t game_process, std::vector<std::string> relaunch_arguments = {}) {
         reap();
-        if (busy_ || state().value("status", "") != "available") return;
-        cancel_ = false;
-        busy_ = true;
-        received_ = 0;
-        const auto artifact = artifact_;
-        set({{"status", "downloading"},
-             {"version", manifest_.at("version")},
-             {"bytes", artifact.at("bytes")},
-             {"message", "Downloading and verifying…"}});
-        launch([this, artifact] {
-            std::filesystem::path temporary;
-            try {
-                if (timestamp(manifest_.at("expiresAt")) <= unix_time())
-                    throw std::runtime_error("Release expired. Check for updates again.");
-                std::filesystem::create_directories(directory_);
-                for (int attempt = 0; attempt < 32; attempt++) {
-                    auto candidate = directory_
-                                     / ("download-" + std::to_string(SDL_GetTicksNS()) + "-" + std::to_string(attempt));
-                    if (std::filesystem::create_directory(candidate)) {
-                        temporary = candidate;
-                        break;
-                    }
-                }
-                if (temporary.empty()) throw std::runtime_error("Cannot create update download directory");
-                const auto part = temporary / "package.partial",
-                           target = directory_ / artifact.at("filename").get<std::string>();
-                if (std::filesystem::exists(target)) {
-                    char existing_hash[65]{};
-                    const auto utf8 = target.u8string();
-                    if (std::filesystem::is_symlink(target) || !std::filesystem::is_regular_file(target)
-                        || std::filesystem::file_size(target) != artifact.at("bytes").get<uint64_t>()
-                        || !bh_sha256_file(
-                                reinterpret_cast<const char *>(utf8.c_str()),
-                                artifact.at("bytes").get<uint64_t>(),
-                                existing_hash
-                        )
-                        || artifact.at("sha256") != existing_hash)
-                        throw std::runtime_error(
-                                "An unverified file already uses this package name. Move it out of the updates folder, "
-                                "then retry."
-                        );
-                    if (cancel_) throw std::runtime_error("Update cancelled");
-                    if (timestamp(manifest_.at("expiresAt")) <= unix_time())
-                        throw std::runtime_error("Release expired. Check for updates again.");
-                    downloaded_ = target;
-                    std::filesystem::remove_all(temporary);
-                    temporary.clear();
-                    set({{"status", "ready"},
-                         {"version", manifest_.at("version")},
-                         {"filename", artifact.at("filename")},
-                         {"message",
-                          "Existing package verified. Open the updates folder, close the game, then install the "
-                          "package."}});
-                    return;
-                }
-                std::ofstream file(part, std::ios::binary);
-                if (!file) throw std::runtime_error("Cannot save update package");
-                Transfer t{{}, &file, artifact.at("bytes").get<uint64_t>(), 0, &cancel_, &received_};
-                fetch(artifact.at("url"), trust_, t);
-                file.close();
-                if (!file || t.total != t.limit)
-                    throw std::runtime_error("Update size differs from the signed release");
-                const auto utf8 = part.u8string();
-                char hash[65]{};
-                if (!bh_sha256_file(reinterpret_cast<const char *>(utf8.c_str()), t.limit, hash)
-                    || artifact.at("sha256") != hash)
-                    throw std::runtime_error("Update hash differs from the signed release");
-                if (cancel_) throw std::runtime_error("Update cancelled");
-                if (timestamp(manifest_.at("expiresAt")) <= unix_time())
-                    throw std::runtime_error("Release expired during download. Check for updates again.");
-                std::filesystem::create_hard_link(part, target);
-                downloaded_ = target;
-                std::filesystem::remove_all(temporary);
-                temporary.clear();
-                set({{"status", "ready"},
-                     {"version", manifest_.at("version")},
-                     {"filename", artifact.at("filename")},
-                     {"message",
-                      "Verified package saved. Open the updates folder, close the game, then install the package."}});
-            } catch (const std::exception &e) {
-                if (!temporary.empty()) {
-                    std::error_code ec;
-                    std::filesystem::remove_all(temporary, ec);
-                }
-                fail(e);
-            }
-        });
+        if (busy_ || !staged_ || state().value("status", "") != "staged") return std::nullopt;
+        update_helper::Plan plan;
+        plan.game_process = game_process;
+        plan.layout = *install_.detection.layout;
+        plan.staged_folder = staged_->folder;
+        plan.version = manifest_.at("version").get<std::string>();
+        plan.build = artifact_.at("build").get<std::string>();
+        plan.previous_version = current_version_;
+        plan.data_folders = install_.data_folders;
+        plan.relaunch_arguments = std::move(relaunch_arguments);
+        plan.result = directory_ / "last-update.json";
+        set(release_state("restarting", "Restarting to update…"));
+        return plan;
     }
 
     void reveal() {
         reap();
         if (busy_ || downloaded_.empty()) return;
-        const auto u8 = std::filesystem::absolute(directory_).generic_u8string();
-        std::string url = "file://";
-#ifdef _WIN32
-        url += '/';
-#endif
-        static const char hex[] = "0123456789ABCDEF";
-        for (unsigned char c : u8) {
-            if (std::isalnum(c) || c == '/' || c == ':' || c == '-' || c == '_' || c == '.' || c == '~')
-                url += char(c);
-            else {
-                url += '%';
-                url += hex[c >> 4];
-                url += hex[c & 15];
-            }
-        }
-        SDL_OpenURL(url.c_str());
+        SDL_OpenURL(data_location::file_url(directory_).c_str());
     }
 };
 }  // namespace native::updates

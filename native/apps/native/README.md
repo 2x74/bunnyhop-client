@@ -115,8 +115,9 @@ bun apps/native/packaging/release-check.ts --package target/native-packages/<sta
 ```
 
 The packager writes a platform archive, the unpacked app, dependency notices and a JSON report with the archive
-SHA-256 and the build identity. Settings → Updates only works for builds configured with a manifest URL and release
-key; the default has none, so updating is manual. See the [release process](../../../docs/releases.md).
+SHA-256 and the build identity. From 0.6.2, Settings → Updates checks for new releases (once a day by default),
+downloads and verifies the package, and installs it on "Restart to update"; your data folder isn't touched. See the
+[release process](../../../docs/releases.md) and [packaging notes](packaging/README.md#updates).
 
 ## Checks
 

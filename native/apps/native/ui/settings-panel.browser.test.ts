@@ -135,8 +135,8 @@ test("rows follow what the host has", async () => {
     await host(page, { settings: { ...HOST_SETTINGS, hudKeysOpacity: 0.6 } });
     await poll(() => row(page, "hud", "Opacity").getByLabel("Opacity value").inputValue(), "60");
     // Graphics the native renderer does its own way say so.
-    const water = row(page, "graphics", "Water reflections");
-    expect(await water.locator(".set-hint").textContent()).toBe("Not available in the native client");
+    const bloom = row(page, "graphics", "Bloom");
+    expect(await bloom.locator(".set-hint").textContent()).toBe("Not available in the native client");
     expect(errors).toEqual([]);
   } finally {
     await close();

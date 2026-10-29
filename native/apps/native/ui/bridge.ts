@@ -48,7 +48,8 @@ export interface VideoExportState {
 }
 export type MenuMessage =
   | { type: "mapLoad"; action: "cancel" | "retry" }
-  | { type: "update"; action: "check" | "download" | "cancel" | "reveal" | "status" }
+  | { type: "update"; action: "check" | "download" | "cancel" | "reveal" | "restart" | "status" }
+  | { type: "update"; action: "automatic"; enabled: boolean }
   | {
       type: "dataFolder";
       action: "status" | "pick" | "useDefault" | "cancelChoice" | "cancelPending" | "forget" | "reveal";

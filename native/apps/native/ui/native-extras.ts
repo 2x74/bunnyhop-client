@@ -23,7 +23,7 @@ function rendererGroup(ui: Ui): HTMLElement {
         ["refracted", "Refracted"],
       ],
       {
-        desc: "Refracted water bends what's under the surface, like CS:S. Simple is cheaper.",
+        desc: "Refracted bends what's under the water in every look. The Source look's Water reflections also refract.",
         keywords: "water refraction quality reflections",
       },
     ),
