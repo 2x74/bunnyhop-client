@@ -323,7 +323,7 @@ class Renderer {
     std::string outfit, packedLoadout;
     GLuint refractColor = 0, refractDepth = 0;
     int refractWidth = 0, refractHeight = 0, waterQuality = 1;
-    bool hasWaterMaterials = false;
+    bool hasWaterMaterials = false, waterBeneathFaces = false;
     GLuint program = 0, skyProgram = 0, depthProgram = 0, emptyVao = 0, lightmap = 0, white = 0, checker = 0,
            planesTexture = 0;
     std::vector<GLuint> ownedTextures;
@@ -647,7 +647,9 @@ class Renderer {
         gl.Uniform1i(loc(program, "kind"), m.kind);
         gl.Uniform1i(loc(program, "aboveWater"), e.above_water);
         gl.Uniform1i(loc(program, "additive"), (m.flags & 8) != 0);
-        if ((m.flags & 4) || m.kind == 2)
+        const bool doubleSided = m.kind == 2 ? native_render::water_face_double_sided(waterBeneathFaces, e.above_water)
+                                             : (m.flags & 4) != 0;
+        if (doubleSided)
             gl.Disable(GL_CULL_FACE);
         else
             gl.Enable(GL_CULL_FACE);
@@ -1461,6 +1463,8 @@ public:
         groups.assign(rawGroups, rawGroups + ng);
         hasWaterMaterials =
                 std::any_of(materials.begin(), materials.end(), [](const BhMaterial &m) { return m.kind == 2; });
+        for (size_t i = 0; i < materials.size() && i < extras.size(); i++)
+            waterBeneathFaces |= materials[i].kind == 2 && !extras[i].above_water;
         worldMesh = geometry(verts, nv, 10, indices, ni, blend, nb);
         auto group_center = [&](uint64_t key,
                                 uint32_t first,

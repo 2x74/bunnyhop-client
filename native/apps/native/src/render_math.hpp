@@ -84,6 +84,12 @@ inline const WaterSurface *water_surface(const Bounds &b, const std::vector<Wate
     return surfaces.empty() ? nullptr : &surfaces.front();
 }
 
+// Like the website, a water face draws both sides only on maps without separate beneath faces ($bottommaterial).
+// Otherwise, seen from above, the back of a beneath face drew in its bright from-below style over the water.
+inline bool water_face_double_sided(bool map_has_beneath_faces, bool above_water) {
+    return !map_has_beneath_faces && above_water;
+}
+
 inline float particle_random(uint32_t id, uint32_t salt) {
     uint32_t h = id ^ ((salt + 1) * 0x9e3779b9u);
     h ^= h >> 16;
