@@ -143,7 +143,7 @@ inline nlohmann::json presentation_smoke(
             "player",
             seconds,
             120,
-            {"#55ddff", "★", "JP", "1", "native-proof", {}, {}, {}, {}}
+            {"#55ddff", "★", "JP", "1", "native-proof", {}, {}, {}, {}, {}}
     );
     chat.push("Clickable profile https://bunnyhop.lol/u/native-proof", "Guide", "system", seconds, 120);
     chat.input = "Unicode input 日本語 🐇";

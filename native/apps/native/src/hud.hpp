@@ -962,11 +962,9 @@ public:
             rows.clear();
             chat_hits_.clear();
             for (const auto &line : lines) {
-                Color name = amber, body = line.kind == "error"     ? Color{1, .45f, .4f, 1}
-                                           : line.kind == "private" ? Color{.8f, .7f, 1, 1}
-                                           : line.kind == "system" || line.kind == "announcement" ? amber
-                                                                                                  : cream;
                 const auto &d = line.decoration;
+                const auto kind = native::chat_kind_style(line.kind, d.tone);
+                Color name = amber, body = kind.color;
                 name = d.appearance.color;
                 if (d.color.size() == 7) {
                     try {
@@ -988,9 +986,11 @@ public:
                 for (size_t mark = 0; mark < native::name_badge_count(d.appearance); ++mark)
                     prefix += "     ";
                 if (!line.name.empty()) prefix += ": ";
+                prefix += kind.prefix;
                 const std::string full = prefix + line.text;
                 std::vector<Span> spans;
-                if (!prefix.empty()) spans.push_back({0, prefix.size(), std::nullopt, name});
+                const size_t name_part = prefix.size() - kind.prefix.size();
+                if (name_part) spans.push_back({0, name_part, std::nullopt, name});
                 if (!d.rank.empty())
                     spans.push_back({0, d.rank.size(), std::nullopt, native::name_color(d.rank_color, dim)});
                 if (!line.name.empty())

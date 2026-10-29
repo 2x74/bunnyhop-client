@@ -216,7 +216,10 @@ test("chat retains private kind and player marks for native display; nominations
       at: 1,
     } as never);
     expect(f.service.view.chat[0]).toMatchObject({ kind: "private", verified: true });
-    expect(f.sent.find((m) => m.type === "chatLine")).toMatchObject({
+    const lines = f.sent.filter((m) => m.type === "chatLine");
+    expect(lines[0]).toMatchObject({ kind: "local" });
+    expect(String(lines[0]?.text)).toStartWith("Connected to Test room");
+    expect(lines[1]).toMatchObject({
       text: "Only you",
       kind: "private",
       verified: true,
