@@ -440,8 +440,9 @@ int run(const native::Options &opt) {
         data_notice = data_startup_notice;
     }
 
-    auto reset_feedback = [&](bool incomplete_history = false) {
-        hud.reset_history();
+    auto reset_feedback = [&](bool incomplete_history = false, bool keep_jump_stats = false) {
+        hud.reset_history(keep_jump_stats);
+        const auto gain = feedback.ssj_gain;
         BhRunState timing{};
         BhSnapshot snapshot{};
         if (core) {
@@ -449,6 +450,7 @@ int run(const native::Options &opt) {
             bh_snapshot(core.get(), &snapshot);
         }
         feedback.reset(timing.in_start != 0, snapshot.movement_mode == 1, incomplete_history);
+        if (keep_jump_stats) feedback.ssj_gain = gain;
     };
     native::RunHeartbeat heartbeat;
     auto &zones = game.zones;
@@ -655,7 +657,7 @@ int run(const native::Options &opt) {
             renderer->set_cosmetics(outfit, packed_loadout);
         }
         audio.reset();
-        hud.reset_history();
+        hud.reset_history(true);
         viewer.camera.reset();
         prev = curr;
         reset_input_timing();
@@ -666,7 +668,7 @@ int run(const native::Options &opt) {
         }
         kept_weapons.restarted(practice.active || zones.empty(), settings.physics >= 10);
         begin_record();
-        reset_feedback();
+        reset_feedback(false, true);
         reset_input_timing();
         // (toast() is declared after reset; set its state directly.)
         if (restart.practice)
@@ -2127,10 +2129,10 @@ int run(const native::Options &opt) {
                         else if (action == "lastLj")
                             hud.repeat_long_jump(chat, epoch_ms() / 1000.);
                         else if (action == "jumpStats") {
-                            preferences["hudSsjChat"] = !preferences.at("hudSsjChat").get<bool>();
-                            menu_state.settings_changed();
-                            json_writer.write(cache / "settings.json", preferences);
-                            apply_preferences();
+                            show_menu(true);
+                            menu_script.open(
+                                    menu.get(), menu_ready, "window.bunnyhopNativeMenu?.open?.('settings','hud')"
+                            );
                         } else if (action == "showTriggers" || action == "showClips") {
                             const char *key = action == "showTriggers" ? "triggersVisible" : "clipsVisible";
                             const bool on = !preferences.at(key).get<bool>();
@@ -2890,6 +2892,8 @@ int run(const native::Options &opt) {
             const double counts_before = input.yaw_counts;
             input_timeline.take_tick(input, sim_ns, tick_ns, opt.frames != 0);
             const double mouse_counts = input.yaw_counts - counts_before;
+            BhRunState timing_before{};
+            bh_run_state(core.get(), &timing_before);
             prev = curr;
             const BhState tutorial_pre = curr;
             BhCmd cmd{};
@@ -2962,6 +2966,7 @@ int run(const native::Options &opt) {
                 }
             }
             renderer->simulation_tick();
+            hud.movement.tick_jump(cmd, curr);
             hud.tick(curr);
             hud.command_tick(cmd, curr.tick);
             if (input_log && !viewer.active) {
@@ -3020,11 +3025,12 @@ int run(const native::Options &opt) {
                 native::SsjTick info;
                 info.jumped = (curr.events & (1u << 1)) != 0;  // EVENT_JUMPED
                 info.teleported = (curr.events & native::teleported) != 0;
-                info.in_start = practice.noclip ? false : feedback.ssj_was_in_start;
+                info.in_start = practice.noclip ? false : timing_before.in_start != 0;
                 info.noclip = practice.noclip || feedback.ssj_was_noclip;
-                if (timing.status == 1) info.time = timing.seconds;
+                if (timing_before.status == 1)
+                    info.time = (timing_before.last_tick - timing_before.start_tick) * step_dt;
                 hud.configure_feedback(feedback);
-                if (timing.update_flags & 4) reset_feedback();  // restarted
+                if (timing.update_flags & 4) reset_feedback(false, true);  // restarted
                 const bool history_ready = feedback.history_ready(pre.grounded, info.in_start, info.noclip);
                 if (history_ready) {
                     if (const auto report = feedback.ssj.tick(pre, ssj_cmd, info)) {
@@ -3034,20 +3040,18 @@ int run(const native::Options &opt) {
                 }
                 feedback.ssj_was_in_start = timing.in_start != 0;
                 feedback.ssj_was_noclip = state.movement_mode == 1;  // Mode::Noclip
-                if (info.teleported)
-                    reset_feedback();
-                else if (history_ready && !info.noclip) {
-                    feedback.strafe_trainer.set_smoothing(hud.preferences().trainer_smoothing);
-                    if (const auto reading = feedback.strafe_trainer.tick(
-                                pre.grounded,
-                                std::hypot(pre.velocity[0], pre.velocity[1]),
-                                cmd.yaw,
-                                cmd.forward,
-                                cmd.side
-                        ))
-                        feedback.strafe_reading = reading;
-                    feedback.strafe_ground_ticks = pre.grounded ? feedback.strafe_ground_ticks + 1 : 0;
-                    if (feedback.strafe_ground_ticks > native::bhop_frames) feedback.strafe_reading.reset();
+                BhSettings trainer_settings{};
+                const auto &style = viewer.active ? viewer.session.style : active_style;
+                if (viewer.active)
+                    trainer_settings = viewer.session.settings;
+                else
+                    bh_style_settings(style.c_str(), &trainer_settings);
+                native::feed_strafe_trainer(
+                        feedback, hud.preferences(), curr, ssj_cmd, trainer_settings, style, step_dt, info.noclip
+                );
+                if (info.teleported) {
+                    feedback.ssj.reset();
+                    feedback.ssj_was_in_start = timing.in_start != 0;
                 }
             }
             BhSurfaceProbe surface{};
@@ -3062,9 +3066,19 @@ int run(const native::Options &opt) {
             audio.set_style(viewer.active ? viewer.session.info.value("style", active_style) : active_style);
             BhJumpObservation jump_observation{};
             const bool observed_jump = bh_jump_observation(core.get(), &jump_observation) != 0;
-            hud.movement.feed(observed_jump ? &jump_observation : nullptr, timing, step_dt, active_style);
-            if (const auto pitch = native::trainer_jump_sound(hud.preferences(), curr, feedback.strafe_reading))
-                audio.play("count_tick", .12f, *pitch);
+            hud.movement.color_blind = hud.preferences().color_blind;
+            hud.movement.feed(
+                    observed_jump ? &jump_observation : nullptr,
+                    timing,
+                    step_dt,
+                    active_style,
+                    hud.preferences().long_jump,
+                    timing_before.in_start != 0,
+                    practice.noclip
+            );
+            if (const auto pitch =
+                        native::trainer_jump_sound(hud.preferences(), feedback.strafe_trainer.take_landing()))
+                audio.play("count_tick", 1.6f, *pitch);
             audio.tick(
                     state,
                     timing,

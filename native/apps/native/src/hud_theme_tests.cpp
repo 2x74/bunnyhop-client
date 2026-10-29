@@ -667,7 +667,7 @@ void test_movement_widgets_and_restart() {
                     -1
             );
         }
-        assert(trainer.rects >= 4 && trainer.has("105%") && trainer.has("Strafe more"));
+        assert(trainer.rects >= 4 && trainer.has("105%") && trainer.has("turn more"));
     }
     native::FirstJumpTracker first;
     run.jumps = 1;
@@ -676,12 +676,9 @@ void test_movement_widgets_and_restart() {
     assert(!first.feed(true, run, 21, false));
     options.trainer_sound = true;
     options.trainer_enabled = true;
-    BhState jumped{};
-    jumped.events = native::jump;
-    assert(native::trainer_jump_sound(options, jumped, native::StrafeReading{105, {}}) == 1.25);
-    assert(native::trainer_jump_sound(options, jumped, native::StrafeReading{180, {}}) == .8);
-    jumped.events = 0;
-    assert(!native::trainer_jump_sound(options, jumped, native::StrafeReading{105, {}}));
+    assert(native::trainer_jump_sound(options, 105) == 1.5);
+    assert(native::trainer_jump_sound(options, 180) == .75);
+    assert(!native::trainer_jump_sound(options, std::nullopt));
     native::AutoRestart restart;
     run.status = 1;
     run.seconds = 10;

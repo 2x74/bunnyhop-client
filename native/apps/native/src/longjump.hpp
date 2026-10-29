@@ -1,6 +1,8 @@
 #pragma once
 #include "bunnyhop_native.h"
 #include "hud_geometry.hpp"
+#include "hud_text.hpp"
+#include "semantic_palette.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -24,6 +26,45 @@ struct LjReport {
     HudSamples<LjStrafe, 256> strafes;
     HudSamples<LjPoint, 512> path;
 };
+
+inline unsigned lj_tier(const LjReport &report) {
+    if (!report.standing || report.failed) return 0;
+    constexpr std::array<double, 4> distances = {250, 260, 268, 275};
+    return unsigned(std::count_if(distances.begin(), distances.end(), [&](double distance) {
+        return report.distance >= distance;
+    }));
+}
+
+inline SemanticColor lj_color(const LjReport &report, std::string_view mode) {
+    std::array<uint32_t, 5> colors = {0xffffff, 0x5eb6ff, 0x4dff88, 0xff5d5d, 0xffc53d};
+    if (mode == "redGreen") colors = {0xffffff, 0x5eb6ff, 0x8040ff, 0xff5d5d, 0xf0e442};
+    if (mode == "blueYellow") colors = {0xffffff, 0x3d8bff, 0x4dff88, 0xff5d5d, 0xe69f00};
+    return semantic_rgb(colors[lj_tier(report)]);
+}
+
+inline HudLabel<> lj_head(const LjReport &report) {
+    HudLabel<> result;
+    double distance = report.distance;
+    // A binary float lands exactly halfway between hundredths only at an odd eighth.
+    // JavaScript toFixed chooses the larger distance there; printf uses ties-to-even.
+    constexpr double eighths_per_unit = 8;
+    const double eighths = distance * eighths_per_unit;
+    if (eighths == std::floor(eighths) && std::fmod(eighths, 2) == 1) distance = std::nextafter(distance, INFINITY);
+    result.format("%s %.2f%s", report.standing ? "LJ" : "BH", distance, report.failed ? " fail" : "");
+    return result;
+}
+
+inline HudLabel<> lj_details(const LjReport &report) {
+    HudLabel<> result;
+    result.format(
+            "%.0f pre | %.0f max | %zu str | %.0f%% sync",
+            std::floor(report.pre + .5),
+            std::floor(report.max + .5),
+            report.strafes.size(),
+            std::floor(report.sync + .5)
+    );
+    return result;
+}
 
 // Display-only port of web/movement-stats/stats.ts LjTracker. The core's exact
 // clean-tick observation is required throughout; no value feeds the simulation.

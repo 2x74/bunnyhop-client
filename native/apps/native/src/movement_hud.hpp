@@ -1,6 +1,7 @@
 #pragma once
 #include "hud_scoreboard.hpp"
 #include "longjump.hpp"
+#include "jump_hud.hpp"
 #include "native_input.hpp"
 #include "settings.hpp"
 #include "run_timing.hpp"
@@ -61,6 +62,7 @@ struct HudPreferences {
     std::array<bool, 3> keys_rows = {true, true, true};
     std::array<std::string, 6> key_labels;
     SemanticPalette palette;
+    std::string color_blind;
     TrainerAppearance trainer;
     SsjFields ssj_fields;
     SsjMode ssj_mode = SsjMode::sixth;
@@ -136,7 +138,8 @@ struct HudPreferences {
             else if (label == "Space")
                 label = "JUMP";
         }
-        result.palette = semantic_palette(settings.at("colorBlind").get<std::string>());
+        result.color_blind = settings.at("colorBlind");
+        result.palette = semantic_palette(result.color_blind);
         result.trainer.style = settings.at("hudStrafeTrainerStyle");
         result.trainer.color = name_color(settings.at("hudStrafeTrainerColor").get<std::string>());
         result.trainer.follow = settings.at("hudStrafeTrainerFollow");
@@ -179,16 +182,61 @@ struct HudPreferences {
     }
 };
 
-inline std::optional<double>
-trainer_jump_sound(const HudPreferences &prefs, const BhState &state, const std::optional<StrafeReading> &reading) {
-    if (!prefs.trainer_enabled || !prefs.trainer_sound || !(state.events & jump) || !reading) return std::nullopt;
-    const float error = std::abs(reading->percent - 100);
-    constexpr double on_pace_pitch = 1.25;
-    constexpr double near_pace_pitch = 1;
-    constexpr double off_pace_pitch = .8;
-    return error <= prefs.trainer.zone       ? on_pace_pitch
-           : error <= prefs.trainer.zone * 3 ? near_pace_pitch
-                                             : off_pace_pitch;
+inline std::optional<double> trainer_jump_sound(const HudPreferences &prefs, std::optional<double> pace) {
+    if (!prefs.trainer_enabled || !prefs.trainer_sound || !pace) return std::nullopt;
+    constexpr std::array<double, 3> pitches = {.75, 1.1, 1.5};
+    return pitches[trainer_band(*pace, prefs.trainer.zone)];
+}
+
+inline bool perfect_hop_visible(
+        std::string_view style, const BhRunState &run, uint32_t tick, double interval, bool practice = false
+) {
+    constexpr double perfect_seconds = .35;
+    return (style == "scroll" || style == "legit") && !practice && run.last_perfect_tick >= 0
+           && tick >= uint32_t(run.last_perfect_tick)
+           && tick - uint32_t(run.last_perfect_tick) < std::ceil(perfect_seconds / interval);
+}
+
+inline HudLabel<64> perf_text(const BhRunState &run) {
+    HudLabel<64> result;
+    if (!run.measured_jumps)
+        result.assign("perf —");
+    else
+        result.format("perf %.1f%%", run.perf_percent);
+    return result;
+}
+
+inline void feed_strafe_trainer(
+        MovementFeedback &feedback,
+        const HudPreferences &prefs,
+        const BhState &state,
+        const SsjCmd &command,
+        const BhSettings &settings,
+        std::string_view style,
+        double interval,
+        bool interrupted
+) {
+    if (!prefs.trainer_enabled) {
+        feedback.strafe_trainer.reset();
+        feedback.strafe_reading.reset();
+        return;
+    }
+    feedback.strafe_trainer.set_smoothing(prefs.trainer_smoothing);
+    feedback.strafe_trainer.zone = prefs.trainer.zone;
+    feedback.strafe_trainer.feed(
+            command,
+            {std::hypot(double(state.velocity[0]), double(state.velocity[1])),
+             bool(state.grounded),
+             bool(state.on_ladder),
+             state.tick,
+             interval,
+             settings.max_speed,
+             settings.air_accelerate,
+             style,
+             interrupted || bool(state.events & 9),
+             bool(state.events & jump)}
+    );
+    feedback.strafe_reading = feedback.strafe_trainer.reading;
 }
 
 struct OffsetReport {
@@ -197,9 +245,40 @@ struct OffsetReport {
     bool gap = false;
 };
 
+inline HudLabel<> offset_text(const OffsetReport &reading) {
+    HudLabel<32> ticks;
+    if (reading.ticks < 0)
+        ticks.format("−%d", -reading.ticks);
+    else
+        ticks.format("%s%d", reading.ticks > 0 ? "+" : "", reading.ticks);
+    HudLabel<> result;
+    result.format(
+            "Offset %s (%s%s)",
+            ticks.bytes.data(),
+            reading.ticks < 0   ? "key early"
+            : reading.ticks > 0 ? "key late"
+                                : "same tick",
+            reading.overlap ? ", overlap"
+            : reading.gap   ? ", gap"
+                            : ""
+    );
+    return result;
+}
+
+inline HudLabel<> first_jump_text(unsigned ticks, std::optional<double> interval = {}) {
+    HudLabel<> result;
+    result.format("FJT %u tick%s", ticks, ticks == 1 ? "" : "s");
+    if (interval) {
+        HudLabel<48> milliseconds;
+        milliseconds.format(" (%.0f ms)", std::floor(ticks * *interval * 1000 + .5));
+        result.append(milliseconds.view());
+    }
+    return result;
+}
+
 class OffsetTracker {
     int64_t tick_ = -1;
-    float yaw_ = 0;
+    float yaw_ = NAN;
     int side_ = 0;
     int turn_ = 0;
     std::optional<std::pair<int64_t, int>> key_at_;
@@ -221,7 +300,9 @@ public:
         yaw_ = cmd.yaw;
         if (!valid) return std::nullopt;
         const int side = (cmd.side > 0) - (cmd.side < 0);
-        const float delta = std::remainder(cmd.yaw - previous_yaw, 360.f);
+        float delta = std::isfinite(previous_yaw) ? std::fmod(cmd.yaw - previous_yaw, 360.f) : 0;
+        if (delta > 180) delta -= 360;
+        if (delta < -180) delta += 360;
         const int turn = (delta < 0) - (delta > 0);
         if ((cmd.buttons & (left | right)) == (left | right))
             overlap_ = true;
@@ -279,71 +360,115 @@ class MovementHud {
     FirstJumpTracker first_;
     LjTracker longjump_;
     uint32_t epoch_ = ~uint32_t(0);
-    bool was_in_start_ = false;
+    StartPreTracker start_pre_;
+    bool lj_enabled_ = false;
+    JumpHud jumps_;
 
 public:
     HudLabel<> start_pre;
     HudLabel<> offset;
     HudLabel<> first_jump;
+    HudLabel<> first_jump_chat;
     HudLabel<> long_jump;
     HudLabel<> long_jump_details;
+    double tick_interval = .01;
+    double jump_sync = 0;
+    double gain_delta = 0;
+    uint32_t gain_tick = 0;
     float pre_speed = 0;
+    SemanticColor long_jump_color = semantic_rgb(0xffffff);
+    std::string color_blind;
     bool new_first = false;
     bool new_long_jump = false;
 
     void reset() { *this = {}; }
 
-    void feed(const BhJumpObservation *observation, const BhRunState &run, double dt, const std::string &style) {
-        if (!observation) {
-            offsets_.reset();
+    void tick_jump(const BhCmd &command, const BhState &state) {
+        constexpr double minimum_gain = 3;
+        if (const auto reading = jumps_.feed(command, state); reading && std::abs(reading->gain) >= minimum_gain) {
+            gain_delta = reading->gain;
+            gain_tick = state.tick;
+        }
+        jump_sync = jumps_.sync();
+    }
+
+private:
+    void clear_observation() {
+        offsets_.reset();
+        first_.reset();
+        longjump_.reset();
+        start_pre_.reset();
+        start_pre.assign("");
+        offset.assign("");
+        first_jump.assign("");
+        long_jump.assign("");
+        long_jump_details.assign("");
+        new_first = false;
+        new_long_jump = false;
+    }
+
+    void feed_start_pre(const BhJumpObservation &observation, bool in_start_before) {
+        const auto &pre = observation.pre;
+        SsjTick info;
+        info.jumped = observation.post.events & jump;
+        info.teleported = observation.post.events & 9;
+        info.in_start = in_start_before;
+        const SsjState state{pre.position, pre.velocity, bool(pre.grounded), bool(pre.on_ladder)};
+        const auto value = start_pre_.tick(state, info);
+        if (!value) return;
+        if (*value) {
+            pre_speed = **value;
+            start_pre.format("Start Pre %d", **value);
+        } else {
+            start_pre.assign("");
+        }
+    }
+
+    void feed_long_jump(const BhJumpObservation &observation, double dt, const std::string &style, bool enabled) {
+        if (lj_enabled_ != enabled) {
             longjump_.reset();
+            long_jump.assign("");
+            long_jump_details.assign("");
+            lj_enabled_ = enabled;
+        }
+        if (!enabled) return;
+        const auto report = longjump_.feed(
+                observation.pre, observation.post, observation.command, observation.valid == 1, dt, style
+        );
+        if (!report) return;
+        long_jump = lj_head(*report);
+        long_jump_details = lj_details(*report);
+        long_jump_color = lj_color(*report, color_blind);
+        new_long_jump = !report->failed;
+    }
+
+public:
+    void
+    feed(const BhJumpObservation *observation,
+         const BhRunState &run,
+         double dt,
+         const std::string &style,
+         bool lj_enabled = true,
+         bool in_start_before = false,
+         bool noclip = false) {
+        tick_interval = dt;
+        if (!observation || noclip) {
+            clear_observation();
             return;
         }
         const auto &state = observation->post;
-        if (epoch_ != observation->epoch || (state.events & 9) || (run.update_flags & 4)) {
-            offsets_.reset();
-            first_.reset();
-            longjump_.reset();
-            offset.assign("");
-            first_jump.assign("");
-        }
+        if (epoch_ != observation->epoch || (state.events & 9) || (run.update_flags & 4)) clear_observation();
         epoch_ = observation->epoch;
-        if (run.in_start || (was_in_start_ && !run.in_start)) {
-            pre_speed = std::hypot(state.velocity[0], state.velocity[1]);
-            start_pre.format("Start Pre %.0f", pre_speed);
-        }
-        was_in_start_ = run.in_start;
-        if (const auto reading = offsets_.feed(observation->command, state, style)) {
-            offset.format(
-                    "Offset %+d (%s%s)",
-                    reading->ticks,
-                    reading->ticks < 0   ? "key early"
-                    : reading->ticks > 0 ? "key late"
-                                         : "same tick",
-                    reading->overlap ? ", overlap"
-                    : reading->gap   ? ", gap"
-                                     : ""
-            );
-        }
+        feed_start_pre(*observation, in_start_before);
+        if (state.grounded || (state.events & 9)) offset.assign("");
+        if (run.jumps == 0) first_jump.assign("");
+        if (const auto reading = offsets_.feed(observation->command, state, style)) offset = offset_text(*reading);
         if (const auto ticks = first_.feed(state.events & jump, run, state.tick, state.events & 9)) {
-            first_jump.format("FJT %u tick%s (%.0f ms)", *ticks, *ticks == 1 ? "" : "s", *ticks * dt * 1000);
+            first_jump = first_jump_text(*ticks);
+            first_jump_chat = first_jump_text(*ticks, dt);
             new_first = true;
         }
-        const auto report =
-                longjump_.feed(observation->pre, state, observation->command, observation->valid == 1, dt, style);
-        if (report) {
-            long_jump.format(
-                    "%s %.2f%s", report->standing ? "LJ" : "BH", report->distance, report->failed ? " fail" : ""
-            );
-            long_jump_details.format(
-                    "%.0f pre | %.0f max | %zu str | %.0f%% sync",
-                    report->pre,
-                    report->max,
-                    report->strafes.size(),
-                    report->sync
-            );
-            new_long_jump = true;
-        }
+        feed_long_jump(*observation, dt, style, lj_enabled);
     }
 };
 }  // namespace native
@@ -584,10 +709,15 @@ void draw_movement_widgets(
         const auto &place = prefs.layout[hud_index(id)];
         return place ? place->visible : fallback;
     };
-    const auto line = [&](const char *id, std::string_view text, float x, float y, bool fallback) {
+    const auto line = [&](const char *id,
+                          std::string_view text,
+                          float x,
+                          float y,
+                          bool fallback,
+                          std::optional<NameColor> color = {}) {
         if (text.empty() || !wanted(id, fallback)) return;
         const auto point = at(id, x, y);
-        hud.overlay_text(point[0], point[1], text, 13, dim, true);
+        hud.overlay_text(point[0], point[1], text, 13, color.value_or(dim), true);
     };
     HudLabel<> label;
     if (run.track) {
@@ -604,16 +734,16 @@ void draw_movement_widgets(
         hud.overlay_rect(
                 point[0] - 90,
                 point[1],
-                180 * float(std::clamp(run.sync_percent, 0., 100.)) / 100,
+                180 * float(std::floor(movement.jump_sync + .5)) / 100,
                 4,
-                prefs.palette.sync
+                jump_sync_color(movement.jump_sync, prefs.palette)
         );
     }
     line("startPre", movement.start_pre.view(), width / 2 - 160, height - 105, false);
     line("strafeOffsets", movement.offset.view(), width / 2, height * .37f, false);
     line("firstJump", movement.first_jump.view(), width / 2, height * .396f, false);
     if (prefs.long_jump) {
-        line("longJump", movement.long_jump.view(), width / 2, height * .315f, false);
+        line("longJump", movement.long_jump.view(), width / 2, height * .315f, false, movement.long_jump_color);
         if (wanted("longJump", false)) {
             const auto point = at("longJump", width / 2, height * .315f);
             hud.overlay_text(point[0], point[1] + 23, movement.long_jump_details.view(), 12, dim, true);
@@ -658,17 +788,17 @@ void draw_trainer(
         const TrainerAppearance &look,
         bool hints,
         const SemanticPalette &palette,
-        int turn_direction
+        int /* turn_direction */
 ) {
-    const float error = std::abs(reading.percent - 100);
-    const unsigned band = error <= look.zone ? 2 : error <= look.zone * 3 ? 1 : 0;
-    auto tone = palette.trainer[band];
-    tone[3] *= reading.percent < look.dim_below ? .25f : 1;
+    const double pace = std::floor(reading.percent + .5);
+    const unsigned band = trainer_band(pace, look.zone);
+    // SemanticPalette stores the default trainer colours good, near, bad.
+    auto tone = palette.trainer[2 - band];
+    tone[3] *= look.dim_below > 0 && (!reading.has_pace || pace < look.dim_below) ? .25f : 1;
     auto ink = look.color;
     ink[3] = tone[3];
     if (look.show_pace) {
-        HudLabel<64> label;
-        label.format("%.0f%%", reading.percent);
+        const auto label = trainer_text(reading);
         hud.overlay_text(x, y, label.view(), 14, ink, true);
     }
     const bool minimal = look.style == "minimal";
@@ -681,9 +811,8 @@ void draw_trainer(
             x - look.zone / 200 * bar, top, look.zone / 100 * bar, thickness, {tone[0], tone[1], tone[2], .2f * tone[3]}
     );
     hud.overlay_rect(x - 1, top - 3, 2, thickness + 6, ink);
-    const float direction = look.follow && turn_direction < 0 ? -1 : 1;
-    const float position = std::clamp((reading.percent - 100) / 200 * direction, -.5f, .5f);
-    hud.overlay_rect(x + position * bar - 2, top - 2, 4, thickness + 4, tone);
+    const float position = float(trainer_position(pace, reading.side, look.follow) - .5);
+    if (reading.has_pace) hud.overlay_rect(x + position * bar - 2, top - 2, 4, thickness + 4, ink);
     if (look.style == "detailed") {
         hud.overlay_text(left, top + thickness + 5, "0", 10, ink);
         hud.overlay_text(x, top + thickness + 5, "100", 10, ink, true);

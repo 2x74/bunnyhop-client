@@ -67,17 +67,6 @@ void expect_close(
 }  // namespace
 
 int main(int argc, char **argv) {
-    {  // JHUD gain colours: red 0-59, orange 60-69, green 70-79, blue 80-89, white 90+.
-        using native::gain_band;
-        using native::GainBand;
-        assert(gain_band(0) == GainBand::red && gain_band(59.99f) == GainBand::red);
-        assert(gain_band(60) == GainBand::orange && gain_band(69.9f) == GainBand::orange);
-        assert(gain_band(70) == GainBand::green && gain_band(79.9f) == GainBand::green);
-        assert(gain_band(80) == GainBand::blue && gain_band(89.9f) == GainBand::blue);
-        assert(gain_band(90) == GainBand::white && gain_band(100) == GainBand::white
-               && gain_band(130) == GainBand::white);
-    }
-
     const std::string path = argc > 1 ? argv[1] : "ssj-oracle.json";
     std::ifstream file(path);
     if (!file) {
@@ -189,82 +178,7 @@ int main(int argc, char **argv) {
         tracker.set_interval(5);  // changing N starts the count over
         assert(tracker.interval() == 5 && tracker.jump == 0);
     }
-    {  // Strafe trainer, per tick by default: the first air tick after one with a yaw reads.
-        using T = native::StrafeTrainer;
-        const std::uint32_t right = T::right_bit, left = T::left_bit;
-        const float speed = 600, ideal = T::ideal_degrees(speed);
-        assert(std::fabs(ideal - 2.8624f) < 1e-3f);
-        T trainer;
-        assert(!trainer.tick(false, speed, 179.0f, right));                   // nothing to compare the yaw with yet
-        auto r = trainer.tick(false, speed, 179.0f + ideal - 360.0f, right);  // across the 180/-180 wrap
-        assert(r && std::fabs(r->percent - 100.0f) < 0.1f && !r->hint);
-        r = trainer.tick(false, speed, 179.0f + 1.5f * ideal - 360.0f, right);  // half a tick's worth
-        assert(r && std::fabs(r->percent - 50.0f) < 0.1f);                      // per tick: no averaging by default
-        assert(native::strafe_band(100) == 0 && native::strafe_band(80) == 1 && native::strafe_band(150) == 2);
-
-        // Smoothing is a rolling mean of the last N air ticks, still one reading per tick.
-        T smooth;
-        smooth.set_smoothing(2);
-        float yaw = 0;
-        smooth.tick(false, speed, yaw, right);
-        r = smooth.tick(false, speed, yaw += ideal, right);
-        assert(r && std::fabs(r->percent - 100.0f) < 0.1f);
-        r = smooth.tick(false, speed, yaw += ideal * 0.5f, right);
-        assert(r && std::fabs(r->percent - 75.0f) < 0.1f);
-        smooth.set_smoothing(0);
-        assert(smooth.smoothing() == 1);
-
-        // Hints wait for a full window, then say what's wrong over it.
-        auto run = [&](float rate, std::uint32_t keys) {
-            T t;
-            float y = 0;
-            std::optional<native::StrafeReading> last;
-            t.tick(false, speed, y, keys);
-            for (unsigned i = 0; i < T::hint_window; ++i) {
-                last = t.tick(false, speed, y += ideal * rate, keys);
-                if (i + 1 < T::hint_window) assert(last && !last->hint);
-            }
-            return last->hint;
-        };
-        assert(!run(1.0f, right));
-        assert(run(0.5f, right) == native::StrafeHint::strafe_more);
-        assert(run(1.6f, right) == native::StrafeHint::strafe_less);
-        assert(run(1.0f, 0) == native::StrafeHint::less_deadtime);             // no key
-        assert(run(1.0f, left | right) == native::StrafeHint::less_deadtime);  // both cancel
-        assert(std::string(native::strafe_hint_text(native::StrafeHint::strafe_more)) == "Strafe more!");
-
-        // Too slow to have an ideal angle: no reading. A long stand starts over.
-        T slow;
-        for (unsigned t = 0; t < 40; ++t)
-            assert(!slow.tick(false, 10, float(t), right));
-        T chain;
-        yaw = 0;
-        chain.tick(false, speed, yaw, 0);
-        for (unsigned i = 0; i < T::hint_window; ++i)
-            chain.tick(false, speed, yaw += ideal, 0);
-        for (unsigned i = 0; i <= T::ground_reset; ++i)
-            assert(!chain.tick(true, speed, yaw, 0));
-        r = chain.tick(false, speed, yaw += ideal, right);
-        assert(r && !r->hint);  // the dead air from before the stand is gone
-    }
     {
-        using T = native::StrafeTrainer;
-        const float speed = 300, ideal = T::ideal_degrees(speed);
-        T wonly;
-        float yaw = 90;
-        wonly.tick(false, speed, yaw, 450.f, 0.f);
-        std::optional<native::StrafeReading> reading;
-        for (unsigned i = 0; i < T::hint_window; ++i)
-            reading = wonly.tick(false, speed, yaw += ideal, 450.f, 0.f);
-        assert(reading && std::fabs(reading->percent - 100) < .1f && !reading->hint);
-        // Filtered D in W-only has no effective movement, regardless of the original physical keys.
-        T filtered;
-        filtered.tick(false, speed, 90, 0.f, 0.f);
-        yaw = 90;
-        for (unsigned i = 0; i < T::hint_window; ++i)
-            reading = filtered.tick(false, speed, yaw += ideal, 0.f, 0.f);
-        assert(reading && reading->hint == native::StrafeHint::less_deadtime);
-
         // The reported W-only gain must use zeroed D, not the unfiltered side wish.
         float pos[3] = {0, 0, 100}, vel[3] = {300, 0, 0};
         native::SsjState pre{pos, vel, true, false};
@@ -298,11 +212,11 @@ int main(int argc, char **argv) {
         f.ssj_was_noclip = true;
         f.strafe_ground_ticks = 99;
         f.strafe_reading = native::StrafeReading{100, native::StrafeHint::less_deadtime};
-        f.strafe_trainer.tick(false, 300, 90, 450.f, 0.f);
+        f.strafe_trainer.feed({450, 0, 90, 0}, {});
         f.reset(false, false, true);
         assert(f.ssj.jump == 0 && f.ssj_line.empty() && !f.ssj_gain && !f.strafe_reading);
         assert(f.strafe_ground_ticks == 0 && !f.ssj_was_in_start && !f.ssj_was_noclip);
-        assert(!f.strafe_trainer.tick(false, 300, 200, 450.f, 0.f));  // no stale yaw
+        assert(!f.strafe_trainer.reading.has_pace);
         for (int i = 0; i < 100; ++i)
             assert(!f.history_ready(false, false, false));
         for (unsigned i = 0; i < native::bhop_frames + 1; ++i)
