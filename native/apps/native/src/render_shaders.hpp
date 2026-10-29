@@ -13,6 +13,10 @@ struct Actor {
     std::optional<Glow> playerGlow;
     GhostSource source = GhostSource::none;
     int ghost_slot = -1;
+    // Ghosts fade out as the camera reaches them (Settings -> Ghost -> Near fade).
+    bool near_fade = false;
+    // A ghost's colour (sRGB) for its name tag.
+    std::array<float, 3> tint{.55f, .85f, 1};
 };
 
 // Source coordinates throughout: Z up. Water is the site's convex-volume fog, evaluated in gamma

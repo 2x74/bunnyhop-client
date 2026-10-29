@@ -184,23 +184,79 @@ inline GLuint link_program(Gl &gl, const char *vertex_source, const char *fragme
 // Standard headers must be included at file scope before these GL-dependent definitions.
 #include "source_hdr.hpp"
 
+// The website's route guide (apps/web/src/ghost-route.ts): the path in the ghost's colour and a white wire box on
+// every takeoff, as screen-space lines of a fixed pixel width. Segments are expanded to quads once, at upload.
 class GhostRouteGeometry {
-    Gl &gl;
-    GLuint program = 0;
+    static constexpr float path_width_points = 2.5f, path_opacity = .85f;
+    static constexpr float marker_width_points = 2, marker_opacity = .95f;
+    static constexpr float marker_half_width_units = 6, marker_below_units = 1, marker_above_units = 2;
+    static constexpr float route_lift_units = 2;
+
+    struct Vertex {
+        native_render::Vec3 point, other;
+        float side = 0;
+    };
 
     struct Mesh {
         GLuint vao = 0, buffer = 0;
-        GLsizei count = 0;
+        GLsizei pathVertices = 0, markerVertices = 0;
     };
 
+    Gl &gl;
+    GLuint program = 0;
     std::array<Mesh, 4> meshes;
-    GLint projectionLocation = -1, colorLocation = -1;
+    std::vector<Vertex> vertices;
+    GLint projectionLocation = -1, colorLocation = -1, widthLocation = -1, viewportLocation = -1;
+
+    void add_segment(const native_render::Vec3 &from, const native_render::Vec3 &to) {
+        const Vertex a{from, to, 1}, b{from, to, -1}, c{to, from, -1}, d{to, from, 1};
+        for (const auto &vertex : {a, b, c, a, c, d})
+            vertices.push_back(vertex);
+    }
+
+    void add_path(const native_render::GhostPath &path, bool fullPath) {
+        if (!fullPath) {
+            for (const auto &link : path.jump_links)
+                add_segment(link.from, link.to);
+            return;
+        }
+        for (size_t tick = path.start + 1; tick <= path.end && tick < path.frames.size(); ++tick) {
+            if (path.teleports[tick] || !native_render::valid_ghost_position(path.frames[tick - 1])
+                || !native_render::valid_ghost_position(path.frames[tick]))
+                continue;
+            add_segment(
+                    native_render::ghost_feet(path.frames[tick - 1], route_lift_units),
+                    native_render::ghost_feet(path.frames[tick], route_lift_units)
+            );
+        }
+    }
+
+    void add_marker(const native_render::Vec3 &takeoff) {
+        constexpr float w = marker_half_width_units;
+        std::array<native_render::Vec3, 8> corners;
+        for (size_t corner = 0; corner < corners.size(); ++corner) {
+            corners[corner] = {
+                    takeoff[0] + ((corner & 1) ? w : -w),
+                    takeoff[1] + ((corner & 2) ? w : -w),
+                    takeoff[2] + ((corner & 4) ? marker_above_units : -marker_below_units)
+            };
+        }
+        constexpr std::array<std::array<int, 2>, 12> edges = {
+                {{0, 1}, {1, 3}, {3, 2}, {2, 0}, {4, 5}, {5, 7}, {7, 6}, {6, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}}
+        };
+        for (const auto &edge : edges)
+            add_segment(corners[size_t(edge[0])], corners[size_t(edge[1])]);
+    }
 
 public:
     explicit GhostRouteGeometry(Gl &api) : gl(api) {
         const char *vertex = R"(#version 330 core
-layout(location=0)in vec3 position;uniform mat4 projection;
-void main(){gl_Position=projection*vec4(position,1);}
+layout(location=0)in vec3 point;layout(location=1)in vec3 other;layout(location=2)in float side;
+uniform mat4 projection;uniform vec2 viewport;uniform float width;
+void main(){vec4 a=projection*vec4(point,1),b=projection*vec4(other,1);
+if(a.w<1e-3){a=a+(b-a)*((1e-3-a.w)/(b.w-a.w));}if(b.w<1e-3){b=b+(a-b)*((1e-3-b.w)/(a.w-b.w));}
+vec2 d=b.xy/b.w-a.xy/a.w;d.x*=viewport.x/viewport.y;d=length(d)>1e-6?normalize(d):vec2(1,0);
+vec2 n=vec2(-d.y,d.x);n.x*=viewport.y/viewport.x;gl_Position=a+vec4(n*side*width/viewport.y*a.w,0,0);}
 )";
         const char *fragment = R"(#version 330 core
 uniform vec4 tint;out vec4 color;void main(){color=tint;}
@@ -208,13 +264,26 @@ uniform vec4 tint;out vec4 color;void main(){color=tint;}
         program = link_program(gl, vertex, fragment);
         projectionLocation = gl.GetUniformLocation(program, "projection");
         colorLocation = gl.GetUniformLocation(program, "tint");
+        widthLocation = gl.GetUniformLocation(program, "width");
+        viewportLocation = gl.GetUniformLocation(program, "viewport");
         for (auto &mesh : meshes) {
             gl.GenVertexArrays(1, &mesh.vao);
             gl.GenBuffers(1, &mesh.buffer);
             gl.BindVertexArray(mesh.vao);
             gl.BindBuffer(GL_ARRAY_BUFFER, mesh.buffer);
-            gl.EnableVertexAttribArray(0);
-            gl.VertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(native_render::Vec3), nullptr);
+            const int sizes[3] = {3, 3, 1};
+            const size_t offsets[3] = {offsetof(Vertex, point), offsetof(Vertex, other), offsetof(Vertex, side)};
+            for (GLuint attribute = 0; attribute < 3; ++attribute) {
+                gl.EnableVertexAttribArray(attribute);
+                gl.VertexAttribPointer(
+                        attribute,
+                        sizes[attribute],
+                        GL_FLOAT,
+                        GL_FALSE,
+                        sizeof(Vertex),
+                        reinterpret_cast<void *>(offsets[attribute])
+                );
+            }
         }
     }
 
@@ -227,55 +296,45 @@ uniform vec4 tint;out vec4 color;void main(){color=tint;}
     }
 
     void upload(unsigned slot, const native_render::GhostPath &path, bool fullPath) {
-        std::vector<native_render::Vec3> vertices;
-        const size_t links = fullPath ? path.frames.size() : path.jump_links.size();
-        vertices.reserve(links * 2 + path.jumps.size() * 8);
-        if (fullPath && !path.frames.empty()) {
-            for (size_t tick = path.start + 1; tick <= path.end && tick < path.frames.size(); ++tick) {
-                if (path.teleports[tick] || !native_render::valid_ghost_position(path.frames[tick - 1])
-                    || !native_render::valid_ghost_position(path.frames[tick]))
-                    continue;
-                vertices.push_back(native_render::ghost_feet(path.frames[tick - 1], 2));
-                vertices.push_back(native_render::ghost_feet(path.frames[tick], 2));
-            }
-        } else {
-            for (const auto &link : path.jump_links) {
-                vertices.push_back(link.from);
-                vertices.push_back(link.to);
-            }
-        }
-        for (const auto &point : path.jumps) {
-            constexpr float halfSize = 8;
-            const std::array<native_render::Vec3, 4> corners = {
-                    {{point[0] - halfSize, point[1] - halfSize, point[2]},
-                     {point[0] + halfSize, point[1] - halfSize, point[2]},
-                     {point[0] + halfSize, point[1] + halfSize, point[2]},
-                     {point[0] - halfSize, point[1] + halfSize, point[2]}}
-            };
-            for (size_t edge = 0; edge < 4; ++edge) {
-                vertices.push_back(corners[edge]);
-                vertices.push_back(corners[(edge + 1) % 4]);
-            }
-        }
+        vertices.clear();
+        add_path(path, fullPath);
         auto &mesh = meshes.at(slot);
+        mesh.pathVertices = GLsizei(vertices.size());
+        for (const auto &takeoff : path.jumps)
+            add_marker(takeoff);
+        mesh.markerVertices = GLsizei(vertices.size()) - mesh.pathVertices;
         gl.BindBuffer(GL_ARRAY_BUFFER, mesh.buffer);
-        gl.BufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(native_render::Vec3), vertices.data(), GL_STATIC_DRAW);
-        mesh.count = GLsizei(vertices.size());
+        gl.BufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STATIC_DRAW);
+        vertices.clear();
+        vertices.shrink_to_fit();
     }
 
-    void draw(unsigned slot, const native::Matrix &projection, const std::array<float, 3> &color) {
+    void
+    draw(unsigned slot,
+         const native::Matrix &projection,
+         const std::array<float, 3> &color,
+         int viewportWidth,
+         int viewportHeight,
+         float pixelDensity) {
         const auto &mesh = meshes.at(slot);
-        if (!mesh.count) return;
+        if (!mesh.pathVertices && !mesh.markerVertices) return;
         gl.Enable(GL_DEPTH_TEST);
         gl.DepthMask(GL_FALSE);
+        gl.Disable(GL_CULL_FACE);
         gl.Enable(GL_BLEND);
         gl.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         gl.UseProgram(program);
         gl.UniformMatrix4fv(projectionLocation, 1, GL_FALSE, projection.data());
-        const float tint[4] = {color[0], color[1], color[2], .45f};
-        gl.Uniform4fv(colorLocation, 1, tint);
+        gl.Uniform2f(viewportLocation, float(std::max(viewportWidth, 1)), float(std::max(viewportHeight, 1)));
         gl.BindVertexArray(mesh.vao);
-        gl.DrawArrays(GL_LINES, 0, mesh.count);
+        gl.Uniform1f(widthLocation, path_width_points * pixelDensity);
+        const float pathTint[4] = {color[0], color[1], color[2], path_opacity};
+        gl.Uniform4fv(colorLocation, 1, pathTint);
+        gl.DrawArrays(GL_TRIANGLES, 0, mesh.pathVertices);
+        gl.Uniform1f(widthLocation, marker_width_points * pixelDensity);
+        const float markerTint[4] = {1, 1, 1, marker_opacity};
+        gl.Uniform4fv(colorLocation, 1, markerTint);
+        gl.DrawArrays(GL_TRIANGLES, mesh.pathVertices, mesh.markerVertices);
         gl.DepthMask(GL_TRUE);
         gl.Disable(GL_BLEND);
     }
@@ -659,6 +718,8 @@ class Renderer {
     }
 
     int viewportWidth = 1, viewportHeight = 1;
+    // Window pixels per point: the route's line widths are in points, like the website's CSS pixels.
+    float pixelDensity = 1;
 
     void water_uniforms(GLuint target, const float eye[3]) {
         gl.Uniform3fv(loc(target, "cameraPosition"), 1, eye);
@@ -1135,7 +1196,7 @@ class Renderer {
         const auto color = path.source == native_render::GhostSource::pb
                                    ? ghostRouteColor
                                    : native_render::ghost_source_color(path.source);
-        ghostRoutes->draw(unsigned(selected), projection, color);
+        ghostRoutes->draw(unsigned(selected), projection, color, viewportWidth, viewportHeight, pixelDensity);
     }
 
     void draw_map_effects(
@@ -1302,10 +1363,12 @@ public:
         if (slot >= ghostPaths.size()) return;
         actor.ghost_slot = int(slot);
         actor.source = ghostPaths[slot].source;
-        if (actor.source != native_render::GhostSource::pb)
-            actor.outfit = "outfit-cream";
-        else if (actor.loadout.empty())
-            actor.loadout = packedLoadout;
+        actor.near_fade = ghostOptions.near_fade;
+        // As on the website: your PB ghost follows your loadout unless its replay carries one; other ghosts hold the
+        // default carrot.
+        if (actor.source == native_render::GhostSource::pb && actor.loadout.empty()) actor.loadout = packedLoadout;
+        actor.tint = actor.source == native_render::GhostSource::pb ? ghostRouteColor
+                                                                    : native_render::ghost_source_color(actor.source);
     }
 
     bool tag_visible(bool ghost) const { return ghost || graphics.tags_players; }
@@ -1637,6 +1700,8 @@ public:
     }
 
     void set_source_look(bool value) { sourceLook = value; }
+
+    void set_pixel_density(float value) { pixelDensity = std::isfinite(value) && value > 0 ? value : 1; }
 
     // Current Source-look exposure (1 off maps with HDR lighting or with the look off).
     float exposure() const { return hdr && sourceLook && lightmapInfo.hdr ? hdr->current_exposure() : 1; }

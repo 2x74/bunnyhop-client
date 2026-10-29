@@ -32,7 +32,7 @@ inline bool positional_teleport(const BhGhostFrame &a, const BhGhostFrame &b) {
 }
 
 struct GhostOptions {
-    bool pb = true, wr = true, custom = true, trail = true, route = false, show = true;
+    bool pb = true, wr = true, custom = true, trail = true, route = false, show = true, near_fade = true;
     GhostSource route_source = GhostSource::none;
     bool route_path = false;
 
@@ -42,6 +42,7 @@ struct GhostOptions {
         wr = settings.value("ghostWr", true);
         custom = settings.value("ghostCustom", true);
         trail = settings.value("ghostTrail", true);
+        near_fade = settings.value("ghostNearFade", true);
         route = settings.value("ghostRoute", false);
         const auto source = settings.value("ghostRouteSource", std::string("auto"));
         route_source = source == "auto" ? GhostSource::none : ghost_source(source);

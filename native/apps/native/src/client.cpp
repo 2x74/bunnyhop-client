@@ -11,7 +11,7 @@
 #include "game_session.hpp"
 #include "base64.hpp"
 #include "replay_practice.hpp"
-#include "ghost_slots.hpp"
+#include "ghost_actors.hpp"
 #include "video_request.hpp"
 #include "display_defaults.hpp"
 #include "json_file_writer.hpp"
@@ -3188,47 +3188,18 @@ int run(const native::Options &opt) {
             eye[2] += prev.view_offset_z + (curr.view_offset_z - prev.view_offset_z) * blend;
             BhSnapshot state{};
             bh_snapshot(core.get(), &state);
-            std::optional<native_render::Actor> audible_ghost;
-            BhCmd ghost_command{};
-            const BhCmd *shown_ghost_command = nullptr;
-            if (ghosts.enabled && renderer->ghost_visible(0) && prefs.show_ghost && ghosts.handle && !viewer.active
-                && !spectator
-                && (tutorial_runner.demo
-                    || (ghosts.info.value("track", 0u) == active_track
-                        && ghosts.info.value("style", std::string("autohop")) == active_style))) {
+            renderer->set_replay_actor(nullptr, 0, 0);
+            if (tutorial_runner.demo && ghosts.enabled && ghosts.handle && prefs.show_ghost && !viewer.active
+                && !spectator) {
                 BhGhostFrame ghost{};
-                const auto &path = renderer->ghost_path(0);
-                const uint32_t elapsed = tutorial_runner.demo ? curr.tick - tutorial_runner.demo_start
-                                         : run_state.status   ? curr.tick - run_state.start_tick
-                                                              : 0;
-                const uint32_t tick = tutorial_runner.demo ? ghosts.info.value("startTick", 0u) + elapsed
-                                                           : std::min(path.start + elapsed, path.end);
+                const uint32_t tick = ghosts.info.value("startTick", 0u) + curr.tick - tutorial_runner.demo_start;
                 if (bh_ghost_frame(core.get(), ghosts.handle, tick, &ghost)) {
-                    if (!tutorial_runner.demo) {
-                        shown_ghost_command = &ghost_command;
-                        if (path.start + elapsed <= path.end)
-                            bh_ghost_command(core.get(), ghosts.handle, tick, &ghost_command);
-                    }
-                    const float opacity =
-                            native::GhostSlots::opacity(curr, ghost, prefs.ghost_opacity, prefs.ghost_near_fade);
-                    renderer->set_replay_actor(
-                            ghost, tutorial_runner.demo ? "outfit-cream" : outfit, renderer->ghost_loadout(0), opacity
-                    );
-                    native_render::Actor actor;
-                    actor.id = "replay-ghost";
-                    actor.frame = ghost;
-                    actor.opacity = opacity;
-                    audible_ghost = actor;
+                    renderer->set_replay_actor(ghost, "outfit-cream", renderer->ghost_loadout(0), prefs.ghost_opacity);
                 } else {
-                    renderer->set_replay_actor(nullptr, 0, 0);
-                    if (tutorial_runner.demo) {
-                        ghosts.enabled = false;
-                        tutorial_runner.demo = false;
-                    }
+                    ghosts.enabled = false;
+                    tutorial_runner.demo = false;
                 }
-            } else
-                renderer->set_replay_actor(nullptr, 0, 0);
-            hud.extras.ghost_progress(renderer->ghost_path(0).frames, curr, run_state, shown_ghost_command);
+            }
             BhRunState display_run = run_state;
             std::string display_style = viewer.active ? viewer.session.info.value("style", active_style) : active_style;
             std::optional<native_render::Actor> spectated_actor;
@@ -3323,26 +3294,27 @@ int run(const native::Options &opt) {
             }
             if (spectator) room.spectator_run(display_run, display_style, *spectator, steady_seconds, epoch_ms());
             if (hide_players) actors.clear();
+            native::PrimaryGhost primary_ghost;
             if (!viewer.active && !spectator && !tutorial_runner.demo && prefs.show_ghost)
-                for (unsigned i = 1; i < 4; i++) {
-                    const auto &slot = ghosts.slots[i];
-                    if (!slot.handle || !slot.enabled || !renderer->ghost_visible(i)
-                        || slot.info.value("track", 0u) != active_track
-                        || slot.info.value("style", std::string("autohop")) != active_style)
-                        continue;
-                    native_render::Actor actor;
-                    actor.id = "ghost-" + std::to_string(i);
-                    actor.name = renderer->ghost_name(i);
-                    const uint32_t tick = slot.info.value("startTick", 0u)
-                                          + (run_state.status ? curr.tick - run_state.start_tick : 0);
-                    if (!bh_ghost_frame(core.get(), slot.handle, tick, &actor.frame)) continue;
-                    actor.outfit = outfit;
-                    actor.loadout = renderer->ghost_loadout(i);
-                    renderer->decorate_ghost(actor, i);
-                    actor.opacity =
-                            native::GhostSlots::opacity(curr, actor.frame, prefs.ghost_opacity, prefs.ghost_near_fade);
-                    actors.push_back(actor);
-                }
+                primary_ghost = native::append_ghost_actors(
+                        ghosts,
+                        *renderer,
+                        {core.get(),
+                         run_state,
+                         curr.tick,
+                         blend,
+                         active_track,
+                         active_style,
+                         outfit,
+                         prefs.ghost_opacity},
+                        actors
+                );
+            hud.extras.ghost_progress(
+                    renderer->ghost_path(0).frames,
+                    curr,
+                    run_state,
+                    primary_ghost.shown ? &primary_ghost.command : nullptr
+            );
             if (external_camera) {
                 renderer->set_viewmodel_visible(false);
                 native_render::Actor self;
@@ -3387,12 +3359,12 @@ int run(const native::Options &opt) {
                     && native::score_ms(display_run.seconds) < native::score_ms(*known_world_record);
             renderer->set_zone_state(display_run.track, display_run, world_record_finish);
             renderer->set_flashlight(flashlight);
+            renderer->set_pixel_density(SDL_GetWindowPixelDensity(window.get()));
             audio.listener(eye, camera_input.yaw());
             if (focused && captured && !opt.frames) {
                 for (const auto &actor : actors)
                     if (actor.id != "local-camera-target")
                         audio.spatial_actor(actor, frame_seconds, actor.id.starts_with("ghost-"));
-                if (audible_ghost) audio.spatial_actor(*audible_ghost, frame_seconds, true);
                 if (spectated_actor && !external_camera) audio.spatial_actor(*spectated_actor, frame_seconds, false);
             }
             native::update_compare_actor(*renderer, replay_compare, curr.tick, viewer.session.range, viewer.active);
@@ -3436,14 +3408,15 @@ int run(const native::Options &opt) {
                         steady_seconds,
                         renderer->output_view(width, height)
                 );
-                if (audible_ghost && prefs.ghost_tag)
+                const auto *primary_actor = native::find_primary_ghost(actors);
+                if (primary_actor && prefs.ghost_tag)
                     native::draw_ghost_name_tag(
                             hud,
                             width,
                             height,
                             prefs.hud_scale,
                             matrix.data(),
-                            *audible_ghost,
+                            *primary_actor,
                             hud.extras.ghost_name.view(),
                             hud.extras.ghost_seconds,
                             hud.extras.ghost_delta.view(),

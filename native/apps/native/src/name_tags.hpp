@@ -224,6 +224,9 @@ struct NameTagTrace {
     }
 };
 
+// Ghost tags take the ghost's own colour, as on the website (player/colors.ts GHOST_CSS, or your ghost cosmetic).
+inline constexpr float ghost_tag_alpha = .85f;
+
 template <class Hud, class Actors, class Room, class Trace>
 void draw_name_tags(
         Hud &hud,
@@ -244,7 +247,8 @@ void draw_name_tags(
     hud.overlay_begin(width, height, percent);
     for (const auto &actor : actors) {
         const bool ghost = actor.id.starts_with("ghost-");
-        if (actor.id == "local-camera-target" || actor.name.empty() || actor.opacity < .05f
+        // Slot 0's tag also shows its time and delta (draw_ghost_name_tag).
+        if (actor.id == "local-camera-target" || actor.id == "ghost-0" || actor.name.empty() || actor.opacity < .05f
             || (ghost ? !ghosts : !players))
             continue;
         const float point[] = {
@@ -258,7 +262,7 @@ void draw_name_tags(
         unsigned slot = 256;
         std::from_chars(actor.id.data(), actor.id.data() + actor.id.size(), slot);
         auto look = room.appearance(slot);
-        if (ghost) look.color = {.55f, .85f, 1, .85f};
+        if (ghost) look.color = {actor.tint[0], actor.tint[1], actor.tint[2], ghost_tag_alpha};
         hud.overlay_name((*screen)[0], (*screen)[1], actor.name, 13, look, seconds, true);
     }
     hud.overlay_end(width, height);
@@ -288,15 +292,15 @@ void draw_ghost_name_tag(
     const auto screen = project_name_tag(matrix, point, view, height, geometry.scale);
     if (!screen || (!through_walls && !trace(point))) return;
     hud.overlay_begin(width, height, percent);
-    constexpr NameColor blue = {.55f, .85f, 1, .85f};
-    hud.overlay_text((*screen)[0], (*screen)[1], name, 13, blue, true);
+    const NameColor tint = {actor.tint[0], actor.tint[1], actor.tint[2], ghost_tag_alpha};
+    hud.overlay_text((*screen)[0], (*screen)[1], name, 13, tint, true);
     HudLabel<128> label;
     if (seconds) label.format("%.3fs", *seconds);
     if (!delta.empty()) {
         label.append(" | ");
         label.append(delta);
     }
-    hud.overlay_text((*screen)[0], (*screen)[1] + 20, label.view(), 11, blue, true);
+    hud.overlay_text((*screen)[0], (*screen)[1] + 20, label.view(), 11, tint, true);
     hud.overlay_end(width, height);
 }
 

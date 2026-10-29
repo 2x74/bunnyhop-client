@@ -242,6 +242,11 @@ in vec3 vColor,normalV,positionV;in float vGlow,vGlowAlpha,vHalo;uniform bool gh
 )" + fp + hatFp + glowNoise + glowFragment
                                +
                                R"(
+float ghostNearFade(){
+ if(uNearFade.y<=uNearFade.x)return 1.;
+ vec3 ab=uAxisB-uAxisA;float h=clamp(dot(cameraPosition-uAxisA,ab)/max(dot(ab,ab),1e-3),0.,1.);
+ return smoothstep(uNearFade.x,uNearFade.y,length(cameraPosition-(uAxisA+ab*h)));
+}
 void main(){vec3 n=normalize(normalV);float back=gl_FrontFacing?1.:.38;if(!gl_FrontFacing)n=-n;vec3 V=normalize(cameraPosition-positionV),L=normalize(vec3(.42,-.46,.78));float key=smoothstep(-.05,.55,dot(n,L));vec3 ambient=mix(vec3(.30,.27,.26),vec3(.70,.76,.88),n.z*.5+.5)*.62;vec3 albedo=vColor;
 )" + fa + R"(
 vec3 col=albedo*(ambient+key*vec3(.78,.74,.68));col+=pow(1.-max(dot(n,V),0.),3.)*.22*vec3(1,.86,.65);col*=back;
@@ -259,7 +264,7 @@ if(ghostStyle){
  vec3 rimC=ghostRim+(ghostRim-ghostColor)*.6;
  col=max(col+rimC*fres*1.6,0.)+vec3(1)*fres*fres*.35;
  col+=mix(ghostColor,vec3(1),.45)*vGlow*1.1;
- alpha=clamp(opacity*(.38+.62*fres)+vGlow*.35*opacity,0.,1.);
+ alpha=clamp((opacity*(.38+.62*fres)+vGlow*.35*opacity)*ghostNearFade(),0.,1.);
  if(alpha<.004)discard;
 }
 col=max(col,vec3(0));color=vec4(mix(col*12.92,1.055*pow(col,vec3(1./2.4))-.055,step(vec3(.0031308),col)),alpha);}
@@ -856,6 +861,20 @@ public:
         gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
     }
 
+    // The website's ghost near fade (player/materials.ts nearFade): hidden within 14 units of the camera, measured to
+    // the body's feet-to-head axis, fully shown from 64.
+    void ghost_near_fade(GLuint actorProgram, const native_render::Actor &actor) {
+        constexpr float hidden_units = 14, shown_units = 64, body_height_units = 64;
+        const auto &position = actor.frame.position;
+        const float top[3] = {position[0], position[1], position[2] + body_height_units};
+        gl.Uniform3fv(gl.GetUniformLocation(actorProgram, "uAxisA"), 1, position);
+        gl.Uniform3fv(gl.GetUniformLocation(actorProgram, "uAxisB"), 1, top);
+        if (actor.near_fade)
+            gl.Uniform2f(gl.GetUniformLocation(actorProgram, "uNearFade"), hidden_units, shown_units);
+        else
+            gl.Uniform2f(gl.GetUniformLocation(actorProgram, "uNearFade"), 0, 0);
+    }
+
     void draw_actor(
             const native_render::Actor &actor,
             const native::Matrix &projection,
@@ -946,6 +965,7 @@ public:
             const auto rim = source == native_render::GhostSource::pb ? ghostRim : color;
             gl.Uniform3fv(gl.GetUniformLocation(actorProgram, "ghostColor"), 1, color.data());
             gl.Uniform3fv(gl.GetUniformLocation(actorProgram, "ghostRim"), 1, rim.data());
+            ghost_near_fade(actorProgram, actor);
         }
         const auto visibleParts = parts_for(actor, l);
         gl.Enable(GL_DEPTH_TEST);

@@ -1,7 +1,6 @@
 #include "ghost_slots.hpp"
 #include "data_location.hpp"
 #include <algorithm>
-#include <cmath>
 #include <stdexcept>
 
 namespace native {
@@ -21,6 +20,7 @@ void GhostSlots::load(BhContext *core, const std::filesystem::path &path, unsign
     auto &slot = slots[index];
     if (slot.handle) bh_ghost_free(core, slot.handle);
     slot = {};
+    cursors[index].reset();
     if (index == 0) {
         handle = 0;
         enabled = false;
@@ -76,12 +76,29 @@ void GhostSlots::toggle(const nlohmann::json &message) {
     slots[0].enabled = enabled;
 }
 
-float GhostSlots::opacity(const BhState &player, const BhGhostFrame &ghost, float opacity, bool near_fade) {
-    const float distance = std::hypot(
-            std::hypot(ghost.position[0] - player.position[0], ghost.position[1] - player.position[1]),
-            ghost.position[2] - player.position[2]
-    );
-    return opacity * (near_fade ? std::clamp((distance - 24.f) / 80.f, 0.f, 1.f) : 1.f);
+bool GhostSlots::present(
+        BhContext *core,
+        unsigned index,
+        const native_render::GhostPath &path,
+        std::optional<double> elapsed,
+        native_render::Actor &actor
+) {
+    const auto &slot = slots.at(index);
+    native_render::GhostPose pose;
+    if (!slot.handle || !native_render::pose_ghost(path, elapsed, pose)) return false;
+    actor.frame = pose.frame;
+    actor.frame.tick = uint32_t(pose.tick);
+    actor.attack = 0;
+    actor.inspect = 0;
+    actor.inspectHeld = false;
+    const auto range = cursors[index].advance(pose.tick, pose.moving, actor.snapped);
+    BhReplayEvents events{};
+    if (range && bh_ghost_events(core, slot.handle, range->first, range->second, &events)) {
+        actor.attack = events.cosmetic;
+        actor.inspect = events.inspect_signal;
+        actor.inspectHeld = events.inspect_held != 0;
+    }
+    return true;
 }
 
 }  // namespace native

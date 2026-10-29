@@ -1,4 +1,4 @@
-#include "ghost_trails.hpp"
+#include "ghost_playback.hpp"
 #include <cassert>
 #include <iostream>
 
@@ -68,5 +68,30 @@ int main() {
     assert(trail_color(colors, 1, 1, 40)[3] == 0);
     assert(glow_distance(999) == 1 && glow_distance(1801) == 0);
     assert(halo_width(0) == .85f && halo_alpha(0) == .08f && halo_alpha(7) < halo_alpha(1));
-    std::cout << "Recorded 2.5s trails, seeks, teleport cuts, route markers, source colours and toggles passed\n";
+    path = recorded_path();
+    path.start = 100;
+    path.end = 900;
+    assert(!ghost_elapsed_ticks(run_status_idle, 500, 0, .5f));
+    assert(*ghost_elapsed_ticks(1, 140, 100, .25f) == 40.25);
+    GhostPose pose;
+    assert(pose_ghost(path, std::nullopt, pose) && pose.tick == 100 && !pose.moving && !pose.running);
+    assert(pose.frame.position[0] == 100 && pose.frame.velocity[0] == 0);
+    assert(pose_ghost(path, 40.25, pose) && pose.moving && std::abs(pose.frame.position[0] - 140.25f) < 1e-4f);
+    assert(pose_ghost(path, 5000, pose) && pose.tick == 900 && !pose.moving && pose.running);
+    path.teleports[141] = 1;
+    assert(pose_ghost(path, 40.5, pose) && pose.frame.position[0] == 140);
+    path.frames[10].yaw = 350;
+    path.frames[11].yaw = 10;
+    BhGhostFrame frame{};
+    assert(sample_ghost_path(path, 10.5, true, frame) && std::abs(std::remainder(frame.yaw, 360.f)) < 1e-3f);
+    GhostEventCursor cursor;
+    bool snapped = false;
+    assert(!cursor.advance(100, true, snapped) && !snapped);
+    const auto played = cursor.advance(103.5, true, snapped);
+    assert(played && played->first == 100 && played->second == 103 && !snapped);
+    assert(!cursor.advance(103.9, true, snapped));
+    assert(!cursor.advance(100, true, snapped) && snapped);
+    assert(!cursor.advance(900, true, snapped) && snapped);
+    std::cout << "Recorded 2.5s trails, seeks, teleport cuts, route markers, source colours, toggles and ghost "
+                 "playback passed\n";
 }
