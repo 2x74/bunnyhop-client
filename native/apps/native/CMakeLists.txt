@@ -336,6 +336,15 @@ if(BUNNYHOP_BUILD_CLIENT)
         bunnyhop_core_native bunnyhop-native-text SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
     target_compile_definitions(bunnyhop-native-gameplay-benchmark PRIVATE
         BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
+    if(APPLE)
+        add_executable(bunnyhop-native-load-benchmark EXCLUDE_FROM_ALL src/load_benchmark.cpp)
+        target_include_directories(bunnyhop-native-load-benchmark PRIVATE vendor)
+        target_link_libraries(bunnyhop-native-load-benchmark PRIVATE
+            bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB Threads::Threads)
+        target_compile_definitions(bunnyhop-native-load-benchmark PRIVATE
+            BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
+        target_compile_options(bunnyhop-native-load-benchmark PRIVATE -ffp-contract=off -Wno-deprecated-declarations)
+    endif()
     add_executable(bunnyhop-native-render-benchmark src/render_benchmark.cpp)
     target_include_directories(bunnyhop-native-render-benchmark PRIVATE vendor)
     target_link_libraries(bunnyhop-native-render-benchmark PRIVATE bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)

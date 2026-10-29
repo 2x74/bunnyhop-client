@@ -95,6 +95,20 @@ struct StartPoints {
 
     bool clear(const std::string &map, uint32_t track) { return points.erase(key(map, track)) != 0; }
 
+    bool clear_practice(const std::string &map) {
+        const auto prefix = map + ":";
+        bool cleared = false;
+        for (auto it = points.begin(); it != points.end();) {
+            if (it.key().starts_with(prefix) && it.value().value("practice", false)) {
+                it = points.erase(it);
+                cleared = true;
+            } else {
+                ++it;
+            }
+        }
+        return cleared;
+    }
+
     std::optional<StartPoint> get(const std::string &map, uint32_t track) const {
         const auto it = points.find(key(map, track));
         return it == points.end() ? std::nullopt : decode(*it);
