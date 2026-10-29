@@ -71,6 +71,7 @@ inline Json default_settings() {
             {"invertY", false},
             {"holdRestart", false},
             {"mouseDiagnostics", false},
+            {"inputBackend", "auto"},
             // Hidden: false goes back to the per-frame proration comparator (also --legacy-input). See timed_input.hpp.
             {"timedInput", true},
             {"crosshairStyle", "cross"},
@@ -502,6 +503,9 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
         } else if (key == "colorBlind") {
             if (!v.is_string() || (v != "off" && v != "redGreen" && v != "blueYellow"))
                 throw std::runtime_error("Unknown color-blind palette");
+        } else if (key == "inputBackend") {
+            if (!v.is_string() || (v != "auto" && v != "sdl" && v != "raw"))
+                throw std::runtime_error("Invalid input backend");
         } else if (key == "waterQuality") {
             if (!v.is_string() || (v != "simple" && v != "refracted"))
                 throw std::runtime_error("Water quality must be simple or refracted");

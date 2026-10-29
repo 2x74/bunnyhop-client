@@ -1,5 +1,6 @@
 #pragma once
 #include <nlohmann/json.hpp>
+#include "input_backend_choice.hpp"
 
 namespace native {
 // Built from validated settings when they change. JSON remains the persisted/menu form.
@@ -10,6 +11,7 @@ struct Preferences {
     bool invert_y;
     bool timed_input;
     bool mouse_diagnostics;
+    InputBackendChoice input_backend;
     bool limit_queued_frames;
     bool vsync;
     int fps_limit;

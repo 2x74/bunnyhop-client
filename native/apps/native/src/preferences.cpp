@@ -8,6 +8,7 @@ Preferences Preferences::from_settings(const nlohmann::json &settings) {
     preferences.vertical_sensitivity = settings.at("verticalSensitivity").get<double>();
     preferences.separate_vertical = settings.at("separateVertical").get<bool>();
     preferences.invert_y = settings.at("invertY").get<bool>();
+    preferences.input_backend = input_backend_choice(settings.value("inputBackend", std::string("auto")));
     preferences.timed_input = settings.value("timedInput", true);
     preferences.mouse_diagnostics = settings.at("mouseDiagnostics").get<bool>();
     preferences.limit_queued_frames = settings.at("limitQueuedFrames").get<bool>();

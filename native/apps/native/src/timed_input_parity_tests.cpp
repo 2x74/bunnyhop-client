@@ -31,6 +31,7 @@ public:
         , name_(scenario.at("name").get<std::string>())
         , start_ns_(start_ns) {
         scheduler_.reset(start_ns);
+        timeline_.configure_stamps(scenario.value("videoDriver", std::string()));
         timeline_.rebuild_binds(native::default_settings().at("binds"));
         timeline_.queue().holdback_ms = scenario.at("holdbackMs").get<double>();
         timeline_.queue().holdback_max_ms = scenario.at("holdbackMaxMs").get<double>();
@@ -83,7 +84,14 @@ private:
         const uint64_t stamp = start_ns_ + event.at(1).get<uint64_t>();
         const uint64_t received = arrival(event);
         if (event.at(0) == "m") {
-            timeline_.motion(input_, stamp, received, event.at(3).get<double>(), event.at(4).get<double>());
+            timeline_.motion(
+                    input_,
+                    stamp,
+                    received,
+                    event.at(3).get<double>(),
+                    event.at(4).get<double>(),
+                    scenario_.value("nativeClock", false)
+            );
         } else {
             const auto code = event.at(3).get<std::string>();
             timeline_.key(held_codes_, code, event.at(4).get<bool>(), false, stamp, received);
@@ -112,6 +120,15 @@ private:
         }
         if (reports != expected.at(4).get<uint32_t>()) {
             return fail({name_, index, "reports " + std::to_string(reports) + ", web " + expected.at(4).dump()});
+        }
+        input_.held = held;
+        const BhCmd command = input_.command();
+        const auto &expected_command = scenario_.at("commands").at(index);
+        if (command.forward != expected_command.at(0).get<float>()
+            || command.side != expected_command.at(1).get<float>() || command.yaw != expected_command.at(2).get<float>()
+            || command.pitch != expected_command.at(3).get<float>()
+            || command.buttons != expected_command.at(4).get<uint32_t>()) {
+            return fail({name_, index, "command differs from golden vector"});
         }
         return true;
     }
