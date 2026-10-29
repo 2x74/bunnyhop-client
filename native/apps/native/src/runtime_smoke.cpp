@@ -8,7 +8,7 @@
 #include "replay_player.hpp"
 #include "leave_hold.hpp"
 #include "room_state.hpp"
-#include "map_jobs.hpp"
+#include "map_download.hpp"
 #include "online.hpp"
 #include "menu_backdrop.hpp"
 #include "client_util.hpp"
@@ -311,7 +311,6 @@ void RuntimeSmoke::check_workers() {
     check(room.id == "old-room", "room setup");
     pending_replay = "stale";
     pending_action = "play";
-    pending_room_map = "stale";
     pending_tutorial = "jump";
     std::atomic_bool entered = false, stopped = false;
     auto &worker_progress_mutex = progress_mutex;
@@ -319,7 +318,7 @@ void RuntimeSmoke::check_workers() {
     download.start(
             [&entered, &stopped, &worker_progress_mutex, &worker_loading](
                     const std::atomic_bool &cancel
-            ) -> native::DownloadedMap {
+            ) -> native::MapDownloadResult {
                 entered = true;
                 while (!cancel)
                     std::this_thread::yield();
@@ -328,7 +327,7 @@ void RuntimeSmoke::check_workers() {
                     if (!cancel) worker_loading = "stale";
                 }
                 stopped = true;
-                throw std::runtime_error("cancelled");
+                return {std::nullopt, "cancelled"};
             }
     );
     while (!entered)
@@ -347,8 +346,7 @@ void RuntimeSmoke::check_workers() {
     actions_.apply_room_event({{"generation", 7}, {"id", "old-room"}, {"event", welcome}});
     check(room.generation == 7 && room.id.empty() && room.map.empty() && !download.valid(),
           "late room callback revived map after leave");
-    check(pending_replay.empty() && pending_room_map.empty() && pending_tutorial.empty() && loading.empty()
-                  && heartbeat.generation > generation,
+    check(pending_replay.empty() && pending_tutorial.empty() && loading.empty() && heartbeat.generation > generation,
           "leave-map stale work/generation");
     actions_.load_map(opt.map, opt.content_root, "native-runtime-fixture-new", detail);
     check(core && renderer && !practice.active && practice.checkpoints.empty(), "new map after leave failed");

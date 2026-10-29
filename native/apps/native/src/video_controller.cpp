@@ -6,8 +6,7 @@
 #include "replay_player.hpp"
 #include "audio.hpp"
 #include "options.hpp"
-#include "map_jobs.hpp"
-#include "online.hpp"
+#include "map_download.hpp"
 #include "data_location.hpp"
 #include <stdexcept>
 

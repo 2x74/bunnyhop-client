@@ -164,10 +164,25 @@ test("due map change closes4001, tells native to load, then reconnects after nat
     expect(f.sent.find((m) => m.type === "roomEvent" && m.event.t === "nativeMap")).toMatchObject({
       event: { t: "nativeMap", map: "bhop_other" },
     });
-    f.service.hostMap("bhop_other");
+    f.service.hostMap("bhop_other", true);
+    expect(f.handlers).toHaveLength(1);
+    f.service.hostMap("bhop_other", false);
     expect(f.handlers).toHaveLength(2);
     f.handlers[1].message(welcome("test", "bhop_other"));
     expect(f.service.view.map).toBe("bhop_other");
+  } finally {
+    f.service.leave();
+  }
+});
+
+test("a future room change cannot reconnect just because its map is still loaded", async () => {
+  const f = fixture();
+  try {
+    await f.service.join("test");
+    f.handlers[0].message(welcome("test"));
+    f.handlers[0].message({ t: "change", change: { map: "bhop_eazy", tier: 1, at: Date.now() + 60_000 } });
+    f.service.hostMap("bhop_eazy");
+    expect(f.handlers).toHaveLength(1);
   } finally {
     f.service.leave();
   }

@@ -85,7 +85,7 @@ int main() {
     check(!stale.get(), "prefetch accepted a different map revision");
     requests = 0;
     load();
-    check(requests == 1, "cached objects/manifest should avoid network");
+    check(requests == 2, "cached objects should only fetch current detail and manifest");
     std::filesystem::remove(cache / "index" / "bhop_test.json");  // Older client cache migration.
     offline = true;
     requests = 0;
@@ -114,7 +114,7 @@ int main() {
     offline = false;
     requests = 0;
     load();
-    check(requests == 2, "corrupt content should redownload");
+    check(requests == 3, "corrupt content should redownload once after checking metadata");
     std::atomic_bool canceled = true;
     rejected = false;
     try {

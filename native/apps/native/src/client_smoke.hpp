@@ -19,7 +19,7 @@ class MenuWebView;
 class MenuBackdrop;
 struct ReplayPlayer;
 struct Input;
-struct DownloadedMap;
+struct MapDownloadResult;
 template <class T>
 class MapJobs;
 
@@ -64,7 +64,7 @@ public:
         const std::string &backdrop_png;
         const bool &gameplay_backdrop_due;
         const bool &menu_ready;
-        const MapJobs<DownloadedMap> &download;
+        const MapJobs<MapDownloadResult> &download;
         const std::string &error;
         bool &running;
     };
@@ -82,6 +82,8 @@ public:
 private:
     const Options &opt;
     std::optional<Context> context_;
+    bool map_requested = false;
+    void request_map();
     void capture_images();
     void request();
 };

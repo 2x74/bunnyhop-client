@@ -286,6 +286,12 @@ if(BUNNYHOP_BUILD_CLIENT)
         target_include_directories(bunnyhop-native-online-tests PRIVATE vendor)
         target_link_libraries(bunnyhop-native-online-tests PRIVATE bunnyhop_core_native CURL::libcurl)
         add_test(NAME native_online_boundaries COMMAND bunnyhop-native-online-tests)
+        add_executable(bunnyhop-native-map-load-tests src/map_load_tests.cpp src/online.cpp)
+        target_include_directories(bunnyhop-native-map-load-tests PRIVATE vendor)
+        target_link_libraries(bunnyhop-native-map-load-tests PRIVATE bunnyhop_core_native CURL::libcurl Threads::Threads)
+        add_test(NAME native_map_cache_recovery COMMAND bunnyhop-native-map-load-tests)
+        add_test(NAME native_room_map_reconnect COMMAND bunnyhop-native-map-load-tests room)
+        set_tests_properties(native_map_cache_recovery native_room_map_reconnect PROPERTIES TIMEOUT 15)
     endif()
     target_compile_definitions(bunnyhop-native PRIVATE
         BUNNYHOP_MENU_HTML="target/native-menu/menu.html"
