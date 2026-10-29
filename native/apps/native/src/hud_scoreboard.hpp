@@ -55,17 +55,33 @@ inline void format_hud_time(HudLabel<48> &label, double seconds) {
     label.format("%02llu:%02llu.%03llu", milliseconds / 60000, (milliseconds / 1000) % 60, milliseconds % 1000);
 }
 
+// Reads whole digits only: floating-point std::from_chars is missing from older macOS deployment targets.
+inline std::optional<unsigned> parse_hud_digits(std::string_view text) {
+    unsigned value = 0;
+    const auto end = text.data() + text.size();
+    const auto parsed = std::from_chars(text.data(), end, value);
+    if (text.empty() || parsed.ec != std::errc() || parsed.ptr != end) return std::nullopt;
+    return value;
+}
+
+// "M:SS.mmm" (any number of minutes, up to nine fraction digits) as seconds.
 inline std::optional<double> parse_hud_time(std::string_view text) {
+    constexpr size_t max_fraction_digits = 9;
     const auto colon = text.find(':');
     if (colon == std::string_view::npos) return std::nullopt;
-    unsigned minutes = 0;
-    double seconds = 0;
-    const auto first = std::from_chars(text.data(), text.data() + colon, minutes);
-    const auto second = std::from_chars(text.data() + colon + 1, text.data() + text.size(), seconds);
-    if (first.ec != std::errc() || first.ptr != text.data() + colon || second.ec != std::errc()
-        || second.ptr != text.data() + text.size() || !std::isfinite(seconds) || seconds < 0 || seconds >= 60)
-        return std::nullopt;
-    return double(minutes) * 60 + seconds;
+    const auto clock = text.substr(colon + 1);
+    const auto dot = clock.find('.');
+    const auto minutes = parse_hud_digits(text.substr(0, colon));
+    const auto whole_seconds = parse_hud_digits(clock.substr(0, dot));
+    if (!minutes || !whole_seconds || *whole_seconds >= 60) return std::nullopt;
+    double seconds = *whole_seconds;
+    if (dot != std::string_view::npos) {
+        const auto fraction_text = clock.substr(dot + 1);
+        const auto fraction = parse_hud_digits(fraction_text);
+        if (!fraction || fraction_text.size() > max_fraction_digits) return std::nullopt;
+        seconds += *fraction / std::pow(10., double(fraction_text.size()));
+    }
+    return double(*minutes) * 60 + seconds;
 }
 
 class HudScoreboard {

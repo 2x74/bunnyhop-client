@@ -334,11 +334,11 @@ int main() {
         assert(allocation_probe::largest == 0);
         allocation_probe::enabled = false;
         // Respect a partly exhausted pack, including equal-rate/raw copies.
-        const std::vector<float> small{1, 2, 3, 4};
-        assert(resample_mono(small, 11025, 22050, 7).empty());
-        assert(resample_mono(small, 11025, 22050, 8).size() == 8);
-        assert(resample_mono(small, 22050, 22050, 3).empty());
-        assert(resample_mono(small, 0, 22050, 3).empty());
+        const std::vector<float> short_clip{1, 2, 3, 4};
+        assert(resample_mono(short_clip, 11025, 22050, 7).empty());
+        assert(resample_mono(short_clip, 11025, 22050, 8).size() == 8);
+        assert(resample_mono(short_clip, 22050, 22050, 3).empty());
+        assert(resample_mono(short_clip, 0, 22050, 3).empty());
     }
 
     {  // Each codec must preserve valid audio, accept an exact sample budget,

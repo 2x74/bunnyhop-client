@@ -176,12 +176,12 @@ inline std::array<float, 4>
 trail_color(const std::array<std::array<float, 3>, 2> &colors, float progress, float opacity, float distance) {
     const float fraction = std::clamp((.92f - progress) * 2.4f, 0.f, 1.f);
     const float mix = fraction * fraction * (3 - 2 * fraction);
-    const float near = std::clamp((distance - 40) / 160, 0.f, 1.f);
+    const float fade_in = std::clamp((distance - 40) / 160, 0.f, 1.f);
     std::array<float, 4> result{};
     for (int axis = 0; axis < 3; ++axis) {
         result[axis] = colors[0][axis] + (colors[1][axis] - colors[0][axis]) * mix;
     }
-    result[3] = std::min(1.f, opacity * 1.2f) * progress * progress * near * near;
+    result[3] = std::min(1.f, opacity * 1.2f) * progress * progress * fade_in * fade_in;
     return result;
 }
 

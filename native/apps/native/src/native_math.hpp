@@ -65,7 +65,7 @@ inline Matrix camera_matrix(const float eye[3], double yaw, double pitch, float 
             1
     };
     // Source fov_desired=90 at 4:3: fixed vertical FOV, Hor+ on wide windows.
-    constexpr float cot = 4.0f / 3.0f, near = 2.0f, far = 60000.0f;
+    constexpr float cot = 4.0f / 3.0f, near_plane = 2.0f, far_plane = 60000.0f;
     Matrix projection = {
             cot / aspect,
             0,
@@ -77,11 +77,11 @@ inline Matrix camera_matrix(const float eye[3], double yaw, double pitch, float 
             0,
             0,
             0,
-            (far + near) / (near - far),
+            (far_plane + near_plane) / (near_plane - far_plane),
             -1,
             0,
             0,
-            2 * far * near / (near - far),
+            2 * far_plane * near_plane / (near_plane - far_plane),
             0
     };
     return multiply(projection, view);

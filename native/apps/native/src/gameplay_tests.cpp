@@ -166,9 +166,9 @@ int main() {
     assert(std::abs(camera.position[0] - free_start - 50) < .001);
     camera.reset();
     assert(!camera.initialized);
-    const float listener[] = {0, 0, 0}, right[] = {0, -80, 0}, left[] = {0, 80, 0}, far[] = {2000, 0, 0};
+    const float listener[] = {0, 0, 0}, right[] = {0, -80, 0}, left[] = {0, 80, 0}, distant[] = {2000, 0, 0};
     assert(native::spatial_mix(right, listener, 0).pan == 1 && native::spatial_mix(left, listener, 0).pan == -1);
-    assert(native::spatial_mix(right, listener, 180).pan < -.99 && native::spatial_mix(far, listener, 0).gain == 0);
+    assert(native::spatial_mix(right, listener, 180).pan < -.99 && native::spatial_mix(distant, listener, 0).gain == 0);
     assert(native::spatial_mix(listener, listener, 0).gain == 1 && native::spatial_mix(listener, listener, 0).pan == 0);
     assert((native::pan_gains(1) == std::array<float, 2>{0, 1})
            && (native::pan_gains(0) == std::array<float, 2>{1, 1}));

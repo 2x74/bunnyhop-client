@@ -143,10 +143,13 @@ void test_json_writer_writes_off_thread_and_keeps_the_newest() {
         assert(!writer.take_error());
         writer.write(dir / "last.json", {{"value", 7}});
     }
-    std::ifstream settings(dir / "settings.json");
-    assert(nlohmann::json::parse(settings).at("value") == 49);
-    std::ifstream last(dir / "last.json");
-    assert(nlohmann::json::parse(last).at("value") == 7);
+    {
+        // Windows can't delete files that are still open, so the streams close before remove_all.
+        std::ifstream settings(dir / "settings.json");
+        assert(nlohmann::json::parse(settings).at("value") == 49);
+        std::ifstream last(dir / "last.json");
+        assert(nlohmann::json::parse(last).at("value") == 7);
+    }
     std::filesystem::remove_all(dir);
 }
 

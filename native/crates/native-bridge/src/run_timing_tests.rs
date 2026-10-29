@@ -24,7 +24,9 @@ fn zones(value: &Value) -> Vec<BhZone> {
 }
 #[test]
 fn web_fixture_source_is_current() {
-    let hash = Sha256::digest(include_bytes!("../../../apps/web/src/run-timing.ts"))
+    // Windows checkouts may convert the source to CRLF; the fixture hashes the LF file.
+    let source = include_str!("../../../apps/web/src/run-timing.ts").replace("\r\n", "\n");
+    let hash = Sha256::digest(source.as_bytes())
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
