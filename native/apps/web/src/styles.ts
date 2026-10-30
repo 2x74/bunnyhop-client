@@ -84,7 +84,6 @@ export interface StyleDef {
 
 const NONE = { w: false, a: false, s: false, d: false };
 
-// Segmented stays out of native style selection until checkpoint loads rebuild the replay.
 export const STYLE_DEFS: readonly StyleDef[] = [
   { id: "autohop", name: "Normal", short: "NM", brief: "Normal", autohop: true, block: NONE, hsw: false, rule: "Autohop: hold jump. Every key works." },
   { id: "legit", name: "EZ Scroll", short: "EZ", brief: "EZ Scroll", autohop: false, block: NONE, hsw: false, rule: "No autohop: press (scroll) jump for every hop." },
@@ -93,6 +92,7 @@ export const STYLE_DEFS: readonly StyleDef[] = [
   { id: "sideways", name: "Sideways", short: "SW", brief: "Sideways", autohop: true, block: { w: false, a: true, s: false, d: true }, hsw: false, rule: "Only W and S in the air: face sideways and strafe with W/S." },
   { id: "hsw", name: "Half-Sideways", short: "HSW", brief: "Half-SW", autohop: true, block: { w: false, a: false, s: true, d: false }, hsw: true, rule: "Hold W plus A or D together in the air. S, pure W and pure A/D do nothing." },
   { id: "lowgrav", name: "Low Gravity", short: "LG", brief: "Low Gravity", autohop: true, block: NONE, hsw: false, rule: "Half gravity (400). Hold jump; every key works. Separate ranking; no overall points or progression." },
+  { id: "segmented", name: "Segmented", short: "SEG", brief: "Segmented", autohop: true, block: NONE, hsw: false, segmented: true, rule: "Save checkpoints and load them mid-run: the timer and the replay go back to the checkpoint. Normal movement. Separate ranking; no overall points or progression." },
   // Assisted styles stay last in the menu. WIRE_STYLES is independently append-only.
   { id: "autostrafe", name: "Auto-strafe", short: "AS", brief: "Auto-strafe", autohop: true, block: NONE, hsw: false, auto: true, rule: "Move the mouse in the air and the game presses A/D for you. Hold A, D or S to take over." },
 ];

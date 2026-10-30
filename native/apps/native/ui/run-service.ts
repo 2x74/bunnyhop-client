@@ -305,13 +305,7 @@ export class NativeRunService {
     }
     const session = this.current;
     if (!session || session.generation !== generation || session.finished || session.accountBlocked) return;
-    if (event.style === "segmented") {
-      if (event.type === "finish") {
-        session.finished = true;
-        this.kept(session, "Segmented needs native checkpoint loads and stitched replays before upload.");
-      }
-      return;
-    }
+    if (event.style === "segmented" && event.type === "beat") return;
     if (!validIdentity(event)) {
       if (event.type === "finish") {
         session.finished = true;

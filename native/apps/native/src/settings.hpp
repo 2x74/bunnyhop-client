@@ -20,7 +20,7 @@
 namespace native {
 using Json = nlohmann::json;
 inline const std::set<std::string> styles = {
-        "autohop", "legit", "scroll", "wonly", "sideways", "hsw", "lowgrav", "autostrafe"
+        "autohop", "legit", "scroll", "wonly", "sideways", "hsw", "lowgrav", "segmented", "autostrafe"
 };
 
 // EZ Scroll ("legit") and Legit Scroll ("scroll"): every hop is a timed press, so

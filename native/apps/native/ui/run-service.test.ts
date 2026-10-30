@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { STYLE_DEFS, isStyleId } from "../../web/src/styles";
+import { styleByName } from "../../web/src/chat-commands";
+import { styleAt, styleIndex } from "../../web/src/net/protocol";
+import { STYLE_DEFS, isStyleId, styleSettings } from "../../web/src/styles";
 import {
   NativeRunService,
   nativeBuildAllowed,
@@ -656,19 +658,42 @@ test.each(["beat", "finish"] as const)(
   },
 );
 
-test("Segmented never sends heartbeats or uploads, even for an allowed native build", async () => {
+test("Segmented uploads with no heartbeats for an allowed native build", async () => {
   const f = fixture();
   await reset(f.service);
   await f.service.receive({ ...beat(1, 0), style: "segmented" });
   await f.service.receive({ ...beat(1, 400), style: "segmented" });
   await f.service.receive({ ...finish(1), style: "segmented" });
   expect(f.bodies).toHaveLength(0);
-  expect(f.uploads).toHaveLength(0);
-  expect(f.statuses.at(-1)).toMatchObject({ status: "kept", local: true });
-  expect(f.statuses.at(-1)?.message).toContain("Segmented");
+  expect(f.uploads).toHaveLength(1);
+  expect(f.uploads[0].beats).toEqual([]);
+  expect(f.statuses.at(-1)?.status).toBe("verified");
 });
 
-test("native style pickers and chat style commands do not offer Segmented", () => {
-  expect(STYLE_DEFS.some((style) => style.id === "segmented")).toBe(false);
-  expect(isStyleId("segmented")).toBe(false);
+// A checkpoint load after a finish sends a reset (client.cpp): the rewound run is a new attempt with its own upload.
+test("a Segmented run finished again after a checkpoint load uploads both finishes", async () => {
+  const f = fixture();
+  await reset(f.service);
+  await f.service.receive({ ...finish(1), style: "segmented" });
+  await reset(f.service, 2);
+  await f.service.receive({ ...finish(2), style: "segmented" });
+  expect(f.uploads).toHaveLength(2);
+  expect(f.uploads.map((upload) => upload.beats)).toEqual([[], []]);
+});
+
+test("Segmented still requires an admitted native build", async () => {
+  const f = fixture(async () => ({ wasm: identity.wasm, native: [] }));
+  await reset(f.service);
+  await f.service.receive({ ...finish(1), style: "segmented" });
+  expect(f.uploads).toHaveLength(0);
+  expect(f.statuses.at(-1)?.status).toBe("kept");
+});
+
+test("native style pickers and chat style commands offer Segmented", () => {
+  expect(STYLE_DEFS.some((style) => style.id === "segmented")).toBe(true);
+  expect(isStyleId("segmented")).toBe(true);
+  expect(styleSettings("segmented")).toEqual(styleSettings("autohop"));
+  expect(styleIndex("segmented")).toBe(8);
+  expect(styleAt(8)).toBe("segmented");
+  for (const alias of ["seg", "segment", "segmented"]) expect(styleByName(alias)).toBe("segmented");
 });

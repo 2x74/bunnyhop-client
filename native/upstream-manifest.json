@@ -17,7 +17,7 @@
   ],
   "patches": {
     "native-core.patch": "5ab005db806ac8fe6cfd1c0dd453feaf29a34650b50d8b6491197c483b0d017e",
-    "native-web.patch": "5f9e406fa78b11748c5adcbfeb6388c5b21143b9385e43c7c1560b39db9d01d6"
+    "native-web.patch": "acd279db57fb57e574b6e5b9ab850233f3c6de6d920c2182106ec0c2357f7a37"
   },
   "sourceTreeSha256": "5c4d4d07963ddac216be1999b38a435eacc196f36acee1d40011d3c7f4846266",
   "sources": {
@@ -1842,7 +1842,7 @@
     "apps/web/src/staff-lens.ts": "52055965f402685c25083c855d8ee14d68ac3b40e049ea3e681703abf55307fb",
     "apps/web/src/start-point.ts": "458a403eb9176150a1109f12c96ae17c984607010ec8f40b18dfbb492feaf342",
     "apps/web/src/style.css": "76ec72c28d1fbfde319a25a52f1d8dd65805fcdbf92e62766edb1b35c572f783",
-    "apps/web/src/styles.ts": "48a74572f2d033c62cf88e67d39a5f1ba7a2808747c517a4913e5b59b36fccf4",
+    "apps/web/src/styles.ts": "ed26e55434ca6c69eafaa66f32cd419e86487eb0c06b84d87898d1723867cabd",
     "apps/web/src/surface-ray.ts": "91237cfa67283c01161dab0578c0c23c28b3be5180ae02a73febaa2ac7a80baf",
     "apps/web/src/texture-packs/manifest.ts": "d206e26708b5ea2b56cbf20d6cdfb85b6e1aec82cd37861015fe2308fb16a44d",
     "apps/web/src/texture-packs/settings.ts": "e3a1fbf39df00e5528b315a68bdd40cd50724201d5dbfe05c8222e22df5fd7aa",

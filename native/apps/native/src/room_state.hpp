@@ -622,7 +622,9 @@ public:
     // What a player's tag shows after the name (net/players.ts): their time while running or finished, "start" in the
     // start zone, preceded by the style's short name unless it is Normal.
     void tag_detail(unsigned slot, double now, HudLabel<48> &out) const {
-        constexpr std::array<std::string_view, 8> short_styles = {"NM", "EZ", "W", "SW", "HSW", "AS", "SCR", "LG"};
+        constexpr std::array<std::string_view, 9> short_styles = {
+                "NM", "EZ", "W", "SW", "HSW", "AS", "SCR", "LG", "SEG"
+        };
         constexpr unsigned timer_start = 1, timer_running = 2, timer_finished = 3;
         out.assign("");
         const auto found = peers.find(slot);

@@ -1402,7 +1402,15 @@ int run(const native::Options &opt) {
                     }
                 } else if (action == "cycleStyle") {
                     static const std::vector<std::string> order = {
-                            "autohop", "legit", "scroll", "wonly", "sideways", "hsw", "lowgrav", "autostrafe"
+                            "autohop",
+                            "legit",
+                            "scroll",
+                            "wonly",
+                            "sideways",
+                            "hsw",
+                            "lowgrav",
+                            "segmented",
+                            "autostrafe"
                     };
                     auto at = std::find(order.begin(), order.end(), selected_style);
                     selected_style = order[(size_t(at - order.begin()) + 1) % order.size()];
