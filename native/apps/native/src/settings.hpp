@@ -101,10 +101,12 @@ inline Json default_settings() {
             {"musicVolume", .5},
             {"uiVolume", .6},
             {"ambienceVolume", .7},
+            {"mapVolume", .5},
             {"muteSfx", false},
             {"muteUi", false},
             {"muteMusic", false},
             {"muteAmbience", false},
+            {"muteMap", false},
             {"muteInBackground", true},
             {"classicSounds", false},
             {"perfectTick", false},
@@ -549,7 +551,7 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
             if (key == "crosshairThickness" && (n < .5 || n > 10))
                 throw std::runtime_error("Crosshair thickness must be .5–10");
             if ((key == "volume" || key == "sfxVolume" || key == "musicVolume" || key == "uiVolume"
-                 || key == "ambienceVolume" || key == "crosshairAlpha" || key == "ghostOpacity")
+                 || key == "ambienceVolume" || key == "mapVolume" || key == "crosshairAlpha" || key == "ghostOpacity")
                 && (n < 0 || n > 1))
                 throw std::runtime_error("Volume must be 0–1");
             if (key == "yawSpeed" && (n < 60 || n > 720)) throw std::runtime_error("Yaw speed must be 60–720");

@@ -388,6 +388,7 @@ export interface NativeSettings {
   musicVolume: number;
   uiVolume: number;
   ambienceVolume: number;
+  mapVolume: number;
   footsteps: boolean;
   weaponSounds: boolean;
   wind: boolean;
@@ -395,6 +396,7 @@ export interface NativeSettings {
   muteMusic: boolean;
   muteUi: boolean;
   muteAmbience: boolean;
+  muteMap: boolean;
   muteInBackground: boolean;
   classicSounds: boolean;
   perfectTick: boolean;
@@ -792,10 +794,12 @@ function defaultSettings(): NativeSettings {
     musicVolume: web.audio.music,
     uiVolume: web.audio.ui,
     ambienceVolume: web.audio.ambience,
+    mapVolume: web.audio.map,
     muteSfx: false,
     muteMusic: false,
     muteUi: false,
     muteAmbience: false,
+    muteMap: false,
     muteInBackground: web.audio.muteInBackground,
     classicSounds: web.audio.classic,
     perfectTick: web.audio.perfectTick,
@@ -1013,6 +1017,7 @@ export function settingsPatch(value: unknown): Partial<NativeSettings> {
     ["viewmodelBob", 0, 2],
     ["viewmodelSway", 0, 2],
     ["ambienceVolume", 0, 1],
+    ["mapVolume", 0, 1],
     ["sfxVolume", 0, 1],
     ["musicVolume", 0, 1],
     ["uiVolume", 0, 1],
@@ -1065,6 +1070,7 @@ export function settingsPatch(value: unknown): Partial<NativeSettings> {
     "muteMusic",
     "muteUi",
     "muteAmbience",
+    "muteMap",
     "muteInBackground",
     "classicSounds",
     "perfectTick",

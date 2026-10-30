@@ -55,6 +55,7 @@
 #include "ssj.hpp"
 #include "strafe_trainer.hpp"
 #include "audio.hpp"
+#include "map_audio.hpp"
 #include "client_util.hpp"
 #include "run_vault.hpp"
 #include "replay_library.hpp"
@@ -197,7 +198,9 @@ int run(const native::Options &opt) {
     std::optional<data_location::Choice> data_choice;
     std::string data_notice, last_data_state;
     const auto startup_data = native::initialize_data_directory(cache);
+    native::MapAudio map_audio;
     native::Audio audio(assets, cache, !opt.hidden && !opt.frames);
+    audio.set_map_mixer(&map_audio.mixer);
     std::unique_ptr<native::MenuWebView> menu;
     std::string menu_failure;
     native::MenuFiles menu_files(cache);
@@ -408,6 +411,7 @@ int run(const native::Options &opt) {
         camera_controls.invert_y = input.invert_y;
         hud.preferences(preferences);
         audio.preferences(preferences);
+        map_audio.preferences(preferences.at("mapVolume").get<float>(), preferences.at("muteMap").get<bool>());
         SDL_GL_SetSwapInterval(opt.frames ? 0 : prefs.vsync ? 1 : 0);
         audio.gain(preferences.at("muted").get<bool>() ? 0 : preferences.at("volume").get<float>());
         audio.set_sfx_pack(preferences.at("sfxPack").get<std::string>() == "custom");
@@ -865,6 +869,7 @@ int run(const native::Options &opt) {
         zones.clear();
         map_id.clear();
         audio.set_map(nullptr);
+        map_audio.stop();
         active_track = 0;
         active_style = selected_style;
         curr = {};
@@ -918,6 +923,7 @@ int run(const native::Options &opt) {
                                                       : std::make_unique<native::Renderer>(gl, next.core.get(), assets);
         next_renderer->set_map_identity(id, detail.is_object() ? detail.value("sha256", std::string()) : std::string());
         game.install(std::move(next.core), std::move(next_renderer), practice, audio);
+        map_audio.start(core.get(), data_location::from_utf8(path), data_location::from_utf8(content));
         // The pause screen shows this map itself, never the home tour.
         if (backdrop) backdrop->release();
         backdrop_shown.clear();
@@ -3562,6 +3568,15 @@ int run(const native::Options &opt) {
             renderer->set_flashlight(flashlight);
             renderer->set_pixel_density(SDL_GetWindowPixelDensity(window.get()));
             audio.listener(eye, camera_input.yaw());
+            map_audio.frame(
+                    core.get(),
+                    eye,
+                    camera_input.yaw(),
+                    camera_input.pitch,
+                    double(SDL_GetTicksNS()) / 1e9,
+                    !viewer.active || (!viewer.paused && !viewer.controls.dragging),
+                    audio.map_audible()
+            );
             if (focused && captured && !opt.frames) {
                 for (const auto &actor : actors)
                     if (actor.id != "local-camera-target")

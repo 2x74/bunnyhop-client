@@ -173,6 +173,11 @@ if(BUNNYHOP_BUILD_CLIENT)
         src/sky_image.cpp
         src/sky_library.cpp
         src/audio_pack.cpp
+        src/map_audio.cpp
+        src/map_audio_load.cpp
+        src/map_audio_scene.cpp
+        src/map_audio_levels.cpp
+        src/map_audio_format.cpp
         src/video_export.cpp
         src/video_codecs.cpp
         src/avatar_picture.cpp
@@ -591,6 +596,29 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME native_runner_help COMMAND bunnyhop-native-runner --help)
     # Decoding and pack scanning need no SDL, so these run everywhere.
+    add_executable(bunnyhop-native-map-audio-identity src/map_audio_identity.cpp)
+    target_include_directories(bunnyhop-native-map-audio-identity PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-map-audio-identity PRIVATE bunnyhop_core_native)
+    set(MAP_AUDIO_ORACLE "${BUNNYHOP_ROOT}/target/map-audio-oracle")
+    add_test(NAME native_map_audio_oracle
+        COMMAND "${BUN_EXECUTABLE}" apps/native/src/map_audio_oracle.ts "${MAP_AUDIO_ORACLE}")
+    set_tests_properties(native_map_audio_oracle PROPERTIES
+        WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP map_audio_oracle TIMEOUT 120)
+    add_executable(bunnyhop-native-map-audio-tests src/map_audio_tests.cpp
+        src/map_audio_scene.cpp src/map_audio_levels.cpp src/map_audio_format.cpp src/audio_pack.cpp)
+    target_include_directories(bunnyhop-native-map-audio-tests PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-map-audio-tests PRIVATE bunnyhop_core_native Threads::Threads)
+    add_test(NAME native_map_audio COMMAND bunnyhop-native-map-audio-tests "${MAP_AUDIO_ORACLE}")
+    set_tests_properties(native_map_audio PROPERTIES FIXTURES_REQUIRED map_audio_oracle)
+    find_package(CURL REQUIRED)
+    add_executable(bunnyhop-native-map-audio-load-tests src/map_audio_load_tests.cpp
+        src/map_audio_load.cpp src/map_audio_scene.cpp src/map_audio_levels.cpp
+        src/map_audio_format.cpp src/audio_pack.cpp src/online.cpp)
+    target_include_directories(bunnyhop-native-map-audio-load-tests PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-map-audio-load-tests PRIVATE
+        bunnyhop_core_native Threads::Threads CURL::libcurl)
+    add_test(NAME native_map_audio_allow_list COMMAND bunnyhop-native-map-audio-load-tests "${MAP_AUDIO_ORACLE}")
+    set_tests_properties(native_map_audio_allow_list PROPERTIES FIXTURES_REQUIRED map_audio_oracle)
     add_executable(bunnyhop-native-audio-tests src/audio_pack_tests.cpp src/audio_pack.cpp)
     target_include_directories(bunnyhop-native-audio-tests PRIVATE vendor src)
     add_test(NAME native_audio_pack COMMAND bunnyhop-native-audio-tests)

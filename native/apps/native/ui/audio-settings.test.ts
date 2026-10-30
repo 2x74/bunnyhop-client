@@ -22,12 +22,15 @@ test("announcer and granular channel settings validate atomically", () => {
 test("the website's audio settings are the native buses, mutes and announcer", () => {
   const prefs = clone(DEFAULT_PREFS);
   Object.assign(prefs.audio, { sfx: 0.3, ambience: 0.4, classic: true, perfectTick: true, muteInBackground: false });
-  prefs.audio.mute = { sfx: true, ui: true, ambience: true, music: true, map: false };
+  prefs.audio.map = 0.25;
+  prefs.audio.mute = { sfx: true, ui: true, ambience: true, music: true, map: true };
   prefs.audio.announcer = { ...prefs.audio.announcer, enabled: true, highSpeedThreshold: 3200 };
   const native = nativeView(prefs, hostSettings());
   expect(native).toMatchObject({
     sfxVolume: 0.3,
     ambienceVolume: 0.4,
+    mapVolume: 0.25,
+    muteMap: true,
     classicSounds: true,
     perfectTick: true,
     muteSfx: true,
@@ -41,4 +44,14 @@ test("the website's audio settings are the native buses, mutes and announcer", (
   pullHost(back, { ...hostSettings(), ...native } as HostSettings);
   expect(back.audio).toEqual(prefs.audio);
   expect(state.settings.announcer).toEqual(DEFAULT_ANNOUNCER);
+});
+
+test("map sounds keep the website default and reject invalid host levels", () => {
+  expect(state.settings.mapVolume).toBe(DEFAULT_PREFS.audio.map);
+  expect(state.settings.mapVolume).toBe(0.5);
+  expect(state.settings.muteMap).toBe(false);
+  expect(settingsPatch({ mapVolume: -1 })).toEqual({});
+  expect(settingsPatch({ mapVolume: Infinity })).toEqual({});
+  expect(settingsPatch({ mapVolume: 1.1 })).toEqual({});
+  expect(settingsPatch({ mapVolume: 0, muteMap: true })).toEqual({ mapVolume: 0, muteMap: true });
 });

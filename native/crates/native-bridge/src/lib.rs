@@ -13,6 +13,8 @@ use std::ptr;
 use std::rc::Rc;
 use std::thread::{self, ThreadId};
 
+mod map_audio;
+pub use map_audio::*;
 mod map_load;
 pub use map_load::{bh_load_map_begin, bh_load_map_poll, bh_load_map_cancel};
 mod release_crypto;
