@@ -6,7 +6,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Keep diagnostics on native code, including Objective-C++ platform adapters.
 if(MSVC)
     # Sources and string literals are UTF-8 (HUD text uses "·" and "…").
-    add_compile_options(/W4 /utf-8)
+    # /bigobj: client.cpp and the larger test units pass MSVC's default limit of 65,279 sections per object.
+    add_compile_options(/W4 /utf-8 /bigobj)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options(-Wall -Wextra)
 endif()
