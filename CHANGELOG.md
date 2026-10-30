@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Maps now play approved ambience and soundscapes, with Map sounds volume and mute controls.
+
 - The camera no longer goes through low ceilings. Under one, your view stays 12 units below it, as in CS:S. This
   moves only what you see: physics and ranked runs are unchanged.
 - The HUD clock counts while you bhop in the start zone instead of showing 0 until you leave it.

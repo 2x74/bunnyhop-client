@@ -2,6 +2,7 @@
 #include "settings.hpp"
 #include "bunnyhop_native.h"
 #include "audio_pack.hpp"
+#include "map_audio_mix.hpp"
 #include "movement_audio.hpp"
 #include "announcer.hpp"
 #include "impact_audio.hpp"
@@ -152,6 +153,7 @@ class Audio {
     std::string sfx_status_text;
     std::array<Voice, 48> voices{};
     SDL_AudioStream *stream = nullptr;
+    MapAudioMixer *map_mixer = nullptr;
     float volume = .65f, sfx_volume = 1, ui_volume = 1, music_volume = 1, ambience_volume = 1;
     bool footsteps_enabled = true, weapon_sounds_enabled = true, wind_enabled = true, others_enabled = true,
          ghosts_enabled = true;
@@ -230,6 +232,7 @@ class Audio {
                     output[2 * i + 1] += sample * pan[1];
                     v.cursor += v.rate;
                 }
+        if (map_mixer) map_mixer->mix(output, count, volume);
         for (size_t i = 0; i < count * 2; ++i)
             output[i] = std::clamp(output[i], -.98f, .98f);
         rendered += count;
@@ -426,6 +429,13 @@ public:
     }
 
     bool classic_active() const { return movement.classic; }
+
+    void set_map_mixer(MapAudioMixer *mixer) {
+        Lock lock(stream);
+        map_mixer = mixer;
+    }
+
+    bool map_audible() const { return enabled_ && volume > 0; }
 
     void set_map(BhContext *core) {
         map_core = core;

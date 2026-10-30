@@ -11,6 +11,9 @@ mod v30;
 #[path = "segments_tests.rs"]
 mod segmented;
 
+#[path = "map_audio_tests.rs"]
+mod map_audio;
+
 struct Fixture(PathBuf);
 impl Fixture {
     fn new() -> Self {
