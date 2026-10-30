@@ -165,7 +165,7 @@ function notices(resources: string, extra: string[]) {
   copy(join(root, "apps/native/packaging/licenses"), to);
   copy(join(root, "apps/native/vendor/nlohmann/LICENSE.MIT"), join(to, "nlohmann-json.txt"));
   copy(join(root, "apps/native/vendor/unicode/LICENSE.txt"), join(to, "Unicode.txt"));
-  for (const name of ["dr_libs", "stb"])
+  for (const name of ["dr_libs", "stb", "nvapi", "amd"])
     copy(join(root, "apps/native/vendor", name, "LICENSE"), join(to, `${name}.txt`));
   for (const name of ["JetBrainsMono-OFL.txt", "LeagueGothic-OFL.txt"])
     copy(join(root, "tools/hermes/fonts", name), join(to, name));

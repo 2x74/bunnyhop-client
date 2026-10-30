@@ -12,6 +12,8 @@ Preferences Preferences::from_settings(const nlohmann::json &settings) {
     preferences.timed_input = settings.value("timedInput", true);
     preferences.mouse_diagnostics = settings.at("mouseDiagnostics").get<bool>();
     preferences.limit_queued_frames = settings.at("limitQueuedFrames").get<bool>();
+    preferences.low_latency_mode = settings.value("lowLatencyMode", std::string("off"));
+    preferences.reflex_flash = settings.value("reflexFlash", false);
     preferences.vsync = settings.at("vsync").get<bool>();
     preferences.fps_limit = settings.at("fpsLimit").get<int>();
     preferences.fov = settings.at("fov").get<float>();

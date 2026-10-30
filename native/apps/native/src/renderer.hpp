@@ -9,6 +9,7 @@
 #include "texture_bleed.hpp"
 #include "ghost_trails.hpp"
 #include "graphics_settings.hpp"
+#include "runner_view.hpp"
 #include "paint.hpp"
 #include "measure.hpp"
 #include "zone_effects.hpp"
@@ -456,7 +457,8 @@ class Renderer {
     native_render::SurfaceToolBindings toolBindings;
     native_render::Paint paint;
     native_render::Measure measure;
-    native::GraphicsSettings graphics;
+    native::GraphicsSettings graphics, chosenGraphics;
+    std::optional<native::RunnerView> runnerView;
     std::unique_ptr<GraphicsTarget> graphicsTarget;
     bool anisotropySupported = false;
     uint32_t queuedWeaponFlags = 0, queuedAttackMode = 0;
@@ -1424,6 +1426,8 @@ public:
         return native::graphics_view(graphics, width, height);
     }
 
+    const native::GraphicsSettings &current_graphics() const { return graphics; }
+
     template <class Hud>
     void draw_measure_label(Hud &hud, const native::Matrix &vp, const float eye[3], int width, int height) {
         if (!toolsVisible || measure.count() != 2) return;
@@ -1939,8 +1943,16 @@ public:
         if (depthProgram) gl.DeleteProgram(depthProgram);
     }
 
+    // A replay watched in the runner's view: their shape and fit over the viewer's own graphics settings.
+    void use_runner_view(const std::optional<native::RunnerView> &view) {
+        if (view == runnerView) return;
+        runnerView = view;
+        graphics = runnerView ? native::runner_view_graphics(chosenGraphics, *runnerView) : chosenGraphics;
+    }
+
     void graphics_settings(const nlohmann::json &settings) {
-        graphics = native::GraphicsSettings::read(settings);
+        chosenGraphics = native::GraphicsSettings::read(settings);
+        graphics = runnerView ? native::runner_view_graphics(chosenGraphics, *runnerView) : chosenGraphics;
         const bool previousRoute = ghostOptions.route, previousPath = ghostOptions.route_path;
         ghostOptions.read(settings);
         if (ghostOptions.route) {
