@@ -5,6 +5,8 @@ import { readFile } from "node:fs/promises";
 type Message = {
   type: string;
   action?: string;
+  id?: number;
+  title?: string;
   tick?: number;
   value?: boolean;
   kind?: string;
