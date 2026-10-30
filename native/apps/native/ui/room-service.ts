@@ -36,6 +36,8 @@ interface Dependencies {
   ensureAccount(): Promise<boolean>;
   send(message: MenuMessage): void;
   now?: () => number;
+  /** The chat bind's first key for the welcome line ("Y"), or null while it has none. */
+  chatKey?: () => string | null;
 }
 export interface RoomView {
   mapInfo?: MapInfo | null;
@@ -540,6 +542,7 @@ export class NativeRoomService {
       room: this.view.room,
       host: this.view.room?.host ?? null,
       changing: this.view.change !== null || this.pendingMap !== null,
+      chatKey: this.dependencies.chatKey?.() ?? null,
     };
     return roomChatLines(message, context, introduced);
   }

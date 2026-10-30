@@ -93,11 +93,11 @@ test("a change sends only the native keys it touches, binds action by action", (
   const before = clone(DEFAULT_PREFS);
   const after = clone(DEFAULT_PREFS);
   after.fov = 100;
-  after.binds.thirdPerson = ["KeyY"];
-  const current = host({ binds: { chat: ["KeyY"] } });
+  after.binds.thirdPerson = ["Tab"];
+  const current = host({ binds: { scoreboard: ["Tab"] } });
   const patch = patchBetween(nativeView(before, current), nativeView(after, current));
-  // Y leaves the native-only chat bind, as a key leaves any other action on the website.
-  expect(patch).toEqual({ fov: 100, binds: { thirdPerson: ["KeyY"], chat: [] } });
+  // Tab leaves the native-only scoreboard bind, as a key leaves any other action on the website.
+  expect(patch).toEqual({ fov: 100, binds: { thirdPerson: ["Tab"], scoreboard: [] } });
 });
 
 test("paint colour, size and paint keys reach the host", () => {

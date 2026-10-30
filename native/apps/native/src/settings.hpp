@@ -242,8 +242,9 @@ inline Json default_settings() {
               {"cpNext", Json::array()},
               {"mainMenu", Json::array()},
               {"noclip", {"KeyZ"}},
-              {"chat", {"KeyY"}},
-              {"commandChat", {"KeyU"}},
+              // Chat (say / say_team in CS:S), as the website binds it: Y and U.
+              {"chat", {"KeyY", "KeyU"}},
+              {"commandChat", Json::array()},
               {"scoreboard", {"Tab"}},
               {"spectatorNext", Json::array()},
               {"spectatorPrevious", Json::array()},
@@ -595,6 +596,25 @@ inline void backup_settings(const std::filesystem::path &file) {
     std::filesystem::copy_file(file, previous, std::filesystem::copy_options::overwrite_existing);
 }
 
+// Actions added after a player saved their binds get their default keys, minus any key the saved binds already use
+// (the website's migrateBinds), so a key the player gave to something else keeps it.
+inline void fill_new_binds(const Json &saved, Json &out) {
+    const auto binds = saved.find("binds");
+    if (binds == saved.end() || !binds->is_object()) return;
+    std::set<std::string> used;
+    for (const auto &[action, codes] : binds->items())
+        if (codes.is_array())
+            for (const auto &code : codes)
+                if (code.is_string()) used.insert(code.get<std::string>());
+    for (auto &[action, codes] : out["binds"].items()) {
+        if (binds->contains(action)) continue;
+        Json free = Json::array();
+        for (const auto &code : codes)
+            if (!used.contains(code.get<std::string>())) free.push_back(code);
+        codes = std::move(free);
+    }
+}
+
 inline Json load_settings(const std::filesystem::path &file) {
     auto out = default_settings();
     if (!std::filesystem::exists(file)) return out;
@@ -652,6 +672,7 @@ inline Json load_settings(const std::filesystem::path &file) {
             std::cerr << "Ignoring setting " << entry.key() << ": " << error.what() << '\n';
         }
     }
+    fill_new_binds(saved, out);
     return out;
 }
 

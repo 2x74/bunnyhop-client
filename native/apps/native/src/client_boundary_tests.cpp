@@ -256,6 +256,19 @@ int main() {
     native::save_settings(folder / "settings.json", original);
     native::save_settings(folder / "settings.json", changed);
     assert(native::load_settings(folder / "settings.json") == changed);
+    {
+        // Chat is Y and U, as on the website. Binds saved before it had U keep U where the player put it.
+        assert((native::default_settings()["binds"]["chat"] == native::Json{"KeyY", "KeyU"}));
+        assert(native::default_settings()["binds"]["commandChat"].empty());
+        auto older = native::default_settings();
+        older["binds"].erase("chat");
+        older["binds"]["noclip"] = {"KeyU"};
+        native::save_settings(folder / "settings.json", older);
+        const auto loaded = native::load_settings(folder / "settings.json");
+        assert((loaded["binds"]["chat"] == native::Json{"KeyY"}));
+        assert((loaded["binds"]["noclip"] == native::Json{"KeyU"}));
+        native::save_settings(folder / "settings.json", changed);
+    }
     assert(!std::filesystem::exists(folder / "settings.json.tmp")
            && !std::filesystem::exists(folder / "settings.json.previous"));
     {

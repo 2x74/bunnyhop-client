@@ -73,10 +73,12 @@ test("welcome greets once and introduces a private lobby once", () => {
     map: { name: "bhop_eazy", tier: 1, startedAt: 0, endsAt: 0 },
     players: [player(0, "Me")],
   } as unknown as ServerMsg;
-  const first = roomChatLines(welcome, context);
+  const first = roomChatLines(welcome, { ...context, chatKey: "Y" });
   expect(first[0].text).toBe(
     "Connected to Lobby (1/8) · bhop_eazy. Y chat · Tab scores · N spectate · type rtv / nominate / timeleft",
   );
   expect(first[1].text).toStartWith("Your private lobby.");
   expect(roomChatLines(welcome, context, true)).toHaveLength(1);
+  // No chat key bound: the line says where to set one, as the website's does.
+  expect(roomChatLines(welcome, context, true)[0].text).toContain("bhop_eazy. Settings → Keys → chat · Tab scores");
 });

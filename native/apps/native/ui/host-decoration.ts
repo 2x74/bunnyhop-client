@@ -159,7 +159,8 @@ export function hostScoreRow(row: ScoreRow, seconds: number | null, at: number, 
 
 export interface HostScoreboard {
   type: "scoreboard";
-  head: ScoreHead | null;
+  /** `chatKey`: the chat bind's first key for the footer hint ("Y"), or null while it has none. */
+  head: (ScoreHead & { chatKey: string | null }) | null;
   rows: HostScoreRow[];
 }
 
@@ -170,6 +171,7 @@ export interface HostScoreboard {
 export function hostScoreboard(
   view: RoomView | null,
   clock: { now: number; server: number; ping: number | null; at: number },
+  chatKey: string | null = null,
 ): HostScoreboard {
   if (!view?.id) return { type: "scoreboard", head: null, rows: [] };
   const board = roomScoreboard(view, clock.now, clock.server, clock.ping);
@@ -177,7 +179,7 @@ export function hostScoreboard(
   const rows = board.rows.map((row) =>
     hostScoreRow(row, runningSeconds(view, row.slot, clock.now), clock.at, idle.has(row.slot)),
   );
-  return { type: "scoreboard", head: board.head, rows };
+  return { type: "scoreboard", head: { ...board.head, chatKey }, rows };
 }
 
 /** Sends the board when it changes; a running time ticking on its own isn't a change (the host advances it). */

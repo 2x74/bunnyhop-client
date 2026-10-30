@@ -21,17 +21,23 @@ export interface RoomChatContext {
   room: RoomInfo | null;
   host: number | null;
   changing: boolean;
+  /** The chat bind's first key ("Y"), or null while it has none. */
+  chatKey?: string | null;
 }
 
 const HOST_COMMANDS = "!map <map>, !mapvote, !extend, !kick <player>";
 
-function welcomeLines(message: Extract<ServerMsg, { t: "welcome" }>, introduced: boolean): RoomChatLine[] {
+function welcomeLines(
+  message: Extract<ServerMsg, { t: "welcome" }>,
+  introduced: boolean,
+  chatKey: string | null,
+): RoomChatLine[] {
   const lines: RoomChatLine[] = [
     {
       kind: "local",
       text:
         `Connected to ${message.room.name} (${message.players.length}/${message.room.maxPlayers}) · ` +
-        `${message.map.name}. Y chat · Tab scores · N spectate · type rtv / nominate / timeleft`,
+        `${message.map.name}. ${chatKey ?? "Settings → Keys →"} chat · Tab scores · N spectate · type rtv / nominate / timeleft`,
     },
   ];
   if (!message.room.private || introduced) return lines;
@@ -79,7 +85,7 @@ export function announceLine(a: Announcement): RoomChatLine {
 export function roomChatLines(message: ServerMsg, context: RoomChatContext, introduced = false): RoomChatLine[] {
   switch (message.t) {
     case "welcome":
-      return welcomeLines(message, introduced);
+      return welcomeLines(message, introduced, context.chatKey ?? null);
     case "join":
       if (message.quiet) return [];
       return [

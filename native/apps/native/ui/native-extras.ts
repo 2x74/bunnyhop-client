@@ -9,6 +9,7 @@ import { registerSettingsSection } from "../../web/src/ui/settings-registry";
 import { uiSound } from "./audio";
 import { DEFAULT_BINDS, nativeKeyCode, state } from "./bridge";
 import { followHost, nativeChoice, nativeToggle, type Ui } from "./native-rows";
+import { WEBSITE_CHAT_BIND } from "./settings-gates";
 import { sendNativeSettings } from "./prefs-bridge";
 
 function inputGroup(ui: Ui): HTMLElement {
@@ -244,7 +245,9 @@ function bindRow(ui: Ui, action: keyof typeof DEFAULT_BINDS, label: string): HTM
 }
 
 function nativeBindsGroup(ui: Ui): HTMLElement {
-  const group = ui.group("Desktop client", ...NATIVE_BINDS.map(([action, label]) => bindRow(ui, action, label)));
+  // The website's own Chat row (Keys → Run) takes over once it has the chat bind (settings-gates.ts).
+  const rows = NATIVE_BINDS.filter(([action]) => action !== "chat" || !WEBSITE_CHAT_BIND);
+  const group = ui.group("Desktop client", ...rows.map(([action, label]) => bindRow(ui, action, label)));
   followHost(group, ui);
   return group;
 }

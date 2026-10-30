@@ -26,7 +26,18 @@ const WEB_LIGHTING = "Lighting of the website's Enhanced and Cinematic looks; th
 const PACKS = "Texture and sky packs install into the browser's storage. The desktop client uses each map's own.";
 const MEASURE = "Measuring draws with the website's 3D engine. It comes back once the native client draws it.";
 
+/**
+ * The website's Keys screen lists Chat under Run once its settings have the chat bind (binds.ts chat); until the
+ * vendored copy has it, the desktop client's own Chat row stands in. Both write the host's `chat` bind.
+ */
+export const WEBSITE_CHAT_BIND = ACTIONS.some((action) => (action.id as string) === "chat");
+const WEBSITE_CHAT_ROWS: Record<string, Gate> = WEBSITE_CHAT_BIND ? { "keys/Run/Chat": needs("bind:chat") } : {};
+const DESKTOP_CHAT_ROWS: Record<string, Gate> = WEBSITE_CHAT_BIND
+  ? {}
+  : { "keys/Desktop client/Chat": needs("bind:chat") };
+
 const ROWS: Record<string, Gate> = {
+  ...WEBSITE_CHAT_ROWS,
   "mouse/Mouse/Sensitivity": needs("sensitivity"),
   "mouse/Mouse/Mouse DPI": menuOnly,
   "mouse/Mouse/Show DPI on profile": menuOnly,
@@ -280,7 +291,7 @@ export const NATIVE_GATES: Readonly<Record<string, Gate>> = {
   "audio/Sound packs/Effects pack": needs("sfxPack"),
   "audio/Sound packs/Music pack": needs("musicPack"),
   "audio/Sound packs/Weapon sounds": needs("weaponSounds"),
-  "keys/Desktop client/Chat": needs("bind:chat"),
+  ...DESKTOP_CHAT_ROWS,
   "keys/Desktop client/Command chat": needs("bind:commandChat"),
   "keys/Desktop client/Scoreboard": needs("bind:scoreboard"),
   "keys/Desktop client/Next player (spectating)": needs("bind:spectatorNext"),

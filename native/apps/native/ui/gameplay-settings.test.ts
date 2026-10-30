@@ -5,7 +5,9 @@ describe("native gameplay preferences", () => {
   test("native-only bind actions keep their defaults", () => {
     expect(NATIVE_BIND_ACTIONS).toContain("setStart");
     expect(NATIVE_BIND_ACTIONS).toContain("spectatorMode");
-    expect(state.settings.binds.chat).toEqual(["KeyY"]);
+    // Chat is the website's bind: Y and U (binds.ts chat); command chat has no key of its own.
+    expect(state.settings.binds.chat).toEqual(["KeyY", "KeyU"]);
+    expect(state.settings.binds.commandChat).toEqual([]);
   });
   test("reject unsupported dimensions/colors and fractional FPS before crossing the bridge", () => {
     expect(settingsPatch({ crosshairColor: "red", viewmodelFov: 101, sfxVolume: -1, fpsLimit: 45.5 })).toEqual({});

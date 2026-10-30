@@ -344,6 +344,7 @@ void test_scoreboard_and_names() {
         // Spectators are listed under the table, as on the website.
         assert(probe.has("Spectating: ") && probe.has("Spectator -> First"));
         assert(probe.flags == 1 && probe.names == 1 && probe.avatars == 1);
+        assert(probe.has("Bind a key to chat, N to spectate."));
     }
     native::HudLabel<48> time;
     native::format_hud_time(time, 16.731);
@@ -412,6 +413,14 @@ void test_merged_menu_contracts() {
     std::string style;
     room.spectator_run(run, style, 3, 90, 100500);
     assert(run.status == 1 && std::abs(run.seconds - 17.231) < 1e-8);
+    room.display_contract(
+            {{"type", "scoreboard"},
+             {"head", {{"room", "Decorated"}, {"map", "bhop_test"}, {"chatKey", "U"}}},
+             {"rows", native::Json::array()}}
+    );
+    DrawProbe keyed;
+    native::draw_scoreboard(keyed, 1280, 720, 100, room.display(), 90, 100500);
+    assert(keyed.has("U to chat, N to spectate."));
     room.display_contract({{"type", "scoreboard"}, {"head", nullptr}, {"rows", native::Json::array()}});
     assert(room.display().count == 0);
     auto settings = native::default_settings();

@@ -47,6 +47,8 @@ struct ScoreHead {
     double ends_at_ms = 0;
     // You are spectating: the footer lists the spectator's keys instead.
     bool spectating = false;
+    // The chat bind's first key for the footer hint ("Y"); empty while chat has no key.
+    std::string chat_key;
 };
 
 inline void format_hud_time(HudLabel<48> &label, double seconds) {
@@ -182,6 +184,7 @@ public:
         next.head.tier = value.value("tier", nlohmann::json()).is_number_integer() ? value["tier"].get<int>() : 0;
         next.head.max = value.value("max", 0u);
         next.head.spectating = json_flag(value, "spectating");
+        next.head.chat_key = json_text(value, "chatKey", 32);
         for (const auto &row : message["rows"]) {
             if (!row.is_object()) continue;
             next.add(row, nullptr, 256, 0);
@@ -526,11 +529,17 @@ void draw_scoreboard(
         draw_score_spectators(hud, frame, board, y);
         y += footer_line;
     }
-    const std::string_view hint = board.head.spectating
-                                          ? "Mouse 1 and 2 switch players. Space changes the camera. R respawns you."
-                                          : "Y to chat, N to spectate. Type rtv, nominate or timeleft. Esc has the "
-                                            "server menu.";
-    hud.overlay_text(frame.x + padding, y, hint, small_size, faint);
+    HudLabel<160> hint;
+    if (board.head.spectating) {
+        hint.assign("Mouse 1 and 2 switch players. Space changes the camera. R respawns you.");
+    } else {
+        // The website's footer names the chat key (net/hud.ts Scoreboard).
+        hint.assign(
+                board.head.chat_key.empty() ? std::string_view("Bind a key") : std::string_view(board.head.chat_key)
+        );
+        hint.append(" to chat, N to spectate. Type rtv, nominate or timeleft. Esc has the server menu.");
+    }
+    hud.overlay_text(frame.x + padding, y, hint.view(), small_size, faint);
     hud.overlay_end(width, height);
 }
 }  // namespace native

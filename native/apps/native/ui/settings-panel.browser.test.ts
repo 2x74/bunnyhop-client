@@ -158,12 +158,12 @@ test("keys: turn speeds in the host's ranges, and native-only binds take keys fr
 
     await page.locator('details.set-adv[data-sec="keys"] summary').click();
     from = await count(page);
-    await page.locator('.bind[data-action="chat"][data-slot="0"]').click();
+    await page.locator('.bind[data-action="scoreboard"][data-slot="0"]').click();
     await page.waitForTimeout(50);
     await page.keyboard.press("KeyL");
-    // L was the website's flashlight key: it moves to chat.
-    expect(await patchesSince(page, from)).toEqual([{ binds: { flashlight: [], chat: ["KeyL"] } }]);
-    expect(await page.locator('.bind[data-action="chat"][data-slot="0"]').textContent()).toBe("L");
+    // L was the website's flashlight key: it moves to the scoreboard.
+    expect(await patchesSince(page, from)).toEqual([{ binds: { flashlight: [], scoreboard: ["KeyL"] } }]);
+    expect(await page.locator('.bind[data-action="scoreboard"][data-slot="0"]').textContent()).toBe("L");
     expect(errors).toEqual([]);
   } finally {
     await close();
