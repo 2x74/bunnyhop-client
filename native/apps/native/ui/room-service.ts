@@ -38,7 +38,11 @@ interface Dependencies {
   now?: () => number;
   /** The chat bind's first key for the welcome line ("Y"), or null while it has none. */
   chatKey?: () => string | null;
+  /** The knife and finish held now: the knife pool's pick (player/cosmetics.ts getHeldLoadout). */
+  heldKnife?: () => { knife: string; finish: string };
 }
+/** Restarts that swap the knife send one message once they stop (net/mp.ts sendHeldKnife's pause). */
+const HELD_KNIFE_PAUSE_MS = 1500;
 export interface RoomView {
   mapInfo?: MapInfo | null;
   nextMap?: string | null;
@@ -272,6 +276,7 @@ export class NativeRoomService {
   private audioAnnouncements = new Set<string>();
   private youId: string | null = null;
   private introducedLobbies = new Set<string>();
+  private knifeTimer: ReturnType<typeof setTimeout> | null = null;
   private cue(id: string): void {
     this.dependencies.send({ type: "audioCue", id, gain: 1, rate: 1 });
   }
@@ -425,6 +430,24 @@ export class NativeRoomService {
     this.view.generation++;
     if (id) this.dependencies.send({ type: "roomEvent", id, generation, event: { t: "nativeLeave" } });
     this.changed();
+  }
+  /**
+   * The held knife changed (a knife pool swap): the room shows it once restarts stop. The room checks the pair against
+   * the saved pool and patches your roster entry (rooms/room.ts holdKnife); older servers drop the message.
+   */
+  heldKnifeChanged(): void {
+    if (this.knifeTimer) clearTimeout(this.knifeTimer);
+    this.knifeTimer = setTimeout(() => {
+      this.knifeTimer = null;
+      this.sendHeldKnife();
+    }, HELD_KNIFE_PAUSE_MS);
+  }
+  private sendHeldKnife(): void {
+    const held = this.dependencies.heldKnife?.();
+    const shown = this.view.players.find((player) => player.slot === this.view.you)?.loadout;
+    if (!held || !shown || !this.transport || this.view.status !== "open") return;
+    if (shown.knife === held.knife && shown.finish === held.finish) return;
+    this.transport.send({ t: "knife", knife: held.knife, finish: held.finish });
   }
   command(value: unknown): boolean {
     let message: ClientMsg | null = null;
@@ -615,6 +638,7 @@ export class NativeRoomService {
       this.view.metaAt = Object.fromEntries(Object.keys(this.view.metas).map((slot) => [slot, this.now()]));
       this.view.change = message.change;
       this.scheduleChange(message.change);
+      this.sendHeldKnife();
     } else if (message.t === "join") {
       this.view.players = this.view.players.filter((p) => p.slot !== message.player.slot);
       if (this.view.players.length < 64) this.view.players.push(message.player);

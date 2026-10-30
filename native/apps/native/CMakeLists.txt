@@ -559,6 +559,11 @@ if(BUILD_TESTING)
     target_include_directories(bunnyhop-native-gun-hold-tests PRIVATE vendor)
     target_compile_options(bunnyhop-native-gun-hold-tests PRIVATE
         $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    add_executable(bunnyhop-native-knife-pool-tests src/knife_pool_tests.cpp)
+    target_include_directories(bunnyhop-native-knife-pool-tests PRIVATE vendor)
+    target_compile_options(bunnyhop-native-knife-pool-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    add_test(NAME native_knife_pool COMMAND bunnyhop-native-knife-pool-tests)
     add_executable(bunnyhop-native-knife-spinner-tests src/knife_spinner_tests.cpp)
     target_include_directories(bunnyhop-native-knife-spinner-tests PRIVATE vendor)
     target_compile_options(bunnyhop-native-knife-spinner-tests PRIVATE

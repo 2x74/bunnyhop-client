@@ -63,7 +63,8 @@ import { nativeSupportScreen } from "./support-panel";
 import { openAccountPanel } from "./account-panel";
 import { tutorialPanel } from "./tutorial-panel";
 import { nativeNavigate } from "./navigation";
-import { cosmeticsPanel, initCosmetics } from "./cosmetics";
+import { cosmeticsPanel, initCosmetics, setKnifePick } from "./cosmetics";
+import { getHeldLoadout, onHeldLoadout } from "../../web/src/player/cosmetics";
 import { creditsPanel } from "./credits";
 import { homeScreen, watchMenuMotion, LAST_MAP } from "./home-menu";
 import { pauseScreen } from "./pause-menu";
@@ -740,6 +741,7 @@ function chatKeyLabel(): string | null {
 }
 const roomService = new NativeRoomService({
   chatKey: chatKeyLabel,
+  heldKnife: getHeldLoadout,
   connect: (id, handlers) => new RoomConnection(id, () => state.style, handlers),
   ensureAccount: async () => {
     try {
@@ -753,6 +755,7 @@ const roomService = new NativeRoomService({
   },
   send,
 });
+onHeldLoadout(() => roomService.heldKnifeChanged());
 const chatService = new NativeChatService(roomService, () => {
   send({ type: "chatAction", action: "openRoom" } as unknown as Parameters<typeof send>[0]);
   show("room");
@@ -927,6 +930,7 @@ window.bunnyhopNativeMenu = {
   onChatSubmit: (value: unknown) => chatService.submit(value),
   onChatSuggest: (value: unknown) => chatService.suggest(value),
   onRoomControl: (value: unknown) => chatService.control(value),
+  onKnifePick: setKnifePick,
   onRoomPose: (value) => {
     roomService.pose(value);
   },

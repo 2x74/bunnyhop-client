@@ -83,6 +83,9 @@ export type MenuMessage =
       ghostId?: string;
       trailId?: string;
       playerGlow?: import("../../web/src/player/glow-config").PlayerGlow | null;
+      /** The saved knife pool (progression.ts KnifePool) and its pick, which the game moves on (knife_pool.hpp). */
+      knifePool?: import("../../web/src/progression").KnifePool | null;
+      knifePick?: number;
     }
   | { type: "settings"; patch: SettingsPatch }
   | { type: "window"; action: "center" | "minimize" | "maximize" | "toggleFullscreen" }
@@ -643,6 +646,8 @@ declare global {
       onChatSubmit?: (value: unknown) => void;
       onChatSuggest?: (value: unknown) => void;
       onRoomControl?: (value: unknown) => void;
+      /** The knife pool's pick after the game moved it on (knife_pool.hpp HeldKnife::menu_script). */
+      onKnifePick?: (value: unknown) => void;
       onLeaveMap?: () => void;
       joinRoom?: (id: string) => void;
       onRoomPose?: (value: unknown) => void;
