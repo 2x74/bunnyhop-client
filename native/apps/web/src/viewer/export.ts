@@ -43,6 +43,7 @@ export interface ExportSource {
   readonly trace: TraceFn;
   readonly compareLabel: string | null;
   deltaAt(t: number): number | null;
+  speedDiffAt(t: number): number | null;
   /** Positions everything for display tick t (camera from `rig`) and renders the scene. */
   render(t: number, dt: number, rig: CameraRig): void;
   /** The viewer's weapon-in-hand toggle (V) for what a camera shows: the export dialog's default. */
@@ -265,7 +266,7 @@ export async function exportMp4(src: ExportSource, o: ExportOptions, onProgress:
     g.drawImage(renderer.domElement, 0, 0, w, hgt);
   };
   const overlay = (t: number) => {
-    hud.draw(g, d, t, src.deltaAt(t), { hud: o.hud, speed: o.speed, keys: o.keys, graph: o.graph, caption: o.caption, crosshair: !!o.crosshair && rig.firstPerson });
+    hud.draw(g, d, t, src.deltaAt(t), { hud: o.hud, speed: o.speed, keys: o.keys, graph: o.graph, caption: o.caption, crosshair: !!o.crosshair && rig.firstPerson }, src.speedDiffAt(t));
     if (o.branding) drawBranding(g, w, hgt);
   };
   try {

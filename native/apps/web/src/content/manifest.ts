@@ -9,6 +9,8 @@
 // Same layout locally (content-cache/, served by the Vite dev server) and in R2 (served by apps/api
 // at GET /content/:sha and GET /content-manifests/:mapSha.json, denylist applied).
 
+import type { Soundscape, SoundscriptEntry } from "../audio/map-sound-format";
+
 export const MANIFEST_VERSION = 1;
 
 export const contentKey = (sha256: string) => `content/${sha256}`;
@@ -83,7 +85,23 @@ export interface ContentManifest {
      * water splashes / wading, the knife (sound/<path>.wav game paths). Fetched only when the option is on.
      */
     sounds?: SoundGroup;
+    /** The sounds this map may play (research/MAP-SOUNDS.md). Without it the map is silent. */
+    mapSounds?: MapSoundGroup;
   };
+}
+
+/**
+ * What a map may play, made by tools/map-sounds/ for one exact BSP. `files` is the allow list: a sound not named here
+ * never plays, whatever the map asks. Files inside the BSP's own pakfile are read from there (the player already has
+ * them) and only stock ones (`stock`) are fetched from `content/<sha256>`. The API's takedown list works on it like
+ * every other optional group.
+ */
+export interface MapSoundGroup {
+  files: Record<string, ManifestFile & { stock?: boolean }>;
+  /** Soundscapes reachable from the map's soundscape entities: lower-case name -> what it plays. */
+  scapes?: Record<string, Soundscape>;
+  /** Soundscript names the map's ambient_generics use: lower-case name -> waves and levels. */
+  scripts?: Record<string, SoundscriptEntry>;
 }
 
 export interface SoundGroup {

@@ -4,6 +4,9 @@
 .ssj b { color: #fff; font-weight: 700; }
 .ssj .ssj-good, .chat-line .ssj-good { color: var(--gain); }
 
+/* JHUD (ssj/view.ts JhudView): two centred lines, the whole readout in one colour (set inline, from prefs). */
+.jhud { font-size: 0.95em; font-weight: 750; line-height: 1.2; text-align: center; font-stretch: 90%; font-variant-numeric: tabular-nums; }
+
 dialog.ssj-dialog { width: min(30rem, 94vw); }
 .ssj-dialog .acct-body { gap: var(--sp-3); }
 /* The paused game shows behind the panel, not the pause menu (like the HUD editor). */

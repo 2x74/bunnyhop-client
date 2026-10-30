@@ -20,6 +20,7 @@ import { fmtBytes, h } from "./dom";
 import { mapArt, mapGallery, observeThumbs, registerMapImages } from "./thumbs";
 import { clampTier, tierLabel, tierName, tierNum, TIERS, type Tier } from "../tiers";
 import { CSGO_NOTE, isCsgo } from "../csgo";
+import { zoneWarningNote } from "../zone-warning";
 import { isStyleId, nextStyle, STYLE_DEFS, styleLabel, type StyleId } from "../styles";
 import { selectedStyle, setSelectedStyle } from "./style-picker";
 import { keyLabel, prefs } from "./settings";
@@ -80,6 +81,8 @@ export interface MapEntry {
   collections?: string[];
   /** "csgo": a CS:GO build of the map (research/CSGO-MAPS.md); absent = CS:S. A label only: it still plays in CS:S movement. */
   game?: string;
+  /** Short label when the zones are unconfirmed or incomplete (zone-warning.ts, tools/zones/zone-warning.ts); absent = fine. */
+  zoneWarning?: string;
 }
 
 /** The small "CS:GO" label for a CS:GO map; null for a CS:S one. */
@@ -709,6 +712,7 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
       null,
       h(`span.mbd-tier.${t ? `t${t}` : "tx"}`, { title: t ? tierName(t) : "Unrated: no rank points" }, t ? `Tier ${tierNum(t)}, ${tierName(t)}` : "Unrated"),
       csgoTag(m),
+      m.zoneWarning ? h("span.mbd-zone-warn", { title: zoneWarningNote(m.zoneWarning) }, m.zoneWarning) : null,
       m.author?.trim() ? authorSpan(m.author) : h("span", null, "Unknown author"),
       bonus ? h("span", { title: "Bonus tracks are timed and ranked separately, always in Normal style" }, `${bonus} bonus track${bonus > 1 ? "s" : ""}`) : null,
       m.size && m.size > 48 << 20 ? h("span", { title: "Download size" }, fmtBytes(m.size)) : null,

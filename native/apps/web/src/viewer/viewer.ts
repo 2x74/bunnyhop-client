@@ -55,10 +55,12 @@ import type { CardInfo } from "./canvas-hud";
 import { openExportDialog, type ExportCam, type ExportSource } from "./export";
 import { runUrl, shareButton } from "../ui/share";
 import { ViewerHud } from "./hud";
-import { F_GROUNDED, F_LANDED, finalRunTime, ReplayPlayer, sampleAt, type RunData, type ViewSample } from "./player";
+import { F_GROUNDED, F_LANDED, F_TELEPORTED, finalRunTime, ReplayPlayer, sampleAt, type RunData, type ViewSample } from "./player";
 import { viewerRequestRunId, viewerUrl, type ReplayTarget, type ViewerRequest } from "./request";
 import { Timeline } from "./timeline";
 import { ReplayAudio } from "../audio/replay";
+import { InputStats } from "../mouse-filter";
+import { frameNumbers } from "../input-debug";
 import { evidenceTicks, jumpTick, replayDeepLink } from "../staff-lens";
 import { GauntletLayer } from "./gauntlet-layer";
 
@@ -89,6 +91,8 @@ export interface ViewerHost {
 }
 
 const SPEEDS = [0.1, 0.25, 0.5, 1, 2, 4];
+/** The compare ghost's speed difference changes every this many ticks: readable, about the live HUD's rate. */
+const SPEED_DIFF_STEP = 10;
 
 /**
  * The weapon-in-hand toggle (V), remembered per view. In-eye starts off: the run as a clean view of the line, like the
@@ -118,6 +122,8 @@ interface Compare {
   endTick: number;
   /** Primary-tick-indexed delta (s; negative = primary ahead), NaN outside the run. */
   delta: Float32Array;
+  /** Primary-tick-indexed speed difference (u/s; positive = primary faster), NaN where there is none. */
+  speedDiff: Float32Array;
 }
 
 export class ReplayViewer implements ExportSource {
@@ -144,6 +150,17 @@ export class ReplayViewer implements ExportSource {
   t = 0;
   playing = false;
   private watchCount: ReplayWatchCount | null = null;
+  /**
+   * Frame times while a replay shows, kept the way the game keeps its own (mouse-filter.ts InputStats): the input stats
+   * overlay shows them while the viewer is open, feedback reports carry them (main.ts), and each visit logs a line.
+   */
+  readonly frameStats = new InputStats();
+  /** Frames counted this visit. */
+  private statFrames = 0;
+  /** The next frame isn't counted: it follows a load, an export or a hidden tab, not a stutter. */
+  private statSkip = true;
+  /** Long tasks count from here (performance clock): after the last load or export. */
+  private statFrom = 0;
   /** Replay sounds (movement, wind, run chimes) while playing. */
   private sound = new ReplayAudio();
   speed = 1;
@@ -153,6 +170,10 @@ export class ReplayViewer implements ExportSource {
   private label = "";
   private corePromise: Promise<Core> | null = null;
   private core: Core | null = null;
+  /** The viewer's own sim (map sounds read the map's state from it while a replay shows). */
+  get simCore(): Core | null {
+    return this.player ? this.core : null;
+  }
   private lastNow = performance.now();
   private lastShown = -1;
   private lastRenderedTick = NaN;
@@ -192,8 +213,9 @@ export class ReplayViewer implements ExportSource {
   private titleEl: HTMLElement;
   private subEl: HTMLElement;
   private noticeEl: HTMLElement;
-  private timeEl: HTMLElement;
-  private tickEl: HTMLElement;
+  /** The clock and tick under the transport: text nodes, written when they change. */
+  private timeText = document.createTextNode("");
+  private tickText = document.createTextNode("");
   private playBtn: HTMLButtonElement;
   private shareBtn: HTMLButtonElement;
   /** Report the run's player (feedback form, "Report a player" with this run). Server runs that aren't yours. */
@@ -228,8 +250,6 @@ export class ReplayViewer implements ExportSource {
     this.titleEl = h("div.rv-title");
     this.subEl = h("div.rv-sub");
     this.noticeEl = h("div.rv-notice", { hidden: true });
-    this.timeEl = h("span.rv-time");
-    this.tickEl = h("span.rv-tick");
     const btn = (label: string, title: string, fn: () => void, cls = "") => h(`button.rv-btn${cls}`, { type: "button", title, "aria-label": title, onclick: fn }, label) as HTMLButtonElement;
     this.playBtn = btn("▶", "Play / pause (Space)", () => this.togglePlay(), ".rv-play");
     // Leaderboard runs have a page (/replay/<id>) that unfurls with the run's card.
@@ -310,7 +330,7 @@ export class ReplayViewer implements ExportSource {
       this.playBtn,
       btn("›", "Next tick (.)", () => this.step(1)),
       btn("⏭", "Finish (End)", () => this.jumpEnd()),
-      h("div.rv-clock", null, this.timeEl, this.tickEl),
+      h("div.rv-clock", null, h("span.rv-time", null, this.timeText), h("span.rv-tick", null, this.tickText)),
     );
     const right = h(
       "div.rv-group.rv-right",
@@ -333,6 +353,18 @@ export class ReplayViewer implements ExportSource {
     document.body.append(this.root);
     this.bindInput();
     prefs.watch(() => this.hud.applyPrefs());
+    // A hidden tab draws nothing: the gap before its next frame isn't a stutter.
+    document.addEventListener("visibilitychange", () => (this.statSkip = true));
+    // Long main-thread tasks while a replay shows (Chromium), as the game counts them while playing (input-debug.ts).
+    try {
+      new PerformanceObserver((list) => {
+        if (!this.active || this.exporting || !this.player) return;
+        // Not the load or the export itself (the next frame isn't counted either).
+        for (const e of list.getEntries()) if (e.startTime >= this.statFrom) this.frameStats.longTask(e.duration);
+      }).observe({ type: "longtask" });
+    } catch {
+      /* unsupported */
+    }
   }
 
   // -------------------------------------------------------------------------------------------
@@ -454,6 +486,9 @@ export class ReplayViewer implements ExportSource {
     this.host.scene.add(this.floor.root);
     this.host.onOpen();
     this.lastNow = performance.now();
+    this.frameStats.reset();
+    this.statFrames = 0;
+    this.statSkip = true;
   }
 
   private setLoading(text: string | null, error = false): void {
@@ -507,6 +542,8 @@ export class ReplayViewer implements ExportSource {
     this.updateTitle();
     this.updateControls();
     this.setLoading(null);
+    this.statSkip = true;
+    this.statFrom = performance.now();
   }
 
   /** The shown tick, in practice: the replay is played into the live game and the viewer closes. Else a notice says why not. */
@@ -557,6 +594,7 @@ export class ReplayViewer implements ExportSource {
     this.drawModel?.setPlayerGlow(null);
     this.watchCount=null;
     this.setClean(false);
+    this.logFrames();
     this.active = false;
     this.playerShadow.setEnabled(false);
     this.playing = false;
@@ -834,6 +872,7 @@ export class ReplayViewer implements ExportSource {
         style: "*",
         name,
         frames: sim.frames!,
+        frameEvents: sim.frameEvents,
         startTick: sim.startTick,
         endTick: sim.endTick || sim.ticks,
         tickInterval: Math.fround(replay.header.settings.tickInterval),
@@ -846,10 +885,12 @@ export class ReplayViewer implements ExportSource {
       ghost.trace = (a, b) => this.trace(a, b, 0); // its tag hides behind walls (Settings -> Ghost -> Names through walls)
       // Delta along the run: the ghost's progress nearest to each primary tick (ghost.ts split()).
       const delta = new Float32Array(d.n + 1).fill(NaN);
+      const speedDiff = new Float32Array(d.n + 1).fill(NaN);
       if (d.startTick) {
         const end = d.endTick || d.n;
         const pos = [0, 0, 0];
         let last = NaN;
+        ghost.prepareSplit();
         for (let i = d.startTick; i <= end; i++) {
           pos[0] = d.pos[i * 3];
           pos[1] = d.pos[i * 3 + 1];
@@ -857,6 +898,11 @@ export class ReplayViewer implements ExportSource {
           const v = ghost.split(pos, i - d.startTick);
           if (v !== null) last = v;
           delta[i] = last;
+          // The live HUD's measure: both speeds from the last tick's move (session.ts frame).
+          if (i > d.startTick && !(d.flags[i] & F_TELEPORTED)) {
+            const mx = pos[0] - d.pos[(i - 1) * 3], my = pos[1] - d.pos[(i - 1) * 3 + 1];
+            speedDiff[i] = Math.sqrt(mx * mx + my * my) / d.interval - ghost.matchSpeed;
+          }
         }
         if (d.endTick && sim.endTick) {
           const fin = (d.endTick - d.startTick - (sim.endTick - sim.startTick)) * d.interval;
@@ -866,7 +912,7 @@ export class ReplayViewer implements ExportSource {
       }
       this.compare?.ghost.dispose();
       this.host.scene.add(ghost.root);
-      this.compare = { ghost, kind, label: name, replay, startTick: sim.startTick, endTick: sim.endTick, delta };
+      this.compare = { ghost, kind, label: name, replay, startTick: sim.startTick, endTick: sim.endTick, delta, speedDiff };
       this.timeline.setCompare(sim.endTick ? d.startTick + (sim.endTick - sim.startTick) : null, GHOST_CSS[kind], delta);
       this.updateControls();
     } catch (e) {
@@ -878,6 +924,15 @@ export class ReplayViewer implements ExportSource {
     const c = this.compare;
     if (!c) return null;
     const v = c.delta[Math.max(0, Math.min(c.delta.length - 1, Math.floor(t)))];
+    return Number.isFinite(v) ? v : null;
+  }
+
+  /** The compare ghost's speed difference at tick t, in steps of SPEED_DIFF_STEP ticks (about the live HUD's rate). */
+  speedDiffAt(t: number): number | null {
+    const c = this.compare;
+    if (!c) return null;
+    const i = Math.max(0, Math.min(c.speedDiff.length - 1, Math.floor(t)));
+    const v = c.speedDiff[i - (i % SPEED_DIFF_STEP)];
     return Number.isFinite(v) ? v : null;
   }
 
@@ -898,8 +953,15 @@ export class ReplayViewer implements ExportSource {
       rig.snap(); this.drawModel.snap();
     }
     this.lastRenderedTick = t;
+    // Moving sprite trails are rebuilt from the brush history every frame (render.ts reconstructTrails). Playing (and
+    // exporting), every tick the core steps through on the way is recorded, so playback never seeks back for it; the
+    // first frame after a cut fills what's missing once. Scrubbing or paused, every frame is a cut: only the ticks the
+    // trails sample are read, as before.
+    const trail = (this.trailKeys = this.host.world.trailHistory());
+    const advancing = this.exporting || (this.playing && !this.timeline.scrubbing);
+    const record = trail && advancing ? this.recordTrail : undefined;
     // In-eye weapon: every tick played through feeds the guns (switches, reloads, shots) as in the game; a jump resets
-    // them to the core's state. Before the trails below, which move the core around.
+    // them to the core's state. Before the trails below, which move the core around after a cut.
     const contiguous = this.lastShown >= 0 && i > this.lastShown && i - this.lastShown < 30;
     const arms = this.arms;
     if (arms && this.core) {
@@ -908,6 +970,7 @@ export class ReplayViewer implements ExportSource {
         let next = this.lastShown + 1;
         let gap = false;
         p.seek(i, (k, events) => {
+          record?.(k);
           if (k < next) return;
           if (k > next) gap = true;
           arms.step(core, events);
@@ -915,23 +978,32 @@ export class ReplayViewer implements ExportSource {
         });
         if (gap) arms.reset(core);
       } else if (this.armsTick !== i) {
-        p.seek(i);
+        p.seek(i, record);
         arms.reset(core);
       }
       this.armsTick = i;
     }
-    this.host.world.reconstructTrails(t * d.interval, seconds => {
-      const tick = Math.max(0, Math.min(d.n, Math.floor(seconds / d.interval)));
-      let at = this.trailHistory.get(tick);
-      if (!at) {
-        p.seek(tick);
-        at = { transforms: p.brushOrigins(), states: this.core?.effectStates() };
-        this.trailHistory.set(tick, at);
-        if (this.trailHistory.size > 512) this.trailHistory.delete(this.trailHistory.keys().next().value!);
+    if (trail) {
+      const time = t * d.interval;
+      if (advancing) this.fillTrailHistory(Math.floor(Math.max(0, time - trail.span) / d.interval) - 1, i);
+      this.host.world.reconstructTrails(time, seconds => {
+        const tick = Math.max(0, Math.min(d.n, Math.floor(seconds / d.interval)));
+        let at = this.trailHistory.get(tick);
+        if (!at) {
+          p.seek(tick, record);
+          this.recordTrail(tick);
+          at = this.trailHistory.get(tick)!;
+        }
+        return at;
+      });
+      // Keeps the window (and some) when the trails live long; oldest recorded first out.
+      const keep = Math.max(512, Math.ceil(trail.span / d.interval) + 64);
+      for (const k of this.trailHistory.keys()) {
+        if (this.trailHistory.size <= keep) break;
+        this.trailHistory.delete(k);
       }
-      return at;
-    });
-    p.seek(i);
+    }
+    p.seek(i, record);
     const origins = p.brushOrigins();
     this.host.world.update(origins, t * d.interval, this.core?.effectStates());
     if (this.core) this.host.onWorldUpdate?.(this.core, origins);
@@ -1002,6 +1074,34 @@ export class ReplayViewer implements ExportSource {
     if (!this.exporting) this.arms?.render(this.host.renderer, cam);
   }
 
+  /** What the trails read (render(): the world's trailHistory), null without trails. */
+  private trailKeys: { models: ReadonlySet<number>; entities: ReadonlySet<number> } | null = null;
+
+  /**
+   * The trails' brush transforms and effect states at the core's current tick (render()): only the keys they read, the
+   * values those of a full brushOrigins / effectStates.
+   */
+  private readonly recordTrail = (k: number): void => {
+    const keys = this.trailKeys;
+    if (!keys || this.trailHistory.has(k) || !this.player || this.player.tick !== k) return;
+    this.trailHistory.set(k, { transforms: this.player.brushOrigins(keys.models), states: this.core?.effectStates(keys.entities) });
+  };
+
+  /**
+   * The trail window's ticks (lo..hi) not recorded yet, in order: the core goes to each (back to a keyframe for the
+   * first after a cut, then forward), recording every tick it steps through, and stops after the last one. Playing,
+   * that's the tick just reached; scrubbing, the ticks the window moved onto. The transforms are the ones a seek to each
+   * tick gives (restore + step is bit-exact, player.ts).
+   */
+  private fillTrailHistory(lo: number, hi: number): void {
+    const p = this.player!;
+    for (let k = Math.max(0, lo); k <= hi; k++) {
+      if (this.trailHistory.has(k)) continue;
+      p.seek(k, this.recordTrail);
+      this.recordTrail(k);
+    }
+  }
+
   /** The arms' animation, bob / sway from the replay's movement and effects, `show`: drawn this frame. */
   private armsFrame(arms: ReplayArms, dt: number, s: ViewSample, show: boolean, origins: Map<number, BrushTransform>): void {
     const input = { velocity: s.vel, grounded: s.grounded, viewOffsetZ: s.viewZ, sidemove: s.side, yaw: s.yaw, pitch: s.pitch, landed: this.armsLanded };
@@ -1015,6 +1115,11 @@ export class ReplayViewer implements ExportSource {
     this.lastNow = now;
     if (this.exporting) return;
     const d = this.data;
+    if (d && !this.statSkip) {
+      this.frameStats.frame(now, performance.now());
+      this.statFrames++;
+    } else this.frameStats.skipFrame(now);
+    this.statSkip = false;
     if (!d) {
       this.host.graphicsPipeline.render(this.host.scene, this.host.camera,0);
       return;
@@ -1032,14 +1137,37 @@ export class ReplayViewer implements ExportSource {
     }
     this.render(this.t, this.playing ? dt * this.speed : dt, this.rig);
     this.sound.frame(d, this.t, this.playing && !this.timeline.scrubbing, this.speed);
-    if (this.hudOn) this.hud.update(d, this.t, this.deltaAt(this.t));
+    if (this.hudOn) this.hud.update(d, this.t, this.deltaAt(this.t), this.speedDiffAt(this.t));
     this.timeline.setHead(this.t);
     this.timeline.render();
     this.gauntlet?.frame(d, this.t);
     const i = Math.floor(this.t);
     const total = d.n * d.interval;
-    this.timeEl.textContent = `${formatTime(this.t * d.interval)} / ${formatTime(total)}`;
-    this.tickEl.textContent = `tick ${i}`;
+    const clock = `${formatTime(this.t * d.interval)} / ${formatTime(total)}`;
+    if (this.timeText.data !== clock) this.timeText.data = clock;
+    const tick = `tick ${i}`;
+    if (this.tickText.data !== tick) this.tickText.data = tick;
+  }
+
+  /**
+   * This visit's frame times, with the game's names (input-debug.ts summary): percentiles over the last
+   * InputStats.FRAMES frames, counts and the worst over the visit. Null before a replay has shown a frame.
+   */
+  frameSummary(): Record<string, number | string> | null {
+    if (!this.statFrames) return null;
+    return {
+      frames: this.statFrames,
+      fps: this.frameStats.rates(performance.now()).frameHz,
+      ...frameNumbers(this.frameStats),
+      look: prefs.get().graphics.preset,
+      cam: this.rig.mode,
+    };
+  }
+
+  /** One console line per visit, like the pre-simulation's on load. */
+  private logFrames(): void {
+    const s = this.frameSummary();
+    if (s) console.info(`replay viewer: ${s.frames} frames, p50 ${s.frameP50} p99 ${s.frameP99} ms, >25 ms ${s.over25}, >50 ms ${s.over50} (worst ${s.worstFrame} ms), long tasks ${s.longTasks}`);
   }
 
   // -------------------------------------------------------------------------------------------
@@ -1145,6 +1273,8 @@ export class ReplayViewer implements ExportSource {
     this.rig.snap();
     this.model.snap();
     this.lastNow = performance.now();
+    this.statSkip = true;
+    this.statFrom = this.lastNow;
   }
 
   async cardInfo(includeLeaderboard = false): Promise<CardInfo> {

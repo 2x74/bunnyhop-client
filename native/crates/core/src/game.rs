@@ -26,6 +26,8 @@ mod scripts19;
 mod momentary;
 // Trigger / clip overlays for the client (never called by `step`; see the module docs).
 mod overlay;
+mod map_sounds;
+pub use map_sounds::{MAP_SOUND_ACTIVE, MAP_SOUND_LAST_START, MAP_SOUND_REMOVED};
 pub use overlay::{
     OVERLAY_CLIP, OVERLAY_GRAVITY, OVERLAY_OTHER, OVERLAY_PUSH, OVERLAY_STATE_ACTIVE, OVERLAY_STATE_VISIBLE, OVERLAY_TELEPORT,
     OVERLAY_WALL, OVERLAY_WHEN_HIDDEN, OverlayBrush,
@@ -1245,6 +1247,10 @@ pub struct Game {
     /// Min-heap on (tick, seq): CEventQueue order. Maps schedule tens of thousands of events at
     /// once (bhop_miku_v2's music relay queues ~90k Toggles), so popping must not be O(n).
     queue: std::collections::BinaryHeap<QueuedEvent>,
+    /// Display only: what the map's I/O asked its sound entities to do (game/map_sounds.rs).
+    map_sounds: map_sounds::MapSounds,
+    map_sound_serial: u32,
+    map_sound_commands: Vec<String>,
     seq: u64,
     pub state: State,
     pub settings: Settings,
@@ -1480,6 +1486,9 @@ impl Game {
             solid: Vec::new(),
             dyn_solid: Vec::new(),
             queue: std::collections::BinaryHeap::new(),
+            map_sounds: map_sounds::MapSounds::default(),
+            map_sound_serial: 0,
+            map_sound_commands: Vec::new(),
             seq: 0,
             state: State::from_player(
                 Player { position: spawn.0, velocity: [0.0; 3], grounded: false, crouched: false, jump_latched: false },
@@ -1645,6 +1654,9 @@ impl Game {
             }
         }
         self.queue.clear();
+        self.map_sounds = map_sounds::MapSounds::new(&self.entities);
+        self.map_sound_serial = self.map_sound_serial.wrapping_add(1);
+        self.map_sound_commands.clear();
         self.seq = 0;
         self.tick = 0;
         self.last_buttons = 0;
@@ -2455,6 +2467,7 @@ impl Game {
         if self.ents[i].removed {
             return;
         }
+        self.map_sound_input(i, input, param);
         // v16 (`NONLINEAR_OBJECTIVES` maps): a scripted trigger's ConnectOutput action runs its script function.
         if input == "callscriptfunction" && self.objectives_on() && self.call_script_function(i, param, activator) {
             return;
@@ -3809,6 +3822,7 @@ impl Game {
         GameState {
             ents: self.ents.clone(),
             queue: self.queue.clone(),
+            map_sounds: self.map_sounds.clone(),
             seq: self.seq,
             state: self.state,
             settings: self.settings,
@@ -3854,6 +3868,9 @@ impl Game {
     pub fn restore_state(&mut self, s: &GameState) {
         self.ents.clone_from(&s.ents);
         self.queue.clone_from(&s.queue);
+        self.map_sounds.clone_from(&s.map_sounds);
+        self.map_sound_serial = self.map_sound_serial.wrapping_add(1);
+        self.map_sound_commands.clear();
         self.seq = s.seq;
         self.state = s.state;
         self.settings = s.settings;
@@ -3950,6 +3967,7 @@ impl Game {
 pub struct GameState {
     ents: Vec<RtEnt>,
     queue: std::collections::BinaryHeap<QueuedEvent>,
+    map_sounds: map_sounds::MapSounds,
     seq: u64,
     state: State,
     settings: Settings,

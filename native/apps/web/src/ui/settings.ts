@@ -11,6 +11,7 @@ import { DEFAULT_BINDS } from "../binds";
 import { CLASSIC, DEFAULT_KEYS, HUD_ELEMENTS, HUD_SCALE, moveRetiredPlaces, type HudLayout, type KeysPrefs } from "../hud/layout";
 import { VIEWMODEL_POS, VIEWMODEL_POS_V1, VIEWMODEL_POS_V2, VIEWMODEL_REV } from "../viewmodel/defaults";
 import { DEFAULT_SSJ, type SsjPrefs } from "../ssj/stats";
+import { DEFAULT_JHUD, type JhudPrefs } from "../ssj/jhud";
 import { DEFAULT_TRIGGER_PREFS, normalizeTriggerPrefs, type TriggerPrefs } from "../triggers/volumes";
 import { DEFAULT_PAINT, type PaintPrefs } from "../paint/prefs";
 import type { GhostRouteMode, GhostRouteSource } from "../ghost-route-data";
@@ -114,10 +115,12 @@ export interface AudioPrefs {
   sfx: number;
   ui: number;
   ambience: number;
+  /** What the map plays (audio/map-sounds.ts). */
+  map: number;
   /** Global mute (the mute key / speaker buttons). */
   muted: boolean;
   /** Per-bus mutes. */
-  mute: { music: boolean; sfx: boolean; ui: boolean; ambience: boolean };
+  mute: { music: boolean; sfx: boolean; ui: boolean; ambience: boolean; map: boolean };
   musicMode: MusicMode;
   shuffle: boolean;
   /** Use the original CS:S footstep / landing / water / knife sounds when the hosted CS:S content has them. */
@@ -202,6 +205,8 @@ export interface Prefs {
     hiddenKeeps: HiddenKeeps;
     /** Jump stats (!ssj, ssj/): the chat line, which jumps it reports and its fields. The HUD element is layout.jumpStats. */
     ssj: SsjPrefs;
+    /** JHUD (!jhud, ssj/jhud.ts): what it shows and its colours. The HUD element is layout.jhud. */
+    jhud: JhudPrefs;
     movement: { fjtChat: boolean; lj: boolean; ljChat: boolean };
   };
   /** Master volume (0..1). The per-bus levels and the rest of the sound options are in `audio`. */
@@ -220,6 +225,8 @@ export interface Prefs {
     /** Persistent jump-to-jump/recorded path and white takeoff markers for one selected race ghost. */
     route: boolean;
     routeSource: GhostRouteSource;
+    /** The ghost the HUD's split and speed difference compare with. Auto: PB, else WR, else custom. */
+    compare: GhostRouteSource;
     routeMode: GhostRouteMode;
     /** Fade a ghost out when the camera is inside / right next to it. */
     nearFade: boolean;
@@ -495,7 +502,7 @@ export const DEFAULT_PREFS: Prefs = {
   inputStats: false,
   fov: 90,
   crosshair: { style: "cross", color: "#4dff6a", size: 6, thickness: 2, gap: 4, outline: true, alpha: 1 },
-  hud: { speedColors: true, gainTicks: true, edgeGlow: false, place: "off", strafeTrainer: DEFAULT_TRAINER, scale: 1, layout: CLASSIC, keys: DEFAULT_KEYS, hidden: false, hiddenKeeps: "speedKeys", ssj: DEFAULT_SSJ, movement: { fjtChat: false, lj: false, ljChat: true } },
+  hud: { speedColors: true, gainTicks: true, edgeGlow: false, place: "off", strafeTrainer: DEFAULT_TRAINER, scale: 1, layout: CLASSIC, keys: DEFAULT_KEYS, hidden: false, hiddenKeeps: "speedKeys", ssj: DEFAULT_SSJ, jhud: DEFAULT_JHUD, movement: { fjtChat: false, lj: false, ljChat: true } },
   volume: 0.8,
   audio: {
     announcer: { enabled: false, finish: true, movement: true, local: true, server: true, volume: 0.8, pb: "perfect", wr: "godlike", speed: "godlike", highSpeed: "holyshit", streak: "perfect", lj: "perfect", speedThreshold: 1500, highSpeedThreshold: 2500, streakThreshold: 3, ljThreshold: 250 },
@@ -504,8 +511,9 @@ export const DEFAULT_PREFS: Prefs = {
     sfx: 0.8,
     ui: 0.6,
     ambience: 0.7,
+    map: 0.5,
     muted: false,
-    mute: { music: false, sfx: false, ui: false, ambience: false },
+    mute: { music: false, sfx: false, ui: false, ambience: false, map: false },
     musicMode: "always",
     shuffle: true,
     classic: false,
@@ -517,7 +525,7 @@ export const DEFAULT_PREFS: Prefs = {
     muteInBackground: true,
   },
   showGhost: true,
-  ghost: { pb: true, wr: true, custom: true, opacity: 0.55, trail: true, route: false, routeSource: "auto", routeMode: "jumps", nearFade: true, tag: true },
+  ghost: { pb: true, wr: true, custom: true, opacity: 0.55, trail: true, route: false, routeSource: "auto", compare: "auto", routeMode: "jumps", nearFade: true, tag: true },
   tags: { throughWalls: false, players: true },
   showZones: true,
   colorBlind: "off",

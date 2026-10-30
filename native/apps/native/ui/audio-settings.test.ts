@@ -22,7 +22,7 @@ test("announcer and granular channel settings validate atomically", () => {
 test("the website's audio settings are the native buses, mutes and announcer", () => {
   const prefs = clone(DEFAULT_PREFS);
   Object.assign(prefs.audio, { sfx: 0.3, ambience: 0.4, classic: true, perfectTick: true, muteInBackground: false });
-  prefs.audio.mute = { sfx: true, ui: true, ambience: true, music: true };
+  prefs.audio.mute = { sfx: true, ui: true, ambience: true, music: true, map: false };
   prefs.audio.announcer = { ...prefs.audio.announcer, enabled: true, highSpeedThreshold: 3200 };
   const native = nativeView(prefs, hostSettings());
   expect(native).toMatchObject({

@@ -26,6 +26,7 @@ import { onStyleChange, setSelectedStyle } from "./ui/style-picker";
 import { afterStep, beforeStep, checkpointMatches, FRAME_STRIDE, frameFlags, makeTimer, quantize, simulate } from "./sim";
 import { EVENT_RESPAWNED, formatTime, RunTimer, type Split, type TickCmd } from "./timer";
 import { ZoneEditor, ZoneView } from "./zone-editor";
+import { zoneWarningToast } from "./zone-warning";
 import { loadZones, nextTrack, parseZoneSet, touching, trackName, tracksOf, zonesEqual, type ZoneSet, zoneSetToJson } from "./zones";
 import { api } from "./api";
 import { placeBoard, worldRecord } from "./shared-reads";
@@ -74,6 +75,8 @@ export interface SessionInit {
   tick: () => void;
   /** No "This map has a bonus track" (a gauntlet: main tracks only). */
   mainTrackOnly?: boolean;
+  /** The map's "zones unconfirmed" label (maps/index.json `zoneWarning`), said once on load. */
+  zoneWarning?: string | null;
   /** Practice spawns work (start-point.ts): solo, not the tutorial or a gauntlet (practice-mode/rules.ts practiceUnavailable). */
   practiceSpawns?: boolean;
   /** Compiles ghosts' programs ahead of their first frame (ghost.ts GhostHost.renderer). */
@@ -108,7 +111,7 @@ export class RunSession {
   private ssj = new LiveSsj((r) => {
     this.hud.setJumpStats(r);
     ssjChat(r);
-  }, (speed) => this.hud.setStartPre(speed));
+  }, (speed) => this.hud.setStartPre(speed), (r) => this.hud.setJhud(r));
   private movementStats = new LiveMovementStats(r => this.hud.setMovementStats(r));
   readonly view = new ZoneView();
   zones: ZoneSet | null = null;
@@ -210,6 +213,7 @@ export class RunSession {
     setPBContext(o.map, s.mapSha256, s.zones ? await sha256Hex(new TextEncoder().encode(zoneSetToJson(s.zones))) : "no-zones");
     // (The zone editor is a dev tool: the dev server or ?debug=1, main.ts.)
     if (!s.zones) s.hud.toast(`No zones yet for ${o.map}${import.meta.env.DEV || debugHookOptIn() ? " · press Z to make some" : ""}`, 8000);
+    else if (o.zoneWarning) s.hud.toast(zoneWarningToast(o.zoneWarning), 8000);
     else {
       const bonuses = tracksOf(s.zones.zones).filter((t) => t > 0).length;
       // (Not on the tutorial: its lessons do the talking.)
@@ -1054,7 +1058,9 @@ export class RunSession {
     // (Before the ghosts: the WR ghost's read takes this board instead of a read of its own.)
     if (placeOn) this.loadPlaceBoard();
     // --- ghost: race ghosts
-    const ghostSplit = this.ghosts.frame(t, alpha, curr.position, this.cam);
+    // Your speed as the ghost's is measured: the last tick's move (none across a teleport: main.ts sets prev = curr).
+    const mx = curr.position[0] - prev.position[0], my = curr.position[1] - prev.position[1];
+    const ghostSplit = this.ghosts.frame(t, alpha, curr.position, this.cam, prev.tick !== curr.tick ? Math.sqrt(mx * mx + my * my) / t.tickInterval : null);
     this.watch.frame(now);
     this.clock.frame(this.o.input.locked);
     // --- /ghost
@@ -1088,6 +1094,8 @@ export class RunSession {
       speed: Math.sqrt(vx * vx + vy * vy),
       status: t.status,
       time,
+      // Prespeeding inside the start zone: the run's clock is already going, so show it.
+      pending: t.started && t.status === "idle" ? (t.pendingTicks() + alpha) * t.tickInterval : 0,
       jumps: t.jumps,
       strafes: t.strafes,
       sync: t.syncPercent(),
@@ -1098,6 +1106,7 @@ export class RunSession {
       place: placeOn ? this.placeText(time) : null,
       // --- UI: ghost keys overlay (the main keys overlay is fed per tick from afterStep) + start-zone state ---
       ghostTick: this.ghosts.pbTick(t.track),
+      ghostSpeed: this.ghosts.speedDelta,
       inStart: t.inStart,
       hasZones: t.zones.length > 0,
       // --- /UI ---

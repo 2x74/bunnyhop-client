@@ -15,8 +15,10 @@ import { h } from "../ui/dom";
 import { prefs } from "../ui/settings";
 import { splitCount, trackName } from "../zones";
 import { F_GROUNDED, F_JUMPED, F_LADDER, F_TELEPORTED, F_RESTARTED, runTimeAt, STATUS_FINISHED, STATUS_IDLE, STATUS_RUNNING, type RunData } from "./player";
-import { SsjTracker, type SsjMode, type SsjReport } from "../ssj/stats";
-import { SsjView } from "../ssj/view";
+import { SsjTracker, type SsjCmd, type SsjMode, type SsjReport, type SsjState, type SsjTick } from "../ssj/stats";
+import { JhudView, SsjView } from "../ssj/view";
+import { JHUD_HOLD, JhudTracker, reportAt, type JhudReport } from "../ssj/jhud";
+import { formatSpeedDiff } from "../closest-pos";
 
 /** Virtual mouse-turn bits (same as hud/keys.ts) and how long a turn stays lit. */
 export const TURN_L = 1 << 16;
@@ -31,6 +33,8 @@ export interface HudValues {
   timeText: string;
   /** Compare delta (s; negative = ahead) or null. */
   split: number | null;
+  /** Compare speed difference (u/s; positive = faster) or null. */
+  ghostSpeed: number | null;
   track: string;
   stage: string;
   jumps: number;
@@ -55,8 +59,8 @@ export function keyBitsAt(d: RunData, i: number): number {
   return b;
 }
 
-/** HUD values at fractional tick t. `delta`: compare-ghost delta at that tick (or null). */
-export function hudValues(d: RunData, t: number, delta: number | null): HudValues {
+/** HUD values at fractional tick t. `delta` / `speedDiff`: compare ghost's at that tick (or null). */
+export function hudValues(d: RunData, t: number, delta: number | null, speedDiff: number | null = null): HudValues {
   const i = Math.max(0, Math.min(d.n, Math.floor(t)));
   const a = Math.min(1, Math.max(0, t - i));
   const j = Math.min(d.n, i + 1);
@@ -83,6 +87,7 @@ export function hudValues(d: RunData, t: number, delta: number | null): HudValue
     timerState,
     timeText,
     split: status === STATUS_IDLE ? null : delta,
+    ghostSpeed: status === STATUS_IDLE ? null : speedDiff,
     track: track ? trackName(track) : "",
     stage,
     jumps: d.jumps[i],
@@ -111,6 +116,25 @@ export function previousJump(d: RunData, k: number): number {
 export function replaySsj(d: RunData, mode: SsjMode): { tick: number; report: SsjReport }[] {
   const t = new SsjTracker(mode);
   const out: { tick: number; report: SsjReport }[] = [];
+  eachReplayTick(d, (k, pre, cmd, at) => {
+    const r = t.tick(pre, cmd, at);
+    if (r) out.push({ tick: k, report: r });
+  });
+  return out;
+}
+
+/** The JHUD over a whole replay, the same way (ssj/index.ts LiveSsj). */
+export function replayJhud(d: RunData): { tick: number; report: JhudReport }[] {
+  const t = new JhudTracker();
+  const out: { tick: number; report: JhudReport }[] = [];
+  eachReplayTick(d, (k, pre, cmd, at) => {
+    const r = t.tick(pre, cmd, { jumped: at.jumped, inStart: at.inStart, time: at.time });
+    if (r) out.push({ tick: k, report: r });
+  });
+  return out;
+}
+
+function eachReplayTick(d: RunData, fn: (k: number, pre: SsjState, cmd: SsjCmd, t: SsjTick) => void): void {
   const pre = { position: [0, 0, 0], velocity: [0, 0, 0], grounded: false, onLadder: false };
   const cmd = { forward: 0, side: 0, yaw: 0, buttons: 0 };
   for (let k = 1; k <= d.n; k++) {
@@ -122,18 +146,19 @@ export function replaySsj(d: RunData, mode: SsjMode): { tick: number; report: Ss
     cmd.side = d.side[k];
     cmd.yaw = d.view[k * 2];
     cmd.buttons = d.buttons[k];
-    const r = t.tick(pre, cmd, {
+    fn(k, pre, cmd, {
       jumped: (d.flags[k] & F_JUMPED) !== 0,
       teleported: (d.flags[k] & F_TELEPORTED) !== 0,
       inStart: d.inStart[p] === 1,
       time: d.status[p] === STATUS_RUNNING ? d.runTicks[p] * d.interval : null,
     });
-    if (r) out.push({ tick: k, report: r });
   }
-  return out;
 }
 
-const VIEWER_ELS: HudElId[] = ["speed", "timer", "split", "track", "stage", "stats", "sync", "keys", "graph", "jumpStats", "strafeTrainer"];
+const setText = (n: Text, v: string) => void (n.data !== v && (n.data = v));
+const setClass = (e: HTMLElement, v: string) => void (e.className !== v && (e.className = v));
+
+const VIEWER_ELS: HudElId[] = ["speed", "timer", "split", "ghostSpeed", "track", "stage", "stats", "sync", "keys", "graph", "jumpStats", "jhud", "strafeTrainer"];
 
 /** DOM HUD for the viewer (inside the viewer root; positioned by the player's HUD layout). */
 export class ViewerHud {
@@ -145,15 +170,22 @@ export class ViewerHud {
   private speedNum = document.createTextNode("");
   private timerEl = h("div.hud-timer");
   private timeFace = new TimeFace();
-  private splitEl = h("div.hud-split");
+  private splitText = document.createTextNode("");
+  private splitEl = h("div.hud-split", null, this.splitText);
+  private gspeedText = document.createTextNode("");
+  private gspeedEl = h("div.hud-gspeed", null, this.gspeedText, h("span.unit", null, " u/s"));
   private trackText = document.createTextNode("");
   private stageText = document.createTextNode("");
   private stats = { j: document.createTextNode(""), s: document.createTextNode(""), y: document.createTextNode("") };
   private syncFill = h("i.sync-fill");
   private syncText = document.createTextNode("");
   private perfText = document.createTextNode("");
-  private statPerf = h("span.hud-perf");
+  private statPerfText = document.createTextNode("");
+  private statPerf = h("span.hud-perf", null, this.statPerfText);
   private ssj = new SsjView();
+  private jhud = new JhudView();
+  /** The JHUD of the open replay (computed on first use). */
+  private jhudOf: { d: RunData; list: { tick: number; report: JhudReport }[] } | null = null;
   private trainer = new StrafeTrainer();
   private trainerView = new StrafeTrainerView();
   /** Jump stats of the open replay for one mode (computed on first use). */
@@ -168,6 +200,7 @@ export class ViewerHud {
       speed: this.speedEl,
       timer: this.timerEl,
       split: this.splitEl,
+      ghostSpeed: this.gspeedEl,
       track: h("div.hud-track", null, this.trackText),
       stage: h("div.hud-stage", null, this.stageText),
       stats: h("div.hud-stats", null, h("span", null, h("b", null, this.stats.j), " jumps"), h("span", null, h("b", null, this.stats.s), " strafes"), h("span", null, h("b", null, this.stats.y), " sync"), this.statPerf),
@@ -175,6 +208,7 @@ export class ViewerHud {
       keys: this.keys.el,
       graph: this.graph.el,
       jumpStats: this.ssj.el,
+      jhud: this.jhud.el,
       strafeTrainer: this.trainerView.el,
     };
     this.el = h("div.rv-hud");
@@ -239,11 +273,12 @@ export class ViewerHud {
     this.fed = i;
   }
 
-  update(d: RunData, t: number, delta: number | null): void {
+  update(d: RunData, t: number, delta: number | null, speedDiff: number | null = null): void {
     const i = Math.max(0, Math.min(d.n, Math.floor(t)));
     this.feed(d, i);
-    const v = hudValues(d, t, delta);
+    const v = hudValues(d, t, delta, speedDiff);
     this.drawSsj(d, i);
+    this.drawJhud(d, i);
     this.trainerView.render(this.trainer.reading);
     this.keys.render();
     this.graph.render();
@@ -251,29 +286,35 @@ export class ViewerHud {
     if (this.speedNum.data !== sp) this.speedNum.data = sp;
     const sc = `hud-speed ${v.speedClass}`;
     if (this.speedEl.className !== sc) this.speedEl.className = sc;
-    const key = `${v.timerState}|${v.timeText}|${v.split === null ? "" : formatDelta(v.split)}|${v.track}|${v.stage}|${v.jumps}|${v.strafes}|${v.sync.toFixed(1)}|${v.perfText}`;
+    const gspeed = v.ghostSpeed === null ? "" : formatSpeedDiff(v.ghostSpeed);
+    const key = `${v.timerState}|${v.timeText}|${v.split === null ? "" : formatDelta(v.split)}|${gspeed}|${v.track}|${v.stage}|${v.jumps}|${v.strafes}|${v.sync.toFixed(1)}|${v.perfText}`;
     if (key === this.last) return;
     this.last = key;
-    this.timerEl.className = `hud-timer ${v.timerState}`;
+    // While the timer runs this is every frame: only what changed is written (style and layout stay put).
+    setClass(this.timerEl, `hud-timer ${v.timerState}`);
     this.timeFace.set(v.timeText);
     const split = v.split === null ? "" : formatDelta(v.split);
-    this.splitEl.textContent = split;
-    this.splitEl.className = `hud-split ${v.split === null ? "" : v.split <= 0 ? "ahead" : "behind"}`;
+    setText(this.splitText, split);
+    setClass(this.splitEl, `hud-split ${v.split === null ? "" : v.split <= 0 ? "ahead" : "behind"}`);
     this.els.split.classList.toggle("empty", !split);
-    this.trackText.data = v.track;
+    setText(this.gspeedText, gspeed);
+    setClass(this.gspeedEl, `hud-gspeed${v.ghostSpeed === null || gspeed === "+0" ? "" : v.ghostSpeed > 0 ? " ahead" : " behind"}`);
+    this.els.ghostSpeed.classList.toggle("empty", !gspeed);
+    setText(this.trackText, v.track);
     this.els.track.classList.toggle("empty", !v.track);
-    this.stageText.data = v.stage;
+    setText(this.stageText, v.stage);
     this.els.stage.classList.toggle("empty", !v.stage);
     this.els.stats.classList.toggle("empty", !v.showStats);
-    this.stats.j.data = String(v.jumps);
-    this.stats.s.data = String(v.strafes);
-    this.stats.y.data = `${v.sync.toFixed(1)}%`;
+    setText(this.stats.j, String(v.jumps));
+    setText(this.stats.s, String(v.strafes));
+    setText(this.stats.y, `${v.sync.toFixed(1)}%`);
     const sync = Math.round(v.sync);
-    this.syncText.data = `${sync}%`;
-    this.perfText.data = v.perfText;
-    this.statPerf.textContent = prefs.get().hud.layout.sync.on ? "" : v.perfText;
-    this.syncFill.style.transform = `scaleX(${sync / 100})`;
-    this.syncFill.className = `sync-fill ${sync >= 85 ? "good" : sync >= 65 ? "ok" : "bad"}`;
+    setText(this.syncText, `${sync}%`);
+    setText(this.perfText, v.perfText);
+    setText(this.statPerfText, prefs.get().hud.layout.sync.on ? "" : v.perfText);
+    const fill = `scaleX(${sync / 100})`;
+    if (this.syncFill.style.transform !== fill) this.syncFill.style.transform = fill;
+    setClass(this.syncFill, `sync-fill ${sync >= 85 ? "good" : sync >= 65 ? "ok" : "bad"}`);
   }
 
   /** The last reported jump at or before tick i (the element hides before the first). */
@@ -290,6 +331,15 @@ export class ViewerHud {
       else hi = m;
     }
     this.els.jumpStats.classList.toggle("empty", !this.ssj.show(lo ? list[lo - 1].report : null, p.ssj.fields));
+  }
+
+  /** The last jump at or before tick i, for JHUD_HOLD seconds after it. */
+  private drawJhud(d: RunData, i: number): void {
+    const p = prefs.get().hud;
+    if (!p.layout.jhud.on) return;
+    if (this.jhudOf?.d !== d) this.jhudOf = { d, list: replayJhud(d) };
+    const at = reportAt(this.jhudOf.list, i);
+    this.els.jhud.classList.toggle("empty", !this.jhud.show(at && (i - at.tick) * d.interval <= JHUD_HOLD ? at.report : null, p.jhud));
   }
 
   /** Forget tick history (new replay / big seek). */

@@ -23,6 +23,8 @@ export class InputDebug {
   private lastDraw = 0;
   private colMax = new Float32Array(COLS);
   private colFlag = new Uint8Array(COLS);
+  /** Frame times shown in place of the game's, when set and non-null (the replay viewer's while it's open). */
+  private frameSource: (() => InputStats | null) | null = null;
 
   constructor(private input: Input) {
     // Long tasks are counted whether or not the overlay is shown (feedback reports carry them). Chromium only.
@@ -60,6 +62,10 @@ export class InputDebug {
     this.lastDraw = 0;
   }
 
+  setFrameSource(f: (() => InputStats | null) | null): void {
+    this.frameSource = f;
+  }
+
   /** Every rendered frame; redraws at most ten times a second. */
   frame(now: number): void {
     if (!this.on || now - this.lastDraw < 100) return;
@@ -93,8 +99,10 @@ export class InputDebug {
     line(4, `INPUT ${lock} · ${s.source} · filter ${s.filter ? "on" : "off"} · ${timed}`, s.lock === "os" ? "#ffb547" : s.lock === "raw" ? "#9fe0a8" : "#9aa3b2");
     line(17, `mouse ${s.pollHz ? `${s.pollHz} Hz` : "– Hz"} · ${s.reportHz} reports/s · ${s.eventHz} events/s · ${s.fps} fps`);
     line(30, `biggest move ${s.maxDelta} · spikes ${s.spikes}${s.spikes ? ` (max ${s.maxSpike})` : ""} · post-lock ${s.discards}${s.mismatches ? ` · sum≠ ${s.mismatches}` : ""}`, s.spikes ? "#ff8a80" : undefined);
-    line(43, `frame p50 ${s.frameP50} p99 ${s.frameP99} ms · >25ms ${s.over25} · >50ms ${s.over50} (worst ${s.worstFrame})`, s.over50 ? "#ff8a80" : undefined);
-    line(56, `long tasks ${s.longTasks}${s.longTasks ? ` (max ${s.longTaskMax} ms)` : ""} · input age p50 ${s.ageP50} max ${s.ageMax} ms`);
+    const fs = this.frameSource?.() ?? null;
+    const f = fs ? frameNumbers(fs) : s;
+    line(43, `${fs ? "replay " : ""}frame p50 ${f.frameP50} p99 ${f.frameP99} ms · >25ms ${f.over25} · >50ms ${f.over50} (worst ${f.worstFrame})`, f.over50 ? "#ff8a80" : undefined);
+    line(56, `long tasks ${f.longTasks}${f.longTasks ? ` (max ${f.longTaskMax} ms)` : ""} · input age p50 ${s.ageP50} max ${s.ageMax} ms`);
 
     // Movement per event over the last SPAN ms, a column per bucket (its largest event, log scale 1 .. 4096 counts):
     // dropped spikes red, post-lock discards orange.
@@ -135,9 +143,10 @@ export class InputDebug {
     g.fillRect(gx, top, gw, gh);
     const yOf = (ms: number) => top + gh - Math.min(1, ms / 50) * gh;
     const fw = gw / InputStats.FRAMES;
+    const fr = fs ?? st;
     for (let k = 0; k < InputStats.FRAMES; k++) {
-      const i = (st.frHead + k) % InputStats.FRAMES;
-      const d = st.frDur[i];
+      const i = (fr.frHead + k) % InputStats.FRAMES;
+      const d = fr.frDur[i];
       if (!d) continue;
       g.fillStyle = d > 50 ? "#ff5252" : d > 25 ? "#ffa726" : "#8fd19e";
       const y = yOf(d);
@@ -156,6 +165,20 @@ export class InputDebug {
 }
 
 const r1 = (v: number) => Math.round(v * 10) / 10;
+
+/** Frame-time numbers of a stats ring (the summary's names). */
+export function frameNumbers(st: InputStats) {
+  return {
+    frameP50: r1(InputStats.pct(st.frDur, 0.5)),
+    frameP99: r1(InputStats.pct(st.frDur, 0.99)),
+    frameMax: r1(Math.max(...st.frDur)),
+    over25: st.framesOver25,
+    over50: st.framesOver50,
+    worstFrame: r1(st.maxFrame),
+    longTasks: st.longTasks,
+    longTaskMax: Math.round(st.maxLongTask),
+  };
+}
 
 /** The input stats as plain numbers: the overlay's text, feedback reports and `__inputStats()`. */
 export function summary(input: Input) {
@@ -185,14 +208,7 @@ export function summary(input: Input) {
     maxSpike: Math.round(st.maxSpike),
     discards: st.discards,
     mismatches: st.mismatches,
-    frameP50: r1(InputStats.pct(st.frDur, 0.5)),
-    frameP99: r1(InputStats.pct(st.frDur, 0.99)),
-    frameMax: r1(Math.max(...st.frDur)),
-    over25: st.framesOver25,
-    over50: st.framesOver50,
-    worstFrame: r1(st.maxFrame),
-    longTasks: st.longTasks,
-    longTaskMax: Math.round(st.maxLongTask),
+    ...frameNumbers(st),
     ageP50: r1(InputStats.pct(Float32Array.from(ages, (a) => a + 1e-3), 0.5)),
     ageMax: r1(ages.length ? Math.max(...ages) : 0),
   };

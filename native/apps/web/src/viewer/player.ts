@@ -287,9 +287,9 @@ export class ReplayPlayer {
     this.stats.lastSeekMs = performance.now() - t0;
   }
 
-  /** Brush entity model origins at the core's current tick. */
-  brushOrigins(): Map<number, BrushTransform> {
-    return this.core.brushOrigins();
+  /** Brush entity model origins at the core's current tick (`only`: just these models, Core.brushOrigins). */
+  brushOrigins(only?: ReadonlySet<number>): Map<number, BrushTransform> {
+    return this.core.brushOrigins(only);
   }
 
   /** Frees the keyframes (the core instance is reused for the next replay). */

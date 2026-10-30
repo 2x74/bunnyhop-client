@@ -46,7 +46,7 @@ import { StrafeTrainerView } from "../hud/strafe-trainer-view";
 import { trainerZone } from "../hud/strafe-trainer";
 import { clampScale, decodeLayout, presetLayout, encodeLayout, HUD_ELEMENTS, HUD_SCALE, PRESETS, sameLayout, type HudElId, type KeysStyle } from "../hud/layout";
 import { hideUiKeeps, hideUiSwitch, hudMiniature } from "./quick-toggles";
-import { ssjRows } from "../ssj";
+import { jhudRows, ssjRows } from "../ssj";
 import { movementRows } from "../movement-stats";
 import { requestRace } from "../player/race";
 import { guardSideMouseButtons, mouseCode } from "../binds";
@@ -227,7 +227,7 @@ function crosshairSection(): SettingsContent {
  * HUD elements in the Show on screen picture (quick-toggles.ts) or in their own group (Jump stats); the rest are under
  * Advanced → More elements.
  */
-const QUICK_ELEMENTS = new Set<HudElId>(["keys", "speed", "timer", "split", "stats", "sync", "fps", "chat", "jumpStats", "strafeTrainer", "strafeOffsets", "firstJump", "longJump", "spectators", "practice"]);
+const QUICK_ELEMENTS = new Set<HudElId>(["keys", "speed", "timer", "split", "stats", "sync", "fps", "chat", "jumpStats", "jhud", "ghostSpeed", "strafeTrainer", "strafeOffsets", "firstJump", "longJump", "spectators", "practice"]);
 const ELEMENT_NOTES: Partial<Record<HudElId, string>> = {
   track: "Which bonus you're running (hidden on the main track).",
   stage: "Stage / checkpoint progress on staged maps.",
@@ -391,6 +391,7 @@ function hudSection(ctx: Ctx): SettingsContent {
           check("Jump sound", () => P().hud.strafeTrainer.sound, (v) => tp((t) => (t.sound = v)), { desc: "A tick on every jump: high when that jump was on pace, low when it was far off.", keywords: "strafetrainer strafe trainer sound audio tick beep jump" }),
         ),
         group("Jump stats", ...ssjRows(), toggle("Start Pre", () => P().hud.layout.startPre.on, (v) => up((p) => (p.hud.layout.startPre.on = v)), { desc: "Speed just before your first takeoff from the start zone. Stays until the next start or restart. Edit layout moves it.", keywords: "prestrafe start pre first jump speed" })),
+        group("JHUD", ...jhudRows()),
         ...movementRows(),
       ],
     ],
@@ -730,6 +731,11 @@ function ghostSection(): SettingsContent {
       ],
       [
         group(
+          "Compare",
+          select<GhostRouteSource>("Compare with", () => P().ghost.compare, g("compare"), [["auto", "Auto (PB, WR, custom)"], ["pb", "Your PB"], ["wr", "World record"], ["custom", "Custom ghost"]], { desc: "The ghost the HUD's split and speed difference are against. A specific one shows nothing until that ghost is loaded and enabled.", keywords: "ghost compare split delta closest position replay pb wr custom selected" }),
+          toggle("Speed difference", () => P().hud.layout.ghostSpeed.on, (v) => up((p) => (p.hud.layout.ghostSpeed.on = v)), { desc: "Your speed against the ghost's at the same point on the route, beside your speed. Edit layout moves it. Nothing shows without a ghost.", keywords: "ghost velocity speed difference closest position u/s" }),
+        ),
+        group(
           "Look",
           range("Opacity", () => P().ghost.opacity, g("opacity"), { min: 0.15, max: 1, step: 0.05, scale: 100, unit: "%", desc: "How solid ghosts look.", keywords: "alpha transparent ghost opacity" }),
           toggle("Trail", () => P().ghost.trail, g("trail"), { desc: "Fading path of the ghost's last few seconds.", keywords: "path line ghost trail" }),
@@ -932,9 +938,19 @@ function graphicsSection(ctx: Ctx): SettingsContent {
             keywords: "fps cap limit max frame rate frames framerate unlimited uncapped vsync 1000",
           }),
           toggle("Exceed monitor FPS", () => G().uncapped, (v) => up((p) => (p.graphics.uncapped = v)), {
-            desc: "Needs Low-latency canvas (Advanced), or a browser started with --disable-gpu-vsync --disable-frame-rate-limit.",
+            desc: "Needs Low-latency canvas, or a browser started with --disable-gpu-vsync --disable-frame-rate-limit.",
             keywords: "uncapped unlimited fps vsync latency frame rate exceed refresh",
           }),
+          toggle("Low-latency canvas", () => G().lowLatency, (v) => up((p) => (p.graphics.lowLatency = v)), {
+            desc: "Applies after a reload.",
+            keywords: "low latency desynchronized canvas vsync fps tearing uncapped",
+          }),
+          select("FPS limit in menus", () => G().menuFps, (v) => up((p) => (p.graphics.menuFps = v)), [
+            [0, "Same as playing"],
+            [30, "30"],
+            [60, "60"],
+            [120, "120"],
+          ], { desc: "Replays play at the FPS limit above.", keywords: "menu fps cap battery power pause replay" }),
         ),
       ],
     ],
@@ -973,19 +989,6 @@ function graphicsSection(ctx: Ctx): SettingsContent {
         select("Cloud quality", () => G().cloudQuality, (v) => up((p) => (p.graphics.cloudQuality = v)), [["low", "Low · 320×180"], ["medium", "Medium · 480×270"], ["high", "High · 640×360"]], { when: () => G().clouds, desc: "The resolution clouds are drawn at.", keywords: "cloud quality" }),
         range("Cloud coverage", () => G().cloudCoverage, (v) => up((p) => (p.graphics.cloudCoverage = v)), { min: 0, max: 1, step: .01, scale: 100, unit: "%", when: () => G().clouds, keywords: "cloud coverage amount" }),
         range("Cloud density", () => G().cloudDensity, (v) => up((p) => (p.graphics.cloudDensity = v)), { min: 0, max: 2, step: .05, scale: 100, unit: "%", when: () => G().clouds, keywords: "cloud density thickness" }),
-      ),
-      group(
-        "Frame rate",
-        toggle("Low-latency canvas", () => G().lowLatency, (v) => up((p) => (p.graphics.lowLatency = v)), {
-          desc: "Applies after a reload.",
-          keywords: "low latency desynchronized canvas vsync fps tearing uncapped",
-        }),
-        select("FPS limit in menus", () => G().menuFps, (v) => up((p) => (p.graphics.menuFps = v)), [
-          [0, "Same as playing"],
-          [30, "30"],
-          [60, "60"],
-          [120, "120"],
-        ], { keywords: "menu fps cap battery power pause" }),
       ),
     ],
   };

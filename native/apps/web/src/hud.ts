@@ -20,8 +20,10 @@ import { EVENT_JUMPED, EVENT_TELEPORTED, type PlayerState } from "./core";
 import { HudEditor } from "./hud/editor";
 import { SpeedGraph } from "./hud/graph";
 import { JumpTracker } from "./hud/jumps";
-import { SSJ_DEMO, SsjView } from "./ssj/view";
+import { JHUD_DEMO, JhudView, SSJ_DEMO, SsjView } from "./ssj/view";
 import type { SsjReport } from "./ssj/stats";
+import { JHUD_HOLD, type JhudReport } from "./ssj/jhud";
+import { formatSpeedDiff } from "./closest-pos";
 import type { MovementReading } from "./movement-stats";
 import type { LjReport } from "./movement-stats/stats";
 import { LjView, fjtNodes, offsetNodes, startPreNodes } from "./movement-stats/view";
@@ -55,6 +57,8 @@ export interface HudFrame {
   speed: number;
   status: RunStatus;
   time: number;
+  /** Seconds on the clock of a run still inside the start zone (timer.ts pendingTicks); 0 or absent: none. */
+  pending?: number;
   jumps: number;
   strafes: number;
   sync: number;
@@ -72,6 +76,8 @@ export interface HudFrame {
   stage?: string | null;
   /** Current tick of this track's PB ghost (drives the ghost keys overlay); null/undefined = no ghost shown. */
   ghostTick?: number | null;
+  /** Your speed minus the race ghost's at the closest point on its route (u/s); null/undefined = nothing to compare. */
+  ghostSpeed?: number | null;
 }
 
 /** Per-tick commands of a PB ghost's replay (index i = command that produced tick i + 1). */
@@ -134,6 +140,7 @@ const DEMO: HudFrame = {
   sync: 88.4,
   pb: 25.012,
   split: -0.231,
+  ghostSpeed: 42,
   place: "#4 · top 3%",
   inStart: false,
   hasZones: true,
@@ -237,6 +244,14 @@ export class Hud {
   /** Jump stats (!ssj): the last reported jump (ssj/view.ts), fed by session.ts. */
   private ssjView = new SsjView();
   private ssjLast: SsjReport | null = null;
+  /** JHUD (!jhud): the last jump, for JHUD_HOLD seconds (ssj/view.ts), fed by session.ts. */
+  private jhudView = new JhudView();
+  private jhudLast: JhudReport | null = null;
+  private jhudUntil = 0;
+  /** Speed vs ghost: the number and its sign last written (NaN: empty). */
+  private gspeedText = text();
+  private gspeedEl = h("div.hud-gspeed", null, this.gspeedText, h("span.unit", null, " u/s"));
+  private gspeedShown = NaN;
   private startPre: number | null = null;
   private startPreEl = h("div.mv-pre");
   private movement: MovementReading = { offset: null, fjt: null, lj: null };
@@ -323,6 +338,8 @@ export class Hud {
       ghostKeys: this.ghostKeys.el,
       graph: this.graph.el,
       jumpStats: this.ssjView.el,
+      jhud: this.jhudView.el,
+      ghostSpeed: this.gspeedEl,
       startPre: this.startPreEl,
       strafeOffsets: this.offsetEl,
       firstJump: this.fjtEl,
@@ -353,6 +370,8 @@ export class Hud {
     this.els.ammo.classList.add("empty"); // shown while a gun is out (setAmmo)
     this.els.spectators.classList.add("empty"); // shown while someone watches (setSpectators, net/mp.ts)
     this.els.practice.classList.add("empty"); // shown while the attempt is practice (setPractice, session.ts)
+    this.els.jhud.classList.add("empty"); // shown for a moment after each jump (setJhud)
+    this.els.ghostSpeed.classList.add("empty"); // shown while there's a ghost to compare with (update)
     this.jumps.onJump = (n, _speed, gain) => {
       this.graph.mark(gain, n === 1);
       if (n > 1) this.pendingGain = gain;
@@ -432,6 +451,7 @@ export class Hud {
     this.ghostKeys.configure({ ...p.hud.keys, pressed: GHOST_COLOR });
     renderCrosshair(this.xhair, p.crosshair);
     this.drawSsj(); // (fields may have changed)
+    this.drawJhud();
     this.shown = Hud.blank();
     this.timeFace.set("");
     this.speedClass = "?";
@@ -460,6 +480,17 @@ export class Hud {
   setJumpStats(r: SsjReport | null): void {
     this.ssjLast = r;
     this.drawSsj();
+  }
+
+  /** JHUD: a jump (ssj/index.ts LiveSsj via session.ts); null clears it. Up until the next jump, or JHUD_HOLD. */
+  setJhud(r: JhudReport | null): void {
+    this.jhudLast = r;
+    this.jhudUntil = r ? performance.now() + JHUD_HOLD * 1000 : 0;
+    this.drawJhud();
+  }
+
+  private drawJhud(): void {
+    this.els.jhud.classList.toggle("empty", !this.jhudView.show(this.editing ? JHUD_DEMO : this.jhudLast, this.p.hud.jhud));
   }
 
   setStartPre(speed: number | null): void {
@@ -743,6 +774,7 @@ export class Hud {
       }
     }
     this.edgeGlow(f.speed);
+    if (this.jhudUntil && now >= this.jhudUntil) this.setJhud(null);
 
     // Tick-driven widgets (each touches the DOM only if it changed).
     this.keys.render();
@@ -779,7 +811,7 @@ export class Hud {
       if (s.state === "start" && state === "running" && !this.editing && !this.spectated) this.ignite();
       this.timerEl.className = `hud-timer ${(s.state = state)}${this.practiceOn ? " practice" : ""}`;
     }
-    const time = state === "nozones" ? "No zones on this map" : formatTime(f.status === "idle" ? 0 : f.time);
+    const time = state === "nozones" ? "No zones on this map" : formatTime(f.status === "idle" ? (f.pending ?? 0) : f.time);
     if (time !== s.time) this.timeFace.set((s.time = time));
 
     // Split: the live ghost delta, except for a moment after a stage, when it holds that stage's delta (split()).
@@ -797,6 +829,16 @@ export class Hud {
       const sign = f.split === null || f.status !== "running" ? 0 : f.split <= 0 ? -1 : 1;
       if (sign && this.ghostSign && sign !== this.ghostSign && !reducedMotion()) nudge(this.splitEl);
       this.ghostSign = sign;
+    }
+    // Your speed against the ghost's. (A number compare first: the text is made only when it changes.)
+    const gs = f.ghostSpeed === null || f.ghostSpeed === undefined || this.spectated ? NaN : Math.round(f.ghostSpeed) + 0;
+    if (gs !== this.gspeedShown && !(gs !== gs && this.gspeedShown !== this.gspeedShown)) {
+      this.gspeedShown = gs;
+      if (gs === gs) {
+        this.gspeedText.data = formatSpeedDiff(gs);
+        this.gspeedEl.className = `hud-gspeed${gs > 0 ? " ahead" : gs < 0 ? " behind" : ""}`;
+      }
+      this.els.ghostSpeed.classList.toggle("empty", gs !== gs);
     }
     // The leaderboard place beside it (its own colour: it isn't ahead or behind anything).
     const place = f.place ?? "";

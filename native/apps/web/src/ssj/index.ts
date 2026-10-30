@@ -13,10 +13,11 @@ import { takeFreeCursor } from "../free-cursor";
 import { postLocalLine } from "../net/hud";
 import { resumePlay } from "../play-lock";
 import type { TickCmd } from "../timer";
-import { check, group, segmented, toggle } from "../ui/controls";
+import { check, color, group, range, segmented, toggle } from "../ui/controls";
 import { h } from "../ui/dom";
 import { prefs, type Prefs } from "../ui/settings";
 import "../ui/settings.css";
+import { DEFAULT_JHUD, JHUD_BANDS, JhudTracker, type JhudBand, type JhudReport } from "./jhud";
 import { SSJ_FIELDS, SsjTracker, ssjItems, ssjText, type SsjField, type SsjMode, type SsjReport, type SsjState, StartPreTracker } from "./stats";
 import { ssjNodes } from "./view";
 import { dismissOutside } from "../ui/dismiss";
@@ -29,8 +30,9 @@ export class LiveSsj {
   private tracker = new SsjTracker(P().mode);
   private pre: SsjState | null = null;
   private startPre = new StartPreTracker();
+  private jhud = new JhudTracker();
 
-  constructor(private report: (r: SsjReport) => void, private reportStartPre: (speed: number | null) => void = () => {}) {
+  constructor(private report: (r: SsjReport) => void, private reportStartPre: (speed: number | null) => void = () => {}, private reportJhud: (r: JhudReport | null) => void = () => {}) {
     prefs.watch((p) => this.tracker.setMode(p.hud.ssj.mode));
   }
 
@@ -39,6 +41,8 @@ export class LiveSsj {
     this.tracker.reset();
     this.startPre.reset();
     this.reportStartPre(null);
+    this.jhud.reset();
+    this.reportJhud(null);
     this.pre = state;
   }
 
@@ -54,6 +58,8 @@ export class LiveSsj {
     if (startPre !== undefined) this.reportStartPre(startPre);
     const r = this.tracker.tick(pre, cmd, { jumped: (events & EVENT_JUMPED) !== 0, teleported: (events & EVENT_TELEPORTED) !== 0, ...o });
     if (r) this.report(r);
+    const j = this.jhud.tick(pre, cmd, { jumped: (events & EVENT_JUMPED) !== 0, ...o });
+    if (j) this.reportJhud(j);
   }
 }
 
@@ -111,18 +117,50 @@ export function ssjRows(): HTMLElement[] {
 }
 
 // ---------------------------------------------------------------------------------------------
-// !ssj panel
+// JHUD settings rows (Settings → HUD → JHUD, and the !jhud panel)
+
+const J = () => prefs.get().hud.jhud;
+const BAND_LABELS: Record<JhudBand, string> = { reallyBad: "Under 60%", bad: "60-70%", meh: "70-80%", good: "80-90%", reallyGood: "90% and up" };
+
+export function jhudRows(): HTMLElement[] {
+  return [
+    toggle("JHUD", () => prefs.get().hud.layout.jhud.on, (v) => up((p) => (p.hud.layout.jhud.on = v)), {
+      hint: "!jhud",
+      desc: "Speed and gain of every jump, near the crosshair, coloured by how it went. Edit layout moves it.",
+      keywords: "jhud jump hud gain speed sync center screen",
+    }),
+    h(
+      "div.check-grid",
+      null,
+      check("Sync", () => J().sync, (v) => up((p) => (p.hud.jhud.sync = v)), { desc: "Air ticks where your strafe added speed, after the gain.", keywords: "jhud sync" }),
+      check("JSS", () => J().jss, (v) => up((p) => (p.hud.jhud.jss = v)), { desc: "How fast you turned against the turn that gains the most at your speed. 100% is ideal.", keywords: "jhud jss strafe speed turn" }),
+      check("Strafe analyzer", () => J().analyzer, (v) => up((p) => (p.hud.jhud.analyzer = v)), { desc: "An arrow by the gain: down when you turned too fast, up when too slow.", keywords: "jhud analyzer arrow fast slow" }),
+    ),
+    range("Speed colours until jump", () => J().speedColors, (v) => up((p) => (p.hud.jhud.speedColors = v)), { min: 1, max: 16, step: 1, desc: "Up to this jump the colour says if your speed is on pace; after it, how good the gain was. The plugins use 6, or 16 for Extra Jumps.", keywords: "jhud extra jumps speed colours colors" }),
+    range("Stop after jump", () => J().cutoff, (v) => up((p) => (p.hud.jhud.cutoff = v)), { min: 0, max: 30, step: 1, desc: "Hides it after this jump, for when you only care about the start. 0 never hides it.", keywords: "jhud cutoff limit" }),
+    ...JHUD_BANDS.map((b) => color(BAND_LABELS[b], () => J().colors[b], (v) => up((p) => (p.hud.jhud.colors[b] = v)), { swatches: Object.values(DEFAULT_JHUD.colors), keywords: "jhud colour color gain" })),
+  ];
+}
+
+// ---------------------------------------------------------------------------------------------
+// !ssj and !jhud panels
 
 let open: HTMLDialogElement | null = null;
 
-/** The Jump stats panel over the game. Play pauses while it's open and resumes when it closes (the HUD editor's way). */
-export function openSsjPanel(): void {
+/** The Jump stats panel over the game. */
+export const openSsjPanel = (): void => openPanel("Jump stats", ssjRows());
+
+/** The JHUD panel over the game: the plugin's !jhud menu. */
+export const openJhudPanel = (): void => openPanel("JHUD", jhudRows());
+
+/** A settings panel over the game. Play pauses while it's open and resumes when it closes (the HUD editor's way). */
+function openPanel(title: string, rows: HTMLElement[]): void {
   if (open) return;
   // From the chat (!ssj) the cursor is already free: play pauses under the panel all the same.
   const relock = !!document.pointerLockElement || takeFreeCursor();
   if (document.pointerLockElement) document.exitPointerLock();
   document.body.classList.add("ssj-open");
-  const d = h("dialog.acct-dialog.ssj-dialog", { "aria-label": "Jump stats" }) as HTMLDialogElement;
+  const d = h("dialog.acct-dialog.ssj-dialog", { "aria-label": title }) as HTMLDialogElement;
   let viaClick = false;
   d.addEventListener("keydown", (e) => {
     e.stopPropagation();
@@ -138,8 +176,8 @@ export function openSsjPanel(): void {
   });
   const done = h("button.btn.btn-sm.primary", { type: "button", onclick: () => ((viaClick = true), d.close()) }, "Done");
   d.append(
-    h("header.acct-head", null, h("h2", null, "Jump stats"), h("button.acct-close", { type: "button", "aria-label": "Close", onclick: () => ((viaClick = true), d.close()) }, "×")),
-    h("div.acct-body.quick-set", null, group(null, ...ssjRows()), h("div.acct-actions", null, done)),
+    h("header.acct-head", null, h("h2", null, title), h("button.acct-close", { type: "button", "aria-label": "Close", onclick: () => ((viaClick = true), d.close()) }, "×")),
+    h("div.acct-body.quick-set", null, group(null, ...rows), h("div.acct-actions", null, done)),
   );
   document.body.append(d);
   open = d;
@@ -147,4 +185,19 @@ export function openSsjPanel(): void {
   done.focus({ preventScroll: true });
 }
 
+registerChatCommand({
+  name: "jhud",
+  args: "[on|off]",
+  help: "jump hud",
+  about: "speed and gain of every jump near the crosshair, coloured by how it went. !jhud opens its settings; !jhud on or off just switches it.",
+  group: "more",
+  where: "both",
+  run: (ctx, arg) => {
+    const v = arg.toLowerCase();
+    if (!v) return openJhudPanel();
+    if (v !== "on" && v !== "off") return void ctx.reply("Usage: !jhud [on|off]");
+    up((p) => (p.hud.layout.jhud.on = v === "on"));
+    ctx.reply(`JHUD ${v}. !jhud for its settings; Edit layout moves it.`);
+  },
+});
 registerChatCommand({ name: "ssj", help: "jump stats", about: "speed, gain and sync on your 6th jump, as a chat line (opens its settings).", group: "more", where: "both", run: () => openSsjPanel() });

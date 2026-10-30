@@ -261,6 +261,14 @@ export class RunTimer {
   }
 
   /**
+   * Ticks on the clock of a run still inside the start zone (rules 2: `started`, not yet announced); 0 otherwise. For
+   * the HUD: leaving the zone keeps this count (startTick = that first tick); landing back in it re-arms and clears it.
+   */
+  pendingTicks(atTick = this.lastTick): number {
+    return this.pendingStart ? atTick - this.pendingStart : 0;
+  }
+
+  /**
    * Seconds. A running clock counts whole ticks (ticks * tick interval); a finished run is its sub-tick time rounded to
    * the millisecond (timeMs, run-timing.ts), what the boards show.
    */

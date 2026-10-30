@@ -20,11 +20,12 @@ body.menu-open #hud .hud-el[data-el="keys"],
 body.menu-open #hud .hud-el[data-el="ghostKeys"],
 body.menu-open #hud .hud-el[data-el="strafeTrainer"],
 body.menu-open #hud .hud-el[data-el="startPre"],
-body.menu-open #hud .hud-el[data-el="jumpStats"] { visibility: hidden; }
+body.menu-open #hud .hud-el[data-el="jumpStats"],
+body.menu-open #hud .hud-el[data-el="jhud"] { visibility: hidden; }
 
 /* --- text elements --- */
 /* The HUD face: heavy for the numbers (speed, timer, ammo), tabular so they don't jitter. */
-.hud-speed, .hud-ammo, .hud-timer, .hud-split { font-stretch: 90%; font-variant-numeric: tabular-nums; }
+.hud-speed, .hud-ammo, .hud-timer, .hud-split, .hud-gspeed { font-stretch: 90%; font-variant-numeric: tabular-nums; }
 .hud-speed { position: relative; display: flex; align-items: baseline; gap: 0.25em; font-size: 2.1em; font-weight: 800; letter-spacing: -0.01em; line-height: 1; transition: color 0.12s; }
 .hud-speed .speed-num { display: inline-block; }
 .hud-speed .unit { font-size: 0.36em; font-weight: 650; opacity: 0.6; font-stretch: 100%; }
@@ -60,6 +61,11 @@ body.menu-open #hud .hud-el[data-el="jumpStats"] { visibility: hidden; }
 .hud-split.hold { opacity: 1; font-weight: 800; }
 .hud-split.ahead { color: var(--gain); }
 .hud-split.behind { color: var(--loss); }
+/* Your speed against the ghost's at the same point on the route (hud.ts): the split's look, with the speed's unit. */
+.hud-gspeed { font-size: 0.95em; font-weight: 700; line-height: 1.2; opacity: 0.85; }
+.hud-gspeed .unit { font-size: 0.7em; font-weight: 650; opacity: 0.6; font-stretch: 100%; }
+.hud-gspeed.ahead { color: var(--gain); }
+.hud-gspeed.behind { color: var(--loss); }
 /* The leaderboard place beside the delta (Settings → HUD → Leaderboard place): the timer's white, a little quieter. With a
    delta it hangs off the delta's right, so the delta stays where the layout put it (a centred anchor would otherwise push
    it into the timer); alone (no PB, no ghost) it takes the delta's spot. */

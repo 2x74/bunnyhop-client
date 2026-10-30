@@ -45,7 +45,7 @@
    two words, and VERSION stays below 0.1.0 while STAGE is alpha.
    ============================================================ */
 
-export const VERSION = "0.0.30";
+export const VERSION = "0.0.31";
 
 /** Release stage, printed after the number ("v0.0.4 alpha"). */
 export const STAGE = "alpha";
@@ -67,20 +67,35 @@ export interface ChangelogEntry {
 
 /** Notes for the next release, unpublished until promoted into CHANGELOG. */
 export const UPCOMING: ChangelogEntry = {
-  version: "0.0.31",
+  version: "0.0.32",
   date: "2026-10-29",
   kind: "minor",
   title: "Next update",
   notes: [
-    "Crouch-cancelling or landing from a teleport onto a floor no longer costs a tick of friction: you jump on the same tick, like bhoptimer servers.",
-    "!showtriggers now shows the scripted collectibles and gates on bhop_cooksassistant. Thanks to GothQueen for the report.",
-    "New Release W on jump option under Keys: jump while holding W and forward lets go until you land or press W again. It is off by default and doesn't apply in Legit Scroll, W-Only, Sideways or Half-Sideways.",
-    "Keys no longer stop working when you change a setting or alt-tab while holding them with Timestamped input on. Before, a held W, A, S or D could go dead until you pressed it again.",
+    "The timer now counts while you bhop in the start zone, instead of showing 0 until you leave it. Your times don't change. Thanks to ponytrap for the report.",
+    "Exceed monitor FPS no longer causes a small stutter every couple of seconds. Thanks to ponytrap for the clip.",
+    "Maps now play their own sounds from where the map puts them: machines, wind, water. Settings → Audio → Map sounds sets the level, and !stopsound turns them off and on. Music inside maps stays off for now.",
+    "The camera no longer goes through low ceilings. Under one, your view now stays below it, as in CS:S. Only the camera moves: movement and replays are unchanged.",
+    "JHUD: type !jhud to see the speed and gain of every jump near your crosshair, coloured by how it went, with optional sync, JSS and a strafe arrow. It's off until you turn it on; Edit layout moves it, and its settings are in Settings → HUD.",
+    "The time against a ghost now follows the route better: it no longer freezes when you leave the ghost's line, and it doesn't jump to another part of a route that loops or runs over itself. Beside your speed you now also see how much faster or slower you are than the ghost at that point (+42 u/s). Settings → Ghost picks which ghost, and turns it off. Nothing shows without a ghost.",
+    "Smoother replays: the 46 maps with glowing trails on moving parts (bhop_2easy, bhop_arcane_v2, bhop_badges, bhop_miku_v2 and more) no longer stutter while a replay plays, seeks or scrubs, replays no longer slow down to the menu FPS limit, and the input stats overlay (Settings → Mouse & view) shows a replay's frame times. Settings → Graphics has one Frame rate section now.",
   ],
 };
 
 /** Newest first. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.0.31",
+    date: "2026-10-29",
+    kind: "minor",
+    title: "Crouch cancels like bhoptimer, Release W on jump and fixes",
+    notes: [
+      "Crouch-cancelling or landing from a teleport onto a floor no longer costs a tick of friction: you jump on the same tick, like bhoptimer servers.",
+      "!showtriggers now shows the scripted collectibles and gates on bhop_cooksassistant. Thanks to GothQueen for the report.",
+      "New Release W on jump option under Keys: jump while holding W and forward lets go until you land or press W again. It is off by default and doesn't apply in Legit Scroll, W-Only, Sideways or Half-Sideways.",
+      "Keys no longer stop working when you change a setting or alt-tab while holding them with Timestamped input on. Before, a held W, A, S or D could go dead until you pressed it again.",
+    ],
+  },
   {
     version: "0.0.30",
     date: "2026-10-29",

@@ -7,7 +7,7 @@
   {
     "path": "crates/core/src/game.rs",
     "classification": "native patch",
-    "baseline": "f7e12b83f80088a1b75335017a31b901da1c5d60"
+    "baseline": "26635920ac7dd9d9e49917a2870baa8e396b0fa3"
   },
   {
     "path": "crates/core/src/game/kin.rs",
@@ -62,7 +62,7 @@
   {
     "path": "crates/core/src/wasm.rs",
     "classification": "native patch",
-    "baseline": "db44deee334634f308411161435e048081019e73"
+    "baseline": "0b8bca00176749bc0d40d1bcdf40adf0400b2cee"
   },
   {
     "path": "crates/core/src/wasm_content.rs",
@@ -152,7 +152,7 @@
   {
     "path": "apps/web/src/core.ts",
     "classification": "native patch",
-    "baseline": "130bf43f87305bccef3857d6759ba88c7c851a90"
+    "baseline": "bf966fc0f3f7c017dd50229ad493d003473830ad"
   },
   {
     "path": "apps/web/src/feedback/modal.ts",

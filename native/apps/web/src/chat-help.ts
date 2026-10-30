@@ -169,8 +169,15 @@ const TOPICS: readonly Topic[] = [
     ],
   },
   {
-    names: ["replays", "replay", "watch", "ghost", "ghosts"],
-    lines: () => ["Every finished run has a replay: V right after it, or Esc → Leaderboard → Watch. In servers, !spec (N) watches a player live."],
+    names: ["replays", "replay", "watch", "ghost", "ghosts", "closest", "closestpos"],
+    lines: () => [
+      "Every finished run has a replay: V right after it, or Esc → Leaderboard → Watch. In servers, !spec (N) watches a player live.",
+      "While you run with a ghost, the split shows your time against it and the number beside your speed how much faster or slower you are, both at the closest point on its route. Settings → Ghost picks the ghost.",
+    ],
+  },
+  {
+    names: ["gain", "jhud", "sync", "jss"],
+    lines: () => ["!jhud shows speed and gain of every jump near your crosshair, coloured by how it went: red, orange, green, cyan, then white from 90% gain. The first 6 jumps colour by speed instead. !ssj reports the same numbers as a chat line, on your 6th jump by default."],
   },
   {
     names: ["keys", "key", "binds", "bind", "controls", "settings"],

@@ -190,6 +190,11 @@ export class InputStats {
     if (dur > this.maxFrame) this.maxFrame = dur;
   }
 
+  /** A frame that isn't measured (after a load or a hidden tab): the next frame's time counts from `now`. */
+  skipFrame(now: number): void {
+    this.lastFrameT = now;
+  }
+
   longTask(ms: number): void {
     this.longTasks++;
     if (ms > this.maxLongTask) this.maxLongTask = ms;

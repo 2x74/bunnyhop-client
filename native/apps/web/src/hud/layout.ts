@@ -31,6 +31,10 @@ export const HUD_ELEMENTS = [
   { id: "spectators", label: "Spectator list" },
   // "Practice" just under the crosshair while the attempt won't count (practice-mode/attempt.ts, hud.ts setPractice).
   { id: "practice", label: "Practice" },
+  // The per-jump readout (!jhud, ssj/jhud.ts).
+  { id: "jhud", label: "JHUD" },
+  // Your speed against the race ghost's at the closest point on its route (closest-pos.ts), beside the speed.
+  { id: "ghostSpeed", label: "Speed vs ghost" },
 ] as const;
 
 export type HudElId = (typeof HUD_ELEMENTS)[number]["id"];
@@ -83,6 +87,8 @@ export const CLASSIC: HudLayout = {
   ammo: P(true, 8, -0.014, -0.022),
   spectators: P(true, 3, 0.012, -0.06),
   practice: P(true, 4, 0, 0.032),
+  jhud: P(false, 4, 0, -0.06),
+  ghostSpeed: P(false, 7, 0.072, -0.262, 0.9),
 };
 
 export const MINIMAL: HudLayout = {
@@ -109,6 +115,8 @@ export const MINIMAL: HudLayout = {
   ammo: P(true, 8, -0.014, -0.022, 0.85),
   spectators: P(true, 3, 0.012, -0.06, 0.9),
   practice: P(true, 4, 0, 0.024, 0.85),
+  jhud: P(false, 4, 0, -0.06, 0.85),
+  ghostSpeed: P(false, 4, 0.06, 0.07, 0.8),
 };
 
 export const STREAMER: HudLayout = {
@@ -136,6 +144,8 @@ export const STREAMER: HudLayout = {
   // Above the chat, which sits at left middle here.
   spectators: P(true, 3, 0.015, -0.14),
   practice: P(true, 4, 0, 0.035, 1),
+  jhud: P(false, 4, 0, -0.06),
+  ghostSpeed: P(false, 7, 0.085, -0.2, 1.05),
 };
 
 /**
@@ -156,7 +166,12 @@ const samePlace = (p: Partial<HudPlace> | undefined, q: Omit<HudPlace, "on">) =>
 
 /** Moves never-moved elements off their retired placements (RETIRED_PLACES). Mutates `layout`. */
 export function moveRetiredPlaces(layout: Record<string, Partial<HudPlace> | undefined>): void {
-  const preset = [MINIMAL, STREAMER].find((l) => samePlace(layout.speed, l.speed)) ?? CLASSIC;
+  const found = [CLASSIC, MINIMAL, STREAMER].find((l) => samePlace(layout.speed, l.speed));
+  const preset = found ?? CLASSIC;
+  // A layout saved before Speed vs ghost: it goes beside the speed, wherever the speed is.
+  const speed = layout.speed;
+  if (!layout.ghostSpeed && speed && typeof speed === "object" && !found) layout.ghostSpeed = { on: false, a: speed.a, x: (speed.x ?? 0) + 0.072, y: speed.y, s: (speed.s ?? 1) * 0.9 };
+  else if (!layout.ghostSpeed) layout.ghostSpeed = { ...preset.ghostSpeed };
   for (const [id, olds] of Object.entries(RETIRED_PLACES) as [HudElId, Omit<HudPlace, "on">[]][]) {
     const p = layout[id];
     if (!p || typeof p !== "object" || !olds.some((o) => samePlace(p, o))) continue;
@@ -179,7 +194,7 @@ export const cloneLayout = (l: HudLayout): HudLayout => JSON.parse(JSON.stringif
  * on or off, and a layout matches a preset whatever their on / off. (Before, picking Classic turned the strafe trainer
  * back off, so "I turned it on" and "I can't see it" were both true: zzuji, Discord 2026-10-28.)
  */
-const PERSONAL: readonly HudElId[] = ["strafeTrainer"];
+const PERSONAL: readonly HudElId[] = ["strafeTrainer", "jhud", "ghostSpeed"];
 
 /** `preset` as a fresh layout, with the PERSONAL elements' on / off taken from `current`. */
 export function presetLayout(preset: HudLayout, current: HudLayout): HudLayout {
@@ -238,7 +253,7 @@ export function placeFromRect(r: { left: number; top: number; width: number; hei
 export const EL_HEIGHT: Partial<Record<HudElId, number>> = {
   speed: 2.1, timer: 1.5, split: 1.15, track: 1, stage: 0.95, stats: 1.05, sync: 1.3, keys: 5.55, ghostKeys: 6.25, graph: 3.6,
   jumpStats: 2.15, map: 0.95, pb: 0.95, fps: 0.85, chat: 2.4, ammo: 2.1, strafeTrainer: 1.7, startPre: 0.85, strafeOffsets: 1.05,
-  firstJump: 1.05, longJump: 2.8, spectators: 3.3, practice: 1.08,
+  firstJump: 1.05, longJump: 2.8, spectators: 3.3, practice: 1.08, jhud: 2.3, ghostSpeed: 1.15,
 };
 /** For an element missing from EL_HEIGHT (one added later). */
 const EL_HEIGHT_DEFAULT = 1.2;
@@ -416,10 +431,10 @@ export const DEFAULT_KEYS: KeysPrefs = {
 };
 
 // Version byte: 1 = first 14, 2 = first 15, 3 = first 16, 4 = first 17 (through strafe trainer), 5 = first 18,
-// 6 = first 21 (through longjump stats), 7 = first 22 (through the spectator list), 8 = all.
+// 6 = first 21 (through longjump stats), 7 = first 22 (through the spectator list), 8 = first 23 (through Practice), 9 = all.
 // Elements an older code doesn't carry keep the Classic placement. The "bhl1." prefix names the format.
-const VERSION = 8;
-const ELEMENTS_IN: Record<number, number> = { 1: 14, 2: 15, 3: 16, 4: 17, 5: 18, 6: 21, 7: 22, [VERSION]: HUD_ELEMENTS.length };
+const VERSION = 9;
+const ELEMENTS_IN: Record<number, number> = { 1: 14, 2: 15, 3: 16, 4: 17, 5: 18, 6: 21, 7: 22, 8: 23, [VERSION]: HUD_ELEMENTS.length };
 const PREFIX = "bhl1.";
 
 function rgb(hex: string): number[] {
