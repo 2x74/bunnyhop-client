@@ -15,7 +15,7 @@ import "./audio.css";
 import type * as THREE from "three";
 import { keyLabel, prefs, type Prefs } from "../ui/settings";
 import { isTextField } from "../input";
-import { BUSES, AudioEngine, sliderGain } from "./engine";
+import { BUSES, AudioEngine, decodeAudio, sliderGain } from "./engine";
 import { MusicPlayer, type MusicScene } from "./music";
 import { ClassicSounds } from "./classic";
 import { MoveSounds, windFor, type SoundSink } from "./movement";
@@ -26,6 +26,10 @@ import { viewmodelEvents } from "./events";
 import type { SfxId } from "./catalog";
 import { manifest } from "./assets";
 import { setNotifySound, whisper } from "../notify";
+import { registerChatCommand } from "../chat-commands";
+import { mapSoundContent } from "../content/sounds";
+import type { Core } from "../core";
+import { MapSounds } from "./map-sounds";
 
 export type { SfxId } from "./catalog";
 export { viewmodelEvents } from "./events";
@@ -58,6 +62,7 @@ function applyPrefs(p: Prefs): void {
     sfx: a.mute.sfx ? 0 : sliderGain(a.sfx),
     ui: a.mute.ui ? 0 : sliderGain(a.ui),
     ambience: a.mute.ambience ? 0 : sliderGain(a.ambience),
+    map: a.mute.map ? 0 : sliderGain(a.map),
   });
   music.setOptions(a.musicMode, a.shuffle);
   classic.set(a.classic);
@@ -143,6 +148,20 @@ export function initAudio(): void {
     true,
   );
   installUiSounds(sfx);
+  // !stopsound, as on CS:S bhop servers: what the map plays, not the game's own sounds.
+  registerChatCommand({
+    name: "stopsound",
+    aliases: ["stopsounds", "mapsounds"],
+    help: "map sounds on / off",
+    about: "turns the sounds the map plays on or off (Settings → Audio → Map sounds).",
+    group: "more",
+    where: "both",
+    run: (ctx) => {
+      let off = false;
+      prefs.update((p) => (off = p.audio.mute.map = !p.audio.mute.map));
+      ctx.reply(off ? "Map sounds off." : "Map sounds on.");
+    },
+  });
   // Notifications (notify/index.ts) play their sound as the reward lands; fanfares pull the music down under them.
   setNotifySound((id, gain = 1, rate = 1) => {
     sfx(id as SfxId, gain, rate);
@@ -302,3 +321,10 @@ export function audioCredits(): string[] {
 export { BUSES };
 
 export { announce, announcerPolicy, announcerAvailable } from "./announcer";
+
+/** The loaded map's sounds, or null when it has no allow list. Call once the map is up. */
+export function startMapSounds(core: Core, bsp: Uint8Array | null): MapSounds | null {
+  const c = mapSoundContent(core);
+  if (!c || !Object.keys(c.group.files).length) return null;
+  return new MapSounds(engine, c.group, c.base, core, bsp, decodeAudio);
+}

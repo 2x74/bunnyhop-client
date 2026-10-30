@@ -55,7 +55,9 @@ inline Json default_hud_layout_web() {
             {"strafeTrainer", place(false, 1, 0, .22, 1.15)},
             {"ammo", place(true, 8, -.014, -.022)},
             {"spectators", place(true, 3, .012, -.06)},
-            {"practice", place(true, 4, 0, .032)}};
+            {"practice", place(true, 4, 0, .032)},
+            {"jhud", place(false, 4, 0, -.06)},
+            {"ghostSpeed", place(false, 7, .072, -.262, .9)}};
 }
 
 // Revision of the default viewmodel framing (viewmodel/defaults.ts VIEWMODEL_REV): 3 is v0.0.29's wider framing, with
@@ -101,10 +103,12 @@ inline Json default_settings() {
             {"musicVolume", .5},
             {"uiVolume", .6},
             {"ambienceVolume", .7},
+            {"mapVolume", .5},
             {"muteSfx", false},
             {"muteUi", false},
             {"muteMusic", false},
             {"muteAmbience", false},
+            {"muteMap", false},
             {"muteInBackground", true},
             {"classicSounds", false},
             {"perfectTick", false},
@@ -150,6 +154,19 @@ inline Json default_settings() {
             {"jumpStatsMode", "sixth"},
             {"jumpStatsColors", true},
             {"jumpStatsInterval", 6},
+            // JHUD (!jhud): what it shows and its colours. The element's switch is hudLayoutWeb's jhud.
+            {"hudJhudSync", true},
+            {"hudJhudJss", false},
+            {"hudJhudAnalyzer", false},
+            {"hudJhudSpeedColors", 6},
+            {"hudJhudCutoff", 0},
+            {"hudJhudColorsReallyBad", "#ff0000"},
+            {"hudJhudColorsBad", "#ffa500"},
+            {"hudJhudColorsMeh", "#00ff00"},
+            {"hudJhudColorsGood", "#00ffff"},
+            {"hudJhudColorsReallyGood", "#ffffff"},
+            // The ghost the HUD's split and speed difference compare with.
+            {"ghostCompare", "auto"},
             // Strafe trainer: smoothing is how many air ticks a reading averages (1 = every tick on its own).
             {"strafeTrainer", false},
             {"strafeTrainerSmoothing", 8},
@@ -312,6 +329,17 @@ inline Json hud_capabilities() {
              "hudSsjFieldsEff",
              "hudSsjFieldsHeight",
              "hudSsjFieldsTime",
+             "hudJhudSync",
+             "hudJhudJss",
+             "hudJhudAnalyzer",
+             "hudJhudSpeedColors",
+             "hudJhudCutoff",
+             "hudJhudColorsReallyBad",
+             "hudJhudColorsBad",
+             "hudJhudColorsMeh",
+             "hudJhudColorsGood",
+             "hudJhudColorsReallyGood",
+             "ghostCompare",
 
              "strafeTrainer",
              "hudStrafeTrainerStyle",
@@ -335,10 +363,11 @@ inline Json hud_capabilities() {
 
 // The HUD elements a layout may place. hud.hpp draws them; ui/hud-layout.ts lists them.
 inline const std::set<std::string> hud_elements = {
-        "crosshair",     "map",      "fps",           "timer",     "speed",     "runStats",   "status",  "jumpStats",
-        "strafeTrainer", "splits",   "speedGraph",    "keys",      "health",    "notice",     "replay",  "split",
-        "track",         "stage",    "stats",         "sync",      "ghostKeys", "graph",      "pb",      "chat",
-        "ammo",          "startPre", "strafeOffsets", "firstJump", "longJump",  "spectators", "practice"
+        "crosshair",     "map",      "fps",           "timer",     "speed",     "runStats",   "status",   "jumpStats",
+        "strafeTrainer", "splits",   "speedGraph",    "keys",      "health",    "notice",     "replay",   "split",
+        "track",         "stage",    "stats",         "sync",      "ghostKeys", "graph",      "pb",       "chat",
+        "ammo",          "startPre", "strafeOffsets", "firstJump", "longJump",  "spectators", "practice", "jhud",
+        "ghostSpeed"
 };
 
 inline bool valid_bind_code(const std::string &code) {
@@ -472,8 +501,9 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
             if (!v.is_string() || !choices.contains(v.get<std::string>()))
                 throw std::runtime_error("Unknown setting choice: " + key);
         } else if (key == "hudHiddenKeeps" || key == "hudPlace" || key == "hudStrafeTrainerStyle"
-                   || key == "autoRestartWhen" || key == "autoRestartAction") {
+                   || key == "autoRestartWhen" || key == "autoRestartAction" || key == "ghostCompare") {
             const auto choices = key == "hudHiddenKeeps" ? std::set<std::string>{"speedKeys", "nothing"}
+                                 : key == "ghostCompare" ? std::set<std::string>{"auto", "pb", "wr", "custom"}
                                  : key == "hudPlace"     ? std::set<std::string>{"off", "place", "top"}
                                  : key == "hudStrafeTrainerStyle"
                                          ? std::set<std::string>{"classic", "detailed", "minimal"}
@@ -482,7 +512,7 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
             if (!v.is_string() || !choices.contains(v.get<std::string>()))
                 throw std::runtime_error("Unknown setting choice: " + key);
         } else if (key == "hudKeysPressed" || key == "hudKeysIdle" || key == "hudStrafeTrainerColor"
-                   || key.starts_with("triggersColors")) {
+                   || key.starts_with("triggersColors") || key.starts_with("hudJhudColors")) {
             if (!v.is_string()) throw std::runtime_error("Color must be #rrggbb");
             const auto color = v.get<std::string>();
             if (color.size() != 7 || color[0] != '#'
@@ -549,7 +579,7 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
             if (key == "crosshairThickness" && (n < .5 || n > 10))
                 throw std::runtime_error("Crosshair thickness must be .5–10");
             if ((key == "volume" || key == "sfxVolume" || key == "musicVolume" || key == "uiVolume"
-                 || key == "ambienceVolume" || key == "crosshairAlpha" || key == "ghostOpacity")
+                 || key == "ambienceVolume" || key == "mapVolume" || key == "crosshairAlpha" || key == "ghostOpacity")
                 && (n < 0 || n > 1))
                 throw std::runtime_error("Volume must be 0–1");
             if (key == "yawSpeed" && (n < 60 || n > 720)) throw std::runtime_error("Yaw speed must be 60–720");
@@ -568,6 +598,10 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
                 throw std::runtime_error("Strafe trainer smoothing must be a whole number 1–50");
             if (key == "jumpStatsInterval" && (n != std::floor(n) || n < 2 || n > 50))
                 throw std::runtime_error("Jump stats interval must be a whole number 2–50");
+            if (key == "hudJhudSpeedColors" && (n != std::floor(n) || n < 1 || n > 16))
+                throw std::runtime_error("JHUD speed colours must be a whole number 1–16");
+            if (key == "hudJhudCutoff" && (n != std::floor(n) || n < 0 || n > 30))
+                throw std::runtime_error("JHUD cutoff must be a whole number 0–30");
             if (key == "fpsLimit" && (n != std::floor(n) || (n != 0 && (n < 30 || n > 1000))))
                 throw std::runtime_error("FPS limit must be 0 or 30–1000");
         }
@@ -580,6 +614,15 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
         out["hudLayoutWeb"]["strafeTrainer"]["on"] = out.at("strafeTrainer");
     }
     return out;
+}
+
+// A layout saved before an element existed takes that element's default place and switch. Absent would mean "shown".
+inline void fill_new_hud_elements(Json &settings) {
+    const auto defaults = default_hud_layout_web();
+    auto &layout = settings["hudLayoutWeb"];
+    for (const auto &[id, place] : defaults.items()) {
+        if (!layout.contains(id)) layout[id] = place;
+    }
 }
 
 // The website's viewmodel framing migration (ui/settings.ts migrateViewmodel): a saved framing still equal to the
@@ -699,6 +742,7 @@ inline Json load_settings(const std::filesystem::path &file) {
         }
     }
     fill_new_binds(saved, out);
+    fill_new_hud_elements(out);
     return out;
 }
 

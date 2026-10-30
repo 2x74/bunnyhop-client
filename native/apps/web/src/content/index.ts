@@ -16,7 +16,7 @@ import { API_URL } from "../api";
 import { type ContentManifest, contentKey, isManifest, manifestKey } from "./manifest";
 import { skyMaterials } from "./resolve";
 import { setPlayerContent } from "./player";
-import { setSoundContent } from "./sounds";
+import { setMapSoundContent, setSoundContent } from "./sounds";
 import { fetchBytes } from "./fetch";
 import { CLIENT_DRAWN_SHADERS } from "../vmt";
 
@@ -154,6 +154,7 @@ export async function prepareMapContent(
   // when textures are skipped (the replacement is then missing: the plain fallback, never the covered art).
   if (manifest?.materialOverrides) core.contentMaterialOverrides(manifest.materialOverrides);
   if (manifest?.optional?.player) setPlayerContent({ group: manifest.optional.player, base: (manifest as ContentManifest & { base?: string }).base ?? CONTENT_BASE });
+  setMapSoundContent(core, manifest?.optional?.mapSounds ? { group: manifest.optional.mapSounds, base: (manifest as ContentManifest & { base?: string }).base ?? CONTENT_BASE } : null);
   if (manifest?.optional?.sounds) setSoundContent({ group: manifest.optional.sounds, base: (manifest as ContentManifest & { base?: string }).base ?? CONTENT_BASE });
   let loaded = 0;
   let failed = 0;

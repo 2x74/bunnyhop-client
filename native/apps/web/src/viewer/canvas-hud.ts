@@ -4,6 +4,7 @@
 // computed by the same clamp() the page uses for that frame size. Also the intro title card and the outro card.
 
 import { formatDelta, splitLead } from "../hud/time-face";
+import { formatSpeedDiff } from "../closest-pos";
 import { anchorX, anchorY, hudPoints, hudRem, type HudElId, type HudPoint, type HudPlace, type KeysPrefs } from "../hud/layout";
 import { IN_BACK, IN_DUCK, IN_FORWARD, IN_JUMP, IN_MOVELEFT, IN_MOVERIGHT } from "../input";
 import { formatTime } from "../timer";
@@ -106,12 +107,12 @@ export class CanvasHud {
     g.restore();
   }
 
-  draw(g: G, d: RunData, t: number, delta: number | null, o: CanvasHudOptions): void {
+  draw(g: G, d: RunData, t: number, delta: number | null, o: CanvasHudOptions, speedDiff: number | null = null): void {
     const p = prefs.get();
     this.hs = p.hud.scale;
     const L = p.hud.layout;
     this.at = hudPoints(L, this.hs, this.rem / Math.max(1, this.h));
-    const v = hudValues(d, t, delta);
+    const v = hudValues(d, t, delta, speedDiff);
     g.save();
     g.textBaseline = "alphabetic";
     g.textAlign = "left";
@@ -127,6 +128,7 @@ export class CanvasHud {
     if (o.hud) {
       if (L.timer.on) this.place(g, "timer", L.timer, this.timer(g, v, em(L.timer)));
       if (L.split.on && v.split !== null) this.place(g, "split", L.split, this.split(g, v.split, em(L.split)));
+      if (L.ghostSpeed.on && v.ghostSpeed !== null) this.place(g, "ghostSpeed", L.ghostSpeed, this.ghostSpeed(g, v.ghostSpeed, em(L.ghostSpeed)));
       if (L.track.on && v.track) this.place(g, "track", L.track, this.text(g, v.track, em(L.track) * 0.85, 750, ACCENT));
       if (L.stage.on && v.stage) this.place(g, "stage", L.stage, this.text(g, v.stage, em(L.stage) * 0.8, 700, "rgba(255,255,255,0.9)"));
       if (L.stats.on && v.showStats) this.place(g, "stats", L.stats, this.stats(g, v, em(L.stats) * 0.8));
@@ -159,6 +161,7 @@ export class CanvasHud {
     if (o.hud) {
       if (L.timer.on) top += draw(this.timer(g, v, e), top);
       if (L.split.on && v.split !== null) top += draw(this.split(g, v.split, e), top);
+      if (L.ghostSpeed.on && v.ghostSpeed !== null) top += draw(this.ghostSpeed(g, v.ghostSpeed, e), top);
       if (L.track.on && v.track) top += draw(this.text(g, v.track, e * 0.85, 750, ACCENT), top);
       if (L.stage.on && v.stage) draw(this.text(g, v.stage, e * 0.8, 700, "rgba(255,255,255,0.9)"), top);
     }
@@ -236,6 +239,11 @@ export class CanvasHud {
         }
       },
     };
+  }
+
+  private ghostSpeed(g: G, s: number, e: number): Box {
+    const text = formatSpeedDiff(s);
+    return this.text(g, `${text} u/s`, e * 0.95, 700, text === "+0" ? "rgba(255,255,255,0.9)" : s > 0 ? GAIN : LOSS, e * 0.95 * 1.2);
   }
 
   private split(g: G, s: number, e: number): Box {

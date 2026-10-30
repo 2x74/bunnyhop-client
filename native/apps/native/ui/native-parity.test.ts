@@ -865,6 +865,32 @@ test("replay vault filters and scrubbing restores prior playback without stale p
   }
 });
 
+test("!jhud opens its settings, and on or off switches it in the host", async () => {
+  const { browser, page, errors } = await open();
+  try {
+    await page.evaluate(() => window.bunnyhopNativeMenu.onState({ map: "bhop_test", settings: {} }));
+    const from = await count(page);
+    await page.evaluate(() => {
+      window.bunnyhopNativeMenu.onChatSubmit!("!jhud");
+      window.bunnyhopNativeMenu.onChatSubmit!("!jhud on");
+      window.bunnyhopNativeMenu.onChatSubmit!("!jhud off");
+      window.bunnyhopNativeMenu.onChatSubmit!("!jhud sideways");
+    });
+    const line = (text: string) => ({ type: "chatLine", kind: "local", text, ms: 12000 });
+    expect(await sent(page, from)).toEqual([
+      { type: "chatAction", action: "jumpStats" },
+      { type: "chatAction", action: "movementStat", stat: "jhud", on: true },
+      line("JHUD on. !jhud for its settings; Edit layout moves it."),
+      { type: "chatAction", action: "movementStat", stat: "jhud", on: false },
+      line("JHUD off. !jhud for its settings; Edit layout moves it."),
+      line("Usage: !jhud [on|off]"),
+    ]);
+    expect(errors).toEqual([]);
+  } finally {
+    await browser.close();
+  }
+});
+
 test("solo SSJ commands toggle in the host without relying on stale menu settings", async () => {
   const { browser, page, errors, writesSeen } = await open();
   try {

@@ -3,7 +3,8 @@
 //   master ── music (── duck)   streamed tracks (audio/music.ts)
 //          ├─ sfx                gameplay, run feedback, viewmodel; positional voices (other players, ghosts) too
 //          ├─ ui                 menus, rooms, progression
-//          └─ ambience           wind, water loops
+//          ├─ ambience           wind, water loops
+//          └─ map                what the map itself plays (audio/map-sounds.ts)
 //
 // Autoplay: the AudioContext is created at startup. Where the browser lets the page play sound without a gesture
 // (Chrome's media engagement, a site setting, Firefox's policy) it runs at once; otherwise it starts suspended and the
@@ -21,8 +22,8 @@ import { UnlockPress } from "./unlock-press";
 import { SFX, SFX_IDS, type SfxId } from "./catalog";
 import { assetUrl, manifest, otherFormat, preferredFormat, sfxPath, type AudioFormat } from "./assets";
 
-export type BusId = "music" | "sfx" | "ui" | "ambience";
-export const BUSES: BusId[] = ["music", "sfx", "ui", "ambience"];
+export type BusId = "music" | "sfx" | "ui" | "ambience" | "map";
+export const BUSES: BusId[] = ["music", "sfx", "ui", "ambience", "map"];
 
 interface Voice {
   src: AudioBufferSourceNode | null;
@@ -98,7 +99,11 @@ export class AudioEngine {
   private stateFns: (() => void)[] = [];
   /** The gesture that got the context running (the speaker button doesn't also mute on that press). */
   readonly unlockPress = new UnlockPress();
-  private levels = { master: 1, music: 1, sfx: 1, ui: 1, ambience: 1 };
+  private levels = { master: 1, music: 1, sfx: 1, ui: 1, ambience: 1, map: 1 };
+  /** Where setListener last put the listener (Source units). */
+  listenerX = 0;
+  listenerY = 0;
+  listenerZ = 0;
   /** Sounds loaded (shipped bank). */
   loaded: Promise<void> = Promise.resolve();
   /** Optional random source (offline renders use a seeded one). */
@@ -178,7 +183,7 @@ export class AudioEngine {
     this.duckNode = ctx.createGain();
     this.buses.music.connect(this.duckNode);
     this.duckNode.connect(this.master);
-    for (const b of ["sfx", "ui", "ambience"] as const) this.buses[b].connect(this.master);
+    for (const b of ["sfx", "ui", "ambience", "map"] as const) this.buses[b].connect(this.master);
     for (const b of ["sfx", "ui", "ambience"] as const) {
       this.pools[b] = [];
       for (let i = 0; i < POOL[b]; i++) {
@@ -256,9 +261,14 @@ export class AudioEngine {
   // Levels
 
   /** Master / bus levels (already curved gains) and mutes; smoothed. */
-  setLevels(l: { master: number; music: number; sfx: number; ui: number; ambience: number }): void {
+  setLevels(l: { master: number; music: number; sfx: number; ui: number; ambience: number; map: number }): void {
     this.levels = l;
     this.applyLevels(0.03);
+  }
+
+  /** Nothing on the map channel can be heard: muted, in the background, or at zero. */
+  get mapSilent(): boolean {
+    return this.levels.master <= 0 || this.levels.map <= 0;
   }
 
   private applyLevels(tau: number): void {
@@ -369,7 +379,7 @@ export class AudioEngine {
     const def = SFX[id];
     const now = ctx.currentTime;
     if (!this.gate(id, now)) return;
-    const pool = this.pools[def.bus === "music" ? "ui" : def.bus];
+    const pool = this.pools[def.bus === "music" || def.bus === "map" ? "ui" : def.bus];
     const buf = bufs[this.pickVariant(id, bufs.length)];
     const r = rate * (1 + (this.random() * 2 - 1) * def.jitter);
     this.start(this.voice(pool, id, def.max, now), id, buf, def.gain * gain, r, now);
@@ -399,6 +409,9 @@ export class AudioEngine {
   setListener(px: number, py: number, pz: number, fx: number, fy: number, fz: number, ux: number, uy: number, uz: number): void {
     const l = this.ctx?.listener;
     if (!l) return;
+    this.listenerX = px;
+    this.listenerY = py;
+    this.listenerZ = pz;
     if (l.positionX) {
       l.positionX.value = px;
       l.positionY.value = py;

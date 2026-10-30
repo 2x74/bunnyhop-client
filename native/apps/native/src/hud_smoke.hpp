@@ -48,6 +48,42 @@ inline void numeric_hud_smoke(NativeHud &hud, int width, int height) {
     if (hud.rasterizations() != warmed) throw std::runtime_error("Changing HUD numbers were rasterized again");
 }
 
+// The JHUD and the speed against the ghost show new numbers on every jump, arrows and all. They come from the digit
+// atlas and drawn shapes, so nothing reaches the system rasterizer even the first time.
+inline void jump_readouts_smoke(NativeHud &hud, int width, int height) {
+    constexpr int jumps = 300;
+    constexpr double tick_interval = .01;
+    auto settings = default_settings();
+    settings["hudLayoutWeb"]["jhud"]["on"] = true;
+    settings["hudLayoutWeb"]["ghostSpeed"]["on"] = true;
+    settings["hudJhudJss"] = true;
+    settings["hudJhudAnalyzer"] = true;
+    hud.preferences(settings);
+    BhSnapshot snapshot{};
+    BhRunState run{};
+    run.status = 1;
+    const auto draw_frame = [&]() {
+        hud.draw(width, height, snapshot, run, BhCmd{}, "map", "autohop", "", 900, true, true, false, BhWeaponReport{});
+    };
+    draw_frame();
+    const auto before = hud.rasterizations();
+    for (int jump = 1; jump <= jumps; ++jump) {
+        JhudReport report;
+        report.jump = unsigned(jump);
+        report.speed = 280 + jump * 3;
+        report.gain = 50 + float(jump % 500) * .1f;
+        report.sync = 90 - float(jump % 300) * .1f;
+        report.jss = .5 + double(jump % 100) * .01;
+        hud.jhud.show(report, uint32_t(jump), tick_interval);
+        hud.extras.ghost_speed.show(double(jump % 200) - 100);
+        draw_frame();
+    }
+    if (hud.rasterizations() != before) throw std::runtime_error("The JHUD or speed against the ghost was rasterized");
+    hud.jhud.clear();
+    hud.extras.ghost_speed.show(std::nullopt);
+    hud.preferences(default_settings());
+}
+
 // Every gameplay element with something to show, as in a start zone or mid-run with the strafe trainer, jump stats,
 // keys, splits and chat on. Shared by the layout check below and the presentation smoke's screenshots.
 struct HudLayoutFixture {
@@ -66,8 +102,10 @@ inline Json hud_layout_fixture_settings(float percent, std::string_view preset =
     settings["speedGraph"] = true;
     settings["hudPlace"] = "top";
     auto &layout = settings["hudLayoutWeb"];
-    for (const char *id : {"fps", "graph", "jumpStats", "strafeTrainer", "sync"})
+    for (const char *id : {"fps", "graph", "jumpStats", "strafeTrainer", "sync", "jhud", "ghostSpeed"})
         layout[id]["on"] = true;
+    settings["hudJhudJss"] = true;
+    settings["hudJhudAnalyzer"] = true;
     return settings;
 }
 
@@ -100,8 +138,21 @@ draw_hud_layout_fixture(NativeHud &hud, Chat &chat, int width, int height, const
         run.sync_percent = 94.2;
         command.buttons = forward | left | jump;
         hud.set_run_comparison("Split 12  3599.731s", "");
+        // The widest numbers these two print.
+        constexpr int widest_speed_difference = -1234;
+        constexpr double tick_interval = .01;
+        JhudReport jump;
+        jump.jump = 1234;
+        jump.speed = 3500;
+        jump.gain = -1234.56f;
+        jump.sync = 100;
+        jump.jss = 3.15;
+        hud.jhud.show(jump, 0, tick_interval);
+        hud.extras.ghost_speed.show(widest_speed_difference);
     } else {
         hud.set_run_comparison("", "");
+        hud.jhud.clear();
+        hud.extras.ghost_speed.show(std::nullopt);
     }
     hud.command_tick(command, 1);
     BhWeaponReport weapon{};
@@ -217,6 +268,7 @@ inline void hud_layout_smoke(NativeHud &hud) {
     }
     hud.preferences(default_settings());
     hud.reset_history();
+    hud.extras.ghost_speed.show(std::nullopt);
 }
 
 // Uses the existing presentation-smoke context. Fixtures never connect to a room or submit a run.
@@ -491,6 +543,7 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
     save("hud-hidden-nothing");
     hud.preferences(default_settings());
     numeric_hud_smoke(hud, width, height);
+    jump_readouts_smoke(hud, width, height);
     hud_layout_smoke(hud);
     Chat layout_chat;
     layout_chat.push("Bunny: gg", "", "player", 1, 60);

@@ -21,7 +21,7 @@ import { Arrival } from "./arrival";
 import { backdropLive, backdropRendered } from "./ui/backdrop";
 import { takeLocalPop } from "./ui/nav";
 import { stopMenuWork } from "./ui/menu-work";
-import { attackReport, restartPoint, Core, DEFAULT_SETTINGS, EVENT_ANGLES_CHANGED, EVENT_ATTACK, EVENT_JUMPED, EVENT_TELEPORTED, weaponReport, type PlayerState, type RestartPoint } from "./core";
+import { attackReport, restartPoint, Core, DEFAULT_SETTINGS, EVENT_ANGLES_CHANGED, EVENT_ATTACK, EVENT_JUMPED, EVENT_TELEPORTED, traceRay, weaponReport, type PlayerState, type RestartPoint } from "./core";
 import { hasRawUpdate, Input, isTextField, type UserCmd } from "./input";
 import { ExperimentWeapons, LiveInputCapture, InputExperimentCapture, experimentRejection, localInputExperimentAllowed, pumpInputExperiment } from "./input-experiment";
 import type { SampledInput, SamplerSource } from "./input-sampler";
@@ -47,6 +47,7 @@ import { countJump, hasFinishedAMap, recordMapPlayed } from "./ui/stats";
 import { api, ApiError } from "./api";
 import { goToLobby, lobbyIdFromParam } from "./net/lobby";
 import { decodeReplay, INSPECT_HOLD, INSPECT_RELEASE, YAW_SET_PUSHER, YAW_SET_SPAWN, YAW_SET_TELEPORT } from "./replay";
+import { clearEyeZ, hullTop, type TraceFn } from "./viewer/cameras";
 import { ReplayViewer } from "./viewer/viewer";
 import { watchFromUrl } from "./gauntlet/watch";
 import { preloadedViewerRequest, onViewerRequest, openReplayViewer, takePending, viewerTargetFromUrl, type ViewerRequest } from "./viewer/request";
@@ -61,7 +62,7 @@ import "./viewmodel/settings"; // Settings -> Viewmodel
 import "./ui/account-settings"; // Settings -> Account (name, sign-in, replay the intro)
 import { initCustomCss } from "./custom-css";
 import "./custom-css/section"; // Settings -> Custom CSS
-import { initAudio, PlayerAudio, runSounds, setListenerFromCamera } from "./audio";
+import { initAudio, PlayerAudio, runSounds, setListenerFromCamera, startMapSounds } from "./audio";
 import { AutoRestart } from "./auto-restart";
 import { buildSurfaces } from "./audio/surfaces";
 import { registerAudioSettings } from "./audio/settings-section";
@@ -487,7 +488,11 @@ scheduleImpactSurfaces(core);
 const hitEffects = new HitEffects();
 scene.add(hitEffects.root);
 const playerAudio = new PlayerAudio();
+// What the map itself plays. Reads files in the background; a map without an allow list gets nothing here.
+const mapSounds = startMapSounds(core, bsp ?? null);
+if (import.meta.env.DEV) Object.assign(window, { __mapSounds: mapSounds });
 
+const eyeTrace: TraceFn = (a, b, r) => traceRay(core, a, b, r);
 let prev: PlayerState = core.state();
 let curr: PlayerState = prev;
 
@@ -542,6 +547,7 @@ await afterPaint();
 run = await RunSession.create({
   core, scene, canvas, input, map: mapName, bsp, wasmBytes, style, renderer,
   mainTrackOnly: !!gauntletStart,
+  zoneWarning: (await withTimeout(fetchMapIndex(), 1500, [])).find((m) => m.name === mapName)?.zoneWarning ?? null,
   practiceSpawns: !practiceUnavailable({ inRoom: !!params.get("server"), tutorial: mapName === TUTORIAL_MAP, gauntlet: !!gauntletStart }),
   onResync: () => { prev = curr = core.state(); input.resetSampler(performance.now(), "session-resync"); },
   restart,
@@ -705,6 +711,8 @@ viewer = new ReplayViewer({
   },
 });
 const replayViewer = viewer;
+inputDebug.setFrameSource(() => (replayViewer.active ? replayViewer.frameStats : null));
+if (import.meta.env.DEV || inputDebugParam) Object.assign(window, { __viewerFrames: () => replayViewer.frameSummary() });
 onViewerRequest((r) => void replayViewer.open(r));
 Object.assign(window, { openReplayViewer });
 if (import.meta.env.DEV) Object.assign(window, { __viewer: replayViewer });
@@ -863,6 +871,8 @@ setGameInfo(() => {
     watchingReplay: replayViewer.active,
     spectating: mp?.isSpectating ?? false,
     input: inputSummary(input), // mouse / frame-time stats (input-debug.ts): flicks and freezes come with numbers
+    // The replay viewer's frame times this visit (viewer.ts frameSummary), once a replay has shown (else left out).
+    replayFrames: replayViewer.frameSummary() ?? undefined,
   };
 });
 
@@ -1134,8 +1144,11 @@ function frame(now: number) {
     session.frameHeld();
     playerAudio.frame(0, true, false);
     replayViewer.frame(now);
+    // The whole-browser uncap gates rAF on the GPU fence (frame-loop.ts gateRaf): without a mark the GPU queue fills.
+    if (browserUncapped) gpuFence.mark();
     drawn(now);
     setListenerFromCamera(camera);
+    mapSounds?.frame(replayViewer.simCore ?? core, replayViewer.playing);
     last = now;
     accumulator = 0;
     return;
@@ -1195,8 +1208,10 @@ function frame(now: number) {
   const z = lerp(prev.position[2] + prev.viewOffsetZ, curr.position[2] + curr.viewOffsetZ);
   session.camera(camera);
   if (!thirdPerson.frame(camera, prev, curr, alpha, input.yaw, input.pitch, lastCmd, frameDt, (curr.tick + alpha) * session.settings.tickInterval, graphicsPipeline.drawsShadowProxies())) {
-    // Source (x, y, z) -> three (x, z, -y)
-    camera.position.set(x, z, -y);
+    // Source (x, y, z) -> three (x, z, -y). Under a ceiling the eye stays below it, as in CS:S (clearEyeZ); flying in
+    // practice noclip it has nothing to stay below.
+    const top = lerp(prev.position[2] + hullTop(prev.crouched), curr.position[2] + hullTop(curr.crouched));
+    camera.position.set(x, practiceMode.noclipping ? z : clearEyeZ(eyeTrace, x, y, top, z), -y);
     camera.rotation.y = ((input.yaw - 90) * Math.PI) / 180;
     camera.rotation.x = (-input.pitch * Math.PI) / 180;
     camera.rotation.z = 0;
@@ -1266,6 +1281,7 @@ function frame(now: number) {
     drawn(now);
   }
   setListenerFromCamera(camera);
+  mapSounds?.frame(core);
   // Wind from 3D speed (falls rush too).
   playerAudio.frame(Math.hypot(lerp(prev.velocity[0], curr.velocity[0]), lerp(prev.velocity[1], curr.velocity[1]), lerp(prev.velocity[2], curr.velocity[2])), curr.grounded, input.locked);
 }
@@ -1283,7 +1299,8 @@ const frameLoop = new FrameLoop({
   uncapped: () => input.locked && prefs.get().graphics.uncapped && !replayViewer.active,
   limit: () => {
     const g = prefs.get().graphics;
-    return !input.locked && g.menuFps > 0 ? g.menuFps : g.fpsLimit;
+    // A replay plays like the game: the menu limit would show its motion at an uneven cadence (60 on 144 Hz).
+    return !input.locked && !replayViewer.active && g.menuFps > 0 ? g.menuFps : g.fpsLimit;
   },
   gpuIdle: () => gpuFence.idle(),
   gateRaf: () => browserUncapped,

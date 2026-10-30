@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
+export const MAX_EVIDENCE_BYTES = 128 * 1024;
 // Stat before reading JSON/checksums; stream large archives/traces in bounded chunks.
 function readBounded(path, maximum) {
   const stat = lstatSync(path);
@@ -131,7 +132,7 @@ export function collectEvidence(directory, context, needs) {
 export function serializeEvidence(evidence) {
   validateEvidence(evidence);
   const bytes = JSON.stringify(evidence) + '\n';
-  requireThat(Buffer.byteLength(bytes, 'utf8') <= 64 * 1024, 'Candidate evidence exceeds the input limit');
+  requireThat(Buffer.byteLength(bytes, 'utf8') <= MAX_EVIDENCE_BYTES, 'Candidate evidence exceeds the input limit');
   return bytes;
 }
 

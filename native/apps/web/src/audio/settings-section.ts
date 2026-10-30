@@ -8,7 +8,7 @@ import { announce, announcerAvailable, classic, engine, music, nextTrack, sfx } 
 import { trackName } from "./now-playing";
 import type { SfxId } from "./catalog";
 
-type BusKey = "music" | "sfx" | "ui" | "ambience";
+type BusKey = "music" | "sfx" | "ui" | "ambience" | "map";
 
 const P = () => prefs.get();
 const up = (fn: (p: Prefs) => void) => prefs.update(fn);
@@ -57,6 +57,7 @@ export function registerAudioSettings(): void {
               level("music", "Music", "The soundtrack in menus and in game."),
               level("sfx", "Effects", "Jumps, landings, footsteps, run chimes, other players.", "land_soft"),
               level("ambience", "Wind & water", "Wind that rises with your speed, and water.", undefined),
+              level("map", "Map sounds", "What the map itself plays. !stopsound turns it off and on."),
               level("ui", "Interface", "Menus, chat, votes, level ups.", "ui_click"),
             ),
           ],
@@ -110,7 +111,7 @@ export function registerAudioSettings(): void {
             ui.range("Longjump distance", () => P().audio.announcer.ljThreshold, v => up(p => p.audio.announcer.ljThreshold = v), { min: 200, max: 1000, step: 1, unit: " units", desc: "Minimum clean LJ distance for a voice cue. Bhop jumps do not trigger it.", keywords: "lj longjump announcer threshold" }),
             ui.actions("Preview voices", [ui.button("Perfect", () => announce("pb", undefined, false, "perfect")), ui.button("Godlike", () => announce("wr", undefined, false, "godlike")), ui.button("Holy shit", () => announce("highSpeed", undefined, false, "holyshit"))], { keywords: "announcer sample test preview" }),
           ),
-          ui.group("Mute channels", mute("music", "Music"), mute("sfx", "Effects"), mute("ambience", "Wind & water"), mute("ui", "Interface")),
+          ui.group("Mute channels", mute("music", "Music"), mute("sfx", "Effects"), mute("ambience", "Wind & water"), mute("map", "Map sounds"), mute("ui", "Interface")),
           ui.group(
             "More",
             ui.toggle("Ghost sounds", () => P().audio.ghosts, (v) => up((p) => (p.audio.ghosts = v)), { desc: "Quiet positional sounds for race ghosts.", keywords: "ghost ghosts" }),

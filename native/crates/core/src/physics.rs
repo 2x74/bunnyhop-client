@@ -661,6 +661,19 @@ fn place_hulls<'a>(hulls: &'a Hulls, angles: [f32; 3], origin: [f32; 3]) -> Vec<
         .collect()
 }
 
+/// Model-space bounds of a model's `.phy` collision (tools).
+pub fn model_collision_bounds(fs: &Vfs, name: &str) -> Option<([f32; 3], [f32; 3])> {
+    let hulls = model_hulls(fs, name, 6)?;
+    let (mut lo, mut hi) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
+    for p in hulls.iter().flat_map(|(points, _, _)| points) {
+        for k in 0..3 {
+            lo[k] = lo[k].min(p[k]);
+            hi[k] = hi[k].max(p[k]);
+        }
+    }
+    lo[0].is_finite().then_some((lo, hi))
+}
+
 impl PropCollision {
     /// Builds the convex solids of every prop source whose collision model `fs` has. Awake physics
     /// props are dropped straight down onto the world and the props already placed (VPhysics lets them

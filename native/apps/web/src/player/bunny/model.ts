@@ -95,11 +95,15 @@ function swing(a: ArrayLike<number>, b: ArrayLike<number>, pivot: ArrayLike<numb
   const r00 = t * ax * ax + cs, r01 = t * ax * ay - sn * az, r02 = t * ax * az + sn * ay;
   const r10 = t * ax * ay + sn * az, r11 = t * ay * ay + cs, r12 = t * ay * az - sn * ax;
   const r20 = t * ax * az - sn * ay, r21 = t * ay * az + sn * ax, r22 = t * az * az + cs;
-  const [px, py, pz] = [pivot[0], pivot[1], pivot[2]];
+  const px = pivot[0], py = pivot[1], pz = pivot[2];
   out[0] = r00, out[1] = r01, out[2] = r02, out[3] = px - (r00 * px + r01 * py + r02 * pz);
   out[4] = r10, out[5] = r11, out[6] = r12, out[7] = py - (r10 * px + r11 * py + r12 * pz);
   out[8] = r20, out[9] = r21, out[10] = r22, out[11] = pz - (r20 * px + r21 * py + r22 * pz);
 }
+
+/** updateEars' per-ear vectors (one bunny is updated at a time). */
+const EAR_MB = new Float64Array(3), EAR_MD = new Float64Array(3), EAR_WB = new Float64Array(3), EAR_WD = new Float64Array(3);
+const EAR_TARGET = new Float64Array(3), EAR_BV = new Float64Array(3), EAR_BD = new Float64Array(3);
 
 /** Bind-space directions an ear (left; mirror x) leans toward when acting: pricked straight up, laid flat back. */
 const EAR_UP = [0.08, 0.06, 1].map((v, _, a) => v / Math.hypot(...a));
@@ -947,16 +951,17 @@ export class BunnyModel implements PlayerModelImpl {
       // hanging ears from a lowered hood don't act).
       const perk = this.acting && this.hood === "up" ? (sx > 0 ? this.acting.earL : this.acting.earR) : 0;
       const want = perk ? earWant(e.dir0, sx, perk, this.earWant) : e.dir0;
-      // Carried base and rest direction, model space then world (Source).
-      const mb = [0, 0, 0], md = [0, 0, 0];
+      // Carried base and rest direction, model space then world (Source). Scratch vectors (Float64: the same doubles
+      // as the number arrays they replace), so a frame allocates nothing here.
+      const mb = EAR_MB, md = EAR_MD, wb = EAR_WB, wd = EAR_WD, target = EAR_TARGET, bv = EAR_BV;
       for (let k = 0; k < 3; k++) {
         mb[k] = S[H + k * 4] * base[0] + S[H + k * 4 + 1] * base[1] + S[H + k * 4 + 2] * base[2] + S[H + k * 4 + 3];
         md[k] = S[H + k * 4] * want[0] + S[H + k * 4 + 1] * want[1] + S[H + k * 4 + 2] * want[2];
       }
-      const wb = [P[0] + cy * mb[0] - sy * mb[1], P[1] + sy * mb[0] + cy * mb[1], P[2] + mb[2]];
-      const wd = [cy * md[0] - sy * md[1], sy * md[0] + cy * md[1], md[2]];
-      const target = [wb[0] + wd[0] * Lp, wb[1] + wd[1] * Lp, wb[2] + wd[2] * Lp];
-      const bv = [0, 0, 0];
+      wb[0] = P[0] + cy * mb[0] - sy * mb[1], wb[1] = P[1] + sy * mb[0] + cy * mb[1], wb[2] = P[2] + mb[2];
+      wd[0] = cy * md[0] - sy * md[1], wd[1] = sy * md[0] + cy * md[1], wd[2] = md[2];
+      target[0] = wb[0] + wd[0] * Lp, target[1] = wb[1] + wd[1] * Lp, target[2] = wb[2] + wd[2] * Lp;
+      bv.fill(0);
       if (e.hasBase && dt > 0 && !snap) for (let k = 0; k < 3; k++) bv[k] = (wb[k] - e.wb[k]) / dt;
       if (snap || !e.hasBase) {
         for (let k = 0; k < 3; k++) (e.p[k] = target[k]), (e.v[k] = bv[k]);
@@ -980,16 +985,15 @@ export class BunnyModel implements PlayerModelImpl {
       let dx = e.p[0] - wb[0], dy = e.p[1] - wb[1], dz = e.p[2] - wb[2];
       const l = hypot3(dx, dy, dz) || 1;
       dx /= l, dy /= l, dz /= l;
-      for (let k = 0; k < 3; k++) e.p[k] = wb[k] + [dx, dy, dz][k] * Lp;
+      e.p[0] = wb[0] + dx * Lp, e.p[1] = wb[1] + dy * Lp, e.p[2] = wb[2] + dz * Lp;
       for (let k = 0; k < 3; k++) e.wb[k] = wb[k];
       e.hasBase = true;
       // World direction -> bind space (undo yaw, then the carrier's rotation: transpose of its 3x3).
       const mx = cy * dx + sy * dy, my = -sy * dx + cy * dy, mz = dz;
-      const bd = [
-        S[H] * mx + S[H + 4] * my + S[H + 8] * mz,
-        S[H + 1] * mx + S[H + 5] * my + S[H + 9] * mz,
-        S[H + 2] * mx + S[H + 6] * my + S[H + 10] * mz,
-      ];
+      const bd = EAR_BD;
+      bd[0] = S[H] * mx + S[H + 4] * my + S[H + 8] * mz;
+      bd[1] = S[H + 1] * mx + S[H + 5] * my + S[H + 9] * mz;
+      bd[2] = S[H + 2] * mx + S[H + 6] * my + S[H + 10] * mz;
       const m1 = this.tmp, m2 = this.tmp2;
       // Hanging ears swing less far and bend less at the mid joint, so hops don't flare them out from the back.
       const hangs = this.hood === "down";

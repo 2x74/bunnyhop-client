@@ -47,6 +47,9 @@ export interface SpriteTrails {
   /** Trails that follow a brush entity. */
   count: number;
   maxLifetime: number;
+  /** The brush models the trails hang on and the trails' own entities: all `update` reads of its transforms / states. */
+  models: ReadonlySet<number>;
+  entities: ReadonlySet<number>;
   reset(): void;
   update(transforms: Map<number, BrushTransform>, now: number, states?: Map<number, boolean>): void;
 }
@@ -155,7 +158,7 @@ export function spriteTrails(entities: Record<string, string>[], texture?: (name
     const groups = names.map(name => spriteTrails(entities.filter(e => key(e, "classname")?.toLowerCase() !== "env_spritetrail" || materialName(key(e, "spritename") ?? "") === name), texture)).filter((v): v is SpriteTrails => !!v);
     if (!groups.length) return null;
     const root = new THREE.Group(); groups.forEach(g => root.add(g.root));
-    return { root, count: groups.reduce((n, g) => n + g.count, 0), maxLifetime: Math.max(...groups.map(g => g.maxLifetime)), reset() { groups.forEach(g => g.reset()); }, update(transforms, time, states) { groups.forEach(g => g.update(transforms, time, states)); } };
+    return { root, count: groups.reduce((n, g) => n + g.count, 0), maxLifetime: Math.max(...groups.map(g => g.maxLifetime)), models: new Set(groups.flatMap(g => [...g.models])), entities: new Set(groups.flatMap(g => [...g.entities])), reset() { groups.forEach(g => g.reset()); }, update(transforms, time, states) { groups.forEach(g => g.update(transforms, time, states)); } };
   }
   const byName = new Map<string, Record<string, string>>();
   for (const e of entities) {
@@ -238,6 +241,8 @@ export function spriteTrails(entities: Record<string, string>[], texture?: (name
     root: mesh,
     count: trails.length,
     maxLifetime: Math.max(...trails.map(t => t.life)),
+    models: new Set(trails.map(t => t.model)),
+    entities: new Set(trails.map(t => t.entity)),
     reset() { for (const t of trails) { t.count = 0; t.head = 0; } },
     update(transforms, now, states) {
       let n = 0; // indices written

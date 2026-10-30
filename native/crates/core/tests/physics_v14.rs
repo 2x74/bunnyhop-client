@@ -2,7 +2,7 @@
 //! that find their path before the map's spawn outputs (`PHYSICS_FIX_TRAIN_SPAWN`). v13 stays as it was.
 //! Maps are gitignored; each test skips (with a note) when its map is absent.
 
-use bunnyhop_core::game::{IN_JUMP, PHYSICS_V13, PHYSICS_V14, map_max_velocity_for, map_max_velocity_table, map_max_velocity_version_table, PHYSICS_V18, PHYSICS_V19, PHYSICS_V20};
+use bunnyhop_core::game::{IN_JUMP, PHYSICS_V13, PHYSICS_V14, map_max_velocity_for, map_max_velocity_table, map_max_velocity_version_table, PHYSICS_V18, PHYSICS_V19, PHYSICS_V21};
 use bunnyhop_core::{Cmd, Game, Settings};
 use std::path::PathBuf;
 
@@ -84,7 +84,7 @@ fn new_limits_preserve_every_historical_version() {
     for (map, limit) in [("bhop_gigaheish_fix", 10000.0), ("bhop_accelerate", 10000.0), ("bhop_quack", 10000.0), ("bhop_rainbowroad_fix", 10000.0), ("kz_bhop_global", 20000.0)] {
         let Some(mut game) = load(map, PHYSICS_V18) else { continue };
         assert_eq!(map_max_velocity_for(&game.entities), Some((map, limit)));
-        for version in (1..=PHYSICS_V20).rev() {
+        for version in (1..=PHYSICS_V21).rev() {
             game.set_settings(Settings { physics_version: version, ..Settings::css_bhop() });
             assert_eq!(game.max_velocity(), if version >= PHYSICS_V19 { limit } else { 3500.0 }, "{map} v{version}");
             assert_eq!(speed_after_tick(&mut game, 6000.0), if version >= PHYSICS_V19 { 6000.0 } else { 0.0 }, "{map} v{version}: movement limit");

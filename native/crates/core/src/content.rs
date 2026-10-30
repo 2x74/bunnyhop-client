@@ -181,6 +181,22 @@ impl DiskContent {
         }
     }
 
+    /// Fetches `paths` (collision models, say) from the VPKs where `pak` doesn't have them (tools).
+    pub fn fetch_paths(&mut self, pak: &[u8], paths: &[String]) {
+        let vfs = self.vfs(pak.to_vec());
+        for path in paths {
+            let _ = vfs.read(path);
+        }
+        for req in vfs.take_pending() {
+            if self.failed.contains(&req.path) {
+                continue;
+            }
+            if self.fetch(&req, &mut |_| None).is_err() {
+                self.failed.insert(req.path.clone());
+            }
+        }
+    }
+
     /// Resolves `names` against `pak` + this content, fetching until nothing is pending.
     /// `synth` supplies bytes for listing requests (synthetic fixtures). Returns the materials and the final VFS.
     pub fn resolve(&mut self, pak: &[u8], names: &[String], synth: &mut dyn FnMut(&str) -> Option<Vec<u8>>) -> (Materials, Vfs, u32) {

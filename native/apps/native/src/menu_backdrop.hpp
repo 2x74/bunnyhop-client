@@ -10,6 +10,7 @@
 // except the loader: it downloads into the cache on a worker and must not
 // call GL, SDL or the native core. The context is created, used and destroyed
 // on the main thread, as bunnyhop_native.h requires.
+#include "eye_clearance.hpp"
 #include "menu_tour.hpp"
 #include "menu_pb.hpp"
 #include <atomic>
@@ -269,10 +270,11 @@ public:
                 if (generation != replay->generation()) renderer->reset_presentation();
                 const auto &state = replay->snapshot();
                 const auto &cmd = replay->command();
+                const auto &feet = state.player.position;
+                const float top_z = feet[2] + native::hull_top_units(state.player.crouched);
+                const float eye_z = feet[2] + state.player.view_offset_z;
                 const float eye[3] = {
-                        state.player.position[0],
-                        state.player.position[1],
-                        state.player.position[2] + state.player.view_offset_z
+                        feet[0], feet[1], native::clear_eye_z(map_->core.get(), feet[0], feet[1], top_z, eye_z)
                 };
                 native::Input view;
                 view.set_angles(cmd.pitch, cmd.yaw);

@@ -103,11 +103,12 @@ struct HudPlace {
     }
 };
 
-inline constexpr std::array<std::string_view, 32> hud_ids = {
-        "crosshair",     "map",        "fps",        "timer", "speed",  "runStats", "status",        "jumpStats",
-        "strafeTrainer", "splits",     "speedGraph", "keys",  "health", "notice",   "replay",        "track",
-        "stage",         "sync",       "ghostKeys",  "pb",    "chat",   "startPre", "strafeOffsets", "firstJump",
-        "longJump",      "spectators", "practice",   "split", "stats",  "graph",    "ammo",          "result"
+inline constexpr std::array<std::string_view, 34> hud_ids = {
+        "crosshair", "map",           "fps",       "timer",      "speed",      "runStats",  "status",
+        "jumpStats", "strafeTrainer", "splits",    "speedGraph", "keys",       "health",    "notice",
+        "replay",    "track",         "stage",     "sync",       "ghostKeys",  "pb",        "chat",
+        "startPre",  "strafeOffsets", "firstJump", "longJump",   "spectators", "practice",  "split",
+        "stats",     "graph",         "ammo",      "result",     "jhud",       "ghostSpeed"
 };
 
 inline std::string_view canonical_hud_id(std::string_view id) {
@@ -138,6 +139,8 @@ inline std::array<float, 2> hud_element_size(std::string_view id) {
     if (id == "speed") return {124, 34};
     if (id == "runStats") return {300, 19};
     if (id == "jumpStats") return {300, 38};
+    if (id == "jhud") return {200, 44};
+    if (id == "ghostSpeed") return {90, 21};
     if (id == "strafeTrainer") return {240, 30};
     if (id == "splits") return {170, 40};
     if (id == "keys") return {292, 28};

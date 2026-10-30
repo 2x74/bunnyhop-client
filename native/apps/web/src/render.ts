@@ -52,6 +52,12 @@ export interface WorldView {
   sky3d: { camera: SkyCamera; root: THREE.Group; enabled: boolean } | null;
   /** Moves brush entity models (doors, platforms, rotators) to their current transforms. */
   update(transforms: Map<number, BrushTransform>, visualTime?: number, effectStates?: Map<number, boolean>): void;
+  /**
+   * What reconstructTrails samples, or null when there is nothing to rebuild (no trails on moving brushes, or Potato):
+   * `span` seconds of history, of only these brush models' transforms and these entities' states. The replay viewer
+   * records that much as it plays.
+   */
+  trailHistory(): { span: number; models: ReadonlySet<number>; entities: ReadonlySet<number> } | null;
   /** Rebuild moving trails from a fixed history sampling grid after a replay seek/export frame. */
   reconstructTrails(time: number, sample: (time: number) => { transforms: Map<number, BrushTransform>; states?: Map<number, boolean> }): void;
   /** Potato graphics (potato.ts) on or off, live. Built the first time it's turned on. */
@@ -1181,6 +1187,9 @@ export async function buildWorld(
       if (trails && potatoOn) trails.root.visible = false;
       smoke?.update(transforms, visualTime, effectStates);
       smokeVolumes?.update(visualTime, transforms, effectStates);
+    },
+    trailHistory() {
+      return trails && !potatoOn ? { span: trails.maxLifetime, models: trails.models, entities: trails.entities } : null;
     },
     reconstructTrails(time, sample) {
       if (!trails || potatoOn) return;

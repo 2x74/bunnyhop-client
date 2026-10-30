@@ -578,7 +578,7 @@ pub fn load(vfs: &Vfs, path: &str) -> Load {
 /// The model-space transform that takes a vertex from the bind pose (`.vvd`) to the pose of the root bone in the
 /// first frame of sequence 0 (what the engine draws an idle entity prop with): `[3x4 row-major]`, or None when it's
 /// the identity / can't be decoded. Only the root bone (no parent) is applied: props whose idle sequence moves the
-/// whole model (prop_door_rotating's door01_left: the root is turned 90 degrees from its bind pose).
+/// whole model (door01_left: the root is turned 90 degrees from its bind pose, and its `.phy` matches the idle pose).
 pub fn root_pose_correction(mdl: &[u8]) -> Option<[f32; 12]> {
     if mdl.get(..4)? != b"IDST" || !mdl_includes(mdl).is_empty() {
         return None;
@@ -610,6 +610,57 @@ pub fn root_pose_correction(mdl: &[u8]) -> Option<[f32; 12]> {
     }
     let identity = (0..3).all(|i| (0..4).all(|j| (out[i * 4 + j] - if i == j { 1.0 } else { 0.0 }).abs() < 1e-4));
     (!identity).then_some(out)
+}
+
+/// Whether the whole model moves with its root in the idle pose, so that pose is `root_pose_correction` exactly: every
+/// bone's skinning transform (idle bone-to-model times pose-to-bone) is the root's. door01_left (hinge and handle bones) is;
+/// a character whose limbs have another pose than their bind pose isn't, and neither is a model we can't decode.
+pub fn idle_pose_is_rigid(mdl: &[u8]) -> bool {
+    (|| {
+        if mdl.get(..4)? != b"IDST" || !mdl_includes(mdl).is_empty() {
+            return None;
+        }
+        let m = build("", vec![mdl.to_vec()], Vec::new(), Vec::new(), None, None)?;
+        let anim = m.decode_anim(*m.seqs.first()?.anims.first()?)?;
+        let mut to_model: Vec<[f32; 12]> = Vec::with_capacity(m.bones.len());
+        let mut skin_of_root: Option<[f32; 12]> = None;
+        for (i, bone) in m.bones.iter().enumerate() {
+            let o = i * ANIM_BONE_FLOATS;
+            let local = bone_matrix([anim[o], anim[o + 1], anim[o + 2], anim[o + 3]], [anim[o + 4], anim[o + 5], anim[o + 6]]);
+            let model = if bone.parent >= 0 { mat34_mul(to_model.get(bone.parent as usize)?, &local) } else { local };
+            let skin = mat34_mul(&model, &bone.pose_to_bone);
+            match &skin_of_root {
+                None => skin_of_root = Some(skin),
+                Some(root) => {
+                    if (0..12).any(|k| (skin[k] - root[k]).abs() > if k % 4 == 3 { 0.05 } else { 0.001 }) {
+                        return Some(false);
+                    }
+                }
+            }
+            to_model.push(model);
+        }
+        Some(skin_of_root.is_some())
+    })()
+    .unwrap_or(false)
+}
+
+fn bone_matrix(q: [f32; 4], t: [f32; 3]) -> [f32; 12] {
+    let (x, y, z, w) = (q[0], q[1], q[2], q[3]);
+    [
+        1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z), 2.0 * (x * z + w * y), t[0],
+        2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - w * x), t[1],
+        2.0 * (x * z - w * y), 2.0 * (y * z + w * x), 1.0 - 2.0 * (x * x + y * y), t[2],
+    ]
+}
+
+fn mat34_mul(a: &[f32; 12], b: &[f32; 12]) -> [f32; 12] {
+    let mut out = [0.0; 12];
+    for i in 0..3 {
+        for j in 0..4 {
+            out[i * 4 + j] = (0..3).map(|k| a[i * 4 + k] * b[k * 4 + j]).sum::<f32>() + if j == 3 { a[i * 4 + 3] } else { 0.0 };
+        }
+    }
+    out
 }
 
 fn build(path: &str, group_bytes: Vec<Vec<u8>>, includes: Vec<String>, materials: Vec<StudioMaterial>, mesh_files: Option<(&[u8], &[u8])>, tex: Option<&MdlTextures>) -> Option<StudioModel> {

@@ -26,6 +26,8 @@ mod scripts19;
 mod momentary;
 // Trigger / clip overlays for the client (never called by `step`; see the module docs).
 mod overlay;
+mod map_sounds;
+pub use map_sounds::{MAP_SOUND_ACTIVE, MAP_SOUND_LAST_START, MAP_SOUND_REMOVED};
 pub use overlay::{
     OVERLAY_CLIP, OVERLAY_GRAVITY, OVERLAY_OTHER, OVERLAY_PUSH, OVERLAY_STATE_ACTIVE, OVERLAY_STATE_VISIBLE, OVERLAY_TELEPORT,
     OVERLAY_WALL, OVERLAY_WHEN_HIDDEN, OverlayBrush,
@@ -174,7 +176,7 @@ pub const PHYSICS_V16: u32 = 16;
 /// slope or a ledge no longer depends on where inside a tick the player meets it.
 pub const PHYSICS_V17: u32 = 17;
 /// The version new recordings use.
-pub const PHYSICS_LATEST: u32 = PHYSICS_V20;
+pub const PHYSICS_LATEST: u32 = PHYSICS_V21;
 /// v18: ladder surface properties, preserving historical replay behavior.
 pub const PHYSICS_V18: u32 = 18;
 /// v19: scoped map mechanics (template instances and explicit velocity scripts). No new movement fix bits.
@@ -182,6 +184,13 @@ pub const PHYSICS_V19: u32 = 19;
 /// v20: bhoptimer autohop clears the old jump latch without stripping the current command, so unducking or
 /// teleporting onto a floor jumps before friction. Scroll, ladders and water retain their jump policy.
 pub const PHYSICS_V20: u32 = 20;
+/// v21: a func_door_rotating that starts open (`spawnpos` 1, or the obsolete StartOpen flag) spawns at its open angles, as
+/// `CRotDoor::Spawn` teleports it there. Before v21 it spawned shut and solid: bhop_collective's three hotel doors, the
+/// only such doors in the catalogue, stopped every run. On the reviewed maps in `game/map_fixes.rs` `PARENTED_DOORS_V21`
+/// (bhop_wayz), a func_door / func_button with a move parent follows it in collision and drawing, and travels in the
+/// parent's space. On bhop_areaportal_v1 the green train gets the red train's orientation edit
+/// (`TRAIN_ORIENTATION_EDITS_V19`). No new movement fix bits.
+pub const PHYSICS_V21: u32 = 21;
 /// Diagnostic pseudo-versions (never valid in a replay, whose field is a u8): `PHYSICS_DIAG | fix bits` turns on only
 /// the listed fixes, to tell which fix changes a replay (tools: /tmp physics-v2 analysis). The fix bits are the low 31
 /// (`PHYSICS_DIAG_FIXES`); before v18 the base was 1 << 30 with 30 fix bits; before v17 the base was 1 << 26 with 26 fix bits, before v16 1 << 25 with 25, before v15
@@ -381,6 +390,21 @@ pub fn map_mechanics_v19_for(entities: &[Entity]) -> Option<&'static str> {
     map_fixes::mechanics_v19(entities).map(|m| m.map)
 }
 
+/// A parsed entity lump's fingerprint, as `MECHANICS_V19` and `PARENTED_DOORS_V21` pin it (tests, tools).
+pub fn map_entity_fingerprint(entities: &[Entity]) -> u32 {
+    map_fixes::entity_fingerprint(entities)
+}
+
+/// The map a parsed entity lump matches in `game/map_fixes.rs` `PARENTED_DOORS_V21` (tests, tools).
+pub fn map_parented_doors_v21_for(entities: &[Entity]) -> Option<&'static str> {
+    map_fixes::parented_doors_v21(entities).map(|m| m.map)
+}
+
+/// Every map in `game/map_fixes.rs` `PARENTED_DOORS_V21` (tests, tools).
+pub fn map_parented_doors_v21_table() -> Vec<&'static str> {
+    map_fixes::PARENTED_DOORS_V21.iter().map(|m| m.map).collect()
+}
+
 /// The map a parsed entity lump matches in `game/map_fixes.rs` `SIGNED_DOOR_TRAVEL` (tests, tools).
 pub fn map_signed_door_travel_for(entities: &[Entity]) -> Option<&'static str> {
     map_fixes::signed_door_travel(entities).map(|m| m.map)
@@ -416,7 +440,7 @@ pub fn physics_fixes(version: u32) -> Option<u32> {
         PHYSICS_V15 => Some(PHYSICS_FIX_V15),
         PHYSICS_V16 => Some(PHYSICS_FIX_V16),
         PHYSICS_V17 => Some(PHYSICS_FIX_V17),
-        PHYSICS_V18 | PHYSICS_V19 | PHYSICS_V20 => Some(PHYSICS_FIX_ALL),
+        PHYSICS_V18 | PHYSICS_V19 | PHYSICS_V20 | PHYSICS_V21 => Some(PHYSICS_FIX_ALL),
         v if v & !PHYSICS_DIAG_FIXES == PHYSICS_DIAG && v & PHYSICS_DIAG_FIXES & !PHYSICS_FIX_ALL == 0 => Some(v & PHYSICS_DIAG_FIXES),
         _ => None,
     }
@@ -816,6 +840,8 @@ struct BrushModel {
     model: usize,
     origin: [f32; 3],
     base_origin: [f32; 3],
+    /// `base_origin` in the move parent's space (m_vecPosition1 = GetLocalOrigin()), for doors that follow it (v21).
+    base_local: [f32; 3],
     angles: [f32; 3],
     /// Model-local bounds.
     mins: [f32; 3],
@@ -1245,6 +1271,10 @@ pub struct Game {
     /// Min-heap on (tick, seq): CEventQueue order. Maps schedule tens of thousands of events at
     /// once (bhop_miku_v2's music relay queues ~90k Toggles), so popping must not be O(n).
     queue: std::collections::BinaryHeap<QueuedEvent>,
+    /// Display only: what the map's I/O asked its sound entities to do (game/map_sounds.rs).
+    map_sounds: map_sounds::MapSounds,
+    map_sound_serial: u32,
+    map_sound_commands: Vec<String>,
     seq: u64,
     pub state: State,
     pub settings: Settings,
@@ -1352,6 +1382,9 @@ pub struct Game {
     script_triggers: Vec<(usize, vscript::ScriptRole)>,
     /// Exact reviewed entity build matched by map_fixes::MECHANICS_V19. Fixed at load.
     map_mechanics: Option<&'static map_fixes::MapMechanics>,
+    /// Exact reviewed entity build matched by map_fixes::PARENTED_DOORS_V21: from physics v21 its parented doors follow
+    /// their parents (`door_follows_parent`). Fixed at load.
+    map_parented_doors: bool,
 }
 
 /// Physics v4 world state the entity list doesn't hold; saved with the game state, cleared on reset.
@@ -1447,6 +1480,7 @@ impl Game {
         let map_player_io = map_fixes::player_io(&entities).is_some();
         let script_triggers = vscript::script_triggers(&entities);
         let map_mechanics = map_fixes::mechanics_v19(&entities);
+        let map_parented_doors = map_fixes::parented_doors_v21(&entities).is_some();
         let physics::MapPhysics { prop_sources, world, texinfo_surface, props, diagnostics, displacement_count } =
             physics::build_with_entities(bsp, content, &entities, prop_mesh)?;
         let models: &[Model] = match bsp.lump(playsrc_bsp::MODELS).map(|l| &l.records) {
@@ -1480,6 +1514,9 @@ impl Game {
             solid: Vec::new(),
             dyn_solid: Vec::new(),
             queue: std::collections::BinaryHeap::new(),
+            map_sounds: map_sounds::MapSounds::default(),
+            map_sound_serial: 0,
+            map_sound_commands: Vec::new(),
             seq: 0,
             state: State::from_player(
                 Player { position: spawn.0, velocity: [0.0; 3], grounded: false, crouched: false, jump_latched: false },
@@ -1543,6 +1580,7 @@ impl Game {
             map_player_io,
             script_triggers,
             map_mechanics,
+            map_parented_doors,
         };
         game.link_hierarchy();
         game.link_templates();
@@ -1574,6 +1612,8 @@ impl Game {
 
     pub fn set_settings(&mut self, settings: Settings) {
         let spawn_changed = (self.map_mechanics.is_some() && (PHYSICS_V19..=PHYSICS_LATEST).contains(&self.settings.physics_version) != (PHYSICS_V19..=PHYSICS_LATEST).contains(&settings.physics_version))
+            || ((self.map_parented_doors || map_fixes::v21_spawn_edits(self.map_mechanics) || self.initial_ents.iter().any(|e| kin::rot_door_spawn_angles(e).is_some()))
+                && (PHYSICS_V21..=PHYSICS_LATEST).contains(&self.settings.physics_version) != (PHYSICS_V21..=PHYSICS_LATEST).contains(&settings.physics_version))
             || (self.settings.physics_fixes() ^ settings.physics_fixes())
             & (PHYSICS_FIX_DOOR_START_OPEN | PHYSICS_FIX_TRAIN_SPAWN | PHYSICS_FIX_MAP_DOOR_TRAVEL)
             != 0;
@@ -1638,13 +1678,30 @@ impl Game {
             for k in 0..self.movers.len() {
                 let i = self.movers[k];
                 if initialize_linear_door_spawn(&self.entities[i], &mut self.ents[i]) {
+                    if self.door_follows_parent(i) {
+                        self.place_following_door(i);
+                        continue;
+                    }
                     for child in 0..self.ents[i].children.len() {
                         self.relink(self.ents[i].children[child]);
                     }
                 }
             }
         }
+        if (PHYSICS_V21..=PHYSICS_LATEST).contains(&self.settings.physics_version) {
+            // CRotDoor::Spawn teleports a door that starts open to its open angles (keeping its movers' state as built).
+            for k in 0..self.kins.len() {
+                let i = self.kins[k];
+                if let Some(angles) = kin::rot_door_spawn_angles(&self.ents[i]) {
+                    self.ents[i].local_angles = angles;
+                    self.relink(i);
+                }
+            }
+        }
         self.queue.clear();
+        self.map_sounds = map_sounds::MapSounds::new(&self.entities);
+        self.map_sound_serial = self.map_sound_serial.wrapping_add(1);
+        self.map_sound_commands.clear();
         self.seq = 0;
         self.tick = 0;
         self.last_buttons = 0;
@@ -1935,7 +1992,7 @@ impl Game {
         // CheckJumpButton can then jump before friction if Duck or SetupMove categorizes ground this tick.
         // Do not rearm scroll, ladder jumps or swimming; no change to raw button edges / last_buttons.
         let mut buttons = cmd.buttons;
-        if self.settings.physics_version == PHYSICS_V20 {
+        if (PHYSICS_V20..=PHYSICS_LATEST).contains(&self.settings.physics_version) {
             if self.settings.autohop && buttons & IN_JUMP != 0
                 && self.state.mode == movement::Mode::Walk && self.state.water_level < 2
             {
@@ -2026,7 +2083,7 @@ impl Game {
             };
             self.timing_path = result.accepted_path;
             // Older versions must never expose this signal, including scroll / diagnostic versions.
-            if self.settings.physics_version == PHYSICS_V20 && !was_grounded {
+            if (PHYSICS_V20..=PHYSICS_LATEST).contains(&self.settings.physics_version) && !was_grounded {
                 self.categorized_ground_jump = result.ground_jump;
             }
             if result.jump_velocity != [0.0; 3] {
@@ -2455,6 +2512,7 @@ impl Game {
         if self.ents[i].removed {
             return;
         }
+        self.map_sound_input(i, input, param);
         // v16 (`NONLINEAR_OBJECTIVES` maps): a scripted trigger's ConnectOutput action runs its script function.
         if input == "callscriptfunction" && self.objectives_on() && self.call_script_function(i, param, activator) {
             return;
@@ -2873,6 +2931,17 @@ impl Game {
                 Data::Mover(m) => (m.dir, m.offset),
                 _ => unreachable!(),
             };
+            if self.door_follows_parent(i) {
+                if offset != before {
+                    let old_origin = self.ents[i].origin;
+                    self.place_following_door(i);
+                    let delta = kin::v_sub(self.ents[i].origin, old_origin);
+                    if delta != [0.0; 3] {
+                        self.carry_player(i, delta, support == Some(i));
+                    }
+                }
+                continue;
+            }
             let Some(b) = self.ents[i].brush.as_mut() else { continue };
             let old_origin = b.origin;
             for k in 0..3 {
@@ -3476,6 +3545,9 @@ impl Game {
         self.ents[i].parent = Some(p);
         self.ents[i].local_origin = local.origin;
         self.ents[i].local_angles = local.angles;
+        if let Some(b) = self.ents[i].brush.as_mut() {
+            b.base_local = local.origin;
+        }
         self.ents[p].children.push(i);
     }
 
@@ -3809,6 +3881,7 @@ impl Game {
         GameState {
             ents: self.ents.clone(),
             queue: self.queue.clone(),
+            map_sounds: self.map_sounds.clone(),
             seq: self.seq,
             state: self.state,
             settings: self.settings,
@@ -3854,6 +3927,9 @@ impl Game {
     pub fn restore_state(&mut self, s: &GameState) {
         self.ents.clone_from(&s.ents);
         self.queue.clone_from(&s.queue);
+        self.map_sounds.clone_from(&s.map_sounds);
+        self.map_sound_serial = self.map_sound_serial.wrapping_add(1);
+        self.map_sound_commands.clear();
         self.seq = s.seq;
         self.state = s.state;
         self.settings = s.settings;
@@ -3950,6 +4026,7 @@ impl Game {
 pub struct GameState {
     ents: Vec<RtEnt>,
     queue: std::collections::BinaryHeap<QueuedEvent>,
+    map_sounds: map_sounds::MapSounds,
     seq: u64,
     state: State,
     settings: Settings,
@@ -4076,6 +4153,7 @@ fn build_entity(e: &Entity, models: &[Model], tick_interval: f32, outputs: Vec<O
             model,
             origin: e.origin(),
             base_origin: e.origin(),
+            base_local: e.origin(),
             angles,
             mins: [m.mins.x.value(), m.mins.y.value(), m.mins.z.value()],
             maxs: [m.maxs.x.value(), m.maxs.y.value(), m.maxs.z.value()],
@@ -4302,6 +4380,20 @@ mod linear_door_spawn_tests {
             assert_eq!(m.dir,[1.0,0.0,0.0],"linear door endpoints are not reversed");
         }
     }
+    #[test]
+    fn rotating_door_start_open_angles_follow_crotdoor_spawn() {
+        let door = |flags: &str, spawnpos: &str| {
+            let e = Entity { pairs: vec![("classname", "func_door_rotating"), ("model", "*1"), ("angles", "0 10 0"), ("distance", "68"), ("spawnflags", flags), ("spawnpos", spawnpos)]
+                .into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect() };
+            kin::rot_door_spawn_angles(&build_entity(&e, &[], 0.01, Vec::new()))
+        };
+        assert_eq!(door("0", "0"), None, "shut");
+        assert_eq!(door("0", "1"), Some([0.0, 78.0, 0.0]), "spawnpos: position 2");
+        assert_eq!(door("2", "1"), Some([0.0, -58.0, 0.0]), "SF_DOOR_ROTATE_BACKWARDS");
+        assert_eq!(door("1", "0"), Some([0.0, 78.0, 0.0]), "StartOpen: swapped, so position 1 is the open one");
+        assert_eq!(door("128", "1"), Some([68.0, 10.0, 0.0]), "SF_DOOR_ROTATE_PITCH");
+    }
+
     #[test]
     fn ordinary_closed_door_and_button_keep_their_authored_transform() {
         for (class,flags,pos) in [("func_door","0","0"),("func_door","0","2"),("func_button","1","0")] {

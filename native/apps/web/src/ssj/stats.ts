@@ -120,6 +120,8 @@ const round2 = (v: number) => f(Math.floor(f(f(v * 100) + 0.5)) / 100);
 export class SsjTracker {
   /** Jump number of the current chain (0 = none yet). */
   jump = 0;
+  /** The last tick went into the jump's stats (the JHUD's JSS covers the same ticks, jhud.ts). */
+  sampled = false;
   private mode: SsjMode;
   private groundTicks = 0;
   private strafeTicks = 0;
@@ -173,6 +175,7 @@ export class SsjTracker {
 
   /** One tick: `pre` is the state before it, `cmd` the command stepped. Returns the report if the mode shows this jump. */
   tick(pre: SsjState, cmd: SsjCmd, t: SsjTick): SsjReport | null {
+    this.sampled = false;
     if (t.noclip) {
       this.groundTicks = 0;
       this.prevButtons = cmd.buttons;
@@ -197,6 +200,7 @@ export class SsjTracker {
   }
 
   private sample(pre: SsjState, cmd: SsjCmd): void {
+    this.sampled = true;
     this.strafeTicks++;
     const vx = pre.velocity[0];
     const vy = pre.velocity[1];

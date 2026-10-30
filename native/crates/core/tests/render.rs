@@ -249,3 +249,47 @@ fn black_tool_walls_are_rendered() {
     assert_eq!(mats.descs[0].kind, Kind::Textured);
     assert_eq!(mats.descs[0].flags & (materials::FLAG_TRANSLUCENT | materials::FLAG_ADDITIVE), 0);
 }
+
+/// World bounds of door01_left at the origin, yaw 0: as an entity prop or from the static prop lump.
+fn door_bounds(entity: bool) -> Option<([f32; 3], [f32; 3])> {
+    use bunnyhop_core::props;
+    let cache = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../content-cache/content");
+    let model = "models/props_c17/door01_left";
+    let mut files: std::collections::HashMap<String, std::rc::Rc<[u8]>> = Default::default();
+    for (ext, sha) in [
+        ("mdl", "8fbbf07f6a1685b64352519310fb3ede3f645b4af9228520f8c1712aab892341"),
+        ("vvd", "80b68e7a71ac87eac480a24fe08dd9499422343630ea21defb71314245922d5c"),
+        ("dx90.vtx", "a4290dad598633afe6684f4b7c12e2dfd70c1c32e9052d6a36c34503f64780d4"),
+    ] {
+        let Ok(bytes) = std::fs::read(cache.join(sha)) else {
+            eprintln!("skipping door pose: {model}.{ext} not in content-cache");
+            return None;
+        };
+        files.insert(format!("{model}.{ext}"), bytes.into());
+    }
+    let mut fs = vfs::Vfs::default();
+    fs.mount(vfs::Source::loose("content", files));
+    let mut sp = props::StaticProps::default();
+    props::add_props(&mut sp, [(format!("{model}.mdl"), [0.0; 3], [0.0; 3], 0, 0)]);
+    sp.props[0].entity = entity;
+    let mesh = props::build(&sp, &fs);
+    assert!(!mesh.vertices.is_empty(), "the door was built");
+    let (mut lo, mut hi) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
+    for v in mesh.vertices.chunks_exact(props::PROP_VERTEX_FLOATS) {
+        for k in 0..3 {
+            lo[k] = lo[k].min(v[k]);
+            hi[k] = hi[k].max(v[k]);
+        }
+    }
+    Some((lo, hi))
+}
+
+/// A `prop_dynamic` door01_left is shut, as the engine draws it and as its `.phy` is: it lies along y, flat against the wall
+/// the mapper put it in (bhop_mirrorsedge_chpt1's corridor, feedback 2026-10-30). Its bind pose, which the static prop lump
+/// keeps, is turned 90 degrees: the door sticks out along x.
+#[test]
+fn entity_prop_doors_draw_in_their_idle_pose() {
+    let (Some((lo, hi)), Some((bind_lo, bind_hi))) = (door_bounds(true), door_bounds(false)) else { return };
+    assert!(hi[0] - lo[0] < 10.0 && hi[1] - lo[1] > 40.0, "idle pose along y: {lo:?} {hi:?}");
+    assert!(bind_hi[1] - bind_lo[1] < 10.0 && bind_hi[0] - bind_lo[0] > 40.0, "bind pose along x: {bind_lo:?} {bind_hi:?}");
+}

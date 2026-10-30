@@ -25,6 +25,10 @@ pub struct Prop {
     pub sky3d: bool,
     /// Uniform scale (CS:GO static prop lump v11; 1.0 everywhere else).
     pub scale: f32,
+    /// An entity prop (`add_props`), which the engine draws in its model's idle pose (`studio::root_pose_correction`):
+    /// `prop_dynamic` door01_left is shut in its idle pose, wide open in its bind pose (bhop_mirrorsedge_chpt1, feedback
+    /// 2026-10-30). False for the static prop lump, which is drawn as baked.
+    pub entity: bool,
 }
 
 #[derive(Default, Clone)]
@@ -45,7 +49,7 @@ pub fn add_props(sp: &mut StaticProps, props: impl IntoIterator<Item = (String, 
                 sp.models.len() - 1
             }
         };
-        sp.props.push(Prop { model, origin, angles, skin, owner, sky3d: false, scale: 1.0 });
+        sp.props.push(Prop { model, origin, angles, skin, owner, sky3d: false, scale: 1.0, entity: true });
     }
 }
 
@@ -56,7 +60,7 @@ pub fn static_props(bsp: &Bsp) -> StaticProps {
     let props = sp
         .occurrences
         .iter()
-        .map(|o| Prop { model: o.model as usize, origin: v(o.origin), angles: v(o.angles), skin: o.skin, owner: 0, sky3d: false, scale: o.uniform_scale.value() })
+        .map(|o| Prop { model: o.model as usize, origin: v(o.origin), angles: v(o.angles), skin: o.skin, owner: 0, sky3d: false, scale: o.uniform_scale.value(), entity: false })
         .collect();
     StaticProps { models, props }
 }
@@ -341,8 +345,11 @@ pub fn build(sp: &StaticProps, vfs: &Vfs) -> PropMesh {
     // (owner, in the 3D skybox, material id) -> (vertices, indices)
     let mut buckets: HashMap<(u32, bool, u32), (Vec<f32>, Vec<u32>)> = HashMap::new();
     let mut loaded: Vec<Option<(ModelGeometry, MdlTextures, Vec<String>)>> = Vec::with_capacity(sp.models.len());
-    // Moving props are drawn in their idle pose (see `studio::root_pose_correction`); static ones as baked.
+    // Moving props are drawn in their idle pose (see `studio::root_pose_correction`), and so are other entity props when
+    // that pose is exactly the correction (`studio::idle_pose_is_rigid`). Other skeletons keep their bind pose; static
+    // props are drawn as baked.
     let mut corrections: Vec<Option<[f32; 12]>> = Vec::with_capacity(sp.models.len());
+    let mut rigid: Vec<bool> = Vec::with_capacity(sp.models.len());
     for m in &sp.models {
         let [mdl_p, vvd_p, vtx_p] = model_files(m);
         // Read all three so missing ones are requested together.
@@ -359,13 +366,14 @@ pub fn build(sp: &StaticProps, vfs: &Vfs) -> PropMesh {
         }
         loaded.push(model);
         corrections.push(vfs.read(&mdl_p).and_then(crate::studio::root_pose_correction));
+        rigid.push(vfs.read(&mdl_p).is_some_and(crate::studio::idle_pose_is_rigid));
     }
     for p in &sp.props {
         let Some(Some((geo, tex, names))) = loaded.get(p.model) else { continue };
         out.instances += 1;
         let (angles, origin) = if p.owner != 0 { ([0.0; 3], [0.0; 3]) } else { (p.angles, p.origin) };
         let r = angle_matrix(angles);
-        let pose = if p.owner != 0 { corrections.get(p.model).copied().flatten() } else { None };
+        let pose = if p.owner != 0 || (p.entity && rigid.get(p.model) == Some(&true)) { corrections.get(p.model).copied().flatten() } else { None };
         let posed = |v: [f32; 3], point: bool| match pose {
             Some(m) => [0, 1, 2].map(|i| m[i * 4] * v[0] + m[i * 4 + 1] * v[1] + m[i * 4 + 2] * v[2] + if point { m[i * 4 + 3] } else { 0.0 }),
             None => v,

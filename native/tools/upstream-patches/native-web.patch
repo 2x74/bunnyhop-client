@@ -1,8 +1,8 @@
 diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
-index 76c5b0e..27f65df 100644
+index ce628e6..26417fb 100644
 --- a/apps/web/src/api.ts
 +++ b/apps/web/src/api.ts
-@@ -763,11 +763,23 @@ const countWrite = (init: RequestInit) => {
+@@ -765,11 +765,23 @@ const countWrite = (init: RequestInit) => {
    if (m !== "GET" && m !== "HEAD") writes++;
  };
  
@@ -28,7 +28,7 @@ index 76c5b0e..27f65df 100644
    } catch (e) {
      if (e instanceof ApiUnavailable) throw e;
      throw new ApiUnavailable();
-@@ -776,24 +788,26 @@ async function request(path: string, init: ApiRequestInit = {}): Promise<Respons
+@@ -778,24 +790,26 @@ async function request(path: string, init: ApiRequestInit = {}): Promise<Respons
    return res;
  }
  
@@ -61,7 +61,7 @@ index 76c5b0e..27f65df 100644
    if (!res.ok) {
      if (!body?.error) throw new ApiUnavailable();
      throw new ApiError(res.status, body.error, body.message ?? `HTTP ${res.status}`, body as Record<string, unknown>);
-@@ -962,19 +976,19 @@ export const api = {
+@@ -964,19 +978,19 @@ export const api = {
     * reserved, ...), 409 "taken" (body.suggestion; registered players), 429 "rename_limit". Guests asking for a taken
     * name get a numbered variant: the result has nameAdjusted.
     */
@@ -87,7 +87,7 @@ index 76c5b0e..27f65df 100644
      setMe(user);
      return user;
    },
-@@ -998,12 +1012,12 @@ export const api = {
+@@ -1000,12 +1014,12 @@ export const api = {
      return json("/me/links", { cache: "no-cache" });
    },
    /** Strict: 400 bad_links names the platform (`body.platform`) and what's wrong. */
@@ -104,7 +104,7 @@ index 76c5b0e..27f65df 100644
    },
    /** Your support (Settings → Account, the Support page). 401 without a session. */
    async mySupport(): Promise<MySupport> {
-@@ -1012,29 +1026,29 @@ export const api = {
+@@ -1014,29 +1028,29 @@ export const api = {
    async giftWallet(): Promise<GiftWallet> {
      return json("/me/gifts", { cache: "no-store" });
    },
@@ -144,7 +144,7 @@ index 76c5b0e..27f65df 100644
    },
    /** The About page's thank-you list (names of supporters who opted in). */
    async supporters(): Promise<{ names: string[]; top: TopSupporter[] }> {
-@@ -1045,8 +1059,8 @@ export const api = {
+@@ -1047,8 +1061,8 @@ export const api = {
      return json<AccountView>("/me/account", { cache: "no-store" });
    },
    /** Removes a sign-in method (refused for the last one: ApiError 400 "last_method"). */
@@ -155,7 +155,7 @@ index 76c5b0e..27f65df 100644
      setMe(v.user);
      return v;
    },
-@@ -1079,23 +1093,28 @@ export const api = {
+@@ -1081,23 +1095,28 @@ export const api = {
      return json<OnboardingState>("/me/onboarding", post(o));
    },
    /** Discord-linked players: show (or hide) their Discord avatar publicly. Off by default; there are no uploads. */
@@ -190,7 +190,7 @@ index 76c5b0e..27f65df 100644
    async playerStats(id: string): Promise<{ totals: { verifiedRuns: number; jumps: number; playtimeSeconds: number; runTimeMs: number; mapsCompleted: number }; styles: { style: string; runs: number; maps: number }[]; maps: { map: string; runs: number }[]; activity: { at: number; runs: number }[] }> {
      return json(`/players/${encodeURIComponent(id)}/stats`);
    },
-@@ -1138,7 +1157,7 @@ export const api = {
+@@ -1140,7 +1159,7 @@ export const api = {
     * Uploads the server refuses outright (unranked map, zone/build mismatch, rate limit, ...) resolve to
     * { id: "", status: "rejected", reason, code } rather than throwing.
     */
@@ -199,7 +199,7 @@ index 76c5b0e..27f65df 100644
      // ?room=<id>: played in a multiplayer room, so the room announces the verified result (PB / top 10 / SR / WR).
      // &race=<id>: a run for the room's race you're in (net/race.ts): the room ties it to the race.
      // ?gauntlet=<attemptId>: a run in a gauntlet attempt (gauntlet/): the reply says whether it became the next split.
-@@ -1157,15 +1176,15 @@ export const api = {
+@@ -1159,15 +1178,15 @@ export const api = {
        if (opts.mouse) form.append("mouse", JSON.stringify(opts.mouse));
        init = { method: "POST", body: form };
      }
@@ -218,7 +218,7 @@ index 76c5b0e..27f65df 100644
    },
    // --- gauntlets
    async gauntlets(): Promise<GauntletHub> {
-@@ -1284,16 +1303,16 @@ export const api = {
+@@ -1286,16 +1305,16 @@ export const api = {
      return json("/me/cosmetics", { cache: "no-cache" });
    },
    /** Partial update; throws ApiError(400, "bad_cosmetic") naming the slot when an item is locked or unknown. */
@@ -289,7 +289,7 @@ index 53a325c..0c510af 100644
 +  }
  }
 diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
-index bb4b69f..a9543a4 100644
+index bf966fc..81dbea4 100644
 --- a/apps/web/src/core.ts
 +++ b/apps/web/src/core.ts
 @@ -1,5 +1,6 @@
@@ -299,7 +299,7 @@ index bb4b69f..a9543a4 100644
  
  export interface MeshGroup {
    model: number;
-@@ -296,6 +297,8 @@ export const EVENT_WEAPON = 1 << 6;
+@@ -317,6 +318,8 @@ export const EVENT_WEAPON = 1 << 6;
  
  interface Exports {
    memory: WebAssembly.Memory;
@@ -308,7 +308,7 @@ index bb4b69f..a9543a4 100644
    alloc(len: number): number;
    load_map(ptr: number, len: number): number;
    load_map_physics?: (ptr: number, len: number) => number;
-@@ -359,6 +362,27 @@ const wasmLoaders = WebAssembly as unknown as WasmLoaders;
+@@ -383,6 +386,27 @@ const wasmLoaders = WebAssembly as unknown as WasmLoaders;
  
  export class Core {
    private constructor(private x: Exports) {}
@@ -336,7 +336,7 @@ index bb4b69f..a9543a4 100644
  
    /** From wasm bytes, a fetch Response, or an already compiled module (Workers can't compile bytes at runtime). */
    static async create(source: BufferSource | WebAssembly.Module | Response | Promise<Response>): Promise<Core> {
-@@ -370,21 +394,21 @@ export class Core {
+@@ -394,21 +418,21 @@ export class Core {
    }
  
    private str(ptr: number, len: number): string {
@@ -362,7 +362,7 @@ index bb4b69f..a9543a4 100644
      if (!this.x.load_map(ptr, bsp.length)) throw new Error(this.lastError());
    }
  
-@@ -395,7 +419,7 @@ export class Core {
+@@ -419,7 +443,7 @@ export class Core {
    loadMapPhysics(bsp: Uint8Array): void {
      this.addPhysicsContent();
      const ptr = this.x.alloc(bsp.length);
@@ -371,7 +371,7 @@ index bb4b69f..a9543a4 100644
      this.commitPhysics(ptr, bsp.length);
    }
  
-@@ -411,7 +435,7 @@ export class Core {
+@@ -435,7 +459,7 @@ export class Core {
          if (done) break;
          if (off + value.length > len) throw new Error(`map stream longer than ${len} bytes`);
          // Re-take the view each chunk: memory.buffer is detached if the wasm memory grew.
@@ -380,7 +380,7 @@ index bb4b69f..a9543a4 100644
          off += value.length;
        }
        if (off !== len) throw new Error(`map stream ended at ${off} of ${len} bytes`);
-@@ -515,7 +539,8 @@ export class Core {
+@@ -539,7 +563,8 @@ export class Core {
      if (!x.mesh_sky_vertices_ptr || !x.mesh_sky_vertices_len || !x.mesh_sky_indices_ptr || !x.mesh_sky_indices_len || !x.mesh_sky_groups) return null;
      const vertices = this.f32(x.mesh_sky_vertices_ptr(), x.mesh_sky_vertices_len()).slice();
      const indices = this.u32(x.mesh_sky_indices_ptr(), x.mesh_sky_indices_len()).slice();
@@ -390,7 +390,7 @@ index bb4b69f..a9543a4 100644
      const groups = [];
      for (let i = 0; i + 3 <= g.length; i += 3) groups.push({ model: g[i], firstIndex: g[i + 1], indexCount: g[i + 2] });
      return { vertices, indices, groups };
-@@ -583,7 +608,7 @@ export class Core {
+@@ -607,7 +632,7 @@ export class Core {
      const levels: TextureLevel[] = [];
      for (let i = 0; i < h[1]; i++) {
        const [width, height, offset, size] = h.subarray(2 + i * 4, 6 + i * 4);
@@ -399,7 +399,7 @@ index bb4b69f..a9543a4 100644
      }
      return { format: h[0] as TextureFormat, levels };
    }
-@@ -592,7 +617,7 @@ export class Core {
+@@ -616,7 +641,7 @@ export class Core {
    lightmap(): Lightmap {
      const len = this.x.lightmap_size();
      const [width, height, hdr] = this.u32(this.x.scratch_u32_ptr(), len);
@@ -408,7 +408,7 @@ index bb4b69f..a9543a4 100644
      return { width, height, data, scale: this.x.lightmap_scale(), hdr: hdr === 1 };
    }
  
-@@ -610,7 +635,7 @@ export class Core {
+@@ -634,12 +659,12 @@ export class Core {
    /** The BSP pakfile lump (a store-only zip of embedded content). */
    pakfile(): Uint8Array {
      const len = this.x.pak_len();
@@ -416,8 +416,14 @@ index bb4b69f..a9543a4 100644
 +    return coreBytes(this.x, this.x.pak_ptr(), len).slice();
    }
  
-   /** Physics settings and version (call after loading the map). Throws if this wasm build can't simulate the version. */
-@@ -720,7 +745,7 @@ export class Core {
+   /** The pakfile lump in wasm memory: read it at once, it is invalid after the next allocation that grows the memory. */
+   pakView(): Uint8Array {
+-    return new Uint8Array(this.x.memory.buffer, this.x.pak_ptr(), this.x.pak_len());
++    return coreBytes(this.x, this.x.pak_ptr(), this.x.pak_len());
+   }
+ 
+   /**
+@@ -782,7 +807,7 @@ export class Core {
    /** Copies bytes into a fresh wasm allocation (ownership passes to the callee). */
    private give(bytes: Uint8Array): [number, number] {
      const ptr = this.x.alloc(bytes.length);
@@ -426,7 +432,7 @@ index bb4b69f..a9543a4 100644
      return [ptr, bytes.length];
    }
  
-@@ -757,7 +782,7 @@ export class Core {
+@@ -819,7 +844,7 @@ export class Core {
    /** Bytes of a file fetched via `contentProvide`/`contentAddFile` (assembled, CRC-checked), or null. */
    contentFile(path: string): Uint8Array | null {
      const len = this.cx.content_file(...this.giveStr(path));
@@ -435,7 +441,7 @@ index bb4b69f..a9543a4 100644
    }
  
    /** Supplies bytes for a pending request (archive chunk for VPKs, whole file for listings). */
-@@ -805,7 +830,7 @@ export class Core {
+@@ -867,7 +892,7 @@ export class Core {
    /** Reads a file through the current VFS (pakfile → fetched → mounts), or null (a mount hit becomes pending). */
    contentRead(path: string): Uint8Array | null {
      if (!this.cx.content_read(...this.giveStr(path))) return null;
@@ -444,7 +450,7 @@ index bb4b69f..a9543a4 100644
    }
  
    /** Pending requests of the current VFS (materials and anything read since the last `contentResolve`). */
-@@ -970,7 +995,7 @@ export class Core {
+@@ -1032,7 +1057,7 @@ export class Core {
      const levels: TextureLevel[] = [];
      for (let i = 0; i < h[1]; i++) {
        const [width, height, offset, size] = h.subarray(2 + i * 4, 6 + i * 4);
@@ -453,7 +459,7 @@ index bb4b69f..a9543a4 100644
      }
      return { format: h[0] as TextureFormat, levels };
    }
-@@ -1052,6 +1077,8 @@ interface ContentExports {
+@@ -1114,6 +1139,8 @@ interface ContentExports {
  
  interface RestartExports {
    memory: WebAssembly.Memory;
@@ -462,7 +468,7 @@ index bb4b69f..a9543a4 100644
    scratch_f32_ptr(): number;
    set_position?: (x: number, y: number, z: number, yaw: number) => void;
    restart_point?: () => number;
-@@ -1100,9 +1127,10 @@ export function setRestartNames(core: Core, targetname: string, classname: strin
+@@ -1162,9 +1189,10 @@ export function setRestartNames(core: Core, targetname: string, classname: strin
    const name = new TextEncoder().encode(targetname);
    const cls = new TextEncoder().encode(classname);
    const ptr = e.alloc(name.length + cls.length);
@@ -474,7 +480,7 @@ index bb4b69f..a9543a4 100644
    e.set_restart_names(ptr, name.length, cls.length);
    RESTART_NAMES.set(core, { targetname, classname });
  }
-@@ -1119,7 +1147,7 @@ export function restartPoint(core: Core): RestartPoint | null {
+@@ -1181,7 +1209,7 @@ export function restartPoint(core: Core): RestartPoint | null {
    if (!e.restart_point) return null;
    const len = e.restart_point();
    if (len < 4) return null;
@@ -483,7 +489,7 @@ index bb4b69f..a9543a4 100644
    const names = RESTART_NAMES.get(core);
    const p: RestartPoint = { position: [s[0], s[1], s[2]], yaw: s[3] };
    if (names?.targetname) p.targetname = names.targetname;
-@@ -1147,7 +1175,7 @@ export function propCollisionMesh(core: Core): Float32Array {
+@@ -1209,7 +1237,7 @@ export function propCollisionMesh(core: Core): Float32Array {
    const e = restartExports(core);
    if (!e.prop_collision_mesh) return new Float32Array(0);
    const len = e.prop_collision_mesh();
@@ -492,7 +498,7 @@ index bb4b69f..a9543a4 100644
  }
  
  // ---- replay viewer wrappers (appended; exports at the end of crates/core/src/wasm.rs) ----
-@@ -1256,7 +1284,7 @@ export function attackReport(core: Core): AttackReport | null {
+@@ -1318,7 +1346,7 @@ export function attackReport(core: Core): AttackReport | null {
    if (!x.attack_report) return null;
    const len = x.attack_report();
    if (len < 13) return null;
@@ -501,7 +507,7 @@ index bb4b69f..a9543a4 100644
    return {
      weapon: s[0],
      mode: s[1] === 2 ? 2 : 1,
-@@ -1354,7 +1382,7 @@ export function weaponReport(core: Core): WeaponReport | null {
+@@ -1416,7 +1444,7 @@ export function weaponReport(core: Core): WeaponReport | null {
    if (!x.weapon_report) return null;
    const len = x.weapon_report();
    if (len < 9) return null;
@@ -510,7 +516,7 @@ index bb4b69f..a9543a4 100644
    return { flags: s[0], active: s[1], primary: s[2], secondary: s[3], knife: s[4] !== 0, clip: s[5], clipSize: s[6], reloadTicks: s[7], burst: s[8] !== 0, floorChanged: len > 9 && s[9] !== 0, silencer: len > 10 && s[10] !== 0, silencerTicks: len > 11 ? s[11] : 0 };
  }
  
-@@ -1381,6 +1409,7 @@ export function floorWeapons(core: Core): Float32Array {
+@@ -1443,6 +1471,7 @@ export function floorWeapons(core: Core): Float32Array {
    const len = x.floor_weapons ? x.floor_weapons() : 0;
    if (len === 0) return EMPTY_F32;
    const ptr = x.scratch_f32_ptr();
@@ -1336,10 +1342,10 @@ index 79f8bef..5dddb77 100644
        drawFeatured();
        runs?.refresh();
 diff --git a/apps/web/src/ui/run-stats.ts b/apps/web/src/ui/run-stats.ts
-index 4f2ca1a..3d778b7 100644
+index 2675204..e8a56ff 100644
 --- a/apps/web/src/ui/run-stats.ts
 +++ b/apps/web/src/ui/run-stats.ts
-@@ -201,7 +201,7 @@ function bindGlobal(): void {
+@@ -214,7 +214,7 @@ function bindGlobal(): void {
    if (globalBound) return;
    globalBound = true;
    // Escape closes the card first (not the dialog or menu under it).
@@ -1348,7 +1354,7 @@ index 4f2ca1a..3d778b7 100644
      "keydown",
      (e) => {
        if (e.key !== "Escape" || !card || card.hidden) return;
-@@ -214,13 +214,13 @@ function bindGlobal(): void {
+@@ -227,13 +227,13 @@ function bindGlobal(): void {
    );
    // Any other key (paging the board, typing in its search) or a press anywhere closes it too; Tab moves focus, which
    // moves the card itself (focusin / focusout).

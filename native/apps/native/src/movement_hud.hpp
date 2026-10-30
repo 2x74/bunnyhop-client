@@ -1,6 +1,7 @@
 #pragma once
 #include "hud_scoreboard.hpp"
 #include "hud_layout.hpp"
+#include "hud_readouts.hpp"
 #include "longjump.hpp"
 #include "jump_hud.hpp"
 #include "native_input.hpp"
@@ -43,6 +44,25 @@ inline Json trainer_preset(std::string_view preset) {
             {"hudStrafeTrainerShowPace", true}};
 }
 
+inline JhudPrefs read_jhud_prefs(const Json &settings) {
+    constexpr std::array<const char *, jhud_band_count> color_keys = {
+            "hudJhudColorsReallyBad",
+            "hudJhudColorsBad",
+            "hudJhudColorsMeh",
+            "hudJhudColorsGood",
+            "hudJhudColorsReallyGood"
+    };
+    JhudPrefs prefs;
+    prefs.sync = settings.at("hudJhudSync");
+    prefs.jss = settings.at("hudJhudJss");
+    prefs.analyzer = settings.at("hudJhudAnalyzer");
+    prefs.speed_colors = settings.at("hudJhudSpeedColors");
+    prefs.cutoff = settings.at("hudJhudCutoff");
+    for (size_t band = 0; band < color_keys.size(); ++band)
+        prefs.colors[band] = name_color(settings.at(color_keys[band]).get<std::string>());
+    return prefs;
+}
+
 struct HudPreferences {
     std::array<std::optional<HudPlace>, hud_ids.size()> layout;
     std::string crosshair_style;
@@ -66,6 +86,7 @@ struct HudPreferences {
     SemanticPalette palette;
     std::string color_blind;
     TrainerAppearance trainer;
+    JhudPrefs jhud;
     SsjFields ssj_fields;
     SsjMode ssj_mode = SsjMode::sixth;
     unsigned ssj_interval = 6;
@@ -140,6 +161,7 @@ struct HudPreferences {
         result.ssj_interval = settings.at("jumpStatsInterval");
         result.trainer_smoothing = settings.at("strafeTrainerSmoothing");
         result.ssj_chat = settings.at("hudSsjChat");
+        result.jhud = read_jhud_prefs(settings);
         result.first_jump_chat = settings.at("hudMovementFjtChat");
         result.long_jump = settings.at("hudMovementLj");
         result.long_jump_chat = settings.at("hudMovementLjChat");
@@ -164,6 +186,13 @@ inline std::optional<double> trainer_jump_sound(const HudPreferences &prefs, std
     if (!prefs.trainer_enabled || !prefs.trainer_sound || !pace) return std::nullopt;
     constexpr std::array<double, 3> pitches = {.75, 1.1, 1.5};
     return pitches[trainer_band(*pace, prefs.trainer.zone)];
+}
+
+// A run starts on its first unarmed tick but isn't announced until it leaves the zone, so bhopping in the start zone
+// already has a clock: the time it will leave with. Display only, like the website's pendingTicks().
+inline double hud_clock_seconds(const BhRunState &run, double tick_interval) {
+    if (run.status != 0 || run.pending_start == 0) return run.seconds;
+    return double(run.last_tick - run.pending_start) * tick_interval;
 }
 
 inline bool perfect_hop_visible(
@@ -457,6 +486,7 @@ inline Json movement_stat_patch(const Json &settings, const Json &message) {
     const char *id = stat == "offsets" ? "strafeOffsets"
                      : stat == "fjt"   ? "firstJump"
                      : stat == "lj"    ? "longJump"
+                     : stat == "jhud"  ? "jhud"
                                        : nullptr;
     if (!id) throw std::runtime_error("Unknown movement stat");
     auto layout = settings.at("hudLayoutWeb");
@@ -482,17 +512,6 @@ inline Json movement_stat_patch(const Json &settings, const Json &message) {
     return patch;
 }
 
-inline float ghost_segment_fraction(const float *position, const BhGhostFrame &from, const BhGhostFrame &to) {
-    float dot = 0, length = 0;
-    for (unsigned axis = 0; axis < 3; ++axis) {
-        const float segment = to.position[axis] - from.position[axis];
-        dot += (position[axis] - from.position[axis]) * segment;
-        length += segment * segment;
-    }
-    constexpr float minimum_segment_squared = 1e-6f;
-    return length > minimum_segment_squared ? std::clamp(dot / length, 0.f, 1.f) : 0.f;
-}
-
 struct HudExtras {
     HudLabel<96> pb;
     HudLabel<64> place;
@@ -514,62 +533,26 @@ struct HudExtras {
     }
 
     HudLabel<96> ghost_delta;
-    uint32_t ghost_start = 0, ghost_end = 0, ghost_match = 0, ghost_sample_tick = ~0u;
-    double ghost_interval = legacy_tick_seconds;
+    bool ghost_ahead = false;
+    // Slot 0's own delta for its name tag; the split above is against the ghost Compare with picks.
+    HudLabel<96> ghost_tag_delta;
+    GhostSpeedReadout ghost_speed;
 
-    void ghost_progress(
-            std::span<const BhGhostFrame> frames, const BhState &state, const BhRunState &run, const BhCmd *command
-    ) {
+    void ghost_keys(const BhCmd *command) {
         have_ghost = command != nullptr;
         ghost_buttons = command ? command->buttons : 0;
-        if (!command || !run.status || frames.empty()) {
-            ghost_delta.assign("");
-            ghost_match = ghost_start;
-            ghost_sample_tick = ~0u;
-            return;
+    }
+
+    void show_ghost_split(std::optional<double> seconds, std::optional<double> tag_seconds) {
+        if (seconds != shown_ghost_split_) {
+            shown_ghost_split_ = seconds;
+            format_ghost_delta(ghost_delta, seconds);
+            ghost_ahead = seconds && *seconds <= 0;
         }
-        if (state.tick == ghost_sample_tick) return;
-        if (run.status == 2 && ghost_seconds) {
-            ghost_delta.format("%+.3fs", run.seconds - *ghost_seconds);
-            ghost_sample_tick = state.tick;
-            return;
+        if (tag_seconds != shown_ghost_tag_) {
+            shown_ghost_tag_ = tag_seconds;
+            format_ghost_delta(ghost_tag_delta, tag_seconds);
         }
-        constexpr uint32_t sample_interval_ticks = 4;
-        if (ghost_sample_tick != ~0u && state.tick >= ghost_sample_tick
-            && state.tick - ghost_sample_tick < sample_interval_ticks)
-            return;
-        if (state.tick < ghost_sample_tick) ghost_match = ghost_start;
-        ghost_sample_tick = state.tick;
-        const uint32_t end = std::min(ghost_end, uint32_t(frames.size() - 1));
-        constexpr uint32_t search_back_ticks = 300, search_forward_ticks = 600;
-        constexpr float match_radius_units = 128;
-        const uint32_t low =
-                std::max(ghost_start, ghost_match > search_back_ticks ? ghost_match - search_back_ticks : 0);
-        const uint32_t high = std::min(end, ghost_match + search_forward_ticks);
-        float distance = match_radius_units * match_radius_units;
-        std::optional<uint32_t> nearest;
-        for (uint32_t tick = low; tick <= high; ++tick) {
-            float squared = 0;
-            for (unsigned axis = 0; axis < 3; ++axis) {
-                const float offset = frames[tick].position[axis] - state.position[axis];
-                squared += offset * offset;
-            }
-            if (squared < distance) {
-                distance = squared;
-                nearest = tick;
-            }
-        }
-        if (!nearest) {
-            ghost_delta.assign("");
-            return;
-        }
-        ghost_match = *nearest;
-        float fraction =
-                *nearest < end ? ghost_segment_fraction(state.position, frames[*nearest], frames[*nearest + 1]) : 0;
-        if (!fraction && *nearest > ghost_start)
-            fraction = -ghost_segment_fraction(state.position, frames[*nearest], frames[*nearest - 1]);
-        const double ghost_elapsed = (*nearest + double(fraction) - ghost_start) * ghost_interval;
-        ghost_delta.format("%+.3fs", run.seconds - ghost_elapsed);
     }
 
     void leaderboard(unsigned rank, std::optional<double> top = std::nullopt) {
@@ -588,12 +571,7 @@ struct HudExtras {
         ghost_map.assign(json_text(info, "map"));
         ghost_style.assign(json_text(info, "style"));
         ghost_track = info.value("track", ~0u);
-        ghost_start = info.value("startTick", 0u);
-        ghost_end = info.value("endTick", 0u);
-        ghost_match = ghost_start;
-        ghost_sample_tick = ~0u;
-        ghost_interval = info.value("settings", Json::object()).value("tickInterval", .01);
-        if (!std::isfinite(ghost_interval) || ghost_interval <= 0) ghost_interval = .01;
+        const uint32_t ghost_start = info.value("startTick", 0u), ghost_end = info.value("endTick", 0u);
         if (info.contains("timeMs") && info["timeMs"].is_number_integer())
             ghost_seconds = info["timeMs"].get<double>() / 1000;
         else if (info.contains("time") && info["time"].is_number())
@@ -647,7 +625,7 @@ struct HudExtras {
             }
         }
         if (message.contains("ghostDelta") && message["ghostDelta"].is_number())
-            ghost_delta.format("%+.3fs", message["ghostDelta"].get<double>());
+            show_ghost_split(message["ghostDelta"].get<double>(), shown_ghost_tag_);
         const auto position = message.find("place");
         if (position != message.end() && position->is_number_unsigned()) {
             leaderboard(position->get<unsigned>(), message.value("topPercent", 0.));
@@ -665,6 +643,16 @@ struct HudExtras {
         have_ghost = message.contains("ghostButtons") && message["ghostButtons"].is_number_unsigned();
         ghost_buttons = have_ghost ? message["ghostButtons"].get<uint32_t>() : 0;
     }
+
+private:
+    static void format_ghost_delta(HudLabel<96> &label, std::optional<double> seconds) {
+        if (seconds)
+            label.format("%+.3fs", *seconds);
+        else
+            label.assign("");
+    }
+
+    std::optional<double> shown_ghost_split_, shown_ghost_tag_;
 };
 
 template <class Hud, class At>

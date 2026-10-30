@@ -45,6 +45,7 @@
 #include "restart_placement.hpp"
 #include "run_timing.hpp"
 #include "weapon_commands.hpp"
+#include "eye_clearance.hpp"
 #include "replay_camera.hpp"
 #include "replay_controls.hpp"
 #include "render_menu_contracts.hpp"
@@ -54,6 +55,7 @@
 #include "ssj.hpp"
 #include "strafe_trainer.hpp"
 #include "audio.hpp"
+#include "map_audio.hpp"
 #include "client_util.hpp"
 #include "run_vault.hpp"
 #include "replay_library.hpp"
@@ -196,7 +198,9 @@ int run(const native::Options &opt) {
     std::optional<data_location::Choice> data_choice;
     std::string data_notice, last_data_state;
     const auto startup_data = native::initialize_data_directory(cache);
+    native::MapAudio map_audio;
     native::Audio audio(assets, cache, !opt.hidden && !opt.frames);
+    audio.set_map_mixer(&map_audio.mixer);
     std::unique_ptr<native::MenuWebView> menu;
     std::string menu_failure;
     native::MenuFiles menu_files(cache);
@@ -329,6 +333,7 @@ int run(const native::Options &opt) {
     auto &room_events = room_bridge.room_events;
     uint32_t active_track = 0;
     native::GhostSlots ghosts;
+    native::GhostCompare ghost_compare;
     unsigned pending_ghost_slot = 0;
     std::string pending_replay, pending_action, score_notice;
     std::optional<double> known_world_record;
@@ -407,6 +412,7 @@ int run(const native::Options &opt) {
         camera_controls.invert_y = input.invert_y;
         hud.preferences(preferences);
         audio.preferences(preferences);
+        map_audio.preferences(preferences.at("mapVolume").get<float>(), preferences.at("muteMap").get<bool>());
         SDL_GL_SetSwapInterval(opt.frames ? 0 : prefs.vsync ? 1 : 0);
         audio.gain(preferences.at("muted").get<bool>() ? 0 : preferences.at("volume").get<float>());
         audio.set_sfx_pack(preferences.at("sfxPack").get<std::string>() == "custom");
@@ -475,6 +481,7 @@ int run(const native::Options &opt) {
 
     auto reset_feedback = [&](bool incomplete_history = false, bool keep_jump_stats = false) {
         hud.reset_history(keep_jump_stats);
+        ghost_compare.restart();
         const auto gain = feedback.ssj_gain;
         BhRunState timing{};
         BhSnapshot snapshot{};
@@ -864,6 +871,7 @@ int run(const native::Options &opt) {
         zones.clear();
         map_id.clear();
         audio.set_map(nullptr);
+        map_audio.stop();
         active_track = 0;
         active_style = selected_style;
         curr = {};
@@ -917,6 +925,7 @@ int run(const native::Options &opt) {
                                                       : std::make_unique<native::Renderer>(gl, next.core.get(), assets);
         next_renderer->set_map_identity(id, detail.is_object() ? detail.value("sha256", std::string()) : std::string());
         game.install(std::move(next.core), std::move(next_renderer), practice, audio);
+        map_audio.start(core.get(), data_location::from_utf8(path), data_location::from_utf8(content));
         // The pause screen shows this map itself, never the home tour.
         if (backdrop) backdrop->release();
         backdrop_shown.clear();
@@ -3166,7 +3175,11 @@ int run(const native::Options &opt) {
                         hud.ssj_report(*report);
                         feedback.ssj_gain = report->gain;
                     }
+                    if (const auto report = feedback.jhud.tick(pre, ssj_cmd, info))
+                        hud.jhud.show(*report, curr.tick, step_dt);
                 }
+                hud.jhud.expire(curr.tick);
+                if (timing.update_flags & 1) ghost_compare.restart();  // started
                 feedback.ssj_was_in_start = timing.in_start != 0;
                 feedback.ssj_was_noclip = state.movement_mode == 1;  // Mode::Noclip
                 BhSettings trainer_settings{};
@@ -3376,6 +3389,7 @@ int run(const native::Options &opt) {
             float eye[3];
             for (int i = 0; i < 3; ++i)
                 eye[i] = prev.position[i] + (curr.position[i] - prev.position[i]) * blend;
+            float eye_hull_top = native::blended_hull_top_z(prev, curr, blend);
             eye[2] += prev.view_offset_z + (curr.view_offset_z - prev.view_offset_z) * blend;
             BhSnapshot state{};
             bh_snapshot(core.get(), &state);
@@ -3428,6 +3442,7 @@ int run(const native::Options &opt) {
                         state.player.velocity[k] = target->frame.velocity[k];
                     }
                     eye[2] += target->frame.view_offset_z;
+                    eye_hull_top = target->frame.position[2] + native::hull_top_units(!!(target->frame.flags & 1));
                     state.player.tick = target->frame.tick;
                     state.player.view_offset_z = target->frame.view_offset_z;
                     state.player.grounded = !!(target->frame.flags & 2);
@@ -3484,29 +3499,26 @@ int run(const native::Options &opt) {
                 );
                 external_camera = true;
             }
+            // The replay camera does this itself for its in-eye view; flying in noclip there is nothing to stay under.
+            if (!viewer.active && !external_camera && (spectator || !practice.noclip))
+                eye[2] = native::clear_eye_z(core.get(), eye[0], eye[1], eye_hull_top, eye[2]);
             if (spectator) room.spectator_run(display_run, display_style, *spectator, steady_seconds, epoch_ms());
             if (hide_players) actors.clear();
             native::PrimaryGhost primary_ghost;
-            if (!viewer.active && !spectator && !tutorial_runner.demo && prefs.show_ghost)
-                primary_ghost = native::append_ghost_actors(
-                        ghosts,
-                        *renderer,
-                        {core.get(),
-                         run_state,
-                         curr.tick,
-                         blend,
-                         active_track,
-                         active_style,
-                         outfit,
-                         prefs.ghost_opacity},
-                        actors
-                );
-            hud.extras.ghost_progress(
-                    renderer->ghost_path(0).frames,
-                    curr,
-                    run_state,
-                    primary_ghost.shown ? &primary_ghost.command : nullptr
+            native::GhostCompare::Racing racing_ghosts{};
+            if (!viewer.active && !spectator && !tutorial_runner.demo && prefs.show_ghost) {
+                const native::GhostFrameContext ghost_context{
+                        core.get(), run_state, curr.tick, blend, active_track, active_style, outfit, prefs.ghost_opacity
+                };
+                primary_ghost = native::append_ghost_actors(ghosts, *renderer, ghost_context, actors);
+                racing_ghosts = native::racing_ghost_paths(ghosts, *renderer, ghost_context);
+            }
+            hud.extras.ghost_keys(primary_ghost.shown ? &primary_ghost.command : nullptr);
+            ghost_compare.frame(
+                    racing_ghosts, prefs.ghost_compare, native::ghost_compare_frame(run_state, prev, curr, step_dt)
             );
+            hud.extras.show_ghost_split(ghost_compare.split(), ghost_compare.delta(0));
+            hud.extras.ghost_speed.show(ghost_compare.speed_delta());
             if (external_camera) {
                 renderer->set_viewmodel_visible(false);
                 native_render::Actor self;
@@ -3556,6 +3568,15 @@ int run(const native::Options &opt) {
             renderer->set_flashlight(flashlight);
             renderer->set_pixel_density(SDL_GetWindowPixelDensity(window.get()));
             audio.listener(eye, camera_input.yaw());
+            map_audio.frame(
+                    core.get(),
+                    eye,
+                    camera_input.yaw(),
+                    camera_input.pitch,
+                    double(SDL_GetTicksNS()) / 1e9,
+                    !viewer.active || (!viewer.paused && !viewer.controls.dragging),
+                    audio.map_audible()
+            );
             if (focused && captured && !opt.frames) {
                 for (const auto &actor : actors)
                     if (actor.id != "local-camera-target")
@@ -3619,7 +3640,7 @@ int run(const native::Options &opt) {
                             *primary_actor,
                             hud.extras.ghost_name.view(),
                             hud.extras.ghost_seconds,
-                            hud.extras.ghost_delta.view(),
+                            hud.extras.ghost_tag_delta.view(),
                             hud.preferences().tags_through_walls,
                             native::NameTagTrace{core.get(), eye},
                             renderer->output_view(width, height)

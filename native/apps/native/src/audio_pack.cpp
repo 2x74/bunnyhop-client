@@ -301,6 +301,19 @@ const char *audio_format_name(AudioFormat format) {
     }
 }
 
+bool decode_sfx_bytes(
+        const std::vector<unsigned char> &bytes, DecodedAudio *out, std::string *error, std::uint64_t max_samples
+) {
+    *out = {};
+    error->clear();
+    const auto format = sniff_audio(bytes.data(), bytes.size());
+    if (format != AudioFormat::wav && format != AudioFormat::mp3) {
+        *error = "map sound is not WAV or MP3";
+        return false;
+    }
+    return decode_encoded(bytes, format, out, std::min(max_samples, max_sfx_samples), error);
+}
+
 bool decode_sfx_file(
         const std::filesystem::path &file,
         DecodedAudio *out,

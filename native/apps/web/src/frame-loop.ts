@@ -36,11 +36,12 @@ export interface FrameLoopOptions {
 /** Below this wait the uncapped loop spins on MessageChannel messages instead of a setTimeout (ms). */
 const SPIN_MS = 2.5;
 /**
- * The spin's slice (ms) while it waits on the clock for the next frame under an FPS limit, with the GPU done: each
- * MessageChannel task polls the clock in place this long before yielding, and yields at once when input is waiting
- * (isInputPending, Chromium; elsewhere input waits at most this long). A task per poll is ~1 µs of churn and a
- * MessageEvent of garbage, thousands a frame. Not while the GPU is busy: a WebGL fence's status only updates between
- * tasks (Blink caches it per task), so those waits still take a task per poll.
+ * The spin's slice (ms): each MessageChannel task waits this long in place, on the clock or on the GPU, before yielding.
+ * A task per poll is a MessageEvent, and isInputPending takes an options object: both are garbage in Blink's own heap
+ * (Oilpan), not V8's. At 300,000 tasks a second, or millions of calls, they filled the global GC limit about once a
+ * second. Each of those full collections ends in a run of 5 ms sweep tasks, one between each frame, which shows as a
+ * small stutter every 1-3 s (research/PERF-WEB.md). A WebGL fence's status only updates between tasks (Blink caches it
+ * per task), so a GPU wait still takes a task per poll, just far fewer. Other work, input included, waits a slice at most.
  */
 const SLICE_MS = 0.05;
 type Scheduling = { isInputPending?: (o?: { includeContinuous?: boolean }) => boolean };
@@ -57,6 +58,8 @@ export class FrameLoop {
   private chan: MessageChannel | null = null;
   /** Bumped to cancel a pending uncapped step (a message or timeout already queued). */
   private gen = 0;
+  /** This frame has already yielded once to let waiting input in. */
+  private yielded = false;
 
   constructor(private o: FrameLoopOptions) {}
 
@@ -108,21 +111,29 @@ export class FrameLoop {
       return;
     }
     const fps = this.o.limit();
-    const gpuIdle = this.o.gpuIdle;
     let now = performance.now();
-    // Waiting on the clock alone: the rest of this slice here, unless input is waiting to be handled first.
+    // One read per task: the fence's status can't change inside one (SLICE_MS).
+    const gpuIdle = this.o.gpuIdle?.() ?? true;
+    // Waiting, on the GPU or on the clock: the rest of this slice here.
     const end = now + SLICE_MS;
-    while (!this.dueAt(now, fps, 0.05) && (gpuIdle?.() ?? true) && !inputPending()) {
+    while (!gpuIdle || !this.dueAt(now, fps, 0.05)) {
       now = performance.now();
       if (now >= end) break;
     }
     // The GPU gate first: a busy GPU doesn't advance the cadence.
-    if ((gpuIdle?.() ?? true) && this.due(now, fps, 0.05)) {
-      try {
-        this.o.frame(now);
-      } catch (e) {
-        // As with rAF (scheduled first): an exception costs one frame, not the loop.
-        console.error(e);
+    if (gpuIdle && this.dueAt(now, fps, 0.05)) {
+      // Waiting input goes first, so this frame shows it. Once a frame, and only one yield: a fast mouse can't hold it off.
+      if (!this.yielded && inputPending()) {
+        this.yielded = true;
+      } else {
+        this.yielded = false;
+        this.due(now, fps, 0.05);
+        try {
+          this.o.frame(now);
+        } catch (e) {
+          // As with rAF (scheduled first): an exception costs one frame, not the loop.
+          console.error(e);
+        }
       }
     }
     this.schedule();
@@ -166,7 +177,12 @@ export class GpuFence {
     const gl = this.gl;
     if (!this.fence || !("fenceSync" in gl)) return true;
     const r = gl.clientWaitSync(this.fence, 0, 0);
-    if (r === gl.TIMEOUT_EXPIRED) return false;
+    if (r === gl.TIMEOUT_EXPIRED) {
+      // The GPU process only reports a finished fence when it next sees work: without this it waits for its own poll,
+      // about 0.5 ms a frame on M5 Metal. Fewer polls (SLICE_MS) made that wait show.
+      gl.flush();
+      return false;
+    }
     gl.deleteSync(this.fence);
     this.fence = null;
     return true;

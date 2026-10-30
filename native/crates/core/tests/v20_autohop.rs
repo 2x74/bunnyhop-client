@@ -1,7 +1,7 @@
 //! v20 adopts shavit-core's old-button policy. Fixtures are physics evidence, not route completion proofs.
 use bunnyhop_core::{
     Cmd, Game, Settings,
-    game::{EVENT_JUMPED, IN_JUMP, PHYSICS_V19, PHYSICS_V20},
+    game::{EVENT_JUMPED, IN_JUMP, PHYSICS_V19, PHYSICS_V20, PHYSICS_V21},
 };
 use playsrc_movement::{CrouchState, Mode};
 
@@ -44,7 +44,7 @@ fn speed(game: &Game) -> f32 {
 
 #[test]
 fn ponytrap_1096_unduck_jumps_before_friction_only_in_v20() {
-    for version in [18, PHYSICS_V19, PHYSICS_V20] {
+    for version in [18, PHYSICS_V19, PHYSICS_V20, PHYSICS_V21] {
         let Some(mut game) = dom(version, true) else {
             return;
         };
@@ -88,7 +88,7 @@ fn shallow_water_still_rearms_autohop() {
 
 #[test]
 fn teleport_onto_floor_jumps_on_first_command_only_in_v20() {
-    for version in [PHYSICS_V19, PHYSICS_V20] {
+    for version in [PHYSICS_V19, PHYSICS_V20, PHYSICS_V21] {
         let Some(mut game) = dom(version, true) else {
             return;
         };
@@ -107,8 +107,8 @@ fn teleport_onto_floor_jumps_on_first_command_only_in_v20() {
             ..Cmd::default()
         })
         .unwrap();
-        assert_eq!(game.events & EVENT_JUMPED != 0, version == PHYSICS_V20, "v{version}: {:?} {:?}", game.state, game.categorized_ground_jump);
-        assert_eq!(game.categorized_ground_jump.is_some(), version == PHYSICS_V20);
+        assert_eq!(game.events & EVENT_JUMPED != 0, version >= PHYSICS_V20, "v{version}: {:?} {:?}", game.state, game.categorized_ground_jump);
+        assert_eq!(game.categorized_ground_jump.is_some(), version >= PHYSICS_V20);
         if let Some(jump) = game.categorized_ground_jump {
             assert_eq!(jump.velocity[0], 962.4);
             assert_eq!(jump.position, [-9934.0, -1850.0, -47.96875]);
@@ -120,7 +120,7 @@ fn teleport_onto_floor_jumps_on_first_command_only_in_v20() {
         }
         assert!(
             (speed(&game)
-                - if version == PHYSICS_V20 {
+                - if version >= PHYSICS_V20 {
                     962.4
                 } else {
                     962.4 * 0.96
@@ -133,7 +133,7 @@ fn teleport_onto_floor_jumps_on_first_command_only_in_v20() {
 
 #[test]
 fn scroll_unduck_and_teleport_require_a_fresh_jump_in_both_versions() {
-    for version in [PHYSICS_V19, PHYSICS_V20] {
+    for version in [PHYSICS_V19, PHYSICS_V20, PHYSICS_V21] {
         for crouched in [false, true] {
             for latched in [false, true] {
                 let Some(mut game) = dom(version, false) else {
@@ -166,7 +166,7 @@ fn ladders_deep_water_and_released_jump_keep_v19_policy() {
         (Mode::Walk, 0, 0),
     ] {
         let mut results = Vec::new();
-        for version in [PHYSICS_V19, PHYSICS_V20] {
+        for version in [PHYSICS_V19, PHYSICS_V20, PHYSICS_V21] {
             let Some(mut game) = dom(version, true) else {
                 return;
             };
@@ -196,7 +196,7 @@ fn map_trigger_teleport_to_floor_reports_the_next_commands_pre_jump_ground() {
     }
     let bsp_bytes = std::fs::read(path).unwrap();
     let bsp = bunnyhop_core::parse_bsp(&bsp_bytes).unwrap();
-    for version in [PHYSICS_V19, PHYSICS_V20] {
+    for version in [PHYSICS_V19, PHYSICS_V20, PHYSICS_V21] {
         let mut game = Game::load(&bsp).unwrap();
         game.set_settings(Settings { physics_version: version, ..Settings::css_bhop() });
         game.reset();
@@ -210,8 +210,8 @@ fn map_trigger_teleport_to_floor_reports_the_next_commands_pre_jump_ground() {
         assert_eq!([game.state.position[0], game.state.position[1]], [-11008.0, -13056.0]);
         assert!(game.state.ground.is_none());
         game.step(held).unwrap();
-        assert_eq!(game.events & EVENT_JUMPED != 0, version == PHYSICS_V20, "v{version}: {:?} {:?}", game.state, game.categorized_ground_jump);
-        assert_eq!(game.categorized_ground_jump.is_some(), version == PHYSICS_V20);
+        assert_eq!(game.events & EVENT_JUMPED != 0, version >= PHYSICS_V20, "v{version}: {:?} {:?}", game.state, game.categorized_ground_jump);
+        assert_eq!(game.categorized_ground_jump.is_some(), version >= PHYSICS_V20);
         if let Some(jump) = game.categorized_ground_jump {
             assert_eq!(jump.velocity[0..2], [0.0, 0.0]);
             assert_eq!(jump.position[0..2], [-11008.0, -13056.0]);

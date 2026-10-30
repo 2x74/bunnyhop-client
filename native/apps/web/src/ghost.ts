@@ -4,8 +4,9 @@
 // and a custom ghost (a loaded .bhr file or any leaderboard run, via player/race.ts requests).
 // Every ghost is a re-simulated replay (exact per-tick frames), so it starts on the exact tick your timer starts
 // (leaving the start zone), waits at its start line while you sit in the start zone, and keeps running to its own
-// finish after you finish. Each shows a name/time tag with a live delta (progress along its path) and an optional
-// fading trail. The HUD split uses the primary ghost (PB, else WR, else custom).
+// finish after you finish. Each shows a name/time tag with a live delta (progress along its path, closest-pos.ts) and an
+// optional fading trail. The HUD split and speed difference use the primary ghost (Settings → Ghost → Compare with:
+// by default PB, else WR, else custom).
 
 import * as THREE from "three";
 import { api, lastKnownMe } from "./api";
@@ -30,6 +31,7 @@ import { SpatialMover } from "./audio";
 import { GhostRoute } from "./ghost-route";
 import { warmPrograms } from "./graphics/warm-programs";
 import { routeGhostKind, type GhostRouteMode } from "./ghost-route-data";
+import { ClosestPos } from "./closest-pos";
 
 /** A PB is always your own run: your account name, not the replay file's (the native client's say "native-player"). */
 const pbName = (replay: Replay): string => lastKnownMe()?.name ?? replay.header.player;
@@ -78,6 +80,10 @@ export interface GhostLook {
 
 const TRAIL_SECONDS = 2.5;
 const TRAIL_STEP = 2; // ticks between trail samples
+/** Route frames of a ghost's search index built per rendered frame (closest-pos.ts). A fraction of a millisecond at worst. */
+const CLOSEST_BUILD_SLICE = 2048;
+/** The speed difference changes this often (s), like shavit's 10 Hz: readable, where every tick is a blur. */
+const SPEED_DIFF_EVERY = 0.1;
 
 export class Ghost {
   readonly root = new THREE.Group();
@@ -86,7 +92,8 @@ export class Ghost {
   private route: GhostRoute | null = null;
   private routeColor: THREE.ColorRepresentation;
   private tag: NameTag;
-  private lastMatch = 0;
+  /** The closest-position search on this ghost's route (made on first use: menu backgrounds never need it). */
+  private closest: ClosestPos | null = null;
   private lastT = -1;
   private pose: PlayerPose & { position: number[]; velocity: number[] } = { position: [0, 0, 0], velocity: [0, 0, 0], yaw: 0, pitch: 0, crouched: false, grounded: true, sidemove: 0, forwardmove: 0 };
   private trailPts = new Float32Array(400 * 3);
@@ -102,6 +109,8 @@ export class Ghost {
   trace: SightTrace | null = null;
   /** Player time minus ghost time at the same point on its path (seconds; negative = you're ahead). */
   delta: number | null = null;
+  /** The ghost's horizontal speed at the last match of split() (u/s); NaN: no match, or its route teleports there. */
+  matchSpeed = NaN;
   /** Ghost tick shown on the last update (drives the HUD's ghost keys overlay). */
   tick = 0;
   /** Race ghosts make quiet positional sounds (Settings → Audio → Ghost sounds); viewer compare ghosts don't. */
@@ -286,49 +295,34 @@ export class Ghost {
     this.tag.place(this.tagPos, camera, seen * Math.min(1, Math.max(0, (dist - 50) / 90)) * (elapsed === null ? 0.85 : 1));
   }
 
+  private get search(): ClosestPos {
+    return (this.closest ??= new ClosestPos(this.d.frames, this.d.startTick, this.d.endTick, this.d.tickInterval, this.d.frameEvents));
+  }
+
+  /** Builds the route search's index, `maxFrames` route frames' worth at most, so a long replay costs no frame. */
+  prepareSplit(maxFrames = Infinity): void {
+    const c = this.search;
+    if (!c.ready) c.build(maxFrames);
+  }
+
   /**
-   * Live delta vs this ghost: finds the ghost tick nearest to `pos` (searching near the last match, refined to a
-   * fraction of a tick along the path) and returns elapsed time minus the ghost's time there (s; negative = ahead).
+   * Live delta vs this ghost: finds the closest point on its route to `pos` (near the last match, closest-pos.ts) and
+   * returns elapsed time minus the ghost's time there (s; negative = ahead). Null: nowhere near the route. Allocates nothing.
    */
   split(pos: readonly number[], elapsedTicks: number): number | null {
-    const f = this.d.frames;
-    const S = FRAME_STRIDE;
-    const lo = Math.max(this.d.startTick, this.lastMatch - 300);
-    const hi = Math.min(this.d.endTick, Math.max(this.lastMatch, this.d.startTick) + 600);
-    let best = -1;
-    let bestD = Infinity;
-    for (let t = lo; t <= hi; t++) {
-      const o = t * S;
-      const dx = f[o] - pos[0];
-      const dy = f[o + 1] - pos[1];
-      const dz = f[o + 2] - pos[2];
-      const dd = dx * dx + dy * dy + dz * dz;
-      if (dd < bestD) (bestD = dd), (best = t);
+    const c = this.search;
+    if (!c.find(pos[0], pos[1], pos[2])) {
+      this.matchSpeed = NaN;
+      return null;
     }
-    if (best < 0 || bestD > 128 * 128) return null;
-    this.lastMatch = best;
-    // Project onto the segment toward the better neighbour for sub-tick progress.
-    let frac = 0;
-    const proj = (a: number, b: number) => {
-      const ax = f[a * S], ay = f[a * S + 1], az = f[a * S + 2];
-      const sx = f[b * S] - ax, sy = f[b * S + 1] - ay, sz = f[b * S + 2] - az;
-      const l2 = sx * sx + sy * sy + sz * sz;
-      return l2 > 1e-6 ? ((pos[0] - ax) * sx + (pos[1] - ay) * sy + (pos[2] - az) * sz) / l2 : 0;
-    };
-    if (best + 1 <= this.d.endTick) {
-      const u = proj(best, best + 1);
-      if (u > 0) frac = Math.min(1, u);
-    }
-    if (frac === 0 && best - 1 >= this.d.startTick) {
-      const u = proj(best, best - 1);
-      if (u > 0) frac = -Math.min(1, u);
-    }
-    return (elapsedTicks - (best + frac - this.d.startTick)) * this.d.tickInterval;
+    this.matchSpeed = c.speed;
+    return (elapsedTicks - (c.tick - this.d.startTick)) * this.d.tickInterval;
   }
 
   resetSplit(): void {
-    this.lastMatch = this.d.startTick;
+    this.closest?.reset();
     this.delta = null;
+    this.matchSpeed = NaN;
   }
 
   setVisible(v: boolean): void {
@@ -383,7 +377,10 @@ export class GhostManager {
   private finishedAt = 0;
   private finishedTicks = 0;
   private lastSplitTick = -1;
+  private lastSpeedTick = -1;
   private primaryDelta: number | null = null;
+  /** Your speed minus the primary ghost's at the closest point on its route (u/s). Null: nothing to compare. */
+  speedDelta: number | null = null;
   private camPos = new THREE.Vector3();
   /** The last frame's camera (new ghosts compile for it). */
   private camera: THREE.Camera | null = null;
@@ -624,6 +621,8 @@ export class GhostManager {
     for (const g of this.ghosts.values()) g.resetSplit();
     this.primaryDelta = null;
     this.lastSplitTick = -1;
+    this.lastSpeedTick = -1;
+    this.speedDelta = null;
   }
 
   onReset(): void {
@@ -640,9 +639,10 @@ export class GhostManager {
 
   /**
    * Updates all ghosts for the current run state. Returns the HUD split (primary ghost delta) or null.
-   * pos: player position (Source); camera: the render camera.
+   * pos: player position (Source); camera: the render camera; playerSpeed: horizontal speed over the last tick's move
+   * (u/s, what the ghost's is measured from), null if there is none. speedDelta is set from it.
    */
-  frame(timer: RunTimer, alpha: number, pos: readonly number[], camera: THREE.Camera | null): number | null {
+  frame(timer: RunTimer, alpha: number, pos: readonly number[], camera: THREE.Camera | null, playerSpeed: number | null = null): number | null {
     if (camera) this.camera = camera;
     const t0 = performance.now();
     const dt = Math.min(0.1, (t0 - this.last) / 1000);
@@ -671,10 +671,12 @@ export class GhostManager {
     const hideUi = uiHidden();
     const look = hideUi ? { ...gp, tag: false } : gp;
     const routeKind = gp.route && !hideUi && !this.hidden && p.showGhost ? routeGhostKind(gp.routeSource, KIND_ORDER.filter((kind) => gp[kind] && !!this.get(kind, track))) : null;
+    const compare = gp.compare;
     for (const g of this.ghosts.values()) {
       const vis = !this.hidden && p.showGhost && gp[g.kind] && g.track === track && (g.d.style === "*" || g.d.style === style);
       g.setVisible(vis);
       if (!vis) continue;
+      g.prepareSplit(CLOSEST_BUILD_SLICE);
       if (doSplit) {
         const s = g.split(pos, timer.ticks());
         if (s !== null) g.delta = s;
@@ -682,9 +684,16 @@ export class GhostManager {
         g.delta = (timer.ticks() - g.ticks) * timer.tickInterval;
       } else if (timer.status === "idle") g.delta = null;
       g.update(elapsed, dt, this.camPos, gp.route ? { ...look, route: g.kind === routeKind } : look);
-      if (!primary || KIND_ORDER.indexOf(g.kind) < KIND_ORDER.indexOf(primary.kind)) primary = g;
+      if (compare === "auto" ? !primary || KIND_ORDER.indexOf(g.kind) < KIND_ORDER.indexOf(primary.kind) : g.kind === compare) primary = g;
     }
     this.primaryDelta = primary?.delta ?? null;
+    if (!primary || timer.status !== "running") this.speedDelta = null;
+    else if (doSplit && (this.lastSpeedTick < 0 || Math.abs(timer.ticks() - this.lastSpeedTick) >= SPEED_DIFF_EVERY / timer.tickInterval)) {
+      this.lastSpeedTick = timer.ticks();
+      const ghostSpeed = primary.matchSpeed;
+      if (ghostSpeed !== ghostSpeed) this.speedDelta = null;
+      else if (playerSpeed !== null) this.speedDelta = playerSpeed - ghostSpeed;
+    }
     const ms = performance.now() - t0;
     this.perf.ms += (ms - this.perf.ms) * 0.05;
     this.perf.max = Math.max(this.perf.max * 0.999, ms);

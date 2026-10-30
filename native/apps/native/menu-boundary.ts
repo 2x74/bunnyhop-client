@@ -94,13 +94,16 @@ function adaptSettingsPanel(source: string): string {
 }
 
 /**
- * The jump-stats rows come with the website's !ssj, which opens a web popover. The native client registers its own
- * !ssj (chat-service.ts: the host toggles the jump HUD), so the website's registration stays out of the menu.
+ * The jump-stats rows come with the website's !ssj and !jhud, which open a web popover. The native client registers its
+ * own (chat-service.ts: the host switches the HUD element or opens Settings), so the website's stay out of the menu.
  */
 function adaptJumpStats(source: string): string {
-  const registration = /^registerChatCommand\(\{ name: "ssj",.*\}\);$/m;
-  if (!registration.test(source)) throw new Error("Native menu: web ssj/index.ts no longer registers !ssj as expected");
-  return source.replace(registration, "");
+  const ssj = /^registerChatCommand\(\{ name: "ssj",.*\}\);$/m;
+  const jhud = /^registerChatCommand\(\{\n  name: "jhud",\n[\s\S]*?^\}\);$/m;
+  if (!ssj.test(source) || !jhud.test(source)) {
+    throw new Error("Native menu: web ssj/index.ts no longer registers !ssj and !jhud as expected");
+  }
+  return source.replace(ssj, "").replace(jhud, "");
 }
 
 async function adaptedSource(path: string): Promise<string | null> {

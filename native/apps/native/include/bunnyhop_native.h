@@ -112,6 +112,21 @@ int bh_run_clear(BhContext *ctx);
 int bh_snapshot(BhContext *ctx, BhSnapshot *out);
 /* Borrowed until the next call to the SAME getter or map reload/destruction. JSON is UTF-8/NUL-terminated. */
 const uint8_t *bh_snapshot_bytes(BhContext *ctx, size_t *byte_count);
+
+/* Display-only audio. All buffers belong to the caller; no settings enter simulation state. */
+typedef struct BhMapSoundState {
+    uint32_t entity, flags, starts, stops;
+    float volume, pitch;
+} BhMapSoundState;
+
+uint32_t bh_map_sound_serial(const BhContext *ctx);
+size_t bh_map_sound_states(const BhContext *ctx, BhMapSoundState *out, size_t capacity);
+size_t bh_map_sound_commands(BhContext *ctx, uint8_t *out, size_t capacity);
+/* Worker-only pak reader. Returned bytes last until close; never reads loose replacements. */
+typedef struct BhSoundPak BhSoundPak;
+BhSoundPak *bh_sound_pak_open(const char *bsp_path);
+const uint8_t *bh_sound_pak_read(const BhSoundPak *pak, const char *path, size_t *size);
+void bh_sound_pak_close(BhSoundPak *pak);
 const char *bh_entities_json(BhContext *ctx, size_t *byte_count);
 const char *bh_models_json(BhContext *ctx, size_t *byte_count);
 /* Configure zones first, then reset/set restart point/names, then begin at tick 0.

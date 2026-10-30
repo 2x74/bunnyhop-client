@@ -2,7 +2,7 @@
 // carries the same group; prepareMapContent registers it here, and audio/classic.ts fetches the files when the
 // "Classic CS:S sounds" option is on. Without hosted content the game keeps its own sounds.
 
-import type { SoundGroup } from "./manifest";
+import type { MapSoundGroup, SoundGroup } from "./manifest";
 
 export interface SoundContent {
   group: SoundGroup;
@@ -28,4 +28,22 @@ export function onSoundContent(fn: (c: SoundContent) => void): () => void {
   listeners.add(fn);
   if (current) fn(current);
   return () => listeners.delete(fn);
+}
+
+/** A map's `optional.mapSounds` (audio/map-sounds.ts reads it). */
+export interface MapSoundContent {
+  group: MapSoundGroup;
+  base: string;
+}
+
+// Per core: the attract screen's background map prepares its content on its own core while the real one loads.
+const mapSounds = new WeakMap<object, MapSoundContent>();
+
+export function setMapSoundContent(core: object, c: MapSoundContent | null): void {
+  if (c) mapSounds.set(core, c);
+  else mapSounds.delete(core);
+}
+
+export function mapSoundContent(core: object): MapSoundContent | null {
+  return mapSounds.get(core) ?? null;
 }

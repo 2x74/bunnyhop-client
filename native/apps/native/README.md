@@ -147,6 +147,10 @@ profiles. Sky packs show in those two looks: the seven built-in skies are fetche
 `sky-cache/` when picked, and `.hdr`, PNG, JPEG and `.bhsky.json` files in its `skies/` folder (where Add from a link
 and Import file save theirs) show in the Sky picker. Downloads and decoding run on workers (`src/sky_library.cpp`).
 
+Map sounds use the map manifest's allow list, including files inside its pakfile. Without a valid list for the
+exact BSP, the map stays silent. Settings → Audio → Map sounds starts at 50%; loading and decoding run in the
+background, with a separate 32-voice budget for map ambience and soundscapes.
+
 ## Packages
 
 Preview builds are published at [2x74/bunnyhop-client Releases](https://github.com/2x74/bunnyhop-client/releases).
@@ -248,6 +252,14 @@ bun apps/native/tools/record-proof.ts --map /path/to/map.bsp --replay /path/to/r
 
 Linux checks run in Docker with `apps/native/tools/verify-linux.sh` (`WITH_CLIENT=1` adds SDL/OpenGL under Xvfb).
 Headless runs don't test a real mouse; input changes need a check on the target OS.
+
+Map audio's replay identity check runs two native viewers, reading audio observations from one, and compares
+every tick's full simulation bytes and timer state. It needs no window or audio device:
+
+```sh
+apps/native/build/bunnyhop-native-map-audio-identity target/replays.json
+# [{"map":"/path/map.bsp","replay":"/path/run.bhr"}]
+```
 
 `--menu-smoke OUTPUT_PREFIX --online-map NAME --hidden` sends the map selection through the menu's host bridge.
 It uses a private data folder at `OUTPUT_PREFIX/data` and never submits scores.

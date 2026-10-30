@@ -173,6 +173,11 @@ if(BUNNYHOP_BUILD_CLIENT)
         src/sky_image.cpp
         src/sky_library.cpp
         src/audio_pack.cpp
+        src/map_audio.cpp
+        src/map_audio_load.cpp
+        src/map_audio_scene.cpp
+        src/map_audio_levels.cpp
+        src/map_audio_format.cpp
         src/video_export.cpp
         src/video_codecs.cpp
         src/avatar_picture.cpp
@@ -427,7 +432,7 @@ if(BUNNYHOP_BUILD_CLIENT)
     endif()
 endif()
 if(BUILD_TESTING)
-    foreach(parity_test IN ITEMS scene_draw_list graphics_settings zone_effects native_chat render_math water_capture texture_bleed room_state gameplay data_location sniper_zoom music_envelope weapon_menu ghost_trails activity cosmetics window_settings window_modes display_modes hud_theme replay_controls)
+    foreach(parity_test IN ITEMS scene_draw_list graphics_settings zone_effects native_chat render_math water_capture texture_bleed room_state gameplay data_location sniper_zoom music_envelope weapon_menu ghost_trails activity cosmetics window_settings window_modes display_modes hud_theme replay_controls ghost_compare)
         add_executable(bunnyhop-native-${parity_test}-tests src/${parity_test}_tests.cpp)
         target_include_directories(bunnyhop-native-${parity_test}-tests PRIVATE include vendor src)
         target_compile_options(bunnyhop-native-${parity_test}-tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
@@ -502,6 +507,9 @@ if(BUILD_TESTING)
     add_executable(bunnyhop-native-camera-tests src/replay_camera_tests.cpp)
     target_include_directories(bunnyhop-native-camera-tests PRIVATE include vendor src)
     target_compile_options(bunnyhop-native-camera-tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    add_executable(bunnyhop-native-eye-clearance-tests src/eye_clearance_tests.cpp)
+    target_include_directories(bunnyhop-native-eye-clearance-tests PRIVATE include vendor src)
+    add_test(NAME native_eye_clearance COMMAND bunnyhop-native-eye-clearance-tests)
     add_executable(bunnyhop-native-room-modes-tests src/room_modes_tests.cpp)
     target_include_directories(bunnyhop-native-room-modes-tests PRIVATE vendor)
     add_executable(bunnyhop-native-latest-worker-tests src/latest_worker_tests.cpp)
@@ -541,6 +549,19 @@ if(BUILD_TESTING)
             WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP ssj_oracle TIMEOUT 120)
         add_test(NAME native_ssj COMMAND bunnyhop-native-ssj-tests "${SSJ_ORACLE}")
         set_tests_properties(native_ssj PROPERTIES FIXTURES_REQUIRED ssj_oracle)
+        set(JHUD_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/jhud-oracle.json")
+        add_test(NAME native_jhud_oracle COMMAND "${BUN_EXECUTABLE}" apps/native/src/jhud_oracle.ts "${JHUD_ORACLE}")
+        set_tests_properties(native_jhud_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP jhud_oracle TIMEOUT 120)
+        add_test(NAME native_jhud COMMAND bunnyhop-native-jhud-tests "${JHUD_ORACLE}")
+        set_tests_properties(native_jhud PROPERTIES FIXTURES_REQUIRED jhud_oracle)
+        set(CLOSEST_POS_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/closest-pos-oracle.json")
+        add_test(NAME native_closest_pos_oracle
+            COMMAND "${BUN_EXECUTABLE}" apps/native/src/closest_pos_oracle.ts "${CLOSEST_POS_ORACLE}")
+        set_tests_properties(native_closest_pos_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP closest_pos_oracle TIMEOUT 120)
+        add_test(NAME native_closest_pos COMMAND bunnyhop-native-closest-pos-tests "${CLOSEST_POS_ORACLE}")
+        set_tests_properties(native_closest_pos PROPERTIES FIXTURES_REQUIRED closest_pos_oracle)
         set(PONYTAIL_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/ponytail-oracle.json")
         add_test(NAME native_ponytail_oracle
             COMMAND "${BUN_EXECUTABLE}" apps/native/src/ponytail-oracle.ts "${PONYTAIL_ORACLE}")
@@ -586,8 +607,40 @@ if(BUILD_TESTING)
         # into an FMA would quietly compute it at a different width.
         target_compile_options(bunnyhop-native-ssj-tests PRIVATE -ffp-contract=off)
     endif()
+    add_executable(bunnyhop-native-jhud-tests src/jhud_tests.cpp)
+    target_include_directories(bunnyhop-native-jhud-tests PRIVATE include vendor src)
+    add_executable(bunnyhop-native-closest-pos-tests src/closest_pos_tests.cpp)
+    target_include_directories(bunnyhop-native-closest-pos-tests PRIVATE include vendor src)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        # The same exact arithmetic as the website: nothing may contract it into an FMA.
+        target_compile_options(bunnyhop-native-jhud-tests PRIVATE -ffp-contract=off)
+        target_compile_options(bunnyhop-native-closest-pos-tests PRIVATE -ffp-contract=off)
+    endif()
     add_test(NAME native_runner_help COMMAND bunnyhop-native-runner --help)
     # Decoding and pack scanning need no SDL, so these run everywhere.
+    add_executable(bunnyhop-native-map-audio-identity src/map_audio_identity.cpp)
+    target_include_directories(bunnyhop-native-map-audio-identity PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-map-audio-identity PRIVATE bunnyhop_core_native)
+    set(MAP_AUDIO_ORACLE "${BUNNYHOP_ROOT}/target/map-audio-oracle")
+    add_test(NAME native_map_audio_oracle
+        COMMAND "${BUN_EXECUTABLE}" apps/native/src/map_audio_oracle.ts "${MAP_AUDIO_ORACLE}")
+    set_tests_properties(native_map_audio_oracle PROPERTIES
+        WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP map_audio_oracle TIMEOUT 120)
+    add_executable(bunnyhop-native-map-audio-tests src/map_audio_tests.cpp
+        src/map_audio_scene.cpp src/map_audio_levels.cpp src/map_audio_format.cpp src/audio_pack.cpp)
+    target_include_directories(bunnyhop-native-map-audio-tests PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-map-audio-tests PRIVATE bunnyhop_core_native Threads::Threads)
+    add_test(NAME native_map_audio COMMAND bunnyhop-native-map-audio-tests "${MAP_AUDIO_ORACLE}")
+    set_tests_properties(native_map_audio PROPERTIES FIXTURES_REQUIRED map_audio_oracle)
+    find_package(CURL REQUIRED)
+    add_executable(bunnyhop-native-map-audio-load-tests src/map_audio_load_tests.cpp
+        src/map_audio_load.cpp src/map_audio_scene.cpp src/map_audio_levels.cpp
+        src/map_audio_format.cpp src/audio_pack.cpp src/online.cpp)
+    target_include_directories(bunnyhop-native-map-audio-load-tests PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-map-audio-load-tests PRIVATE
+        bunnyhop_core_native Threads::Threads CURL::libcurl)
+    add_test(NAME native_map_audio_allow_list COMMAND bunnyhop-native-map-audio-load-tests "${MAP_AUDIO_ORACLE}")
+    set_tests_properties(native_map_audio_allow_list PROPERTIES FIXTURES_REQUIRED map_audio_oracle)
     add_executable(bunnyhop-native-audio-tests src/audio_pack_tests.cpp src/audio_pack.cpp)
     target_include_directories(bunnyhop-native-audio-tests PRIVATE vendor src)
     add_test(NAME native_audio_pack COMMAND bunnyhop-native-audio-tests)

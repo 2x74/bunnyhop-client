@@ -80,6 +80,32 @@ export function eyeOf(s: SpectatorTarget, out: number[] = [0, 0, 0]): number[] {
   return out;
 }
 
+/** CS:S hull height above the feet (g_CSViewVectors), 2 units under the eye: 62 standing, 45 ducked. */
+export const hullTop = (crouched: boolean): number => (crouched ? 45 : 62);
+
+const EYE_CLEARANCE = 12;
+const CEILING_BOX = 15;
+const ceilingFrom = [0, 0, 0];
+const ceilingTo = [0, 0, 0];
+
+/**
+ * The rendered eye height under a ceiling (CCSGameMovement::PlayerMove): the eye sits above the hull, so with the hull
+ * against a ceiling it would be through it. CS:S sweeps a 30x30 box up from the hull's top to 12 units above the eye and
+ * keeps the eye 12 units under whatever it hits; away from ceilings it does nothing. The core's view_offset leaves this
+ * out and feeds its water, use and weapon traces, so this moves the camera only. `topZ`: the top of the hull.
+ */
+export function clearEyeZ(trace: TraceFn, x: number, y: number, topZ: number, eyeZ: number): number {
+  const reach = eyeZ + EYE_CLEARANCE - topZ;
+  if (reach <= 0) return eyeZ;
+  // A cube, not a flat box: its body stays inside the hull and its top face is what leads.
+  ceilingFrom[0] = ceilingTo[0] = x;
+  ceilingFrom[1] = ceilingTo[1] = y;
+  ceilingFrom[2] = topZ - CEILING_BOX;
+  ceilingTo[2] = ceilingFrom[2] + reach;
+  const f = trace(ceilingFrom, ceilingTo, CEILING_BOX);
+  return f < 1 ? Math.min(eyeZ, topZ + f * reach - EYE_CLEARANCE) : eyeZ;
+}
+
 // ---------------------------------------------------------------------------------------------
 
 export interface ChaseOptions {
@@ -447,6 +473,7 @@ export class SpectatorCamera {
       case "eye": {
         const e = eyeOf(s, this.eyeTmp);
         e[2] += err;
+        if (this.trace) e[2] = clearEyeZ(this.trace, e[0], e[1], s.pos[2] + hullTop(s.crouched), e[2]);
         setEye(camera, e, s.yaw, s.pitch);
         return false;
       }

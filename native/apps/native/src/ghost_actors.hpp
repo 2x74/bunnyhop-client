@@ -1,4 +1,5 @@
 #pragma once
+#include "ghost_compare.hpp"
 #include "ghost_slots.hpp"
 #include "renderer.hpp"
 #include <optional>
@@ -37,6 +38,17 @@ inline bool
 ghost_slot_races(const GhostSlot &slot, const Renderer &renderer, unsigned index, const GhostFrameContext &context) {
     return slot.handle && slot.enabled && renderer.ghost_visible(index) && slot.info.value("track", 0u) == context.track
            && slot.info.value("style", std::string("autohop")) == context.style;
+}
+
+// Each slot's route for the HUD's comparison, while that ghost races on this track.
+inline GhostCompare::Racing
+racing_ghost_paths(const GhostSlots &ghosts, const Renderer &renderer, const GhostFrameContext &context) {
+    GhostCompare::Racing racing{};
+    for (unsigned index = 0; index < GhostSlots::slot_count; ++index) {
+        if (ghost_slot_races(ghosts.slots[index], renderer, index, context))
+            racing[index] = &renderer.ghost_path(index);
+    }
+    return racing;
 }
 
 // Adds every race ghost to the frame's actors, all four slots alike: your outfit with the runner's loadout, as the

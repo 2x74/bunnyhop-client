@@ -846,6 +846,44 @@ pub extern "C" fn overlay_states() -> usize {
     })
 }
 
+/// Map sounds (game/map_sounds.rs): display only, nothing here feeds back into the simulation. Bumped whenever the two
+/// below may read differently, so the client checks one number per frame.
+#[unsafe(no_mangle)]
+pub extern "C" fn map_sound_serial() -> u32 {
+    with(|c| c.game.as_ref().map_or(0, |g| g.map_sound_serial()))
+}
+
+/// The ambient_generics now into scratch_f32, in entity order, 6 values each: entity, MAP_SOUND_* flags, starts, stops,
+/// last Volume input (0..100, -1 none), last Pitch input (0..255, -1 none).
+#[unsafe(no_mangle)]
+pub extern "C" fn map_sound_states() -> usize {
+    with(|c| {
+        c.scratch_f32.clear();
+        if let Some(g) = &c.game {
+            for (a, removed) in g.map_sound_states() {
+                let flags = a.flags() | if removed { crate::game::MAP_SOUND_REMOVED } else { 0 };
+                c.scratch_f32.extend([a.ent as f32, flags as f32, a.starts as f32, a.stops as f32, a.volume, a.pitch]);
+            }
+        }
+        c.scratch_f32.len()
+    })
+}
+
+/// `play` commands the map ran since the last call into scratch_str, one per line.
+#[unsafe(no_mangle)]
+pub extern "C" fn map_sound_commands() -> usize {
+    with(|c| {
+        c.scratch_str.clear();
+        if let Some(g) = &mut c.game {
+            for line in g.take_map_sound_commands() {
+                c.scratch_str.push_str(&line);
+                c.scratch_str.push('\n');
+            }
+        }
+        c.scratch_str.len()
+    })
+}
+
 // Optional observational ABI v2. Does not change commands, snapshots or ranked timing.
 #[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
 pub extern "C" fn timing_path_version() -> u32 { playsrc_movement::accepted_path::VERSION }

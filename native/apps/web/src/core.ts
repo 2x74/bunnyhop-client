@@ -173,6 +173,12 @@ export interface OverlayVolume {
   planes: Float32Array;
 }
 
+/** `Core.mapSoundStates` layout: entity, flags, starts, stops, volume (0..100, -1 none), pitch (0..255, -1 none). */
+export const MAP_SOUND_STRIDE = 6;
+export const MAP_SOUND_ACTIVE = 1;
+export const MAP_SOUND_REMOVED = 2;
+export const MAP_SOUND_LAST_START = 4;
+
 /** `Core.overlayStates()` bits: an enabled trigger / a solid brush entity, and drawn. */
 export const OVERLAY_STATE_ACTIVE = 1;
 export const OVERLAY_STATE_VISIBLE = 2;
@@ -232,6 +238,11 @@ export const PROP_TRANSFORM_KEY = 1 << 20;
  * - v20: v19 + bhoptimer autohop: clear the old jump latch while walking with jump held and water level < 2,
  *   keeping the current jump command so unducking or teleporting onto a floor jumps before friction.
  *   Scroll styles, ladder jumps and swimming keep their existing policy.
+ * - v21: v20 + a func_door_rotating that starts open (spawnpos 1, or the obsolete StartOpen flag) spawns at its open
+ *   angles, as CRotDoor::Spawn teleports it there: bhop_collective's three hotel doors, the only ones in the catalogue,
+ *   stopped every run before. On the maps in map_fixes.rs PARENTED_DOORS_V21 (bhop_wayz), a func_door / func_button with
+ *   a move parent follows it in collision and drawing and travels in the parent's space; on bhop_areaportal_v1 the green
+ *   train gets the red train's orientation edit, so it doesn't turn its riders around. Every other map plays as on v20.
  */
 export const PHYSICS_V1 = 1;
 /** Weapon commands and the USP silencer (research/WEAPONS.md). */
@@ -257,13 +268,15 @@ export const PHYSICS_V16 = 16;
 /** RNGFix parity: uphill / downhill inclines, edge bugs, trigger jumping and telehops as on RNGFix servers. */
 export const PHYSICS_V17 = 17;
 /** The physics version new runs are played and recorded with. */
-export const PHYSICS_VERSION = 20;
+export const PHYSICS_VERSION = 21;
 /** Climbable surface properties used by bhop_synthetic_fix. */
 export const PHYSICS_V18 = 18;
 /** Scoped entity makers and known velocity-script equivalents. */
 export const PHYSICS_V19 = 19;
 /** bhoptimer autohop: unduck / teleport onto a floor jumps before friction. */
 export const PHYSICS_V20 = 20;
+/** Start-open func_door_rotating spawns open (bhop_collective); bhop_wayz's parented doors follow their parent; bhop_areaportal_v1's green train keeps riders' view. */
+export const PHYSICS_V21 = 21;
 /** Versions this code knows (the wasm build must support them too, see Core.setSettings). */
 export const isPhysicsVersion = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= PHYSICS_V1 && (v as number) <= PHYSICS_VERSION;
 
@@ -361,6 +374,9 @@ interface Exports {
   brush_states?: () => number;
   effect_states?: () => number;
   sky_camera?: () => number;
+  map_sound_serial?: () => number;
+  map_sound_states?: () => number;
+  map_sound_commands?: () => number;
   overlay_volumes?: () => number;
   overlay_states?: () => number;
 }
@@ -653,6 +669,37 @@ export class Core {
     return coreBytes(this.x, this.x.pak_ptr(), len).slice();
   }
 
+  /** The pakfile lump in wasm memory: read it at once, it is invalid after the next allocation that grows the memory. */
+  pakView(): Uint8Array {
+    return coreBytes(this.x, this.x.pak_ptr(), this.x.pak_len());
+  }
+
+  /**
+   * Map sounds (crates/core/src/game/map_sounds.rs): display only, nothing here reaches the simulation. 0 on a wasm
+   * without the export, where only sounds that start by themselves can play. Changes when the two below may differ.
+   */
+  mapSoundSerial(): number {
+    return this.x.map_sound_serial?.() ?? 0;
+  }
+
+  /**
+   * The ambient_generics now, MAP_SOUND_STRIDE values each (see MAP_SOUND_* below), into `out`. Returns the value
+   * count; `out` must hold it (no allocation, the client reads this when the serial moved).
+   */
+  mapSoundStates(out: Float32Array): number {
+    if (!this.x.map_sound_states) return 0;
+    const len = Math.min(this.x.map_sound_states(), out.length);
+    out.set(this.f32(this.x.scratch_f32_ptr(), len));
+    return len;
+  }
+
+  /** `play ...` commands the map ran since the last call. */
+  mapSoundCommands(): string[] {
+    if (!this.x.map_sound_commands) return [];
+    const len = this.x.map_sound_commands();
+    return len ? this.str(this.x.scratch_str_ptr(), len).split("\n").filter(Boolean) : [];
+  }
+
   /** Physics settings and version (call after loading the map). Throws if this wasm build can't simulate the version. */
   setSettings(s: Settings): void {
     this.x.set_settings(s.tickInterval, s.airAccelerate, s.accelerate, s.friction, s.stopSpeed, s.gravity, s.maxSpeed, s.autohop ? 1 : 0);
@@ -700,21 +747,24 @@ export class Core {
   }
 
   /** Enabled smoke/trail/local-light entities, including map I/O and Kill; null on older wasm. */
-  effectStates(): Map<number, boolean> | undefined {
+  effectStates(only?: ReadonlySet<number>): Map<number, boolean> | undefined {
     if (!this.x.effect_states) return undefined;
     const len = this.x.effect_states();
     const data = this.f32(this.x.scratch_f32_ptr(), len);
     const states = new Map<number, boolean>();
-    for (let i = 0; i + 1 < data.length; i += 2) states.set(data[i], data[i + 1] !== 0);
+    for (let i = 0; i + 1 < data.length; i += 2) if (!only || only.has(data[i])) states.set(data[i], data[i + 1] !== 0);
     return states;
   }
 
-  /** Current transforms of brush entity models: model index -> [x, y, z, pitch, yaw, roll] (Source degrees). */
-  brushOrigins(): Map<number, BrushTransform> {
+  /**
+   * Current transforms of brush entity models: model index -> [x, y, z, pitch, yaw, roll] (Source degrees). `only`: just
+   * these keys (the same values; the replay viewer's trail history reads a few models every tick).
+   */
+  brushOrigins(only?: ReadonlySet<number>): Map<number, BrushTransform> {
     const len = this.x.brush_origins();
     const b = this.f32(this.x.scratch_f32_ptr(), len);
     const out = new Map<number, BrushTransform>();
-    for (let i = 0; i < b.length; i += 7) out.set(b[i], [b[i + 1], b[i + 2], b[i + 3], b[i + 4], b[i + 5], b[i + 6]]);
+    for (let i = 0; i < b.length; i += 7) if (!only || only.has(b[i])) out.set(b[i], [b[i + 1], b[i + 2], b[i + 3], b[i + 4], b[i + 5], b[i + 6]]);
     if (this.x.brush_states) {
       const slen = this.x.brush_states();
       const st = this.f32(this.x.scratch_f32_ptr(), slen);
@@ -726,7 +776,7 @@ export class Core {
     // Moving props (doors) ride along under PROP_TRANSFORM_KEY + entity.
     const plen = this.x.prop_transforms?.() ?? 0;
     const p = this.f32(this.x.scratch_f32_ptr(), plen);
-    for (let i = 0; i < p.length; i += 7) out.set(PROP_TRANSFORM_KEY + p[i], [p[i + 1], p[i + 2], p[i + 3], p[i + 4], p[i + 5], p[i + 6]]);
+    for (let i = 0; i < p.length; i += 7) if (!only || only.has(PROP_TRANSFORM_KEY + p[i])) out.set(PROP_TRANSFORM_KEY + p[i], [p[i + 1], p[i + 2], p[i + 3], p[i + 4], p[i + 5], p[i + 6]]);
     return out;
   }
 

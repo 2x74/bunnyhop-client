@@ -17,6 +17,7 @@
 #include "hud_trainer.hpp"
 #include "crosshair_shape.hpp"
 #include "hud_result.hpp"
+#include "hud_readouts.hpp"
 #include "toasts.hpp"
 
 namespace native {
@@ -507,6 +508,7 @@ class NativeHud {
 public:
     void preferences(const native::Json &value) {
         prefs_ = native::HudPreferences::from(value);
+        jhud.configure(prefs_.jhud);
         rebuild_crosshair();
         if (ssj_last_) {
             const auto labels = native::ssj_labels(*ssj_last_, prefs_.ssj_fields);
@@ -524,6 +526,7 @@ public:
     native::Toasts toasts;
     native::MovementHud movement;
     native::HudExtras extras;
+    native::JhudReadout jhud;
 
 private:
     std::string context_map_;
@@ -686,6 +689,7 @@ public:
             ssj_line_.assign("");
         }
         ssj_pending_ = false;
+        jhud.clear();
         movement.reset();
         result.reset();
         keys_latest_ = keys_edges_ = 0;
@@ -1324,6 +1328,8 @@ else{color=vec4(ink.rgb,ink.a*(uv.x<-1.?1.:texture(font,uv).a));}})"
             draw_speed(s.player.tick, speed, run, style, practising);
             draw_run_stats(run, style);
             draw_jump_stats(jump_stats, jump_stats_gain);
+            draw_jhud();
+            draw_ghost_speed();
             if (strafe) draw_strafe_trainer(*strafe, strafe_hints);
             if (prefs_.keys_overlay || editing_) draw_keys();
             draw_health(s.health, weapon);
@@ -1386,6 +1392,7 @@ else{color=vec4(ink.rgb,ink.a*(uv.x<-1.?1.:texture(font,uv).a));}})"
     template <class Demo>
     void swap_demo(Demo &demo) {
         std::swap(extras, demo.extras);
+        std::swap(jhud, demo.jhud);
         std::swap(movement, demo.movement);
         std::swap(split_line, demo.split_line);
         std::swap(delta_line, demo.delta_line);
@@ -1414,6 +1421,11 @@ private:
     static constexpr float run_stats_from_bottom = 68;
     static constexpr float jump_stats_from_bottom = 232;
     static constexpr float jump_stats_line_gap = 21;
+    // A little above the crosshair, as the website's, and under the strafe offsets and first jump tick.
+    static constexpr float jhud_top_of_screen = .42f;
+    // Across the speed from Start Pre, as the website's: clear of the gain tick and "Perfect" beside the speed.
+    static constexpr float ghost_speed_beside_column = 175;
+    static constexpr float ghost_speed_from_bottom = 100;
     static constexpr float trainer_bottom_from_bottom = 250;
     static constexpr float splits_from_bottom = 350;
     static constexpr float split_line_gap = 22;
@@ -1597,7 +1609,7 @@ private:
         const float w = frame_width_, h = frame_height_;
         const auto [x, y] = place("timer", w / 2, h - timer_from_bottom);
         native::HudLabel<48> time;
-        native::format_hud_time(time, run.seconds);
+        native::format_hud_time(time, native::hud_clock_seconds(run, movement.tick_interval));
         const Color color = (run.status == 2 || practising) ? amber : cream;
         text(x, y, time.view(), timer_size, color, true);
         draw_status(run, x, y - status_above_timer);
@@ -1666,6 +1678,26 @@ private:
             text(x, y + jump_stats_line_gap, stats.substr(newline + 1), 12, color, true);
     }
 
+    // These two are off until the player turns them on, even in a layout that doesn't list them.
+    bool personal_element_on(std::string_view id) const {
+        const auto &entry = layout_place(id);
+        return editing_ || (entry && entry->visible);
+    }
+
+    void draw_jhud() {
+        if (!personal_element_on("jhud") || !jhud.shown()) return;
+        const auto [x, y] = place("jhud", frame_width_ / 2, frame_height_ * jhud_top_of_screen);
+        native::draw_jhud(*this, x, y, jhud);
+    }
+
+    void draw_ghost_speed() {
+        if (!personal_element_on("ghostSpeed") || !extras.ghost_speed.shown()) return;
+        const auto [x, y] = place(
+                "ghostSpeed", frame_width_ / 2 + ghost_speed_beside_column, frame_height_ - ghost_speed_from_bottom
+        );
+        native::draw_ghost_speed(*this, x, y, extras.ghost_speed, palette_);
+    }
+
     // Above the jump stats; its bottom stays put whatever style and height the trainer has.
     void draw_strafe_trainer(const native::StrafeReading &reading, bool hints) {
         const float height = native::trainer_height(prefs_.trainer);
@@ -1680,7 +1712,7 @@ private:
         const auto [x, y] = place("splits", frame_width_ / 2, frame_height_ - splits_from_bottom);
         if (!split_line.empty()) text(x, y, split_line, 14, cream, true);
         if (shown_delta.empty()) return;
-        const bool good = delta_line.empty() ? shown_delta.front() == '-' : delta_good;
+        const bool good = delta_line.empty() ? extras.ghost_ahead : delta_good;
         text(x,
              split_line.empty() ? y : y + split_line_gap,
              shown_delta,
