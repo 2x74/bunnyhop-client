@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "status": "unpublished",
+  "status": "published",
   "commit": "b64ad5bcf1255f177616668d71730ce2a59e749a",
   "toolchain": "1.99.1",
-  "url": "",
+  "url": "https://bunnyhop.lol/assets/bunnyhop_core-FKL40sVR.wasm",
   "sha256": "5d58c4cb8852d43531d8a8359b437a12ab845dcccfa4b4c347303ef52a81c47d",
   "bytes": 1475104,
   "physics": 20,
