@@ -66,7 +66,9 @@ This is the last version you need to download by hand: from here on, Settings â†
   from the Replays list. It needs FFmpeg installed.
 
 **Ranked**
-- Physics v19 for v0.0.30's new maps and their mechanics.
+- Physics v20: crouch-cancelling or teleporting onto a floor with jump held jumps on the same tick, without a tick
+  of friction, as on bhoptimer servers. It includes v0.0.30's new maps and their mechanics.
+- `!showtriggers` shows the scripted ingredients and gates on bhop_cooksassistant.
 - Runs with null binds count for ranked, as on the website.
 - Leaderboard hover cards show your FPS, polling rate, sensitivity and native version.
 - `!practice off` clears the map's practice spawns, as on the website.
