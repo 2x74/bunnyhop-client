@@ -2,6 +2,7 @@
 #include "replay_session.hpp"
 #include "replay_controls.hpp"
 #include "replay_camera.hpp"
+#include "runner_view.hpp"
 #include <memory>
 
 namespace native {
@@ -13,6 +14,8 @@ struct ReplayPlayer {
     std::string id;
     bool active = false, paused = false, failed = false, orbit_drag = false;
     double speed = 1;
+    // "Runner's view": the replay drawn in the runner's shape, fit and FOV (replayControl runnerView).
+    std::optional<RunnerView> runner_view;
 
     void begin(const std::filesystem::path &path);
     void action(ReplayControls::Action action, uint32_t tick, Input &camera_controls);

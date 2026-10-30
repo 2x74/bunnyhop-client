@@ -1,5 +1,6 @@
 #pragma once
 #include "display_modes.hpp"
+#include "runner_view.hpp"
 #include <SDL3/SDL.h>
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -72,5 +73,20 @@ private:
         return mode ? mode_json(*mode) : nlohmann::json(nullptr);
     }
 };
+
+// The window as the player sees it, for the runner's view sent with a run: its pixels and, in exclusive
+// fullscreen, the monitor's own desktop size and the chosen scaling.
+inline ShownWindow shown_window(SDL_Window *window, const WindowJson &settings) {
+    ShownWindow shown;
+    SDL_GetWindowSizeInPixels(window, &shown.width, &shown.height);
+    shown.exclusive = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) && SDL_GetWindowFullscreenMode(window);
+    if (!shown.exclusive) return shown;
+    if (const auto *desktop = SDL_GetDesktopDisplayMode(SDL_GetDisplayForWindow(window))) {
+        shown.desktop_width = int(std::lround(desktop->w * desktop->pixel_density));
+        shown.desktop_height = int(std::lround(desktop->h * desktop->pixel_density));
+    }
+    shown.exclusive_bars = fullscreen_scaling_setting(settings) == "bars";
+    return shown;
+}
 
 }  // namespace native

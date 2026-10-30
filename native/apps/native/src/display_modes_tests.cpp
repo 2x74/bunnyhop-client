@@ -1,10 +1,12 @@
 #include "display_mode_trial.hpp"
 #include "display_modes.hpp"
+#include "runner_view.hpp"
 #include "settings.hpp"
 #include <cassert>
 #include <vector>
 
-// Exclusive fullscreen modes as the settings store them, and the ten-second trial of a new mode.
+// Exclusive fullscreen modes as the settings store them, the ten-second trial of a new mode, and the runner's view
+// sent with a run (aspect, fit and FOV) and read back for replays.
 
 namespace {
 
@@ -116,6 +118,42 @@ void trial_reverts_after_ten_seconds() {
     assert(trial.revert(after) == after);
 }
 
+void runner_view_follows_the_picture() {
+    native::GraphicsSettings graphics;
+    // Borderless 16:9 with the game drawn 4:3 and stretched.
+    graphics.aspect = 4.f / 3;
+    auto view = native::runner_view(graphics, {2560, 1440}, 90);
+    assert(view.stretched() && std::abs(view.aspect - 4. / 3) < 1e-6 && std::abs(view.screen - 16. / 9) < 1e-6);
+    assert(native::runner_view_label(view) == "4:3 stretched");
+    graphics.bars = true;
+    view = native::runner_view(graphics, {2560, 1440}, 90);
+    assert(!view.stretched() && native::runner_view_label(view) == "4:3 black bars");
+    // Exclusive 1280×960 on a 16:9 monitor, scaled by the graphics card.
+    graphics = {};
+    native::ShownWindow exclusive{1280, 960, true, 2560, 1440, false};
+    view = native::runner_view(graphics, exclusive, 100);
+    assert(view.stretched() && native::runner_view_label(view) == "4:3 stretched" && view.fov == 100);
+    exclusive.exclusive_bars = true;
+    assert(native::runner_view_label(native::runner_view(graphics, exclusive, 100)) == "4:3 black bars");
+    // Native 16:9: nothing to say beyond the shape.
+    view = native::runner_view(graphics, {1920, 1080}, 90);
+    assert(!view.stretched() && native::runner_view_label(view) == "16:9");
+
+    const auto json = native::runner_view_json(native::runner_view(graphics, {1280, 1024, true, 1920, 1080}, 95.55));
+    assert(json["aspect"] == 1.25 && json["screen"] == 1.778 && json["fit"] == "stretch" && json["fov"] == 95.6);
+    const auto read = native::read_runner_view(json);
+    assert(read && read->stretched() && native::runner_view_label(*read) == "5:4 stretched");
+    assert(!native::read_runner_view({{"aspect", 9}, {"screen", 1.778}, {"fit", "stretch"}, {"fov", 90}}));
+    assert(!native::read_runner_view({{"aspect", 1.333}, {"screen", 1.778}, {"fit", "zoom"}, {"fov", 90}}));
+    assert(!native::read_runner_view({{"aspect", 1.333}, {"screen", 1.778}, {"fit", "bars"}, {"fov", 10}}));
+
+    // A replay viewer draws the runner's shape and fit over their own settings.
+    native::GraphicsSettings viewer;
+    viewer.resolution_scale = .5f;
+    const auto shown = native::runner_view_graphics(viewer, *read);
+    assert(std::abs(shown.aspect - 1.25f) < 1e-6f && !shown.bars && shown.resolution_scale == .5f);
+}
+
 }  // namespace
 
 int main() {
@@ -124,4 +162,5 @@ int main() {
     displays_match_by_name_and_place();
     settings_validate_modes();
     trial_reverts_after_ten_seconds();
+    runner_view_follows_the_picture();
 }

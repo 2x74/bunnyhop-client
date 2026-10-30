@@ -2574,6 +2574,8 @@ int run(const native::Options &opt) {
                             if (viewer.camera.mode == "auto") {
                                 video.prepare_viewer_camera();
                             }
+                        } else if (action == "runnerView") {
+                            viewer.runner_view = native::read_runner_view(message.value("view", nlohmann::json()));
                         } else if (action == "pause")
                             viewer.paused = message.value("paused", !viewer.paused);
                         else if (action == "speed") {
@@ -3248,6 +3250,14 @@ int run(const native::Options &opt) {
                 if (!recorder.path.empty()) {
                     try {
                         recorder.write(core.get());
+                        // The runner's shape, fit and FOV, so a replay can be watched as it was played.
+                        const auto runner_view = native::runner_view_json(
+                                native::runner_view(
+                                        renderer ? renderer->current_graphics() : native::GraphicsSettings{},
+                                        native::shown_window(window.get(), preferences),
+                                        prefs.fov
+                                )
+                        );
                         // Local vault failures cannot withhold an otherwise valid replay submission.
                         const auto id = data_location::utf8(data_location::from_utf8(recorder.path).filename());
                         replay_library.archive(
@@ -3263,6 +3273,7 @@ int run(const native::Options &opt) {
                                  {"sync", run_state.sync_percent},
                                  {"finishedAt", epoch_ms()},
                                  {"client", identity.value("build", std::string("local"))},
+                                 {"view", runner_view},
                                  {"eligible", !turn_admission.local_only && bool(run_state.recording_valid)}},
                                 prefs.capture_pb_screenshots
                         );
@@ -3282,11 +3293,13 @@ int run(const native::Options &opt) {
                                 json_writer.write(cache / "backdrop-pbs.json", backdrop_pbs);
                             }
                         }
+                        auto play = run_history.play(activity, map_id, prefs, recorder.input.turns);
+                        play["view"] = runner_view;
                         run_event(recorder.finish_event(
                                 run_state.track,
                                 run_state.seconds,
                                 native::read_text(data_location::from_utf8(recorder.path)),
-                                run_history.play(activity, map_id, prefs, recorder.input.turns),
+                                play,
                                 {{"sensitivity", prefs.sensitivity}}
                         ));
                         std::cout << "Native finish " << run_state.seconds << " seconds; replay " << recorder.path
@@ -3485,7 +3498,9 @@ int run(const native::Options &opt) {
             }
             const bool local_scope = !viewer.active && !spectator && !external_camera && !opt.camera;
             if (local_scope && simulation_active) scope.frame(frame_seconds);
-            renderer->set_camera_fov(local_scope ? scope.fov(prefs.fov) : prefs.fov);
+            renderer->use_runner_view(viewer.active ? viewer.runner_view : std::nullopt);
+            const float view_fov = viewer.active && viewer.runner_view ? float(viewer.runner_view->fov) : prefs.fov;
+            renderer->set_camera_fov(local_scope ? scope.fov(prefs.fov) : view_fov);
             if (local_scope && scope.scoped()) renderer->set_viewmodel_visible(false);
             const bool world_record_finish =
                     !viewer.active && !spectator && !practice.active && !turn_admission.local_only
