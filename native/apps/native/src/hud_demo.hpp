@@ -7,6 +7,7 @@ namespace native {
 struct HudDemoState {
     HudExtras extras;
     MovementHud movement;
+    JhudReadout jhud;
     std::string split_line = "Split 3  16.731s";
     std::string delta_line;
     Chat chat;
@@ -20,6 +21,17 @@ struct HudDemoState {
                  {"ghostButtons", left | jump},
                  {"ghostDelta", -.042}}
         );
+        constexpr int demo_speed_difference = 42;
+        extras.ghost_speed.show(demo_speed_difference);
+        constexpr double demo_tick_interval = .01;
+        JhudReport jump;
+        jump.jump = 6;
+        jump.speed = 624;
+        // Reads 84.21, as the website's sample does: the readout cuts digits, and 84.21 is stored a hair under.
+        jump.gain = 84.215f;
+        jump.sync = 90.5f;
+        jump.jss = .98;
+        jhud.show(jump, 0, demo_tick_interval);
         movement.start_pre.assign("Start Pre 280");
         movement.offset.assign("Offset -1 (key early)");
         movement.first_jump.assign("FJT 0 ticks (0 ms)");
@@ -58,6 +70,7 @@ inline void draw_hud_demo(
     weapon.clip = 12;
     weapon.clip_size = 36;
     const native::Practice practice;
+    demo.jhud.configure(hud.preferences().jhud);
     hud.swap_demo(demo);
     hud.draw(
             width,

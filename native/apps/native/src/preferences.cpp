@@ -32,6 +32,9 @@ Preferences Preferences::from_settings(const nlohmann::json &settings) {
     preferences.ghost_opacity = settings.value("ghostOpacity", .4f);
     preferences.ghost_near_fade = settings.value("ghostNearFade", true);
     preferences.ghost_tag = settings.value("ghostTag", true);
+    const auto compare = settings.value("ghostCompare", std::string("auto"));
+    preferences.ghost_compare =
+            compare == "auto" ? native_render::GhostSource::none : native_render::ghost_source(compare);
     preferences.capture_pb_screenshots = settings.value("capturePbScreenshots", false);
     preferences.always_on_top = settings.value("alwaysOnTop", false);
     preferences.remember_window_bounds = settings.value("rememberWindowBounds", true);

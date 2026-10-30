@@ -333,6 +333,7 @@ int run(const native::Options &opt) {
     auto &room_events = room_bridge.room_events;
     uint32_t active_track = 0;
     native::GhostSlots ghosts;
+    native::GhostCompare ghost_compare;
     unsigned pending_ghost_slot = 0;
     std::string pending_replay, pending_action, score_notice;
     std::optional<double> known_world_record;
@@ -480,6 +481,7 @@ int run(const native::Options &opt) {
 
     auto reset_feedback = [&](bool incomplete_history = false, bool keep_jump_stats = false) {
         hud.reset_history(keep_jump_stats);
+        ghost_compare.restart();
         const auto gain = feedback.ssj_gain;
         BhRunState timing{};
         BhSnapshot snapshot{};
@@ -3173,7 +3175,11 @@ int run(const native::Options &opt) {
                         hud.ssj_report(*report);
                         feedback.ssj_gain = report->gain;
                     }
+                    if (const auto report = feedback.jhud.tick(pre, ssj_cmd, info))
+                        hud.jhud.show(*report, curr.tick, step_dt);
                 }
+                hud.jhud.expire(curr.tick);
+                if (timing.update_flags & 1) ghost_compare.restart();  // started
                 feedback.ssj_was_in_start = timing.in_start != 0;
                 feedback.ssj_was_noclip = state.movement_mode == 1;  // Mode::Noclip
                 BhSettings trainer_settings{};
@@ -3499,26 +3505,20 @@ int run(const native::Options &opt) {
             if (spectator) room.spectator_run(display_run, display_style, *spectator, steady_seconds, epoch_ms());
             if (hide_players) actors.clear();
             native::PrimaryGhost primary_ghost;
-            if (!viewer.active && !spectator && !tutorial_runner.demo && prefs.show_ghost)
-                primary_ghost = native::append_ghost_actors(
-                        ghosts,
-                        *renderer,
-                        {core.get(),
-                         run_state,
-                         curr.tick,
-                         blend,
-                         active_track,
-                         active_style,
-                         outfit,
-                         prefs.ghost_opacity},
-                        actors
-                );
-            hud.extras.ghost_progress(
-                    renderer->ghost_path(0).frames,
-                    curr,
-                    run_state,
-                    primary_ghost.shown ? &primary_ghost.command : nullptr
+            native::GhostCompare::Racing racing_ghosts{};
+            if (!viewer.active && !spectator && !tutorial_runner.demo && prefs.show_ghost) {
+                const native::GhostFrameContext ghost_context{
+                        core.get(), run_state, curr.tick, blend, active_track, active_style, outfit, prefs.ghost_opacity
+                };
+                primary_ghost = native::append_ghost_actors(ghosts, *renderer, ghost_context, actors);
+                racing_ghosts = native::racing_ghost_paths(ghosts, *renderer, ghost_context);
+            }
+            hud.extras.ghost_keys(primary_ghost.shown ? &primary_ghost.command : nullptr);
+            ghost_compare.frame(
+                    racing_ghosts, prefs.ghost_compare, native::ghost_compare_frame(run_state, prev, curr, step_dt)
             );
+            hud.extras.show_ghost_split(ghost_compare.split(), ghost_compare.delta(0));
+            hud.extras.ghost_speed.show(ghost_compare.speed_delta());
             if (external_camera) {
                 renderer->set_viewmodel_visible(false);
                 native_render::Actor self;
@@ -3640,7 +3640,7 @@ int run(const native::Options &opt) {
                             *primary_actor,
                             hud.extras.ghost_name.view(),
                             hud.extras.ghost_seconds,
-                            hud.extras.ghost_delta.view(),
+                            hud.extras.ghost_tag_delta.view(),
                             hud.preferences().tags_through_walls,
                             native::NameTagTrace{core.get(), eye},
                             renderer->output_view(width, height)

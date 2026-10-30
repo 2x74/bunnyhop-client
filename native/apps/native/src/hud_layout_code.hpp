@@ -11,12 +11,12 @@ namespace native {
 // in the website's order [on << 7 | anchor] [x int16, 1e-4] [y int16] [scale / 50], then the keys overlay's
 // [style] [opacity * 100] [rows] [pressed rgb] [idle rgb]. A code copied on either side imports on the other.
 inline constexpr std::string_view hud_layout_code_prefix = "bhl1.";
-inline constexpr unsigned hud_layout_code_version = 8;
+inline constexpr unsigned hud_layout_code_version = 9;
 inline constexpr std::array<std::string_view, 3> hud_keys_styles = {"classic", "keycaps", "minimal"};
 
 // Elements each older code version carries, in the website's order; the rest keep their default place.
 inline size_t hud_layout_code_elements(unsigned version) {
-    constexpr std::array<size_t, 8> counts = {14, 15, 16, 17, 18, 21, 22, web_hud_elements.size()};
+    constexpr std::array<size_t, 9> counts = {14, 15, 16, 17, 18, 21, 22, 23, web_hud_elements.size()};
     return version >= 1 && version <= counts.size() ? counts[version - 1] : 0;
 }
 

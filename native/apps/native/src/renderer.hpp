@@ -1517,6 +1517,7 @@ public:
     void set_ghost_path(unsigned slot, native_render::GhostPath path) {
         if (slot >= ghostPaths.size()) throw std::runtime_error("Invalid ghost slot");
         path.build_route();
+        path.revision = native_render::next_ghost_path_revision();
         ghostPaths[slot] = std::move(path);
         if (ghostRoutes) ghostRoutes->upload(slot, ghostPaths[slot], ghostOptions.route_path);
     }

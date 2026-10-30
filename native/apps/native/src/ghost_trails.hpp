@@ -4,6 +4,7 @@
 #include "native_cosmetics.hpp"
 #include "graphics_settings.hpp"
 #include <array>
+#include <atomic>
 #include <span>
 #include <vector>
 
@@ -54,6 +55,12 @@ struct GhostOptions {
     }
 };
 
+// Tells one loaded path from the next, though a new path's frames may land on a freed one's memory.
+inline uint64_t next_ghost_path_revision() {
+    static std::atomic<uint64_t> revision = 0;
+    return ++revision;
+}
+
 struct GhostPath {
     struct Segment {
         Vec3 from, to;
@@ -68,6 +75,7 @@ struct GhostPath {
     double interval = 1. / 64;
     GhostSource source = GhostSource::custom;
     bool enabled = false;
+    uint64_t revision = 0;
 
     void build_route() {
         jump_links.clear();
@@ -126,6 +134,7 @@ struct GhostPath {
             }
         }
         enabled = true;
+        revision = next_ghost_path_revision();
         build_route();
     }
 };

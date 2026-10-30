@@ -28,7 +28,7 @@ function rng(seed: number): () => number {
   };
 }
 
-interface Tick {
+export interface Tick {
   px: number;
   py: number;
   pz: number;
@@ -48,7 +48,7 @@ interface Tick {
   time: number | null;
 }
 
-function stream(seed: number, count: number): Tick[] {
+export function stream(seed: number, count: number): Tick[] {
   const random = rng(seed);
   const ticks: Tick[] = [];
   let x = 0,
@@ -147,24 +147,26 @@ function stream(seed: number, count: number): Tick[] {
   return ticks;
 }
 
-const modes: SsjMode[] = ["sixth", "every", "everySixth"];
-const cases = modes.flatMap((mode, index) =>
-  [11, 97, 4242].map((seed) => {
-    const ticks = stream(seed + index * 1000, 2600);
-    const tracker = new SsjTracker(mode);
-    const reports = ticks.map((t) =>
-      tracker.tick(
-        { position: [t.px, t.py, t.pz], velocity: [t.vx, t.vy, t.vz], grounded: t.grounded, onLadder: t.onLadder },
-        { forward: t.forward, side: t.side, yaw: t.yaw, buttons: t.buttons },
-        { jumped: t.jumped, teleported: t.teleported, inStart: t.inStart, noclip: t.noclip, time: t.time },
-      ),
-    );
-    return { mode, seed, ticks, reports };
-  }),
-);
+if (import.meta.main) {
+  const modes: SsjMode[] = ["sixth", "every", "everySixth"];
+  const cases = modes.flatMap((mode, index) =>
+    [11, 97, 4242].map((seed) => {
+      const ticks = stream(seed + index * 1000, 2600);
+      const tracker = new SsjTracker(mode);
+      const reports = ticks.map((t) =>
+        tracker.tick(
+          { position: [t.px, t.py, t.pz], velocity: [t.vx, t.vy, t.vz], grounded: t.grounded, onLadder: t.onLadder },
+          { forward: t.forward, side: t.side, yaw: t.yaw, buttons: t.buttons },
+          { jumped: t.jumped, teleported: t.teleported, inStart: t.inStart, noclip: t.noclip, time: t.time },
+        ),
+      );
+      return { mode, seed, ticks, reports };
+    }),
+  );
 
-const out = process.argv[2];
-if (!out) throw new Error("usage: ssj_oracle.ts <output.json>");
-writeFileSync(out, JSON.stringify({ cases }));
-const total = cases.reduce((n, c) => n + c.reports.filter(Boolean).length, 0);
-console.log(`SSJ oracle: ${cases.length} cases, ${cases[0].ticks.length} ticks each, ${total} reports`);
+  const out = process.argv[2];
+  if (!out) throw new Error("usage: ssj_oracle.ts <output.json>");
+  writeFileSync(out, JSON.stringify({ cases }));
+  const total = cases.reduce((n, c) => n + c.reports.filter(Boolean).length, 0);
+  console.log(`SSJ oracle: ${cases.length} cases, ${cases[0].ticks.length} ticks each, ${total} reports`);
+}

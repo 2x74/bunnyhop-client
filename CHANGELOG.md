@@ -2,12 +2,18 @@
 
 ## Unreleased
 
-- Maps now play approved ambience and soundscapes, with Map sounds volume and mute controls.
-
 - The camera no longer goes through low ceilings. Under one, your view stays 12 units below it, as in CS:S. This
   moves only what you see: physics and ranked runs are unchanged.
 - The HUD clock counts while you bhop in the start zone instead of showing 0 until you leave it.
 - Maps with unconfirmed or incomplete zones say so in the map panel and once when they load.
+- Maps now play approved ambience and soundscapes, with Map sounds volume and mute controls.
+- JHUD: type `!jhud` to see the speed and gain of every jump near your crosshair, coloured by how it went, with
+  optional sync, JSS and a strafe arrow. It's off until you turn it on; Settings → HUD → JHUD has its colours, and
+  the layout editor moves it.
+- Speed difference: your speed against your race ghost's at the same point on its route, beside your speed. Turn it
+  on in Settings → Ghost → Compare.
+- Compare with: pick the ghost your split and speed difference use. The split now stays on the lap or level you're
+  on, as on the website.
 
 ## v0.6.2 — Native
 

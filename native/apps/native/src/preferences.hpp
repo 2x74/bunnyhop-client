@@ -1,6 +1,7 @@
 #pragma once
 #include <nlohmann/json.hpp>
 #include "input_backend_choice.hpp"
+#include "native_cosmetics.hpp"
 #include <string>
 
 namespace native {
@@ -33,6 +34,7 @@ struct Preferences {
     float ghost_opacity;
     bool ghost_near_fade;
     bool ghost_tag;
+    native_render::GhostSource ghost_compare;
     bool capture_pb_screenshots;
     bool always_on_top;
     bool remember_window_bounds;

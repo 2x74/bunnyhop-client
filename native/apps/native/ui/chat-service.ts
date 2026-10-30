@@ -41,7 +41,7 @@ export type ChatAction =
       type: "chatAction";
       action: "paint" | "clearPaint" | "paintOptions" | "measure" | "clearMeasure" | "lastLj" | "triggerMenu";
     }
-  | { type: "chatAction"; action: "movementStat"; stat: "offsets" | "fjt" | "lj"; on?: boolean };
+  | { type: "chatAction"; action: "movementStat"; stat: "offsets" | "fjt" | "lj" | "jhud"; on?: boolean };
 export interface NativeChatLine {
   type: "chatLine";
   text: string;
@@ -101,6 +101,25 @@ export class NativeChatService {
         group: "more",
         help: "toggle jump stats",
         run: () => emit({ type: "chatAction", action: "jumpStats" }),
+      });
+      registerChatCommand({
+        name: "jhud",
+        args: "[on|off]",
+        where: "both",
+        group: "more",
+        help: "jump hud",
+        about:
+          "speed and gain of every jump near the crosshair, coloured by how it went. !jhud opens its settings; !jhud on or off just switches it.",
+        run: (ctx, arg) => {
+          const value = arg.toLowerCase();
+          if (!value) {
+            emit({ type: "chatAction", action: "jumpStats" });
+            return;
+          }
+          if (value !== "on" && value !== "off") return ctx.reply("Usage: !jhud [on|off]");
+          emit({ type: "chatAction", action: "movementStat", stat: "jhud", on: value === "on" });
+          ctx.reply(`JHUD ${value}. !jhud for its settings; Edit layout moves it.`);
+        },
       });
       registerChatCommand({
         name: "showtriggers",
