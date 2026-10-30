@@ -1,0 +1,194 @@
+{
+  "source": "apps/web/src/mouse-filter.ts",
+  "sha256": "c3ba91d170d99e65931c36c104f781b5e19ab1ba2f625188790162378213b877",
+  "startMs": 1000,
+  "scenarios": [
+    {
+      "rate": 125,
+      "durationMs": 2000,
+      "frameMs": 10,
+      "movingMs": 2000,
+      "expected": {
+        "events": 250,
+        "reports": 250,
+        "maxDelta": 3,
+        "frameP50": 10,
+        "frameP99": 10,
+        "frameMax": 10,
+        "over25": 0,
+        "over50": 0,
+        "pollHz": 125
+      }
+    },
+    {
+      "rate": 250,
+      "durationMs": 2000,
+      "frameMs": 10,
+      "movingMs": 2000,
+      "expected": {
+        "events": 500,
+        "reports": 500,
+        "maxDelta": 3,
+        "frameP50": 10,
+        "frameP99": 10,
+        "frameMax": 10,
+        "over25": 0,
+        "over50": 0,
+        "pollHz": 250
+      }
+    },
+    {
+      "rate": 500,
+      "durationMs": 2000,
+      "frameMs": 10,
+      "movingMs": 2000,
+      "expected": {
+        "events": 1000,
+        "reports": 1000,
+        "maxDelta": 3,
+        "frameP50": 10,
+        "frameP99": 10,
+        "frameMax": 10,
+        "over25": 0,
+        "over50": 0,
+        "pollHz": 500
+      }
+    },
+    {
+      "rate": 1000,
+      "durationMs": 2000,
+      "frameMs": 10,
+      "movingMs": 2000,
+      "expected": {
+        "events": 2000,
+        "reports": 2000,
+        "maxDelta": 3,
+        "frameP50": 10,
+        "frameP99": 10,
+        "frameMax": 10,
+        "over25": 0,
+        "over50": 0,
+        "pollHz": 1000
+      }
+    },
+    {
+      "rate": 2000,
+      "durationMs": 2000,
+      "frameMs": 10,
+      "movingMs": 2000,
+      "expected": {
+        "events": 4000,
+        "reports": 4000,
+        "maxDelta": 3,
+        "frameP50": 10,
+        "frameP99": 10,
+        "frameMax": 10,
+        "over25": 0,
+        "over50": 0,
+        "pollHz": 2000
+      }
+    },
+    {
+      "rate": 4000,
+      "durationMs": 2000,
+      "frameMs": 10,
+      "movingMs": 2000,
+      "expected": {
+        "events": 8000,
+        "reports": 8000,
+        "maxDelta": 3,
+        "frameP50": 10,
+        "frameP99": 10,
+        "frameMax": 10,
+        "over25": 0,
+        "over50": 0,
+        "pollHz": 4000
+      }
+    },
+    {
+      "rate": 8000,
+      "durationMs": 2000,
+      "frameMs": 10,
+      "movingMs": 2000,
+      "expected": {
+        "events": 16000,
+        "reports": 16000,
+        "maxDelta": 3,
+        "frameP50": 10,
+        "frameP99": 10,
+        "frameMax": 10,
+        "over25": 0,
+        "over50": 0,
+        "pollHz": 8000
+      }
+    },
+    {
+      "rate": 1000,
+      "durationMs": 1000,
+      "frameMs": 10,
+      "movingMs": 1000,
+      "expected": {
+        "events": 1000,
+        "reports": 1000,
+        "maxDelta": 3,
+        "frameP50": 10,
+        "frameP99": 10,
+        "frameMax": 10,
+        "over25": 0,
+        "over50": 0,
+        "pollHz": 0
+      }
+    },
+    {
+      "rate": 1000,
+      "durationMs": 3000,
+      "frameMs": 40,
+      "movingMs": 3000,
+      "expected": {
+        "events": 3000,
+        "reports": 3000,
+        "maxDelta": 3,
+        "frameP50": 40,
+        "frameP99": 40,
+        "frameMax": 40,
+        "over25": 75,
+        "over50": 0,
+        "pollHz": 1000
+      }
+    },
+    {
+      "rate": 1000,
+      "durationMs": 3000,
+      "frameMs": 60,
+      "movingMs": 3000,
+      "expected": {
+        "events": 3000,
+        "reports": 3000,
+        "maxDelta": 3,
+        "frameP50": 60,
+        "frameP99": 60,
+        "frameMax": 60,
+        "over25": 50,
+        "over50": 50,
+        "pollHz": 1000
+      }
+    },
+    {
+      "rate": 1000,
+      "durationMs": 2000,
+      "frameMs": 10,
+      "movingMs": 200,
+      "expected": {
+        "events": 200,
+        "reports": 200,
+        "maxDelta": 3,
+        "frameP50": 10,
+        "frameP99": 10,
+        "frameMax": 10,
+        "over25": 0,
+        "over50": 0,
+        "pollHz": 0
+      }
+    }
+  ]
+}

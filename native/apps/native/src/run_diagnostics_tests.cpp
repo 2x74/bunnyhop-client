@@ -244,9 +244,45 @@ void bounds_and_reset() {
     assert(result["input"]["events"] == 0 && result["input"]["maxDelta"] == 0);
     assert(sanitize_play({{"attempt", 10'000'001}, {"seconds", -1}, {"pollHz", 999}}).empty());
 }
+
+void web_diagnostics(const char *path) {
+    std::ifstream stream(path);
+    assert(stream);
+    const auto vectors = Json::parse(stream);
+    const uint64_t start = vectors.at("startMs").get<uint64_t>() * millisecond_ns;
+    for (const auto &scenario : vectors.at("scenarios")) {
+        const uint64_t rate = scenario.at("rate"), duration_ms = scenario.at("durationMs");
+        const uint64_t frame_ms = scenario.at("frameMs"), moving_ms = scenario.at("movingMs");
+        native::TimedInput queue;
+        native::RunDiagnostics diagnostics;
+        diagnostics.start(start, queue, true);
+        uint64_t next_report = 1;
+        for (uint64_t elapsed_ms = frame_ms; elapsed_ms <= duration_ms; elapsed_ms += frame_ms) {
+            while (next_report * second_ns / rate <= std::min(elapsed_ms, moving_ms) * millisecond_ns) {
+                const uint64_t timestamp = start + next_report++ * second_ns / rate;
+                diagnostics.motion(timestamp, start + elapsed_ms * millisecond_ns, 3, 0);
+                ++queue.reports;
+            }
+            if (elapsed_ms < duration_ms) diagnostics.frame(start + elapsed_ms * millisecond_ns, queue);
+        }
+        diagnostics.stop(start + duration_ms * millisecond_ns, queue);
+        const auto result = diagnostics.serialize(Json::object());
+        const auto &input = result.at("input");
+        for (const auto &[key, value] : scenario.at("expected").items()) {
+            if (key == "pollHz") {
+                assert(input.value("pollHz", 0) == value);
+            } else {
+                assert(input.at(key) == value);
+            }
+        }
+        server_accepts(result);
+    }
+}
 }  // namespace
 
-int main() {
+int main(int argc, char **argv) {
+    assert(argc == 2);
+    web_diagnostics(argv[1]);
     recorded_run();
     history();
     polling();

@@ -8,7 +8,7 @@ window) and WebView2 on Windows. The menu bundle refuses the web game entry poin
 (`build-menu.ts`, `menu-boundary.ts`). There is no Electron dependency; the old Electron client lives at the
 repository root.
 
-The vendored game sources come from web `release-0.0.30` at `1593e71b`, physics 19, timer rules 2. Historical
+The vendored game sources come from web `release-0.0.30` at `56bc58e0`, physics 19, timer rules 2. Historical
 physics 1–18 remain available for replays. See [the v0.0.30 integration notes](../../docs/v0.0.30-native-integration.md).
 
 ## Build and play
@@ -100,6 +100,9 @@ native code owns the four-second signed heartbeat and command hashes. The server
 with the canonical verifier. Only a build on the server's allowlist (`ALLOWED_NATIVE_CLIENT_BUILDS`, matching
 build, WASM, physics and rules, unexpired) can upload ranked runs; any other build keeps its replays locally.
 
+Segmented is hidden from native style selection until checkpoint loads rebuild its stitched replay. The native
+upload transport also refuses Segmented runs.
+
 Turn binds use `cl_yawspeed` and the fast-turn multiplier and are recorded in the replay. In Legit Scroll they
 keep the attempt local outside practice. Recording stops at 180,000 commands (about 30 minutes). Closing the app
 drops pending uploads; the BHR stays on disk.
@@ -122,7 +125,7 @@ verification.
 The HUD layout editor runs in the host, over the game (`src/hud_editor.cpp`): F2 or Settings → HUD → Edit layout
 (`hudEditor`) opens it. Places are the website's anchored `hudLayoutWeb` entries, so a `bhl1.` layout code imports on
 either side; the run status, notices and replay banner, which the website doesn't have, are anchored `hudLayout`
-entries. Settings → HUD → Layout preset sends `hudPreset` with `classic`, `minimal` or `streamer`.
+entries. HUD presets keep the player’s strafe trainer switch. Settings → HUD → Layout preset sends `hudPreset` with `classic`, `minimal` or `streamer`.
 
 Account → Edit avatar is the website's avatar editor (`ui/avatar-editor.ts`). The menu has no WebGL, so it sends
 `avatarRender` with the spec, its packed loadout and backdrop, and the host poses and draws the bunny offscreen
