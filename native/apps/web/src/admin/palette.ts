@@ -3,7 +3,7 @@
 //                       players by name or id (GET /admin/players), maps (GET /maps, opens their runs). Up / down,
 //                       Enter, Esc.
 //   g then a letter      go to a section: q l a p i b u s (the letters show in the rail while g is held: body.goto)
-//   ?                    the palette, which lists the shortcuts in its foot
+//   ?                    every shortcut, the view's own too (shortcuts.ts; deps.help), else the palette
 // Only sections and views the viewer may open are offered (the caller filters by the staff matrix). Plain DOM; user
 // text (player names) only through textContent.
 
@@ -19,6 +19,10 @@ export interface PaletteDeps {
   canOpen: (tab: string) => boolean;
   /** g + key: where the key goes for this viewer (null: nothing). */
   goto: (key: string) => string | null;
+  /** ?: the shortcuts sheet. */
+  help?: () => void;
+  /** A player picked: their drawer (drawer.ts); Shift+Enter or a modified click opens the full page. */
+  openPlayer?: (id: string) => void;
 }
 
 /** g + key: the section each key opens (main.ts SECTIONS carries the same letters). */
@@ -104,8 +108,10 @@ export function installPalette(d: PaletteDeps): { open: (q?: string) => void } {
   let seq = 0;
   let timer = 0;
 
-  const go = (href: string) => {
+  const go = (href: string, page = false) => {
     dlg.close();
+    const player = /^#\/player\/([^/?]+)$/.exec(href);
+    if (player && !page && d.openPlayer) return d.openPlayer(decodeURIComponent(player[1]));
     if (location.hash === href) window.dispatchEvent(new HashChangeEvent("hashchange"));
     else location.hash = href;
   };
@@ -165,7 +171,7 @@ export function installPalette(d: PaletteDeps): { open: (q?: string) => void } {
         }
         row.append(k);
       }
-      row.addEventListener("click", (e) => (e.preventDefault(), go(it.href)));
+      row.addEventListener("click", (e) => (e.preventDefault(), go(it.href, e.shiftKey || e.metaKey || e.ctrlKey)));
       row.addEventListener("pointermove", () => {
         if (sel === i) return;
         sel = i;
@@ -219,7 +225,7 @@ export function installPalette(d: PaletteDeps): { open: (q?: string) => void } {
     } else if (e.key === "Enter") {
       e.preventDefault();
       const it = items[sel];
-      if (it) go(it.href);
+      if (it) go(it.href, e.shiftKey);
     }
   });
 
@@ -267,7 +273,10 @@ export function installPalette(d: PaletteDeps): { open: (q?: string) => void } {
       }
       return;
     }
-    if (e.key === "/" || e.key === "?") {
+    if (e.key === "?" && d.help) {
+      e.preventDefault();
+      d.help();
+    } else if (e.key === "/" || e.key === "?") {
       e.preventDefault();
       open();
     } else if (e.key === "g") {

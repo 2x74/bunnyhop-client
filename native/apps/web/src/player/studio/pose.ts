@@ -26,6 +26,8 @@ function quatScale(x: number, y: number, z: number, w: number, t: number, out: F
 }
 
 const tmp4 = new Float32Array(4);
+// Quaternion lengths below are Math.sqrt of the summed squares, not Math.hypot: V8's hypot allocates an array of its
+// arguments on every call, and these run per bone per layer per frame for every model on screen.
 
 export class BoneSetup {
   /** Current pose, bone-local (quat xyzw, position). */
@@ -50,12 +52,12 @@ export class BoneSetup {
     d.info.poseParams.forEach((_, i) => this.setPoseParam(i, 0));
   }
 
-  private temp(depth: number): [Float32Array, Float32Array] {
+  /** Makes sure scratch buffers exist for `depth` (tq[depth], tp[depth]). */
+  private temp(depth: number): void {
     while (this.tq.length <= depth) {
       this.tq.push(new Float32Array(this.d.bones * 4));
       this.tp.push(new Float32Array(this.d.bones * 3));
     }
-    return [this.tq[depth], this.tp[depth]];
   }
 
   /** `Studio_SetPoseParameter`: stores the normalised value; returns the clamped real value. */
@@ -131,25 +133,25 @@ export class BoneSetup {
   private seqAnims(s: Seq): number {
     this.localPose(s, 0, this.lp0);
     this.localPose(s, 1, this.lp1);
-    const [s0, i0] = this.lp0;
-    const [s1, i1] = this.lp1;
+    const s0 = this.lp0[0], i0 = this.lp0[1];
+    const s1 = this.lp1[0], i1 = this.lp1[1];
     const cols = s.groupSize[0];
     const rows = s.groupSize[1];
-    const last = s.anims.length - 1;
     const x1 = Math.min(i0 + 1, cols - 1);
     const y1 = Math.min(i1 + 1, rows - 1);
-    let n = 0;
-    const put = (x: number, y: number, w: number) => {
-      if (w <= 0.001) return;
-      this.cornerA[n] = s.anims[Math.min(last, y * cols + x)];
-      this.cornerW[n] = w;
-      n++;
-    };
-    put(i0, i1, (1 - s0) * (1 - s1));
-    put(x1, i1, s0 * (1 - s1));
-    put(i0, y1, (1 - s0) * s1);
-    put(x1, y1, s0 * s1);
-    return n;
+    // (Per frame for every model on screen: no closure or tuple allocations here.)
+    let n = this.corner(s, 0, i0, i1, (1 - s0) * (1 - s1));
+    n = this.corner(s, n, x1, i1, s0 * (1 - s1));
+    n = this.corner(s, n, i0, y1, (1 - s0) * s1);
+    return this.corner(s, n, x1, y1, s0 * s1);
+  }
+
+  /** One corner of seqAnims' blend grid into cornerA/cornerW at `n` (skipped when its weight is ~0); the new count. */
+  private corner(s: Seq, n: number, x: number, y: number, w: number): number {
+    if (w <= 0.001) return n;
+    this.cornerA[n] = s.anims[Math.min(s.anims.length - 1, y * s.groupSize[0] + x)];
+    this.cornerW[n] = w;
+    return n + 1;
   }
 
   /** `Studio_CPS`: cycles per second of a sequence at the current pose parameters. */
@@ -238,7 +240,7 @@ export class BoneSetup {
     const inv = wsum > 0 ? 1 / wsum : 1;
     for (let j = 0; j < act.length; j++) {
       const qo = act[j] * 4;
-      const l = Math.hypot(tq[qo], tq[qo + 1], tq[qo + 2], tq[qo + 3]) || 1;
+      const l = Math.sqrt(tq[qo] * tq[qo] + tq[qo + 1] * tq[qo + 1] + tq[qo + 2] * tq[qo + 2] + tq[qo + 3] * tq[qo + 3]) || 1;
       tq[qo] /= l;
       tq[qo + 1] /= l;
       tq[qo + 2] /= l;
@@ -284,7 +286,7 @@ export class BoneSetup {
           z = dw * az + dx * ay - dy * ax + dz * aw;
           ww = dw * aw - dx * ax - dy * ay - dz * az;
         }
-        const l = Math.hypot(x, y, z, ww) || 1;
+        const l = Math.sqrt(x * x + y * y + z * z + ww * ww) || 1;
         Q[qo] = x / l;
         Q[qo + 1] = y / l;
         Q[qo + 2] = z / l;
@@ -318,7 +320,7 @@ export class BoneSetup {
       const y = Q[qo + 1] * s1 + by * s2;
       const z = Q[qo + 2] * s1 + bz * s2;
       const ww = Q[qo + 3] * s1 + bw * s2;
-      const l = Math.hypot(x, y, z, ww) || 1;
+      const l = Math.sqrt(x * x + y * y + z * z + ww * ww) || 1;
       Q[qo] = x / l;
       Q[qo + 1] = y / l;
       Q[qo + 2] = z / l;
@@ -336,7 +338,8 @@ export class BoneSetup {
     const s = this.d.seqs[seqIndex];
     if (!s) return;
     this.layersThisFrame++;
-    const [tq, tp] = this.temp(depth);
+    this.temp(depth);
+    const tq = this.tq[depth], tp = this.tp[depth];
     this.calcPoseSingle(s, cycle, tq, tp);
     this.slerpBones(s, tq, tp, weight);
     // AddSequenceLayers

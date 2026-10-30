@@ -358,10 +358,15 @@ export class SourceHdr {
     return this.black;
   }
 
+  /** The depth of the last scene drawn (the blended surfaces are drawn over it after the composite: gamma-blend.ts). */
+  get depthTexture(): THREE.DepthTexture | null {
+    return this.scene?.depthTexture ?? null;
+  }
+
   private ensureTargets(): void {
     if (this.scene) return;
     const samples = this.renderer.getContext().getContextAttributes()?.antialias ? 4 : 0;
-    this.scene = new THREE.WebGLRenderTarget(this.width, this.height, { type: THREE.HalfFloatType, samples, depthBuffer: true });
+    this.scene = new THREE.WebGLRenderTarget(this.width, this.height, { type: THREE.HalfFloatType, samples, depthBuffer: true, depthTexture: new THREE.DepthTexture(this.width, this.height) });
   }
 
   private disposeTargets(): void {

@@ -11,6 +11,7 @@
 import * as THREE from "three";
 import type { PlayerPose } from "../model";
 import { rig, type Rig, type V3 } from "./rig";
+import { hypot2, hypot3 } from "../../hypot";
 
 const enum C {
   HIPS_Y, HIPS_PITCH, HIPS_YAW, HIPS_ROLL,
@@ -127,7 +128,7 @@ export class BunnyProcedural {
     }
     const len = (a: string, b: string) => {
       const p = at(r.bone(a)), q = at(r.bone(b));
-      return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+      return hypot3(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
     };
     this.thigh = len("L_Thigh", "L_Calf");
     this.shin = len("L_Calf", "L_Foot");
@@ -137,7 +138,7 @@ export class BunnyProcedural {
   /** Two-bone leg IK in the sagittal plane: foot at (forward, down) from the hip -> [thigh swing, knee flex] (deg). */
   private legIK(fwd: number, down: number): [number, number] {
     const L1 = this.thigh, L2 = this.shin;
-    const d = clamp(Math.hypot(fwd, down), Math.abs(L1 - L2) + 0.1, L1 + L2 - 0.01);
+    const d = clamp(hypot2(fwd, down), Math.abs(L1 - L2) + 0.1, L1 + L2 - 0.01);
     const knee = Math.PI - Math.acos(clamp((L1 * L1 + L2 * L2 - d * d) / (2 * L1 * L2), -1, 1));
     const toFoot = Math.atan2(fwd, down);
     const inner = Math.acos(clamp((L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), -1, 1));
@@ -148,7 +149,7 @@ export class BunnyProcedural {
   update(dt: number, s: PlayerPose, vel: number[], snap: boolean, _jumped: boolean, S: Float32Array): number {
     this.time = s.visualTime ?? (this.time + dt);
     const [vx, vy, vz] = vel;
-    const speed = Math.hypot(vx, vy);
+    const speed = hypot2(vx, vy);
     let dYaw = Number.isNaN(this.lastYaw) || snap || dt <= 0 ? 0 : wrap180(s.yaw - this.lastYaw) / dt;
     this.lastYaw = s.yaw;
     if (Math.abs(dYaw) > 3000) dYaw = 0;

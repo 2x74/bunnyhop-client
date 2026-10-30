@@ -19,7 +19,7 @@ index 0c958a8..2556240 100644
  playsrc-collision = { path = "../vendor/collision" }
  playsrc-movement = { path = "../vendor/movement" }
 diff --git a/crates/core/src/game.rs b/crates/core/src/game.rs
-index 3fd54df..58d93df 100644
+index cc0eeea..ff4f7cb 100644
 --- a/crates/core/src/game.rs
 +++ b/crates/core/src/game.rs
 @@ -1195,8 +1195,8 @@ impl Tracer for Scene<'_> {
@@ -33,7 +33,7 @@ index 3fd54df..58d93df 100644
      [cp * cy, cp * sy, -sp]
  }
  
-@@ -2113,8 +2113,8 @@ impl Game {
+@@ -2114,8 +2114,8 @@ impl Game {
          let lo = [p[0] + hull.mins[0], p[1] + hull.mins[1], p[2] + hull.mins[2]];
          let hi = [p[0] + hull.maxs[0], p[1] + hull.maxs[1], p[2] + hull.maxs[2]];
          let center = [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5];
@@ -45,7 +45,7 @@ index 3fd54df..58d93df 100644
          let right = [sy, -cy, 0.0];
          let (mut forward, mut side) = (forward, side);
 diff --git a/crates/core/src/game/kin.rs b/crates/core/src/game/kin.rs
-index 60bf365..1eb4378 100644
+index a70a7e3..f66d9af 100644
 --- a/crates/core/src/game/kin.rs
 +++ b/crates/core/src/game/kin.rs
 @@ -99,12 +99,12 @@ pub(super) fn vector_angles(f: [f32; 3]) -> [f32; 3] {
@@ -63,7 +63,7 @@ index 60bf365..1eb4378 100644
      if pitch < 0.0 {
          pitch += 360.0;
      }
-@@ -2542,7 +2542,7 @@ fn brush_probes(world: &playsrc_collision::World, model: usize) -> Vec<[f32; 3]>
+@@ -2560,7 +2560,7 @@ fn brush_probes(world: &playsrc_collision::World, model: usize) -> Vec<[f32; 3]>
          let c = face.iter().fold([0.0f32; 3], |a, p| v_add(a, *p));
          let c = v_scale(c, 1.0 / face.len() as f32);
          let mut poly = face.clone();
@@ -72,7 +72,7 @@ index 60bf365..1eb4378 100644
          let (lo, hi) = poly.iter().fold(([f32::MAX; 2], [f32::MIN; 2]), |(lo, hi), p| ([lo[0].min(p[0]), lo[1].min(p[1])], [hi[0].max(p[0]), hi[1].max(p[1])]));
          let inside = |x: f32, y: f32| {
              (0..poly.len()).all(|k| {
-@@ -2620,9 +2620,9 @@ type Quat = [f32; 4];
+@@ -2638,9 +2638,9 @@ type Quat = [f32; 4];
  
  /// mathlib AngleQuaternion.
  fn quat_from_angles(a: [f32; 3]) -> Quat {
@@ -85,7 +85,7 @@ index 60bf365..1eb4378 100644
      let srxcp = sr * cp;
      let crxsp = cr * sp;
      let crxcp = cr * cp;
-@@ -2631,7 +2631,7 @@ fn quat_from_angles(a: [f32; 3]) -> Quat {
+@@ -2649,7 +2649,7 @@ fn quat_from_angles(a: [f32; 3]) -> Quat {
  }
  
  fn quat_axis_angle(axis: [f32; 3], degrees: f32) -> Quat {
@@ -94,7 +94,7 @@ index 60bf365..1eb4378 100644
      [axis[0] * s, axis[1] * s, axis[2] * s, c]
  }
  
-@@ -2664,12 +2664,12 @@ fn angles_from_quat(q: Quat) -> [f32; 3] {
+@@ -2682,12 +2682,12 @@ fn angles_from_quat(q: Quat) -> [f32; 3] {
      let xy = (m00 * m00 + m10 * m10).sqrt();
      if xy > 0.001 {
          [
@@ -111,7 +111,7 @@ index 60bf365..1eb4378 100644
      }
  }
  
-@@ -2677,7 +2677,7 @@ fn quat_angle_diff(p: Quat, q: Quat) -> f32 {
+@@ -2695,7 +2695,7 @@ fn quat_angle_diff(p: Quat, q: Quat) -> f32 {
      let qinv = [-q[0], -q[1], -q[2], q[3]];
      let d = quat_mul(p, qinv);
      let sin = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().min(1.0);
@@ -120,7 +120,7 @@ index 60bf365..1eb4378 100644
  }
  
  /// mathlib QuaternionSlerp (with QuaternionAlign).
-@@ -2691,10 +2691,10 @@ fn quat_slerp(p: Quat, q: Quat, t: f32) -> Quat {
+@@ -2709,10 +2709,10 @@ fn quat_slerp(p: Quat, q: Quat, t: f32) -> Quat {
      let mut qt = [0.0; 4];
      if 1.0 + cosom > 0.000001 {
          if 1.0 - cosom > 0.000001 {
@@ -135,7 +135,7 @@ index 60bf365..1eb4378 100644
          } else {
              sclp = 1.0 - t;
              sclq = t;
-@@ -2704,8 +2704,8 @@ fn quat_slerp(p: Quat, q: Quat, t: f32) -> Quat {
+@@ -2722,8 +2722,8 @@ fn quat_slerp(p: Quat, q: Quat, t: f32) -> Quat {
          }
      } else {
          qt = [-q[1], q[0], -q[3], q[2]];

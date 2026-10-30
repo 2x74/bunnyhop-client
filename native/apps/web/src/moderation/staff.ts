@@ -11,8 +11,7 @@
 //   - rank: nobody but the owner acts on staff of their own rank or higher (outranks);
 //   - moderator bans: temporary only, at most MOD_BAN_MAX_MINUTES, never replacing a ban set by an admin, and a
 //     moderator lifts only bans set by moderators;
-//   - moderator shadowbans: a moderator lifts only shadowbans set by moderators in the panel, never one set by an admin,
-//     the owner, the token, Bun-E or the anticheat (player.unshadow.any).
+//   - every staff role can lift a shadowban, including automatic false positives, with a logged reason.
 
 import type { StaffRole } from "../progression";
 
@@ -76,11 +75,11 @@ export const PERMISSIONS = {
   "cases.work": "moderator",
   /**
    * Shadowban / un-shadow (src/shadow.ts: the player keeps playing, nobody else sees them). A softer action than a ban,
-   * so moderators hold it like player.ban.temp; they lift only the shadowbans moderators set (player.unshadow.any).
+   * so moderators hold it like player.ban.temp; every lift requires a reason in the audit log.
    */
   "player.shadow": "moderator",
   /** Lifting any shadowban (set by an admin, the owner, the token, Bun-E or the anticheat / ban-evasion rules). */
-  "player.unshadow.any": "admin",
+  "player.unshadow.any": "moderator",
   // --- names
   "names.rename": "moderator",
   "names.unban": "admin",

@@ -174,11 +174,25 @@ export const PRESETS: { id: string; label: string; layout: HudLayout }[] = [
 
 export const cloneLayout = (l: HudLayout): HudLayout => JSON.parse(JSON.stringify(l));
 
+/**
+ * Elements a player turns on for themselves (a training aid), not part of a preset's look: picking a preset keeps them
+ * on or off, and a layout matches a preset whatever their on / off. (Before, picking Classic turned the strafe trainer
+ * back off, so "I turned it on" and "I can't see it" were both true: zzuji, Discord 2026-10-28.)
+ */
+const PERSONAL: readonly HudElId[] = ["strafeTrainer"];
+
+/** `preset` as a fresh layout, with the PERSONAL elements' on / off taken from `current`. */
+export function presetLayout(preset: HudLayout, current: HudLayout): HudLayout {
+  const l = cloneLayout(preset);
+  for (const id of PERSONAL) l[id].on = current[id].on;
+  return l;
+}
+
 export function sameLayout(a: HudLayout, b: HudLayout): boolean {
   return HUD_ELEMENTS.every(({ id }) => {
     const p = a[id];
     const q = b[id];
-    return p.on === q.on && p.a === q.a && Math.abs(p.x - q.x) < 1e-4 && Math.abs(p.y - q.y) < 1e-4 && Math.abs(p.s - q.s) < 1e-3;
+    return (p.on === q.on || PERSONAL.includes(id)) && p.a === q.a && Math.abs(p.x - q.x) < 1e-4 && Math.abs(p.y - q.y) < 1e-4 && Math.abs(p.s - q.s) < 1e-3;
   });
 }
 

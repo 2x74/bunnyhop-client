@@ -194,3 +194,15 @@ body.potato .lo-rim { display: none; }
 .lo-length input[type="range"] { flex: 1; }
 .lo-length output { min-width: 3.2em; font-variant-numeric: tabular-nums; color: var(--muted, #9aa3b2); }
 .lo-hair-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--sw); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25); }
+/* Knife pool (Knife / Finish tabs): chips for the knives (with finishes) the game swaps between, then its two choices. */
+.lo-pool-row { flex-wrap: wrap; row-gap: 8px; }
+.lo-pool-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.lo-pool-list:empty { display: none; }
+.lo-pool-chip { display: inline-flex; align-items: center; border-radius: 999px; background: var(--raise); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); font-size: 12px; }
+.lo-pool-chip.on { box-shadow: inset 0 0 0 1px var(--accent); }
+.lo-pool-pick, .lo-pool-x { border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.lo-pool-pick { display: inline-flex; align-items: center; gap: 6px; padding: 4px 4px 4px 10px; }
+.lo-pool-x { padding: 4px 9px 4px 4px; opacity: 0.55; }
+.lo-pool-x:hover, .lo-pool-x:focus-visible { opacity: 1; }
+.lo-pool-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--sw); }
+.lo-poolseg[hidden] { display: none; }

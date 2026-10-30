@@ -31,6 +31,21 @@ export interface FlagRow {
   time: number | null;
   created_at: number;
   client?: RunClient;
+  /** The rules that flagged it (evidence codes, comma-separated). */
+  codes?: string | null;
+}
+
+/** A run's client and input from its diagnostics (GET /admin/players/:id diag). */
+export interface DiagRow {
+  run_id: string;
+  created_at: number;
+  fps: number | null;
+  poll_hz: number | null;
+  lock: string | null;
+  cap: number | null;
+  vsync: number | boolean | null;
+  yaw: number | null;
+  client?: RunClient;
 }
 
 export interface PlayerDetail {
@@ -57,7 +72,7 @@ export interface PlayerDetail {
   alts: { id: string; name: string; provider: string; created_at: number; banned?: number; shadowed?: number }[];
   altCount?: number;
   role?: StaffRole | null;
-  identities: { provider: string; username: string | null; created_at: number }[];
+  identities: { provider: string; username: string | null; provider_id?: string | null; created_at: number }[];
   network?: PlayerNetwork | null;
   rooms: { id: string; name: string; reachable: boolean; online: boolean; slot: number | null; muted: number | null }[];
   /** 0.0.22: flags (how each ended) and feedback tickets; lite = no rooms or network. */
@@ -68,6 +83,13 @@ export interface PlayerDetail {
   reports?: { id: string; status: string; user_id: string | null; user_name: string | null; message: string; created_at: number }[];
   /** Staff notes on the player, pinned first (apps/api src/admin-cases.ts). */
   notes?: Note[];
+  /** Boards with a PB and on how many maps; the all-time points rank (null: unranked). */
+  boards?: { pbs: number; maps: number };
+  rank?: number | null;
+  /** Their last runs' client and input, newest first. */
+  diag?: DiagRow[];
+  /** Every flag by how it ended (review null: open; auto: closed on arrival). */
+  flagTotals?: { review: string | null; auto: number; n: number }[];
 }
 
 export const activeBan = (d: PlayerDetail, now = Date.now()) => d.bans.find((b) => b.until === null || b.until > now) ?? null;
@@ -156,10 +178,59 @@ export function modRows(actions: ModRow[], max = 5): HTMLElement[] {
       "div",
       { class: "ctx-mod" },
       h("span", { class: `act-word ${k}` }, w),
-      h("span", { class: "faint" }, ` by ${e.actor_id === "token" ? "the admin token" : (e.actor_name ?? e.actor_id)}, ${ago(e.created_at)}`),
-      detailSentence(e.action, e.details, e.room_id) ? h("div", { class: "faint ctx-detail" }, detailSentence(e.action, e.details, e.room_id)) : null,
+      h("span", { class: "faint" }, " by ", e.actor_id === "token" || e.actor_id === "system" ? (e.actor_id === "token" ? "the admin token" : "bunnyhop.lol") : playerLink(e.actor_id, e.actor_name ?? e.actor_id), `, ${ago(e.created_at)}`),
+      detailSentence(e.action, e.details, e.room_id) ? h("div", { class: "faint ctx-detail" }, detailSentence(e.action, e.details, e.room_id), " ", logLinks(e)) : logLinks(e).length ? h("div", { class: "faint ctx-detail" }, logLinks(e)) : null,
     );
   });
+}
+
+/**
+ * Where a moderation log row points (its details): the ticket, the run (in admin and its replay), the map. So a log
+ * line is a way through to what it was about, not a dead end.
+ */
+export function logLinks(e: Pick<ModRow, "action" | "details">): HTMLElement[] {
+  let d: Record<string, unknown> = {};
+  try {
+    d = e.details ? (JSON.parse(e.details) as Record<string, unknown>) : {};
+  } catch {
+    return [];
+  }
+  const out: HTMLElement[] = [];
+  const str = (v: unknown) => (typeof v === "string" && /^[\w.-]{1,64}$/.test(v) ? v : null);
+  const fb = str(d.feedback);
+  if (fb) out.push(h("a", { class: "log-link", href: `#/feedback/${encodeURIComponent(fb)}` }, "ticket"));
+  const runs = [d.run, d.runId, ...(Array.isArray(d.runs) ? d.runs : []), ...(Array.isArray(d.ids) && /^(run|integrity)-/.test(e.action) ? d.ids : [])].map(str).filter((x): x is string => !!x);
+  if (runs[0]) out.push(h("a", { class: "log-link", href: `#/runs?id=${encodeURIComponent(runs[0])}` }, runs.length > 1 ? `run (of ${runs.length})` : "run"), h("a", { class: "log-link", href: `/replay/${encodeURIComponent(runs[0])}`, target: "_blank", rel: "noopener" }, "replay"));
+  const map = str(d.map);
+  if (map) out.push(h("a", { class: "log-link", href: `/maps/${encodeURIComponent(map)}`, target: "_blank", rel: "noopener" }, map));
+  return out;
+}
+
+/** A run with its ways out: the run in admin, its replay, the map's page (the drawer's recent runs). */
+export function runLinkRows(runs: PlayerDetail["runs"], max = 6): HTMLElement[] {
+  return runs.slice(0, max).map((r) =>
+    h(
+      "div",
+      { class: "ctx-row two run-row" },
+      h("span", { class: "run-pb" }, r.pb ? badge("PB", "acc") : null),
+      mapArt(r.map),
+      h(
+        "span",
+        { class: "ctx-main" },
+        h("span", { class: "ctx-name" }, h("a", { href: `#/runs?id=${encodeURIComponent(r.id)}`, title: "The run in admin" }, r.map), r.track ? h("span", { class: "faint" }, ` b${r.track}`) : null, " ", h("span", { class: "t-run" }, fmtTime(r.time))),
+        h(
+          "span",
+          { class: "ctx-sub" },
+          r.status === "verified" ? h("span", { class: "faint" }, r.style) : badge(r.status, r.status === "rejected" || r.status === "error" ? "bad" : ""),
+          h("span", { class: "faint", title: when(r.created_at) }, ago(r.created_at)),
+          clientTag(r.client),
+          h("span", { class: "spacer" }),
+          r.status === "verified" ? h("a", { class: "log-link", href: `/replay/${encodeURIComponent(r.id)}`, target: "_blank", rel: "noopener" }, "replay") : null,
+          h("a", { class: "log-link", href: `/maps/${encodeURIComponent(r.map)}`, target: "_blank", rel: "noopener" }, "map"),
+        ),
+      ),
+    ),
+  );
 }
 
 /** Alts (same IP hash) and accounts linked through a device / fingerprint / network, with their states. */

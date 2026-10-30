@@ -313,6 +313,24 @@ pub(crate) struct MapMechanics {
     pub makers: bool,
     pub velocity_scripts: bool,
 }
+
+/// Owned Stripper-style map edits, applied to runtime spawn state only at physics 19.
+/// The enclosing MapMechanics fingerprint pins the original retained entity build.
+pub(crate) struct TrainOrientationEdit {
+    pub map: &'static str,
+    pub targetname: &'static str,
+    pub model: &'static str,
+    pub orientation_type: i64,
+}
+
+pub(crate) const TRAIN_ORIENTATION_EDITS_V19: &[TrainOrientationEdit] = &[
+    // bhop_areaportal_v1, BSP SHA256 d0e43b68978db9ed43222e01159d0ab7685cc78b02b7263b1266bb8f7a295416.
+    // Stripper equivalent: match func_tracktrain / rede3da / *26, replace orientationtype "1" with "0".
+    // srcds rolls its 180-degree push back in the following VPhysics shadow stage; our core lacks that stage.
+    // This is our explicit map edit to retain translation without turning riders, NOT VPhysics emulation.
+    // Keep speed, path_tracks, outputs and the shared pusher unchanged. research/MAP-REPORTS-0.0.30.md §1.
+    TrainOrientationEdit { map: "bhop_areaportal_v1", targetname: "rede3da", model: "*26", orientation_type: 0 },
+];
 impl MapMechanics {
     pub fn player_io(&self) -> bool {
         self.makers || matches!(self.map, "bhop_crutle4_css" | "bhop_crutle3_css" | "bhop_enlightened2"
@@ -321,6 +339,7 @@ impl MapMechanics {
 }
 pub(crate) const MECHANICS_V19: &[MapMechanics] = &[
     // Player reports, exact entity builds; no scripts/makers/player I/O enabled by these entries.
+    MapMechanics { map: "bhop_areaportal_v1", fingerprint: 0xb83dc69d, makers: false, velocity_scripts: false },
     MapMechanics { map: "bhop_profane", fingerprint: 0x6282cf5e, makers: false, velocity_scripts: false },
     MapMechanics { map: "bhop_playboy_csgo", fingerprint: 0x7b264d5d, makers: false, velocity_scripts: false },
     MapMechanics { map: "bhop_ceaseless", fingerprint: 0x829ab1d3, makers: false, velocity_scripts: true },

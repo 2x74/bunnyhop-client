@@ -133,6 +133,13 @@ export interface SimResult {
    * from its takeoff (research/TIMER-RULES.md "Retiming rules 1 runs"). Absent for rules 2+ replays.
    */
   retimed?: { timer: RunTimer; track: number; startTick: number; endTick: number };
+  /**
+   * Segmented replays (replay.segments): the checkpoint loads compared with the re-simulated state at their tick, and
+   * the tick of the first load whose recorded state isn't exactly that state (or is out of tick order), else null. A
+   * load can only restore a state the run reached at that tick and saved there (research/SEGMENTED.md). Absent without
+   * loads.
+   */
+  segments?: { checked: number; mismatchTick: number | null };
 }
 
 export const FRAME_STRIDE = 6;
@@ -175,6 +182,10 @@ export class SimRun {
   /** Rules 1 replays: the current-rules timer (SimResult.retimed). */
   private readonly retimer: RunTimer | null = null;
   private retimed = { track: 0, startTick: 0, endTick: 0 };
+  /** Segmented loads (replay.segments): the next one to compare, those compared, the first that isn't the run's state. */
+  private seg = 0;
+  private segChecked = 0;
+  private segMismatch: number | null = null;
 
   constructor(
     private readonly core: Core,
@@ -197,6 +208,7 @@ export class SimRun {
     this.frames = opts.frames ? new Float32Array((n + 1) * FRAME_STRIDE) : undefined;
     this.frameEvents = opts.frames ? new Uint8Array(n + 1) : undefined;
     this.state = core.state();
+    this.checkSegments(0, this.state);
     this.putFrame(0, this.state, n > 0 ? replay.yaw[0] : this.state.teleportAngles[1], n > 0 ? replay.pitch[0] : this.state.teleportAngles[0]);
     // The style's key filter is re-applied to every recorded command (from the pre-tick state, as the client did).
     this.filter = new StyleFilter(styleDef(replayStyle(h)), replayPhysics(h));
@@ -255,11 +267,24 @@ export class SimRun {
         if (!checkpointMatches(checkpoints[this.cp], state) && this.firstMismatch === null) this.firstMismatch = tick;
         this.cp++;
       }
+      this.checkSegments(tick, state);
       this.putFrame(tick, state, cmd.yaw, cmd.pitch);
       if (this.frameEvents) this.frameEvents[tick] = events & (EVENT_JUMPED | EVENT_TELEPORTED);
       opts.onTick?.(tick, state, events, { timer, filter, cmd, update: r.update });
     }
     this.i = end;
+  }
+
+  /** Compares the Segmented loads recorded at `tick` with the state after `tick` commands (SimResult.segments). */
+  private checkSegments(tick: number, s: PlayerState): void {
+    const loads = this.replay.segments;
+    if (!loads) return;
+    while (this.seg < loads.length && loads[this.seg].tick <= tick) {
+      const l = loads[this.seg++];
+      this.segChecked++;
+      // (A load behind the current tick is out of order: the encoder never writes one.)
+      if ((l.tick !== tick || !checkpointMatches(l, s)) && this.segMismatch === null) this.segMismatch = l.tick;
+    }
   }
 
   /** The result (call once done; before that it describes the ticks simulated so far). */
@@ -281,6 +306,7 @@ export class SimRun {
       firstViolationTick: this.firstViolationTick,
       firstViolation: this.firstViolation,
       ...(this.retimer ? { retimed: { timer: this.retimer, ...this.retimed } } : {}),
+      ...(this.replay.segments ? { segments: { checked: this.segChecked, mismatchTick: this.segMismatch } } : {}),
     };
   }
 }

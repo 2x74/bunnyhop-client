@@ -89,21 +89,33 @@ export function mapSmoke(entities: EffectEntity[], bounds: Map<number, THREE.Box
     root.add(mesh); emitters.push({entity,model:Number((value(e,"model")??"*-1").slice(1)),origin,volume,mesh,count,life,e});
   });
   if(!emitters.length){fallback.dispose();return null;}
-  const mat=new THREE.Matrix4(), pos=new THREE.Vector3();
+  const mat=new THREE.Matrix4(), pos=new THREE.Vector3(), ext=new THREE.Vector3(), shift=new THREE.Vector3(), euler=new THREE.Euler(), c1=new THREE.Color(), c2=new THREE.Color();
+  // Keyvalues read once per emitter: value() scans every key of the entity, and this used to run about a dozen times per
+  // particle per frame. Same numbers, same expressions below, so the same cloud.
+  const kv=emitters.map(a=>{const e=a.e;return{
+    on:a.volume?number(e,"StartDisabled",0)===0:number(e,"InitialState",0)!==0,
+    color1:vector(value(e,a.volume?"Color1":"rendercolor")??"255 255 255").map(v=>v/255) as [number,number,number],
+    color2:vector(value(e,"Color2")??"255 255 255").map(v=>v/255) as [number,number,number],
+    rate:Math.max(.01,number(e,"Rate",20)),movement:number(e,"MovementSpeed",10),drawWidth:number(e,"ParticleDrawWidth",128),density:number(e,"Density",.5),
+    twist:number(e,"twist",0),baseSpread:number(e,"BaseSpread",20),spreadSpeed:number(e,"SpreadSpeed",15),windAngle:number(e,"WindAngle",0),windSpeed:number(e,"WindSpeed",0),
+    speed:number(e,"speed",30),startSize:number(e,"StartSize",20),endSize:number(e,"EndSize",30),renderamt:number(e,"renderamt",255),rotation:number(e,a.volume?"RotationSpeed":"roll",0),
+  };});
+  const wrap=(v:number)=>v-Math.floor(v);
   return {root,count:emitters.length,particles:2048-budget,update(time,transforms,states){
     time=Math.max(0,Number.isFinite(time)?time:0);
-    for(const a of emitters){ const e=a.e, g=a.mesh.geometry; const tf=transforms.get(a.model);
-      a.mesh.visible=states?.get(a.entity)??(a.volume ? number(e,"StartDisabled",0)===0 : number(e,"InitialState",0)!==0); if(!a.mesh.visible)continue;
+    for(let ai=0;ai<emitters.length;ai++){ const a=emitters[ai], k=kv[ai], g=a.mesh.geometry; const tf=transforms.get(a.model);
+      a.mesh.visible=states?.get(a.entity)??k.on; if(!a.mesh.visible)continue;
       const p=g.getAttribute("center") as THREE.InstancedBufferAttribute,s=g.getAttribute("size"),alpha=g.getAttribute("opacity"),spin=g.getAttribute("spin"),tint=g.getAttribute("tint");
-      const c1=new THREE.Color().setRGB(...vector(value(e,a.volume?"Color1":"rendercolor")??"255 255 255").map(v=>v/255) as [number,number,number],THREE.SRGBColorSpace); const c2=new THREE.Color().setRGB(...vector(value(e,"Color2")??"255 255 255").map(v=>v/255) as [number,number,number],THREE.SRGBColorSpace);
-      if(tf)mat.makeRotationFromEuler(new THREE.Euler(tf[5]*Math.PI/180,tf[3]*Math.PI/180,tf[4]*Math.PI/180,"ZYX"));
-      const rate=Math.max(.01,number(e,"Rate",20)), newest=Math.floor(time*rate);
-      for(let j=0;j<a.count;j++){const id=a.volume?j:newest-j; const age=a.volume?0:time-id/rate; const r=(k:number)=>particleRandom(id+a.entity*100003,k); let size:number,fade:number;
-        if(a.volume){const b=a.volume, velocity=number(e,"MovementSpeed",10); const ext=b.getSize(pos); const wrap=(v:number)=>v-Math.floor(v); pos.set(b.min.x+wrap(r(0)+time*velocity/Math.max(1,ext.x))*ext.x,b.min.y+wrap(r(1)+time*velocity*.61/Math.max(1,ext.y))*ext.y,b.min.z+wrap(r(2)+time*velocity*.37/Math.max(1,ext.z))*ext.z); size=number(e,"ParticleDrawWidth",128)*.5;fade=Math.min(1,Math.max(0,number(e,"Density",.5))); }
-        else{const f=age/a.life, theta=r(0)*Math.PI*2+age*number(e,"twist",0)*Math.PI/180, radius=Math.sqrt(r(1))*number(e,"BaseSpread",20)+age*number(e,"SpreadSpeed",15)*r(2); const wind=number(e,"WindAngle",0)*Math.PI/180;pos.set(a.origin.x+Math.cos(theta)*radius+Math.cos(wind)*age*number(e,"WindSpeed",0),a.origin.y+Math.sin(theta)*radius+Math.sin(wind)*age*number(e,"WindSpeed",0),a.origin.z+age*number(e,"speed",30));size=number(e,"StartSize",20)+(number(e,"EndSize",30)-number(e,"StartSize",20))*f;fade=id>=0&&age<a.life?(.5-.5*Math.cos(Math.min(1,Math.max(0,f))*Math.PI*2))**(f>.5?2:1)*Math.min(1,Math.max(0,number(e,"renderamt",255)/255)):0;}
-        if(tf&&a.volume)pos.sub(a.origin).applyMatrix4(mat).add(new THREE.Vector3(tf[0],tf[1],tf[2])); p.setXYZ(j,pos.x,pos.y,pos.z);s.setX(j,size);alpha.setX(j,fade);spin.setX(j,r(3)*Math.PI*2+time*number(e,a.volume?"RotationSpeed":"roll",0)*Math.PI/180);const mix=a.volume?r(4):0;tint.setXYZ(j,c1.r+(c2.r-c1.r)*mix,c1.g+(c2.g-c1.g)*mix,c1.b+(c2.b-c1.b)*mix);
+      c1.setRGB(k.color1[0],k.color1[1],k.color1[2],THREE.SRGBColorSpace); c2.setRGB(k.color2[0],k.color2[1],k.color2[2],THREE.SRGBColorSpace);
+      if(tf){mat.makeRotationFromEuler(euler.set(tf[5]*Math.PI/180,tf[3]*Math.PI/180,tf[4]*Math.PI/180,"ZYX"));shift.set(tf[0],tf[1],tf[2]);}
+      const rate=k.rate, newest=Math.floor(time*rate), seed=a.entity*100003;
+      if(a.volume)a.volume.getSize(ext);
+      for(let j=0;j<a.count;j++){const id=a.volume?j:newest-j; const age=a.volume?0:time-id/rate; let size:number,fade:number;
+        if(a.volume){const b=a.volume, velocity=k.movement; pos.set(b.min.x+wrap(particleRandom(id+seed,0)+time*velocity/Math.max(1,ext.x))*ext.x,b.min.y+wrap(particleRandom(id+seed,1)+time*velocity*.61/Math.max(1,ext.y))*ext.y,b.min.z+wrap(particleRandom(id+seed,2)+time*velocity*.37/Math.max(1,ext.z))*ext.z); size=k.drawWidth*.5;fade=Math.min(1,Math.max(0,k.density)); }
+        else{const f=age/a.life, theta=particleRandom(id+seed,0)*Math.PI*2+age*k.twist*Math.PI/180, radius=Math.sqrt(particleRandom(id+seed,1))*k.baseSpread+age*k.spreadSpeed*particleRandom(id+seed,2); const wind=k.windAngle*Math.PI/180;pos.set(a.origin.x+Math.cos(theta)*radius+Math.cos(wind)*age*k.windSpeed,a.origin.y+Math.sin(theta)*radius+Math.sin(wind)*age*k.windSpeed,a.origin.z+age*k.speed);size=k.startSize+(k.endSize-k.startSize)*f;fade=id>=0&&age<a.life?(.5-.5*Math.cos(Math.min(1,Math.max(0,f))*Math.PI*2))**(f>.5?2:1)*Math.min(1,Math.max(0,k.renderamt/255)):0;}
+        if(tf&&a.volume)pos.sub(a.origin).applyMatrix4(mat).add(shift); p.setXYZ(j,pos.x,pos.y,pos.z);s.setX(j,size);alpha.setX(j,fade);spin.setX(j,particleRandom(id+seed,3)*Math.PI*2+time*k.rotation*Math.PI/180);const mix=a.volume?particleRandom(id+seed,4):0;tint.setXYZ(j,c1.r+(c2.r-c1.r)*mix,c1.g+(c2.g-c1.g)*mix,c1.b+(c2.b-c1.b)*mix);
       }
-      for(const attr of [p,s,alpha,spin,tint])attr.needsUpdate=true;
+      p.needsUpdate=s.needsUpdate=alpha.needsUpdate=spin.needsUpdate=tint.needsUpdate=true;
     }
   }};
 }

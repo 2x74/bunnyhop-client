@@ -124,7 +124,7 @@ export const PONY_PITCH = [-0.3, 0.95] as const, PONY_SIDE = 0.6;
  * one is perkier.
  */
 export function ponyLimits(len: number): { pitch: [number, number]; side: number } {
-  const l = Math.min(2.5, Math.max(0.3, Number.isFinite(len) ? len : 1));
+  const l = Math.min(3, Math.max(0.3, Number.isFinite(len) ? len : 1));
   return {
     pitch: [Math.max(-0.45, PONY_PITCH[0] / l ** 1.5), PONY_PITCH[1] - 0.4 * Math.min(1, Math.max(0, l - 1))],
     side: Math.min(0.75, PONY_SIDE / Math.sqrt(l)),

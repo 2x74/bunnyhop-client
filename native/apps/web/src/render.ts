@@ -30,6 +30,7 @@ import {
   TextureFormat,
 } from "./core";
 import { prepareMapContent, type PrepareContentOptions } from "./content";
+import { markGammaBlend } from "./graphics/gamma-blend";
 import { glassMaterial, setWaterVisualTime, updateWaterUniforms, waterSurfaceMaterial, waterVolumes, withWaterFog } from "./water";
 import { mapSmoke, brushBounds, materialName } from "./map-effects/smoke";
 import { spriteTrails } from "./sprite-trails";
@@ -155,16 +156,18 @@ function fallbackMaterial(info: MaterialInfo, lightMap: THREE.Texture, lightMapI
   const name = baseMaterialName(info.name);
   const color = new THREE.Color().setHSL(hashHue(name), 0.12, 0.62, THREE.SRGBColorSpace);
   if (/glass|window/.test(name)) {
-    return new THREE.MeshBasicMaterial({ color: 0xbcd6e6, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide });
+    return markGammaBlend(new THREE.MeshBasicMaterial({ color: 0xbcd6e6, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide }));
   }
   if (/^(effects|decals|overlays|sprites)\//.test(name) || name.includes("{")) {
-    return new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.15, depthWrite: false });
+    return markGammaBlend(new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.15, depthWrite: false }));
   }
   return new THREE.MeshBasicMaterial({ map: checkerTexture(support.anisotropy), color, lightMap, lightMapIntensity });
 }
 
 function sourceFlags<M extends THREE.Material>(material: M, desc?: MaterialDesc): M {
   material.userData.sourceUnlit = !!(desc && (desc.flags & MAT_UNLIT));
+  // $translucent / $additive: blended in gamma space in the HDR looks (graphics/gamma-blend.ts).
+  if (material.transparent && desc && desc.flags & (MAT_TRANSLUCENT | MAT_ADDITIVE)) markGammaBlend(material);
   return material;
 }
 
@@ -257,7 +260,7 @@ function propMaterial(desc: MaterialDesc | undefined, map: THREE.Texture | null,
     return new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL(hashHue(name), 0.1, 0.55, THREE.SRGBColorSpace), vertexColors: true });
   }
   const translucent = (desc.flags & (MAT_TRANSLUCENT | MAT_ADDITIVE)) !== 0;
-  return new THREE.MeshBasicMaterial({
+  const m = new THREE.MeshBasicMaterial({
     map,
     color: new THREE.Color(...desc.color),
     vertexColors: true,
@@ -268,6 +271,7 @@ function propMaterial(desc: MaterialDesc | undefined, map: THREE.Texture | null,
     alphaTest: desc.flags & MAT_ALPHATEST ? desc.alphaRef : 0,
     side: desc.flags & MAT_NOCULL ? THREE.DoubleSide : THREE.FrontSide,
   });
+  return translucent ? markGammaBlend(m) : m;
 }
 
 /**

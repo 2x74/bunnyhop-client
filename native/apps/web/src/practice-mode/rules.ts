@@ -56,8 +56,10 @@ export function practiceCommandPlan(o: { cmd: PracticeChatCommand; unavailable: 
  * menu is open; otherwise it says how ("hint"). Before the start, after a finish and on practice attempts keys act.
  * Typed commands (!tele, !noclip) always act: typing is deliberate.
  */
-export function practiceKeyGate(o: { tool: PracticeTool; timedRun: boolean; menuOpen: boolean }): "act" | "hint" {
+export function practiceKeyGate(o: { tool: PracticeTool; timedRun: boolean; menuOpen: boolean; segmenting?: boolean }): "act" | "hint" {
   if (o.tool === "cpSave" || !o.timedRun || o.menuOpen) return "act";
+  // A clean Segmented run (styles.ts isSegmented): checkpoint loads are the style, and keep the run real. Noclip doesn't.
+  if (o.segmenting && o.tool !== "noclip") return "act";
   return "hint";
 }
 

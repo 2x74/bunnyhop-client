@@ -18,6 +18,11 @@ import { hasCrownGeometry, seedCrownGeometry } from "./crown";
 import { hasHatGeometry, seedHatGeometry } from "./hats";
 import { hasBunnyGeometry, seedBunnyGeometry } from "./mesh";
 import { bunnyParts } from "./prebuild-parts";
+import { hasViewmodelGeometry, seedViewmodelGeometry } from "../../viewmodel/mesh";
+import { markViewmodelLayout } from "../../viewmodel/finishes/layout";
+import type { KnifeDef } from "../../viewmodel/knives/types";
+import { hasKnifeCloud, seedKnifeCloud } from "../../viewmodel/knives/hold";
+import type { GloveStyleId } from "../../loadout";
 
 /** A BufferGeometry as plain transferable data. */
 export interface PlainGeometry {
@@ -26,7 +31,8 @@ export interface PlainGeometry {
   sphere: number[] | null;
 }
 
-type Reply = { id: number; key: string; body: PlainGeometry | null; hat: PlainGeometry | null; crown: PlainGeometry | null } | { id: number; error: string };
+type VmReply = { id: number; vm: { knife: string; glove: GloveStyleId; geometry: PlainGeometry; tris: number | null }[]; clouds: { knife: string; p: Float32Array; grip: Uint8Array; n: number }[] };
+type Reply = { id: number; key: string; body: PlainGeometry | null; hat: PlainGeometry | null; crown: PlainGeometry | null } | VmReply | { id: number; error: string };
 
 function geometry(p: PlainGeometry): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
@@ -50,7 +56,16 @@ function ensureWorker(): Worker | null {
     w.onmessage = (e: MessageEvent<Reply>) => {
       const r = e.data;
       if ("error" in r) console.warn("bunny prebuild failed; building on the main thread", r.error);
-      else {
+      else if ("vm" in r) {
+        for (const v of r.vm) {
+          const g = geometry(v.geometry);
+          markViewmodelLayout(g); // laid out in the worker (finishUV is part of the geometry)
+          seedViewmodelGeometry(v.knife, v.glove, g);
+          const def = knifeOf.get(v.knife);
+          if (def && v.tris !== null) def.tris ??= v.tris;
+        }
+        for (const c of r.clouds) seedKnifeCloud(c.knife, { p: c.p, grip: c.grip, n: c.n });
+      } else {
         if (r.body) seedBunnyGeometry(r.key, geometry(r.body));
         if (r.hat) seedHatGeometry(hatOf.get(r.id)!, geometry(r.hat));
         if (r.crown) seedCrownGeometry(crownOf.get(r.id)!, geometry(r.crown));
@@ -109,6 +124,44 @@ export function prebuildBunny(outfit: string | null | undefined, loadout: Cosmet
   }).finally(() => inflight.delete(flight));
   inflight.set(flight, done);
   w.postMessage({ id, outfit: outfit ?? null, loadout, body: needBody, hat: needHat, crown: needCrown });
+  return done;
+}
+
+const knifeOf = new Map<string, KnifeDef>();
+
+/**
+ * What the Loadout's (and Support's) first frame needs, built in the worker: your bunny, the hands in the default
+ * knife and gloves (the Viewmodel's first geometry) and in yours, and your knife's grip cloud. For the main menu once
+ * it's idle, so a click to Support or a profile doesn't build them on the main thread; ui/loadout-stage.ts
+ * prewarmLoadout builds the rest (every knife and glove) once one of those is open.
+ */
+export function prebuildLoadoutStart(outfit: string | null | undefined, loadout: CosmeticLoadout, knife: KnifeDef, glove: GloveStyleId, defaultKnife: KnifeDef): Promise<void> {
+  return Promise.all([prebuildBunny(outfit, loadout), prebuildViewmodels([[defaultKnife, "knit"], [knife, glove]])]).then(() => {});
+}
+
+/**
+ * Builds the first-person viewmodel geometry (hands in a glove style + a knife: viewmodel/mesh.ts) of these pairs in
+ * the worker, for the ones not built yet; viewmodelGeometry then finds them cached. Never rejects; without the worker
+ * they're built on the main thread when first used, as before.
+ */
+export function prebuildViewmodels(pairs: readonly [KnifeDef, GloveStyleId][]): Promise<void> {
+  const need = pairs.filter(([k, g]) => !hasViewmodelGeometry(k.id, g));
+  // And their knives' point clouds for the grip solver (knives/hold.ts knifeCloud: the knife's mesh again, deduped).
+  const clouds = [...new Set(pairs.map(([k]) => k.id))].filter((id) => !hasKnifeCloud(id));
+  const flight = need.map(([k, g]) => `${k.id}|${g}`).join(",") + `;${clouds.join(",")}`;
+  if (!need.length && !clouds.length) return Promise.resolve();
+  const running = inflight.get(`vm:${flight}`);
+  if (running) return running;
+  const w = ensureWorker();
+  if (!w) return Promise.resolve();
+  const id = ++seq;
+  for (const [k] of need) knifeOf.set(k.id, k);
+  const done = new Promise<void>((resolve) => {
+    const timer = window.setTimeout(resolve, PREBUILD_TIMEOUT_MS);
+    waiting.set(id, () => (clearTimeout(timer), resolve()));
+  }).finally(() => inflight.delete(`vm:${flight}`));
+  inflight.set(`vm:${flight}`, done);
+  w.postMessage({ id, vm: need.map(([k, g]) => [k.id, g]), clouds });
   return done;
 }
 

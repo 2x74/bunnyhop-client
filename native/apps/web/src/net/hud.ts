@@ -11,6 +11,7 @@ import type { StaffRole } from "../progression";
 import type { RankTag } from "./protocol";
 import type { PlayerMarks } from "../creators";
 import { countryFlag } from "../ui/country-flag";
+import { bindLabel } from "../ui/settings";
 import { nameAttrs, nameMarks } from "../ui/marks";
 import { hopKeyframes, hopOffKeyframes } from "../notify/spring";
 
@@ -395,7 +396,7 @@ export class Scoreboard {
         h("tbody", null, ...playing.map(row)),
       ),
       spec.length ? h("div.sb-spec", null, h("span.dim", null, "Spectating: "), spec.map((r) => `${r.name}${r.status.replace(/^SPEC/, "")}`).join(", ")) : null,
-      h("div.sb-hint.dim", null, head.spectating ? "Mouse 1 and 2 switch players. Space changes the camera. R respawns you." : "Y to chat, N to spectate. Type rtv, nominate or timeleft. Esc has the server menu."),
+      h("div.sb-hint.dim", null, head.spectating ? "Mouse 1 and 2 switch players. Space changes the camera. R respawns you." : `${bindLabel("chat") ?? "Bind a key"} to chat, N to spectate. Type rtv, nominate or timeleft. Esc has the server menu.`),
     );
   }
 }

@@ -45,6 +45,7 @@ const ponyLength = (l: CosmeticLoadout | null | undefined): number => (l?.hairLe
 import { bunnyGunGeometry, bunnyHold, bunnySilencerGeometry } from "../../viewmodel/guns/meshes";
 import { GunHold } from "./gun-hold";
 import { BunnyGunFx } from "./gun-fx";
+import { hypot2, hypot3 } from "../../hypot";
 
 const D2R = Math.PI / 180;
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
@@ -84,7 +85,7 @@ function boneMap(r: Rig, d: StudioData): Int16Array {
 /** 3x4 rotation about `pivot` taking unit vector a to unit vector b, scaled to `frac` of the angle (max maxAng). */
 function swing(a: ArrayLike<number>, b: ArrayLike<number>, pivot: ArrayLike<number>, frac: number, maxAng: number, out: Float32Array): void {
   let ax = a[1] * b[2] - a[2] * b[1], ay = a[2] * b[0] - a[0] * b[2], az = a[0] * b[1] - a[1] * b[0];
-  const s = Math.hypot(ax, ay, az);
+  const s = hypot3(ax, ay, az);
   const c = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   let ang = Math.atan2(s, c);
   if (s < 1e-6) (ax = 1), (ay = az = 0), (ang = 0);
@@ -108,7 +109,7 @@ function earWant(dir0: number[], sx: number, perk: number, out: number[]): numbe
   const to = perk > 0 ? EAR_UP : EAR_BACK;
   const k = Math.min(1, Math.abs(perk));
   for (let i = 0; i < 3; i++) out[i] = dir0[i] + ((i === 0 ? to[0] * sx : to[i]) - dir0[i]) * k;
-  const l = Math.hypot(out[0], out[1], out[2]) || 1;
+  const l = hypot3(out[0], out[1], out[2]) || 1;
   out[0] /= l, out[1] /= l, out[2] /= l;
   return out;
 }
@@ -402,11 +403,11 @@ export class BunnyModel implements PlayerModelImpl {
     const cos = Math.cos((10 * Math.PI) / 180);
     let worst = -Infinity;
     for (let k = 0; k < knife.length; k += 3) {
-      const dx = knife[k] - cx, dy = knife[k + 1] - cy, dz = knife[k + 2] - cz, l = Math.hypot(dx, dy, dz);
+      const dx = knife[k] - cx, dy = knife[k + 1] - cy, dz = knife[k + 2] - cz, l = hypot3(dx, dy, dz);
       if (l > 20 || l < 1e-6) continue;
       let rad = 0;
       for (let i = 0; i < head.length; i += 3) {
-        const hx = head[i] - cx, hy = head[i + 1] - cy, hz = head[i + 2] - cz, hl = Math.hypot(hx, hy, hz);
+        const hx = head[i] - cx, hy = head[i + 1] - cy, hz = head[i + 2] - cz, hl = hypot3(hx, hy, hz);
         if (hx * dx + hy * dy + hz * dz > cos * l * hl) rad = Math.max(rad, hl);
       }
       if (rad) worst = Math.max(worst, rad - l);
@@ -698,7 +699,7 @@ export class BunnyModel implements PlayerModelImpl {
       const want = ((this.pose?.yaw ?? this.yaw) - this.yaw) * D2R;
       let dYaw = (want - Math.atan2(fy, fx)) / D2R;
       dYaw = ((((dYaw + 180) % 360) + 360) % 360) - 180;
-      const lean = Math.asin(clamp(fz / (Math.hypot(fx, fy, fz) || 1), -1, 1)) / D2R; // < 0: leaning forward
+      const lean = Math.asin(clamp(fz / (hypot3(fx, fy, fz) || 1), -1, 1)) / D2R; // < 0: leaning forward
       this.turnAbout(ar.chest, lean * a.square, dYaw * a.square, 0, ar.chestSub);
     }
     this.turnAbout(ar.chest, a.chestPitch, a.chestYaw, a.chestRoll, ar.chestSub);
@@ -728,10 +729,10 @@ export class BunnyModel implements PlayerModelImpl {
 
   /** Rotates the bones `sub` about `pivot` by the shortest rotation taking direction a to direction b (model space). */
   private swingSub(sub: number[], a: ArrayLike<number>, b: ArrayLike<number>, pivot: ArrayLike<number>): void {
-    const la = Math.hypot(a[0], a[1], a[2]), lb = Math.hypot(b[0], b[1], b[2]);
+    const la = hypot3(a[0], a[1], a[2]), lb = hypot3(b[0], b[1], b[2]);
     if (la < 1e-6 || lb < 1e-6) return;
     let ax = (a[1] * b[2] - a[2] * b[1]) / (la * lb), ay = (a[2] * b[0] - a[0] * b[2]) / (la * lb), az = (a[0] * b[1] - a[1] * b[0]) / (la * lb);
-    const sn = Math.hypot(ax, ay, az), cs = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (la * lb);
+    const sn = hypot3(ax, ay, az), cs = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (la * lb);
     if (sn < 1e-6) return;
     (ax /= sn), (ay /= sn), (az /= sn);
     const t = 1 - cs, M = this.actM;
@@ -763,15 +764,15 @@ export class BunnyModel implements PlayerModelImpl {
     };
     const T = toModel(reach.hand, true, new Float64Array(3)), pole = toModel(reach.pole, false, new Float64Array(3));
     const P0 = this.jointAt(b.upper, new Float64Array(3)), P1 = this.jointAt(b.fore, new Float64Array(3)), P2 = this.jointAt(b.hand, new Float64Array(3));
-    const L1 = Math.hypot(P1[0] - P0[0], P1[1] - P0[1], P1[2] - P0[2]), L2 = Math.hypot(P2[0] - P1[0], P2[1] - P1[1], P2[2] - P1[2]);
+    const L1 = hypot3(P1[0] - P0[0], P1[1] - P0[1], P1[2] - P0[2]), L2 = hypot3(P2[0] - P1[0], P2[1] - P1[1], P2[2] - P1[2]);
     const D = [T[0] - P0[0], T[1] - P0[1], T[2] - P0[2]];
-    const dl = Math.hypot(D[0], D[1], D[2]) || 1;
+    const dl = hypot3(D[0], D[1], D[2]) || 1;
     const d = clamp(dl, Math.abs(L1 - L2) + 0.05, L1 + L2 - 0.05);
     const dir = [D[0] / dl, D[1] / dl, D[2] / dl];
     // The elbow: on the circle around the shoulder-wrist line, toward the pole.
     const pd = pole[0] * dir[0] + pole[1] * dir[1] + pole[2] * dir[2];
     let px = pole[0] - dir[0] * pd, py = pole[1] - dir[1] * pd, pz = pole[2] - dir[2] * pd;
-    const pl = Math.hypot(px, py, pz) || 1;
+    const pl = hypot3(px, py, pz) || 1;
     (px /= pl), (py /= pl), (pz /= pl);
     const along = (L1 * L1 - L2 * L2 + d * d) / (2 * d), h = Math.sqrt(Math.max(0, L1 * L1 - along * along));
     const E = [P0[0] + dir[0] * along + px * h, P0[1] + dir[1] * along + py * h, P0[2] + dir[2] * along + pz * h];
@@ -839,7 +840,7 @@ export class BunnyModel implements PlayerModelImpl {
     if ((this.loadout?.hat === "hat-propeller" || this.loadout?.hat === "hat-maxwell") && !cosmeticsStill()) {
       // Raw horizontal velocity, the same u/s shown by the HUD. Read before animation processing;
       // airborne movement is included, with no dependence on gait, grounded state or leg playback.
-      this.uniforms.uPropellerAngle.value = advancePropeller(this.uniforms.uPropellerAngle.value, Math.hypot(this.vel[0], this.vel[1]), dt);
+      this.uniforms.uPropellerAngle.value = advancePropeller(this.uniforms.uPropellerAngle.value, hypot2(this.vel[0], this.vel[1]), dt);
     }
     if (this.loadout?.hat === "hat-ponytail") {
       // The tail's pendulum: the body's acceleration (hops, landings, strafes), wind from its speed, the head's turn.
@@ -850,7 +851,7 @@ export class BunnyModel implements PlayerModelImpl {
     }
     if (this.loadout?.hat === "hat-capybara" || this.loadout?.hat === "hat-maxwell") {
       const c = this.capyMotion;
-      advanceCapybara(c, Math.hypot(this.vel[0], this.vel[1]), s.grounded, dt, snap, cosmeticsStill());
+      advanceCapybara(c, hypot2(this.vel[0], this.vel[1]), s.grounded, dt, snap, cosmeticsStill());
       this.uniforms.uCapybara.value.set(c.alert, c.squash, c.lean, c.time);
     }
     lp.set(px, py, pz);
@@ -936,7 +937,7 @@ export class BunnyModel implements PlayerModelImpl {
     let twitch = 0;
     if (this.earTwitch < 0) {
       this.earTwitch = 2.5 + Math.random() * 4.5;
-      if (Math.hypot(this.vel[0], this.vel[1]) < 40) twitch = Math.random() < 0.5 ? 1 : -1;
+      if (hypot2(this.vel[0], this.vel[1]) < 40) twitch = Math.random() < 0.5 ? 1 : -1;
     }
     for (const e of this.ears) {
       const sx = e.side;
@@ -977,7 +978,7 @@ export class BunnyModel implements PlayerModelImpl {
       }
       // Keep the proxy at pendulum length from the base.
       let dx = e.p[0] - wb[0], dy = e.p[1] - wb[1], dz = e.p[2] - wb[2];
-      const l = Math.hypot(dx, dy, dz) || 1;
+      const l = hypot3(dx, dy, dz) || 1;
       dx /= l, dy /= l, dz /= l;
       for (let k = 0; k < 3; k++) e.p[k] = wb[k] + [dx, dy, dz][k] * Lp;
       for (let k = 0; k < 3; k++) e.wb[k] = wb[k];
@@ -1038,7 +1039,7 @@ export class BunnyModel implements PlayerModelImpl {
     if (s.gunReload) hold.reload(s.gunReload.seconds, !!s.gunReload.shell, !!s.gunReload.empty);
     const a = this.acting;
     hold.silenced = this.silencerOn && !!d.def.silencer;
-    hold.apply(this.S, { yaw: s.yaw - this.yaw, pitch: s.pitch, crouched: s.crouched, grounded: s.grounded, speed: Math.hypot(this.vel[0], this.vel[1]), dt, snap, still }, !!a && !!(a.arm || a.armL || a.reachR || a.reachL));
+    hold.apply(this.S, { yaw: s.yaw - this.yaw, pitch: s.pitch, crouched: s.crouched, grounded: s.grounded, speed: hypot2(this.vel[0], this.vel[1]), dt, snap, still }, !!a && !!(a.arm || a.armL || a.reachR || a.reachL));
     const bm = this.gunSkel!.boneMatrices!, K = hold.skin;
     for (let i = 0; i < 2; i++) {
       const o = i * 12, q = i * 16;

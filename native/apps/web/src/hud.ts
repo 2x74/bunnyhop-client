@@ -567,13 +567,17 @@ export class Hud {
    * This attempt is practice ("Practice", "Practice · noclip"; session.ts, every frame): the line under the crosshair
    * and the yellow timer. Null: a run that counts. Cheap when unchanged.
    */
-  setPractice(label: string | null): void {
-    if (label === this.practiceLabel) return;
+  setPractice(label: string | null, segmented = false): void {
+    if (label === this.practiceLabel && segmented === this.segmentLine) return;
     this.practiceLabel = label;
-    this.practiceOn = !!label;
+    // A Segmented run's line ("Segmented · 2 loads") sits in the same place but the run counts: no yellow timer.
+    this.segmentLine = segmented;
+    this.practiceOn = !!label && !segmented;
     this.timerEl.classList.toggle("practice", this.practiceOn);
+    this.els.practice.classList.toggle("segmented", segmented);
     this.drawPractice();
   }
+  private segmentLine = false;
 
   private drawPractice(): void {
     const label = this.practiceLabel ?? (this.editing ? "Practice" : null);

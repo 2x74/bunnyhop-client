@@ -71,6 +71,9 @@ export const DEFAULT_BINDS: Record<BindAction, string[]> = {
   // pause menu's own key for it is Backspace (menu.ts), which the tutorial uses in game for the previous lesson.
   mainMenu: [],
   hudEditor: ["F2"],
+  // Chat (say / say_team in CS:S). Before it was an action these keys opened it whenever nothing else was bound to them;
+  // saved binds that use Y or U for something else keep it there (settings.ts migrateBinds adds only free keys).
+  chat: ["KeyY", "KeyU"],
   thirdPerson: ["KeyT"],
   // Viewmodel (cosmetic; never sim inputs). Movement binds win if a key is bound to both (see Input.press).
   attack: ["Mouse1"],

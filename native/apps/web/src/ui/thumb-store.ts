@@ -66,20 +66,48 @@ export async function loadThumb(version: string, key: string): Promise<HTMLCanva
   }
 }
 
-/** Stores a thumbnail (encoded off the main thread by toBlob), fire and forget. */
-export function saveThumb(version: string, key: string, c: HTMLCanvasElement): void {
-  try {
-    c.toBlob(
-      (blob) => {
-        if (!blob) return;
-        void db(version)
-          .then((d) => d && req(d.transaction(STORE, "readwrite").objectStore(STORE).put(blob, key)))
-          .catch(() => {});
-      },
-      "image/webp",
-      0.92,
-    );
-  } catch {
-    /* not stored: drawn again next time */
+/**
+ * Thumbnails waiting to be stored. toBlob encodes off the main thread, but its snapshot of the canvas is on it (~0.7 ms
+ * a thumbnail, ~3 ms on a slow PC), and the stage draws a few thumbnails a frame while a category fills in: the saves
+ * wait for idle time instead.
+ */
+const pending: { version: string; key: string; c: HTMLCanvasElement }[] = [];
+let idleQueued = false;
+/** Idle time a save needs left in the idle period (ms). */
+const SAVE_MS = 4;
+
+function flush(deadline?: IdleDeadline): void {
+  idleQueued = false;
+  while (pending.length && (!deadline || deadline.didTimeout || deadline.timeRemaining() > SAVE_MS)) {
+    const { version, key, c } = pending.shift()!;
+    try {
+      c.toBlob(
+        (blob) => {
+          if (!blob) return;
+          void db(version)
+            .then((d) => d && req(d.transaction(STORE, "readwrite").objectStore(STORE).put(blob, key)))
+            .catch(() => {});
+        },
+        "image/webp",
+        0.92,
+      );
+    } catch {
+      /* not stored: drawn again next time */
+    }
+    if (deadline?.didTimeout) break; // one per overdue callback, then back to waiting for idle time
   }
+  if (pending.length) queueFlush();
+}
+
+function queueFlush(): void {
+  if (idleQueued) return;
+  idleQueued = true;
+  if (typeof requestIdleCallback === "function") requestIdleCallback(flush, { timeout: 3000 });
+  else setTimeout(flush, 200);
+}
+
+/** Stores a thumbnail (in idle time, encoded off the main thread by toBlob), fire and forget. */
+export function saveThumb(version: string, key: string, c: HTMLCanvasElement): void {
+  pending.push({ version, key, c });
+  queueFlush();
 }

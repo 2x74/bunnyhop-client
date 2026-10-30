@@ -2,6 +2,7 @@
 import { appLocation } from "./platform/navigation";
 import "./platform/boot";
 import { myProfile } from "./ui/account-state";
+import { advanceKnifePool, getOutfit, onHeldLoadout, poolPicks } from "./player/cosmetics";
 import { PlayerShadowProxy } from "./graphics/player-shadow";
 import "./texture-packs/settings";
 import "./sky-packs/settings";
@@ -414,6 +415,8 @@ if (isStyleId(styleParam) && !gauntletStart) setSelectedStyle(styleParam);
 // (Gauntlets are Normal only: this session runs Normal without changing the style you picked for other maps.)
 const style = gauntletStart ? (GAUNTLET_STYLE as StyleId) : selectedStyle();
 localStorage.setItem("bunnyhop:last-map", mapName);
+// A new map: the knife pool moves on to its next knife (player/cosmetics.ts), before anything builds the viewmodel.
+if (!replayMap) advanceKnifePool("map");
 setSocialPlaying(mapName, style); // friends see the map (and the room, once joined: social/state.ts)
 document.title = `${mapName} · bunnyhop.lol`;
 const loading = showLoading(mapName);
@@ -501,6 +504,8 @@ function restart(track?: number, at?: RestartPoint | null) {
   liveCapture.stop(); // a core/world reset ends this independently reproducible segment
   if (liveCapture.status.stopping) liveCapture.fail("Restart during command application requires a new capture");
   const view = run!.resetCore(track, at ?? null);
+  // Knife pool swap "restart": the next knife comes up with the new attempt.
+  advanceKnifePool("restart");
   playerAudio.reset();
   prev = curr = core.state();
   input.restartSamplerView(curr.teleportAngles[1],view?.pitch ?? curr.teleportAngles[0],YAW_SET_SPAWN);
@@ -549,6 +554,26 @@ setPlayAttempt(() => session.timer.status === "running");
 setUpdateBusy(() => session.timer.status === "running");
 viewmodel = new Viewmodel();
 const vm = viewmodel;
+// Knife pool (player/cosmetics.ts): every knife it swaps to is built and compiled ahead in idle time (first person in
+// the prebuild worker, your bunny too), so a swap on restart never stalls a frame. Again whenever the pool changes.
+{
+  let warmed = "";
+  const warmPool = () => {
+    const picks = poolPicks();
+    const key = picks.map((l) => `${l.knife}|${l.finish}|${l.glove}`).join(",");
+    if (key === warmed) return;
+    warmed = key;
+    const go = () => {
+      if (!picks.length) return;
+      void vm.warmLoadouts(picks, renderer, vm.camera, vm.scene);
+      void import("./player/bunny/prebuild").then((pre) => picks.forEach((l) => void pre.prebuildBunny(getOutfit(), l)));
+    };
+    if ("requestIdleCallback" in window) requestIdleCallback(go, { timeout: 3000 });
+    else setTimeout(go, 500);
+  };
+  warmPool();
+  onHeldLoadout(warmPool);
+}
 // Dev hook (as `bunnyhop` above): the viewmodel, for in-game knife / finish captures (research/knife-finishes/).
 if (import.meta.env.DEV) Object.assign((window as unknown as { bunnyhop: object }).bunnyhop, { vm });
 vm.onAttack = (kind) => {
@@ -585,10 +610,10 @@ practice = new Practice({
   tutorial: mapName === TUTORIAL_MAP,
   gauntlet: !!gauntletStart,
   restart: () => restart(),
-  resync: (view) => {
+  resync: (view, kind = YAW_SET_SPAWN) => {
     prev = curr = core.state();
     if (view) {
-      input.setYaw(view.yaw, YAW_SET_SPAWN);
+      input.setYaw(view.yaw, kind);
       input.pitch = view.pitch;
     }
     input.resetSampler(performance.now(), "practice-resync");
@@ -698,7 +723,7 @@ if (params.has("spectate")) {
   history.replaceState(history.state, "", url.pathname + url.search + url.hash);
 }
 const mp = serverId ? (await import("./net/mp")).startMultiplayer({ serverId, map: mapName, scene, core, input, session, restart, impacts: gunView.impacts, game, renderer, spectate: spectateId }) : null;
-// Chat in solo play (solo-chat.ts): Y types the same commands as in rooms (!r, !setstart, !help; chat-commands.ts).
+// Chat in solo play (solo-chat.ts): the chat key (Y) types the same commands as in rooms (!r, !setstart, !help; chat-commands.ts).
 // Not on the tutorial map, whose lessons own the restart keys.
 const soloChat = mp || tutorial ? null : new SoloChat({ input, session, restart: (t) => restart(t), enabled: () => !replayViewer.active, game });
 session.multiplayer = mp !== null;
@@ -862,6 +887,8 @@ const leaveHold = new LeaveHold({
 });
 input.onAction = (a, code) => {
   if (replayViewer.active) return;
+  // The chat bind (Settings -> Keys): the room's chat, or solo play's command chat. None on the tutorial map.
+  if (a === "chat") return void (mp ? mp.onAction(a) : soloChat?.open());
   if (a === "paint" || a === "paintOnce") return void requestPaint();
   if (a === "clearPaint") return clearPaint();
   if (a === "lastLj") return openLastJump();
@@ -1155,7 +1182,7 @@ function frame(now: number) {
   const y = lerp(prev.position[1], curr.position[1]);
   const z = lerp(prev.position[2] + prev.viewOffsetZ, curr.position[2] + curr.viewOffsetZ);
   session.camera(camera);
-  if (!thirdPerson.frame(camera, prev, curr, alpha, input.yaw, input.pitch, lastCmd, frameDt, (curr.tick + alpha) * session.settings.tickInterval)) {
+  if (!thirdPerson.frame(camera, prev, curr, alpha, input.yaw, input.pitch, lastCmd, frameDt, (curr.tick + alpha) * session.settings.tickInterval, graphicsPipeline.drawsShadowProxies())) {
     // Source (x, y, z) -> three (x, z, -y)
     camera.position.set(x, z, -y);
     camera.rotation.y = ((input.yaw - 90) * Math.PI) / 180;
@@ -1163,7 +1190,9 @@ function frame(now: number) {
     camera.rotation.z = 0;
   }
   playerShadow.update([x, y, lerp(prev.position[2], curr.position[2])], curr.crouched, !thirdPerson.active && !mp?.isSpectating);
-  mp?.frame(camera, frameDt); // other players; takes the camera while spectating
+  // Other players; takes the camera while spectating. Those behind the camera aren't posed unless the look draws
+  // shadow passes (net/players.ts).
+  mp?.frame(camera, frameDt, graphicsPipeline.drawsShadowProxies());
 
   const p = prefs.get();
   // Zone boxes go with the rest of the UI when it's hidden (ui/hide-ui.ts).

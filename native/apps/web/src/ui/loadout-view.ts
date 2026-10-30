@@ -19,10 +19,10 @@ import { getPlayerGlow, onPlayerGlow } from "../player/cosmetics";
 import "./loadout-view.css";
 import { fixedModel } from "../player/bunny/look";
 import type { Profile } from "../api";
-import { SUPPORTER_MIN_USD, COSMETICS, cosmetic, HAIR_HATS, crownOf, DEFAULT_COSMETICS, isUnlocked, secretCosmetic, SUPPORTER_SETS, supporterItem, type CosmeticDef } from "../progression";
+import { SUPPORTER_MIN_USD, COSMETICS, cosmetic, HAIR_HATS, KNIFE_POOL_MAX, type KnifePool, crownOf, DEFAULT_COSMETICS, isUnlocked, secretCosmetic, SUPPORTER_SETS, supporterItem, type CosmeticDef } from "../progression";
 import { HAIR_DEFAULT, HAIR_LENGTH, HAIR_PRESETS, LENGTH_HATS, hairColorOf, hairHex, hairLengthOf, isWig, loadoutFor, packLoadout, type CosmeticLoadout } from "../loadout";
 import { glowColorPicker } from "./glow-color-picker";
-import { getGhostCosmetics, getLoadout, getOutfit, onGhostCosmetics, onLoadout, onOutfit, setGhostCosmetics, setLoadout, setOutfit } from "../player/cosmetics";
+import { getGhostCosmetics, getKnifePool, getLoadout, getOutfit, onGhostCosmetics, onHeldLoadout, onLoadout, onOutfit, setGhostCosmetics, setKnifePool, setLoadout, setOutfit } from "../player/cosmetics";
 import { previewOf } from "../notify/item-preview";
 import type { Loadout, NewTracker } from "./card-editor";
 import { arrowNav, h } from "./dom";
@@ -57,6 +57,9 @@ export interface LoadoutModel {
   setHairColor(hex: string | null): void;
   /** The ponytail's length (a percent, HAIR_LENGTH; null = the default). */
   setHairLength(n: number | null): void;
+  /** The knife pool (progression.ts KnifePool; null = none). */
+  knifePool(): KnifePool | null;
+  setKnifePool(p: KnifePool | null): void;
   status(): { kind: "idle" | "saving" | "saved" | "error"; text: string };
   isNew(id: string): boolean;
   see(ids: string[]): void;
@@ -64,7 +67,7 @@ export interface LoadoutModel {
   on(fn: () => void): () => void;
 }
 
-const pick = (c: Record<string, string | number | null | undefined>): LoadoutChoice => ({
+const pick = (c: Record<string, unknown>): LoadoutChoice => ({
   knife: (c.knife as string | null | undefined) ?? DEFAULT_COSMETICS.knife,
   finish: (c.finish as string | null | undefined) ?? DEFAULT_COSMETICS.finish,
   glove: (c.glove as string | null | undefined) ?? DEFAULT_COSMETICS.glove,
@@ -76,6 +79,7 @@ const pick = (c: Record<string, string | number | null | undefined>): LoadoutCho
   hairColor: (c.hairColor as string | null | undefined) ?? null,
   hairLength: hairLengthOf(c.hairLength),
 });
+const emptyPool = (): KnifePool => ({ items: [], swap: "map", order: "order" });
 
 /** The profile owner's loadout (saved to the account as you go). */
 export function profileModel(p: Profile, lo: Loadout, news: NewTracker): LoadoutModel {
@@ -90,6 +94,8 @@ export function profileModel(p: Profile, lo: Loadout, news: NewTracker): Loadout
     equip: (slot, id) => lo.equip(slot, id),
     setHairColor: (hex) => lo.apply({ hairColor: hex }),
     setHairLength: (n) => lo.apply({ hairLength: n }),
+    knifePool: () => lo.choice.knifePool ?? null,
+    setKnifePool: (pool) => lo.apply({ knifePool: pool && pool.items.length ? pool : null }),
     status: () => lo.status,
     isNew: (id) => news.isNew(id),
     see: (ids) => news.see(ids),
@@ -132,12 +138,17 @@ export function localModel(): LoadoutModel {
       setLoadout(loadoutFor({ ...choice(), hairLength: n }));
       status = { kind: "saved", text: "Saved on this device" };
     },
+    knifePool: () => getKnifePool(),
+    setKnifePool: (pool) => {
+      setKnifePool(pool && pool.items.length ? pool : null);
+      status = { kind: "saved", text: "Saved on this device" };
+    },
     status: () => status,
     isNew: () => false,
     see: () => {},
     clearIndicators: () => {},
     on: (fn) => {
-      const offs = [onLoadout(() => fn()), onOutfit(() => fn()), onGhostCosmetics(() => fn())];
+      const offs = [onLoadout(() => fn()), onOutfit(() => fn()), onGhostCosmetics(() => fn()), onHeldLoadout(() => fn())];
       return () => offs.forEach((off) => off());
     },
   };
@@ -376,13 +387,66 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     lengthInput.style.setProperty("--p", String((n - HAIR_LENGTH.min) / (HAIR_LENGTH.max - HAIR_LENGTH.min)));
     lengthValue.textContent = `${n}%`;
   }
-  const root = h("section.lo", { "aria-label": "Loadout" }, h("div.lo-head", null, tabs, clearIndicators, status), bodyRow, hairRow, lengthRow, h("div.lo-body", null, stageHost, grid));
+  // Knife pool (Knife and Finish tabs): knives with their finishes the game swaps between, each map or each restart, in
+  // order or at random (player/cosmetics.ts). "Add" puts the knife and finish on the stage in it; a chip equips its
+  // pair, its × takes it out.
+  const poolList = h("div.lo-pool-list", { role: "list", "aria-label": "Knife pool" });
+  const poolAdd = h("button.btn.btn-sm.lo-pool-add", { type: "button", onclick: () => {
+    const c = shownChoice();
+    const p = m.knifePool() ?? emptyPool();
+    const pair = { knife: c.knife ?? DEFAULT_COSMETICS.knife!, finish: c.finish ?? DEFAULT_COSMETICS.finish! };
+    if (p.items.length >= KNIFE_POOL_MAX || p.items.some((x) => x.knife === pair.knife && x.finish === pair.finish)) return;
+    // The first add also keeps what you hold now, so one click makes a pool of two.
+    const cur = choice();
+    const first = !p.items.length && (cur.knife !== pair.knife || cur.finish !== pair.finish) ? [{ knife: cur.knife ?? DEFAULT_COSMETICS.knife!, finish: cur.finish ?? DEFAULT_COSMETICS.finish! }] : [];
+    m.setKnifePool({ ...p, items: [...p.items, ...first, pair] });
+    uiSound("ui_press");
+    drawPool();
+  } }, "Add to pool");
+  const poolSeg = (label: string, key: "swap" | "order", opts: [string, string][]) => {
+    const seg = h("div.seg.lo-poolseg", { role: "radiogroup", "aria-label": label });
+    return { seg, draw(p: KnifePool) {
+      seg.replaceChildren(...opts.map(([v, text]) => {
+        const on = p[key] === v;
+        return h(`button${on ? ".on" : ""}`, { type: "button", role: "radio", "aria-checked": String(on), onclick: () => { m.setKnifePool({ ...p, [key]: v }); drawPool(); } }, text);
+      }));
+    } };
+  };
+  const swapSeg = poolSeg("Swap", "swap", [["map", "Each map"], ["restart", "Each restart"]]);
+  const orderSeg = poolSeg("Order", "order", [["order", "In order"], ["random", "Random"]]);
+  const poolHint = h("span.lo-model-note");
+  const poolRow = h("div.lo-model-row.lo-pool-row", null, h("span.lo-model-label", null, "Knife pool"), poolList, poolAdd, swapSeg.seg, orderSeg.seg, poolHint);
+  function drawPool(): void {
+    poolRow.hidden = !!o.previewOnly || (slot !== "knife" && slot !== "finish");
+    if (poolRow.hidden) return;
+    const p = m.knifePool() ?? emptyPool();
+    const c = shownChoice();
+    const inPool = p.items.some((x) => x.knife === c.knife && x.finish === c.finish);
+    poolAdd.disabled = inPool || p.items.length >= KNIFE_POOL_MAX || !m.owns(cosmetic(c.knife) ?? cosmetic(DEFAULT_COSMETICS.knife)!) || !m.owns(cosmetic(c.finish) ?? cosmetic(DEFAULT_COSMETICS.finish)!);
+    poolAdd.title = inPool ? "Already in the pool" : p.items.length >= KNIFE_POOL_MAX ? `The pool holds ${KNIFE_POOL_MAX}` : "Add the knife and finish shown";
+    const cur = choice();
+    poolList.replaceChildren(...p.items.map((it, i) => {
+      const k = cosmetic(it.knife), f = cosmetic(it.finish);
+      const plain = it.finish === DEFAULT_COSMETICS.finish;
+      const name = `${k?.name ?? it.knife}${plain ? "" : ` · ${f?.name ?? it.finish}`}`;
+      const worn = cur.knife === it.knife && cur.finish === it.finish;
+      return h(`span.lo-pool-chip${worn ? ".on" : ""}`, { role: "listitem", style: `--sw:${f && !plain ? f.color : k?.color ?? "#ff7a1a"}` },
+        h("button.lo-pool-pick", { type: "button", title: `Equip ${name}`, onclick: () => { m.equip("knife", it.knife); m.equip("finish", it.finish); drawPool(); apply(); } }, h("span.lo-pool-dot", { "aria-hidden": "true" }), name),
+        h("button.lo-pool-x", { type: "button", "aria-label": `Take ${name} out of the pool`, title: "Take out", onclick: () => { m.setKnifePool({ ...p, items: p.items.filter((_, j) => j !== i) }); drawPool(); } }, "×"));
+    }));
+    const active = p.items.length >= 2;
+    swapSeg.seg.hidden = orderSeg.seg.hidden = !active;
+    if (active) (swapSeg.draw(p), orderSeg.draw(p));
+    poolHint.textContent = active ? "" : p.items.length ? "Add one more to swap between them" : "Swap between knives each map or restart";
+  }
+  const root = h("section.lo", { "aria-label": "Loadout" }, h("div.lo-head", null, tabs, clearIndicators, status), bodyRow, hairRow, lengthRow, poolRow, h("div.lo-body", null, stageHost, grid));
 
   function drawTabs(): void {
     clearIndicators.disabled = !COSMETICS.some((c) => isLoadoutCategory(c.slot) && m.owns(c) && m.isNew(c.id));
     drawBody();
     drawHair();
     drawLength();
+    drawPool();
     tabs.replaceChildren(
       ...cats.map((s) => {
         const fresh = s !== slot && listed(s).some((c) => m.isNew(c.id));
@@ -602,6 +666,7 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     applyRaf = 0;
     if (!hairDraft) drawHair();
     if (lengthDraft === null) drawLength();
+    drawPool();
     const c = shownChoice();
     stage?.display(loadoutOf(c), lookOf(c));
     drawCaption(c);

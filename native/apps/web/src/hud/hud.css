@@ -55,6 +55,7 @@ body.menu-open #hud .hud-el[data-el="jumpStats"] { visibility: hidden; }
 .hud-timer.practice { color: var(--practice); }
 /* "Practice" under the crosshair (hud.ts setPractice): a quiet word in the timer's yellow, no box. */
 .hud-practice { font-size: 0.9em; font-weight: 700; color: var(--practice); }
+.hud-practice.segmented { color: inherit; opacity: 0.8; }
 .hud-split { font-size: 0.95em; font-weight: 700; line-height: 1.2; opacity: 0.85; }
 .hud-split.hold { opacity: 1; font-weight: 800; }
 .hud-split.ahead { color: var(--gain); }

@@ -35,6 +35,11 @@ const hasBlade = (F: THREE.BufferAttribute) => {
 };
 
 /** First-person hands + knife (viewmodel/mesh.ts or the knife registry's build). */
+/** A geometry laid out elsewhere (the prebuild worker, its finishUV transferred with it): ensureViewmodelLayout skips it. */
+export function markViewmodelLayout(g: THREE.BufferGeometry): void {
+  done.add(g);
+}
+
 export function ensureViewmodelLayout(g: THREE.BufferGeometry): void {
   if (done.has(g)) return;
   done.add(g);

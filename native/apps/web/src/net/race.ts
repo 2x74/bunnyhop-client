@@ -261,12 +261,14 @@ export class RaceUi {
   /** Menu 3: the style (main track). */
   private pickStyle(p: { slot: number; name: string }): void {
     const cur = this.o.selectedStyle();
+    // (Not Segmented: races are in rooms, where checkpoints don't work.)
+    const styles = STYLE_DEFS.filter((d) => !d.segmented);
     this.o.menu.show("race", {
       title: `Race ${p.name}: style`,
-      items: STYLE_DEFS.map((d) => ({ label: d.name, detail: d.id === cur ? "yours" : "", selected: d.id === cur })),
+      items: styles.map((d) => ({ label: d.name, detail: d.id === cur ? "yours" : "", selected: d.id === cur })),
       onPick: (i) => {
         this.o.menu.hide("race");
-        this.send(p.slot, STYLE_DEFS[i].id, 0);
+        this.send(p.slot, styles[i].id, 0);
       },
     });
   }

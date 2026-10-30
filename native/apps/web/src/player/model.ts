@@ -24,7 +24,7 @@ import * as THREE from "three";
 import { playerUniforms, type PlayerUniforms } from "./materials";
 import { RunnerModel } from "./runner";
 import { BunnyModel } from "./bunny/model";
-import { getLoadout, getOutfit, onLoadout, onOutfit } from "./cosmetics";
+import { getHeldLoadout, getOutfit, onHeldLoadout, onOutfit } from "./cosmetics";
 import type { CosmeticLoadout } from "../loadout";
 import { followLoadout, knifeOf } from "../viewmodel/equip";
 import { equippedKnife, onKnife } from "../viewmodel/knives/equipped";
@@ -186,7 +186,7 @@ export class PlayerModel {
       }),
     );
     this.unsub.push(
-      onLoadout((l) => {
+      onHeldLoadout((l) => {
         if (this.o.loadout === undefined && this.impl instanceof BunnyModel) this.impl.setLoadout(l);
       }),
     );
@@ -208,7 +208,7 @@ export class PlayerModel {
   }
 
   private bunny(): BunnyModel {
-    return new BunnyModel({ ...this.o, playerGlow: this.o.playerGlow === undefined ? getPlayerGlow() : this.o.playerGlow, outfit: this.o.outfit ?? getOutfit(), knife: this.knifeChoice(), loadout: this.o.loadout === undefined ? getLoadout() : this.o.loadout }, this.uniforms, readyAnimRig());
+    return new BunnyModel({ ...this.o, playerGlow: this.o.playerGlow === undefined ? getPlayerGlow() : this.o.playerGlow, outfit: this.o.outfit ?? getOutfit(), knife: this.knifeChoice(), loadout: this.o.loadout === undefined ? getHeldLoadout() : this.o.loadout }, this.uniforms, readyAnimRig());
   }
 
   get playerGlow(): PlayerGlow | null { return this.o.playerGlow === undefined ? getPlayerGlow() : this.o.playerGlow; }
@@ -224,7 +224,7 @@ export class PlayerModel {
   setLoadout(l: CosmeticLoadout | null | undefined): void {
     this.o.loadout = l;
     if (!(this.impl instanceof BunnyModel)) return;
-    this.impl.setLoadout(l === undefined ? getLoadout() : l);
+    this.impl.setLoadout(l === undefined ? getHeldLoadout() : l);
     this.impl.setKnife(this.knifeChoice());
   }
 
