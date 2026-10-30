@@ -156,6 +156,7 @@ export class ReplayViewer {
   private readonly onKey = (event: KeyboardEvent) => this.key(event);
   private readonly bars: ResizeObserver;
   private readonly panel: HTMLElement;
+  private reportedBars = "";
   private readonly offPracticeAnswer: () => void;
 
   constructor(private readonly hooks: ReplayViewerHooks) {
@@ -329,9 +330,12 @@ export class ReplayViewer {
   /** The host plays on under the viewer and lays the runner's HUD out between its title and its panel. */
   private reportBars(): void {
     if (!this.el.isConnected) return;
-    const top = this.titleEl.parentElement?.getBoundingClientRect().bottom ?? 0;
-    const bottom = innerHeight - this.panel.getBoundingClientRect().top;
-    send({ type: "replayControl", action: "viewer", open: true, top: Math.ceil(top), bottom: Math.ceil(bottom) });
+    const top = Math.ceil(this.titleEl.parentElement?.getBoundingClientRect().bottom ?? 0);
+    const bottom = Math.ceil(innerHeight - this.panel.getBoundingClientRect().top);
+    const report = `${state.playback.id}:${top}:${bottom}`;
+    if (report === this.reportedBars) return;
+    this.reportedBars = report;
+    send({ type: "replayControl", action: "viewer", open: true, top, bottom });
   }
 
   private flash(text: string): void {
