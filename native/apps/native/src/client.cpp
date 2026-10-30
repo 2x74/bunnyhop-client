@@ -2530,6 +2530,8 @@ int run(const native::Options &opt) {
                             viewer.toggle_weapon();
                         else if (action == "hud")
                             viewer.hud = message.value("value", !viewer.hud);
+                        else if (action == "viewer")
+                            viewer.ui_open = message.value("open", false);
                         else if (action == "stop")
                             reset();
                     } else if (type == "sensitivity") {
@@ -2886,6 +2888,7 @@ int run(const native::Options &opt) {
             ))
             act(*ready, false, true);
         video.step(captured && !viewer.active);
+        viewer.ui_shown = viewer.active && viewer.ui_open && menu && menu->visible();
         viewer.wrap_loop(curr.tick);
         if (!video.preparing())
             if (const auto seek = viewer.controls.take()) try {
@@ -2896,7 +2899,8 @@ int run(const native::Options &opt) {
                 }
         const bool simulation_active =
                 !video.preparing() && core && !spectator && !room_modes.frozen() && !download.valid()
-                && ((focused && (captured || (viewer.active && (!menu || !menu->visible())))) || opt.frames)
+                && ((focused && (captured || (viewer.active && (!menu || !menu->visible() || viewer.ui_shown))))
+                    || opt.frames)
                 && (!viewer.active || (!viewer.paused && !viewer.controls.dragging));
         if (heartbeat.start && !simulation_active) heartbeat.paused = true;
         const double frame_seconds = input_clock.elapsed(now);
@@ -3554,7 +3558,7 @@ int run(const native::Options &opt) {
                     steady_seconds,
                     width,
                     height,
-                    (!menu || !menu->visible()) && !opt.camera,
+                    (!menu || !menu->visible() || viewer.ui_shown) && !opt.camera,
                     video.preparing(),
                     held_action("scoreboard") || show_scores,
                     weapon_context(),

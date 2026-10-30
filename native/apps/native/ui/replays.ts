@@ -369,7 +369,7 @@ export function replayPanel(notice: (value: string) => void): HTMLElement {
       title: `Queue a video of each replay listed (up to ${MAX_BATCH})`,
       onclick: () => video(shownReplays.slice(0, MAX_BATCH).map(exportFile)),
     },
-    "Videos of listed",
+    "Videos of all listed",
   ) as HTMLButtonElement;
   for (const control of [search, filter, sort])
     control.addEventListener("input", () => {

@@ -17,6 +17,7 @@ void ReplayPlayer::begin(const std::filesystem::path &file) {
     path = file;
     loop.reset();
     hud = true;
+    ui_open = false;
     view_continuous_ = false;
 }
 

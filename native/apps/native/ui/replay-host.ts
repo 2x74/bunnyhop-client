@@ -12,7 +12,8 @@
 // Host contract (call): bunnyhopNativeMenu.onReplayTimeline(ReplayTimelineData), once per replay.
 // Menu messages: {type:"replayCompare", action:"set", kind, name, replayBase64} and
 // {type:"replayCompare", action:"clear"}; {type:"replayControl", action:"loop", value:{from,to}|null},
-// {type:"replayControl", action:"weapon"} and {type:"replayControl", action:"hud", value}.
+// {type:"replayControl", action:"weapon"}, {type:"replayControl", action:"hud", value} and
+// {type:"replayControl", action:"viewer", open} while the viewer is on screen.
 
 import type { GhostKind } from "../../web/src/player/colors";
 import { readTimelineData, type ReplayTimelineData } from "./replay-timeline";

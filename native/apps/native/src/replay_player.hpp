@@ -22,6 +22,9 @@ struct ReplayPlayer {
     bool active = false, paused = false, failed = false, orbit_drag = false;
     // The weapon in hand (V) in-eye and in third person, and the viewer's HUD switch (H).
     bool weapon_eye = true, weapon_third = true, hud = true;
+    // The menu shows the viewer (ui_open) and is on screen (ui_shown, each frame): playback runs and the runner's HUD
+    // draws under it, like the website's viewer.
+    bool ui_open = false, ui_shown = false;
     double speed = 1;
     // Playback returns to `from` on reaching `to`.
     std::optional<Loop> loop;

@@ -131,6 +131,14 @@ export type MenuMessage =
   | { type: "replayControl"; action: "loop"; value: { from: number; to: number } | null }
   | { type: "replayControl"; action: "weapon" }
   | { type: "replayControl"; action: "hud"; value: boolean }
+  /** Draw the replay in the runner's shape, fit and FOV (src/runner_view.hpp); null goes back. */
+  | {
+      type: "replayControl";
+      action: "runnerView";
+      view: { aspect: number; screen: number; bars: boolean; fov: number } | null;
+    }
+  /** The viewer is on screen: the host keeps playing under it and draws the runner's HUD. */
+  | { type: "replayControl"; action: "viewer"; open: boolean }
   | { type: "practiceFromReplay"; tick?: number }
   /** A second replay as a ghost on the one being watched (replay-host.ts); needs the host's "compare" feature. */
   | { type: "replayCompare"; action: "set"; kind: "pb" | "wr" | "custom"; name: string; replayBase64: string }

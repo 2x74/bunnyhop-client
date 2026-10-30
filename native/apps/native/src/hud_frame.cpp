@@ -76,7 +76,7 @@ void HudFrame::draw_status(const BhCmd &shown, const BhWeaponReport &weapon) con
             display_fps,
             prefs.hud && (!viewer.active || viewer.hud),
             prefs.crosshair,
-            viewer.active,
+            viewer.active && !viewer.ui_shown,
             weapon,
             prefs.jump_stats ? hud.ssj_line() : std::string_view(),
             feedback.ssj_gain,
@@ -128,7 +128,7 @@ void HudFrame::draw_diagnostics() const {
 }
 
 void HudFrame::draw_playback() const {
-    if (viewer.active && !chat.active && !video_preparing) {
+    if (viewer.active && !viewer.ui_shown && !chat.active && !video_preparing) {
         native::draw_replay_controls(
                 hud,
                 width,

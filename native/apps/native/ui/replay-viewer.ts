@@ -56,6 +56,7 @@ const HELP: readonly [string, string][] = [
   ["1–6 or F", "in-eye · chase · free · flyby · auto · orbit"],
   ["V", "weapon in hand on / off"],
   ["H", "HUD on / off"],
+  ["R", "the runner's screen shape and FOV, when recorded"],
   ["C", "compare with another replay"],
   ["E", "export video"],
   ["P", "practice from this moment"],
@@ -69,6 +70,42 @@ export interface ReplayViewerHooks {
 }
 
 type Button = HTMLButtonElement;
+
+/** How the runner saw the run (the vault's record, src/runner_view.hpp): the shape drawn, the monitor's, the FOV. */
+interface RunnerView {
+  aspect: number;
+  screen: number;
+  bars: boolean;
+  fov: number;
+}
+
+const ASPECT_NAMES: readonly [number, string][] = [
+  [4 / 3, "4:3"],
+  [16 / 9, "16:9"],
+  [16 / 10, "16:10"],
+  [5 / 4, "5:4"],
+  [21 / 9, "21:9"],
+];
+const SAME_ASPECT = 0.01;
+
+function readRunnerView(replay: { localSummary?: unknown } | undefined): RunnerView | null {
+  const summary = replay?.localSummary;
+  const view = summary && typeof summary === "object" ? (summary as { view?: unknown }).view : null;
+  if (!view || typeof view !== "object") return null;
+  const v = view as Record<string, unknown>;
+  const numbers = [v.aspect, v.screen, v.fov].every((n) => typeof n === "number" && Number.isFinite(n) && n > 0);
+  return numbers
+    ? { aspect: Number(v.aspect), screen: Number(v.screen), bars: v.bars === true, fov: Number(v.fov) }
+    : null;
+}
+
+/** "4:3 stretched · 100 FOV". */
+function runnerViewLabel(view: RunnerView): string {
+  const name = ASPECT_NAMES.find(([ratio]) => Math.abs(ratio - view.aspect) < SAME_ASPECT)?.[1];
+  const shape = name ?? view.aspect.toFixed(2);
+  const fit = Math.abs(view.aspect - view.screen) < SAME_ASPECT ? "" : view.bars ? " with bars" : " stretched";
+  return `${shape}${fit} · ${Math.round(view.fov)} FOV`;
+}
 
 function button(label: string, title: string, onclick: () => void, classes = ""): Button {
   return h(`button.rv-btn${classes}`, { type: "button", title, "aria-label": title, onclick }, label) as Button;
@@ -101,6 +138,8 @@ export class ReplayViewer {
   private readonly gotoMenu = h("div.rv-menu", { hidden: true, role: "menu" });
   private readonly loopButton: Button;
   private readonly weaponButton: Button;
+  private readonly viewButton: Button;
+  private runnerViewOn = false;
   private loopStart: number | null = null;
   private readonly practiceButton: Button;
   private readonly shareButton: Button;
@@ -131,6 +170,12 @@ export class ReplayViewer {
     this.gotoButton = button("Go to", "Go to a jump or split (G)", () => this.toggleGotoMenu(), ".rv-chip");
     this.loopButton = button("Loop", "Loop a part: mark A, then B (L)", () => this.markLoop(), ".rv-chip");
     this.weaponButton = button("Weapon", "Weapon in hand (V)", () => this.toggleWeapon(), ".rv-chip");
+    this.viewButton = button(
+      "Runner's view",
+      "Watch in the shape and FOV the runner played with (R)",
+      () => this.toggleRunnerView(),
+      ".rv-chip",
+    );
     this.playButton = button("▶", "Play / pause (Space)", () => this.togglePlay(), ".rv-play");
     this.fullButton = button(
       "Full recording",
@@ -198,6 +243,7 @@ export class ReplayViewer {
       this.exporter.el,
     );
     addEventListener("keydown", this.onKey, true);
+    send({ type: "replayControl", action: "viewer", open: true });
     this.offPracticeAnswer = practiceFromReplay.onAnswer(() => this.flash(practiceFromReplay.message()));
   }
 
@@ -207,11 +253,11 @@ export class ReplayViewer {
       "div.rv-group",
       null,
       button("⏮", "Start (Home)", () => this.seek(shownRange(state.playback).start)),
-      button("⇠", "Previous jump (Shift+J)", () => this.seekJump(-1)),
+      button("‹J", "Previous jump (Shift+J)", () => this.seekJump(-1)),
       button("‹", "Previous tick (,)", step(-1)),
       this.playButton,
       button("›", "Next tick (.)", step(1)),
-      button("⇢", "Next jump (J)", () => this.seekJump(1)),
+      button("J›", "Next jump (J)", () => this.seekJump(1)),
       button("⏭", "End (End)", () => this.seek(shownRange(state.playback).end)),
       h("div.rv-clock.native-playback-position", null, this.timeEl, this.tickEl),
     );
@@ -256,6 +302,7 @@ export class ReplayViewer {
       h("div.rv-menu-wrap", null, this.gotoButton, this.gotoMenu),
       this.loopButton,
       this.weaponButton,
+      this.viewButton,
       h("div.rv-menu-wrap", null, this.compareButton, this.compareMenu),
       this.practiceButton,
       exportButton,
@@ -268,6 +315,7 @@ export class ReplayViewer {
   /** Removes the key listener and cancels a drag. The screen calls it when the viewer leaves the page. */
   dispose(): void {
     removeEventListener("keydown", this.onKey, true);
+    send({ type: "replayControl", action: "viewer", open: false });
     this.offPracticeAnswer();
     this.scrubber.cancel(false);
   }
@@ -471,6 +519,17 @@ export class ReplayViewer {
     send({ type: "replayControl", action: "loop", value: { from, to } });
   }
 
+  private runnerView(): RunnerView | null {
+    return readRunnerView(state.replays.find((item) => item.id === state.playback.id));
+  }
+
+  private toggleRunnerView(): void {
+    const view = this.runnerView();
+    if (!view) return;
+    this.runnerViewOn = !this.runnerViewOn;
+    send({ type: "replayControl", action: "runnerView", view: this.runnerViewOn ? view : null });
+  }
+
   private toggleWeapon(): void {
     send({ type: "replayControl", action: "weapon" });
   }
@@ -610,6 +669,7 @@ export class ReplayViewer {
       KeyV: () => {
         if (hostSupports("weapon")) this.toggleWeapon();
       },
+      KeyR: () => this.toggleRunnerView(),
       KeyH: () => {
         if (hostSupports("hud")) this.toggleHud();
       },
@@ -673,6 +733,10 @@ export class ReplayViewer {
     this.fullButton.setAttribute("aria-pressed", String(!!playback.fullRecording));
     this.paintLoop();
     this.weaponButton.hidden = !hostSupports("weapon");
+    const view = this.runnerView();
+    this.viewButton.hidden = !view;
+    this.viewButton.classList.toggle("on", this.runnerViewOn);
+    this.viewButton.textContent = view && this.runnerViewOn ? runnerViewLabel(view) : "Runner's view";
     this.weaponButton.classList.toggle("on", replayWeapon());
     this.weaponButton.setAttribute("aria-pressed", String(replayWeapon()));
     this.gotoButton.hidden = !replayTimeline(playback.id);
@@ -734,6 +798,10 @@ export class ReplayViewer {
     if (playback.id !== this.replayId) {
       this.scrubber.cancel(false);
       this.loopStart = null;
+      // Opening another replay clears the host's runner view.
+      this.runnerViewOn = false;
+      // A new replay starts with the host's viewer flag cleared.
+      if (playback.active) send({ type: "replayControl", action: "viewer", open: true });
     }
     this.countWatching();
     if (this.pendingTick !== null) {

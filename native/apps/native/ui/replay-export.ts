@@ -309,6 +309,7 @@ export class ReplayExportDialog {
   private replayId = "";
   private musicKey = "";
   private paintTracks: () => void = () => {};
+  private paintClip: () => void = () => {};
   private hostKey = "";
 
   constructor(private readonly hooks: ExportHooks) {
@@ -549,7 +550,7 @@ export class ReplayExportDialog {
         "div.rv-checks",
         null,
         this.check("Speed", "speed"),
-        this.check("Timer and sync", "hud", "speed, timer, sync"),
+        this.check("Timer and sync", "hud", "splits, stats, jump stats"),
         this.check("Keys", "keys"),
         this.check("Speed graph", "graph"),
         this.check("Crosshair", "crosshair", undefined, firstPerson),
@@ -560,7 +561,7 @@ export class ReplayExportDialog {
 
   private soundSection(): HTMLElement {
     const gameplay = this.check("Include gameplay audio", "audio", "follows your volume and mutes");
-    const wav = this.check("Also save the sound as WAV", "audioFile", "next to the video, for editors", () =>
+    const wav = this.check("Sound as a WAV too", "audioFile", "next to the video, for editors", () =>
       this.settings.codec === "png" ? "PNG frames always come with audio.wav" : null,
     );
     return section("Sound", h("div.rv-checks", null, gameplay, wav), this.musicRow);
@@ -578,7 +579,9 @@ export class ReplayExportDialog {
       { type: "button", onclick: () => this.useLoop() },
       "Use loop A–B",
     ) as HTMLButtonElement;
-    this.controls.push(() => (loop.hidden = !this.hooks.loop?.()));
+    this.paintClip = () => {
+      loop.hidden = !this.hooks.loop?.();
+    };
     return section(
       "Clip",
       checkRow(this.full, "Full recording", "the whole file, not 1 s before to 1.5 s after the run"),
@@ -668,7 +671,7 @@ export class ReplayExportDialog {
       this.clipSection,
       this.advanced(),
     );
-    this.controls.push(() => this.paintMusic());
+    this.controls.push(this.paintClip);
   }
 
   private apply(values: Partial<ExportSettings>): void {
