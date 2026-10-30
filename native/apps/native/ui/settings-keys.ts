@@ -12,7 +12,8 @@ export type KeyRule =
   | { kind: "boolean" }
   | { kind: "choice"; values: readonly (string | number)[] }
   | { kind: "color" }
-  | { kind: "number"; min: number; max: number; whole?: boolean };
+  | { kind: "number"; min: number; max: number; whole?: boolean }
+  | { kind: "skyId" };
 
 export interface RequestedKey {
   /** Dotted path into the web Prefs. */
@@ -28,6 +29,8 @@ const boolean: KeyRule = { kind: "boolean" };
 const color: KeyRule = { kind: "color" };
 const choice = (...values: (string | number)[]): KeyRule => ({ kind: "choice", values });
 const number = (min: number, max: number, whole = false): KeyRule => ({ kind: "number", min, max, whole });
+/** A sky pack id (web sky-packs/manifest.ts) or null for none. */
+const skyId: KeyRule = { kind: "skyId" };
 
 /** "hud.keys.opacity" -> "hudKeysOpacity". */
 export function nativeKeyFor(path: string): string {
@@ -106,6 +109,24 @@ export const REQUESTED_KEYS: readonly RequestedKey[] = [
   render("graphics.bloom", boolean),
   render("graphics.materialResponse", boolean),
   render("graphics.skyExposure", number(-4, 4)),
+  render("graphics.preset", choice("source", "classic", "enhanced", "cinematic")),
+  render("graphics.spatialAA", boolean),
+  render("graphics.contactShading", boolean),
+  render("graphics.atmosphere", boolean),
+  render("graphics.sunShafts", boolean),
+  render("graphics.mapProfiles", boolean),
+  render("graphics.ambienceShowcase", boolean),
+  render("graphics.lightingProfile", choice("map", "auto", "balanced", "daylight", "indoor", "ambience")),
+  render("graphics.directContribution", number(0, 2)),
+  render("graphics.ambientContribution", number(0, 2)),
+  render("graphics.dynamicShadows", boolean),
+  render("graphics.shadowQuality", choice("low", "medium", "high")),
+  render("graphics.shadowDistance", number(256, 4096)),
+  render("graphics.shadowStrength", number(0, 0.4)),
+  render("graphics.skyMode", choice("map", "procedural", "pack")),
+  render("graphics.skyPackId", skyId),
+  render("graphics.skyRotation", number(-180, 180)),
+  render("graphics.lightingSource", choice("map", "pack")),
 ];
 
 export const REQUESTED_BY_KEY = new Map(REQUESTED_KEYS.map((entry) => [entry.key, entry]));
@@ -141,6 +162,8 @@ export function followsRule(rule: KeyRule, value: unknown): boolean {
       if (typeof value !== "number" || !Number.isFinite(value)) return false;
       if (rule.whole && !Number.isInteger(value)) return false;
       return value >= rule.min && value <= rule.max;
+    case "skyId":
+      return value === null || (typeof value === "string" && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(value));
   }
 }
 

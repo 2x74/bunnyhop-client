@@ -8,14 +8,15 @@ NVAPI's headers, unchanged. To update, re-download from the upstream URL and ref
 |---|---|---|
 | `nlohmann/` | https://github.com/nlohmann/json | JSON throughout the client |
 | `dr_libs/` | https://github.com/mackron/dr_libs | Decoding custom WAV, MP3 and FLAC |
-| `stb/` | https://github.com/nothings/stb | Decoding custom Ogg Vorbis |
+| `stb/` | https://github.com/nothings/stb | Decoding custom Ogg Vorbis; sky panoramas (.hdr, PNG, JPEG) |
 | `nvapi/` | https://github.com/NVIDIA/nvapi | NVIDIA Reflex on Windows (an excerpt: `nvapi_reflex.h`) |
 | `amd/` | https://github.com/GPUOpen-LibrariesAndSDKs/AntiLag2-SDK | AMD Anti-Lag 2 on Windows (`ffx_antilag2_dx11.h`) |
 
 `dr_libs` and `stb` exist only for the custom audio packs: a player's own files
 in `sound/` and `bgm/` can be in any of those formats, so the client has to
 decode them itself. The shipped bunnyhop.lol audio is raw float32 (`.f32`) and
-needs no decoder — none of this is on the path for the default packs.
+needs no decoder — none of this is on the path for the default packs. `stb_image.h` (v2.30) decodes the sky
+panoramas the Enhanced and Cinematic looks draw, in `src/sky_image.cpp` only, on the sky worker.
 
 Each decoder is compiled into exactly one translation unit (`src/audio_pack.cpp`)
 rather than being header-only everywhere, so the implementation is emitted once

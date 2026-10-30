@@ -164,6 +164,8 @@ if(BUNNYHOP_BUILD_CLIENT)
         src/preferences.cpp
         src/replay_library.cpp
         src/online.cpp
+        src/sky_image.cpp
+        src/sky_library.cpp
         src/audio_pack.cpp
         src/video_export.cpp
         src/avatar_picture.cpp
@@ -334,6 +336,11 @@ if(BUNNYHOP_BUILD_CLIENT)
         target_link_libraries(bunnyhop-native-client-tests PRIVATE SDL3::SDL3)
         target_compile_options(bunnyhop-native-client-tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
         add_test(NAME native_client_boundaries COMMAND bunnyhop-native-client-tests)
+        add_executable(bunnyhop-native-sky-tests src/sky_tests.cpp src/sky_image.cpp src/sky_library.cpp src/online.cpp)
+        target_include_directories(bunnyhop-native-sky-tests PRIVATE vendor include src)
+        target_link_libraries(bunnyhop-native-sky-tests PRIVATE bunnyhop_core_native CURL::libcurl SDL3::SDL3)
+        target_compile_options(bunnyhop-native-sky-tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+        add_test(NAME native_sky COMMAND bunnyhop-native-sky-tests)
         add_executable(bunnyhop-native-online-tests src/online_tests.cpp src/online.cpp)
         target_include_directories(bunnyhop-native-online-tests PRIVATE vendor)
         target_link_libraries(bunnyhop-native-online-tests PRIVATE bunnyhop_core_native CURL::libcurl)
@@ -360,7 +367,7 @@ if(BUNNYHOP_BUILD_CLIENT)
     target_link_libraries(bunnyhop-native-menu-backdrop-smoke PRIVATE bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
     target_compile_definitions(bunnyhop-native-menu-backdrop-smoke PRIVATE
         BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
-    add_executable(bunnyhop-native-render-smoke src/render_smoke.cpp)
+    add_executable(bunnyhop-native-render-smoke src/render_smoke.cpp src/sky_image.cpp)
     # Avatar pictures through the menu's render service, into files: `ASSETS JOBS.json OUTPUT_DIR`.
     add_executable(bunnyhop-native-avatar-smoke EXCLUDE_FROM_ALL
         src/avatar_smoke.cpp src/avatar_picture.cpp src/webp_lossless.cpp)
@@ -390,7 +397,7 @@ if(BUNNYHOP_BUILD_CLIENT)
             BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
         target_compile_options(bunnyhop-native-load-benchmark PRIVATE -ffp-contract=off -Wno-deprecated-declarations)
     endif()
-    add_executable(bunnyhop-native-render-benchmark src/render_benchmark.cpp)
+    add_executable(bunnyhop-native-render-benchmark src/render_benchmark.cpp src/sky_image.cpp)
     target_include_directories(bunnyhop-native-render-benchmark PRIVATE vendor)
     target_link_libraries(bunnyhop-native-render-benchmark PRIVATE bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
     target_compile_definitions(bunnyhop-native-render-benchmark PRIVATE BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")

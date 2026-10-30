@@ -127,6 +127,12 @@ the numbers native mirrors when a re-sync changes them. The v0.0.29 integration 
 Settings are the website's settings screen. `ui/settings-gates.ts` places every website row: shown, waiting for a
 host setting, switched off where the native renderer has its own version, or left out with the reason.
 
+Graphics → Look has the website's four looks. Enhanced and Cinematic draw through `src/enhanced_look.hpp` (soft bloom,
+grade, haze, contact shading, sun shafts, edge smoothing) with sun shadows (`src/sun_shadows.hpp`) and the lighting
+profiles. Sky packs show in those two looks: the seven built-in skies are fetched once into the data folder's
+`sky-cache/` when picked, and `.hdr`, PNG, JPEG and `.bhsky.json` files in its `skies/` folder (where Add from a link
+and Import file save theirs) show in the Sky picker. Downloads and decoding run on workers (`src/sky_library.cpp`).
+
 ## Packages
 
 Preview builds are published at [2x74/bunnyhop-client Releases](https://github.com/2x74/bunnyhop-client/releases).
