@@ -32,6 +32,9 @@ pub use replay::{
 mod recording;
 pub use recording::{bh_record_cosmetic, bh_record_inspect, bh_record_loadout};
 mod practice;
+mod segments;
+pub use segments::{bh_segment_loads, bh_record_options_read_v29};
+pub use practice::bh_segment_restore;
 mod surfaces;
 pub use surfaces::{BhSurfaceProbe, bh_surface_at};
 mod run;
@@ -293,6 +296,7 @@ struct Map {
     playback: Option<replay::Playback>,
     ghosts: Vec<Option<replay::Ghost>>,
     checkpoints: Vec<Option<practice::Checkpoint>>,
+    segments: segments::History,
 }
 impl Map {
     fn load_cancellable(
@@ -597,6 +601,7 @@ impl Map {
             playback: None,
             ghosts: Vec::new(),
             checkpoints: Vec::new(),
+            segments: segments::History::default(),
         })
     }
     fn transform(&mut self, model: u32) -> Result<BhTransform, String> {

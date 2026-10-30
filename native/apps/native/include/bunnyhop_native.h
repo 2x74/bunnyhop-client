@@ -401,6 +401,10 @@ int bh_practice_noclip_tick(BhContext *ctx, const BhNoclipState *state, BhSnapsh
 /* returns1 standing,2 crouched,0 stuck/error. */
 uint32_t bh_practice_noclip_exit(BhContext *ctx, const BhNoclipState *state, float yaw, float pitch, BhSnapshot *out);
 uint32_t bh_practice_save(BhContext *ctx, float yaw, float pitch);
+// Clean Segmented only. Negative loads means this attempt is not segmenting.
+int bh_segment_loads(BhContext *ctx);
+int bh_segment_restore(BhContext *ctx, uint32_t handle, BhCmd *out_view, BhSnapshot *out);
+int bh_record_options_read_v29(BhContext *ctx, BhRecordOptionsV29 *options);
 int bh_practice_restore(BhContext *ctx, uint32_t handle, BhCmd *out_view, BhSnapshot *out);
 int bh_practice_free(BhContext *ctx, uint32_t handle);
 /* Camera collision: clear fraction [0,1] across current world/props/brushes, ignores player clips. */

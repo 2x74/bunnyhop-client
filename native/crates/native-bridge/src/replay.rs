@@ -33,6 +33,7 @@ pub struct Decoded {
     pub spawn: Option<Spawn>,
     pub commands: Vec<BhCmd>,
     pub checkpoints: Vec<(u32, [f32; 3], [f32; 3])>,
+    pub segments: Vec<segments::Load>,
     pub map_sha: String,
     pub info: CString,
     pub cosmetic: Vec<CosmeticEvent>,
@@ -462,10 +463,37 @@ impl Decoded {
                 "angleSpeedKey": options.angle_speed_key
             }));
         }
+        let mut segments = Vec::new();
+        if r.bytes.get(r.at..r.at + 4) == Some(&segments::MAGIC.to_le_bytes()) {
+            let parse = (|| -> Result<(), String> {
+                r.u32()?;
+                let count = r.varint()? as usize;
+                if count == 0 || count > segments::MAX_LOADS { return Err("bad count".into()); }
+                let mut tick = 0u32;
+                for _ in 0..count {
+                    tick = tick.checked_add(r.varint()?).ok_or("tick overflow")?;
+                    let position = r.vec3()?;
+                    let velocity = r.vec3()?;
+                    finite(&position)?;
+                    finite(&velocity)?;
+                    if tick as usize > n { return Err("load after replay".into()); }
+                    segments.push(segments::Load { tick, position, velocity });
+                }
+                Ok(())
+            })();
+            parse.map_err(|e| format!("bad segment loads: {e}"))?;
+        }
+        if !segments.is_empty() && style != "segmented" {
+            return Err("only Segmented runs load checkpoints".into());
+        }
+        if style == "segmented" && (version < 7 || settings.physics < 19 || rules < 2) {
+            return Err("Segmented needs replay v7, physics v19 and timer rules 2".into());
+        }
         let spawn_json=spawn.as_ref().map(|s|json!({"position":s.position,"yaw":s.yaw,"targetname":s.targetname,"classname":s.classname}));
         let info=CString::new(json!({"version":version,"map":map,"mapSha256":map_sha,"settings":recording::settings_json(settings),"prespeedCap":if cap>0.0{Some(cap)}else{None},"startTick":start,"endTick":end,"totalTicks":n,"track":track,"spawn":spawn_json,"style":style,"timerRules":rules,"zones":zones.iter().map(|z|z.json()).collect::<Vec<_>>(),"clientBuild":client,"player":player,"recordedAt":recorded,"checkpointInterval":interval,"checkpoints":cp_count,"counted":counted,"packedLoadout":packed_loadout,"cosmeticEvents":cosmetic.len(),"inspectEvents":inspect.len()}).to_string()).map_err(|e|e.to_string())?;
         let mut metadata: serde_json::Value =
             serde_json::from_slice(info.as_bytes()).map_err(|e| e.to_string())?;
+        metadata["segmentLoads"] = segments.len().into();
         if let Some(rates) = turn_speed {
             metadata["turnSpeed"] = rates;
         }
@@ -492,6 +520,7 @@ impl Decoded {
             commands,
             checkpoints,
             map_sha,
+            segments,
             info,
             cosmetic,
             inspect,
@@ -529,6 +558,13 @@ impl Map {
         self.check_replay(d)
     }
     fn check_replay(&self, d: &Decoded) -> Result<(), String> {
+        for load in d.segments.iter().filter(|load| load.tick == self.game.tick) {
+            if load.position.iter().zip(self.game.state.position)
+                .chain(load.velocity.iter().zip(self.game.state.velocity))
+                .any(|(a, b)| a.to_bits() != b.to_bits()) {
+                return Err(format!("segment load mismatch at tick {}", load.tick));
+            }
+        }
         for (t, p, v) in d.checkpoints.iter().filter(|c| c.0 == self.game.tick) {
             if p.iter()
                 .zip(self.game.state.position)
@@ -679,7 +715,7 @@ pub unsafe extern "C" fn bh_ghost_load_cancellable(
         call(ctx, |c| {
             check_cancel(cancel, data)?;
             let d = Decoded::load(Path::new(string(path)?))?;
-            if d.commands.len() > 1_000_000 {
+            if d.commands.len() > segments::MAX_LOG_TICKS {
                 return Err("ghost exceeds frame limit".into());
             }
             let m = c.map()?;

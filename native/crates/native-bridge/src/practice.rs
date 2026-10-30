@@ -52,6 +52,7 @@ pub unsafe extern "C" fn bh_practice_from_replay(
 
 pub struct Checkpoint {
     game: game::GameState,
+    pub(crate) segment: Option<segments::Mark>,
     settings: BhSettings,
     filter: styles::Filter,
     timer: Option<run::Timer>,
@@ -61,7 +62,7 @@ pub struct Checkpoint {
 }
 impl Checkpoint {
     fn bytes(&self) -> usize {
-        self.game.approx_bytes()
+        self.game.approx_bytes() + self.segment.as_ref().map_or(0, segments::Mark::bytes)
     }
 }
 #[repr(C)]
@@ -242,6 +243,7 @@ pub unsafe extern "C" fn bh_practice_save(ctx: *mut BhContext, yaw: f32, pitch: 
             }
             let checkpoint = Checkpoint {
                 game: m.game.save_state(),
+                segment: m.segment_mark()?,
                 settings,
                 filter: m.filter.clone(),
                 timer: m.timer.clone(),
@@ -282,6 +284,17 @@ pub unsafe extern "C" fn bh_practice_restore(
     view: *mut BhCmd,
     out: *mut BhSnapshot,
 ) -> c_int {
+    unsafe { restore(ctx, handle, view, out, false) }
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_segment_restore(
+    ctx: *mut BhContext, handle: u32, view: *mut BhCmd, out: *mut BhSnapshot,
+) -> c_int {
+    unsafe { restore(ctx, handle, view, out, true) }
+}
+unsafe fn restore(
+    ctx: *mut BhContext, handle: u32, view: *mut BhCmd, out: *mut BhSnapshot, segmented: bool,
+) -> c_int {
     unsafe {
         call(ctx, |c| {
             if view.is_null() || out.is_null() {
@@ -295,7 +308,12 @@ pub unsafe extern "C" fn bh_practice_restore(
             {
                 return Err("invalid practice checkpoint".into());
             }
-            invalidate_recording(m, "practice_restore")?;
+            let recording = if segmented {
+                Some(m.segment_recording(handle)?)
+            } else {
+                invalidate_recording(m, "practice_restore")?;
+                None
+            };
             m.playback = None;
             let s = m.checkpoints[handle as usize - 1].as_ref().unwrap();
             m.game.restore_state(&s.game);
@@ -314,6 +332,17 @@ pub unsafe extern "C" fn bh_practice_restore(
                 },
             )?;
             output(out, BhSnapshot::from(&m.game))?;
+            if let Some(mut recorder) = recording {
+                recorder.data.segments.push(segments::Load {
+                    tick: m.game.tick, position: BhState::from(&m.game).position, velocity: BhState::from(&m.game).velocity,
+                });
+                m.recorded_commands = recorder.data.commands.len() as u64;
+                m.record_hash = recorder.data.commands.iter().fold(run::HASH_SEED, |h, &c| run::fold_command(h, c));
+                m.recorder = Some(recorder);
+                m.record_valid = true;
+                m.completed_record = None;
+                m.invalidate_jump_observation();
+            }
             c.settings = settings;
             c.style_id = style;
             Ok(())

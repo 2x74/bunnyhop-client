@@ -1,6 +1,6 @@
 //! Exact command/style transform from apps/web/src/styles.ts and autostrafe.ts.
 use super::{BhCmd, BhSettings, BhState};
-pub const IDS: [&str; 8] = [
+pub const IDS: [&str; 9] = [
     "autohop",
     "legit",
     "scroll",
@@ -9,6 +9,7 @@ pub const IDS: [&str; 8] = [
     "hsw",
     "lowgrav",
     "autostrafe",
+    "segmented",
 ];
 const FORWARD: u32 = 1 << 3;
 const BACK: u32 = 1 << 4;
