@@ -62,7 +62,7 @@ pub struct Checkpoint {
 }
 impl Checkpoint {
     fn bytes(&self) -> usize {
-        self.game.approx_bytes() + self.segment.as_ref().map_or(0, segments::Mark::bytes)
+        self.game.approx_bytes()
     }
 }
 #[repr(C)]
@@ -251,13 +251,9 @@ pub unsafe extern "C" fn bh_practice_save(ctx: *mut BhContext, yaw: f32, pitch: 
                 yaw,
                 pitch,
             };
-            if m.checkpoints
-                .iter()
-                .flatten()
-                .map(Checkpoint::bytes)
-                .sum::<usize>()
-                .saturating_add(checkpoint.bytes())
-                > 128 << 20
+            if m.checkpoints.iter().any(Option::is_some)
+                && m.checkpoints.iter().flatten().map(Checkpoint::bytes).sum::<usize>()
+                    .saturating_add(checkpoint.bytes()) > 128 << 20
             {
                 return Err("practice checkpoints exceed 128 MiB".into());
             }

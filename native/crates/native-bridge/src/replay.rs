@@ -494,6 +494,7 @@ impl Decoded {
         let mut metadata: serde_json::Value =
             serde_json::from_slice(info.as_bytes()).map_err(|e| e.to_string())?;
         metadata["segmentLoads"] = segments.len().into();
+        metadata["segmentTicks"] = json!(segments.iter().map(|load| load.tick).collect::<Vec<_>>());
         if let Some(rates) = turn_speed {
             metadata["turnSpeed"] = rates;
         }

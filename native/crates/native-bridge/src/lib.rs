@@ -1357,7 +1357,8 @@ pub unsafe extern "C" fn bh_record_write_bhr(ctx: *mut BhContext, path: *const c
     unsafe {
         call(ctx, |c| {
             let m = c.map()?;
-            if m.recorder.is_some() || !m.record_valid {
+            let retained_segment = m.filter.id == "segmented" && m.completed_record.is_some();
+            if (m.recorder.is_some() && !retained_segment) || !m.record_valid {
                 return Err("end a valid native recording before writing BHR".into());
             }
             m.completed_record

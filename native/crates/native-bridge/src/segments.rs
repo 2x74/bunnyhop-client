@@ -22,6 +22,8 @@ struct Tick {
 #[derive(Default)]
 pub struct History {
     ticks: Vec<Tick>,
+    cosmetic: HashMap<isize, Vec<u8>>,
+    inspect: HashMap<isize, Vec<u8>>,
     ranges: Vec<std::ops::Range<usize>>,
     generation: u64,
     full: bool,
@@ -32,18 +34,12 @@ pub struct Mark {
     data: ReplayData,
     interval: u32,
 }
-impl Mark {
-    pub fn bytes(&self) -> usize {
-        self.ranges.len() * std::mem::size_of::<std::ops::Range<usize>>()
-            + self.data.segments.len() * std::mem::size_of::<Load>()
-            + (self.data.cosmetic.len() + self.data.inspect.len())
-                * std::mem::size_of::<replay::CosmeticEvent>()
-    }
-}
 impl History {
     pub fn begin(&mut self) {
         if self.full {
             self.ticks.clear();
+            self.cosmetic.clear();
+            self.inspect.clear();
             self.generation += 1;
             self.full = false;
         }
@@ -69,6 +65,31 @@ impl History {
             last.end += 1;
         } else {
             self.ranges.push(index..index + 1);
+        }
+    }
+    pub fn event(&mut self, kind: u8, inspect: bool) {
+        if self.full {
+            return;
+        }
+        let at = self
+            .ranges
+            .last()
+            .map_or(-1, |range| range.end as isize - 1);
+        let events = if inspect {
+            &mut self.inspect
+        } else {
+            &mut self.cosmetic
+        };
+        events.entry(at).or_default().push(kind);
+    }
+    fn events(&self, at: isize, tick: u32, data: &mut ReplayData) {
+        for (log, events) in [
+            (&self.cosmetic, &mut data.cosmetic),
+            (&self.inspect, &mut data.inspect),
+        ] {
+            for &kind in log.get(&at).into_iter().flatten() {
+                events.push(replay::CosmeticEvent { tick, kind });
+            }
         }
     }
     pub fn mark(&self, data: &ReplayData, interval: u32, tick: usize) -> Result<Mark, String> {
@@ -98,10 +119,15 @@ impl History {
             return Err("Segmented replay exceeds 100000 loads".into());
         }
         let mut data = mark.data.metadata();
+        data.cosmetic.clear();
+        data.inspect.clear();
+        self.events(-1, 0, &mut data);
         for range in &mark.ranges {
-            for tick in &self.ticks[range.clone()] {
+            for index in range.clone() {
+                let tick = &self.ticks[index];
                 data.commands.push(tick.command);
                 data.looks.push(tick.look);
+                self.events(index as isize, data.commands.len() as u32, &mut data);
                 if let Some(cp) = &tick.checkpoint {
                     let mut cp = cp.clone();
                     cp.tick = data.commands.len() as u32;

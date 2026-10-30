@@ -21,6 +21,7 @@ pub struct Checkpoint {
     pub position: [f32; 3],
     pub velocity: [f32; 3],
 }
+#[derive(Clone)]
 pub struct ReplayData {
     pub options: crate::BhRecordOptionsV29,
     pub header: Value,
@@ -40,8 +41,8 @@ impl ReplayData {
         Self {
             options: self.options, header: self.header.clone(), commands: Vec::new(),
             looks: Vec::new(), checkpoints: Vec::new(), start_tick: self.start_tick,
-            end_tick: self.end_tick, track: self.track, cosmetic: self.cosmetic.clone(),
-            inspect: self.inspect.clone(), packed_loadout: self.packed_loadout.clone(),
+            end_tick: self.end_tick, track: self.track, cosmetic: Vec::new(),
+            inspect: Vec::new(), packed_loadout: self.packed_loadout.clone(),
             segments: self.segments.clone(),
         }
     }
@@ -576,7 +577,13 @@ impl Map {
             recorder.data.end_tick = timer.state.end_tick;
             recorder.data.track = timer.state.track;
             recorder.data.checkpoint(super::BhState::from(&self.game));
-            self.completed_record = Some(recorder.data);
+            if self.filter.id == "segmented" {
+                self.completed_record = Some(recorder.data.clone());
+                recorder.writer = None;
+                self.recorder = Some(recorder);
+            } else {
+                self.completed_record = Some(recorder.data);
+            }
         }
         result
     }
@@ -608,6 +615,9 @@ unsafe fn record_event(ctx: *mut super::BhContext, kind: u32, inspect: bool) -> 
                 &mut recorder.data.cosmetic
             };
             if events.len() < 20_000 {
+                if m.filter.id == "segmented" && m.record_valid {
+                    m.segments.event(kind as u8, inspect);
+                }
                 events.push(super::replay::CosmeticEvent {
                     tick: recorder.data.commands.len() as u32,
                     kind: kind as u8,

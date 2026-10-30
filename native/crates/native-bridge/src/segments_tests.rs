@@ -199,3 +199,170 @@ fn segmented_rejects_practice_marks_without_mutating_world() {
         bh_destroy(ctx);
     }
 }
+
+#[test]
+fn segmented_finished_archive_is_frozen_while_new_checkpoints_keep_recording() {
+    let fixture = Fixture::new();
+    let path = prop_fixture(&fixture);
+    unsafe {
+        let ctx = bh_create();
+        assert_eq!(bh_load_map(ctx, path.as_ptr(), fixture.root().as_ptr()), 1);
+        let options = BhRunOptions {
+            rules: 2,
+            ..BhRunOptions::default()
+        };
+        assert_eq!(
+            bh_run_configure(ctx, &options, timer_zones().as_ptr(), 2),
+            1
+        );
+        assert_eq!(
+            bh_record_begin(
+                ctx,
+                ptr::null(),
+                c"segmented".as_ptr(),
+                c"test".as_ptr(),
+                10
+            ),
+            1
+        );
+        let command = BhCmd {
+            forward: 450.0,
+            buttons: 8,
+            ..BhCmd::default()
+        };
+        let mut state = BhState::default();
+        let mut run = BhRunState::default();
+        for _ in 0..40 {
+            assert_eq!(bh_step(ctx, &BhCmd::default(), &mut state), 1);
+        }
+        let checkpoint = bh_practice_save(ctx, 17.0, -10.0);
+        let changed = BhRecordOptionsV29 {
+            timed_input: 1,
+            null_binds: 1,
+            ..BhRecordOptionsV29::default()
+        };
+        assert_eq!(bh_record_options_v29(ctx, &changed), 1);
+        restore(ctx, checkpoint);
+        let mut restored = BhRecordOptionsV29::default();
+        assert_eq!(bh_record_options_read_v29(ctx, &mut restored), 1);
+        assert_eq!((restored.timed_input, restored.null_binds), (0, 0));
+        for _ in 0..1000 {
+            assert_eq!(bh_step(ctx, &command, &mut state), 1);
+            assert_eq!(bh_run_state(ctx, &mut run), 1);
+            if run.status == 2 {
+                break;
+            }
+        }
+        assert_eq!(run.status, 2);
+        assert_eq!(bh_record_end(ctx), 1);
+        let frozen = (*ctx)
+            .map
+            .as_ref()
+            .unwrap()
+            .completed_record
+            .as_ref()
+            .unwrap()
+            .encode_raw()
+            .unwrap();
+        for _ in 0..5 {
+            assert_eq!(bh_step(ctx, &command, &mut state), 1);
+        }
+        assert_eq!(
+            (*ctx)
+                .map
+                .as_ref()
+                .unwrap()
+                .completed_record
+                .as_ref()
+                .unwrap()
+                .encode_raw()
+                .unwrap(),
+            frozen
+        );
+        let after_finish = bh_practice_save(ctx, 0.0, 0.0);
+        assert_ne!(after_finish, 0);
+        restore(ctx, after_finish);
+        assert_eq!(
+            (*ctx).map.as_ref().unwrap().recorded_commands as u32,
+            run.last_tick + 5
+        );
+        restore(ctx, checkpoint);
+        assert_eq!((*ctx).map.as_ref().unwrap().game.tick, 40);
+        bh_destroy(ctx);
+    }
+}
+
+#[test]
+#[ignore = "requires original release BSPs (BH_V19_MAPS)"]
+fn segmented_v19_snapshots_retain_script_instances_and_gravity_on_every_tick() {
+    let directory = std::env::var("BH_V19_MAPS").unwrap();
+    for (map, position, warmup) in [
+        ("bhop_akb_tutorial", [7496.0, -3304.0, 1992.0], 20),
+        ("bhop_treason", [8416.0, 4096.0, 7820.0], 25),
+    ] {
+        unsafe {
+            let ctx = bh_create();
+            let path = CString::new(format!("{directory}/{map}.bsp")).unwrap();
+            assert_eq!(bh_load_map(ctx, path.as_ptr(), ptr::null()), 1);
+            let entities = (*ctx).map.as_ref().unwrap().game.entities.len();
+            let options = BhRunOptions {
+                rules: 2,
+                ..BhRunOptions::default()
+            };
+            assert_eq!(
+                bh_run_configure(ctx, &options, timer_zones().as_ptr(), 2),
+                1
+            );
+            assert_eq!(
+                bh_set_position(ctx, position[0], position[1], position[2], 0.0),
+                1
+            );
+            assert_eq!(
+                bh_record_begin(
+                    ctx,
+                    ptr::null(),
+                    c"segmented".as_ptr(),
+                    c"test".as_ptr(),
+                    10
+                ),
+                1
+            );
+            for _ in 0..warmup {
+                assert_eq!(bh_step(ctx, &BhCmd::default(), &mut BhState::default()), 1);
+            }
+            let m = (*ctx).map.as_ref().unwrap();
+            if map == "bhop_akb_tutorial" {
+                assert!(m.game.entities.len() > entities);
+            } else {
+                assert_eq!(m.game.gravity_scale, 50.0);
+            }
+            let checkpoint = bh_practice_save(ctx, 0.0, 0.0);
+            assert_ne!(checkpoint, 0);
+            let mut expected = Vec::new();
+            for _ in 0..100 {
+                assert_eq!(bh_step(ctx, &BhCmd::default(), &mut BhState::default()), 1);
+                let m = (*ctx).map.as_ref().unwrap();
+                expected.push((m.game.snapshot_bytes(), m.timer.as_ref().unwrap().json()));
+            }
+            assert_eq!(bh_reset(ctx), 1);
+            assert_eq!(
+                bh_record_begin(
+                    ctx,
+                    ptr::null(),
+                    c"segmented".as_ptr(),
+                    c"test".as_ptr(),
+                    10
+                ),
+                1
+            );
+            restore(ctx, checkpoint);
+            for (bytes, timer) in expected {
+                assert_eq!(bh_step(ctx, &BhCmd::default(), &mut BhState::default()), 1);
+                let m = (*ctx).map.as_ref().unwrap();
+                assert_eq!(m.game.snapshot_bytes(), bytes, "{map}: full snapshot");
+                assert_eq!(m.timer.as_ref().unwrap().json(), timer, "{map}: timer");
+            }
+            bh_destroy(ctx);
+        }
+    }
+}
