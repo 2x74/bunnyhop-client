@@ -1046,6 +1046,15 @@ pub struct WishState {
     pub uncapped_speed: f32,
 }
 
+/// Ground state immediately before an accepted ground jump, before impulse / air acceleration.
+/// Observational only; consumers can recover a ground contact hidden by a same-command takeoff.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GroundJump {
+    pub position: [f32; 3],
+    pub velocity: [f32; 3],
+    pub crouched: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct StepResult {
     /// Present only for opt-in observational timing. Never affects simulation.
@@ -1056,6 +1065,7 @@ pub struct StepResult {
     pub wish_state: WishState,
     pub wish_velocity: [f32; 3],
     pub jump_velocity: [f32; 3],
+    pub ground_jump: Option<GroundJump>,
     pub climbed_step: f32,
     pub contacts: Vec<Contact>,
     pub events: Vec<Event>,

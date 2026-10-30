@@ -638,6 +638,10 @@ function keysSection(ctx: Ctx): SettingsContent {
             desc: "Letting go of the newer key goes back to the one still held. Works in every style except Legit Scroll, and always in practice.",
             keywords: "null bind binds nulls snap tap socd last input priority a d w s cancel overlap strafe script",
           }),
+          toggle("Release W on jump", () => P().wRelease, (v) => up((p) => (p.wRelease = v)), {
+            desc: "Jumping with W held lets go of forward until you land or press W again. Not in Legit Scroll, W-Only, Sideways or Half-Sideways.",
+            keywords: "release w jump forward let go auto unpress -forward prestrafe hold w air strafe script wjump",
+          }),
           range("Turn speed", () => P().yawSpeed, (v) => up((p) => (p.yawSpeed = Math.round(v))), {
             min: YAW_SPEED_RANGE[0], max: YAW_SPEED_RANGE[1], step: 5, unit: "°/s",
             desc: "How fast Turn left and Turn right turn the view. CS:S cl_yawspeed (default 210). A change applies from your next restart.",
@@ -1005,7 +1009,7 @@ const BUILTIN: Section[] = [
   { id: "mouse", label: "Mouse & view", blurb: "", order: 10, render: mouseSection, reset: resetKeys("sensitivity", "verticalSensitivityEnabled", "verticalSensitivity", "dpi", "dpiConfirmed", "dpiHidden", "invertY", "rawInput", "spikeFilter", "timedInput", "inputStats", "fov") },
   { id: "crosshair", label: "Crosshair", blurb: "", order: 20, render: crosshairSection, reset: resetKeys("crosshair") },
   { id: "hud", label: "HUD", blurb: "", order: 30, render: hudSection, reset: resetKeys("hud", "showZones", "triggers") },
-  { id: "keys", label: "Keys", blurb: "Click a slot, then press a key. Backspace clears.", order: 40, render: keysSection, reset: resetKeys("binds", "holdRestart", "autoRestart", "practice", "nullBinds", "yawSpeed", "angleSpeedKey") },
+  { id: "keys", label: "Keys", blurb: "Click a slot, then press a key. Backspace clears.", order: 40, render: keysSection, reset: resetKeys("binds", "holdRestart", "autoRestart", "practice", "nullBinds", "wRelease", "yawSpeed", "angleSpeedKey") },
   { id: "ghost", label: "Ghosts & players", blurb: "", order: 50, render: ghostSection, reset: resetKeys("showGhost", "ghost", "tags", "showPlayerGlow", "firstPersonGlow") },
   { id: "graphics", label: "Graphics", blurb: "", order: 60, render: graphicsSection, reset: () => void chooseGraphicsPreset("source").then(() => { resetKeys("graphics")(); up((p) => (p.models = clone(DEFAULT_PREFS.models))); }) },
   { id: "audio", label: "Audio", blurb: "", order: 70, render: audioSection, reset: resetKeys("volume") },

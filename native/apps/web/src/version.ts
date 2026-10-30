@@ -74,6 +74,8 @@ export const UPCOMING: ChangelogEntry = {
   notes: [
     "Crouch-cancelling or landing from a teleport onto a floor no longer costs a tick of friction: you jump on the same tick, like bhoptimer servers.",
     "!showtriggers now shows the scripted collectibles and gates on bhop_cooksassistant. Thanks to GothQueen for the report.",
+    "New Release W on jump option under Keys: jump while holding W and forward lets go until you land or press W again. It is off by default and doesn't apply in Legit Scroll, W-Only, Sideways or Half-Sideways.",
+    "Keys no longer stop working when you change a setting or alt-tab while holding them with Timestamped input on. Before, a held W, A, S or D could go dead until you pressed it again.",
   ],
 };
 

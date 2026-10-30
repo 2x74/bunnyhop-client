@@ -6,13 +6,14 @@ import { IN_GIVE_SHIFT, IN_WEAPON_COMMAND_MASK } from './weapon-rules';
 export function localInputExperimentAllowed(dev: boolean, hostname: string): boolean {
   return dev && ['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname);
 }
-export interface ExperimentContext { multiplayer: boolean; tutorial: boolean; practice: boolean; editor: boolean; queue?: boolean; gauntlet?: boolean; nullBinds?: boolean; thirdPerson?: boolean; debug?: boolean; autoRestart?: boolean; tickInterval?: number }
+export interface ExperimentContext { multiplayer: boolean; tutorial: boolean; practice: boolean; editor: boolean; queue?: boolean; gauntlet?: boolean; nullBinds?: boolean; wRelease?: boolean; thirdPerson?: boolean; debug?: boolean; autoRestart?: boolean; tickInterval?: number }
 export function experimentRejection(c: ExperimentContext): string | null {
   if (c.tickInterval !== undefined && Math.fround(c.tickInterval) !== Math.fround(.01)) return 'Only 100 Hz is supported by the input experiment';
   if (c.queue) return 'Queue mode is unsupported by the input experiment';
   if (c.gauntlet) return 'Gauntlet mode is unsupported by the input experiment';
   if (c.thirdPerson) return 'Third person is unsupported by the input experiment';
   if (c.debug) return 'Debug/scripted play is unsupported by the input experiment';
+  if (c.wRelease) return 'Release W on jump is unsupported by the input experiment';
   if (c.autoRestart) return 'Auto restart is unsupported by the input experiment';
   if (c.multiplayer) return 'Multiplayer is unsupported by the input experiment';
   if (c.tutorial) return 'Tutorial is unsupported by the input experiment';

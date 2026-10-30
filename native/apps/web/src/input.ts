@@ -17,6 +17,7 @@ import { IN_GIVE_SHIFT, IN_WEAPON_COMMAND_MASK } from "./weapon-rules";
 import { countedYaw, norm360, YAW_SET_RAW, YAW_SET_SENSITIVITY, YAW_SET_SPAWN, YAW_SET_TURN, YAW_WITH_TURN, type LookSample } from "./replay";
 import { DEFAULT_TURN_SPEED, IN_LEFT, IN_RIGHT, IN_TURN_FAST, turnDelta, type TurnSpeed } from "./turn-binds";
 import { resolveNullBinds } from "./null-binds";
+import { WRelease, type WReleaseContext } from "./w-release";
 
 /**
  * Whether `unadjustedMovement` really turns raw input on here (only for the diagnostics label): Chromium does (Windows,
@@ -93,6 +94,8 @@ export interface UserCmd {
   nullBinds?: boolean;
   /** Timestamped input built this command (timed-input.ts); the replay header records it. */
   timed?: boolean;
+  /** Release W on jump was on for this command (w-release.ts); the replay header records it. */
+  wRelease?: boolean;
 }
 
 export interface InputSettings {
@@ -604,7 +607,9 @@ export class Input {
 
   private press(code: string, repeat: boolean, e: Event): void {
     if (this.codeBits.has(code)) {
-      if (this.timedActive && !repeat && !this.heldCodes.has(code) && this.codeBits.get(code)! & TIMED_KEY_BITS) this.ti.addEdge(this.ti.stamp(e.timeStamp, performance.now()), code, true);
+      // A key not held yet: a press, or a key repeat of one a release-all forgot while it stayed down (blur / focus).
+      // Frame-sampled input re-adds it on that repeat too (heldCodes below), so timed input gives it back the same way.
+      if (this.timedActive && !this.heldCodes.has(code) && this.codeBits.get(code)! & TIMED_KEY_BITS) this.ti.addEdge(this.ti.stamp(e.timeStamp, performance.now()), code, true);
       this.heldCodes.add(code);
       this.queue({type:"key", code, down:true, bits:this.codeBits.get(code)!}, e.timeStamp);
       e.preventDefault();
@@ -630,7 +635,6 @@ export class Input {
 
   setBinds(binds: Partial<Record<BindAction, string[]>>): void {
     if (this.sampler) this.releaseAll();
-    this.ti.releaseKeys();
     this.codeBits.clear();
     this.codeAction.clear();
     const weapon: [BindAction, string[]][] = [];
@@ -648,6 +652,10 @@ export class Input {
     }
     // Weapon keys: only on keys nothing else uses (Settings -> Keys already keeps every key on one action).
     for (const [action, codes] of weapon) for (const c of codes) if (!this.codeBits.has(c) && !this.codeAction.has(c)) this.codeAction.set(c, action);
+    // Held movement keys carry over under the new binds, as frame-sampled input reads them from heldCodes. Every
+    // settings write runs this (main.ts prefs.watch): clearing the timed keys here killed a held W/A/S/D until it was
+    // pressed again (v0.0.29-0.0.30, GothQueen's dropped keys).
+    this.seedTimedKeys();
   }
 
   /** Requests weapon slot 1..3 (IN_SLOT_*) in the next command only. */
@@ -683,6 +691,7 @@ export class Input {
     this.heldCodes.clear();
     this.commitPending(); // the view the player sees is the view the next command has
     this.ti.releaseKeys();
+    this.wRelease.reset();
     this.wheelBits = 0;
     this.slot = 0;
     this.weaponBits = 0;
@@ -725,6 +734,8 @@ export class Input {
    * keeps press order (a Set keeps insertion order; a release deletes the code, key repeat re-adds nothing).
    */
   private nullBinds = false;
+  /** Release W on jump (w-release.ts): its per-command state, applied in sample() while the setting is active. */
+  private readonly wRelease = new WRelease();
 
   /**
    * Timed input's command buttons: the movement keys as of the command's cutoff (in press order, for null binds), every
@@ -832,8 +843,11 @@ export class Input {
     });
   }
 
-  /** Builds the command for the next simulation tick. */
-  sample(o: { turnBinds?: boolean; tickInterval?: number; nullBinds?: boolean; at?: number } = {}): UserCmd {
+  /**
+   * Builds the command for the next simulation tick. `wRelease`: Release W on jump is active, with the player's
+   * pre-tick ground state (w-release.ts); absent: off.
+   */
+  sample(o: { turnBinds?: boolean; tickInterval?: number; nullBinds?: boolean; wRelease?: WReleaseContext; at?: number } = {}): UserCmd {
     if (this.sampler) throw new Error("Use pumpSampler(now) while the sampler is enabled");
     this.nullBinds = !!o.nullBinds;
     // Timed input: this tick's share of the motion and key edges (`at`: its boundary, main.ts frame()).
@@ -861,7 +875,10 @@ export class Input {
     }
     // The knife binds are actions (the viewmodel swings on them), not movement bits: add their buttons here.
     // A weapon slot request (requestSlot) goes into this one command only.
-    const buttons = (timed ? this.timedHeld : this.held) | turn | (this.actionHeld("attack") ? IN_ATTACK : 0) | (this.actionHeld("attack2") ? IN_ATTACK2 : 0) | (this.slot << IN_SLOT_SHIFT) | this.weaponBits | (this.give << IN_GIVE_SHIFT);
+    let buttons = (timed ? this.timedHeld : this.held) | turn | (this.actionHeld("attack") ? IN_ATTACK : 0) | (this.actionHeld("attack2") ? IN_ATTACK2 : 0) | (this.slot << IN_SLOT_SHIFT) | this.weaponBits | (this.give << IN_GIVE_SHIFT);
+    // Release W on jump: only the forward bit changes, and forwardmove follows it below.
+    if (o.wRelease) buttons = this.wRelease.apply(buttons, o.wRelease);
+    else this.wRelease.reset();
     this.wheelBits = 0;
     this.slot = 0;
     this.weaponBits = 0;
@@ -882,6 +899,6 @@ export class Input {
     this.framesSince = this.eventsSince = this.reportsSince = 0;
     this.sampledYawEpoch = this.yawEpoch;
     const pitch = timed ? this.cmdPitch : this.pitch;
-    return { pitch, yaw: countedYaw(this.yawBase, count, this.yawK), forwardmove, sidemove, buttons, look, ...(this.nullBinds ? { nullBinds: true } : {}), ...(timed ? { timed: true } : {}) };
+    return { pitch, yaw: countedYaw(this.yawBase, count, this.yawK), forwardmove, sidemove, buttons, look, ...(this.nullBinds ? { nullBinds: true } : {}), ...(timed ? { timed: true } : {}), ...(o.wRelease ? { wRelease: true } : {}) };
   }
 }

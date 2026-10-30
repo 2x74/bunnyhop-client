@@ -73,6 +73,7 @@ pub(super) fn step(
         wish_state: WishState::default(),
         wish_velocity: [0.0; 3],
         jump_velocity: [0.0; 3],
+        ground_jump: None,
         climbed_step: 0.0,
         contacts: Vec::new(),
         events,
@@ -1507,6 +1508,11 @@ fn check_jump(
     {
         return Ok(());
     }
+    result.ground_jump = Some(crate::GroundJump {
+        position: result.state.position,
+        velocity: result.state.velocity,
+        crouched: result.state.crouch.uses_crouched_hull(),
+    });
     if let Some(cap) = policy.bunnyhop_speed_cap {
         cap_vector_speed(&mut result.state.velocity, cap);
     }

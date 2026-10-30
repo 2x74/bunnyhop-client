@@ -1257,6 +1257,9 @@ pub struct Game {
     pub events: u32,
     /// Observational only: a clean, unmodified movement tick for local jump statistics. Never feeds physics.
     pub jumpstats_valid: bool,
+    /// V20 only: newly categorized ground followed by a jump in the same command. Timer observation;
+    /// never inferred from post-jump speed (air acceleration / triggers may already have changed it).
+    pub categorized_ground_jump: Option<movement::GroundJump>,
     /// View angles forced by the last teleport (pitch, yaw, roll).
     pub teleport_angles: [f32; 3],
     /// The player's targetname (bhop maps rename `!activator` to gate filtered teleports).
@@ -1491,6 +1494,7 @@ impl Game {
             tick: 0,
             events: 0,
             jumpstats_valid: false,
+            categorized_ground_jump: None,
             teleport_angles: spawn.1,
             player_name: String::new(),
             player_class: PLAYER_CLASS.to_string(),
@@ -1613,6 +1617,7 @@ impl Game {
     pub fn reset(&mut self) {
         self.timing_path = None;
         self.jumpstats_valid = false;
+        self.categorized_ground_jump = None;
         self.restart_point = None;
         self.restart_names = None;
         self.entities.truncate(self.initial_ents.len());
@@ -1900,6 +1905,7 @@ impl Game {
     pub fn step(&mut self, cmd: Cmd) -> Result<(), String> {
         self.timing_path = self.observe_timing.then(|| movement::accepted_path::AcceptedPath::unsupported("movement-not-executed"));
         self.jumpstats_valid = false;
+        self.categorized_ground_jump = None;
         let before_events = self.state;
         // RNGFix telehop: no fix right after another map teleport (`g_bMapTeleportedSequentialTicks`).
         let map_teleported_last_tick = self.events & EVENT_MAP_TELEPORT != 0;
@@ -2019,6 +2025,10 @@ impl Game {
                 }
             };
             self.timing_path = result.accepted_path;
+            // Older versions must never expose this signal, including scroll / diagnostic versions.
+            if self.settings.physics_version == PHYSICS_V20 && !was_grounded {
+                self.categorized_ground_jump = result.ground_jump;
+            }
             if result.jump_velocity != [0.0; 3] {
                 self.events |= EVENT_JUMPED;
             }
@@ -3809,6 +3819,7 @@ impl Game {
             spawn_angles: self.spawn_angles,
             tick: self.tick,
             events: self.events,
+            categorized_ground_jump: self.categorized_ground_jump,
             teleport_angles: self.teleport_angles,
             player_name: self.player_name.clone(),
             player_class: self.player_class.clone(),
@@ -3853,6 +3864,7 @@ impl Game {
         self.spawn_angles = s.spawn_angles;
         self.tick = s.tick;
         self.events = s.events;
+        self.categorized_ground_jump = s.categorized_ground_jump;
         self.teleport_angles = s.teleport_angles;
         self.player_name.clone_from(&s.player_name);
         self.player_class.clone_from(&s.player_class);
@@ -3948,6 +3960,7 @@ pub struct GameState {
     spawn_angles: [f32; 3],
     tick: u32,
     events: u32,
+    categorized_ground_jump: Option<movement::GroundJump>,
     teleport_angles: [f32; 3],
     player_name: String,
     player_class: String,

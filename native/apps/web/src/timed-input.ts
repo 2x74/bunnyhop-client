@@ -120,10 +120,18 @@ export class TimedInput {
     this.pendingP += p;
   }
 
-  /** A movement key went down / up at `t`. */
+  /**
+   * A movement key went down / up at `t`. A key's edges keep the order they arrived in: after a stall over MAX_AGE_MS a
+   * press can be stamped "now" while its release keeps its own, earlier time, which would sort the release first and
+   * leave the key stuck down.
+   */
   addEdge(t: number, code: string, down: boolean): void {
+    t = Math.max(t, this.lastEdge.get(code) ?? -Infinity);
+    this.lastEdge.set(code, t);
     insert(this.edges, this.edgeHead, { t, code, down });
   }
+  /** The newest edge time per key code (addEdge). */
+  private readonly lastEdge = new Map<string, number>();
 
   private adapt(): void {
     const share = this.winLate / this.winSeen;

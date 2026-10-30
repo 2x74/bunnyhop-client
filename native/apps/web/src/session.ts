@@ -344,7 +344,7 @@ export class RunSession {
       beforeStep(this.o.core, this.timer, c);
     }
     // v8: the live view state rides along to the recorder (a scripted command has none: that replay is written as v7).
-    return { forwardmove: c.forward, sidemove: c.side, yaw: c.yaw, pitch: c.pitch, buttons: c.buttons, ...(this.experimentalInput || this.scripted || !sample.look ? {} : { look: sample.look }), ...(sample.nullBinds && !this.scripted ? { nullBinds: true } : {}), ...(sample.timed && !this.scripted ? { timed: true } : {}) };
+    return { forwardmove: c.forward, sidemove: c.side, yaw: c.yaw, pitch: c.pitch, buttons: c.buttons, ...(this.experimentalInput || this.scripted || !sample.look ? {} : { look: sample.look }), ...(sample.nullBinds && !this.scripted ? { nullBinds: true } : {}), ...(sample.timed && !this.scripted ? { timed: true } : {}), ...(sample.wRelease && !this.scripted ? { wRelease: true } : {}) };
   }
 
   // -------------------------------------------------------------------------------------------
@@ -533,6 +533,7 @@ export class RunSession {
       this.recorder.push(cmd.forward, cmd.side, cmd.yaw, cmd.pitch, cmd.buttons, u.look ?? null);
       if (u.nullBinds) this.recorder.nullBinds = true; // header.nullBinds: the anticheat expects instant key switches
       if (u.timed) this.recorder.timedInput = true; // header.timedInput: per-tick input isn't frame-sampled
+      if (u.wRelease) this.recorder.wRelease = true; // header.wRelease: forward let go on jumps by the setting
       this.recorder.maybeCheckpoint(state.tick, state.position, state.velocity);
     }
     this.pushFrame(state, cmd, events);
@@ -997,7 +998,7 @@ export class RunSession {
     if (!this.segmenting) return null;
     const n = this.recorder.length;
     if (this.segLog.length !== n || this.o.core.state().tick !== n) return null;
-    return this.segLog.mark({ nullBinds: this.recorder.nullBinds, timedInput: this.recorder.timedInput, turnSpeed: this.recorder.turnSpeed });
+    return this.segLog.mark({ nullBinds: this.recorder.nullBinds, timedInput: this.recorder.timedInput, wRelease: this.recorder.wRelease, turnSpeed: this.recorder.turnSpeed });
   }
 
   /** The checkpoint's Segmented path can still be rebuilt here (its history wasn't dropped). */

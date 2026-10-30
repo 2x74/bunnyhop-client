@@ -98,7 +98,15 @@ export interface Lightmap {
   hdr: boolean;
 }
 
+/** V20 newly categorized ground immediately before a same-command jump (absent on older physics / WASM). */
+export interface CategorizedGroundJump {
+  position: [number, number, number];
+  velocity: [number, number, number];
+  crouched: boolean;
+}
+
 export interface PlayerState {
+  categorizedGroundJump?: CategorizedGroundJump;
   position: [number, number, number];
   velocity: [number, number, number];
   viewOffsetZ: number;
@@ -684,6 +692,10 @@ export class Core {
       ...(len > 20 && s[17] === s[17] ? { touchPosition: [s[17], s[18], s[19]] as [number, number, number], touchCrouched: s[20] !== 0 } : {}),
       ...(len > 22 ? { weapons: s[21], activeWeapon: s[22] } : {}),
       ...(len > 23 ? { jumpStatsValid: s[23] !== 0 } : {}),
+      ...(len > 30 && s[24] === s[24] ? { categorizedGroundJump: {
+        position: [s[24], s[25], s[26]] as [number, number, number],
+        velocity: [s[27], s[28], s[29]] as [number, number, number], crouched: s[30] !== 0,
+      } } : {}),
     };
   }
 

@@ -195,6 +195,13 @@ export const FLAG_NULL_BINDS = 1 << 3;
  * Information for the anticheat only (the frame-rate measures don't apply): the commands re-simulate as always.
  */
 export const FLAG_TIMED_INPUT = 1 << 4;
+/**
+ * Release W on jump was on for some of the recording (w-release.ts): a jump taken holding forward let go of forward
+ * until the next ground tick or a new W press. Any version; only written when set, so other replays are byte-identical.
+ * Older decoders ignore it. Information for reviewers and the anticheat only: the commands are the released ones and
+ * re-simulate as always.
+ */
+export const FLAG_W_RELEASE = 1 << 5;
 export const DEFAULT_CHECKPOINT_INTERVAL = 100;
 export const COSMETIC_MAGIC = 0x58434842; // "BHCX" little-endian
 export const LOADOUT_MAGIC = 0x4f4c4842; // "BHLO" little-endian
@@ -243,6 +250,8 @@ export interface ReplayHeader {
   nullBinds?: boolean;
   /** Timestamped input built some recorded command (FLAG_TIMED_INPUT). Absent when off. */
   timedInput?: boolean;
+  /** Release W on jump was on during the recording (FLAG_W_RELEASE). Absent when off. */
+  wRelease?: boolean;
   /** The turn binds' rates for the whole recording (the "BHTS" trailer). Absent: 210°/s, no fast turn. */
   turnSpeed?: TurnSpeed;
 }
@@ -311,6 +320,8 @@ export class ReplayRecorder {
   nullBinds = false;
   /** Timestamped input built some recorded command (header.timedInput). */
   timedInput = false;
+  /** Release W on jump was on for some recorded command (header.wRelease). */
+  wRelease = false;
   /** The turn binds' rates for this whole recording (header.turnSpeed); set at its start (session.ts). */
   turnSpeed: TurnSpeed | null = null;
   /** Segmented checkpoint loads on the recorded path (Replay.segments; practice-mode/segments.ts sets them). */
@@ -327,6 +338,7 @@ export class ReplayRecorder {
     this.looks = [];
     this.nullBinds = false;
     this.timedInput = false;
+    this.wRelease = false;
     this.turnSpeed = null;
     this.checkpoints = [];
     this.cosmetic = [];
@@ -397,7 +409,7 @@ export class ReplayRecorder {
   build(header: Omit<ReplayHeader, "totalTicks" | "checkpointInterval" | "version">): Replay {
     const n = this.n;
     return {
-      header: { ...header, version: replayVersionFor(header), totalTicks: n, checkpointInterval: this.checkpointInterval, ...(this.nullBinds ? { nullBinds: true } : {}), ...(this.timedInput ? { timedInput: true } : {}), ...(this.turnSpeed ? { turnSpeed: { ...this.turnSpeed } } : {}) },
+      header: { ...header, version: replayVersionFor(header), totalTicks: n, checkpointInterval: this.checkpointInterval, ...(this.nullBinds ? { nullBinds: true } : {}), ...(this.timedInput ? { timedInput: true } : {}), ...(this.wRelease ? { wRelease: true } : {}), ...(this.turnSpeed ? { turnSpeed: { ...this.turnSpeed } } : {}) },
       forward: this.forward.slice(0, n),
       side: this.side.slice(0, n),
       buttons: this.buttons.slice(0, n),
@@ -620,7 +632,7 @@ export function encodeRaw(r: Replay): Uint8Array {
   const fractional = counted?.count instanceof Float64Array;
   const version = fractional ? REPLAY_VERSION_FRACTIONAL : h.settings.stamina || h.style === "lowgrav" ? REPLAY_VERSION_STAMINA : counted ? REPLAY_VERSION_COUNTED : replayVersionFor(h);
   w.u16(version);
-  w.u16((h.settings.autohop ? FLAG_AUTOHOP : 0) | (h.settings.stamina ? FLAG_STAMINA : 0) | (version >= REPLAY_VERSION_STAMINA && counted ? FLAG_COUNTED : 0) | (h.nullBinds ? FLAG_NULL_BINDS : 0) | (h.timedInput ? FLAG_TIMED_INPUT : 0));
+  w.u16((h.settings.autohop ? FLAG_AUTOHOP : 0) | (h.settings.stamina ? FLAG_STAMINA : 0) | (version >= REPLAY_VERSION_STAMINA && counted ? FLAG_COUNTED : 0) | (h.nullBinds ? FLAG_NULL_BINDS : 0) | (h.timedInput ? FLAG_TIMED_INPUT : 0) | (h.wRelease ? FLAG_W_RELEASE : 0));
   w.str8(h.map);
   w.bytes(hexToBytes(h.mapSha256));
   const s = h.settings;
@@ -894,6 +906,7 @@ export function decodeRaw(buf: Uint8Array, opts: { commands?: boolean } = {}): R
       checkpointInterval,
       ...(flags & FLAG_NULL_BINDS ? { nullBinds: true } : {}),
       ...(flags & FLAG_TIMED_INPUT ? { timedInput: true } : {}),
+      ...(flags & FLAG_W_RELEASE ? { wRelease: true } : {}),
       ...(turnSpeed ? { turnSpeed } : {}),
     },
     forward,

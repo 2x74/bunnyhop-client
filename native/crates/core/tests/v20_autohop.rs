@@ -107,7 +107,17 @@ fn teleport_onto_floor_jumps_on_first_command_only_in_v20() {
             ..Cmd::default()
         })
         .unwrap();
-        assert_eq!(game.events & EVENT_JUMPED != 0, version == PHYSICS_V20);
+        assert_eq!(game.events & EVENT_JUMPED != 0, version == PHYSICS_V20, "v{version}: {:?} {:?}", game.state, game.categorized_ground_jump);
+        assert_eq!(game.categorized_ground_jump.is_some(), version == PHYSICS_V20);
+        if let Some(jump) = game.categorized_ground_jump {
+            assert_eq!(jump.velocity[0], 962.4);
+            assert_eq!(jump.position, [-9934.0, -1850.0, -47.96875]);
+            let saved = game.save_state();
+            game.step(Cmd::default()).unwrap();
+            assert!(game.categorized_ground_jump.is_none());
+            game.restore_state(&saved);
+            assert_eq!(game.categorized_ground_jump, Some(jump));
+        }
         assert!(
             (speed(&game)
                 - if version == PHYSICS_V20 {
@@ -174,5 +184,37 @@ fn ladders_deep_water_and_released_jump_keep_v19_policy() {
             results[0], results[1],
             "mode={mode:?}, water={water}, buttons={buttons}"
         );
+    }
+}
+
+#[test]
+fn map_trigger_teleport_to_floor_reports_the_next_commands_pre_jump_ground() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_lol_tutorial.bsp");
+    if !path.is_file() {
+        eprintln!("skipping optional tutorial BSP fixture");
+        return;
+    }
+    let bsp_bytes = std::fs::read(path).unwrap();
+    let bsp = bunnyhop_core::parse_bsp(&bsp_bytes).unwrap();
+    for version in [PHYSICS_V19, PHYSICS_V20] {
+        let mut game = Game::load(&bsp).unwrap();
+        game.set_settings(Settings { physics_version: version, ..Settings::css_bhop() });
+        game.reset();
+        // Real lesson-one exit trigger_teleport -> lesson-two floor destination.
+        game.place_player([-12350.0, -13952.0, 100.0]);
+        game.state.velocity = [0.0, 0.0, -100.0];
+        game.state.jump_latched = true;
+        let held = Cmd { buttons: IN_JUMP, ..Cmd::default() };
+        game.step(held).unwrap();
+        assert_ne!(game.events & bunnyhop_core::game::EVENT_TELEPORTED, 0);
+        assert_eq!([game.state.position[0], game.state.position[1]], [-11008.0, -13056.0]);
+        assert!(game.state.ground.is_none());
+        game.step(held).unwrap();
+        assert_eq!(game.events & EVENT_JUMPED != 0, version == PHYSICS_V20, "v{version}: {:?} {:?}", game.state, game.categorized_ground_jump);
+        assert_eq!(game.categorized_ground_jump.is_some(), version == PHYSICS_V20);
+        if let Some(jump) = game.categorized_ground_jump {
+            assert_eq!(jump.velocity[0..2], [0.0, 0.0]);
+            assert_eq!(jump.position[0..2], [-11008.0, -13056.0]);
+        }
     }
 }

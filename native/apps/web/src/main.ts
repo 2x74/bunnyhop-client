@@ -36,6 +36,7 @@ import { setUiHidden, uiHidden } from "./ui/hide-ui";
 import { isStyleId, styleSettings, type StyleId } from "./styles";
 import { turnBindsAllowed } from "./turn-binds";
 import { nullBindsAllowed } from "./null-binds";
+import { wReleaseAllowed, type WReleaseContext } from "./w-release";
 import { resolveGauntlet, startGauntletMode } from "./gauntlet/mode";
 import { readQueue, settleQueue } from "./map-queue";
 import { startQueueMode } from "./queue-mode";
@@ -774,7 +775,7 @@ if (localInputExperimentAllowed(import.meta.env.DEV, location.hostname)) {
   badge.style.cssText = "position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:99999;background:#39180b;color:#fff;padding:8px;font:13px monospace;pointer-events:none";
   badge.hidden = true;
   document.body.append(badge);
-  const context = () => ({ multiplayer: !!mp, tutorial: !!tutorial, practice: session.practicing || practiceMode.noclipping, editor: !!session.editor?.active, queue: !!readQueue(), gauntlet: !!gauntletStart || !!session.modeLock, nullBinds: prefs.get().nullBinds, thirdPerson: thirdPerson.active, debug: session.debug, autoRestart: prefs.get().autoRestart.when !== "off", tickInterval: session.settings.tickInterval });
+  const context = () => ({ multiplayer: !!mp, tutorial: !!tutorial, practice: session.practicing || practiceMode.noclipping, editor: !!session.editor?.active, queue: !!readQueue(), gauntlet: !!gauntletStart || !!session.modeLock, nullBinds: prefs.get().nullBinds, wRelease: prefs.get().wRelease, thirdPerson: thirdPerson.active, debug: session.debug, autoRestart: prefs.get().autoRestart.when !== "off", tickInterval: session.settings.tickInterval });
   const enable = (source: SamplerSource = experimentSource) => {
     const rejected = experimentRejection(context());
     if (rejected) throw new Error(rejected);
@@ -1024,11 +1025,22 @@ function bindPolicy(): { turnBinds: boolean; nullBinds: boolean } {
   const free = session.practicing;
   return { turnBinds: free || turnBindsAllowed(inputStyle), nullBinds: prefs.get().nullBinds && (free || nullBindsAllowed(inputStyle)) };
 }
+/**
+ * Release W on jump for the next command (w-release.ts): the pre-tick player state when the setting is on and the style
+ * allows it (practice: every style), else undefined (off). Never while flying in practice noclip (W flies there).
+ */
+function wReleasePolicy(): WReleaseContext | undefined {
+  if (!prefs.get().wRelease || practiceMode.noclipping) return undefined;
+  const inputStyle = session.timer.inStart ? session.styleFor(session.timer.track) : session.runStyle;
+  if (!session.practicing && !wReleaseAllowed(inputStyle)) return undefined;
+  const s = core.state();
+  return { grounded: s.grounded, onLadder: s.onLadder, autohop: session.settings.autohop };
+}
 /** One tick; `at`: its boundary on the frame clock (timed input takes the input stamped up to it), none for a debug tick. */
 function tick(at?: number) {
   if (inputExperiment) throw new Error("Manual/debug ticks are unsupported while experimental input is enabled");
   weaponsBeforeTick(); // a gun kept over a restart goes into this command, like a typed !usp
-  const sample = input.sample({ ...bindPolicy(), tickInterval: session.settings.tickInterval, at });
+  const sample = input.sample({ ...bindPolicy(), wRelease: wReleasePolicy(), tickInterval: session.settings.tickInterval, at });
   applyTick(sample);
 }
 function applyTick(sample: UserCmd, diagnostic?: SampledInput, generatedGive = 0) {
@@ -1132,7 +1144,7 @@ function frame(now: number) {
   potatoHint.frame(frameDt * 1000, input.locked);
   if (inputExperiment) {
     accumulator = 0;
-    const rejected = experimentRejection({ multiplayer: !!mp, tutorial: !!tutorial, practice: session.practicing || practiceMode.noclipping, editor: !!session.editor?.active, queue: !!readQueue(), gauntlet: !!gauntletStart || !!session.modeLock, nullBinds: prefs.get().nullBinds, thirdPerson: thirdPerson.active, debug: session.debug, autoRestart: prefs.get().autoRestart.when !== "off", tickInterval: session.settings.tickInterval });
+    const rejected = experimentRejection({ multiplayer: !!mp, tutorial: !!tutorial, practice: session.practicing || practiceMode.noclipping, editor: !!session.editor?.active, queue: !!readQueue(), gauntlet: !!gauntletStart || !!session.modeLock, nullBinds: prefs.get().nullBinds, wRelease: prefs.get().wRelease, thirdPerson: thirdPerson.active, debug: session.debug, autoRestart: prefs.get().autoRestart.when !== "off", tickInterval: session.settings.tickInterval });
     if (rejected && !experimentFailure) {
       liveCapture.fail(rejected);
       experimentFailure = true;

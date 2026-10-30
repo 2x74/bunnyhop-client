@@ -155,6 +155,9 @@ export interface Prefs {
   rawInput: boolean;
   /** Null binds (null-binds.ts): with A + D or W + S held, the key pressed last wins. Off by default. */
   nullBinds: boolean;
+  /** Release W on jump (w-release.ts): a jump taken holding W lets go of forward until you land or press W again. Off
+   * by default. */
+  wRelease: boolean;
   /** CS:S `cl_yawspeed`: +left / +right, degrees per second (turn-binds.ts YAW_SPEED_RANGE). Fixed per recording. */
   yawSpeed: number;
   /** CS:S `cl_anglespeedkey`: the turn speed's multiplier while Fast turn is held (ANGLE_SPEED_KEY_RANGE). */
@@ -484,6 +487,7 @@ export const DEFAULT_PREFS: Prefs = {
   invertY: false,
   rawInput: true,
   nullBinds: false,
+  wRelease: false,
   yawSpeed: 210,
   angleSpeedKey: 2,
   spikeFilter: true,

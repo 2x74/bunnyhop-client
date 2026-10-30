@@ -7,7 +7,7 @@
   {
     "path": "crates/core/src/game.rs",
     "classification": "native patch",
-    "baseline": "a693985c0a31df252bdfd25cb8ff0769aa339bec"
+    "baseline": "f7e12b83f80088a1b75335017a31b901da1c5d60"
   },
   {
     "path": "crates/core/src/game/kin.rs",
@@ -62,7 +62,7 @@
   {
     "path": "crates/core/src/wasm.rs",
     "classification": "native patch",
-    "baseline": "86ea0e73fc94ff44abded17766aa296c7ded6d20"
+    "baseline": "db44deee334634f308411161435e048081019e73"
   },
   {
     "path": "crates/core/src/wasm_content.rs",
@@ -122,12 +122,12 @@
   {
     "path": "crates/vendor/movement/src/lib.rs",
     "classification": "older upstream; overwrite",
-    "baseline": "5124d5311d92307021b4f21e8866b9e46bc2f935"
+    "baseline": "dae18c1ec5e1a1bf8e05c5ffa29edfe0d4c58987"
   },
   {
     "path": "crates/vendor/movement/src/movement.rs",
     "classification": "native patch",
-    "baseline": "5e14ca60b9e5122ee18b775f83b9f2b20042a811"
+    "baseline": "fdee233062c4ca0f57e6a649ad99d6fc5274c33b"
   },
   {
     "path": "crates/vendor/thirdpartylegalnotices.txt",
@@ -152,7 +152,7 @@
   {
     "path": "apps/web/src/core.ts",
     "classification": "native patch",
-    "baseline": "efca612a26b4d62dd43724d83b69756e35749a49"
+    "baseline": "130bf43f87305bccef3857d6759ba88c7c851a90"
   },
   {
     "path": "apps/web/src/feedback/modal.ts",
