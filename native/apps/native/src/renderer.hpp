@@ -18,6 +18,8 @@
 #include "resource_loading.hpp"
 #include "actor_anim.hpp"
 #include "tp_inspect.hpp"
+#include "knife_spinner.hpp"
+#include "inspect_cues.hpp"
 #include <span>
 #include "nlohmann/json.hpp"
 #include <filesystem>
@@ -2136,6 +2138,15 @@ public:
         queuedWeaponFlags = queuedAttackMode = 0;
         queuedAttack = false;
         if (viewmodel) viewmodel->reset_presentation();
+    }
+
+    // The first-person inspect's sound cues heard since the last clear.
+    std::span<const native_render::InspectCue> inspect_cues() const {
+        return viewmodel ? viewmodel->inspect_cues().cues() : std::span<const native_render::InspectCue>();
+    }
+
+    void clear_inspect_cues() {
+        if (viewmodel) viewmodel->inspect_cues().clear();
     }
 
     void inspect_press() {

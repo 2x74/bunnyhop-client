@@ -74,6 +74,11 @@ class NativeViewmodel {
     std::vector<std::string> weapons;
     std::vector<float> data, pose;
     nlohmann::json metadata;
+    native_render::KnifeSpinner spinner;
+    std::unordered_map<std::string, std::vector<native_render::InspectTrickCues>> inspectCueTimes;
+    native_render::InspectCueQueue inspectCueQueue;
+    int cueTrick = -1;
+    double cueTime = 0;
     std::optional<native_render::Glow> localGlow;
     bool showGlow = true, firstPersonGlow = true;
     Look equipped;
@@ -432,7 +437,7 @@ class NativeViewmodel {
         gl.DepthMask(GL_TRUE);
     }
 
-    void sample(const Entry &entry, const Clip &c, double t, bool loop) {
+    void sample(const Entry &entry, const Clip &c, double t, bool loop, double spinDegrees = 0) {
         if (loop && c.duration > 0) t = std::fmod(std::max(0., t), c.duration);
         const double frame =
                 c.duration > 0 ? std::clamp(t / c.duration * double(c.frames - 1), 0., double(c.frames - 1)) : 0;
@@ -443,6 +448,7 @@ class NativeViewmodel {
             const float x = data[c.offset + a * pose.size() + i], y = data[c.offset + b * pose.size() + i];
             pose[i] = x + (y - x) * f;
         }
+        native_render::turn_spinner(pose, spinner, spinDegrees);
         gl.ActiveTexture(GL_TEXTURE0);
         gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
         gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 3, entry.bones, 0, GL_RGBA, GL_FLOAT, pose.data());
@@ -699,6 +705,8 @@ public:
             tpInspects = raw.at("knives");
         }
         weapons = metadata.at("weapons").get<std::vector<std::string>>();
+        spinner = native_render::parse_knife_spinner(metadata);
+        inspectCueTimes = native_render::parse_inspect_cues(metadata.at("inspects"));
         if (metadata.contains("actorRig")) {
             const auto &rig = metadata["actorRig"];
             actorNames = rig["names"].get<std::vector<std::string>>();
@@ -879,6 +887,27 @@ public:
         inspectQueued = inspectHeld = false;
         inspectPresses = inspectLoops = 0;
     }
+
+    // The inspect's sound cues the trick passed this frame; the game plays them, then clears the queue.
+    void hear_inspect_cues(double seconds) {
+        const auto knife = inspectCueTimes.find(equipped.knife);
+        if (inspectIndex < 0 || knife == inspectCueTimes.end() || size_t(inspectIndex) >= knife->second.size()) {
+            cueTrick = -1;
+            return;
+        }
+        const double t = std::max(0., seconds - started);
+        if (cueTrick != inspectIndex) {
+            cueTrick = inspectIndex;
+            cueTime = t;
+            return;
+        }
+        native_render::collect_inspect_cues(knife->second[size_t(inspectIndex)], cueTime, t, inspectCueQueue);
+        cueTime = t;
+    }
+
+    native_render::InspectCueQueue &inspect_cues() { return inspectCueQueue; }
+
+    const native_render::InspectCueQueue &inspect_cues() const { return inspectCueQueue; }
 
     void inspect_press() { inspectPresses = std::min(inspectPresses + 1, 4u); }
 
@@ -1360,6 +1389,7 @@ public:
                     started = seconds;
                 }
             }
+            hear_inspect_cues(seconds);
         } else {
             inspectIndex = -1;
             if (inspectPresses) {
@@ -1385,7 +1415,8 @@ public:
             c = clip(entry, action + (gunSilenced ? ":silenced" : ""));
             time = 0;
         }
-        sample(entry, *c, time, false);
+        const bool spins = active == 1 && spinner.spins(equipped.knife);
+        sample(entry, *c, time, false, spins ? native_render::whirl_idle_degrees(spinner, seconds) : 0);
         gl.Clear(GL_DEPTH_BUFFER_BIT);
         gl.Enable(GL_DEPTH_TEST);
         gl.DepthMask(GL_TRUE);

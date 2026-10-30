@@ -61,6 +61,49 @@ const chunk = (type: string, data: Uint8Array) => {
   tail.writeUInt32BE(crc(Buffer.concat([t, data])));
   return Buffer.concat([n, t, data, tail]);
 };
+const paeth = (left: number, up: number, upLeft: number): number => {
+  const p = left + up - upLeft;
+  const toLeft = Math.abs(p - left),
+    toUp = Math.abs(p - up),
+    toUpLeft = Math.abs(p - upLeft);
+  if (toLeft <= toUp && toLeft <= toUpLeft) return left;
+  return toUp <= toUpLeft ? up : upLeft;
+};
+
+/** One row under PNG filter `type` (0 none, 1 sub, 2 up, 3 average, 4 Paeth) into `out` at `at`. */
+function filterRow(type: number, row: Buffer, above: Buffer | null, out: Buffer, at: number): void {
+  out[at] = type;
+  for (let i = 0; i < row.length; i++) {
+    const left = i >= 4 ? row[i - 4] : 0,
+      up = above ? above[i] : 0,
+      upLeft = above && i >= 4 ? above[i - 4] : 0;
+    const predicted = [0, left, up, (left + up) >> 1, paeth(left, up, upLeft)][type];
+    out[at + 1 + i] = (row[i] - predicted) & 255;
+  }
+}
+
+/** Scanlines with each row's filter chosen by the smallest sum of signed residuals (the PNG spec's heuristic). */
+function filterRows(pixels: Buffer, width: number, height: number): Buffer {
+  const stride = width * 4;
+  const scan = Buffer.alloc(height * (stride + 1));
+  const trial = Buffer.alloc(stride + 1);
+  for (let y = 0; y < height; y++) {
+    const row = pixels.subarray(y * stride, (y + 1) * stride);
+    const above = y ? pixels.subarray((y - 1) * stride, y * stride) : null;
+    let best = Infinity;
+    for (let type = 0; type < 5; type++) {
+      filterRow(type, row, above, trial, 0);
+      let cost = 0;
+      for (let i = 1; i < trial.length; i++) cost += trial[i] < 128 ? trial[i] : 256 - trial[i];
+      if (cost < best) {
+        best = cost;
+        trial.copy(scan, y * (stride + 1));
+      }
+    }
+  }
+  return scan;
+}
+
 const images: Record<string, string> = {};
 let pngBytes = 0;
 for (const job of jobs) {
@@ -101,9 +144,10 @@ for (const job of jobs) {
   y1 = Math.min(h - 1, y1 + 8);
   const width = x1 - x0 + 1,
     height = y1 - y0 + 1,
-    scan = Buffer.alloc(height * (width * 4 + 1));
+    pixels = Buffer.alloc(height * width * 4);
   for (let y = 0; y < height; y++)
-    raw.copy(scan, y * (width * 4 + 1) + 1, ((y0 + y) * w + x0) * 4, ((y0 + y) * w + x1 + 1) * 4);
+    raw.copy(pixels, y * width * 4, ((y0 + y) * w + x0) * 4, ((y0 + y) * w + x1 + 1) * 4);
+  const scan = filterRows(pixels, width, height);
   const header = Buffer.alloc(13);
   header.writeUInt32BE(width);
   header.writeUInt32BE(height, 4);
@@ -112,7 +156,7 @@ for (const job of jobs) {
   const png = Buffer.concat([
     Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
     chunk("IHDR", header),
-    chunk("IDAT", deflateSync(scan)),
+    chunk("IDAT", deflateSync(scan, { level: 9 })),
     chunk("IEND", Buffer.alloc(0)),
   ]);
   pngBytes += png.length;

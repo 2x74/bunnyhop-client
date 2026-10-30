@@ -30,14 +30,18 @@ inline constexpr double turn_seconds = .05, max_step_seconds = .1, substep_secon
 inline constexpr double pitch_low = -.3, pitch_high = .95, side_limit = .6;
 inline constexpr double pi = 3.141592653589793;
 
-inline double clamped_length(double length) {
-    return std::clamp(std::isfinite(length) ? length : 1., .3, 2.5);
+// The swing limits keep scaling up to the longest tail (3x, the small of the back); the pendulum's frequency stops
+// slowing at 2.5x, as on the website (hat-fx.ts ponyLimits and advancePonytail).
+inline constexpr double longest_limits = 3, longest_frequency = 2.5;
+
+inline double clamped_length(double length, double longest) {
+    return std::clamp(std::isfinite(length) ? length : 1., .3, longest);
 }
 }  // namespace ponytail
 
 // Angle limits for a tail `length` times the built one: a long tail drops and swings less, a short one is perkier.
 inline PonytailLimits ponytail_limits(double length) {
-    const double l = ponytail::clamped_length(length);
+    const double l = ponytail::clamped_length(length, ponytail::longest_limits);
     return {std::max(-.45, ponytail::pitch_low / std::pow(l, 1.5)),
             ponytail::pitch_high - .4 * std::clamp(l - 1, 0., 1.),
             std::min(.75, ponytail::side_limit / std::sqrt(l))};
@@ -103,7 +107,7 @@ inline void advance_ponytail(
     s.time = std::fmod(s.time + h, pi * 200);
     const double idle = std::exp(-std::hypot(v[0], v[1]) / 120);
     const auto limits = ponytail_limits(length);
-    const double w0 = 2 * pi * frequency_hz / std::sqrt(clamped_length(length)), spring = w0 * w0,
+    const double w0 = 2 * pi * frequency_hz / std::sqrt(clamped_length(length, longest_frequency)), spring = w0 * w0,
                  friction = 2 * damping * w0;
     const double pitchRest = .035 * idle * std::sin(s.time * 1.7), sideRest = .06 * idle * std::sin(s.time * 1.1);
     const int substeps = std::max(1, int(std::ceil(h / substep_seconds)));

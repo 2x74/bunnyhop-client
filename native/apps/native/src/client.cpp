@@ -35,6 +35,7 @@
 #include "capabilities.hpp"
 #include "practice_controller.hpp"
 #include "practice_mode.hpp"
+#include "knife_pool.hpp"
 #include "leave_hold.hpp"
 #include "native_chat.hpp"
 #include "sniper_zoom.hpp"
@@ -315,6 +316,9 @@ int run(const native::Options &opt) {
     std::string selected_style = opt.style, active_style = opt.style, outfit, packed_loadout,
                 ghost_cosmetic = "ghost-default", trail_cosmetic = "trail-none";
     std::optional<native_render::Glow> player_glow;
+    // The equipped loadout holding the knife pool's pick: what the viewmodel, your bunny and the replay trailer show.
+    native::HeldKnife held_knife;
+    auto next_knife_event = native::KnifePoolEvent::restart;
     native::RoomBridge room_bridge;
     auto &room = room_bridge.room;
     auto &room_modes = room_bridge.room_modes;
@@ -639,7 +643,7 @@ int run(const native::Options &opt) {
                 active_style,
                 replay_player,
                 configured_turns,
-                packed_loadout
+                held_knife.loadout()
         );
         run_history.select(map_id, active_track, active_style, double(SDL_GetTicksNS()) / run_second_ns);
     };
@@ -682,11 +686,14 @@ int run(const native::Options &opt) {
         curr = restart.state;
         if (tutorial_runner.lesson && tutorial_runner.lesson->is_active())
             tutorial_runner.restart(core.get(), active_style, curr);
+        // The knife pool moves on before the attempt starts, so the whole run holds one knife.
+        if (held_knife.advance(next_knife_event) && menu && menu_ready) menu->evaluate_js(held_knife.menu_script());
+        next_knife_event = native::KnifePoolEvent::restart;
         if (renderer) {
             renderer->reset_presentation();
             scope.reset();
             renderer->set_viewmodel_weapon(std::nullopt);
-            renderer->set_cosmetics(outfit, packed_loadout);
+            renderer->set_cosmetics(outfit, held_knife.loadout());
         }
         audio.reset();
         hud.reset_history(true);
@@ -921,9 +928,11 @@ int run(const native::Options &opt) {
         ghosts.handle = 0;
         ghosts.enabled = false;
         ghosts.id.clear();
+        // A new map brings the knife pool's next knife, except for a map loaded to watch a replay.
+        next_knife_event = pending_replay.empty() ? native::KnifePoolEvent::map : native::KnifePoolEvent::none;
         reset();
         apply_preferences();
-        renderer->set_cosmetics(outfit, packed_loadout);
+        renderer->set_cosmetics(outfit, held_knife.loadout());
         renderer->set_ghost_cosmetics(ghost_cosmetic, trail_cosmetic);
         apply_room_mode(room_modes.map_loaded(map_id, room.spectator_target.has_value(), epoch_ms()));
     };
@@ -2610,13 +2619,18 @@ int run(const native::Options &opt) {
                         packed_loadout = message.value("packedLoadout", std::string());
                         if (outfit.size() > 64 || packed_loadout.size() > 200)
                             throw std::runtime_error("Invalid cosmetic selection");
+                        held_knife.update(
+                                packed_loadout,
+                                message.value("knifePool", nlohmann::json(nullptr)),
+                                message.value("knifePick", -1L)
+                        );
                         ghost_cosmetic = message.value("ghostId", ghost_cosmetic);
                         trail_cosmetic = message.value("trailId", trail_cosmetic);
                         if (ghost_cosmetic.size() > 64 || trail_cosmetic.size() > 64)
                             throw std::runtime_error("Invalid ghost cosmetic");
                         if (renderer) {
                             renderer->set_player_glow(player_glow);
-                            renderer->set_cosmetics(outfit, packed_loadout);
+                            renderer->set_cosmetics(outfit, held_knife.loadout());
                             renderer->set_ghost_cosmetics(ghost_cosmetic, trail_cosmetic);
                         }
                     } else if (type == "roomEvent") {
@@ -3478,7 +3492,7 @@ int run(const native::Options &opt) {
                 self.id = "local-camera-target";
                 self.opacity = 1;
                 self.outfit = viewer.active ? viewer.runner_outfit : outfit;
-                self.loadout = viewer.active ? viewer.runner_loadout : packed_loadout;
+                self.loadout = viewer.active ? viewer.runner_loadout : held_knife.loadout();
                 self.emptyHand = viewer.active && !viewer.weapon_third;
                 self.playerGlow = player_glow;
                 for (int k = 0; k < 3; k++) {
@@ -3542,6 +3556,9 @@ int run(const native::Options &opt) {
                     (viewer.active || opt.frames) ? curr.tick * step_dt
                                                   : std::chrono::duration<double>(now - started).count()
             );
+            for (const auto cue : renderer->inspect_cues())
+                audio.inspect_cue(cue);
+            renderer->clear_inspect_cues();
             renderer->draw_measure_label(
                     hud,
                     renderer->camera(eye, camera_input.yaw(), camera_input.pitch, float(width) / height),
