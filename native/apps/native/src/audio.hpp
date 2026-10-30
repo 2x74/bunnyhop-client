@@ -160,7 +160,7 @@ class Audio {
     struct SpatialState {
         MovementAudio movement;
         bool grounded = false, first = true;
-        uint32_t attack_tick = ~0u, jump_tick = ~0u;
+        uint32_t attack_tick = ~0u, jump_tick = ~0u, weapon = 0;
     };
 
     std::unordered_map<std::string, SpatialState> spatial_states;
@@ -757,6 +757,12 @@ public:
                     spatial(id, a.frame.position, float(gain) * (ghost ? .35f : .65f), rate);
                 }
         );
+        // Drew a gun (a switch or a pickup): its draw sound at them (net/players.ts).
+        constexpr float draw_gain = .7f;
+        if (!ghost && !s.first && !a.snapped && a.frame.weapon != s.weapon && a.frame.weapon >= 2
+            && weapon_sounds_enabled)
+            spatial("gun_draw", a.frame.position, draw_gain);
+        s.weapon = a.frame.weapon;
         s.first = false;
         s.grounded = p.grounded;
         if (a.attack && s.attack_tick != a.frame.tick) {

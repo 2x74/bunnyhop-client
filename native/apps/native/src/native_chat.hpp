@@ -1,5 +1,6 @@
 #pragma once
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cmath>
 #include <limits>
@@ -17,7 +18,32 @@ struct ChatDecoration {
     std::string color, badge, country, rank, profile;
     std::string color2, effect, rank_color;
     NameAppearance appearance;
+    // An announce line's record kind: wr, sr, top10 or pb.
+    std::string tone;
 };
+
+struct ChatKindStyle {
+    std::string_view prefix;
+    std::array<float, 4> color;
+};
+
+// The website's line kinds (net/hud.ts ChatBox.add, net.css .chat-line): a lead-in and the line's colour.
+inline ChatKindStyle chat_kind_style(std::string_view kind, std::string_view tone) {
+    constexpr std::array<float, 4> cream = {.937f, .914f, .867f, 1};
+    if (kind == "server") return {"» ", {1, .835f, .604f, 1}};
+    if (kind == "admin") return {"ADMIN » ", {1, .604f, .541f, 1}};
+    if (kind == "private") return {"(to you) ", {.722f, .769f, .847f, 1}};
+    if (kind == "local") return {"", {.624f, .816f, 1, 1}};
+    if (kind == "announce") {
+        if (tone == "wr") return {"", {1, .831f, .369f, 1}};
+        if (tone == "sr") return {"", {1, .616f, .180f, 1}};
+        if (tone == "top10") return {"", {.498f, .820f, 1, 1}};
+        if (tone == "pb") return {"", {.302f, 1, .533f, 1}};
+    }
+    if (kind == "error") return {"", {1, .45f, .4f, 1}};
+    if (kind == "system" || kind == "announcement") return {"", {1, .71f, .24f, 1}};
+    return {"", cream};
+}
 
 inline ChatDecoration chat_decoration(const nlohmann::json &message) {
     ChatDecoration decoration;
@@ -29,6 +55,7 @@ inline ChatDecoration chat_decoration(const nlohmann::json &message) {
     decoration.rank = json_text(message, "nativeRank", 64);
     decoration.rank_color = json_text(message, "nativeRankColor");
     decoration.profile = json_text(message, "nativeProfileId");
+    decoration.tone = json_text(message, "tone", 16);
     if (decoration.country.empty()) decoration.country = json_text(message, "country", 2);
     const auto rank = message.find("rank");
     if (decoration.rank.empty() && rank != message.end() && rank->is_object()) {

@@ -69,13 +69,24 @@ class RoomState {
         bool silenced = false;
     };
 
+    // A peer's run as the snapshots report it (protocol.ts NetMeta), read once when it arrives.
+    struct WireMeta {
+        bool known = false;
+        unsigned style = 0, timer = 0;
+        double timer_ticks = 0;
+    };
+
     struct Peer {
         native_render::Actor actor;
+        WireMeta wire;
         std::deque<Sample> samples;
         double arrived = 0, offset = 0, batch = .1, jitter = 0, meta_at = 0;
         bool clock = false, spectator = false;
         uint32_t rendered = 0;
         double rendered_at = -1;
+        // The tick drawn, advanced at real time and eased toward the interpolation target (playback_tick).
+        double playback = 0, playback_at = -1;
+        bool batch_measured = false;
         nlohmann::json info, meta;
     };
 
@@ -130,6 +141,16 @@ class RoomState {
                 }
             }
         }
+    }
+
+    static WireMeta wire_meta(const nlohmann::json &meta) {
+        WireMeta wire;
+        wire.known = meta.is_object();
+        if (!wire.known) return wire;
+        wire.style = meta.value("style", 0u);
+        wire.timer = meta.value("timer", 0u);
+        wire.timer_ticks = meta.value("timerTicks", 0.);
+        return wire;
     }
 
     std::string change_map(const std::string &next) {
@@ -272,7 +293,7 @@ public:
                 const auto spec = peer.info.find("spec");
                 if (spec != peer.info.end() && spec->is_number_unsigned()) {
                     const auto target = peers.find(spec->get<unsigned>());
-                    if (target != peers.end()) row.status += " -> " + target->second.actor.name;
+                    if (target != peers.end()) row.status += " \u2192 " + target->second.actor.name;
                 }
             }
         }
@@ -384,7 +405,10 @@ public:
                 for (auto it = e["metas"].begin(); it != e["metas"].end(); ++it) {
                     try {
                         const unsigned slot = unsigned(std::stoul(it.key()));
-                        if (slot < 256) peers[slot].meta = it.value();
+                        if (slot < 256) {
+                            peers[slot].meta = it.value();
+                            peers[slot].wire = wire_meta(it.value());
+                        }
                     } catch (const std::exception &) {
                     }
                 }
@@ -408,6 +432,7 @@ public:
             for (auto &[slot, p] : peers) {
                 p.samples.clear();
                 p.clock = false;
+                p.playback_at = -1;
             }
             return change_map(next_map);
         } else if (type == "chat")
@@ -425,12 +450,14 @@ public:
             auto &p = peers[slot];
             if (block.contains("meta") && block["meta"].is_object()) {
                 p.meta = block["meta"];
+                p.wire = wire_meta(p.meta);
                 p.meta_at = now;
             }
             p.actor.id = std::to_string(slot);
             p.actor.opacity = 1;
             const auto &samples = block.at("samples");
             if (!samples.is_array() || samples.size() > 8) continue;
+            const uint32_t newest_before = p.samples.empty() ? 0 : p.samples.back().frame.tick;
             bool appended = false;
             for (const auto &raw : samples) {
                 BhGhostFrame f{};
@@ -459,26 +486,63 @@ public:
                     p.clock = false;
                     p.rendered = 0;
                     p.rendered_at = -1;
+                    p.playback_at = -1;
                 }
                 appended = true;
                 p.samples.push_back({f, bool(flags & 8), flags, block.value("silenced", false)});
                 while (p.samples.size() > 96)
                     p.samples.pop_front();
             }
-            if (appended && !p.samples.empty() && now > p.arrived) {
-                const double offset = now - p.samples.back().frame.tick * .01;
-                if (!p.clock) {
-                    p.offset = offset;
-                    p.clock = true;
-                } else {
-                    const double late = std::max(0., offset - p.offset);
-                    p.jitter = .9 * p.jitter + .1 * std::min(late, .12);
-                    p.offset = std::min(offset, p.offset + .0002);
-                    if (p.arrived > 0) p.batch = .8 * p.batch + .2 * std::clamp(now - p.arrived, .02, .4);
-                }
-                p.arrived = now;
+            if (appended && !p.samples.empty() && now > p.arrived) update_clock(p, now, newest_before);
+        }
+    }
+
+    // Maps a sender's ticks onto local time (net/interp.ts RemoteTrack.push): the offset follows the fastest arrivals,
+    // jitter is how late the others come, and the batch interval is measured from the ticks a batch covers, not from
+    // arrival times, which jitter.
+    static void update_clock(Peer &p, double now, uint32_t newest_before) {
+        constexpr double longest_batch_seconds = .4;
+        const uint32_t newest = p.samples.back().frame.tick;
+        if (newest_before && newest > newest_before) {
+            const double span = (newest - newest_before) * .01;
+            if (span <= longest_batch_seconds) {
+                p.batch = p.batch_measured ? .8 * p.batch + .2 * span : span;
+                p.batch_measured = true;
             }
         }
+        const double offset = now - newest * .01;
+        if (!p.clock) {
+            p.offset = offset;
+            p.clock = true;
+        } else {
+            const double late = std::max(0., offset - p.offset);
+            p.jitter = .9 * p.jitter + .1 * std::min(late, .12);
+            p.offset = std::min(offset, p.offset + .0002);
+        }
+        p.arrived = now;
+    }
+
+    // The tick to draw a peer at. The target moves whenever the offset or the jitter estimate changes; drawing it
+    // directly makes the player jump a little each time, which shows at high frame rates. The drawn tick runs at real
+    // time and eases toward the target at most a tenth faster or slower, and snaps when it is far off.
+    static double playback_tick(Peer &p, double target, double now) {
+        constexpr double ticks_per_second = 100;
+        constexpr double resync_ticks = 30;
+        constexpr double max_rate_change = .1;
+        constexpr double settle_per_second = 4;
+        if (p.playback_at < 0 || std::abs(target - p.playback) > resync_ticks) {
+            p.playback = target;
+            p.playback_at = now;
+            return target;
+        }
+        const double elapsed = now - p.playback_at;
+        if (elapsed <= 0) return p.playback;
+        const double step = elapsed * ticks_per_second;
+        const double error = target - (p.playback + step);
+        const double limit = step * max_rate_change;
+        p.playback += step + std::clamp(error * std::min(1., elapsed * settle_per_second), -limit, limit);
+        p.playback_at = now;
+        return p.playback;
     }
 
     std::vector<native_render::Actor> actors(double now) {
@@ -486,7 +550,7 @@ public:
         for (auto &[slot, p] : peers) {
             if (slot == self || p.spectator || p.samples.empty() || now - p.arrived > 10) continue;
             const double delay = std::clamp(p.batch + p.jitter, .1, .52);
-            const double target = (now - p.offset - delay) * 100 + 1e-7;
+            const double target = playback_tick(p, (now - p.offset - delay) * 100, now) + 1e-7;
             auto frame = p.samples.front().frame;
             for (size_t i = 1; i < p.samples.size(); i++) {
                 const auto &a = p.samples[i - 1].frame, &b = p.samples[i].frame;
@@ -553,6 +617,30 @@ public:
             out.push_back(p.actor);
         }
         return out;
+    }
+
+    // What a player's tag shows after the name (net/players.ts): their time while running or finished, "start" in the
+    // start zone, preceded by the style's short name unless it is Normal.
+    void tag_detail(unsigned slot, double now, HudLabel<48> &out) const {
+        constexpr std::array<std::string_view, 8> short_styles = {"NM", "EZ", "W", "SW", "HSW", "AS", "SCR", "LG"};
+        constexpr unsigned timer_start = 1, timer_running = 2, timer_finished = 3;
+        out.assign("");
+        const auto found = peers.find(slot);
+        if (found == peers.end() || !found->second.wire.known) return;
+        const auto &peer = found->second;
+        const auto &wire = peer.wire;
+        if (wire.style != 0 && wire.style < short_styles.size()) out.assign(short_styles[wire.style]);
+        if (wire.timer == timer_running || wire.timer == timer_finished) {
+            const double running =
+                    wire.timer == timer_running && peer.meta_at > 0 ? std::max(0., now - peer.meta_at) : 0;
+            HudLabel<48> time;
+            format_hud_time(time, wire.timer_ticks * .01 + running);
+            if (!out.empty()) out.append(" · ");
+            out.append(time.view());
+        } else if (wire.timer == timer_start) {
+            if (!out.empty()) out.append(" · ");
+            out.append("start");
+        }
     }
 
     std::optional<std::pair<unsigned, double>> timer(unsigned slot, double now) const {

@@ -157,9 +157,4 @@ inline std::array<float, 2> hud_element_size(std::string_view id) {
     return {240, 26};
 }
 
-inline HudRect scoreboard_bounds(float width, float height, size_t rows) {
-    const float panel_width = std::min(1100.f, width - 32);
-    const float panel_height = std::min(height - 48, 158.f + float(rows) * 36);
-    return {(width - panel_width) / 2, (height - panel_height) / 2, panel_width, panel_height};
-}
 }  // namespace native

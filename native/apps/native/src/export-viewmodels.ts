@@ -28,7 +28,14 @@ import { KNIVES } from "../../web/src/viewmodel/knives/index";
 import { gunFpCtx, gunRig } from "../../web/src/viewmodel/guns/rig";
 import { GunPoser } from "../../web/src/viewmodel/guns/pose";
 import { GUNS, gunById } from "../../web/src/viewmodel/guns/index";
-import { bunnyGunGeometry, bunnySilencerGeometry, worldGunGeometry } from "../../web/src/viewmodel/guns/meshes";
+import {
+  bunnyGunGeometry,
+  bunnyHold,
+  bunnySilencerGeometry,
+  worldGunGeometry,
+} from "../../web/src/viewmodel/guns/meshes";
+import { fistFrames } from "../../web/src/player/bunny/gun-hold";
+import { holdData } from "./gun-hold-data";
 import { FINISH_STYLE, GLOVE_STYLE, GLOVE_STYLE_IDS, HAIR_DEFAULT } from "../../web/src/loadout";
 import { FINISH_CODE } from "../../web/src/viewmodel/finishes/shader";
 const directory = resolve(process.argv[2] ?? "target/native-assets");
@@ -138,15 +145,16 @@ function geometry(name: string, g: any) {
 }
 /**
  * The website places a bunny's gun each frame with its two-handed hold (player/bunny/gun-hold.ts); its mesh is baked
- * with the grip in the right fist's bind pose. Native carries it in the right hand: every vertex on that bone.
+ * with the grip in the right fist's bind pose and skinned to its own two bones, the gun and the magazine. Native
+ * appends those two bones after the rig's (gun_hold.hpp writes them), so the mesh keeps both.
  */
-function inRightHand(source: THREE.BufferGeometry): THREE.BufferGeometry {
+function onGunBones(source: THREE.BufferGeometry): THREE.BufferGeometry {
   const g = source.clone();
-  const hand = bunnyRig().bone("R_Hand");
+  const first = bunnyRig().names.length;
   const ids = g.getAttribute("skinIndex"),
     weights = g.getAttribute("skinWeight");
   for (let i = 0; i < ids.count; i++) {
-    ids.setXYZW(i, hand, 0, 0, 0);
+    ids.setXYZW(i, first + (ids.getX(i) === 1 ? 1 : 0), 0, 0, 0);
     weights.setXYZW(i, 1, 0, 0, 0);
   }
   return g;
@@ -176,10 +184,10 @@ for (const def of GUNS) {
   const gun = b.geometry();
   bakeGunAO(gun);
   geometry(`fpgun:${def.id}`, gun);
-  geometry(`tpgun:${def.id}`, inRightHand(bunnyGunGeometry(def)));
+  geometry(`tpgun:${def.id}`, onGunBones(bunnyGunGeometry(def)));
   geometry(`worldgun:${def.id}`, worldGunGeometry(def).clone());
   const sil = bunnySilencerGeometry(def);
-  if (sil) geometry(`tpsilencer:${def.id}`, inRightHand(sil));
+  if (sil) geometry(`tpsilencer:${def.id}`, onGunBones(sil));
 }
 for (const glove of GLOVE_STYLE_IDS) {
   for (const def of KNIVES) {
@@ -411,7 +419,9 @@ await writeFile(
         [c.color, c.color2 ?? c.color],
       ]),
     ),
-    actorRig: { names: br.names, parent: Array.from(br.parent), bind: Array.from(br.bind) },
+    actorRig: { names: br.names, parent: Array.from(br.parent), bind: Array.from(br.bind), csBones: br.csBones },
+    gunHolds: Object.fromEntries(GUNS.map((def) => [def.id, holdData(bunnyHold(def))])),
+    fists: Object.fromEntries(Object.entries(fistFrames(br)).map(([key, m]) => [key, Array.from(m)])),
     outfits: COLOURWAYS,
     hats: hatMeshes,
     hatFits,

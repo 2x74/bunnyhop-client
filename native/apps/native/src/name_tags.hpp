@@ -3,6 +3,7 @@
 #include "hud_text.hpp"
 #include "hud_geometry.hpp"
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cmath>
@@ -213,19 +214,163 @@ project_name_tag(const float *matrix, const float *point, const GraphicsView &vi
     return screen;
 }
 
+// Line of sight from the camera to a point near a tag (player/tag.ts TagSight.clear): a hit within a few units
+// of the point still counts, since heads touch ceilings.
 template <class Core>
 struct NameTagTrace {
     Core *core;
     const float *eye;
 
     bool operator()(const float *point) const {
+        constexpr float near_hit_units = 10;
         float fraction = 0;
-        return bh_trace_camera(core, eye, point, 0, &fraction) && fraction >= .98f;
+        if (!bh_trace_camera(core, eye, point, 0, &fraction)) return false;
+        const float length = std::hypot(point[0] - eye[0], point[1] - eye[1], point[2] - eye[2]);
+        return (1 - fraction) * length < near_hit_units;
     }
 };
 
+// Tag visibility as the website fades it (player/tag.ts TagSight, net/players.ts): occlusion checked ten times a
+// second at the head and the chest and eased in and out, gone right next to the camera, and a distance fade.
+struct NameTagSight {
+    float alpha = -1;
+    bool seen = true;
+    double wait = 0;
+};
+
+class NameTagSights {
+public:
+    static constexpr double check_interval_seconds = .1;
+    static constexpr float fade_in_per_second = 8;
+    static constexpr float fade_out_per_second = 5;
+    static constexpr float near_hidden_units = 90;
+    static constexpr float near_ramp_units = 90;
+    static constexpr float far_full_units = 2000;
+    static constexpr float far_gone_units = 3000;
+    static constexpr std::array<float, 2> sight_drops_units = {14, 42};
+
+    // Once per drawn frame, before the tags.
+    void begin(double seconds, const float *eye) {
+        dt_ = last_ < 0 ? 0 : std::clamp(seconds - last_, 0., .1);
+        last_ = seconds;
+        for (int k = 0; k < 3; ++k)
+            eye_[k] = eye[k];
+    }
+
+    void reset(unsigned slot) {
+        if (slot < slots_.size()) slots_[slot] = {};
+    }
+
+    template <class Trace>
+    float opacity(unsigned slot, const float *point, bool through_walls, Trace &trace) {
+        const float distance = std::hypot(point[0] - eye_[0], point[1] - eye_[1], point[2] - eye_[2]);
+        if (distance < near_hidden_units) return 0;
+        const float near = std::min(1.f, (distance - near_hidden_units) / near_ramp_units);
+        const float far = distance <= far_full_units ? 1
+                          : distance >= far_gone_units
+                                  ? 0
+                                  : 1 - (distance - far_full_units) / (far_gone_units - far_full_units);
+        return near * far * (through_walls ? 1 : seen(slot, point, trace));
+    }
+
+private:
+    std::array<NameTagSight, 256> slots_{};
+    float eye_[3] = {};
+    double last_ = -1, dt_ = 0;
+
+    template <class Trace>
+    float seen(unsigned slot, const float *point, Trace &trace) {
+        NameTagSight scratch;
+        auto &sight = slot < slots_.size() ? slots_[slot] : scratch;
+        sight.wait -= dt_;
+        if (sight.wait <= 0 || sight.alpha < 0) {
+            sight.wait = check_interval_seconds;
+            sight.seen = false;
+            for (const float drop : sight_drops_units) {
+                const float below[] = {point[0], point[1], point[2] - drop};
+                if (trace(below)) {
+                    sight.seen = true;
+                    break;
+                }
+            }
+        }
+        const float target = sight.seen ? 1.f : 0.f;
+        if (sight.alpha < 0)
+            sight.alpha = target;
+        else if (target > sight.alpha)
+            sight.alpha = std::min(target, sight.alpha + float(dt_) * fade_in_per_second);
+        else
+            sight.alpha = std::max(target, sight.alpha - float(dt_) * fade_out_per_second);
+        return sight.alpha;
+    }
+};
+
+// A room slot's accent (net/players.ts PALETTE): the dot on its tag and scoreboard row.
+inline NameColor slot_color(unsigned slot) {
+    constexpr std::array<uint32_t, 10> palette = {
+            0xff7a59, 0x4fa8ff, 0x5ee08a, 0xffd84d, 0xc477ff, 0xff5d9e, 0x3fd0c9, 0xffa94d, 0x9aa3ff, 0xb6f06a
+    };
+    const uint32_t rgb = palette[slot % palette.size()];
+    return {float(rgb >> 16) / 255, float((rgb >> 8) & 255) / 255, float(rgb & 255) / 255, 1};
+}
+
 // Ghost tags take the ghost's own colour, as on the website (player/colors.ts GHOST_CSS, or your ghost cosmetic).
 inline constexpr float ghost_tag_alpha = .85f;
+
+namespace name_tag_look {
+constexpr NameColor pill = {.043f, .051f, .071f, .62f};
+constexpr NameColor detail_ink = {.639f, .671f, .729f, 1};
+constexpr float name_size = 13;
+constexpr float detail_size = 12;
+constexpr float pill_height = 22;
+constexpr float dot_size = 7;
+constexpr float badge_width = 18;
+// Above the head: the website places the tag 76 units over the feet standing, 58 crouched.
+constexpr float standing_height_units = 76;
+constexpr float crouched_height_units = 58;
+}  // namespace name_tag_look
+
+inline NameAppearance faded_appearance(NameAppearance look, float opacity) {
+    look.color[3] *= opacity;
+    look.second[3] *= opacity;
+    for (auto &badge : look.badges)
+        for (auto &color : badge.colors)
+            color[3] *= opacity;
+    return look;
+}
+
+// One player's tag: a pill with their slot colour's dot, the name in its look and marks, then their time or style.
+template <class Hud>
+void draw_player_tag(
+        Hud &hud,
+        float x,
+        float y,
+        std::string_view name,
+        std::string_view detail,
+        const NameAppearance &look,
+        NameColor dot,
+        float opacity,
+        double seconds
+) {
+    using namespace name_tag_look;
+    const float name_width = hud.overlay_text_width(name, name_size) + float(name_badge_count(look)) * badge_width;
+    const float detail_width = detail.empty() ? 0 : hud.overlay_text_width(detail, detail_size) + 10;
+    const float width = dot_size + 10 + name_width + detail_width + 16;
+    const float left = x - width / 2;
+    hud.overlay_rect(left, y - 4, width, pill_height, {pill[0], pill[1], pill[2], pill[3] * opacity});
+    dot[3] *= opacity;
+    hud.overlay_rect(left + 8, y + 4, dot_size, dot_size, dot);
+    const float name_x = left + 8 + dot_size + 6;
+    hud.overlay_name(name_x, y, name, name_size, faded_appearance(look, opacity), seconds);
+    if (!detail.empty())
+        hud.overlay_text(
+                name_x + name_width + 8,
+                y + 1,
+                detail,
+                detail_size,
+                {detail_ink[0], detail_ink[1], detail_ink[2], opacity}
+        );
+}
 
 template <class Hud, class Actors, class Room, class Trace>
 void draw_name_tags(
@@ -236,6 +381,7 @@ void draw_name_tags(
         const float *matrix,
         const Actors &actors,
         const Room &room,
+        NameTagSights &sights,
         bool players,
         bool ghosts,
         bool through_walls,
@@ -243,27 +389,49 @@ void draw_name_tags(
         double seconds,
         std::optional<GraphicsView> output = std::nullopt
 ) {
+    using namespace name_tag_look;
     const HudGeometry geometry(width, height, percent);
     hud.overlay_begin(width, height, percent);
+    HudLabel<48> detail;
     for (const auto &actor : actors) {
         const bool ghost = actor.id.starts_with("ghost-");
         // Slot 0's tag also shows its time and delta (draw_ghost_name_tag).
         if (actor.id == "local-camera-target" || actor.id == "ghost-0" || actor.name.empty() || actor.opacity < .05f
             || (ghost ? !ghosts : !players))
             continue;
+        unsigned slot = 256;
+        std::from_chars(actor.id.data(), actor.id.data() + actor.id.size(), slot);
+        if (actor.snapped) sights.reset(slot);
+        const bool crouched = actor.frame.flags & 1;
         const float point[] = {
                 actor.frame.position[0],
                 actor.frame.position[1],
-                actor.frame.position[2] + actor.frame.view_offset_z + 20
+                actor.frame.position[2] + (crouched ? crouched_height_units : standing_height_units)
         };
         const auto view = output.value_or(graphics_view(GraphicsSettings{}, width, height));
         const auto screen = project_name_tag(matrix, point, view, height, geometry.scale);
-        if (!screen || (!through_walls && !trace(point))) continue;
-        unsigned slot = 256;
-        std::from_chars(actor.id.data(), actor.id.data() + actor.id.size(), slot);
-        auto look = room.appearance(slot);
-        if (ghost) look.color = {actor.tint[0], actor.tint[1], actor.tint[2], ghost_tag_alpha};
-        hud.overlay_name((*screen)[0], (*screen)[1], actor.name, 13, look, seconds, true);
+        if (!screen) continue;
+        if (ghost) {
+            if (!through_walls && !trace(point)) continue;
+            NameAppearance look;
+            look.color = {actor.tint[0], actor.tint[1], actor.tint[2], ghost_tag_alpha};
+            hud.overlay_name((*screen)[0], (*screen)[1], actor.name, name_size, look, seconds, true);
+            continue;
+        }
+        const float opacity = sights.opacity(slot, point, through_walls, trace);
+        if (opacity <= .01f) continue;
+        room.tag_detail(slot, seconds, detail);
+        draw_player_tag(
+                hud,
+                (*screen)[0],
+                (*screen)[1],
+                actor.name,
+                detail.view(),
+                room.appearance(slot),
+                slot_color(slot),
+                opacity,
+                seconds
+        );
     }
     hud.overlay_end(width, height);
 }

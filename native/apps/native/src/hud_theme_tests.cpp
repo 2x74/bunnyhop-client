@@ -87,6 +87,8 @@ struct DrawProbe {
 
     void overlay_avatar(float, float, unsigned, native::NameColor) { ++avatars; }
 
+    float overlay_text_width(std::string_view text, float size) const { return float(text.size()) * size * .6f; }
+
     void overlay_name(float, float, std::string_view, float, const native::NameAppearance &, double, bool = false) {
         ++names;
     }
@@ -338,8 +340,11 @@ void test_scoreboard_and_names() {
             NoAllocations no_allocations;
             native::draw_scoreboard(probe, size.first, size.second, 100, board, 1, 0);
         }
-        assert(probe.has("Test room") && probe.has("T7+") && probe.has("00:12.345"));
-        assert(probe.has("SPEC -> First") && probe.flags == 2 && probe.names == 2 && probe.avatars == 2);
+        assert(probe.has("Test room") && probe.has("T7+") && probe.has("00:12.345") && probe.has("Normal"));
+        // Spectators are listed under the table, as on the website.
+        assert(probe.has("Spectating: ") && probe.has("Spectator -> First"));
+        assert(probe.flags == 1 && probe.names == 1 && probe.avatars == 1);
+        assert(probe.has("Bind a key to chat, N to spectate."));
     }
     native::HudLabel<48> time;
     native::format_hud_time(time, 16.731);
@@ -408,6 +413,14 @@ void test_merged_menu_contracts() {
     std::string style;
     room.spectator_run(run, style, 3, 90, 100500);
     assert(run.status == 1 && std::abs(run.seconds - 17.231) < 1e-8);
+    room.display_contract(
+            {{"type", "scoreboard"},
+             {"head", {{"room", "Decorated"}, {"map", "bhop_test"}, {"chatKey", "U"}}},
+             {"rows", native::Json::array()}}
+    );
+    DrawProbe keyed;
+    native::draw_scoreboard(keyed, 1280, 720, 100, room.display(), 90, 100500);
+    assert(keyed.has("U to chat, N to spectate."));
     room.display_contract({{"type", "scoreboard"}, {"head", nullptr}, {"rows", native::Json::array()}});
     assert(room.display().count == 0);
     auto settings = native::default_settings();
@@ -431,13 +444,68 @@ void test_merged_menu_contracts() {
     assert(triggers.key("Digit0", true, false) && !triggers.open);
 }
 
+// The website's tag fades (player/tag.ts TagSight(2000, 3000), net/players.ts near-camera ramp).
+void test_tag_sight_fades() {
+    native::NameTagSights sights;
+    const float eye[] = {0, 0, 0};
+    auto clear = [](const float *) {
+        return true;
+    };
+    auto blocked = [](const float *) {
+        return false;
+    };
+    sights.begin(0, eye);
+    const float close[] = {60, 0, 0}, ramp[] = {135, 0, 0}, far[] = {2500, 0, 0}, gone[] = {3200, 0, 0};
+    assert(sights.opacity(1, close, true, clear) == 0);
+    assert(std::abs(sights.opacity(1, ramp, true, clear) - .5f) < 1e-5f);
+    assert(std::abs(sights.opacity(1, far, true, clear) - .5f) < 1e-5f);
+    assert(sights.opacity(1, gone, true, clear) == 0);
+    // Occlusion eases out over a fifth of a second and back in over an eighth.
+    const float mid[] = {500, 0, 0};
+    assert(sights.opacity(2, mid, false, clear) == 1);
+    sights.begin(.1, eye);
+    assert(std::abs(sights.opacity(2, mid, false, blocked) - .5f) < 1e-4f);
+    sights.begin(.2, eye);
+    assert(sights.opacity(2, mid, false, blocked) == 0);
+    sights.begin(.32, eye);
+    assert(std::abs(sights.opacity(2, mid, false, clear) - .8f) < 1e-4f);
+}
+
+void test_room_tag_detail() {
+    native::RoomState room;
+    room.event(
+            {{"generation", 1},
+             {"id", "easy"},
+             {"event",
+              {{"t", "welcome"},
+               {"you", 0},
+               {"room", {{"name", "Easy"}}},
+               {"map", {{"name", "bhop_eazy"}}},
+               {"players",
+                native::Json::array(
+                        {{{"slot", 0}, {"name", "Me"}, {"style", "autohop"}},
+                         {{"slot", 1}, {"name", "Scroller"}, {"style", "scroll"}}}
+                )},
+               {"metas", {{"1", {{"style", 6}, {"track", 0}, {"timer", 3}, {"timerTicks", 1673}, {"ping", 20}}}}}}}}
+    );
+    native::HudLabel<48> detail;
+    room.tag_detail(1, 10, detail);
+    assert(detail.view() == "SCR · 00:16.730");
+    room.tag_detail(0, 10, detail);
+    assert(detail.empty());
+}
+
 void test_tags_and_race_picker() {
+    test_room_tag_detail();
     native::RoomState room;
     std::array<native_render::Actor, 1> actors;
     actors[0].id = "1";
     actors[0].name = "Bunny";
     actors[0].opacity = 1;
     const std::array<float, 16> matrix = {.01f, 0, 0, 0, 0, .01f, 0, 0, 0, 0, .01f, 0, 0, 0, 0, 4};
+    native::NameTagSights sights;
+    const float eye[] = {0, 0, 900};
+    sights.begin(0, eye);
     DrawProbe hidden;
     native::draw_name_tags(
             hidden,
@@ -447,6 +515,7 @@ void test_tags_and_race_picker() {
             matrix.data(),
             actors,
             room,
+            sights,
             true,
             true,
             false,
@@ -465,6 +534,7 @@ void test_tags_and_race_picker() {
                 matrix.data(),
                 actors,
                 room,
+                sights,
                 true,
                 true,
                 true,
@@ -473,6 +543,7 @@ void test_tags_and_race_picker() {
         );
     }
     assert(visible.names == 1);
+    test_tag_sight_fades();
     native::draw_ghost_name_tag(
             visible, 1280, 720, 100, matrix.data(), actors[0], "PB ghost", 16.731, "-0.020s", true, [](const float *) {
                 return false;

@@ -270,8 +270,9 @@ export const DEFAULT_BINDS: Record<NativeBindAction, readonly string[]> = {
   ...WEB_DEFAULT_BINDS,
   showTriggers: ["Mouse3"],
   showClips: [],
-  chat: ["KeyY"],
-  commandChat: ["KeyU"],
+  // The website's chat bind (binds.ts chat): Y and U, like CS:S say / say_team. Command chat opens it with "!".
+  chat: ["KeyY", "KeyU"],
+  commandChat: [],
   scoreboard: ["Tab"],
   spectatorNext: [],
   spectatorPrevious: [],

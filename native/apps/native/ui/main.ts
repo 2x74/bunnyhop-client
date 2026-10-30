@@ -47,6 +47,7 @@ import { NativeRoomService } from "./room-service";
 import { RoomConnection } from "../../web/src/net/room";
 import { setRoomPresence, setRaceTag, currentRoom, currentRace } from "../../web/src/net/presence";
 import { serverBrowser } from "../../web/src/ui/servers";
+import { keyLabel } from "../../web/src/ui/settings";
 import { roomPanel } from "./rooms-panel";
 import { safeNativeChatUrl } from "./chat-links";
 import { NativeChatService } from "./chat-service";
@@ -732,7 +733,13 @@ function receive(value: unknown): void {
   setWatching(state.playback.active ? state.map : false);
   window.dispatchEvent(new CustomEvent("bunnyhop:host-state", { detail: state }));
 }
+/** The chat bind's first key, as players read it ("Y"), or null while chat has no key. */
+function chatKeyLabel(): string | null {
+  const code = state.settings.binds.chat?.[0];
+  return code ? keyLabel(code) : null;
+}
 const roomService = new NativeRoomService({
+  chatKey: chatKeyLabel,
   connect: (id, handlers) => new RoomConnection(id, () => state.style, handlers),
   ensureAccount: async () => {
     try {
@@ -764,7 +771,7 @@ roomService.subscribe(() => {
     ping: roomService.ping(),
     at: Date.now(),
   };
-  scoreboardFeed.update(hostScoreboard(roomService.view, clock));
+  scoreboardFeed.update(hostScoreboard(roomService.view, clock, chatKeyLabel()));
 });
 onBeforeSend((message) => {
   if (

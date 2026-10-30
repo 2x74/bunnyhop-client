@@ -18,6 +18,7 @@ import {
   type RaceView,
 } from "../../web/src/net/protocol";
 import { nativeChatDecoration } from "./chat-decoration";
+import { announceLine, roomChatLines, type RoomChatLine } from "./room-chat-lines";
 import { isStyleId } from "../../web/src/styles";
 import type { RoomHandlers, RoomStatus } from "../../web/src/net/room";
 import type { MenuMessage } from "./bridge";
@@ -35,6 +36,8 @@ interface Dependencies {
   ensureAccount(): Promise<boolean>;
   send(message: MenuMessage): void;
   now?: () => number;
+  /** The chat bind's first key for the welcome line ("Y"), or null while it has none. */
+  chatKey?: () => string | null;
 }
 export interface RoomView {
   mapInfo?: MapInfo | null;
@@ -267,6 +270,8 @@ export class NativeRoomService {
   private audioRaceId = "";
   private audioGifts = new Set<string>();
   private audioAnnouncements = new Set<string>();
+  private youId: string | null = null;
+  private introducedLobbies = new Set<string>();
   private cue(id: string): void {
     this.dependencies.send({ type: "audioCue", id, gain: 1, rate: 1 });
   }
@@ -521,9 +526,30 @@ export class NativeRoomService {
     if (this.view.id)
       this.dependencies.send({ type: "roomEvent", generation: this.view.generation, id: this.view.id, event });
   }
+  private sendLine(line: RoomChatLine): void {
+    this.dependencies.send({ type: "chatLine", ...line } as unknown as MenuMessage);
+  }
+  /** The website's own room lines for this message, worked out before it changes the view. */
+  private chatLines(message: ServerMsg): RoomChatLine[] {
+    if (message.t === "gift" && this.audioGifts.has(message.batchId)) return [];
+    if (message.t === "welcome") this.youId = message.youId;
+    const lobby = message.t === "welcome" && message.room.private ? message.room.id : null;
+    const introduced = lobby !== null && this.introducedLobbies.has(lobby);
+    if (lobby !== null) this.introducedLobbies.add(lobby);
+    const context = {
+      you: this.view.you,
+      youId: this.youId,
+      room: this.view.room,
+      host: this.view.room?.host ?? null,
+      changing: this.view.change !== null || this.pendingMap !== null,
+      chatKey: this.dependencies.chatKey?.() ?? null,
+    };
+    return roomChatLines(message, context, introduced);
+  }
   private message(message: ServerMsg): void {
     if (!validRoomEvent(message)) return;
     if (message.t === "welcome" && message.room?.id !== this.view.id) return;
+    const lines = this.chatLines(message);
     // Compare before updating room state, so vote refreshes and reconnects
     // cannot duplicate a cue. Identity fencing above rejects stale sockets.
     if (message.t === "join") this.cue("player_join");
@@ -628,10 +654,7 @@ export class NativeRoomService {
       this.scheduleChange(message.change);
     } else if (message.t === "race") this.view.race = message.race;
     else if (message.t === "error") this.view.detail = message.message;
-    if (message.t === "announce")
-      this.view.chat.push({
-        text: `${message.a.name}: ${message.a.kind.toUpperCase()} on ${message.a.map} (${message.a.time.toFixed(3)}s)`,
-      });
+    if (message.t === "announce") this.view.chat.push({ text: announceLine(message.a).text, kind: "announce" });
     if (message.t === "kicked") {
       this.pendingMap = null;
       this.view.change = null;
@@ -652,12 +675,7 @@ export class NativeRoomService {
     }
     if (message.t === "host" && this.view.room) this.view.room.host = message.slot;
     this.view.chat = this.view.chat.slice(-100);
-    if (message.t === "error" || message.t === "kicked")
-      this.dependencies.send({
-        type: "chatLine",
-        kind: "server",
-        text: message.t === "error" ? message.message : message.reason,
-      } as unknown as MenuMessage);
+    for (const line of lines) this.sendLine(line);
     this.event({
       ...message,
       ...(message.t === "welcome" || message.t === "race" || message.t === "change"

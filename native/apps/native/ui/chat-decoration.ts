@@ -24,8 +24,9 @@ export function nativeChatDecoration(value: Record<string, unknown>): ChatDecora
   });
   const look = hostNameLook(marks);
   if (look.color || look.effect) out.nativeName = look;
-  const markList = hostMarks(marks);
-  if (markList.length) out.nativeMarks = markList;
+  // Always sent, empty too: the host otherwise falls back to the older badge words and shows marks the player didn't
+  // equip (a supporter without the badge equipped shows none on the website).
+  out.nativeMarks = hostMarks(marks);
   const badge =
     typeof value.staff === "string" && Object.hasOwn(STAFF_LABEL, value.staff)
       ? (value.staff as keyof typeof STAFF_LABEL)

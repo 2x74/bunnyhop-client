@@ -1589,6 +1589,7 @@ int run(const native::Options &opt) {
     room_bridge.bind_presence(opt, menu.get(), menu_ready, show_menu);
     auto &discord = room_bridge.discord;
     const bool discord_allowed = room_bridge.discord_allowed;
+    if (!opt.room_smoke.empty()) return native::run_room_smoke(opt, window.get(), gl, game, hud);
     if (!opt.presentation_smoke.empty()) {
         return native::run_presentation_smoke(opt, window.get(), gl, game, hud);
     }
@@ -3552,6 +3553,7 @@ int run(const native::Options &opt) {
                 const auto matrix = renderer->camera(
                         eye, camera_input.yaw(), camera_input.pitch, float(width) / std::max(height, 1)
                 );
+                room_bridge.tag_sights.begin(steady_seconds, eye);
                 native::draw_name_tags(
                         hud,
                         width,
@@ -3560,6 +3562,7 @@ int run(const native::Options &opt) {
                         matrix.data(),
                         actors,
                         room,
+                        room_bridge.tag_sights,
                         hud.preferences().tags_players,
                         prefs.ghost_tag,
                         hud.preferences().tags_through_walls,
