@@ -11,7 +11,8 @@ namespace native {
 // - Windows: raw mouse events carry the raw-input thread's read time, spread over each batch. Raw keyboard events
 //   (on while captured) carry the read time; message-loop keys carry the message clock, in whole milliseconds.
 // - X11: relative motion is stamped in X server milliseconds, not SDL nanoseconds, so motion uses arrival time.
-// - macOS, Wayland, X11 keys: stamped by SDL when the event is processed, close to arrival.
+// - macOS: NSEvent time mapped by SDL. Wayland: relative-pointer microseconds (or input-timestamps), mapped by SDL.
+//   X11 keys use SDL's event clock. Native IOHID/evdev motion is already mapped and bypasses this SDL policy.
 //
 // A source whose stamps keep landing off the clock (in the future, or older than any hitch) falls back to arrival
 // time for the session. Stamps that are merely old (a hitch's backlog) are kept; TimedInput::stamp places them.

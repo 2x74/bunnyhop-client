@@ -24,6 +24,13 @@ public:
     struct PreparedMap {
         CorePtr core{nullptr, &bh_destroy};
         std::vector<BhZone> zones;
+        static PreparedMap
+        begin(const std::string &path,
+              const std::string &content,
+              const BhSettings &settings,
+              const nlohmann::json &detail);
+        bool poll();
+        void configure();
     };
 
     explicit GameSession(ReplayCamera &playback_camera);

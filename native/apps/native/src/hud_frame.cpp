@@ -100,9 +100,10 @@ void HudFrame::draw_diagnostics() const {
         std::snprintf(
                 label,
                 sizeof(label),
-                "Mouse %.0f events/s | burst %llu | age %.2f/%.2f ms | pump max %.2f ms",
+                "%s %.0f/s | jitter %.2f ms | age %.2f/%.2f ms | pump %.2f ms",
+                mouse_diagnostics.backend,
                 m.events_per_second,
-                static_cast<unsigned long long>(m.peak_burst),
+                m.timestamp_jitter_ms,
                 m.average_age_ms,
                 m.max_age_ms,
                 m.max_pump_ms

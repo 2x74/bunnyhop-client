@@ -36,7 +36,7 @@ import { openReplayViewer } from "./viewer/request";
 import { mapTier } from "./ui/maps";
 import { announce, announcerPolicy, runSounds, sfx } from "./audio";
 import { restartTarget, withRestartNames } from "./restart";
-import { checkStartPoint, clearStartPoint, loadStartPoint, resolveStartPoint, savedMessage, saveStartPoint } from "./start-point";
+import { checkStartPoint, clearPracticeSpawns, clearStartPoint, loadStartPoint, resolveStartPoint, savedMessage, saveStartPoint } from "./start-point";
 import { getLoadout, getOutfit, knownOutfitUnlocks } from "./player/cosmetics";
 import { cosmetic } from "./progression";
 import { withTimeout } from "./content/fetch";
@@ -439,6 +439,11 @@ export class RunSession {
     if (usable === false) return say("Can't restart on this exact spot. Try a step away.", 3000);
     saveStartPoint(map, r.track, point);
     say(savedMessage(r.track, r.practice), r.practice ? 5000 : 2000);
+  }
+
+  /** !practice off must stay off on later restarts and visits, including other tracks. */
+  clearPracticeSpawns(): boolean {
+    return clearPracticeSpawns(this.o.map);
   }
 
   /** Clear start point (bind or !clearstart): the current track goes back to the default start. `reply`: as above. */

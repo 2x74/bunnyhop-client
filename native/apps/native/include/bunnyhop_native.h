@@ -203,6 +203,12 @@ void bh_default_settings(BhSettings *out);
  * Returns 1 on success, 0 on failure; failure must not leave a partially usable map.
  */
 int bh_load_map(BhContext *ctx, const char *path, const char *content_root);
+/* Isolated preparation on a worker; all these calls and borrowed results remain owner-thread only.
+ * begin replaces/cancels an earlier job. poll: 0 pending, 1 installed, -1 error (bh_last_error).
+ * cancel/destroy discard late results without waiting for the worker. */
+int bh_load_map_begin(BhContext *ctx, const char *path, const char *content_root);
+int bh_load_map_poll(BhContext *ctx);
+int bh_load_map_cancel(BhContext *ctx);
 int bh_set_settings(BhContext *ctx, const BhSettings *settings);
 int bh_reset(BhContext *ctx);
 int bh_set_position(BhContext *ctx, float x, float y, float z, float yaw);
