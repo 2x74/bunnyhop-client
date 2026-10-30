@@ -164,7 +164,7 @@ void produce_reports(native::RawMousePipe &pipe) {
 void threaded_handoff() {
     auto pipe = std::make_unique<native::RawMousePipe>();
     pipe->capture(true);
-    std::jthread producer(produce_reports, std::ref(*pipe));
+    std::thread producer(produce_reports, std::ref(*pipe));
     for (size_t index = 0; index < stress_reports; ++index) {
         pipe->requested.store(true, std::memory_order_release);
         native::RawMouseReport report;

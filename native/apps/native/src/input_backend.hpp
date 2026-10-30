@@ -39,7 +39,7 @@ private:
     std::unique_ptr<RawMousePipe> owned_pipe_;
     RawMousePipe *pipe_;
     std::unique_ptr<RawMouseBatch> batch_;
-    std::jthread worker_;
+    std::thread worker_;
     InputBackendChoice choice_ = InputBackendChoice::automatic;
     bool native_active_ = false;
     bool native_event_ = false;

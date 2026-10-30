@@ -8,7 +8,7 @@ InputBackend::InputBackend(std::string_view video_driver)
     , pipe_(owned_pipe_.get())
     , batch_(std::make_unique<RawMouseBatch>()) {
 #if defined(__APPLE__) || defined(__linux__)
-    worker_ = std::jthread(run_raw_mouse, std::ref(*pipe_));
+    worker_ = std::thread(run_raw_mouse, std::ref(*pipe_));
 #endif
 }
 
