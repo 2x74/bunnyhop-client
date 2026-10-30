@@ -98,7 +98,7 @@ inline HudSnap snap_box(HudRect box, float screen_width, float screen_height, fl
 
 // Native presets, tuned for the native HUD's element sizes, as a settings patch. Classic centred is the built-in
 // layout (v0.5.1's places): the website's default entries, which hud_layout.hpp reads as "at the native place".
-inline Json hud_preset(std::string_view id) {
+inline Json hud_preset(std::string_view id, const Json &settings = default_settings()) {
     auto layout = default_hud_layout_web();
     Json native = Json::object();
     const auto set = [&](const char *element, unsigned anchor, double x, double y, double scale = 1) {
@@ -141,6 +141,7 @@ inline Json hud_preset(std::string_view id) {
         for (const char *shown : {"keys", "graph", "fps", "sync"})
             layout[shown]["on"] = true;
     }
+    layout["strafeTrainer"]["on"] = strafe_trainer_enabled(settings);
     return {{"hudLayoutWeb", std::move(layout)}, {"hudLayout", std::move(native)}};
 }
 
@@ -149,7 +150,7 @@ inline constexpr std::array<std::string_view, 3> hud_preset_labels = {"Classic c
 
 // Whether the layout is exactly preset `id` (the editor marks it).
 inline bool hud_layout_is_preset(const Json &settings, std::string_view id) {
-    const auto preset = hud_preset(id);
+    const auto preset = hud_preset(id, settings);
     return settings.at("hudLayoutWeb") == preset.at("hudLayoutWeb")
            && settings.at("hudLayout") == preset.at("hudLayout");
 }

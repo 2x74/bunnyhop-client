@@ -2420,7 +2420,7 @@ int run(const native::Options &opt) {
                         if (std::find(native::hud_preset_ids.begin(), native::hud_preset_ids.end(), id)
                             == native::hud_preset_ids.end())
                             throw std::runtime_error("Unknown HUD preset");
-                        preferences = native::patch_settings(preferences, native::hud_preset(id), false);
+                        preferences = native::patch_settings(preferences, native::hud_preset(id, preferences), false);
                         json_writer.write(cache / "settings.json", preferences);
                         apply_preferences();
                     } else if (type == "hudEditor") {

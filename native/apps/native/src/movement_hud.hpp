@@ -25,7 +25,8 @@ struct TrainerAppearance {
 inline Json trainer_preset(std::string_view preset) {
     const bool beginner = preset == "beginner";
     const bool strict = preset == "strict";
-    return {{"hudStrafeTrainerStyle",
+    return {{"strafeTrainer", true},
+            {"hudStrafeTrainerStyle",
              beginner ? "detailed"
              : strict ? "minimal"
                       : "classic"},
@@ -148,7 +149,7 @@ struct HudPreferences {
         result.tags_through_walls = settings.at("tagsThroughWalls");
         result.perf_hud = settings.at("audioPerfHud");
         result.trainer_sound = settings.at("hudStrafeTrainerSound");
-        result.trainer_enabled = settings.at("strafeTrainer");
+        result.trainer_enabled = strafe_trainer_enabled(settings);
         result.null_binds = settings.at("nullBinds");
         result.triggers_visible = settings.at("triggersVisible");
         result.clips_visible = settings.at("clipsVisible");

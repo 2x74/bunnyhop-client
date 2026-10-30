@@ -144,7 +144,7 @@ public:
         renderer_->set_viewmodel_visible(true);
         hud_ = std::make_unique<native::NativeHud>(gl_, BUNNYHOP_NATIVE_ASSET_ROOT);
         auto preferences = native::default_settings();
-        preferences["strafeTrainer"] = true;
+        preferences = native::patch_settings(preferences, {{"strafeTrainer", true}});
         hud_->preferences(preferences);
         timeline_.rebuild_binds(preferences.at("binds"));
         prepare_panels();

@@ -1,4 +1,5 @@
 #include "preferences.hpp"
+#include "settings.hpp"
 #include <nlohmann/json.hpp>
 
 namespace native {
@@ -23,7 +24,7 @@ Preferences Preferences::from_settings(const nlohmann::json &settings) {
     preferences.viewmodel = settings.at("viewmodel").get<bool>();
     preferences.source_look = settings.at("sourceLook").get<bool>();
     preferences.jump_stats = settings.at("jumpStats").get<bool>();
-    preferences.strafe_trainer = settings.at("strafeTrainer").get<bool>();
+    preferences.strafe_trainer = strafe_trainer_enabled(settings);
     preferences.strafe_trainer_hints = settings.at("strafeTrainerHints").get<bool>();
     preferences.practice_keep_velocity = settings.at("practiceKeepVelocity").get<bool>();
     preferences.hold_restart = settings.at("holdRestart").get<bool>();

@@ -382,7 +382,7 @@ void HudLayoutEditor::run_action(const std::string &action, const NativeHud &hud
         return;
     }
     if (action.starts_with("preset:")) {
-        apply(hud_preset(std::string_view(action).substr(7)));
+        apply(hud_preset(std::string_view(action).substr(7), settings_));
         return;
     }
     if (action == "scale:up" || action == "scale:down") {

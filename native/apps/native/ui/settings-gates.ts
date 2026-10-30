@@ -67,7 +67,9 @@ const ROWS: Record<string, Gate> = {
   "hud/Keys overlay/Pressed": needs("hudKeysPressed"),
   "hud/Keys overlay/Idle": needs("hudKeysIdle"),
   "hud/Keys overlay/Rows": needs("hudKeysRowsWasd", "hudKeysRowsActions", "hudKeysRowsMouse"),
+  "hud/Strafe trainer/Show strafe trainer": needs("strafeTrainer", "hudLayoutWeb"),
   "hud/Strafe trainer/Preset": needs(
+    "strafeTrainer",
     "hudStrafeTrainerStyle",
     "hudStrafeTrainerFollow",
     "strafeTrainerSmoothing",

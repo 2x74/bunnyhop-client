@@ -40,6 +40,15 @@ void preference_changes() {
         rejected = true;
     }
     assert(rejected);
+    auto layout = original.at("hudLayoutWeb");
+    layout["strafeTrainer"]["on"] = true;
+    const auto trainer = native::patch_settings(original, {{"hudLayoutWeb", layout}});
+    assert(trainer.at("strafeTrainer") == true);
+    assert(native::Preferences::from_settings(trainer).strafe_trainer);
+    const auto hidden = native::patch_settings(trainer, {{"strafeTrainer", false}});
+    assert(!native::Preferences::from_settings(hidden).strafe_trainer);
+    const auto old_layout = native::patch_settings(trainer, {{"hudLayoutWeb", native::Json::object()}});
+    assert(native::Preferences::from_settings(old_layout).strafe_trainer);
     assert(original == native::default_settings());
     assert(native::patch_settings(original, settings) == settings);
 }
