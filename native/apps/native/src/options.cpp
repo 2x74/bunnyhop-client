@@ -15,7 +15,11 @@ Options options(int argc, char **argv) {
             if (++i >= argc) throw std::runtime_error("Missing value for " + arg);
             return argv[i];
         };
-        if (arg == "--presentation-smoke") {
+        if (arg == "--room-smoke") {
+            out.room_smoke = value();
+            out.hidden = true;
+            out.no_menu = true;
+        } else if (arg == "--presentation-smoke") {
             out.presentation_smoke = value();
             out.hidden = true;
             out.no_menu = true;
@@ -117,6 +121,7 @@ void print_help(std::ostream &output) {
               "output.ppm] [--camera x,y,z,pitch,yaw] [--hidden]\n"
               "  [--runtime-smoke OUTPUT_DIR --replay PATH] (offline lifecycle checks with --map; private "
               "data, no network)\n"
+              "  [--room-smoke DIR] (with --map: replays DIR/room.jsonl, saves the frames in DIR/shots.json)\n"
               "  [--tutorial jump|strafe|speed|final] [--tutorial-demo] (tutorial map only)\n"
               "  [--menu-smoke OUTPUT_PREFIX] (with --online-map; live API reads only, no scores)\n"
               "  [--menu-home-smoke OUTPUT_PREFIX] (home menu over the real map tour backdrop; no gameplay "

@@ -11,15 +11,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const MAX_COMMANDS: u64 = 180_000;
 pub struct Recorder {
-    writer: Option<BufWriter<std::fs::File>>,
+    pub(crate) writer: Option<BufWriter<std::fs::File>>,
     pub checkpoint_interval: u32,
     pub data: ReplayData,
 }
+#[derive(Clone)]
 pub struct Checkpoint {
     pub tick: u32,
     pub position: [f32; 3],
     pub velocity: [f32; 3],
 }
+#[derive(Clone)]
 pub struct ReplayData {
     pub options: crate::BhRecordOptionsV29,
     pub header: Value,
@@ -32,8 +34,18 @@ pub struct ReplayData {
     pub cosmetic: Vec<super::replay::CosmeticEvent>,
     pub inspect: Vec<super::replay::CosmeticEvent>,
     pub packed_loadout: Option<String>,
+    pub segments: Vec<super::segments::Load>,
 }
 impl ReplayData {
+    pub(crate) fn metadata(&self) -> Self {
+        Self {
+            options: self.options, header: self.header.clone(), commands: Vec::new(),
+            looks: Vec::new(), checkpoints: Vec::new(), start_tick: self.start_tick,
+            end_tick: self.end_tick, track: self.track, cosmetic: Vec::new(),
+            inspect: Vec::new(), packed_loadout: self.packed_loadout.clone(),
+            segments: self.segments.clone(),
+        }
+    }
     fn checkpoint(&mut self, s: super::BhState) {
         if self.checkpoints.last().is_none_or(|cp| cp.tick != s.tick) {
             self.checkpoints.push(Checkpoint {
@@ -59,6 +71,11 @@ impl ReplayData {
         let options = self.options.checked()?;
         let timed_input_flag = if options.timed_input != 0 {
             crate::v29::FLAG_TIMED_INPUT
+        } else {
+            0
+        };
+        let null_binds_flag = if options.null_binds != 0 {
+            crate::v29::FLAG_NULL_BINDS
         } else {
             0
         };
@@ -104,6 +121,7 @@ impl ReplayData {
             u16::from(flag("autohop"))
                 | (u16::from(flag("stamina")) << 1)
                 | (u16::from(version >= 9 && counted.is_some()) << 2)
+                | null_binds_flag
                 | timed_input_flag,
         );
         w.str8(h["map"].as_str().ok_or("missing map")?)?;
@@ -287,6 +305,26 @@ impl ReplayData {
         w.u32(crate::v29::TURN_SPEED_MAGIC);
         w.f32(options.yaw_speed);
         w.f32(options.angle_speed_key);
+        if !self.segments.is_empty() {
+            if self.segments.len() > super::segments::MAX_LOADS {
+                return Err("too many segment loads".into());
+            }
+            w.u32(super::segments::MAGIC);
+            w.varint(self.segments.len() as u32);
+            let mut previous = 0;
+            for load in &self.segments {
+                if load.tick < previous {
+                    return Err("segment loads out of tick order".into());
+                }
+                super::finite(&load.position)?;
+                super::finite(&load.velocity)?;
+                w.varint(load.tick - previous);
+                previous = load.tick;
+                for value in load.position.into_iter().chain(load.velocity) {
+                    w.f32(value);
+                }
+            }
+        }
         Ok(w.0)
     }
 }
@@ -430,6 +468,12 @@ impl Map {
                     .map_err(|e| format!("{}: {e}", path.display()))
             })
             .transpose()?;
+        if style == "segmented" {
+            if settings.physics < 19 || timer.options.rules < 2 {
+                return Err("Segmented needs physics v19 and timer rules 2".into());
+            }
+            self.segments.begin();
+        }
         let mut recorder = Recorder {
             writer,
             checkpoint_interval,
@@ -445,6 +489,7 @@ impl Map {
                 cosmetic: Vec::new(),
                 inspect: Vec::new(),
                 packed_loadout: None,
+                segments: Vec::new(),
             },
         };
         recorder.write(&header)?;
@@ -477,6 +522,11 @@ impl Map {
         if checkpoint {
             recorder.data.checkpoint(super::BhState::from(&self.game));
         }
+        if self.filter.id == "segmented" && self.record_valid {
+            self.segments.push(cmd, look, if checkpoint {
+                recorder.data.checkpoints.last().cloned()
+            } else { None });
+        }
         if recorder.writer.is_some() {
             let mut row = json!({"type":"tick","command":{"forward":cmd.forward as i16,"side":cmd.side as i16,"yaw":cmd.yaw,"pitch":cmd.pitch,
             "buttons":cmd.buttons,"yawBits":cmd.yaw.to_bits(),"pitchBits":cmd.pitch.to_bits()},
@@ -494,7 +544,7 @@ impl Map {
                 return Err(e);
             }
         }
-        if self.recorded_commands >= MAX_COMMANDS {
+        if self.filter.id != "segmented" && self.recorded_commands >= MAX_COMMANDS {
             self.finish_record(false, "command_limit")?;
         }
         Ok(())
@@ -527,7 +577,13 @@ impl Map {
             recorder.data.end_tick = timer.state.end_tick;
             recorder.data.track = timer.state.track;
             recorder.data.checkpoint(super::BhState::from(&self.game));
-            self.completed_record = Some(recorder.data);
+            if self.filter.id == "segmented" {
+                self.completed_record = Some(recorder.data.clone());
+                recorder.writer = None;
+                self.recorder = Some(recorder);
+            } else {
+                self.completed_record = Some(recorder.data);
+            }
         }
         result
     }
@@ -559,6 +615,9 @@ unsafe fn record_event(ctx: *mut super::BhContext, kind: u32, inspect: bool) -> 
                 &mut recorder.data.cosmetic
             };
             if events.len() < 20_000 {
+                if m.filter.id == "segmented" && m.record_valid {
+                    m.segments.event(kind as u8, inspect);
+                }
                 events.push(super::replay::CosmeticEvent {
                     tick: recorder.data.commands.len() as u32,
                     kind: kind as u8,

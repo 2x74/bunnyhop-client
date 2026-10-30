@@ -6,6 +6,7 @@ SDL3: Copyright (C) 1997-2026 Sam Lantinga and contributors, zlib license (https
 Microsoft WebView2 SDK/runtime: Microsoft license terms (https://www.nuget.org/packages/Microsoft.Web.WebView2).
 Other bundled dependency notices must accompany release artifacts; see release-check.ts.
 Custom audio decoding uses dr_libs (David Reid) and stb_vorbis (Sean Barrett and contributors); their license texts are included in licenses/dr_libs.txt and licenses/stb.txt.
+Windows low latency mode uses declarations from NVIDIA NVAPI (MIT, licenses/nvapi.txt) and the AMD Anti-Lag 2 SDK (MIT, licenses/amd.txt).
 Audio credits and source metadata are retained in resources/native-assets/audio.json.
 Map BSPs and Source model meshes/textures are not bundled; the native client fetches authorized hosted content.
 The generated bunny/viewmodel rigs retain structural bind-pose data (bone names, hierarchy, positions and quaternions) extracted from Valve CS:S models/player/ct_urban.mdl and models/weapons/v_knife_t.mdl. Source data provenance is also recorded in the source skeleton.json files; Valve owns the referenced models and trademarks. Original procedural bunny geometry/animation is separate from that skeleton data.

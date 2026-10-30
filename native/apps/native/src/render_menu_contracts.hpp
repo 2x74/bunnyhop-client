@@ -23,11 +23,14 @@ void reply_surface_chat(
         const BhState &state,
         const Input &input,
         Chat &chat,
-        double seconds
+        double seconds,
+        bool can_paint
 ) {
     const char *reply = "Load a map to use surface tools.";
     if (action == "paintOptions")
         reply = "Paint colour and size are in Settings > Paint.";
+    else if (action == "paint" && !can_paint)
+        reply = "Paint is unavailable while spectating or watching a replay.";
     else if (renderer) {
         const auto tool = action == "paint" ? "paintOnce" : action == "measure" ? "measurePoint" : action;
         reply = renderer->surface_tool(tool, state, input);
@@ -149,8 +152,9 @@ public:
     }
 };
 
-inline void render_playback_state(nlohmann::json &state, const ReplayCompare &compare, double interval) {
-    state["playback"]["features"] = {"compare"};
-    state["playback"]["compare"] = compare.menu_state(interval);
+inline void
+render_playback_state(nlohmann::json &state, const ReplayCompare &compare, double interval, const BhState &shown) {
+    state["playback"]["features"] = {"compare", "loop", "weapon", "hud", "orbit", "strafes", "exportQueue"};
+    state["playback"]["compare"] = compare.menu_state(interval, shown.tick, shown.position);
 }
 }  // namespace native

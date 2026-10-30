@@ -49,9 +49,17 @@ void RunHeartbeat::sent(std::chrono::steady_clock::time_point now) {
 }
 
 void RunRecorder::clear(bool recording_ended) {
+    diagnostics.reset();
     ended = recording_ended;
     path.clear();
     pending_capture.reset();
+}
+
+std::string RunRecorder::next_path() const {
+    const auto stamp =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch())
+                    .count();
+    return data_location::utf8(replays / (replay_map + "-" + std::to_string(stamp) + ".bhr"));
 }
 
 void RunRecorder::begin(
@@ -64,14 +72,24 @@ void RunRecorder::begin(
         TurnSettings turns,
         const std::string &loadout
 ) {
-    const auto stamp =
-            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch())
-                    .count();
-    path = data_location::utf8(cache / "replays" / (map + "-" + std::to_string(stamp) + ".bhr"));
+    replays = cache / "replays";
+    replay_map = map;
+    path = next_path();
     require(bh_record_identity(core, build.c_str()), core, "Setting native release identity");
     require(bh_record_begin(core, "", style.c_str(), player.c_str(), 100), core, "Starting native recording");
     require(input.begin(core, turns), core, "Setting v29 recording input");
     bh_record_loadout(core, loadout.c_str());
+}
+
+void RunRecorder::resume_segment(BhContext *core) {
+    require(input.restore(core), core, "Restoring recording input");
+    // A load can follow a finish whose replay is already written; the rewound run gets a file of its own.
+    path = next_path();
+    BhRunState run{};
+    require(bh_run_state(core, &run), core, "Reading restored timer");
+    ended = run.status == 2;
+    pending_capture.reset();
+    diagnostics.reset();
 }
 
 void RunRecorder::write(BhContext *core) {
@@ -79,11 +97,19 @@ void RunRecorder::write(BhContext *core) {
     require(bh_record_write_bhr(core, path.c_str()), core, "Writing native replay");
 }
 
-nlohmann::json RunRecorder::finish_event(uint32_t track, double seconds, const std::string &bytes) const {
+nlohmann::json RunRecorder::finish_event(
+        uint32_t track,
+        double seconds,
+        const std::string &bytes,
+        const nlohmann::json &play,
+        const nlohmann::json &mouse
+) const {
     return {{"type", "finish"},
             {"track", track},
             {"timeMs", score_ms(seconds)},
             {"timingPolicy", timing_policy},
+            {"diagnostics", diagnostics.serialize(play)},
+            {"mouse", mouse},
             {"replayBase64", base64(bytes)}};
 }
 

@@ -78,6 +78,14 @@
 //                (turn-binds.ts turnDelta); the anticheat checks every turn rebase against them. Only the analysis
 //                reads it: the commands re-simulate as always. No version bump (older decoders stop before it); unlike
 //                the cosmetic trailers a malformed one is an error, never silently the legacy rate.
+//   segments     optional trailer after the turn speed (absent when the run loaded no checkpoint; only Segmented runs,
+//                styles.ts isSegmented, may carry one): u32 "BHSG", varint count, then per checkpoint load
+//                { varint tick delta, f32 x3 position, f32 x3 velocity }: the stitched run's command count when the load
+//                happened (the save's tick: the recording was rewound to the checkpoint's commands) and the player state
+//                the load restored. The commands are the stitched path, so they re-simulate continuously from the reset
+//                like any replay; the verifier also requires every recorded load state to be exactly the re-simulated state
+//                at its tick, i.e. a state the run really reached and saved (sim.ts, verifier.ts, research/SEGMENTED.md).
+//                No version bump (older decoders stop before it); a malformed one is an error.
 
 // v8 (counted yaw, research/ANTICHEAT.md §8.17): the client keeps the view yaw as an exact base plus whole mouse counts,
 // yaw = countedYaw(base, count, k) = norm360(base - count * k) with k = sensitivity * m_yaw (CS:S units), so the yaw of
@@ -159,8 +167,18 @@ export interface CountedYaw {
 export const replayVersionFor = (h: Pick<ReplayHeader, "spawn" | "settings" | "timerRules" | "style">) =>
   h.settings.stamina || h.style === "lowgrav" ? REPLAY_VERSION_STAMINA : replayTimerRules(h) !== TIMER_RULES_V1 ? REPLAY_VERSION : replayPhysics(h) !== PHYSICS_V1 ? REPLAY_VERSION_PHYSICS : hasRestartNames(h) ? 5 : 4;
 /** Low Gravity started with v9 format, physics v10 and timer rules 2; older combinations never existed. */
-export const styleReplayAllowed = (h: ReplayHeader): boolean =>
-  replayStyle(h) !== "lowgrav" || ((h.version ?? 0) >= 9 && replayPhysics(h) >= 10 && replayTimerRules(h) >= 2);
+export const styleReplayAllowed = (h: ReplayHeader): boolean => styleReplayProblem(h) === null;
+/** First physics version of Segmented runs (v0.0.30): no older Segmented replay can exist. */
+export const SEGMENTED_PHYSICS_FROM = 19;
+/** Why the header's style can't come with its format / physics / timer rules (styleReplayAllowed), or null. */
+export function styleReplayProblem(h: ReplayHeader): string | null {
+  const style = replayStyle(h);
+  if (style === "lowgrav" && !((h.version ?? 0) >= 9 && replayPhysics(h) >= 10 && replayTimerRules(h) >= 2)) return "style lowgrav requires replay v9, physics v10 and timer rules 2 or later";
+  if (style === "segmented" && !((h.version ?? 0) >= REPLAY_VERSION && replayPhysics(h) >= SEGMENTED_PHYSICS_FROM && replayTimerRules(h) >= 2)) {
+    return `style segmented requires replay v${REPLAY_VERSION}, physics v${SEGMENTED_PHYSICS_FROM} and timer rules 2 or later`;
+  }
+  return null;
+}
 const ZONE_KIND_CODES: readonly ZoneKind[] = ["start", "end", "stage", "checkpoint"];
 export const FLAG_AUTOHOP = 1 << 0;
 const FLAG_STAMINA = 1 << 1;
@@ -177,11 +195,21 @@ export const FLAG_NULL_BINDS = 1 << 3;
  * Information for the anticheat only (the frame-rate measures don't apply): the commands re-simulate as always.
  */
 export const FLAG_TIMED_INPUT = 1 << 4;
+/**
+ * Release W on jump was on for some of the recording (w-release.ts): a jump taken holding forward let go of forward
+ * until the next ground tick or a new W press. Any version; only written when set, so other replays are byte-identical.
+ * Older decoders ignore it. Information for reviewers and the anticheat only: the commands are the released ones and
+ * re-simulate as always.
+ */
+export const FLAG_W_RELEASE = 1 << 5;
 export const DEFAULT_CHECKPOINT_INTERVAL = 100;
 export const COSMETIC_MAGIC = 0x58434842; // "BHCX" little-endian
 export const LOADOUT_MAGIC = 0x4f4c4842; // "BHLO" little-endian
 export const INSPECT_MAGIC = 0x49434842; // "BHCI" little-endian
 export const TURN_SPEED_MAGIC = 0x53544842; // "BHTS" little-endian
+export const SEGMENTS_MAGIC = 0x47534842; // "BHSG" little-endian
+/** Most checkpoint loads a replay may record (a load every second for 4 h is 14400). */
+export const MAX_SEGMENT_LOADS = 100_000;
 /** Inspect trailer kinds (the first two are combo.ts SIG_START / SIG_NEXT). */
 export const INSPECT_START = 1;
 export const INSPECT_NEXT = 2;
@@ -222,6 +250,8 @@ export interface ReplayHeader {
   nullBinds?: boolean;
   /** Timestamped input built some recorded command (FLAG_TIMED_INPUT). Absent when off. */
   timedInput?: boolean;
+  /** Release W on jump was on during the recording (FLAG_W_RELEASE). Absent when off. */
+  wRelease?: boolean;
   /** The turn binds' rates for the whole recording (the "BHTS" trailer). Absent: 210°/s, no fast turn. */
   turnSpeed?: TurnSpeed;
 }
@@ -231,6 +261,12 @@ export interface Checkpoint {
   position: [number, number, number];
   velocity: [number, number, number];
 }
+
+/**
+ * A Segmented checkpoint load (the "BHSG" trailer): after `tick` commands of the stitched run the player loaded a
+ * checkpoint saved at that tick, which restored this position and velocity (the f32 state after `tick` commands).
+ */
+export type SegmentLoad = Checkpoint;
 
 export interface Replay {
   header: ReplayHeader;
@@ -250,6 +286,8 @@ export interface Replay {
   inspect?: CosmeticEvent[];
   /** v8: the mouse counts the yaw column was made from (absent: v1-v7, or a recording without whole counts). */
   counted?: CountedYaw;
+  /** Segmented checkpoint loads, tick order (the "BHSG" trailer; absent: none). Verified (verifier.ts). */
+  segments?: SegmentLoad[];
 }
 
 /** Style implied by the physics settings alone (replays before v4 had no style field). */
@@ -282,8 +320,12 @@ export class ReplayRecorder {
   nullBinds = false;
   /** Timestamped input built some recorded command (header.timedInput). */
   timedInput = false;
+  /** Release W on jump was on for some recorded command (header.wRelease). */
+  wRelease = false;
   /** The turn binds' rates for this whole recording (header.turnSpeed); set at its start (session.ts). */
   turnSpeed: TurnSpeed | null = null;
+  /** Segmented checkpoint loads on the recorded path (Replay.segments; practice-mode/segments.ts sets them). */
+  segments: SegmentLoad[] = [];
 
   constructor(public checkpointInterval = DEFAULT_CHECKPOINT_INTERVAL) {}
 
@@ -296,10 +338,12 @@ export class ReplayRecorder {
     this.looks = [];
     this.nullBinds = false;
     this.timedInput = false;
+    this.wRelease = false;
     this.turnSpeed = null;
     this.checkpoints = [];
     this.cosmetic = [];
     this.inspect = [];
+    this.segments = [];
   }
 
   /** Records a cosmetic event (e.g. a carrot swing) at the current tick. Never affects the commands. */
@@ -365,7 +409,7 @@ export class ReplayRecorder {
   build(header: Omit<ReplayHeader, "totalTicks" | "checkpointInterval" | "version">): Replay {
     const n = this.n;
     return {
-      header: { ...header, version: replayVersionFor(header), totalTicks: n, checkpointInterval: this.checkpointInterval, ...(this.nullBinds ? { nullBinds: true } : {}), ...(this.timedInput ? { timedInput: true } : {}), ...(this.turnSpeed ? { turnSpeed: { ...this.turnSpeed } } : {}) },
+      header: { ...header, version: replayVersionFor(header), totalTicks: n, checkpointInterval: this.checkpointInterval, ...(this.nullBinds ? { nullBinds: true } : {}), ...(this.timedInput ? { timedInput: true } : {}), ...(this.wRelease ? { wRelease: true } : {}), ...(this.turnSpeed ? { turnSpeed: { ...this.turnSpeed } } : {}) },
       forward: this.forward.slice(0, n),
       side: this.side.slice(0, n),
       buttons: this.buttons.slice(0, n),
@@ -375,6 +419,7 @@ export class ReplayRecorder {
       cosmetic: this.cosmetic.map((e) => ({ ...e })),
       inspect: this.inspect.map((e) => ({ ...e })),
       ...withCounted(this.looks, this.yaw, n),
+      ...(this.segments.length ? { segments: this.segments.map((c) => ({ ...c, position: [...c.position], velocity: [...c.velocity] })) } : {}),
     };
   }
 }
@@ -587,7 +632,7 @@ export function encodeRaw(r: Replay): Uint8Array {
   const fractional = counted?.count instanceof Float64Array;
   const version = fractional ? REPLAY_VERSION_FRACTIONAL : h.settings.stamina || h.style === "lowgrav" ? REPLAY_VERSION_STAMINA : counted ? REPLAY_VERSION_COUNTED : replayVersionFor(h);
   w.u16(version);
-  w.u16((h.settings.autohop ? FLAG_AUTOHOP : 0) | (h.settings.stamina ? FLAG_STAMINA : 0) | (version >= REPLAY_VERSION_STAMINA && counted ? FLAG_COUNTED : 0) | (h.nullBinds ? FLAG_NULL_BINDS : 0) | (h.timedInput ? FLAG_TIMED_INPUT : 0));
+  w.u16((h.settings.autohop ? FLAG_AUTOHOP : 0) | (h.settings.stamina ? FLAG_STAMINA : 0) | (version >= REPLAY_VERSION_STAMINA && counted ? FLAG_COUNTED : 0) | (h.nullBinds ? FLAG_NULL_BINDS : 0) | (h.timedInput ? FLAG_TIMED_INPUT : 0) | (h.wRelease ? FLAG_W_RELEASE : 0));
   w.str8(h.map);
   w.bytes(hexToBytes(h.mapSha256));
   const s = h.settings;
@@ -703,6 +748,19 @@ export function encodeRaw(r: Replay): Uint8Array {
     w.u32(TURN_SPEED_MAGIC);
     w.f32(h.turnSpeed.yawSpeed);
     w.f32(h.turnSpeed.angleSpeedKey);
+  }
+  const seg = r.segments ?? [];
+  if (seg.length) {
+    if (seg.length > MAX_SEGMENT_LOADS) throw new Error(`replay: more than ${MAX_SEGMENT_LOADS} segment loads`);
+    w.u32(SEGMENTS_MAGIC);
+    w.varint(seg.length);
+    prev = 0;
+    for (const c of seg) {
+      if (!(c.tick >= prev)) throw new Error("replay: segment loads out of tick order");
+      w.varint(c.tick - prev);
+      for (const v of [...c.position, ...c.velocity]) w.f32(v);
+      prev = c.tick;
+    }
   }
   return w.result();
 }
@@ -826,6 +884,7 @@ export function decodeRaw(buf: Uint8Array, opts: { commands?: boolean } = {}): R
   const loadout = readLoadout(r);
   const inspect = readInspects(r);
   const turnSpeed = readTurnSpeed(r);
+  const segments = readSegments(r);
   return {
     header: {
       version,
@@ -847,6 +906,7 @@ export function decodeRaw(buf: Uint8Array, opts: { commands?: boolean } = {}): R
       checkpointInterval,
       ...(flags & FLAG_NULL_BINDS ? { nullBinds: true } : {}),
       ...(flags & FLAG_TIMED_INPUT ? { timedInput: true } : {}),
+      ...(flags & FLAG_W_RELEASE ? { wRelease: true } : {}),
       ...(turnSpeed ? { turnSpeed } : {}),
     },
     forward,
@@ -858,6 +918,7 @@ export function decodeRaw(buf: Uint8Array, opts: { commands?: boolean } = {}): R
     ...(cosmetic.length ? { cosmetic } : {}),
     ...(loadout ? { loadout } : {}),
     ...(inspect.length ? { inspect } : {}),
+    ...(segments ? { segments } : {}),
     ...(counted ? { counted } : {}),
   };
 }
@@ -1008,6 +1069,27 @@ function readTurnSpeed(r: Reader): TurnSpeed | null {
   const angleSpeedKey = r.f32();
   if (!Number.isFinite(yawSpeed) || !Number.isFinite(angleSpeedKey)) throw new Error("replay: bad turn speed");
   return { yawSpeed, angleSpeedKey };
+}
+
+/** The optional segments trailer (see the format notes): null when absent; a malformed one throws. */
+function readSegments(r: Reader): SegmentLoad[] | null {
+  if (r.remaining < 4) return null;
+  const at = r.pos;
+  if (r.u32() !== SEGMENTS_MAGIC) {
+    r.pos = at;
+    return null;
+  }
+  const n = r.varint();
+  if (n < 1 || n > MAX_SEGMENT_LOADS || n * 25 > r.remaining) throw new Error("replay: bad segment loads");
+  const out: SegmentLoad[] = [];
+  let tick = 0;
+  for (let i = 0; i < n; i++) {
+    tick += r.varint();
+    const v = Array.from({ length: 6 }, () => r.f32());
+    if (!v.every(Number.isFinite)) throw new Error("replay: bad segment load state");
+    out.push({ tick, position: [v[0], v[1], v[2]], velocity: [v[3], v[4], v[5]] });
+  }
+  return out;
 }
 
 /** The optional loadout trailer (see the format notes); null when absent or malformed. */

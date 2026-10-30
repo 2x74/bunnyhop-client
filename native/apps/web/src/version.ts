@@ -45,7 +45,7 @@
    two words, and VERSION stays below 0.1.0 while STAGE is alpha.
    ============================================================ */
 
-export const VERSION = "0.0.29";
+export const VERSION = "0.0.30";
 
 /** Release stage, printed after the number ("v0.0.4 alpha"). */
 export const STAGE = "alpha";
@@ -67,15 +67,49 @@ export interface ChangelogEntry {
 
 /** Notes for the next release, unpublished until promoted into CHANGELOG. */
 export const UPCOMING: ChangelogEntry = {
-  version: "0.0.30",
-  date: "2026-10-28",
+  version: "0.0.31",
+  date: "2026-10-29",
   kind: "minor",
   title: "Next update",
-  notes: [],
+  notes: [
+    "Crouch-cancelling or landing from a teleport onto a floor no longer costs a tick of friction: you jump on the same tick, like bhoptimer servers.",
+    "!showtriggers now shows the scripted collectibles and gates on bhop_cooksassistant. Thanks to GothQueen for the report.",
+    "New Release W on jump option under Keys: jump while holding W and forward lets go until you land or press W again. It is off by default and doesn't apply in Legit Scroll, W-Only, Sideways or Half-Sideways.",
+    "Keys no longer stop working when you change a setting or alt-tab while holding them with Timestamped input on. Before, a held W, A, S or D could go dead until you pressed it again.",
+  ],
 };
 
 /** Newest first. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.0.30",
+    date: "2026-10-29",
+    kind: "major",
+    title: "1,002 maps, Segmented, new music and the knife pool",
+    notes: [
+      "1,002 maps: 325 new ones, the biggest batch yet. Every one is tiered and ranked from the first run.",
+      "The most-played maps we were still missing from Momentum Mod and the big bhop servers: bhop_stref_shanghai, bhop_orgrimmar, bhop_monority, bhop_supernova, bhop_eternity, bhop_perspective, bhop_wooden_temple, bhop_tranquil_garden2, bhop_2006isback_fix, bhop_greenglow_new, bhop_icosa and bhop_vulcan.",
+      "Community classics and big builds: bhop_communityjump, bhop_umbra, bhop_culture and bhop_culture2, bhop_imaginarium, bhop_epiphany2, bhop_sj, bhop_404, bhop_fruits2, bhop_rainbowroad_fix, bhop_velocity, bhop_tron_evolution, bhop_strafing_in_egypt, bhop_floccidrift and bhop_inmomentum_gfl_final. The largest ones take longer to load the first time.",
+      "CS:GO-era and newer releases: the bhop_awtop, bhop_jaunt and bhop_eto_legko series, bhop_dfwc2017, bhop_nostalgia, bhop_bliss, bhop_frotinity, bhop_andromeda, bhop_kastella, and kz_bhop_lj, kz_bhop_deserted and kz_bhop_delusional.",
+      "51 hard maps from T5 up, so T7+ now has 24 maps. The new top end includes bhop_3muddz, bhop_4muddz, bhop_torture, bhop_finaltorture_v2b, bhop_kirous, bhop_theory_hard, bhop_challenging, bhop_4matan, bhop_crutle_hard, bhop_hellopro and kz_bhop_knothard. The endurance maps bhop_ragequit, bhop_union and bhop_quit_full_css are here too, if you have an evening to spare.",
+      "Maps with their own scripted tricks now play like they do on the servers they came from: bhop_ceaseless, bhop_retrowave, bhop_akb_tutorial, bhop_k2, bhop_k3, bhop_jx2, bhop_crutle3_css, bhop_crutle4_css, kz_bhop_liminal, bhop_api_kowka, bhop_collective and bhop_sina_fix. bhop_treason is the biggest map in the game: use the desktop app or a PC with plenty of memory.",
+      "Speed caps lifted where the map needs it: bhop_gigaheish_fix, bhop_accelerate, bhop_quack and bhop_rainbowroad_fix go up to 10,000 u/s and kz_bhop_global to 20,000. On bhop_cutekittenz2, bhop_ponpon_fix and bhop_vandora the landing spots the map creates now appear. Existing times on these maps stay on the board.",
+      "Tier review against the tiers on the big bhop servers, Momentum Mod and our own finish times: 30 maps change tier. Up: bhop_vandora (T5), bhop_dreamtour2 (T4), bhop_addict_v2, bhop_forgotten and bhop_xyz_v2 (T3), bhop_huar2 and bhop_something (T2). 23 maps move down, among them bhop_tesquo_v2, bhop_enigma2, bhop_quickie, bhop_goldsrc and bhop_moonlight_beta. Points totals update to match.",
+      "Map fixes from your reports: bhop_profane's crouch jumps can be made (CS:GO maps get CS:GO's jump height there), teleports on bhop_playboy_csgo no longer point you at the floor, and the platforms on bhop_areaportal_v1 carry you instead of turning you around. !practice off now also clears a map's practice spawns, so a map like bhop_blacknwhite_csgo can't get stuck in practice.",
+      "Segmented, a new style like the shavit servers': press C to save a checkpoint and X to go back to it during a run. Your timer and replay go back with you, so the time is your best path stitched together. It has its own leaderboards and style ranks, and doesn't count toward overall points. Pick it from the style menu or type !seg.",
+      "11 new music tracks: Maxvel (eurobeat), Booster (trance), Perf (French house), Noclip (darksynth), Tickrate (chiptune), Edgebug (jungle), Jumpbug (breakcore), Godlike (J-rock), Prespeed (skate punk) and Surf (surf rock), plus Spectate, a slow one for the menus.",
+      "Knife pool: pick up to 8 of your knives in Loadout → Knife and they take turns, each map or each restart, in order or at random. Everyone sees the knife you're actually holding, in rooms and in replays.",
+      "New knife: the Whirligig, a curved talon with a spinner on the guard that you can flick, with three inspects of its own. Free for everyone.",
+      "The Karrotbit is rebuilt with a sharper blade, a wrapped handle and a new draw that spins it round your finger.",
+      "The ponytail can now be much longer, up to the small of your back.",
+      "Glass is see-through again in the Source, Enhanced and Cinematic looks. On maps like bhop_challenjour_v2 it no longer glows, fades as you get close or turns solid white.",
+      "Smoother frames: far less memory churn every frame, so fewer small hitches, cheaper water, and Loadout and Support open without a freeze. Busy rooms cost less when players are behind you.",
+      "The chat key can be rebound in Settings → Keys → Run (Y and U by default), and help shows your own key.",
+      "The strafe trainer has a plain on/off switch in Settings → HUD → Strafe trainer, and picking a HUD preset no longer turns it off.",
+      "Not sure whether to play in the browser, the desktop app or the native client? The Desktop app link at the bottom of the home screen now opens a side-by-side comparison with the downloads.",
+      "New Valve gauntlet: ten Aztec, Dust, GoldSrc and Portal maps from bh_aztec to bhop_qportal.",
+    ],
+  },
   {
     version: "0.0.29",
     date: "2026-10-28",
@@ -100,6 +134,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       "New supporter cosmetics, from tyzi's asks: Space Buns and Ponytail wigs, with your own hair colour, the hood down and a ponytail that swings, plus the Half Oni Mask. New metal knife finishes: Emerald Steel, Ruby Steel, Sapphire Steel, Pearl, Chromatic and Chrome, which reflect the map in the Enhanced and Cinematic looks.",
       "Gloves and sleeves got a detail pass: real hoodie sleeves with ribbed cuffs, gloves with straps, seams and pads that tuck into the sleeve, and new Plush and Bun-E forearms. The bunny's hoodie, shoes and visor have new materials and stitching.",
       "Every gun has a reworked model and new animations: recoil that snaps and settles, slides and bolts that move, reloads that drop the old mag, shells that bounce at your feet, and wrists that no longer bend at odd angles. Each gun has its own new firing sound. Other players' guns now sit right in their hands, with recoil and reloads. None of it moves your aim.",
+      "A wider default viewmodel shows more of your gloves and sleeves. The old framing is the CS:S preset in Settings → Viewmodel, and if you changed your viewmodel, yours stays as it was.",
+      "The bunny has a new face and head shape, and the avatar editor has every new hat, finish and glove, with hair colour and length for the wigs. Saved avatars update to the new look by themselves.",
       "Settings → Graphics is simpler: Quality, Sky, Colour & visibility and Display up front, everything else under Advanced. Sky packs no longer squash the layout.",
       "One Sky picker in Settings → Graphics, with seven skies to download, and Add from a link for Poly Haven skies, .hdr files and now any 2:1 PNG, JPEG or WebP panorama. Drop a sky file onto Settings to add it. The new guide at bunnyhop.lol/custom-skies shows how, including turning a Source skybox into one.",
       "In the desktop app, keep skies in a folder (F10 → Client → Open skies folder) and they show up in the Sky picker as soon as you save them there. This needs the next desktop app update.",

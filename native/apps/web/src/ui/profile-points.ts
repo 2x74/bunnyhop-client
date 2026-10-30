@@ -54,7 +54,7 @@ export function topPoints(p: Profile, early?: Promise<{ scope: string; records: 
         if (mine !== seq) return;
         list.replaceChildren(
           ...(res.records.length
-            ? [h("div.pf-run.pf-pts-row.pf-run-head", { "aria-hidden": "true" }, h("span", null, "Map"), h("span.pf-run-place", null, "Place"), h("span.pf-run-pts", null, "Points"), h("span.pf-run-pts", { title: "Each record counts 2.5% less than the one before it" }, "Counted")), ...res.records.map(row)]
+            ? [h("div.pf-run.pf-pts-row.pf-run-head", { "aria-hidden": "true" }, h("span", null, "Map"), h("span.pf-run-place", null, "Place"), h("span.pf-run-pts", null, "Points"), h("span.pf-run-pts", { title: "Your records count best first, each 1.5% less than the one before it in your own list (not your place on the map)" }, "Counted")), ...res.records.map(row)]
             : [h("p.pf-empty", null, "No points yet.")]),
         );
       },

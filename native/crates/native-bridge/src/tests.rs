@@ -6,6 +6,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 mod replay_v10;
 #[path = "v29_tests.rs"]
 mod v29;
+#[path = "v30_tests.rs"]
+mod v30;
+#[path = "segments_tests.rs"]
+mod segmented;
 
 struct Fixture(PathBuf);
 impl Fixture {
@@ -326,6 +330,121 @@ fn zip_files(files: &[(&str, &[u8])]) -> Vec<u8> {
     }
     z.finish().unwrap().into_inner()
 }
+fn ground_bsp(pak: &[u8]) -> Vec<u8> {
+    let mut bytes = bsp(pak);
+    let offset = |index: usize| {
+        let at = 8 + 16 * index;
+        i32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize
+    };
+    let brush = offset(18);
+    let side = offset(19);
+    integer(&mut bytes, brush + 8, 1);
+    bytes[side + 2..side + 4].copy_from_slice(&0i16.to_le_bytes());
+    bytes
+}
+
+fn check_surface_replay(ctx: *mut BhContext, fixture: &Fixture, command: BhCmd, expected: BhState) {
+    unsafe {
+        let map = (*ctx).map.as_ref().unwrap();
+        let settings = styles::settings("autohop").unwrap();
+        let header = serde_json::json!({
+            "map": "map", "mapSha256": map.map_sha256,
+            "settings": recording::settings_json(settings), "prespeedCap": null,
+            "timerRules": 2, "spawn": null, "style": "autohop", "zones": [],
+            "clientBuild": "native/surface-proof", "player": "proof", "recordedAt": 0.0,
+            "checkpointInterval": 100
+        });
+        let data = recording::ReplayData {
+            options: BhRecordOptionsV29::default(),
+            header,
+            commands: vec![command; 100],
+            looks: vec![None; 100],
+            checkpoints: vec![recording::Checkpoint {
+                tick: 100,
+                position: expected.position,
+                velocity: expected.velocity,
+            }],
+            start_tick: 1,
+            end_tick: 100,
+            track: 0,
+            cosmetic: vec![],
+            inspect: vec![],
+            packed_loadout: None,
+            segments: Vec::new(),
+        };
+        let path = fixture.file("surface.bhr", &data.encode_raw().unwrap());
+        let ghost = bh_ghost_load(ctx, path.as_ptr());
+        assert!(
+            ghost > 0,
+            "{}",
+            CStr::from_ptr(bh_last_error(ctx)).to_string_lossy()
+        );
+        let mut frame = BhGhostFrame::default();
+        assert_eq!(bh_ghost_frame(ctx, ghost, 100, &mut frame), 1);
+        assert_eq!(
+            frame.position.map(f32::to_bits),
+            expected.position.map(f32::to_bits)
+        );
+        assert_eq!(
+            frame.velocity.map(f32::to_bits),
+            expected.velocity.map(f32::to_bits)
+        );
+        assert_eq!(bh_replay_load(ctx, path.as_ptr()), 1);
+        let mut replay = BhSnapshot::default();
+        assert_eq!(bh_replay_seek(ctx, 100, &mut replay), 1);
+        state_equal(replay.player, expected);
+    }
+}
+
+#[test]
+fn render_materials_do_not_change_replay_physics() {
+    let fixture = Fixture::new();
+    let material = br#"LightmappedGeneric { "$surfaceprop" "gravel" }"#;
+    fixture.file("materials/fixture/test.vmt", material);
+    let path = fixture.file("map.bsp", &ground_bsp(&[]));
+    let pak = zip_files(&[("materials/fixture/test.vmt", material)]);
+    let packed = fixture.file("packed.bsp", &ground_bsp(&pak));
+    let root = fixture.root();
+    unsafe {
+        let canonical = bh_create();
+        let rendered = bh_create();
+        let embedded = bh_create();
+        assert_eq!(bh_load_map(canonical, path.as_ptr(), ptr::null()), 1);
+        assert_eq!(bh_load_map(rendered, path.as_ptr(), root.as_ptr()), 1);
+        assert_eq!(bh_load_map(embedded, packed.as_ptr(), root.as_ptr()), 1);
+        let mut settings = BhSettings::default();
+        assert_eq!(bh_style_settings(c"autohop".as_ptr(), &mut settings), 1);
+        for ctx in [canonical, rendered, embedded] {
+            assert_eq!(bh_set_settings(ctx, &settings), 1);
+            assert_eq!(bh_reset(ctx), 1);
+        }
+        let command = BhCmd {
+            forward: 450.0,
+            ..BhCmd::default()
+        };
+        let mut differs = false;
+        let mut expected = BhState::default();
+        for _ in 0..100 {
+            let mut actual = BhState::default();
+            let mut packed_state = BhState::default();
+            assert_eq!(bh_step(canonical, &command, &mut expected), 1);
+            assert_eq!(bh_step(rendered, &command, &mut actual), 1);
+            assert_eq!(bh_step(embedded, &command, &mut packed_state), 1);
+            state_equal(expected, actual);
+            differs |=
+                packed_state.velocity.map(f32::to_bits) != expected.velocity.map(f32::to_bits);
+        }
+        assert!(
+            differs,
+            "embedded BSP surface properties must still affect movement"
+        );
+        check_surface_replay(rendered, &fixture, command, expected);
+        for ctx in [canonical, rendered, embedded] {
+            bh_destroy(ctx);
+        }
+    }
+}
+
 #[test]
 fn loose_dependencies_decode_rgba8_and_pak_has_precedence() {
     let fixture = Fixture::new();
@@ -948,6 +1067,7 @@ fn counted_telemetry_matches_shared_recorder_rebases_and_decoder() {
             cosmetic: vec![],
             inspect: vec![],
             packed_loadout: None,
+            segments: Vec::new(),
         };
         let path = fixture.0.join(format!("{case}.bhr"));
         data.write_bhr(&path).unwrap();

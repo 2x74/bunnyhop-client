@@ -29,7 +29,7 @@ test("offline menu routes styles, native settings, replay controls, tutorials an
     // Styles: the web pause screen's Style tab, one row per style.
     await page.evaluate(() => window.bunnyhopNativeMenu.onState({ map: "bhop_eazy", paused: true }));
     await page.getByRole("tab", { name: "Style" }).click();
-    expect(await page.locator(".style-list .style-row").count()).toBe(8);
+    expect(await page.locator(".style-list .style-row").count()).toBe(9);
     await page.locator('.style-row[data-style="lowgrav"]').click();
     expect(await page.evaluate(() => (window as unknown as { messages: unknown[] }).messages.at(-1))).toEqual({
       type: "style",

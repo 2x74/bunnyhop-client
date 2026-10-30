@@ -86,6 +86,22 @@ inline std::optional<Glow> parse_glow(const nlohmann::json &value) {
     return glow;
 }
 
+// The colourway a replay was run in: field 7 of its packed loadout (loadout.ts packLoadout), absent in older replays.
+inline std::optional<std::string> packed_outfit(std::string_view packed) {
+    constexpr size_t outfit_field = 7, packed_max_bytes = 200;
+    if (packed.size() > packed_max_bytes || !packed.starts_with("2;")) return std::nullopt;
+    size_t start = 0;
+    for (size_t field = 0; field < outfit_field; ++field) {
+        start = packed.find(';', start);
+        if (start == std::string_view::npos) return std::nullopt;
+        ++start;
+    }
+    const auto end = packed.find(';', start);
+    const auto outfit = packed.substr(start, end == std::string_view::npos ? std::string_view::npos : end - start);
+    if (!outfit.starts_with("outfit-") || outfit.size() > 64) return std::nullopt;
+    return std::string(outfit);
+}
+
 struct AccessoryMotion {
     double last = -1, angle = 0;
     float alert = 0, squash = 0, lean = 0;
@@ -109,32 +125,6 @@ inline void advance_accessory(AccessoryMotion &motion, double seconds, float spe
     motion.lean = motion.alert * .09f;
     motion.grounded = grounded;
     motion.last = seconds;
-}
-
-struct HatFit {
-    std::array<float, 3> scale{1, 1, 1}, offset{0, 0, 0};
-};
-
-inline HatFit hat_fit(const std::string &outfit, const std::string &hat) {
-    HatFit fit;
-    const bool plush = outfit == "outfit-plush", bune = outfit == "outfit-bune";
-    if (!plush && !bune) return fit;
-    if (hat == "hat-halo" || hat == "hat-gem-orbit" || hat == "hat-lucky-coins" || hat == "hat-aurora") {
-        fit.offset[2] = plush ? 5.5f : 3.f;
-        return fit;
-    }
-    if (hat == "hat-capybara" || hat == "hat-maxwell") {
-        fit.offset = {0, .15f, plush ? .65f : .55f};
-        return fit;
-    }
-    if (hat == "hat-tophat") {
-        fit.offset[2] = plush ? .7f : .6f;
-        return fit;
-    }
-    fit.scale = plush ? std::array<float, 3>{6.f / 5.55f, 6.1f / 6.05f, 6.5f / 6}
-                      : std::array<float, 3>{6.48f / 5.55f, 5.85f / 6.05f, 7.02f / 6};
-    fit.offset = {0, (plush ? -.1f : .01f) - .55f * fit.scale[1], (plush ? 70.2f : 69.58f) - 69.35f * fit.scale[2]};
-    return fit;
 }
 
 }  // namespace native_render

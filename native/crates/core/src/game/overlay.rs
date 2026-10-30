@@ -6,9 +6,11 @@
 //! What counts is what the simulation itself uses: the triggers `touch_triggers_at` tests (with the per-map trigger
 //! boxes in place of their brushes where the physics version uses them), the brushes the player's solid mask hits.
 //! Triggers that can never fire for the player (no client spawnflag) and trigger_multiple / trigger_once without
-//! outputs (they do nothing; timer zones are drawn by the client from its own zone data) are left out.
+//! outputs or an emulated script role (they do nothing; timer zones are drawn by the client from its own zone data)
+//! are left out.
 
 use super::{Data, Game, PHYSICS_FIX_MAP_TRIGGERS, RtEnt, TriggerKind, MAX_HEALTH};
+use super::vscript::ScriptRole;
 use playsrc_collision::{CONTENTS_PLAYERCLIP, World as CollisionWorld};
 
 /// trigger_teleport, trigger_hurt that kills within a second (damage >= 100: a reset) and triggers whose outputs move
@@ -96,14 +98,23 @@ impl Game {
         }
         let teleporter = |name: &str| self.ents.iter().any(|x| x.class == "point_teleport" && x.name.eq_ignore_ascii_case(name));
         match &t.kind {
-            TriggerKind::Teleport { .. } => Some(OVERLAY_TELEPORT),
+            TriggerKind::Teleport { .. } | TriggerKind::TeleportRelative { .. } => Some(OVERLAY_TELEPORT),
             TriggerKind::Push { .. } => Some(OVERLAY_PUSH),
             TriggerKind::Gravity { .. } => Some(OVERLAY_GRAVITY),
             TriggerKind::Hurt { damage, .. } => {
                 Some(if *damage >= MAX_HEALTH { OVERLAY_TELEPORT } else { output_kind(e, &teleporter).unwrap_or(OVERLAY_OTHER) })
             }
             TriggerKind::PlayerMovement { .. } => Some(output_kind(e, &teleporter).unwrap_or(OVERLAY_OTHER)),
-            TriggerKind::Multiple { .. } => output_kind(e, &teleporter),
+            TriggerKind::Multiple { .. } => output_kind(e, &teleporter).or_else(|| {
+                if !self.objectives_on() {
+                    return None;
+                }
+                self.script_triggers.iter().find(|(j, _)| *j == i).map(|(_, role)| match role {
+                    ScriptRole::GateTeleport => OVERLAY_TELEPORT,
+                    ScriptRole::GateRebound => OVERLAY_PUSH,
+                    ScriptRole::Objective | ScriptRole::Reset => OVERLAY_OTHER,
+                })
+            }),
         }
     }
 

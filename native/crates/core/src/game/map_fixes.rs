@@ -102,9 +102,11 @@ pub(crate) fn find(entities: &[Entity]) -> Option<(&'static MapFix, Vec<(usize, 
 /// A map's own sv_maxvelocity (physics v14, `PHYSICS_FIX_MAP_MAX_VELOCITY`), matched by worldspawn keyvalues.
 pub(crate) struct MaxVelocity {
     pub map: &'static str,
-    /// Worldspawn keyvalues that must match exactly (bounds and Hammer's mapversion pin the build).
+    /// Worldspawn keyvalues that must match exactly (bounds plus mapversion, or skyname when absent).
     pub worldspawn: &'static [(&'static str, &'static str)],
     pub max_velocity: f32,
+    /// First physics version using this limit; historical replay masks stay unchanged.
+    pub min_physics: u32,
     /// Why, for the reader.
     #[allow(dead_code)]
     pub reason: &'static str,
@@ -112,38 +114,79 @@ pub(crate) struct MaxVelocity {
 
 /// Maps built for more than the 3500 u/s default. Each of the first four runs `sv_maxvelocity 10000` from a logic_auto
 /// OnMapSpawn through a point_servercommand (which the core doesn't execute); Momentum Mod's zone files set
-/// `maxVelocity: 10000` for icetrap and all three sandtraps. Audit of every map's entity lump: research/MAX-VELOCITY.md.
+/// `maxVelocity: 10000` for icetrap and all three sandtraps. v19 adds mapper requests and newly audited map commands;
+/// see research/MAX-VELOCITY.md and research/MAX-VELOCITY-V19.md.
 pub(crate) const MAX_VELOCITY: &[MaxVelocity] = &[
     MaxVelocity {
         map: "bhop_sandtrap",
         worldspawn: &[("world_mins", "-16224 -12160 -16320"), ("world_maxs", "9088 15328 15968"), ("mapversion", "209")],
         max_velocity: 10000.0,
+        min_physics: 14,
         reason: "logic_auto: server,Command,sv_maxvelocity 10000",
     },
     MaxVelocity {
         map: "bhop_sandtrap3",
         worldspawn: &[("world_mins", "-11840 -15904 -14336"), ("world_maxs", "13792 15328 11744"), ("mapversion", "414")],
         max_velocity: 10000.0,
+        min_physics: 14,
         reason: "logic_auto: server,Command,sv_maxvelocity 10000",
     },
     MaxVelocity {
         map: "bhop_icetrap",
         worldspawn: &[("world_mins", "-16128 -13440 -16000"), ("world_maxs", "16096 13408 13824"), ("mapversion", "539")],
         max_velocity: 10000.0,
+        min_physics: 14,
         reason: "logic_auto: server,Command,sv_maxvelocity 10000",
     },
     MaxVelocity {
         map: "bhop_goldsrc",
         worldspawn: &[("world_mins", "-13275 -12984 -966"), ("world_maxs", "6840 14273 3936"), ("mapversion", "680")],
         max_velocity: 10000.0,
+        min_physics: 14,
         reason: "logic_auto: server,Command,sm_cvar sv_maxvelocity 10000",
     },
     MaxVelocity {
         map: "bhop_sandtrap2",
         worldspawn: &[("world_mins", "-13152 -14816 -14848"), ("world_maxs", "13568 16160 11264"), ("mapversion", "201")],
         max_velocity: 10000.0,
+        min_physics: 14,
         reason: "its logic_auto sets only sv_airaccelerate, but the map is built for 10k like sandtrap 1 and 3 (map \
                  description; Momentum Mod maxVelocity 10000)",
+    },
+    MaxVelocity {
+        map: "bhop_gigaheish_fix",
+        worldspawn: &[("world_mins", "-15360 -15872 -14336"), ("world_maxs", "15872 15872 14592"), ("skyname", "sky303")],
+        max_velocity: 10000.0,
+        min_physics: 19,
+        reason: "mapper requests sv_maxvelocity 5000 or above (GameBanana 289140); v19 audit uses the existing 10k standard",
+    },
+    MaxVelocity {
+        map: "bhop_accelerate",
+        worldspawn: &[("world_mins", "-12096 -15488 -2688"), ("world_maxs", "12992 12480 1664"), ("mapversion", "754")],
+        max_velocity: 10000.0,
+        min_physics: 19,
+        reason: "mapper requests maxvelocity above 3500 (GameBanana 124369); research/MAX-VELOCITY-V19.md",
+    },
+    MaxVelocity {
+        map: "bhop_quack",
+        worldspawn: &[("world_mins", "-7200 -16128 -16240"), ("world_maxs", "15680 13776 1536"), ("mapversion", "265")],
+        max_velocity: 10000.0,
+        min_physics: 19,
+        reason: "logic_auto: servercmd,Command,sv_maxvelocity 10000 (popular batch 3; v19 audit)",
+    },
+    MaxVelocity {
+        map: "bhop_rainbowroad_fix",
+        worldspawn: &[("world_mins", "-15472 -10274 -5317"), ("world_maxs", "11456 12728 5928"), ("mapversion", "461")],
+        max_velocity: 10000.0,
+        min_physics: 19,
+        reason: "logic_auto: server,Command,sv_maxvelocity 10000 (popular batch 3; v19 audit)",
+    },
+    MaxVelocity {
+        map: "kz_bhop_global",
+        worldspawn: &[("world_mins", "-14982 -15352 -8927"), ("world_maxs", "14715 11575 6084"), ("mapversion", "1508")],
+        max_velocity: 20000.0,
+        min_physics: 19,
+        reason: "WR spends 24.96 s at the vertical cap; public reference route reaches 10482 u/s on Z, so 10k is insufficient; v19 audit",
     },
 ];
 
@@ -260,4 +303,82 @@ pub(crate) const NONLINEAR_OBJECTIVES: &[NonlinearObjectives] = &[NonlinearObjec
 pub(crate) fn nonlinear_objectives(entities: &[Entity]) -> Option<&'static NonlinearObjectives> {
     let world = entities.iter().find(|e| e.classname().eq_ignore_ascii_case("worldspawn"))?;
     NONLINEAR_OBJECTIVES.iter().find(|m| m.worldspawn.iter().all(|(k, v)| world.get(k) == Some(*v)))
+}
+
+/// Physics v19 map-local mechanics. Entity fingerprint covers every retained key/value (including order),
+/// excluding outputs, which the verifier stores separately. Completeness additionally pins the entire BSP SHA256.
+pub(crate) struct MapMechanics {
+    pub map: &'static str,
+    pub fingerprint: u32,
+    pub makers: bool,
+    pub velocity_scripts: bool,
+}
+
+/// Owned Stripper-style map edits, applied to runtime spawn state only at physics 19.
+/// The enclosing MapMechanics fingerprint pins the original retained entity build.
+pub(crate) struct TrainOrientationEdit {
+    pub map: &'static str,
+    pub targetname: &'static str,
+    pub model: &'static str,
+    pub orientation_type: i64,
+}
+
+pub(crate) const TRAIN_ORIENTATION_EDITS_V19: &[TrainOrientationEdit] = &[
+    // bhop_areaportal_v1, BSP SHA256 d0e43b68978db9ed43222e01159d0ab7685cc78b02b7263b1266bb8f7a295416.
+    // Stripper equivalent: match func_tracktrain / rede3da / *26, replace orientationtype "1" with "0".
+    // srcds rolls its 180-degree push back in the following VPhysics shadow stage; our core lacks that stage.
+    // This is our explicit map edit to retain translation without turning riders, NOT VPhysics emulation.
+    // Keep speed, path_tracks, outputs and the shared pusher unchanged. research/MAP-REPORTS-0.0.30.md §1.
+    TrainOrientationEdit { map: "bhop_areaportal_v1", targetname: "rede3da", model: "*26", orientation_type: 0 },
+];
+impl MapMechanics {
+    pub fn player_io(&self) -> bool {
+        self.makers || matches!(self.map, "bhop_crutle4_css" | "bhop_crutle3_css" | "bhop_enlightened2"
+            | "bhop_balaco" | "bhop_4triedsame" | "kz_fastcombowombo" | "bhop_sina_fix" | "bhop_treason")
+    }
+}
+pub(crate) const MECHANICS_V19: &[MapMechanics] = &[
+    // Player reports, exact entity builds; no scripts/makers/player I/O enabled by these entries.
+    MapMechanics { map: "bhop_areaportal_v1", fingerprint: 0xb83dc69d, makers: false, velocity_scripts: false },
+    MapMechanics { map: "bhop_profane", fingerprint: 0x6282cf5e, makers: false, velocity_scripts: false },
+    MapMechanics { map: "bhop_playboy_csgo", fingerprint: 0x7b264d5d, makers: false, velocity_scripts: false },
+    MapMechanics { map: "bhop_ceaseless", fingerprint: 0x829ab1d3, makers: false, velocity_scripts: true },
+    MapMechanics { map: "bhop_cutekittenz2", fingerprint: 0x7b2aa5ac, makers: true, velocity_scripts: false },
+    MapMechanics { map: "bhop_vandora", fingerprint: 0x73333401, makers: true, velocity_scripts: false },
+    MapMechanics { map: "bhop_ponpon_fix", fingerprint: 0x115add2e, makers: true, velocity_scripts: false },
+    MapMechanics { map: "bhop_retrowave", fingerprint: 0x1341a8e6, makers: true, velocity_scripts: false },
+    MapMechanics { map: "bhop_akb_tutorial", fingerprint: 0x0a2964d3, makers: true, velocity_scripts: false },
+    // Original paks contain no .nut files; these exact missing-file calls have no side effects.
+    MapMechanics { map: "bhop_k2", fingerprint: 0x157753a0, makers: false, velocity_scripts: false },
+    MapMechanics { map: "bhop_k3", fingerprint: 0xd4a11278, makers: false, velocity_scripts: false },
+    MapMechanics { map: "bhop_prig_skok_2", fingerprint: 0x022e7a8b, makers: false, velocity_scripts: false },
+    MapMechanics { map: "bhop_rpg", fingerprint: 0xcf6581d7, makers: false, velocity_scripts: false },
+    MapMechanics { map: "bhop_avantasia", fingerprint: 0x0b414fd1, makers: false, velocity_scripts: false },
+    MapMechanics { map: "bhop_crutle4_css", fingerprint: 0x82e3aa85, makers: false, velocity_scripts: false },
+    MapMechanics { map: "bhop_crutle3_css", fingerprint: 0x2014834a, makers: false, velocity_scripts: false },
+    MapMechanics { map: "bhop_enlightened2", fingerprint: 0x0e8b64ba, makers: false, velocity_scripts: false },
+    MapMechanics { map: "bhop_balaco", fingerprint: 0x18c4daa3, makers: false, velocity_scripts: false },
+    MapMechanics { map: "bhop_4triedsame", fingerprint: 0x0c832785, makers: false, velocity_scripts: false },
+    MapMechanics { map: "kz_fastcombowombo", fingerprint: 0x6488bde3, makers: false, velocity_scripts: false },
+    MapMechanics { map: "bhop_sina_fix", fingerprint: 0xd39597cb, makers: false, velocity_scripts: false },
+    MapMechanics { map: "bhop_collective", fingerprint: 0x9befc103, makers: false, velocity_scripts: false },
+    MapMechanics { map: "bhop_api_kowka", fingerprint: 0xe3778369, makers: false, velocity_scripts: false },
+    MapMechanics { map: "kz_bhop_liminal", fingerprint: 0x1b4bf86b, makers: false, velocity_scripts: false },
+    MapMechanics { map: "bhop_surf_apex", fingerprint: 0x0382bb33, makers: false, velocity_scripts: false },
+    MapMechanics { map: "bhop_treason", fingerprint: 0x3b951e2a, makers: false, velocity_scripts: false },
+    MapMechanics { map: "bhop_prototype01", fingerprint: 0x4b656963, makers: false, velocity_scripts: false },
+ ];
+
+pub(crate) fn mechanics_v19(entities: &[Entity]) -> Option<&'static MapMechanics> {
+    let mut hash = crc32fast::Hasher::new();
+    for e in entities {
+        for (k, v) in &e.pairs {
+            if crate::entities::Output::parse(k, v).is_some() { continue; }
+            hash.update(k.as_bytes()); hash.update(&[0]);
+            hash.update(v.as_bytes()); hash.update(&[0]);
+        }
+        hash.update(&[255]);
+    }
+    let fingerprint = hash.finalize();
+    MECHANICS_V19.iter().find(|m| m.fingerprint == fingerprint)
 }

@@ -15,6 +15,8 @@ struct ReplayPose {
 struct ReplaySession {
     nlohmann::json info;
     ReplayRange range;
+    std::string style;
+    BhSettings settings{};
     ReplayPose initial;
 
     static ReplaySession open(BhContext *core, const std::filesystem::path &path, bool full_recording = false) {
@@ -29,6 +31,10 @@ struct ReplaySession {
         ReplaySession session;
         session.info = nlohmann::json::parse(raw, raw + bytes);
         session.range = ReplayRange::make(session.info, full_recording);
+        session.style = session.info.at("style");
+        const auto &settings = session.info.at("settings");
+        session.settings.max_speed = settings.at("maxSpeed");
+        session.settings.air_accelerate = settings.at("airAccelerate");
         session.initial = session.seek(core, session.range.from);
         return session;
     }

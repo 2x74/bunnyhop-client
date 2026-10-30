@@ -22,11 +22,23 @@ const RAW_INPUT = "The desktop client always reads raw mouse motion; there's no 
 const SPIKES = "It drops browser pointer-lock jumps, which the desktop client never gets.";
 const BROWSER_FRAMES =
   "A browser frame-loop option. The desktop client paces frames with FPS limit and Display → VSync.";
-const WEB_LIGHTING = "Lighting of the website's Enhanced and Cinematic looks; the native renderer has no equivalent.";
-const PACKS = "Texture and sky packs install into the browser's storage. The desktop client uses each map's own.";
-const PAINT_MEASURE = "These sections draw with the website's 3D engine. They come back once the native client paints.";
+const NEARBY_LIGHTS =
+  "The map's lamps as real lights. The desktop client's Enhanced and Cinematic looks don't draw them yet.";
+const BOUNCE = "Bounced light. The desktop client's Enhanced and Cinematic looks don't draw it yet.";
+const CLOUDS = "Volumetric clouds. The desktop client's Enhanced and Cinematic looks don't draw them yet.";
+
+/**
+ * The website's Keys screen lists Chat under Run once its settings have the chat bind (binds.ts chat); until the
+ * vendored copy has it, the desktop client's own Chat row stands in. Both write the host's `chat` bind.
+ */
+export const WEBSITE_CHAT_BIND = ACTIONS.some((action) => (action.id as string) === "chat");
+const WEBSITE_CHAT_ROWS: Record<string, Gate> = WEBSITE_CHAT_BIND ? { "keys/Run/Chat": needs("bind:chat") } : {};
+const DESKTOP_CHAT_ROWS: Record<string, Gate> = WEBSITE_CHAT_BIND
+  ? {}
+  : { "keys/Desktop client/Chat": needs("bind:chat") };
 
 const ROWS: Record<string, Gate> = {
+  ...WEBSITE_CHAT_ROWS,
   "mouse/Mouse/Sensitivity": needs("sensitivity"),
   "mouse/Mouse/Mouse DPI": menuOnly,
   "mouse/Mouse/Show DPI on profile": menuOnly,
@@ -47,15 +59,18 @@ const ROWS: Record<string, Gate> = {
   "crosshair/Look/Opacity": needs("crosshairAlpha"),
   "crosshair/Look/Outline": needs("crosshairOutline"),
 
-  "hud/Show on screen/Show on screen": menuOnly,
+  "hud/Show on screen/Show on screen": excluded(
+    "A picture of the website's layout. The desktop client's HUD has its own places: the switches below turn " +
+      "elements on and off, and Edit layout moves them over the game.",
+  ),
   "hud/Show on screen/Leaderboard place": needs("hudPlace"),
   "hud/Show on screen/Spectator list": needs("hud:spectators"),
   "hud/Show on screen/Practice": needs("hud:practice"),
   "hud/Hide UI/Hide UI": needs("hud"),
   "hud/Hide UI/Hidden UI keeps": needs("hudHiddenKeeps"),
   "hud/Colours/Colour blind": needs("colorBlind"),
-  "hud/Layout/Edit layout": needs("hudLayoutWeb", "hudEditor"),
-  "hud/Layout/Preset": needs("hudLayoutWeb"),
+  "hud/Layout/Edit layout": needs("hudLayoutWeb", "bind:hudEditor"),
+  "hud/Layout/Preset": excluded("The website's presets fit its HUD; the desktop client's are under Layout preset."),
   "hud/Layout/HUD scale": needs("hudScale"),
   "hud/Keys overlay/Style": needs("keysStyle"),
   "hud/Keys overlay/Size": needs("hudLayout|hudLayoutWeb"),
@@ -63,7 +78,9 @@ const ROWS: Record<string, Gate> = {
   "hud/Keys overlay/Pressed": needs("hudKeysPressed"),
   "hud/Keys overlay/Idle": needs("hudKeysIdle"),
   "hud/Keys overlay/Rows": needs("hudKeysRowsWasd", "hudKeysRowsActions", "hudKeysRowsMouse"),
+  "hud/Strafe trainer/Show strafe trainer": needs("strafeTrainer", "hudLayoutWeb"),
   "hud/Strafe trainer/Preset": needs(
+    "strafeTrainer",
     "hudStrafeTrainerStyle",
     "hudStrafeTrainerFollow",
     "strafeTrainerSmoothing",
@@ -128,6 +145,7 @@ const ROWS: Record<string, Gate> = {
   // Bind rows: one per action, in whichever group the website puts it.
   ...Object.fromEntries(ACTIONS.map((action) => [`keys/*/${action.label}`, needs(`bind:${action.id}`)])),
   "keys/Movement/Null binds": needs("nullBinds"),
+  "keys/Movement/Release W on jump": excluded("Not in the desktop client yet."),
   "keys/Movement/Turn speed": needs("yawSpeed"),
   "keys/Movement/Fast turn": needs("angleSpeedKey"),
   "keys/Practice/Teleport keeps speed": needs("practiceKeepVelocity"),
@@ -136,10 +154,10 @@ const ROWS: Record<string, Gate> = {
   "keys/Run/When it passes": needs("autoRestartWhen", "autoRestartAction"),
   "keys/Tools/Pause / menu": menuOnly,
 
-  "paint/Surface paint/Colour": excluded(PAINT_MEASURE),
-  "paint/Surface paint/Size": excluded(PAINT_MEASURE),
-  "paint/Surface paint/Marks": excluded(PAINT_MEASURE),
-  "measure/Distance measurement/Measurement": excluded(PAINT_MEASURE),
+  "paint/Surface paint/Colour": needs("paint"),
+  "paint/Surface paint/Size": needs("paint"),
+  "paint/Surface paint/Marks": menuOnly,
+  "measure/Distance measurement/Measurement": needs("bind:measurePoint"),
 
   "ghost/Race/Show ghosts": needs("showGhost"),
   "ghost/Race/Your PB": needs("ghostPb"),
@@ -168,10 +186,7 @@ const ROWS: Record<string, Gate> = {
   "graphics/Quality/Look": needs("sourceLook"),
   "graphics/Quality/Potato mode": needs("graphicsPotato"),
   "graphics/Quality/Antialiasing": needs("graphicsAntialias"),
-  "graphics/Quality/Water reflections": ownVersion(
-    "The native client refracts water instead: Advanced → Water.",
-    "graphicsWaterReflections",
-  ),
+  "graphics/Quality/Water reflections": needs("graphicsWaterReflections"),
   "graphics/Quality/Anisotropic filtering": needs("graphicsAnisotropy"),
   "graphics/Colour & visibility/Brightness": needs("graphicsBrightness"),
   "graphics/Colour & visibility/Gamma": needs("graphicsGamma"),
@@ -188,13 +203,32 @@ const ROWS: Record<string, Gate> = {
   "graphics/Frame rate/Exceed monitor FPS": excluded(BROWSER_FRAMES),
   "graphics/Frame rate/Low-latency canvas": excluded("A browser canvas mode. The desktop client draws to its window."),
   "graphics/Frame rate/FPS limit in menus": needs("graphicsMenuFps"),
-  "graphics/Effects/Bloom": ownVersion("Bloom is part of the Source look.", "graphicsBloom"),
+  "graphics/Effects/Bloom": needs("graphicsBloom"),
+  "graphics/Effects/Map visual profiles": needs("graphicsMapProfiles"),
   "graphics/Effects/Material detail": needs("graphicsMaterialResponse"),
-  "graphics/Effects/Edge smoothing": excluded("A post-process of the website's renderer."),
-  "graphics/Effects/*": excluded(WEB_LIGHTING),
-  "graphics/Lighting/*": excluded(WEB_LIGHTING),
-  "graphics/Clouds/*": excluded(WEB_LIGHTING),
+  "graphics/Effects/Edge smoothing": needs("graphicsSpatialAA"),
+  "graphics/Effects/Contact shading": needs("graphicsContactShading"),
+  "graphics/Effects/Atmospheric haze": needs("graphicsAtmosphere"),
+  "graphics/Effects/Sun shafts": needs("graphicsSunShafts"),
+  "graphics/Effects/Volumetric light": excluded(
+    "Light scattering through the sun's shadows. The desktop client's Enhanced and Cinematic looks don't draw it yet.",
+  ),
+  "graphics/Lighting/Lighting profile": needs("graphicsLightingProfile", "graphicsAmbienceShowcase", "graphicsPreset"),
+  "graphics/Lighting/Sun strength": needs("graphicsDirectContribution"),
+  "graphics/Lighting/Ambient strength": needs("graphicsAmbientContribution"),
+  "graphics/Lighting/Sun shadows": needs("graphicsDynamicShadows", "graphicsShadowQuality"),
+  "graphics/Lighting/Shadow strength": needs("graphicsShadowStrength"),
+  "graphics/Lighting/Shadow range": needs("graphicsShadowDistance"),
+  "graphics/Lighting/Nearby light shadows": excluded(NEARBY_LIGHTS),
+  "graphics/Lighting/Nearby lights": excluded(NEARBY_LIGHTS),
+  "graphics/Lighting/Nearby light strength": excluded(NEARBY_LIGHTS),
+  "graphics/Lighting/*": excluded(BOUNCE),
+  "graphics/Clouds/*": excluded(CLOUDS),
+  "graphics/Sky/Sky": needs("graphicsSkyMode", "graphicsSkyPackId"),
+  "graphics/Sky/Sky rotation": needs("graphicsSkyRotation"),
   "graphics/Sky/Sky brightness": needs("graphicsSkyExposure"),
+  "graphics/Sky/Sky lighting": needs("graphicsLightingSource"),
+  "graphics/Sky packs/*": needs("graphicsSkyPackId"),
 
   "viewmodel/Viewmodel/Show viewmodel": needs("viewmodel"),
   "viewmodel/Viewmodel/Viewmodel FOV": needs("viewmodelFov"),
@@ -205,7 +239,7 @@ const ROWS: Record<string, Gate> = {
   "viewmodel/Position/Offset X": needs("viewmodelX"),
   "viewmodel/Position/Offset Y": needs("viewmodelY"),
   "viewmodel/Position/Offset Z": needs("viewmodelZ"),
-  "viewmodel/Position/Reset position": needs("viewmodelX", "viewmodelY", "viewmodelZ"),
+  "viewmodel/Position/Reset to default": needs("viewmodelFov", "viewmodelX", "viewmodelY", "viewmodelZ"),
   "viewmodel/Movement feel/Bob": needs("viewmodelBob"),
   "viewmodel/Movement feel/Sway": needs("viewmodelSway"),
 
@@ -253,8 +287,14 @@ export const NATIVE_GATES: Readonly<Record<string, Gate>> = {
   "display/Window/Minimize fullscreen when switching apps": needs("minimizeOnFocusLoss"),
   "display/Window/Window controls": menuOnly,
   "display/Window/Shortcuts": menuOnly,
+  "display/Fullscreen/Monitor": needs("fullscreenMode"),
+  "display/Fullscreen/Resolution": needs("fullscreenMode"),
+  "display/Fullscreen/Refresh rate": needs("fullscreenMode"),
+  "display/Fullscreen/Scaling": needs("fullscreenScaling"),
   "display/Frame pacing/VSync": needs("vsync"),
   "display/Frame pacing/GPU frame limit": needs("limitQueuedFrames"),
+  "display/Frame pacing/Low latency mode": needs("lowLatencyMode"),
+  "display/Frame pacing/Reflex flash indicator": needs("reflexFlash"),
   "display/Local replays/Capture device personal bests": needs("capturePbScreenshots"),
   "discord/Rich Presence/Show on Discord": needs("discordRichPresence"),
   "discord/Rich Presence/Show the map": needs("discordShowMap"),
@@ -266,18 +306,21 @@ export const NATIVE_GATES: Readonly<Record<string, Gate>> = {
   "data/Game data folder/Move game data": menuOnly,
   "data/Game data folder/Waiting to move": menuOnly,
   "data/Game data folder/Folder not found": menuOnly,
-  "updates/Desktop app/Version": menuOnly,
-  "updates/Desktop app/Updates": menuOnly,
+  "updates/Native client/Version": menuOnly,
+  "updates/Native client/Updates": menuOnly,
+  "updates/Native client/Ranked": menuOnly,
+  "updates/Native client/What's new": menuOnly,
+  "updates/Native client/Check automatically": menuOnly,
+  "mouse/Native input/Mouse backend": needs("inputBackend"),
   "mouse/Mouse diagnostics/Last sample": needs("mouseDiagnostics"),
   "graphics/Native renderer/Water": needs("waterQuality"),
   "graphics/Native renderer/World effects": needs("effectsVisible"),
   "hud/More jump stats/Gain colours": needs("jumpStatsColors"),
   "hud/More jump stats/Every N jumps": needs("jumpStatsInterval"),
-  "hud/Positions/Drag to place": needs("hudLayout"),
   "audio/Sound packs/Effects pack": needs("sfxPack"),
   "audio/Sound packs/Music pack": needs("musicPack"),
   "audio/Sound packs/Weapon sounds": needs("weaponSounds"),
-  "keys/Desktop client/Chat": needs("bind:chat"),
+  ...DESKTOP_CHAT_ROWS,
   "keys/Desktop client/Command chat": needs("bind:commandChat"),
   "keys/Desktop client/Scoreboard": needs("bind:scoreboard"),
   "keys/Desktop client/Next player (spectating)": needs("bind:spectatorNext"),
@@ -286,6 +329,20 @@ export const NATIVE_GATES: Readonly<Record<string, Gate>> = {
   "keys/Desktop client/Show triggers": needs("bind:showTriggers"),
   "keys/Desktop client/Show player clips": needs("bind:showClips"),
   "css/Custom CSS/CSS file": menuOnly,
+  "hud/Show on screen/Speed": needs("hudLayoutWeb"),
+  "hud/Show on screen/Timer": needs("hudLayoutWeb"),
+  "hud/Show on screen/Run stats": needs("hudLayoutWeb"),
+  "hud/Show on screen/Split vs PB": needs("hudLayoutWeb"),
+  "hud/Show on screen/Sync bar": needs("hudLayoutWeb"),
+  "hud/Show on screen/Keys overlay": needs("keysOverlay"),
+  "hud/Show on screen/Strafe trainer": needs("strafeTrainer"),
+  "hud/Show on screen/FPS counter": needs("hudLayoutWeb"),
+  "hud/Show on screen/Chat": needs("hudLayoutWeb"),
+  "hud/Layout/Layout preset": needs("hudLayoutWeb"),
+  "paint/Keys/Paint (hold)": needs("bind:paint"),
+  "paint/Keys/Place paint mark": needs("bind:paintOnce"),
+  "paint/Keys/Clear paint": needs("bind:clearPaint"),
+  "paint/Keys/Change keys": menuOnly,
 };
 
 /** The gate of a row, or null when the table doesn't place it. */

@@ -5,6 +5,7 @@
 // Second opinion.
 
 import { act, ago, api, avatar, emptyLine, glyph, h, may, me, toast, when, fmtTime, type Person } from "./core";
+import { markSeen } from "./seen";
 import { actionWords, detailSentence } from "./words";
 import type { Note } from "./notes";
 
@@ -337,13 +338,14 @@ function eventLine(kind: CaseKind, e: TimelineEvent, staff: Person[]): HTMLEleme
 }
 
 /** Flags in a row fold into one line ("4 more flags"), so a busy player's timeline still reads. */
-function foldFlags(nodes: { e: TimelineEvent; el: HTMLElement }[]): HTMLElement[] {
+function foldFlags(nodes: { e?: TimelineEvent; el: HTMLElement }[]): HTMLElement[] {
   const out: HTMLElement[] = [];
+  const isFlag = (x: { e?: TimelineEvent }) => x.e?.kind === "flag";
   for (let i = 0; i < nodes.length; ) {
-    if (nodes[i].e.kind !== "flag") (out.push(nodes[i].el), i++);
+    if (!isFlag(nodes[i])) (out.push(nodes[i].el), i++);
     else {
       let j = i;
-      while (j < nodes.length && nodes[j].e.kind === "flag") j++;
+      while (j < nodes.length && isFlag(nodes[j])) j++;
       const run = nodes.slice(i, j).map((x) => x.el);
       if (run.length <= 3) out.push(...run);
       else {
@@ -356,27 +358,140 @@ function foldFlags(nodes: { e: TimelineEvent; el: HTMLElement }[]): HTMLElement[
   return out;
 }
 
+// ---------------------------------------------------------------------------------------------
+// The player's side of a ticket in the same timeline (research/ADMIN-UPLIFT.md): their report, their replies, and
+// staff replies (what the player sees), between the staff comments (what they never see) and the changes.
+
+/** Something on the timeline that isn't a case event, placed by time. */
+export interface ThreadItem {
+  id: string;
+  at: number;
+  render: () => HTMLElement;
+}
+
+/** A message in the ticket's thread (GET /admin/feedback/:id replies; from_actor "player" is the player's own). */
+export interface TicketReply {
+  id: number;
+  body: string;
+  from_actor: string;
+  from_name: string | null;
+  from_avatar?: string | null;
+  created_at: number;
+  read_at: number | null;
+}
+
 /**
- * The timeline and the comment box. `legacyNote`: a ticket's old single staff note, shown first. onComment: after a
- * comment lands (the host can refresh its pin or move a card).
+ * The ticket's messages as timeline items. `report`: also the report itself first (the side pane; the ticket page shows
+ * it above). `waitingSince`: the player's first unanswered reply (feedback.player_reply_at), marked "not answered".
  */
-export function timeline(kind: CaseKind, subject: string, data: ThreadData, o: { legacyNote?: { body: string; at: number } | null; onComment?: (note: boolean) => void; empty?: string; stage?: () => string } = {}): HTMLElement {
-  const root = h("div", { class: "tl" });
+export function ticketItems(t: { message: string; created_at: number }, replies: TicketReply[], o: { player: string; waitingSince: number | null; report?: boolean }): ThreadItem[] {
+  const time = (at: number) => h("span", { class: "tl-time", title: when(at) }, ago(at));
+  const player = (id: string, at: number, body: string, opening: boolean): ThreadItem => ({
+    id,
+    at,
+    render: () =>
+      h(
+        "div",
+        { class: `tl-msg is-player${o.waitingSince !== null && at >= o.waitingSince ? " waiting" : ""}` },
+        avatar({ name: o.player, avatar: null }, { size: 26 }),
+        h(
+          "div",
+          { class: "tl-c-main" },
+          h("div", { class: "tl-c-head" }, h("b", null, o.player), h("span", { class: "tl-tag" }, opening ? "reported" : "replied"), time(at), o.waitingSince !== null && at >= o.waitingSince ? h("span", { class: "tl-state warn" }, "not answered") : null),
+          h("div", { class: "tl-bubble" }, body),
+        ),
+      ),
+  });
+  const items = replies.map((r): ThreadItem => {
+    if (r.from_actor === "player") return player(`m${r.id}`, r.created_at, r.body, false);
+    const name = r.from_actor === "token" ? "Admin token" : (r.from_name ?? r.from_actor);
+    return {
+      id: `m${r.id}`,
+      at: r.created_at,
+      render: () =>
+        h(
+          "div",
+          { class: "tl-msg is-reply" },
+          avatar({ name, avatar: r.from_avatar ?? null }, { size: 26, staff: true }),
+          h(
+            "div",
+            { class: "tl-c-main" },
+            h("div", { class: "tl-c-head" }, h("b", null, name), h("span", { class: "tl-tag to-player" }, glyph("reply"), `to ${o.player}`), time(r.created_at), h("span", { class: `tl-state${r.read_at ? " ok" : ""}`, title: r.read_at ? when(r.read_at) : "The player hasn't opened it yet" }, r.read_at ? `read ${ago(r.read_at)}` : "unread")),
+            h("div", { class: "tl-c-body" }, r.body),
+          ),
+        ),
+    };
+  });
+  return o.report ? [player("report", t.created_at, t.message, true), ...items] : items;
+}
+
+/** The reply mode of the composer: what reaches the player's inbox. */
+export interface ReplyMode {
+  /** The player's name, on the box. */
+  to: string;
+  /** Why a reply can't be sent (no session, the account is gone); null when it can. */
+  blocked: string | null;
+  /** Sends; `resolve`: "Reply and resolve". Resolves true when it went. */
+  send: (body: string, resolve: boolean) => Promise<boolean>;
+  sendLabel: string;
+  /** null: no resolve button (already resolved). */
+  resolveLabel: string | null;
+  /** Saved replies and the like, under the box in reply mode. */
+  tools?: (text: HTMLTextAreaElement) => HTMLElement[];
+}
+
+/** A timeline element: `update` repaints the list with fresh data (the composer and what's typed in it stay). */
+export type TimelineEl = HTMLElement & {
+  update: (d: ThreadData, items?: ThreadItem[]) => void;
+  focusMode: (m: "reply" | "comment") => void;
+  /** The composer's box (null: nothing to write). */
+  box: HTMLTextAreaElement | null;
+  /** "Reply and resolve" with what's in the box (the ticket page's r key). */
+  replyResolve: () => void;
+};
+
+/**
+ * The timeline and the composer. `legacyNote`: a ticket's old single staff note, shown first. `items`: the ticket's
+ * messages (ticketItems), merged in by time. `reply`: the composer also replies to the player, with a visible switch
+ * between Reply (the player reads it) and Comment (staff only). onComment: after a comment lands (the host can refresh
+ * its pin or move a card).
+ */
+export function timeline(kind: CaseKind, subject: string, data: ThreadData, o: { legacyNote?: { body: string; at: number } | null; onComment?: (note: boolean) => void; empty?: string; stage?: () => string; items?: ThreadItem[]; reply?: ReplyMode } = {}): TimelineEl {
+  const root = h("div", { class: "tl" }) as unknown as TimelineEl;
   const list = h("div", { class: "tl-list" });
+  let items = o.items ?? [];
   const paint = () => {
-    const nodes = data.events.map((e) => ({ e, el: eventLine(kind, e, data.staff) })).filter((x): x is { e: TimelineEvent; el: HTMLElement } => !!x.el);
+    const nodes: { at: number; e?: TimelineEvent; el: HTMLElement }[] = [
+      ...items.map((it) => ({ at: it.at, el: it.render() })),
+      ...data.events.map((e) => ({ at: e.at, e, el: eventLine(kind, e, data.staff) })).filter((x): x is { at: number; e: TimelineEvent; el: HTMLElement } => !!x.el),
+    ].sort((a, b) => a.at - b.at);
+    if (kind === "report" && o.reply) for (const n of nodes) if (n.e?.kind === "comment") n.el.classList.add("staff-only");
     const legacy = o.legacyNote?.body
       ? h("div", { class: "tl-comment legacy" }, h("span", { class: "av", "aria-hidden": "true" }, glyph("note")), h("div", { class: "tl-c-main" }, h("div", { class: "tl-c-head" }, h("b", null, "Staff note"), h("span", { class: "tl-time" }, "from before comments")), h("div", { class: "tl-c-body" }, o.legacyNote.body)))
       : null;
     list.replaceChildren(...(legacy ? [legacy] : []), ...(nodes.length ? foldFlags(nodes) : legacy ? [] : [emptyLine(o.empty ?? "No comments yet.")]));
   };
   paint();
-  if (!may("cases.work")) return root.append(list), root;
+  root.update = (d, next) => {
+    data.events = d.events;
+    data.staff = d.staff;
+    data.notes = d.notes;
+    if (next) items = next;
+    paint();
+  };
+  root.focusMode = () => undefined;
+  root.box = null;
+  root.replyResolve = () => undefined;
+  if (!may("cases.work") && !o.reply) return root.append(list), root;
 
-  const text = h("textarea", { class: "tl-input", rows: 2, maxlength: "2000", placeholder: kind === "ac" ? "Comment, or @name for a second opinion" : "Comment for staff (the player never sees it)" });
+  const canComment = may("cases.work");
+  const reply = o.reply && !o.reply.blocked ? o.reply : null;
+  let mode: "reply" | "comment" = reply ? "reply" : "comment";
+  const text = h("textarea", { class: "tl-input", rows: 2, maxlength: "2000" });
   const asNote = h("button", { type: "button", class: "small ghost tl-note-toggle", "aria-pressed": "false", title: "Also save it as a note on the player", disabled: !data.user || !may("player.notes") }, glyph("pin"), "Also a player note");
   asNote.onclick = () => asNote.setAttribute("aria-pressed", String(asNote.getAttribute("aria-pressed") !== "true"));
-  const send = async () => {
+  const me_ = () => data.staff.find((s) => s.id === me?.id) ?? { id: me?.id ?? "token", name: me?.name ?? "You", avatar: me?.avatar ?? null };
+  const sendComment = async () => {
     const body = text.value.trim();
     if (!body) return toast("Write a comment first.", true), text.focus();
     const note = asNote.getAttribute("aria-pressed") === "true";
@@ -384,7 +499,8 @@ export function timeline(kind: CaseKind, subject: string, data: ThreadData, o: {
     if (!r) return;
     text.value = "";
     asNote.setAttribute("aria-pressed", "false");
-    data.events.push({ id: `new${Date.now()}`, at: Date.now(), kind: "comment", actor: data.staff.find((s) => s.id === me?.id) ?? { id: me?.id ?? "token", name: me?.name ?? "You", avatar: me?.avatar ?? null }, body, data: note ? { note: 1 } : null });
+    markSeen(kind, subject);
+    data.events.push({ id: `new${Date.now()}`, at: Date.now(), kind: "comment", actor: me_(), body, data: note ? { note: 1 } : null });
     // An @mention asks for a second opinion: the anticheat card moves there.
     if (kind === "ac" && mentioned(body, data.staff).some((p) => p.id !== me?.id) && ["triage", "looking"].includes(o.stage?.() ?? "triage")) {
       const m = await caseAct(kind, subject, { action: "move", stage: "second" }, "Moved to second opinion");
@@ -393,15 +509,57 @@ export function timeline(kind: CaseKind, subject: string, data: ThreadData, o: {
     paint();
     o.onComment?.(note);
   };
+  const sendReply = async (resolve: boolean) => {
+    if (!reply) return;
+    const body = text.value.trim();
+    if (!body) return toast("Write a reply first.", true), text.focus();
+    if (!(await reply.send(text.value, resolve))) return;
+    text.value = "";
+    text.dispatchEvent(new Event("input"));
+    markSeen(kind, subject);
+  };
+  const send = () => (mode === "reply" ? sendReply(false) : sendComment());
   text.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) (e.preventDefault(), void send());
   });
-  const form = h(
-    "form",
-    { class: "tl-new", onsubmit: (e: Event) => (e.preventDefault(), void send()) },
-    avatar(data.staff.find((s) => s.id === me?.id) ?? { name: me?.name ?? "?", avatar: me?.avatar ?? null }, { size: 26, staff: true }),
-    h("div", { class: "tl-new-main" }, text, h("div", { class: "tl-new-acts" }, asNote, h("span", { class: "spacer" }), h("span", { class: "faint tl-hint" }, "Ctrl Enter"), h("button", { type: "submit", class: "small" }, "Comment"))),
+  const tools = reply?.tools ? h("div", { class: "tl-tools" }, ...reply.tools(text)) : null;
+  const acts = h("div", { class: "tl-new-acts" });
+  const seg = reply && canComment ? h("div", { class: "seg tl-modes", role: "radiogroup", "aria-label": "Who reads it" }) : null;
+  const form = h("form", { class: "tl-new", onsubmit: (e: Event) => (e.preventDefault(), void send()) });
+  const paintMode = () => {
+    form.classList.toggle("mode-reply", mode === "reply");
+    form.classList.toggle("mode-comment", mode === "comment");
+    text.placeholder = mode === "reply" ? `Reply to ${reply!.to}: they read this in their inbox (/ for saved replies)` : kind === "ac" ? "Comment, or @name for a second opinion" : "Staff comment: the player never sees it";
+    if (tools) tools.hidden = mode !== "reply";
+    seg?.replaceChildren(
+      h("button", { type: "button", role: "radio", "aria-checked": String(mode === "reply"), onclick: () => setMode("reply") }, glyph("reply"), `Reply to ${reply!.to}`),
+      h("button", { type: "button", role: "radio", "aria-checked": String(mode === "comment"), onclick: () => setMode("comment") }, glyph("note"), "Staff comment"),
+    );
+    acts.replaceChildren(
+      ...(mode === "comment" ? [asNote] : []),
+      h("span", { class: "spacer" }),
+      h("span", { class: "faint tl-hint" }, "Ctrl Enter"),
+      ...(mode === "reply"
+        ? [h("button", { type: "submit", class: "small" }, glyph("reply"), reply!.sendLabel), ...(reply!.resolveLabel ? [h("button", { type: "button", class: "small primary", onclick: () => void sendReply(true) }, reply!.resolveLabel)] : [])]
+        : [h("button", { type: "submit", class: "small" }, "Comment")]),
+    );
+  };
+  const setMode = (m: "reply" | "comment") => {
+    if (m === "reply" && !reply) return;
+    if (m === "comment" && !canComment) return;
+    mode = m;
+    paintMode();
+    text.focus();
+  };
+  root.focusMode = setMode;
+  root.box = text;
+  root.replyResolve = () => (reply ? (mode !== "reply" && setMode("reply"), void sendReply(true)) : undefined);
+  form.append(
+    avatar(me_(), { size: 26, staff: true }),
+    h("div", { class: "tl-new-main" }, seg, text, tools, acts),
   );
-  root.append(list, form);
+  paintMode();
+  const blocked = o.reply?.blocked ? h("p", { class: "tl-blocked faint" }, o.reply.blocked) : null;
+  root.append(list, blocked ?? "", ...(reply || canComment ? [form] : []));
   return root;
 }

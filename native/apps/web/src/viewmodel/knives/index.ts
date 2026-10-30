@@ -16,9 +16,10 @@ import { golden } from "./golden";
 import { karrotbit } from "./karrotbit";
 import { thistle } from "./thistle";
 import { thornback } from "./thornback";
+import { whirligig } from "./whirligig";
 import type { KnifeDef } from "./types";
 
-export const KNIVES: readonly KnifeDef[] = [carrot, karrotbit, bunnyfly, daikon, cleaver, candycane, golden, thornback, thistle];
+export const KNIVES: readonly KnifeDef[] = [carrot, karrotbit, bunnyfly, daikon, cleaver, candycane, golden, thornback, thistle, whirligig];
 
 const byId = new Map(KNIVES.flatMap((k) => [[k.id, k] as const, [k.cosmeticId, k] as const]));
 

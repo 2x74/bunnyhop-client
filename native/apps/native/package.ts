@@ -165,7 +165,7 @@ function notices(resources: string, extra: string[]) {
   copy(join(root, "apps/native/packaging/licenses"), to);
   copy(join(root, "apps/native/vendor/nlohmann/LICENSE.MIT"), join(to, "nlohmann-json.txt"));
   copy(join(root, "apps/native/vendor/unicode/LICENSE.txt"), join(to, "Unicode.txt"));
-  for (const name of ["dr_libs", "stb"])
+  for (const name of ["dr_libs", "stb", "nvapi", "amd"])
     copy(join(root, "apps/native/vendor", name, "LICENSE"), join(to, `${name}.txt`));
   for (const name of ["JetBrainsMono-OFL.txt", "LeagueGothic-OFL.txt"])
     copy(join(root, "tools/hermes/fonts", name), join(to, name));
@@ -324,6 +324,7 @@ if (import.meta.main) {
       licenses: { type: "string", multiple: true },
       release: { type: "boolean" },
       "require-platform-signing": { type: "boolean" },
+      "update-test-hooks": { type: "boolean" },
     },
   });
   try {
@@ -356,6 +357,9 @@ if (import.meta.main) {
       root,
       values.binary ?? `apps/native/build/bunnyhop-native${platform === "win32" ? ".exe" : ""}`,
     );
+    const testHooks = hasUpdateTestHooks(sourceBinary);
+    if (testHooks && !values["update-test-hooks"])
+      throw new Error("This binary was built with BUNNYHOP_UPDATE_TEST_HOOKS and can't be released");
     const packageRoot = platform === "darwin" ? join(stage, MAC_APP) : stage;
     const executable =
       platform === "darwin"
@@ -381,6 +385,7 @@ if (import.meta.main) {
       "tp-inspects.json",
       "runner.json",
       "runner.bin",
+      "avatar.json",
     ]) {
       if (!existsSync(join(assets, file))) throw new Error(`Required hosted actor animation asset missing: ${file}`);
     }
@@ -504,8 +509,10 @@ if (import.meta.main) {
       archive = join(out, `${tag}.${extension}`);
     if (existsSync(archive)) throw new Error(`Archive exists: ${archive}`);
     if (platform === "darwin") run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", packageRoot, archive]);
-    else if (platform === "win32") run(["tar", "-a", "-c", "-f", archive, "-C", stage, "."]);
+    // Archiving "." names every entry "./…", and Windows Explorer shows such a zip as empty until it's extracted.
+    else if (platform === "win32") run(["tar", "-a", "-c", "-f", archive, "-C", stage, ...readdirSync(stage).sort()]);
     else run(["tar", "-czf", archive, "-C", stage, "."]);
+    if (platform === "win32") verifyZipEntryNames(run(["tar", "-tf", archive]));
     if (platform === "darwin" && values["notary-profile"]) {
       if (signing !== "developer-id") throw new Error("Notarization requires Developer ID signing");
       console.log(
@@ -537,7 +544,7 @@ if (import.meta.main) {
       signing,
       notarized,
       ...(minimumSupportedOS ? { minimumSupportedOS } : {}),
-      releaseEligible: true,
+      releaseEligible: !testHooks,
       platformSigned:
         platform === "darwin" ? signing === "developer-id" : platform === "win32" ? signing === "authenticode" : false,
     };
@@ -547,4 +554,14 @@ if (import.meta.main) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
+}
+
+// A test-hook build reads its update trust from the environment; the variable's name is in the binary.
+export function hasUpdateTestHooks(binary: string): boolean {
+  return readFileSync(binary).includes("BUNNYHOP_UPDATE_TEST_TRUST");
+}
+
+function verifyZipEntryNames(listing: string): void {
+  const bad = listing.split(/\r?\n/).find((name) => name.startsWith("./") || name.startsWith("/"));
+  if (bad !== undefined) throw new Error(`Windows zip entry must be a plain relative name: ${bad}`);
 }

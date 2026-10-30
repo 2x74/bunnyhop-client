@@ -1,5 +1,5 @@
 import { appHref } from "./platform/navigation";
-import type { AvatarSpec } from "./avatar/spec";
+import { AVATAR_RENDER_VERSION, type AvatarSpec } from "./avatar/spec";
 import type { PlayerGlow } from "./player/glow-config";
 import { cleanLoadout, type CosmeticLoadout } from "./loadout";
 // Client contract for the bunnyhop.lol backend (apps/api). UI code depends only on these signatures.
@@ -90,6 +90,8 @@ export interface MySupport {
   minUsd: number;
   /** Stripe payments are open (the API has its key); else the Support page shows "Coming soon". */
   payments?: boolean;
+  /** Your player glow when you may wear it without being a supporter (the owner and admins); else absent / null. */
+  glow?: PlayerGlow | null;
 }
 
 /** Profile links as the owner edits them: handles per platform and the "show on my profile" switch. */
@@ -116,6 +118,8 @@ export interface User {
   onboarded?: boolean;
   /** Own account only: a supporter (the reserved slot in a full room, ui/servers.ts). Absent = no. */
   supporter?: boolean;
+  /** Own account only: the saved bunny avatar was drawn with an older look; avatar/refresh.ts re-renders it. */
+  bunnyAvatarStale?: boolean;
   /** setDisplayName(): a guest asked for a taken name and got a numbered variant. */
   nameAdjusted?: boolean;
 }
@@ -205,6 +209,8 @@ export interface RunStats {
   mouse?: { sensitivity?: number; dpi?: number; pollHz?: number; raw?: boolean };
   turn?: { yawSpeed: number; angleSpeedKey: number };
   play?: { attempt?: number; seconds?: number; session?: number; sessionSeconds?: number };
+  /** The runner's view (native client): the shape drawn (width / height), how it filled the monitor, the FOV. */
+  view?: { aspect: number; fill: "native" | "stretched" | "bars"; fov: number };
 }
 
 export interface Leaderboard {
@@ -451,7 +457,14 @@ export interface PointsRecord {
   counted: number;
 }
 
-export type CosmeticChoice = Record<"background" | "frame" | "title" | "ghost" | "trail" | "outfit" | "knife" | "finish" | "glove" | "hat" | "body", string | null>;
+export type CosmeticChoice = Record<"background" | "frame" | "title" | "ghost" | "trail" | "outfit" | "knife" | "finish" | "glove" | "hat" | "body", string | null> & {
+  /** A wig's hair colour ("#rrggbb"), kept for players who own one; absent = the default. */
+  hairColor?: string | null;
+  /** The ponytail's length (a whole percent, progression.ts HAIR_LENGTH), kept for wig owners; absent = 100. */
+  hairLength?: number | null;
+  /** Knives (with their finishes) the game swaps between (progression.ts KnifePool); absent = none. */
+  knifePool?: import("./progression").KnifePool | null;
+};
 
 /**
  * A player as boards, ranks, records and profiles name them. verified / creator: admin-granted marks (creators.ts),
@@ -1270,16 +1283,19 @@ export const api = {
   async saveMapGroups(user: string, changes: ApiMapGroupChange[]): Promise<ApiMapGroup[]> {
     return (await json<{ groups: ApiMapGroup[] }>("/me/map-groups", { ...post({ user, changes }), keepalive: true })).groups;
   },
-  /** Your bunny avatar (avatar/spec.ts): the saved one, or your default; `url` is its picture. ApiError 401 without a session. */
-  async bunnyAvatar(): Promise<{ spec: AvatarSpec; custom: boolean; url: string }> {
+  /**
+   * Your bunny avatar (avatar/spec.ts): the saved one, or your default; `url` is its picture, `render` the look it was
+   * drawn with (AVATAR_RENDER_VERSION; null on the default). ApiError 401 without a session.
+   */
+  async bunnyAvatar(): Promise<{ spec: AvatarSpec; custom: boolean; url: string; render?: number | null }> {
     return json("/me/avatar/bunny", { cache: "no-store" });
   },
   /**
-   * Saves a bunny avatar: its spec and the editor's 256 px WebP render (base64). ApiError 400 bad_cosmetic names a slot
-   * when an item isn't yours, 429 rate_limited.
+   * Saves a bunny avatar: its spec and the editor's 256 px WebP render (base64), drawn with this build's look (`render`,
+   * spec.ts AVATAR_RENDER_VERSION). ApiError 400 bad_cosmetic names a slot when an item isn't yours, 429 rate_limited.
    */
-  async saveBunnyAvatar(spec: AvatarSpec, image: string): Promise<{ spec: AvatarSpec; custom: boolean; url: string }> {
-    return json("/me/avatar/bunny", post({ spec, image }));
+  async saveBunnyAvatar(spec: AvatarSpec, image: string): Promise<{ spec: AvatarSpec; custom: boolean; url: string; render?: number }> {
+    return json("/me/avatar/bunny", post({ spec, image, render: AVATAR_RENDER_VERSION }));
   },
   /** Back to the default avatar (your colourway, the pose your id picks). */
   async resetBunnyAvatar(): Promise<{ spec: AvatarSpec; custom: boolean; url: string }> {

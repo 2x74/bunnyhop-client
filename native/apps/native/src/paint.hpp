@@ -185,9 +185,10 @@ void surface_tool_key(
         bool repeat,
         const BhState &state,
         const native::Input &input,
+        bool can_paint,
         Toast &toast
 ) {
-    if (const auto *message = renderer.tool_key(code, down, repeat, state, input)) toast(message);
+    if (const auto *message = renderer.tool_key(code, down, repeat, state, input, can_paint)) toast(message);
 }
 
 class Paint {
@@ -196,7 +197,13 @@ public:
 
     struct Mark {
         SurfaceOwner owner;
-        std::array<std::array<Vec3, 4>, maximum_faces> faces{};
+
+        struct Face {
+            std::array<Vec3, 4> points{};
+            std::array<std::array<float, 2>, 4> uv{};
+        };
+
+        std::array<Face, maximum_faces> faces{};
         size_t count = 0;
         std::array<float, 4> color{};
     };
@@ -205,7 +212,7 @@ private:
     std::array<Mark, capacity> marks_{};
     size_t count_ = 0, next_ = 0;
     float diameter_ = 32;
-    std::array<float, 4> color_{1, .251f, .251f, .9f};
+    std::array<float, 4> color_{1, .251f, .251f, 1};
     double last_seconds_ = -1;
     std::optional<SurfaceHit> last_hit_;
 
@@ -264,16 +271,16 @@ private:
             a[corner] = {dot(delta, right), dot(delta, up), dot(delta, hit.normal)};
         }
         size_t count = 3;
-        constexpr unsigned circle_planes = 16;
-        for (unsigned plane = 0; plane < circle_planes && count; ++plane) {
-            const float angle = float(plane) * float(native::radians) * 360 / circle_planes;
-            count = clip({a.data(), count}, b, {std::cos(angle), std::sin(angle), 0}, diameter_ * .5f);
+        // A square projector keeps UVs linear across clipped triangles; the fragment shader rounds the decal.
+        constexpr std::array<Vec3, 4> sides = {{{1, 0, 0}, {0, 1, 0}, {-1, 0, 0}, {0, -1, 0}}};
+        for (const auto &side : sides) {
+            count = clip({a.data(), count}, b, side, diameter_ * .5f);
             a = b;
         }
         count = clip({a.data(), count}, b, {0, 0, 1}, 1);
         count = clip({b.data(), count}, a, {0, 0, -1}, 1);
         for (size_t corner = 1; corner + 1 < count && mark.count < maximum_faces; ++corner) {
-            std::array<Vec3, 4> face{};
+            Mark::Face face;
             const size_t indices[4] = {0, corner, corner + 1, corner + 1};
             for (size_t vertex = 0; vertex < 4; ++vertex) {
                 const auto &point = a[indices[vertex]];
@@ -282,7 +289,11 @@ private:
                     world[axis] = hit.point[axis] + right[axis] * point[0] + up[axis] * point[1]
                                   + hit.normal[axis] * (point[2] + .08f);
                 }
-                face[vertex] = surface_local(matrix, world);
+                face.points[vertex] = surface_local(matrix, world);
+                face.uv[vertex] = {
+                        std::clamp(point[0] / diameter_ + .5f, 0.f, 1.f),
+                        std::clamp(point[1] / diameter_ + .5f, 0.f, 1.f)
+                };
             }
             mark.faces[mark.count++] = face;
         }
@@ -303,11 +314,18 @@ public:
         }
     }
 
-    bool stamp(BhContext *core, const SurfaceHit &hit, double seconds, bool held = false) {
+    bool ready(double seconds, bool held) const {
         constexpr double interval_seconds = .1;
-        if (held && seconds - last_seconds_ < interval_seconds) {
-            return false;
-        }
+        return !held || seconds - last_seconds_ >= interval_seconds;
+    }
+
+    bool request(double seconds, bool held) {
+        if (!ready(seconds, held)) return false;
+        last_seconds_ = seconds;
+        return true;
+    }
+
+    bool stamp(BhContext *core, const SurfaceHit &hit, bool held = false) {
         if (held && last_hit_ && last_hit_->owner == hit.owner) {
             Vec3 delta{};
             for (int axis = 0; axis < 3; ++axis) {
@@ -317,7 +335,6 @@ public:
                 return false;
             }
         }
-        last_seconds_ = seconds;
         auto &mark = marks_[next_];
         mark.count = 0;
         mark.owner = hit.owner;
@@ -352,10 +369,10 @@ public:
             }
             for (size_t triangle = 0; triangle < mark.count; ++triangle) {
                 auto face = mark.faces[triangle];
-                for (auto &point : face) {
+                for (auto &point : face.points) {
                     point = transform_point(matrix, point);
                 }
-                presentation.quad(face, mark.color);
+                presentation.decal(face.points, mark.color, face.uv);
             }
         }
     }

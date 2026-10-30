@@ -20,6 +20,9 @@ int main() {
     assert(native_render::water_surface({{100, 100, 0}, {110, 110, 20}}, surfaces) == &surfaces[1]);
     assert(native_render::water_surface({{200, 200, 0}, {210, 210, 20}}, surfaces) == &surfaces.front());
     assert(native_render::water_surface({{0, 0, 0}, {1, 1, 1}}, {}) == nullptr);
+    assert(native_render::water_face_double_sided(false, true));
+    assert(!native_render::water_face_double_sided(true, true));
+    assert(!native_render::water_face_double_sided(false, false));
     native_render::EventQueue<int, 3> queue;
     queue.push(1);
     queue.push(2);

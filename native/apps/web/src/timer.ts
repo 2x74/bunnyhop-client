@@ -25,6 +25,8 @@ export interface TickCmd {
 }
 
 export interface TickState {
+  /** V20 only: grounded state before same-command categorize-and-jump; absent for v1–v19. */
+  categorizedGroundJump?: { position: readonly number[]; velocity: readonly number[]; crouched: boolean };
   position: readonly number[];
   velocity: readonly number[];
   grounded: boolean;
@@ -330,6 +332,23 @@ export class RunTimer {
       }
     } else {
       const armed = this.validStart(s) && start !== null;
+      // V20 can categorize a restart / teleport floor and jump before any post-tick grounded state exists.
+      // A new ground contact has no elapsed settling time: only the <=50 u/s escape can qualify it.
+      // Use the actual pre-jump hull / speed, never the post-move (possibly teleported / accelerated) state.
+      const groundJump = s.categorizedGroundJump;
+      const jumpSpeed = groundJump ? Math.sqrt(groundJump.velocity[0] ** 2 + groundJump.velocity[1] ** 2) : Infinity;
+      const jumpStart = groundJump && events & EVENT_JUMPED && !(events & EVENT_RESPAWNED) && !s.onLadder
+        && jumpSpeed <= START_SLOW_SPEED && (this.options.prespeedCap === null || jumpSpeed <= this.options.prespeedCap)
+        ? touching(groundJump.position, groundJump.crouched, this.zones, "start", this.track)
+          ?? touching(groundJump.position, groundJump.crouched, this.zones, "start") : null;
+      if (!armed && jumpStart && !passEnd) {
+        if (this.status !== "idle") out.restarted = true;
+        this.status = "idle";
+        this.track = trackOf(jumpStart);
+        this.clearStats();
+        this.pendingStart = 0;
+        this.armed = true;
+      }
       if (armed && !passEnd) {
         if (this.status !== "idle") out.restarted = true;
         this.status = "idle";

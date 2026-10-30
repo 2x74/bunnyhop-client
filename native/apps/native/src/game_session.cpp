@@ -64,18 +64,45 @@ GameSession::PreparedMap GameSession::prepare(
             "Loading BSP map");
     require(bh_set_settings(next.core.get(), &settings), next.core.get(), "Applying settings");
     next.zones = timer_zones(detail);
-    BhRunOptions timing{};
-    bh_default_run_options(&timing);
-    if (!next.zones.empty()) {
-        require(bh_run_configure(next.core.get(), &timing, next.zones.data(), next.zones.size()),
-                next.core.get(),
-                "Configuring timer");
-    }
+    next.configure();
     return next;
 }
 
-void GameSession::prepare_workers(const std::string &path, const std::string &content) {
-    video.cancel();
+GameSession::PreparedMap GameSession::PreparedMap::begin(
+        const std::string &path, const std::string &content, const BhSettings &settings, const nlohmann::json &detail
+) {
+    PreparedMap next;
+    next.core.reset(bh_create());
+    if (!next.core) throw std::runtime_error("Could not create native core");
+    require(bh_set_settings(next.core.get(), &settings), next.core.get(), "Applying settings");
+    require(bh_load_map_begin(next.core.get(), path.c_str(), content.empty() ? nullptr : content.c_str()),
+            next.core.get(),
+            "Preparing BSP map");
+    next.zones = timer_zones(detail);
+    return next;
+}
+
+bool GameSession::PreparedMap::poll() {
+    const auto status = bh_load_map_poll(core.get());
+    if (status < 0) throw std::runtime_error(bh_last_error(core.get()));
+    if (!status) return false;
+    configure();
+    return true;
+}
+
+void GameSession::PreparedMap::configure() {
+    BhRunOptions timing{};
+    bh_default_run_options(&timing);
+    if (!zones.empty()) {
+        require(bh_run_configure(core.get(), &timing, zones.data(), zones.size()), core.get(), "Configuring timer");
+    }
+}
+
+void GameSession::prepare_workers(const std::string &path, const std::string &content, const nlohmann::json &detail) {
+    video.cancel_preparation();
+    map_path = path;
+    content_root = content;
+    map_detail = detail;
     replay_timeline.map(data_location::from_utf8(path), data_location::from_utf8(content));
     replay_compare_import.map(data_location::from_utf8(path), data_location::from_utf8(content));
 }
@@ -115,8 +142,8 @@ void GameSession::leave(PracticeController &practice) {
 }
 
 void GameSession::release() {
-    // Capture and camera preparation restore borrowed replay state during teardown.
-    video.cancel();
+    // Camera preparation restores borrowed replay state during teardown. Exports run on in their own process.
+    video.cancel_preparation();
     replay_timeline.reset();
     replay_compare_import.reset();
     replay_compare.clear();

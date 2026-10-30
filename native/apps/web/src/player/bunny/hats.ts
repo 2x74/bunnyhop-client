@@ -17,11 +17,20 @@
 //     - Circlet: a band of dark amethyst glass round the hood with one angular crest over the forehead and a small
 //       chevron at the back; a light sweeps to and fro along the aqua line across its front.
 //
+//   - More Supporter hats, asked for by supporters: Propeller Cap, Capybara and Maxwell (moving, accent -1..-8); the
+//     Space Buns and Ponytail wigs (wigs.ts: the player's hair colour; the ponytail swings) and the Half Oni Mask
+//     (oni-mask.ts). On the standard bunny a wig is built for the bare head (the hood is down: mesh.ts), on Plush and
+//     Bun-E for their hoods: headwearKey picks the build.
+//
 // headwear() is the one rule for what a bunny wears on its head: the hat when one is on, else the rank crown.
 
 import * as THREE from "three";
 import { add, Builder, cross, frame, norm, ring, scale, sub, type Paint, type Wt } from "./builder";
 import { crownGeometry } from "./crown";
+import { oniMask } from "./oni-mask";
+import { ponytail, ponytailDown, spaceBuns, spaceBunsDown } from "./wigs";
+import { isWig } from "../../loadout";
+import type { BunnyLook } from "./look";
 import { rig, type V3 } from "./rig";
 import { AURORA_C, HALO_C, HALO_N, ORBIT_C, ORBIT_R, PROPELLER_C, orbitAngle } from "../hat-fx";
 import type { CosmeticLoadout } from "../../loadout";
@@ -633,6 +642,12 @@ const BUILD: Record<string, () => THREE.BufferGeometry> = {
   "hat-propeller": propellerCap,
   "hat-capybara": capybara,
   "hat-maxwell": maxwell,
+  "hat-space-buns": spaceBuns,
+  "hat-ponytail": ponytail,
+  // The wigs on the bare head (hood down), keyed by headwearKey.
+  "hat-space-buns@down": spaceBunsDown,
+  "hat-ponytail@down": ponytailDown,
+  "hat-oni-mask": oniMask,
   "hat-founder-crown": founderCrown,
   "hat-tophat": topHat,
   "hat-beanie": beanie,
@@ -670,6 +685,9 @@ export function seedHatGeometry(id: string, g: THREE.BufferGeometry): void {
  * What a bunny wears on its head: the hat when one is on (the owner's, the Supporter's), else the rank crown
  * for overall #1-#3, else nothing. A hat wins over the crown its wearer holds (owner call, v0.0.6).
  */
-export function headwear(l: CosmeticLoadout | null | undefined): THREE.BufferGeometry | null {
-  return (l?.hat ? hatGeometry(l.hat) : null) ?? (l?.crown ? crownGeometry(l.crown) : null);
+export function headwear(l: CosmeticLoadout | null | undefined, look: BunnyLook = "bunny"): THREE.BufferGeometry | null {
+  return (l?.hat ? hatGeometry(headwearKey(l.hat, look)) : null) ?? (l?.crown ? crownGeometry(l.crown) : null);
 }
+
+/** The geometry key of a hat on a look: a wig on the standard bunny is the hood-down build ("<id>@down"). */
+export const headwearKey = (hat: string, look: BunnyLook): string => (look === "bunny" && isWig(hat) ? `${hat}@down` : hat);

@@ -6,6 +6,7 @@
 namespace native {
 using Matrix = std::array<float, 16>;
 constexpr double radians = 3.14159265358979323846 / 180.0;
+constexpr float camera_near_plane = 2.0f, camera_far_plane = 60000.0f;
 
 inline Matrix identity() {
     return {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
@@ -65,7 +66,7 @@ inline Matrix camera_matrix(const float eye[3], double yaw, double pitch, float 
             1
     };
     // Source fov_desired=90 at 4:3: fixed vertical FOV, Hor+ on wide windows.
-    constexpr float cot = 4.0f / 3.0f, near_plane = 2.0f, far_plane = 60000.0f;
+    constexpr float cot = 4.0f / 3.0f, near_plane = camera_near_plane, far_plane = camera_far_plane;
     Matrix projection = {
             cot / aspect,
             0,

@@ -39,10 +39,10 @@ test("MP4 soundtrack selection uses the native pack, explicit offsets, levels an
       }),
     );
     // Export MP4 in the viewer: the web's export card, its Music row of segments.
-    await page.getByRole("button", { name: "Render this replay to an MP4 video (E)", exact: true }).click();
+    await page.getByRole("button", { name: "Render this replay to a video (E)", exact: true }).click();
     const music = page.getByRole("radiogroup", { name: "Music" }),
       picked = () => music.getByRole("radio", { checked: true }).textContent(),
-      save = page.getByRole("button", { name: "Save MP4 to Downloads", exact: true });
+      save = page.getByRole("button", { name: "Export", exact: true });
     expect(await picked()).toBe("None");
     expect(await music.getByRole("radio").allTextContents()).toEqual(["None", "Airstrafe", "My song"]);
     expect(await page.getByLabel("Music start offset seconds", { exact: true }).isDisabled()).toBe(true);
@@ -59,16 +59,10 @@ test("MP4 soundtrack selection uses the native pack, explicit offsets, levels an
     await save.click();
     expect(
       await page.evaluate(() => (window as any).messages.filter((m: any) => m.type === "videoExport").at(-1)),
-    ).toEqual({
+    ).toMatchObject({
       type: "videoExport",
       action: "start",
       options: {
-        width: 1280,
-        height: 720,
-        fps: 60,
-        quality: "high",
-        camera: "eye",
-        hud: true,
         audio: false,
         music: "custom.wav",
         musicOffset: 12.5,
@@ -87,9 +81,14 @@ test("MP4 soundtrack selection uses the native pack, explicit offsets, levels an
       }),
     );
     expect(await picked()).toBe("None");
-    await page.evaluate(() => window.bunnyhopNativeMenu.onState({ videoExport: { state: "capturing" } }));
-    expect(await music.getByRole("radio", { name: "Airstrafe" }).isDisabled()).toBe(true);
-    expect(await save.isDisabled()).toBe(true);
+    // Exports run in the background: while one renders the card stays usable and queues the next.
+    await page.evaluate(() =>
+      window.bunnyhopNativeMenu.onState({
+        videoExport: { state: "capturing", queue: [{ id: 1, title: "x", state: "rendering", frame: 1, frames: 9 }] },
+      }),
+    );
+    expect(await music.getByRole("radio", { name: "Airstrafe" }).isDisabled()).toBe(false);
+    expect(await page.getByRole("button", { name: "Add to queue", exact: true }).isEnabled()).toBe(true);
     expect(errors).toEqual([]);
   } finally {
     await browser.close();

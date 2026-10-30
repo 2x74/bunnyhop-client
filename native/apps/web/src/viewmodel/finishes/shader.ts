@@ -17,7 +17,9 @@
 // with a sweeping shimmer), and the Supporter's three, all animated: Geode (a split geode: stone rim, agate bands,
 // crystal facets that a shine crosses), Rift (angular cracks of light in a dark plum blade, a pulse running up them)
 // and Spectrum (a halftone hex grid with broad colour bands drifting through it); High Roller's Gold Leaf (torn gold
-// leaf on black lacquer, a crossing sheen) and Borealis's Aurora (rippling curtains of light over faint stars). Wide blades (the Clover Cleaver)
+// leaf on black lacquer, a crossing sheen) and Borealis's Aurora (rippling curtains of light over faint stars), and
+// the Supporter metals (polishedShade below: Emerald, Ruby and Sapphire Steel, Pearl, Chromatic, Chrome), shaded as
+// polished metal rather than painted, their look in a view-fixed reflection. Wide blades (the Clover Cleaver)
 // stretch every pattern across, since pattern space is the carrot's. Self-lit parts
 // come back in `emit` and skip the lighting. Potato mode holds the clock still (setCosmeticsStill). A future
 // player tint (loadout.ts CosmeticLoadout.tint) would arrive as one more uniform set in setFinishUniforms and read by
@@ -27,11 +29,13 @@ import * as THREE from "three";
 import type { PlayerUniforms } from "../../player/materials";
 import { finishStyle, gloveStyle, type CosmeticLoadout, type FinishKind, type GloveStyle } from "../../loadout";
 import { NOISE_GLSL } from "./glsl";
+import { FIN_ENV_LODS, FIN_ENV_UNIFORMS } from "./environment";
 import { GLOVE_FRAGMENT_PARS, GLOVE_VERTEX_MAIN, GLOVE_VERTEX_PARS } from "../gloves/glsl";
+import { COS_ENV_ON, COS_TIER, cosEnvUniform, DETAIL_PARS, KNIFE_PARS, type CosEnvUniform } from "./detail";
 export { GLOVE_FRAGMENT_ALBEDO, GLOVE_FRAGMENT_LIGHT } from "../gloves/glsl";
 
 /** `#define FINISH n` per design (0 = no finish code at all). */
-export const FINISH_CODE: Record<FinishKind, number> = { none: 0, sunset: 1, ember: 2, tigerlily: 3, nebula: 4, dewweb: 5, frost: 6, heartbeet: 7, fourleaf: 8, founder: 9, geode: 10, rift: 11, spectrum: 12, goldleaf: 13, aurora: 14, contour: 15, meteor: 16, hourglass: 17, lantern: 18, wildflower: 19, tally: 20, devgrid: 21 };
+export const FINISH_CODE: Record<FinishKind, number> = { none: 0, sunset: 1, ember: 2, tigerlily: 3, nebula: 4, dewweb: 5, frost: 6, heartbeet: 7, fourleaf: 8, founder: 9, geode: 10, rift: 11, spectrum: 12, goldleaf: 13, aurora: 14, contour: 15, meteor: 16, hourglass: 17, lantern: 18, wildflower: 19, tally: 20, devgrid: 21, emerald: 22, ruby: 23, sapphire: 24, pearl: 25, chromatic: 26, chrome: 27 };
 
 /** One finished item, as the shader sees it: which design. */
 export interface FinishSpec {
@@ -42,26 +46,34 @@ export function specOf(l: Pick<CosmeticLoadout, "finish">): FinishSpec {
   return { kind: finishStyle(l.finish).kind };
 }
 
-/** Program variant of a look: the FINISH code, whether glove zones are recoloured, the low-detail noise. */
+/**
+ * Program variant of a look: the FINISH code, whether glove zones are recoloured, and `detail`: the first-person
+ * viewmodel's extra shading (finishes/detail.ts VM_DETAIL: knife hardware materials, the glove recipes on the knit
+ * glove too, the scene reflection on hardware). Third-person bunnies never set it.
+ */
 export interface MaterialLook {
   finish: number;
   glove: boolean;
+  detail?: boolean;
 }
 
 export const NO_LOOK: MaterialLook = Object.freeze({ finish: 0, glove: false });
 
-export const lookOf = (spec: FinishSpec | null, glove: GloveStyle | null): MaterialLook => ({ finish: spec ? FINISH_CODE[spec.kind] : 0, glove: !!glove && glove.style !== "knit" });
+export const lookOf = (spec: FinishSpec | null, glove: GloveStyle | null, detail = false): MaterialLook => ({ finish: spec ? FINISH_CODE[spec.kind] : 0, glove: !!glove && glove.style !== "knit", detail });
 
-export const sameLook = (a: MaterialLook, b: MaterialLook) => a.finish === b.finish && a.glove === b.glove;
+export const sameLook = (a: MaterialLook, b: MaterialLook) => a.finish === b.finish && a.glove === b.glove && !!a.detail === !!b.detail;
 
 /** Phones / tablets: 3 noise octaves instead of 5 and no glitter (plan §4.4 FINISH_LOD). */
-export const FINISH_LOD = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+// globalThis: the API (cosmetics catalogue) typechecks this file without the DOM.
+const g = globalThis as { matchMedia?: (q: string) => { matches: boolean }; location?: { search: string } };
+export const FINISH_LOD = typeof g.matchMedia === "function" && g.matchMedia("(pointer: coarse)").matches;
 
 export function lookDefines(l: MaterialLook): Record<string, number> {
   const d: Record<string, number> = {};
   if (l.finish > 0) d.FINISH = l.finish;
-  if (l.glove) d.GLOVE = 1;
-  if (l.finish > 0 && (FINISH_LOD || still)) d.FINISH_LOD = 1;
+  if (l.glove || l.detail) d.GLOVE = 1;
+  if (l.detail) d.VM_DETAIL = 1;
+  if (l.finish > 0 && (FINISH_LOD || still) && !studio) d.FINISH_LOD = 1;
   return d;
 }
 
@@ -72,6 +84,15 @@ export interface FinishUniforms {
   uFinTime: THREE.IUniform<number>;
   /** Glove colour slots (gloves/paint.ts SLOT_G: base, fingers, tips, strap, detail; linear colours). */
   uGlove: THREE.IUniform<THREE.Color[]>;
+  /** The metal finishes' scene reflection on the composer looks (environment.ts; shared, read-only). */
+  uFinEnv: THREE.IUniform<THREE.Texture | null>;
+  uFinEnvOn: THREE.IUniform<number>;
+  uFinSunDir: THREE.IUniform<THREE.Vector3>;
+  uFinSunColor: THREE.IUniform<THREE.Color>;
+  /** Cosmetic detail tier (finishes/detail.ts; shared) and the first-person hardware's scene reflection (per block). */
+  uCosTier: THREE.IUniform<number>;
+  uCosEnv: CosEnvUniform;
+  uCosEnvOn: THREE.IUniform<number>;
 }
 
 /**
@@ -79,20 +100,31 @@ export interface FinishUniforms {
  * every animated finish and hat) and new finish programs compile with the cheaper FINISH_LOD path. Set by main.ts with
  * the world's potato switch; ?still=1 on the dev pages.
  */
-let still = typeof location !== "undefined" && new URLSearchParams(location.search).get("still") === "1";
+let still = !!g.location && new URLSearchParams(g.location.search).get("still") === "1";
 const STILL_T = 2.15;
 export function setCosmeticsStill(on: boolean): void {
   still = on;
 }
 /** Shared animation preference, including cosmetics driven by each player's movement. */
 export function cosmeticsStill(): boolean {
-  return still;
+  return still && !studio;
 }
+
+/**
+ * Studio stills (the avatar renderer, avatar/stage.ts, while it poses and draws): the clock held on STILL_T, so the same
+ * spec always gives the same picture, but the movement-driven cosmetics (the ponytail) still simulated and the finish
+ * programs built at full detail, whatever this page's Potato switch or a phone's FINISH_LOD say.
+ */
+let studio = false;
+export function setCosmeticsStudio(on: boolean): void {
+  studio = on;
+}
+export const cosmeticsStudio = (): boolean => studio;
 
 /** One clock for every finish (twinkle, glitter, the Founder's shimmer) and hat, read by three.js at upload time. */
 const FIN_TIME: THREE.IUniform<number> = {
   get value() {
-    return still ? STILL_T : (performance.now() / 1000) % 3600;
+    return still || studio ? STILL_T : (performance.now() / 1000) % 3600;
   },
   set value(_: number) {
     /* read-only */
@@ -103,6 +135,10 @@ export function finishUniforms(): FinishUniforms {
   return {
     uFinTime: FIN_TIME,
     uGlove: { value: [new THREE.Color(), new THREE.Color(), new THREE.Color(), new THREE.Color(), new THREE.Color()] },
+    ...FIN_ENV_UNIFORMS,
+    uCosTier: COS_TIER,
+    uCosEnv: cosEnvUniform(),
+    uCosEnvOn: COS_ENV_ON,
   };
 }
 
@@ -118,13 +154,16 @@ export function setGloveUniforms(u: PlayerUniforms, g: GloveStyle | null): void 
   u.uGlove.value.forEach((c, i) => c.setHex(cs[i]));
 }
 
-/** Finish + glove of a loadout onto a uniform block; returns the program variant the material needs. */
-export function applyLoadoutUniforms(u: PlayerUniforms, l: CosmeticLoadout | null, override?: FinishSpec | null): MaterialLook {
+/**
+ * Finish + glove of a loadout onto a uniform block; returns the program variant the material needs (`detail`: the
+ * first-person viewmodel, see MaterialLook).
+ */
+export function applyLoadoutUniforms(u: PlayerUniforms, l: CosmeticLoadout | null, override?: FinishSpec | null, detail = false): MaterialLook {
   const spec = override !== undefined ? override : l ? specOf(l) : null;
   const glove = l ? gloveStyle(l.glove) : null;
   setFinishUniforms(u, spec);
   setGloveUniforms(u, glove);
-  return lookOf(spec && spec.kind !== "none" ? spec : null, glove);
+  return lookOf(spec && spec.kind !== "none" ? spec : null, glove, detail);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -149,10 +188,13 @@ ${GLOVE_VERTEX_MAIN}`;
 
 /** Fragment: declarations + the finish recipes (FINISH 1..21) + the glove materials (GLOVE). */
 export const FRAGMENT_PARS = /* glsl */ `
+uniform float uCosTier;
 #if defined(FINISH) || defined(GLOVE)
 ${NOISE_GLSL}
 #endif
+${DETAIL_PARS}
 ${GLOVE_FRAGMENT_PARS}
+${KNIFE_PARS}
 #ifdef FINISH
 varying vec4 vFin;
 uniform float uFinTime;
@@ -654,30 +696,245 @@ vec3 finishAlbedo(float u, float v, vec2 P, out float metal, out float sparkle, 
 #endif
 }
 
+#if FINISH >= 22
+// POLISHED METALS (22..27, the Supporter's metals): no painted pattern, the look is the metal itself, so it lives in
+// the reflection. Per graphics look:
+//   Enhanced / Cinematic (the composer): the real scene, world-anchored (environment.ts cube, finSceneMetal below):
+//     the reflection moves as you look around, the map's sun puts a crisp soft box + glint on the blade.
+//   Source / Plain: the studio below, fixed to the view (always readable, whatever the map looks like).
+//   Potato (FINISH_LOD): the studio, the clock held still, and the scene code isn't even compiled.
+// The switch is a uniform (uFinEnvOn), not a define: changing the look never recompiles a knife.
+// finStudio is a small studio seen in the polished face, fixed to the view (like a matcap, so the
+// knife looks the same whether you look up, down or at a wall, and in third person): a dim sky with one strip light,
+// a bright band at the horizon, a near-black band just under it fading into a dim warm floor. The reflected ray is
+// bent a little across the blade (by v), so even a flat face shows the horizon as a line running along it, like the
+// light on a ground bevel, and that line slides over the blade as the knife sways, slashes and turns in an inspect.
+vec3 finStudio(vec3 R) {
+  float y = R.y;
+  vec3 sky = mix(vec3(1.40, 1.42, 1.46), vec3(0.26, 0.28, 0.33), smoothstep(0.0, 0.32, y));
+  sky += vec3(1.0) * smoothstep(0.50, 0.55, y) * (1.0 - smoothstep(0.64, 0.70, y));
+  vec3 floorC = mix(vec3(0.015, 0.015, 0.02), vec3(0.30, 0.27, 0.24), smoothstep(-0.06, -0.38, y));
+  floorC += vec3(0.45, 0.42, 0.40) * smoothstep(-0.48, -0.52, y) * (1.0 - smoothstep(-0.60, -0.66, y));
+  return mix(floorC, sky, smoothstep(-0.015, 0.015, y));
+}
+vec3 finBent(vec3 Rv, float u, float v) { return normalize(Rv + vec3(0.0, 0.6 * v - 0.12 + 0.06 * sin(u * 5.0), 0.0)); }
+// Polished metal of colour F0 (linear): reflection tinted head-on, whiter toward grazing, sharp + broad highlight.
+vec3 finMetal(vec3 F0, float u, float v, vec2 P, vec3 n, vec3 V, vec3 L, vec3 ambient, float key) {
+  vec3 R = reflect(-V, n);
+  vec3 Rv = (viewMatrix * vec4(R, 0.0)).xyz;
+  float nv = max(dot(n, V), 0.0);
+  vec3 F = F0 + (1.0 - F0) * pow(1.0 - nv, 5.0);
+  // Faint polishing streaks along the blade, so the face isn't perfectly flat.
+  float streak = 1.0 + 0.035 * gnoise(vec2(P.x * 0.5, P.y * 46.0));
+  vec3 col = finStudio(finBent(Rv, u, v)) * F * streak;
+  col += F0 * (ambient * 0.06 + key * 0.10);
+  float rl = max(dot(R, L), 0.0);
+  col += mix(vec3(1.0), F0, 0.3) * (pow(rl, 260.0) * 2.4 + pow(rl, 28.0) * 0.30);
+  return col;
+}
+// Hue on a smooth colour wheel (0..1 around), for the rainbow and pearl sheens.
+vec3 finHue(float h) { return 0.5 + 0.5 * cos(6.28318 * (h + vec3(0.0, 0.333, 0.667))); }
+
+#ifndef FINISH_LOD
+// SCENE METAL (the composer looks, environment.ts: uFinEnvOn = 1): the blade reflects the real scene around the
+// camera (a world-space cube, so the reflection moves as you look around) over the studio's clean bands, and the
+// look's own sun. A coloured metal under a thin clear coat: the metal reflects the light tinted by F0 (Schlick fresnel,
+// whiter toward grazing), the coat adds a faint untinted mirror that takes over at grazing angles, and the sun puts a
+// crisp soft box and a tight GGX glint on both (only when the sky is open toward the sun: the cube's blurred radiance
+// in the sun's direction gates it). Roughness picks the cube's mip level.
+uniform samplerCube uFinEnv;
+uniform float uFinEnvOn;
+uniform vec3 uFinSunDir, uFinSunColor;
+vec3 finEnv(vec3 R, float rough) { return textureLod(uFinEnv, R, rough * ${FIN_ENV_LODS.toFixed(1)}).rgb; }
+float finLum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+// The cube holds the scene as drawn (sky and sunlit stone come out near white, though they are far brighter than a
+// shaded wall): give its brightest parts back some range, so the sky reflects as a hot band, as on real chrome.
+vec3 finHot(vec3 e) { return e * (1.0 + 2.2 * smoothstep(0.5, 0.95, finLum(e))); }
+// Whether the sky is open toward the sun from here (the cube's blurred light that way): indoors, no sun highlights.
+float finOpen() { return smoothstep(0.06, 0.45, finLum(finEnv(uFinSunDir, 0.45))); }
+// GGX glint from the sun, peak-limited so the sharpest one stays a clean hot point instead of a blown-out disc.
+float finGlint(vec3 n, vec3 V, float rough) {
+  vec3 H = normalize(uFinSunDir + V);
+  float nh = max(dot(n, H), 0.0), nl = max(dot(n, uFinSunDir), 0.0);
+  float a2 = pow(max(rough * rough, 0.003), 2.0);
+  float d = nh * nh * (a2 - 1.0) + 1.0;
+  return min(a2 / (3.14159 * d * d) * 0.25 * nl, 18.0) * finOpen();
+}
+// The scene as the metals see it: desaturated toward its own light (keep = how much of the scene's colour stays), and
+// never darker than the studio's bands: a dark wall still shows the clean horizon and strip, the scene only brightens.
+vec3 finOnStudio(vec3 e, vec3 studio, float keep) { return max(mix(vec3(finLum(e)), e, keep), studio * 0.9); }
+vec3 finSceneMetal(vec3 F0, float rough, float u, float v, vec2 P, vec3 n, vec3 V) {
+  float nv = max(dot(n, V), 1e-3);
+  vec3 Rw = reflect(-V, n);
+  // A slight bend across the blade (like the studio's, smaller): a flat face still shows the scene's horizon as a line.
+  vec3 R = normalize(Rw + vec3(0.0, 0.12 * v, 0.0));
+  float fc = pow(1.0 - nv, 5.0);
+  vec3 F = F0 + (1.0 - F0) * fc;
+  float coat = 0.04 + 0.96 * fc;
+  float sat = (max(F0.r, max(F0.g, F0.b)) - min(F0.r, min(F0.g, F0.b))) / max(F0.r, max(F0.g, F0.b));
+  // The tinted metals keep a quarter of the scene's colour (the gem colour stays pure), chrome about two thirds.
+  float keep = mix(0.65, 0.25, sat);
+  // The studio's bands (view-locked, as on Source / Plain) under the moving scene.
+  vec3 Rv = finBent((viewMatrix * vec4(Rw, 0.0)).xyz, u, v);
+  vec3 studio = finStudio(Rv);
+  // The coloured layer: the scene blurred well past texture detail (no foliage or concrete reads as a pattern).
+  vec3 env = finOnStudio(finHot(finEnv(R, rough + 0.32)), studio, keep);
+  // The clear coat: sharper, so the scene's shapes still slide over the blade.
+  vec3 envc = finOnStudio(finHot(finEnv(R, rough * 0.5 + 0.1)), studio, keep);
+  float streak = 1.0 + 0.03 * gnoise(vec2(P.x * 0.5, P.y * 46.0));
+  vec3 col = env * F * (1.0 - coat) * streak + envc * coat;
+  // Highlights: the sun as a small soft box with a crisp edge and the tight GGX glint at its centre.
+  float open = finOpen();
+  float rl = max(dot(R, uFinSunDir), 0.0);
+  vec3 white = mix(F, vec3(1.0), 0.45);
+  col += uFinSunColor * (smoothstep(0.986, 0.994, rl) * 1.1 + finGlint(n, V, rough)) * open * white;
+  // Glow: no bloom reaches the first-person knife (it is drawn after post-processing), so the hottest light gets a soft
+  // halo on the blade itself: around the sun's highlight, along the studio's horizon line, and around the brightest
+  // parts of the scene (its blurred light above white).
+  float halo = pow(rl, 40.0) * 0.45 * open + exp(-abs(Rv.y) * 14.0) * 0.16;
+  halo += max(finLum(finEnv(R, 0.7)) - 0.85, 0.0) * 0.6;
+  col += halo * white * mix(vec3(1.0), uFinSunColor, open * 0.5);
+  return col;
+}
+#endif
+
+vec3 polishedShade(float u, float v, vec2 P, vec3 n, vec3 V, vec3 L, vec3 ambient, float key) {
+  float nv = max(dot(n, V), 0.0);
+#if FINISH == 25
+  // PEARL: a white pearl metal, satin rather than mirror. Its sheen is a thin film: the hue walks pink, gold, mint,
+  // lilac as the angle to the face changes, already there head-on and stronger toward the edges, the film a little
+  // thicker in broad soft patches so the colours aren't uniform.
+  vec3 R = reflect(-V, n);
+  float film = 0.55 * fbm3(P * vec2(0.32, 0.9) + vec2(3.0, 8.0)) + (1.0 - nv) * 1.1 + u * 0.2 + v * 0.1;
+  vec3 sheen = mix(vec3(1.0), finHue(film + 0.92), 0.30 + 0.40 * pow(1.0 - nv, 1.5));
+  vec3 base = vec3(0.80, 0.78, 0.77);
+#ifndef FINISH_LOD
+  if (uFinEnvOn > 0.5) {
+    // Lit by the scene: its blurred light around the normal, a glossy coat reflecting it through the sheen, a soft glint.
+    vec3 Rs = normalize(R + vec3(0.0, 0.22 * v, 0.0));
+    float coat = 0.06 + 0.94 * pow(1.0 - nv, 5.0);
+    vec3 col = base * sheen * (finEnv(n, 0.85) * 0.9 + uFinSunColor * max(dot(n, uFinSunDir), 0.0) * 0.25);
+    // Over the soft studio gradient (as on Source / Plain), the scene half desaturated so the sheen stays the colour.
+    float sy = finBent((viewMatrix * vec4(R, 0.0)).xyz, u, v).y;
+    vec3 soft = mix(vec3(0.22, 0.21, 0.22), vec3(1.0, 1.02, 1.06), smoothstep(-0.35, 0.45, sy));
+    col += finOnStudio(finEnv(Rs, 0.34), soft, 0.5) * sheen * (0.22 + 0.78 * coat);
+    col += uFinSunColor * finGlint(n, V, 0.22) * sheen;
+    return col;
+  }
+#endif
+  vec3 col = base * sheen * (ambient * 0.9 + key * vec3(0.78, 0.74, 0.68) * 0.55);
+  // A soft (blurred) studio reflection tinted by the sheen.
+  vec3 Rb = finBent((viewMatrix * vec4(R, 0.0)).xyz, u, v);
+  float y = Rb.y;
+  vec3 env = mix(vec3(0.22, 0.21, 0.22), vec3(1.0, 1.02, 1.06), smoothstep(-0.35, 0.45, y));
+  col += env * sheen * (0.30 + 0.45 * pow(1.0 - nv, 2.0));
+  float rl = max(dot(R, L), 0.0);
+  col += sheen * (pow(rl, 90.0) * 1.1 + pow(rl, 14.0) * 0.18);
+  return col;
+#else
+#if FINISH == 22
+  // EMERALD STEEL: deep green tinted chrome.
+  vec3 F0 = vec3(0.02, 0.42, 0.15);
+  float rough = 0.07;
+#elif FINISH == 23
+  // RUBY STEEL: deep red tinted chrome.
+  vec3 F0 = vec3(0.62, 0.02, 0.06);
+  float rough = 0.07;
+#elif FINISH == 24
+  // SAPPHIRE STEEL: deep blue tinted chrome.
+  vec3 F0 = vec3(0.04, 0.16, 0.72);
+  float rough = 0.07;
+#elif FINISH == 26
+  // CHROMATIC: polished chrome washed in a rainbow that turns with the angle you see it at, runs a little along the
+  // blade and drifts slowly round the wheel (one turn every ~24 s; still in Potato mode, the clock holds).
+  float h = (1.0 - nv) * 0.9 + u * 0.55 + v * 0.08 - uFinTime / 24.0;
+  vec3 F0 = mix(vec3(0.95), finHue(h) * 0.9 + 0.05, 0.78);
+  float rough = 0.06;
+#else
+  // CHROME (27): plain bright polished chrome.
+  vec3 F0 = vec3(0.88, 0.89, 0.91);
+  float rough = 0.045;
+#endif
+#ifndef FINISH_LOD
+  if (uFinEnvOn > 0.5) return finSceneMetal(F0, rough, u, v, P, n, V);
+#endif
+  return finMetal(F0, u, v, P, n, V, L, ambient, key);
+#endif
+}
+#endif
+
 // The finished blade's shaded colour (n: front-facing normal, V: to the eye, L: key light, ambient, key).
 vec3 finishShade(vec3 n, vec3 V, vec3 L, vec3 ambient, float key) {
   float u = clamp(vFin.x, 0.0, 1.0), v = clamp(vFin.y, -1.0, 1.0);
   vec2 P = vec2(2.3 + u * 8.9, v * finRad(u));
+#if FINISH >= 22
+  return polishedShade(u, v, P, n, V, L, ambient, key);
+#else
   float metal, sparkle;
   vec3 emit;
   vec3 alb = finishAlbedo(u, v, P, metal, sparkle, emit);
   // Keep the carrot's growth rings as faint grooves under the paint.
   alb *= mix(0.86, 1.0, step(0.15, vColor.g));
-  // The player material's toon key + ambient, plus a stylised metal reflection (sky / ground, sharp highlight).
   vec3 R = reflect(-V, n);
-  float envT = smoothstep(-0.25, 0.75, R.y);
-  vec3 env = mix(vec3(0.12, 0.11, 0.13), vec3(1.05, 1.08, 1.15), envT);
-  float spec = pow(max(dot(R, L), 0.0), 48.0);
   vec3 diffuse = alb * (ambient + key * vec3(0.78, 0.74, 0.68));
-  vec3 metallic = alb * (env * 0.75 + key * 0.45);
+  float lv = cosLevel();
+  if (lv < 0.5) {
+    // Potato / Plain (detail level 0, finishes/detail.ts): the player material's toon key + ambient, plus a stylised
+    // metal reflection (sky / ground, sharp highlight). Unchanged since v0.0.6.
+    float envT = smoothstep(-0.25, 0.75, R.y);
+    vec3 env = mix(vec3(0.12, 0.11, 0.13), vec3(1.05, 1.08, 1.15), envT);
+    float spec = pow(max(dot(R, L), 0.0), 48.0);
+    vec3 metallic = alb * (env * 0.75 + key * 0.45);
+    vec3 col = mix(diffuse, metallic, metal);
+    col += spec * mix(vec3(1.0), alb * 2.0, 0.3) * (0.35 + 0.65 * metal);
+    col += sparkle * vec3(1.0) * (0.4 + 0.6 * pow(max(dot(n, V), 0.0), 2.0));
+    float rim = pow(1.0 - max(dot(n, V), 0.0), 3.0);
+    col += rim * 0.18 * mix(vec3(1.0), alb, 0.5);
+    // Self-lit parts (the Supporter finishes' veins, dots and glints): not shaded, so they glow in any light.
+    return col + emit;
+  }
+  // Source and up: each part shades as what it is. The metallic share reflects the studio (Source) or the scene
+  // (Enhanced / Cinematic, first person: detail.ts cosReflect, the metals' clean-bands / desaturate / blur treatment)
+  // tinted by the pattern; the painted share is the toon diffuse; the whole blade sits under a thin clear coat (an
+  // untinted reflection that takes over at grazing angles); a crisp highlight; the honed edge catches a bright line;
+  // glow parts stay self-lit (Enhanced: with a soft halo spilling round them).
+  float nv = max(dot(n, V), 0.0);
+  float fc = pow(1.0 - nv, 5.0);
+  vec3 H = normalize(L + V);
+  float nh = max(dot(n, H), 0.0);
+  vec3 refl = cosReflect(R, mix(0.3, 0.07, metal), lv);
+  vec3 metallic = alb * (refl * 0.82 + key * 0.3);
+  // Enhanced: faint polishing streaks along the blade on the metallic share.
+  if (lv > 1.5) metallic *= 1.0 + 0.05 * metal * gnoise(vec2(P.x * 0.6, P.y * 52.0));
   vec3 col = mix(diffuse, metallic, metal);
-  col += spec * mix(vec3(1.0), alb * 2.0, 0.3) * (0.35 + 0.65 * metal);
-  col += sparkle * vec3(1.0) * (0.4 + 0.6 * pow(max(dot(n, V), 0.0), 2.0));
-  float rim = pow(1.0 - max(dot(n, V), 0.0), 3.0);
-  col += rim * 0.18 * mix(vec3(1.0), alb, 0.5);
-  // Self-lit parts (the Supporter finishes' veins, dots and glints): not shaded, so they glow in any light.
+  // The coat: bent a little across the blade (like the metals' studio), so even a flat face shows the horizon as a
+  // clean line running along it.
+  vec3 Rc = normalize(R + vec3(0.0, 0.35 * v - 0.08, 0.0));
+  // (Capped, so a bright sky never washes a dark finish out at grazing angles: the pattern stays the finish.)
+  col += min(cosReflect(Rc, 0.04, lv), vec3(1.0)) * (0.06 + 0.94 * fc) * (0.5 - 0.25 * metal);
+  col += mix(vec3(1.0), alb, 0.3) * (pow(nh, 200.0) * 1.6 + pow(nh, 26.0) * 0.12) * (0.3 + 0.7 * key) * (0.4 + 0.6 * metal);
+  col += sparkle * vec3(1.0) * (0.4 + 0.6 * pow(nv, 2.0));
+  float tip = smoothstep(0.85, 1.0, u);
+  col += mix(vec3(1.0), alb, 0.35) * smoothstep(0.9, 0.985, vFin.w) * step(tip + 0.02, vFin.w) * (0.25 + 0.35 * key);
   col += emit;
+#if (FINISH == 10 || FINISH == 11 || FINISH == 12 || FINISH == 13 || FINISH == 14 || FINISH == 16 || FINISH == 18) && !defined(FINISH_LOD)
+  if (lv > 1.5) {
+    // Halo: the glow of the pattern around this point (four taps a little way off, in pattern space) spills onto it,
+    // so glowing veins, dots and streaks bloom softly on the blade (the first-person knife is drawn after the
+    // post-processing, so no real bloom reaches it).
+    float m2, s2;
+    vec3 e2, hs = vec3(0.0);
+    for (int i = 0; i < 4; i++) {
+      vec2 o = i == 0 ? vec2(1.0, 0.0) : i == 1 ? vec2(-1.0, 0.0) : i == 2 ? vec2(0.0, 1.0) : vec2(0.0, -1.0);
+      float uu = clamp(u + o.x * 0.02, 0.0, 1.0), vv = clamp(v + o.y * 0.18, -1.0, 1.0);
+      finishAlbedo(uu, vv, vec2(2.3 + uu * 8.9, vv * finRad(uu)), m2, s2, e2);
+      hs += e2;
+    }
+    col += max(hs * 0.25 - emit * 0.4, 0.0) * 0.55 + emit * 0.12;
+  }
+#endif
   return col;
+#endif
 }
 #endif`;
 

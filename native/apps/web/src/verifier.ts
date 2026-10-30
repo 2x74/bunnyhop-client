@@ -3,10 +3,10 @@
 // Never trusts the time stored in the replay: re-simulates the commands against authoritative zones.
 
 import { isPhysicsVersion, type Core, type PlayerState, type Settings } from "./core";
-import { replayPhysics, replayStyle, replayTimerRules, styleReplayAllowed, type Replay } from "./replay";
+import { replayPhysics, replayStyle, replayTimerRules, styleReplayProblem, type Replay } from "./replay";
 import { restartNamesAllowed, restartPointProblem } from "./restart";
 import { SimRun, type SimOptions, type SimResult } from "./sim";
-import { BONUS_STYLE, STYLE_DEFS, styleDef, stylePrespeedCap, styleSettings } from "./styles";
+import { BONUS_STYLE, isSegmented, STYLE_DEFS, styleDef, stylePrespeedCap, styleSettings } from "./styles";
 import { isTimerRules } from "./timer";
 import type { RunTiming } from "./run-timing";
 import { HULL_HEIGHT, zonesEqual, type Zone } from "./zones";
@@ -90,6 +90,8 @@ export interface VerifyResult {
    * is what the boards rank.
    */
   rules1?: { ticks: number; startTick: number; endTick: number; timeMs: number };
+  /** Segmented runs: the checkpoint loads on the stitched path (replay.segments), each proven a saved state. Absent: none. */
+  segmentLoads?: number;
 }
 
 /** Result for a replay whose simulation stopped early (a desync): invalid, nothing timed. */
@@ -169,7 +171,10 @@ function beginVerify(core: Core, replay: Replay, zones: readonly Zone[], opts: V
   }
   if (!def) problems.push(`unknown style ${style}`);
   else if (def.autohop !== h.settings.autohop) problems.push(`style ${def.name} ${def.autohop ? "requires" : "forbids"} autohop`);
-  if (!styleReplayAllowed(h)) problems.push("style lowgrav requires replay v9, physics v10 and timer rules 2 or later");
+  const styleProblem = styleReplayProblem(h);
+  if (styleProblem) problems.push(styleProblem);
+  // Checkpoint loads that rewind the run are Segmented's rule; any other style's run is one continuous attempt.
+  if (replay.segments?.length && !isSegmented(style)) problems.push(`${replay.segments.length} segment load(s) in a ${def?.name ?? style} run: only Segmented runs load checkpoints`);
   const physics = replayPhysics(h);
   if (!isPhysicsVersion(physics)) {
     // Not simulable by this build (a newer client's replay, or a forged field): reject without simulating.
@@ -229,6 +234,14 @@ function concludeVerify(replay: Replay, problems: string[], sim: SimResult, simM
   const finalStateMatches =
     !!last && last.tick === sim.ticks && [0, 1, 2].every((i) => Object.is(last.position[i], sim.final.position[i]) && Object.is(last.velocity[i], sim.final.velocity[i]));
 
+  // Segmented (research/SEGMENTED.md): the commands are the stitched path, and each recorded load must restore exactly
+  // the state the re-simulation reaches at its tick, i.e. one the run reached and saved there.
+  const seg = sim.segments;
+  if (seg && seg.mismatchTick !== null) {
+    problems.push(`segment load at tick ${seg.mismatchTick} restores a state this run never saved (not the run's position and velocity at that tick)`);
+  } else if (seg && stoppedAt === null && seg.checked < (replay.segments?.length ?? 0)) {
+    problems.push(`${(replay.segments?.length ?? 0) - seg.checked} segment load(s) after the replay's last tick`);
+  }
   if (!sim.checkpointsMatch) problems.push(`desync: checkpoint mismatch at tick ${sim.firstMismatchTick}`);
   if (stoppedAt !== null) {
     // Stopped at the first desync (verifyReplaySliced): the finish checks would only describe the unsimulated rest.
@@ -280,5 +293,6 @@ function concludeVerify(replay: Replay, problems: string[], sim: SimResult, simM
     stats: { jumps: ranked.timer.jumps, strafes: ranked.timer.strafes, sync: ranked.timer.syncPercent(), perf: ranked.timer.perfPercent() },
     simMs,
     ...(rules1 ? { rules1 } : {}),
+    ...(replay.segments?.length ? { segmentLoads: replay.segments.length } : {}),
   };
 }

@@ -519,37 +519,40 @@
     "gun_draw": {
       "variants": 1,
       "durations": [
-        0.372
+        0.213
       ],
       "loop": false,
       "loopStart": 0,
       "loopEnd": 0
     },
     "gun_thumper_fire": {
-      "variants": 2,
+      "variants": 3,
       "durations": [
-        0.5,
-        0.5
+        0.154,
+        0.301,
+        0.237
       ],
       "loop": false,
       "loopStart": 0,
       "loopEnd": 0
     },
     "gun_cottontail_fire": {
-      "variants": 2,
+      "variants": 3,
       "durations": [
-        0.5,
-        0.5
+        0.177,
+        0.172,
+        0.199
       ],
       "loop": false,
       "loopStart": 0,
       "loopEnd": 0
     },
     "gun_jackrabbit_fire": {
-      "variants": 2,
+      "variants": 3,
       "durations": [
-        0.577,
-        0.574
+        0.545,
+        0.39,
+        0.227
       ],
       "loop": false,
       "loopStart": 0,
@@ -558,18 +561,19 @@
     "gun_broadfork_fire": {
       "variants": 2,
       "durations": [
-        0.39,
-        0.432
+        0.52,
+        0.57
       ],
       "loop": false,
       "loopStart": 0,
       "loopEnd": 0
     },
     "gun_hedgerow_fire": {
-      "variants": 2,
+      "variants": 3,
       "durations": [
-        0.536,
-        0.428
+        0.293,
+        0.244,
+        0.375
       ],
       "loop": false,
       "loopStart": 0,
@@ -578,9 +582,9 @@
     "gun_seeddrill_fire": {
       "variants": 3,
       "durations": [
-        0.3,
-        0.3,
-        0.3
+        0.144,
+        0.149,
+        0.184
       ],
       "loop": false,
       "loopStart": 0,
@@ -589,7 +593,7 @@
     "gun_pump": {
       "variants": 1,
       "durations": [
-        0.344
+        0.531
       ],
       "loop": false,
       "loopStart": 0,
@@ -608,7 +612,7 @@
     "gun_mag_out": {
       "variants": 1,
       "durations": [
-        0.134
+        0.234
       ],
       "loop": false,
       "loopStart": 0,
@@ -617,7 +621,7 @@
     "gun_mag_in": {
       "variants": 1,
       "durations": [
-        0.118
+        0.098
       ],
       "loop": false,
       "loopStart": 0,
@@ -626,7 +630,7 @@
     "gun_slide": {
       "variants": 1,
       "durations": [
-        0.261
+        0.481
       ],
       "loop": false,
       "loopStart": 0,
@@ -635,7 +639,7 @@
     "gun_bolt": {
       "variants": 1,
       "durations": [
-        0.408
+        0.356
       ],
       "loop": false,
       "loopStart": 0,
@@ -644,7 +648,7 @@
     "gun_pod_out": {
       "variants": 1,
       "durations": [
-        0.363
+        0.409
       ],
       "loop": false,
       "loopStart": 0,
@@ -653,7 +657,7 @@
     "gun_pod_in": {
       "variants": 1,
       "durations": [
-        0.229
+        0.181
       ],
       "loop": false,
       "loopStart": 0,
@@ -662,8 +666,8 @@
     "gun_dry": {
       "variants": 2,
       "durations": [
-        0.141,
-        0.146
+        0.116,
+        0.135
       ],
       "loop": false,
       "loopStart": 0,
@@ -672,7 +676,7 @@
     "gun_pickup": {
       "variants": 1,
       "durations": [
-        0.375
+        0.28
       ],
       "loop": false,
       "loopStart": 0,
@@ -681,17 +685,18 @@
     "gun_mode": {
       "variants": 1,
       "durations": [
-        0.076
+        0.12
       ],
       "loop": false,
       "loopStart": 0,
       "loopEnd": 0
     },
     "gun_cottontail_silenced": {
-      "variants": 2,
+      "variants": 3,
       "durations": [
-        0.45,
-        0.45
+        0.165,
+        0.153,
+        0.215
       ],
       "loop": false,
       "loopStart": 0,
@@ -775,6 +780,57 @@
       "variants": 1,
       "durations": [
         0.18
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_furrow_fire": {
+      "variants": 3,
+      "durations": [
+        0.134,
+        0.142,
+        0.287
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_beanpole_fire": {
+      "variants": 2,
+      "durations": [
+        0.635,
+        0.741
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_beanpole_bolt": {
+      "variants": 1,
+      "durations": [
+        0.382
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_case_metal": {
+      "variants": 3,
+      "durations": [
+        0.204,
+        0.243,
+        0.305
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "gun_case_shell": {
+      "variants": 2,
+      "durations": [
+        0.103,
+        0.102
       ],
       "loop": false,
       "loopStart": 0,
@@ -888,6 +944,116 @@
       "role": "game",
       "duration": 125.64,
       "bpm": 80,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    },
+    {
+      "id": "game-maxvel",
+      "title": "Maxvel",
+      "role": "game",
+      "duration": 127.38,
+      "bpm": 155,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    },
+    {
+      "id": "game-booster",
+      "title": "Booster",
+      "role": "game",
+      "duration": 128.75,
+      "bpm": 138,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    },
+    {
+      "id": "game-perf",
+      "title": "Perf",
+      "role": "game",
+      "duration": 128.47,
+      "bpm": 122,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    },
+    {
+      "id": "game-noclip",
+      "title": "Noclip",
+      "role": "game",
+      "duration": 128.38,
+      "bpm": 110,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    },
+    {
+      "id": "game-tickrate",
+      "title": "Tickrate",
+      "role": "game",
+      "duration": 129.49,
+      "bpm": 150,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    },
+    {
+      "id": "game-edgebug",
+      "title": "Edgebug",
+      "role": "game",
+      "duration": 127.93,
+      "bpm": 165,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    },
+    {
+      "id": "game-jumpbug",
+      "title": "Jumpbug",
+      "role": "game",
+      "duration": 125.57,
+      "bpm": 175,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    },
+    {
+      "id": "game-godlike",
+      "title": "Godlike",
+      "role": "game",
+      "duration": 131.07,
+      "bpm": 180,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    },
+    {
+      "id": "game-prespeed",
+      "title": "Prespeed",
+      "role": "game",
+      "duration": 126.272,
+      "bpm": 190,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    },
+    {
+      "id": "game-surf",
+      "title": "Surf",
+      "role": "game",
+      "duration": 121.18,
+      "bpm": 172,
+      "loopStart": 0,
+      "loopEnd": 0,
+      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
+    },
+    {
+      "id": "menu-spectate",
+      "title": "Spectate (menu)",
+      "role": "menu",
+      "duration": 112.06,
+      "bpm": 92,
       "loopStart": 0,
       "loopEnd": 0,
       "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"

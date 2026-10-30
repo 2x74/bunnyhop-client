@@ -484,6 +484,8 @@ export class ReplayViewer implements ExportSource {
     this.hud.reset();
     this.hud.setTickRate(d.tickrate);
     this.timeline.setData(d);
+    // A Segmented replay is the stitched run: it plays straight through; the timeline marks where each load continued it.
+    this.timeline.setSegments((replay.segments ?? []).map((l) => l.tick));
     this.rig.setShots([]);
     if (this.rig.mode === "auto") this.autoShots();
     this.t = d.startTick ? Math.max(0, d.startTick - d.tickrate) : 0;
@@ -539,7 +541,9 @@ export class ReplayViewer implements ExportSource {
     const time = d.endTick ? formatTime(finalRunTime(d)!) : "DNF";
     this.titleEl.replaceChildren(h("b", null, this.playerName() || "unknown"), h("span.rv-time-big", null, time));
     const track = d.runTrack || h0.track || 0;
-    this.subEl.textContent = [h0.map, track ? trackName(track) : "", styleLabel(replayStyle(h0)), `${d.tickrate} tick`, this.label, new Date(h0.recordedAt).toLocaleDateString()].filter(Boolean).join(" · ");
+    const loads = r.segments?.length ?? 0;
+    const style = styleLabel(replayStyle(h0)) + (loads ? ` (${loads} load${loads === 1 ? "" : "s"})` : "");
+    this.subEl.textContent = [h0.map, track ? trackName(track) : "", style, `${d.tickrate} tick`, this.label, new Date(h0.recordedAt).toLocaleDateString()].filter(Boolean).join(" · ");
     this.noticeEl.textContent = this.notice;
     this.noticeEl.hidden = !this.notice;
   }

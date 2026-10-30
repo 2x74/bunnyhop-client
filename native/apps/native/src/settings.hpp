@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include "window_settings.hpp"
+#include "hud_geometry.hpp"
 #if __has_include("graphics_settings.hpp")
 #include "graphics_settings.hpp"
 #endif
@@ -19,7 +20,7 @@
 namespace native {
 using Json = nlohmann::json;
 inline const std::set<std::string> styles = {
-        "autohop", "legit", "scroll", "wonly", "sideways", "hsw", "lowgrav", "autostrafe"
+        "autohop", "legit", "scroll", "wonly", "sideways", "hsw", "lowgrav", "segmented", "autostrafe"
 };
 
 // EZ Scroll ("legit") and Legit Scroll ("scroll"): every hop is a timed press, so
@@ -57,6 +58,10 @@ inline Json default_hud_layout_web() {
             {"practice", place(true, 4, 0, .032)}};
 }
 
+// Revision of the default viewmodel framing (viewmodel/defaults.ts VIEWMODEL_REV): 3 is v0.0.29's wider framing, with
+// the gloves, cuffs and some sleeve in view. The website's CS:S preset keeps the old one.
+inline constexpr int viewmodel_revision = 3;
+
 inline Json default_settings() {
     Json result = {
             {"sensitivity", 2.0},
@@ -66,6 +71,7 @@ inline Json default_settings() {
             {"invertY", false},
             {"holdRestart", false},
             {"mouseDiagnostics", false},
+            {"inputBackend", "auto"},
             // Hidden: false goes back to the per-frame proration comparator (also --legacy-input). See timed_input.hpp.
             {"timedInput", true},
             {"crosshairStyle", "cross"},
@@ -75,10 +81,11 @@ inline Json default_settings() {
             {"crosshairThickness", 2.0},
             {"crosshairAlpha", 1.0},
             {"crosshairOutline", true},
-            {"viewmodelFov", 54.0},
-            {"viewmodelX", .6},
+            {"viewmodelFov", 64.0},
+            {"viewmodelX", .5},
             {"viewmodelY", 1.5},
-            {"viewmodelZ", -.9},
+            {"viewmodelZ", 0.0},
+            {"viewmodelRev", viewmodel_revision},
             {"viewmodelLeftHand", false},
             {"viewmodelBob", 1.0},
             {"viewmodelSway", 1.0},
@@ -128,6 +135,9 @@ inline Json default_settings() {
             {"vsync", false},
             {"fpsLimit", 1000},
             {"limitQueuedFrames", true},
+            // Windows: present through DXGI ("on", "boost" adds NVIDIA's clock boost) with Reflex or Anti-Lag 2.
+            {"lowLatencyMode", "off"},
+            {"reflexFlash", false},
             {"volume", .8},
             {"muted", false},
             {"hudScale", 100.0},
@@ -235,8 +245,9 @@ inline Json default_settings() {
               {"cpNext", Json::array()},
               {"mainMenu", Json::array()},
               {"noclip", {"KeyZ"}},
-              {"chat", {"KeyY"}},
-              {"commandChat", {"KeyU"}},
+              // Chat (say / say_team in CS:S), as the website binds it: Y and U.
+              {"chat", {"KeyY", "KeyU"}},
+              {"commandChat", Json::array()},
               {"scoreboard", {"Tab"}},
               {"spectatorNext", Json::array()},
               {"spectatorPrevious", Json::array()},
@@ -352,6 +363,30 @@ inline bool valid_bind_code(const std::string &code) {
     return other.contains(code);
 }
 
+// A website layout change that moves an element (a preset, a layout code) replaces a v0.5.1 placement of that
+// element. Showing or hiding one moves nothing, so placements made in v0.5.1 stay.
+inline void drop_moved_legacy_places(Json &legacy, const Json &before, const Json &after) {
+    for (const auto &[id, place] : after.items()) {
+        const auto old = before.find(id);
+        bool moved = old == before.end();
+        for (const char *field : {"a", "x", "y", "s"})
+            moved = moved || !old->contains(field) || old->at(field) != place.value(field, Json());
+        if (!moved) continue;
+        for (auto entry = legacy.begin(); entry != legacy.end();) {
+            if (canonical_hud_id(entry.key()) == canonical_hud_id(id))
+                entry = legacy.erase(entry);
+            else
+                ++entry;
+        }
+    }
+}
+
+inline bool strafe_trainer_enabled(const Json &settings) {
+    const auto &layout = settings.at("hudLayoutWeb");
+    const auto trainer = layout.find("strafeTrainer");
+    return trainer == layout.end() ? settings.at("strafeTrainer").get<bool>() : trainer->at("on").get<bool>();
+}
+
 // A patch is atomic. Invalid persisted input never silently changes half the controls.
 inline Json patch_settings(const Json &current, const Json &patch, bool switch_layout = true) {
     if (!patch.is_object() || patch.size() > 256) throw std::runtime_error("Invalid settings object");
@@ -370,6 +405,14 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
         } else if (key == "windowMode") {
             if (!v.is_string() || !valid_window_mode(v.get<std::string>()))
                 throw std::runtime_error("Invalid window mode");
+        } else if (key == "fullscreenMode") {
+            const auto mode = read_fullscreen_mode(v);
+            if (!mode) throw std::runtime_error("Invalid fullscreen mode");
+            out[key] = fullscreen_mode_json(*mode);
+            continue;
+        } else if (key == "fullscreenScaling") {
+            if (!v.is_string() || !valid_fullscreen_scaling(v.get<std::string>()))
+                throw std::runtime_error("Invalid fullscreen scaling");
         } else if (defaults[key].is_boolean()) {
             if (!v.is_boolean()) throw std::runtime_error("Setting must be true or false: " + key);
         } else if (key == "binds") {
@@ -421,7 +464,8 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
                     || (!place.contains("x") && !place.contains("visible") && !place.contains("scale")))
                     throw std::runtime_error("HUD position needs both axes");
             }
-            if (web_schema && switch_layout && !patch.contains("hudLayout")) out["hudLayout"] = Json::object();
+            if (web_schema && switch_layout && !patch.contains("hudLayout"))
+                drop_moved_legacy_places(out["hudLayout"], current.at("hudLayoutWeb"), v);
         } else if (key == "triggersStyle" || key == "audioMusicMode") {
             const auto choices = key == "triggersStyle" ? std::set<std::string>{"filled", "outline", "bottom"}
                                                         : std::set<std::string>{"always", "menus", "off"};
@@ -469,6 +513,12 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
         } else if (key == "colorBlind") {
             if (!v.is_string() || (v != "off" && v != "redGreen" && v != "blueYellow"))
                 throw std::runtime_error("Unknown color-blind palette");
+        } else if (key == "lowLatencyMode") {
+            if (!v.is_string() || (v != "off" && v != "on" && v != "boost"))
+                throw std::runtime_error("Low latency mode must be off, on or boost");
+        } else if (key == "inputBackend") {
+            if (!v.is_string() || (v != "auto" && v != "sdl" && v != "raw"))
+                throw std::runtime_error("Invalid input backend");
         } else if (key == "waterQuality") {
             if (!v.is_string() || (v != "simple" && v != "refracted"))
                 throw std::runtime_error("Water quality must be simple or refracted");
@@ -523,7 +573,33 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
         }
         out[key] = v;
     }
+    // The menu's layout switch is authoritative; retain the old native key for saved settings and host messages.
+    if (patch.contains("hudLayoutWeb") && patch.at("hudLayoutWeb").contains("strafeTrainer")) {
+        out["strafeTrainer"] = out.at("hudLayoutWeb").at("strafeTrainer").at("on");
+    } else if (patch.contains("strafeTrainer")) {
+        out["hudLayoutWeb"]["strafeTrainer"]["on"] = out.at("strafeTrainer");
+    }
     return out;
+}
+
+// The website's viewmodel framing migration (ui/settings.ts migrateViewmodel): a saved framing still equal to the
+// default it was saved under is one the player never changed, so it moves to the current default. Any change of theirs
+// stays. Either way the file is marked current, so picking the CS:S preset (the old default) later sticks.
+inline void migrate_viewmodel(Json &saved) {
+    if (!saved.is_object()) return;
+    const auto revision = saved.find("viewmodelRev");
+    if (revision != saved.end() && revision->is_number() && revision->get<double>() >= viewmodel_revision) return;
+    const std::pair<const char *, double> previous[] = {
+            {"viewmodelFov", 54}, {"viewmodelX", .6}, {"viewmodelY", 1.5}, {"viewmodelZ", -.9}
+    };
+    const bool unchanged = std::all_of(std::begin(previous), std::end(previous), [&](const auto &field) {
+        return !saved.contains(field.first)
+               || (saved[field.first].is_number() && saved[field.first].template get<double>() == field.second);
+    });
+    if (unchanged)
+        for (const auto &field : previous)
+            saved.erase(field.first);
+    saved["viewmodelRev"] = viewmodel_revision;
 }
 
 // New installs start with VSync off and a 1000 FPS cap (lowest input latency; see display_defaults.hpp). A settings
@@ -544,6 +620,25 @@ inline void backup_settings(const std::filesystem::path &file) {
     auto previous = file;
     previous += ".previous";
     std::filesystem::copy_file(file, previous, std::filesystem::copy_options::overwrite_existing);
+}
+
+// Actions added after a player saved their binds get their default keys, minus any key the saved binds already use
+// (the website's migrateBinds), so a key the player gave to something else keeps it.
+inline void fill_new_binds(const Json &saved, Json &out) {
+    const auto binds = saved.find("binds");
+    if (binds == saved.end() || !binds->is_object()) return;
+    std::set<std::string> used;
+    for (const auto &[action, codes] : binds->items())
+        if (codes.is_array())
+            for (const auto &code : codes)
+                if (code.is_string()) used.insert(code.get<std::string>());
+    for (auto &[action, codes] : out["binds"].items()) {
+        if (binds->contains(action)) continue;
+        Json free = Json::array();
+        for (const auto &code : codes)
+            if (!used.contains(code.get<std::string>())) free.push_back(code);
+        codes = std::move(free);
+    }
 }
 
 inline Json load_settings(const std::filesystem::path &file) {
@@ -580,6 +675,7 @@ inline Json load_settings(const std::filesystem::path &file) {
     migrate_retired_models(saved);
 #endif
     keep_saved_display(saved);
+    migrate_viewmodel(saved);
     bool backed_up = false;
     for (auto entry = saved.begin(); entry != saved.end(); ++entry) {
         if (entry.key() == "binds" && entry->is_object()) {
@@ -602,6 +698,7 @@ inline Json load_settings(const std::filesystem::path &file) {
             std::cerr << "Ignoring setting " << entry.key() << ": " << error.what() << '\n';
         }
     }
+    fill_new_binds(saved, out);
     return out;
 }
 

@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { styleByName } from "../../web/src/chat-commands";
+import { styleAt, styleIndex } from "../../web/src/net/protocol";
+import { STYLE_DEFS, isStyleId, styleSettings } from "../../web/src/styles";
 import {
   NativeRunService,
   nativeBuildAllowed,
@@ -41,7 +44,7 @@ function deferred<T>() {
   });
   return { promise, resolve, reject };
 }
-function fixture(policy: () => Promise<VersionPolicy> = async () => allowed) {
+function fixture(policy: () => Promise<VersionPolicy> = async () => allowed, dpi?: () => number | null) {
   const statuses: RunServiceStatus[] = [],
     bodies: Parameters<RunApi["runBeat"]>[0][] = [],
     uploads: { bytes: Uint8Array; beats: string[] }[] = [];
@@ -64,6 +67,7 @@ function fixture(policy: () => Promise<VersionPolicy> = async () => allowed) {
     version: policy,
     origin: () => "https://bunnyhop.lol",
     send: (status) => statuses.push(status),
+    dpi,
   });
   return { service, api, statuses, bodies, uploads, requests };
 }
@@ -88,6 +92,54 @@ describe("native run service, mocked network only", () => {
     expect(f.uploads[0].beats).toEqual(["t0", "t1", "t2"]);
     expect(f.bodies.slice(1).every((body) => body.sid === "session")).toBe(true);
     expect(f.statuses.at(-1)?.status).toBe("verified");
+  });
+  test("the run's mouse settings go with the upload and its diagnostics follow the stored run", async () => {
+    const f = fixture();
+    const mice: unknown[] = [];
+    const attached: { id: string; diagnostics: object }[] = [];
+    f.api.submitRun = async (_bytes, options) => {
+      mice.push(options.mouse);
+      return { id: "stored-run", status: "verified", rank: 3 };
+    };
+    f.api.runDiagnostics = async (id, diagnostics) => {
+      attached.push({ id, diagnostics });
+    };
+    await reset(f.service);
+    const first = f.service.receive(beat(1, 0));
+    f.requests[0].resolve({ sid: "session", token: "t0" });
+    await first;
+    const diagnostics = { fps: 997, client: { kind: "native" } };
+    await f.service.receive({ ...finish(1), diagnostics, mouse: { sensitivity: 1.2 } });
+    expect(mice).toEqual([{ sensitivity: 1.2, dpi: null }]);
+    expect(attached).toEqual([{ id: "stored-run", diagnostics }]);
+  });
+  test("the DPI entered in Settings goes with the host's sensitivity", async () => {
+    const f = fixture(undefined, () => 1600);
+    const mice: unknown[] = [];
+    f.api.submitRun = async (_bytes, options) => {
+      mice.push(options.mouse);
+      return { id: "stored-run", status: "verified" };
+    };
+    await reset(f.service);
+    const first = f.service.receive(beat(1, 0));
+    f.requests[0].resolve({ sid: "session", token: "t0" });
+    await first;
+    await f.service.receive({ ...finish(1), mouse: { sensitivity: 0.9 } });
+    expect(mice).toEqual([{ sensitivity: 0.9, dpi: 1600 }]);
+  });
+  test("a refused upload has no run to attach diagnostics to", async () => {
+    const f = fixture();
+    const attached: string[] = [];
+    f.api.submitRun = async () => ({ id: "", status: "rejected", reason: "refused" });
+    f.api.runDiagnostics = async (id) => {
+      attached.push(id);
+    };
+    await reset(f.service);
+    const first = f.service.receive(beat(1, 0));
+    f.requests[0].resolve({ sid: "session", token: "t0" });
+    await first;
+    await f.service.receive({ ...finish(1), diagnostics: { fps: 60 } });
+    expect(attached).toEqual([]);
   });
   test("initial handshake shares a session with a beat queued before its reply", async () => {
     const f = fixture();
@@ -605,3 +657,43 @@ test.each(["beat", "finish"] as const)(
     expect(alreadySent).toBeGreaterThan(0);
   },
 );
+
+test("Segmented uploads with no heartbeats for an allowed native build", async () => {
+  const f = fixture();
+  await reset(f.service);
+  await f.service.receive({ ...beat(1, 0), style: "segmented" });
+  await f.service.receive({ ...beat(1, 400), style: "segmented" });
+  await f.service.receive({ ...finish(1), style: "segmented" });
+  expect(f.bodies).toHaveLength(0);
+  expect(f.uploads).toHaveLength(1);
+  expect(f.uploads[0].beats).toEqual([]);
+  expect(f.statuses.at(-1)?.status).toBe("verified");
+});
+
+// A checkpoint load after a finish sends a reset (client.cpp): the rewound run is a new attempt with its own upload.
+test("a Segmented run finished again after a checkpoint load uploads both finishes", async () => {
+  const f = fixture();
+  await reset(f.service);
+  await f.service.receive({ ...finish(1), style: "segmented" });
+  await reset(f.service, 2);
+  await f.service.receive({ ...finish(2), style: "segmented" });
+  expect(f.uploads).toHaveLength(2);
+  expect(f.uploads.map((upload) => upload.beats)).toEqual([[], []]);
+});
+
+test("Segmented still requires an admitted native build", async () => {
+  const f = fixture(async () => ({ wasm: identity.wasm, native: [] }));
+  await reset(f.service);
+  await f.service.receive({ ...finish(1), style: "segmented" });
+  expect(f.uploads).toHaveLength(0);
+  expect(f.statuses.at(-1)?.status).toBe("kept");
+});
+
+test("native style pickers and chat style commands offer Segmented", () => {
+  expect(STYLE_DEFS.some((style) => style.id === "segmented")).toBe(true);
+  expect(isStyleId("segmented")).toBe(true);
+  expect(styleSettings("segmented")).toEqual(styleSettings("autohop"));
+  expect(styleIndex("segmented")).toBe(8);
+  expect(styleAt(8)).toBe("segmented");
+  for (const alias of ["seg", "segment", "segmented"]) expect(styleByName(alias)).toBe("segmented");
+});

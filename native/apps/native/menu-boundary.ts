@@ -46,8 +46,10 @@ const adapters: Record<string, string> = {
   "ui/controls": "settings-controls.ts",
   // Account sync with the native-only settings in the same document.
   "platform/settings-sync": "settings-sync.ts",
-  // The Sky picker installs sky packs with converters that load Three; the native renderer uses each map's sky.
+  // The Sky picker and Sky packs: the host keeps, fetches and decodes the skies (sky_library.cpp).
   "sky-packs/settings": "sky-settings.ts",
+  // Cinematic's sky comes from the host; the menu downloads nothing into the browser.
+  "graphics/cinematic-assets": "cinematic-assets.ts",
 };
 // Checked after the adapters: input stays forbidden apart from its command bits.
 const forbiddenGameModules = ["main", "render", "session", "attract", "input"];

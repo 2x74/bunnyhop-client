@@ -10,12 +10,15 @@
 //   setDrawTargets((scene) => ({ screen, offscreen }))   the renderer front (pipeline.ts) says where `scene` is drawn
 //   await warmPrograms(renderer, root, camera, scene)       compiles `root`'s programs for those, in parallel
 import * as THREE from "three";
+import { gammaBlendMeshes, isGammaBlend } from "./gamma-blend";
 
 export interface DrawTargets {
   /** Drawn straight to the canvas. */
   screen: boolean;
   /** Drawn into a render target (any target: they all share the linear-output variant). */
   offscreen: boolean;
+  /** The map's blended surfaces are drawn to the canvas even when the rest isn't (gamma-blend.ts). */
+  blendedOnScreen?: boolean;
 }
 
 let drawTargets: (scene: THREE.Scene) => DrawTargets = () => ({ screen: true, offscreen: false });
@@ -60,6 +63,15 @@ export async function warmPrograms(renderer: THREE.WebGLRenderer, root: THREE.Ob
   for (let i = 0; i < targets.length; i++) {
     if (i) await nextTask();
     bound(renderer, targets[i], () => renderer.compile(root, camera, scene));
+  }
+  if (where.blendedOnScreen && !where.screen) {
+    await nextTask();
+    // Each blended material on its own mesh's geometry, so only those get a canvas variant.
+    const blended = new THREE.Group();
+    for (const mesh of gammaBlendMeshes(root)) {
+      for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) if (isGammaBlend(m)) blended.add(new THREE.Mesh(mesh.geometry, m));
+    }
+    if (blended.children.length) bound(renderer, null, () => renderer.compile(blended, camera, scene));
   }
   // All of the renderer's programs: any still compiling may be this root's, and they all finish.
   const programs = () => (renderer.info.programs ?? []) as unknown as Program[];

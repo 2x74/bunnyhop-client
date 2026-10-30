@@ -13,15 +13,15 @@
 
 import { api, ApiError, type User } from "../api";
 import { COSMETICS, cosmetic, type CosmeticDef } from "../progression";
-import { FINISH_STYLE, GLOVE_STYLE } from "../loadout";
+import { FINISH_STYLE, GLOVE_STYLE, HAIR_DEFAULT, HAIR_LENGTH, HAIR_PRESETS, LENGTH_HATS, hairColorOf, hairHex, isWig } from "../loadout";
+import { glowColorPicker } from "../ui/glow-color-picker";
 import { KNIVES } from "../viewmodel/knives/index";
 import { GUNS } from "../viewmodel/guns/index";
 import { isHat } from "../player/bunny/hats";
-import { discoverPlayerContent } from "../content";
-import { loadAnimRig } from "../player/studio/loader";
 import { AvatarStage, GESTURES, paintBackdrop, type Focus, type MapShots } from "./stage";
+import { avatarWebpBase64, mapIndex, playerAnims, settleOnAnims } from "./refresh";
 import { getLoadout, getOutfit } from "../player/cosmetics";
-import { AVATAR_PX, BACKDROPS, cleanAvatar, defaultAvatar, defaultBg, FRAMES, GUN_IDS, packAvatar, POSES, type AvatarSpec } from "./spec";
+import { AVATAR_PX, AVATAR_RENDER_VERSION, BACKDROPS, cleanAvatar, defaultAvatar, defaultBg, FRAMES, GUN_IDS, packAvatar, POSES, type AvatarSpec } from "./spec";
 
 const q = new URLSearchParams(location.search);
 const DRAFT_KEY = "bunnyhop:avatar-draft";
@@ -60,6 +60,9 @@ function ownedOnly(s: AvatarSpec): AvatarSpec {
     ...s,
     outfit: ok(s.outfit) ? s.outfit : d.outfit,
     hat: ok(s.hat) ? s.hat : null,
+    // Hair settings only with a wig you own on (the server checks them like the hat).
+    hairColor: s.hat && isWig(s.hat) && ok(s.hat) ? s.hairColor : undefined,
+    hairLength: s.hat && isWig(s.hat) && ok(s.hat) ? s.hairLength : undefined,
     knife: ok(s.knife) ? s.knife : d.knife,
     finish: ok(s.finish) ? s.finish : d.finish,
     glove: ok(s.glove) ? s.glove : d.glove,
@@ -355,6 +358,59 @@ function renderPicker(slot: Slot): void {
   );
 }
 
+// Hair (a wig on: Space Buns, Ponytail): the Loadout's colours (loadout.ts HAIR_PRESETS) and its custom colour picker,
+// and the Ponytail's length. Only while a wig you own is on; the default colour and length stay out of the spec.
+let hairDialog: HTMLDialogElement | null = null;
+function hairControls(): HTMLElement[] {
+  const hat = spec.hat;
+  if (!hat || !isWig(hat) || !owns(cosmetic(hat))) return [];
+  const cur = hairHex(hairColorOf(spec.hairColor) ?? HAIR_DEFAULT);
+  const preset = HAIR_PRESETS.find((p) => p.hex === cur);
+  const setHair = (hex: string | null) => setSpec({ hairColor: !hex || hex === hairHex(HAIR_DEFAULT) ? undefined : hex });
+  const custom = el(
+    "button",
+    {
+      type: "button",
+      class: "av-link av-hair-custom",
+      "aria-haspopup": "dialog",
+      "aria-pressed": String(!preset),
+      title: preset ? "Choose any colour" : `Custom colour ${cur.toUpperCase()}`,
+      onclick: () => {
+        if (hairDialog) return hairDialog.focus();
+        hairDialog = glowColorPicker({
+          title: "Hair colour",
+          intro: "Choose a colour for your hair.",
+          current: cur as `#${string}`,
+          preview: (hex) => setPreview({ hairColor: hex }),
+          apply: (hex) => ((preview = null), setHair(hex)),
+          closed: () => ((hairDialog = null), setPreview(null)),
+        });
+      },
+    },
+    el("span", { class: "av-hair-dot", style: `--sw:${cur}`, "aria-hidden": "true" }),
+    "Custom…",
+  );
+  const out: HTMLElement[] = [
+    el("h3", {}, "Hair", el("span", { class: "av-cur" }, preset?.name ?? cur.toUpperCase())),
+    el(
+      "div",
+      { class: "av-hair" },
+      swatches(
+        HAIR_PRESETS.map((p) => ({ id: p.hex, name: p.name, color: p.hex })),
+        preset ? cur : "",
+        (hex) => setHair(hex),
+        (hex) => setPreview(hex ? { hairColor: hex } : null),
+      ),
+      custom,
+    ),
+  ];
+  if (LENGTH_HATS.includes(hat)) {
+    const n = spec.hairLength ?? HAIR_LENGTH.default;
+    out.push(slider("Length", n, HAIR_LENGTH.min, HAIR_LENGTH.max, 5, (v) => setSpec({ hairLength: v === HAIR_LENGTH.default ? undefined : v }, { quiet: true })));
+  }
+  return out;
+}
+
 /** A row that opens a slot's picker: what you wear there, as a thumbnail and a name. */
 function pickRow(slot: Slot, o: Options): HTMLElement | null {
   const items = choicesOf(slot, o);
@@ -417,6 +473,7 @@ function renderControls(): void {
       "Look",
       null,
       el("div", { class: "av-picks" }, pickRow("outfit", o), pickRow("hat", o), spec.hand === "knife" ? pickRow("knife", o) : null, spec.hand === "knife" ? pickRow("finish", o) : null, pickRow("glove", o)),
+      ...hairControls(),
       el("h3", {}, "Build", el("span", { class: "av-cur" }, name(spec.body) ?? "")),
       list(
         [
@@ -471,21 +528,7 @@ function status(text: string, bad = false): void {
 
 const blobOf = (c: HTMLCanvasElement, type: string, quality?: number) => new Promise<Blob | null>((res) => c.toBlob(res, type, quality));
 
-async function webpBase64(): Promise<string> {
-  const c = await stage.render(spec, AVATAR_PX, maps);
-  // Smallest WebP that fits (photos of maps are the big ones).
-  for (const quality of [0.9, 0.8, 0.65, 0.5]) {
-    const b = await blobOf(c, "image/webp", quality);
-    if (!b || b.type !== "image/webp") throw new Error("This browser can't make WebP images.");
-    if (b.size <= 90 * 1024) {
-      const bytes = new Uint8Array(await b.arrayBuffer());
-      let bin = "";
-      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-      return btoa(bin);
-    }
-  }
-  throw new Error("That picture is too detailed to save. Try another backdrop.");
-}
+const webpBase64 = () => avatarWebpBase64(stage, spec, maps);
 
 $("av-save").addEventListener("click", async () => {
   const btn = $("av-save") as HTMLButtonElement;
@@ -583,13 +626,37 @@ $("av-discord-box").addEventListener("change", async (e) => {
 // Start
 
 /** What a loadout puts on the avatar (the default pose stays). */
-const wearing = (l: { outfit?: string | null; knife?: string | null; finish?: string | null; glove?: string | null; hat?: string | null; body?: string | null }): Partial<AvatarSpec> => {
+const wearing = (l: { outfit?: string | null; knife?: string | null; finish?: string | null; glove?: string | null; hat?: string | null; body?: string | null; hairColor?: string | number | null; hairLength?: number | null }): Partial<AvatarSpec> => {
   const p: Partial<AvatarSpec> = {};
   for (const k of ["outfit", "knife", "finish", "glove", "body"] as const) if (l[k]) p[k] = l[k]!;
   p.hat = l.hat ?? null;
+  // Your hair as you wear it (the Hair controls under Look change it for the avatar only).
+  const hair = hairColorOf(l.hairColor);
+  if (hair !== null) p.hairColor = hairHex(hair);
+  if (l.hairLength) p.hairLength = l.hairLength;
   if (p.outfit) p.bg = defaultBg(p.outfit);
   return p;
 };
+
+/**
+ * The saved avatar, re-rendered with this build's look and saved again exactly as it was (the server checks it like
+ * any save), once the animations are in; on a stage of its own, offscreen, so the preview never flickers. Silent.
+ */
+async function refreshOnOpen(saved: AvatarSpec): Promise<void> {
+  await animsReady;
+  if (!hasAnims) return;
+  const st = new AvatarStage();
+  try {
+    st.set(saved);
+    if (!(await settleOnAnims(st))) return;
+    await api.saveBunnyAvatar(saved, await avatarWebpBase64(st, saved, maps));
+    console.info(`avatar: re-rendered your saved avatar for look ${AVATAR_RENDER_VERSION}`);
+  } catch {
+    /* the old picture stays until the next try or the deploy batch */
+  } finally {
+    st.dispose();
+  }
+}
 
 async function start(): Promise<void> {
   // Until the account answers: this browser's draft, else the loadout this browser wears.
@@ -603,23 +670,13 @@ async function start(): Promise<void> {
   draw();
 
   // Maps: backdrops, and the player content (the bunny's CS:S animations) named by any map's content manifest.
-  const index = fetch("/index.json")
-    .then((r) => (r.ok ? r.json() : { maps: [] }))
-    .then((j: { maps?: { name: string; hero?: string | null; sha256?: string }[] }) => j.maps ?? [])
-    .catch(() => []);
-  void index.then(async (list) => {
+  void mapIndex().then(async (list) => {
     mapList = list.filter((m) => m.hero).map((m) => ({ name: m.name, hero: m.hero! }));
     renderControls();
     if (spec.bg.startsWith("map:")) (bgKey = ""), draw();
-    const sha = (list.find((m) => m.name === "bhop_eazy") ?? list.find((m) => m.sha256))?.sha256;
-    if (sha && (await discoverPlayerContent(sha).catch(() => false))) {
-      await loadAnimRig().catch(() => null);
+    if (await playerAnims(list)) {
       // The model switches to the CS:S animations on its next update; pose again once it has.
-      for (let i = 0; i < 60 && stage.animSource !== "cs"; i++) {
-        stage.repose();
-        await new Promise((r) => setTimeout(r, 50));
-      }
-      stage.repose();
+      await settleOnAnims(stage);
       draw();
       hasAnims = true;
     }
@@ -641,6 +698,8 @@ async function start(): Promise<void> {
       // Your avatar: the saved one, else your default pose in the loadout you wear.
       spec = ownedOnly(mine.custom ? mine.spec : cleanAvatar({ ...mine.spec, ...wearing(cos.choice) }));
       $("av-row-name").textContent = user.name;
+      // Saved with an older look (spec.ts AVATAR_RENDER_VERSION): draw it again as saved, quietly (avatar/refresh.ts).
+      if (mine.custom && (mine.render ?? 1) < AVATAR_RENDER_VERSION) void refreshOnOpen(mine.spec);
     } catch {
       signedIn = false;
     }
@@ -663,9 +722,16 @@ Object.assign(window, {
     set: (p: Partial<AvatarSpec>) => setSpec(p),
     /** A finished picture as a data URL (tools/avatar/render-defaults.ts). */
     render: async (s: Partial<AvatarSpec>, size: number, type = "image/png") => (await stage.render(cleanAvatar({ ...spec, ...s }), size, maps)).toDataURL(type, 0.92),
+    /** The saved picture for a spec, exactly as "Use as my avatar" makes it (base64 WebP; tools/avatar/rerender-saved.ts). */
+    picture: (s: unknown) => avatarWebpBase64(stage, cleanAvatar(s), maps),
+    /** The look this build draws (spec.ts AVATAR_RENDER_VERSION) and the animations it poses with ("cs" once loaded). */
+    renderVersion: AVATAR_RENDER_VERSION,
+    anim: () => stage.animSource,
     /** Dev only: every item (the server still checks ownership on save). */
     showAll: () => import.meta.env.DEV && ((showAll = true), renderControls()),
     debug: () => stage.debugFrame(),
+    /** Dev only: the stage itself (research/avatar-refresh/clearance.cjs measures hands and knives against the hood). */
+    stage: import.meta.env.DEV ? stage : null,
     gestures: GESTURES,
   },
 });

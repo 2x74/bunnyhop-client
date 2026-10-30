@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { MaterialDesc, WaterParams } from "./core";
+import { markGammaBlend } from "./graphics/gamma-blend";
 
 // Water and glass visuals (render.ts).
 //
@@ -273,10 +274,10 @@ export function glassMaterial(desc: MaterialDesc): THREE.Material {
   const tint = new THREE.Color(...desc.color);
   // Plain (untinted) refract glass would be invisible: give it a faint cool tint.
   if (tint.r > 0.97 && tint.g > 0.97 && tint.b > 0.97) tint.set(0xd8e8f0);
-  return new THREE.ShaderMaterial({
+  return markGammaBlend(new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
-    uniforms: { ...waterUniforms, uTint: { value: new THREE.Vector3(tint.r, tint.g, tint.b) } },
+    uniforms: { ...waterUniforms, uTint: { value: new THREE.Vector3(tint.r, tint.g, tint.b) }, uExposure: { value: 1 } },
     vertexShader: /* glsl */ `
       varying vec3 vWaterWorld;
       varying vec3 vWaterClip;
@@ -291,6 +292,7 @@ export function glassMaterial(desc: MaterialDesc): THREE.Material {
     fragmentShader: /* glsl */ `
       ${FOG_DECL}
       uniform vec3 uTint;
+      uniform float uExposure;
       varying vec3 vNormalW;
       void main() {
         vec3 v = normalize(cameraPosition - vWaterWorld);
@@ -299,9 +301,10 @@ export function glassMaterial(desc: MaterialDesc): THREE.Material {
         vec3 col = mix(uTint, vec3(1.0), fres * 0.35);
         float alpha = mix(0.28, 0.6, fres);
         gl_FragColor = sRGBTransferEOTF(vec4(applyWaterFog(col, vWaterWorld), alpha));
+        gl_FragColor.rgb *= uExposure;
         #include <colorspace_fragment>
       }`,
-  });
+  }));
 }
 
 interface Volume {

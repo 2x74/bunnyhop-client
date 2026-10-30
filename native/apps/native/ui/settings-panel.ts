@@ -14,6 +14,10 @@ import { registerCustomCssSection } from "./custom-css/section";
 import { registerDataFolderSection } from "./data-folder-panel";
 import { registerDiscordSection } from "./discord-section";
 import { registerMouseDiagnostics } from "./mouse-diagnostics";
+import { registerMeasureSection } from "./measure-section";
+import { registerPaintSection } from "./paint-section";
+import { installHostHudEditor } from "./hud-editor-opener";
+import { registerHudRows } from "./hud-section";
 import { redrawSettings, registerNativeExtras } from "./native-extras";
 import { installGlowSettings } from "./glow-settings";
 import { flushSettings, onHostSettings } from "./prefs-bridge";
@@ -38,6 +42,10 @@ function install(): void {
   registerDataFolderSection();
   registerUpdatesSection();
   registerCustomCssSection();
+  registerPaintSection();
+  registerMeasureSection();
+  installHostHudEditor();
+  registerHudRows();
   registerMouseDiagnostics();
   registerNativeExtras();
   decorateNativeRows();
@@ -52,6 +60,9 @@ export function settingsPanel(initialSection?: string): HTMLElement {
   install();
   if (initialSection) sessionStorage.setItem(LAST_SECTION, sectionId(initialSection));
   const panel = webSettingsPanel();
+  // The search box sits over the rail here (settings-native.css): a short placeholder fits it.
+  const search = panel.querySelector<HTMLInputElement>("input.set-q");
+  if (search) search.placeholder = "Search settings";
   watchClose(panel);
   return panel;
 }
@@ -62,15 +73,7 @@ export function focusSettingsSection(root: HTMLElement, id: string): boolean {
   const item = root.querySelector<HTMLButtonElement>(`.set-rail-item[data-sec="${sectionId(id)}"]`);
   if (!item) return false;
   item.click();
-  if (id === "hud-editor") openAdvanced(root, "hud");
   return true;
-}
-
-function openAdvanced(root: HTMLElement, id: string): void {
-  const details = root.querySelector<HTMLDetailsElement>(`details.set-adv[data-sec="${id}"]`);
-  if (!details) return;
-  details.open = true;
-  details.querySelector(".native-place")?.closest(".set-row")?.scrollIntoView({ block: "nearest" });
 }
 
 /** Leaving the screen sends what's still waiting and ends a key capture. */

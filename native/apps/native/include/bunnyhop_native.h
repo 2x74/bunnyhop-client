@@ -153,6 +153,7 @@ uint32_t bh_abi_version(void);
  * Check version AND sizes before using the new calls; unknown layouts fail closed. */
 #define BH_V29_ABI_VERSION 1
 #define BH_TIMING_PATH_VERSION 2
+#define BH_FLAG_NULL_BINDS (1u << 3)
 #define BH_FLAG_TIMED_INPUT (1u << 4)
 #define BH_IN_TURN_FAST (1u << 6)
 
@@ -160,6 +161,7 @@ typedef struct BhRecordOptionsV29 {
     uint32_t version, size;
     float yaw_speed, angle_speed_key; /* f32, inclusive 60..720 / 1..4 */
     uint32_t timed_input;             /* sticky after real timed input contributes, 0 or 1 */
+    uint32_t null_binds;              /* sticky once null binds resolve a recorded command, 0 or 1 */
 } BhRecordOptionsV29;
 
 typedef struct BhTimingSegmentV2 {
@@ -170,7 +172,7 @@ typedef struct BhTimingSegmentV2 {
 
 int bh_v29_check_abi(uint32_t version, size_t record_size, size_t segment_size);
 /* Begin first. Default frozen pair 210/2; set custom rates before the first command.
- * Later calls may mark timed_input; rates cannot change. New BHRs append BHTS. */
+ * Later calls may mark timed_input or null_binds; rates cannot change. New BHRs append BHTS. */
 int bh_record_options_v29(BhContext *ctx, const BhRecordOptionsV29 *options);
 /* After bh_replay_load/seek on the live context: preserve full world/timer/filter
  * state, leave playback, invalidate ranked recording. Current map/style/settings/
@@ -201,6 +203,12 @@ void bh_default_settings(BhSettings *out);
  * Returns 1 on success, 0 on failure; failure must not leave a partially usable map.
  */
 int bh_load_map(BhContext *ctx, const char *path, const char *content_root);
+/* Isolated preparation on a worker; all these calls and borrowed results remain owner-thread only.
+ * begin replaces/cancels an earlier job. poll: 0 pending, 1 installed, -1 error (bh_last_error).
+ * cancel/destroy discard late results without waiting for the worker. */
+int bh_load_map_begin(BhContext *ctx, const char *path, const char *content_root);
+int bh_load_map_poll(BhContext *ctx);
+int bh_load_map_cancel(BhContext *ctx);
 int bh_set_settings(BhContext *ctx, const BhSettings *settings);
 int bh_reset(BhContext *ctx);
 int bh_set_position(BhContext *ctx, float x, float y, float z, float yaw);
@@ -393,6 +401,10 @@ int bh_practice_noclip_tick(BhContext *ctx, const BhNoclipState *state, BhSnapsh
 /* returns1 standing,2 crouched,0 stuck/error. */
 uint32_t bh_practice_noclip_exit(BhContext *ctx, const BhNoclipState *state, float yaw, float pitch, BhSnapshot *out);
 uint32_t bh_practice_save(BhContext *ctx, float yaw, float pitch);
+// Clean Segmented only. Negative loads means this attempt is not segmenting.
+int bh_segment_loads(BhContext *ctx);
+int bh_segment_restore(BhContext *ctx, uint32_t handle, BhCmd *out_view, BhSnapshot *out);
+int bh_record_options_read_v29(BhContext *ctx, BhRecordOptionsV29 *options);
 int bh_practice_restore(BhContext *ctx, uint32_t handle, BhCmd *out_view, BhSnapshot *out);
 int bh_practice_free(BhContext *ctx, uint32_t handle);
 /* Camera collision: clear fraction [0,1] across current world/props/brushes, ignores player clips. */

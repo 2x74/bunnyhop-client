@@ -27,7 +27,7 @@ test("native decorations map trusted structured marks without coercing objects",
 test("unknown colors/countries/objects never become host rendering values", () => {
   expect(
     nativeChatDecoration({ nameColor: "url(evil)", rank: { name: {} }, staff: {}, country: "USA", verified: "yes" }),
-  ).toEqual({});
+  ).toEqual({ nativeMarks: [] });
   expect(nativeChatDecoration({ rank: { name: "a\nb" } }).nativeRank).toBe("ab");
 });
 
@@ -36,5 +36,11 @@ test("creator badges use the shared platform catalog", () => {
   expect(nativeChatDecoration({ creator: "youtube" }).nativeMarks).toEqual([
     { id: "creator", name: "YouTube creator", kind: "youtube", colors: ["#ff3d3d"] },
   ]);
-  expect(nativeChatDecoration({ creator: "unknown" })).toEqual({});
+  expect(nativeChatDecoration({ creator: "unknown" })).toEqual({ nativeMarks: [] });
+});
+
+test("a supporter with no equipped badges shows no marks, as on the website", () => {
+  const decoration = nativeChatDecoration({ supporter: true, nameColor: "lime", nameEffect: "glow", nameBadges: [] });
+  expect(decoration.nativeMarks).toEqual([]);
+  expect(decoration.nativeBadge).toBe("Supporter");
 });

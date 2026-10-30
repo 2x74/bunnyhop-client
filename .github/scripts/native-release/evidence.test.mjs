@@ -13,7 +13,7 @@ function fixture() {
     const [os, arch] = platform.split('/');
     const archive = `bunnyhop-native-0.0.2-${os}-${arch}.${os === 'linux' ? 'tar.gz' : 'zip'}`;
     const bytes = Buffer.from(`fixture-only archive ${platform}`);
-    const report = { schema: 1, releaseEligible: true, version: '0.0.2', platform, archive, bytes: bytes.length, sha256: sha256(bytes), canonicalWasmSha256: PINNED_WASM_SHA256, binarySha256: 'c'.repeat(64), menuSha256: 'd'.repeat(64), assetsSha256: 'e'.repeat(64), wasm: `bunnyhop-web/${PINNED_WASM_SHA256.slice(0, 12)}`, physics: 18, rules: 2, binaryHashMode: os === 'darwin' ? 'macho-code-v1' : 'sha256' };
+    const report = { schema: 1, releaseEligible: true, version: '0.0.2', platform, archive, bytes: bytes.length, sha256: sha256(bytes), canonicalWasmSha256: PINNED_WASM_SHA256, binarySha256: 'c'.repeat(64), menuSha256: 'd'.repeat(64), assetsSha256: 'e'.repeat(64), wasm: `bunnyhop-web/${PINNED_WASM_SHA256.slice(0, 12)}`, physics: 20, rules: 2, binaryHashMode: os === 'darwin' ? 'macho-code-v1' : 'sha256' };
     report.build = `bunnyhop-native/${sha256(['package-v1', os, arch, report.binarySha256, report.menuSha256, report.assetsSha256, report.canonicalWasmSha256].join('\0')).slice(0, 24)}`;
     const dir = join(root, artifactName(target, context.runId, context.runAttempt));
     mkdirSync(dir);
@@ -27,12 +27,12 @@ function fixture() {
     for (const file of parityFiles) writeFileSync(join(parityDir, file), data);
     const behavior = Object.fromEntries(behaviorCounters.map(key => [key, 0]));
     const parity = { schema: 1, suite: PARITY_SUITE, pass: true, platform, sourceSha: context.sourceSha, runId: context.runId, runAttempt: context.runAttempt,
-      wasmSha256: PINNED_WASM_SHA256, runnerSha256: 'f'.repeat(64), physics: 18, contrastPhysics: 16, ladderContrastPhysics: 17, comparedStates: 1400, mismatchRows: 0, missingPhysics: [],
+      wasmSha256: PINNED_WASM_SHA256, runnerSha256: 'f'.repeat(64), physics: 20, contrastPhysics: 16, ladderContrastPhysics: 17, comparedStates: 1900, mismatchRows: 0, missingPhysics: [],
       files: parityFiles.map(name => ({ name, sha256: digest })), fixtures: Object.keys(fixtureTrials).map(name => ({
         name, mapSha256: digest, trials: fixtureTrials[name], divergentStates: 1,
         versions: fixtureVersions(name).map(physics => ({ physics, comparedStates: 100, actualStates: 100, mismatchRows: 0, firstMismatch: null, missingPhysics: [], commandsSha256: digest, wasmStatesSha256: digest, nativeStatesSha256: digest })),
         behavior: Object.fromEntries(fixtureVersions(name).map(v => [`v${v}`, name === 'material-ladder'
-          ? { ...behavior, attached: v === 18 ? 16 : 0, climbed: v === 18 ? 16 : 0 }
+          ? { ...behavior, attached: v >= 18 ? 16 : 0, climbed: v >= 18 ? 16 : 0 }
           : v === 16 ? { ...behavior, speedLost: 1, edgeBugs: 1, teleported: 1 }
           : { ...behavior, landed: name === 'incline' ? 60 : 0, speedKept: name === 'incline' ? 60 : 0, jumped: 1, teleported: 40, fallRestored: 40, mapTeleport: 40 }])),
       })) };
@@ -49,7 +49,7 @@ function withEvidence(fn) {
 test('collects immutable coordinates and verifies archive/report/checksum bytes', () => withEvidence(e => {
   assert.equal(e.artifacts.length, 3);
   assert.equal(e.artifacts[0].name, 'bunnyhop-windows-x64-1234-2');
-  assert.equal(e.artifacts[0].report.physics, 18);
+  assert.equal(e.artifacts[0].report.physics, 20);
 }));
 for (const [name, mutate] of [
   ['missing parity artifact', e => { delete e.artifacts[0].parity; }],
@@ -66,7 +66,7 @@ for (const [name, mutate] of [
   ['absent thin-trigger contact', e => { e.artifacts[0].parity.report.fixtures[2].behavior.v17.teleported = 0; }],
   ['absent telehop fall restoration', e => { e.artifacts[0].parity.report.fixtures[3].behavior.v17.fallRestored = 0; }],
   ['missing latest RNGFix version', e => { e.artifacts[0].parity.report.fixtures[0].versions.pop(); }],
-  ['absent latest RNGFix speed preservation', e => { e.artifacts[0].parity.report.fixtures[0].behavior.v18.speedKept = 0; }],
+  ['absent latest RNGFix speed preservation', e => { e.artifacts[0].parity.report.fixtures[0].behavior.v20.speedKept = 0; }],
   ['absent material ladder fixture', e => { e.artifacts[0].parity.report.fixtures.pop(); }],
   ['absent material ladder contrast', e => { e.artifacts[0].parity.report.fixtures[4].divergentStates = 0; }],
   ['absent material ladder attachment', e => { e.artifacts[0].parity.report.fixtures[4].behavior.v18.attached = 0; }],

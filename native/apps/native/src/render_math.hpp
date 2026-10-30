@@ -71,6 +71,20 @@ inline Bounds transformed_bounds(const Bounds &b, const native::Matrix &m) {
     return out;
 }
 
+// Whether a group's bounds (under `model`) can cast into the sun's orthographic map of `range` units each way.
+inline bool in_light_box(const Bounds &b, const native::Matrix &model, const native::Matrix &light, float range) {
+    const auto world = transformed_bounds(b, model);
+    Vec3 center{};
+    float radius = 0;
+    for (int k = 0; k < 3; k++) {
+        center[k] = (world.lo[k] + world.hi[k]) * .5f;
+        radius += (world.hi[k] - world.lo[k]) * (world.hi[k] - world.lo[k]) * .25f;
+    }
+    const auto projected = transform_point(light, center);
+    const float reach = 1 + std::sqrt(radius) / range;
+    return std::abs(projected[0]) <= reach && std::abs(projected[1]) <= reach;
+}
+
 struct WaterSurface {
     Vec3 center{}, color{};
     std::array<float, 2> range{};
@@ -82,6 +96,12 @@ inline const WaterSurface *water_surface(const Bounds &b, const std::vector<Wate
             && s.center[1] >= b.lo[1] - 1 && s.center[1] <= b.hi[1] + 1)
             return &s;
     return surfaces.empty() ? nullptr : &surfaces.front();
+}
+
+// Like the website, a water face draws both sides only on maps without separate beneath faces ($bottommaterial).
+// Otherwise, seen from above, the back of a beneath face drew in its bright from-below style over the water.
+inline bool water_face_double_sided(bool map_has_beneath_faces, bool above_water) {
+    return !map_has_beneath_faces && above_water;
 }
 
 inline float particle_random(uint32_t id, uint32_t salt) {

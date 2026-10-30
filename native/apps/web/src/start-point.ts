@@ -199,3 +199,17 @@ export function clearStartPoint(map: string, track: number, store = defaultStore
   writeAll(map, all, store);
   return true;
 }
+
+/** Leaving practice removes this map's practice spawns, preserving valid ranked start points. */
+export function clearPracticeSpawns(map: string, store = defaultStore()): boolean {
+  const all = readAll(map, store);
+  let cleared = false;
+  for (const [track, point] of Object.entries(all)) {
+    if (point && typeof point === "object" && "pr" in point && point.pr) {
+      delete all[track];
+      cleared = true;
+    }
+  }
+  if (cleared) writeAll(map, all, store);
+  return cleared;
+}

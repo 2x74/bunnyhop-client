@@ -17,7 +17,7 @@ use bunnyhop_core::game::{
     PHYSICS_FIX_DAMAGE_ACTIVATOR, PHYSICS_FIX_FUNC_LOD, PHYSICS_FIX_GLOCK_BURST, PHYSICS_FIX_LADDER, PHYSICS_FIX_WATER_JUMP,
     PHYSICS_FIX_TEMPLATE_NAMES, PHYSICS_FIX_USP_SILENCER, PHYSICS_FIX_WEAPON_COMMANDS, PHYSICS_FIX_WEAPON_RESTORE, PHYSICS_FIX_WEAPONS,
     PHYSICS_LATEST, PHYSICS_V1, PHYSICS_V2, PHYSICS_V3, PHYSICS_V4, PHYSICS_V5, PHYSICS_V6, PHYSICS_V7, PHYSICS_V8, PHYSICS_V9,
-    PHYSICS_V10, PHYSICS_V11, PHYSICS_V12, PHYSICS_V13, PHYSICS_V14, PHYSICS_V15, PHYSICS_V16, PHYSICS_V17, PHYSICS_V18, PHYSICS_FIX_SURFACE_LADDER, PHYSICS_FIX_MAP_PLAYER_IO, PHYSICS_FIX_INCLINE, PHYSICS_FIX_EDGE, PHYSICS_FIX_TRIGGER_JUMP, PHYSICS_FIX_TELEHOP, PHYSICS_FIX_DOWNHILL, PHYSICS_FIX_MAP_MAX_VELOCITY, PHYSICS_FIX_TRAIN_SPAWN, PHYSICS_FIX_MAP_DOOR_TRAVEL, PHYSICS_FIX_DOOR_START_OPEN, PHYSICS_FIX_CROUCH_GROUND, physics_fixes,
+    PHYSICS_V10, PHYSICS_V11, PHYSICS_V12, PHYSICS_V13, PHYSICS_V14, PHYSICS_V15, PHYSICS_V16, PHYSICS_V17, PHYSICS_V18, PHYSICS_V19, PHYSICS_V20, PHYSICS_FIX_SURFACE_LADDER, PHYSICS_FIX_MAP_PLAYER_IO, PHYSICS_FIX_INCLINE, PHYSICS_FIX_EDGE, PHYSICS_FIX_TRIGGER_JUMP, PHYSICS_FIX_TELEHOP, PHYSICS_FIX_DOWNHILL, PHYSICS_FIX_MAP_MAX_VELOCITY, PHYSICS_FIX_TRAIN_SPAWN, PHYSICS_FIX_MAP_DOOR_TRAVEL, PHYSICS_FIX_DOOR_START_OPEN, PHYSICS_FIX_CROUCH_GROUND, physics_fixes,
 };
 use bunnyhop_core::game::{EVENT_MAP_TELEPORT, EVENT_TELEPORTED, IN_JUMP};
 use bunnyhop_core::physics::ConvexBrush;
@@ -38,7 +38,7 @@ fn v(version: u32) -> Settings {
 #[test]
 fn versions_and_fix_bits() {
     assert_eq!(Settings::css_bhop().physics_version, PHYSICS_V1, "native default stays v1");
-    assert_eq!(PHYSICS_LATEST, PHYSICS_V18);
+    assert_eq!(PHYSICS_LATEST, PHYSICS_V20);
     assert_eq!(physics_fixes(PHYSICS_V1), Some(0));
     assert_eq!(physics_fixes(PHYSICS_V2), Some(PHYSICS_FIX_PLAYERCLIP | PHYSICS_FIX_UNDUCK_JUMP));
     assert_eq!(
@@ -87,6 +87,7 @@ fn versions_and_fix_bits() {
         assert!(!fixes.rngfix_incline && !fixes.rngfix_edge && !fixes.uphill, "v{version} keeps the old slopes");
     }
     assert_eq!(physics_fixes(PHYSICS_V18), Some(v16 | rngfix | PHYSICS_FIX_SURFACE_LADDER));
+    assert_eq!(physics_fixes(PHYSICS_V19), physics_fixes(PHYSICS_V18));
     let v17 = v(PHYSICS_V17).configuration().fixes;
     assert!(v17.downhill && v17.rngfix_incline && v17.rngfix_edge);
     assert!(!v17.uphill && !v17.rampbug, "v17 uses RNGFix's uphill, not the optional rule's");
@@ -97,7 +98,8 @@ fn versions_and_fix_bits() {
     assert_eq!(physics_fixes(PHYSICS_DIAG | PHYSICS_FIX_KNIFE), Some(PHYSICS_FIX_KNIFE));
     assert_eq!(physics_fixes(PHYSICS_DIAG | PHYSICS_FIX_VPHYSICS_SEPARATION), Some(PHYSICS_FIX_VPHYSICS_SEPARATION));
     assert_eq!(physics_fixes(0), None);
-    assert_eq!(physics_fixes(19), None);
+    assert_eq!(physics_fixes(PHYSICS_V20), physics_fixes(PHYSICS_V19));
+    assert_eq!(physics_fixes(21), None);
     // v7 used all 16 bits of the old diagnostic mask (base 0x1_0000); v8's fix is bit 16, so the base moved to bit 24
     // with 24 fix bits; v15's fix is bit 24, so it moved again to bit 25 with 25 fix bits, v16's is bit 25, so it moved
     // to bit 26, and v17's four are bits 26..29, so it is now bit 30 with 30 fix bits. Versions keep their fix sets bit
@@ -820,6 +822,8 @@ fn telehop_keeps_the_landing_velocity_from_v17() {
             })
             .collect()
     };
+    assert_eq!(landing_teleports(&mut game, PHYSICS_V19), landing_teleports(&mut game, PHYSICS_V20),
+        "v20 does not change RNGFix's post-move velocity restoration without a jump command");
     let (t16, t17) = (landing_teleports(&mut game, PHYSICS_V16), landing_teleports(&mut game, telehop));
     assert!(!t16.is_empty() && t16.len() == t17.len(), "the same landings teleport ({} / {})", t16.len(), t17.len());
     for ((v16, e16), (v17, e17)) in t16.iter().zip(&t17) {

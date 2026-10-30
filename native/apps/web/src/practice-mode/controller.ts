@@ -10,6 +10,11 @@
 //
 // main.ts wiring: onAction (bound actions), noclipping + noclipStep (instead of command -> core.step -> afterStep),
 // onRestart (R / B / M / style switches end noclip).
+//
+// Segmented (styles.ts isSegmented, segments.ts): in a clean Segmented attempt the same checkpoints are bhoptimer's
+// segmented ones. A save also keeps the run's place (its recording's path); a teleport (load) restores the snapshot with
+// its speed and view whatever Keep speed says, rewinds the timer and the recording to the checkpoint, and the run stays
+// a real run. The keys act during the run without the !cp menu. Noclip still makes it practice.
 
 import { whisper } from "../notify";
 import { freeState, hasStateSnapshots, restoreState, snapshotBytes, snapshotState, type Core, type PlayerState } from "../core";
@@ -19,9 +24,11 @@ import { setVelocity, SimRun } from "../sim";
 import type { Replay } from "../replay";
 import { formatTime } from "../timer";
 import type { MenuSpec } from "../net/hud";
-import { styleForTrack, type StyleId } from "../styles";
+import { styleForTrack, type StyleFilter, type StyleId } from "../styles";
 import { keyLabel, prefs, type Action } from "../ui/settings";
 import { Checkpoints, MAX_CHECKPOINTS, saveTimer, type Checkpoint, type TimerSnapshot } from "./checkpoints";
+import type { SegmentMark } from "./segments";
+import { YAW_SET_TELEPORT } from "../replay";
 import { replayStartProblem } from "./replay-start";
 import { hasNoclip, noclipExit, noclipMove, noclipTick, type NoclipState } from "./noclip";
 import { isPracticeTool, PRACTICE_KEY_HINT, practiceCommandPlan, practiceKeyGate, practiceUnavailable, type PracticeChatCommand, type PracticeContext, type PracticeTool } from "./rules";
@@ -33,6 +40,8 @@ interface CheckpointData {
   timer: TimerSnapshot;
   yaw: number;
   pitch: number;
+  /** Saved in a clean Segmented attempt: the run's place, so a load rewinds the run to it (segments.ts). */
+  segment?: { mark: SegmentMark; filter: StyleFilter };
 }
 
 export interface PracticeHost extends PracticeContext {
@@ -42,8 +51,9 @@ export interface PracticeHost extends PracticeContext {
   input: Input;
   /** R: back to the start of the current track. */
   restart: () => void;
-  /** The core state changed outside a step (noclip off, a teleport): re-read it, set the view if given. */
-  resync: (view: { yaw: number; pitch: number } | null) => void;
+  /** The core state changed outside a step (noclip off, a teleport): re-read it, set the view if given (`kind`: the
+   * view set's replay kind, YAW_SET_*; default a spawn set). */
+  resync: (view: { yaw: number; pitch: number } | null, kind?: number) => void;
   /** A practice key where its tools don't work, or the dev zone editor's Z while practice mode is off, goes to the
    * key's other use (the tutorial's X, the zone editor). True if something used it. */
   fallthrough: (code: string) => boolean;
@@ -128,6 +138,11 @@ export class Practice {
     const plan = practiceCommandPlan({ cmd, unavailable: !!this.unavailable });
     if (plan === "unavailable") return reply(this.unavailable!);
     if (plan === "toggle") return this.toggle();
+    if (cmd === "off") return this.leave();
+    if (cmd === "on") {
+      if (!this.on) this.enter();
+      return;
+    }
     if (cmd === "menu") return this.toggleMenu();
     if (cmd === "noclip") this.toggleNoclip();
     else if (cmd === "save") this.save();
@@ -139,9 +154,9 @@ export class Practice {
   private leave(): void {
     this.endNoclip();
     this.h.session.setPracticeMode(false);
+    const cleared = this.h.session.clearPracticeSpawns();
     this.h.restart();
-    // (A practice spawn, start-point.ts, keeps restarts practice until it's cleared.)
-    this.toast(this.h.session.practicing ? "Practice mode off. Your spawn keeps restarts practice. !clearstart removes it." : "Practice mode off. You're back at the start.", 3000);
+    this.toast(`Practice mode off. ${cleared ? "Practice spawns cleared. " : ""}You're back at the start.`, 3000);
     void this.h.session.refreshMenu();
   }
 
@@ -191,7 +206,7 @@ export class Practice {
 
   /** Whether a bound tool key acts now (rules.ts practiceKeyGate); else one hint per run. */
   private keyActs(a: PracticeTool): boolean {
-    if (practiceKeyGate({ tool: a, timedRun: this.timedRun, menuOpen: this.menuOpen }) === "act") return true;
+    if (practiceKeyGate({ tool: a, timedRun: this.timedRun, menuOpen: this.menuOpen, segmenting: this.h.session.segmenting }) === "act") return true;
     const run = this.h.session.timer.startTick;
     if (this.keyHintRun !== run) {
       this.keyHintRun = run;
@@ -228,24 +243,27 @@ export class Practice {
   private menuSpec(): MenuSpec {
     const n = this.cps.count, at = this.cps.number;
     const keep = prefs.get().practice.keepVelocity;
+    const seg = this.h.session.segmenting;
     return {
-      title: "Checkpoints",
+      title: seg ? "Segmented checkpoints" : "Checkpoints",
       items: [
         { label: `Save checkpoint (${Math.min(n + 1, MAX_CHECKPOINTS)}/${MAX_CHECKPOINTS})` },
         { label: `Teleport to checkpoint (${Math.max(at, 1)})`, disabled: !n },
         { label: "Previous", disabled: at <= 1 },
         { label: "Next", disabled: at >= n },
         { label: "Noclip", detail: this.noclip ? "on" : "off" },
-        { label: "Keep speed", detail: keep ? "on" : "off" },
+        // (bhoptimer hides its velocity toggle for segmented checkpoints: a load always restores the speed.)
+        seg ? { label: "Keep speed", detail: "always", disabled: true } : { label: "Keep speed", detail: keep ? "on" : "off" },
       ],
       // bhoptimer's warning line ("Teleporting will stop your timer!").
-      footer: "A teleport or noclip makes a timed run practice.",
+      footer: seg ? "Segmented: a teleport takes the timer and the replay back to the checkpoint. Noclip makes the run practice." : "A teleport or noclip makes a timed run practice.",
       exit: "Close",
       onPick: (i) => {
         if (i === 0) this.save();
         else if (i === 1) this.teleport(this.cps.current());
         else if (i === 2 || i === 3) this.step(i === 2 ? -1 : 1);
         else if (i === 4) this.toggleNoclip();
+        else if (seg) return;
         else prefs.update((p) => (p.practice.keepVelocity = !p.practice.keepVelocity));
         this.refreshMenu();
       },
@@ -281,7 +299,10 @@ export class Practice {
 
   private save(): void {
     const s = this.h.session;
-    const cp = this.cps.save({ style: s.runStyle, selected: s.selectedStyle, timer: saveTimer(s.timer), yaw: this.h.input.yaw, pitch: this.h.input.pitch });
+    const mark = s.segmenting ? s.segmentMark() : null;
+    if (s.segmenting && !mark) return this.toast("This Segmented run's history is full (4 hours of play). Restart to start a new one.", 4000, "bad");
+    const segment = mark ? { mark, filter: s.filterState() } : undefined;
+    const cp = this.cps.save({ style: s.runStyle, selected: s.selectedStyle, timer: saveTimer(s.timer), yaw: this.h.input.yaw, pitch: this.h.input.pitch, ...(segment ? { segment } : {}) });
     if (cp) whisper(`Checkpoint ${this.cps.number} saved`, { key: "practice-cp" });
     else this.toast("Couldn't save a checkpoint.", 2500, "bad");
   }
@@ -296,6 +317,7 @@ export class Practice {
       this.toast("That checkpoint was saved in another style.", 2500, "bad");
       return false;
     }
+    if (s.segmenting) return this.load(cp);
     if (!this.cps.restore(cp)) {
       this.toast("Couldn't teleport to that checkpoint.", 2500, "bad");
       return false;
@@ -306,6 +328,34 @@ export class Practice {
     if (!prefs.get().practice.keepVelocity) setVelocity(this.h.core, [0, 0, 0]);
     s.practiceRestored(cp.data.style, cp.data.timer);
     this.h.resync({ yaw: cp.data.yaw, pitch: cp.data.pitch });
+    return true;
+  }
+
+  /**
+   * A Segmented load (header): the run goes back to the checkpoint and stays a real run. A checkpoint without a
+   * Segmented place (saved in practice, or one the history no longer holds) can't continue the run: it says so and
+   * nothing changes, so a stray key never turns the run into practice.
+   */
+  private load(cp: Checkpoint<CheckpointData>): boolean {
+    const s = this.h.session;
+    const seg = cp.data.segment;
+    if (!seg || cp.data.style !== s.runStyle || !s.segmentUsable(seg.mark)) {
+      this.toast(`That checkpoint ${seg ? "is from a run that's no longer kept" : "was saved in practice"}, so it can't continue this Segmented run. Save a new one, or type !practice.`, 4000, "bad");
+      return false;
+    }
+    if (!this.cps.restore(cp)) {
+      this.toast("Couldn't teleport to that checkpoint.", 2500, "bad");
+      return false;
+    }
+    this.endNoclip();
+    if (!s.segmentRestored(cp.data.style, cp.data.timer, seg.filter, seg.mark)) {
+      // (Never expected: the snapshot and its mark were taken together.) The core is the checkpoint's now, so the
+      // attempt can only go on as practice.
+      s.practiceUse("teleport");
+      s.practiceRestored(cp.data.style, cp.data.timer);
+    }
+    // A view set the replay explains: segment loads are in its trailer (apps/api/src/input-analysis.ts).
+    this.h.resync({ yaw: cp.data.yaw, pitch: cp.data.pitch }, YAW_SET_TELEPORT);
     return true;
   }
 

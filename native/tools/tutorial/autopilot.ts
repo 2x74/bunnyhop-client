@@ -117,6 +117,9 @@ export class Autopilot {
     // From a standstill, run up to speed before the first hop (but never stand still against an obstacle).
     this.groundTicks = s.grounded ? this.groundTicks + 1 : 0;
     if (s.grounded && speed < 200 && this.groundTicks < 40) jump = false;
+    // A reset is uncategorized until its first move. Request the intended ground run-up explicitly:
+    // v20 can otherwise categorize and jump immediately, bypassing the run-up above.
+    if (s.tick === 0 && speed === 0 && s.velocity[2] === 0) jump = false;
     if (this.o.legit) jump = jump && s.grounded && !this.prevJump;
     this.prevJump = jump;
     let buttons = jump ? IN_JUMP : 0;

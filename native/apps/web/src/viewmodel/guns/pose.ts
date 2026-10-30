@@ -48,8 +48,14 @@ export function clampFeel(feel: ArrayLike<number>, out: Float32Array): Float32Ar
   return out;
 }
 
-/** How much the forearms aim at the elbow anchors (1) vs continue the hand (0). */
-export const ARM = { anchor: 0.9 };
+/**
+ * How much the forearms aim at the elbow anchors (1) vs continue the hand (0), and the most a wrist may bend (deg)
+ * between the line the hand continues and its forearm: the firing hand nearly straight, the support hand a little
+ * more (the forearm still heads toward its anchor, only as far as that allows).
+ */
+export const ARM = { anchor: 0.9, bendR: 14, bendL: 24 };
+/** The firing wrist's limit while the hand is on a bolt (GunPose.rightW). */
+const BOLT_WRIST = 55;
 /**
  * Elbow anchors (view space): forearms aim from the wrists back toward these. The pistols' (and the default): out to
  * each side and down, so the two forearms open into a V below the gun and leave the screen at its bottom edge instead
@@ -71,6 +77,8 @@ export class GunPoser {
   private onSil: SolvedHand | null = null;
   private curlsSil = new Float32Array(20);
   private targets = new Map<string, Float32Array>();
+  /** The right hand on a bolt action's knob (GunDef.places.bolt; relative to the bolt), or null. */
+  private rightBolt: Float32Array | null = null;
   private poserR = new FingerPoser("R");
   private poserL = new FingerPoser("L");
   private curlsR = new Float32Array(20);
@@ -112,7 +120,8 @@ export class GunPoser {
     this.onSil = solveSilencerHand(def, glove);
     if (this.onSil) flatCurls(this.onSil.curls, this.curlsSil);
     this.targets.clear();
-    for (const [k, pl] of Object.entries(def.places)) if (pl) this.targets.set(k, handAt("L", pl));
+    for (const [k, pl] of Object.entries(def.places)) if (pl && k !== "bolt") this.targets.set(k, handAt("L", pl));
+    this.rightBolt = def.places.bolt ? handAt("R", def.places.bolt) : null;
     if (!keepAnim || this.anim.def !== def) this.anim.setGun(def);
   }
 
@@ -159,9 +168,29 @@ export class GunPoser {
     // --- Parts.
     translateLocal(G, -p.slide, 0, 0, W, this.partMatrix("Slide"));
     translateLocal(G, -p.pump, 0, 0, W, this.partMatrix("Pump"));
+    if (def.bolt && p.bolt) {
+      // A bolt action: turned up about its own axis (nose of the handle rising), then drawn back.
+      const pi = this.partMatrix("Pump");
+      rotX(def.bolt.side * p.bolt * D2R, def.bolt.axis[0], def.bolt.axis[1], this.C);
+      concat(W, pi, this.C, 0, this.C2, 0);
+      W.set(this.C2, pi);
+    }
+    // The trigger swings back about its pivot with the squeeze.
+    const ti = this.partMatrix("Trig");
+    if (def.trigger && p.trigger > 0) {
+      rotY(TRIGGER_DEG * D2R * Math.min(1, p.trigger), def.trigger[0], def.trigger[2], this.C);
+      concat(G, 0, this.C, 0, W, ti);
+    } else W.set(G, ti);
     // --- Right hand on the grip (rides the gun), fingers from the solved curls.
     const hR = this.bones.R.hand * 12;
     concat(G, 0, R.handInGun, 0, W, hR);
+    if (p.rightW > 0 && this.rightBolt) {
+      // Off the grip onto the bolt knob, riding the bolt (turned and drawn back with it).
+      concat(W, this.partMatrix("Pump"), this.rightBolt, 0, T, 0);
+      for (let i = 0; i < 12; i++) this.C[i] = W[hR + i];
+      lerpRigid(this.C, T, p.rightW, this.C2);
+      W.set(this.C2, hR);
+    }
     const cR = this.cR;
     cR.set(this.curlsR);
     // Trigger squeeze (index MCP / PIP), index off the trigger along the frame, the thumb flick.
@@ -174,6 +203,7 @@ export class GunPoser {
       cR[17] += 18 * p.thumb;
       cR[18] += 10 * p.thumb;
     }
+    if (p.rightW > 0) for (let i = 0; i < 20; i++) cR[i] += (PRESETS.pinch[i] - cR[i]) * p.rightW;
     this.poserR.pose(W, (i, k) => cR[i * 4 + k], (i) => cR[i * 4 + 3]);
     // --- Left hand: support (on the gun / the pump), or a target, plus a view-space trip.
     const hL = this.bones.L.hand * 12;
@@ -192,7 +222,8 @@ export class GunPoser {
       if (p.leftT === "mag" && p.magHand && def.mag) {
         translateLocal(G, def.mag.out[0] * p.mag, def.mag.out[1] * p.mag, def.mag.out[2] * p.mag, this.T3, 0);
         concat(this.T3, 0, tgt, 0, T, 0);
-      } else concat(G, 0, tgt, 0, T, 0);
+      } else if (p.leftT === "rack" && def.bolt) concat(W, this.partMatrix("Pump"), tgt, 0, T, 0);
+      else concat(G, 0, tgt, 0, T, 0);
       lerpRigid(this.H, T, p.leftW, this.H);
     }
     this.H[3] += p.leftOff[0];
@@ -233,6 +264,13 @@ export class GunPoser {
         } else W.set(G, mi);
       } else {
         translateLocal(G, out[0] * p.mag, out[1] * p.mag, out[2] * p.mag, W, mi);
+        if (p.magSpin) {
+          // Tumbling as it falls: about gun-local y through its pivot.
+          const mp = def.mag.p;
+          rotY(p.magSpin * D2R, mp[0], mp[2], this.C);
+          concat(W, mi, this.C, 0, this.C2, 0);
+          W.set(this.C2, mi);
+        }
         W[mi + 3] += p.magDrop[0];
         W[mi + 7] += p.magDrop[1];
         W[mi + 11] += p.magDrop[2];
@@ -247,10 +285,18 @@ export class GunPoser {
       // Before it's in: back out of the port toward the hand (gun-local -x, down).
       const k = 1 - p.auxIn;
       translateLocal(T2, -1.3 * k, 0, -0.6 * k, W, ai);
+    } else if (def.id === "fiveseven") {
+      // The Jackrabbit's ears ride the slide and flop back / forward about their base (p.tail: shots, the inspect).
+      const si = this.partMatrix("Slide");
+      if (p.tail) {
+        rotY(-p.tail * 0.38, EAR_C[0], EAR_C[2], this.C);
+        concat(W, si, this.C, 0, this.C2, 0);
+        W.set(this.C2, ai);
+      } else W.copyWithin(ai, si, si + 12);
     } else if (def.id === "usp" || def.id === "p90") {
       // The Cottontail's tail / the Seed Drill's pod lid ride the slide / the magazine with a wobble (scale).
       const base = def.id === "usp" ? this.partMatrix("Slide") : mi;
-      W.set(W.subarray(base, base + 12), ai);
+      W.copyWithin(ai, base, base + 12);
       if (p.tail) scaleAbout(W, ai, def.id === "usp" ? TAIL_C : POD_C, 1 + 0.18 * p.tail, 1 - 0.12 * p.tail);
     } else W.fill(0, ai, ai + 12);
     // --- The silencer: on the bore (turned, wound out along the thread) or carried; collapsed while it's off.
@@ -318,6 +364,17 @@ export class GunPoser {
     want = [(want[0] / wl) * k + (cur[0] / cl) * (1 - k), (want[1] / wl) * k + (cur[1] / cl) * (1 - k), (want[2] / wl) * k + (cur[2] / cl) * (1 - k)];
     const hl = Math.hypot(want[0], want[1], want[2]) || 1;
     want = [want[0] / hl, want[1] / hl, want[2] / hl];
+    // Keep the wrist nearly straight: no more than ARM.bendR / bendL from the hand's own line (a slerp from it).
+    const cn: V3 = [cur[0] / cl, cur[1] / cl, cur[2] / cl];
+    const th = Math.acos(Math.max(-1, Math.min(1, cn[0] * want[0] + cn[1] * want[1] + cn[2] * want[2])));
+    let limDeg = this.def?.wrist?.[side] ?? (side === "R" ? ARM.bendR : ARM.bendL);
+    // Working a bolt, the firing wrist turns (its forearm drops toward the elbow below the screen, not across it).
+    if (side === "R") limDeg += (BOLT_WRIST - limDeg) * Math.max(0, Math.min(1, this.anim.pose.rightW));
+    const lim = (limDeg * Math.PI) / 180;
+    if (th > lim && th > 1e-4) {
+      const sn = Math.sin(th), a = Math.sin(th - lim) / sn, b = Math.sin(lim) / sn;
+      want = [cn[0] * a + want[0] * b, cn[1] * a + want[1] * b, cn[2] * a + want[2] * b];
+    }
     const ax: V3 = [cur[1] * want[2] - cur[2] * want[1], cur[2] * want[0] - cur[0] * want[2], cur[0] * want[1] - cur[1] * want[0]];
     const s = Math.hypot(ax[0], ax[1], ax[2]);
     const c = cur[0] * want[0] + cur[1] * want[1] + cur[2] * want[2];
@@ -349,11 +406,31 @@ export class GunPoser {
 }
 
 const D2R = Math.PI / 180;
+/** How far the trigger swings back at a full squeeze (deg). */
+const TRIGGER_DEG = 16;
+
+/** out = rotation about gun-local y through (x, *, z) by `a` (rad; + swings a point below the pivot back, toward -x). */
+function rotY(a: number, x: number, z: number, out: Float32Array): void {
+  const c = Math.cos(a), s = Math.sin(a);
+  out[0] = c, out[1] = 0, out[2] = s, out[3] = x - (c * x + s * z);
+  out[4] = 0, out[5] = 1, out[6] = 0, out[7] = 0;
+  out[8] = -s, out[9] = 0, out[10] = c, out[11] = z - (-s * x + c * z);
+}
+
+/** out = rotation about gun-local x through (*, y, z) by `a` (rad). */
+function rotX(a: number, y: number, z: number, out: Float32Array): void {
+  const c = Math.cos(a), s = Math.sin(a);
+  out[0] = 1, out[1] = 0, out[2] = 0, out[3] = 0;
+  out[4] = 0, out[5] = c, out[6] = -s, out[7] = y - (c * y - s * z);
+  out[8] = 0, out[9] = s, out[10] = c, out[11] = z - (s * y + c * z);
+}
 const X_AXIS: V3 = [1, 0, 0], Y_NEG: V3 = [0, -1, 0], Z_AXIS: V3 = [0, 0, 1];
 
 /** Cottontail's tail ball centre / the Seed Drill's pod centre (gun-local), for their wobble. */
 const TAIL_C: V3 = [-1.0, 0, 1.0];
 const POD_C: V3 = [-5.9, 0, 1.75];
+/** The Jackrabbit's ears' base (gun-local), their flop pivot. */
+const EAR_C: V3 = [-0.25, 0, 1.5];
 
 interface ArmBones {
   hand: number;

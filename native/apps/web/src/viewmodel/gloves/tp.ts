@@ -8,7 +8,7 @@
 import { add, blend, Builder, clamp, frame, len, lerp3, norm, ring, scale, smoothstep, sub, type Paint, type Wt } from "../../player/bunny/builder";
 import { rig as bunnyRig, type V3 } from "../../player/bunny/rig";
 import type { GloveStyleId } from "../../loadout";
-import { dome, emit, strip, type Q } from "./fp";
+import { dome, emit, fingerAO, strip, type Q } from "./fp";
 import { gp, MAT, NO_SEAM, PAL_SLOT, SLOT_G } from "./paint";
 
 const GLOVE: Paint = { code: 3 + PAL_SLOT.glove };
@@ -123,8 +123,13 @@ function palm(h: TpHand, sp: PalmSpec): void {
   });
 }
 
+/** Knuckle crease weight per finger path row (the three joints; gloves/glsl.ts). */
+const TP_CREASE: Record<number, number> = { 1: 0.55, 2: 1, 3: 0.8 };
+
 interface DigitSpec {
   seamless?: boolean;
+  /** Knuckle creases in the shading; false for rigid shells. Default true. */
+  creases?: boolean;
   /** Quad rows: 0 into the hand, 1 proximal, 2 middle, 3 distal / tip. d: 0 index, 1 middle-ring-pinky, 2 thumb. */
   paint(q: Q, d: number): Paint;
   bulge?(q: Q, d: number): number;
@@ -166,7 +171,8 @@ function digits(h: TpHand, sp: DigitSpec): void {
       seamless: sp.seamless,
       paint: (i, k) => sp.paint({ i, s: (A[i] + A[Math.min(n - 1, i + 1)]) / 2, bn: (bnAt(i, k) + bnAt(i, k + 1)) / 2, ac: (acAt(i, k) + acAt(i, k + 1)) / 2 }, d),
       weight: (i) => (i === 0 ? blend(h.hand, f.bones[0], 0.5) : [[f.bones[Math.min(f.bones.length - 1, i - 1)], 1]]),
-      fin: (i, k) => [NO_SEAM, A[i], sp.wear?.({ i, s: A[i], bn: bnAt(i, k), ac: acAt(i, k) }, d) ?? 0],
+      ao: (i, k) => fingerAO(d === 0 ? 0 : d === 1 ? 3 : 4, acAt(i, k), bnAt(i, k), i === 0),
+      fin: (i, k) => [NO_SEAM, A[i], sp.wear?.({ i, s: A[i], bn: bnAt(i, k), ac: acAt(i, k) }, d) ?? 0, sp.creases === false ? 0 : (TP_CREASE[i] ?? 0)],
       capStart: sp.paint({ i: 0, s: 0, bn: 0, ac: 0 }, d),
       capEnd: sp.paint({ i: n - 2, s: A[n - 1], bn: -1, ac: 0 }, d),
     });
@@ -341,7 +347,7 @@ const plush: StyleFn = h => {
 
 const bune: StyleFn = h => {
   palm(h, { seamless: true, rows: [.5,.65], paint: q => q.bn < -.25 ? P(B.fingers, MAT.rubber) : q.s > .5 && q.s < .65 ? P(B.tips, MAT.metal) : P(B.base, MAT.plate) });
-  digits(h, { seamless: true, paint: q => q.i === 1 || q.bn < -.35 ? P(B.fingers, MAT.rubber) : P(B.base, MAT.plate) });
+  digits(h, { seamless: true, creases: false, paint: q => q.i === 1 || q.bn < -.35 ? P(B.fingers, MAT.rubber) : P(B.base, MAT.plate) });
 };
 
 const STYLES: Record<Exclude<GloveStyleId, "knit">, StyleFn> = { sport, driver, wraps, moto, specialist, paws, garden, plush, bune };

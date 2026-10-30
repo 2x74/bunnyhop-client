@@ -1,4 +1,5 @@
 #include "preferences.hpp"
+#include "settings.hpp"
 #include <nlohmann/json.hpp>
 
 namespace native {
@@ -8,9 +9,12 @@ Preferences Preferences::from_settings(const nlohmann::json &settings) {
     preferences.vertical_sensitivity = settings.at("verticalSensitivity").get<double>();
     preferences.separate_vertical = settings.at("separateVertical").get<bool>();
     preferences.invert_y = settings.at("invertY").get<bool>();
+    preferences.input_backend = input_backend_choice(settings.value("inputBackend", std::string("auto")));
     preferences.timed_input = settings.value("timedInput", true);
     preferences.mouse_diagnostics = settings.at("mouseDiagnostics").get<bool>();
     preferences.limit_queued_frames = settings.at("limitQueuedFrames").get<bool>();
+    preferences.low_latency_mode = settings.value("lowLatencyMode", std::string("off"));
+    preferences.reflex_flash = settings.value("reflexFlash", false);
     preferences.vsync = settings.at("vsync").get<bool>();
     preferences.fps_limit = settings.at("fpsLimit").get<int>();
     preferences.fov = settings.at("fov").get<float>();
@@ -20,7 +24,7 @@ Preferences Preferences::from_settings(const nlohmann::json &settings) {
     preferences.viewmodel = settings.at("viewmodel").get<bool>();
     preferences.source_look = settings.at("sourceLook").get<bool>();
     preferences.jump_stats = settings.at("jumpStats").get<bool>();
-    preferences.strafe_trainer = settings.at("strafeTrainer").get<bool>();
+    preferences.strafe_trainer = strafe_trainer_enabled(settings);
     preferences.strafe_trainer_hints = settings.at("strafeTrainerHints").get<bool>();
     preferences.practice_keep_velocity = settings.at("practiceKeepVelocity").get<bool>();
     preferences.hold_restart = settings.at("holdRestart").get<bool>();

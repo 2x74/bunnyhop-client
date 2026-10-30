@@ -40,10 +40,12 @@ export const PLACEMENT = [1.0, 0.75, 0.6, 0.5, 0.45, 0.4, 0.35, 0.3, 0.25, 0.2] 
  * "harder Normal" and keeps most; the key-restricted styles count 0.6. Every style also has its own ranking
  * (unweighted raw points), so style specialists get a board of their own.
  */
-export const STYLE_WEIGHT: Record<string, number> = { autohop: 1, legit: 0.8, scroll: 0.8, wonly: 0.6, sideways: 0.6, hsw: 0.6, autostrafe: 0, lowgrav: 0 };
+export const STYLE_WEIGHT: Record<string, number> = { autohop: 1, legit: 0.8, scroll: 0.8, wonly: 0.6, sideways: 0.6, hsw: 0.6, autostrafe: 0, lowgrav: 0, segmented: 0 };
 // Auto-strafe (assisted: the game presses A/D from your mouse) is a separate scored mode: its own boards, WRs and
 // style ranking (raw points, like every style), but weight 0, so it adds nothing to the overall rank (bhoptimer's
 // convention for assisted/TAS styles: rankingmultiplier 0). Styles missing here (none today; stale ids) earn nothing.
+// Segmented likewise: bhoptimer's default shavit-styles.cfg gives it "rankingmultiplier" "0.0" (records and replays, no
+// points) because its checkpoint loads let a run be assembled from retried pieces (research/SEGMENTED.md).
 
 /** True if records in this style earn (style-ranking) points: the style has its own ranking. */
 export const isRankedStyle = (style: string): boolean => Object.hasOwn(STYLE_WEIGHT, style);

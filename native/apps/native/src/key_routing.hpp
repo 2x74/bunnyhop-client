@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <cstddef>
+#include <optional>
 
 namespace native {
 
@@ -29,6 +30,16 @@ public:
         const bool was_down = down_[scancode];
         down_[scancode] = down;
         return down && sdl_repeat && was_down;
+    }
+
+    // Raw SDL events can still arrive while the embedded menu owns Win32 focus.
+    // They must not seed repeat suppression for the next gameplay press.
+    std::optional<bool> route(size_t scancode, bool down, bool sdl_repeat, bool owns_keyboard) {
+        if (!owns_keyboard) {
+            clear();
+            return std::nullopt;
+        }
+        return repeat(scancode, down, sdl_repeat);
     }
 
     // An input barrier: keys released while the game wasn't listening may never report their key-up.

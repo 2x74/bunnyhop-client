@@ -9,7 +9,7 @@ import { NewTracker as IndicatorTracker } from "./new-tracker";
 // last seen" dots).
 
 import { api, ApiError, type CosmeticChoice, type Profile, type SupporterSettings } from "../api";
-import { getGhostCosmetics, getLoadout, getOutfit, rememberUnlocks, setGhostCosmetics, setLoadout, setOutfit } from "../player/cosmetics";
+import { getGhostCosmetics, getLoadout, getOutfit, rememberUnlocks, setGhostCosmetics, setKnifePool, setLoadout, setOutfit } from "../player/cosmetics";
 import { loadoutFor, sameLoadout } from "../loadout";
 import { colourway } from "../player/bunny/palettes";
 import { achievement, ACHIEVEMENTS, COSMETICS, crownOf, DEFAULT_COSMETICS, type CosmeticDef, type CosmeticSlot } from "../progression";
@@ -71,6 +71,7 @@ export class Loadout {
   private syncLoadout(): void {
     if (!this.p.mine || !this.current()) return;
     const l = loadoutFor(this.choice, crownOf(profileRanks(this.p)));
+    setKnifePool(this.choice.knifePool ?? null);
     if (!sameLoadout(l, getLoadout())) setLoadout(l);
   }
 
@@ -110,7 +111,7 @@ export class Loadout {
     this.choice = { ...this.choice, ...patch };
     Object.assign(this.pending, patch);
     // Loadout items show at once (the preview stage and the game follow it); a refused save puts it back.
-    if (Object.keys(patch).some((k) => isLoadoutSlot(k) || k === "hat" || k === "body")) this.syncLoadout();
+    if (Object.keys(patch).some((k) => isLoadoutSlot(k) || k === "hat" || k === "body" || k === "hairColor" || k === "hairLength" || k === "knifePool")) this.syncLoadout();
     this.status = { kind: "saving", text: "Saving…" };
     this.emit();
     clearTimeout(this.timer);

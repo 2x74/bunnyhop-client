@@ -12,8 +12,10 @@ import "./support.css";
 
 /** Shared personal glow editor: modal drafts never enter the debounced saved preferences. */
 /** `support`: show non-supporters the way to get it (the Loadout; not the Support page, which is that way). */
-export function playerGlowControls(o: { root: () => HTMLElement; preview: () => void; support?: boolean }) {
-  let glow: PlayerGlow = { ...DEFAULT_PLAYER_GLOW };
+/** `startOff`: a preview for someone without the glow starts switched off (they turn "Show" on to see it). */
+export function playerGlowControls(o: { root: () => HTMLElement; preview: () => void; support?: boolean; startOff?: boolean }) {
+  const initial = (): PlayerGlow => ({ ...DEFAULT_PLAYER_GLOW, ...(o.startOff ? { enabled: false } : {}) });
+  let glow: PlayerGlow = initial();
   let savedGlow: PlayerGlow | null = null;
   let glowDraft: PlayerGlow | null = null;
   let glowDialog: HTMLDialogElement | null = null;
@@ -54,7 +56,7 @@ export function playerGlowControls(o: { root: () => HTMLElement; preview: () => 
           glowStatus.className = "pf-status error";
           if (savedGlow) glow = { ...savedGlow }, drawGlow(), previewGlow();
           const revision = playerGlowRevision();
-          void api.mySupport().then(s => { if (generation === accountGeneration() && seq === glowSeq && revision === playerGlowRevision() && !disposed && o.root().isConnected) seed(s?.supporter?.playerGlow ?? null); }).catch(() => {});
+          void api.mySupport().then(s => { if (generation === accountGeneration() && seq === glowSeq && revision === playerGlowRevision() && !disposed && o.root().isConnected) seed(s?.supporter?.playerGlow ?? s?.glow ?? null); }).catch(() => {});
         },
       );
     }, 400);
@@ -152,7 +154,7 @@ export function playerGlowControls(o: { root: () => HTMLElement; preview: () => 
   const reset = () => {
     glowDialog?.close(); glowDraft = null;
     ++glowSeq; clearTimeout(glowTimer); savedGlow = null; supporter = false;
-    glow = { ...DEFAULT_PLAYER_GLOW }; drawGlow(); showSupport();
+    glow = initial(); drawGlow(); showSupport();
   };
   const bind = () => {
     const root = o.root();
@@ -165,7 +167,7 @@ export function playerGlowControls(o: { root: () => HTMLElement; preview: () => 
       void api.mySupport().then(s => {
         if (!disposed && root.isConnected && generation === accountGeneration()) {
           const current = revision === playerGlowRevision();
-          const next = current ? s?.supporter?.playerGlow ?? null : getPlayerGlow();
+          const next = current ? s?.supporter?.playerGlow ?? s?.glow ?? null : getPlayerGlow();
           if (current && seq === glowSeq) setPlayerGlow(next);
           seed(next, seq !== glowSeq);
         }

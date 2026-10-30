@@ -9,7 +9,7 @@
 // for the page's life; a run without one (old, not public, offline) shows nothing.
 
 import { api, type RunStats } from "../api";
-import { styleLabel } from "../styles";
+import { styleDef, styleLabel } from "../styles";
 import { trackName } from "../zones";
 import { h } from "./dom";
 import "./run-stats.css";
@@ -42,17 +42,29 @@ function load(id: string): Promise<RunStats | null> {
 /** Common mouse polling rates: an estimate near one of them is shown as it. */
 const POLL_RATES = [125, 250, 500, 1000, 2000, 4000, 8000];
 
-/** "Browser · Chrome 156", "Desktop app 0.2.2", "Native client 804eac9" from the server's label. */
+/** "Browser", "Desktop app 0.2.2", "Native client 0.6.2" from the server's label (which browser stays private). */
 export function clientText(c: NonNullable<RunStats["client"]>): string {
   if (c.kind === "native") return c.label.replace(/^Native\b/, "Native client");
   if (c.kind === "desktop") return c.label.replace(/^Desktop\b/, "Desktop app");
-  return c.label === "Browser" ? "Browser" : `Browser · ${c.label}`;
+  return "Browser";
 }
 
 /** An estimated polling rate: the common rate within 15 %, else to the nearest 10 Hz. */
 export function pollText(hz: number): string {
   const near = POLL_RATES.find((r) => Math.abs(hz - r) <= r * 0.15);
   return `${(near ?? Math.round(hz / 10) * 10).toLocaleString("en-US")} Hz`;
+}
+
+/** Shapes players name, by width / height. */
+const SHAPES: [number, string][] = [[4 / 3, "4:3"], [5 / 4, "5:4"], [16 / 10, "16:10"], [16 / 9, "16:9"], [21 / 9, "21:9"], [32 / 9, "32:9"]];
+
+/** The runner's view: "4:3 stretched · FOV 90", "4:3 black bars · FOV 90", "16:9 · FOV 100". */
+export function viewText(v: NonNullable<RunStats["view"]>): string {
+  const named = SHAPES.find(([aspect]) => Math.abs(v.aspect - aspect) < 0.02)?.[1];
+  // 2560×1080 and 3440×1440 are sold as 21:9.
+  const shape = named ?? (v.aspect > 2.3 && v.aspect < 2.45 ? "21:9" : `${plain(v.aspect)}:1`);
+  const fill = v.fill === "stretched" ? " stretched" : v.fill === "bars" ? " black bars" : "";
+  return `${shape}${fill} · FOV ${plain(v.fov)}`;
 }
 
 /** Time played, to the minute: "3h 12m", "12m", "under a minute". */
@@ -76,7 +88,8 @@ export function statsRows(s: RunStats): { run: [string, string][]; setup: [strin
   if (s.jumps != null) run.push(["Jumps", num(s.jumps)]);
   if (s.strafes != null) run.push(["Strafes", num(s.strafes)]);
   if (s.sync != null) run.push(["Sync", `${num(s.sync, 1)}%`]);
-  if (s.perf != null) run.push(["Perfect hops", `${num(s.perf, 1)}%`]);
+  // (Not on autohop styles: holding jump makes every hop perfect.)
+  if (s.perf != null && !styleDef(s.style)?.autohop) run.push(["Perfect hops", `${num(s.perf, 1)}%`]);
   run.push(["Replay views", num(s.views ?? 0)]);
 
   const setup: [string, string][] = [];
@@ -90,6 +103,7 @@ export function statsRows(s: RunStats): { run: [string, string][]; setup: [strin
   if (m.pollHz !== undefined) setup.push(["Polling rate", pollText(m.pollHz)]);
   if (m.raw !== undefined) setup.push(["Raw input", m.raw ? "On" : "Off"]);
   if (s.turn) setup.push(["Turn speed", `${plain(s.turn.yawSpeed)}°/s · fast ×${plain(s.turn.angleSpeedKey)}`]);
+  if (s.view) setup.push(["View", viewText(s.view)]);
 
   const play: [string, string][] = [];
   const p = s.play ?? {};

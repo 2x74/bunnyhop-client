@@ -1,6 +1,7 @@
 #pragma once
 #include "bunnyhop_native.h"
 #include "recording_input.hpp"
+#include "run_diagnostics.hpp"
 #include <nlohmann/json.hpp>
 #include <chrono>
 #include <filesystem>
@@ -28,11 +29,15 @@ struct RunHeartbeat {
 
 struct RunRecorder {
     RecordingInput input;
+    RunDiagnostics diagnostics;
     bool ended = false;
     std::string path;
     std::optional<std::pair<std::string, std::string>> pending_capture;
+    std::filesystem::path replays;
+    std::string replay_map;
 
     void clear(bool recording_ended);
+    std::string next_path() const;
     void
     begin(BhContext *core,
           const std::filesystem::path &cache,
@@ -42,8 +47,15 @@ struct RunRecorder {
           const std::string &player,
           TurnSettings turns,
           const std::string &loadout);
+    void resume_segment(BhContext *core);
     void write(BhContext *core);
-    nlohmann::json finish_event(uint32_t track, double seconds, const std::string &bytes) const;
+    nlohmann::json finish_event(
+            uint32_t track,
+            double seconds,
+            const std::string &bytes,
+            const nlohmann::json &play = nlohmann::json::object(),
+            const nlohmann::json &mouse = nlohmann::json::object()
+    ) const;
 };
 
 }  // namespace native

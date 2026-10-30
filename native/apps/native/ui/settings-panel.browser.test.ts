@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { chromium, type Page } from "playwright";
+import { CLASSIC } from "../../web/src/hud/layout";
 import { state } from "./bridge";
 
 // The settings screen is the website's, in the native menu with no host: the tests play the host through
@@ -133,9 +134,10 @@ test("rows follow what the host has", async () => {
     // From then on the host's value shows.
     await host(page, { settings: { ...HOST_SETTINGS, hudKeysOpacity: 0.6 } });
     await poll(() => row(page, "hud", "Opacity").getByLabel("Opacity value").inputValue(), "60");
-    // Graphics the native renderer does its own way say so.
-    const water = row(page, "graphics", "Water reflections");
-    expect(await water.locator(".set-hint").textContent()).toBe("Not available in the native client");
+    // Bloom drives the Source look's bloom and the Enhanced and Cinematic glow alike: it shows once the host has it.
+    expect(await row(page, "graphics", "Bloom").count()).toBe(0);
+    await host(page, { settings: { ...HOST_SETTINGS, hudKeysOpacity: 0.6, graphicsBloom: true } });
+    await poll(() => row(page, "graphics", "Bloom").count(), 1);
     expect(errors).toEqual([]);
   } finally {
     await close();
@@ -157,12 +159,12 @@ test("keys: turn speeds in the host's ranges, and native-only binds take keys fr
 
     await page.locator('details.set-adv[data-sec="keys"] summary').click();
     from = await count(page);
-    await page.locator('.bind[data-action="chat"][data-slot="0"]').click();
+    await page.locator('.bind[data-action="scoreboard"][data-slot="0"]').click();
     await page.waitForTimeout(50);
     await page.keyboard.press("KeyL");
-    // L was the website's flashlight key: it moves to chat.
-    expect(await patchesSince(page, from)).toEqual([{ binds: { flashlight: [], chat: ["KeyL"] } }]);
-    expect(await page.locator('.bind[data-action="chat"][data-slot="0"]').textContent()).toBe("L");
+    // L was the website's flashlight key: it moves to the scoreboard.
+    expect(await patchesSince(page, from)).toEqual([{ binds: { flashlight: [], scoreboard: ["KeyL"] } }]);
+    expect(await page.locator('.bind[data-action="scoreboard"][data-slot="0"]').textContent()).toBe("L");
     expect(errors).toEqual([]);
   } finally {
     await close();
@@ -278,6 +280,73 @@ test("settings kept with the account upload one document with native settings an
     await openSettings(page, "account");
     await row(page, "account", "Name and sign-in").getByRole("button", { name: "Open account" }).click();
     await page.getByText("Keep settings with my account").waitFor();
+    expect(errors).toEqual([]);
+  } finally {
+    await close();
+  }
+}, 30_000);
+
+test("Edit layout and Paint reach the host", async () => {
+  const { page, errors, close } = await open();
+  try {
+    // A host with the website's layout model has the website's Edit layout row; the host runs the editor.
+    await host(page, { settings: { ...HOST_SETTINGS, hudLayoutWeb: CLASSIC } });
+    await openSettings(page, "hud");
+    const from = await count(page);
+    await page.getByRole("button", { name: "Edit layout" }).click();
+    await poll(async () => (await sent(page)).slice(from).some((message) => message.type === "hudEditor"), true);
+    await page.locator('.set-rail-item[data-sec="paint"]').click();
+    const before = await count(page);
+    const paint = page.locator('section[data-sec="paint"]');
+    await paint.getByRole("radio", { name: "Cyan" }).click();
+    await paint.locator(".set-row", { hasText: "Marks" }).getByRole("button", { name: "Clear paint" }).click();
+    const messages = (await sent(page)).slice(before);
+    expect(messages).toContainEqual({ type: "paint", action: "clear" });
+    expect(await patchesSince(page, before)).toContainEqual({ paint: { color: "#40dcff", size: "medium" } });
+    expect(errors).toEqual([]);
+  } finally {
+    await close();
+  }
+});
+
+test("graphics: the composer looks and the Sky picker follow the host's sky library", async () => {
+  const { page, errors, close } = await open();
+  try {
+    const look = {
+      graphicsPreset: "source",
+      graphicsSkyMode: "map",
+      graphicsSkyPackId: null,
+      graphicsSkyRotation: 0,
+      graphicsLightingSource: "map",
+      graphicsSkyExposure: 0,
+    };
+    const skies = {
+      skies: [
+        { id: "clear-day", name: "Clear day", source: "builtin", downloaded: true, mb: 6.2 },
+        { id: "sunset", name: "Sunset", source: "builtin", downloaded: false, mb: 5.5 },
+        { id: "folder-dusk-0123abcd", name: "Dusk", source: "folder", error: null },
+        { id: "folder-big-89abcdef", name: "Big", source: "folder", error: "Over 32 MB." },
+      ],
+      busy: false,
+      status: "",
+      error: "",
+      added: "",
+    };
+    await host(page, { settings: { ...HOST_SETTINGS, ...look }, skies });
+    await openSettings(page, "graphics");
+    const options = row(page, "graphics", "Look").locator("option");
+    await poll(() => options.evaluateAll((all) => all.filter((o) => (o as HTMLOptionElement).disabled).length), 0);
+    const picker = row(page, "graphics", "Sky").locator("select");
+    await poll(
+      () => picker.locator("option").allTextContents(),
+      ["Map sky", "Procedural daylight", "Clear day", "Sunset · 5.5 MB", "Dusk", "Big · Over 32 MB."],
+    );
+    if (process.env.SKY_SETTINGS_SHOT) await page.screenshot({ path: process.env.SKY_SETTINGS_SHOT, fullPage: true });
+    const from = await count(page);
+    await picker.selectOption("pack:sunset");
+    expect(await patchesSince(page, from)).toEqual([
+      { graphicsPreset: "enhanced", graphicsSkyMode: "pack", graphicsSkyPackId: "sunset" },
+    ]);
     expect(errors).toEqual([]);
   } finally {
     await close();

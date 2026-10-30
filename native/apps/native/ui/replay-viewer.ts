@@ -18,7 +18,7 @@ import { base64Bytes } from "./base64";
 import { REPLAY_CAMERAS, runSeconds, send, state, type ReplayCamera } from "./bridge";
 import { watchingSplit } from "./gauntlet-watch";
 import { ReplayExportDialog } from "./replay-export";
-import { hostSupports, replayCompare, replayTimeline } from "./replay-host";
+import { hostSupports, replayCompare, replayHud, replayLoop, replayTimeline, replayWeapon } from "./replay-host";
 import { practiceFromReplay } from "./replay-practice";
 import { clampToRange, shownRange, shownSeconds } from "./replay-range";
 import { ReplayScrubber } from "./replay-scrubber";
@@ -34,21 +34,31 @@ const CAMERA_LABELS: Record<ReplayCamera, { label: string; title: string }> = {
   free: { label: "Free", title: "Free roam (3)" },
   flyby: { label: "Flyby", title: "Free path: a drone following the run (4)" },
   auto: { label: "Auto", title: "Auto-director: cuts between shots (5)" },
+  orbit: { label: "Orbit", title: "Orbit: a slow turn around the player (6)" },
 };
 const SEEK_SECONDS = 5;
 const FINE_SEEK_SECONDS = 1;
 /** How long a seek waits for the host to show it before the host's tick counts again. */
 const PENDING_SEEK_MS = 1500;
 const MAX_REPLAY_BYTES = 8 << 20;
+/** Seeking to a jump starts this long before it, like the website's ?jump= links. */
+const JUMP_LEAD_SECONDS = 0.5;
 const HELP: readonly [string, string][] = [
   ["Space", "play / pause"],
   [", / .", "step one tick back / forward"],
   ["← / →", "±5 s (Shift ±1 s)"],
   ["Home / End", "start / end"],
+  ["J / Shift+J", "next / previous jump"],
+  ["N / Shift+N", "next / previous split"],
+  ["G", "go to a jump or split"],
+  ["L", "loop: mark A, then B; again to stop"],
   ["[ / ]", "slower / faster"],
-  ["1–5 or F", "in-eye · chase · free · flyby · auto"],
+  ["1–6 or F", "in-eye · chase · free · flyby · auto · orbit"],
+  ["V", "weapon in hand on / off"],
+  ["H", "HUD on / off"],
+  ["R", "the runner's screen shape and FOV, when recorded"],
   ["C", "compare with another replay"],
-  ["E", "export MP4"],
+  ["E", "export video"],
   ["P", "practice from this moment"],
   ["Esc", "back"],
 ];
@@ -60,6 +70,42 @@ export interface ReplayViewerHooks {
 }
 
 type Button = HTMLButtonElement;
+
+/** How the runner saw the run (the vault's record, src/runner_view.hpp): the shape drawn, the monitor's, the FOV. */
+interface RunnerView {
+  aspect: number;
+  screen: number;
+  bars: boolean;
+  fov: number;
+}
+
+const ASPECT_NAMES: readonly [number, string][] = [
+  [4 / 3, "4:3"],
+  [16 / 9, "16:9"],
+  [16 / 10, "16:10"],
+  [5 / 4, "5:4"],
+  [21 / 9, "21:9"],
+];
+const SAME_ASPECT = 0.01;
+
+function readRunnerView(replay: { localSummary?: unknown } | undefined): RunnerView | null {
+  const summary = replay?.localSummary;
+  const view = summary && typeof summary === "object" ? (summary as { view?: unknown }).view : null;
+  if (!view || typeof view !== "object") return null;
+  const v = view as Record<string, unknown>;
+  const numbers = [v.aspect, v.screen, v.fov].every((n) => typeof n === "number" && Number.isFinite(n) && n > 0);
+  return numbers
+    ? { aspect: Number(v.aspect), screen: Number(v.screen), bars: v.bars === true, fov: Number(v.fov) }
+    : null;
+}
+
+/** "4:3 stretched · 100 FOV". */
+function runnerViewLabel(view: RunnerView): string {
+  const name = ASPECT_NAMES.find(([ratio]) => Math.abs(ratio - view.aspect) < SAME_ASPECT)?.[1];
+  const shape = name ?? view.aspect.toFixed(2);
+  const fit = Math.abs(view.aspect - view.screen) < SAME_ASPECT ? "" : view.bars ? " with bars" : " stretched";
+  return `${shape}${fit} · ${Math.round(view.fov)} FOV`;
+}
 
 function button(label: string, title: string, onclick: () => void, classes = ""): Button {
   return h(`button.rv-btn${classes}`, { type: "button", title, "aria-label": title, onclick }, label) as Button;
@@ -88,6 +134,13 @@ export class ReplayViewer {
   private readonly fullButton: Button;
   private readonly compareButton: Button;
   private readonly compareMenu = h("div.rv-menu", { hidden: true, role: "menu" });
+  private readonly gotoButton: Button;
+  private readonly gotoMenu = h("div.rv-menu", { hidden: true, role: "menu" });
+  private readonly loopButton: Button;
+  private readonly weaponButton: Button;
+  private readonly viewButton: Button;
+  private runnerViewOn = false;
+  private loopStart: number | null = null;
   private readonly practiceButton: Button;
   private readonly shareButton: Button;
   private readonly reportButton: Button;
@@ -101,6 +154,9 @@ export class ReplayViewer {
   private lastTick = 0;
   private lastUpdate = 0;
   private readonly onKey = (event: KeyboardEvent) => this.key(event);
+  private readonly bars: ResizeObserver;
+  private readonly panel: HTMLElement;
+  private reportedBars = "";
   private readonly offPracticeAnswer: () => void;
 
   constructor(private readonly hooks: ReplayViewerHooks) {
@@ -109,7 +165,20 @@ export class ReplayViewer {
       seek: (tick) => send({ type: "replayControl", action: "seek", tick }),
       pause: (paused) => send({ type: "replayControl", action: "pause", paused }),
     });
-    this.exporter = new ReplayExportDialog(hooks.notice);
+    this.exporter = new ReplayExportDialog({
+      notice: hooks.notice,
+      title: () => this.exportTitle(),
+      loop: () => replayLoop(),
+    });
+    this.gotoButton = button("Go to", "Go to a jump or split (G)", () => this.toggleGotoMenu(), ".rv-chip");
+    this.loopButton = button("Loop", "Loop a part: mark A, then B (L)", () => this.markLoop(), ".rv-chip");
+    this.weaponButton = button("Weapon", "Weapon in hand (V)", () => this.toggleWeapon(), ".rv-chip");
+    this.viewButton = button(
+      "Runner's view",
+      "Watch in the shape and FOV the runner played with (R)",
+      () => this.toggleRunnerView(),
+      ".rv-chip",
+    );
     this.playButton = button("▶", "Play / pause (Space)", () => this.togglePlay(), ".rv-play");
     this.fullButton = button(
       "Full recording",
@@ -177,6 +246,10 @@ export class ReplayViewer {
       this.exporter.el,
     );
     addEventListener("keydown", this.onKey, true);
+    this.bars = new ResizeObserver(() => this.reportBars());
+    this.bars.observe(panel);
+    this.bars.observe(top);
+    this.panel = panel;
     this.offPracticeAnswer = practiceFromReplay.onAnswer(() => this.flash(practiceFromReplay.message()));
   }
 
@@ -186,9 +259,11 @@ export class ReplayViewer {
       "div.rv-group",
       null,
       button("⏮", "Start (Home)", () => this.seek(shownRange(state.playback).start)),
+      button("‹J", "Previous jump (Shift+J)", () => this.seekJump(-1)),
       button("‹", "Previous tick (,)", step(-1)),
       this.playButton,
       button("›", "Next tick (.)", step(1)),
+      button("J›", "Next jump (J)", () => this.seekJump(1)),
       button("⏭", "End (End)", () => this.seek(shownRange(state.playback).end)),
       h("div.rv-clock.native-playback-position", null, this.timeEl, this.tickEl),
     );
@@ -218,8 +293,8 @@ export class ReplayViewer {
 
   private actions(): HTMLElement {
     const exportButton = button(
-      "Export MP4",
-      "Render this replay to an MP4 video (E)",
+      "Export video",
+      "Render this replay to a video (E)",
       () => this.exporter.open(),
       ".rv-chip.rv-accent",
     );
@@ -230,6 +305,10 @@ export class ReplayViewer {
       "div.rv-group.rv-right",
       null,
       this.fullButton,
+      h("div.rv-menu-wrap", null, this.gotoButton, this.gotoMenu),
+      this.loopButton,
+      this.weaponButton,
+      this.viewButton,
       h("div.rv-menu-wrap", null, this.compareButton, this.compareMenu),
       this.practiceButton,
       exportButton,
@@ -242,8 +321,21 @@ export class ReplayViewer {
   /** Removes the key listener and cancels a drag. The screen calls it when the viewer leaves the page. */
   dispose(): void {
     removeEventListener("keydown", this.onKey, true);
+    this.bars.disconnect();
+    send({ type: "replayControl", action: "viewer", open: false });
     this.offPracticeAnswer();
     this.scrubber.cancel(false);
+  }
+
+  /** The host plays on under the viewer and lays the runner's HUD out between its title and its panel. */
+  private reportBars(): void {
+    if (!this.el.isConnected) return;
+    const top = Math.ceil(this.titleEl.parentElement?.getBoundingClientRect().bottom ?? 0);
+    const bottom = Math.ceil(innerHeight - this.panel.getBoundingClientRect().top);
+    const report = `${state.playback.id}:${top}:${bottom}`;
+    if (report === this.reportedBars) return;
+    this.reportedBars = report;
+    send({ type: "replayControl", action: "viewer", open: true, top, bottom });
   }
 
   private flash(text: string): void {
@@ -317,9 +409,151 @@ export class ReplayViewer {
     if (state.playback.id) send({ type: "replay", action: "export", id: state.playback.id });
   }
 
+  /** The run's link at the shown moment: the website opens it paused at `?t=` (staff-lens.ts replayDeepLink). */
   private shareData(): { url: string; title: string } {
     const run = serverRun();
-    return { url: runUrl(run?.runId ?? ""), title: `${run?.name ?? "Replay"} · ${state.map ?? ""} · bunnyhop.lol` };
+    const tick = this.shownTick();
+    const url = runUrl(run?.runId ?? "") + (tick > shownRange(state.playback).start ? `?t=${tick}` : "");
+    return { url, title: `${run?.name ?? "Replay"} · ${state.map ?? ""} · bunnyhop.lol` };
+  }
+
+  private exportTitle(): string {
+    const playback = state.playback;
+    const replay = state.replays.find((item) => item.id === playback.id);
+    const name = playback.player?.name ?? serverRun()?.name ?? replay?.name ?? "Replay";
+    return `${name} · ${state.map ?? replay?.map ?? ""}`;
+  }
+
+  // Jumps, splits and the loop
+
+  /** The timed run's jumps (from the start zone to the finish), as the website counts them for ?jump=. */
+  private timedJumps(): number[] {
+    const data = replayTimeline(state.playback.id);
+    if (!data) return [];
+    return data.jumps.filter((tick) => tick >= data.startTick && (!data.endTick || tick <= data.endTick));
+  }
+
+  private leadTicks(): number {
+    return Math.round(JUMP_LEAD_SECONDS / shownRange(state.playback).interval);
+  }
+
+  private seekJump(direction: -1 | 1): void {
+    const data = replayTimeline(state.playback.id);
+    if (!data) return;
+    const now = this.shownTick() + this.leadTicks();
+    const jumps = direction > 0 ? data.jumps.filter((t) => t > now + 1) : data.jumps.filter((t) => t < now - 1);
+    const target = direction > 0 ? jumps[0] : jumps.at(-1);
+    if (target !== undefined) this.seek(Math.max(0, target - this.leadTicks()));
+  }
+
+  private seekSplit(direction: -1 | 1): void {
+    const data = replayTimeline(state.playback.id);
+    if (!data) return;
+    const marks = [data.startTick, ...data.splits.map((split) => split.tick), data.endTick].filter(Boolean);
+    const now = this.shownTick();
+    const target = direction > 0 ? marks.find((t) => t > now + 1) : marks.filter((t) => t < now - 1).at(-1);
+    if (target !== undefined) this.seek(target);
+  }
+
+  /** The n-th timed jump (1-based), half a second before it. */
+  private gotoJump(n: number): void {
+    const tick = this.timedJumps()[n - 1];
+    if (tick === undefined) {
+      this.flash(`This run has ${this.timedJumps().length} jumps.`);
+      return;
+    }
+    this.seek(Math.max(0, tick - this.leadTicks()));
+  }
+
+  private toggleGotoMenu(): void {
+    if (!this.gotoMenu.hidden) {
+      this.gotoMenu.hidden = true;
+      return;
+    }
+    const data = replayTimeline(state.playback.id);
+    const range = shownRange(state.playback);
+    const at = (tick: number) => formatTime((tick - range.start) * range.interval);
+    const choose = (tick: number) => () => {
+      this.gotoMenu.hidden = true;
+      this.seek(tick);
+    };
+    const item = (label: string, sub: string, tick: number) =>
+      h(
+        "button.rv-menu-item",
+        { type: "button", role: "menuitem", onclick: choose(tick) },
+        h("span", null, label),
+        h("small", null, sub),
+      );
+    const jump = h("input", {
+      type: "number",
+      min: 1,
+      step: 1,
+      placeholder: "#",
+      "aria-label": "Jump number",
+    }) as HTMLInputElement;
+    const go = () => {
+      this.gotoMenu.hidden = true;
+      this.gotoJump(Math.floor(jump.valueAsNumber));
+    };
+    jump.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") go();
+    });
+    const splits = data?.splits ?? [];
+    this.gotoMenu.replaceChildren(
+      h(
+        "div.rv-menu-row",
+        null,
+        h("span", null, `Jump (of ${this.timedJumps().length})`),
+        jump,
+        button("Go", "Go to that jump", go),
+      ),
+      ...(data?.startTick ? [item("Run start", at(data.startTick), data.startTick)] : []),
+      ...splits.map((split) =>
+        item(split.kind === "stage" ? `Stage ${split.index}` : `Checkpoint ${split.index}`, at(split.tick), split.tick),
+      ),
+      ...(data?.endTick ? [item("Finish", at(data.endTick), data.endTick)] : []),
+    );
+    this.gotoMenu.hidden = false;
+    jump.focus();
+  }
+
+  /** L: the first press marks A, the second B and starts looping, the third stops. */
+  private markLoop(): void {
+    if (replayLoop()) {
+      send({ type: "replayControl", action: "loop", value: null });
+      this.loopStart = null;
+      return;
+    }
+    const tick = this.shownTick();
+    if (this.loopStart === null || tick === this.loopStart) {
+      this.loopStart = tick;
+      this.flash("Loop from here: press L again where it ends.");
+      return;
+    }
+    const from = Math.min(this.loopStart, tick);
+    const to = Math.max(this.loopStart, tick);
+    this.loopStart = null;
+    this.flash("");
+    send({ type: "replayControl", action: "loop", value: { from, to } });
+  }
+
+  private runnerView(): RunnerView | null {
+    return readRunnerView(state.replays.find((item) => item.id === state.playback.id));
+  }
+
+  private toggleRunnerView(): void {
+    const view = this.runnerView();
+    if (!view) return;
+    this.runnerViewOn = !this.runnerViewOn;
+    send({ type: "replayControl", action: "runnerView", view: this.runnerViewOn ? view : null });
+  }
+
+  private toggleWeapon(): void {
+    send({ type: "replayControl", action: "weapon" });
+  }
+
+  private toggleHud(): void {
+    send({ type: "replayControl", action: "hud", value: !replayHud() });
   }
 
   private report(): void {
@@ -424,7 +658,7 @@ export class ReplayViewer {
   private handleKey(event: KeyboardEvent): boolean {
     const range = shownRange(state.playback);
     const jump = (event.shiftKey ? FINE_SEEK_SECONDS : SEEK_SECONDS) / range.interval;
-    const camera = /^Digit([1-5])$/.exec(event.code);
+    const camera = /^Digit([1-6])$/.exec(event.code);
     if (camera) {
       this.setCamera(REPLAY_CAMERAS[Number(camera[1]) - 1]);
       return true;
@@ -444,6 +678,19 @@ export class ReplayViewer {
         if (!this.compareButton.hidden) this.toggleCompareMenu();
       },
       KeyE: () => this.exporter.open(),
+      KeyJ: () => this.seekJump(event.shiftKey ? -1 : 1),
+      KeyN: () => this.seekSplit(event.shiftKey ? -1 : 1),
+      KeyG: () => this.toggleGotoMenu(),
+      KeyL: () => {
+        if (hostSupports("loop")) this.markLoop();
+      },
+      KeyV: () => {
+        if (hostSupports("weapon")) this.toggleWeapon();
+      },
+      KeyR: () => this.toggleRunnerView(),
+      KeyH: () => {
+        if (hostSupports("hud")) this.toggleHud();
+      },
       KeyP: () => {
         if (!this.practiceButton.hidden) this.practice();
       },
@@ -452,8 +699,9 @@ export class ReplayViewer {
       },
     };
     const action = actions[event.code];
-    if (event.code === "Escape" && !this.compareMenu.hidden) {
+    if (event.code === "Escape" && (!this.compareMenu.hidden || !this.gotoMenu.hidden)) {
       this.compareMenu.hidden = true;
+      this.gotoMenu.hidden = true;
       return true;
     }
     if (!action || (event.repeat && event.code !== "ArrowLeft" && event.code !== "ArrowRight")) return false;
@@ -470,11 +718,12 @@ export class ReplayViewer {
     this.titleEl.replaceChildren(h("b", null, name), time ? h("span.rv-time-big", null, time) : "");
     const style = state.player?.style ?? replay?.style ?? state.style;
     const track = state.player?.track ?? replay?.track ?? 0;
+    const loads = replayTimeline(playback.id)?.segments.length ?? 0;
     const recorded = replay ? new Date(replay.recordedAt).toLocaleDateString() : "";
     this.subEl.textContent = [
       state.map ?? replay?.map ?? "",
       track ? trackName(track) : "",
-      styleLabel(style),
+      style === "segmented" && loads ? `Segmented (${loads} loads)` : styleLabel(style),
       recorded,
     ]
       .filter(Boolean)
@@ -501,9 +750,21 @@ export class ReplayViewer {
       control.classList.toggle("on", camera === (playback.camera ?? "eye"));
     this.fullButton.classList.toggle("on", !!playback.fullRecording);
     this.fullButton.setAttribute("aria-pressed", String(!!playback.fullRecording));
+    this.paintLoop();
+    this.weaponButton.hidden = !hostSupports("weapon");
+    const view = this.runnerView();
+    this.viewButton.hidden = !view;
+    this.viewButton.classList.toggle("on", this.runnerViewOn);
+    this.viewButton.textContent = view && this.runnerViewOn ? runnerViewLabel(view) : "Runner's view";
+    this.weaponButton.classList.toggle("on", replayWeapon());
+    this.weaponButton.setAttribute("aria-pressed", String(replayWeapon()));
+    this.gotoButton.hidden = !replayTimeline(playback.id);
     const compare = replayCompare();
     this.compareButton.hidden = !hostSupports("compare");
-    this.compareButton.textContent = compare ? `vs ${compare.name}` : "Compare";
+    const delta = compare?.delta;
+    const deltaText =
+      delta === null || delta === undefined ? "" : ` ${delta > 0 ? "+" : "−"}${Math.abs(delta).toFixed(3)}`;
+    this.compareButton.textContent = compare ? `vs ${compare.name}${deltaText}` : "Compare";
     this.compareButton.classList.toggle("on", !!compare);
     if (compare) this.compareButton.style.setProperty("--chip", GHOST_CSS[compare.kind]);
     else this.compareButton.style.removeProperty("--chip");
@@ -511,6 +772,16 @@ export class ReplayViewer {
     this.shareButton.hidden = !run;
     const mine = !!run && (run.id ? run.id === lastKnownMe()?.id : run.name === lastKnownMe()?.name);
     this.reportButton.hidden = !run || mine || !canReport({ ...(run.id ? { id: run.id } : {}), name: run.name });
+  }
+
+  private paintLoop(): void {
+    const loop = replayLoop();
+    const range = shownRange(state.playback);
+    const at = (tick: number) => formatTime((tick - range.start) * range.interval);
+    this.loopButton.hidden = !hostSupports("loop");
+    this.loopButton.classList.toggle("on", !!loop || this.loopStart !== null);
+    if (loop) this.loopButton.textContent = `Loop ${at(loop.from)}–${at(loop.to)}`;
+    else this.loopButton.textContent = this.loopStart === null ? "Loop" : `Loop from ${at(this.loopStart)}…`;
   }
 
   /** Counts a view of a server run once enough of it has played (web viewer watch-count.ts). */
@@ -543,7 +814,14 @@ export class ReplayViewer {
   /** Call on every host state. */
   update(): void {
     const playback = state.playback;
-    if (playback.id !== this.replayId) this.scrubber.cancel(false);
+    if (playback.id !== this.replayId) {
+      this.scrubber.cancel(false);
+      this.loopStart = null;
+      // Opening another replay clears the host's runner view.
+      this.runnerViewOn = false;
+      // A new replay starts with the host's viewer flag cleared.
+      if (playback.active) this.reportBars();
+    }
     this.countWatching();
     if (this.pendingTick !== null) {
       const caughtUp = Math.abs(playback.tick - this.pendingTick) <= 2 || performance.now() > this.pendingUntil;
@@ -552,6 +830,7 @@ export class ReplayViewer {
     const range = shownRange(playback);
     this.timeline.setRange(range);
     this.timeline.setData(replayTimeline(playback.id));
+    this.timeline.setLoop(replayLoop());
     const compare = replayCompare();
     this.timeline.setCompare(compare?.endTick ?? null, compare ? GHOST_CSS[compare.kind] : "");
     practiceFromReplay.update();
@@ -562,6 +841,6 @@ export class ReplayViewer {
     this.paintTitle();
     this.paintClock();
     this.paintControls();
-    this.exporter.refresh();
+    if (this.exporter.isOpen) this.exporter.refresh();
   }
 }

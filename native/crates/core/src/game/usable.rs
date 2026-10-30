@@ -235,6 +235,7 @@ impl Game {
             match &k.kind {
                 kin::KinKind::PropDoor(_) => self.prop_door_use(i, activator),
                 kin::KinKind::RotButton(_) => self.rot_button_use(i, use_type, activator),
+                kin::KinKind::Momentary(_) => self.momentary_use(i),
                 _ => {
                     self.kin_input(i, "use", "", activator);
                 }

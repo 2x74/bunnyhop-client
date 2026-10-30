@@ -7,7 +7,7 @@ import { takeFreeCursor } from "../free-cursor";
 import { h } from "../ui/dom";
 import { keyLabel, prefs } from "../ui/settings";
 import { range } from "../ui/controls";
-import { anchorX, anchorY, clampScale, cloneLayout, CLASSIC, decodeLayout, encodeLayout, HUD_ELEMENTS, HUD_SCALE, placeFromRect, PRESETS, remFraction, sameLayout, unzoomPlace, type HudElId, type HudLayout, type HudPlace } from "./layout";
+import { anchorX, anchorY, clampScale, CLASSIC, presetLayout, decodeLayout, encodeLayout, HUD_ELEMENTS, HUD_SCALE, placeFromRect, PRESETS, remFraction, sameLayout, unzoomPlace, type HudElId, type HudLayout, type HudPlace } from "./layout";
 
 export interface EditorHost {
   root: HTMLElement;
@@ -139,7 +139,7 @@ export class HudEditor {
     }
     const presets = h("div.he-presets");
     for (const p of PRESETS) {
-      const b = h("button.btn.he-btn", { type: "button", onclick: () => this.commit((l) => Object.assign(l, cloneLayout(p.layout))) }, p.label);
+      const b = h("button.btn.he-btn", { type: "button", onclick: () => this.commit((l) => Object.assign(l, presetLayout(p.layout, l))) }, p.label);
       this.presetBtns.set(p.id, b);
       presets.append(b);
     }
@@ -194,7 +194,7 @@ export class HudEditor {
         h("span.he-label", null, "Presets"),
         presets,
         h("label.he-snap", { for: "he-snap" }, snap, " Snap"),
-        h("button.btn.he-btn", { type: "button", onclick: () => this.commit((l) => Object.assign(l, cloneLayout(CLASSIC))) }, "Reset to default"),
+        h("button.btn.he-btn", { type: "button", onclick: () => this.commit((l) => Object.assign(l, presetLayout(CLASSIC, l))) }, "Reset to default"),
       ),
       h("div.he-row", null, h("span.he-label", null, "HUD scale"), this.scaleControl()),
       h("div.he-row", null, h("span.he-label", null, "Share"), io, exportBtn, importBtn, msg),

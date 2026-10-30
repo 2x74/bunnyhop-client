@@ -1,3 +1,4 @@
+import { applyHostSkies } from "./sky-settings";
 import { applySemanticPalette } from "./semantic-palette";
 import { NativeWorldRecord } from "./world-record";
 import { NativeHudLeaderboard, type BoardContext } from "./hud-leaderboard";
@@ -19,6 +20,7 @@ import { accountGeneration } from "../../web/src/ui/account-state";
 import { countJump, recordMapPlayed } from "../../web/src/ui/stats";
 import { mapTime } from "../../web/src/map-time";
 import { NativeRunService } from "./run-service";
+import { profileDpi } from "./profile-mouse";
 import { formatTime } from "../../web/src/timer";
 import { isStyleId } from "../../web/src/styles";
 import { onStyleChange, setSelectedStyle } from "../../web/src/ui/style-picker";
@@ -33,6 +35,7 @@ import {
   playLocalReplay,
 } from "./replays";
 import { applyReplayHostState, applyReplayTimeline } from "./replay-host";
+import { applyVideoQueueState } from "./video-queue";
 import { practiceFromReplay } from "./replay-practice";
 import { applyChatFeatures } from "./chat-features";
 import { hostScoreboard, ScoreboardFeed } from "./host-decoration";
@@ -44,6 +47,7 @@ import { NativeRoomService } from "./room-service";
 import { RoomConnection } from "../../web/src/net/room";
 import { setRoomPresence, setRaceTag, currentRoom, currentRace } from "../../web/src/net/presence";
 import { serverBrowser } from "../../web/src/ui/servers";
+import { keyLabel } from "../../web/src/ui/settings";
 import { roomPanel } from "./rooms-panel";
 import { safeNativeChatUrl } from "./chat-links";
 import { NativeChatService } from "./chat-service";
@@ -59,7 +63,8 @@ import { nativeSupportScreen } from "./support-panel";
 import { openAccountPanel } from "./account-panel";
 import { tutorialPanel } from "./tutorial-panel";
 import { nativeNavigate } from "./navigation";
-import { cosmeticsPanel, initCosmetics } from "./cosmetics";
+import { cosmeticsPanel, initCosmetics, setKnifePick } from "./cosmetics";
+import { getHeldLoadout, onHeldLoadout } from "../../web/src/player/cosmetics";
 import { creditsPanel } from "./credits";
 import { homeScreen, watchMenuMotion, LAST_MAP } from "./home-menu";
 import { pauseScreen } from "./pause-menu";
@@ -706,6 +711,8 @@ function receive(value: unknown): void {
   const pauseBefore = paused();
   const applied = applyState(value);
   applyReplayHostState(value);
+  applyVideoQueueState(value);
+  applyHostSkies(value);
   applyChatFeatures(value);
   if (applied) applySemanticPalette(state.settings.colorBlind);
   // A newly picked map is up: the next Esc in game is the pause menu, not the browser it was picked from.
@@ -719,7 +726,7 @@ function receive(value: unknown): void {
   paintLoading();
   if (finishChanged && !finishSummary) gauntletLine = null;
   gauntlet.onHostState();
-  roomService.hostMap(state.map);
+  roomService.hostMap(state.map, !!state.loading);
   syncingStyle = true;
   setSelectedStyle(state.style);
   syncingStyle = false;
@@ -727,7 +734,14 @@ function receive(value: unknown): void {
   setWatching(state.playback.active ? state.map : false);
   window.dispatchEvent(new CustomEvent("bunnyhop:host-state", { detail: state }));
 }
+/** The chat bind's first key, as players read it ("Y"), or null while chat has no key. */
+function chatKeyLabel(): string | null {
+  const code = state.settings.binds.chat?.[0];
+  return code ? keyLabel(code) : null;
+}
 const roomService = new NativeRoomService({
+  chatKey: chatKeyLabel,
+  heldKnife: getHeldLoadout,
   connect: (id, handlers) => new RoomConnection(id, () => state.style, handlers),
   ensureAccount: async () => {
     try {
@@ -741,6 +755,7 @@ const roomService = new NativeRoomService({
   },
   send,
 });
+onHeldLoadout(() => roomService.heldKnifeChanged());
 const chatService = new NativeChatService(roomService, () => {
   send({ type: "chatAction", action: "openRoom" } as unknown as Parameters<typeof send>[0]);
   show("room");
@@ -759,7 +774,7 @@ roomService.subscribe(() => {
     ping: roomService.ping(),
     at: Date.now(),
   };
-  scoreboardFeed.update(hostScoreboard(roomService.view, clock));
+  scoreboardFeed.update(hostScoreboard(roomService.view, clock, chatKeyLabel()));
 });
 onBeforeSend((message) => {
   if (
@@ -832,6 +847,7 @@ const gauntlet = new NativeGauntlet({
 });
 const runService = new NativeRunService({
   api,
+  dpi: profileDpi,
   account: async () => {
     const user = await api.me();
     return api.meStale() ? null : (user?.id ?? null);
@@ -914,6 +930,7 @@ window.bunnyhopNativeMenu = {
   onChatSubmit: (value: unknown) => chatService.submit(value),
   onChatSuggest: (value: unknown) => chatService.suggest(value),
   onRoomControl: (value: unknown) => chatService.control(value),
+  onKnifePick: setKnifePick,
   onRoomPose: (value) => {
     roomService.pose(value);
   },

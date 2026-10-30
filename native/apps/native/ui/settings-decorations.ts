@@ -4,16 +4,17 @@ import { prefs } from "../../web/src/ui/settings";
 import { hostCan } from "./prefs-bridge";
 import { decorateRow } from "./settings-controls";
 
-/** Web looks that build on the Source look with the website's own renderer. */
-const WEB_ONLY_LOOKS = ["enhanced", "cinematic"];
+/** Looks that build on the Source look, which a host without the graphicsPreset key can't draw. */
+const COMPOSER_LOOKS = ["enhanced", "cinematic"];
 
 /** Show on screen's pieces that are HUD elements (quick-toggles.ts), by web element id. */
 const MINIATURE_ELEMENTS = ["speed", "timer", "split", "stats", "sync", "keys", "strafeTrainer", "fps", "chat"];
 
 export function decorateNativeRows(): void {
   decorateRow("graphics/Quality/Look", (row) => {
+    if (hostCan("graphicsPreset")) return;
     for (const option of row.querySelectorAll<HTMLOptionElement>("option")) {
-      if (!WEB_ONLY_LOOKS.includes(option.value)) continue;
+      if (!COMPOSER_LOOKS.includes(option.value)) continue;
       option.disabled = true;
       option.textContent = `${option.textContent} (website only)`;
     }

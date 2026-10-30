@@ -1,7 +1,8 @@
 diff --git a/crates/core/Cargo.toml b/crates/core/Cargo.toml
+index 0c958a8..2556240 100644
 --- a/crates/core/Cargo.toml
 +++ b/crates/core/Cargo.toml
-@@ -4,10 +4,15 @@
+@@ -4,10 +4,15 @@ version = "0.1.0"
  edition.workspace = true
  license.workspace = true
  
@@ -18,9 +19,10 @@ diff --git a/crates/core/Cargo.toml b/crates/core/Cargo.toml
  playsrc-collision = { path = "../vendor/collision" }
  playsrc-movement = { path = "../vendor/movement" }
 diff --git a/crates/core/src/game.rs b/crates/core/src/game.rs
+index f7e12b8..c1264a7 100644
 --- a/crates/core/src/game.rs
 +++ b/crates/core/src/game.rs
-@@ -1178,8 +1178,8 @@
+@@ -1198,8 +1198,8 @@ impl Tracer for Scene<'_> {
  }
  
  fn angle_vectors_forward(angles: [f32; 3]) -> [f32; 3] {
@@ -31,7 +33,7 @@ diff --git a/crates/core/src/game.rs b/crates/core/src/game.rs
      [cp * cy, cp * sy, -sp]
  }
  
-@@ -2068,8 +2068,8 @@
+@@ -2131,8 +2131,8 @@ impl Game {
          let lo = [p[0] + hull.mins[0], p[1] + hull.mins[1], p[2] + hull.mins[2]];
          let hi = [p[0] + hull.maxs[0], p[1] + hull.maxs[1], p[2] + hull.maxs[2]];
          let center = [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5];
@@ -43,9 +45,10 @@ diff --git a/crates/core/src/game.rs b/crates/core/src/game.rs
          let right = [sy, -cy, 0.0];
          let (mut forward, mut side) = (forward, side);
 diff --git a/crates/core/src/game/kin.rs b/crates/core/src/game/kin.rs
+index a70a7e3..f66d9af 100644
 --- a/crates/core/src/game/kin.rs
 +++ b/crates/core/src/game/kin.rs
-@@ -99,12 +99,12 @@
+@@ -99,12 +99,12 @@ pub(super) fn vector_angles(f: [f32; 3]) -> [f32; 3] {
      if f[1] == 0.0 && f[0] == 0.0 {
          return [if f[2] > 0.0 { 270.0 } else { 90.0 }, 0.0, 0.0];
      }
@@ -60,7 +63,7 @@ diff --git a/crates/core/src/game/kin.rs b/crates/core/src/game/kin.rs
      if pitch < 0.0 {
          pitch += 360.0;
      }
-@@ -2538,7 +2538,7 @@
+@@ -2560,7 +2560,7 @@ fn brush_probes(world: &playsrc_collision::World, model: usize) -> Vec<[f32; 3]>
          let c = face.iter().fold([0.0f32; 3], |a, p| v_add(a, *p));
          let c = v_scale(c, 1.0 / face.len() as f32);
          let mut poly = face.clone();
@@ -69,7 +72,7 @@ diff --git a/crates/core/src/game/kin.rs b/crates/core/src/game/kin.rs
          let (lo, hi) = poly.iter().fold(([f32::MAX; 2], [f32::MIN; 2]), |(lo, hi), p| ([lo[0].min(p[0]), lo[1].min(p[1])], [hi[0].max(p[0]), hi[1].max(p[1])]));
          let inside = |x: f32, y: f32| {
              (0..poly.len()).all(|k| {
-@@ -2616,9 +2616,9 @@
+@@ -2638,9 +2638,9 @@ type Quat = [f32; 4];
  
  /// mathlib AngleQuaternion.
  fn quat_from_angles(a: [f32; 3]) -> Quat {
@@ -82,7 +85,7 @@ diff --git a/crates/core/src/game/kin.rs b/crates/core/src/game/kin.rs
      let srxcp = sr * cp;
      let crxsp = cr * sp;
      let crxcp = cr * cp;
-@@ -2627,7 +2627,7 @@
+@@ -2649,7 +2649,7 @@ fn quat_from_angles(a: [f32; 3]) -> Quat {
  }
  
  fn quat_axis_angle(axis: [f32; 3], degrees: f32) -> Quat {
@@ -91,7 +94,7 @@ diff --git a/crates/core/src/game/kin.rs b/crates/core/src/game/kin.rs
      [axis[0] * s, axis[1] * s, axis[2] * s, c]
  }
  
-@@ -2660,12 +2660,12 @@
+@@ -2682,12 +2682,12 @@ fn angles_from_quat(q: Quat) -> [f32; 3] {
      let xy = (m00 * m00 + m10 * m10).sqrt();
      if xy > 0.001 {
          [
@@ -108,7 +111,7 @@ diff --git a/crates/core/src/game/kin.rs b/crates/core/src/game/kin.rs
      }
  }
  
-@@ -2673,7 +2673,7 @@
+@@ -2695,7 +2695,7 @@ fn quat_angle_diff(p: Quat, q: Quat) -> f32 {
      let qinv = [-q[0], -q[1], -q[2], q[3]];
      let d = quat_mul(p, qinv);
      let sin = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().min(1.0);
@@ -117,7 +120,7 @@ diff --git a/crates/core/src/game/kin.rs b/crates/core/src/game/kin.rs
  }
  
  /// mathlib QuaternionSlerp (with QuaternionAlign).
-@@ -2687,10 +2687,10 @@
+@@ -2709,10 +2709,10 @@ fn quat_slerp(p: Quat, q: Quat, t: f32) -> Quat {
      let mut qt = [0.0; 4];
      if 1.0 + cosom > 0.000001 {
          if 1.0 - cosom > 0.000001 {
@@ -132,7 +135,7 @@ diff --git a/crates/core/src/game/kin.rs b/crates/core/src/game/kin.rs
          } else {
              sclp = 1.0 - t;
              sclq = t;
-@@ -2700,8 +2700,8 @@
+@@ -2722,8 +2722,8 @@ fn quat_slerp(p: Quat, q: Quat, t: f32) -> Quat {
          }
      } else {
          qt = [-q[1], q[0], -q[3], q[2]];
@@ -144,9 +147,10 @@ diff --git a/crates/core/src/game/kin.rs b/crates/core/src/game/kin.rs
              qt[k] = sp * p[k] + sq * qt[k];
          }
 diff --git a/crates/core/src/game/minigame.rs b/crates/core/src/game/minigame.rs
+index 583af9a..486b57e 100644
 --- a/crates/core/src/game/minigame.rs
 +++ b/crates/core/src/game/minigame.rs
-@@ -218,8 +218,8 @@
+@@ -218,8 +218,8 @@ impl Game {
          let last = ui.last.unwrap_or(buttons);
          let fov = self.entities[i].float("FieldOfView").unwrap_or(-1.0);
          if fov > -1.0 {
@@ -158,9 +162,10 @@ diff --git a/crates/core/src/game/minigame.rs b/crates/core/src/game/minigame.rs
              let p = self.state.position;
              let center = [p[0], p[1], p[2] + self.current_hull().maxs[2] * 0.5];
 diff --git a/crates/core/src/game/practice.rs b/crates/core/src/game/practice.rs
+index e9a87c9..a60cdae 100644
 --- a/crates/core/src/game/practice.rs
 +++ b/crates/core/src/game/practice.rs
-@@ -34,8 +34,8 @@
+@@ -34,8 +34,8 @@ impl Game {
      /// 100 units each), then the same with the crouched hull. Returns 1 (standing), 2 (crouched) or 0 (no free space
      /// found: left at `position`, standing).
      pub fn practice_noclip_exit(&mut self, position: [f32; 3], velocity: [f32; 3], yaw: f32, pitch: f32) -> u32 {
@@ -172,9 +177,10 @@ diff --git a/crates/core/src/game/practice.rs b/crates/core/src/game/practice.rs
          let forward = [cp * cy, cp * sy, -sp];
          let right = [sy, -cy, 0.0];
 diff --git a/crates/core/src/game/propdoor.rs b/crates/core/src/game/propdoor.rs
+index ec9c34e..2d2fbd4 100644
 --- a/crates/core/src/game/propdoor.rs
 +++ b/crates/core/src/game/propdoor.rs
-@@ -181,9 +181,9 @@
+@@ -181,9 +181,9 @@ impl Game {
              let maxs = [hi[0] - o[0], hi[1] - o[1], 0.0];
              let len2 = |v: [f32; 3]| v[0] * v[0] + v[1] * v[1];
              let check = if len2(mins) > len2(maxs) { mins } else { maxs };
@@ -187,7 +193,7 @@ diff --git a/crates/core/src/game/propdoor.rs b/crates/core/src/game/propdoor.rs
              let right = [-sr * sp * cy + cr * sy, -sr * sp * sy - cr * cy, -sr * cp];
              if check[0] * right[0] + check[1] * right[1] + check[2] * right[2] > 0.0 {
                  let d = self.prop_door_mut(i);
-@@ -327,8 +327,8 @@
+@@ -327,8 +327,8 @@ impl Game {
              let away_player = away_from_player == Some(true);
              if away_player {
                  let a = self.ents[i].angles;
@@ -199,9 +205,10 @@ diff --git a/crates/core/src/game/propdoor.rs b/crates/core/src/game/propdoor.rs
                  let p = self.state.position;
                  let o = self.ents[i].origin;
 diff --git a/crates/core/src/game/usable.rs b/crates/core/src/game/usable.rs
+index 28d151e..3ec0530 100644
 --- a/crates/core/src/game/usable.rs
 +++ b/crates/core/src/game/usable.rs
-@@ -132,8 +132,8 @@
+@@ -132,8 +132,8 @@ impl Game {
  
      /// CBasePlayer::FindUseEntity.
      pub(super) fn find_use_entity(&self, pitch: f32, yaw: f32) -> Option<usize> {
@@ -213,9 +220,10 @@ diff --git a/crates/core/src/game/usable.rs b/crates/core/src/game/usable.rs
          let up = [sp * cy, sp * sy, cp];
          let p = self.state.position;
 diff --git a/crates/core/src/game/weapons.rs b/crates/core/src/game/weapons.rs
+index 7813d13..fd731d2 100644
 --- a/crates/core/src/game/weapons.rs
 +++ b/crates/core/src/game/weapons.rs
-@@ -498,8 +498,8 @@
+@@ -498,8 +498,8 @@ impl Game {
      }
  
      fn eye_and_forward(&self, cmd: Cmd) -> ([f32; 3], [f32; 3]) {
@@ -226,7 +234,7 @@ diff --git a/crates/core/src/game/weapons.rs b/crates/core/src/game/weapons.rs
          let p = self.state.position;
          let o = self.state.view_offset;
          ([p[0] + o[0], p[1] + o[1], p[2] + o[2]], [cp * cy, cp * sy, -sp])
-@@ -706,7 +706,7 @@
+@@ -706,7 +706,7 @@ impl Game {
          self.weapon_event(WEAPON_EVENT_DROPPED);
          // The entity it came from, unless a point_template has respawned a new copy into it meanwhile.
          if let Some(e) = held.ent.filter(|&e| self.ents[e].removed) {
@@ -235,7 +243,7 @@ diff --git a/crates/core/src/game/weapons.rs b/crates/core/src/game/weapons.rs
              let p = self.state.position;
              let from = [p[0], p[1], p[2] + 32.0];
              let to = [p[0] + cy * 48.0, p[1] + sy * 48.0, p[2] + 32.0];
-@@ -934,7 +934,7 @@
+@@ -934,7 +934,7 @@ impl Game {
          self.report_attack(gun.id, if silenced { 2 } else { 1 }, eye, end, hit);
          // Damage falls off with distance: damage * rangeModifier ^ (distance / 500).
          let distance = hit.map_or(gun.range, |t| t.fraction * gun.range);
@@ -245,9 +253,10 @@ diff --git a/crates/core/src/game/weapons.rs b/crates/core/src/game/weapons.rs
      }
  
 diff --git a/crates/core/src/lib.rs b/crates/core/src/lib.rs
+index 1053aad..56b1702 100644
 --- a/crates/core/src/lib.rs
 +++ b/crates/core/src/lib.rs
-@@ -9,7 +9,7 @@
+@@ -9,7 +9,7 @@ pub mod skybox;
  pub mod studio;
  pub mod physics;
  pub mod vfs;
@@ -256,17 +265,18 @@ diff --git a/crates/core/src/lib.rs b/crates/core/src/lib.rs
  mod wasm;
  
  pub use game::{Cmd, Game, Settings};
-@@ -20,3 +20,6 @@
-     // v19/v20 maps keep the Source 2013 profile; v21 (CS:GO) maps get the CS:GO one.
-     playsrc_bsp::parse(bytes, playsrc_bsp::Profile::for_source(bytes), playsrc_bsp::Limits { max_compression_ratio: 4_096, ..Default::default() }).map_err(|e| format!("bsp: {e:?}"))
+@@ -28,3 +28,6 @@ pub fn parse_bsp(bytes: &[u8]) -> Result<playsrc_bsp::Bsp, String> {
+         max_light_samples: 32 * 1024 * 1024,
+         ..Default::default() }).map_err(|e| format!("bsp: {e:?}"))
  }
 +
 +#[cfg(all(feature = "native-web", not(target_arch = "wasm32")))]
 +pub use wasm::native_web;
 diff --git a/crates/core/src/lightmap.rs b/crates/core/src/lightmap.rs
+index 2ec52cd..fc7a95a 100644
 --- a/crates/core/src/lightmap.rs
 +++ b/crates/core/src/lightmap.rs
-@@ -260,3 +260,87 @@
+@@ -260,3 +260,87 @@ mod tests {
          assert!(!is_unlit(&[], &black));
      }
  }
@@ -355,9 +365,10 @@ diff --git a/crates/core/src/lightmap.rs b/crates/core/src/lightmap.rs
 +    }
 +}
 diff --git a/crates/core/src/physics.rs b/crates/core/src/physics.rs
+index 823fd98..5e39d8c 100644
 --- a/crates/core/src/physics.rs
 +++ b/crates/core/src/physics.rs
-@@ -429,9 +429,9 @@
+@@ -429,9 +429,9 @@ impl DynamicHulls {
  
  /// Source AngleMatrix applied to a local point.
  pub fn rotate(v: [f32; 3], angles: [f32; 3]) -> [f32; 3] {
@@ -371,9 +382,10 @@ diff --git a/crates/core/src/physics.rs b/crates/core/src/physics.rs
      let left = [sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, sr * cp];
      let up = [cr * sp * cy + sr * sy, cr * sp * sy - sr * cy, cr * cp];
 diff --git a/crates/core/src/props.rs b/crates/core/src/props.rs
+index 1142a80..96763d0 100644
 --- a/crates/core/src/props.rs
 +++ b/crates/core/src/props.rs
-@@ -307,9 +307,9 @@
+@@ -307,9 +307,9 @@ pub struct PropMesh {
  
  /// Source `AngleMatrix` (pitch about Y, yaw about Z, roll about X), as rows applied to column vectors.
  fn angle_matrix([pitch, yaw, roll]: [f32; 3]) -> [[f32; 3]; 3] {
@@ -386,10 +398,562 @@ diff --git a/crates/core/src/props.rs b/crates/core/src/props.rs
      [
          [cp * cy, sr * sp * cy - cr * sy, cr * sp * cy + sr * sy],
          [cp * sy, sr * sp * sy + cr * cy, cr * sp * sy - sr * cy],
+diff --git a/crates/core/src/wasm.rs b/crates/core/src/wasm.rs
+index db44dee..fb4196d 100644
+--- a/crates/core/src/wasm.rs
++++ b/crates/core/src/wasm.rs
+@@ -31,7 +31,7 @@ fn with<R>(f: impl FnOnce(&mut Ctx) -> R) -> R {
+     CTX.with(|c| f(&mut c.borrow_mut()))
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn alloc(len: usize) -> *mut u8 {
+     let mut v = Vec::<u8>::with_capacity(len);
+     let p = v.as_mut_ptr();
+@@ -39,13 +39,13 @@ pub extern "C" fn alloc(len: usize) -> *mut u8 {
+     p
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn dealloc(ptr: *mut u8, len: usize) {
+     unsafe { drop(Vec::from_raw_parts(ptr, 0, len)) };
+ }
+ 
+ /// Loads a BSP from `len` bytes at `ptr` (takes ownership). Returns 1 on success, 0 on error (see `error_ptr`).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn load_map(ptr: *mut u8, len: usize) -> u32 {
+     let bytes = unsafe { Vec::from_raw_parts(ptr, len, len) };
+     with(|c| {
+@@ -82,7 +82,7 @@ pub unsafe extern "C" fn load_map(ptr: *mut u8, len: usize) -> u32 {
+ 
+ /// Like `load_map`, but only builds the simulation (collision, triggers, entities): no render mesh, pakfile or
+ /// materials. Used by the server-side verifier to keep memory within Worker limits. Same return convention.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn load_map_physics(ptr: *mut u8, len: usize) -> u32 {
+     let bytes = unsafe { Vec::from_raw_parts(ptr, len, len) };
+     with(|c| {
+@@ -113,23 +113,23 @@ pub unsafe extern "C" fn load_map_physics(ptr: *mut u8, len: usize) -> u32 {
+     })
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn error_ptr() -> *const u8 {
+     with(|c| c.error.as_ptr())
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn error_len() -> usize {
+     with(|c| c.error.len())
+ }
+ 
+ macro_rules! mesh_buf {
+     ($ptr:ident, $len:ident, $field:ident, $ty:ty) => {
+-        #[unsafe(no_mangle)]
++        #[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+         pub extern "C" fn $ptr() -> *const $ty {
+             with(|c| c.mesh.as_ref().map_or(std::ptr::null(), |m| m.$field.as_ptr()))
+         }
+-        #[unsafe(no_mangle)]
++        #[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+         pub extern "C" fn $len() -> usize {
+             with(|c| c.mesh.as_ref().map_or(0, |m| m.$field.len()))
+         }
+@@ -142,7 +142,7 @@ mesh_buf!(mesh_sky_vertices_ptr, mesh_sky_vertices_len, sky_vertices, f32);
+ mesh_buf!(mesh_sky_indices_ptr, mesh_sky_indices_len, sky_indices, u32);
+ 
+ /// Sky face groups as u32 triples in the scratch buffer: model, first_index, index_count (into `mesh_sky_indices`).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn mesh_sky_groups() -> usize {
+     with(|c| {
+         c.scratch_u32.clear();
+@@ -155,7 +155,7 @@ pub extern "C" fn mesh_sky_groups() -> usize {
+ 
+ /// Per group (parallel to `mesh_groups`), 1 if it's in the 3D skybox set (drawn by the skybox pass, not the main
+ /// view; see `sky_camera`), into scratch_u32.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn mesh_group_sky3d() -> usize {
+     with(|c| {
+         c.scratch_u32.clear();
+@@ -169,7 +169,7 @@ pub extern "C" fn mesh_group_sky3d() -> usize {
+ /// The 3D skybox's `sky_camera` into scratch_f32 (`skybox.rs`); empty if the map has no usable 3D skybox:
+ /// [origin x, y, z, scale, area, fog enable, fog blend, fogcolor r, g, b, fogcolor2 r, g, b (0..255),
+ ///  fog dir x, y, z, fog start, fog end, fog max density].
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn sky_camera() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -187,7 +187,7 @@ pub extern "C" fn sky_camera() -> usize {
+ }
+ 
+ /// Groups as u32 quads: model, material, first_index, index_count.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn mesh_groups() -> usize {
+     with(|c| {
+         c.scratch_u32.clear();
+@@ -200,23 +200,23 @@ pub extern "C" fn mesh_groups() -> usize {
+     })
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn scratch_u32_ptr() -> *const u32 {
+     with(|c| c.scratch_u32.as_ptr())
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn scratch_f32_ptr() -> *const f32 {
+     with(|c| c.scratch_f32.as_ptr())
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn scratch_str_ptr() -> *const u8 {
+     with(|c| c.scratch_str.as_ptr())
+ }
+ 
+ /// Materials as newline-separated `name width height` lines.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn mesh_materials() -> usize {
+     with(|c| {
+         c.scratch_str.clear();
+@@ -230,7 +230,7 @@ pub extern "C" fn mesh_materials() -> usize {
+ }
+ 
+ /// Raw entity lump as `classname\tkey=value\t...` lines.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn entities_text() -> usize {
+     with(|c| {
+         c.scratch_str.clear();
+@@ -245,19 +245,19 @@ pub extern "C" fn entities_text() -> usize {
+     })
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn pak_ptr() -> *const u8 {
+     with(|c| c.vfs.source("pak").map_or(std::ptr::null(), |s| s.bytes().as_ptr()))
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn pak_len() -> usize {
+     with(|c| c.vfs.source("pak").map_or(0, |s| s.bytes().len()))
+ }
+ 
+ /// Resolved materials (parallel to `mesh_materials`) as newline-separated lines:
+ /// `kind flags texture alpha alpha_ref r g b shader`.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn material_info() -> usize {
+     with(|c| {
+         c.scratch_str.clear();
+@@ -272,14 +272,14 @@ pub extern "C" fn material_info() -> usize {
+     })
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn texture_count() -> usize {
+     with(|c| c.materials.textures.len())
+ }
+ 
+ /// Extracts texture `index` into `tex_bytes`. Header goes to scratch_u32 as
+ /// `[format, level_count, (width, height, offset, len) * level_count]`. Returns the header length, 0 on error.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn texture_payload(index: usize, allow_s3tc: u32, need_alpha: u32) -> usize {
+     with(|c| {
+         c.scratch_u32.clear();
+@@ -307,13 +307,13 @@ pub extern "C" fn texture_payload(index: usize, allow_s3tc: u32, need_alpha: u32
+     })
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn tex_bytes_ptr() -> *const u8 {
+     with(|c| c.tex_bytes.as_ptr())
+ }
+ 
+ /// Lightmap atlas into scratch_u32 as `[width, height, hdr]`; pixels (RGBA8, sRGB-encoded) at `lightmap_ptr`.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn lightmap_size() -> usize {
+     with(|c| {
+         c.scratch_u32.clear();
+@@ -324,12 +324,12 @@ pub extern "C" fn lightmap_size() -> usize {
+     })
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn lightmap_ptr() -> *const u8 {
+     with(|c| c.mesh.as_ref().map_or(std::ptr::null(), |m| m.lightmap.rgba.as_ptr()))
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn set_settings(tick_interval: f32, air_accelerate: f32, accelerate: f32, friction: f32, stop_speed: f32, gravity: f32, max_speed: f32, autohop: u32) {
+     with(|c| {
+         if let Some(g) = c.game.as_mut() {
+@@ -341,7 +341,7 @@ pub extern "C" fn set_settings(tick_interval: f32, air_accelerate: f32, accelera
+ }
+ 
+ /// Enable CS:S stamina independently of the legacy settings ABI.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn set_stamina(enabled: u32) {
+     with(|c| {
+         if let Some(g) = c.game.as_mut() {
+@@ -353,7 +353,7 @@ pub extern "C" fn set_stamina(enabled: u32) {
+ /// Selects the physics version (`game::PHYSICS_V1`, `PHYSICS_V2`, ...; a loaded map starts at v1). Call after
+ /// `load_map*` like `set_settings`; kept across `set_settings` and `reset`. Returns 1 if this build knows the version,
+ /// else 0 (nothing changes). Clients feature-detect the export (builds without it are v1 only).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn set_physics_version(version: u32) -> u32 {
+     if crate::game::physics_fixes(version).is_none() {
+         return 0;
+@@ -366,7 +366,7 @@ pub extern "C" fn set_physics_version(version: u32) -> u32 {
+     1
+ }
+ 
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn reset() {
+     with(|c| {
+         if let Some(g) = c.game.as_mut() {
+@@ -376,7 +376,7 @@ pub extern "C" fn reset() {
+ }
+ 
+ /// Advances one tick. Returns event bits, or u32::MAX on error.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn step(forward: f32, side: f32, yaw: f32, pitch: f32, buttons: u32) -> u32 {
+     with(|c| {
+         let Some(g) = c.game.as_mut() else { return u32::MAX };
+@@ -398,7 +398,7 @@ pub extern "C" fn step(forward: f32, side: f32, yaw: f32, pitch: f32, buttons: u
+ ///  (WEAPON_* bits, physics v4: `Game::weapons`), clean movement tick for local jump stats,
+ ///  v20 categorized ground jump: pre-jump position x/y/z, velocity x/y/z, crouched (NaN position if absent)]
+ /// (movement mode: playsrc `Mode` as a number; 6 = ladder. Style key filters exempt ladders, like bhoptimer.)
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn player_state() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -432,7 +432,7 @@ pub extern "C" fn player_state() -> usize {
+ }
+ 
+ /// Brush entity transforms into scratch_f32 as [model, x, y, z, pitch, yaw, roll] (7 floats each).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn brush_origins() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -446,7 +446,7 @@ pub extern "C" fn brush_origins() -> usize {
+ }
+ 
+ /// Moving entity prop transforms (prop_door_rotating) into scratch_f32 as [entity, x, y, z, pitch, yaw, roll].
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn prop_transforms() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -460,19 +460,19 @@ pub extern "C" fn prop_transforms() -> usize {
+ }
+ 
+ /// Factor the lightmap atlas was scaled by before sRGB encoding (multiply by its inverse after sampling).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn lightmap_scale() -> f32 {
+     with(|c| c.mesh.as_ref().map_or(crate::lightmap::HDR_SCALE, |m| m.lightmap.scale))
+ }
+ 
+ /// Floats per vertex in `mesh_vertices`.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn mesh_vertex_floats() -> usize {
+     mesh::VERTEX_FLOATS
+ }
+ 
+ /// Overwrites the player velocity (used by the run timer's start-zone prespeed cap; replays apply it identically).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn set_velocity(x: f32, y: f32, z: f32) {
+     with(|c| {
+         if let Some(g) = c.game.as_mut() {
+@@ -485,7 +485,7 @@ pub extern "C" fn set_velocity(x: f32, y: f32, z: f32) {
+ 
+ /// Brush entity render/collision state into scratch_f32 as [model, visible, solid] triples
+ /// (killed/disabled func_brush, broken func_breakable, toggled func_wall_toggle, ...).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn brush_states() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -499,7 +499,7 @@ pub extern "C" fn brush_states() -> usize {
+ }
+ 
+ /// Presentation entity states [entity index, enabled], restored with simulation snapshots.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn effect_states() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -515,7 +515,7 @@ pub extern "C" fn effect_states() -> usize {
+ /// Server rules: bhop_block_fix (0 = stock sinking doors, 1 = block fix), grace seconds before a
+ /// standing player is sent through the block's teleport, teleport_keeps_velocity (Source = 1).
+ /// Resets the map.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn set_rules(bhop_block_fix: u32, bhop_block_grace: f32, teleport_keeps_velocity: u32) {
+     use crate::game::{BhopBlockMode, Rules};
+     with(|c| {
+@@ -531,7 +531,7 @@ pub extern "C" fn set_rules(bhop_block_fix: u32, bhop_block_grace: f32, teleport
+ }
+ 
+ /// Player extras into scratch_f32: [health, gravity_scale, speed_scale]; name via scratch_str.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn player_extras() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -558,7 +558,7 @@ mod studio_exports;
+ /// Restart point (start-zone restart): respawns the player at (x, y, z) feet facing `yaw` with zero
+ /// velocity, settled onto the floor below; deaths respawn there until the next `reset`. Call right
+ /// after `reset` (tick 0); replays store it in their header and re-apply it after reset.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn set_position(x: f32, y: f32, z: f32, yaw: f32) {
+     with(|c| {
+         if let Some(g) = c.game.as_mut() {
+@@ -570,7 +570,7 @@ pub extern "C" fn set_position(x: f32, y: f32, z: f32, yaw: f32) {
+ /// Names the player gets at the restart point (call after `set_position`): `name_len` bytes of targetname then
+ /// `class_len` bytes of classname (UTF-8; empty classname = "player") at `ptr` (from `alloc`; takes ownership).
+ /// See `Game::set_restart_names`.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn set_restart_names(ptr: *mut u8, name_len: usize, class_len: usize) {
+     let bytes = unsafe { Vec::from_raw_parts(ptr, name_len + class_len, name_len + class_len) };
+     let name = String::from_utf8_lossy(&bytes[..name_len]);
+@@ -583,7 +583,7 @@ pub unsafe extern "C" fn set_restart_names(ptr: *mut u8, name_len: usize, class_
+ }
+ 
+ /// Restart point since the last reset into scratch_f32: [] if none, else [x, y, z, yaw] (settled).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn restart_point() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -598,7 +598,7 @@ pub extern "C" fn restart_point() -> usize {
+ /// bit0 downhill landing fix, bit1 uphill landing fix, bit2 rampbug fix, bit3 telehop fix,
+ /// bit4 DISABLE per-material surface properties. Resets the map. Physics v17 runs RNGFix's versions of the downhill,
+ /// uphill and telehop fixes itself (bit3 is ignored there; bit1's slide-stop variant stays available on top).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn set_movement_rules(flags: u32) {
+     with(|c| {
+         if let Some(g) = c.game.as_mut() {
+@@ -618,7 +618,7 @@ pub extern "C" fn set_movement_rules(flags: u32) {
+ /// Static/dynamic prop collision hulls as a triangle soup (9 floats per triangle, world space) into
+ /// scratch_f32. Props collide but their models are not rendered by the client; draw these so players
+ /// can see what they hit.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn prop_collision_mesh() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -632,7 +632,7 @@ pub extern "C" fn prop_collision_mesh() -> usize {
+ // ---- physics content (prop collision models; see Game::physics_files) ----
+ 
+ /// Collision files (`.phy` / `.mdl`) the loaded map's props need, newline-separated in scratch_str.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn physics_files() -> usize {
+     with(|c| {
+         c.scratch_str = c.game.as_ref().map(|g| g.physics_files().join("\n")).unwrap_or_default();
+@@ -641,7 +641,7 @@ pub extern "C" fn physics_files() -> usize {
+ }
+ 
+ /// Prop models still without collision (their files weren't available), newline-separated in scratch_str.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn physics_missing() -> usize {
+     with(|c| {
+         c.scratch_str = c.game.as_ref().map(|g| g.missing_prop_models().join("\n")).unwrap_or_default();
+@@ -651,7 +651,7 @@ pub extern "C" fn physics_missing() -> usize {
+ 
+ /// Rebuilds prop collision from the pakfile and the files added since the map loaded (content_add_file /
+ /// fetched content), then resets the map. Call after hosted content arrived, before playing.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn physics_reload() {
+     with(|c| {
+         let Some(g) = c.game.as_mut() else { return };
+@@ -679,7 +679,7 @@ thread_local! {
+ 
+ /// Captures the full simulation state (player, brush entities/doors, triggers, entity I/O queue). Returns a
+ /// handle (>= 1) for `state_restore` / `state_free`, or 0 when no map is loaded.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn state_snapshot() -> u32 {
+     let Some(s) = with(|c| c.game.as_ref().map(|g| g.save_state())) else { return 0 };
+     SNAPSHOTS.with(|v| {
+@@ -699,7 +699,7 @@ pub extern "C" fn state_snapshot() -> u32 {
+ 
+ /// Restores a capture made with `state_snapshot` on the currently loaded map. Returns 1 on success, 0 for an
+ /// unknown handle or no map. Stepping afterwards is bit-identical to the run the capture was taken from.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn state_restore(handle: u32) -> u32 {
+     SNAPSHOTS.with(|v| {
+         let v = v.borrow();
+@@ -715,7 +715,7 @@ pub extern "C" fn state_restore(handle: u32) -> u32 {
+ }
+ 
+ /// Frees a capture (0 / unknown handles are ignored).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn state_free(handle: u32) {
+     SNAPSHOTS.with(|v| {
+         if let Some(slot) = v.borrow_mut().get_mut((handle as usize).wrapping_sub(1)) {
+@@ -725,7 +725,7 @@ pub extern "C" fn state_free(handle: u32) {
+ }
+ 
+ /// Approximate memory held by a capture in bytes (0 for unknown handles).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn state_snapshot_bytes(handle: u32) -> usize {
+     SNAPSHOTS.with(|v| v.borrow().get((handle as usize).wrapping_sub(1)).and_then(|s| s.as_ref()).map_or(0, |s| s.approx_bytes()))
+ }
+@@ -733,7 +733,7 @@ pub extern "C" fn state_snapshot_bytes(handle: u32) -> usize {
+ /// Camera collision: sweeps a cube of half-size `radius` from start to end (Source units) against the world,
+ /// props and solid brush entities (MASK_SOLID, player clips ignored). Returns the clear fraction 0..1
+ /// (1 = unobstructed); 1 when no map is loaded.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn trace_ray(sx: f32, sy: f32, sz: f32, ex: f32, ey: f32, ez: f32, radius: f32) -> f32 {
+     with(|c| c.game.as_ref().map_or(1.0, |g| g.trace_camera([sx, sy, sz], [ex, ey, ez], radius)))
+ }
+@@ -741,7 +741,7 @@ pub extern "C" fn trace_ray(sx: f32, sy: f32, sz: f32, ex: f32, ey: f32, ez: f32
+ /// The player's attack this tick (after a step that returned EVENT_ATTACK) into scratch_f32:
+ /// [weapon (WEAPON_* bit), mode (1 primary, 2 secondary), hit (0/1), start x,y,z, end x,y,z, normal x,y,z,
+ ///  entity index or -1]; empty when the last step had no attack.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn attack_report() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -760,7 +760,7 @@ pub extern "C" fn attack_report() -> usize {
+ /// id, primary id, secondary id, has knife, clip, clip size, reload ticks left, burst mode, floor items changed since
+ /// the last floor_weapons call (0/1), the USP's silencer on (v7), silencer attach / detach ticks left (v7)]; valid every
+ /// tick.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn weapon_report() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -774,7 +774,7 @@ pub extern "C" fn weapon_report() -> usize {
+ /// Every weapon_* item of the map into scratch_f32 as [entity, weapon id, flags, x, y, z, pitch, yaw, roll] (9 floats
+ /// each, entity order, present or not; flags FLOOR_* = present 1, picked up 2, spawned 4, dropped 8, removed 16, moved 32
+ /// since the previous call); research/WEAPONS.md "Floor weapons". No allocation once scratch_f32 has grown.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn floor_weapons() -> usize {
+     with(|c| {
+         let Ctx { game, scratch_f32: out, .. } = c;
+@@ -794,7 +794,7 @@ pub extern "C" fn floor_weapons() -> usize {
+ 
+ /// Practice noclip tick: the player at (x, y, z) with velocity (vx, vy, vz), no collision or trigger touches, while the
+ /// world runs one tick (`Game::practice_noclip_tick`). Returns the event bits (0 with no map).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn practice_noclip_tick(x: f32, y: f32, z: f32, vx: f32, vy: f32, vz: f32) -> u32 {
+     with(|c| match c.game.as_mut() {
+         Some(g) => {
+@@ -807,7 +807,7 @@ pub extern "C" fn practice_noclip_tick(x: f32, y: f32, z: f32, vx: f32, vy: f32,
+ 
+ /// Leaves practice noclip at (x, y, z) keeping the velocity, finding free space near it along the view (yaw, pitch)
+ /// if the hull is stuck (`Game::practice_noclip_exit`). Returns 1 standing, 2 crouched, 0 stuck or no map.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn practice_noclip_exit(x: f32, y: f32, z: f32, vx: f32, vy: f32, vz: f32, yaw: f32, pitch: f32) -> u32 {
+     with(|c| c.game.as_mut().map_or(0, |g| g.practice_noclip_exit([x, y, z], [vx, vy, vz], yaw, pitch)))
+ }
+@@ -817,7 +817,7 @@ pub extern "C" fn practice_noclip_exit(x: f32, y: f32, z: f32, vx: f32, vy: f32,
+ /// The volumes the client's trigger and clip overlays draw, into scratch_f32: per volume
+ /// [kind (OVERLAY_*), entity (-1: world), model (-1: planes already in world space), flags (OVERLAY_WHEN_HIDDEN),
+ ///  plane count, then per plane normal x, y, z, distance]. Needs a full `load_map` (it tells drawn faces apart).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn overlay_volumes() -> usize {
+     with(|c| {
+         c.scratch_f32.clear();
+@@ -835,7 +835,7 @@ pub extern "C" fn overlay_volumes() -> usize {
+ 
+ /// Every entity's overlay state now (OVERLAY_STATE_* bits, `Game::overlay_state`) into scratch_u32, in entity order.
+ /// Works on a physics-only load too (the replay viewer's).
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn overlay_states() -> usize {
+     with(|c| {
+         c.scratch_u32.clear();
+@@ -847,15 +847,15 @@ pub extern "C" fn overlay_states() -> usize {
+ }
+ 
+ // Optional observational ABI v2. Does not change commands, snapshots or ranked timing.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn timing_path_version() -> u32 { playsrc_movement::accepted_path::VERSION }
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn timing_observe(enabled: u32) {
+     with(|c| { if let Some(g) = &mut c.game { g.observe_timing = enabled != 0; g.timing_path = None; } });
+ }
+ /// f64 buffer: status (0 absent, 1 supported, 2 unsupported), then 15 values per
+ /// segment: t0,t1,from[3],to[3],hull.mins[3],hull.maxs[3],discrete. Copy before next call.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn timing_path() -> usize {
+     with(|c| {
+         c.timing_f64.clear();
+@@ -873,9 +873,9 @@ pub extern "C" fn timing_path() -> usize {
+         c.timing_f64.len()
+     })
+ }
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn timing_path_ptr() -> *const f64 { with(|c| c.timing_f64.as_ptr()) }
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn timing_path_reason() -> usize {
+     with(|c| {
+         c.scratch_str = c.game.as_ref().and_then(|g| g.timing_path.as_ref())
+@@ -883,3 +883,7 @@ pub extern "C" fn timing_path_reason() -> usize {
+         c.scratch_str.len()
+     })
+ }
++// The opt-in native adapter owns a thread per session; canonical WASM exports stay unchanged.
++#[cfg(all(feature = "native-web", not(target_arch = "wasm32")))]
++#[path = "../../native-web/core.rs"]
++pub mod native_web;
 diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
+index 00ba3ca..5975707 100644
 --- a/crates/core/src/wasm_content.rs
 +++ b/crates/core/src/wasm_content.rs
-@@ -43,7 +43,7 @@
+@@ -43,7 +43,7 @@ unsafe fn owned_string(ptr: *mut u8, len: usize) -> String {
  
  /// Mounts a `_dir.vpk` tree (takes ownership of both buffers). `name` is e.g. `cstrike/cstrike_pak_dir.vpk`;
  /// a mount with the same name is replaced. Mount order is search order. Returns the entry count, 0 on error.
@@ -398,7 +962,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub unsafe extern "C" fn content_mount_vpk(name_ptr: *mut u8, name_len: usize, dir_ptr: *mut u8, dir_len: usize) -> usize {
      let name = unsafe { owned_string(name_ptr, name_len) };
      let dir = unsafe { owned(dir_ptr, dir_len) };
-@@ -68,7 +68,7 @@
+@@ -68,7 +68,7 @@ pub unsafe extern "C" fn content_mount_vpk(name_ptr: *mut u8, name_len: usize, d
  }
  
  /// Mounts a listing of fetchable paths (newline-separated; takes ownership). Searched after all VPKs.
@@ -407,7 +971,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub unsafe extern "C" fn content_mount_listing(name_ptr: *mut u8, name_len: usize, text_ptr: *mut u8, text_len: usize) -> usize {
      let name = unsafe { owned_string(name_ptr, name_len) };
      let text = unsafe { owned_string(text_ptr, text_len) };
-@@ -91,7 +91,7 @@
+@@ -91,7 +91,7 @@ pub(super) fn loose_source() -> Option<Source> {
  }
  
  /// Drops all VPK mounts and listings (fetched files are kept).
@@ -416,7 +980,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub extern "C" fn content_unmount_all() {
      CONTENT.with(|k| {
          let mut k = k.borrow_mut();
-@@ -101,7 +101,7 @@
+@@ -101,7 +101,7 @@ pub extern "C" fn content_unmount_all() {
  }
  
  /// Adds a file whose bytes are already known (e.g. restored from the browser cache). Takes ownership.
@@ -425,7 +989,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub unsafe extern "C" fn content_add_file(path_ptr: *mut u8, path_len: usize, data_ptr: *mut u8, data_len: usize) {
      let path = normalize(&unsafe { owned_string(path_ptr, path_len) });
      let data = unsafe { owned(data_ptr, data_len) };
-@@ -112,7 +112,7 @@
+@@ -112,7 +112,7 @@ pub unsafe extern "C" fn content_add_file(path_ptr: *mut u8, path_len: usize, da
  /// (`you/miku1\tconcrete/concretewall004a`). Material `from` then resolves as `to` (its VMT and textures, searched
  /// pakfile -> fetched files -> mounts as usual) while keeping its slot, so the mesh is unchanged. An empty text clears
  /// them. Returns the number of overrides.
@@ -434,7 +998,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub unsafe extern "C" fn content_material_overrides(text_ptr: *mut u8, text_len: usize) -> usize {
      let text = unsafe { owned_string(text_ptr, text_len) };
      let map: HashMap<String, String> = text
-@@ -129,7 +129,7 @@
+@@ -129,7 +129,7 @@ pub unsafe extern "C" fn content_material_overrides(text_ptr: *mut u8, text_len:
  /// Supplies the bytes for a pending request of the last `content_resolve` (takes ownership): the
  /// archive chunk `(archive, offset, length)` for VPK requests, the whole file for listings. VPK data
  /// is joined with its directory preload bytes and CRC-checked. Returns 1 on success, 0 on error.
@@ -443,7 +1007,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub unsafe extern "C" fn content_provide(path_ptr: *mut u8, path_len: usize, data_ptr: *mut u8, data_len: usize) -> u32 {
      let path = normalize(&unsafe { owned_string(path_ptr, path_len) });
      let data = unsafe { owned(data_ptr, data_len) };
-@@ -164,7 +164,7 @@
+@@ -164,7 +164,7 @@ pub unsafe extern "C" fn content_provide(path_ptr: *mut u8, path_len: usize, dat
  
  /// Copies a fetched file's assembled bytes into `tex_bytes` (for host-side caching). Returns its
  /// length; 0 if unknown or empty.
@@ -452,7 +1016,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub unsafe extern "C" fn content_file(path_ptr: *mut u8, path_len: usize) -> usize {
      let path = normalize(&unsafe { owned_string(path_ptr, path_len) });
      let bytes = CONTENT.with(|k| k.borrow().loose.get(&path).map(|b| b.to_vec()));
-@@ -179,7 +179,7 @@
+@@ -179,7 +179,7 @@ pub unsafe extern "C" fn content_file(path_ptr: *mut u8, path_len: usize) -> usi
  /// `extra` (newline-separated material names, e.g. skybox faces; takes ownership) are resolved after
  /// the mesh materials and appended to `material_info`/`material_extras`. Pending requests are listed in
  /// scratch_str as `path\tmount\tarchive\toffset\tlength` lines; returns that text's length (0 = done).
@@ -461,7 +1025,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub unsafe extern "C" fn content_resolve(extra_ptr: *mut u8, extra_len: usize) -> usize {
      let extra = unsafe { owned_string(extra_ptr, extra_len) };
      with(|c| {
-@@ -221,7 +221,7 @@
+@@ -221,7 +221,7 @@ pub unsafe extern "C" fn content_resolve(extra_ptr: *mut u8, extra_len: usize) -
  }
  
  /// Resolved texture paths (index = texture id in `material_info`), newline-separated in scratch_str.
@@ -470,7 +1034,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub extern "C" fn texture_paths() -> usize {
      with(|c| {
          c.scratch_str = c.materials.textures.join("\n");
-@@ -230,7 +230,7 @@
+@@ -230,7 +230,7 @@ pub extern "C" fn texture_paths() -> usize {
  }
  
  /// Per resolved material, 4 floats in scratch_f32: `[texture2, detail, detail_scale, detail_blend]`.
@@ -479,7 +1043,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub extern "C" fn material_extras() -> usize {
      with(|c| {
          c.scratch_f32.clear();
-@@ -242,7 +242,7 @@
+@@ -242,7 +242,7 @@ pub extern "C" fn material_extras() -> usize {
  }
  
  /// Per resolved material, 4 floats in scratch_f32: `[fog_start, fog_end, above_water (0/1), 0]` (water materials).
@@ -488,7 +1052,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub extern "C" fn material_water() -> usize {
      with(|c| {
          c.scratch_f32.clear();
-@@ -254,7 +254,7 @@
+@@ -254,7 +254,7 @@ pub extern "C" fn material_water() -> usize {
  }
  
  /// Water volumes of the loaded map, 6 floats each in scratch_f32: `[minx, miny, minz, maxx, maxy, maxz]` (Source space).
@@ -497,7 +1061,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub extern "C" fn water_volumes() -> usize {
      with(|c| {
          c.scratch_f32 = c.mesh.as_ref().map(|m| m.water.iter().flatten().copied().collect()).unwrap_or_default();
-@@ -263,7 +263,7 @@
+@@ -263,7 +263,7 @@ pub extern "C" fn water_volumes() -> usize {
  }
  
  /// Matching water-box clipping planes, packed as count then count * [nx, ny, nz, distance].
@@ -506,7 +1070,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub extern "C" fn water_planes() -> usize {
      with(|c| {
          c.scratch_f32.clear();
-@@ -282,7 +282,7 @@
+@@ -282,7 +282,7 @@ pub extern "C" fn water_planes() -> usize {
  /// Reads a file through the current VFS (pakfile → fetched → mounts; rebuilt by `content_resolve`).
  /// Returns 1 with the bytes in `tex_bytes` (`tex_bytes_len`), or 0; a hit in a mount records a
  /// pending request (see `content_pending`).
@@ -515,7 +1079,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub unsafe extern "C" fn content_read(path_ptr: *mut u8, path_len: usize) -> u32 {
      let path = unsafe { owned_string(path_ptr, path_len) };
      with(|c| match c.vfs.read(&path).map(<[u8]>::to_vec) {
-@@ -294,13 +294,13 @@
+@@ -294,13 +294,13 @@ pub unsafe extern "C" fn content_read(path_ptr: *mut u8, path_len: usize) -> u32
      })
  }
  
@@ -531,7 +1095,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub extern "C" fn content_pending() -> usize {
      with(|c| {
          c.scratch_str.clear();
-@@ -312,7 +312,7 @@
+@@ -312,7 +312,7 @@ pub extern "C" fn content_pending() -> usize {
  }
  
  /// Paths in the mounted VPKs starting with `prefix` (newline-separated in scratch_str).
@@ -540,7 +1104,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub unsafe extern "C" fn content_list(prefix_ptr: *mut u8, prefix_len: usize) -> usize {
      let prefix = normalize(&unsafe { owned_string(prefix_ptr, prefix_len) });
      let mut paths: Vec<String> = CONTENT.with(|k| k.borrow().vpks.iter().flat_map(|m| m.paths().filter(|p| p.starts_with(&prefix)).map(str::to_string).collect::<Vec<_>>()).collect());
-@@ -326,7 +326,7 @@
+@@ -326,7 +326,7 @@ pub unsafe extern "C" fn content_list(prefix_ptr: *mut u8, prefix_len: usize) ->
  
  /// Material names a studio model uses (one per MDL texture, `$cdmaterials` resolved against the VFS),
  /// newline-separated in scratch_str. 0 if the MDL isn't available (requested if it's in a mount).
@@ -549,7 +1113,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub unsafe extern "C" fn model_materials(path_ptr: *mut u8, path_len: usize) -> usize {
      let path = unsafe { owned_string(path_ptr, path_len) };
      with(|c| {
-@@ -345,7 +345,7 @@
+@@ -345,7 +345,7 @@ thread_local! {
  
  /// Parses the static prop lump of a BSP (bytes copied in; ownership taken). Model paths (dictionary)
  /// go to scratch_str, newline-separated; returns that text's length.
@@ -558,7 +1122,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub unsafe extern "C" fn props_load(ptr: *mut u8, len: usize) -> usize {
      let bytes = unsafe { owned(ptr, len) };
      let bsp = crate::parse_bsp(&bytes).ok();
-@@ -368,7 +368,7 @@
+@@ -368,7 +368,7 @@ pub unsafe extern "C" fn props_load(ptr: *mut u8, len: usize) -> usize {
  
  /// Builds the prop mesh from the loaded props and the current VFS. Material names go to scratch_str
  /// (newline-separated); returns that text's length. Models whose files aren't loaded are skipped (and requested).
@@ -567,7 +1131,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub extern "C" fn props_build() -> usize {
      with(|c| {
          PROPS.with(|p| {
-@@ -383,7 +383,7 @@
+@@ -383,7 +383,7 @@ pub extern "C" fn props_build() -> usize {
  
  /// Prop mesh stats into scratch_u32: `[instances, built models, missing models, vertex floats, indices, groups]`;
  /// missing model paths in scratch_str.
@@ -576,7 +1140,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub extern "C" fn props_info() -> usize {
      with(|c| {
          PROPS.with(|p| {
-@@ -404,7 +404,7 @@
+@@ -404,7 +404,7 @@ pub extern "C" fn props_info() -> usize {
  
  /// Moving prop groups (prop_door_rotating) into scratch_u32 as `[entity, material, first_index, index_count]`
  /// quads; their vertices are in model space, placed every frame by `prop_transforms`.
@@ -585,7 +1149,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub extern "C" fn props_dynamic_groups() -> usize {
      with(|c| {
          PROPS.with(|p| {
-@@ -415,7 +415,7 @@
+@@ -415,7 +415,7 @@ pub extern "C" fn props_dynamic_groups() -> usize {
  }
  
  /// Prop groups into scratch_u32 as `[material, first_index, index_count]` triples.
@@ -594,7 +1158,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub extern "C" fn props_groups() -> usize {
      with(|c| {
          PROPS.with(|p| {
-@@ -427,7 +427,7 @@
+@@ -427,7 +427,7 @@ pub extern "C" fn props_groups() -> usize {
  
  /// Per prop group (parallel to `props_groups`), 1 if it's in the 3D skybox set (drawn by the skybox pass, see
  /// `sky_camera`), into scratch_u32.
@@ -603,7 +1167,7 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
  pub extern "C" fn props_group_sky3d() -> usize {
      with(|c| {
          PROPS.with(|p| {
-@@ -437,23 +437,45 @@
+@@ -437,23 +437,45 @@ pub extern "C" fn props_group_sky3d() -> usize {
      })
  }
  
@@ -654,9 +1218,10 @@ diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
 +    CONTENT.with(|c| *c.borrow_mut() = Content::default());
 +}
 diff --git a/crates/core/src/wasm_studio.rs b/crates/core/src/wasm_studio.rs
+index 8bcd394..495853c 100644
 --- a/crates/core/src/wasm_studio.rs
 +++ b/crates/core/src/wasm_studio.rs
-@@ -21,7 +21,7 @@
+@@ -21,7 +21,7 @@ unsafe fn owned_string(ptr: *mut u8, len: usize) -> String {
  /// Loads a studio model (`models/....mdl`, takes ownership of the path) with its includes, VVD, VTX and
  /// materials. Returns a handle (>= 1), or 0: files pending (`content_pending` non-empty; provide them, call
  /// `content_resolve`, retry) or an error (`error_ptr`). Loading the same path again returns the same handle.
@@ -665,7 +1230,7 @@ diff --git a/crates/core/src/wasm_studio.rs b/crates/core/src/wasm_studio.rs
  pub unsafe extern "C" fn studio_load(path_ptr: *mut u8, path_len: usize) -> u32 {
      let path = crate::vfs::normalize(&unsafe { owned_string(path_ptr, path_len) });
      if let Some(h) = MODELS.with(|m| m.borrow().iter().position(|x| x.path == path)) {
-@@ -49,7 +49,7 @@
+@@ -49,7 +49,7 @@ fn model<R>(h: u32, f: impl FnOnce(&StudioModel) -> R) -> Option<R> {
  }
  
  /// Model metadata JSON into scratch_str; returns its length (0 = bad handle).
@@ -674,7 +1239,7 @@ diff --git a/crates/core/src/wasm_studio.rs b/crates/core/src/wasm_studio.rs
  pub extern "C" fn studio_info(h: u32) -> usize {
      let json = model(h, |m| m.info_json()).unwrap_or_default();
      with(|c| {
-@@ -59,7 +59,7 @@
+@@ -59,7 +59,7 @@ pub extern "C" fn studio_info(h: u32) -> usize {
  }
  
  /// Skinned mesh vertices into scratch_f32 (`STUDIO_VERTEX_FLOATS` per vertex); returns the float count.
@@ -683,7 +1248,7 @@ diff --git a/crates/core/src/wasm_studio.rs b/crates/core/src/wasm_studio.rs
  pub extern "C" fn studio_vertices(h: u32) -> usize {
      let v = model(h, |m| m.mesh.vertices.clone()).unwrap_or_default();
      with(|c| {
-@@ -69,7 +69,7 @@
+@@ -69,7 +69,7 @@ pub extern "C" fn studio_vertices(h: u32) -> usize {
  }
  
  /// Triangle indices into scratch_u32 (groups are in the info JSON); returns the count.
@@ -692,7 +1257,7 @@ diff --git a/crates/core/src/wasm_studio.rs b/crates/core/src/wasm_studio.rs
  pub extern "C" fn studio_indices(h: u32) -> usize {
      let v = model(h, |m| m.mesh.indices.clone()).unwrap_or_default();
      with(|c| {
-@@ -79,7 +79,7 @@
+@@ -79,7 +79,7 @@ pub extern "C" fn studio_indices(h: u32) -> usize {
  }
  
  /// Decoded animation `anim` (all frames, `frames * bones * 7` floats: quat xyzw + pos) into scratch_f32.
@@ -701,7 +1266,7 @@ diff --git a/crates/core/src/wasm_studio.rs b/crates/core/src/wasm_studio.rs
  pub extern "C" fn studio_anim(h: u32, anim: u32) -> usize {
      let v = model(h, |m| m.decode_anim(anim as usize)).flatten().unwrap_or_default();
      with(|c| {
-@@ -89,7 +89,7 @@
+@@ -89,7 +89,7 @@ pub extern "C" fn studio_anim(h: u32, anim: u32) -> usize {
  }
  
  /// Texture payload of a VTF by game path (takes ownership of the path): same output as `texture_payload`.
@@ -710,7 +1275,7 @@ diff --git a/crates/core/src/wasm_studio.rs b/crates/core/src/wasm_studio.rs
  pub unsafe extern "C" fn texture_payload_path(path_ptr: *mut u8, path_len: usize, allow_s3tc: u32, need_alpha: u32) -> usize {
      let path = unsafe { owned_string(path_ptr, path_len) };
      with(|c| {
-@@ -115,3 +115,8 @@
+@@ -115,3 +115,8 @@ pub unsafe extern "C" fn texture_payload_path(path_ptr: *mut u8, path_len: usize
          }
      })
  }
@@ -719,8 +1284,82 @@ diff --git a/crates/core/src/wasm_studio.rs b/crates/core/src/wasm_studio.rs
 +pub(super) fn native_clear_models() {
 +    MODELS.with(|m| *m.borrow_mut() = Vec::new());
 +}
+diff --git a/crates/core/tests/native_entities.rs b/crates/core/tests/native_entities.rs
+new file mode 100644
+index 0000000..8c19623
+--- /dev/null
++++ b/crates/core/tests/native_entities.rs
+@@ -0,0 +1,33 @@
++use bunnyhop_core::{Cmd, Game};
++use std::path::PathBuf;
++
++fn load(name: &str) -> Option<Game> {
++    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
++    let bytes = std::fs::read(&path).map_err(|_| eprintln!("skipping {name}: {} not found", path.display())).ok()?;
++    Some(Game::load(&bunnyhop_core::parse_bsp(&bytes).unwrap()).unwrap())
++}
++
++/// Synthetic uses a solid brush with $surfaceprop ladder rather than CONTENTS_LADDER.
++#[test]
++fn synthetic_material_ladder_is_versioned() {
++    use bunnyhop_core::{Settings, game::{PHYSICS_V17, PHYSICS_V18}};
++    let Some(mut game) = load("bhop_synthetic_fix") else { return };
++    for version in [PHYSICS_V17, PHYSICS_V18] {
++        game.set_settings(Settings { physics_version: version, ..Settings::css_bhop() });
++        game.reset();
++        game.place_player([-12052.5, 13065.0, 7690.0]);
++        let start = game.state.position;
++        let mut ladder_ticks = 0;
++        for _ in 0..20 {
++            game.step(Cmd { forward: 400.0, yaw: 0.0, pitch: 0.0, ..Default::default() }).unwrap();
++            ladder_ticks += usize::from(game.state.mode == playsrc_movement::Mode::Ladder);
++        }
++        eprintln!("v{version}: {start:?} -> {:?}, ladder ticks {ladder_ticks}", game.state.position);
++        if version == PHYSICS_V18 {
++            assert!(ladder_ticks > 10, "attach to the reported ladder");
++            assert!(game.state.position[2] > start[2] + 25.0, "climb the ladder");
++        } else {
++            assert_eq!(ladder_ticks, 0, "old replays keep the original behavior");
++        }
++    }
++}
+diff --git a/crates/core/tests/native_render.rs b/crates/core/tests/native_render.rs
+new file mode 100644
+index 0000000..1e17e37
+--- /dev/null
++++ b/crates/core/tests/native_render.rs
+@@ -0,0 +1,28 @@
++use bunnyhop_core::materials::{self, Kind};
++use bunnyhop_core::{content, mesh, vfs};
++use std::path::PathBuf;
++
++fn map_bytes(name: &str) -> Option<Vec<u8>> {
++    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
++    std::fs::read(&path).map_err(|_| eprintln!("skipping {name}: {} not found", path.display())).ok()
++}
++
++/// GothQueen's unreal_space report: toolsblack is a visible opaque wall, not a nodraw tool.
++#[test]
++fn black_tool_walls_are_rendered() {
++    assert!(!mesh::hidden_tool_material("tools/toolsblack"));
++    assert!(!mesh::hidden_tool_material("tools/toolswhite"));
++    assert!(mesh::hidden_tool_material("tools/toolsnodraw"));
++    assert!(mesh::hidden_tool_material("tools/toolsplayerclip"));
++    let Some(bytes) = map_bytes("bhop_unreal_space") else { return };
++    let bsp = bunnyhop_core::parse_bsp(&bytes).unwrap();
++    let m = mesh::build(&bsp);
++    let material = m.materials.iter().position(|m| m.name == "tools/toolsblack").expect("map uses black walls");
++    let count: u32 = m.groups.iter().filter(|g| g.material as usize == material).map(|g| g.index_count).sum();
++    assert!(count > 0, "black wall faces must reach the renderer");
++    let mut fs = vfs::Vfs::default();
++    fs.mount(vfs::Source::from_zip("pak", content::pakfile(&bsp)));
++    let mats = materials::resolve(&fs, &["tools/toolsblack".into()]);
++    assert_eq!(mats.descs[0].kind, Kind::Textured);
++    assert_eq!(mats.descs[0].flags & (materials::FLAG_TRANSLUCENT | materials::FLAG_ADDITIVE), 0);
++}
 diff --git a/crates/vendor/SOURCE-SDK-NOTICES.md b/crates/vendor/SOURCE-SDK-NOTICES.md
 new file mode 100644
+index 0000000..7ac11c3
 --- /dev/null
 +++ b/crates/vendor/SOURCE-SDK-NOTICES.md
 @@ -0,0 +1,9 @@
@@ -734,9 +1373,10 @@ new file mode 100644
 +
 +The existing `LICENSE.source-sdk-2013` matches that revision's root `LICENSE` after whitespace normalization. The playsrc licensing notice is preserved separately in `NOTICE-playsrc.md`; original playsrc MIT terms are in `LICENSE-playsrc`.
 diff --git a/crates/vendor/collision/Cargo.toml b/crates/vendor/collision/Cargo.toml
+index 9538c83..72c1d0b 100644
 --- a/crates/vendor/collision/Cargo.toml
 +++ b/crates/vendor/collision/Cargo.toml
-@@ -6,11 +6,15 @@
+@@ -6,11 +6,15 @@ license.workspace = true
  
  [features]
  replay-reference = []
@@ -753,9 +1393,10 @@ diff --git a/crates/vendor/collision/Cargo.toml b/crates/vendor/collision/Cargo.
  [lib]
  path = "src/lib.rs"
 diff --git a/crates/vendor/collision/src/lib.rs b/crates/vendor/collision/src/lib.rs
+index e589d58..ad50e36 100644
 --- a/crates/vendor/collision/src/lib.rs
 +++ b/crates/vendor/collision/src/lib.rs
-@@ -2742,3 +2742,6 @@
+@@ -2742,3 +2742,6 @@ mod tests {
          assert!(overlap.start_solid && overlap.all_solid);
      }
  }
@@ -764,6 +1405,7 @@ diff --git a/crates/vendor/collision/src/lib.rs b/crates/vendor/collision/src/li
 +pub mod math;
 diff --git a/crates/vendor/collision/src/math.rs b/crates/vendor/collision/src/math.rs
 new file mode 100644
+index 0000000..1666b29
 --- /dev/null
 +++ b/crates/vendor/collision/src/math.rs
 @@ -0,0 +1,106 @@
@@ -874,9 +1516,10 @@ new file mode 100644
 +    }
 +}
 diff --git a/crates/vendor/collision/src/snapshot.rs b/crates/vendor/collision/src/snapshot.rs
+index 003dcce..f51fa5e 100644
 --- a/crates/vendor/collision/src/snapshot.rs
 +++ b/crates/vendor/collision/src/snapshot.rs
-@@ -41,9 +41,9 @@
+@@ -41,9 +41,9 @@ impl Transform {
          {
              return Err(error(ErrorCode::InvalidSnapshot, None));
          }
@@ -889,7 +1532,7 @@ diff --git a/crates/vendor/collision/src/snapshot.rs b/crates/vendor/collision/s
          let crcy = cr * cy;
          let crsy = cr * sy;
          let srcy = sr * cy;
-@@ -2197,9 +2197,9 @@
+@@ -2197,9 +2197,9 @@ fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
  }
  
  fn quaternion_from_angles(angles: [f32; 3]) -> [f64; 4] {
@@ -902,7 +1545,7 @@ diff --git a/crates/vendor/collision/src/snapshot.rs b/crates/vendor/collision/s
      [
          sr * cp * cy - cr * sp * sy,
          cr * sp * cy + sr * cp * sy,
-@@ -2236,16 +2236,16 @@
+@@ -2236,16 +2236,16 @@ fn quaternion_rotate(rotation: [f64; 4], value: [f32; 3]) -> [f32; 3] {
  }
  
  fn angles_from_quaternion(value: [f64; 4]) -> [f32; 3] {
@@ -925,9 +1568,10 @@ diff --git a/crates/vendor/collision/src/snapshot.rs b/crates/vendor/collision/s
          pitch.to_degrees() as f32,
          yaw.to_degrees() as f32,
 diff --git a/crates/vendor/movement/Cargo.toml b/crates/vendor/movement/Cargo.toml
+index 6584a8f..73b95c0 100644
 --- a/crates/vendor/movement/Cargo.toml
 +++ b/crates/vendor/movement/Cargo.toml
-@@ -4,6 +4,9 @@
+@@ -4,6 +4,9 @@ version = "0.1.0"
  edition.workspace = true
  license.workspace = true
  
@@ -938,9 +1582,10 @@ diff --git a/crates/vendor/movement/Cargo.toml b/crates/vendor/movement/Cargo.to
  playsrc-collision = { path = "../collision" }
  
 diff --git a/crates/vendor/movement/src/movement.rs b/crates/vendor/movement/src/movement.rs
+index fdee233..041aa99 100644
 --- a/crates/vendor/movement/src/movement.rs
 +++ b/crates/vendor/movement/src/movement.rs
-@@ -1112,7 +1112,7 @@
+@@ -1113,7 +1113,7 @@ fn full_walk(
      result.wish_state = wish;
      if result.state.ground.is_some() {
          if configuration.css_stamina && result.state.stamina_ms > 0.0 {
@@ -949,7 +1594,7 @@ diff --git a/crates/vendor/movement/src/movement.rs b/crates/vendor/movement/src
              result.state.velocity[0] *= ratio;
              result.state.velocity[1] *= ratio;
          }
-@@ -3422,9 +3422,9 @@
+@@ -3428,9 +3428,9 @@ fn angle_basis(
      yaw_degrees: f32,
      roll_degrees: f32,
  ) -> ([f32; 3], [f32; 3], [f32; 3]) {
@@ -964,6 +1609,7 @@ diff --git a/crates/vendor/movement/src/movement.rs b/crates/vendor/movement/src
          pitch_cosine * yaw_sine,
 diff --git a/crates/vendor/thirdpartylegalnotices.txt b/crates/vendor/thirdpartylegalnotices.txt
 new file mode 100644
+index 0000000..f417b48
 --- /dev/null
 +++ b/crates/vendor/thirdpartylegalnotices.txt
 @@ -0,0 +1,912 @@
@@ -1879,624 +2525,3 @@ new file mode 100644
 +LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 +OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 +SOFTWARE.
-diff --git a/crates/core/src/wasm.rs b/crates/core/src/wasm.rs
---- a/crates/core/src/wasm.rs
-+++ b/crates/core/src/wasm.rs
-@@ -31,7 +31,7 @@
-     CTX.with(|c| f(&mut c.borrow_mut()))
- }
- 
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn alloc(len: usize) -> *mut u8 {
-     let mut v = Vec::<u8>::with_capacity(len);
-     let p = v.as_mut_ptr();
-@@ -39,13 +39,13 @@
-     p
- }
- 
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub unsafe extern "C" fn dealloc(ptr: *mut u8, len: usize) {
-     unsafe { drop(Vec::from_raw_parts(ptr, 0, len)) };
- }
- 
- /// Loads a BSP from `len` bytes at `ptr` (takes ownership). Returns 1 on success, 0 on error (see `error_ptr`).
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub unsafe extern "C" fn load_map(ptr: *mut u8, len: usize) -> u32 {
-     let bytes = unsafe { Vec::from_raw_parts(ptr, len, len) };
-     with(|c| {
-@@ -82,7 +82,7 @@
- 
- /// Like `load_map`, but only builds the simulation (collision, triggers, entities): no render mesh, pakfile or
- /// materials. Used by the server-side verifier to keep memory within Worker limits. Same return convention.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub unsafe extern "C" fn load_map_physics(ptr: *mut u8, len: usize) -> u32 {
-     let bytes = unsafe { Vec::from_raw_parts(ptr, len, len) };
-     with(|c| {
-@@ -113,23 +113,23 @@
-     })
- }
- 
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn error_ptr() -> *const u8 {
-     with(|c| c.error.as_ptr())
- }
- 
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn error_len() -> usize {
-     with(|c| c.error.len())
- }
- 
- macro_rules! mesh_buf {
-     ($ptr:ident, $len:ident, $field:ident, $ty:ty) => {
--        #[unsafe(no_mangle)]
-+        #[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
-         pub extern "C" fn $ptr() -> *const $ty {
-             with(|c| c.mesh.as_ref().map_or(std::ptr::null(), |m| m.$field.as_ptr()))
-         }
--        #[unsafe(no_mangle)]
-+        #[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
-         pub extern "C" fn $len() -> usize {
-             with(|c| c.mesh.as_ref().map_or(0, |m| m.$field.len()))
-         }
-@@ -142,7 +142,7 @@
- mesh_buf!(mesh_sky_indices_ptr, mesh_sky_indices_len, sky_indices, u32);
- 
- /// Sky face groups as u32 triples in the scratch buffer: model, first_index, index_count (into `mesh_sky_indices`).
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn mesh_sky_groups() -> usize {
-     with(|c| {
-         c.scratch_u32.clear();
-@@ -155,7 +155,7 @@
- 
- /// Per group (parallel to `mesh_groups`), 1 if it's in the 3D skybox set (drawn by the skybox pass, not the main
- /// view; see `sky_camera`), into scratch_u32.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn mesh_group_sky3d() -> usize {
-     with(|c| {
-         c.scratch_u32.clear();
-@@ -169,7 +169,7 @@
- /// The 3D skybox's `sky_camera` into scratch_f32 (`skybox.rs`); empty if the map has no usable 3D skybox:
- /// [origin x, y, z, scale, area, fog enable, fog blend, fogcolor r, g, b, fogcolor2 r, g, b (0..255),
- ///  fog dir x, y, z, fog start, fog end, fog max density].
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn sky_camera() -> usize {
-     with(|c| {
-         c.scratch_f32.clear();
-@@ -187,7 +187,7 @@
- }
- 
- /// Groups as u32 quads: model, material, first_index, index_count.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn mesh_groups() -> usize {
-     with(|c| {
-         c.scratch_u32.clear();
-@@ -200,23 +200,23 @@
-     })
- }
- 
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn scratch_u32_ptr() -> *const u32 {
-     with(|c| c.scratch_u32.as_ptr())
- }
- 
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn scratch_f32_ptr() -> *const f32 {
-     with(|c| c.scratch_f32.as_ptr())
- }
- 
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn scratch_str_ptr() -> *const u8 {
-     with(|c| c.scratch_str.as_ptr())
- }
- 
- /// Materials as newline-separated `name width height` lines.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn mesh_materials() -> usize {
-     with(|c| {
-         c.scratch_str.clear();
-@@ -230,7 +230,7 @@
- }
- 
- /// Raw entity lump as `classname\tkey=value\t...` lines.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn entities_text() -> usize {
-     with(|c| {
-         c.scratch_str.clear();
-@@ -245,19 +245,19 @@
-     })
- }
- 
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn pak_ptr() -> *const u8 {
-     with(|c| c.vfs.source("pak").map_or(std::ptr::null(), |s| s.bytes().as_ptr()))
- }
- 
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn pak_len() -> usize {
-     with(|c| c.vfs.source("pak").map_or(0, |s| s.bytes().len()))
- }
- 
- /// Resolved materials (parallel to `mesh_materials`) as newline-separated lines:
- /// `kind flags texture alpha alpha_ref r g b shader`.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn material_info() -> usize {
-     with(|c| {
-         c.scratch_str.clear();
-@@ -272,14 +272,14 @@
-     })
- }
- 
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn texture_count() -> usize {
-     with(|c| c.materials.textures.len())
- }
- 
- /// Extracts texture `index` into `tex_bytes`. Header goes to scratch_u32 as
- /// `[format, level_count, (width, height, offset, len) * level_count]`. Returns the header length, 0 on error.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn texture_payload(index: usize, allow_s3tc: u32, need_alpha: u32) -> usize {
-     with(|c| {
-         c.scratch_u32.clear();
-@@ -307,13 +307,13 @@
-     })
- }
- 
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn tex_bytes_ptr() -> *const u8 {
-     with(|c| c.tex_bytes.as_ptr())
- }
- 
- /// Lightmap atlas into scratch_u32 as `[width, height, hdr]`; pixels (RGBA8, sRGB-encoded) at `lightmap_ptr`.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn lightmap_size() -> usize {
-     with(|c| {
-         c.scratch_u32.clear();
-@@ -324,12 +324,12 @@
-     })
- }
- 
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn lightmap_ptr() -> *const u8 {
-     with(|c| c.mesh.as_ref().map_or(std::ptr::null(), |m| m.lightmap.rgba.as_ptr()))
- }
- 
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn set_settings(tick_interval: f32, air_accelerate: f32, accelerate: f32, friction: f32, stop_speed: f32, gravity: f32, max_speed: f32, autohop: u32) {
-     with(|c| {
-         if let Some(g) = c.game.as_mut() {
-@@ -341,7 +341,7 @@
- }
- 
- /// Enable CS:S stamina independently of the legacy settings ABI.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn set_stamina(enabled: u32) {
-     with(|c| {
-         if let Some(g) = c.game.as_mut() {
-@@ -353,7 +353,7 @@
- /// Selects the physics version (`game::PHYSICS_V1`, `PHYSICS_V2`, ...; a loaded map starts at v1). Call after
- /// `load_map*` like `set_settings`; kept across `set_settings` and `reset`. Returns 1 if this build knows the version,
- /// else 0 (nothing changes). Clients feature-detect the export (builds without it are v1 only).
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn set_physics_version(version: u32) -> u32 {
-     if crate::game::physics_fixes(version).is_none() {
-         return 0;
-@@ -366,7 +366,7 @@
-     1
- }
- 
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn reset() {
-     with(|c| {
-         if let Some(g) = c.game.as_mut() {
-@@ -376,7 +376,7 @@
- }
- 
- /// Advances one tick. Returns event bits, or u32::MAX on error.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn step(forward: f32, side: f32, yaw: f32, pitch: f32, buttons: u32) -> u32 {
-     with(|c| {
-         let Some(g) = c.game.as_mut() else { return u32::MAX };
-@@ -397,7 +397,7 @@
- ///  teleport it caused; NaN after a reset / respawn: `Game::touch_origin`), weapons held, active weapon
- ///  (WEAPON_* bits, physics v4: `Game::weapons`), clean movement tick for local jump stats]
- /// (movement mode: playsrc `Mode` as a number; 6 = ladder. Style key filters exempt ladders, like bhoptimer.)
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn player_state() -> usize {
-     with(|c| {
-         c.scratch_f32.clear();
-@@ -424,7 +424,7 @@
- }
- 
- /// Brush entity transforms into scratch_f32 as [model, x, y, z, pitch, yaw, roll] (7 floats each).
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn brush_origins() -> usize {
-     with(|c| {
-         c.scratch_f32.clear();
-@@ -438,7 +438,7 @@
- }
- 
- /// Moving entity prop transforms (prop_door_rotating) into scratch_f32 as [entity, x, y, z, pitch, yaw, roll].
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn prop_transforms() -> usize {
-     with(|c| {
-         c.scratch_f32.clear();
-@@ -452,19 +452,19 @@
- }
- 
- /// Factor the lightmap atlas was scaled by before sRGB encoding (multiply by its inverse after sampling).
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn lightmap_scale() -> f32 {
-     with(|c| c.mesh.as_ref().map_or(crate::lightmap::HDR_SCALE, |m| m.lightmap.scale))
- }
- 
- /// Floats per vertex in `mesh_vertices`.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn mesh_vertex_floats() -> usize {
-     mesh::VERTEX_FLOATS
- }
- 
- /// Overwrites the player velocity (used by the run timer's start-zone prespeed cap; replays apply it identically).
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn set_velocity(x: f32, y: f32, z: f32) {
-     with(|c| {
-         if let Some(g) = c.game.as_mut() {
-@@ -477,7 +477,7 @@
- 
- /// Brush entity render/collision state into scratch_f32 as [model, visible, solid] triples
- /// (killed/disabled func_brush, broken func_breakable, toggled func_wall_toggle, ...).
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn brush_states() -> usize {
-     with(|c| {
-         c.scratch_f32.clear();
-@@ -491,7 +491,7 @@
- }
- 
- /// Presentation entity states [entity index, enabled], restored with simulation snapshots.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn effect_states() -> usize {
-     with(|c| {
-         c.scratch_f32.clear();
-@@ -507,7 +507,7 @@
- /// Server rules: bhop_block_fix (0 = stock sinking doors, 1 = block fix), grace seconds before a
- /// standing player is sent through the block's teleport, teleport_keeps_velocity (Source = 1).
- /// Resets the map.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn set_rules(bhop_block_fix: u32, bhop_block_grace: f32, teleport_keeps_velocity: u32) {
-     use crate::game::{BhopBlockMode, Rules};
-     with(|c| {
-@@ -523,7 +523,7 @@
- }
- 
- /// Player extras into scratch_f32: [health, gravity_scale, speed_scale]; name via scratch_str.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn player_extras() -> usize {
-     with(|c| {
-         c.scratch_f32.clear();
-@@ -550,7 +550,7 @@
- /// Restart point (start-zone restart): respawns the player at (x, y, z) feet facing `yaw` with zero
- /// velocity, settled onto the floor below; deaths respawn there until the next `reset`. Call right
- /// after `reset` (tick 0); replays store it in their header and re-apply it after reset.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn set_position(x: f32, y: f32, z: f32, yaw: f32) {
-     with(|c| {
-         if let Some(g) = c.game.as_mut() {
-@@ -562,7 +562,7 @@
- /// Names the player gets at the restart point (call after `set_position`): `name_len` bytes of targetname then
- /// `class_len` bytes of classname (UTF-8; empty classname = "player") at `ptr` (from `alloc`; takes ownership).
- /// See `Game::set_restart_names`.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub unsafe extern "C" fn set_restart_names(ptr: *mut u8, name_len: usize, class_len: usize) {
-     let bytes = unsafe { Vec::from_raw_parts(ptr, name_len + class_len, name_len + class_len) };
-     let name = String::from_utf8_lossy(&bytes[..name_len]);
-@@ -575,7 +575,7 @@
- }
- 
- /// Restart point since the last reset into scratch_f32: [] if none, else [x, y, z, yaw] (settled).
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn restart_point() -> usize {
-     with(|c| {
-         c.scratch_f32.clear();
-@@ -590,7 +590,7 @@
- /// bit0 downhill landing fix, bit1 uphill landing fix, bit2 rampbug fix, bit3 telehop fix,
- /// bit4 DISABLE per-material surface properties. Resets the map. Physics v17 runs RNGFix's versions of the downhill,
- /// uphill and telehop fixes itself (bit3 is ignored there; bit1's slide-stop variant stays available on top).
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn set_movement_rules(flags: u32) {
-     with(|c| {
-         if let Some(g) = c.game.as_mut() {
-@@ -610,7 +610,7 @@
- /// Static/dynamic prop collision hulls as a triangle soup (9 floats per triangle, world space) into
- /// scratch_f32. Props collide but their models are not rendered by the client; draw these so players
- /// can see what they hit.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn prop_collision_mesh() -> usize {
-     with(|c| {
-         c.scratch_f32.clear();
-@@ -624,7 +624,7 @@
- // ---- physics content (prop collision models; see Game::physics_files) ----
- 
- /// Collision files (`.phy` / `.mdl`) the loaded map's props need, newline-separated in scratch_str.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn physics_files() -> usize {
-     with(|c| {
-         c.scratch_str = c.game.as_ref().map(|g| g.physics_files().join("\n")).unwrap_or_default();
-@@ -633,7 +633,7 @@
- }
- 
- /// Prop models still without collision (their files weren't available), newline-separated in scratch_str.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn physics_missing() -> usize {
-     with(|c| {
-         c.scratch_str = c.game.as_ref().map(|g| g.missing_prop_models().join("\n")).unwrap_or_default();
-@@ -643,7 +643,7 @@
- 
- /// Rebuilds prop collision from the pakfile and the files added since the map loaded (content_add_file /
- /// fetched content), then resets the map. Call after hosted content arrived, before playing.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn physics_reload() {
-     with(|c| {
-         let Some(g) = c.game.as_mut() else { return };
-@@ -671,7 +671,7 @@
- 
- /// Captures the full simulation state (player, brush entities/doors, triggers, entity I/O queue). Returns a
- /// handle (>= 1) for `state_restore` / `state_free`, or 0 when no map is loaded.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn state_snapshot() -> u32 {
-     let Some(s) = with(|c| c.game.as_ref().map(|g| g.save_state())) else { return 0 };
-     SNAPSHOTS.with(|v| {
-@@ -691,7 +691,7 @@
- 
- /// Restores a capture made with `state_snapshot` on the currently loaded map. Returns 1 on success, 0 for an
- /// unknown handle or no map. Stepping afterwards is bit-identical to the run the capture was taken from.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn state_restore(handle: u32) -> u32 {
-     SNAPSHOTS.with(|v| {
-         let v = v.borrow();
-@@ -707,7 +707,7 @@
- }
- 
- /// Frees a capture (0 / unknown handles are ignored).
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn state_free(handle: u32) {
-     SNAPSHOTS.with(|v| {
-         if let Some(slot) = v.borrow_mut().get_mut((handle as usize).wrapping_sub(1)) {
-@@ -717,7 +717,7 @@
- }
- 
- /// Approximate memory held by a capture in bytes (0 for unknown handles).
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn state_snapshot_bytes(handle: u32) -> usize {
-     SNAPSHOTS.with(|v| v.borrow().get((handle as usize).wrapping_sub(1)).and_then(|s| s.as_ref()).map_or(0, |s| s.approx_bytes()))
- }
-@@ -725,7 +725,7 @@
- /// Camera collision: sweeps a cube of half-size `radius` from start to end (Source units) against the world,
- /// props and solid brush entities (MASK_SOLID, player clips ignored). Returns the clear fraction 0..1
- /// (1 = unobstructed); 1 when no map is loaded.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn trace_ray(sx: f32, sy: f32, sz: f32, ex: f32, ey: f32, ez: f32, radius: f32) -> f32 {
-     with(|c| c.game.as_ref().map_or(1.0, |g| g.trace_camera([sx, sy, sz], [ex, ey, ez], radius)))
- }
-@@ -733,7 +733,7 @@
- /// The player's attack this tick (after a step that returned EVENT_ATTACK) into scratch_f32:
- /// [weapon (WEAPON_* bit), mode (1 primary, 2 secondary), hit (0/1), start x,y,z, end x,y,z, normal x,y,z,
- ///  entity index or -1]; empty when the last step had no attack.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn attack_report() -> usize {
-     with(|c| {
-         c.scratch_f32.clear();
-@@ -752,7 +752,7 @@
- /// id, primary id, secondary id, has knife, clip, clip size, reload ticks left, burst mode, floor items changed since
- /// the last floor_weapons call (0/1), the USP's silencer on (v7), silencer attach / detach ticks left (v7)]; valid every
- /// tick.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn weapon_report() -> usize {
-     with(|c| {
-         c.scratch_f32.clear();
-@@ -766,7 +766,7 @@
- /// Every weapon_* item of the map into scratch_f32 as [entity, weapon id, flags, x, y, z, pitch, yaw, roll] (9 floats
- /// each, entity order, present or not; flags FLOOR_* = present 1, picked up 2, spawned 4, dropped 8, removed 16, moved 32
- /// since the previous call); research/WEAPONS.md "Floor weapons". No allocation once scratch_f32 has grown.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn floor_weapons() -> usize {
-     with(|c| {
-         let Ctx { game, scratch_f32: out, .. } = c;
-@@ -786,7 +786,7 @@
- 
- /// Practice noclip tick: the player at (x, y, z) with velocity (vx, vy, vz), no collision or trigger touches, while the
- /// world runs one tick (`Game::practice_noclip_tick`). Returns the event bits (0 with no map).
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn practice_noclip_tick(x: f32, y: f32, z: f32, vx: f32, vy: f32, vz: f32) -> u32 {
-     with(|c| match c.game.as_mut() {
-         Some(g) => {
-@@ -799,7 +799,7 @@
- 
- /// Leaves practice noclip at (x, y, z) keeping the velocity, finding free space near it along the view (yaw, pitch)
- /// if the hull is stuck (`Game::practice_noclip_exit`). Returns 1 standing, 2 crouched, 0 stuck or no map.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn practice_noclip_exit(x: f32, y: f32, z: f32, vx: f32, vy: f32, vz: f32, yaw: f32, pitch: f32) -> u32 {
-     with(|c| c.game.as_mut().map_or(0, |g| g.practice_noclip_exit([x, y, z], [vx, vy, vz], yaw, pitch)))
- }
-@@ -809,7 +809,7 @@
- /// The volumes the client's trigger and clip overlays draw, into scratch_f32: per volume
- /// [kind (OVERLAY_*), entity (-1: world), model (-1: planes already in world space), flags (OVERLAY_WHEN_HIDDEN),
- ///  plane count, then per plane normal x, y, z, distance]. Needs a full `load_map` (it tells drawn faces apart).
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn overlay_volumes() -> usize {
-     with(|c| {
-         c.scratch_f32.clear();
-@@ -827,7 +827,7 @@
- 
- /// Every entity's overlay state now (OVERLAY_STATE_* bits, `Game::overlay_state`) into scratch_u32, in entity order.
- /// Works on a physics-only load too (the replay viewer's).
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn overlay_states() -> usize {
-     with(|c| {
-         c.scratch_u32.clear();
-@@ -839,15 +839,15 @@
- }
- 
- // Optional observational ABI v2. Does not change commands, snapshots or ranked timing.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn timing_path_version() -> u32 { playsrc_movement::accepted_path::VERSION }
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn timing_observe(enabled: u32) {
-     with(|c| { if let Some(g) = &mut c.game { g.observe_timing = enabled != 0; g.timing_path = None; } });
- }
- /// f64 buffer: status (0 absent, 1 supported, 2 unsupported), then 15 values per
- /// segment: t0,t1,from[3],to[3],hull.mins[3],hull.maxs[3],discrete. Copy before next call.
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn timing_path() -> usize {
-     with(|c| {
-         c.timing_f64.clear();
-@@ -865,9 +865,9 @@
-         c.timing_f64.len()
-     })
- }
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn timing_path_ptr() -> *const f64 { with(|c| c.timing_f64.as_ptr()) }
--#[unsafe(no_mangle)]
-+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
- pub extern "C" fn timing_path_reason() -> usize {
-     with(|c| {
-         c.scratch_str = c.game.as_ref().and_then(|g| g.timing_path.as_ref())
-@@ -875,3 +875,7 @@
-         c.scratch_str.len()
-     })
- }
-+// The opt-in native adapter owns a thread per session; canonical WASM exports stay unchanged.
-+#[cfg(all(feature = "native-web", not(target_arch = "wasm32")))]
-+#[path = "../../native-web/core.rs"]
-+pub mod native_web;
-diff --git a/crates/core/tests/native_entities.rs b/crates/core/tests/native_entities.rs
-new file mode 100644
---- /dev/null
-+++ b/crates/core/tests/native_entities.rs
-@@ -0,0 +1,33 @@
-+use bunnyhop_core::{Cmd, Game};
-+use std::path::PathBuf;
-+
-+fn load(name: &str) -> Option<Game> {
-+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
-+    let bytes = std::fs::read(&path).map_err(|_| eprintln!("skipping {name}: {} not found", path.display())).ok()?;
-+    Some(Game::load(&bunnyhop_core::parse_bsp(&bytes).unwrap()).unwrap())
-+}
-+
-+/// Synthetic uses a solid brush with $surfaceprop ladder rather than CONTENTS_LADDER.
-+#[test]
-+fn synthetic_material_ladder_is_versioned() {
-+    use bunnyhop_core::{Settings, game::{PHYSICS_V17, PHYSICS_V18}};
-+    let Some(mut game) = load("bhop_synthetic_fix") else { return };
-+    for version in [PHYSICS_V17, PHYSICS_V18] {
-+        game.set_settings(Settings { physics_version: version, ..Settings::css_bhop() });
-+        game.reset();
-+        game.place_player([-12052.5, 13065.0, 7690.0]);
-+        let start = game.state.position;
-+        let mut ladder_ticks = 0;
-+        for _ in 0..20 {
-+            game.step(Cmd { forward: 400.0, yaw: 0.0, pitch: 0.0, ..Default::default() }).unwrap();
-+            ladder_ticks += usize::from(game.state.mode == playsrc_movement::Mode::Ladder);
-+        }
-+        eprintln!("v{version}: {start:?} -> {:?}, ladder ticks {ladder_ticks}", game.state.position);
-+        if version == PHYSICS_V18 {
-+            assert!(ladder_ticks > 10, "attach to the reported ladder");
-+            assert!(game.state.position[2] > start[2] + 25.0, "climb the ladder");
-+        } else {
-+            assert_eq!(ladder_ticks, 0, "old replays keep the original behavior");
-+        }
-+    }
-+}
-diff --git a/crates/core/tests/native_render.rs b/crates/core/tests/native_render.rs
-new file mode 100644
---- /dev/null
-+++ b/crates/core/tests/native_render.rs
-@@ -0,0 +1,28 @@
-+use bunnyhop_core::materials::{self, Kind};
-+use bunnyhop_core::{content, mesh, vfs};
-+use std::path::PathBuf;
-+
-+fn map_bytes(name: &str) -> Option<Vec<u8>> {
-+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
-+    std::fs::read(&path).map_err(|_| eprintln!("skipping {name}: {} not found", path.display())).ok()
-+}
-+
-+/// GothQueen's unreal_space report: toolsblack is a visible opaque wall, not a nodraw tool.
-+#[test]
-+fn black_tool_walls_are_rendered() {
-+    assert!(!mesh::hidden_tool_material("tools/toolsblack"));
-+    assert!(!mesh::hidden_tool_material("tools/toolswhite"));
-+    assert!(mesh::hidden_tool_material("tools/toolsnodraw"));
-+    assert!(mesh::hidden_tool_material("tools/toolsplayerclip"));
-+    let Some(bytes) = map_bytes("bhop_unreal_space") else { return };
-+    let bsp = bunnyhop_core::parse_bsp(&bytes).unwrap();
-+    let m = mesh::build(&bsp);
-+    let material = m.materials.iter().position(|m| m.name == "tools/toolsblack").expect("map uses black walls");
-+    let count: u32 = m.groups.iter().filter(|g| g.material as usize == material).map(|g| g.index_count).sum();
-+    assert!(count > 0, "black wall faces must reach the renderer");
-+    let mut fs = vfs::Vfs::default();
-+    fs.mount(vfs::Source::from_zip("pak", content::pakfile(&bsp)));
-+    let mats = materials::resolve(&fs, &["tools/toolsblack".into()]);
-+    assert_eq!(mats.descs[0].kind, Kind::Textured);
-+    assert_eq!(mats.descs[0].flags & (materials::FLAG_TRANSLUCENT | materials::FLAG_ADDITIVE), 0);
-+}

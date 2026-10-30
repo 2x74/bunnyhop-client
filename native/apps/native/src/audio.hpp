@@ -8,6 +8,7 @@
 #include "music.hpp"
 #include "spatial_audio.hpp"
 #include "render_shaders.hpp"
+#include "inspect_cues.hpp"
 #include <SDL3/SDL.h>
 #include <nlohmann/json.hpp>
 #include <array>
@@ -160,7 +161,7 @@ class Audio {
     struct SpatialState {
         MovementAudio movement;
         bool grounded = false, first = true;
-        uint32_t attack_tick = ~0u, jump_tick = ~0u;
+        uint32_t attack_tick = ~0u, jump_tick = ~0u, weapon = 0;
     };
 
     std::unordered_map<std::string, SpatialState> spatial_states;
@@ -701,6 +702,13 @@ public:
         if (!layer.empty() && layer != id) play(layer, gain, rate, pan, positional);
     }
 
+    // A knife inspect's flip, spin or regrip (inspect_cues.hpp), with the other weapon sounds.
+    void inspect_cue(native_render::InspectCue cue) {
+        if (!weapon_sounds_enabled) return;
+        const auto sound = native_render::inspect_cue_sound(cue);
+        play(sound.id, sound.gain);
+    }
+
     void impact(const BhAttackReport &attack, const std::string &surface) {
         if (!attack.hit) return;
         const auto material = surface == "grass" ? "dirt" : surface == "water" ? "concrete" : surface;
@@ -757,6 +765,12 @@ public:
                     spatial(id, a.frame.position, float(gain) * (ghost ? .35f : .65f), rate);
                 }
         );
+        // Drew a gun (a switch or a pickup): its draw sound at them (net/players.ts).
+        constexpr float draw_gain = .7f;
+        if (!ghost && !s.first && !a.snapped && a.frame.weapon != s.weapon && a.frame.weapon >= 2
+            && weapon_sounds_enabled)
+            spatial("gun_draw", a.frame.position, draw_gain);
+        s.weapon = a.frame.weapon;
         s.first = false;
         s.grounded = p.grounded;
         if (a.attack && s.attack_tick != a.frame.tick) {

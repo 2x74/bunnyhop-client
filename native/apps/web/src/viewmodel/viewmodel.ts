@@ -27,10 +27,13 @@
 import * as THREE from "three";
 import { playerUniforms, solidMaterial, type PlayerUniforms } from "../player/materials";
 import { colourway, paletteOf } from "../player/bunny/palettes";
-import { getLoadout, getOutfit, getPlayerGlow, onLoadout, onOutfit } from "../player/cosmetics";
+import { getHeldLoadout, getOutfit, getPlayerGlow, onHeldLoadout, onOutfit } from "../player/cosmetics";
 import { PlayerGlowShell } from "../player/glow";
 import { DEFAULT_LOADOUT, gloveStyle, type CosmeticLoadout } from "../loadout";
-import { applyLoadoutUniforms, NO_LOOK, sameLook, type FinishSpec, type MaterialLook } from "./finishes/shader";
+import { applyLoadoutUniforms, lookDefines, NO_LOOK, sameLook, type FinishSpec, type MaterialLook } from "./finishes/shader";
+import { compileModel, prebuildViewmodels } from "../player/bunny/prebuild";
+import type { GloveStyleId } from "../loadout";
+import { wantsReflection } from "./finishes/detail";
 import { ensureViewmodelLayout } from "./finishes/layout";
 import { followLoadout } from "./equip";
 import { concat } from "../player/bunny/rig";
@@ -44,13 +47,14 @@ import { angleMatrix } from "./math";
 import { viewmodelGeometry } from "./mesh";
 import { equippedKnife, onKnife } from "./knives/equipped";
 import { KnifeHold, prewarmGrips } from "./knives/hold";
-import { KNIVES } from "./knives/index";
+import { knifeById, KNIVES } from "./knives/index";
 import { carrot } from "./knives/carrot";
 import type { KnifeDef } from "./knives/types";
 import { PROC_DURATION, VmProcedural, type VmAction } from "./procedural";
 import { vmRig } from "./rig";
 import { VmInspect } from "./inspects/runtime";
 import { clampFingers } from "./fingers";
+import { hypot2, hypot3 } from "../hypot";
 
 const D2R = Math.PI / 180;
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
@@ -164,7 +168,7 @@ export class Viewmodel {
   knifeHold: KnifeHold | null = null;
   private visible = true;
   /** Cosmetic loadout on the hands + knife (finish, gloves; the knife itself comes through setKnife) and its program variant. */
-  private loadout: CosmeticLoadout = getLoadout();
+  private loadout: CosmeticLoadout = getHeldLoadout();
   private look: MaterialLook = NO_LOOK;
   /** Dev lab / previews: a finish shown instead of the loadout's (undefined = the loadout's). */
   private finishOverride: FinishSpec | null | undefined = undefined;
@@ -203,9 +207,9 @@ export class Viewmodel {
     this.applyColours(follow ? getOutfit() : undefined);
     if (follow) followLoadout();
     this.setKnife(follow ? equippedKnife() : null);
-    this.setLoadout(follow ? getLoadout() : { ...DEFAULT_LOADOUT });
+    this.setLoadout(follow ? getHeldLoadout() : { ...DEFAULT_LOADOUT });
     if (follow) {
-      this.unsub.push(onLoadout((l) => this.setLoadout(l)));
+      this.unsub.push(onHeldLoadout((l) => this.setLoadout(l)));
       this.unsub.push(onKnife((k) => this.setKnife(k)));
       this.unsub.push(onOutfit((id) => this.applyColours(id)));
     }
@@ -268,11 +272,55 @@ export class Viewmodel {
     const g = this.geometryFor(this.knifeDef);
     if (this.mesh.geometry !== g) this.mesh.geometry = g;
     ensureViewmodelLayout(this.mesh.geometry);
-    const look = applyLoadoutUniforms(this.uniforms, this.loadout, this.finishOverride);
+    // The first-person detail shading (finishes/detail.ts); the scene reflection only runs for reflective hardware or a
+    // painted finish (its metallic / glossy parts; the metal finishes, 22+, keep their own capture alive).
+    const look = applyLoadoutUniforms(this.uniforms, this.loadout, this.finishOverride, true);
+    this.uniforms.uCosEnv.want = wantsReflection(g) || (look.finish > 0 && look.finish < 22);
     if (sameLook(look, this.look)) return;
     this.look = look;
-    (this.mesh.material as THREE.Material).dispose();
-    this.mesh.material = solidMaterial(this.uniforms, look);
+    const old = this.mesh.material as THREE.ShaderMaterial;
+    this.mesh.material = this.materialFor(look);
+    if (![...this.kept.values()].includes(old)) old.dispose();
+  }
+
+  /**
+   * Program variants kept compiled (looks a knife pool swaps between, warmLoadouts): their materials stay alive so
+   * three keeps the programs, and a swap on restart picks one up without compiling. Anything else is made per change.
+   */
+  private kept = new Map<string, THREE.ShaderMaterial>();
+  private materialFor(look: MaterialLook): THREE.ShaderMaterial {
+    return this.kept.get(JSON.stringify(lookDefines(look))) ?? solidMaterial(this.uniforms, look);
+  }
+
+  /**
+   * Builds and compiles what holding each of `ls` needs (a knife pool's picks, player/cosmetics.ts): the hands + knife
+   * geometry in the prebuild worker, then one program variant each, compiled off the frame (compileModel). Variants
+   * from an earlier call that aren't in `ls` are let go.
+   */
+  async warmLoadouts(ls: readonly CosmeticLoadout[], renderer: THREE.WebGLRenderer, camera: THREE.Camera, scene: THREE.Scene): Promise<void> {
+    const glove = gloveStyle(this.loadout.glove).style;
+    const knives = ls.map((l) => knifeById(l.knife) ?? carrot);
+    await prebuildViewmodels(knives.map((k) => [k, glove] as [KnifeDef, GloveStyleId]));
+    const want = new Map<string, MaterialLook>();
+    for (const l of ls) {
+      const look = applyLoadoutUniforms(this.uniforms, { ...l, glove: this.loadout.glove }, undefined, true);
+      want.set(JSON.stringify(lookDefines(look)), look);
+    }
+    // Back to the held loadout's uniforms (the glove is the same, so this only restates them).
+    applyLoadoutUniforms(this.uniforms, this.loadout, this.finishOverride, true);
+    for (const [key, m] of this.kept) if (!want.has(key)) (this.kept.delete(key), m !== this.mesh.material && m.dispose());
+    const root = new THREE.Group();
+    for (const [key, look] of want) {
+      let m = this.kept.get(key);
+      if (!m) this.kept.set(key, (m = sameLook(look, this.look) ? (this.mesh.material as THREE.ShaderMaterial) : solidMaterial(this.uniforms, look)));
+      const mesh = new THREE.SkinnedMesh(this.mesh.geometry, m);
+      mesh.bindMode = THREE.DetachedBindMode;
+      mesh.bind(this.skeleton, new THREE.Matrix4());
+      mesh.frustumCulled = false;
+      root.add(mesh);
+    }
+    for (const k of knives) viewmodelGeometry(k === carrot ? undefined : k, glove);
+    await compileModel(renderer, root, camera, scene);
   }
 
   get knife(): KnifeDef | null {
@@ -499,10 +547,12 @@ export class Viewmodel {
       }
       bs.accumulate(p.seq, p.cycle, w);
       const A = bs.buildMatrices();
+      // (Copied by hand: a subarray per bone per frame was garbage.)
+      const bind = r.bind;
       for (let i = 0; i < map.length; i++) {
         const a = map[i];
-        if (a >= 0) W.set(A.subarray(a * 12, a * 12 + 12), i * 12);
-        else W.set(r.bind.subarray(i * 12, i * 12 + 12), i * 12);
+        const src = a >= 0 ? A : bind, so = a >= 0 ? a * 12 : i * 12, o = i * 12;
+        for (let k = 0; k < 12; k++) W[o + k] = src[so + k];
       }
       void d;
     } else {
@@ -535,7 +585,7 @@ export class Viewmodel {
     const bobK = vp.bob;
     const swayK = vp.sway;
     // --- CS:S bob (CalcViewmodelBob), only while grounded.
-    const hs = s.grounded ? Math.hypot(s.velocity[0], s.velocity[1]) : 0;
+    const hs = s.grounded ? hypot2(s.velocity[0], s.velocity[1]) : 0;
     const maxDelta = dt * 320;
     let speed = clamp(hs, this.bobSpeed - maxDelta, this.bobSpeed + maxDelta);
     speed = clamp(speed, -320, 320);
@@ -561,16 +611,16 @@ export class Viewmodel {
     const lf = this.lastFacing;
     // A view snapped (nearly) straight around (a teleport or restart turning 180°) would leave the lag direction
     // antiparallel and stuck at full strength, pulling the viewmodel into the camera: start the lag over instead.
-    if (Math.hypot(fwd[0] - lf[0], fwd[1] - lf[1], fwd[2] - lf[2]) > 1.9) (lf[0] = fwd[0]), (lf[1] = fwd[1]), (lf[2] = fwd[2]);
+    if (hypot3(fwd[0] - lf[0], fwd[1] - lf[1], fwd[2] - lf[2]) > 1.9) (lf[0] = fwd[0]), (lf[1] = fwd[1]), (lf[2] = fwd[2]);
     const dx = fwd[0] - lf[0], dy = fwd[1] - lf[1], dz = fwd[2] - lf[2];
     if (dt > 0) {
       let k = 5;
-      const diff = Math.hypot(dx, dy, dz);
+      const diff = hypot3(dx, dy, dz);
       if (diff > 1.5) k *= diff / 1.5;
       lf[0] += dx * k * dt;
       lf[1] += dy * k * dt;
       lf[2] += dz * k * dt;
-      const ll = Math.hypot(lf[0], lf[1], lf[2]) || 1;
+      const ll = hypot3(lf[0], lf[1], lf[2]) || 1;
       lf[0] /= ll, lf[1] /= ll, lf[2] /= ll;
     }
     const ox = -5 * dx * swayK, oy = -5 * dy * swayK, oz = -5 * dz * swayK;

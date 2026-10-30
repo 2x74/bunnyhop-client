@@ -57,7 +57,8 @@ DataPaths resolve_data_folder(const Options &opt, SDL_Window *window, DataMovePr
     if (!pref_path) throw std::runtime_error("Cannot find the native client data directory");
     const std::string isolated = !opt.runtime_smoke.empty()        ? opt.runtime_smoke
                                  : !opt.presentation_smoke.empty() ? opt.presentation_smoke
-                                                                   : opt.video_smoke;
+                                 : !opt.video_smoke.empty()        ? opt.video_smoke
+                                                                   : opt.menu_smoke;
     const std::filesystem::path default_root = native::data_location::from_utf8(pref_path);
     SDL_free(pref_path);
     // Settings -> Game data: the folder may live elsewhere (another drive), and a

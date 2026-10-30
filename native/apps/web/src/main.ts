@@ -2,6 +2,7 @@
 import { appLocation } from "./platform/navigation";
 import "./platform/boot";
 import { myProfile } from "./ui/account-state";
+import { advanceKnifePool, getOutfit, onHeldLoadout, poolPicks } from "./player/cosmetics";
 import { PlayerShadowProxy } from "./graphics/player-shadow";
 import "./texture-packs/settings";
 import "./sky-packs/settings";
@@ -35,6 +36,7 @@ import { setUiHidden, uiHidden } from "./ui/hide-ui";
 import { isStyleId, styleSettings, type StyleId } from "./styles";
 import { turnBindsAllowed } from "./turn-binds";
 import { nullBindsAllowed } from "./null-binds";
+import { wReleaseAllowed, type WReleaseContext } from "./w-release";
 import { resolveGauntlet, startGauntletMode } from "./gauntlet/mode";
 import { readQueue, settleQueue } from "./map-queue";
 import { startQueueMode } from "./queue-mode";
@@ -88,6 +90,8 @@ import { startPlaytime } from "./playtime";
 import { mapTime } from "./map-time";
 import { deviceIdSettled } from "./device";
 import { setCosmeticsStill } from "./viewmodel/finishes/shader";
+import { setCosmeticsTier, tierOf } from "./viewmodel/finishes/detail";
+import { lookTierOf, setPlayerLookTier } from "./player/look-tier";
 import { PotatoHint } from "./potato-hint";
 import { CanvasVideoGrade } from "./video-grade";
 import { initTriggerOverlay, triggerOverlayFrame } from "./triggers";
@@ -207,6 +211,8 @@ prefs.watch((p) => {
   resize();
   if (applyPalette(p.colorBlind)) run?.view.recolor(); // colour-blind palette (palette.ts): CSS variables, then the zones
   setCosmeticsStill(p.graphics.potato); // animated finishes and hats hold still in Potato mode
+  setCosmeticsTier(tierOf(p.graphics)); // glove + knife hardware detail per look (viewmodel/finishes/detail.ts)
+  setPlayerLookTier(lookTierOf(p.graphics)); // garment detail on the bunnies and the sleeves (player/look-tier.ts)
   document.body.classList.toggle("potato", p.graphics.potato); // and the HUD drops its blurs (hud.css)
   if (world) {
     world.setPotato(p.graphics.potato);
@@ -410,6 +416,8 @@ if (isStyleId(styleParam) && !gauntletStart) setSelectedStyle(styleParam);
 // (Gauntlets are Normal only: this session runs Normal without changing the style you picked for other maps.)
 const style = gauntletStart ? (GAUNTLET_STYLE as StyleId) : selectedStyle();
 localStorage.setItem("bunnyhop:last-map", mapName);
+// A new map: the knife pool moves on to its next knife (player/cosmetics.ts), before anything builds the viewmodel.
+if (!replayMap) advanceKnifePool("map");
 setSocialPlaying(mapName, style); // friends see the map (and the room, once joined: social/state.ts)
 document.title = `${mapName} · bunnyhop.lol`;
 const loading = showLoading(mapName);
@@ -497,6 +505,8 @@ function restart(track?: number, at?: RestartPoint | null) {
   liveCapture.stop(); // a core/world reset ends this independently reproducible segment
   if (liveCapture.status.stopping) liveCapture.fail("Restart during command application requires a new capture");
   const view = run!.resetCore(track, at ?? null);
+  // Knife pool swap "restart": the next knife comes up with the new attempt.
+  advanceKnifePool("restart");
   playerAudio.reset();
   prev = curr = core.state();
   input.restartSamplerView(curr.teleportAngles[1],view?.pitch ?? curr.teleportAngles[0],YAW_SET_SPAWN);
@@ -545,6 +555,28 @@ setPlayAttempt(() => session.timer.status === "running");
 setUpdateBusy(() => session.timer.status === "running");
 viewmodel = new Viewmodel();
 const vm = viewmodel;
+// Knife pool (player/cosmetics.ts): every knife it swaps to is built and compiled ahead in idle time (first person in
+// the prebuild worker, your bunny too), so a swap on restart never stalls a frame. Again whenever the pool changes.
+{
+  let warmed = "";
+  const warmPool = () => {
+    const picks = poolPicks();
+    const key = picks.map((l) => `${l.knife}|${l.finish}|${l.glove}`).join(",");
+    if (key === warmed) return;
+    warmed = key;
+    const go = () => {
+      if (!picks.length) return;
+      void vm.warmLoadouts(picks, renderer, vm.camera, vm.scene);
+      void import("./player/bunny/prebuild").then((pre) => picks.forEach((l) => void pre.prebuildBunny(getOutfit(), l)));
+    };
+    if ("requestIdleCallback" in window) requestIdleCallback(go, { timeout: 3000 });
+    else setTimeout(go, 500);
+  };
+  warmPool();
+  onHeldLoadout(warmPool);
+}
+// Dev hook (as `bunnyhop` above): the viewmodel, for in-game knife / finish captures (research/knife-finishes/).
+if (import.meta.env.DEV) Object.assign((window as unknown as { bunnyhop: object }).bunnyhop, { vm });
 vm.onAttack = (kind) => {
   session.recordCosmetic(kind); // replay cosmetic trailer (ghosts / replays show the swing)
   mp?.onAttack(kind); // other players see it
@@ -579,10 +611,10 @@ practice = new Practice({
   tutorial: mapName === TUTORIAL_MAP,
   gauntlet: !!gauntletStart,
   restart: () => restart(),
-  resync: (view) => {
+  resync: (view, kind = YAW_SET_SPAWN) => {
     prev = curr = core.state();
     if (view) {
-      input.setYaw(view.yaw, YAW_SET_SPAWN);
+      input.setYaw(view.yaw, kind);
       input.pitch = view.pitch;
     }
     input.resetSampler(performance.now(), "practice-resync");
@@ -692,7 +724,7 @@ if (params.has("spectate")) {
   history.replaceState(history.state, "", url.pathname + url.search + url.hash);
 }
 const mp = serverId ? (await import("./net/mp")).startMultiplayer({ serverId, map: mapName, scene, core, input, session, restart, impacts: gunView.impacts, game, renderer, spectate: spectateId }) : null;
-// Chat in solo play (solo-chat.ts): Y types the same commands as in rooms (!r, !setstart, !help; chat-commands.ts).
+// Chat in solo play (solo-chat.ts): the chat key (Y) types the same commands as in rooms (!r, !setstart, !help; chat-commands.ts).
 // Not on the tutorial map, whose lessons own the restart keys.
 const soloChat = mp || tutorial ? null : new SoloChat({ input, session, restart: (t) => restart(t), enabled: () => !replayViewer.active, game });
 session.multiplayer = mp !== null;
@@ -743,7 +775,7 @@ if (localInputExperimentAllowed(import.meta.env.DEV, location.hostname)) {
   badge.style.cssText = "position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:99999;background:#39180b;color:#fff;padding:8px;font:13px monospace;pointer-events:none";
   badge.hidden = true;
   document.body.append(badge);
-  const context = () => ({ multiplayer: !!mp, tutorial: !!tutorial, practice: session.practicing || practiceMode.noclipping, editor: !!session.editor?.active, queue: !!readQueue(), gauntlet: !!gauntletStart || !!session.modeLock, nullBinds: prefs.get().nullBinds, thirdPerson: thirdPerson.active, debug: session.debug, autoRestart: prefs.get().autoRestart.when !== "off", tickInterval: session.settings.tickInterval });
+  const context = () => ({ multiplayer: !!mp, tutorial: !!tutorial, practice: session.practicing || practiceMode.noclipping, editor: !!session.editor?.active, queue: !!readQueue(), gauntlet: !!gauntletStart || !!session.modeLock, nullBinds: prefs.get().nullBinds, wRelease: prefs.get().wRelease, thirdPerson: thirdPerson.active, debug: session.debug, autoRestart: prefs.get().autoRestart.when !== "off", tickInterval: session.settings.tickInterval });
   const enable = (source: SamplerSource = experimentSource) => {
     const rejected = experimentRejection(context());
     if (rejected) throw new Error(rejected);
@@ -856,6 +888,8 @@ const leaveHold = new LeaveHold({
 });
 input.onAction = (a, code) => {
   if (replayViewer.active) return;
+  // The chat bind (Settings -> Keys): the room's chat, or solo play's command chat. None on the tutorial map.
+  if (a === "chat") return void (mp ? mp.onAction(a) : soloChat?.open());
   if (a === "paint" || a === "paintOnce") return void requestPaint();
   if (a === "clearPaint") return clearPaint();
   if (a === "lastLj") return openLastJump();
@@ -991,11 +1025,22 @@ function bindPolicy(): { turnBinds: boolean; nullBinds: boolean } {
   const free = session.practicing;
   return { turnBinds: free || turnBindsAllowed(inputStyle), nullBinds: prefs.get().nullBinds && (free || nullBindsAllowed(inputStyle)) };
 }
+/**
+ * Release W on jump for the next command (w-release.ts): the pre-tick player state when the setting is on and the style
+ * allows it (practice: every style), else undefined (off). Never while flying in practice noclip (W flies there).
+ */
+function wReleasePolicy(): WReleaseContext | undefined {
+  if (!prefs.get().wRelease || practiceMode.noclipping) return undefined;
+  const inputStyle = session.timer.inStart ? session.styleFor(session.timer.track) : session.runStyle;
+  if (!session.practicing && !wReleaseAllowed(inputStyle)) return undefined;
+  const s = core.state();
+  return { grounded: s.grounded, onLadder: s.onLadder, autohop: session.settings.autohop };
+}
 /** One tick; `at`: its boundary on the frame clock (timed input takes the input stamped up to it), none for a debug tick. */
 function tick(at?: number) {
   if (inputExperiment) throw new Error("Manual/debug ticks are unsupported while experimental input is enabled");
   weaponsBeforeTick(); // a gun kept over a restart goes into this command, like a typed !usp
-  const sample = input.sample({ ...bindPolicy(), tickInterval: session.settings.tickInterval, at });
+  const sample = input.sample({ ...bindPolicy(), wRelease: wReleasePolicy(), tickInterval: session.settings.tickInterval, at });
   applyTick(sample);
 }
 function applyTick(sample: UserCmd, diagnostic?: SampledInput, generatedGive = 0) {
@@ -1029,6 +1074,8 @@ function applyTick(sample: UserCmd, diagnostic?: SampledInput, generatedGive = 0
   const attackNow = events & EVENT_ATTACK ? attackReport(core) : null;
   gunView.tick(weaponNow, attackNow);
   if (attackNow && attackNow.weapon >= 2) mp?.onShot(); // other players see the shot (the knife's swings: vm.onAttack)
+  // Your third-person bunny's kick / reload gestures; others see the reload too (protocol.ts SF_STAB with a gun).
+  if (thirdPerson.weaponTick(weaponNow, attackNow, session.settings.tickInterval)) mp?.onGunReload();
   arms.tick(curr, events); // weapon switches + EVENT_ATTACK: the swing / shot, its impact
   session.hud.setAmmo(gunView.ammo());
   tutorial?.tick(cmd, prev, curr, events);
@@ -1097,7 +1144,7 @@ function frame(now: number) {
   potatoHint.frame(frameDt * 1000, input.locked);
   if (inputExperiment) {
     accumulator = 0;
-    const rejected = experimentRejection({ multiplayer: !!mp, tutorial: !!tutorial, practice: session.practicing || practiceMode.noclipping, editor: !!session.editor?.active, queue: !!readQueue(), gauntlet: !!gauntletStart || !!session.modeLock, nullBinds: prefs.get().nullBinds, thirdPerson: thirdPerson.active, debug: session.debug, autoRestart: prefs.get().autoRestart.when !== "off", tickInterval: session.settings.tickInterval });
+    const rejected = experimentRejection({ multiplayer: !!mp, tutorial: !!tutorial, practice: session.practicing || practiceMode.noclipping, editor: !!session.editor?.active, queue: !!readQueue(), gauntlet: !!gauntletStart || !!session.modeLock, nullBinds: prefs.get().nullBinds, wRelease: prefs.get().wRelease, thirdPerson: thirdPerson.active, debug: session.debug, autoRestart: prefs.get().autoRestart.when !== "off", tickInterval: session.settings.tickInterval });
     if (rejected && !experimentFailure) {
       liveCapture.fail(rejected);
       experimentFailure = true;
@@ -1147,7 +1194,7 @@ function frame(now: number) {
   const y = lerp(prev.position[1], curr.position[1]);
   const z = lerp(prev.position[2] + prev.viewOffsetZ, curr.position[2] + curr.viewOffsetZ);
   session.camera(camera);
-  if (!thirdPerson.frame(camera, prev, curr, alpha, input.yaw, input.pitch, lastCmd, frameDt, (curr.tick + alpha) * session.settings.tickInterval)) {
+  if (!thirdPerson.frame(camera, prev, curr, alpha, input.yaw, input.pitch, lastCmd, frameDt, (curr.tick + alpha) * session.settings.tickInterval, graphicsPipeline.drawsShadowProxies())) {
     // Source (x, y, z) -> three (x, z, -y)
     camera.position.set(x, z, -y);
     camera.rotation.y = ((input.yaw - 90) * Math.PI) / 180;
@@ -1155,7 +1202,9 @@ function frame(now: number) {
     camera.rotation.z = 0;
   }
   playerShadow.update([x, y, lerp(prev.position[2], curr.position[2])], curr.crouched, !thirdPerson.active && !mp?.isSpectating);
-  mp?.frame(camera, frameDt); // other players; takes the camera while spectating
+  // Other players; takes the camera while spectating. Those behind the camera aren't posed unless the look draws
+  // shadow passes (net/players.ts).
+  mp?.frame(camera, frameDt, graphicsPipeline.drawsShadowProxies());
 
   const p = prefs.get();
   // Zone boxes go with the rest of the UI when it's hidden (ui/hide-ui.ts).
@@ -1183,23 +1232,24 @@ function frame(now: number) {
   // Viewmodel: animate always (swings stay in step), draw only in first person on your own player.
   // (Hidden with a gun out: no knife that shoots.)
   vm.setVisible(p.viewmodel.show && !thirdPerson.active && !mp?.isSpectating && arms.knifeOut);
+  const vmInput = {
+    velocity: [lerp(prev.velocity[0], curr.velocity[0]), lerp(prev.velocity[1], curr.velocity[1]), lerp(prev.velocity[2], curr.velocity[2])],
+    grounded: curr.grounded,
+    viewOffsetZ: lerp(prev.viewOffsetZ, curr.viewOffsetZ),
+    sidemove: lastCmd.side,
+    yaw: input.yaw,
+    pitch: input.pitch,
+    landed: landVz,
+  };
   vm.update(
     frameDt,
-    {
-      velocity: [lerp(prev.velocity[0], curr.velocity[0]), lerp(prev.velocity[1], curr.velocity[1]), lerp(prev.velocity[2], curr.velocity[2])],
-      grounded: curr.grounded,
-      viewOffsetZ: lerp(prev.viewOffsetZ, curr.viewOffsetZ),
-      sidemove: lastCmd.side,
-      yaw: input.yaw,
-      pitch: input.pitch,
-      landed: landVz,
-    },
+    vmInput,
     { primary: arms.knifeOut && input.actionHeld("attack"), secondary: arms.knifeOut && input.actionHeld("attack2"), inspect: arms.knifeOut && input.actionHeld("inspect") },
   );
   landVz = 0;
   // The gun viewmodel rides the knife viewmodel's bob / sway (which keeps animating while hidden); hidden while scoped.
   gunView.setVisible(p.viewmodel.show && !thirdPerson.active && !mp?.isSpectating && !arms.scoped);
-  gunView.frame(frameDt, vm.feelMatrix, origins);
+  gunView.frame(frameDt, vm.feelMatrix, origins, vmInput);
   if (vm.inspects.holding !== inspectHeld) {
     inspectHeld = vm.inspects.holding;
     session.recordInspect(inspectHeld ? INSPECT_HOLD : INSPECT_RELEASE);

@@ -42,12 +42,25 @@ void HudFrame::draw() const {
     BhWeaponReport weapon{};
     bh_weapon_report(core, &weapon);
     if (!visible) return;
+    if (layout_editor.active()) {
+        draw_layout_editor();
+        return;
+    }
     draw_status(shown, weapon);
     draw_diagnostics();
     draw_playback();
     draw_chat();
     draw_panels();
     draw_notifications();
+}
+
+// Every element with sample values, at the layout being edited, under the editor's outlines and bar.
+void HudFrame::draw_layout_editor() const {
+    if (layout_editor.take_preview()) hud.preferences(layout_editor.working_settings());
+    hud.set_editing(true);
+    draw_hud_demo(hud, layout_demo, width, height, prefs.hud_scale, map_id, display_style, display_fps);
+    hud.set_editing(false);
+    layout_editor.draw(hud, width, height, display_scale, layout_editor_key);
 }
 
 void HudFrame::draw_status(const BhCmd &shown, const BhWeaponReport &weapon) const {
@@ -61,13 +74,13 @@ void HudFrame::draw_status(const BhCmd &shown, const BhWeaponReport &weapon) con
             display_style,
             shown_notice,
             display_fps,
-            prefs.hud,
+            prefs.hud && (!viewer.active || viewer.hud),
             prefs.crosshair,
-            viewer.active,
+            viewer.active && !viewer.ui_shown,
             weapon,
             prefs.jump_stats ? hud.ssj_line() : std::string_view(),
             feedback.ssj_gain,
-            prefs.strafe_trainer && !viewer.active ? feedback.strafe_reading : std::nullopt,
+            prefs.strafe_trainer ? feedback.strafe_reading : std::nullopt,
             prefs.strafe_trainer_hints,
             &hud_layout,
             prefs.hud_scale,
@@ -87,9 +100,10 @@ void HudFrame::draw_diagnostics() const {
         std::snprintf(
                 label,
                 sizeof(label),
-                "Mouse %.0f events/s | burst %llu | age %.2f/%.2f ms | pump max %.2f ms",
+                "%s %.0f/s | jitter %.2f ms | age %.2f/%.2f ms | pump %.2f ms",
+                mouse_diagnostics.backend,
                 m.events_per_second,
-                static_cast<unsigned long long>(m.peak_burst),
+                m.timestamp_jitter_ms,
                 m.average_age_ms,
                 m.max_age_ms,
                 m.max_pump_ms
@@ -114,7 +128,7 @@ void HudFrame::draw_diagnostics() const {
 }
 
 void HudFrame::draw_playback() const {
-    if (viewer.active && !chat.active && !video_preparing) {
+    if (viewer.active && !viewer.ui_shown && !chat.active && !video_preparing) {
         native::draw_replay_controls(
                 hud,
                 width,

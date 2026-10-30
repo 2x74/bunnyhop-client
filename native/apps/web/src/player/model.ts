@@ -24,7 +24,7 @@ import * as THREE from "three";
 import { playerUniforms, type PlayerUniforms } from "./materials";
 import { RunnerModel } from "./runner";
 import { BunnyModel } from "./bunny/model";
-import { getLoadout, getOutfit, onLoadout, onOutfit } from "./cosmetics";
+import { getHeldLoadout, getOutfit, onHeldLoadout, onOutfit } from "./cosmetics";
 import type { CosmeticLoadout } from "../loadout";
 import { followLoadout, knifeOf } from "../viewmodel/equip";
 import { equippedKnife, onKnife } from "../viewmodel/knives/equipped";
@@ -71,6 +71,16 @@ export interface PlayerPose {
   inspect?: number;
   /** The inspect key is held (hold-to-loop tricks keep looping while true). */
   inspectHeld?: boolean;
+  /**
+   * A shot from the gun in hand since the last setState (PlayerModel.setGun; the bunny kicks, flashes at the muzzle and
+   * throws a case: player/bunny/gun-hold.ts). Knife swings stay `attack`.
+   */
+  gunShot?: boolean;
+  /**
+   * The gun in hand started a reload since the last setState, `seconds` long (the core's reload time, or the gun's own
+   * for other players), or with `shell` one shell of a tube gun went in (`seconds` until the next one could).
+   */
+  gunReload?: { seconds: number; shell?: boolean; empty?: boolean } | null;
 }
 
 /** `model` values: a Settings choice, a CS:S team (uses the Settings skin for it), or a specific skin ("ct_gign"). */
@@ -176,7 +186,7 @@ export class PlayerModel {
       }),
     );
     this.unsub.push(
-      onLoadout((l) => {
+      onHeldLoadout((l) => {
         if (this.o.loadout === undefined && this.impl instanceof BunnyModel) this.impl.setLoadout(l);
       }),
     );
@@ -198,7 +208,7 @@ export class PlayerModel {
   }
 
   private bunny(): BunnyModel {
-    return new BunnyModel({ ...this.o, playerGlow: this.o.playerGlow === undefined ? getPlayerGlow() : this.o.playerGlow, outfit: this.o.outfit ?? getOutfit(), knife: this.knifeChoice(), loadout: this.o.loadout === undefined ? getLoadout() : this.o.loadout }, this.uniforms, readyAnimRig());
+    return new BunnyModel({ ...this.o, playerGlow: this.o.playerGlow === undefined ? getPlayerGlow() : this.o.playerGlow, outfit: this.o.outfit ?? getOutfit(), knife: this.knifeChoice(), loadout: this.o.loadout === undefined ? getHeldLoadout() : this.o.loadout }, this.uniforms, readyAnimRig());
   }
 
   get playerGlow(): PlayerGlow | null { return this.o.playerGlow === undefined ? getPlayerGlow() : this.o.playerGlow; }
@@ -214,7 +224,7 @@ export class PlayerModel {
   setLoadout(l: CosmeticLoadout | null | undefined): void {
     this.o.loadout = l;
     if (!(this.impl instanceof BunnyModel)) return;
-    this.impl.setLoadout(l === undefined ? getLoadout() : l);
+    this.impl.setLoadout(l === undefined ? getHeldLoadout() : l);
     this.impl.setKnife(this.knifeChoice());
   }
 
@@ -258,6 +268,11 @@ export class PlayerModel {
   setGunSilencer(on: boolean): void {
     this.gunSilencer = on;
     if (this.impl instanceof BunnyModel) this.impl.setGunSilencer(on);
+  }
+
+  /** The bunny's gun muzzle in three.js world space as of the last update (false: no gun drawn, or another model). */
+  gunMuzzle(out: THREE.Vector3): boolean {
+    return this.impl instanceof BunnyModel && this.root.visible && this.impl.gunMuzzle(out);
   }
 
   /** Bunny: switch to the CS:S animations once they're loaded (fetched once this model is animated). */

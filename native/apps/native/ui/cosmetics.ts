@@ -15,22 +15,57 @@ import {
   onOutfit,
   onLoadout,
   onGhostCosmetics,
+  getKnifePool,
+  setKnifePool,
 } from "../../web/src/player/cosmetics";
-import { loadoutFor, packLoadout } from "../../web/src/loadout";
+import { hairHex, loadoutFor, packLoadout } from "../../web/src/loadout";
 import { h } from "../../web/src/ui/dom";
 import { send } from "./bridge";
 export interface CosmeticApi {
   myCosmetics(): Promise<{ choice: CosmeticChoice; unlocked: string[] }>;
   saveCosmetics(patch: Partial<CosmeticChoice>): Promise<CosmeticChoice>;
 }
-export class NativeCosmetics {
-  choice: CosmeticChoice = {
-    ...DEFAULT_COSMETICS,
-    ...getLoadout(),
+/** The equipped look as a saved choice: the loadout carries a wig's hair colour as a number, the account as "#rrggbb". */
+function localChoice(base: CosmeticChoice): CosmeticChoice {
+  const loadout = getLoadout();
+  return {
+    ...base,
+    ...loadout,
+    hairColor: loadout.hairColor === undefined ? base.hairColor : hairHex(loadout.hairColor),
     outfit: getOutfit(),
     ghost: getGhostCosmetics().ghostId,
     trail: getGhostCosmetics().trailId,
+    knifePool: getKnifePool(),
   };
+}
+
+// The knife pool's pick, where the website keeps it (player/cosmetics.ts PICK_KEY). The game moves it on at a map load
+// or a restart and reports it here, so it carries over to the next session as on the website.
+export const KNIFE_PICK_KEY = "bunnyhop:knife-pool-pick";
+
+export function storedKnifePick(): number {
+  try {
+    const pick = Number(localStorage.getItem(KNIFE_PICK_KEY) ?? "-1");
+    return Number.isInteger(pick) && pick >= 0 ? pick : -1;
+  } catch {
+    return -1;
+  }
+}
+
+/** The game's pick (onKnifePick): saved, then the held loadout's listeners hear of it (rooms show the knife). */
+export function setKnifePick(value: unknown): void {
+  if (!Number.isInteger(value) || Number(value) < 0 || Number(value) > 7) return;
+  try {
+    localStorage.setItem(KNIFE_PICK_KEY, String(value));
+  } catch {
+    return;
+  }
+  // Setting the same pool again re-reads the pick and tells the held loadout's listeners when it changed.
+  setKnifePool(getKnifePool());
+}
+
+export class NativeCosmetics {
+  choice: CosmeticChoice = localChoice({ ...DEFAULT_COSMETICS });
   unlocked = new Set(COSMETICS.filter((c) => isUnlocked(c, 1, [])).map((c) => c.id));
   online = false;
   status = "";
@@ -52,6 +87,7 @@ export class NativeCosmetics {
     this.syncing = true;
     try {
       setOutfit(this.choice.outfit);
+      setKnifePool(this.choice.knifePool ?? null);
       setLoadout(loadoutFor(this.choice, getLoadout().crown ?? null));
       setGhostCosmetics(this.choice.ghost, this.choice.trail);
     } finally {
@@ -61,13 +97,7 @@ export class NativeCosmetics {
   observeLocal(): void {
     if (this.syncing) return;
     this.epoch++;
-    this.choice = {
-      ...this.choice,
-      ...getLoadout(),
-      outfit: getOutfit(),
-      ghost: getGhostCosmetics().ghostId,
-      trail: getGhostCosmetics().trailId,
-    };
+    this.choice = localChoice(this.choice);
     this.changed();
   }
   async refresh(): Promise<void> {
@@ -118,32 +148,44 @@ export class NativeCosmetics {
   }
 }
 export const cosmetics = new NativeCosmetics();
+let sentKnifePool = "";
+
+/** What the game shows: the equipped look, the knife pool and its pick (the game holds the pick, knife_pool.hpp). */
+function sendCosmetics(): void {
+  const knifePool = getKnifePool();
+  sentKnifePool = JSON.stringify(knifePool);
+  send({
+    type: "cosmetics",
+    outfit: getOutfit(),
+    packedLoadout: packLoadout(getLoadout()),
+    ghostId: getGhostCosmetics().ghostId,
+    trailId: getGhostCosmetics().trailId,
+    playerGlow: getPlayerGlow(),
+    knifePool,
+    knifePick: storedKnifePick(),
+  });
+}
+
+/**
+ * The website announces a held knife that changes, not a pool edit that keeps the same one in hand. Pool edits come from
+ * the Loadout's buttons and the account, so a click or an account refresh that changed the saved pool sends it.
+ */
+function sendChangedKnifePool(): void {
+  if (JSON.stringify(getKnifePool()) !== sentKnifePool) sendCosmetics();
+}
+
 export function initCosmetics(): void {
   installGlowSettings();
   const notify = () => {
     cosmetics.observeLocal();
-    send({
-      type: "cosmetics",
-      outfit: getOutfit(),
-      packedLoadout: packLoadout(getLoadout()),
-      ghostId: getGhostCosmetics().ghostId,
-      trailId: getGhostCosmetics().trailId,
-      playerGlow: getPlayerGlow(),
-    });
+    sendCosmetics();
   };
   onOutfit(notify);
   onLoadout(notify);
   onGhostCosmetics(notify);
-  onPlayerGlow(() =>
-    send({
-      type: "cosmetics",
-      outfit: getOutfit(),
-      packedLoadout: packLoadout(getLoadout()),
-      ghostId: getGhostCosmetics().ghostId,
-      trailId: getGhostCosmetics().trailId,
-      playerGlow: getPlayerGlow(),
-    }),
-  );
+  onPlayerGlow(sendCosmetics);
+  document.addEventListener("click", sendChangedKnifePool);
+  cosmetics.subscribe(sendChangedKnifePool);
   notify();
   addEventListener("bunnyhop:account", () => {
     void cosmetics.refresh();

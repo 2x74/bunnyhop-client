@@ -19,11 +19,13 @@ class MenuWebView;
 class MenuBackdrop;
 struct ReplayPlayer;
 struct Input;
-struct DownloadedMap;
+struct MapDownloadResult;
 template <class T>
 class MapJobs;
 
 int run_presentation_smoke(const Options &opt, SDL_Window *window, Gl &gl, GameSession &game, NativeHud &hud);
+// Replays a recorded room session (DIR/room.jsonl) and saves the frames in DIR/shots.json.
+int run_room_smoke(const Options &opt, SDL_Window *window, Gl &gl, GameSession &game, NativeHud &hud);
 
 struct VideoSmokeState {
     const Options &opt;
@@ -37,16 +39,16 @@ struct VideoSmokeState {
 
 class VideoSmoke : private VideoSmokeState {
 public:
-    VideoSmoke(VideoSmokeState state, std::function<void()> refresh_playback_pose);
+    explicit VideoSmoke(VideoSmokeState state);
     void begin();
     void frame(bool &running);
 
 private:
-    std::function<void()> refresh_playback_pose_;
     int video_smoke_stage = 0;
     std::string video_smoke_encoder;
     std::chrono::steady_clock::time_point video_smoke_started;
     void check_restored() const;
+    void request_music();
 };
 
 class MenuSmoke {
@@ -64,7 +66,7 @@ public:
         const std::string &backdrop_png;
         const bool &gameplay_backdrop_due;
         const bool &menu_ready;
-        const MapJobs<DownloadedMap> &download;
+        const MapJobs<MapDownloadResult> &download;
         const std::string &error;
         bool &running;
     };
@@ -82,6 +84,8 @@ public:
 private:
     const Options &opt;
     std::optional<Context> context_;
+    bool map_requested = false;
+    void request_map();
     void capture_images();
     void request();
 };

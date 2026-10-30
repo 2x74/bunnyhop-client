@@ -60,20 +60,59 @@ gh release upload v0.0.1 artifacts/windows/*.zip artifacts/windows/*.json --repo
 
 Pushing the release tag already starts a run; manual dispatch is for an intentional rebuild, not a second required step. The existing verified local macOS asset is retained when attaching Linux/Windows results. Platform builds are targets until their hosted jobs pass; packaging CI does not establish physical input/GPU correctness.
 
-# Optional signed package downloads
+# Updates
 
-Settings → Updates integrates signed release checking, explicit download, cancellation and revealing the verified package folder. `update.ts` remains available as a standalone CLI. `release-keys.json` deliberately has no pinned keys or manifest URL, so both checking and downloading fail closed. Activation requires reviewed release public keys, `manifestUrl` and allowed `downloadOrigins`, embedded at build time through CMake's `BUNNYHOP_UPDATE_TRUST` file. No signing secret is needed for manual unsigned releases. Do not generate a transient release key and silently trust it.
+Settings → Updates checks the update channel, downloads the package for this platform and installs it in place.
+`release-keys.json` pins the release key (`native-k8plus-2026-10`), the channel URL and the hosts a download may use:
 
-With an already configured Ed25519 private-key file, an operator can create a signed envelope for package reports; the tool does not publish it:
+- `manifestUrl`: `update-manifest.json` on the `native-update-channel` branch, read through raw.githubusercontent.com.
+  GitHub's `/releases/latest/` skips prereleases, and every native release is a prerelease, so the channel is a file
+  the signer rewrites instead.
+- `downloadOrigins`: raw.githubusercontent.com, github.com and release-assets.githubusercontent.com (where GitHub
+  redirects release downloads). Every redirect hop must stay on these.
+
+The private key lives on the signing server only. CI never signs and needs no secret.
+
+## Signing releases
+
+`sign-release.ts --pending` runs from a timer on the signing server. For every published release from 0.6.2 on that
+has the three platform archives and their package reports but no `update-manifest.json`, it downloads them, checks
+each archive's size and SHA-256 against its report and the report's build identity, signs a manifest (version, notes
+from the release body, and per platform the download URL, size, SHA-256, build and verifier) and attaches it to the
+release. It then points the channel at the newest signed release and re-signs it when fewer than 10 days of its 30-day
+validity remain. A release that is still missing files is skipped until the next run. Without `--upload` it only
+prints what it would do.
 
 ```sh
-bun apps/native/packaging/release.ts --report PACKAGE.json --url-base https://downloads.bunnyhop.lol/native/VERSION/ --key EXISTING_PRIVATE_KEY_FILE --key-id reviewed-release-key --out NEW-release.json
-bun apps/native/packaging/update.ts --manifest https://downloads.bunnyhop.lol/native/release.json --keys REVIEWED_PUBLIC_KEYS.json --current CURRENT_BUILD
-# Only after explicit user confirmation:
-bun apps/native/packaging/update.ts --manifest HTTPS_MANIFEST --keys REVIEWED_PUBLIC_KEYS.json --download USER_DOWNLOAD_DIRECTORY --confirm
+bun apps/native/packaging/sign-release.ts --pending --upload --repo 2x74/bunnyhop-client \
+  --key ~/services/bunnyhop-native-updates/keys/release-ed25519.pem --key-id native-k8plus-2026-10
 ```
 
-The native client and CLI verify Ed25519 signatures before using manifest metadata, enforce expiry/platform/URL/size limits, restrict every redirect to pinned HTTPS origins, and verify artifact SHA-256/byte count. They refuse destination replacement. Neither extracts, executes, or installs downloaded files; the user closes the game and explicitly opens/installs a verified package. Tests reject key/signature/content tampering, expired manifests and unsafe paths/origins; CLI transport tests also exercise redirect escapes and corrupt downloads. Production native downloads require qualification against a configured signed release.
+It needs `gh` signed in with access to the repository, takes a lock so overlapping runs exit, and refuses a key file
+others can read or a key that isn't the one pinned under `--key-id`. To sign files already on disk instead:
+
+```sh
+bun apps/native/packaging/sign-release.ts --local DIR --tag vX.Y.Z --repo 2x74/bunnyhop-client \
+  --key PEM --key-id native-k8plus-2026-10 --out update-manifest.json
+```
+
+## Installing in place
+
+The client unpacks the verified archive into `.bunnyhop-update` next to the install (beside the `.app` on macOS,
+inside the game folder on Windows and Linux), recomputes the unpacked build's identity and, on macOS, checks its code
+signature. "Restart to update" waits until no run is in progress and no upload is pending, then quits and starts
+its own program as `--finish-update PLAN`. That helper waits for the game to close, renames each replaced entry to
+`NAME.update-old`, moves the new one in and starts the new version. If a rename fails, or the new version exits with
+an error within 20 seconds, every rename is undone and the old version starts again. The game data folder is never
+part of the swap; an install whose data folder sits inside a replaced entry falls back to a manual install.
+
+Copies that can't replace themselves (development builds, a translocated macOS app, an AppImage, a read-only
+folder) save the verified package in the updates folder for a manual install, as before. `update.ts` remains a
+command-line check and download.
+
+`apps/native/tools/update-e2e.ts` runs the whole path on macOS against a loopback server and a throwaway key. Build the
+old package from a binary configured with `-DBUNNYHOP_UPDATE_TEST_HOOKS=ON` and package it with
+`--update-test-hooks`; such packages are never release-eligible.
 
 # Linux tester handoff
 

@@ -104,7 +104,7 @@ async function firstPerson(): Promise<void> {
   const zoom = Number(q.get("zoom") ?? 1), cx = Number(q.get("cx") ?? 0.5), cy = Number(q.get("cy") ?? 0.5);
   if (fin) {
     setFinishUniforms(vm.uniforms, fin);
-    vm.mesh.material = solidMaterial(vm.uniforms, lookOf(fin, null));
+    vm.mesh.material = solidMaterial(vm.uniforms, lookOf(fin, null, true));
   }
   const specs = (q.get("cells") ?? `${q.get("knife") ?? "karrotbit"}:right:idle,${q.get("knife") ?? "karrotbit"}:left:idle`).split(",");
   // Dev tuning: &place=ox,oy,oz,rx,ry,rz (knife frame in the fist), &arm=f,l,u,pitch,yaw,roll, &wrist=p,y,r.
@@ -211,7 +211,7 @@ function turntable(): void {
   const u = playerUniforms();
   u.uAccent.value.set(0xffb43a);
   if (fin) setFinishUniforms(u, fin);
-  const mesh = new THREE.SkinnedMesh(geo, solidMaterial(u, fin ? lookOf(fin, null) : undefined));
+  const mesh = new THREE.SkinnedMesh(geo, solidMaterial(u, lookOf(fin, null, true)));
   mesh.bindMode = THREE.DetachedBindMode;
   mesh.bind(skeleton, new THREE.Matrix4());
   mesh.frustumCulled = false;

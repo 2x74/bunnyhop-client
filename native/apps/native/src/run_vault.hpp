@@ -4,6 +4,7 @@
 #include "nlohmann/json.hpp"
 #include "atomic_replace.hpp"
 #include "run_timing.hpp"
+#include "runner_view.hpp"
 #include <filesystem>
 #include <fstream>
 #include <vector>
@@ -129,7 +130,8 @@ public:
             return nullptr;
         const auto ms = time_ms ? int64_t(*time_ms) : score_ms(*time);
         if (ms <= 0) return nullptr;
-        return {{"schema", 2},
+        J clean = {
+                {"schema", 2},
                 {"map", map},
                 {"style", style},
                 {"track", unsigned(*track)},
@@ -143,7 +145,11 @@ public:
                 {"client", text(raw, "client", 32)},
                 {"localPb", raw.value("localPb", J(false)) == true},
                 {"eligible", raw.value("eligible", J(false)) == true},
-                {"verified", false}};
+                {"verified", false}
+        };
+        // The runner's shape, fit and FOV (runner_view.hpp), for watching the replay as it was played.
+        if (const auto view = read_runner_view(raw.value("view", J()))) clean["view"] = runner_view_json(*view);
+        return clean;
     }
 
     J read(const std::string &id) const {

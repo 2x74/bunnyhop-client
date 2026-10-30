@@ -85,8 +85,11 @@ int main(int argc, char **argv) {
             return replay_bytes;
         });
         nlohmann::json host = {{"playback", nlohmann::json::object()}};
-        native::render_playback_state(host, compare, info.at("settings").at("tickInterval"));
+        BhSnapshot shown{};
+        bh_snapshot(core.get(), &shown);
+        native::render_playback_state(host, compare, info.at("settings").at("tickInterval"), shown.player);
         if (host.at("playback").at("features").at(0) != "compare"
+            || !host.at("playback").at("compare").contains("delta")
             || host.at("playback").at("compare").at("kind") != "pb"
             || host.at("playback").at("compare").at("name") != "Your PB" || snapshot_bytes(core.get()) != before) {
             throw std::runtime_error("Compare contract mismatch");

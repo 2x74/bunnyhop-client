@@ -71,7 +71,7 @@ struct Fixture {
         std::filesystem::remove_all(directory, error);
     }
 
-    std::filesystem::path record(const char *name, bool timed, bool contribute) {
+    std::filesystem::path record(const char *name, bool timed, bool contribute, bool null_binds = false) {
         BhRunOptions options{};
         bh_default_run_options(&options);
         check(bh_run_configure(core.get(), &options, zones.data(), zones.size()), core.get());
@@ -80,6 +80,9 @@ struct Fixture {
         check(bh_record_begin(core.get(), "", "autohop", "test", 100), core.get());
         native::RecordingInput recording;
         check(recording.begin(core.get(), {300, 2.5}), core.get());
+        if (null_binds) {
+            check(recording.mark_null_binds(core.get()), core.get());
+        }
         native::Input input;
         input.set_angles(0, 0);
         native::InputTimeline timeline;
@@ -125,7 +128,7 @@ struct Fixture {
         BhState state{};
         check(bh_step_look_v2(core.get(), &command, &*look, &state), core.get());
         if (tick == 1) {
-            BhRecordOptionsV29 changed{1, sizeof(BhRecordOptionsV29), 301, 2.5, 0};
+            BhRecordOptionsV29 changed{1, sizeof(BhRecordOptionsV29), 301, 2.5, 0, 0};
             assert(!bh_record_options_v29(core.get(), &changed));
         }
     }
@@ -172,6 +175,17 @@ void test_recording_options_roundtrip() {
             assert(bool(raw.at(6) & BH_FLAG_TIMED_INPUT) == (timed && contribute));
         }
     }
+}
+
+// A run with null binds stays ranked, as on the website: only the header flag records them.
+void test_null_binds_recorded_in_header() {
+    Fixture fixture;
+    const auto plain = fixture.record("plain.bhr", true, true);
+    assert(!fixture.header(plain).contains("nullBinds"));
+    assert(!(decompress(plain).at(6) & BH_FLAG_NULL_BINDS));
+    const auto nulls = fixture.record("nulls.bhr", true, true, true);
+    assert(fixture.header(nulls).value("nullBinds", false));
+    assert(decompress(nulls).at(6) & BH_FLAG_NULL_BINDS);
 }
 
 void test_turn_settings_validation() {
@@ -497,12 +511,45 @@ void test_bonus_takeover_uses_normal_style() {
     assert(takeover.track == 1 && takeover.style == "autohop");
 }
 
+void test_invalid_start_point_preserves_default_spawn() {
+    Fixture fixture;
+    fixture.zones[0] = {0, 0, 0, {-100, -100, 64}, {5, 100, 200}};
+    BhRunOptions options{};
+    bh_default_run_options(&options);
+    check(bh_run_configure(fixture.core.get(), &options, fixture.zones.data(), fixture.zones.size()),
+          fixture.core.get());
+    check(bh_reset(fixture.core.get()), fixture.core.get());
+    BhState spawn{};
+    check(bh_state(fixture.core.get(), &spawn), fixture.core.get());
+    native::StartPoints points;
+    BhState obstructed = spawn;
+    obstructed.position[2] = 32;
+    points.save("fixture", 0, obstructed, 90, 20);
+    const auto restart = native::RestartPlacement::place(
+            fixture.core.get(), "fixture", 0, std::vector<BhZone>(fixture.zones.begin(), fixture.zones.end()), &points
+    );
+    assert(!restart.practice && !restart.pitch);
+    for (size_t axis = 0; axis < 3; ++axis) {
+        assert(restart.state.position[axis] == spawn.position[axis]);
+    }
+    const auto evidence = fixture.directory / "fallback.jsonl";
+    check(bh_record_begin(fixture.core.get(), native::data_location::utf8(evidence).c_str(), "autohop", "test", 100),
+          fixture.core.get());
+    check(bh_record_end(fixture.core.get()), fixture.core.get());
+    std::ifstream input(evidence);
+    Json header;
+    input >> header;
+    assert(header.at("spawn").is_null());
+}
+
 }  // namespace
 
 int main() {
     test_restart_placement_and_recorded_names();
+    test_invalid_start_point_preserves_default_spawn();
     test_replay_library_cache();
     test_recording_options_roundtrip();
+    test_null_binds_recorded_in_header();
     test_turn_settings_validation();
     test_practice_takeover();
     test_practice_rejection_replies();

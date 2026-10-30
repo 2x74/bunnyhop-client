@@ -17,7 +17,7 @@ struct DownloadedMap {
 // Byte budgets for one map download. The defaults are the gameplay limits; the
 // menu backdrop passes smaller ones so a background never fetches a huge map.
 struct DownloadLimits {
-    size_t bsp = size_t(512) * 1024 * 1024;
+    size_t bsp = size_t(768) * 1024 * 1024;
     size_t content_file = size_t(256) * 1024 * 1024;
     size_t content_total = size_t(1024) * 1024 * 1024;
 };
@@ -41,6 +41,14 @@ void download_classic_sounds(
         const std::filesystem::path &content_root, const std::filesystem::path &cache, const DownloadFetch &fetch = {}
 );
 bool valid_map_id(const std::string &id);
+// One HTTPS GET of at most `limit` bytes, for public content (sky packs). Throws DownloadNetworkError when the
+// network is unreachable and runtime_error for any other failure. Run on a worker thread.
+std::vector<uint8_t> fetch_https(
+        const std::string &url,
+        size_t limit,
+        const std::atomic_bool *cancel = nullptr,
+        const LoadProgressCallback &progress = {}
+);
 bool safe_content_path(const std::string &path);
 // Public, immutable game content only. Account cookies stay in the menu's web view.
 // Run on a worker thread; never call the native simulation or SDL from this callback.

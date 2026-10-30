@@ -1,6 +1,7 @@
 // Build-time only: compile the site's original meshes, material recipes and procedural pose clips.
 // Runtime gameplay uses C++/OpenGL and Rust; this compiler is never embedded in the application.
-import { mkdir, writeFile, rm, readFile } from "node:fs/promises";
+import { mkdir, writeFile, rm } from "node:fs/promises";
+import type * as THREE from "three";
 import { deflateSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
@@ -8,16 +9,13 @@ import { Builder } from "../../web/src/player/bunny/builder";
 import { concat, rig as bunnyRig } from "../../web/src/player/bunny/rig";
 import { buildBunnyGeometry } from "../../web/src/player/bunny/mesh";
 import { BunnyProcedural } from "../../web/src/player/bunny/procedural";
-import { COSMETICS } from "../../web/src/progression";
+import { COSMETICS, HAIR_HATS, LENGTH_HATS, HAIR_LENGTH } from "../../web/src/progression";
 import { COLOURWAYS } from "../../web/src/player/bunny/palettes";
-import {
-  HAT_FX_VERTEX_PARS,
-  HAT_FX_VERTEX_NORMAL,
-  HAT_FX_VERTEX_POSITION,
-  HAT_FX_FRAGMENT_PARS,
-  HAT_FX_FRAGMENT_SOLID,
-} from "../../web/src/player/hat-fx";
-import { hatGeometry } from "../../web/src/player/bunny/hats";
+import { hatGeometry, headwearKey } from "../../web/src/player/bunny/hats";
+import { hatFit } from "../../web/src/player/bunny/hat-fit";
+import { ensureHeadwear } from "../../web/src/player/hat-detail";
+import { bakeGunAO } from "../../web/src/viewmodel/guns/ao";
+import { writePlayerMaterials } from "./export-player-materials";
 import { crownGeometry } from "../../web/src/player/bunny/crown";
 import { vmRig } from "../../web/src/viewmodel/rig";
 import { VmProcedural, PROC_DURATION, type VmAction } from "../../web/src/viewmodel/procedural";
@@ -30,17 +28,24 @@ import { KNIVES } from "../../web/src/viewmodel/knives/index";
 import { gunFpCtx, gunRig } from "../../web/src/viewmodel/guns/rig";
 import { GunPoser } from "../../web/src/viewmodel/guns/pose";
 import { GUNS, gunById } from "../../web/src/viewmodel/guns/index";
-import { bunnyGunGeometry, bunnySilencerGeometry, worldGunGeometry } from "../../web/src/viewmodel/guns/meshes";
-import { FINISH_STYLE, GLOVE_STYLE, GLOVE_STYLE_IDS } from "../../web/src/loadout";
 import {
-  FINISH_CODE,
-  FRAGMENT_PARS,
-  VERTEX_PARS,
-  VERTEX_MAIN,
-  GLOVE_FRAGMENT_ALBEDO,
-  GLOVE_FRAGMENT_LIGHT,
-} from "../../web/src/viewmodel/finishes/shader";
+  bunnyGunGeometry,
+  bunnyHold,
+  bunnySilencerGeometry,
+  worldGunGeometry,
+} from "../../web/src/viewmodel/guns/meshes";
+import { fistFrames } from "../../web/src/player/bunny/gun-hold";
+import { holdData } from "./gun-hold-data";
+import { FINISH_STYLE, GLOVE_STYLE, GLOVE_STYLE_IDS, HAIR_DEFAULT } from "../../web/src/loadout";
+import { FINISH_CODE } from "../../web/src/viewmodel/finishes/shader";
+import { clampFingers } from "../../web/src/viewmodel/fingers";
+import { WHIRL_FLICK } from "../../web/src/viewmodel/knives/whirligig";
+// The knives' wall-clock motion (the bayonets' idle sway, the Whirligig's thumb flicks) reads performance.now(). Freeze
+// it so the baked clips don't depend on when they were built; native adds the spinner's flicks at runtime.
+Object.defineProperty(performance, "now", { value: () => 0, configurable: true });
 const directory = resolve(process.argv[2] ?? "target/native-assets");
+// Floats per vertex: position 3, normal 3, partColor 3, skinIndex 4, skinWeight 4, accent 1, finishUV 4, headwear 1.
+const STRIDE = 23;
 const pieces: Buffer[] = [];
 let byteOffset = 0;
 const put = (data: Float32Array) => {
@@ -69,7 +74,8 @@ function geometry(name: string, g: any) {
     a = g.getAttribute("accent"),
     ids = g.getAttribute("skinIndex"),
     weights = g.getAttribute("skinWeight"),
-    finish = g.getAttribute("finishUV");
+    finish = g.getAttribute("finishUV"),
+    headwear = g.getAttribute("headwear");
   // Body meshes are weapon-free: selected TP weapons render as separate parts.
   if (name.startsWith("body:")) {
     const knifeBone = bunnyRig().index("bunny.Knife");
@@ -78,9 +84,9 @@ function geometry(name: string, g: any) {
         if (ids.array[i * 4 + j] === knifeBone && weights.array[i * 4 + j] > 0)
           throw new Error("Embedded default knife in body: " + name);
   }
-  const vertices = new Float32Array(p.count * 22);
+  const vertices = new Float32Array(p.count * STRIDE);
   for (let i = 0; i < p.count; i++) {
-    const at = i * 22;
+    const at = i * STRIDE;
     vertices.set(
       [p.getX(i), p.getY(i), p.getZ(i), n.getX(i), n.getY(i), n.getZ(i), c.getX(i), c.getY(i), c.getZ(i)],
       at,
@@ -91,19 +97,20 @@ function geometry(name: string, g: any) {
       vertices[at + 18 + j] = finish?.array[i * 4 + j] ?? 0;
     }
     vertices[at + 17] = a.getX(i);
+    vertices[at + 22] = headwear?.getX(i) ?? 0;
   }
   // Index identical vertices; source builders intentionally emit triangle soup.
   const unique: number[] = [],
     indices = new Uint32Array(p.count),
     seen = new Map<string, number>();
   for (let i = 0; i < p.count; i++) {
-    const view = new Uint8Array(vertices.buffer, i * 22 * 4, 22 * 4);
+    const view = new Uint8Array(vertices.buffer, i * STRIDE * 4, STRIDE * 4);
     const key = Buffer.from(view).toString("base64");
     let at = seen.get(key);
     if (at === undefined) {
-      at = unique.length / 22;
+      at = unique.length / STRIDE;
       seen.set(key, at);
-      for (let j = 0; j < 22; j++) unique.push(vertices[i * 22 + j]);
+      for (let j = 0; j < STRIDE; j++) unique.push(vertices[i * STRIDE + j]);
     }
     indices[i] = at;
   }
@@ -123,7 +130,7 @@ function geometry(name: string, g: any) {
     sum[2] += n.getZ(i);
     sums.set(key, sum);
   }
-  const smooth = new Float32Array((unique.length / 22) * 3);
+  const smooth = new Float32Array((unique.length / STRIDE) * 3);
   for (let i = 0; i < p.count; i++) {
     const normal = sums.get(keys[i])!;
     const length = Math.hypot(...normal) || 1;
@@ -135,15 +142,51 @@ function geometry(name: string, g: any) {
   meshes[name] = {
     glowOffset: putUnique(smooth),
     offset: putUnique(new Float32Array(unique)),
-    vertices: unique.length / 22,
+    vertices: unique.length / STRIDE,
     indexOffset: putUnique(new Float32Array(indices.buffer)),
     indices: indices.length,
   };
   g.dispose();
 }
+/**
+ * The website places a bunny's gun each frame with its two-handed hold (player/bunny/gun-hold.ts); its mesh is baked
+ * with the grip in the right fist's bind pose and skinned to its own two bones, the gun and the magazine. Native
+ * appends those two bones after the rig's (gun_hold.hpp writes them), so the mesh keeps both.
+ */
+function onGunBones(source: THREE.BufferGeometry): THREE.BufferGeometry {
+  const g = source.clone();
+  const first = bunnyRig().names.length;
+  const ids = g.getAttribute("skinIndex"),
+    weights = g.getAttribute("skinWeight");
+  for (let i = 0; i < ids.count; i++) {
+    ids.setXYZW(i, first + (ids.getX(i) === 1 ? 1 : 0), 0, 0, 0);
+    weights.setXYZW(i, 1, 0, 0, 0);
+  }
+  return g;
+}
 const vr = vmRig(),
   gr = gunRig(),
   br = bunnyRig();
+/**
+ * The website's last steps on a knife pose (viewmodel.ts pose): the extra bones and state.local follow the hold (the
+ * balisong's halves, the Whirligig's spinner, the Karrotbit's draw twirl), then no finger bends past its range.
+ */
+function finishPose(hold: KnifeHold, W: Float32Array): void {
+  hold.solve(W);
+  clampFingers(W, vr);
+}
+/**
+ * The Whirligig's spinner bone: its axle in bind space (the bone's local x through its origin) and the idle flicks, so
+ * native turns it on the wall clock like the website (knives/whirligig.ts whirlIdle).
+ */
+function spinner() {
+  const bone = vr.bone("Whirl_Spin"),
+    at = bone * 12;
+  const axis = [vr.bind[at], vr.bind[at + 4], vr.bind[at + 8]];
+  const pivot = [vr.bind[at + 3], vr.bind[at + 7], vr.bind[at + 11]];
+  const knives = KNIVES.filter((def) => def.joints?.includes("Whirl_Spin")).map((def) => def.id);
+  return { bone, axis, pivot, knives, ...WHIRL_FLICK };
+}
 for (const glove of GLOVE_STYLE_IDS) {
   const b = new Builder();
   buildFpHands(b, glove);
@@ -162,11 +205,14 @@ for (const def of GUNS) {
   const ctx = gunFpCtx(b);
   def.build(ctx);
   def.silencer?.build(ctx);
-  geometry(`fpgun:${def.id}`, b.geometry());
-  geometry(`tpgun:${def.id}`, bunnyGunGeometry(def, br.bone("R_Hand")).clone());
+  // The website bakes soft occlusion into the gun's recesses (guns/ao.ts); hands neither give nor take it.
+  const gun = b.geometry();
+  bakeGunAO(gun);
+  geometry(`fpgun:${def.id}`, gun);
+  geometry(`tpgun:${def.id}`, onGunBones(bunnyGunGeometry(def)));
   geometry(`worldgun:${def.id}`, worldGunGeometry(def).clone());
-  const sil = bunnySilencerGeometry(def, br.bone("R_Hand"));
-  if (sil) geometry(`tpsilencer:${def.id}`, sil.clone());
+  const sil = bunnySilencerGeometry(def);
+  if (sil) geometry(`tpsilencer:${def.id}`, onGunBones(sil));
 }
 for (const glove of GLOVE_STYLE_IDS) {
   for (const def of KNIVES) {
@@ -183,6 +229,7 @@ for (const glove of GLOVE_STYLE_IDS) {
         const t = Math.min(duration, f / 60);
         proc.pose(action, t, W);
         hold.apply(W, action, t, "procedural");
+        finishPose(hold, W);
         for (let i = 0; i < vr.names.length; i++) concat(W, i * 12, vr.inv, i * 12, S, i * 12);
         baked.set(S, f * S.length);
       }
@@ -200,6 +247,7 @@ for (const glove of GLOVE_STYLE_IDS) {
         hold.state.show = c.show?.(t) ?? 0;
         hold.apply(W, "idle", 0, "procedural");
         c.apply(W, t, { arm, knife: def, state: hold.state });
+        finishPose(hold, W);
         for (let i = 0; i < vr.names.length; i++) concat(W, i * 12, vr.inv, i * 12, S, i * 12);
         baked.set(S, f * S.length);
       }
@@ -274,28 +322,33 @@ for (const glove of GLOVE_STYLE_IDS) {
 for (const look of ["bunny", "tek", "plush", "bune"] as const)
   for (const body of look === "bunny" ? (["classic", "feminine"] as const) : (["classic"] as const))
     for (const glove of GLOVE_STYLE_IDS)
-      geometry(
-        `body:${look}:${body}:${glove}`,
-        buildBunnyGeometry({ ...KNIVES[0], build: () => {} }, glove, look, body),
-      );
-for (const tier of [1, 2, 3] as const) geometry(`crown:${tier}`, crownGeometry(tier).clone());
-for (const id of [
-  "hat-founder-crown",
-  "hat-tophat",
-  "hat-beanie",
-  "hat-gem-orbit",
-  "hat-halo",
-  "hat-circlet",
-  "hat-propeller",
-  "hat-capybara",
-  "hat-maxwell",
-  "hat-dealer-visor",
-  "hat-lucky-coins",
-  "hat-aurora",
-]) {
-  const g = hatGeometry(id);
-  if (g) geometry(id, g.clone());
+      for (const hood of look === "bunny" ? (["up", "down"] as const) : (["up"] as const))
+        geometry(
+          `body:${look}:${body}:${glove}${hood === "down" ? ":down" : ""}`,
+          buildBunnyGeometry({ ...KNIVES[0], build: () => {} }, glove, look, body, hood),
+        );
+const headwearMesh = (name: string, g: THREE.BufferGeometry) => {
+  const copy = g.clone();
+  ensureHeadwear(copy);
+  geometry(name, copy);
+};
+for (const tier of [1, 2, 3] as const) headwearMesh(`crown:${tier}`, crownGeometry(tier));
+const HAT_IDS = COSMETICS.filter((c) => c.slot === "hat").map((c) => c.id);
+const BODY_LOOKS = ["bunny", "tek", "plush", "bune"] as const;
+const hatMeshes: Record<string, Record<string, string>> = {};
+for (const id of HAT_IDS) {
+  hatMeshes[id] = {};
+  for (const look of BODY_LOOKS) {
+    const key = headwearKey(id, look);
+    const g = hatGeometry(key);
+    if (!g) continue;
+    if (!meshes[key]) headwearMesh(key, g);
+    hatMeshes[id][look] = key;
+  }
 }
+const hatFits = Object.fromEntries(
+  BODY_LOOKS.map((look) => [look, Object.fromEntries(["", ...HAT_IDS].map((id) => [id, hatFit(look, id || null)]))]),
+);
 {
   const clips = [];
   for (const action of ["idle", "run", "crouch", "air", "fall"])
@@ -371,8 +424,8 @@ await rm(resolve(directory, "viewmodels.bin"), { force: true });
 await writeFile(
   resolve(directory, "viewmodels.json"),
   JSON.stringify({
-    version: 2,
-    stride: 22,
+    version: 3,
+    stride: STRIDE,
     bytes: byteOffset,
     weapons: ids.map((id) => (id === "knife" ? id : (gunById(id)?.id ?? ""))),
     meshes,
@@ -393,8 +446,13 @@ await writeFile(
         [c.color, c.color2 ?? c.color],
       ]),
     ),
-    actorRig: { names: br.names, parent: Array.from(br.parent), bind: Array.from(br.bind) },
+    actorRig: { names: br.names, parent: Array.from(br.parent), bind: Array.from(br.bind), csBones: br.csBones },
+    gunHolds: Object.fromEntries(GUNS.map((def) => [def.id, holdData(bunnyHold(def))])),
+    fists: Object.fromEntries(Object.entries(fistFrames(br)).map(([key, m]) => [key, Array.from(m)])),
     outfits: COLOURWAYS,
+    hats: hatMeshes,
+    hatFits,
+    hair: { hats: HAIR_HATS, lengthHats: LENGTH_HATS, length: HAIR_LENGTH, defaultColor: HAIR_DEFAULT },
     gloves: GLOVE_STYLE,
     inspects: Object.fromEntries(
       KNIVES.map((def) => [
@@ -405,34 +463,34 @@ await writeFile(
           exit: c.exit,
           open: c.open,
           loop: c.loop,
+          cues: (c.cues ?? []).map((cue) => [cue.t, cue.type]),
         })),
       ]),
     ),
+    spinner: spinner(),
     finishes: Object.fromEntries(Object.entries(FINISH_STYLE).map(([id, spec]) => [id, FINISH_CODE[spec.kind]])),
   }),
 );
-const glsl = (source: string, stage: "vertex" | "fragment") =>
-  source
-    .replace(/\battribute\b/g, "in")
-    .replace(/\bvarying\b/g, stage === "vertex" ? "out" : "in")
-    .replace(/\btexture2D\b/g, "texture");
-await writeFile(resolve(directory, "cosmetic-vertex-pars.glsl"), glsl(VERTEX_PARS, "vertex"));
-await writeFile(resolve(directory, "cosmetic-vertex-main.glsl"), glsl(VERTEX_MAIN, "vertex"));
-await writeFile(resolve(directory, "cosmetic-fragment-pars.glsl"), glsl(FRAGMENT_PARS, "fragment"));
-await writeFile(resolve(directory, "cosmetic-fragment-albedo.glsl"), glsl(GLOVE_FRAGMENT_ALBEDO, "fragment"));
-await writeFile(resolve(directory, "cosmetic-fragment-light.glsl"), glsl(GLOVE_FRAGMENT_LIGHT, "fragment"));
+await writePlayerMaterials(directory);
+// Shader pieces older builds compiled from; the player materials above replace them.
+for (const name of [
+  "cosmetic-vertex-pars",
+  "cosmetic-vertex-main",
+  "cosmetic-fragment-pars",
+  "cosmetic-fragment-albedo",
+  "cosmetic-fragment-light",
+  "hat-vertex-pars",
+  "hat-vertex-normal",
+  "hat-vertex-position",
+  "hat-fragment-pars",
+  "hat-fragment-solid",
+  "glow-noise",
+  "glow-fragment",
+])
+  await rm(resolve(directory, name + ".glsl"), { force: true });
 console.log(
   `native original meshes/poses/cosmetics: ${(byteOffset / 1048576).toFixed(1)} MiB native data, ${(compressed.byteLength / 1048576).toFixed(1)} MiB packaged -> ${directory}`,
 );
-
-for (const [name, source, stage] of [
-  ["hat-vertex-pars", HAT_FX_VERTEX_PARS, "vertex"],
-  ["hat-vertex-normal", HAT_FX_VERTEX_NORMAL, "vertex"],
-  ["hat-vertex-position", HAT_FX_VERTEX_POSITION, "vertex"],
-  ["hat-fragment-pars", HAT_FX_FRAGMENT_PARS, "fragment"],
-  ["hat-fragment-solid", HAT_FX_FRAGMENT_SOLID, "fragment"],
-] as const)
-  await writeFile(resolve(directory, name + ".glsl"), glsl(source, stage));
 
 // Hosted actor clips share the pinned verifier decoder; package no procedural-only release.
 const actorExport = Bun.spawnSync(
@@ -447,19 +505,14 @@ const gestureExport = Bun.spawnSync([process.execPath, resolve(import.meta.dir, 
 });
 if (gestureExport.exitCode) throw new Error("Third-person inspect export failed");
 
+const avatarExport = Bun.spawnSync([process.execPath, resolve(import.meta.dir, "export-avatar.ts"), directory], {
+  stdout: "inherit",
+  stderr: "inherit",
+});
+if (avatarExport.exitCode) throw new Error("Avatar pose export failed");
+
 const runnerExport = Bun.spawnSync([process.execPath, resolve(import.meta.dir, "export-runner.ts"), directory], {
   stdout: "inherit",
   stderr: "inherit",
 });
 if (runnerExport.exitCode) throw new Error("Original runner export failed");
-
-// Extract the upstream shader literals without importing its browser-owned materials module.
-const glowSource = await readFile(resolve(import.meta.dir, "../../web/src/player/glow.ts"), "utf8");
-for (const [name, constant] of [
-  ["glow-noise", "auraNoise"],
-  ["glow-fragment", "auraFragment"],
-]) {
-  const source = glowSource.match(new RegExp(`const ${constant} = /\\* glsl \\*/ \x60([\\s\\S]*?)\x60;`))?.[1];
-  if (!source) throw new Error(`Missing upstream glow shader ${constant}`);
-  await writeFile(resolve(directory, name + ".glsl"), source);
-}

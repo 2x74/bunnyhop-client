@@ -1,5 +1,88 @@
 # Changelog
 
+## v0.6.2 — Native
+
+This is the last version you need to download by hand: from here on, Settings → Updates updates the game for you.
+
+**HUD and menus**
+- The HUD and menus are back to the v0.5.1 look, and nothing overlaps any more. The FPS counter, IN START, run
+  stats and key labels each keep their own place at every screen size and HUD scale.
+- New HUD layout editor: press F2, or Settings → HUD → Edit layout. Drag and resize anything, snap to a grid or the
+  centre lines, nudge with the arrow keys, hide elements, pick a preset (Classic, Minimal, Streamer), and copy or
+  paste a layout code that also works on the website.
+- The strafe trainer has the website's three styles: Classic, Detailed and Minimal.
+- SSJ, jump stats and the strafe trainer show the same numbers and colours as the website.
+- The crosshair is drawn in whole pixels at the website's size, so its lines match on every screen, including
+  borderless on Windows.
+- Settings → Paint: colours, sizes, Clear paint and the paint keys, which now save. Holding the paint key places
+  marks smoothly, and marks have soft edges.
+
+**Graphics**
+- Enhanced and Cinematic looks, with bloom, haze, sun shafts, contact shading, sun shadows and edge smoothing.
+- Custom skies, as on the website: the seven built-in skies, Poly Haven links, .hdr files and 2:1 panoramas, a skies
+  folder in your game data, and sky rotation, brightness and lighting.
+- The v0.0.29 bunny, gloves, sleeves and guns, the wigs, the Half Oni Mask and the metal knife finishes. Other
+  players and replays wear their own loadout.
+- Water no longer shows as a pale slab. In the Source look it refracts and, with Water reflections on, reflects the
+  map and players. Skybox seams and pale halos around leaves are gone.
+- Ghosts, trails and the route guide work like the website's.
+
+**Cosmetics**
+- Knife pool, as on the website: up to 8 knives with their finishes that swap each map or each restart, in order or
+  at random. Set it up in Loadout → Knife; it saves to your account, and other players and your replays see the knife
+  you're holding.
+- New knife: Whirligig, with its spinner, its draw and three inspects (Flick, Pinwheel, Backspin).
+- The rebuilt Karrotbit, with its ring twirl on the draw.
+- Ponytails go up to 300% long.
+- Knife inspects make their flick, spin and catch sounds, and the Bunnyfly's blade shows in first person.
+
+**Loadout**
+- Knife pool, as on the website: up to 8 knives that swap on each map or each restart, in order or at random. Saved
+  to your account, and other players see the knife you're holding.
+- The Whirligig knife, with its spinner, Flick, Pinwheel and Backspin inspects. The Karrotbit spin draw. Ponytails up
+  to 300% long.
+- Knife inspects make the website's flick, spin and catch sounds.
+
+**Display and input**
+- Exclusive fullscreen: pick the monitor, resolution and refresh rate, then keep it or it switches back after 10
+  seconds. True 4:3 stretched or black bars.
+- Windows: Low latency mode with NVIDIA Reflex (Off, On, On + Boost) and the Reflex flash indicator.
+- Steadier frame pacing at an FPS limit, and keys no longer stick after the menu or chat takes focus.
+- macOS and Linux: optional direct mouse input (Settings → Mouse). Show input stats says which one you're using.
+
+**Multiplayer**
+- The Tab scoreboard matches the website: style names, running and finished times, a HOST tag, and spectators
+  listed under the table.
+- Chat shows the website's join, leave, record and host lines. Chat is now a key you can rebind (Y and U by default).
+- Name tags above players show their name colour, badges and time, and fade with distance and behind walls.
+- Other players hold guns with both hands, with kick, reloads, muzzle flashes and tracers, and move smoothly at any
+  frame rate.
+
+**Replays and video**
+- The replay viewer keeps playing while it's open, with a smooth camera, an orbit camera, loops (L), next jump or
+  split (J, N), Go to (G), and the runner's own screen shape and FOV (R).
+- Video export runs in the background without freezing the game: the website's presets, motion blur, 4K and 8K, up
+  to 240 fps, H.264, HEVC and AV1, ProRes, DNxHR and lossless, hardware encoding, a queue, and export straight
+  from the Replays list. It needs FFmpeg installed.
+
+**Ranked**
+- Physics v20 for v0.0.30's new maps and their mechanics.
+- Crouch-cancelling or landing from a teleport onto a floor no longer costs a tick of friction: you jump on the same
+  tick, like bhoptimer servers.
+- `!showtriggers` shows the scripted ingredients and gates on bhop_cooksassistant.
+- The Segmented style (`!seg`), as on the website: press C to save and X to load during the run. The time and the
+  replay keep only the path you finished on, and Segmented has its own boards.
+- Runs with null binds count for ranked, as on the website.
+- Leaderboard hover cards show your FPS, polling rate, sensitivity and native version.
+- `!practice off` clears the map's practice spawns, as on the website.
+- Fixed runs being rejected on maps where a texture changes the floor's friction, such as bhop_cyx_jump.
+
+**Account and app**
+- Edit avatar opens an editor in the game and saves to the account you're signed in to.
+- Settings → Updates: Update, then Restart to update. Your settings, replays and maps are kept.
+- Maps no longer get stuck downloading. A failed download shows an error, and Retry works.
+- Windows: the zip shows its files in Explorer before you extract it.
+
 ## v0.6.1 — Native
 
 **Fixes**

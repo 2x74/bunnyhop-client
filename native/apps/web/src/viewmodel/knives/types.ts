@@ -23,6 +23,26 @@ export type { Rarity };
 /** finishUV.z part ids (player/bunny/builder.ts): which surfaces a finish may paint. */
 export const PART = { none: 0, blade: 1, guard: 2, grip: 3, glove: 4, cuff: 5 } as const;
 
+/**
+ * Knife hardware materials (Paint.mat, ctx.ts fixed(colour, mat)): how the first-person viewmodel shades a part on
+ * Source and up (finishes/detail.ts). Stored as finishUV.z = part + mat / 16, so keep mat <= 6 (the part still rounds
+ * the same). A finish still paints the blade over its material.
+ */
+export const KMAT = {
+  none: 0,
+  /** Polished bare metal (steel, silver, gold): a studio (or the scene, Enhanced) reflection tinted by the colour. */
+  polished: 1,
+  /** Satin / blackened metal (gunmetal guards): blurred reflection, broad highlight. */
+  satin: 2,
+  /** Lacquer / enamel / hard candy: the colour under a glossy clear coat. */
+  lacquer: 3,
+  /** Grip: cord wrap, rubber, ray skin: matte, a fine weave in relief. */
+  grip: 4,
+  /** Vegetable skin (carrot, daikon, leaves): a waxy sheen and fine growth lines. */
+  veg: 5,
+} as const;
+export type KMat = (typeof KMAT)[keyof typeof KMAT];
+
 /** Finger joint curls in degrees (proximal, middle, distal) + an optional spread about the palm normal at the root. */
 export interface Curl {
   /** Curl per joint toward the palm (thumb: across the palm). */

@@ -7,6 +7,8 @@ import { act, age, api, badge, glyph, h, may, n, playerLink, poll, setKeys, step
 import { hopArc, stamp } from "./ui";
 import { mapArt } from "./art";
 import { ring } from "./charts";
+import { unread } from "./seen";
+import { onLive } from "./watch";
 
 interface QueueData {
   now: number;
@@ -114,7 +116,7 @@ export const queueView: View = async (root) => {
           (d.tickets?.items ?? []).map((t) =>
             h(
               "div",
-              { class: "q-row row-go", "data-key": `t:${t.id}`, "data-href": `#/feedback/${encodeURIComponent(t.id)}`, tabindex: "-1" },
+              { class: `q-row row-go${unread("report", t.id, t.player_reply_at ?? t.created_at) ? " unread" : ""}`, "data-key": `t:${t.id}`, "data-href": `#/feedback/${encodeURIComponent(t.id)}`, tabindex: "-1" },
               h("span", { class: "q-kind" }, FB_WORD[t.category] ?? t.category),
               h("span", { class: "q-who" }, t.user_id ? playerLink(t.user_id, t.user_name) : h("span", { class: "faint" }, "anonymous")),
               t.map ? mapArt(t.map) : h("span"),
@@ -205,23 +207,35 @@ export const queueView: View = async (root) => {
   paint();
   setQueueBadge(total(data));
   const rows = () => [...body.querySelectorAll<HTMLElement>(".q-row")];
-  setKeys({
-    j: () => void stepRows(rows(), 1),
-    k: () => void stepRows(rows(), -1),
-    Enter: () => {
-      const r = body.querySelector<HTMLElement>(".q-row.cur");
-      if (r?.dataset.href) location.hash = r.dataset.href;
+  setKeys(
+    {
+      j: () => void stepRows(rows(), 1),
+      k: () => void stepRows(rows(), -1),
+      Enter: () => {
+        const r = body.querySelector<HTMLElement>(".q-row.cur");
+        if (r?.dataset.href) location.hash = r.dataset.href;
+      },
     },
-  });
-  return poll(async () => {
+    [
+      ["j / k", "Next and previous item"],
+      ["Enter", "Open it"],
+    ],
+  );
+  // Fresh when the live stamp moves (watch.ts), and once a minute for the kinds it doesn't watch (names, suggestions,
+  // verify errors). Not while a verdict is stamping or a row has the focus.
+  const tick = async () => {
     if (body.querySelector(".stamped") || document.activeElement?.closest(".q-row")) return;
     const next = await api<QueueData>("/admin/queue");
+    if (!body.isConnected) return;
     const was = total(data);
     data = next;
     setQueueBadge(total(data));
     if (was && !total(data) && hadItems) return (paintSub(), calm(true));
     hadItems ||= total(data) > 0;
     paint();
-  }, 60_000);
+  };
+  const stop = poll(tick, 60_000);
+  const unlive = onLive((_s, _c, initial) => !initial && void tick().catch(() => undefined));
+  return () => (stop(), unlive());
 };
 

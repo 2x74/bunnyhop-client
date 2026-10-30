@@ -5,15 +5,22 @@
 // The silencer (physics v7): a short threaded barrel peeks out of the slide's nose; the can is a soft blueberry tube
 // with an oat-cream collar (eight flats, where the hand turns it) and nose cap, and one carrot-orange stripe along its
 // top so every turn of it reads. It screws onto the thread (guns/anim.ts silencer clip).
+//
+// Construction (gun polish, v0.0.29): painted cream slide and blueberry frame (polymer sheen), a steel barrel hood in
+// the ejection port and a steel extractor, a slide stop lever and pins on the frame, checkered grip ribs, a dark steel
+// magazine body, a trigger that swings back with the squeeze (Trig bone).
 
-import { fixed } from "../../knives/ctx";
 import { PART } from "../../knives/types";
 import type { KnifeCtx } from "../../knives/ctx";
-import { ball, box, dome, guard, lathe, rod, slab, type P2 } from "../shapes";
+import { ball, box, dome, groove, guard, lathe, pins, plate, slab, trigger, type P2 } from "../shapes";
+import { gunPaint as fixed } from "../material";
 import type { GunDef, SilencerSpec } from "../types";
 
 const SLIDE = fixed(0xd8d0bf), SLIDE_DARK = fixed(0xa79f8d), FRAME = fixed(0x343c50), FRAME_DARK = fixed(0x262c3c);
-const TAIL = fixed(0xf6f3ec), TAIL_SHADE = fixed(0xe2ddd2), BORE = fixed(0x14161a), DOT = fixed(0xffffff), ORANGE = fixed(0xff7a1a), STEEL = fixed(0x8b9099);
+const TAIL = fixed(0xf6f3ec), TAIL_SHADE = fixed(0xe2ddd2), BORE = fixed(0x14161a), DOT = fixed(0xffffff), ORANGE = fixed(0xff7a1a), STEEL = fixed(0x8b9099, "metal");
+const RIB = fixed(0x262c3c, "grip"), LEVER = fixed(0x22262f, "dark"), MAG = fixed(0x2e3440, "dark"), LINE = fixed(0x1c212d), LIP = fixed(0x5a6680);
+/** The trigger's pivot (top of its blade, gun-local). */
+const TRIGGER: [number, number, number] = [2.4, 0, -0.48];
 
 const RAKE = (15 * Math.PI) / 180;
 const UP: [number, number] = [Math.sin(RAKE), Math.cos(RAKE)];
@@ -79,6 +86,11 @@ function build(k: KnifeCtx): void {
   // Cocking grooves: square-cut little slabs (tiny enough that rounding them only costs triangles).
   if (fp) for (let i = 0; i < 4; i++) for (const y of [-1, 1]) box(k, [-0.1 + i * 0.2, y * 0.5, 0.85], [0.04, 0.02, 0.45], { paint: SLIDE_DARK, bone: "Slide", bevel: 0.01, round: 0 });
   box(k, [2.3, -0.2, 1.53], [0.6, 0.22, 0.03], { paint: SLIDE_DARK, bone: "Slide", bevel: 0.01 });
+  if (fp) {
+    // The barrel's hood in the port, the extractor on the right flank.
+    plate(k, [2.42, -0.18, 1.565], [0.4, 0.16, 0.012], { paint: STEEL });
+    plate(k, [1.75, -0.505, 1.2], [0.32, 0.012, 0.05], { paint: STEEL, bone: "Slide" });
+  }
   // Sights: rear with two dots, a white front dot.
   box(k, [-0.15, 0, 1.62], [0.13, 0.38, 0.1], { paint: FRAME_DARK, bone: "Slide" });
   if (fp) for (const y of [-0.22, 0.22]) dome(k, [-0.29, y, 1.64], [-1, 0, 0], 0.05, { paint: DOT, bone: "Slide", h: 0.02, sides: 6 });
@@ -98,17 +110,24 @@ function build(k: KnifeCtx): void {
   // --- Frame: smooth dust cover, rounded guard, the ribbed grip.
   slab(k, [[-0.45, 0.15], [5.25, 0.15], [5.35, -0.15], [4.8, -0.48], [2.0, -0.55], [0.6, -0.48], [-0.45, -0.2]], -0.46, 0.46, { paint: FRAME, part: PART.blade, round: 0.12 });
   guard(k, [[3.25, -0.48], [3.2, -1.42], [2.2, -1.58], [1.45, -1.3], [1.38, -0.78]], 0.13, { paint: FRAME, open: true });
-  rod(k, [2.4, 0, -0.48], [2.52, 0, -0.88], 0.075, { paint: ORANGE });
-  rod(k, [2.52, 0, -0.88], [2.42, 0, -1.16], 0.075, { paint: ORANGE });
+  trigger(k, TRIGGER, 0.68, { paint: ORANGE });
+  if (fp) {
+    // Left flank: the slide stop lever and its thumb tab; the takedown tab; pins through the frame.
+    plate(k, [1.0, 0.47, 0.02], [0.5, 0.025, 0.06], { paint: LEVER });
+    plate(k, [1.42, 0.49, -0.07], [0.09, 0.03, 0.1], { paint: LEVER });
+    for (const y of [-0.47, 0.47]) plate(k, [3.05, y, -0.2], [0.08, 0.02, 0.11], { paint: LEVER });
+    pins(k, [[1.95, -0.3], [-0.05, -0.34]], 0.47, 0.08, { paint: STEEL, h: 0.05 });
+    for (const y of [-0.46, 0.46]) groove(k, 3.45, 5.1, -0.14, y, { paint: LINE, lip: LIP });
+  }
   const b0 = BACK0;
   slab(k, [along(b0, 0, -0.15), along(b0, -0.05, 0.9), [1.28, -0.6], along(b0, 1.0, GRIP_DEPTH), along(b0, GRIP_LEN, GRIP_DEPTH - 0.05), along(b0, GRIP_LEN, 0.02), along(b0, 1.5, -0.05)], -0.56, 0.56, { paint: FRAME, part: PART.grip, round: 0.25, bevel: 0.14 });
   if (fp) for (let i = 0; i < 5; i++) for (const y of [-1, 1]) {
     const t = 0.95 + i * 0.5;
-    slab(k, [along(b0, t, 0.25), along(b0, t, GRIP_DEPTH - 0.25), along(b0, t + 0.18, GRIP_DEPTH - 0.27), along(b0, t + 0.18, 0.25)], y > 0 ? 0.54 : -0.58, y > 0 ? 0.58 : -0.54, { paint: FRAME_DARK, round: 0, bevel: 0.015 });
+    slab(k, [along(b0, t, 0.25), along(b0, t, GRIP_DEPTH - 0.25), along(b0, t + 0.18, GRIP_DEPTH - 0.27), along(b0, t + 0.18, 0.25)], y > 0 ? 0.54 : -0.58, y > 0 ? 0.58 : -0.54, { paint: RIB, round: 0, bevel: 0.015 });
   }
   slab(k, [[-0.4, 0.12], [-0.8, 0.06], [-0.82, -0.08], [-0.42, -0.1]], -0.36, 0.36, { paint: FRAME, round: 0.08 });
   // --- Magazine: the body inside the grip, a rounded base with a carrot-orange heel.
-  slab(k, [along(b0, 0.35, 0.3), along(b0, 0.35, GRIP_DEPTH - 0.4), along(b0, GRIP_LEN - 0.02, GRIP_DEPTH - 0.45), along(b0, GRIP_LEN - 0.02, 0.3)], -0.4, 0.4, { paint: FRAME_DARK, bone: "Mag", round: 0.08 });
+  slab(k, [along(b0, 0.35, 0.3), along(b0, 0.35, GRIP_DEPTH - 0.4), along(b0, GRIP_LEN - 0.02, GRIP_DEPTH - 0.45), along(b0, GRIP_LEN - 0.02, 0.3)], -0.4, 0.4, { paint: MAG, bone: "Mag", round: 0.08 });
   slab(k, [along(b0, GRIP_LEN - 0.05, -0.05), along(b0, GRIP_LEN - 0.05, GRIP_DEPTH), along(b0, GRIP_LEN + 0.25, GRIP_DEPTH - 0.1), along(b0, GRIP_LEN + 0.25, 0.02)], -0.58, 0.58, { paint: FRAME_DARK, bone: "Mag", round: 0.14, bevel: 0.1 });
   const h = along(b0, GRIP_LEN + 0.12, 0.05);
   box(k, [h[0], 0, h[1]], [0.14, 0.5, 0.12], { paint: ORANGE, bone: "Mag" });
@@ -150,8 +169,11 @@ export const cottontail: GunDef = {
     rack: { o: [0.25, 0.95, 0.75], up: [-1, 0, 0], fwd: [0, 0, 1] },
     tail: { o: [-1.0, 1.3, 1.0], up: [0, 0, 1], fwd: [1, 0, 0] },
   },
-  frame: { o: [18, -5.2, -3.65], a: [0, 6, -5] },
+  // 0.6 lower than v0.0.28 (-3.65) since the v0.0.29 default framing (viewmodel/defaults.ts) lifts the hands: the
+  // support cuff stays under the grip instead of standing up in front of the gloves.
+  frame: { o: [18, -5.2, -4.25], a: [0, 6, -5] },
   silencer,
+  trigger: TRIGGER,
   muzzle: [5.85, 0, 0.8],
   eject: { p: [2.3, -0.3, 1.55], dir: [-0.1, -0.85, 0.5] },
   shell: "pistol",

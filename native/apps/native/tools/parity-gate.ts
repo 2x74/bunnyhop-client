@@ -5,7 +5,13 @@ import { resolve, join } from "node:path";
 import { parseArgs } from "node:util";
 import { Core, DEFAULT_SETTINGS, setPosition, type PlayerState } from "../../web/src/core";
 import { setVelocity } from "../../web/src/sim";
-import { CANONICAL_WASM_SHA256, CANONICAL_WASM_BYTES, CANONICAL_WASM_URL, ensureCanonicalWasm } from "../ensure-wasm";
+import {
+  CANONICAL_WASM_SHA256,
+  CANONICAL_WASM_BYTES,
+  CANONICAL_WASM_URL,
+  CANONICAL_PHYSICS,
+  ensureCanonicalWasm,
+} from "../ensure-wasm";
 import { createFixtures, FIXTURE_SUITE, type Fixture } from "./parity-fixtures";
 // The data contract also runs under Node in the evidence collector. Dynamic import
 // keeps the native-only TypeScript mirror independent of the repository's .github tree.
@@ -180,7 +186,7 @@ export async function runGate(runner: string | string[], output: string, wasmPat
     wasmBytes: wasm.length,
     wasmUrl: CANONICAL_WASM_URL,
     runnerSha256: hash(readFileSync(typeof runner === "string" ? runner : runner[0])),
-    physics: 18,
+    physics: CANONICAL_PHYSICS,
     contrastPhysics: 16,
     ladderContrastPhysics: 17,
     comparedStates: 0,

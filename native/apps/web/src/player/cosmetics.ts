@@ -7,7 +7,8 @@
 // online); offline the choice is local only and limited to the free colours by the editor.
 
 import { cosmetic, DEFAULT_COSMETICS } from "../progression";
-import { cleanLoadout, DEFAULT_LOADOUT, sameLoadout, type CosmeticLoadout } from "../loadout";
+import { cleanLoadout, DEFAULT_LOADOUT, nextPoolIndex, poolActive, sameLoadout, withPick, type CosmeticLoadout, type KnifePool } from "../loadout";
+import { knifePoolOf } from "../progression";
 import { GHOST_CSS } from "./colors";
 
 const KEY = "bunnyhop:ghost-cosmetics";
@@ -144,11 +145,100 @@ export function setLoadout(l: CosmeticLoadout): void {
   }
   if (sameLoadout(prev, v)) return;
   for (const fn of loadoutListeners) fn(v);
+  emitHeld();
 }
 
 export function onLoadout(fn: (l: CosmeticLoadout) => void): () => void {
   loadoutListeners.add(fn);
   return () => loadoutListeners.delete(fn);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Knife pool (progression.ts KnifePool, saved with the cosmetics): the knife the game holds is the pool's pick, and
+// getHeldLoadout() is the equipped loadout holding it. The viewmodel, your bunny, its room roster entry (net/mp.ts)
+// and the run's replay trailer (session.ts) follow the held loadout; the Loadout screen edits the equipped one.
+// The pick moves on at a map load (main.ts) and, with swap "restart", on every restart; it never changes mid-run.
+
+const POOL_KEY = "bunnyhop:knife-pool";
+const PICK_KEY = "bunnyhop:knife-pool-pick";
+const heldListeners = new Set<(l: CosmeticLoadout) => void>();
+let lastHeld: CosmeticLoadout | null = null;
+
+/** The saved pool (items checked against the catalogue only; the server checks unlocks), or null. */
+export function getKnifePool(): KnifePool | null {
+  try {
+    return knifePoolOf(JSON.parse(localStorage.getItem(POOL_KEY) ?? "null"), () => true);
+  } catch {
+    return null;
+  }
+}
+
+export function setKnifePool(p: KnifePool | null | undefined): void {
+  const v = knifePoolOf(p ?? null, () => true);
+  try {
+    if (v) localStorage.setItem(POOL_KEY, JSON.stringify(v));
+    else localStorage.removeItem(POOL_KEY);
+  } catch {
+    /* private mode */
+  }
+  emitHeld();
+}
+
+const pickIndex = (): number => {
+  try {
+    const n = Number(localStorage.getItem(PICK_KEY));
+    return Number.isInteger(n) && n >= 0 ? n : -1;
+  } catch {
+    return -1;
+  }
+};
+
+/** The equipped loadout holding the pool's current pick (the equipped one itself without an active pool). */
+export function getHeldLoadout(): CosmeticLoadout {
+  const l = getLoadout();
+  const p = getKnifePool();
+  return poolActive(p) ? withPick(l, p, Math.max(0, pickIndex())) : l;
+}
+
+/** The equipped loadout holding each of the pool's knives in turn ([] without an active pool): what to build ahead. */
+export function poolPicks(): CosmeticLoadout[] {
+  const l = getLoadout();
+  const p = getKnifePool();
+  return poolActive(p) ? p.items.map((_, i) => withPick(l, p, i)) : [];
+}
+
+/**
+ * A map loaded ("map") or the run restarted ("restart"): the pool moves on to its next knife when its swap says so.
+ * Returns whether the held knife changed.
+ */
+export function advanceKnifePool(event: "map" | "restart"): boolean {
+  const p = getKnifePool();
+  if (!poolActive(p) || (event === "restart" && p.swap !== "restart")) return false;
+  const at = pickIndex();
+  // The very first pick: the first item in order, any one at random.
+  const next = at < 0 ? (p.order === "random" ? Math.floor(Math.random() * p.items.length) : 0) : nextPoolIndex(p, at);
+  try {
+    localStorage.setItem(PICK_KEY, String(next));
+  } catch {
+    /* private mode */
+  }
+  return emitHeld();
+}
+
+/** Tells the held-loadout listeners when the held look changed; returns whether it did. */
+function emitHeld(): boolean {
+  const v = getHeldLoadout();
+  if (lastHeld && sameLoadout(lastHeld, v)) return false;
+  lastHeld = v;
+  for (const fn of heldListeners) fn(v);
+  return true;
+}
+
+/** The held loadout changes (a pool swap, or the equipped loadout changing under it). */
+export function onHeldLoadout(fn: (l: CosmeticLoadout) => void): () => void {
+  if (!lastHeld) lastHeld = getHeldLoadout();
+  heldListeners.add(fn);
+  return () => heldListeners.delete(fn);
 }
 
 // Entitlement is provided by the account API; no stored local config grants supporter glow.

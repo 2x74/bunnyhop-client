@@ -22,7 +22,9 @@ const messages = (page: Page) => page.evaluate(() => (window as any).messages as
 const sent = async (page: Page, from: number) =>
   (await messages(page))
     .slice(from)
-    .filter((m) => !["cosmetics", "menuAppearance", "menuBackdrop", "audioCue", "playerName"].includes(m.type));
+    .filter((m) => !["cosmetics", "menuAppearance", "menuBackdrop", "audioCue", "playerName"].includes(m.type))
+    // The viewer reports its bars as layout settles; that isn't a playback command.
+    .filter((m) => m.type !== "replayControl" || m.action !== "viewer");
 const count = async (page: Page) => (await messages(page)).length;
 const player = (id: string, name: string) => ({ id, name, avatar: null, country: null });
 const ATTEMPT = {

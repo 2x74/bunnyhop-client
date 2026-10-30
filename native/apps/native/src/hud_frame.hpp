@@ -1,5 +1,7 @@
 #pragma once
 #include "hud.hpp"
+#include "hud_demo.hpp"
+#include "hud_editor.hpp"
 #include "weapon_menu.hpp"
 #include "preferences.hpp"
 
@@ -50,11 +52,16 @@ struct HudFrame {
     bool video_preparing;
     bool scoreboard;
     WeaponMenuContext weapon_menu_context;
+    HudLayoutEditor &layout_editor;
+    HudDemoState &layout_demo;
+    float display_scale;
+    std::string layout_editor_key;
 
     void draw() const;
 
 private:
     void draw_status(const BhCmd &shown, const BhWeaponReport &weapon) const;
+    void draw_layout_editor() const;
     void draw_diagnostics() const;
     void draw_playback() const;
     void draw_chat() const;

@@ -61,11 +61,18 @@ int main() {
     chat.close();
     assert(chat.scroll_offset() == 0);
     chat.push(
-            "decorated", "runner", "chat", 14, 12, {"#00ffAA", "SUPPORTER", "US", "Gold", "player-1", {}, {}, {}, {}}
+            "decorated",
+            "runner",
+            "chat",
+            14,
+            12,
+            {"#00ffAA", "SUPPORTER", "US", "Gold", "player-1", {}, {}, {}, {}, {}}
     );
     const auto decorated = chat.visible(14).back();
     assert(decorated.decoration.color == "#00ffAA" && decorated.decoration.badge == "SUPPORTER");
-    chat.push("unsafe", "runner", "error", 14, 12, {"red;bad", "badge\nline", "USAUSAUSA", "rank", "", {}, {}, {}, {}});
+    chat.push(
+            "unsafe", "runner", "error", 14, 12, {"red;bad", "badge\nline", "USAUSAUSA", "rank", "", {}, {}, {}, {}, {}}
+    );
     assert(chat.visible(14).back().decoration.color.empty() && chat.visible(14).back().decoration.country.size() == 8);
     chat.open();
     chat.clear_input();

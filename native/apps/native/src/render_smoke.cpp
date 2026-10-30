@@ -1,5 +1,6 @@
 // Deterministic framebuffer evidence for the actual native renderer. No menus, network, timer or recording.
 #include "renderer.hpp"
+#include "sky_image.hpp"
 #include "weapon_commands.hpp"
 #include <cstdlib>
 #include <optional>
@@ -8,7 +9,7 @@ int main(int argc, char **argv) {
     try {
         std::string map, content, output, waterOutput, action, outfit = "outfit-cream", loadout, zoneFile,
                                                                waterQuality = "refracted", glowColor, actorAction,
-                                                               colorBlind = "off";
+                                                               colorBlind = "off", graphicsJson, skyFile, mapName;
         unsigned zoneStatus = 0, zoneTrack = 0;
         bool zoneGold = false;
         bool simulateFire = false, aura = true, firstPersonGlow = true;
@@ -98,6 +99,12 @@ int main(int argc, char **argv) {
                 actorAction = value();
             else if (arg == "--actor")
                 actor = true;
+            else if (arg == "--graphics")
+                graphicsJson = value();
+            else if (arg == "--sky")
+                skyFile = value();
+            else if (arg == "--map-name")
+                mapName = value();
             else if (arg == "--opacity")
                 opacity = number();
             else if (arg == "--actor-yaw")
@@ -180,8 +187,18 @@ int main(int argc, char **argv) {
         renderer.set_flashlight(flashlight);
         renderer.set_triggers_visible(triggers);
         renderer.set_color_blind(colorBlind);
-        renderer.graphics_settings({{"graphicsAntialias", msaa}});
+        auto graphics = graphicsJson.empty() ? nlohmann::json::object() : nlohmann::json::parse(graphicsJson);
+        graphics["graphicsAntialias"] = msaa;
+        renderer.graphics_settings(graphics);
         renderer.set_source_look(sourceLook);
+        renderer.set_map_identity(mapName, "");
+        if (!skyFile.empty()) {
+            std::ifstream file(skyFile, std::ios::binary);
+            const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            auto sky = native::decode_sky(bytes, native::sky_file_kind(skyFile), native::SkyClouds::photographic);
+            if (!sky.picture) throw std::runtime_error("sky: " + sky.error);
+            renderer.use_sky(graphics.value("graphicsSkyPackId", std::string("sky")), &*sky.picture);
+        }
 
         if (!zoneFile.empty()) {
             std::ifstream f(zoneFile);

@@ -71,25 +71,35 @@ inline std::string text_tail(const std::string &s, unsigned columns) {
     return out;
 }
 
+// Breaks after the last space that fits, or inside a word longer than a line. Spaces stay at the end of their line,
+// so the lines put together are `s` without its line breaks.
 inline std::vector<std::string> wrap_text(const std::string &s, unsigned columns) {
     std::vector<std::string> out;
     std::string line;
     unsigned used = 0;
+    size_t after_space = 0;
+    unsigned used_after_space = 0;
     columns = std::max(1u, columns);
     for (const auto &c : text_clusters(s)) {
         if (c.text == "\n" || c.text == "\r\n") {
             out.push_back(line);
             line.clear();
-            used = 0;
+            used = after_space = used_after_space = 0;
             continue;
         }
-        if (used + c.columns > columns && !line.empty()) {
-            out.push_back(line);
-            line.clear();
-            used = 0;
+        if (used + c.columns > columns && !line.empty() && c.text != " ") {
+            const size_t cut = after_space ? after_space : line.size();
+            out.push_back(line.substr(0, cut));
+            line.erase(0, cut);
+            used = after_space ? used - used_after_space : 0;
+            after_space = used_after_space = 0;
         }
         line += c.text;
         used += c.columns;
+        if (c.text == " ") {
+            after_space = line.size();
+            used_after_space = used;
+        }
     }
     if (!line.empty() || out.empty()) out.push_back(line);
     return out;

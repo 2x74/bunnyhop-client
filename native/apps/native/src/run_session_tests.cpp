@@ -133,6 +133,64 @@ void recording(const std::filesystem::path &root) {
 
 }  // namespace
 
+// A checkpoint load rewinds the recording; the rest of the run is written to a new replay with the load in it.
+// Uses the map and floor model written by recording().
+void segmented_load(const std::filesystem::path &root) {
+    const auto map = root / "fixture.bsp";
+    const std::unique_ptr<BhContext, decltype(&bh_destroy)> core(bh_create(), bh_destroy);
+    assert(core
+           && bh_load_map(
+                   core.get(), native::data_location::utf8(map).c_str(), native::data_location::utf8(root).c_str()
+           ));
+    BhRunOptions options{};
+    bh_default_run_options(&options);
+    options.rules = 2;
+    const BhZone zones[] = {
+            {0, 0, 0, {-100, -100, -10000}, {100, 100, 1000}}, {1, 0, 0, {150, -100, -10000}, {1000, 100, 1000}}
+    };
+    assert(bh_run_configure(core.get(), &options, zones, 2));
+    assert(bh_reset(core.get()));
+    assert(bh_set_position(core.get(), 10, 20, 65, 0));
+    native::RunRecorder recorder;
+    recorder.begin(core.get(), root, "segmented", "bunnyhop-native/test", "segmented", "player", {}, "");
+    assert(bh_segment_loads(core.get()) == 0);
+    BhCmd forward{};
+    forward.forward = 450;
+    forward.buttons = native::forward;
+    const BhCmd idle{};
+    BhState state{};
+    constexpr unsigned save_tick = 30, abandoned_ticks = 25;
+    for (unsigned tick = 0; tick < save_tick; ++tick)
+        assert(bh_step(core.get(), &forward, &state));
+    const auto checkpoint = bh_practice_save(core.get(), 0, 0);
+    assert(checkpoint);
+    for (unsigned tick = 0; tick < abandoned_ticks; ++tick)
+        assert(bh_step(core.get(), &idle, &state));
+    const auto first_path = recorder.path;
+    BhCmd view{};
+    BhSnapshot snapshot{};
+    assert(bh_segment_restore(core.get(), checkpoint, &view, &snapshot));
+    assert(snapshot.player.tick == save_tick && bh_segment_loads(core.get()) == 1);
+    recorder.resume_segment(core.get());
+    assert(recorder.path != first_path && !recorder.ended);
+    assert(native::data_location::from_utf8(recorder.path).parent_path() == root / "replays");
+    assert(native::data_location::from_utf8(recorder.path).filename().string().starts_with("segmented-"));
+    BhRunState run{};
+    for (unsigned tick = 0; tick < 1000 && run.status != 2; ++tick) {
+        assert(bh_step(core.get(), &forward, &state));
+        assert(bh_run_state(core.get(), &run));
+    }
+    assert(run.status == 2);
+    recorder.write(core.get());
+    size_t size = 0;
+    const char *header = bh_replay_header(core.get(), recorder.path.c_str(), &size);
+    assert(header);
+    const auto info = nlohmann::json::parse(header, header + size);
+    assert(info.at("style") == "segmented" && info.at("segmentLoads") == 1);
+    assert(info.at("segmentTicks") == nlohmann::json::array({save_tick}));
+    assert(info.at("totalTicks") == run.total_commands);
+}
+
 int main() {
     invalidation();
     const auto root =
@@ -150,4 +208,5 @@ int main() {
 
     std::filesystem::create_directories(root / "replays");
     recording(root);
+    segmented_load(root);
 }

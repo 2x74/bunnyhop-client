@@ -13,16 +13,29 @@ import { LESSON_IDS, type LessonId } from "../../web/src/tutorial/data";
 import { DEFAULT_BINDS as WEB_DEFAULT_BINDS } from "../../web/src/binds";
 import { ANGLE_SPEED_KEY_RANGE, YAW_SPEED_RANGE } from "./turn-speed";
 import { DEFAULT_PREFS } from "../../web/src/ui/settings";
+import { PAINT_COLORS, PAINT_SIZES, type PaintPrefs, type PaintSize } from "../../web/src/paint/prefs";
 import { requestedPatch } from "./settings-keys";
 export const LIVE_ORIGIN = "https://bunnyhop.lol";
 export interface VideoExportOptions {
   width: number;
   height: number;
   fps: number;
-  quality: "standard" | "high" | "max";
-  camera: "eye" | "chase" | "flyby" | "auto";
+  quality: "standard" | "high" | "max" | "edit";
+  camera: "eye" | "chase" | "flyby" | "orbit" | "auto";
   hud: boolean;
+  codec?: "h264" | "hevc" | "av1" | "prores" | "dnxhr" | "ffv1" | "png";
+  encoder?: "auto" | "hardware" | "software";
+  look?: "settings" | "source" | "plain" | "enhanced" | "cinematic";
+  supersample?: 1 | 2;
+  samples?: 1 | 2 | 4 | 8 | 16;
+  shutter?: number;
+  speed?: boolean;
+  keys?: boolean;
+  graph?: boolean;
+  crosshair?: boolean;
+  weapon?: boolean;
   audio?: boolean;
+  audioFile?: boolean;
   music?: string;
   musicOffset?: number;
   musicLevel?: number;
@@ -47,13 +60,17 @@ export interface VideoExportState {
 }
 export type MenuMessage =
   | { type: "mapLoad"; action: "cancel" | "retry" }
-  | { type: "update"; action: "check" | "download" | "cancel" | "reveal" | "status" }
+  | { type: "update"; action: "check" | "download" | "cancel" | "reveal" | "restart" | "status" }
+  | { type: "update"; action: "automatic"; enabled: boolean }
   | {
       type: "dataFolder";
       action: "status" | "pick" | "useDefault" | "cancelChoice" | "cancelPending" | "forget" | "reveal";
     }
   | { type: "dataFolder"; action: "move"; when: "now" | "later" }
-  | { type: "videoExport"; action: "start" | "cancel"; options?: VideoExportOptions }
+  | { type: "videoExport"; action: "start"; options: VideoExportOptions; title?: string }
+  | { type: "videoExport"; action: "file"; id: string; map: string; options: VideoExportOptions }
+  | { type: "videoExport"; action: "cancel"; id?: number }
+  | { type: "videoExport"; action: "clear" }
   | { type: "ready"; origin: string; webglContexts: number; webglAttempts: number }
   | { type: "resume" | "restart" | "quit" }
   | { type: "prefetchMap"; map: string | null; sha?: string }
@@ -66,6 +83,9 @@ export type MenuMessage =
       ghostId?: string;
       trailId?: string;
       playerGlow?: import("../../web/src/player/glow-config").PlayerGlow | null;
+      /** The saved knife pool (progression.ts KnifePool) and its pick, which the game moves on (knife_pool.hpp). */
+      knifePool?: import("../../web/src/progression").KnifePool | null;
+      knifePick?: number;
     }
   | { type: "settings"; patch: SettingsPatch }
   | { type: "window"; action: "center" | "minimize" | "maximize" | "toggleFullscreen" }
@@ -81,6 +101,18 @@ export type MenuMessage =
       name?: string;
     }
   | { type: "replays"; action: "list" }
+  /** Clears the player's paint on the loaded map (renderer.hpp tool_message). */
+  | { type: "paint"; action: "clear" }
+  /** Sets an aimed measurement point or clears the measurement (renderer.hpp tool_message). */
+  | { type: "measure"; action: "point" | "clear" }
+  /** The Sky picker's skies (sky_library.cpp): add from a link, import a file, remove, open the folder, cancel. */
+  | { type: "sky"; action: "link"; url: string }
+  | { type: "sky"; action: "remove"; id: string }
+  | { type: "sky"; action: "import" | "openFolder" | "cancel" }
+  /** Opens the HUD layout editor over the game (hud_editor.cpp); the menu closes. */
+  | { type: "hudEditor" }
+  /** Moves the HUD to one of the host's layout presets (hud_editor_layout.hpp). */
+  | { type: "hudPreset"; id: "classic" | "minimal" | "streamer" }
   | {
       type: "replay";
       action: "play" | "ghost" | "export" | "delete" | "screenshot";
@@ -105,6 +137,17 @@ export type MenuMessage =
       speed?: number;
     }
   | { type: "replayControl"; action: "fullRecording"; value: boolean }
+  | { type: "replayControl"; action: "loop"; value: { from: number; to: number } | null }
+  | { type: "replayControl"; action: "weapon" }
+  | { type: "replayControl"; action: "hud"; value: boolean }
+  /** Draw the replay in the runner's shape, fit and FOV (src/runner_view.hpp); null goes back. */
+  | {
+      type: "replayControl";
+      action: "runnerView";
+      view: { aspect: number; screen: number; bars: boolean; fov: number } | null;
+    }
+  /** The viewer is on screen: the host keeps playing under it and draws the runner's HUD. */
+  | { type: "replayControl"; action: "viewer"; open: boolean; top?: number; bottom?: number }
   | { type: "practiceFromReplay"; tick?: number }
   /** A second replay as a ghost on the one being watched (replay-host.ts); needs the host's "compare" feature. */
   | { type: "replayCompare"; action: "set"; kind: "pb" | "wr" | "custom"; name: string; replayBase64: string }
@@ -139,9 +182,22 @@ export type MenuMessage =
   | { type: "worldRecord"; map: string; style: string; track: number; generation: number; seconds: number | null }
   /** The player's own board place for the HUD's place line (hud-leaderboard.ts). */
   | import("./hud-leaderboard").HudLeaderboardMessage
+  /** Avatar editor pictures (avatar-host.ts). */
+  | import("./avatar-host").AvatarHostMessage
   | RunServiceStatus;
 
-export const PRACTICE_ACTIONS = ["toggle", "menu", "noclip", "save", "tele", "prev", "next", "keepVelocity"] as const;
+export const PRACTICE_ACTIONS = [
+  "toggle",
+  "on",
+  "off",
+  "menu",
+  "noclip",
+  "save",
+  "tele",
+  "prev",
+  "next",
+  "keepVelocity",
+] as const;
 export type PracticeAction = (typeof PRACTICE_ACTIONS)[number];
 /** gauntlet/state.ts GauntletProgress: this map's index, the map count, the earlier splits' sum, your PB's split here. */
 export interface GauntletHudProgress {
@@ -205,6 +261,11 @@ export const NATIVE_BIND_ACTIONS = [
   "spectatorNext",
   "spectatorPrevious",
   "spectatorMode",
+  "paint",
+  "paintOnce",
+  "clearPaint",
+  "measurePoint",
+  "clearMeasure",
 ] as const;
 type NativeBindAction = (typeof NATIVE_BIND_ACTIONS)[number];
 /** The web game's defaults, plus native-only actions and defaults (settings.hpp keeps the same list). */
@@ -212,8 +273,9 @@ export const DEFAULT_BINDS: Record<NativeBindAction, readonly string[]> = {
   ...WEB_DEFAULT_BINDS,
   showTriggers: ["Mouse3"],
   showClips: [],
-  chat: ["KeyY"],
-  commandChat: ["KeyU"],
+  // The website's chat bind (binds.ts chat): Y and U, like CS:S say / say_team. Command chat opens it with "!".
+  chat: ["KeyY", "KeyU"],
+  commandChat: [],
   scoreboard: ["Tab"],
   spectatorNext: [],
   spectatorPrevious: [],
@@ -228,6 +290,44 @@ export const JUMP_STATS_MODES: readonly JumpStatsMode[] = ["sixth", "every", "in
 export const AUDIO_PACKS: readonly AudioPack[] = ["default", "custom"];
 export const WINDOW_MODES = ["windowed", "borderless", "fullscreen"] as const;
 export type WindowMode = (typeof WINDOW_MODES)[number];
+export const LOW_LATENCY_MODES = ["off", "on", "boost"] as const;
+export type LowLatencyMode = (typeof LOW_LATENCY_MODES)[number];
+/** What low latency presentation this computer has (low_latency.hpp), and the technique in use. */
+export interface LowLatencyInfo {
+  dxgi: boolean;
+  reflex: boolean;
+  antiLag: boolean;
+  active: "" | "Reflex" | "Anti-Lag 2" | "DXGI";
+}
+export const FULLSCREEN_SCALINGS = ["stretch", "bars"] as const;
+export type FullscreenScaling = (typeof FULLSCREEN_SCALINGS)[number];
+/** Exclusive fullscreen's mode (window_settings.hpp). Width 0 is the desktop mode; refresh 0 the highest. */
+export interface FullscreenMode {
+  display: string;
+  displayIndex: number;
+  width: number;
+  height: number;
+  refreshHz: number;
+}
+export interface DisplayModeInfo {
+  width: number;
+  height: number;
+  refreshHz: number;
+}
+/** A monitor and the exclusive modes it offers (display_catalog.hpp). */
+export interface DisplayInfo {
+  name: string;
+  index: number;
+  window: boolean;
+  primary: boolean;
+  desktop: DisplayModeInfo | null;
+  modes: DisplayModeInfo[];
+}
+export interface DisplayCatalog {
+  displays: DisplayInfo[];
+  /** The mode exclusive fullscreen shows now, or null. */
+  exclusive: DisplayModeInfo | null;
+}
 export interface NativeAudioState {
   classicLoading: boolean;
   classicActive: boolean;
@@ -240,14 +340,21 @@ export interface NativeSettings {
   playerModel: "bunny";
   ghostModel: "same" | "bunny";
   mouseDiagnostics: boolean;
+  inputBackend: "auto" | "sdl" | "raw";
   windowMode: WindowMode;
   alwaysOnTop: boolean;
   rememberWindowBounds: boolean;
   minimizeOnFocusLoss: boolean;
+  fullscreenMode: FullscreenMode;
+  fullscreenScaling: FullscreenScaling;
+  lowLatencyMode: LowLatencyMode;
+  reflexFlash: boolean;
   capturePbScreenshots: boolean;
   showPlayerGlow: boolean;
   firstPersonGlow: boolean;
   waterQuality: "simple" | "refracted";
+  /** Private surface paint: one of the website's colours and sizes (paint/prefs.ts). */
+  paint: PaintPrefs;
   zonesVisible: boolean;
   effectsVisible: boolean;
   triggersVisible: boolean;
@@ -379,7 +486,7 @@ export function runSeconds(run: { seconds?: number; timeMs?: unknown }): number 
   if (Number.isSafeInteger(run.timeMs) && Number(run.timeMs) > 0) return Number(run.timeMs) / 1000;
   return typeof run.seconds === "number" && Number.isFinite(run.seconds) && run.seconds > 0 ? run.seconds : null;
 }
-export const REPLAY_CAMERAS = ["eye", "chase", "free", "flyby", "auto"] as const;
+export const REPLAY_CAMERAS = ["eye", "chase", "free", "flyby", "auto", "orbit"] as const;
 export type ReplayCamera = (typeof REPLAY_CAMERAS)[number];
 export interface NativeGhost {
   slot: number;
@@ -517,6 +624,10 @@ export interface NativeMenuState {
   capabilities: string[] | null;
   /** Values of website settings the host has added (settings-keys.ts), and its web HUD layout. */
   extraSettings: Record<string, unknown>;
+  /** Monitors and their fullscreen modes; null until the host sends them. */
+  displays: DisplayCatalog | null;
+  /** Low latency presentation; null until the host sends it (or on a host without it). */
+  lowLatency: LowLatencyInfo | null;
 }
 
 declare global {
@@ -535,6 +646,8 @@ declare global {
       onChatSubmit?: (value: unknown) => void;
       onChatSuggest?: (value: unknown) => void;
       onRoomControl?: (value: unknown) => void;
+      /** The knife pool's pick after the game moved it on (knife_pool.hpp HeldKnife::menu_script). */
+      onKnifePick?: (value: unknown) => void;
       onLeaveMap?: () => void;
       joinRoom?: (id: string) => void;
       onRoomPose?: (value: unknown) => void;
@@ -635,14 +748,20 @@ function defaultSettings(): NativeSettings {
     playerModel: "bunny",
     ghostModel: "same",
     mouseDiagnostics: web.inputStats,
+    inputBackend: "auto",
     capturePbScreenshots: false,
     windowMode: "windowed",
     alwaysOnTop: false,
     rememberWindowBounds: true,
     minimizeOnFocusLoss: false,
+    fullscreenMode: { display: "", displayIndex: -1, width: 0, height: 0, refreshHz: 0 },
+    fullscreenScaling: "stretch",
+    lowLatencyMode: "off",
+    reflexFlash: false,
     showPlayerGlow: web.showPlayerGlow,
     firstPersonGlow: web.firstPersonGlow,
     waterQuality: "simple",
+    paint: { ...web.paint },
     showGhost: web.showGhost,
     ghostOpacity: web.ghost.opacity,
     ghostNearFade: web.ghost.nearFade,
@@ -779,6 +898,8 @@ export const state: NativeMenuState = {
   bindActions: null,
   capabilities: null,
   extraSettings: {},
+  displays: null,
+  lowLatency: null,
 };
 
 export const nativeKeyCode = (code: unknown): code is string =>
@@ -787,11 +908,98 @@ export const nativeKeyCode = (code: unknown): code is string =>
     code,
   );
 
+/** A paint colour and size the host takes: the website's palette and sizes only (graphics_settings.hpp). */
+function paintPatch(value: unknown): PaintPrefs | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { color, size } = value as Record<string, unknown>;
+  if (!PAINT_COLORS.some(([known]) => known === color)) return null;
+  if (typeof size !== "string" || !Object.hasOwn(PAINT_SIZES, size)) return null;
+  return { color: color as string, size: size as PaintSize };
+}
+
+const MODE_SIDE_MAX = 16384;
+const MODE_REFRESH_MAX = 1000;
+
+const modeSide = (value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value) && (value === 0 || (value >= 240 && value <= MODE_SIDE_MAX));
+const refreshRate = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= MODE_REFRESH_MAX;
+
+/** A fullscreen mode the host takes (window_settings.hpp read_fullscreen_mode). */
+export function fullscreenModePatch(value: unknown): FullscreenMode | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { display, displayIndex, width, height, refreshHz } = value as Record<string, unknown>;
+  if (typeof display !== "string" || display.length > 128) return null;
+  if (typeof displayIndex !== "number" || !Number.isInteger(displayIndex) || displayIndex < -1 || displayIndex > 64)
+    return null;
+  if (!modeSide(width) || !modeSide(height) || (width === 0) !== (height === 0) || !refreshRate(refreshHz)) return null;
+  return { display, displayIndex, width, height, refreshHz };
+}
+
+function displayModeInfo(value: unknown): DisplayModeInfo | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { width, height, refreshHz } = value as Record<string, unknown>;
+  if (!modeSide(width) || !modeSide(height) || !width || !height || !refreshRate(refreshHz)) return null;
+  return { width, height, refreshHz };
+}
+
+function displayInfo(value: unknown): DisplayInfo | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const item = value as Record<string, unknown>;
+  if (typeof item.name !== "string" || !Number.isInteger(item.index) || !Array.isArray(item.modes)) return null;
+  return {
+    name: item.name.slice(0, 128),
+    index: item.index as number,
+    window: item.window === true,
+    primary: item.primary === true,
+    desktop: displayModeInfo(item.desktop),
+    modes: item.modes
+      .slice(0, 160)
+      .map(displayModeInfo)
+      .filter((mode): mode is DisplayModeInfo => mode !== null),
+  };
+}
+
+const LOW_LATENCY_TECHNIQUES = ["", "Reflex", "Anti-Lag 2", "DXGI"] as const;
+
+/** The host's low latency support (client.cpp state `lowLatency`), or null. */
+export function lowLatencyInfo(value: unknown): LowLatencyInfo | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { dxgi, reflex, antiLag, active } = value as Record<string, unknown>;
+  return {
+    dxgi: dxgi === true,
+    reflex: reflex === true,
+    antiLag: antiLag === true,
+    active: LOW_LATENCY_TECHNIQUES.includes(active as LowLatencyInfo["active"])
+      ? (active as LowLatencyInfo["active"])
+      : "",
+  };
+}
+
+/** The host's monitors and modes (display_catalog.hpp), or null when it sent something else. */
+export function displayCatalog(value: unknown): DisplayCatalog | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { displays, exclusive } = value as Record<string, unknown>;
+  if (!Array.isArray(displays)) return null;
+  return {
+    displays: displays
+      .slice(0, 16)
+      .map(displayInfo)
+      .filter((display): display is DisplayInfo => display !== null),
+    exclusive: displayModeInfo(exclusive),
+  };
+}
+
 export function settingsPatch(value: unknown): Partial<NativeSettings> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const input = value as Record<string, unknown>,
     out: Record<string, unknown> = {};
   if (WINDOW_MODES.includes(input.windowMode as WindowMode)) out.windowMode = input.windowMode;
+  const fullscreenMode = fullscreenModePatch(input.fullscreenMode);
+  if (fullscreenMode) out.fullscreenMode = fullscreenMode;
+  if (FULLSCREEN_SCALINGS.includes(input.fullscreenScaling as FullscreenScaling))
+    out.fullscreenScaling = input.fullscreenScaling;
+  if (LOW_LATENCY_MODES.includes(input.lowLatencyMode as LowLatencyMode)) out.lowLatencyMode = input.lowLatencyMode;
   for (const [key, min, max] of [
     ["ghostOpacity", 0, 1],
     ["crosshairSize", 0, 40],
@@ -834,6 +1042,7 @@ export function settingsPatch(value: unknown): Partial<NativeSettings> {
     "alwaysOnTop",
     "rememberWindowBounds",
     "minimizeOnFocusLoss",
+    "reflexFlash",
     "showPlayerGlow",
     "firstPersonGlow",
     "gainTicks",
@@ -884,7 +1093,12 @@ export function settingsPatch(value: unknown): Partial<NativeSettings> {
     "timedInput",
   ])
     if (typeof input[key] === "boolean") out[key] = input[key];
+  if (input.inputBackend === "auto" || input.inputBackend === "sdl" || input.inputBackend === "raw") {
+    out.inputBackend = input.inputBackend;
+  }
   if (input.waterQuality === "simple" || input.waterQuality === "refracted") out.waterQuality = input.waterQuality;
+  const paint = paintPatch(input.paint);
+  if (paint) out.paint = paint;
   if (
     typeof input.crosshairStyle === "string" &&
     ["cross", "cross-dot", "dot", "t", "circle", "none"].includes(input.crosshairStyle)
@@ -986,6 +1200,8 @@ export function applyState(value: unknown): boolean {
     state.sensitivity = state.settings.sensitivity;
     readHostSettings(next.settings);
   } else state.settings.sensitivity = state.sensitivity;
+  if (next.displays !== undefined) state.displays = displayCatalog(next.displays);
+  if (next.lowLatency !== undefined) state.lowLatency = lowLatencyInfo(next.lowLatency);
   if (Array.isArray(next.capabilities))
     state.capabilities = next.capabilities
       .filter((item): item is string => typeof item === "string" && item.length <= 64)

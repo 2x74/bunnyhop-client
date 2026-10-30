@@ -1,4 +1,6 @@
 #include "practice.hpp"
+#include "practice_mode.hpp"
+#include "resource_loading.hpp"
 #include "hud_geometry.hpp"
 #include "leave_hold.hpp"
 #include "map_jobs.hpp"
@@ -12,11 +14,91 @@
 #include <iostream>
 using namespace std::chrono_literals;
 
+void test_practice_mode() {
+    native::Practice practice;
+    native::StartPoints points;
+    BhState player{};
+    player.grounded = 1;
+    points.save("map", 0, player, 0, 0, true);
+    points.save("map", 1, player, 0, 0, false);
+    points.save("map", 2, player, 0, 0, true);
+    points.save("other", 0, player, 0, 0, true);
+    practice.retain({1, "autohop", "autohop", 0});
+    practice.active = practice.noclip = true;
+    unsigned enters = 0, restarts = 0;
+    auto enter = [&](const std::string &) {
+        assert(practice.mode);
+        practice.active = true;
+        ++enters;
+    };
+    auto restart = [&]() {
+        assert(!practice.noclip && !practice.mode);
+        assert(!points.get("map", 0) && !points.get("map", 2));
+        assert(points.get("map", 1) && points.get("other", 0));
+        assert(practice.checkpoints.size() == 1);
+        practice.restart();
+        ++restarts;
+    };
+    using Mode = native::PracticeMode;
+    assert(Mode::apply(practice, points, "map", false, enter, restart) == Mode::Change::cleared_spawns);
+    assert(!practice.active && !practice.mode && !practice.noclip);
+    assert(Mode::apply(practice, points, "map", false, enter, restart) == Mode::Change::off);
+    practice.restart();
+    assert(!practice.active && restarts == 2);
+    assert(Mode::apply(practice, points, "map", true, enter, restart) == Mode::Change::on);
+    assert(Mode::apply(practice, points, "map", true, enter, restart) == Mode::Change::unchanged);
+    assert(enters == 1 && practice.active);
+    assert(Mode::apply(practice, points, "map", std::nullopt, enter, restart) == Mode::Change::off);
+    assert(Mode::apply(practice, points, "map", std::nullopt, enter, restart) == Mode::Change::on);
+    assert(enters == 2 && practice.mode);
+}
+
+struct LoadingLifetime {
+    int &alive;
+
+    explicit LoadingLifetime(int &value) : alive(value) { ++alive; }
+
+    ~LoadingLifetime() { --alive; }
+};
+
+native::ResourceLoading loading_fixture(int &alive, bool fail) {
+    LoadingLifetime lifetime(alive);
+    co_yield "loaded";
+    if (fail) throw std::runtime_error("resource failure");
+}
+
+void test_resource_loading() {
+    int alive = 0;
+    {
+        auto loading = loading_fixture(alive, false);
+        assert(alive == 0 && !loading.step() && alive == 1);
+    }
+    assert(alive == 0);
+    auto loading = loading_fixture(alive, true);
+    assert(!loading.step() && alive == 1);
+    bool failed = false;
+    try {
+        loading.step();
+    } catch (const std::runtime_error &failure) {
+        failed = std::string(failure.what()) == "resource failure";
+    }
+    assert(failed && alive == 0);
+}
+
 int main() {
+    test_resource_loading();
+    test_practice_mode();
     native::Practice p;
     assert(p.key_allowed("save", true));
     assert(!p.key_allowed("tele", true));
     assert(p.key_allowed("noclip", false));
+    p.segment_status(2);
+    assert(p.segment_label.view() == "Segmented · 2 loads");
+    assert(p.key_allowed("tele", true));
+    assert(p.key_allowed("next", true));
+    assert(p.key_allowed("prev", true));
+    assert(!p.key_allowed("noclip", true));
+    p.segment_status(-1);
     p.menu_open = true;
     assert(p.key_allowed("tele", true));
     assert(p.key_allowed("noclip", true));
@@ -50,11 +132,13 @@ int main() {
     assert(prefs["binds"]["cpPrev"].empty() && prefs["binds"]["cpNext"].empty() && prefs["binds"]["mainMenu"].empty());
     for (float percent : {50.f, 100.f, 175.f}) {
         const native::HudGeometry g(1280, 720, percent);
-        assert(std::abs(g.scale - .8f * percent / 100) < 1e-6f);
+        // 720 px tall holds 800 HUD units at most, so past 112.5% the HUD stops growing instead of overlapping.
+        const float expected = std::min(.8f * percent / 100, 720.f / native::hud_min_height_units);
+        assert(std::abs(g.scale - expected) < 1e-6f);
+        assert(g.height >= native::hud_min_height_units - .001f && g.width >= native::hud_min_width_units - .001f);
         // The centre remains fixed; default bottom spacing and glyph/key gaps all scale together.
         assert(std::abs(g.width * .5f * g.scale - 640) < .001f);
         assert(std::abs((g.height - 154) * g.scale - (720 - 154 * g.scale)) < .001f);
-        assert(std::abs(4 * g.scale / (.8f * percent / 100) - 4) < 1e-6f);
         auto patch = native::patch_settings(prefs, {{"hudScale", int(percent)}});
         assert(patch["hudScale"] == int(percent));
     }

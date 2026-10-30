@@ -13,6 +13,8 @@ use std::ptr;
 use std::rc::Rc;
 use std::thread::{self, ThreadId};
 
+mod map_load;
+pub use map_load::{bh_load_map_begin, bh_load_map_poll, bh_load_map_cancel};
 mod release_crypto;
 mod assets;
 mod look;
@@ -30,6 +32,9 @@ pub use replay::{
 mod recording;
 pub use recording::{bh_record_cosmetic, bh_record_inspect, bh_record_loadout};
 mod practice;
+mod segments;
+pub use segments::{bh_segment_loads, bh_record_options_read_v29};
+pub use practice::bh_segment_restore;
 mod surfaces;
 pub use surfaces::{BhSurfaceProbe, bh_surface_at};
 mod run;
@@ -264,8 +269,10 @@ struct Map {
     vfs: vfs::Vfs,
     root: Option<PathBuf>,
     loose: HashMap<String, Rc<[u8]>>,
+    physics_files: HashMap<String, Rc<[u8]>>,
     attempted: HashSet<String>,
     texture: Vec<u8>,
+    prepared_textures: HashMap<String, map_load::PreparedTexture>,
     model_count: usize,
     transforms: Vec<BhTransform>,
     transforms_dirty: bool,
@@ -289,6 +296,7 @@ struct Map {
     playback: Option<replay::Playback>,
     ghosts: Vec<Option<replay::Ghost>>,
     checkpoints: Vec<Option<practice::Checkpoint>>,
+    segments: segments::History,
 }
 impl Map {
     fn load_cancellable(
@@ -307,6 +315,9 @@ impl Map {
         if root.as_ref().is_some_and(|p| !p.is_dir()) {
             return Err("content root is not a directory".into());
         }
+        const MAX_BSP_BYTES: u64 = 768 * 1024 * 1024;
+        let size = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?.len();
+        if size > MAX_BSP_BYTES { return Err("native BSP exceeds 768 MiB".into()); }
         let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
         check()?;
         let map_sha256 = recording::sha(&bytes);
@@ -343,6 +354,14 @@ impl Map {
                 vfs::Listing::everything_under("disk", ""),
             )));
         }
+        // Match the verifier's physics manifest: loose collision models belong to
+        // the simulation, but render VMTs must not change the BSP's surface properties.
+        let physics_files = loose.clone();
+        let physics_content = if root.is_some() {
+            Some(vfs::Source::loose("content", physics_files.clone()))
+        } else {
+            content::cached_physics_content(path)
+        };
         check()?;
         let mesh = mesh::build(&bsp);
         let mut names = mesh
@@ -372,12 +391,6 @@ impl Map {
             }
             remount(&mut fs, &loose);
         }
-        // Include loose VMTs too: the simulation reads $surfaceprop from these same materials.
-        let physics_content = if root.is_some() {
-            Some(vfs::Source::loose("content", loose.clone()))
-        } else {
-            content::cached_physics_content(path)
-        };
         check()?;
         let mut game = Game::load_with_content(&bsp, physics_content)?;
         game.set_settings(settings.checked()?);
@@ -561,8 +574,10 @@ impl Map {
             vfs: fs,
             root,
             loose,
+            physics_files,
             attempted,
             texture: Vec::new(),
+            prepared_textures: HashMap::new(),
             model_count,
             transforms: Vec::new(),
             transforms_dirty: true,
@@ -586,6 +601,7 @@ impl Map {
             playback: None,
             ghosts: Vec::new(),
             checkpoints: Vec::new(),
+            segments: segments::History::default(),
         })
     }
     fn transform(&mut self, model: u32) -> Result<BhTransform, String> {
@@ -597,7 +613,7 @@ impl Map {
             self.transforms.resize(
                 self.model_count,
                 BhTransform {
-                    visible: 1,
+                    visible: 2,
                     ..BhTransform::default()
                 },
             );
@@ -612,13 +628,24 @@ impl Map {
             for (model, visible, _) in self.game.brush_states() {
                 if model != 0 {
                     if let Some(t) = self.transforms.get_mut(model as usize) {
-                        t.visible = u32::from(visible);
+                        // Core.brushOrigins keeps the first visibility row for each model slot, even when
+                        // a later template instance supplied that slot's transform.
+                        if t.visible == 2 { t.visible = u32::from(visible); }
                     }
                 }
+            }
+            for transform in &mut self.transforms {
+                if transform.visible == 2 { transform.visible = 1; }
             }
             self.transforms_dirty = false;
         }
         Ok(self.transforms[model as usize])
+    }
+    fn take_prepared_texture(&mut self, path: &str) -> Option<BhImage> {
+        let image = self.prepared_textures.remove(path)?;
+        self.texture = image.rgba;
+        Some(BhImage { rgba: self.texture.as_ptr(), byte_count: self.texture.len(),
+            width: image.width, height: image.height })
     }
     fn texture(&mut self, index: u32) -> Result<BhImage, String> {
         self.texture.clear();
@@ -628,6 +655,7 @@ impl Map {
             .get(index as usize)
             .ok_or("texture index out of range")?
             .clone();
+        if let Some(image) = self.take_prepared_texture(&path) { return Ok(image); }
         if self.vfs.read(&path).is_none() {
             if let Some(root) = &self.root {
                 if self.attempted.insert(path.clone()) {
@@ -688,6 +716,7 @@ fn read_loose(root: &Path, name: &str) -> Option<Vec<u8>> {
 
 pub struct BhContext {
     owner: ThreadId,
+    loading: Option<map_load::MapLoad>,
     map: Option<Map>,
     settings: BhSettings,
     error: CString,
@@ -699,6 +728,7 @@ impl BhContext {
     fn new() -> Self {
         Self {
             owner: thread::current().id(),
+            loading: None,
             map: None,
             settings: BhSettings::default(),
             error: CString::default(),
@@ -847,6 +877,7 @@ pub unsafe extern "C" fn bh_load_map_cancellable(
     unsafe {
         call(ctx, |c| {
             check_cancel(cancel, data)?;
+            c.loading = None;
             if let Some(mut old) = c.map.take() {
                 let _ = old.finish_record(false, "map_reload");
             }
@@ -1326,7 +1357,8 @@ pub unsafe extern "C" fn bh_record_write_bhr(ctx: *mut BhContext, path: *const c
     unsafe {
         call(ctx, |c| {
             let m = c.map()?;
-            if m.recorder.is_some() || !m.record_valid {
+            let retained_segment = m.filter.id == "segmented" && m.completed_record.is_some();
+            if (m.recorder.is_some() && !retained_segment) || !m.record_valid {
                 return Err("end a valid native recording before writing BHR".into());
             }
             m.completed_record

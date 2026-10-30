@@ -44,7 +44,7 @@ import { uiSound } from "../audio/ui";
 import { KeysOverlay, PREVIEW_BITS } from "../hud/keys";
 import { StrafeTrainerView } from "../hud/strafe-trainer-view";
 import { trainerZone } from "../hud/strafe-trainer";
-import { clampScale, cloneLayout, decodeLayout, encodeLayout, HUD_ELEMENTS, HUD_SCALE, PRESETS, sameLayout, type HudElId, type KeysStyle } from "../hud/layout";
+import { clampScale, decodeLayout, presetLayout, encodeLayout, HUD_ELEMENTS, HUD_SCALE, PRESETS, sameLayout, type HudElId, type KeysStyle } from "../hud/layout";
 import { hideUiKeeps, hideUiSwitch, hudMiniature } from "./quick-toggles";
 import { ssjRows } from "../ssj";
 import { movementRows } from "../movement-stats";
@@ -246,7 +246,7 @@ function hudSection(ctx: Ctx): SettingsContent {
     presetSeg.replaceChildren(
       ...PRESETS.map((pr) => {
         const on = sameLayout(P().hud.layout, pr.layout);
-        return h(`button${on ? ".on" : ""}`, { type: "button", "aria-pressed": String(on), onclick: () => (up((p) => (p.hud.layout = cloneLayout(pr.layout))), ctx.refresh()) }, pr.label);
+        return h(`button${on ? ".on" : ""}`, { type: "button", "aria-pressed": String(on), onclick: () => (up((p) => (p.hud.layout = presetLayout(pr.layout, p.hud.layout))), ctx.refresh()) }, pr.label);
       }),
     );
   paintPresets();
@@ -367,7 +367,10 @@ function hudSection(ctx: Ctx): SettingsContent {
         group(
           "Strafe trainer",
           trainerBox,
-          segmented<TrainerPreset>("Preset", () => trainerPreset(P().hud.strafeTrainer) as TrainerPreset, (v) => (tp((t) => applyTrainerPreset(t, v)), ctx.refresh()), [
+          // Its own switch here too (the same one as in Show on screen): setting the trainer up here used to leave it off.
+          toggle("Show strafe trainer", () => P().hud.layout.strafeTrainer.on, (v) => (up((p) => (p.hud.layout.strafeTrainer.on = v)), ctx.refresh()), { desc: "On the HUD in every layout preset; !st toggles it in game. Move and resize it in Edit layout.", keywords: "strafetrainer strafe trainer show hide on off enable visible" }),
+          // Picking a preset is asking for the trainer: it turns on too.
+          segmented<TrainerPreset>("Preset", () => trainerPreset(P().hud.strafeTrainer) as TrainerPreset, (v) => (up((p) => (p.hud.layout.strafeTrainer.on = true)), tp((t) => applyTrainerPreset(t, v)), ctx.refresh()), [
             ["beginner", "Beginner"],
             ["standard", "Standard"],
             ["strict", "Strict"],
@@ -529,7 +532,7 @@ function ghostDot(kind: GhostKind, r: HTMLElement): HTMLElement {
 
 const BIND_GROUPS: [string, Action[]][] = [
   ["Movement", ["forward", "back", "left", "right", "jump", "duck", "turnLeft", "turnRight", "turnFast"]],
-  ["Run", ["restart", "restartBonus", "restartMain", "setStart", "clearStart", "cycleStyle", "mainMenu"]],
+  ["Run", ["restart", "restartBonus", "restartMain", "setStart", "clearStart", "cycleStyle", "mainMenu", "chat"]],
   ["Show / hide", ["keysOverlay", "hideUi", "viewmodel", "thirdPerson", "flashlight", "mute", "nextTrack"]],
   ["Carrot", ["attack", "attack2", "inspect"]],
   ["Practice", ["practice", "noclip", "cpSave", "cpTeleport", "cpPrev", "cpNext"]],
@@ -557,6 +560,7 @@ const BIND_KEYWORDS: Partial<Record<Action, string>> = {
   clearStart: "clear delete start point position clearstart deletestart delstart spawn restart",
   cycleStyle: "style styles autohop scroll legit w-only sideways hsw f3",
   hudEditor: "hud editor layout f2",
+  chat: "chat say say_team messagemode talk type message commands y u",
   thirdPerson: "third person thirdperson camera t",
   attack: "slash attack mouse1 carrot knife",
   attack2: "stab attack2 mouse2 carrot knife",
@@ -633,6 +637,10 @@ function keysSection(ctx: Ctx): SettingsContent {
             info: "When you hold A and D together, the last one you pressed wins instead of both cancelling out. Same for W and S.",
             desc: "Letting go of the newer key goes back to the one still held. Works in every style except Legit Scroll, and always in practice.",
             keywords: "null bind binds nulls snap tap socd last input priority a d w s cancel overlap strafe script",
+          }),
+          toggle("Release W on jump", () => P().wRelease, (v) => up((p) => (p.wRelease = v)), {
+            desc: "Jumping with W held lets go of forward until you land or press W again. Not in Legit Scroll, W-Only, Sideways or Half-Sideways.",
+            keywords: "release w jump forward let go auto unpress -forward prestrafe hold w air strafe script wjump",
           }),
           range("Turn speed", () => P().yawSpeed, (v) => up((p) => (p.yawSpeed = Math.round(v))), {
             min: YAW_SPEED_RANGE[0], max: YAW_SPEED_RANGE[1], step: 5, unit: "°/s",
@@ -1001,7 +1009,7 @@ const BUILTIN: Section[] = [
   { id: "mouse", label: "Mouse & view", blurb: "", order: 10, render: mouseSection, reset: resetKeys("sensitivity", "verticalSensitivityEnabled", "verticalSensitivity", "dpi", "dpiConfirmed", "dpiHidden", "invertY", "rawInput", "spikeFilter", "timedInput", "inputStats", "fov") },
   { id: "crosshair", label: "Crosshair", blurb: "", order: 20, render: crosshairSection, reset: resetKeys("crosshair") },
   { id: "hud", label: "HUD", blurb: "", order: 30, render: hudSection, reset: resetKeys("hud", "showZones", "triggers") },
-  { id: "keys", label: "Keys", blurb: "Click a slot, then press a key. Backspace clears.", order: 40, render: keysSection, reset: resetKeys("binds", "holdRestart", "autoRestart", "practice", "nullBinds", "yawSpeed", "angleSpeedKey") },
+  { id: "keys", label: "Keys", blurb: "Click a slot, then press a key. Backspace clears.", order: 40, render: keysSection, reset: resetKeys("binds", "holdRestart", "autoRestart", "practice", "nullBinds", "wRelease", "yawSpeed", "angleSpeedKey") },
   { id: "ghost", label: "Ghosts & players", blurb: "", order: 50, render: ghostSection, reset: resetKeys("showGhost", "ghost", "tags", "showPlayerGlow", "firstPersonGlow") },
   { id: "graphics", label: "Graphics", blurb: "", order: 60, render: graphicsSection, reset: () => void chooseGraphicsPreset("source").then(() => { resetKeys("graphics")(); up((p) => (p.models = clone(DEFAULT_PREFS.models))); }) },
   { id: "audio", label: "Audio", blurb: "", order: 70, render: audioSection, reset: resetKeys("volume") },

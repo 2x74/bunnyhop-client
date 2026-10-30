@@ -6,7 +6,8 @@
 //   const guns = new GunPresenter({ core, scene, onGun: (id) => thirdPerson.setGun(id) });
 //   per sim tick:   guns.tick(weaponReport(core), events & EVENT_ATTACK ? attackReport(core) : null)
 //                   (a knife attack report is ignored here; WeaponPresenter keeps the knife)
-//   per frame:      guns.frame(dt, vm.feelMatrix, brushOrigins)        (animation, fx, impacts)
+//   per frame:      guns.frame(dt, vm.feelMatrix, brushOrigins, input)  (animation, fx, impacts; input: the knife
+//                   viewmodel's ViewmodelInput, for the gun's own movement feel, guns/motion.ts)
 //                   guns.setVisible(firstPerson && viewmodel shown && !spectating); guns.render(renderer, camera)
 //   inspect key:    guns.inspect() when guns.active
 //   restart:        guns.reset(weaponReport(core))               (no draw animation replay, impacts cleared)
@@ -31,6 +32,7 @@ import { GunImpacts } from "./impacts";
 import { gunSound } from "./sounds";
 import type { GunDef } from "./types";
 import { GunViewmodel } from "./viewmodel";
+import type { GunMotionInput } from "./motion";
 import { FloorGuns } from "./world";
 
 /** Sim tick length (s): the core's reload ticks become animation seconds with it. */
@@ -88,11 +90,11 @@ export class GunPresenter {
     this.vm = new GunViewmodel(h.replay ? { loadout: h.replay.loadout } : {});
     h.scene.add(this.impacts.root);
     if (!h.replay) h.scene.add(this.floor.root);
-    this.vm.onSound = (kind, gain) => this.sound(this.active, kind, gain);
+    this.vm.onSound = (kind, gain, rate) => this.sound(this.active, kind, gain, rate);
   }
 
-  private sound(def: GunDef | null, kind: Parameters<typeof gunSound>[1], gain?: number): void {
-    if (!this.h.replay) gunSound(def, kind, gain === undefined ? undefined : { gain });
+  private sound(def: GunDef | null, kind: Parameters<typeof gunSound>[1], gain?: number, rate?: number): void {
+    if (!this.h.replay) gunSound(def, kind, gain === undefined && rate === undefined ? undefined : { gain, rate });
   }
 
   /** Removes the impacts (and floor guns) from the scene and frees the viewmodel (the replay viewer's presenter). */
@@ -231,10 +233,10 @@ export class GunPresenter {
   }
 
   /** Per rendered frame: the shotgun's start hands over to its first shell, animation, fx, impacts. */
-  frame(dt: number, feel: ArrayLike<number> | null, transforms?: Map<number, BrushTransform>): void {
+  frame(dt: number, feel: ArrayLike<number> | null, transforms?: Map<number, BrushTransform>, motion: GunMotionInput | null = null): void {
     this.transforms = transforms;
     if (this.startLeft > 0 && (this.startLeft -= dt) <= 0 && this.shells) this.vm.anim.shellInsert(Math.max(0.1, this.firstShell));
-    if (this.active) this.vm.update(dt, feel);
+    if (this.active) this.vm.update(dt, feel, motion);
     this.impacts.update(dt, transforms);
   }
 

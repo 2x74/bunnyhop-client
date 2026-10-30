@@ -13,11 +13,81 @@ inline bool valid_window_mode(const std::string &mode) {
     return mode == "windowed" || mode == "borderless" || mode == "fullscreen";
 }
 
+// Exclusive fullscreen's display mode. A width of 0 is the display's desktop mode; a refresh rate of 0 is the
+// highest the size offers. `display` is the monitor's name and `display_index` its place in SDL's display list,
+// which tells two monitors of the same model apart.
+struct FullscreenMode {
+    std::string display;
+    int display_index = -1;
+    int width = 0;
+    int height = 0;
+    double refresh_hz = 0;
+
+    bool operator==(const FullscreenMode &) const = default;
+};
+
+inline constexpr int fullscreen_mode_max_side_px = 16384;
+inline constexpr double fullscreen_mode_max_refresh_hz = 1000;
+inline constexpr size_t fullscreen_mode_max_display_name = 128;
+inline constexpr int fullscreen_mode_max_display_index = 64;
+
+inline WindowJson fullscreen_mode_json(const FullscreenMode &mode) {
+    return {{"display", mode.display},
+            {"displayIndex", mode.display_index},
+            {"width", mode.width},
+            {"height", mode.height},
+            {"refreshHz", mode.refresh_hz}};
+}
+
+inline bool fullscreen_side_valid(const WindowJson &value) {
+    if (!value.is_number_integer()) return false;
+    const auto side = value.get<int64_t>();
+    return side == 0 || (side >= 240 && side <= fullscreen_mode_max_side_px);
+}
+
+inline std::optional<FullscreenMode> read_fullscreen_mode(const WindowJson &value) {
+    if (!value.is_object() || value.size() > 5) return std::nullopt;
+    const auto display = value.value("display", WindowJson(""));
+    const auto index = value.value("displayIndex", WindowJson(-1));
+    const auto width = value.value("width", WindowJson(0));
+    const auto height = value.value("height", WindowJson(0));
+    const auto refresh = value.value("refreshHz", WindowJson(0));
+    if (!display.is_string() || display.get_ref<const std::string &>().size() > fullscreen_mode_max_display_name)
+        return std::nullopt;
+    if (!index.is_number_integer() || index.get<int64_t>() < -1
+        || index.get<int64_t>() > fullscreen_mode_max_display_index)
+        return std::nullopt;
+    if (!fullscreen_side_valid(width) || !fullscreen_side_valid(height) || (width == 0) != (height == 0))
+        return std::nullopt;
+    if (!refresh.is_number() || !(refresh.get<double>() >= 0) || refresh.get<double>() > fullscreen_mode_max_refresh_hz)
+        return std::nullopt;
+    return FullscreenMode{
+            display.get<std::string>(), index.get<int>(), width.get<int>(), height.get<int>(), refresh.get<double>()
+    };
+}
+
+// How a fullscreen resolution of another shape than the monitor fills it.
+inline bool valid_fullscreen_scaling(const std::string &scaling) {
+    return scaling == "stretch" || scaling == "bars";
+}
+
 inline WindowJson default_window_settings() {
     return {{"windowMode", "windowed"},
             {"alwaysOnTop", false},
             {"rememberWindowBounds", true},
-            {"minimizeOnFocusLoss", false}};
+            {"minimizeOnFocusLoss", false},
+            {"fullscreenMode", fullscreen_mode_json({})},
+            {"fullscreenScaling", "stretch"}};
+}
+
+inline FullscreenMode fullscreen_mode_setting(const WindowJson &settings) {
+    if (!settings.contains("fullscreenMode")) return {};
+    return read_fullscreen_mode(settings.at("fullscreenMode")).value_or(FullscreenMode{});
+}
+
+inline std::string fullscreen_scaling_setting(const WindowJson &settings) {
+    const auto scaling = settings.value("fullscreenScaling", std::string("stretch"));
+    return valid_fullscreen_scaling(scaling) ? scaling : "stretch";
 }
 
 inline void patch_window_settings(WindowJson &target, const WindowJson &patch) {
@@ -28,6 +98,13 @@ inline void patch_window_settings(WindowJson &target, const WindowJson &patch) {
     }
     for (const char *key : {"alwaysOnTop", "rememberWindowBounds", "minimizeOnFocusLoss"})
         if (patch.contains(key) && patch[key].is_boolean()) target[key] = patch[key];
+    if (patch.contains("fullscreenMode")) {
+        if (const auto mode = read_fullscreen_mode(patch["fullscreenMode"]))
+            target["fullscreenMode"] = fullscreen_mode_json(*mode);
+    }
+    if (patch.contains("fullscreenScaling") && patch["fullscreenScaling"].is_string()
+        && valid_fullscreen_scaling(patch["fullscreenScaling"].get<std::string>()))
+        target["fullscreenScaling"] = patch["fullscreenScaling"];
 }
 
 struct WindowBounds {

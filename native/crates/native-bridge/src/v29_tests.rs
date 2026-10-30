@@ -42,6 +42,7 @@ fn sample_recording(options: BhRecordOptionsV29) -> recording::ReplayData {
         cosmetic: vec![],
         inspect: vec![],
         packed_loadout: None,
+            segments: Vec::new(),
     }
 }
 
@@ -81,12 +82,39 @@ fn bhts_roundtrip_timed_flag_and_strict_recognized_trailer() {
 }
 
 #[test]
+fn null_binds_flag_matches_the_website_header() {
+    let plain = sample_recording(BhRecordOptionsV29::default())
+        .encode_raw()
+        .unwrap();
+    assert_eq!(u16::from_le_bytes(plain[6..8].try_into().unwrap()) & 8, 0);
+    let info: serde_json::Value =
+        serde_json::from_slice(replay::Decoded::parse(&plain).unwrap().info.as_bytes()).unwrap();
+    assert!(info.get("nullBinds").is_none());
+    let raw = sample_recording(BhRecordOptionsV29 {
+        null_binds: 1,
+        ..BhRecordOptionsV29::default()
+    })
+    .encode_raw()
+    .unwrap();
+    // replay.ts FLAG_NULL_BINDS = 1 << 3
+    assert_eq!(u16::from_le_bytes(raw[6..8].try_into().unwrap()) & 8, 8);
+    let info: serde_json::Value =
+        serde_json::from_slice(replay::Decoded::parse(&raw).unwrap().info.as_bytes()).unwrap();
+    assert_eq!(info["nullBinds"], true);
+    let invalid = BhRecordOptionsV29 {
+        null_binds: 2,
+        ..BhRecordOptionsV29::default()
+    };
+    assert!(invalid.checked().is_err());
+}
+
+#[test]
 fn v29_layout_freezing_and_observation_preserve_simulation() {
-    assert_eq!(size_of::<BhRecordOptionsV29>(), 20);
+    assert_eq!(size_of::<BhRecordOptionsV29>(), 24);
     assert_eq!(size_of::<BhTimingSegmentV2>(), 72);
-    assert_eq!(bh_v29_check_abi(1, 20, 72), 1);
-    assert_eq!(bh_v29_check_abi(2, 20, 72), 0);
-    assert_eq!(bh_v29_check_abi(1, 24, 72), 0);
+    assert_eq!(bh_v29_check_abi(1, 24, 72), 1);
+    assert_eq!(bh_v29_check_abi(2, 24, 72), 0);
+    assert_eq!(bh_v29_check_abi(1, 20, 72), 0);
     let fixture = Fixture::new();
     let map = fixture.file("fixture.bsp", &bsp(&[]));
     unsafe {
@@ -121,7 +149,22 @@ fn v29_layout_freezing_and_observation_preserve_simulation() {
         options.timed_input = 1;
         assert_eq!(bh_record_options_v29(c, &options), 1);
         options.timed_input = 0;
+        options.null_binds = 1;
         assert_eq!(bh_record_options_v29(c, &options), 1);
+        options.null_binds = 0;
+        assert_eq!(bh_record_options_v29(c, &options), 1);
+        assert_eq!(
+            (*c).map
+                .as_ref()
+                .unwrap()
+                .recorder
+                .as_ref()
+                .unwrap()
+                .data
+                .options
+                .null_binds,
+            1
+        );
         assert_eq!(
             (*c).map
                 .as_ref()

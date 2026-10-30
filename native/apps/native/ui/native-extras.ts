@@ -8,9 +8,34 @@ import { keyLabel, prefs } from "../../web/src/ui/settings";
 import { registerSettingsSection } from "../../web/src/ui/settings-registry";
 import { uiSound } from "./audio";
 import { DEFAULT_BINDS, nativeKeyCode, state } from "./bridge";
-import { hudEditor } from "./hud-editor";
 import { followHost, nativeChoice, nativeToggle, type Ui } from "./native-rows";
-import { hostHas, sendNativeSettings } from "./prefs-bridge";
+import { WEBSITE_CHAT_BIND } from "./settings-gates";
+import { sendNativeSettings } from "./prefs-bridge";
+
+function inputGroup(ui: Ui): HTMLElement {
+  const group = ui.group(
+    "Native input",
+    nativeChoice(
+      ui,
+      "Mouse backend",
+      "inputBackend",
+      [
+        ["auto", "Auto"],
+        ["sdl", "SDL"],
+        ["raw", "Raw"],
+      ],
+      {
+        desc:
+          "Auto uses SDL. Raw tries IOHID on macOS (Input Monitoring permission) or evdev on Linux (device access). " +
+          "Windows keeps SDL raw input. SDL is the fallback. After changing permissions or reconnecting a mouse, " +
+          "select SDL then Raw to retry. Raw is experimental; check sensitivity before playing.",
+        keywords: "mouse raw input backend hid evdev permission",
+      },
+    ),
+  );
+  followHost(group, ui);
+  return group;
+}
 
 function rendererGroup(ui: Ui): HTMLElement {
   const group = ui.group(
@@ -24,7 +49,7 @@ function rendererGroup(ui: Ui): HTMLElement {
         ["refracted", "Refracted"],
       ],
       {
-        desc: "Refracted water bends what's under the surface, like CS:S. Simple is cheaper.",
+        desc: "Refracted bends what's under the water in every look. The Source look's Water reflections also refract.",
         keywords: "water refraction quality reflections",
       },
     ),
@@ -65,23 +90,6 @@ function jumpStatsGroup(ui: Ui): HTMLElement {
     interval,
   );
   followHost(group, ui);
-  return group;
-}
-
-/** The native HUD's placement canvas, until the host takes the website's layout (and its in-game editor). */
-function positionsGroup(ui: Ui): HTMLElement | null {
-  if (hostHas("hudLayoutWeb")) return null;
-  const canvas = hudEditor(
-    () => state.settings.hudLayout,
-    (layout) => sendNativeSettings({ hudLayout: layout }),
-  );
-  const row = ui.row("Drag to place", canvas, {
-    desc: "Drag an element to move it. Arrow keys move the selected one; Shift moves it less. Dim ones are hidden.",
-    keywords: "hud layout position move drag editor place",
-  });
-  row.classList.add("mn-row");
-  const group = ui.group("Positions", row);
-  followHost(group, ui, () => (canvas as HTMLElement & { paint?: () => void }).paint?.());
   return group;
 }
 
@@ -237,20 +245,15 @@ function bindRow(ui: Ui, action: keyof typeof DEFAULT_BINDS, label: string): HTM
 }
 
 function nativeBindsGroup(ui: Ui): HTMLElement {
-  const group = ui.group("Desktop client", ...NATIVE_BINDS.map(([action, label]) => bindRow(ui, action, label)));
+  // The website's own Chat row (Keys → Run) takes over once it has the chat bind (settings-gates.ts).
+  const rows = NATIVE_BINDS.filter(([action]) => action !== "chat" || !WEBSITE_CHAT_BIND);
+  const group = ui.group("Desktop client", ...rows.map(([action, label]) => bindRow(ui, action, label)));
   followHost(group, ui);
   return group;
 }
 
 function registerNativeHud(): void {
-  registerSettingsSection(
-    "native-hud",
-    (ui) => {
-      const positions = positionsGroup(ui);
-      return positions ? [jumpStatsGroup(ui), positions] : [jumpStatsGroup(ui)];
-    },
-    { advancedUnder: "hud" },
-  );
+  registerSettingsSection("native-hud", (ui) => [jumpStatsGroup(ui)], { advancedUnder: "hud" });
 }
 
 /**
@@ -261,6 +264,7 @@ export const redrawSettings = registerNativeHud;
 
 /** Registers the native rows under the website's sections (call once). */
 export function registerNativeExtras(): void {
+  registerSettingsSection("native-input", (ui) => [inputGroup(ui)], { advancedUnder: "mouse" });
   registerSettingsSection("native-graphics", (ui) => [rendererGroup(ui)], { advancedUnder: "graphics" });
   registerNativeHud();
   registerSettingsSection("native-audio", (ui) => [packsGroup(ui)], { advancedUnder: "audio" });

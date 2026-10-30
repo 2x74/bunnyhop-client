@@ -23,6 +23,12 @@ import { concat, invert34, quatMat, type V3 } from "../player/bunny/rig";
 export const BFLY = { pinZ: 2.35, pinY: 0.3 } as const;
 
 /**
+ * Whirligig (knives/whirligig.ts) spinner: its axle in Knife_Handle's frame (the knife's x, through the blade's root,
+ * the petals' reach `r` clear of the collar under it) and its reach.
+ */
+export const WHIRL = { pos: [0, -0.04, 2.5] as V3, r: 0.94 } as const;
+
+/**
  * Extra bones, parent-local bind (translation only, identity rotation, so each bone's local x is the pin axis):
  *   v_weapon.Bfly_Blade  parent Knife_Handle, at pin A (0, +pinY, pinZ): the blade, rotating about pin A relative to the
  *                        safe handle. Angle 0 = open (blade out of the fist along +z), 180 = closed (folded into the
@@ -32,10 +38,12 @@ export const BFLY = { pinZ: 2.35, pinY: 0.3 } as const;
  *                        180 = closed over the blade's edge; it rotates by -angle about local x.
  * Both closed (180, 180) is the idle; knives/bunnyfly.ts poseBunnyfly() drives them (and can keep the bite handle in
  * the fist instead of the safe one, for flips).
+ *   v_weapon.Whirl_Spin  parent Knife_Handle, at WHIRL.pos: the Whirligig's spinner, turning about the axle (local x).
  */
 export const EXTRA_BONES: { name: string; parent: string; pos: V3 }[] = [
   { name: "v_weapon.Bfly_Blade", parent: "v_weapon.Knife_Handle", pos: [0, BFLY.pinY, BFLY.pinZ] },
   { name: "v_weapon.Bfly_Bite", parent: "v_weapon.Bfly_Blade", pos: [0, -2 * BFLY.pinY, 0] },
+  { name: "v_weapon.Whirl_Spin", parent: "v_weapon.Knife_Handle", pos: WHIRL.pos },
 ];
 
 export interface VmRig {

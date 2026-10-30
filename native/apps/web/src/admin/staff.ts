@@ -3,6 +3,7 @@
 // whoever did it, or the one who did it (POST /admin/log/undo runs the reverse through the same checked paths).
 
 import { act, ago, api, ask, emptyLine, glyph, h, may, me, playerLink, reroute, rooms, staffShield, table, timeCell, when, type ModRow, type View, fill } from "./core";
+import { logLinks } from "./context";
 import { actionWords, detailSentence } from "./words";
 import { stamp } from "./ui";
 import { MOD_BAN_MAX_MINUTES, outranks } from "../moderation/staff";
@@ -106,7 +107,7 @@ function modLine(e: ModRow, withTarget: boolean): HTMLTableRowElement {
     h("td", { class: "nowrap" }, e.actor_id === "token" ? h("span", { class: "faint" }, "Admin token") : playerLink(e.actor_id, e.actor_name), e.source === "room" ? h("span", { class: "sub-line" }, "in a room") : null),
     h("td", { class: "nowrap" }, h("span", { class: `act-word ${k}` }, w), e.undone_at ? h("span", { class: "sub-line", title: when(e.undone_at) }, `undone ${ago(e.undone_at)}`) : null),
     withTarget ? h("td", null, e.target_user ? playerLink(e.target_user, e.target_name) : (e.target_name ?? "")) : null,
-    h("td", { class: "msg" }, detailSentence(e.action, e.details, e.room_id)),
+    h("td", { class: "msg" }, detailSentence(e.action, e.details, e.room_id), h("span", { class: "log-links" }, logLinks(e))),
     h("td", { class: "acts" }, undo ? h("span", { class: "hover-acts" }, undo) : null),
   );
 }

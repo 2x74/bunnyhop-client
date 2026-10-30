@@ -103,13 +103,15 @@ export function tierTag(tier: number | null | undefined): HTMLElement {
 }
 
 /** A map line: chip, name, tier, and an optional track ("b1"). `href`: the name links there. */
+/** A map name with its chip and tier; the name links to the map's runs in the panel (`href`: elsewhere, "" for none). */
 export function mapLine(name: string, o: { tier?: number | null; track?: number; href?: string; style?: string } = {}): HTMLElement {
   const tier = o.tier !== undefined ? o.tier : mapTier(name);
+  o = { ...o, href: o.href ?? `#/runs?map=${encodeURIComponent(name)}` };
   return h(
     "span",
     { class: "map-line" },
     mapArt(name),
-    o.href ? h("a", { href: o.href, class: "map-name" }, name) : h("span", { class: "map-name" }, name),
+    o.href ? h("a", { href: o.href, class: "map-name", title: o.href.startsWith("#/runs?map=") ? "Runs on this map" : undefined }, name) : h("span", { class: "map-name" }, name),
     o.track ? h("span", { class: "faint" }, `b${o.track}`) : null,
     tier !== null || o.tier !== undefined ? tierTag(tier) : null,
     o.style ? h("span", { class: "faint" }, o.style) : null,

@@ -10,6 +10,7 @@ export const KNIFE_IDS = [
   "golden",
   "thornback",
   "thistle",
+  "whirligig",
 ] as const;
 export function knifeById(value: string): { id: string; cosmeticId: string } | undefined {
   const id = value.replace(/^knife-/, "");

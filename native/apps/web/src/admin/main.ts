@@ -14,7 +14,7 @@ import { installPress, hopArc } from "./ui";
 import { $, api, avatar, cachedMe, clearKeys, h, may, me, NotAdmin, ROLE_WORD, setMe, setRouter, setToken, staffShield, token, append, type Me, type View } from "./core";
 import { GOTO_KEYS, installPalette } from "./palette";
 import type { Permission } from "../moderation/staff";
-import { closeDrawer, installDrawer } from "./drawer";
+import { closeDrawer, installDrawer, openDrawer } from "./drawer";
 import { loadMapIndex } from "./art";
 import { hopIndicator } from "../ui/hop";
 import { queueView, refreshQueueBadge } from "./queue";
@@ -24,12 +24,15 @@ import { acBoardView, reportBoardView } from "./board";
 import { closeMenu } from "./thread";
 import { runsView, signalsView } from "./runs";
 import { namesView, networkView, playerView, playersView } from "./players";
-import { announceView, feedbackView, refreshFeedbackBadge } from "./inbox";
+import { announceView, feedbackView, setFeedbackBadge } from "./inbox";
 import { mapsView, recordsView2, supportersView } from "./boards";
 import { gauntletsView } from "./gauntlets";
 import { mappersView } from "./mappers";
 import { pulseView } from "./pulse";
 import { logView, teamView } from "./staff";
+import { closePeek } from "./peek";
+import { showShortcuts } from "./shortcuts";
+import { onLive, startLive } from "./watch";
 
 // ---------------------------------------------------------------------------------------------
 // Sections and their tabs
@@ -173,7 +176,12 @@ const homeOf = (s: Section) => {
 
 let cleanup: (() => void) | void;
 let palette: ReturnType<typeof installPalette> | null = null;
-let badgeTimer = 0;
+/** The page's own title; the tab shows "(n) " before it while n things wait on staff (watch.ts). */
+let baseTitle = document.title;
+let waitingCount = 0;
+/** start() runs again after a pasted token: the live listener is wired once. */
+let liveWired = false;
+const paintTitle = () => (document.title = `${waitingCount ? `(${waitingCount > 99 ? "99+" : waitingCount}) ` : ""}${baseTitle}`);
 
 /** Slides the rail's raised marker to the active section (on a phone: under it, in the strip). */
 function moveIndicator(animate: boolean): void {
@@ -262,6 +270,8 @@ function skeleton(view: string, detail: boolean): HTMLElement {
 // Auth
 
 function showAuthPage(error?: string): void {
+  // A view still loading from before (the optimistic first route) must not paint over this.
+  routeSeq++;
   cleanup?.();
   cleanup = undefined;
   setMe(null);
@@ -319,6 +329,8 @@ function install(): void {
       const s = SECTIONS.find((x) => x.key === key);
       return s && GOTO_KEYS.includes(key) ? homeOf(s) : null;
     },
+    help: showShortcuts,
+    openPlayer: (id) => void openDrawer(id, document.querySelector<HTMLElement>(`a.pl[data-player="${CSS.escape(id)}"]`)),
   });
   installPress();
   installDrawer();
@@ -338,16 +350,15 @@ function install(): void {
 
 async function start(): Promise<void> {
   install();
-  // Paint the rail and the route's skeleton at once from the last answer in this tab; /admin/me confirms it.
+  // Paint the rail and the route's skeleton at once from the last answer in this tab, and start loading the view with it
+  // (one wave, not two: the view's requests go out beside /admin/me, which confirms who this is).
   const cached = token() || cachedMe() ? cachedMe() : null;
+  let first: Promise<void> | null = null;
   if (cached) {
     setMe(cached);
     paintRail(cached);
     if (!location.hash) history.replaceState(null, "", "#/queue");
-    // The route's own skeleton (its title and tabs, its shape) while /admin/me and the view load.
-    const { view, rest } = markRoute();
-    const detail = view === "player" || (view === "feedback" && rest.length > 0);
-    $("app").replaceChildren(...[pageHead(view, detail), skeleton(view, detail)].filter((x): x is HTMLElement => !!x));
+    first = route();
   }
   let fresh: Me;
   try {
@@ -360,16 +371,22 @@ async function start(): Promise<void> {
   const same = cached && cached.id === fresh.id && cached.role === fresh.role && (cached.perms ?? []).join() === (fresh.perms ?? []).join();
   setMe(fresh);
   if (!same) paintRail(fresh);
-  void refreshFeedbackBadge();
-  void refreshQueueBadge();
-  // Badges: once a minute while the tab is visible.
-  badgeTimer ||= window.setInterval(() => {
-    if (document.hidden) return;
-    void refreshFeedbackBadge();
-    void refreshQueueBadge();
-  }, 60_000);
+  // Badges and the tab title follow the live stamp (watch.ts: every 15 s while the tab is visible). The Queue's own
+  // number is its list's (the Queue view sets it); elsewhere it is read once the view is up, then on live changes.
+  if (!liveWired) onLive((s, changed, initial) => {
+    const fb = s.waiting.feedback;
+    if (fb) setFeedbackBadge(fb.waiting);
+    waitingCount = (fb?.waiting ?? 0) + (s.waiting.flags ?? 0);
+    paintTitle();
+    if (!initial && changed.has("waiting") && !location.hash.startsWith("#/queue")) void refreshQueueBadge();
+  });
+  liveWired = true;
   if (!location.hash) history.replaceState(null, "", "#/queue");
-  await route();
+  // The view's requests go out first; the live beat right behind them.
+  const shown = !same || !first ? route() : first;
+  startLive();
+  await shown;
+  if (!location.hash.startsWith("#/queue")) setTimeout(() => void refreshQueueBadge(true), 1500);
 }
 
 /** The rail and the tab strip for the current hash (before the view loads). */
@@ -415,6 +432,7 @@ async function route(): Promise<void> {
   cleanup = undefined;
   clearKeys();
   closeDrawer();
+  closePeek();
   closeMenu();
   const { view, rest, qs } = markRoute();
   const detail = view === "player" || (view === "feedback" && rest.length > 0);
@@ -435,7 +453,8 @@ async function route(): Promise<void> {
   }
   root.dataset.section = sectionOf(view).id;
   root.dataset.detail = detail ? "1" : "";
-  document.title = `${detail ? (view === "player" ? "Player" : "Ticket") : sectionOf(view).label} · bunnyhop.lol admin`;
+  baseTitle = `${detail ? (view === "player" ? "Player" : "Ticket") : sectionOf(view).label} · bunnyhop.lol admin`;
+  paintTitle();
   root.classList.remove("enter");
   try {
     const c = await VIEWS[view](body, new URLSearchParams(qs), rest);

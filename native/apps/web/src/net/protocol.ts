@@ -94,7 +94,12 @@ export const SF_TELEPORT = 8;
  * (EXT_WEAPONS) a shot. Older clients ignore it.
  */
 export const SF_SLASH = 16;
-/** Cosmetic: a carrot stab (secondary attack) since the previous sample. */
+/**
+ * Cosmetic: a carrot stab (secondary attack) since the previous sample; with a gun in hand (EXT_WEAPONS, 0.0.29) a
+ * reload started or a tube gun's shell went in (third-person reload gesture). Sent only on samples without SF_SLASH.
+ * Older clients ignore SF_STAB with a gun (a gun "attack" that isn't primary plays nothing), and the room relays it
+ * like any attack flag (rate limited with the shots), so no room change.
+ */
 export const SF_STAB = 32;
 /**
  * Cosmetic: the inspect (viewmodel/inspects/combo.ts), a 2-bit field in bits 6-7 (SF_INSPECT_MASK): 1 = an inspect
@@ -143,7 +148,7 @@ export const TIMER_RUNNING = 2;
 export const TIMER_FINISHED = 3;
 
 /** Wire order of styles (frozen: never reorder, only append). */
-export const WIRE_STYLES: readonly StyleId[] = ["autohop", "legit", "wonly", "sideways", "hsw", "autostrafe", "scroll", "lowgrav"];
+export const WIRE_STYLES: readonly StyleId[] = ["autohop", "legit", "wonly", "sideways", "hsw", "autostrafe", "scroll", "lowgrav", "segmented"];
 export const styleIndex = (s: string): number => Math.max(0, WIRE_STYLES.indexOf(s as StyleId));
 export const styleAt = (i: number): StyleId | null => WIRE_STYLES[i] ?? null;
 
@@ -669,7 +674,12 @@ export type ClientMsg =
   | { t: "rtv" }
   | { t: "nominate"; map: string }
   /** Start/stop spectating (target slot, or null to play again). */
-  | { t: "spec"; target: number | null };
+  | { t: "spec"; target: number | null }
+  /**
+   * (0.0.30) The knife and finish held now (the knife pool's pick, player/cosmetics.ts): the room checks the pair is
+   * the player's equipped one or in their saved pool and patches their roster loadout. Older servers drop it.
+   */
+  | { t: "knife"; knife: string; finish: string };
 
 /** Validates a client control frame. Returns null for anything malformed (the room drops it). */
 export function parseClientMsg(text: string): ClientMsg | null {
@@ -692,6 +702,8 @@ export function parseClientMsg(text: string): ClientMsg | null {
       return { t: "rtv" };
     case "nominate":
       return typeof o.map === "string" && o.map.length <= 64 ? { t: "nominate", map: o.map } : null;
+    case "knife":
+      return typeof o.knife === "string" && typeof o.finish === "string" && o.knife.length <= 48 && o.finish.length <= 48 ? { t: "knife", knife: o.knife, finish: o.finish } : null;
     case "spec":
       if (o.target === null) return { t: "spec", target: null };
       return Number.isInteger(o.target) && (o.target as number) >= 0 && (o.target as number) < 256 ? { t: "spec", target: o.target as number } : null;

@@ -111,3 +111,30 @@ fn overlays_never_change_the_run() {
         assert_eq!(a.tick, b.tick);
     }
 }
+
+/// v19 scripts use map outputs, or add runtime outputs for Liminal / Treason's bhop blocks. Both already draw.
+#[test]
+fn v19_script_connections_are_in_the_overlay() {
+    for map in ["bhop_ceaseless", "bhop_retrowave", "bhop_k2", "bhop_k3", "bhop_api_kowka", "kz_bhop_liminal", "bhop_treason"] {
+        let Some((game, drawn)) = load(map) else { continue };
+        let before = game.snapshot_bytes();
+        let brushes = game.overlay_brushes(&drawn);
+        let mut scripted = 0;
+        for (i, e) in game.entities.iter().enumerate() {
+            if !matches!(e.classname(), "trigger_multiple" | "trigger_once") || e.get("model").is_none() {
+                continue;
+            }
+            let connected = e.pairs.iter().any(|(k, v)| k.to_ascii_lowercase().starts_with("on") && v.to_ascii_lowercase().contains("script"));
+            let block = e.get("vscripts") == Some("bhopblocks_ent.nut");
+            if !connected && !block {
+                continue;
+            }
+            scripted += 1;
+            assert!(brushes.iter().any(|b| b.entity == Some(i) && b.kind <= OVERLAY_OTHER), "{map}: script trigger {i}");
+        }
+        if matches!(map, "bhop_ceaseless" | "bhop_api_kowka" | "kz_bhop_liminal" | "bhop_treason") {
+            assert!(scripted > 0, "{map}: expected script connections");
+        }
+        assert_eq!(game.snapshot_bytes(), before, "{map}: overlay queries are read-only");
+    }
+}

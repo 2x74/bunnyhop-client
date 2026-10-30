@@ -1,5 +1,5 @@
 import { appHref } from "../platform/navigation";
-import { setPlayerGlow } from "../player/cosmetics";
+import { getHeldLoadout, onHeldLoadout, setPlayerGlow } from "../player/cosmetics";
 import { lastKnownMe } from "../api";
 import { takeFreeCursor } from "../free-cursor";
 import { openFeedback } from "../feedback/state";
@@ -21,7 +21,7 @@ import * as THREE from "three";
 import { EVENT_JUMPED, EVENT_TELEPORTED, traceRay, type Core, type PlayerState } from "../core";
 import type { Input, UserCmd } from "../input";
 import type { RunSession } from "../session";
-import type { Action } from "../ui/settings";
+import { bindLabel, type Action } from "../ui/settings";
 import { formatTime } from "../timer";
 import { IN_WEAPON_COMMAND_MASK } from "../weapon-rules";
 import { ATTACK_STAB } from "../viewmodel/events";
@@ -127,6 +127,8 @@ export class Multiplayer {
   private jumped = false;
   /** SF_SLASH / SF_STAB since the last sample. */
   private attackFlags = 0;
+  /** A gun reload (or a shell going in) waiting for a sample without a shot (onGunReload). */
+  private gunReload = false;
   /** Inspect field for the next sample (protocol.ts SF_INSPECT_*): a start / next event, else the held level. */
   private inspectSig = 0;
   private inspectHeld = false;
@@ -145,9 +147,27 @@ export class Multiplayer {
   private uiAt = 0;
   private navigating = false;
   private status: RoomStatus = "connecting";
+  /** A knife pool swap waiting to be sent (sendHeldKnife after a pause, so restart spam sends one). */
+  private knifeTimer = 0;
+
+  /**
+   * The knife and finish you hold (the knife pool's pick) when the room shows another one for you: the room checks the
+   * pair against your saved pool and patches your roster entry (rooms/room.ts holdKnife).
+   */
+  private sendHeldKnife(): void {
+    const shown = this.players.players.get(this.you)?.info.loadout;
+    const held = getHeldLoadout();
+    if (!shown || (shown.knife === held.knife && shown.finish === held.finish)) return;
+    this.conn.send({ t: "knife", knife: held.knife, finish: held.finish });
+  }
 
   constructor(private o: MultiplayerInit) {
     this.specOnJoin = o.spectate ?? null;
+    // Knife pool swaps (player/cosmetics.ts): the others see the knife you hold now, once you've stopped restarting.
+    onHeldLoadout(() => {
+      clearTimeout(this.knifeTimer);
+      this.knifeTimer = window.setTimeout(() => this.sendHeldKnife(), 1500);
+    });
     const hud = o.session.hud;
     const root = document.getElementById("hud")!;
     this.chat = new ChatBox(hud.chatEl);
@@ -245,6 +265,8 @@ export class Multiplayer {
     if (this.spectating !== null) return;
     this.weapon = weapon;
     this.silenced = silenced;
+    // (A reload still waiting when the gun went away is dropped: SF_STAB with the knife would be a stab.)
+    if (weapon === null || weapon < 2) this.gunReload = false;
     this.netTick++;
     if (events & EVENT_JUMPED) this.jumped = true;
     if (events & EVENT_TELEPORTED) this.teleported = true;
@@ -252,6 +274,12 @@ export class Multiplayer {
       const p = s.position;
       const v = s.velocity;
       const prev = this.lastSample;
+      // A gun reload rides SF_STAB on a sample without a shot (protocol.ts SF_STAB: older clients ignore SF_STAB with a
+      // gun in hand, and one carrying both bits would read as a stab to them, losing the shot); else the next sample.
+      if (this.gunReload && !(this.attackFlags & (SF_SLASH | SF_STAB))) {
+        this.attackFlags |= SF_STAB;
+        this.gunReload = false;
+      }
       let flags = (s.grounded ? SF_GROUNDED : 0) | (s.crouched ? SF_CROUCHED : 0) | (this.jumped ? SF_JUMPED : 0) | this.attackFlags | ((this.inspectSig || (this.inspectHeld ? 3 : 0)) << SF_INSPECT_SHIFT);
       // Restarts reset the core without an event: catch any jump the movement can't explain.
       if (this.teleported || !prev || Math.hypot(p[0] - prev.x, p[1] - prev.y, p[2] - prev.z) > Math.hypot(v[0], v[1], v[2]) * 0.05 + 48) flags |= SF_TELEPORT;
@@ -269,7 +297,8 @@ export class Multiplayer {
     }
   }
 
-  frame(camera: THREE.PerspectiveCamera, dt: number): boolean {
+  /** `poseBehind`: players behind the camera are posed too (RemotePlayers.frame). */
+  frame(camera: THREE.PerspectiveCamera, dt: number, poseBehind = true): boolean {
     const now = performance.now();
     let moved = false;
     if (this.spectating !== null) {
@@ -292,7 +321,7 @@ export class Multiplayer {
         inStart: rt?.status === TIMER_START,
       });
     } else this.players.inEye = null;
-    this.players.frame(camera, dt, now);
+    this.players.frame(camera, dt, now, poseBehind);
     if (now - this.uiAt > 200) {
       this.uiAt = now;
       this.refreshUi(now);
@@ -301,6 +330,14 @@ export class Multiplayer {
   }
 
   onAction(a: Action): boolean {
+    if (a === "chat") {
+      if (!this.chat.isOpen && this.o.input.locked) {
+        this.o.input.releaseAll();
+        this.chat.open();
+        this.o.input.freeCursor();
+      }
+      return true;
+    }
     if (this.spectating !== null && (a === "restart" || a === "restartMain" || a === "restartBonus")) {
       this.stopSpectating();
       return true;
@@ -324,6 +361,15 @@ export class Multiplayer {
   onShot(): void {
     if (this.spectating !== null) return;
     this.attackFlags |= SF_SLASH;
+  }
+
+  /**
+   * Your gun started a reload, or a tube gun's shell went in: SF_STAB on the next sample without a shot, which receivers
+   * read as a reload when the sample's weapon is a gun (protocol.ts SF_STAB). Only ever with a gun in hand.
+   */
+  onGunReload(): void {
+    if (this.spectating !== null) return;
+    this.gunReload = true;
   }
 
   /** An inspect trick started (combo.ts SIG_START / SIG_NEXT): sent with the next sample (SF_INSPECT_*). */
@@ -376,6 +422,7 @@ export class Multiplayer {
         if (own?.id === lastKnownMe()?.id) setPlayerGlow(own?.playerGlow ?? null);
         for (const [slot, meta] of Object.entries(m.metas)) this.players.setMeta(Number(slot), meta, now);
         for (const [slot, w] of Object.entries(m.weapons ?? {})) this.players.setWeapon(Number(slot), w);
+        this.sendHeldKnife();
         this.teleported = true;
         this.lastSample = null;
         if (this.spectating !== null) {
@@ -390,7 +437,7 @@ export class Multiplayer {
         this.race.onState(m.race ?? null);
         this.race.connected();
         this.setChange(m.change);
-        this.chat.add({ kind: "local", text: `Connected to ${m.room.name} (${m.players.length}/${m.room.maxPlayers}) · ${m.map.name}. Y chat · Tab scores · N spectate · type rtv / nominate / timeleft` });
+        this.chat.add({ kind: "local", text: `Connected to ${m.room.name} (${m.players.length}/${m.room.maxPlayers}) · ${m.map.name}. ${bindLabel("chat") ?? "Settings → Keys →"} chat · Tab scores · N spectate · type rtv / nominate / timeleft` });
         if (m.room.private) this.lobbyIntro(m.room.id);
         if (this.specOnJoin) {
           // Straight from the friends list: watching before the first sample goes out, so you never spawn.
@@ -664,14 +711,7 @@ export class Multiplayer {
       this.menu.key(Number(digit[1]));
       return;
     }
-    // Bound actions keep their keys (rebinding Y / N / U to something else wins).
-    if ((e.code === "KeyY" || e.code === "KeyU") && !this.o.input.isBound(e.code)) {
-      e.preventDefault();
-      this.o.input.releaseAll();
-      this.chat.open();
-      this.o.input.freeCursor();
-      return;
-    }
+    // (The chat key is an action, Settings -> Keys: onAction.) Bound actions keep their keys (rebinding N wins).
     if (e.code === "KeyN" && !this.o.input.isBound(e.code)) {
       e.preventDefault();
       if (this.menu.id.current === "spec") this.menu.hide();

@@ -21,6 +21,7 @@ if (values["prebuilt-resources"]) {
     "target/native-assets/actor-animations.json",
     "target/native-assets/actor-animations.bin",
     "target/native-assets/tp-inspects.json",
+    "target/native-assets/avatar.json",
     "target/native-assets/runner.json",
     "target/native-assets/runner.bin",
     "target/native-assets/audio.json",

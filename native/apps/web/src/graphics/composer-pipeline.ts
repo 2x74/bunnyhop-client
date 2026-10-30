@@ -26,6 +26,8 @@ import type { HybridGI } from "./hybrid-gi/index";
 import { WaterCapture } from "../water-capture";
 import { hdrWorld } from "./source-hdr";
 import { SourceHdrPass } from "./source-hdr-pass";
+import { GammaBlend } from "./gamma-blend";
+import { captureFinishEnvironment } from "../viewmodel/finishes/environment";
 
 
 /**
@@ -167,7 +169,11 @@ export class ComposerPipeline {
       cloud.update(view,{direction:this.lighting!.sun?.direction??new THREE.Vector3(0,1,0),color:this.lighting!.sun?.irradianceColor??this.lighting!.sun?.color??new THREE.Color(0,0,0),ambient:this.lighting!.ambient??new THREE.Color(.18,.2,.22)},timeSeconds,{enabled:true,quality:this.options.cloudQuality,coverage:this.options.cloudCoverage,density:this.options.cloudDensity,baseHeight:Math.max(16384,this.worldTop+2048),seed:1});
     };
     if(cloudOn){(this.clouds??=new CloudRenderer(this.renderer)).resetFrameStats();prepare(camera);}else{this.clouds?.dispose();this.clouds=null;}
-    this.skyBackground.run(scene,asset,{mode:this.skyMode,yaw:this.skyYaw,exposure:this.skyExposure,sun:this.lighting.sun,clouds:cloudOn&&this.clouds?{uniforms:this.clouds.getUniforms(),prepare}:undefined},()=>this.renderFrame(scene,camera,timeSeconds));
+    this.skyBackground.run(scene,asset,{mode:this.skyMode,yaw:this.skyYaw,exposure:this.skyExposure,sun:this.lighting.sun,clouds:cloudOn&&this.clouds?{uniforms:this.clouds.getUniforms(),prepare}:undefined},()=>{
+      // The metal knife finishes' scene reflection (viewmodel/finishes/environment.ts): one cube face, with this frame's sky.
+      if(enabled)captureFinishEnvironment(this.renderer,scene,camera,this.lighting?.sun);
+      this.renderFrame(scene,camera,timeSeconds);
+    });
   }
   private renderFrame(scene: THREE.Scene, camera: THREE.Camera, _timeSeconds = 0): void {
     const config = presetConfig(this.options);
@@ -236,6 +242,10 @@ export class ComposerPipeline {
       if (this.options.spatialAA !== false) this.aa = createSpatialAAPass(this.width, this.height);
       this.composer.addPass(this.scenePass);if(this.hybrid)this.composer.addPass(this.hybrid.getPass());if(this.hybrid?.getStats().core.ready)this.attachHybridDepth(); if (this.gi) this.composer.addPass(this.gi.getPass()); if (this.contact) this.composer.addPass(this.contact); this.composer.addPass(this.exposure = new SourceHdrPass(this.renderer)); this.composer.addPass(this.bloom); this.composer.addPass(this.grade); if (this.shafts) this.composer.addPass(this.shafts); if (this.scattering) this.composer.addPass(this.scattering); if (this.bokeh) this.composer.addPass(this.bokeh); if (this.accumulation) this.composer.addPass(this.accumulation); this.composer.addPass(this.output); if (this.aa) this.composer.addPass(this.aa);
       this.setSize(this.width, this.height);
+      // The scene's depth, for the blended surfaces drawn after the last pass (gamma-blend.ts).
+      this.attachHybridDepth();
+      const scenePass = this.scenePass, renderScene = scenePass.render.bind(scenePass);
+      scenePass.render = (renderer, write, read, delta, mask) => { renderScene(renderer, write, read, delta, mask); if (this.blendPending) this.gammaBlend?.captureDepth(read); };
     }
     this.scenePass!.scene = scene; this.scenePass!.camera = camera;
     if (this.contact) {
@@ -272,11 +282,23 @@ export class ComposerPipeline {
       this.exposure.dt = Math.max(0, _timeSeconds - this.composerTime);
     }
     this.composerTime = _timeSeconds;
-    try { this.composer.render(0); } finally {
+    // Glass and other blended surfaces go on after the last pass, in gamma space like CS:S's LDR path (gamma-blend.ts).
+    const blend = (this.gammaBlend ??= new GammaBlend(this.renderer));
+    this.blendPending = blend.hide(scene);
+    try { this.composer.render(0); } catch (e) { blend.show(); throw e; } finally {
       this.renderer.setRenderTarget(target); this.renderer.setViewport(viewport); this.renderer.setScissor(scissor); this.renderer.setScissorTest(scissorTest);
       this.renderer.autoClear = autoClear; this.renderer.setClearColor(clearColor, clearAlpha);
     }
+    if (!this.blendPending) return;
+    this.blendPending = false;
+    const depth = blend.capturedDepth;
+    if (!depth) { blend.show(); return; }
+    // The last pass drew to the canvas.
+    this.renderer.setRenderTarget(null);
+    try { blend.draw(camera, depth, this.getSourceExposure()); } finally { this.renderer.setRenderTarget(target); }
   }
+  private gammaBlend: GammaBlend | null = null;
+  private blendPending = false;
   /** Current CS:S exposure on maps with HDR lighting (source-hdr-pass.ts), else 1. */
   getSourceExposure(): number { return this.exposure?.enabled ? this.exposure.auto.value : 1; }
   private exposure: SourceHdrPass | null = null;
@@ -292,6 +314,7 @@ export class ComposerPipeline {
     this.shafts?.dispose(); this.shafts = null; this.opaqueDepth.dispose();
     this.composer = null; this.scenePass = null; this.bloom = null; this.grade = null; this.output = null;
     this.water?.dispose(); this.water = null; this.scene = null;
+    this.gammaBlend?.dispose(); this.gammaBlend = null; this.blendPending = false;
   }
   dispose():void{this.resetEffects();this.skyRuntime?.dispose();this.skyRuntime=null;this.boundsScene=null;this.lighting=null;this.lastScene=null;this.lastCamera=null;this.exportLocked=false;this.queuedOptions=null;}
 }

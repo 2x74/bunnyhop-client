@@ -9,7 +9,7 @@ import { DEFAULT_MOUSE_DPI } from "../mouse-settings";
 
 import { DEFAULT_BINDS } from "../binds";
 import { CLASSIC, DEFAULT_KEYS, HUD_ELEMENTS, HUD_SCALE, moveRetiredPlaces, type HudLayout, type KeysPrefs } from "../hud/layout";
-import { VIEWMODEL_POS, VIEWMODEL_POS_V1, VIEWMODEL_REV } from "../viewmodel/defaults";
+import { VIEWMODEL_POS, VIEWMODEL_POS_V1, VIEWMODEL_POS_V2, VIEWMODEL_REV } from "../viewmodel/defaults";
 import { DEFAULT_SSJ, type SsjPrefs } from "../ssj/stats";
 import { DEFAULT_TRIGGER_PREFS, normalizeTriggerPrefs, type TriggerPrefs } from "../triggers/volumes";
 import { DEFAULT_PAINT, type PaintPrefs } from "../paint/prefs";
@@ -35,6 +35,8 @@ export type Action =
   // Leave for the main menu from the game (leave-confirm.ts: asks once during a timed run). Unbound by default.
   | "mainMenu"
   | "hudEditor"
+  // Opens the chat (rooms: net/mp.ts; solo: solo-chat.ts). Y and U by default, like CS:S say / say_team.
+  | "chat"
   | "thirdPerson"
   | "attack"
   | "attack2"
@@ -153,6 +155,9 @@ export interface Prefs {
   rawInput: boolean;
   /** Null binds (null-binds.ts): with A + D or W + S held, the key pressed last wins. Off by default. */
   nullBinds: boolean;
+  /** Release W on jump (w-release.ts): a jump taken holding W lets go of forward until you land or press W again. Off
+   * by default. */
+  wRelease: boolean;
   /** CS:S `cl_yawspeed`: +left / +right, degrees per second (turn-binds.ts YAW_SPEED_RANGE). Fixed per recording. */
   yawSpeed: number;
   /** CS:S `cl_anglespeedkey`: the turn speed's multiplier while Fast turn is held (ANGLE_SPEED_KEY_RANGE). */
@@ -353,7 +358,8 @@ export interface Prefs {
     z: number;
     /**
      * Revision of the default framing these values were saved under (VIEWMODEL_REV): migrateViewmodel moves players
-     * who never changed it to the current default once (v0.0.6: lower and smaller), and leaves custom ones alone.
+     * who never changed it to the current default once (v0.0.6: lower and smaller; v0.0.29: wider, hands and sleeves in
+     * view), and leaves custom ones alone.
      */
     rev: number;
   };
@@ -389,6 +395,7 @@ export const ACTIONS: { id: Action; label: string }[] = [
   { id: "cycleStyle", label: "Switch style" },
   { id: "mainMenu", label: "Main menu" },
   { id: "hudEditor", label: "Edit HUD layout" },
+  { id: "chat", label: "Chat" },
   { id: "thirdPerson", label: "Third person (practice)" },
   { id: "attack", label: "Slash (carrot)" },
   { id: "attack2", label: "Stab (carrot)" },
@@ -480,6 +487,7 @@ export const DEFAULT_PREFS: Prefs = {
   invertY: false,
   rawInput: true,
   nullBinds: false,
+  wRelease: false,
   yawSpeed: 210,
   angleSpeedKey: 2,
   spikeFilter: true,
@@ -581,14 +589,18 @@ function migrate(raw: Record<string, unknown>): Record<string, unknown> {
 }
 
 /**
- * Viewmodel framing saved before v0.0.6 (no `rev`): if the player never changed it (FOV and offsets all at the old
- * defaults, or absent) it moves to the new default (VIEWMODEL_POS); any change of theirs keeps all four as they are.
- * Either way it's marked current, so choosing 54 / 0 / 0 / 0 again later sticks.
+ * Viewmodel framing saved under an older default (no `rev`: before v0.0.6, framing 1; rev 2: v0.0.6-v0.0.28): the whole
+ * prefs object is saved on any change, defaults included, so a stored framing equal to the default it was saved under
+ * (FOV and all three offsets, absent counting as equal) is one the player never changed: it moves to the current default
+ * (VIEWMODEL_POS). Any change of theirs keeps all four as they are. Either way it's marked current, so choosing an old
+ * framing again later (the CS:S preset is rev 2's) sticks.
  */
 function migrateViewmodel(raw: Record<string, unknown>): void {
   const v = raw?.viewmodel as Record<string, unknown> | undefined;
-  if (!v || typeof v !== "object" || Array.isArray(v) || typeof v.rev === "number") return;
-  const old = VIEWMODEL_POS_V1 as Record<string, number>;
+  if (!v || typeof v !== "object" || Array.isArray(v)) return;
+  const rev = typeof v.rev === "number" ? v.rev : 1;
+  if (rev >= VIEWMODEL_REV) return;
+  const old = (rev <= 1 ? VIEWMODEL_POS_V1 : VIEWMODEL_POS_V2) as Record<string, number>;
   if (Object.keys(old).every((k) => v[k] === undefined || v[k] === old[k])) Object.assign(v, VIEWMODEL_POS);
   v.rev = VIEWMODEL_REV;
 }
@@ -816,6 +828,12 @@ export function keyLabel(code: string): string {
   if (code.startsWith("Digit")) return code.slice(5);
   if (code.startsWith("Numpad")) return "Num " + code.slice(6);
   return code;
+}
+
+/** The first key bound to `action`, for people ("Y"), or null while it has none. */
+export function bindLabel(action: Action): string | null {
+  const c = prefs.get().binds[action]?.[0];
+  return c ? keyLabel(c) : null;
 }
 
 /** The game's render pixel ratio: the screen's (capped at 2x, 1x in potato mode) times the resolution scale. */

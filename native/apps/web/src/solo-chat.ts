@@ -1,5 +1,5 @@
-// Chat in solo play: the room chat box (net/hud.ts ChatBox, in the HUD's chat element) for typing commands. Y (or U)
-// opens it like in a room (with the cursor free to scroll it: free-cursor.ts), Enter runs the line through
+// Chat in solo play: the room chat box (net/hud.ts ChatBox, in the HUD's chat element) for typing commands. The chat
+// bind (Settings -> Keys, Y and U by default; main.ts calls open) opens it like in a room (with the cursor free to scroll it: free-cursor.ts), Enter runs the line through
 // chat-commands.ts, Esc closes. Nothing is sent anywhere: commands answer as local lines, room-only ones say so, and
 // plain chat says it goes nowhere. main.ts creates it in solo play (rooms have net/mp.ts) and runs every tick's input
 // through filterInput.
@@ -15,7 +15,7 @@ export interface SoloChatInit {
   session: RunSession;
   /** main.ts restart (resets the run onto a track's start). */
   restart: (track?: number) => void;
-  /** Whether Y may open the chat now (not over the replay viewer). */
+  /** Whether the chat key may open the chat now (not over the replay viewer). */
   enabled: () => boolean;
   /** The game behind the commands (chat-game.ts): keys for !help, practice, styles, records. */
   game: ChatGame;
@@ -24,6 +24,8 @@ export interface SoloChatInit {
 export class SoloChat {
   readonly chat: ChatBox;
   private ctx: ChatContext;
+  private input: Input;
+  private enabled: () => boolean;
 
   constructor(o: SoloChatInit) {
     const hud = o.session.hud;
@@ -46,19 +48,19 @@ export class SoloChat {
       o.input.recapture();
     };
     this.chat.suggest = (t) => suggestChat(t, "solo");
-    document.addEventListener("keydown", (e) => {
-      if (this.chat.isOpen || !o.input.locked || e.ctrlKey || e.metaKey || e.altKey || e.repeat || !o.enabled()) return;
-      // Same keys as rooms; a bind on Y / U wins.
-      if ((e.code === "KeyY" || e.code === "KeyU") && !o.input.isBound(e.code)) {
-        e.preventDefault();
-        o.input.releaseAll();
-        this.chat.open();
-        o.input.freeCursor();
-      }
-    });
+    this.input = o.input;
+    this.enabled = o.enabled;
     document.addEventListener("pointerlockchange", () => {
       if (!o.input.locked) this.chat.close();
     });
+  }
+
+  /** The chat bind was pressed in game (main.ts): open the chat with the cursor free, as in rooms. */
+  open(): void {
+    if (this.chat.isOpen || !this.input.locked || !this.enabled()) return;
+    this.input.releaseAll();
+    this.chat.open();
+    this.input.freeCursor();
   }
 
   /** No movement or buttons while typing (view angles still follow), as in rooms; a weapon command (!usp) goes through. */

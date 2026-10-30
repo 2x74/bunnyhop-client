@@ -395,7 +395,8 @@ pub extern "C" fn step(forward: f32, side: f32, yaw: f32, pitch: f32, buttons: u
 ///  view angle change pitch, yaw, roll (rotating pushers this tick; see EVENT_ANGLES_CHANGED),
 ///  touch pass x, y, z, crouched (where this tick's trigger touch pass after the move happened, before any
 ///  teleport it caused; NaN after a reset / respawn: `Game::touch_origin`), weapons held, active weapon
-///  (WEAPON_* bits, physics v4: `Game::weapons`), clean movement tick for local jump stats]
+///  (WEAPON_* bits, physics v4: `Game::weapons`), clean movement tick for local jump stats,
+///  v20 categorized ground jump: pre-jump position x/y/z, velocity x/y/z, crouched (NaN position if absent)]
 /// (movement mode: playsrc `Mode` as a number; 6 = ladder. Style key filters exempt ladders, like bhoptimer.)
 #[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
 pub extern "C" fn player_state() -> usize {
@@ -418,6 +419,13 @@ pub extern "C" fn player_state() -> usize {
             c.scratch_f32.push(f32::from(weapons));
             c.scratch_f32.push(f32::from(active));
             c.scratch_f32.push(g.jumpstats_valid as u32 as f32);
+            if let Some(jump) = g.categorized_ground_jump {
+                c.scratch_f32.extend_from_slice(&jump.position);
+                c.scratch_f32.extend_from_slice(&jump.velocity);
+                c.scratch_f32.push(jump.crouched as u32 as f32);
+            } else {
+                c.scratch_f32.extend_from_slice(&[f32::NAN; 7]);
+            }
         }
         c.scratch_f32.len()
     })

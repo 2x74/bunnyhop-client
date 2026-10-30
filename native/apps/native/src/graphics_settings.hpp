@@ -1,4 +1,5 @@
 #pragma once
+#include "look_settings.hpp"
 #include "nlohmann/json.hpp"
 #include <algorithm>
 #include <array>
@@ -10,7 +11,8 @@
 
 namespace native {
 inline nlohmann::json default_graphics_settings() {
-    return {{"ghostPb", true},
+    nlohmann::json settings = {
+            {"ghostPb", true},
             {"ghostWr", true},
             {"ghostCustom", true},
             {"ghostTrail", true},
@@ -37,7 +39,10 @@ inline nlohmann::json default_graphics_settings() {
             {"graphicsBloom", true},
             {"graphicsMaterialResponse", true},
             {"graphicsSkyExposure", 0.},
-            {"paint", {{"color", "#ff4040"}, {"size", "medium"}}}};
+            {"paint", {{"color", "#ff4040"}, {"size", "medium"}}}
+    };
+    settings.update(default_look_settings());
+    return settings;
 }
 
 inline nlohmann::json default_graphics_binds() {
@@ -96,6 +101,7 @@ inline void apply_graphics_quality(nlohmann::json &settings, const std::string &
 
 // settings.hpp calls this before scalar validation. Keys/defaults match settings-keys.ts owned by the menu.
 inline bool patch_graphics_setting(nlohmann::json &out, const std::string &key, const nlohmann::json &value) {
+    if (patch_look_setting(out, key, value)) return true;
     const auto defaults = default_graphics_settings();
     if (!defaults.contains(key)) return false;
     if (key == "paint") {
@@ -157,7 +163,9 @@ struct GraphicsSettings {
     int samples = 0, anisotropy = 8, menu_fps = 0;
     bool bars = false, pixelated = false, fullbright = false, potato = false, source = true;
     bool bloom = true, material_response = true, flashlight = false, tags_players = true, tags_through_walls = false;
+    bool water_reflections = true;
     enum class Background { live, still, off } background = Background::live;
+    LookSettings look;
 
     static GraphicsSettings read(const nlohmann::json &settings) {
         auto values = default_graphics_settings();
@@ -176,7 +184,9 @@ struct GraphicsSettings {
         result.fullbright = values.at("graphicsFullbright");
         result.potato = values.at("graphicsPotato");
         result.source = settings.value("sourceLook", true);
+        result.look = LookSettings::read(values, result.source);
         result.bloom = values.at("graphicsBloom");
+        result.water_reflections = values.at("graphicsWaterReflections");
         result.material_response = values.at("graphicsMaterialResponse");
         result.flashlight = values.at("graphicsFlashlight");
         result.sky_exposure = values.at("graphicsSkyExposure");
@@ -227,7 +237,7 @@ struct GraphicsMenuPacer {
         game_limit = settings.value("fpsLimit", 500);
     }
 
-    template <class Delay>
+    template <class Delay, class PreciseDelay>
     void
     frame(bool has_core,
           bool live_backdrop,
@@ -237,7 +247,8 @@ struct GraphicsMenuPacer {
           bool captured,
           bool menu_visible,
           double spent,
-          Delay delay) const {
+          Delay delay,
+          PreciseDelay precise_delay) const {
         if (pace(menu_visible, spent, delay)) return;
         constexpr double home_frame_seconds = 1. / 62;
         constexpr uint64_t idle_delay_ns = 10000000;
@@ -247,7 +258,7 @@ struct GraphicsMenuPacer {
             delay(idle_delay_ns);
         else if (!scripted && game_limit > 0) {
             const double target = 1. / game_limit;
-            if (spent < target) delay(uint64_t((target - spent) * 1e9));
+            if (spent < target) precise_delay(uint64_t((target - spent) * 1e9));
         }
     }
 

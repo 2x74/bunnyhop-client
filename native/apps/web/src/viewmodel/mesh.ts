@@ -41,3 +41,14 @@ export function viewmodelGeometry(knife: KnifeDef = carrot, glove: GloveStyleId 
   if (!g) cached.set(id, (g = buildViewmodelGeometry(knife, glove)));
   return g;
 }
+
+/** Whether the pair's geometry is built (or seeded) already. */
+export function hasViewmodelGeometry(knifeId: string, glove: GloveStyleId): boolean {
+  return cached.has(`${knifeId}|${glove}`);
+}
+
+/** A pair's geometry built elsewhere (the prebuild worker, player/bunny/prebuild.ts): what viewmodelGeometry returns from now on. */
+export function seedViewmodelGeometry(knifeId: string, glove: GloveStyleId, g: THREE.BufferGeometry): void {
+  const id = `${knifeId}|${glove}`;
+  if (!cached.has(id)) cached.set(id, g);
+}

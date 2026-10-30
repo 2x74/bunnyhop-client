@@ -79,6 +79,179 @@ static double energy(const std::vector<float> &pcm) {
     return sum;
 }
 
+// Top half red, bottom half blue, in the bottom-up row order OpenGL reads back.
+static std::vector<uint8_t> split_frame(int width, int height) {
+    std::vector<uint8_t> frame(size_t(width) * height * 4);
+    for (int y = 0; y < height; ++y)
+        for (int x = 0; x < width; ++x) {
+            const size_t i = size_t(y * width + x) * 4;
+            frame[i] = y < height / 2 ? 240 : 10;
+            frame[i + 1] = 20;
+            frame[i + 2] = y < height / 2 ? 10 : 240;
+            frame[i + 3] = 255;
+        }
+    return frame;
+}
+
+static bool has(const std::vector<std::string> &arguments, const std::string &a, const std::string &b) {
+    for (size_t i = 0; i + 1 < arguments.size(); ++i)
+        if (arguments[i] == a && arguments[i + 1] == b) return true;
+    return false;
+}
+
+static void codec_choices() {
+    const std::string listing = " V....D libx264              libx264 H.264\n"
+                                " V....D h264_videotoolbox    VideoToolbox H.264\n"
+                                " V....D libsvtav1            SVT-AV1\n"
+                                " VF...D prores_ks            Apple ProRes\n"
+                                " A....D aac                  AAC\n"
+                                " V....D notacodec            something else\n";
+    const auto names = native::listed_video_encoders(listing);
+    assert((names == std::vector<std::string>{"libx264", "h264_videotoolbox", "libsvtav1", "prores_ks", "aac"}));
+    native::VideoEncoders encoders{"ffmpeg", {"libx264", "h264_videotoolbox", "libsvtav1", "prores_ks"}, true};
+    native::VideoOptions options;
+    auto choice = native::choose_video_encoder(encoders, options);
+    assert(choice && choice->name == "h264_videotoolbox" && choice->hardware && choice->note.empty());
+    options.encoder = "software";
+    choice = native::choose_video_encoder(encoders, options);
+    assert(choice && choice->name == "libx264" && !choice->hardware);
+    // A hardware encoder that refused the size falls back to software.
+    options.encoder = "hardware";
+    choice = native::choose_video_encoder(encoders, options, {"h264_videotoolbox"});
+    assert(choice && choice->name == "libx264" && !choice->note.empty());
+    options.codec = "av1";
+    choice = native::choose_video_encoder(encoders, options);
+    assert(choice && choice->name == "libsvtav1" && choice->codec == "av1");
+    options.codec = "hevc";
+    choice = native::choose_video_encoder(encoders, options);
+    assert(choice && choice->codec == "h264" && choice->note.find("HEVC") != std::string::npos);
+    options.codec = "prores";
+    assert(native::choose_video_encoder(encoders, options)->name == "prores_ks");
+    assert(native::video_extension("prores") == ".mov" && native::video_extension("ffv1") == ".mkv");
+    assert(native::video_extension("png").empty() && native::video_extension("av1") == ".mp4");
+    options = {};
+    options.width = 1920;
+    options.height = 1080;
+    options.quality = "standard";
+    assert(native::video_bitrate(options) == 14929920);
+    options.width = 3840;
+    options.height = 2160;
+    options.fps = 240;
+    options.quality = "max";
+    assert(native::video_bitrate(options) == 80000000);
+    options.quality = "edit";
+    assert(native::video_bitrate(options) == 240000000);
+}
+
+static void encode_arguments() {
+    native::VideoOptions options;
+    options.fps = 240;
+    const native::VideoEncoderChoice x264{"libx264", "h264", false, ""};
+    auto arguments = native::video_encode_arguments(options, x264, "ffmpeg", "/out.mp4", 10);
+    assert(has(arguments, "-pixel_format", "rgba") && has(arguments, "-framerate", "240"));
+    assert(has(arguments, "-vf", "vflip,scale=out_color_matrix=bt709:out_range=tv,format=yuv420p"));
+    assert(has(arguments, "-crf", "18") && has(arguments, "-g", "480") && has(arguments, "-colorspace", "bt709"));
+    assert(arguments.back() == "/out.mp4" && has(arguments, "-movflags", "+faststart"));
+    options.quality = "edit";
+    arguments = native::video_encode_arguments(options, x264, "ffmpeg", "/out.mp4", 10);
+    assert(has(arguments, "-g", "120") && has(arguments, "-crf", "8"));
+    const native::VideoEncoderChoice toolbox{"hevc_videotoolbox", "hevc", true, ""};
+    arguments = native::video_encode_arguments(options, toolbox, "ffmpeg", "/out.mp4", 10);
+    assert(has(arguments, "-b:v", "240000000") && has(arguments, "-tag:v", "hvc1"));
+    const native::VideoEncoderChoice vaapi{"h264_vaapi", "h264", true, ""};
+    arguments = native::video_encode_arguments(options, vaapi, "ffmpeg", "/out.mp4", 10);
+    assert(has(arguments, "-vaapi_device", "/dev/dri/renderD128"));
+    assert(has(arguments, "-vf", "vflip,scale=out_color_matrix=bt709:out_range=tv,format=nv12,hwupload"));
+    const native::VideoEncoderChoice png{"png", "png", false, ""};
+    arguments = native::video_encode_arguments(options, png, "ffmpeg", "/frames/frame-%06d.png", 10);
+    assert(has(arguments, "-vf", "vflip,format=rgb24") && has(arguments, "-f", "image2"));
+    assert(!has(arguments, "-colorspace", "bt709"));
+    const native::VideoEncoderChoice prores{"prores_ks", "prores", false, ""};
+    arguments = native::video_encode_arguments(options, prores, "ffmpeg", "/out.mov", 10);
+    assert(has(arguments, "-profile:v", "3")
+           && has(arguments, "-vf", "vflip,scale=out_color_matrix=bt709:out_range=tv,format=yuv422p10le"));
+    arguments = native::video_probe_arguments(toolbox, "ffmpeg", 256, 256, 2);
+    assert(arguments.back() == "-" && has(arguments, "-f", "null") && has(arguments, "-video_size", "256x256"));
+    for (const auto size : {std::pair{7680, 4320}, std::pair{1080, 1920}, std::pair{2000, 1000}}) {
+        native::VideoOptions sized;
+        sized.width = size.first;
+        sized.height = size.second;
+        sized.to = 100;
+        native::VideoTimeline::make(sized, 100);
+    }
+    for (const auto size : {std::pair{7682, 4320}, std::pair{1081, 1920}, std::pair{8, 8}}) {
+        native::VideoOptions sized;
+        sized.width = size.first;
+        sized.height = size.second;
+        sized.to = 100;
+        bool rejected = false;
+        try {
+            native::VideoTimeline::make(sized, 100);
+        } catch (...) {
+            rejected = true;
+        }
+        assert(rejected);
+    }
+}
+
+// DNxHR's smallest picture is 256x120.
+constexpr int matrix_width = 256, matrix_height = 144;
+
+// Every encoder this FFmpeg can use writes a file of the right codec and length, picture the right way up.
+static void encoder_matrix(const native::VideoAvailability &available, const std::filesystem::path &directory) {
+    for (const auto &name : available.encoders.usable) {
+        const auto *spec = native::video_encoder_spec(name);
+        if (name == "libaom-av1") continue;
+        native::VideoOptions options;
+        options.width = matrix_width;
+        options.height = matrix_height;
+        options.fps = 30;
+        options.from = 0;
+        options.to = 20;
+        options.audio = false;
+        options.codec = std::string(spec->codec);
+        const native::VideoEncoderChoice choice{name, options.codec, spec->hardware, ""};
+        const auto extension = native::video_extension(options.codec);
+        const auto output = directory / ("matrix-" + name + extension);
+        native::NativeVideoExport encoder;
+        encoder.start(options, output, 6, available.encoder, choice);
+        for (int i = 0; i < 6; ++i) {
+            while (!encoder.can_submit() && encoder.busy())
+                SDL_Delay(2);
+            assert(encoder.submit(split_frame(matrix_width, matrix_height)));
+        }
+        encoder.finish();
+        done(encoder);
+        assert(encoder.status()["state"] == "completed");
+        const auto first = extension.empty() ? output / "frame-000000.png" : output;
+        const auto pixels = command(
+                {available.encoder,
+                 "-v",
+                 "error",
+                 "-i",
+                 first.string(),
+                 "-frames:v",
+                 "1",
+                 "-f",
+                 "rawvideo",
+                 "-pix_fmt",
+                 "rgb24",
+                 "pipe:1"}
+        );
+        const size_t row = matrix_width * 3;
+        assert(pixels.size() == row * matrix_height && pixels[2] > 180 && pixels[row * (matrix_height - 10)] > 180);
+        if (extension.empty()) {
+            assert(std::filesystem::is_regular_file(output / "frame-000005.png"));
+        } else {
+            const auto stream = probe(output)["streams"][0];
+            const auto codec = stream["codec_name"].get<std::string>();
+            assert(codec == (options.codec == "dnxhr" ? "dnxhd" : options.codec));
+        }
+        std::cout << "encoder " << name << " ok\n";
+        std::filesystem::remove_all(output);
+    }
+}
+
 // Feed the actual gameplay cue path with jumps and weapon attacks on ticks
 // that a 30 FPS capture does not render. No generated tone stands in for SFX.
 static void tick(native::ReplayAudioTrack &track, uint32_t n, double dt, bool finish = false) {
@@ -254,8 +427,10 @@ int main(int argc, char **argv) {
         }
         assert(rejected);
     }
+    codec_choices();
+    encode_arguments();
     const auto available = native::NativeVideoExport::probe();
-    if (!available.available) {
+    if (!available.available || !available.encoders.has("libx264") || !available.encoders.aac) {
         std::cout << "Video real-encoder integration unavailable: " << available.reason << '\n';
         return 77;
     }
@@ -265,6 +440,7 @@ int main(int argc, char **argv) {
             / ("bunnyhop video test " + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directory(directory);
     const auto output = directory / "clip ; ' $(literal).mp4";
+    encoder_matrix(available, directory);
     native::NativeVideoExport encoder;
     options.width = options.height = 64;
     options.fps = 30;
@@ -272,14 +448,7 @@ int main(int argc, char **argv) {
     options.from = 0;
     options.to = 20;
     encoder.start(options, output, 6, available.encoder);
-    std::vector<uint8_t> frame(64 * 64 * 3);
-    for (int y = 0; y < 64; ++y)
-        for (int x = 0; x < 64; ++x) {
-            const size_t i = size_t(y * 64 + x) * 3;
-            frame[i] = y < 32 ? 240 : 10;
-            frame[i + 1] = 20;
-            frame[i + 2] = y < 32 ? 10 : 240;
-        }
+    const auto frame = split_frame(64, 64);
     for (int i = 0; i < 6; ++i) {
         while (!encoder.can_submit() && encoder.busy())
             SDL_Delay(2);
@@ -293,7 +462,8 @@ int main(int argc, char **argv) {
             {available.encoder, "-v", "error", "-i", output.string(), "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"}
     );
     assert(pixels.size() == 6 * 64 * 64 * 3);
-    assert(pixels[0] > 200 && pixels[2] < 40 && pixels[64 * 48 * 3 + 2] > 200);
+    // OpenGL rows arrive bottom first: the buffer's first (red) rows are the bottom of the picture.
+    assert(pixels[2] > 200 && pixels[0] < 40 && pixels[64 * 48 * 3] > 200);
     assert(probe(output)["streams"].size() == 1);
     const std::filesystem::path assets =
             argc > 1 ? argv[1] : std::filesystem::path(__FILE__).parent_path() / "../../../target/native-assets";

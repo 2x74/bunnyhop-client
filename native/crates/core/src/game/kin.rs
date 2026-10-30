@@ -171,6 +171,7 @@ pub(super) enum KinKind {
     Motor(Motor),
     PropDoor(super::propdoor::PropDoor),
     RotButton(super::propdoor::RotButton),
+    Momentary(super::momentary::Momentary),
     Fall(Fall),
 }
 
@@ -357,7 +358,7 @@ const SF_DOOR_LOCKED: i64 = 2048;
 // ------------------------------------------------------------------ spawn
 
 impl Kin {
-    fn new(kind: KinKind) -> Self {
+    pub(super) fn new(kind: KinKind) -> Self {
         Self { push: Push { move_done: -1.0, fixangle: true, ..Push::default() }, kind }
     }
 }
@@ -551,6 +552,24 @@ pub(super) fn build_path_track(e: &Entity) -> Data {
 // ------------------------------------------------------------------ Game integration
 
 impl Game {
+    /// Apply reviewed map entity edits after restoring original spawn state, before train Find.
+    /// Never modify source entities or initial_ents: selecting v1..18 restores authored behavior.
+    pub(super) fn initialize_train_entity_edits(&mut self) {
+        let Some(mechanics) = self.map_mechanics.filter(|_| self.mechanics_on()) else { return };
+        for edit in super::map_fixes::TRAIN_ORIENTATION_EDITS_V19.iter().filter(|e| e.map == mechanics.map) {
+            for k in 0..self.kins.len() {
+                let i = self.kins[k];
+                let e = &self.entities[i];
+                if e.classname() == "func_tracktrain" && e.get("targetname") == Some(edit.targetname)
+                    && e.get("model") == Some(edit.model) {
+                    if let KinKind::Train(t) = &mut self.kin_mut(i).kind {
+                        t.orientation_type = edit.orientation_type;
+                    }
+                }
+            }
+        }
+    }
+
     pub(super) fn kin(&self, i: usize) -> &Kin {
         match &self.ents[i].data {
             Data::Kin(k) => k,
@@ -1200,6 +1219,7 @@ impl Game {
             },
             KinKind::Motor(_) => self.motor_think(i),
             KinKind::PropDoor(_) => self.prop_door_anim_think(i),
+            KinKind::Momentary(_) => self.momentary_think(i),
             KinKind::RotButton(b) => {
                 if b.return_think {
                     self.rot_button_return(i);
@@ -1240,6 +1260,7 @@ impl Game {
             KinKind::Motor(_) => {}
             KinKind::PropDoor(_) => self.prop_door_move_done(i),
             KinKind::RotButton(_) => self.rot_button_move_done(i),
+            KinKind::Momentary(_) => self.momentary_move_done(i),
             KinKind::Fall(_) => {}
         }
     }
@@ -1302,7 +1323,7 @@ impl Game {
                     self.damage_player(dmg);
                 }
             }
-            KinKind::Motor(_) | KinKind::PropDoor(_) | KinKind::RotButton(_) | KinKind::Fall(_) => {}
+            KinKind::Motor(_) | KinKind::PropDoor(_) | KinKind::RotButton(_) | KinKind::Momentary(_) | KinKind::Fall(_) => {}
         }
     }
 
@@ -1521,6 +1542,7 @@ impl Game {
             KinKind::Motor(_) => false,
             KinKind::PropDoor(_) => self.prop_door_input(i, input, param, activator),
             KinKind::RotButton(_) => self.rot_button_input(i, input, activator),
+            KinKind::Momentary(_) => self.momentary_input(i, input, param),
             KinKind::Fall(f) => {
                 let active = match input {
                     // CPhysBox::InputEnableMotion / InputWake / InputDisableMotion / InputSleep.

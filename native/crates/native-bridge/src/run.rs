@@ -5,6 +5,9 @@ use super::{
     run_timing::{self, Crossing, FRACTION_UNITS},
 };
 use bunnyhop_core::game::{EVENT_JUMPED, EVENT_RESPAWNED, EVENT_TELEPORTED};
+
+/// Timer rules 2's slow-start escape (website timer.ts START_SLOW_SPEED): this slow on the ground always arms.
+const START_SLOW_SPEED: f64 = 50.0;
 use serde_json::{Value, json};
 
 #[repr(C)]
@@ -212,9 +215,31 @@ impl Timer {
         if self.options.cap_enabled != 0 && speed > f64::from(self.options.prespeed_cap) {
             return false;
         }
-        speed <= 50.0
+        speed <= START_SLOW_SPEED
             || self.ground_since < 0
             || i64::from(s.tick) - self.ground_since >= (0.5 / self.interval + 0.5).floor() as i64
+    }
+    /// Physics v20 can put a restart or floor teleport on the ground and jump in the same command, so no grounded
+    /// tick ever shows up after the step (website timer.ts). The core keeps the pre-jump ground state: a slow
+    /// contact in a start zone arms the run there; a fast bhop landing never does.
+    fn categorized_jump_start(
+        &self,
+        game: Option<&bunnyhop_core::Game>,
+        events: u32,
+        s: BhState,
+    ) -> Option<BhZone> {
+        let jump = game?.categorized_ground_jump?;
+        if events & EVENT_JUMPED == 0 || events & EVENT_RESPAWNED != 0 || s.on_ladder != 0 {
+            return None;
+        }
+        let [vx, vy, _] = jump.velocity.map(f64::from);
+        let speed = (vx * vx + vy * vy).sqrt();
+        let capped = self.options.cap_enabled != 0 && speed > f64::from(self.options.prespeed_cap);
+        if speed > START_SLOW_SPEED || capped {
+            return None;
+        }
+        self.touching(jump.position, jump.crouched, 0, Some(self.state.track))
+            .or_else(|| self.touching(jump.position, jump.crouched, 0, None))
     }
     fn cap(&self, s: BhState) -> Option<[f32; 3]> {
         if self.options.cap_enabled == 0 {
@@ -283,6 +308,17 @@ impl Timer {
             }
         } else {
             let armed = self.valid_start(s) && start.is_some();
+            let jump_start = self.categorized_jump_start(game, events, s);
+            if let Some(zone) = jump_start.filter(|_| !armed && !pass_end) {
+                if self.state.status != 0 {
+                    self.state.update_flags |= 4;
+                }
+                self.state.status = 0;
+                self.state.track = zone.track;
+                self.clear_stats();
+                self.state.pending_start = 0;
+                self.armed = true;
+            }
             if armed && !pass_end {
                 if self.state.status != 0 {
                     self.state.update_flags |= 4;

@@ -23,6 +23,7 @@ public:
 
     RoomState room;
     RoomModes room_modes;
+    NameTagSights tag_sights;
     std::optional<unsigned> observed_spectator;
     uint32_t room_events = 8;
     discord::Settings discord_settings;

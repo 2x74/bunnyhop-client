@@ -6,6 +6,7 @@
 // Reduced motion: no idle turn and no hopping (one still pose), dragging still turns it.
 
 import * as THREE from "three";
+import { compileModel } from "../player/bunny/prebuild";
 import { cosmetic } from "../progression";
 import type { CosmeticLoadout } from "../loadout";
 import { PlayerModel, type PlayerPose } from "../player/model";
@@ -214,6 +215,11 @@ export class BunnyScene {
   }
 
   /** Draws into the renderer's current viewport (w x h CSS pixels). */
+  /** Compiles its programs for `r` (in parallel where the browser can), so its first frame there doesn't link them. */
+  compile(r: THREE.WebGLRenderer): Promise<void> {
+    return compileModel(r, this.scene, this.camera, this.scene, 3000);
+  }
+
   render(r: THREE.WebGLRenderer, w: number, h: number): void {
     const cam = this.camera;
     cam.aspect = w / Math.max(1, h);

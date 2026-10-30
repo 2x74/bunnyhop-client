@@ -121,6 +121,15 @@ export interface KnifeCloud {
 
 const clouds = new Map<string, KnifeCloud>();
 
+/** Whether a knife's cloud is built (or seeded) already. */
+export function hasKnifeCloud(id: string): boolean {
+  return clouds.has(id);
+}
+/** A knife's cloud built elsewhere (the prebuild worker, player/bunny/prebuild.ts): what knifeCloud returns from now on. */
+export function seedKnifeCloud(id: string, c: KnifeCloud): void {
+  if (!clouds.has(id)) clouds.set(id, c);
+}
+
 export function knifeCloud(def: KnifeDef): KnifeCloud {
   let c = clouds.get(def.id);
   if (c) return c;
@@ -128,14 +137,23 @@ export function knifeCloud(def: KnifeDef): KnifeCloud {
   def.build(new KnifeCtx(b, "fp", (p) => p, () => [[0, 1]]));
   const g = b.geometry();
   const P = g.getAttribute("position"), F = g.getAttribute("finishUV");
-  // Welded duplicates (seams, caps) add nothing: keep one point per 0.01 cell.
-  const seen = new Set<string>();
+  // Welded duplicates (seams, caps) add nothing: keep one point per 0.01 cell. (A number key for the cell: a string
+  // per vertex made this most of the first grip solve. Any cell beyond +-500 units, which no knife has, keys by string.)
+  const seen = new Set<number>();
+  const seenFar = new Set<string>();
   const p: number[] = [], grip: number[] = [];
   for (let v = 0; v < P.count; v++) {
     const x = P.getX(v), y = P.getY(v), z = P.getZ(v);
-    const k = `${Math.round(x * 100)},${Math.round(y * 100)},${Math.round(z * 100)}`;
-    if (seen.has(k)) continue;
-    seen.add(k);
+    const X = Math.round(x * 100), Y = Math.round(y * 100), Z = Math.round(z * 100);
+    if (Math.abs(X) < 50000 && Math.abs(Y) < 50000 && Math.abs(Z) < 50000) {
+      const k = (X + 50000) * 1e10 + (Y + 50000) * 1e5 + (Z + 50000);
+      if (seen.has(k)) continue;
+      seen.add(k);
+    } else {
+      const k = `${X},${Y},${Z}`;
+      if (seenFar.has(k)) continue;
+      seenFar.add(k);
+    }
     p.push(x, y, z);
     grip.push(F && Math.round(F.getZ(v)) === PART.grip ? 1 : 0);
   }
@@ -150,11 +168,15 @@ export function knifeCloud(def: KnifeDef): KnifeCloud {
  */
 function cloudAt(cl: KnifeCloud, knife: Float32Array, c: V3, rad: number, gripZ?: [number, number]): { p: Float32Array; grip: Uint8Array; n: number } {
   const p: number[] = [], grip: number[] = [];
+  const m = knife;
   for (let i = 0; i < cl.n; i++) {
-    const z = cl.p[i * 3 + 2];
-    const q = xform(knife, 0, [cl.p[i * 3], cl.p[i * 3 + 1], z]);
-    if ((q[0] - c[0]) ** 2 + (q[1] - c[1]) ** 2 + (q[2] - c[2]) ** 2 > rad * rad) continue;
-    p.push(q[0], q[1], q[2]);
+    const x = cl.p[i * 3], y = cl.p[i * 3 + 1], z = cl.p[i * 3 + 2];
+    // xform(knife, 0, [x, y, z]), without an array per point (the seat solve calls this many times).
+    const q0 = m[0] * x + m[1] * y + m[2] * z + m[3];
+    const q1 = m[4] * x + m[5] * y + m[6] * z + m[7];
+    const q2 = m[8] * x + m[9] * y + m[10] * z + m[11];
+    if ((q0 - c[0]) ** 2 + (q1 - c[1]) ** 2 + (q2 - c[2]) ** 2 > rad * rad) continue;
+    p.push(q0, q1, q2);
     grip.push(cl.grip[i] && (!gripZ || (z >= gripZ[0] && z <= gripZ[1])) ? 1 : 0);
   }
   return { p: Float32Array.from(p), grip: Uint8Array.from(grip), n: grip.length };
@@ -175,31 +197,77 @@ function palmSurface(s: number, palmL: number): number {
  */
 export function palmGap(h: HandFrame, pts: { p: Float32Array; grip: Uint8Array; n: number }): number {
   let best = Infinity;
+  const W = h.wrist, X = h.ax, A = h.across, N = h.n;
   for (let i = 0; i < pts.n; i++) {
     if (!pts.grip[i]) continue;
-    const d: V3 = [pts.p[i * 3] - h.wrist[0], pts.p[i * 3 + 1] - h.wrist[1], pts.p[i * 3 + 2] - h.wrist[2]];
-    const s = dot(d, h.ax), a = dot(d, h.across);
+    // dot(d, ...) with d = point - wrist, without an array per point.
+    const d0 = pts.p[i * 3] - W[0], d1 = pts.p[i * 3 + 1] - W[1], d2 = pts.p[i * 3 + 2] - W[2];
+    const s = d0 * X[0] + d1 * X[1] + d2 * X[2], a = d0 * A[0] + d1 * A[1] + d2 * A[2];
     if (s < 0.3 || s > h.palmL + 0.2 || Math.abs(a) > 1.45) continue;
-    best = Math.min(best, dot(d, h.n) - palmSurface(s, h.palmL));
+    best = Math.min(best, d0 * N[0] + d1 * N[1] + d2 * N[2] - palmSurface(s, h.palmL));
   }
   return best;
 }
 
-/** Gap from finger / thumb segments to the knife (units; < 0 = sunk in): [grip points, any point] per segment. */
-function segGaps(h: HandFrame, f: string, pts: { p: Float32Array; grip: Uint8Array; n: number }, skin: number, out: number[][]): void {
+/**
+ * The knife's points binned in a grid (cells of GRID_CELL units), for segGaps: the solver measures every finger
+ * segment against the knife a few thousand times per grip, and only points near a segment can matter.
+ */
+interface PointGrid {
+  pts: { p: Float32Array; grip: Uint8Array; n: number };
+  cells: Map<number, number[]>;
+}
+const GRID_CELL = 1;
+const cellKey = (ix: number, iy: number, iz: number) => ((ix + 512) * 1024 + (iy + 512)) * 1024 + (iz + 512);
+function pointGrid(pts: { p: Float32Array; grip: Uint8Array; n: number }): PointGrid {
+  const cells = new Map<number, number[]>();
+  for (let i = 0; i < pts.n; i++) {
+    const k = cellKey(Math.floor(pts.p[i * 3] / GRID_CELL), Math.floor(pts.p[i * 3 + 1] / GRID_CELL), Math.floor(pts.p[i * 3 + 2] / GRID_CELL));
+    let c = cells.get(k);
+    if (!c) cells.set(k, (c = []));
+    c.push(i);
+  }
+  return { pts, cells };
+}
+/**
+ * How far past a segment's surface segGaps still measures points (units). The solver only compares gaps with
+ * GRIP_CONTACT and -GRIP_SINK (both < 0), so a point farther than this can't change any of its decisions: segGaps
+ * reports Infinity when no point is this close, where it used to report the (positive) distance to the nearest.
+ */
+const GAP_REACH = 0.1;
+
+/**
+ * Gap from finger / thumb segments to the knife (units; < 0 = sunk in): [grip points, any point] per segment, over the
+ * points within GAP_REACH of it (Infinity when none are).
+ */
+function segGaps(h: HandFrame, f: string, grid: PointGrid, skin: number, out: number[][]): void {
   const j = [1, 2, 3].map((k) => h.joint(`${f}0${k}`));
   const m3 = h.bone(`${f}03`);
   const [tipLen, fr] = TIP[f];
   const tip = xform(m3, 0, [tipLen, 0, 0]);
   const segs: [V3, V3][] = [[j[0], j[1]], [j[1], j[2]], [j[2], tip]];
+  const pts = grid.pts;
   for (let s = 0; s < 3; s++) {
     let g = Infinity, a = Infinity;
     const r = fr * SEG_R[s] + skin;
-    for (let i = 0; i < pts.n; i++) {
-      const d = pointSeg(pts.p, i * 3, segs[s][0], segs[s][1]) - r;
-      if (d < a) a = d;
-      if (pts.grip[i] && d < g) g = d;
-    }
+    const [A, B] = segs[s];
+    const reach = r + GAP_REACH;
+    const x0 = Math.floor((Math.min(A[0], B[0]) - reach) / GRID_CELL), x1 = Math.floor((Math.max(A[0], B[0]) + reach) / GRID_CELL);
+    const y0 = Math.floor((Math.min(A[1], B[1]) - reach) / GRID_CELL), y1 = Math.floor((Math.max(A[1], B[1]) + reach) / GRID_CELL);
+    const z0 = Math.floor((Math.min(A[2], B[2]) - reach) / GRID_CELL), z1 = Math.floor((Math.max(A[2], B[2]) + reach) / GRID_CELL);
+    for (let ix = x0; ix <= x1; ix++)
+      for (let iy = y0; iy <= y1; iy++)
+        for (let iz = z0; iz <= z1; iz++) {
+          const c = grid.cells.get(cellKey(ix, iy, iz));
+          if (!c) continue;
+          for (let q = 0; q < c.length; q++) {
+            const i = c[q];
+            const d = pointSeg(pts.p, i * 3, A, B) - r;
+            if (d > GAP_REACH) continue;
+            if (d < a) a = d;
+            if (pts.grip[i] && d < g) g = d;
+          }
+        }
     out[s][0] = g;
     out[s][1] = a;
   }
@@ -249,7 +317,7 @@ const GRIP_SINK = 0.06;
 export function wrapFingers(h: HandFrame, spec: HoldSpec, knife: Float32Array, wrap: NonNullable<HoldSpec["wrap"]>, def: KnifeDef, glove: GloveStyleId = "knit"): Map<string, V3> {
   const out = new Map<string, V3>();
   const centre = add(h.wrist, scale(h.ax, h.palmL));
-  const pts = cloudAt(knifeCloud(def), knife, centre, 7, wrap.gripZ);
+  const pts = pointGrid(cloudAt(knifeCloud(def), knife, centre, 7, wrap.gripZ));
   const gaps = [[0, 0], [0, 0], [0, 0]];
   for (const f of wrap.fingers) {
     const key = f.toLowerCase() as "index";

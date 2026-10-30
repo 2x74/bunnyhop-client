@@ -39,6 +39,8 @@ type ScriptedEvent = MotionEvent | KeyEvent;
 type Tick = { boundary: number; counts: number; pitch: number; held: number; reports: number };
 type Scenario = {
   name: string;
+  nativeClock?: boolean;
+  videoDriver?: string;
   holdbackMs: number;
   holdbackMaxMs: number;
   events: ScriptedEvent[];
@@ -244,7 +246,7 @@ function key(t: number, code: string, down: boolean, arrival = t): KeyEvent {
 function scenarios(): Scenario[] {
   const out: Scenario[] = [];
   const durations: Record<number, number> = { 1000: 600 * MS, 2000: 320 * MS, 8000: 120 * MS };
-  for (const fps of [60, 100, 144, 240, 360]) {
+  for (const fps of [60, 100, 144, 240, 360, 500, 1000]) {
     for (const hz of [1000, 2000, 8000]) {
       const duration = durations[hz];
       out.push({
@@ -262,6 +264,58 @@ function scenarios(): Scenario[] {
         frames: frames(fps, duration + 20 * MS),
       });
     }
+  }
+  // Alternating short/long frames exercise high-rate attribution across uneven pump boundaries.
+  for (const hz of [2000, 4000, 8000]) {
+    for (const fps of [60, 240, 1000]) {
+      const duration = 600 * MS;
+      const schedule: number[] = [];
+      for (let index = 1, time = START_NS; time < START_NS + duration + 20 * MS; index++) {
+        time += Math.round((1e9 / fps) * (index % 2 ? 0.35 : 1.65));
+        schedule.push(time);
+      }
+      out.push({
+        name: `uneven ${fps} fps ${hz} Hz`,
+        holdbackMs: 1,
+        holdbackMaxMs: webModule.HOLDBACK_MAX,
+        events: strafe(hz, duration, 137),
+        frames: schedule,
+      });
+    }
+  }
+  // A native clock changes only attribution. With identical source stamps, SDL and native delivery must match
+  // every tick; an estimated read time across a boundary moves only the reports whose stamps differ.
+  for (const hz of [2000, 4000, 8000]) {
+    for (const fps of [60, 240, 1000]) {
+      for (const nativeClock of [false, true]) {
+        out.push({
+          name: `${nativeClock ? "native" : "SDL"} identical stamps ${fps} fps ${hz} Hz`,
+          nativeClock,
+          videoDriver: nativeClock ? "x11" : "",
+          holdbackMs: 1,
+          holdbackMaxMs: webModule.HOLDBACK_MAX,
+          events: strafe(hz, 120 * MS, 137),
+          frames: frames(fps, 150 * MS),
+        });
+      }
+    }
+  }
+  for (const precise of [false, true]) {
+    out.push({
+      name: `${precise ? "native event" : "batch estimate"} across tick boundary`,
+      nativeClock: precise,
+      videoDriver: precise ? "x11" : "windows",
+      holdbackMs: 0,
+      holdbackMaxMs: webModule.HOLDBACK_MAX,
+      events: [
+        { kind: "motion", t: START_NS + (precise ? 9 : 11) * MS, arrival: START_NS + 12 * MS, x: 2, y: 1 },
+        { kind: "motion", t: START_NS + 11 * MS, arrival: START_NS + 12 * MS, x: -3, y: -2 },
+        key(START_NS + 9 * MS, "KeyA", true, START_NS + 12 * MS),
+        key(START_NS + 11 * MS, "KeyA", false, START_NS + 12 * MS),
+        key(START_NS + 11 * MS, "KeyD", true, START_NS + 12 * MS),
+      ],
+      frames: [START_NS + 12 * MS, START_NS + 20 * MS, START_NS + 30 * MS],
+    });
   }
   // A slow input pipeline: every report arrives |lateNs| after its stamp (in order, as SDL's queue keeps them). At
   // 6 ms the holdback rises until reports stop being late; at 30 ms it gives up on timestamps.
@@ -358,13 +412,24 @@ const vectors = {
   web: { file: "apps/web/src/timed-input.ts", sha256: createHash("sha256").update(source).digest("hex") },
   scenarios: scenarios().map((scenario) => {
     const result = new Runner(scenario).run();
+    let yawCounts = 0;
+    const commands = result.ticks.map((tick) => {
+      yawCounts += tick.counts;
+      const yaw = (((-yawCounts * (SENSITIVITY * DEGREES_PER_COUNT)) % 360) + 360) % 360;
+      const forward = 450 * (Number(Boolean(tick.held & KEY_BITS.KeyW)) - Number(Boolean(tick.held & KEY_BITS.KeyS)));
+      const side = 450 * (Number(Boolean(tick.held & KEY_BITS.KeyD)) - Number(Boolean(tick.held & KEY_BITS.KeyA)));
+      return [forward, side, Math.fround(yaw), Math.fround(tick.pitch), tick.held];
+    });
     return {
       name: scenario.name,
+      nativeClock: scenario.nativeClock ?? false,
+      videoDriver: scenario.videoDriver ?? "",
       holdbackMs: scenario.holdbackMs,
       holdbackMaxMs: scenario.holdbackMaxMs,
       frames: scenario.frames.map((t) => t - START_NS),
       events: deliveryOrder(scenario.events).map(encodeEvent),
       ticks: result.ticks.map((t) => [t.boundary - START_NS, t.counts, t.pitch, t.held, t.reports]),
+      commands,
       late: result.late,
       finalHoldbackMs: result.holdbackMs,
       unreliable: result.unreliable,

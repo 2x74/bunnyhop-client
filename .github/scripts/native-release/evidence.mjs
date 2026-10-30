@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, lstatSync, writeFileSync, openSync, readSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
-import { validateParityReport, parityArtifactName, PINNED_WASM_SHA256 } from './parity-contract.mjs';
+import { validateParityReport, parityArtifactName, PINNED_WASM_SHA256, PINNED_PHYSICS, PINNED_RULES } from './parity-contract.mjs';
 import { pathToFileURL } from 'node:url';
 
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -45,7 +45,7 @@ export function validateReport(report, version, platform) {
   requireThat(Number.isSafeInteger(report.bytes) && report.bytes > 0 && report.bytes <= MAX_ARCHIVE_BYTES && hex.test(report.sha256), 'Invalid archive digest/size');
   for (const key of ['canonicalWasmSha256', 'binarySha256', 'menuSha256', 'assetsSha256']) requireThat(hex.test(report[key]), `Missing identity: ${key}`);
   requireThat(report.wasm === `bunnyhop-web/${report.canonicalWasmSha256.slice(0, 12)}`, 'WASM identity mismatch');
-  requireThat(report.canonicalWasmSha256 === PINNED_WASM_SHA256 && report.physics === 18 && report.rules === 2, 'Package must use pinned WASM/physics 18/rules 2');
+  requireThat(report.canonicalWasmSha256 === PINNED_WASM_SHA256 && report.physics === PINNED_PHYSICS && report.rules === PINNED_RULES, 'Package must use pinned WASM, physics and timer rules');
   requireThat(Number.isInteger(report.physics) && report.physics > 0 && Number.isInteger(report.rules) && report.rules > 0, 'Missing physics/rules');
   const [os, arch] = platform.split('/');
   requireThat(report.binaryHashMode === (os === 'darwin' ? 'macho-code-v1' : 'sha256'), 'Unexpected binary hash mode');

@@ -33,6 +33,10 @@ export interface ReplayTimelineData {
   step: number;
   speed: number[];
   jumps: number[];
+  /** Ticks where the runner switched strafe side (absent from older hosts). */
+  strafes: number[];
+  /** Kept-path Segmented checkpoint loads. */
+  segments: number[];
   splits: ReplaySplit[];
   /** The final run's start and finish; 0 when the replay never starts or never finishes one. */
   startTick: number;
@@ -60,6 +64,8 @@ export function readTimelineData(value: unknown): ReplayTimelineData | null {
     return null;
   if (!Array.isArray(data.speed) || data.speed.length > MAX_SAMPLES || !data.speed.every(isSpeed)) return null;
   const jumps = Array.isArray(data.jumps) ? data.jumps.slice(0, MAX_MARKS).filter(isTick) : [];
+  const strafes = Array.isArray(data.strafes) ? data.strafes.slice(0, MAX_MARKS).filter(isTick) : [];
+  const segments = Array.isArray(data.segments) ? data.segments.slice(0, MAX_MARKS).filter(isTick) : [];
   const rawSplits = Array.isArray(data.splits) ? data.splits.slice(0, MAX_MARKS) : [];
   const splits = rawSplits.map(readSplit).filter((split): split is ReplaySplit => split !== null);
   return {
@@ -68,6 +74,8 @@ export function readTimelineData(value: unknown): ReplayTimelineData | null {
     step: data.step,
     speed: data.speed,
     jumps,
+    strafes,
+    segments,
     splits,
     startTick: isTick(data.startTick) ? data.startTick : 0,
     endTick: isTick(data.endTick) ? data.endTick : 0,
@@ -87,6 +95,7 @@ export class ReplayTimeline {
   private range: ShownRange = { start: 0, end: 0, ticks: 0, interval: 0.01 };
   private data: ReplayTimelineData | null = null;
   private compare: { endTick: number; color: string } | null = null;
+  private loop: { from: number; to: number } | null = null;
   private head = 0;
   private hover: number | null = null;
   private dragging = false;
@@ -138,6 +147,13 @@ export class ReplayTimeline {
     if (same || (!this.compare && endTick === null)) return;
     this.compare = endTick === null ? null : { endTick, color };
     this.invalidate();
+  }
+
+  /** The A–B loop, shaded on the bar. */
+  setLoop(loop: { from: number; to: number } | null): void {
+    if (loop?.from === this.loop?.from && loop?.to === this.loop?.to) return;
+    this.loop = loop;
+    this.draw();
   }
 
   /** The playhead, and the readout screen readers get (`text`: "00:01.500 of 00:25.600"). */
@@ -228,6 +244,14 @@ export class ReplayTimeline {
     const head = this.x(this.head);
     context.fillStyle = "rgba(255,255,255,0.05)";
     context.fillRect(0, 0, head, this.height);
+    if (this.loop) {
+      const from = this.x(this.loop.from);
+      context.fillStyle = "rgba(120,190,255,0.16)";
+      context.fillRect(from, 0, this.x(this.loop.to) - from, this.height);
+      context.fillStyle = "rgba(120,190,255,0.9)";
+      context.fillRect(Math.round(from), 0, ratio, this.height);
+      context.fillRect(Math.round(this.x(this.loop.to)), 0, ratio, this.height);
+    }
     if (this.hover !== null) {
       context.fillStyle = "rgba(255,255,255,0.35)";
       context.fillRect(Math.round(this.x(this.hover)), 0, ratio, this.height);
@@ -309,6 +333,17 @@ export class ReplayTimeline {
     for (const tick of data.jumps) {
       if (this.inRange(tick))
         context.fillRect(Math.round(this.x(tick)), this.height - 6 * ratio, Math.max(1, ratio), 5 * ratio);
+    }
+    // Strafe switches: shorter ticks just above the jumps.
+    context.fillStyle = "rgba(120,190,255,0.45)";
+    for (const tick of data.strafes) {
+      if (this.inRange(tick))
+        context.fillRect(Math.round(this.x(tick)), this.height - 10 * ratio, Math.max(1, ratio), 3 * ratio);
+    }
+    context.fillStyle = "rgba(255,255,255,0.5)";
+    for (const tick of data.segments) {
+      if (this.inRange(tick))
+        context.fillRect(Math.round(this.x(tick)), this.height - 4 * ratio, Math.max(1, ratio), 4 * ratio);
     }
     for (const split of data.splits) {
       this.marker(context, split.tick, ACCENT, split.kind === "stage" ? `S${split.index}` : `CP${split.index}`, 1);

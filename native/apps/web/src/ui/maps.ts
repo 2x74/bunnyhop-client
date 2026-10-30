@@ -19,6 +19,7 @@ import { formatTime } from "../timer";
 import { fmtBytes, h } from "./dom";
 import { mapArt, mapGallery, observeThumbs, registerMapImages } from "./thumbs";
 import { clampTier, tierLabel, tierName, tierNum, TIERS, type Tier } from "../tiers";
+import { CSGO_NOTE, isCsgo } from "../csgo";
 import { isStyleId, nextStyle, STYLE_DEFS, styleLabel, type StyleId } from "../styles";
 import { selectedStyle, setSelectedStyle } from "./style-picker";
 import { keyLabel, prefs } from "./settings";
@@ -75,8 +76,15 @@ export interface MapEntry {
   tracks?: number | { main?: number; bonus?: number } | null;
   /** Start/end zones are known for this map (not shown in the UI). */
   zoned?: boolean;
-  /** Curated collections (maps/index.json): "prestige", "iconic", "short", "modern", "halloween", … */
+  /** Curated collections (maps/index.json): "prestige", "iconic", "short", "modern", "halloween", "csgo", … */
   collections?: string[];
+  /** "csgo": a CS:GO build of the map (research/CSGO-MAPS.md); absent = CS:S. A label only: it still plays in CS:S movement. */
+  game?: string;
+}
+
+/** The small "CS:GO" label for a CS:GO map; null for a CS:S one. */
+export function csgoTag(m: { game?: string } | null | undefined): HTMLElement | null {
+  return isCsgo(m) ? h("span.mb-csgo", { title: CSGO_NOTE }, "CS:GO") : null;
 }
 
 function bonusCount(m: MapEntry): number {
@@ -161,6 +169,7 @@ const COLLECTIONS: [id: string, label: string][] = [
   ["short", "Short"],
   ["modern", "Modern"],
   ["halloween", "Halloween"],
+  ["csgo", "CS:GO maps"],
   ["new", "New maps"],
 ];
 /** The set menu's own entry: the player's starred maps. */
@@ -229,6 +238,8 @@ function mapRow(m: MapEntry, fallbackThumb: string | null = null): HTMLElement {
   const by = m.author?.trim() && !/^(unknown|none)$/i.test(m.author.trim()) ? `by ${m.author.trim()}` : "Unknown author";
   const r = rowShell(m.name, mapArt(m.name, m.thumbnail ?? fallbackThumb, { className: "mb-thumb" }), m.name, bonus ? `${by}, ${bonus} bonus${bonus > 1 ? "es" : ""}` : by, true);
   if (bonus) r.querySelector(".mb-name small")!.setAttribute("title", "Bonus tracks are timed and ranked separately, always in Normal style");
+  const tag = csgoTag(m);
+  if (tag) r.querySelector(".mb-title b")!.after(tag);
   return r;
 }
 
@@ -525,7 +536,7 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
         const inSet = maps.filter((m) => g.maps.has(m.name));
         return h("option", { value: GROUP + g.id }, inSet.length ? done(g.name, inSet) : g.name);
       }),
-      ...present.map(([id, label]) => h("option", { value: id }, done(label, maps.filter((m) => m.collections?.includes(id))))),
+      ...present.map(([id, label]) => h("option", { value: id, title: id === "csgo" ? CSGO_NOTE : null }, done(label, maps.filter((m) => m.collections?.includes(id))))),
       ...(tierLines.length ? [h("optgroup", { label: `${setName} by tier` }, ...tierLines)] : []),
     );
     setSel.value = collection;
@@ -697,6 +708,7 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
       "p.mbd-meta",
       null,
       h(`span.mbd-tier.${t ? `t${t}` : "tx"}`, { title: t ? tierName(t) : "Unrated: no rank points" }, t ? `Tier ${tierNum(t)}, ${tierName(t)}` : "Unrated"),
+      csgoTag(m),
       m.author?.trim() ? authorSpan(m.author) : h("span", null, "Unknown author"),
       bonus ? h("span", { title: "Bonus tracks are timed and ranked separately, always in Normal style" }, `${bonus} bonus track${bonus > 1 ? "s" : ""}`) : null,
       m.size && m.size > 48 << 20 ? h("span", { title: "Download size" }, fmtBytes(m.size)) : null,

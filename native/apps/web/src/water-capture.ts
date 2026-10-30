@@ -7,6 +7,20 @@ export interface WaterCaptureQuality {
 }
 interface Surface { material: THREE.ShaderMaterial; height: number | null; bounds: THREE.Box3 }
 
+/**
+ * Surfaces are kept per grid cell (Source units, xz): one material's water spread over a whole map (canals, a moat) is
+ * many small boxes, so the frustum and distance tests see only the water that is really near the view.
+ */
+const CELL = 1024;
+/**
+ * Like CS:S's cheap water (r_cheapwaterend / $cheapwaterenddistance): the reflect / refract passes only run while water
+ * is this close (Source units to its nearest point); farther water draws the plain surface. Each pass draws the whole
+ * scene again, which more than halved the frame rate on big water maps (bhop_lost_world, 2026-10-29). The margin keeps
+ * it from switching every frame at the edge.
+ */
+const CAPTURE_DISTANCE = 1536;
+const CAPTURE_MARGIN = 256;
+
 const isWaterSurface = (m: THREE.Material): m is THREE.ShaderMaterial => m instanceof THREE.ShaderMaterial && !!m.userData.waterSurface;
 /** Whether `root` has a surface WaterCapture would capture for (cached per root). */
 const waterIn = new WeakMap<THREE.Object3D, boolean>();
@@ -30,6 +44,8 @@ export class WaterCapture {
   private camera = new THREE.PerspectiveCamera();
   private rendering = false;
   private captureType: THREE.TextureDataType = THREE.UnsignedByteType;
+  /** Captured last frame (CAPTURE_MARGIN applies). */
+  private near = false;
   constructor(private scene: THREE.Scene) {
     this.color.depthTexture = new THREE.DepthTexture(1, 1, THREE.UnsignedIntType);
     this.scene.updateMatrixWorld(true);
@@ -41,20 +57,22 @@ export class WaterCapture {
       const positions = geometry.getAttribute("position"), normals = geometry.getAttribute("normal");
       if (!positions) return;
       const groups = geometry.groups.length ? geometry.groups : [{ start: 0, count: geometry.index?.count ?? positions.count, materialIndex: 0 }];
-      const point = new THREE.Vector3(), normal = new THREE.Vector3();
+      const corner = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()], centre = new THREE.Vector3(), normal = new THREE.Vector3();
       const normalMatrix = new THREE.Matrix3().getNormalMatrix(object.matrixWorld);
       for (const group of groups) {
         const material = materials[group.materialIndex ?? 0];
         if (!material || !isWaterSurface(material)) continue;
-        for (let i = group.start; i < group.start + group.count; i++) {
-          const index = geometry.index?.getX(i) ?? i;
-          point.fromBufferAttribute(positions, index).applyMatrix4(object.matrixWorld);
-          if (normals) normal.fromBufferAttribute(normals, index).applyMatrix3(normalMatrix).normalize();
-          const height = normals && normal.y > 0.99 ? Math.round(point.y * 10) / 10 : null;
-          const key = `${material.uuid}:${height}`;
+        // Whole triangles, each in the cell of its centre (a big face's box spans the cells it covers).
+        for (let i = group.start; i + 2 < group.start + group.count; i += 3) {
+          const first = geometry.index?.getX(i) ?? i;
+          for (let k = 0; k < 3; k++) corner[k].fromBufferAttribute(positions, geometry.index?.getX(i + k) ?? i + k).applyMatrix4(object.matrixWorld);
+          centre.copy(corner[0]).add(corner[1]).add(corner[2]).divideScalar(3);
+          if (normals) normal.fromBufferAttribute(normals, first).applyMatrix3(normalMatrix).normalize();
+          const height = normals && normal.y > 0.99 ? Math.round(centre.y * 10) / 10 : null;
+          const key = `${material.uuid}:${height}:${Math.floor(centre.x / CELL)}:${Math.floor(centre.z / CELL)}`;
           let surface = found.get(key);
           if (!surface) { surface = { material, height, bounds: new THREE.Box3() }; found.set(key, surface); }
-          surface.bounds.expandByPoint(point);
+          for (const p of corner) surface.bounds.expandByPoint(p);
         }
       }
     });
@@ -71,7 +89,7 @@ export class WaterCapture {
       material.uniforms.uReflectionReady.value = 0;
       material.uniforms.uReflectionReadyB.value = 0;
     }
-    if (this.rendering || !this.surfaces.length || !(camera instanceof THREE.PerspectiveCamera) || quality.refractionScale <= 0) return;
+    if (this.rendering || !this.surfaces.length || !(camera instanceof THREE.PerspectiveCamera) || quality.refractionScale <= 0) return void (this.near = false);
     const type = renderer.extensions?.has("EXT_color_buffer_float") ? THREE.HalfFloatType : THREE.UnsignedByteType;
     if (type !== this.captureType) {
       this.captureType = type;
@@ -79,7 +97,11 @@ export class WaterCapture {
     }
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
     const frustum = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
-    const visible = this.surfaces.filter(s => frustum.intersectsBox(s.bounds));
+    // Water in view, close enough, and seen from above (the surface seen from below never reads the captures).
+    const eye = camera.getWorldPosition(new THREE.Vector3());
+    const limit = CAPTURE_DISTANCE + (this.near ? CAPTURE_MARGIN : 0);
+    const visible = this.surfaces.filter(s => (s.height === null || eye.y > s.height) && s.bounds.distanceToPoint(eye) <= limit && frustum.intersectsBox(s.bounds));
+    this.near = visible.length > 0;
     if (!visible.length) return;
     const target = renderer.getRenderTarget(), viewport = renderer.getViewport(new THREE.Vector4()), scissor = renderer.getScissor(new THREE.Vector4());
     const scissorTest = renderer.getScissorTest(), autoClear = renderer.autoClear, xr = renderer.xr.enabled;
@@ -112,11 +134,11 @@ export class WaterCapture {
         const reflection = this.reflections[i] ?? (this.reflections[i] = new THREE.WebGLRenderTarget(1, 1, { type: this.captureType }));
         this.resize(reflection, size, quality.reflectionScale);
         this.camera.copy(camera);
-        const eye = camera.getWorldPosition(new THREE.Vector3()); eye.y = 2 * height - eye.y;
+        const mirrored = eye.clone(); mirrored.y = 2 * height - mirrored.y;
         const forward = camera.getWorldDirection(new THREE.Vector3()); forward.y *= -1;
-        this.camera.position.copy(eye);
+        this.camera.position.copy(mirrored);
         this.camera.up.copy(camera.up).transformDirection(camera.matrixWorld); this.camera.up.y *= -1;
-        this.camera.lookAt(eye.clone().add(forward)); this.camera.updateMatrixWorld(true);
+        this.camera.lookAt(mirrored.clone().add(forward)); this.camera.updateMatrixWorld(true);
         // Oblique near plane removes geometry beneath the reflecting plane (no scene mutations).
         const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -height).applyMatrix4(this.camera.matrixWorldInverse);
         const clip = new THREE.Vector4(plane.normal.x, plane.normal.y, plane.normal.z, plane.constant);

@@ -1,5 +1,8 @@
 #include "hud_theme.hpp"
 #include "movement_hud.hpp"
+#include "hud_trainer.hpp"
+#include "crosshair_shape.hpp"
+#include "hud_editor_layout.hpp"
 #include "hud_result.hpp"
 #include "toasts.hpp"
 #include "room_modes.hpp"
@@ -8,6 +11,7 @@
 #include "native_chat.hpp"
 #include "capabilities.hpp"
 #include <cassert>
+#include <set>
 #include <iostream>
 #include <filesystem>
 #include <fstream>
@@ -82,6 +86,8 @@ struct DrawProbe {
     void overlay_mark(float, float, native::NameMark, native::NameColor) {}
 
     void overlay_avatar(float, float, unsigned, native::NameColor) { ++avatars; }
+
+    float overlay_text_width(std::string_view text, float size) const { return float(text.size()) * size * .6f; }
 
     void overlay_name(float, float, std::string_view, float, const native::NameAppearance &, double, bool = false) {
         ++names;
@@ -170,18 +176,27 @@ void test_web_settings_schema() {
             assert(rejects_setting(settings, key, 1));
         }
     }
+    // The website's default places leave every element at the native HUD's own place, at the native size.
     const auto classic = native::HudPreferences::from(settings);
-    const auto keys_size = native::hud_element_size("keys");
-    const auto track_size = native::hud_element_size("track");
-    const auto keys_rect = classic.layout[native::hud_index("keys")]->rect(1600, 900, keys_size[0], keys_size[1]);
-    const auto track_rect = classic.layout[native::hud_index("track")]->rect(1600, 900, track_size[0], track_size[1]);
-    assert(keys_rect.y + keys_rect.height <= track_rect.y);
-    auto legacy = native::patch_settings(settings, {{"hudLayout", {{"fps", {{"visible", true}}}}}});
+    for (const auto id : native::web_hud_elements) {
+        const auto &place = classic.layout[native::hud_index(id)];
+        assert(place && !place->placed && std::abs(place->scale - 1) < 1e-6f);
+    }
+    auto legacy = native::patch_settings(
+            settings, {{"hudLayout", {{"fps", {{"visible", true}}}, {"timer", {{"x", 50}, {"y", 70}}}}}}
+    );
     assert(native::HudPreferences::from(legacy).layout[native::hud_index("fps")]->visible);
+    assert(native::HudPreferences::from(legacy).layout[native::hud_index("timer")]->placed);
+    // Showing an element keeps a v0.5.1 placement; moving the timer with the website's layout replaces its own.
     auto web = settings.at("hudLayoutWeb");
+    web["graph"]["on"] = true;
+    assert(native::patch_settings(legacy, {{"hudLayoutWeb", web}}).at("hudLayout") == legacy.at("hudLayout"));
     web["timer"]["x"] = -.05;
     const auto modern = native::patch_settings(legacy, {{"hudLayoutWeb", web}});
-    assert(modern.at("hudLayoutWeb") == web && modern.at("hudLayout").empty());
+    assert(modern.at("hudLayoutWeb") == web && !modern.at("hudLayout").contains("timer"));
+    assert(modern.at("hudLayout").contains("fps"));
+    const auto moved = native::HudPreferences::from(modern).layout[native::hud_index("timer")];
+    assert(moved && moved->placed && moved->anchored);
     const auto file = std::filesystem::temp_directory_path() / "bunnyhop-polish-settings.json";
     native::save_settings(file, legacy);
     const auto reloaded = native::load_settings(file);
@@ -286,6 +301,10 @@ void test_layouts_and_options() {
     const auto beginner = native::patch_settings(defaults, native::trainer_preset("beginner"));
     assert(beginner["hudStrafeTrainerStyle"] == "detailed" && beginner["strafeTrainerSmoothing"] == 12);
     assert(native::trainer_preset("strict")["hudStrafeTrainerZone"] == 5);
+    for (const auto preset : {"beginner", "standard", "strict"}) {
+        const auto enabled = native::patch_settings(defaults, native::trainer_preset(preset));
+        assert(native::HudPreferences::from(enabled).trainer_enabled);
+    }
 }
 
 void test_scoreboard_and_names() {
@@ -325,8 +344,11 @@ void test_scoreboard_and_names() {
             NoAllocations no_allocations;
             native::draw_scoreboard(probe, size.first, size.second, 100, board, 1, 0);
         }
-        assert(probe.has("Test room") && probe.has("T7+") && probe.has("00:12.345"));
-        assert(probe.has("SPEC -> First") && probe.flags == 2 && probe.names == 2 && probe.avatars == 2);
+        assert(probe.has("Test room") && probe.has("T7+") && probe.has("00:12.345") && probe.has("Normal"));
+        // Spectators are listed under the table, as on the website.
+        assert(probe.has("Spectating: ") && probe.has("Spectator -> First"));
+        assert(probe.flags == 1 && probe.names == 1 && probe.avatars == 1);
+        assert(probe.has("Bind a key to chat, N to spectate."));
     }
     native::HudLabel<48> time;
     native::format_hud_time(time, 16.731);
@@ -395,6 +417,14 @@ void test_merged_menu_contracts() {
     std::string style;
     room.spectator_run(run, style, 3, 90, 100500);
     assert(run.status == 1 && std::abs(run.seconds - 17.231) < 1e-8);
+    room.display_contract(
+            {{"type", "scoreboard"},
+             {"head", {{"room", "Decorated"}, {"map", "bhop_test"}, {"chatKey", "U"}}},
+             {"rows", native::Json::array()}}
+    );
+    DrawProbe keyed;
+    native::draw_scoreboard(keyed, 1280, 720, 100, room.display(), 90, 100500);
+    assert(keyed.has("U to chat, N to spectate."));
     room.display_contract({{"type", "scoreboard"}, {"head", nullptr}, {"rows", native::Json::array()}});
     assert(room.display().count == 0);
     auto settings = native::default_settings();
@@ -418,13 +448,68 @@ void test_merged_menu_contracts() {
     assert(triggers.key("Digit0", true, false) && !triggers.open);
 }
 
+// The website's tag fades (player/tag.ts TagSight(2000, 3000), net/players.ts near-camera ramp).
+void test_tag_sight_fades() {
+    native::NameTagSights sights;
+    const float eye[] = {0, 0, 0};
+    auto clear = [](const float *) {
+        return true;
+    };
+    auto blocked = [](const float *) {
+        return false;
+    };
+    sights.begin(0, eye);
+    const float close[] = {60, 0, 0}, ramp[] = {135, 0, 0}, distant[] = {2500, 0, 0}, gone[] = {3200, 0, 0};
+    assert(sights.opacity(1, close, true, clear) == 0);
+    assert(std::abs(sights.opacity(1, ramp, true, clear) - .5f) < 1e-5f);
+    assert(std::abs(sights.opacity(1, distant, true, clear) - .5f) < 1e-5f);
+    assert(sights.opacity(1, gone, true, clear) == 0);
+    // Occlusion eases out over a fifth of a second and back in over an eighth.
+    const float mid[] = {500, 0, 0};
+    assert(sights.opacity(2, mid, false, clear) == 1);
+    sights.begin(.1, eye);
+    assert(std::abs(sights.opacity(2, mid, false, blocked) - .5f) < 1e-4f);
+    sights.begin(.2, eye);
+    assert(sights.opacity(2, mid, false, blocked) == 0);
+    sights.begin(.32, eye);
+    assert(std::abs(sights.opacity(2, mid, false, clear) - .8f) < 1e-4f);
+}
+
+void test_room_tag_detail() {
+    native::RoomState room;
+    room.event(
+            {{"generation", 1},
+             {"id", "easy"},
+             {"event",
+              {{"t", "welcome"},
+               {"you", 0},
+               {"room", {{"name", "Easy"}}},
+               {"map", {{"name", "bhop_eazy"}}},
+               {"players",
+                native::Json::array(
+                        {{{"slot", 0}, {"name", "Me"}, {"style", "autohop"}},
+                         {{"slot", 1}, {"name", "Scroller"}, {"style", "scroll"}}}
+                )},
+               {"metas", {{"1", {{"style", 6}, {"track", 0}, {"timer", 3}, {"timerTicks", 1673}, {"ping", 20}}}}}}}}
+    );
+    native::HudLabel<48> detail;
+    room.tag_detail(1, 10, detail);
+    assert(detail.view() == "SCR · 00:16.730");
+    room.tag_detail(0, 10, detail);
+    assert(detail.empty());
+}
+
 void test_tags_and_race_picker() {
+    test_room_tag_detail();
     native::RoomState room;
     std::array<native_render::Actor, 1> actors;
     actors[0].id = "1";
     actors[0].name = "Bunny";
     actors[0].opacity = 1;
     const std::array<float, 16> matrix = {.01f, 0, 0, 0, 0, .01f, 0, 0, 0, 0, .01f, 0, 0, 0, 0, 4};
+    native::NameTagSights sights;
+    const float eye[] = {0, 0, 900};
+    sights.begin(0, eye);
     DrawProbe hidden;
     native::draw_name_tags(
             hidden,
@@ -434,6 +519,7 @@ void test_tags_and_race_picker() {
             matrix.data(),
             actors,
             room,
+            sights,
             true,
             true,
             false,
@@ -452,6 +538,7 @@ void test_tags_and_race_picker() {
                 matrix.data(),
                 actors,
                 room,
+                sights,
                 true,
                 true,
                 true,
@@ -460,6 +547,7 @@ void test_tags_and_race_picker() {
         );
     }
     assert(visible.names == 1);
+    test_tag_sight_fades();
     native::draw_ghost_name_tag(
             visible, 1280, 720, 100, matrix.data(), actors[0], "PB ghost", 16.731, "-0.020s", true, [](const float *) {
                 return false;
@@ -648,26 +736,35 @@ void test_movement_widgets_and_restart() {
             true,
             2
     );
-    for (const auto label :
-         {"Start Pre", "Offset -1", "FJT", "LJ 275.50", "PB", "Watcher", "Practice", "Bonus", "Stage", "Ghost"})
+    for (const auto label : {"Start Pre", "Offset -1", "FJT", "LJ 275.50", "Watcher", "Practice", "Stage", "Ghost"})
         assert(probe.has(label));
+    // The map line names the bonus; its own line only shows where the player put it.
+    assert(!probe.has("Bonus"));
+    settings["hudLayout"]["track"] = {{"x", 50}, {"y", 30}};
+    DrawProbe placed_track;
+    native::draw_movement_widgets(
+            placed_track,
+            [](const char *, float x, float y) { return std::array{x, y}; },
+            native::HudPreferences::from(settings),
+            movement,
+            extras,
+            run,
+            1600,
+            900,
+            false,
+            0
+    );
+    assert(placed_track.has("Bonus"));
     for (const char *style : {"classic", "detailed", "minimal"}) {
         options.trainer.style = style;
         DrawProbe trainer;
         {
             NoAllocations no_allocations;
             native::draw_trainer(
-                    trainer,
-                    500,
-                    200,
-                    {105, native::StrafeHint::strafe_more},
-                    options.trainer,
-                    true,
-                    options.palette,
-                    -1
+                    trainer, 500, 200, {105, native::StrafeHint::strafe_more}, options.trainer, true, options.palette
             );
         }
-        assert(trainer.rects >= 4 && trainer.has("105%") && trainer.has("Strafe more"));
+        assert(trainer.rects >= 4 && trainer.has("105%") && trainer.has("turn more"));
     }
     native::FirstJumpTracker first;
     run.jumps = 1;
@@ -676,12 +773,9 @@ void test_movement_widgets_and_restart() {
     assert(!first.feed(true, run, 21, false));
     options.trainer_sound = true;
     options.trainer_enabled = true;
-    BhState jumped{};
-    jumped.events = native::jump;
-    assert(native::trainer_jump_sound(options, jumped, native::StrafeReading{105, {}}) == 1.25);
-    assert(native::trainer_jump_sound(options, jumped, native::StrafeReading{180, {}}) == .8);
-    jumped.events = 0;
-    assert(!native::trainer_jump_sound(options, jumped, native::StrafeReading{105, {}}));
+    assert(native::trainer_jump_sound(options, 105) == 1.5);
+    assert(native::trainer_jump_sound(options, 180) == .75);
+    assert(!native::trainer_jump_sound(options, std::nullopt));
     native::AutoRestart restart;
     run.status = 1;
     run.seconds = 10;
@@ -695,6 +789,120 @@ void test_movement_widgets_and_restart() {
 }
 }  // namespace
 
+// Filled pixels of a crosshair, relative to its middle.
+std::set<std::pair<int, int>> crosshair_pixels(const native::CrosshairShape &shape, bool outline) {
+    std::set<std::pair<int, int>> pixels;
+    for (const auto &run : shape.runs()) {
+        if (run.outline != outline) continue;
+        for (int x = run.x; x < run.x + run.width; ++x)
+            assert(pixels.emplace(x, run.y).second);
+    }
+    return pixels;
+}
+
+void test_crosshair_pixels() {
+    native::CrosshairShape shape;
+    // Even thickness: the arms mirror around the line between the two middle pixels; gap and size are exact.
+    shape.build("cross", 6, 4, 2, true, 1);
+    auto fill = crosshair_pixels(shape, false);
+    assert(fill.size() == 4 * 6 * 2);
+    for (const auto &[x, y] : fill)
+        assert(fill.contains({-1 - x, y}) && fill.contains({x, -1 - y}));
+    assert(fill.contains({-5, 0}) && !fill.contains({-4, 0}) && fill.contains({4, 0}) && fill.contains({9, -1}));
+    const auto outline = crosshair_pixels(shape, true);
+    for (const auto &pixel : outline)
+        assert(!fill.contains(pixel));
+    assert(outline.contains({-11, 0}) && outline.contains({10, 0}) && outline.contains({-5, -2}));
+    // Odd thickness centres on one pixel; fractional settings round to whole pixels.
+    shape.build("cross", 5.6f, 3.4f, 2.6f, false, 1);
+    fill = crosshair_pixels(shape, false);
+    assert(fill.size() == 4 * 6 * 3 && crosshair_pixels(shape, true).empty());
+    for (const auto &[x, y] : fill)
+        assert(fill.contains({-x, y}) && fill.contains({x, -y}));
+    // CSS pixels times the display scale, as on the website.
+    shape.build("cross", 6, 4, 2, false, 2);
+    assert(crosshair_pixels(shape, false).size() == 4 * 12 * 4);
+    // The website's dot is a circle 1.6 times the thickness wide; T has no top arm.
+    shape.build("dot", 6, 4, 5, false, 1);
+    fill = crosshair_pixels(shape, false);
+    assert(fill.contains({-4, 0}) && fill.contains({3, 0}) && !fill.contains({4, 0}) && !fill.contains({3, 3}));
+    shape.build("t", 6, 4, 2, false, 1);
+    for (const auto &[x, y] : crosshair_pixels(shape, false))
+        assert(y >= -1);
+    // Circle: the ring's outer edge is size + gap from the middle, with a centre dot.
+    shape.build("circle", 6, 4, 2, false, 1);
+    fill = crosshair_pixels(shape, false);
+    assert(fill.contains({9, 0}) && !fill.contains({10, 0}) && !fill.contains({7, 0}) && fill.contains({0, 0}));
+    // Windows' borderless window is one row taller; the middle stays on the same pixel.
+    assert(native::CrosshairShape::centre_px(1441) == native::CrosshairShape::centre_px(1440));
+}
+
+// Layout codes made by the website's encodeLayout (hud/layout.ts): its Classic layout, and one with a moved timer,
+// the FPS counter on and a minimal keys overlay.
+constexpr const char *web_classic_code =
+        "bhl1.CIcAAPXEMocAAPdoMocC0PdULYcAAPPkK4cAAPmOMocAAPiUMgcAAPq6MoQAAAR-MgQDUgR-KAYAlv7UMgQAAP2oMoAAeACgMoL_"
+        "iACgMgAA"
+        "eAHCMoYAePgwMoj_dP8kMgEAAAiYOQf9EvXEMgQAAPrsKwQAAPvwKwQAAPjGMoMAeP2oMoQAAAFAMgFkB____5qjsg";
+constexpr const char *web_custom_code =
+        "bhl1.CIcAAPXEMoEE0gH0RocC0PdULYcAAPPkK4cAAPmOMocAAPiUMgcAAPq6MoQAAAR-MgQDUgR-KAYAlv7UMgQAAP2oMoAAeACgMoL_"
+        "iACgMoAA"
+        "eAHCMoYAePgwMoj_dP8kMgEAAAiYOQf9EvXEMgQAAPrsKwQAAPvwKwQAAPjGMoMAeP2oMoQAAAFAMgI8Bf-2PZqjsg";
+
+void test_layout_codes() {
+    const auto defaults = native::default_settings();
+    assert(native::encode_hud_layout(defaults) == web_classic_code);
+    // The website's Classic code leaves every element at the native HUD's own place.
+    const auto classic = native::decode_hud_layout(web_classic_code);
+    assert(classic);
+    const auto imported = native::patch_settings(defaults, *classic, false);
+    for (const auto &place : native::HudPreferences::from(imported).layout)
+        assert(!place || !place->placed);
+    const auto custom = native::decode_hud_layout(std::string("  ") + web_custom_code + "\n");
+    assert(custom);
+    const auto &timer = custom->at("hudLayoutWeb").at("timer");
+    assert(timer.at("a") == 1 && std::abs(timer.at("x").get<double>() - .1234) < 1e-9 && timer.at("s") == 1.4);
+    assert(custom->at("hudLayoutWeb").at("fps").at("on") == true && custom->at("keysStyle") == "minimal");
+    assert(custom->at("hudKeysRowsActions") == false && custom->at("hudKeysPressed") == "#ffb63d");
+    const auto settings = native::patch_settings(defaults, *custom, false);
+    assert(native::encode_hud_layout(settings) == web_custom_code);
+    assert(!native::decode_hud_layout("bhl1.???") && !native::decode_hud_layout("bhl2.CIcA"));
+    assert(!native::decode_hud_layout("bhl1.CA"));
+}
+
+void test_layout_editor_math() {
+    // A box in the bottom centre cell anchors to the screen's bottom centre, and HudPlace::rect puts it back.
+    const native::HudRect box{900, 900, 120, 30};
+    const auto place = native::hud_place_from_box(box, 1920, 1080, true, 1.25);
+    assert(place.at("a") == 7 && place.at("s") == 1.25);
+    const native::HudPlace stored{true, true, 7, place.at("x").get<float>(), place.at("y").get<float>(), 1, true};
+    const auto back = stored.rect(1920, 1080, 120, 30);
+    assert(std::abs(back.x - box.x) < .2f && std::abs(back.y - box.y) < .2f);
+    // Snapping: the centre line within 8 px, otherwise the anchor-side edge to the grid.
+    const auto centred = native::snap_box({893, 500, 120, 30}, 1920, 1080, 8, 8);
+    assert(centred.vertical_guide && std::abs(centred.box.x - 900) < 1e-3f);
+    const auto gridded = native::snap_box({13, 21, 50, 20}, 1920, 1080, 8, 8);
+    assert(!gridded.vertical_guide && gridded.box.x == 16 && gridded.box.y == 24);
+    // Each preset is a valid settings patch, and Classic is the built-in layout.
+    for (const auto id : native::hud_preset_ids) {
+        const auto settings = native::patch_settings(native::default_settings(), native::hud_preset(id), false);
+        assert(native::hud_layout_is_preset(settings, id));
+    }
+    assert(native::hud_layout_is_preset(native::default_settings(), "classic"));
+    for (const bool enabled : {false, true}) {
+        auto settings = native::patch_settings(native::default_settings(), {{"strafeTrainer", enabled}});
+        for (const auto id : native::hud_preset_ids) {
+            settings = native::patch_settings(settings, native::hud_preset(id, settings), false);
+            assert(settings.at("hudLayoutWeb").at("strafeTrainer").at("on") == enabled);
+            assert(settings.at("strafeTrainer") == enabled);
+            assert(native::HudPreferences::from(settings).trainer_enabled == enabled);
+            assert(native::hud_layout_is_preset(settings, id));
+        }
+    }
+    std::set<std::string_view> ids;
+    for (const auto &element : native::hud_editor_elements)
+        assert(ids.insert(element.id).second && native::hud_index(element.id) != 0);
+}
+
 int main() {
     test_web_settings_schema();
     test_defaults_and_saved_settings();
@@ -705,6 +913,9 @@ int main() {
     test_ghost_progress();
     test_results_toasts_and_room_widgets();
     test_movement_widgets_and_restart();
+    test_crosshair_pixels();
+    test_layout_codes();
+    test_layout_editor_math();
     std::cout << "HUD: 8 scenario groups, all layout IDs, three trainer styles, defaults and saved settings\n";
     using native::parse_hud_theme;
 

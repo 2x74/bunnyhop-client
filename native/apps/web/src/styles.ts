@@ -56,7 +56,7 @@ const IN_BACK = 1 << 4;
 const IN_MOVELEFT = 1 << 9;
 const IN_MOVERIGHT = 1 << 10;
 
-export type StyleId = "autohop" | "legit" | "wonly" | "sideways" | "hsw" | "autostrafe" | "scroll" | "lowgrav";
+export type StyleId = "autohop" | "legit" | "wonly" | "sideways" | "hsw" | "autostrafe" | "scroll" | "lowgrav" | "segmented";
 
 export interface StyleDef {
   /** Stable key: replay header, PB/ghost storage, leaderboard boards, API routes. */
@@ -75,6 +75,11 @@ export interface StyleDef {
   rule: string;
   /** Assisted style: the strafe is computed in the air from the mouse (Auto-strafe; autostrafe.ts). */
   auto?: boolean;
+  /**
+   * Segmented (bhoptimer "segments" "1"): checkpoint loads during a timed run rewind the timer and the replay instead of
+   * making the attempt practice (practice-mode/segments.ts, research/SEGMENTED.md). Normal movement otherwise.
+   */
+  segmented?: boolean;
 }
 
 const NONE = { w: false, a: false, s: false, d: false };
@@ -87,6 +92,7 @@ export const STYLE_DEFS: readonly StyleDef[] = [
   { id: "sideways", name: "Sideways", short: "SW", brief: "Sideways", autohop: true, block: { w: false, a: true, s: false, d: true }, hsw: false, rule: "Only W and S in the air: face sideways and strafe with W/S." },
   { id: "hsw", name: "Half-Sideways", short: "HSW", brief: "Half-SW", autohop: true, block: { w: false, a: false, s: true, d: false }, hsw: true, rule: "Hold W plus A or D together in the air. S, pure W and pure A/D do nothing." },
   { id: "lowgrav", name: "Low Gravity", short: "LG", brief: "Low Gravity", autohop: true, block: NONE, hsw: false, rule: "Half gravity (400). Hold jump; every key works. Separate ranking; no overall points or progression." },
+  { id: "segmented", name: "Segmented", short: "SEG", brief: "Segmented", autohop: true, block: NONE, hsw: false, segmented: true, rule: "Save checkpoints and load them mid-run: the timer and the replay go back to the checkpoint. Normal movement. Separate ranking; no overall points or progression." },
   // Assisted styles stay last in the menu. WIRE_STYLES is independently append-only.
   { id: "autostrafe", name: "Auto-strafe", short: "AS", brief: "Auto-strafe", autohop: true, block: NONE, hsw: false, auto: true, rule: "Move the mouse in the air and the game presses A/D for you. Hold A, D or S to take over." },
 ];
@@ -194,9 +200,14 @@ export function isAssisted(id: string): boolean {
   return !!BY_ID.get(id)?.auto;
 }
 
+/** True for Segmented: checkpoint loads rewind the run instead of ending it (StyleDef.segmented). */
+export function isSegmented(id: string): boolean {
+  return !!BY_ID.get(id)?.segmented;
+}
+
 /** Styles whose runs can earn XP, clear achievements and overall progression. */
 export function earnsProgression(id: string): boolean {
-  return isStyleId(id) && !isAssisted(id) && id !== "lowgrav";
+  return isStyleId(id) && !isAssisted(id) && id !== "lowgrav" && !isSegmented(id);
 }
 
 const MOVE_BITS = IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT;

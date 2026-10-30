@@ -126,6 +126,9 @@ struct TurnAdmission {
     bool allows_event(std::string_view type) const { return !local_only || (type != "beat" && type != "finish"); }
 };
 
+// Counted-yaw rebase kinds recorded in the replay (web replay.ts YAW_SET_*).
+constexpr uint32_t yaw_set_spawn = 1, yaw_set_teleport = 2;
+
 // Keep fractional SDL deltas; recomputing from a double base avoids accumulating
 // a float rounding error for every mouse report. Only SDL relative motion feeds this.
 struct Input {

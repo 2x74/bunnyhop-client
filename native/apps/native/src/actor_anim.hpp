@@ -2,6 +2,7 @@
 // Runtime Source animation evaluator. Mirrors web player/studio/{pose,animstate}.ts.
 // Original decoded animations are shared; every actor keeps independent transition/feet/fire state.
 #include "nlohmann/json.hpp"
+#include "actor_gestures.hpp"
 #include <vector>
 #include <array>
 #include <string>
@@ -9,6 +10,7 @@
 #include <cmath>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 
 namespace native_actor_anim {
@@ -406,14 +408,17 @@ struct Input {
     bool ducking = false, grounded = true, jumped = false;
 };
 
-// Onboarding-only acting, in degrees. Gameplay callers leave it null.
+// Acting for the onboarding scenes and avatar pictures, in degrees. Gameplay callers leave it null.
 struct Acting {
     double chestPitch = 0, chestYaw = 0, chestRoll = 0, headPitch = 0, headYaw = 0, headRoll = 0, earL = 0, earR = 0;
+    native_gestures::Gesture gesture;
 };
 
 struct Ear {
-    int bone = -1;
+    int bone = -1, carrier = -1;
     double side = 1;
+    // Hanging from the lowered hood (a wig on): stiffer, swings less and never acts.
+    bool hang = false;
     std::array<double, 3> base{}, mid{}, dir{}, p{}, v{}, wb{};
     bool has = false;
 };
@@ -423,6 +428,7 @@ swing(const std::array<double, 3> &a,
       const std::array<double, 3> &b,
       const std::array<double, 3> &pivot,
       double frac,
+      double max_angle,
       float *out) {
     double x = a[1] * b[2] - a[2] * b[1], y = a[2] * b[0] - a[0] * b[2], z = a[0] * b[1] - a[1] * b[0],
            len = std::sqrt(x * x + y * y + z * z), angle = std::atan2(len, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]);
@@ -434,7 +440,7 @@ swing(const std::array<double, 3> &a,
         y /= len;
         z /= len;
     }
-    angle = std::min(angle, 1.1) * frac;
+    angle = std::min(angle, max_angle) * frac;
     double c = std::cos(angle), sn = std::sin(angle), t = 1 - c;
     float r[9] = {
             float(t * x * x + c),
@@ -462,6 +468,9 @@ struct State {
     double lastJump = -1;
     bool wasGrounded = true;
     std::array<Ear, 2> ears;
+    V bind;
+    int head = -1, upperSpine = -1;
+    bool hoodDown = false;
     double earTwitch = 3;
     unsigned randomState = 0x12345678;
     const Data &d;
@@ -474,6 +483,7 @@ struct State {
     bool jumping = false, firstJump = false, feetInit = false;
     Transition main, idle, run;
     std::array<Blend, 4> layers;
+    std::optional<native_gestures::Rig> gestureRig;
     int px, py, pYaw, pPitch;
 
     explicit State(const Data &d)
@@ -483,22 +493,43 @@ struct State {
         , py(d.param("move_y"))
         , pYaw(d.param("body_yaw"))
         , pPitch(d.param("body_pitch")) {
-        if (d.rig.contains("bind")) {
-            const auto bind = d.rig["bind"].get<V>();
-            for (int side = 0; side < 2; side++) {
-                auto &e = ears[side];
-                e.side = side ? -1 : 1;
-                const std::string name = side ? "bunny.EarR" : "bunny.EarL";
-                for (size_t i = 0; i < d.rig["names"].size(); i++)
-                    if (d.rig["names"][i] == name) e.bone = int(i);
-                if (e.bone < 0) continue;
-                e.dir = {.27 * e.side, .36, .893};
-                for (int k = 0; k < 3; k++) {
-                    e.base[k] = bind[e.bone * 12 + k * 4 + 3];
-                    e.mid[k] = e.base[k] + e.dir[k] * 4.4;
-                }
-            }
+        for (size_t i = 0; i < d.rig["names"].size(); i++) {
+            const auto &name = d.rig["names"][i];
+            if (name == "ValveBiped.Bip01_Head1") head = int(i);
+            if (name == "ValveBiped.Bip01_Spine4") upperSpine = int(i);
+            if (name == "bunny.EarL") ears[0].bone = int(i);
+            if (name == "bunny.EarR") ears[1].bone = int(i);
         }
+        ears[0].side = 1;
+        ears[1].side = -1;
+        if (d.rig.contains("bind")) bind = d.rig["bind"].get<V>();
+        place_ears(false);
+    }
+
+    // The ears' pivots (player/bunny/model.ts makeEars): on the head, or with the hood down hanging from the upper
+    // spine (rig.ts EAR_DOWN).
+    void place_ears(bool down) {
+        constexpr std::array<double, 3> up_dir = {.27, .36, .893}, down_base = {2.3, 9.9, 60.2},
+                                        down_dir = {.3, .62, -.72};
+        constexpr double segment = 4.4;
+        hoodDown = down;
+        for (auto &e : ears) {
+            if (e.bone < 0 || bind.size() < size_t(e.bone + 1) * 12) continue;
+            e.hang = down;
+            e.carrier = down ? upperSpine : head;
+            e.dir = down ? down_dir : up_dir;
+            e.dir[0] *= e.side;
+            for (int k = 0; k < 3; k++)
+                e.base[k] = down ? down_base[size_t(k)] : bind[size_t(e.bone) * 12 + size_t(k) * 4 + 3];
+            if (down) e.base[0] *= e.side;
+            for (int k = 0; k < 3; k++)
+                e.mid[k] = e.base[k] + e.dir[k] * segment;
+            e.has = false;
+        }
+    }
+
+    void hood(bool down) {
+        if (down != hoodDown) place_ears(down);
     }
 
     void reset(double time) {
@@ -678,95 +709,17 @@ struct State {
     }
 
     void actingPose(const Acting &a, V &out) {
-        const auto bind = d.rig["bind"].get<V>();
-        const auto parents = d.rig["parent"].get<std::vector<int>>();
-        const int count = d.rig["csBones"];
-        auto turn = [&](const char *name, double pitch, double yaw, double roll) {
-            int bone = -1;
-            for (int i = 0; i < count; i++)
-                if (d.rig["names"][i] == name) bone = i;
-            if (bone < 0 || (!pitch && !yaw && !roll)) return;
-            const double rad = 3.141592653589793 / 180, x = pitch * rad, y = -roll * rad, z = yaw * rad;
-            const float X[12] = {
-                    1,
-                    0,
-                    0,
-                    0,
-                    0,
-                    float(std::cos(x)),
-                    float(-std::sin(x)),
-                    0,
-                    0,
-                    float(std::sin(x)),
-                    float(std::cos(x)),
-                    0
-            };
-            const float Y[12] = {
-                    float(std::cos(y)),
-                    0,
-                    float(std::sin(y)),
-                    0,
-                    0,
-                    1,
-                    0,
-                    0,
-                    float(-std::sin(y)),
-                    0,
-                    float(std::cos(y)),
-                    0
-            };
-            const float Z[12] = {
-                    float(std::cos(z)),
-                    float(-std::sin(z)),
-                    0,
-                    0,
-                    float(std::sin(z)),
-                    float(std::cos(z)),
-                    0,
-                    0,
-                    0,
-                    0,
-                    1,
-                    0
-            };
-            float local[12], tmp[12], T[12]{}, M[12]{};
-            concat(Z, X, tmp);
-            concat(tmp, Y, local);
-            const float *S = out.data() + bone * 12;
-            for (int r = 0; r < 3; r++)
-                for (int c = 0; c < 3; c++)
-                    for (int k = 0; k < 3; k++)
-                        T[r * 4 + c] += S[r * 4 + k] * local[k * 4 + c];
-            for (int r = 0; r < 3; r++)
-                for (int c = 0; c < 3; c++)
-                    for (int k = 0; k < 3; k++)
-                        M[r * 4 + c] += T[r * 4 + k] * S[c * 4 + k];
-            double pivot[3];
-            for (int r = 0; r < 3; r++)
-                pivot[r] = S[r * 4] * bind[bone * 12 + 3] + S[r * 4 + 1] * bind[bone * 12 + 7]
-                           + S[r * 4 + 2] * bind[bone * 12 + 11] + S[r * 4 + 3];
-            for (int r = 0; r < 3; r++) {
-                M[r * 4 + 3] = float(pivot[r]);
-                for (int k = 0; k < 3; k++)
-                    M[r * 4 + 3] -= float(M[r * 4 + k] * pivot[k]);
-            }
-            for (int i = 0; i < count; i++) {
-                int parent = i;
-                while (parent >= 0 && parent != bone)
-                    parent = parents[parent];
-                if (parent == bone) concat(M, out.data() + i * 12, out.data() + i * 12);
-            }
-        };
-        turn("ValveBiped.Bip01_Spine2", a.chestPitch, a.chestYaw, a.chestRoll);
-        turn("ValveBiped.Bip01_Head1", a.headPitch, a.headYaw, a.headRoll);
+        if (!gestureRig) gestureRig.emplace(d.rig);
+        const auto &rig = *gestureRig;
+        if (!rig.valid()) return;
+        const double lookYaw = eyeYaw - feetYaw;
+        native_gestures::square_chest(rig, a.gesture.square, lookYaw, out);
+        native_gestures::turn_about(rig, rig.chest, a.chestPitch, a.chestYaw, a.chestRoll, rig.chest_subtree, out);
+        native_gestures::turn_about(rig, rig.head, a.headPitch, a.headYaw, a.headRoll, rig.head_subtree, out);
+        native_gestures::pose_arms(rig, a.gesture, lookYaw, out);
     }
 
     void earPose(const Input &s, double dt, bool snap, V &out, const Acting *acting = nullptr) {
-        int head = -1;
-        for (size_t i = 0; i < d.rig["names"].size(); i++)
-            if (d.rig["names"][i] == "ValveBiped.Bip01_Head1") head = int(i);
-        if (head < 0) return;
-        const float *H = out.data() + head * 12;
         const double cy = std::cos(feetYaw * 3.141592653589793 / 180), sy = std::sin(feetYaw * 3.141592653589793 / 180);
         earTwitch -= dt;
         double twitch = 0;
@@ -779,9 +732,10 @@ struct State {
             if (speed < 40) twitch = random() < .5 ? 1 : -1;
         }
         for (auto &e : ears) {
-            if (e.bone < 0) continue;
+            if (e.bone < 0 || e.carrier < 0) continue;
+            const float *H = out.data() + e.carrier * 12;
             std::array<double, 3> mb{}, md{}, wb{}, wd{}, target{}, bv{}, want = e.dir;
-            const double perk = acting ? (e.side > 0 ? acting->earL : acting->earR) : 0;
+            const double perk = acting && !e.hang ? (e.side > 0 ? acting->earL : acting->earR) : 0;
             if (perk) {
                 std::array<double, 3> to =
                         perk > 0 ? std::array<double, 3>{.08, .06, 1} : std::array<double, 3>{.32, .95, -.02};
@@ -820,9 +774,11 @@ struct State {
                     e.v[0] += -wd[1] * 70 * twitch * e.side;
                     e.v[1] += wd[0] * 70 * twitch * e.side;
                 }
+                const double stiffness = e.hang ? 640 : 320, damping = e.hang ? 34 : 21;
                 for (int it = 0; it < steps; it++)
                     for (int k = 0; k < 3; k++) {
-                        double a = 320 * (target[k] - e.p[k]) - 21 * (e.v[k] - bv[k]) - e.v[k] - (k == 2 ? 30 : 0);
+                        double a = stiffness * (target[k] - e.p[k]) - damping * (e.v[k] - bv[k]) - e.v[k]
+                                   - (k == 2 ? 30 : 0);
                         e.v[k] += a * h;
                         e.p[k] += e.v[k] * h;
                     }
@@ -846,9 +802,10 @@ struct State {
                     H[2] * mx + H[6] * my + H[10] * dz
             };
             float m[12];
-            swing(e.dir, bd, e.base, 1, m);
+            const double max_angle = e.hang ? .5 : 1.1;
+            swing(e.dir, bd, e.base, e.hang ? .55 : 1, max_angle, m);
             concat(H, m, out.data() + e.bone * 12);
-            swing(e.dir, bd, e.mid, .5, m);
+            swing(e.dir, bd, e.mid, e.hang ? .3 : .5, max_angle, m);
             concat(out.data() + e.bone * 12, m, out.data() + (e.bone + 1) * 12);
         }
     }

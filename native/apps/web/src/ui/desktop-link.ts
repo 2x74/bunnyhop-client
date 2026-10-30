@@ -5,6 +5,7 @@
 import { API_URL } from "../api";
 import { nativeClient } from "../client-bridge";
 import { h } from "./dom";
+import { icon } from "./icons";
 import { dismissOutside } from "./dismiss";
 import "./account.css";
 
@@ -40,31 +41,73 @@ function osName(): string | null {
   return null;
 }
 
-/** The "Desktop app" popup: what the client is, the version, and where to get it; then the native client, the other one. */
+/**
+ * One row of the comparison: what it is, platforms, updates, input... A row's cells are the browser's, the desktop app's
+ * and the native client's, in that order.
+ */
+type Cells = [string, string, string];
+const ROWS: [string, Cells][] = [
+  ["What it is", [
+    "The game at bunnyhop.lol. Nothing to install.",
+    "The same site in its own window (Electron), with a few extras. Open source, by the bunnyhop.lol team.",
+    "A separate client by luna: C++ on the same Rust movement and timer code, with its own menus and no browser.",
+  ]],
+  ["Platforms", ["Any desktop browser", "Windows, macOS, Linux", "Windows x64, Linux x64, macOS 15 or later on Apple silicon"]],
+  ["Updates", [
+    "Always the latest version.",
+    "The game is always the latest. The app says when a new app version is out; you install it.",
+    "In the app (Settings → Updates), checked once a day. 0.6.2 is the last version you download by hand.",
+  ]],
+  ["Input and frame rate", [
+    "Input goes through the browser's event queue, which can hold it back on busy frames.",
+    "Chromium set up for games: input reaches the game sooner than in Chrome. F10 has display options and a frame-time benchmark.",
+    "No browser in between: raw mouse input, uncapped FPS or an exact limit, exclusive fullscreen, and NVIDIA Reflex on Windows.",
+  ]],
+  ["Custom CSS", ["Yes, Settings → Custom CSS", "Yes, and a CSS file it reloads when you save it (F10 → Client)", "In the menus, and a theme's HUD colours carry over"]],
+  ["Custom skies", ["Yes, Settings → Graphics → Sky", "Yes, and a skies folder (F10 → Client → Open skies folder)", "Yes, the same Sky picker, and a skies folder"]],
+  ["Also", ["", "Discord status with Join, maps kept on disk, a run vault", "Beta: expect rough edges. Video export with hardware encoders, the avatar editor and a live HUD editor (F2)."]],
+  ["Ranked runs", ["Yes", "Yes, the same as the browser", "Yes, from builds the server has reviewed"]],
+];
+
+/**
+ * The "Desktop app" popup: the three ways to play side by side (browser, the desktop app, luna's native client), then
+ * where to get each. Players mixed the two downloads up (2026-10).
+ */
 export function openDesktopApp(): void {
   if (document.querySelector("dialog.desktop-dialog")) return;
   const os = osName();
   const version = h("small.desktop-ver");
-  const d = h("dialog.acct-dialog.desktop-dialog", { "aria-label": "Desktop app" }) as HTMLDialogElement;
+  const d = h("dialog.acct-dialog.desktop-dialog", { "aria-label": "Ways to play" }) as HTMLDialogElement;
   const ext = (label: string, href: string) => h("a.link-btn", { href, target: "_blank", rel: "noopener" }, label);
+  const COLS = ["Browser", "Desktop app", "Native client"];
+  const head = h("tr", null, h("td"), ...COLS.map((c, i) => h("th", { scope: "col" }, c, i === 1 ? version : i === 0 ? h("small.desktop-here", null, "you're here") : h("small.desktop-ver", null, "beta"))));
+  const row = (what: string, cells: (string | HTMLElement)[]) =>
+    h("tr", null, h("th", { scope: "row" }, what), ...cells.map((c, i) => h("td", { "data-col": COLS[i] }, c)));
   d.append(
-    h("header.acct-head", null, h("h2", null, "Desktop app ", version)),
+    h("header.acct-head", null, h("h2", null, "Ways to play"), h("button.acct-close", { type: "button", "aria-label": "Close", onclick: () => d.close() }, icon("close"))),
     h(
       "div.acct-body",
       null,
-      h("p", null, "A free, open-source window for bunnyhop.lol on Windows, macOS and Linux. It loads the same game with the same account, and never touches movement or input, so runs count the same as in the browser."),
-      h("p", null, "It adds Discord status with Join, maps kept on disk, a run vault, and an F10 menu with display options and a frame-time benchmark."),
-      h("p.dim", null, "The builds aren't signed with a paid certificate, so Windows and macOS ask once before the first launch."),
+      h("p.desktop-lede", null, "Same account, maps, leaderboards and settings everywhere. Pick by what you want from it."),
       h(
-        "div.desktop-acts",
+        "table.desktop-cmp",
         null,
-        h("a.btn.primary", { href: desktopDownloadUrl(), rel: "noopener" }, os ? `Download for ${os}` : "Download"),
-        ext("Other downloads", RELEASES),
-        ext("Source code", SOURCE),
+        h("thead", null, head),
+        h(
+          "tbody",
+          null,
+          ...ROWS.map(([what, cells]) => row(what, cells)),
+          h(
+            "tr.desktop-get",
+            null,
+            h("th", { scope: "row" }, "Get it"),
+            h("td", { "data-col": COLS[0] }, h("span.dim", null, "You're playing it")),
+            h("td", { "data-col": COLS[1] }, h("a.btn.primary", { href: desktopDownloadUrl(), rel: "noopener" }, os ? `Download for ${os}` : "Download"), h("span.desktop-links", null, ext("Other downloads", RELEASES), ext("Source code", SOURCE))),
+            h("td", { "data-col": COLS[2] }, h("a.btn", { href: NATIVE_RELEASES, target: "_blank", rel: "noopener" }, "Native releases")),
+          ),
+        ),
       ),
-      h("h3.desktop-sub", null, "Native client (beta)"),
-      h("p", null, "A separate client written in C++ by luna, built around the same game core but without a browser. It reads the mouse directly, like m_rawinput 2 in CS:S, which some players find smoother. Its menus follow the browser game's, and its runs count once its build is reviewed. It's newer, so expect rough edges and updates by hand."),
-      h("div.desktop-acts", null, ext("Native client releases", NATIVE_RELEASES)),
+      h("p.dim.desktop-note", null, "Neither download is signed with a paid certificate, so Windows and macOS ask once before the first launch."),
     ),
   );
   d.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Escape") { e.preventDefault(); d.close(); } });

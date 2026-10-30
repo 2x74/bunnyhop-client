@@ -55,10 +55,19 @@ export interface RemotePlayer {
   prep: Promise<void>;
   /** The model is being made (prep, then its shaders compile); it's drawn once `model` is set. */
   making: boolean;
+  /** Their pose wasn't updated last frame (behind the camera, see frame()): snapped when they're posed again. */
+  unposed?: boolean;
 }
 
 const tmp = new THREE.Vector3();
 const camPos = new THREE.Vector3();
+const camDir = new THREE.Vector3();
+/** Closer than this (units) a player is always posed, wherever they are. */
+const POSE_NEAR = 150;
+/** A model's radius for the behind-the-camera test (units: the bunny, a hat, a gun held out). */
+const POSE_RADIUS = 90;
+/** Extra angle past the edge of the view before a player counts as behind (radians, ~10 degrees). */
+const POSE_MARGIN = 0.18;
 const D2R = Math.PI / 180;
 /** Tracer length when nothing is hit (the rifles' range, research/WEAPONS.md). */
 const SHOT_RANGE = 8192;
@@ -188,10 +197,21 @@ export class RemotePlayers {
     this.scene.add(p.tag.sprite);
   }
 
-  /** Per rendered frame: interpolate, animate, place tags. */
-  frame(camera: THREE.Camera, dt: number, now: number): void {
+  /**
+   * Per rendered frame: interpolate, animate, place tags. `poseBehind`: also pose players behind the camera (the
+   * composer looks' sun shadows can fall into view from them). Otherwise a player behind the camera, outside the view
+   * in yaw with a margin, keeps their last pose and is hidden until they're in front again: nothing of them can be
+   * on screen, in a water reflection (it mirrors the view vertically) or in the refraction pass. The bone setup was
+   * most of a full room's main-thread time. Their sounds go on as usual.
+   */
+  frame(camera: THREE.Camera, dt: number, now: number, poseBehind = true): void {
     this.camera = camera;
     camera.getWorldPosition(camPos);
+    // The view's half-angle in yaw (a perspective camera; anything else poses everyone).
+    const persp = camera instanceof THREE.PerspectiveCamera ? camera : null;
+    const halfYaw = persp ? Math.atan(Math.tan(THREE.MathUtils.degToRad(persp.fov) / 2) * persp.aspect) : Math.PI;
+    camera.getWorldDirection(camDir);
+    const fwdLen = Math.hypot(camDir.x, camDir.z);
     const me = this.you();
     const pr = prefs.get();
     const hear = pr.audio.others;
@@ -213,16 +233,39 @@ export class RemotePlayers {
       }
       const m = p.model!;
       const s = p.state;
-      if (s.snapped) m.snap();
+      const gunAttackNow = s.attack !== 0 && s.attackWeapon >= 2;
+      if (!poseBehind && persp && fwdLen > 0.2 && this.inEye !== p.slot && !gunAttackNow && !s.snapped) {
+        // three (x, y, z) = Source (x, z, -y); the angle in yaw between the view and the player.
+        const dx = s.pos[0] - camPos.x, dz = -s.pos[1] - camPos.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > POSE_NEAR) {
+          const cos = (dx * camDir.x + dz * camDir.z) / (dist * fwdLen);
+          const off = Math.acos(Math.max(-1, Math.min(1, cos)));
+          if (off > halfYaw + Math.atan2(POSE_RADIUS, dist) + POSE_MARGIN) {
+            m.root.visible = false;
+            p.unposed = true;
+            if (hear) (p.sound ??= new SpatialMover()).update(dt, s.pos, s.vel, s.grounded, s.crouched, s.jumped, s.snapped);
+            else p.sound?.moves.reset();
+            p.tag!.place(tmp.set(s.pos[0], s.pos[2] + 76, -s.pos[1]), camPos, 0);
+            continue;
+          }
+        }
+      }
+      if (s.snapped || p.unposed) m.snap();
+      p.unposed = false;
       // The gun in their hand (the bunny; other models keep the knife, as for your own third person).
       m.setGun(s.weapon >= 2 ? (WEAPON_IDS[s.weapon] ?? null) : null);
       m.setGunSilencer(s.weapon >= 2 && s.silenced); // the USP's silencer (0.0.12, protocol.ts EXT_SILENCED)
       // An attack with a gun is a shot (no knife swing); with the knife (or an older client: unknown) a swing.
       const gunAttack = s.attack !== 0 && s.attackWeapon >= 2;
       const swing = gunAttack ? 0 : s.attack;
-      m.setState({ position: s.pos, velocity: s.vel, yaw: s.yaw, pitch: s.pitch, crouched: s.crouched, grounded: s.grounded, jumped: s.jumped, attack: swing, inspect: s.inspect, inspectHeld: s.inspectHeld });
+      // Their gun in third person (player/bunny/gun-hold.ts): the kick and flash per shot, the reload gesture (its length
+      // from the gun's own timing: the sender's core isn't ours), a shell per tube-gun event.
+      const held = s.weapon >= 2 ? gunForWeapon(s.weapon) : undefined;
+      const gunReload = s.reload && held ? (held.timing.shells ? { seconds: held.timing.shells.each, shell: true } : { seconds: held.timing.reload ?? 2 }) : null;
+      m.setState({ position: s.pos, velocity: s.vel, yaw: s.yaw, pitch: s.pitch, crouched: s.crouched, grounded: s.grounded, jumped: s.jumped, attack: swing, inspect: s.inspect, inspectHeld: s.inspectHeld, gunShot: gunAttack && s.attack === 1, gunReload });
       if (swing) emitWeaponEvent({ type: swing === 2 ? "stab" : "slash", source: "remote", slot: p.slot, position: [s.pos[0], s.pos[1], s.pos[2]] });
-      if (gunAttack && s.attack === 1) this.shot(s, hear);
+      if (gunAttack && s.attack === 1) this.shot(s, hear, m);
       // Drew a gun (a switch or a pickup): its draw sound at them.
       if (s.weaponChanged && s.weapon >= 2 && hear && !s.snapped) gunSound(gunForWeapon(s.weapon) ?? null, "draw", { at: s.pos, gain: 0.7 });
       if (s.inspect) emitWeaponEvent({ type: "inspect", source: "remote", slot: p.slot, position: [s.pos[0], s.pos[1], s.pos[2]], trick: s.inspect === 1 ? 0 : undefined });
@@ -258,7 +301,7 @@ export class RemotePlayers {
   }
 
   /** A remote shot: their gun's sound at them and a tracer from about their muzzle along their view. */
-  private shot(s: InterpState, hear: boolean): void {
+  private shot(s: InterpState, hear: boolean, m?: PlayerModel): void {
     if (hear) GunPresenter.remoteShot(s.attackWeapon, s.pos, s.attackSilenced);
     if (!this.impacts) return;
     const cp = Math.cos(s.pitch * D2R);
@@ -267,11 +310,11 @@ export class RemotePlayers {
     const far = [0, 1, 2].map((k) => eye[k] + fwd[k] * SHOT_RANGE);
     const f = this.trace ? this.trace(eye, far) : 1;
     const end = [0, 1, 2].map((k) => eye[k] + fwd[k] * SHOT_RANGE * f);
-    // The tracer leaves from about the muzzle of the gun in the bunny's right hand (chest height, ahead and right).
+    // The tracer leaves from their gun's muzzle (the bunny's posed gun as of the last frame), else about where it would be.
     const rl = Math.hypot(fwd[0], fwd[1]) || 1;
     const right = [fwd[1] / rl, -fwd[0] / rl, 0];
     const hand = s.crouched ? 30 : 46;
-    const from = [s.pos[0] + (fwd[0] / rl) * 26 + right[0] * 7, s.pos[1] + (fwd[1] / rl) * 26 + right[1] * 7, s.pos[2] + hand];
+    const from = m?.gunMuzzle(tmp) ? [tmp.x, -tmp.z, tmp.y] : [s.pos[0] + (fwd[0] / rl) * 26 + right[0] * 7, s.pos[1] + (fwd[1] / rl) * 26 + right[1] * 7, s.pos[2] + hand];
     this.impacts.hit(end, [0, 0, 0], "concrete", { from });
   }
 

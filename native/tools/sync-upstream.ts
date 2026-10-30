@@ -35,10 +35,19 @@ const { values } = parseArgs({
     upstream: { type: "string" },
     commit: { type: "string" },
     "dry-run": { type: "boolean" },
+    "wasm-sha256": { type: "string" },
+    "wasm-bytes": { type: "string" },
+    "build-wasm": { type: "boolean" },
   },
 });
 if (!values.upstream || !values.commit) throw new Error("--upstream /repo --commit <full SHA> [--dry-run]");
 if (!/^[0-9a-f]{40}$/.test(values.commit)) throw new Error("Use an immutable full 40-character commit SHA");
+const wasmSha256 = values["wasm-sha256"];
+const wasmBytes = Number(values["wasm-bytes"]);
+if (wasmSha256 !== undefined || values["wasm-bytes"] !== undefined || values["build-wasm"]) {
+  if (!wasmSha256 || !/^[a-f0-9]{64}$/.test(wasmSha256) || !Number.isSafeInteger(wasmBytes) || wasmBytes <= 0)
+    throw new Error("Pass --wasm-sha256 <expected SHA256> --wasm-bytes <expected size> together");
+}
 const upstream = resolve(values.upstream);
 const commit = new TextDecoder().decode(run(["git", "rev-parse", `${values.commit}^{commit}`], upstream)).trim();
 if (commit !== values.commit) throw new Error("Commit resolution mismatch");
@@ -118,6 +127,55 @@ try {
       await writeFile(target, await readFile(join(stage, file)));
     }
     await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+    if (wasmSha256) {
+      const pinPath = join(root, "upstream-wasm.json");
+      const pin = JSON.parse(await readFile(pinPath, "utf8"));
+      const core = await readFile(join(stage, "apps/web/src/core.ts"), "utf8");
+      const timer = await readFile(join(stage, "apps/web/src/timer.ts"), "utf8");
+      const physics = Number(core.match(/export const PHYSICS_VERSION = (\d+)/)?.[1]);
+      const rulesToken = timer.match(/export const TIMER_RULES = (\w+)/)?.[1];
+      const rules = Number(
+        rulesToken &&
+          (/^\d+$/.test(rulesToken) ? rulesToken : timer.match(new RegExp(`export const ${rulesToken} = (\\d+)`))?.[1]),
+      );
+      if (!physics || !rules) throw new Error("Cannot read synced physics/timer rules");
+      await writeFile(
+        pinPath,
+        JSON.stringify(
+          {
+            ...pin,
+            status: "unpublished",
+            commit,
+            url: "",
+            sha256: wasmSha256,
+            bytes: wasmBytes,
+            physics,
+            rules,
+          },
+          null,
+          2,
+        ) + "\n",
+      );
+      const identityPath = join(root, "apps/native/packaging/release_identity.hpp");
+      const identity = await readFile(identityPath, "utf8");
+      const refreshedIdentity = identity
+        .replace(/release_wasm_sha256="[a-f0-9]{64}"/, `release_wasm_sha256="${wasmSha256}"`)
+        .replace(/release_physics=\d+,release_rules=\d+/, `release_physics=${physics},release_rules=${rules}`);
+      if (
+        !refreshedIdentity.includes(`release_wasm_sha256="${wasmSha256}"`) ||
+        !refreshedIdentity.includes(`release_physics=${physics},release_rules=${rules}`)
+      )
+        throw new Error("Cannot refresh the native C++ verifier identity");
+      await writeFile(identityPath, refreshedIdentity);
+    }
+    if (values["build-wasm"]) {
+      const build = Bun.spawn(["bun", "tools/build-upstream-wasm.ts", "--upstream", upstream], {
+        cwd: root,
+        stdout: "inherit",
+        stderr: "inherit",
+      });
+      if (await build.exited) throw new Error("Synced verifier does not match the expected release identity");
+    }
   }
   console.log(
     `${values["dry-run"] ? "Dry run" : "Synced"} ${commit}: ${Object.keys(sources).length} source files, ${Object.keys(patches).length} patches, tree ${manifest.sourceTreeSha256}`,

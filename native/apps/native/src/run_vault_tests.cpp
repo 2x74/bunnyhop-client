@@ -24,6 +24,13 @@ static void test_millisecond_pbs(const std::filesystem::path &root) {
     const auto faster = vault.archive("faster.bhr", raw);
     assert(faster.at("localPb") == true && faster.at("time") == 12.344);
     assert(faster.at("timingPolicy") == 1);
+    assert(!faster.contains("view"));
+    raw["view"] = {{"aspect", 1.333}, {"screen", 1.778}, {"fit", "stretch"}, {"fov", 90}};
+    const auto viewed = native::RunVault::sanitize(raw);
+    assert(native::read_runner_view(viewed.at("view"))->stretched());
+    raw["view"] = {{"aspect", 1.333}, {"screen", 1.778}, {"fit", "zoom"}, {"fov", 90}};
+    assert(!native::RunVault::sanitize(raw).contains("view"));
+    raw.erase("view");
     raw["timeMs"] = 12344.5;
     assert(native::RunVault::sanitize(raw).is_null());
     raw.erase("timeMs");

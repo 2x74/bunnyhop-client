@@ -36,17 +36,19 @@ import { ensureViewmodelLayout } from "../viewmodel/finishes/layout";
 import { viewmodelGeometry } from "../viewmodel/mesh";
 import { vmRig } from "../viewmodel/rig";
 import { getLoadout, getOutfit, onOutfit } from "../player/cosmetics";
-import { GLOVE_STYLE_IDS, gloveStyle, type CosmeticLoadout } from "../loadout";
+import { GLOVE_STYLE_IDS, gloveStyle, type CosmeticLoadout, type GloveStyleId } from "../loadout";
 import { prefs } from "./settings";
 import { BunnyScene, type BunnyLook } from "./bunny-preview";
 import { HERO, type PreviewSpec } from "../notify/item-preview";
 import type { ItemScene } from "../notify/item3d-scenes";
-import { compileModel, prebuildBunny } from "../player/bunny/prebuild";
+import { compileModel, prebuildBunny, prebuildViewmodels } from "../player/bunny/prebuild";
 import { bunnyParts } from "../player/bunny/prebuild-parts";
 import { hasBunnyGeometry } from "../player/bunny/mesh";
 import { hasHatGeometry } from "../player/bunny/hats";
 import { loadoutFor } from "../loadout";
 import { menuIdleAllowed, onMenuMapStart } from "./menu-work";
+import { loadThumb, saveThumb } from "./thumb-store";
+import { playerLookTier } from "../player/look-tier";
 
 /** First person and close-up (hands), your bunny, your ghost. */
 export type StageView = "fp" | "close" | "bunny" | "ghost";
@@ -74,6 +76,17 @@ const IDLE_LOOP = 4.6;
 /** Thumbnails, per page: they only depend on what they show. */
 const thumbCache = new Map<string, HTMLCanvasElement>();
 const MAX_THUMBS = 240;
+/**
+ * Thumbnails are also kept across page loads (thumb-store.ts), as long as this chunk is the same build: its hashed URL
+ * changes whenever this file or any model code it imports changes. Not in dev (one URL for every edit).
+ */
+const THUMB_STORE = import.meta.env.DEV ? null : new URL(import.meta.url).pathname;
+/** A stored thumbnail's key: the job's, plus what else the drawing depends on (the player-material look; for gloves,
+ * the viewmodel settings that place the hand). */
+function storedKey(job: ThumbJob): string {
+  const vm = job.kind === "glove" ? `|${JSON.stringify(prefs.get().viewmodel)}` : "";
+  return `${job.key}|t${playerLookTier()}${vm}`;
+}
 
 /** How long a stage whose view closed waits to be taken over before it frees its GL context. */
 const PARK_MS = 60_000;
@@ -199,6 +212,8 @@ export class LoadoutStage {
   /** The last item model drawn per kind (see runJob). */
   private lastItem = new Map<string, ItemScene>();
   private waiting = new Map<string, ((c: HTMLCanvasElement) => void)[]>();
+  /** Thumbnails being looked up in the store (thumb-store.ts). */
+  private looking = new Set<string>();
 
   /**
    * The Loadout's stage in `host`: a parked one (its canvas left the page: a closed Loadout, the screen being replaced)
@@ -419,8 +434,29 @@ export class LoadoutStage {
     const list = this.waiting.get(job.key);
     if (list) return void list.push(done);
     this.waiting.set(job.key, [done]);
+    if (!THUMB_STORE) return this.queueThumb(job);
+    // Stored from an earlier visit: shown without drawing anything; else queued to draw.
+    this.looking.add(job.key);
+    void loadThumb(THUMB_STORE, storedKey(job)).then((c) => {
+      this.looking.delete(job.key);
+      if (this.disposed || !this.waiting.has(job.key)) return;
+      if (!c) return this.queueThumb(job);
+      this.deliver(job.key, c);
+    });
+  }
+
+  private queueThumb(job: ThumbJob): void {
     this.jobs.push(job);
     this.kick();
+  }
+
+  /** A finished thumbnail: cached for the page and handed to the tiles waiting for it. */
+  private deliver(key: string, c: HTMLCanvasElement): void {
+    if (thumbCache.size >= MAX_THUMBS) thumbCache.delete(thumbCache.keys().next().value!);
+    thumbCache.set(key, c);
+    const cbs = this.waiting.get(key) ?? [];
+    this.waiting.delete(key);
+    for (const cb of cbs) cb(c);
   }
 
   /** Builds the next queued item models (two at a time, in idle time); their thumbnails draw once they're ready. */
@@ -452,6 +488,7 @@ export class LoadoutStage {
 
   /** Drops queued thumbnails nobody shows any more (slot switched). */
   cancelThumbs(keep: (key: string) => boolean): void {
+    for (const k of this.looking) if (!keep(k)) this.waiting.delete(k);
     this.jobs = this.jobs.filter((j) => keep(j.key) || (this.waiting.delete(j.key), j.kind === "item" && j.scene?.dispose(), false));
   }
 
@@ -491,11 +528,8 @@ export class LoadoutStage {
     out.getContext("2d", { willReadFrequently: true })!.drawImage(this.canvas, 0, bh - th, tw, th, 0, 0, tw, th);
     r.setScissorTest(false);
     r.setViewport(0, 0, bw / pr, bh / pr);
-    if (thumbCache.size >= MAX_THUMBS) thumbCache.delete(thumbCache.keys().next().value!);
-    thumbCache.set(job.key, out);
-    const cbs = this.waiting.get(job.key) ?? [];
-    this.waiting.delete(job.key);
-    for (const cb of cbs) cb(out);
+    if (THUMB_STORE) saveThumb(THUMB_STORE, storedKey(job), out);
+    this.deliver(job.key, out);
   }
 
   /** The knife alone, tip up and to the right, its face turned a little to the light. */
@@ -667,8 +701,21 @@ export class LoadoutStage {
     this.renderer.clear();
     if (!b) return;
     b.advance(dt);
+    // A new bunny scene's programs compile in parallel before its first frame (as the hands', drawFirstPerson).
+    if (this.bunnyReady !== b) {
+      if (this.bunnyCompiling !== b) {
+        this.bunnyCompiling = b;
+        void b.compile(this.renderer).finally(() => {
+          if (this.bunnyCompiling === b) this.bunnyReady = b;
+          this.kick();
+        });
+      }
+      return;
+    }
     b.render(this.renderer, this.w, this.h);
   }
+  private bunnyReady: BunnyScene | null = null;
+  private bunnyCompiling: BunnyScene | null = null;
 
   private drawFirstPerson(dt: number): void {
     // Look-around: a slow wander (not with reduced motion) plus the drag, easing back when let go.
@@ -701,8 +748,22 @@ export class LoadoutStage {
     this.world.position.set(0, 0, 0);
     this.world.rotation.set(0, 0, 0);
     this.crop(this.vm, this.rect, this.w, this.h);
+    // The first time in this context: its programs compile in parallel first (the 70 kB hands shader linked inside a
+    // frame froze the page for 0.1-0.3 s on open, longer on Windows), the hero shows when they're ready.
+    if (this.vmReady !== true) {
+      if (this.vmReady === false) {
+        this.vmReady = null;
+        void compileModel(this.renderer, this.vm.scene, this.vm.camera, this.vm.scene, 3000).finally(() => {
+          this.vmReady = true;
+          this.kick();
+        });
+      }
+      return;
+    }
     this.vm.render(this.renderer, this.world);
   }
+  /** The hero viewmodel's programs: not compiled in this context yet (false), compiling (null), ready (true). */
+  private vmReady: boolean | null = false;
 
   private drawCloseUp(dt: number): void {
     // Turntable: inertia from drags and flourishes, a slow spin when left alone (not with reduced motion).
@@ -908,6 +969,10 @@ export function prewarmLoadout(l: CosmeticLoadout = getLoadout(), done?: () => v
     const ric = (fn: () => void) => ("requestIdleCallback" in window ? requestIdleCallback(fn, { timeout: 400 }) : setTimeout(fn, 30));
     const mine = vmKnife(knifeOf(l.knife)) ?? undefined;
     const glove = gloveStyle(l.glove).style;
+    // The first-person geometries below are built in the prebuild worker first (~10 ms each here, several times that
+    // on a slow PC, about 30 of them): the steps then only sample them. Any not back yet are built here as before.
+    const vmPairs: [KnifeDef, GloveStyleId][] = [[carrot, "knit"], [mine ?? carrot, glove], ...GLOVE_STYLE_IDS.map((style): [KnifeDef, GloveStyleId] => [mine ?? carrot, style]), ...KNIVES.map((k): [KnifeDef, GloveStyleId] => [k, glove])];
+    const built = prebuildViewmodels(vmPairs);
     const steps: (() => void)[] = [
       () => sampleOf(viewmodelGeometry(mine, glove)),
       ...GLOVE_STYLE_IDS.map((style) => () => sampleOf(viewmodelGeometry(mine, style))),
@@ -921,7 +986,7 @@ export function prewarmLoadout(l: CosmeticLoadout = getLoadout(), done?: () => v
       step();
       ric(next);
     };
-    ric(next);
+    void built.then(() => ric(next));
   });
   if (done) void warming.then(done);
   return warming;

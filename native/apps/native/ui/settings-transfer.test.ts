@@ -6,10 +6,11 @@ import {
   parseSettingsText,
   planSettingsImport,
 } from "../../web/src/ui/settings-io";
-import { DEFAULT_PREFS } from "../../web/src/ui/settings";
+import { DEFAULT_PREFS, type Prefs } from "../../web/src/ui/settings";
 import { loadProfiles } from "../../web/src/ui/settings-profiles";
-import { state } from "./bridge";
-import { hostSettings, nativeView } from "./prefs-bridge";
+import { DEFAULT_BINDS, state } from "./bridge";
+import { hostSettings, MAPPINGS, nativeView, type HostSettings } from "./prefs-bridge";
+import { WEBSITE_CHAT_BIND } from "./settings-gates";
 import { parseOldPresets, presetsToProfiles } from "./settings-presets";
 import { mergeSettings, nativeOnlySettings, syncDocument } from "./settings-sync";
 import { prefsFromNative, websiteSettingsText } from "./settings-transfer";
@@ -119,4 +120,16 @@ test("the account copy keeps what this build doesn't know and carries native-onl
   expect(doc.settings.native).toEqual(native);
   expect((doc.settings as Record<string, unknown>).futureTop).toEqual({ on: true });
   expect(prefsFromNative({ sensitivity: 4 }).sensitivity).toBe(4);
+});
+
+// The website's chat bind (binds.ts chat, Y and U). Runs once the vendored website has it: until then its importer
+// drops binds.chat as an unknown action.
+test.skipIf(!WEBSITE_CHAT_BIND)("a website settings file's binds.chat reaches the native chat bind", () => {
+  const website = JSON.parse(JSON.stringify(DEFAULT_PREFS)) as Prefs;
+  (website.binds as Record<string, string[]>).chat = ["Enter"];
+  const plan = planSettingsImport(buildSettingsDoc(website), JSON.parse(JSON.stringify(DEFAULT_PREFS)));
+  const binds = MAPPINGS.find((mapping) => mapping.keys[0] === "binds")!;
+  const out = binds.toNative(plan.next, { binds: { ...DEFAULT_BINDS } } as unknown as HostSettings);
+  expect((out.binds as Record<string, string[]>).chat).toEqual(["Enter"]);
+  expect((DEFAULT_PREFS.binds as Record<string, string[]>).chat).toEqual([...DEFAULT_BINDS.chat]);
 });
