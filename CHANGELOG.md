@@ -27,6 +27,15 @@ This is the last version you need to download by hand: from here on, Settings â†
   map and players. Skybox seams and pale halos around leaves are gone.
 - Ghosts, trails and the route guide work like the website's.
 
+**Cosmetics**
+- Knife pool, as on the website: up to 8 knives with their finishes that swap each map or each restart, in order or
+  at random. Set it up in Loadout â†’ Knife; it saves to your account, and other players and your replays see the knife
+  you're holding.
+- New knife: Whirligig, with its spinner, its draw and three inspects (Flick, Pinwheel, Backspin).
+- The rebuilt Karrotbit, with its ring twirl on the draw.
+- Ponytails go up to 300% long.
+- Knife inspects make their flick, spin and catch sounds, and the Bunnyfly's blade shows in first person.
+
 **Display and input**
 - Exclusive fullscreen: pick the monitor, resolution and refresh rate, then keep it or it switches back after 10
   seconds. True 4:3 stretched or black bars.
