@@ -69,9 +69,16 @@ Check sensitivity with a physical mouse before using Raw; it has not completed t
 ## Replays and scores
 
 Replays opens the local vault: finished and imported BHR files with search, filters and sorting. Playback has a
-timeline over the live scene: drag to scrub, Space pauses, Left/Right steps a frame, Tab switches between cursor
-and camera. The vault also races ghosts, imports and exports BHR files, and exports MP4 clips with gameplay audio
-and optional music (FFmpeg with libx264).
+timeline over the live scene with the speed graph, jumps, strafe switches and splits: drag to scrub, Space pauses,
+`,` and `.` step a tick, J and N go to the next jump or split, L loops a part, 1-6 pick the camera (in-eye, chase,
+free, flyby, auto, orbit), V and H switch the weapon in hand and the HUD, and Tab switches between cursor and camera.
+Compare shows a second replay as a ghost with the time ahead or behind; Share copies the run's link at the shown tick.
+
+Export video renders in a separate process (`--export-video`, below) while the game keeps running, one export after
+another, into Downloads: any size up to 8K at 24-240 fps, motion blur and supersampling, H.264, HEVC, AV1, ProRes,
+DNxHR, lossless FFV1 or PNG frames, with gameplay audio, optional music and the sound as a WAV. It uses FFmpeg from
+PATH (or Homebrew on macOS), hardware encoders (VideoToolbox, NVENC, Quick Sync, AMF, VAAPI) where a test encode works
+and software otherwise. The Replays list makes videos of replays without opening them.
 
 Replays are saved to the app's `replays/` folder before upload. The menu uploads with your bunnyhop.lol account;
 native code owns the four-second signed heartbeat and command hashes. The server re-simulates every submission
@@ -142,6 +149,31 @@ Smoke runs that need no account:
 apps/native/build/bunnyhop-native --map /path/to/map.bsp --hidden --frames 30 --screenshot /tmp/native.ppm
 apps/native/build/bunnyhop-native --map /path/to/map.bsp --no-menu --hidden --presentation-smoke /tmp/hud
 ```
+
+Export replays to video without the game, one process for any number of jobs. It prints JSON progress lines and
+reads `cancel` on stdin:
+
+```sh
+apps/native/build/bunnyhop-native --export-video /path/to/spec.json
+```
+
+```json
+{
+  "cache": "/path/to/data",
+  "jobs": [
+    {
+      "replay": "/path/to/run.bhr",
+      "map": "bhop_eazy",
+      "output": "/path/to/folder",
+      "options": { "width": 1920, "height": 1080, "fps": 60, "quality": "high", "camera": "chase", "hud": true,
+                   "codec": "hevc", "samples": 4, "shutter": 90 }
+    }
+  ]
+}
+```
+
+The map comes from `cache` (or is downloaded) unless the job names a `bsp`. `settings` sets the player's settings
+(defaults otherwise).
 
 Profile a full offline gameplay workload without capturing the mouse or opening a menu:
 
