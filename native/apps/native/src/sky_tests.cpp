@@ -15,7 +15,7 @@
 
 namespace {
 
-bool near(float a, float b, float tolerance = 1e-4f) {
+bool close_to(float a, float b, float tolerance = 1e-4f) {
     return std::abs(a - b) <= tolerance;
 }
 
@@ -67,7 +67,7 @@ void base64_round_trips() {
 
 void half_floats_round_trip() {
     for (float value : {0.f, 1.f, .5f, 65504.f, 6.1035e-5f, 3.14159f, 1234.5f})
-        assert(near(native::float_from_half(native::half_from_float(value)), value, value * 1e-3f + 1e-7f));
+        assert(close_to(native::float_from_half(native::half_from_float(value)), value, value * 1e-3f + 1e-7f));
     assert(native::half_from_float(1e9f) == 0x7bff);
 }
 
@@ -96,14 +96,14 @@ void hdr_panoramas_declare_their_sun() {
     assert(decoded.picture);
     const auto &sky = *decoded.picture;
     assert(sky.width == 8 && sky.height == 4 && sky.pixels.size() == 8 * 4 * 3);
-    assert(near(native::float_from_half(sky.pixels[(1 * 8 + 6) * 3]), 4, .01f));
+    assert(close_to(native::float_from_half(sky.pixels[(1 * 8 + 6) * 3]), 4, .01f));
     // from-hdr.ts skyLighting: latitude and longitude of the texel's centre, colour over its peak.
     const float pi = 3.14159265f, lat = (.5f - 1.5f / 4) * pi, lon = (6.5f / 8 - .5f) * 2 * pi;
     const auto &sun = sky.lighting.sun_direction;
-    assert(near(sun[0], std::cos(lat) * std::cos(lon)) && near(sun[1], std::sin(lat)));
-    assert(near(sun[2], std::cos(lat) * std::sin(lon)));
-    assert(near(sky.lighting.sun_color[0], 1) && near(sky.lighting.sun_color[1], .5f));
-    assert(near(sky.lighting.sun_intensity, 1) && near(sky.lighting.ambient_intensity, .28f));
+    assert(close_to(sun[0], std::cos(lat) * std::cos(lon)) && close_to(sun[1], std::sin(lat)));
+    assert(close_to(sun[2], std::cos(lat) * std::sin(lon)));
+    assert(close_to(sky.lighting.sun_color[0], 1) && close_to(sky.lighting.sun_color[1], .5f));
+    assert(close_to(sky.lighting.sun_intensity, 1) && close_to(sky.lighting.ambient_intensity, .28f));
     const auto wide = native::decode_sky(tiny_hdr(0, 0), native::SkyFileKind::image, native::SkyClouds::clear);
     assert(!wide.picture && !wide.error.empty());
 }
@@ -142,8 +142,8 @@ void packs_are_checked_like_the_website() {
     };
     const auto good = decode(pack);
     assert(good.picture);
-    assert(near(good.picture->rotation, 3.14159265f / 2) && near(good.picture->exposure, 2));
-    assert(good.picture->lighting.has_sun && near(good.picture->lighting.sun_intensity, .8f));
+    assert(close_to(good.picture->rotation, 3.14159265f / 2) && close_to(good.picture->exposure, 2));
+    assert(good.picture->lighting.has_sun && close_to(good.picture->lighting.sun_intensity, .8f));
     auto tampered = pack;
     tampered["asset"]["sha256"] = std::string(64, '0');
     assert(decode(tampered).error == "Sky asset hash mismatch");
@@ -181,7 +181,7 @@ void looks_read_and_validate_like_the_website() {
     look.lighting_profile = native::LightingProfileId::map;
     look.ambience_showcase = false;
     look.map_profiles = true;
-    assert(near(native::resolve_visual_profile(look, "bhop_arcane_v2", "", true).bloom_scale, .85f));
+    assert(close_to(native::resolve_visual_profile(look, "bhop_arcane_v2", "", true).bloom_scale, .85f));
 }
 
 void a_map_lit_pack_turns_to_the_map_sun() {
@@ -194,9 +194,9 @@ void a_map_lit_pack_turns_to_the_map_sun() {
     sky.lighting.sun_direction = {1, 0, 0};
     const float yaw = native::sky_yaw(look, false, sky, map);
     const auto turned = native::source_from_three(native::turn_three(sky.lighting.sun_direction, yaw));
-    assert(near(turned[0], 0) && near(turned[1], 1) && near(turned[2], 0));
+    assert(close_to(turned[0], 0) && close_to(turned[1], 1) && close_to(turned[2], 0));
     const auto lit = native::resolve_scene_sun(map, &sky, true, yaw, 1);
-    assert(lit.from_pack && near(lit.direction[1], 1));
+    assert(lit.from_pack && close_to(lit.direction[1], 1));
 }
 
 void the_sun_map_centres_on_the_camera() {
@@ -204,7 +204,7 @@ void the_sun_map_centres_on_the_camera() {
     const auto m = native::sun_view_projection(center, direction, 1024, 1024);
     const auto p = native_render::transform_point(m, {128, -64, 32});
     const float texel = 2.f / 1024;
-    assert(std::abs(p[0]) <= texel && std::abs(p[1]) <= texel && near(p[2], 0, 1e-3f));
+    assert(std::abs(p[0]) <= texel && std::abs(p[1]) <= texel && close_to(p[2], 0, 1e-3f));
 }
 
 }  // namespace

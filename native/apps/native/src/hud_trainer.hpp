@@ -81,16 +81,16 @@ void draw_trainer_zones(
     const float width = TrainerLayout::width;
     const float good = float(look.zone / trainer_pace_max) * width;
     const double near_pace = std::min(trainer_target_pace, double(look.zone) * trainer_ok_span);
-    const float near = float(near_pace / trainer_pace_max) * width;
+    const float near_width = float(near_pace / trainer_pace_max) * width;
     const float middle = left + width / 2;
     const NameColor bad_color = with_alpha(palette.trainer[2], TrainerLayout::bad_zone_alpha * alpha);
     const NameColor near_color = with_alpha(palette.trainer[1], alpha);
     const bool round = look.style == "detailed";
-    draw_rounded_rect(hud, left, top, width / 2 - near, rail, bad_color, round, false);
-    hud.overlay_rect(middle - near, top, near - good, rail, near_color);
+    draw_rounded_rect(hud, left, top, width / 2 - near_width, rail, bad_color, round, false);
+    hud.overlay_rect(middle - near_width, top, near_width - good, rail, near_color);
     hud.overlay_rect(middle - good, top, 2 * good, rail, with_alpha(palette.trainer[0], alpha));
-    hud.overlay_rect(middle + good, top, near - good, rail, near_color);
-    draw_rounded_rect(hud, middle + near, top, width / 2 - near, rail, bad_color, false, round);
+    hud.overlay_rect(middle + good, top, near_width - good, rail, near_color);
+    draw_rounded_rect(hud, middle + near_width, top, width / 2 - near_width, rail, bad_color, false, round);
 }
 
 template <class Hud>

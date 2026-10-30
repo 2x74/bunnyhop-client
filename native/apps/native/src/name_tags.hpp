@@ -265,12 +265,12 @@ public:
     float opacity(unsigned slot, const float *point, bool through_walls, Trace &trace) {
         const float distance = std::hypot(point[0] - eye_[0], point[1] - eye_[1], point[2] - eye_[2]);
         if (distance < near_hidden_units) return 0;
-        const float near = std::min(1.f, (distance - near_hidden_units) / near_ramp_units);
-        const float far = distance <= far_full_units ? 1
-                          : distance >= far_gone_units
-                                  ? 0
-                                  : 1 - (distance - far_full_units) / (far_gone_units - far_full_units);
-        return near * far * (through_walls ? 1 : seen(slot, point, trace));
+        const float near_fade = std::min(1.f, (distance - near_hidden_units) / near_ramp_units);
+        const float far_fade = distance <= far_full_units ? 1
+                               : distance >= far_gone_units
+                                       ? 0
+                                       : 1 - (distance - far_full_units) / (far_gone_units - far_full_units);
+        return near_fade * far_fade * (through_walls ? 1 : seen(slot, point, trace));
     }
 
 private:

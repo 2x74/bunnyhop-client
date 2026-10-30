@@ -2230,11 +2230,11 @@ public:
         };
         float eye[3] = {actor.frame.position[0], actor.frame.position[1], actor.frame.position[2]};
         eye[2] += crouched ? crouched_eye_units : standing_eye_units;
-        float far[3];
+        float shot_end[3];
         for (int k = 0; k < 3; ++k)
-            far[k] = eye[k] + forward[k] * shot_range_units;
+            shot_end[k] = eye[k] + forward[k] * shot_range_units;
         float fraction = 1;
-        if (!bh_trace_camera(core, eye, far, 0, &fraction)) fraction = 1;
+        if (!bh_trace_camera(core, eye, shot_end, 0, &fraction)) fraction = 1;
         BhAttackReport report{};
         report.weapon = actor.frame.weapon;
         report.hit = fraction < 1;

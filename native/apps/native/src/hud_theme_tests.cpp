@@ -459,10 +459,10 @@ void test_tag_sight_fades() {
         return false;
     };
     sights.begin(0, eye);
-    const float close[] = {60, 0, 0}, ramp[] = {135, 0, 0}, far[] = {2500, 0, 0}, gone[] = {3200, 0, 0};
+    const float close[] = {60, 0, 0}, ramp[] = {135, 0, 0}, distant[] = {2500, 0, 0}, gone[] = {3200, 0, 0};
     assert(sights.opacity(1, close, true, clear) == 0);
     assert(std::abs(sights.opacity(1, ramp, true, clear) - .5f) < 1e-5f);
-    assert(std::abs(sights.opacity(1, far, true, clear) - .5f) < 1e-5f);
+    assert(std::abs(sights.opacity(1, distant, true, clear) - .5f) < 1e-5f);
     assert(sights.opacity(1, gone, true, clear) == 0);
     // Occlusion eases out over a fifth of a second and back in over an eighth.
     const float mid[] = {500, 0, 0};

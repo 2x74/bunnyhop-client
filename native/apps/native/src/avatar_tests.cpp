@@ -33,7 +33,7 @@ nlohmann::json message() {
             {"backdrop", {{"kind", "studio"}, {"top", "#22222a"}, {"bottom", "#0e0e12"}, {"glow", "#7ee0b0"}}}};
 }
 
-bool near(double a, double b) {
+bool close_to(double a, double b) {
     return std::abs(a - b) < 1e-9;
 }
 
@@ -41,7 +41,7 @@ void reads_requests() {
     const auto request = parse_request(message());
     assert(request && request->id == 7 && request->output == Output::webp && request->size == 256);
     assert(request->spec.pose == "swing" && request->spec.frame == Frame::close && request->spec.hand == Hand::knife);
-    assert(near(request->spec.moment, .75) && near(request->spec.zoom, 1.1));
+    assert(close_to(request->spec.moment, .75) && close_to(request->spec.zoom, 1.1));
     assert(request->backdrop.kind == Backdrop::Kind::studio && request->backdrop.glow
            && request->backdrop.glow->g == 0xe0);
     // Anything out of the spec's ranges (avatar/spec.ts cleanAvatar) is refused rather than clamped.
@@ -69,14 +69,14 @@ void times_poses() {
     Spec spec;
     spec.moment = .5;
     spec.pose = "idle";
-    assert(near(PoseScript(spec, library).until(), settle_seconds + 1.5));
+    assert(close_to(PoseScript(spec, library).until(), settle_seconds + 1.5));
     spec.pose = "swing";
     PoseScript swing(spec, library);
-    assert(near(swing.until(), settle_seconds + .02 + .3) && swing.signal() && swing.signal()->attack == 1);
+    assert(close_to(swing.until(), settle_seconds + .02 + .3) && swing.signal() && swing.signal()->attack == 1);
     spec.pose = "showoff";
     spec.knife = "knife-thornback";
     PoseScript showoff(spec, library);
-    assert(near(showoff.until(), settle_seconds + .1 + .5 * (3.15 - .3)) && showoff.signal()->inspect == 1);
+    assert(close_to(showoff.until(), settle_seconds + .1 + .5 * (3.15 - .3)) && showoff.signal()->inspect == 1);
     spec.hand = Hand::none;
     assert(!PoseScript(spec, library).signal());
     spec.pose = "hop";
@@ -88,7 +88,7 @@ void times_poses() {
     assert(hop.at(settle_seconds, 0).grounded && std::abs(hop.at(0, 0).velocity[0] - 300) < 1e-3);
     spec.pose = "lookup";
     const auto up = PoseScript(spec, library).at(0, -62);
-    assert(near(up.yaw, -34) && near(up.pitch, -38));
+    assert(close_to(up.yaw, -34) && close_to(up.pitch, -38));
 }
 
 void reads_exported_gestures(const std::filesystem::path &assets) {

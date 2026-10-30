@@ -60,11 +60,11 @@ void test_capture_distance_margin() {
     native_render::WaterCapturePlanner planner;
     planner.load(builder.cells(), 1);
     // 128 to the pool's edge plus 1600: out of reach until captures start, then kept within the margin.
-    const Vec3 far{-1728, 0, 20};
-    assert(!planner.plan(far, looking_down_x(far)).refract);
-    const Vec3 near{-1000, 0, 20};
-    assert(planner.plan(near, looking_down_x(near)).refract);
-    assert(planner.plan(far, looking_down_x(far)).refract);
+    const Vec3 far_eye{-1728, 0, 20};
+    assert(!planner.plan(far_eye, looking_down_x(far_eye)).refract);
+    const Vec3 near_eye{-1000, 0, 20};
+    assert(planner.plan(near_eye, looking_down_x(near_eye)).refract);
+    assert(planner.plan(far_eye, looking_down_x(far_eye)).refract);
     const Vec3 beyond{-2000, 0, 20};
     assert(!planner.plan(beyond, looking_down_x(beyond)).refract);
 }

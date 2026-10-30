@@ -14,7 +14,7 @@ constexpr double tolerance_units = 2e-3;
 
 double worst = 0;
 
-void near(double a, double b, const char *what, size_t frame) {
+void expect_near(double a, double b, const char *what, size_t frame) {
     const double error = std::abs(a - b);
     worst = std::max(worst, error);
     if (error > tolerance_units) {
@@ -49,11 +49,11 @@ void replay(const Json &run, const native_gun::Rig &rig, double jitter) {
         hold.apply(skinning, input);
         const auto &want = expected.at("skinning");
         for (size_t i = 0; i < skinning.size(); ++i)
-            near(skinning[i], want[i].get<double>(), "skinning", frame);
+            expect_near(skinning[i], want[i].get<double>(), "skinning", frame);
         for (size_t i = 0; i < hold.skin.size(); ++i)
-            near(hold.skin[i], expected.at("skin")[i].get<double>(), "gun bone", frame);
+            expect_near(hold.skin[i], expected.at("skin")[i].get<double>(), "gun bone", frame);
         for (size_t i = 0; i < 3; ++i)
-            near(hold.muzzle[i], expected.at("muzzle")[i].get<double>(), "muzzle", frame);
+            expect_near(hold.muzzle[i], expected.at("muzzle")[i].get<double>(), "muzzle", frame);
     }
 }
 }  // namespace
