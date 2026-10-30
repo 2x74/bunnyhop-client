@@ -38,6 +38,11 @@ import { fistFrames } from "../../web/src/player/bunny/gun-hold";
 import { holdData } from "./gun-hold-data";
 import { FINISH_STYLE, GLOVE_STYLE, GLOVE_STYLE_IDS, HAIR_DEFAULT } from "../../web/src/loadout";
 import { FINISH_CODE } from "../../web/src/viewmodel/finishes/shader";
+import { clampFingers } from "../../web/src/viewmodel/fingers";
+import { WHIRL_FLICK } from "../../web/src/viewmodel/knives/whirligig";
+// The knives' wall-clock motion (the bayonets' idle sway, the Whirligig's thumb flicks) reads performance.now(). Freeze
+// it so the baked clips don't depend on when they were built; native adds the spinner's flicks at runtime.
+Object.defineProperty(performance, "now", { value: () => 0, configurable: true });
 const directory = resolve(process.argv[2] ?? "target/native-assets");
 // Floats per vertex: position 3, normal 3, partColor 3, skinIndex 4, skinWeight 4, accent 1, finishUV 4, headwear 1.
 const STRIDE = 23;
@@ -162,6 +167,26 @@ function onGunBones(source: THREE.BufferGeometry): THREE.BufferGeometry {
 const vr = vmRig(),
   gr = gunRig(),
   br = bunnyRig();
+/**
+ * The website's last steps on a knife pose (viewmodel.ts pose): the extra bones and state.local follow the hold (the
+ * balisong's halves, the Whirligig's spinner, the Karrotbit's draw twirl), then no finger bends past its range.
+ */
+function finishPose(hold: KnifeHold, W: Float32Array): void {
+  hold.solve(W);
+  clampFingers(W, vr);
+}
+/**
+ * The Whirligig's spinner bone: its axle in bind space (the bone's local x through its origin) and the idle flicks, so
+ * native turns it on the wall clock like the website (knives/whirligig.ts whirlIdle).
+ */
+function spinner() {
+  const bone = vr.bone("Whirl_Spin"),
+    at = bone * 12;
+  const axis = [vr.bind[at], vr.bind[at + 4], vr.bind[at + 8]];
+  const pivot = [vr.bind[at + 3], vr.bind[at + 7], vr.bind[at + 11]];
+  const knives = KNIVES.filter((def) => def.joints?.includes("Whirl_Spin")).map((def) => def.id);
+  return { bone, axis, pivot, knives, ...WHIRL_FLICK };
+}
 for (const glove of GLOVE_STYLE_IDS) {
   const b = new Builder();
   buildFpHands(b, glove);
@@ -204,6 +229,7 @@ for (const glove of GLOVE_STYLE_IDS) {
         const t = Math.min(duration, f / 60);
         proc.pose(action, t, W);
         hold.apply(W, action, t, "procedural");
+        finishPose(hold, W);
         for (let i = 0; i < vr.names.length; i++) concat(W, i * 12, vr.inv, i * 12, S, i * 12);
         baked.set(S, f * S.length);
       }
@@ -221,6 +247,7 @@ for (const glove of GLOVE_STYLE_IDS) {
         hold.state.show = c.show?.(t) ?? 0;
         hold.apply(W, "idle", 0, "procedural");
         c.apply(W, t, { arm, knife: def, state: hold.state });
+        finishPose(hold, W);
         for (let i = 0; i < vr.names.length; i++) concat(W, i * 12, vr.inv, i * 12, S, i * 12);
         baked.set(S, f * S.length);
       }
@@ -439,6 +466,7 @@ await writeFile(
         })),
       ]),
     ),
+    spinner: spinner(),
     finishes: Object.fromEntries(Object.entries(FINISH_STYLE).map(([id, spec]) => [id, FINISH_CODE[spec.kind]])),
   }),
 );

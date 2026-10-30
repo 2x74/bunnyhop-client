@@ -18,6 +18,7 @@
 #include "resource_loading.hpp"
 #include "actor_anim.hpp"
 #include "tp_inspect.hpp"
+#include "knife_spinner.hpp"
 #include <span>
 #include "nlohmann/json.hpp"
 #include <filesystem>
