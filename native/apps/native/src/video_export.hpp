@@ -63,6 +63,9 @@ struct VideoTimeline {
     uint64_t audio_frames(int sample_rate = 22050) const;
 };
 
+// SDL_CreateProcessWithProperties, retried when another thread closed a descriptor during the spawn (EBADF).
+SDL_Process *spawn_process(SDL_PropertiesID props);
+
 struct VideoAvailability {
     bool available = false;
     // `encoder` is the FFmpeg program; `encoders` what it can encode with on this computer.

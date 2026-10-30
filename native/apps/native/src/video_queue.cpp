@@ -65,7 +65,7 @@ start_worker(const std::filesystem::path &executable, const std::filesystem::pat
     SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_APP);
     SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER, SDL_PROCESS_STDIO_REDIRECT);
     SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_STDERR_POINTER, log);
-    auto *process = SDL_CreateProcessWithProperties(props);
+    auto *process = spawn_process(props);
     SDL_DestroyProperties(props);
     return process;
 }

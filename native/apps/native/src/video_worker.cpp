@@ -439,7 +439,8 @@ std::optional<std::filesystem::path> argument(int argc, char **argv) {
 }
 
 int run(const std::filesystem::path &spec_path) {
-    Control control;
+    // The stdin reader is detached and may outlive this call by a moment while the process exits.
+    static Control control;
     try {
         const auto spec = read_spec(spec_path);
         std::thread(listen, std::ref(control), spec.parent).detach();

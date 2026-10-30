@@ -28,6 +28,8 @@ constexpr size_t log_tail_bytes = 4096;
 constexpr int probe_side_pixels = 256;
 constexpr int probe_frames = 2;
 constexpr int audio_file_sample_rate = 48000;
+constexpr int spawn_attempts = 5;
+constexpr int spawn_retry_delay_ms = 5;
 constexpr int min_dnxhr_width_pixels = 256, min_dnxhr_height_pixels = 120;
 
 bool one_of(int value, const auto &choices) {
@@ -104,7 +106,7 @@ SDL_Process *create_process(const std::vector<std::string> &arguments, bool inpu
     } else {
         SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER, SDL_PROCESS_STDIO_NULL);
     }
-    auto *process = SDL_CreateProcessWithProperties(props);
+    auto *process = spawn_process(props);
     SDL_DestroyProperties(props);
     return process;
 }
@@ -234,6 +236,17 @@ uint64_t tree_size(const std::filesystem::path &path) {
 }
 
 }  // namespace
+
+// SDL closes every descriptor the child would inherit; one closed by another thread between its scan and the spawn
+// (the renderer, a file read) fails the spawn with "Bad file descriptor". Trying again is safe.
+SDL_Process *spawn_process(SDL_PropertiesID props) {
+    for (int attempt = 0; attempt < spawn_attempts; ++attempt) {
+        if (auto *process = SDL_CreateProcessWithProperties(props)) return process;
+        if (std::string_view(SDL_GetError()).find("Bad file descriptor") == std::string_view::npos) return nullptr;
+        SDL_Delay(spawn_retry_delay_ms);
+    }
+    return nullptr;
+}
 
 VideoTimeline VideoTimeline::make(const VideoOptions &o, uint32_t ticks) {
     validate_picture(o);
