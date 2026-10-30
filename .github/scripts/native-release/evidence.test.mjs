@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { artifactName, collectEvidence, sha256, targets, validateEvidence, serializeEvidence } from './evidence.mjs';
+import { artifactName, collectEvidence, MAX_EVIDENCE_BYTES, sha256, targets, validateEvidence, serializeEvidence } from './evidence.mjs';
 import { PINNED_WASM_SHA256, PARITY_SUITE, parityArtifactName, parityFiles, fixtureVersions, fixtureTrials, behaviorCounters } from './parity-contract.mjs';
 const context = { repository: '2x74/bunnyhop-client', sourceSha: 'a'.repeat(40), ref: 'refs/heads/main', workflowRef: '2x74/bunnyhop-client/.github/workflows/native-release.yml@refs/heads/main', event: 'workflow_dispatch', runId: '1234', runAttempt: '2', version: '0.0.2', platform: 'all' };
 function fixture() {
@@ -140,7 +140,7 @@ test('both workflows require movement gates, evidence and immediate Windows exit
  test('complete v18 all-platform evidence fits the bounded input', () => withEvidence(e => {
   assert.ok(Buffer.byteLength(JSON.stringify(e, null, 2)) > 64 * 1024);
   const bytes = serializeEvidence(e);
-  assert.ok(Buffer.byteLength(bytes) <= 64 * 1024);
+  assert.ok(Buffer.byteLength(bytes) <= MAX_EVIDENCE_BYTES);
   assert.deepEqual(JSON.parse(bytes), e);
-  assert.throws(() => serializeEvidence({ ...e, oversized: 'x'.repeat(64 * 1024) }), /input limit/);
+  assert.throws(() => serializeEvidence({ ...e, oversized: 'x'.repeat(MAX_EVIDENCE_BYTES) }), /input limit/);
 }));
