@@ -12,6 +12,7 @@
 #include "../packaging/assets_identity.hpp"
 #include "../packaging/executable_identity.hpp"
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -67,7 +68,7 @@ inline Detection detect_macos(const fs::path &executable) {
     if (executable.parent_path().filename() != "MacOS" || contents.filename() != "Contents"
         || bundle.extension() != ".app")
         return {std::nullopt, "This copy isn't inside an app bundle."};
-    if (data_location::utf8(bundle).find("/AppTranslocation/") != std::string::npos)
+    if (std::ranges::find(bundle, fs::path("AppTranslocation")) != bundle.end())
         return {std::nullopt,
                 "macOS is running the game from a temporary copy. Move the app to another folder, open it from "
                 "there, then update."};
