@@ -153,7 +153,7 @@ const CuratedSky *find_curated_sky(std::string_view id) {
 std::optional<SkyLink> parse_sky_link(std::string_view raw) {
     static const std::regex url_pattern(R"(^\s*https://([^/?#\s]+)(/[^?#\s]*)?([?#]\S*)?\s*$)", std::regex::icase);
     std::cmatch match;
-    if (!std::regex_match(raw.begin(), raw.end(), match, url_pattern)) return std::nullopt;
+    if (!std::regex_match(raw.data(), raw.data() + raw.size(), match, url_pattern)) return std::nullopt;
     const auto host = lower(match[1].str());
     const auto path = match[2].str();
     std::string url(raw);
