@@ -286,6 +286,50 @@ test("settings kept with the account upload one document with native settings an
   }
 }, 30_000);
 
+test("the JHUD and Compare rows write the host's keys", async () => {
+  const { page, errors, close } = await open();
+  try {
+    const settings = {
+      ...HOST_SETTINGS,
+      hudLayoutWeb: CLASSIC,
+      hudJhudSync: true,
+      hudJhudJss: false,
+      hudJhudAnalyzer: false,
+      hudJhudSpeedColors: 6,
+      hudJhudCutoff: 0,
+      hudJhudColorsReallyBad: "#ff0000",
+      hudJhudColorsBad: "#ffa500",
+      hudJhudColorsMeh: "#00ff00",
+      hudJhudColorsGood: "#00ffff",
+      hudJhudColorsReallyGood: "#ffffff",
+      ghostCompare: "auto",
+    };
+    await host(page, { settings, capabilities: ["hud:jhud", "hud:ghostSpeed"] });
+    await openSettings(page, "hud");
+    const layoutChange = (patches: unknown[], id: "jhud" | "ghostSpeed") =>
+      (patches[0] as { hudLayoutWeb: Record<string, { on: boolean }> }).hudLayoutWeb[id].on;
+    let from = await count(page);
+    await row(page, "hud", "JHUD").getByRole("switch").click();
+    expect(layoutChange(await patchesSince(page, from), "jhud")).toBe(true);
+    from = await count(page);
+    await row(page, "hud", "Sync").getByRole("switch").click();
+    expect(await patchesSince(page, from)).toEqual([{ hudJhudSync: false }]);
+    from = await count(page);
+    await row(page, "hud", "90% and up").getByRole("radio", { name: "#ff0000" }).click();
+    expect(await patchesSince(page, from)).toEqual([{ hudJhudColorsReallyGood: "#ff0000" }]);
+    await page.locator('.set-rail-item[data-sec="ghost"]').click();
+    from = await count(page);
+    await row(page, "ghost", "Compare with").locator("select").selectOption("wr");
+    expect(await patchesSince(page, from)).toEqual([{ ghostCompare: "wr" }]);
+    from = await count(page);
+    await row(page, "ghost", "Speed difference").getByRole("switch").click();
+    expect(layoutChange(await patchesSince(page, from), "ghostSpeed")).toBe(true);
+    expect(errors).toEqual([]);
+  } finally {
+    await close();
+  }
+}, 30_000);
+
 test("Edit layout and Paint reach the host", async () => {
   const { page, errors, close } = await open();
   try {

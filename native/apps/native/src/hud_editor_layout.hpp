@@ -14,7 +14,7 @@ struct HudEditorElement {
     bool web;
 };
 
-inline constexpr std::array<HudEditorElement, 26> hud_editor_elements = {{
+inline constexpr std::array<HudEditorElement, 28> hud_editor_elements = {{
         {"map", "Map / style", true},
         {"fps", "FPS", true},
         {"pb", "Personal best", true},
@@ -41,6 +41,8 @@ inline constexpr std::array<HudEditorElement, 26> hud_editor_elements = {{
         {"longJump", "Longjump stats", true},
         {"ghostKeys", "Ghost keys", true},
         {"practice", "Practice", true},
+        {"jhud", "JHUD", true},
+        {"ghostSpeed", "Speed vs ghost", true},
 }};
 
 // Website elements whose switch is also a setting of its own (the menu keeps the two in step the same way).
@@ -115,8 +117,10 @@ inline Json hud_preset(std::string_view id, const Json &settings = default_setti
         set("timer", 4, 0, .135, .8);
         set("stage", 4, -.1, .135, .85);
         status(4, .1, .135);
+        set("ghostSpeed", 4, .1, .09, .85);
         set("split", 4, 0, .195, .8);
         set("jumpStats", 4, 0, .27, .9);
+        set("jhud", 4, 0, -.06, .85);
         set("stats", 7, 0, -.06, .9);
         set("sync", 7, 0, -.035);
         set("strafeTrainer", 1, 0, .2);
@@ -124,6 +128,7 @@ inline Json hud_preset(std::string_view id, const Json &settings = default_setti
             layout[hidden]["on"] = false;
     } else if (id == "streamer") {
         set("speed", 7, 0, -.15, 1.25);
+        set("ghostSpeed", 7, .12, -.15, 1.05);
         set("timer", 7, 0, -.075, 1.2);
         set("stats", 7, 0, -.02);
         set("sync", 7, 0, -.045);
@@ -142,6 +147,11 @@ inline Json hud_preset(std::string_view id, const Json &settings = default_setti
             layout[shown]["on"] = true;
     }
     layout["strafeTrainer"]["on"] = strafe_trainer_enabled(settings);
+    // Like the website's personal elements, these keep their switch: a preset doesn't turn them off behind your back.
+    const auto &current = settings.at("hudLayoutWeb");
+    for (const char *personal : {"jhud", "ghostSpeed"}) {
+        if (current.contains(personal)) layout[personal]["on"] = current.at(personal).value("on", false);
+    }
     return {{"hudLayoutWeb", std::move(layout)}, {"hudLayout", std::move(native)}};
 }
 

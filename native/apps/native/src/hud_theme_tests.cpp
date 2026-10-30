@@ -126,6 +126,17 @@ void test_web_settings_schema() {
         {"key":"hudStrafeTrainerShowPace","rule":{"kind":"boolean"},"default":true},
         {"key":"hudStrafeTrainerSound","rule":{"kind":"boolean"},"default":false},
         {"key":"hudSsjChat","rule":{"kind":"boolean"},"default":false},
+        {"key":"hudJhudSync","rule":{"kind":"boolean"},"default":true},
+        {"key":"hudJhudJss","rule":{"kind":"boolean"},"default":false},
+        {"key":"hudJhudAnalyzer","rule":{"kind":"boolean"},"default":false},
+        {"key":"hudJhudSpeedColors","rule":{"kind":"number","min":1,"max":16,"whole":true},"default":6},
+        {"key":"hudJhudCutoff","rule":{"kind":"number","min":0,"max":30,"whole":true},"default":0},
+        {"key":"hudJhudColorsReallyBad","rule":{"kind":"color"},"default":"#ff0000"},
+        {"key":"hudJhudColorsBad","rule":{"kind":"color"},"default":"#ffa500"},
+        {"key":"hudJhudColorsMeh","rule":{"kind":"color"},"default":"#00ff00"},
+        {"key":"hudJhudColorsGood","rule":{"kind":"color"},"default":"#00ffff"},
+        {"key":"hudJhudColorsReallyGood","rule":{"kind":"color"},"default":"#ffffff"},
+        {"key":"ghostCompare","rule":{"kind":"choice","values":["auto","pb","wr","custom"]},"default":"auto"},
         {"key":"hudSsjFieldsSpeed","rule":{"kind":"boolean"},"default":true},
         {"key":"hudSsjFieldsDiff","rule":{"kind":"boolean"},"default":true},
         {"key":"hudSsjFieldsGain","rule":{"kind":"boolean"},"default":true},
@@ -208,7 +219,7 @@ void test_web_settings_schema() {
     const auto capabilities = native::native_capabilities();
     for (const auto &id : native::web_hud_elements)
         assert(std::find(capabilities.begin(), capabilities.end(), "hud:" + std::string(id)) != capabilities.end());
-    std::cout << "Web settings schema: 44 exact defaults, choices and numeric/color/boolean boundaries\n";
+    std::cout << "Web settings schema: 55 exact defaults, choices and numeric/color/boolean boundaries\n";
 }
 
 void test_defaults_and_saved_settings() {
@@ -220,7 +231,8 @@ void test_defaults_and_saved_settings() {
     assert(defaults["crosshairColor"] == "#4dff6a" && defaults["crosshairGap"] == 4);
     assert(defaults["fpsLimit"] == 1000);
     assert(defaults["hudLayoutWeb"]["fps"]["on"] == false);
-    assert(defaults["hudLayoutWeb"].size() == 23);
+    assert(defaults["hudLayoutWeb"].size() == 25);
+    assert(defaults["hudLayoutWeb"]["jhud"]["on"] == false && defaults["hudLayoutWeb"]["ghostSpeed"]["on"] == false);
     assert(defaults["ghostOpacity"] == .55 && defaults["strafeTrainerSmoothing"] == 8);
     assert(defaults["strafeTrainerHints"] == false);
     const auto &binds = defaults["binds"];
@@ -594,32 +606,21 @@ void test_ghost_progress() {
     assert(extras.ghost_target("test", "autohop", 0, true) == extras.ghost_seconds);
     assert(!extras.ghost_target("other", "autohop", 0, true));
     assert(!extras.ghost_target("test", "autohop", 0, false));
-    std::array<BhGhostFrame, 101> frames{};
-    for (size_t tick = 0; tick < frames.size(); ++tick)
-        frames[tick].position[0] = float(tick) * 10;
-    BhState state{};
-    state.tick = 40;
-    state.position[0] = 305;
-    BhRunState run{};
-    run.status = 1;
-    run.seconds = .18;
     BhCmd command{};
     command.buttons = native::forward | native::jump;
-    extras.ghost_progress(frames, state, run, &command);
+    extras.ghost_keys(&command);
     assert(extras.have_ghost && extras.ghost_buttons == command.buttons);
-    assert(extras.ghost_delta.view() == "-0.025s");
-    state.tick += 4;
-    state.position[0] = 500;
-    run.seconds = .5;
-    extras.ghost_progress(frames, state, run, &command);
-    assert(extras.ghost_delta.view() == "+0.100s");
-    run.status = 2;
-    run.seconds = .9;
-    ++state.tick;
-    extras.ghost_progress(frames, state, run, &command);
-    assert(extras.ghost_delta.view() == "+0.005s");
-    extras.ghost_progress(frames, state, run, nullptr);
-    assert(!extras.have_ghost && extras.ghost_delta.empty());
+    extras.show_ghost_split(-.025, -.025);
+    assert(extras.ghost_delta.view() == "-0.025s" && extras.ghost_ahead);
+    extras.show_ghost_split(.1, -.5);
+    assert(extras.ghost_delta.view() == "+0.100s" && !extras.ghost_ahead);
+    assert(extras.ghost_tag_delta.view() == "-0.500s");
+    // Exactly level reads ahead, as on the website.
+    extras.show_ghost_split(0., 0.);
+    assert(extras.ghost_delta.view() == "+0.000s" && extras.ghost_ahead);
+    extras.ghost_keys(nullptr);
+    extras.show_ghost_split(std::nullopt, std::nullopt);
+    assert(!extras.have_ghost && extras.ghost_delta.empty() && !extras.ghost_ahead && extras.ghost_tag_delta.empty());
     extras.leaderboard(4, 3);
     assert(extras.place.view() == "#4 · top 3%");
     extras.leaderboard(0);
@@ -840,13 +841,56 @@ void test_crosshair_pixels() {
 // Layout codes made by the website's encodeLayout (hud/layout.ts): its Classic layout, and one with a moved timer,
 // the FPS counter on and a minimal keys overlay.
 constexpr const char *web_classic_code =
-        "bhl1.CIcAAPXEMocAAPdoMocC0PdULYcAAPPkK4cAAPmOMocAAPiUMgcAAPq6MoQAAAR-MgQDUgR-KAYAlv7UMgQAAP2oMoAAeACgMoL_"
-        "iACgMgAA"
-        "eAHCMoYAePgwMoj_dP8kMgEAAAiYOQf9EvXEMgQAAPrsKwQAAPvwKwQAAPjGMoMAeP2oMoQAAAFAMgFkB____5qjsg";
+        "bhl1.CYcAAPXEMocAAPdoMocC0PdULYcAAPPkK4cAAPmOMocAAPiUMgcAAPq6MoQAAAR-MgQDUgR-KAYAlv7UMgQAAP2oMoAAeACgMoL_"
+        "iACgMgAAeAHCMoYAePgwMoj_dP8kMgEAAAiYOQf9EvXEMgQAAPrsKwQAAPvwKwQAAPjGMoMAeP2oMoQAAAFAMgQAAP2oMgcC0PXELQFkB____"
+        "5qjsg";
 constexpr const char *web_custom_code =
+        "bhl1.CYcAAPXEMoEE0gH0RocC0PdULYcAAPPkK4cAAPmOMocAAPiUMgcAAPq6MoQAAAR-MgQDUgR-KAYAlv7UMgQAAP2oMoAAeACgMoL_"
+        "iACgMoAAeAHCMoYAePgwMoj_dP8kMgEAAAiYOQf9EvXEMgQAAPrsKwQAAPvwKwQAAPjGMoMAeP2oMoQAAAFAMgQAAP2oMgcC0PXELQI8Bf-2P"
+        "Zqjsg";
+// A code from before the JHUD and Speed vs ghost (the same custom layout, version 8).
+constexpr const char *web_version_8_code =
         "bhl1.CIcAAPXEMoEE0gH0RocC0PdULYcAAPPkK4cAAPmOMocAAPiUMgcAAPq6MoQAAAR-MgQDUgR-KAYAlv7UMgQAAP2oMoAAeACgMoL_"
-        "iACgMoAA"
-        "eAHCMoYAePgwMoj_dP8kMgEAAAiYOQf9EvXEMgQAAPrsKwQAAPvwKwQAAPjGMoMAeP2oMoQAAAFAMgI8Bf-2PZqjsg";
+        "iACgMoAAeAHCMoYAePgwMoj_dP8kMgEAAAiYOQf9EvXEMgQAAPrsKwQAAPvwKwQAAPjGMoMAeP2oMoQAAAFAMgI8Bf-2PZqjsg";
+
+// A layout saved before the JHUD and Speed vs ghost has them off, in their default places, and still makes a code.
+void test_new_elements_in_old_layouts() {
+    const auto file = std::filesystem::temp_directory_path() / "bunnyhop-hud-old-layout.json";
+    auto layout = native::default_settings().at("hudLayoutWeb");
+    layout.erase("jhud");
+    layout.erase("ghostSpeed");
+    native::save_settings(file, {{"hudLayoutWeb", layout}});
+    const auto settings = native::load_settings(file);
+    std::filesystem::remove(file);
+    assert(settings.at("hudLayoutWeb") == native::default_settings().at("hudLayoutWeb"));
+    assert(native::encode_hud_layout(settings) == web_classic_code);
+    const auto preferences = native::HudPreferences::from(settings);
+    assert(!preferences.layout[native::hud_index("jhud")]->visible);
+    assert(!preferences.layout[native::hud_index("ghostSpeed")]->visible);
+    assert(preferences.jhud == native::JhudPrefs{});
+}
+
+// The JHUD and Speed vs ghost keep their switches through a preset, as on the website.
+void test_presets_keep_personal_elements() {
+    auto settings = native::default_settings();
+    settings["hudLayoutWeb"]["jhud"]["on"] = true;
+    for (const auto id : native::hud_preset_ids) {
+        const auto moved = native::patch_settings(settings, native::hud_preset(id, settings), false);
+        assert(moved.at("hudLayoutWeb").at("jhud").at("on") == true);
+        assert(moved.at("hudLayoutWeb").at("ghostSpeed").at("on") == false);
+        assert(native::hud_layout_is_preset(moved, id));
+    }
+}
+
+void test_jhud_chat_switch() {
+    auto settings = native::default_settings();
+    settings =
+            native::patch_settings(settings, native::movement_stat_patch(settings, {{"stat", "jhud"}, {"on", true}}));
+    assert(settings.at("hudLayoutWeb").at("jhud").at("on") == true);
+    settings =
+            native::patch_settings(settings, native::movement_stat_patch(settings, {{"stat", "jhud"}, {"on", false}}));
+    assert(settings.at("hudLayoutWeb").at("jhud").at("on") == false);
+}
 
 void test_layout_codes() {
     const auto defaults = native::default_settings();
@@ -865,6 +909,10 @@ void test_layout_codes() {
     assert(custom->at("hudKeysRowsActions") == false && custom->at("hudKeysPressed") == "#ffb63d");
     const auto settings = native::patch_settings(defaults, *custom, false);
     assert(native::encode_hud_layout(settings) == web_custom_code);
+    const auto older = native::decode_hud_layout(web_version_8_code);
+    assert(older && older->at("hudLayoutWeb").at("timer") == custom->at("hudLayoutWeb").at("timer"));
+    assert(older->at("hudLayoutWeb").at("jhud") == defaults.at("hudLayoutWeb").at("jhud"));
+    assert(older->at("hudLayoutWeb").at("ghostSpeed") == defaults.at("hudLayoutWeb").at("ghostSpeed"));
     assert(!native::decode_hud_layout("bhl1.???") && !native::decode_hud_layout("bhl2.CIcA"));
     assert(!native::decode_hud_layout("bhl1.CA"));
 }
@@ -906,6 +954,9 @@ void test_layout_editor_math() {
 int main() {
     test_web_settings_schema();
     test_defaults_and_saved_settings();
+    test_new_elements_in_old_layouts();
+    test_presets_keep_personal_elements();
+    test_jhud_chat_switch();
     test_layouts_and_options();
     test_scoreboard_and_names();
     test_merged_menu_contracts();

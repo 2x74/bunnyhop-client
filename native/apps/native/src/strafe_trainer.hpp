@@ -1,4 +1,5 @@
 #pragma once
+#include "jhud.hpp"
 #include "ssj.hpp"
 #include "hud_geometry.hpp"
 #include <algorithm>
@@ -193,6 +194,7 @@ public:
 // until a start-zone or a full grounded reset supplies a known chain boundary.
 struct MovementFeedback {
     SsjTracker ssj;
+    JhudTracker jhud;
     std::string ssj_line;
     std::optional<float> ssj_gain;
     bool ssj_was_in_start = false, ssj_was_noclip = false;
@@ -203,6 +205,7 @@ struct MovementFeedback {
 
     void reset(bool in_start = false, bool noclip = false, bool incomplete = false) {
         ssj.reset();
+        jhud.reset();
         ssj_line.clear();
         ssj_gain.reset();
         strafe_trainer.reset();

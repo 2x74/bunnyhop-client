@@ -5,6 +5,7 @@
 
 import { DEFAULT_PREFS } from "../../web/src/ui/settings";
 import { KINDS, TRIGGER_OPACITY, TRIGGER_THICKNESS } from "../../web/src/triggers/volumes";
+import { JHUD_BANDS } from "../../web/src/ssj/jhud";
 import { SSJ_FIELDS } from "../../web/src/ssj/stats";
 import { VIDEO_LIMITS } from "../../web/src/video-settings";
 
@@ -72,6 +73,13 @@ export const REQUESTED_KEYS: readonly RequestedKey[] = [
   hud("hud.strafeTrainer.sound", boolean),
   hud("hud.ssj.chat", boolean),
   ...SSJ_FIELDS.map((field) => hud(`hud.ssj.fields.${field}`, boolean)),
+  hud("hud.jhud.sync", boolean),
+  hud("hud.jhud.jss", boolean),
+  hud("hud.jhud.analyzer", boolean),
+  hud("hud.jhud.speedColors", number(1, 16, true)),
+  hud("hud.jhud.cutoff", number(0, 30, true)),
+  ...JHUD_BANDS.map((band) => hud(`hud.jhud.colors.${band}`, color)),
+  hud("ghost.compare", choice("auto", "pb", "wr", "custom")),
   hud("hud.movement.fjtChat", boolean),
   hud("hud.movement.lj", boolean),
   hud("hud.movement.ljChat", boolean),

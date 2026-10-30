@@ -115,6 +115,8 @@ public:
 
     /** Jump number of the current chain (0 = none yet). */
     unsigned jump = 0;
+    /** The last tick went into the jump's stats (the JHUD's JSS covers the same ticks, jhud.hpp). */
+    bool sampled = false;
 
     SsjMode mode() const { return mode_; }
 
@@ -145,6 +147,7 @@ public:
 
     /** One tick. |pre| is the state before it, |cmd| the command stepped. */
     std::optional<SsjReport> tick(const SsjState &pre, const SsjCmd &cmd, const SsjTick &t) {
+        sampled = false;
         if (t.noclip) {
             ground_ticks_ = 0;
             prev_buttons_ = cmd.buttons;
@@ -184,6 +187,7 @@ private:
     }
 
     void sample(const SsjState &pre, const SsjCmd &cmd) {
+        sampled = true;
         ++strafe_ticks_;
         const float vx = pre.velocity[0], vy = pre.velocity[1];
         dx_ = dx_ + vx * ssj_detail::tick_interval;
