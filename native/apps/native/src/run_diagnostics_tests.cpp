@@ -89,6 +89,12 @@ void server_accepts(const Json &diagnostics) {
     assert(sanitized.dump().size() <= 3072);
 }
 
+// Returns with the file closed: Windows can't remove a folder while a file in it is open.
+std::string read_file(const std::filesystem::path &path) {
+    std::ifstream stream(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+}
+
 void recorded_run() {
     const auto root = std::filesystem::temp_directory_path() / "bunnyhop-run-diagnostics-test";
     std::filesystem::create_directories(root / "replays");
@@ -137,8 +143,7 @@ void recorded_run() {
     }
     assert(run.status == 2);
     recorder.write(core.get());
-    std::ifstream replay(recorder.path, std::ios::binary);
-    const std::string replay_bytes{std::istreambuf_iterator<char>(replay), std::istreambuf_iterator<char>()};
+    const std::string replay_bytes = read_file(recorder.path);
     assert(!replay_bytes.empty());
     const auto event = recorder.finish_event(
             run.track, run.seconds, replay_bytes, {{"attempt", 3}, {"seconds", 12}}, {{"sensitivity", 1.73}}

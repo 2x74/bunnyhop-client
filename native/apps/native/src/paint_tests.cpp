@@ -33,8 +33,14 @@ struct Presentation {
     }
 };
 
+// Paint keeps every mark inline (about 1.3 MB), more than a Windows thread's default stack.
+std::unique_ptr<native_render::Paint> make_paint() {
+    return std::make_unique<native_render::Paint>();
+}
+
 void cadence() {
-    native_render::Paint paint;
+    const auto paint_owner = make_paint();
+    auto &paint = *paint_owner;
     assert(paint.request(1, false));
     assert(!paint.request(1.05, true));
     constexpr double frames_per_second = 144;
@@ -61,7 +67,8 @@ void projection_and_spacing() {
     std::ofstream(path, std::ios::binary).write(reinterpret_cast<const char *>(bytes.data()), bytes.size());
     const std::unique_ptr<BhContext, decltype(&bh_destroy)> core(bh_create(), bh_destroy);
     assert(core && bh_load_map(core.get(), path.string().c_str(), nullptr));
-    native_render::Paint paint;
+    const auto paint_owner = make_paint();
+    auto &paint = *paint_owner;
     native_render::SurfaceHit hit{{20, 20, 0}, {0, 0, 1}, {}};
     assert(paint.request(1, false) && paint.stamp(core.get(), hit));
     assert(paint.count() == 1);
