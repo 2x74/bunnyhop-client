@@ -741,6 +741,7 @@ int run(const native::Options &opt) {
                 }
                 BhRunState timing{};
                 bh_run_state(core.get(), &timing);
+                practice.segment_status(bh_segment_loads(core.get()));
                 if (bound && action != "toggle" && !practice.key_allowed(action, timing.status == 1)) {
                     if (practice.hinted_run != timing.start_tick) {
                         practice.hinted_run = timing.start_tick;
@@ -753,6 +754,7 @@ int run(const native::Options &opt) {
                     return;
                 }
                 if (action == "keepVelocity") {
+                    if (practice.segmented) return;
                     preferences["practiceKeepVelocity"] = value.value_or(!prefs.practice_keep_velocity);
                     prefs = native::Preferences::from_settings(preferences);
                     menu_state.settings_changed();
@@ -802,13 +804,22 @@ int run(const native::Options &opt) {
                         return;
                     }
                     const auto view = practice.restore(core.get());
-                    practice_use("teleport");
+                    if (practice.segmented) {
+                        recorder.resume_segment(core.get());
+                        run_event(heartbeat.invalidate());
+                        practice.segment_status(bh_segment_loads(core.get()));
+                    } else {
+                        practice_use("teleport");
+                    }
                     practice.noclip = false;
                     active_style = cp.style;
                     active_track = cp.track;
                     curr = practice.restore_velocity(core.get(), prefs.practice_keep_velocity);
                     prev = curr;
-                    input.set_angles(view.pitch, view.yaw);
+                    // The replay explains a Segmented load by its loads trailer; a practice teleport is a spawn set.
+                    input.set_angles(
+                            view.pitch, view.yaw, practice.segmented ? native::yaw_set_teleport : native::yaw_set_spawn
+                    );
                     toast("Checkpoint " + std::to_string(practice.number()) + " of "
                           + std::to_string(practice.checkpoints.size()));
                 } else
@@ -1400,7 +1411,15 @@ int run(const native::Options &opt) {
                     }
                 } else if (action == "cycleStyle") {
                     static const std::vector<std::string> order = {
-                            "autohop", "legit", "scroll", "wonly", "sideways", "hsw", "lowgrav", "autostrafe"
+                            "autohop",
+                            "legit",
+                            "scroll",
+                            "wonly",
+                            "sideways",
+                            "hsw",
+                            "lowgrav",
+                            "segmented",
+                            "autostrafe"
                     };
                     auto at = std::find(order.begin(), order.end(), selected_style);
                     selected_style = order[(size_t(at - order.begin()) + 1) % order.size()];
@@ -3043,7 +3062,7 @@ int run(const native::Options &opt) {
                     run_event(heartbeat.invalidate(native::RunHeartbeat::Reset::start));
                     score_notice = "Practice turn controls: local replay only";
                 }
-                if (!recorder.path.empty() && !recorder.ended) {
+                if (!recorder.path.empty() && (!recorder.ended || practice.segmented)) {
                     require(recorder.input.mark_timed(core.get(), input_timeline.tick_contributed()),
                             core.get(),
                             "Marking timed input recording");
@@ -3243,7 +3262,9 @@ int run(const native::Options &opt) {
         if (core) {
             if (viewer.active || !zones.empty())
                 require(bh_run_state(core.get(), &run_state), core.get(), "Reading native timer");
-            if (!practice.active && !viewer.active && run_state.status == 1 && run_state.recording) {
+            practice.segment_status(bh_segment_loads(core.get()));
+            if (!practice.active && !viewer.active && active_style != "segmented" && run_state.status == 1
+                && run_state.recording) {
                 const bool started_run = heartbeat.start != run_state.start_tick;
                 if (started_run) {
                     run_event(heartbeat.invalidate(native::RunHeartbeat::Reset::generation));

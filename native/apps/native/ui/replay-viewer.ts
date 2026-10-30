@@ -718,11 +718,12 @@ export class ReplayViewer {
     this.titleEl.replaceChildren(h("b", null, name), time ? h("span.rv-time-big", null, time) : "");
     const style = state.player?.style ?? replay?.style ?? state.style;
     const track = state.player?.track ?? replay?.track ?? 0;
+    const loads = replayTimeline(playback.id)?.segments.length ?? 0;
     const recorded = replay ? new Date(replay.recordedAt).toLocaleDateString() : "";
     this.subEl.textContent = [
       state.map ?? replay?.map ?? "",
       track ? trackName(track) : "",
-      styleLabel(style),
+      style === "segmented" && loads ? `Segmented (${loads} loads)` : styleLabel(style),
       recorded,
     ]
       .filter(Boolean)

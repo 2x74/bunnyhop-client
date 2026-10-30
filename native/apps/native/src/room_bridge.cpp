@@ -87,6 +87,7 @@ nlohmann::json RoomBridge::presence_activity(
             {"sideways", "Sideways"},
             {"hsw", "Half-Sideways"},
             {"lowgrav", "Low Gravity"},
+            {"segmented", "Segmented"},
             {"autostrafe", "Auto-strafe"}
     };
     native::discord::Status status;

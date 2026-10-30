@@ -41,6 +41,12 @@ public:
         return true;
     }
 
+    bool restore(BhContext *core) {
+        active_ = bh_record_options_read_v29(core, &options_) != 0;
+        if (active_) turns = {options_.yaw_speed, options_.angle_speed_key};
+        return active_;
+    }
+
     void stop() { active_ = false; }
 
     bool active() const { return active_; }

@@ -8,6 +8,8 @@ mod replay_v10;
 mod v29;
 #[path = "v30_tests.rs"]
 mod v30;
+#[path = "segments_tests.rs"]
+mod segmented;
 
 struct Fixture(PathBuf);
 impl Fixture {
@@ -368,6 +370,7 @@ fn check_surface_replay(ctx: *mut BhContext, fixture: &Fixture, command: BhCmd, 
             cosmetic: vec![],
             inspect: vec![],
             packed_loadout: None,
+            segments: Vec::new(),
         };
         let path = fixture.file("surface.bhr", &data.encode_raw().unwrap());
         let ghost = bh_ghost_load(ctx, path.as_ptr());
@@ -1064,6 +1067,7 @@ fn counted_telemetry_matches_shared_recorder_rebases_and_decoder() {
             cosmetic: vec![],
             inspect: vec![],
             packed_loadout: None,
+            segments: Vec::new(),
         };
         let path = fixture.0.join(format!("{case}.bhr"));
         data.write_bhr(&path).unwrap();

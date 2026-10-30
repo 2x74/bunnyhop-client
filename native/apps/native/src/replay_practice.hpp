@@ -49,6 +49,7 @@ inline std::string replay_style_label(const std::string &style) {
             {"sideways", "Sideways"},
             {"hsw", "Half-Sideways"},
             {"lowgrav", "Low Gravity"},
+            {"segmented", "Segmented"},
             {"autostrafe", "Auto Strafe"},
     };
     for (const auto &[id, label] : labels) {

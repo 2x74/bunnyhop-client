@@ -125,8 +125,8 @@ public:
         row.spectator = spec != player.end() && !spec->is_null();
         row.afk = json_flag(player, "afk");
         if (meta.is_object()) {
-            constexpr std::array<std::string_view, 8> styles = {
-                    "autohop", "legit", "wonly", "sideways", "hsw", "autostrafe", "scroll", "lowgrav"
+            constexpr std::array<std::string_view, 9> styles = {
+                    "autohop", "legit", "wonly", "sideways", "hsw", "autostrafe", "scroll", "lowgrav", "segmented"
             };
             if (meta.contains("style") && meta["style"].is_number_unsigned()) {
                 const unsigned index = meta["style"].get<unsigned>();
@@ -231,7 +231,7 @@ struct ScoreLocal {
 
 // The website's style names (styles.ts STYLES), for the Style column.
 inline std::string_view score_style_label(std::string_view id) {
-    constexpr std::array<std::pair<std::string_view, std::string_view>, 8> labels = {
+    constexpr std::array<std::pair<std::string_view, std::string_view>, 9> labels = {
             {{"autohop", "Normal"},
              {"legit", "EZ Scroll"},
              {"scroll", "Legit Scroll"},
@@ -239,6 +239,7 @@ inline std::string_view score_style_label(std::string_view id) {
              {"sideways", "Sideways"},
              {"hsw", "Half-Sideways"},
              {"lowgrav", "Low Gravity"},
+             {"segmented", "Segmented"},
              {"autostrafe", "Auto-strafe"}}
     };
     for (const auto &[key, label] : labels)

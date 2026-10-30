@@ -42,6 +42,7 @@ fn sample_recording(options: BhRecordOptionsV29) -> recording::ReplayData {
         cosmetic: vec![],
         inspect: vec![],
         packed_loadout: None,
+            segments: Vec::new(),
     }
 }
 

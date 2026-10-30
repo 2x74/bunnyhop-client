@@ -33,8 +33,11 @@ struct RunRecorder {
     bool ended = false;
     std::string path;
     std::optional<std::pair<std::string, std::string>> pending_capture;
+    std::filesystem::path replays;
+    std::string replay_map;
 
     void clear(bool recording_ended);
+    std::string next_path() const;
     void
     begin(BhContext *core,
           const std::filesystem::path &cache,
@@ -44,6 +47,7 @@ struct RunRecorder {
           const std::string &player,
           TurnSettings turns,
           const std::string &loadout);
+    void resume_segment(BhContext *core);
     void write(BhContext *core);
     nlohmann::json finish_event(
             uint32_t track,
