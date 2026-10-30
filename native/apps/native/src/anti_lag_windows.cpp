@@ -1,5 +1,8 @@
-// Built with /permissive: AMD's header uses an MSVC extension (a pure virtual destructor with a body).
+// Built with /permissive, and with AMD's header only when CMake found that the compiler takes it
+// (BUNNYHOP_ANTI_LAG); without it there is no Anti-Lag 2 and low latency mode uses the waitable swapchain.
 #include "anti_lag_windows.hpp"
+
+#ifdef BUNNYHOP_ANTI_LAG
 #include <windows.h>
 #include <d3d11.h>
 #pragma warning(push, 0)
@@ -30,3 +33,14 @@ void shutdown() {
 }
 
 }  // namespace native::anti_lag
+#else
+namespace native::anti_lag {
+
+bool initialize() { return false; }
+
+void update(bool, unsigned) {}
+
+void shutdown() {}
+
+}  // namespace native::anti_lag
+#endif
