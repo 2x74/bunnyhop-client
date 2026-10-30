@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The camera no longer goes through low ceilings. Under one, your view stays 12 units below it, as in CS:S. This
+  moves only what you see: physics and ranked runs are unchanged.
+
 ## v0.6.2 — Native
 
 This is the last version you need to download by hand: from here on, Settings → Updates updates the game for you.

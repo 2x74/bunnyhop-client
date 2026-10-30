@@ -1,5 +1,6 @@
 #pragma once
 #include "bunnyhop_native.h"
+#include "eye_clearance.hpp"
 #include "native_input.hpp"
 #include <array>
 #include <optional>
@@ -365,7 +366,9 @@ public:
         eye_last_view = s.view_offset_z;
         eye_last_crouch = s.crouched;
         if (active_mode == "eye") {
-            position = {s.position[0], s.position[1], float(s.position[2] + s.view_offset_z + eye_error)};
+            const float eye_z = float(s.position[2] + s.view_offset_z + eye_error);
+            const float top_z = s.position[2] + hull_top_units(s.crouched);
+            position = {s.position[0], s.position[1], clear_eye_z(core, s.position[0], s.position[1], top_z, eye_z)};
             yaw = view_yaw;
             pitch = view_pitch;
         } else if (active_mode == "tripod" && shot_index >= 0) {

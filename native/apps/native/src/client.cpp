@@ -45,6 +45,7 @@
 #include "restart_placement.hpp"
 #include "run_timing.hpp"
 #include "weapon_commands.hpp"
+#include "eye_clearance.hpp"
 #include "replay_camera.hpp"
 #include "replay_controls.hpp"
 #include "render_menu_contracts.hpp"
@@ -3376,6 +3377,7 @@ int run(const native::Options &opt) {
             float eye[3];
             for (int i = 0; i < 3; ++i)
                 eye[i] = prev.position[i] + (curr.position[i] - prev.position[i]) * blend;
+            float eye_hull_top = native::blended_hull_top_z(prev, curr, blend);
             eye[2] += prev.view_offset_z + (curr.view_offset_z - prev.view_offset_z) * blend;
             BhSnapshot state{};
             bh_snapshot(core.get(), &state);
@@ -3428,6 +3430,7 @@ int run(const native::Options &opt) {
                         state.player.velocity[k] = target->frame.velocity[k];
                     }
                     eye[2] += target->frame.view_offset_z;
+                    eye_hull_top = target->frame.position[2] + native::hull_top_units(!!(target->frame.flags & 1));
                     state.player.tick = target->frame.tick;
                     state.player.view_offset_z = target->frame.view_offset_z;
                     state.player.grounded = !!(target->frame.flags & 2);
@@ -3484,6 +3487,9 @@ int run(const native::Options &opt) {
                 );
                 external_camera = true;
             }
+            // The replay camera does this itself for its in-eye view; flying in noclip there is nothing to stay under.
+            if (!viewer.active && !external_camera && (spectator || !practice.noclip))
+                eye[2] = native::clear_eye_z(core.get(), eye[0], eye[1], eye_hull_top, eye[2]);
             if (spectator) room.spectator_run(display_run, display_style, *spectator, steady_seconds, epoch_ms());
             if (hide_players) actors.clear();
             native::PrimaryGhost primary_ghost;
