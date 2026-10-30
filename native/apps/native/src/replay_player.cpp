@@ -1,5 +1,6 @@
 #include "replay_player.hpp"
 #include "data_location.hpp"
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
@@ -20,6 +21,13 @@ void ReplayPlayer::begin(const std::filesystem::path &file) {
     hud = true;
     ui_open = false;
     view_continuous_ = false;
+}
+
+void ReplayPlayer::viewer_ui(const nlohmann::json &message) {
+    constexpr double max_bar_css_pixels = 4000;
+    ui_open = message.value("open", false);
+    ui_top = std::clamp(message.value("top", 0.), 0., max_bar_css_pixels);
+    ui_bottom = std::clamp(message.value("bottom", 0.), 0., max_bar_css_pixels);
 }
 
 void ReplayPlayer::toggle_weapon() {

@@ -682,6 +682,7 @@ export class ReplayExportDialog {
 
   private repaint(): void {
     for (const paint of this.controls) paint();
+    this.paintMusic();
     this.summary();
   }
 

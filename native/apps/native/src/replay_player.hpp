@@ -2,6 +2,8 @@
 #include "replay_session.hpp"
 #include "replay_controls.hpp"
 #include "replay_camera.hpp"
+#include <algorithm>
+#include <cmath>
 #include "runner_view.hpp"
 #include <memory>
 #include <optional>
@@ -26,6 +28,8 @@ struct ReplayPlayer {
     // The menu shows the viewer (ui_open) and is on screen (ui_shown, each frame): playback runs and the runner's HUD
     // draws under it, like the website's viewer.
     bool ui_open = false, ui_shown = false;
+    // The viewer's title bar and bottom panel in CSS pixels: the HUD under it lays out between them.
+    double ui_top = 0, ui_bottom = 0;
     double speed = 1;
     // Playback returns to `from` on reaching `to`.
     std::optional<Loop> loop;
@@ -48,6 +52,21 @@ struct ReplayPlayer {
     // The runner's position and view drawn `blend` of the way from the previous tick to the current one, so the
     // camera moves smoothly at any frame rate and playback speed.
     void smooth(BhState &shown, const BhState &previous, const BhState &current, float blend, Input &view) const;
+    // The menu's viewer message: open or closed, and the space its bars take.
+    void viewer_ui(const nlohmann::json &message);
+
+    // The HUD's area (hud_area.hpp HudArea) without the viewer's bars while it is on screen.
+    template <class Area>
+    Area hud_area(Area area, int window_height, float pixel_density) const {
+        if (!ui_shown) return area;
+        const double density = pixel_density > 0 ? pixel_density : 1;
+        const int top = std::max(area.top, int(std::lround(ui_top * density)));
+        const int bottom = std::min(area.top + area.height, window_height - int(std::lround(ui_bottom * density)));
+        if (bottom - top < area.height / 3) return area;
+        area.top = top;
+        area.height = bottom - top;
+        return area;
+    }
 
 private:
     BhCmd view_from_{}, view_to_{};

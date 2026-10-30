@@ -154,6 +154,8 @@ export class ReplayViewer {
   private lastTick = 0;
   private lastUpdate = 0;
   private readonly onKey = (event: KeyboardEvent) => this.key(event);
+  private readonly bars: ResizeObserver;
+  private readonly panel: HTMLElement;
   private readonly offPracticeAnswer: () => void;
 
   constructor(private readonly hooks: ReplayViewerHooks) {
@@ -243,7 +245,10 @@ export class ReplayViewer {
       this.exporter.el,
     );
     addEventListener("keydown", this.onKey, true);
-    send({ type: "replayControl", action: "viewer", open: true });
+    this.bars = new ResizeObserver(() => this.reportBars());
+    this.bars.observe(panel);
+    this.bars.observe(top);
+    this.panel = panel;
     this.offPracticeAnswer = practiceFromReplay.onAnswer(() => this.flash(practiceFromReplay.message()));
   }
 
@@ -315,9 +320,18 @@ export class ReplayViewer {
   /** Removes the key listener and cancels a drag. The screen calls it when the viewer leaves the page. */
   dispose(): void {
     removeEventListener("keydown", this.onKey, true);
+    this.bars.disconnect();
     send({ type: "replayControl", action: "viewer", open: false });
     this.offPracticeAnswer();
     this.scrubber.cancel(false);
+  }
+
+  /** The host plays on under the viewer and lays the runner's HUD out between its title and its panel. */
+  private reportBars(): void {
+    if (!this.el.isConnected) return;
+    const top = this.titleEl.parentElement?.getBoundingClientRect().bottom ?? 0;
+    const bottom = innerHeight - this.panel.getBoundingClientRect().top;
+    send({ type: "replayControl", action: "viewer", open: true, top: Math.ceil(top), bottom: Math.ceil(bottom) });
   }
 
   private flash(text: string): void {
@@ -801,7 +815,7 @@ export class ReplayViewer {
       // Opening another replay clears the host's runner view.
       this.runnerViewOn = false;
       // A new replay starts with the host's viewer flag cleared.
-      if (playback.active) send({ type: "replayControl", action: "viewer", open: true });
+      if (playback.active) this.reportBars();
     }
     this.countWatching();
     if (this.pendingTick !== null) {

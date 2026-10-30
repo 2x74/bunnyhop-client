@@ -138,7 +138,7 @@ export type MenuMessage =
       view: { aspect: number; screen: number; bars: boolean; fov: number } | null;
     }
   /** The viewer is on screen: the host keeps playing under it and draws the runner's HUD. */
-  | { type: "replayControl"; action: "viewer"; open: boolean }
+  | { type: "replayControl"; action: "viewer"; open: boolean; top?: number; bottom?: number }
   | { type: "practiceFromReplay"; tick?: number }
   /** A second replay as a ghost on the one being watched (replay-host.ts); needs the host's "compare" feature. */
   | { type: "replayCompare"; action: "set"; kind: "pb" | "wr" | "custom"; name: string; replayBase64: string }

@@ -2586,7 +2586,7 @@ int run(const native::Options &opt) {
                         else if (action == "hud")
                             viewer.hud = message.value("value", !viewer.hud);
                         else if (action == "viewer")
-                            viewer.ui_open = message.value("open", false);
+                            viewer.viewer_ui(message);
                         else if (action == "stop")
                             reset();
                     } else if (type == "sensitivity") {
@@ -3595,7 +3595,11 @@ int run(const native::Options &opt) {
             }
             // The crosshair is sized in CSS pixels, like the website's: the display's scale, not the HUD's.
             hud.set_display_scale(SDL_GetWindowDisplayScale(window.get()));
-            const auto area = native::hud_area(renderer->output_view(width, height), width, height);
+            const auto area = viewer.hud_area(
+                    native::hud_area(renderer->output_view(width, height), width, height),
+                    height,
+                    SDL_GetWindowPixelDensity(window.get())
+            );
             native::HudViewport hud_viewport(gl, area, width, height);
             native::HudFrame{
                     core.get(),
