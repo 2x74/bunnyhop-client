@@ -321,6 +321,8 @@ pub(crate) struct TrainOrientationEdit {
     pub targetname: &'static str,
     pub model: &'static str,
     pub orientation_type: i64,
+    /// First physics version using this edit; older versions keep the authored orientation.
+    pub min_physics: u32,
 }
 
 pub(crate) const TRAIN_ORIENTATION_EDITS_V19: &[TrainOrientationEdit] = &[
@@ -329,8 +331,15 @@ pub(crate) const TRAIN_ORIENTATION_EDITS_V19: &[TrainOrientationEdit] = &[
     // srcds rolls its 180-degree push back in the following VPhysics shadow stage; our core lacks that stage.
     // This is our explicit map edit to retain translation without turning riders, NOT VPhysics emulation.
     // Keep speed, path_tracks, outputs and the shared pusher unchanged. research/MAP-REPORTS-0.0.30.md §1.
-    TrainOrientationEdit { map: "bhop_areaportal_v1", targetname: "rede3da", model: "*26", orientation_type: 0 },
+    TrainOrientationEdit { map: "bhop_areaportal_v1", targetname: "rede3da", model: "*26", orientation_type: 0, min_physics: 19 },
+    // The same edit for the green train, physics 21 on: its 180-degree push turns riders around and leaves them turned.
+    TrainOrientationEdit { map: "bhop_areaportal_v1", targetname: "gamstvonorm", model: "*30", orientation_type: 0, min_physics: 21 },
 ];
+
+/// The map has spawn state that differs from physics v21 on, so crossing that version restarts it (`Game::set_settings`).
+pub(crate) fn v21_spawn_edits(mechanics: Option<&MapMechanics>) -> bool {
+    mechanics.is_some_and(|m| TRAIN_ORIENTATION_EDITS_V19.iter().any(|e| e.map == m.map && e.min_physics == super::PHYSICS_V21))
+}
 impl MapMechanics {
     pub fn player_io(&self) -> bool {
         self.makers || matches!(self.map, "bhop_crutle4_css" | "bhop_crutle3_css" | "bhop_enlightened2"
@@ -370,6 +379,12 @@ pub(crate) const MECHANICS_V19: &[MapMechanics] = &[
  ];
 
 pub(crate) fn mechanics_v19(entities: &[Entity]) -> Option<&'static MapMechanics> {
+    let fingerprint = entity_fingerprint(entities);
+    MECHANICS_V19.iter().find(|m| m.fingerprint == fingerprint)
+}
+
+/// CRC of every retained key/value in order, without outputs, which the verifier stores separately.
+pub(crate) fn entity_fingerprint(entities: &[Entity]) -> u32 {
     let mut hash = crc32fast::Hasher::new();
     for e in entities {
         for (k, v) in &e.pairs {
@@ -379,6 +394,33 @@ pub(crate) fn mechanics_v19(entities: &[Entity]) -> Option<&'static MapMechanics
         }
         hash.update(&[255]);
     }
-    let fingerprint = hash.finalize();
-    MECHANICS_V19.iter().find(|m| m.fingerprint == fingerprint)
+    hash.finalize()
+}
+
+/// Maps whose func_door / func_button brushes follow their move parent (physics v21). `CBaseDoor` is an ordinary
+/// MOVETYPE_PUSH child in Source, so the door turns with its parent and travels in the parent's space. The core has
+/// always held a door's brush at base origin + travel and never turned it. Not global: bhop_guly, bhop_addict_v2,
+/// bhop_eazy_v2, bhop_monster_jam and bhop_mario_fxd have the same setup and real runs on some of their boards, see
+/// research/parented-doors-v21/scan.json. Matched by entity fingerprint like `MECHANICS_V19`.
+pub(crate) struct ParentedDoors {
+    pub map: &'static str,
+    pub fingerprint: u32,
+    /// Why, for the reader.
+    #[allow(dead_code)]
+    pub reason: &'static str,
+}
+
+pub(crate) const PARENTED_DOORS_V21: &[ParentedDoors] = &[ParentedDoors {
+    map: "bhop_wayz",
+    fingerprint: 0x5a757368,
+    reason: "level 10's three-layer floor (func_door *148) is parented to the rotator 10throll with the teleports *1 and \
+             *3, all cut with the same holes. With the floor held still, the holes line up with the teleports' only near \
+             rotor angle 0 and the map can't be finished (feedback 2026-10-30, lfyzl; bhop.rip's recording falls through \
+             floor 1 at 10 different world angles). The rolling logs *79, *92 and *96 follow roll71, roll5 and roll2.",
+}];
+
+/// The map's parented-door entry, if `entities` is one of the `PARENTED_DOORS_V21` builds.
+pub(crate) fn parented_doors_v21(entities: &[Entity]) -> Option<&'static ParentedDoors> {
+    let fingerprint = entity_fingerprint(entities);
+    PARENTED_DOORS_V21.iter().find(|m| m.fingerprint == fingerprint)
 }

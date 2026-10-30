@@ -238,6 +238,11 @@ export const PROP_TRANSFORM_KEY = 1 << 20;
  * - v20: v19 + bhoptimer autohop: clear the old jump latch while walking with jump held and water level < 2,
  *   keeping the current jump command so unducking or teleporting onto a floor jumps before friction.
  *   Scroll styles, ladder jumps and swimming keep their existing policy.
+ * - v21: v20 + a func_door_rotating that starts open (spawnpos 1, or the obsolete StartOpen flag) spawns at its open
+ *   angles, as CRotDoor::Spawn teleports it there: bhop_collective's three hotel doors, the only ones in the catalogue,
+ *   stopped every run before. On the maps in map_fixes.rs PARENTED_DOORS_V21 (bhop_wayz), a func_door / func_button with
+ *   a move parent follows it in collision and drawing and travels in the parent's space; on bhop_areaportal_v1 the green
+ *   train gets the red train's orientation edit, so it doesn't turn its riders around. Every other map plays as on v20.
  */
 export const PHYSICS_V1 = 1;
 /** Weapon commands and the USP silencer (research/WEAPONS.md). */
@@ -263,13 +268,15 @@ export const PHYSICS_V16 = 16;
 /** RNGFix parity: uphill / downhill inclines, edge bugs, trigger jumping and telehops as on RNGFix servers. */
 export const PHYSICS_V17 = 17;
 /** The physics version new runs are played and recorded with. */
-export const PHYSICS_VERSION = 20;
+export const PHYSICS_VERSION = 21;
 /** Climbable surface properties used by bhop_synthetic_fix. */
 export const PHYSICS_V18 = 18;
 /** Scoped entity makers and known velocity-script equivalents. */
 export const PHYSICS_V19 = 19;
 /** bhoptimer autohop: unduck / teleport onto a floor jumps before friction. */
 export const PHYSICS_V20 = 20;
+/** Start-open func_door_rotating spawns open (bhop_collective); bhop_wayz's parented doors follow their parent; bhop_areaportal_v1's green train keeps riders' view. */
+export const PHYSICS_V21 = 21;
 /** Versions this code knows (the wasm build must support them too, see Core.setSettings). */
 export const isPhysicsVersion = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= PHYSICS_V1 && (v as number) <= PHYSICS_VERSION;
 

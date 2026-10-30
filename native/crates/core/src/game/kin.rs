@@ -357,6 +357,20 @@ const SF_DOOR_LOCKED: i64 = 2048;
 
 // ------------------------------------------------------------------ spawn
 
+/// The angles `CRotDoor::Spawn` teleports a func_door_rotating to when it starts open: position 2 for `spawnpos` 1, the
+/// swapped position 1 for the obsolete StartOpen flag. None for every other entity (and any door that starts shut).
+pub(super) fn rot_door_spawn_angles(e: &RtEnt) -> Option<[f32; 3]> {
+    let Data::Kin(k) = &e.data else { return None };
+    let KinKind::RotDoor(d) = &k.kind else { return None };
+    if d.spawnflags & SF_DOOR_START_OPEN_OBSOLETE != 0 {
+        Some(d.angle1)
+    } else if d.state == Toggle::AtTop {
+        Some(d.angle2)
+    } else {
+        None
+    }
+}
+
 impl Kin {
     pub(super) fn new(kind: KinKind) -> Self {
         Self { push: Push { move_done: -1.0, fixangle: true, ..Push::default() }, kind }
@@ -556,7 +570,8 @@ impl Game {
     /// Never modify source entities or initial_ents: selecting v1..18 restores authored behavior.
     pub(super) fn initialize_train_entity_edits(&mut self) {
         let Some(mechanics) = self.map_mechanics.filter(|_| self.mechanics_on()) else { return };
-        for edit in super::map_fixes::TRAIN_ORIENTATION_EDITS_V19.iter().filter(|e| e.map == mechanics.map) {
+        let physics = self.settings.physics_version;
+        for edit in super::map_fixes::TRAIN_ORIENTATION_EDITS_V19.iter().filter(|e| e.map == mechanics.map && physics >= e.min_physics) {
             for k in 0..self.kins.len() {
                 let i = self.kins[k];
                 let e = &self.entities[i];
@@ -786,6 +801,25 @@ impl Game {
 
     // -------------------------------------------------------------- transforms / hierarchy
 
+    /// v21, `map_fixes::PARENTED_DOORS_V21`: this func_door / func_button's brush follows its move parent. Everywhere
+    /// else, and at every older version, its brush keeps base origin + travel and never turns.
+    pub(super) fn door_follows_parent(&self, i: usize) -> bool {
+        self.map_parented_doors
+            && (PHYSICS_V21..=PHYSICS_LATEST).contains(&self.settings.physics_version)
+            && self.ents[i].door_brush
+            && self.ents[i].parent.is_some()
+    }
+
+    /// CBaseDoor::Spawn keeps m_vecPosition1 / 2 in local space and LinearMove moves there, so a door's travel is along
+    /// its movedir in the parent's axes. Places the door at its travel and relinks it and its children.
+    pub(super) fn place_following_door(&mut self, i: usize) {
+        let Data::Mover(m) = &self.ents[i].data else { return };
+        let (dir, offset) = (m.dir, m.offset);
+        let Some(b) = &self.ents[i].brush else { return };
+        self.ents[i].local_origin = v_add(b.base_local, v_scale(dir, offset));
+        self.relink(i);
+    }
+
     /// Recomputes the abs transform of `i` from its local transform and its parent, then of all its
     /// descendants (CBaseEntity::CalcAbsolutePosition, invalidated recursively).
     pub(super) fn relink(&mut self, i: usize) {
@@ -794,11 +828,12 @@ impl Game {
             Some(p) => xf(self.ents[p].origin, self.ents[p].angles).compose(local).unwrap_or(local),
             None => local,
         };
+        let follows = self.door_follows_parent(i);
         let e = &mut self.ents[i];
         e.origin = abs.origin;
         e.angles = abs.angles;
         if let Some(b) = e.brush.as_mut() {
-            if !e.door_brush {
+            if !e.door_brush || follows {
                 b.origin = abs.origin;
                 b.angles = abs.angles;
             }

@@ -45,7 +45,7 @@
    two words, and VERSION stays below 0.1.0 while STAGE is alpha.
    ============================================================ */
 
-export const VERSION = "0.0.31";
+export const VERSION = "0.0.32";
 
 /** Release stage, printed after the number ("v0.0.4 alpha"). */
 export const STAGE = "alpha";
@@ -67,23 +67,36 @@ export interface ChangelogEntry {
 
 /** Notes for the next release, unpublished until promoted into CHANGELOG. */
 export const UPCOMING: ChangelogEntry = {
-  version: "0.0.32",
-  date: "2026-10-29",
+  version: "0.0.33",
+  date: "2026-10-30",
   kind: "minor",
   title: "Next update",
-  notes: [
-    "The timer now counts while you bhop in the start zone, instead of showing 0 until you leave it. Your times don't change. Thanks to ponytrap for the report.",
-    "Exceed monitor FPS no longer causes a small stutter every couple of seconds. Thanks to ponytrap for the clip.",
-    "Maps now play their own sounds from where the map puts them: machines, wind, water. Settings → Audio → Map sounds sets the level, and !stopsound turns them off and on. Music inside maps stays off for now.",
-    "The camera no longer goes through low ceilings. Under one, your view now stays below it, as in CS:S. Only the camera moves: movement and replays are unchanged.",
-    "JHUD: type !jhud to see the speed and gain of every jump near your crosshair, coloured by how it went, with optional sync, JSS and a strafe arrow. It's off until you turn it on; Edit layout moves it, and its settings are in Settings → HUD.",
-    "The time against a ghost now follows the route better: it no longer freezes when you leave the ghost's line, and it doesn't jump to another part of a route that loops or runs over itself. Beside your speed you now also see how much faster or slower you are than the ghost at that point (+42 u/s). Settings → Ghost picks which ghost, and turns it off. Nothing shows without a ghost.",
-    "Smoother replays: the 46 maps with glowing trails on moving parts (bhop_2easy, bhop_arcane_v2, bhop_badges, bhop_miku_v2 and more) no longer stutter while a replay plays, seeks or scrubs, replays no longer slow down to the menu FPS limit, and the input stats overlay (Settings → Mouse & view) shows a replay's frame times. Settings → Graphics has one Frame rate section now.",
-  ],
+  notes: [],
 };
 
 /** Newest first. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.0.32",
+    date: "2026-10-30",
+    kind: "minor",
+    title: "Map sounds, JHUD, a start-zone timer and map fixes",
+    notes: [
+      "Maps now play their own sounds from where the map puts them: machines, wind, water. Settings → Audio → Map sounds sets the level, and !stopsound turns them off and on. Music inside maps stays off for now.",
+      "JHUD: type !jhud to see the speed and gain of every jump near your crosshair, coloured by how it went, with optional sync, JSS and a strafe arrow. It's off until you turn it on; Edit layout moves it, and its settings are in Settings → HUD.",
+      "The timer now counts while you bhop in the start zone, instead of showing 0 until you leave it. Your times don't change. Thanks to ponytrap for the report.",
+      "bhop_collective and bhop_wayz can be finished. bhop_collective's three hotel doors now start open, and level 10's floor on bhop_wayz now turns with its teleports, so its holes are safe to drop through at any angle, both as in CS:S. Thanks to GothQueen and lfy for the reports.",
+      "bhop_areaportal_v1: the green platform no longer turns you around.",
+      "Doors and other props placed as map entities now face the way they do in CS:S. On bhop_mirrorsedge_chpt1 the corridor doors are shut, flat against the walls, instead of sticking out into the corridor. Only the drawing changes: collision and replays are the same. Thanks to GothQueen for the report.",
+      "Zones fixed on bhop_alvo2 (main end), bhop_benchmark (end) and bhop_iconic (bonus). Maps whose zones are incomplete or unconfirmed now say so in the map panel and when you load them. Thanks to throwtop for the report.",
+      "bhop_cancer_15 moves from T5 to T4.",
+      "Native client v0.6.2 is out, and its runs count on the boards.",
+      "The camera no longer goes through low ceilings. Under one, your view now stays below it, as in CS:S. Only the camera moves: movement and replays are unchanged. Thanks to throwtop and ponytrap for the reports.",
+      "The time against a ghost now follows the route better: it no longer freezes when you leave the ghost's line, and it doesn't jump to another part of a route that loops or runs over itself. A new Speed vs ghost readout shows how much faster or slower you are than the ghost at that point (+42 u/s): turn it on in Edit layout. Settings → Ghost picks which ghost, and turns it off.",
+      "Exceed monitor FPS no longer causes a small stutter every couple of seconds. Thanks to ponytrap for the clip.",
+      "Smoother replays: the 46 maps with glowing trails on moving parts (bhop_2easy, bhop_arcane_v2, bhop_badges, bhop_miku_v2 and more) no longer stutter while a replay plays, seeks or scrubs, replays no longer slow down to the menu FPS limit, and the input stats overlay (Settings → Mouse & view) shows a replay's frame times. Settings → Graphics has one Frame rate section now.",
+    ],
+  },
   {
     version: "0.0.31",
     date: "2026-10-29",

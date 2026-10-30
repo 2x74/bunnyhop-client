@@ -10,7 +10,7 @@
 //! Positions are the recording's, not a re-simulation: CS:GO movement (tick rate, air accelerate, stamina, hull) is not
 //! ours, so this checks the geometry along the route, not the run.
 //!
-//!   posreplay <map> <positions.txt> [--teleport 128] [--every 1]
+//!   posreplay <map> <positions.txt> [--teleport 128] [--physics N]
 //!
 //! The map is maps/<map>.bsp; prop collision comes from the content cache (`CONTENT_CACHE_DIR`).
 use bunnyhop_core::content::load_game;
@@ -27,7 +27,10 @@ fn main() {
     let opt = |name: &str, default: f32| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).and_then(|v| v.parse().ok()).unwrap_or(default);
     let teleport = opt("--teleport", 128.0);
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let game = load_game(&root.join("maps").join(format!("{}.bsp", args[1]))).expect("load map");
+    let mut game = load_game(&root.join("maps").join(format!("{}.bsp", args[1]))).expect("load map");
+    // Spawn-time entity state follows the physics version (start-open doors, v12 / v21).
+    game.set_settings(bunnyhop_core::Settings { physics_version: opt("--physics", 1.0) as u32, ..bunnyhop_core::Settings::css_bhop() });
+    game.reset();
     let text = std::fs::read_to_string(&args[2]).expect("read positions");
     let frames: Vec<([f32; 3], bool)> = text
         .lines()

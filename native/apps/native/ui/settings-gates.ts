@@ -159,6 +159,8 @@ const ROWS: Record<string, Gate> = {
   "hud/JHUD/90% and up": needs("hudJhudColorsReallyGood"),
   "ghost/Compare/Compare with": needs("ghostCompare"),
   "ghost/Compare/Speed difference": needs("hud:ghostSpeed"),
+  "audio/Volume/Map sounds": needs("mapVolume"),
+  "audio/Mute channels/Map sounds": needs("muteMap"),
   "keys/Movement/Turn speed": needs("yawSpeed"),
   "keys/Movement/Fast turn": needs("angleSpeedKey"),
   "keys/Practice/Teleport keeps speed": needs("practiceKeepVelocity"),

@@ -7,12 +7,12 @@
   {
     "path": "crates/core/src/game.rs",
     "classification": "native patch",
-    "baseline": "26635920ac7dd9d9e49917a2870baa8e396b0fa3"
+    "baseline": "7acaad9690840e275c70b9504fac2571ee58ab91"
   },
   {
     "path": "crates/core/src/game/kin.rs",
     "classification": "native patch",
-    "baseline": "a70a7e337e5e3ad0b41bc91c9f7f5f23f4734566"
+    "baseline": "ed0c754b5db79128fe1c0773e3b6e6100666e2e7"
   },
   {
     "path": "crates/core/src/game/minigame.rs",
@@ -52,12 +52,12 @@
   {
     "path": "crates/core/src/physics.rs",
     "classification": "native patch",
-    "baseline": "823fd98e69728746ae9e33c3d1b17dd4b4fde96b"
+    "baseline": "13f3767c8c6f25150cf583db3b35232ee4d40c21"
   },
   {
     "path": "crates/core/src/props.rs",
     "classification": "native patch",
-    "baseline": "1142a80c4ac98db764c0765242a673f303edcb17"
+    "baseline": "305ca34f9b3f8c3f60e78d3f92ebcb2e3d0dd0a3"
   },
   {
     "path": "crates/core/src/wasm.rs",
@@ -87,7 +87,7 @@
   {
     "path": "crates/core/tests/render.rs",
     "classification": "upstream tests restored; native suite preserved separately",
-    "baseline": "36305879c57128f92776c2c105e0f69c036e2df0"
+    "baseline": "b02feb16ca155cdad970415819f8231fe0b2fe4c"
   },
   {
     "path": "crates/vendor/SOURCE-SDK-NOTICES.md",
@@ -152,7 +152,7 @@
   {
     "path": "apps/web/src/core.ts",
     "classification": "native patch",
-    "baseline": "bf966fc0f3f7c017dd50229ad493d003473830ad"
+    "baseline": "277195c71c666a00bac5d6a77dd393728e1533c9"
   },
   {
     "path": "apps/web/src/feedback/modal.ts",

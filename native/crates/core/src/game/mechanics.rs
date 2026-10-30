@@ -160,6 +160,7 @@ impl Game {
             if let Some(b) = &mut fresh.brush {
                 b.origin = placed.origin;
                 b.base_origin = placed.origin;
+                b.base_local = placed.origin;
                 b.angles = placed.angles;
             }
             // Rebuild the mover at its new spawn origin, not with the template's absolute endpoints.
@@ -315,6 +316,18 @@ mod tests {
         }
     }
     #[test]
+    fn parented_door_builds_match_in_full_and_verifier_loaders() {
+        for m in map_fixes::PARENTED_DOORS_V21 {
+            let Some(game) = load(m.map, PHYSICS_V21) else { continue };
+            assert!(game.map_parented_doors, "{} fingerprint", m.map);
+            let mut entities = game.entities.clone();
+            for e in &mut entities {
+                e.pairs.retain(|(k, v)| Output::parse(k, v).is_none());
+            }
+            assert_eq!(map_fixes::parented_doors_v21(&entities).map(|m| m.map), Some(m.map));
+        }
+    }
+    #[test]
     fn v20_inherits_v19_mechanics_and_keeps_instances_when_switching_versions() {
         if let Some(mut game) = load("bhop_ceaseless", PHYSICS_V18) {
             // Crossing the v19 boundary must reinitialize zero-count outputs and scoped scripts.
@@ -343,6 +356,66 @@ mod tests {
             let Some(game) = load(map, PHYSICS_V20) else { continue; };
             assert!(game.mechanics_on(), "{map} keeps its reviewed mechanics in v20");
         }
+    }
+    #[test]
+    fn v21_inherits_v19_mechanics() {
+        for map in ["bhop_profane", "bhop_playboy_csgo", "bhop_api_kowka", "kz_bhop_liminal", "bhop_treason"] {
+            let Some(game) = load(map, PHYSICS_V21) else { continue; };
+            assert!(game.mechanics_on(), "{map} keeps its reviewed mechanics in v21");
+        }
+        let Some(mut game) = load("bhop_ceaseless", PHYSICS_V21) else { return };
+        let script = game.find_named("vscript").unwrap();
+        game.state.velocity = [300.0, 400.0, 123.0];
+        game.entity_input(script, "runscriptcode", "Boost(500)", Actor::Player);
+        assert_eq!(game.state.velocity, [600.0, 800.0, 123.0]);
+    }
+    /// A door that also travels on its own, on a `PARENTED_DOORS_V21` map: the branch the fix takes on any map that
+    /// joins the table later. bhop_wayz's doors never open by themselves, so this opens one as an output would.
+    #[test]
+    fn a_following_door_travels_in_its_parents_space_and_keeps_turning() {
+        const PAD: [f32; 3] = [3944.0, -1619.0, 1423.0];
+        let Some(mut g) = load("bhop_wayz", PHYSICS_V21) else { return };
+        let brush = |g: &Game, m: u32| g.brush_transforms().into_iter().find(|b| b.0 == m).unwrap();
+        g.set_position(PAD, 0.0);
+        while brush(&g, 66).2[1] < 90.0 {
+            g.step(Cmd::default()).unwrap();
+        }
+        let door = g.entities.iter().position(|e| e.get("model") == Some("*148")).unwrap();
+        let rest = brush(&g, 148).1;
+        g.entity_input(door, "open", "", Actor::None);
+        for _ in 0..50 {
+            g.set_position(PAD, 0.0);
+            g.step(Cmd::default()).unwrap();
+        }
+        // movedir "0 0 0" is +X in the parent's axes, which have turned a bit past +90 degrees: world +Y, some -X.
+        let open = brush(&g, 148);
+        assert!(open.1[1] - rest[1] > 40.0 && (open.1[0] - rest[0]).abs() < 20.0 && open.1[2] == rest[2], "{rest:?} -> {:?}", open.1);
+        assert_eq!(open.2[1], brush(&g, 66).2[1], "it keeps turning while it travels");
+        // Back at its first local spot on the turned parent, with the same transform as a door that never moved.
+        g.entity_input(door, "close", "", Actor::None);
+        for _ in 0..200 {
+            g.set_position(PAD, 0.0);
+            g.step(Cmd::default()).unwrap();
+        }
+        let closed = brush(&g, 148).1;
+        assert!((closed[0] - rest[0]).abs() < 0.01 && (closed[1] - rest[1]).abs() < 0.01 && closed[2] == rest[2], "{closed:?}");
+        assert_eq!(brush(&g, 148).2[1], brush(&g, 66).2[1]);
+    }
+    #[test]
+    fn a_following_door_keeps_its_transform_through_save_and_restore() {
+        let Some(mut g) = load("bhop_wayz", PHYSICS_V21) else { return };
+        g.set_position([3944.0, -1619.0, 1423.0], 0.0);
+        for _ in 0..300 {
+            g.step(Cmd::default()).unwrap();
+        }
+        let saved = g.save_state();
+        let digest = g.snapshot_bytes();
+        for _ in 0..300 {
+            g.step(Cmd::default()).unwrap();
+        }
+        assert_ne!(g.snapshot_bytes(), digest, "the floor's turn is in the digest");
+        g.restore_state(&saved);
+        assert_eq!(g.snapshot_bytes(), digest);
     }
     #[test]
     fn missing_message_scripts_are_explicit_noops_only_on_reviewed_v19_builds() {
