@@ -134,9 +134,10 @@ test("rows follow what the host has", async () => {
     // From then on the host's value shows.
     await host(page, { settings: { ...HOST_SETTINGS, hudKeysOpacity: 0.6 } });
     await poll(() => row(page, "hud", "Opacity").getByLabel("Opacity value").inputValue(), "60");
-    // Graphics the native renderer does its own way say so.
-    const bloom = row(page, "graphics", "Bloom");
-    expect(await bloom.locator(".set-hint").textContent()).toBe("Not available in the native client");
+    // Bloom drives the Source look's bloom and the Enhanced and Cinematic glow alike: it shows once the host has it.
+    expect(await row(page, "graphics", "Bloom").count()).toBe(0);
+    await host(page, { settings: { ...HOST_SETTINGS, hudKeysOpacity: 0.6, graphicsBloom: true } });
+    await poll(() => row(page, "graphics", "Bloom").count(), 1);
     expect(errors).toEqual([]);
   } finally {
     await close();
@@ -307,3 +308,47 @@ test("Edit layout and Paint reach the host", async () => {
     await close();
   }
 });
+
+test("graphics: the composer looks and the Sky picker follow the host's sky library", async () => {
+  const { page, errors, close } = await open();
+  try {
+    const look = {
+      graphicsPreset: "source",
+      graphicsSkyMode: "map",
+      graphicsSkyPackId: null,
+      graphicsSkyRotation: 0,
+      graphicsLightingSource: "map",
+      graphicsSkyExposure: 0,
+    };
+    const skies = {
+      skies: [
+        { id: "clear-day", name: "Clear day", source: "builtin", downloaded: true, mb: 6.2 },
+        { id: "sunset", name: "Sunset", source: "builtin", downloaded: false, mb: 5.5 },
+        { id: "folder-dusk-0123abcd", name: "Dusk", source: "folder", error: null },
+        { id: "folder-big-89abcdef", name: "Big", source: "folder", error: "Over 32 MB." },
+      ],
+      busy: false,
+      status: "",
+      error: "",
+      added: "",
+    };
+    await host(page, { settings: { ...HOST_SETTINGS, ...look }, skies });
+    await openSettings(page, "graphics");
+    const options = row(page, "graphics", "Look").locator("option");
+    await poll(() => options.evaluateAll((all) => all.filter((o) => (o as HTMLOptionElement).disabled).length), 0);
+    const picker = row(page, "graphics", "Sky").locator("select");
+    await poll(
+      () => picker.locator("option").allTextContents(),
+      ["Map sky", "Procedural daylight", "Clear day", "Sunset · 5.5 MB", "Dusk", "Big · Over 32 MB."],
+    );
+    if (process.env.SKY_SETTINGS_SHOT) await page.screenshot({ path: process.env.SKY_SETTINGS_SHOT, fullPage: true });
+    const from = await count(page);
+    await picker.selectOption("pack:sunset");
+    expect(await patchesSince(page, from)).toEqual([
+      { graphicsPreset: "enhanced", graphicsSkyMode: "pack", graphicsSkyPackId: "sunset" },
+    ]);
+    expect(errors).toEqual([]);
+  } finally {
+    await close();
+  }
+}, 30_000);

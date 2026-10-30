@@ -100,6 +100,12 @@ export type MenuMessage =
   | { type: "replays"; action: "list" }
   /** Clears the player's paint on the loaded map (renderer.hpp tool_message). */
   | { type: "paint"; action: "clear" }
+  /** Sets an aimed measurement point or clears the measurement (renderer.hpp tool_message). */
+  | { type: "measure"; action: "point" | "clear" }
+  /** The Sky picker's skies (sky_library.cpp): add from a link, import a file, remove, open the folder, cancel. */
+  | { type: "sky"; action: "link"; url: string }
+  | { type: "sky"; action: "remove"; id: string }
+  | { type: "sky"; action: "import" | "openFolder" | "cancel" }
   /** Opens the HUD layout editor over the game (hud_editor.cpp); the menu closes. */
   | { type: "hudEditor" }
   /** Moves the HUD to one of the host's layout presets (hud_editor_layout.hpp). */

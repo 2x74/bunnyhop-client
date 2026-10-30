@@ -14,6 +14,7 @@ import { registerCustomCssSection } from "./custom-css/section";
 import { registerDataFolderSection } from "./data-folder-panel";
 import { registerDiscordSection } from "./discord-section";
 import { registerMouseDiagnostics } from "./mouse-diagnostics";
+import { registerMeasureSection } from "./measure-section";
 import { registerPaintSection } from "./paint-section";
 import { installHostHudEditor } from "./hud-editor-opener";
 import { registerHudRows } from "./hud-section";
@@ -42,6 +43,7 @@ function install(): void {
   registerUpdatesSection();
   registerCustomCssSection();
   registerPaintSection();
+  registerMeasureSection();
   installHostHudEditor();
   registerHudRows();
   registerMouseDiagnostics();

@@ -74,6 +74,7 @@ class SourceHdr {
     GLuint multisampleFbo = 0, multisampleColor = 0, multisampleDepth = 0;
     int requestedSamples = 0, currentSamples = -1;
     Target quarter[2], lum;
+    int quarterWidth = 0, quarterHeight = 0;
     GLuint pbo = 0;
     GLsync fence = nullptr;
     int width = 0, height = 0;
@@ -148,10 +149,19 @@ class SourceHdr {
             }
         }
         currentSamples = requestedSamples;
-        for (auto &q : quarter)
-            q = make_target(std::max(1, w / 4), std::max(1, h / 4), GL_RGBA, GL_HALF_FLOAT, GL_RGBA16F);
         width = w;
         height = h;
+    }
+
+    void ensure_bloom_targets(int w, int h) {
+        const int qw = std::max(1, w / 4), qh = std::max(1, h / 4);
+        if (quarter[0].fbo && quarterWidth == qw && quarterHeight == qh) return;
+        destroy(quarter[0]);
+        destroy(quarter[1]);
+        for (auto &q : quarter)
+            q = make_target(qw, qh, GL_RGBA, GL_HALF_FLOAT, GL_RGBA16F);
+        quarterWidth = qw;
+        quarterHeight = qh;
     }
 
     void fullscreen(GLuint program) {
@@ -181,7 +191,7 @@ class SourceHdr {
     }
 
     // Measure now and then (asynchronously) and move the exposure toward the averaged goal.
-    void meter(double dt) {
+    void meter(GLuint scene, double dt) {
         if (fence) {
             const GLenum state = gl.ClientWaitSync(fence, 0, 0);
             if (state == GL_ALREADY_SIGNALED || state == GL_CONDITION_SATISFIED) {
@@ -204,7 +214,7 @@ class SourceHdr {
             gl.Viewport(0, 0, lumWidth, lumHeight);
             gl.UseProgram(luminance);
             gl.ActiveTexture(GL_TEXTURE0);
-            gl.BindTexture(GL_TEXTURE_2D, sceneColor);
+            gl.BindTexture(GL_TEXTURE_2D, scene);
             gl.Uniform1i(loc(luminance, "scene"), 0);
             gl.Uniform1f(loc(luminance, "exposure"), exposure);
             fullscreen(luminance);
@@ -292,31 +302,39 @@ public:
             gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, sceneFbo);
             gl.BlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
         }
+        expose(sceneColor, targetFbo, w, h, dt);
+        gl.Enable(GL_DEPTH_TEST);
+        gl.DepthMask(GL_TRUE);
+    }
+
+    // Bloom and expose `scene` (a gamma-encoded half-float frame of w x h) into `targetFbo`, then meter it. The
+    // Enhanced and Cinematic looks call this on their own scene target.
+    void expose(GLuint scene, GLuint targetFbo, int w, int h, double dt) {
         gl.Disable(GL_DEPTH_TEST);
         gl.Disable(GL_BLEND);
         gl.Disable(GL_CULL_FACE);
         gl.DepthMask(GL_FALSE);
         const bool withBloom = bloom && bloomScale > 0;
         if (withBloom) {
+            ensure_bloom_targets(w, h);
             const auto &a = quarter[0], &b = quarter[1];
-            const int qw = std::max(1, w / 4), qh = std::max(1, h / 4);
             gl.BindFramebuffer(GL_FRAMEBUFFER, a.fbo);
-            gl.Viewport(0, 0, qw, qh);
+            gl.Viewport(0, 0, quarterWidth, quarterHeight);
             gl.UseProgram(downsample);
             gl.ActiveTexture(GL_TEXTURE0);
-            gl.BindTexture(GL_TEXTURE_2D, sceneColor);
+            gl.BindTexture(GL_TEXTURE_2D, scene);
             gl.Uniform1i(loc(downsample, "scene"), 0);
             gl.Uniform1f(loc(downsample, "exposure"), exposure);
             gl.Uniform2f(loc(downsample, "texel"), 1.f / w, 1.f / h);
             fullscreen(downsample);
-            blur_into(a, b, 1.f / qw, 0, 1);
-            blur_into(b, a, 0, 1.f / qh, bloomScale);
+            blur_into(a, b, 1.f / quarterWidth, 0, 1);
+            blur_into(b, a, 0, 1.f / quarterHeight, bloomScale);
         }
         gl.BindFramebuffer(GL_FRAMEBUFFER, targetFbo);
         gl.Viewport(0, 0, w, h);
         gl.UseProgram(composite);
         gl.ActiveTexture(GL_TEXTURE0);
-        gl.BindTexture(GL_TEXTURE_2D, sceneColor);
+        gl.BindTexture(GL_TEXTURE_2D, scene);
         gl.Uniform1i(loc(composite, "scene"), 0);
         gl.Uniform1f(loc(composite, "exposure"), exposure);
         gl.ActiveTexture(GL_TEXTURE1);
@@ -324,12 +342,10 @@ public:
         gl.Uniform1i(loc(composite, "bloom"), 1);
         gl.Uniform1i(loc(composite, "hasBloom"), withBloom);
         fullscreen(composite);
-        meter(std::clamp(dt, 0., .25));
+        meter(scene, std::clamp(dt, 0., .25));
         gl.BindFramebuffer(GL_FRAMEBUFFER, targetFbo);
         gl.Viewport(0, 0, w, h);
         gl.ActiveTexture(GL_TEXTURE0);
-        gl.Enable(GL_DEPTH_TEST);
-        gl.DepthMask(GL_TRUE);
     }
 };
 

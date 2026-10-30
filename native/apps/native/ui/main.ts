@@ -1,3 +1,4 @@
+import { applyHostSkies } from "./sky-settings";
 import { applySemanticPalette } from "./semantic-palette";
 import { NativeWorldRecord } from "./world-record";
 import { NativeHudLeaderboard, type BoardContext } from "./hud-leaderboard";
@@ -709,6 +710,7 @@ function receive(value: unknown): void {
   const applied = applyState(value);
   applyReplayHostState(value);
   applyVideoQueueState(value);
+  applyHostSkies(value);
   applyChatFeatures(value);
   if (applied) applySemanticPalette(state.settings.colorBlind);
   // A newly picked map is up: the next Esc in game is the pause menu, not the browser it was picked from.

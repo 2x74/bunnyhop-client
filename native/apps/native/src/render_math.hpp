@@ -71,6 +71,20 @@ inline Bounds transformed_bounds(const Bounds &b, const native::Matrix &m) {
     return out;
 }
 
+// Whether a group's bounds (under `model`) can cast into the sun's orthographic map of `range` units each way.
+inline bool in_light_box(const Bounds &b, const native::Matrix &model, const native::Matrix &light, float range) {
+    const auto world = transformed_bounds(b, model);
+    Vec3 center{};
+    float radius = 0;
+    for (int k = 0; k < 3; k++) {
+        center[k] = (world.lo[k] + world.hi[k]) * .5f;
+        radius += (world.hi[k] - world.lo[k]) * (world.hi[k] - world.lo[k]) * .25f;
+    }
+    const auto projected = transform_point(light, center);
+    const float reach = 1 + std::sqrt(radius) / range;
+    return std::abs(projected[0]) <= reach && std::abs(projected[1]) <= reach;
+}
+
 struct WaterSurface {
     Vec3 center{}, color{};
     std::array<float, 2> range{};
