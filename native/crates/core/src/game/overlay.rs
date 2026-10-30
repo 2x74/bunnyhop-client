@@ -96,7 +96,7 @@ impl Game {
         }
         let teleporter = |name: &str| self.ents.iter().any(|x| x.class == "point_teleport" && x.name.eq_ignore_ascii_case(name));
         match &t.kind {
-            TriggerKind::Teleport { .. } => Some(OVERLAY_TELEPORT),
+            TriggerKind::Teleport { .. } | TriggerKind::TeleportRelative { .. } => Some(OVERLAY_TELEPORT),
             TriggerKind::Push { .. } => Some(OVERLAY_PUSH),
             TriggerKind::Gravity { .. } => Some(OVERLAY_GRAVITY),
             TriggerKind::Hurt { damage, .. } => {

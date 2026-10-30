@@ -6,7 +6,7 @@ import { GunAnimator, type BaseClip, type Cue } from "../../web/src/viewmodel/gu
 import { gunById } from "../../web/src/viewmodel/guns/index";
 import { mkdir, readFile, writeFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { exportMusic } from "./export-music";
+import { bundledMusic, exportMusic } from "./export-music";
 const root = resolve(import.meta.dir, "../../..");
 const out = resolve(Bun.argv[2] ?? join(root, "target/native-assets"));
 await mkdir(join(out, "audio"), { recursive: true });
@@ -118,6 +118,8 @@ manifest.weaponAudio = weaponIds.map((id) => {
 const gift = supporterGiftWave(22050);
 await writeFile(join(out, "audio/supporter_gift-1.f32"), new Uint8Array(gift.buffer));
 manifest.sfx.supporter_gift = { variants: 1, durations: [gift.length / 22050] };
+// The native package retains its pinned offline soundtrack across web catalogue additions.
+manifest.music = bundledMusic(manifest.music);
 exportMusic(out, manifest.music);
 await writeFile(join(out, "audio.json"), JSON.stringify(manifest));
 console.log(

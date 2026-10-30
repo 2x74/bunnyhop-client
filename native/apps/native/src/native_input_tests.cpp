@@ -66,7 +66,27 @@ void test_null_binds_per_tick() {
     std::cout << "Null binds: four pinned tick commands, duplicate bindings, release fallback, and style gate\n";
 }
 
+void test_core_teleport_view() {
+    for (const bool timed : {false, true}) {
+        native::Input input;
+        input.set_angles(30, 90);
+        BhState state{};
+        state.events = native::teleported;
+        state.teleport_angles[0] = -10;
+        state.teleport_angles[1] = 237;
+        input.events(state);
+        if (timed) input.look_sample();
+        const auto command = input.command();
+        assert(command.pitch == -10 && command.yaw == 237);
+        state.teleport_angles[0] = -3;
+        state.teleport_angles[1] = 123;
+        input.events(state);
+        assert(input.command().pitch == -3 && input.command().yaw == 123);
+    }
+}
+
 int main() {
+    test_core_teleport_view();
     test_null_binds_per_tick();
     static_assert(sizeof(BhLookSample) == 40 && offsetof(BhLookSample, count) == 16);
     static_assert(sizeof(BhLookSampleV2) == 48 && offsetof(BhLookSampleV2, epoch) == 24);

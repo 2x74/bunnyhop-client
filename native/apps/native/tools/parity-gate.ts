@@ -180,7 +180,7 @@ export async function runGate(runner: string | string[], output: string, wasmPat
     wasmBytes: wasm.length,
     wasmUrl: CANONICAL_WASM_URL,
     runnerSha256: hash(readFileSync(typeof runner === "string" ? runner : runner[0])),
-    physics: 18,
+    physics: 19,
     contrastPhysics: 16,
     ladderContrastPhysics: 17,
     comparedStates: 0,

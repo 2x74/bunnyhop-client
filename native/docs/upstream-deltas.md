@@ -1,10 +1,14 @@
 # Vendored delta audit
 
+Current sync: website `release-0.0.30` at `1593e71b4865a26c7820cc818b948a810ccac0a9`.
+The two patches were refreshed against that source; `classification.json` records its Git blob baselines.
+The rows below describe why each native delta exists.
+
 Baseline: native `4ca38014`; upstream `9cde9db9d37ea1b0752da6222b10f65e52d5f3d1`.
 Resynced to upstream `042dca417ae08ab7cf3fd37591eae21ef772aab1`, then `b29f5037fb8367d487cd3513fc8f19c9a467392b`, then
 `59fd424c388005d9de1e18366ef89a6e6a9ae27d`; those syncs changed only the rows marked 042dca41, b29f5037 and 59fd424c.
 The audit compared tracked files and both repositories' history, not working-tree timestamps.
-`tools/upstream-patches/classification.json` records the closest release-branch ancestor for each changed file.
+`tools/upstream-patches/classification.json` records the current upstream blob for each native delta.
 
 | Paths under native/ | Classification and action | Native history |
 | --- | --- | --- |

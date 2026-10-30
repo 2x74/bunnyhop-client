@@ -6,6 +6,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 mod replay_v10;
 #[path = "v29_tests.rs"]
 mod v29;
+#[path = "v30_tests.rs"]
+mod v30;
 
 struct Fixture(PathBuf);
 impl Fixture {

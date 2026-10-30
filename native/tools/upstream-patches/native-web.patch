@@ -242,7 +242,7 @@ index 05a50f7..9280040 100644
    /** Public URL of a verified run's replay (watch links: ?replay=<url>). */
    replayUrl(runId: string): string {
 diff --git a/apps/web/src/assets/audio/manifest.json b/apps/web/src/assets/audio/manifest.json
-index b602744..d85fc9f 100644
+index 53a325c..0c510af 100644
 --- a/apps/web/src/assets/audio/manifest.json
 +++ b/apps/web/src/assets/audio/manifest.json
 @@ -740,24 +740,6 @@
@@ -270,7 +270,7 @@ index b602744..d85fc9f 100644
      "ui_press": {
        "variants": 1,
        "durations": [
-@@ -969,7 +951,14 @@
+@@ -1079,7 +1061,14 @@
    ],
    "credits": [
      "Sound effects: original, generated with ElevenLabs Sound Effects for bunnyhop.lol",
@@ -289,7 +289,7 @@ index b602744..d85fc9f 100644
 +  }
  }
 diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
-index 12efbce..618cd63 100644
+index bb4b69f..a9543a4 100644
 --- a/apps/web/src/core.ts
 +++ b/apps/web/src/core.ts
 @@ -1,5 +1,6 @@
@@ -299,7 +299,7 @@ index 12efbce..618cd63 100644
  
  export interface MeshGroup {
    model: number;
-@@ -294,6 +295,8 @@ export const EVENT_WEAPON = 1 << 6;
+@@ -296,6 +297,8 @@ export const EVENT_WEAPON = 1 << 6;
  
  interface Exports {
    memory: WebAssembly.Memory;
@@ -308,7 +308,7 @@ index 12efbce..618cd63 100644
    alloc(len: number): number;
    load_map(ptr: number, len: number): number;
    load_map_physics?: (ptr: number, len: number) => number;
-@@ -357,6 +360,27 @@ const wasmLoaders = WebAssembly as unknown as WasmLoaders;
+@@ -359,6 +362,27 @@ const wasmLoaders = WebAssembly as unknown as WasmLoaders;
  
  export class Core {
    private constructor(private x: Exports) {}
@@ -336,7 +336,7 @@ index 12efbce..618cd63 100644
  
    /** From wasm bytes, a fetch Response, or an already compiled module (Workers can't compile bytes at runtime). */
    static async create(source: BufferSource | WebAssembly.Module | Response | Promise<Response>): Promise<Core> {
-@@ -368,21 +392,21 @@ export class Core {
+@@ -370,21 +394,21 @@ export class Core {
    }
  
    private str(ptr: number, len: number): string {
@@ -362,7 +362,7 @@ index 12efbce..618cd63 100644
      if (!this.x.load_map(ptr, bsp.length)) throw new Error(this.lastError());
    }
  
-@@ -393,7 +417,7 @@ export class Core {
+@@ -395,7 +419,7 @@ export class Core {
    loadMapPhysics(bsp: Uint8Array): void {
      this.addPhysicsContent();
      const ptr = this.x.alloc(bsp.length);
@@ -371,7 +371,7 @@ index 12efbce..618cd63 100644
      this.commitPhysics(ptr, bsp.length);
    }
  
-@@ -409,7 +433,7 @@ export class Core {
+@@ -411,7 +435,7 @@ export class Core {
          if (done) break;
          if (off + value.length > len) throw new Error(`map stream longer than ${len} bytes`);
          // Re-take the view each chunk: memory.buffer is detached if the wasm memory grew.
@@ -380,7 +380,7 @@ index 12efbce..618cd63 100644
          off += value.length;
        }
        if (off !== len) throw new Error(`map stream ended at ${off} of ${len} bytes`);
-@@ -513,7 +537,8 @@ export class Core {
+@@ -515,7 +539,8 @@ export class Core {
      if (!x.mesh_sky_vertices_ptr || !x.mesh_sky_vertices_len || !x.mesh_sky_indices_ptr || !x.mesh_sky_indices_len || !x.mesh_sky_groups) return null;
      const vertices = this.f32(x.mesh_sky_vertices_ptr(), x.mesh_sky_vertices_len()).slice();
      const indices = this.u32(x.mesh_sky_indices_ptr(), x.mesh_sky_indices_len()).slice();
@@ -390,7 +390,7 @@ index 12efbce..618cd63 100644
      const groups = [];
      for (let i = 0; i + 3 <= g.length; i += 3) groups.push({ model: g[i], firstIndex: g[i + 1], indexCount: g[i + 2] });
      return { vertices, indices, groups };
-@@ -581,7 +606,7 @@ export class Core {
+@@ -583,7 +608,7 @@ export class Core {
      const levels: TextureLevel[] = [];
      for (let i = 0; i < h[1]; i++) {
        const [width, height, offset, size] = h.subarray(2 + i * 4, 6 + i * 4);
@@ -399,7 +399,7 @@ index 12efbce..618cd63 100644
      }
      return { format: h[0] as TextureFormat, levels };
    }
-@@ -590,7 +615,7 @@ export class Core {
+@@ -592,7 +617,7 @@ export class Core {
    lightmap(): Lightmap {
      const len = this.x.lightmap_size();
      const [width, height, hdr] = this.u32(this.x.scratch_u32_ptr(), len);
@@ -408,7 +408,7 @@ index 12efbce..618cd63 100644
      return { width, height, data, scale: this.x.lightmap_scale(), hdr: hdr === 1 };
    }
  
-@@ -608,7 +633,7 @@ export class Core {
+@@ -610,7 +635,7 @@ export class Core {
    /** The BSP pakfile lump (a store-only zip of embedded content). */
    pakfile(): Uint8Array {
      const len = this.x.pak_len();
@@ -417,7 +417,7 @@ index 12efbce..618cd63 100644
    }
  
    /** Physics settings and version (call after loading the map). Throws if this wasm build can't simulate the version. */
-@@ -718,7 +743,7 @@ export class Core {
+@@ -720,7 +745,7 @@ export class Core {
    /** Copies bytes into a fresh wasm allocation (ownership passes to the callee). */
    private give(bytes: Uint8Array): [number, number] {
      const ptr = this.x.alloc(bytes.length);
@@ -426,7 +426,7 @@ index 12efbce..618cd63 100644
      return [ptr, bytes.length];
    }
  
-@@ -755,7 +780,7 @@ export class Core {
+@@ -757,7 +782,7 @@ export class Core {
    /** Bytes of a file fetched via `contentProvide`/`contentAddFile` (assembled, CRC-checked), or null. */
    contentFile(path: string): Uint8Array | null {
      const len = this.cx.content_file(...this.giveStr(path));
@@ -435,7 +435,7 @@ index 12efbce..618cd63 100644
    }
  
    /** Supplies bytes for a pending request (archive chunk for VPKs, whole file for listings). */
-@@ -803,7 +828,7 @@ export class Core {
+@@ -805,7 +830,7 @@ export class Core {
    /** Reads a file through the current VFS (pakfile → fetched → mounts), or null (a mount hit becomes pending). */
    contentRead(path: string): Uint8Array | null {
      if (!this.cx.content_read(...this.giveStr(path))) return null;
@@ -444,7 +444,7 @@ index 12efbce..618cd63 100644
    }
  
    /** Pending requests of the current VFS (materials and anything read since the last `contentResolve`). */
-@@ -968,7 +993,7 @@ export class Core {
+@@ -970,7 +995,7 @@ export class Core {
      const levels: TextureLevel[] = [];
      for (let i = 0; i < h[1]; i++) {
        const [width, height, offset, size] = h.subarray(2 + i * 4, 6 + i * 4);
@@ -453,7 +453,7 @@ index 12efbce..618cd63 100644
      }
      return { format: h[0] as TextureFormat, levels };
    }
-@@ -1050,6 +1075,8 @@ interface ContentExports {
+@@ -1052,6 +1077,8 @@ interface ContentExports {
  
  interface RestartExports {
    memory: WebAssembly.Memory;
@@ -462,7 +462,7 @@ index 12efbce..618cd63 100644
    scratch_f32_ptr(): number;
    set_position?: (x: number, y: number, z: number, yaw: number) => void;
    restart_point?: () => number;
-@@ -1098,9 +1125,10 @@ export function setRestartNames(core: Core, targetname: string, classname: strin
+@@ -1100,9 +1127,10 @@ export function setRestartNames(core: Core, targetname: string, classname: strin
    const name = new TextEncoder().encode(targetname);
    const cls = new TextEncoder().encode(classname);
    const ptr = e.alloc(name.length + cls.length);
@@ -474,7 +474,7 @@ index 12efbce..618cd63 100644
    e.set_restart_names(ptr, name.length, cls.length);
    RESTART_NAMES.set(core, { targetname, classname });
  }
-@@ -1117,7 +1145,7 @@ export function restartPoint(core: Core): RestartPoint | null {
+@@ -1119,7 +1147,7 @@ export function restartPoint(core: Core): RestartPoint | null {
    if (!e.restart_point) return null;
    const len = e.restart_point();
    if (len < 4) return null;
@@ -483,7 +483,7 @@ index 12efbce..618cd63 100644
    const names = RESTART_NAMES.get(core);
    const p: RestartPoint = { position: [s[0], s[1], s[2]], yaw: s[3] };
    if (names?.targetname) p.targetname = names.targetname;
-@@ -1145,7 +1173,7 @@ export function propCollisionMesh(core: Core): Float32Array {
+@@ -1147,7 +1175,7 @@ export function propCollisionMesh(core: Core): Float32Array {
    const e = restartExports(core);
    if (!e.prop_collision_mesh) return new Float32Array(0);
    const len = e.prop_collision_mesh();
@@ -492,7 +492,7 @@ index 12efbce..618cd63 100644
  }
  
  // ---- replay viewer wrappers (appended; exports at the end of crates/core/src/wasm.rs) ----
-@@ -1254,7 +1282,7 @@ export function attackReport(core: Core): AttackReport | null {
+@@ -1256,7 +1284,7 @@ export function attackReport(core: Core): AttackReport | null {
    if (!x.attack_report) return null;
    const len = x.attack_report();
    if (len < 13) return null;
@@ -501,7 +501,7 @@ index 12efbce..618cd63 100644
    return {
      weapon: s[0],
      mode: s[1] === 2 ? 2 : 1,
-@@ -1352,7 +1380,7 @@ export function weaponReport(core: Core): WeaponReport | null {
+@@ -1354,7 +1382,7 @@ export function weaponReport(core: Core): WeaponReport | null {
    if (!x.weapon_report) return null;
    const len = x.weapon_report();
    if (len < 9) return null;
@@ -510,7 +510,7 @@ index 12efbce..618cd63 100644
    return { flags: s[0], active: s[1], primary: s[2], secondary: s[3], knife: s[4] !== 0, clip: s[5], clipSize: s[6], reloadTicks: s[7], burst: s[8] !== 0, floorChanged: len > 9 && s[9] !== 0, silencer: len > 10 && s[10] !== 0, silencerTicks: len > 11 ? s[11] : 0 };
  }
  
-@@ -1379,6 +1407,7 @@ export function floorWeapons(core: Core): Float32Array {
+@@ -1381,6 +1409,7 @@ export function floorWeapons(core: Core): Float32Array {
    const len = x.floor_weapons ? x.floor_weapons() : 0;
    if (len === 0) return EMPTY_F32;
    const ptr = x.scratch_f32_ptr();
