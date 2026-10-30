@@ -35,6 +35,8 @@ export type Action =
   // Leave for the main menu from the game (leave-confirm.ts: asks once during a timed run). Unbound by default.
   | "mainMenu"
   | "hudEditor"
+  // Opens the chat (rooms: net/mp.ts; solo: solo-chat.ts). Y and U by default, like CS:S say / say_team.
+  | "chat"
   | "thirdPerson"
   | "attack"
   | "attack2"
@@ -390,6 +392,7 @@ export const ACTIONS: { id: Action; label: string }[] = [
   { id: "cycleStyle", label: "Switch style" },
   { id: "mainMenu", label: "Main menu" },
   { id: "hudEditor", label: "Edit HUD layout" },
+  { id: "chat", label: "Chat" },
   { id: "thirdPerson", label: "Third person (practice)" },
   { id: "attack", label: "Slash (carrot)" },
   { id: "attack2", label: "Stab (carrot)" },
@@ -821,6 +824,12 @@ export function keyLabel(code: string): string {
   if (code.startsWith("Digit")) return code.slice(5);
   if (code.startsWith("Numpad")) return "Num " + code.slice(6);
   return code;
+}
+
+/** The first key bound to `action`, for people ("Y"), or null while it has none. */
+export function bindLabel(action: Action): string | null {
+  const c = prefs.get().binds[action]?.[0];
+  return c ? keyLabel(c) : null;
 }
 
 /** The game's render pixel ratio: the screen's (capped at 2x, 1x in potato mode) times the resolution scale. */

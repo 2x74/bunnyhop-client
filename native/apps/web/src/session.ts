@@ -21,7 +21,7 @@ import { keyLabel, prefs } from "./ui/settings";
 import { RunMouseSettings, mouseFromPrefs } from "./mouse-settings";
 import { DEFAULT_TURN_SPEED, turnSpeedOf } from "./turn-binds";
 import { decodeReplay, encodeReplay, ReplayRecorder, replayFileName, replayStyle, sha256Hex, type Replay } from "./replay";
-import { nextStyle, StyleFilter, strafeKeys, styleDef, styleForTrack, styleLabel, stylePrespeedCap, styleSettings, type StyleDef, type StyleId } from "./styles";
+import { isSegmented, nextStyle, StyleFilter, strafeKeys, styleDef, styleForTrack, styleLabel, stylePrespeedCap, styleSettings, type StyleDef, type StyleId } from "./styles";
 import { onStyleChange, setSelectedStyle } from "./ui/style-picker";
 import { afterStep, beforeStep, checkpointMatches, FRAME_STRIDE, frameFlags, makeTimer, quantize, simulate } from "./sim";
 import { EVENT_RESPAWNED, formatTime, RunTimer, type Split, type TickCmd } from "./timer";
@@ -37,7 +37,7 @@ import { mapTier } from "./ui/maps";
 import { announce, announcerPolicy, runSounds, sfx } from "./audio";
 import { restartTarget, withRestartNames } from "./restart";
 import { checkStartPoint, clearPracticeSpawns, clearStartPoint, loadStartPoint, resolveStartPoint, savedMessage, saveStartPoint } from "./start-point";
-import { getLoadout, getOutfit, knownOutfitUnlocks } from "./player/cosmetics";
+import { getHeldLoadout, getOutfit, knownOutfitUnlocks } from "./player/cosmetics";
 import { cosmetic } from "./progression";
 import { withTimeout } from "./content/fetch";
 import { reportRun, RunWatch, SelfCheck, type RunPlay } from "./selfcheck";
@@ -49,6 +49,7 @@ import { TUTORIAL_MAP } from "./tutorial/data";
 import { practiceReason } from "./practice";
 import { finishRoute, PracticeAttempt, practiceFlipLine, practiceStartLine, type PracticeUse } from "./practice-mode/attempt";
 import { loadTimer, type TimerSnapshot } from "./practice-mode/checkpoints";
+import { SegmentLog, type SegmentMark } from "./practice-mode/segments";
 import { LiveSsj, ssjChat } from "./ssj";
 import { LiveMovementStats } from "./movement-stats";
 
@@ -113,6 +114,8 @@ export class RunSession {
   zones: ZoneSet | null = null;
   timer: RunTimer;
   recorder = new ReplayRecorder();
+  /** Segmented runs' recording history (practice-mode/segments.ts): every tick of a clean Segmented attempt, every branch. */
+  private segLog = new SegmentLog();
   editor: ZoneEditor | null = null;
   /** Race ghosts (PB / WR / custom, per track; ghost.ts). Only the current track's ghosts are shown. */
   ghosts!: GhostManager;
@@ -533,6 +536,12 @@ export class RunSession {
       this.recorder.maybeCheckpoint(state.tick, state.position, state.velocity);
     }
     this.pushFrame(state, cmd, events);
+    if (this.segmenting) {
+      // Segmented: the tick goes into the history too, so a checkpoint load can rebuild the recording (segments.ts).
+      const o = state.tick * FRAME_STRIDE;
+      this.segLog.push({ forward: cmd.forward, side: cmd.side, yaw: cmd.yaw, pitch: cmd.pitch, buttons: cmd.buttons, look: u.look ?? null, frame: this.liveFrames.subarray(o, o + FRAME_STRIDE), frameEvents: this.liveFrameEvents[state.tick] });
+      if (state.tick % this.recorder.checkpointInterval === 0) this.segLog.checkpoint(state.position, state.velocity);
+    }
     // A practice attempt (practice mode, third person, a lesson, scripted commands, the debug hook) is never submitted,
     // so it never beats either: a run that turns into practice drops its session.
     if (update.restarted || this.unranked) this.clock.stop();
@@ -554,12 +563,13 @@ export class RunSession {
       this.watch.start((now, windowMs) => this.o.input.filter.stats.pollHz(now, windowMs));
       // Run session (run-clock.ts): heartbeats over the commands recorded from the timer's start tick (the replay's
       // header.startTick: the recorder and the sim count ticks from the same reset). Not for practice (above).
-      if (!this.unranked) {
-        this.runAttempt = this.attempts.start(this.o.map, this.timer.track, this.runStyle);
+      // Segmented runs rewind on purpose, which is what the heartbeats exist to catch (run-clock.ts): none for them.
+      if (!this.unranked) this.runAttempt = this.attempts.start(this.o.map, this.timer.track, this.runStyle);
+      if (!this.unranked && !isSegmented(this.runStyle)) {
         this.clock.start({
           map: this.o.map, track: this.timer.track, style: this.runStyle, startTick: this.timer.startTick,
           length: () => this.recorder.length, fold: (h, from, to) => this.recorder.fold(h, from, to),
-          attempt: this.runAttempt,
+          attempt: this.runAttempt ?? undefined,
         });
       }
       this.ghosts.onRunStart();
@@ -656,6 +666,7 @@ export class RunSession {
    */
   recordCosmetic(kind: number): void {
     if (!this.experimentalInput) this.recorder.event(kind);
+    if (this.segmenting) this.segLog.event(kind);
   }
 
   /**
@@ -680,6 +691,7 @@ export class RunSession {
   /** Inspect event (replay.ts INSPECT_* kinds) at the current tick: the replay's inspect trailer, for third person. */
   recordInspect(kind: number): void {
     if (!this.experimentalInput) this.recorder.inspectEvent(kind);
+    if (this.segmenting) this.segLog.event(kind, true);
   }
 
   onReset(): void {
@@ -702,10 +714,18 @@ export class RunSession {
     this.ssj.reset(s);
     this.movementStats.reset(s);
     this.pushFrame(s, { forward: 0, side: 0, yaw: s.teleportAngles[1], pitch: s.teleportAngles[0], buttons: 0 });
+    // A new path in the Segmented history (its checkpoints from earlier attempts stay loadable); a full one starts over.
+    if (this.segLog.full) this.segLog.clear();
+    this.segLog.begin(this.liveFrames.subarray(s.tick * FRAME_STRIDE, (s.tick + 1) * FRAME_STRIDE), this.liveFrameEvents[s.tick]);
   }
 
   private pushFrame(s: PlayerState, c: TickCmd, events = 0): void {
-    const o = s.tick * FRAME_STRIDE;
+    this.putFrame(s.tick, [s.position[0], s.position[1], s.position[2], frameFlags(s), c.yaw, c.pitch], events & (EVENT_JUMPED | EVENT_TELEPORTED));
+  }
+
+  /** Writes the live frame of `tick` (FRAME_STRIDE values) and its jump / teleport events. */
+  private putFrame(tick: number, frame: ArrayLike<number>, events: number): void {
+    const o = tick * FRAME_STRIDE;
     if (o + FRAME_STRIDE > this.liveFrames.length) {
       const b = new Float32Array(Math.max(this.liveFrames.length * 2, o + FRAME_STRIDE));
       b.set(this.liveFrames);
@@ -714,8 +734,8 @@ export class RunSession {
       eventBuffer.set(this.liveFrameEvents);
       this.liveFrameEvents = eventBuffer;
     }
-    this.liveFrames.set([s.position[0], s.position[1], s.position[2], frameFlags(s), c.yaw, c.pitch], o);
-    this.liveFrameEvents[s.tick] = events & (EVENT_JUMPED | EVENT_TELEPORTED);
+    this.liveFrames.set(frame, o);
+    this.liveFrameEvents[tick] = events;
   }
 
   private buildReplay(endTick: number): Replay {
@@ -738,8 +758,10 @@ export class RunSession {
       player: this.player,
       recordedAt: Date.now(),
     });
-    // Cosmetic trailer: the knife / finish / gloves and the colourway this run was played with (replays and ghosts show them).
-    replay.loadout = { ...getLoadout(), ...recordedOutfit() };
+    // Cosmetic trailer: the knife / finish / gloves and the colourway this run was played with (replays and ghosts show
+    // them); the knife and finish are the ones held, the knife pool's pick when a pool is active (it only moves on at a
+    // map load or a restart, so it's the one held through the run).
+    replay.loadout = { ...getHeldLoadout(), ...recordedOutfit() };
     return replay;
   }
 
@@ -765,15 +787,18 @@ export class RunSession {
     // (A practice run is never a PB: third person, the debug hook, a lesson, scripted commands.)
     const newPB = !this.unranked && (!pb || t.timeMs() < pbMs(pb));
     const pbDate = Date.now();
+    // The finished run's stats, read now: a Segmented checkpoint load during the encode below puts the same timer back
+    // to an earlier point of the run (segmentRestored).
+    const done = { jumps: t.jumps, strafes: t.strafes, sync: t.syncPercent(), splits: t.splits.map((s): [number, number] => [s.index, s.ticks]) };
+    const summary = this.clientSummary(newPB);
     const bytes = await encodeReplay(replay);
     if (this.experimentalInput) return; // opt-in while encoding invalidates this completion
     this.lastRun = { replay, bytes };
     // --- UI: end-of-run card (submission status: this.hud.setSubmission(...)) ---
     this.hud.runFinished({
-      time, previousPB: pb?.time ?? null, newPB, jumps: t.jumps, strafes: t.strafes, sync: t.syncPercent(),
+      time, previousPB: pb?.time ?? null, newPB, jumps: done.jumps, strafes: done.strafes, sync: done.sync,
       style: styleLabel(style), track: track ? trackName(track) : null, onMap: this.onMap(),
     });
-    const summary = this.clientSummary(newPB);
     const clientResult = ++this.clientResult;
     const archive = (verified = false) => this.experimentalInput ? Promise.resolve() : saveClientRun({ ...summary, verified }).then((id) =>
       clientResultSettled(id, () => this.clientResult === clientResult && this.timer === t && t.status === "finished" && this.lastRun?.replay === replay));
@@ -798,10 +823,10 @@ export class RunSession {
         ticks,
         time,
         date: pbDate,
-        jumps: t.jumps,
-        strafes: t.strafes,
-        sync: t.syncPercent(),
-        splits: t.splits.map((s) => [s.index, s.ticks]),
+        jumps: done.jumps,
+        strafes: done.strafes,
+        sync: done.sync,
+        splits: done.splits,
       });
       void savePBReplay(this.o.map, style, bytes, track, pbOwner, pbDate).catch((e) => console.warn("PB replay storage:", e));
       if (pbOwner === pbAccount()) this.ghosts.setPB(track, frames, replay, t.startTick, t.endTick, frameEvents);
@@ -952,6 +977,68 @@ export class RunSession {
   }
 
   // -------------------------------------------------------------------------------------------
+  // Segmented (styles.ts isSegmented, practice-mode/segments.ts, research/SEGMENTED.md)
+
+  /** A clean Segmented attempt: a checkpoint load rewinds the run (timer, recording) instead of making it practice. */
+  get segmenting(): boolean {
+    return isSegmented(this.runStyle) && !this.unranked;
+  }
+
+  /** Checkpoint loads on the current Segmented run's path (0 outside one). */
+  get segmentLoads(): number {
+    return this.segmenting ? this.segLog.loadCount : 0;
+  }
+
+  /**
+   * Where the Segmented run is, for a checkpoint saved now: its path through the history. Null outside a clean
+   * Segmented attempt, or when the history can't rebuild it (full; out of step with the recording).
+   */
+  segmentMark(): SegmentMark | null {
+    if (!this.segmenting) return null;
+    const n = this.recorder.length;
+    if (this.segLog.length !== n || this.o.core.state().tick !== n) return null;
+    return this.segLog.mark({ nullBinds: this.recorder.nullBinds, timedInput: this.recorder.timedInput, turnSpeed: this.recorder.turnSpeed });
+  }
+
+  /** The checkpoint's Segmented path can still be rebuilt here (its history wasn't dropped). */
+  segmentUsable(m: SegmentMark): boolean {
+    return this.segLog.usable(m);
+  }
+
+  /** The live key filter's state (plain fields: shallow copies), for a Segmented checkpoint. */
+  filterState(): StyleFilter {
+    return Object.assign(Object.create(Object.getPrototypeOf(this.styleFilter)), this.styleFilter) as StyleFilter;
+  }
+
+  /**
+   * A Segmented checkpoint load: the core was just restored from the checkpoint's snapshot, which it took after
+   * `m.ticks` commands. The timer, the key filter, the recording (back to the checkpoint's path plus this load) and the
+   * live frames follow it, and the attempt stays clean: no practiceUse. False (nothing changed) if `m` can't be rebuilt
+   * or the core isn't at its tick; the caller then treats it as a practice teleport.
+   */
+  segmentRestored(style: StyleId, timer: TimerSnapshot, filter: StyleFilter, m: SegmentMark): boolean {
+    const s = this.o.core.state();
+    if (!this.segmenting || style !== this.runStyle || s.tick !== m.ticks || !this.segLog.usable(m)) return false;
+    const was = this.timer.status;
+    loadTimer(this.timer, timer);
+    this.styleFilter = Object.assign(Object.create(Object.getPrototypeOf(filter)), filter) as StyleFilter;
+    this.segLog.load(m, s, this.recorder, (tick, frame, events) => this.putFrame(tick, frame, events));
+    this.clientResult++; // a finished run's pending archive no longer describes the run on screen (as onReset)
+    this.hud.resetTicks();
+    this.ssj.reset(s);
+    this.movementStats.reset(s);
+    this.ghosts.onReset();
+    // A load into a running run from a stopped timer (back from the start zone, or a checkpoint of an attempt before a
+    // restart): the run's frame watch (selfcheck.ts) and the start zone's curtain follow, as on a timer start.
+    if (this.timer.status === "running" && was !== "running") {
+      this.watch.start((now, windowMs) => this.o.input.filter.stats.pollHz(now, windowMs));
+      this.view.startRun(this.timer.track);
+    } else if (this.timer.status === "idle") this.view.reset();
+    this.updateInfo(this.timer.track);
+    return true;
+  }
+
+  // -------------------------------------------------------------------------------------------
   // Frame / camera
 
   /** A rendered frame in which the live game doesn't run (main.ts: the replay viewer is open): the run is paused. */
@@ -978,7 +1065,9 @@ export class RunSession {
     this.updateInfo();
     // The Practice line under the crosshair and the yellow timer, whenever this attempt won't count (not on the
     // tutorial: its lessons are practice and its coach does the talking). Cheap when unchanged.
-    this.hud.setPractice(this.unranked && this.o.map !== TUTORIAL_MAP ? (this.practiceNoclip ? "Practice · noclip" : "Practice") : null);
+    const loads = this.segmentLoads;
+    if (this.segmenting) this.hud.setPractice(`Segmented${loads ? ` · ${loads} load${loads === 1 ? "" : "s"}` : ""}`, true);
+    else this.hud.setPractice(this.unranked && this.o.map !== TUTORIAL_MAP ? (this.practiceNoclip ? "Practice · noclip" : "Practice") : null);
     const pb = getPB(this.o.map, this.styleFor(t.track), t.track);
     const splitTotal = t.splitTotal();
     const lastSplit = t.splits[t.splits.length - 1];
@@ -1174,6 +1263,8 @@ export class RunSession {
           strafes: this.timer.strafes,
           sync: this.timer.syncPercent(),
           recorded: this.recorder.length,
+          segmenting: this.segmenting,
+          segmentLoads: this.recorder.segments.length,
           position: s.position,
           velocity: s.velocity,
           bits: [...s.position, ...s.velocity].map(f32hex).join(" "),

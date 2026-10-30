@@ -22,6 +22,7 @@
 
 import type { BoneSetup } from "./pose";
 import { STUDIO_SNAP, type StudioData } from "./data";
+import { hypot2 } from "../../hypot";
 
 const MOVING_MINIMUM_SPEED = 0.5;
 /** SDK template: above this a moving player uses ACT_RUN, below ACT_WALK. */
@@ -255,7 +256,7 @@ export class CsAnimState {
     this.now += dt;
     this.vx = s.vel[0];
     this.vy = s.vel[1];
-    this.speed = Math.hypot(this.vx, this.vy);
+    this.speed = hypot2(this.vx, this.vy);
     this.groundTime = s.onGround ? this.groundTime + dt : 0;
     if (s.jumped) {
       // DoAnimationEvent( PLAYERANIMEVENT_JUMP )

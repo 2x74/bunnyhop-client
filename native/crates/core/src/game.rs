@@ -1615,6 +1615,7 @@ impl Game {
         self.entities.truncate(self.initial_ents.len());
         self.ents = self.initial_ents.clone();
         self.reindex_instances();
+        self.initialize_train_entity_edits();
         self.initialize_velocity_scripts();
         self.initialize_scripts19();
         if self.map_signed_door_travel && self.settings.physics_fixes() & PHYSICS_FIX_MAP_DOOR_TRAVEL != 0 {

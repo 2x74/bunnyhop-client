@@ -162,8 +162,8 @@ export async function kickDialog(t: Target, roomId?: string, lobby = false): Pro
 export async function shadowDialog(t: Target & { shadow_at?: number | null }): Promise<boolean> {
   const path = `/admin/players/${encodeURIComponent(t.id)}`;
   if (t.shadow_at) {
-    const v = await ask({ title: `Lift ${t.name}'s shadowban?`, text: "Everyone sees their runs, ranks, profile and chat again. Their boards are re-scored now.", confirm: "Lift shadowban" });
-    return !!(v && (await act(path, { action: "unshadow" }, "Shadowban lifted", { run: () => undoCall(path, { action: "shadow", reason: "undo" }, "Shadowbanned again") })));
+    const v = await ask({ title: `Lift ${t.name}'s shadowban?`, text: "Everyone sees their runs, ranks, profile and chat again. Their boards are re-scored now.", fields: [{ name: "reason", label: "Reason (staff only)", kind: "text", required: true, list: recentReasons() }], confirm: "Lift shadowban" });
+    return !!(v && (await act(path, { action: "unshadow", reason: v.reason }, "Shadowban lifted", { run: () => undoCall(path, { action: "shadow", reason: `Undo lift: ${v.reason}` }, "Shadowbanned again") })));
   }
   const v = await ask({
     title: `Shadowban ${t.name}?`,
@@ -174,7 +174,7 @@ export async function shadowDialog(t: Target & { shadow_at?: number | null }): P
   });
   if (!v) return false;
   rememberReason(v.reason);
-  return !!(await act(path, { action: "shadow", reason: v.reason }, `Shadowbanned ${t.name}`, { run: () => undoCall(path, { action: "unshadow" }, "Shadowban lifted") }));
+  return !!(await act(path, { action: "shadow", reason: v.reason }, `Shadowbanned ${t.name}`, { run: () => undoCall(path, { action: "unshadow", reason: `Undo shadowban: ${v.reason}` }, "Shadowban lifted") }));
 }
 
 /** The warn box's example text. */

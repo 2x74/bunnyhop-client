@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { STYLE_DEFS, isStyleId } from "../../web/src/styles";
 import {
   NativeRunService,
   nativeBuildAllowed,
@@ -654,3 +655,20 @@ test.each(["beat", "finish"] as const)(
     expect(alreadySent).toBeGreaterThan(0);
   },
 );
+
+test("Segmented never sends heartbeats or uploads, even for an allowed native build", async () => {
+  const f = fixture();
+  await reset(f.service);
+  await f.service.receive({ ...beat(1, 0), style: "segmented" });
+  await f.service.receive({ ...beat(1, 400), style: "segmented" });
+  await f.service.receive({ ...finish(1), style: "segmented" });
+  expect(f.bodies).toHaveLength(0);
+  expect(f.uploads).toHaveLength(0);
+  expect(f.statuses.at(-1)).toMatchObject({ status: "kept", local: true });
+  expect(f.statuses.at(-1)?.message).toContain("Segmented");
+});
+
+test("native style pickers and chat style commands do not offer Segmented", () => {
+  expect(STYLE_DEFS.some((style) => style.id === "segmented")).toBe(false);
+  expect(isStyleId("segmented")).toBe(false);
+});

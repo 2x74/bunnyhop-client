@@ -10,6 +10,7 @@ import { presetConfig, type GraphicsOptions } from "./presets";
 import { resolveVisualProfile } from "./profiles";
 import { publishHybridStatus } from "./hybrid-status";
 import { hdrWorld, SourceHdr } from "./source-hdr";
+import { GammaBlend } from "./gamma-blend";
 import { hasWaterSurfaces, WaterCapture, type WaterCaptureQuality } from "../water-capture";
 import { gpuIdle, setDrawTargets, type DrawTargets } from "./warm-programs";
 import type { ComposerPipeline } from "./composer-pipeline";
@@ -52,7 +53,16 @@ export class GraphicsPipeline {
     if (!world || presetConfig(this.options).preset !== "source") return { screen: true, offscreen: false };
     const hdr = this.supported && this.renderer.capabilities.isWebGL2 && hdrWorld(scene);
     const water = this.options.waterReflections !== false && hasWaterSurfaces(world);
-    return { screen: !hdr, offscreen: hdr || water };
+    // On HDR maps the world goes to the scene target only, apart from its blended surfaces (gamma-blend.ts).
+    return hdr ? { screen: false, offscreen: true, blendedOnScreen: true } : { screen: true, offscreen: water };
+  }
+
+  /**
+   * Whether frames draw shadow passes, which draw your own (hidden) third-person model in first person
+   * (player-shadow.ts). Only the composer looks have them.
+   */
+  drawsShadowProxies(): boolean {
+    return this.wantsComposer();
   }
 
   /** Whether these options draw through the composer (and so need it loaded). */
@@ -140,8 +150,19 @@ export class GraphicsPipeline {
     const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
     hdr.setSize(size.x, size.y);
     hdr.bloom = this.options.bloom !== false;
-    hdr.render(scene, camera, dt);
+    // Glass and other blended surfaces go on after the composite, in gamma space like CS:S's LDR path (gamma-blend.ts).
+    const blend = (this.gammaBlend ??= new GammaBlend(this.renderer));
+    const exposure = hdr.currentExposure;
+    const blended = blend.hide(scene);
+    try {
+      hdr.render(scene, camera, dt);
+    } catch (e) {
+      blend.show();
+      throw e;
+    }
+    if (blended) blend.draw(camera, hdr.depthTexture!, exposure);
   }
+  private gammaBlend: GammaBlend | null = null;
 
   /** Starts compiling the programs of the Source look's own passes for `scene` (HDR exposure, bloom, composite). */
   compilePasses(scene: THREE.Scene): void {
@@ -189,6 +210,8 @@ export class GraphicsPipeline {
     this.sourceWorld = null;
     this.sourceHdr?.dispose();
     this.sourceHdr = null;
+    this.gammaBlend?.dispose();
+    this.gammaBlend = null;
   }
 
   /** Current CS:S exposure (1 off maps with HDR lighting), for checks and captures. */

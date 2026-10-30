@@ -307,6 +307,8 @@ export const STYLE_COMMANDS: Record<StyleId, readonly string[]> = {
   sideways: ["sw", "sideways"],
   hsw: ["hsw", "halfsideways"],
   lowgrav: ["lg", "lowgrav", "lowgravity"],
+  // bhoptimer: "sr; seg; segment; segmented" (sr is also its !wr alias, so not here).
+  segmented: ["seg", "segment", "segmented"],
   autostrafe: ["auto", "as", "autostrafe"],
 };
 

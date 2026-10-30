@@ -552,6 +552,24 @@ pub(super) fn build_path_track(e: &Entity) -> Data {
 // ------------------------------------------------------------------ Game integration
 
 impl Game {
+    /// Apply reviewed map entity edits after restoring original spawn state, before train Find.
+    /// Never modify source entities or initial_ents: selecting v1..18 restores authored behavior.
+    pub(super) fn initialize_train_entity_edits(&mut self) {
+        let Some(mechanics) = self.map_mechanics.filter(|_| self.mechanics_on()) else { return };
+        for edit in super::map_fixes::TRAIN_ORIENTATION_EDITS_V19.iter().filter(|e| e.map == mechanics.map) {
+            for k in 0..self.kins.len() {
+                let i = self.kins[k];
+                let e = &self.entities[i];
+                if e.classname() == "func_tracktrain" && e.get("targetname") == Some(edit.targetname)
+                    && e.get("model") == Some(edit.model) {
+                    if let KinKind::Train(t) = &mut self.kin_mut(i).kind {
+                        t.orientation_type = edit.orientation_type;
+                    }
+                }
+            }
+        }
+    }
+
     pub(super) fn kin(&self, i: usize) -> &Kin {
         match &self.ents[i].data {
             Data::Kin(k) => k,

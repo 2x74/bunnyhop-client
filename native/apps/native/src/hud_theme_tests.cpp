@@ -301,6 +301,10 @@ void test_layouts_and_options() {
     const auto beginner = native::patch_settings(defaults, native::trainer_preset("beginner"));
     assert(beginner["hudStrafeTrainerStyle"] == "detailed" && beginner["strafeTrainerSmoothing"] == 12);
     assert(native::trainer_preset("strict")["hudStrafeTrainerZone"] == 5);
+    for (const auto preset : {"beginner", "standard", "strict"}) {
+        const auto enabled = native::patch_settings(defaults, native::trainer_preset(preset));
+        assert(native::HudPreferences::from(enabled).trainer_enabled);
+    }
 }
 
 void test_scoreboard_and_names() {
@@ -884,6 +888,16 @@ void test_layout_editor_math() {
         assert(native::hud_layout_is_preset(settings, id));
     }
     assert(native::hud_layout_is_preset(native::default_settings(), "classic"));
+    for (const bool enabled : {false, true}) {
+        auto settings = native::patch_settings(native::default_settings(), {{"strafeTrainer", enabled}});
+        for (const auto id : native::hud_preset_ids) {
+            settings = native::patch_settings(settings, native::hud_preset(id, settings), false);
+            assert(settings.at("hudLayoutWeb").at("strafeTrainer").at("on") == enabled);
+            assert(settings.at("strafeTrainer") == enabled);
+            assert(native::HudPreferences::from(settings).trainer_enabled == enabled);
+            assert(native::hud_layout_is_preset(settings, id));
+        }
+    }
     std::set<std::string_view> ids;
     for (const auto &element : native::hud_editor_elements)
         assert(ids.insert(element.id).second && native::hud_index(element.id) != 0);

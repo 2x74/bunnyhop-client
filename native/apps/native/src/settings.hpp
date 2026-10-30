@@ -381,6 +381,12 @@ inline void drop_moved_legacy_places(Json &legacy, const Json &before, const Jso
     }
 }
 
+inline bool strafe_trainer_enabled(const Json &settings) {
+    const auto &layout = settings.at("hudLayoutWeb");
+    const auto trainer = layout.find("strafeTrainer");
+    return trainer == layout.end() ? settings.at("strafeTrainer").get<bool>() : trainer->at("on").get<bool>();
+}
+
 // A patch is atomic. Invalid persisted input never silently changes half the controls.
 inline Json patch_settings(const Json &current, const Json &patch, bool switch_layout = true) {
     if (!patch.is_object() || patch.size() > 256) throw std::runtime_error("Invalid settings object");
@@ -566,6 +572,12 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
                 throw std::runtime_error("FPS limit must be 0 or 30–1000");
         }
         out[key] = v;
+    }
+    // The menu's layout switch is authoritative; retain the old native key for saved settings and host messages.
+    if (patch.contains("hudLayoutWeb") && patch.at("hudLayoutWeb").contains("strafeTrainer")) {
+        out["strafeTrainer"] = out.at("hudLayoutWeb").at("strafeTrainer").at("on");
+    } else if (patch.contains("strafeTrainer")) {
+        out["hudLayoutWeb"]["strafeTrainer"]["on"] = out.at("strafeTrainer");
     }
     return out;
 }

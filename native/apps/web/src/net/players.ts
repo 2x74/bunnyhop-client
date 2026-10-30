@@ -55,10 +55,19 @@ export interface RemotePlayer {
   prep: Promise<void>;
   /** The model is being made (prep, then its shaders compile); it's drawn once `model` is set. */
   making: boolean;
+  /** Their pose wasn't updated last frame (behind the camera, see frame()): snapped when they're posed again. */
+  unposed?: boolean;
 }
 
 const tmp = new THREE.Vector3();
 const camPos = new THREE.Vector3();
+const camDir = new THREE.Vector3();
+/** Closer than this (units) a player is always posed, wherever they are. */
+const POSE_NEAR = 150;
+/** A model's radius for the behind-the-camera test (units: the bunny, a hat, a gun held out). */
+const POSE_RADIUS = 90;
+/** Extra angle past the edge of the view before a player counts as behind (radians, ~10 degrees). */
+const POSE_MARGIN = 0.18;
 const D2R = Math.PI / 180;
 /** Tracer length when nothing is hit (the rifles' range, research/WEAPONS.md). */
 const SHOT_RANGE = 8192;
@@ -188,10 +197,21 @@ export class RemotePlayers {
     this.scene.add(p.tag.sprite);
   }
 
-  /** Per rendered frame: interpolate, animate, place tags. */
-  frame(camera: THREE.Camera, dt: number, now: number): void {
+  /**
+   * Per rendered frame: interpolate, animate, place tags. `poseBehind`: also pose players behind the camera (the
+   * composer looks' sun shadows can fall into view from them). Otherwise a player behind the camera, outside the view
+   * in yaw with a margin, keeps their last pose and is hidden until they're in front again: nothing of them can be
+   * on screen, in a water reflection (it mirrors the view vertically) or in the refraction pass. The bone setup was
+   * most of a full room's main-thread time. Their sounds go on as usual.
+   */
+  frame(camera: THREE.Camera, dt: number, now: number, poseBehind = true): void {
     this.camera = camera;
     camera.getWorldPosition(camPos);
+    // The view's half-angle in yaw (a perspective camera; anything else poses everyone).
+    const persp = camera instanceof THREE.PerspectiveCamera ? camera : null;
+    const halfYaw = persp ? Math.atan(Math.tan(THREE.MathUtils.degToRad(persp.fov) / 2) * persp.aspect) : Math.PI;
+    camera.getWorldDirection(camDir);
+    const fwdLen = Math.hypot(camDir.x, camDir.z);
     const me = this.you();
     const pr = prefs.get();
     const hear = pr.audio.others;
@@ -213,7 +233,26 @@ export class RemotePlayers {
       }
       const m = p.model!;
       const s = p.state;
-      if (s.snapped) m.snap();
+      const gunAttackNow = s.attack !== 0 && s.attackWeapon >= 2;
+      if (!poseBehind && persp && fwdLen > 0.2 && this.inEye !== p.slot && !gunAttackNow && !s.snapped) {
+        // three (x, y, z) = Source (x, z, -y); the angle in yaw between the view and the player.
+        const dx = s.pos[0] - camPos.x, dz = -s.pos[1] - camPos.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > POSE_NEAR) {
+          const cos = (dx * camDir.x + dz * camDir.z) / (dist * fwdLen);
+          const off = Math.acos(Math.max(-1, Math.min(1, cos)));
+          if (off > halfYaw + Math.atan2(POSE_RADIUS, dist) + POSE_MARGIN) {
+            m.root.visible = false;
+            p.unposed = true;
+            if (hear) (p.sound ??= new SpatialMover()).update(dt, s.pos, s.vel, s.grounded, s.crouched, s.jumped, s.snapped);
+            else p.sound?.moves.reset();
+            p.tag!.place(tmp.set(s.pos[0], s.pos[2] + 76, -s.pos[1]), camPos, 0);
+            continue;
+          }
+        }
+      }
+      if (s.snapped || p.unposed) m.snap();
+      p.unposed = false;
       // The gun in their hand (the bunny; other models keep the knife, as for your own third person).
       m.setGun(s.weapon >= 2 ? (WEAPON_IDS[s.weapon] ?? null) : null);
       m.setGunSilencer(s.weapon >= 2 && s.silenced); // the USP's silencer (0.0.12, protocol.ts EXT_SILENCED)

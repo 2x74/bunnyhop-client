@@ -225,6 +225,7 @@ function header(title: string, sub?: string | HTMLElement | null, inner?: () => 
 function build(s: Screen | undefined): HTMLElement | null {
   switch (s) {
     case "home":
+      prewarmLoadoutStartSoon();
       return homeScreen({
         play: () => ((S.mapsFocus = null), push("maps")),
         pick: pickMap,
@@ -313,6 +314,40 @@ function prewarmLoadoutSoon(): void {
   };
   if ("requestIdleCallback" in window) requestIdleCallback(go, { timeout: 3000 });
   else setTimeout(go, 500);
+}
+
+/**
+ * From the main menu, once it's idle: what the first frame of Support or the Loadout needs (your bunny, your hands and
+ * knife), built in the prebuild worker (player/bunny/prebuild.ts prebuildLoadoutStart), so that click doesn't build
+ * them on the main thread. Once per page; not in game.
+ */
+let startPrewarmed = false;
+function prewarmLoadoutStartSoon(): void {
+  if (S.inGame || startPrewarmed) return;
+  const go = () => {
+    if (S.inGame || startPrewarmed || !menuIdleAllowed()) return;
+    startPrewarmed = true;
+    void Promise.all([import("./player/bunny/prebuild"), import("./player/cosmetics"), import("./viewmodel/knives/index"), import("./viewmodel/knives/carrot"), import("./loadout"), import("./progression")])
+      .then(([pre, cos, knives, c, lo, prog]) => {
+        const build = () => {
+          if (S.inGame || !menuIdleAllowed()) return;
+          const l = cos.getLoadout();
+          const knife = knives.knifeById(l.knife) ?? c.carrot;
+          void pre.prebuildLoadoutStart(cos.getOutfit(), l, knife, lo.gloveStyle(l.glove).style, c.carrot);
+          // Support's first look: the first supporter set on your knife and body (ui/support.ts setLook).
+          const sup = prog.SUPPORTER_LOOK;
+          void pre.prebuildLoadoutStart(sup.outfit, { ...l, finish: sup.finish, glove: sup.glove, hat: sup.hat }, knife, lo.gloveStyle(sup.glove).style, c.carrot);
+        };
+        build();
+        // The account's own loadout and colourway often arrive after this (its profile loads): those too (cached
+        // pieces are skipped).
+        cos.onLoadout(build);
+        cos.onOutfit(build);
+      })
+      .catch(() => {});
+  };
+  if ("requestIdleCallback" in window) requestIdleCallback(go, { timeout: 4000 });
+  else setTimeout(go, 1000);
 }
 
 function render(dir: "in" | "out" = "in", animate = false): void {
@@ -619,7 +654,7 @@ function helpTab(inRoom: boolean): HTMLElement {
     h(
       "div.pp-screen-foot",
       null,
-      h("span.dim", null, "Type these in chat (Y). !help <topic> explains one."),
+      h("span.dim", null, `Type these in chat (${bindHint("chat") ?? "bind a chat key in Settings → Keys"}). !help <topic> explains one.`),
       h("button.link-btn", { type: "button", onclick: () => push("controls") }, "Every key and how to bhop", chev()),
     ),
   );

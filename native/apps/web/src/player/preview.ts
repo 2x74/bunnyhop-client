@@ -114,9 +114,11 @@ const outfitList = q.get("outfits")?.split(",").filter(Boolean) ?? null;
 const bodyList = q.get("bodies")?.split(",").filter(b => b === "classic" || b === "feminine") ?? null;
 const hatList = q.get("hats")?.split(",").filter(Boolean) ?? null;
 const crownQ = Number(q.get("crown")) as 1 | 2 | 3;
+/** A hats= entry: a hat id, crown1..3, or "hat-ponytail@250" (the ponytail at that length, a percent). */
 const headwear = (w: string) => {
-  const crown = /^crown[123]$/.test(w) ? (Number(w.slice(5)) as 1 | 2 | 3) : [1, 2, 3].includes(crownQ) ? crownQ : null;
-  return loadoutFor({ hat: w }, crown);
+  const [hat, len] = w.split("@");
+  const crown = /^crown[123]$/.test(hat) ? (Number(hat.slice(5)) as 1 | 2 | 3) : [1, 2, 3].includes(crownQ) ? crownQ : null;
+  return loadoutFor({ hat, hairLength: len ? Number(len) : undefined }, crown);
 };
 const gunList = q.get("guns")?.split(",").filter(Boolean) ?? null;
 const columns: { pose: string; model?: string; outfit?: string; hat?: string; body?: string; gun?: string; label: string }[] = gunList

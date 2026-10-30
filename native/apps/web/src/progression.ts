@@ -1008,6 +1008,8 @@ export const COSMETICS: CosmeticDef[] = [
   { id: "knife-sprouts", slot: "knife", name: "Twin Sprouts", unlock: free, color: "#ffb04a", rarity: 4 },
   { id: "knife-candycane", slot: "knife", name: "Candy Cane Shiv", unlock: free, color: "#e8333f", rarity: 5 },
   { id: "knife-golden", slot: "knife", name: "Golden Carrot", unlock: free, color: "#ffd45e", rarity: 5 },
+  // v0.0.30: a talon with a three-petal spinner on its bolster (viewmodel/knives/whirligig.ts; kill's ask).
+  { id: "knife-whirligig", slot: "knife", name: "Whirligig", unlock: free, color: "#f2a93b", rarity: 4 },
   // Supporter (SUPPORTER): the two bayonets, the only knives that aren't free (viewmodel/knives/thornback.ts, thistle.ts).
   // A big sawback clip point with a muzzle ring; a slim spinner with a thistle-head pommel.
   { id: "knife-thornback", slot: "knife", name: "Thornback", unlock: ach(SUPPORTER), color: "#2b6870", rarity: 4 },
@@ -1352,7 +1354,69 @@ export function rankHint(u: { max: number; scope: "all" | "style" }): string {
  * colour of a wig hat (loadout.ts WIGS), and `hairLength` (a percent, HAIR_LENGTH), the ponytail's length, both kept
  * only for players who own a wig (absent = the default).
  */
-export type CosmeticChoice = Record<CosmeticSlot, string | null> & { hairColor?: string | null; hairLength?: number | null };
+export type CosmeticChoice = Record<CosmeticSlot, string | null> & { hairColor?: string | null; hairLength?: number | null; knifePool?: KnifePool | null };
+
+/**
+ * Knife pool (v0.0.30, syl's ask): owned knives, each with its own finish, that the game swaps between on a map change
+ * (or on every restart too), in order or at random. Saved with the cosmetics (CosmeticChoice.knifePool); the run's
+ * replay trailer and the room roster carry the knife actually held (loadout.ts heldPick), never the pool. Active with
+ * two or more items; fewer is a pool still being built (the equipped knife is held).
+ */
+export interface KnifePool {
+  items: { knife: string; finish: string }[];
+  /** "map": a new knife each map; "restart": each restart too. */
+  swap: "map" | "restart";
+  /** "order": the next one in the list; "random": any other one. */
+  order: "order" | "random";
+}
+export const KNIFE_POOL_MAX = 8;
+export const KNIFE_POOL_SWAPS = ["map", "restart"] as const;
+export const KNIFE_POOL_ORDERS = ["order", "random"] as const;
+
+/**
+ * A saved / sent knife pool, checked item by item: strict (on save) returns the first problem as a string, lenient (on
+ * read) drops unknown, locked and repeated items and keeps the rest (null when nothing is left). `owns` says whether an
+ * item is unlocked.
+ */
+export function knifePoolOf(v: unknown, owns: (c: CosmeticDef) => boolean, strict: true): KnifePool | string | null;
+export function knifePoolOf(v: unknown, owns: (c: CosmeticDef) => boolean, strict?: false): KnifePool | null;
+export function knifePoolOf(v: unknown, owns: (c: CosmeticDef) => boolean, strict = false): KnifePool | string | null {
+  if (v === null || v === undefined) return null;
+  const fail = (why: string) => (strict ? why : null);
+  if (typeof v !== "object" || Array.isArray(v)) return fail("expected { items, swap, order }");
+  const r = v as Record<string, unknown>;
+  if (!Array.isArray(r.items)) return fail("expected an items list");
+  if (strict && r.items.length > KNIFE_POOL_MAX) return fail(`at most ${KNIFE_POOL_MAX} knives`);
+  const swap = KNIFE_POOL_SWAPS.find((x) => x === r.swap);
+  const order = KNIFE_POOL_ORDERS.find((x) => x === r.order);
+  if (strict && (r.swap !== undefined && !swap)) return fail("swap: expected map or restart");
+  if (strict && (r.order !== undefined && !order)) return fail("order: expected order or random");
+  const items: KnifePool["items"] = [];
+  const seen = new Set<string>();
+  for (const it of r.items) {
+    const o = (it && typeof it === "object" ? it : {}) as Record<string, unknown>;
+    const k = typeof o.knife === "string" ? cosmetic(o.knife) : null;
+    const f = typeof o.finish === "string" ? cosmetic(o.finish) : null;
+    if (!k || k.slot !== "knife" || !f || f.slot !== "finish") {
+      if (strict) return fail("unknown knife or finish");
+      continue;
+    }
+    if (!owns(k) || !owns(f)) {
+      if (strict) return fail(`locked (${unlockHint(!owns(k) ? k : f)})`);
+      continue;
+    }
+    const key = `${k.id}|${f.id}`;
+    if (seen.has(key)) {
+      if (strict) return fail("the same knife and finish twice");
+      continue;
+    }
+    seen.add(key);
+    items.push({ knife: k.id, finish: f.id });
+    if (items.length === KNIFE_POOL_MAX) break;
+  }
+  if (!items.length && !strict) return null;
+  return { items, swap: swap ?? "map", order: order ?? "order" };
+}
 
 /** Hats that are hair (player/bunny/wigs.ts): the player picks their colour (CosmeticChoice.hairColor). */
 export const HAIR_HATS: readonly string[] = ["hat-space-buns", "hat-ponytail"];
@@ -1360,9 +1424,10 @@ export const HAIR_HATS: readonly string[] = ["hat-space-buns", "hat-ponytail"];
 export const LENGTH_HATS: readonly string[] = ["hat-ponytail"];
 /**
  * The ponytail's length, a whole percent of the built length (player/bunny/wigs.ts; the shader stretches it, hat-fx.ts):
- * from a short tuft to about the middle of the back. 100 = as built.
+ * from a short tuft to the small of the back (v0.0.30: up from 200, the middle of the back; tyzi: "Much longer"). 100 =
+ * as built. Older builds read a length past their own top as the built length.
  */
-export const HAIR_LENGTH = { min: 40, max: 200, default: 100 } as const;
+export const HAIR_LENGTH = { min: 40, max: 300, default: 100 } as const;
 const hairHexOf = (v: unknown): string | null => (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : null);
 /** A saved / carried hair length (a whole percent in range), else null. */
 export const hairLengthOf = (v: unknown): number | null =>
@@ -1388,6 +1453,8 @@ export function cleanCosmetics(raw: unknown, level: number, achievements: readon
   if (hair && ownsHair(level, achievements, ranks, staff)) out.hairColor = hair;
   const length = hairLengthOf(r.hairLength);
   if (length !== null && length !== HAIR_LENGTH.default && ownsHair(level, achievements, ranks, staff)) out.hairLength = length;
+  const pool = knifePoolOf(r.knifePool, (c) => isUnlocked(c, level, achievements, ranks, staff));
+  if (pool) out.knifePool = pool;
   return out;
 }
 
@@ -1404,6 +1471,11 @@ export function cosmeticsProblem(raw: unknown, level: number, achievements: read
       if (v === null) continue;
       if (hairLengthOf(v) === null) return { slot, reason: `expected a whole number from ${HAIR_LENGTH.min} to ${HAIR_LENGTH.max}` };
       if (!ownsHair(level, achievements, ranks, staff)) return { slot, reason: `locked (${unlockHint(cosmetic(HAIR_HATS[0])!)})` };
+      continue;
+    }
+    if (slot === "knifePool") {
+      const pool = knifePoolOf(v, (c) => isUnlocked(c, level, achievements, ranks, staff), true);
+      if (typeof pool === "string") return { slot, reason: pool };
       continue;
     }
     if (!(slot in DEFAULT_COSMETICS)) return { slot, reason: "unknown slot" };

@@ -9,7 +9,9 @@ import { columns } from "./charts";
 import { mapLine } from "./art";
 import { MSG_CATEGORIES } from "./dialogs";
 import { actionWords, detailSentence } from "./words";
-import { caseProps, loadThread, reportStage, timeline } from "./thread";
+import { caseProps, loadThread, reportStage, ticketItems, timeline, type ReplyMode, type ThreadData, type TicketReply } from "./thread";
+import { markSeen } from "./seen";
+import { onLive } from "./watch";
 import { pinnedLine } from "./notes";
 import type { StaffRole } from "../progression";
 import { tierLabel } from "../tiers";
@@ -80,6 +82,8 @@ export interface FeedbackItem {
   last_reply_at?: number | null;
   player_replies?: number;
   player_reply_at?: number | null;
+  /** The player's newest reply (null: none). */
+  player_last_at?: number | null;
 }
 
 const FB_REPLY: [string, string][] = [
@@ -234,13 +238,13 @@ const feedbackList: View = async (root, params) => {
   });
 };
 
-interface FeedbackDetail {
+export interface FeedbackDetail {
   feedback: Omit<FeedbackItem, "screenshot" | "has_context" | "message_length"> & { screenshot: boolean; screenshot_size: number | null; context: unknown; ip_hash: string | null };
   user: { id: string; name: string; provider: string; created_at: number; merged_into: string | null } | null;
   run: { id: string; user_id: string; map: string; style: string; track: number; status: string; reason: string | null; time: number | null; created_at: number } | null;
   history: ModRow[];
   sameIp: number;
-  replies?: { id: number; body: string; from_actor: string; from_name: string | null; from_avatar?: string | null; created_at: number; read_at: number | null }[];
+  replies?: TicketReply[];
   recipient?: { id: string; name: string; provider: string } | null;
   vetting?: Vetting | null;
   report?: ReportFacts;
@@ -439,90 +443,47 @@ function snippetPicker(text: HTMLTextAreaElement): { el: HTMLElement; open: () =
   return { el: list, open: () => void open() };
 }
 
-/** The ticket's thread and composer. */
-function replyCard(d: FeedbackDetail, onSent: (status?: string) => void): { el: HTMLElement; text: HTMLTextAreaElement | null; send: (status?: string) => Promise<void> } {
+/**
+ * The ticket's reply mode for the thread's composer (thread.ts timeline): who it reaches, the saved replies ("/" in an
+ * empty box), the counter, and the send. onSent: after it went (the status it set, "resolved" for Reply and resolve).
+ */
+export function ticketReplyMode(d: FeedbackDetail, onSent: (status?: string) => void): ReplyMode {
   const fb = d.feedback;
-  const replies = d.replies ?? [];
-  const playerName = d.recipient?.name ?? d.user?.name ?? fb.user_name ?? "Player";
-  const waiting = fb.player_reply_at ?? null;
-  const seen = async () => {
-    if (await act(`/admin/feedback/${encodeURIComponent(fb.id)}`, { action: "seen" }, "Marked read")) {
-      void refreshFeedbackBadge();
-      reroute();
-    }
-  };
-  const thread = replies.length
-    ? h(
-        "div",
-        { class: "fb-thread" },
-        replies.map((r) => {
-          const mine = r.from_actor === "player";
-          return h(
-            "div",
-            { class: mine ? "fb-reply is-player" : "fb-reply" },
-            avatar({ name: mine ? playerName : r.from_actor === "token" ? "Admin" : (r.from_name ?? "?"), avatar: mine ? null : (r.from_avatar ?? null) }, { staff: !mine }),
-            h(
-              "div",
-              { class: "fb-reply-head" },
-              h("b", null, mine ? playerName : r.from_actor === "token" ? "Admin token" : (r.from_name ?? r.from_actor)),
-              h("span", { class: "faint", title: when(r.created_at) }, ago(r.created_at)),
-              mine ? (waiting !== null && r.created_at >= waiting ? badge("not answered", "warn") : null) : r.read_at ? badge(`read ${ago(r.read_at)}`, "ok") : badge("unread", "acc"),
-            ),
-            h("div", { class: "fb-reply-body" }, r.body),
-          );
-        }),
-        waiting !== null ? h("div", { class: "fb-waiting" }, h("button", { type: "button", class: "small", onclick: () => void seen() }, glyph("check"), "Mark read")) : null,
-      )
-    : null;
-  if (!d.recipient) {
-    return {
-      el: h("section", { class: "card" }, h("h2", null, "Replies"), thread, h("p", { class: "fb-noinbox" }, fb.user_id ? "That player no longer exists, so a reply can't reach them." : "Sent without a session, so there's no inbox to reply to.", fb.contact ? [" They left: ", h("b", null, fb.contact)] : null)),
-      text: null,
-      send: async () => undefined,
-    };
-  }
-  const text = h("textarea", { placeholder: `Reply to ${d.recipient.name} (/ for saved replies)`, maxlength: "2000" });
-  const counter = h("span", { class: "faint" }, "0 / 2000");
-  text.addEventListener("input", () => (counter.textContent = `${[...text.value].length} / 2000`));
-  const picker = snippetPicker(text);
-  const send = async (status?: string) => {
-    if (!text.value.trim()) return toast("Write a reply first.", true), text.focus();
-    const r = await act<{ status: string }>(`/admin/feedback/${encodeURIComponent(fb.id)}`, { action: "reply", body: text.value, ...(status ? { status } : {}) }, status === "resolved" ? "Replied and resolved" : "Reply sent");
-    if (r) {
+  const to = d.recipient;
+  return {
+    to: to?.name ?? d.user?.name ?? fb.user_name ?? "the player",
+    blocked: to ? null : `${fb.user_id ? "That player no longer exists, so a reply can't reach them." : "Sent without a session, so there's no inbox to reply to."}${fb.contact ? ` They left: ${fb.contact}` : ""}`,
+    sendLabel: fb.status === "new" ? "Send, mark triaged" : "Send",
+    resolveLabel: fb.status !== "resolved" ? "Reply and resolve" : null,
+    send: async (body, resolve) => {
+      const status = resolve ? "resolved" : undefined;
+      const r = await act<{ status: string }>(`/admin/feedback/${encodeURIComponent(fb.id)}`, { action: "reply", body, ...(status ? { status } : {}) }, resolve ? "Replied and resolved" : "Reply sent");
+      if (!r) return false;
       void refreshFeedbackBadge();
       onSent(status);
-    }
-  };
-  const save = async () => {
-    if (!text.value.trim()) return toast("Write the reply first, then save it.", true);
-    const v = await ask({ title: "Save this reply", fields: [{ name: "title", label: "Name it", kind: "text", required: true, value: text.value.trim().split("\n")[0].slice(0, 40) }], confirm: "Save" });
-    if (v && (await act("/admin/snippets", { action: "add", title: v.title, body: text.value.trim() }, "Saved for everyone"))) void snippets(true);
-  };
-  return {
-    el: h(
-      "section",
-      { class: "card" },
-      h("h2", null, "Replies", replies.length ? h("small", null, String(replies.length)) : null),
-      thread,
-      h(
-        "form",
-        { class: "fb-note", onsubmit: (e: Event) => (e.preventDefault(), void send()) },
-        h("label", { class: "field" }, h("span", null, "To ", playerLink(d.recipient.id, d.recipient.name), fb.user_id !== d.recipient.id ? h("span", { class: "faint" }, " (merged account)") : null), text),
+      return true;
+    },
+    tools: (text) => {
+      const counter = h("span", { class: "faint" }, "0 / 2000");
+      text.addEventListener("input", () => (counter.textContent = `${[...text.value].length} / 2000`));
+      const picker = snippetPicker(text);
+      const save = async () => {
+        if (!text.value.trim()) return toast("Write the reply first, then save it.", true);
+        const v = await ask({ title: "Save this reply", fields: [{ name: "title", label: "Name it", kind: "text", required: true, value: text.value.trim().split("\n")[0].slice(0, 40) }], confirm: "Save" });
+        if (v && (await act("/admin/snippets", { action: "add", title: v.title, body: text.value.trim() }, "Saved for everyone"))) void snippets(true);
+      };
+      return [
         picker.el,
         h(
           "div",
-          { class: "actions" },
+          { class: "tl-tools-row" },
+          to && fb.user_id !== to.id ? h("span", { class: "faint" }, "Goes to ", playerLink(to.id, to.name), " (merged account)") : null,
           counter,
           h("button", { type: "button", class: "ghost small", onclick: () => picker.open() }, "Saved replies"),
           h("button", { type: "button", class: "ghost small", onclick: () => void save() }, "Save as a reply"),
-          h("span", { style: "flex:1" }),
-          h("button", { type: "submit" }, glyph("reply"), fb.status === "new" ? "Send, mark triaged" : "Send"),
-          fb.status !== "resolved" ? h("button", { type: "button", class: "primary", onclick: () => void send("resolved") }, "Reply and resolve") : null,
         ),
-      ),
-    ),
-    text,
-    send,
+      ];
+    },
   };
 }
 
@@ -595,32 +556,29 @@ async function nextWaiting(id: string): Promise<string | null> {
 }
 
 const feedbackDetail: View = async (root, _params, [id]) => {
-  const d = await api<FeedbackDetail>(`/admin/feedback/${encodeURIComponent(id)}`);
+  // The ticket and its case timeline in parallel (one wave, not two).
+  const get = () => Promise.all([api<FeedbackDetail>(`/admin/feedback/${encodeURIComponent(id)}`), loadThread("report", id).catch((e: Error) => e)]);
+  let [d, t] = await get();
   const fb = d.feedback;
+  markSeen("report", fb.id);
   const ctx = fb.context && typeof fb.context === "object" ? (fb.context as Record<string, unknown>) : null;
   const client = feedbackClient(ctx);
   const errors = ctx && Array.isArray(ctx.errors) ? (ctx.errors as { at?: number; kind?: string; msg?: string; src?: string; stack?: string }[]) : [];
   let shotUrl: string | null = null;
 
   const status = h("select", null, FB_STATUSES.map(([v, l]) => h("option", { value: v, selected: fb.status === v }, l)));
-  // The ticket as a case (apps/api src/admin-cases.ts): its board stage, who has it, labels, staff comments, and the
-  // player's pinned note. The old single staff note shows first in the comments.
-  const caseSlot = h("div", { class: "fb-case" }, h("div", { class: "sk-block sm" }));
+  // The ticket as a case (apps/api src/admin-cases.ts): its board stage, who has it, labels, and the player's pinned note.
+  // Staff comments, the player's replies and staff replies are one timeline in the main column (the Thread section).
+  const caseSlot = h("div", { class: "fb-case" });
   const pinSlot = h("div", { class: "fb-pin" });
-  void loadThread("report", fb.id).then(
-    (t) => {
-      const staffReplies = (d.replies ?? []).filter((r) => r.from_actor !== "player");
-      const stage = reportStage({ status: fb.status, player_reply_at: fb.player_reply_at, replies: staffReplies.length, last_reply_at: staffReplies.at(-1)?.created_at ?? null }, t.case);
-      fill(pinSlot, pinnedLine(t.notes.find((n) => n.pinned), "pin-line big"));
-      fill(
-        caseSlot,
-        h("dl", { class: "props" }, caseProps("report", fb.id, { stage, assignee: t.case?.assignee ?? null, labels: t.case?.labels ?? [] }, t.staff, { layout: "list", onChange: (_s, what) => what === "stage" && (void refreshFeedbackBadge(), reroute()) })),
-        h("h3", null, "Staff comments"),
-        timeline("report", fb.id, t, { legacyNote: fb.admin_note ? { body: fb.admin_note, at: fb.updated_at } : null, empty: "No comments yet. The player never sees these." }),
-      );
-    },
-    (e: Error) => fill(caseSlot, h("p", { class: "err" }, `Couldn't load the case: ${e.message}`)),
-  );
+  const paintCase = (th: ThreadData) => {
+    const staffReplies = (d.replies ?? []).filter((r) => r.from_actor !== "player");
+    const stage = reportStage({ status: d.feedback.status, player_reply_at: d.feedback.player_reply_at, replies: staffReplies.length, last_reply_at: staffReplies.at(-1)?.created_at ?? null }, th.case);
+    fill(pinSlot, pinnedLine(th.notes.find((n) => n.pinned), "pin-line big"));
+    fill(caseSlot, h("dl", { class: "props" }, caseProps("report", fb.id, { stage, assignee: th.case?.assignee ?? null, labels: th.case?.labels ?? [] }, th.staff, { layout: "list", onChange: (_s, what) => what === "stage" && (void refreshFeedbackBadge(), reroute()) })));
+  };
+  if (t instanceof Error) fill(caseSlot, h("p", { class: "err" }, `Couldn't load the case: ${t.message}`));
+  else paintCase(t);
   const setStatus = async (s: string) => {
     if (s === fb.status) return;
     if (await act(`/admin/feedback/${encodeURIComponent(fb.id)}`, { action: "status", status: s }, `Marked ${FB_STATUSES.find(([v]) => v === s)?.[1].toLowerCase() ?? s}`)) {
@@ -724,13 +682,33 @@ const feedbackDetail: View = async (root, _params, [id]) => {
         )
       : emptyLine("Nothing yet."),
   );
-  // After "Reply and resolve", the next ticket waiting on staff opens.
-  const reply = replyCard(d, async (st) => {
+  // The thread: the player's replies, staff replies and staff comments in one timeline, the composer under it (Reply
+  // to the player, or a staff comment). After "Reply and resolve", the next ticket waiting on staff opens.
+  const playerName = d.recipient?.name ?? d.user?.name ?? fb.user_name ?? "Player";
+  const items = (x: FeedbackDetail) => ticketItems(x.feedback, x.replies ?? [], { player: playerName, waitingSince: x.feedback.player_reply_at ?? null });
+  const afterReply = async (st?: string) => {
     if (st !== "resolved") return reroute();
     const nextId = await nextWaiting(fb.id);
     if (nextId) location.hash = `#/feedback/${encodeURIComponent(nextId)}`;
     else (toast("No more tickets waiting."), (location.hash = "#/feedback"));
+  };
+  const seen = async () => {
+    if (await act(`/admin/feedback/${encodeURIComponent(fb.id)}`, { action: "seen" }, "Marked read")) (void refreshFeedbackBadge(), reroute());
+  };
+  const th: ThreadData = t instanceof Error ? { case: null, cases: 0, user: fb.user_id, events: [], notes: [], staff: [] } : t;
+  const tl = timeline("report", fb.id, th, {
+    items: items(d),
+    legacyNote: fb.admin_note ? { body: fb.admin_note, at: fb.updated_at } : null,
+    empty: "No replies or comments yet.",
+    reply: ticketReplyMode(d, (st) => void afterReply(st)),
   });
+  const replyCount = (d.replies ?? []).length + th.events.filter((e) => e.kind === "comment").length;
+  const threadCard = h(
+    "section",
+    { class: "card fb-thread-card" },
+    h("h2", null, "Thread", replyCount ? h("small", null, String(replyCount)) : null, fb.player_reply_at ? h("button", { type: "button", class: "small ghost", title: "Seen: the player's reply needs no answer", onclick: () => void seen() }, glyph("check"), "Mark read") : null, help("One timeline: the player's report and replies, staff replies (the player reads these in their inbox) and staff comments (only staff see these). The box under it switches between the two: e writes a reply, c a comment.")),
+    tl,
+  );
   const main = h(
     "div",
     { class: "main-col" },
@@ -738,7 +716,7 @@ const feedbackDetail: View = async (root, _params, [id]) => {
     application ? h("section", { class: "card" }, h("h2", null, "Application"), applicationAnswers(fb)) : [message, mentions],
     application ? vettingCard(d) : null,
     fb.category === "report" ? reportCard(d.report) : null,
-    reply.el,
+    threadCard,
     fb.screenshot ? h("section", { class: "card" }, h("h2", null, "Screenshot"), shot) : null,
     application ? null : h("section", { class: "card" }, h("h2", null, "Game info"), facts),
     errors.length
@@ -774,18 +752,44 @@ const feedbackDetail: View = async (root, _params, [id]) => {
       fbStatusBadge(fb.status),
       h("span", { class: "sub", title: when(fb.created_at) }, ago(fb.created_at)),
       idCell(fb.id),
-      h("div", { class: "tools" }, ...quick, help("j / k: next and previous ticket. r: reply and resolve. t: mark triaged. e: write a reply. / in the reply box: saved replies.")),
+      h("div", { class: "tools" }, ...quick, help("j / k: next and previous ticket. e: write a reply, c: a staff comment. r: reply and resolve. t: mark triaged. / in the reply box: saved replies. ? lists every key.")),
     ),
     h("div", { class: "split" }, main, side),
   );
-  setKeys({
-    j: () => go(1),
-    k: () => go(-1),
-    e: () => reply.text?.focus(),
-    t: () => void setStatus("triaged"),
-    r: () => (reply.text?.value.trim() ? void reply.send("resolved") : reply.text?.focus()),
+  setKeys(
+    {
+      j: () => go(1),
+      k: () => go(-1),
+      e: () => tl.focusMode("reply"),
+      c: () => tl.focusMode("comment"),
+      t: () => void setStatus("triaged"),
+      r: () => (tl.box?.value.trim() ? tl.replyResolve() : tl.focusMode("reply")),
+    },
+    [
+      ["j / k", "Next and previous ticket in the list"],
+      ["e", "Write a reply to the player"],
+      ["c", "Write a staff comment"],
+      ["r", "Reply and resolve (with text in the box)"],
+      ["t", "Mark triaged"],
+      ["Ctrl Enter", "Send what's in the box"],
+      ["/", "Saved replies (in an empty reply box)"],
+    ],
+  );
+  // Live: a player's reply (or a colleague's comment) lands in the thread while the page is open. A status someone else
+  // changed reloads the page, unless something is typed in the box.
+  const unlive = onLive((_s, changed) => {
+    if (!changed.has("feedback") && !changed.has("cases")) return;
+    void get().then(([nd, nt]) => {
+      if (!root.isConnected) return;
+      if (nd.feedback.status !== d.feedback.status && !tl.box?.value.trim()) return reroute();
+      d = nd;
+      if (!(nt instanceof Error)) (paintCase(nt), tl.update(nt, items(nd)));
+      else tl.update(th, items(nd));
+      markSeen("report", fb.id);
+    }, () => undefined);
   });
   return () => {
+    unlive();
     if (shotUrl) URL.revokeObjectURL(shotUrl);
   };
 };

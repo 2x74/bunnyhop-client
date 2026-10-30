@@ -35,6 +35,19 @@ export interface FrameLoopOptions {
 
 /** Below this wait the uncapped loop spins on MessageChannel messages instead of a setTimeout (ms). */
 const SPIN_MS = 2.5;
+/**
+ * The spin's slice (ms) while it waits on the clock for the next frame under an FPS limit, with the GPU done: each
+ * MessageChannel task polls the clock in place this long before yielding, and yields at once when input is waiting
+ * (isInputPending, Chromium; elsewhere input waits at most this long). A task per poll is ~1 µs of churn and a
+ * MessageEvent of garbage, thousands a frame. Not while the GPU is busy: a WebGL fence's status only updates between
+ * tasks (Blink caches it per task), so those waits still take a task per poll.
+ */
+const SLICE_MS = 0.05;
+type Scheduling = { isInputPending?: (o?: { includeContinuous?: boolean }) => boolean };
+const scheduling = (globalThis.navigator as { scheduling?: Scheduling } | undefined)?.scheduling;
+/** Mouse motion counts: it is what the frames between vsyncs exist for. */
+const PENDING_OPTS = { includeContinuous: true };
+const inputPending: () => boolean = typeof scheduling?.isInputPending === "function" ? () => scheduling.isInputPending!(PENDING_OPTS) : () => false;
 /** rAF timestamps sit on vsync: a frame this early is still due (ms), so a limit that divides the refresh rate holds. */
 const RAF_SLACK_MS = 1;
 
@@ -69,6 +82,11 @@ export class FrameLoop {
     return true;
   }
 
+  /** due() without advancing the cadence. */
+  private dueAt(now: number, fps: number, slack: number): boolean {
+    return !(fps > 0) || now - this.lastRender >= 1000 / fps - slack;
+  }
+
   private raf = (now: number): void => {
     if (this.o.uncapped() && document.visibilityState !== "hidden") {
       this.uncappedOn = true;
@@ -89,9 +107,17 @@ export class FrameLoop {
       requestAnimationFrame(this.raf);
       return;
     }
-    const now = performance.now();
+    const fps = this.o.limit();
+    const gpuIdle = this.o.gpuIdle;
+    let now = performance.now();
+    // Waiting on the clock alone: the rest of this slice here, unless input is waiting to be handled first.
+    const end = now + SLICE_MS;
+    while (!this.dueAt(now, fps, 0.05) && (gpuIdle?.() ?? true) && !inputPending()) {
+      now = performance.now();
+      if (now >= end) break;
+    }
     // The GPU gate first: a busy GPU doesn't advance the cadence.
-    if ((this.o.gpuIdle?.() ?? true) && this.due(now, this.o.limit(), 0.05)) {
+    if ((gpuIdle?.() ?? true) && this.due(now, fps, 0.05)) {
       try {
         this.o.frame(now);
       } catch (e) {

@@ -8,9 +8,10 @@
 
 import { add, cross, norm, ring, scale, sub } from "../../player/bunny/builder";
 import type { V3 } from "../../player/bunny/rig";
-import { ACCENT, LEAF, LEAF_DARK, type KnifeCtx } from "./ctx";
+import { ACCENT, edgeWeight, fixed, LEAF, LEAF_DARK, type KnifeCtx } from "./ctx";
 import { tweak } from "./hold";
-import { PART, type KnifeDef } from "./types";
+import { attackFlavour, hump, idleSway, localXf, reducedMotion, rise } from "./bayonet";
+import { KMAT, PART, type KnifeDef } from "./types";
 
 const X: V3 = [1, 0, 0], Y: V3 = [0, 1, 0];
 /** Fine-tune of the first-person hold in the knife's own axes (offset units, rotation degrees x / y / z). */
@@ -51,82 +52,190 @@ function bladeAt(s: number): V3 {
   return [0, y, z];
 }
 
+/** The carrot palette of the blade: skin, a thin growth line, the darker spine, the peeled (paler) edge bevel. */
+const SKIN = fixed(0xff7a1a, KMAT.veg), LINE = fixed(0xe0600e, KMAT.veg), SPINE = fixed(0xe86a12, KMAT.veg), PEEL = fixed(0xffa04c, KMAT.veg), PEEL_LINE = fixed(0xf58a34, KMAT.veg);
+
+/** The blade's half width (in its plane) and half thickness at s: slim, widest a quarter of the way out, a needle tip. */
+const bladeHalf = (s: number) => (0.4 + 0.15 * Math.sin(Math.min(1, s * 2.2) * Math.PI * 0.5)) * Math.pow(1 - s, 0.72) + 0.012;
+const bladeThick = (s: number) => 0.135 * Math.pow(1 - s, 0.62) + 0.018;
+/** The carrot blade's half width at u (finishes/shader.ts finRad): pattern units across per unit of v (bayonet.ts). */
+const finRad = (u: number) => 0.8 * Math.pow(Math.max(1 - u, 0), 0.85) + 0.04;
+
+/**
+ * The crescent: a ground section lofted along the curved centreline (like bayonet.ts's blades, but curling): the sharp
+ * edge on the inside of the curve (+y), a flat bevel up to a crisp grind line in the paler "peeled" carrot, flat faces
+ * with thin growth lines, a chamfered spine. Finish coordinates as on the bayonets (v -1 edge .. 1 spine, u integrated
+ * along the arc so every finish keeps its aspect).
+ */
+function crescent(k: KnifeCtx): void {
+  const fp = k.view === "fp";
+  const n = fp ? 28 : 12;
+  // Half profile (+x side) from the edge apex to the spine: c (-1 edge .. 1 spine), thickness factor, crease.
+  const GRIND = -0.25;
+  const half = fp
+    ? [
+        { c: GRIND, t: 1, crease: true },
+        { c: 0.62, t: 1, crease: true },
+        { c: 0.86, t: 0.88 },
+        { c: 1, t: 0.5, crease: true },
+      ]
+    : [
+        { c: GRIND, t: 1 },
+        { c: 0.8, t: 1 },
+        { c: 1, t: 0.55 },
+      ];
+  const cols: { c: number; side: number; t: number }[] = [{ c: -1, side: 0, t: 0 }];
+  for (const q of half) for (let d = 0; d < (q.crease ? 2 : 1); d++) cols.push({ c: q.c, side: 1, t: q.t });
+  for (let j = half.length - 1; j >= 0; j--) for (let d = 0; d < (half[j].crease ? 2 : 1); d++) cols.push({ c: half[j].c, side: -1, t: half[j].t });
+  const facePaint = (i: number, kk: number) => {
+    const a = cols[kk], b = cols[(kk + 1) % cols.length];
+    // Thin growth rings right round the blade (the carrot's), a row wide, none on the last stretch to the tip.
+    const line = fp && i > 1 && i < n - 5 && i % 5 === 2;
+    if (a.side === 0 || b.side === 0 || Math.max(a.c, b.c) <= GRIND + 1e-6) return line ? PEEL_LINE : PEEL;
+    if (Math.min(a.c, b.c) >= 0.62 - 1e-6) return line ? LINE : SPINE;
+    return line ? LINE : SKIN;
+  };
+  // Along-the-arc finish coordinate (aspect-preserving, as bayonet.ts finishAlong).
+  const N = 200;
+  const tab = new Float32Array(N + 1);
+  let u = 0;
+  for (let i = 0; i < N; i++) {
+    const s0 = i / N, s1 = (i + 1) / N;
+    const p0 = bladeAt(s0), p1 = bladeAt(s1);
+    u = Math.min(0.995, u + (finRad(u) / (8.9 * Math.max(0.03, bladeHalf((s0 + s1) / 2)))) * Math.hypot(p1[1] - p0[1], p1[2] - p0[2]));
+    tab[i + 1] = u;
+  }
+  const along = (s: number) => {
+    const f = s * N, i = Math.min(N - 1, Math.floor(f));
+    return tab[i] + (tab[i + 1] - tab[i]) * (f - i);
+  };
+  const rows: V3[][] = [];
+  const fins: [number, number, number][][] = [];
+  const h = 1e-3;
+  for (let i = 0; i <= n; i++) {
+    const sv = i / n;
+    const c0 = bladeAt(sv);
+    const t = norm(sub(bladeAt(Math.min(1, sv + h)), bladeAt(Math.max(0, sv - h))));
+    const wd = norm(cross(t, X));
+    const hw = bladeHalf(sv), th = bladeThick(sv);
+    // The spine side bulges a little (the carrot's shoulder): the section's centre sits toward the spine.
+    const sh = -0.05 * Math.sin(sv * Math.PI);
+    const uu = along(sv);
+    const row: V3[] = [];
+    const fr: [number, number, number][] = [];
+    for (const cc of cols) {
+      row.push(add(add(c0, scale(wd, -cc.c * hw + sh)), scale(X, cc.side * th * cc.t)));
+      fr.push([uu, cc.c, edgeWeight(uu, Math.max(0, -cc.c * 1.1))]);
+    }
+    rows.push(row);
+    fins.push(fr);
+  }
+  const outRef = (i: number, kk: number): V3 => {
+    const cc = cols[kk];
+    const sv = i / n;
+    const t = norm(sub(bladeAt(Math.min(1, sv + h)), bladeAt(Math.max(0, sv - h))));
+    const wd = norm(cross(t, X));
+    return cc.side === 0 ? wd : cc.c >= 0.99 ? add(scale(wd, -1), scale(X, cc.side * 0.6)) : [cc.side, 0, 0];
+  };
+  k.surface(rows, { paint: facePaint, part: PART.blade, fin: (i, kk) => fins[i][kk], capStart: SKIN, capEnd: null, out: outRef });
+  // Jimping: a row of small notches on the spine by the bolster, where the thumb rides.
+  if (fp)
+    for (let j = 0; j < 5; j++) {
+      const sv = 0.035 + j * 0.028;
+      const c0 = bladeAt(sv);
+      const t = norm(sub(bladeAt(sv + h), bladeAt(sv - h)));
+      const wd = norm(cross(t, X));
+      const top = add(c0, scale(wd, -bladeHalf(sv) - 0.05 * Math.sin(sv * Math.PI) + 0.01));
+      const w = bladeThick(sv) * 0.55;
+      k.tube([add(top, scale(X, -w)), top, add(top, scale(X, w))], 0.045, 6, wd, () => SPINE, { part: PART.blade });
+    }
+}
+
 function build(k: KnifeCtx): void {
   const fp = k.view === "fp";
-  // --- Blade: a crescent carrot, widest a quarter of the way out, wedge section (edge on the concave side), the
-  //     spine side bulging a little like a carrot's shoulder.
-  k.blade({
-    n: 18,
-    m: 12,
-    center: bladeAt,
-    width: (s) => (0.5 + 0.26 * Math.sin(Math.min(1, s * 2.4) * Math.PI * 0.5)) * Math.pow(1 - s, 0.62) + 0.025,
-    thick: (s) => 0.19 * Math.pow(1 - s, 0.7) + 0.03,
-    shift: (s) => -0.06 * Math.sin(s * Math.PI),
-    edge: 1,
-    ex: 2.3,
-  });
-  // --- Bolster: an accent collar between handle and blade.
+  crescent(k);
+  // --- Bolster: a lacquered collar between handle and blade that swells into a small finger guard on the edge side.
   {
-    const zs = [H1 - 0.06, H1 + 0.12, B0 + 0.04];
-    const rows = zs.map((z, i) => ring(handleAt(Math.min(z, H1)).map((v, j) => (j === 2 ? z : v)) as V3, X, Y, [0.33, 0.39, 0.3][i], [0.52, 0.62, 0.5][i], fp ? 14 : 10));
+    const zs = [H1 - 0.06, H1 + 0.04, H1 + 0.16, B0 - 0.04, B0 + 0.04];
+    const rx = [0.31, 0.36, 0.37, 0.3, 0.2];
+    const ry = [0.45, 0.55, 0.66, 0.6, 0.46];
+    const cy = [0, 0.04, 0.12, 0.1, 0.04];
+    const rows = zs.map((z, i) => ring([0, handleAt(Math.min(z, H1))[1] + cy[i], z], X, Y, rx[i], ry[i], fp ? 16 : 10, 2.6));
     k.surface(rows, { paint: () => ACCENT, part: PART.guard, capStart: ACCENT, capEnd: ACCENT });
   }
-  // --- Handle: leaf wrap with ridges (finger grooves), oval section.
+  // --- Handle: a leaf cord wrap (diamonds in two greens, the cord rows proud, like bayonet.ts's wrapped grips), three
+  //     shallow finger grooves on the edge side (the fingers' side).
   {
-    const n = fp ? 10 : 6;
+    const n = fp ? 14 : 6;
+    const m = fp ? 12 : 8;
     const rows: V3[][] = [];
     for (let i = 0; i <= n; i++) {
-      const z = H0 + ((H1 - H0) * i) / n;
-      const ridge = i % 2 ? 1.08 : 1;
-      rows.push(ring(handleAt(z), X, Y, 0.3 * ridge, 0.42 * ridge, fp ? 12 : 8));
+      const t = i / n;
+      const z = H0 + (H1 - H0) * t;
+      const c = handleAt(z);
+      const groove = fp ? 0.07 * Math.max(0, Math.sin(3 * Math.PI * Math.min(1, Math.max(0, (t - 0.08) / 0.84)))) : 0;
+      const row: V3[] = [];
+      const cord = fp && i % 2 === 1 && i < n ? 1.05 : 1;
+      for (let kk = 0; kk < m; kk++) {
+        const a = ((kk + (fp && i % 2 ? 0.5 : 0)) / m) * Math.PI * 2;
+        const ca = Math.cos(a), sa = Math.sin(a);
+        const x = Math.sign(ca) * Math.pow(Math.abs(ca), 2 / 2.3) * 0.3 * cord;
+        const yy = Math.sign(sa) * Math.pow(Math.abs(sa), 2 / 2.3) * 0.42 * cord * (sa > 0 ? 1 - groove * sa : 1);
+        row.push([c[0] + x, c[1] + yy, c[2]]);
+      }
+      rows.push(row);
     }
-    k.surface(rows, { paint: (i) => (i % 4 === 1 ? LEAF : LEAF_DARK), part: PART.grip, capStart: LEAF_DARK, capEnd: LEAF_DARK });
+    k.surface(rows, { paint: (i, kk) => (fp ? ((i + kk) % 2 ? LEAF : LEAF_DARK) : i % 2 ? LEAF : LEAF_DARK), part: PART.grip, capStart: LEAF_DARK, capEnd: LEAF_DARK });
   }
   // --- Collar between the handle and the ring.
   {
     const rows = [RING_Z + RING_R - 0.08, H0 - 0.12, H0 + 0.05].map((z, i) => ring([0, 0, z], X, Y, [0.22, 0.32, 0.29][i], [0.3, 0.44, 0.4][i], fp ? 12 : 8));
     k.surface(rows, { paint: () => ACCENT, part: PART.guard, capStart: ACCENT, capEnd: ACCENT });
   }
-  // --- Finger ring: the leaves braided into a loop (two strands twisting around the loop's centreline).
+  // --- Finger ring: a smooth lacquered core, the carrot's leaves braided round it (two strands, first person).
   {
-    const n = fp ? 22 : 14;
-    const strands = fp ? 2 : 1;
-    for (let sIdx = 0; sIdx < strands; sIdx++) {
-      const path: V3[] = [];
-      for (let i = 0; i < n; i++) {
-        const a = (i / n) * Math.PI * 2;
-        // Loop in the y-z plane around (0, 0, RING_Z), starting at the collar (top of the loop, +z).
-        const c: V3 = [0, Math.sin(a) * RING_R, RING_Z + Math.cos(a) * RING_R];
-        if (strands === 1) {
-          path.push(c);
-          continue;
+    const n = fp ? 30 : 14;
+    const loopAt = (a: number): V3 => [0, Math.sin(a) * RING_R, RING_Z + Math.cos(a) * RING_R];
+    const core: V3[] = [];
+    for (let i = 0; i < n; i++) core.push(loopAt((i / n) * Math.PI * 2));
+    k.loop(core, fp ? RING_T * 0.62 : RING_T, fp ? 8 : 6, X, () => ACCENT, { part: PART.grip });
+    if (fp)
+      for (let sIdx = 0; sIdx < 2; sIdx++) {
+        const path: V3[] = [];
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2;
+          const c = loopAt(a);
+          const out = norm(sub(c, [0, 0, RING_Z]));
+          const tw = a * 5 + sIdx * Math.PI;
+          path.push(add(c, add(scale(out, Math.cos(tw) * RING_T * 0.62), scale(X, Math.sin(tw) * RING_T * 0.62))));
         }
-        const out = norm(sub(c, [0, 0, RING_Z]));
-        const tw = a * 4 + sIdx * Math.PI;
-        path.push(add(c, add(scale(out, Math.cos(tw) * RING_T * 0.5), scale(X, Math.sin(tw) * RING_T * 0.5))));
+        k.loop(path, RING_T * 0.42, 5, X, () => (sIdx ? LEAF : LEAF_DARK), { part: PART.grip });
       }
-      k.loop(path, strands === 1 ? RING_T : RING_T * 0.68, fp ? 5 : 6, X, () => (sIdx ? LEAF : LEAF_DARK), { part: PART.grip });
-    }
   }
   // --- Two leaves sprouting off the collar, curling back over the ring.
   for (const side of [-1, 1]) {
     const path: V3[] = [];
     for (let i = 0; i <= 6; i++) {
       const t = i / 6;
-      path.push([0.04 * side * t, side * (0.24 + 0.85 * t - 0.1 * t * t), H0 - 0.08 - 0.25 * t - 0.3 * t * t]);
+      path.push([0.05 * side * t, side * (0.24 + 0.85 * t - 0.12 * t * t), H0 - 0.08 - 0.25 * t - 0.32 * t * t]);
     }
-    k.leaf(path, (i) => 0.19 * Math.sin(((i + 0.35) / 6.7) * Math.PI) + 0.02, 0.06, X, () => (side > 0 ? LEAF : LEAF_DARK));
+    k.leaf(path, (i) => 0.17 * Math.sin(((i + 0.35) / 6.7) * Math.PI) + 0.02, 0.05, X, () => (side > 0 ? LEAF : LEAF_DARK));
   }
 }
+
+const L = new Float32Array(12);
+const RING_C: V3 = [0, 0, RING_Z], RING_AXIS: V3 = [1, 0, 0];
+/** The draw's turn slides the knife this far along the ring's hole (off the back of the hand) at its middle. */
+const SLIDE = 0.4;
 
 export const karrotbit: KnifeDef = {
   id: "karrotbit",
   cosmeticId: "knife-karrotbit",
   name: "Karrotbit",
   rarity: 3,
-  blurb: "A hooked carrot with a leaf-braid finger ring that spins around your index finger.",
+  blurb: "A hooked carrot with a peeled edge and a leaf-braid finger ring that spins round your index finger.",
   build,
-  pivots: { ring: { p: [0, 0, RING_Z], axis: [1, 0, 0] } },
+  pivots: { ring: { p: RING_C, axis: RING_AXIS } },
   // Third person: reverse grip, the blade curling out under the fist, the ring on the index side.
   tp: { o: [3.85, -1.12, 0.25], z: [-0.53, -0.1, 0.84], y: [1, 0, 0], s: 1.75 },
   hold: {
@@ -151,7 +260,7 @@ export const karrotbit: KnifeDef = {
       return tweak(m, HOLD_O, HOLD_A);
     },
   },
-  pose(_action, _t, s) {
+  pose(action, t, s) {
     // CS-style karambit idle: index through the ring on top of the fist, the blade out of the bottom of it, hanging
     // down and hooking forward and in, away from the camera (inspects/karrotbit.ts ends each trick on the old "show
     // it to you" pose, the hook curled back toward the camera). Kept through the swings: the base slash / stab motion
@@ -161,5 +270,24 @@ export const karrotbit: KnifeDef = {
     s.arm.o[0] = p(0), s.arm.o[1] = p(1), s.arm.o[2] = p(2);
     s.arm.a[0] = p(3), s.arm.a[1] = p(4), s.arm.a[2] = p(5);
     s.wrist[0] = p(6), s.wrist[1] = p(7), s.wrist[2] = p(8);
+    if (action === "idle") return idleSway(s, 0.8 * (1 - w));
+    if (action === "draw") {
+      // The karambit draw: the hand comes up with the fingers open and the knife turns once round the index finger
+      // through the ring (about the ring's hole, an even turn so it reads), then the fist closes on the handle.
+      const rm = reducedMotion();
+      if (!rm) {
+        const e = Math.min(1, Math.max(0, (t - 0.14) / 0.3));
+        const turn = e * e * (3 - 2 * e);
+        if (e > 0 && e < 1) s.local = localXf(L, RING_AXIS, 360 * turn, RING_C, [SLIDE * Math.sin(Math.PI * e), 0, 0]);
+        s.loosen = rise(t, 0.04, 0.12) * (1 - rise(t, 0.42, 0.54));
+      }
+      // The fist lifts a little into frame for it and the wrist rolls the ring toward you.
+      const k = rm ? 0.4 : 1;
+      s.arm.o[2] += k * 1.2 * hump(t, 0.04, 0.62);
+      s.wrist[2] += k * 14 * hump(t, 0.06, 0.6);
+      return;
+    }
+    // Swings: the hook leads (a bigger wrist roll into the cut than a straight blade), a little twist on the stab.
+    attackFlavour(action, t, s, { roll: 16, snap: 9, twist: 10 });
   },
 };

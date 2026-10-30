@@ -64,7 +64,7 @@ export function helpLines(all: readonly ChatCommand[], ctx: Ctx): { label?: stri
 /** Keys without a command, listed in Esc → Help with their group. */
 const KEY_ROWS: readonly { group: HelpGroup; what: string; actions?: readonly string[]; fixed?: string; where?: ChatWhere }[] = [
   { group: "practice", what: "Turn left / right", actions: ["turnLeft", "turnRight"] },
-  { group: "more", what: "Chat", fixed: "Y" },
+  { group: "more", what: "Chat", actions: ["chat"] },
   { group: "more", what: "Hide UI", actions: ["hideUi"] },
   { group: "more", what: "Third person (practice)", actions: ["thirdPerson"] },
 ];
@@ -159,7 +159,7 @@ const TOPICS: readonly Topic[] = [
   },
   {
     names: ["server", "servers", "room", "rooms", "online", "vote"],
-    lines: () => ["rtv votes for a new map · nominate <map> · timeleft · nextmap · !spec [player] or N watches someone · !race challenges someone · !hide hides players · Tab scoreboard · Y chat"],
+    lines: (c) => [`rtv votes for a new map · nominate <map> · timeleft · nextmap · !spec [player] or N watches someone · !race challenges someone · !hide hides players · Tab scoreboard · ${key(c, "chat", "Y")} chat`],
   },
   {
     names: ["race", "races", "racing", "duel", "duels", "challenge"],
@@ -175,10 +175,9 @@ const TOPICS: readonly Topic[] = [
   {
     names: ["keys", "key", "binds", "bind", "controls", "settings"],
     lines: (c) => [
-      [["restart", "restart"], ["restartBonus", "bonus"], ["setStart", "start point"], ["cycleStyle", "style"], ["thirdPerson", "third person"], ["hideUi", "hide UI"]]
+      [["restart", "restart"], ["restartBonus", "bonus"], ["setStart", "start point"], ["cycleStyle", "style"], ["thirdPerson", "third person"], ["hideUi", "hide UI"], ["chat", "chat"]]
         .map(([a, what]) => (c.game?.key(a) ? `${c.game.key(a)} ${what}` : null))
         .filter(Boolean)
-        .concat(["Y chat"])
         .join(" · "),
       "Every key and command: Esc → Help. Change them in Settings → Keys.",
     ],

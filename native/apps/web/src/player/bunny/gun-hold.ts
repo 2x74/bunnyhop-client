@@ -31,6 +31,7 @@
 
 import { concat, invert34, rig, xform, type Rig, type V3 } from "./rig";
 import type { GunDef, HandPlace } from "../../viewmodel/guns/types";
+import { hypot2, hypot3 } from "../../hypot";
 
 const D2R = Math.PI / 180;
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
@@ -61,7 +62,7 @@ const m34 = () => new Float64Array(12);
 const v3 = () => new Float64Array(3);
 
 function norm3(v: ArrayLike<number>, out: Float64Array = v3()): Float64Array {
-  const l = Math.hypot(v[0], v[1], v[2]) || 1;
+  const l = hypot3(v[0], v[1], v[2]) || 1;
   out[0] = v[0] / l, out[1] = v[1] / l, out[2] = v[2] / l;
   return out;
 }
@@ -101,10 +102,10 @@ function rotAbout(ax: ArrayLike<number>, ang: number, p: ArrayLike<number>, out:
 
 /** Shortest rotation taking direction a to direction b, about pivot p. */
 function swingM(a: ArrayLike<number>, b: ArrayLike<number>, p: ArrayLike<number>, out: M34, ax: Float64Array): boolean {
-  const la = Math.hypot(a[0], a[1], a[2]), lb = Math.hypot(b[0], b[1], b[2]);
+  const la = hypot3(a[0], a[1], a[2]), lb = hypot3(b[0], b[1], b[2]);
   if (la < 1e-9 || lb < 1e-9) return false;
   cross3(a, b, ax);
-  const s = Math.hypot(ax[0], ax[1], ax[2]) / (la * lb), c = dot3(a, b) / (la * lb);
+  const s = hypot3(ax[0], ax[1], ax[2]) / (la * lb), c = dot3(a, b) / (la * lb);
   if (s < 1e-9) return false;
   norm3(ax, ax);
   rotAbout(ax, Math.atan2(s, c), p, out);
@@ -355,8 +356,8 @@ export class GunHold {
         upper, fore, hand,
         upperSub: sub(upper), foreSub: sub(fore), handSub,
         fingers: handSub.slice(1),
-        L1: Math.hypot(P1[0] - P0[0], P1[1] - P0[1], P1[2] - P0[2]),
-        L2: Math.hypot(P2[0] - P1[0], P2[1] - P1[1], P2[2] - P1[2]),
+        L1: hypot3(P1[0] - P0[0], P1[1] - P0[1], P1[2] - P0[2]),
+        L2: hypot3(P2[0] - P1[0], P2[1] - P1[1], P2[2] - P1[2]),
         fb: norm3([P2[0] - P1[0], P2[1] - P1[1], P2[2] - P1[2]]),
         side: side === "R" ? 1 : -1,
       };
@@ -506,7 +507,7 @@ export class GunHold {
     const piv = this.q;
     if (d.long) {
       // The butt in the right shoulder's pocket: in from the joint toward the chest, a little forward and down.
-      const hz = Math.hypot(D[0], D[1]) || 1;
+      const hz = hypot2(D[0], D[1]) || 1;
       for (let r = 0; r < 3; r++) piv[r] = sR[r] - Rt[r] * (3.2 + inward - high * 6) + (r < 2 ? (D[r] / hz) * (1.6 + high * 5) : 0) - (r === 2 ? 1.2 + lower + high * 5 : 0);
       this.placeBy(d.butt, piv);
       // A short stock puts the grip almost on the shoulder (the arm folds flat and the elbow has no good place): the
@@ -576,7 +577,7 @@ export class GunHold {
     const sR = this.joint(S, R.upper, this.p0), sL = this.joint(S, L.upper, this.p1);
     const lx = sL[0] - sR[0], ly = sL[1] - sR[1];
     const D = this.d, Rt = this.rr;
-    const hz = Math.hypot(D[0], D[1]) || 1;
+    const hz = hypot2(D[0], D[1]) || 1;
     // Angle of the shoulder line (right -> left) from the aim's left axis, toward forward.
     const cur = Math.atan2((lx * D[0] + ly * D[1]) / hz, -(lx * Rt[0] + ly * Rt[1])) / D2R;
     const delta = clamp(want - cur, -MAX_BLADE, MAX_BLADE) * D2R;
@@ -669,7 +670,7 @@ export class GunHold {
         f[r] = S[fo + r * 4] * fb[0] + S[fo + r * 4 + 1] * fb[1] + S[fo + r * 4 + 2] * fb[2];
         h[r] = S[ho + r * 4] * fb[0] + S[ho + r * 4 + 1] * fb[1] + S[ho + r * 4 + 2] * fb[2];
       }
-      const ang = Math.acos(clamp(dot3(f, h) / (Math.hypot(f[0], f[1], f[2]) * Math.hypot(h[0], h[1], h[2]) || 1), -1, 1));
+      const ang = Math.acos(clamp(dot3(f, h) / (hypot3(f[0], f[1], f[2]) * hypot3(h[0], h[1], h[2]) || 1), -1, 1));
       if (ang > 0.01) {
         cross3(h, f, this.ax);
         norm3(this.ax, this.ax);
@@ -695,7 +696,7 @@ export class GunHold {
     const out = this.ax;
     out[0] = E[0] - P0[0], out[1] = E[1] - P0[1], out[2] = E[2] - P0[2];
     const D0 = W[0] - P0[0], D1 = W[1] - P0[1], D2 = W[2] - P0[2];
-    const dl = Math.hypot(D0, D1, D2) || 1;
+    const dl = hypot3(D0, D1, D2) || 1;
     const L1 = a.L1, L2 = a.L2;
     const dd = clamp(dl, Math.abs(L1 - L2) + 0.05, L1 + L2 - 0.02);
     const dx = D0 / dl, dy = D1 / dl, dz = D2 / dl;
@@ -708,7 +709,7 @@ export class GunHold {
     let pz = out[2] / L1 + side[2] * sideK - up[2] * 0.2 - 0.2;
     const pd = px * dx + py * dy + pz * dz;
     px -= dx * pd, py -= dy * pd, pz -= dz * pd;
-    const pl = Math.hypot(px, py, pz) || 1;
+    const pl = hypot3(px, py, pz) || 1;
     px /= pl, py /= pl, pz /= pl;
     const along = (L1 * L1 - L2 * L2 + dd * dd) / (2 * dd), h = Math.sqrt(Math.max(0, L1 * L1 - along * along));
     const Ex = P0[0] + dx * along + px * h, Ey = P0[1] + dy * along + py * h, Ez = P0[2] + dz * along + pz * h;
@@ -756,7 +757,7 @@ export class GunHold {
     let twist = 2 * Math.atan2(proj, qw);
     twist = Math.atan2(Math.sin(twist), Math.cos(twist));
     // Swing (bend) = the rotation left after removing the twist: angle = 2 acos(|w| / |twist part|).
-    const tl = Math.hypot(qw, proj) || 1;
+    const tl = hypot2(qw, proj) || 1;
     const bend = 2 * Math.acos(clamp(tl, 0, 1));
     const share = TWIST_SHARE;
     const fdir = this.q;
@@ -798,7 +799,7 @@ export class GunHold {
     const P0 = this.joint(S, L.upper, this.p0), f = this.fistL, G = this.G;
     const max = L.L1 + L.L2 - 1.0;
     // Fist centre -> wrist is ~3 units; measure from the fist's centre with that margin.
-    const dist = Math.hypot(f[3] - P0[0], f[7] - P0[1], f[11] - P0[2]) + 2.5;
+    const dist = hypot3(f[3] - P0[0], f[7] - P0[1], f[11] - P0[2]) + 2.5;
     if (dist <= max) return;
     // Along the barrel (G's x), back toward the shoulder: solve |f - t x - P0| = max - 2.5 for t.
     const ox = f[3] - P0[0], oy = f[7] - P0[1], oz = f[11] - P0[2];
@@ -857,7 +858,7 @@ export class GunHold {
     // The pouch: low in front of the belly, a little to the left (seen from either side), below the gun.
     const P = this.joint(S, this.pelvis, this.p2);
     const Rt = this.rr, G = this.G;
-    const hz = Math.hypot(G[0], G[4]) || 1;
+    const hz = hypot2(G[0], G[4]) || 1;
     const hip = this.hip;
     for (let r = 0; r < 3; r++) hip[r] = P[r] - Rt[r] * 3 + (r < 2 ? (G[r * 4] / hz) * 8 : 8);
     if (this.reloadShell || !d.mag) {

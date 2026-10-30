@@ -8,7 +8,7 @@ import { playerGlowRevision, setPlayerGlow } from "../player/cosmetics";
 import { api, lastKnownMe, type Profile, type User } from "../api";
 import { h } from "./dom";
 import { avatarImg, pictureOf } from "./avatar";
-import { setLoadout } from "../player/cosmetics";
+import { setKnifePool, setLoadout } from "../player/cosmetics";
 import { loadoutFor } from "../loadout";
 import { crownOf, heldRanks } from "../progression";
 
@@ -102,7 +102,10 @@ export function myProfile(): Promise<Profile | null> {
     if (p !== cachedProfile) return;
     if (prof) for (const fn of profileListeners) fn(prof);
     if (glowRevision === playerGlowRevision()) setPlayerGlow(prof?.mine ? prof.player.playerGlow ?? null : null);
-    if (prof?.mine) setLoadout(loadoutFor(prof.cosmetics, crownOf(heldRanks([prof.rank, ...prof.styles]))));
+    if (prof?.mine) {
+      setKnifePool(prof.cosmetics.knifePool ?? null);
+      setLoadout(loadoutFor(prof.cosmetics, crownOf(heldRanks([prof.rank, ...prof.styles]))));
+    }
   });
   return p;
 }

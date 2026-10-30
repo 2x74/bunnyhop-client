@@ -79,6 +79,9 @@ export function previewModel(mine: () => boolean): LoadoutModel & { changed(): v
       choice.hairLength = n;
       fns.forEach((f) => f());
     },
+    // Support previews items only (the pool row is hidden: previewOnly).
+    knifePool: () => null,
+    setKnifePool: () => {},
     equip: (slot, id) => {
       choice[slot] = id;
       equipped.forEach((f) => f(id));

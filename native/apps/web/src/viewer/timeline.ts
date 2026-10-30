@@ -1,5 +1,6 @@
 // Viewer timeline: the whole run's speed graph with jump ticks, stage/checkpoint splits, start and finish markers
-// (plus the compare ghost's finish), the region outside the timed run dimmed, a playhead, and a hover readout.
+// (plus the compare ghost's finish), a Segmented run's checkpoint loads, the region outside the timed run dimmed, a
+// playhead, and a hover readout.
 // Drag anywhere to scrub. One canvas, redrawn only when the playhead or the size changes.
 // A long wait in the spawn before the timer starts (hena, 10-27: 20 s of standing still in a 43 s replay) isn't drawn:
 // the bar starts LEAD_S before the start when the lead-in is longer than LEAD_MIN_S, so the run fills it.
@@ -38,6 +39,8 @@ export class Timeline {
   private dragging = false;
   /** Staff only (staff-lens.ts): the jumps the run's analysis flagged, marked once in amber. */
   private evidence: number[] = [];
+  /** A Segmented run's checkpoint loads (replay.segments): where the stitched run continues from a saved checkpoint. */
+  private segments: number[] = [];
   /** First tick the bar shows (see LEAD_S) and the ticks it spans. */
   private lo = 0;
   private span = 1;
@@ -111,6 +114,12 @@ export class Timeline {
 
   setEvidence(ticks: number[]): void {
     this.evidence = ticks;
+    this.bg = null;
+    this.dirty = true;
+  }
+
+  setSegments(ticks: number[]): void {
+    this.segments = ticks;
     this.bg = null;
     this.dirty = true;
   }
@@ -223,6 +232,11 @@ export class Timeline {
     if (d.endTick) line(d.endTick, palette().loss, "FINISH");
     if (this.compareEnd !== null && this.compareEnd <= d.n) line(this.compareEnd, this.compareColor, "GHOST", 1);
     if (d.desyncTick !== null) line(d.desyncTick, "#ff2d55", "DESYNC");
+    // Segmented loads: short ticks along the bottom edge (a routed run can have hundreds; no labels).
+    if (this.segments.length) {
+      g.fillStyle = palette().gain;
+      for (const t of this.segments) g.fillRect(Math.round(xOf(t)) - Math.max(1, dpr / 2), H - 6 * dpr, Math.max(1, dpr), 6 * dpr);
+    }
     // Staff evidence lane: the flagged jumps as amber ticks along the top edge, with a faint column under each.
     for (const t of this.evidence) {
       const x = Math.round(xOf(t));

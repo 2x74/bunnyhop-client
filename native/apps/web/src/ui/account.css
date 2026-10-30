@@ -100,8 +100,26 @@ dialog[open].acct-dialog { animation: acct-in 0.16s ease-out; }
 .acct-support-link:hover { color: var(--text); }
 
 /* The home screen's Desktop app popup (ui/desktop-link.ts). */
-dialog.desktop-dialog { width: min(30rem, 94vw); }
-.desktop-dialog .acct-body p { margin: 0 0 0.7rem; line-height: 1.45; }
-.desktop-ver { margin-left: 0.3rem; font-size: var(--fs-sm); font-weight: 500; color: var(--faint); }
-.desktop-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem 1rem; margin-top: 1rem; }
-.desktop-sub { margin: 1.4rem 0 0.5rem; padding-top: 1rem; border-top: 1px solid var(--line); font-size: var(--fs-lg); font-weight: 600; }
+/* Ways to play (ui/desktop-link.ts): browser, desktop app and native client side by side, one row per question. */
+dialog.desktop-dialog { width: min(58rem, 96vw); }
+.desktop-dialog .acct-body p { margin: 0; line-height: 1.45; }
+.desktop-lede { color: var(--dim); }
+.desktop-ver, .desktop-here { margin-left: 0.4rem; font-size: var(--fs-xs); font-weight: 500; color: var(--faint); }
+.desktop-cmp { width: 100%; border-collapse: collapse; margin: 0.6rem 0 0.4rem; table-layout: fixed; font-size: var(--fs-sm); line-height: 1.4; }
+.desktop-cmp thead th { text-align: left; padding: 0 0.9rem 0.5rem 0; font-size: var(--fs-md); font-weight: 700; color: var(--text); white-space: nowrap; }
+.desktop-cmp thead td { width: 8.5rem; }
+.desktop-cmp tbody tr { border-top: 1px solid var(--line); }
+.desktop-cmp tbody th { text-align: left; vertical-align: top; padding: 0.55rem 0.9rem 0.55rem 0; font-weight: 500; color: var(--dim); }
+.desktop-cmp td { vertical-align: top; padding: 0.55rem 0.9rem 0.55rem 0; color: var(--text); }
+.desktop-get td { padding-top: 0.8rem; }
+.desktop-links { display: flex; flex-wrap: wrap; gap: 0 0.4rem; margin: 0.35rem 0 0 -0.5rem; }
+.desktop-note { font-size: var(--fs-xs); }
+/* Narrow: each question with its three answers under it, named. */
+@media (max-width: 44rem) {
+  .desktop-cmp, .desktop-cmp tbody, .desktop-cmp tr, .desktop-cmp th, .desktop-cmp td { display: block; }
+  .desktop-cmp thead { display: none; }
+  .desktop-cmp tbody th { padding-bottom: 0.2rem; color: var(--text); font-weight: 650; }
+  .desktop-cmp td { padding: 0.15rem 0 0.3rem; }
+  .desktop-cmp td:empty { display: none; }
+  .desktop-cmp td::before { content: attr(data-col); display: block; color: var(--faint); font-size: var(--fs-xs); }
+}

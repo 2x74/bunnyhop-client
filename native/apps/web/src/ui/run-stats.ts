@@ -42,7 +42,7 @@ function load(id: string): Promise<RunStats | null> {
 /** Common mouse polling rates: an estimate near one of them is shown as it. */
 const POLL_RATES = [125, 250, 500, 1000, 2000, 4000, 8000];
 
-/** "Browser", "Desktop app 0.2.2", "Native client 804eac9" from the server's label (which browser stays private). */
+/** "Browser", "Desktop app 0.2.2", "Native client 0.6.2" from the server's label (which browser stays private). */
 export function clientText(c: NonNullable<RunStats["client"]>): string {
   if (c.kind === "native") return c.label.replace(/^Native\b/, "Native client");
   if (c.kind === "desktop") return c.label.replace(/^Desktop\b/, "Desktop app");

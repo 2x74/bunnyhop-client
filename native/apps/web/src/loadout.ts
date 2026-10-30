@@ -11,8 +11,9 @@
 // - Wire forms: the room roster carries the object (`CosmeticLoadout`, JSON), replays carry `packLoadout()` text in an
 //   optional trailer (replay.ts). Both are read leniently: anything unknown falls back to the defaults, never an error.
 
-import { cosmetic, DEFAULT_COSMETICS, HAIR_HATS, HAIR_LENGTH, LENGTH_HATS, hairLengthOf, type CosmeticSlot } from "./progression";
+import { cosmetic, DEFAULT_COSMETICS, HAIR_HATS, HAIR_LENGTH, LENGTH_HATS, hairLengthOf, type CosmeticSlot, type KnifePool } from "./progression";
 export { HAIR_LENGTH, LENGTH_HATS, hairLengthOf };
+export type { KnifePool };
 
 export interface CosmeticLoadout {
   /** progression.ts "knife-*" id. */
@@ -269,6 +270,43 @@ export const sameLoadout = (a: CosmeticLoadout | null | undefined, b: CosmeticLo
   !!a && !!b && a.knife === b.knife && a.finish === b.finish && a.glove === b.glove && (a.crown ?? null) === (b.crown ?? null) && (a.hat ?? null) === (b.hat ?? null) && (a.body ?? "body-a") === (b.body ?? "body-a") && (a.outfit ?? null) === (b.outfit ?? null) && (a.hairColor ?? null) === (b.hairColor ?? null) && (a.hairLength ?? null) === (b.hairLength ?? null);
 
 export const isDefaultLoadout = (l: CosmeticLoadout) => l.knife === DEFAULT_KNIFE && l.finish === DEFAULT_FINISH && l.glove === DEFAULT_GLOVE && l.body !== "body-b";
+
+// ---------------------------------------------------------------------------------------------
+// Knife pool (progression.ts KnifePool): which knife is held. The pool itself never travels with a loadout: a replay
+// trailer and the room roster carry the knife and finish held in that run (withPick), so every reader stays as it is.
+
+/** A pool the game swaps between (two or more items); anything less holds the equipped knife. */
+export const poolActive = (p: KnifePool | null | undefined): p is KnifePool => !!p && p.items.length >= 2;
+
+/** The pick after item `i`: the next one in the list, or (random) any other one (`rnd` 0..1). */
+export function nextPoolIndex(p: KnifePool, i: number, rnd: number = Math.random()): number {
+  const n = p.items.length;
+  if (n < 2) return 0;
+  const at = ((Math.floor(i) % n) + n) % n;
+  if (p.order === "order") return (at + 1) % n;
+  return (at + 1 + Math.min(n - 2, Math.floor(rnd * (n - 1)))) % n;
+}
+
+/** `l` holding pool item `i` (wrapped into range), or `l` itself when the pool isn't active. */
+export function withPick(l: CosmeticLoadout, p: KnifePool | null | undefined, i: number): CosmeticLoadout {
+  if (!poolActive(p)) return l;
+  const it = p.items[((Math.floor(i) % p.items.length) + p.items.length) % p.items.length];
+  return it.knife === l.knife && it.finish === l.finish ? l : { ...l, knife: it.knife, finish: it.finish };
+}
+
+/**
+ * Compact form of the pairs a room accepts (the equipped one plus the pool's), for the socket attachment (< 2 KB):
+ * "karrotbit:sunset,whirligig:geode" (ids without their "knife-" / "fin-" prefixes).
+ */
+export function packPairs(pairs: readonly { knife: string; finish: string }[]): string {
+  const out = new Set<string>();
+  for (const p of pairs) out.add(`${p.knife.replace(/^knife-/, "")}:${p.finish.replace(/^fin-/, "")}`);
+  return [...out].join(",");
+}
+
+/** Whether (knife, finish) is one of the packed pairs (packPairs). */
+export const pairsHave = (packed: string | null | undefined, knife: string, finish: string): boolean =>
+  !!packed && packed.split(",").includes(`${knife.replace(/^knife-/, "")}:${finish.replace(/^fin-/, "")}`);
 
 // ---------------------------------------------------------------------------------------------
 // Packed text form: "2;<knife>;<finish>;<glove>[;<crown>[;<hat>[;<body>[;<outfit>[;<hair>[;<length>]]]]]]". Empty tail

@@ -21,6 +21,7 @@ import { invalidateRuns, styleWord } from "./runs";
 import { hopIndicator } from "../ui/hop";
 import { caseProps, loadThread, timeline, type ThreadData } from "./thread";
 import { pinnedLine } from "./notes";
+import { markSeen } from "./seen";
 
 export interface Evidence {
   code: string;
@@ -397,7 +398,8 @@ export const casesView: View = async (root, params) => {
         (e: Error) => my === seq && fill(runSlot, h("p", { class: "err" }, `Couldn't load the run: ${e.message}`)),
       );
     } else runSlot.replaceChildren();
-    // The case: stage, assignee, labels, the pinned note, and its timeline.
+    // The case: stage, assignee, labels, the pinned note, and its timeline. Looking at it marks it seen (seen.ts).
+    markSeen("ac", p.user_id);
     void thread(p.user_id).then(
       (t) => {
         if (my !== seq) return;

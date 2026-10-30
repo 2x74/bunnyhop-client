@@ -232,13 +232,9 @@ export function may(p: Permission): boolean {
   return !me?.perms || me.perms.includes(p);
 }
 
-/**
- * Whether to offer Shadowban / Lift shadowban for a player shadowed from `source` (users.shadow_source; null = not
- * shadowed). Moderators lift only the panel's shadowbans ('admin'), and the server also refuses those an admin set
- * (apps/api src/staff.ts assertShadowLiftable); the anticheat's, ban evasion's and Bun-E's stay with admins.
- */
-export function mayShadow(shadowed: boolean, source: string | null | undefined): boolean {
-  return may("player.shadow") && (!shadowed || may("player.unshadow.any") || source === "admin");
+/** Every staff role may correct automatic or manual shadowbans. The API also checks target rank and reason. */
+export function mayShadow(shadowed: boolean, _source: string | null | undefined): boolean {
+  return may("player.shadow") && (!shadowed || may("player.unshadow.any"));
 }
 
 /** The role's word in the panel ("Owner", "Admin", "Moderator"). */
@@ -410,7 +406,7 @@ export function table(head: (string | [string, string])[], rows: HTMLTableRowEle
 /** A state: a word with a mark (never a pill). kind: ok | bad | warn | acc | info | "". */
 export const badge = (text: string, kind = "") => h("span", { class: `badge ${kind}` }, text);
 
-/** Which client played a run (apps/api src/run-client.ts, staff endpoints only): "Native 804eac9", "Desktop 0.2.2", "Chrome 156". The tooltip has the user agent and build. */
+/** Which client played a run (apps/api src/run-client.ts, staff endpoints only): "Native 0.6.2", "Desktop 0.2.2", "Chrome 156". The tooltip has the user agent and build. */
 export interface RunClient {
   kind: "native" | "desktop" | "browser" | "unknown";
   label: string;
@@ -572,17 +568,24 @@ export function poll(fn: () => Promise<unknown> | void, ms: number): () => void 
 
 type KeyMap = Record<string, (e: KeyboardEvent) => void>;
 let keys: KeyMap = {};
-export function setKeys(map: KeyMap): void {
+let keyHelp: [string, string][] = [];
+/** The view's keys, and what they do in words for the ? sheet (shortcuts.ts). */
+export function setKeys(map: KeyMap, help: [keys: string, what: string][] = []): void {
   keys = map;
+  keyHelp = help;
 }
 export function clearKeys(): void {
   keys = {};
+  keyHelp = [];
 }
+export const viewKeyHelp = () => keyHelp;
 if (typeof document !== "undefined") document.addEventListener("keydown", (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
   const t = e.target as HTMLElement;
   if (t.closest?.("input, textarea, select, [contenteditable=true]") || document.querySelector("dialog[open]")) return;
   if (document.body.classList.contains("goto")) return;
+  // Enter on a focused link or button is the link's or the button's (a player's name opens the drawer), not the view's.
+  if (e.key === "Enter" && t.closest?.("a[href], button")) return;
   const fn = keys[e.key] ?? keys[e.key.toLowerCase()];
   if (!fn) return;
   e.preventDefault();

@@ -20,6 +20,9 @@ export class ThirdPerson {
   private inspectHeld = false;
   private spec: SpectatorCamera;
   private model = new PlayerModel({ style: "solid" });
+  /** Posed at least once (its skin and animations load on the first update), and whether the pose is behind now. */
+  private posed = false;
+  private stale = false;
   private s: SpectatorTarget & { pos: number[]; vel: number[] } = { pos: [0, 0, 0], vel: [0, 0, 0], viewZ: 64, yaw: 0, pitch: 0, crouched: false, grounded: true };
 
   constructor(scene: THREE.Scene, core: Core) {
@@ -102,9 +105,25 @@ export class ThirdPerson {
 
   /**
    * Places the camera behind the interpolated player (alpha between prev and curr ticks), looking along the live
-   * view yaw. Returns false when inactive (main.ts places the first-person eye).
+   * view yaw. Returns false when inactive (main.ts places the first-person eye). `poseHidden`: animate the model even
+   * in first person, where it isn't drawn: only the composer looks' shadow passes draw it then (player-shadow.ts), so
+   * the Source / Classic / Potato looks skip the whole bone setup every frame.
    */
-  frame(camera: THREE.PerspectiveCamera, prev: PlayerState, curr: PlayerState, alpha: number, yaw: number, pitch: number, cmd: { forward: number; side: number }, dt: number, visualTime?: number): boolean {
+  frame(camera: THREE.PerspectiveCamera, prev: PlayerState, curr: PlayerState, alpha: number, yaw: number, pitch: number, cmd: { forward: number; side: number }, dt: number, visualTime?: number, poseHidden = true): boolean {
+    if (!this.active && !poseHidden && this.posed) {
+      this.pendingAttack = 0;
+      this.pendingInspect = 0;
+      this.pendingShot = false;
+      this.pendingReload = null;
+      this.stale = true;
+      return false;
+    }
+    if (this.stale) {
+      // Back in view after frames without a pose: start from here, not from where it was hidden.
+      this.stale = false;
+      this.model.snap();
+    }
+    this.posed = true;
 
     const s = this.s;
     for (let k = 0; k < 3; k++) {

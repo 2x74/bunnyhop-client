@@ -460,6 +460,8 @@ export type CosmeticChoice = Record<"background" | "frame" | "title" | "ghost" |
   hairColor?: string | null;
   /** The ponytail's length (a whole percent, progression.ts HAIR_LENGTH), kept for wig owners; absent = 100. */
   hairLength?: number | null;
+  /** Knives (with their finishes) the game swaps between (progression.ts KnifePool); absent = none. */
+  knifePool?: import("./progression").KnifePool | null;
 };
 
 /**

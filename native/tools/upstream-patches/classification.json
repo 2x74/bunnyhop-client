@@ -137,7 +137,7 @@
   {
     "path": "apps/web/src/api.ts",
     "classification": "native patch",
-    "baseline": "05a50f7ad9efd121a3cd4d211137d10394d6b8db"
+    "baseline": "76c5b0e8fc7816708d40d11a5ffe894bb125ffd3"
   },
   {
     "path": "apps/web/src/assets/audio/manifest.json",
@@ -167,7 +167,7 @@
   {
     "path": "apps/web/src/net/hud.ts",
     "classification": "dropped 042dca41: menu builds use the chat-hud adapter; take upstream",
-    "baseline": "9617781a00d6214e19ae79b130e124b2938eddf4"
+    "baseline": "fff9e643b46d762cb654730b676423ae16f31f2a"
   },
   {
     "path": "apps/web/src/net/scoreboard.ts",
@@ -192,7 +192,7 @@
   {
     "path": "apps/web/src/ui/card-editor.ts",
     "classification": "native patch",
-    "baseline": "7a1b2a83ec0e4bcc9e889302eef7bbacafe099c1"
+    "baseline": "0892240b6898dfa4a4f0a13264c4174e20e6bf84"
   },
   {
     "path": "apps/web/src/ui/country-picker.ts",
@@ -232,12 +232,12 @@
   {
     "path": "apps/web/src/ui/run-stats.ts",
     "classification": "native patch",
-    "baseline": "5bdbcd2e233dda42e65ded95ffc23d3826f2b0f3"
+    "baseline": "4f2ca1ae4cf9b3df108045c06c2d7414d5476f91"
   },
   {
     "path": "apps/web/src/ui/support.ts",
     "classification": "native patch",
-    "baseline": "7074f88cc7f67d0e0c31ec0784942f49d5f9b778"
+    "baseline": "62c7e52271d7d228502d3667a3f657fd7995d39d"
   },
   {
     "path": "apps/web/src/viewmodel/inspects/third.ts",
@@ -258,5 +258,10 @@
     "path": "apps/web/src/native-input.ts",
     "classification": "native transport patch",
     "baseline": "absent"
+  },
+  {
+    "path": "apps/web/src/styles.ts",
+    "classification": "native patch",
+    "baseline": "2e1a8f51a919aebbaf3149b6b9841f1167294e5d"
   }
 ]

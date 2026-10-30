@@ -56,6 +56,17 @@ interface Culled {
   cells: Cell[];
   /** Per original group: its material and its cells' index ranges, in cell order. */
   groups: { materialIndex: number; runs: Run[] }[];
+  /** The draw-group objects cull() hands the geometry, reused render after render. */
+  pool?: { start: number; count: number; materialIndex: number }[];
+}
+
+/** Writes draw group `n` of `pool` (made the first time); returns n + 1. */
+function putGroup(pool: NonNullable<Culled["pool"]>, n: number, start: number, count: number, materialIndex: number): number {
+  const gr = (pool[n] ??= { start: 0, count: 0, materialIndex: 0 });
+  gr.start = start;
+  gr.count = count;
+  gr.materialIndex = materialIndex;
+  return n + 1;
 }
 
 const frustum = new THREE.Frustum();
@@ -155,7 +166,9 @@ export class CellCuller {
       if (!mesh.visible) continue;
       mesh.updateWorldMatrix(true, false);
       for (const cell of d.cells) cell.visible = frustum.intersectsSphere(sphere.copy(cell.sphere).applyMatrix4(mesh.matrixWorld));
-      geo.clearGroups();
+      // The groups are rewritten for every render (water captures too), so their objects are reused, not reallocated.
+      const pool = (d.pool ??= []);
+      let n = 0;
       for (const g of d.groups) {
         let start = -1;
         let end = -1;
@@ -163,13 +176,16 @@ export class CellCuller {
           if (r.cell >= 0 && !d.cells[r.cell].visible) continue;
           if (r.start === end) end += r.count;
           else {
-            if (start >= 0) geo.addGroup(start, end - start, g.materialIndex);
+            if (start >= 0) n = putGroup(pool, n, start, end - start, g.materialIndex);
             start = r.start;
             end = r.start + r.count;
           }
         }
-        if (start >= 0) geo.addGroup(start, end - start, g.materialIndex);
+        if (start >= 0) n = putGroup(pool, n, start, end - start, g.materialIndex);
       }
+      const groups = geo.groups;
+      groups.length = n;
+      for (let i = 0; i < n; i++) groups[i] = pool[i];
     }
   }
 

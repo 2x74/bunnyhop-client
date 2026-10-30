@@ -181,6 +181,75 @@ function rotChain(W: Float32Array, chain: number[], from: number, axis: V3, deg:
 
 const over = (v: number, r: Range) => (v < r.min ? r.min - v : v > r.max ? r.max - v : 0);
 
+// clampFingers runs every frame: its own allocation-free copies of the vector helpers above (the same operations in
+// the same order), writing into these scratch vectors instead of returning new arrays.
+const sv = (): V3 => [0, 0, 0];
+const FA = sv(), FW = sv(), FN = sv(), FC = sv(), FK = sv(), FR = sv(), TA = sv(), P0 = sv(), P1 = sv(), P2 = sv(), SA = sv(), SB = sv(), SX = sv(), CR = sv(), HA = sv(), HB = sv(), HX = sv();
+const PS = [P0, P1, P2];
+function subTo(o: V3, a: V3, b: V3): V3 {
+  o[0] = a[0] - b[0];
+  o[1] = a[1] - b[1];
+  o[2] = a[2] - b[2];
+  return o;
+}
+function crossTo(o: V3, a: V3, b: V3): V3 {
+  const x = a[1] * b[2] - a[2] * b[1], y = a[2] * b[0] - a[0] * b[2], z = a[0] * b[1] - a[1] * b[0];
+  o[0] = x;
+  o[1] = y;
+  o[2] = z;
+  return o;
+}
+function normTo(o: V3, a: V3): V3 {
+  const l = Math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]) || 1;
+  o[0] = a[0] / l;
+  o[1] = a[1] / l;
+  o[2] = a[2] / l;
+  return o;
+}
+function posTo(o: V3, W: ArrayLike<number>, i: number): V3 {
+  o[0] = W[i * 12 + 3];
+  o[1] = W[i * 12 + 7];
+  o[2] = W[i * 12 + 11];
+  return o;
+}
+function xAxisTo(o: V3, W: ArrayLike<number>, i: number): V3 {
+  o[0] = W[i * 12];
+  o[1] = W[i * 12 + 4];
+  o[2] = W[i * 12 + 8];
+  return normTo(o, o);
+}
+/** hinge() without allocations. */
+function hingeFast(a: V3, b: V3, c: V3): number {
+  const ka = dot(a, c), kb = dot(b, c);
+  HA[0] = a[0] - c[0] * ka, HA[1] = a[1] - c[1] * ka, HA[2] = a[2] - c[2] * ka;
+  HB[0] = b[0] - c[0] * kb, HB[1] = b[1] - c[1] * kb, HB[2] = b[2] - c[2] * kb;
+  return Math.atan2(dot(crossTo(HX, HA, HB), c), dot(HA, HB)) * R2D;
+}
+/** frameOf() into the scratch frame (FA, FW, FN, FC); the wrist isn't needed here. */
+function frameFast(W: ArrayLike<number>, s: Side): void {
+  const ch = s.chains;
+  const wx = W[s.hand * 12 + 3], wy = W[s.hand * 12 + 7], wz = W[s.hand * 12 + 11];
+  // Knuckle centre of index, middle, ring and pinky; w from the index knuckle to the pinky's.
+  const i0 = ch.index[0] * 12, i1 = ch.middle[0] * 12, i2 = ch.ring[0] * 12, i3 = ch.pinky[0] * 12;
+  FK[0] = (W[i0 + 3] + W[i1 + 3] + W[i2 + 3] + W[i3 + 3]) / 4 - wx;
+  FK[1] = (W[i0 + 7] + W[i1 + 7] + W[i2 + 7] + W[i3 + 7]) / 4 - wy;
+  FK[2] = (W[i0 + 11] + W[i1 + 11] + W[i2 + 11] + W[i3 + 11]) / 4 - wz;
+  normTo(FA, FK);
+  FR[0] = W[i0 + 3] - W[i3 + 3];
+  FR[1] = W[i0 + 7] - W[i3 + 7];
+  FR[2] = W[i0 + 11] - W[i3 + 11];
+  const k = dot(FR, FA);
+  FR[0] -= FA[0] * k;
+  FR[1] -= FA[1] * k;
+  FR[2] -= FA[2] * k;
+  normTo(FW, FR);
+  crossTo(FN, FA, FW);
+  FN[0] *= s.nSign;
+  FN[1] *= s.nSign;
+  FN[2] *= s.nSign;
+  normTo(FC, crossTo(FC, FA, FN));
+}
+
 /**
  * Safety clamp: rotates every finger / thumb joint past its limit back onto it (both hands). Returns how many joints
  * it corrected (0 in a clean pose).
@@ -189,18 +258,25 @@ export function clampFingers(W: Float32Array, r: VmRig, hands: "R" | "both" = "R
   let fixed = 0;
   for (const s of sidesOf(r)) {
     if (hands === "R" && s.side !== "R") continue;
-    const f = frameOf(W, s);
+    frameFast(W, s);
     for (const d of DIGITS) {
       const c = s.chains[d];
       if (d === "thumb") {
-        const ta = norm(fromHand(f, s.thumbAxis));
-        for (const k of [1, 2] as const) {
-          const p = c.map((i) => pos(W, i));
-          const a = norm(sub(p[1], p[0])), b = norm(sub(p[2], p[1]));
-          const deg = k === 1 ? hinge(a, b, ta) : hinge(b, xAxis(W, c[2]), ta);
+        // ta = norm(fromHand(f, thumbAxis))
+        const t = s.thumbAxis;
+        TA[0] = FA[0] * t[0] + FW[0] * t[1] + FN[0] * t[2];
+        TA[1] = FA[1] * t[0] + FW[1] * t[1] + FN[1] * t[2];
+        TA[2] = FA[2] * t[0] + FW[2] * t[1] + FN[2] * t[2];
+        normTo(TA, TA);
+        for (let k = 1; k <= 2; k++) {
+          posTo(P0, W, c[0]);
+          posTo(P1, W, c[1]);
+          posTo(P2, W, c[2]);
+          const a = normTo(SA, subTo(SA, P1, P0)), b = normTo(SB, subTo(SB, P2, P1));
+          const deg = k === 1 ? hingeFast(a, b, TA) : hingeFast(b, xAxisTo(SX, W, c[2]), TA);
           const e = over(deg, LIMITS.thumb.flex[k]);
           if (Math.abs(e) > 1e-3) {
-            rotChain(W, c, k, ta, e, p[k]);
+            rotChain(W, c, k, TA, e, PS[k]);
             fixed++;
           }
         }
@@ -208,24 +284,26 @@ export function clampFingers(W: Float32Array, r: VmRig, hands: "R" | "both" = "R
       }
       // MCP abduction (about the palm normal), then flexion joint by joint (about the curl axis).
       {
-        const p0 = pos(W, c[0]);
-        const d1 = norm(sub(pos(W, c[1]), p0));
-        const abd = Math.asin(Math.max(-1, Math.min(1, dot(d1, f.c)))) * R2D - s.abd0[d];
+        posTo(P0, W, c[0]);
+        const d1 = normTo(SA, subTo(SA, posTo(P1, W, c[1]), P0));
+        const abd = Math.asin(Math.max(-1, Math.min(1, dot(d1, FC)))) * R2D - s.abd0[d];
         const e = over(abd, LIMITS.finger.abd);
         if (Math.abs(e) > 1e-3) {
           // A rotation about n moves the segment along n x d1; pick the sign that moves it along +c by e.
-          const sgn = dot(cross(f.n, d1), f.c) >= 0 ? 1 : -1;
-          rotChain(W, c, 0, f.n, e * sgn, p0);
+          const sgn = dot(crossTo(CR, FN, d1), FC) >= 0 ? 1 : -1;
+          rotChain(W, c, 0, FN, e * sgn, P0);
           fixed++;
         }
       }
       for (let k = 0; k < 3; k++) {
-        const p = c.map((i) => pos(W, i));
-        const prev = k === 0 ? f.ax : norm(sub(p[k], p[k - 1]));
-        const cur = k < 2 ? norm(sub(p[k + 1], p[k])) : xAxis(W, c[2]);
-        const e = over(hinge(prev, cur, f.c), LIMITS.finger.flex[k]);
+        posTo(P0, W, c[0]);
+        posTo(P1, W, c[1]);
+        posTo(P2, W, c[2]);
+        const prev = k === 0 ? FA : normTo(SA, subTo(SA, PS[k], PS[k - 1]));
+        const cur = k < 2 ? normTo(SB, subTo(SB, PS[k + 1], PS[k])) : xAxisTo(SB, W, c[2]);
+        const e = over(hingeFast(prev, cur, FC), LIMITS.finger.flex[k]);
         if (Math.abs(e) > 1e-3) {
-          rotChain(W, c, k, f.c, e, p[k]);
+          rotChain(W, c, k, FC, e, PS[k]);
           fixed++;
         }
       }
