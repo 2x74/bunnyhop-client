@@ -36,11 +36,15 @@ void shutdown() {
 #else
 namespace native::anti_lag {
 
-bool initialize() { return false; }
+bool initialize() {
+    return false;
+}
 
-void update(bool, unsigned) {}
+void update(bool, unsigned) {
+}
 
-void shutdown() {}
+void shutdown() {
+}
 
 }  // namespace native::anti_lag
 #endif
