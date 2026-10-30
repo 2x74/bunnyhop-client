@@ -36,13 +36,6 @@ This is the last version you need to download by hand: from here on, Settings â†
 - Ponytails go up to 300% long.
 - Knife inspects make their flick, spin and catch sounds, and the Bunnyfly's blade shows in first person.
 
-**Loadout**
-- Knife pool, as on the website: up to 8 knives that swap on each map or each restart, in order or at random. Saved
-  to your account, and other players see the knife you're holding.
-- The Whirligig knife, with its spinner, Flick, Pinwheel and Backspin inspects. The Karrotbit spin draw. Ponytails up
-  to 300% long.
-- Knife inspects make the website's flick, spin and catch sounds.
-
 **Display and input**
 - Exclusive fullscreen: pick the monitor, resolution and refresh rate, then keep it or it switches back after 10
   seconds. True 4:3 stretched or black bars.
