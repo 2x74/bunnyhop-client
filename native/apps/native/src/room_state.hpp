@@ -198,6 +198,7 @@ public:
                                               : 0);
             run.status = row.timer == 3 ? 2 : row.timer == 2 ? 1 : 0;
             run.in_start = row.timer == 1;
+            run.pending_start = 0;
             return;
         }
     }

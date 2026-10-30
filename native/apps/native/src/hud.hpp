@@ -1597,7 +1597,7 @@ private:
         const float w = frame_width_, h = frame_height_;
         const auto [x, y] = place("timer", w / 2, h - timer_from_bottom);
         native::HudLabel<48> time;
-        native::format_hud_time(time, run.seconds);
+        native::format_hud_time(time, native::hud_clock_seconds(run, movement.tick_interval));
         const Color color = (run.status == 2 || practising) ? amber : cream;
         text(x, y, time.view(), timer_size, color, true);
         draw_status(run, x, y - status_above_timer);

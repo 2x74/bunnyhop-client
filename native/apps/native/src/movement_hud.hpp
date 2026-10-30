@@ -166,6 +166,13 @@ inline std::optional<double> trainer_jump_sound(const HudPreferences &prefs, std
     return pitches[trainer_band(*pace, prefs.trainer.zone)];
 }
 
+// A run starts on its first unarmed tick but isn't announced until it leaves the zone, so bhopping in the start zone
+// already has a clock: the time it will leave with. Display only, like the website's pendingTicks().
+inline double hud_clock_seconds(const BhRunState &run, double tick_interval) {
+    if (run.status != 0 || run.pending_start == 0) return run.seconds;
+    return double(run.last_tick - run.pending_start) * tick_interval;
+}
+
 inline bool perfect_hop_visible(
         std::string_view style, const BhRunState &run, uint32_t tick, double interval, bool practice = false
 ) {

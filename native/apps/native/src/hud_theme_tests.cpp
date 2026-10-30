@@ -800,6 +800,28 @@ std::set<std::pair<int, int>> crosshair_pixels(const native::CrosshairShape &sha
     return pixels;
 }
 
+void test_prespeed_clock() {
+    constexpr double tick_interval = .01;
+    BhRunState run{};
+    run.last_tick = 500;
+    assert(native::hud_clock_seconds(run, tick_interval) == 0);
+    // Bhopping in the start zone: the clock counts from the run's first tick.
+    run.pending_start = 498;
+    run.in_start = 1;
+    assert(std::abs(native::hud_clock_seconds(run, tick_interval) - .02) < 1e-9);
+    run.pending_start = 500;
+    assert(native::hud_clock_seconds(run, tick_interval) == 0);
+    // Out of the zone the timer's own clock takes over.
+    run.status = 1;
+    run.pending_start = 0;
+    run.start_tick = 498;
+    run.seconds = .03;
+    assert(native::hud_clock_seconds(run, tick_interval) == .03);
+    run.status = 2;
+    run.seconds = 12.345;
+    assert(native::hud_clock_seconds(run, tick_interval) == 12.345);
+}
+
 void test_crosshair_pixels() {
     native::CrosshairShape shape;
     // Even thickness: the arms mirror around the line between the two middle pixels; gap and size are exact.
@@ -913,6 +935,7 @@ int main() {
     test_ghost_progress();
     test_results_toasts_and_room_widgets();
     test_movement_widgets_and_restart();
+    test_prespeed_clock();
     test_crosshair_pixels();
     test_layout_codes();
     test_layout_editor_math();
