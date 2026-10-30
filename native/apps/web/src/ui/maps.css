@@ -74,6 +74,8 @@
 .mb-star.on .icon, .mbd-star.on .icon { fill: currentColor; }
 .mb-name small { font-size: var(--fs-xs); color: var(--dim); }
 .mb-row .mb-c-tier { font-size: var(--fs-sm); font-weight: 750; color: var(--tc, var(--tier-x)); }
+/* "CS:GO" on a CS:GO map's row and panel: the tier pill's outline, in the quiet text colour. */
+.mb-csgo { flex: none; align-self: center; font-size: var(--fs-xs); font-weight: 700; line-height: 1.3; padding: 0 0.3rem; border-radius: var(--r-1); color: var(--dim); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dim) 45%, transparent); cursor: default; }
 .mb-c-pb, .mb-c-wr { text-align: right; white-space: nowrap; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
 .mb-c-pb b { color: var(--accent); font-weight: 700; }
 .mb-c-wr { color: var(--dim); }

@@ -69,6 +69,7 @@ This is the last version you need to download by hand: from here on, Settings â†
 - Physics v20 for v0.0.30's new maps and their mechanics.
 - Crouch-cancelling or landing from a teleport onto a floor no longer costs a tick of friction: you jump on the same
   tick, like bhoptimer servers.
+- `!showtriggers` shows the scripted ingredients and gates on bhop_cooksassistant.
 - The Segmented style (`!seg`), as on the website: press C to save and X to load during the run. The time and the
   replay keep only the path you finished on, and Segmented has its own boards.
 - Runs with null binds count for ranked, as on the website.

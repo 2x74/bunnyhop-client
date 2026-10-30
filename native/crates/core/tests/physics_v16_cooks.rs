@@ -7,6 +7,7 @@
 //! research/COOKSASSISTANT-1025.md.
 
 use bunnyhop_core::game::{
+    OVERLAY_OTHER, OVERLAY_PUSH, OVERLAY_TELEPORT,
     PHYSICS_V15, PHYSICS_V16, map_nonlinear_objectives_for, map_nonlinear_objectives_table, map_player_io_for,
 };
 use bunnyhop_core::{Cmd, Game, Settings};
@@ -102,6 +103,29 @@ fn cooks_table_and_scripted_triggers() {
         let game = Game::load(&bunnyhop_core::parse_bsp(&bytes).unwrap()).unwrap();
         assert_eq!(map_nonlinear_objectives_for(&game.entities), None, "{map}");
         assert!(game.objective_triggers().is_empty(), "{map}");
+    }
+}
+
+#[test]
+fn cooks_scripted_triggers_have_overlay_roles() {
+    for version in [PHYSICS_V15, PHYSICS_V16, bunnyhop_core::game::PHYSICS_LATEST] {
+        let Some(game) = load(version) else { return };
+        let before = game.snapshot_bytes();
+        let brushes = game.overlay_brushes(&[]);
+        for (model, kind) in [
+            (3, OVERLAY_TELEPORT), (4, OVERLAY_OTHER), (5, OVERLAY_OTHER), (6, OVERLAY_OTHER),
+            (7, OVERLAY_OTHER), (8, OVERLAY_OTHER), (10, OVERLAY_PUSH), (11, OVERLAY_TELEPORT), (12, OVERLAY_PUSH),
+        ] {
+            let entity = game.entities.iter().position(|e| e.get("model") == Some(format!("*{model}").as_str())).unwrap();
+            let volumes: Vec<_> = brushes.iter().filter(|b| b.entity == Some(entity)).collect();
+            if version == PHYSICS_V15 {
+                assert!(volumes.is_empty(), "v15 has no script effect on *{model}");
+            } else {
+                assert!(!volumes.is_empty(), "v{version}: missing *{model}");
+                assert!(volumes.iter().all(|b| b.kind == kind && b.planes.len() >= 4), "v{version}: *{model}");
+            }
+        }
+        assert_eq!(game.snapshot_bytes(), before, "overlay queries leave the complete simulation state unchanged");
     }
 }
 

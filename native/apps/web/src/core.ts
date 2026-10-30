@@ -219,6 +219,11 @@ export const PROP_TRANSFORM_KEY = 1 << 20;
  *   on or jumping into an uphill slope keeps the speed (RNGFix uphill), downhill boosts as RNGFix computes them, edge
  *   bugs still let the player jump, landing on a thin trigger always touches it, and a teleport touched in the same tick
  *   as a collision or landing keeps the speed (telehop). Slopes and ledges no longer depend on the sub-tick phase.
+ * - v18: v17 + climbable surface properties.
+ * - v19: v18 + scoped map mechanics, script equivalents and per-map maximum velocities.
+ * - v20: v19 + bhoptimer autohop: clear the old jump latch while walking with jump held and water level < 2,
+ *   keeping the current jump command so unducking or teleporting onto a floor jumps before friction.
+ *   Scroll styles, ladder jumps and swimming keep their existing policy.
  */
 export const PHYSICS_V1 = 1;
 /** Weapon commands and the USP silencer (research/WEAPONS.md). */
@@ -244,11 +249,13 @@ export const PHYSICS_V16 = 16;
 /** RNGFix parity: uphill / downhill inclines, edge bugs, trigger jumping and telehops as on RNGFix servers. */
 export const PHYSICS_V17 = 17;
 /** The physics version new runs are played and recorded with. */
-export const PHYSICS_VERSION = 19;
+export const PHYSICS_VERSION = 20;
 /** Climbable surface properties used by bhop_synthetic_fix. */
 export const PHYSICS_V18 = 18;
 /** Scoped entity makers and known velocity-script equivalents. */
 export const PHYSICS_V19 = 19;
+/** bhoptimer autohop: unduck / teleport onto a floor jumps before friction. */
+export const PHYSICS_V20 = 20;
 /** Versions this code knows (the wasm build must support them too, see Core.setSettings). */
 export const isPhysicsVersion = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= PHYSICS_V1 && (v as number) <= PHYSICS_VERSION;
 

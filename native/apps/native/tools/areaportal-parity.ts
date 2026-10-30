@@ -88,9 +88,9 @@ function rideTurns(step: Step, physics: number, offset: number[], jump: boolean,
     }
     previousY = result.transform[1];
     angle += Math.abs(result.state.angleChange[1]);
-    if (physics === 19) checkRider(result, offset);
+    if (physics >= 19) checkRider(result, offset);
   }
-  if (!jump && (turns !== 2 || (physics === 19 ? angle !== 0 : angle < 180)))
+  if (!jump && (turns !== 2 || (physics >= 19 ? angle !== 0 : angle < 180)))
     throw new Error(`v${physics}: turns ${turns}, rider angle ${angle}`);
   return { turns, angle };
 }
@@ -152,7 +152,7 @@ function rider(physics: number, offset: number[], jump: boolean, sequence: numbe
 }
 
 let sequence = 0;
-for (const physics of [18, 19, 18, 19])
+for (const physics of [18, 19, 20, 18, 19, 20])
   for (const offset of [
     [0, 0],
     [40, 25],

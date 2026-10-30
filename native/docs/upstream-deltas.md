@@ -1,6 +1,6 @@
 # Vendored delta audit
 
-Current sync: website `release-0.0.30` at `1593e71b4865a26c7820cc818b948a810ccac0a9`.
+Current sync: website `hotfix/0030-wasm` at `6a37d059f59291a25ac3bbfefd5d1aa6ad5f45f4`.
 The two patches were refreshed against that source; `classification.json` records its Git blob baselines.
 The rows below describe why each native delta exists.
 

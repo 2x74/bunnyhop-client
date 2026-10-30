@@ -90,7 +90,7 @@ async function probe(map: string, physics: number, kind: "velocity" | "ledge" | 
       const state = core.state();
       reached ||= state.position[0] > -2840 && state.position[2] >= 66 && state.grounded;
     }
-    if (reached !== (physics === 19)) throw new Error(`Profane v${physics}: ledge ${reached}`);
+    if (reached !== physics >= 19) throw new Error(`Profane v${physics}: ledge ${reached}`);
     positive = { reached };
   } else if (kind === "bonus") {
     const zones = JSON.parse(readFileSync(path.replace(/\.bsp$/, ".zones.json"), "utf8")) as {
@@ -108,7 +108,7 @@ async function probe(map: string, physics: number, kind: "velocity" | "ledge" | 
     position(trigger.origin.split(/\s+/).map((v, i) => Number(v) + (bounds.mins[i] + bounds.maxs[i]) / 2));
     step(1, 0, 0);
     const pitch = core.state().teleportAngles[0];
-    if (pitch !== (physics === 19 ? -10 : 350)) throw new Error(`Playboy v${physics}: pitch ${pitch}`);
+    if (pitch !== (physics >= 19 ? -10 : 350)) throw new Error(`Playboy v${physics}: pitch ${pitch}`);
     positive = { pitch };
   }
   const prefix = join(output, `${map}-v${physics}`);
@@ -180,7 +180,7 @@ async function probeWheelUse() {
   const result = {
     map: "bhop_rpg",
     kind: "ss2 continuous use, pause and reversal",
-    physics: 19,
+    physics: DEFAULT_SETTINGS.physics,
     ticks: 150,
     useDifferences,
     identical: true,
@@ -190,11 +190,11 @@ async function probeWheelUse() {
 }
 
 for (const map of ["bhop_gigaheish_fix", "bhop_accelerate", "bhop_quack", "bhop_rainbowroad_fix", "kz_bhop_global"])
-  for (const physics of [18, 19]) await probe(map, physics, "velocity");
-for (const physics of [18, 19]) {
+  for (const physics of [18, 19, 20]) await probe(map, physics, "velocity");
+for (const physics of [18, 19, 20]) {
   await probe("bhop_profane", physics, "ledge");
   await probe("bhop_playboy_csgo", physics, "pitch");
 }
-await probe("bhop_ceaseless", 19, "bonus");
+for (const physics of [19, 20]) await probe("bhop_ceaseless", physics, "bonus");
 await probeWheelUse();
 writeFileSync(join(output, "report.json"), JSON.stringify(results, null, 2) + "\n");

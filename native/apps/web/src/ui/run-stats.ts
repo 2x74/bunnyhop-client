@@ -55,6 +55,18 @@ export function pollText(hz: number): string {
   return `${(near ?? Math.round(hz / 10) * 10).toLocaleString("en-US")} Hz`;
 }
 
+/** Shapes players name, by width / height. */
+const SHAPES: [number, string][] = [[4 / 3, "4:3"], [5 / 4, "5:4"], [16 / 10, "16:10"], [16 / 9, "16:9"], [21 / 9, "21:9"], [32 / 9, "32:9"]];
+
+/** The runner's view: "4:3 stretched · FOV 90", "4:3 black bars · FOV 90", "16:9 · FOV 100". */
+export function viewText(v: NonNullable<RunStats["view"]>): string {
+  const named = SHAPES.find(([aspect]) => Math.abs(v.aspect - aspect) < 0.02)?.[1];
+  // 2560×1080 and 3440×1440 are sold as 21:9.
+  const shape = named ?? (v.aspect > 2.3 && v.aspect < 2.45 ? "21:9" : `${plain(v.aspect)}:1`);
+  const fill = v.fill === "stretched" ? " stretched" : v.fill === "bars" ? " black bars" : "";
+  return `${shape}${fill} · FOV ${plain(v.fov)}`;
+}
+
 /** Time played, to the minute: "3h 12m", "12m", "under a minute". */
 export function playedFor(seconds: number): string {
   const min = Math.floor(seconds / 60);
@@ -91,6 +103,7 @@ export function statsRows(s: RunStats): { run: [string, string][]; setup: [strin
   if (m.pollHz !== undefined) setup.push(["Polling rate", pollText(m.pollHz)]);
   if (m.raw !== undefined) setup.push(["Raw input", m.raw ? "On" : "Off"]);
   if (s.turn) setup.push(["Turn speed", `${plain(s.turn.yawSpeed)}°/s · fast ×${plain(s.turn.angleSpeedKey)}`]);
+  if (s.view) setup.push(["View", viewText(s.view)]);
 
   const play: [string, string][] = [];
   const p = s.play ?? {};

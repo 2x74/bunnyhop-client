@@ -209,6 +209,8 @@ export interface RunStats {
   mouse?: { sensitivity?: number; dpi?: number; pollHz?: number; raw?: boolean };
   turn?: { yawSpeed: number; angleSpeedKey: number };
   play?: { attempt?: number; seconds?: number; session?: number; sessionSeconds?: number };
+  /** The runner's view (native client): the shape drawn (width / height), how it filled the monitor, the FOV. */
+  view?: { aspect: number; fill: "native" | "stretched" | "bars"; fov: number };
 }
 
 export interface Leaderboard {
