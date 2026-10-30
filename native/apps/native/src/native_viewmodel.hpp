@@ -75,6 +75,10 @@ class NativeViewmodel {
     std::vector<float> data, pose;
     nlohmann::json metadata;
     native_render::KnifeSpinner spinner;
+    std::unordered_map<std::string, std::vector<native_render::InspectTrickCues>> inspectCueTimes;
+    native_render::InspectCueQueue inspectCueQueue;
+    int cueTrick = -1;
+    double cueTime = 0;
     std::optional<native_render::Glow> localGlow;
     bool showGlow = true, firstPersonGlow = true;
     Look equipped;
@@ -702,6 +706,7 @@ public:
         }
         weapons = metadata.at("weapons").get<std::vector<std::string>>();
         spinner = native_render::parse_knife_spinner(metadata);
+        inspectCueTimes = native_render::parse_inspect_cues(metadata.at("inspects"));
         if (metadata.contains("actorRig")) {
             const auto &rig = metadata["actorRig"];
             actorNames = rig["names"].get<std::vector<std::string>>();
@@ -882,6 +887,27 @@ public:
         inspectQueued = inspectHeld = false;
         inspectPresses = inspectLoops = 0;
     }
+
+    // The inspect's sound cues the trick passed this frame; the game plays them, then clears the queue.
+    void hear_inspect_cues(double seconds) {
+        const auto knife = inspectCueTimes.find(equipped.knife);
+        if (inspectIndex < 0 || knife == inspectCueTimes.end() || size_t(inspectIndex) >= knife->second.size()) {
+            cueTrick = -1;
+            return;
+        }
+        const double t = std::max(0., seconds - started);
+        if (cueTrick != inspectIndex) {
+            cueTrick = inspectIndex;
+            cueTime = t;
+            return;
+        }
+        native_render::collect_inspect_cues(knife->second[size_t(inspectIndex)], cueTime, t, inspectCueQueue);
+        cueTime = t;
+    }
+
+    native_render::InspectCueQueue &inspect_cues() { return inspectCueQueue; }
+
+    const native_render::InspectCueQueue &inspect_cues() const { return inspectCueQueue; }
 
     void inspect_press() { inspectPresses = std::min(inspectPresses + 1, 4u); }
 
@@ -1363,6 +1389,7 @@ public:
                     started = seconds;
                 }
             }
+            hear_inspect_cues(seconds);
         } else {
             inspectIndex = -1;
             if (inspectPresses) {

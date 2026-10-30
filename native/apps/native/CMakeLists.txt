@@ -569,6 +569,11 @@ if(BUILD_TESTING)
     target_compile_options(bunnyhop-native-knife-spinner-tests PRIVATE
         $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
     add_test(NAME native_knife_spinner COMMAND bunnyhop-native-knife-spinner-tests)
+    add_executable(bunnyhop-native-inspect-cues-tests src/inspect_cues_tests.cpp)
+    target_include_directories(bunnyhop-native-inspect-cues-tests PRIVATE vendor)
+    target_compile_options(bunnyhop-native-inspect-cues-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    add_test(NAME native_inspect_cues COMMAND bunnyhop-native-inspect-cues-tests)
     add_executable(bunnyhop-native-ponytail-tests src/ponytail_tests.cpp)
     target_include_directories(bunnyhop-native-ponytail-tests PRIVATE vendor)
     target_compile_options(bunnyhop-native-ponytail-tests PRIVATE

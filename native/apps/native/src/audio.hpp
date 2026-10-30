@@ -8,6 +8,7 @@
 #include "music.hpp"
 #include "spatial_audio.hpp"
 #include "render_shaders.hpp"
+#include "inspect_cues.hpp"
 #include <SDL3/SDL.h>
 #include <nlohmann/json.hpp>
 #include <array>
@@ -699,6 +700,13 @@ public:
             layer = def.value("layer", std::string());
         }
         if (!layer.empty() && layer != id) play(layer, gain, rate, pan, positional);
+    }
+
+    // A knife inspect's flip, spin or regrip (inspect_cues.hpp), with the other weapon sounds.
+    void inspect_cue(native_render::InspectCue cue) {
+        if (!weapon_sounds_enabled) return;
+        const auto sound = native_render::inspect_cue_sound(cue);
+        play(sound.id, sound.gain);
     }
 
     void impact(const BhAttackReport &attack, const std::string &surface) {

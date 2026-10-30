@@ -3556,6 +3556,9 @@ int run(const native::Options &opt) {
                     (viewer.active || opt.frames) ? curr.tick * step_dt
                                                   : std::chrono::duration<double>(now - started).count()
             );
+            for (const auto cue : renderer->inspect_cues())
+                audio.inspect_cue(cue);
+            renderer->clear_inspect_cues();
             renderer->draw_measure_label(
                     hud,
                     renderer->camera(eye, camera_input.yaw(), camera_input.pitch, float(width) / height),

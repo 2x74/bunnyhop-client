@@ -463,6 +463,7 @@ await writeFile(
           exit: c.exit,
           open: c.open,
           loop: c.loop,
+          cues: (c.cues ?? []).map((cue) => [cue.t, cue.type]),
         })),
       ]),
     ),
