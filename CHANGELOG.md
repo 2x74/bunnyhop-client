@@ -34,6 +34,14 @@ This is the last version you need to download by hand: from here on, Settings â†
 - Steadier frame pacing at an FPS limit, and keys no longer stick after the menu or chat takes focus.
 - macOS and Linux: optional direct mouse input (Settings â†’ Mouse). Show input stats says which one you're using.
 
+**Multiplayer**
+- The Tab scoreboard matches the website: style names, running and finished times, a HOST tag, and spectators
+  listed under the table.
+- Chat shows the website's join, leave, record and host lines. Chat is now a key you can rebind (Y and U by default).
+- Name tags above players show their name colour, badges and time, and fade with distance and behind walls.
+- Other players hold guns with both hands, with kick, reloads, muzzle flashes and tracers, and move smoothly at any
+  frame rate.
+
 **Replays and video**
 - The replay viewer keeps playing while it's open, with a smooth camera, an orbit camera, loops (L), next jump or
   split (J, N), Go to (G), and the runner's own screen shape and FOV (R).
