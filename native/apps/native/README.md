@@ -66,7 +66,22 @@ its packet timestamps are estimates spread across each read batch. Missing permi
 raw queue overrun returns to SDL. After changing permission or reconnecting on Linux, select SDL then Raw to retry.
 Check sensitivity with a physical mouse before using Raw; it has not completed target-OS hardware validation.
 
-## Replays and scores
+## Display
+
+- Settings → Display → Fullscreen picks the monitor, resolution and refresh rate exclusive fullscreen switches to,
+  so 4:3 (1280×960, 1024×768, 1440×1080) and 16:10 modes work. A new mode shows at once and goes back after ten
+  seconds unless you press Enter. A resolution of another shape than the monitor asks Windows for Stretched or Black
+  bars; drivers set to override games decide themselves. `--windowed` recovers from any mode.
+- Graphics → Aspect ratio gives the same picture in borderless without a mode change. With black bars the HUD and
+  crosshair stay inside the picture. Mouse turning is counts × sensitivity × 0.022° in every mode.
+- Windows: Display → Low latency mode presents through DXGI (flip model, tearing, VRR) and uses NVIDIA Reflex
+  (with Boost and the latency analyzer's flash) or AMD Anti-Lag 2 when the card has them. It is offered only when the
+  driver shares OpenGL frames with Direct3D, and any failure falls back to the OpenGL swap with a notice.
+- While you play, Windows also gets a 1 ms timer, no power throttling and the "Games" scheduling class; menus and
+  other apps get them back.
+- A finished run records your view (shape, fit, FOV) with its diagnostics, so replays can show "4:3 stretched".
+
+
 
 Replays opens the local vault: finished and imported BHR files with search, filters and sorting. Playback has a
 timeline over the live scene with the speed graph, jumps, strafe switches and splits: drag to scrub, Space pauses,

@@ -135,6 +135,9 @@ inline Json default_settings() {
             {"vsync", false},
             {"fpsLimit", 1000},
             {"limitQueuedFrames", true},
+            // Windows: present through DXGI ("on", "boost" adds NVIDIA's clock boost) with Reflex or Anti-Lag 2.
+            {"lowLatencyMode", "off"},
+            {"reflexFlash", false},
             {"volume", .8},
             {"muted", false},
             {"hudScale", 100.0},
@@ -395,6 +398,14 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
         } else if (key == "windowMode") {
             if (!v.is_string() || !valid_window_mode(v.get<std::string>()))
                 throw std::runtime_error("Invalid window mode");
+        } else if (key == "fullscreenMode") {
+            const auto mode = read_fullscreen_mode(v);
+            if (!mode) throw std::runtime_error("Invalid fullscreen mode");
+            out[key] = fullscreen_mode_json(*mode);
+            continue;
+        } else if (key == "fullscreenScaling") {
+            if (!v.is_string() || !valid_fullscreen_scaling(v.get<std::string>()))
+                throw std::runtime_error("Invalid fullscreen scaling");
         } else if (defaults[key].is_boolean()) {
             if (!v.is_boolean()) throw std::runtime_error("Setting must be true or false: " + key);
         } else if (key == "binds") {
@@ -495,6 +506,9 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
         } else if (key == "colorBlind") {
             if (!v.is_string() || (v != "off" && v != "redGreen" && v != "blueYellow"))
                 throw std::runtime_error("Unknown color-blind palette");
+        } else if (key == "lowLatencyMode") {
+            if (!v.is_string() || (v != "off" && v != "on" && v != "boost"))
+                throw std::runtime_error("Low latency mode must be off, on or boost");
         } else if (key == "inputBackend") {
             if (!v.is_string() || (v != "auto" && v != "sdl" && v != "raw"))
                 throw std::runtime_error("Invalid input backend");

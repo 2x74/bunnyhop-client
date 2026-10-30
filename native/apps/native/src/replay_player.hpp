@@ -2,6 +2,7 @@
 #include "replay_session.hpp"
 #include "replay_controls.hpp"
 #include "replay_camera.hpp"
+#include "runner_view.hpp"
 #include <memory>
 #include <optional>
 
@@ -28,6 +29,8 @@ struct ReplayPlayer {
     double speed = 1;
     // Playback returns to `from` on reaching `to`.
     std::optional<Loop> loop;
+    // "Runner's view": the replay drawn in the runner's shape, fit and FOV (replayControl runnerView).
+    std::optional<RunnerView> runner_view;
 
     void begin(const std::filesystem::path &file);
     void action(ReplayControls::Action action, uint32_t tick, Input &camera_controls);

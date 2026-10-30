@@ -2,7 +2,8 @@
 
 import { h } from "../../web/src/ui/dom";
 import { registerSettingsSection } from "../../web/src/ui/settings-registry";
-import { send, state, WINDOW_MODES, type WindowMode } from "./bridge";
+import { send, state, WINDOW_MODES, type LowLatencyMode, type WindowMode } from "./bridge";
+import { fullscreenGroup } from "./fullscreen-modes";
 import { followHost, nativeChoice, nativeToggle, type Ui } from "./native-rows";
 
 const MODE_LABELS: Record<WindowMode, string> = {
@@ -25,7 +26,9 @@ function windowGroup(ui: Ui): HTMLElement {
       WINDOW_MODES.map((mode) => [mode, MODE_LABELS[mode]]),
       {
         hint: "Alt+Enter switches",
-        desc: "Borderless covers the screen without changing its mode. Fullscreen uses the display's desktop mode.",
+        desc:
+          "Borderless covers the screen without changing its mode. Fullscreen is exclusive and uses the resolution " +
+          "below. While the menu is open it shows as Borderless.",
         keywords: "window fullscreen borderless windowed display mode alt enter",
       },
     ),
@@ -58,6 +61,36 @@ function windowGroup(ui: Ui): HTMLElement {
   return group;
 }
 
+function lowLatencyText(): string {
+  const info = state.lowLatency;
+  const card = info?.reflex ? "NVIDIA Reflex" : info?.antiLag ? "AMD Anti-Lag 2" : "a waitable swapchain";
+  const using = info?.active ? ` In use: ${info.active === "DXGI" ? "DXGI" : info.active}.` : "";
+  return (
+    `Presents through DXGI with ${card}: the frame starts as late as the card allows, and borderless gets the ` +
+    `latency and VRR of exclusive fullscreen.${using}`
+  );
+}
+
+function lowLatencyRows(ui: Ui): HTMLElement[] {
+  const supported = (): boolean => state.lowLatency?.dxgi === true;
+  const modes: [LowLatencyMode, string][] = [
+    ["off", "Off"],
+    ["on", "On"],
+  ];
+  if (state.lowLatency?.reflex) modes.push(["boost", "On + Boost"]);
+  const mode = nativeChoice(ui, "Low latency mode", "lowLatencyMode", modes, {
+    desc: lowLatencyText,
+    keywords: "reflex nvidia anti-lag amd latency dxgi vrr gsync freesync boost",
+    when: supported,
+  });
+  const flash = nativeToggle(ui, "Reflex flash indicator", "reflexFlash", {
+    desc: "Flashes on each left click for NVIDIA's Reflex Latency Analyzer.",
+    keywords: "reflex latency analyzer flash ldat",
+    when: () => supported() && state.lowLatency?.reflex === true && state.settings.lowLatencyMode !== "off",
+  });
+  return [mode, flash];
+}
+
 function framesGroup(ui: Ui): HTMLElement {
   return ui.group(
     "Frame pacing",
@@ -73,6 +106,7 @@ function framesGroup(ui: Ui): HTMLElement {
         "it off if your frame rate drops.",
       keywords: "queued frames latency gpu input lag",
     }),
+    ...lowLatencyRows(ui),
   );
 }
 
@@ -90,9 +124,18 @@ function replaysGroup(ui: Ui): HTMLElement {
 
 /** Registers Settings → Display (call once). */
 export function registerDisplaySection(): void {
-  registerSettingsSection("display", (ui) => ({ columns: [[windowGroup(ui)], [framesGroup(ui), replaysGroup(ui)]] }), {
-    label: "Display",
-    icon: "grid",
-    order: 62,
-  });
+  registerSettingsSection(
+    "display",
+    (ui) => ({
+      columns: [
+        [windowGroup(ui), fullscreenGroup(ui)],
+        [framesGroup(ui), replaysGroup(ui)],
+      ],
+    }),
+    {
+      label: "Display",
+      icon: "grid",
+      order: 62,
+    },
+  );
 }

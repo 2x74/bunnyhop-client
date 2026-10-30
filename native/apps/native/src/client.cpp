@@ -75,6 +75,11 @@
 #include "runtime_smoke.hpp"
 #include "window_sdl.hpp"
 #include "window_mode_driver.hpp"
+#include "display_catalog.hpp"
+#include "display_mode_tryout.hpp"
+#include "hud_area.hpp"
+#include "low_latency.hpp"
+#include "play_priority.hpp"
 #include "menu_scripts.hpp"
 #include "menu_files.hpp"
 #include "menu_messages.hpp"
@@ -282,6 +287,15 @@ int run(const native::Options &opt) {
         std::cerr << "Window: " << window_controller.error() << '\n';
         preferences["windowMode"] = window_controller.mode();
     }
+    // Monitors and their modes for Settings → Display, and the ten-second trial of a new exclusive mode.
+    native::DisplayCatalog display_catalog;
+    display_catalog.refresh(window.get());
+    native::DisplayModeTryout display_tryout;
+    // Windows: DXGI presentation with Reflex or Anti-Lag 2, and process settings held only while playing.
+    native::LowLatencyPresenter low_latency;
+    native::LowLatencyControl low_latency_control;
+    const auto low_latency_support = low_latency.support(window.get());
+    native::PlayPriority play_priority;
     auto prefs = native::Preferences::from_settings(preferences);
     bool window_dirty = false;
     auto window_save_due = std::chrono::steady_clock::now();
@@ -1585,6 +1599,19 @@ int run(const native::Options &opt) {
         }
         if (window_dirty && Clock::now() >= window_save_due) save_window();
         video.poll_probe();
+        if (const auto refused = low_latency_control.update(
+                    low_latency,
+                    window.get(),
+                    prefs.low_latency_mode,
+                    prefs.fps_limit,
+                    prefs.reflex_flash,
+                    opt.frames || !opt.runtime_smoke.empty()
+            ))
+            toast(*refused, 6000);
+        if (const auto failure = low_latency.take_failure()) toast("Low latency mode is off: " + *failure, 6000);
+        play_priority.update(core && captured && focused && (!menu || !menu->visible()));
+        // Reflex sleeps here, before input is read, and marks the input sample; InputTimeline reads it as before.
+        low_latency.frame_start();
         const uint64_t mouse_pump_start = SDL_GetTicksNS();
         if (input_backend.begin(
                     prefs.input_backend, captured && focused && !chat.active && !viewer.active && !room.spectator_target
@@ -1607,9 +1634,19 @@ int run(const native::Options &opt) {
                 || event.type == SDL_EVENT_MOUSE_MOTION || event.type == SDL_EVENT_MOUSE_WHEEL
                 || event.type == SDL_EVENT_TEXT_INPUT)
                 had_input_activity = true;
-            if (hud_editor.active()
-                && hud_editor.event(event, hud, SDL_GetWindowPixelDensity(window.get()), hud_editor_bind))
-                continue;
+            if (display_tryout.event(event)) continue;
+            if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT && captured)
+                low_latency.trigger_flash();
+            if (hud_editor.active()) {
+                int pixels_w = 0, pixels_h = 0;
+                SDL_GetWindowSizeInPixels(window.get(), &pixels_w, &pixels_h);
+                const float density = SDL_GetWindowPixelDensity(window.get());
+                const auto area =
+                        renderer ? native::hud_area(renderer->output_view(pixels_w, pixels_h), pixels_w, pixels_h)
+                                 : native::HudArea{0, 0, pixels_w, pixels_h};
+                if (hud_editor.event(native::hud_area_event(event, area, density), hud, density, hud_editor_bind))
+                    continue;
+            }
             switch (event.type) {
                 case SDL_EVENT_QUIT:
                     running = false;
@@ -1653,6 +1690,11 @@ int run(const native::Options &opt) {
                 case SDL_EVENT_DISPLAY_ADDED:
                 case SDL_EVENT_DISPLAY_REMOVED:
                     window_modes.display_changed();
+                    display_catalog.refresh(window.get());
+                    break;
+                case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+                case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
+                    display_catalog.refresh(window.get());
                     break;
                 case SDL_EVENT_KEY_DOWN:
                 case SDL_EVENT_KEY_UP: {
@@ -1964,6 +2006,12 @@ int run(const native::Options &opt) {
         }
         if (hud_editor.take_closed() && focused && (!menu || !menu->visible()))
             capture(!(viewer.active && viewer.controls.visible));
+        if (auto display = display_tryout.finish_due(preferences, window_modes, menu.get(), SDL_GetTicksNS())) {
+            preferences = std::move(*display);
+            json_writer.write(cache / "settings.json", preferences);
+            apply_preferences();
+            display_catalog.refresh(window.get());
+        }
         if (had_input_activity) activity.input(std::chrono::duration<double>(Clock::now().time_since_epoch()).count());
         if (menu)
             for (const auto &raw : menu->drain_messages()) {
@@ -2328,7 +2376,12 @@ int run(const native::Options &opt) {
                         save_window();
                         auto changed = native::patch_settings(preferences, message.at("patch"));
                         if (!window_modes.choose(changed)) throw std::runtime_error(window_controller.error());
-                        json_writer.write(cache / "settings.json", changed);
+                        // A new exclusive mode is shown now and saved once the player keeps it.
+                        const bool trying = display_tryout.start(
+                                preferences, changed, window_modes, menu.get(), window.get(), SDL_GetTicksNS()
+                        );
+                        if (!display_tryout.error().empty()) toast(display_tryout.error(), 5000);
+                        if (!trying) json_writer.write(cache / "settings.json", changed);
                         preferences = std::move(changed);
                         input_timeline.settings_changed(input, held_codes);
                         apply_preferences();
@@ -2508,6 +2561,8 @@ int run(const native::Options &opt) {
                             if (viewer.camera.mode == "auto") {
                                 video.prepare_viewer_camera();
                             }
+                        } else if (action == "runnerView") {
+                            viewer.runner_view = native::read_runner_view(message.value("view", nlohmann::json()));
                         } else if (action == "pause")
                             viewer.paused = message.value("paused", !viewer.paused);
                         else if (action == "speed") {
@@ -3195,6 +3250,14 @@ int run(const native::Options &opt) {
                 if (!recorder.path.empty()) {
                     try {
                         recorder.write(core.get());
+                        // The runner's shape, fit and FOV, so a replay can be watched as it was played.
+                        const auto runner_view = native::runner_view_json(
+                                native::runner_view(
+                                        renderer ? renderer->current_graphics() : native::GraphicsSettings{},
+                                        native::shown_window(window.get(), preferences),
+                                        prefs.fov
+                                )
+                        );
                         // Local vault failures cannot withhold an otherwise valid replay submission.
                         const auto id = data_location::utf8(data_location::from_utf8(recorder.path).filename());
                         replay_library.archive(
@@ -3210,6 +3273,7 @@ int run(const native::Options &opt) {
                                  {"sync", run_state.sync_percent},
                                  {"finishedAt", epoch_ms()},
                                  {"client", identity.value("build", std::string("local"))},
+                                 {"view", runner_view},
                                  {"eligible", !turn_admission.local_only && bool(run_state.recording_valid)}},
                                 prefs.capture_pb_screenshots
                         );
@@ -3229,11 +3293,13 @@ int run(const native::Options &opt) {
                                 json_writer.write(cache / "backdrop-pbs.json", backdrop_pbs);
                             }
                         }
+                        auto play = run_history.play(activity, map_id, prefs, recorder.input.turns);
+                        play["view"] = runner_view;
                         run_event(recorder.finish_event(
                                 run_state.track,
                                 run_state.seconds,
                                 native::read_text(data_location::from_utf8(recorder.path)),
-                                run_history.play(activity, map_id, prefs, recorder.input.turns),
+                                play,
                                 {{"sensitivity", prefs.sensitivity}}
                         ));
                         std::cout << "Native finish " << run_state.seconds << " seconds; replay " << recorder.path
@@ -3261,6 +3327,7 @@ int run(const native::Options &opt) {
         }
         int width = 0, height = 0;
         SDL_GetWindowSizeInPixels(window.get(), &width, &height);
+        low_latency.render_start(width, height);
         if (renderer && !video.preparing()) {
             const float blend = (opt.frames || !simulation_active) ? 1.0f : float(input_scheduler.seconds() / step_dt);
             float eye[3];
@@ -3433,7 +3500,9 @@ int run(const native::Options &opt) {
             }
             const bool local_scope = !viewer.active && !spectator && !external_camera && !opt.camera;
             if (local_scope && simulation_active) scope.frame(frame_seconds);
-            renderer->set_camera_fov(local_scope ? scope.fov(prefs.fov) : prefs.fov);
+            renderer->use_runner_view(viewer.active ? viewer.runner_view : std::nullopt);
+            const float view_fov = viewer.active && viewer.runner_view ? float(viewer.runner_view->fov) : prefs.fov;
+            renderer->set_camera_fov(local_scope ? scope.fov(prefs.fov) : view_fov);
             if (local_scope && scope.scoped()) renderer->set_viewmodel_visible(false);
             const bool world_record_finish =
                     !viewer.active && !spectator && !practice.active && !turn_admission.local_only
@@ -3526,6 +3595,8 @@ int run(const native::Options &opt) {
             }
             // The crosshair is sized in CSS pixels, like the website's: the display's scale, not the HUD's.
             hud.set_display_scale(SDL_GetWindowDisplayScale(window.get()));
+            const auto area = native::hud_area(renderer->output_view(width, height), width, height);
+            native::HudViewport hud_viewport(gl, area, width, height);
             native::HudFrame{
                     core.get(),
                     hud,
@@ -3556,8 +3627,8 @@ int run(const native::Options &opt) {
                     gauntlet_good,
                     display_fps,
                     steady_seconds,
-                    width,
-                    height,
+                    area.width,
+                    area.height,
                     (!menu || !menu->visible() || viewer.ui_shown) && !opt.camera,
                     video.preparing(),
                     held_action("scoreboard") || show_scores,
@@ -3662,10 +3733,13 @@ int run(const native::Options &opt) {
             && (curr.tick >= opt.frames || (viewer.active && viewer.paused && curr.tick >= viewer.session.range.to))) {
             renderer->screenshot(opt.screenshot, width, height);
         }
+        display_tryout.draw(hud, width, height, SDL_GetTicksNS());
         const GLenum gl_error = gl.GetError();
         if (gl_error != GL_NO_ERROR) throw std::runtime_error("OpenGL error " + std::to_string(gl_error));
         frame_diagnostics.mark(native::FrameDiagnostics::kRender, SDL_GetTicksNS());
-        if (!SDL_GL_SwapWindow(window.get()))
+        if (low_latency.active())
+            low_latency.present(prefs.vsync);
+        else if (!SDL_GL_SwapWindow(window.get()))
             throw std::runtime_error(std::string("Swapping framebuffer failed: ") + SDL_GetError());
         frame_diagnostics.mark(native::FrameDiagnostics::kSwap, SDL_GetTicksNS());
         frame_pacer.after_swap(gl, prefs.limit_queued_frames && !opt.frames);
@@ -3763,6 +3837,12 @@ int run(const native::Options &opt) {
                           {"name",
                            ghosts.info.is_object() ? ghosts.info.value("player", std::string("Ghost")) : "Ghost"}}},
                         {"replayCompare", replay_compare.state()},
+                        {"displays", display_catalog.json()},
+                        {"lowLatency",
+                         {{"dxgi", low_latency_support.dxgi},
+                          {"reflex", low_latency_support.reflex},
+                          {"antiLag", low_latency_support.anti_lag},
+                          {"active", low_latency.technique()}}},
                         {"surfaceTools", renderer ? renderer->surface_tools_state() : nlohmann::json(nullptr)},
                         {"graphicsLimits", renderer ? renderer->graphics_limits() : nlohmann::json(nullptr)},
                         {"runGeneration", heartbeat.generation},

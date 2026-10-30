@@ -20,7 +20,17 @@ const AT_KEY = "bunnyhop:settings-at";
 const OPT_KEY = "bunnyhop:settings-sync";
 const SAVE_DELAY_MS = 4000;
 /** Native-only settings that belong to this computer, not the player. */
-const DEVICE_KEYS = ["windowMode", "alwaysOnTop", "rememberWindowBounds", "minimizeOnFocusLoss", "mouseDiagnostics"];
+const DEVICE_KEYS = [
+  "windowMode",
+  "alwaysOnTop",
+  "rememberWindowBounds",
+  "minimizeOnFocusLoss",
+  "fullscreenMode",
+  "fullscreenScaling",
+  "lowLatencyMode",
+  "reflexFlash",
+  "mouseDiagnostics",
+];
 /** Retired like on the website: everyone is shown in their loadout. */
 const RETIRED_KEYS = ["playerModel", "ghostModel"];
 
