@@ -11,6 +11,13 @@ interface Step {
   length: number;
 }
 
+/** The built tail, then longer ones up to the slider's top (300%, past where the frequency stops slowing). */
+function tailLength(step: number): number {
+  if (step < 300) return 1;
+  if (step < 400) return 1.6;
+  return step < 500 ? 2.8 : 3;
+}
+
 function movementStream(): Step[] {
   const steps: Step[] = [];
   for (let i = 0; i < 600; i++) {
@@ -23,7 +30,7 @@ function movementStream(): Step[] {
       speed * Math.sin((yaw * Math.PI) / 180),
       airborne ? 280 - 800 * (seconds % 0.5) : 0,
     ];
-    steps.push({ velocity, yaw, dt: i % 7 === 0 ? 1 / 30 : 1 / 144, snap: i === 300, length: i < 400 ? 1 : 1.6 });
+    steps.push({ velocity, yaw, dt: i % 7 === 0 ? 1 / 30 : 1 / 144, snap: i === 300, length: tailLength(i) });
   }
   return steps;
 }
