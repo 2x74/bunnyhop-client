@@ -1,6 +1,8 @@
 #include "room_state.hpp"
 #include <cassert>
+#include <algorithm>
 #include <cmath>
+#include <vector>
 using J = nlohmann::json;
 
 J envelope(J event) {
@@ -33,7 +35,74 @@ void feed(native::RoomState &room, J samples, double now, J meta = nullptr, bool
     );
 }
 
+// A player running a circle at 300 u/s, sampled at 20 Hz and sent in 100 ms batches that arrive up to 30 ms late,
+// drawn at 1000 FPS: the drawn speed stays close to 300, without the jumps each clock estimate change used to cause.
+void test_smooth_under_jitter() {
+    constexpr double radius = 400, speed = 300, jitter_seconds = .03, frame_seconds = .001;
+    native::RoomState room;
+    room.event(envelope(
+            {{"t", "welcome"},
+             {"you", 0},
+             {"room", {{"name", "r"}}},
+             {"map", {{"name", "m"}}},
+             {"players", J::array({{{"slot", 0}, {"name", "me"}}, {{"slot", 1}, {"name", "them"}}})}}
+    ));
+    const double rate = speed / radius;
+
+    struct Batch {
+        double arrive;
+        J message;
+    };
+
+    std::vector<Batch> batches;
+    uint32_t noise = 12345;
+    for (int b = 0; b < 200; ++b) {
+        J samples = J::array();
+        for (int k = 0; k < 2; ++k) {
+            const unsigned tick = unsigned((b * 2 + k) * 5 + 5);
+            const double t = tick * .01;
+            samples.push_back(
+                    {{"tick", tick},
+                     {"x", radius * std::cos(rate * t)},
+                     {"y", radius * std::sin(rate * t)},
+                     {"z", 0},
+                     {"vx", -speed * std::sin(rate * t)},
+                     {"vy", speed * std::cos(rate * t)},
+                     {"vz", 0},
+                     {"yaw", 0},
+                     {"pitch", 0},
+                     {"flags", 1}}
+            );
+        }
+        noise = noise * 1664525u + 1013904223u;
+        const double late = jitter_seconds * double(noise >> 8) / double(1u << 24);
+        J block = {{"slot", 1}, {"samples", samples}};
+        batches.push_back(
+                {(b * 2 + 1) * .05 + .09 + late,
+                 {{"generation", 1}, {"id", "test"}, {"snapshot", {{"serverTime", 0}, {"blocks", J::array({block})}}}}}
+        );
+    }
+    std::sort(batches.begin(), batches.end(), [](const Batch &a, const Batch &b) { return a.arrive < b.arrive; });
+    size_t next = 0;
+    double previous[2] = {NAN, NAN}, worst = 0;
+    for (double now = 2; now < 18; now += frame_seconds) {
+        for (; next < batches.size() && batches[next].arrive <= now; ++next)
+            room.snapshot(batches[next].message, batches[next].arrive);
+        const auto actors = room.actors(now);
+        assert(actors.size() == 1);
+        const auto &position = actors[0].frame.position;
+        if (!std::isnan(previous[0])) {
+            const double drawn = std::hypot(position[0] - previous[0], position[1] - previous[1]) / frame_seconds;
+            worst = std::max(worst, std::abs(drawn - speed));
+        }
+        previous[0] = position[0];
+        previous[1] = position[1];
+    }
+    assert(worst < 30);
+}
+
 int main() {
+    test_smooth_under_jitter();
     native::RoomState room;
     room.event(envelope(
             {{"t", "welcome"},

@@ -84,6 +84,9 @@ class RoomState {
         bool clock = false, spectator = false;
         uint32_t rendered = 0;
         double rendered_at = -1;
+        // The tick drawn, advanced at real time and eased toward the interpolation target (playback_tick).
+        double playback = 0, playback_at = -1;
+        bool batch_measured = false;
         nlohmann::json info, meta;
     };
 
@@ -429,6 +432,7 @@ public:
             for (auto &[slot, p] : peers) {
                 p.samples.clear();
                 p.clock = false;
+                p.playback_at = -1;
             }
             return change_map(next_map);
         } else if (type == "chat")
@@ -453,6 +457,7 @@ public:
             p.actor.opacity = 1;
             const auto &samples = block.at("samples");
             if (!samples.is_array() || samples.size() > 8) continue;
+            const uint32_t newest_before = p.samples.empty() ? 0 : p.samples.back().frame.tick;
             bool appended = false;
             for (const auto &raw : samples) {
                 BhGhostFrame f{};
@@ -481,26 +486,63 @@ public:
                     p.clock = false;
                     p.rendered = 0;
                     p.rendered_at = -1;
+                    p.playback_at = -1;
                 }
                 appended = true;
                 p.samples.push_back({f, bool(flags & 8), flags, block.value("silenced", false)});
                 while (p.samples.size() > 96)
                     p.samples.pop_front();
             }
-            if (appended && !p.samples.empty() && now > p.arrived) {
-                const double offset = now - p.samples.back().frame.tick * .01;
-                if (!p.clock) {
-                    p.offset = offset;
-                    p.clock = true;
-                } else {
-                    const double late = std::max(0., offset - p.offset);
-                    p.jitter = .9 * p.jitter + .1 * std::min(late, .12);
-                    p.offset = std::min(offset, p.offset + .0002);
-                    if (p.arrived > 0) p.batch = .8 * p.batch + .2 * std::clamp(now - p.arrived, .02, .4);
-                }
-                p.arrived = now;
+            if (appended && !p.samples.empty() && now > p.arrived) update_clock(p, now, newest_before);
+        }
+    }
+
+    // Maps a sender's ticks onto local time (net/interp.ts RemoteTrack.push): the offset follows the fastest arrivals,
+    // jitter is how late the others come, and the batch interval is measured from the ticks a batch covers, not from
+    // arrival times, which jitter.
+    static void update_clock(Peer &p, double now, uint32_t newest_before) {
+        constexpr double longest_batch_seconds = .4;
+        const uint32_t newest = p.samples.back().frame.tick;
+        if (newest_before && newest > newest_before) {
+            const double span = (newest - newest_before) * .01;
+            if (span <= longest_batch_seconds) {
+                p.batch = p.batch_measured ? .8 * p.batch + .2 * span : span;
+                p.batch_measured = true;
             }
         }
+        const double offset = now - newest * .01;
+        if (!p.clock) {
+            p.offset = offset;
+            p.clock = true;
+        } else {
+            const double late = std::max(0., offset - p.offset);
+            p.jitter = .9 * p.jitter + .1 * std::min(late, .12);
+            p.offset = std::min(offset, p.offset + .0002);
+        }
+        p.arrived = now;
+    }
+
+    // The tick to draw a peer at. The target moves whenever the offset or the jitter estimate changes; drawing it
+    // directly makes the player jump a little each time, which shows at high frame rates. The drawn tick runs at real
+    // time and eases toward the target at most a tenth faster or slower, and snaps when it is far off.
+    static double playback_tick(Peer &p, double target, double now) {
+        constexpr double ticks_per_second = 100;
+        constexpr double resync_ticks = 30;
+        constexpr double max_rate_change = .1;
+        constexpr double settle_per_second = 4;
+        if (p.playback_at < 0 || std::abs(target - p.playback) > resync_ticks) {
+            p.playback = target;
+            p.playback_at = now;
+            return target;
+        }
+        const double elapsed = now - p.playback_at;
+        if (elapsed <= 0) return p.playback;
+        const double step = elapsed * ticks_per_second;
+        const double error = target - (p.playback + step);
+        const double limit = step * max_rate_change;
+        p.playback += step + std::clamp(error * std::min(1., elapsed * settle_per_second), -limit, limit);
+        p.playback_at = now;
+        return p.playback;
     }
 
     std::vector<native_render::Actor> actors(double now) {
@@ -508,7 +550,7 @@ public:
         for (auto &[slot, p] : peers) {
             if (slot == self || p.spectator || p.samples.empty() || now - p.arrived > 10) continue;
             const double delay = std::clamp(p.batch + p.jitter, .1, .52);
-            const double target = (now - p.offset - delay) * 100 + 1e-7;
+            const double target = playback_tick(p, (now - p.offset - delay) * 100, now) + 1e-7;
             auto frame = p.samples.front().frame;
             for (size_t i = 1; i < p.samples.size(); i++) {
                 const auto &a = p.samples[i - 1].frame, &b = p.samples[i].frame;
