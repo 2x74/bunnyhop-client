@@ -24,6 +24,7 @@ struct ReplayTimelineData {
     uint32_t step = 1, start = 0, end = 0;
     std::vector<float> speeds;
     std::vector<uint32_t> jumps;
+    std::vector<uint32_t> segments;
     // Ticks where the runner switched strafe side (A to D or back).
     std::vector<uint32_t> strafes;
     std::vector<Split> splits;
@@ -58,6 +59,7 @@ struct ReplayTimelineData {
                 {"speed", speeds},
                 {"jumps", jumps},
                 {"strafes", strafes},
+                {"segments", segments},
                 {"splits", std::move(marks)},
                 {"startTick", start},
                 {"endTick", end},
@@ -131,10 +133,11 @@ inline ReplayTimelineData build_replay_timeline(
     if (!raw) throw std::runtime_error("Missing timeline replay metadata");
     const auto info = nlohmann::json::parse(raw, raw + bytes);
     const uint32_t total = info.at("totalTicks");
-    constexpr uint32_t maximum_ticks = 1000000, maximum_bins = 4096;
+    constexpr uint32_t maximum_ticks = 1440000, maximum_bins = 4096;
     if (total > maximum_ticks) throw std::runtime_error("Timeline exceeds replay tick limit");
     ReplayTimelineData timeline;
     timeline.step = std::max(1u, (total + maximum_bins) / maximum_bins);
+    timeline.segments = info.value("segmentTicks", std::vector<uint32_t>{});
     timeline.start = info.value("startTick", 0u);
     timeline.end = info.value("endTick", 0u);
     timeline.speeds.reserve(total / timeline.step + 1);

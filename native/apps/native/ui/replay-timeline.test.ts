@@ -25,16 +25,18 @@ const TIMELINE = {
 };
 
 test("the host's timeline is read value by value", () => {
-  expect(readTimelineData(TIMELINE)).toEqual(TIMELINE as ReturnType<typeof readTimelineData>);
+  expect(readTimelineData(TIMELINE)).toEqual({ ...TIMELINE, segments: [] } as ReturnType<typeof readTimelineData>);
   // Bad marks are dropped, not the whole timeline; a missing finish is 0, as in the web's RunData.
   const loose = readTimelineData({
     ...TIMELINE,
     jumps: [120, -1, 1.5, "x"],
+    segments: [50, 50, 90, -1, 1.5, "x"],
     splits: [{ tick: 1, kind: "lap", index: 1 }],
     endTick: undefined,
     desyncTick: 130,
   });
   expect(loose?.jumps).toEqual([120]);
+  expect(loose?.segments).toEqual([50, 50, 90]);
   expect(loose?.splits).toEqual([]);
   expect(loose?.endTick).toBe(0);
   expect(loose?.desyncTick).toBe(130);

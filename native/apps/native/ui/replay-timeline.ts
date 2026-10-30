@@ -35,6 +35,8 @@ export interface ReplayTimelineData {
   jumps: number[];
   /** Ticks where the runner switched strafe side (absent from older hosts). */
   strafes: number[];
+  /** Kept-path Segmented checkpoint loads. */
+  segments: number[];
   splits: ReplaySplit[];
   /** The final run's start and finish; 0 when the replay never starts or never finishes one. */
   startTick: number;
@@ -63,6 +65,7 @@ export function readTimelineData(value: unknown): ReplayTimelineData | null {
   if (!Array.isArray(data.speed) || data.speed.length > MAX_SAMPLES || !data.speed.every(isSpeed)) return null;
   const jumps = Array.isArray(data.jumps) ? data.jumps.slice(0, MAX_MARKS).filter(isTick) : [];
   const strafes = Array.isArray(data.strafes) ? data.strafes.slice(0, MAX_MARKS).filter(isTick) : [];
+  const segments = Array.isArray(data.segments) ? data.segments.slice(0, MAX_MARKS).filter(isTick) : [];
   const rawSplits = Array.isArray(data.splits) ? data.splits.slice(0, MAX_MARKS) : [];
   const splits = rawSplits.map(readSplit).filter((split): split is ReplaySplit => split !== null);
   return {
@@ -72,6 +75,7 @@ export function readTimelineData(value: unknown): ReplayTimelineData | null {
     speed: data.speed,
     jumps,
     strafes,
+    segments,
     splits,
     startTick: isTick(data.startTick) ? data.startTick : 0,
     endTick: isTick(data.endTick) ? data.endTick : 0,
@@ -335,6 +339,11 @@ export class ReplayTimeline {
     for (const tick of data.strafes) {
       if (this.inRange(tick))
         context.fillRect(Math.round(this.x(tick)), this.height - 10 * ratio, Math.max(1, ratio), 3 * ratio);
+    }
+    context.fillStyle = "rgba(255,255,255,0.5)";
+    for (const tick of data.segments) {
+      if (this.inRange(tick))
+        context.fillRect(Math.round(this.x(tick)), this.height - 4 * ratio, Math.max(1, ratio), 4 * ratio);
     }
     for (const split of data.splits) {
       this.marker(context, split.tick, ACCENT, split.kind === "stage" ? `S${split.index}` : `CP${split.index}`, 1);
