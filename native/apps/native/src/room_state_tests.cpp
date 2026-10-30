@@ -101,7 +101,41 @@ void test_smooth_under_jitter() {
     assert(worst < 30);
 }
 
+// A roster patch with a new outfit or loadout (the room re-stamping a player who changed cosmetics) shows at once.
+void test_live_cosmetics() {
+    native::RoomState room;
+    room.event(envelope(
+            {{"t", "welcome"},
+             {"you", 0},
+             {"room", {{"name", "r"}}},
+             {"map", {{"name", "m"}}},
+             {"players",
+              J::array(
+                      {{{"slot", 0}, {"name", "me"}},
+                       {{"slot", 2},
+                        {"name", "them"},
+                        {"outfit", "outfit-cream"},
+                        {"loadout", {{"knife", "knife-carrot"}, {"finish", "fin-garden"}, {"glove", "glove-knit"}}}}}
+              )}}
+    ));
+    feed(room, J::array({sample(100, 0), sample(105, 5)}), 1);
+    auto actors = room.actors(2);
+    assert(actors.size() == 1 && actors[0].outfit == "outfit-cream");
+    assert(actors[0].loadout.find("knife-carrot") != std::string::npos);
+    room.event(envelope(
+            {{"t", "player"},
+             {"slot", 2},
+             {"patch",
+              {{"outfit", "outfit-midnight"},
+               {"loadout", {{"knife", "knife-bayonet"}, {"finish", "fin-garden"}, {"glove", "glove-knit"}}}}}}
+    ));
+    actors = room.actors(2.01);
+    assert(actors[0].outfit == "outfit-midnight");
+    assert(actors[0].loadout.find("knife-bayonet") != std::string::npos);
+}
+
 int main() {
+    test_live_cosmetics();
     test_smooth_under_jitter();
     native::RoomState room;
     room.event(envelope(
