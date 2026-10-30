@@ -1,6 +1,7 @@
 #pragma once
 #include "actor_anim.hpp"
 #include "tp_inspect.hpp"
+#include "gun_hold.hpp"
 #include <span>
 #ifndef BUNNYHOP_NATIVE_ASSET_ROOT
 #define BUNNYHOP_NATIVE_ASSET_ROOT "target/native-assets"
@@ -143,6 +144,19 @@ class NativeViewmodel {
     };
 
     std::unordered_map<std::string, ActorAction> actorActions;
+
+    // The two-handed third-person gun hold (gun_hold.hpp): per gun data, and per actor its pose state and where its
+    // muzzle was last drawn (world space), for the flash and tracer of its next shot.
+    struct ActorHold {
+        std::unique_ptr<native_gun::GunHold> hold;
+        std::optional<std::array<float, 3>> muzzle;
+        uint32_t noise = 0x9e3779b9u;
+    };
+
+    std::unordered_map<std::string, native_gun::GunHoldData> gunHolds;
+    std::optional<native_gun::Rig> gunRig;
+    std::unordered_map<std::string, ActorHold> actorHolds;
+    std::vector<std::string> gunRigNames;
     float previewYaw = 0, previewPitch = 0;
     float bobScale = 1, swayScale = 1, swayYaw = 0, swayPitch = 0, previousYaw = 0, previousPitch = 0;
     bool viewInitialized = false;
@@ -434,7 +448,80 @@ class NativeViewmodel {
         gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 3, entry.bones, 0, GL_RGBA, GL_FLOAT, pose.data());
     }
 
-    void actor_actions(const native_render::Actor &actor, const Look &look, double seconds) {
+    void load_gun_holds(const nlohmann::json &metadata, size_t cs_bones) {
+        if (!metadata.contains("gunHolds") || !metadata.contains("fists")) return;
+        for (const auto &[id, raw] : metadata["gunHolds"].items())
+            gunHolds.emplace(id, native_gun::parse_hold(raw));
+        gunRig = native_gun::Rig{
+                actorNames,
+                actorParents,
+                actorBind,
+                std::min(cs_bones, actorNames.size()),
+                native_gun::parse_fists(metadata["fists"])
+        };
+    }
+
+    // A small per-actor random stream for the shot kick's jitter (the website uses Math.random).
+    static double hold_noise(ActorHold &state) {
+        state.noise ^= state.noise << 13;
+        state.noise ^= state.noise >> 17;
+        state.noise ^= state.noise << 5;
+        return double(state.noise) / 4294967296.0;
+    }
+
+    // Appends the gun mesh's two bones to `pose`: the hold's when the actor has a gun, else the right hand's.
+    void
+    gun_layer(const native_render::Actor &actor, double dt, float feetYaw, const native_actor_anim::Acting *acting) {
+        const auto &gun = weapons[std::min(size_t(actor.frame.weapon), weapons.size() - 1)];
+        const auto data = actor.frame.weapon >= 2 ? gunHolds.find(gun) : gunHolds.end();
+        const size_t bones = pose.size() / 12;
+        auto &state = actorHolds[actor.id];
+        if (!gunRig || data == gunHolds.end() || bones != actorNames.size()) {
+            const int hand = gunRig ? actor_bone("ValveBiped.Bip01_R_Hand") : -1;
+            for (int copy = 0; copy < 2; ++copy)
+                for (size_t i = 0; i < 12; ++i)
+                    pose.push_back(hand >= 0 && size_t(hand) < bones ? pose[size_t(hand) * 12 + i] : float(i % 5 == 0));
+            if (state.hold) state.hold->set_gun(nullptr, false);
+            state.muzzle.reset();
+            return;
+        }
+        const bool seen = state.hold != nullptr;
+        if (!state.hold) state.hold = std::make_unique<native_gun::GunHold>(*gunRig);
+        auto &hold = *state.hold;
+        hold.set_gun(&data->second, seen && !actor.snapped);
+        if (actor.attack == 1) hold.shot(hold_noise(state), hold_noise(state));
+        if (actor.attack == 2) {
+            const auto &d = data->second;
+            const bool shell = d.shell_seconds.has_value();
+            hold.reload(shell ? *d.shell_seconds : d.reload_seconds.value_or(2), shell);
+        }
+        hold.silenced = actor.silenced && data->second.silencer_tip.has_value();
+        native_gun::HoldInput input;
+        input.yaw = actor.frame.yaw - feetYaw;
+        input.pitch = actor.frame.pitch;
+        input.dt = dt;
+        input.snap = actor.snapped;
+        const bool arms_free = acting
+                               && (acting->gesture.arms[0].turn || acting->gesture.arms[0].reach
+                                   || acting->gesture.arms[1].turn || acting->gesture.arms[1].reach);
+        hold.apply(pose, input, arms_free);
+        pose.insert(pose.end(), hold.skin.begin(), hold.skin.end());
+        const double yaw = feetYaw * native_gun::radians_per_degree;
+        const auto &m = hold.muzzle;
+        state.muzzle = std::array<float, 3>{
+                actor.frame.position[0] + float(m[0] * std::cos(yaw) - m[1] * std::sin(yaw)),
+                actor.frame.position[1] + float(m[0] * std::sin(yaw) + m[1] * std::cos(yaw)),
+                actor.frame.position[2] + float(m[2])
+        };
+    }
+
+    void actor_actions(
+            const native_render::Actor &actor,
+            const Look &look,
+            double seconds,
+            float feetYaw,
+            const native_actor_anim::Acting *acting
+    ) {
         auto &state = actorActions[actor.id];
         if (actor.snapped || seconds < state.last || state.knife != look.knife || state.weapon != actor.frame.weapon)
             state = {};
@@ -464,12 +551,14 @@ class NativeViewmodel {
         native_render::advance_ponytail(
                 state.ponytail, actor.frame.velocity, actor.frame.yaw, dt, actor.snapped || dt <= 0, look.hairLength
         );
+        gun_layer(actor, dt, feetYaw, acting);
         gl.ActiveTexture(GL_TEXTURE0);
         gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
         gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 3, pose.size() / 12, 0, GL_RGBA, GL_FLOAT, pose.data());
         if (actorActions.size() > 256) {
             actorActions.clear();
             actorAnimationStates.clear();
+            actorHolds.clear();
         }
     }
 
@@ -616,6 +705,7 @@ public:
                 throw std::runtime_error("Invalid actor rig metadata");
             for (size_t i = 0; i < actorParents.size(); i++)
                 if (actorParents[i] >= int(i)) throw std::runtime_error("Invalid actor rig hierarchy");
+            load_gun_holds(metadata, rig.value("csBones", actorNames.size()));
         }
         for (const auto &[name, raw] : metadata.at("meshes").items()) {
             Mesh m;
@@ -1029,6 +1119,13 @@ public:
     void forget_actor(const std::string &id) {
         actorAnimationStates.erase(id);
         actorActions.erase(id);
+        actorHolds.erase(id);
+    }
+
+    // Where an actor's gun muzzle was last drawn (world space), while it holds a gun.
+    std::optional<std::array<float, 3>> actor_muzzle(const std::string &id) const {
+        const auto found = actorHolds.find(id);
+        return found == actorHolds.end() ? std::nullopt : found->second.muzzle;
     }
 
     // The weapon slot that holds gun `id` ("usp", "awp"), or 0.
@@ -1087,7 +1184,7 @@ public:
                 state->pose(input, seconds, actor.snapped, actor.attack != 0, pose, acting);
                 actorYaw = float(state->feetYaw);
             }
-            actor_actions(actor, l, seconds);
+            actor_actions(actor, l, seconds, actorYaw, acting);
         }
         return actorYaw;
     }

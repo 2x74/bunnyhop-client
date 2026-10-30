@@ -477,7 +477,18 @@ if(BUILD_TESTING)
             WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP ponytail_oracle TIMEOUT 60)
         add_test(NAME native_ponytail COMMAND bunnyhop-native-ponytail-tests "${PONYTAIL_ORACLE}")
         set_tests_properties(native_ponytail PROPERTIES FIXTURES_REQUIRED ponytail_oracle)
+        set(GUN_HOLD_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/gun-hold-oracle.json")
+        add_test(NAME native_gun_hold_oracle
+            COMMAND "${BUN_EXECUTABLE}" apps/native/src/gun-hold-oracle.ts "${GUN_HOLD_ORACLE}")
+        set_tests_properties(native_gun_hold_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP gun_hold_oracle TIMEOUT 120)
+        add_test(NAME native_gun_hold COMMAND bunnyhop-native-gun-hold-tests "${GUN_HOLD_ORACLE}")
+        set_tests_properties(native_gun_hold PROPERTIES FIXTURES_REQUIRED gun_hold_oracle)
     endif()
+    add_executable(bunnyhop-native-gun-hold-tests src/gun_hold_tests.cpp)
+    target_include_directories(bunnyhop-native-gun-hold-tests PRIVATE vendor)
+    target_compile_options(bunnyhop-native-gun-hold-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
     add_executable(bunnyhop-native-ponytail-tests src/ponytail_tests.cpp)
     target_include_directories(bunnyhop-native-ponytail-tests PRIVATE vendor)
     target_compile_options(bunnyhop-native-ponytail-tests PRIVATE

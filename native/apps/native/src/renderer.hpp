@@ -1077,12 +1077,15 @@ class Renderer {
     struct QueuedShot {
         BhAttackReport report;
         native_render::ShotBasis basis;
+        // Another player's shot: its flash is drawn here, not by the viewmodel.
+        bool remote = false;
     };
 
     struct ShotEffect {
         BhAttackReport report;
         native_render::ShotBasis basis;
         double started;
+        bool remote = false;
     };
 
     native_render::EventQueue<QueuedShot, 128> attackEvents;
@@ -1164,7 +1167,7 @@ class Renderer {
             }
         for (const auto &event : attackEvents.take()) {
             if (shotEffects.size() == 128) shotEffects.erase(shotEffects.begin());
-            shotEffects.push_back({event.report, event.basis, seconds});
+            shotEffects.push_back({event.report, event.basis, seconds, event.remote});
         }
         shotEffects.erase(
                 std::remove_if(
@@ -1185,7 +1188,7 @@ class Renderer {
                     to[k] = r.end[k];
                 if (age < .065f) {
                     presentation->ribbon(from, to, .4f, {1, .78f, .35f, (1 - age / .065f) * .65f}, eye);
-                    if (!viewmodelVisible)
+                    if (!viewmodelVisible || e.remote)
                         presentation->billboard(from, 4.5f, {1, .7f, .2f, 1 - age / .065f}, right, up);
                 }
                 if (r.hit) {
@@ -1942,6 +1945,56 @@ public:
     void set_room_actors(const std::vector<native_render::Actor> &actors) {
         roomActors = actors;
         if (roomActors.size() > 64) roomActors.resize(64);
+        for (const auto &actor : roomActors)
+            queue_remote_shot(actor);
+    }
+
+    // Another player's shot (net/players.ts shot): a tracer along their view from their gun's muzzle (as posed last
+    // frame) to where it meets the world here, with the flash and the impact.
+    void queue_remote_shot(const native_render::Actor &actor) {
+        constexpr float shot_range_units = 8192;
+        constexpr float standing_eye_units = 64, crouched_eye_units = 46;
+        if (actor.attack != 1 || actor.frame.weapon < 2 || actor.id.starts_with("ghost-")) return;
+        const bool crouched = actor.frame.flags & 1;
+        const float pitch = actor.frame.pitch * float(native::radians), yaw = actor.frame.yaw * float(native::radians);
+        const native_render::Vec3 forward = {
+                std::cos(pitch) * std::cos(yaw), std::cos(pitch) * std::sin(yaw), -std::sin(pitch)
+        };
+        float eye[3] = {actor.frame.position[0], actor.frame.position[1], actor.frame.position[2]};
+        eye[2] += crouched ? crouched_eye_units : standing_eye_units;
+        float far[3];
+        for (int k = 0; k < 3; ++k)
+            far[k] = eye[k] + forward[k] * shot_range_units;
+        float fraction = 1;
+        if (!bh_trace_camera(core, eye, far, 0, &fraction)) fraction = 1;
+        BhAttackReport report{};
+        report.weapon = actor.frame.weapon;
+        report.hit = fraction < 1;
+        for (int k = 0; k < 3; ++k) {
+            report.start[k] = eye[k];
+            report.end[k] = eye[k] + forward[k] * shot_range_units * fraction;
+            report.normal[k] = -forward[k];
+        }
+        native_render::Vec3 from = remote_muzzle(actor, forward, crouched);
+        auto basis = native_render::shot_basis(from, {report.end[0], report.end[1], report.end[2]}, false);
+        basis.muzzle = from;
+        attackEvents.push({report, basis, true});
+    }
+
+    // The muzzle of the bunny's posed gun, else about where it would be (in front of the right hip).
+    native_render::Vec3
+    remote_muzzle(const native_render::Actor &actor, const native_render::Vec3 &forward, bool crouched) const {
+        if (viewmodel)
+            if (const auto muzzle = viewmodel->actor_muzzle(actor.id)) return *muzzle;
+        constexpr float ahead_units = 26, side_units = 7, standing_hand_units = 46, crouched_hand_units = 30;
+        const float flat = std::hypot(forward[0], forward[1]);
+        const float length = flat > 0 ? flat : 1;
+        const native_render::Vec3 right = {forward[1] / length, -forward[0] / length, 0};
+        native_render::Vec3 out{};
+        for (int k = 0; k < 2; ++k)
+            out[k] = actor.frame.position[k] + forward[k] / length * ahead_units + right[k] * side_units;
+        out[2] = actor.frame.position[2] + (crouched ? crouched_hand_units : standing_hand_units);
+        return out;
     }
 
     native::Matrix camera(const float eye[3], double yaw, double pitch, float aspect) {
