@@ -7,7 +7,7 @@
   {
     "path": "crates/core/src/game.rs",
     "classification": "native patch",
-    "baseline": "cc0eeea26e5af48eae420de9f0819d05ec8fed24"
+    "baseline": "a693985c0a31df252bdfd25cb8ff0769aa339bec"
   },
   {
     "path": "crates/core/src/game/kin.rs",
@@ -82,7 +82,7 @@
   {
     "path": "crates/core/tests/physics_v16_cooks.rs",
     "classification": "whitespace only; overwrite",
-    "baseline": "1fe5603916d93c08634e20c034db7eecb9f26ff5"
+    "baseline": "0a45775c04dfd1b0571d24f2c41667adfba889ed"
   },
   {
     "path": "crates/core/tests/render.rs",
@@ -137,7 +137,7 @@
   {
     "path": "apps/web/src/api.ts",
     "classification": "native patch",
-    "baseline": "76c5b0e8fc7816708d40d11a5ffe894bb125ffd3"
+    "baseline": "ce628e612711c42d4b8aea25d7b5938679557782"
   },
   {
     "path": "apps/web/src/assets/audio/manifest.json",
@@ -152,7 +152,7 @@
   {
     "path": "apps/web/src/core.ts",
     "classification": "native patch",
-    "baseline": "bb4b69f37037133c96e7e7908914f6d1ef64b96c"
+    "baseline": "efca612a26b4d62dd43724d83b69756e35749a49"
   },
   {
     "path": "apps/web/src/feedback/modal.ts",
@@ -232,7 +232,7 @@
   {
     "path": "apps/web/src/ui/run-stats.ts",
     "classification": "native patch",
-    "baseline": "4f2ca1ae4cf9b3df108045c06c2d7414d5476f91"
+    "baseline": "2675204ac019e2c4f416c602329a373c1ce2bc10"
   },
   {
     "path": "apps/web/src/ui/support.ts",

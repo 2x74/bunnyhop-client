@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "status": "published",
-  "commit": "56bc58e0ee77da327961253835fbaf864cf95e49",
+  "status": "unpublished",
+  "commit": "6a37d059f59291a25ac3bbfefd5d1aa6ad5f45f4",
   "toolchain": "1.99.1",
-  "url": "https://bunnyhop.lol/assets/bunnyhop_core-CdnuhyLx.wasm",
-  "sha256": "1e6670dce25ed91b400cf0ea75eea9ceefb3392f9b3b14658d3fba828ffd26dc",
-  "bytes": 1474810,
-  "physics": 19,
+  "url": "",
+  "sha256": "2b4e6a763c750cd674dd92288d96d502a24d1294723ceff051f8f8ec906e1212",
+  "bytes": 1474290,
+  "physics": 20,
   "rules": 2
 }

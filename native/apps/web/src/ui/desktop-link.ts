@@ -50,22 +50,22 @@ const ROWS: [string, Cells][] = [
   ["What it is", [
     "The game at bunnyhop.lol. Nothing to install.",
     "The same site in its own window (Electron), with a few extras. Open source, by the bunnyhop.lol team.",
-    "A separate client by luna: C++ on the same Rust movement and timer code, menus from the site, no browser.",
+    "A separate client by luna: C++ on the same Rust movement and timer code, with its own menus and no browser.",
   ]],
-  ["Platforms", ["Any desktop browser", "Windows, macOS, Linux", "Windows x64, Linux x64, macOS on Apple silicon"]],
+  ["Platforms", ["Any desktop browser", "Windows, macOS, Linux", "Windows x64, Linux x64, macOS 15 or later on Apple silicon"]],
   ["Updates", [
     "Always the latest version.",
     "The game is always the latest. The app says when a new app version is out; you install it.",
-    "In the app (Settings → Updates) from 0.6.3. On 0.6.2 or older, download the new version once by hand.",
+    "In the app (Settings → Updates), checked once a day. 0.6.2 is the last version you download by hand.",
   ]],
   ["Input and frame rate", [
     "Input goes through the browser's event queue, which can hold it back on busy frames.",
     "Chromium set up for games: input reaches the game sooner than in Chrome. F10 has display options and a frame-time benchmark.",
-    "No browser in between: the highest frame rates, and the mouse read straight from the OS.",
+    "No browser in between: raw mouse input, uncapped FPS or an exact limit, exclusive fullscreen, and NVIDIA Reflex on Windows.",
   ]],
-  ["Custom CSS", ["Yes, Settings → Custom CSS", "Yes, and a CSS file it reloads when you save it (F10 → Client)", "Menus only: the in-game HUD is drawn natively"]],
-  ["Custom skies", ["Yes, Settings → Graphics → Sky", "Yes, and a skies folder (F10 → Client → Open skies folder)", "No, each map's own sky"]],
-  ["Also", ["", "Discord status with Join, maps kept on disk, a run vault", "Beta: expect rough edges. Feedback button in the client."]],
+  ["Custom CSS", ["Yes, Settings → Custom CSS", "Yes, and a CSS file it reloads when you save it (F10 → Client)", "In the menus, and a theme's HUD colours carry over"]],
+  ["Custom skies", ["Yes, Settings → Graphics → Sky", "Yes, and a skies folder (F10 → Client → Open skies folder)", "Yes, the same Sky picker, and a skies folder"]],
+  ["Also", ["", "Discord status with Join, maps kept on disk, a run vault", "Beta: expect rough edges. Video export with hardware encoders, the avatar editor and a live HUD editor (F2)."]],
   ["Ranked runs", ["Yes", "Yes, the same as the browser", "Yes, from builds the server has reviewed"]],
 ];
 

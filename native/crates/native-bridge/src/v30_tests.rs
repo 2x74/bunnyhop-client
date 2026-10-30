@@ -255,7 +255,7 @@ unsafe fn roundtrip(
         let path = fixture.0.join(format!("{name}-{track}.bhr"));
         data.write_bhr(&path).unwrap();
         let decoded = replay::Decoded::load(&path).unwrap();
-        assert_eq!(decoded.settings.physics, 19);
+        assert_eq!(decoded.settings.physics, game::PHYSICS_LATEST);
         assert_eq!(decoded.options.rules, 2);
         let path = CString::new(path.to_str().unwrap()).unwrap();
         assert_eq!(bh_replay_load(ctx, path.as_ptr()), 1);
@@ -311,7 +311,7 @@ fn v19_native_replay_roundtrips_on_release_maps() {
             let path = map_fixture(name);
             let zones = original_zones(&path);
             assert_eq!(bh_load_map(ctx, path.as_ptr(), ptr::null()), 1);
-            assert_eq!((*ctx).settings.physics, 19);
+            assert_eq!((*ctx).settings.physics, game::PHYSICS_LATEST);
             let options = BhRunOptions {
                 rules: 2,
                 ..BhRunOptions::default()

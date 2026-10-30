@@ -174,11 +174,14 @@ pub const PHYSICS_V16: u32 = 16;
 /// slope or a ledge no longer depends on where inside a tick the player meets it.
 pub const PHYSICS_V17: u32 = 17;
 /// The version new recordings use.
-pub const PHYSICS_LATEST: u32 = PHYSICS_V19;
+pub const PHYSICS_LATEST: u32 = PHYSICS_V20;
 /// v18: ladder surface properties, preserving historical replay behavior.
 pub const PHYSICS_V18: u32 = 18;
 /// v19: scoped map mechanics (template instances and explicit velocity scripts). No new movement fix bits.
 pub const PHYSICS_V19: u32 = 19;
+/// v20: bhoptimer autohop clears the old jump latch without stripping the current command, so unducking or
+/// teleporting onto a floor jumps before friction. Scroll, ladders and water retain their jump policy.
+pub const PHYSICS_V20: u32 = 20;
 /// Diagnostic pseudo-versions (never valid in a replay, whose field is a u8): `PHYSICS_DIAG | fix bits` turns on only
 /// the listed fixes, to tell which fix changes a replay (tools: /tmp physics-v2 analysis). The fix bits are the low 31
 /// (`PHYSICS_DIAG_FIXES`); before v18 the base was 1 << 30 with 30 fix bits; before v17 the base was 1 << 26 with 26 fix bits, before v16 1 << 25 with 25, before v15
@@ -413,7 +416,7 @@ pub fn physics_fixes(version: u32) -> Option<u32> {
         PHYSICS_V15 => Some(PHYSICS_FIX_V15),
         PHYSICS_V16 => Some(PHYSICS_FIX_V16),
         PHYSICS_V17 => Some(PHYSICS_FIX_V17),
-        PHYSICS_V18 | PHYSICS_V19 => Some(PHYSICS_FIX_ALL),
+        PHYSICS_V18 | PHYSICS_V19 | PHYSICS_V20 => Some(PHYSICS_FIX_ALL),
         v if v & !PHYSICS_DIAG_FIXES == PHYSICS_DIAG && v & PHYSICS_DIAG_FIXES & !PHYSICS_FIX_ALL == 0 => Some(v & PHYSICS_DIAG_FIXES),
         _ => None,
     }
@@ -1566,7 +1569,7 @@ impl Game {
     }
 
     pub fn set_settings(&mut self, settings: Settings) {
-        let spawn_changed = (self.map_mechanics.is_some() && (self.settings.physics_version == PHYSICS_V19) != (settings.physics_version == PHYSICS_V19))
+        let spawn_changed = (self.map_mechanics.is_some() && (PHYSICS_V19..=PHYSICS_LATEST).contains(&self.settings.physics_version) != (PHYSICS_V19..=PHYSICS_LATEST).contains(&settings.physics_version))
             || (self.settings.physics_fixes() ^ settings.physics_fixes())
             & (PHYSICS_FIX_DOOR_START_OPEN | PHYSICS_FIX_TRAIN_SPAWN | PHYSICS_FIX_MAP_DOOR_TRAVEL)
             != 0;
@@ -1922,19 +1925,23 @@ impl Game {
             && self.state.water_level == 0 && self.state.base_velocity == [0.0; 3]
             && self.gravity_scale == 1.0 && self.speed_scale == 1.0 && self.settings.gravity == 800.0
             && self.state.ground.is_none_or(|g| g.support.is_none_or(|hit| hit_entity(hit).is_none()) && g.normal[2] >= 0.99 && g.jump_factor == 1.0);
-        // Historical autohop mode (also used by our srcds parity plugin): IN_JUMP is stripped while the
-        // player is airborne at the start of the tick (not on a ladder, water level < 2), so the engine's
-        // jump latch is clear on the landing tick and holding jump re-jumps at once. Shavit instead clears old jump
-        // buttons without stripping the current command; that separate server-policy choice is not enabled here. The strip uses the
-        // pre-move ground state: a tick that starts airborne never jumps, even if the player is categorized onto the
-        // ground before moving (after a teleport). Verified against srcds (tools/parity).
+        // bhoptimer shavit-core OnPlayerRunCmd: keep IN_JUMP, clear m_nOldButtons' jump bit before movement.
+        // CheckJumpButton can then jump before friction if Duck or SetupMove categorizes ground this tick.
+        // Do not rearm scroll, ladder jumps or swimming; no change to raw button edges / last_buttons.
         let mut buttons = cmd.buttons;
-        if self.settings.autohop
+        if self.settings.physics_version == PHYSICS_V20 {
+            if self.settings.autohop && buttons & IN_JUMP != 0
+                && self.state.mode == movement::Mode::Walk && self.state.water_level < 2
+            {
+                self.state.jump_latched = false;
+            }
+        } else if self.settings.autohop
             && buttons & IN_JUMP != 0
             && !was_grounded
             && self.state.mode != movement::Mode::Ladder
             && self.state.water_level < 2
         {
+            // v1..v19 (and diagnostic versions): historical pre-move airborne strip, kept bit-identical.
             buttons &= !IN_JUMP;
         }
 

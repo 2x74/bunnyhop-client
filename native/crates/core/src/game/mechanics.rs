@@ -4,7 +4,7 @@ use super::*;
 
 impl Game {
     pub(super) fn mechanics_on(&self) -> bool {
-        self.settings.physics_version == PHYSICS_V19 && self.map_mechanics.is_some()
+        (PHYSICS_V19..=PHYSICS_LATEST).contains(&self.settings.physics_version) && self.map_mechanics.is_some()
     }
 
     /// CEventAction's constructor maps a map-file fire count of zero to EVENT_FIRE_ALWAYS.
@@ -312,6 +312,36 @@ mod tests {
                 map_fixes::mechanics_v19(&entities).is_none(),
                 "changed entity builds don't match"
             );
+        }
+    }
+    #[test]
+    fn v20_inherits_v19_mechanics_and_keeps_instances_when_switching_versions() {
+        if let Some(mut game) = load("bhop_ceaseless", PHYSICS_V18) {
+            // Crossing the v19 boundary must reinitialize zero-count outputs and scoped scripts.
+            game.set_settings(Settings { physics_version: PHYSICS_V20, ..Settings::css_bhop() });
+            let script = game.find_named("vscript").unwrap();
+            game.state.velocity = [300.0, 400.0, 123.0];
+            game.entity_input(script, "runscriptcode", "Boost(500)", Actor::Player);
+            assert_eq!(game.state.velocity, [600.0, 800.0, 123.0]);
+            assert!(game.ents.iter().flat_map(|e| e.outputs.iter()).all(|o| o.times != 0));
+        }
+        for map in ["bhop_cutekittenz2", "bhop_vandora", "bhop_ponpon_fix"] {
+            let Some(mut game) = load(map, PHYSICS_V19) else { continue; };
+            let maker = game.find_named("teleport_maker_1").unwrap();
+            let base = game.ents.len();
+            game.place_player([1000.0, 1000.0, 1000.0]);
+            game.entity_input(maker, "forcespawnatentityorigin", "!activator", Actor::Player);
+            assert_eq!(game.ents.len(), base + 1);
+            game.set_settings(Settings { physics_version: PHYSICS_V20, ..Settings::css_bhop() });
+            assert_eq!(game.ents.len(), base + 1, "v19 -> v20 must preserve the active instance");
+            game.entity_input(maker, "forcespawnatentityorigin", "!activator", Actor::Player);
+            assert_eq!(game.ents.len(), base + 2, "v20 keeps makers enabled");
+            game.set_settings(Settings { physics_version: PHYSICS_V18, ..Settings::css_bhop() });
+            assert_eq!(game.ents.len(), base, "v20 -> v18 restores historical spawn state");
+        }
+        for map in ["bhop_profane", "bhop_playboy_csgo", "bhop_api_kowka", "kz_bhop_liminal", "bhop_treason"] {
+            let Some(game) = load(map, PHYSICS_V20) else { continue; };
+            assert!(game.mechanics_on(), "{map} keeps its reviewed mechanics in v20");
         }
     }
     #[test]
