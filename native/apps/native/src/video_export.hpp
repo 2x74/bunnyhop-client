@@ -19,7 +19,7 @@ struct VideoOptions {
     std::string quality = "high", camera = "eye";
     // h264 hevc av1 prores dnxhr ffv1 png; encoder: auto, hardware or software.
     std::string codec = "h264", encoder = "auto";
-    // settings (the player's graphics), source or plain.
+    // settings (the player's graphics), source, plain, enhanced or cinematic.
     std::string look = "settings";
     // Motion blur: scene renders per frame spread over the shutter (360 = the whole frame time).
     int supersample = 1, samples = 1;

@@ -25,7 +25,7 @@ export interface VideoExportOptions {
   hud: boolean;
   codec?: "h264" | "hevc" | "av1" | "prores" | "dnxhr" | "ffv1" | "png";
   encoder?: "auto" | "hardware" | "software";
-  look?: "settings" | "source" | "plain";
+  look?: "settings" | "source" | "plain" | "enhanced" | "cinematic";
   supersample?: 1 | 2;
   samples?: 1 | 2 | 4 | 8 | 16;
   shutter?: number;

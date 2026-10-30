@@ -56,8 +56,9 @@ void validate_picture(const VideoOptions &o) {
         throw std::runtime_error("DNxHR needs a picture of at least 256×120.");
     if (o.encoder != "auto" && o.encoder != "hardware" && o.encoder != "software")
         throw std::runtime_error("Choose auto, hardware or software encoding.");
-    if (o.look != "settings" && o.look != "source" && o.look != "plain")
-        throw std::runtime_error("Choose the Source or Plain look.");
+    if (o.look != "settings" && o.look != "source" && o.look != "plain" && o.look != "enhanced"
+        && o.look != "cinematic")
+        throw std::runtime_error("Choose the Source, Plain, Enhanced or Cinematic look.");
     if ((o.supersample != 1 && o.supersample != 2) || !one_of(o.samples, video_sample_counts))
         throw std::runtime_error("Supersampling is 1 or 2; samples per frame 1, 2, 4, 8 or 16.");
     if (!std::isfinite(o.shutter_degrees) || o.shutter_degrees < 0 || o.shutter_degrees > max_shutter_degrees)

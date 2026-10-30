@@ -168,7 +168,16 @@ Json export_hud_settings(Json settings, const VideoOptions &options) {
     return settings;
 }
 
-void configure_renderer(Renderer &renderer, const Json &settings, const VideoOptions &options) {
+// The export's look over the player's graphics settings: Plain is the website's "classic" preset.
+Json export_graphics_settings(Json settings, const VideoOptions &options) {
+    if (options.look == "settings") return settings;
+    settings["graphicsPreset"] = options.look == "plain" ? "classic" : options.look;
+    settings["sourceLook"] = options.look != "plain";
+    return settings;
+}
+
+void configure_renderer(Renderer &renderer, const Json &player_settings, const VideoOptions &options) {
+    const auto settings = export_graphics_settings(player_settings, options);
     const auto prefs = Preferences::from_settings(settings);
     renderer.graphics_settings(settings);
     renderer.set_fov(prefs.fov);
@@ -189,7 +198,7 @@ void configure_renderer(Renderer &renderer, const Json &settings, const VideoOpt
     renderer.set_zones_visible(settings.value("zonesVisible", true));
     renderer.set_effects_visible(settings.value("effectsVisible", true));
     renderer.set_water_quality(settings.value("waterQuality", std::string("simple")) == "refracted" ? 1 : 0);
-    renderer.set_source_look(options.look == "settings" ? prefs.source_look : options.look == "source");
+    renderer.set_source_look(options.look == "settings" ? prefs.source_look : options.look != "plain");
 }
 
 ReplayCamera prepare_camera(BhContext *core, const VideoOptions &options, uint32_t total_ticks) {

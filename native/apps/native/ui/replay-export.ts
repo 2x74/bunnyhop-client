@@ -53,6 +53,8 @@ const LOOKS: readonly Choice<Look>[] = [
   { id: "settings", label: "As in Settings" },
   { id: "source", label: "Source" },
   { id: "plain", label: "Plain" },
+  { id: "enhanced", label: "Enhanced" },
+  { id: "cinematic", label: "Cinematic" },
 ];
 // The web export's camera names (viewer/export.ts EXPORT_CAMS), and native's orbit.
 const CAMERAS: readonly Choice<Camera>[] = [
