@@ -1,12 +1,24 @@
 # Changelog
 
-## Unreleased
+## v0.6.3 — Native
 
+Update from Settings → Updates: press Update, then Restart to update. Your settings, replays and maps are kept.
+
+**Ranked**
+- Physics v21, matching website v0.0.32: bhop_wayz's doors follow their rotator, so level 10 can be finished; a door
+  that starts open on bhop_collective spawns open; and the green train on bhop_areaportal_v1 stops turning you around.
+- Doors and props now rest in their proper pose on 123 maps, such as the corridor doors on bhop_mirrorsedge_chpt1.
+
+**Camera and clock**
 - The camera no longer goes through low ceilings. Under one, your view stays 12 units below it, as in CS:S. This
   moves only what you see: physics and ranked runs are unchanged.
 - The HUD clock counts while you bhop in the start zone instead of showing 0 until you leave it.
-- Maps with unconfirmed or incomplete zones say so in the map panel and once when they load.
-- Maps now play approved ambience and soundscapes, with Map sounds volume and mute controls.
+
+**Map sounds**
+- Maps now play approved ambience and soundscapes, placed in the map and fading with distance. Settings → Audio has
+  a Map sounds volume and mute.
+
+**HUD**
 - JHUD: type `!jhud` to see the speed and gain of every jump near your crosshair, coloured by how it went, with
   optional sync, JSS and a strafe arrow. It's off until you turn it on; Settings → HUD → JHUD has its colours, and
   the layout editor moves it.
@@ -14,6 +26,7 @@
   on in Settings → Ghost → Compare.
 - Compare with: pick the ghost your split and speed difference use. The split now stays on the lap or level you're
   on, as on the website.
+- Maps with unconfirmed or incomplete zones say so in the map panel and once when they load.
 
 ## v0.6.2 — Native
 
