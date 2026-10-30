@@ -10,7 +10,8 @@ import { api } from "../../web/src/api";
 import { accountChanged, setReplayIntro } from "../../web/src/ui/account-state";
 import { localName } from "../../web/src/ui/account";
 import { h } from "../../web/src/ui/dom";
-import { mapBrowser, closeMapPanel } from "../../web/src/ui/maps";
+import { fetchMapIndex, mapBrowser, closeMapPanel } from "../../web/src/ui/maps";
+import { MapZoneWarning } from "./map-zone-warning";
 import { onNavigate } from "../../web/src/ui/nav";
 import { onViewerRequest } from "../../web/src/viewer/request";
 import { onRaceRequest } from "../../web/src/player/race";
@@ -665,6 +666,11 @@ function reportedBoard(report: Record<string, unknown>): BoardContext | null | u
   if (!map || report.loading || !api.available()) return null;
   return { map, style, track: Number(track), generation: Number(runGeneration) };
 }
+const mapZoneWarning = new MapZoneWarning(
+  async (map) => (await fetchMapIndex()).find((entry) => entry.name === map)?.zoneWarning,
+  (text, ms) => send({ type: "hudToast", text, ms }),
+);
+
 function receive(value: unknown): void {
   const report = value as Record<string, unknown> | null;
   const board = report ? reportedBoard(report) : undefined;
@@ -710,6 +716,7 @@ function receive(value: unknown): void {
     ]);
   const pauseBefore = paused();
   const applied = applyState(value);
+  mapZoneWarning.mapChanged(state.map);
   applyReplayHostState(value);
   applyVideoQueueState(value);
   applyHostSkies(value);

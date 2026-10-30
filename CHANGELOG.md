@@ -4,6 +4,8 @@
 
 - The camera no longer goes through low ceilings. Under one, your view stays 12 units below it, as in CS:S. This
   moves only what you see: physics and ranked runs are unchanged.
+- The HUD clock counts while you bhop in the start zone instead of showing 0 until you leave it.
+- Maps with unconfirmed or incomplete zones say so in the map panel and once when they load.
 
 ## v0.6.2 — Native
 
