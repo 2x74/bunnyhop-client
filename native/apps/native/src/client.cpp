@@ -70,6 +70,7 @@
 #include "relaunch.hpp"
 #include "update_host.hpp"
 #include "video_capture.hpp"
+#include "video_worker.hpp"
 #include "client_smoke.hpp"
 #include "runtime_smoke.hpp"
 #include "window_sdl.hpp"
@@ -340,14 +341,9 @@ int run(const native::Options &opt) {
     auto &replay_compare_import = game.replay_compare_import;
     native::GraphicsMenuPacer graphics_menu_pacer;
     auto &video = game.video;
-    auto &video_encoder = video.encoder;
-
-    auto &video_capture = video.capture;
-    auto &director_job = video.director_job;
     native::ReplayCamera third_camera;
-    auto &video_error = video.error;
     auto &video_music_catalog = video.music_catalog;
-    auto cancel_video = std::bind_front(&native::VideoController::cancel, &video);
+    auto stop_camera_preparation = std::bind_front(&native::VideoController::cancel_preparation, &video);
     auto video_state = std::bind_front(&native::VideoController::state, &video);
     double display_fps = 0;
     native::TutorialRunner tutorial_runner;
@@ -648,7 +644,7 @@ int run(const native::Options &opt) {
         run_history.select(map_id, active_track, active_style, double(SDL_GetTicksNS()) / run_second_ns);
     };
     auto reset = [&]() {
-        cancel_video();
+        stop_camera_preparation();
         viewer.controls = {};
         viewer.controls.pending.reset();
         viewer.orbit_drag = false;
@@ -818,7 +814,7 @@ int run(const native::Options &opt) {
                 room_events |= 8;
             };
     auto leave_map = [&]() {
-        cancel_video();
+        stop_camera_preparation();
         viewer.controls = {};
         viewer.controls.pending.reset();
         viewer.orbit_drag = false;
@@ -890,7 +886,7 @@ int run(const native::Options &opt) {
                         const std::string &content,
                         const std::string &id,
                         const nlohmann::json &detail) {
-        game.prepare_workers(path, content);
+        game.prepare_workers(path, content, detail);
         auto next = map_preparation.take(path, content, settings, detail);
         const auto &next_zones = next.zones;
         std::unique_ptr<native::Tutorial> next_tutorial;
@@ -1050,7 +1046,9 @@ int run(const native::Options &opt) {
             const auto runner_loadout = viewer.session.info.value("packedLoadout", nlohmann::json()).is_string()
                                                 ? viewer.session.info.at("packedLoadout").get<std::string>()
                                                 : std::string();
-            renderer->set_cosmetics(native_render::packed_outfit(runner_loadout).value_or(outfit), runner_loadout);
+            viewer.runner_outfit = native_render::packed_outfit(runner_loadout).value_or(outfit);
+            viewer.runner_loadout = runner_loadout;
+            renderer->set_cosmetics(viewer.runner_outfit, runner_loadout);
             viewer.begin(path);
             replay_timeline.request(path, viewer.id);
             recorder.clear(true);
@@ -1098,11 +1096,7 @@ int run(const native::Options &opt) {
     auto replay_action = [&](native::ReplayControls::Action action) {
         viewer.action(action, curr.tick, camera_controls);
     };
-    video.bind(
-            {gl, game, hud, viewer, curr, preferences, active_style, outfit, assets, cache, opt, audio, download},
-            show_menu,
-            refresh_playback_pose
-    );
+    video.bind({game, viewer, curr, preferences, outfit, assets, cache, opt}, refresh_playback_pose);
     menu_smoke.bind(
             {window.get(),
              game,
@@ -1118,7 +1112,6 @@ int run(const native::Options &opt) {
              error,
              running}
     );
-    auto request_video = std::bind_front(&native::VideoController::request, &video);
     auto request_replay = [&](const std::filesystem::path &path,
                               const std::string &action,
                               unsigned ghost_slot = 0,
@@ -1599,9 +1592,7 @@ int run(const native::Options &opt) {
     if (!opt.presentation_smoke.empty()) {
         return native::run_presentation_smoke(opt, window.get(), gl, game, hud);
     }
-    native::VideoSmoke video_smoke(
-            {opt, game, viewer, curr, prev, camera_controls, preferences}, refresh_playback_pose
-    );
+    native::VideoSmoke video_smoke({opt, game, viewer, curr, prev, camera_controls, preferences});
     video_smoke.begin();
     while (running) {
         const auto frame_started = Clock::now();
@@ -1733,7 +1724,7 @@ int run(const native::Options &opt) {
                     if (down && !repeat && event.key.scancode == SDL_SCANCODE_RETURN
                         && (event.key.mod & SDL_KMOD_ALT)) {
                         save_window();
-                        if (!(video_capture || director_job || video_encoder.busy())) {
+                        if (!video.preparing()) {
                             if (auto changed = window_modes.toggle(preferences)) {
                                 preferences = std::move(*changed);
                                 menu_state.settings_changed();
@@ -1744,9 +1735,9 @@ int run(const native::Options &opt) {
                         }
                         break;
                     }
-                    if (video_capture || director_job || video_encoder.busy()) {
+                    if (video.preparing()) {
                         if (down && event.key.scancode == SDL_SCANCODE_ESCAPE) {
-                            cancel_video();
+                            stop_camera_preparation();
                             refresh_playback_pose();
                         }
                         break;
@@ -1877,7 +1868,7 @@ int run(const native::Options &opt) {
                     if (mouse_diagnostics.active && captured && focused && !chat.active) {
                         mouse_diagnostics.motion(motion_stamp, received);
                     }
-                    if (video_capture || director_job || video_encoder.busy()) {
+                    if (video.preparing()) {
                         viewer.controls.dragging = false;
                         viewer.orbit_drag = false;
                         break;
@@ -1922,7 +1913,7 @@ int run(const native::Options &opt) {
                 }
                 case SDL_EVENT_MOUSE_BUTTON_DOWN:
                 case SDL_EVENT_MOUSE_BUTTON_UP: {
-                    if (video_capture || director_job || video_encoder.busy()) {
+                    if (video.preparing()) {
                         viewer.controls.dragging = false;
                         viewer.orbit_drag = false;
                         break;
@@ -2045,22 +2036,21 @@ int run(const native::Options &opt) {
                         avatar_service.close();
                         continue;
                     }
-                    if (type == "practiceFromReplay" && (video_capture || director_job || video_encoder.busy())) {
+                    if (type == "practiceFromReplay" && video.preparing()) {
                         menu->evaluate_js(
                                 "window.bunnyhopNativeMenu?.onPracticeFromReplayResult?.("
                                 + native::practice_from_replay_reply(
-                                          false, "Finish or cancel video export before continuing as practice."
+                                          false, "Wait for the auto-director's cameras before continuing as practice."
                                 )
                                           .dump()
                                 + ")"
                         );
                         continue;
                     }
-                    if ((video_capture || director_job || video_encoder.busy()) && type != "videoExport"
-                        && type != "ready" && type != "update" && type != "audioCue" && type != "music"
-                        && type != "quit") {
+                    if (video.preparing() && type != "videoExport" && type != "ready" && type != "update"
+                        && type != "audioCue" && type != "music" && type != "quit") {
                         if (type == "settings")
-                            throw std::runtime_error("Finish or cancel video export before changing settings.");
+                            throw std::runtime_error("Wait for the auto-director's cameras before changing settings.");
                         continue;
                     }
                     const size_t limit = native::render_menu_message_limit(
@@ -2567,19 +2557,7 @@ int run(const native::Options &opt) {
                         } else
                             throw std::runtime_error("Unknown tutorial action");
                     } else if (type == "videoExport") {
-                        try {
-                            const auto action = message.value("action", std::string());
-                            if (action == "cancel") {
-                                cancel_video();
-                                refresh_playback_pose();
-                            } else if (action == "start") {
-                                request_video(native::parse_video_options(message.at("options")));
-                            }
-                        } catch (const std::exception &failure) {
-                            cancel_video();
-                            refresh_playback_pose();
-                            video_error = failure.what();
-                        }
+                        video.message(message, cache / "replays");
                     } else if (type == "replayControl" && viewer.active) {
                         const auto action = message.at("action").get<std::string>();
                         if (action == "camera") {
@@ -2608,7 +2586,15 @@ int run(const native::Options &opt) {
                             if (tick < viewer.session.range.from || tick > viewer.session.range.to)
                                 throw std::runtime_error("Replay tick outside playback range");
                             viewer.controls.pending = tick;
-                        } else if (action == "stop")
+                        } else if (action == "loop")
+                            viewer.set_loop(message.at("value"));
+                        else if (action == "weapon")
+                            viewer.toggle_weapon();
+                        else if (action == "hud")
+                            viewer.hud = message.value("value", !viewer.hud);
+                        else if (action == "viewer")
+                            viewer.viewer_ui(message);
+                        else if (action == "stop")
                             reset();
                     } else if (type == "sensitivity") {
                         preferences = native::patch_settings(preferences, {{"sensitivity", message.at("value")}});
@@ -2643,7 +2629,7 @@ int run(const native::Options &opt) {
                     else if (type == "update") {
                         BhRunState timing{};
                         if (core) bh_run_state(core.get(), &timing);
-                        const bool exporting = video_capture || director_job || video_encoder.busy();
+                        const bool exporting = video.exporting() || video.preparing();
                         const auto reply = updater.handle(
                                 message, {timing.status, timing.in_start != 0, heartbeat.generation, exporting}
                         );
@@ -2963,8 +2949,10 @@ int run(const native::Options &opt) {
                     epoch_ms(), held_action(restart_guard.action), !captured || chat.active || viewer.active
             ))
             act(*ready, false, true);
-        video.step();
-        if (!video_capture && !director_job && !video_encoder.busy())
+        video.step(captured && !viewer.active);
+        viewer.ui_shown = viewer.active && viewer.ui_open && menu && menu->visible();
+        viewer.wrap_loop(curr.tick);
+        if (!video.preparing())
             if (const auto seek = viewer.controls.take()) try {
                     seek_playback(*seek);
                 } catch (const std::exception &e) {
@@ -2972,9 +2960,9 @@ int run(const native::Options &opt) {
                     viewer.paused = true;
                 }
         const bool simulation_active =
-                !video_capture && !director_job && !video_encoder.busy() && core && !spectator && !room_modes.frozen()
-                && !download.valid()
-                && ((focused && (captured || (viewer.active && (!menu || !menu->visible())))) || opt.frames)
+                !video.preparing() && core && !spectator && !room_modes.frozen() && !download.valid()
+                && ((focused && (captured || (viewer.active && (!menu || !menu->visible() || viewer.ui_shown))))
+                    || opt.frames)
                 && (!viewer.active || (!viewer.paused && !viewer.controls.dragging));
         if (heartbeat.start && !simulation_active) heartbeat.paused = true;
         const double frame_seconds = input_clock.elapsed(now);
@@ -3026,6 +3014,7 @@ int run(const native::Options &opt) {
                 curr = state.player;
                 bh_last_command(core.get(), &cmd);
                 input.set_angles(cmd.pitch, cmd.yaw, 5);
+                viewer.record_view(cmd, curr.tick);
             } else {
                 const bool turns_allowed = captured
                                            && native::turn_binds_allowed(
@@ -3346,7 +3335,7 @@ int run(const native::Options &opt) {
         int width = 0, height = 0;
         SDL_GetWindowSizeInPixels(window.get(), &width, &height);
         low_latency.render_start(width, height);
-        if (renderer && !video_capture && !director_job) {
+        if (renderer && !video.preparing()) {
             const float blend = (opt.frames || !simulation_active) ? 1.0f : float(input_scheduler.seconds() / step_dt);
             float eye[3];
             for (int i = 0; i < 3; ++i)
@@ -3390,7 +3379,7 @@ int run(const native::Options &opt) {
             renderer->set_player_glow(player_glow);
             if (!spectator) renderer->set_spectated_actor(std::nullopt);
             renderer->set_viewmodel_weapon(std::nullopt);
-            renderer->set_viewmodel_visible(prefs.viewmodel && !opt.camera);
+            renderer->set_viewmodel_visible(prefs.viewmodel && !opt.camera && (!viewer.active || viewer.weapon_eye));
             renderer->set_source_look(prefs.source_look);
             if (spectator) {
                 spectated_actor = room.spectated(steady_seconds);
@@ -3434,6 +3423,7 @@ int run(const native::Options &opt) {
                             frame_seconds,
                             held_codes.contains("ShiftLeft") || held_codes.contains("ShiftRight")
                     );
+                viewer.smooth(state.player, prev, curr, blend, camera_input);
                 viewer.camera.sample(
                         core.get(),
                         state.player,
@@ -3486,8 +3476,9 @@ int run(const native::Options &opt) {
                 native_render::Actor self;
                 self.id = "local-camera-target";
                 self.opacity = 1;
-                self.outfit = outfit;
-                self.loadout = packed_loadout;
+                self.outfit = viewer.active ? viewer.runner_outfit : outfit;
+                self.loadout = viewer.active ? viewer.runner_loadout : packed_loadout;
+                self.emptyHand = viewer.active && !viewer.weapon_third;
                 self.playerGlow = player_glow;
                 for (int k = 0; k < 3; k++) {
                     self.frame.position[k] = state.player.position[k];
@@ -3611,7 +3602,11 @@ int run(const native::Options &opt) {
             }
             // The crosshair is sized in CSS pixels, like the website's: the display's scale, not the HUD's.
             hud.set_display_scale(SDL_GetWindowDisplayScale(window.get()));
-            const auto area = native::hud_area(renderer->output_view(width, height), width, height);
+            const auto area = viewer.hud_area(
+                    native::hud_area(renderer->output_view(width, height), width, height),
+                    height,
+                    SDL_GetWindowPixelDensity(window.get())
+            );
             native::HudViewport hud_viewport(gl, area, width, height);
             native::HudFrame{
                     core.get(),
@@ -3645,8 +3640,8 @@ int run(const native::Options &opt) {
                     steady_seconds,
                     area.width,
                     area.height,
-                    (!menu || !menu->visible()) && !opt.camera,
-                    bool(video_capture) || bool(director_job),
+                    (!menu || !menu->visible() || viewer.ui_shown) && !opt.camera,
+                    video.preparing(),
                     held_action("scoreboard") || show_scores,
                     weapon_context(),
                     hud_editor,
@@ -3889,7 +3884,7 @@ int run(const native::Options &opt) {
                                             {"error", ""}
                                     }}
                 };
-                native::render_playback_state(state, replay_compare, viewer.session.range.tick_interval);
+                native::render_playback_state(state, replay_compare, viewer.session.range.tick_interval, curr);
                 state["ghosts"] = nlohmann::json::array();
                 for (unsigned slot = 0; slot < 4; slot++) {
                     const auto &g = ghosts.slots[slot];
@@ -4065,6 +4060,7 @@ int run(const native::Options &opt) {
 
 int main(int argc, char **argv) {
     if (const auto plan = native::update_helper::plan_argument(argc, argv)) return native::update_helper::run(*plan);
+    if (const auto spec = native::video_worker::argument(argc, argv)) return native::video_worker::run(*spec);
 #ifdef BUNNYHOP_UPDATE_TEST_HOOKS
     if (argc == 3 && std::string(argv[1]) == "--update-smoke")
         return native::updates::run_smoke(native::data_location::from_utf8(argv[2]));

@@ -149,6 +149,9 @@ if(BUNNYHOP_BUILD_CLIENT)
         src/input_backend.cpp
         src/game_session.cpp
         src/video_controller.cpp
+        src/video_queue.cpp
+        src/video_worker.cpp
+        src/video_capture.cpp
         src/hud_frame.cpp
         src/hud_editor.cpp
         src/room_bridge.cpp
@@ -168,6 +171,7 @@ if(BUNNYHOP_BUILD_CLIENT)
         src/sky_library.cpp
         src/audio_pack.cpp
         src/video_export.cpp
+        src/video_codecs.cpp
         src/avatar_picture.cpp
         src/webp_lossless.cpp
     )
@@ -472,11 +476,12 @@ if(BUILD_TESTING)
             $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
         add_test(NAME native_file_dialogs COMMAND bunnyhop-native-file-dialog-tests)
         set_tests_properties(native_file_dialogs PROPERTIES TIMEOUT 20)
-        add_executable(bunnyhop-native-video-tests src/video_export_tests.cpp src/video_export.cpp src/audio_pack.cpp)
+        add_executable(bunnyhop-native-video-tests
+            src/video_export_tests.cpp src/video_export.cpp src/video_codecs.cpp src/audio_pack.cpp)
         target_include_directories(bunnyhop-native-video-tests PRIVATE include vendor src)
         target_link_libraries(bunnyhop-native-video-tests PRIVATE bunnyhop_core_native SDL3::SDL3 Threads::Threads)
         add_test(NAME native_video_export COMMAND bunnyhop-native-video-tests "${CMAKE_CURRENT_SOURCE_DIR}/../../target/native-assets")
-        set_tests_properties(native_video_export PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
+        set_tests_properties(native_video_export PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 240)
         add_executable(bunnyhop-native-update-tests src/native_update_tests.cpp)
         target_include_directories(bunnyhop-native-update-tests PRIVATE include vendor src)
         target_link_libraries(bunnyhop-native-update-tests PRIVATE bunnyhop_core_native SDL3::SDL3 CURL::libcurl Threads::Threads)
@@ -721,6 +726,10 @@ if(BUNNYHOP_BUILD_CLIENT)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(bunnyhop-native-replay-viewer-tests src/replay_viewer_tests.cpp src/replay_player.cpp)
+    target_include_directories(bunnyhop-native-replay-viewer-tests PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-replay-viewer-tests PRIVATE bunnyhop_core_native)
+    add_test(NAME native_replay_viewer COMMAND bunnyhop-native-replay-viewer-tests)
     add_executable(bunnyhop-native-replay-compare-tests src/replay_compare_tests.cpp)
     target_include_directories(bunnyhop-native-replay-compare-tests PRIVATE include vendor src)
     target_link_libraries(bunnyhop-native-replay-compare-tests PRIVATE bunnyhop_core_native)

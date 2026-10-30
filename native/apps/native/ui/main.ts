@@ -35,6 +35,7 @@ import {
   playLocalReplay,
 } from "./replays";
 import { applyReplayHostState, applyReplayTimeline } from "./replay-host";
+import { applyVideoQueueState } from "./video-queue";
 import { practiceFromReplay } from "./replay-practice";
 import { applyChatFeatures } from "./chat-features";
 import { hostScoreboard, ScoreboardFeed } from "./host-decoration";
@@ -708,6 +709,7 @@ function receive(value: unknown): void {
   const pauseBefore = paused();
   const applied = applyState(value);
   applyReplayHostState(value);
+  applyVideoQueueState(value);
   applyHostSkies(value);
   applyChatFeatures(value);
   if (applied) applySemanticPalette(state.settings.colorBlind);

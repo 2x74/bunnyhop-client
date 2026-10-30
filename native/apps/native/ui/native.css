@@ -103,6 +103,18 @@ html.native-clock-stopped *, html.native-clock-stopped *::before, html.native-cl
 .native-replay-what small { font-size:var(--fs-xs); }
 .native-replay-time { font-weight:700;font-variant-numeric:tabular-nums; }
 .native-replay-actions { display:flex;align-items:center;gap:.4rem; }
+.native-video-queue { display:flex;flex-direction:column;gap:.5rem;margin:var(--sp-3) 0;padding:.6rem 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line); }
+.native-video-queue-head { display:flex;align-items:center;justify-content:space-between;gap:1rem; }
+.native-video-job { display:flex;flex-direction:column;gap:.25rem;min-width:0; }
+.native-video-job-top { display:flex;align-items:center;justify-content:space-between;gap:1rem;font-weight:600; }
+.native-video-job small { font-size:var(--fs-xs);overflow-wrap:anywhere;font-variant-numeric:tabular-nums; }
+.native-video-job.is-error small[role=status] { color:#ffb3b3; }
+.native-video-job .rv-ex-bar { height:.35rem;border-radius:.2rem;background:var(--raise-2,rgba(255,255,255,.08));overflow:hidden; }
+.native-video-job .rv-ex-fill { height:100%;background:var(--accent,var(--amber));transform-origin:0 50%; }
+#rv .rv-ex-card .native-video-queue { margin:0; }
+#rv .rv-menu-row { display:flex;align-items:center;gap:.4rem;padding:.35rem .6rem; }
+#rv .rv-menu-row span { font-size:.84rem;color:var(--dim);margin-right:auto; }
+#rv .rv-menu-row input { width:4.5rem;background:var(--raise-2);color:var(--text);border:1px solid var(--line);border-radius:var(--radius-sm);padding:.3rem .4rem; }
 .native-ghost-toggle { display:flex;align-items:center;gap:.4rem; }
 
 .native-room-screen,.native-servers,.native-stats,.native-ranks,.native-profile,.native-tutorial-screen,.native-loadout { display:flex;flex-direction:column;max-height:100%;min-height:0; }

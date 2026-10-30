@@ -37,16 +37,16 @@ struct VideoSmokeState {
 
 class VideoSmoke : private VideoSmokeState {
 public:
-    VideoSmoke(VideoSmokeState state, std::function<void()> refresh_playback_pose);
+    explicit VideoSmoke(VideoSmokeState state);
     void begin();
     void frame(bool &running);
 
 private:
-    std::function<void()> refresh_playback_pose_;
     int video_smoke_stage = 0;
     std::string video_smoke_encoder;
     std::chrono::steady_clock::time_point video_smoke_started;
     void check_restored() const;
+    void request_music();
 };
 
 class MenuSmoke {

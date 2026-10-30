@@ -24,7 +24,10 @@ struct ReplayTimelineData {
     uint32_t step = 1, start = 0, end = 0;
     std::vector<float> speeds;
     std::vector<uint32_t> jumps;
+    // Ticks where the runner switched strafe side (A to D or back).
+    std::vector<uint32_t> strafes;
     std::vector<Split> splits;
+    int last_side = 0;
     std::optional<uint32_t> desync;
 
     void sample(uint32_t tick, const BhState &state) {
@@ -34,6 +37,12 @@ struct ReplayTimelineData {
         if (std::isfinite(speed)) speeds[bin] = std::max(speeds[bin], speed);
         constexpr uint32_t jumped = 1u << 1;
         if (state.events & jumped) jumps.push_back(tick);
+    }
+
+    void strafe(uint32_t tick, const BhCmd &command) {
+        const int side = command.side > 0 ? 1 : command.side < 0 ? -1 : 0;
+        if (side && last_side && side != last_side) strafes.push_back(tick);
+        if (side) last_side = side;
     }
 
     nlohmann::json json(const std::string &id) const {
@@ -48,6 +57,7 @@ struct ReplayTimelineData {
                 {"step", step},
                 {"speed", speeds},
                 {"jumps", jumps},
+                {"strafes", strafes},
                 {"splits", std::move(marks)},
                 {"startTick", start},
                 {"endTick", end},
@@ -139,6 +149,8 @@ inline ReplayTimelineData build_replay_timeline(
             break;
         }
         timeline.sample(tick, state.player);
+        BhCmd command{};
+        if (bh_last_command(core.get(), &command)) timeline.strafe(tick, command);
         BhRunState run{};
         if (bh_run_state(core.get(), &run)) timeline_split(timeline, state.player, run, zones, last_split);
     }

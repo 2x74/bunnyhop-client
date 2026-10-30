@@ -27,6 +27,8 @@ constexpr double camera_angle_tolerance_degrees = .0001;
 constexpr uint32_t export_ticks = 200;
 constexpr uint32_t encoder_failure_ticks = 100;
 constexpr int cancel_after_frames = 3;
+constexpr int smoke_width_pixels = 640;
+constexpr int smoke_height_pixels = 360;
 constexpr double music_offset_seconds = 12;
 constexpr double music_volume_fraction = 1;
 constexpr double master_volume_fraction = .65;
@@ -55,15 +57,13 @@ int run_presentation_smoke(const Options &opt, SDL_Window *window, Gl &gl, GameS
     return 0;
 }
 
-VideoSmoke::VideoSmoke(VideoSmokeState state, std::function<void()> refresh_playback_pose)
-    : VideoSmokeState(state)
-    , refresh_playback_pose_(std::move(refresh_playback_pose)) {
+VideoSmoke::VideoSmoke(VideoSmokeState state) : VideoSmokeState(state) {
 }
 
+// Exports run in their own process. The viewer must stay exactly where it was through a cancel, an encoder that
+// cannot start and a completed export with music.
 void VideoSmoke::begin() {
     if (!opt.video_smoke.empty()) {
-        // The viewer now plays with a free cursor too. Hold the fixture paused
-        // so restoration can be inspected after each asynchronous export phase.
         viewer.paused = true;
         BhSnapshot restored{};
         require(bh_replay_seek(game.core.get(), restored_tick, &restored), game.core.get(), "Video smoke initial seek");
@@ -76,10 +76,12 @@ void VideoSmoke::begin() {
         camera_controls.set_angles(free_camera_pitch_degrees, free_camera_yaw_degrees);
         game.video.wait_probe();
         native::VideoOptions options;
+        options.width = smoke_width_pixels;
+        options.height = smoke_height_pixels;
         options.full_recording = true;
         options.to = std::min(export_ticks, viewer.session.range.total);
         options.camera = "auto";
-        game.video.request(options);
+        game.video.request(options, "smoke cancel");
     }
     video_smoke_encoder = game.video.available.encoder;
     video_smoke_started = Clock::now();
@@ -90,50 +92,52 @@ void VideoSmoke::check_restored() const {
         || viewer.camera.position != free_camera_position_units
         || std::abs(viewer.camera.yaw - free_camera_yaw_degrees) > camera_angle_tolerance_degrees
         || std::abs(viewer.camera.pitch - free_camera_pitch_degrees) > camera_angle_tolerance_degrees)
-        throw std::runtime_error("Video export did not restore the viewer state");
+        throw std::runtime_error("Video export moved the viewer");
+}
+
+void VideoSmoke::request_music() {
+    native::VideoOptions options;
+    options.width = smoke_width_pixels;
+    options.height = smoke_height_pixels;
+    options.full_recording = true;
+    options.to = std::min(export_ticks, viewer.session.range.total);
+    options.camera = "auto";
+    options.music = "game-airstrafe";
+    options.music_offset = music_offset_seconds;
+    // Smoke-only soundtrack. Regular exports keep the explicit No music default.
+    preferences["musicPack"] = "default";
+    preferences["muted"] = false;
+    preferences["muteMusic"] = false;
+    preferences["musicVolume"] = music_volume_fraction;
+    preferences["volume"] = master_volume_fraction;
+    game.video.request(options, "smoke music");
 }
 
 void VideoSmoke::frame(bool &running) {
     if (opt.video_smoke.empty()) return;
     const auto result = game.video.state();
     const auto phase = result.value("state", std::string());
+    check_restored();
     if (video_smoke_stage == 0 && phase == "capturing" && result.value("frames", 0) >= cancel_after_frames) {
         game.video.cancel();
-        refresh_playback_pose_();
-        check_restored();
         video_smoke_stage = 1;
-    } else if (video_smoke_stage == 1 && !game.video.encoder.busy()) {
-        check_restored();
+    } else if (video_smoke_stage == 1 && phase == "canceled") {
         game.video.available.encoder = "/bunnyhop-test-missing-encoder";
         native::VideoOptions options;
+        options.width = smoke_width_pixels;
+        options.height = smoke_height_pixels;
         options.full_recording = true;
         options.to = encoder_failure_ticks;
-        game.video.request(options);
+        game.video.request(options, "smoke missing encoder");
         video_smoke_stage = 2;
-    } else if (video_smoke_stage == 2 && phase == "error" && !game.video.encoder.busy()) {
-        check_restored();
+    } else if (video_smoke_stage == 2 && phase == "error") {
         game.video.available.encoder = video_smoke_encoder;
-        native::VideoOptions options;
-        options.full_recording = true;
-        options.to = export_ticks;
-        options.camera = "auto";
-        options.music = "game-airstrafe";
-        options.music_offset = music_offset_seconds;
-        // Smoke-only soundtrack. Regular exports keep the explicit No music default.
-        preferences["musicPack"] = "default";
-        preferences["muted"] = false;
-        preferences["muteMusic"] = false;
-        preferences["musicVolume"] = music_volume_fraction;
-        preferences["volume"] = master_volume_fraction;
-        game.video.request(options);
+        request_music();
         video_smoke_stage = 3;
     } else if (video_smoke_stage == 3 && phase == "completed") {
-        check_restored();
         auto proof = result;
         proof["restoredTick"] = curr.tick;
-        proof["restoredFreeCamera"] = true;
-        proof["cancelRestored"] = true;
-        proof["encoderFailureRestored"] = true;
+        proof["viewerUntouched"] = true;
         std::ofstream(native::data_location::from_utf8(opt.video_smoke) / "result.json") << proof.dump(2) << '\n';
         running = false;
     } else if (video_smoke_stage == 3 && (phase == "error" || phase == "canceled"))

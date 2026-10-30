@@ -20,10 +20,22 @@ export interface VideoExportOptions {
   width: number;
   height: number;
   fps: number;
-  quality: "standard" | "high" | "max";
-  camera: "eye" | "chase" | "flyby" | "auto";
+  quality: "standard" | "high" | "max" | "edit";
+  camera: "eye" | "chase" | "flyby" | "orbit" | "auto";
   hud: boolean;
+  codec?: "h264" | "hevc" | "av1" | "prores" | "dnxhr" | "ffv1" | "png";
+  encoder?: "auto" | "hardware" | "software";
+  look?: "settings" | "source" | "plain" | "enhanced" | "cinematic";
+  supersample?: 1 | 2;
+  samples?: 1 | 2 | 4 | 8 | 16;
+  shutter?: number;
+  speed?: boolean;
+  keys?: boolean;
+  graph?: boolean;
+  crosshair?: boolean;
+  weapon?: boolean;
   audio?: boolean;
+  audioFile?: boolean;
   music?: string;
   musicOffset?: number;
   musicLevel?: number;
@@ -55,7 +67,10 @@ export type MenuMessage =
       action: "status" | "pick" | "useDefault" | "cancelChoice" | "cancelPending" | "forget" | "reveal";
     }
   | { type: "dataFolder"; action: "move"; when: "now" | "later" }
-  | { type: "videoExport"; action: "start" | "cancel"; options?: VideoExportOptions }
+  | { type: "videoExport"; action: "start"; options: VideoExportOptions; title?: string }
+  | { type: "videoExport"; action: "file"; id: string; map: string; options: VideoExportOptions }
+  | { type: "videoExport"; action: "cancel"; id?: number }
+  | { type: "videoExport"; action: "clear" }
   | { type: "ready"; origin: string; webglContexts: number; webglAttempts: number }
   | { type: "resume" | "restart" | "quit" }
   | { type: "prefetchMap"; map: string | null; sha?: string }
@@ -119,6 +134,17 @@ export type MenuMessage =
       speed?: number;
     }
   | { type: "replayControl"; action: "fullRecording"; value: boolean }
+  | { type: "replayControl"; action: "loop"; value: { from: number; to: number } | null }
+  | { type: "replayControl"; action: "weapon" }
+  | { type: "replayControl"; action: "hud"; value: boolean }
+  /** Draw the replay in the runner's shape, fit and FOV (src/runner_view.hpp); null goes back. */
+  | {
+      type: "replayControl";
+      action: "runnerView";
+      view: { aspect: number; screen: number; bars: boolean; fov: number } | null;
+    }
+  /** The viewer is on screen: the host keeps playing under it and draws the runner's HUD. */
+  | { type: "replayControl"; action: "viewer"; open: boolean; top?: number; bottom?: number }
   | { type: "practiceFromReplay"; tick?: number }
   /** A second replay as a ghost on the one being watched (replay-host.ts); needs the host's "compare" feature. */
   | { type: "replayCompare"; action: "set"; kind: "pb" | "wr" | "custom"; name: string; replayBase64: string }
@@ -456,7 +482,7 @@ export function runSeconds(run: { seconds?: number; timeMs?: unknown }): number 
   if (Number.isSafeInteger(run.timeMs) && Number(run.timeMs) > 0) return Number(run.timeMs) / 1000;
   return typeof run.seconds === "number" && Number.isFinite(run.seconds) && run.seconds > 0 ? run.seconds : null;
 }
-export const REPLAY_CAMERAS = ["eye", "chase", "free", "flyby", "auto"] as const;
+export const REPLAY_CAMERAS = ["eye", "chase", "free", "flyby", "auto", "orbit"] as const;
 export type ReplayCamera = (typeof REPLAY_CAMERAS)[number];
 export interface NativeGhost {
   slot: number;
