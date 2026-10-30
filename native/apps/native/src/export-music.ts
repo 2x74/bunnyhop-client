@@ -25,7 +25,9 @@ export const OST = JSON.parse(manifestBytes.toString()) as {
 const metadataKeys = ["id", "title", "role", "duration", "bpm", "loopStart", "loopEnd", "credit"] as const;
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
-function verifyCatalog(music: unknown): void {
+type MusicMetadata = Pick<(typeof OST.tracks)[number], (typeof metadataKeys)[number]>;
+
+function verifyCatalog(music: unknown): asserts music is MusicMetadata[] {
   if (OST.schema !== 1 || OST.tracks.length !== 11 || !Array.isArray(music) || music.length !== OST.tracks.length)
     throw new Error("Bundled OST catalog is incomplete");
   const ids = new Set<string>();
@@ -47,6 +49,13 @@ function verifyCatalog(music: unknown): void {
   }
 }
 
+export function bundledMusic(music: unknown): MusicMetadata[] {
+  if (!Array.isArray(music)) throw new Error("Bundled OST catalog is incomplete");
+  const selected: unknown[] = OST.tracks.map((track) => music.find((entry) => entry?.id === track.id));
+  verifyCatalog(selected);
+  return selected;
+}
+
 function verifyTrack(directory: string, track: (typeof OST.tracks)[number]): void {
   const file = join(directory, track.file),
     st = lstatSync(file);
@@ -55,7 +64,7 @@ function verifyTrack(directory: string, track: (typeof OST.tracks)[number]): voi
 }
 
 export function exportMusic(assets: string, music: unknown): void {
-  verifyCatalog(music);
+  bundledMusic(music);
   for (const track of OST.tracks) verifyTrack(MUSIC_SOURCE, track);
   const directory = join(assets, "music");
   mkdirSync(directory, { recursive: true });

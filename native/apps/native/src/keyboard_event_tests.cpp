@@ -1,6 +1,7 @@
 // SDL event sequences exercise the production repeat/ownership gate and exact tick commands, without a window.
 #include "input_timeline.hpp"
 #include "settings.hpp"
+#include "client_util.hpp"
 #include <SDL3/SDL.h>
 #ifdef NDEBUG
 #undef NDEBUG
@@ -31,7 +32,8 @@ struct Keyboard {
                 timeline.key_event(event.key.scancode, down, event.key.repeat, native::game_owns_keyboard(menu, true));
         if (!repeat) return;
         if (down && !*repeat) ++presses;
-        const std::string code = event.key.scancode == SDL_SCANCODE_A ? "KeyA" : "KeyD";
+        const std::string code = native::key_code(event.key.scancode);
+        if (code.empty()) return;
         timeline.key(held, code, down, false, event.key.timestamp, origin_ns + 50 * millisecond_ns);
     }
 
@@ -99,9 +101,43 @@ void captured_switches_keep_subframe_edges() {
     keyboard.event(key(51, SDL_SCANCODE_D, false));
     assert(keyboard.tick().buttons == 0);
 }
+
+void focus_loss_releases_modifiers() {
+    const std::array modifiers{
+            SDL_SCANCODE_LCTRL,
+            SDL_SCANCODE_RCTRL,
+            SDL_SCANCODE_LSHIFT,
+            SDL_SCANCODE_RSHIFT,
+            SDL_SCANCODE_LALT,
+            SDL_SCANCODE_RALT,
+            SDL_SCANCODE_LGUI,
+            SDL_SCANCODE_RGUI
+    };
+    for (const auto scancode : modifiers) {
+        Keyboard keyboard;
+        const std::string code = native::key_code(scancode);
+        const uint32_t expected = code.empty() ? 0 : native::duck;
+        const auto codes = code.empty() ? nlohmann::json::array() : nlohmann::json::array({code});
+        keyboard.timeline.rebuild_binds({{"duck", codes}});
+        keyboard.event(key(1, scancode, true));
+        assert(keyboard.tick().buttons == expected);
+        keyboard.timeline.keyboard_focus_lost();
+        keyboard.timeline.release(keyboard.input, keyboard.held);
+        assert(keyboard.tick().buttons == 0);
+        keyboard.event(key(21, scancode, true, true), true);
+        keyboard.event(key(22, scancode, false), true);
+        keyboard.event(key(31, scancode, true, true));
+        assert(keyboard.tick().buttons == 0);
+        assert(keyboard.tick().buttons == expected);
+        keyboard.event(key(41, scancode, false));
+        assert(keyboard.tick().buttons == 0);
+        assert(keyboard.presses == 2);
+    }
+}
 }  // namespace
 
 int main() {
+    focus_loss_releases_modifiers();
     menu_repeat_does_not_poison_gameplay();
     captured_switches_keep_subframe_edges();
 }

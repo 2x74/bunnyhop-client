@@ -8,8 +8,8 @@ window) and WebView2 on Windows. The menu bundle refuses the web game entry poin
 (`build-menu.ts`, `menu-boundary.ts`). There is no Electron dependency; the old Electron client lives at the
 repository root.
 
-The vendored game sources come from web `main` at `59fd424c` (v0.0.29 and its hotfixes), physics 18, timer rules 2. See
-[the v0.0.29 integration notes](../../docs/v0.0.29-native-integration.md).
+The vendored game sources come from web `release-0.0.30` at `1593e71b`, physics 19, timer rules 2. Historical
+physics 1–18 remain available for replays. See [the v0.0.30 integration notes](../../docs/v0.0.30-native-integration.md).
 
 ## Build and play
 
@@ -56,7 +56,15 @@ still shows new motion at once. `--legacy-input` restores per-frame input for co
 reads the keyboard through raw input.
 
 Settings → Mouse → Show input stats overlays delivered reports per second, peak reports per frame, event age and
-frame time per phase, and flags stalls over 50 ms. It is off by default and does no per-event allocation.
+frame time per phase, and flags stalls over 50 ms. It also names the backend and reports motion timestamp jitter.
+These measure delivered motion, including SDL timestamp estimates, rather than the USB polling rate.
+
+Mouse → Advanced → Native input selects Auto, SDL or experimental Raw. Auto keeps SDL. Raw reads relative HID
+counts with device timestamps on macOS (requires Input Monitoring) or evdev packets with monotonic kernel times on
+Linux (requires access to the mouse device nodes). Buttons and keys keep SDL. Windows keeps SDL's raw-input thread;
+its packet timestamps are estimates spread across each read batch. Missing permission, a disconnected device or a
+raw queue overrun returns to SDL. After changing permission or reconnecting on Linux, select SDL then Raw to retry.
+Check sensitivity with a physical mouse before using Raw; it has not completed target-OS hardware validation.
 
 ## Replays and scores
 

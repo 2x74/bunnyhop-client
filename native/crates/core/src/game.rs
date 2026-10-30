@@ -21,6 +21,9 @@ mod map_fixes;
 mod practice;
 // DanZay's VScript objective gates, emulated natively on bhop_cooksassistant (physics v16).
 mod vscript;
+mod mechanics;
+mod scripts19;
+mod momentary;
 // Trigger / clip overlays for the client (never called by `step`; see the module docs).
 mod overlay;
 pub use overlay::{
@@ -171,9 +174,11 @@ pub const PHYSICS_V16: u32 = 16;
 /// slope or a ledge no longer depends on where inside a tick the player meets it.
 pub const PHYSICS_V17: u32 = 17;
 /// The version new recordings use.
-pub const PHYSICS_LATEST: u32 = PHYSICS_V18;
+pub const PHYSICS_LATEST: u32 = PHYSICS_V19;
 /// v18: ladder surface properties, preserving historical replay behavior.
 pub const PHYSICS_V18: u32 = 18;
+/// v19: scoped map mechanics (template instances and explicit velocity scripts). No new movement fix bits.
+pub const PHYSICS_V19: u32 = 19;
 /// Diagnostic pseudo-versions (never valid in a replay, whose field is a u8): `PHYSICS_DIAG | fix bits` turns on only
 /// the listed fixes, to tell which fix changes a replay (tools: /tmp physics-v2 analysis). The fix bits are the low 31
 /// (`PHYSICS_DIAG_FIXES`); before v18 the base was 1 << 30 with 30 fix bits; before v17 the base was 1 << 26 with 26 fix bits, before v16 1 << 25 with 25, before v15
@@ -368,6 +373,11 @@ pub fn map_nonlinear_objectives_table() -> Vec<&'static str> {
     map_fixes::NONLINEAR_OBJECTIVES.iter().map(|m| m.map).collect()
 }
 
+/// Reviewed map mechanics build, selected by its entity fingerprint (tests/tools).
+pub fn map_mechanics_v19_for(entities: &[Entity]) -> Option<&'static str> {
+    map_fixes::mechanics_v19(entities).map(|m| m.map)
+}
+
 /// The map a parsed entity lump matches in `game/map_fixes.rs` `SIGNED_DOOR_TRAVEL` (tests, tools).
 pub fn map_signed_door_travel_for(entities: &[Entity]) -> Option<&'static str> {
     map_fixes::signed_door_travel(entities).map(|m| m.map)
@@ -376,6 +386,11 @@ pub fn map_signed_door_travel_for(entities: &[Entity]) -> Option<&'static str> {
 /// Every map's own sv_maxvelocity (`game/map_fixes.rs` `MAX_VELOCITY`), as (map name, value) (tests, tools).
 pub fn map_max_velocity_table() -> Vec<(&'static str, f32)> {
     map_fixes::MAX_VELOCITY.iter().map(|m| (m.map, m.max_velocity)).collect()
+}
+
+/// Per-map limits with their first physics version (tests/tools; no new diagnostic fix bits).
+pub fn map_max_velocity_version_table() -> Vec<(&'static str, f32, u32)> {
+    map_fixes::MAX_VELOCITY.iter().map(|m| (m.map, m.max_velocity, m.min_physics)).collect()
 }
 
 /// The fixes a physics version turns on; None for unknown versions.
@@ -398,7 +413,7 @@ pub fn physics_fixes(version: u32) -> Option<u32> {
         PHYSICS_V15 => Some(PHYSICS_FIX_V15),
         PHYSICS_V16 => Some(PHYSICS_FIX_V16),
         PHYSICS_V17 => Some(PHYSICS_FIX_V17),
-        PHYSICS_V18 => Some(PHYSICS_FIX_ALL),
+        PHYSICS_V18 | PHYSICS_V19 => Some(PHYSICS_FIX_ALL),
         v if v & !PHYSICS_DIAG_FIXES == PHYSICS_DIAG && v & PHYSICS_DIAG_FIXES & !PHYSICS_FIX_ALL == 0 => Some(v & PHYSICS_DIAG_FIXES),
         _ => None,
     }
@@ -688,6 +703,8 @@ enum TriggerKind {
         target: String,
         landmark: Option<String>,
     },
+    /// CTriggerTeleportRelative: offset from the trigger center, zero momentum, unchanged angles.
+    TeleportRelative { offset: [f32; 3] },
     Push {
         dir: [f32; 3],
         speed: f32,
@@ -1317,7 +1334,7 @@ pub struct Game {
     map_trigger_boxes: Vec<(usize, physics::ConvexBrush)>,
     /// The map's sv_maxvelocity (`map_fixes::MAX_VELOCITY`), if it has one; used from physics v14
     /// (`PHYSICS_FIX_MAP_MAX_VELOCITY`). Fixed at load.
-    map_max_velocity: Option<f32>,
+    map_max_velocity: Option<&'static map_fixes::MaxVelocity>,
     /// The map is in `map_fixes::SIGNED_DOOR_TRAVEL`: from physics v15 (`PHYSICS_FIX_MAP_DOOR_TRAVEL`) its movers use
     /// Source's signed travel. Fixed at load.
     map_signed_door_travel: bool,
@@ -1327,6 +1344,8 @@ pub struct Game {
     /// The map is in `map_fixes::NONLINEAR_OBJECTIVES`: its scripted triggers (entity, role); from physics v16
     /// (`PHYSICS_FIX_MAP_PLAYER_IO`) `game/vscript.rs` runs their scripts. Empty elsewhere. Fixed at load.
     script_triggers: Vec<(usize, vscript::ScriptRole)>,
+    /// Exact reviewed entity build matched by map_fixes::MECHANICS_V19. Fixed at load.
+    map_mechanics: Option<&'static map_fixes::MapMechanics>,
 }
 
 /// Physics v4 world state the entity list doesn't hold; saved with the game state, cleared on reset.
@@ -1348,6 +1367,9 @@ struct Extra {
     /// Objective triggers the player collected (v16, `NONLINEAR_OBJECTIVES` maps: the script scope's
     /// `nl_collectedObjectives`), entity indices in the order collected.
     objectives: Vec<u32>,
+    /// Original template member for each runtime instance, after initial_ents.len().
+    instance_sources: Vec<usize>,
+    scripts19: scripts19::State,
 }
 
 impl Extra {
@@ -1385,6 +1407,11 @@ impl Extra {
                 out.extend_from_slice(&i.to_le_bytes());
             }
         }
+        if !self.instance_sources.is_empty() {
+            out.extend_from_slice(b"instances\0");
+            for i in &self.instance_sources { out.extend_from_slice(&(*i as u32).to_le_bytes()); }
+        }
+        self.scripts19.digest(&mut out);
         out
     }
 }
@@ -1409,10 +1436,11 @@ impl Game {
             Some((fix, boxes)) => (Some(fix.map), boxes),
             None => (None, Vec::new()),
         };
-        let map_max_velocity = map_fixes::max_velocity(&entities).map(|m| m.max_velocity);
+        let map_max_velocity = map_fixes::max_velocity(&entities);
         let map_signed_door_travel = map_fixes::signed_door_travel(&entities).is_some();
         let map_player_io = map_fixes::player_io(&entities).is_some();
         let script_triggers = vscript::script_triggers(&entities);
+        let map_mechanics = map_fixes::mechanics_v19(&entities);
         let physics::MapPhysics { prop_sources, world, texinfo_surface, props, diagnostics, displacement_count } =
             physics::build_with_entities(bsp, content, &entities, prop_mesh)?;
         let models: &[Model] = match bsp.lump(playsrc_bsp::MODELS).map(|l| &l.records) {
@@ -1507,6 +1535,7 @@ impl Game {
             map_signed_door_travel,
             map_player_io,
             script_triggers,
+            map_mechanics,
         };
         game.link_hierarchy();
         game.link_templates();
@@ -1537,7 +1566,8 @@ impl Game {
     }
 
     pub fn set_settings(&mut self, settings: Settings) {
-        let spawn_changed = (self.settings.physics_fixes() ^ settings.physics_fixes())
+        let spawn_changed = (self.map_mechanics.is_some() && (self.settings.physics_version == PHYSICS_V19) != (settings.physics_version == PHYSICS_V19))
+            || (self.settings.physics_fixes() ^ settings.physics_fixes())
             & (PHYSICS_FIX_DOOR_START_OPEN | PHYSICS_FIX_TRAIN_SPAWN | PHYSICS_FIX_MAP_DOOR_TRAVEL)
             != 0;
         self.settings = settings;
@@ -1546,10 +1576,20 @@ impl Game {
             record_queries: false,
             ..settings.configuration()
         };
-        if let Some(v) = self.map_max_velocity.filter(|_| settings.physics_fixes() & PHYSICS_FIX_MAP_MAX_VELOCITY != 0) {
-            self.config.maximum_velocity = v;
+        if let Some(entry) = self.map_max_velocity.filter(|m| {
+            settings.physics_version >= m.min_physics && settings.physics_fixes() & PHYSICS_FIX_MAP_MAX_VELOCITY != 0
+        }) {
+            self.config.maximum_velocity = entry.max_velocity;
         }
         self.policy = settings.policy();
+        if self.mechanics_on() && self.map_mechanics.is_some_and(|m| m.map == "bhop_profane") {
+            // CS:GO FinishDuck recentres the 72/54 hulls: +9 airborne, rather than CS:S's +8.5.
+            // Jump impulse remains sqrt(2*800*57) in both games. research/MAP-REPORTS-0.0.30.md.
+            self.policy.standing_hull.maxs[2] = 72.0;
+            self.policy.crouched_hull.maxs[2] = 54.0;
+            self.policy.crouched_view[2] = 46.0;
+            self.policy.air_crouch_lift = Some(9.0);
+        }
         // load_map starts at v1; the client selects its version before building the rendered world.
         // Spawn geometry and spawn-time entity state must follow that selection immediately, even before an explicit restart.
         if spawn_changed {
@@ -1572,7 +1612,11 @@ impl Game {
         self.jumpstats_valid = false;
         self.restart_point = None;
         self.restart_names = None;
+        self.entities.truncate(self.initial_ents.len());
         self.ents = self.initial_ents.clone();
+        self.reindex_instances();
+        self.initialize_velocity_scripts();
+        self.initialize_scripts19();
         if self.map_signed_door_travel && self.settings.physics_fixes() & PHYSICS_FIX_MAP_DOOR_TRAVEL != 0 {
             for k in 0..self.movers.len() {
                 let i = self.movers[k];
@@ -1604,6 +1648,7 @@ impl Game {
         self.state_after_command = self.state;
         self.events = EVENT_TELEPORTED;
         self.io_time = self.server_time(-1);
+        self.initialize_momentary_buttons();
         if self.settings.physics_fixes() & PHYSICS_FIX_TRAIN_SPAWN != 0 {
             self.find_train_paths();
         }
@@ -2183,7 +2228,8 @@ impl Game {
 
     /// v16: the player's own outputs and filter tests run on this map (`map_fixes::PLAYER_IO`, `PHYSICS_FIX_MAP_PLAYER_IO`).
     fn player_io(&self) -> bool {
-        self.map_player_io && self.settings.physics_fixes() & PHYSICS_FIX_MAP_PLAYER_IO != 0
+        (self.map_player_io && self.settings.physics_fixes() & PHYSICS_FIX_MAP_PLAYER_IO != 0)
+            || (self.mechanics_on() && self.map_mechanics.is_some_and(|m| m.player_io()))
     }
 
     /// `fire_output` for the outputs `AddOutput` gave the player (v16): caller = the player; spent outputs are removed.
@@ -2304,8 +2350,9 @@ impl Game {
         out
     }
 
-    fn accept_input(&mut self, target: Actor, input: &str, param: &str, activator: Actor, _caller: Actor) {
+    fn accept_input(&mut self, target: Actor, input: &str, param: &str, activator: Actor, caller: Actor) {
         let input = input.to_ascii_lowercase();
+        if self.script19_input(target, &input, param, activator, caller) { return; }
         match target {
             Actor::None => {}
             Actor::Player => self.player_input(&input, param, activator),
@@ -2318,7 +2365,9 @@ impl Game {
             // v16 (`PHYSICS_FIX_MAP_PLAYER_IO` maps): `AddOutput "OnUser1 target:input:param:delay:times"` gives the
             // player an output (CBaseEntity::InputAddOutput -> KeyValue -> the output's ParseEventAction).
             "addoutput" if self.player_io() && Output::parse_add_output(param).is_some() => {
-                self.extra.player_outputs.extend(Output::parse_add_output(param));
+                let mut output = Output::parse_add_output(param).unwrap();
+                if self.mechanics_on() && output.times == 0 { output.times = -1; }
+                self.extra.player_outputs.push(output);
             }
             "fireuser1" | "fireuser2" | "fireuser3" | "fireuser4" if self.player_io() => {
                 let event = format!("onuser{}", &input[8..]);
@@ -2392,6 +2441,7 @@ impl Game {
         if input == "callscriptfunction" && self.objectives_on() && self.call_script_function(i, param, activator) {
             return;
         }
+        if self.mechanics_input(i, input, param, activator) { return; }
         // point_template / game_ui (v4).
         if self.settings.physics_fixes() & PHYSICS_FIX_GAME_ENTITIES != 0 {
             match (self.ents[i].class.as_str(), input) {
@@ -3057,6 +3107,8 @@ impl Game {
                 continue;
             }
             let e = &self.ents[i];
+            if matches!(t.kind, TriggerKind::TeleportRelative { .. })
+                && !(self.mechanics_on() && self.map_mechanics.is_some_and(|m| m.map == "bhop_collective")) { continue; }
             // v8 per-map fix: the box replaces the brush (`game/map_fixes.rs`).
             let map_box = map_boxes.iter().find(|(j, _)| *j == i).map(|(_, b)| b);
             let overlapping = !e.removed
@@ -3138,6 +3190,21 @@ impl Game {
                     // v17: RNGFix counts the teleports a trigger_teleport's Touch makes (`Hook_TriggerTeleportTouchPost`).
                     if self.teleport_through(i) && self.settings.physics_fixes() & PHYSICS_FIX_TELEHOP != 0 {
                         self.events |= EVENT_MAP_TELEPORT;
+                    }
+                }
+                TriggerKind::TeleportRelative { offset } => {
+                    if self.mechanics_on() && self.map_mechanics.is_some_and(|m| m.map == "bhop_collective") {
+                        if let Some(b) = &self.ents[i].brush {
+                            // WorldSpaceCenter transforms the OBB center (not the player's relative position).
+                            let center = Transform { origin: b.origin, angles: b.angles }
+                                .transform_point(std::array::from_fn(|k| (b.mins[k] + b.maxs[k]) * 0.5)).unwrap_or(b.origin);
+                            self.state.position = std::array::from_fn(|k| center[k] + offset[k]);
+                            self.state.velocity = [0.0; 3];
+                            self.state.ground = None;
+                            self.teleport_angles = self.last_angles;
+                            self.events |= EVENT_TELEPORTED;
+                            self.unstick();
+                        }
                     }
                 }
                 TriggerKind::Push { dir, speed, once } => {
@@ -3324,6 +3391,11 @@ impl Game {
             None => {
                 if !preserve_angles {
                     angles = self.ents[dest].angles;
+                    if self.mechanics_on() && self.map_mechanics.is_some_and(|m| m.map == "bhop_playboy_csgo") {
+                        // Destination abs angles / SnapEyeAngles represent rotations, not an unsigned camera pitch.
+                        // Normalize before the client clamps to its playable pitch range (357 -> -3).
+                        angles[0] = (angles[0] + 180.0).rem_euclid(360.0) - 180.0;
+                    }
                 }
                 if !self.rules.teleport_keeps_velocity {
                     self.state.velocity = [0.0; 3];
@@ -3794,6 +3866,7 @@ impl Game {
         self.last_buttons = s.last_buttons;
         self.arms.clone_from(&s.arms);
         self.extra.clone_from(&s.extra);
+        self.restore_instance_sources();
         self.contacts.clear();
         self.near.clear();
         self.near_region = None;

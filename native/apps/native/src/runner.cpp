@@ -17,6 +17,18 @@ void check(BhContext *ctx, int result) {
     if (!result) throw std::runtime_error(bh_last_error(ctx));
 }
 
+void emit_model(BhContext *ctx, uint32_t model) {
+    BhTransform transform{};
+    check(ctx, bh_model_transform(ctx, model, &transform));
+    std::cout << "{\"model\":" << model << ",\"bits\":[";
+    for (size_t i = 0; i < 6; ++i) {
+        if (i) std::cout << ',';
+        const float value = i < 3 ? transform.origin[i] : transform.angles[i - 3];
+        std::cout << std::bit_cast<uint32_t>(value);
+    }
+    std::cout << "],\"visible\":" << transform.visible << "}\n";
+}
+
 void emit(BhContext *ctx) {
     BhState s{};
     check(ctx, bh_state(ctx, &s));
@@ -64,7 +76,7 @@ int main(int argc, char **argv) {
                 std::cout << "bunnyhop-native-runner --map MAP.bsp [--commands FILE] [--content-root DIR]\n"
                           << "Protocol: settings dt air accel friction stop gravity speed autohop physics stamina;\n"
                           << "reset; position x y z yaw; velocity x y z; names \"target\" \"class\";\n"
-                          << "cmd forward side yaw pitch buttons; state (one JSON line per state).\n";
+                          << "cmd forward side yaw pitch buttons; state; model N (one JSON line per result).\n";
                 return 0;
             }
             if ((arg == "--map" || arg == "--commands" || arg == "--content-root") && i + 1 < argc) {
@@ -115,6 +127,10 @@ int main(int argc, char **argv) {
                 } else if (op == "state") {
                     fields(in);
                     emit(ctx.get());
+                } else if (op == "model") {
+                    uint32_t model;
+                    fields(in, model);
+                    emit_model(ctx.get(), model);
                 } else if (op == "position") {
                     float x, y, z, yaw;
                     fields(in, x, y, z, yaw);

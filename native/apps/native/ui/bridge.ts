@@ -151,7 +151,18 @@ export type MenuMessage =
   | import("./avatar-host").AvatarHostMessage
   | RunServiceStatus;
 
-export const PRACTICE_ACTIONS = ["toggle", "menu", "noclip", "save", "tele", "prev", "next", "keepVelocity"] as const;
+export const PRACTICE_ACTIONS = [
+  "toggle",
+  "on",
+  "off",
+  "menu",
+  "noclip",
+  "save",
+  "tele",
+  "prev",
+  "next",
+  "keepVelocity",
+] as const;
 export type PracticeAction = (typeof PRACTICE_ACTIONS)[number];
 /** gauntlet/state.ts GauntletProgress: this map's index, the map count, the earlier splits' sum, your PB's split here. */
 export interface GauntletHudProgress {
@@ -255,6 +266,7 @@ export interface NativeSettings {
   playerModel: "bunny";
   ghostModel: "same" | "bunny";
   mouseDiagnostics: boolean;
+  inputBackend: "auto" | "sdl" | "raw";
   windowMode: WindowMode;
   alwaysOnTop: boolean;
   rememberWindowBounds: boolean;
@@ -652,6 +664,7 @@ function defaultSettings(): NativeSettings {
     playerModel: "bunny",
     ghostModel: "same",
     mouseDiagnostics: web.inputStats,
+    inputBackend: "auto",
     capturePbScreenshots: false,
     windowMode: "windowed",
     alwaysOnTop: false,
@@ -911,6 +924,9 @@ export function settingsPatch(value: unknown): Partial<NativeSettings> {
     "timedInput",
   ])
     if (typeof input[key] === "boolean") out[key] = input[key];
+  if (input.inputBackend === "auto" || input.inputBackend === "sdl" || input.inputBackend === "raw") {
+    out.inputBackend = input.inputBackend;
+  }
   if (input.waterQuality === "simple" || input.waterQuality === "refracted") out.waterQuality = input.waterQuality;
   const paint = paintPatch(input.paint);
   if (paint) out.paint = paint;

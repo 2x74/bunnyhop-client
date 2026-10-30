@@ -115,3 +115,12 @@ test("disconnected server commands answer clearly; local commands still work", (
   expect(f.replies).toEqual(["The room is not connected."]);
   expect(f.actions).toEqual([["restart", undefined]]);
 });
+
+test("explicit practice arguments and aliases keep their intent", () => {
+  const f = fixture("solo");
+  for (const text of ["!practice off", "!practice off", "!prac on", "!practice on", "!practice"]) f.line(text);
+  expect(f.actions).toEqual(["off", "off", "on", "on", "toggle"]);
+  f.line("!practice invalid");
+  expect(f.actions).toHaveLength(5);
+  expect(f.replies.at(-1)).toContain("[on|off]");
+});
