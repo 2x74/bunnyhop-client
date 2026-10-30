@@ -679,7 +679,8 @@ void draw_movement_widgets(
         float height,
         bool practice,
         unsigned checkpoint,
-        bool editing = false
+        bool editing = false,
+        std::string_view segmented = {}
 ) {
     constexpr NameColor cream = {.94f, .91f, .86f, 1};
     constexpr NameColor dim = {.63f, .65f, .70f, 1};
@@ -746,7 +747,9 @@ void draw_movement_widgets(
         for (size_t i = 0; i < extras.spectator_count; ++i)
             hud.overlay_text(point[0], point[1] + 20 + float(i) * 18, extras.spectators[i].view(), 12, dim);
     }
-    if (practice) {
+    if (!segmented.empty()) {
+        line("practice", segmented, width / 2, height / 2 + 28, true, cream);
+    } else if (practice) {
         label.format("Practice | checkpoint %u", checkpoint);
         line("practice", label.view(), width / 2, height / 2 + 28, true);
     }

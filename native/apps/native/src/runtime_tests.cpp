@@ -92,6 +92,13 @@ int main() {
     assert(p.key_allowed("save", true));
     assert(!p.key_allowed("tele", true));
     assert(p.key_allowed("noclip", false));
+    p.segment_status(2);
+    assert(p.segment_label.view() == "Segmented · 2 loads");
+    assert(p.key_allowed("tele", true));
+    assert(p.key_allowed("next", true));
+    assert(p.key_allowed("prev", true));
+    assert(!p.key_allowed("noclip", true));
+    p.segment_status(-1);
     p.menu_open = true;
     assert(p.key_allowed("tele", true));
     assert(p.key_allowed("noclip", true));

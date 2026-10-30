@@ -31,6 +31,7 @@ std::optional<std::string> PracticeController::activate(BhContext *core, const s
     BhRunState timing{};
     bh_run_state(core, &timing);
     active = true;
+    segment_status(-1);
     tool = used_tool;
     return timing.status == 1 ? "This run is practice now. Press R to restart for a real run."
                               : "Practice until you restart. Press R for a real run.";
@@ -65,7 +66,7 @@ void PracticeController::save(
     auto handle = bh_practice_save(core, float(input.yaw()), float(input.pitch));
     // Retain the newest 100 snapshots within the bridge's 128 MiB cap.
     // On large maps evict the oldest and retry, as the web checkpoint store does.
-    while (!handle && !checkpoints.empty()) {
+    while (!handle && !checkpoints.empty() && std::string(bh_last_error(core)).find("Segmented") == std::string::npos) {
         bh_practice_free(core, checkpoints.front().handle);
         checkpoints.erase(checkpoints.begin());
         handle = bh_practice_save(core, float(input.yaw()), float(input.pitch));
@@ -92,12 +93,15 @@ bool PracticeController::exit_flight(BhContext *core, const Input &input, BhStat
 BhCmd PracticeController::restore(BhContext *core) const {
     BhSnapshot snapshot{};
     BhCmd view{};
-    require(bh_practice_restore(core, checkpoints[current].handle, &view, &snapshot), core, "Restoring checkpoint");
+    const auto handle = checkpoints[current].handle;
+    const auto restored = segmented ? bh_segment_restore(core, handle, &view, &snapshot)
+                                    : bh_practice_restore(core, handle, &view, &snapshot);
+    require(restored, core, "Restoring checkpoint");
     return view;
 }
 
 BhState PracticeController::restore_velocity(BhContext *core, bool keep_velocity) {
-    if (!keep_velocity) require(bh_set_velocity(core, 0, 0, 0), core, "Clearing checkpoint speed");
+    if (!segmented && !keep_velocity) require(bh_set_velocity(core, 0, 0, 0), core, "Clearing checkpoint speed");
     BhState state{};
     require(bh_state(core, &state), core, "Reading checkpoint");
     return state;

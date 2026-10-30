@@ -1348,7 +1348,8 @@ else{color=vec4(ink.rgb,ink.a*(uv.x<-1.?1.:texture(font,uv).a));}})"
                     frame_height_,
                     practising || editing_,
                     practice ? practice->number() : 0,
-                    editing_
+                    editing_,
+                    practice ? practice->segment_label.view() : std::string_view{}
             );
             element_visible = true;
             element_scale = 1;

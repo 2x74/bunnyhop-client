@@ -6,8 +6,7 @@
 #include <vector>
 
 namespace native {
-// Host-only v27 practice policy. The bridge owns snapshots; nothing here changes
-// canonical movement, recorded input, replay simulation or ranked timer rules.
+// The bridge owns snapshots, replay paths and timer rules for practice and Segmented.
 struct Practice {
     struct Checkpoint {
         uint32_t handle;
@@ -16,6 +15,9 @@ struct Practice {
     };
 
     bool mode = false, active = false, noclip = false, menu_open = false;
+    bool segmented = false;
+    int segment_loads = -1;
+    HudLabel<80> segment_label;
     std::string tool;
     BhNoclipState flight{};
     std::vector<Checkpoint> checkpoints;
@@ -24,11 +26,24 @@ struct Practice {
 
     bool key_allowed(const std::string &action, bool timed) const {
         // Noclip works mid-run in any mode: it stops the timer (bh_practice_enter).
-        return action == "save" || action == "noclip" || !timed || active || menu_open;
+        return action == "save" || (!segmented && action == "noclip") || !timed || active || menu_open
+               || (segmented && (action == "tele" || action == "prev" || action == "next"));
+    }
+
+    void segment_status(int loads) {
+        const bool clean = !active && loads >= 0;
+        if (segmented == clean && segment_loads == loads) return;
+        segmented = clean;
+        segment_loads = loads;
+        segment_label.assign(clean ? "Segmented" : "");
+        if (clean && loads > 0) segment_label.format("Segmented · %d load%s", loads, loads == 1 ? "" : "s");
     }
 
     void restart() {
         active = mode;
+        segmented = false;
+        segment_loads = -1;
+        segment_label.assign("");
         noclip = false;
         tool.clear();
         hinted_run = -1;
@@ -75,7 +90,7 @@ void draw_checkpoint_menu(Hud &hud, float /*width*/, float height, const Practic
     constexpr std::array<float, 4> dim = {.63f, .65f, .70f, 1};
     constexpr std::array<float, 4> amber = {1, .71f, .24f, 1};
     hud.overlay_rect(x - 10, y - 8, 320, 220, {.03f, .03f, .05f, .8f});
-    hud.overlay_text(x, y, "Checkpoints", 19, cream);
+    hud.overlay_text(x, y, practice.segmented ? "Segmented checkpoints" : "Checkpoints", 19, cream);
     HudLabel<96> label;
     label.format("1. Save checkpoint (%zu/100)", std::min(size_t(100), practice.checkpoints.size() + 1));
     hud.overlay_text(x, y + 34, label.view(), 14, cream);
@@ -85,9 +100,16 @@ void draw_checkpoint_menu(Hud &hud, float /*width*/, float height, const Practic
     hud.overlay_text(x, y + 100, "4. Next", 14, practice.number() >= practice.checkpoints.size() ? dim : cream);
     label.format("5. Noclip: %s", practice.noclip ? "on" : "off");
     hud.overlay_text(x, y + 122, label.view(), 14, cream);
-    label.format("6. Keep speed: %s", keep_velocity ? "on" : "off");
+    label.format("6. Keep speed: %s", practice.segmented ? "always" : keep_velocity ? "on" : "off");
     hud.overlay_text(x, y + 144, label.view(), 14, cream);
     hud.overlay_text(x, y + 166, "0. Close", 14, cream);
-    hud.overlay_text(x, y + 196, "Teleport / noclip makes a run practice.", 11, amber);
+    hud.overlay_text(
+            x,
+            y + 196,
+            practice.segmented ? "Teleport rewinds timer / replay. Noclip is practice."
+                               : "Teleport / noclip makes a run practice.",
+            11,
+            practice.segmented ? cream : amber
+    );
 }
 }  // namespace native
