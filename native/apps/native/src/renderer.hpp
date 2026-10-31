@@ -78,7 +78,7 @@ class Renderer {
     RenderUniforms uniforms{gl};
     BhContext *core;
     RenderResources resources{gl, core};
-    WaterPass water{gl, uniforms, core};
+    WaterPass water{gl, graphicsContext, uniforms, core};
     WorldPass world{gl, core, resources, uniforms, profile};
     SkyPass sky{gl, core, resources, uniforms};
     ShadowPass shadows{gl, graphicsContext, resources, uniforms, world};

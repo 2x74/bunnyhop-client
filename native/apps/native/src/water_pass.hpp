@@ -2,11 +2,12 @@
 
 class WaterPass {
     Gl &gl;
+    gfx::Context &context;
     RenderUniforms &uniforms;
     BhContext *&core;
 
 public:
-    WaterPass(Gl &g, RenderUniforms &u, BhContext *&c) : gl(g), uniforms(u), core(c) {}
+    WaterPass(Gl &g, gfx::Context &ctx, RenderUniforms &u, BhContext *&c) : gl(g), context(ctx), uniforms(u), core(c) {}
 
     struct Volume {
         std::array<float, 3> lo{}, hi{}, color{.2f, .3f, .35f};
@@ -243,7 +244,7 @@ public:
             DrawWorld drawWorld,
             DrawActors drawActors
     ) {
-        if (!waterReflection) waterReflection = std::make_unique<WaterReflectionTarget>(gl);
+        if (!waterReflection) waterReflection = std::make_unique<WaterReflectionTarget>(context);
         GLint drawTarget = 0, readTarget = 0;
         gl.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawTarget);
         gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &readTarget);

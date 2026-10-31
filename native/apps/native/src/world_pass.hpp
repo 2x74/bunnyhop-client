@@ -270,8 +270,12 @@ public:
         gl.Uniform1f(uniforms.loc(program, "timeSeconds"), time);
         gl.Uniform1i(uniforms.loc(program, "reflectionReady"), !sky && !reflection && water.reflectionDrawn);
         gl.Uniform1f(uniforms.loc(program, "reflectionHeight"), water.waterPlan.reflection_height.value_or(0));
-        gl.ActiveTexture(GL_TEXTURE8);
-        gl.BindTexture(GL_TEXTURE_2D, water.reflectionDrawn ? water.waterReflection->texture() : resources.white);
+        if (water.reflectionDrawn)
+            water.waterReflection->bind(8);
+        else {
+            gl.ActiveTexture(GL_TEXTURE8);
+            gl.BindTexture(GL_TEXTURE_2D, resources.white);
+        }
         gl.Uniform1i(uniforms.loc(program, "fullbright"), view.graphics.fullbright);
         gl.Uniform1i(uniforms.loc(program, "potato"), view.graphics.potato);
         gl.Uniform1i(uniforms.loc(program, "skyPass"), sky && view.hasSky && skyInfo.fog_enable);
