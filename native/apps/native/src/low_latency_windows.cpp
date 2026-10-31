@@ -490,8 +490,9 @@ struct LowLatencyPresenter::Impl {
 LowLatencyPresenter::LowLatencyPresenter() = default;
 
 void LowLatencyPresenter::fail(std::string reason) {
-    std::cerr << "Low latency mode: " << reason << '\n';
+    std::cerr << (native_ ? "D3D11: " : "Low latency mode: ") << reason << '\n';
     if (!native_) impl_.reset();
+    failed_ = true;
     error_ = reason;
     failure_ = std::move(reason);
 }
@@ -560,9 +561,13 @@ bool LowLatencyPresenter::initialize_native(SDL_Window *window, bool warp) {
 bool LowLatencyPresenter::exclusive(bool enabled) {
     if (!native_ || !impl_ || impl_->fullscreen == enabled) return true;
     const HRESULT result = impl_->swapchain->SetFullscreenState(enabled ? TRUE : FALSE, nullptr);
-    if (FAILED(result)) {
+    if (result != S_OK) {
         error_ = hresult_text("Changing DXGI fullscreen", result);
-        std::cerr << error_ << '\n';
+        SDL_SetError("%s", error_.c_str());
+        if (result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET)
+            fail(error_);
+        else
+            std::cerr << error_ << '\n';
         return false;
     }
     impl_->fullscreen = enabled;

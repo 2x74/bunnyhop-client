@@ -175,6 +175,7 @@ int run(const native::Options &opt, native::RendererLaunch &launch) {
     auto &low_latency = device.presenter();
     native::FramePacer<native::gfx::Context> frame_pacer;
     const std::string gpu_renderer = device.adapter();
+    std::cerr << "Active renderer: " << device.name() << " (" << gpu_renderer << ")\n";
     const auto assets = native::resource("native-assets", BUNNYHOP_NATIVE_ASSET_ROOT);
     const auto menu_path = opt.menu_html == BUNNYHOP_MENU_HTML ? native::resource("menu.html", opt.menu_html)
                                                                : native::data_location::from_utf8(opt.menu_html);

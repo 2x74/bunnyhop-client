@@ -30,14 +30,17 @@ jobs:
             native/target/native-deps
             native/target/d3d-shaders/toolchain
             native/target/release
-          key: d3d11-windows-pins-${{ hashFiles('native/apps/native/packaging/sdl.json', 'native/apps/native/tools/d3d-shaders/toolchain.json', 'native/Cargo.lock') }}
+          key: >-
+            d3d11-windows-pins-${{ hashFiles(
+            'native/apps/native/packaging/sdl.json',
+            'native/apps/native/tools/d3d-shaders/toolchain.json', 'native/Cargo.lock') }}
       - name: Restore frozen inputs and locally captured OpenGL goldens
         run: |
           $archive = [System.IO.File]::Create("$pwd/target/d3d11-windows-fixtures.tar.gz")
           try {
             foreach ($part in (Get-ChildItem target/d3d11-windows-fixtures.part-* | Sort-Object Name)) {
-              $input = [System.IO.File]::OpenRead($part.FullName)
-              try { $input.CopyTo($archive) } finally { $input.Dispose() }
+              $fixtureStream = [System.IO.File]::OpenRead($part.FullName)
+              try { $fixtureStream.CopyTo($archive) } finally { $fixtureStream.Dispose() }
             }
           } finally { $archive.Dispose() }
           tar -xzf target/d3d11-windows-fixtures.tar.gz -C target
@@ -60,7 +63,7 @@ jobs:
           $sdlBin = "$pwd/target/native-deps/sdl/install/bin"
           $vcpkgBin = "$pwd/target/native-deps/vcpkg/installed/x64-windows/bin"
           $env:PATH = "$sdlBin;$vcpkgBin;$env:PATH"
-          $tests = 'native_(preferences|renderer_startup|graphics_settings|client_boundaries|window_modes|display_modes)'
+          $tests = 'native_(preferences|renderer_startup|gfx_resource_owners|graphics_settings|client_boundaries|window_modes|display_modes)'
           ctest --test-dir apps/native/build --output-on-failure -R $tests
           if ($LASTEXITCODE -ne 0) { throw 'Settings/display checks failed' }
           ./apps/native/build/bunnyhop-native-gfx-smoke.exe target/d3d11-controls --warp
