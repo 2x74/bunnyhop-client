@@ -24,7 +24,7 @@ Update from Settings → Updates: press Update, then Restart to update. Your set
 - A failed map load always tells you why.
 
 **Log file**
-- The game now keeps a log file. If something goes wrong, open Settings → Data → Open log folder and send us
+- The game now keeps a log file. If something goes wrong, open Settings → Game data → Open log folder and send us
   `bunnyhop-native.log`. It leaves out your account details and your computer's username.
 
 **Third person**
