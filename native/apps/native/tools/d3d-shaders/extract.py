@@ -45,31 +45,52 @@ def declarations(source):
             for match in DECLARATION.finditer(source)]
 
 
+def shader_source(path):
+    return path.suffix in (".hpp", ".cpp") and not path.name.endswith("_smoke.cpp")
+
+
+def arguments(expression):
+    result = []
+    start = 0
+    depth = 0
+    for item in tokens(expression):
+        if item[0] == "," and depth == 0:
+            result.append(expression[start:item.start()].strip())
+            start = item.end()
+        elif item[0] in ("(", "{", "["):
+            depth += 1
+        elif item[0] in (")", "}", "]"):
+            depth -= 1
+    result.append(expression[start:].strip())
+    return result
+
+
 def calls(source):
     result = []
     items = tokens(source)
     for i, match in enumerate(items):
-        if match[0] != "link_program" or items[i + 1][0] != "(":
+        if match[0] not in ("link_program", "create_program") or items[i + 1][0] != "(":
             continue
         end = ending(source, items[i + 1].end(), ")")
         expression = source[items[i + 1].end():end - 1]
         if expression.startswith("Gl &"):
             continue
-        arguments = []
-        start = 0
-        depth = 0
-        for item in tokens(expression):
-            if item[0] == "," and depth == 0:
-                arguments.append(expression[start:item.start()].strip())
-                start = item.end()
-            elif item[0] in ("(", "{", "["):
-                depth += 1
-            elif item[0] in (")", "}", "]"):
-                depth -= 1
-        arguments.append(expression[start:].strip())
-        if len(arguments) != 3:
-            raise ValueError(f"Unknown link_program signature: {expression}")
-        result.append((match.start(), arguments[1:]))
+        if match[0] == "create_program":
+            if not expression.startswith("{") or not expression.endswith("}"):
+                continue
+            expression = expression[1:-1]
+        parts = arguments(expression)
+        if len(parts) != 3:
+            raise ValueError(f"Unknown shader creation signature: {expression}")
+        if match[0] == "link_program" and parts[1:] == ["source.vertex", "source.fragment"]:
+            continue
+        site = (match.start(), parts[1:])
+        if match[0] == "create_program":
+            key = arguments(parts[0][1:-1])
+            if len(key) != 2:
+                raise ValueError(f"Unknown program key: {parts[0]}")
+            site += tuple(json.loads(part) for part in key)
+        result.append(site)
     return result
 
 
@@ -113,7 +134,7 @@ def extract(output):
             'int main(int argc, char **argv) {', 'std::filesystem::current_path(argv[1]);']
     discovered = {}
     for path in sorted(SOURCE.glob("*")):
-        if path.suffix not in (".hpp", ".cpp"):
+        if not shader_source(path):
             continue
         source = path.read_text(encoding="utf-8")
         sites = calls(source)
@@ -122,7 +143,10 @@ def extract(output):
         if path.name not in NAMES or len(sites) != len(NAMES[path.name]):
             raise ValueError(f"Register new shader sites in NAMES: {path.name}: {len(sites)}")
         discovered[path.name] = len(sites)
-        for name, (position, arguments) in zip(NAMES[path.name], sites):
+        for name, creation in zip(NAMES[path.name], sites):
+            position, arguments = creation[:2]
+            if len(creation) == 4 and creation[2:] != (name, ""):
+                raise ValueError(f"ProgramKey does not match the shader manifest: {creation[2:]}")
             site = f'{path.relative_to(NATIVE).as_posix()}:{source[:position].count(chr(10)) + 1}'
             if name == "player":
                 for variant in player_variants(finishes):

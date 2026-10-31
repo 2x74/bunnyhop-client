@@ -53,7 +53,8 @@ public:
 
 void falloff(native::Gl &gl) {
     Target target(gl);
-    native::NativePresentation presentation(gl);
+    native::gfx::Context context(gl);
+    native::NativePresentation presentation(context);
     const std::array<native_render::Vec3, 4> points = {{{-1, -1, 0}, {1, -1, 0}, {1, 1, 0}, {-1, 1, 0}}};
     const std::array<std::array<float, 2>, 4> uv = {{{0, 0}, {1, 0}, {1, 1}, {0, 1}}};
     const float eye[] = {0, 0, 2};

@@ -39,7 +39,8 @@ A program compile or reflection failure leaves a report and returns nonzero. Set
 
 ## Inventory
 
-There are 19 GLSL `link_program` call sites: 18 fixed programs and one lazy player factory, covering 22 material/pass families.
+There are 19 production GLSL creation sites: 17 legacy `link_program` calls and two seam `create_program`
+descriptors, covering 18 fixed programs and one lazy player factory across 22 material/pass families.
 `sun_shadows.hpp` and `water_*.hpp` use the world/depth programs rather than compiling additional shaders.
 The extractor checks all native C++ source files and fails if a GLSL creation site is added or removed.
 It evaluates the actual C++ shader declarations, concatenations, shader factory functions and
@@ -194,6 +195,10 @@ several pairs: the native player binds `uFinEnv`, `uCosEnv` and `uPlayerEnv` to 
 same cube and sampler to every reflected pair. `spirv.textures` describes declared bindings, while
 `dxbc.resources` identifies bindings surviving optimization.
 
+The seam's fixed `ProgramKey` values are `presentation` and `video`, both with empty permutation keys.
+Their OpenGL fallback sources are still evaluated by the extractor. Backend dispatch helpers and smoke-only
+programs are excluded from the production inventory; all 135 cache entries still extract to 105 distinct pairs.
+
 Vertex inputs use `TEXCOORD<GL attribute location>`, with the name, GLSL type and location in `vertexInputs`.
 Build the D3D input layout against the actual DXBC input signature and native vertex stride/offsets; do not
 reinterpret all attributes as float4. Vertex/instance IDs use system-value semantics and require no buffer field. Aura shells use `gl_InstanceID`;
@@ -245,7 +250,10 @@ with X3511 after attempting 702 unrolled iterations. The new source gives FXC an
 bound. For every input, both forms execute the same sampling/arithmetic statements in the same order and
 exit before the same iteration; there are no side effects in either condition. OpenGL's defined pixel
 results are therefore unchanged by control-flow equivalence. No other runtime shader source, generated
-website asset or OpenGL code is edited. Rendered-image comparisons were not run.
+website asset or OpenGL code is edited. On macOS 27.0.1 / Apple M5 Pro, the frozen hidden-window suite in
+[seam.md](seam.md#pixel-baseline) compared the loop header with and without the rewrite: all 41 images
+matched exactly, including Enhanced/Cinematic with MSAA on and off. D3D11 image comparison still needs
+Windows hardware.
 
 ## Validation scope
 

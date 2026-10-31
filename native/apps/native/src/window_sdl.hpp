@@ -2,6 +2,7 @@
 #include "display_modes.hpp"
 #include "display_scaling.hpp"
 #include "window_settings.hpp"
+#include "gfx_window.hpp"
 #include <SDL3/SDL.h>
 #include <string>
 #include <vector>

@@ -3,7 +3,7 @@ import tempfile
 from pathlib import Path
 import unittest
 
-from extract import NAMES, SOURCE, calls, function, player_variants
+from extract import NAMES, SOURCE, calls, function, player_variants, shader_source
 from interfaces import check_dxbc, link_locations, match_hlsl, remap
 from reflection import check_interfaces, normalize, type_size
 
@@ -21,7 +21,7 @@ class ShaderPipelineTests(unittest.TestCase):
     def test_every_creation_site_is_registered(self):
         found = {}
         for path in SOURCE.iterdir():
-            if path.suffix in ('.hpp', '.cpp'):
+            if shader_source(path):
                 count = len(calls(path.read_text(encoding="utf-8")))
                 if count:
                     found[path.name] = count
@@ -29,6 +29,16 @@ class ShaderPipelineTests(unittest.TestCase):
         shader_creation = sum(
             path.read_text(encoding="utf-8").count('gl.CreateShader(') for path in SOURCE.glob('*.hpp'))
         self.assertEqual(shader_creation, 1)
+
+    def test_seam_program_descriptors_preserve_shader_sources(self):
+        source = '''Program create_program(const ProgramDesc &source) { return {}; }
+        void create_program() {}
+        context.create_program({{"presentation", ""}, vs, fs.c_str()});'''
+        self.assertEqual(calls(source)[0][1], ["vs", "fs.c_str()"])
+        self.assertEqual(calls(source)[0][2:], ("presentation", ""))
+        self.assertEqual(len(calls(source)), 1)
+        self.assertEqual(calls("link_program(gl_, source.vertex, source.fragment);"), [])
+        self.assertFalse(shader_source(Path("gfx_smoke.cpp")))
 
     def test_reachable_player_cache_keys(self):
         variants = player_variants(range(28))
