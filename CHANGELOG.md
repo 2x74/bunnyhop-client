@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.6.4 — Native
+
+Update from Settings → Updates: press Update, then Restart to update. Your settings, replays and maps are kept.
+
+**Ranked**
+- Physics v22, matching website v0.0.33: Momentum's edge rule. A landing with no ground under your next tick is taken
+  back unless you jump, so it costs no friction tick.
+
+**Accounts**
+- Sign in with your name and a password, or add a password to your account in Account. Forgot password works through
+  the Discord or email on your account.
+- Guests can save their progress with just a password, and a guest's new best offers it: press Esc after the run.
+- Password accounts no longer read "Signed in with Discord".
+- The security check some sign-ins ask for can't load in the native client. If you get it, sign in with email or
+  Discord instead.
+
+**Map loading**
+- Fixed on Windows: Play, Settings and other menu buttons could stop responding after opening Ranks or Gauntlets, until
+  you restarted the game.
+- A map download that stalls now ends in an error with Retry instead of waiting forever, and big maps on a slow
+  connection no longer hit a time limit.
+- A failed map load always tells you why.
+
+**Log file**
+- The game now keeps a log file. If something goes wrong, open Settings → Data → Open log folder and send us
+  `bunnyhop-native.log`. It leaves out your account details and your computer's username.
+
+**Third person**
+- You now see your own knife swing in third person and in replays and video exports. A compare ghost swings too.
+- Other players no longer play a knife swing when they fire a gun, and a third-person gun's kick no longer stacks.
+
+**HUD**
+- Fixed Ctrl and other keys staying lit on the key overlay after a restart.
+- The run stats' average FPS now goes past 1000.
+
 ## v0.6.3 — Native
 
 Update from Settings → Updates: press Update, then Restart to update. Your settings, replays and maps are kept.

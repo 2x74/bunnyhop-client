@@ -127,6 +127,8 @@ test("a guest signs in with a password, and a required check that can't load poi
     await expect(account.getByRole("heading", { name: "Save progress" }).isVisible()).resolves.toBe(true);
     await page.screenshot({ path: `${shots}/guest.png` });
     await account.getByRole("button", { name: "Already have an account? Sign in" }).click();
+    // The form focuses its first field on the next frame; typing before that would land in the wrong box.
+    await page.waitForFunction(() => document.activeElement?.getAttribute("name") === "username");
     await account.getByRole("textbox", { name: "Name or email" }).fill("Returning");
     await account.getByLabel("Password", { exact: true }).fill("correct horse");
     await page.screenshot({ path: `${shots}/sign-in.png` });
