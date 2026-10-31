@@ -75,10 +75,9 @@ class Renderer {
     RenderProfile profile;
     Gl &gl;
     gfx::Context graphicsContext;
-    RenderUniforms uniforms{gl};
     BhContext *core;
     RenderResources resources{graphicsContext, core};
-    WaterPass water{gl, graphicsContext, uniforms, core};
+    WaterPass water{graphicsContext, core};
     WorldPass world{graphicsContext, core, resources, profile};
     SkyPass sky{graphicsContext, core, resources};
     ShadowPass shadows{graphicsContext, resources, world};
@@ -88,7 +87,7 @@ class Renderer {
     std::vector<native_render::Actor> roomActors;
     std::optional<native_render::Actor> replayActor, compareActor;
     std::string outfit, packedLoadout;
-    static constexpr float no_clip_height = render_no_clip_height;
+    static constexpr float no_clip_height = gfx::no_clip_height;
     float clipHeight = no_clip_height;
     std::unique_ptr<NativeViewmodel> viewmodel;
     bool viewmodelVisible = true, floorWeaponsVisible = true;
@@ -149,10 +148,6 @@ class Renderer {
     int viewportWidth = 1, viewportHeight = 1;
     // Window pixels per point: the route's line widths are in points, like the website's CSS pixels.
     float pixelDensity = 1;
-
-    void water_uniforms(GLuint target, const float eye[3], const native::Matrix &vp) {
-        water.water_uniforms(target, eye, vp, viewportWidth, viewportHeight);
-    }
 
     void capture_refraction() {
         water.capture_refraction(viewportWidth, viewportHeight, [&]() -> gfx::TargetView {
@@ -485,8 +480,6 @@ public:
         resources.destroy(world.propMesh);
         resources.destroy(sky.skyMesh);
         resources.release();
-        graphicsContext.destroy(water.planesTexture);
-        graphicsContext.destroy(water.planesSampler);
     }
 
     // A replay watched in the runner's view: their shape and fit over the viewer's own graphics settings.
@@ -893,7 +886,6 @@ public:
                 clipHeight,
                 [&](const float mirroredEye[3], float reflectionPlane) {
                     draw_sky_backdrop(mirroredEye, vp, aspect, true);
-                    gl.Enable(GL_CLIP_DISTANCE0);
                     draw_3d_sky(eye, aspect, seconds, reflectionPlane);
                 },
                 [&](const float mirroredEye[3]) {

@@ -1,20 +1,20 @@
 #pragma once
 
 class WaterPass {
-    // Temporary bridge until world and sky programs use reflected water constants.
-    Gl &gl;
     gfx::Context &context;
-    RenderUniforms &uniforms;
     BhContext *&core;
 
 public:
-    WaterPass(Gl &g, gfx::Context &ctx, RenderUniforms &u, BhContext *&c) : gl(g), context(ctx), uniforms(u), core(c) {}
+    WaterPass(gfx::Context &ctx, BhContext *&c) : context(ctx), core(c) { endPipeline = context.create_pipeline({}); }
 
     ~WaterPass() {
         context.destroy(refraction);
         context.destroy(resolved);
         context.destroy(refractionColorSampler);
         context.destroy(refractionDepthSampler);
+        context.destroy(planesTexture);
+        context.destroy(planesSampler);
+        context.destroy(endPipeline);
     }
 
     struct Volume {
@@ -24,7 +24,7 @@ public:
 
     gfx::RenderTarget refraction, resolved;
     gfx::Sampler refractionColorSampler, refractionDepthSampler;
-    int refractWidth = 0, refractHeight = 0, waterQuality = 1;
+    int refractWidth = 0, refractHeight = 0, refractionSamples = 0, waterQuality = 1;
     bool hasWaterMaterials = false, waterBeneathFaces = false;
     // The Source look's water captures (water_capture.hpp). sceneCaptured: the scene pass being drawn has refraction.
     native_render::WaterCapturePlanner waterPlanner;
@@ -33,6 +33,7 @@ public:
     bool reflectionDrawn = false, sceneCaptured = false;
     gfx::Texture planesTexture;
     gfx::Sampler planesSampler;
+    gfx::Pipeline endPipeline;
     std::vector<Volume> volumes;
     std::vector<size_t> waterOrder;
     std::vector<std::array<float, 4>> waterRects;
@@ -139,35 +140,20 @@ public:
         context.bind_texture(6, planesTexture, planesSampler);
     }
 
-    // Temporary bridge for the world and sky programs while their constant blocks are converted.
-    void water_uniforms(uint32_t target, const float eye[3], const native::Matrix &vp, int width, int height) {
-        prepare_water_values(eye, vp, width, height);
-        gl.Uniform3fv(uniforms.loc(target, "cameraPosition"), 1, values.camera.data());
-        gl.Uniform2fv(uniforms.loc(target, "viewportSize"), 1, values.viewport.data());
-        gl.Uniform1i(uniforms.loc(target, "waterCount"), values.count);
-        gl.Uniform4fv(uniforms.loc(target, "waterRect"), values.count, values.rect.data());
-        if (values.count) {
-            gl.Uniform3fv(uniforms.loc(target, "waterMin"), values.count, values.minimum.data());
-            gl.Uniform3fv(uniforms.loc(target, "waterMax"), values.count, values.maximum.data());
-            gl.Uniform3fv(uniforms.loc(target, "waterColor"), values.count, values.color.data());
-            gl.Uniform2fv(uniforms.loc(target, "waterRange"), values.count, values.range.data());
-            gl.Uniform2fv(uniforms.loc(target, "waterSpan"), values.count, values.span.data());
-        }
-        context.bind_texture(6, planesTexture, planesSampler);
-        gl.Uniform1i(uniforms.loc(target, "waterPlanes"), 6);
-    }
-
     uint64_t refractionCaptures = 0;
 
     void prepare_refraction(const gfx::TargetView &source, int width, int height) {
         const auto depth = source.desc.depth == gfx::Format::none ? gfx::Format::depth24 : source.desc.depth;
-        if (refractWidth == width && refractHeight == height && refraction.desc.depth == depth) return;
+        if (refractWidth == width && refractHeight == height && refraction.desc.depth == depth
+            && refractionSamples == source.desc.samples)
+            return;
         context.destroy(refraction);
         context.destroy(resolved);
         refraction = context.create_target({width, height, gfx::Format::rgba16f, depth});
         if (source.desc.samples > 1) resolved = context.create_target({width, height, source.desc.color, depth});
         refractWidth = width;
         refractHeight = height;
+        refractionSamples = source.desc.samples;
     }
 
     void bind_refraction() {
@@ -304,27 +290,22 @@ public:
             DrawActors drawActors
     ) {
         if (!waterReflection) waterReflection = std::make_unique<WaterReflectionTarget>(context);
-        GLint drawTarget = 0, readTarget = 0;
-        gl.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawTarget);
-        gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &readTarget);
+        const auto restore = context.current_target();
         const float plane = *waterPlan.reflection_height;
         const float mirroredEye[3] = {eye[0], eye[1], 2 * plane - eye[2]};
         waterReflection->begin(width, height);
         viewportWidth = waterReflection->width();
         viewportHeight = waterReflection->height();
-        gl.FrontFace(GL_CW);
         drawSky(mirroredEye, plane);
         clipHeight = plane;
         drawWorld(mirroredEye);
-        gl.Disable(GL_CLIP_DISTANCE0);
         drawActors(mirroredEye);
-        gl.FrontFace(GL_CCW);
-        clipHeight = render_no_clip_height;
+        context.pipeline(endPipeline);
+        clipHeight = gfx::no_clip_height;
         viewportWidth = width;
         viewportHeight = height;
-        gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, GLuint(drawTarget));
-        gl.BindFramebuffer(GL_READ_FRAMEBUFFER, GLuint(readTarget));
-        gl.Viewport(0, 0, width, height);
+        context.bind_target(restore);
+        context.viewport({0, 0, width, height});
         reflectionDrawn = true;
     }
 };
