@@ -3,7 +3,7 @@
 #include "display_scaling.hpp"
 #include "window_settings.hpp"
 #include "gfx_window.hpp"
-#include "low_latency.hpp"
+#include "window_presenter.hpp"
 #include <SDL3/SDL.h>
 #include <string>
 #include <vector>
@@ -21,7 +21,7 @@ class WindowController {
     };
 
     SDL_Window *window_;
-    LowLatencyPresenter *presenter_ = nullptr;
+    WindowPresenter *presenter_ = nullptr;
     std::optional<WindowBounds> normal_;
     std::string desired_ = "windowed", error_;
     ExclusiveTarget exclusive_;
@@ -171,7 +171,7 @@ class WindowController {
     }
 
 public:
-    explicit WindowController(SDL_Window *window, LowLatencyPresenter *presenter = nullptr)
+    explicit WindowController(SDL_Window *window, WindowPresenter *presenter = nullptr)
         : window_(window)
         , presenter_(presenter) {
         observe_bounds();

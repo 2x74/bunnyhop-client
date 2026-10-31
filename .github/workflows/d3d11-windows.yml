@@ -23,6 +23,14 @@ jobs:
       - run: rustup toolchain install 1.99.1 --profile minimal
       - run: rustup override set 1.99.1
       - run: bun install --frozen-lockfile
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        id: dependencies
+        with:
+          path: |
+            native/target/native-deps
+            native/target/d3d-shaders/toolchain
+            native/target/release
+          key: d3d11-windows-pins-${{ hashFiles('native/apps/native/packaging/sdl.json', 'native/apps/native/tools/d3d-shaders/toolchain.json', 'native/Cargo.lock') }}
       - name: Restore frozen inputs and locally captured OpenGL goldens
         run: |
           $archive = [System.IO.File]::Create("$pwd/target/d3d11-windows-fixtures.tar.gz")
@@ -89,6 +97,14 @@ jobs:
           $spec | ConvertTo-Json | Set-Content target/warp-tester-spec.json
           ./apps/native/build/bunnyhop-native-gameplay-benchmark.exe target/warp-tester-spec.json
           if ($LASTEXITCODE -ne 0) { throw 'WARP tester correctness smoke failed' }
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        if: always() && steps.dependencies.outputs.cache-hit != 'true'
+        with:
+          path: |
+            native/target/native-deps
+            native/target/d3d-shaders/toolchain
+            native/target/release
+          key: ${{ steps.dependencies.outputs.cache-primary-key }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
