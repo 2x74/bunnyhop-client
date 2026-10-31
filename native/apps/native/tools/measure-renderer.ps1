@@ -50,19 +50,23 @@ function Read-PresentModes([string]$Csv, [object]$Result) {
 try {
     Push-Location $bundle
     & ./bunnyhop-native-shader-benchmark.exe target/native-assets (Join-Path $work 'shaders.json') *> (Join-Path $work 'shader.log')
-    if ($LASTEXITCODE -ne 0) { throw 'Shader compilation measurement failed.' }
-    $shaderResult = Get-Content -Raw (Join-Path $work 'shaders.json') | ConvertFrom-Json
-    $summary.Add("GPU: $($shaderResult.gpu); driver: $($shaderResult.driver); OS: $($shaderResult.os)")
-    $shaderTimes = @($shaderResult.permutations | ForEach-Object { [double]$_.totalMs } | Sort-Object)
-    $summary.Add(('Shader lazy compile/link: {0} keys; median {1:F2} ms; worst {2:F2} ms (driver cache intact).' -f `
-        $shaderTimes.Count, $shaderTimes[[int][Math]::Floor($shaderTimes.Count / 2)], $shaderTimes[-1]))
+    if ($LASTEXITCODE -eq 0) {
+        $shaderResult = Get-Content -Raw (Join-Path $work 'shaders.json') | ConvertFrom-Json
+        $summary.Add("GPU: $($shaderResult.gpu); driver: $($shaderResult.driver); OS: $($shaderResult.os)")
+        $shaderTimes = @($shaderResult.permutations | ForEach-Object { [double]$_.totalMs } | Sort-Object)
+        $summary.Add(('GL compile/link: {0} keys; median {1:F2} ms; worst {2:F2} ms (driver cache intact).' -f `
+            $shaderTimes.Count, $shaderTimes[[int][Math]::Floor($shaderTimes.Count / 2)], $shaderTimes[-1]))
+    } else {
+        $shaderResult = @{ status = 'unavailable'; reason = 'OpenGL shader setup failed.'; exitCode = $LASTEXITCODE }
+        $summary.Add('OpenGL shader compilation: unavailable; see measurement.json.')
+    }
     & ./bunnyhop-native-shader-benchmark.exe target/native-assets (Join-Path $work 'd3d11-shaders.json') `
         --renderer d3d11 *> (Join-Path $work 'd3d11-shaders.log')
     if ($LASTEXITCODE -eq 0) {
         $d3dShaders = Get-Content -Raw (Join-Path $work 'd3d11-shaders.json') | ConvertFrom-Json
         $summary.Add("D3D11 program creation: $($d3dShaders.permutations.Count) precompiled keys measured.")
     } else {
-        $d3dShaders = @{ status = 'unavailable'; reason = (Get-Content -Raw (Join-Path $work 'd3d11-shaders.log')) }
+        $d3dShaders = @{ status = 'unavailable'; reason = 'D3D11 program setup failed.'; exitCode = $LASTEXITCODE }
         $summary.Add('D3D11 program creation: unavailable; see measurement.json.')
     }
     for ($repeat = 0; $repeat -lt $Repeats; $repeat++) {
@@ -96,7 +100,7 @@ try {
             }
             if (!(Test-Path -LiteralPath $ready)) {
                 $records.Add(@{ repeat = $repeat + 1; renderer = $case.renderer; mode = $case.mode; fpsLimit = $case.fps;
-                                status = 'unavailable'; reason = (Get-Content -Raw (Join-Path $work "$stem-error.log")) })
+                                status = 'unavailable'; reason = 'Renderer or map setup failed before measurement.' })
                 $summary.Add("$stem : unavailable (presenter or map setup failed).")
                 if (!$benchmark.HasExited) { $benchmark.Kill() }
                 $benchmark = $null
@@ -119,7 +123,11 @@ try {
                 $presentmon = $null
             }
             if ($benchmark.ExitCode -ne 0 -or !(Test-Path -LiteralPath $resultPath)) {
-                throw "Capture $stem failed or was cancelled; no fallback result will be compared."
+                $records.Add(@{ repeat = $repeat + 1; renderer = $case.renderer; mode = $case.mode;
+                    fpsLimit = $case.fps; status = 'failed'; reason = 'Capture failed or was cancelled.' })
+                $summary.Add("$stem : failed; no fallback timing samples.")
+                $benchmark = $null
+                continue
             }
             $benchmark = $null
             $result = Get-Content -Raw -LiteralPath $resultPath | ConvertFrom-Json
@@ -132,8 +140,15 @@ try {
             Write-Host ("$stem : $($result.frame.fps) fps; $modesText")
         }
     }
+    $programComparison = foreach ($program in $d3dShaders.permutations) {
+        $glProgram = @($shaderResult.permutations | Where-Object { $_.programKey -eq $program.key })
+        @{ key = $program.key; d3d11CreationMs = $program.totalMs;
+           glCompileLinkMs = if ($glProgram.Count) { $glProgram[0].totalMs } else { $null } }
+    }
     $report = @{ schema = 1; mapSha256 = (Get-FileHash -LiteralPath $mapPath -Algorithm SHA256).Hash.ToLowerInvariant();
-        runs = $records; shaders = $shaderResult; d3d11Programs = $d3dShaders; method = 'Sequential matched frame-indexed camera; alternating case order; VSync off.' }
+        runs = $records; shaders = $shaderResult; d3d11Programs = $d3dShaders;
+        programsByKey = @($programComparison);
+        method = 'Sequential matched frame-indexed camera; alternating case order; VSync off.' }
     $report | ConvertTo-Json -Depth 100 | Set-Content -Encoding UTF8 (Join-Path $outputPath 'measurement.json')
     foreach ($group in ($records | Where-Object { $_.status -eq 'ok' } | Group-Object renderer, mode, fpsLimit)) {
         $runs = @($group.Group)

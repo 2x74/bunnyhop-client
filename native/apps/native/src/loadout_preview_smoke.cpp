@@ -122,6 +122,10 @@ int main(int argc, char **argv) {
         capture("bunny-outline", 17.2);
         job["view"] = "fp";
         job["playerGlow"]["aura"] = true;
+        // The bunny's orbit angle would rotate first-person hands out of the camera.
+        job["yaw"] = 0;
+        job["pitch"] = 0;
+        job["inspect"] = 0;
         capture("hands-aura", 17.5);
         job["view"] = "onboarding";
         auto malformed = job;

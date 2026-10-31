@@ -12,8 +12,9 @@ python3 apps/native/tools/d3d11-game/prepare.py /path/to/frozen-suite.json targe
 python3 apps/native/tools/d3d11-game/capture.py target/d3d11-fixtures target/d3d11-reference --renderer opengl
 ```
 
-Archive the inputs and reference images as `target/d3d11-windows-fixtures.tar.gz` on the temporary CI branch,
-with the inputs under `d3d11-fixtures/` and reference images under `d3d11-fixtures/goldens/`.
+Archive inputs under `d3d11-fixtures/` in `target/d3d11-windows-fixtures.tar.gz`, split into numbered
+`target/d3d11-windows-fixtures.part-*` files on the temporary CI branch. Archive the canonical reference PNGs
+under `goldens/` in `target/d3d11-windows-goldens.tar.gz`; select PPM over a same-named smaller supplementary PNG.
 The suite hashes every input. Never rebuild its assets between captures. The archive is CI input, not a release asset.
 
 `d3d11-whole-game-evidence` contains every reference/candidate image, logs, input hashes, metrics and RGB difference

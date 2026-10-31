@@ -34,6 +34,8 @@ jobs:
           } finally { $archive.Dispose() }
           tar -xzf target/d3d11-windows-fixtures.tar.gz -C target
           if ($LASTEXITCODE -ne 0) { throw 'Frozen fixtures are missing or damaged' }
+          tar -xzf target/d3d11-windows-goldens.tar.gz -C target/d3d11-fixtures
+          if ($LASTEXITCODE -ne 0) { throw 'Canonical full-resolution goldens failed' }
           Copy-Item target/d3d11-fixtures/target/native-assets target/native-assets -Recurse
           bun run wasm
           if ($LASTEXITCODE -ne 0) { throw 'Pinned verifier failed' }
@@ -47,8 +49,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Whole-game smoke build failed' }
       - name: Run settings tests and the WARP seam controls
         run: |
-          $env:PATH = "$pwd/target/native-deps/sdl/install/bin;$pwd/target/native-deps/vcpkg/installed/x64-windows/bin;$env:PATH"
-          ctest --test-dir apps/native/build --output-on-failure -R 'native_(preferences|graphics_settings|client_boundaries|window_modes|display_modes)'
+          $sdlBin = "$pwd/target/native-deps/sdl/install/bin"
+          $vcpkgBin = "$pwd/target/native-deps/vcpkg/installed/x64-windows/bin"
+          $env:PATH = "$sdlBin;$vcpkgBin;$env:PATH"
+          $tests = 'native_(preferences|renderer_startup|graphics_settings|client_boundaries|window_modes|display_modes)'
+          ctest --test-dir apps/native/build --output-on-failure -R $tests
           if ($LASTEXITCODE -ne 0) { throw 'Settings/display checks failed' }
           ./apps/native/build/bunnyhop-native-gfx-smoke.exe target/d3d11-controls --warp
           if ($LASTEXITCODE -ne 0) { throw 'WARP seam controls failed' }
@@ -56,7 +61,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'WARP postprocess control failed' }
       - name: Render every real game path under WARP
         run: |
-          $env:PATH = "$pwd/target/native-deps/sdl/install/bin;$pwd/target/native-deps/vcpkg/installed/x64-windows/bin;$env:PATH"
+          $sdlBin = "$pwd/target/native-deps/sdl/install/bin"
+          $vcpkgBin = "$pwd/target/native-deps/vcpkg/installed/x64-windows/bin"
+          $env:PATH = "$sdlBin;$vcpkgBin;$env:PATH"
           python apps/native/tools/d3d11-game/capture.py target/d3d11-fixtures target/d3d11-game --renderer d3d11
           if ($LASTEXITCODE -ne 0) { throw 'Whole-game WARP render failed' }
       - name: Compare every image and produce RGB heatmaps
@@ -70,6 +77,18 @@ jobs:
           $errors = $null
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path apps/native/tools/measure-renderer.ps1), [ref]$null, [ref]$errors) | Out-Null
           if ($errors.Count) { throw ($errors | Out-String) }
+          $sdlBin = "$pwd/target/native-deps/sdl/install/bin"
+          $vcpkgBin = "$pwd/target/native-deps/vcpkg/installed/x64-windows/bin"
+          $env:PATH = "$sdlBin;$vcpkgBin;$env:PATH"
+          ./apps/native/build/bunnyhop-native-shader-benchmark.exe target/native-assets `
+            target/d3d11-game/warp-programs.json --renderer d3d11 --d3d11-warp
+          if ($LASTEXITCODE -ne 0) { throw 'WARP precompiled program creation failed' }
+          $spec = @{ path = "$pwd/target/d3d11-fixtures/inputs/bhop_eazy.bsp";
+            out = "$pwd/target/d3d11-game/warp-tester.json"; renderer = 'd3d11'; warp = $true;
+            frames = 20; warmup = 2; width = 640; height = 360; vsync = $false; lowLatency = 'off' }
+          $spec | ConvertTo-Json | Set-Content target/warp-tester-spec.json
+          ./apps/native/build/bunnyhop-native-gameplay-benchmark.exe target/warp-tester-spec.json
+          if ($LASTEXITCODE -ne 0) { throw 'WARP tester correctness smoke failed' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

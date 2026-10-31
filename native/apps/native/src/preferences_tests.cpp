@@ -6,11 +6,9 @@
 #include <set>
 
 namespace {
-void preference_changes() {
-    const auto original = native::default_settings();
-    auto settings = original;
-    auto cached = native::Preferences::from_settings(settings);
-    assert(cached.renderer == native::RendererChoice::opengl);
+void renderer_preferences() {
+    const auto settings = native::default_settings();
+    assert(native::Preferences::from_settings(settings).renderer == native::RendererChoice::opengl);
     const auto d3d11 = native::patch_settings(settings, {{"renderer", "d3d11"}});
     assert(native::Preferences::from_settings(d3d11).renderer == native::RendererChoice::d3d11);
     assert(native::patch_settings(d3d11, {{"renderer", "opengl"}}).at("renderer") == "opengl");
@@ -24,6 +22,12 @@ void preference_changes() {
         renderer_rejected = true;
     }
     assert(renderer_rejected);
+}
+
+void preference_changes() {
+    const auto original = native::default_settings();
+    auto settings = original;
+    auto cached = native::Preferences::from_settings(settings);
     settings = native::patch_settings(
             settings,
             {{"fov", 110},
@@ -100,6 +104,7 @@ void bind_changes() {
 }  // namespace
 
 int main() {
+    renderer_preferences();
     preference_changes();
     bind_changes();
     std::cout << "Typed settings snapshots, bind reloads, shared keys and wheel binds passed\n";

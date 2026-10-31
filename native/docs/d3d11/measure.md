@@ -77,8 +77,8 @@ animation clocks still use wall time. The report records the camera origin, reso
 It uses the benchmark's default renderer settings; audio, menus, networking and real mouse input are absent.
 
 Driver shader caches remain intact. The first run can be slower, and repeated runs reveal cached compilation rather
-than a guaranteed clean-driver install. Do not call these cold-cache numbers. A D3D11 port can move HLSL compilation
-to build time, but still needs separate first-draw and pipeline/driver-cache measurements.
+than a guaranteed clean-driver install. Do not call these cold-cache numbers. D3D11 HLSL compilation runs at
+build time; first-draw and pipeline/driver-cache costs need separate measurements.
 
 Software timers cannot measure end-to-end click-to-photon latency. They do not include mouse electronics, all input
 transport, display scanout or pixel response. In the normal game's Reflex flash-indicator mode, a click emits a
@@ -105,8 +105,12 @@ a different schema; use the PowerShell tool for this presentation comparison.
 
 ## WARP CI and backend notes
 
-The new `.github/workflows/d3d11-windows.yml` runs only on pushes to `ci/d3d11-windows`; it leaves release workflows untouched.
-The standalone probe needs only the Windows SDK and MSVC, not SDL, Rust, maps or OpenGL:
+The whole-game `.github/workflows/d3d11-windows.yml` runs on `ci/d3d11-windows` and uploads
+`d3d11-whole-game-evidence` plus `renderer-measure-windows`. It uses frozen assets/maps and locally generated
+OpenGL reference images. Renderer startup recovery, every render fixture, the hidden client and the tester's
+precompiled-program and GPU-query paths run under WARP. WARP timing samples are correctness checks, not GPU speed.
+
+The older `d3d11-warp.yml` standalone experiment remains separate. Its probe needs only the Windows SDK and MSVC:
 
 ```powershell
 cmake -S native/apps/native/tools/d3d11-warp -B warp-build -A x64
@@ -126,10 +130,9 @@ queue idles between stages, so neither is a hardware GPU performance estimate. F
 The separate session probe creates an HWND and a real flip-discard swapchain and attempts `Present(0, 0)`. Its HRESULTs
 and occlusion status are reported; failure is nonfatal. Even a successful swapchain/Present does not prove scanout or
 independent flip on the hosted runner. WARP validates D3D11 API/shader/pixel semantics, not hardware performance,
-WGL interop, Reflex, Anti-Lag, tearing/VRR or real monitor latency. The future renderer can use a similar WARP fixture
-for Windows render smoke tests without relying on the runner's OpenGL 1.1 implementation.
+WGL interop, Reflex, Anti-Lag, tearing/VRR or real monitor latency. The whole-game fixture uses the production backend and skips the runner's OpenGL 1.1 implementation.
 
 Only the gameplay benchmark compiles an instrumented copy of the existing presenter. `measure-presenter.cmake`
 inserts measurement hooks at checked source anchors and fails configuration if those anchors move. The normal client
-still compiles `low_latency_windows.cpp` directly. Keep those anchors in sync if presenter code changes. No renderer,
-gameplay, replay, verifier or release code path is switched by these tools.
+still compiles `low_latency_windows.cpp` directly. Keep those anchors in sync if presenter code changes. The tester selects its own renderer from the spec and leaves player preferences, gameplay rules, replays, verifier
+and release identity unchanged.
