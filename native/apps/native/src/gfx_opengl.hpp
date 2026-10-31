@@ -507,8 +507,8 @@ public:
         Geometry result;
         result.array = generate(gl_.GenVertexArrays);
         result.vertices = generate(gl_.GenBuffers);
-        gl_.BindVertexArray(result.array);
-        gl_.BindBuffer(GL_ARRAY_BUFFER, result.vertices);
+        gl_.BindVertexArray(GLuint(result.array));
+        gl_.BindBuffer(GL_ARRAY_BUFFER, GLuint(result.vertices));
         for (const auto &attribute : attributes) {
             gl_.EnableVertexAttribArray(attribute.location);
             gl_.VertexAttribPointer(
@@ -589,7 +589,7 @@ public:
         result.height = height;
         result.format = format;
         result.buffer = generate(gl_.GenBuffers);
-        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, result.buffer);
+        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, GLuint(result.buffer));
         gl_.BufferData(GL_PIXEL_PACK_BUFFER, GLsizeiptr(readback_bytes(result)), nullptr, GL_STREAM_READ);
         gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         return result;
