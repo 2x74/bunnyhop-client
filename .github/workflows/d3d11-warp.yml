@@ -1,0 +1,33 @@
+name: D3D11 WARP experiment
+on:
+  push:
+    branches: [ci/d3d11-warp]
+permissions:
+  contents: read
+jobs:
+  warp:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Build standalone probe with MSVC
+        shell: pwsh
+        run: |
+          cmake -S native/apps/native/tools/d3d11-warp -B warp-build -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'Configure failed' }
+          cmake --build warp-build --config Release
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+      - name: Exercise WARP and the runner session
+        shell: pwsh
+        run: |
+          ./warp-build/Release/d3d11-warp-probe.exe warp-evidence
+          if ($LASTEXITCODE -ne 0) { throw 'WARP probe failed' }
+          Get-Content warp-evidence/report.json >> $env:GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: d3d11-warp-evidence
+          path: warp-evidence
+          if-no-files-found: warn
