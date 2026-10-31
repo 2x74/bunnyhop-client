@@ -27,3 +27,6 @@ add_test(NAME native_gfx_d3d11 COMMAND d3d11-backend-proof "${CMAKE_CURRENT_BINA
 add_test(NAME native_gfx_opengl COMMAND d3d11-backend-proof)
 set_tests_properties(native_gfx_opengl PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME native_post_processing_d3d11 COMMAND d3d11-post-proof --warp)
+backend_proof(gfx-constants-proof gfx_constants_tests.cpp)
+target_compile_options(gfx-constants-proof PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG>)
+add_test(NAME native_gfx_constants COMMAND gfx-constants-proof)
