@@ -18,6 +18,7 @@
 #include "resource_loading.hpp"
 #include "actor_anim.hpp"
 #include "tp_inspect.hpp"
+#include "third_person_events.hpp"
 #include "knife_spinner.hpp"
 #include "inspect_cues.hpp"
 #include <span>
@@ -2219,11 +2220,13 @@ public:
     }
 
     // Another player's shot (net/players.ts shot): a tracer along their view from their gun's muzzle (as posed last
-    // frame) to where it meets the world here, with the flash and the impact.
+    // frame) to where it meets the world here, with the flash and the impact. Your own comes from simulation_tick.
     void queue_remote_shot(const native_render::Actor &actor) {
         constexpr float shot_range_units = 8192;
         constexpr float standing_eye_units = 64, crouched_eye_units = 46;
-        if (actor.attack != 1 || actor.frame.weapon < 2 || actor.id.starts_with("ghost-")) return;
+        if (actor.attack != native_render::gun_shot_pulse || actor.frame.weapon < native_render::first_gun_weapon
+            || actor.id.starts_with("ghost-") || actor.id == native_render::own_actor_id)
+            return;
         const bool crouched = actor.frame.flags & 1;
         const float pitch = actor.frame.pitch * float(native::radians), yaw = actor.frame.yaw * float(native::radians);
         const native_render::Vec3 forward = {

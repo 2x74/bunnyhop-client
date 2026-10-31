@@ -19,7 +19,7 @@ function existingAccount(): HTMLElement {
     "section.acct-sec",
     { id: "acct-existing" },
     h("h3", null, "Already play on bunnyhop.lol?"),
-    h("p.acct-note", null, "Sign in with your account's email above and your runs, ranks and unlocks come with you. If you only use Discord there, add an email in Account on bunnyhop.lol first."),
+    h("p.acct-note", null, "Sign in above with your account's name and password or its email, and your runs, ranks and unlocks come with you. If you only use Discord there, add a password or an email in Account on bunnyhop.lol first."),
   );
 }
 

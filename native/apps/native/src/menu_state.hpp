@@ -45,10 +45,24 @@ public:
         full_ = false;
         visible_ = visible;
         if (changed.empty()) return {};
-        return "window.bunnyhopNativeMenu?.onState(" + changed.dump() + ")";
+        return script(changed);
+    }
+
+    // News that shouldn't wait for the next publish. It is remembered like one: a field the menu heard about here and
+    // that changes back before the next publish must still be sent, or the menu keeps the old value for good.
+    std::string publish_now(const nlohmann::json &fields) {
+        for (auto field = fields.begin(); field != fields.end(); ++field)
+            sent_[field.key()] = field.value();
+        return script(fields);
     }
 
 private:
+    // Error text can carry a Windows code page, and a message the menu can't read mustn't end the session.
+    static std::string script(const nlohmann::json &fields) {
+        const auto encoded = fields.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+        return "window.bunnyhopNativeMenu?.onState(" + encoded + ")";
+    }
+
     nlohmann::json sent_ = nlohmann::json::object();
     bool full_ = true;
     bool visible_ = false;

@@ -169,6 +169,9 @@ if(BUNNYHOP_BUILD_CLIENT)
         src/startup.cpp
         src/preferences.cpp
         src/replay_library.cpp
+        src/native_log.cpp
+        src/log_scrub.cpp
+        src/crash_note.cpp
         src/online.cpp
         src/sky_image.cpp
         src/sky_library.cpp
@@ -357,7 +360,15 @@ if(BUNNYHOP_BUILD_CLIENT)
         target_include_directories(bunnyhop-native-online-tests PRIVATE vendor)
         target_link_libraries(bunnyhop-native-online-tests PRIVATE bunnyhop_core_native CURL::libcurl)
         add_test(NAME native_online_boundaries COMMAND bunnyhop-native-online-tests)
-        add_executable(bunnyhop-native-map-load-tests src/map_load_tests.cpp src/online.cpp)
+        add_executable(bunnyhop-native-log-tests src/native_log_tests.cpp src/native_log.cpp src/log_scrub.cpp src/crash_note.cpp)
+        target_include_directories(bunnyhop-native-log-tests PRIVATE vendor)
+        target_link_libraries(bunnyhop-native-log-tests PRIVATE SDL3::SDL3 Threads::Threads)
+        add_test(NAME native_log COMMAND bunnyhop-native-log-tests)
+        set_tests_properties(native_log PROPERTIES TIMEOUT 60)
+        add_executable(bunnyhop-native-menu-state-tests src/menu_state_tests.cpp)
+        target_include_directories(bunnyhop-native-menu-state-tests PRIVATE vendor)
+        add_test(NAME native_menu_state COMMAND bunnyhop-native-menu-state-tests)
+        add_executable(bunnyhop-native-map-load-tests src/map_load_tests.cpp src/online.cpp src/native_log.cpp src/log_scrub.cpp)
         target_include_directories(bunnyhop-native-map-load-tests PRIVATE vendor)
         target_link_libraries(bunnyhop-native-map-load-tests PRIVATE bunnyhop_core_native CURL::libcurl Threads::Threads)
         add_test(NAME native_map_cache_recovery COMMAND bunnyhop-native-map-load-tests)
@@ -761,6 +772,26 @@ if(BUILD_TESTING)
         set_tests_properties(native_tp_inspect_oracle PROPERTIES FIXTURES_SETUP tp_inspect_oracle)
         add_test(NAME native_tp_inspect_web COMMAND bunnyhop-native-tp-inspect-tests "${TP_INSPECT_ASSETS}/tp-inspects.json" "${TP_INSPECT_ORACLE}")
         set_tests_properties(native_tp_inspect_web PROPERTIES FIXTURES_REQUIRED "tp_inspect_tracks;tp_inspect_oracle")
+    endif()
+endif()
+
+# The third-person knife attack against the website, and through the real simulation and a real replay.
+if(BUILD_TESTING)
+    add_executable(bunnyhop-native-third-person-swing-tests src/third_person_swing_tests.cpp src/ghost_slots.cpp)
+    target_include_directories(bunnyhop-native-third-person-swing-tests PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-third-person-swing-tests PRIVATE bunnyhop_core_native)
+    find_program(THIRD_PERSON_SWING_BUN bun)
+    if(THIRD_PERSON_SWING_BUN)
+        set(THIRD_PERSON_SWING_ASSETS "${CMAKE_CURRENT_SOURCE_DIR}/../../target/native-assets")
+        set(THIRD_PERSON_SWING_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/third-person-swing-oracle.json")
+        add_test(NAME native_third_person_swing_oracle COMMAND "${THIRD_PERSON_SWING_BUN}" apps/native/src/third-person-swing-oracle.ts
+            "${THIRD_PERSON_SWING_ASSETS}" "${THIRD_PERSON_SWING_ORACLE}")
+        set_tests_properties(native_third_person_swing_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP third_person_swing_oracle TIMEOUT 60)
+        add_test(NAME native_third_person_swing COMMAND bunnyhop-native-third-person-swing-tests
+            "${THIRD_PERSON_SWING_ASSETS}" "${THIRD_PERSON_SWING_ORACLE}")
+        set_tests_properties(native_third_person_swing PROPERTIES
+            FIXTURES_REQUIRED third_person_swing_oracle SKIP_RETURN_CODE 77 TIMEOUT 60)
     endif()
 endif()
 

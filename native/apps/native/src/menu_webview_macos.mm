@@ -3,6 +3,7 @@
 #import <AppKit/AppKit.h>
 #import <WebKit/WebKit.h>
 #include <algorithm>
+#include <iostream>
 #include <utility>
 
 namespace {
@@ -31,8 +32,10 @@ struct MenuState {
         for (const auto &message : messages)
             queued += message.size();
         if (!data || data.length > max_message_bytes || messages.size() >= max_messages ||
-            queued + data.length > 16 * 1024 * 1024)
+            queued + data.length > 16 * 1024 * 1024) {
+            std::cerr << "Menu message dropped: the queue is full\n";
             return;
+        }
         messages.emplace_back(static_cast<const char *>(data.bytes), data.length);
     }
 };

@@ -45,6 +45,8 @@ export class ResultCard {
   private sub = h("div.endcard-sub");
   private reel = h("div.endcard-reel", { hidden: true });
   private extra = h("div.endcard-extra", { hidden: true });
+  /** One line of text, never a control: the pointer is locked here (ui/keep-run.ts). */
+  private keep = h("div.ec-keep", { hidden: true });
   private time: HTMLElement | null = null;
   private word: HTMLElement | null = null;
   private note: HTMLElement | null = null;
@@ -96,8 +98,9 @@ export class ResultCard {
     this.sub.replaceChildren();
     this.reel.hidden = true;
     this.reel.replaceChildren();
+    this.keep.hidden = true;
     // The time (and its PB / WR word) floats over the world; the rest sits in one quiet card under it.
-    const card = h("div.ec-card", null, stats, this.sub, this.reel, this.extra);
+    const card = h("div.ec-card", null, stats, this.sub, this.reel, this.extra, this.keep);
     this.hint = h("div.ec-hint", null, `${o.restartKey} to go again`);
     const parts: (HTMLElement | null)[] = [r.track ? h("div.ec-track", null, r.track) : null, time, deltaRow, this.note, card, this.hint];
     this.el.replaceChildren(...parts.filter((e): e is HTMLElement => !!e));
@@ -331,6 +334,12 @@ export class ResultCard {
   setExtra(el: Node | null): void {
     this.extra.replaceChildren(...(el ? [el] : []));
     this.extra.hidden = !el;
+  }
+
+  /** "Keep this run" for a guest (ui/keep-run.ts); goes with the result. */
+  setKeep(text: string): void {
+    this.keep.textContent = text;
+    this.keep.hidden = false;
   }
 
   private cancel(): void {

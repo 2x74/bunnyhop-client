@@ -16,15 +16,15 @@ registerSettingsSection(
   (ui) => [
     ui.group(
       "Account",
-      // One row: guests get Sign in (the panel at its sign-in methods), accounts get the panel at their name.
+      // One row: guests get Save progress (the panel at its sign-in methods), accounts get the panel at their name.
       api.available() && (lastKnownMe()?.provider ?? "guest") === "guest"
-        ? ui.actions("Name and sign-in", [ui.button("Sign in", () => openAccount("save"), { primary: true })], {
+        ? ui.actions("Name and sign-in", [ui.button("Save progress", () => openAccount("save"), { primary: true })], {
             desc: SIGN_IN_HELP,
-            keywords: "login sign in discord email save progress account link name username rename display nickname",
+            keywords: "login sign in password discord email save progress account link name username rename display nickname",
           })
         : ui.actions("Name and sign-in", [ui.button("Open account", () => openAccount("name"), { primary: true })], {
             desc: "Change your display name (3 a day), see how you sign in, sign out.",
-            keywords: "name username rename display nickname sign out logout login sign in discord email account link",
+            keywords: "name username rename display nickname sign out logout login sign in password discord email account link",
           }),
       api.available()
         ? ui.actions("Profile flag", [ui.button("Choose flag", () => void Promise.all([myProfile(), import("./country-picker")]).then(([p, m]) => m.countryPicker(p?.player.country, () => (refreshMyProfile(), toast("Profile flag saved")))))], {

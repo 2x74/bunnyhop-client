@@ -321,6 +321,7 @@ export const NATIVE_GATES: Readonly<Record<string, Gate>> = {
   "data/Game data folder/Move game data": menuOnly,
   "data/Game data folder/Waiting to move": menuOnly,
   "data/Game data folder/Folder not found": menuOnly,
+  "data/Game data folder/Log file": menuOnly,
   "updates/Native client/Version": menuOnly,
   "updates/Native client/Updates": menuOnly,
   "updates/Native client/Ranked": menuOnly,

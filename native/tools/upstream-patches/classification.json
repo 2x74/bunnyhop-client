@@ -2,12 +2,12 @@
   {
     "path": "crates/core/Cargo.toml",
     "classification": "native patch",
-    "baseline": "0c958a87d02d93e2b0db33877d02f4506584e73e"
+    "baseline": "01bc5f743f2ccd878f3d777dc791619c0dc61c79"
   },
   {
     "path": "crates/core/src/game.rs",
     "classification": "native patch",
-    "baseline": "7acaad9690840e275c70b9504fac2571ee58ab91"
+    "baseline": "8463f8a71dbbe844a9c816e0f21e7439c21aaaae"
   },
   {
     "path": "crates/core/src/game/kin.rs",
@@ -62,7 +62,7 @@
   {
     "path": "crates/core/src/wasm.rs",
     "classification": "native patch",
-    "baseline": "0b8bca00176749bc0d40d1bcdf40adf0400b2cee"
+    "baseline": "4a86be6a082b6838f0ab034f1ee837998f04d7e2"
   },
   {
     "path": "crates/core/src/wasm_content.rs",
@@ -122,12 +122,12 @@
   {
     "path": "crates/vendor/movement/src/lib.rs",
     "classification": "older upstream; overwrite",
-    "baseline": "dae18c1ec5e1a1bf8e05c5ffa29edfe0d4c58987"
+    "baseline": "8a871fa4e852febf74f92f91ae240f0ccf8d43fc"
   },
   {
     "path": "crates/vendor/movement/src/movement.rs",
     "classification": "native patch",
-    "baseline": "fdee233062c4ca0f57e6a649ad99d6fc5274c33b"
+    "baseline": "db4ec52ec07b04903a8731e50fd2750114e32a3d"
   },
   {
     "path": "crates/vendor/thirdpartylegalnotices.txt",
@@ -137,7 +137,7 @@
   {
     "path": "apps/web/src/api.ts",
     "classification": "native patch",
-    "baseline": "ce628e612711c42d4b8aea25d7b5938679557782"
+    "baseline": "9071196ad3e4b2899c786399c22c854be2ae41db"
   },
   {
     "path": "apps/web/src/assets/audio/manifest.json",
@@ -152,7 +152,7 @@
   {
     "path": "apps/web/src/core.ts",
     "classification": "native patch",
-    "baseline": "277195c71c666a00bac5d6a77dd393728e1533c9"
+    "baseline": "074dd8f1e1bd831b0078e45ca2ebc09c82b11393"
   },
   {
     "path": "apps/web/src/feedback/modal.ts",
@@ -227,7 +227,7 @@
   {
     "path": "apps/web/src/ui/profile.ts",
     "classification": "native patch",
-    "baseline": "79f8bef4eedbb244df81c83a13cb62bff4b06bb9"
+    "baseline": "23f89c88e23428c785c56bd8bb3f044bf447bef7"
   },
   {
     "path": "apps/web/src/ui/run-stats.ts",
@@ -237,7 +237,7 @@
   {
     "path": "apps/web/src/ui/support.ts",
     "classification": "native patch",
-    "baseline": "62c7e52271d7d228502d3667a3f657fd7995d39d"
+    "baseline": "a4adae0af2c18ff39ebb6fbf1e678ab6cfd3502b"
   },
   {
     "path": "apps/web/src/viewmodel/inspects/third.ts",
@@ -262,6 +262,21 @@
   {
     "path": "apps/web/src/styles.ts",
     "classification": "native patch",
-    "baseline": "2e1a8f51a919aebbaf3149b6b9841f1167294e5d"
+    "baseline": "f377b6e550171db5e6d041ef9b2ee313e3c355a6"
+  },
+  {
+    "path": "apps/web/src/ui/account-state.ts",
+    "classification": "native patch",
+    "baseline": "af7b075decfbdd1f33c5b7e58ae6b707e839139b"
+  },
+  {
+    "path": "crates/core/tests/native_entities.rs",
+    "classification": "native patch",
+    "baseline": null
+  },
+  {
+    "path": "crates/core/tests/native_render.rs",
+    "classification": "native patch",
+    "baseline": null
   }
 ]

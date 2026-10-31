@@ -133,6 +133,11 @@ export interface PlayerState {
   activeWeapon?: number;
   /** Read-only clean movement observation for local LJ stats (absent on older WASM builds). */
   jumpStatsValid?: boolean;
+  /**
+   * Physics v22: this landing is an edge landing. The next command decides whether it stands: without a jump the player is
+   * airborne on that tick, so style key rules treat it as an air tick (styles.ts). Absent otherwise.
+   */
+  edgeLanding?: boolean;
 }
 
 /**
@@ -243,6 +248,9 @@ export const PROP_TRANSFORM_KEY = 1 << 20;
  *   stopped every run before. On the maps in map_fixes.rs PARENTED_DOORS_V21 (bhop_wayz), a func_door / func_button with
  *   a move parent follows it in collision and drawing and travels in the parent's space; on bhop_areaportal_v1 the green
  *   train gets the red train's orientation edit, so it doesn't turn its riders around. Every other map plays as on v20.
+ * - v22: v21 + Momentum's edge rule (research/EDGEBUG-V22.md): a landing with no walkable ground under the next tick is taken
+ *   back on that tick unless it jumps, so no friction tick (EVENT_EDGEBUG). Autohop with jump held on the landing tick plays
+ *   as v21, and a jump on the next tick (held or a new scroll press) is exactly v21's.
  */
 export const PHYSICS_V1 = 1;
 /** Weapon commands and the USP silencer (research/WEAPONS.md). */
@@ -268,7 +276,7 @@ export const PHYSICS_V16 = 16;
 /** RNGFix parity: uphill / downhill inclines, edge bugs, trigger jumping and telehops as on RNGFix servers. */
 export const PHYSICS_V17 = 17;
 /** The physics version new runs are played and recorded with. */
-export const PHYSICS_VERSION = 21;
+export const PHYSICS_VERSION = 22;
 /** Climbable surface properties used by bhop_synthetic_fix. */
 export const PHYSICS_V18 = 18;
 /** Scoped entity makers and known velocity-script equivalents. */
@@ -277,6 +285,8 @@ export const PHYSICS_V19 = 19;
 export const PHYSICS_V20 = 20;
 /** Start-open func_door_rotating spawns open (bhop_collective); bhop_wayz's parented doors follow their parent; bhop_areaportal_v1's green train keeps riders' view. */
 export const PHYSICS_V21 = 21;
+/** Momentum's edge rule: without a jump, a landing with no ground under the next tick stays in the air, with no friction tick. */
+export const PHYSICS_V22 = 22;
 /** Versions this code knows (the wasm build must support them too, see Core.setSettings). */
 export const isPhysicsVersion = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= PHYSICS_V1 && (v as number) <= PHYSICS_VERSION;
 
@@ -322,6 +332,8 @@ export const EVENT_ANGLES_CHANGED = 1 << 4;
 export const EVENT_ATTACK = 1 << 5;
 /** The player's weapons changed this tick (physics v4): `weaponReport(core)` flags (research/WEAPONS.md). */
 export const EVENT_WEAPON = 1 << 6;
+/** Physics v22: this tick took back the previous tick's edge landing: airborne, no friction tick, no jump. */
+export const EVENT_EDGEBUG = 1 << 8;
 
 interface Exports {
   memory: WebAssembly.Memory;
@@ -743,6 +755,7 @@ export class Core {
         position: [s[24], s[25], s[26]] as [number, number, number],
         velocity: [s[27], s[28], s[29]] as [number, number, number], crouched: s[30] !== 0,
       } } : {}),
+      ...(s[31] === 1 ? { edgeLanding: true } : {}),
     };
   }
 

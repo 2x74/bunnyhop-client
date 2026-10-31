@@ -44,7 +44,11 @@ function deferred<T>() {
   });
   return { promise, resolve, reject };
 }
-function fixture(policy: () => Promise<VersionPolicy> = async () => allowed, dpi?: () => number | null) {
+function fixture(
+  policy: () => Promise<VersionPolicy> = async () => allowed,
+  dpi?: () => number | null,
+  verifiedBest?: () => void,
+) {
   const statuses: RunServiceStatus[] = [],
     bodies: Parameters<RunApi["runBeat"]>[0][] = [],
     uploads: { bytes: Uint8Array; beats: string[] }[] = [];
@@ -68,6 +72,7 @@ function fixture(policy: () => Promise<VersionPolicy> = async () => allowed, dpi
     origin: () => "https://bunnyhop.lol",
     send: (status) => statuses.push(status),
     dpi,
+    verifiedBest,
   });
   return { service, api, statuses, bodies, uploads, requests };
 }
@@ -112,6 +117,25 @@ describe("native run service, mocked network only", () => {
     await f.service.receive({ ...finish(1), diagnostics, mouse: { sensitivity: 1.2 } });
     expect(mice).toEqual([{ sensitivity: 1.2, dpi: null }]);
     expect(attached).toEqual([{ id: "stored-run", diagnostics }]);
+  });
+  test("a verified new best offers to keep the run; a slower run and an unverified best don't", async () => {
+    for (const [answer, offers] of [
+      [{ id: "best", status: "verified", pb: true }, 1],
+      [{ id: "slower", status: "verified", pb: false }, 0],
+      [{ id: "refused", status: "rejected", pb: true }, 0],
+    ] as const) {
+      let offered = 0;
+      const f = fixture(undefined, undefined, () => {
+        offered++;
+      });
+      f.api.submitRun = async () => answer;
+      await reset(f.service);
+      const first = f.service.receive(beat(1, 0));
+      f.requests[0].resolve({ sid: "session", token: "t0" });
+      await first;
+      await f.service.receive(finish(1));
+      expect(offered).toBe(offers);
+    }
   });
   test("the DPI entered in Settings goes with the host's sensitivity", async () => {
     const f = fixture(undefined, () => 1600);

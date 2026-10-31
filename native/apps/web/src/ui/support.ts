@@ -265,8 +265,8 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
       h("div.sp-actions", null, h("button.btn.sp-soon", { type: "button", disabled: true, "aria-disabled": "true" }, "Coming soon"), when),
     );
   };
-  // Payments open: an amount (whole dollars, the minimum by default) and a button to Stripe's page. Guests sign in first:
-  // their account lives in one browser, and the perks must stay with the player.
+  // Payments open: an amount (whole dollars, the minimum by default) and a button to Stripe's page. Guests save their
+  // account first: a guest lives in one browser, and the perks must stay with the player.
   const drawPay = (s: MySupport) => {
     if (backFromCheckout) return drawPaid();
     const min = s.minUsd || SUPPORTER_MIN_USD;
@@ -274,7 +274,7 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
     ask.replaceChildren(
       h("p.sp-lead", null, "Support bunnyhop.lol"),
       h("p", null, `Pay once, $${min} or more. It covers the servers, and the game stays free: nothing you buy helps you play. Every $5 after the first is a gift for another player.`),
-      ...(guest ? [h("div.sp-actions", null, h("button.btn.primary", { type: "button", onclick: () => openAccount("save") }, "Sign in to support"))] : payForm(min, "Support")),
+      ...(guest ? [h("div.sp-actions", null, h("button.btn.primary", { type: "button", onclick: () => openAccount("save") }, "Save your account to support"))] : payForm(min, "Support")),
     );
   };
   /** An amount (whole dollars, `min` by default) and a button to Stripe's page, plus the error line. */
@@ -283,7 +283,7 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
     // site, on the same account (add email in Account to sign in there).
     if (WAVEDASH)
       return [
-        h("p.dim", null, "Supporting happens on bunnyhop.lol, on this same account: add email in Account if you haven't, then sign in with it there."),
+        h("p.dim", null, "Supporting happens on bunnyhop.lol, on this same account: add email or a password in Account if you haven't, then sign in with it there."),
         h("div.sp-actions", null, h(`button.btn${primary ? ".primary" : ""}`, { type: "button", onclick: () => void wavedashCopy("https://bunnyhop.lol/?support") }, "Copy the link")),
       ];
     const amount = h("input.es-input.sp-amount", { type: "number", min: String(min), max: "1000", step: "1", value: String(min), inputmode: "numeric", "aria-label": "Amount in US dollars" }) as HTMLInputElement;

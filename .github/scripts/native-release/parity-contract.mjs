@@ -4,7 +4,7 @@ const pin = JSON.parse(readFileSync(new URL('../../../native/upstream-wasm.json'
 export const PINNED_WASM_SHA256 = pin.sha256;
 export const PINNED_PHYSICS = pin.physics;
 export const PINNED_RULES = pin.rules;
-export const PARITY_SUITE = 'material-ladder-release-v5';
+export const PARITY_SUITE = 'material-ladder-release-v6';
 export const parityArtifactName = (target, runId, attempt) => `native-parity-${target}-${runId}-${attempt}`;
 export const fixtureHashes = {
   incline: '28734c897cdf610bfc7ca349713557747e05754109b720777281b20784e80b98',
@@ -13,7 +13,7 @@ export const fixtureHashes = {
   telehop: '9284b7e5abef51bf69589276eb5bbf7e286f4365fbe3dc2b512a25ecf3e095d5',
   'material-ladder': '91e211b00d7a0fa3722bb7d9971bd9a866e039fe450f7d0142bb2fa9b1dee36b',
 };
-export const fixtureVersions = name => name === 'material-ladder' ? [17, 18, 21] : [16, 17, 20, 21];
+export const fixtureVersions = name => name === 'material-ladder' ? [17, 18, 22] : [16, 17, 21, 22];
 export const fixtureTrials = { incline: 60, edge: 80, 'thin-trigger': 40, telehop: 40, 'material-ladder': 16 };
 export const behaviorCounters = ['landed', 'speedKept', 'speedLost', 'jumped', 'edgeBugs', 'teleported', 'fallRestored', 'mapTeleport', 'attached', 'climbed'];
 export const parityFiles = [...Object.keys(fixtureHashes).flatMap(name => [
@@ -44,11 +44,11 @@ export function validateParityReport(report, platform, context) {
       requireThat(Number.isSafeInteger(observation[counter]) && observation[counter] >= 0 && observation[counter] <= f.trials, `${f.name} invalid behavior count`);
     if (f.name === 'material-ladder') {
       const { v17, v18 } = f.behavior;
-      requireThat(v17.attached === 0 && v17.climbed === 0 && v18.attached === f.trials && v18.climbed === f.trials && f.behavior.v21.attached === f.trials && f.behavior.v21.climbed === f.trials, 'material ladder does not exercise v18 attachment/climbing with v17 historical contrast');
+      requireThat(v17.attached === 0 && v17.climbed === 0 && v18.attached === f.trials && v18.climbed === f.trials && f.behavior.v22.attached === f.trials && f.behavior.v22.climbed === f.trials, 'material ladder does not exercise v18 attachment/climbing with v17 historical contrast');
     } else {
       const a = f.behavior.v16;
       // Both v17 and the latest version must retain every RNGFix behavior.
-      for (const b of [f.behavior.v17, f.behavior.v20, f.behavior.v21]) {
+      for (const b of [f.behavior.v17, f.behavior.v21, f.behavior.v22]) {
         if (f.name === 'incline') requireThat(b.landed === f.trials && b.speedKept === f.trials && a.speedLost > 0, 'incline does not exercise speed preservation');
         if (f.name === 'edge') requireThat(b.jumped > a.jumped && a.edgeBugs > 0 && b.edgeBugs === 0, 'edge does not exercise edge-bug prevention');
         if (f.name === 'thin-trigger') requireThat(b.teleported === f.trials && a.teleported > 0 && a.teleported < b.teleported, 'thin trigger does not exercise first-landing contact');

@@ -13,6 +13,11 @@ namespace native {
 namespace {
 constexpr size_t MiB = 1024 * 1024;
 const std::string origin = "https://bunnyhop.lol";
+// This slow for this long counts as stalled. There's no limit on a whole transfer: the largest map has to be able to
+// finish on a slow line, and a retry would start it again from nothing.
+constexpr long stalled_bytes_per_second = 1024;
+constexpr long stall_window_seconds = 30;
+constexpr long connect_timeout_seconds = 15;
 using Bytes = std::vector<uint8_t>;
 
 struct Response {
@@ -78,10 +83,9 @@ Bytes fetch(
     curl_easy_setopt(handle.get(), CURLOPT_FOLLOWLOCATION, 0L);
     curl_easy_setopt(handle.get(), CURLOPT_FAILONERROR, 1L);
     curl_easy_setopt(handle.get(), CURLOPT_ACCEPT_ENCODING, "");
-    curl_easy_setopt(handle.get(), CURLOPT_CONNECTTIMEOUT, 15L);
-    curl_easy_setopt(handle.get(), CURLOPT_TIMEOUT, 180L);
-    curl_easy_setopt(handle.get(), CURLOPT_LOW_SPEED_LIMIT, 1024L);
-    curl_easy_setopt(handle.get(), CURLOPT_LOW_SPEED_TIME, 20L);
+    curl_easy_setopt(handle.get(), CURLOPT_CONNECTTIMEOUT, connect_timeout_seconds);
+    curl_easy_setopt(handle.get(), CURLOPT_LOW_SPEED_LIMIT, stalled_bytes_per_second);
+    curl_easy_setopt(handle.get(), CURLOPT_LOW_SPEED_TIME, stall_window_seconds);
     curl_easy_setopt(handle.get(), CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(handle.get(), CURLOPT_ERRORBUFFER, error);
     curl_easy_setopt(handle.get(), CURLOPT_WRITEFUNCTION, receive);

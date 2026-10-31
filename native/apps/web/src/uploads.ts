@@ -88,6 +88,6 @@ export function legacyCandidate(size: number, h: Pick<ReplayHeader, "player" | "
 
 /** Why the upload failed, in the end card's and the toasts' words. */
 export function failureText(f: UploadFailure): string {
-  if (f === "guest_limit") return "too many new players have started on your network lately (shared connections like schools reach this; signing in with Discord or email avoids it)";
+  if (f === "guest_limit") return "too many new players have started on your network lately (shared connections like schools reach this; signing in to your account avoids it)";
   return f === "too_large" ? "the replay is too large for the server" : f === "network" ? "no connection to the leaderboard" : "the upload was interrupted";
 }

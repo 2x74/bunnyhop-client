@@ -15,6 +15,7 @@ const SHIELD = "M10 2.5L16.5 5V10C16.5 13.6 13.7 16.3 10 17.5C6.3 16.3 3.5 13.6 
 
 const DRAW: Record<string, Shape[]> = {
   // sections
+  analytics: [p("M3 17H17"), p("M5.5 13.5V10M10 13.5V4M14.5 13.5V7.5")],
   queue: [p("M3 4.5H17M3 9H17M3 13.5H9.5"), p("M12 15L14.2 17.2L18 13.4")],
   maps: [p("M3 5L7.5 3L12.5 5L17 3V15L12.5 17L7.5 15L3 17Z"), p("M7.5 3V15M12.5 5V17")],
   overview: [p("M3 3H9V9H3Z"), p("M11 3H17V7H11Z"), p("M11 9H17V17H11Z"), p("M3 11H9V17H3Z")],

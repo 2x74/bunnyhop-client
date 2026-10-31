@@ -6,6 +6,7 @@
 #include <jsc/jsc.h>
 #include <algorithm>
 #include <cstring>
+#include <iostream>
 #include <utility>
 
 namespace {
@@ -66,6 +67,8 @@ struct MenuState {
         if (value.size() <= max_message_bytes && messages.size() < max_messages
             && queued + value.size() <= 16 * 1024 * 1024)
             messages.push_back(std::move(value));
+        else
+            std::cerr << "Menu message dropped: the queue is full\n";
     }
 
     void fail(const char *reason) {

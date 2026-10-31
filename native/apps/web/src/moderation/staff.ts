@@ -110,6 +110,11 @@ export const PERMISSIONS = {
   "maps.manage": "owner",
   /** Pulse → what the Worker costs (D1 rows read and written today, from Cloudflare's analytics). */
   "costs.read": "admin",
+  /**
+   * The Analytics section: retention, clients and hardware, the query tool. Aggregates only, with small groups folded
+   * (apps/api src/analytics-query.ts). Players with the Contributor badge read it too (no role).
+   */
+  "analytics.read": "admin",
   /** The one-off achievement XP backfill (api/src/achievement-xp.ts): every player's level can move, so the owner's. */
   "progression.backfill": "owner",
   // --- the staff handbook (/docs, apps/api/src/docs.ts; pages in docs/)
@@ -172,6 +177,7 @@ const LABELS: Record<Permission, string> = {
   "maps.read": "see the maps list",
   "maps.manage": "change map tiers or retire maps",
   "costs.read": "see what the servers cost",
+  "analytics.read": "see player analytics",
   "progression.backfill": "pay achievement XP for achievements already held",
   "docs.read": "read the staff handbook",
   "docs.admin": "read the handbook's admin pages",

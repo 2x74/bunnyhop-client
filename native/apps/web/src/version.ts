@@ -45,7 +45,7 @@
    two words, and VERSION stays below 0.1.0 while STAGE is alpha.
    ============================================================ */
 
-export const VERSION = "0.0.32";
+export const VERSION = "0.0.33";
 
 /** Release stage, printed after the number ("v0.0.4 alpha"). */
 export const STAGE = "alpha";
@@ -67,7 +67,7 @@ export interface ChangelogEntry {
 
 /** Notes for the next release, unpublished until promoted into CHANGELOG. */
 export const UPCOMING: ChangelogEntry = {
-  version: "0.0.33",
+  version: "0.0.34",
   date: "2026-10-30",
   kind: "minor",
   title: "Next update",
@@ -76,6 +76,18 @@ export const UPCOMING: ChangelogEntry = {
 
 /** Newest first. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.0.33",
+    date: "2026-10-30",
+    kind: "minor",
+    title: "Password sign-in and Momentum-style edge bugs",
+    notes: [
+      "You can now add a password to your account and sign in with your name and password on any device, with no email needed. Add one from the account panel, or when you finish a run as a guest. A lost password can only be reset if your account also has an email or Discord linked.",
+      "Edge bugs now work like Momentum Mod: with jump released, falling onto the very edge of a ledge drops your fall speed and carries you off it at full speed, with no friction tick. Hold jump, or press it on the next tick while scrolling, and you hop exactly as before. Your existing runs don't change. Thanks to ponytrap for pointing it out.",
+      "A run's average FPS now shows its real number above 1000, instead of stopping at 1000.",
+      "The native client gets password sign-in and the new edge bugs in its next update, coming shortly.",
+    ],
+  },
   {
     version: "0.0.32",
     date: "2026-10-30",

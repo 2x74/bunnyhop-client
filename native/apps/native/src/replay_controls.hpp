@@ -4,6 +4,7 @@
 #include "bunnyhop_native.h"
 #include "render_shaders.hpp"
 #include "graphics_settings.hpp"
+#include "ghost_playback.hpp"
 #include <filesystem>
 #include <vector>
 #include <algorithm>
@@ -197,6 +198,8 @@ class ReplayCompare {
 public:
     struct Prepared {
         std::vector<BhGhostFrame> frames;
+        // Each tick's swing and inspect, for after the compare handle is gone.
+        std::vector<BhReplayEvents> events;
         native_render::Actor actor;
         uint32_t start = 0, end = 0, playback_start = 0;
         double interval = 1. / 64;
@@ -205,11 +208,39 @@ public:
 
 private:
     std::vector<BhGhostFrame> frames_;
+    std::vector<BhReplayEvents> events_;
+    native_render::GhostEventCursor event_ticks_;
     BhContext *core_ = nullptr;
     uint32_t handle_ = 0, start_ = 0, end_ = 0, playback_start_ = 0;
     double interval_ = 1. / 64;
     bool finished_ = false;
     native_render::Actor actor_;
+
+    BhReplayEvents prepared_events(uint32_t from, uint32_t to) const {
+        BhReplayEvents out{};
+        for (uint32_t tick = from + 1; tick <= to && tick < events_.size(); ++tick) {
+            if (events_[tick].cosmetic) out.cosmetic = events_[tick].cosmetic;
+            if (events_[tick].inspect_signal) out.inspect_signal = events_[tick].inspect_signal;
+            out.inspect_held = events_[tick].inspect_held;
+        }
+        return out;
+    }
+
+    // The swings and inspects it passed since the last frame, as a race ghost plays them (ghost.ts showAt).
+    void play_events(uint32_t at, bool moving) {
+        actor_.attack = actor_.inspect = 0;
+        actor_.inspectHeld = false;
+        const auto range = event_ticks_.advance(at, moving, actor_.snapped);
+        if (!range) return;
+        BhReplayEvents events{};
+        if (!events_.empty())
+            events = prepared_events(range->first, range->second);
+        else if (!bh_ghost_events(core_, handle_, range->first, range->second, &events))
+            return;
+        actor_.attack = events.cosmetic;
+        actor_.inspect = events.inspect_signal;
+        actor_.inspectHeld = events.inspect_held != 0;
+    }
 
 public:
     void clear() {
@@ -219,6 +250,8 @@ public:
         core_ = nullptr;
         handle_ = 0;
         frames_.clear();
+        events_.clear();
+        event_ticks_.reset();
     }
 
     void
@@ -278,11 +311,10 @@ public:
         const uint32_t at = compare_tick(tick, playback_start_, interval, start_, end_, interval_);
         if (!frames_.empty()) {
             actor_.frame = frames_[std::min(size_t(at), frames_.size() - 1)];
-            return &actor_;
-        }
-        if (!bh_ghost_frame(core_, handle_, at, &actor_.frame)) {
+        } else if (!bh_ghost_frame(core_, handle_, at, &actor_.frame)) {
             return nullptr;
         }
+        play_events(at, tick >= playback_start_ && at < end_);
         return &actor_;
     }
 
@@ -295,6 +327,7 @@ public:
         result.interval = interval_;
         result.finished = finished_;
         result.frames.resize(size_t(end_) + 1);
+        result.events.resize(size_t(end_) + 1);
         for (uint32_t tick = 0; tick <= end_; ++tick) {
             if (cancel && cancel->load(std::memory_order_relaxed)) {
                 clear();
@@ -303,6 +336,7 @@ public:
             if (!bh_ghost_frame(core_, handle_, tick, &result.frames[tick])) {
                 throw std::runtime_error("Could not prepare compare path");
             }
+            bh_ghost_events(core_, handle_, tick ? tick - 1 : 0, tick, &result.events[tick]);
         }
         clear();
         return result;
@@ -311,6 +345,7 @@ public:
     void adopt(Prepared result) {
         clear();
         frames_ = std::move(result.frames);
+        events_ = std::move(result.events);
         actor_ = std::move(result.actor);
         start_ = result.start;
         end_ = result.end;

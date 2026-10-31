@@ -51,6 +51,7 @@ import { AUTO_HOLD_TICKS, AUTO_MOVE, strafeDir, yawDelta } from "./autostrafe";
 import { TURN_HOLD_BITS, turnBindsAllowed } from "./turn-binds";
 
 // Source IN_* button bits (same values as input.ts; duplicated to keep this module DOM-free).
+const IN_JUMP = 1 << 1;
 const IN_FORWARD = 1 << 3;
 const IN_BACK = 1 << 4;
 const IN_MOVELEFT = 1 << 9;
@@ -146,6 +147,8 @@ export function restrictsKeys(d: StyleDef): boolean {
 export interface StyleContext {
   grounded: boolean;
   onLadder?: boolean;
+  /** Physics v22: the landing can still be taken back (PlayerState.edgeLanding). */
+  edgeLanding?: boolean;
 }
 
 /**
@@ -257,7 +260,9 @@ export class StyleFilter {
     if (state.onLadder) this.fromLadder = true;
     else if (state.grounded) this.fromLadder = false;
     if (this.style?.auto) return this.assist(cmd, state);
-    return filterCommand(this.style, cmd, { grounded: state.grounded, onLadder: state.onLadder || this.fromLadder });
+    // A v22 edge landing without a jump is an air tick: the core takes the landing back before it moves.
+    const grounded = state.grounded && !(state.edgeLanding && !(cmd.buttons & IN_JUMP));
+    return filterCommand(this.style, cmd, { grounded, onLadder: state.onLadder || this.fromLadder });
   }
 
   /** Auto-strafe: the computed strafe (header comment). */

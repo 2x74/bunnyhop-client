@@ -1,6 +1,6 @@
 import { SIGN_IN_HELP } from "./account-copy";
 // Guest-first account chip: avatar, display name and level; clicking it opens the account panel (ui/account-panel.ts:
-// name, sign-in methods, sign out). Guests also get "Sign in", which opens the panel at the sign-in methods.
+// name, sign-in methods, sign out). Guests also get "Save progress", which opens the panel at the sign-in methods.
 // Offline (no API): the name is local-only (it is written into replays).
 
 import { api, lastKnownMe, type User } from "../api";
@@ -33,7 +33,7 @@ function levelTag(small: HTMLElement): void {
   });
 }
 
-/** Renders the account area (chip + "Sign in" for guests). `quiet` drops the "offline" note. */
+/** Renders the account area (chip + "Save progress" for guests). `quiet` drops the "offline" note. */
 export function accountChip(o: { quiet?: boolean } = {}): HTMLElement {
   const root = h("div.account", { "aria-live": "polite" });
   const paint = (u: User | null) => {
@@ -50,7 +50,7 @@ export function accountChip(o: { quiet?: boolean } = {}): HTMLElement {
     );
     const chip = h(`div.chip.${guest ? "guest-chip" : "user-chip"}`, null, accountAvatar({ id: u?.id ?? null, name, avatarUrl: u?.avatarUrl ?? null }), h("span.chip-col", null, h("span.name-edit", null, nameBtn), tag));
     root.replaceChildren(chip);
-    if (guest && api.available()) root.append(h("button.btn.save-progress", { type: "button", title: SIGN_IN_HELP, onclick: () => openAccount("save") }, "Sign in"));
+    if (guest && api.available()) root.append(h("button.btn.save-progress", { type: "button", title: SIGN_IN_HELP, onclick: () => openAccount("save") }, "Save progress"));
   };
   // First paint: the last player this browser had (not "guest" while the answer is on its way).
   paint(api.available() ? lastKnownMe() : null);

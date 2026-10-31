@@ -24,7 +24,7 @@ export const fullProfileFixture: Profile = {
     id: "profile-fixture",
     name: "Profile Hopper",
     avatarUrl: null,
-    provider: "discord",
+    provider: "account",
     since: "2025-01-01T00:00:00Z",
     country: "US",
   },

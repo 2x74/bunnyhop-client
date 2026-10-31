@@ -1,6 +1,7 @@
 #include "startup.hpp"
 #include "app_identity.hpp"
 #include "app_icon.hpp"
+#include "native_log.hpp"
 #include "../packaging/executable_identity.hpp"
 #include "../packaging/assets_identity.hpp"
 #include "../packaging/release_identity.hpp"
@@ -50,6 +51,34 @@ WindowAndGl create_window_and_gl(const Options &opt) {
     if (!SDL_GL_MakeCurrent(window.get(), context.get())) throw std::runtime_error(SDL_GetError());
     SDL_GL_SetSwapInterval(opt.frames ? 0 : 1);
     return {std::move(window), std::move(context)};
+}
+
+std::vector<std::string> log_session_header(
+        const nlohmann::json &identity,
+        const std::string &gpu,
+        uint32_t physics,
+        const nlohmann::json &preferences,
+        SDL_Window *window,
+        const std::filesystem::path &data
+) {
+    int window_width = 0, window_height = 0;
+    SDL_GetWindowSize(window, &window_width, &window_height);
+    const auto wasm = identity.value("wasm", std::string());
+    return {"Bunnyhop Native " + identity.value("version", std::string("local")) + ", build "
+                    + identity.value("build", std::string("unknown")),
+            "OS: " + native::log::os_description(),
+            "GPU: " + gpu,
+            "Core: physics " + std::to_string(physics) + ", WASM " + (wasm.empty() ? "unverified" : wasm),
+            "Window: " + preferences.value("windowMode", std::string("windowed")) + ", " + std::to_string(window_width)
+                    + "x" + std::to_string(window_height),
+            "Data folder: " + data_location::utf8(data)};
+}
+
+void open_log_in_default_folder() {
+    char *pref_path = SDL_GetPrefPath("bunnyhop.lol", "Bunnyhop Native");
+    if (!pref_path) return;
+    native::log::open(data_location::from_utf8(pref_path));
+    SDL_free(pref_path);
 }
 
 DataPaths resolve_data_folder(const Options &opt, SDL_Window *window, DataMoveProgress &display) {

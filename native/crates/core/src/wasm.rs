@@ -396,7 +396,8 @@ pub extern "C" fn step(forward: f32, side: f32, yaw: f32, pitch: f32, buttons: u
 ///  touch pass x, y, z, crouched (where this tick's trigger touch pass after the move happened, before any
 ///  teleport it caused; NaN after a reset / respawn: `Game::touch_origin`), weapons held, active weapon
 ///  (WEAPON_* bits, physics v4: `Game::weapons`), clean movement tick for local jump stats,
-///  v20 categorized ground jump: pre-jump position x/y/z, velocity x/y/z, crouched (NaN position if absent)]
+///  v20 categorized ground jump: pre-jump position x/y/z, velocity x/y/z, crouched (NaN position if absent),
+///  v22 edge landing: the next command decides whether this landing stands (`State::edge_landing`)]
 /// (movement mode: playsrc `Mode` as a number; 6 = ladder. Style key filters exempt ladders, like bhoptimer.)
 #[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
 pub extern "C" fn player_state() -> usize {
@@ -426,6 +427,7 @@ pub extern "C" fn player_state() -> usize {
             } else {
                 c.scratch_f32.extend_from_slice(&[f32::NAN; 7]);
             }
+            c.scratch_f32.push(s.edge_landing.is_some() as u32 as f32);
         }
         c.scratch_f32.len()
     })
@@ -881,6 +883,23 @@ pub extern "C" fn map_sound_commands() -> usize {
             }
         }
         c.scratch_str.len()
+    })
+}
+
+/// Tools only (`--features edge-diag`, never in a shipped build): the v22 edge landing prediction on every landing, on
+/// any version, without changing the simulation. `edge_observed`: 0 none, 1 the next tick slides off, 2 it clears the ledge.
+#[cfg(feature = "edge-diag")]
+#[unsafe(no_mangle)]
+pub extern "C" fn edge_observe(enabled: u32) {
+    with(|c| { if let Some(g) = &mut c.game { g.observe_edge_landings = enabled != 0; } });
+}
+#[cfg(feature = "edge-diag")]
+#[unsafe(no_mangle)]
+pub extern "C" fn edge_observed() -> u32 {
+    with(|c| match c.game.as_ref().and_then(|g| g.edge_landing_observed) {
+        Some(playsrc_movement::EdgeLandingKind::Slide) => 1,
+        Some(playsrc_movement::EdgeLandingKind::Miss) => 2,
+        None => 0,
     })
 }
 

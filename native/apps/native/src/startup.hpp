@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <type_traits>
+#include <vector>
 
 namespace native {
 class SdlSession {
@@ -46,6 +47,17 @@ public:
 };
 
 DataPaths resolve_data_folder(const Options &opt, SDL_Window *window, DataMoveProgress &display);
+// The lines that open the log: what someone reading it needs to know about this copy of the game on this machine.
+std::vector<std::string> log_session_header(
+        const nlohmann::json &identity,
+        const std::string &gpu,
+        uint32_t physics,
+        const nlohmann::json &preferences,
+        SDL_Window *window,
+        const std::filesystem::path &data
+);
+// For a failure before the data folder is known. Does nothing once the log is open.
+void open_log_in_default_folder();
 std::string read_text(const std::filesystem::path &path);
 std::string file_hash(const std::filesystem::path &path, const std::string &mode = "sha256");
 std::filesystem::path executable_path();

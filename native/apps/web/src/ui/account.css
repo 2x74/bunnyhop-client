@@ -47,6 +47,7 @@ dialog[open].acct-dialog { animation: acct-in 0.16s ease-out; }
 .acct-icon.discord { color: #fff; background: var(--discord); }
 .acct-icon.email { color: var(--accent); }
 .acct-icon.wavedash { color: var(--text); font-weight: 800; }
+.acct-icon.password { color: var(--accent); }
 .acct-unlink:disabled { opacity: 0.45; }
 .acct-toggle { display: flex; align-items: center; gap: 0.6rem; font-size: 0.88rem; color: var(--dim); cursor: pointer; }
 /* Discord avatar opt-in, under the Discord row: switch, the picture it would use, what it does. */
@@ -93,6 +94,15 @@ dialog[open].acct-dialog { animation: acct-in 0.16s ease-out; }
 .es-code { font-family: var(--mono); font-size: 1.4rem; letter-spacing: 0.35em; text-align: center; max-width: 11rem; }
 .es-links { display: flex; gap: 0.4rem; margin: 0; }
 .es-dev { margin: 0; font-size: 0.8rem; color: var(--accent); }
+.pw-actions { align-items: center; }
+.pw-check[hidden] { display: none; }
+.acct-signin, .email-signin .acct-unlink { align-self: flex-start; }
+.acct-signin { padding-left: 0; }
+
+/* "Keep this run": a line on the end card (hud/result.ts), the form in the pause menu (ui/keep-run.ts). */
+.keep-run { display: flex; flex-direction: column; gap: 0.4rem; margin: 0 0 0.6rem; padding: 0.7rem 0.8rem; border-radius: var(--radius-sm); background: var(--raise); border: 1px solid var(--line); }
+.keep-run h3 { margin: 0; font-size: var(--fs-sm); font-weight: 700; color: var(--text); }
+.keep-run .link-btn { align-self: flex-start; padding-left: 0; }
 
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 /* The community Discord server under the Discord method (ui/account-panel.ts): one line and a button, no box. */

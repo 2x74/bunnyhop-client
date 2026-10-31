@@ -47,11 +47,15 @@
 #include "weapon_commands.hpp"
 #include "eye_clearance.hpp"
 #include "replay_camera.hpp"
+#include "third_person_events.hpp"
 #include "replay_controls.hpp"
 #include "render_menu_contracts.hpp"
 #include "render_capabilities.hpp"
 #include "map_download.hpp"
 #include "map_preparation.hpp"
+#include "crash_note.hpp"
+#include "native_log.hpp"
+#include "native_log_sdl.hpp"
 #include "ssj.hpp"
 #include "strafe_trainer.hpp"
 #include "audio.hpp"
@@ -198,6 +202,19 @@ int run(const native::Options &opt) {
     std::optional<data_location::Choice> data_choice;
     std::string data_notice, last_data_state;
     const auto startup_data = native::initialize_data_directory(cache);
+    const auto identity = native::load_release_identity(manifest_path, menu_path, assets);
+    const auto *gl_version = gl.GetString(GL_VERSION);
+    native::log::open(
+            cache,
+            native::log_session_header(
+                    identity,
+                    gpu_renderer + ", OpenGL " + (gl_version ? reinterpret_cast<const char *>(gl_version) : "unknown"),
+                    settings.physics,
+                    startup_data.settings,
+                    window.get(),
+                    cache
+            )
+    );
     native::MapAudio map_audio;
     native::Audio audio(assets, cache, !opt.hidden && !opt.frames);
     audio.set_map_mixer(&map_audio.mixer);
@@ -216,19 +233,7 @@ int run(const native::Options &opt) {
     }
     if (!menu && opt.map.empty() && opt.online_map.empty())
         throw std::runtime_error("Menus are unavailable on this build; use --map PATH or --online-map NAME");
-    // Every download_map call materializes files in the same content cache,
-    // so downloads take turns. Waiting gives up once its
-    // own download is cancelled, so neither worker can hold up shutdown.
-    std::mutex cache_mutex;
-    auto lock_cache = [&cache_mutex](const std::atomic_bool &cancel) {
-        std::unique_lock lock(cache_mutex, std::defer_lock);
-        while (!lock.try_lock()) {
-            if (cancel) throw std::runtime_error("Map download cancelled");
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        }
-        if (cancel) throw std::runtime_error("Map download cancelled");
-        return lock;
-    };
+    native::MapCacheLock lock_cache;
     // Home-screen backdrop: the web map tour over the map the menu picked,
     // from its own native context. Released as soon as a gameplay map loads.
     std::unique_ptr<native::MenuBackdrop> backdrop;
@@ -377,6 +382,7 @@ int run(const native::Options &opt) {
     native::StartPoints start_points;
     native::KeptWeapons kept_weapons;
     third_camera.set_mode("chase");
+    native_render::ThirdPersonEvents third_person_events;
     native::Input camera_controls;
     native::SniperZoom scope;
     native::NativeWeaponMenu gun_menu;
@@ -460,9 +466,9 @@ int run(const native::Options &opt) {
     std::string error;
     native::ReplayLibrary replay_library(cache);
     native::RunVault run_vault(cache / "run-vault");
-    const auto identity = native::load_release_identity(manifest_path, menu_path, assets);
     native::updates::Host updater(cache, default_root, identity, native::executable_path());
     recorder.diagnostics.set_client_version(identity.value("version", std::string("local")));
+    recorder.diagnostics.set_device(gpu_renderer, SDL_GetPlatform());
     // Jump stats (!ssj). Display only — it reads the same pre-state, command and
     // events the simulation already produced and never feeds anything back.
     native::MovementFeedback feedback;
@@ -813,6 +819,8 @@ int run(const native::Options &opt) {
                     const auto view = practice.restore(core.get());
                     if (practice.segmented) {
                         recorder.resume_segment(core.get());
+                        // A Segmented run is measured from its last load: its finish still reports an FPS.
+                        recorder.diagnostics.start(SDL_GetTicksNS(), input_timeline.queue(), input_timeline.timed());
                         run_event(heartbeat.invalidate());
                         practice.segment_status(bh_segment_loads(core.get()));
                     } else {
@@ -846,6 +854,7 @@ int run(const native::Options &opt) {
         show_menu(true);
         if (menu && menu_ready) menu->evaluate_js("window.bunnyhopNativeMenu?.onLeaveMap?.()");
         map_download.cancel();
+        map_download.note_left_map();
         map_preparation.cancel();
         cancel_prefetch();
         pending_replay.clear();
@@ -958,7 +967,10 @@ int run(const native::Options &opt) {
     };
     auto request_map = [&](const std::string &id) {
         if (!opt.runtime_smoke.empty()) throw std::runtime_error("Offline runtime smoke attempted a map download");
-        if (map_download.loading_map(id)) return;
+        if (map_download.loading_map(id)) {
+            map_download.note_refused(id, "it is already loading");
+            return;
+        }
         if (!native::valid_map_id(id)) throw std::runtime_error("Invalid map name");
         cancel_prefetch();
         error.clear();
@@ -2086,9 +2098,11 @@ int run(const native::Options &opt) {
                         continue;
                     }
                     if (video.preparing() && type != "videoExport" && type != "ready" && type != "update"
-                        && type != "audioCue" && type != "music" && type != "quit") {
+                        && type != "audioCue" && type != "music" && type != "quit" && type != "menuLog") {
                         if (type == "settings")
                             throw std::runtime_error("Wait for the auto-director's cameras before changing settings.");
+                        if (type == "selectMap")
+                            throw std::runtime_error("Wait for the auto-director's cameras before changing maps.");
                         continue;
                     }
                     const size_t limit = native::render_menu_message_limit(
@@ -2108,7 +2122,11 @@ int run(const native::Options &opt) {
                         menu_files.menu_ready();
                     } else if (type == "resume" && core && !download.valid())
                         show_menu(false);
-                    else if (type == "prefetchMap") {
+                    else if (type == "resume") {
+                        std::cerr << "Resume ignored: " << (core ? "a map is loading" : "no map is up") << '\n';
+                        // The menu thought a map was up. Tell it what is.
+                        menu_state.reset();
+                    } else if (type == "prefetchMap") {
                         if (message.at("map").is_null()) {
                             cancel_prefetch();
                             continue;
@@ -2390,6 +2408,8 @@ int run(const native::Options &opt) {
                     } else if (type == "restart" && core && !download.valid()) {
                         reset();
                         show_menu(false);
+                    } else if (type == "restart") {
+                        std::cerr << "Restart ignored: " << (core ? "a map is loading" : "no map is up") << '\n';
                     } else if (type == "selectMap") {
                         const auto style = message.value("style", selected_style);
                         if (!native::styles.contains(style)) throw std::runtime_error("Unknown style");
@@ -2752,6 +2772,11 @@ int run(const native::Options &opt) {
                             }
                         } else if (action == "reveal")
                             SDL_OpenURL(data_location::file_url(cache).c_str());
+                        else if (action == "revealLogs") {
+                            std::error_code folder_error;
+                            std::filesystem::create_directories(native::log::folder(cache), folder_error);
+                            SDL_OpenURL(data_location::file_url(native::log::folder(cache)).c_str());
+                        }
                         last_data_state.clear();
                     } else if (type == "openExternal")
                         native::open_external(message.at("url").get<std::string>());
@@ -2760,6 +2785,8 @@ int run(const native::Options &opt) {
                     else if (type == "menuError") {
                         error = message.value("error", std::string("Menu failed"));
                         std::cerr << "Menu: " << error << '\n';
+                    } else if (type == "menuLog") {
+                        std::cerr << "Menu: " << message.value("text", std::string()) << '\n';
                     } else if (type == "worldRecord") {
                         if (message.value("generation", uint64_t(-1)) != heartbeat.generation
                             || message.value("map", std::string()) != map_id
@@ -2852,10 +2879,10 @@ int run(const native::Options &opt) {
             });
         }
         download.poll();
-        if (download.valid() && download.wait_for(std::chrono::seconds(0)) == std::future_status::ready
-            && !map_preparing) {
+        if (!map_preparing && map_download.settled(Clock::now())) {
             map_preparing = true;
-            map_preparation.start(download.get(), settings, gl, assets);
+            map_preparation.start(map_download.take(), settings, gl, assets);
+            if (map_preparation.download.map) map_download.note_preparing();
             nlohmann::json update;
             {
                 std::lock_guard lock(progress_mutex);
@@ -2864,7 +2891,7 @@ int run(const native::Options &opt) {
                 load_progress["message"] = loading;
                 update = {{"loading", loading}, {"loadProgress", load_progress}, {"error", ""}};
             }
-            if (menu && menu_ready) menu->evaluate_js("window.bunnyhopNativeMenu?.onState?.(" + update.dump() + ")");
+            if (menu && menu_ready) menu->evaluate_js(menu_state.publish_now(update));
         } else if (map_preparing && map_preparation.poll(gl, assets)) {
             map_preparing = false;
             try {
@@ -2890,7 +2917,7 @@ int run(const native::Options &opt) {
                 const auto failure = error;
                 if (core) reset();
                 error = failure;
-                std::cerr << "Map load " << last_requested_map << ": " << error << '\n';
+                map_download.note_failed(error);
                 toast(error);
                 if (!menu || opt.frames) throw std::runtime_error(error);
                 // Back on the home screen: restart the tour this download interrupted.
@@ -2900,7 +2927,8 @@ int run(const native::Options &opt) {
                     backdrop_cut = false;
                     backdrop_source.clear();
                 }
-            }
+            } else
+                map_download.note_loaded();
             {
                 std::lock_guard lock(progress_mutex);
                 loading.clear();
@@ -3204,7 +3232,11 @@ int run(const native::Options &opt) {
                     surface_found ? surface.water_z - curr.position[2] : std::numeric_limits<double>::quiet_NaN();
             static const std::array<const char *, 6> surfaces = {"concrete", "metal", "wood", "grass", "tile", "water"};
             const bool attacked = bh_attack_report(core.get(), &attack);
-            if (!viewer.active) scope.observe(weapon, attacked ? &attack : nullptr);
+            if (!viewer.active) {
+                scope.observe(weapon, attacked ? &attack : nullptr);
+                third_person_events.tick(weapon, attacked ? &attack : nullptr, step_dt);
+                if (curr.events & native::teleported) third_person_events.snap();
+            }
             audio.set_style(viewer.active ? viewer.session.info.value("style", active_style) : active_style);
             BhJumpObservation jump_observation{};
             const bool observed_jump = bh_jump_observation(core.get(), &jump_observation) != 0;
@@ -3519,27 +3551,20 @@ int run(const native::Options &opt) {
             );
             hud.extras.show_ghost_split(ghost_compare.split(), ghost_compare.delta(0));
             hud.extras.ghost_speed.show(ghost_compare.speed_delta());
+            if (viewer.active)
+                third_person_events.replay_frame(core.get(), curr.tick);
+            else
+                third_person_events.own_frame();
             if (external_camera) {
                 renderer->set_viewmodel_visible(false);
-                native_render::Actor self;
-                self.id = "local-camera-target";
-                self.opacity = 1;
+                BhWeaponReport held{};
+                bh_weapon_report(core.get(), &held);
+                auto self = native_render::own_actor(state, input.pitch, input.yaw(), held.active);
                 self.outfit = viewer.active ? viewer.runner_outfit : outfit;
                 self.loadout = viewer.active ? viewer.runner_loadout : held_knife.loadout();
                 self.emptyHand = viewer.active && !viewer.weapon_third;
                 self.playerGlow = player_glow;
-                for (int k = 0; k < 3; k++) {
-                    self.frame.position[k] = state.player.position[k];
-                    self.frame.velocity[k] = state.player.velocity[k];
-                }
-                self.frame.tick = state.player.tick;
-                self.frame.flags = (state.player.crouched ? 1 : 0) | (state.player.grounded ? 2 : 0);
-                self.frame.view_offset_z = state.player.view_offset_z;
-                self.frame.pitch = input.pitch;
-                self.frame.yaw = input.yaw();
-                BhWeaponReport held{};
-                bh_weapon_report(core.get(), &held);
-                self.frame.weapon = held.active;
+                third_person_events.apply(self);
                 if (spectator) {
                     if (const auto target = room.spectated(steady_seconds)) {
                         self = *target;
@@ -3579,7 +3604,7 @@ int run(const native::Options &opt) {
             );
             if (focused && captured && !opt.frames) {
                 for (const auto &actor : actors)
-                    if (actor.id != "local-camera-target")
+                    if (actor.id != native_render::own_actor_id)
                         audio.spatial_actor(actor, frame_seconds, actor.id.starts_with("ghost-"));
                 if (spectated_actor && !external_camera) audio.spatial_actor(*spectated_actor, frame_seconds, false);
             }
@@ -4127,6 +4152,9 @@ int main(int argc, char **argv) {
     if (argc == 3 && std::string(argv[1]) == "--update-smoke")
         return native::updates::run_smoke(native::data_location::from_utf8(argv[2]));
 #endif
+    native::log::Session log_session;
+    native::log::install_crash_notes();
+    native::log::capture_sdl_output();
     bool interactive_errors = true;
     // Scripted checks must also exit on failure without a modal alert. Inspect
     // flags before parsing so malformed smoke invocations cannot wait for input.
@@ -4148,6 +4176,7 @@ int main(int argc, char **argv) {
         return code;
     } catch (const std::exception &error) {
         std::cerr << "Bunnyhop native: " << error.what() << '\n';
+        if (interactive_errors) native::open_log_in_default_folder();
         if (interactive_errors) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, native::app_name, error.what(), nullptr);
         return 1;
     }

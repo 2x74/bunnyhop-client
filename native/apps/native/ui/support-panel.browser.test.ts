@@ -52,6 +52,7 @@ test("support/account reuse web flows with explicit checkout and server-reviewed
           methods: [{ provider: "email", label: "fixture@example.test" }],
           canUnlink: { email: false, discord: false },
           name: { changesLeft: 3, limit: 3, isDefault: false },
+          password: { set: false, resetUntil: null, alias: false },
         };
       else if (path === "/api/me/supporter") body = { supporter: null, payments: true, minUsd: 5 };
       else if (path === "/api/supporters") body = { names: [], top: [] };

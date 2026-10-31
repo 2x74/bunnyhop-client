@@ -33,7 +33,7 @@ async function measurePing(id: string): Promise<number | null> {
 }
 
 /**
- * Private lobby: create yours (signed in: Discord or email) or open a friend's invite (a link or its code). The lobby
+ * Private lobby: create yours (not as a guest) or open a friend's invite (a link or its code). The lobby
  * starts on `map` when given (the map you're on), else a random one; the host changes it with !map. One row: the link,
  * the invite field; a line under it only when there's something to say.
  */
@@ -50,7 +50,7 @@ function lobbyBlock(map: string | null): HTMLElement {
     } catch (e) {
       create.disabled = false;
       if (e instanceof ApiError && e.code === "signin_required") {
-        say("Sign in with Discord or email to create a lobby. Joining a friend's works as a guest.");
+        say("Save your account to create a lobby. Joining a friend's works as a guest.");
         openAccount("save");
       } else say(e instanceof ApiError ? e.message : "Couldn't reach the servers. Try again in a moment.");
     }

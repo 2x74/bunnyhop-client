@@ -42,8 +42,10 @@ import { audioCredits, sfx, uiOpen, uiSound } from "./audio";
 import { attractLeave } from "./attract";
 import { initGamepadNav } from "./ui/gamepad";
 import { handleAuthReturn } from "./ui/account-email";
+import { takePasswordReset } from "./ui/account-password";
 import { lastVerifiedRun, runUrl, shareWithToast } from "./ui/share";
-import { accountChanged, onboardingMaybeNeeded, setReplayIntro } from "./ui/account-state";
+import { accountChanged, onboardingMaybeNeeded, openAccount, setReplayIntro } from "./ui/account-state";
+import { keepRunBlock } from "./ui/keep-run";
 import { openFeedback } from "./feedback/state";
 import { openInbox, withInboxBadge } from "./inbox/state";
 import { versionButton } from "./ui/changelog";
@@ -736,6 +738,7 @@ function pauseScreen(): HTMLElement {
   const panel = h(
     "section.pause-panel",
     { "aria-label": "Pause menu panel" },
+    keepRunBlock(),
     h("header.pp-head", null, tabBar),
     panelBody,
   );
@@ -1251,6 +1254,8 @@ export function showHome(): Promise<string> {
   void handleAuthReturn()
     .then((msg) => {
       if (msg) (accountChanged(), menuToast(msg, 3600));
+      // A "forgot password" sign-in that landed: straight to setting the new one. Abandoned ones have no window open.
+      if (takePasswordReset()) void api.account().then((v) => v.password.resetUntil && openAccount("password"), () => undefined);
     })
     .then(() => (intro && onboardingMaybeNeeded() ? loadOnboarding().then((m) => m.maybeStartOnboarding({ pick: pickMap })) : undefined));
   return new Promise((resolve) => (S.pickResolve = resolve));

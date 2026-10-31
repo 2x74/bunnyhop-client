@@ -2,7 +2,7 @@ use crate::accepted_path::{AcceptedPath, MotionSegment};
 use crate::{
     CONTENTS_CURRENT_0, CONTENTS_CURRENT_90, CONTENTS_CURRENT_180, CONTENTS_CURRENT_270,
     CONTENTS_CURRENT_DOWN, CONTENTS_CURRENT_UP, CONTENTS_LADDER, CONTENTS_SLIME, CONTENTS_WATER,
-    Configuration, Contact, CrouchPhase, Error, Event, FailureKind, GroundState, MASK_CURRENT,
+    Configuration, Contact, CrouchPhase, EdgeLanding, EdgeLandingKind, Error, Event, FailureKind, GroundState, MASK_CURRENT,
     MAX_COMMAND_MAGNITUDE, MAX_COORDINATE, Mode, MoveCollision, MoverResult, MoverStatus,
     ObserverMode, Operation, PointQueryPurpose, PointQueryRecord, Policy, PreventedCollision, QueryPurpose,
     QueryRecord, State, StateDisposition, StepInput, StepResult, StepStrategy, StuckRecoveryMode,
@@ -13,6 +13,9 @@ use playsrc_collision::Hull;
 const MAX_BUMPS: usize = 4;
 const MAX_CLIP_PLANES: usize = 5;
 const STUCK_OFFSETS: usize = 54;
+/// How many ticks `edge_landing_kind` follows a fall through the 2-unit probe (from rest at sv_gravity 800 and 100 tick it
+/// takes 7; a gravity of 100 takes 20).
+const EDGE_FALL_TICKS: u32 = 32;
 
 #[derive(Clone, Copy)]
 struct PreparedCommand {
@@ -83,6 +86,7 @@ pub(super) fn step(
         air_move_velocity: None,
         move_collided: false,
         prevented_collision: None,
+        edge_landing_kind: None,
     };
 
     if mode_checks_stuck(result.state.mode)
@@ -1156,11 +1160,14 @@ fn full_walk(
     let total_velocity = add(result.state.velocity, result.state.base_velocity);
     // The base velocity this move used (StartGravity zeroed its z): RNGFix's `g_vLastBaseVelocity`.
     let move_base_velocity = result.state.base_velocity;
-    let mut move_start = result.state.position;
+    let air_move_start = result.state.position;
+    let mut move_start = air_move_start;
     if !grounded_before_move {
         result.air_move_velocity = Some(result.state.velocity);
         // bunnyhop patch: RNGFix's pre-tick collision prediction (see `MovementFixes::rngfix_incline` / `rngfix_edge`).
-        if configuration.fixes.rngfix_incline || configuration.fixes.rngfix_edge {
+        if (configuration.fixes.rngfix_incline || configuration.fixes.rngfix_edge)
+            && !configuration.fixes.skip_prevent_collision
+        {
             if let Some((start, fix)) =
                 rngfix_prevent_collision(context, move_start, total_velocity, hull, configuration, policy, tick)?
             {
@@ -1203,8 +1210,10 @@ fn full_walk(
     result.state.velocity = sub(result.state.velocity, result.state.base_velocity);
 
     let was_grounded = result.state.ground.is_some();
+    let mut edge_contact = None;
     let pre_categorize_velocity = result.state.velocity;
     let pre_categorize_position = result.state.position;
+    let pre_categorize_base_velocity = result.state.base_velocity;
     categorize_position(
         context,
         &mut result.state,
@@ -1243,9 +1252,163 @@ fn full_walk(
         result.state.fall_speed = result.state.fall_speed.max(-result.state.velocity[2]);
     } else if !was_grounded && result.state.ground.is_some() {
         land(context, result, configuration)?;
+        // bunnyhop patch: an edge landing can be taken back on the next tick (see `MovementFixes::edgebug`).
+        if (configuration.fixes.edgebug || configuration.fixes.edgebug_observe)
+            && result.state.mode == Mode::Walk
+            && result.state.water_level <= 1
+        {
+            if let Some((kind, contact)) = edge_landing_kind(
+                context,
+                result,
+                air_move_start,
+                total_velocity,
+                pre_categorize_velocity,
+                pre_categorize_base_velocity,
+                configuration,
+                policy,
+                tick,
+            )? {
+                result.edge_landing_kind = Some(kind);
+                edge_contact = contact;
+            }
+        }
     }
     clamp_velocity(&mut result.state.velocity, configuration.maximum_velocity);
+    if configuration.fixes.edgebug
+        && let Some(kind) = result.edge_landing_kind
+    {
+        // RNGFix moved this tick's move 0.1 above the contact, which the next move can clear by that much. The path did
+        // reach the ledge, so the contact's clip is taken here: every path that meets the ledge loses its fall speed.
+        let mut air_velocity = edge_contact.map_or(pre_categorize_velocity, |normal| rngfix_clip_velocity(pre_categorize_velocity, normal));
+        air_velocity[2] -= configuration.gravity * configuration.gravity_scale * tick * 0.5;
+        clamp_velocity(&mut air_velocity, configuration.maximum_velocity);
+        result.state.edge_landing = Some(EdgeLanding {
+            kind,
+            landed_velocity: result.state.velocity,
+            air_velocity,
+            air_base_velocity: pre_categorize_base_velocity,
+            // CategorizePosition without ground: rising (a clip's 1/32 u/s counts) is 0.25.
+            air_surface_friction: if edge_contact.is_none() && pre_categorize_velocity[2] > 0.0 { 0.25 } else { 1.0 },
+        });
+    }
     Ok(())
+}
+
+/// Momentum's `sv_edge_fix` prediction (mom_gamemovement.cpp CategorizePosition) for a landing at the end of this tick's
+/// airborne move: `None` if the path's first contact keeps the player on walkable ground, else how the path goes. As
+/// Momentum, the slide takes a full tick from the point of contact wherever in the tick the contact is, so the answer
+/// depends on the path and not on the sub-tick phase ("consistent max distance edgebugs"). Unlike Momentum:
+/// - stairs and curbs are not edges: a landing whose next tick would walk down a step of up to 18 units keeps the ground on v21, and a
+///   scroll player's jump on the tick after that with it (bh_aztec's stairs), so it stays a landing. Momentum tests 2 units;
+/// - a slow fall is followed until it touches or clears the edge (Momentum takes the landing back one tick at a time until
+///   its one-tick fall touches). A path whose first contact is in the middle of a floor lands where v21 lands (the 2-unit
+///   probe), so only real edges are affected;
+/// - the fall's velocity has its full gravity (Momentum's has half, and comes before this tick's FinishGravity);
+/// - a landing on something moving stays a landing: this looks at this tick's geometry only, and a pusher takes the
+///   next tick's game_code_moved path anyway;
+/// - a contact RNGFix's uphill fix would keep the speed on stays a landing, and so does a landing still rising (Momentum's
+///   fall trace misses the ground then, and it stays in the air until it comes down).
+/// Besides the kind, returns the contact's normal when an RNGFix pre-move fix kept this tick's move off it.
+#[allow(clippy::too_many_arguments)]
+fn edge_landing_kind(
+    context: &mut QueryContext<'_, impl Tracer>,
+    result: &StepResult,
+    air_move_start: [f32; 3],
+    move_velocity: [f32; 3],
+    velocity: [f32; 3],
+    base_velocity: [f32; 3],
+    configuration: Configuration,
+    policy: Policy,
+    tick: f32,
+) -> Result<Option<(EdgeLandingKind, Option<[f32; 3]>)>, Error> {
+    let Some(ground) = result.state.ground else { return Ok(None) };
+    if let Some(support) = ground.support
+        && context.tracer.support_velocity(support)? != [0.0; 3]
+    {
+        return Ok(None);
+    }
+    let hull = result.state.active_hull(policy);
+    let mask = configuration.solid_mask;
+    let position = result.state.position;
+    let mut next = add(velocity, [base_velocity[0], base_velocity[1], 0.0]);
+    next[2] -= configuration.gravity * configuration.gravity_scale * tick;
+    // Still rising (a jump up onto a ledge, under NON_JUMP_VELOCITY): the ground only seems to go away.
+    if next[2] > 0.0 {
+        return Ok(None);
+    }
+    // Where the path first meets a surface: this tick's own contact if it was walkable, else the next tick's fall.
+    let mut hit = None;
+    let mut fall_ticks = 0;
+    let prevented = result.prevented_collision.is_some();
+    if result.move_collided || prevented {
+        let first = context.trace(QueryPurpose::Displacement, air_move_start, add(air_move_start, scale(move_velocity, tick)), hull, mask)?;
+        if first.fraction < 1.0 && !first.start_solid && !first.all_solid
+            && first.normal.is_some_and(|n| n[2] >= configuration.standable_normal)
+        {
+            hit = Some(first);
+        }
+    }
+    let mut from = position;
+    while hit.is_none() {
+        let fall = context.trace(QueryPurpose::Displacement, from, add(from, scale(next, tick)), hull, mask)?;
+        if fall.start_solid || fall.all_solid {
+            return Ok(None);
+        }
+        if fall.fraction < 1.0 {
+            hit = Some(fall);
+            break;
+        }
+        // A fall ending exactly on the surface traces clear and ends stuck (TryPlayerMove stops dead): that is ground.
+        let at_end = context.trace(QueryPurpose::Endpoint, fall.end, fall.end, hull, mask)?;
+        if at_end.start_solid || at_end.all_solid {
+            return Ok(None);
+        }
+        if !walkable_below(context, fall.end, hull, configuration)? {
+            return Ok(Some((EdgeLandingKind::Miss, None)));
+        }
+        fall_ticks += 1;
+        if fall_ticks >= EDGE_FALL_TICKS {
+            return Ok(None);
+        }
+        from = fall.end;
+        next[2] -= configuration.gravity * configuration.gravity_scale * tick;
+    }
+    let hit = hit.expect("set above");
+    let Some(normal) = hit.normal else { return Ok(None) };
+    let clipped = rngfix_clip_velocity(next, normal);
+    // RNGFix's uphill fix stays: hitting a rising slope near its crest would clip away far more than the friction tick.
+    let speed = |v: [f32; 3]| v[0] * v[0] + v[1] * v[1];
+    if normal[2] < 1.0 && normal[0] * next[0] + normal[1] * next[1] < 0.0 && speed(clipped) <= speed(next) {
+        return Ok(None);
+    }
+    let slide = context.trace(QueryPurpose::Displacement, hit.end, add(hit.end, scale(clipped, tick)), hull, mask)?;
+    if slide.start_solid || slide.all_solid {
+        return Ok(None);
+    }
+    let contact = prevented.then_some(normal);
+    Ok((!walkable_below(context, slide.end, hull, configuration)?).then_some((EdgeLandingKind::Slide, contact)))
+}
+
+/// Walkable ground under `position` for a player who has just landed: CategorizePosition's test (full hull, then the
+/// quadrants), down as far as the next tick's walk would stay on the ground (LAND_HEIGHT + a step: WalkMove's StayOnGround).
+fn walkable_below(
+    context: &mut QueryContext<'_, impl Tracer>,
+    position: [f32; 3],
+    hull: Hull,
+    configuration: Configuration,
+) -> Result<bool, Error> {
+    let below = [position[0], position[1], position[2] - configuration.ground_probe - configuration.step_height];
+    let full = context.trace(QueryPurpose::GroundFull, position, below, hull, configuration.solid_mask)?;
+    if standable(full, configuration.standable_normal) {
+        return Ok(true);
+    }
+    for quadrant in quadrants(hull) {
+        let trace = context.trace(QueryPurpose::GroundQuadrant, position, below, quadrant, configuration.solid_mask)?;
+        if standable(trace, configuration.standable_normal) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Ground probes can land before movement (including before CheckJumpButton), after ducking,

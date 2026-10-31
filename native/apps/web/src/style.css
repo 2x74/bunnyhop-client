@@ -666,6 +666,8 @@ body:not(.in-game) #hud { display: none; }
 .ec-card .endcard-progress, .ec-card > .endcard-extra { grid-column: 1 / -1; }
 .ec-card > .endcard-sub:empty + .endcard-reel .reel-row, .ec-card > .endcard-sub[hidden] + .endcard-reel .reel-row { grid-column: 1 / -1; }
 .ec-card > .endcard-extra:empty, .ec-card > .endcard-extra[hidden] { display: none; }
+.ec-card > .ec-keep { grid-column: 1 / -1; font-size: 0.9em; font-weight: 600; color: var(--cream-2); }
+.ec-card > .ec-keep[hidden] { display: none; }
 #hud.result .hud-el:is([data-el="timer"], [data-el="split"], [data-el="stats"], [data-el="stage"], [data-el="sync"]) { visibility: hidden; }
 .ec-track { font-weight: 750; color: var(--amber); }
 .ec-time { position: relative; font-size: 3.4em; font-weight: 800; font-stretch: 90%; line-height: 1.04; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
