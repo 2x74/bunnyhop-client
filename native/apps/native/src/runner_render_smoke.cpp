@@ -1,4 +1,3 @@
-#include <set>
 #include "online.hpp"
 #include "renderer.hpp"
 #include "menu_backdrop.hpp"
@@ -20,6 +19,23 @@ static void APIENTRY trackUpload(
     realUpload(target, level, internal, w, h, border, format, type, data);
 }
 
+static decltype(native::Gl::TexSubImage2D) realUpdate = nullptr;
+
+static void APIENTRY trackUpdate(
+        GLenum target,
+        GLint level,
+        GLint x,
+        GLint y,
+        GLsizei width,
+        GLsizei height,
+        GLenum format,
+        GLenum type,
+        const void *pixels
+) {
+    if (target == GL_TEXTURE_2D && width == 3 && height > 1) poseBones = height;
+    realUpdate(target, level, x, y, width, height, format, type, pixels);
+}
+
 int main(int argc, char **argv) {
     try {
         if (argc != 3) throw std::runtime_error("usage: runner-render-smoke ASSETS OUTPUT");
@@ -37,6 +53,8 @@ int main(int argc, char **argv) {
         gl.load();
         realUpload = gl.TexImage2D;
         gl.TexImage2D = trackUpload;
+        realUpdate = gl.TexSubImage2D;
+        gl.TexSubImage2D = trackUpdate;
         native::NativeViewmodel models(gl, argv[1]);
         std::filesystem::create_directories(argv[2]);
         gl.Viewport(0, 0, 768, 600);
@@ -48,7 +66,6 @@ int main(int argc, char **argv) {
         actor.frame.flags = 2;
         actor.frame.weapon = 1;
         nlohmann::json evidence = nlohmann::json::array();
-        std::set<std::string> images;
         auto capture = [&](const std::string &name, double time, int bones) {
             gl.ClearColor(.045f, .06f, .085f, 1);
             gl.DepthMask(GL_TRUE);
@@ -57,34 +74,37 @@ int main(int argc, char **argv) {
             models.draw_actor(actor, vp, eye, time);
             if (poseBones != bones) throw std::runtime_error(name + " incorrect rig: " + std::to_string(poseBones));
             auto png = backbuffer_png(gl, 768, 600, 2000000);
-            if (png.size() < 1000 || !images.insert(png).second)
-                throw std::runtime_error("Blank/duplicate runner capture: " + name);
+            if (png.size() < 1000) throw std::runtime_error("Blank/duplicate runner capture: " + name);
             if (gl.GetError() != GL_NO_ERROR) throw std::runtime_error("Runner GL error");
             std::ofstream(std::filesystem::path(argv[2]) / (name + ".png")) << png;
             evidence.push_back({{"name", name}, {"bones", poseBones}, {"bytes", png.size()}});
+            return png;
         };
-        const int bunnyBones = 54;
-        capture("bunny", 0, bunnyBones);
+        // Gun-hold bones are appended even when the actor carries a knife.
+        const int bunnyBones = 56;
+        const auto bunny = capture("bunny", 0, bunnyBones);
         models.actor_models("runner", "same");
-        capture("runner-idle", 0, 20);
+        if (capture("runner-idle", 0, bunnyBones) != bunny)
+            throw std::runtime_error("Retired runner selection changed the equipped bunny");
         actor.frame.velocity[0] = 250;
         for (int f = 1; f <= 70; f++)
             models.draw_actor(actor, vp, eye, f / 60.);
-        capture("runner-run", 1.2, 20);
+        capture("runner-run", 1.2, bunnyBones);
         actor.frame.flags = 3;
         for (int f = 73; f < 100; f++)
             models.draw_actor(actor, vp, eye, f / 60.);
-        capture("runner-crouch", 1.7, 20);
+        capture("runner-crouch", 1.7, bunnyBones);
         actor.frame.flags = 0;
         actor.frame.velocity[2] = 150;
         actor.frame.position[2] = 25;
-        capture("runner-air", 1.8, 20);
+        capture("runner-air", 1.8, bunnyBones);
         actor.id = "ghost-one";
         actor.opacity = .5f;
         models.actor_models("runner", "bunny");
-        capture("ghost-bunny", 2, bunnyBones);
+        const auto ghost = capture("ghost-bunny", 2, bunnyBones);
         models.actor_models("bunny", "runner");
-        capture("ghost-runner", 2, 20);
+        if (capture("ghost-runner", 2, bunnyBones) != ghost)
+            throw std::runtime_error("Retired runner override changed the ghost bunny");
         actor.id = "menu-preview";
         actor.opacity = 1;
         actor.frame.flags = 2;
@@ -99,7 +119,7 @@ int main(int argc, char **argv) {
         capture("restored-bunny", 2.3, bunnyBones);
         std::ofstream(std::filesystem::path(argv[2]) / "evidence.json") << evidence.dump(2);
         std::cout << evidence.size()
-                  << " original runner/Bunny captures: selection, ghost override, menu isolation, GL_NO_ERROR passed\n";
+                  << " bunny captures: retired selection, ghost override, menu isolation, GL_NO_ERROR passed\n";
         return 0;
     } catch (const std::exception &e) {
         std::cerr << e.what() << '\n';

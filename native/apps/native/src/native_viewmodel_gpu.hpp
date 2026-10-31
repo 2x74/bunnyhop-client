@@ -1,12 +1,12 @@
 #pragma once
+#include "native_viewmodel_constants.hpp"
 
 // Included beside NativeViewmodel inside native; mesh/program ownership is independent of pose evaluation.
 class NativeViewmodelGpu {
 protected:
     struct Mesh {
-        GLuint vao = 0, vbo = 0, ebo = 0;
+        gfx::Geometry geometry;
         size_t vertices = 0, offset = 0, indices = 0, indexOffset = 0, glowOffset = 0;
-        GLuint glowVbo = 0;
     };
 
     struct HeadwearFit {
@@ -27,14 +27,24 @@ protected:
         HeadwearFit fit;
     };
 
-    gfx::Context graphicsContext;
-    Gl &gl;
-    using PlayerProgram = native_render::PlayerProgram;
+    struct PlayerProgram {
+        gfx::Program program;
+        gfx::ConstantBinding base, glow, accessory, ghost, actor_glow, aura, aura_pass;
+        mutable NativePlayerConstants values;
+    };
+
+    std::optional<gfx::Context> ownedContext;
+    gfx::Context &graphicsContext;
     using PlayerMaterial = native_render::PlayerMaterial;
     static constexpr size_t vertex_floats = 23;
     // The metals' scene reflection sampler uses a separate unit from the skinning pose.
-    static constexpr GLint reflection_unit = 9;
-    GLuint bonesTexture = 0, identityBonesTexture = 0, reflectionCube = 0;
+    static constexpr unsigned reflection_unit = 9;
+    static constexpr int max_pose_bones = 258;
+    gfx::Texture bonesTexture, identityBonesTexture, reflectionCube;
+    gfx::Sampler bonesSampler, reflectionSampler;
+    std::array<gfx::Pipeline, 96> pipelines;
+    bool resourcesReady = false;
+    gfx::PipelineState drawState;
     std::unordered_map<int, PlayerProgram> programs;
     std::unique_ptr<native_render::PlayerShaderSources> shaders;
     int cosmeticsTier = 2, playerLookTier = 1;
@@ -42,69 +52,35 @@ protected:
     std::unordered_map<std::string, Mesh> meshes;
     std::vector<float> data;
 
+    void create_bindings(PlayerProgram &p) {
+        p.base = graphicsContext.create_constants(p.program, {player_base_fields, sizeof(p.values)});
+        p.glow = graphicsContext.create_constants(p.program, {player_glow_fields, sizeof(p.values)});
+        p.accessory = graphicsContext.create_constants(p.program, {player_accessory_fields, sizeof(p.values)});
+        p.ghost = graphicsContext.create_constants(p.program, {player_ghost_fields, sizeof(p.values)});
+        p.actor_glow = graphicsContext.create_constants(p.program, {player_actor_glow_fields, sizeof(p.values)});
+        p.aura = graphicsContext.create_constants(p.program, {player_aura_fields, sizeof(p.values)});
+        p.aura_pass = graphicsContext.create_constants(p.program, {player_aura_pass_fields, sizeof(p.values)});
+        graphicsContext.texture_unit(p.program, "boneMatrices", 0);
+        graphicsContext.texture_unit(p.program, "uFinEnv", reflection_unit);
+        graphicsContext.texture_unit(p.program, "uCosEnv", reflection_unit);
+        graphicsContext.texture_unit(p.program, "uPlayerEnv", reflection_unit);
+    }
+
     PlayerProgram link_player_program(int finish, bool glove, bool detail, PlayerMaterial material) {
-        const auto defines = native_render::player_defines(finish, glove, detail, material);
-        const bool gun = material == PlayerMaterial::gun || material == PlayerMaterial::world_gun;
-        const auto vertex = defines + (gun ? shaders->gunVertex : shaders->vertex);
-        const auto fragment = defines
-                              + (material == PlayerMaterial::ghost ? shaders->ghost
-                                 : gun                             ? shaders->gun
-                                                                   : shaders->solid);
+        std::string vertex, fragment;
+        if (graphicsContext.backend() == gfx::Backend::opengl) {
+            const auto defines = native_render::player_defines(finish, glove, detail, material);
+            const bool gun = material == PlayerMaterial::gun || material == PlayerMaterial::world_gun;
+            vertex = defines + (gun ? shaders->gunVertex : shaders->vertex);
+            fragment = defines
+                       + (material == PlayerMaterial::ghost ? shaders->ghost
+                          : gun                             ? shaders->gun
+                                                            : shaders->solid);
+        }
+        const auto key = native_render::player_shader_key(finish, glove, detail, material);
         PlayerProgram p;
-        p.id = link_program(gl, vertex.c_str(), fragment.c_str());
-        auto at = [&](const char *name) {
-            return gl.GetUniformLocation(p.id, name);
-        };
-        p.projection = at("projection");
-        p.model = at("model");
-        p.modelMatrix = at("modelMatrix");
-        p.viewMatrix = at("viewMatrix");
-        p.cameraPosition = at("cameraPosition");
-        p.offset = at("offset");
-        p.mirror = at("mirror");
-        p.auraPass = at("auraPass");
-        p.auraSize = at("auraSize");
-        p.glowTime = at("glowTime");
-        p.boneMatrices = at("boneMatrices");
-        p.palette = at("uPalette");
-        p.accent = at("uAccent");
-        p.glove = at("uGlove");
-        p.finTime = at("uFinTime");
-        p.cosTier = at("uCosTier");
-        p.playerLook = at("uPlayerLook");
-        p.fabric = at("uFabric");
-        p.headwearScale = at("uHeadwearScale");
-        p.headwearOffset = at("uHeadwearOffset");
-        p.headwearFaceScale = at("uHeadwearFaceScale");
-        p.headwearFaceOffset = at("uHeadwearFaceOffset");
-        p.hairColor = at("uHairColor");
-        p.propellerAngle = at("uPropellerAngle");
-        p.capybara = at("uCapybara");
-        p.ponytail = at("uPonytail");
-        p.finEnvOn = at("uFinEnvOn");
-        p.cosEnvOn = at("uCosEnvOn");
-        p.playerEnvOn = at("uPlayerEnvOn");
-        p.finSunDir = at("uFinSunDir");
-        p.finSunColor = at("uFinSunColor");
-        p.finEnv = at("uFinEnv");
-        p.cosEnv = at("uCosEnv");
-        p.playerEnv = at("uPlayerEnv");
-        p.gunFlash = at("uGunFlash");
-        p.gunFlashPos = at("uGunFlashPos");
-        p.glowEnabled = at("playerGlowEnabled");
-        p.glowColor = at("playerGlowColor");
-        p.glowIntensity = at("playerGlowIntensity");
-        p.glowOpacity = at("glowOpacity");
-        p.glowAxisA = at("glowAxisA");
-        p.glowAxisB = at("glowAxisB");
-        p.glowNearFade = at("glowNearFade");
-        p.glowDistance = at("uGlowDistance");
-        p.ghost = at("uGhost");
-        p.ghostRim = at("uGhostRim");
-        p.opacity = at("uOpacity");
-        p.axisA = at("uAxisA");
-        p.axisB = at("uAxisB");
-        p.nearFade = at("uNearFade");
+        p.program = graphicsContext.create_program({{key, ""}, vertex.c_str(), fragment.c_str()});
+        create_bindings(p);
         return p;
     }
 
@@ -117,76 +93,92 @@ protected:
         return programs.emplace(key, link_player_program(finish, glove, detail, material)).first->second;
     }
 
-    void mesh(const std::string &name, int instances = 1) {
-        auto at = meshes.find(name);
-        if (at == meshes.end()) return;
-        auto &m = at->second;
-        if (!m.vao) {
-            gl.GenVertexArrays(1, &m.vao);
-            gl.BindVertexArray(m.vao);
-            gl.GenBuffers(1, &m.vbo);
-            gl.BindBuffer(GL_ARRAY_BUFFER, m.vbo);
-            gl.BufferData(
-                    GL_ARRAY_BUFFER, m.vertices * vertex_floats * sizeof(float), data.data() + m.offset, GL_STATIC_DRAW
-            );
-            // position, normal, partColor, skinIndex, skinWeight, accent, finishUV, then headwear at location 8
-            // (location 7 is the glow's smooth normal, in its own buffer).
-            constexpr std::array<GLuint, 8> location = {0, 1, 2, 3, 4, 5, 6, 8};
-            constexpr std::array<int, 8> size = {3, 3, 3, 4, 4, 1, 4, 1}, offset = {0, 3, 6, 9, 13, 17, 18, 22};
-            for (size_t a = 0; a < location.size(); a++) {
-                gl.EnableVertexAttribArray(location[a]);
-                gl.VertexAttribPointer(
-                        location[a],
-                        size[a],
-                        GL_FLOAT,
-                        GL_FALSE,
-                        vertex_floats * sizeof(float),
-                        reinterpret_cast<void *>(size_t(offset[a]) * 4)
-                );
-            }
-            gl.GenBuffers(1, &m.glowVbo);
-            gl.BindBuffer(GL_ARRAY_BUFFER, m.glowVbo);
-            gl.BufferData(GL_ARRAY_BUFFER, m.vertices * 3 * sizeof(float), data.data() + m.glowOffset, GL_STATIC_DRAW);
-            gl.EnableVertexAttribArray(7);
-            gl.VertexAttribPointer(7, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
-            if (m.indices) {
-                gl.GenBuffers(1, &m.ebo);
-                gl.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, m.ebo);
-                gl.BufferData(GL_ELEMENT_ARRAY_BUFFER, m.indices * 4, data.data() + m.indexOffset, GL_STATIC_DRAW);
-            }
+    void upload_mesh(Mesh &mesh) {
+        // Interleaving once preserves every original attribute without a backend-specific second vertex stream.
+        constexpr size_t gpu_vertex_floats = vertex_floats + 3;
+        std::vector<float> vertices(mesh.vertices * gpu_vertex_floats);
+        for (size_t i = 0; i < mesh.vertices; ++i) {
+            auto *out = vertices.data() + i * gpu_vertex_floats;
+            std::copy_n(data.data() + mesh.offset + i * vertex_floats, vertex_floats, out);
+            std::copy_n(data.data() + mesh.glowOffset + i * 3, 3, out + vertex_floats);
         }
-        gl.BindVertexArray(m.vao);
-        if (instances > 1) {
-            if (m.indices)
-                gl.DrawElementsInstanced(GL_TRIANGLES, m.indices, GL_UNSIGNED_INT, nullptr, instances);
-            else
-                gl.DrawArraysInstanced(GL_TRIANGLES, 0, m.vertices, instances);
-        } else if (m.indices)
-            gl.DrawElements(GL_TRIANGLES, m.indices, GL_UNSIGNED_INT, nullptr);
-        else
-            gl.DrawArrays(GL_TRIANGLES, 0, m.vertices);
+        static constexpr gfx::VertexAttribute attributes[] = {
+                {0, 3, 0},
+                {1, 3, 12},
+                {2, 3, 24},
+                {3, 4, 36},
+                {4, 4, 52},
+                {5, 1, 68},
+                {6, 4, 72},
+                {8, 1, 88},
+                {7, 3, vertex_floats * sizeof(float)}
+        };
+        mesh.geometry = graphicsContext.create_geometry(gpu_vertex_floats * sizeof(float), attributes);
+        graphicsContext.stream_vertices(mesh.geometry, std::as_bytes(std::span(vertices)));
+        if (mesh.indices) {
+            graphicsContext.upload_indices(
+                    mesh.geometry, std::as_bytes(std::span(data.data() + mesh.indexOffset, mesh.indices))
+            );
+        }
     }
 
-    void draw_glow(std::span<const std::string> parts, const PlayerProgram &program, bool aura, float scale) {
-        gl.Uniform1f(program.auraSize, scale);
-        gl.Enable(GL_BLEND);
-        gl.BlendFunc(GL_SRC_ALPHA, GL_ONE);
-        gl.DepthMask(GL_FALSE);
-        gl.Enable(GL_CULL_FACE);
-        gl.CullFace(GL_FRONT);
-        gl.Uniform1f(program.auraPass, 1);
-        for (const auto &part : parts) {
+    void mesh(const Mesh *resource, int instances = 1) {
+        if (!resource) return;
+        const auto &mesh = *resource;
+        graphicsContext.bind_geometry(mesh.geometry);
+        if (mesh.indices)
+            graphicsContext.draw_indexed(
+                    gfx::Primitive::triangles, gfx::IndexType::u32, 0, int(mesh.indices), instances
+            );
+        else if (instances > 1)
+            graphicsContext.draw_instanced(gfx::Primitive::triangles, 0, int(mesh.vertices), instances);
+        else
+            graphicsContext.draw(gfx::Primitive::triangles, 0, int(mesh.vertices));
+    }
+
+    template <size_t Size>
+    static void write_vector(std::array<float, Size> &out, const float *values) {
+        std::copy_n(values, Size, out.begin());
+    }
+
+    template <size_t Count>
+    static void write_vector(std::array<std::array<float, 4>, Count> &out, const float *values) {
+        for (size_t i = 0; i < Count; ++i)
+            std::copy_n(values + i * 3, 3, out[i].begin());
+    }
+
+    void apply_draw_state() {
+        const unsigned blend = !drawState.blend.enabled                               ? 0u
+                               : drawState.blend.destination == gfx::BlendFactor::one ? 2u
+                                                                                      : 1u;
+        const unsigned index = blend + (drawState.depth.write ? 0u : 3u)
+                               + (drawState.raster.cull == gfx::Cull::front ? 6u : 0u)
+                               + (drawState.color_write[0] ? 0u : 12u)
+                               + (drawState.raster.winding == gfx::Winding::clockwise ? 24u : 0u)
+                               + (drawState.depth.compare == gfx::Compare::less ? 48u : 0u);
+        graphicsContext.pipeline(pipelines[index]);
+    }
+
+    void draw_glow(std::span<const Mesh *const> parts, const PlayerProgram &program, bool aura, float scale) {
+        const auto previous = drawState;
+        drawState.blend = {true, gfx::BlendFactor::source_alpha, gfx::BlendFactor::one};
+        drawState.depth.write = false;
+        drawState.raster.cull = gfx::Cull::front;
+        apply_draw_state();
+        program.values.auraSize = scale;
+        program.values.auraPass = 1;
+        graphicsContext.constants(program.aura, &program.values);
+        for (const auto &part : parts)
             mesh(part);
-        }
         if (aura && !parts.empty()) {
-            gl.Uniform1f(program.auraPass, 2);
+            program.values.auraPass = 2;
+            graphicsContext.constants(program.aura_pass, &program.values);
             mesh(parts.front(), native_render::glow_halo_layers);
         }
-        gl.CullFace(GL_BACK);
-        gl.Disable(GL_CULL_FACE);
-        gl.Uniform1f(program.auraPass, 0);
-        gl.Disable(GL_BLEND);
-        gl.DepthMask(GL_TRUE);
+        drawState = previous;
+        apply_draw_state();
+        program.values.auraPass = 0;
+        graphicsContext.constants(program.aura_pass, &program.values);
     }
 
     struct BindOptions {
@@ -195,59 +187,55 @@ protected:
         float opacity = 1, mirror = 1;
         std::array<float, 3> offset{};
         const native_render::Glow *glow = nullptr;
-        GLuint poseTexture = 0;
+        bool identityPose = false;
     };
 
     // Uniforms every player program reads, the same for each draw of a frame.
     void bind_shared(const PlayerProgram &p, double seconds) {
         constexpr float sun_direction[3] = {.4196f, .7792f, .4596f}, sun_color[3] = {1, .96f, .9f};
-        gl.Uniform1i(p.boneMatrices, 0);
-        gl.Uniform1f(p.auraPass, 0);
-        gl.Uniform1f(p.auraSize, 1);
-        gl.Uniform1f(p.glowTime, float(seconds));
-        gl.Uniform1f(p.finTime, float(std::fmod(seconds, 3600.)));
-        gl.Uniform1f(p.cosTier, float(cosmeticsTier));
-        gl.Uniform1f(p.playerLook, float(playerLookTier));
-        gl.Uniform1f(p.fabric, 0);
+        p.values.auraPass = 0;
+        p.values.auraSize = 1;
+        p.values.glowTime = float(seconds);
+        p.values.finTime = float(std::fmod(seconds, 3600.));
+        p.values.cosTier = float(cosmeticsTier);
+        p.values.playerLook = float(playerLookTier);
+        p.values.fabric = 0;
         // The scene reflections of the Enhanced and Cinematic looks have no native equivalent: metals keep the studio.
-        gl.Uniform1f(p.finEnvOn, 0);
-        gl.Uniform1f(p.cosEnvOn, 0);
-        gl.Uniform1f(p.playerEnvOn, 0);
-        gl.Uniform3fv(p.finSunDir, 1, sun_direction);
-        gl.Uniform3fv(p.finSunColor, 1, sun_color);
-        gl.Uniform1i(p.finEnv, reflection_unit);
-        gl.Uniform1i(p.cosEnv, reflection_unit);
-        gl.Uniform1i(p.playerEnv, reflection_unit);
+        p.values.finEnvOn = 0;
+        p.values.cosEnvOn = 0;
+        p.values.playerEnvOn = 0;
+        write_vector(p.values.finSunDir, sun_direction);
+        write_vector(p.values.finSunColor, sun_color);
         const float noFlash[4] = {1, .72f, .4f, 0}, origin[3] = {};
-        gl.Uniform4fv(p.gunFlash, 1, noFlash);
-        gl.Uniform3fv(p.gunFlashPos, 1, origin);
-        gl.Uniform1f(p.glowDistance, 1);
-        gl.Uniform2f(p.glowNearFade, 0, 0);
-        gl.Uniform2f(p.nearFade, 0, 0);
+        write_vector(p.values.gunFlash, noFlash);
+        write_vector(p.values.gunFlashPos, origin);
+        p.values.glowDistance = 1;
+        p.values.glowNearFade = {0, 0};
+        p.values.nearFade = {0, 0};
     }
 
     void bind_look(const PlayerProgram &p, const Look &look) {
-        gl.Uniform3fv(p.palette, 8, look.palette.data());
-        gl.Uniform3fv(p.accent, 1, look.accent.data());
-        gl.Uniform3fv(p.glove, 5, look.gloveColors.data());
-        gl.Uniform3fv(p.hairColor, 1, look.hairColor.data());
-        gl.Uniform3fv(p.headwearScale, 1, look.fit.scale.data());
-        gl.Uniform3fv(p.headwearOffset, 1, look.fit.offset.data());
-        gl.Uniform3fv(p.headwearFaceScale, 1, look.fit.faceScale.data());
-        gl.Uniform3fv(p.headwearFaceOffset, 1, look.fit.faceOffset.data());
+        write_vector(p.values.palette, look.palette.data());
+        write_vector(p.values.accent, look.accent.data());
+        write_vector(p.values.glove, look.gloveColors.data());
+        write_vector(p.values.hairColor, look.hairColor.data());
+        write_vector(p.values.headwearScale, look.fit.scale.data());
+        write_vector(p.values.headwearOffset, look.fit.offset.data());
+        write_vector(p.values.headwearFaceScale, look.fit.faceScale.data());
+        write_vector(p.values.headwearFaceOffset, look.fit.faceOffset.data());
         const float ponytail[4] = {0, 0, look.hairLength, 0};
-        gl.Uniform4fv(p.ponytail, 1, ponytail);
+        write_vector(p.values.ponytail, ponytail);
     }
 
     void bind_glow(const PlayerProgram &p, const native_render::Glow *glow, float opacity) {
-        gl.Uniform1i(p.glowEnabled, showGlow && glow && glow->enabled);
-        gl.Uniform1f(p.glowOpacity, opacity);
+        p.values.glowEnabled = showGlow && glow && glow->enabled ? 1u : 0u;
+        p.values.glowOpacity = opacity;
         if (!glow) return;
         float rgb[3];
         for (int k = 0; k < 3; k++)
             rgb[k] = native_render::srgb_linear(glow->color[k]);
-        gl.Uniform3fv(p.glowColor, 1, rgb);
-        gl.Uniform1f(p.glowIntensity, glow->intensity);
+        write_vector(p.values.glowColor, rgb);
+        p.values.glowIntensity = glow->intensity;
     }
 
     const PlayerProgram &
@@ -257,76 +245,99 @@ protected:
          const float eye[3],
          double seconds,
          const BindOptions &options) {
-        gl.ActiveTexture(GL_TEXTURE0 + reflection_unit);
-        gl.BindTexture(GL_TEXTURE_CUBE_MAP, reflectionCube);
-        gl.ActiveTexture(GL_TEXTURE0);
-        gl.BindTexture(GL_TEXTURE_2D, options.poseTexture ? options.poseTexture : bonesTexture);
+        graphicsContext.bind_texture(reflection_unit, reflectionCube, reflectionSampler);
+        graphicsContext.bind_texture(0, options.identityPose ? identityBonesTexture : bonesTexture, bonesSampler);
         const auto &p = program(look, options.material, options.detail);
-        gl.UseProgram(p.id);
+        graphicsContext.bind_program(p.program);
         const auto webModel = native_render::web_model(model), webView = native_render::web_view(projection);
         const auto camera = native_render::to_web_space(eye);
-        gl.UniformMatrix4fv(p.projection, 1, GL_FALSE, projection.data());
-        gl.UniformMatrix4fv(p.model, 1, GL_FALSE, model.data());
-        gl.UniformMatrix4fv(p.modelMatrix, 1, GL_FALSE, webModel.data());
-        gl.UniformMatrix4fv(p.viewMatrix, 1, GL_FALSE, webView.data());
-        gl.Uniform3fv(p.cameraPosition, 1, camera.data());
-        gl.Uniform3fv(p.offset, 1, options.offset.data());
-        gl.Uniform1f(p.mirror, options.mirror);
-        gl.Uniform1f(p.opacity, options.opacity);
+        p.values.projection = projection;
+        p.values.model = model;
+        p.values.modelMatrix = webModel;
+        p.values.viewMatrix = webView;
+        write_vector(p.values.cameraPosition, camera.data());
+        write_vector(p.values.offset, options.offset.data());
+        p.values.mirror = options.mirror;
+        p.values.opacity = options.opacity;
         bind_shared(p, seconds);
         bind_look(p, look);
         bind_glow(p, options.glow, options.opacity);
+        graphicsContext.constants(p.base, &p.values);
+        if (options.glow) graphicsContext.constants(p.glow, &p.values);
         return p;
     }
 
-    void upload_bound_pose(std::span<const float> pose) {
-        gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 3, GLsizei(pose.size() / 12), 0, GL_RGBA, GL_FLOAT, pose.data());
+    void upload_pose(std::span<const float> pose) {
+        graphicsContext.bind_texture(0, bonesTexture, bonesSampler);
+        graphicsContext.update_texture(bonesTexture, {0, 0, 3, int(pose.size() / 12)}, pose.data());
     }
 
-    void upload_pose(std::span<const float> pose) {
-        gl.ActiveTexture(GL_TEXTURE0);
-        gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
-        upload_bound_pose(pose);
+    void release_samplers() {
+        // Legacy scene passes still bind textures directly and must retain each texture's own filtering.
+        graphicsContext.unbind_sampler(0);
+        graphicsContext.unbind_sampler(reflection_unit);
+    }
+
+    void prepare_pipelines() {
+        for (unsigned i = 0; i < pipelines.size(); ++i) {
+            gfx::PipelineState state;
+            const unsigned blend = i % 3;
+            state.blend.enabled = blend != 0;
+            state.blend.destination = blend == 2 ? gfx::BlendFactor::one : gfx::BlendFactor::inverse_source_alpha;
+            state.depth.write = (i / 3 % 2) == 0;
+            state.raster.cull = i / 6 % 2 ? gfx::Cull::front : gfx::Cull::none;
+            state.color_write.fill((i / 12 % 2) == 0);
+            state.depth.compare = i / 48 ? gfx::Compare::less : gfx::Compare::less_equal;
+            state.raster.winding = i / 24 % 2 ? gfx::Winding::clockwise : gfx::Winding::counter_clockwise;
+            pipelines[i] = graphicsContext.create_pipeline(state);
+        }
     }
 
     void prepare_resources() {
-        gl.GenTextures(1, &reflectionCube);
-        gl.BindTexture(GL_TEXTURE_CUBE_MAP, reflectionCube);
+        if (resourcesReady) return;
         const uint8_t black[4] = {0, 0, 0, 255};
-        for (GLenum face = 0; face < 6; ++face)
-            gl.TexImage2D(
-                    GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, black
-            );
-        gl.TexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        gl.TexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        gl.GenTextures(1, &bonesTexture);
-        gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        // Floor weapons share a rigid identity pose. Keep it separate from the mutable animated rig
-        // so drawing each weapon does not redefine a texture still in use by earlier draws.
+        const std::array<const void *, 6> faces = {black, black, black, black, black, black};
+        reflectionCube = graphicsContext.create_texture({1, 1, gfx::Format::rgba8, gfx::TextureKind::cube}, faces);
+        reflectionSampler = graphicsContext.create_sampler({});
+        gfx::SamplerDesc nearest;
+        nearest.minification = nearest.magnification = gfx::Filter::nearest;
+        bonesSampler = graphicsContext.create_sampler(nearest);
+        bonesTexture = graphicsContext.create_texture({3, max_pose_bones, gfx::Format::rgba32f});
+        // Floor draws reuse a separate immutable pose while animated actors update their shared texture.
         const float identity[12] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
-        gl.GenTextures(1, &identityBonesTexture);
-        gl.BindTexture(GL_TEXTURE_2D, identityBonesTexture);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 3, 1, 0, GL_RGBA, GL_FLOAT, identity);
-        gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
+        const std::array<const void *, 1> identity_data = {identity};
+        identityBonesTexture = graphicsContext.create_texture({3, 1, gfx::Format::rgba32f}, identity_data);
+        graphicsContext.bind_texture(0, bonesTexture, bonesSampler);
+        prepare_pipelines();
+        for (auto &[name, mesh] : meshes)
+            upload_mesh(mesh);
+        resourcesReady = true;
     }
 
-    explicit NativeViewmodelGpu(Gl &api) : graphicsContext(api), gl(api) {}
+    explicit NativeViewmodelGpu(Gl &api) : ownedContext(std::in_place, api), graphicsContext(*ownedContext) {}
+
+    explicit NativeViewmodelGpu(gfx::Context &context) : graphicsContext(context) {}
 
     ~NativeViewmodelGpu() {
-        for (auto &[name, m] : meshes) {
-            if (m.glowVbo) gl.DeleteBuffers(1, &m.glowVbo);
-            if (m.ebo) gl.DeleteBuffers(1, &m.ebo);
-            if (m.vbo) gl.DeleteBuffers(1, &m.vbo);
-            if (m.vao) gl.DeleteVertexArrays(1, &m.vao);
+        if (!resourcesReady) return;
+        for (auto &[name, mesh] : meshes)
+            graphicsContext.destroy(mesh.geometry);
+        for (auto &[key, p] : programs) {
+            graphicsContext.destroy(p.base);
+            graphicsContext.destroy(p.glow);
+            graphicsContext.destroy(p.accessory);
+            graphicsContext.destroy(p.ghost);
+            graphicsContext.destroy(p.actor_glow);
+            graphicsContext.destroy(p.aura);
+            graphicsContext.destroy(p.aura_pass);
+            graphicsContext.destroy(p.program);
         }
-        for (const auto &[key, p] : programs)
-            gl.DeleteProgram(p.id);
-        if (reflectionCube) gl.DeleteTextures(1, &reflectionCube);
-        if (bonesTexture) gl.DeleteTextures(1, &bonesTexture);
-        if (identityBonesTexture) gl.DeleteTextures(1, &identityBonesTexture);
+        for (auto &pipeline : pipelines)
+            graphicsContext.destroy(pipeline);
+        graphicsContext.destroy(reflectionCube);
+        graphicsContext.destroy(bonesTexture);
+        graphicsContext.destroy(identityBonesTexture);
+        graphicsContext.destroy(bonesSampler);
+        graphicsContext.destroy(reflectionSampler);
     }
 };

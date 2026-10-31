@@ -21,6 +21,7 @@ class NativeViewmodel : private NativeViewmodelGpu {
     struct Entry {
         size_t bones = 0;
         std::vector<std::string> meshes;
+        std::vector<const Mesh *> drawMeshes;
         std::vector<Clip> clips;
     };
 
@@ -39,6 +40,7 @@ class NativeViewmodel : private NativeViewmodelGpu {
     std::unordered_map<std::string, std::unique_ptr<native_actor_anim::State>> actorAnimationStates;
     std::unordered_map<std::string, Entry> entries;
     std::vector<std::string> weapons;
+    std::vector<const Mesh *> floorMeshes;
     std::vector<float> pose;
     nlohmann::json metadata;
     native_render::KnifeSpinner spinner;
@@ -57,13 +59,21 @@ class NativeViewmodel : private NativeViewmodelGpu {
         uint32_t weapon = 0;
         bool silenced = false, emptyHand = false, used = false;
         std::array<std::string, 5> names;
+        std::array<const Mesh *, 5> drawMeshes{};
         size_t count = 0;
     };
 
     std::array<ActorParts, 68> actorParts;
     size_t nextActorParts = 0;
 
-    std::span<const std::string> parts_for(const native_render::Actor &actor, const Look &look) {
+    void resolve_parts(ActorParts &parts) {
+        for (size_t i = 0; i < parts.count; ++i) {
+            const auto at = meshes.find(parts.names[i]);
+            parts.drawMeshes[i] = at == meshes.end() ? nullptr : &at->second;
+        }
+    }
+
+    const ActorParts &parts_for(const native_render::Actor &actor, const Look &look) {
         ActorParts *parts = nullptr;
         for (auto &cached : actorParts) {
             if (cached.used && cached.id == actor.id) {
@@ -74,7 +84,7 @@ class NativeViewmodel : private NativeViewmodelGpu {
         if (parts && parts->outfit == actor.outfit && parts->loadout == actor.loadout
             && parts->weapon == actor.frame.weapon && parts->silenced == actor.silenced
             && parts->emptyHand == actor.emptyHand) {
-            return {parts->names.data(), parts->count};
+            return *parts;
         }
         if (!parts) parts = &actorParts[nextActorParts++ % actorParts.size()];
         parts->used = true;
@@ -90,10 +100,14 @@ class NativeViewmodel : private NativeViewmodelGpu {
                                        + look.glove + (look.hoodDown ? ":down" : "");
         if (!look.hatMesh.empty()) parts->names[parts->count++] = look.hatMesh;
         const auto &gun = weapons[std::min(size_t(actor.frame.weapon), weapons.size() - 1)];
-        if (actor.emptyHand) return {parts->names.data(), parts->count};
+        if (actor.emptyHand) {
+            resolve_parts(*parts);
+            return *parts;
+        }
         parts->names[parts->count++] = gun.empty() || gun == "knife" ? "tpknife:" + look.knife : "tpgun:" + gun;
         if (actor.silenced && !gun.empty() && gun != "knife") parts->names[parts->count++] = "tpsilencer:" + gun;
-        return {parts->names.data(), parts->count};
+        resolve_parts(*parts);
+        return *parts;
     }
 
     std::array<std::array<float, 3>, 2> previewTrail{{{1, .761f, .239f}, {1, .761f, .239f}}};
@@ -405,11 +419,7 @@ class NativeViewmodel : private NativeViewmodelGpu {
         }
     }
 
-public:
-    explicit NativeViewmodel(
-            Gl &g, const std::filesystem::path &assetRoot = BUNNYHOP_NATIVE_ASSET_ROOT, bool cpu_only = false
-    )
-        : NativeViewmodelGpu(g) {
+    void read_model_data(const std::filesystem::path &assetRoot) {
         if (std::filesystem::exists(assetRoot / "actor-animations.json"))
             actorAnimationData = std::make_shared<native_actor_anim::Data>(assetRoot.string());
         std::ifstream file(assetRoot / "viewmodels.json");
@@ -444,6 +454,9 @@ public:
             if (raw.at("version") != 1) throw std::runtime_error("Invalid inspect tracks");
             tpInspects = raw.at("knives");
         }
+    }
+
+    void read_rig() {
         weapons = metadata.at("weapons").get<std::vector<std::string>>();
         spinner = native_render::parse_knife_spinner(metadata);
         inspectCueTimes = native_render::parse_inspect_cues(metadata.at("inspects"));
@@ -458,6 +471,9 @@ public:
                 if (actorParents[i] >= int(i)) throw std::runtime_error("Invalid actor rig hierarchy");
             load_gun_holds(metadata, rig.value("csBones", actorNames.size()));
         }
+    }
+
+    void read_meshes() {
         for (const auto &[name, raw] : metadata.at("meshes").items()) {
             Mesh m;
             m.vertices = raw.at("vertices");
@@ -470,10 +486,18 @@ public:
                 throw std::runtime_error("Invalid native mesh range");
             meshes.emplace(name, m);
         }
+    }
+
+    void read_entries() {
         for (const auto &[name, raw] : metadata.at("entries").items()) {
             Entry e;
             e.bones = raw.at("bones");
             e.meshes = raw.at("meshes").get<std::vector<std::string>>();
+            e.drawMeshes.reserve(e.meshes.size());
+            for (const auto &name : e.meshes) {
+                const auto at = meshes.find(name);
+                e.drawMeshes.push_back(at == meshes.end() ? nullptr : &at->second);
+            }
             if (!e.bones || e.bones > 256) throw std::runtime_error("Invalid native rig");
             for (const auto &c : raw.at("clips")) {
                 Clip t{c.at("name"), c.at("duration"), c.at("frames"), size_t(c.at("offset")) / 4};
@@ -484,18 +508,48 @@ public:
             }
             entries.emplace(name, std::move(e));
         }
+    }
 
-        shaders = std::make_unique<native_render::PlayerShaderSources>(assetRoot);
+    void load_assets(const std::filesystem::path &assetRoot, bool cpu_only) {
+        read_model_data(assetRoot);
+        read_rig();
+        read_meshes();
+        floorMeshes.reserve(weapons.size());
+        for (const auto &weapon : weapons) {
+            const auto at = meshes.find("worldgun:" + weapon);
+            floorMeshes.push_back(at == meshes.end() ? nullptr : &at->second);
+        }
+        read_entries();
+        if (graphicsContext.backend() == gfx::Backend::opengl)
+            shaders = std::make_unique<native_render::PlayerShaderSources>(assetRoot);
         if (!cpu_only) prepare_graphics();
+    }
+
+public:
+    explicit NativeViewmodel(
+            Gl &api, const std::filesystem::path &assetRoot = BUNNYHOP_NATIVE_ASSET_ROOT, bool cpu_only = false
+    )
+        : NativeViewmodelGpu(api) {
+        load_assets(assetRoot, cpu_only);
+    }
+
+    explicit NativeViewmodel(
+            gfx::Context &graphics,
+            const std::filesystem::path &assetRoot = BUNNYHOP_NATIVE_ASSET_ROOT,
+            bool cpu_only = false
+    )
+        : NativeViewmodelGpu(graphics) {
+        load_assets(assetRoot, cpu_only);
     }
 
     void prepare_graphics() {
         prepare_resources();
         gunFx = std::make_unique<NativePresentation>(graphicsContext);
-        pose.reserve(256 * 12);
-        basePose.reserve(256 * 12);
+        pose.reserve(max_pose_bones * 12);
+        basePose.reserve(max_pose_bones * 12);
         equipped = look("outfit-cream", "");
         program(equipped, PlayerMaterial::solid);
+        release_samplers();
         std::cout << "Native models: " << meshes.size() << " original meshes, " << entries.size()
                   << " pose sets, GPU skinning/cosmetics\n";
     }
@@ -651,7 +705,8 @@ public:
             draw(width, height, state, weapon, 0, false, 0, 0);
             action = previewAction;
             started = 0;
-            gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            graphicsContext.clear_color({0, 0, 0, 0});
+            graphicsContext.clear_depth();
             state.player.tick = 2;
             draw(width, height, state, weapon, 0, false, 0, seconds);
         }
@@ -666,7 +721,8 @@ public:
             float yaw,
             float pitch,
             unsigned presses,
-            bool held
+            bool held,
+            gfx::Compare depth_compare = gfx::Compare::less_equal
     ) {
         previewYaw = std::remainder(yaw, 360.f);
         previewPitch = std::clamp(pitch, -45.f, 45.f);
@@ -713,7 +769,7 @@ public:
             inspect_held(held);
             BhSnapshot state{};
             state.player.tick = uint32_t(seconds * 60) + 1;
-            draw(width, height, state, 1, 0, false, 0, seconds);
+            draw(width, height, state, 1, 0, false, 0, seconds, nullptr, false, depth_compare);
         }
         previewYaw = previewPitch = 0;
     }
@@ -768,15 +824,13 @@ public:
         const auto &plain = look("outfit-cream", "");
         BindOptions options;
         options.material = PlayerMaterial::world_gun;
-        options.poseTexture = identityBonesTexture;
+        options.identityPose = true;
         bind(plain, projection, native::model_matrix(t), eye, seconds, options);
-        gl.Enable(GL_DEPTH_TEST);
-        gl.DepthMask(GL_TRUE);
-        gl.Disable(GL_BLEND);
-        gl.Disable(GL_CULL_FACE);
-        mesh("worldgun:" + weapons[weapon.weapon]);
-        gl.ActiveTexture(GL_TEXTURE0);
-        gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
+        drawState = {};
+        apply_draw_state();
+        mesh(floorMeshes[weapon.weapon]);
+        graphicsContext.bind_texture(0, bonesTexture, bonesSampler);
+        release_samplers();
     }
 
     // The website's ghost near fade (player/materials.ts nearFade): hidden within 14 units of the camera, measured to
@@ -787,17 +841,18 @@ public:
                                    ? ghostColor
                                    : native_render::linear_color(native_render::ghost_source_color(source));
         const auto rim = source == native_render::GhostSource::pb ? ghostRim : color;
-        gl.Uniform3fv(p.ghost, 1, color.data());
-        gl.Uniform3fv(p.ghostRim, 1, rim.data());
+        write_vector(p.values.ghost, color.data());
+        write_vector(p.values.ghostRim, rim.data());
         const auto &position = actor.frame.position;
         const float top[3] = {position[0], position[1], position[2] + body_height_units};
         const auto feet = native_render::to_web_space(position), head = native_render::to_web_space(top);
-        gl.Uniform3fv(p.axisA, 1, feet.data());
-        gl.Uniform3fv(p.axisB, 1, head.data());
+        write_vector(p.values.axisA, feet.data());
+        write_vector(p.values.axisB, head.data());
         if (actor.near_fade)
-            gl.Uniform2f(p.nearFade, hidden_units, shown_units);
+            p.values.nearFade = {hidden_units, shown_units};
         else
-            gl.Uniform2f(p.nearFade, 0, 0);
+            p.values.nearFade = {0, 0};
+        graphicsContext.constants(p.ghost, &p.values);
     }
 
     static native_render::GhostSource ghost_source_of(const native_render::Actor &actor) {
@@ -821,7 +876,8 @@ public:
 
     // Avatar pictures (avatar_stage.hpp): what a posed actor is made of, for framing it.
     std::span<const std::string> actor_parts(const native_render::Actor &actor) {
-        return parts_for(actor, look(actor.outfit, actor.loadout));
+        const auto &parts = parts_for(actor, look(actor.outfit, actor.loadout));
+        return {parts.names.data(), parts.count};
     }
 
     static constexpr size_t mesh_vertex_floats = vertex_floats;
@@ -908,7 +964,7 @@ public:
                 const float amount = std::min(std::abs(frame.pitch) / 60.f, 1.f);
                 for (size_t i = 0; i < pose.size(); i++)
                     pose[i] = basePose[i] + (pose[i] - basePose[i]) * amount;
-                upload_bound_pose(pose);
+                upload_pose(pose);
             }
             if (actorAnimationData) {
                 auto &state = actorAnimationStates[actor.id];
@@ -928,6 +984,50 @@ public:
             actor_actions(actor, pulses, l, seconds, actorYaw, acting);
         }
         return actorYaw;
+    }
+
+    void draw_actor_parts(
+            const native_render::Actor &actor,
+            std::span<const Mesh *const> visibleParts,
+            const PlayerProgram &actorProgram,
+            const float eye[3]
+    ) {
+        const auto &frame = actor.frame;
+        if (showGlow && actor.playerGlow && actor.playerGlow->enabled && actor.opacity >= .999f) {
+            const float distance = std::hypot(
+                    std::hypot(eye[0] - frame.position[0], eye[1] - frame.position[1]), eye[2] - frame.position[2]
+            );
+            actorProgram.values.glowNearFade = {14, 60};
+            actorProgram.values.glowDistance = native_render::glow_distance(distance);
+            const float top[3] = {frame.position[0], frame.position[1], frame.position[2] + 64};
+            const auto feet = native_render::to_web_space(frame.position), head = native_render::to_web_space(top);
+            write_vector(actorProgram.values.glowAxisA, feet.data());
+            write_vector(actorProgram.values.glowAxisB, head.data());
+            graphicsContext.constants(actorProgram.actor_glow, &actorProgram.values);
+            draw_glow(visibleParts, actorProgram, actor.playerGlow->aura && distance < 650, 1);
+        }
+        if (actor.opacity < 1) {
+            drawState.color_write.fill(false);
+            drawState.blend.enabled = false;
+            drawState.depth.write = true;
+            apply_draw_state();
+            for (const auto &part : visibleParts)
+                mesh(part);
+            drawState.color_write.fill(true);
+            drawState.blend = {true};
+            drawState.depth.write = false;
+            apply_draw_state();
+        } else {
+            drawState.blend.enabled = false;
+            drawState.depth.write = true;
+            apply_draw_state();
+        }
+        for (const auto &part : visibleParts)
+            mesh(part);
+        drawState.depth.write = true;
+        drawState.blend.enabled = false;
+        apply_draw_state();
+        release_samplers();
     }
 
     // Draws `actor` in the pose the last pose_actor call uploaded.
@@ -959,46 +1059,97 @@ public:
         const auto &actorProgram = bind(l, projection, model, eye, seconds, options);
         const auto &motion = actorActions[actor.id].accessory;
         const float capy[4] = {motion.alert, motion.squash, motion.lean, float(seconds)};
-        gl.Uniform4fv(actorProgram.capybara, 1, capy);
-        gl.Uniform1f(actorProgram.propellerAngle, float(motion.angle));
+        write_vector(actorProgram.values.capybara, capy);
+        actorProgram.values.propellerAngle = float(motion.angle);
         const auto &tail = actorActions[actor.id].ponytail;
         const float ponytail[4] = {float(tail.pitch), float(tail.side), l.hairLength, 0};
-        gl.Uniform4fv(actorProgram.ponytail, 1, ponytail);
+        write_vector(actorProgram.values.ponytail, ponytail);
+        graphicsContext.constants(actorProgram.accessory, &actorProgram.values);
         if (source != native_render::GhostSource::none) ghost_uniforms(actorProgram, actor, source);
-        const auto visibleParts = parts_for(actor, l);
-        gl.Enable(GL_DEPTH_TEST);
-        gl.Disable(GL_CULL_FACE);
-        gl.DepthFunc(GL_LEQUAL);
-        if (showGlow && actor.playerGlow && actor.playerGlow->enabled && actor.opacity >= .999f) {
-            const float distance = std::hypot(
-                    std::hypot(eye[0] - frame.position[0], eye[1] - frame.position[1]), eye[2] - frame.position[2]
-            );
-            gl.Uniform2f(actorProgram.glowNearFade, 14, 60);
-            gl.Uniform1f(actorProgram.glowDistance, native_render::glow_distance(distance));
-            const float top[3] = {frame.position[0], frame.position[1], frame.position[2] + 64};
-            const auto feet = native_render::to_web_space(frame.position), head = native_render::to_web_space(top);
-            gl.Uniform3fv(actorProgram.glowAxisA, 1, feet.data());
-            gl.Uniform3fv(actorProgram.glowAxisB, 1, head.data());
-            draw_glow(visibleParts, actorProgram, actor.playerGlow->aura && distance < 650, 1);
+        const auto &parts = parts_for(actor, l);
+        const std::span<const Mesh *const> visibleParts(parts.drawMeshes.data(), parts.count);
+        drawState = {};
+        apply_draw_state();
+        draw_actor_parts(actor, visibleParts, actorProgram, eye);
+    }
+
+    void draw_muzzle_flash(uint32_t active, double seconds, const float offset[3], const native::Matrix &projection) {
+        const float eye[3] = {};
+        const double flashAge = seconds - gunFlashStarted;
+        if (active > 1 && flashAge >= 0 && flashAge < .055 && metadata.contains("gunMuzzles")
+            && metadata["gunMuzzles"].contains(weapons[active])) {
+            const auto &info = metadata["gunMuzzles"][weapons[active]];
+            const bool quiet = gunSilenced && info.contains("silPoint");
+            const auto &point = info[quiet ? "silPoint" : "point"];
+            const size_t bone = size_t(info[quiet ? "silPart" : "part"].get<unsigned>()) * 12;
+            if (bone + 11 < pose.size()) {
+                native_render::Vec3 muzzle{};
+                for (int r = 0; r < 3; r++)
+                    muzzle[r] = pose[bone + r * 4] * point[0].get<float>()
+                                + pose[bone + r * 4 + 1] * point[1].get<float>()
+                                + pose[bone + r * 4 + 2] * point[2].get<float>() + pose[bone + r * 4 + 3] + offset[r];
+                muzzle[1] *= leftHand ? -1.f : 1.f;
+                gunFx->clear();
+                gunFx->billboard(
+                        muzzle,
+                        quiet ? 1.2f : 2.2f,
+                        quiet ? std::array<float, 4>{.6f, .65f, .7f, float(1 - flashAge / .055) * .25f}
+                              : std::array<float, 4>{1, .64f, .15f, float(1 - flashAge / .055) * .95f},
+                        {0, 1, 0},
+                        {0, 0, 1}
+                );
+                gunFx->draw(projection, eye);
+            }
         }
-        if (actor.opacity < 1) {
-            gl.ColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-            gl.Disable(GL_BLEND);
-            gl.DepthMask(GL_TRUE);
-            for (const auto &part : visibleParts)
-                mesh(part);
-            gl.ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-            gl.Enable(GL_BLEND);
-            gl.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            gl.DepthMask(GL_FALSE);
-        } else {
-            gl.Disable(GL_BLEND);
-            gl.DepthMask(GL_TRUE);
-        }
-        for (const auto &part : visibleParts)
+    }
+
+    void draw_viewmodel(
+            int width,
+            int height,
+            const BhSnapshot &snapshot,
+            uint32_t active,
+            double seconds,
+            const Entry &entry,
+            gfx::Compare depth_compare
+    ) {
+        graphicsContext.clear_depth();
+        drawState = {};
+        drawState.depth.compare = depth_compare;
+        const float cot = (4.f / 3.f) / std::tan(float(fov * native::radians * .5));
+        const native::Matrix
+                perspective =
+                        {cot / (float(width) / height), 0, 0, 0, 0, cot, 0, 0, 0, 0, -1.00376f, -1, 0, 0, -1.50282f, 0},
+                sourceView = {0, 0, -1, 0, -1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1};
+        const float speed = std::hypot(snapshot.player.velocity[0], snapshot.player.velocity[1]),
+                    bob = std::min(speed / 350.f, 1.f) * bobScale;
+        const float offset[3] =
+                {offsetY,
+                 -offsetX + swayYaw * swayScale + float(std::sin(seconds * 7)) * .15f * bob,
+                 offsetZ + swayPitch * swayScale + float(std::abs(std::sin(seconds * 7))) * .28f * bob},
+                    eye[3] = {};
+        BhTransform turn{};
+        turn.angles[1] = previewYaw;
+        turn.angles[0] = previewPitch;
+        BindOptions options;
+        options.material = active == 1 ? PlayerMaterial::solid : PlayerMaterial::gun;
+        // First-person detail shading (finishes/detail.ts VM_DETAIL), as the website's viewmodels compile.
+        options.detail = true;
+        options.offset = {offset[0], offset[1], offset[2]};
+        options.mirror = leftHand ? -1.f : 1.f;
+        options.glow = firstPersonGlow && localGlow ? &*localGlow : nullptr;
+        const auto projection = native::multiply(perspective, sourceView);
+        const auto &handsProgram = bind(equipped, projection, native::model_matrix(turn), eye, seconds, options);
+        drawState.raster.winding = leftHand ? gfx::Winding::clockwise : gfx::Winding::counter_clockwise;
+        apply_draw_state();
+        for (const auto *part : entry.drawMeshes)
             mesh(part);
-        gl.DepthMask(GL_TRUE);
-        gl.Disable(GL_BLEND);
+        if (showGlow && firstPersonGlow && localGlow && localGlow->enabled) {
+            draw_glow(entry.drawMeshes, handsProgram, localGlow->aura, .2f);
+        }
+        drawState.raster.winding = gfx::Winding::counter_clockwise;
+        apply_draw_state();
+        release_samplers();
+        draw_muzzle_flash(active, seconds, offset, projection);
     }
 
     void
@@ -1011,7 +1162,8 @@ public:
          uint32_t mode,
          double seconds,
          const BhWeaponReport *report = nullptr,
-         bool presentationEvent = false) {
+         bool presentationEvent = false,
+         gfx::Compare depth_compare = gfx::Compare::less_equal) {
         if (active >= weapons.size() || !active) return;
         const auto name = active == 1 ? "knife:" + equipped.knife + ":" + equipped.glove
                                       : "gun:" + weapons[active] + ":" + equipped.glove;
@@ -1122,68 +1274,6 @@ public:
         }
         const bool spins = active == 1 && spinner.spins(equipped.knife);
         sample(entry, *c, time, false, spins ? native_render::whirl_idle_degrees(spinner, seconds) : 0);
-        gl.Clear(GL_DEPTH_BUFFER_BIT);
-        gl.Enable(GL_DEPTH_TEST);
-        gl.DepthMask(GL_TRUE);
-        gl.Disable(GL_BLEND);
-        gl.Disable(GL_CULL_FACE);
-        const float cot = (4.f / 3.f) / std::tan(float(fov * native::radians * .5));
-        const native::Matrix
-                perspective =
-                        {cot / (float(width) / height), 0, 0, 0, 0, cot, 0, 0, 0, 0, -1.00376f, -1, 0, 0, -1.50282f, 0},
-                sourceView = {0, 0, -1, 0, -1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1};
-        const float speed = std::hypot(snapshot.player.velocity[0], snapshot.player.velocity[1]),
-                    bob = std::min(speed / 350.f, 1.f) * bobScale;
-        const float offset[3] =
-                {offsetY,
-                 -offsetX + swayYaw * swayScale + float(std::sin(seconds * 7)) * .15f * bob,
-                 offsetZ + swayPitch * swayScale + float(std::abs(std::sin(seconds * 7))) * .28f * bob},
-                    eye[3] = {};
-        BhTransform turn{};
-        turn.angles[1] = previewYaw;
-        turn.angles[0] = previewPitch;
-        BindOptions options;
-        options.material = active == 1 ? PlayerMaterial::solid : PlayerMaterial::gun;
-        // First-person detail shading (finishes/detail.ts VM_DETAIL), as the website's viewmodels compile.
-        options.detail = true;
-        options.offset = {offset[0], offset[1], offset[2]};
-        options.mirror = leftHand ? -1.f : 1.f;
-        options.glow = firstPersonGlow && localGlow ? &*localGlow : nullptr;
-        const auto &handsProgram = bind(
-                equipped, native::multiply(perspective, sourceView), native::model_matrix(turn), eye, seconds, options
-        );
-        gl.FrontFace(leftHand ? GL_CW : GL_CCW);
-        for (const auto &part : entry.meshes)
-            mesh(part);
-        if (showGlow && firstPersonGlow && localGlow && localGlow->enabled) {
-            draw_glow(entry.meshes, handsProgram, localGlow->aura, .2f);
-        }
-        gl.FrontFace(GL_CCW);
-        const double flashAge = seconds - gunFlashStarted;
-        if (active > 1 && flashAge >= 0 && flashAge < .055 && metadata.contains("gunMuzzles")
-            && metadata["gunMuzzles"].contains(weapons[active])) {
-            const auto &info = metadata["gunMuzzles"][weapons[active]];
-            const bool quiet = gunSilenced && info.contains("silPoint");
-            const auto &point = info[quiet ? "silPoint" : "point"];
-            const size_t bone = size_t(info[quiet ? "silPart" : "part"].get<unsigned>()) * 12;
-            if (bone + 11 < pose.size()) {
-                native_render::Vec3 muzzle{};
-                for (int r = 0; r < 3; r++)
-                    muzzle[r] = pose[bone + r * 4] * point[0].get<float>()
-                                + pose[bone + r * 4 + 1] * point[1].get<float>()
-                                + pose[bone + r * 4 + 2] * point[2].get<float>() + pose[bone + r * 4 + 3] + offset[r];
-                muzzle[1] *= leftHand ? -1.f : 1.f;
-                gunFx->clear();
-                gunFx->billboard(
-                        muzzle,
-                        quiet ? 1.2f : 2.2f,
-                        quiet ? std::array<float, 4>{.6f, .65f, .7f, float(1 - flashAge / .055) * .25f}
-                              : std::array<float, 4>{1, .64f, .15f, float(1 - flashAge / .055) * .95f},
-                        {0, 1, 0},
-                        {0, 0, 1}
-                );
-                gunFx->draw(native::multiply(perspective, sourceView), eye);
-            }
-        }
+        draw_viewmodel(width, height, snapshot, active, seconds, entry, depth_compare);
     }
 };

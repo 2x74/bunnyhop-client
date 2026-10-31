@@ -122,8 +122,6 @@ public:
 };
 
 class AvatarService {
-    // Temporary bridge for NativeViewmodel construction.
-    native::Gl &gl;
     gfx::Context &context;
     std::filesystem::path assets;
     std::unique_ptr<NativeAvatarStage> stage;
@@ -159,10 +157,12 @@ class AvatarService {
     }
 
 public:
-    AvatarService(gfx::Context &graphics, native::Gl &api, std::filesystem::path asset_root)
-        : gl(api)
-        , context(graphics)
+    AvatarService(gfx::Context &graphics, std::filesystem::path asset_root)
+        : context(graphics)
         , assets(std::move(asset_root)) {}
+
+    AvatarService(gfx::Context &graphics, native::Gl &, std::filesystem::path asset_root)
+        : AvatarService(graphics, std::move(asset_root)) {}
 
     // A menu message. Previews ("live": the big picture) replace each other; the rest queue.
     void request(const nlohmann::json &message) {
@@ -205,7 +205,7 @@ public:
         auto job = next();
         if (!job) return;
         try {
-            if (!stage && !unavailable) stage = std::make_unique<NativeAvatarStage>(context, gl, assets);
+            if (!stage && !unavailable) stage = std::make_unique<NativeAvatarStage>(context, assets);
         } catch (const std::exception &e) {
             unavailable = true;
             std::cerr << "Avatar renderer: " << e.what() << '\n';

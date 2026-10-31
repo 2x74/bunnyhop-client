@@ -21,7 +21,8 @@ int main(int argc, char **argv) {
         native::Gl gl;
         gl.load();
         std::filesystem::create_directories(argv[2]);
-        NativeLoadoutPreview preview(gl, argv[1]);
+        native::gfx::Context graphics(gl);
+        NativeLoadoutPreview preview(graphics, argv[1], native::gfx::Compare::less);
         nlohmann::json job = {
                 {"id", 1},
                 {"loadout", "2;knife-bayonet;fin-sunset;glove-sport-pandora"},
