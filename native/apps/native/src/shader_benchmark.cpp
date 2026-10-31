@@ -1,4 +1,6 @@
 #include "renderer.hpp"
+#include "client_graphics.hpp"
+#include "gfx_window.hpp"
 #include "benchmark_system.hpp"
 #ifdef __APPLE__
 #include <OpenGL/OpenGL.h>
@@ -122,10 +124,86 @@ Json permutation(
             {"linkMs", link_ms},
             {"totalMs", total_ms}};
 }
+
+int measure_d3d11(const char *output_path) {
+#ifndef _WIN32
+    (void)output_path;
+    throw std::runtime_error("D3D11 program measurement requires Windows");
+#else
+    if (!SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(SDL_GetError());
+    std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> window(
+            SDL_CreateWindow("D3D11 program measurement", 64, 64, SDL_WINDOW_HIDDEN), SDL_DestroyWindow
+    );
+    if (!window) throw std::runtime_error(SDL_GetError());
+    native::ClientGraphics device(window.get(), native::gfx::Backend::d3d11);
+    auto &graphics = device.context();
+    Json permutations = Json::array();
+    const auto measure = [&](const std::string &key) {
+        const auto start = Clock::now();
+        auto program = graphics.create_program({{key, ""}});
+        const double elapsed = milliseconds(start);
+        permutations.push_back({{"key", key}, {"totalMs", elapsed}});
+        graphics.destroy(program);
+    };
+    for (const char *key :
+         {"world",
+          "sky",
+          "depth",
+          "cutout-depth",
+          "ghost-route",
+          "hud",
+          "presentation",
+          "video",
+          "look-bright",
+          "look-blur",
+          "look-contact",
+          "look-composite",
+          "look-fxaa",
+          "hdr-downsample",
+          "hdr-blur",
+          "hdr-composite",
+          "hdr-luminance",
+          "graphics-target"})
+        measure(key);
+    for (int material = 0; material < 4; ++material) {
+        const int finishes = material == 0 ? 28 : 1;
+        for (int finish = 0; finish < finishes; ++finish) {
+            for (bool glove : {false, true}) {
+                for (bool detail : {false, true}) {
+                    if (material == 1 && detail) continue;
+                    if (material == 2 && !detail) continue;
+                    if (material == 3 && (glove || detail)) continue;
+                    measure(native_render::player_shader_key(
+                            finish, glove, detail, native_render::PlayerMaterial(material)
+                    ));
+                }
+            }
+        }
+    }
+    graphics.check_error("D3D11 program measurement");
+    const Json result = {
+            {"schema", 1},
+            {"renderer", "d3d11"},
+            {"gpu", device.adapter()},
+            {"driver", device.description()},
+            {"os", benchmark_os()},
+            {"permutations", permutations},
+            {"method",
+             "Precompiled DXBC lookup, reflection and D3D11 program creation per key; "
+             "excludes constants, geometry/input layouts, pipelines and first draw."}
+    };
+    std::ofstream output(output_path);
+    output << result.dump(2) << '\n';
+    if (!output) throw std::runtime_error("Cannot write D3D11 program measurement");
+    return 0;
+#endif
+}
 }  // namespace
 
 int main(int argc, char **argv) {
     try {
+        if (argc == 5 && std::string_view(argv[3]) == "--renderer" && std::string_view(argv[4]) == "d3d11")
+            return measure_d3d11(argv[2]);
         if (argc != 3) throw std::runtime_error("usage: bunnyhop-native-shader-benchmark ASSET_DIRECTORY OUTPUT.json");
         Context context;
         native::Gl gl;

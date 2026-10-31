@@ -1,4 +1,6 @@
 #pragma once
+#include "benchmark_gpu_d3d11.hpp"
+#include <memory>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
 #include <algorithm>
@@ -14,6 +16,9 @@ class BenchmarkGpu {
         bool pending = false;
     };
 
+#ifdef _WIN32
+    std::unique_ptr<BenchmarkGpuD3D11> d3d11_;
+#endif
     std::array<Query, 32> queries_{};
     void(APIENTRY *generate_)(GLsizei, GLuint *) = nullptr;
     void(APIENTRY *destroy_)(GLsizei, const GLuint *) = nullptr;
@@ -41,7 +46,15 @@ class BenchmarkGpu {
     }
 
 public:
-    BenchmarkGpu() {
+    BenchmarkGpu(void *device = nullptr, void *context = nullptr) {
+        (void)device;
+        (void)context;
+        if (device) {
+#ifdef _WIN32
+            d3d11_ = std::make_unique<BenchmarkGpuD3D11>(device, context);
+#endif
+            return;
+        }
         load(generate_, "glGenQueries");
         load(destroy_, "glDeleteQueries");
         load(begin_, "glBeginQuery");
@@ -56,9 +69,17 @@ public:
                 if (query.id) destroy_(1, &query.id);
     }
 
-    bool supported() const { return generate_ && destroy_ && begin_ && end_ && available_ && value_; }
+    bool supported() const {
+#ifdef _WIN32
+        if (d3d11_) return true;
+#endif
+        return generate_ && destroy_ && begin_ && end_ && available_ && value_;
+    }
 
     void begin() {
+#ifdef _WIN32
+        if (d3d11_) return d3d11_->begin();
+#endif
         const size_t frame = frames_.size();
         frames_.push_back(-1);
         if (!supported()) return;
@@ -73,6 +94,9 @@ public:
     }
 
     void end() {
+#ifdef _WIN32
+        if (d3d11_) return d3d11_->end();
+#endif
         if (!active_) return;
         end_(GL_TIME_ELAPSED);
         queries_[(frames_.size() - 1) % queries_.size()].pending = true;
@@ -80,6 +104,9 @@ public:
     }
 
     std::vector<double> finish(size_t warmup) {
+#ifdef _WIN32
+        if (d3d11_) return d3d11_->finish(warmup);
+#endif
         if (supported())
             for (auto &query : queries_)
                 collect(query, true);

@@ -1,5 +1,6 @@
 #pragma once
 #include "options.hpp"
+#include "gfx_types.hpp"
 #include "data_location.hpp"
 #include <SDL3/SDL.h>
 #include <nlohmann/json.hpp>
@@ -30,7 +31,7 @@ struct WindowAndGl {
     ContextPtr context;
 };
 
-WindowAndGl create_window_and_gl(const Options &opt);
+WindowAndGl create_window_and_gl(const Options &opt, gfx::Backend backend = gfx::Backend::opengl);
 
 struct DataPaths {
     std::filesystem::path default_root;

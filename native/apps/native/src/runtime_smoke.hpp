@@ -1,4 +1,5 @@
 #pragma once
+#include "gfx.hpp"
 #include "bunnyhop_native.h"
 #include <nlohmann/json.hpp>
 #include <filesystem>
@@ -33,7 +34,7 @@ struct RuntimeSmokeState {
     std::unique_ptr<BhContext, decltype(&bh_destroy)> &core;
     std::unique_ptr<Renderer> &renderer;
     const std::unique_ptr<MenuWebView> &menu;
-    Gl &gl;
+    gfx::Context &gl;
     NativeHud &hud;
     SDL_Window *window;
     Input &input;

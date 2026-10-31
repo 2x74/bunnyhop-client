@@ -1,3 +1,4 @@
+#include "smoke_graphics.hpp"
 // Draws avatar pictures through the same service the menu talks to, from a JSON list of
 // {name, request} (request = an avatarRender message), into OUTPUT/<name>.png or .webp. Opens a hidden GL
 // window; no menu, account or network.
@@ -36,18 +37,17 @@ std::string decode_base64(const std::string &text) {
     return out;
 }
 
-nlohmann::json render(native::avatar::AvatarService &service, native::Gl &gl, const nlohmann::json &request) {
+nlohmann::json render(native::avatar::AvatarService &service, native::gfx::Context &gl, const nlohmann::json &request) {
     service.request(request);
     for (int wait = 0; wait < max_reply_waits; ++wait) {
-        gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
-        gl.Viewport(3, 5, 101, 77);
+        const auto target = gl.current_target();
+        gl.viewport({3, 5, 101, 77});
         service.frame();
-        GLint framebuffer = -1, viewport[4];
-        gl.GetIntegerv(GL_FRAMEBUFFER_BINDING, &framebuffer);
-        gl.GetIntegerv(GL_VIEWPORT, viewport);
-        if (framebuffer != 0 || viewport[0] != 3 || viewport[1] != 5 || viewport[2] != 101 || viewport[3] != 77)
-            throw std::runtime_error("Avatar render leaked its framebuffer or viewport");
-        if (gl.GetError() != GL_NO_ERROR) throw std::runtime_error("Avatar render GL error");
+        const auto viewport = gl.current_viewport();
+        if (gl.current_target() != target || viewport.x != 3 || viewport.y != 5 || viewport.width != 101
+            || viewport.height != 77)
+            throw std::runtime_error("Avatar render leaked its target or viewport");
+        gl.check_error("Avatar render");
         const auto replies = service.take_replies();
         if (!replies.empty()) return reply_json(replies.front());
         std::this_thread::sleep_for(reply_wait);
@@ -84,25 +84,13 @@ int main(int argc, char **argv) {
         const std::filesystem::path output = argv[3];
         std::filesystem::create_directories(output);
         if (!SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(SDL_GetError());
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-        auto *window = SDL_CreateWindow("Native avatar smoke", 320, 240, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
-        if (!window) throw std::runtime_error(SDL_GetError());
-        auto context = SDL_GL_CreateContext(window);
-        if (!context) throw std::runtime_error(SDL_GetError());
-        SDL_GL_MakeCurrent(window, context);
-        native::Gl gl;
-        gl.load();
+        native::SmokeGraphics surface(320, 240);
+        auto &graphics = surface.context();
         {
-            native::gfx::Context graphics(gl);
             native::avatar::AvatarService service(graphics, argv[1]);
             for (const auto &job : jobs)
-                save(output, job.at("name").get<std::string>(), render(service, gl, job.at("request")));
+                save(output, job.at("name").get<std::string>(), render(service, graphics, job.at("request")));
         }
-        SDL_GL_DestroyContext(context);
-        SDL_DestroyWindow(window);
         return 0;
     } catch (const std::exception &e) {
         std::cerr << e.what() << '\n';

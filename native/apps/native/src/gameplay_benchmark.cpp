@@ -1,5 +1,7 @@
 // Offline full-frame workload. The hidden window never captures input or creates a menu/network client.
 #include "renderer.hpp"
+#include "client_graphics.hpp"
+#include "gfx_window.hpp"
 #include "hud.hpp"
 #include "input_timeline.hpp"
 #include "input_scheduler.hpp"
@@ -66,10 +68,16 @@ struct Spec {
     int width, height, frames, warmup, fps, hz, ghosts;
     bool vsync, queued, ordinary_sleep, play_priority, comparison, visible;
     std::string low_latency;
+    native::gfx::Backend backend = native::gfx::Backend::opengl;
 
     explicit Spec(const char *file) {
         std::ifstream input(file);
         input >> json;
+        const auto renderer = json.value("renderer", std::string("opengl"));
+        if (renderer != "opengl" && renderer != "d3d11") throw std::runtime_error("Invalid renderer");
+        backend = native::renderer_backend(native::renderer_choice(renderer));
+        if (renderer == "d3d11" && backend != native::gfx::Backend::d3d11)
+            throw std::runtime_error("D3D11 benchmark requires Windows");
         path = json.at("path");
         content = json.value("contentRoot", std::string());
         output = json.at("out");
@@ -119,10 +127,11 @@ struct Surface {
                 "Offline gameplay benchmark",
                 spec.width,
                 spec.height,
-                SDL_WINDOW_OPENGL | (spec.visible ? SDL_WindowFlags(0) : SDL_WINDOW_HIDDEN)
+                native::gfx::window_flags(spec.backend) | (spec.visible ? SDL_WindowFlags(0) : SDL_WINDOW_HIDDEN)
         );
         if (!window) throw std::runtime_error(SDL_GetError());
         if (spec.visible && !SDL_SetWindowFullscreen(window, true)) throw std::runtime_error(SDL_GetError());
+        if (spec.backend != native::gfx::Backend::opengl) return;
         context = SDL_GL_CreateContext(window);
         if (!context || !SDL_GL_MakeCurrent(window, context)) throw std::runtime_error(SDL_GetError());
         if (!SDL_GL_SetSwapInterval(spec.vsync ? 1 : 0)) throw std::runtime_error(SDL_GetError());
@@ -152,8 +161,14 @@ Json spread(std::vector<double> values) {
 
 class Benchmark {
 public:
-    explicit Benchmark(const Spec &spec) : spec_(spec), surface_(spec), core_(bh_create(), bh_destroy) {
-        gl_.load();
+    explicit Benchmark(const Spec &spec)
+        : spec_(spec)
+        , surface_(spec)
+        , device_(surface_.window, spec.backend)
+        , graphics_(device_.context())
+        , presenter_(device_.presenter())
+        , gpu_(presenter_.device(), presenter_.immediate_context())
+        , core_(bh_create(), bh_destroy) {
         if (!core_) throw std::runtime_error("Cannot create simulation");
         require(bh_load_map(core_.get(), spec.path.c_str(), spec.content.empty() ? nullptr : spec.content.c_str()));
         bh_default_settings(&settings_);
@@ -164,7 +179,7 @@ public:
             eye_[axis] = snapshot_.player.position[axis] + (axis == 2 ? snapshot_.player.view_offset_z : 0);
         if (spec.json.contains("eye")) eye_ = spec.json.at("eye").get<std::array<float, 3>>();
         view_.set_angles(spec.json.value("pitch", 0.), spec.json.value("yaw", input_.yaw()));
-        renderer_ = std::make_unique<native::Renderer>(gl_, core_.get());
+        renderer_ = std::make_unique<native::Renderer>(graphics_, core_.get());
         renderer_->set_profiling(true);
         renderer_->set_viewmodel_visible(true);
         hud_ = std::make_unique<native::NativeHud>(graphics_, BUNNYHOP_NATIVE_ASSET_ROOT);
@@ -224,7 +239,7 @@ public:
             frame_diagnostics();
             frame_heartbeat();
             frame_actors();
-            presenter_.render_start(spec_.width, spec_.height);
+            device_.begin();
             if (spec_.low_latency != "off" && !presenter_.active())
                 throw std::runtime_error("Low latency mode stopped: " + presenter_.error());
             mark(render_start);
@@ -235,12 +250,7 @@ public:
             mark(hud);
             frame_diagnostics_.mark(native::FrameDiagnostics::kRender, SDL_GetTicksNS());
             gpu_.end();
-            if (presenter_.active())
-                presenter_.present(spec_.vsync);
-            else
-                SDL_GL_SwapWindow(surface_.window);
-            if (spec_.low_latency != "off" && !presenter_.active())
-                throw std::runtime_error("Low latency mode stopped: " + presenter_.error());
+            device_.present(spec_.vsync);
             mark(swap);
             frame_diagnostics_.mark(native::FrameDiagnostics::kSwap, SDL_GetTicksNS());
             pacer_.after_swap(graphics_, spec_.queued);
@@ -274,8 +284,9 @@ public:
 private:
     const Spec &spec_;
     Surface surface_;
-    native::Gl gl_;
-    native::gfx::Context graphics_{gl_};
+    native::ClientGraphics device_;
+    native::gfx::Context &graphics_;
+    native::LowLatencyPresenter &presenter_;
     BenchmarkGpu gpu_;
     std::unique_ptr<BhContext, decltype(&bh_destroy)> core_;
     std::unique_ptr<native::Renderer> renderer_;
@@ -289,7 +300,6 @@ private:
     native::FramePacer<native::gfx::Context> pacer_;
     native::GraphicsMenuPacer limiter_;
     native::PlayPriority play_priority_;
-    native::LowLatencyPresenter presenter_;
     native::Chat chat_;
     native::HudScoreboard board_;
     native::RunHeartbeat heartbeat_;
@@ -526,9 +536,6 @@ private:
     }
 
     void write(uint64_t rasterized) {
-        const auto string = [this](GLenum name) {
-            return std::string(reinterpret_cast<const char *>(gl_.GetString(name)));
-        };
         size_t summary_bytes = 0;
         const auto *summary = bh_record_summary_json(core_.get(), &summary_bytes);
         const Json recording = summary && summary_bytes ? Json::parse(summary, summary + summary_bytes) : Json();
@@ -538,8 +545,9 @@ private:
                 {"spec", spec_.json},
                 {"os", benchmark_os()},
                 {"presenter", presenter_.active() ? std::string(presenter_.technique()) : std::string("OpenGL swap")},
-                {"gpu", string(GL_RENDERER)},
-                {"driver", string(GL_VERSION)},
+                {"renderer", device_.name()},
+                {"gpu", device_.adapter()},
+                {"driver", device_.description()},
                 {"sdl", SDL_GetVersion()},
                 {"frame", spread(frames_)},
                 {"framesMs", frames_},
@@ -581,7 +589,7 @@ private:
         for (const auto ms : gpu_frames)
             result["gpuRenderMs"].push_back(ms >= 0 ? Json(ms) : Json());
         result["gpuUnavailableReason"] =
-                gpu_.supported() ? "Null samples mean query ring overflow" : "GL timer query unavailable";
+                gpu_.supported() ? "Null samples mean query ring overflow" : "GPU timer query unavailable";
         result["measuredQpcStart"] = measured_qpc_start_;
         result["measuredQpcEnd"] = measured_qpc_end_;
         for (size_t phase = 0; phase < count; ++phase) {
@@ -603,7 +611,7 @@ private:
 #ifdef _WIN32
         result["dxgi"] = benchmark_latency::result(size_t(spec_.warmup));
 #endif
-        if (gl_.GetError() != GL_NO_ERROR) throw std::runtime_error("Benchmark OpenGL error");
+        graphics_.check_error("Benchmark");
         std::ofstream output(spec_.output);
         output << result.dump(2) << '\n';
         if (!output) throw std::runtime_error("Cannot write benchmark result");

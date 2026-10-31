@@ -1,5 +1,6 @@
 #pragma once
 #include <SDL3/SDL.h>
+#include "gfx_types.hpp"
 #include <memory>
 #include <optional>
 #include <string>
@@ -7,9 +8,8 @@
 
 namespace native {
 
-// Settings → Display → Low latency mode. Off presents with the OpenGL swap. On presents through a DXGI flip-model
-// swapchain (Windows): independent flip in borderless, VRR, and NVIDIA Reflex or AMD Anti-Lag 2 where the card has
-// it. Boost also keeps an NVIDIA card's clocks up.
+// OpenGL uses DXGI interop only when enabled. Native D3D11 always uses flip-model DXGI; this setting controls
+// Reflex/Anti-Lag markers and pacing there. Boost also requests NVIDIA's clock boost.
 enum class LowLatencyMode { off, on, boost };
 
 inline bool valid_low_latency_mode(std::string_view value) {
@@ -21,18 +21,18 @@ inline LowLatencyMode low_latency_mode(std::string_view value) {
     return value == "on" ? LowLatencyMode::on : LowLatencyMode::off;
 }
 
-// What this computer offers, found once at startup with the game's GL context current.
+// Probed once with the active renderer; native D3D11 never probes WGL interop.
 struct LowLatencySupport {
     bool dxgi = false;
     bool reflex = false;
     bool anti_lag = false;
 };
 
-// Presents GL frames through DXGI. The game draws as before into the framebuffer bound by render_start(), a
-// D3D11 texture shared with GL (WGL_NV_DX_interop2); present() copies it into the swapchain right side up and
-// presents. Any failure turns it off with error() and the game goes back to the OpenGL swap. The markers follow
-// the Reflex order: frame_start (the sleep, simulation start and input sample, before input is pumped),
-// render_start (simulation end, render submit start) and present (render submit end, present).
+// Owns the only D3D11 device, immediate context and swapchain. Native D3D11 borrows a scene RTV/DSV;
+// OpenGL interop borrows a shared framebuffer. Present supplies the final vertical flip for either path.
+// Marker order is frame_start (sleep, simulation start, input sample), render_start (simulation end,
+// render submit start), present (render submit end, present start/end). A native device failure retains
+// borrowed objects until the caller can unwind and exit cleanly; interop failures return to the GL swap.
 class LowLatencyPresenter {
 public:
     LowLatencyPresenter();
@@ -48,6 +48,17 @@ public:
     // Anti-Lag 2 so their limiter and the game's agree. False with error() when it couldn't be turned on.
     bool configure(SDL_Window *window, LowLatencyMode mode, int fps_limit, bool flash_indicator);
 
+    bool initialize_native(SDL_Window *window, bool warp = false);
+    bool exclusive(bool enabled);
+
+    bool native_mode() const { return native_; }
+
+    bool failed() const { return native_ && !error_.empty(); }
+
+    void *device() const;
+    void *immediate_context() const;
+    gfx::TargetView native_target() const;
+    std::string adapter_description() const;
     bool active() const;
 
     const std::string &error() const { return error_; }
@@ -76,6 +87,7 @@ private:
     std::unique_ptr<Impl> impl_;
     LowLatencySupport support_;
     bool probed_ = false;
+    bool native_ = false;
     std::string error_;
     std::optional<std::string> failure_;
 
@@ -125,6 +137,30 @@ inline const LowLatencySupport &LowLatencyPresenter::support(SDL_Window *) {
 inline bool LowLatencyPresenter::configure(SDL_Window *, LowLatencyMode mode, int, bool) {
     error_ = mode == LowLatencyMode::off ? "" : "Low latency mode is for Windows";
     return mode == LowLatencyMode::off;
+}
+
+inline bool LowLatencyPresenter::initialize_native(SDL_Window *, bool) {
+    return false;
+}
+
+inline bool LowLatencyPresenter::exclusive(bool) {
+    return true;
+}
+
+inline void *LowLatencyPresenter::device() const {
+    return nullptr;
+}
+
+inline void *LowLatencyPresenter::immediate_context() const {
+    return nullptr;
+}
+
+inline gfx::TargetView LowLatencyPresenter::native_target() const {
+    return {};
+}
+
+inline std::string LowLatencyPresenter::adapter_description() const {
+    return {};
 }
 
 inline bool LowLatencyPresenter::active() const {

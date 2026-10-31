@@ -10,6 +10,20 @@ void preference_changes() {
     const auto original = native::default_settings();
     auto settings = original;
     auto cached = native::Preferences::from_settings(settings);
+    assert(cached.renderer == native::RendererChoice::opengl);
+    const auto d3d11 = native::patch_settings(settings, {{"renderer", "d3d11"}});
+    assert(native::Preferences::from_settings(d3d11).renderer == native::RendererChoice::d3d11);
+    assert(native::patch_settings(d3d11, {{"renderer", "opengl"}}).at("renderer") == "opengl");
+#ifndef _WIN32
+    assert(native::renderer_backend(native::RendererChoice::d3d11) == native::gfx::Backend::opengl);
+#endif
+    bool renderer_rejected = false;
+    try {
+        native::patch_settings(settings, {{"renderer", "unknown"}});
+    } catch (const std::runtime_error &) {
+        renderer_rejected = true;
+    }
+    assert(renderer_rejected);
     settings = native::patch_settings(
             settings,
             {{"fov", 110},

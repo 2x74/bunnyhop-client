@@ -466,6 +466,9 @@ if(BUNNYHOP_BUILD_CLIENT)
     target_compile_definitions(bunnyhop-native-gameplay-benchmark PRIVATE
         BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
     if(WIN32)
+        target_sources(bunnyhop-native-shader-benchmark PRIVATE src/low_latency_windows.cpp src/anti_lag_windows.cpp)
+        target_include_directories(bunnyhop-native-shader-benchmark PRIVATE vendor)
+        target_link_libraries(bunnyhop-native-shader-benchmark PRIVATE d3d11 dxgi)
         include(tools/measure-presenter.cmake)
         target_include_directories(bunnyhop-native-gameplay-benchmark PRIVATE src)
         target_sources(bunnyhop-native-gameplay-benchmark PRIVATE

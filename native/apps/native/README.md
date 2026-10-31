@@ -277,3 +277,7 @@ The movengine project was read as a reference for input and BSP rendering; none 
 the repository's and the vendored Source-related notices. The JSON header is nlohmann/json 3.12.0 (MIT).
 
 ![Combined native Loadout preview](../../../docs/images/native-loadout-combined.png)
+
+On Windows, `--renderer d3d11` opts into the D3D11 renderer. OpenGL remains the default. The persisted
+`renderer` setting accepts `opengl` or `d3d11` and takes effect after restart; there is no menu control yet.
+D3D11 startup failures and a previous startup crash recover to OpenGL with a notice.

@@ -8,6 +8,8 @@
 namespace native {
 struct Options {
     std::string map, content_root, screenshot, online_map, menu_html = BUNNYHOP_MENU_HTML, menu_smoke;
+    std::optional<std::string> renderer;
+    bool d3d11_warp = false;
     uint64_t frames = 0;
     double sensitivity = 2;
     bool hidden = false, help = false, no_menu = false, windowed = false, sensitivity_set = false,

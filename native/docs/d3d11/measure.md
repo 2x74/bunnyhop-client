@@ -1,13 +1,14 @@
 # Compare Windows presentation paths
 
 This tool runs a local map without a game account, network client or recorded player inputs. It compares the current
-OpenGL swap with Low latency On and Boost, each uncapped and capped at 240 fps. VSync is off in all six cases. It
-also measures the runtime compilation of every current player material cache key. It does not contain a D3D11 renderer.
+OpenGL swap/interop and native D3D11 with Low latency Off, On and Boost, each uncapped and capped at 240 fps.
+VSync is off in all twelve cases. It also measures GL compile/link and precompiled D3D11 program creation by key.
+D3D11 always presents through DXGI; its mode setting controls Reflex and Anti-Lag only.
 
 ## For testers
 
-1. Open [D3D11 WARP experiment runs](https://github.com/2x74/bunnyhop-client/actions/workflows/d3d11-warp.yml).
-   Pick the successful run on `ci/d3d11-warp` whose commit the developer gave you. Under **Artifacts**, download
+1. Open [D3D11 whole-game runs](https://github.com/2x74/bunnyhop-client/actions/workflows/d3d11-windows.yml).
+   Pick the successful run on `ci/d3d11-windows` whose commit the developer gave you. Under **Artifacts**, download
    **renderer-measure-windows**, then extract the ZIP fully. GitHub may require a login to download an artifact;
    running the extracted tool needs no account or token. Artifacts expire after 30 days; a developer can share the ZIP.
 2. Have a local Source BSP map and its game content available. Use the same map/content for every comparison.
@@ -32,11 +33,15 @@ also measures the runtime compilation of every current player material cache key
    process IDs, timestamps identifying a session, account names and tokens. Temporary specs, stderr and raw ETW CSVs
    are deleted. Nothing is uploaded by the tool. An unavailable mode is reported; it is never silently replaced by Off.
 
-If the shader step fails, check that the ZIP was fully extracted and that the PC supports OpenGL 3.3. On/Boost also
-require WGL_NV_DX_interop2. Boost changes NVIDIA clock policy when Reflex supports it; on other GPUs it can behave
+If the shader step fails, check that the ZIP was fully extracted and that the PC supports OpenGL 3.3. OpenGL On/Boost also
+require WGL_NV_DX_interop2; native D3D11 needs no GL context or interop. Boost changes NVIDIA clock policy when Reflex supports it; on other GPUs it can behave
 like On. A hybrid-GPU laptop can fail interop if GL and D3D cannot use the same adapter. A failed capture produces an
 error instead of comparing incomplete data. Re-run after fixing the setup. Very large desktops above 4096 pixels on
 either axis need a lower desktop resolution for this benchmark.
+
+Native D3D11 reports delayed timestamp/disjoint GPU queries. Its shader probe requests all 135 manifest keys
+from embedded DXBC and measures lookup, reflection and program creation. It excludes input layouts, constant
+bindings, pipeline state and first draws. An unavailable D3D11 case has a failure reason and no timing samples.
 
 ## What the report measures
 
@@ -100,7 +105,7 @@ a different schema; use the PowerShell tool for this presentation comparison.
 
 ## WARP CI and backend notes
 
-The new `.github/workflows/d3d11-warp.yml` runs only on pushes to `ci/d3d11-warp`; it leaves release workflows untouched.
+The new `.github/workflows/d3d11-windows.yml` runs only on pushes to `ci/d3d11-windows`; it leaves release workflows untouched.
 The standalone probe needs only the Windows SDK and MSVC, not SDL, Rust, maps or OpenGL:
 
 ```powershell

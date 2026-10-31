@@ -1,4 +1,4 @@
-// Menus/account only. The native SDL window retains OpenGL and raw game input.
+// Menus/account only. The native SDL window retains rendering and raw game input.
 // SDK: packaging/WebView2.cmake; API: learn.microsoft.com/microsoft-edge/webview2/reference/win32/.
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -224,6 +224,10 @@ struct MenuWebView::Impl {
         if (!window) {
             state->fail("SDL window has no Win32 HWND");
             return;
+        }
+        if (!(SDL_GetWindowFlags(sdl) & SDL_WINDOW_OPENGL)) {
+            const LONG_PTR style = GetWindowLongPtrW(window, GWL_STYLE);
+            SetWindowLongPtrW(window, GWL_STYLE, style | WS_CLIPCHILDREN);
         }
         const HRESULT init = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
         if (FAILED(init)) {

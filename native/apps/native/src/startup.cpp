@@ -34,13 +34,14 @@ void GlContextDeleter::operator()(SDL_GLContext context) const {
     SDL_GL_DestroyContext(context);
 }
 
-WindowAndGl create_window_and_gl(const Options &opt) {
-    gfx::configure_window();
-    SDL_WindowFlags flags = gfx::window_flags() | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+WindowAndGl create_window_and_gl(const Options &opt, gfx::Backend backend) {
+    gfx::configure_window(backend);
+    SDL_WindowFlags flags = gfx::window_flags(backend) | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     if (opt.hidden) flags |= SDL_WINDOW_HIDDEN;
     WindowPtr window(SDL_CreateWindow(native::app_name, 1280, 720, flags), &SDL_DestroyWindow);
     if (!window) throw std::runtime_error(std::string("Creating SDL window failed: ") + SDL_GetError());
     if (!native::set_app_icon(window.get())) std::cerr << "Could not set native app icon: " << SDL_GetError() << '\n';
+    if (backend != gfx::Backend::opengl) return {std::move(window), ContextPtr{}};
     ContextPtr context(SDL_GL_CreateContext(window.get()));
     if (!context) throw std::runtime_error(std::string("Creating OpenGL 3.3 core context failed: ") + SDL_GetError());
     if (!SDL_GL_MakeCurrent(window.get(), context.get())) throw std::runtime_error(SDL_GetError());
@@ -76,7 +77,7 @@ void open_log_in_default_folder() {
     SDL_free(pref_path);
 }
 
-DataPaths resolve_data_folder(const Options &opt, SDL_Window *window, DataMoveProgress &display) {
+DataPaths resolve_data_folder(const Options &opt, SDL_Window *, DataMoveProgress &display) {
     char *pref_path = SDL_GetPrefPath("bunnyhop.lol", "Bunnyhop Native");
     if (!pref_path) throw std::runtime_error("Cannot find the native client data directory");
     const std::string isolated = !opt.runtime_smoke.empty()        ? opt.runtime_smoke
@@ -118,7 +119,6 @@ DataPaths resolve_data_folder(const Options &opt, SDL_Window *window, DataMovePr
                 while (SDL_PollEvent(&ignored)) {
                 }
                 display.draw(to, double(progress.total.load()), double(progress.done.load()));
-                SDL_GL_SwapWindow(window);
                 SDL_Delay(33);
             }
             worker.join();

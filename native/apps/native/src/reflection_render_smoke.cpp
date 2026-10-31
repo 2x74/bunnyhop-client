@@ -1,3 +1,4 @@
+#include "smoke_graphics.hpp"
 #include "renderer.hpp"
 
 namespace {
@@ -14,34 +15,10 @@ struct SdlLifetime {
     ~SdlLifetime() { SDL_Quit(); }
 };
 
-struct WindowContext {
-    SDL_GLContext value = nullptr;
-
-    ~WindowContext() {
-        if (value) SDL_GL_DestroyContext(value);
-    }
-};
-
 struct Device {
     SdlLifetime sdl;
-    std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> window{nullptr, SDL_DestroyWindow};
-    WindowContext windowContext;
-    native::Gl gl;
-    native::gfx::Context graphics{gl};
-
-    Device() {
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-        window.reset(SDL_CreateWindow("Reflection regression", width, height, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN));
-        if (!window) throw std::runtime_error(SDL_GetError());
-        windowContext.value = SDL_GL_CreateContext(window.get());
-        if (!windowContext.value) throw std::runtime_error(SDL_GetError());
-        SDL_GL_MakeCurrent(window.get(), windowContext.value);
-        SDL_GL_SetSwapInterval(0);
-        gl.load();
-    }
+    native::SmokeGraphics surface{width, height};
+    native::gfx::Context &graphics = surface.context();
 };
 
 std::vector<std::byte> capture(Device &device, native::gfx::TargetView source, const std::filesystem::path &path) {
@@ -51,7 +28,7 @@ std::vector<std::byte> capture(Device &device, native::gfx::TargetView source, c
     device.graphics.enqueue_readback(source, slot);
     device.graphics.collect(slot, rgba, native::gfx::RowOrigin::top, 5'000'000'000);
     device.graphics.destroy(slot);
-    device.graphics.bind_target(native::gfx::Context::window_target(width, height));
+    device.graphics.bind_target(device.surface.output(width, height));
     std::vector<std::byte> rgb(size_t(desc.width) * desc.height * 3);
     for (size_t i = 0; i < rgb.size() / 3; ++i)
         std::copy_n(rgba.data() + i * 4, 3, rgb.data() + i * 3);
@@ -244,7 +221,7 @@ scene(Device &device,
       bool actor,
       bool reflected,
       const std::array<float, 3> &position) {
-    native::Renderer renderer(device.gl, core, assets);
+    native::Renderer renderer(device.graphics, core, assets);
     renderer.graphics_settings(
             {{"graphicsPreset", "source"}, {"graphicsAntialias", false}, {"graphicsWaterReflections", reflected}}
     );
@@ -270,7 +247,7 @@ scene(Device &device,
         renderer.draw(width, height, camera.data(), input, &snapshot, seconds);
     const std::string name = std::string(reflected ? "reflection-" : "direct-") + (actor ? "actor" : "empty");
     SceneCapture result;
-    result.main = capture(device, native::gfx::Context::window_target(width, height), output / (name + ".ppm"));
+    result.main = capture(device, device.surface.output(width, height), output / (name + ".ppm"));
     if (reflected) {
         result.reflection = capture(device, renderer.water_reflection_target(), output / (name + "-target.ppm"));
         WaterSurface surface(device);
@@ -309,7 +286,7 @@ void reflection_cases(
 }
 
 void mirrored_cases(Device &device, const std::filesystem::path &assets, const std::filesystem::path &output) {
-    native::NativeViewmodel model(device.gl, assets);
+    native::NativeViewmodel model(device.graphics, assets);
     model.cosmetics("outfit-cream", "2;knife-bayonet;fin-geode;glove-sport-pandora");
     auto pipeline = device.graphics.create_pipeline({});
     for (const bool mirrored : {false, true}) {
@@ -323,7 +300,7 @@ void mirrored_cases(Device &device, const std::filesystem::path &assets, const s
             device.graphics.clear_depth();
             model.draw(width, height, snapshot, weapon, 0, false, 0, 2);
             const auto name = std::string(mirrored ? "mirrored-" : "right-") + (weapon == 1 ? "knife" : "gun");
-            capture(device, native::gfx::Context::window_target(width, height), output / (name + ".ppm"));
+            capture(device, device.surface.output(width, height), output / (name + ".ppm"));
         }
     }
     device.graphics.destroy(pipeline);

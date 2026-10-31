@@ -87,8 +87,8 @@ D3D11 context can be injected before resource creation, with an OpenGL fallback 
 `BUNNYHOP_GFX_DISPATCH` enables the dispatcher with an unavailable second backend on non-Windows benchmark builds.
 `gfx_types.hpp` contains API-independent descriptions and native-value handles with explicit bool/equality.
 `gfx_opengl.hpp` and `gfx_d3d11.cpp` implement operations; `gfx_gl_api.hpp` owns the GL loader/compiler.
-`gfx_window.hpp` centralizes backend availability and SDL flags. The legacy client startup still creates OpenGL;
-whole-renderer startup and presentation integration follow the offscreen seam milestone.
+`gfx_window.hpp` centralizes backend availability and SDL flags. The client defaults to OpenGL; Windows can opt into D3D11 with `--renderer d3d11` or persisted `renderer`.
+Changes to the preference take effect on restart.
 
 All calls execute immediately on one render/context thread, in call order. There are no recorded command lists,
 barriers, queue ownership or per-draw virtual calls. `Context` borrows the GL table; resources must be destroyed
@@ -174,14 +174,30 @@ No camera caller changes its math. Nonconstant cube face orientation needs a Win
 reflection cubes are black on all six faces. The authoritative semantics are in
 [the shader contract](shaders.md#semantic-requirements-for-the-backend).
 
-`window_target` and `borrow_target` provide non-owning views. The latter leaves the existing WGL interop FBO owned
-by `LowLatencyPresenter`. Presentation still runs through the existing client/presenter path in this milestone.
-The future D3D11 context should borrow the device and immediate context already owned by
-`LowLatencyPresenter::Impl`, and borrow its current swapchain RTV as a target view. The presenter remains the sole
-swapchain/resize/Present owner and retains Reflex/Anti-Lag markers and pacing. The native D3D path bypasses the
-WGL interop copy; it must not create a second device or swapchain. Inject the context before creating renderer
-resources. `startup.cpp` and `window_sdl.hpp` now share `gfx_window.hpp`; the eventual non-GL startup branch omits
-`SDL_WINDOW_OPENGL` and SDL GL context creation. No user-facing backend switch is enabled yet.
+`window_target` and `borrow_target` provide non-owning views. The presenter owns the device, immediate context,
+scene color/depth target and flip-discard swapchain. `ClientGraphics` injects the borrowed D3D11 context before
+HUD/model/renderer resource creation, reborrows the scene target after resize, prepares its refraction copy,
+and resets backend state after the presenter uses the immediate context. Presentation performs one Y flip.
+Native D3D11 creates neither an SDL GL context nor WGL interop resources. OpenGL remains the default everywhere.
+
+Native D3D11 always uses DXGI. Low latency Off disables Reflex/Anti-Lag; On and Boost retain the existing marker
+order. VSync and the FPS limiter still apply. Its swapchain omits the frame-latency waitable flag because D3D11
+exclusive fullscreen cannot use that flag; the game's GPU queue fence and FPS limiter still pace frames.
+The window controller owns SDL display mode/scaling and asks the presenter to enter/leave DXGI exclusive mode.
+The existing menu/focus policy and ten-second display trial apply to both renderers. Native borderless fits the
+display exactly; the existing OpenGL extra-row workaround is unchanged.
+
+Startup failures unwind renderer resources, recreate the window with OpenGL and show a toast. A marker written
+before render initialization catches a previous startup crash; first successful presentation queues its removal
+on a worker. Recovery-file failures also choose OpenGL. Device removal during play logs the HRESULT and exits
+with a player-visible error. Hidden WARP proof runs fail instead of substituting OpenGL pixels.
+WebView2 retains its child HWND, bounds and focus logic; native D3D11 windows clip child windows. Backdrops,
+avatars and loadout previews use the seam. The separate video worker creates its own OpenGL surface regardless
+of the game's persisted renderer setting.
+
+See [the whole-game proof](../../apps/native/tools/d3d11-game/README.md) for CI inputs, image metrics and evidence.
+Real displays must check actual present mode, tearing/VRR, Reflex/Anti-Lag, exclusive/scaling transitions,
+trial reverts, and WebView2 focus/composition. WARP cannot measure hardware FPS.
 
 ## Migrated callers
 

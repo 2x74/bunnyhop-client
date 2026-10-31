@@ -15,7 +15,13 @@ Options options(int argc, char **argv) {
             if (++i >= argc) throw std::runtime_error("Missing value for " + arg);
             return argv[i];
         };
-        if (arg == "--room-smoke") {
+        if (arg == "--renderer") {
+            out.renderer = value();
+            if (*out.renderer != "opengl" && *out.renderer != "d3d11")
+                throw std::runtime_error("--renderer must be opengl or d3d11");
+        } else if (arg == "--d3d11-warp") {
+            out.d3d11_warp = true;
+        } else if (arg == "--room-smoke") {
             out.room_smoke = value();
             out.hidden = true;
             out.no_menu = true;
@@ -116,7 +122,7 @@ Options options(int argc, char **argv) {
 
 void print_help(std::ostream &output) {
     output << "Usage: bunnyhop-native [--map MAP.bsp | --online-map NAME] [--content-root DIR] "
-              "[--sensitivity 2]\n"
+              "[--sensitivity 2] [--renderer opengl|d3d11]\n"
               "  [--menu-html PATH] [--no-menu] [--windowed] [--legacy-input] [--frames N] [--screenshot "
               "output.ppm] [--camera x,y,z,pitch,yaw] [--hidden]\n"
               "  [--runtime-smoke OUTPUT_DIR --replay PATH] (offline lifecycle checks with --map; private "

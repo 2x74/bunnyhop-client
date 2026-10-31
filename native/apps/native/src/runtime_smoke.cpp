@@ -175,7 +175,7 @@ void RuntimeSmoke::draw_hud_fixture() {
                 true,
                 leave_progress_fraction
         );
-        const auto png = backbuffer_png(gl, w, h);
+        const auto png = target_png(gl, gl.current_target(), w, h);
         std::ofstream image(output / ("hud-" + std::to_string(int(percent)) + ".png"), std::ios::binary);
         image.write(png.data(), png.size());
     }
@@ -246,7 +246,7 @@ void RuntimeSmoke::check_replay() {
             viewer.camera.mode
     );
     {
-        const auto png = backbuffer_png(gl, w, h);
+        const auto png = target_png(gl, gl.current_target(), w, h);
         std::ofstream image(output / "replay-controls.png", std::ios::binary);
         image.write(png.data(), png.size());
     }
@@ -350,7 +350,7 @@ void RuntimeSmoke::check_workers() {
           "leave-map stale work/generation");
     actions_.load_map(opt.map, opt.content_root, "native-runtime-fixture-new", detail);
     check(core && renderer && !practice.active && practice.checkpoints.empty(), "new map after leave failed");
-    check(gl.GetError() == GL_NO_ERROR, "OpenGL error");
+    gl.check_error("Runtime smoke");
 }
 
 void RuntimeSmoke::write_result() {
