@@ -169,6 +169,7 @@ void main(){color=enabled?tint:vec4(0);})";
         for (int x = 0; x < width; ++x)
             require(channel(bottom, x, y, 0) == channel(top, x, height - 1 - y, 0), "Readback Y flip changed");
     const std::array<uint16_t, 3> indices = {0, 1, 2};
+    context.upload_vertices(geometry, std::as_bytes(std::span(vertices)));
     context.upload_indices(geometry, std::as_bytes(std::span(indices)));
     context.bind_target(target);
     context.bind_program(program);
@@ -242,6 +243,32 @@ color=(texture(uFinEnv,d)+texture(uCosEnv,d)+texture(uPlayerEnv,d))/3.*fromVerte
     require(channel(pixels, 0, 0, 2) == 255 && channel(pixels, 10, 0, 0) > 150,
             "Cube fanout, vertex textures, bone texture or front-face winding changed");
     save("cube-faces", pixels, width, height);
+    for (auto &face : faces)
+        for (size_t pixel = 0; pixel < face.size(); pixel += 4) {
+            face[pixel] = face[pixel + 1] = 128;
+            face[pixel + 2] = face[pixel + 3] = 255;
+        }
+    auto srgb = context.create_texture({4, 4, Format::srgb8, TextureKind::cube, 1, 3}, pointers);
+    context.generate_mips(srgb);
+    SamplerDesc filtered;
+    filtered.mipmapped = true;
+    filtered.max_anisotropy = context.max_anisotropy();
+    filtered.wrap_s = Address::repeat;
+    filtered.wrap_t = Address::clamp;
+    auto anisotropic = context.create_sampler(filtered);
+    context.bind_target(target);
+    context.bind_program(program);
+    context.bind_texture(9, srgb, anisotropic);
+    context.bind_geometry(geometry);
+    context.draw(Primitive::triangles, 0, 3);
+    const auto decoded = read(context, target, RowOrigin::bottom);
+    require(channel(decoded, 0, 0, 0) >= 54 && channel(decoded, 0, 0, 0) <= 56 && channel(decoded, 0, 0, 2) == 255,
+            "sRGB texture upload did not preserve hardware decode");
+    save("srgb-cube", decoded, width, height);
+    require(bool(srgb) && srgb == srgb && srgb != cube, "Texture handle validity/equality changed");
+    context.destroy(srgb);
+    require(!srgb, "Destroyed texture remained valid");
+    context.destroy(anisotropic);
     context.destroy(target);
     context.destroy(geometry);
     context.destroy(pipeline);
@@ -295,6 +322,10 @@ void video(Context &context, int supersample, int samples) {
 }
 
 void run(Context &context) {
+    context.viewport({1, 2, width, height});
+    const auto viewport = context.current_viewport();
+    require(viewport.x == 1 && viewport.y == 2 && viewport.width == width && viewport.height == height,
+            "Viewport restoration query changed");
     require(context.max_samples() >= 4, "Graphics backend does not support four samples");
     auto scalar = context.create_target({width, height, Format::r8});
     context.bind_target(scalar);
@@ -376,6 +407,9 @@ int main(int argc, char **argv) {
     }
     try {
         Context context(gl);
+        gl.Viewport(2, 3, 4, 5);
+        require(context.current_viewport().width == 4, "GL viewport query ignored legacy state");
+        require(bool(context.current_target()), "The current GL window target must be valid");
         run(context);
         return 0;
     } catch (const std::exception &error) {
