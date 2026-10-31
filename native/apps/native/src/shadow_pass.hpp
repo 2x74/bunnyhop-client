@@ -81,12 +81,12 @@ public:
         const GLuint shader = cutouts ? cutoutDepthProgram : depthProgram;
         if (cutouts) {
             const auto &m = world.materials[material];
-            gl.BindTexture(GL_TEXTURE_2D, m.texture < 0 ? resources.white : resources.texture(m.texture));
+            resources.bind(0, m.texture < 0 ? resources.white : resources.texture(m.texture));
             gl.Uniform1f(
                     uniforms.loc(shader, "cutoff"), (m.flags & world.material_alpha_test) ? m.alpha_ref : cutout_alpha
             );
         }
-        gl.BindVertexArray(mesh.vao);
+        context.bind_geometry(mesh.geometry);
         gl.UniformMatrix4fv(uniforms.loc(shader, "model"), 1, GL_FALSE, matrix.data());
         gl.DrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, reinterpret_cast<void *>(uintptr_t(first) * 4));
     }
@@ -138,6 +138,8 @@ public:
                     );
         }
         if (!viewmodel) return;
+        // Legacy skinned meshes use texture parameters for their single-level bone texture.
+        context.unbind_sampler(0);
         for (const auto &actor : roomActors)
             if (actor.ghost_slot < 0) viewmodel->draw_actor(actor, lightVp, eye, seconds);
     }

@@ -77,10 +77,10 @@ class Renderer {
     gfx::Context graphicsContext;
     RenderUniforms uniforms{gl};
     BhContext *core;
-    RenderResources resources{gl, core};
+    RenderResources resources{graphicsContext, core};
     WaterPass water{gl, graphicsContext, uniforms, core};
-    WorldPass world{gl, core, resources, uniforms, profile};
-    SkyPass sky{gl, core, resources, uniforms};
+    WorldPass world{gl, graphicsContext, core, resources, uniforms, profile};
+    SkyPass sky{gl, graphicsContext, core, resources, uniforms};
     ShadowPass shadows{gl, graphicsContext, resources, uniforms, world};
     PresentationPass presentationPass{graphicsContext, core, profile};
     bool flashlightEnabled = false;
@@ -143,7 +143,6 @@ class Renderer {
     native::GraphicsSettings graphics, chosenGraphics;
     std::optional<native::RunnerView> runnerView;
     std::unique_ptr<GraphicsTarget> graphicsTarget;
-    bool anisotropySupported = false;
     uint32_t queuedWeaponFlags = 0, queuedAttackMode = 0;
     bool queuedAttack = false;
 
@@ -264,10 +263,8 @@ public:
     }
 
     nlohmann::json graphics_limits() const {
-        GLint maximumSamples = 0;
-        gl.GetIntegerv(GL_MAX_SAMPLES, &maximumSamples);
-        float maximumAnisotropy = 1;
-        if (anisotropySupported) gl.GetFloatv(0x84ff, &maximumAnisotropy);
+        const int maximumSamples = graphicsContext.max_samples();
+        const float maximumAnisotropy = graphicsContext.max_anisotropy();
         return {{"msaaMax", std::min(8, maximumSamples)},
                 {"anisotropyMax", maximumAnisotropy},
                 {"waterReflections", false},
@@ -465,7 +462,6 @@ public:
         presentationPass.waterConstants = water.water_constants(presentationPass.presentation->shader_program());
         presentationPass.mapEffects.load(core);
 
-        anisotropySupported = SDL_GL_ExtensionSupported("GL_EXT_texture_filter_anisotropic");
         co_yield "viewmodel";
         if (viewmodel)
             viewmodel->prepare_graphics();
@@ -489,11 +485,9 @@ public:
         resources.destroy(world.worldMesh);
         resources.destroy(world.propMesh);
         resources.destroy(sky.skyMesh);
-        if (!resources.ownedTextures.empty())
-            gl.DeleteTextures(resources.ownedTextures.size(), resources.ownedTextures.data());
+        resources.release();
         graphicsContext.destroy(water.planesTexture);
         graphicsContext.destroy(water.planesSampler);
-        if (resources.emptyVao) gl.DeleteVertexArrays(1, &resources.emptyVao);
         if (world.program) gl.DeleteProgram(world.program);
         if (sky.skyProgram) gl.DeleteProgram(sky.skyProgram);
         if (shadows.depthProgram) gl.DeleteProgram(shadows.depthProgram);
@@ -518,15 +512,9 @@ public:
             graphicsTarget = std::make_unique<GraphicsTarget>(graphicsContext);
         sourceLook = graphics.source;
         if (hdr) hdr->bloom = graphics.bloom;
-        if (anisotropySupported) {
-            constexpr GLenum anisotropy = 0x84fe, maximumAnisotropy = 0x84ff;
-            float maximum = 1;
-            gl.GetFloatv(maximumAnisotropy, &maximum);
-            for (GLuint texture : resources.ownedTextures) {
-                gl.BindTexture(GL_TEXTURE_2D, texture);
-                gl.TexParameterf(GL_TEXTURE_2D, anisotropy, std::min(float(graphics.anisotropy), maximum));
-            }
-        }
+        const float anisotropy = std::min(float(graphics.anisotropy), graphicsContext.max_anisotropy());
+        resources.sampling(anisotropy);
+        sky.panorama_sampling(anisotropy);
     }
 
     // The Source look on or off (the Plain look). The Enhanced and Cinematic looks build on the Source look.
@@ -917,8 +905,7 @@ public:
                     draw_3d_sky(eye, aspect, seconds, reflectionPlane);
                 },
                 [&](const float mirroredEye[3]) {
-                    gl.ActiveTexture(GL_TEXTURE7);
-                    gl.BindTexture(GL_TEXTURE_2D, resources.white);
+                    resources.bind(7, resources.white);
                     draw_sky_depth(vp);
                     draw_scene(vp, mirroredEye, false, seconds, true);
                 },
@@ -968,17 +955,9 @@ public:
         phaseStart = profile.profile_now();
         if (lightmapChanged > 0) {
             if (profile.profiling) profile.frameProfile.atlasUpdateBytes = changedLightmap.byte_count;
-            gl.ActiveTexture(GL_TEXTURE1);
-            gl.BindTexture(GL_TEXTURE_2D, world.lightmap);
-            gl.TexImage2D(
-                    GL_TEXTURE_2D,
-                    0,
-                    GL_SRGB8_ALPHA8,
-                    changedLightmap.width,
-                    changedLightmap.height,
-                    0,
-                    GL_RGBA,
-                    GL_UNSIGNED_BYTE,
+            graphicsContext.update_texture(
+                    world.lightmap,
+                    {0, 0, int(changedLightmap.width), int(changedLightmap.height)},
                     changedLightmap.rgba
             );
         }
@@ -1016,8 +995,7 @@ public:
         const double skySceneBefore =
                 profile.frameProfile.buildCull + profile.frameProfile.sort + profile.frameProfile.submit;
         draw_3d_sky(eye, aspect, seconds);
-        gl.ActiveTexture(GL_TEXTURE7);
-        gl.BindTexture(GL_TEXTURE_2D, resources.white);
+        resources.bind(7, resources.white);
         draw_sky_depth(vp);
         profile.profile_elapsed(profile.frameProfile.sky, phaseStart);
         if (profile.profiling)

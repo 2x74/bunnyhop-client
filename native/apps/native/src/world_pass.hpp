@@ -2,24 +2,27 @@
 
 class WorldPass {
     Gl &gl;
+    gfx::Context &context;
     BhContext *&core;
     RenderResources &resources;
     RenderUniforms &uniforms;
     RenderProfile &profile;
 
 public:
-    WorldPass(Gl &g, BhContext *&c, RenderResources &r, RenderUniforms &u, RenderProfile &p)
+    WorldPass(Gl &g, gfx::Context &ctx, BhContext *&c, RenderResources &r, RenderUniforms &u, RenderProfile &p)
         : gl(g)
+        , context(ctx)
         , core(c)
         , resources(r)
         , uniforms(u)
         , profile(p) {}
 
-    GLuint program = 0, lightmap = 0;
+    GLuint program = 0;
+    gfx::Texture lightmap;
     RenderGeometry worldMesh, propMesh;
     std::vector<BhGroup> groups;
     std::vector<BhPropGroup> propGroups;
-    std::vector<GLuint> normals;
+    std::vector<gfx::Texture> normals;
     std::array<float, 3> sunDirection{.35f, .45f, .82f};
     bool hasSun = false;
     native::MapSun mapSun;
@@ -104,7 +107,7 @@ public:
         raw = bh_material_names_json(core, &count);
         if (!raw || !count) co_return;
         const auto names = nlohmann::json::parse(raw, raw + count);
-        std::unordered_map<std::string, GLuint> cached;
+        std::unordered_map<std::string, gfx::Texture> cached;
         for (size_t i = 0; i < normals.size() && i < names.size(); i++) {
             co_yield "normal texture";
             const auto path = normal_path(names[i]);
@@ -123,7 +126,7 @@ public:
                 continue;
             BhImage image{};
             if (bh_texture_path(core, path.c_str(), &image)) {
-                normals[i] = resources.upload(image, true, true, false);
+                normals[i] = resources.upload(image, true, false);
                 cached.emplace(path, normals[i]);
             }
         }
@@ -179,17 +182,12 @@ public:
         }
         const BhMaterialExtra empty = {-1, -1, 4, 1, 0, 400, 1};
         const auto &e = index < extras.size() ? extras[index] : empty;
-        gl.ActiveTexture(GL_TEXTURE0);
-        gl.BindTexture(
-                GL_TEXTURE_2D,
-                m.texture < 0 ? (m.kind == 1 ? resources.checker : resources.white) : resources.texture(m.texture)
+        resources.bind(
+                0, m.texture < 0 ? (m.kind == 1 ? resources.checker : resources.white) : resources.texture(m.texture)
         );
-        gl.ActiveTexture(GL_TEXTURE2);
-        gl.BindTexture(GL_TEXTURE_2D, resources.texture(e.texture2));
-        gl.ActiveTexture(GL_TEXTURE3);
-        gl.BindTexture(GL_TEXTURE_2D, resources.texture(e.detail, true));
-        gl.ActiveTexture(GL_TEXTURE7);
-        gl.BindTexture(GL_TEXTURE_2D, index < normals.size() && normals[index] ? normals[index] : resources.white);
+        resources.bind(2, resources.texture(e.texture2));
+        resources.bind(3, resources.texture(e.detail, true));
+        resources.bind(7, index < normals.size() && normals[index] ? normals[index] : resources.white);
         const bool hasNormal = graphics.material_response && index < normals.size() && normals[index];
         gl.Uniform1i(materialUniforms.hasNormal, hasNormal);
         gl.Uniform1i(materialUniforms.hasSecondary, e.texture2 >= 0);
@@ -272,10 +270,8 @@ public:
         gl.Uniform1f(uniforms.loc(program, "reflectionHeight"), water.waterPlan.reflection_height.value_or(0));
         if (water.reflectionDrawn)
             water.waterReflection->bind(8);
-        else {
-            gl.ActiveTexture(GL_TEXTURE8);
-            gl.BindTexture(GL_TEXTURE_2D, resources.white);
-        }
+        else
+            resources.bind(8, resources.white);
         gl.Uniform1i(uniforms.loc(program, "fullbright"), view.graphics.fullbright);
         gl.Uniform1i(uniforms.loc(program, "potato"), view.graphics.potato);
         gl.Uniform1i(uniforms.loc(program, "skyPass"), sky && view.hasSky && skyInfo.fog_enable);
@@ -312,8 +308,7 @@ public:
                 skyInfo.fog_end / std::max(skyInfo.scale, .001f),
                 skyInfo.fog_max_density
         );
-        gl.ActiveTexture(GL_TEXTURE1);
-        gl.BindTexture(GL_TEXTURE_2D, lightmap);
+        resources.bind(1, lightmap, false);
         ++sceneNumber;
         sceneDrawList.begin(groups.size() + propGroups.size());
         auto &draws = sceneDrawList.draws;
@@ -363,8 +358,7 @@ public:
                     capture_refraction();
                     water.sceneCaptured = true;
                     gl.UseProgram(program);
-                    gl.ActiveTexture(GL_TEXTURE1);
-                    gl.BindTexture(GL_TEXTURE_2D, lightmap);
+                    resources.bind(1, lightmap, false);
                 }
                 gl.Enable(GL_BLEND);
                 gl.DepthMask(GL_FALSE);
@@ -383,7 +377,7 @@ public:
                 const auto model = native::model_matrix(transform);
                 gl.UniformMatrix4fv(materialUniforms.model, 1, GL_FALSE, model.data());
                 bind_material(d.material, d.prop, view.graphics, water);
-                gl.BindVertexArray(d.prop ? propMesh.vao : worldMesh.vao);
+                context.bind_geometry(d.prop ? propMesh.geometry : worldMesh.geometry);
                 gl.DrawElements(
                         GL_TRIANGLES,
                         d.count,
@@ -401,6 +395,8 @@ public:
         gl.DepthMask(GL_TRUE);
         gl.Disable(GL_POLYGON_OFFSET_FILL);
         gl.Disable(GL_BLEND);
+        // Legacy skinned meshes use texture parameters for their single-level bone texture.
+        context.unbind_sampler(0);
     }
 
     void record_group_bounds(
@@ -522,7 +518,7 @@ public:
     void prepare_lightmap() {
         // The atlas is sRGB-encoded linear light times its scale (bunnyhop_core::lightmap): decode, then divide.
         BhImage image{};
-        lightmap = bh_lightmap(core, &image) ? resources.upload(image, false, false, true) : resources.white;
+        lightmap = bh_lightmap(core, &image) ? resources.upload(image, false, true) : resources.white;
         if (lightmap == resources.white || !bh_lightmap_info(core, &lightmapInfo)) lightmapInfo = {1, 0};
     }
 };
