@@ -188,7 +188,8 @@ public:
     } sunValues;
 
     std::array<gfx::ConstantBinding, 4> materialConstants;
-    gfx::ConstantBinding sceneConstants, sunConstants;
+    gfx::ConstantBinding sceneConstants;
+    std::array<gfx::ConstantBinding, 3> sunConstants;
     WaterPass::UniformBinding waterConstants;
     std::array<gfx::Pipeline, 32> pipelines;
     unsigned activePipeline = ~0u;
@@ -198,7 +199,8 @@ public:
         for (auto &binding : materialConstants)
             context.destroy(binding);
         context.destroy(sceneConstants);
-        context.destroy(sunConstants);
+        for (auto &binding : sunConstants)
+            context.destroy(binding);
         waterConstants.release(context);
         for (auto &pipeline : pipelines)
             context.destroy(pipeline);
@@ -272,12 +274,15 @@ public:
                 {"sunShadowRadius", offsetof(SunValues, sunShadowRadius), 4, gfx::ConstantType::float1},
                 {"sunShadowBias", offsetof(SunValues, sunShadowBias), 4, gfx::ConstantType::float1},
         };
-        sunConstants = context.create_constants(program, {fields, sizeof(SunValues)});
+        constexpr size_t counts[] = {1, 9, std::size(fields)};
+        for (size_t i = 0; i < sunConstants.size(); ++i)
+            sunConstants[i] = context.create_constants(program, {{fields, counts[i]}, sizeof(SunValues)});
     }
 
     void upload_sun() {
         context.bind_program(program);
-        context.constants(sunConstants, &sunValues);
+        const unsigned variant = sunValues.sunActive ? (sunValues.sunShadowActive ? 2u : 1u) : 0u;
+        context.constants(sunConstants[variant], &sunValues);
     }
 
     void prepare_pipelines() {
