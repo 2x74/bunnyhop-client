@@ -51,6 +51,7 @@ struct RasterState {
     Winding winding = Winding::counter_clockwise;
     bool offset = false;
     float slope_bias = 0, constant_bias = 0;
+    bool clip_distance = false;
 };
 
 struct PipelineState {

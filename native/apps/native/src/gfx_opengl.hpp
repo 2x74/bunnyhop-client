@@ -279,6 +279,7 @@ public:
         enabled(GL_CULL_FACE, state.raster.cull != Cull::none);
         if (state.raster.cull != Cull::none) gl_.CullFace(state.raster.cull == Cull::front ? GL_FRONT : GL_BACK);
         gl_.FrontFace(state.raster.winding == Winding::counter_clockwise ? GL_CCW : GL_CW);
+        enabled(GL_CLIP_DISTANCE0, state.raster.clip_distance);
         enabled(GL_POLYGON_OFFSET_FILL, state.raster.offset);
         if (state.raster.offset) gl_.PolygonOffset(state.raster.slope_bias, state.raster.constant_bias);
         const auto &write = state.color_write;
