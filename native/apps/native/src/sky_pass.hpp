@@ -11,7 +11,8 @@ public:
     RenderGeometry skyMesh;
     std::array<gfx::Pipeline, 2> depthPipelines, depthEndPipelines;
     gfx::Program skyProgram;
-    gfx::ConstantBinding skyConstants, waterConstants;
+    gfx::ConstantBinding skyConstants;
+    WaterPass::UniformBinding waterConstants;
     std::array<gfx::Pipeline, 2> backdropPipelines;
     float frameSkyYaw = 0;
     static constexpr unsigned sky_panorama_unit = 10;
@@ -51,7 +52,7 @@ public:
 
     ~SkyPass() {
         context.destroy(skyConstants);
-        context.destroy(waterConstants);
+        waterConstants.release(context);
         context.destroy(skyProgram);
         for (auto &pipeline : backdropPipelines)
             context.destroy(pipeline);

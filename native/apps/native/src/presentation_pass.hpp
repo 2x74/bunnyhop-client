@@ -8,11 +8,11 @@ class PresentationPass {
 public:
     PresentationPass(gfx::Context &ctx, BhContext *&c, RenderProfile &p) : context(ctx), core(c), profile(p) {}
 
-    ~PresentationPass() { context.destroy(waterConstants); }
+    ~PresentationPass() { waterConstants.release(context); }
 
     NativeMapEffects mapEffects;
     std::unique_ptr<NativePresentation> presentation;
-    gfx::ConstantBinding waterConstants;
+    WaterPass::UniformBinding waterConstants;
     static constexpr double paint_second_ns = 1'000'000'000;
     bool toolsVisible = true, paintHeld = false, paintVisible = true;
     std::string paintHeldCode;

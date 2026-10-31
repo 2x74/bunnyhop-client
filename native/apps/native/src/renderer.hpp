@@ -501,7 +501,7 @@ public:
         loading = {};
         presentationPass.ghostRoutes.reset();
         graphicsTarget.reset();
-        graphicsContext.destroy(presentationPass.waterConstants);
+        presentationPass.waterConstants.release(graphicsContext);
         presentationPass.presentation.reset();
         hdr.reset();
         viewmodel.reset();

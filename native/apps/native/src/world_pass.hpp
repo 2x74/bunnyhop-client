@@ -188,7 +188,8 @@ public:
     } sunValues;
 
     std::array<gfx::ConstantBinding, 4> materialConstants;
-    gfx::ConstantBinding sceneConstants, sunConstants, waterConstants;
+    gfx::ConstantBinding sceneConstants, sunConstants;
+    WaterPass::UniformBinding waterConstants;
     std::array<gfx::Pipeline, 32> pipelines;
     unsigned activePipeline = ~0u;
     std::array<gfx::Pipeline, 2> endPipelines;
@@ -198,7 +199,7 @@ public:
             context.destroy(binding);
         context.destroy(sceneConstants);
         context.destroy(sunConstants);
-        context.destroy(waterConstants);
+        waterConstants.release(context);
         for (auto &pipeline : pipelines)
             context.destroy(pipeline);
         for (auto &pipeline : endPipelines)

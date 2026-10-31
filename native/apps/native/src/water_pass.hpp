@@ -72,7 +72,16 @@ public:
         std::array<float, 96> rect{};
     } values;
 
-    gfx::ConstantBinding water_constants(gfx::Program program) {
+    struct UniformBinding {
+        std::array<gfx::ConstantBinding, 25> counts;
+
+        void release(gfx::Context &context) {
+            for (auto &binding : counts)
+                context.destroy(binding);
+        }
+    };
+
+    UniformBinding water_constants(gfx::Program program) {
         static constexpr gfx::ConstantField fields[] = {
                 {"cameraPosition", offsetof(WaterValues, camera), 12, gfx::ConstantType::float3, 1, 0},
                 {"viewportSize", offsetof(WaterValues, viewport), 8, gfx::ConstantType::float2, 1, 0},
@@ -85,7 +94,18 @@ public:
                 {"waterRect", offsetof(WaterValues, rect), 384, gfx::ConstantType::float4, 24, 16},
         };
         context.texture_unit(program, "waterPlanes", 6);
-        return context.create_constants(program, {fields, sizeof(WaterValues)});
+        UniformBinding result;
+        std::array<gfx::ConstantField, std::size(fields)> selected;
+        std::copy(std::begin(fields), std::end(fields), selected.begin());
+        for (uint32_t count = 0; count < result.counts.size(); ++count) {
+            for (size_t i = 3; i < selected.size(); ++i) {
+                selected[i].count = count;
+                selected[i].size = count * selected[i].array_stride;
+            }
+            const size_t size = count ? selected.size() : 3;
+            result.counts[count] = context.create_constants(program, {{selected.data(), size}, sizeof(WaterValues)});
+        }
+        return result;
     }
 
     void prepare_water_values(const float eye[3], const native::Matrix &vp, int width, int height) {
@@ -132,11 +152,10 @@ public:
         values.count = int32_t(order.size());
     }
 
-    void water_uniforms(
-            const gfx::ConstantBinding &binding, const float eye[3], const native::Matrix &vp, int width, int height
-    ) {
+    void
+    water_uniforms(const UniformBinding &binding, const float eye[3], const native::Matrix &vp, int width, int height) {
         prepare_water_values(eye, vp, width, height);
-        context.constants(binding, &values);
+        context.constants(binding.counts[size_t(values.count)], &values);
         context.bind_texture(6, planesTexture, planesSampler);
     }
 
