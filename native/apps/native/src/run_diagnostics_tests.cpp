@@ -33,7 +33,14 @@ Json sanitize(const Json &body) {
             result["client"]["version"] = client.at("version");
     }
     const double fps = body.at("fps");
-    if (std::isfinite(fps)) result["fps"] = std::clamp(std::round(fps * 100) / 100, 0., 1000.);
+    if (std::isfinite(fps)) result["fps"] = std::clamp(std::round(fps * 100) / 100, 0., 10000.);
+    if (body.contains("fp")) {
+        const std::pair<const char *, size_t> strings[] = {{"renderer", 128}, {"platform", 32}};
+        for (const auto &[key, limit] : strings) {
+            if (!body.at("fp").contains(key)) continue;
+            result["fp"][key] = body.at("fp").at(key).get<std::string>().substr(0, limit);
+        }
+    }
     const std::set<std::string> numbers = {"pollHz",     "reportHz",    "eventHz",    "fps",         "events",
                                            "reports",    "maxDelta",    "spikes",     "maxSpike",    "discards",
                                            "mismatches", "frameP50",    "frameP99",   "frameMax",    "over25",
@@ -210,6 +217,26 @@ void client_version() {
     assert(local.serialize(Json::object()).at("client") == Json({{"kind", "native"}}));
 }
 
+// Admin analytics reads the GPU and OS here, and a machine past 1000 FPS reports its real average.
+void device_and_fast_frames() {
+    native::TimedInput queue;
+    native::RunDiagnostics diagnostics;
+    diagnostics.set_device(std::string(200, 'x'), "Windows");
+    diagnostics.start(second_ns, queue, true);
+    constexpr uint64_t frames = 2500;
+    for (uint64_t frame = 1; frame < frames; ++frame)
+        diagnostics.frame(second_ns + frame * second_ns / frames, queue);
+    diagnostics.stop(2 * second_ns, queue);
+    const auto body = diagnostics.serialize(Json::object());
+    assert(body.at("fps") == 2500);
+    assert(body.at("fp").at("renderer") == std::string(128, 'x'));
+    assert(body.at("fp").at("platform") == "Windows");
+    server_accepts(body);
+    diagnostics.set_device("", "");
+    diagnostics.start(3 * second_ns, queue, true);
+    assert(!diagnostics.serialize(Json::object()).contains("fp"));
+}
+
 void polling() {
     constexpr unsigned rates[] = {125, 250, 500, 1000, 2000, 4000, 8000};
     for (unsigned rate : rates) {
@@ -292,5 +319,6 @@ int main(int argc, char **argv) {
     history();
     polling();
     client_version();
+    device_and_fast_frames();
     bounds_and_reset();
 }

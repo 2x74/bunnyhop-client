@@ -463,6 +463,7 @@ int run(const native::Options &opt) {
     const auto identity = native::load_release_identity(manifest_path, menu_path, assets);
     native::updates::Host updater(cache, default_root, identity, native::executable_path());
     recorder.diagnostics.set_client_version(identity.value("version", std::string("local")));
+    recorder.diagnostics.set_device(gpu_renderer, SDL_GetPlatform());
     // Jump stats (!ssj). Display only — it reads the same pre-state, command and
     // events the simulation already produced and never feeds anything back.
     native::MovementFeedback feedback;
@@ -813,6 +814,8 @@ int run(const native::Options &opt) {
                     const auto view = practice.restore(core.get());
                     if (practice.segmented) {
                         recorder.resume_segment(core.get());
+                        // A Segmented run is measured from its last load: its finish still reports an FPS.
+                        recorder.diagnostics.start(SDL_GetTicksNS(), input_timeline.queue(), input_timeline.timed());
                         run_event(heartbeat.invalidate());
                         practice.segment_status(bh_segment_loads(core.get()));
                     } else {

@@ -19,7 +19,9 @@ class RunDiagnostics {
     static constexpr std::array<unsigned, 7> poll_rates = {125, 250, 500, 1000, 2000, 4000, 8000};
     static constexpr double poll_tolerance = .15;
     static constexpr double input_number_limit = 1'000'000;
-    static constexpr double fps_limit = 1000;
+    // apps/api src/diagnostics.ts PLAY_BOUNDS.fpsLimit, the highest limit the server records.
+    static constexpr double fps_limit = 10'000;
+    static constexpr size_t renderer_limit = 128;
 
     struct Samples {
         std::array<float, sample_capacity> values{};
@@ -50,7 +52,7 @@ class RunDiagnostics {
     unsigned poll_samples_ = 0;
     double max_delta_ = 0, holdback_ms_ = 0;
     bool timed_ = false, timed_off_ = false;
-    std::string client_version_;
+    std::string client_version_, renderer_, platform_;
     Samples frame_ms_, age_ms_;
 
     static double number(double value) {
@@ -90,12 +92,22 @@ public:
         client_version_ = version == "local" ? std::string() : std::move(version);
     }
 
+    // The GPU the game draws with and the OS, in the website's fingerprint fields (apps/web/src/device.ts).
+    void set_device(std::string renderer, std::string platform) {
+        renderer_ = std::move(renderer);
+        platform_ = std::move(platform);
+    }
+
     void reset() { running_ = false; }
 
     void start(uint64_t now, const TimedInput &queue, bool timed) {
         auto version = std::move(client_version_);
+        auto renderer = std::move(renderer_);
+        auto platform = std::move(platform_);
         *this = RunDiagnostics{};
         client_version_ = std::move(version);
+        renderer_ = std::move(renderer);
+        platform_ = std::move(platform);
         running_ = true;
         started_ = last_frame_ = poll_at_ = now;
         reports_start_ = queue.reports;
@@ -147,6 +159,13 @@ public:
         return client;
     }
 
+    nlohmann::json fingerprint_json() const {
+        nlohmann::json fingerprint = nlohmann::json::object();
+        if (!renderer_.empty()) fingerprint["renderer"] = renderer_.substr(0, renderer_limit);
+        if (!platform_.empty()) fingerprint["platform"] = platform_;
+        return fingerprint;
+    }
+
     nlohmann::json serialize(const nlohmann::json &play) const {
         const double seconds = stopped_ > started_ ? double(stopped_ - started_) / second_ns : 0;
         const double fps = seconds > 0 ? double(frames_) / seconds : 0;
@@ -181,6 +200,7 @@ public:
                 {"input", std::move(input)},
                 {"play", play}
         };
+        if (auto fingerprint = fingerprint_json(); !fingerprint.empty()) result["fp"] = std::move(fingerprint);
         if (const auto hz = poll_rate()) {
             result["play"]["pollHz"] = hz;
             result["input"]["pollHz"] = hz;
