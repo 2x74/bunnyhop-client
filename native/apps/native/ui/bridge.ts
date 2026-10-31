@@ -60,11 +60,13 @@ export interface VideoExportState {
 }
 export type MenuMessage =
   | { type: "mapLoad"; action: "cancel" | "retry" }
+  /** A line for the game's log file (menu-log.ts). */
+  | { type: "menuLog"; text: string }
   | { type: "update"; action: "check" | "download" | "cancel" | "reveal" | "restart" | "status" }
   | { type: "update"; action: "automatic"; enabled: boolean }
   | {
       type: "dataFolder";
-      action: "status" | "pick" | "useDefault" | "cancelChoice" | "cancelPending" | "forget" | "reveal";
+      action: "status" | "pick" | "useDefault" | "cancelChoice" | "cancelPending" | "forget" | "reveal" | "revealLogs";
     }
   | { type: "dataFolder"; action: "move"; when: "now" | "later" }
   | { type: "videoExport"; action: "start"; options: VideoExportOptions; title?: string }

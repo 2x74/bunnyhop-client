@@ -44,7 +44,10 @@ Json read_group(const std::filesystem::path &bsp, const std::filesystem::path &r
     }
     if (!hashed || manifest.at("mapSha256") != actual.data())
         throw std::runtime_error("map sound allow list does not match BSP");
-    const auto group = manifest.at("optional").at("mapSounds");
+    // Most maps have no sounds of their own, which is nothing to report.
+    const auto optional = manifest.value("optional", Json::object());
+    if (!optional.contains("mapSounds")) return nullptr;
+    const auto group = optional.at("mapSounds");
     const auto &files = group.at("files");
     if (!files.is_object() || files.size() > allowed_file_limit) throw std::runtime_error("invalid sound allow list");
     for (const auto &[name, info] : files.items()) {
@@ -167,7 +170,7 @@ std::shared_ptr<MapAudioScene> load_map_audio(
 ) {
     try {
         const auto group = read_group(bsp, content_root);
-        if (cancel) return {};
+        if (cancel || group.is_null()) return {};
         const auto path = data_location::utf8(bsp);
         const std::unique_ptr<BhSoundPak, decltype(&bh_sound_pak_close)> pak(
                 bh_sound_pak_open(path.c_str()), bh_sound_pak_close

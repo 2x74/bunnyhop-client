@@ -43,7 +43,7 @@ export function readDataFolderStatus(value: unknown): DataFolderStatus | null {
   };
 }
 
-type DataAction = "pick" | "useDefault" | "reveal" | "forget" | "cancelPending" | "cancelChoice";
+type DataAction = "pick" | "useDefault" | "reveal" | "revealLogs" | "forget" | "cancelPending" | "cancelChoice";
 const act = (action: DataAction) => () => send({ type: "dataFolder", action });
 const move = (when: "now" | "later") => () => send({ type: "dataFolder", action: "move", when });
 
@@ -78,7 +78,11 @@ function dataFolderGroup(ui: Ui): HTMLElement {
   });
   const pendingRow = ui.actions("Waiting to move", [cancelPending], { keywords: "data folder move pending" });
   const missingRow = ui.actions("Folder not found", [forget], { keywords: "data folder missing drive" });
-  const group = ui.group("Game data folder", folderRow, defaultRow, moveRow, pendingRow, missingRow);
+  const logRow = ui.actions("Log file", [ui.button("Open log folder", act("revealLogs"))], {
+    readout: h("small.set-readout", null, "If we ask for your log, send us bunnyhop-native.log from this folder."),
+    keywords: "log logs file crash bug report problem support troubleshooting send",
+  });
+  const group = ui.group("Game data folder", folderRow, defaultRow, moveRow, pendingRow, missingRow, logRow);
   moveRow.hidden = pendingRow.hidden = missingRow.hidden = defaultRow.hidden = true;
   const paint = (s: DataFolderStatus): void => {
     path.textContent = s.path;
