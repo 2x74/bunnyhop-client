@@ -14,7 +14,7 @@ def images(directory):
             continue
         if path.suffix.lower() in (".ppm", ".png", ".webp"):
             name = path.relative_to(directory).with_suffix(".png")
-            if name not in result or path.suffix == ".png":
+            if name not in result or path.suffix == ".ppm":
                 result[name] = path
     return result
 
