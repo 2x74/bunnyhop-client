@@ -284,7 +284,7 @@ public:
         for (unsigned variant = 0; variant < pipelines.size(); ++variant) {
             gfx::PipelineState state;
             state.raster.offset = variant & 1;
-            state.raster.clip_distance = true;
+            state.raster.clip_distance = (variant & 16) != 0;
             state.raster.slope_bias = -1;
             state.raster.constant_bias = -4;
             state.raster.cull = variant & 2 ? gfx::Cull::none : gfx::Cull::back;
@@ -553,7 +553,12 @@ public:
             profile.profile_elapsed(profile.frameProfile.submit, phaseStart);
             if (profile.profiling) profile.frameProfile.submit -= profile.frameProfile.sort - sortBefore;
         }
-        context.pipeline(endPipelines[unsigned(reflection)]);
+        if (reflection || activePipeline == ~0u || (activePipeline & 1))
+            context.pipeline(endPipelines[unsigned(reflection)]);
+        else {
+            context.depth_write(true);
+            context.blend(false);
+        }
         // Legacy skinned meshes use texture parameters for their single-level bone texture.
         context.unbind_sampler(0);
     }

@@ -1123,7 +1123,9 @@ public:
         spectatedFlags = 0;
         queuedWeaponFlags = queuedAttackMode = 0;
         queuedAttack = false;
-        graphicsContext.pipeline(framePipeline);
+        graphicsContext.depth_write(true);
+        graphicsContext.depth_test(true);
+        graphicsContext.blend(false);
         if (graphics.target_needed())
             graphicsTarget->finish(frame.output, frame.outputWidth, frame.outputHeight, frame.view, graphics);
     }

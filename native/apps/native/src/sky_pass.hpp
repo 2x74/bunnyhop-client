@@ -9,7 +9,7 @@ public:
     SkyPass(gfx::Context &ctx, BhContext *&c, RenderResources &r) : context(ctx), core(c), resources(r) {}
 
     RenderGeometry skyMesh;
-    std::array<gfx::Pipeline, 2> depthPipelines, depthEndPipelines;
+    std::array<gfx::Pipeline, 2> depthPipelines;
     gfx::Program skyProgram;
     gfx::ConstantBinding skyConstants;
     WaterPass::UniformBinding waterConstants;
@@ -59,8 +59,6 @@ public:
         context.destroy(skyPanorama);
         context.destroy(panoramaSampler);
         for (auto &pipeline : depthPipelines)
-            context.destroy(pipeline);
-        for (auto &pipeline : depthEndPipelines)
             context.destroy(pipeline);
     }
 
@@ -169,7 +167,8 @@ public:
         sky_panorama_uniforms(view);
         context.constants(skyConstants, &values);
         if (!view.graphics.potato) context.draw(gfx::Primitive::triangles, 0, 3);
-        context.pipeline(depthEndPipelines[unsigned(mirrored)]);
+        context.depth_test(true);
+        context.depth_write(true);
     }
 
     // The 3D skybox (sky_camera) around its origin. mirror_height: the water reflection's plane in world units.
@@ -218,7 +217,7 @@ public:
                     int(item.index_count)
             );
         }
-        context.pipeline(depthEndPipelines[unsigned(mirrored)]);
+        // World submission binds color-write and depth-bias state before its next draw.
     }
 
     void prepare_depth_pipelines() {
@@ -231,10 +230,6 @@ public:
             state.raster.clip_distance = true;
             state.color_write = {false, false, false, false};
             depthPipelines[mirror] = context.create_pipeline(state);
-            state.raster.offset = false;
-            state.raster.clip_distance = false;
-            state.color_write = {true, true, true, true};
-            depthEndPipelines[mirror] = context.create_pipeline(state);
         }
     }
 
