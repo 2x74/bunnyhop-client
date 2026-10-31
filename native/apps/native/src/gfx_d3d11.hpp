@@ -44,6 +44,8 @@ public:
     Sampler create_sampler(const SamplerDesc &desc);
     void destroy(Sampler &sampler);
     void bind_texture(unsigned slot, Texture texture, Sampler sampler = {});
+    void bind_image(unsigned slot, Texture texture);
+    void bind_sampler(unsigned slot, Sampler sampler);
     void unbind_sampler(unsigned slot);
     RenderTarget create_target(const TargetDesc &desc);
     void destroy(RenderTarget &target);

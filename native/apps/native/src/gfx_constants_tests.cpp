@@ -1,4 +1,4 @@
-#include "gfx_opengl.hpp"
+#include "gfx.hpp"
 #include <cassert>
 #include <iostream>
 
@@ -40,6 +40,12 @@ int main() {
     gl.Uniform3fv = vectors3;
     gl.Uniform2fv = vectors2;
     gl.Uniform1iv = integers;
+    Context default_context(gl);
+    assert(default_context.backend() == Backend::opengl);
+#if defined(_WIN32) || defined(BUNNYHOP_GFX_DISPATCH)
+    Context fallback(gl, nullptr, Backend::d3d11);
+    assert(fallback.backend() == Backend::opengl);
+#endif
     OpenGlContext context(gl);
 
     struct Block {

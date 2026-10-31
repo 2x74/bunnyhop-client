@@ -483,13 +483,13 @@ struct D3D11Context::Impl {
         auto result = std::make_unique<PipelineData>();
         for (unsigned enabled = 0; enabled < 2; ++enabled) {
             D3D11_BLEND_DESC desc{};
-            auto &target = desc.RenderTarget[0];
-            target.BlendEnable = enabled != 0;
-            target.SrcBlend = target.SrcBlendAlpha = factor(description.blend.source);
-            target.DestBlend = target.DestBlendAlpha = factor(description.blend.destination);
-            target.BlendOp = target.BlendOpAlpha = D3D11_BLEND_OP_ADD;
+            auto &blend_target = desc.RenderTarget[0];
+            blend_target.BlendEnable = enabled != 0;
+            blend_target.SrcBlend = blend_target.SrcBlendAlpha = factor(description.blend.source);
+            blend_target.DestBlend = blend_target.DestBlendAlpha = factor(description.blend.destination);
+            blend_target.BlendOp = blend_target.BlendOpAlpha = D3D11_BLEND_OP_ADD;
             for (unsigned i = 0; i < 4; ++i)
-                if (description.color_write[i]) target.RenderTargetWriteMask |= BYTE(1 << i);
+                if (description.color_write[i]) blend_target.RenderTargetWriteMask |= BYTE(1 << i);
             checked(device->CreateBlendState(&desc, &result->blend[enabled]), "Cannot create D3D11 blend description");
         }
         for (unsigned flags = 0; flags < 4; ++flags) {
@@ -505,7 +505,7 @@ struct D3D11Context::Impl {
         desc.CullMode = description.raster.cull == Cull::none    ? D3D11_CULL_NONE
                         : description.raster.cull == Cull::front ? D3D11_CULL_FRONT
                                                                  : D3D11_CULL_BACK;
-        // The translated vertex Y flip makes a GL CCW front face clockwise in D3D target coordinates.
+        // The translated vertex Y flip makes a GL CCW front face clockwise in D3D blend_target coordinates.
         desc.FrontCounterClockwise = description.raster.winding == Winding::clockwise;
         desc.DepthClipEnable = TRUE;
         desc.MultisampleEnable = TRUE;
@@ -924,6 +924,18 @@ void D3D11Context::destroy(Sampler &sampler) {
 void D3D11Context::bind_texture(unsigned slot, Texture texture, Sampler sampler) {
     if (slot >= impl_->units.size()) throw std::runtime_error("D3D11 logical texture unit exceeds limit");
     impl_->units[slot] = {native<TextureData>(texture.id), native<SamplerData>(sampler.id)};
+    impl_->textures(slot);
+}
+
+void D3D11Context::bind_image(unsigned slot, Texture texture) {
+    if (slot >= impl_->units.size()) throw std::runtime_error("D3D11 logical texture unit exceeds limit");
+    impl_->units[slot].texture = native<TextureData>(texture.id);
+    impl_->textures(slot);
+}
+
+void D3D11Context::bind_sampler(unsigned slot, Sampler sampler) {
+    if (slot >= impl_->units.size()) throw std::runtime_error("D3D11 logical texture unit exceeds limit");
+    impl_->units[slot].sampler = native<SamplerData>(sampler.id);
     impl_->textures(slot);
 }
 
@@ -1569,6 +1581,14 @@ void D3D11Context::destroy(Sampler &) {
 }
 
 void D3D11Context::bind_texture(unsigned, Texture, Sampler) {
+    unavailable();
+}
+
+void D3D11Context::bind_image(unsigned, Texture) {
+    unavailable();
+}
+
+void D3D11Context::bind_sampler(unsigned, Sampler) {
     unavailable();
 }
 
