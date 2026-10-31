@@ -1,6 +1,7 @@
 #pragma once
 
 class WaterPass {
+    // Temporary bridge until world and sky programs use reflected water constants.
     Gl &gl;
     gfx::Context &context;
     RenderUniforms &uniforms;
@@ -22,7 +23,8 @@ public:
     native_render::WaterCapturePlan waterPlan;
     std::unique_ptr<WaterReflectionTarget> waterReflection;
     bool reflectionDrawn = false, sceneCaptured = false;
-    GLuint planesTexture = 0;
+    gfx::Texture planesTexture;
+    gfx::Sampler planesSampler;
     std::vector<Volume> volumes;
     std::vector<size_t> waterOrder;
     std::vector<std::array<float, 4>> waterRects;
@@ -52,13 +54,37 @@ public:
         waterPlanner.load(builder.cells(), materials.size());
     }
 
-    void
-    water_uniforms(GLuint target, const float eye[3], const native::Matrix &vp, int viewportWidth, int viewportHeight) {
-        gl.Uniform3fv(uniforms.loc(target, "cameraPosition"), 1, eye);
+    struct WaterValues {
+        std::array<float, 3> camera{};
+        std::array<float, 2> viewport{};
+        int32_t count = 0;
+        std::array<float, 72> minimum{}, maximum{}, color{};
+        std::array<float, 48> range{}, span{};
+        std::array<float, 96> rect{};
+    } values;
+
+    gfx::ConstantBinding water_constants(gfx::Program program) {
+        static constexpr gfx::ConstantField fields[] = {
+                {"cameraPosition", offsetof(WaterValues, camera), 12, gfx::ConstantType::float3, 1, 0},
+                {"viewportSize", offsetof(WaterValues, viewport), 8, gfx::ConstantType::float2, 1, 0},
+                {"waterCount", offsetof(WaterValues, count), 4, gfx::ConstantType::int1, 1, 0},
+                {"waterMin", offsetof(WaterValues, minimum), 288, gfx::ConstantType::float3, 24, 12},
+                {"waterMax", offsetof(WaterValues, maximum), 288, gfx::ConstantType::float3, 24, 12},
+                {"waterColor", offsetof(WaterValues, color), 288, gfx::ConstantType::float3, 24, 12},
+                {"waterRange", offsetof(WaterValues, range), 192, gfx::ConstantType::float2, 24, 8},
+                {"waterSpan", offsetof(WaterValues, span), 192, gfx::ConstantType::float2, 24, 8},
+                {"waterRect", offsetof(WaterValues, rect), 384, gfx::ConstantType::float4, 24, 16},
+        };
+        context.texture_unit(program, "waterPlanes", 6);
+        return context.create_constants(program, {fields, sizeof(WaterValues)});
+    }
+
+    void prepare_water_values(const float eye[3], const native::Matrix &vp, int width, int height) {
+        std::copy_n(eye, 3, values.camera.begin());
+        values.viewport = {float(width), float(height)};
         auto &order = waterOrder;
         auto &rects = waterRects;
         order.clear();
-        rects.resize(volumes.size());
         for (size_t i = 0; i < volumes.size(); i++)
             if (native_render::screen_rect({volumes[i].lo, volumes[i].hi}, vp, rects[i])) order.push_back(i);
         auto distance = [&](size_t i) {
@@ -69,9 +95,17 @@ public:
             }
             return d;
         };
-        std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) { return distance(a) < distance(b); });
+        std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+            const float left = distance(a), right = distance(b);
+            return left == right ? a < b : left < right;
+        });
         if (order.size() > 24) order.resize(24);
-        float lo[72]{}, hi[72]{}, color[72]{}, range[48]{}, span[48]{}, rect[96]{};
+        auto &lo = values.minimum;
+        auto &hi = values.maximum;
+        auto &color = values.color;
+        auto &range = values.range;
+        auto &span = values.span;
+        auto &rect = values.rect;
         for (size_t n = 0; n < order.size(); n++) {
             const auto &v = volumes[order[n]];
             for (int k = 0; k < 4; k++)
@@ -86,18 +120,32 @@ public:
                 span[n * 2 + k] = v.span[k];
             }
         }
-        gl.Uniform2f(uniforms.loc(target, "viewportSize"), float(viewportWidth), float(viewportHeight));
-        gl.Uniform4fv(uniforms.loc(target, "waterRect"), GLsizei(order.size()), rect);
-        gl.Uniform1i(uniforms.loc(target, "waterCount"), GLint(order.size()));
-        if (!order.empty()) {
-            gl.Uniform3fv(uniforms.loc(target, "waterMin"), order.size(), lo);
-            gl.Uniform3fv(uniforms.loc(target, "waterMax"), order.size(), hi);
-            gl.Uniform3fv(uniforms.loc(target, "waterColor"), order.size(), color);
-            gl.Uniform2fv(uniforms.loc(target, "waterRange"), order.size(), range);
-            gl.Uniform2fv(uniforms.loc(target, "waterSpan"), order.size(), span);
+        values.count = int32_t(order.size());
+    }
+
+    void water_uniforms(
+            const gfx::ConstantBinding &binding, const float eye[3], const native::Matrix &vp, int width, int height
+    ) {
+        prepare_water_values(eye, vp, width, height);
+        context.constants(binding, &values);
+        context.bind_texture(6, planesTexture, planesSampler);
+    }
+
+    // Temporary bridge for the world and sky programs while their constant blocks are converted.
+    void water_uniforms(uint32_t target, const float eye[3], const native::Matrix &vp, int width, int height) {
+        prepare_water_values(eye, vp, width, height);
+        gl.Uniform3fv(uniforms.loc(target, "cameraPosition"), 1, values.camera.data());
+        gl.Uniform2fv(uniforms.loc(target, "viewportSize"), 1, values.viewport.data());
+        gl.Uniform1i(uniforms.loc(target, "waterCount"), values.count);
+        gl.Uniform4fv(uniforms.loc(target, "waterRect"), values.count, values.rect.data());
+        if (values.count) {
+            gl.Uniform3fv(uniforms.loc(target, "waterMin"), values.count, values.minimum.data());
+            gl.Uniform3fv(uniforms.loc(target, "waterMax"), values.count, values.maximum.data());
+            gl.Uniform3fv(uniforms.loc(target, "waterColor"), values.count, values.color.data());
+            gl.Uniform2fv(uniforms.loc(target, "waterRange"), values.count, values.range.data());
+            gl.Uniform2fv(uniforms.loc(target, "waterSpan"), values.count, values.span.data());
         }
-        gl.ActiveTexture(GL_TEXTURE6);
-        gl.BindTexture(GL_TEXTURE_2D, planesTexture);
+        context.bind_texture(6, planesTexture, planesSampler);
         gl.Uniform1i(uniforms.loc(target, "waterPlanes"), 6);
     }
 
@@ -168,14 +216,14 @@ public:
 
     void upload_water_planes(std::vector<float> planes) {
         if (planes.empty()) planes.resize(4);
-        GLint limit = 0;
-        gl.GetIntegerv(GL_MAX_TEXTURE_SIZE, &limit);
-        if (planes.size() / 4 > size_t(limit)) throw std::runtime_error("Native water plane texture exceeds GPU size");
-        gl.GenTextures(1, &planesTexture);
-        gl.BindTexture(GL_TEXTURE_2D, planesTexture);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, planes.size() / 4, 1, 0, GL_RGBA, GL_FLOAT, planes.data());
+        if (planes.size() / 4 > size_t(context.max_texture_size()))
+            throw std::runtime_error("Native water plane texture exceeds GPU size");
+        const void *data[] = {planes.data()};
+        planesTexture = context.create_texture({int(planes.size() / 4), 1, gfx::Format::rgba32f}, data);
+        gfx::SamplerDesc sampling;
+        sampling.minification = gfx::Filter::nearest;
+        sampling.magnification = gfx::Filter::nearest;
+        planesSampler = context.create_sampler(sampling);
     }
 
     ResourceLoading prepare_water(
@@ -219,6 +267,8 @@ public:
             }
         }
         upload_water_planes(std::move(planes));
+        waterOrder.reserve(volumes.size());
+        waterRects.resize(volumes.size());
     }
 
     void plan_water(const float eye[3], const native::Matrix &vp, bool capturesEnabled, bool reflectionsEnabled) {

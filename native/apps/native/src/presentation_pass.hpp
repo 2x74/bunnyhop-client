@@ -1,20 +1,18 @@
 #pragma once
 
 class PresentationPass {
-    Gl &gl;
     gfx::Context &context;
     BhContext *&core;
     RenderProfile &profile;
 
 public:
-    PresentationPass(Gl &g, gfx::Context &ctx, BhContext *&c, RenderProfile &p)
-        : gl(g)
-        , context(ctx)
-        , core(c)
-        , profile(p) {}
+    PresentationPass(gfx::Context &ctx, BhContext *&c, RenderProfile &p) : context(ctx), core(c), profile(p) {}
+
+    ~PresentationPass() { context.destroy(waterConstants); }
 
     NativeMapEffects mapEffects;
     std::unique_ptr<NativePresentation> presentation;
+    gfx::ConstantBinding waterConstants;
     static constexpr double paint_second_ns = 1'000'000'000;
     bool toolsVisible = true, paintHeld = false, paintVisible = true;
     std::string paintHeldCode;
@@ -221,8 +219,8 @@ public:
         draw_map_effects(eye, seconds, right, up, view.graphics.potato);
         profile.profile_elapsed(profile.frameProfile.presentationBuild, presentationStart);
         presentationStart = profile.profile_now();
-        gl.UseProgram(presentation->shader());
-        water.water_uniforms(presentation->shader(), eye, vp, view.viewportWidth, view.viewportHeight);
+        context.bind_program(presentation->shader_program());
+        water.water_uniforms(waterConstants, eye, vp, view.viewportWidth, view.viewportHeight);
         profile.profile_elapsed(profile.frameProfile.presentationWaterUniforms, presentationStart);
         presentationStart = profile.profile_now();
         presentation->draw(vp, eye);

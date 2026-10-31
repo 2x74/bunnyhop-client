@@ -82,7 +82,7 @@ class Renderer {
     WorldPass world{gl, core, resources, uniforms, profile};
     SkyPass sky{gl, core, resources, uniforms};
     ShadowPass shadows{gl, graphicsContext, resources, uniforms, world};
-    PresentationPass presentationPass{gl, graphicsContext, core, profile};
+    PresentationPass presentationPass{graphicsContext, core, profile};
     bool flashlightEnabled = false;
     float fieldOfView = 90;
     std::vector<native_render::Actor> roomActors;
@@ -464,6 +464,7 @@ public:
         gl.Uniform3fv(uniforms.loc(world.program, "sunDirection"), 1, world.sunDirection.data());
         shadows.prepare_resources();
         presentationPass.presentation = std::make_unique<NativePresentation>(graphicsContext);
+        presentationPass.waterConstants = water.water_constants(presentationPass.presentation->shader_program());
         presentationPass.mapEffects.load(core);
 
         anisotropySupported = SDL_GL_ExtensionSupported("GL_EXT_texture_filter_anisotropic");
@@ -492,7 +493,8 @@ public:
         resources.destroy(sky.skyMesh);
         if (!resources.ownedTextures.empty())
             gl.DeleteTextures(resources.ownedTextures.size(), resources.ownedTextures.data());
-        if (water.planesTexture) gl.DeleteTextures(1, &water.planesTexture);
+        graphicsContext.destroy(water.planesTexture);
+        graphicsContext.destroy(water.planesSampler);
         if (resources.emptyVao) gl.DeleteVertexArrays(1, &resources.emptyVao);
         if (world.program) gl.DeleteProgram(world.program);
         if (sky.skyProgram) gl.DeleteProgram(sky.skyProgram);
