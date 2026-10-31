@@ -164,7 +164,7 @@ public:
     explicit Benchmark(const Spec &spec)
         : spec_(spec)
         , surface_(spec)
-        , device_(surface_.window, spec.backend)
+        , device_(surface_.window, spec.backend, spec.json.value("warp", false))
         , graphics_(device_.context())
         , presenter_(device_.presenter())
         , gpu_(presenter_.device(), presenter_.immediate_context())

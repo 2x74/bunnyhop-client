@@ -10,7 +10,7 @@ from PIL import Image
 def images(directory):
     result = {}
     for path in sorted(directory.rglob("*")):
-        if "comparison" in path.relative_to(directory).parts:
+        if {"comparison", "canonical"}.intersection(path.relative_to(directory).parts):
             continue
         if path.suffix.lower() in (".ppm", ".png", ".webp"):
             name = path.relative_to(directory).with_suffix(".png")
@@ -36,6 +36,22 @@ def ssim(before, after):
     return float((luminance * structure).mean())
 
 
+def verify_metric():
+    random = np.random.default_rng(327)
+    before = random.uniform(8, 246, (129, 257, 3))
+    if ssim(before, before + 1) < 0.98:
+        raise ValueError("The metric rejects a one-code-value rounding difference")
+    controls = {
+        "black pass": np.zeros_like(before),
+        "vertical flip": before[::-1],
+        "wrong brightness": before * 0.5,
+    }
+    for name, after in controls.items():
+        if ssim(before, after) >= 0.98:
+            raise ValueError(f"The metric accepts the {name} control")
+    print("Metric controls: rounding accepted; black, flipped and darkened frames rejected")
+
+
 def compare(reference, candidate):
     expected, actual = images(reference), images(candidate)
     if not expected or expected.keys() != actual.keys():
@@ -57,7 +73,9 @@ def compare(reference, candidate):
         destination = evidence / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         Image.fromarray(np.clip(difference * 4, 0, 255).astype("uint8")).save(destination)
-        right.save(actual[name].with_suffix(".png"))
+        canonical = candidate / "canonical" / name
+        canonical.parent.mkdir(parents=True, exist_ok=True)
+        right.save(canonical)
         report.append(
             dict(
                 image=str(name),
@@ -87,4 +105,5 @@ if __name__ == "__main__":
     parser.add_argument("reference", type=Path)
     parser.add_argument("candidate", type=Path)
     args = parser.parse_args()
+    verify_metric()
     compare(args.reference, args.candidate)
