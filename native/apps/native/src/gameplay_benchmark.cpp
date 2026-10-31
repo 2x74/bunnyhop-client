@@ -116,7 +116,10 @@ struct Surface {
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
         SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
         window = SDL_CreateWindow(
-                "Offline gameplay benchmark", spec.width, spec.height, SDL_WINDOW_OPENGL | (spec.visible ? SDL_WindowFlags(0) : SDL_WINDOW_HIDDEN)
+                "Offline gameplay benchmark",
+                spec.width,
+                spec.height,
+                SDL_WINDOW_OPENGL | (spec.visible ? SDL_WindowFlags(0) : SDL_WINDOW_HIDDEN)
         );
         if (!window) throw std::runtime_error(SDL_GetError());
         if (spec.visible && !SDL_SetWindowFullscreen(window, true)) throw std::runtime_error(SDL_GetError());
@@ -189,6 +192,9 @@ public:
         diagnostics_.start(started, timeline_.queue(), true);
         uint64_t rasterized = 0;
         play_priority_.update(spec_.play_priority);
+#ifdef _WIN32
+        benchmark_latency::prepare(size_t(spec_.warmup + spec_.frames));
+#endif
         if (!presenter_.configure(surface_.window, native::low_latency_mode(spec_.low_latency), spec_.fps, false))
             throw std::runtime_error("Low latency mode: " + presenter_.error());
         if (spec_.json.contains("readyFile")) {
@@ -548,19 +554,33 @@ private:
         };
         if (spec_.comparison) {
             result.erase("recording");
-            result["spec"] = {{"width", spec_.width}, {"height", spec_.height}, {"frames", spec_.frames},
-                              {"warmup", spec_.warmup}, {"fpsLimit", spec_.fps}, {"vsync", spec_.vsync},
-                              {"lowLatency", spec_.low_latency}, {"limitQueuedFrames", spec_.queued}};
-            result["camera"] = {{"eye", camera_eye_}, {"yaw", camera_yaw_}, {"pitch", camera_pitch_},
-                                 {"path", "frame-indexed 360 degree yaw, 16 unit circle, 10 degree pitch sine"}};
+            result["spec"] = {
+                    {"width", spec_.width},
+                    {"height", spec_.height},
+                    {"frames", spec_.frames},
+                    {"warmup", spec_.warmup},
+                    {"fpsLimit", spec_.fps},
+                    {"vsync", spec_.vsync},
+                    {"lowLatency", spec_.low_latency},
+                    {"limitQueuedFrames", spec_.queued}
+            };
+            result["camera"] = {
+                    {"eye", camera_eye_},
+                    {"yaw", camera_yaw_},
+                    {"pitch", camera_pitch_},
+                    {"path", "frame-indexed 360 degree yaw, 16 unit circle, 10 degree pitch sine"}
+            };
             result["method"] = "Visible borderless fullscreen, matched camera and one simulation tick per frame; "
-                "offline simulation/HUD/actors; real driver presentation, VSync off. Driver animation clocks use wall time. "
-                "Software intervals are not click-to-photon latency.";
+                               "offline simulation/HUD/actors; real driver presentation, VSync off. Driver animation "
+                               "clocks use wall time. "
+                               "Software intervals are not click-to-photon latency.";
         }
         const auto gpu_frames = gpu_.finish(size_t(spec_.warmup));
         result["gpuRenderMs"] = Json::array();
-        for (const auto ms : gpu_frames) result["gpuRenderMs"].push_back(ms >= 0 ? Json(ms) : Json());
-        result["gpuUnavailableReason"] = gpu_.supported() ? "Null samples mean query ring overflow" : "GL timer query unavailable";
+        for (const auto ms : gpu_frames)
+            result["gpuRenderMs"].push_back(ms >= 0 ? Json(ms) : Json());
+        result["gpuUnavailableReason"] =
+                gpu_.supported() ? "Null samples mean query ring overflow" : "GL timer query unavailable";
         result["measuredQpcStart"] = measured_qpc_start_;
         result["measuredQpcEnd"] = measured_qpc_end_;
         for (size_t phase = 0; phase < count; ++phase) {
@@ -569,8 +589,12 @@ private:
         }
         std::vector<size_t> worst(frames_.size());
         std::iota(worst.begin(), worst.end(), 0);
-        std::partial_sort(worst.begin(), worst.begin() + std::min(size_t(20), worst.size()), worst.end(),
-                          [this](size_t a, size_t b) { return frames_[a] > frames_[b]; });
+        std::partial_sort(
+                worst.begin(),
+                worst.begin() + std::min(size_t(20), worst.size()),
+                worst.end(),
+                [this](size_t a, size_t b) { return frames_[a] > frames_[b]; }
+        );
         for (size_t index = 0; index < std::min(size_t(20), worst.size()); ++index) {
             const size_t frame = worst[index];
             result["worstFrames"].push_back({{"frame", frame}, {"wallMs", frames_[frame]}});

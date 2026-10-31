@@ -17,9 +17,14 @@ struct Context {
 #ifdef __APPLE__
     CGLContextObj context = nullptr;
     void *library = nullptr;
+
     Context() {
-        const CGLPixelFormatAttribute attributes[] = {kCGLPFAOpenGLProfile,
-            CGLPixelFormatAttribute(kCGLOGLPVersion_3_2_Core), kCGLPFAAllowOfflineRenderers, CGLPixelFormatAttribute(0)};
+        const CGLPixelFormatAttribute attributes[] = {
+                kCGLPFAOpenGLProfile,
+                CGLPixelFormatAttribute(kCGLOGLPVersion_3_2_Core),
+                kCGLPFAAllowOfflineRenderers,
+                CGLPixelFormatAttribute(0)
+        };
         CGLPixelFormatObj format = nullptr;
         GLint count = 0;
         if (CGLChoosePixelFormat(attributes, &format, &count) != kCGLNoError || !format)
@@ -31,15 +36,20 @@ struct Context {
         library = dlopen("/System/Library/Frameworks/OpenGL.framework/OpenGL", RTLD_LAZY);
         if (!library) throw std::runtime_error("OpenGL framework unavailable");
     }
+
     ~Context() {
         CGLSetCurrentContext(nullptr);
         if (context) CGLDestroyContext(context);
         if (library) dlclose(library);
     }
-    void load(native::Gl &gl) { gl.load([this](const char *name) { return dlsym(library, name); }); }
+
+    void load(native::Gl &gl) {
+        gl.load([this](const char *name) { return dlsym(library, name); });
+    }
 #else
     SDL_Window *window = nullptr;
     SDL_GLContext context = nullptr;
+
     Context() {
         if (!SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(SDL_GetError());
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
@@ -50,23 +60,34 @@ struct Context {
         context = SDL_GL_CreateContext(window);
         if (!context || !SDL_GL_MakeCurrent(window, context)) throw std::runtime_error(SDL_GetError());
     }
+
     ~Context() {
         if (context) SDL_GL_DestroyContext(context);
         if (window) SDL_DestroyWindow(window);
         SDL_Quit();
     }
+
     void load(native::Gl &gl) { gl.load(); }
 #endif
 };
 
-Json permutation(native::Gl &gl, const native_render::PlayerShaderSources &sources,
-                 int finish, bool glove, bool detail, native_render::PlayerMaterial material) {
+Json permutation(
+        native::Gl &gl,
+        const native_render::PlayerShaderSources &sources,
+        int finish,
+        bool glove,
+        bool detail,
+        native_render::PlayerMaterial material
+) {
     const auto start = Clock::now();
     const auto defines = native_render::player_defines(finish, glove, detail, material);
-    const bool gun = material == native_render::PlayerMaterial::gun || material == native_render::PlayerMaterial::world_gun;
+    const bool gun =
+            material == native_render::PlayerMaterial::gun || material == native_render::PlayerMaterial::world_gun;
     const auto vertex = defines + (gun ? sources.gunVertex : sources.vertex);
-    const auto fragment = defines + (material == native_render::PlayerMaterial::ghost ? sources.ghost
-                                      : gun ? sources.gun : sources.solid);
+    const auto fragment = defines
+                          + (material == native_render::PlayerMaterial::ghost ? sources.ghost
+                             : gun                                            ? sources.gun
+                                                                              : sources.solid);
     const auto vertex_start = Clock::now();
     const GLuint vertex_shader = native::shader(gl, GL_VERTEX_SHADER, vertex.c_str());
     const double vertex_ms = milliseconds(vertex_start);
@@ -90,11 +111,18 @@ Json permutation(native::Gl &gl, const native_render::PlayerShaderSources &sourc
     gl.DeleteShader(vertex_shader);
     gl.DeleteShader(fragment_shader);
     // Keep programs alive, as the lazy cache does. The context owns their lifetime.
-    return {{"key", native_render::player_program_key(finish, glove, detail, material)}, {"finish", finish},
-            {"glove", glove}, {"detail", detail}, {"material", int(material)}, {"defines", defines},
-            {"vertexMs", vertex_ms}, {"fragmentMs", fragment_ms}, {"linkMs", link_ms}, {"totalMs", total_ms}};
+    return {{"key", native_render::player_program_key(finish, glove, detail, material)},
+            {"finish", finish},
+            {"glove", glove},
+            {"detail", detail},
+            {"material", int(material)},
+            {"defines", defines},
+            {"vertexMs", vertex_ms},
+            {"fragmentMs", fragment_ms},
+            {"linkMs", link_ms},
+            {"totalMs", total_ms}};
 }
-}
+}  // namespace
 
 int main(int argc, char **argv) {
     try {
@@ -103,18 +131,25 @@ int main(int argc, char **argv) {
         native::Gl gl;
         context.load(gl);
         native_render::PlayerShaderSources sources(argv[1]);
-        Json result = {{"schema", 1}, {"gpu", reinterpret_cast<const char *>(gl.GetString(GL_RENDERER))},
-                       {"driver", reinterpret_cast<const char *>(gl.GetString(GL_VERSION))},
-                       {"os", benchmark_os()}, {"permutations", Json::array()},
-                       {"method", "First runtime compile/link per lazy cache key, same player_defines and sources as NativeViewmodel. "
-                        "Includes duplicate source keys. Driver caches are left intact; excludes uniform lookup and first draw specialization."}};
+        Json result = {
+                {"schema", 1},
+                {"gpu", reinterpret_cast<const char *>(gl.GetString(GL_RENDERER))},
+                {"driver", reinterpret_cast<const char *>(gl.GetString(GL_VERSION))},
+                {"os", benchmark_os()},
+                {"permutations", Json::array()},
+                {"method",
+                 "First runtime compile/link per lazy cache key, same player_defines and sources as NativeViewmodel. "
+                 "Includes duplicate source keys. Driver caches are left intact; excludes uniform lookup and first "
+                 "draw specialization."}
+        };
         for (int material = 0; material < 4; ++material) {
             const int finishes = material == 0 ? 28 : 1;
             for (int finish = 0; finish < finishes; ++finish)
                 for (bool glove : {false, true})
                     for (bool detail : {false, true})
-                        result["permutations"].push_back(permutation(gl, sources, finish, glove, detail,
-                                                                    native_render::PlayerMaterial(material)));
+                        result["permutations"].push_back(
+                                permutation(gl, sources, finish, glove, detail, native_render::PlayerMaterial(material))
+                        );
         }
         if (gl.GetError() != GL_NO_ERROR) throw std::runtime_error("Shader benchmark GL error");
         std::ofstream output(argv[2]);

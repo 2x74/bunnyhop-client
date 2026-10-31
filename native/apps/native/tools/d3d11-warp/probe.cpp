@@ -69,8 +69,19 @@ void compute(uint3 id : SV_DispatchThreadID) { output[id.xy] = id.y * 32 + id.x 
 
 ComPtr<ID3DBlob> compile(const char *entry, const char *profile) {
     ComPtr<ID3DBlob> code, errors;
-    const HRESULT result = D3DCompile(shaders, sizeof shaders - 1, "warp-probe", nullptr, nullptr,
-                                      entry, profile, D3DCOMPILE_ENABLE_STRICTNESS, 0, &code, &errors);
+    const HRESULT result = D3DCompile(
+            shaders,
+            sizeof shaders - 1,
+            "warp-probe",
+            nullptr,
+            nullptr,
+            entry,
+            profile,
+            D3DCOMPILE_ENABLE_STRICTNESS,
+            0,
+            &code,
+            &errors
+    );
     if (FAILED(result) && errors) throw std::runtime_error(static_cast<const char *>(errors->GetBufferPointer()));
     check(result, "D3DCompile (d3dcompiler_47)");
     return code;
@@ -110,7 +121,7 @@ public:
         std::filesystem::create_directories(output);
     }
 
-    template<class Function>
+    template <class Function>
     void stage(const char *name, Function function) {
         const auto start = Clock::now();
         try {
@@ -119,7 +130,8 @@ public:
         } catch (const std::exception &error) {
             report["features"][name]["passed"] = false;
             report["features"][name]["error"] = error.what();
-            report["features"][name]["wallMs"] = std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+            report["features"][name]["wallMs"] =
+                    std::chrono::duration<double, std::milli>(Clock::now() - start).count();
             throw;
         }
         const double elapsed = std::chrono::duration<double, std::milli>(Clock::now() - start).count();
@@ -152,8 +164,11 @@ public:
         check(context->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped), "staging readback");
         std::vector<uint32_t> result(size * size);
         for (UINT y = 0; y < size; ++y)
-            std::memcpy(result.data() + y * size, static_cast<const uint8_t *>(mapped.pData) + y * mapped.RowPitch,
-                        size * sizeof(uint32_t));
+            std::memcpy(
+                    result.data() + y * size,
+                    static_cast<const uint8_t *>(mapped.pData) + y * mapped.RowPitch,
+                    size * sizeof(uint32_t)
+            );
         context->Unmap(staging.Get(), 0);
         return result;
     }
@@ -167,8 +182,19 @@ public:
     void create() {
         const D3D_FEATURE_LEVEL requested = D3D_FEATURE_LEVEL_11_0;
         D3D_FEATURE_LEVEL actual{};
-        check(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, &requested, 1, D3D11_SDK_VERSION,
-                               &device, &actual, &context), "D3D11CreateDevice WARP");
+        check(D3D11CreateDevice(
+                      nullptr,
+                      D3D_DRIVER_TYPE_WARP,
+                      nullptr,
+                      0,
+                      &requested,
+                      1,
+                      D3D11_SDK_VERSION,
+                      &device,
+                      &actual,
+                      &context
+              ),
+              "D3D11CreateDevice WARP");
         require(actual == requested, "wrong feature level");
         UINT quality = 0;
         check(device->CheckMultisampleQualityLevels(DXGI_FORMAT_R8G8B8A8_UNORM, samples, &quality), "MSAA quality");
@@ -195,15 +221,20 @@ public:
         check(device->CreateShaderResourceView(cube.Get(), nullptr, &cube_view), "cube SRV");
         D3D11_SAMPLER_DESC sampler_description{};
         sampler_description.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
-        sampler_description.AddressU = sampler_description.AddressV = sampler_description.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sampler_description.AddressU = sampler_description.AddressV = sampler_description.AddressW =
+                D3D11_TEXTURE_ADDRESS_CLAMP;
         sampler_description.MaxLOD = D3D11_FLOAT32_MAX;
         ComPtr<ID3D11SamplerState> sampler;
         check(device->CreateSamplerState(&sampler_description, &sampler), "sampler");
         const auto vertex_code = compile("vertex", "vs_5_0"), pixel_code = compile("colour", "ps_5_0");
         ComPtr<ID3D11VertexShader> vertex;
         ComPtr<ID3D11PixelShader> pixel;
-        check(device->CreateVertexShader(vertex_code->GetBufferPointer(), vertex_code->GetBufferSize(), nullptr, &vertex), "VS");
-        check(device->CreatePixelShader(pixel_code->GetBufferPointer(), pixel_code->GetBufferSize(), nullptr, &pixel), "PS");
+        check(device->CreateVertexShader(
+                      vertex_code->GetBufferPointer(), vertex_code->GetBufferSize(), nullptr, &vertex
+              ),
+              "VS");
+        check(device->CreatePixelShader(pixel_code->GetBufferPointer(), pixel_code->GetBufferSize(), nullptr, &pixel),
+              "PS");
         D3D11_VIEWPORT viewport{0, 0, float(size), float(size), 0, 1};
         D3D11_RASTERIZER_DESC raster_description{};
         raster_description.FillMode = D3D11_FILL_SOLID;
@@ -229,8 +260,8 @@ public:
         report["colourSamples"] = {pixels[8 * size + 8], pixels[8 * size + 24]};
         for (UINT y = 0; y < size; ++y)
             for (UINT x = 0; x < size; ++x)
-                require(x < size / 2 ? pixels[y * size + x] == 0xff0000ffu
-                                     : resolved_blue(pixels[y * size + x]), "cube/clip/colour resolve pixel mismatch");
+                require(x < size / 2 ? pixels[y * size + x] == 0xff0000ffu : resolved_blue(pixels[y * size + x]),
+                        "cube/clip/colour resolve pixel mismatch");
         stage("shader-depth-resolve-sv-depth-readback", [&] { resolve_depth(depth.Get()); });
         stage("copy-subresource-region-readback", [&] { copy_region(resolved.Get()); });
     }
@@ -243,9 +274,12 @@ public:
         description.SampleDesc.Count = 1;
         description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
         description.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE;
-        const std::array<uint32_t, 6> colours = {0xff0000ff, 0xff00ff00, 0xff00ffff, 0xffff00ff, 0xffff0000, 0xffffffff};
+        const std::array<uint32_t, 6> colours = {
+                0xff0000ff, 0xff00ff00, 0xff00ffff, 0xffff00ff, 0xffff0000, 0xffffffff
+        };
         std::array<D3D11_SUBRESOURCE_DATA, 6> data{};
-        for (size_t face = 0; face < data.size(); ++face) data[face] = {&colours[face], 4, 4};
+        for (size_t face = 0; face < data.size(); ++face)
+            data[face] = {&colours[face], 4, 4};
         ComPtr<ID3D11Texture2D> cube;
         check(device->CreateTexture2D(&description, data.data(), &cube), "cube texture");
         return cube;
@@ -272,8 +306,12 @@ public:
         const auto vertex_code = compile("fullscreen", "vs_5_0"), pixel_code = compile("depthResolve", "ps_5_0");
         ComPtr<ID3D11VertexShader> vertex;
         ComPtr<ID3D11PixelShader> pixel;
-        check(device->CreateVertexShader(vertex_code->GetBufferPointer(), vertex_code->GetBufferSize(), nullptr, &vertex), "depth VS");
-        check(device->CreatePixelShader(pixel_code->GetBufferPointer(), pixel_code->GetBufferSize(), nullptr, &pixel), "depth PS");
+        check(device->CreateVertexShader(
+                      vertex_code->GetBufferPointer(), vertex_code->GetBufferSize(), nullptr, &vertex
+              ),
+              "depth VS");
+        check(device->CreatePixelShader(pixel_code->GetBufferPointer(), pixel_code->GetBufferSize(), nullptr, &pixel),
+              "depth PS");
         context->VSSetShader(vertex.Get(), nullptr, 0);
         context->PSSetShader(pixel.Get(), nullptr, 0);
         context->PSSetShaderResources(0, 1, view.GetAddressOf());
@@ -295,9 +333,7 @@ public:
         evidence("depth-resolve.png", image);
     }
 
-    static bool resolved_blue(uint32_t value) {
-        return value == 0xff9f0000u || value == 0xffa00000u;
-    }
+    static bool resolved_blue(uint32_t value) { return value == 0xff9f0000u || value == 0xffa00000u; }
 
     void copy_region(ID3D11Texture2D *source) {
         auto destination = texture(DXGI_FORMAT_R8G8B8A8_UNORM, D3D11_BIND_RENDER_TARGET);
@@ -310,8 +346,8 @@ public:
         const auto pixels = read(destination.Get());
         for (UINT y = 0; y < size; ++y)
             for (UINT x = 0; x < size; ++x)
-                require(x < 8 && y < 8 ? resolved_blue(pixels[y * size + x])
-                                      : pixels[y * size + x] == 0xff000000u, "copy region mismatch");
+                require(x < 8 && y < 8 ? resolved_blue(pixels[y * size + x]) : pixels[y * size + x] == 0xff000000u,
+                        "copy region mismatch");
         evidence("copy-region.png", pixels);
     }
 
@@ -336,7 +372,7 @@ public:
         evidence("compute-uav.png", image);
     }
 
-    template<class Value>
+    template <class Value>
     Value query(ID3D11Query *query_object) {
         Value value{};
         const auto deadline = Clock::now() + std::chrono::seconds(10);
@@ -373,8 +409,20 @@ public:
     }
 
     void flip() {
-        const HWND window = CreateWindowExW(0, L"STATIC", L"WARP flip probe", WS_OVERLAPPEDWINDOW,
-                                            0, 0, 128, 128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        const HWND window = CreateWindowExW(
+                0,
+                L"STATIC",
+                L"WARP flip probe",
+                WS_OVERLAPPEDWINDOW,
+                0,
+                0,
+                128,
+                128,
+                nullptr,
+                nullptr,
+                GetModuleHandleW(nullptr),
+                nullptr
+        );
         if (!window) {
             report["flip"] = {{"created", false}, {"win32Error", GetLastError()}};
             return;
@@ -394,7 +442,8 @@ public:
         description.BufferCount = 2;
         description.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         ComPtr<IDXGISwapChain1> swapchain;
-        const HRESULT created = factory->CreateSwapChainForHwnd(device.Get(), window, &description, nullptr, nullptr, &swapchain);
+        const HRESULT created =
+                factory->CreateSwapChainForHwnd(device.Get(), window, &description, nullptr, nullptr, &swapchain);
         report["flip"] = {{"created", SUCCEEDED(created)}, {"createHresult", uint32_t(created)}};
         if (SUCCEEDED(created)) {
             const HRESULT presented = swapchain->Present(0, 0);
@@ -406,7 +455,7 @@ public:
         DestroyWindow(window);
     }
 };
-}
+}  // namespace
 
 int main(int argc, char **argv) {
     const auto start = Clock::now();

@@ -54,7 +54,8 @@ either axis need a lower desktop resolution for this benchmark.
 - On NVIDIA where available: `NvAPI_D3D_GetLatency` reports for completed frames, with simulation, render-submit,
   present, driver, OS render-queue, GPU and GPU-active durations. Report frame IDs include warmup; subtract warmup
   plus one to relate them to zero-based measured frame indices. Reports can lag the application, so the last frames
-  may be absent. A missing endpoint yields null, never a fabricated zero. Unsupported APIs have a status/reason.
+  may be absent. These are reports for the interop D3D device; its GPU interval may omit GL work. A missing endpoint
+  yields null, never a fabricated zero. Unsupported APIs have a status/reason.
 - PresentMon 2.6.0 ETW `PresentMode` counts, filtered to the benchmark process and measured QPC interval. Hardware
   Independent Flip and composed modes are observed labels, rather than conclusions drawn from a flip-discard flag.
   If ETW is unavailable the mode is unknown. Counts cover the whole measured interval and can include transitions.
