@@ -264,7 +264,8 @@ color=(texture(uFinEnv,d)+texture(uCosEnv,d)+texture(uPlayerEnv,d))/3.*fromVerte
     context.clear_color({0, 0, 0, 1});
     context.pipeline(pipeline);
     context.bind_program(program);
-    context.bind_texture(9, cube, sampler);
+    context.bind_sampler(9, sampler);
+    context.bind_image(9, cube);
     context.bind_texture(3, bone_texture, sampler);
     context.bind_geometry(geometry);
     context.draw(Primitive::triangles, 0, 3);
@@ -287,7 +288,8 @@ color=(texture(uFinEnv,d)+texture(uCosEnv,d)+texture(uPlayerEnv,d))/3.*fromVerte
     auto anisotropic = context.create_sampler(filtered);
     context.bind_target(target);
     context.bind_program(program);
-    context.bind_texture(9, srgb, anisotropic);
+    context.bind_image(9, srgb);
+    context.bind_sampler(9, anisotropic);
     context.bind_geometry(geometry);
     context.draw(Primitive::triangles, 0, 3);
     const auto decoded = read(context, target, RowOrigin::bottom);

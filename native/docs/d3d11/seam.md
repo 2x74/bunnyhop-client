@@ -263,7 +263,7 @@ swapchain presentation require the later caller integration and hardware qualifi
 
 The forced-dispatch benchmark against `9b46cf7` used seven alternating pairs with the frozen 160x90 Source specs,
 500 warmup and 5,000 measured frames per run. The isolated dispatcher binary is `0a6604e`, before merging other
-callers. A second comparison uses the merged caller tree. No local build/test ran during either measurement;
+callers. A second comparison uses the initial caller merge at `161c7d5`, before the later scene-pass migration. No local build/test ran during either measurement;
 process checks found no compiler load at the boundaries of the isolated comparison. A first attempt overlapped
 compilation and was interrupted and excluded. Results are GPU-completed batch microseconds per frame:
 

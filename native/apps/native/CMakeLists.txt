@@ -23,12 +23,18 @@ if(WIN32 OR BUNNYHOP_GFX_DISPATCH)
     if(WIN32)
         enable_language(RC)
         find_package(Python3 REQUIRED COMPONENTS Interpreter)
-        file(GLOB GFX_SHADER_INPUTS CONFIGURE_DEPENDS src/*.hpp tools/d3d-shaders/*.py tools/d3d-shaders/*.hlsl)
+        file(GLOB GFX_SHADER_INPUTS CONFIGURE_DEPENDS src/*.hpp
+            tools/d3d-shaders/*.py tools/d3d-shaders/*.hlsl tools/d3d-shaders/*.ts
+            tools/d3d-shaders/*.cpp tools/d3d-shaders/*.json)
+        file(GLOB_RECURSE GFX_PLAYER_SHADER_INPUTS CONFIGURE_DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/../web/src/player/*.ts"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../web/src/viewmodel/*.ts")
         set(GFX_SHADER_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/d3d11")
         add_custom_command(OUTPUT "${GFX_SHADER_OUTPUT}/d3d11-shaders.rc" "${GFX_SHADER_OUTPUT}/d3d11-shaders.bin"
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/d3d-shaders/package.py"
                 --build --output "${GFX_SHADER_OUTPUT}"
-            DEPENDS ${GFX_SHADER_INPUTS} src/gfx_smoke.cpp
+            DEPENDS ${GFX_SHADER_INPUTS} ${GFX_PLAYER_SHADER_INPUTS} src/gfx_smoke.cpp
+                src/export-player-materials.ts ../web/src/loadout.ts ../../bun.lock
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.." VERBATIM)
         target_sources(bunnyhop_gfx_d3d11 INTERFACE "${GFX_SHADER_OUTPUT}/d3d11-shaders.rc")
         target_link_libraries(bunnyhop_gfx_d3d11 PUBLIC d3d11)
