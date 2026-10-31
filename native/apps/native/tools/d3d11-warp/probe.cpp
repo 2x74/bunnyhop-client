@@ -195,6 +195,14 @@ public:
         check(device->CreateVertexShader(vertex_code->GetBufferPointer(), vertex_code->GetBufferSize(), nullptr, &vertex), "VS");
         check(device->CreatePixelShader(pixel_code->GetBufferPointer(), pixel_code->GetBufferSize(), nullptr, &pixel), "PS");
         D3D11_VIEWPORT viewport{0, 0, float(size), float(size), 0, 1};
+        D3D11_RASTERIZER_DESC raster_description{};
+        raster_description.FillMode = D3D11_FILL_SOLID;
+        raster_description.CullMode = D3D11_CULL_NONE;
+        raster_description.DepthClipEnable = TRUE;
+        raster_description.MultisampleEnable = TRUE;
+        ComPtr<ID3D11RasterizerState> raster;
+        check(device->CreateRasterizerState(&raster_description, &raster), "rasterizer state");
+        context->RSSetState(raster.Get());
         context->RSSetViewports(1, &viewport);
         context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context->VSSetShader(vertex.Get(), nullptr, 0);
@@ -207,10 +215,11 @@ public:
         auto resolved = texture(DXGI_FORMAT_R8G8B8A8_UNORM, 0);
         context->ResolveSubresource(resolved.Get(), 0, colour.Get(), 0, DXGI_FORMAT_R8G8B8A8_UNORM);
         const auto pixels = read(resolved.Get());
+        evidence("colour-cube-clip-msaa.png", pixels);
+        report["colourSamples"] = {pixels[8 * size + 8], pixels[8 * size + 24]};
         for (UINT y = 0; y < size; ++y)
             for (UINT x = 0; x < size; ++x)
                 require(pixels[y * size + x] == (x < size / 2 ? 0xff0000ffu : 0xffff0000u), "cube/clip/colour resolve pixel mismatch");
-        evidence("colour-cube-clip-msaa.png", pixels);
         resolve_depth(depth.Get());
         copy_region(resolved.Get());
     }
