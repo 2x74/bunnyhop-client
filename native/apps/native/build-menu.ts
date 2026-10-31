@@ -67,7 +67,9 @@ for (let index = 0; index < styles.length; index++) {
     if (!/^(?:data:|#|https:)/.test(url)) throw new Error(`Menu stylesheet contains an external asset: ${url}`);
   }
 }
-const prelude = `window.__nativeMenuGraphics={contexts:0,attempts:0};(()=>{const original=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type,...args){if(/webgl|experimental-webgl/i.test(type)){window.__nativeMenuGraphics.attempts++;return null;}return original.call(this,type,...args);};})();`;
+// The shared screens write the address bar (/ranks, /gauntlets) for the website's sake. The native menu has no address
+// bar and every screen lives in main.ts, so the document stays at the one address its host served it from.
+const prelude = `history.pushState=history.replaceState=()=>{};window.__nativeMenuGraphics={contexts:0,attempts:0};(()=>{const original=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type,...args){if(/webgl|experimental-webgl/i.test(type)){window.__nativeMenuGraphics.attempts++;return null;}return original.call(this,type,...args);};})();`;
 const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="https://bunnyhop.lol/"><title>bunnyhop.lol</title><style>${styles.join("\n").replaceAll("</style", "<\\/style")}</style></head><body class="native-menu menu-open"><div id="native-backdrop" aria-hidden="true"></div><div id="overlay"><div id="menu" class="screen-home"></div></div><p id="native-status" role="status"></p><p id="native-notice" role="status"></p><script>${prelude}</script><script>${scripts[0].replaceAll("</script", "<\\/script")}</script></body></html>`;
 await mkdir(dirname(out), { recursive: true });
 await writeFile(out, html);

@@ -4,6 +4,7 @@
 #define NOMINMAX
 #endif
 #include "menu_webview.hpp"
+#include "menu_messages.hpp"
 #include <SDL3/SDL.h>
 #include <windows.h>
 #include <commctrl.h>
@@ -15,6 +16,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <iostream>
 #include <utility>
 #include <iterator>
 #include <cwchar>
@@ -388,9 +390,12 @@ struct MenuWebView::Impl {
                             Text origin, current, body;
                             a->get_Source(&origin.value);
                             view->get_Source(&current.value);
-                            if (std::wstring(origin) != menu_url || std::wstring(current) != menu_url
-                                || FAILED(a->TryGetWebMessageAsString(&body.value)))
+                            if (!native::menu_message_source_trusted(static_cast<LPCWSTR>(origin))
+                                || !native::menu_message_source_trusted(static_cast<LPCWSTR>(current))) {
+                                std::cerr << "Menu message dropped: it came from outside the menu\n";
                                 return S_OK;
+                            }
+                            if (FAILED(a->TryGetWebMessageAsString(&body.value))) return S_OK;
                             if (wcslen(body) > max_message_bytes) return S_OK;
                             const auto bytes = narrow(body);
                             if (bytes.size() > max_message_bytes) return S_OK;

@@ -250,6 +250,8 @@ void MenuSmoke::request() {
     context.menu->evaluate_js(
             "(()=>{const home=" + std::string(opt.menu_home_smoke ? "true" : "false")
             + ",expected=" + nlohmann::json(context.game.map_id).dump() + R"JS(;
+                // Past the menu's own history guard: the host must keep hearing a document whose address moved.
+                History.prototype.replaceState.call(history,history.state,'','/ranks');
                 const post=value=>window.webkit.messageHandlers.bunnyhop.postMessage(JSON.stringify({type:'smoke',...value}));
                 let attempts=0;
                 // Painted, not merely present: on screen, and no ancestor hidden,
