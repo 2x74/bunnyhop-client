@@ -130,9 +130,15 @@ int main() {
     } gl_context{SDL_GL_CreateContext(window.get())};
 
     if (!gl_context.value) return 77;
+    native::Gl gl;
     try {
-        native::Gl gl;
         gl.load();
+    } catch (const std::exception &error) {
+        // CI runners without a GPU only offer OpenGL 1.1, which can't run the renderer at all.
+        std::cerr << error.what() << '\n';
+        return 77;
+    }
+    try {
         Context context(gl);
         targets(context);
         draws(context);
