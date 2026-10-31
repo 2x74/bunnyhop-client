@@ -48,7 +48,14 @@ float4 fullscreen(uint id : SV_VertexID) : SV_Position {
 }
 TextureCube cube : register(t0);
 SamplerState nearestSampler : register(s0);
-float4 colour() : SV_Target { return cube.SampleLevel(nearestSampler, float3(0, 0, 1), 0); }
+struct Pixel { float4 colour : SV_Target; float depth : SV_Depth; };
+Pixel colour(uint sample : SV_SampleIndex) {
+    Pixel result;
+    result.colour = cube.SampleLevel(nearestSampler, float3(0, 0, 1), 0);
+    result.colour.rgb *= float(sample + 1) / 4;
+    result.depth = .25 + .1 * float(3 - sample);
+    return result;
+}
 Texture2DMS<float, 4> depthSamples : register(t0);
 float depthResolve(float4 position : SV_Position) : SV_Depth {
     float result = 1;
@@ -222,7 +229,8 @@ public:
         report["colourSamples"] = {pixels[8 * size + 8], pixels[8 * size + 24]};
         for (UINT y = 0; y < size; ++y)
             for (UINT x = 0; x < size; ++x)
-                require(pixels[y * size + x] == (x < size / 2 ? 0xff0000ffu : 0xffff0000u), "cube/clip/colour resolve pixel mismatch");
+                require(x < size / 2 ? pixels[y * size + x] == 0xff0000ffu
+                                     : resolved_blue(pixels[y * size + x]), "cube/clip/colour resolve pixel mismatch");
         stage("shader-depth-resolve-sv-depth-readback", [&] { resolve_depth(depth.Get()); });
         stage("copy-subresource-region-readback", [&] { copy_region(resolved.Get()); });
     }
@@ -287,6 +295,10 @@ public:
         evidence("depth-resolve.png", image);
     }
 
+    static bool resolved_blue(uint32_t value) {
+        return value == 0xff9f0000u || value == 0xffa00000u;
+    }
+
     void copy_region(ID3D11Texture2D *source) {
         auto destination = texture(DXGI_FORMAT_R8G8B8A8_UNORM, D3D11_BIND_RENDER_TARGET);
         ComPtr<ID3D11RenderTargetView> target;
@@ -298,7 +310,8 @@ public:
         const auto pixels = read(destination.Get());
         for (UINT y = 0; y < size; ++y)
             for (UINT x = 0; x < size; ++x)
-                require(pixels[y * size + x] == (x < 8 && y < 8 ? 0xffff0000u : 0xff000000u), "copy region mismatch");
+                require(x < 8 && y < 8 ? resolved_blue(pixels[y * size + x])
+                                      : pixels[y * size + x] == 0xff000000u, "copy region mismatch");
         evidence("copy-region.png", pixels);
     }
 

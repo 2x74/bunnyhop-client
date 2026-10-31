@@ -174,7 +174,6 @@ public:
         for (auto &samples : phases_)
             samples.reserve(spec.frames);
         frames_.reserve(spec.frames);
-        profile_frames_.reserve(spec.frames);
         camera_eye_ = eye_;
         camera_yaw_ = view_.yaw();
         camera_pitch_ = view_.pitch;
@@ -257,7 +256,6 @@ public:
             frame_diagnostics_.mark(native::FrameDiagnostics::kSleep, SDL_GetTicksNS());
             if (frame == -1) rasterized = hud_->rasterizations();
             if (frame >= 0) {
-                profile_frames_.push_back(renderer_->frameProfile);
                 for (size_t phase = 0; phase < count; ++phase)
                     phases_[phase].push_back(current_[phase]);
                 frames_.push_back(std::chrono::duration<double, std::milli>(Clock::now() - start).count());
@@ -303,7 +301,6 @@ private:
     std::array<double, count> current_{};
     std::array<std::vector<double>, count> phases_;
     std::vector<double> frames_;
-    std::vector<native::Renderer::FrameProfile> profile_frames_;
     int64_t measured_qpc_start_ = 0, measured_qpc_end_ = 0;
     std::array<float, 3> camera_eye_{};
     double camera_yaw_ = 0, camera_pitch_ = 0;
@@ -564,13 +561,6 @@ private:
         result["gpuRenderMs"] = Json::array();
         for (const auto ms : gpu_frames) result["gpuRenderMs"].push_back(ms >= 0 ? Json(ms) : Json());
         result["gpuUnavailableReason"] = gpu_.supported() ? "Null samples mean query ring overflow" : "GL timer query unavailable";
-        const auto last_profile = renderer_->frameProfile;
-        result["rendererFrames"] = Json::array();
-        for (const auto &profile : profile_frames_) {
-            renderer_->frameProfile = profile;
-            result["rendererFrames"].push_back(renderer_->profile_json());
-        }
-        renderer_->frameProfile = last_profile;
         result["measuredQpcStart"] = measured_qpc_start_;
         result["measuredQpcEnd"] = measured_qpc_end_;
         for (size_t phase = 0; phase < count; ++phase) {

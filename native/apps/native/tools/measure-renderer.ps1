@@ -91,7 +91,7 @@ try {
             if (Test-Path -LiteralPath $presentmonPath) {
                 $presentmon = Start-Process -FilePath $presentmonPath -PassThru -WindowStyle Hidden `
                     -ArgumentList @('--process_id', $benchmark.Id, '--output_file', ('"' + $csv + '"'),
-                        '--qpc_time', '--terminate_on_proc_exit', '--no_console_stats', '--session_name', "Bunnyhop-$stem") `
+                        '--qpc_time', '--v2_metrics', '--terminate_on_proc_exit', '--no_console_stats', '--session_name', "Bunnyhop-$stem") `
                     -RedirectStandardOutput (Join-Path $work "$stem-presentmon.log") `
                     -RedirectStandardError (Join-Path $work "$stem-presentmon-error.log")
                 Start-Sleep -Seconds 2

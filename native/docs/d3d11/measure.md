@@ -44,7 +44,7 @@ either axis need a lower desktop resolution for this benchmark.
   frame indices. Percentiles use sorted samples at `floor(N * percentile)` (clamped to the last sample).
 - CPU elapsed time per phase, including presenter pacing, input pump, simulation, feedback, diagnostics, heartbeat,
   actor preparation, render start, world, HUD, swap, queue fencing and the fps limiter. Renderer subphases and work
-  counts are retained per frame. These are wall-clock CPU intervals, including waits, rather than CPU thread-cycle time.
+  counts are retained for the final frame. These are wall-clock CPU intervals, including waits, rather than CPU thread-cycle time.
 - OpenGL `GL_TIME_ELAPSED` queries around world and HUD submission, excluding interop lock/unlock and presentation.
   A delayed ring reads completed queries without waiting in the measured loop. Unsupported/missed samples are null.
 - On/Boost: CPU time inside the interop lock and unlock calls, CPU time submitting the orientation-correcting D3D
@@ -113,7 +113,8 @@ colour/cube/clip/MSAA, shader-resolved depth, a copied subregion and compute UAV
 program before success. It requests only WARP at feature level 11_0 and compiles SM5 shaders through
 `d3dcompiler_47.dll`. It exercises a 4x MSAA colour/depth target, colour resolve, `Texture2DMS` depth resolve writing
 `SV_Depth`, cube sampling, `SV_ClipDistance`, `CopySubresourceRegion`, staging readback, compute UAV writes and timestamp
-queries. Stage wall times include shader compilation, readback and PNG writing; the timestamp interval includes
+queries. Per-sample colour/depth values differ, so the checks distinguish colour averaging and minimum-depth resolve
+from copying sample zero. Stage wall times include shader compilation, readback and PNG writing; the timestamp interval includes
 queue idles between stages, so neither is a hardware GPU performance estimate. Failure is fatal for offscreen tests.
 
 The separate session probe creates an HWND and a real flip-discard swapchain and attempts `Present(0, 0)`. Its HRESULTs
