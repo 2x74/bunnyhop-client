@@ -85,6 +85,7 @@ void targets(Context &context) {
     context.enqueue_readback(resolved, depth);
     std::vector<float> depth_values(size_t(width) * height);
     context.collect(depth, std::as_writable_bytes(std::span(depth_values)), RowOrigin::bottom, timeout_ns);
+    context.check_error("Depth resolve/readback diagnostics");
     require(std::all_of(depth_values.begin(), depth_values.end(), [](float value) { return value == 1; }),
             "Depth resolve changed cleared depth");
 #if defined(_WIN32)

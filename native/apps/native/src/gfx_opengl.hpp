@@ -90,12 +90,12 @@ class OpenGlContext {
 
     void attach(GLenum attachment, const Texture &texture) {
         if (texture.id)
-            gl_.FramebufferTexture2D(GL_FRAMEBUFFER, attachment, texture_target(texture.desc), texture.id, 0);
+            gl_.FramebufferTexture2D(GL_FRAMEBUFFER, attachment, texture_target(texture.desc), GLuint(texture.id), 0);
     }
 
     void blit(const TargetView &source, const TargetView &destination, GLbitfield mask) {
-        gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, source.id);
-        gl_.BindFramebuffer(GL_DRAW_FRAMEBUFFER, destination.id);
+        gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, GLuint(source.id));
+        gl_.BindFramebuffer(GL_DRAW_FRAMEBUFFER, GLuint(destination.id));
         target_ = destination;
         gl_.BlitFramebuffer(
                 0,
@@ -150,11 +150,11 @@ public:
     Program create_program(const ProgramDesc &source) { return {link_program(gl_, source.vertex, source.fragment)}; }
 
     void destroy(Program &program) {
-        if (program.id) gl_.DeleteProgram(program.id);
+        if (program.id) gl_.DeleteProgram(GLuint(program.id));
         program = {};
     }
 
-    void bind_program(Program program) { gl_.UseProgram(program.id); }
+    void bind_program(Program program) { gl_.UseProgram(GLuint(program.id)); }
 
     ConstantBinding create_constants(Program program, const ConstantLayout &layout) {
         ConstantBinding result;
@@ -175,7 +175,9 @@ public:
                 const std::string name =
                         field.count == 1 ? field.name : std::string(field.name) + "[" + std::to_string(i) + "]";
                 result.fields.push_back(
-                        {gl_.GetUniformLocation(program.id, name.c_str()), field.offset + i * stride, field.type}
+                        {gl_.GetUniformLocation(GLuint(program.id), name.c_str()),
+                         field.offset + i * stride,
+                         field.type}
                 );
             }
         }
@@ -215,7 +217,7 @@ public:
 
     void texture_unit(Program program, const char *name, unsigned unit) {
         bind_program(program);
-        gl_.Uniform1i(gl_.GetUniformLocation(program.id, name), GLint(unit));
+        gl_.Uniform1i(gl_.GetUniformLocation(GLuint(program.id), name), GLint(unit));
     }
 
     Pipeline create_pipeline(const PipelineState &state) { return {state}; }
@@ -255,7 +257,7 @@ public:
         Texture result{0, desc};
         result.id = generate(gl_.GenTextures);
         const GLenum target = texture_target(desc);
-        gl_.BindTexture(target, result.id);
+        gl_.BindTexture(target, GLuint(result.id));
         if (desc.samples > 1) {
             gl_.TexImage2DMultisample(target, desc.samples, format.internal, desc.width, desc.height, GL_TRUE);
         } else {
@@ -284,12 +286,12 @@ public:
 
     void generate_mips(Texture texture) {
         const auto target = texture_target(texture.desc);
-        gl_.BindTexture(target, texture.id);
+        gl_.BindTexture(target, GLuint(texture.id));
         gl_.GenerateMipmap(target);
     }
 
     void destroy(Texture &texture) {
-        if (texture.id) release(gl_.DeleteTextures, texture.id);
+        if (texture.id) release(gl_.DeleteTextures, GLuint(texture.id));
         texture = {};
     }
 
@@ -323,14 +325,14 @@ public:
     }
 
     void destroy(Sampler &sampler) {
-        if (sampler.id) release(gl_.DeleteSamplers, sampler.id);
+        if (sampler.id) release(gl_.DeleteSamplers, GLuint(sampler.id));
         sampler = {};
     }
 
     void bind_texture(unsigned slot, Texture texture, Sampler sampler = {}) {
         gl_.ActiveTexture(GL_TEXTURE0 + slot);
-        gl_.BindTexture(texture_target(texture.desc), texture.id);
-        gl_.BindSampler(slot, sampler.id);
+        gl_.BindTexture(texture_target(texture.desc), GLuint(texture.id));
+        gl_.BindSampler(slot, GLuint(sampler.id));
     }
 
     void unbind_sampler(unsigned slot) { gl_.BindSampler(slot, 0); }
@@ -340,7 +342,7 @@ public:
         result.desc = desc;
         try {
             result.id = generate(gl_.GenFramebuffers);
-            gl_.BindFramebuffer(GL_FRAMEBUFFER, result.id);
+            gl_.BindFramebuffer(GL_FRAMEBUFFER, GLuint(result.id));
             if (desc.color != Format::none)
                 result.color = create_texture({desc.width, desc.height, desc.color, TextureKind::image, desc.samples});
             if (desc.depth != Format::none)
@@ -364,7 +366,7 @@ public:
 
     void destroy(RenderTarget &target) {
         if (target_.id == target.id) target_ = {};
-        if (target.id) release(gl_.DeleteFramebuffers, target.id);
+        if (target.id) release(gl_.DeleteFramebuffers, GLuint(target.id));
         destroy(target.color);
         destroy(target.depth);
         target = {};
@@ -376,7 +378,7 @@ public:
     static TargetView borrow_target(uintptr_t framebuffer, const TargetDesc &desc) { return {framebuffer, desc}; }
 
     void bind_target(const TargetView &target) {
-        gl_.BindFramebuffer(GL_FRAMEBUFFER, target.id);
+        gl_.BindFramebuffer(GL_FRAMEBUFFER, GLuint(target.id));
         target_ = target;
     }
 
@@ -399,8 +401,8 @@ public:
     }
 
     void copy_color(const TargetView &source, Rect region, Texture destination, int x = 0, int y = 0) {
-        gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, source.id);
-        gl_.BindTexture(texture_target(destination.desc), destination.id);
+        gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, GLuint(source.id));
+        gl_.BindTexture(texture_target(destination.desc), GLuint(destination.id));
         gl_.CopyTexSubImage2D(
                 texture_target(destination.desc), 0, x, y, region.x, region.y, region.width, region.height
         );
@@ -428,23 +430,23 @@ public:
     }
 
     void destroy(Geometry &geometry) {
-        if (geometry.vertices) release(gl_.DeleteBuffers, geometry.vertices);
-        if (geometry.indices) release(gl_.DeleteBuffers, geometry.indices);
-        if (geometry.array) release(gl_.DeleteVertexArrays, geometry.array);
+        if (geometry.vertices) release(gl_.DeleteBuffers, GLuint(geometry.vertices));
+        if (geometry.indices) release(gl_.DeleteBuffers, GLuint(geometry.indices));
+        if (geometry.array) release(gl_.DeleteVertexArrays, GLuint(geometry.array));
         geometry = {};
     }
 
-    void bind_geometry(Geometry geometry) { gl_.BindVertexArray(geometry.array); }
+    void bind_geometry(Geometry geometry) { gl_.BindVertexArray(GLuint(geometry.array)); }
 
     void stream_vertices(Geometry geometry, std::span<const std::byte> data) {
-        gl_.BindBuffer(GL_ARRAY_BUFFER, geometry.vertices);
+        gl_.BindBuffer(GL_ARRAY_BUFFER, GLuint(geometry.vertices));
         gl_.BufferData(GL_ARRAY_BUFFER, GLsizeiptr(data.size()), data.data(), GL_STREAM_DRAW);
     }
 
     void upload_indices(Geometry &geometry, std::span<const std::byte> data) {
         bind_geometry(geometry);
         if (!geometry.indices) geometry.indices = generate(gl_.GenBuffers);
-        gl_.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, geometry.indices);
+        gl_.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, GLuint(geometry.indices));
         gl_.BufferData(GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr(data.size()), data.data(), GL_STATIC_DRAW);
     }
 
@@ -499,9 +501,9 @@ public:
 
     void enqueue_readback(const TargetView &source, Readback &readback, int x = 0, int y = 0) {
         if (readback.fence.id || readback.mapped) throw std::runtime_error("Readback slot is busy");
-        gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, source.id);
+        gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, GLuint(source.id));
         gl_.PixelStorei(GL_PACK_ALIGNMENT, 1);
-        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, readback.buffer);
+        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, GLuint(readback.buffer));
         const auto format = pixel_format(readback.format);
         gl_.ReadPixels(x, y, readback.width, readback.height, format.channels, format.type, nullptr);
         gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
@@ -515,7 +517,7 @@ public:
 
     MappedPixels map(Readback &readback) {
         if (readback.mapped || poll(readback) != Wait::ready) throw std::runtime_error("Readback is not ready to map");
-        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, readback.buffer);
+        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, GLuint(readback.buffer));
         const auto *data =
                 gl_.MapBufferRange(GL_PIXEL_PACK_BUFFER, 0, GLsizeiptr(readback_bytes(readback)), GL_MAP_READ_BIT);
         gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
@@ -527,7 +529,7 @@ public:
     }
 
     void unmap(Readback &readback) {
-        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, readback.buffer);
+        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, GLuint(readback.buffer));
         const bool valid = gl_.UnmapBuffer(GL_PIXEL_PACK_BUFFER) == GL_TRUE;
         gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         readback.mapped = false;
@@ -554,12 +556,12 @@ public:
 
     void destroy(Readback &readback) {
         if (readback.mapped) {
-            gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, readback.buffer);
+            gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, GLuint(readback.buffer));
             gl_.UnmapBuffer(GL_PIXEL_PACK_BUFFER);
             gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         }
         destroy(readback.fence);
-        if (readback.buffer) release(gl_.DeleteBuffers, readback.buffer);
+        if (readback.buffer) release(gl_.DeleteBuffers, GLuint(readback.buffer));
         readback = {};
     }
 };

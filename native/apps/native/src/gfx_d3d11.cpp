@@ -328,17 +328,17 @@ struct D3D11Context::Impl {
         reflect_stage(result, result.reflection.at("frag"), 1);
     }
 
-    void input_layout(GeometryData &geometry, ProgramData &program) {
+    void input_layout(GeometryData &vertex_data, ProgramData &shader_data) {
         std::vector<D3D11_INPUT_ELEMENT_DESC> elements;
-        for (const auto &input : program.reflection.at("vert").at("dxbc").at("inputs")) {
+        for (const auto &input : shader_data.reflection.at("vert").at("dxbc").at("inputs")) {
             if (input.at("systemValue") != 0) continue;
             const unsigned location = input.at("index");
             const auto attribute = std::find_if(
-                    geometry.attributes.begin(), geometry.attributes.end(), [&](const VertexAttribute &field) {
+                    vertex_data.attributes.begin(), vertex_data.attributes.end(), [&](const VertexAttribute &field) {
                         return field.location == location;
                     }
             );
-            if (input.at("semantic") != "TEXCOORD" || attribute == geometry.attributes.end()) return;
+            if (input.at("semantic") != "TEXCOORD" || attribute == vertex_data.attributes.end()) return;
             static constexpr DXGI_FORMAT formats[] = {
                     DXGI_FORMAT_UNKNOWN,
                     DXGI_FORMAT_R32_FLOAT,
@@ -361,12 +361,12 @@ struct D3D11Context::Impl {
             checked(device->CreateInputLayout(
                             elements.data(),
                             UINT(elements.size()),
-                            program.vertex_bytes.data(),
-                            program.vertex_bytes.size(),
+                            shader_data.vertex_bytes.data(),
+                            shader_data.vertex_bytes.size(),
                             &layout
                     ),
                     "Cannot create D3D11 input layout");
-        geometry.layouts.emplace(&program, std::move(layout));
+        vertex_data.layouts.emplace(&shader_data, std::move(layout));
     }
 
     void srv(unsigned stage, unsigned slot, ID3D11ShaderResourceView *view) {
@@ -459,40 +459,41 @@ struct D3D11Context::Impl {
         bound_raster = raster;
     }
 
-    std::unique_ptr<PipelineData> make_pipeline(const PipelineState &state) {
+    std::unique_ptr<PipelineData> make_pipeline(const PipelineState &description) {
         auto result = std::make_unique<PipelineData>();
         for (unsigned enabled = 0; enabled < 2; ++enabled) {
             D3D11_BLEND_DESC desc{};
             auto &target = desc.RenderTarget[0];
             target.BlendEnable = enabled != 0;
-            target.SrcBlend = target.SrcBlendAlpha = factor(state.blend.source);
-            target.DestBlend = target.DestBlendAlpha = factor(state.blend.destination);
+            target.SrcBlend = target.SrcBlendAlpha = factor(description.blend.source);
+            target.DestBlend = target.DestBlendAlpha = factor(description.blend.destination);
             target.BlendOp = target.BlendOpAlpha = D3D11_BLEND_OP_ADD;
             for (unsigned i = 0; i < 4; ++i)
-                if (state.color_write[i]) target.RenderTargetWriteMask |= BYTE(1 << i);
-            checked(device->CreateBlendState(&desc, &result->blend[enabled]), "Cannot create D3D11 blend state");
+                if (description.color_write[i]) target.RenderTargetWriteMask |= BYTE(1 << i);
+            checked(device->CreateBlendState(&desc, &result->blend[enabled]), "Cannot create D3D11 blend description");
         }
         for (unsigned flags = 0; flags < 4; ++flags) {
             D3D11_DEPTH_STENCIL_DESC desc{};
             desc.DepthEnable = (flags & 2) != 0;
             desc.DepthWriteMask = flags & 1 ? D3D11_DEPTH_WRITE_MASK_ALL : D3D11_DEPTH_WRITE_MASK_ZERO;
-            desc.DepthFunc = comparison(state.depth.compare);
-            checked(device->CreateDepthStencilState(&desc, &result->depth[flags]), "Cannot create D3D11 depth state");
+            desc.DepthFunc = comparison(description.depth.compare);
+            checked(device->CreateDepthStencilState(&desc, &result->depth[flags]),
+                    "Cannot create D3D11 depth description");
         }
         D3D11_RASTERIZER_DESC desc{};
         desc.FillMode = D3D11_FILL_SOLID;
-        desc.CullMode = state.raster.cull == Cull::none    ? D3D11_CULL_NONE
-                        : state.raster.cull == Cull::front ? D3D11_CULL_FRONT
-                                                           : D3D11_CULL_BACK;
+        desc.CullMode = description.raster.cull == Cull::none    ? D3D11_CULL_NONE
+                        : description.raster.cull == Cull::front ? D3D11_CULL_FRONT
+                                                                 : D3D11_CULL_BACK;
         // The translated vertex Y flip makes a GL CCW front face clockwise in D3D target coordinates.
-        desc.FrontCounterClockwise = state.raster.winding == Winding::clockwise;
+        desc.FrontCounterClockwise = description.raster.winding == Winding::clockwise;
         desc.DepthClipEnable = TRUE;
         desc.MultisampleEnable = TRUE;
-        if (state.raster.offset) {
-            desc.SlopeScaledDepthBias = state.raster.slope_bias;
-            desc.DepthBias = INT(state.raster.constant_bias);
+        if (description.raster.offset) {
+            desc.SlopeScaledDepthBias = description.raster.slope_bias;
+            desc.DepthBias = INT(description.raster.constant_bias);
         }
-        checked(device->CreateRasterizerState(&desc, &result->raster), "Cannot create D3D11 raster state");
+        checked(device->CreateRasterizerState(&desc, &result->raster), "Cannot create D3D11 raster description");
         return result;
     }
 
@@ -1182,7 +1183,9 @@ void D3D11Context::enqueue_readback(const TargetView &source, Readback &readback
     impl_->detach_outputs();
     impl_->unbind_resource(resource.Get());
     const D3D11_BOX region{UINT(x), UINT(y), 0, UINT(x + readback.width), UINT(y + readback.height), 1};
-    impl_->context->CopySubresourceRegion(value->active, 0, 0, 0, 0, resource.Get(), 0, &region);
+    if (depth && (x != 0 || y != 0 || readback.width != source.desc.width || readback.height != source.desc.height))
+        throw std::runtime_error("D3D11 depth readback requires the entire subresource");
+    impl_->context->CopySubresourceRegion(value->active, 0, 0, 0, 0, resource.Get(), 0, depth ? nullptr : &region);
     impl_->context->End(value->completion.query.Get());
     readback.fence = {handle(&value->completion), true};
 }
