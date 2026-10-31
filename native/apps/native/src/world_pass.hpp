@@ -362,6 +362,9 @@ public:
                 if (!sky && !reflection && water.waterPlan.refract && visibleWater) {
                     capture_refraction();
                     water.sceneCaptured = true;
+                    gl.UseProgram(program);
+                    gl.ActiveTexture(GL_TEXTURE1);
+                    gl.BindTexture(GL_TEXTURE_2D, lightmap);
                 }
                 gl.Enable(GL_BLEND);
                 gl.DepthMask(GL_FALSE);

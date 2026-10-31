@@ -108,7 +108,7 @@ class Renderer {
         if (!sourceLook || graphics.potato || graphics.fullbright || !world.lightmapInfo.hdr || hdrUnavailable)
             return nullptr;
         if (!hdr) try {
-                hdr = std::make_unique<SourceHdr>(graphicsContext, gl);
+                hdr = std::make_unique<SourceHdr>(graphicsContext);
             } catch (const std::exception &e) {
                 hdrUnavailable = true;
                 std::cerr << "Native HDR unavailable, drawing straight: " << e.what() << '\n';
@@ -129,7 +129,7 @@ class Renderer {
     EnhancedLook *enhanced_pass() {
         if (!graphics.look.composer() || graphics.potato || enhancedUnavailable) return nullptr;
         if (!enhanced) try {
-                enhanced = std::make_unique<EnhancedLook>(graphicsContext, gl);
+                enhanced = std::make_unique<EnhancedLook>(graphicsContext);
             } catch (const std::exception &e) {
                 enhancedUnavailable = true;
                 std::cerr << "Enhanced look unavailable, drawing the Source look: " << e.what() << '\n';
@@ -156,13 +156,11 @@ class Renderer {
     }
 
     void capture_refraction() {
-        water.capture_refraction(viewportWidth, viewportHeight, resources.ownedTextures, [&] {
-            if (frameLook)
-                frameLook->refraction_source();
-            else if (auto *hdr = hdr_pass())
-                hdr->refraction_source(viewportWidth, viewportHeight);
-            else if (graphics.target_needed())
-                graphicsTarget->refraction_source();
+        water.capture_refraction(viewportWidth, viewportHeight, [&]() -> gfx::TargetView {
+            if (frameLook) return frameLook->refraction_source();
+            if (auto *hdr = hdr_pass()) return hdr->refraction_source(viewportWidth, viewportHeight);
+            if (graphics.target_needed()) return graphicsTarget->refraction_source();
+            return graphicsContext.current_target();
         });
     }
 
@@ -517,7 +515,7 @@ public:
         // The looks' passes link with the settings (at map load or when the look changes), never in a run's frame.
         enhanced_pass();
         if (graphics.target_needed() && !graphicsTarget)
-            graphicsTarget = std::make_unique<GraphicsTarget>(graphicsContext, gl);
+            graphicsTarget = std::make_unique<GraphicsTarget>(graphicsContext);
         sourceLook = graphics.source;
         if (hdr) hdr->bloom = graphics.bloom;
         if (anisotropySupported) {
@@ -943,8 +941,9 @@ public:
          double seconds = -1) {
         if (width <= 0 || height <= 0) return;
         const int outputWidth = width, outputHeight = height;
-        GLint outputTarget = 0;
-        gl.GetIntegerv(GL_FRAMEBUFFER_BINDING, &outputTarget);
+        auto outputTarget = graphicsContext.current_target();
+        outputTarget.desc.width = width;
+        outputTarget.desc.height = height;
         const auto graphicsView = native::graphics_view(graphics, width, height);
         if (graphics.target_needed()) {
             graphicsTarget->begin(graphicsView, graphics.samples);
@@ -993,8 +992,7 @@ public:
         gl.Viewport(0, 0, width, height);
         plan_water(eye, vp);
         if (water.waterPlan.reflection_height) draw_water_reflection(eye, aspect, width, height, seconds);
-        GLint frameTarget = 0;
-        gl.GetIntegerv(GL_FRAMEBUFFER_BINDING, &frameTarget);
+        const auto frameTarget = graphicsContext.current_target();
         SourceHdr *pass = hdr_pass();
         frameLook = enhanced_pass();
         if (profile.profiling) profile.frameProfile.hdrEffective = pass != nullptr || (frameLook && hdr_object());
@@ -1048,9 +1046,9 @@ public:
         profile.profile_elapsed(profile.frameProfile.presentation, phaseStart);
         phaseStart = profile.profile_now();
         if (frameLook)
-            frameLook->finish(GLuint(frameTarget), look_frame(vp, eye, aspect), hdr_object(), dt);
+            frameLook->finish(frameTarget, look_frame(vp, eye, aspect), hdr_object(), dt);
         else if (pass)
-            pass->finish(GLuint(frameTarget), width, height, dt);
+            pass->finish(frameTarget, width, height, dt);
         frameLook = nullptr;
         profile.profile_elapsed(profile.frameProfile.hdrFinish, phaseStart);
         phaseStart = profile.profile_now();
@@ -1111,7 +1109,7 @@ public:
         gl.Disable(GL_BLEND);
         gl.Disable(GL_POLYGON_OFFSET_FILL);
         if (graphics.target_needed()) {
-            graphicsTarget->finish(GLuint(outputTarget), outputWidth, outputHeight, graphicsView, graphics);
+            graphicsTarget->finish(outputTarget, outputWidth, outputHeight, graphicsView, graphics);
         }
     }
 

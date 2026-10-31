@@ -10,12 +10,20 @@ class WaterPass {
 public:
     WaterPass(Gl &g, gfx::Context &ctx, RenderUniforms &u, BhContext *&c) : gl(g), context(ctx), uniforms(u), core(c) {}
 
+    ~WaterPass() {
+        context.destroy(refraction);
+        context.destroy(resolved);
+        context.destroy(refractionColorSampler);
+        context.destroy(refractionDepthSampler);
+    }
+
     struct Volume {
         std::array<float, 3> lo{}, hi{}, color{.2f, .3f, .35f};
         std::array<float, 2> range{0, 400}, span{};
     };
 
-    GLuint refractColor = 0, refractDepth = 0;
+    gfx::RenderTarget refraction, resolved;
+    gfx::Sampler refractionColorSampler, refractionDepthSampler;
     int refractWidth = 0, refractHeight = 0, waterQuality = 1;
     bool hasWaterMaterials = false, waterBeneathFaces = false;
     // The Source look's water captures (water_capture.hpp). sceneCaptured: the scene pass being drawn has refraction.
@@ -151,38 +159,37 @@ public:
 
     uint64_t refractionCaptures = 0;
 
+    void prepare_refraction(const gfx::TargetView &source, int width, int height) {
+        const auto depth = source.desc.depth == gfx::Format::none ? gfx::Format::depth24 : source.desc.depth;
+        if (refractWidth == width && refractHeight == height && refraction.desc.depth == depth) return;
+        context.destroy(refraction);
+        context.destroy(resolved);
+        refraction = context.create_target({width, height, gfx::Format::rgba16f, depth});
+        if (source.desc.samples > 1) resolved = context.create_target({width, height, source.desc.color, depth});
+        refractWidth = width;
+        refractHeight = height;
+    }
+
+    void bind_refraction() {
+        context.bind_texture(4, refraction.color, refractionColorSampler);
+        context.bind_texture(5, refraction.depth, refractionDepthSampler);
+    }
+
     template <class RefractionSource>
-    void capture_refraction(
-            int viewportWidth, int viewportHeight, std::vector<GLuint> &ownedTextures, RefractionSource source
-    ) {
+    void capture_refraction(int width, int height, RefractionSource source) {
         ++refractionCaptures;
-        GLint read_target = 0, draw_target = 0;
-        gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_target);
-        gl.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw_target);
-        source();
-        for (int i = 0; i < 2; i++) {
-            GLuint &id = i ? refractDepth : refractColor;
-            if (!id) {
-                gl.GenTextures(1, &id);
-                ownedTextures.push_back(id);
-            }
-            gl.ActiveTexture(GL_TEXTURE4 + i);
-            gl.BindTexture(GL_TEXTURE_2D, id);
-            gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, i ? GL_NEAREST : GL_LINEAR);
-            gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, i ? GL_NEAREST : GL_LINEAR);
-            gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-            if (refractWidth != viewportWidth || refractHeight != viewportHeight)
-                gl.CopyTexImage2D(
-                        GL_TEXTURE_2D, 0, i ? GL_DEPTH_COMPONENT24 : GL_RGBA16F, 0, 0, viewportWidth, viewportHeight, 0
-                );
-            else
-                gl.CopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, viewportWidth, viewportHeight);
+        const auto restore = context.current_target();
+        auto input = source();
+        prepare_refraction(input, width, height);
+        if (input.desc.samples > 1) {
+            context.resolve_color(input, resolved);
+            context.resolve_depth(input, resolved);
+            input = resolved;
         }
-        refractWidth = viewportWidth;
-        refractHeight = viewportHeight;
-        gl.BindFramebuffer(GL_READ_FRAMEBUFFER, GLuint(read_target));
-        gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, GLuint(draw_target));
+        context.copy_color(input, {0, 0, width, height}, refraction.color);
+        context.resolve_depth(input, refraction);
+        context.bind_target(restore);
+        bind_refraction();
     }
 
     std::vector<native_render::WaterSurface> water_surfaces(
@@ -266,6 +273,8 @@ public:
                 volumes.push_back(volume);
             }
         }
+        refractionColorSampler = context.create_sampler({});
+        refractionDepthSampler = context.create_sampler({gfx::Filter::nearest, gfx::Filter::nearest});
         upload_water_planes(std::move(planes));
         waterOrder.reserve(volumes.size());
         waterRects.resize(volumes.size());
