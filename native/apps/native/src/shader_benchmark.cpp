@@ -140,7 +140,8 @@ int measure_d3d11(const char *output_path) {
     Json permutations = Json::array();
     const auto measure = [&](const std::string &key) {
         const auto start = Clock::now();
-        auto program = graphics.create_program({{key, ""}});
+        const native::gfx::ProgramDesc description{{key, ""}};
+        auto program = graphics.create_program(description);
         const double elapsed = milliseconds(start);
         permutations.push_back({{"key", key}, {"totalMs", elapsed}});
         graphics.destroy(program);
