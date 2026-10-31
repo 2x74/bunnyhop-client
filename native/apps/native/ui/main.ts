@@ -62,6 +62,9 @@ import { profilePanel } from "./profile-panel";
 import type { ProfileOpen } from "../../web/src/ui/profile";
 import { nativeSupportScreen } from "./support-panel";
 import { openAccountPanel } from "./account-panel";
+import { takePasswordReset } from "../../web/src/ui/account-password";
+import { keepRunOffer } from "../../web/src/ui/keep-run";
+import { releaseKeepRunField } from "./keep-run-focus";
 import { tutorialPanel } from "./tutorial-panel";
 import { nativeNavigate } from "./navigation";
 import { cosmeticsPanel, initCosmetics, setKnifePick } from "./cosmetics";
@@ -644,8 +647,17 @@ void activityService.refreshAccount();
 window.addEventListener("bunnyhop:account", () => {
   void activityService.refreshAccount();
 });
+const keepRunLineMs = 8000;
 function refreshAccount(): void {
   accountChanged();
+  // A "forgot password" sign-in that landed: straight to setting the new one. Abandoned ones have no window open.
+  if (!takePasswordReset()) return;
+  void api.account().then(
+    (view) => {
+      if (view.password.resetUntil) openAccountPanel("password");
+    },
+    () => undefined,
+  );
 }
 const nativeWorldRecord = new NativeWorldRecord(worldRecord, (context, seconds) =>
   send({ type: "worldRecord", ...context, seconds }),
@@ -696,6 +708,7 @@ function receive(value: unknown): void {
     });
   const before = structural(),
     mapBefore = state.map;
+  if (value && typeof value === "object" && (value as { paused?: unknown }).paused === false) releaseKeepRunField();
   let finishChanged = false;
   if (value && typeof value === "object" && "timer" in value) {
     const next = readFinish((value as { timer: unknown }).timer);
@@ -855,6 +868,11 @@ const gauntlet = new NativeGauntlet({
 const runService = new NativeRunService({
   api,
   dpi: profileDpi,
+  // The end card's line for a guest. The field itself is in the pause menu, where game keys don't go.
+  verifiedBest: () =>
+    void keepRunOffer().then((line) => {
+      if (line) send({ type: "hudToast", text: line, ms: keepRunLineMs });
+    }),
   account: async () => {
     const user = await api.me();
     return api.meStale() ? null : (user?.id ?? null);
@@ -904,7 +922,6 @@ const onGamepad = installGamepadNavigation(() => !state.map || state.paused);
 const introHooks = {
   play: selectMap,
   learn: () => show("tutorial"),
-  signIn: () => openAccountPanel("save"),
   active: () => screen === "home" && !state.map && !state.loading,
 };
 setReplayIntro(() => openOnboarding(introHooks));

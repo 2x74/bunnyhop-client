@@ -1,13 +1,17 @@
 import { h } from "../../web/src/ui/dom";
-import { api } from "../../web/src/api";
+import { api, type User } from "../../web/src/api";
 import { accountChanged } from "../../web/src/ui/account-state";
+import { SECOND_ACCOUNT_HELP } from "../../web/src/ui/account-copy";
+import { emailSignIn } from "../../web/src/ui/account-email";
 import { nameField } from "../../web/src/ui/account-name";
+import { markPasswordReset, passwordSignIn } from "../../web/src/ui/account-password";
 import { localName } from "../../web/src/ui/account";
 import { COSMETICS } from "../../web/src/progression";
 import { getOutfit, setOutfit } from "../../web/src/player/cosmetics";
 import { firstMapOfTheDay } from "../../web/src/ui/first-map";
 import { bunnyStage, type BunnyStage } from "./onboarding-preview";
-import { send, state } from "./bridge";
+import { toast } from "./account-panel";
+import { LIVE_ORIGIN, openAuth, send, state } from "./bridge";
 const DONE = "bunnyhop:onboarded";
 export function hasOnboardingHistory(storage: Storage): boolean {
   if (storage.getItem(DONE) || storage.getItem("bunnyhop:last-map") || storage.getItem("bunnyhop:stats")) return true;
@@ -18,7 +22,6 @@ export const convertSensitivity = (s: number, yaw: number) => Math.round(((s * y
 interface Hooks {
   play: (map: string) => void;
   learn: () => void;
-  signIn: () => void;
   active: () => boolean;
 }
 let running = false;
@@ -83,6 +86,54 @@ export function openOnboarding(hooks: Hooks): void {
     step++;
     paint();
   };
+  // A returning player leaves the intro as themself. A new account carries on from the name.
+  const signedIn = (user: User, message: string) => {
+    accountChanged(user);
+    toast(message);
+    if (user.onboarded) {
+      finish();
+      return;
+    }
+    stage?.setName(user.name);
+    next();
+  };
+  async function paintSignIn(): Promise<void> {
+    const back = h("button.btn", { type: "button", onclick: () => paint() }, "Back");
+    const providers = await api.providers().catch(() => ({ discord: false, email: false }));
+    if (!dialog.open) return;
+    const forgot = h(
+      "p.acct-note",
+      { hidden: true },
+      "Sign in below with the Discord or email on your account, then you have 15 minutes to set a new password without the old one. An account with neither can't be reset.",
+    );
+    const discord = h(
+      "button.btn.discord",
+      {
+        type: "button",
+        onclick: () => finish(() => openAuth(api.discordLoginUrl(`${LIVE_ORIGIN}/?native=1`))),
+      },
+      "Sign in with Discord",
+    );
+    // Name and password first: it can't make a second account, a Discord or email that's new here can.
+    const methods = [
+      passwordSignIn({
+        onDone: signedIn,
+        onForgot: () => {
+          markPasswordReset();
+          forgot.hidden = false;
+        },
+      }),
+      forgot,
+      providers.discord ? discord : null,
+      providers.email ? emailSignIn({ autofocus: false, onDone: signedIn }) : null,
+      providers.discord || providers.email ? h("p.acct-note.dim", null, SECOND_ACCOUNT_HELP) : null,
+    ].filter((method): method is HTMLElement => !!method);
+    body.replaceChildren(
+      h("h2", null, "Sign in"),
+      h("div.native-intro-signin", null, ...methods),
+      h("div.native-intro-actions", null, back),
+    );
+  }
   function paint(): void {
     stage?.strafe(step === 0);
     const actions = h("div.native-intro-actions");
@@ -138,7 +189,7 @@ export function openOnboarding(hooks: Hooks): void {
       });
       actions.append(
         btn,
-        h("button.link-btn", { type: "button", onclick: () => finish(hooks.signIn) }, "Already play? Sign in"),
+        h("button.link-btn", { type: "button", onclick: () => void paintSignIn() }, "Already play? Sign in"),
       );
       body.replaceChildren(h("h2", null, "What should we call you?"), nf.el, actions);
     } else if (step === 1) {

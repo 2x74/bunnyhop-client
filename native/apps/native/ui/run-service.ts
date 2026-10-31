@@ -89,6 +89,8 @@ export interface RunServiceDependencies {
   sleep?: (ms: number) => Promise<void>;
   pollLimitMs?: number;
   pollDelayMs?: number;
+  /** A verified new best, now safely on the server: a guest's moment to save their progress (ui/keep-run.ts). */
+  verifiedBest?: () => void;
   /** The DPI the player entered in Settings (self-reported, null when unset or hidden), sent with the replay. */
   dpi?: () => number | null;
   /** Called once per finished run, with its generation: a gauntlet tag is spent here. */
@@ -565,6 +567,7 @@ export class NativeRunService {
     const status = result.status === "queued" || result.status === "verifying" ? "pending" : result.status;
     // XP, the level and unlocks feed the finish card's reward reel; only a verified run has earned them.
     const progression = status === "verified" ? runProgression(result) : {};
+    if (status === "verified" && result.pb) this.dependencies.verifiedBest?.();
     const announcer = result.announcer === "pb" || result.announcer === "wr" ? { announcer: result.announcer } : {};
     this.status(session, status, {
       ...progression,

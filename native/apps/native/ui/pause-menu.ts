@@ -23,6 +23,7 @@ import { versionButton } from "../../web/src/ui/changelog";
 import { supportLink } from "../../web/src/ui/community";
 import { openFeedback } from "../../web/src/feedback/state";
 import { openInbox, withInboxBadge } from "../../web/src/inbox/state";
+import { keepRunBlock } from "../../web/src/ui/keep-run";
 import { ACTIONS, keyLabel } from "../../web/src/ui/settings";
 
 /** The pause menu's own keys (web menu.ts PAUSE_KEYS): a Main menu bind on one of these doesn't leave from here. */
@@ -422,6 +423,7 @@ export function pauseScreen(a: PauseActions): HTMLElement {
   const panel = h(
     "section.pause-panel",
     { "aria-label": "Pause menu panel" },
+    keepRunBlock(),
     h("header.pp-head", null, tabBar),
     panelBody,
   );

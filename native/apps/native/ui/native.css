@@ -256,6 +256,9 @@ dialog.css-dialog { width:min(56rem,96vw); }
 .native-intro {width:min(620px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;background:var(--panel,#16191d);color:var(--text,#eee);border:1px solid #666;border-radius:16px;padding:clamp(20px,4vw,48px)}
 .native-intro::backdrop{background:#000b;backdrop-filter:blur(8px)}
 .native-intro h2{font-size:clamp(24px,4vw,38px);margin:0 0 24px}
+.native-intro-signin{display:flex;flex-direction:column;align-items:flex-start;gap:12px}
+.native-intro-signin form{width:100%}
+.native-intro-signin input{margin:0}
 .native-intro-actions,.native-intro-colours{display:flex;flex-wrap:wrap;gap:12px;margin:24px 0}
 .native-intro input,.native-intro select{max-width:100%;padding:12px;margin:8px 12px 8px 0}
 .native-intro-colours [aria-pressed=true]{outline:3px solid currentColor;outline-offset:3px}
