@@ -96,7 +96,8 @@ int main(int argc, char **argv) {
         native::Gl gl;
         gl.load();
         {
-            native::avatar::AvatarService service(gl, argv[1]);
+            native::gfx::Context graphics(gl);
+            native::avatar::AvatarService service(graphics, gl, argv[1]);
             for (const auto &job : jobs)
                 save(output, job.at("name").get<std::string>(), render(service, gl, job.at("request")));
         }

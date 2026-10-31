@@ -16,7 +16,8 @@ def main():
     parser.add_argument("--commit", required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--target", action="append", choices=("render-smoke", "effects-render-smoke",
-                        "display-modes-smoke", "video-frames-smoke", "render-benchmark"))
+                        "display-modes-smoke", "video-frames-smoke", "render-benchmark",
+                        "avatar-smoke", "menu-backdrop-smoke"))
     args = parser.parse_args()
     native = Path(__file__).resolve().parents[3]
     repo = native.parent

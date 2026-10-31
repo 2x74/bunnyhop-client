@@ -92,7 +92,8 @@ void render_case(
     renderer.draw(shot.width, shot.height, eye, input, &spawn, 4);
     const auto area = native::hud_area(renderer.output_view(shot.width, shot.height), shot.width, shot.height);
     {
-        native::HudViewport viewport(gl, area, shot.width, shot.height);
+        native::gfx::Context graphics(gl);
+        native::HudViewport viewport(graphics, area, shot.width, shot.height);
         draw_hud(hud, spawn, area.width, area.height);
     }
     if (gl.GetError() != GL_NO_ERROR) throw std::runtime_error(std::string("GL error in ") + shot.name);
@@ -126,7 +127,8 @@ int main(int argc, char **argv) {
         {
             native::Renderer renderer(gl, core.get());
             renderer.set_viewmodel_visible(false);
-            native::NativeHud hud(gl, argv[3]);
+            native::gfx::Context hud_graphics(gl);
+            native::NativeHud hud(hud_graphics, argv[3]);
             hud.preferences(native::default_settings());
             for (const auto &shot : cases)
                 render_case(gl, renderer, hud, spawn, shot, output);

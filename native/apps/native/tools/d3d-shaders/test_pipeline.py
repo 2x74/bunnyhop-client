@@ -33,12 +33,17 @@ class ShaderPipelineTests(unittest.TestCase):
     def test_seam_program_descriptors_preserve_shader_sources(self):
         source = '''Program create_program(const ProgramDesc &source) { return {}; }
         void create_program() {}
-        context.create_program({{"presentation", ""}, vs, fs.c_str()});'''
+        context.create_program(
+            {{"presentation", ""}, vs, fs.c_str()}
+        );'''
         self.assertEqual(calls(source)[0][1], ["vs", "fs.c_str()"])
         self.assertEqual(calls(source)[0][2:], ("presentation", ""))
         self.assertEqual(len(calls(source)), 1)
         self.assertEqual(calls("link_program(gl_, source.vertex, source.fragment);"), [])
         self.assertFalse(shader_source(Path("gfx_smoke.cpp")))
+        hud = calls((SOURCE / "hud.hpp").read_text(encoding="utf-8"))
+        self.assertEqual(len(hud), 1)
+        self.assertEqual(hud[0][2:], ("hud", ""))
 
     def test_reachable_player_cache_keys(self):
         variants = player_variants(range(28))
