@@ -16,6 +16,7 @@ public:
         , uniforms(u) {}
 
     RenderGeometry skyMesh;
+    std::array<gfx::Pipeline, 2> depthPipelines, depthEndPipelines;
     GLuint skyProgram = 0;
     float frameSkyYaw = 0;
     static constexpr GLint sky_panorama_unit = 10;
@@ -41,6 +42,10 @@ public:
     ~SkyPass() {
         context.destroy(skyPanorama);
         context.destroy(panoramaSampler);
+        for (auto &pipeline : depthPipelines)
+            context.destroy(pipeline);
+        for (auto &pipeline : depthEndPipelines)
+            context.destroy(pipeline);
     }
 
     void panorama_sampling(float anisotropy) {
@@ -188,35 +193,48 @@ public:
         gl.Clear(GL_DEPTH_BUFFER_BIT);
     }
 
-    // Sky brush faces only write depth, so the world behind them stays hidden as in Source.
-    void draw_sky_depth(const native::Matrix &vp, GLuint depthProgram, float clipHeight) {
+    // Sky brushes write only depth so the world behind them stays hidden as in Source.
+    void draw_sky_depth(const native::Matrix &vp, RenderDepthProgram &depth, float clipHeight, bool mirrored) {
         if (!skyMesh.geometry) return;
-        gl.Disable(GL_BLEND);
-        gl.DepthMask(GL_TRUE);
-        gl.UseProgram(depthProgram);
-        gl.UniformMatrix4fv(uniforms.loc(depthProgram, "viewProjection"), 1, GL_FALSE, vp.data());
-        gl.Uniform1f(uniforms.loc(depthProgram, "clipHeight"), clipHeight);
-        gl.ColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-        gl.Disable(GL_CULL_FACE);
-        gl.Enable(GL_POLYGON_OFFSET_FILL);
-        gl.PolygonOffset(1, 2);
+        context.pipeline(depthPipelines[unsigned(mirrored)]);
+        depth.bind(vp, clipHeight);
         context.bind_geometry(skyMesh.geometry);
         for (const auto &item : skyGroups) {
             if (item.sky3d) continue;
-            BhTransform t{};
-            t.visible = 1;
-            if (item.model) bh_model_transform(core, item.model, &t);
-            if (!t.visible) continue;
-            const auto model = native::model_matrix(t);
-            gl.UniformMatrix4fv(uniforms.loc(depthProgram, "model"), 1, GL_FALSE, model.data());
-            const auto first = reinterpret_cast<void *>(uintptr_t(item.first_index) * sizeof(uint32_t));
-            gl.DrawElements(GL_TRIANGLES, item.index_count, GL_UNSIGNED_INT, first);
+            BhTransform transform{};
+            transform.visible = 1;
+            if (item.model) bh_model_transform(core, item.model, &transform);
+            if (!transform.visible) continue;
+            depth.model(native::model_matrix(transform));
+            context.draw_indexed(
+                    gfx::Primitive::triangles,
+                    gfx::IndexType::u32,
+                    size_t(item.first_index) * sizeof(uint32_t),
+                    int(item.index_count)
+            );
         }
-        gl.ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        gl.Disable(GL_POLYGON_OFFSET_FILL);
+        context.pipeline(depthEndPipelines[unsigned(mirrored)]);
+    }
+
+    void prepare_depth_pipelines() {
+        for (unsigned mirror = 0; mirror < depthPipelines.size(); ++mirror) {
+            gfx::PipelineState state;
+            state.raster.offset = true;
+            state.raster.slope_bias = 1;
+            state.raster.constant_bias = 2;
+            state.raster.winding = mirror ? gfx::Winding::clockwise : gfx::Winding::counter_clockwise;
+            state.raster.clip_distance = true;
+            state.color_write = {false, false, false, false};
+            depthPipelines[mirror] = context.create_pipeline(state);
+            state.raster.offset = false;
+            state.raster.clip_distance = false;
+            state.color_write = {true, true, true, true};
+            depthEndPipelines[mirror] = context.create_pipeline(state);
+        }
     }
 
     void prepare_program() {
+        prepare_depth_pipelines();
         skyProgram = link_program(gl, native_render::sky_vertex, native_render::sky_fragment().c_str());
     }
 };

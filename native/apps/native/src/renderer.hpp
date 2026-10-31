@@ -81,7 +81,7 @@ class Renderer {
     WaterPass water{gl, graphicsContext, uniforms, core};
     WorldPass world{graphicsContext, core, resources, profile};
     SkyPass sky{gl, graphicsContext, core, resources, uniforms};
-    ShadowPass shadows{gl, graphicsContext, resources, uniforms, world};
+    ShadowPass shadows{graphicsContext, resources, world};
     PresentationPass presentationPass{graphicsContext, core, profile};
     bool flashlightEnabled = false;
     float fieldOfView = 90;
@@ -488,8 +488,6 @@ public:
         graphicsContext.destroy(water.planesTexture);
         graphicsContext.destroy(water.planesSampler);
         if (sky.skyProgram) gl.DeleteProgram(sky.skyProgram);
-        if (shadows.depthProgram) gl.DeleteProgram(shadows.depthProgram);
-        if (shadows.cutoutDepthProgram) gl.DeleteProgram(shadows.cutoutDepthProgram);
     }
 
     // A replay watched in the runner's view: their shape and fit over the viewer's own graphics settings.
@@ -813,7 +811,9 @@ public:
         );
     }
 
-    void draw_sky_depth(const native::Matrix &vp) { sky.draw_sky_depth(vp, shadows.depthProgram, clipHeight); }
+    void draw_sky_depth(const native::Matrix &vp) {
+        sky.draw_sky_depth(vp, shadows.depthProgram, clipHeight, clipHeight != no_clip_height);
+    }
 
     void prepare_sun_light(const float eye[3], double seconds) {
         shadows.prepare_sun_light(eye, seconds, graphics, frameSun, visual_profile(), viewmodel.get(), roomActors);

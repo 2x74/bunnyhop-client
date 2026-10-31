@@ -283,6 +283,7 @@ public:
         for (unsigned variant = 0; variant < pipelines.size(); ++variant) {
             gfx::PipelineState state;
             state.raster.offset = variant & 1;
+            state.raster.clip_distance = true;
             state.raster.slope_bias = -1;
             state.raster.constant_bias = -4;
             state.raster.cull = variant & 2 ? gfx::Cull::none : gfx::Cull::back;
@@ -389,36 +390,8 @@ public:
         if (water.sceneCaptured) water.bind_refraction();
     }
 
-    void prepare_scene_values(
-            const native::Matrix &vp,
-            const float eye[3],
-            bool sky,
-            double time,
-            bool reflection,
-            const View &view,
-            WaterPass &water
-    ) {
+    void sky_fog_values(const View &view) {
         const auto &skyInfo = view.skyInfo;
-        context.bind_program(program);
-        sceneValues.viewProjection = vp;
-        sceneValues.clipHeight = reflection ? view.clipHeight : gfx::no_clip_height;
-        water.water_uniforms(waterConstants, eye, vp, view.viewportWidth, view.viewportHeight);
-        sceneValues.timeSeconds = time;
-        sceneValues.reflectionReady = !sky && !reflection && water.reflectionDrawn;
-        sceneValues.reflectionHeight = water.waterPlan.reflection_height.value_or(0);
-        if (water.reflectionDrawn)
-            water.waterReflection->bind(8);
-        else
-            resources.bind(8, resources.white);
-        sceneValues.fullbright = view.graphics.fullbright;
-        sceneValues.potato = view.graphics.potato;
-        sceneValues.skyPass = sky && view.hasSky && skyInfo.fog_enable;
-        sceneValues.flashlight = view.flashlightEnabled && !sky;
-        sceneValues.flashDirection = {
-                float(std::cos(view.lastPitch * native::radians) * std::cos(view.lastYaw * native::radians)),
-                float(std::cos(view.lastPitch * native::radians) * std::sin(view.lastYaw * native::radians)),
-                float(-std::sin(view.lastPitch * native::radians))
-        };
         float fog[3] = {skyInfo.fog_color[0] / 255.f, skyInfo.fog_color[1] / 255.f, skyInfo.fog_color[2] / 255.f};
         if (skyInfo.fog_blend) {
             const float dx = std::cos(view.lastPitch * native::radians) * std::cos(view.lastYaw * native::radians),
@@ -444,6 +417,35 @@ public:
                 skyInfo.fog_end / std::max(skyInfo.scale, .001f),
                 skyInfo.fog_max_density
         };
+    }
+
+    void prepare_scene_values(
+            const native::Matrix &vp,
+            const float eye[3],
+            bool sky,
+            double time,
+            bool reflection,
+            const View &view,
+            WaterPass &water
+    ) {
+        const auto &skyInfo = view.skyInfo;
+        context.bind_program(program);
+        sceneValues.viewProjection = vp;
+        sceneValues.clipHeight = reflection ? view.clipHeight : gfx::no_clip_height;
+        water.water_uniforms(waterConstants, eye, vp, view.viewportWidth, view.viewportHeight);
+        sceneValues.timeSeconds = time;
+        sceneValues.reflectionReady = !sky && !reflection && water.reflectionDrawn;
+        sceneValues.reflectionHeight = water.waterPlan.reflection_height.value_or(0);
+        sceneValues.fullbright = view.graphics.fullbright;
+        sceneValues.potato = view.graphics.potato;
+        sceneValues.skyPass = sky && view.hasSky && skyInfo.fog_enable;
+        sceneValues.flashlight = view.flashlightEnabled && !sky;
+        sceneValues.flashDirection = {
+                float(std::cos(view.lastPitch * native::radians) * std::cos(view.lastYaw * native::radians)),
+                float(std::cos(view.lastPitch * native::radians) * std::sin(view.lastYaw * native::radians)),
+                float(-std::sin(view.lastPitch * native::radians))
+        };
+        sky_fog_values(view);
         sceneValues.lightmapScale = lightmapInfo.scale;
         context.constants(sceneConstants, &sceneValues);
         bind_scene_textures(water);
