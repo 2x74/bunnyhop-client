@@ -2,6 +2,8 @@
 #include "gfx_types.hpp"
 #include "gfx_gl_api.hpp"
 #include <algorithm>
+#include <atomic>
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -10,6 +12,17 @@ namespace native::gfx {
 class OpenGlContext {
     Gl &gl_;
     TargetView target_;
+
+    static uintptr_t software_handle() {
+        static std::atomic<uintptr_t> next{1};
+        return next.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    static GLenum addressing(Address address) {
+        if (address == Address::repeat) return GL_REPEAT;
+        if (address == Address::mirror) return GL_MIRRORED_REPEAT;
+        return address == Address::border ? GL_CLAMP_TO_BORDER : GL_CLAMP_TO_EDGE;
+    }
 
     template <typename Function>
     static uintptr_t generate(Function function) {
@@ -35,6 +48,8 @@ class OpenGlContext {
                 return {GL_R8, GL_RED, GL_UNSIGNED_BYTE, 1};
             case Format::rgba8:
                 return {GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, 4};
+            case Format::srgb8:
+                return {GL_SRGB8_ALPHA8, GL_RGBA, GL_UNSIGNED_BYTE, 4};
             case Format::rgba16f:
                 return {GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, 8};
             case Format::rgba32f:
@@ -116,6 +131,14 @@ public:
 
     static Backend backend() { return Backend::opengl; }
 
+    float max_anisotropy() const {
+        if (!SDL_GL_ExtensionSupported("GL_EXT_texture_filter_anisotropic")) return 1;
+        constexpr GLenum maximum_anisotropy = 0x84ff;
+        GLfloat maximum = 1;
+        gl_.GetFloatv(maximum_anisotropy, &maximum);
+        return maximum;
+    }
+
     int max_samples(Format color = Format::rgba8, Format depth = Format::depth24) const {
         GLint result = 1, limit = 1;
         gl_.GetIntegerv(GL_MAX_SAMPLES, &result);
@@ -187,6 +210,7 @@ public:
                     {location, field.offset, field.type, field.count, size, stride, packing_offset, pack}
             );
         }
+        result.id = software_handle();
         return result;
     }
 
@@ -241,7 +265,7 @@ public:
         gl_.Uniform1i(gl_.GetUniformLocation(GLuint(program.id), name), GLint(unit));
     }
 
-    Pipeline create_pipeline(const PipelineState &state) { return {state}; }
+    Pipeline create_pipeline(const PipelineState &state) { return {state, software_handle()}; }
 
     void destroy(Pipeline &pipeline) { pipeline = {}; }
 
@@ -330,6 +354,8 @@ public:
     }
 
     Sampler create_sampler(const SamplerDesc &desc) {
+        if (!std::isfinite(desc.max_anisotropy) || desc.max_anisotropy < 1)
+            throw std::runtime_error("Invalid sampler anisotropy");
         Sampler result;
         result.id = generate(gl_.GenSamplers);
         GLenum minification = desc.minification == Filter::linear ? GL_LINEAR : GL_NEAREST;
@@ -343,13 +369,20 @@ public:
         gl_.SamplerParameteri(
                 result.id, GL_TEXTURE_MAG_FILTER, desc.magnification == Filter::linear ? GL_LINEAR : GL_NEAREST
         );
-        const GLenum address = desc.address == Address::clamp    ? GL_CLAMP_TO_EDGE
-                               : desc.address == Address::mirror ? GL_MIRRORED_REPEAT
-                               : desc.address == Address::border ? GL_CLAMP_TO_BORDER
-                                                                 : GL_REPEAT;
-        gl_.SamplerParameteri(result.id, GL_TEXTURE_WRAP_S, address);
-        gl_.SamplerParameteri(result.id, GL_TEXTURE_WRAP_T, address);
-        gl_.SamplerParameteri(result.id, GL_TEXTURE_WRAP_R, address);
+        const Address axes[] = {desc.wrap_s, desc.wrap_t, desc.wrap_r};
+        const GLenum parameters[] = {GL_TEXTURE_WRAP_S, GL_TEXTURE_WRAP_T, GL_TEXTURE_WRAP_R};
+        for (unsigned axis = 0; axis < 3; ++axis)
+            gl_.SamplerParameteri(
+                    GLuint(result.id),
+                    parameters[axis],
+                    addressing(axes[axis] == Address::inherit ? desc.address : axes[axis])
+            );
+        if (desc.max_anisotropy > 1) {
+            const float maximum = max_anisotropy();
+            constexpr GLenum texture_anisotropy = 0x84fe;
+            if (maximum > 1)
+                gl_.SamplerParameterf(GLuint(result.id), texture_anisotropy, std::min(desc.max_anisotropy, maximum));
+        }
         gl_.SamplerParameteri(result.id, GL_TEXTURE_COMPARE_MODE, desc.compare ? GL_COMPARE_REF_TO_TEXTURE : GL_NONE);
         gl_.SamplerParameteri(result.id, GL_TEXTURE_COMPARE_FUNC, comparison(desc.comparison));
         gl_.SamplerParameterf(result.id, GL_TEXTURE_MIN_LOD, desc.min_lod);
@@ -406,10 +439,12 @@ public:
         target = {};
     }
 
-    static TargetView window_target(int width, int height) { return {0, {width, height}}; }
+    static TargetView window_target(int width, int height) { return {0, {width, height}, 0, true}; }
 
     // Borrowed WGL interop targets stay owned by LowLatencyPresenter.
-    static TargetView borrow_target(uintptr_t framebuffer, const TargetDesc &desc) { return {framebuffer, desc}; }
+    static TargetView borrow_target(uintptr_t framebuffer, const TargetDesc &desc) {
+        return {framebuffer, desc, 0, true};
+    }
 
     void bind_target(const TargetView &target) {
         gl_.BindFramebuffer(GL_FRAMEBUFFER, GLuint(target.id));
@@ -481,6 +516,11 @@ public:
     void stream_vertices(Geometry geometry, std::span<const std::byte> data) {
         gl_.BindBuffer(GL_ARRAY_BUFFER, GLuint(geometry.vertices));
         gl_.BufferData(GL_ARRAY_BUFFER, GLsizeiptr(data.size()), data.data(), GL_STREAM_DRAW);
+    }
+
+    void upload_vertices(Geometry geometry, std::span<const std::byte> data) {
+        gl_.BindBuffer(GL_ARRAY_BUFFER, GLuint(geometry.vertices));
+        gl_.BufferData(GL_ARRAY_BUFFER, GLsizeiptr(data.size()), data.data(), GL_STATIC_DRAW);
     }
 
     void upload_indices(Geometry &geometry, std::span<const std::byte> data) {

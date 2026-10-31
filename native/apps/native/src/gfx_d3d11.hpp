@@ -18,6 +18,7 @@ public:
     D3D11Context(const D3D11Context &) = delete;
     D3D11Context &operator=(const D3D11Context &) = delete;
     static std::unique_ptr<D3D11Context> warp();
+    float max_anisotropy() const;
     int max_samples(Format color = Format::rgba8, Format depth = Format::depth24) const;
     TargetView current_target() const;
     int max_texture_size() const;
@@ -59,6 +60,7 @@ public:
     void destroy(Geometry &geometry);
     void bind_geometry(Geometry geometry);
     void stream_vertices(Geometry geometry, std::span<const std::byte> data);
+    void upload_vertices(Geometry geometry, std::span<const std::byte> data);
     void upload_indices(Geometry &geometry, std::span<const std::byte> data);
     void draw(Primitive topology, int first, int count);
     void draw_instanced(Primitive topology, int first, int count, int instances);
