@@ -40,6 +40,11 @@ class ShaderPipelineTests(unittest.TestCase):
         self.assertEqual(calls("link_program(gl_, source.vertex, source.fragment);"), [])
         self.assertFalse(shader_source(Path("gfx_smoke.cpp")))
 
+    def test_postprocessing_keys_match_the_manifest(self):
+        for filename in ("source_hdr.hpp", "enhanced_look.hpp"):
+            sites = calls((SOURCE / filename).read_text(encoding="utf-8"))
+            self.assertEqual([site[2:] for site in sites], [(key, "") for key in NAMES[filename]])
+
     def test_reachable_player_cache_keys(self):
         variants = player_variants(range(28))
         self.assertEqual(len(variants), 117)
