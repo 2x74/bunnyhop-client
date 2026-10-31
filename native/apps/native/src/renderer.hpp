@@ -64,59 +64,28 @@ namespace native {
 #include "water_reflection.hpp"
 #include "render_uniforms.hpp"
 #include "water_pass.hpp"
+#include "render_resources.hpp"
+#include "render_profile.hpp"
+#include "world_pass.hpp"
 
 class Renderer {
-    struct Geometry {
-        GLuint vao = 0, vbo = 0, ebo = 0, blend = 0;
-        size_t indices = 0;
-    };
-
-    using ProfileClock = std::chrono::steady_clock;
-
-    struct FrameProfile {
-        double lightmapRefresh = 0, lightmapUpload = 0, sky = 0, buildCull = 0, sort = 0, submit = 0, presentation = 0,
-               hdrFinish = 0, waterReflection = 0;
-        double floorReport = 0, floorDraw = 0, actorDraw = 0, presentationBuild = 0, presentationWaterUniforms = 0,
-               presentationSubmit = 0, viewmodel = 0;
-        uint64_t groups = 0, survivors = 0, drawCalls = 0, triangles = 0, atlasUpdateBytes = 0, floorCount = 0;
-        bool hdrAuthored = false, hdrEffective = false;
-        size_t waterVolumes = 0;
-    } frameProfile;
-
-    bool profiling = false;
-
-    ProfileClock::time_point profile_now() const {
-        return profiling ? ProfileClock::now() : ProfileClock::time_point{};
-    }
-
-    void profile_elapsed(double &value, ProfileClock::time_point start) {
-        if (profiling) value += std::chrono::duration<double, std::milli>(ProfileClock::now() - start).count();
-    }
-
+    RenderProfile profile;
     Gl &gl;
     gfx::Context graphicsContext;
     RenderUniforms uniforms{gl};
     BhContext *core;
+    RenderResources resources{gl, core};
     WaterPass water{gl, uniforms, core};
-    Geometry worldMesh, propMesh, skyMesh;
+    WorldPass world{gl, core, resources, uniforms, profile};
+    RenderGeometry skyMesh;
     float fieldOfView = 90;
     std::vector<native_render::Actor> roomActors;
     std::optional<native_render::Actor> replayActor, compareActor;
     std::string outfit, packedLoadout;
     static constexpr float no_clip_height = -1e30f;
     float clipHeight = no_clip_height;
-    GLuint program = 0, skyProgram = 0, depthProgram = 0, emptyVao = 0, lightmap = 0, white = 0, checker = 0;
-    std::vector<GLuint> ownedTextures;
-    std::unordered_map<uint64_t, GLuint> textures;
-    std::unordered_map<int32_t, std::pair<uint32_t, uint32_t>> textureSizes;
-    std::unordered_map<int32_t, std::array<float, 3>> textureAverages;
-    std::vector<BhGroup> groups, skyGroups;
-    std::vector<BhPropGroup> propGroups;
-    std::vector<GLuint> normals;
-    std::array<float, 3> sunDirection{.35f, .45f, .82f};
-    bool hasSun = false;
-    std::vector<BhMaterial> materials;
-    std::vector<BhMaterialExtra> extras;
+    GLuint skyProgram = 0, depthProgram = 0;
+    std::vector<BhGroup> skyGroups;
     std::array<int32_t, 6> skyMaterials{-1, -1, -1, -1, -1, -1};
     BhSkyInfo skyInfo{};
     bool hasSky = false;
@@ -130,7 +99,6 @@ class Renderer {
     bool spectatedSilenced = false, viewmodelLeftHand = false;
     native_render::EventQueue<unsigned, 32> spectatedAttacks;
     // Source look (source_hdr.hpp): CS:S's exposure and bloom on maps whose lightmap came from HDR lighting.
-    BhLightmapInfo lightmapInfo{1, 0};
     bool sourceLook = true, hdrUnavailable = false;
     std::unique_ptr<SourceHdr> hdr;
     double lastSeconds = -1;
@@ -138,10 +106,10 @@ class Renderer {
     // CS:S's exposure and bloom on maps with HDR lighting: the Source look's own pass, and the first step of the
     // Enhanced and Cinematic looks.
     SourceHdr *hdr_object() {
-        if (!sourceLook || graphics.potato || graphics.fullbright || !lightmapInfo.hdr || hdrUnavailable)
+        if (!sourceLook || graphics.potato || graphics.fullbright || !world.lightmapInfo.hdr || hdrUnavailable)
             return nullptr;
         if (!hdr) try {
-                hdr = std::make_unique<SourceHdr>(gl, emptyVao);
+                hdr = std::make_unique<SourceHdr>(gl, resources.emptyVao);
             } catch (const std::exception &e) {
                 hdrUnavailable = true;
                 std::cerr << "Native HDR unavailable, drawing straight: " << e.what() << '\n';
@@ -162,7 +130,7 @@ class Renderer {
     EnhancedLook *enhanced_pass() {
         if (!graphics.look.composer() || graphics.potato || enhancedUnavailable) return nullptr;
         if (!enhanced) try {
-                enhanced = std::make_unique<EnhancedLook>(gl, emptyVao);
+                enhanced = std::make_unique<EnhancedLook>(gl, resources.emptyVao);
             } catch (const std::exception &e) {
                 enhancedUnavailable = true;
                 std::cerr << "Enhanced look unavailable, drawing the Source look: " << e.what() << '\n';
@@ -176,7 +144,6 @@ class Renderer {
     std::string skyPanoramaId;
     native::SkyPicture skyPanoramaInfo;
     std::string mapName, mapSha;
-    native::MapSun mapSun;
     native::SceneSun frameSun;
     // Sun shadows of the composer looks (sun_shadows.hpp), on their own texture unit.
     std::unique_ptr<SunShadowMap> sunShadows;
@@ -204,338 +171,6 @@ class Renderer {
     uint32_t queuedWeaponFlags = 0, queuedAttackMode = 0;
     bool queuedAttack = false;
 
-    GLuint upload(const BhImage &image, bool repeat, bool mipmap, bool srgb = true) {
-        if (!image.rgba || !image.width || !image.height || uint64_t(image.width) * image.height * 4 > image.byte_count)
-            throw std::runtime_error("Invalid native texture");
-        GLint limit = 0;
-        gl.GetIntegerv(GL_MAX_TEXTURE_SIZE, &limit);
-        if (image.width > uint32_t(limit) || image.height > uint32_t(limit))
-            throw std::runtime_error("Native texture exceeds GPU limit");
-        GLuint id = 0;
-        gl.GenTextures(1, &id);
-        ownedTextures.push_back(id);
-        gl.BindTexture(GL_TEXTURE_2D, id);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, mipmap ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, repeat ? GL_REPEAT : GL_CLAMP_TO_EDGE);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, repeat ? GL_REPEAT : GL_CLAMP_TO_EDGE);
-        gl.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
-        gl.TexImage2D(
-                GL_TEXTURE_2D,
-                0,
-                srgb ? GL_SRGB8_ALPHA8 : GL_RGBA8,
-                image.width,
-                image.height,
-                0,
-                GL_RGBA,
-                GL_UNSIGNED_BYTE,
-                image.rgba
-        );
-        if (mipmap) gl.GenerateMipmap(GL_TEXTURE_2D);
-        return id;
-    }
-
-    GLuint texture(int32_t index, bool raw = false) {
-        if (index < 0) return white;
-        const uint64_t key = uint32_t(index) | (uint64_t(raw) << 32);
-        const auto found = textures.find(key);
-        return found == textures.end() ? checker : found->second;
-    }
-
-    ResourceLoading cache_texture(int32_t index, bool raw = false) {
-        if (index < 0) co_return;
-        const uint64_t key = uint32_t(index) | (uint64_t(raw) << 32);
-        if (textures.count(key)) co_return;
-        BhImage image{};
-        GLuint id = checker;
-        if (bh_texture(core, index, &image)) {
-            textureSizes[index] = {image.width, image.height};
-            std::vector<uint8_t> pixels;
-            if (!raw && cutoutTextures.count(index)) {
-                pixels.assign(image.rgba, image.rgba + image.byte_count);
-                const auto width = image.width, height = image.height;
-                std::packaged_task<std::vector<uint8_t>()> prepare(
-                        [pixels = std::move(pixels), width, height]() mutable {
-                            if (native_render::has_transparent_texels(pixels))
-                                native_render::bleed_transparent_texels(pixels, width, height);
-                            return std::move(pixels);
-                        }
-                );
-                auto result = prepare.get_future();
-                std::thread(std::move(prepare)).detach();
-                while (result.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
-                    co_yield "cutout pixels";
-                pixels = result.get();
-            }
-            co_yield "upload texture";
-            const BhImage prepared{
-                    pixels.empty() ? image.rgba : pixels.data(), image.byte_count, image.width, image.height
-            };
-            id = upload(prepared, true, true, !raw);
-            if (!raw) {
-                std::array<float, 3> average{};
-                const size_t pixels = size_t(image.width) * image.height;
-                const size_t step = std::max(size_t(1), pixels / 4096);
-                size_t count = 0;
-                for (size_t pixel = 0; pixel < pixels; pixel += step) {
-                    for (size_t channel = 0; channel < 3; ++channel) {
-                        average[channel] += native_render::srgb_linear(float(image.rgba[pixel * 4 + channel]) / 255);
-                    }
-                    ++count;
-                }
-                for (auto &channel : average)
-                    channel /= std::max(size_t(1), count);
-                textureAverages[index] = average;
-            }
-        }
-        textures.emplace(key, id);
-    }
-
-    // BhMaterial flags (bunnyhop_core's MAT_TRANSLUCENT, MAT_ALPHATEST).
-    static constexpr uint32_t material_translucent = 1, material_alpha_test = 2;
-    // Textures a cutout or translucent material reads alpha from (texture_bleed.hpp).
-    std::unordered_set<int32_t> cutoutTextures;
-
-    std::string normal_path(std::string name, int depth = 0) {
-        if (depth > 6) return {};
-        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return char(std::tolower(c)); });
-        std::replace(name.begin(), name.end(), '\\', '/');
-        if (name.rfind("materials/", 0) == 0) name.erase(0, 10);
-        if (name.ends_with(".vmt")) name.resize(name.size() - 4);
-        const std::string path = "materials/" + name + ".vmt";
-        size_t count = 0;
-        const auto *raw = bh_content_read(core, path.c_str(), &count);
-        if (!raw || !count) return {};
-        std::string text(reinterpret_cast<const char *>(raw), count);
-        text = std::regex_replace(text, std::regex(R"(//[^\r\n]*)"), "");
-        if (std::regex_search(text, std::regex(R"("?\$ssbump"?\s+"?1\b)", std::regex::icase))
-            || std::regex_search(text, std::regex(R"("?\$bumptransform"?\s+)", std::regex::icase)))
-            return {};
-        std::smatch match;
-        if (std::regex_search(text, match, std::regex(R"rx("?\$bumpmap"?\s+"([^"\r\n]+)")rx", std::regex::icase))) {
-            std::string bump = match[1];
-            std::transform(bump.begin(), bump.end(), bump.begin(), [](unsigned char c) {
-                return char(std::tolower(c));
-            });
-            std::replace(bump.begin(), bump.end(), '\\', '/');
-            if (bump.rfind("materials/", 0) == 0) bump.erase(0, 10);
-            if (bump.ends_with(".vtf")) bump.resize(bump.size() - 4);
-            return "materials/" + bump + ".vtf";
-        }
-        if (std::regex_search(text, match, std::regex(R"rx("?include"?\s+"([^"\r\n]+)")rx", std::regex::icase)))
-            return normal_path(match[1], depth + 1);
-        return {};
-    }
-
-    ResourceLoading load_normals() {
-        size_t count = 0;
-        const char *raw = bh_entities_json(core, &count);
-        if (raw && count) {
-            const auto entities = nlohmann::json::parse(raw, raw + count);
-            for (const auto &e : entities) {
-                if (e.value("classname", "") != "light_environment") continue;
-                float pitch = 0, yaw = 0, roll = 0;
-                std::stringstream angles(e.value("angles", "0 0 0"));
-                angles >> pitch >> yaw >> roll;
-                if (e.contains("pitch")) try {
-                        pitch = std::stof(e.at("pitch").get<std::string>());
-                    } catch (...) {
-                        break;
-                    }
-                if (std::isfinite(pitch) && std::isfinite(yaw)) {
-                    pitch *= native::radians;
-                    yaw *= native::radians;
-                    sunDirection = {
-                            -std::cos(pitch) * std::cos(yaw), -std::cos(pitch) * std::sin(yaw), -std::sin(pitch)
-                    };
-                    hasSun = true;
-                }
-                break;
-            }
-            mapSun = native::read_map_sun(entities, sunDirection, hasSun);
-        }
-        normals.resize(materials.size());
-        if (!hasSun) co_return;
-        raw = bh_material_names_json(core, &count);
-        if (!raw || !count) co_return;
-        const auto names = nlohmann::json::parse(raw, raw + count);
-        std::unordered_map<std::string, GLuint> cached;
-        for (size_t i = 0; i < normals.size() && i < names.size(); i++) {
-            co_yield "normal texture";
-            const auto path = normal_path(names[i]);
-            if (path.empty()) continue;
-            if (cached.count(path)) {
-                normals[i] = cached.at(path);
-                continue;
-            }
-            size_t bytes = 0;
-            const auto *vtf = bh_content_read(core, path.c_str(), &bytes);
-            if (!vtf || bytes < 64 || vtf[0] != 'V' || vtf[1] != 'T' || vtf[2] != 'F' || vtf[3] != 0) continue;
-            const uint32_t f = uint32_t(vtf[52]) | (uint32_t(vtf[53]) << 8) | (uint32_t(vtf[54]) << 16)
-                               | (uint32_t(vtf[55]) << 24);
-            if (f != 0 && f != 1 && f != 2 && f != 3 && f != 11 && f != 12 && f != 13 && f != 14 && f != 15 && f != 16
-                && f != 20)
-                continue;
-            BhImage image{};
-            if (bh_texture_path(core, path.c_str(), &image)) {
-                normals[i] = upload(image, true, true, false);
-                cached.emplace(path, normals[i]);
-            }
-        }
-        std::cout << "Native embedded normal textures: " << cached.size() << "\n";
-    }
-
-    Geometry geometry(
-            const float *vertices,
-            size_t floats,
-            int stride,
-            const uint32_t *indices,
-            size_t count,
-            const float *blend = nullptr,
-            size_t blends = 0
-    ) {
-        Geometry out;
-        if (!floats || !count) return out;
-        if (!vertices || !indices || floats % stride || count > size_t(std::numeric_limits<GLsizei>::max()))
-            throw std::runtime_error("Invalid native geometry buffer");
-        for (size_t i = 0; i < count; i++)
-            if (indices[i] >= floats / stride) throw std::runtime_error("Native mesh index out of bounds");
-        out.indices = count;
-        gl.GenVertexArrays(1, &out.vao);
-        gl.BindVertexArray(out.vao);
-        gl.GenBuffers(1, &out.vbo);
-        gl.BindBuffer(GL_ARRAY_BUFFER, out.vbo);
-        gl.BufferData(GL_ARRAY_BUFFER, floats * sizeof(float), vertices, GL_STATIC_DRAW);
-        gl.GenBuffers(1, &out.ebo);
-        gl.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, out.ebo);
-        gl.BufferData(GL_ELEMENT_ARRAY_BUFFER, count * sizeof(uint32_t), indices, GL_STATIC_DRAW);
-        gl.EnableVertexAttribArray(0);
-        gl.VertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride * sizeof(float), nullptr);
-        if (stride >= 8) {
-            for (int i = 1; i < 3; i++) {
-                gl.EnableVertexAttribArray(i);
-                gl.VertexAttribPointer(
-                        i,
-                        i == 1 ? 3 : 2,
-                        GL_FLOAT,
-                        GL_FALSE,
-                        stride * sizeof(float),
-                        reinterpret_cast<void *>(size_t(i == 1 ? 3 : 6) * sizeof(float))
-                );
-            }
-        }
-        if (stride == 10) {
-            gl.EnableVertexAttribArray(3);
-            gl.VertexAttribPointer(
-                    3, 2, GL_FLOAT, GL_FALSE, stride * sizeof(float), reinterpret_cast<void *>(8 * sizeof(float))
-            );
-        }
-        if (blend && blends == floats / stride) {
-            gl.GenBuffers(1, &out.blend);
-            gl.BindBuffer(GL_ARRAY_BUFFER, out.blend);
-            gl.BufferData(GL_ARRAY_BUFFER, blends * sizeof(float), blend, GL_STATIC_DRAW);
-            gl.EnableVertexAttribArray(4);
-            gl.VertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, sizeof(float), nullptr);
-        }
-        return out;
-    }
-
-    void destroy(Geometry &mesh) {
-        if (mesh.blend) gl.DeleteBuffers(1, &mesh.blend);
-        if (mesh.ebo) gl.DeleteBuffers(1, &mesh.ebo);
-        if (mesh.vbo) gl.DeleteBuffers(1, &mesh.vbo);
-        if (mesh.vao) gl.DeleteVertexArrays(1, &mesh.vao);
-    }
-
-    bool transparent(const BhMaterial &m) const {
-        return (m.flags & (1 | 8)) || m.kind == 2 || m.kind == 3 || m.alpha < 1;
-    }
-
-    // Per-draw uniforms of the world program, looked up once: bind_material runs for every draw of every pass.
-    struct MaterialUniforms {
-        GLint model = -1, flatColor = -1, hasNormal = -1, hasSecondary = -1, hasDetail = -1, detailScale = -1;
-        GLint detailBlend = -1, tint = -1, opacity = -1, cutoff = -1, unlit = -1, props = -1, kind = -1;
-        GLint aboveWater = -1, captureReady = -1, waterFogEnd = -1, additive = -1;
-
-        void read(Gl &gl, GLuint program) {
-            const std::pair<GLint *, const char *> uniforms[] = {
-                    {&model, "model"},
-                    {&flatColor, "flatColor"},
-                    {&hasNormal, "hasNormal"},
-                    {&hasSecondary, "hasSecondary"},
-                    {&hasDetail, "hasDetail"},
-                    {&detailScale, "detailScale"},
-                    {&detailBlend, "detailBlend"},
-                    {&tint, "tint"},
-                    {&opacity, "opacity"},
-                    {&cutoff, "cutoff"},
-                    {&unlit, "unlit"},
-                    {&props, "props"},
-                    {&kind, "kind"},
-                    {&aboveWater, "aboveWater"},
-                    {&captureReady, "captureReady"},
-                    {&waterFogEnd, "waterFogEnd"},
-                    {&additive, "additive"},
-            };
-            for (const auto &[location, name] : uniforms)
-                *location = gl.GetUniformLocation(program, name);
-        }
-    } materialUniforms;
-
-    void bind_material(uint32_t index, bool prop) {
-        const BhMaterial fallback = {-1, 1, 0, 1, .5f, {1, 1, 1}};
-        const auto &m = index < materials.size() ? materials[index] : fallback;
-        if (graphics.potato) {
-            const auto found = textureAverages.find(m.texture);
-            const std::array<float, 3> fallbackColor = {.5f, .5f, .5f};
-            gl.Uniform3fv(
-                    materialUniforms.flatColor,
-                    1,
-                    found == textureAverages.end() ? fallbackColor.data() : found->second.data()
-            );
-        }
-        const BhMaterialExtra empty = {-1, -1, 4, 1, 0, 400, 1};
-        const auto &e = index < extras.size() ? extras[index] : empty;
-        gl.ActiveTexture(GL_TEXTURE0);
-        gl.BindTexture(GL_TEXTURE_2D, m.texture < 0 ? (m.kind == 1 ? checker : white) : texture(m.texture));
-        gl.ActiveTexture(GL_TEXTURE2);
-        gl.BindTexture(GL_TEXTURE_2D, texture(e.texture2));
-        gl.ActiveTexture(GL_TEXTURE3);
-        gl.BindTexture(GL_TEXTURE_2D, texture(e.detail, true));
-        gl.ActiveTexture(GL_TEXTURE7);
-        gl.BindTexture(GL_TEXTURE_2D, index < normals.size() && normals[index] ? normals[index] : white);
-        const bool hasNormal = graphics.material_response && index < normals.size() && normals[index];
-        gl.Uniform1i(materialUniforms.hasNormal, hasNormal);
-        gl.Uniform1i(materialUniforms.hasSecondary, e.texture2 >= 0);
-        gl.Uniform1i(materialUniforms.hasDetail, e.detail >= 0 && !graphics.potato);
-        gl.Uniform1f(materialUniforms.detailScale, e.detail_scale);
-        gl.Uniform1f(materialUniforms.detailBlend, e.detail_blend);
-        gl.Uniform3fv(materialUniforms.tint, 1, m.color);
-        gl.Uniform1f(materialUniforms.opacity, m.alpha);
-        gl.Uniform1f(materialUniforms.cutoff, (m.flags & 2) ? m.alpha_ref : 0);
-        gl.Uniform1i(materialUniforms.unlit, (m.flags & 16) != 0 || (!prop && lightmap == white));
-        gl.Uniform1i(materialUniforms.props, prop);
-        gl.Uniform1i(materialUniforms.kind, m.kind);
-        gl.Uniform1i(materialUniforms.aboveWater, e.above_water);
-        if (m.kind == 2) {
-            gl.Uniform1i(materialUniforms.captureReady, water.sceneCaptured && water.waterPlanner.ready(index));
-            gl.Uniform1f(materialUniforms.waterFogEnd, std::max(1.f, e.fog_end));
-        }
-        gl.Uniform1i(materialUniforms.additive, (m.flags & 8) != 0);
-        const bool doubleSided = m.kind == 2 ? native_render::water_face_double_sided(water.waterBeneathFaces, e.above_water)
-                                             : (m.flags & 4) != 0;
-        if (doubleSided)
-            gl.Disable(GL_CULL_FACE);
-        else
-            gl.Enable(GL_CULL_FACE);
-        gl.BlendFunc(GL_SRC_ALPHA, (m.flags & 8) ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
-        if (m.kind == 2) {
-            gl.Enable(GL_POLYGON_OFFSET_FILL);
-            gl.PolygonOffset(-1, -4);
-        } else
-            gl.Disable(GL_POLYGON_OFFSET_FILL);
-    }
-
     int viewportWidth = 1, viewportHeight = 1;
     // Window pixels per point: the route's line widths are in points, like the website's CSS pixels.
     float pixelDensity = 1;
@@ -545,7 +180,7 @@ class Renderer {
     }
 
     void capture_refraction() {
-        water.capture_refraction(viewportWidth, viewportHeight, ownedTextures, [&] {
+        water.capture_refraction(viewportWidth, viewportHeight, resources.ownedTextures, [&] {
             if (frameLook)
                 frameLook->refraction_source();
             else if (auto *hdr = hdr_pass())
@@ -555,171 +190,7 @@ class Renderer {
         });
     }
 
-    struct SceneTransform {
-        BhTransform value{};
-        uint64_t scene = 0;
-    };
-
-    // Reused by every scene pass (3D sky, reflection, world) so drawing doesn't allocate each frame.
-    native_render::SceneDrawList sceneDrawList;
-    std::unordered_map<uint64_t, SceneTransform> sceneTransforms;
-    uint64_t sceneNumber = 0;
-
-    const BhTransform &scene_transform(bool prop, int32_t entity, uint32_t model) {
-        const uint64_t key = (uint64_t(prop) << 63) | uint32_t(prop ? entity : model);
-        auto &cached = sceneTransforms[key];
-        if (cached.scene != sceneNumber) {
-            cached.value = {};
-            cached.value.visible = 1;
-            if (prop && entity >= 0)
-                bh_prop_transform(core, entity, &cached.value);
-            else if (!prop && model)
-                bh_model_transform(core, model, &cached.value);
-            cached.scene = sceneNumber;
-        }
-        return cached.value;
-    }
-
-    // reflection: the mirrored scene for the water reflection, without the water itself.
-    void draw_scene(const native::Matrix &vp, const float eye[3], bool sky, double time, bool reflection = false) {
-        auto phaseStart = profile_now();
-        water.sceneCaptured = false;
-        gl.UseProgram(program);
-        gl.UniformMatrix4fv(uniforms.loc(program, "viewProjection"), 1, GL_FALSE, vp.data());
-        gl.Uniform1f(uniforms.loc(program, "clipHeight"), clipHeight);
-        water_uniforms(program, eye, vp);
-        gl.Uniform1f(uniforms.loc(program, "timeSeconds"), time);
-        gl.Uniform1i(uniforms.loc(program, "reflectionReady"), !sky && !reflection && water.reflectionDrawn);
-        gl.Uniform1f(uniforms.loc(program, "reflectionHeight"), water.waterPlan.reflection_height.value_or(0));
-        gl.ActiveTexture(GL_TEXTURE8);
-        gl.BindTexture(GL_TEXTURE_2D, water.reflectionDrawn ? water.waterReflection->texture() : white);
-        gl.Uniform1i(uniforms.loc(program, "fullbright"), graphics.fullbright);
-        gl.Uniform1i(uniforms.loc(program, "potato"), graphics.potato);
-        gl.Uniform1i(uniforms.loc(program, "skyPass"), sky && hasSky && skyInfo.fog_enable);
-        gl.Uniform1i(uniforms.loc(program, "flashlight"), flashlightEnabled && !sky);
-        gl.Uniform3f(
-                uniforms.loc(program, "flashDirection"),
-                std::cos(lastPitch * native::radians) * std::cos(lastYaw * native::radians),
-                std::cos(lastPitch * native::radians) * std::sin(lastYaw * native::radians),
-                -std::sin(lastPitch * native::radians)
-        );
-        float fog[3] = {skyInfo.fog_color[0] / 255.f, skyInfo.fog_color[1] / 255.f, skyInfo.fog_color[2] / 255.f};
-        if (skyInfo.fog_blend) {
-            const float dx = std::cos(lastPitch * native::radians) * std::cos(lastYaw * native::radians),
-                        dy = std::cos(lastPitch * native::radians) * std::sin(lastYaw * native::radians),
-                        dz = -std::sin(lastPitch * native::radians);
-            const float len = std::hypot(std::hypot(skyInfo.fog_dir[0], skyInfo.fog_dir[1]), skyInfo.fog_dir[2]);
-            const float t = len > 0 ? std::clamp(
-                                              .5f
-                                                      + .5f
-                                                                * (dx * skyInfo.fog_dir[0] + dy * skyInfo.fog_dir[1]
-                                                                   + dz * skyInfo.fog_dir[2])
-                                                                / len,
-                                              0.f,
-                                              1.f
-                                      )
-                                    : 0;
-            for (int k = 0; k < 3; k++)
-                fog[k] = (skyInfo.fog_color[k] * t + skyInfo.fog_color2[k] * (1 - t)) / 255.f;
-        }
-        gl.Uniform3fv(uniforms.loc(program, "skyFogColor"), 1, fog);
-        gl.Uniform3f(
-                uniforms.loc(program, "skyFogRange"),
-                skyInfo.fog_start / std::max(skyInfo.scale, .001f),
-                skyInfo.fog_end / std::max(skyInfo.scale, .001f),
-                skyInfo.fog_max_density
-        );
-        gl.ActiveTexture(GL_TEXTURE1);
-        gl.BindTexture(GL_TEXTURE_2D, lightmap);
-        ++sceneNumber;
-        sceneDrawList.begin(groups.size() + propGroups.size());
-        auto &draws = sceneDrawList.draws;
-        for (const auto &g : groups)
-            if (bool(g.sky3d) == sky) sceneDrawList.add({g.material, g.first_index, g.index_count, false, -1, g.model});
-        for (const auto &g : propGroups)
-            if (bool(g.sky3d) == sky) sceneDrawList.add({g.material, g.first_index, g.index_count, true, g.entity, 0});
-        if (profiling) frameProfile.groups += draws.size();
-        // Cull transformed bounds before submission; sort translucency from current, transformed centres.
-        draws.erase(
-                std::remove_if(
-                        draws.begin(),
-                        draws.end(),
-                        [&](native_render::SceneDraw &d) {
-                            const auto &transform = scene_transform(d.prop, d.entity, d.model);
-                            if (!transform.visible) return true;
-                            const auto model = native::model_matrix(transform);
-                            const uint64_t key = (uint64_t(d.prop) << 63) | d.first;
-                            const auto at = groupBounds.find(key);
-                            if (at != groupBounds.end()) {
-                                const auto bounds = native_render::transformed_bounds(at->second, model);
-                                // The reflection clips away everything below its plane.
-                                if (reflection && bounds.hi[2] < clipHeight) return true;
-                                std::array<float, 4> rect;
-                                if (!native_render::screen_rect(bounds, vp, rect)) return true;
-                                for (int k = 0; k < 3; k++) {
-                                    const float n = (bounds.lo[k] + bounds.hi[k]) * .5f - eye[k];
-                                    d.distance += n * n;
-                                }
-                            }
-                            return false;
-                        }
-                ),
-                draws.end()
-        );
-        if (profiling) frameProfile.survivors += draws.size();
-        profile_elapsed(frameProfile.buildCull, phaseStart);
-        const bool visibleWater =
-                water.hasWaterMaterials && std::any_of(draws.begin(), draws.end(), [&](const native_render::SceneDraw &d) {
-                    return d.material < materials.size() && materials[d.material].kind == 2;
-                });
-        for (int pass = 0; pass < 2; pass++) {
-            const double sortBefore = frameProfile.sort;
-            phaseStart = profile_now();
-            if (pass) {
-                if (!sky && !reflection && water.waterPlan.refract && visibleWater) {
-                    capture_refraction();
-                    water.sceneCaptured = true;
-                }
-                gl.Enable(GL_BLEND);
-                gl.DepthMask(GL_FALSE);
-                auto sortStart = profile_now();
-                sceneDrawList.back_to_front();
-                profile_elapsed(frameProfile.sort, sortStart);
-            } else {
-                gl.Disable(GL_BLEND);
-                gl.DepthMask(GL_TRUE);
-            }
-            for (const auto &d : draws) {
-                const auto &m = d.material < materials.size() ? materials[d.material] : materials.front();
-                if (transparent(m) != (pass != 0) || (reflection && m.kind == 2)) continue;
-                const auto &transform = scene_transform(d.prop, d.entity, d.model);
-                if (!transform.visible) continue;
-                const auto model = native::model_matrix(transform);
-                gl.UniformMatrix4fv(materialUniforms.model, 1, GL_FALSE, model.data());
-                bind_material(d.material, d.prop);
-                gl.BindVertexArray(d.prop ? propMesh.vao : worldMesh.vao);
-                gl.DrawElements(
-                        GL_TRIANGLES,
-                        d.count,
-                        GL_UNSIGNED_INT,
-                        reinterpret_cast<void *>(uintptr_t(d.first) * sizeof(uint32_t))
-                );
-                if (profiling) {
-                    frameProfile.drawCalls++;
-                    frameProfile.triangles += d.count / 3;
-                }
-            }
-            profile_elapsed(frameProfile.submit, phaseStart);
-            if (profiling) frameProfile.submit -= frameProfile.sort - sortBefore;
-        }
-        gl.DepthMask(GL_TRUE);
-        gl.Disable(GL_POLYGON_OFFSET_FILL);
-        gl.Disable(GL_BLEND);
-    }
-
     double lastYaw = 0, lastPitch = 0;
-    std::unordered_map<uint64_t, std::array<float, 3>> centers;
-    std::unordered_map<uint64_t, native_render::Bounds> groupBounds;
     native_render::GhostTrails ghostTrails;
     std::array<native_render::GhostPath, 4> ghostPaths;
     native_render::GhostOptions ghostOptions;
@@ -785,7 +256,7 @@ class Renderer {
     }
 
     void draw_presentation(const native::Matrix &vp, const float eye[3], double seconds) {
-        auto presentationStart = profile_now();
+        auto presentationStart = profile.profile_now();
         presentation->clear();
         const float cy = std::cos(lastYaw * native::radians), sy = std::sin(lastYaw * native::radians),
                     cp = std::cos(lastPitch * native::radians), sp = std::sin(lastPitch * native::radians);
@@ -905,14 +376,14 @@ class Renderer {
             }
         }
         draw_map_effects(eye, seconds, right, up);
-        profile_elapsed(frameProfile.presentationBuild, presentationStart);
-        presentationStart = profile_now();
+        profile.profile_elapsed(profile.frameProfile.presentationBuild, presentationStart);
+        presentationStart = profile.profile_now();
         gl.UseProgram(presentation->shader());
         water_uniforms(presentation->shader(), eye, vp);
-        profile_elapsed(frameProfile.presentationWaterUniforms, presentationStart);
-        presentationStart = profile_now();
+        profile.profile_elapsed(profile.frameProfile.presentationWaterUniforms, presentationStart);
+        presentationStart = profile.profile_now();
         presentation->draw(vp, eye);
-        profile_elapsed(frameProfile.presentationSubmit, presentationStart);
+        profile.profile_elapsed(profile.frameProfile.presentationSubmit, presentationStart);
     }
 
     void draw_ghost_trail(const native_render::Actor &actor, const float eye[3]) {
@@ -1157,10 +628,10 @@ public:
 
     bool tags_through_walls() const { return graphics.tags_through_walls; }
 
-    void set_profiling(bool enabled) { profiling = enabled; }
+    void set_profiling(bool enabled) { profile.profiling = enabled; }
 
     nlohmann::json profile_json() const {
-        const auto &p = frameProfile;
+        const auto &p = profile.frameProfile;
         return {{"lightmapRefreshMs", p.lightmapRefresh},
                 {"lightmapUploadMs", p.lightmapUpload},
                 {"skyMs", p.sky},
@@ -1284,153 +755,38 @@ public:
         return false;
     }
 
-    void prepare_fallback_textures() {
-        gl.GenVertexArrays(1, &emptyVao);
-        const uint8_t blank[4] = {255, 255, 255, 255};
-        white = upload({blank, 4, 1, 1}, true, false);
-        uint8_t fallback[8 * 8 * 4];
-        for (int y = 0; y < 8; y++)
-            for (int x = 0; x < 8; x++) {
-                const uint8_t v = ((x / 4 + y / 4) % 2) ? 140 : 185;
-                const int at = (y * 8 + x) * 4;
-                fallback[at] = fallback[at + 1] = fallback[at + 2] = v;
-                fallback[at + 3] = 255;
-            }
-        checker = upload({fallback, sizeof(fallback), 8, 8}, true, true);
-    }
-
-    void record_group_bounds(
-            uint64_t key,
-            uint32_t first,
-            uint32_t count,
-            const float *v,
-            size_t floats,
-            int stride,
-            const uint32_t *ix,
-            size_t n
-    ) {
-        if (uint64_t(first) + count > n) throw std::runtime_error("Native draw range exceeds index buffer");
-        native_render::Bounds bounds;
-        bounds.lo.fill(1e30f);
-        bounds.hi.fill(-1e30f);
-        for (size_t i = first; i < size_t(first) + count; i++) {
-            const size_t at = size_t(ix[i]) * stride;
-            if (at + 2 >= floats) throw std::runtime_error("Native group vertex invalid");
-            for (int k = 0; k < 3; k++) {
-                bounds.lo[k] = std::min(bounds.lo[k], v[at + k]);
-                bounds.hi[k] = std::max(bounds.hi[k], v[at + k]);
-            }
-        }
-        std::array<float, 3> mid{};
-        for (int k = 0; k < 3; k++)
-            mid[k] = (bounds.lo[k] + bounds.hi[k]) * .5f;
-        centers[key] = mid;
-        groupBounds[key] = bounds;
-    }
-
-    ResourceLoading prepare_world() {
-        size_t nv = 0, ni = 0, ng = 0, nm = 0, ne = 0, nb = 0;
-        const float *verts = bh_vertices(core, &nv);
-        const uint32_t *indices = bh_indices(core, &ni);
-        const auto *rawGroups = bh_groups(core, &ng);
-        const auto *rawMaterials = bh_materials(core, &nm);
-        const auto *rawExtras = bh_material_extras(core, &ne);
-        const float *blend = bh_blend(core, &nb);
-        if (!nv || !ni || !ng || !rawGroups) throw std::runtime_error("Map has no drawable native mesh");
-        if (rawMaterials && nm) materials.assign(rawMaterials, rawMaterials + nm);
-        if (materials.empty()) materials.push_back({-1, 1, 0, 1, .5f, {1, 1, 1}});
-        if (rawExtras && ne) extras.assign(rawExtras, rawExtras + ne);
-        groups.assign(rawGroups, rawGroups + ng);
-        water.hasWaterMaterials =
-                std::any_of(materials.begin(), materials.end(), [](const BhMaterial &m) { return m.kind == 2; });
-        for (size_t i = 0; i < materials.size() && i < extras.size(); i++)
-            water.waterBeneathFaces |= materials[i].kind == 2 && !extras[i].above_water;
-        co_yield "geometry";
-        worldMesh = geometry(verts, nv, 10, indices, ni, blend, nb);
-        co_yield "resource";
-        for (const auto &item : groups) {
-            record_group_bounds(item.first_index, item.first_index, item.index_count, verts, nv, 10, indices, ni);
-            co_yield "resource";
-        }
-    }
-
-    ResourceLoading prepare_props() {
-        size_t pv = 0, pi = 0, pg = 0;
-        const float *propVertices = bh_prop_vertices(core, &pv);
-        const auto *propIndices = bh_prop_indices(core, &pi);
-        const auto *rawProps = bh_prop_groups(core, &pg);
-        propMesh = geometry(propVertices, pv, 8, propIndices, pi);
-        if (rawProps && pg) propGroups.assign(rawProps, rawProps + pg);
-        co_yield "resource";
-        for (const auto &item : propGroups) {
-            record_group_bounds(
-                    (uint64_t(1) << 63) | item.first_index,
-                    item.first_index,
-                    item.index_count,
-                    propVertices,
-                    pv,
-                    8,
-                    propIndices,
-                    pi
-            );
-            co_yield "resource";
-        }
-    }
-
     void prepare_sky() {
         size_t sv = 0, si = 0, sg = 0;
         const float *skyVertices = bh_sky_vertices(core, &sv);
         const auto *skyIndices = bh_sky_indices(core, &si);
         const auto *rawSky = bh_sky_groups(core, &sg);
-        skyMesh = geometry(skyVertices, sv, 3, skyIndices, si);
+        skyMesh = resources.geometry(skyVertices, sv, 3, skyIndices, si);
         if (rawSky && sg) skyGroups.assign(rawSky, rawSky + sg);
         hasSky = bh_sky_info(core, &skyInfo) != 0;
         size_t skyCount = 0;
         const auto *sky = bh_sky_materials(core, &skyCount);
         if (sky && skyCount == 6) std::copy(sky, sky + 6, skyMaterials.begin());
-        // The atlas is sRGB-encoded linear light times its scale (bunnyhop_core::lightmap): decode, then divide.
-        BhImage image{};
-        lightmap = bh_lightmap(core, &image) ? upload(image, false, false, true) : white;
-        if (lightmap == white || !bh_lightmap_info(core, &lightmapInfo)) lightmapInfo = {1, 0};
+        world.prepare_lightmap();
     }
 
-    ResourceLoading prepare_textures() {
-        for (const auto &m : materials)
-            if (m.flags & (material_translucent | material_alpha_test)) cutoutTextures.insert(m.texture);
-        co_yield "resource";
-        for (const auto &m : materials) {
-            auto texture_loading = cache_texture(m.texture);
-            while (!texture_loading.step())
-                co_yield "texture";
-            co_yield "texture";
-        }
-        for (const auto &e : extras) {
-            auto secondary_loading = cache_texture(e.texture2);
-            while (!secondary_loading.step())
-                co_yield "secondary texture";
-            auto detail_loading = cache_texture(e.detail, true);
-            while (!detail_loading.step())
-                co_yield "detail texture";
-        }
-    }
+    ResourceLoading prepare_world() { return world.prepare_world(water); }
+    ResourceLoading prepare_props() { return world.prepare_props(); }
+    ResourceLoading prepare_textures() { return world.prepare_textures(); }
+    void prepare_uniforms() { world.prepare_uniforms(); }
+    ResourceLoading load_normals() { return world.load_normals(); }
 
-    void prepare_uniforms() {
-        gl.UseProgram(program);
-        gl.Uniform1i(uniforms.loc(program, "baseTexture"), 0);
-        gl.Uniform1i(uniforms.loc(program, "lightTexture"), 1);
-        gl.Uniform1i(uniforms.loc(program, "secondaryTexture"), 2);
-        gl.Uniform1i(uniforms.loc(program, "detailTexture"), 3);
-        gl.Uniform1i(uniforms.loc(program, "sceneColor"), 4);
-        gl.Uniform1i(uniforms.loc(program, "sceneDepth"), 5);
-        gl.Uniform1i(uniforms.loc(program, "reflectionTexture"), 8);
-        gl.Uniform2f(uniforms.loc(program, "cameraNearFar"), native::camera_near_plane, native::camera_far_plane);
-        gl.Uniform1f(uniforms.loc(program, "lightmapScale"), lightmapInfo.scale);
+    void draw_scene(const native::Matrix &vp, const float eye[3], bool sky, double time, bool reflection = false) {
+        const WorldPass::View view{
+                graphics, skyInfo, hasSky, flashlightEnabled, lastYaw, lastPitch, clipHeight,
+                viewportWidth, viewportHeight
+        };
+        world.draw_scene(vp, eye, sky, time, reflection, view, water, [&] { capture_refraction(); });
     }
 
     ResourceLoading prepare_scene() {
-        prepare_fallback_textures();
-        auto world = prepare_world();
-        while (!world.step())
+        resources.prepare_fallback_textures();
+        auto worldLoading = prepare_world();
+        while (!worldLoading.step())
             co_yield "world geometry";
         auto props = prepare_props();
         while (!props.step())
@@ -1440,7 +796,7 @@ public:
         auto textures = prepare_textures();
         while (!textures.step())
             co_yield "texture";
-        auto waterLoading = water.prepare_water(groups, materials, extras);
+        auto waterLoading = water.prepare_water(world.groups, world.materials, world.extras);
         while (!waterLoading.step())
             co_yield "water";
         prepare_uniforms();
@@ -1457,8 +813,7 @@ public:
 
     ResourceLoading prepare_resources(std::filesystem::path assetRoot) {
         measureLabel.reserve(100);
-        program = link_program(gl, native_render::world_vertex, native_render::world_fragment().c_str());
-        materialUniforms.read(gl, program);
+        world.prepare_program();
         co_yield "world shader";
         skyProgram = link_program(gl, native_render::sky_vertex, native_render::sky_fragment().c_str());
         depthProgram = link_program(gl, native_render::depth_vertex, native_render::depth_fragment);
@@ -1471,14 +826,14 @@ public:
         while (!normal_loading.step())
             co_yield "normal texture";
         co_yield "resource";
-        gl.UseProgram(program);
-        gl.Uniform1i(uniforms.loc(program, "normalTexture"), 7);
-        gl.Uniform3fv(uniforms.loc(program, "sunDirection"), 1, sunDirection.data());
+        gl.UseProgram(world.program);
+        gl.Uniform1i(uniforms.loc(world.program, "normalTexture"), 7);
+        gl.Uniform3fv(uniforms.loc(world.program, "sunDirection"), 1, world.sunDirection.data());
         sunShadows = std::make_unique<SunShadowMap>(gl);
         cutoutDepthProgram = link_program(gl, native_render::cutout_depth_vertex, native_render::cutout_depth_fragment);
-        gl.UseProgram(program);
-        gl.Uniform1i(uniforms.loc(program, "sunShadowMap"), sun_shadow_unit);
-        gl.Uniform1i(uniforms.loc(program, "sunActive"), 0);
+        gl.UseProgram(world.program);
+        gl.Uniform1i(uniforms.loc(world.program, "sunShadowMap"), sun_shadow_unit);
+        gl.Uniform1i(uniforms.loc(world.program, "sunActive"), 0);
         presentation = std::make_unique<NativePresentation>(graphicsContext);
         mapEffects.load(core);
 
@@ -1503,13 +858,14 @@ public:
         presentation.reset();
         hdr.reset();
         viewmodel.reset();
-        destroy(worldMesh);
-        destroy(propMesh);
-        destroy(skyMesh);
-        if (!ownedTextures.empty()) gl.DeleteTextures(ownedTextures.size(), ownedTextures.data());
+        resources.destroy(world.worldMesh);
+        resources.destroy(world.propMesh);
+        resources.destroy(skyMesh);
+        if (!resources.ownedTextures.empty())
+            gl.DeleteTextures(resources.ownedTextures.size(), resources.ownedTextures.data());
         if (water.planesTexture) gl.DeleteTextures(1, &water.planesTexture);
-        if (emptyVao) gl.DeleteVertexArrays(1, &emptyVao);
-        if (program) gl.DeleteProgram(program);
+        if (resources.emptyVao) gl.DeleteVertexArrays(1, &resources.emptyVao);
+        if (world.program) gl.DeleteProgram(world.program);
         if (skyProgram) gl.DeleteProgram(skyProgram);
         if (depthProgram) gl.DeleteProgram(depthProgram);
         if (cutoutDepthProgram) gl.DeleteProgram(cutoutDepthProgram);
@@ -1542,14 +898,14 @@ public:
         // The looks' passes link with the settings (at map load or when the look changes), never in a run's frame.
         enhanced_pass();
         if (graphics.target_needed() && !graphicsTarget)
-            graphicsTarget = std::make_unique<GraphicsTarget>(gl, emptyVao);
+            graphicsTarget = std::make_unique<GraphicsTarget>(gl, resources.emptyVao);
         sourceLook = graphics.source;
         if (hdr) hdr->bloom = graphics.bloom;
         if (anisotropySupported) {
             constexpr GLenum anisotropy = 0x84fe, maximumAnisotropy = 0x84ff;
             float maximum = 1;
             gl.GetFloatv(maximumAnisotropy, &maximum);
-            for (GLuint texture : ownedTextures) {
+            for (GLuint texture : resources.ownedTextures) {
                 gl.BindTexture(GL_TEXTURE_2D, texture);
                 gl.TexParameterf(GL_TEXTURE_2D, anisotropy, std::min(float(graphics.anisotropy), maximum));
             }
@@ -1576,7 +932,7 @@ public:
         if (id == skyPanoramaId || !picture || picture->pixels.empty()) return;
         if (!skyPanorama) {
             gl.GenTextures(1, &skyPanorama);
-            ownedTextures.push_back(skyPanorama);
+            resources.ownedTextures.push_back(skyPanorama);
         }
         gl.BindTexture(GL_TEXTURE_2D, skyPanorama);
         gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -1607,7 +963,7 @@ public:
     void set_pixel_density(float value) { pixelDensity = std::isfinite(value) && value > 0 ? value : 1; }
 
     // Current Source-look exposure (1 off maps with HDR lighting or with the look off).
-    float exposure() const { return hdr && sourceLook && lightmapInfo.hdr ? hdr->current_exposure() : 1; }
+    float exposure() const { return hdr && sourceLook && world.lightmapInfo.hdr ? hdr->current_exposure() : 1; }
 
     // Scope FOV is presentation only; persisted player FOV remains 60–130.
     void set_camera_fov(float value) {
@@ -1857,7 +1213,7 @@ public:
 
     void sky_panorama_uniforms() {
         static constexpr std::array<float, 3> default_sun{.45f, .6f, .35f};
-        const auto sun = hasSun ? sunDirection : default_sun;
+        const auto sun = world.hasSun ? world.sunDirection : default_sun;
         const float length = std::hypot(std::hypot(sun[0], sun[1]), sun[2]);
         gl.Uniform3f(uniforms.loc(skyProgram, "proceduralSun"), sun[0] / length, sun[1] / length, sun[2] / length);
         const bool shown = panorama_drawn();
@@ -1865,7 +1221,7 @@ public:
         gl.Uniform1f(uniforms.loc(skyProgram, "panoramaYaw"), frameSkyYaw);
         gl.Uniform1f(uniforms.loc(skyProgram, "panoramaExposure"), skyPanoramaInfo.exposure);
         gl.ActiveTexture(GL_TEXTURE0 + sky_panorama_unit);
-        gl.BindTexture(GL_TEXTURE_2D, shown ? skyPanorama : white);
+        gl.BindTexture(GL_TEXTURE_2D, shown ? skyPanorama : resources.white);
         gl.Uniform1i(uniforms.loc(skyProgram, "panorama"), sky_panorama_unit);
         gl.ActiveTexture(GL_TEXTURE0);
     }
@@ -1878,7 +1234,7 @@ public:
         gl.Disable(GL_DEPTH_TEST);
         gl.DepthMask(GL_FALSE);
         gl.UseProgram(skyProgram);
-        gl.BindVertexArray(emptyVao);
+        gl.BindVertexArray(resources.emptyVao);
         water_uniforms(skyProgram, eye, vp);
         const float cy = std::cos(lastYaw * native::radians), sy = std::sin(lastYaw * native::radians),
                     cp = std::cos(lastPitch * native::radians), sp = std::sin(lastPitch * native::radians);
@@ -1893,14 +1249,14 @@ public:
         // Procedural daylight (Enhanced and Cinematic) draws the fallback sky in place of the map's faces.
         const bool procedural = graphics.look.composer() && graphics.look.sky_mode == native::SkyMode::procedural;
         for (int i = 0; i < 6; i++) {
-            GLuint id = white;
+            GLuint id = resources.white;
             const int32_t m = procedural ? -1 : skyMaterials[i];
-            if (m >= 0 && size_t(m) < materials.size()) {
-                const auto t = materials[m].texture;
-                if (t >= 0 && texture(t) != checker) {
-                    id = texture(t);
+            if (m >= 0 && size_t(m) < world.materials.size()) {
+                const auto t = world.materials[m].texture;
+                if (t >= 0 && resources.texture(t) != resources.checker) {
+                    id = resources.texture(t);
                     present[i] = 1;
-                    const auto wh = textureSizes[t];
+                    const auto wh = resources.textureSizes[t];
                     half[i] = i < 4 && wh.first == wh.second * 2;
                 }
             }
@@ -1990,14 +1346,14 @@ public:
 
     Caster caster(uint32_t material) const {
         static constexpr uint32_t additive = 8;
-        if (material >= materials.size()) return Caster::none;
-        const auto &m = materials[material];
+        if (material >= world.materials.size()) return Caster::none;
+        const auto &m = world.materials[material];
         if (m.kind == 2 || m.kind == 3 || (m.flags & additive)) return Caster::none;
-        return (m.flags & (material_translucent | material_alpha_test)) || m.alpha < 1 ? Caster::cutout : Caster::solid;
+        return (m.flags & (world.material_translucent | world.material_alpha_test)) || m.alpha < 1 ? Caster::cutout : Caster::solid;
     }
 
     void cast_group(
-            const Geometry &mesh,
+            const RenderGeometry &mesh,
             bool prop,
             uint32_t material,
             uint32_t first,
@@ -2011,16 +1367,16 @@ public:
         static constexpr float cutout_alpha = .5f;
         const auto kind = caster(material);
         if (kind == Caster::none || (kind == Caster::cutout) != cutouts) return;
-        const auto &transform = scene_transform(prop, entity, model);
+        const auto &transform = world.scene_transform(prop, entity, model);
         if (!transform.visible) return;
         const auto matrix = native::model_matrix(transform);
-        const auto bounds = groupBounds.find((uint64_t(prop) << 63) | first);
-        if (bounds != groupBounds.end() && !native_render::in_light_box(bounds->second, matrix, lightVp, range)) return;
+        const auto bounds = world.groupBounds.find((uint64_t(prop) << 63) | first);
+        if (bounds != world.groupBounds.end() && !native_render::in_light_box(bounds->second, matrix, lightVp, range)) return;
         const GLuint shader = cutouts ? cutoutDepthProgram : depthProgram;
         if (cutouts) {
-            const auto &m = materials[material];
-            gl.BindTexture(GL_TEXTURE_2D, m.texture < 0 ? white : texture(m.texture));
-            gl.Uniform1f(uniforms.loc(shader, "cutoff"), (m.flags & material_alpha_test) ? m.alpha_ref : cutout_alpha);
+            const auto &m = world.materials[material];
+            gl.BindTexture(GL_TEXTURE_2D, m.texture < 0 ? resources.white : resources.texture(m.texture));
+            gl.Uniform1f(uniforms.loc(shader, "cutoff"), (m.flags & world.material_alpha_test) ? m.alpha_ref : cutout_alpha);
         }
         gl.BindVertexArray(mesh.vao);
         gl.UniformMatrix4fv(uniforms.loc(shader, "model"), 1, GL_FALSE, matrix.data());
@@ -2029,7 +1385,7 @@ public:
 
     // World groups, props and players into the sun's depth map: solid surfaces, then cut-outs by their alpha.
     void draw_shadow_casters(const native::Matrix &lightVp, float range, const float eye[3], double seconds) {
-        ++sceneNumber;
+        ++world.sceneNumber;
         for (const bool cutouts : {false, true}) {
             const GLuint shader = cutouts ? cutoutDepthProgram : depthProgram;
             gl.UseProgram(shader);
@@ -2037,10 +1393,10 @@ public:
             if (!cutouts) gl.Uniform1f(uniforms.loc(shader, "clipHeight"), no_clip_height);
             gl.ActiveTexture(GL_TEXTURE0);
             gl.Uniform1i(uniforms.loc(shader, "baseTexture"), 0);
-            for (const auto &g : groups)
+            for (const auto &g : world.groups)
                 if (!g.sky3d)
                     cast_group(
-                            worldMesh,
+                            world.worldMesh,
                             false,
                             g.material,
                             g.first_index,
@@ -2051,10 +1407,10 @@ public:
                             range,
                             cutouts
                     );
-            for (const auto &g : propGroups)
+            for (const auto &g : world.propGroups)
                 if (!g.sky3d)
                     cast_group(
-                            propMesh,
+                            world.propMesh,
                             true,
                             g.material,
                             g.first_index,
@@ -2075,18 +1431,18 @@ public:
     void prepare_sun_light(const float eye[3], double seconds) {
         static constexpr float shadow_bias = .0003f;
         const auto terms = sun_terms();
-        gl.UseProgram(program);
-        gl.Uniform1i(uniforms.loc(program, "sunActive"), terms.active);
+        gl.UseProgram(world.program);
+        gl.Uniform1i(uniforms.loc(world.program, "sunActive"), terms.active);
         if (!terms.active) return;
-        gl.Uniform1i(uniforms.loc(program, "sunShadowActive"), terms.shadows);
-        gl.Uniform1f(uniforms.loc(program, "sunSkyFill"), terms.fill);
-        gl.Uniform1f(uniforms.loc(program, "sunBakedScale"), terms.baked);
-        gl.Uniform1f(uniforms.loc(program, "sunDirectStrength"), terms.direct);
-        gl.Uniform1f(uniforms.loc(program, "sunShadowStrength"), terms.strength);
-        gl.Uniform3fv(uniforms.loc(program, "sunLightDirection"), 1, frameSun.direction.data());
-        const auto &color = !frameSun.from_pack && terms.direct > 0 ? mapSun.irradiance : frameSun.color;
-        gl.Uniform3fv(uniforms.loc(program, "sunLightColor"), 1, color.data());
-        gl.Uniform3fv(uniforms.loc(program, "sunAmbientColor"), 1, frameSun.ambient.data());
+        gl.Uniform1i(uniforms.loc(world.program, "sunShadowActive"), terms.shadows);
+        gl.Uniform1f(uniforms.loc(world.program, "sunSkyFill"), terms.fill);
+        gl.Uniform1f(uniforms.loc(world.program, "sunBakedScale"), terms.baked);
+        gl.Uniform1f(uniforms.loc(world.program, "sunDirectStrength"), terms.direct);
+        gl.Uniform1f(uniforms.loc(world.program, "sunShadowStrength"), terms.strength);
+        gl.Uniform3fv(uniforms.loc(world.program, "sunLightDirection"), 1, frameSun.direction.data());
+        const auto &color = !frameSun.from_pack && terms.direct > 0 ? world.mapSun.irradiance : frameSun.color;
+        gl.Uniform3fv(uniforms.loc(world.program, "sunLightColor"), 1, color.data());
+        gl.Uniform3fv(uniforms.loc(world.program, "sunAmbientColor"), 1, frameSun.ambient.data());
         if (!terms.shadows) return;
         const int size = graphics.look.shadow_size;
         const float range = std::clamp(graphics.look.shadow_distance, 256.f, 4096.f);
@@ -2104,18 +1460,18 @@ public:
         gl.Disable(GL_POLYGON_OFFSET_FILL);
         gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, GLuint(drawTarget));
         gl.BindFramebuffer(GL_READ_FRAMEBUFFER, GLuint(readTarget));
-        gl.UseProgram(program);
-        gl.UniformMatrix4fv(uniforms.loc(program, "sunShadowMatrix"), 1, GL_FALSE, lightVp.data());
-        gl.Uniform1f(uniforms.loc(program, "sunShadowTexel"), 1.f / float(size));
-        gl.Uniform1f(uniforms.loc(program, "sunShadowRadius"), size <= 512 ? 1.f : 2.f);
-        gl.Uniform1f(uniforms.loc(program, "sunShadowBias"), shadow_bias);
+        gl.UseProgram(world.program);
+        gl.UniformMatrix4fv(uniforms.loc(world.program, "sunShadowMatrix"), 1, GL_FALSE, lightVp.data());
+        gl.Uniform1f(uniforms.loc(world.program, "sunShadowTexel"), 1.f / float(size));
+        gl.Uniform1f(uniforms.loc(world.program, "sunShadowRadius"), size <= 512 ? 1.f : 2.f);
+        gl.Uniform1f(uniforms.loc(world.program, "sunShadowBias"), shadow_bias);
         gl.ActiveTexture(GL_TEXTURE0 + sun_shadow_unit);
         gl.BindTexture(GL_TEXTURE_2D, sunShadows->texture());
         gl.ActiveTexture(GL_TEXTURE0);
     }
 
     native::VisualProfile visual_profile() const {
-        return native::resolve_visual_profile(graphics.look, mapName, mapSha, mapSun.present);
+        return native::resolve_visual_profile(graphics.look, mapName, mapSha, world.mapSun.present);
     }
 
     // This frame's sky turn and sun for the composer looks; material detail follows the pack's sun when it lights.
@@ -2123,11 +1479,11 @@ public:
         const bool panorama = panorama_drawn();
         const bool lit =
                 graphics.look.composer() && native::pack_lights_scene(graphics.look, visual_profile(), panorama);
-        frameSkyYaw = panorama ? native::sky_yaw(graphics.look, lit, skyPanoramaInfo, mapSun) : 0;
+        frameSkyYaw = panorama ? native::sky_yaw(graphics.look, lit, skyPanoramaInfo, world.mapSun) : 0;
         const float exposure = skyPanoramaInfo.exposure * std::exp2(std::clamp(graphics.sky_exposure, -4.f, 4.f));
-        frameSun = native::resolve_scene_sun(mapSun, panorama ? &skyPanoramaInfo : nullptr, lit, frameSkyYaw, exposure);
-        gl.UseProgram(program);
-        gl.Uniform3fv(uniforms.loc(program, "sunDirection"), 1, (frameSun.from_pack ? frameSun.direction : sunDirection).data());
+        frameSun = native::resolve_scene_sun(world.mapSun, panorama ? &skyPanoramaInfo : nullptr, lit, frameSkyYaw, exposure);
+        gl.UseProgram(world.program);
+        gl.Uniform3fv(uniforms.loc(world.program, "sunDirection"), 1, (frameSun.from_pack ? frameSun.direction : world.sunDirection).data());
     }
 
     // The post-processing of one Enhanced or Cinematic frame (web composer-pipeline.ts applyAppearance).
@@ -2174,8 +1530,8 @@ public:
     }
 
     void draw_water_reflection(const float eye[3], float aspect, int width, int height, double seconds) {
-        auto phaseStart = profile_now();
-        const double scenePhases = frameProfile.buildCull + frameProfile.sort + frameProfile.submit;
+        auto phaseStart = profile.profile_now();
+        const double scenePhases = profile.frameProfile.buildCull + profile.frameProfile.sort + profile.frameProfile.submit;
         const float plane = *water.waterPlan.reflection_height;
         const auto vp = native::multiply(camera(eye, lastYaw, lastPitch, aspect), native_render::mirror_matrix(plane));
         water.draw_reflection(
@@ -2187,16 +1543,16 @@ public:
                 },
                 [&](const float mirroredEye[3]) {
                     gl.ActiveTexture(GL_TEXTURE7);
-                    gl.BindTexture(GL_TEXTURE_2D, white);
+                    gl.BindTexture(GL_TEXTURE_2D, resources.white);
                     draw_sky_depth(vp);
                     draw_scene(vp, mirroredEye, false, seconds, true);
                 },
                 [&](const float mirroredEye[3]) { draw_reflected_actors(vp, mirroredEye, seconds); }
         );
-        profile_elapsed(frameProfile.waterReflection, phaseStart);
-        if (profiling) {
-            const double sceneTime = frameProfile.buildCull + frameProfile.sort + frameProfile.submit - scenePhases;
-            frameProfile.waterReflection -= sceneTime;
+        profile.profile_elapsed(profile.frameProfile.waterReflection, phaseStart);
+        if (profile.profiling) {
+            const double sceneTime = profile.frameProfile.buildCull + profile.frameProfile.sort + profile.frameProfile.submit - scenePhases;
+            profile.frameProfile.waterReflection -= sceneTime;
         }
     }
 
@@ -2223,20 +1579,20 @@ public:
         lastYaw = input.yaw();
         lastPitch = input.pitch;
         if (viewmodel) viewmodel->view_angles(float(lastYaw), float(lastPitch));
-        if (profiling) {
-            frameProfile = {};
-            frameProfile.hdrAuthored = lightmapInfo.hdr;
-            frameProfile.waterVolumes = water.volumes.size();
+        if (profile.profiling) {
+            profile.frameProfile = {};
+            profile.frameProfile.hdrAuthored = world.lightmapInfo.hdr;
+            profile.frameProfile.waterVolumes = water.volumes.size();
         }
-        auto phaseStart = profile_now();
+        auto phaseStart = profile.profile_now();
         BhImage changedLightmap{};
         const int lightmapChanged = bh_lightmap_update(core, &changedLightmap);
-        profile_elapsed(frameProfile.lightmapRefresh, phaseStart);
-        phaseStart = profile_now();
+        profile.profile_elapsed(profile.frameProfile.lightmapRefresh, phaseStart);
+        phaseStart = profile.profile_now();
         if (lightmapChanged > 0) {
-            if (profiling) frameProfile.atlasUpdateBytes = changedLightmap.byte_count;
+            if (profile.profiling) profile.frameProfile.atlasUpdateBytes = changedLightmap.byte_count;
             gl.ActiveTexture(GL_TEXTURE1);
-            gl.BindTexture(GL_TEXTURE_2D, lightmap);
+            gl.BindTexture(GL_TEXTURE_2D, world.lightmap);
             gl.TexImage2D(
                     GL_TEXTURE_2D,
                     0,
@@ -2249,7 +1605,7 @@ public:
                     changedLightmap.rgba
             );
         }
-        profile_elapsed(frameProfile.lightmapUpload, phaseStart);
+        profile.profile_elapsed(profile.frameProfile.lightmapUpload, phaseStart);
         const double dt = lastSeconds < 0 ? 0 : std::max(0., seconds - lastSeconds);
         lastSeconds = seconds;
         const float aspect = float(width) / height;
@@ -2263,7 +1619,7 @@ public:
         gl.GetIntegerv(GL_FRAMEBUFFER_BINDING, &frameTarget);
         SourceHdr *pass = hdr_pass();
         frameLook = enhanced_pass();
-        if (profiling) frameProfile.hdrEffective = pass != nullptr || (frameLook && hdr_object());
+        if (profile.profiling) profile.frameProfile.hdrEffective = pass != nullptr || (frameLook && hdr_object());
         if (frameLook) {
             frameLook->samples(graphics.samples);
             frameLook->begin(width, height);
@@ -2271,7 +1627,7 @@ public:
             pass->samples(graphics.samples);
             pass->begin(width, height);
         }
-        phaseStart = profile_now();
+        phaseStart = profile.profile_now();
         gl.Viewport(0, 0, width, height);
         gl.ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         gl.DepthMask(GL_TRUE);
@@ -2281,44 +1637,44 @@ public:
             gl.ClearColor(.24, .34, .45, 1);
         gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         draw_sky_backdrop(eye, vp, aspect, false);
-        const double skySceneBefore = frameProfile.buildCull + frameProfile.sort + frameProfile.submit;
+        const double skySceneBefore = profile.frameProfile.buildCull + profile.frameProfile.sort + profile.frameProfile.submit;
         draw_3d_sky(eye, aspect, seconds);
         gl.ActiveTexture(GL_TEXTURE7);
-        gl.BindTexture(GL_TEXTURE_2D, white);
+        gl.BindTexture(GL_TEXTURE_2D, resources.white);
         draw_sky_depth(vp);
-        profile_elapsed(frameProfile.sky, phaseStart);
-        if (profiling)
-            frameProfile.sky -= frameProfile.buildCull + frameProfile.sort + frameProfile.submit - skySceneBefore;
+        profile.profile_elapsed(profile.frameProfile.sky, phaseStart);
+        if (profile.profiling)
+            profile.frameProfile.sky -= profile.frameProfile.buildCull + profile.frameProfile.sort + profile.frameProfile.submit - skySceneBefore;
         draw_scene(vp, eye, false, seconds);
-        phaseStart = profile_now();
+        phaseStart = profile.profile_now();
         if (viewmodel) {
-            auto detailStart = profile_now();
+            auto detailStart = profile.profile_now();
             size_t floorCount = 0;
             const auto *floor = bh_floor_weapons(core, &floorCount);
-            profile_elapsed(frameProfile.floorReport, detailStart);
-            if (profiling) frameProfile.floorCount = floorCount;
-            detailStart = profile_now();
+            profile.profile_elapsed(profile.frameProfile.floorReport, detailStart);
+            if (profile.profiling) profile.frameProfile.floorCount = floorCount;
+            detailStart = profile.profile_now();
             for (size_t i = 0; floorWeaponsVisible && floor && i < floorCount; i++)
                 viewmodel->draw_floor(floor[i], vp, eye, seconds);
-            profile_elapsed(frameProfile.floorDraw, detailStart);
-            detailStart = profile_now();
+            profile.profile_elapsed(profile.frameProfile.floorDraw, detailStart);
+            detailStart = profile.profile_now();
             if (replayActor) viewmodel->draw_actor(*replayActor, vp, eye, seconds);
             if (compareActor) viewmodel->draw_actor(*compareActor, vp, eye, seconds);
             for (const auto &actor : roomActors)
                 viewmodel->draw_actor(actor, vp, eye, seconds);
-            profile_elapsed(frameProfile.actorDraw, detailStart);
+            profile.profile_elapsed(profile.frameProfile.actorDraw, detailStart);
         }
         draw_presentation(vp, eye, seconds);
-        profile_elapsed(frameProfile.presentation, phaseStart);
-        phaseStart = profile_now();
+        profile.profile_elapsed(profile.frameProfile.presentation, phaseStart);
+        phaseStart = profile.profile_now();
         if (frameLook)
             frameLook->finish(GLuint(frameTarget), look_frame(vp, eye, aspect), hdr_object(), dt);
         else if (pass)
             pass->finish(GLuint(frameTarget), width, height, dt);
         frameLook = nullptr;
-        profile_elapsed(frameProfile.hdrFinish, phaseStart);
-        phaseStart = profile_now();
-        auto viewmodelStart = profile_now();
+        profile.profile_elapsed(profile.frameProfile.hdrFinish, phaseStart);
+        phaseStart = profile.profile_now();
+        auto viewmodelStart = profile.profile_now();
         BhSnapshot snapshot{};
         if (state)
             snapshot = *state;
@@ -2364,8 +1720,8 @@ public:
                         viewmodelWeapon ? nullptr : &weapon
                 );
         }
-        profile_elapsed(frameProfile.viewmodel, viewmodelStart);
-        profile_elapsed(frameProfile.presentation, phaseStart);
+        profile.profile_elapsed(profile.frameProfile.viewmodel, viewmodelStart);
+        profile.profile_elapsed(profile.frameProfile.presentation, phaseStart);
         spectatedAttacks.clear();
         spectatedFlags = 0;  // Hidden third-person viewmodels must not replay stale pulses on return to eye mode.
         queuedWeaponFlags = queuedAttackMode = 0;

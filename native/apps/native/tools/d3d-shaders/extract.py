@@ -19,7 +19,8 @@ NAMES = {
     "enhanced_look.hpp": ["look-bright", "look-blur", "look-contact", "look-composite", "look-fxaa"],
     "source_hdr.hpp": ["hdr-downsample", "hdr-blur", "hdr-composite", "hdr-luminance", "graphics-target"],
     "ghost_route.hpp": ["ghost-route"],
-    "renderer.hpp": ["world", "sky", "depth", "cutout-depth"],
+    "world_pass.hpp": ["world"],
+    "renderer.hpp": ["sky", "depth", "cutout-depth"],
     "native_viewmodel.hpp": ["player"],
 }
 
