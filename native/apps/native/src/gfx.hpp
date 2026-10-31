@@ -33,6 +33,16 @@ public:
 
     static size_t readback_bytes(const Readback &readback) { return OpenGlContext::readback_bytes(readback); }
 
+    float max_anisotropy() const {
+        if (backend_ == Backend::opengl) return opengl_->max_anisotropy();
+        return d3d11_->max_anisotropy();
+    }
+
+    void upload_vertices(Geometry geometry, std::span<const std::byte> data) {
+        if (backend_ == Backend::opengl) return opengl_->upload_vertices(geometry, data);
+        return d3d11_->upload_vertices(geometry, data);
+    }
+
     int max_samples(Format color = Format::rgba8, Format depth = Format::depth24) const {
         if (backend_ == Backend::opengl) return opengl_->max_samples(color, depth);
         return d3d11_->max_samples(color, depth);

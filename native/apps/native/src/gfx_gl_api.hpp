@@ -49,6 +49,7 @@ namespace native {
     X(void, Uniform4fv, (GLint, GLsizei, const GLfloat *)) \
     X(void, Uniform3fv, (GLint, GLsizei, const GLfloat *)) \
     X(void, Uniform2fv, (GLint, GLsizei, const GLfloat *)) \
+    X(void, Uniform1fv, (GLint, GLsizei, const GLfloat *)) \
     X(void, Uniform1iv, (GLint, GLsizei, const GLint *)) \
     X(void, Uniform3f, (GLint, GLfloat, GLfloat, GLfloat)) \
     X(void, GenTextures, (GLsizei, GLuint *)) \

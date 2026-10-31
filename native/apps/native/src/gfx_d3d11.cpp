@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -54,6 +55,8 @@ struct PixelFormat {
 
 PixelFormat pixel_format(Format format) {
     switch (format) {
+        case Format::srgb8:
+            return {DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_FORMAT_UNKNOWN, 4};
         case Format::r8:
             return {DXGI_FORMAT_R8_UNORM, DXGI_FORMAT_R8_UNORM, DXGI_FORMAT_UNKNOWN, 1};
         case Format::rgba8:
@@ -160,6 +163,7 @@ struct ProgramData {
 
 struct GeometryData {
     UINT stride = 0, offset = 0, cursor = 0;
+    bool static_vertices = false;
     static constexpr UINT capacity = 4 * 1024 * 1024;
     std::vector<VertexAttribute> attributes;
     std::unordered_map<ProgramData *, ComPtr<ID3D11InputLayout>> layouts;
@@ -556,6 +560,10 @@ std::unique_ptr<D3D11Context> D3D11Context::warp() {
     return result;
 }
 
+float D3D11Context::max_anisotropy() const {
+    return D3D11_REQ_MAXANISOTROPY;
+}
+
 int D3D11Context::max_samples(Format color, Format depth) const {
     int maximum = 1;
     for (unsigned samples = 2; samples <= D3D11_MAX_MULTISAMPLE_SAMPLE_COUNT; samples *= 2) {
@@ -835,6 +843,8 @@ void D3D11Context::destroy(Texture &texture) {
 }
 
 Sampler D3D11Context::create_sampler(const SamplerDesc &desc) {
+    if (!std::isfinite(desc.max_anisotropy) || desc.max_anisotropy < 1)
+        throw std::runtime_error("Invalid sampler anisotropy");
     D3D11_SAMPLER_DESC sampler{};
     sampler.Filter = D3D11_ENCODE_BASIC_FILTER(
             desc.minification == Filter::linear ? D3D11_FILTER_TYPE_LINEAR : D3D11_FILTER_TYPE_POINT,
@@ -842,13 +852,19 @@ Sampler D3D11Context::create_sampler(const SamplerDesc &desc) {
             desc.mip_filter == Filter::linear ? D3D11_FILTER_TYPE_LINEAR : D3D11_FILTER_TYPE_POINT,
             desc.compare ? D3D11_FILTER_REDUCTION_TYPE_COMPARISON : D3D11_FILTER_REDUCTION_TYPE_STANDARD
     );
-    const auto address = desc.address == Address::clamp    ? D3D11_TEXTURE_ADDRESS_CLAMP
-                         : desc.address == Address::repeat ? D3D11_TEXTURE_ADDRESS_WRAP
-                         : desc.address == Address::mirror ? D3D11_TEXTURE_ADDRESS_MIRROR
-                                                           : D3D11_TEXTURE_ADDRESS_BORDER;
-    sampler.AddressU = sampler.AddressV = sampler.AddressW = address;
+    const auto addressing = [&](Address axis) {
+        const auto address = axis == Address::inherit ? desc.address : axis;
+        if (address == Address::repeat) return D3D11_TEXTURE_ADDRESS_WRAP;
+        if (address == Address::mirror) return D3D11_TEXTURE_ADDRESS_MIRROR;
+        return address == Address::border ? D3D11_TEXTURE_ADDRESS_BORDER : D3D11_TEXTURE_ADDRESS_CLAMP;
+    };
+    sampler.AddressU = addressing(desc.wrap_s);
+    sampler.AddressV = addressing(desc.wrap_t);
+    sampler.AddressW = addressing(desc.wrap_r);
+    if (desc.max_anisotropy > 1)
+        sampler.Filter = desc.compare ? D3D11_FILTER_COMPARISON_ANISOTROPIC : D3D11_FILTER_ANISOTROPIC;
     sampler.ComparisonFunc = comparison(desc.comparison);
-    sampler.MaxAnisotropy = 1;
+    sampler.MaxAnisotropy = UINT(std::clamp(desc.max_anisotropy, 1.f, max_anisotropy()));
     sampler.MinLOD = desc.mipmapped ? desc.min_lod : 0;
     sampler.MaxLOD = desc.mipmapped ? desc.max_lod : 0;
     std::copy(desc.border_color.begin(), desc.border_color.end(), sampler.BorderColor);
@@ -1082,7 +1098,7 @@ void D3D11Context::bind_geometry(Geometry geometry) {
 
 void D3D11Context::stream_vertices(Geometry geometry, std::span<const std::byte> data) {
     auto *value = native<GeometryData>(geometry.array);
-    if (!value->stride || data.size() > GeometryData::capacity || data.size() % value->stride)
+    if (value->static_vertices || !value->stride || data.size() > GeometryData::capacity || data.size() % value->stride)
         throw std::runtime_error("D3D11 vertex stream exceeds the ring capacity or stride");
     if (data.empty()) return;
     const UINT aligned = ((value->cursor + value->stride - 1) / value->stride) * value->stride;
@@ -1100,6 +1116,23 @@ void D3D11Context::stream_vertices(Geometry geometry, std::span<const std::byte>
     std::memcpy(static_cast<std::byte *>(mapped.pData) + value->offset, data.data(), data.size());
     impl_->context->Unmap(value->vertices.Get(), 0);
     value->cursor = value->offset + UINT(data.size());
+    if (impl_->geometry == value) impl_->bind_geometry();
+}
+
+void D3D11Context::upload_vertices(Geometry geometry, std::span<const std::byte> data) {
+    auto *value = native<GeometryData>(geometry.array);
+    if (!value->stride || data.empty() || data.size() > UINT32_MAX || data.size() % value->stride)
+        throw std::runtime_error("Invalid static vertex data");
+    D3D11_BUFFER_DESC desc{};
+    desc.ByteWidth = UINT(data.size());
+    desc.Usage = D3D11_USAGE_IMMUTABLE;
+    desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    const D3D11_SUBRESOURCE_DATA contents{data.data(), 0, 0};
+    ComPtr<ID3D11Buffer> vertices;
+    checked(impl_->device->CreateBuffer(&desc, &contents, &vertices), "Cannot upload D3D11 static vertices");
+    value->vertices = std::move(vertices);
+    value->static_vertices = true;
+    value->offset = value->cursor = 0;
     if (impl_->geometry == value) impl_->bind_geometry();
 }
 
@@ -1304,6 +1337,14 @@ D3D11Context::D3D11Context(D3D11Device) {
 D3D11Context::~D3D11Context() = default;
 
 std::unique_ptr<D3D11Context> D3D11Context::warp() {
+    unavailable();
+}
+
+float D3D11Context::max_anisotropy() const {
+    unavailable();
+}
+
+void D3D11Context::upload_vertices(Geometry, std::span<const std::byte>) {
     unavailable();
 }
 

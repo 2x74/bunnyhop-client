@@ -24,10 +24,10 @@ enum class RowOrigin { bottom, top };
 struct Rect {
     int x = 0, y = 0, width = 0, height = 0;
 };
-enum class Format { none, r8, rgba8, rgba16f, rgba32f, r32f, depth24, depth32f, depth24_stencil8 };
+enum class Format { none, r8, rgba8, srgb8, rgba16f, rgba32f, r32f, depth24, depth32f, depth24_stencil8 };
 enum class TextureKind { image, cube };
 enum class Filter { nearest, linear };
-enum class Address { clamp, repeat, mirror, border };
+enum class Address { clamp, repeat, mirror, border, inherit };
 enum class Compare { less, less_equal, always };
 enum class Cull { none, front, back };
 enum class Winding { counter_clockwise, clockwise };
@@ -76,6 +76,8 @@ struct SamplerDesc {
     Filter mip_filter = Filter::linear;
     float min_lod = -1000, max_lod = 1000;
     std::array<float, 4> border_color{};
+    float max_anisotropy = 1;
+    Address wrap_s = Address::inherit, wrap_t = Address::inherit, wrap_r = Address::inherit;
 };
 
 struct TargetDesc {
@@ -129,20 +131,36 @@ struct ProgramDesc {
 
 struct Program {
     uintptr_t id = 0;
+
+    explicit operator bool() const noexcept { return id != 0; }
+
+    friend bool operator==(const Program &a, const Program &b) noexcept { return a.id == b.id; }
 };
 
 struct Pipeline {
     PipelineState state;
     uintptr_t id = 0;
+
+    explicit operator bool() const noexcept { return id != 0; }
+
+    friend bool operator==(const Pipeline &a, const Pipeline &b) noexcept { return a.id == b.id; }
 };
 
 struct Texture {
     uintptr_t id = 0;
     TextureDesc desc;
+
+    explicit operator bool() const noexcept { return id != 0; }
+
+    friend bool operator==(const Texture &a, const Texture &b) noexcept { return a.id == b.id; }
 };
 
 struct Sampler {
     uintptr_t id = 0;
+
+    explicit operator bool() const noexcept { return id != 0; }
+
+    friend bool operator==(const Sampler &a, const Sampler &b) noexcept { return a.id == b.id; }
 };
 
 struct TargetView {
@@ -150,6 +168,12 @@ struct TargetView {
     TargetDesc desc;
     uintptr_t native_depth = 0;
     bool borrowed = false;
+
+    explicit operator bool() const noexcept { return id != 0 || borrowed; }
+
+    friend bool operator==(const TargetView &a, const TargetView &b) noexcept {
+        return a.id == b.id && a.native_depth == b.native_depth && bool(a) == bool(b);
+    }
 };
 
 struct RenderTarget : TargetView {
@@ -158,11 +182,19 @@ struct RenderTarget : TargetView {
 
 struct Geometry {
     uintptr_t array = 0, vertices = 0, indices = 0;
+
+    explicit operator bool() const noexcept { return array != 0; }
+
+    friend bool operator==(const Geometry &a, const Geometry &b) noexcept { return a.array == b.array; }
 };
 
 struct Fence {
     uintptr_t id = 0;
     bool borrowed = false;
+
+    explicit operator bool() const noexcept { return id != 0; }
+
+    friend bool operator==(const Fence &a, const Fence &b) noexcept { return a.id == b.id; }
 };
 
 struct Readback {
@@ -171,6 +203,10 @@ struct Readback {
     int width = 0, height = 0;
     Format format = Format::rgba8;
     bool mapped = false;
+
+    explicit operator bool() const noexcept { return buffer != 0; }
+
+    friend bool operator==(const Readback &a, const Readback &b) noexcept { return a.buffer == b.buffer; }
 };
 
 struct ConstantBinding {
@@ -178,11 +214,19 @@ struct ConstantBinding {
         int32_t location;
         uint32_t offset;
         ConstantType type;
+        uint32_t count = 1, size = 4, stride = 4, packing_offset = 0;
+        bool pack = false;
     };
 
     std::vector<Field> fields;
+    mutable std::vector<float> packed_floats;
+    mutable std::vector<int32_t> packed_integers;
     uint32_t byte_size = 0;
     uintptr_t id = 0;
+
+    explicit operator bool() const noexcept { return id != 0; }
+
+    friend bool operator==(const ConstantBinding &a, const ConstantBinding &b) noexcept { return a.id == b.id; }
 };
 
 inline constexpr float no_clip_height = -1e30f;
