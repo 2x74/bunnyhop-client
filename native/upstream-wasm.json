@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "status": "unpublished",
-  "commit": "164185cc6914bfff3732e4f512227d9ac68bef8d",
+  "status": "published",
+  "commit": "31fb4dbe069d1b1f75aa53570cb7e0183ea182aa",
   "toolchain": "1.99.1",
-  "url": "",
+  "url": "https://bunnyhop.lol/assets/bunnyhop_core-CUH0xNSF.wasm",
   "sha256": "064e592bf89dda68e9a6a5d7a805a85ceb9084154c0e4cd3d1d645ceada34a3d",
   "bytes": 1494916,
   "physics": 22,

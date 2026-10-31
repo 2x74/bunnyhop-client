@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repository": "https://github.com/2x74/bunnyhop",
-  "commit": "164185cc6914bfff3732e4f512227d9ac68bef8d",
+  "commit": "31fb4dbe069d1b1f75aa53570cb7e0183ea182aa",
   "areas": [
     "crates/core",
     "crates/vendor",
@@ -19,7 +19,7 @@
     "native-core.patch": "dc43e78042dc2f92e7caef61c708997557595f0fa37ea5a7af19bfe788d70abb",
     "native-web.patch": "875d60aa3f3b73cb921733d155c1d87e1e45a0fc04270d6599caafcb6b8284ff"
   },
-  "sourceTreeSha256": "892396f7987a5bfd2dd4d9d8502bf8b1219c63f7afdd0171b33d524572963b4a",
+  "sourceTreeSha256": "77c30653b9e5726df9f1673c90016413a35e569785a73c0f257197483c71dc3d",
   "sources": {
     "apps/web/src/about/about.css": "58b185b3292dd831e0b04c3bc9d40034693267ce7d973b0acb33b22b65c0e507",
     "apps/web/src/about/changelog-page.ts": "bfbe95c9fcb55ff795edc5aab6fc52081c9ed401f160cdf0f3af91d96fa9f1c7",
@@ -893,7 +893,7 @@
     "apps/web/src/upload-store.ts": "97dc649903e5cf5f6a3ced0ecd6564e4a5b6876a196ddf552e2f1973017c592a",
     "apps/web/src/uploads.ts": "17a1a77b209c8009a3a04e84cd82e14f86dee5ef7aa6c627e0893bf6244d567c",
     "apps/web/src/verifier.ts": "2f1062e575b60bbc375c7ce2b4ec43c6d098a07d6d0bc7020ed5a0540ea445ea",
-    "apps/web/src/version.ts": "15db739b062488a5baaa6bf709cd085f2d2d695c9f30ecdb4599910145d9eb38",
+    "apps/web/src/version.ts": "a3d99d4066760d61e693d023ec16e84d07e5ec89ad77cc19bafa7df3c28b713d",
     "apps/web/src/video-grade.ts": "1185315b5990ea8d155596ba092e9fd60113c43adf1ad64fcfb03368ddc6c558",
     "apps/web/src/video-settings.ts": "60db218f25f6327dcbdfc08207f71c5cda2a624bdf68286ef64358bb00c7f7ab",
     "apps/web/src/viewer/arms.ts": "7f7448bd187df1721bbea7d23292db65b7af142a0b84237b1b67b0287b849486",
@@ -2022,7 +2022,7 @@
     "apps/web/src/upload-store.ts": "97dc649903e5cf5f6a3ced0ecd6564e4a5b6876a196ddf552e2f1973017c592a",
     "apps/web/src/uploads.ts": "17a1a77b209c8009a3a04e84cd82e14f86dee5ef7aa6c627e0893bf6244d567c",
     "apps/web/src/verifier.ts": "2f1062e575b60bbc375c7ce2b4ec43c6d098a07d6d0bc7020ed5a0540ea445ea",
-    "apps/web/src/version.ts": "15db739b062488a5baaa6bf709cd085f2d2d695c9f30ecdb4599910145d9eb38",
+    "apps/web/src/version.ts": "a3d99d4066760d61e693d023ec16e84d07e5ec89ad77cc19bafa7df3c28b713d",
     "apps/web/src/video-grade.ts": "1185315b5990ea8d155596ba092e9fd60113c43adf1ad64fcfb03368ddc6c558",
     "apps/web/src/video-settings.ts": "60db218f25f6327dcbdfc08207f71c5cda2a624bdf68286ef64358bb00c7f7ab",
     "apps/web/src/viewer/arms.ts": "7f7448bd187df1721bbea7d23292db65b7af142a0b84237b1b67b0287b849486",
