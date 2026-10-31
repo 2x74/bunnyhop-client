@@ -46,6 +46,8 @@ SDL at the native client's pinned revision and compiles the actual backend and s
 - `Format::srgb8` is four RGBA8 bytes, with hardware sRGB decode for RGB and unchanged alpha.
   `Format::r8` is one UNORM byte. `rgba16f` uploads packed RGBA half floats; convert RGB float
   panoramas at load. Set `TextureDesc::levels` to the full mip count before `generate_mips()`.
+- `bind_image(unit, texture)` preserves the logical sampler. `bind_sampler(unit, sampler)` preserves
+  the texture. Material passes can bind shared samplers once, then change images alone per draw.
 - `SamplerDesc::max_anisotropy` is clamped to `max_anisotropy()`. `wrap_s/t/r` override the
   common `address`; their default `Address::inherit` preserves existing initializers.
 - `upload_vertices(geometry, bytes)` creates static storage; interleave blend attributes at load.

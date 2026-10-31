@@ -407,6 +407,13 @@ public:
         gl_.BindSampler(slot, GLuint(sampler.id));
     }
 
+    void bind_image(unsigned slot, Texture texture) {
+        gl_.ActiveTexture(GL_TEXTURE0 + slot);
+        gl_.BindTexture(texture_target(texture.desc), GLuint(texture.id));
+    }
+
+    void bind_sampler(unsigned slot, Sampler sampler) { gl_.BindSampler(slot, GLuint(sampler.id)); }
+
     void unbind_sampler(unsigned slot) { gl_.BindSampler(slot, 0); }
 
     RenderTarget create_target(const TargetDesc &desc) {

@@ -927,6 +927,18 @@ void D3D11Context::bind_texture(unsigned slot, Texture texture, Sampler sampler)
     impl_->textures(slot);
 }
 
+void D3D11Context::bind_image(unsigned slot, Texture texture) {
+    if (slot >= impl_->units.size()) throw std::runtime_error("D3D11 logical texture unit exceeds limit");
+    impl_->units[slot].texture = native<TextureData>(texture.id);
+    impl_->textures(slot);
+}
+
+void D3D11Context::bind_sampler(unsigned slot, Sampler sampler) {
+    if (slot >= impl_->units.size()) throw std::runtime_error("D3D11 logical texture unit exceeds limit");
+    impl_->units[slot].sampler = native<SamplerData>(sampler.id);
+    impl_->textures(slot);
+}
+
 void D3D11Context::unbind_sampler(unsigned slot) {
     if (slot >= impl_->units.size()) throw std::runtime_error("D3D11 logical texture unit exceeds limit");
     impl_->units[slot].sampler = nullptr;
@@ -1569,6 +1581,14 @@ void D3D11Context::destroy(Sampler &) {
 }
 
 void D3D11Context::bind_texture(unsigned, Texture, Sampler) {
+    unavailable();
+}
+
+void D3D11Context::bind_image(unsigned, Texture) {
+    unavailable();
+}
+
+void D3D11Context::bind_sampler(unsigned, Sampler) {
     unavailable();
 }
 

@@ -173,6 +173,16 @@ public:
         return d3d11_->bind_texture(slot, texture, sampler);
     }
 
+    void bind_image(unsigned slot, Texture texture) {
+        if (backend_ == Backend::opengl) return opengl_->bind_image(slot, texture);
+        return d3d11_->bind_image(slot, texture);
+    }
+
+    void bind_sampler(unsigned slot, Sampler sampler) {
+        if (backend_ == Backend::opengl) return opengl_->bind_sampler(slot, sampler);
+        return d3d11_->bind_sampler(slot, sampler);
+    }
+
     void unbind_sampler(unsigned slot) {
         if (backend_ == Backend::opengl) return opengl_->unbind_sampler(slot);
         return d3d11_->unbind_sampler(slot);
