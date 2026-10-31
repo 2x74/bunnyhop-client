@@ -23,7 +23,7 @@ procedural materials, planar reflections, viewmodels, real swapchain presentatio
 
 The regular Windows CMake build runs `d3d-shaders/package.py --build` before compiling resources.
 That uses the pinned translators and compiler, resolves every manifest alias, deduplicates DXBC and
-reflection, and embeds the archive as RCDATA 201 in each executable. The executable identity therefore
+reflection, and embeds the archive as RCDATA 201 in each graphics executable. The executable identity therefore
 covers the shaders. No runtime FXC, external shader search path or additional release workflow step is
 needed. Compiler diagnostics remain in `target/d3d-shaders/output`.
 
@@ -49,7 +49,8 @@ SDL at the native client's pinned revision and compiles the actual backend and s
 - `max_samples(color, depth)` queries the shared supported sample limit. `current_target()` and
   `current_viewport()` query actual GL bindings/state, including legacy changes. The dimensions of
   an unknown legacy framebuffer are unspecified; borrow it explicitly when dimensions are needed.
-  D3D11 tracks both values. `poll(readback, true)` requests a nonblocking flush before polling.
+  D3D11 tracks both values. `RasterState::clip_distance` controls GL clip distance zero;
+  D3D11 always uses the shader clip distance and requires `no_clip_height` outside reflections. `poll(readback, true)` requests a nonblocking flush before polling.
 - Handles support explicit `bool`, `==` and `!=`; callers must not interpret their native fields.
   `destroy(ConstantBinding&)` releases the binding layout. D3D11 stage buffers are shared by the
   program's layouts and released with that program. Destroy bindings before their program.
