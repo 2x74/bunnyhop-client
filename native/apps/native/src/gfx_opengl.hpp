@@ -2,6 +2,8 @@
 #include "gfx_types.hpp"
 #include "gfx_gl_api.hpp"
 #include <algorithm>
+#include <atomic>
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -10,6 +12,17 @@ namespace native::gfx {
 class OpenGlContext {
     Gl &gl_;
     TargetView target_;
+
+    static uintptr_t software_handle() {
+        static std::atomic<uintptr_t> next{1};
+        return next.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    static GLenum addressing(Address address) {
+        if (address == Address::repeat) return GL_REPEAT;
+        if (address == Address::mirror) return GL_MIRRORED_REPEAT;
+        return address == Address::border ? GL_CLAMP_TO_BORDER : GL_CLAMP_TO_EDGE;
+    }
 
     template <typename Function>
     static uintptr_t generate(Function function) {
@@ -35,6 +48,8 @@ class OpenGlContext {
                 return {GL_R8, GL_RED, GL_UNSIGNED_BYTE, 1};
             case Format::rgba8:
                 return {GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, 4};
+            case Format::srgb8:
+                return {GL_SRGB8_ALPHA8, GL_RGBA, GL_UNSIGNED_BYTE, 4};
             case Format::rgba16f:
                 return {GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, 8};
             case Format::rgba32f:
@@ -114,7 +129,17 @@ class OpenGlContext {
 public:
     explicit OpenGlContext(Gl &gl) : gl_(gl) {}
 
+    void reset_state() {}
+
     static Backend backend() { return Backend::opengl; }
+
+    float max_anisotropy() const {
+        if (!SDL_GL_ExtensionSupported("GL_EXT_texture_filter_anisotropic")) return 1;
+        constexpr GLenum maximum_anisotropy = 0x84ff;
+        GLfloat maximum = 1;
+        gl_.GetFloatv(maximum_anisotropy, &maximum);
+        return maximum;
+    }
 
     int max_samples(Format color = Format::rgba8, Format depth = Format::depth24) const {
         GLint result = 1, limit = 1;
@@ -133,8 +158,8 @@ public:
     TargetView current_target() const {
         GLint framebuffer = 0;
         gl_.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &framebuffer);
-        if (uintptr_t(framebuffer) == target_.id) return target_;
-        return {uintptr_t(framebuffer), {}};
+        if (uintptr_t(framebuffer) == target_.id && bool(target_)) return target_;
+        return {uintptr_t(framebuffer), {}, 0, true};
     }
 
     int max_texture_size() const {
@@ -187,6 +212,7 @@ public:
                     {location, field.offset, field.type, field.count, size, stride, packing_offset, pack}
             );
         }
+        result.id = software_handle();
         return result;
     }
 
@@ -212,7 +238,10 @@ public:
             const auto count = GLsizei(field.count);
             switch (field.type) {
                 case ConstantType::float1:
-                    gl_.Uniform1fv(field.location, count, floats);
+                    if (count == 1)
+                        gl_.Uniform1f(field.location, *floats);
+                    else
+                        gl_.Uniform1fv(field.location, count, floats);
                     break;
                 case ConstantType::float2:
                     gl_.Uniform2fv(field.location, count, floats);
@@ -225,7 +254,10 @@ public:
                     break;
                 case ConstantType::int1:
                 case ConstantType::bool32:
-                    gl_.Uniform1iv(field.location, count, integers);
+                    if (count == 1)
+                        gl_.Uniform1i(field.location, *integers);
+                    else
+                        gl_.Uniform1iv(field.location, count, integers);
                     break;
                 case ConstantType::matrix4:
                     gl_.UniformMatrix4fv(field.location, count, GL_FALSE, floats);
@@ -241,7 +273,7 @@ public:
         gl_.Uniform1i(gl_.GetUniformLocation(GLuint(program.id), name), GLint(unit));
     }
 
-    Pipeline create_pipeline(const PipelineState &state) { return {state}; }
+    Pipeline create_pipeline(const PipelineState &state) { return {state, software_handle()}; }
 
     void destroy(Pipeline &pipeline) { pipeline = {}; }
 
@@ -255,6 +287,7 @@ public:
         enabled(GL_CULL_FACE, state.raster.cull != Cull::none);
         if (state.raster.cull != Cull::none) gl_.CullFace(state.raster.cull == Cull::front ? GL_FRONT : GL_BACK);
         gl_.FrontFace(state.raster.winding == Winding::counter_clockwise ? GL_CCW : GL_CW);
+        enabled(GL_CLIP_DISTANCE0, state.raster.clip_distance);
         enabled(GL_POLYGON_OFFSET_FILL, state.raster.offset);
         if (state.raster.offset) gl_.PolygonOffset(state.raster.slope_bias, state.raster.constant_bias);
         const auto &write = state.color_write;
@@ -330,6 +363,8 @@ public:
     }
 
     Sampler create_sampler(const SamplerDesc &desc) {
+        if (!std::isfinite(desc.max_anisotropy) || desc.max_anisotropy < 1)
+            throw std::runtime_error("Invalid sampler anisotropy");
         Sampler result;
         result.id = generate(gl_.GenSamplers);
         GLenum minification = desc.minification == Filter::linear ? GL_LINEAR : GL_NEAREST;
@@ -339,22 +374,31 @@ public:
             else
                 minification = desc.mip_filter == Filter::linear ? GL_NEAREST_MIPMAP_LINEAR : GL_NEAREST_MIPMAP_NEAREST;
         }
-        gl_.SamplerParameteri(result.id, GL_TEXTURE_MIN_FILTER, GLint(minification));
+        gl_.SamplerParameteri(GLuint(result.id), GL_TEXTURE_MIN_FILTER, GLint(minification));
         gl_.SamplerParameteri(
-                result.id, GL_TEXTURE_MAG_FILTER, desc.magnification == Filter::linear ? GL_LINEAR : GL_NEAREST
+                GLuint(result.id), GL_TEXTURE_MAG_FILTER, desc.magnification == Filter::linear ? GL_LINEAR : GL_NEAREST
         );
-        const GLenum address = desc.address == Address::clamp    ? GL_CLAMP_TO_EDGE
-                               : desc.address == Address::mirror ? GL_MIRRORED_REPEAT
-                               : desc.address == Address::border ? GL_CLAMP_TO_BORDER
-                                                                 : GL_REPEAT;
-        gl_.SamplerParameteri(result.id, GL_TEXTURE_WRAP_S, address);
-        gl_.SamplerParameteri(result.id, GL_TEXTURE_WRAP_T, address);
-        gl_.SamplerParameteri(result.id, GL_TEXTURE_WRAP_R, address);
-        gl_.SamplerParameteri(result.id, GL_TEXTURE_COMPARE_MODE, desc.compare ? GL_COMPARE_REF_TO_TEXTURE : GL_NONE);
-        gl_.SamplerParameteri(result.id, GL_TEXTURE_COMPARE_FUNC, comparison(desc.comparison));
-        gl_.SamplerParameterf(result.id, GL_TEXTURE_MIN_LOD, desc.min_lod);
-        gl_.SamplerParameterf(result.id, GL_TEXTURE_MAX_LOD, desc.max_lod);
-        gl_.SamplerParameterfv(result.id, GL_TEXTURE_BORDER_COLOR, desc.border_color.data());
+        const Address axes[] = {desc.wrap_s, desc.wrap_t, desc.wrap_r};
+        const GLenum parameters[] = {GL_TEXTURE_WRAP_S, GL_TEXTURE_WRAP_T, GL_TEXTURE_WRAP_R};
+        for (unsigned axis = 0; axis < 3; ++axis)
+            gl_.SamplerParameteri(
+                    GLuint(result.id),
+                    parameters[axis],
+                    addressing(axes[axis] == Address::inherit ? desc.address : axes[axis])
+            );
+        if (desc.max_anisotropy > 1) {
+            const float maximum = max_anisotropy();
+            constexpr GLenum texture_anisotropy = 0x84fe;
+            if (maximum > 1)
+                gl_.SamplerParameterf(GLuint(result.id), texture_anisotropy, std::min(desc.max_anisotropy, maximum));
+        }
+        gl_.SamplerParameteri(
+                GLuint(result.id), GL_TEXTURE_COMPARE_MODE, desc.compare ? GL_COMPARE_REF_TO_TEXTURE : GL_NONE
+        );
+        gl_.SamplerParameteri(GLuint(result.id), GL_TEXTURE_COMPARE_FUNC, comparison(desc.comparison));
+        gl_.SamplerParameterf(GLuint(result.id), GL_TEXTURE_MIN_LOD, desc.min_lod);
+        gl_.SamplerParameterf(GLuint(result.id), GL_TEXTURE_MAX_LOD, desc.max_lod);
+        gl_.SamplerParameterfv(GLuint(result.id), GL_TEXTURE_BORDER_COLOR, desc.border_color.data());
         return result;
     }
 
@@ -368,6 +412,13 @@ public:
         gl_.BindTexture(texture_target(texture.desc), GLuint(texture.id));
         gl_.BindSampler(slot, GLuint(sampler.id));
     }
+
+    void bind_image(unsigned slot, Texture texture) {
+        gl_.ActiveTexture(GL_TEXTURE0 + slot);
+        gl_.BindTexture(texture_target(texture.desc), GLuint(texture.id));
+    }
+
+    void bind_sampler(unsigned slot, Sampler sampler) { gl_.BindSampler(slot, GLuint(sampler.id)); }
 
     void unbind_sampler(unsigned slot) { gl_.BindSampler(slot, 0); }
 
@@ -406,10 +457,12 @@ public:
         target = {};
     }
 
-    static TargetView window_target(int width, int height) { return {0, {width, height}}; }
+    static TargetView window_target(int width, int height) { return {0, {width, height}, 0, true}; }
 
     // Borrowed WGL interop targets stay owned by LowLatencyPresenter.
-    static TargetView borrow_target(uintptr_t framebuffer, const TargetDesc &desc) { return {framebuffer, desc}; }
+    static TargetView borrow_target(uintptr_t framebuffer, const TargetDesc &desc) {
+        return {framebuffer, desc, 0, true};
+    }
 
     void bind_target(const TargetView &target) {
         gl_.BindFramebuffer(GL_FRAMEBUFFER, GLuint(target.id));
@@ -440,6 +493,8 @@ public:
         blit(source, destination, GL_DEPTH_BUFFER_BIT);
     }
 
+    void prepare_color_copy(const TargetView &) {}
+
     void copy_color(const TargetView &source, Rect region, Texture destination, int x = 0, int y = 0) {
         gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, GLuint(source.id));
         gl_.BindTexture(texture_target(destination.desc), GLuint(destination.id));
@@ -452,8 +507,8 @@ public:
         Geometry result;
         result.array = generate(gl_.GenVertexArrays);
         result.vertices = generate(gl_.GenBuffers);
-        gl_.BindVertexArray(result.array);
-        gl_.BindBuffer(GL_ARRAY_BUFFER, result.vertices);
+        gl_.BindVertexArray(GLuint(result.array));
+        gl_.BindBuffer(GL_ARRAY_BUFFER, GLuint(result.vertices));
         for (const auto &attribute : attributes) {
             gl_.EnableVertexAttribArray(attribute.location);
             gl_.VertexAttribPointer(
@@ -481,6 +536,11 @@ public:
     void stream_vertices(Geometry geometry, std::span<const std::byte> data) {
         gl_.BindBuffer(GL_ARRAY_BUFFER, GLuint(geometry.vertices));
         gl_.BufferData(GL_ARRAY_BUFFER, GLsizeiptr(data.size()), data.data(), GL_STREAM_DRAW);
+    }
+
+    void upload_vertices(Geometry geometry, std::span<const std::byte> data) {
+        gl_.BindBuffer(GL_ARRAY_BUFFER, GLuint(geometry.vertices));
+        gl_.BufferData(GL_ARRAY_BUFFER, GLsizeiptr(data.size()), data.data(), GL_STATIC_DRAW);
     }
 
     void upload_indices(Geometry &geometry, std::span<const std::byte> data) {
@@ -529,7 +589,7 @@ public:
         result.height = height;
         result.format = format;
         result.buffer = generate(gl_.GenBuffers);
-        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, result.buffer);
+        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, GLuint(result.buffer));
         gl_.BufferData(GL_PIXEL_PACK_BUFFER, GLsizeiptr(readback_bytes(result)), nullptr, GL_STREAM_READ);
         gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         return result;

@@ -33,6 +33,21 @@ public:
 
     static size_t readback_bytes(const Readback &readback) { return OpenGlContext::readback_bytes(readback); }
 
+    void reset_state() {
+        if (backend_ == Backend::opengl) return opengl_->reset_state();
+        return d3d11_->reset_state();
+    }
+
+    float max_anisotropy() const {
+        if (backend_ == Backend::opengl) return opengl_->max_anisotropy();
+        return d3d11_->max_anisotropy();
+    }
+
+    void upload_vertices(Geometry geometry, std::span<const std::byte> data) {
+        if (backend_ == Backend::opengl) return opengl_->upload_vertices(geometry, data);
+        return d3d11_->upload_vertices(geometry, data);
+    }
+
     int max_samples(Format color = Format::rgba8, Format depth = Format::depth24) const {
         if (backend_ == Backend::opengl) return opengl_->max_samples(color, depth);
         return d3d11_->max_samples(color, depth);
@@ -158,6 +173,16 @@ public:
         return d3d11_->bind_texture(slot, texture, sampler);
     }
 
+    void bind_image(unsigned slot, Texture texture) {
+        if (backend_ == Backend::opengl) return opengl_->bind_image(slot, texture);
+        return d3d11_->bind_image(slot, texture);
+    }
+
+    void bind_sampler(unsigned slot, Sampler sampler) {
+        if (backend_ == Backend::opengl) return opengl_->bind_sampler(slot, sampler);
+        return d3d11_->bind_sampler(slot, sampler);
+    }
+
     void unbind_sampler(unsigned slot) {
         if (backend_ == Backend::opengl) return opengl_->unbind_sampler(slot);
         return d3d11_->unbind_sampler(slot);
@@ -201,6 +226,11 @@ public:
     void resolve_depth(const TargetView &source, const TargetView &destination) {
         if (backend_ == Backend::opengl) return opengl_->resolve_depth(source, destination);
         return d3d11_->resolve_depth(source, destination);
+    }
+
+    void prepare_color_copy(const TargetView &source) {
+        if (backend_ == Backend::opengl) return opengl_->prepare_color_copy(source);
+        return d3d11_->prepare_color_copy(source);
     }
 
     void copy_color(const TargetView &source, Rect region, Texture destination, int x = 0, int y = 0) {

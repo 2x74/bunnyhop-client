@@ -18,8 +18,10 @@ public:
     D3D11Context(const D3D11Context &) = delete;
     D3D11Context &operator=(const D3D11Context &) = delete;
     static std::unique_ptr<D3D11Context> warp();
+    float max_anisotropy() const;
     int max_samples(Format color = Format::rgba8, Format depth = Format::depth24) const;
     TargetView current_target() const;
+    void reset_state();
     int max_texture_size() const;
     void check_error(const char *message);
     Program create_program(const ProgramDesc &source);
@@ -42,6 +44,8 @@ public:
     Sampler create_sampler(const SamplerDesc &desc);
     void destroy(Sampler &sampler);
     void bind_texture(unsigned slot, Texture texture, Sampler sampler = {});
+    void bind_image(unsigned slot, Texture texture);
+    void bind_sampler(unsigned slot, Sampler sampler);
     void unbind_sampler(unsigned slot);
     RenderTarget create_target(const TargetDesc &desc);
     void destroy(RenderTarget &target);
@@ -54,11 +58,13 @@ public:
     void clear_depth();
     void resolve_color(const TargetView &source, const TargetView &destination);
     void resolve_depth(const TargetView &source, const TargetView &destination);
+    void prepare_color_copy(const TargetView &source);
     void copy_color(const TargetView &source, Rect region, Texture destination, int x = 0, int y = 0);
     Geometry create_geometry(size_t stride, std::span<const VertexAttribute> attributes);
     void destroy(Geometry &geometry);
     void bind_geometry(Geometry geometry);
     void stream_vertices(Geometry geometry, std::span<const std::byte> data);
+    void upload_vertices(Geometry geometry, std::span<const std::byte> data);
     void upload_indices(Geometry &geometry, std::span<const std::byte> data);
     void draw(Primitive topology, int first, int count);
     void draw_instanced(Primitive topology, int first, int count, int instances);

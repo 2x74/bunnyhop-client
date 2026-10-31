@@ -83,7 +83,26 @@ void enhanced(gfx::Context &context) {
 }
 }  // namespace
 
-int main() {
+int main(int argc, char **argv) {
+#if defined(_WIN32)
+    if (argc > 1 && std::string_view(argv[1]) == "--warp") {
+        try {
+            auto device = gfx::D3D11Context::warp();
+            gfx::Context context(*device);
+            exposure(context);
+            enhanced(context);
+            context.check_error("Postprocessing D3D11 error");
+            std::cout << "WARP exposure ring, resize, MSAA and Enhanced checks passed\n";
+            return 0;
+        } catch (const std::exception &error) {
+            std::cerr << error.what() << '\n';
+            return 1;
+        }
+    }
+#else
+    (void)argc;
+    (void)argv;
+#endif
     SDL_SetHint(SDL_HINT_MAC_BACKGROUND_APP, "1");
     if (!SDL_Init(SDL_INIT_VIDEO)) return 77;
 

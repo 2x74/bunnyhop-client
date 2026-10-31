@@ -124,26 +124,30 @@ void draws(Context &context) {
     static constexpr const char *vertex = R"(#version 330 core
 layout(location=0) in vec2 point;
 uniform vec3 shift[2];
-void main(){gl_Position=vec4(point+shift[gl_InstanceID].xy,0,1);})";
+uniform float clipHeight;
+void main(){vec2 p=point+shift[gl_InstanceID].xy;
+gl_ClipDistance[0]=p.y-clipHeight;gl_Position=vec4(p,0,1);})";
     static constexpr const char *fragment = R"(#version 330 core
 uniform vec4 tint;
 uniform bool enabled;
 out vec4 color;
-void main(){color=enabled?tint:vec4(0);})";
+void main(){color=enabled?(gl_FrontFacing?tint:vec4(0,1,0,1)):vec4(0);})";
     auto program = context.create_program({{"gfx-smoke", ""}, vertex, fragment});
 
     struct alignas(16) Constants {
         std::array<float, 4> shift[2];
         std::array<float, 4> tint;
         uint32_t enabled = 5;
-        std::array<float, 3> padding{};
+        float clipHeight = no_clip_height;
+        std::array<float, 2> padding{};
     };
 
     static constexpr ConstantField fields[] = {
             {"shift", 0, 32, ConstantType::float3, 2, 16},
             {"tint", 32, 16, ConstantType::float4},
             {"enabled", 48, 4, ConstantType::bool32},
-            {"optimizedOut", 52, 4, ConstantType::float1}
+            {"clipHeight", 52, 4, ConstantType::float1},
+            {"optimizedOut", 56, 4, ConstantType::float1}
     };
     auto binding = context.create_constants(program, {fields, sizeof(Constants)});
     const Constants constants = {{{-.5f, -.5f, 0, 0}, {.5f, .5f, 0, 0}}, {1, 0, 0, 1}};
@@ -168,7 +172,33 @@ void main(){color=enabled?tint:vec4(0);})";
     for (int y = 0; y < height; ++y)
         for (int x = 0; x < width; ++x)
             require(channel(bottom, x, y, 0) == channel(top, x, height - 1 - y, 0), "Readback Y flip changed");
+    auto mirrored = context.create_pipeline({{}, {false, false}, {Cull::none, Winding::clockwise}});
+    context.bind_target(target);
+    context.pipeline(mirrored);
+    context.clear_color({0, 0, 0, 1});
+    context.draw_instanced(Primitive::triangles, 0, 3, 2);
+    const auto back_facing = read(context, target, RowOrigin::bottom);
+    require(channel(back_facing, 4, 1, 1) == 255 && channel(back_facing, 12, 5, 1) == 255,
+            "Mirrored winding or fragment front-face interpretation changed");
+    auto clipping_state = pipeline.state;
+    clipping_state.raster.clip_distance = true;
+    auto clipping = context.create_pipeline(clipping_state);
+    auto clipped = constants;
+    clipped.clipHeight = 0;
+    context.bind_target(target);
+    context.pipeline(clipping);
+    context.constants(binding, &clipped);
+    context.clear_color({0, 0, 0, 1});
+    context.draw_instanced(Primitive::triangles, 0, 3, 2);
+    const auto clipped_pixels = read(context, target, RowOrigin::bottom);
+    require(channel(clipped_pixels, 4, 1, 0) == 0 && channel(clipped_pixels, 12, 5, 0) == 255,
+            "Clip-distance pipeline or no-clip sentinel changed");
+    context.pipeline(pipeline);
+    context.constants(binding, &constants);
+    context.destroy(clipping);
+    context.destroy(mirrored);
     const std::array<uint16_t, 3> indices = {0, 1, 2};
+    context.upload_vertices(geometry, std::as_bytes(std::span(vertices)));
     context.upload_indices(geometry, std::as_bytes(std::span(indices)));
     context.bind_target(target);
     context.bind_program(program);
@@ -234,7 +264,8 @@ color=(texture(uFinEnv,d)+texture(uCosEnv,d)+texture(uPlayerEnv,d))/3.*fromVerte
     context.clear_color({0, 0, 0, 1});
     context.pipeline(pipeline);
     context.bind_program(program);
-    context.bind_texture(9, cube, sampler);
+    context.bind_sampler(9, sampler);
+    context.bind_image(9, cube);
     context.bind_texture(3, bone_texture, sampler);
     context.bind_geometry(geometry);
     context.draw(Primitive::triangles, 0, 3);
@@ -242,6 +273,33 @@ color=(texture(uFinEnv,d)+texture(uCosEnv,d)+texture(uPlayerEnv,d))/3.*fromVerte
     require(channel(pixels, 0, 0, 2) == 255 && channel(pixels, 10, 0, 0) > 150,
             "Cube fanout, vertex textures, bone texture or front-face winding changed");
     save("cube-faces", pixels, width, height);
+    for (auto &face : faces)
+        for (size_t pixel = 0; pixel < face.size(); pixel += 4) {
+            face[pixel] = face[pixel + 1] = 128;
+            face[pixel + 2] = face[pixel + 3] = 255;
+        }
+    auto srgb = context.create_texture({4, 4, Format::srgb8, TextureKind::cube, 1, 3}, pointers);
+    context.generate_mips(srgb);
+    SamplerDesc filtered;
+    filtered.mipmapped = true;
+    filtered.max_anisotropy = context.max_anisotropy();
+    filtered.wrap_s = Address::repeat;
+    filtered.wrap_t = Address::clamp;
+    auto anisotropic = context.create_sampler(filtered);
+    context.bind_target(target);
+    context.bind_program(program);
+    context.bind_image(9, srgb);
+    context.bind_sampler(9, anisotropic);
+    context.bind_geometry(geometry);
+    context.draw(Primitive::triangles, 0, 3);
+    const auto decoded = read(context, target, RowOrigin::bottom);
+    require(channel(decoded, 0, 0, 0) >= 54 && channel(decoded, 0, 0, 0) <= 56 && channel(decoded, 0, 0, 2) == 255,
+            "sRGB texture upload did not preserve hardware decode");
+    save("srgb-cube", decoded, width, height);
+    require(bool(srgb) && srgb == srgb && srgb != cube, "Texture handle validity/equality changed");
+    context.destroy(srgb);
+    require(!srgb, "Destroyed texture remained valid");
+    context.destroy(anisotropic);
     context.destroy(target);
     context.destroy(geometry);
     context.destroy(pipeline);
@@ -258,6 +316,7 @@ void video(Context &context, int supersample, int samples) {
     const std::array<native_render::Vec3, 4> quad = {{{-.8f, -.7f, 0}, {.2f, -.7f, 0}, {.2f, .5f, 0}, {-.8f, .5f, 0}}};
     const float eye[] = {0, 0, 2};
     for (size_t frame = 0; frame < 6; ++frame) {
+        context.reset_state();
         targets.begin_frame();
         for (int sample = 0; sample < samples; ++sample) {
             targets.bind_scene();
@@ -295,6 +354,10 @@ void video(Context &context, int supersample, int samples) {
 }
 
 void run(Context &context) {
+    context.viewport({1, 2, width, height});
+    const auto viewport = context.current_viewport();
+    require(viewport.x == 1 && viewport.y == 2 && viewport.width == width && viewport.height == height,
+            "Viewport restoration query changed");
     require(context.max_samples() >= 4, "Graphics backend does not support four samples");
     auto scalar = context.create_target({width, height, Format::r8});
     context.bind_target(scalar);
@@ -314,9 +377,11 @@ void run(Context &context) {
     cubes(context);
     video(context, 1, 1);
     video(context, 2, 3);
-    auto fence = context.signal();
-    require(context.wait(fence, timeout_ns, true) == Wait::ready, "Standalone fence timed out");
-    context.destroy(fence);
+    for (int i = 0; i < 130; ++i) {
+        auto fence = context.signal();
+        require(context.wait(fence, timeout_ns, true) == Wait::ready, "Standalone fence timed out");
+        context.destroy(fence);
+    }
     context.check_error("Graphics seam error");
     std::cout << "Graphics/subsystem checks passed\n";
 }
@@ -376,6 +441,9 @@ int main(int argc, char **argv) {
     }
     try {
         Context context(gl);
+        gl.Viewport(2, 3, 4, 5);
+        require(context.current_viewport().width == 4, "GL viewport query ignored legacy state");
+        require(bool(context.current_target()), "The current GL window target must be valid");
         run(context);
         return 0;
     } catch (const std::exception &error) {

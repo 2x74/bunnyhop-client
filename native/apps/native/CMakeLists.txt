@@ -23,19 +23,24 @@ if(WIN32 OR BUNNYHOP_GFX_DISPATCH)
     if(WIN32)
         enable_language(RC)
         find_package(Python3 REQUIRED COMPONENTS Interpreter)
-        file(GLOB GFX_SHADER_INPUTS CONFIGURE_DEPENDS src/*.hpp tools/d3d-shaders/*.py tools/d3d-shaders/*.hlsl)
+        file(GLOB GFX_SHADER_INPUTS CONFIGURE_DEPENDS src/*.hpp
+            tools/d3d-shaders/*.py tools/d3d-shaders/*.hlsl tools/d3d-shaders/*.ts
+            tools/d3d-shaders/*.cpp tools/d3d-shaders/*.json)
+        file(GLOB_RECURSE GFX_PLAYER_SHADER_INPUTS CONFIGURE_DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/../web/src/player/*.ts"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../web/src/viewmodel/*.ts")
         set(GFX_SHADER_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/d3d11")
         add_custom_command(OUTPUT "${GFX_SHADER_OUTPUT}/d3d11-shaders.rc" "${GFX_SHADER_OUTPUT}/d3d11-shaders.bin"
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/d3d-shaders/package.py"
                 --build --output "${GFX_SHADER_OUTPUT}"
-            DEPENDS ${GFX_SHADER_INPUTS} src/gfx_smoke.cpp
+            DEPENDS ${GFX_SHADER_INPUTS} ${GFX_PLAYER_SHADER_INPUTS} src/gfx_smoke.cpp
+                src/export-player-materials.ts ../web/src/loadout.ts ../../bun.lock
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.." VERBATIM)
         target_sources(bunnyhop_gfx_d3d11 INTERFACE "${GFX_SHADER_OUTPUT}/d3d11-shaders.rc")
         target_link_libraries(bunnyhop_gfx_d3d11 PUBLIC d3d11)
     else()
         add_compile_definitions(BUNNYHOP_GFX_DISPATCH)
     endif()
-    link_libraries(bunnyhop_gfx_d3d11)
 endif()
 option(BUNNYHOP_TEST_GTK "Run GTK lifecycle tests under Xvfb and D-Bus" OFF)
 # Lets the updater use a loopback HTTP server and a trust file from the environment, for the end-to-end update test.
@@ -150,6 +155,9 @@ endif()
 if(BUNNYHOP_BUILD_CLIENT)
     find_package(SDL3 3.4 CONFIG REQUIRED)
     find_package(OpenGL REQUIRED)
+    if(WIN32 OR BUNNYHOP_GFX_DISPATCH)
+        target_link_libraries(OpenGL::GL INTERFACE bunnyhop_gfx_d3d11)
+    endif()
     find_package(CURL REQUIRED)
     find_package(ZLIB REQUIRED)
     find_package(Threads REQUIRED)
@@ -166,6 +174,11 @@ if(BUNNYHOP_BUILD_CLIENT)
             bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
         add_test(NAME native_paint_render COMMAND bunnyhop-native-paint-render-smoke)
         set_tests_properties(native_paint_render PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30)
+        add_executable(bunnyhop-native-gfx-constants-tests src/gfx_constants_tests.cpp)
+        target_link_libraries(bunnyhop-native-gfx-constants-tests PRIVATE SDL3::SDL3 OpenGL::GL)
+        target_compile_options(bunnyhop-native-gfx-constants-tests PRIVATE
+            $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+        add_test(NAME native_gfx_constants COMMAND bunnyhop-native-gfx-constants-tests)
         add_executable(bunnyhop-native-gfx-smoke src/gfx_smoke.cpp)
         target_include_directories(bunnyhop-native-gfx-smoke PRIVATE src include vendor)
         target_link_libraries(bunnyhop-native-gfx-smoke PRIVATE SDL3::SDL3 OpenGL::GL)

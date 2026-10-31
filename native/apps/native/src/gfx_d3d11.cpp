@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -54,6 +55,8 @@ struct PixelFormat {
 
 PixelFormat pixel_format(Format format) {
     switch (format) {
+        case Format::srgb8:
+            return {DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_FORMAT_UNKNOWN, 4};
         case Format::r8:
             return {DXGI_FORMAT_R8_UNORM, DXGI_FORMAT_R8_UNORM, DXGI_FORMAT_UNKNOWN, 1};
         case Format::rgba8:
@@ -108,6 +111,7 @@ struct TargetData {
 
 struct QueryData {
     ComPtr<ID3D11Query> query;
+    bool pooled = false, in_use = false, issued = false;
 };
 
 struct PipelineData {
@@ -160,6 +164,7 @@ struct ProgramData {
 
 struct GeometryData {
     UINT stride = 0, offset = 0, cursor = 0;
+    bool static_vertices = false;
     static constexpr UINT capacity = 4 * 1024 * 1024;
     std::vector<VertexAttribute> attributes;
     std::unordered_map<ProgramData *, ComPtr<ID3D11InputLayout>> layouts;
@@ -213,6 +218,8 @@ struct D3D11Context::Impl {
     };
 
     std::array<Unit, 32> units{};
+    std::array<QueryData, 64> fences;
+    size_t next_fence = 0;
     TargetView target;
     Rect viewport;
     ID3D11RenderTargetView *rtv = nullptr;
@@ -223,6 +230,10 @@ struct D3D11Context::Impl {
     std::unique_ptr<ProgramData> copy_program;
     std::unique_ptr<PipelineData> copy_pipeline;
     ComPtr<ID3D11Buffer> copy_constants;
+    ComPtr<ID3D11Texture2D> borrowed_color;
+    ComPtr<ID3D11ShaderResourceView> borrowed_color_srv;
+    D3D11_TEXTURE2D_DESC borrowed_color_desc{};
+    DXGI_FORMAT borrowed_color_view = DXGI_FORMAT_UNKNOWN;
 
     Impl(D3D11Device borrowed)
         : device(static_cast<ID3D11Device *>(borrowed.device))
@@ -233,6 +244,11 @@ struct D3D11Context::Impl {
         ComPtr<ID3D11Device> context_device;
         context->GetDevice(&context_device);
         if (context_device.Get() != device) throw std::runtime_error("D3D11 device/context mismatch");
+        const D3D11_QUERY_DESC completion{D3D11_QUERY_EVENT, 0};
+        for (auto &fence : fences) {
+            checked(device->CreateQuery(&completion, &fence.query), "Cannot create D3D11 fence pool");
+            fence.pooled = true;
+        }
         const auto module = GetModuleHandleW(nullptr);
         const auto resource = FindResourceW(module, MAKEINTRESOURCEW(201), MAKEINTRESOURCEW(10));
         if (!resource) throw std::runtime_error("Embedded D3D11 shader archive is missing");
@@ -467,13 +483,13 @@ struct D3D11Context::Impl {
         auto result = std::make_unique<PipelineData>();
         for (unsigned enabled = 0; enabled < 2; ++enabled) {
             D3D11_BLEND_DESC desc{};
-            auto &target = desc.RenderTarget[0];
-            target.BlendEnable = enabled != 0;
-            target.SrcBlend = target.SrcBlendAlpha = factor(description.blend.source);
-            target.DestBlend = target.DestBlendAlpha = factor(description.blend.destination);
-            target.BlendOp = target.BlendOpAlpha = D3D11_BLEND_OP_ADD;
+            auto &blend_target = desc.RenderTarget[0];
+            blend_target.BlendEnable = enabled != 0;
+            blend_target.SrcBlend = blend_target.SrcBlendAlpha = factor(description.blend.source);
+            blend_target.DestBlend = blend_target.DestBlendAlpha = factor(description.blend.destination);
+            blend_target.BlendOp = blend_target.BlendOpAlpha = D3D11_BLEND_OP_ADD;
             for (unsigned i = 0; i < 4; ++i)
-                if (description.color_write[i]) target.RenderTargetWriteMask |= BYTE(1 << i);
+                if (description.color_write[i]) blend_target.RenderTargetWriteMask |= BYTE(1 << i);
             checked(device->CreateBlendState(&desc, &result->blend[enabled]), "Cannot create D3D11 blend description");
         }
         for (unsigned flags = 0; flags < 4; ++flags) {
@@ -489,7 +505,7 @@ struct D3D11Context::Impl {
         desc.CullMode = description.raster.cull == Cull::none    ? D3D11_CULL_NONE
                         : description.raster.cull == Cull::front ? D3D11_CULL_FRONT
                                                                  : D3D11_CULL_BACK;
-        // The translated vertex Y flip makes a GL CCW front face clockwise in D3D target coordinates.
+        // The translated vertex Y flip makes a GL CCW front face clockwise in D3D blend_target coordinates.
         desc.FrontCounterClockwise = description.raster.winding == Winding::clockwise;
         desc.DepthClipEnable = TRUE;
         desc.MultisampleEnable = TRUE;
@@ -529,6 +545,7 @@ D3D11Context::D3D11Context(D3D11Device borrowed) : impl_(std::make_unique<Impl>(
     impl_->copy_pipeline = impl_->make_pipeline({{}, {false, false}, {}});
     impl_->copy_constants = impl_->buffer(16, D3D11_BIND_CONSTANT_BUFFER);
     impl_->depth_pipeline = impl_->make_pipeline({{}, {true, true, Compare::always}, {}});
+    reset_state();
 }
 
 D3D11Context::~D3D11Context() = default;
@@ -554,6 +571,32 @@ std::unique_ptr<D3D11Context> D3D11Context::warp() {
     result->impl_->owned_device = std::move(device);
     result->impl_->owned_context = std::move(context);
     return result;
+}
+
+void D3D11Context::reset_state() {
+    impl_->context->ClearState();
+    impl_->program = nullptr;
+    impl_->geometry = nullptr;
+    impl_->current_pipeline = nullptr;
+    impl_->bound_blend = nullptr;
+    impl_->bound_depth = nullptr;
+    impl_->bound_raster = nullptr;
+    for (auto &stage : impl_->bound_buffers)
+        stage.fill(nullptr);
+    for (auto &stage : impl_->bound_srvs)
+        stage.fill(nullptr);
+    for (auto &stage : impl_->bound_samplers)
+        stage.fill(nullptr);
+    impl_->rtv = nullptr;
+    impl_->dsv = nullptr;
+    impl_->target = {};
+    impl_->viewport = {};
+    impl_->color_resource.Reset();
+    impl_->depth_resource.Reset();
+}
+
+float D3D11Context::max_anisotropy() const {
+    return D3D11_REQ_MAXANISOTROPY;
 }
 
 int D3D11Context::max_samples(Format color, Format depth) const {
@@ -835,6 +878,8 @@ void D3D11Context::destroy(Texture &texture) {
 }
 
 Sampler D3D11Context::create_sampler(const SamplerDesc &desc) {
+    if (!std::isfinite(desc.max_anisotropy) || desc.max_anisotropy < 1)
+        throw std::runtime_error("Invalid sampler anisotropy");
     D3D11_SAMPLER_DESC sampler{};
     sampler.Filter = D3D11_ENCODE_BASIC_FILTER(
             desc.minification == Filter::linear ? D3D11_FILTER_TYPE_LINEAR : D3D11_FILTER_TYPE_POINT,
@@ -842,13 +887,19 @@ Sampler D3D11Context::create_sampler(const SamplerDesc &desc) {
             desc.mip_filter == Filter::linear ? D3D11_FILTER_TYPE_LINEAR : D3D11_FILTER_TYPE_POINT,
             desc.compare ? D3D11_FILTER_REDUCTION_TYPE_COMPARISON : D3D11_FILTER_REDUCTION_TYPE_STANDARD
     );
-    const auto address = desc.address == Address::clamp    ? D3D11_TEXTURE_ADDRESS_CLAMP
-                         : desc.address == Address::repeat ? D3D11_TEXTURE_ADDRESS_WRAP
-                         : desc.address == Address::mirror ? D3D11_TEXTURE_ADDRESS_MIRROR
-                                                           : D3D11_TEXTURE_ADDRESS_BORDER;
-    sampler.AddressU = sampler.AddressV = sampler.AddressW = address;
+    const auto addressing = [&](Address axis) {
+        const auto address = axis == Address::inherit ? desc.address : axis;
+        if (address == Address::repeat) return D3D11_TEXTURE_ADDRESS_WRAP;
+        if (address == Address::mirror) return D3D11_TEXTURE_ADDRESS_MIRROR;
+        return address == Address::border ? D3D11_TEXTURE_ADDRESS_BORDER : D3D11_TEXTURE_ADDRESS_CLAMP;
+    };
+    sampler.AddressU = addressing(desc.wrap_s);
+    sampler.AddressV = addressing(desc.wrap_t);
+    sampler.AddressW = addressing(desc.wrap_r);
+    if (desc.max_anisotropy > 1)
+        sampler.Filter = desc.compare ? D3D11_FILTER_COMPARISON_ANISOTROPIC : D3D11_FILTER_ANISOTROPIC;
     sampler.ComparisonFunc = comparison(desc.comparison);
-    sampler.MaxAnisotropy = 1;
+    sampler.MaxAnisotropy = UINT(std::clamp(desc.max_anisotropy, 1.f, max_anisotropy()));
     sampler.MinLOD = desc.mipmapped ? desc.min_lod : 0;
     sampler.MaxLOD = desc.mipmapped ? desc.max_lod : 0;
     std::copy(desc.border_color.begin(), desc.border_color.end(), sampler.BorderColor);
@@ -873,6 +924,18 @@ void D3D11Context::destroy(Sampler &sampler) {
 void D3D11Context::bind_texture(unsigned slot, Texture texture, Sampler sampler) {
     if (slot >= impl_->units.size()) throw std::runtime_error("D3D11 logical texture unit exceeds limit");
     impl_->units[slot] = {native<TextureData>(texture.id), native<SamplerData>(sampler.id)};
+    impl_->textures(slot);
+}
+
+void D3D11Context::bind_image(unsigned slot, Texture texture) {
+    if (slot >= impl_->units.size()) throw std::runtime_error("D3D11 logical texture unit exceeds limit");
+    impl_->units[slot].texture = native<TextureData>(texture.id);
+    impl_->textures(slot);
+}
+
+void D3D11Context::bind_sampler(unsigned slot, Sampler sampler) {
+    if (slot >= impl_->units.size()) throw std::runtime_error("D3D11 logical texture unit exceeds limit");
+    impl_->units[slot].sampler = native<SamplerData>(sampler.id);
     impl_->textures(slot);
 }
 
@@ -909,6 +972,37 @@ void D3D11Context::destroy(RenderTarget &target) {
 }
 
 TargetView D3D11Context::borrow_target(void *rtv, const TargetDesc &desc, void *dsv) {
+    if (desc.width < 1 || desc.height < 1 || desc.samples < 1 || (desc.color != Format::none) != (rtv != nullptr)
+        || (desc.depth != Format::none) != (dsv != nullptr))
+        throw std::runtime_error("Borrowed D3D11 target metadata requires its color and depth views");
+    const auto validate = [&](ID3D11View *view) {
+        if (!view) return;
+        ComPtr<ID3D11Resource> resource;
+        ComPtr<ID3D11Texture2D> texture;
+        view->GetResource(&resource);
+        checked(resource.As(&texture), "Borrowed D3D11 target must be a 2D texture");
+        D3D11_TEXTURE2D_DESC actual{};
+        texture->GetDesc(&actual);
+        if (actual.Width != UINT(desc.width) || actual.Height != UINT(desc.height)
+            || actual.SampleDesc.Count != UINT(desc.samples) || actual.ArraySize != 1)
+            throw std::runtime_error("Borrowed D3D11 target dimensions or sample count differ");
+    };
+    auto *color = static_cast<ID3D11RenderTargetView *>(rtv);
+    auto *depth = static_cast<ID3D11DepthStencilView *>(dsv);
+    validate(color);
+    validate(depth);
+    if (color) {
+        D3D11_RENDER_TARGET_VIEW_DESC view{};
+        color->GetDesc(&view);
+        if (view.Format != pixel_format(desc.color).view)
+            throw std::runtime_error("Borrowed D3D11 color format differs");
+    }
+    if (depth) {
+        D3D11_DEPTH_STENCIL_VIEW_DESC view{};
+        depth->GetDesc(&view);
+        if (view.Format != pixel_format(desc.depth).depth)
+            throw std::runtime_error("Borrowed D3D11 depth format differs");
+    }
     return {handle(rtv), desc, handle(dsv), true};
 }
 
@@ -994,6 +1088,41 @@ void D3D11Context::resolve_depth(const TargetView &source, const TargetView &des
     impl_->detach_outputs();
 }
 
+void D3D11Context::prepare_color_copy(const TargetView &source) {
+    if (!source.borrowed) return;
+    auto *view = Impl::color(source);
+    if (!view || source.desc.samples != 1) throw std::runtime_error("Invalid borrowed color copy source");
+    ComPtr<ID3D11Resource> resource;
+    ComPtr<ID3D11Texture2D> texture;
+    view->GetResource(&resource);
+    checked(resource.As(&texture), "Color copy source must be a 2D texture");
+    D3D11_TEXTURE2D_DESC desc{};
+    D3D11_RENDER_TARGET_VIEW_DESC color{};
+    texture->GetDesc(&desc);
+    view->GetDesc(&color);
+    const auto &cached = impl_->borrowed_color_desc;
+    if (impl_->borrowed_color && cached.Width == desc.Width && cached.Height == desc.Height
+        && cached.Format == desc.Format && impl_->borrowed_color_view == color.Format)
+        return;
+    impl_->unbind_resource(impl_->borrowed_color.Get());
+    desc.MipLevels = desc.ArraySize = 1;
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    desc.CPUAccessFlags = desc.MiscFlags = 0;
+    ComPtr<ID3D11Texture2D> owned;
+    ComPtr<ID3D11ShaderResourceView> srv;
+    checked(impl_->device->CreateTexture2D(&desc, nullptr, &owned), "Cannot create borrowed color copy cache");
+    D3D11_SHADER_RESOURCE_VIEW_DESC sampling{};
+    sampling.Format = color.Format;
+    sampling.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    sampling.Texture2D.MipLevels = 1;
+    checked(impl_->device->CreateShaderResourceView(owned.Get(), &sampling, &srv), "Cannot sample borrowed color copy");
+    impl_->borrowed_color = std::move(owned);
+    impl_->borrowed_color_srv = std::move(srv);
+    impl_->borrowed_color_desc = desc;
+    impl_->borrowed_color_view = color.Format;
+}
+
 void D3D11Context::copy_color(const TargetView &source, Rect region, Texture destination, int x, int y) {
     if (!Impl::color(source)) throw std::runtime_error("Missing copy source");
     if (source.desc.samples != 1 || destination.desc.samples != 1)
@@ -1009,9 +1138,17 @@ void D3D11Context::copy_color(const TargetView &source, Rect region, Texture des
     impl_->unbind_resource(from.Get());
     impl_->unbind_resource(to);
     if (source.desc.color != destination.desc.format) {
-        if (source.borrowed || destination.desc.kind != TextureKind::image)
-            throw std::runtime_error("Color conversion requires seam-owned 2D targets");
-        const auto *data = native<TargetData>(source.id);
+        if (destination.desc.kind != TextureKind::image)
+            throw std::runtime_error("Color conversion requires a 2D destination");
+        ID3D11ShaderResourceView *sampling = nullptr;
+        if (source.borrowed) {
+            prepare_color_copy(source);
+            impl_->unbind_resource(impl_->borrowed_color.Get());
+            impl_->context->CopyResource(impl_->borrowed_color.Get(), from.Get());
+            sampling = impl_->borrowed_color_srv.Get();
+        } else {
+            sampling = native<TargetData>(source.id)->color->srv.Get();
+        }
         bind_target(
                 {handle(native<TextureData>(destination.id)->rtv.Get()),
                  {destination.desc.width, destination.desc.height, destination.desc.format},
@@ -1036,7 +1173,7 @@ void D3D11Context::copy_color(const TargetView &source, Rect region, Texture des
         impl_->current_pipeline = impl_->copy_pipeline.get();
         impl_->state = {{}, {false, false}, {}};
         impl_->bind_state();
-        impl_->srv(1, 0, data->color->srv.Get());
+        impl_->srv(1, 0, sampling);
         impl_->context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         impl_->context->Draw(3, 0);
         impl_->srv(1, 0, nullptr);
@@ -1082,7 +1219,7 @@ void D3D11Context::bind_geometry(Geometry geometry) {
 
 void D3D11Context::stream_vertices(Geometry geometry, std::span<const std::byte> data) {
     auto *value = native<GeometryData>(geometry.array);
-    if (!value->stride || data.size() > GeometryData::capacity || data.size() % value->stride)
+    if (value->static_vertices || !value->stride || data.size() > GeometryData::capacity || data.size() % value->stride)
         throw std::runtime_error("D3D11 vertex stream exceeds the ring capacity or stride");
     if (data.empty()) return;
     const UINT aligned = ((value->cursor + value->stride - 1) / value->stride) * value->stride;
@@ -1100,6 +1237,23 @@ void D3D11Context::stream_vertices(Geometry geometry, std::span<const std::byte>
     std::memcpy(static_cast<std::byte *>(mapped.pData) + value->offset, data.data(), data.size());
     impl_->context->Unmap(value->vertices.Get(), 0);
     value->cursor = value->offset + UINT(data.size());
+    if (impl_->geometry == value) impl_->bind_geometry();
+}
+
+void D3D11Context::upload_vertices(Geometry geometry, std::span<const std::byte> data) {
+    auto *value = native<GeometryData>(geometry.array);
+    if (!value->stride || data.empty() || data.size() > UINT32_MAX || data.size() % value->stride)
+        throw std::runtime_error("Invalid static vertex data");
+    D3D11_BUFFER_DESC desc{};
+    desc.ByteWidth = UINT(data.size());
+    desc.Usage = D3D11_USAGE_IMMUTABLE;
+    desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    const D3D11_SUBRESOURCE_DATA contents{data.data(), 0, 0};
+    ComPtr<ID3D11Buffer> vertices;
+    checked(impl_->device->CreateBuffer(&desc, &contents, &vertices), "Cannot upload D3D11 static vertices");
+    value->vertices = std::move(vertices);
+    value->static_vertices = true;
+    value->offset = value->cursor = 0;
     if (impl_->geometry == value) impl_->bind_geometry();
 }
 
@@ -1135,11 +1289,17 @@ void D3D11Context::draw_indexed(Primitive topology, IndexType type, size_t byte_
 }
 
 Fence D3D11Context::signal() {
-    auto result = std::make_unique<QueryData>();
-    const D3D11_QUERY_DESC desc{D3D11_QUERY_EVENT, 0};
-    checked(impl_->device->CreateQuery(&desc, &result->query), "Cannot create D3D11 fence");
-    impl_->context->End(result->query.Get());
-    return {handle(result.release())};
+    for (size_t i = 0; i < impl_->fences.size(); ++i) {
+        auto &fence = impl_->fences[impl_->next_fence++ % impl_->fences.size()];
+        if (fence.in_use) continue;
+        if (fence.issued
+            && impl_->context->GetData(fence.query.Get(), nullptr, 0, D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK)
+            continue;
+        fence.in_use = fence.issued = true;
+        impl_->context->End(fence.query.Get());
+        return {handle(&fence), true};
+    }
+    throw std::runtime_error("D3D11 fence pool is exhausted");
 }
 
 Wait D3D11Context::wait(Fence fence, uint64_t timeout_ns, bool flush) {
@@ -1159,7 +1319,12 @@ Wait D3D11Context::wait(Fence fence, uint64_t timeout_ns, bool flush) {
 }
 
 void D3D11Context::destroy(Fence &fence) {
-    if (!fence.borrowed) release<QueryData>(fence.id);
+    if (auto *value = native<QueryData>(fence.id)) {
+        if (value->pooled)
+            value->in_use = false;
+        else if (!fence.borrowed)
+            release<QueryData>(fence.id);
+    }
     fence = {};
 }
 
@@ -1307,6 +1472,18 @@ std::unique_ptr<D3D11Context> D3D11Context::warp() {
     unavailable();
 }
 
+void D3D11Context::reset_state() {
+    unavailable();
+}
+
+float D3D11Context::max_anisotropy() const {
+    unavailable();
+}
+
+void D3D11Context::upload_vertices(Geometry, std::span<const std::byte>) {
+    unavailable();
+}
+
 int D3D11Context::max_samples(Format, Format) const {
     unavailable();
 }
@@ -1407,6 +1584,14 @@ void D3D11Context::bind_texture(unsigned, Texture, Sampler) {
     unavailable();
 }
 
+void D3D11Context::bind_image(unsigned, Texture) {
+    unavailable();
+}
+
+void D3D11Context::bind_sampler(unsigned, Sampler) {
+    unavailable();
+}
+
 void D3D11Context::unbind_sampler(unsigned) {
     unavailable();
 }
@@ -1444,6 +1629,10 @@ void D3D11Context::resolve_color(const TargetView &, const TargetView &) {
 }
 
 void D3D11Context::resolve_depth(const TargetView &, const TargetView &) {
+    unavailable();
+}
+
+void D3D11Context::prepare_color_copy(const TargetView &) {
     unavailable();
 }
 

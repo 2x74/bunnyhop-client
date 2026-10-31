@@ -70,10 +70,14 @@ The first baseline commit's renderer is identical to `098e4d0`; only its effects
 
 ## Interface and ownership
 
-`gfx.hpp` selects a concrete `Context` at compile time. `gfx_types.hpp` contains API-independent descriptions;
-`gfx_opengl.hpp` implements the operations; `gfx_gl_api.hpp` owns the extracted GL loader and shader compiler.
-`gfx_window.hpp` centralizes backend availability, SDL flags and context attributes. OpenGL is the only available
-backend and remains the default on every OS. Requesting D3D11 fails before creating a window.
+`gfx.hpp` aliases `OpenGlContext` on macOS/Linux and uses an inlined, non-virtual dispatcher on Windows.
+Each forwarding call branches once on the stored backend. OpenGL remains the default; an explicitly requested
+D3D11 context can be injected before resource creation, with an OpenGL fallback when no D3D11 context is supplied.
+`BUNNYHOP_GFX_DISPATCH` enables the dispatcher with an unavailable second backend on non-Windows benchmark builds.
+`gfx_types.hpp` contains API-independent descriptions and native-value handles with explicit bool/equality.
+`gfx_opengl.hpp` and `gfx_d3d11.cpp` implement operations; `gfx_gl_api.hpp` owns the GL loader/compiler.
+`gfx_window.hpp` centralizes backend availability and SDL flags. The legacy client startup still creates OpenGL;
+whole-renderer startup and presentation integration follow the offscreen seam milestone.
 
 All calls execute immediately on one render/context thread, in call order. There are no recorded command lists,
 barriers, queue ownership or per-draw virtual calls. `Context` borrows the GL table; resources must be destroyed
@@ -123,6 +127,8 @@ same resources to every surviving reflected pair for that unit; unit 9 can feed 
 `boneMatrices` uses a 2D RGBA32F texture/SRV (three texels per bone), not constant-buffer matrices.
 Sampler descriptions preserve filtering, mip LOD clamps, compare function, border color and addressing.
 No JSON, string lookup, allocation or virtual dispatch occurs in constants, pipeline binding, stream upload or draw.
+GL array constants use one upload per field; packed arrays are direct and padded arrays use reusable packing storage.
+D3D11 scatters packed caller arrays into each reflected stage's array stride.
 
 Readback slots are created once, enqueued once, then polled or collected. A pending slot cannot be overwritten.
 Mapped pointers live until `unmap`; collection copies tightly packed rows to caller-owned memory, honoring the
@@ -132,8 +138,8 @@ depth consumers as well as RGBA video. Callers own ring size and scheduling.
 
 Resolve and copy calls mutate current bindings; the next pass binds its target/program/resources explicitly.
 Color and depth resolve are separate even when both attachments originate in the same target. The existing GL
-depth blit selects an implementation-dependent sample and does not average depth. Choosing D3D11's exact depth
-sample rule is an explicit follow-up decision; sample zero and minimum depth have different edge behavior.
+depth blit selects an implementation-dependent sample and does not average depth. D3D11 resolves depth with a fullscreen `Texture2DMS.Load(position, 0)` pass writing `SV_Depth`.
+The WARP check writes a larger value to sample zero than to every other sample, rejecting minimum and averaged depth.
 See Microsoft's [resolve API](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-resolvesubresource)
 and [resource usage rules](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/ne-d3d11-d3d11_usage).
 
@@ -256,6 +262,41 @@ The final full build returned zero before CTest. 98/98 selected CTests passed (1
 The new GPU smoke ran, rather than skipping. Nine shader pipeline tests passed and all 135 keys / 105 pairs
 extracted after the seam change. The Windows DXBC compilation from the shader work was not rerun locally;
 neither Windows/MSVC nor Linux client builds, real presentation/latency tests, or the full menu UI suite ran.
+
+### D3D11 backend qualification
+
+The [backend proof](../../apps/native/tools/d3d11-backend/README.md) documents the resource APIs, caller handoff,
+shader embedding and comparison limits. The Windows build embeds deduplicated DXBC and reflection as an executable
+resource; every manifest alias is addressable and the executable hash covers the archive. The presenter remains
+the only owner of the real device, swapchain, resize, Present and latency markers.
+
+[Windows WARP qualification](https://github.com/2x74/bunnyhop-client/actions/runs/41226181036) passed MSVC,
+the debug-layer hazard checks and 16 image comparisons against Apple OpenGL. Maximum RGB channel error was 1.
+The same run passes the real SourceHdr/EnhancedLook tests, packed/padded array upload checks, borrowed RTV/DSV
+metadata and RGBA8-to-RGBA16F refraction conversion. The GL test skips on the runner's OpenGL 1.1 path;
+all four non-GL-context tests execute. The shader archive contains 11,250,406 deduplicated DXBC/reflection bytes.
+The frozen 41-image Mac suite also remains byte-identical with the forced dispatcher and R8 contact target.
+These results cover offscreen seam operations, video, presentation and postprocessing; real world rendering and
+swapchain presentation require the later caller integration and hardware qualification.
+
+The forced-dispatch benchmark against `9b46cf7` used seven alternating pairs with the frozen 160x90 Source specs,
+500 warmup and 5,000 measured frames per run. The isolated dispatcher binary is `0a6604e`, before merging other
+callers. A second comparison uses the initial caller merge at `161c7d5`, before the later scene-pass migration. No local build/test ran during either measurement;
+process checks found no compiler load at the boundaries of the isolated comparison. A first attempt overlapped
+compilation and was interrupted and excluded. Results are GPU-completed batch microseconds per frame:
+
+| Workload | Seam baseline | Dispatcher | Paired delta, 95% interval |
+| --- | ---: | ---: | ---: |
+| World | 490.984 | 477.883 | -13.101 [-30.053, +3.852] |
+| World + 128 presentation draws | 710.149 | 713.950 | +3.801 [-7.938, +15.540] |
+| Merged callers, world | 498.400 | 493.519 | -4.881 [-17.610, +7.847] |
+| Merged callers, world + 128 draws | 698.697 | 702.180 | +3.483 [-7.888, +14.853] |
+
+The intervals include zero; no regression was detected. These Mac offscreen results do not measure Windows
+hardware or a 330-microsecond presented frame. Raw frame samples/specs are preserved under
+`target/d3d11-backend/performance-quiet` and `performance-final`. The full Mac build passed before CTest;
+100 selected tests passed, with menu-focus/window-mode tests excluded. Ten shader pipeline tests and 51 release
+evidence tests passed; the pinned release workflow is unchanged.
 
 ## Remaining migration split
 
