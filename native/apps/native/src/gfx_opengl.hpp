@@ -7,61 +7,23 @@
 #include <vector>
 
 namespace native::gfx {
-struct Program {
-    GLuint id = 0;
-};
-
-struct Pipeline {
-    PipelineState state;
-};
-
-struct Texture {
-    GLuint id = 0;
-    TextureDesc desc;
-};
-
-struct Sampler {
-    GLuint id = 0;
-};
-
-struct TargetView {
-    GLuint id = 0;
-    TargetDesc desc;
-};
-
-struct RenderTarget : TargetView {
-    Texture color, depth;
-};
-
-struct Geometry {
-    GLuint array = 0, vertices = 0, indices = 0;
-};
-
-struct Fence {
-    GLsync id = nullptr;
-};
-
-struct Readback {
-    GLuint buffer = 0;
-    Fence fence;
-    int width = 0, height = 0;
-    Format format = Format::rgba8;
-    bool mapped = false;
-};
-
-struct ConstantBinding {
-    struct Field {
-        GLint location;
-        uint32_t offset;
-        ConstantType type;
-    };
-
-    std::vector<Field> fields;
-    uint32_t byte_size = 0;
-};
-
 class OpenGlContext {
     Gl &gl_;
+    TargetView target_;
+    Rect viewport_;
+
+    template <typename Function>
+    static uintptr_t generate(Function function) {
+        GLuint name = 0;
+        function(1, &name);
+        return name;
+    }
+
+    template <typename Function>
+    static void release(Function function, uintptr_t value) {
+        const auto name = GLuint(value);
+        function(1, &name);
+    }
 
     struct PixelFormat {
         GLenum internal, channels, type;
@@ -70,6 +32,8 @@ class OpenGlContext {
 
     static PixelFormat pixel_format(Format format) {
         switch (format) {
+            case Format::r8:
+                return {GL_R8, GL_RED, GL_UNSIGNED_BYTE, 1};
             case Format::rgba8:
                 return {GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, 4};
             case Format::rgba16f:
@@ -127,12 +91,13 @@ class OpenGlContext {
 
     void attach(GLenum attachment, const Texture &texture) {
         if (texture.id)
-            gl_.FramebufferTexture2D(GL_FRAMEBUFFER, attachment, texture_target(texture.desc), texture.id, 0);
+            gl_.FramebufferTexture2D(GL_FRAMEBUFFER, attachment, texture_target(texture.desc), GLuint(texture.id), 0);
     }
 
     void blit(const TargetView &source, const TargetView &destination, GLbitfield mask) {
-        gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, source.id);
-        gl_.BindFramebuffer(GL_DRAW_FRAMEBUFFER, destination.id);
+        gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, GLuint(source.id));
+        gl_.BindFramebuffer(GL_DRAW_FRAMEBUFFER, GLuint(destination.id));
+        target_ = destination;
         gl_.BlitFramebuffer(
                 0,
                 0,
@@ -150,6 +115,29 @@ class OpenGlContext {
 public:
     explicit OpenGlContext(Gl &gl) : gl_(gl) {}
 
+    static Backend backend() { return Backend::opengl; }
+
+    int max_samples(Format color = Format::rgba8, Format depth = Format::depth24) const {
+        GLint result = 1, limit = 1;
+        gl_.GetIntegerv(GL_MAX_SAMPLES, &result);
+        if (color != Format::none) {
+            gl_.GetIntegerv(GL_MAX_COLOR_TEXTURE_SAMPLES, &limit);
+            result = std::min(result, limit);
+        }
+        if (depth != Format::none) {
+            gl_.GetIntegerv(GL_MAX_DEPTH_TEXTURE_SAMPLES, &limit);
+            result = std::min(result, limit);
+        }
+        return result;
+    }
+
+    TargetView current_target() const {
+        GLint framebuffer = 0;
+        gl_.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &framebuffer);
+        if (uintptr_t(framebuffer) == target_.id) return target_;
+        return {uintptr_t(framebuffer), {}};
+    }
+
     int max_texture_size() const {
         GLint result = 0;
         gl_.GetIntegerv(GL_MAX_TEXTURE_SIZE, &result);
@@ -163,11 +151,11 @@ public:
     Program create_program(const ProgramDesc &source) { return {link_program(gl_, source.vertex, source.fragment)}; }
 
     void destroy(Program &program) {
-        if (program.id) gl_.DeleteProgram(program.id);
+        if (program.id) gl_.DeleteProgram(GLuint(program.id));
         program = {};
     }
 
-    void bind_program(Program program) { gl_.UseProgram(program.id); }
+    void bind_program(Program program) { gl_.UseProgram(GLuint(program.id)); }
 
     ConstantBinding create_constants(Program program, const ConstantLayout &layout) {
         ConstantBinding result;
@@ -188,7 +176,9 @@ public:
                 const std::string name =
                         field.count == 1 ? field.name : std::string(field.name) + "[" + std::to_string(i) + "]";
                 result.fields.push_back(
-                        {gl_.GetUniformLocation(program.id, name.c_str()), field.offset + i * stride, field.type}
+                        {gl_.GetUniformLocation(GLuint(program.id), name.c_str()),
+                         field.offset + i * stride,
+                         field.type}
                 );
             }
         }
@@ -226,9 +216,11 @@ public:
         }
     }
 
+    void destroy(ConstantBinding &binding) { binding = {}; }
+
     void texture_unit(Program program, const char *name, unsigned unit) {
         bind_program(program);
-        gl_.Uniform1i(gl_.GetUniformLocation(program.id, name), GLint(unit));
+        gl_.Uniform1i(gl_.GetUniformLocation(GLuint(program.id), name), GLint(unit));
     }
 
     Pipeline create_pipeline(const PipelineState &state) { return {state}; }
@@ -266,9 +258,9 @@ public:
         if (!faces.empty() && faces.size() != face_count) throw std::runtime_error("Incomplete texture faces");
         const auto format = pixel_format(desc.format);
         Texture result{0, desc};
-        gl_.GenTextures(1, &result.id);
+        result.id = generate(gl_.GenTextures);
         const GLenum target = texture_target(desc);
-        gl_.BindTexture(target, result.id);
+        gl_.BindTexture(target, GLuint(result.id));
         if (desc.samples > 1) {
             gl_.TexImage2DMultisample(target, desc.samples, format.internal, desc.width, desc.height, GL_TRUE);
         } else {
@@ -295,20 +287,33 @@ public:
         return result;
     }
 
+    void update_texture(Texture texture, Rect region, const void *pixels) {
+        if (!pixels || texture.desc.kind != TextureKind::image || texture.desc.samples != 1 || region.x < 0
+            || region.y < 0 || region.width < 1 || region.height < 1 || region.x + region.width > texture.desc.width
+            || region.y + region.height > texture.desc.height)
+            throw std::runtime_error("Invalid texture update");
+        const auto format = pixel_format(texture.desc.format);
+        gl_.BindTexture(GL_TEXTURE_2D, GLuint(texture.id));
+        gl_.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        gl_.TexSubImage2D(
+                GL_TEXTURE_2D, 0, region.x, region.y, region.width, region.height, format.channels, format.type, pixels
+        );
+    }
+
     void generate_mips(Texture texture) {
         const auto target = texture_target(texture.desc);
-        gl_.BindTexture(target, texture.id);
+        gl_.BindTexture(target, GLuint(texture.id));
         gl_.GenerateMipmap(target);
     }
 
     void destroy(Texture &texture) {
-        if (texture.id) gl_.DeleteTextures(1, &texture.id);
+        if (texture.id) release(gl_.DeleteTextures, GLuint(texture.id));
         texture = {};
     }
 
     Sampler create_sampler(const SamplerDesc &desc) {
         Sampler result;
-        gl_.GenSamplers(1, &result.id);
+        result.id = generate(gl_.GenSamplers);
         GLenum minification = desc.minification == Filter::linear ? GL_LINEAR : GL_NEAREST;
         if (desc.mipmapped) {
             if (desc.minification == Filter::linear)
@@ -336,14 +341,14 @@ public:
     }
 
     void destroy(Sampler &sampler) {
-        if (sampler.id) gl_.DeleteSamplers(1, &sampler.id);
+        if (sampler.id) release(gl_.DeleteSamplers, GLuint(sampler.id));
         sampler = {};
     }
 
     void bind_texture(unsigned slot, Texture texture, Sampler sampler = {}) {
         gl_.ActiveTexture(GL_TEXTURE0 + slot);
-        gl_.BindTexture(texture_target(texture.desc), texture.id);
-        gl_.BindSampler(slot, sampler.id);
+        gl_.BindTexture(texture_target(texture.desc), GLuint(texture.id));
+        gl_.BindSampler(slot, GLuint(sampler.id));
     }
 
     void unbind_sampler(unsigned slot) { gl_.BindSampler(slot, 0); }
@@ -352,8 +357,8 @@ public:
         RenderTarget result;
         result.desc = desc;
         try {
-            gl_.GenFramebuffers(1, &result.id);
-            gl_.BindFramebuffer(GL_FRAMEBUFFER, result.id);
+            result.id = generate(gl_.GenFramebuffers);
+            gl_.BindFramebuffer(GL_FRAMEBUFFER, GLuint(result.id));
             if (desc.color != Format::none)
                 result.color = create_texture({desc.width, desc.height, desc.color, TextureKind::image, desc.samples});
             if (desc.depth != Format::none)
@@ -371,11 +376,13 @@ public:
             destroy(result);
             throw;
         }
+        target_ = result;
         return result;
     }
 
     void destroy(RenderTarget &target) {
-        if (target.id) gl_.DeleteFramebuffers(1, &target.id);
+        if (target_.id == target.id) target_ = {};
+        if (target.id) release(gl_.DeleteFramebuffers, GLuint(target.id));
         destroy(target.color);
         destroy(target.depth);
         target = {};
@@ -384,11 +391,19 @@ public:
     static TargetView window_target(int width, int height) { return {0, {width, height}}; }
 
     // Borrowed WGL interop targets stay owned by LowLatencyPresenter.
-    static TargetView borrow_target(GLuint framebuffer, const TargetDesc &desc) { return {framebuffer, desc}; }
+    static TargetView borrow_target(uintptr_t framebuffer, const TargetDesc &desc) { return {framebuffer, desc}; }
 
-    void bind_target(const TargetView &target) { gl_.BindFramebuffer(GL_FRAMEBUFFER, target.id); }
+    void bind_target(const TargetView &target) {
+        gl_.BindFramebuffer(GL_FRAMEBUFFER, GLuint(target.id));
+        target_ = target;
+    }
 
-    void viewport(Rect rect) { gl_.Viewport(rect.x, rect.y, rect.width, rect.height); }
+    Rect current_viewport() const { return viewport_; }
+
+    void viewport(Rect rect) {
+        gl_.Viewport(rect.x, rect.y, rect.width, rect.height);
+        viewport_ = rect;
+    }
 
     void clear_color(std::array<float, 4> color) {
         gl_.ClearColor(color[0], color[1], color[2], color[3]);
@@ -407,8 +422,8 @@ public:
     }
 
     void copy_color(const TargetView &source, Rect region, Texture destination, int x = 0, int y = 0) {
-        gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, source.id);
-        gl_.BindTexture(texture_target(destination.desc), destination.id);
+        gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, GLuint(source.id));
+        gl_.BindTexture(texture_target(destination.desc), GLuint(destination.id));
         gl_.CopyTexSubImage2D(
                 texture_target(destination.desc), 0, x, y, region.x, region.y, region.width, region.height
         );
@@ -416,8 +431,8 @@ public:
 
     Geometry create_geometry(size_t stride, std::span<const VertexAttribute> attributes) {
         Geometry result;
-        gl_.GenVertexArrays(1, &result.array);
-        gl_.GenBuffers(1, &result.vertices);
+        result.array = generate(gl_.GenVertexArrays);
+        result.vertices = generate(gl_.GenBuffers);
         gl_.BindVertexArray(result.array);
         gl_.BindBuffer(GL_ARRAY_BUFFER, result.vertices);
         for (const auto &attribute : attributes) {
@@ -436,23 +451,23 @@ public:
     }
 
     void destroy(Geometry &geometry) {
-        if (geometry.vertices) gl_.DeleteBuffers(1, &geometry.vertices);
-        if (geometry.indices) gl_.DeleteBuffers(1, &geometry.indices);
-        if (geometry.array) gl_.DeleteVertexArrays(1, &geometry.array);
+        if (geometry.vertices) release(gl_.DeleteBuffers, GLuint(geometry.vertices));
+        if (geometry.indices) release(gl_.DeleteBuffers, GLuint(geometry.indices));
+        if (geometry.array) release(gl_.DeleteVertexArrays, GLuint(geometry.array));
         geometry = {};
     }
 
-    void bind_geometry(Geometry geometry) { gl_.BindVertexArray(geometry.array); }
+    void bind_geometry(Geometry geometry) { gl_.BindVertexArray(GLuint(geometry.array)); }
 
     void stream_vertices(Geometry geometry, std::span<const std::byte> data) {
-        gl_.BindBuffer(GL_ARRAY_BUFFER, geometry.vertices);
+        gl_.BindBuffer(GL_ARRAY_BUFFER, GLuint(geometry.vertices));
         gl_.BufferData(GL_ARRAY_BUFFER, GLsizeiptr(data.size()), data.data(), GL_STREAM_DRAW);
     }
 
     void upload_indices(Geometry &geometry, std::span<const std::byte> data) {
         bind_geometry(geometry);
-        if (!geometry.indices) gl_.GenBuffers(1, &geometry.indices);
-        gl_.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, geometry.indices);
+        if (!geometry.indices) geometry.indices = generate(gl_.GenBuffers);
+        gl_.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, GLuint(geometry.indices));
         gl_.BufferData(GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr(data.size()), data.data(), GL_STATIC_DRAW);
     }
 
@@ -471,17 +486,19 @@ public:
             gl_.DrawElementsInstanced(primitive(topology), count, indices, offset, instances);
     }
 
-    Fence signal() { return {gl_.FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0)}; }
+    Fence signal() { return {reinterpret_cast<uintptr_t>(gl_.FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0))}; }
 
     Wait wait(Fence fence, uint64_t timeout_ns = 0, bool flush = false) {
         if (!fence.id) return Wait::failed;
-        const auto result = gl_.ClientWaitSync(fence.id, flush ? GL_SYNC_FLUSH_COMMANDS_BIT : 0, timeout_ns);
+        const auto result = gl_.ClientWaitSync(
+                reinterpret_cast<GLsync>(fence.id), flush ? GL_SYNC_FLUSH_COMMANDS_BIT : 0, timeout_ns
+        );
         if (result == GL_TIMEOUT_EXPIRED) return Wait::pending;
         return result == GL_WAIT_FAILED ? Wait::failed : Wait::ready;
     }
 
     void destroy(Fence &fence) {
-        if (fence.id) gl_.DeleteSync(fence.id);
+        if (fence.id) gl_.DeleteSync(reinterpret_cast<GLsync>(fence.id));
         fence = {};
     }
 
@@ -492,7 +509,7 @@ public:
         result.width = width;
         result.height = height;
         result.format = format;
-        gl_.GenBuffers(1, &result.buffer);
+        result.buffer = generate(gl_.GenBuffers);
         gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, result.buffer);
         gl_.BufferData(GL_PIXEL_PACK_BUFFER, GLsizeiptr(readback_bytes(result)), nullptr, GL_STREAM_READ);
         gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
@@ -505,9 +522,9 @@ public:
 
     void enqueue_readback(const TargetView &source, Readback &readback, int x = 0, int y = 0) {
         if (readback.fence.id || readback.mapped) throw std::runtime_error("Readback slot is busy");
-        gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, source.id);
+        gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, GLuint(source.id));
         gl_.PixelStorei(GL_PACK_ALIGNMENT, 1);
-        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, readback.buffer);
+        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, GLuint(readback.buffer));
         const auto format = pixel_format(readback.format);
         gl_.ReadPixels(x, y, readback.width, readback.height, format.channels, format.type, nullptr);
         gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
@@ -515,13 +532,13 @@ public:
         check_error("OpenGL readback failed");
     }
 
-    bool pending(const Readback &readback) const { return readback.fence.id != nullptr; }
+    bool pending(const Readback &readback) const { return readback.fence.id != 0; }
 
-    Wait poll(const Readback &readback) { return wait(readback.fence); }
+    Wait poll(const Readback &readback, bool flush = false) { return wait(readback.fence, 0, flush); }
 
     MappedPixels map(Readback &readback) {
         if (readback.mapped || poll(readback) != Wait::ready) throw std::runtime_error("Readback is not ready to map");
-        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, readback.buffer);
+        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, GLuint(readback.buffer));
         const auto *data =
                 gl_.MapBufferRange(GL_PIXEL_PACK_BUFFER, 0, GLsizeiptr(readback_bytes(readback)), GL_MAP_READ_BIT);
         gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
@@ -533,7 +550,7 @@ public:
     }
 
     void unmap(Readback &readback) {
-        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, readback.buffer);
+        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, GLuint(readback.buffer));
         const bool valid = gl_.UnmapBuffer(GL_PIXEL_PACK_BUFFER) == GL_TRUE;
         gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         readback.mapped = false;
@@ -560,12 +577,12 @@ public:
 
     void destroy(Readback &readback) {
         if (readback.mapped) {
-            gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, readback.buffer);
+            gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, GLuint(readback.buffer));
             gl_.UnmapBuffer(GL_PIXEL_PACK_BUFFER);
             gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         }
         destroy(readback.fence);
-        if (readback.buffer) gl_.DeleteBuffers(1, &readback.buffer);
+        if (readback.buffer) release(gl_.DeleteBuffers, GLuint(readback.buffer));
         readback = {};
     }
 };
