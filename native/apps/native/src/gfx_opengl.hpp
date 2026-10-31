@@ -7,61 +7,21 @@
 #include <vector>
 
 namespace native::gfx {
-struct Program {
-    GLuint id = 0;
-};
-
-struct Pipeline {
-    PipelineState state;
-};
-
-struct Texture {
-    GLuint id = 0;
-    TextureDesc desc;
-};
-
-struct Sampler {
-    GLuint id = 0;
-};
-
-struct TargetView {
-    GLuint id = 0;
-    TargetDesc desc;
-};
-
-struct RenderTarget : TargetView {
-    Texture color, depth;
-};
-
-struct Geometry {
-    GLuint array = 0, vertices = 0, indices = 0;
-};
-
-struct Fence {
-    GLsync id = nullptr;
-};
-
-struct Readback {
-    GLuint buffer = 0;
-    Fence fence;
-    int width = 0, height = 0;
-    Format format = Format::rgba8;
-    bool mapped = false;
-};
-
-struct ConstantBinding {
-    struct Field {
-        GLint location;
-        uint32_t offset;
-        ConstantType type;
-    };
-
-    std::vector<Field> fields;
-    uint32_t byte_size = 0;
-};
-
 class OpenGlContext {
     Gl &gl_;
+
+    template <typename Function>
+    static uintptr_t generate(Function function) {
+        GLuint name = 0;
+        function(1, &name);
+        return name;
+    }
+
+    template <typename Function>
+    static void release(Function function, uintptr_t value) {
+        const auto name = GLuint(value);
+        function(1, &name);
+    }
 
     struct PixelFormat {
         GLenum internal, channels, type;
@@ -266,7 +226,7 @@ public:
         if (!faces.empty() && faces.size() != face_count) throw std::runtime_error("Incomplete texture faces");
         const auto format = pixel_format(desc.format);
         Texture result{0, desc};
-        gl_.GenTextures(1, &result.id);
+        result.id = generate(gl_.GenTextures);
         const GLenum target = texture_target(desc);
         gl_.BindTexture(target, result.id);
         if (desc.samples > 1) {
@@ -302,13 +262,13 @@ public:
     }
 
     void destroy(Texture &texture) {
-        if (texture.id) gl_.DeleteTextures(1, &texture.id);
+        if (texture.id) release(gl_.DeleteTextures, texture.id);
         texture = {};
     }
 
     Sampler create_sampler(const SamplerDesc &desc) {
         Sampler result;
-        gl_.GenSamplers(1, &result.id);
+        result.id = generate(gl_.GenSamplers);
         GLenum minification = desc.minification == Filter::linear ? GL_LINEAR : GL_NEAREST;
         if (desc.mipmapped) {
             if (desc.minification == Filter::linear)
@@ -336,7 +296,7 @@ public:
     }
 
     void destroy(Sampler &sampler) {
-        if (sampler.id) gl_.DeleteSamplers(1, &sampler.id);
+        if (sampler.id) release(gl_.DeleteSamplers, sampler.id);
         sampler = {};
     }
 
@@ -352,7 +312,7 @@ public:
         RenderTarget result;
         result.desc = desc;
         try {
-            gl_.GenFramebuffers(1, &result.id);
+            result.id = generate(gl_.GenFramebuffers);
             gl_.BindFramebuffer(GL_FRAMEBUFFER, result.id);
             if (desc.color != Format::none)
                 result.color = create_texture({desc.width, desc.height, desc.color, TextureKind::image, desc.samples});
@@ -375,7 +335,7 @@ public:
     }
 
     void destroy(RenderTarget &target) {
-        if (target.id) gl_.DeleteFramebuffers(1, &target.id);
+        if (target.id) release(gl_.DeleteFramebuffers, target.id);
         destroy(target.color);
         destroy(target.depth);
         target = {};
@@ -384,7 +344,7 @@ public:
     static TargetView window_target(int width, int height) { return {0, {width, height}}; }
 
     // Borrowed WGL interop targets stay owned by LowLatencyPresenter.
-    static TargetView borrow_target(GLuint framebuffer, const TargetDesc &desc) { return {framebuffer, desc}; }
+    static TargetView borrow_target(uintptr_t framebuffer, const TargetDesc &desc) { return {framebuffer, desc}; }
 
     void bind_target(const TargetView &target) { gl_.BindFramebuffer(GL_FRAMEBUFFER, target.id); }
 
@@ -416,8 +376,8 @@ public:
 
     Geometry create_geometry(size_t stride, std::span<const VertexAttribute> attributes) {
         Geometry result;
-        gl_.GenVertexArrays(1, &result.array);
-        gl_.GenBuffers(1, &result.vertices);
+        result.array = generate(gl_.GenVertexArrays);
+        result.vertices = generate(gl_.GenBuffers);
         gl_.BindVertexArray(result.array);
         gl_.BindBuffer(GL_ARRAY_BUFFER, result.vertices);
         for (const auto &attribute : attributes) {
@@ -436,9 +396,9 @@ public:
     }
 
     void destroy(Geometry &geometry) {
-        if (geometry.vertices) gl_.DeleteBuffers(1, &geometry.vertices);
-        if (geometry.indices) gl_.DeleteBuffers(1, &geometry.indices);
-        if (geometry.array) gl_.DeleteVertexArrays(1, &geometry.array);
+        if (geometry.vertices) release(gl_.DeleteBuffers, geometry.vertices);
+        if (geometry.indices) release(gl_.DeleteBuffers, geometry.indices);
+        if (geometry.array) release(gl_.DeleteVertexArrays, geometry.array);
         geometry = {};
     }
 
@@ -451,7 +411,7 @@ public:
 
     void upload_indices(Geometry &geometry, std::span<const std::byte> data) {
         bind_geometry(geometry);
-        if (!geometry.indices) gl_.GenBuffers(1, &geometry.indices);
+        if (!geometry.indices) geometry.indices = generate(gl_.GenBuffers);
         gl_.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, geometry.indices);
         gl_.BufferData(GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr(data.size()), data.data(), GL_STATIC_DRAW);
     }
@@ -471,17 +431,19 @@ public:
             gl_.DrawElementsInstanced(primitive(topology), count, indices, offset, instances);
     }
 
-    Fence signal() { return {gl_.FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0)}; }
+    Fence signal() { return {reinterpret_cast<uintptr_t>(gl_.FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0))}; }
 
     Wait wait(Fence fence, uint64_t timeout_ns = 0, bool flush = false) {
         if (!fence.id) return Wait::failed;
-        const auto result = gl_.ClientWaitSync(fence.id, flush ? GL_SYNC_FLUSH_COMMANDS_BIT : 0, timeout_ns);
+        const auto result = gl_.ClientWaitSync(
+                reinterpret_cast<GLsync>(fence.id), flush ? GL_SYNC_FLUSH_COMMANDS_BIT : 0, timeout_ns
+        );
         if (result == GL_TIMEOUT_EXPIRED) return Wait::pending;
         return result == GL_WAIT_FAILED ? Wait::failed : Wait::ready;
     }
 
     void destroy(Fence &fence) {
-        if (fence.id) gl_.DeleteSync(fence.id);
+        if (fence.id) gl_.DeleteSync(reinterpret_cast<GLsync>(fence.id));
         fence = {};
     }
 
@@ -492,7 +454,7 @@ public:
         result.width = width;
         result.height = height;
         result.format = format;
-        gl_.GenBuffers(1, &result.buffer);
+        result.buffer = generate(gl_.GenBuffers);
         gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, result.buffer);
         gl_.BufferData(GL_PIXEL_PACK_BUFFER, GLsizeiptr(readback_bytes(result)), nullptr, GL_STREAM_READ);
         gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
@@ -515,7 +477,7 @@ public:
         check_error("OpenGL readback failed");
     }
 
-    bool pending(const Readback &readback) const { return readback.fence.id != nullptr; }
+    bool pending(const Readback &readback) const { return readback.fence.id != 0; }
 
     Wait poll(const Readback &readback) { return wait(readback.fence); }
 
@@ -565,7 +527,7 @@ public:
             gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         }
         destroy(readback.fence);
-        if (readback.buffer) gl_.DeleteBuffers(1, &readback.buffer);
+        if (readback.buffer) release(gl_.DeleteBuffers, readback.buffer);
         readback = {};
     }
 };

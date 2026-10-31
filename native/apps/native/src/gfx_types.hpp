@@ -4,13 +4,18 @@
 #include <cstdint>
 #include <span>
 #include <string_view>
+#include <vector>
 
 namespace native::gfx {
 enum class Backend { opengl, d3d11 };
 inline constexpr Backend selected_backend = Backend::opengl;
 
 inline constexpr bool available(Backend backend) {
+#if defined(_WIN32)
+    return backend == Backend::opengl || backend == Backend::d3d11;
+#else
     return backend == Backend::opengl;
+#endif
 }
 
 // Camera matrices and shader inputs retain OpenGL's [-w,+w] depth and bottom-left target/texture origin.
@@ -120,6 +125,64 @@ struct ProgramDesc {
     ProgramKey key;
     // OpenGL fallback only. D3D11 looks up precompiled DXBC and reflection using key.
     const char *vertex = nullptr, *fragment = nullptr;
+};
+
+struct Program {
+    uintptr_t id = 0;
+};
+
+struct Pipeline {
+    PipelineState state;
+    uintptr_t id = 0;
+};
+
+struct Texture {
+    uintptr_t id = 0;
+    TextureDesc desc;
+};
+
+struct Sampler {
+    uintptr_t id = 0;
+};
+
+struct TargetView {
+    uintptr_t id = 0;
+    TargetDesc desc;
+    uintptr_t native_depth = 0;
+    bool borrowed = false;
+};
+
+struct RenderTarget : TargetView {
+    Texture color, depth;
+};
+
+struct Geometry {
+    uintptr_t array = 0, vertices = 0, indices = 0;
+};
+
+struct Fence {
+    uintptr_t id = 0;
+    bool borrowed = false;
+};
+
+struct Readback {
+    uintptr_t buffer = 0;
+    Fence fence;
+    int width = 0, height = 0;
+    Format format = Format::rgba8;
+    bool mapped = false;
+};
+
+struct ConstantBinding {
+    struct Field {
+        int32_t location;
+        uint32_t offset;
+        ConstantType type;
+    };
+
+    std::vector<Field> fields;
+    uint32_t byte_size = 0;
+    uintptr_t id = 0;
 };
 
 inline constexpr float no_clip_height = -1e30f;
