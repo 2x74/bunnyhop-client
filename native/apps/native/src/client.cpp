@@ -47,6 +47,7 @@
 #include "weapon_commands.hpp"
 #include "eye_clearance.hpp"
 #include "replay_camera.hpp"
+#include "third_person_events.hpp"
 #include "replay_controls.hpp"
 #include "render_menu_contracts.hpp"
 #include "render_capabilities.hpp"
@@ -381,6 +382,7 @@ int run(const native::Options &opt) {
     native::StartPoints start_points;
     native::KeptWeapons kept_weapons;
     third_camera.set_mode("chase");
+    native_render::ThirdPersonEvents third_person_events;
     native::Input camera_controls;
     native::SniperZoom scope;
     native::NativeWeaponMenu gun_menu;
@@ -3230,7 +3232,11 @@ int run(const native::Options &opt) {
                     surface_found ? surface.water_z - curr.position[2] : std::numeric_limits<double>::quiet_NaN();
             static const std::array<const char *, 6> surfaces = {"concrete", "metal", "wood", "grass", "tile", "water"};
             const bool attacked = bh_attack_report(core.get(), &attack);
-            if (!viewer.active) scope.observe(weapon, attacked ? &attack : nullptr);
+            if (!viewer.active) {
+                scope.observe(weapon, attacked ? &attack : nullptr);
+                third_person_events.tick(weapon, attacked ? &attack : nullptr, step_dt);
+                if (curr.events & native::teleported) third_person_events.snap();
+            }
             audio.set_style(viewer.active ? viewer.session.info.value("style", active_style) : active_style);
             BhJumpObservation jump_observation{};
             const bool observed_jump = bh_jump_observation(core.get(), &jump_observation) != 0;
@@ -3545,27 +3551,20 @@ int run(const native::Options &opt) {
             );
             hud.extras.show_ghost_split(ghost_compare.split(), ghost_compare.delta(0));
             hud.extras.ghost_speed.show(ghost_compare.speed_delta());
+            if (viewer.active)
+                third_person_events.replay_frame(core.get(), curr.tick);
+            else
+                third_person_events.own_frame();
             if (external_camera) {
                 renderer->set_viewmodel_visible(false);
-                native_render::Actor self;
-                self.id = "local-camera-target";
-                self.opacity = 1;
+                BhWeaponReport held{};
+                bh_weapon_report(core.get(), &held);
+                auto self = native_render::own_actor(state, input.pitch, input.yaw(), held.active);
                 self.outfit = viewer.active ? viewer.runner_outfit : outfit;
                 self.loadout = viewer.active ? viewer.runner_loadout : held_knife.loadout();
                 self.emptyHand = viewer.active && !viewer.weapon_third;
                 self.playerGlow = player_glow;
-                for (int k = 0; k < 3; k++) {
-                    self.frame.position[k] = state.player.position[k];
-                    self.frame.velocity[k] = state.player.velocity[k];
-                }
-                self.frame.tick = state.player.tick;
-                self.frame.flags = (state.player.crouched ? 1 : 0) | (state.player.grounded ? 2 : 0);
-                self.frame.view_offset_z = state.player.view_offset_z;
-                self.frame.pitch = input.pitch;
-                self.frame.yaw = input.yaw();
-                BhWeaponReport held{};
-                bh_weapon_report(core.get(), &held);
-                self.frame.weapon = held.active;
+                third_person_events.apply(self);
                 if (spectator) {
                     if (const auto target = room.spectated(steady_seconds)) {
                         self = *target;
@@ -3605,7 +3604,7 @@ int run(const native::Options &opt) {
             );
             if (focused && captured && !opt.frames) {
                 for (const auto &actor : actors)
-                    if (actor.id != "local-camera-target")
+                    if (actor.id != native_render::own_actor_id)
                         audio.spatial_actor(actor, frame_seconds, actor.id.starts_with("ghost-"));
                 if (spectated_actor && !external_camera) audio.spatial_actor(*spectated_actor, frame_seconds, false);
             }

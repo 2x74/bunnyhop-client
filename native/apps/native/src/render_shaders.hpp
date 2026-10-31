@@ -3,6 +3,15 @@
 #include "native_cosmetics.hpp"
 
 namespace native_render {
+// Your own model, in a third-person camera.
+inline constexpr std::string_view own_actor_id = "local-camera-target";
+
+// A reload of your own gun, timed by the core. Another player's arrives as `attack` 2 and takes the gun's own timing.
+struct GunReload {
+    double seconds = 0;
+    bool shell = false, empty = false;
+};
+
 struct Actor {
     std::string id, name;
     BhGhostFrame frame{};
@@ -11,7 +20,9 @@ struct Actor {
     bool silenced = false, jumped = false, inspectHeld = false, snapped = false;
     // Nothing in the right hand (an avatar gesture): no knife or gun drawn.
     bool emptyHand = false;
+    // Since the last frame. With the knife 1 is a slash and 2 a stab; with a gun 1 is a shot and 2 a reload.
     unsigned attack = 0, inspect = 0;
+    std::optional<GunReload> gunReload;
     std::optional<Glow> playerGlow;
     GhostSource source = GhostSource::none;
     int ghost_slot = -1;

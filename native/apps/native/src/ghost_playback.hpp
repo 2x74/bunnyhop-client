@@ -64,12 +64,12 @@ inline bool pose_ghost(const GhostPath &path, std::optional<double> elapsed, Gho
 
 // Recorded knife swings and inspects between the ticks shown on consecutive frames.
 struct GhostEventCursor {
-    double shown = -1;
+    double shown = -1, live_ticks = ghost_live_event_ticks;
 
     // Returns the tick range whose events belong to this frame, or nullopt when nothing new was played.
     std::optional<std::pair<uint32_t, uint32_t>> advance(double tick, bool moving, bool &snapped) {
         snapped = shown >= 0 && (tick < shown - 1 || tick - shown > ghost_snap_ticks);
-        const bool live = moving && shown >= 0 && tick > shown && tick - shown < ghost_live_event_ticks;
+        const bool live = moving && shown >= 0 && tick > shown && tick - shown < live_ticks;
         const double previous = shown;
         shown = tick;
         if (!live || uint32_t(tick) <= uint32_t(previous)) return std::nullopt;

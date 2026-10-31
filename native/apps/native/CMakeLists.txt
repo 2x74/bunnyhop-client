@@ -775,6 +775,26 @@ if(BUILD_TESTING)
     endif()
 endif()
 
+# The third-person knife attack against the website, and through the real simulation and a real replay.
+if(BUILD_TESTING)
+    add_executable(bunnyhop-native-third-person-swing-tests src/third_person_swing_tests.cpp src/ghost_slots.cpp)
+    target_include_directories(bunnyhop-native-third-person-swing-tests PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-third-person-swing-tests PRIVATE bunnyhop_core_native)
+    find_program(THIRD_PERSON_SWING_BUN bun)
+    if(THIRD_PERSON_SWING_BUN)
+        set(THIRD_PERSON_SWING_ASSETS "${CMAKE_CURRENT_SOURCE_DIR}/../../target/native-assets")
+        set(THIRD_PERSON_SWING_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/third-person-swing-oracle.json")
+        add_test(NAME native_third_person_swing_oracle COMMAND "${THIRD_PERSON_SWING_BUN}" apps/native/src/third-person-swing-oracle.ts
+            "${THIRD_PERSON_SWING_ASSETS}" "${THIRD_PERSON_SWING_ORACLE}")
+        set_tests_properties(native_third_person_swing_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP third_person_swing_oracle TIMEOUT 60)
+        add_test(NAME native_third_person_swing COMMAND bunnyhop-native-third-person-swing-tests
+            "${THIRD_PERSON_SWING_ASSETS}" "${THIRD_PERSON_SWING_ORACLE}")
+        set_tests_properties(native_third_person_swing PROPERTIES
+            FIXTURES_REQUIRED third_person_swing_oracle SKIP_RETURN_CODE 77 TIMEOUT 60)
+    endif()
+endif()
+
 if(BUILD_TESTING)
     add_executable(bunnyhop-native-runner-animation-tests src/runner_anim_tests.cpp)
     target_include_directories(bunnyhop-native-runner-animation-tests PRIVATE vendor)
