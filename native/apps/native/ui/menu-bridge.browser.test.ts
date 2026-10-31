@@ -80,3 +80,31 @@ for (const screen of ["/ranks", "/gauntlets"]) {
     }
   });
 }
+
+test("a load that fails fast shows the failure every time, with a Retry the game hears", async () => {
+  const { browser, page } = await open();
+  try {
+    const failOnce = () =>
+      page.evaluate(() => {
+        const progress = { map: "bhop_sqee", stage: "renderer", message: "Preparing" };
+        // The host's publish_now as the download settles, then its next publish.
+        window.bunnyhopNativeMenu.onState({ loading: "Preparing", loadProgress: progress, error: "" });
+        window.bunnyhopNativeMenu.onState({
+          loading: "",
+          error: "Network unavailable",
+          loadProgress: { ...progress, stage: "error", message: "Network unavailable" },
+        });
+      });
+    await failOnce();
+    await page.getByRole("heading", { name: "Map could not load" }).waitFor();
+    await page.getByRole("button", { name: "Back", exact: true }).click();
+    expect(await page.locator(".native-loading").count()).toBe(0);
+    await failOnce();
+    await page.getByRole("heading", { name: "Map could not load" }).waitFor();
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
+    const received = await page.evaluate(() => (window as unknown as { received: unknown[] }).received);
+    expect(received).toContainEqual({ type: "mapLoad", action: "retry" });
+  } finally {
+    await browser.close();
+  }
+});

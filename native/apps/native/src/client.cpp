@@ -2867,7 +2867,7 @@ int run(const native::Options &opt) {
                 load_progress["message"] = loading;
                 update = {{"loading", loading}, {"loadProgress", load_progress}, {"error", ""}};
             }
-            if (menu && menu_ready) menu->evaluate_js("window.bunnyhopNativeMenu?.onState?.(" + update.dump() + ")");
+            if (menu && menu_ready) menu->evaluate_js(menu_state.publish_now(update));
         } else if (map_preparing && map_preparation.poll(gl, assets)) {
             map_preparing = false;
             try {
