@@ -323,12 +323,12 @@ public:
         }
         const BhMaterialExtra empty = {-1, -1, 4, 1, 0, 400, 1};
         const auto &e = index < extras.size() ? extras[index] : empty;
-        resources.bind(
+        resources.material_image(
                 0, m.texture < 0 ? (m.kind == 1 ? resources.checker : resources.white) : resources.texture(m.texture)
         );
-        resources.bind(2, resources.texture(e.texture2));
-        resources.bind(3, resources.texture(e.detail, true));
-        resources.bind(7, index < normals.size() && normals[index] ? normals[index] : resources.white);
+        resources.material_image(2, resources.texture(e.texture2));
+        resources.material_image(3, resources.texture(e.detail, true));
+        resources.material_image(7, index < normals.size() && normals[index] ? normals[index] : resources.white);
         const bool hasNormal = graphics.material_response && index < normals.size() && normals[index];
         materialValues.hasNormal = hasNormal;
         materialValues.hasSecondary = e.texture2 >= 0;
@@ -387,6 +387,8 @@ public:
     }
 
     void bind_scene_textures(WaterPass &water) {
+        for (const unsigned unit : {0u, 2u, 3u, 7u})
+            resources.material_sampling(unit);
         resources.bind(1, lightmap, false);
         context.bind_texture(6, water.planesTexture, water.planesSampler);
         if (water.reflectionDrawn)

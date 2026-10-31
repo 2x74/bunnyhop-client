@@ -59,6 +59,10 @@ public:
         context.bind_texture(unit, texture, samplers[sampling]);
     }
 
+    void material_sampling(unsigned unit) { context.bind_sampler(unit, samplers[3]); }
+
+    void material_image(unsigned unit, gfx::Texture texture) { context.bind_image(unit, texture); }
+
     gfx::Texture texture(int32_t index, bool raw = false) {
         if (index < 0) return white;
         const uint64_t key = uint32_t(index) | (uint64_t(raw) << 32);

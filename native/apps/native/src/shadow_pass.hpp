@@ -81,7 +81,9 @@ public:
         float cutoff = 0;
         if (cutouts) {
             const auto &materialInfo = world.materials[material];
-            resources.bind(0, materialInfo.texture < 0 ? resources.white : resources.texture(materialInfo.texture));
+            resources.material_image(
+                    0, materialInfo.texture < 0 ? resources.white : resources.texture(materialInfo.texture)
+            );
             cutoff = materialInfo.flags & world.material_alpha_test ? materialInfo.alpha_ref : cutout_alpha;
         }
         context.bind_geometry(mesh.geometry);
@@ -104,6 +106,7 @@ public:
         for (const bool cutouts : {false, true}) {
             auto &shader = cutouts ? cutoutDepthProgram : depthProgram;
             shader.bind(lightVp);
+            if (cutouts) resources.material_sampling(0);
             for (const auto &g : world.groups)
                 if (!g.sky3d)
                     cast_group(
