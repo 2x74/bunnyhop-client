@@ -801,6 +801,24 @@ std::set<std::pair<int, int>> crosshair_pixels(const native::CrosshairShape &sha
     return pixels;
 }
 
+// A restart rewinds the tick: Ctrl, pressed once late in the last attempt, must not stay lit into the new one.
+void test_key_flash_stops_at_restart() {
+    constexpr unsigned flash_ticks = 11;
+    constexpr size_t duck_slot = 4;
+    native::KeyFlash flash;
+    flash.advance(6000);
+    flash.flash(duck_slot, flash_ticks);
+    assert(flash.lit(duck_slot));
+    flash.advance(6010);
+    assert(flash.lit(duck_slot));
+    flash.advance(6011);
+    assert(!flash.lit(duck_slot));
+    flash.advance(6000);
+    flash.flash(duck_slot, flash_ticks);
+    flash.advance(0);
+    assert(!flash.lit(duck_slot));
+}
+
 void test_prespeed_clock() {
     constexpr double tick_interval = .01;
     BhRunState run{};
@@ -987,6 +1005,7 @@ int main() {
     test_results_toasts_and_room_widgets();
     test_movement_widgets_and_restart();
     test_prespeed_clock();
+    test_key_flash_stops_at_restart();
     test_crosshair_pixels();
     test_layout_codes();
     test_layout_editor_math();

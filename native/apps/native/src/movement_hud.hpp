@@ -195,6 +195,24 @@ inline double hud_clock_seconds(const BhRunState &run, double tick_interval) {
     return double(run.last_tick - run.pending_start) * tick_interval;
 }
 
+// How long each key on the overlay stays lit after a press. Restarts and replay seeks move the tick backwards, and a
+// lit-until from before one would hold its key lit until the new tick caught up.
+class KeyFlash {
+public:
+    void advance(uint32_t tick) {
+        if (tick < tick_) until_.fill(0);
+        tick_ = tick;
+    }
+
+    void flash(size_t slot, unsigned ticks) { until_[slot] = tick_ + ticks; }
+
+    bool lit(size_t slot) const { return until_[slot] > tick_; }
+
+private:
+    std::array<uint32_t, 8> until_{};
+    uint32_t tick_ = 0;
+};
+
 inline bool perfect_hop_visible(
         std::string_view style, const BhRunState &run, uint32_t tick, double interval, bool practice = false
 ) {

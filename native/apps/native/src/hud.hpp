@@ -212,8 +212,7 @@ class NativeHud {
     float scale = 1;
     native::HudPreferences prefs_ = native::HudPreferences::from(native::default_settings());
     std::array<native::HudElementStyle, native::hud_ids.size()> element_styles_;
-    std::array<uint32_t, 8> key_until_{};
-    uint32_t keys_tick_ = 0;
+    native::KeyFlash key_flash_;
     uint32_t keys_latest_ = 0;
     uint32_t keys_edges_ = 0;
     float keys_yaw_ = 0;
@@ -648,25 +647,26 @@ public:
     }
 
     void command_tick(const BhCmd &command, uint32_t tick) {
+        constexpr unsigned turn_flash_ticks = 3;
+        key_flash_.advance(tick);
         if (have_keys_yaw_) {
             const float delta = std::remainder(command.yaw - keys_yaw_, 360.f);
             if (delta > 0) {
-                key_until_[6] = tick + 3;
+                key_flash_.flash(6, turn_flash_ticks);
             }
             if (delta < 0) {
-                key_until_[7] = tick + 3;
+                key_flash_.flash(7, turn_flash_ticks);
             }
         }
         keys_yaw_ = command.yaw;
         have_keys_yaw_ = true;
-        keys_tick_ = tick;
         const uint32_t edges = command.buttons & ~keys_latest_;
         constexpr std::array<uint32_t, 6> bits = {
                 native::forward, native::left, native::back, native::right, native::duck, native::jump
         };
         constexpr unsigned flash_ticks = 11;
         for (size_t i = 0; i < bits.size(); ++i) {
-            if (edges & bits[i]) key_until_[i] = tick + flash_ticks;
+            if (edges & bits[i]) key_flash_.flash(i, flash_ticks);
         }
         keys_edges_ |= edges;
         keys_latest_ = command.buttons;
@@ -1783,14 +1783,14 @@ private:
     static constexpr std::array<uint32_t, 8> key_bits = {
             native::forward, native::left, native::back, native::right, native::jump, native::duck, 0, 0
     };
-    // key_until_ slots: the six keys in prefs_.key_labels order (forward, left, back, right, duck, jump), then the
+    // key_flash_ slots: the six keys in prefs_.key_labels order (forward, left, back, right, duck, jump), then the
     // two turn arrows.
     static constexpr std::array<size_t, 8> key_flash_slot = {0, 1, 2, 3, 5, 4, 6, 7};
 
     bool key_pressed(size_t i) const {
         const size_t slot = key_flash_slot[i];
-        if (i >= 6) return key_until_[slot] > keys_tick_;
-        return ((keys_latest_ | keys_edges_) & key_bits[i]) || key_until_[slot] > keys_tick_;
+        if (i >= 6) return key_flash_.lit(slot);
+        return ((keys_latest_ | keys_edges_) & key_bits[i]) || key_flash_.lit(slot);
     }
 
     bool key_row_shown(size_t i) const {
