@@ -1,8 +1,10 @@
 import { test, expect } from "bun:test";
 import { chromium, type Page } from "playwright";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 
 const menu = new URL("../../../target/native-menu/menu.html", import.meta.url).pathname;
+const out = resolve(import.meta.dir, "../../../target/native-menu/web-port");
 const MENU_URL = "https://bunnyhop.lol/__native_menu__/index.html";
 const EMPTY_BOARD = { scope: "all", total: 0, ranked: 0, offset: 0, limit: 50, entries: [], pinned: [], me: null };
 
@@ -127,6 +129,38 @@ test("an error nothing caught reaches the game's log, once", async () => {
     expect(
       logged.filter((text) => text.startsWith("unhandled rejection") && text.includes("menu fixture rejection")).length,
     ).toBe(1);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("Settings opens the log folder, and searching for the log finds the row", async () => {
+  const { browser, page } = await open();
+  try {
+    const path = "C:\\Users\\player\\AppData\\Roaming\\bunnyhop.lol\\Bunnyhop Native";
+    await page.evaluate(() => window.bunnyhopNativeMenu.open?.("settings", "data"));
+    await page.evaluate(
+      (folder) =>
+        window.dispatchEvent(
+          new CustomEvent("bunnyhop:data-folder", {
+            detail: { path: folder, defaultPath: folder, isDefault: true, configured: folder },
+          }),
+        ),
+      path,
+    );
+    const button = page.getByRole("button", { name: "Open log folder", exact: true });
+    await button.scrollIntoViewIfNeeded();
+    await mkdir(out, { recursive: true });
+    await page.screenshot({ path: resolve(out, "settings-log-folder.png") });
+    await button.click();
+    const received = await page.evaluate(() => (window as unknown as { received: unknown[] }).received);
+    expect(received).toContainEqual({ type: "dataFolder", action: "revealLogs" });
+
+    expect(await page.getByText("send us bunnyhop-native.log", { exact: false }).isVisible()).toBe(true);
+
+    await page.getByLabel("Search settings").fill("crash log");
+    await page.getByRole("button", { name: "Request data or deletion" }).waitFor({ state: "hidden" });
+    expect(await button.isVisible()).toBe(true);
   } finally {
     await browser.close();
   }

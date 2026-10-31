@@ -66,7 +66,7 @@ export type MenuMessage =
   | { type: "update"; action: "automatic"; enabled: boolean }
   | {
       type: "dataFolder";
-      action: "status" | "pick" | "useDefault" | "cancelChoice" | "cancelPending" | "forget" | "reveal";
+      action: "status" | "pick" | "useDefault" | "cancelChoice" | "cancelPending" | "forget" | "reveal" | "revealLogs";
     }
   | { type: "dataFolder"; action: "move"; when: "now" | "later" }
   | { type: "videoExport"; action: "start"; options: VideoExportOptions; title?: string }

@@ -264,6 +264,13 @@ apps/native/build/bunnyhop-native-map-audio-identity target/replays.json
 `--menu-smoke OUTPUT_PREFIX --online-map NAME --hidden` sends the map selection through the menu's host bridge.
 It uses a private data folder at `OUTPUT_PREFIX/data` and never submits scores.
 
+## Log file
+
+The game writes `logs/bunnyhop-native.log` in its data folder, which Settings → Game data → Open log folder opens.
+The last two sessions sit beside it as `.1` and `.2`, and each file stops at 4 MiB. It holds what the game prints to
+stderr, map loads step by step, menu errors and a note if the game crashes. Tokens, cookies, passwords, emails,
+Discord codes, URL queries and your home folder are taken out before a line is written, so it can be posted in public.
+
 ## Notices
 
 The movengine project was read as a reference for input and BSP rendering; none of its GPL-3.0 code is used. Keep

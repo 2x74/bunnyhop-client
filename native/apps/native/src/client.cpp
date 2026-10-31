@@ -2769,6 +2769,11 @@ int run(const native::Options &opt) {
                             }
                         } else if (action == "reveal")
                             SDL_OpenURL(data_location::file_url(cache).c_str());
+                        else if (action == "revealLogs") {
+                            std::error_code folder_error;
+                            std::filesystem::create_directories(native::log::folder(cache), folder_error);
+                            SDL_OpenURL(data_location::file_url(native::log::folder(cache)).c_str());
+                        }
                         last_data_state.clear();
                     } else if (type == "openExternal")
                         native::open_external(message.at("url").get<std::string>());
