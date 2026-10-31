@@ -1,5 +1,6 @@
 #include "low_latency.hpp"
 #include "anti_lag_windows.hpp"
+#include "gfx_d3d11.hpp"
 #include <windows.h>
 #include <d3d11.h>
 #include <d3dcompiler.h>
@@ -188,21 +189,24 @@ ComPtr<IDXGIAdapter1> matching_adapter(IDXGIFactory1 *factory, UINT vendor) {
     return nullptr;
 }
 
-ComPtr<ID3D11Device> create_device(ComPtr<ID3D11DeviceContext> &context, std::string &error) {
+ComPtr<ID3D11Device>
+create_device(ComPtr<ID3D11DeviceContext> &context, std::string &error, bool native = false, bool warp = false) {
     ComPtr<IDXGIFactory1> factory;
     HRESULT result = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
     if (FAILED(result)) {
         error = hresult_text("CreateDXGIFactory1", result);
         return nullptr;
     }
-    const auto adapter = matching_adapter(factory.Get(), gl_vendor_id());
+    const auto adapter = matching_adapter(factory.Get(), native ? 0 : gl_vendor_id());
     const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0};
     ComPtr<ID3D11Device> device;
     result = D3D11CreateDevice(
             adapter.Get(),
-            adapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE,
+            warp      ? D3D_DRIVER_TYPE_WARP
+            : adapter ? D3D_DRIVER_TYPE_UNKNOWN
+                      : D3D_DRIVER_TYPE_HARDWARE,
             nullptr,
-            0,
+            warp ? D3D11_CREATE_DEVICE_DEBUG : 0,
             levels,
             UINT(std::size(levels)),
             D3D11_SDK_VERSION,
@@ -246,6 +250,10 @@ struct LowLatencyPresenter::Impl {
     ComPtr<ID3D11RenderTargetView> back_buffer;
     ComPtr<ID3D11Texture2D> frame;
     ComPtr<ID3D11ShaderResourceView> frame_view;
+    ComPtr<ID3D11RenderTargetView> scene_view;
+    ComPtr<ID3D11Texture2D> scene_depth;
+    ComPtr<ID3D11DepthStencilView> scene_depth_view;
+    bool native = false, fullscreen = false;
     ComPtr<ID3D11VertexShader> vertex_shader;
     ComPtr<ID3D11PixelShader> pixel_shader;
     ComPtr<ID3D11SamplerState> sampler;
@@ -259,6 +267,12 @@ struct LowLatencyPresenter::Impl {
     uint64_t frame_id = 0;
 
     ~Impl() { release(); }
+
+    bool create_native(SDL_Window *window, bool warp, std::string &error) {
+        native = true;
+        device = create_device(context, error, true, warp);
+        return device && create_swapchain(window_handle(window), error) && create_blit(error);
+    }
 
     bool create(SDL_Window *window, std::string &error) {
         if (!gl.load()) {
@@ -289,14 +303,15 @@ struct LowLatencyPresenter::Impl {
         if (SUCCEEDED(factory.As(&factory5)))
             factory5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allow_tearing, sizeof allow_tearing);
         tearing = allow_tearing == TRUE;
-        swap_flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT
-                     | (tearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0u);
+        swap_flags =
+                (native ? DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH : DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT)
+                | (tearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0u);
         DXGI_SWAP_CHAIN_DESC1 description{};
         description.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
         description.SampleDesc.Count = 1;
         description.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
         description.BufferCount = swapchain_buffers;
-        description.Scaling = DXGI_SCALING_NONE;
+        description.Scaling = DXGI_SCALING_STRETCH;
         description.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         description.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
         description.Flags = swap_flags;
@@ -314,8 +329,13 @@ struct LowLatencyPresenter::Impl {
             error = "DXGI 1.3 is needed";
             return false;
         }
-        swapchain->SetMaximumFrameLatency(max_frame_latency);
-        waitable = swapchain->GetFrameLatencyWaitableObject();
+        if (!native) {
+            swapchain->SetMaximumFrameLatency(max_frame_latency);
+            waitable = swapchain->GetFrameLatencyWaitableObject();
+        } else {
+            ComPtr<IDXGIDevice1> latency_device;
+            if (SUCCEEDED(device.As(&latency_device))) latency_device->SetMaximumFrameLatency(max_frame_latency);
+        }
         return true;
     }
 
@@ -362,7 +382,19 @@ struct LowLatencyPresenter::Impl {
         }
         width = new_width;
         height = new_height;
-        return create_framebuffer(error);
+        return native ? create_native_frame(error) : create_framebuffer(error);
+    }
+
+    bool create_native_frame(std::string &error) {
+        D3D11_TEXTURE2D_DESC depth_description{};
+        frame->GetDesc(&depth_description);
+        depth_description.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+        depth_description.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+        HRESULT result = device->CreateRenderTargetView(frame.Get(), nullptr, &scene_view);
+        if (SUCCEEDED(result)) result = device->CreateTexture2D(&depth_description, nullptr, &scene_depth);
+        if (SUCCEEDED(result)) result = device->CreateDepthStencilView(scene_depth.Get(), nullptr, &scene_depth_view);
+        if (FAILED(result)) error = hresult_text("Creating the scene target", result);
+        return SUCCEEDED(result);
     }
 
     bool create_framebuffer(std::string &error) {
@@ -403,6 +435,8 @@ struct LowLatencyPresenter::Impl {
 
     // The GL frame into the back buffer, right side up.
     void blit() {
+        // The game leaves depth, blend, raster and geometry bindings on the shared immediate context.
+        context->ClearState();
         const D3D11_VIEWPORT viewport{0, 0, float(width), float(height), 0, 1};
         ID3D11RenderTargetView *target = back_buffer.Get();
         ID3D11ShaderResourceView *source = frame_view.Get();
@@ -428,6 +462,9 @@ struct LowLatencyPresenter::Impl {
         if (depth) gl.DeleteRenderbuffers(1, &depth);
         if (frame_texture) glDeleteTextures(1, &frame_texture);
         framebuffer = depth = frame_texture = 0;
+        scene_view.Reset();
+        scene_depth_view.Reset();
+        scene_depth.Reset();
         frame_view.Reset();
         frame.Reset();
         back_buffer.Reset();
@@ -444,6 +481,7 @@ struct LowLatencyPresenter::Impl {
         interop_device = nullptr;
         if (waitable) CloseHandle(waitable);
         waitable = nullptr;
+        if (swapchain && fullscreen) swapchain->SetFullscreenState(FALSE, nullptr);
         swapchain.Reset();
         if (context) context->Flush();
     }
@@ -452,8 +490,9 @@ struct LowLatencyPresenter::Impl {
 LowLatencyPresenter::LowLatencyPresenter() = default;
 
 void LowLatencyPresenter::fail(std::string reason) {
-    std::cerr << "Low latency mode: " << reason << '\n';
-    impl_.reset();
+    std::cerr << (native_ ? "D3D11: " : "Low latency mode: ") << reason << '\n';
+    if (!native_) impl_.reset();
+    failed_ = true;
     error_ = reason;
     failure_ = std::move(reason);
 }
@@ -481,7 +520,7 @@ const LowLatencySupport &LowLatencyPresenter::support(SDL_Window *) {
 
 bool LowLatencyPresenter::configure(SDL_Window *window, LowLatencyMode mode, int fps_limit, bool flash_indicator) {
     error_.clear();
-    if (mode == LowLatencyMode::off) {
+    if (mode == LowLatencyMode::off && !native_) {
         impl_.reset();
         return true;
     }
@@ -495,12 +534,75 @@ bool LowLatencyPresenter::configure(SDL_Window *window, LowLatencyMode mode, int
         impl_ = std::move(created);
     }
     const unsigned interval_us = fps_limit > 0 ? microseconds_per_second / unsigned(fps_limit) : 0;
-    impl_->use_reflex =
-            support_.reflex && reflex().set_mode(impl_->device.Get(), true, mode == LowLatencyMode::boost, interval_us);
-    impl_->use_anti_lag = !impl_->use_reflex && support_.anti_lag && anti_lag::initialize();
+    const bool enabled = mode != LowLatencyMode::off;
+    if (impl_->use_anti_lag) anti_lag::shutdown();
+    impl_->use_reflex = support_.reflex
+                        && reflex().set_mode(impl_->device.Get(), enabled, mode == LowLatencyMode::boost, interval_us)
+                        && enabled;
+    impl_->use_anti_lag = enabled && !impl_->use_reflex && support_.anti_lag && anti_lag::initialize();
     impl_->anti_lag_fps = fps_limit > 0 ? unsigned(fps_limit) : 0;
     impl_->flash_indicator = flash_indicator;
     return true;
+}
+
+bool LowLatencyPresenter::initialize_native(SDL_Window *window, bool warp) {
+    auto created = std::make_unique<Impl>();
+    if (!created->create_native(window, warp, error_)) return false;
+    impl_ = std::move(created);
+    native_ = probed_ = support_.dxgi = true;
+    support_.reflex = !warp && reflex().load() && reflex().set_mode(impl_->device.Get(), false, false, 0);
+    support_.anti_lag = !warp && !support_.reflex && anti_lag::initialize();
+    if (support_.anti_lag) anti_lag::shutdown();
+    int width = 0, height = 0;
+    SDL_GetWindowSizeInPixels(window, &width, &height);
+    return impl_->resize(UINT(width), UINT(height), error_);
+}
+
+bool LowLatencyPresenter::exclusive(bool enabled) {
+    if (!native_ || !impl_ || impl_->fullscreen == enabled) return true;
+    const HRESULT result = impl_->swapchain->SetFullscreenState(enabled ? TRUE : FALSE, nullptr);
+    if (result != S_OK) {
+        error_ = hresult_text("Changing DXGI fullscreen", result);
+        SDL_SetError("%s", error_.c_str());
+        if (result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET)
+            fail(error_);
+        else
+            std::cerr << error_ << '\n';
+        return false;
+    }
+    impl_->fullscreen = enabled;
+    // Flip-model fullscreen transitions require ResizeBuffers before the next Present.
+    impl_->width = impl_->height = 0;
+    return true;
+}
+
+void *LowLatencyPresenter::device() const {
+    return impl_ ? impl_->device.Get() : nullptr;
+}
+
+void *LowLatencyPresenter::immediate_context() const {
+    return impl_ ? impl_->context.Get() : nullptr;
+}
+
+gfx::TargetView LowLatencyPresenter::native_target() const {
+    if (!impl_ || !native_) return {};
+    const gfx::TargetDesc description{
+            int(impl_->width), int(impl_->height), gfx::Format::rgba8, gfx::Format::depth24_stencil8
+    };
+    return gfx::D3D11Context::borrow_target(impl_->scene_view.Get(), description, impl_->scene_depth_view.Get());
+}
+
+std::string LowLatencyPresenter::adapter_description() const {
+    if (!impl_) return {};
+    ComPtr<IDXGIDevice> device;
+    ComPtr<IDXGIAdapter> adapter;
+    DXGI_ADAPTER_DESC description{};
+    if (FAILED(impl_->device.As(&device)) || FAILED(device->GetAdapter(&adapter))
+        || FAILED(adapter->GetDesc(&description)))
+        return {};
+    char text[512]{};
+    WideCharToMultiByte(CP_UTF8, 0, description.Description, -1, text, sizeof text, nullptr, nullptr);
+    return text;
 }
 
 bool LowLatencyPresenter::active() const {
@@ -538,24 +640,32 @@ void LowLatencyPresenter::render_start(int width, int height) {
     std::string error;
     if ((UINT(width) != state.width || UINT(height) != state.height) && !state.resize(UINT(width), UINT(height), error))
         return fail(error);
+    if (state.native) return;
     if (!state.lock_frame()) return fail("The OpenGL driver couldn't lock the frame texture");
     state.gl.BindFramebuffer(GL_FRAMEBUFFER, state.framebuffer);
 }
 
 void LowLatencyPresenter::present(bool vsync) {
-    if (!impl_ || !impl_->locked) return;
+    if (!impl_ || (!impl_->native && !impl_->locked)) return;
     auto &state = *impl_;
-    state.gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
-    state.unlock_frame();
+    if (!state.native) {
+        state.gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
+        state.unlock_frame();
+    }
     state.blit();
     if (state.use_reflex) {
         reflex().marker(state.device.Get(), state.frame_id, RENDERSUBMIT_END);
         reflex().marker(state.device.Get(), state.frame_id, PRESENT_START);
     }
-    const UINT flags = !vsync && state.tearing ? DXGI_PRESENT_ALLOW_TEARING : 0;
+    const UINT flags = !vsync && state.tearing && !state.fullscreen ? DXGI_PRESENT_ALLOW_TEARING : 0;
     const HRESULT result = state.swapchain->Present(vsync ? 1 : 0, flags);
     if (state.use_reflex) reflex().marker(state.device.Get(), state.frame_id, PRESENT_END);
-    if (FAILED(result)) fail(hresult_text("Present", result));
+    if (FAILED(result)) {
+        std::string error = hresult_text("Present", result);
+        if (result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET)
+            error += "; " + hresult_text("Device removed reason", state.device->GetDeviceRemovedReason());
+        fail(error);
+    }
 }
 
 void LowLatencyPresenter::trigger_flash() {

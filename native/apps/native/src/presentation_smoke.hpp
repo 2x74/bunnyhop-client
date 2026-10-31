@@ -10,7 +10,7 @@
 
 namespace native {
 inline nlohmann::json presentation_smoke(
-        Gl &gl,
+        gfx::Context &gl,
         BhContext *core,
         Renderer &renderer,
         NativeHud &hud,
@@ -62,13 +62,13 @@ inline nlohmann::json presentation_smoke(
         draw("Native presentation proof");
     };
     auto save = [&](const std::string &name) {
-        const auto png = backbuffer_png(gl, width, height, 64u * 1024u * 1024u);
+        const auto png = target_png(gl, gl.current_target(), width, height, 64u * 1024u * 1024u);
         if (png.empty()) throw std::runtime_error("Empty screenshot");
         const auto path = output / (name + ".png");
         std::ofstream file(path, std::ios::binary);
         file.write(png.data(), png.size());
         if (!file) throw std::runtime_error("Writing " + path.string());
-        if (gl.GetError() != GL_NO_ERROR) throw std::runtime_error("GL error capturing " + name);
+        gl.check_error("Presentation capture");
         return path.string();
     };
     renderer.set_viewmodel_visible(true);

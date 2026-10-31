@@ -26,6 +26,9 @@ inline const Json &native_capabilities() {
         for (const auto id : web_hud_elements)
             result.push_back("hud:" + std::string(id));
         append_render_capabilities(result);
+#ifdef _WIN32
+        result.push_back("renderer");
+#endif
         return result;
     }();
     return capabilities;

@@ -1,3 +1,4 @@
+#include "smoke_graphics.hpp"
 // Deterministic framebuffer evidence for the actual native renderer. No menus, network, timer or recording.
 #include "renderer.hpp"
 #include "sky_image.hpp"
@@ -133,32 +134,8 @@ int main(int argc, char **argv) {
             ~Sdl() { SDL_Quit(); }
         } sdl;
 
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-        auto *window = SDL_CreateWindow("Native render evidence", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
-        if (!window) throw std::runtime_error(SDL_GetError());
-
-        struct Window {
-            SDL_Window *w;
-
-            ~Window() { SDL_DestroyWindow(w); }
-        } cleanup{window};
-
-        const auto context = SDL_GL_CreateContext(window);
-        if (!context) throw std::runtime_error(SDL_GetError());
-
-        struct Context {
-            SDL_GLContext c;
-
-            ~Context() { SDL_GL_DestroyContext(c); }
-        } contextCleanup{context};
-
-        SDL_GL_MakeCurrent(window, context);
-        SDL_GL_SetSwapInterval(0);
-        native::Gl gl;
-        gl.load();
+        native::SmokeGraphics surface(1280, 720);
+        auto &context = surface.context();
         using Core = std::unique_ptr<BhContext, decltype(&bh_destroy)>;
         Core core(bh_create(), &bh_destroy);
         if (!core || !bh_load_map(core.get(), map.c_str(), content.empty() ? nullptr : content.c_str()))
@@ -180,7 +157,7 @@ int main(int argc, char **argv) {
                 eye[k] = snapshot.player.position[k] + (k == 2 ? snapshot.player.view_offset_z : 0);
         native::Input input;
         input.set_angles(pitch, yaw);
-        native::Renderer renderer(gl, core.get());
+        native::Renderer renderer(context, core.get());
         renderer.set_viewmodel_visible(!worldOnly && weapon < 0);
         renderer.set_cosmetics(outfit, loadout);
         renderer.set_water_quality(waterQuality == "refracted" ? 1 : 0);
@@ -270,10 +247,10 @@ int main(int argc, char **argv) {
             visibleActor = a;
             renderer.set_room_actors({a});
         }
-        int width = 0, height = 0;
-        SDL_GetWindowSizeInPixels(window, &width, &height);
+        int width = 1280, height = 720;
+
         std::unique_ptr<native::NativeViewmodel> preview;
-        if (!worldOnly && weapon >= 0 && !simulateFire) preview = std::make_unique<native::NativeViewmodel>(gl);
+        if (!worldOnly && weapon >= 0 && !simulateFire) preview = std::make_unique<native::NativeViewmodel>(context);
         if (preview) {
             preview->cosmetics(outfit, loadout);
             preview->player_glow(glow);
@@ -336,8 +313,7 @@ int main(int argc, char **argv) {
         if (requireWater && !renderer.refraction_captures())
             throw std::runtime_error("No visible refracted water was captured");
         std::cout << "Refraction captures: " << renderer.refraction_captures() << '\n';
-        const auto error = gl.GetError();
-        if (error != GL_NO_ERROR) throw std::runtime_error("native render GL error " + std::to_string(error));
+        context.check_error("Render smoke");
         renderer.screenshot(output, width, height);
         std::cout << "Native render evidence: " << width << 'x' << height << ", yaw=" << yaw << ", pitch=" << pitch
                   << ", camera=" << eye[0] << ',' << eye[1] << ',' << eye[2] << "; GL_NO_ERROR\n";

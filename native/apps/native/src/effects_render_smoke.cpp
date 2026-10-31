@@ -1,3 +1,4 @@
+#include "smoke_graphics.hpp"
 // Offline rendering fixture. Synthetic poses never enter the simulation, recorder or a server.
 #include "renderer.hpp"
 #include "online.hpp"
@@ -44,36 +45,8 @@ int main(int argc, char **argv) {
             ~Sdl() { SDL_Quit(); }
         } sdl;
 
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-        auto *window = SDL_CreateWindow("Rendering effect fixtures", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
-        if (!window) {
-            throw std::runtime_error(SDL_GetError());
-        }
-
-        struct Window {
-            SDL_Window *value;
-
-            ~Window() { SDL_DestroyWindow(value); }
-        } window_guard{window};
-
-        const auto context = SDL_GL_CreateContext(window);
-        if (!context) {
-            throw std::runtime_error(SDL_GetError());
-        }
-
-        struct Context {
-            SDL_GLContext value;
-
-            ~Context() { SDL_GL_DestroyContext(value); }
-        } context_guard{context};
-
-        SDL_GL_MakeCurrent(window, context);
-        SDL_GL_SetSwapInterval(0);
-        native::Gl gl;
-        gl.load();
+        native::SmokeGraphics surface(1280, 720);
+        auto &graphics = surface.context();
         std::unique_ptr<BhContext, decltype(&bh_destroy)> core(bh_create(), &bh_destroy);
         if (!core || !bh_load_map(core.get(), argv[1], argv[2])) {
             throw std::runtime_error(core ? bh_last_error(core.get()) : "No core");
@@ -85,7 +58,7 @@ int main(int argc, char **argv) {
         }
         BhSnapshot spawn{};
         bh_snapshot(core.get(), &spawn);
-        native::Renderer renderer(gl, core.get());
+        native::Renderer renderer(graphics, core.get());
         renderer.set_viewmodel_visible(false);
         renderer.set_zones_visible(false);
         renderer.set_ghost_cosmetics("ghost-geode", "trail-geode");
@@ -114,11 +87,9 @@ int main(int argc, char **argv) {
             renderer.graphics_settings(preferences);
             renderer.set_room_actors(actors);
             renderer.draw(1280, 720, eye, input, &spawn, 4);
-            if (gl.GetError() != GL_NO_ERROR) {
-                throw std::runtime_error(std::string("GL error in ") + name);
-            }
+            graphics.check_error("Effect fixture");
             renderer.screenshot((output / (std::string(name) + ".ppm")).string(), 1280, 720);
-            const auto png = backbuffer_png(gl, 1280, 720);
+            const auto png = native::target_png(graphics, graphics.current_target(), 1280, 720);
             std::ofstream file(output / (std::string(name) + ".png"), std::ios::binary);
             file.write(png.data(), std::streamsize(png.size()));
         };

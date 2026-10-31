@@ -44,7 +44,9 @@ void require(bool ok, BhContext *core, const char *operation) {
 
 }  // namespace
 
-int run_presentation_smoke(const Options &opt, SDL_Window *window, Gl &gl, GameSession &game, NativeHud &hud) {
+int run_presentation_smoke(
+        const Options &opt, SDL_Window *window, gfx::Context &gl, GameSession &game, NativeHud &hud
+) {
     if (!game.renderer || !game.core) throw std::runtime_error("Presentation smoke requires a local map");
     bh_record_end(game.core.get());
     int width = 0, height = 0;

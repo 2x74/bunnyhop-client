@@ -1,6 +1,7 @@
 #pragma once
 #include <nlohmann/json.hpp>
 #include "input_backend_choice.hpp"
+#include "renderer_choice.hpp"
 #include "native_cosmetics.hpp"
 #include <string>
 
@@ -15,6 +16,7 @@ struct Preferences {
     bool mouse_diagnostics;
     InputBackendChoice input_backend;
     bool limit_queued_frames;
+    RendererChoice renderer;
     std::string low_latency_mode;
     bool reflex_flash;
     bool vsync;

@@ -1,4 +1,6 @@
 #include "renderer.hpp"
+#include "client_graphics.hpp"
+#include "gfx_window.hpp"
 #include "benchmark_system.hpp"
 #ifdef __APPLE__
 #include <OpenGL/OpenGL.h>
@@ -112,6 +114,7 @@ Json permutation(
     gl.DeleteShader(fragment_shader);
     // Keep programs alive, as the lazy cache does. The context owns their lifetime.
     return {{"key", native_render::player_program_key(finish, glove, detail, material)},
+            {"programKey", native_render::player_shader_key(finish, glove, detail, material)},
             {"finish", finish},
             {"glove", glove},
             {"detail", detail},
@@ -122,10 +125,103 @@ Json permutation(
             {"linkMs", link_ms},
             {"totalMs", total_ms}};
 }
+
+#ifdef _WIN32
+std::vector<std::string> d3d11_program_keys() {
+    std::vector<std::string> keys;
+    for (const char *key :
+         {"world",
+          "sky",
+          "depth",
+          "cutout-depth",
+          "ghost-route",
+          "hud",
+          "presentation",
+          "video",
+          "look-bright",
+          "look-blur",
+          "look-contact",
+          "look-composite",
+          "look-fxaa",
+          "hdr-downsample",
+          "hdr-blur",
+          "hdr-composite",
+          "hdr-luminance",
+          "graphics-target"})
+        keys.emplace_back(key);
+    for (int material = 0; material < 4; ++material) {
+        const int finishes = material == 0 ? 28 : 1;
+        for (int finish = 0; finish < finishes; ++finish) {
+            for (bool glove : {false, true}) {
+                for (bool detail : {false, true}) {
+                    if (material == 1 && detail) continue;
+                    if (material == 2 && !detail) continue;
+                    if (material == 3 && (glove || detail)) continue;
+                    keys.push_back(
+                            native_render::player_shader_key(
+                                    finish, glove, detail, native_render::PlayerMaterial(material)
+                            )
+                    );
+                }
+            }
+        }
+    }
+    return keys;
+}
+#endif
+
+int measure_d3d11(const char *output_path, bool warp) {
+#ifndef _WIN32
+    (void)output_path;
+    (void)warp;
+    throw std::runtime_error("D3D11 program measurement requires Windows");
+#else
+    if (!SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(SDL_GetError());
+    std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> window(
+            SDL_CreateWindow("D3D11 program measurement", 64, 64, SDL_WINDOW_HIDDEN), SDL_DestroyWindow
+    );
+    if (!window) throw std::runtime_error(SDL_GetError());
+    native::ClientGraphics device(window.get(), native::gfx::Backend::d3d11, warp);
+    auto &graphics = device.context();
+    Json permutations = Json::array();
+    const auto measure = [&](const std::string &key) {
+        const auto start = Clock::now();
+        const native::gfx::ProgramDesc description{{key, ""}};
+        auto program = graphics.create_program(description);
+        const double elapsed = milliseconds(start);
+        permutations.push_back({{"key", key}, {"totalMs", elapsed}});
+        graphics.destroy(program);
+    };
+    for (const auto &key : d3d11_program_keys())
+        measure(key);
+    graphics.check_error("D3D11 program measurement");
+    const Json result = {
+            {"schema", 1},
+            {"renderer", "d3d11"},
+            {"gpu", device.adapter()},
+            {"driver", device.description()},
+            {"os", benchmark_os()},
+            {"permutations", permutations},
+            {"method",
+             "Precompiled DXBC lookup, reflection and D3D11 program creation per key; "
+             "excludes constants, geometry/input layouts, pipelines and first draw."}
+    };
+    std::ofstream output(output_path);
+    output << result.dump(2) << '\n';
+    if (!output) throw std::runtime_error("Cannot write D3D11 program measurement");
+    return 0;
+#endif
+}
 }  // namespace
 
 int main(int argc, char **argv) {
     try {
+        if ((argc == 5 || argc == 6) && std::string_view(argv[3]) == "--renderer"
+            && std::string_view(argv[4]) == "d3d11") {
+            const bool warp = argc == 6 && std::string_view(argv[5]) == "--d3d11-warp";
+            if (argc == 6 && !warp) throw std::runtime_error("Unknown shader measurement option");
+            return measure_d3d11(argv[2], warp);
+        }
         if (argc != 3) throw std::runtime_error("usage: bunnyhop-native-shader-benchmark ASSET_DIRECTORY OUTPUT.json");
         Context context;
         native::Gl gl;
@@ -133,6 +229,7 @@ int main(int argc, char **argv) {
         native_render::PlayerShaderSources sources(argv[1]);
         Json result = {
                 {"schema", 1},
+                {"renderer", "opengl"},
                 {"gpu", reinterpret_cast<const char *>(gl.GetString(GL_RENDERER))},
                 {"driver", reinterpret_cast<const char *>(gl.GetString(GL_VERSION))},
                 {"os", benchmark_os()},

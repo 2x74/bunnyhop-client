@@ -14,8 +14,10 @@ measure_replace("    if (!state.lock_frame())"
     "    benchmark_latency::clock_start();\n    if (!state.lock_frame())")
 measure_replace("    state.gl.BindFramebuffer(GL_FRAMEBUFFER, state.framebuffer);"
     "    benchmark_latency::clock_end(benchmark_latency::lock);\n    state.gl.BindFramebuffer(GL_FRAMEBUFFER, state.framebuffer);")
-measure_replace("    state.unlock_frame();\n    state.blit();"
-    "    benchmark_latency::clock_start();\n    state.unlock_frame();\n    benchmark_latency::clock_end(benchmark_latency::unlock);\n    benchmark_latency::copy_start(state.device.Get(), state.context.Get());\n    benchmark_latency::clock_start();\n    state.blit();\n    benchmark_latency::clock_end(benchmark_latency::copy);\n    benchmark_latency::copy_end(state.context.Get());")
+measure_replace("        state.unlock_frame();"
+    "        benchmark_latency::clock_start();\n        state.unlock_frame();\n        benchmark_latency::clock_end(benchmark_latency::unlock);")
+measure_replace("    state.blit();"
+    "    benchmark_latency::copy_start(state.device.Get(), state.context.Get());\n    benchmark_latency::clock_start();\n    state.blit();\n    benchmark_latency::clock_end(benchmark_latency::copy);\n    benchmark_latency::copy_end(state.context.Get());")
 measure_replace("    const HRESULT result = state.swapchain->Present"
     "    benchmark_latency::clock_start();\n    const HRESULT result = state.swapchain->Present")
 measure_replace("    if (state.use_reflex) reflex().marker(state.device.Get(), state.frame_id, PRESENT_END);"

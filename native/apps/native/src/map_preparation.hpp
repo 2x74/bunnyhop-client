@@ -26,7 +26,8 @@ public:
         download = {};
     }
 
-    void start(MapDownloadResult next, const BhSettings &settings, Gl &gl, const std::filesystem::path &assets) {
+    void
+    start(MapDownloadResult next, const BhSettings &settings, gfx::Context &gl, const std::filesystem::path &assets) {
         cancel();
         download = std::move(next);
         if (!download.map) return;
@@ -57,7 +58,7 @@ public:
         return GameSession::prepare(path, content, settings, detail);
     }
 
-    bool poll(Gl &gl, const std::filesystem::path &assets) {
+    bool poll(gfx::Context &gl, const std::filesystem::path &assets) {
         viewmodels.poll();
         if (!download.error.empty() || !prepared) return true;
         try {

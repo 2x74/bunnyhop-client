@@ -1,3 +1,4 @@
+#include "smoke_graphics.hpp"
 #include <set>
 #include "online.hpp"
 #include "renderer.hpp"
@@ -8,20 +9,9 @@ int main(int argc, char **argv) {
     try {
         if (argc != 3) throw std::runtime_error("usage: loadout-preview-smoke ASSETS OUTPUT");
         if (!SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(SDL_GetError());
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-        auto *window =
-                SDL_CreateWindow("Native loadout preview smoke", 960, 600, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
-        if (!window) throw std::runtime_error(SDL_GetError());
-        auto context = SDL_GL_CreateContext(window);
-        if (!context) throw std::runtime_error(SDL_GetError());
-        SDL_GL_MakeCurrent(window, context);
-        native::Gl gl;
-        gl.load();
+        native::SmokeGraphics surface(960, 600);
+        auto &graphics = surface.context();
         std::filesystem::create_directories(argv[2]);
-        native::gfx::Context graphics(gl);
         NativeLoadoutPreview preview(graphics, argv[1], native::gfx::Compare::less);
         nlohmann::json job = {
                 {"id", 1},
@@ -39,18 +29,14 @@ int main(int argc, char **argv) {
         nlohmann::json evidence = nlohmann::json::array();
         std::set<std::string> captures;
         auto capture = [&](const std::string &name, double now) {
-            gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
-            gl.Viewport(11, 13, 601, 401);
+            const auto target = graphics.current_target();
+            graphics.viewport({11, 13, 601, 401});
             const auto png = preview.render(job, now);
-            GLint framebuffer = -1, vp[4];
-            gl.GetIntegerv(GL_FRAMEBUFFER_BINDING, &framebuffer);
-            gl.GetIntegerv(GL_VIEWPORT, vp);
-            if (framebuffer != 0 || vp[0] != 11 || vp[1] != 13 || vp[2] != 601 || vp[3] != 401)
-                throw std::runtime_error("Preview leaked framebuffer/viewport");
-            GLint cullFace = 0;
-            gl.GetIntegerv(GL_CULL_FACE_MODE, &cullFace);
-            if (cullFace != GL_BACK) throw std::runtime_error("Preview leaked front-face culling into the scene");
-            if (gl.GetError() != GL_NO_ERROR) throw std::runtime_error("Preview GL error");
+            const auto viewport = graphics.current_viewport();
+            if (graphics.current_target() != target || viewport.x != 11 || viewport.y != 13 || viewport.width != 601
+                || viewport.height != 401)
+                throw std::runtime_error("Preview leaked target/viewport");
+            graphics.check_error("Preview render");
             if (png.size() < 1000) throw std::runtime_error("Blank PNG");
             if (!captures.insert(png).second) throw std::runtime_error("Duplicate view capture: " + name);
             std::ofstream out(std::filesystem::path(argv[2]) / (name + ".png"), std::ios::binary);
@@ -136,6 +122,10 @@ int main(int argc, char **argv) {
         capture("bunny-outline", 17.2);
         job["view"] = "fp";
         job["playerGlow"]["aura"] = true;
+        // The bunny's orbit angle would rotate first-person hands out of the camera.
+        job["yaw"] = 0;
+        job["pitch"] = 0;
+        job["inspect"] = 0;
         capture("hands-aura", 17.5);
         job["view"] = "onboarding";
         auto malformed = job;

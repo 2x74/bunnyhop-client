@@ -132,26 +132,6 @@ inline std::string target_png(
     }
 }
 
-// Temporary bridge: legacy screenshot callers supply their current GL target and expect pack-state restoration.
-inline std::string backbuffer_png(native::Gl &gl, int width, int height, size_t max_uri_bytes = 2000000) {
-    if (width <= 0 || height <= 0) return {};
-    GLint framebuffer = 0, alignment = 4;
-    gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &framebuffer);
-    gl.GetIntegerv(GL_PACK_ALIGNMENT, &alignment);
-
-    struct RestorePack {
-        native::Gl &gl;
-        GLint alignment;
-
-        ~RestorePack() { gl.PixelStorei(GL_PACK_ALIGNMENT, alignment); }
-    } restore{gl, alignment};
-
-    gfx::Context context(gl);
-    return target_png(
-            context, context.borrow_target(unsigned(framebuffer), {width, height}), width, height, max_uri_bytes
-    );
-}
-
 class MenuBackdrop {
 public:
     enum class Status { idle, loading, ready, failed };
@@ -159,8 +139,8 @@ public:
     // promptly once `cancel` is set and must not write the cache after that.
     using Loader = std::function<native::DownloadedMap(const std::string &map, const std::atomic_bool &cancel)>;
 
-    MenuBackdrop(native::Gl &api, std::filesystem::path asset_root, Loader loader)
-        : gl(api)
+    MenuBackdrop(gfx::Context &api, std::filesystem::path asset_root, Loader loader)
+        : graphics(api)
         , assets(std::move(asset_root))
         , load(std::move(loader)) {}
 
@@ -259,7 +239,7 @@ public:
         if (pending && may_build) {
             try {
                 auto loaded = std::make_unique<BackdropMap>(load_backdrop_map(pending->bsp, pending->content_root));
-                auto next = std::make_unique<native::Renderer>(gl, loaded->core.get(), assets);
+                auto next = std::make_unique<native::Renderer>(graphics, loaded->core.get(), assets);
                 next->set_viewmodel_visible(false);
                 next->set_fov(native::tour::renderer_fov());
                 director = std::make_unique<native::tour::Director>(loaded->shots);
@@ -402,8 +382,7 @@ private:
         std::future<native::DownloadedMap> result;
     };
 
-    // Temporary bridge: Renderer still constructs from the legacy GL table.
-    native::Gl &gl;
+    gfx::Context &graphics;
     native::GraphicsSettings graphics_;
     nlohmann::json settings_ = nlohmann::json::object();
     std::filesystem::path assets;

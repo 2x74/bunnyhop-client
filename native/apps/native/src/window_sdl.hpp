@@ -3,6 +3,7 @@
 #include "display_scaling.hpp"
 #include "window_settings.hpp"
 #include "gfx_window.hpp"
+#include "window_presenter.hpp"
 #include <SDL3/SDL.h>
 #include <string>
 #include <vector>
@@ -20,6 +21,7 @@ class WindowController {
     };
 
     SDL_Window *window_;
+    WindowPresenter *presenter_ = nullptr;
     std::optional<WindowBounds> normal_;
     std::string desired_ = "windowed", error_;
     ExclusiveTarget exclusive_;
@@ -37,6 +39,7 @@ class WindowController {
     }
 
     bool set_mode(const std::string &mode, const ExclusiveTarget &target) {
+        if (presenter_ && !presenter_->exclusive(false)) return false;
         if (mode == "windowed")
             return SDL_SetWindowFullscreen(window_, false) && SDL_SetWindowFullscreenMode(window_, nullptr)
                    && SDL_SetWindowBordered(window_, true);
@@ -141,7 +144,7 @@ class WindowController {
         if (!SDL_SetWindowFullscreenMode(window_, &*mode) || !SDL_SetWindowFullscreen(window_, true)) return false;
         if (!SDL_SyncWindow(window_)) return false;
         request_display_scaling(window_, target.scaling == "bars" ? DisplayScaling::bars : DisplayScaling::stretch);
-        return true;
+        return !presenter_ || presenter_->exclusive(true);
     }
 
     static ExclusiveTarget exclusive_target(const WindowJson &settings) {
@@ -152,7 +155,7 @@ class WindowController {
     std::optional<SDL_Rect> borderless_rect() const {
         SDL_Rect r{};
         if (!SDL_GetDisplayBounds(SDL_GetDisplayForWindow(window_), &r)) return std::nullopt;
-        r.h += 1;
+        if (SDL_GetWindowFlags(window_) & SDL_WINDOW_OPENGL) r.h += 1;
         return r;
     }
 
@@ -168,7 +171,9 @@ class WindowController {
     }
 
 public:
-    explicit WindowController(SDL_Window *window) : window_(window) {
+    explicit WindowController(SDL_Window *window, WindowPresenter *presenter = nullptr)
+        : window_(window)
+        , presenter_(presenter) {
         observe_bounds();
         desired_ = mode();
     }

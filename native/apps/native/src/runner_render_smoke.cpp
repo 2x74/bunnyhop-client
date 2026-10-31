@@ -51,6 +51,7 @@ int main(int argc, char **argv) {
         SDL_GL_MakeCurrent(w, ctx);
         native::Gl gl;
         gl.load();
+        native::gfx::Context graphics(gl);
         realUpload = gl.TexImage2D;
         gl.TexImage2D = trackUpload;
         realUpdate = gl.TexSubImage2D;
@@ -73,7 +74,7 @@ int main(int argc, char **argv) {
             gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
             models.draw_actor(actor, vp, eye, time);
             if (poseBones != bones) throw std::runtime_error(name + " incorrect rig: " + std::to_string(poseBones));
-            auto png = backbuffer_png(gl, 768, 600, 2000000);
+            auto png = native::target_png(graphics, graphics.current_target(), 768, 600, 2000000);
             if (png.size() < 1000) throw std::runtime_error("Blank/duplicate runner capture: " + name);
             if (gl.GetError() != GL_NO_ERROR) throw std::runtime_error("Runner GL error");
             std::ofstream(std::filesystem::path(argv[2]) / (name + ".png")) << png;
