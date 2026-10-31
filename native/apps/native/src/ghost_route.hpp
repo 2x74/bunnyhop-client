@@ -110,6 +110,7 @@ uniform vec4 tint;out vec4 color;void main(){color=tint;}
     ~GhostRouteGeometry() {
         for (auto &mesh : meshes)
             context.destroy(mesh.geometry);
+        context.destroy(constants);
         context.destroy(pipeline);
         context.destroy(program);
     }

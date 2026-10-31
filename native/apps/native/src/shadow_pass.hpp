@@ -2,13 +2,15 @@
 
 class ShadowPass {
     Gl &gl;
+    gfx::Context &context;
     RenderResources &resources;
     RenderUniforms &uniforms;
     WorldPass &world;
 
 public:
-    ShadowPass(Gl &g, RenderResources &r, RenderUniforms &u, WorldPass &w)
+    ShadowPass(Gl &g, gfx::Context &ctx, RenderResources &r, RenderUniforms &u, WorldPass &w)
         : gl(g)
+        , context(ctx)
         , resources(r)
         , uniforms(u)
         , world(w) {}
@@ -186,8 +188,7 @@ public:
         gl.Uniform1f(uniforms.loc(world.program, "sunShadowTexel"), 1.f / float(size));
         gl.Uniform1f(uniforms.loc(world.program, "sunShadowRadius"), size <= 512 ? 1.f : 2.f);
         gl.Uniform1f(uniforms.loc(world.program, "sunShadowBias"), shadow_bias);
-        gl.ActiveTexture(GL_TEXTURE0 + sun_shadow_unit);
-        gl.BindTexture(GL_TEXTURE_2D, sunShadows->texture());
+        sunShadows->bind(sun_shadow_unit);
         gl.ActiveTexture(GL_TEXTURE0);
     }
 
@@ -196,7 +197,7 @@ public:
     }
 
     void prepare_resources() {
-        sunShadows = std::make_unique<SunShadowMap>(gl);
+        sunShadows = std::make_unique<SunShadowMap>(context);
         cutoutDepthProgram = link_program(gl, native_render::cutout_depth_vertex, native_render::cutout_depth_fragment);
         gl.UseProgram(world.program);
         gl.Uniform1i(uniforms.loc(world.program, "sunShadowMap"), sun_shadow_unit);

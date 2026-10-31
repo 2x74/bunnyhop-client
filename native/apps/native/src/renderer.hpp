@@ -81,7 +81,7 @@ class Renderer {
     WaterPass water{gl, uniforms, core};
     WorldPass world{gl, core, resources, uniforms, profile};
     SkyPass sky{gl, core, resources, uniforms};
-    ShadowPass shadows{gl, resources, uniforms, world};
+    ShadowPass shadows{gl, graphicsContext, resources, uniforms, world};
     PresentationPass presentationPass{gl, graphicsContext, core, profile};
     bool flashlightEnabled = false;
     float fieldOfView = 90;
