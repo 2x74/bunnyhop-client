@@ -442,7 +442,10 @@ public:
         }
     }
 
-    explicit EnhancedLook(native::gfx::Context &graphics) : EnhancedLook(graphics, graphics.max_samples()) {}
+    explicit EnhancedLook(native::gfx::Context &graphics)
+        : EnhancedLook(
+                  graphics, graphics.max_samples(native::gfx::Format::rgba16f, native::gfx::Format::depth24_stencil8)
+          ) {}
 
     ~EnhancedLook() { release(); }
 

@@ -248,7 +248,11 @@ public:
     }
 
     explicit SourceHdr(native::gfx::Context &graphics)
-        : SourceHdr(graphics, graphics.max_samples(), graphics.current_target()) {}
+        : SourceHdr(
+                  graphics,
+                  graphics.max_samples(native::gfx::Format::rgba16f, native::gfx::Format::depth24_stencil8),
+                  graphics.current_target()
+          ) {}
 
     ~SourceHdr() { release(); }
 
