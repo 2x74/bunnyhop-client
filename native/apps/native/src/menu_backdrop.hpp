@@ -63,16 +63,24 @@ inline BackdropMap load_backdrop_map(const std::filesystem::path &bsp, const std
     return out;
 }
 
-// The current back buffer as a small PNG: box-filtered to fit 960x540, halved
-// again until its data URI fits `max_uri_bytes`. Read before SwapWindow.
-inline std::string backbuffer_png(native::Gl &gl, int width, int height, size_t max_uri_bytes = 2000000) {
+// A target as a small PNG: box-filtered to fit 960x540, halved until its data URI fits `max_uri_bytes`.
+inline std::string target_png(
+        gfx::Context &context, const gfx::TargetView &target, int width, int height, size_t max_uri_bytes = 2000000
+) {
     if (width <= 0 || height <= 0) return {};
-    std::vector<unsigned char> pixels(size_t(width) * height * 3);
-    int alignment = 4;
-    gl.GetIntegerv(GL_PACK_ALIGNMENT, &alignment);
-    gl.PixelStorei(GL_PACK_ALIGNMENT, 1);
-    gl.ReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
-    gl.PixelStorei(GL_PACK_ALIGNMENT, alignment);
+    auto readback = context.create_readback(width, height);
+
+    struct Release {
+        gfx::Context &context;
+        gfx::Readback &readback;
+
+        ~Release() { context.destroy(readback); }
+    } release{context, readback};
+
+    std::vector<unsigned char> pixels(size_t(width) * height * 4);
+    constexpr uint64_t readback_timeout_ns = 5'000'000'000;
+    context.enqueue_readback(target, readback);
+    context.collect(readback, std::as_writable_bytes(std::span(pixels)), gfx::RowOrigin::bottom, readback_timeout_ns);
     double scale = std::min({1.0, 960.0 / width, 540.0 / height});
     for (;;) {
         const int w = std::max(1, int(width * scale)), h = std::max(1, int(height * scale));
@@ -87,7 +95,7 @@ inline std::string backbuffer_png(native::Gl &gl, int width, int height, size_t 
                 for (int sy = y0; sy < y1 && sy < height; ++sy)
                     for (int sx = x0; sx < x1 && sx < width; ++sx, ++n)
                         for (int k = 0; k < 3; ++k)
-                            sum[k] += pixels[(size_t(sy) * width + sx) * 3 + k];
+                            sum[k] += pixels[(size_t(sy) * width + sx) * 4 + k];
                 for (int k = 0; k < 3; ++k)
                     rows[size_t(y) * (w * 3 + 1) + 1 + x * 3 + k] = (unsigned char)(n ? sum[k] / n : 0);
             }
@@ -122,6 +130,26 @@ inline std::string backbuffer_png(native::Gl &gl, int width, int height, size_t 
         if (w <= 160) throw std::runtime_error("Backdrop PNG exceeds its size limit");
         scale *= .5;
     }
+}
+
+// Temporary bridge: legacy screenshot callers supply their current GL target and expect pack-state restoration.
+inline std::string backbuffer_png(native::Gl &gl, int width, int height, size_t max_uri_bytes = 2000000) {
+    if (width <= 0 || height <= 0) return {};
+    GLint framebuffer = 0, alignment = 4;
+    gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &framebuffer);
+    gl.GetIntegerv(GL_PACK_ALIGNMENT, &alignment);
+
+    struct RestorePack {
+        native::Gl &gl;
+        GLint alignment;
+
+        ~RestorePack() { gl.PixelStorei(GL_PACK_ALIGNMENT, alignment); }
+    } restore{gl, alignment};
+
+    gfx::Context context(gl);
+    return target_png(
+            context, context.borrow_target(unsigned(framebuffer), {width, height}), width, height, max_uri_bytes
+    );
 }
 
 class MenuBackdrop {
@@ -374,6 +402,7 @@ private:
         std::future<native::DownloadedMap> result;
     };
 
+    // Temporary bridge: Renderer still constructs from the legacy GL table.
     native::Gl &gl;
     native::GraphicsSettings graphics_;
     nlohmann::json settings_ = nlohmann::json::object();

@@ -1,12 +1,13 @@
 #pragma once
 #include "graphics_settings.hpp"
+#include "gfx_types.hpp"
 #include <SDL3/SDL.h>
 
 namespace native {
 
 // Where the HUD lays out. With Graphics → Aspect ratio and black bars, the HUD, crosshair and chat stay inside the
 // picture between the bars, as a 4:3 game shows them on a 16:9 monitor; otherwise they use the whole window.
-// `top` counts from the window's top, as the HUD does; GL viewports count from the bottom.
+// `top` counts from the window's top, as the HUD does; graphics viewports count from the bottom.
 struct HudArea {
     int x = 0;
     int top = 0;
@@ -36,20 +37,23 @@ inline SDL_Event hud_area_event(SDL_Event event, const HudArea &area, float pixe
 }
 
 // Draws into the HUD's area for its lifetime and gives the whole window back afterwards.
-template <class Gl>
+template <class Context>
 class HudViewport {
 public:
-    HudViewport(Gl &gl, const HudArea &area, int width, int height) : gl_(gl), width_(width), height_(height) {
-        gl_.Viewport(area.x, area.bottom(height), area.width, area.height);
+    HudViewport(Context &context, const HudArea &area, int width, int height)
+        : context_(context)
+        , width_(width)
+        , height_(height) {
+        context_.viewport({area.x, area.bottom(height), area.width, area.height});
     }
 
-    ~HudViewport() { gl_.Viewport(0, 0, width_, height_); }
+    ~HudViewport() { context_.viewport({0, 0, width_, height_}); }
 
     HudViewport(const HudViewport &) = delete;
     HudViewport &operator=(const HudViewport &) = delete;
 
 private:
-    Gl &gl_;
+    Context &context_;
     int width_;
     int height_;
 };

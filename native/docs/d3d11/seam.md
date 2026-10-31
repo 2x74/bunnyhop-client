@@ -101,7 +101,7 @@ new vertex formats or independent stencil/blend modes should be added when a mig
 
 `ProgramDesc` identifies a program and permutation with `ProgramKey`, plus an OpenGL source fallback.
 The D3D11 backend must look up ahead-of-time DXBC/reflection by that key, including the manifest's aliases;
-it never runs FXC while rendering. Fixed migrated keys are `presentation` and `video`, with empty permutation.
+it never runs FXC while rendering. Fixed migrated keys are `hud`, `presentation` and `video`, with empty permutation.
 The shader inventory has 135 cache entries / 105 distinct pairs; player keys include material, finish, glove and
 detail flags as defined by its manifest.
 
@@ -171,8 +171,18 @@ resources. `startup.cpp` and `window_sdl.hpp` now share `gfx_window.hpp`; the ev
 `video_frames.hpp` uses the seam for targets, shaders, named constants, samplers, geometry, accumulation draws,
 readback rings and fences. Its public dimensions and bottom-row-first video contract are unchanged.
 `native_presentation.hpp` uses it for streaming effect/paint geometry, constants, pipeline state and draws.
-Both constructors borrow `gfx::Context` directly. The legacy renderer owns the temporary OpenGL adapter and
-shares it with presentation and video capture.
+`hud.hpp` borrows the context for atlas/raster textures, named constants, a UI pipeline and one streamed
+vertex buffer per flush. Texture-owner addresses identify batches without inspecting backend handles; numeric
+text keeps its warmed digit cache. `hud_area.hpp` uses seam viewports; `hud_text.hpp` has no graphics calls.
+`frame_pacing.hpp` uses standalone fences with the existing 100 ms bounded wait, which maps to D3D11 event
+queries. Avatar readback is enqueued once and polled on later frames, with a five-second failure deadline;
+a separate submission fence supplies the flush option absent from `poll(Readback)`.
+`target_png` takes an explicit target and collects seam readback while retaining the original PNG filtering.
+Temporary bridges remain for legacy screenshot callers' read target/pack state, the avatar caller's current
+target/viewport, and construction of the backdrop renderer and avatar viewmodel from the GL table.
+Those hosts must pass explicit target views/rectangles and the shared context when their renderers migrate.
+Presentation, video, HUD and avatar service constructors borrow `gfx::Context` directly. The legacy
+renderer owns the temporary OpenGL adapter shared with presentation and video capture.
 `shader()` is a temporary native-handle bridge for `renderer.hpp`'s existing shared water uniforms; remove it
 when water constants move to reflected blocks. `Renderer(Gl&)` remains during the remaining migration.
 

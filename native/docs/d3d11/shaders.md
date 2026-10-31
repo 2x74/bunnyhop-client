@@ -39,7 +39,7 @@ A program compile or reflection failure leaves a report and returns nonzero. Set
 
 ## Inventory
 
-There are 19 production GLSL creation sites: 17 legacy `link_program` calls and two seam `create_program`
+There are 19 production GLSL creation sites: 16 legacy `link_program` calls and three seam `create_program`
 descriptors, covering 18 fixed programs and one lazy player factory across 22 material/pass families.
 `sun_shadows.hpp` and `water_*.hpp` use the world/depth programs rather than compiling additional shaders.
 The extractor checks all native C++ source files and fails if a GLSL creation site is added or removed.
@@ -195,7 +195,7 @@ several pairs: the native player binds `uFinEnv`, `uCosEnv` and `uPlayerEnv` to 
 same cube and sampler to every reflected pair. `spirv.textures` describes declared bindings, while
 `dxbc.resources` identifies bindings surviving optimization.
 
-The seam's fixed `ProgramKey` values are `presentation` and `video`, both with empty permutation keys.
+The seam's fixed `ProgramKey` values are `hud`, `presentation` and `video`, all with empty permutation keys.
 Their OpenGL fallback sources are still evaluated by the extractor. Backend dispatch helpers and smoke-only
 programs are excluded from the production inventory; all 135 cache entries still extract to 105 distinct pairs.
 

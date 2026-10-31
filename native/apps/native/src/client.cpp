@@ -170,7 +170,8 @@ int run(const native::Options &opt) {
     auto &window = window_and_gl.window;
     native::Gl gl;
     gl.load();
-    native::FramePacer<native::Gl> frame_pacer;
+    native::gfx::Context graphics(gl);
+    native::FramePacer<native::gfx::Context> frame_pacer;
     // Feedback context (the menu's "Attach game info"): the GPU the game draws with, not the menu web view's.
     const std::string gpu_renderer = [&] {
         const auto *name = gl.GetString(GL_RENDERER);
@@ -180,14 +181,14 @@ int run(const native::Options &opt) {
     const auto menu_path = opt.menu_html == BUNNYHOP_MENU_HTML ? native::resource("menu.html", opt.menu_html)
                                                                : native::data_location::from_utf8(opt.menu_html);
     const auto manifest_path = native::resource("native-manifest.json", BUNNYHOP_NATIVE_MANIFEST);
-    native::NativeHud hud(gl, assets);
+    native::NativeHud hud(graphics, assets);
     native::HudLayoutEditor hud_editor;
     native::HudDemoState hud_demo;
     std::vector<std::string> hud_editor_bind;
     native::MenuGamepad menu_gamepad;
     std::unique_ptr<NativeLoadoutPreview> loadout_preview;
     std::optional<nlohmann::json> preview_request;
-    native::avatar::AvatarService avatar_service(gl, assets);
+    native::avatar::AvatarService avatar_service(graphics, gl, assets);
     native::NativeHud::Layout hud_layout;
     // Resolved before the audio device so the custom sound/ and bgm/ folders
     // are known at the point the packs are first applied.
@@ -3694,7 +3695,7 @@ int run(const native::Options &opt) {
                     height,
                     SDL_GetWindowPixelDensity(window.get())
             );
-            native::HudViewport hud_viewport(gl, area, width, height);
+            native::HudViewport hud_viewport(graphics, area, width, height);
             native::HudFrame{
                     core.get(),
                     hud,
@@ -3840,7 +3841,7 @@ int run(const native::Options &opt) {
         else if (!SDL_GL_SwapWindow(window.get()))
             throw std::runtime_error(std::string("Swapping framebuffer failed: ") + SDL_GetError());
         frame_diagnostics.mark(native::FrameDiagnostics::kSwap, SDL_GetTicksNS());
-        frame_pacer.after_swap(gl, prefs.limit_queued_frames && !opt.frames);
+        frame_pacer.after_swap(graphics, prefs.limit_queued_frames && !opt.frames);
         frame_diagnostics.mark(native::FrameDiagnostics::kGpuWait, SDL_GetTicksNS());
         sky_library.frame(menu && menu->visible());
         if (renderer) renderer->use_sky(sky_library.current_id(), sky_library.current());
@@ -4135,7 +4136,7 @@ int run(const native::Options &opt) {
     if (!opt.frames && opt.runtime_smoke.empty()) {
         run_history.persist(json_writer, cache, activity, double(SDL_GetTicksNS()) / run_second_ns, true);
     }
-    frame_pacer.release(gl);
+    frame_pacer.release(graphics);
     if (core) bh_record_end(core.get());
     capture(false);
     std::cout << "Rendered " << frame << " frames; simulation tick " << curr.tick << "; position " << curr.position[0]
