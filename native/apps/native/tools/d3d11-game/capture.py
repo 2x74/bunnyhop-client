@@ -33,7 +33,7 @@ def capture(fixtures, output, renderer):
         ]
         if case["binary"] == "client":
             command[0] = str(NATIVE / "apps/native/build" / ("bunnyhop-native" + suffix))
-            command += ["--renderer", renderer]
+            command += ["--renderer", renderer, "--render-fixture", str(output / "client-fixture")]
             if renderer == "d3d11":
                 command += ["--d3d11-warp"]
         log = output / (case["name"] + ".log")

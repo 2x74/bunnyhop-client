@@ -15,7 +15,11 @@ Options options(int argc, char **argv) {
             if (++i >= argc) throw std::runtime_error("Missing value for " + arg);
             return argv[i];
         };
-        if (arg == "--renderer") {
+        if (arg == "--render-fixture") {
+            out.render_fixture = value();
+            out.hidden = true;
+            out.no_menu = true;
+        } else if (arg == "--renderer") {
             out.renderer = value();
             if (*out.renderer != "opengl" && *out.renderer != "d3d11")
                 throw std::runtime_error("--renderer must be opengl or d3d11");
@@ -108,6 +112,8 @@ Options options(int argc, char **argv) {
         throw std::runtime_error("Unknown tutorial lesson");
     if (!native::styles.contains(out.style)) throw std::runtime_error("Unknown movement style");
     if (!out.screenshot.empty() && !out.frames) out.frames = 1;
+    if (!out.render_fixture.empty() && !out.frames)
+        throw std::runtime_error("Render fixtures require --frames or --screenshot");
     if (!out.map.empty() && !out.online_map.empty()) throw std::runtime_error("Choose --map or --online-map");
     if (!out.online_map.empty() && !native::valid_map_id(out.online_map))
         throw std::runtime_error("Invalid online map name");
@@ -125,6 +131,7 @@ void print_help(std::ostream &output) {
               "[--sensitivity 2] [--renderer opengl|d3d11]\n"
               "  [--menu-html PATH] [--no-menu] [--windowed] [--legacy-input] [--frames N] [--screenshot "
               "output.ppm] [--camera x,y,z,pitch,yaw] [--hidden]\n"
+              "  [--render-fixture OUTPUT_DIR] (isolated settings and 1280x720 pixels with --map and --frames)\n"
               "  [--runtime-smoke OUTPUT_DIR --replay PATH] (offline lifecycle checks with --map; private "
               "data, no network)\n"
               "  [--room-smoke DIR] (with --map: replays DIR/room.jsonl, saves the frames in DIR/shots.json)\n"

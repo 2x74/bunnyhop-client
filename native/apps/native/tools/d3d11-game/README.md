@@ -2,7 +2,8 @@
 
 The `ci/d3d11-windows` workflow builds the actual client and renders the frozen golden suite through WARP,
 including reflections, mirrored hands, display/HUD shapes, avatar editor pictures, loadout previews and a
-hidden frame-counted client on a real BSP. The separate video export process still selects OpenGL.
+hidden frame-counted client on a real BSP. Its explicit `--render-fixture` mode fixes physical dimensions and
+uses private settings, avoiding Retina scaling and saved player preferences. The separate video export process still selects OpenGL.
 
 Prepare inputs on the OpenGL reference machine, using the frozen suite described in
 [seam.md](../../../../docs/d3d11/seam.md):

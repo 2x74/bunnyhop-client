@@ -36,7 +36,9 @@ void GlContextDeleter::operator()(SDL_GLContext context) const {
 
 WindowAndGl create_window_and_gl(const Options &opt, gfx::Backend backend) {
     gfx::configure_window(backend);
-    SDL_WindowFlags flags = gfx::window_flags(backend) | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    SDL_WindowFlags flags = gfx::window_flags(backend) | SDL_WINDOW_RESIZABLE;
+    // Golden captures use physical pixels and private settings across Retina and standard-density displays.
+    if (opt.render_fixture.empty()) flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
     if (opt.hidden) flags |= SDL_WINDOW_HIDDEN;
     WindowPtr window(SDL_CreateWindow(native::app_name, 1280, 720, flags), &SDL_DestroyWindow);
     if (!window) throw std::runtime_error(std::string("Creating SDL window failed: ") + SDL_GetError());
@@ -80,7 +82,8 @@ void open_log_in_default_folder() {
 DataPaths resolve_data_folder(const Options &opt, SDL_Window *, DataMoveProgress &display) {
     char *pref_path = SDL_GetPrefPath("bunnyhop.lol", "Bunnyhop Native");
     if (!pref_path) throw std::runtime_error("Cannot find the native client data directory");
-    const std::string isolated = !opt.runtime_smoke.empty()        ? opt.runtime_smoke
+    const std::string isolated = !opt.render_fixture.empty()       ? opt.render_fixture
+                                 : !opt.runtime_smoke.empty()      ? opt.runtime_smoke
                                  : !opt.presentation_smoke.empty() ? opt.presentation_smoke
                                  : !opt.video_smoke.empty()        ? opt.video_smoke
                                                                    : opt.menu_smoke;
