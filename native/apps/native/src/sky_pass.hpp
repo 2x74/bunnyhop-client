@@ -1,25 +1,20 @@
 #pragma once
 
 class SkyPass {
-    Gl &gl;
     gfx::Context &context;
     BhContext *&core;
     RenderResources &resources;
-    RenderUniforms &uniforms;
 
 public:
-    SkyPass(Gl &g, gfx::Context &ctx, BhContext *&c, RenderResources &r, RenderUniforms &u)
-        : gl(g)
-        , context(ctx)
-        , core(c)
-        , resources(r)
-        , uniforms(u) {}
+    SkyPass(gfx::Context &ctx, BhContext *&c, RenderResources &r) : context(ctx), core(c), resources(r) {}
 
     RenderGeometry skyMesh;
     std::array<gfx::Pipeline, 2> depthPipelines, depthEndPipelines;
-    GLuint skyProgram = 0;
+    gfx::Program skyProgram;
+    gfx::ConstantBinding skyConstants, waterConstants;
+    std::array<gfx::Pipeline, 2> backdropPipelines;
     float frameSkyYaw = 0;
-    static constexpr GLint sky_panorama_unit = 10;
+    static constexpr unsigned sky_panorama_unit = 10;
     std::vector<BhGroup> skyGroups;
     std::array<int32_t, 6> skyMaterials{-1, -1, -1, -1, -1, -1};
     BhSkyInfo skyInfo{};
@@ -29,6 +24,21 @@ public:
     gfx::Sampler panoramaSampler;
     std::string skyPanoramaId;
     native::SkyPicture skyPanoramaInfo;
+
+    struct SkyValues {
+        std::array<float, 3> forward{};
+        std::array<float, 3> right{};
+        std::array<float, 3> up{};
+        float skyExposure = 0;
+        float aspect = 0;
+        float cot = 0;
+        std::array<int32_t, 6> skyPresent{};
+        std::array<int32_t, 6> skyHalf{};
+        std::array<float, 3> proceduralSun{};
+        uint32_t panoramaShown = 0;
+        float panoramaYaw = 0;
+        float panoramaExposure = 0;
+    } values;
 
     struct View {
         const native::GraphicsSettings &graphics;
@@ -40,6 +50,11 @@ public:
     };
 
     ~SkyPass() {
+        context.destroy(skyConstants);
+        context.destroy(waterConstants);
+        context.destroy(skyProgram);
+        for (auto &pipeline : backdropPipelines)
+            context.destroy(pipeline);
         context.destroy(skyPanorama);
         context.destroy(panoramaSampler);
         for (auto &pipeline : depthPipelines)
@@ -97,17 +112,15 @@ public:
         static constexpr std::array<float, 3> default_sun{.45f, .6f, .35f};
         const auto sun = view.hasSun ? view.sunDirection : default_sun;
         const float length = std::hypot(std::hypot(sun[0], sun[1]), sun[2]);
-        gl.Uniform3f(uniforms.loc(skyProgram, "proceduralSun"), sun[0] / length, sun[1] / length, sun[2] / length);
+        values.proceduralSun = {sun[0] / length, sun[1] / length, sun[2] / length};
         const bool shown = panorama_drawn(view.graphics);
-        gl.Uniform1i(uniforms.loc(skyProgram, "panoramaShown"), shown);
-        gl.Uniform1f(uniforms.loc(skyProgram, "panoramaYaw"), frameSkyYaw);
-        gl.Uniform1f(uniforms.loc(skyProgram, "panoramaExposure"), skyPanoramaInfo.exposure);
+        values.panoramaShown = shown;
+        values.panoramaYaw = frameSkyYaw;
+        values.panoramaExposure = skyPanoramaInfo.exposure;
         if (shown)
             context.bind_texture(sky_panorama_unit, skyPanorama, panoramaSampler);
         else
             resources.bind(sky_panorama_unit, resources.white);
-        gl.Uniform1i(uniforms.loc(skyProgram, "panorama"), sky_panorama_unit);
-        gl.ActiveTexture(GL_TEXTURE0);
     }
 
     // The 2D skybox, or the procedural sky, behind everything. mirrored: as the water reflection sees it.
@@ -120,26 +133,21 @@ public:
             WaterPass &water,
             std::span<const BhMaterial> materials
     ) {
-        static constexpr const char *face_uniforms[6] = {"sky0", "sky1", "sky2", "sky3", "sky4", "sky5"};
-        gl.Disable(GL_BLEND);
-        gl.Disable(GL_CULL_FACE);
-        gl.Disable(GL_DEPTH_TEST);
-        gl.DepthMask(GL_FALSE);
-        gl.UseProgram(skyProgram);
+        context.pipeline(backdropPipelines[unsigned(mirrored)]);
+        context.bind_program(skyProgram);
         context.bind_geometry(resources.emptyGeometry);
-        water.water_uniforms(skyProgram, eye, vp, view.viewportWidth, view.viewportHeight);
+        water.water_uniforms(waterConstants, eye, vp, view.viewportWidth, view.viewportHeight);
         const float cy = std::cos(view.lastYaw * native::radians), sy = std::sin(view.lastYaw * native::radians),
                     cp = std::cos(view.lastPitch * native::radians), sp = std::sin(view.lastPitch * native::radians);
         const float flip = mirrored ? -1.f : 1.f;
-        gl.Uniform3f(uniforms.loc(skyProgram, "forward"), cp * cy, cp * sy, -sp * flip);
-        gl.Uniform3f(uniforms.loc(skyProgram, "right"), sy, -cy, 0);
-        gl.Uniform3f(uniforms.loc(skyProgram, "up"), sp * cy, sp * sy, cp * flip);
-        gl.Uniform1f(uniforms.loc(skyProgram, "skyExposure"), view.graphics.sky_exposure);
-        gl.Uniform1f(uniforms.loc(skyProgram, "aspect"), aspect);
-        gl.Uniform1f(
-                uniforms.loc(skyProgram, "cot"), (4.f / 3.f) / std::tan(float(view.fieldOfView * native::radians * .5))
-        );
-        GLint present[6]{}, half[6]{};
+        values.forward = {cp * cy, cp * sy, -sp * flip};
+        values.right = {sy, -cy, 0};
+        values.up = {sp * cy, sp * sy, cp * flip};
+        values.skyExposure = view.graphics.sky_exposure;
+        values.aspect = aspect;
+        values.cot = (4.f / 3.f) / std::tan(float(view.fieldOfView * native::radians * .5));
+        values.skyPresent.fill(0);
+        values.skyHalf.fill(0);
         // Procedural daylight (Enhanced and Cinematic) draws the fallback sky in place of the map's faces.
         const bool procedural =
                 view.graphics.look.composer() && view.graphics.look.sky_mode == native::SkyMode::procedural;
@@ -150,21 +158,17 @@ public:
                 const auto t = materials[m].texture;
                 if (t >= 0 && resources.texture(t) != resources.checker) {
                     id = resources.texture(t);
-                    present[i] = 1;
+                    values.skyPresent[i] = 1;
                     const auto wh = resources.textureSizes[t];
-                    half[i] = i < 4 && wh.first == wh.second * 2;
+                    values.skyHalf[i] = i < 4 && wh.first == wh.second * 2;
                 }
             }
             resources.bind(unsigned(i), id, false);
-            gl.Uniform1i(uniforms.loc(skyProgram, face_uniforms[i]), i);
         }
-        gl.Uniform1iv(uniforms.loc(skyProgram, "skyPresent"), 6, present);
-        gl.Uniform1iv(uniforms.loc(skyProgram, "skyHalf"), 6, half);
         sky_panorama_uniforms(view);
-        if (!view.graphics.potato) gl.DrawArrays(GL_TRIANGLES, 0, 3);
-        gl.Enable(GL_DEPTH_TEST);
-        gl.DepthMask(GL_TRUE);
-        gl.DepthFunc(GL_LEQUAL);
+        context.constants(skyConstants, &values);
+        if (!view.graphics.potato) context.draw(gfx::Primitive::triangles, 0, 3);
+        context.pipeline(depthEndPipelines[unsigned(mirrored)]);
     }
 
     // The 3D skybox (sky_camera) around its origin. mirror_height: the water reflection's plane in world units.
@@ -190,7 +194,7 @@ public:
             clipHeight = skyHeight;
         }
         drawScene(vp, skyEye, seconds, mirror_height.has_value());
-        gl.Clear(GL_DEPTH_BUFFER_BIT);
+        context.clear_depth();
     }
 
     // Sky brushes write only depth so the world behind them stays hidden as in Source.
@@ -233,8 +237,39 @@ public:
         }
     }
 
-    void prepare_program() {
+    void prepare_constants() {
+        static constexpr gfx::ConstantField fields[] = {
+                {"forward", offsetof(SkyValues, forward), 12, gfx::ConstantType::float3, 1},
+                {"right", offsetof(SkyValues, right), 12, gfx::ConstantType::float3, 1},
+                {"up", offsetof(SkyValues, up), 12, gfx::ConstantType::float3, 1},
+                {"skyExposure", offsetof(SkyValues, skyExposure), 4, gfx::ConstantType::float1, 1},
+                {"aspect", offsetof(SkyValues, aspect), 4, gfx::ConstantType::float1, 1},
+                {"cot", offsetof(SkyValues, cot), 4, gfx::ConstantType::float1, 1},
+                {"skyPresent", offsetof(SkyValues, skyPresent), 24, gfx::ConstantType::int1, 6},
+                {"skyHalf", offsetof(SkyValues, skyHalf), 24, gfx::ConstantType::int1, 6},
+                {"proceduralSun", offsetof(SkyValues, proceduralSun), 12, gfx::ConstantType::float3, 1},
+                {"panoramaShown", offsetof(SkyValues, panoramaShown), 4, gfx::ConstantType::bool32, 1},
+                {"panoramaYaw", offsetof(SkyValues, panoramaYaw), 4, gfx::ConstantType::float1, 1},
+                {"panoramaExposure", offsetof(SkyValues, panoramaExposure), 4, gfx::ConstantType::float1, 1},
+        };
+        skyConstants = context.create_constants(skyProgram, {fields, sizeof(SkyValues)});
+    }
+
+    void prepare_program(WaterPass &water) {
         prepare_depth_pipelines();
-        skyProgram = link_program(gl, native_render::sky_vertex, native_render::sky_fragment().c_str());
+        skyProgram =
+                context.create_program({{"sky", ""}, native_render::sky_vertex, native_render::sky_fragment().c_str()});
+        prepare_constants();
+        waterConstants = water.water_constants(skyProgram);
+        static constexpr const char *faces[] = {"sky0", "sky1", "sky2", "sky3", "sky4", "sky5"};
+        for (unsigned i = 0; i < std::size(faces); ++i)
+            context.texture_unit(skyProgram, faces[i], i);
+        context.texture_unit(skyProgram, "panorama", sky_panorama_unit);
+        for (unsigned mirror = 0; mirror < backdropPipelines.size(); ++mirror) {
+            gfx::PipelineState state;
+            state.depth = {false, false};
+            state.raster.winding = mirror ? gfx::Winding::clockwise : gfx::Winding::counter_clockwise;
+            backdropPipelines[mirror] = context.create_pipeline(state);
+        }
     }
 };

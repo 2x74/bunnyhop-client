@@ -80,7 +80,7 @@ class Renderer {
     RenderResources resources{graphicsContext, core};
     WaterPass water{gl, graphicsContext, uniforms, core};
     WorldPass world{graphicsContext, core, resources, profile};
-    SkyPass sky{gl, graphicsContext, core, resources, uniforms};
+    SkyPass sky{graphicsContext, core, resources};
     ShadowPass shadows{graphicsContext, resources, world};
     PresentationPass presentationPass{graphicsContext, core, profile};
     bool flashlightEnabled = false;
@@ -443,7 +443,7 @@ public:
         presentationPass.measureLabel.reserve(100);
         world.prepare_program(water);
         co_yield "world shader";
-        sky.prepare_program();
+        sky.prepare_program(water);
         shadows.prepare_depth_program();
         co_yield "sky shader";
         auto scene = prepare_scene();
@@ -487,7 +487,6 @@ public:
         resources.release();
         graphicsContext.destroy(water.planesTexture);
         graphicsContext.destroy(water.planesSampler);
-        if (sky.skyProgram) gl.DeleteProgram(sky.skyProgram);
     }
 
     // A replay watched in the runner's view: their shape and fit over the viewer's own graphics settings.
