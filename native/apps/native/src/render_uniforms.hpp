@@ -1,5 +1,7 @@
 #pragma once
 
+inline constexpr float render_no_clip_height = -1e30f;
+
 class RenderUniforms {
     Gl &gl;
 

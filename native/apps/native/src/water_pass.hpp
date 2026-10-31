@@ -254,7 +254,7 @@ public:
         gl.Disable(GL_CLIP_DISTANCE0);
         drawActors(mirroredEye);
         gl.FrontFace(GL_CCW);
-        clipHeight = -1e30f;
+        clipHeight = render_no_clip_height;
         viewportWidth = width;
         viewportHeight = height;
         gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, GLuint(drawTarget));

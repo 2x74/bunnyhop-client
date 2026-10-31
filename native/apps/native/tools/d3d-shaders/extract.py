@@ -21,7 +21,7 @@ NAMES = {
     "ghost_route.hpp": ["ghost-route"],
     "world_pass.hpp": ["world"],
     "sky_pass.hpp": ["sky"],
-    "renderer.hpp": ["depth", "cutout-depth"],
+    "shadow_pass.hpp": ["depth", "cutout-depth"],
     "native_viewmodel.hpp": ["player"],
 }
 
