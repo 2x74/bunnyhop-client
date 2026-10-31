@@ -20,7 +20,8 @@ NAMES = {
     "source_hdr.hpp": ["hdr-downsample", "hdr-blur", "hdr-composite", "hdr-luminance", "graphics-target"],
     "ghost_route.hpp": ["ghost-route"],
     "world_pass.hpp": ["world"],
-    "renderer.hpp": ["sky", "depth", "cutout-depth"],
+    "sky_pass.hpp": ["sky"],
+    "renderer.hpp": ["depth", "cutout-depth"],
     "native_viewmodel.hpp": ["player"],
 }
 
