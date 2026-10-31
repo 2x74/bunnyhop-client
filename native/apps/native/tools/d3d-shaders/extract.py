@@ -22,7 +22,7 @@ NAMES = {
     "world_pass.hpp": ["world"],
     "sky_pass.hpp": ["sky"],
     "shadow_pass.hpp": ["depth", "cutout-depth"],
-    "native_viewmodel.hpp": ["player"],
+    "native_viewmodel_gpu.hpp": ["player"],
 }
 
 
