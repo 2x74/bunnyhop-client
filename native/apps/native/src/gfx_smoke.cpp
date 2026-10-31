@@ -178,6 +178,7 @@ void main(){color=enabled?tint:vec4(0);})";
     require(read(context, target, RowOrigin::bottom) == bottom, "Indexed instancing changed pixels");
     context.destroy(target);
     context.destroy(geometry);
+    context.destroy(binding);
     context.destroy(program);
     context.destroy(pipeline);
     save("instancing", bottom, width, height);
@@ -219,9 +220,11 @@ color=(texture(uFinEnv,d)+texture(uCosEnv,d)+texture(uPlayerEnv,d))/3.*fromVerte
     }
     auto cube = context.create_texture({4, 4, Format::rgba8, TextureKind::cube}, pointers);
     std::array<float, 24> bones{};
-    bones[20] = 1;
+
     const void *bone_face[] = {bones.data()};
     auto bone_texture = context.create_texture({3, 2, Format::rgba32f}, bone_face);
+    const std::array<float, 4> bone = {1, 0, 0, 1};
+    context.update_texture(bone_texture, {2, 1, 1, 1}, bone.data());
     auto sampler = context.create_sampler({Filter::nearest, Filter::nearest});
     auto geometry = context.create_geometry(0, {});
     auto target = context.create_target({width, height});

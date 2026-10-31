@@ -139,7 +139,10 @@ struct ConstantCopy {
     bool boolean;
 };
 
+struct ProgramData;
+
 struct ConstantsData {
+    ProgramData *owner = nullptr;
     std::vector<ConstantCopy> copies;
 };
 
@@ -211,6 +214,7 @@ struct D3D11Context::Impl {
 
     std::array<Unit, 32> units{};
     TargetView target;
+    Rect viewport;
     ID3D11RenderTargetView *rtv = nullptr;
     ID3D11DepthStencilView *dsv = nullptr;
     ComPtr<ID3D11Resource> color_resource, depth_resource;
@@ -630,6 +634,7 @@ void D3D11Context::bind_program(Program program) {
 ConstantBinding D3D11Context::create_constants(Program program, const ConstantLayout &layout) {
     auto *value = native<ProgramData>(program.id);
     auto result = std::make_unique<ConstantsData>();
+    result->owner = value;
     for (const auto &field : layout.fields) {
         const uint32_t size = constant_size(field.type), stride = field.array_stride ? field.array_stride : size;
         if (!field.name || !field.count || stride < size || stride % 4 || field.offset % 4
@@ -659,6 +664,12 @@ ConstantBinding D3D11Context::create_constants(Program program, const ConstantLa
     binding.byte_size = layout.byte_size;
     value->constants.push_back(std::move(result));
     return binding;
+}
+
+void D3D11Context::destroy(ConstantBinding &binding) {
+    if (auto *value = native<ConstantsData>(binding.id))
+        std::erase_if(value->owner->constants, [&](const auto &owned) { return owned.get() == value; });
+    binding = {};
 }
 
 void D3D11Context::constants(const ConstantBinding &binding, const void *bytes) {
@@ -790,6 +801,22 @@ Texture D3D11Context::create_texture(const TextureDesc &desc, std::span<const vo
     return {handle(result.release()), desc};
 }
 
+void D3D11Context::update_texture(Texture texture, Rect region, const void *pixels) {
+    const auto format = pixel_format(texture.desc.format);
+    if (!pixels || texture.desc.kind != TextureKind::image || texture.desc.samples != 1
+        || format.depth != DXGI_FORMAT_UNKNOWN || region.x < 0 || region.y < 0 || region.width < 1 || region.height < 1
+        || region.x + region.width > texture.desc.width || region.y + region.height > texture.desc.height)
+        throw std::runtime_error("Invalid texture update");
+    auto *value = native<TextureData>(texture.id);
+    if (value->texture.Get() == impl_->color_resource.Get()) impl_->detach_outputs();
+    const D3D11_BOX box{
+            UINT(region.x), UINT(region.y), 0, UINT(region.x + region.width), UINT(region.y + region.height), 1
+    };
+    impl_->context->UpdateSubresource(
+            value->texture.Get(), 0, &box, pixels, UINT(size_t(region.width) * format.bytes), 0
+    );
+}
+
 void D3D11Context::generate_mips(Texture texture) {
     impl_->context->GenerateMips(native<TextureData>(texture.id)->srv.Get());
 }
@@ -901,9 +928,14 @@ void D3D11Context::bind_target(const TargetView &target) {
     impl_->target = target;
 }
 
+Rect D3D11Context::current_viewport() const {
+    return impl_->viewport;
+}
+
 void D3D11Context::viewport(Rect rect) {
     const D3D11_VIEWPORT viewport{float(rect.x), float(rect.y), float(rect.width), float(rect.height), 0, 1};
     impl_->context->RSSetViewports(1, &viewport);
+    impl_->viewport = rect;
 }
 
 void D3D11Context::clear_color(std::array<float, 4> color) {
@@ -1304,6 +1336,18 @@ void D3D11Context::bind_program(Program) {
 }
 
 ConstantBinding D3D11Context::create_constants(Program, const ConstantLayout &) {
+    unavailable();
+}
+
+void D3D11Context::destroy(ConstantBinding &) {
+    unavailable();
+}
+
+Rect D3D11Context::current_viewport() const {
+    unavailable();
+}
+
+void D3D11Context::update_texture(Texture, Rect, const void *) {
     unavailable();
 }
 

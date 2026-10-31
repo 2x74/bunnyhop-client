@@ -26,6 +26,7 @@ public:
     void destroy(Program &program);
     void bind_program(Program program);
     ConstantBinding create_constants(Program program, const ConstantLayout &layout);
+    void destroy(ConstantBinding &binding);
     void constants(const ConstantBinding &binding, const void *bytes);
     void texture_unit(Program program, const char *name, unsigned unit);
     Pipeline create_pipeline(const PipelineState &state);
@@ -35,6 +36,7 @@ public:
     void depth_test(bool enabled);
     void blend(bool enabled);
     Texture create_texture(const TextureDesc &desc, std::span<const void *const> faces = {});
+    void update_texture(Texture texture, Rect region, const void *pixels);
     void generate_mips(Texture texture);
     void destroy(Texture &texture);
     Sampler create_sampler(const SamplerDesc &desc);
@@ -46,6 +48,7 @@ public:
     // RTV/DSV remain valid until the presenter resizes. Reborrow after each resize.
     static TargetView borrow_target(void *rtv, const TargetDesc &desc, void *dsv = nullptr);
     void bind_target(const TargetView &target);
+    Rect current_viewport() const;
     void viewport(Rect rect);
     void clear_color(std::array<float, 4> color);
     void clear_depth();

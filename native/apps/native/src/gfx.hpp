@@ -73,6 +73,21 @@ public:
         return d3d11_->create_constants(program, layout);
     }
 
+    void destroy(ConstantBinding &binding) {
+        if (backend_ == Backend::opengl) return opengl_->destroy(binding);
+        return d3d11_->destroy(binding);
+    }
+
+    Rect current_viewport() const {
+        if (backend_ == Backend::opengl) return opengl_->current_viewport();
+        return d3d11_->current_viewport();
+    }
+
+    void update_texture(Texture texture, Rect region, const void *pixels) {
+        if (backend_ == Backend::opengl) return opengl_->update_texture(texture, region, pixels);
+        return d3d11_->update_texture(texture, region, pixels);
+    }
+
     void constants(const ConstantBinding &binding, const void *bytes) {
         if (backend_ == Backend::opengl) return opengl_->constants(binding, bytes);
         return d3d11_->constants(binding, bytes);
