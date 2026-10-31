@@ -10,6 +10,7 @@ namespace native::gfx {
 class OpenGlContext {
     Gl &gl_;
     TargetView target_;
+    Rect viewport_;
 
     template <typename Function>
     static uintptr_t generate(Function function) {
@@ -215,6 +216,8 @@ public:
         }
     }
 
+    void destroy(ConstantBinding &binding) { binding = {}; }
+
     void texture_unit(Program program, const char *name, unsigned unit) {
         bind_program(program);
         gl_.Uniform1i(gl_.GetUniformLocation(GLuint(program.id), name), GLint(unit));
@@ -282,6 +285,19 @@ public:
             if (desc.kind == TextureKind::cube) gl_.TexParameteri(target, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
         }
         return result;
+    }
+
+    void update_texture(Texture texture, Rect region, const void *pixels) {
+        if (!pixels || texture.desc.kind != TextureKind::image || texture.desc.samples != 1 || region.x < 0
+            || region.y < 0 || region.width < 1 || region.height < 1 || region.x + region.width > texture.desc.width
+            || region.y + region.height > texture.desc.height)
+            throw std::runtime_error("Invalid texture update");
+        const auto format = pixel_format(texture.desc.format);
+        gl_.BindTexture(GL_TEXTURE_2D, GLuint(texture.id));
+        gl_.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        gl_.TexSubImage2D(
+                GL_TEXTURE_2D, 0, region.x, region.y, region.width, region.height, format.channels, format.type, pixels
+        );
     }
 
     void generate_mips(Texture texture) {
@@ -382,7 +398,12 @@ public:
         target_ = target;
     }
 
-    void viewport(Rect rect) { gl_.Viewport(rect.x, rect.y, rect.width, rect.height); }
+    Rect current_viewport() const { return viewport_; }
+
+    void viewport(Rect rect) {
+        gl_.Viewport(rect.x, rect.y, rect.width, rect.height);
+        viewport_ = rect;
+    }
 
     void clear_color(std::array<float, 4> color) {
         gl_.ClearColor(color[0], color[1], color[2], color[3]);
