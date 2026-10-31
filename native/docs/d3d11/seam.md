@@ -68,6 +68,17 @@ keep the same inputs, assets and arguments. Record its `build.json` as the suite
 The capture's HEAD/diff describe the harness checkout; `sourceBuild.revision` describes historical binaries.
 The first baseline commit's renderer is identical to `098e4d0`; only its effects smoke call signature was repaired.
 
+### Reflected actors and mirrored hands
+
+Build `bunnyhop-native-reflection-render-smoke` and run it with the Aero BSP, frozen assets directory and an
+output directory. Its twelve PPMs cover an off-screen actor in the actual planar reflection target, that
+reflection composed through the unchanged world water shader, actor-off controls, and right/mirrored knife and
+gun viewmodels. The actor must change reflection and water-composite pixels while leaving the direct view unchanged.
+
+Aero's upward water triangles are clockwise. The existing main view treats them as backfaces, so the fixture
+uses an explicitly front-facing water quad to exercise composition without changing the frozen map images.
+The quad samples the renderer's actual reflection texture; it does not replace the actor or water shaders.
+
 ## Interface and ownership
 
 `gfx.hpp` aliases `OpenGlContext` on macOS/Linux and uses an inlined, non-virtual dispatcher on Windows.

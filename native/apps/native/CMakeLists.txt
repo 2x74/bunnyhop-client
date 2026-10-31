@@ -429,6 +429,15 @@ if(BUNNYHOP_BUILD_CLIENT)
     target_compile_definitions(bunnyhop-native-menu-backdrop-smoke PRIVATE
         BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
     add_executable(bunnyhop-native-render-smoke src/render_smoke.cpp src/sky_image.cpp)
+    add_executable(bunnyhop-native-reflection-render-smoke EXCLUDE_FROM_ALL src/reflection_render_smoke.cpp)
+    target_include_directories(bunnyhop-native-reflection-render-smoke PRIVATE vendor)
+    target_link_libraries(bunnyhop-native-reflection-render-smoke PRIVATE
+        bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
+    target_compile_definitions(bunnyhop-native-reflection-render-smoke PRIVATE
+        BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(bunnyhop-native-reflection-render-smoke PRIVATE -ffp-contract=off)
+    endif()
     # Avatar pictures through the menu's render service, into files: `ASSETS JOBS.json OUTPUT_DIR`.
     add_executable(bunnyhop-native-avatar-smoke EXCLUDE_FROM_ALL
         src/avatar_smoke.cpp src/avatar_picture.cpp src/webp_lossless.cpp)

@@ -22,7 +22,6 @@
 #include "knife_spinner.hpp"
 #include "inspect_cues.hpp"
 #include <span>
-#include <type_traits>
 #include "nlohmann/json.hpp"
 #include <filesystem>
 #include <chrono>
@@ -71,11 +70,20 @@ namespace native {
 #include "presentation_pass.hpp"
 
 class Renderer {
+    struct ActorWinding {
+        NativeViewmodel &model;
+        gfx::Winding previous;
+
+        ActorWinding(NativeViewmodel &value, gfx::Winding winding) : model(value), previous(value.scene_winding()) {
+            model.scene_winding(winding);
+        }
+
+        ~ActorWinding() { model.scene_winding(previous); }
+    };
+
     RenderProfile profile;
     std::optional<gfx::Context> ownedContext;
     gfx::Context &graphicsContext;
-    // Temporary construction bridge until every viewmodel caller supplies the shared graphics context.
-    Gl *legacyGl = nullptr;
     gfx::Pipeline framePipeline;
     BhContext *core;
     RenderResources resources{graphicsContext, core};
@@ -269,6 +277,16 @@ public:
                 {"msaaRestartRequired", false}};
     }
 
+    gfx::Texture water_reflection_texture() const {
+        if (!water.reflectionDrawn) throw std::runtime_error("No water reflection was drawn");
+        return water.waterReflection->texture();
+    }
+
+    gfx::TargetView water_reflection_target() const {
+        if (!water.reflectionDrawn) throw std::runtime_error("No water reflection was drawn");
+        return water.waterReflection->view();
+    }
+
     uint64_t refraction_captures() const { return water.refractionCaptures; }
 
     native::GraphicsView output_view(int width, int height) const {
@@ -358,7 +376,6 @@ public:
     )
         : ownedContext(std::in_place, api)
         , graphicsContext(*ownedContext)
-        , legacyGl(&api)
         , core(context) {
         begin_loading(assetRoot, deferred, std::move(prepared_viewmodel));
     }
@@ -386,14 +403,8 @@ public:
         }
     }
 
-    template <class Model = NativeViewmodel>
     std::unique_ptr<NativeViewmodel> make_viewmodel(const std::filesystem::path &assetRoot) {
-        if constexpr (std::is_constructible_v<Model, gfx::Context &, const std::filesystem::path &>) {
-            return std::make_unique<Model>(graphicsContext, assetRoot);
-        } else {
-            if (!legacyGl) throw std::runtime_error("A viewmodel with the shared graphics context is required");
-            return std::make_unique<Model>(*legacyGl, assetRoot);
-        }
+        return std::make_unique<NativeViewmodel>(graphicsContext, assetRoot);
     }
 
     gfx::Context &graphics_context() { return graphicsContext; }
@@ -895,6 +906,7 @@ public:
     // Players, ghosts and the replay runner in the water's mirror, as the website's scene capture shows them.
     void draw_reflected_actors(const native::Matrix &vp, const float eye[3], double seconds) {
         if (!viewmodel) return;
+        const ActorWinding winding(*viewmodel, gfx::Winding::clockwise);
         if (replayActor) viewmodel->draw_actor(*replayActor, vp, eye, seconds);
         if (compareActor) viewmodel->draw_actor(*compareActor, vp, eye, seconds);
         for (const auto &actor : roomActors)

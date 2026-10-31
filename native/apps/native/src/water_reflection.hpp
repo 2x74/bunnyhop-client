@@ -46,6 +46,8 @@ public:
 
     void bind(unsigned unit) { context.bind_texture(unit, target.color, sampler); }
 
+    gfx::TargetView view() const { return target; }
+
     gfx::Texture texture() const { return target.color; }
 
     int width() const { return width_; }
