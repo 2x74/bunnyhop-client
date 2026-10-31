@@ -47,8 +47,6 @@ public:
 };
 
 DataPaths resolve_data_folder(const Options &opt, SDL_Window *window, DataMoveProgress &display);
-// SDL's own log lines also go to the log file.
-void capture_sdl_log();
 // The lines that open the log: what someone reading it needs to know about this copy of the game on this machine.
 std::vector<std::string> log_session_header(
         const nlohmann::json &identity,

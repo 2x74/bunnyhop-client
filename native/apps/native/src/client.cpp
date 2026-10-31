@@ -54,6 +54,7 @@
 #include "map_preparation.hpp"
 #include "crash_note.hpp"
 #include "native_log.hpp"
+#include "native_log_sdl.hpp"
 #include "ssj.hpp"
 #include "strafe_trainer.hpp"
 #include "audio.hpp"
@@ -4154,7 +4155,7 @@ int main(int argc, char **argv) {
 #endif
     native::log::Session log_session;
     native::log::install_crash_notes();
-    native::capture_sdl_log();
+    native::log::capture_sdl_output();
     bool interactive_errors = true;
     // Scripted checks must also exit on failure without a modal alert. Inspect
     // flags before parsing so malformed smoke invocations cannot wait for input.

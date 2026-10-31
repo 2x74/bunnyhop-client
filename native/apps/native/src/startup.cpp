@@ -53,20 +53,6 @@ WindowAndGl create_window_and_gl(const Options &opt) {
     return {std::move(window), std::move(context)};
 }
 
-namespace {
-void SDLCALL log_sdl_output(void *userdata, int category, SDL_LogPriority priority, const char *message) {
-    SDL_GetDefaultLogOutputFunction()(userdata, category, priority, message);
-    try {
-        native::log::write(std::string("SDL: ") + (message ? message : ""));
-    } catch (...) {
-    }
-}
-}  // namespace
-
-void capture_sdl_log() {
-    SDL_SetLogOutputFunction(log_sdl_output, nullptr);
-}
-
 std::vector<std::string> log_session_header(
         const nlohmann::json &identity,
         const std::string &gpu,

@@ -1,6 +1,7 @@
 #include "crash_note.hpp"
 #include "log_scrub.hpp"
 #include "native_log.hpp"
+#include "native_log_sdl.hpp"
 #include <algorithm>
 #include <chrono>
 #include <csignal>
@@ -211,6 +212,19 @@ void check_unusable_folder() {
     check(native::log::wait_until_written(written_limit), "a log that won't open held up its callers");
 }
 
+void check_sdl_output() {
+    TemporaryFolder folder;
+    {
+        native::log::Session session;
+        native::log::capture_sdl_output();
+        native::log::open(folder.path);
+        SDL_Log("a line from SDL with password=hidden-value");
+    }
+    const auto text = read_text(folder.log());
+    check(contains(text, "SDL: a line from SDL"), "SDL's log didn't reach the file");
+    check(!contains(text, "hidden-value"), "SDL's log wasn't scrubbed");
+}
+
 void check_threads_keep_lines_whole() {
     constexpr int line_count = 200;
     TemporaryFolder folder;
@@ -280,6 +294,7 @@ int main(int argc, char **argv) {
         check_unclean_exit_noted();
         check_unusable_folder();
         check_threads_keep_lines_whole();
+        check_sdl_output();
 #ifndef _WIN32
         check_crash_notes(argv[0]);
 #endif
