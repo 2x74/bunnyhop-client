@@ -1,0 +1,54 @@
+name: D3D11 backend WARP proof
+on:
+  push:
+    branches: [ci/d3d11-backend]
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: 1.4.3
+      - name: Prepare MSVC and pinned SDK
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installation = & $vswhere -latest -property installationPath
+          Import-Module "$installation\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          $sdk = (Get-Content native/apps/native/tools/d3d-shaders/toolchain.json | ConvertFrom-Json).windowsSdk
+          Enter-VsDevShell -VsInstallPath $installation -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64 -winsdk=$sdk"
+          foreach ($name in 'PATH', 'INCLUDE', 'LIB', 'LIBPATH', 'WindowsSdkDir', 'WindowsSDKVersion', 'VCToolsInstallDir') {
+            "$name=$([Environment]::GetEnvironmentVariable($name))" >> $env:GITHUB_ENV
+          }
+      - working-directory: native
+        run: bun install --frozen-lockfile
+      - name: Compile and embed all shaders
+        run: python native/apps/native/tools/d3d-shaders/package.py --build --output native/target/d3d11-embedded
+      - name: Build actual backend and migrated subsystems
+        shell: pwsh
+        run: |
+          cmake -S native/apps/native/tools/d3d11-backend -B backend-build -G Ninja -DCMAKE_BUILD_TYPE=Release "-DSHADER_RESOURCES=$pwd/native/target/d3d11-embedded"
+          if ($LASTEXITCODE -ne 0) { throw 'Configure failed' }
+          cmake --build backend-build --parallel 4
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+          ctest --test-dir backend-build --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw 'WARP failed' }
+      - name: Compare WARP pixels with Apple OpenGL reference
+        shell: pwsh
+        run: |
+          python -m pip install Pillow==12.0.0
+          python native/apps/native/tools/d3d11-backend/compare.py native/apps/native/tools/d3d11-backend/goldens backend-build/evidence
+          if ($LASTEXITCODE -ne 0) { throw 'Image comparison failed' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: d3d11-backend-evidence
+          path: |
+            backend-build/evidence
+            backend-build/Testing
+            native/target/d3d-shaders/output/report.json
+            native/target/d3d-shaders/output/programs/*/compile.log
