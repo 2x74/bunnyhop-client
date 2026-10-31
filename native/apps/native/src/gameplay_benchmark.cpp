@@ -9,6 +9,11 @@
 #include "low_latency.hpp"
 #include "play_priority.hpp"
 #include <iomanip>
+#include "benchmark_gpu.hpp"
+#include "benchmark_system.hpp"
+#ifdef _WIN32
+#include "benchmark_latency_windows.hpp"
+#endif
 
 namespace {
 using Json = nlohmann::json;
@@ -23,12 +28,14 @@ constexpr float overlay_scale = 100;
 constexpr double chat_seconds = 1;
 
 enum Phase : size_t {
+    frame_start,
     pump,
     simulation,
     feedback,
     diagnostics,
     heartbeat,
     actors,
+    render_start,
     world,
     hud,
     swap,
@@ -38,12 +45,14 @@ enum Phase : size_t {
 };
 
 constexpr std::array<const char *, count> phase_names = {
+        "frameStart",
         "pump",
         "simulation",
         "feedback",
         "diagnostics",
         "heartbeat",
         "actors",
+        "renderStart",
         "world",
         "hud",
         "swap",
@@ -55,7 +64,7 @@ struct Spec {
     Json json;
     std::string path, content, output;
     int width, height, frames, warmup, fps, hz, ghosts;
-    bool vsync, queued, ordinary_sleep, play_priority;
+    bool vsync, queued, ordinary_sleep, play_priority, comparison, visible;
     std::string low_latency;
 
     explicit Spec(const char *file) {
@@ -76,6 +85,16 @@ struct Spec {
         ordinary_sleep = json.value("ordinarySleep", false);
         // Windows: the play-time process settings, and presenting through DXGI ("on" or "boost").
         play_priority = json.value("playPriority", false);
+        comparison = json.value("comparison", false);
+        visible = json.value("visible", false);
+        if (comparison && visible && !json.contains("width") && !json.contains("height")) {
+            if (!SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(SDL_GetError());
+            const auto *display = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+            if (!display) throw std::runtime_error(SDL_GetError());
+            width = display->w;
+            height = display->h;
+            SDL_Quit();
+        }
         low_latency = json.value("lowLatency", std::string("off"));
         if (!native::valid_low_latency_mode(low_latency)) throw std::runtime_error("Invalid lowLatency");
         if (width < 64 || height < 64 || width > 4096 || height > 4096 || frames < 1 || frames > 100000 || warmup < 0
@@ -97,9 +116,10 @@ struct Surface {
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
         SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
         window = SDL_CreateWindow(
-                "Offline gameplay benchmark", spec.width, spec.height, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN
+                "Offline gameplay benchmark", spec.width, spec.height, SDL_WINDOW_OPENGL | (spec.visible ? SDL_WindowFlags(0) : SDL_WINDOW_HIDDEN)
         );
         if (!window) throw std::runtime_error(SDL_GetError());
+        if (spec.visible && !SDL_SetWindowFullscreen(window, true)) throw std::runtime_error(SDL_GetError());
         context = SDL_GL_CreateContext(window);
         if (!context || !SDL_GL_MakeCurrent(window, context)) throw std::runtime_error(SDL_GetError());
         if (!SDL_GL_SetSwapInterval(spec.vsync ? 1 : 0)) throw std::runtime_error(SDL_GetError());
@@ -119,6 +139,8 @@ Json spread(std::vector<double> values) {
     std::sort(values.begin(), values.end());
     const double mean = std::accumulate(values.begin(), values.end(), 0.) / double(values.size());
     return {{"p50Ms", values[values.size() / 2]},
+            {"p95Ms", values[std::min(values.size() - 1, size_t(values.size() * .95))]},
+            {"p999Ms", values[std::min(values.size() - 1, size_t(values.size() * .999))]},
             {"p99Ms", values[std::min(values.size() - 1, size_t(values.size() * .99))]},
             {"maxMs", values.back()},
             {"meanMs", mean},
@@ -152,13 +174,17 @@ public:
         for (auto &samples : phases_)
             samples.reserve(spec.frames);
         frames_.reserve(spec.frames);
+        profile_frames_.reserve(spec.frames);
+        camera_eye_ = eye_;
+        camera_yaw_ = view_.yaw();
+        camera_pitch_ = view_.pitch;
         actor_frames_.resize(spec.ghosts);
     }
 
     ~Benchmark() { pacer_.release(gl_); }
 
     void run() {
-        const uint64_t started = SDL_GetTicksNS();
+        uint64_t started = SDL_GetTicksNS();
         scheduler_.reset(started);
         report_at_ = started;
         diagnostics_.start(started, timeline_.queue(), true);
@@ -166,27 +192,50 @@ public:
         play_priority_.update(spec_.play_priority);
         if (!presenter_.configure(surface_.window, native::low_latency_mode(spec_.low_latency), spec_.fps, false))
             throw std::runtime_error("Low latency mode: " + presenter_.error());
+        if (spec_.json.contains("readyFile")) {
+            std::ofstream(spec_.json.at("readyFile").get<std::string>()) << "ready\n";
+            const auto deadline = Clock::now() + std::chrono::seconds(120);
+            while (!std::filesystem::exists(spec_.json.at("startFile").get<std::string>())) {
+                if (Clock::now() > deadline) throw std::runtime_error("Capture controller timed out");
+                SDL_PumpEvents();
+                SDL_Delay(10);
+            }
+            started = SDL_GetTicksNS();
+            scheduler_.reset(started);
+            report_at_ = started;
+        }
         for (int frame = -spec_.warmup; frame < spec_.frames; ++frame) {
             const auto start = Clock::now();
+            if (frame == 0) measured_qpc_start_ = benchmark_qpc();
             mark_ = start;
             current_.fill(0);
             frame_diagnostics_.start_frame(SDL_GetTicksNS(), true);
             presenter_.frame_start();
-            frame_input();
+            mark(frame_start);
+            const size_t path_frame = size_t(std::max(frame, 0));
+            camera(path_frame);
+            frame_input(started + uint64_t(frame + spec_.warmup + 1) * tick_ns);
             frame_ticks();
             frame_diagnostics();
             frame_heartbeat();
             frame_actors();
             presenter_.render_start(spec_.width, spec_.height);
+            if (spec_.low_latency != "off" && !presenter_.active())
+                throw std::runtime_error("Low latency mode stopped: " + presenter_.error());
+            mark(render_start);
+            gpu_.begin();
             renderer_->draw(spec_.width, spec_.height, eye_.data(), view_, &snapshot_);
             mark(world);
             frame_hud();
             mark(hud);
             frame_diagnostics_.mark(native::FrameDiagnostics::kRender, SDL_GetTicksNS());
+            gpu_.end();
             if (presenter_.active())
                 presenter_.present(spec_.vsync);
             else
                 SDL_GL_SwapWindow(surface_.window);
+            if (spec_.low_latency != "off" && !presenter_.active())
+                throw std::runtime_error("Low latency mode stopped: " + presenter_.error());
             mark(swap);
             frame_diagnostics_.mark(native::FrameDiagnostics::kSwap, SDL_GetTicksNS());
             pacer_.after_swap(gl_, spec_.queued);
@@ -208,11 +257,13 @@ public:
             frame_diagnostics_.mark(native::FrameDiagnostics::kSleep, SDL_GetTicksNS());
             if (frame == -1) rasterized = hud_->rasterizations();
             if (frame >= 0) {
-                frames_.push_back(std::chrono::duration<double, std::milli>(Clock::now() - start).count());
+                profile_frames_.push_back(renderer_->frameProfile);
                 for (size_t phase = 0; phase < count; ++phase)
                     phases_[phase].push_back(current_[phase]);
+                frames_.push_back(std::chrono::duration<double, std::milli>(Clock::now() - start).count());
             }
         }
+        measured_qpc_end_ = benchmark_qpc();
         write(rasterized);
     }
 
@@ -220,6 +271,7 @@ private:
     const Spec &spec_;
     Surface surface_;
     native::Gl gl_;
+    BenchmarkGpu gpu_;
     std::unique_ptr<BhContext, decltype(&bh_destroy)> core_;
     std::unique_ptr<native::Renderer> renderer_;
     std::unique_ptr<native::NativeHud> hud_;
@@ -251,6 +303,20 @@ private:
     std::array<double, count> current_{};
     std::array<std::vector<double>, count> phases_;
     std::vector<double> frames_;
+    std::vector<native::Renderer::FrameProfile> profile_frames_;
+    int64_t measured_qpc_start_ = 0, measured_qpc_end_ = 0;
+    std::array<float, 3> camera_eye_{};
+    double camera_yaw_ = 0, camera_pitch_ = 0;
+
+    void camera(size_t frame) {
+        if (!spec_.comparison) return;
+        const double progress = double(frame) / double(spec_.frames);
+        constexpr double circle = 6.283185307179586;
+        eye_ = camera_eye_;
+        eye_[0] += float(std::sin(progress * circle) * 16);
+        eye_[1] += float((1 - std::cos(progress * circle)) * 16);
+        view_.set_angles(camera_pitch_ + std::sin(progress * circle) * 10, camera_yaw_ + progress * 360);
+    }
 
     void require(int ok) const {
         if (!ok) throw std::runtime_error(bh_last_error(core_.get()));
@@ -315,11 +381,13 @@ private:
         heartbeat_.begin(0);
     }
 
-    void frame_input() {
+    void frame_input(uint64_t matched_now) {
         SDL_Event event{};
         while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_EVENT_QUIT || (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE))
+                throw std::runtime_error("Capture cancelled");
         }
-        const uint64_t now = SDL_GetTicksNS();
+        const uint64_t now = spec_.comparison ? matched_now : SDL_GetTicksNS();
         auto pump_schedule = scheduler_;
         pump_schedule.frame(now, true, tick_ns);
         timeline_.begin_pump(input_, now, pump_schedule, tick_ns);
@@ -464,6 +532,7 @@ private:
                 {"schema", 1},
                 {"recording", recording},
                 {"spec", spec_.json},
+                {"os", benchmark_os()},
                 {"presenter", presenter_.active() ? std::string(presenter_.technique()) : std::string("OpenGL swap")},
                 {"gpu", string(GL_RENDERER)},
                 {"driver", string(GL_VERSION)},
@@ -480,8 +549,45 @@ private:
                  "run diagnostics, 4s heartbeat, cached ghost fixtures, HUD/chat/12-row scoreboard, swap/fence/cap. "
                  "No menu, audio, network or real input devices; hidden swap is not display latency."}
         };
-        for (size_t phase = 0; phase < count; ++phase)
+        if (spec_.comparison) {
+            result.erase("recording");
+            result["spec"] = {{"width", spec_.width}, {"height", spec_.height}, {"frames", spec_.frames},
+                              {"warmup", spec_.warmup}, {"fpsLimit", spec_.fps}, {"vsync", spec_.vsync},
+                              {"lowLatency", spec_.low_latency}, {"limitQueuedFrames", spec_.queued}};
+            result["camera"] = {{"eye", camera_eye_}, {"yaw", camera_yaw_}, {"pitch", camera_pitch_},
+                                 {"path", "frame-indexed 360 degree yaw, 16 unit circle, 10 degree pitch sine"}};
+            result["method"] = "Visible borderless fullscreen, matched camera and one simulation tick per frame; "
+                "offline simulation/HUD/actors; real driver presentation, VSync off. Driver animation clocks use wall time. "
+                "Software intervals are not click-to-photon latency.";
+        }
+        const auto gpu_frames = gpu_.finish(size_t(spec_.warmup));
+        result["gpuRenderMs"] = Json::array();
+        for (const auto ms : gpu_frames) result["gpuRenderMs"].push_back(ms >= 0 ? Json(ms) : Json());
+        result["gpuUnavailableReason"] = gpu_.supported() ? "Null samples mean query ring overflow" : "GL timer query unavailable";
+        const auto last_profile = renderer_->frameProfile;
+        result["rendererFrames"] = Json::array();
+        for (const auto &profile : profile_frames_) {
+            renderer_->frameProfile = profile;
+            result["rendererFrames"].push_back(renderer_->profile_json());
+        }
+        renderer_->frameProfile = last_profile;
+        result["measuredQpcStart"] = measured_qpc_start_;
+        result["measuredQpcEnd"] = measured_qpc_end_;
+        for (size_t phase = 0; phase < count; ++phase) {
             result["phases"][phase_names[phase]] = spread(phases_[phase]);
+            result["phaseFramesMs"][phase_names[phase]] = phases_[phase];
+        }
+        std::vector<size_t> worst(frames_.size());
+        std::iota(worst.begin(), worst.end(), 0);
+        std::partial_sort(worst.begin(), worst.begin() + std::min(size_t(20), worst.size()), worst.end(),
+                          [this](size_t a, size_t b) { return frames_[a] > frames_[b]; });
+        for (size_t index = 0; index < std::min(size_t(20), worst.size()); ++index) {
+            const size_t frame = worst[index];
+            result["worstFrames"].push_back({{"frame", frame}, {"wallMs", frames_[frame]}});
+        }
+#ifdef _WIN32
+        result["dxgi"] = benchmark_latency::result(size_t(spec_.warmup));
+#endif
         if (gl_.GetError() != GL_NO_ERROR) throw std::runtime_error("Benchmark OpenGL error");
         std::ofstream output(spec_.output);
         output << result.dump(2) << '\n';

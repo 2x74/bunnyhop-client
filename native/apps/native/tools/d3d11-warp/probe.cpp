@@ -82,9 +82,11 @@ void png(const std::filesystem::path &path, std::vector<uint8_t> &pixels) {
     check(encoder->CreateNewFrame(&frame, nullptr), "PNG frame");
     check(frame->Initialize(nullptr), "PNG frame initialize");
     check(frame->SetSize(size, size), "PNG size");
-    WICPixelFormatGUID format = GUID_WICPixelFormat32bppRGBA;
+    WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
     check(frame->SetPixelFormat(&format), "PNG format");
-    require(IsEqualGUID(format, GUID_WICPixelFormat32bppRGBA), "WIC changed pixel format");
+    require(IsEqualGUID(format, GUID_WICPixelFormat32bppBGRA), "WIC changed pixel format");
+    for (size_t pixel = 0; pixel < pixels.size(); pixel += 4)
+        std::swap(pixels[pixel], pixels[pixel + 2]);
     check(frame->WritePixels(size, size * 4, UINT(pixels.size()), pixels.data()), "PNG pixels");
     check(frame->Commit(), "PNG frame commit");
     check(encoder->Commit(), "PNG commit");
@@ -110,6 +112,7 @@ public:
         } catch (const std::exception &error) {
             report["features"][name]["passed"] = false;
             report["features"][name]["error"] = error.what();
+            report["features"][name]["wallMs"] = std::chrono::duration<double, std::milli>(Clock::now() - start).count();
             throw;
         }
         const double elapsed = std::chrono::duration<double, std::milli>(Clock::now() - start).count();
@@ -220,8 +223,8 @@ public:
         for (UINT y = 0; y < size; ++y)
             for (UINT x = 0; x < size; ++x)
                 require(pixels[y * size + x] == (x < size / 2 ? 0xff0000ffu : 0xffff0000u), "cube/clip/colour resolve pixel mismatch");
-        resolve_depth(depth.Get());
-        copy_region(resolved.Get());
+        stage("shader-depth-resolve-sv-depth-readback", [&] { resolve_depth(depth.Get()); });
+        stage("copy-subresource-region-readback", [&] { copy_region(resolved.Get()); });
     }
 
     ComPtr<ID3D11Texture2D> make_cube() {

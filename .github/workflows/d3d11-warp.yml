@@ -31,3 +31,71 @@ jobs:
           name: d3d11-warp-evidence
           path: warp-evidence
           if-no-files-found: warn
+  resources:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: bun install --frozen-lockfile
+      - run: bunx playwright install --with-deps chromium
+      - run: bun run wasm
+      - run: bun apps/native/build-menu.ts
+      - run: bun apps/native/src/export-viewmodels.ts
+      - run: bun apps/native/src/export-presentation.ts
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: renderer-measure-resources
+          path: |
+            native/target/native-assets
+            native/target/native-menu/menu.html
+            native/target/native-menu/menu-manifest.json
+          if-no-files-found: error
+  measurement-tool:
+    needs: resources
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+      - run: rustup toolchain install 1.99.1 --profile minimal
+      - run: rustup override set 1.99.1
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: renderer-measure-resources
+          path: native/target
+      - shell: pwsh
+        run: ./apps/native/tools/build-measure-windows.ps1
+      - name: Validate controller syntax and headless shader error path
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path apps/native/tools/measure-renderer.ps1), [ref]$null, [ref]$errors) | Out-Null
+          if ($errors.Count) { throw ($errors | Out-String) }
+          # GL 1.1 on this runner cannot compile the player's GL 3.3 shaders.
+          ./target/renderer-measure-windows/bunnyhop-native-shader-benchmark.exe target/native-assets target/runner-shaders.json
+          if ($LASTEXITCODE -eq 0) { Write-Host 'Runner also supports the GL shader probe.' }
+          else { Write-Host 'GL 3.3 shader measurement needs a tester GPU, as expected.' }
+          exit 0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: renderer-measure-windows
+          path: native/target/renderer-measure-windows
+          if-no-files-found: error
+          retention-days: 30
