@@ -18,7 +18,8 @@ NAMES = {
     "video_frames.hpp": ["video"], "native_presentation.hpp": ["presentation"], "hud.hpp": ["hud"],
     "enhanced_look.hpp": ["look-bright", "look-blur", "look-contact", "look-composite", "look-fxaa"],
     "source_hdr.hpp": ["hdr-downsample", "hdr-blur", "hdr-composite", "hdr-luminance", "graphics-target"],
-    "renderer.hpp": ["ghost-route", "world", "sky", "depth", "cutout-depth"],
+    "ghost_route.hpp": ["ghost-route"],
+    "renderer.hpp": ["world", "sky", "depth", "cutout-depth"],
     "native_viewmodel.hpp": ["player"],
 }
 

@@ -239,6 +239,7 @@ goldens after each extraction, so later API conversion does not require concurre
 | --- | --- | --- |
 | 1 | Shader layouts/assets | Adapt generated reflection to `ConstantLayout`; agree asset IDs, stage/slot, matrix layout and texture bindings |
 | 1 | Renderer extraction, one owner | Extract `prepare_world`/`prepare_props` and world submission into `world_pass.hpp`; sky setup/draw into `sky_pass.hpp`; water setup/uniforms/refraction into `water_pass.hpp`; sun caster submission into `shadow_pass.hpp`. Preserve class-facing methods initially |
+| 2, parallel | Ghost routes: `ghost_route.hpp` | Owns route mesh upload and line/marker draws; GL program, VAO/VBO, uniforms, blend/depth state remain. Borrows only the GL table; Renderer supplies paths, projection, color and viewport |
 | 2, parallel | Source postprocessing: `source_hdr.hpp` | Targets, exposure PBO/fence ring, constants, explicit color and depth resolves; owns its own shared code |
 | 2, parallel | Enhanced postprocessing: `enhanced_look.hpp` | Its own targets/fullscreen passes and explicit depth resolve; no edits to Source header |
 | 2, parallel | Shadow/reflection targets: `sun_shadows.hpp`, `water_reflection.hpp` | Independent target resources; integrate with extracted shadow/water passes |
