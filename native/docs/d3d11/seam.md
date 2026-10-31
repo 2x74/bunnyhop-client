@@ -68,6 +68,17 @@ keep the same inputs, assets and arguments. Record its `build.json` as the suite
 The capture's HEAD/diff describe the harness checkout; `sourceBuild.revision` describes historical binaries.
 The first baseline commit's renderer is identical to `098e4d0`; only its effects smoke call signature was repaired.
 
+### Reflected actors and mirrored hands
+
+Build `bunnyhop-native-reflection-render-smoke` and run it with the Aero BSP, frozen assets directory and an
+output directory. Its twelve PPMs cover an off-screen actor in the actual planar reflection target, that
+reflection composed through the unchanged world water shader, actor-off controls, and right/mirrored knife and
+gun viewmodels. The actor must change reflection and water-composite pixels while leaving the direct view unchanged.
+
+Aero's upward water triangles are clockwise. The existing main view treats them as backfaces, so the fixture
+uses an explicitly front-facing water quad to exercise composition without changing the frozen map images.
+The quad samples the renderer's actual reflection texture; it does not replace the actor or water shaders.
+
 ## Interface and ownership
 
 `gfx.hpp` aliases `OpenGlContext` on macOS/Linux and uses an inlined, non-virtual dispatcher on Windows.
@@ -190,10 +201,9 @@ three glow-normal floats once; draw calls use mesh addresses resolved at setup o
 Animated bones update a preallocated 3×258 RGBA32F texture; floor weapons use a
 separate immutable 3×1 identity texture. Constants resolve once per permutation, with bool32 glow flags and
 16-byte palette/glove array strides. All three environment names map to logical unit 9. Aura instance draws
-start at zero, and mirrored hands select clockwise raster variants. GL sampler bindings are released before
-returning to legacy passes so their texture filtering remains intact. A temporary back-cull pipeline restores
-the latent cull-face mode after aura shells because legacy world passes only re-enable culling. Remove that
-restore when those passes bind their own raster states.
+start at zero, and mirrored hands select clockwise raster variants. Scene winding is explicit: the reflection
+caller scopes clockwise winding around actor draws, and actor/floor draw-state resets copy that winding.
+Sampler releases and a back-cull restore remain for standalone OpenGL callers; scene passes bind explicit state.
 `NativeViewmodel(gfx::Context&, path, cpu_only)` borrows the rendering context; its `Gl&` overload owns an
 OpenGL adapter. Scene draws select `Compare::less_equal`; standalone preview callers can explicitly pass
 `Compare::less` through the draw setup. Both comparisons use pipelines created at resource setup.
@@ -203,12 +213,11 @@ overloads preserve existing standalone callers. `native_map_effects.hpp` has no 
 Player `ProgramKey` names include every manifest alias, with an empty permutation string. The extractor evaluates
 the runtime key function for every reachable material/finish/glove/detail combination and rejects missing names.
 D3D11 creation reads precompiled programs without loading or compiling the OpenGL fallback sources.
-Temporary bridges remain for legacy screenshot callers' read target/pack state and construction of the backdrop
-renderer from the GL table. Remove those as its renderer migrates.
-Presentation, video, HUD and avatar service constructors borrow `gfx::Context` directly. The legacy
-renderer owns the temporary OpenGL adapter shared with presentation and video capture.
-`shader()` is a temporary native-handle bridge for `renderer.hpp`'s existing shared water uniforms; remove it
-when water constants move to reflected blocks. `Renderer(Gl&)` remains during the remaining migration.
+Presentation, video, HUD, avatar services and Renderer borrow `gfx::Context` directly. Renderer passes that
+context to NativeViewmodel. Its `Gl&` convenience constructor owns an adapter for existing OpenGL startup.
+Shared water values use reflected constants; the native shader handle bridge has been removed. Refraction
+consumes an explicit `TargetView`, resolving multisampled inputs before copies. The framebuffer-borrowing
+postprocess finish overloads and `post_gl_bridge.hpp` are gone.
 
 The shader integration merge is `5d0b612`. The extractor recognizes the two keyed program descriptors and verifies
 their fixed keys against the manifest; extraction still produces 135 entries / 105 distinct pairs, with nine
@@ -298,55 +307,46 @@ hardware or a 330-microsecond presented frame. Raw frame samples/specs are prese
 100 selected tests passed, with menu-focus/window-mode tests excluded. Ten shader pipeline tests and 51 release
 evidence tests passed; the pinned release workflow is unchanged.
 
-## Remaining migration split
+## Scene migration boundaries
 
-Keep one integration owner for `renderer.hpp` and the public gfx headers. Other workstreams change their own
-headers and hand the integrator constructor/binding changes. Perform the extraction step first, with exact
-goldens after each extraction, so later API conversion does not require concurrent edits to the large class.
+The core scene headers contain no direct graphics API calls or temporary native-handle bridges.
+Programs use stable manifest keys, and reflected constant bindings resolve names only at setup.
 
-| Order | Workstream and files | Boundary and integration handoff |
-| --- | --- | --- |
-| 1 | Shader layouts/assets | Adapt generated reflection to `ConstantLayout`; agree asset IDs, stage/slot, matrix layout and texture bindings |
-| 1 | Renderer extraction, one owner | Extracted world, sky, water, shadow, presentation assembly and ghost routes into the headers below. `renderer.hpp` retains public forwarding methods, actor/viewmodel coordination, postprocess selection, frame order and resource teardown |
-| 2, parallel | Scene presentation assembly: `presentation_pass.hpp` | Owns zone/overlay, shot, paint, measurement, ghost trail/route assembly and map-effect submission. Its remaining direct GL call binds the presentation shader for shared water uniforms; `NativePresentation` still owns its migrated GPU batch. Borrows camera/settings/actor view, mutable water pass and shared profiler; Renderer queues shots, supplies cosmetic colors and coordinates teardown |
-| 2, parallel | Sun and shadows: `shadow_pass.hpp` | Owns sun terms, shared solid-depth and cutout-depth programs, sun target setup and caster submission. GL program/uniform/texture binds, target/depth/offset state and indexed draws remain. Borrows world meshes/materials/bounds and its mutable scene-transform cache, lighting/profile values, player draw service and actor span. Sky depth borrows its solid-depth program: agree the depth constants/pipeline interface before converting independently |
-| 2, parallel | Sky: `sky_pass.hpp` | Owns sky mesh/metadata, panorama upload, sky program, backdrop/3D sky and depth-only sky submission. GL textures, uniforms, fullscreen/indexed draws and depth/cull/offset state remain. Borrows shared textures/material spans, water uniforms, viewport, camera and world-submission callbacks; depth-only sky borrows the shadow pass depth program. Sky yaw/panorama metadata also feeds scene lighting |
-| 2, parallel | World and props: `world_pass.hpp` | Owns mesh/material preparation, lightmap and normal metadata, draw-list culling/sorting and world submission. GL world program, material uniforms, texture binds, geometry draws and depth/blend/cull state remain. Borrows settings, sky fog/camera values, water pass and refraction callback. Shadow submission shares mesh bounds and the scene-transform cache; world lightmap/HDR metadata also feeds postprocessing |
-| 2, parallel | Shared resources: `render_resources.hpp`, `render_profile.hpp` | Owns texture cache/uploads, fallback textures, common geometry helpers and frame counters/timings. GL allocation/deletion, texture sampling parameters and vertex layout remain. Sky and world share textures; water and sky register texture ownership here. Renderer preserves teardown order and texture-quality updates |
-| 2, parallel | Water: `water_pass.hpp` | Owns volume/cell preparation, capture planning, shared water uniforms, refraction textures and reflection submission state. GL texture upload/copy, framebuffer restore, uniforms, winding/clip state remain. Borrows material/group spans, uniform cache, texture deletion registry and viewport/clip references; Renderer supplies postprocess refraction-source and scene draws. Water uniforms still target world, sky and presentation programs (including map effects in its batch): coordinate their constant-block conversion |
-| 2, parallel | Shared uniform cache: `render_uniforms.hpp` | Owns cached GL uniform locations; world, sky, water and shadow borrow it until each owns reflected constant blocks |
-| 2, parallel | Ghost routes: `ghost_route.hpp` | Owns route mesh upload and line/marker draws; GL program, VAO/VBO, uniforms, blend/depth state remain. Borrows only the GL table; Presentation assembly supplies paths, projection, color and viewport |
-| 2, parallel | Source postprocessing: `source_hdr.hpp` | Targets, exposure PBO/fence ring, constants, explicit color and depth resolves; owns its own shared code |
-| 2, parallel | Enhanced postprocessing: `enhanced_look.hpp` | Its own targets/fullscreen passes and explicit depth resolve; no edits to Source header |
-| 2, parallel | Shadow/reflection targets: `sun_shadows.hpp`, `water_reflection.hpp` | Independent target resources; integrate with extracted shadow/water passes |
-| 2, parallel | HUD: `hud.hpp`, `hud_area.hpp`, `hud_text.hpp` | Atlas textures, streaming batches, UI pipeline; keep text rasterization unchanged |
-| 2, parallel | Readback services: `menu_backdrop.hpp`, `avatar_stage.hpp`, `frame_pacing.hpp` | Independent asynchronous slot/fence callers; Source exposure remains with its postprocess owner |
-| 3, complete | Viewmodels and cosmetic previews | GPU resources extracted, then migrated; shared-context constructors and precompiled program keys are ready for renderer integration |
-| 3, parallel | Other leaf geometry | `native_map_effects.hpp` is API-independent; shared water constants are handed off through the extracted water pass |
-| 3, parallel | Extracted world, sky, water, shadow pass headers | Each pass owner converts its own code; only integration owner edits `renderer.hpp` wiring and cleanup |
-| 4 | Startup/presentation/Windows, one owner | Inject existing D3D device/context, borrowed swapchain target, resize/present and low-latency markers; add opt-in backend selection |
+| Files | Ownership and shared boundary |
+| --- | --- |
+| `renderer.hpp` | Frame order, actor/viewmodel coordination, postprocess selection, explicit frame targets/readback and teardown |
+| `world_pass.hpp` | World/prop preparation, culling/sorting, material constants, explicit texture/geometry/pipeline submission |
+| `sky_pass.hpp` | Panorama textures, sky geometry/backdrop, camera/fog metadata and shared solid-depth submission |
+| `shadow_pass.hpp` | Sun terms, solid/cutout depth programs and caster submission using world bounds/transform caches |
+| `presentation_pass.hpp` | Zone/shot/paint/measurement/trail/route assembly and reflected water values for NativePresentation |
+| `water_pass.hpp` | Volume/cell planning, reflected water constants, resolved refraction copies and reflection submission |
+| `render_resources.hpp` | Shared/fallback textures, immutable geometry uploads, mip/sampling policy and resource teardown |
+| `render_uniforms.hpp` | Shared reflected depth-program view/model constants, including the no-clip sentinel |
+| `ghost_route.hpp` | Route geometry, constants, pipeline state and line/marker draws |
+| `sun_shadows.hpp`, `water_reflection.hpp` | Owned seam targets, samplers and explicit target/viewport restoration |
 
-The extracted headers are included inside `native` after their common dependencies, matching the existing
-rendering headers. Constructors borrow named services, never the whole Renderer. Map-reading services borrow
-the simulation-context pointer by reference so `set_simulation_context` still updates every consumer.
+The headers are included inside `native` after their common dependencies. Constructors borrow named services,
+never the whole Renderer. Map-reading services borrow the simulation-context pointer by reference so
+`set_simulation_context` updates every consumer.
 
-Coordinate these shared boundaries before parallel API conversion:
+Preserve these boundaries when integrating the Windows frame path:
 
-- Water uniforms write into world, sky and presentation programs. Presentation's native shader bridge remains
-  required until water constants use reflected blocks. World material constants also consume the water planner's
-  ready flags, refraction state and beneath-face policy.
 - Shadow and sky depth share the solid-depth program. Shadow submission advances the world's scene number and
-  uses its transform cache, meshes, bounds and material textures. Keep cache invalidation and clip-height resets
-  in the current order across shadow, 3D sky, reflection and main-world draws.
-- Shadow and frame-lighting wiring still write sun uniforms into the world program. Sky panorama/yaw metadata
-  and world map-sun metadata feed those terms and postprocessing. Lightmap refresh still runs at frame start in
-  Renderer; its texture and HDR metadata belong to the world pass.
-- Shared texture uploads, fallback IDs, deletion registry and anisotropy changes live in `render_resources.hpp`.
-  Water refraction and sky panorama textures register there; water planes and pass programs retain the explicit
-  Renderer teardown order. Water reflection borrows viewport/clip references and restores framebuffer bindings;
-  its refraction source is selected by Renderer from Enhanced, Source or the graphics target.
+  uses its transform cache, meshes, bounds and material textures. Preserve invalidation order across shadow,
+  3D sky, reflection and main-world draws. Supply `no_clip_height` outside planar reflections.
+- Water values use reflected blocks in world, sky and presentation. World material constants consume the
+  planner's ready flags, refraction state and beneath-face policy. Refraction copies resolve MSAA first and bind
+  inputs explicitly afterward. A sampled texture must not also be the current render attachment.
+- Sky panorama/yaw and world map-sun metadata feed lighting and postprocessing. Lightmap refresh runs at frame
+  start; its texture and HDR metadata belong to the world pass. Material constant variants avoid inactive arrays
+  and retain scalar updates for the world's many batches.
+- Shared textures and anisotropy changes live in `render_resources.hpp`. Water planes and pass programs retain
+  explicit teardown order. Reflection restores target/viewport and scopes clockwise actor winding through
+  NativeViewmodel's precreated raster pipelines, without allocating during draws.
+- Startup must inject the presenter's existing D3D device/context and borrowed swapchain target before resource
+  creation. The presenter keeps resize, Present and latency markers. Bind its valid color/depth target and reset
+  seam state caches after direct presenter operations; do not create a second device or swapchain.
 
-Before Windows backend implementation, implement the per-stage reflection adapter and decide the depth-resolve
-sample policy. The coordinate and presentation policy is fixed by the shader contract above.
-Keep OpenGL as the Windows default until target hardware measurements justify changing it. No physics, replay,
-shared Rust code, WASM pin or release workflow changes are needed for this migration.
+The coordinate and presentation policy is fixed by the shader contract above. Keep OpenGL as the Windows default
+until target hardware measurements justify changing it. No physics, replay, shared Rust code, WASM pin or release
+workflow changes are needed for this migration.

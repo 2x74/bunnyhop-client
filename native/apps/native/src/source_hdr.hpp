@@ -17,7 +17,6 @@
 //   SourceHdr hdr(context, maximumSamples);
 //   hdr.begin(w, h);  ...draw the world...  hdr.finish(target, w, h, dtSeconds);  ...draw viewmodel / HUD...
 #include "gfx.hpp"
-#include "post_gl_bridge.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -248,9 +247,12 @@ public:
         context.bind_target(restore_target);
     }
 
-    // Temporary bridge: renderer.hpp can construct this lazily while its frame target is bound.
-    SourceHdr(native::gfx::Context &graphics, Gl &gl)
-        : SourceHdr(graphics, native_post::maximum_samples(gl), native_post::current_target(gl)) {}
+    explicit SourceHdr(native::gfx::Context &graphics)
+        : SourceHdr(
+                  graphics,
+                  graphics.max_samples(native::gfx::Format::rgba16f, native::gfx::Format::depth24_stencil8),
+                  graphics.current_target()
+          ) {}
 
     ~SourceHdr() { release(); }
 
@@ -278,8 +280,6 @@ public:
             context.resolve_color(multisample, scene);
             context.resolve_depth(multisample, scene);
         }
-        // Temporary bridge: renderer.hpp still copies refraction from the bound read target.
-        context.bind_target(scene);
         return scene;
     }
 
@@ -288,11 +288,6 @@ public:
         expose(scene.color, destination, w, h, dt);
         context.depth_test(true);
         context.depth_write(true);
-    }
-
-    // Temporary bridge for renderer.hpp's borrowed framebuffer argument.
-    void finish(uint32_t framebuffer, int w, int h, double dt) {
-        finish(native_post::target(framebuffer, w, h), w, h, dt);
     }
 
     void expose(native::gfx::Texture texture, native::gfx::TargetView destination, int w, int h, double dt) {
@@ -374,9 +369,7 @@ void main(){
         nearestSampler = context.create_sampler({Filter::nearest, Filter::nearest});
     }
 
-    // Temporary bridge for the legacy renderer's GL sample-limit query.
-    GraphicsTarget(native::gfx::Context &graphics, Gl &gl)
-        : GraphicsTarget(graphics, native_post::maximum_samples(gl)) {}
+    explicit GraphicsTarget(native::gfx::Context &graphics) : GraphicsTarget(graphics, graphics.max_samples()) {}
 
     ~GraphicsTarget() {
         context.destroy(scene);
@@ -401,8 +394,6 @@ void main(){
             context.resolve_color(multisample, scene);
             context.resolve_depth(multisample, scene);
         }
-        // Temporary bridge: renderer.hpp still copies refraction from the bound read target.
-        context.bind_target(scene);
         return scene;
     }
 
@@ -428,19 +419,5 @@ void main(){
         context.viewport({0, 0, output_width, output_height});
         context.depth_write(true);
         context.depth_test(true);
-    }
-
-    // Temporary bridge for renderer.hpp's borrowed framebuffer argument.
-    void
-    finish(uint32_t framebuffer,
-           int output_width,
-           int output_height,
-           const native::GraphicsView &view,
-           const native::GraphicsSettings &settings) {
-        finish(native_post::target(framebuffer, output_width, output_height),
-               output_width,
-               output_height,
-               view,
-               settings);
     }
 };

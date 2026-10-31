@@ -33,6 +33,7 @@ class NativeViewmodel : private NativeViewmodelGpu {
 
     std::array<CachedLook, 128> lookCache;
     size_t nextLook = 0;
+    gfx::Winding sceneWinding = gfx::Winding::counter_clockwise;
     std::vector<float> basePose;
     std::unique_ptr<NativePresentation> gunFx;
     double gunFlashStarted = -100;
@@ -827,6 +828,7 @@ public:
         options.identityPose = true;
         bind(plain, projection, native::model_matrix(t), eye, seconds, options);
         drawState = {};
+        drawState.raster.winding = sceneWinding;
         apply_draw_state();
         mesh(floorMeshes[weapon.weapon]);
         graphicsContext.bind_texture(0, bonesTexture, bonesSampler);
@@ -860,6 +862,10 @@ public:
         return actor.source == native_render::GhostSource::none && ghostId ? native_render::GhostSource::custom
                                                                            : actor.source;
     }
+
+    gfx::Winding scene_winding() const { return sceneWinding; }
+
+    void scene_winding(gfx::Winding winding) { sceneWinding = winding; }
 
     void draw_actor(
             const native_render::Actor &actor,
@@ -1069,6 +1075,7 @@ public:
         const auto &parts = parts_for(actor, l);
         const std::span<const Mesh *const> visibleParts(parts.drawMeshes.data(), parts.count);
         drawState = {};
+        drawState.raster.winding = sceneWinding;
         apply_draw_state();
         draw_actor_parts(actor, visibleParts, actorProgram, eye);
     }

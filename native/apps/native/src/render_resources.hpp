@@ -1,57 +1,69 @@
 #pragma once
 
 struct RenderGeometry {
-    GLuint vao = 0, vbo = 0, ebo = 0, blend = 0;
+    gfx::Geometry geometry;
     size_t indices = 0;
 };
 
 class RenderResources {
-    Gl &gl;
+    gfx::Context &context;
     BhContext *&core;
 
 public:
-    RenderResources(Gl &g, BhContext *&c) : gl(g), core(c) {}
+    RenderResources(gfx::Context &g, BhContext *&c) : context(g), core(c) {}
 
-    GLuint emptyVao = 0, white = 0, checker = 0;
-    std::vector<GLuint> ownedTextures;
-    std::unordered_map<uint64_t, GLuint> textures;
+    gfx::Geometry emptyGeometry;
+    gfx::Texture white, checker;
+    std::array<gfx::Sampler, 4> samplers;
+    std::vector<gfx::Texture> ownedTextures;
+    std::unordered_map<uint64_t, gfx::Texture> textures;
     std::unordered_map<int32_t, std::pair<uint32_t, uint32_t>> textureSizes;
     std::unordered_map<int32_t, std::array<float, 3>> textureAverages;
     // Textures a cutout or translucent material reads alpha from (texture_bleed.hpp).
     std::unordered_set<int32_t> cutoutTextures;
 
-    GLuint upload(const BhImage &image, bool repeat, bool mipmap, bool srgb = true) {
+    gfx::Texture upload(const BhImage &image, bool mipmap, bool srgb = true) {
         if (!image.rgba || !image.width || !image.height || uint64_t(image.width) * image.height * 4 > image.byte_count)
             throw std::runtime_error("Invalid native texture");
-        GLint limit = 0;
-        gl.GetIntegerv(GL_MAX_TEXTURE_SIZE, &limit);
-        if (image.width > uint32_t(limit) || image.height > uint32_t(limit))
-            throw std::runtime_error("Native texture exceeds GPU limit");
-        GLuint id = 0;
-        gl.GenTextures(1, &id);
-        ownedTextures.push_back(id);
-        gl.BindTexture(GL_TEXTURE_2D, id);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, mipmap ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, repeat ? GL_REPEAT : GL_CLAMP_TO_EDGE);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, repeat ? GL_REPEAT : GL_CLAMP_TO_EDGE);
-        gl.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
-        gl.TexImage2D(
-                GL_TEXTURE_2D,
-                0,
-                srgb ? GL_SRGB8_ALPHA8 : GL_RGBA8,
-                image.width,
-                image.height,
-                0,
-                GL_RGBA,
-                GL_UNSIGNED_BYTE,
-                image.rgba
-        );
-        if (mipmap) gl.GenerateMipmap(GL_TEXTURE_2D);
-        return id;
+        const auto limit = uint32_t(context.max_texture_size());
+        if (image.width > limit || image.height > limit) throw std::runtime_error("Native texture exceeds GPU limit");
+        const int levels = mipmap ? 1 + int(std::floor(std::log2(std::max(image.width, image.height)))) : 1;
+        const gfx::TextureDesc desc{
+                int(image.width),
+                int(image.height),
+                srgb ? gfx::Format::srgb8 : gfx::Format::rgba8,
+                gfx::TextureKind::image,
+                1,
+                levels
+        };
+        const void *pixels[] = {image.rgba};
+        const auto texture = context.create_texture(desc, pixels);
+        ownedTextures.push_back(texture);
+        if (mipmap) context.generate_mips(texture);
+        return texture;
     }
 
-    GLuint texture(int32_t index, bool raw = false) {
+    void sampling(float anisotropy) {
+        for (unsigned i = 0; i < samplers.size(); ++i) {
+            context.destroy(samplers[i]);
+            gfx::SamplerDesc desc;
+            desc.address = i & 1 ? gfx::Address::repeat : gfx::Address::clamp;
+            desc.mipmapped = i & 2;
+            desc.max_anisotropy = anisotropy;
+            samplers[i] = context.create_sampler(desc);
+        }
+    }
+
+    void bind(unsigned unit, gfx::Texture texture, bool repeat = true) {
+        const unsigned sampling = unsigned(repeat) | (texture.desc.levels > 1 ? 2u : 0u);
+        context.bind_texture(unit, texture, samplers[sampling]);
+    }
+
+    void material_sampling(unsigned unit) { context.bind_sampler(unit, samplers[3]); }
+
+    void material_image(unsigned unit, gfx::Texture texture) { context.bind_image(unit, texture); }
+
+    gfx::Texture texture(int32_t index, bool raw = false) {
         if (index < 0) return white;
         const uint64_t key = uint32_t(index) | (uint64_t(raw) << 32);
         const auto found = textures.find(key);
@@ -63,7 +75,7 @@ public:
         const uint64_t key = uint32_t(index) | (uint64_t(raw) << 32);
         if (textures.count(key)) co_return;
         BhImage image{};
-        GLuint id = checker;
+        gfx::Texture id = checker;
         if (bh_texture(core, index, &image)) {
             textureSizes[index] = {image.width, image.height};
             std::vector<uint8_t> pixels;
@@ -87,7 +99,7 @@ public:
             const BhImage prepared{
                     pixels.empty() ? image.rgba : pixels.data(), image.byte_count, image.width, image.height
             };
-            id = upload(prepared, true, true, !raw);
+            id = upload(prepared, true, !raw);
             if (!raw) {
                 std::array<float, 3> average{};
                 const size_t pixels = size_t(image.width) * image.height;
@@ -118,61 +130,55 @@ public:
     ) {
         RenderGeometry out;
         if (!floats || !count) return out;
-        if (!vertices || !indices || floats % stride || count > size_t(std::numeric_limits<GLsizei>::max()))
+        if (!vertices || !indices || floats % stride || count > size_t(std::numeric_limits<int>::max()))
             throw std::runtime_error("Invalid native geometry buffer");
         for (size_t i = 0; i < count; i++)
             if (indices[i] >= floats / stride) throw std::runtime_error("Native mesh index out of bounds");
         out.indices = count;
-        gl.GenVertexArrays(1, &out.vao);
-        gl.BindVertexArray(out.vao);
-        gl.GenBuffers(1, &out.vbo);
-        gl.BindBuffer(GL_ARRAY_BUFFER, out.vbo);
-        gl.BufferData(GL_ARRAY_BUFFER, floats * sizeof(float), vertices, GL_STATIC_DRAW);
-        gl.GenBuffers(1, &out.ebo);
-        gl.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, out.ebo);
-        gl.BufferData(GL_ELEMENT_ARRAY_BUFFER, count * sizeof(uint32_t), indices, GL_STATIC_DRAW);
-        gl.EnableVertexAttribArray(0);
-        gl.VertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride * sizeof(float), nullptr);
+        const auto attributes = geometry_attributes(stride);
+        const int storedStride = stride >= 8 ? 11 : stride;
+        out.geometry = context.create_geometry(storedStride * sizeof(float), attributes);
         if (stride >= 8) {
-            for (int i = 1; i < 3; i++) {
-                gl.EnableVertexAttribArray(i);
-                gl.VertexAttribPointer(
-                        i,
-                        i == 1 ? 3 : 2,
-                        GL_FLOAT,
-                        GL_FALSE,
-                        stride * sizeof(float),
-                        reinterpret_cast<void *>(size_t(i == 1 ? 3 : 6) * sizeof(float))
-                );
+            // Fixed missing attributes preserve GL's zero defaults and give D3D11 a complete world input layout.
+            std::vector<float> packed(floats / stride * storedStride);
+            for (size_t i = 0; i < floats / stride; ++i) {
+                std::copy_n(vertices + i * stride, stride, packed.data() + i * storedStride);
+                if (blend && blends == floats / stride) packed[i * storedStride + 10] = blend[i];
             }
+            context.upload_vertices(out.geometry, std::as_bytes(std::span(packed)));
+        } else {
+            context.upload_vertices(out.geometry, std::as_bytes(std::span(vertices, floats)));
         }
-        if (stride == 10) {
-            gl.EnableVertexAttribArray(3);
-            gl.VertexAttribPointer(
-                    3, 2, GL_FLOAT, GL_FALSE, stride * sizeof(float), reinterpret_cast<void *>(8 * sizeof(float))
-            );
-        }
-        if (blend && blends == floats / stride) {
-            gl.GenBuffers(1, &out.blend);
-            gl.BindBuffer(GL_ARRAY_BUFFER, out.blend);
-            gl.BufferData(GL_ARRAY_BUFFER, blends * sizeof(float), blend, GL_STATIC_DRAW);
-            gl.EnableVertexAttribArray(4);
-            gl.VertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, sizeof(float), nullptr);
-        }
+        context.upload_indices(out.geometry, std::as_bytes(std::span(indices, count)));
         return out;
     }
 
-    void destroy(RenderGeometry &mesh) {
-        if (mesh.blend) gl.DeleteBuffers(1, &mesh.blend);
-        if (mesh.ebo) gl.DeleteBuffers(1, &mesh.ebo);
-        if (mesh.vbo) gl.DeleteBuffers(1, &mesh.vbo);
-        if (mesh.vao) gl.DeleteVertexArrays(1, &mesh.vao);
+    static std::span<const gfx::VertexAttribute> geometry_attributes(int stride) {
+        static constexpr gfx::VertexAttribute attributes[] = {
+                {0, 3, 0},
+                {1, 3, 3 * sizeof(float)},
+                {2, 2, 6 * sizeof(float)},
+                {3, 2, 8 * sizeof(float)},
+                {4, 1, 10 * sizeof(float)}
+        };
+        return {attributes, stride >= 8 ? 5u : 1u};
+    }
+
+    void destroy(RenderGeometry &mesh) { context.destroy(mesh.geometry); }
+
+    void release() {
+        for (auto &texture : ownedTextures)
+            context.destroy(texture);
+        for (auto &sampler : samplers)
+            context.destroy(sampler);
+        context.destroy(emptyGeometry);
     }
 
     void prepare_fallback_textures() {
-        gl.GenVertexArrays(1, &emptyVao);
+        emptyGeometry = context.create_geometry(0, {});
+        sampling(1);
         const uint8_t blank[4] = {255, 255, 255, 255};
-        white = upload({blank, 4, 1, 1}, true, false);
+        white = upload({blank, 4, 1, 1}, false);
         uint8_t fallback[8 * 8 * 4];
         for (int y = 0; y < 8; y++)
             for (int x = 0; x < 8; x++) {
@@ -181,6 +187,6 @@ public:
                 fallback[at] = fallback[at + 1] = fallback[at + 2] = v;
                 fallback[at + 3] = 255;
             }
-        checker = upload({fallback, sizeof(fallback), 8, 8}, true, true);
+        checker = upload({fallback, sizeof(fallback), 8, 8}, true);
     }
 };

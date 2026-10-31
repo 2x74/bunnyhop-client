@@ -442,8 +442,10 @@ public:
         }
     }
 
-    // Temporary bridge for the legacy renderer's GL sample-limit query.
-    EnhancedLook(native::gfx::Context &graphics, Gl &gl) : EnhancedLook(graphics, native_post::maximum_samples(gl)) {}
+    explicit EnhancedLook(native::gfx::Context &graphics)
+        : EnhancedLook(
+                  graphics, graphics.max_samples(native::gfx::Format::rgba16f, native::gfx::Format::depth24_stencil8)
+          ) {}
 
     ~EnhancedLook() { release(); }
 
@@ -460,8 +462,6 @@ public:
 
     native::gfx::TargetView refraction_source() {
         resolve_multisample();
-        // Temporary bridge: renderer.hpp still copies refraction from the bound read target.
-        context.bind_target(scene);
         return scene;
     }
 
@@ -492,10 +492,5 @@ public:
         context.viewport({0, 0, width, height});
         context.depth_test(true);
         context.depth_write(true);
-    }
-
-    // Temporary bridge for renderer.hpp's borrowed framebuffer argument.
-    void finish(uint32_t framebuffer, const LookFrame &frame, SourceHdr *hdr, double dt) {
-        finish(native_post::target(framebuffer, width, height), frame, hdr, dt);
     }
 };

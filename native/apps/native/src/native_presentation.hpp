@@ -63,8 +63,7 @@ void main(){float a=vColor.a;if(uv.y>=paintUvOffset){
         context.destroy(program);
     }
 
-    // Temporary bridge for renderer.hpp's shared water uniforms.
-    uint32_t shader() const { return uint32_t(program.id); }
+    gfx::Program shader_program() const { return program; }
 
     void clear() { quads.clear(); }
 

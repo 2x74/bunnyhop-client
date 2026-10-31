@@ -1,23 +1,24 @@
 #pragma once
 
 class ShadowPass {
-    Gl &gl;
+    gfx::Context &context;
     RenderResources &resources;
-    RenderUniforms &uniforms;
     WorldPass &world;
 
 public:
-    ShadowPass(Gl &g, RenderResources &r, RenderUniforms &u, WorldPass &w)
-        : gl(g)
-        , resources(r)
-        , uniforms(u)
-        , world(w) {}
+    ShadowPass(gfx::Context &ctx, RenderResources &r, WorldPass &w) : context(ctx), resources(r), world(w) {}
 
-    GLuint depthProgram = 0;
+    RenderDepthProgram depthProgram{context};
     // Sun shadows of the composer looks (sun_shadows.hpp), on their own texture unit.
     std::unique_ptr<SunShadowMap> sunShadows;
-    GLuint cutoutDepthProgram = 0;
-    static constexpr GLint sun_shadow_unit = 11;
+    RenderDepthProgram cutoutDepthProgram{context};
+    gfx::Pipeline casterPipeline, endPipeline;
+    static constexpr unsigned sun_shadow_unit = 11;
+
+    ~ShadowPass() {
+        context.destroy(casterPipeline);
+        context.destroy(endPipeline);
+    }
 
     struct SunTerms {
         bool active = false, shadows = false;
@@ -76,17 +77,20 @@ public:
         const auto bounds = world.groupBounds.find((uint64_t(prop) << 63) | first);
         if (bounds != world.groupBounds.end() && !native_render::in_light_box(bounds->second, matrix, lightVp, range))
             return;
-        const GLuint shader = cutouts ? cutoutDepthProgram : depthProgram;
+        auto &shader = cutouts ? cutoutDepthProgram : depthProgram;
+        float cutoff = 0;
         if (cutouts) {
-            const auto &m = world.materials[material];
-            gl.BindTexture(GL_TEXTURE_2D, m.texture < 0 ? resources.white : resources.texture(m.texture));
-            gl.Uniform1f(
-                    uniforms.loc(shader, "cutoff"), (m.flags & world.material_alpha_test) ? m.alpha_ref : cutout_alpha
+            const auto &materialInfo = world.materials[material];
+            resources.material_image(
+                    0, materialInfo.texture < 0 ? resources.white : resources.texture(materialInfo.texture)
             );
+            cutoff = materialInfo.flags & world.material_alpha_test ? materialInfo.alpha_ref : cutout_alpha;
         }
-        gl.BindVertexArray(mesh.vao);
-        gl.UniformMatrix4fv(uniforms.loc(shader, "model"), 1, GL_FALSE, matrix.data());
-        gl.DrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, reinterpret_cast<void *>(uintptr_t(first) * 4));
+        context.bind_geometry(mesh.geometry);
+        shader.model(matrix, cutoff);
+        context.draw_indexed(
+                gfx::Primitive::triangles, gfx::IndexType::u32, size_t(first) * sizeof(uint32_t), int(count)
+        );
     }
 
     // World groups, props and players into the sun's depth map: solid surfaces, then cut-outs by their alpha.
@@ -100,12 +104,9 @@ public:
     ) {
         ++world.sceneNumber;
         for (const bool cutouts : {false, true}) {
-            const GLuint shader = cutouts ? cutoutDepthProgram : depthProgram;
-            gl.UseProgram(shader);
-            gl.UniformMatrix4fv(uniforms.loc(shader, "viewProjection"), 1, GL_FALSE, lightVp.data());
-            if (!cutouts) gl.Uniform1f(uniforms.loc(shader, "clipHeight"), render_no_clip_height);
-            gl.ActiveTexture(GL_TEXTURE0);
-            gl.Uniform1i(uniforms.loc(shader, "baseTexture"), 0);
+            auto &shader = cutouts ? cutoutDepthProgram : depthProgram;
+            shader.bind(lightVp);
+            if (cutouts) resources.material_sampling(0);
             for (const auto &g : world.groups)
                 if (!g.sky3d)
                     cast_group(
@@ -136,8 +137,22 @@ public:
                     );
         }
         if (!viewmodel) return;
+        // Legacy skinned meshes use texture parameters for their single-level bone texture.
+        context.unbind_sampler(0);
         for (const auto &actor : roomActors)
             if (actor.ghost_slot < 0) viewmodel->draw_actor(actor, lightVp, eye, seconds);
+    }
+
+    void set_sun_values(const SunTerms &terms, const native::SceneSun &frameSun) {
+        world.sunValues.sunShadowActive = terms.shadows;
+        world.sunValues.sunSkyFill = terms.fill;
+        world.sunValues.sunBakedScale = terms.baked;
+        world.sunValues.sunDirectStrength = terms.direct;
+        world.sunValues.sunShadowStrength = terms.strength;
+        world.sunValues.sunLightDirection = frameSun.direction;
+        const auto &color = !frameSun.from_pack && terms.direct > 0 ? world.mapSun.irradiance : frameSun.color;
+        world.sunValues.sunLightColor = color;
+        world.sunValues.sunAmbientColor = frameSun.ambient;
     }
 
     // The sun's depth map around the camera and the world shader's sun terms for this frame.
@@ -152,54 +167,56 @@ public:
     ) {
         static constexpr float shadow_bias = .0003f;
         const auto terms = sun_terms(graphics, frameSun, profile);
-        gl.UseProgram(world.program);
-        gl.Uniform1i(uniforms.loc(world.program, "sunActive"), terms.active);
-        if (!terms.active) return;
-        gl.Uniform1i(uniforms.loc(world.program, "sunShadowActive"), terms.shadows);
-        gl.Uniform1f(uniforms.loc(world.program, "sunSkyFill"), terms.fill);
-        gl.Uniform1f(uniforms.loc(world.program, "sunBakedScale"), terms.baked);
-        gl.Uniform1f(uniforms.loc(world.program, "sunDirectStrength"), terms.direct);
-        gl.Uniform1f(uniforms.loc(world.program, "sunShadowStrength"), terms.strength);
-        gl.Uniform3fv(uniforms.loc(world.program, "sunLightDirection"), 1, frameSun.direction.data());
-        const auto &color = !frameSun.from_pack && terms.direct > 0 ? world.mapSun.irradiance : frameSun.color;
-        gl.Uniform3fv(uniforms.loc(world.program, "sunLightColor"), 1, color.data());
-        gl.Uniform3fv(uniforms.loc(world.program, "sunAmbientColor"), 1, frameSun.ambient.data());
-        if (!terms.shadows) return;
+        context.bind_program(world.program);
+        world.sunValues.sunActive = terms.active;
+        if (!terms.active) {
+            world.upload_sun();
+            return;
+        }
+        set_sun_values(terms, frameSun);
+        if (!terms.shadows) {
+            world.upload_sun();
+            return;
+        }
         const int size = graphics.look.shadow_size;
         const float range = std::clamp(graphics.look.shadow_distance, 256.f, 4096.f);
         const auto lightVp = sun_view_projection({eye[0], eye[1], eye[2]}, frameSun.direction, range, size);
-        GLint drawTarget = 0, readTarget = 0;
-        gl.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawTarget);
-        gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &readTarget);
+        const auto restore = context.current_target();
+        const auto viewport = context.current_viewport();
         sunShadows->begin(size);
-        gl.Disable(GL_BLEND);
-        gl.Disable(GL_CULL_FACE);
-        gl.Enable(GL_DEPTH_TEST);
-        gl.Enable(GL_POLYGON_OFFSET_FILL);
-        gl.PolygonOffset(2, 4);
+        context.pipeline(casterPipeline);
         draw_shadow_casters(lightVp, range, eye, seconds, viewmodel, roomActors);
-        gl.Disable(GL_POLYGON_OFFSET_FILL);
-        gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, GLuint(drawTarget));
-        gl.BindFramebuffer(GL_READ_FRAMEBUFFER, GLuint(readTarget));
-        gl.UseProgram(world.program);
-        gl.UniformMatrix4fv(uniforms.loc(world.program, "sunShadowMatrix"), 1, GL_FALSE, lightVp.data());
-        gl.Uniform1f(uniforms.loc(world.program, "sunShadowTexel"), 1.f / float(size));
-        gl.Uniform1f(uniforms.loc(world.program, "sunShadowRadius"), size <= 512 ? 1.f : 2.f);
-        gl.Uniform1f(uniforms.loc(world.program, "sunShadowBias"), shadow_bias);
-        gl.ActiveTexture(GL_TEXTURE0 + sun_shadow_unit);
-        gl.BindTexture(GL_TEXTURE_2D, sunShadows->texture());
-        gl.ActiveTexture(GL_TEXTURE0);
+        context.pipeline(endPipeline);
+        context.bind_target(restore);
+        context.viewport(viewport);
+        world.sunValues.sunShadowMatrix = lightVp;
+        world.sunValues.sunShadowTexel = 1.f / float(size);
+        world.sunValues.sunShadowRadius = size <= 512 ? 1.f : 2.f;
+        world.sunValues.sunShadowBias = shadow_bias;
+        world.upload_sun();
+        sunShadows->bind(sun_shadow_unit);
     }
 
     void prepare_depth_program() {
-        depthProgram = link_program(gl, native_render::depth_vertex, native_render::depth_fragment);
+        depthProgram.program =
+                context.create_program({{"depth", ""}, native_render::depth_vertex, native_render::depth_fragment});
+        depthProgram.prepare_constants();
     }
 
     void prepare_resources() {
-        sunShadows = std::make_unique<SunShadowMap>(gl);
-        cutoutDepthProgram = link_program(gl, native_render::cutout_depth_vertex, native_render::cutout_depth_fragment);
-        gl.UseProgram(world.program);
-        gl.Uniform1i(uniforms.loc(world.program, "sunShadowMap"), sun_shadow_unit);
-        gl.Uniform1i(uniforms.loc(world.program, "sunActive"), 0);
+        sunShadows = std::make_unique<SunShadowMap>(context);
+        cutoutDepthProgram.program = context.create_program(
+                {{"cutout-depth", ""}, native_render::cutout_depth_vertex, native_render::cutout_depth_fragment}
+        );
+        cutoutDepthProgram.prepare_constants();
+        context.texture_unit(cutoutDepthProgram.program, "baseTexture", 0);
+        gfx::PipelineState state;
+        state.raster.offset = true;
+        state.raster.slope_bias = 2;
+        state.raster.constant_bias = 4;
+        casterPipeline = context.create_pipeline(state);
+        endPipeline = context.create_pipeline({});
+        context.bind_program(world.program);
+        world.sunValues.sunActive = 0;
     }
 };

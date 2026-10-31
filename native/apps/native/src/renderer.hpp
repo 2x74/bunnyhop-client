@@ -34,7 +34,7 @@
 #include <thread>
 #include <array>
 #include <SDL3/SDL.h>
-#include <SDL3/SDL_opengl.h>
+#include "gfx.hpp"
 #include "player_material.hpp"
 #include "ponytail_motion.hpp"
 #include <algorithm>
@@ -49,8 +49,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-
-#include "gfx.hpp"
 
 namespace native {
 #include "native_presentation.hpp"
@@ -72,23 +70,34 @@ namespace native {
 #include "presentation_pass.hpp"
 
 class Renderer {
+    struct ActorWinding {
+        NativeViewmodel &model;
+        gfx::Winding previous;
+
+        ActorWinding(NativeViewmodel &value, gfx::Winding winding) : model(value), previous(value.scene_winding()) {
+            model.scene_winding(winding);
+        }
+
+        ~ActorWinding() { model.scene_winding(previous); }
+    };
+
     RenderProfile profile;
-    Gl &gl;
-    gfx::Context graphicsContext;
-    RenderUniforms uniforms{gl};
+    std::optional<gfx::Context> ownedContext;
+    gfx::Context &graphicsContext;
+    gfx::Pipeline framePipeline;
     BhContext *core;
-    RenderResources resources{gl, core};
-    WaterPass water{gl, uniforms, core};
-    WorldPass world{gl, core, resources, uniforms, profile};
-    SkyPass sky{gl, core, resources, uniforms};
-    ShadowPass shadows{gl, resources, uniforms, world};
-    PresentationPass presentationPass{gl, core, profile};
+    RenderResources resources{graphicsContext, core};
+    WaterPass water{graphicsContext, core};
+    WorldPass world{graphicsContext, core, resources, profile};
+    SkyPass sky{graphicsContext, core, resources};
+    ShadowPass shadows{graphicsContext, resources, world};
+    PresentationPass presentationPass{graphicsContext, core, profile};
     bool flashlightEnabled = false;
     float fieldOfView = 90;
     std::vector<native_render::Actor> roomActors;
     std::optional<native_render::Actor> replayActor, compareActor;
     std::string outfit, packedLoadout;
-    static constexpr float no_clip_height = render_no_clip_height;
+    static constexpr float no_clip_height = gfx::no_clip_height;
     float clipHeight = no_clip_height;
     std::unique_ptr<NativeViewmodel> viewmodel;
     bool viewmodelVisible = true, floorWeaponsVisible = true;
@@ -108,7 +117,7 @@ class Renderer {
         if (!sourceLook || graphics.potato || graphics.fullbright || !world.lightmapInfo.hdr || hdrUnavailable)
             return nullptr;
         if (!hdr) try {
-                hdr = std::make_unique<SourceHdr>(graphicsContext, gl);
+                hdr = std::make_unique<SourceHdr>(graphicsContext);
             } catch (const std::exception &e) {
                 hdrUnavailable = true;
                 std::cerr << "Native HDR unavailable, drawing straight: " << e.what() << '\n';
@@ -129,7 +138,7 @@ class Renderer {
     EnhancedLook *enhanced_pass() {
         if (!graphics.look.composer() || graphics.potato || enhancedUnavailable) return nullptr;
         if (!enhanced) try {
-                enhanced = std::make_unique<EnhancedLook>(graphicsContext, gl);
+                enhanced = std::make_unique<EnhancedLook>(graphicsContext);
             } catch (const std::exception &e) {
                 enhancedUnavailable = true;
                 std::cerr << "Enhanced look unavailable, drawing the Source look: " << e.what() << '\n';
@@ -143,7 +152,6 @@ class Renderer {
     native::GraphicsSettings graphics, chosenGraphics;
     std::optional<native::RunnerView> runnerView;
     std::unique_ptr<GraphicsTarget> graphicsTarget;
-    bool anisotropySupported = false;
     uint32_t queuedWeaponFlags = 0, queuedAttackMode = 0;
     bool queuedAttack = false;
 
@@ -151,18 +159,12 @@ class Renderer {
     // Window pixels per point: the route's line widths are in points, like the website's CSS pixels.
     float pixelDensity = 1;
 
-    void water_uniforms(GLuint target, const float eye[3], const native::Matrix &vp) {
-        water.water_uniforms(target, eye, vp, viewportWidth, viewportHeight);
-    }
-
     void capture_refraction() {
-        water.capture_refraction(viewportWidth, viewportHeight, resources.ownedTextures, [&] {
-            if (frameLook)
-                frameLook->refraction_source();
-            else if (auto *hdr = hdr_pass())
-                hdr->refraction_source(viewportWidth, viewportHeight);
-            else if (graphics.target_needed())
-                graphicsTarget->refraction_source();
+        water.capture_refraction(viewportWidth, viewportHeight, [&]() -> gfx::TargetView {
+            if (frameLook) return frameLook->refraction_source();
+            if (auto *hdr = hdr_pass()) return hdr->refraction_source(viewportWidth, viewportHeight);
+            if (graphics.target_needed()) return graphicsTarget->refraction_source();
+            return graphicsContext.current_target();
         });
     }
 
@@ -266,15 +268,23 @@ public:
     }
 
     nlohmann::json graphics_limits() const {
-        GLint maximumSamples = 0;
-        gl.GetIntegerv(GL_MAX_SAMPLES, &maximumSamples);
-        float maximumAnisotropy = 1;
-        if (anisotropySupported) gl.GetFloatv(0x84ff, &maximumAnisotropy);
+        const int maximumSamples = graphicsContext.max_samples();
+        const float maximumAnisotropy = graphicsContext.max_anisotropy();
         return {{"msaaMax", std::min(8, maximumSamples)},
                 {"anisotropyMax", maximumAnisotropy},
                 {"waterReflections", false},
                 {"models", {"bunny"}},
                 {"msaaRestartRequired", false}};
+    }
+
+    gfx::Texture water_reflection_texture() const {
+        if (!water.reflectionDrawn) throw std::runtime_error("No water reflection was drawn");
+        return water.waterReflection->texture();
+    }
+
+    gfx::TargetView water_reflection_target() const {
+        if (!water.reflectionDrawn) throw std::runtime_error("No water reflection was drawn");
+        return water.waterReflection->view();
     }
 
     uint64_t refraction_captures() const { return water.refractionCaptures; }
@@ -358,21 +368,43 @@ public:
     ResourceLoading loading;
 
     Renderer(
-            Gl &g,
-            BhContext *c,
+            Gl &api,
+            BhContext *context,
             const std::filesystem::path &assetRoot = BUNNYHOP_NATIVE_ASSET_ROOT,
             bool deferred = false,
             std::unique_ptr<NativeViewmodel> prepared_viewmodel = {}
     )
-        : gl(g)
-        , graphicsContext(g)
-        , core(c) {
+        : ownedContext(std::in_place, api)
+        , graphicsContext(*ownedContext)
+        , core(context) {
+        begin_loading(assetRoot, deferred, std::move(prepared_viewmodel));
+    }
+
+    Renderer(
+            gfx::Context &graphics,
+            BhContext *context,
+            const std::filesystem::path &assetRoot = BUNNYHOP_NATIVE_ASSET_ROOT,
+            bool deferred = false,
+            std::unique_ptr<NativeViewmodel> prepared_viewmodel = {}
+    )
+        : graphicsContext(graphics)
+        , core(context) {
+        begin_loading(assetRoot, deferred, std::move(prepared_viewmodel));
+    }
+
+    void begin_loading(
+            const std::filesystem::path &assetRoot, bool deferred, std::unique_ptr<NativeViewmodel> prepared_viewmodel
+    ) {
         viewmodel = std::move(prepared_viewmodel);
         loading = prepare_resources(assetRoot);
         if (!deferred) {
             while (!poll_loading()) {
             }
         }
+    }
+
+    std::unique_ptr<NativeViewmodel> make_viewmodel(const std::filesystem::path &assetRoot) {
+        return std::make_unique<NativeViewmodel>(graphicsContext, assetRoot);
     }
 
     gfx::Context &graphics_context() { return graphicsContext; }
@@ -445,10 +477,11 @@ public:
     }
 
     ResourceLoading prepare_resources(std::filesystem::path assetRoot) {
+        framePipeline = graphicsContext.create_pipeline({});
         presentationPass.measureLabel.reserve(100);
-        world.prepare_program();
+        world.prepare_program(water);
         co_yield "world shader";
-        sky.prepare_program();
+        sky.prepare_program(water);
         shadows.prepare_depth_program();
         co_yield "sky shader";
         auto scene = prepare_scene();
@@ -459,24 +492,19 @@ public:
         while (!normal_loading.step())
             co_yield "normal texture";
         co_yield "resource";
-        gl.UseProgram(world.program);
-        gl.Uniform1i(uniforms.loc(world.program, "normalTexture"), 7);
-        gl.Uniform3fv(uniforms.loc(world.program, "sunDirection"), 1, world.sunDirection.data());
+        world.sceneValues.sunDirection = world.sunDirection;
         shadows.prepare_resources();
         presentationPass.presentation = std::make_unique<NativePresentation>(graphicsContext);
+        presentationPass.waterConstants = water.water_constants(presentationPass.presentation->shader_program());
         presentationPass.mapEffects.load(core);
 
-        anisotropySupported = SDL_GL_ExtensionSupported("GL_EXT_texture_filter_anisotropic");
         co_yield "viewmodel";
         if (viewmodel)
             viewmodel->prepare_graphics();
         else
-            viewmodel = std::make_unique<NativeViewmodel>(gl, assetRoot);
+            viewmodel = make_viewmodel(assetRoot);
         co_yield "resource";
-        gl.Enable(GL_DEPTH_TEST);
-        gl.DepthFunc(GL_LEQUAL);
-        gl.CullFace(GL_BACK);
-        gl.FrontFace(GL_CCW);
+        graphicsContext.pipeline(framePipeline);
         print_geometry();
     }
 
@@ -484,20 +512,15 @@ public:
         loading = {};
         presentationPass.ghostRoutes.reset();
         graphicsTarget.reset();
+        presentationPass.waterConstants.release(graphicsContext);
         presentationPass.presentation.reset();
         hdr.reset();
         viewmodel.reset();
         resources.destroy(world.worldMesh);
         resources.destroy(world.propMesh);
         resources.destroy(sky.skyMesh);
-        if (!resources.ownedTextures.empty())
-            gl.DeleteTextures(resources.ownedTextures.size(), resources.ownedTextures.data());
-        if (water.planesTexture) gl.DeleteTextures(1, &water.planesTexture);
-        if (resources.emptyVao) gl.DeleteVertexArrays(1, &resources.emptyVao);
-        if (world.program) gl.DeleteProgram(world.program);
-        if (sky.skyProgram) gl.DeleteProgram(sky.skyProgram);
-        if (shadows.depthProgram) gl.DeleteProgram(shadows.depthProgram);
-        if (shadows.cutoutDepthProgram) gl.DeleteProgram(shadows.cutoutDepthProgram);
+        resources.release();
+        graphicsContext.destroy(framePipeline);
     }
 
     // A replay watched in the runner's view: their shape and fit over the viewer's own graphics settings.
@@ -515,18 +538,12 @@ public:
         // The looks' passes link with the settings (at map load or when the look changes), never in a run's frame.
         enhanced_pass();
         if (graphics.target_needed() && !graphicsTarget)
-            graphicsTarget = std::make_unique<GraphicsTarget>(graphicsContext, gl);
+            graphicsTarget = std::make_unique<GraphicsTarget>(graphicsContext);
         sourceLook = graphics.source;
         if (hdr) hdr->bloom = graphics.bloom;
-        if (anisotropySupported) {
-            constexpr GLenum anisotropy = 0x84fe, maximumAnisotropy = 0x84ff;
-            float maximum = 1;
-            gl.GetFloatv(maximumAnisotropy, &maximum);
-            for (GLuint texture : resources.ownedTextures) {
-                gl.BindTexture(GL_TEXTURE_2D, texture);
-                gl.TexParameterf(GL_TEXTURE_2D, anisotropy, std::min(float(graphics.anisotropy), maximum));
-            }
-        }
+        const float anisotropy = std::min(float(graphics.anisotropy), graphicsContext.max_anisotropy());
+        resources.sampling(anisotropy);
+        sky.panorama_sampling(anisotropy);
     }
 
     // The Source look on or off (the Plain look). The Enhanced and Cinematic looks build on the Source look.
@@ -827,7 +844,9 @@ public:
         );
     }
 
-    void draw_sky_depth(const native::Matrix &vp) { sky.draw_sky_depth(vp, shadows.depthProgram, clipHeight); }
+    void draw_sky_depth(const native::Matrix &vp) {
+        sky.draw_sky_depth(vp, shadows.depthProgram, clipHeight, clipHeight != no_clip_height);
+    }
 
     void prepare_sun_light(const float eye[3], double seconds) {
         shadows.prepare_sun_light(eye, seconds, graphics, frameSun, visual_profile(), viewmodel.get(), roomActors);
@@ -847,12 +866,7 @@ public:
         frameSun = native::resolve_scene_sun(
                 world.mapSun, panorama ? &sky.skyPanoramaInfo : nullptr, lit, sky.frameSkyYaw, exposure
         );
-        gl.UseProgram(world.program);
-        gl.Uniform3fv(
-                uniforms.loc(world.program, "sunDirection"),
-                1,
-                (frameSun.from_pack ? frameSun.direction : world.sunDirection).data()
-        );
+        world.sceneValues.sunDirection = frameSun.from_pack ? frameSun.direction : world.sunDirection;
     }
 
     // The post-processing of one Enhanced or Cinematic frame (web composer-pipeline.ts applyAppearance).
@@ -892,6 +906,7 @@ public:
     // Players, ghosts and the replay runner in the water's mirror, as the website's scene capture shows them.
     void draw_reflected_actors(const native::Matrix &vp, const float eye[3], double seconds) {
         if (!viewmodel) return;
+        const ActorWinding winding(*viewmodel, gfx::Winding::clockwise);
         if (replayActor) viewmodel->draw_actor(*replayActor, vp, eye, seconds);
         if (compareActor) viewmodel->draw_actor(*compareActor, vp, eye, seconds);
         for (const auto &actor : roomActors)
@@ -913,12 +928,10 @@ public:
                 clipHeight,
                 [&](const float mirroredEye[3], float reflectionPlane) {
                     draw_sky_backdrop(mirroredEye, vp, aspect, true);
-                    gl.Enable(GL_CLIP_DISTANCE0);
                     draw_3d_sky(eye, aspect, seconds, reflectionPlane);
                 },
                 [&](const float mirroredEye[3]) {
-                    gl.ActiveTexture(GL_TEXTURE7);
-                    gl.BindTexture(GL_TEXTURE_2D, resources.white);
+                    resources.bind(7, resources.white);
                     draw_sky_depth(vp);
                     draw_scene(vp, mirroredEye, false, seconds, true);
                 },
@@ -932,26 +945,64 @@ public:
         }
     }
 
-    void
-    draw(int width,
-         int height,
-         const float eye[3],
-         const native::Input &input,
-         const BhSnapshot *state = nullptr,
-         double seconds = -1) {
-        if (width <= 0 || height <= 0) return;
-        const int outputWidth = width, outputHeight = height;
-        GLint outputTarget = 0;
-        gl.GetIntegerv(GL_FRAMEBUFFER_BINDING, &outputTarget);
-        const auto graphicsView = native::graphics_view(graphics, width, height);
-        if (graphics.target_needed()) {
-            graphicsTarget->begin(graphicsView, graphics.samples);
-            width = graphicsView.width;
-            height = graphicsView.height;
+    struct Frame {
+        int outputWidth = 0, outputHeight = 0, width = 0, height = 0;
+        native::GraphicsView view;
+        gfx::TargetView output, scene;
+        double seconds = 0, dt = 0;
+        float aspect = 1;
+        native::Matrix projection{};
+        SourceHdr *hdr = nullptr;
+    };
+
+    void refresh_lightmap() {
+        auto phaseStart = profile.profile_now();
+        BhImage changedLightmap{};
+        const int lightmapChanged = bh_lightmap_update(core, &changedLightmap);
+        profile.profile_elapsed(profile.frameProfile.lightmapRefresh, phaseStart);
+        phaseStart = profile.profile_now();
+        if (lightmapChanged > 0) {
+            if (profile.profiling) profile.frameProfile.atlasUpdateBytes = changedLightmap.byte_count;
+            graphicsContext.update_texture(
+                    world.lightmap,
+                    {0, 0, int(changedLightmap.width), int(changedLightmap.height)},
+                    changedLightmap.rgba
+            );
         }
-        viewportWidth = width;
-        viewportHeight = height;
-        if (seconds < 0) seconds = SDL_GetTicks() / 1000.;
+        profile.profile_elapsed(profile.frameProfile.lightmapUpload, phaseStart);
+    }
+
+    void begin_composer(Frame &frame) {
+        frame.scene = graphicsContext.current_target();
+        frame.hdr = hdr_pass();
+        frameLook = enhanced_pass();
+        if (profile.profiling) profile.frameProfile.hdrEffective = frame.hdr != nullptr || (frameLook && hdr_object());
+        if (frameLook) {
+            frameLook->samples(graphics.samples);
+            frameLook->begin(frame.width, frame.height);
+        } else if (frame.hdr) {
+            frame.hdr->samples(graphics.samples);
+            frame.hdr->begin(frame.width, frame.height);
+        }
+    }
+
+    Frame begin_frame(int width, int height, const float eye[3], const native::Input &input, double seconds) {
+        Frame frame;
+        frame.outputWidth = width;
+        frame.outputHeight = height;
+        frame.output = graphicsContext.current_target();
+        frame.output.desc.width = width;
+        frame.output.desc.height = height;
+        graphicsContext.bind_target(frame.output);
+        frame.view = native::graphics_view(graphics, width, height);
+        if (graphics.target_needed()) {
+            graphicsTarget->begin(frame.view, graphics.samples);
+            width = frame.view.width;
+            height = frame.view.height;
+        }
+        frame.width = viewportWidth = width;
+        frame.height = viewportHeight = height;
+        frame.seconds = seconds < 0 ? SDL_GetTicks() / 1000. : seconds;
         lastYaw = input.yaw();
         lastPitch = input.pitch;
         if (viewmodel) viewmodel->view_angles(float(lastYaw), float(lastPitch));
@@ -960,99 +1011,93 @@ public:
             profile.frameProfile.hdrAuthored = world.lightmapInfo.hdr;
             profile.frameProfile.waterVolumes = water.volumes.size();
         }
-        auto phaseStart = profile.profile_now();
-        BhImage changedLightmap{};
-        const int lightmapChanged = bh_lightmap_update(core, &changedLightmap);
-        profile.profile_elapsed(profile.frameProfile.lightmapRefresh, phaseStart);
-        phaseStart = profile.profile_now();
-        if (lightmapChanged > 0) {
-            if (profile.profiling) profile.frameProfile.atlasUpdateBytes = changedLightmap.byte_count;
-            gl.ActiveTexture(GL_TEXTURE1);
-            gl.BindTexture(GL_TEXTURE_2D, world.lightmap);
-            gl.TexImage2D(
-                    GL_TEXTURE_2D,
-                    0,
-                    GL_SRGB8_ALPHA8,
-                    changedLightmap.width,
-                    changedLightmap.height,
-                    0,
-                    GL_RGBA,
-                    GL_UNSIGNED_BYTE,
-                    changedLightmap.rgba
-            );
-        }
-        profile.profile_elapsed(profile.frameProfile.lightmapUpload, phaseStart);
-        const double dt = lastSeconds < 0 ? 0 : std::max(0., seconds - lastSeconds);
-        lastSeconds = seconds;
-        const float aspect = float(width) / height;
-        const auto vp = camera(eye, lastYaw, lastPitch, aspect);
+        refresh_lightmap();
+        frame.dt = lastSeconds < 0 ? 0 : std::max(0., frame.seconds - lastSeconds);
+        lastSeconds = frame.seconds;
+        frame.aspect = float(width) / height;
+        frame.projection = camera(eye, lastYaw, lastPitch, frame.aspect);
         resolve_look_lighting();
-        prepare_sun_light(eye, seconds);
-        gl.Viewport(0, 0, width, height);
-        plan_water(eye, vp);
-        if (water.waterPlan.reflection_height) draw_water_reflection(eye, aspect, width, height, seconds);
-        GLint frameTarget = 0;
-        gl.GetIntegerv(GL_FRAMEBUFFER_BINDING, &frameTarget);
-        SourceHdr *pass = hdr_pass();
-        frameLook = enhanced_pass();
-        if (profile.profiling) profile.frameProfile.hdrEffective = pass != nullptr || (frameLook && hdr_object());
-        if (frameLook) {
-            frameLook->samples(graphics.samples);
-            frameLook->begin(width, height);
-        } else if (pass) {
-            pass->samples(graphics.samples);
-            pass->begin(width, height);
-        }
-        phaseStart = profile.profile_now();
-        gl.Viewport(0, 0, width, height);
-        gl.ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        gl.DepthMask(GL_TRUE);
-        if (graphics.potato)
-            gl.ClearColor(.616f, .733f, .847f, 1);
-        else
-            gl.ClearColor(.24, .34, .45, 1);
-        gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        draw_sky_backdrop(eye, vp, aspect, false);
-        const double skySceneBefore =
+        prepare_sun_light(eye, frame.seconds);
+        graphicsContext.viewport({0, 0, width, height});
+        plan_water(eye, frame.projection);
+        if (water.waterPlan.reflection_height) draw_water_reflection(eye, frame.aspect, width, height, frame.seconds);
+        begin_composer(frame);
+        return frame;
+    }
+
+    void draw_frame_sky(const Frame &frame, const float eye[3]) {
+        auto phaseStart = profile.profile_now();
+        graphicsContext.viewport({0, 0, frame.width, frame.height});
+        graphicsContext.pipeline(framePipeline);
+        const std::array<float, 4> background = graphics.potato ? std::array<float, 4>{.616f, .733f, .847f, 1}
+                                                                : std::array<float, 4>{.24f, .34f, .45f, 1};
+        graphicsContext.clear_color(background);
+        graphicsContext.clear_depth();
+        draw_sky_backdrop(eye, frame.projection, frame.aspect, false);
+        const double sceneBefore =
                 profile.frameProfile.buildCull + profile.frameProfile.sort + profile.frameProfile.submit;
-        draw_3d_sky(eye, aspect, seconds);
-        gl.ActiveTexture(GL_TEXTURE7);
-        gl.BindTexture(GL_TEXTURE_2D, resources.white);
-        draw_sky_depth(vp);
+        draw_3d_sky(eye, frame.aspect, frame.seconds);
+        resources.bind(7, resources.white);
+        draw_sky_depth(frame.projection);
         profile.profile_elapsed(profile.frameProfile.sky, phaseStart);
         if (profile.profiling)
             profile.frameProfile.sky -= profile.frameProfile.buildCull + profile.frameProfile.sort
-                                        + profile.frameProfile.submit - skySceneBefore;
-        draw_scene(vp, eye, false, seconds);
-        phaseStart = profile.profile_now();
-        if (viewmodel) {
-            auto detailStart = profile.profile_now();
-            size_t floorCount = 0;
-            const auto *floor = bh_floor_weapons(core, &floorCount);
-            profile.profile_elapsed(profile.frameProfile.floorReport, detailStart);
-            if (profile.profiling) profile.frameProfile.floorCount = floorCount;
-            detailStart = profile.profile_now();
-            for (size_t i = 0; floorWeaponsVisible && floor && i < floorCount; i++)
-                viewmodel->draw_floor(floor[i], vp, eye, seconds);
-            profile.profile_elapsed(profile.frameProfile.floorDraw, detailStart);
-            detailStart = profile.profile_now();
-            if (replayActor) viewmodel->draw_actor(*replayActor, vp, eye, seconds);
-            if (compareActor) viewmodel->draw_actor(*compareActor, vp, eye, seconds);
-            for (const auto &actor : roomActors)
-                viewmodel->draw_actor(actor, vp, eye, seconds);
-            profile.profile_elapsed(profile.frameProfile.actorDraw, detailStart);
-        }
-        draw_presentation(vp, eye, seconds);
-        profile.profile_elapsed(profile.frameProfile.presentation, phaseStart);
-        phaseStart = profile.profile_now();
+                                        + profile.frameProfile.submit - sceneBefore;
+    }
+
+    void draw_frame_actors(const Frame &frame, const float eye[3]) {
+        if (!viewmodel) return;
+        auto detailStart = profile.profile_now();
+        size_t floorCount = 0;
+        const auto *floor = bh_floor_weapons(core, &floorCount);
+        profile.profile_elapsed(profile.frameProfile.floorReport, detailStart);
+        if (profile.profiling) profile.frameProfile.floorCount = floorCount;
+        detailStart = profile.profile_now();
+        for (size_t i = 0; floorWeaponsVisible && floor && i < floorCount; i++)
+            viewmodel->draw_floor(floor[i], frame.projection, eye, frame.seconds);
+        profile.profile_elapsed(profile.frameProfile.floorDraw, detailStart);
+        detailStart = profile.profile_now();
+        if (replayActor) viewmodel->draw_actor(*replayActor, frame.projection, eye, frame.seconds);
+        if (compareActor) viewmodel->draw_actor(*compareActor, frame.projection, eye, frame.seconds);
+        for (const auto &actor : roomActors)
+            viewmodel->draw_actor(actor, frame.projection, eye, frame.seconds);
+        profile.profile_elapsed(profile.frameProfile.actorDraw, detailStart);
+    }
+
+    void finish_composer(const Frame &frame, const float eye[3]) {
+        auto phaseStart = profile.profile_now();
         if (frameLook)
-            frameLook->finish(GLuint(frameTarget), look_frame(vp, eye, aspect), hdr_object(), dt);
-        else if (pass)
-            pass->finish(GLuint(frameTarget), width, height, dt);
+            frameLook->finish(frame.scene, look_frame(frame.projection, eye, frame.aspect), hdr_object(), frame.dt);
+        else if (frame.hdr)
+            frame.hdr->finish(frame.scene, frame.width, frame.height, frame.dt);
         frameLook = nullptr;
         profile.profile_elapsed(profile.frameProfile.hdrFinish, phaseStart);
-        phaseStart = profile.profile_now();
-        auto viewmodelStart = profile.profile_now();
+    }
+
+    void draw_spectated_viewmodel(const Frame &frame, BhSnapshot &snapshot) {
+        BhWeaponReport remote{};
+        remote.active = spectatedActor->frame.weapon;
+        remote.silencer = spectatedActor->silenced ? 1 : 0;
+        snapshot.player.tick = spectatedActor->frame.tick;
+        const auto pulses = spectatedAttacks.take();
+        const unsigned mode = pulses.empty() ? 0 : pulses.back();
+        viewmodel->draw(
+                frame.width,
+                frame.height,
+                snapshot,
+                remote.active,
+                spectatedFlags,
+                !pulses.empty(),
+                mode,
+                frame.seconds,
+                &remote,
+                !pulses.empty() || spectatedFlags != 0
+        );
+        spectatedFlags = 0;
+    }
+
+    void draw_frame_viewmodel(const Frame &frame, const BhSnapshot *state) {
+        auto phaseStart = profile.profile_now();
         BhSnapshot snapshot{};
         if (state)
             snapshot = *state;
@@ -1063,30 +1108,12 @@ public:
         bh_weapon_report(core, &weapon);
         bh_attack_report(core, &attack);
         if (viewmodel && viewmodelVisible) {
-            if (spectatedActor) {
-                BhWeaponReport remote{};
-                remote.active = spectatedActor->frame.weapon;
-                remote.silencer = spectatedActor->silenced ? 1 : 0;
-                snapshot.player.tick = spectatedActor->frame.tick;
-                const auto pulses = spectatedAttacks.take();
-                const unsigned mode = pulses.empty() ? 0 : pulses.back();
+            if (spectatedActor)
+                draw_spectated_viewmodel(frame, snapshot);
+            else
                 viewmodel->draw(
-                        width,
-                        height,
-                        snapshot,
-                        remote.active,
-                        spectatedFlags,
-                        !pulses.empty(),
-                        mode,
-                        seconds,
-                        &remote,
-                        !pulses.empty() || spectatedFlags != 0
-                );
-                spectatedFlags = 0;
-            } else
-                viewmodel->draw(
-                        width,
-                        height,
+                        frame.width,
+                        frame.height,
                         snapshot,
                         viewmodelWeapon.value_or(weapon.active),
                         viewmodelWeapon ? 0 : weapon.flags | queuedWeaponFlags,
@@ -1094,35 +1121,79 @@ public:
                         viewmodelWeapon ? 0
                         : queuedAttack  ? queuedAttackMode
                                         : attack.mode,
-                        seconds,
+                        frame.seconds,
                         viewmodelWeapon ? nullptr : &weapon
                 );
         }
-        profile.profile_elapsed(profile.frameProfile.viewmodel, viewmodelStart);
+        profile.profile_elapsed(profile.frameProfile.viewmodel, phaseStart);
         profile.profile_elapsed(profile.frameProfile.presentation, phaseStart);
+    }
+
+    void finish_frame(const Frame &frame) {
         spectatedAttacks.clear();
-        spectatedFlags = 0;  // Hidden third-person viewmodels must not replay stale pulses on return to eye mode.
+        // Hidden third-person viewmodels must not replay stale pulses on return to eye mode.
+        spectatedFlags = 0;
         queuedWeaponFlags = queuedAttackMode = 0;
         queuedAttack = false;
-        gl.DepthMask(GL_TRUE);
-        gl.Enable(GL_DEPTH_TEST);
-        gl.Disable(GL_BLEND);
-        gl.Disable(GL_POLYGON_OFFSET_FILL);
-        if (graphics.target_needed()) {
-            graphicsTarget->finish(GLuint(outputTarget), outputWidth, outputHeight, graphicsView, graphics);
+        graphicsContext.depth_write(true);
+        graphicsContext.depth_test(true);
+        graphicsContext.blend(false);
+        if (graphics.target_needed())
+            graphicsTarget->finish(frame.output, frame.outputWidth, frame.outputHeight, frame.view, graphics);
+    }
+
+    void
+    draw(int width,
+         int height,
+         const float eye[3],
+         const native::Input &input,
+         const BhSnapshot *state = nullptr,
+         double seconds = -1) {
+        if (width <= 0 || height <= 0) return;
+        const auto frame = begin_frame(width, height, eye, input, seconds);
+        draw_frame_sky(frame, eye);
+        draw_scene(frame.projection, eye, false, frame.seconds);
+        auto phaseStart = profile.profile_now();
+        draw_frame_actors(frame, eye);
+        draw_presentation(frame.projection, eye, frame.seconds);
+        profile.profile_elapsed(profile.frameProfile.presentation, phaseStart);
+        finish_composer(frame, eye);
+        draw_frame_viewmodel(frame, state);
+        finish_frame(frame);
+    }
+
+    std::vector<std::byte> screenshot_pixels(int width, int height) {
+        constexpr uint64_t readback_timeout_ns = 5'000'000'000;
+        auto source = graphicsContext.current_target();
+        source.desc.width = width;
+        source.desc.height = height;
+        auto readback = graphicsContext.create_readback(width, height);
+        std::vector<std::byte> pixels(gfx::Context::readback_bytes(readback));
+        try {
+            graphicsContext.enqueue_readback(source, readback);
+            graphicsContext.collect(readback, pixels, gfx::RowOrigin::top, readback_timeout_ns);
+        } catch (...) {
+            graphicsContext.destroy(readback);
+            graphicsContext.bind_target(source);
+            throw;
         }
+        graphicsContext.destroy(readback);
+        graphicsContext.bind_target(source);
+        return pixels;
     }
 
     void screenshot(const std::string &path, int width, int height) {
         if (width <= 0 || height <= 0) throw std::runtime_error("Cannot capture empty framebuffer");
-        std::vector<uint8_t> pixels(size_t(width) * height * 3);
-        gl.PixelStorei(GL_PACK_ALIGNMENT, 1);
-        gl.ReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+        const auto pixels = screenshot_pixels(width, height);
         std::ofstream file(path, std::ios::binary);
         if (!file) throw std::runtime_error("Cannot write screenshot: " + path);
         file << "P6\n" << width << ' ' << height << "\n255\n";
-        for (int y = height - 1; y >= 0; y--)
-            file.write(reinterpret_cast<const char *>(pixels.data() + size_t(y) * width * 3), width * 3);
+        std::vector<std::byte> row(size_t(width) * 3);
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x)
+                std::copy_n(pixels.data() + (size_t(y) * width + x) * 4, 3, row.data() + size_t(x) * 3);
+            file.write(reinterpret_cast<const char *>(row.data()), std::streamsize(row.size()));
+        }
         if (!file) throw std::runtime_error("Screenshot write failed: " + path);
         std::cout << "Screenshot: " << path << '\n';
     }
