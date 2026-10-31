@@ -1,6 +1,7 @@
 #pragma once
 #include <SDL3/SDL.h>
 #include "gfx_types.hpp"
+#include "window_presenter.hpp"
 #include <memory>
 #include <optional>
 #include <string>
@@ -33,10 +34,10 @@ struct LowLatencySupport {
 // Marker order is frame_start (sleep, simulation start, input sample), render_start (simulation end,
 // render submit start), present (render submit end, present start/end). A native device failure retains
 // borrowed objects until the caller can unwind and exit cleanly; interop failures return to the GL swap.
-class LowLatencyPresenter {
+class LowLatencyPresenter : public WindowPresenter {
 public:
     LowLatencyPresenter();
-    ~LowLatencyPresenter();
+    ~LowLatencyPresenter() override;
 
     LowLatencyPresenter(const LowLatencyPresenter &) = delete;
     LowLatencyPresenter &operator=(const LowLatencyPresenter &) = delete;
@@ -49,7 +50,7 @@ public:
     bool configure(SDL_Window *window, LowLatencyMode mode, int fps_limit, bool flash_indicator);
 
     bool initialize_native(SDL_Window *window, bool warp = false);
-    bool exclusive(bool enabled);
+    bool exclusive(bool enabled) override;
 
     bool native_mode() const { return native_; }
 

@@ -11,7 +11,9 @@ $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
     if ($_ -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process') }
 }
 $vcpkg = Join-Path (Get-Location) 'target/native-deps/vcpkg'
-Run 'git' @('clone', '--filter=blob:none', '--no-checkout', 'https://github.com/microsoft/vcpkg.git', $vcpkg)
+if (!(Test-Path (Join-Path $vcpkg '.git'))) {
+    Run 'git' @('clone', '--filter=blob:none', '--no-checkout', 'https://github.com/microsoft/vcpkg.git', $vcpkg)
+}
 Run 'git' @('-C', $vcpkg, 'checkout', '--detach', '8bd269459edab68222274040cb79608590b6c91e')
 Run (Join-Path $vcpkg 'bootstrap-vcpkg.bat') @('-disableMetrics')
 Run (Join-Path $vcpkg 'vcpkg.exe') @('install', 'curl:x64-windows', 'zlib:x64-windows', '--disable-metrics')
