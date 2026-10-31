@@ -143,7 +143,7 @@ void main(){
  vec2 uv1=edgeUv-offset,uv2=edgeUv+offset;float end1=lumaAt(uv1)-localAverage,end2=lumaAt(uv2)-localAverage;
  bool done1=abs(end1)>=gradient,done2=abs(end2)>=gradient;
  const float steps[10]=float[10](1.,1.,1.,1.5,2.,2.,2.,2.,4.,8.);
- for(int i=0;i<10&&!(done1&&done2);i++){
+ for(int i=0;i<10;i++){if(done1&&done2)break;
   if(!done1){uv1-=offset*steps[i];end1=lumaAt(uv1)-localAverage;done1=abs(end1)>=gradient;}
   if(!done2){uv2+=offset*steps[i];end2=lumaAt(uv2)-localAverage;done2=abs(end2)>=gradient;}
  }
