@@ -10,7 +10,6 @@ namespace native::gfx {
 class OpenGlContext {
     Gl &gl_;
     TargetView target_;
-    Rect viewport_;
 
     template <typename Function>
     static uintptr_t generate(Function function) {
@@ -172,15 +171,21 @@ public:
                 || uint64_t(field.offset) + field.size > layout.byte_size
                 || (field.type == ConstantType::matrix4 && field.matrix_stride != 16))
                 throw std::runtime_error("Invalid reflected constant layout");
-            for (uint32_t i = 0; i < field.count; ++i) {
-                const std::string name =
-                        field.count == 1 ? field.name : std::string(field.name) + "[" + std::to_string(i) + "]";
-                result.fields.push_back(
-                        {gl_.GetUniformLocation(GLuint(program.id), name.c_str()),
-                         field.offset + i * stride,
-                         field.type}
-                );
+            const auto location = gl_.GetUniformLocation(GLuint(program.id), field.name);
+            if (location < 0) continue;
+            const bool integer = field.type == ConstantType::int1 || field.type == ConstantType::bool32;
+            const bool pack = stride != size || field.type == ConstantType::bool32;
+            const uint32_t packing_offset =
+                    uint32_t(integer ? result.packed_integers.size() : result.packed_floats.size());
+            if (pack) {
+                if (integer)
+                    result.packed_integers.resize(packing_offset + field.count);
+                else
+                    result.packed_floats.resize(packing_offset + field.count * (size / 4));
             }
+            result.fields.push_back(
+                    {location, field.offset, field.type, field.count, size, stride, packing_offset, pack}
+            );
         }
         return result;
     }
@@ -189,28 +194,41 @@ public:
     void constants(const ConstantBinding &binding, const void *bytes) {
         for (const auto &field : binding.fields) {
             const auto *data = static_cast<const std::byte *>(bytes) + field.offset;
-            const auto *floats = reinterpret_cast<const float *>(data);
+            const float *floats = reinterpret_cast<const float *>(data);
+            const int32_t *integers = reinterpret_cast<const int32_t *>(data);
+            if (field.pack && (field.type == ConstantType::int1 || field.type == ConstantType::bool32)) {
+                auto *packed = binding.packed_integers.data() + field.packing_offset;
+                for (uint32_t i = 0; i < field.count; ++i) {
+                    std::memcpy(packed + i, data + i * field.stride, 4);
+                    if (field.type == ConstantType::bool32) packed[i] = packed[i] != 0;
+                }
+                integers = packed;
+            } else if (field.pack) {
+                auto *packed = binding.packed_floats.data() + field.packing_offset;
+                for (uint32_t i = 0; i < field.count; ++i)
+                    std::memcpy(packed + i * (field.size / 4), data + i * field.stride, field.size);
+                floats = packed;
+            }
+            const auto count = GLsizei(field.count);
             switch (field.type) {
                 case ConstantType::float1:
-                    gl_.Uniform1f(field.location, *floats);
+                    gl_.Uniform1fv(field.location, count, floats);
                     break;
                 case ConstantType::float2:
-                    gl_.Uniform2fv(field.location, 1, floats);
+                    gl_.Uniform2fv(field.location, count, floats);
                     break;
                 case ConstantType::float3:
-                    gl_.Uniform3fv(field.location, 1, floats);
+                    gl_.Uniform3fv(field.location, count, floats);
                     break;
                 case ConstantType::float4:
-                    gl_.Uniform4fv(field.location, 1, floats);
+                    gl_.Uniform4fv(field.location, count, floats);
                     break;
                 case ConstantType::int1:
-                    gl_.Uniform1i(field.location, *reinterpret_cast<const int32_t *>(data));
-                    break;
                 case ConstantType::bool32:
-                    gl_.Uniform1i(field.location, *reinterpret_cast<const uint32_t *>(data) != 0 ? 1 : 0);
+                    gl_.Uniform1iv(field.location, count, integers);
                     break;
                 case ConstantType::matrix4:
-                    gl_.UniformMatrix4fv(field.location, 1, GL_FALSE, floats);
+                    gl_.UniformMatrix4fv(field.location, count, GL_FALSE, floats);
                     break;
             }
         }
@@ -398,12 +416,13 @@ public:
         target_ = target;
     }
 
-    Rect current_viewport() const { return viewport_; }
-
-    void viewport(Rect rect) {
-        gl_.Viewport(rect.x, rect.y, rect.width, rect.height);
-        viewport_ = rect;
+    Rect current_viewport() const {
+        GLint viewport[4]{};
+        gl_.GetIntegerv(GL_VIEWPORT, viewport);
+        return {viewport[0], viewport[1], viewport[2], viewport[3]};
     }
+
+    void viewport(Rect rect) { gl_.Viewport(rect.x, rect.y, rect.width, rect.height); }
 
     void clear_color(std::array<float, 4> color) {
         gl_.ClearColor(color[0], color[1], color[2], color[3]);

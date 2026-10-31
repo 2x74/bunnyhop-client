@@ -178,9 +178,13 @@ struct ConstantBinding {
         int32_t location;
         uint32_t offset;
         ConstantType type;
+        uint32_t count = 1, size = 4, stride = 4, packing_offset = 0;
+        bool pack = false;
     };
 
     std::vector<Field> fields;
+    mutable std::vector<float> packed_floats;
+    mutable std::vector<int32_t> packed_integers;
     uint32_t byte_size = 0;
     uintptr_t id = 0;
 };
