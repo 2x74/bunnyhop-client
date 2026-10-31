@@ -252,12 +252,33 @@ shader embedding and comparison limits. The Windows build embeds deduplicated DX
 resource; every manifest alias is addressable and the executable hash covers the archive. The presenter remains
 the only owner of the real device, swapchain, resize, Present and latency markers.
 
-[Windows WARP qualification](https://github.com/2x74/bunnyhop-client/actions/runs/41223382994) passed MSVC,
-the debug-layer hazard checks and 15 image comparisons against Apple OpenGL. Maximum RGB channel error was 1.
-The expanded resource/postprocessing qualification is in the same workflow on `ci/d3d11-backend`.
+[Windows WARP qualification](https://github.com/2x74/bunnyhop-client/actions/runs/41226181036) passed MSVC,
+the debug-layer hazard checks and 16 image comparisons against Apple OpenGL. Maximum RGB channel error was 1.
+The same run passes the real SourceHdr/EnhancedLook tests, packed/padded array upload checks, borrowed RTV/DSV
+metadata and RGBA8-to-RGBA16F refraction conversion. The GL test skips on the runner's OpenGL 1.1 path;
+all four non-GL-context tests execute. The shader archive contains 11,250,406 deduplicated DXBC/reflection bytes.
 The frozen 41-image Mac suite also remains byte-identical with the forced dispatcher and R8 contact target.
 These results cover offscreen seam operations, video, presentation and postprocessing; real world rendering and
 swapchain presentation require the later caller integration and hardware qualification.
+
+The forced-dispatch benchmark against `9b46cf7` used seven alternating pairs with the frozen 160x90 Source specs,
+500 warmup and 5,000 measured frames per run. The isolated dispatcher binary is `0a6604e`, before merging other
+callers. A second comparison uses the merged caller tree. No local build/test ran during either measurement;
+process checks found no compiler load at the boundaries of the isolated comparison. A first attempt overlapped
+compilation and was interrupted and excluded. Results are GPU-completed batch microseconds per frame:
+
+| Workload | Seam baseline | Dispatcher | Paired delta, 95% interval |
+| --- | ---: | ---: | ---: |
+| World | 490.984 | 477.883 | -13.101 [-30.053, +3.852] |
+| World + 128 presentation draws | 710.149 | 713.950 | +3.801 [-7.938, +15.540] |
+| Merged callers, world | 498.400 | 493.519 | -4.881 [-17.610, +7.847] |
+| Merged callers, world + 128 draws | 698.697 | 702.180 | +3.483 [-7.888, +14.853] |
+
+The intervals include zero; no regression was detected. These Mac offscreen results do not measure Windows
+hardware or a 330-microsecond presented frame. Raw frame samples/specs are preserved under
+`target/d3d11-backend/performance-quiet` and `performance-final`. The full Mac build passed before CTest;
+100 selected tests passed, with menu-focus/window-mode tests excluded. Ten shader pipeline tests and 51 release
+evidence tests passed; the pinned release workflow is unchanged.
 
 ## Remaining migration split
 

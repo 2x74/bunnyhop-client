@@ -370,7 +370,7 @@ public:
         }
         gl_.SamplerParameteri(GLuint(result.id), GL_TEXTURE_MIN_FILTER, GLint(minification));
         gl_.SamplerParameteri(
-                result.id, GL_TEXTURE_MAG_FILTER, desc.magnification == Filter::linear ? GL_LINEAR : GL_NEAREST
+                GLuint(result.id), GL_TEXTURE_MAG_FILTER, desc.magnification == Filter::linear ? GL_LINEAR : GL_NEAREST
         );
         const Address axes[] = {desc.wrap_s, desc.wrap_t, desc.wrap_r};
         const GLenum parameters[] = {GL_TEXTURE_WRAP_S, GL_TEXTURE_WRAP_T, GL_TEXTURE_WRAP_R};
