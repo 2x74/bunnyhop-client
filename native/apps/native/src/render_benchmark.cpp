@@ -73,6 +73,16 @@ int main(int argc, char **argv) {
         native::Input input;
         input.set_angles(pitch, yaw);
         native::Renderer renderer(gl, core.get());
+        const int presentationDraws = spec.value("presentationDraws", 0);
+        if (presentationDraws < 0 || presentationDraws > 4096)
+            throw std::runtime_error("Invalid presentation draw count");
+        std::unique_ptr<native::NativePresentation> presentation;
+        if (presentationDraws) {
+            presentation = std::make_unique<native::NativePresentation>(gl);
+            presentation->quad(
+                    {{{-.8f, -.8f, 0}, {-.7f, -.8f, 0}, {-.7f, -.7f, 0}, {-.8f, -.7f, 0}}}, {1, .5f, .25f, .5f}
+            );
+        }
         renderer.set_viewmodel_visible(false);
         renderer.set_zones_visible(false);
         renderer.set_triggers_visible(false);
@@ -102,8 +112,13 @@ int main(int argc, char **argv) {
             if (syncMode != "batch") finish();
             if (syncMode == "readback") gl.ReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
         };
+        const auto draw = [&](int frame) {
+            renderer.draw(width, height, eye.data(), input, &snapshot, double(frame) / 60);
+            for (int i = 0; i < presentationDraws; ++i)
+                presentation->draw(native::identity(), eye.data());
+        };
         for (int i = 0; i < warmup; i++) {
-            renderer.draw(width, height, eye.data(), input, &snapshot, double(i) / 60);
+            draw(i);
             sync();
         }
         finish();
@@ -116,7 +131,7 @@ int main(int argc, char **argv) {
         for (int i = 0; i < frames; i++) {
             SDL_PumpEvents();
             const auto start = Clock::now();
-            renderer.draw(width, height, eye.data(), input, &snapshot, double(warmup + i) / 60);
+            draw(warmup + i);
             const auto submitted = Clock::now();
             if (syncMode != "batch") finish();
             const auto finished = Clock::now();
@@ -195,6 +210,7 @@ int main(int argc, char **argv) {
         result["settings"]["effects"] = effects;
         result["settings"]["floorWeapons"] = floorWeapons;
         result["visualTime"] = "warmup starts at 0; measured starts at warmup/60";
+        result["presentationDraws"] = presentationDraws;
         result["method"] = "Fixed camera world render; sync=" + syncMode
                            + "; batch includes final GPU completion; no window presentation, simulation, UI or network";
         std::ofstream(out) << result.dump(2) << '\n';
