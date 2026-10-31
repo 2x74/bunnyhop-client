@@ -33,6 +33,11 @@ public:
 
     static size_t readback_bytes(const Readback &readback) { return OpenGlContext::readback_bytes(readback); }
 
+    void reset_state() {
+        if (backend_ == Backend::opengl) return opengl_->reset_state();
+        return d3d11_->reset_state();
+    }
+
     float max_anisotropy() const {
         if (backend_ == Backend::opengl) return opengl_->max_anisotropy();
         return d3d11_->max_anisotropy();
@@ -211,6 +216,11 @@ public:
     void resolve_depth(const TargetView &source, const TargetView &destination) {
         if (backend_ == Backend::opengl) return opengl_->resolve_depth(source, destination);
         return d3d11_->resolve_depth(source, destination);
+    }
+
+    void prepare_color_copy(const TargetView &source) {
+        if (backend_ == Backend::opengl) return opengl_->prepare_color_copy(source);
+        return d3d11_->prepare_color_copy(source);
     }
 
     void copy_color(const TargetView &source, Rect region, Texture destination, int x = 0, int y = 0) {

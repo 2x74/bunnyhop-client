@@ -314,6 +314,7 @@ void video(Context &context, int supersample, int samples) {
     const std::array<native_render::Vec3, 4> quad = {{{-.8f, -.7f, 0}, {.2f, -.7f, 0}, {.2f, .5f, 0}, {-.8f, .5f, 0}}};
     const float eye[] = {0, 0, 2};
     for (size_t frame = 0; frame < 6; ++frame) {
+        context.reset_state();
         targets.begin_frame();
         for (int sample = 0; sample < samples; ++sample) {
             targets.bind_scene();
@@ -374,9 +375,11 @@ void run(Context &context) {
     cubes(context);
     video(context, 1, 1);
     video(context, 2, 3);
-    auto fence = context.signal();
-    require(context.wait(fence, timeout_ns, true) == Wait::ready, "Standalone fence timed out");
-    context.destroy(fence);
+    for (int i = 0; i < 130; ++i) {
+        auto fence = context.signal();
+        require(context.wait(fence, timeout_ns, true) == Wait::ready, "Standalone fence timed out");
+        context.destroy(fence);
+    }
     context.check_error("Graphics seam error");
     std::cout << "Graphics/subsystem checks passed\n";
 }

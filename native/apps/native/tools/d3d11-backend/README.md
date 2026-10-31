@@ -34,9 +34,15 @@ SDL at the native client's pinned revision and compiles the actual backend and s
 
 - `Context(gl)` keeps OpenGL. Windows can opt in with `Context(gl, &d3d11, Backend::d3d11)`;
   a null D3D11 pointer selects OpenGL. `Context(d3d11)` is for a D3D-only caller or WARP.
+  Call `reset_state()` after any presenter/external use of the immediate context. This clears D3D
+  bindings and their caches, including untracked SRVs; OpenGL continues to tolerate legacy state changes.
 - `D3D11Context({device, immediate_context})` borrows both pointers. Resources must die before
   their context/device. The presenter remains responsible for resize, the swapchain, Present and
   the final Y flip. `Context::borrow_d3d11_target(rtv, desc, dsv)` borrows views until resize.
+  Metadata must match the actual dimensions, samples and view formats. A non-none depth format requires a DSV.
+  `prepare_color_copy(borrowed_output)` at setup/resize preallocates a matching texture/SRV for format-converting
+  refraction copies from an RTV without an SRV. `copy_color` then reuses that cache; an unprepared first copy
+  creates it. The single cache follows the presenter's one current output.
 - `Format::srgb8` is four RGBA8 bytes, with hardware sRGB decode for RGB and unchanged alpha.
   `Format::r8` is one UNORM byte. `rgba16f` uploads packed RGBA half floats; convert RGB float
   panoramas at load. Set `TextureDesc::levels` to the full mip count before `generate_mips()`.
@@ -59,4 +65,5 @@ SDL at the native client's pinned revision and compiles the actual backend and s
 
 `BUNNYHOP_GFX_DISPATCH=ON` forces the Windows-style branch on macOS/Linux with an unavailable D3D stub.
 It does not change the shipping default. Depth readback currently requires the entire subresource;
-color readback supports rectangles. The backend never applies another clip-space or vertex-Y fixup.
+color readback supports rectangles. Standalone fences reuse 64 precreated event queries;
+released queries are reused after completion, and saturation is an explicit error. The backend never applies another clip-space or vertex-Y fixup.
