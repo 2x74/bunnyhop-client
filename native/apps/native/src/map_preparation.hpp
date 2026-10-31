@@ -5,6 +5,10 @@
 
 namespace native {
 
+// The workers that parse the BSP and load the models report no progress, so a wait on them can only be bounded as a
+// whole. The largest map on a slow disk takes well under this.
+inline constexpr auto map_worker_wait_limit = std::chrono::minutes(5);
+
 class MapPreparation {
 public:
     MapDownloadResult download;
@@ -26,6 +30,7 @@ public:
         cancel();
         download = std::move(next);
         if (!download.map) return;
+        worker_wait_started = std::chrono::steady_clock::now();
         try {
             viewmodels.start([&gl, assets](const std::atomic_bool &cancel) {
                 if (cancel) return std::unique_ptr<NativeViewmodel>{};
@@ -57,9 +62,10 @@ public:
         if (!download.error.empty() || !prepared) return true;
         try {
             if (!ready) ready = prepared->poll();
-            if (!ready) return false;
+            if (!ready) return give_up_on_worker();
             if (!renderer) {
-                if (viewmodels.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return false;
+                if (viewmodels.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+                    return give_up_on_worker();
                 renderer = std::make_unique<Renderer>(gl, prepared->core.get(), assets, true, viewmodels.get());
             }
             return renderer->poll_loading();
@@ -70,6 +76,17 @@ public:
             return true;
         }
     }
+
+private:
+    bool give_up_on_worker() {
+        if (std::chrono::steady_clock::now() - worker_wait_started < map_worker_wait_limit) return false;
+        download.error = "This map stopped loading while it was being prepared. Try again.";
+        renderer.reset();
+        prepared.reset();
+        return true;
+    }
+
+    std::chrono::steady_clock::time_point worker_wait_started;
 };
 
 }  // namespace native

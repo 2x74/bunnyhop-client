@@ -216,19 +216,7 @@ int run(const native::Options &opt) {
     }
     if (!menu && opt.map.empty() && opt.online_map.empty())
         throw std::runtime_error("Menus are unavailable on this build; use --map PATH or --online-map NAME");
-    // Every download_map call materializes files in the same content cache,
-    // so downloads take turns. Waiting gives up once its
-    // own download is cancelled, so neither worker can hold up shutdown.
-    std::mutex cache_mutex;
-    auto lock_cache = [&cache_mutex](const std::atomic_bool &cancel) {
-        std::unique_lock lock(cache_mutex, std::defer_lock);
-        while (!lock.try_lock()) {
-            if (cancel) throw std::runtime_error("Map download cancelled");
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        }
-        if (cancel) throw std::runtime_error("Map download cancelled");
-        return lock;
-    };
+    native::MapCacheLock lock_cache;
     // Home-screen backdrop: the web map tour over the map the menu picked,
     // from its own native context. Released as soon as a gameplay map loads.
     std::unique_ptr<native::MenuBackdrop> backdrop;
@@ -2855,10 +2843,9 @@ int run(const native::Options &opt) {
             });
         }
         download.poll();
-        if (download.valid() && download.wait_for(std::chrono::seconds(0)) == std::future_status::ready
-            && !map_preparing) {
+        if (!map_preparing && map_download.settled(Clock::now())) {
             map_preparing = true;
-            map_preparation.start(download.get(), settings, gl, assets);
+            map_preparation.start(map_download.take(), settings, gl, assets);
             nlohmann::json update;
             {
                 std::lock_guard lock(progress_mutex);

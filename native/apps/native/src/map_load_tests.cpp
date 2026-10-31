@@ -7,6 +7,13 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <thread>
+#ifndef _WIN32
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
 
 namespace {
 using Bytes = std::vector<uint8_t>;
@@ -321,6 +328,171 @@ void check_worker_retry() {
     const auto result = download.jobs.get();
     check(result.map && result.map->id == map_id, "retry couldn't load failed map");
 }
+
+// A worker wedged inside one route (a stuck disk, a socket that never answers) that ignores its cancel token, holding
+// the cache for as long as it stays there.
+struct WedgedRoute {
+    std::string route;
+    native::DownloadFetch inner;
+    std::promise<void> entered, release;
+    std::shared_future<void> released = release.get_future().share();
+    std::atomic_bool wedged = false;
+    ReleaseWorker guard{release};
+
+    WedgedRoute(Fixture &fixture, std::string wedged_route) : route(std::move(wedged_route)), inner(fixture.fetch()) {}
+
+    native::DownloadFetch fetch() {
+        return [this](const std::string &asked,
+                      size_t limit,
+                      const std::atomic_bool *cancel,
+                      const native::LoadProgressCallback &progress) {
+            if (asked == route && !wedged.exchange(true)) {
+                entered.set_value();
+                released.wait();
+            }
+            return inner(asked, limit, cancel, progress);
+        };
+    }
+
+    void wait_until_stuck() {
+        check(entered.get_future().wait_for(worker_timeout) == std::future_status::ready, "fixture never wedged");
+    }
+};
+
+constexpr auto past_stall_limit = native::map_load_stall_limit + std::chrono::seconds(1);
+
+native::MapDownloadResult settled_result(native::MapDownload &download) {
+    check(download.jobs.wait_for(worker_timeout) == std::future_status::ready, "worker didn't finish");
+    check(download.settled(native::MapDownload::Clock::now()), "finished worker wasn't settled");
+    return download.take();
+}
+
+void check_hung_download_gives_up() {
+    Fixture fixture;
+    native::MapCacheLock lock_cache;
+    WedgedRoute wedge(fixture, fixture.bsp_route);
+    const auto fetch = wedge.fetch();
+    native::MapDownload download;
+    download.start(map_id, fixture.cache, lock_cache, fetch);
+    wedge.wait_until_stuck();
+    const auto started = native::MapDownload::Clock::now();
+    check(!download.settled(started), "a load gave up as soon as it started");
+    download.start(map_id, fixture.cache, lock_cache, fetch);
+    check(download.loading_map(map_id), "pressing Play again dropped the load in progress");
+
+    check(download.settled(started + past_stall_limit), "a hung load never ended");
+    const auto hung = download.take();
+    check(!hung.map && hung.error.find("try again") != std::string::npos, "a hung load gave no way forward");
+    check(!download.loading_map(map_id), "Retry would still be refused after the load ended");
+
+    // The old worker still holds the cache: Retry waits behind it, in the open and for a bounded time.
+    download.start(map_id, fixture.cache, lock_cache, fetch);
+    check(download.settled(native::MapDownload::Clock::now() + past_stall_limit), "a retry behind it never ended");
+    check(!download.take().map, "a retry behind a stuck worker claimed a map");
+
+    wedge.release.set_value();
+    download.start(map_id, fixture.cache, lock_cache, fetch);
+    const auto recovered = settled_result(download);
+    check(recovered.map && recovered.map->id == map_id, "Retry didn't recover once the stuck worker let go");
+}
+
+void check_cached_map_behind_retired_worker() {
+    Fixture fixture;
+    fixture.load();
+    fixture.routes["/api/maps/bhop_other"] = fixture.routes[fixture.detail_route];
+    native::MapCacheLock lock_cache;
+    WedgedRoute wedge(fixture, "/api/maps/bhop_other");
+    const auto fetch = wedge.fetch();
+    native::MapDownload download;
+    download.start("bhop_other", fixture.cache, lock_cache, fetch);
+    wedge.wait_until_stuck();
+    download.start(map_id, fixture.cache, lock_cache, fetch);
+    check(download.settled(native::MapDownload::Clock::now() + past_stall_limit),
+          "a cached map waited forever behind a retired worker");
+    const auto blocked = download.take();
+    check(!blocked.map && blocked.error.find("Another download") != std::string::npos,
+          "the player wasn't told what the cached map is waiting for");
+    wedge.release.set_value();
+    download.start(map_id, fixture.cache, lock_cache, fetch);
+    check(settled_result(download).map.has_value(), "the cached map didn't load once the cache was free");
+}
+
+constexpr auto report_interval = std::chrono::milliseconds(25);
+
+// Sends `steps` progress reports as curl does, about once a tick, with or without new bytes.
+native::DownloadFetch reporting_fetch(Fixture &fixture, int steps, bool moving) {
+    return [&fixture, steps, moving, inner = fixture.fetch()](
+                   const std::string &route,
+                   size_t limit,
+                   const std::atomic_bool *cancel,
+                   const native::LoadProgressCallback &progress
+           ) {
+        if (route == fixture.bsp_route)
+            for (int step = 0; step < steps && !(cancel && *cancel); ++step) {
+                progress({"download", "Downloading map data", moving ? uint64_t(step + 1) : 1, 1000});
+                std::this_thread::sleep_for(report_interval);
+            }
+        return inner(route, limit, cancel, progress);
+    };
+}
+
+void check_stall_means_no_bytes() {
+    constexpr auto short_stall_limit = std::chrono::seconds(1);
+    constexpr int reports_past_the_limit = 60;
+    const auto settle = [](native::MapDownload &download) {
+        while (!download.settled(native::MapDownload::Clock::now()))
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        return download.take();
+    };
+    native::MapCacheLock lock_cache;
+    native::MapDownload download;
+    download.stall_limit = short_stall_limit;
+
+    Fixture stuck;
+    download.start(map_id, stuck.cache, lock_cache, reporting_fetch(stuck, reports_past_the_limit, false));
+    const auto stalled = settle(download);
+    check(!stalled.map && !stalled.error.empty(), "reports with no new bytes counted as progress");
+
+    Fixture slow;
+    download.start(map_id, slow.cache, lock_cache, reporting_fetch(slow, reports_past_the_limit, true));
+    const auto finished = settle(download);
+    check(finished.map.has_value(), "a slow transfer that keeps moving was called stalled");
+}
+
+#ifndef _WIN32
+// The real transfer against a socket that accepts and never answers: cancelling has to interrupt the blocked read.
+void check_cancel_interrupts_blocked_transfer() {
+    constexpr auto cancel_after = std::chrono::milliseconds(300);
+    constexpr auto answer_limit = std::chrono::seconds(4);
+    const int listener = ::socket(AF_INET, SOCK_STREAM, 0);
+    check(listener >= 0, "no socket for the blocked transfer");
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t address_size = sizeof(address);
+    check(::bind(listener, reinterpret_cast<sockaddr *>(&address), address_size) == 0, "couldn't bind");
+    check(::listen(listener, 1) == 0, "couldn't listen");
+    check(::getsockname(listener, reinterpret_cast<sockaddr *>(&address), &address_size) == 0, "no port");
+    const auto url = "https://127.0.0.1:" + std::to_string(ntohs(address.sin_port)) + "/blocked";
+    std::atomic_bool cancel = false;
+    auto transfer = std::async(std::launch::async, [&] {
+        try {
+            native::fetch_https(url, 1024, &cancel);
+            return std::string();
+        } catch (const std::exception &error) {
+            return std::string(error.what());
+        }
+    });
+    std::this_thread::sleep_for(cancel_after);
+    check(transfer.wait_for(std::chrono::seconds(0)) == std::future_status::timeout,
+          "the transfer didn't block on the silent socket");
+    cancel = true;
+    const auto answered = transfer.wait_for(answer_limit) == std::future_status::ready;
+    ::close(listener);
+    check(answered, "cancelling didn't interrupt a blocked transfer");
+    check(transfer.get().find("cancelled") != std::string::npos, "a cancelled transfer reported something else");
+}
+#endif
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -338,6 +510,12 @@ int main(int argc, char **argv) {
             check_moved_cache();
             check_map_switch();
             check_worker_retry();
+            check_hung_download_gives_up();
+            check_cached_map_behind_retired_worker();
+            check_stall_means_no_bytes();
+#ifndef _WIN32
+            check_cancel_interrupts_blocked_transfer();
+#endif
         }
     } catch (const std::exception &error) {
         std::cerr << error.what() << '\n';
