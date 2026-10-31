@@ -23,7 +23,7 @@ procedural materials, planar reflections, viewmodels, real swapchain presentatio
 
 The regular Windows CMake build runs `d3d-shaders/package.py --build` before compiling resources.
 That uses the pinned translators and compiler, resolves every manifest alias, deduplicates DXBC and
-reflection, and embeds the archive as RCDATA 201 in each executable. The executable identity therefore
+reflection, and embeds the archive as RCDATA 201 in each graphics executable. The executable identity therefore
 covers the shaders. No runtime FXC, external shader search path or additional release workflow step is
 needed. Compiler diagnostics remain in `target/d3d-shaders/output`.
 
@@ -34,9 +34,15 @@ SDL at the native client's pinned revision and compiles the actual backend and s
 
 - `Context(gl)` keeps OpenGL. Windows can opt in with `Context(gl, &d3d11, Backend::d3d11)`;
   a null D3D11 pointer selects OpenGL. `Context(d3d11)` is for a D3D-only caller or WARP.
+  Call `reset_state()` after any presenter/external use of the immediate context. This clears D3D
+  bindings and their caches, including untracked SRVs; OpenGL continues to tolerate legacy state changes.
 - `D3D11Context({device, immediate_context})` borrows both pointers. Resources must die before
   their context/device. The presenter remains responsible for resize, the swapchain, Present and
   the final Y flip. `Context::borrow_d3d11_target(rtv, desc, dsv)` borrows views until resize.
+  Metadata must match the actual dimensions, samples and view formats. A non-none depth format requires a DSV.
+  `prepare_color_copy(borrowed_output)` at setup/resize preallocates a matching texture/SRV for format-converting
+  refraction copies from an RTV without an SRV. `copy_color` then reuses that cache; an unprepared first copy
+  creates it. The single cache follows the presenter's one current output.
 - `Format::srgb8` is four RGBA8 bytes, with hardware sRGB decode for RGB and unchanged alpha.
   `Format::r8` is one UNORM byte. `rgba16f` uploads packed RGBA half floats; convert RGB float
   panoramas at load. Set `TextureDesc::levels` to the full mip count before `generate_mips()`.
@@ -49,7 +55,8 @@ SDL at the native client's pinned revision and compiles the actual backend and s
 - `max_samples(color, depth)` queries the shared supported sample limit. `current_target()` and
   `current_viewport()` query actual GL bindings/state, including legacy changes. The dimensions of
   an unknown legacy framebuffer are unspecified; borrow it explicitly when dimensions are needed.
-  D3D11 tracks both values. `poll(readback, true)` requests a nonblocking flush before polling.
+  D3D11 tracks both values. `RasterState::clip_distance` controls GL clip distance zero;
+  D3D11 always uses the shader clip distance and requires `no_clip_height` outside reflections. `poll(readback, true)` requests a nonblocking flush before polling.
 - Handles support explicit `bool`, `==` and `!=`; callers must not interpret their native fields.
   `destroy(ConstantBinding&)` releases the binding layout. D3D11 stage buffers are shared by the
   program's layouts and released with that program. Destroy bindings before their program.
@@ -58,4 +65,5 @@ SDL at the native client's pinned revision and compiles the actual backend and s
 
 `BUNNYHOP_GFX_DISPATCH=ON` forces the Windows-style branch on macOS/Linux with an unavailable D3D stub.
 It does not change the shipping default. Depth readback currently requires the entire subresource;
-color readback supports rectangles. The backend never applies another clip-space or vertex-Y fixup.
+color readback supports rectangles. Standalone fences reuse 64 precreated event queries;
+released queries are reused after completion, and saturation is an explicit error. The backend never applies another clip-space or vertex-Y fixup.

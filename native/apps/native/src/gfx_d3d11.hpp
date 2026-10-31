@@ -21,6 +21,7 @@ public:
     float max_anisotropy() const;
     int max_samples(Format color = Format::rgba8, Format depth = Format::depth24) const;
     TargetView current_target() const;
+    void reset_state();
     int max_texture_size() const;
     void check_error(const char *message);
     Program create_program(const ProgramDesc &source);
@@ -55,6 +56,7 @@ public:
     void clear_depth();
     void resolve_color(const TargetView &source, const TargetView &destination);
     void resolve_depth(const TargetView &source, const TargetView &destination);
+    void prepare_color_copy(const TargetView &source);
     void copy_color(const TargetView &source, Rect region, Texture destination, int x = 0, int y = 0);
     Geometry create_geometry(size_t stride, std::span<const VertexAttribute> attributes);
     void destroy(Geometry &geometry);

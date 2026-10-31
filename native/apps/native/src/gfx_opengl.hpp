@@ -129,6 +129,8 @@ class OpenGlContext {
 public:
     explicit OpenGlContext(Gl &gl) : gl_(gl) {}
 
+    void reset_state() {}
+
     static Backend backend() { return Backend::opengl; }
 
     float max_anisotropy() const {
@@ -477,6 +479,8 @@ public:
     void resolve_depth(const TargetView &source, const TargetView &destination) {
         blit(source, destination, GL_DEPTH_BUFFER_BIT);
     }
+
+    void prepare_color_copy(const TargetView &) {}
 
     void copy_color(const TargetView &source, Rect region, Texture destination, int x = 0, int y = 0) {
         gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, GLuint(source.id));

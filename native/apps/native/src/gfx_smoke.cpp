@@ -124,26 +124,30 @@ void draws(Context &context) {
     static constexpr const char *vertex = R"(#version 330 core
 layout(location=0) in vec2 point;
 uniform vec3 shift[2];
-void main(){gl_Position=vec4(point+shift[gl_InstanceID].xy,0,1);})";
+uniform float clipHeight;
+void main(){vec2 p=point+shift[gl_InstanceID].xy;
+gl_ClipDistance[0]=p.y-clipHeight;gl_Position=vec4(p,0,1);})";
     static constexpr const char *fragment = R"(#version 330 core
 uniform vec4 tint;
 uniform bool enabled;
 out vec4 color;
-void main(){color=enabled?tint:vec4(0);})";
+void main(){color=enabled?(gl_FrontFacing?tint:vec4(0,1,0,1)):vec4(0);})";
     auto program = context.create_program({{"gfx-smoke", ""}, vertex, fragment});
 
     struct alignas(16) Constants {
         std::array<float, 4> shift[2];
         std::array<float, 4> tint;
         uint32_t enabled = 5;
-        std::array<float, 3> padding{};
+        float clipHeight = no_clip_height;
+        std::array<float, 2> padding{};
     };
 
     static constexpr ConstantField fields[] = {
             {"shift", 0, 32, ConstantType::float3, 2, 16},
             {"tint", 32, 16, ConstantType::float4},
             {"enabled", 48, 4, ConstantType::bool32},
-            {"optimizedOut", 52, 4, ConstantType::float1}
+            {"clipHeight", 52, 4, ConstantType::float1},
+            {"optimizedOut", 56, 4, ConstantType::float1}
     };
     auto binding = context.create_constants(program, {fields, sizeof(Constants)});
     const Constants constants = {{{-.5f, -.5f, 0, 0}, {.5f, .5f, 0, 0}}, {1, 0, 0, 1}};
@@ -168,6 +172,31 @@ void main(){color=enabled?tint:vec4(0);})";
     for (int y = 0; y < height; ++y)
         for (int x = 0; x < width; ++x)
             require(channel(bottom, x, y, 0) == channel(top, x, height - 1 - y, 0), "Readback Y flip changed");
+    auto mirrored = context.create_pipeline({{}, {false, false}, {Cull::none, Winding::clockwise}});
+    context.bind_target(target);
+    context.pipeline(mirrored);
+    context.clear_color({0, 0, 0, 1});
+    context.draw_instanced(Primitive::triangles, 0, 3, 2);
+    const auto back_facing = read(context, target, RowOrigin::bottom);
+    require(channel(back_facing, 4, 1, 1) == 255 && channel(back_facing, 12, 5, 1) == 255,
+            "Mirrored winding or fragment front-face interpretation changed");
+    auto clipping_state = pipeline.state;
+    clipping_state.raster.clip_distance = true;
+    auto clipping = context.create_pipeline(clipping_state);
+    auto clipped = constants;
+    clipped.clipHeight = 0;
+    context.bind_target(target);
+    context.pipeline(clipping);
+    context.constants(binding, &clipped);
+    context.clear_color({0, 0, 0, 1});
+    context.draw_instanced(Primitive::triangles, 0, 3, 2);
+    const auto clipped_pixels = read(context, target, RowOrigin::bottom);
+    require(channel(clipped_pixels, 4, 1, 0) == 0 && channel(clipped_pixels, 12, 5, 0) == 255,
+            "Clip-distance pipeline or no-clip sentinel changed");
+    context.pipeline(pipeline);
+    context.constants(binding, &constants);
+    context.destroy(clipping);
+    context.destroy(mirrored);
     const std::array<uint16_t, 3> indices = {0, 1, 2};
     context.upload_vertices(geometry, std::as_bytes(std::span(vertices)));
     context.upload_indices(geometry, std::as_bytes(std::span(indices)));
@@ -285,6 +314,7 @@ void video(Context &context, int supersample, int samples) {
     const std::array<native_render::Vec3, 4> quad = {{{-.8f, -.7f, 0}, {.2f, -.7f, 0}, {.2f, .5f, 0}, {-.8f, .5f, 0}}};
     const float eye[] = {0, 0, 2};
     for (size_t frame = 0; frame < 6; ++frame) {
+        context.reset_state();
         targets.begin_frame();
         for (int sample = 0; sample < samples; ++sample) {
             targets.bind_scene();
@@ -345,9 +375,11 @@ void run(Context &context) {
     cubes(context);
     video(context, 1, 1);
     video(context, 2, 3);
-    auto fence = context.signal();
-    require(context.wait(fence, timeout_ns, true) == Wait::ready, "Standalone fence timed out");
-    context.destroy(fence);
+    for (int i = 0; i < 130; ++i) {
+        auto fence = context.signal();
+        require(context.wait(fence, timeout_ns, true) == Wait::ready, "Standalone fence timed out");
+        context.destroy(fence);
+    }
     context.check_error("Graphics seam error");
     std::cout << "Graphics/subsystem checks passed\n";
 }
