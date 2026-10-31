@@ -4,8 +4,9 @@
 WARP device with the debug layer and fails on device errors or SRV/output hazards. Production contexts
 borrow a device and immediate context; only `D3D11Context::warp()` creates a device.
 
-The committed PNGs are Apple M5 Pro OpenGL references from the hidden-window smoke. They cover
-MSAA color/copy, instancing, six nonconstant cube faces, vertex-stage textures, RGBA32F bone fetches,
+The committed [reference PNGs](goldens/) are Apple M5 Pro OpenGL references from the hidden-window smoke. They cover
+MSAA color/copy, static/indexed instancing, six nonconstant cube faces, sRGB decode, mip generation,
+anisotropic samplers, vertex-stage textures, partial RGBA32F bone updates,
 and the real video/presentation classes at 1x/one sample and 2x/three samples across two ring wraps.
 The WARP test additionally writes different depths to each MSAA sample and requires sample zero
 (.625, larger than every other sample) after the shader resolve. Depth checks use numeric readback.
@@ -28,3 +29,33 @@ needed. Compiler diagnostics remain in `target/d3d-shaders/output`.
 
 The standalone proof CMake project needs `SHADER_RESOURCES` pointing at package.py's output. It builds
 SDL at the native client's pinned revision and compiles the actual backend and subsystem headers.
+
+## Caller APIs
+
+- `Context(gl)` keeps OpenGL. Windows can opt in with `Context(gl, &d3d11, Backend::d3d11)`;
+  a null D3D11 pointer selects OpenGL. `Context(d3d11)` is for a D3D-only caller or WARP.
+- `D3D11Context({device, immediate_context})` borrows both pointers. Resources must die before
+  their context/device. The presenter remains responsible for resize, the swapchain, Present and
+  the final Y flip. `Context::borrow_d3d11_target(rtv, desc, dsv)` borrows views until resize.
+- `Format::srgb8` is four RGBA8 bytes, with hardware sRGB decode for RGB and unchanged alpha.
+  `Format::r8` is one UNORM byte. `rgba16f` uploads packed RGBA half floats; convert RGB float
+  panoramas at load. Set `TextureDesc::levels` to the full mip count before `generate_mips()`.
+- `SamplerDesc::max_anisotropy` is clamped to `max_anisotropy()`. `wrap_s/t/r` override the
+  common `address`; their default `Address::inherit` preserves existing initializers.
+- `upload_vertices(geometry, bytes)` creates static storage; interleave blend attributes at load.
+  `stream_vertices` uses a 4 MiB dynamic ring per geometry. Static geometry can exceed that size.
+- `update_texture(texture, rect, pixels)` updates tightly packed mip-zero rows without backend
+  allocation. RGBA32F bone texels use floats. D3D11 uses ordered `UpdateSubresource` copies.
+- `max_samples(color, depth)` queries the shared supported sample limit. `current_target()` and
+  `current_viewport()` query actual GL bindings/state, including legacy changes. The dimensions of
+  an unknown legacy framebuffer are unspecified; borrow it explicitly when dimensions are needed.
+  D3D11 tracks both values. `poll(readback, true)` requests a nonblocking flush before polling.
+- Handles support explicit `bool`, `==` and `!=`; callers must not interpret their native fields.
+  `destroy(ConstantBinding&)` releases the binding layout. D3D11 stage buffers are shared by the
+  program's layouts and released with that program. Destroy bindings before their program.
+- Packed array constants upload with one GL call per field. Padded arrays reuse setup-time packing
+  storage. D3D11 scatters each element into the stage's authoritative reflected stride.
+
+`BUNNYHOP_GFX_DISPATCH=ON` forces the Windows-style branch on macOS/Linux with an unavailable D3D stub.
+It does not change the shipping default. Depth readback currently requires the entire subresource;
+color readback supports rectangles. The backend never applies another clip-space or vertex-Y fixup.

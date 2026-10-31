@@ -156,8 +156,8 @@ public:
     TargetView current_target() const {
         GLint framebuffer = 0;
         gl_.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &framebuffer);
-        if (uintptr_t(framebuffer) == target_.id) return target_;
-        return {uintptr_t(framebuffer), {}};
+        if (uintptr_t(framebuffer) == target_.id && bool(target_)) return target_;
+        return {uintptr_t(framebuffer), {}, 0, true};
     }
 
     int max_texture_size() const {
@@ -279,6 +279,7 @@ public:
         enabled(GL_CULL_FACE, state.raster.cull != Cull::none);
         if (state.raster.cull != Cull::none) gl_.CullFace(state.raster.cull == Cull::front ? GL_FRONT : GL_BACK);
         gl_.FrontFace(state.raster.winding == Winding::counter_clockwise ? GL_CCW : GL_CW);
+        enabled(GL_CLIP_DISTANCE0, state.raster.clip_distance);
         enabled(GL_POLYGON_OFFSET_FILL, state.raster.offset);
         if (state.raster.offset) gl_.PolygonOffset(state.raster.slope_bias, state.raster.constant_bias);
         const auto &write = state.color_write;
@@ -365,7 +366,7 @@ public:
             else
                 minification = desc.mip_filter == Filter::linear ? GL_NEAREST_MIPMAP_LINEAR : GL_NEAREST_MIPMAP_NEAREST;
         }
-        gl_.SamplerParameteri(result.id, GL_TEXTURE_MIN_FILTER, GLint(minification));
+        gl_.SamplerParameteri(GLuint(result.id), GL_TEXTURE_MIN_FILTER, GLint(minification));
         gl_.SamplerParameteri(
                 result.id, GL_TEXTURE_MAG_FILTER, desc.magnification == Filter::linear ? GL_LINEAR : GL_NEAREST
         );
@@ -383,11 +384,13 @@ public:
             if (maximum > 1)
                 gl_.SamplerParameterf(GLuint(result.id), texture_anisotropy, std::min(desc.max_anisotropy, maximum));
         }
-        gl_.SamplerParameteri(result.id, GL_TEXTURE_COMPARE_MODE, desc.compare ? GL_COMPARE_REF_TO_TEXTURE : GL_NONE);
-        gl_.SamplerParameteri(result.id, GL_TEXTURE_COMPARE_FUNC, comparison(desc.comparison));
-        gl_.SamplerParameterf(result.id, GL_TEXTURE_MIN_LOD, desc.min_lod);
-        gl_.SamplerParameterf(result.id, GL_TEXTURE_MAX_LOD, desc.max_lod);
-        gl_.SamplerParameterfv(result.id, GL_TEXTURE_BORDER_COLOR, desc.border_color.data());
+        gl_.SamplerParameteri(
+                GLuint(result.id), GL_TEXTURE_COMPARE_MODE, desc.compare ? GL_COMPARE_REF_TO_TEXTURE : GL_NONE
+        );
+        gl_.SamplerParameteri(GLuint(result.id), GL_TEXTURE_COMPARE_FUNC, comparison(desc.comparison));
+        gl_.SamplerParameterf(GLuint(result.id), GL_TEXTURE_MIN_LOD, desc.min_lod);
+        gl_.SamplerParameterf(GLuint(result.id), GL_TEXTURE_MAX_LOD, desc.max_lod);
+        gl_.SamplerParameterfv(GLuint(result.id), GL_TEXTURE_BORDER_COLOR, desc.border_color.data());
         return result;
     }
 
