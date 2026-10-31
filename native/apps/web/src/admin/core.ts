@@ -176,7 +176,9 @@ export interface Me {
   id: string;
   name: string;
   token: boolean;
-  role?: StaffRole;
+  /** Null for a Contributor without a staff role (`contributor`), who may only read Analytics. */
+  role?: StaffRole | null;
+  contributor?: boolean;
   perms?: Permission[];
   /** Their picture (avatar, else Discord picture), null: the letter. */
   avatar?: string | null;

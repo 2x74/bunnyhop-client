@@ -13,7 +13,7 @@ import { loadoutFor } from "../loadout";
 import { crownOf, heldRanks } from "../progression";
 
 /** Opens the account panel (ui/account-panel.ts, loaded on demand with the name rules and blocklist). */
-export function openAccount(section: "name" | "save" | null = null): void {
+export function openAccount(section: "name" | "save" | "password" | null = null): void {
   void import("./account-panel").then((m) => m.openAccountPanel(section));
 }
 

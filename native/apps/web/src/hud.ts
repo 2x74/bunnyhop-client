@@ -1080,6 +1080,11 @@ export class Hud {
     this.card.setExtra(el);
   }
 
+  /** The guest's "Keep this run" line under the result (ui/keep-run.ts). */
+  setKeepRun(text: string): void {
+    if (this.card.shown) this.card.setKeep(text);
+  }
+
   private hideCard(): void {
     this.card.hide();
     this.root.classList.remove("result");

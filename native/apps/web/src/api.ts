@@ -140,7 +140,7 @@ export interface NameCheck {
 
 export interface SignInMethod {
   /** "wavedash": the player's Wavedash account (the Wavedash build signs in with it). */
-  provider: "discord" | "email" | "wavedash";
+  provider: "discord" | "email" | "wavedash" | "password";
   label: string;
   since: string;
 }
@@ -157,6 +157,11 @@ export interface AccountView {
   methods: SignInMethod[];
   canUnlink: Record<string, boolean>;
   name: { isDefault: boolean; changesLeft: number; limit: number; resetAt: string | null };
+  /**
+   * resetUntil: until when this browser may set a new password without the old one (ISO), else null. alias: staff renamed
+   * this player and their old name still signs in, until they rename themself.
+   */
+  password: { set: boolean; resetUntil: string | null; alias: boolean };
   onboarding: OnboardingState;
 }
 
@@ -1060,9 +1065,29 @@ export const api = {
   async account(): Promise<AccountView> {
     return json<AccountView>("/me/account", { cache: "no-store" });
   },
-  /** Removes a sign-in method (refused for the last one: ApiError 400 "last_method"). */
-  async unlink(provider: SignInMethod["provider"], dispatch?: RequestDispatch): Promise<AccountView> {
-    const v = await json<AccountView>("/me/unlink", post({ provider }), dispatch);
+  /** Removes a sign-in method (refused for the last one: ApiError 400 "last_method"). A password needs `current` (or the recovery window). */
+  async unlink(provider: SignInMethod["provider"], current?: string, dispatch?: RequestDispatch): Promise<AccountView> {
+    const v = await jsonOr5xx<AccountView>("/me/unlink", post({ provider, current }), dispatch);
+    setMe(v.user);
+    return v;
+  },
+  /**
+   * Signs in with a name or email and a password. ApiError: invalid_login (the one answer for a wrong name or password),
+   * turnstile_required (body.siteKey: pass the check and send its token), turnstile_unavailable, password_capacity (both:
+   * the message points elsewhere), rate_limited, auth_busy.
+   */
+  async passwordLogin(login: string, password: string, turnstile?: string): Promise<{ user: User; outcome: "linked" | "signed_in" | "merged" | "created"; aliasUsed?: boolean }> {
+    const r = await jsonOr5xx<{ user: User; outcome: "linked" | "signed_in" | "merged" | "created"; aliasUsed?: boolean }>("/auth/password/login", post({ login, password, turnstile }, true));
+    setMe(r.user);
+    return r;
+  },
+  /**
+   * Sets this player's password. Changing one needs `current`, unless the session is in its recovery window.
+   * ApiError: password_short, password_long, password_name, password_breached, name_required, wrong_password,
+   * rate_limited, auth_busy.
+   */
+  async setPassword(password: string, current?: string): Promise<AccountView> {
+    const v = await jsonOr5xx<AccountView>("/me/password", post({ password, current }, true));
     setMe(v.user);
     return v;
   },

@@ -151,6 +151,37 @@ pub struct MovementFixes {
     /// of the tick (sliding along it after the clip) would end with no ground within 2 units below, the move starts
     /// from `collision point - velocity * tick + 0.1 up` instead, so the player lands on the edge and can jump.
     pub rngfix_edge: bool,
+    /// Momentum's `sv_edge_fix` (mom_gamemovement.cpp CategorizePosition; physics v22): a landing at the end of an
+    /// airborne move whose next tick would leave the player with no walkable ground within 2 units below stores an
+    /// `EdgeLanding`. The caller sets this per tick (off with autohop and jump held) and decides on the next tick's
+    /// command: a jump carries on from the landing, anything else takes it back (`State::resolve_edge_landing`).
+    pub edgebug: bool,
+    /// Run the same prediction without changing anything and report it in `StepResult::edge_landing_kind` (tools).
+    pub edgebug_observe: bool,
+    /// No RNGFix pre-move fix this tick: the tick right after an undone edge landing has to hit the ledge (the edge bug)
+    /// instead of being moved back above it again.
+    pub skip_prevent_collision: bool,
+}
+
+/// bunnyhop patch: how the tick after an edge landing would go (`MovementFixes::edgebug`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EdgeLandingKind {
+    /// It hits the ledge and slides off: the edge bug. The hit takes the fall speed, no friction.
+    Slide,
+    /// It clears the ledge without touching it: no contact, the fall speed stays.
+    Miss,
+}
+
+/// bunnyhop patch: what taking back an edge landing needs (`MovementFixes::edgebug`): the state the tick would have
+/// ended with had the 2-unit ground probe not landed the player.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EdgeLanding {
+    pub kind: EdgeLandingKind,
+    /// The velocity the landing left. Anything else at the next tick means a touch changed it: the landing stands.
+    pub landed_velocity: [f32; 3],
+    pub air_velocity: [f32; 3],
+    pub air_base_velocity: [f32; 3],
+    pub air_surface_friction: f32,
 }
 
 /// bunnyhop patch: which RNGFix pre-move fix moved the start of this tick's move (`StepResult::prevented_collision`).
@@ -592,9 +623,28 @@ pub struct State {
     pub previous_forward: f32,
     pub stuck_offset: u8,
     pub stuck_next_check_time: f32,
+    /// bunnyhop patch: this state's landing can still be taken back on the next tick (`MovementFixes::edgebug`).
+    pub edge_landing: Option<EdgeLanding>,
 }
 
 impl State {
+    /// bunnyhop patch: decides the previous tick's edge landing (`MovementFixes::edgebug`) now that the command is known,
+    /// and returns whether it was taken back. `jump`: this command jumps. `moved`: game code moved the player since the
+    /// move ended. A jump carries on from the landing. Otherwise the player is airborne again with the velocity, base
+    /// velocity and air friction the tick would have ended with, unless something since changed their speed, moved them
+    /// or took the ground away: then the landing stands.
+    pub fn resolve_edge_landing(&mut self, jump: bool, moved: bool) -> bool {
+        let Some(edge) = self.edge_landing.take() else { return false };
+        if jump || moved || self.ground.is_none() || self.mode != Mode::Walk || self.water_level > 1 || self.velocity != edge.landed_velocity {
+            return false;
+        }
+        self.ground = None;
+        self.velocity = edge.air_velocity;
+        self.base_velocity = edge.air_base_velocity;
+        self.surface_friction = edge.air_surface_friction;
+        true
+    }
+
     pub fn from_player(player: Player, policy: Policy) -> Self {
         let crouch = if player.crouched {
             CrouchState::CROUCHED
@@ -639,6 +689,7 @@ impl State {
             previous_forward: 0.0,
             stuck_offset: 0,
             stuck_next_check_time: 0.0,
+            edge_landing: None,
         }
     }
 
@@ -704,6 +755,13 @@ impl State {
                 .unwrap_or(0.0)])
         {
             bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        // Only physics v22 ever has one, so every older digest keeps its bytes.
+        if let Some(edge) = self.edge_landing {
+            bytes.push(edge.kind as u8);
+            for value in edge.landed_velocity.into_iter().chain(edge.air_velocity).chain(edge.air_base_velocity).chain([edge.air_surface_friction]) {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
         }
     }
 }
@@ -1082,6 +1140,9 @@ pub struct StepResult {
     /// bunnyhop patch: an RNGFix pre-move fix moved the start of this tick's move (`MovementFixes::rngfix_incline` /
     /// `rngfix_edge`).
     pub prevented_collision: Option<PreventedCollision>,
+    /// bunnyhop patch: this tick's landing is an edge landing, and how the next tick would go
+    /// (`MovementFixes::edgebug` / `edgebug_observe`).
+    pub edge_landing_kind: Option<EdgeLandingKind>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

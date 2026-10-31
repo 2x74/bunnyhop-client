@@ -1608,7 +1608,8 @@ impl Map {
             return Err("recorded movement must be representable as i16".into());
         }
         let cmd = if filter {
-            self.filter.apply(cmd, BhState::from(&self.game))
+            let edge_landing = self.game.state.edge_landing.is_some();
+            self.filter.apply(cmd, BhState::from(&self.game), edge_landing)
         } else {
             cmd
         };

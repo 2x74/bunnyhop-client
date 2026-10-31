@@ -74,6 +74,9 @@ pub const EVENT_WEAPON: u32 = 1 << 6;
 /// A trigger_teleport moved the player this tick (physics v17 only: RNGFix's map teleport, `PHYSICS_FIX_TELEHOP`).
 /// Kept in the saved state with the other events, so the next tick knows it follows a teleport.
 pub const EVENT_MAP_TELEPORT: u32 = 1 << 7;
+/// Physics v22: this tick took back the previous tick's edge landing (`movement::MovementFixes::edgebug`): the player is
+/// airborne again, with no friction tick and no jump.
+pub const EVENT_EDGEBUG: u32 = 1 << 8;
 
 /// The player entity's classname until a map renames it with `AddOutput classname`.
 const PLAYER_CLASS: &str = "player";
@@ -176,7 +179,7 @@ pub const PHYSICS_V16: u32 = 16;
 /// slope or a ledge no longer depends on where inside a tick the player meets it.
 pub const PHYSICS_V17: u32 = 17;
 /// The version new recordings use.
-pub const PHYSICS_LATEST: u32 = PHYSICS_V21;
+pub const PHYSICS_LATEST: u32 = PHYSICS_V22;
 /// v18: ladder surface properties, preserving historical replay behavior.
 pub const PHYSICS_V18: u32 = 18;
 /// v19: scoped map mechanics (template instances and explicit velocity scripts). No new movement fix bits.
@@ -191,6 +194,11 @@ pub const PHYSICS_V20: u32 = 20;
 /// parent's space. On bhop_areaportal_v1 the green train gets the red train's orientation edit
 /// (`TRAIN_ORIENTATION_EDITS_V19`). No new movement fix bits.
 pub const PHYSICS_V21: u32 = 21;
+/// v22: Momentum Mod's edge rule (`sv_edge_fix`; research/EDGEBUG-V22.md) on top of RNGFix. A landing that would leave the
+/// player with no walkable ground under them on the next tick can be taken back on that tick: with a jump they jump
+/// exactly as on v21, without one they stay airborne, with no friction tick (`EVENT_EDGEBUG`). Autohop with jump held on the
+/// landing tick plays as v21. The landing tick itself (touches, thin triggers, timer) is a v21 landing. No new fix bits.
+pub const PHYSICS_V22: u32 = 22;
 /// Diagnostic pseudo-versions (never valid in a replay, whose field is a u8): `PHYSICS_DIAG | fix bits` turns on only
 /// the listed fixes, to tell which fix changes a replay (tools: /tmp physics-v2 analysis). The fix bits are the low 31
 /// (`PHYSICS_DIAG_FIXES`); before v18 the base was 1 << 30 with 30 fix bits; before v17 the base was 1 << 26 with 26 fix bits, before v16 1 << 25 with 25, before v15
@@ -440,7 +448,7 @@ pub fn physics_fixes(version: u32) -> Option<u32> {
         PHYSICS_V15 => Some(PHYSICS_FIX_V15),
         PHYSICS_V16 => Some(PHYSICS_FIX_V16),
         PHYSICS_V17 => Some(PHYSICS_FIX_V17),
-        PHYSICS_V18 | PHYSICS_V19 | PHYSICS_V20 | PHYSICS_V21 => Some(PHYSICS_FIX_ALL),
+        PHYSICS_V18 | PHYSICS_V19 | PHYSICS_V20 | PHYSICS_V21 | PHYSICS_V22 => Some(PHYSICS_FIX_ALL),
         v if v & !PHYSICS_DIAG_FIXES == PHYSICS_DIAG && v & PHYSICS_DIAG_FIXES & !PHYSICS_FIX_ALL == 0 => Some(v & PHYSICS_DIAG_FIXES),
         _ => None,
     }
@@ -626,6 +634,7 @@ impl Rules {
             rampbug: self.rampbug_fix,
             rngfix_incline: settings.physics_fixes() & PHYSICS_FIX_INCLINE != 0,
             rngfix_edge: settings.physics_fixes() & PHYSICS_FIX_EDGE != 0,
+            ..Default::default()
         }
     }
 }
@@ -1251,6 +1260,10 @@ pub struct TeleportInfo {
 pub struct Game {
     /// Opt-in observational timing; excluded from physics snapshots.
     pub observe_timing: bool,
+    /// Tools: run the v22 edge landing prediction on every landing, on any version, and report it in
+    /// `edge_landing_observed` without changing the simulation.
+    pub observe_edge_landings: bool,
+    pub edge_landing_observed: Option<movement::EdgeLandingKind>,
     pub timing_path: Option<movement::accepted_path::AcceptedPath>,
     world: CollisionWorld,
     props: PropCollision,
@@ -1509,6 +1522,8 @@ impl Game {
             entities,
             ents,
             observe_timing: false,
+            observe_edge_landings: false,
+            edge_landing_observed: None,
             timing_path: None,
             initial_ents: Vec::new(),
             solid: Vec::new(),
@@ -1982,6 +1997,14 @@ impl Game {
             self.die();
         }
 
+        // v22: the previous tick's edge landing, now that this command is known. A jump carries on from the landing as on
+        // v21. Otherwise it is taken back: no friction, and this tick's move hits the ledge or clears it.
+        let edge_jump = cmd.buttons & IN_JUMP != 0 && (self.settings.autohop || !self.state.jump_latched);
+        let edge_moved = self.state.position != self.last_move_origin || self.speed_scale <= 0.0;
+        let edge_bug = self.state.resolve_edge_landing(edge_jump, edge_moved);
+        if edge_bug {
+            self.events |= EVENT_EDGEBUG;
+        }
         let was_grounded = self.state.ground.is_some();
         let clean_before = before_events.position == self.state.position
             && before_events.velocity == self.state.velocity
@@ -2058,6 +2081,12 @@ impl Game {
             config.gravity_scale = self.gravity_scale;
             config.lagged_movement_scale = self.speed_scale;
             config.allow_auto_movement = !self.auto_movement_disabled;
+            // Momentum: `sv_edge_fix && !(HasAutoBhop && IN_JUMP)`. Scroll styles always qualify: their jump is a new press
+            // on the next command, which the take-back above sees in time.
+            config.fixes.edgebug = (PHYSICS_V22..=PHYSICS_LATEST).contains(&self.settings.physics_version)
+                && !(self.settings.autohop && buttons & IN_JUMP != 0);
+            config.fixes.edgebug_observe = self.observe_edge_landings;
+            config.fixes.skip_prevent_collision = edge_bug;
             self.update_broadphase();
             let scene = self.scene(self.tick as f32 * self.settings.tick_interval);
             let execute = if self.observe_timing { movement::step_observed } else { movement::step };
@@ -2082,6 +2111,7 @@ impl Game {
                 }
             };
             self.timing_path = result.accepted_path;
+            self.edge_landing_observed = result.edge_landing_kind;
             // Older versions must never expose this signal, including scroll / diagnostic versions.
             if (PHYSICS_V20..=PHYSICS_LATEST).contains(&self.settings.physics_version) && !was_grounded {
                 self.categorized_ground_jump = result.ground_jump;
@@ -2102,7 +2132,8 @@ impl Game {
             self.state = result.state;
             self.near_region = None;
         }
-        if !was_grounded && self.state.ground.is_some() {
+        // (A slow fall onto an edge can be an edge landing several ticks in a row: only the first is a landing.)
+        if !was_grounded && self.state.ground.is_some() && !(edge_bug && self.state.edge_landing.is_some()) {
             self.events |= EVENT_LANDED;
         }
 

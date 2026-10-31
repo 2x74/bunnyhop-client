@@ -4,8 +4,10 @@
 // hides what the API would refuse here), else an ADMIN_TOKEN pasted here (kept in sessionStorage for this tab only,
 // sent as a Bearer token). The API answers 404 to everyone else, which is what shows the token form.
 //
-// This file is the shell: the rail of eight sections (Queue, Live, Anticheat, Players, Inbox, Boards, Pulse, Staff) and
-// Back to game (the desktop client has no address bar),
+// A player with the Contributor badge and no staff role gets the same shell with Analytics alone (/admin/me perms).
+//
+// This file is the shell: the rail of nine sections (Queue, Live, Anticheat, Players, Inbox, Boards, Pulse, Analytics,
+// Staff) and Back to game (the desktop client has no address bar),
 // each section's tabs under its title, the router, loading and error states, and the boot (the rail paints at once from
 // the last /admin/me in this tab). The views live in their own modules.
 
@@ -29,6 +31,7 @@ import { mapsView, recordsView2, supportersView } from "./boards";
 import { gauntletsView } from "./gauntlets";
 import { mappersView } from "./mappers";
 import { pulseView } from "./pulse";
+import { clientsView, queryView, retentionView } from "./analytics";
 import { logView, teamView } from "./staff";
 import { closePeek } from "./peek";
 import { showShortcuts } from "./shortcuts";
@@ -120,6 +123,17 @@ const SECTIONS: Section[] = [
   },
   { id: "pulse", label: "Pulse", key: "u", glyph: "activity", tabs: [{ id: "overview", label: "Pulse", perm: "overview", rail: "runs.manage" }] },
   {
+    id: "analytics",
+    label: "Analytics",
+    key: "n",
+    glyph: "analytics",
+    tabs: [
+      { id: "analytics", label: "Retention", perm: "analytics.read" },
+      { id: "anclients", label: "Clients and hardware", perm: "analytics.read" },
+      { id: "anquery", label: "Query", perm: "analytics.read" },
+    ],
+  },
+  {
     id: "staff",
     label: "Staff",
     key: "s",
@@ -153,6 +167,9 @@ const VIEWS: Record<string, View> = {
   mappers: mappersView,
   supporters: supportersView,
   overview: pulseView,
+  analytics: retentionView,
+  anclients: clientsView,
+  anquery: queryView,
   admins: teamView,
   log: logView,
 };
@@ -170,6 +187,8 @@ const homeOf = (s: Section) => {
   const t = railTabs(s)[0];
   return t ? `#/${t.id}` : null;
 };
+/** Where the panel opens: the Queue, or for a Contributor without a staff role the one section they have. */
+const firstHome = () => SECTIONS.map(homeOf).find((h) => h) ?? "#/queue";
 
 // ---------------------------------------------------------------------------------------------
 // The rail
@@ -204,7 +223,7 @@ function moveIndicator(animate: boolean): void {
 function paintRail(m: Me): void {
   const who = $("who");
   const name = m.token ? "Admin token" : m.name;
-  const word = m.role ? ROLE_WORD[m.role] : "Signed in";
+  const word = m.role ? ROLE_WORD[m.role] : m.contributor ? "Contributor" : "Signed in";
   document.body.dataset.role = m.token ? "" : (m.role ?? "");
   document.querySelector(".rail .rail-role")?.remove();
   if (!m.token && m.role) document.querySelector(".rail .wordmark")?.after(h("div", { class: "rail-role" }, staffShield(m.role), word));
@@ -238,7 +257,7 @@ function paintRail(m: Me): void {
   hopIndicator(tabs, "a.nav-link", { axis: "y", selected: ".on", inset: 7 });
   const sb = $("search-btn");
   sb.replaceChildren(glyph("search"), h("span", null, "Search"), h("kbd", null, "/"));
-  sb.hidden = false;
+  sb.hidden = !may("overview");
   sb.onclick = () => palette?.open();
 }
 
@@ -249,7 +268,7 @@ function paintRail(m: Me): void {
 function skeleton(view: string, detail: boolean): HTMLElement {
   const i = (cls: string) => h("i", { class: cls });
   const rows = (k: number) => Array.from({ length: k }, () => h("div", { class: "sk-row" }, i("w1"), i("w2"), i("w3"), i("w4")));
-  const kind = detail ? "detail" : view === "overview" ? "overview" : view === "suspicious" ? "split" : view === "acboard" || view === "fbboard" ? "board" : "table";
+  const kind = detail ? "detail" : view === "overview" || view === "analytics" || view === "anclients" ? "overview" : view === "suspicious" ? "split" : view === "acboard" || view === "fbboard" ? "board" : "table";
   return h(
     "div",
     { class: `skel-page sk-${kind}`, "aria-label": "Loading", role: "status" },
@@ -357,7 +376,7 @@ async function start(): Promise<void> {
   if (cached) {
     setMe(cached);
     paintRail(cached);
-    if (!location.hash) history.replaceState(null, "", "#/queue");
+    if (!location.hash) history.replaceState(null, "", firstHome());
     first = route();
   }
   let fresh: Me;
@@ -381,19 +400,20 @@ async function start(): Promise<void> {
     if (!initial && changed.has("waiting") && !location.hash.startsWith("#/queue")) void refreshQueueBadge();
   });
   liveWired = true;
-  if (!location.hash) history.replaceState(null, "", "#/queue");
-  // The view's requests go out first; the live beat right behind them.
+  if (!location.hash) history.replaceState(null, "", firstHome());
+  // The view's requests go out first; the live beat right behind them. (A Contributor has no queue or live beat.)
   const shown = !same || !first ? route() : first;
-  startLive();
+  const staff = may("overview");
+  if (staff) startLive();
   await shown;
-  if (!location.hash.startsWith("#/queue")) setTimeout(() => void refreshQueueBadge(true), 1500);
+  if (staff && !location.hash.startsWith("#/queue")) setTimeout(() => void refreshQueueBadge(true), 1500);
 }
 
 /** The rail and the tab strip for the current hash (before the view loads). */
 function markRoute(): { view: string; rest: string[]; qs: string } {
   const [path, qs] = location.hash.replace(/^#\/?/, "").split("?");
   const [name, ...rest] = path.split("/").map(decodeURIComponent);
-  const view = VIEWS[name] ? name : "queue";
+  const view = VIEWS[name] ? name : firstHome().slice(2);
   const sec = sectionOf(view);
   for (const a of $("tabs").querySelectorAll<HTMLAnchorElement>("a.nav-link")) {
     const on = a.dataset.section === sec.id;

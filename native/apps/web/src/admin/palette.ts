@@ -26,7 +26,7 @@ export interface PaletteDeps {
 }
 
 /** g + key: the section each key opens (main.ts SECTIONS carries the same letters). */
-export const GOTO_KEYS = ["q", "l", "a", "p", "i", "b", "u", "s"];
+export const GOTO_KEYS = ["q", "l", "a", "p", "i", "b", "u", "n", "s"];
 
 /** Saved views: [view it belongs to, label, hash]. */
 const VIEWS: [string, string, string][] = [

@@ -7,6 +7,8 @@ license.workspace = true
 [features]
 native-web = ["native-wasm-math", "dep:bunnyhop-native-web-macros"]
 native-wasm-math = ["playsrc-collision/native-wasm-math", "playsrc-movement/native-wasm-math"]
+# Measurement exports for research/EDGEBUG-V22.md. Never in a shipped build.
+edge-diag = []
 
 [lib]
 crate-type = ["cdylib", "rlib"]

@@ -11,6 +11,7 @@ pub const IDS: [&str; 9] = [
     "autostrafe",
     "segmented",
 ];
+const JUMP: u32 = 1 << 1;
 const FORWARD: u32 = 1 << 3;
 const BACK: u32 = 1 << 4;
 const LEFT: u32 = 1 << 9;
@@ -64,7 +65,8 @@ impl Filter {
     pub fn reset(&mut self, physics: u32) {
         *self = Self::new(&self.id, physics);
     }
-    pub fn apply(&mut self, mut c: BhCmd, s: BhState) -> BhCmd {
+    /// `edge_landing`: physics v22's landing that the next command can still take back (`State::edge_landing`).
+    pub fn apply(&mut self, mut c: BhCmd, s: BhState, edge_landing: bool) -> BhCmd {
         if s.on_ladder != 0 {
             self.from_ladder = true;
         } else if s.grounded != 0 {
@@ -141,7 +143,9 @@ impl Filter {
         if self.id == "scroll" {
             c.buttons &= !((1 << 6) | (1 << 7) | (1 << 8));
         }
-        if s.grounded != 0 || s.on_ladder != 0 || self.from_ladder {
+        // Without a jump the core takes an edge landing back before it moves, so the key rules see an air tick.
+        let grounded = s.grounded != 0 && !(edge_landing && c.buttons & JUMP == 0);
+        if grounded || s.on_ladder != 0 || self.from_ladder {
             return c;
         }
         if ["wonly", "sideways"].contains(&self.id.as_str()) {
@@ -223,7 +227,8 @@ mod tests {
                     on_ladder: u32::from(row["state"]["onLadder"].as_bool().unwrap()),
                     ..BhState::default()
                 };
-                let got = filter.apply(command(&row["cmd"]), state);
+                let edge_landing = row["state"]["edgeLanding"].as_bool().unwrap();
+                let got = filter.apply(command(&row["cmd"]), state, edge_landing);
                 let mut expected = command(&row["expected"]);
                 // The pinned web filter predates v29 IN_TURN_FAST. All other fields remain its exact oracle.
                 if style == "scroll" {

@@ -71,7 +71,10 @@ export const UPCOMING: ChangelogEntry = {
   date: "2026-10-30",
   kind: "minor",
   title: "Next update",
-  notes: [],
+  notes: [
+    "Edge bugs now work like Momentum Mod: with jump released, falling onto the very edge of a ledge drops your fall speed and carries you off it at full speed, with no friction tick. Hold jump, or press it on the next tick while scrolling, and you hop exactly as before.",
+    "You can now add a password to your account and sign in with your name and password on any device, with no email needed. Add one from the account panel, or when you finish a run as a guest. A lost password can only be reset if your account also has an email or Discord linked.",
+  ],
 };
 
 /** Newest first. */

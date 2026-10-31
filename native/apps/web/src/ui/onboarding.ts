@@ -21,8 +21,10 @@ import { achievement, COSMETICS, secretCosmetic, suggestNextMaps, supporterItem,
 import { availableNow } from "./community";
 import { getOutfit, knownOutfitUnlocks, rememberUnlocks, setOutfit } from "../player/cosmetics";
 import { accountChanged, me, ONBOARDED_KEY } from "./account-state";
+import { SECOND_ACCOUNT_HELP } from "./account-copy";
 import { emailSignIn, reloadWithToast } from "./account-email";
 import { nameField } from "./account-name";
+import { markPasswordReset, passwordSignIn } from "./account-password";
 import { toast } from "./account-panel";
 import { arrowNav, h } from "./dom";
 import { sfx } from "../audio";
@@ -270,25 +272,33 @@ export function openOnboarding(user?: User | null): void {
         onclick: async () => {
           already.remove();
           const providers = await api.providers().catch(() => ({ discord: false, email: false }));
+          // A returning player: skip the rest and reload as them. A new account: carry on from the bunny.
+          const onDone = (u: User, message: string) => {
+            if (u.onboarded) {
+              finish();
+              return reloadWithToast(message);
+            }
+            accountChanged(u);
+            user = u;
+            showName(u.name);
+            toast(message);
+            go(1);
+          };
+          const forgot = h("p.acct-note", { hidden: true }, "Sign in below with the Discord or email on your account, then you have 15 minutes to set a new password without the old one. An account with neither can't be reset.");
           signIn.replaceChildren(
             ...[
+              // Name and password first: it can't make a second account, a Discord or email that's new here can.
+              passwordSignIn({
+                onDone,
+                onForgot: () => {
+                  markPasswordReset();
+                  forgot.hidden = false;
+                },
+              }),
+              forgot,
               providers.discord ? h("a.btn.discord", { href: api.discordLoginUrl(appHref()) }, "Sign in with Discord") : null,
-              providers.email
-                ? emailSignIn({
-                    onDone: (u, message) => {
-                      // A returning player: skip the rest and reload as them. A new account: carry on from the bunny.
-                      if (u.onboarded) {
-                        finish();
-                        return reloadWithToast(message);
-                      }
-                      accountChanged(u);
-                      user = u;
-                      showName(u.name);
-                      toast(message);
-                      go(1);
-                    },
-                  })
-                : null,
+              providers.email ? emailSignIn({ autofocus: false, onDone }) : null,
+              providers.discord || providers.email ? h("p.acct-note.dim", null, SECOND_ACCOUNT_HELP) : null,
             ].filter((x): x is HTMLElement => !!x),
           );
         },

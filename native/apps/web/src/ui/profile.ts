@@ -299,7 +299,7 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
   // A guest's own profile with something to keep: one text link (the account panel explains the rest).
   const nudge =
     p.mine && !fresh && p.player.provider === "guest" && a.saveProgress
-      ? h("button.link-btn.pf-nudge", { type: "button", title: SIGN_IN_HELP, onclick: () => a.saveProgress!() }, "Sign in to keep your progress ›")
+      ? h("button.link-btn.pf-nudge", { type: "button", title: SIGN_IN_HELP, onclick: () => a.saveProgress!() }, "Save your progress ›")
       : null;
   // Profile links (YouTube / Twitch / X / TikTok) the player chose to show; the owner's edits (Edit card → Links) redraw it.
   const linksSlot = h("div.pf-links");

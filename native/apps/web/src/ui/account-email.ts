@@ -7,7 +7,7 @@ import { api, ApiError, type User } from "../api";
 import { h } from "./dom";
 import { confirmDialog } from "./settings-transfer";
 
-const OUTCOME: Record<string, string> = {
+export const OUTCOME: Record<string, string> = {
   linked: "Progress saved. Sign in with this email on any device.",
   merged: "Signed in. This browser's runs were added to your account.",
   signed_in: "Signed in.",

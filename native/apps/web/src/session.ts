@@ -1,5 +1,6 @@
 import { appLocation } from "./platform/navigation";
 import { me, accountGeneration } from "./ui/account-state";
+import { keepRunOffer } from "./ui/keep-run";
 // Run session: glues timer, zones, replay recording, PB + ghost, HUD and zone editor onto the
 // fixed-tick loop in main.ts (replays open in the replay viewer: viewer/viewer.ts). main.ts calls:
 //   command(sample) -> step -> afterStep(cmd, events)   every tick
@@ -846,6 +847,8 @@ export class RunSession {
     void submitAndTrack(bytes, (m, ms) => this.hud.toast(m, ms), (st) => {
       this.hud.setSubmission(st);
       if (st.status === "rejected" && newPB) rejectPB(this.o.map, style, track, pbDate, pbOwner);
+      // A guest's first finish or PB, now safely on the server: the "Keep this run" line.
+      if (st.status === "verified" && newPB) void keepRunOffer().then((line) => line && this.hud.setKeepRun(line));
       this.onSubmission?.(st);
       if (st.status !== "submitting") uploaded("id" in st ? st.id : "");
       // Kept on this device until the server has it, with its run-session tokens; a failed upload is retried once

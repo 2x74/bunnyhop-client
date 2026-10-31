@@ -14,7 +14,7 @@ fn legit_scroll_strips_all_turn_bits() {
             on_ladder,
             ..BhState::default()
         };
-        assert_eq!(filter.apply(command, state).buttons, 1 << 3);
+        assert_eq!(filter.apply(command, state, false).buttons, 1 << 3);
     }
 }
 
