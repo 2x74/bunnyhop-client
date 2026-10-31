@@ -2,6 +2,7 @@
 #include "actor_anim.hpp"
 #include "tp_inspect.hpp"
 #include "gun_hold.hpp"
+#include "third_person_events.hpp"
 #include <span>
 #ifndef BUNNYHOP_NATIVE_ASSET_ROOT
 #define BUNNYHOP_NATIVE_ASSET_ROOT "target/native-assets"
@@ -475,9 +476,25 @@ class NativeViewmodel {
         return double(state.noise) / 4294967296.0;
     }
 
+    // A shot's kick and a reload's gesture.
+    static void
+    play_gun_pulses(const native_render::ActorPulses &pulses, ActorHold &state, const native_gun::GunHoldData &gun) {
+        auto &hold = *state.hold;
+        if (pulses.shot) hold.shot(hold_noise(state), hold_noise(state));
+        if (pulses.reload) {
+            const bool shell = gun.shell_seconds.has_value();
+            hold.reload(shell ? *gun.shell_seconds : gun.reload_seconds.value_or(2), shell);
+        }
+    }
+
     // Appends the gun mesh's two bones to `pose`: the hold's when the actor has a gun, else the right hand's.
-    void
-    gun_layer(const native_render::Actor &actor, double dt, float feetYaw, const native_actor_anim::Acting *acting) {
+    void gun_layer(
+            const native_render::Actor &actor,
+            const native_render::ActorPulses &pulses,
+            double dt,
+            float feetYaw,
+            const native_actor_anim::Acting *acting
+    ) {
         const auto &gun = weapons[std::min(size_t(actor.frame.weapon), weapons.size() - 1)];
         const auto data = actor.frame.weapon >= 2 ? gunHolds.find(gun) : gunHolds.end();
         const size_t bones = pose.size() / 12;
@@ -494,19 +511,14 @@ class NativeViewmodel {
         const bool seen = state.hold != nullptr;
         if (!state.hold) state.hold = std::make_unique<native_gun::GunHold>(*gunRig);
         auto &hold = *state.hold;
-        hold.set_gun(&data->second, seen && !actor.snapped);
-        if (actor.attack == 1) hold.shot(hold_noise(state), hold_noise(state));
-        if (actor.attack == 2) {
-            const auto &d = data->second;
-            const bool shell = d.shell_seconds.has_value();
-            hold.reload(shell ? *d.shell_seconds : d.reload_seconds.value_or(2), shell);
-        }
+        hold.set_gun(&data->second, seen && !pulses.snapped);
+        play_gun_pulses(pulses, state, data->second);
         hold.silenced = actor.silenced && data->second.silencer_tip.has_value();
         native_gun::HoldInput input;
         input.yaw = actor.frame.yaw - feetYaw;
         input.pitch = actor.frame.pitch;
         input.dt = dt;
-        input.snap = actor.snapped;
+        input.snap = pulses.snapped;
         const bool arms_free = acting
                                && (acting->gesture.arms[0].turn || acting->gesture.arms[0].reach
                                    || acting->gesture.arms[1].turn || acting->gesture.arms[1].reach);
@@ -523,19 +535,20 @@ class NativeViewmodel {
 
     void actor_actions(
             const native_render::Actor &actor,
+            const native_render::ActorPulses &pulses,
             const Look &look,
             double seconds,
             float feetYaw,
             const native_actor_anim::Acting *acting
     ) {
         auto &state = actorActions[actor.id];
-        if (actor.snapped || seconds < state.last || state.knife != look.knife || state.weapon != actor.frame.weapon)
+        if (pulses.snapped || seconds < state.last || state.knife != look.knife || state.weapon != actor.frame.weapon)
             state = {};
         const double dt = state.last < 0 ? 0 : std::clamp(seconds - state.last, 0., .1);
         state.last = seconds;
         state.knife = look.knife;
         state.weapon = actor.frame.weapon;
-        if (actor.attack) state.gesture.cancel();
+        if (pulses.swing) state.gesture.cancel();
         if (actor.frame.weapon == 1 && tpInspects.contains(look.knife)) {
             const auto &spec = tpInspects[look.knife];
             if (actor.id == "menu-preview")
@@ -552,12 +565,12 @@ class NativeViewmodel {
                 seconds,
                 std::hypot(actor.frame.velocity[0], actor.frame.velocity[1]),
                 bool(actor.frame.flags & 2),
-                actor.snapped
+                pulses.snapped
         );
         native_render::advance_ponytail(
-                state.ponytail, actor.frame.velocity, actor.frame.yaw, dt, actor.snapped || dt <= 0, look.hairLength
+                state.ponytail, actor.frame.velocity, actor.frame.yaw, dt, pulses.snapped || dt <= 0, look.hairLength
         );
-        gun_layer(actor, dt, feetYaw, acting);
+        gun_layer(actor, pulses, dt, feetYaw, acting);
         gl.ActiveTexture(GL_TEXTURE0);
         gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
         gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 3, pose.size() / 12, 0, GL_RGBA, GL_FLOAT, pose.data());
@@ -1184,6 +1197,9 @@ public:
         if (!std::isfinite(actor.frame.yaw) || !std::isfinite(actor.frame.pitch)) return not_posed;
         const auto &l = look(actor.outfit, actor.loadout);
         const auto &frame = actor.frame;
+        const auto known = actorActions.find(actor.id);
+        const bool posed_this_frame = known != actorActions.end() && known->second.last == seconds;
+        const auto pulses = native_render::actor_pulses(actor, posed_this_frame, acting != nullptr);
         float actorYaw = frame.yaw;
         {
             const auto &entry = entries.at("bunny");
@@ -1217,10 +1233,10 @@ public:
                 input.grounded = bool(frame.flags & 2);
                 input.jumped = actor.jumped;
                 state->hood(l.hoodDown);
-                state->pose(input, seconds, actor.snapped, actor.attack != 0, pose, acting);
+                state->pose(input, seconds, pulses.snapped, pulses.swing, pose, acting);
                 actorYaw = float(state->feetYaw);
             }
-            actor_actions(actor, l, seconds, actorYaw, acting);
+            actor_actions(actor, pulses, l, seconds, actorYaw, acting);
         }
         return actorYaw;
     }

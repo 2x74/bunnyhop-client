@@ -18,6 +18,7 @@
 #include "resource_loading.hpp"
 #include "actor_anim.hpp"
 #include "tp_inspect.hpp"
+#include "third_person_events.hpp"
 #include "knife_spinner.hpp"
 #include "inspect_cues.hpp"
 #include <span>

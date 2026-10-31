@@ -11,6 +11,7 @@ struct Actor {
     bool silenced = false, jumped = false, inspectHeld = false, snapped = false;
     // Nothing in the right hand (an avatar gesture): no knife or gun drawn.
     bool emptyHand = false;
+    // Since the last frame. With the knife 1 is a slash and 2 a stab; with a gun 1 is a shot and 2 a reload.
     unsigned attack = 0, inspect = 0;
     std::optional<Glow> playerGlow;
     GhostSource source = GhostSource::none;
