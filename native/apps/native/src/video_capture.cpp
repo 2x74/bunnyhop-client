@@ -116,6 +116,8 @@ BhSnapshot VideoCapture::interpolated(double tick, double &mix) {
 
 void VideoCapture::place_actor(const BhSnapshot &state) {
     std::vector<native_render::Actor> actors;
+    // A frame can span several ticks or share one with the last sample: each swing plays once, wherever it falls.
+    actor_events_.replay_frame(core_, next_.player.tick);
     if (camera_.third_person()) {
         native_render::Actor actor;
         actor.id = "video-target";
@@ -134,11 +136,7 @@ void VideoCapture::place_actor(const BhSnapshot &state) {
         BhWeaponReport held{};
         bh_weapon_report(core_, &held);
         actor.frame.weapon = held.active;
-        BhReplayEvents events{};
-        bh_replay_events(core_, previous_.player.tick, next_.player.tick, &events);
-        actor.inspect = events.inspect_signal;
-        actor.attack = events.cosmetic;
-        actor.inspectHeld = events.inspect_held;
+        actor_events_.apply(actor);
         actors.push_back(std::move(actor));
     }
     renderer_.set_room_actors(actors);

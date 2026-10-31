@@ -140,6 +140,7 @@ private:
     std::optional<std::vector<uint8_t>> waiting_;
     uint64_t frame_ = 0, collected_ = 0, submitted_ = 0;
     double last_sample_tick_ = -1;
+    native_render::ThirdPersonEvents actor_events_;
     bool done_ = false;
     BhSnapshot previous_{}, next_{};
     BhCmd prior_command_{}, next_command_{};
