@@ -22,7 +22,7 @@ NAMES = {
     "world_pass.hpp": ["world"],
     "sky_pass.hpp": ["sky"],
     "shadow_pass.hpp": ["depth", "cutout-depth"],
-    "native_viewmodel.hpp": ["player"],
+    "native_viewmodel_gpu.hpp": ["player"],
 }
 
 
@@ -92,7 +92,7 @@ def calls(source):
             key = arguments(parts[0][1:-1])
             if len(key) != 2:
                 raise ValueError(f"Unknown program key: {parts[0]}")
-            site += tuple(json.loads(part) for part in key)
+            site += tuple(json.loads(part) if part.startswith('"') else part for part in key)
         result.append(site)
     return result
 
@@ -130,7 +130,8 @@ def extract(output):
         cpp.append(f'namespace {namespace} {{\n' + '\n'.join(globals) + '\n}')
     player = (SOURCE / "player_material.hpp").read_text(encoding="utf-8")
     enum = re.search(r'enum class PlayerMaterial \{[^}]+\};', player)[0]
-    cpp += ['namespace native_render {', enum, function(player, "player_defines"), '}']
+    cpp += ['namespace native_render {', enum, function(player, "player_defines"),
+            function(player, "player_shader_key"), '}']
     cpp += ['std::string read(const char *path) { std::ifstream f(path); return {std::istreambuf_iterator<char>(f), {}}; }',
             'void emit(const std::string &name, const std::string &v, const std::string &f) {',
             'std::ofstream(name + ".vert") << v;', 'std::ofstream(name + ".frag") << f;', '}',
@@ -148,7 +149,7 @@ def extract(output):
         discovered[path.name] = len(sites)
         for name, creation in zip(NAMES[path.name], sites):
             position, arguments = creation[:2]
-            if len(creation) == 4 and creation[2:] != (name, ""):
+            if len(creation) == 4 and creation[2:] != (("key", "") if name == "player" else (name, "")):
                 raise ValueError(f"ProgramKey does not match the shader manifest: {creation[2:]}")
             site = f'{path.relative_to(NATIVE).as_posix()}:{source[:position].count(chr(10)) + 1}'
             if name == "player":
@@ -166,7 +167,11 @@ def extract(output):
                                f'native_render::PlayerMaterial::{material});')
                     vertex = f'read("assets/{v}.glsl")'
                     fragment = f'read("assets/{f}.glsl")'
-                    cpp.append(f'emit("{key}", defines + {vertex}, defines + {fragment}); }}')
+                    cpp.append('auto key = native_render::player_shader_key('
+                               f'{finish}, {str(glove).lower()}, {str(detail).lower()}, '
+                               f'native_render::PlayerMaterial::{material});')
+                    cpp.append(f'if (key != "{key}") return 2;')
+                    cpp.append(f'emit(key, defines + {vertex}, defines + {fragment}); }}')
                     manifest.append(dict(name=key, family=f'player-{material}', site=site, variant=variant))
                 continue
             cpp.append('{')

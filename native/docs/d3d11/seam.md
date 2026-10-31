@@ -184,9 +184,27 @@ text keeps its warmed digit cache. `hud_area.hpp` uses seam viewports; `hud_text
 queries. Avatar readback is enqueued once and polled on later frames, with a five-second failure deadline;
 a separate submission fence supplies the flush option absent from `poll(Readback)`.
 `target_png` takes an explicit target and collects seam readback while retaining the original PNG filtering.
-Temporary bridges remain for legacy screenshot callers' read target/pack state, the avatar caller's current
-target/viewport, and construction of the backdrop renderer and avatar viewmodel from the GL table.
-Those hosts must pass explicit target views/rectangles and the shared context when their renderers migrate.
+`native_viewmodel_gpu.hpp` owns the viewmodel/player meshes, programs, constants, samplers and raster pipelines;
+`native_viewmodel.hpp` retains animation and pose evaluation. Mesh setup interleaves the original 23 floats and
+three glow-normal floats once; draw calls use mesh addresses resolved at setup or cosmetic cache refresh.
+Animated bones update a preallocated 3×258 RGBA32F texture; floor weapons use a
+separate immutable 3×1 identity texture. Constants resolve once per permutation, with bool32 glow flags and
+16-byte palette/glove array strides. All three environment names map to logical unit 9. Aura instance draws
+start at zero, and mirrored hands select clockwise raster variants. GL sampler bindings are released before
+returning to legacy passes so their texture filtering remains intact. A temporary back-cull pipeline restores
+the latent cull-face mode after aura shells because legacy world passes only re-enable culling. Remove that
+restore when those passes bind their own raster states.
+`NativeViewmodel(gfx::Context&, path, cpu_only)` borrows the rendering context; its `Gl&` overload owns an
+OpenGL adapter. Scene draws select `Compare::less_equal`; standalone preview callers can explicitly pass
+`Compare::less` through the draw setup. Both comparisons use pipelines created at resource setup.
+`loadout_preview.hpp`, `avatar_stage.hpp` and `avatar_service.hpp` borrow the same context, with no raw graphics
+calls. They restore the caller's explicit target/viewport and read back through the seam. Legacy constructor
+overloads preserve existing standalone callers. `native_map_effects.hpp` has no graphics API dependency.
+Player `ProgramKey` names include every manifest alias, with an empty permutation string. The extractor evaluates
+the runtime key function for every reachable material/finish/glove/detail combination and rejects missing names.
+D3D11 creation reads precompiled programs without loading or compiling the OpenGL fallback sources.
+Temporary bridges remain for legacy screenshot callers' read target/pack state and construction of the backdrop
+renderer from the GL table. Remove those as its renderer migrates.
 Presentation, video, HUD and avatar service constructors borrow `gfx::Context` directly. The legacy
 renderer owns the temporary OpenGL adapter shared with presentation and video capture.
 `shader()` is a temporary native-handle bridge for `renderer.hpp`'s existing shared water uniforms; remove it
@@ -303,8 +321,8 @@ goldens after each extraction, so later API conversion does not require concurre
 | 2, parallel | Shadow/reflection targets: `sun_shadows.hpp`, `water_reflection.hpp` | Independent target resources; integrate with extracted shadow/water passes |
 | 2, parallel | HUD: `hud.hpp`, `hud_area.hpp`, `hud_text.hpp` | Atlas textures, streaming batches, UI pipeline; keep text rasterization unchanged |
 | 2, parallel | Readback services: `menu_backdrop.hpp`, `avatar_stage.hpp`, `frame_pacing.hpp` | Independent asynchronous slot/fence callers; Source exposure remains with its postprocess owner |
-| 3, parallel | `native_viewmodel.hpp` | One owner first extracts GPU mesh/program/constants into a dedicated header; keep animation/pose logic untouched, then migrate rendering |
-| 3, parallel | `native_map_effects.hpp` and other leaf geometry | Own shader/geometry resources; shared water constants handed off through the extracted water pass |
+| 3, complete | Viewmodels and cosmetic previews | GPU resources extracted, then migrated; shared-context constructors and precompiled program keys are ready for renderer integration |
+| 3, parallel | Other leaf geometry | `native_map_effects.hpp` is API-independent; shared water constants are handed off through the extracted water pass |
 | 3, parallel | Extracted world, sky, water, shadow pass headers | Each pass owner converts its own code; only integration owner edits `renderer.hpp` wiring and cleanup |
 | 4 | Startup/presentation/Windows, one owner | Inject existing D3D device/context, borrowed swapchain target, resize/present and low-latency markers; add opt-in backend selection |
 

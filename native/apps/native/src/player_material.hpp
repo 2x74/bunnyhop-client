@@ -15,21 +15,6 @@ namespace native_render {
 
 enum class PlayerMaterial { solid, ghost, gun, world_gun };
 
-// Uniform locations, looked up once per program.
-struct PlayerProgram {
-    GLuint id = 0;
-    GLint projection = -1, model = -1, modelMatrix = -1, viewMatrix = -1, cameraPosition = -1, offset = -1, mirror = -1,
-          auraPass = -1, auraSize = -1, glowTime = -1, boneMatrices = -1;
-    GLint palette = -1, accent = -1, glove = -1, finTime = -1, cosTier = -1, playerLook = -1, fabric = -1;
-    GLint headwearScale = -1, headwearOffset = -1, headwearFaceScale = -1, headwearFaceOffset = -1, hairColor = -1;
-    GLint propellerAngle = -1, capybara = -1, ponytail = -1;
-    GLint finEnvOn = -1, cosEnvOn = -1, playerEnvOn = -1, finSunDir = -1, finSunColor = -1, finEnv = -1, cosEnv = -1,
-          playerEnv = -1, gunFlash = -1, gunFlashPos = -1;
-    GLint glowEnabled = -1, glowColor = -1, glowIntensity = -1, glowOpacity = -1, glowAxisA = -1, glowAxisB = -1,
-          glowNearFade = -1, glowDistance = -1;
-    GLint ghost = -1, ghostRim = -1, opacity = -1, axisA = -1, axisB = -1, nearFade = -1;
-};
-
 // Source (x, y, z) -> three.js (x, z, -y).
 inline std::array<float, 3> to_web_space(const float source[3]) {
     return {source[0], source[2], -source[1]};
@@ -86,6 +71,16 @@ struct PlayerShaderSources {
 
 inline int player_program_key(int finish, bool glove, bool detail, PlayerMaterial material) {
     return finish | (glove ? 64 : 0) | (detail ? 128 : 0) | (int(material) << 8);
+}
+
+// Full manifest names preserve aliases: equal shader sources still have distinct cache keys.
+inline std::string player_shader_key(int finish, bool glove, bool detail, PlayerMaterial material) {
+    const char *family = material == PlayerMaterial::solid   ? "solid"
+                         : material == PlayerMaterial::ghost ? "ghost"
+                         : material == PlayerMaterial::gun   ? "gun"
+                                                             : "world_gun";
+    return "player-" + std::string(family) + "-" + std::to_string(finish) + "-g" + (glove ? "1" : "0") + "-d"
+           + (detail ? "1" : "0");
 }
 
 // The #defines three.js would give the same material (viewmodel/finishes/shader.ts lookDefines, guns/material.ts).
