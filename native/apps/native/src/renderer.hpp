@@ -307,7 +307,7 @@ class Renderer {
         if (!sourceLook || graphics.potato || graphics.fullbright || !lightmapInfo.hdr || hdrUnavailable)
             return nullptr;
         if (!hdr) try {
-                hdr = std::make_unique<SourceHdr>(gl, emptyVao);
+                hdr = std::make_unique<SourceHdr>(graphicsContext, gl);
             } catch (const std::exception &e) {
                 hdrUnavailable = true;
                 std::cerr << "Native HDR unavailable, drawing straight: " << e.what() << '\n';
@@ -328,7 +328,7 @@ class Renderer {
     EnhancedLook *enhanced_pass() {
         if (!graphics.look.composer() || graphics.potato || enhancedUnavailable) return nullptr;
         if (!enhanced) try {
-                enhanced = std::make_unique<EnhancedLook>(gl, emptyVao);
+                enhanced = std::make_unique<EnhancedLook>(graphicsContext, gl);
             } catch (const std::exception &e) {
                 enhancedUnavailable = true;
                 std::cerr << "Enhanced look unavailable, drawing the Source look: " << e.what() << '\n';
@@ -1892,7 +1892,7 @@ public:
         // The looks' passes link with the settings (at map load or when the look changes), never in a run's frame.
         enhanced_pass();
         if (graphics.target_needed() && !graphicsTarget)
-            graphicsTarget = std::make_unique<GraphicsTarget>(gl, emptyVao);
+            graphicsTarget = std::make_unique<GraphicsTarget>(graphicsContext, gl);
         sourceLook = graphics.source;
         if (hdr) hdr->bloom = graphics.bloom;
         if (anisotropySupported) {
