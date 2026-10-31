@@ -156,19 +156,25 @@ public:
     ) {
         static constexpr float shadow_bias = .0003f;
         const auto terms = sun_terms(graphics, frameSun, profile);
-        gl.UseProgram(world.program);
-        gl.Uniform1i(uniforms.loc(world.program, "sunActive"), terms.active);
-        if (!terms.active) return;
-        gl.Uniform1i(uniforms.loc(world.program, "sunShadowActive"), terms.shadows);
-        gl.Uniform1f(uniforms.loc(world.program, "sunSkyFill"), terms.fill);
-        gl.Uniform1f(uniforms.loc(world.program, "sunBakedScale"), terms.baked);
-        gl.Uniform1f(uniforms.loc(world.program, "sunDirectStrength"), terms.direct);
-        gl.Uniform1f(uniforms.loc(world.program, "sunShadowStrength"), terms.strength);
-        gl.Uniform3fv(uniforms.loc(world.program, "sunLightDirection"), 1, frameSun.direction.data());
+        context.bind_program(world.program);
+        world.sunValues.sunActive = terms.active;
+        if (!terms.active) {
+            world.upload_sun();
+            return;
+        }
+        world.sunValues.sunShadowActive = terms.shadows;
+        world.sunValues.sunSkyFill = terms.fill;
+        world.sunValues.sunBakedScale = terms.baked;
+        world.sunValues.sunDirectStrength = terms.direct;
+        world.sunValues.sunShadowStrength = terms.strength;
+        world.sunValues.sunLightDirection = frameSun.direction;
         const auto &color = !frameSun.from_pack && terms.direct > 0 ? world.mapSun.irradiance : frameSun.color;
-        gl.Uniform3fv(uniforms.loc(world.program, "sunLightColor"), 1, color.data());
-        gl.Uniform3fv(uniforms.loc(world.program, "sunAmbientColor"), 1, frameSun.ambient.data());
-        if (!terms.shadows) return;
+        world.sunValues.sunLightColor = color;
+        world.sunValues.sunAmbientColor = frameSun.ambient;
+        if (!terms.shadows) {
+            world.upload_sun();
+            return;
+        }
         const int size = graphics.look.shadow_size;
         const float range = std::clamp(graphics.look.shadow_distance, 256.f, 4096.f);
         const auto lightVp = sun_view_projection({eye[0], eye[1], eye[2]}, frameSun.direction, range, size);
@@ -185,11 +191,12 @@ public:
         gl.Disable(GL_POLYGON_OFFSET_FILL);
         gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, GLuint(drawTarget));
         gl.BindFramebuffer(GL_READ_FRAMEBUFFER, GLuint(readTarget));
-        gl.UseProgram(world.program);
-        gl.UniformMatrix4fv(uniforms.loc(world.program, "sunShadowMatrix"), 1, GL_FALSE, lightVp.data());
-        gl.Uniform1f(uniforms.loc(world.program, "sunShadowTexel"), 1.f / float(size));
-        gl.Uniform1f(uniforms.loc(world.program, "sunShadowRadius"), size <= 512 ? 1.f : 2.f);
-        gl.Uniform1f(uniforms.loc(world.program, "sunShadowBias"), shadow_bias);
+        context.bind_program(world.program);
+        world.sunValues.sunShadowMatrix = lightVp;
+        world.sunValues.sunShadowTexel = 1.f / float(size);
+        world.sunValues.sunShadowRadius = size <= 512 ? 1.f : 2.f;
+        world.sunValues.sunShadowBias = shadow_bias;
+        world.upload_sun();
         sunShadows->bind(sun_shadow_unit);
         gl.ActiveTexture(GL_TEXTURE0);
     }
@@ -201,8 +208,7 @@ public:
     void prepare_resources() {
         sunShadows = std::make_unique<SunShadowMap>(context);
         cutoutDepthProgram = link_program(gl, native_render::cutout_depth_vertex, native_render::cutout_depth_fragment);
-        gl.UseProgram(world.program);
-        gl.Uniform1i(uniforms.loc(world.program, "sunShadowMap"), sun_shadow_unit);
-        gl.Uniform1i(uniforms.loc(world.program, "sunActive"), 0);
+        context.bind_program(world.program);
+        world.sunValues.sunActive = 0;
     }
 };

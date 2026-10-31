@@ -1,23 +1,19 @@
 #pragma once
 
 class WorldPass {
-    Gl &gl;
     gfx::Context &context;
     BhContext *&core;
     RenderResources &resources;
-    RenderUniforms &uniforms;
     RenderProfile &profile;
 
 public:
-    WorldPass(Gl &g, gfx::Context &ctx, BhContext *&c, RenderResources &r, RenderUniforms &u, RenderProfile &p)
-        : gl(g)
-        , context(ctx)
+    WorldPass(gfx::Context &ctx, BhContext *&c, RenderResources &r, RenderProfile &p)
+        : context(ctx)
         , core(c)
         , resources(r)
-        , uniforms(u)
         , profile(p) {}
 
-    GLuint program = 0;
+    gfx::Program program;
     gfx::Texture lightmap;
     RenderGeometry worldMesh, propMesh;
     std::vector<BhGroup> groups;
@@ -137,48 +133,186 @@ public:
         return (m.flags & (1 | 8)) || m.kind == 2 || m.kind == 3 || m.alpha < 1;
     }
 
-    // Per-draw uniforms of the world program, looked up once: bind_material runs for every draw of every pass.
-    struct MaterialUniforms {
-        GLint model = -1, flatColor = -1, hasNormal = -1, hasSecondary = -1, hasDetail = -1, detailScale = -1;
-        GLint detailBlend = -1, tint = -1, opacity = -1, cutoff = -1, unlit = -1, props = -1, kind = -1;
-        GLint aboveWater = -1, captureReady = -1, waterFogEnd = -1, additive = -1;
+    struct MaterialValues {
+        native::Matrix model{};
+        uint32_t hasNormal = 0;
+        uint32_t hasSecondary = 0;
+        uint32_t hasDetail = 0;
+        float detailScale = 0;
+        float detailBlend = 0;
+        std::array<float, 3> tint{};
+        float opacity = 0;
+        float cutoff = 0;
+        uint32_t unlit = 0;
+        uint32_t props = 0;
+        int32_t kind = 0;
+        uint32_t aboveWater = 0;
+        uint32_t additive = 0;
+        std::array<float, 3> flatColor{};
+        uint32_t captureReady = 0;
+        float waterFogEnd = 0;
+    } materialValues;
 
-        void read(Gl &gl, GLuint program) {
-            const std::pair<GLint *, const char *> uniforms[] = {
-                    {&model, "model"},
-                    {&flatColor, "flatColor"},
-                    {&hasNormal, "hasNormal"},
-                    {&hasSecondary, "hasSecondary"},
-                    {&hasDetail, "hasDetail"},
-                    {&detailScale, "detailScale"},
-                    {&detailBlend, "detailBlend"},
-                    {&tint, "tint"},
-                    {&opacity, "opacity"},
-                    {&cutoff, "cutoff"},
-                    {&unlit, "unlit"},
-                    {&props, "props"},
-                    {&kind, "kind"},
-                    {&aboveWater, "aboveWater"},
-                    {&captureReady, "captureReady"},
-                    {&waterFogEnd, "waterFogEnd"},
-                    {&additive, "additive"},
-            };
-            for (const auto &[location, name] : uniforms)
-                *location = gl.GetUniformLocation(program, name);
+    struct SceneValues {
+        native::Matrix viewProjection{};
+        float clipHeight = gfx::no_clip_height;
+        float timeSeconds = 0;
+        uint32_t reflectionReady = 0;
+        float reflectionHeight = 0;
+        uint32_t fullbright = 0;
+        uint32_t potato = 0;
+        uint32_t skyPass = 0;
+        uint32_t flashlight = 0;
+        std::array<float, 3> flashDirection{};
+        std::array<float, 3> skyFogColor{};
+        std::array<float, 3> skyFogRange{};
+        std::array<float, 2> cameraNearFar{native::camera_near_plane, native::camera_far_plane};
+        float lightmapScale = 1;
+        std::array<float, 3> sunDirection{};
+    } sceneValues;
+
+    struct SunValues {
+        uint32_t sunActive = 0;
+        uint32_t sunShadowActive = 0;
+        float sunSkyFill = 0;
+        float sunBakedScale = 1;
+        float sunDirectStrength = 0;
+        float sunShadowStrength = 0;
+        std::array<float, 3> sunLightDirection{};
+        std::array<float, 3> sunLightColor{};
+        std::array<float, 3> sunAmbientColor{};
+        native::Matrix sunShadowMatrix{};
+        float sunShadowTexel = 0;
+        float sunShadowRadius = 0;
+        float sunShadowBias = 0;
+    } sunValues;
+
+    std::array<gfx::ConstantBinding, 4> materialConstants;
+    gfx::ConstantBinding sceneConstants, sunConstants, waterConstants;
+    std::array<gfx::Pipeline, 32> pipelines;
+    unsigned activePipeline = ~0u;
+    std::array<gfx::Pipeline, 2> endPipelines;
+
+    ~WorldPass() {
+        for (auto &binding : materialConstants)
+            context.destroy(binding);
+        context.destroy(sceneConstants);
+        context.destroy(sunConstants);
+        context.destroy(waterConstants);
+        for (auto &pipeline : pipelines)
+            context.destroy(pipeline);
+        for (auto &pipeline : endPipelines)
+            context.destroy(pipeline);
+        context.destroy(program);
+    }
+
+    void prepare_material_constants() {
+        static constexpr gfx::ConstantField fields[] = {
+                {"model", offsetof(MaterialValues, model), 64, gfx::ConstantType::matrix4},
+                {"hasNormal", offsetof(MaterialValues, hasNormal), 4, gfx::ConstantType::bool32},
+                {"hasSecondary", offsetof(MaterialValues, hasSecondary), 4, gfx::ConstantType::bool32},
+                {"hasDetail", offsetof(MaterialValues, hasDetail), 4, gfx::ConstantType::bool32},
+                {"detailScale", offsetof(MaterialValues, detailScale), 4, gfx::ConstantType::float1},
+                {"detailBlend", offsetof(MaterialValues, detailBlend), 4, gfx::ConstantType::float1},
+                {"tint", offsetof(MaterialValues, tint), 12, gfx::ConstantType::float3},
+                {"opacity", offsetof(MaterialValues, opacity), 4, gfx::ConstantType::float1},
+                {"cutoff", offsetof(MaterialValues, cutoff), 4, gfx::ConstantType::float1},
+                {"unlit", offsetof(MaterialValues, unlit), 4, gfx::ConstantType::bool32},
+                {"props", offsetof(MaterialValues, props), 4, gfx::ConstantType::bool32},
+                {"kind", offsetof(MaterialValues, kind), 4, gfx::ConstantType::int1},
+                {"aboveWater", offsetof(MaterialValues, aboveWater), 4, gfx::ConstantType::bool32},
+                {"additive", offsetof(MaterialValues, additive), 4, gfx::ConstantType::bool32},
+                {"flatColor", offsetof(MaterialValues, flatColor), 12, gfx::ConstantType::float3},
+                {"captureReady", offsetof(MaterialValues, captureReady), 4, gfx::ConstantType::bool32},
+                {"waterFogEnd", offsetof(MaterialValues, waterFogEnd), 4, gfx::ConstantType::float1},
+        };
+        for (unsigned variant = 0; variant < materialConstants.size(); ++variant) {
+            std::vector<gfx::ConstantField> selected(fields, fields + 14);
+            if (variant & 1) selected.push_back(fields[14]);
+            if (variant & 2) selected.insert(selected.end(), fields + 15, std::end(fields));
+            materialConstants[variant] = context.create_constants(program, {selected, sizeof(MaterialValues)});
         }
-    } materialUniforms;
+    }
 
-    void bind_material(uint32_t index, bool prop, const native::GraphicsSettings &graphics, const WaterPass &water) {
+    void prepare_scene_constants() {
+        static constexpr gfx::ConstantField fields[] = {
+                {"viewProjection", offsetof(SceneValues, viewProjection), 64, gfx::ConstantType::matrix4},
+                {"clipHeight", offsetof(SceneValues, clipHeight), 4, gfx::ConstantType::float1},
+                {"timeSeconds", offsetof(SceneValues, timeSeconds), 4, gfx::ConstantType::float1},
+                {"reflectionReady", offsetof(SceneValues, reflectionReady), 4, gfx::ConstantType::bool32},
+                {"reflectionHeight", offsetof(SceneValues, reflectionHeight), 4, gfx::ConstantType::float1},
+                {"fullbright", offsetof(SceneValues, fullbright), 4, gfx::ConstantType::bool32},
+                {"potato", offsetof(SceneValues, potato), 4, gfx::ConstantType::bool32},
+                {"skyPass", offsetof(SceneValues, skyPass), 4, gfx::ConstantType::bool32},
+                {"flashlight", offsetof(SceneValues, flashlight), 4, gfx::ConstantType::bool32},
+                {"flashDirection", offsetof(SceneValues, flashDirection), 12, gfx::ConstantType::float3},
+                {"skyFogColor", offsetof(SceneValues, skyFogColor), 12, gfx::ConstantType::float3},
+                {"skyFogRange", offsetof(SceneValues, skyFogRange), 12, gfx::ConstantType::float3},
+                {"cameraNearFar", offsetof(SceneValues, cameraNearFar), 8, gfx::ConstantType::float2},
+                {"lightmapScale", offsetof(SceneValues, lightmapScale), 4, gfx::ConstantType::float1},
+                {"sunDirection", offsetof(SceneValues, sunDirection), 12, gfx::ConstantType::float3},
+        };
+        sceneConstants = context.create_constants(program, {fields, sizeof(SceneValues)});
+    }
+
+    void prepare_sun_constants() {
+        static constexpr gfx::ConstantField fields[] = {
+                {"sunActive", offsetof(SunValues, sunActive), 4, gfx::ConstantType::bool32},
+                {"sunShadowActive", offsetof(SunValues, sunShadowActive), 4, gfx::ConstantType::bool32},
+                {"sunSkyFill", offsetof(SunValues, sunSkyFill), 4, gfx::ConstantType::float1},
+                {"sunBakedScale", offsetof(SunValues, sunBakedScale), 4, gfx::ConstantType::float1},
+                {"sunDirectStrength", offsetof(SunValues, sunDirectStrength), 4, gfx::ConstantType::float1},
+                {"sunShadowStrength", offsetof(SunValues, sunShadowStrength), 4, gfx::ConstantType::float1},
+                {"sunLightDirection", offsetof(SunValues, sunLightDirection), 12, gfx::ConstantType::float3},
+                {"sunLightColor", offsetof(SunValues, sunLightColor), 12, gfx::ConstantType::float3},
+                {"sunAmbientColor", offsetof(SunValues, sunAmbientColor), 12, gfx::ConstantType::float3},
+                {"sunShadowMatrix", offsetof(SunValues, sunShadowMatrix), 64, gfx::ConstantType::matrix4},
+                {"sunShadowTexel", offsetof(SunValues, sunShadowTexel), 4, gfx::ConstantType::float1},
+                {"sunShadowRadius", offsetof(SunValues, sunShadowRadius), 4, gfx::ConstantType::float1},
+                {"sunShadowBias", offsetof(SunValues, sunShadowBias), 4, gfx::ConstantType::float1},
+        };
+        sunConstants = context.create_constants(program, {fields, sizeof(SunValues)});
+    }
+
+    void upload_sun() {
+        context.bind_program(program);
+        context.constants(sunConstants, &sunValues);
+    }
+
+    void prepare_pipelines() {
+        for (unsigned variant = 0; variant < pipelines.size(); ++variant) {
+            gfx::PipelineState state;
+            state.raster.offset = variant & 1;
+            state.raster.slope_bias = -1;
+            state.raster.constant_bias = -4;
+            state.raster.cull = variant & 2 ? gfx::Cull::none : gfx::Cull::back;
+            state.blend.destination = variant & 4 ? gfx::BlendFactor::one : gfx::BlendFactor::inverse_source_alpha;
+            state.blend.enabled = variant & 8;
+            state.depth.write = !(variant & 8);
+            state.raster.winding = variant & 16 ? gfx::Winding::clockwise : gfx::Winding::counter_clockwise;
+            pipelines[variant] = context.create_pipeline(state);
+        }
+        for (unsigned mirror = 0; mirror < endPipelines.size(); ++mirror) {
+            gfx::PipelineState state;
+            state.raster.winding = mirror ? gfx::Winding::clockwise : gfx::Winding::counter_clockwise;
+            endPipelines[mirror] = context.create_pipeline(state);
+        }
+    }
+
+    void bind_material(
+            uint32_t index,
+            bool prop,
+            bool translucent,
+            bool mirrored,
+            const native::GraphicsSettings &graphics,
+            const WaterPass &water
+    ) {
         const BhMaterial fallback = {-1, 1, 0, 1, .5f, {1, 1, 1}};
         const auto &m = index < materials.size() ? materials[index] : fallback;
         if (graphics.potato) {
             const auto found = resources.textureAverages.find(m.texture);
             const std::array<float, 3> fallbackColor = {.5f, .5f, .5f};
-            gl.Uniform3fv(
-                    materialUniforms.flatColor,
-                    1,
-                    found == resources.textureAverages.end() ? fallbackColor.data() : found->second.data()
-            );
+            materialValues.flatColor = found == resources.textureAverages.end() ? fallbackColor : found->second;
         }
         const BhMaterialExtra empty = {-1, -1, 4, 1, 0, 400, 1};
         const auto &e = index < extras.size() ? extras[index] : empty;
@@ -189,36 +323,35 @@ public:
         resources.bind(3, resources.texture(e.detail, true));
         resources.bind(7, index < normals.size() && normals[index] ? normals[index] : resources.white);
         const bool hasNormal = graphics.material_response && index < normals.size() && normals[index];
-        gl.Uniform1i(materialUniforms.hasNormal, hasNormal);
-        gl.Uniform1i(materialUniforms.hasSecondary, e.texture2 >= 0);
-        gl.Uniform1i(materialUniforms.hasDetail, e.detail >= 0 && !graphics.potato);
-        gl.Uniform1f(materialUniforms.detailScale, e.detail_scale);
-        gl.Uniform1f(materialUniforms.detailBlend, e.detail_blend);
-        gl.Uniform3fv(materialUniforms.tint, 1, m.color);
-        gl.Uniform1f(materialUniforms.opacity, m.alpha);
-        gl.Uniform1f(materialUniforms.cutoff, (m.flags & 2) ? m.alpha_ref : 0);
-        gl.Uniform1i(materialUniforms.unlit, (m.flags & 16) != 0 || (!prop && lightmap == resources.white));
-        gl.Uniform1i(materialUniforms.props, prop);
-        gl.Uniform1i(materialUniforms.kind, m.kind);
-        gl.Uniform1i(materialUniforms.aboveWater, e.above_water);
+        materialValues.hasNormal = hasNormal;
+        materialValues.hasSecondary = e.texture2 >= 0;
+        materialValues.hasDetail = e.detail >= 0 && !graphics.potato;
+        materialValues.detailScale = e.detail_scale;
+        materialValues.detailBlend = e.detail_blend;
+        std::copy_n(m.color, 3, materialValues.tint.begin());
+        materialValues.opacity = m.alpha;
+        materialValues.cutoff = (m.flags & 2) ? m.alpha_ref : 0;
+        materialValues.unlit = (m.flags & 16) != 0 || (!prop && lightmap == resources.white);
+        materialValues.props = prop;
+        materialValues.kind = m.kind;
+        materialValues.aboveWater = e.above_water;
         if (m.kind == 2) {
-            gl.Uniform1i(materialUniforms.captureReady, water.sceneCaptured && water.waterPlanner.ready(index));
-            gl.Uniform1f(materialUniforms.waterFogEnd, std::max(1.f, e.fog_end));
+            materialValues.captureReady = water.sceneCaptured && water.waterPlanner.ready(index);
+            materialValues.waterFogEnd = std::max(1.f, e.fog_end);
         }
-        gl.Uniform1i(materialUniforms.additive, (m.flags & 8) != 0);
+        materialValues.additive = (m.flags & 8) != 0;
         const bool doubleSided =
                 m.kind == 2 ? native_render::water_face_double_sided(water.waterBeneathFaces, e.above_water)
                             : (m.flags & 4) != 0;
-        if (doubleSided)
-            gl.Disable(GL_CULL_FACE);
-        else
-            gl.Enable(GL_CULL_FACE);
-        gl.BlendFunc(GL_SRC_ALPHA, (m.flags & 8) ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
-        if (m.kind == 2) {
-            gl.Enable(GL_POLYGON_OFFSET_FILL);
-            gl.PolygonOffset(-1, -4);
-        } else
-            gl.Disable(GL_POLYGON_OFFSET_FILL);
+        const unsigned variant = unsigned(m.kind == 2) | (unsigned(doubleSided) << 1)
+                                 | (unsigned((m.flags & 8) != 0) << 2) | (unsigned(translucent) << 3)
+                                 | (unsigned(mirrored) << 4);
+        if (variant != activePipeline) {
+            context.pipeline(pipelines[variant]);
+            activePipeline = variant;
+        }
+        const unsigned constants = unsigned(graphics.potato) | (unsigned(m.kind == 2) << 1);
+        context.constants(materialConstants[constants], &materialValues);
     }
 
     struct SceneTransform {
@@ -246,42 +379,46 @@ public:
         return cached.value;
     }
 
-    // reflection: the mirrored scene for the water reflection, without the water itself.
-    template <class CaptureRefraction>
-    void draw_scene(
+    void bind_scene_textures(WaterPass &water) {
+        resources.bind(1, lightmap, false);
+        context.bind_texture(6, water.planesTexture, water.planesSampler);
+        if (water.reflectionDrawn)
+            water.waterReflection->bind(8);
+        else
+            resources.bind(8, resources.white);
+        if (water.sceneCaptured) water.bind_refraction();
+    }
+
+    void prepare_scene_values(
             const native::Matrix &vp,
             const float eye[3],
             bool sky,
             double time,
             bool reflection,
             const View &view,
-            WaterPass &water,
-            CaptureRefraction capture_refraction
+            WaterPass &water
     ) {
         const auto &skyInfo = view.skyInfo;
-        auto phaseStart = profile.profile_now();
-        water.sceneCaptured = false;
-        gl.UseProgram(program);
-        gl.UniformMatrix4fv(uniforms.loc(program, "viewProjection"), 1, GL_FALSE, vp.data());
-        gl.Uniform1f(uniforms.loc(program, "clipHeight"), view.clipHeight);
-        water.water_uniforms(program, eye, vp, view.viewportWidth, view.viewportHeight);
-        gl.Uniform1f(uniforms.loc(program, "timeSeconds"), time);
-        gl.Uniform1i(uniforms.loc(program, "reflectionReady"), !sky && !reflection && water.reflectionDrawn);
-        gl.Uniform1f(uniforms.loc(program, "reflectionHeight"), water.waterPlan.reflection_height.value_or(0));
+        context.bind_program(program);
+        sceneValues.viewProjection = vp;
+        sceneValues.clipHeight = reflection ? view.clipHeight : gfx::no_clip_height;
+        water.water_uniforms(waterConstants, eye, vp, view.viewportWidth, view.viewportHeight);
+        sceneValues.timeSeconds = time;
+        sceneValues.reflectionReady = !sky && !reflection && water.reflectionDrawn;
+        sceneValues.reflectionHeight = water.waterPlan.reflection_height.value_or(0);
         if (water.reflectionDrawn)
             water.waterReflection->bind(8);
         else
             resources.bind(8, resources.white);
-        gl.Uniform1i(uniforms.loc(program, "fullbright"), view.graphics.fullbright);
-        gl.Uniform1i(uniforms.loc(program, "potato"), view.graphics.potato);
-        gl.Uniform1i(uniforms.loc(program, "skyPass"), sky && view.hasSky && skyInfo.fog_enable);
-        gl.Uniform1i(uniforms.loc(program, "flashlight"), view.flashlightEnabled && !sky);
-        gl.Uniform3f(
-                uniforms.loc(program, "flashDirection"),
-                std::cos(view.lastPitch * native::radians) * std::cos(view.lastYaw * native::radians),
-                std::cos(view.lastPitch * native::radians) * std::sin(view.lastYaw * native::radians),
-                -std::sin(view.lastPitch * native::radians)
-        );
+        sceneValues.fullbright = view.graphics.fullbright;
+        sceneValues.potato = view.graphics.potato;
+        sceneValues.skyPass = sky && view.hasSky && skyInfo.fog_enable;
+        sceneValues.flashlight = view.flashlightEnabled && !sky;
+        sceneValues.flashDirection = {
+                float(std::cos(view.lastPitch * native::radians) * std::cos(view.lastYaw * native::radians)),
+                float(std::cos(view.lastPitch * native::radians) * std::sin(view.lastYaw * native::radians)),
+                float(-std::sin(view.lastPitch * native::radians))
+        };
         float fog[3] = {skyInfo.fog_color[0] / 255.f, skyInfo.fog_color[1] / 255.f, skyInfo.fog_color[2] / 255.f};
         if (skyInfo.fog_blend) {
             const float dx = std::cos(view.lastPitch * native::radians) * std::cos(view.lastYaw * native::radians),
@@ -301,14 +438,20 @@ public:
             for (int k = 0; k < 3; k++)
                 fog[k] = (skyInfo.fog_color[k] * t + skyInfo.fog_color2[k] * (1 - t)) / 255.f;
         }
-        gl.Uniform3fv(uniforms.loc(program, "skyFogColor"), 1, fog);
-        gl.Uniform3f(
-                uniforms.loc(program, "skyFogRange"),
+        std::copy_n(fog, 3, sceneValues.skyFogColor.begin());
+        sceneValues.skyFogRange = {
                 skyInfo.fog_start / std::max(skyInfo.scale, .001f),
                 skyInfo.fog_end / std::max(skyInfo.scale, .001f),
                 skyInfo.fog_max_density
-        );
-        resources.bind(1, lightmap, false);
+        };
+        sceneValues.lightmapScale = lightmapInfo.scale;
+        context.constants(sceneConstants, &sceneValues);
+        bind_scene_textures(water);
+    }
+
+    void
+    collect_scene_draws(const native::Matrix &vp, const float eye[3], bool sky, bool reflection, const View &view) {
+        auto phaseStart = profile.profile_now();
         ++sceneNumber;
         sceneDrawList.begin(groups.size() + propGroups.size());
         auto &draws = sceneDrawList.draws;
@@ -346,55 +489,68 @@ public:
         );
         if (profile.profiling) profile.frameProfile.survivors += draws.size();
         profile.profile_elapsed(profile.frameProfile.buildCull, phaseStart);
+    }
+
+    void submit_draws(bool translucent, bool reflection, const View &view, const WaterPass &water) {
+        for (const auto &d : sceneDrawList.draws) {
+            const auto &m = d.material < materials.size() ? materials[d.material] : materials.front();
+            if (transparent(m) != translucent || (reflection && m.kind == 2)) continue;
+            const auto &transform = scene_transform(d.prop, d.entity, d.model);
+            if (!transform.visible) continue;
+            const auto model = native::model_matrix(transform);
+            materialValues.model = model;
+            bind_material(d.material, d.prop, translucent, reflection, view.graphics, water);
+            context.bind_geometry(d.prop ? propMesh.geometry : worldMesh.geometry);
+            context.draw_indexed(
+                    gfx::Primitive::triangles, gfx::IndexType::u32, size_t(d.first) * sizeof(uint32_t), int(d.count)
+            );
+            if (profile.profiling) {
+                profile.frameProfile.drawCalls++;
+                profile.frameProfile.triangles += d.count / 3;
+            }
+        }
+    }
+
+    template <class CaptureRefraction>
+    void draw_scene(
+            const native::Matrix &vp,
+            const float eye[3],
+            bool sky,
+            double time,
+            bool reflection,
+            const View &view,
+            WaterPass &water,
+            CaptureRefraction capture_refraction
+    ) {
+        water.sceneCaptured = false;
+        activePipeline = ~0u;
+        prepare_scene_values(vp, eye, sky, time, reflection, view, water);
+        collect_scene_draws(vp, eye, sky, reflection, view);
+        auto &draws = sceneDrawList.draws;
         const bool visibleWater = water.hasWaterMaterials
                                   && std::any_of(draws.begin(), draws.end(), [&](const native_render::SceneDraw &d) {
                                          return d.material < materials.size() && materials[d.material].kind == 2;
                                      });
         for (int pass = 0; pass < 2; pass++) {
             const double sortBefore = profile.frameProfile.sort;
-            phaseStart = profile.profile_now();
+            auto phaseStart = profile.profile_now();
             if (pass) {
                 if (!sky && !reflection && water.waterPlan.refract && visibleWater) {
                     capture_refraction();
                     water.sceneCaptured = true;
-                    gl.UseProgram(program);
-                    resources.bind(1, lightmap, false);
+                    context.bind_program(program);
+                    activePipeline = ~0u;
+                    bind_scene_textures(water);
                 }
-                gl.Enable(GL_BLEND);
-                gl.DepthMask(GL_FALSE);
                 auto sortStart = profile.profile_now();
                 sceneDrawList.back_to_front();
                 profile.profile_elapsed(profile.frameProfile.sort, sortStart);
-            } else {
-                gl.Disable(GL_BLEND);
-                gl.DepthMask(GL_TRUE);
             }
-            for (const auto &d : draws) {
-                const auto &m = d.material < materials.size() ? materials[d.material] : materials.front();
-                if (transparent(m) != (pass != 0) || (reflection && m.kind == 2)) continue;
-                const auto &transform = scene_transform(d.prop, d.entity, d.model);
-                if (!transform.visible) continue;
-                const auto model = native::model_matrix(transform);
-                gl.UniformMatrix4fv(materialUniforms.model, 1, GL_FALSE, model.data());
-                bind_material(d.material, d.prop, view.graphics, water);
-                context.bind_geometry(d.prop ? propMesh.geometry : worldMesh.geometry);
-                gl.DrawElements(
-                        GL_TRIANGLES,
-                        d.count,
-                        GL_UNSIGNED_INT,
-                        reinterpret_cast<void *>(uintptr_t(d.first) * sizeof(uint32_t))
-                );
-                if (profile.profiling) {
-                    profile.frameProfile.drawCalls++;
-                    profile.frameProfile.triangles += d.count / 3;
-                }
-            }
+            submit_draws(pass != 0, reflection, view, water);
             profile.profile_elapsed(profile.frameProfile.submit, phaseStart);
             if (profile.profiling) profile.frameProfile.submit -= profile.frameProfile.sort - sortBefore;
         }
-        gl.DepthMask(GL_TRUE);
-        gl.Disable(GL_POLYGON_OFFSET_FILL);
-        gl.Disable(GL_BLEND);
+        context.pipeline(endPipelines[unsigned(reflection)]);
         // Legacy skinned meshes use texture parameters for their single-level bone texture.
         context.unbind_sampler(0);
     }
@@ -498,21 +654,30 @@ public:
     }
 
     void prepare_uniforms() {
-        gl.UseProgram(program);
-        gl.Uniform1i(uniforms.loc(program, "baseTexture"), 0);
-        gl.Uniform1i(uniforms.loc(program, "lightTexture"), 1);
-        gl.Uniform1i(uniforms.loc(program, "secondaryTexture"), 2);
-        gl.Uniform1i(uniforms.loc(program, "detailTexture"), 3);
-        gl.Uniform1i(uniforms.loc(program, "sceneColor"), 4);
-        gl.Uniform1i(uniforms.loc(program, "sceneDepth"), 5);
-        gl.Uniform1i(uniforms.loc(program, "reflectionTexture"), 8);
-        gl.Uniform2f(uniforms.loc(program, "cameraNearFar"), native::camera_near_plane, native::camera_far_plane);
-        gl.Uniform1f(uniforms.loc(program, "lightmapScale"), lightmapInfo.scale);
+        const std::pair<const char *, unsigned> textures[] = {
+                {"baseTexture", 0},
+                {"lightTexture", 1},
+                {"secondaryTexture", 2},
+                {"detailTexture", 3},
+                {"sceneColor", 4},
+                {"sceneDepth", 5},
+                {"normalTexture", 7},
+                {"reflectionTexture", 8},
+                {"sunShadowMap", 11}
+        };
+        for (const auto &[name, unit] : textures)
+            context.texture_unit(program, name, unit);
     }
 
-    void prepare_program() {
-        program = link_program(gl, native_render::world_vertex, native_render::world_fragment().c_str());
-        materialUniforms.read(gl, program);
+    void prepare_program(WaterPass &water) {
+        program = context.create_program(
+                {{"world", ""}, native_render::world_vertex, native_render::world_fragment().c_str()}
+        );
+        prepare_material_constants();
+        prepare_scene_constants();
+        prepare_sun_constants();
+        prepare_pipelines();
+        waterConstants = water.water_constants(program);
     }
 
     void prepare_lightmap() {

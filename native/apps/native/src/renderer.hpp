@@ -79,7 +79,7 @@ class Renderer {
     BhContext *core;
     RenderResources resources{graphicsContext, core};
     WaterPass water{gl, graphicsContext, uniforms, core};
-    WorldPass world{gl, graphicsContext, core, resources, uniforms, profile};
+    WorldPass world{graphicsContext, core, resources, profile};
     SkyPass sky{gl, graphicsContext, core, resources, uniforms};
     ShadowPass shadows{gl, graphicsContext, resources, uniforms, world};
     PresentationPass presentationPass{graphicsContext, core, profile};
@@ -441,7 +441,7 @@ public:
 
     ResourceLoading prepare_resources(std::filesystem::path assetRoot) {
         presentationPass.measureLabel.reserve(100);
-        world.prepare_program();
+        world.prepare_program(water);
         co_yield "world shader";
         sky.prepare_program();
         shadows.prepare_depth_program();
@@ -454,9 +454,7 @@ public:
         while (!normal_loading.step())
             co_yield "normal texture";
         co_yield "resource";
-        gl.UseProgram(world.program);
-        gl.Uniform1i(uniforms.loc(world.program, "normalTexture"), 7);
-        gl.Uniform3fv(uniforms.loc(world.program, "sunDirection"), 1, world.sunDirection.data());
+        world.sceneValues.sunDirection = world.sunDirection;
         shadows.prepare_resources();
         presentationPass.presentation = std::make_unique<NativePresentation>(graphicsContext);
         presentationPass.waterConstants = water.water_constants(presentationPass.presentation->shader_program());
@@ -479,6 +477,7 @@ public:
         loading = {};
         presentationPass.ghostRoutes.reset();
         graphicsTarget.reset();
+        graphicsContext.destroy(presentationPass.waterConstants);
         presentationPass.presentation.reset();
         hdr.reset();
         viewmodel.reset();
@@ -488,7 +487,6 @@ public:
         resources.release();
         graphicsContext.destroy(water.planesTexture);
         graphicsContext.destroy(water.planesSampler);
-        if (world.program) gl.DeleteProgram(world.program);
         if (sky.skyProgram) gl.DeleteProgram(sky.skyProgram);
         if (shadows.depthProgram) gl.DeleteProgram(shadows.depthProgram);
         if (shadows.cutoutDepthProgram) gl.DeleteProgram(shadows.cutoutDepthProgram);
@@ -835,12 +833,7 @@ public:
         frameSun = native::resolve_scene_sun(
                 world.mapSun, panorama ? &sky.skyPanoramaInfo : nullptr, lit, sky.frameSkyYaw, exposure
         );
-        gl.UseProgram(world.program);
-        gl.Uniform3fv(
-                uniforms.loc(world.program, "sunDirection"),
-                1,
-                (frameSun.from_pack ? frameSun.direction : world.sunDirection).data()
-        );
+        world.sceneValues.sunDirection = frameSun.from_pack ? frameSun.direction : world.sunDirection;
     }
 
     // The post-processing of one Enhanced or Cinematic frame (web composer-pipeline.ts applyAppearance).
