@@ -145,6 +145,11 @@ if(BUNNYHOP_BUILD_CLIENT)
             bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
         add_test(NAME native_paint_render COMMAND bunnyhop-native-paint-render-smoke)
         set_tests_properties(native_paint_render PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30)
+        add_executable(bunnyhop-native-gfx-smoke src/gfx_smoke.cpp)
+        target_include_directories(bunnyhop-native-gfx-smoke PRIVATE src)
+        target_link_libraries(bunnyhop-native-gfx-smoke PRIVATE SDL3::SDL3 OpenGL::GL)
+        add_test(NAME native_gfx COMMAND bunnyhop-native-gfx-smoke)
+        set_tests_properties(native_gfx PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30)
     endif()
     add_executable(bunnyhop-native
         src/client.cpp

@@ -55,6 +55,7 @@ class NativeViewmodel {
     std::array<CachedLook, 128> lookCache;
     size_t nextLook = 0;
     std::vector<float> basePose;
+    gfx::Context graphicsContext;
     std::unique_ptr<NativePresentation> gunFx;
     double gunFlashStarted = -100;
     std::shared_ptr<native_actor_anim::Data> actorAnimationData;
@@ -684,7 +685,8 @@ public:
     explicit NativeViewmodel(
             Gl &g, const std::filesystem::path &assetRoot = BUNNYHOP_NATIVE_ASSET_ROOT, bool cpu_only = false
     )
-        : gl(g) {
+        : graphicsContext(g)
+        , gl(g) {
         if (std::filesystem::exists(assetRoot / "actor-animations.json"))
             actorAnimationData = std::make_shared<native_actor_anim::Data>(assetRoot.string());
         std::ifstream file(assetRoot / "viewmodels.json");
@@ -774,7 +776,7 @@ public:
             );
         gl.TexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         gl.TexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        gunFx = std::make_unique<NativePresentation>(gl);
+        gunFx = std::make_unique<NativePresentation>(graphicsContext);
         gl.GenTextures(1, &bonesTexture);
         gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
         gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);

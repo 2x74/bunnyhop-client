@@ -1,5 +1,5 @@
 #pragma once
-#include "renderer.hpp"
+#include "gfx.hpp"
 #include <array>
 #include <cstring>
 #include <stdexcept>
@@ -15,15 +15,14 @@ class VideoFrameTargets {
 public:
     static constexpr size_t readback_slots = 3;
 
-    VideoFrameTargets(Gl &gl, int width, int height, int supersample, int samples)
-        : gl_(gl)
+    VideoFrameTargets(gfx::Context &context, int width, int height, int supersample, int samples)
+        : context_(context)
         , width_(width)
         , height_(height)
         , render_width_(width * supersample)
         , render_height_(height * supersample)
         , accumulate_(supersample > 1 || samples > 1) {
-        GLint limit = 0;
-        gl.GetIntegerv(GL_MAX_TEXTURE_SIZE, &limit);
+        const int limit = context_.max_texture_size();
         if (render_width_ > limit || render_height_ > limit)
             throw std::runtime_error(
                     "This GPU renders at most " + std::to_string(limit) + " px wide; lower the size or supersampling."
@@ -47,133 +46,80 @@ public:
 
     void begin_frame() {
         if (!accumulate_) return;
-        gl_.BindFramebuffer(GL_FRAMEBUFFER, accumulation_.framebuffer);
-        gl_.Viewport(0, 0, render_width_, render_height_);
-        gl_.ClearColor(0, 0, 0, 0);
-        gl_.Clear(GL_COLOR_BUFFER_BIT);
+        context_.bind_target(accumulation_);
+        context_.viewport({0, 0, render_width_, render_height_});
+        context_.clear_color({0, 0, 0, 0});
     }
 
     void bind_scene() {
-        gl_.BindFramebuffer(GL_FRAMEBUFFER, scene_.framebuffer);
-        gl_.Viewport(0, 0, render_width_, render_height_);
+        context_.bind_target(scene_);
+        context_.viewport({0, 0, render_width_, render_height_});
     }
 
     // Adds the scene just drawn into the accumulation, weighted so `count` samples average.
     void add_sample(int count) {
         if (!accumulate_) return;
-        gl_.BindFramebuffer(GL_FRAMEBUFFER, accumulation_.framebuffer);
-        gl_.Viewport(0, 0, render_width_, render_height_);
-        gl_.Enable(GL_BLEND);
-        gl_.BlendFunc(GL_ONE, GL_ONE);
-        draw_texture(scene_.color, 1.f / float(count));
-        gl_.Disable(GL_BLEND);
+        context_.bind_target(accumulation_);
+        context_.viewport({0, 0, render_width_, render_height_});
+        draw_texture(scene_.color, 1.f / float(count), true);
+        context_.blend(false);
     }
 
     // The averaged samples at video size; with 2x supersampling each pixel is the mean of its four.
     void resolve() {
         if (!accumulate_) return;
-        gl_.BindFramebuffer(GL_FRAMEBUFFER, output_.framebuffer);
-        gl_.Viewport(0, 0, width_, height_);
-        gl_.Disable(GL_BLEND);
-        draw_texture(accumulation_.color, 1);
+        context_.bind_target(output_);
+        context_.viewport({0, 0, width_, height_});
+        draw_texture(accumulation_.color, 1, false);
     }
 
     void bind_output() {
-        gl_.BindFramebuffer(GL_FRAMEBUFFER, accumulate_ ? output_.framebuffer : scene_.framebuffer);
-        gl_.Viewport(0, 0, width_, height_);
+        context_.bind_target(accumulate_ ? output_ : scene_);
+        context_.viewport({0, 0, width_, height_});
     }
 
     // Starts reading the finished frame into `slot` of the ring.
     void read_back(size_t slot) {
         bind_output();
-        gl_.PixelStorei(GL_PACK_ALIGNMENT, 1);
-        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, pixel_buffers_[slot]);
-        gl_.ReadPixels(0, 0, width_, height_, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-        if (fences_[slot]) gl_.DeleteSync(fences_[slot]);
-        fences_[slot] = gl_.FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-        if (gl_.GetError() != GL_NO_ERROR) throw std::runtime_error("OpenGL video capture failed");
+        context_.enqueue_readback(accumulate_ ? output_ : scene_, readbacks_.at(slot));
     }
 
-    bool pending(size_t slot) const { return fences_[slot] != nullptr; }
+    bool pending(size_t slot) const { return context_.pending(readbacks_.at(slot)); }
 
     // Waits for the read in `slot` and copies the frame (bottom row first) into `pixels`.
     void collect(size_t slot, std::vector<uint8_t> &pixels) {
-        constexpr GLuint64 wait_nanoseconds = 5'000'000'000;
-        if (!fences_[slot]) throw std::runtime_error("No video frame is waiting in that slot");
-        const auto waited = gl_.ClientWaitSync(fences_[slot], GL_SYNC_FLUSH_COMMANDS_BIT, wait_nanoseconds);
-        gl_.DeleteSync(fences_[slot]);
-        fences_[slot] = nullptr;
-        if (waited == GL_WAIT_FAILED || waited == GL_TIMEOUT_EXPIRED)
-            throw std::runtime_error("The GPU did not finish a video frame");
-        const size_t size = frame_bytes();
-        pixels.resize(size);
-        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, pixel_buffers_[slot]);
-        const void *mapped = gl_.MapBufferRange(GL_PIXEL_PACK_BUFFER, 0, GLsizeiptr(size), GL_MAP_READ_BIT);
-        if (!mapped) {
-            gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-            throw std::runtime_error("Cannot map a video frame");
-        }
-        std::memcpy(pixels.data(), mapped, size);
-        gl_.UnmapBuffer(GL_PIXEL_PACK_BUFFER);
-        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+        constexpr uint64_t wait_nanoseconds = 5'000'000'000;
+        pixels.resize(frame_bytes());
+        context_.collect(
+                readbacks_.at(slot), std::as_writable_bytes(std::span(pixels)), gfx::RowOrigin::bottom, wait_nanoseconds
+        );
     }
 
     size_t frame_bytes() const { return size_t(width_) * height_ * 4; }
 
 private:
-    struct Target {
-        GLuint framebuffer = 0, color = 0, depth = 0;
-    };
-
-    Gl &gl_;
+    gfx::Context &context_;
     int width_, height_, render_width_, render_height_;
     bool accumulate_;
-    Target scene_, accumulation_, output_;
-    GLuint program_ = 0, vertex_array_ = 0;
-    GLint weight_location_ = -1, image_location_ = -1;
-    std::array<GLuint, readback_slots> pixel_buffers_{};
-    std::array<GLsync, readback_slots> fences_{};
+    gfx::RenderTarget scene_, accumulation_, output_;
+    gfx::Program program_;
+    gfx::Geometry geometry_;
+    gfx::Sampler sampler_;
+    gfx::Pipeline additive_pipeline_, resolve_pipeline_;
+    gfx::ConstantBinding constants_;
+    std::array<gfx::Readback, readback_slots> readbacks_{};
 
     void create() {
-        scene_ = target(render_width_, render_height_, GL_RGBA8, true);
+        scene_ = context_.create_target({render_width_, render_height_, gfx::Format::rgba8, gfx::Format::depth24});
         if (accumulate_) {
-            accumulation_ = target(render_width_, render_height_, GL_RGBA16F, false);
-            output_ = target(width_, height_, GL_RGBA8, false);
+            accumulation_ = context_.create_target({render_width_, render_height_, gfx::Format::rgba16f});
+            output_ = context_.create_target({width_, height_, gfx::Format::rgba8});
             create_program();
         }
-        gl_.GenBuffers(GLsizei(pixel_buffers_.size()), pixel_buffers_.data());
-        for (const GLuint buffer : pixel_buffers_) {
-            gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, buffer);
-            gl_.BufferData(GL_PIXEL_PACK_BUFFER, GLsizeiptr(frame_bytes()), nullptr, GL_STREAM_READ);
-        }
-        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-        gl_.BindFramebuffer(GL_FRAMEBUFFER, 0);
-        if (gl_.GetError() != GL_NO_ERROR) throw std::runtime_error("Cannot create the video frame targets");
-    }
-
-    Target target(int width, int height, GLenum format, bool depth) {
-        Target result;
-        gl_.GenFramebuffers(1, &result.framebuffer);
-        gl_.BindFramebuffer(GL_FRAMEBUFFER, result.framebuffer);
-        gl_.GenTextures(1, &result.color);
-        gl_.BindTexture(GL_TEXTURE_2D, result.color);
-        const GLenum type = format == GL_RGBA16F ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE;
-        gl_.TexImage2D(GL_TEXTURE_2D, 0, GLint(format), width, height, 0, GL_RGBA, type, nullptr);
-        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        gl_.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, result.color, 0);
-        if (depth) {
-            gl_.GenRenderbuffers(1, &result.depth);
-            gl_.BindRenderbuffer(GL_RENDERBUFFER, result.depth);
-            gl_.RenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, width, height);
-            gl_.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, result.depth);
-        }
-        if (gl_.CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-            throw std::runtime_error("Video capture framebuffer is unavailable");
-        return result;
+        for (auto &readback : readbacks_)
+            readback = context_.create_readback(width_, height_);
+        context_.bind_target({});
+        context_.check_error("Cannot create the video frame targets");
     }
 
     void create_program() {
@@ -192,49 +138,41 @@ uniform float weight;
 void main() {
     color = texture(image, uv) * weight;
 })";
-        program_ = link_program(gl_, vertex, fragment);
-        weight_location_ = gl_.GetUniformLocation(program_, "weight");
-        image_location_ = gl_.GetUniformLocation(program_, "image");
-        gl_.GenVertexArrays(1, &vertex_array_);
+        program_ = context_.create_program({{"video", ""}, vertex, fragment});
+        static constexpr gfx::ConstantField fields[] = {{"weight", 0, 4, gfx::ConstantType::float1}};
+        constants_ = context_.create_constants(program_, {fields, 16});
+        context_.texture_unit(program_, "image", 0);
+        geometry_ = context_.create_geometry(0, {});
+        sampler_ = context_.create_sampler({});
+        additive_pipeline_ =
+                context_.create_pipeline({{true, gfx::BlendFactor::one, gfx::BlendFactor::one}, {false, false}, {}});
+        resolve_pipeline_ = context_.create_pipeline({{}, {false, false}, {}});
     }
 
-    void draw_texture(GLuint texture, float weight) {
-        gl_.Disable(GL_DEPTH_TEST);
-        gl_.Disable(GL_CULL_FACE);
-        gl_.DepthMask(GL_FALSE);
-        gl_.ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        gl_.UseProgram(program_);
-        gl_.Uniform1f(weight_location_, weight);
-        gl_.Uniform1i(image_location_, 0);
-        gl_.ActiveTexture(GL_TEXTURE0);
-        gl_.BindTexture(GL_TEXTURE_2D, texture);
-        gl_.BindVertexArray(vertex_array_);
-        gl_.DrawArrays(GL_TRIANGLES, 0, 3);
-        gl_.DepthMask(GL_TRUE);
-        gl_.Enable(GL_DEPTH_TEST);
-    }
-
-    void release_target(Target &value) {
-        if (value.framebuffer) gl_.DeleteFramebuffers(1, &value.framebuffer);
-        if (value.color) gl_.DeleteTextures(1, &value.color);
-        if (value.depth) gl_.DeleteRenderbuffers(1, &value.depth);
-        value = {};
+    void draw_texture(gfx::Texture texture, float weight, bool additive) {
+        context_.pipeline(additive ? additive_pipeline_ : resolve_pipeline_);
+        context_.bind_program(program_);
+        const std::array<float, 4> block = {weight, 0, 0, 0};
+        context_.constants(constants_, block.data());
+        context_.bind_texture(0, texture, sampler_);
+        context_.bind_geometry(geometry_);
+        context_.draw(gfx::Primitive::triangles, 0, 3);
+        context_.unbind_sampler(0);
+        context_.depth_write(true);
+        context_.depth_test(true);
     }
 
     void release() {
-        for (auto &fence : fences_)
-            if (fence) {
-                gl_.DeleteSync(fence);
-                fence = nullptr;
-            }
-        if (pixel_buffers_[0]) gl_.DeleteBuffers(GLsizei(pixel_buffers_.size()), pixel_buffers_.data());
-        pixel_buffers_.fill(0);
-        release_target(scene_);
-        release_target(accumulation_);
-        release_target(output_);
-        if (program_) gl_.DeleteProgram(program_);
-        if (vertex_array_) gl_.DeleteVertexArrays(1, &vertex_array_);
-        program_ = vertex_array_ = 0;
+        for (auto &readback : readbacks_)
+            context_.destroy(readback);
+        context_.destroy(scene_);
+        context_.destroy(accumulation_);
+        context_.destroy(output_);
+        context_.destroy(program_);
+        context_.destroy(geometry_);
+        context_.destroy(sampler_);
+        context_.destroy(additive_pipeline_);
+        context_.destroy(resolve_pipeline_);
     }
 };
 

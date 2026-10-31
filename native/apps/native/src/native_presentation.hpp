@@ -19,13 +19,16 @@ public:
     };
 
 private:
-    Gl &gl;
-    GLuint program = 0, vao = 0, vbo = 0;
+    gfx::Context &context;
+    gfx::Program program;
+    gfx::Geometry geometry;
+    gfx::Pipeline pipeline;
+    gfx::ConstantBinding view_constants;
     std::vector<Quad> quads;
     std::vector<Vertex> vertices;
 
 public:
-    explicit NativePresentation(Gl &g) : gl(g) {
+    explicit NativePresentation(gfx::Context &graphics) : context(graphics) {
         const char *vs = R"(#version 330 core
 layout(location=0)in vec3 position;layout(location=1)in vec4 tint;layout(location=2)in vec2 texcoord;
 uniform mat4 viewProjection;out vec4 vColor;out vec2 uv;out vec3 world;
@@ -42,35 +45,26 @@ void main(){float a=vColor.a;if(uv.y>=paintUvOffset){
     if(a<.003)discard;
 }else if(uv.y>=4.){float h=1.-(uv.y-4.);a*=h*h;}else if(uv.x>=0.){bool smoke=uv.y>1.;vec2 st=vec2(uv.x,smoke?uv.y-2.:uv.y);vec2 p=st*2.-1.;float r=dot(p,p);a*=pow(max(0.,1.-r),smoke?1.2:2.);if(smoke){float n=noise(st*5.)*.6+noise(st*11.+3.)*.3+noise(st*23.+7.)*.1;a*=smoothstep(.18,.65,n);}if(a<.003)discard;}color=vec4(waterFog(vColor.rgb,world),a);}
 )";
-        program = link_program(gl, vs, fs.c_str());
-        gl.GenVertexArrays(1, &vao);
-        gl.GenBuffers(1, &vbo);
-        gl.BindVertexArray(vao);
-        gl.BindBuffer(GL_ARRAY_BUFFER, vbo);
-        for (int i = 0; i < 3; i++) {
-            gl.EnableVertexAttribArray(i);
-            const int sizes[3] = {3, 4, 2};
-            const size_t offsets[3] = {0, 3, 7};
-            gl.VertexAttribPointer(
-                    i,
-                    sizes[i],
-                    GL_FLOAT,
-                    GL_FALSE,
-                    sizeof(Vertex),
-                    reinterpret_cast<void *>(offsets[i] * sizeof(float))
-            );
-        }
+        program = context.create_program({{"presentation", ""}, vs, fs.c_str()});
+        static constexpr gfx::ConstantField fields[] = {{"viewProjection", 0, 64, gfx::ConstantType::matrix4}};
+        view_constants = context.create_constants(program, {fields, 64});
+        static constexpr gfx::VertexAttribute attributes[] = {
+                {0, 3, offsetof(Vertex, p)}, {1, 4, offsetof(Vertex, c)}, {2, 2, offsetof(Vertex, uv)}
+        };
+        geometry = context.create_geometry(sizeof(Vertex), attributes);
+        pipeline = context.create_pipeline({{true}, {true, false, gfx::Compare::less_equal}, {}});
         quads.reserve(8192);
         vertices.reserve(8192 * 6);
     }
 
     ~NativePresentation() {
-        gl.DeleteBuffers(1, &vbo);
-        gl.DeleteVertexArrays(1, &vao);
-        gl.DeleteProgram(program);
+        context.destroy(geometry);
+        context.destroy(pipeline);
+        context.destroy(program);
     }
 
-    GLuint shader() const { return program; }
+    // Temporary bridge for renderer.hpp's shared water uniforms.
+    uint32_t shader() const { return program.id; }
 
     void clear() { quads.clear(); }
 
@@ -156,19 +150,13 @@ void main(){float a=vColor.a;if(uv.y>=paintUvOffset){
                 }
                 vertices.push_back(v);
             }
-        gl.UseProgram(program);
-        gl.UniformMatrix4fv(gl.GetUniformLocation(program, "viewProjection"), 1, GL_FALSE, vp.data());
-        gl.BindVertexArray(vao);
-        gl.BindBuffer(GL_ARRAY_BUFFER, vbo);
-        gl.BufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STREAM_DRAW);
-        gl.Enable(GL_DEPTH_TEST);
-        gl.DepthFunc(GL_LEQUAL);
-        gl.DepthMask(GL_FALSE);
-        gl.Disable(GL_CULL_FACE);
-        gl.Enable(GL_BLEND);
-        gl.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        gl.DrawArrays(GL_TRIANGLES, 0, GLsizei(vertices.size()));
-        gl.DepthMask(GL_TRUE);
-        gl.Disable(GL_BLEND);
+        context.bind_program(program);
+        context.constants(view_constants, vp.data());
+        context.bind_geometry(geometry);
+        context.stream_vertices(geometry, std::as_bytes(std::span(vertices)));
+        context.pipeline(pipeline);
+        context.draw(gfx::Primitive::triangles, 0, int(vertices.size()));
+        context.depth_write(true);
+        context.blend(false);
     }
 };

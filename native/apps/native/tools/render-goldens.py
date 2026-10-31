@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import shutil
 import subprocess
 import sys
 
@@ -34,6 +35,11 @@ def pixels(path):
 
 
 def compare(reference, candidate):
+    manifests = [directory / "manifest.json" for directory in (reference, candidate)]
+    if all(path.exists() for path in manifests):
+        before, after = (json.loads(path.read_text()) for path in manifests)
+        if before["inputs"] != after["inputs"]:
+            raise ValueError("Input hashes differ; recapture both renderers with the same frozen assets")
     expected = sorted(path.relative_to(reference) for path in reference.rglob("*.ppm"))
     actual = sorted(path.relative_to(candidate) for path in candidate.rglob("*.ppm"))
     if not expected or expected != actual:
@@ -64,13 +70,19 @@ def capture(args):
             raise ValueError(f"Build the requested commit first: HEAD={revision}, requested={requested}")
     args.out.mkdir(parents=True, exist_ok=False)
     inputs = {str(Path(path).resolve()): sha256(Path(path)) for path in suite["inputs"]}
+    # Historical and current binaries both read their relative asset root here.
+    working = args.out.resolve()
+    if suite.get("assets"):
+        shutil.copytree(suite["assets"], working / "target/native-assets")
+    else:
+        working = NATIVE
     binaries = {}
     for case in suite["cases"]:
         command = [part.replace("{out}", str(args.out.resolve()))
                    .replace("{native}", str(NATIVE)) for part in case["command"]]
         binaries[command[0]] = sha256(Path(command[0]))
         with (args.out / (case["name"] + ".log")).open("w") as log:
-            subprocess.run(command, cwd=NATIVE, env={**os.environ, "SDL_MAC_BACKGROUND_APP": "1"},
+            subprocess.run(command, cwd=working, env={**os.environ, "SDL_MAC_BACKGROUND_APP": "1"},
                            stdout=log, stderr=subprocess.STDOUT, check=True)
         print(case["name"], flush=True)
     images = {str(path.relative_to(args.out)): sha256(path) for path in sorted(args.out.rglob("*.ppm"))}
@@ -86,7 +98,7 @@ def capture(args):
 
 def make_suite(args):
     world, water = str(args.world_map.resolve()), str(args.water_map.resolve())
-    assets = NATIVE / "target/native-assets"
+    assets = args.assets.resolve() if args.assets else NATIVE / "target/native-assets"
     smoke = "{native}/apps/native/build/bunnyhop-native-"
     cases = []
     for look in ("classic", "source", "enhanced", "cinematic"):
@@ -116,7 +128,8 @@ def make_suite(args):
         ("video", [smoke + "video-frames-smoke", "{out}/video"]),
     ):
         cases.append({"name": name, "command": command})
-    suite = {"inputs": [world, water, *map(str, sorted(path for path in assets.iterdir() if path.is_file()))],
+    suite = {"assets": str(assets),
+             "inputs": [world, water, *map(str, sorted(path for path in assets.iterdir() if path.is_file()))],
              "cases": cases}
     args.out.write_text(json.dumps(suite, indent=2) + "\n")
 
@@ -133,6 +146,7 @@ def main():
     diff.add_argument("candidate", type=Path)
     suite = commands.add_parser("suite")
     suite.add_argument("--world-map", type=Path, required=True)
+    suite.add_argument("--assets", type=Path, help="Frozen native-assets directory shared by both revisions")
     suite.add_argument("--water-map", type=Path, required=True)
     suite.add_argument("--water-eye", type=float, nargs=3, required=True)
     suite.add_argument("--water-pitch", type=float, default=45)

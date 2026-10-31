@@ -367,7 +367,6 @@ void run_job(const Spec &spec, const Job &job, Gl &gl, const VideoAvailability &
     const auto timeline = VideoTimeline::make(options, total);
     encoder.start(options, output, timeline.frames, available.encoder, choice);
     VideoCapture capture(
-            gl,
             loaded.map.core.get(),
             *renderer,
             hud,

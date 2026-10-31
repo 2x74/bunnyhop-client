@@ -78,7 +78,7 @@ int main(int argc, char **argv) {
             throw std::runtime_error("Invalid presentation draw count");
         std::unique_ptr<native::NativePresentation> presentation;
         if (presentationDraws) {
-            presentation = std::make_unique<native::NativePresentation>(gl);
+            presentation = std::make_unique<native::NativePresentation>(renderer.graphics_context());
             presentation->quad(
                     {{{-.8f, -.8f, 0}, {-.7f, -.8f, 0}, {-.7f, -.7f, 0}, {-.8f, -.7f, 0}}}, {1, .5f, .25f, .5f}
             );

@@ -1,3 +1,4 @@
+#include "renderer.hpp"
 #include "video_frames.hpp"
 #include <filesystem>
 
@@ -13,8 +14,9 @@ void write_ppm(const std::filesystem::path &path, const std::vector<uint8_t> &rg
 
 void capture(native::Gl &gl, const std::filesystem::path &output, int supersample, int samples) {
     constexpr int width = 160, height = 90;
-    native::VideoFrameTargets targets(gl, width, height, supersample, samples);
-    native::NativePresentation presentation(gl);
+    native::gfx::Context context(gl);
+    native::VideoFrameTargets targets(context, width, height, supersample, samples);
+    native::NativePresentation presentation(context);
     const std::array<native_render::Vec3, 4> quad = {{{-.8f, -.7f, 0}, {.2f, -.7f, 0}, {.2f, .5f, 0}, {-.8f, .5f, 0}}};
     const float eye[] = {0, 0, 2};
     // More frames than slots exercise slot reuse and a full asynchronous ring.
