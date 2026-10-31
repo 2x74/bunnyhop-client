@@ -238,7 +238,10 @@ public:
             const auto count = GLsizei(field.count);
             switch (field.type) {
                 case ConstantType::float1:
-                    gl_.Uniform1fv(field.location, count, floats);
+                    if (count == 1)
+                        gl_.Uniform1f(field.location, *floats);
+                    else
+                        gl_.Uniform1fv(field.location, count, floats);
                     break;
                 case ConstantType::float2:
                     gl_.Uniform2fv(field.location, count, floats);
@@ -251,7 +254,10 @@ public:
                     break;
                 case ConstantType::int1:
                 case ConstantType::bool32:
-                    gl_.Uniform1iv(field.location, count, integers);
+                    if (count == 1)
+                        gl_.Uniform1i(field.location, *integers);
+                    else
+                        gl_.Uniform1iv(field.location, count, integers);
                     break;
                 case ConstantType::matrix4:
                     gl_.UniformMatrix4fv(field.location, count, GL_FALSE, floats);
