@@ -82,7 +82,7 @@ class Renderer {
     WorldPass world{gl, core, resources, uniforms, profile};
     SkyPass sky{gl, core, resources, uniforms};
     ShadowPass shadows{gl, resources, uniforms, world};
-    PresentationPass presentationPass{gl, core, profile};
+    PresentationPass presentationPass{gl, graphicsContext, core, profile};
     bool flashlightEnabled = false;
     float fieldOfView = 90;
     std::vector<native_render::Actor> roomActors;

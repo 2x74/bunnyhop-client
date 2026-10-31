@@ -14,15 +14,24 @@ class GhostRouteGeometry {
     };
 
     struct Mesh {
-        GLuint vao = 0, buffer = 0;
-        GLsizei pathVertices = 0, markerVertices = 0;
+        gfx::Geometry geometry;
+        int pathVertices = 0, markerVertices = 0;
     };
 
-    Gl &gl;
-    GLuint program = 0;
+    gfx::Context &context;
+    gfx::Program program;
+    gfx::Pipeline pipeline;
+    gfx::ConstantBinding constants;
+
+    struct DrawConstants {
+        native::Matrix projection{};
+        std::array<float, 2> viewport{};
+        float width = 0;
+        std::array<float, 4> tint{};
+    } values;
+
     std::array<Mesh, 4> meshes;
     std::vector<Vertex> vertices;
-    GLint projectionLocation = -1, colorLocation = -1, widthLocation = -1, viewportLocation = -1;
 
     void add_segment(const native_render::Vec3 &from, const native_render::Vec3 &to) {
         const Vertex a{from, to, 1}, b{from, to, -1}, c{to, from, -1}, d{to, from, 1};
@@ -65,7 +74,7 @@ class GhostRouteGeometry {
     }
 
 public:
-    explicit GhostRouteGeometry(Gl &api) : gl(api) {
+    explicit GhostRouteGeometry(gfx::Context &api) : context(api) {
         const char *vertex = R"(#version 330 core
 layout(location=0)in vec3 point;layout(location=1)in vec3 other;layout(location=2)in float side;
 uniform mat4 projection;uniform vec2 viewport;uniform float width;
@@ -77,50 +86,43 @@ vec2 n=vec2(-d.y,d.x);n.x*=viewport.y/viewport.x;gl_Position=a+vec4(n*side*width
         const char *fragment = R"(#version 330 core
 uniform vec4 tint;out vec4 color;void main(){color=tint;}
 )";
-        program = link_program(gl, vertex, fragment);
-        projectionLocation = gl.GetUniformLocation(program, "projection");
-        colorLocation = gl.GetUniformLocation(program, "tint");
-        widthLocation = gl.GetUniformLocation(program, "width");
-        viewportLocation = gl.GetUniformLocation(program, "viewport");
-        for (auto &mesh : meshes) {
-            gl.GenVertexArrays(1, &mesh.vao);
-            gl.GenBuffers(1, &mesh.buffer);
-            gl.BindVertexArray(mesh.vao);
-            gl.BindBuffer(GL_ARRAY_BUFFER, mesh.buffer);
-            const int sizes[3] = {3, 3, 1};
-            const size_t offsets[3] = {offsetof(Vertex, point), offsetof(Vertex, other), offsetof(Vertex, side)};
-            for (GLuint attribute = 0; attribute < 3; ++attribute) {
-                gl.EnableVertexAttribArray(attribute);
-                gl.VertexAttribPointer(
-                        attribute,
-                        sizes[attribute],
-                        GL_FLOAT,
-                        GL_FALSE,
-                        sizeof(Vertex),
-                        reinterpret_cast<void *>(offsets[attribute])
-                );
-            }
-        }
+        program = context.create_program({{"ghost-route", ""}, vertex, fragment});
+        const gfx::ConstantField fields[] = {
+                {"projection", offsetof(DrawConstants, projection), 64, gfx::ConstantType::matrix4},
+                {"viewport", offsetof(DrawConstants, viewport), 8, gfx::ConstantType::float2},
+                {"width", offsetof(DrawConstants, width), 4, gfx::ConstantType::float1},
+                {"tint", offsetof(DrawConstants, tint), 16, gfx::ConstantType::float4},
+        };
+        constants = context.create_constants(program, {fields, sizeof(DrawConstants)});
+        gfx::PipelineState state;
+        state.depth.write = false;
+        state.blend.enabled = true;
+        pipeline = context.create_pipeline(state);
+        const gfx::VertexAttribute attributes[] = {
+                {0, 3, offsetof(Vertex, point)},
+                {1, 3, offsetof(Vertex, other)},
+                {2, 1, offsetof(Vertex, side)},
+        };
+        for (auto &mesh : meshes)
+            mesh.geometry = context.create_geometry(sizeof(Vertex), attributes);
     }
 
     ~GhostRouteGeometry() {
-        for (auto &mesh : meshes) {
-            gl.DeleteBuffers(1, &mesh.buffer);
-            gl.DeleteVertexArrays(1, &mesh.vao);
-        }
-        gl.DeleteProgram(program);
+        for (auto &mesh : meshes)
+            context.destroy(mesh.geometry);
+        context.destroy(pipeline);
+        context.destroy(program);
     }
 
     void upload(unsigned slot, const native_render::GhostPath &path, bool fullPath) {
         vertices.clear();
         add_path(path, fullPath);
         auto &mesh = meshes.at(slot);
-        mesh.pathVertices = GLsizei(vertices.size());
+        mesh.pathVertices = int(vertices.size());
         for (const auto &takeoff : path.jumps)
             add_marker(takeoff);
-        mesh.markerVertices = GLsizei(vertices.size()) - mesh.pathVertices;
-        gl.BindBuffer(GL_ARRAY_BUFFER, mesh.buffer);
-        gl.BufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STATIC_DRAW);
+        mesh.markerVertices = int(vertices.size()) - mesh.pathVertices;
+        context.stream_vertices(mesh.geometry, std::as_bytes(std::span(vertices)));
         vertices.clear();
         vertices.shrink_to_fit();
     }
@@ -134,24 +136,20 @@ uniform vec4 tint;out vec4 color;void main(){color=tint;}
          float pixelDensity) {
         const auto &mesh = meshes.at(slot);
         if (!mesh.pathVertices && !mesh.markerVertices) return;
-        gl.Enable(GL_DEPTH_TEST);
-        gl.DepthMask(GL_FALSE);
-        gl.Disable(GL_CULL_FACE);
-        gl.Enable(GL_BLEND);
-        gl.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        gl.UseProgram(program);
-        gl.UniformMatrix4fv(projectionLocation, 1, GL_FALSE, projection.data());
-        gl.Uniform2f(viewportLocation, float(std::max(viewportWidth, 1)), float(std::max(viewportHeight, 1)));
-        gl.BindVertexArray(mesh.vao);
-        gl.Uniform1f(widthLocation, path_width_points * pixelDensity);
-        const float pathTint[4] = {color[0], color[1], color[2], path_opacity};
-        gl.Uniform4fv(colorLocation, 1, pathTint);
-        gl.DrawArrays(GL_TRIANGLES, 0, mesh.pathVertices);
-        gl.Uniform1f(widthLocation, marker_width_points * pixelDensity);
-        const float markerTint[4] = {1, 1, 1, marker_opacity};
-        gl.Uniform4fv(colorLocation, 1, markerTint);
-        gl.DrawArrays(GL_TRIANGLES, mesh.pathVertices, mesh.markerVertices);
-        gl.DepthMask(GL_TRUE);
-        gl.Disable(GL_BLEND);
+        context.pipeline(pipeline);
+        context.bind_program(program);
+        values.projection = projection;
+        values.viewport = {float(std::max(viewportWidth, 1)), float(std::max(viewportHeight, 1))};
+        context.bind_geometry(mesh.geometry);
+        values.width = path_width_points * pixelDensity;
+        values.tint = {color[0], color[1], color[2], path_opacity};
+        context.constants(constants, &values);
+        context.draw(gfx::Primitive::triangles, 0, mesh.pathVertices);
+        values.width = marker_width_points * pixelDensity;
+        values.tint = {1, 1, 1, marker_opacity};
+        context.constants(constants, &values);
+        context.draw(gfx::Primitive::triangles, mesh.pathVertices, mesh.markerVertices);
+        context.depth_write(true);
+        context.blend(false);
     }
 };

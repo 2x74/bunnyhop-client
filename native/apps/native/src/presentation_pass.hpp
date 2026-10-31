@@ -2,11 +2,16 @@
 
 class PresentationPass {
     Gl &gl;
+    gfx::Context &context;
     BhContext *&core;
     RenderProfile &profile;
 
 public:
-    PresentationPass(Gl &g, BhContext *&c, RenderProfile &p) : gl(g), core(c), profile(p) {}
+    PresentationPass(Gl &g, gfx::Context &ctx, BhContext *&c, RenderProfile &p)
+        : gl(g)
+        , context(ctx)
+        , core(c)
+        , profile(p) {}
 
     NativeMapEffects mapEffects;
     std::unique_ptr<NativePresentation> presentation;
@@ -488,7 +493,7 @@ public:
         const bool previousRoute = ghostOptions.route, previousPath = ghostOptions.route_path;
         ghostOptions.read(settings);
         if (ghostOptions.route) {
-            if (!ghostRoutes) ghostRoutes = std::make_unique<GhostRouteGeometry>(gl);
+            if (!ghostRoutes) ghostRoutes = std::make_unique<GhostRouteGeometry>(context);
             if (!previousRoute || previousPath != ghostOptions.route_path) {
                 for (unsigned slot = 0; slot < ghostPaths.size(); ++slot) {
                     ghostRoutes->upload(slot, ghostPaths[slot], ghostOptions.route_path);
