@@ -40,6 +40,13 @@ void save(const std::string &name, std::span<const std::byte> rgba, int w, int h
 std::vector<std::byte> read(Context &context, const RenderTarget &target, RowOrigin origin) {
     auto readback = context.create_readback(width, height);
     context.enqueue_readback(target, readback);
+    bool rejected = false;
+    try {
+        context.enqueue_readback(target, readback);
+    } catch (const std::runtime_error &) {
+        rejected = true;
+    }
+    require(rejected, "Pending readback was overwritten");
     std::vector<std::byte> result(Context::readback_bytes(readback));
     context.collect(readback, result, origin, timeout_ns);
     require(!context.pending(readback), "Collected readback remained pending");
@@ -68,6 +75,12 @@ void targets(Context &context) {
     auto copied = context.create_target({width, height});
     context.copy_color(resolved, {0, 0, width, height}, copied.color);
     require(read(context, copied, RowOrigin::bottom) == pixels, "Framebuffer-to-texture copy changed pixels");
+    auto floating = context.create_target({width, height, Format::rgba16f});
+    context.bind_target(floating);
+    context.clear_color({.25f, .5f, .75f, 1});
+    context.copy_color(floating, {2, 1, width - 4, height - 2}, copied.color, 2, 1);
+    require(read(context, copied, RowOrigin::bottom) == pixels, "Float-to-UNORM color copy changed pixels");
+    context.destroy(floating);
     auto depth = context.create_readback(width, height, Format::depth32f);
     context.enqueue_readback(resolved, depth);
     std::vector<float> depth_values(size_t(width) * height);
@@ -154,6 +167,14 @@ void main(){color=enabled?tint:vec4(0);})";
     for (int y = 0; y < height; ++y)
         for (int x = 0; x < width; ++x)
             require(channel(bottom, x, y, 0) == channel(top, x, height - 1 - y, 0), "Readback Y flip changed");
+    const std::array<uint16_t, 3> indices = {0, 1, 2};
+    context.upload_indices(geometry, std::as_bytes(std::span(indices)));
+    context.bind_target(target);
+    context.bind_program(program);
+    context.bind_geometry(geometry);
+    context.clear_color({0, 0, 0, 1});
+    context.draw_indexed(Primitive::triangles, IndexType::u16, 0, 3, 2);
+    require(read(context, target, RowOrigin::bottom) == bottom, "Indexed instancing changed pixels");
     context.destroy(target);
     context.destroy(geometry);
     context.destroy(program);

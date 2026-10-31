@@ -23,7 +23,7 @@ def smoke_programs(output, translators, compiler):
         result = compile_program(dict(name=name, family=name), output, translators, compiler)
         if result['status'] != 'dxbc':
             raise ValueError(result)
-    for name in ('depth-resolve', 'depth-pattern'):
+    for name in ('depth-resolve', 'depth-pattern', 'copy'):
         source = Path(__file__).with_name(name + '.hlsl')
         directory = output / ('programs/internal-' + name)
         directory.mkdir(parents=True, exist_ok=True)
@@ -47,7 +47,7 @@ def package(output, destination):
             content.extend(data)
         return unique[digest]
 
-    extras = ['internal-depth-resolve', 'internal-depth-pattern', 'gfx-smoke', 'gfx-cube']
+    extras = ['internal-depth-resolve', 'internal-depth-pattern', 'internal-copy', 'gfx-smoke', 'gfx-cube']
     for program in manifest + [dict(name=name, family=name) for name in extras]:
         name = program['name']
         directory = output / 'programs' / program.get('alias', name)

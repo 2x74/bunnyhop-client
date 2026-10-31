@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 project(d3d11_backend_proof LANGUAGES CXX RC)
 include(FetchContent)
+file(TO_CMAKE_PATH "${SHADER_RESOURCES}" SHADER_RESOURCES)
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../packaging/sdl.json" SDL_PIN)
 string(JSON SDL_COMMIT GET "${SDL_PIN}" commit)
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)

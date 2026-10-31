@@ -166,7 +166,7 @@ struct ReadbackData {
     ComPtr<ID3D11Texture2D> staging, depth24;
     ID3D11Texture2D *active = nullptr;
     std::vector<float> converted;
-    bool convert_depth24 = false;
+    bool convert_depth24 = false, pack_stencil = false;
 };
 
 struct Asset {
@@ -213,6 +213,9 @@ struct D3D11Context::Impl {
     ComPtr<ID3D11Resource> color_resource, depth_resource;
     std::unique_ptr<ProgramData> depth_resolve;
     std::unique_ptr<PipelineData> depth_pipeline;
+    std::unique_ptr<ProgramData> copy_program;
+    std::unique_ptr<PipelineData> copy_pipeline;
+    ComPtr<ID3D11Buffer> copy_constants;
 
     Impl(D3D11Device borrowed)
         : device(static_cast<ID3D11Device *>(borrowed.device))
@@ -270,7 +273,7 @@ struct D3D11Context::Impl {
                 "Cannot create D3D11 pixel shader");
         result->vertex_bytes = source.vertex;
         result->reflection = Json::parse(source.reflection);
-        reflect(*result);
+        if (key.program != "internal-copy") reflect(*result);
         return result;
     }
 
@@ -408,6 +411,8 @@ struct D3D11Context::Impl {
 
     void upload_constants() {
         if (!program) throw std::runtime_error("No D3D11 program is bound");
+        if (!geometry || !geometry->layouts.contains(program))
+            throw std::runtime_error("D3D11 geometry does not match program");
         for (const auto &storage : program->buffers) {
             if (storage->dirty) {
                 D3D11_MAPPED_SUBRESOURCE mapped{};
@@ -431,8 +436,7 @@ struct D3D11Context::Impl {
     void bind_geometry() {
         if (!geometry || !program) return;
         const auto layout = geometry->layouts.find(program);
-        if (layout == geometry->layouts.end()) throw std::runtime_error("D3D11 geometry does not match program");
-        context->IASetInputLayout(layout->second.Get());
+        context->IASetInputLayout(layout == geometry->layouts.end() ? nullptr : layout->second.Get());
         ID3D11Buffer *buffers[] = {geometry->vertices.Get(), geometry->vertices.Get()};
         const UINT strides[] = {geometry->stride, geometry->stride}, offsets[] = {geometry->offset, geometry->offset};
         context->IASetVertexBuffers(0, 2, buffers, strides, offsets);
@@ -511,6 +515,9 @@ struct D3D11Context::Impl {
 
 D3D11Context::D3D11Context(D3D11Device borrowed) : impl_(std::make_unique<Impl>(borrowed)) {
     impl_->depth_resolve = impl_->make_program({"internal-depth-resolve", ""});
+    impl_->copy_program = impl_->make_program({"internal-copy", ""});
+    impl_->copy_pipeline = impl_->make_pipeline({{}, {false, false}, {}});
+    impl_->copy_constants = impl_->buffer(16, D3D11_BIND_CONSTANT_BUFFER);
     impl_->depth_pipeline = impl_->make_pipeline({{}, {true, true, Compare::always}, {}});
 }
 
@@ -929,8 +936,8 @@ void D3D11Context::resolve_depth(const TargetView &source, const TargetView &des
 
 void D3D11Context::copy_color(const TargetView &source, Rect region, Texture destination, int x, int y) {
     if (!Impl::color(source)) throw std::runtime_error("Missing copy source");
-    if (source.desc.samples != 1 || destination.desc.samples != 1 || source.desc.color != destination.desc.format)
-        throw std::runtime_error("D3D11 color copy requires matching single-sample formats");
+    if (source.desc.samples != 1 || destination.desc.samples != 1)
+        throw std::runtime_error("D3D11 color copy requires single-sample textures");
     if (region.x < 0 || region.y < 0 || x < 0 || y < 0 || region.width < 1 || region.height < 1
         || region.x + region.width > source.desc.width || region.y + region.height > source.desc.height
         || x + region.width > destination.desc.width || y + region.height > destination.desc.height)
@@ -941,6 +948,41 @@ void D3D11Context::copy_color(const TargetView &source, Rect region, Texture des
     impl_->detach_outputs();
     impl_->unbind_resource(from.Get());
     impl_->unbind_resource(to);
+    if (source.desc.color != destination.desc.format) {
+        if (source.borrowed || destination.desc.kind != TextureKind::image)
+            throw std::runtime_error("Color conversion requires seam-owned 2D targets");
+        const auto *data = native<TargetData>(source.id);
+        bind_target(
+                {handle(native<TextureData>(destination.id)->rtv.Get()),
+                 {destination.desc.width, destination.desc.height, destination.desc.format},
+                 0,
+                 true}
+        );
+        viewport({x, y, region.width, region.height});
+        const int32_t offset[] = {region.x - x, region.y - y, 0, 0};
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        checked(impl_->context->Map(impl_->copy_constants.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped),
+                "Cannot map D3D11 copy constants");
+        std::memcpy(mapped.pData, offset, sizeof(offset));
+        impl_->context->Unmap(impl_->copy_constants.Get(), 0);
+        auto *constants = impl_->copy_constants.Get();
+        impl_->context->PSSetConstantBuffers(0, 1, &constants);
+        impl_->bound_buffers[1][0] = constants;
+        impl_->program = nullptr;
+        impl_->geometry = nullptr;
+        impl_->context->VSSetShader(impl_->copy_program->vertex.Get(), nullptr, 0);
+        impl_->context->PSSetShader(impl_->copy_program->pixel.Get(), nullptr, 0);
+        impl_->context->IASetInputLayout(nullptr);
+        impl_->current_pipeline = impl_->copy_pipeline.get();
+        impl_->state = {{}, {false, false}, {}};
+        impl_->bind_state();
+        impl_->srv(1, 0, data->color->srv.Get());
+        impl_->context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        impl_->context->Draw(3, 0);
+        impl_->srv(1, 0, nullptr);
+        impl_->detach_outputs();
+        return;
+    }
     const D3D11_BOX box{
             UINT(region.x), UINT(region.y), 0, UINT(region.x + region.width), UINT(region.y + region.height), 1
     };
@@ -1074,10 +1116,10 @@ Readback D3D11Context::create_readback(int width, int height, Format format) {
     desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
     desc.Format = pixel_format(format).texture;
     checked(impl_->device->CreateTexture2D(&desc, nullptr, &result->staging), "Cannot create D3D11 readback");
+    if (pixel_format(format).depth != DXGI_FORMAT_UNKNOWN) result->converted.resize(size_t(width) * height);
     if (format == Format::depth32f) {
         desc.Format = DXGI_FORMAT_R24G8_TYPELESS;
         checked(impl_->device->CreateTexture2D(&desc, nullptr, &result->depth24), "Cannot create depth readback");
-        result->converted.resize(size_t(width) * height);
     }
     Readback readback;
     readback.buffer = handle(result.release());
@@ -1102,11 +1144,14 @@ void D3D11Context::enqueue_readback(const TargetView &source, Readback &readback
     if (depth && Impl::depth(source)) Impl::depth(source)->GetResource(&resource);
     if (!depth && Impl::color(source)) Impl::color(source)->GetResource(&resource);
     if (!resource) throw std::runtime_error("Missing D3D11 readback attachment");
-    value->convert_depth24 = readback.format == Format::depth32f
-                             && (source.desc.depth == Format::depth24 || source.desc.depth == Format::depth24_stencil8);
-    if (!value->convert_depth24 && (depth ? source.desc.depth : source.desc.color) != readback.format)
+    value->convert_depth24 =
+            depth && (source.desc.depth == Format::depth24 || source.desc.depth == Format::depth24_stencil8);
+    value->pack_stencil = readback.format == Format::depth24_stencil8;
+    if ((depth ? source.desc.depth : source.desc.color) != readback.format
+        && !(value->convert_depth24 && readback.format == Format::depth32f))
         throw std::runtime_error("D3D11 readback format differs");
-    value->active = value->convert_depth24 ? value->depth24.Get() : value->staging.Get();
+    value->active =
+            value->convert_depth24 && readback.format == Format::depth32f ? value->depth24.Get() : value->staging.Get();
     impl_->detach_outputs();
     impl_->unbind_resource(resource.Get());
     const D3D11_BOX region{UINT(x), UINT(y), 0, UINT(x + readback.width), UINT(y + readback.height), 1};
@@ -1137,7 +1182,12 @@ MappedPixels D3D11Context::map(Readback &readback) {
                 static_cast<const std::byte *>(mapped.pData) + size_t(y) * mapped.RowPitch
         );
         for (int x = 0; x < readback.width; ++x)
-            value->converted[size_t(y) * readback.width + x] = float(row[x] & 0xffffff) / float(0xffffff);
+            if (value->pack_stencil) {
+                const uint32_t packed = (row[x] << 8) | (row[x] >> 24);
+                std::memcpy(&value->converted[size_t(y) * readback.width + x], &packed, 4);
+            } else {
+                value->converted[size_t(y) * readback.width + x] = float(row[x] & 0xffffff) / float(0xffffff);
+            }
     }
     return {reinterpret_cast<const std::byte *>(value->converted.data()),
             size_t(readback.width) * 4,
