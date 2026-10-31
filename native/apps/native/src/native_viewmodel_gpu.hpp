@@ -43,6 +43,7 @@ protected:
     gfx::Texture bonesTexture, identityBonesTexture, reflectionCube;
     gfx::Sampler bonesSampler, reflectionSampler;
     std::array<gfx::Pipeline, 96> pipelines;
+    gfx::Pipeline backFaceReset;
     bool resourcesReady = false;
     gfx::PipelineState drawState;
     std::unordered_map<int, PlayerProgram> programs;
@@ -175,6 +176,8 @@ protected:
             graphicsContext.constants(program.aura_pass, &program.values);
             mesh(parts.front(), native_render::glow_halo_layers);
         }
+        // Temporary bridge: legacy world passes enable culling without selecting its face again.
+        graphicsContext.pipeline(backFaceReset);
         drawState = previous;
         apply_draw_state();
         program.values.auraPass = 0;
@@ -279,6 +282,9 @@ protected:
     }
 
     void prepare_pipelines() {
+        gfx::PipelineState back_faces;
+        back_faces.raster.cull = gfx::Cull::back;
+        backFaceReset = graphicsContext.create_pipeline(back_faces);
         for (unsigned i = 0; i < pipelines.size(); ++i) {
             gfx::PipelineState state;
             const unsigned blend = i % 3;
@@ -334,6 +340,7 @@ protected:
         }
         for (auto &pipeline : pipelines)
             graphicsContext.destroy(pipeline);
+        graphicsContext.destroy(backFaceReset);
         graphicsContext.destroy(reflectionCube);
         graphicsContext.destroy(bonesTexture);
         graphicsContext.destroy(identityBonesTexture);

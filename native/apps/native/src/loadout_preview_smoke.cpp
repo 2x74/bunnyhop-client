@@ -47,6 +47,9 @@ int main(int argc, char **argv) {
             gl.GetIntegerv(GL_VIEWPORT, vp);
             if (framebuffer != 0 || vp[0] != 11 || vp[1] != 13 || vp[2] != 601 || vp[3] != 401)
                 throw std::runtime_error("Preview leaked framebuffer/viewport");
+            GLint cullFace = 0;
+            gl.GetIntegerv(GL_CULL_FACE_MODE, &cullFace);
+            if (cullFace != GL_BACK) throw std::runtime_error("Preview leaked front-face culling into the scene");
             if (gl.GetError() != GL_NO_ERROR) throw std::runtime_error("Preview GL error");
             if (png.size() < 1000) throw std::runtime_error("Blank PNG");
             if (!captures.insert(png).second) throw std::runtime_error("Duplicate view capture: " + name);
