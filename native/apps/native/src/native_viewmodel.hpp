@@ -476,7 +476,7 @@ class NativeViewmodel {
         return double(state.noise) / 4294967296.0;
     }
 
-    // A shot's kick and a reload's gesture.
+    // A shot's kick and a reload's gesture. A clip that rises is a tube gun's next shell, or a magazine just finished.
     static void
     play_gun_pulses(const native_render::ActorPulses &pulses, ActorHold &state, const native_gun::GunHoldData &gun) {
         auto &hold = *state.hold;
@@ -485,6 +485,8 @@ class NativeViewmodel {
             const bool shell = gun.shell_seconds.has_value();
             hold.reload(shell ? *gun.shell_seconds : gun.reload_seconds.value_or(2), shell);
         }
+        const auto &own = pulses.own_reload;
+        if (own && (!own->shell || gun.shell_seconds)) hold.reload(own->seconds, own->shell, own->empty);
     }
 
     // Appends the gun mesh's two bones to `pose`: the hold's when the actor has a gun, else the right hand's.
