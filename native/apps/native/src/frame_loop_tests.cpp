@@ -122,31 +122,32 @@ void test_game_cap_uses_precise_sleep_only_while_playing() {
     assert(ordinary == 0 && precise == 0);
 }
 
-struct FakeGl {
+struct FakeGraphics {
     using Sync = int *;
     std::vector<int> fences;
     int created = 0;
     int deleted = 0;
     std::vector<int> waited;
 
-    Sync FenceSync(unsigned, unsigned) {
+    Sync signal() {
         fences.push_back(++created);
         return &fences.back();
     }
 
-    unsigned ClientWaitSync(Sync sync, unsigned, unsigned long long) {
+    native::gfx::Wait wait(Sync sync, uint64_t timeout, bool flush) {
+        assert(timeout == native::FramePacer<FakeGraphics>::kMaxWaitNs && flush);
         waited.push_back(*sync);
-        return 0;
+        return native::gfx::Wait::ready;
     }
 
-    void DeleteSync(Sync) { ++deleted; }
+    void destroy(Sync &) { ++deleted; }
 };
 
 // After swapping frame N, wait for the fence placed after frame N-1, then fence N.
 void test_frame_pacer_waits_for_the_previous_frame() {
-    FakeGl gl;
+    FakeGraphics gl;
     gl.fences.reserve(16);
-    native::FramePacer<FakeGl> pacer;
+    native::FramePacer<FakeGraphics> pacer;
     pacer.after_swap(gl, true);
     assert(gl.waited.empty());
     pacer.after_swap(gl, true);

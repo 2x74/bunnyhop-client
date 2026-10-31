@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 // Include after renderer.hpp. The native half of the website's avatar/stage.ts: poses the bunny for an avatar spec
 // from rest (the same spec always gives the same pose), frames it and draws it supersampled into its own
 // framebuffer. Main (GL) thread only; the 2D work and encoding happen in avatar_service.hpp's worker.
@@ -74,10 +75,17 @@ class NativeAvatarStage {
         float elevation = 0;
     };
 
+    // Temporary bridge: NativeViewmodel and legacy caller-state restoration still use GL.
     native::Gl &gl;
+    gfx::Context &context;
     native::NativeViewmodel models;
     PoseLibrary library;
-    GLuint framebuffer = 0, color = 0, depth = 0;
+    gfx::RenderTarget target;
+    gfx::Readback readback;
+    gfx::Fence submitted;
+    std::chrono::steady_clock::time_point submitted_at;
+    gfx::Pipeline clear_pipeline;
+    BunnyLayer pending_layer;
     int target_px = 0;
     std::array<CachedPose, pose_cache_size> poses;
     size_t next_pose = 0;
@@ -353,71 +361,102 @@ class NativeAvatarStage {
         return matrix;
     }
 
-    bool bind_target(int px) {
-        gl.BindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    void bind_target(int px) {
         if (target_px != px) {
+            context.destroy(readback);
+            context.destroy(target);
+            target_px = 0;
+            target = context.create_target({px, px, gfx::Format::rgba8, gfx::Format::depth24});
+            readback = context.create_readback(px, px);
             target_px = px;
-            gl.BindTexture(GL_TEXTURE_2D, color);
-            gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, px, px, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-            gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-            gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-            gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color, 0);
-            gl.BindRenderbuffer(GL_RENDERBUFFER, depth);
-            gl.RenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, px, px);
-            gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depth);
         }
-        return gl.CheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+        context.bind_target(target);
     }
 
 public:
-    NativeAvatarStage(native::Gl &api, const std::filesystem::path &assets)
+    NativeAvatarStage(gfx::Context &graphics, native::Gl &api, const std::filesystem::path &assets)
         : gl(api)
+        , context(graphics)
         , models(api, assets)
         , library(load_library(assets)) {
-        gl.GenFramebuffers(1, &framebuffer);
-        gl.GenTextures(1, &color);
-        gl.GenRenderbuffers(1, &depth);
+        clear_pipeline = context.create_pipeline({{}, {true, true}, {}});
     }
 
     NativeAvatarStage(const NativeAvatarStage &) = delete;
     NativeAvatarStage &operator=(const NativeAvatarStage &) = delete;
 
     ~NativeAvatarStage() {
-        gl.DeleteRenderbuffers(1, &depth);
-        gl.DeleteTextures(1, &color);
-        gl.DeleteFramebuffers(1, &framebuffer);
+        context.destroy(submitted);
+        context.destroy(readback);
+        context.destroy(target);
+        context.destroy(clear_pipeline);
+    }
+
+    bool pending() const { return context.pending(readback); }
+
+    bool ready() {
+        // A standalone fence submits hidden-window work without a blocking readback wait.
+        const auto status = context.wait(submitted, 0, true);
+        if (status == gfx::Wait::pending && std::chrono::steady_clock::now() - submitted_at > std::chrono::seconds(5))
+            throw std::runtime_error("Avatar readback timed out");
+        if (status == gfx::Wait::failed) throw std::runtime_error("Avatar readback failed");
+        return status == gfx::Wait::ready;
+    }
+
+    BunnyLayer collect() {
+        constexpr uint64_t readback_timeout_ns = 5'000'000'000;
+        context.collect(
+                readback,
+                std::as_writable_bytes(std::span(pending_layer.gl_rows)),
+                gfx::RowOrigin::bottom,
+                readback_timeout_ns
+        );
+        context.destroy(submitted);
+        return std::move(pending_layer);
     }
 
     // The bunny for `request`, transparent around it, at twice the picture size (stage.ts render()).
-    // Restores the framebuffer and viewport it found. Empty when the target can't be made.
-    BunnyLayer draw(const Request &request) {
+    void draw(const Request &request) {
+        if (pending()) throw std::runtime_error("Avatar readback is busy");
         const int supersample = std::clamp(supersample_budget_px / request.size, 1, max_supersample);
         const int px = request.size * supersample;
         const auto &pose = posed(request.spec);
         auto actor = dressed(request.spec);
         std::copy(pose.position.begin(), pose.position.end(), actor.frame.position);
+        // Temporary bridge: callers still enter with an implicit GL target/viewport. Restore even on failure.
         GLint previous = 0, viewport[4];
         gl.GetIntegerv(GL_FRAMEBUFFER_BINDING, &previous);
         gl.GetIntegerv(GL_VIEWPORT, viewport);
-        BunnyLayer layer;
-        if (bind_target(px)) {
-            const auto camera = frame(request, actor, pose);
-            gl.Viewport(0, 0, px, px);
-            gl.ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-            gl.DepthMask(GL_TRUE);
-            gl.ClearColor(0, 0, 0, 0);
-            gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-            models.upload_actor_pose(pose.bones);
-            models.draw_posed_actor(actor, projection(camera), camera.eye.data(), 0, pose.feet_yaw);
-            layer.px = px;
-            layer.supersample = supersample;
-            layer.gl_rows.resize(size_t(px) * px * 4);
-            gl.PixelStorei(GL_PACK_ALIGNMENT, 1);
-            gl.ReadPixels(0, 0, px, px, GL_RGBA, GL_UNSIGNED_BYTE, layer.gl_rows.data());
-        }
-        gl.BindFramebuffer(GL_FRAMEBUFFER, GLuint(previous));
-        gl.Viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
-        return layer;
+
+        struct Restore {
+            gfx::Context &context;
+            gfx::TargetView target;
+            gfx::Rect viewport;
+
+            ~Restore() {
+                context.bind_target(target);
+                context.viewport(viewport);
+            }
+        } restore{
+                context,
+                context.borrow_target(unsigned(previous), {}),
+                {viewport[0], viewport[1], viewport[2], viewport[3]}
+        };
+
+        bind_target(px);
+        const auto camera = frame(request, actor, pose);
+        context.viewport({0, 0, px, px});
+        context.pipeline(clear_pipeline);
+        context.clear_color({0, 0, 0, 0});
+        context.clear_depth();
+        models.upload_actor_pose(pose.bones);
+        models.draw_posed_actor(actor, projection(camera), camera.eye.data(), 0, pose.feet_yaw);
+        pending_layer.px = px;
+        pending_layer.supersample = supersample;
+        pending_layer.gl_rows.resize(size_t(px) * px * 4);
+        context.enqueue_readback(target, readback);
+        submitted = context.signal();
+        submitted_at = std::chrono::steady_clock::now();
     }
 };
 

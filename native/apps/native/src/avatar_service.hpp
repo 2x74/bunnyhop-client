@@ -122,10 +122,12 @@ public:
 };
 
 class AvatarService {
+    // Temporary bridge for NativeViewmodel construction.
     native::Gl &gl;
+    gfx::Context &context;
     std::filesystem::path assets;
     std::unique_ptr<NativeAvatarStage> stage;
-    std::optional<Request> preview;
+    std::optional<Request> preview, rendering;
     // Saves and downloads go before the preview; thumbnails fill in after it.
     std::deque<Request> exports, thumbnails;
     std::vector<std::string> errors;
@@ -157,7 +159,10 @@ class AvatarService {
     }
 
 public:
-    AvatarService(native::Gl &api, std::filesystem::path asset_root) : gl(api), assets(std::move(asset_root)) {}
+    AvatarService(gfx::Context &graphics, native::Gl &api, std::filesystem::path asset_root)
+        : gl(api)
+        , context(graphics)
+        , assets(std::move(asset_root)) {}
 
     // A menu message. Previews ("live": the big picture) replace each other; the rest queue.
     void request(const nlohmann::json &message) {
@@ -184,10 +189,23 @@ public:
 
     // Renders at most one queued picture. Call on the GL thread while the menu shows.
     void frame() {
+        if (rendering) {
+            try {
+                if (!stage->ready()) return;
+                auto layer = stage->collect();
+                if (!encoder) encoder = std::make_unique<AvatarEncoder>();
+                encoder->push(std::move(*rendering), std::move(layer));
+            } catch (const std::exception &e) {
+                std::cerr << "Avatar readback: " << e.what() << '\n';
+                errors.push_back(failure(rendering->id, "The picture couldn't be drawn."));
+                stage.reset();
+            }
+            rendering.reset();
+        }
         auto job = next();
         if (!job) return;
         try {
-            if (!stage && !unavailable) stage = std::make_unique<NativeAvatarStage>(gl, assets);
+            if (!stage && !unavailable) stage = std::make_unique<NativeAvatarStage>(context, gl, assets);
         } catch (const std::exception &e) {
             unavailable = true;
             std::cerr << "Avatar renderer: " << e.what() << '\n';
@@ -197,10 +215,10 @@ public:
             return;
         }
         try {
-            auto layer = stage->draw(*job);
-            if (!encoder) encoder = std::make_unique<AvatarEncoder>();
-            encoder->push(std::move(*job), std::move(layer));
+            stage->draw(*job);
+            rendering = std::move(job);
         } catch (const std::exception &e) {
+            stage.reset();
             std::cerr << "Avatar render: " << e.what() << '\n';
             errors.push_back(failure(job->id, "The picture couldn't be drawn."));
         }
@@ -220,6 +238,7 @@ public:
         preview.reset();
         exports.clear();
         thumbnails.clear();
+        rendering.reset();
         stage.reset();
     }
 };

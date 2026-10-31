@@ -167,7 +167,7 @@ public:
         renderer_ = std::make_unique<native::Renderer>(gl_, core_.get());
         renderer_->set_profiling(true);
         renderer_->set_viewmodel_visible(true);
-        hud_ = std::make_unique<native::NativeHud>(gl_, BUNNYHOP_NATIVE_ASSET_ROOT);
+        hud_ = std::make_unique<native::NativeHud>(graphics_, BUNNYHOP_NATIVE_ASSET_ROOT);
         auto preferences = native::default_settings();
         preferences = native::patch_settings(preferences, {{"strafeTrainer", true}});
         hud_->preferences(preferences);
@@ -183,7 +183,7 @@ public:
         actor_frames_.resize(spec.ghosts);
     }
 
-    ~Benchmark() { pacer_.release(gl_); }
+    ~Benchmark() { pacer_.release(graphics_); }
 
     void run() {
         uint64_t started = SDL_GetTicksNS();
@@ -243,7 +243,7 @@ public:
                 throw std::runtime_error("Low latency mode stopped: " + presenter_.error());
             mark(swap);
             frame_diagnostics_.mark(native::FrameDiagnostics::kSwap, SDL_GetTicksNS());
-            pacer_.after_swap(gl_, spec_.queued);
+            pacer_.after_swap(graphics_, spec_.queued);
             mark(gpu_wait);
             frame_diagnostics_.mark(native::FrameDiagnostics::kGpuWait, SDL_GetTicksNS());
             limiter_.frame(
@@ -275,6 +275,7 @@ private:
     const Spec &spec_;
     Surface surface_;
     native::Gl gl_;
+    native::gfx::Context graphics_{gl_};
     BenchmarkGpu gpu_;
     std::unique_ptr<BhContext, decltype(&bh_destroy)> core_;
     std::unique_ptr<native::Renderer> renderer_;
@@ -285,7 +286,7 @@ private:
     native::RunDiagnostics diagnostics_;
     native::FrameDiagnostics frame_diagnostics_;
     native::MovementFeedback feedback_;
-    native::FramePacer<native::Gl> pacer_;
+    native::FramePacer<native::gfx::Context> pacer_;
     native::GraphicsMenuPacer limiter_;
     native::PlayPriority play_priority_;
     native::LowLatencyPresenter presenter_;

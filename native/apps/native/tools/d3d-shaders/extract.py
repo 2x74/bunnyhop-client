@@ -72,7 +72,7 @@ def calls(source):
         if match[0] not in ("link_program", "create_program") or items[i + 1][0] != "(":
             continue
         end = ending(source, items[i + 1].end(), ")")
-        expression = source[items[i + 1].end():end - 1]
+        expression = source[items[i + 1].end():end - 1].strip()
         if expression.startswith("Gl &"):
             continue
         if match[0] == "create_program":

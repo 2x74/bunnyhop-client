@@ -14,7 +14,7 @@
 // Everything runs in one composite pass after the optional occlusion and bloom passes, so Enhanced with its default
 // switches costs one bloom chain, one composite and one FXAA pass over the Source look.
 //
-//   EnhancedLook look(gl, emptyVao);
+//   EnhancedLook look(context, maximumSamples);
 //   look.begin(w, h, samples);  ...draw the world...  look.finish(target, w, h, frame, hdr, dt);
 #include <array>
 #include <algorithm>
@@ -182,285 +182,320 @@ class EnhancedLook {
     static constexpr std::array<int, bloom_levels> blur_radii{3, 5, 7, 9, 11};
 
     struct Target {
-        GLuint fbo = 0, texture = 0;
+        native::gfx::RenderTarget resource;
         int width = 0, height = 0;
     };
 
-    Gl &gl;
-    GLuint emptyVao;
-    GLuint brightProgram = 0, blurProgram = 0, contactProgram = 0, compositeProgram = 0, fxaaProgram = 0;
-    GLuint sceneFbo = 0, sceneColor = 0, sceneDepth = 0;
-    GLuint multisampleFbo = 0, multisampleColor = 0, multisampleDepth = 0;
-    int width = 0, height = 0, requestedSamples = 0, currentSamples = -1;
-    // After CS:S's exposure on maps with HDR lighting; the composite reads it instead of the scene.
-    Target exposed, contact, output;
+    struct BrightConstants {
+        std::array<float, 2> texel;
+        float threshold;
+    };
+
+    struct BlurConstants {
+        std::array<float, 2> direction;
+        int32_t radius;
+    };
+
+    struct ContactConstants {
+        std::array<float, 2> projectionScale, nearFar, texel;
+    };
+
+    struct CompositeConstants {
+        std::array<float, 4> bloomWeights;
+        float bloomWeight4;
+        uint32_t hasContact, hasBloom;
+        float contactStrength;
+        std::array<float, 2> contactTexel;
+        float saturation, contrast, exposure, shoulder, haze, hazeDistance;
+        std::array<float, 2> nearFar, sunUv;
+        std::array<float, 3> sunColor;
+        float shafts;
+    };
+
+    native::gfx::Context &context;
+    native::gfx::Program brightProgram, blurProgram, contactProgram, compositeProgram, fxaaProgram;
+    native::gfx::ConstantBinding brightConstants, blurConstants, contactConstants, compositeConstants, fxaaConstants;
+    native::gfx::Geometry geometry;
+    native::gfx::Sampler linearSampler, depthSampler;
+    native::gfx::Pipeline pipeline;
+    native::gfx::RenderTarget scene, multisample;
+    int maximumSamples, width = 0, height = 0, requestedSamples = 0, currentSamples = -1;
+    Target exposed, contact, output, bright;
     std::array<Target, bloom_levels> bloomHorizontal, bloomVertical;
-    Target bright;
 
-    Target make_target(int w, int h, GLint internal, GLenum format, GLenum type) {
-        Target t;
-        t.width = w;
-        t.height = h;
-        gl.GenTextures(1, &t.texture);
-        gl.BindTexture(GL_TEXTURE_2D, t.texture);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        gl.TexImage2D(GL_TEXTURE_2D, 0, internal, w, h, 0, format, type, nullptr);
-        gl.GenFramebuffers(1, &t.fbo);
-        gl.BindFramebuffer(GL_FRAMEBUFFER, t.fbo);
-        gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t.texture, 0);
-        if (gl.CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-            throw std::runtime_error("Enhanced look target incomplete");
-        return t;
-    }
-
-    Target half_float_target(int w, int h) { return make_target(w, h, GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT); }
-
-    void destroy(Target &t) {
-        if (t.fbo) gl.DeleteFramebuffers(1, &t.fbo);
-        if (t.texture) gl.DeleteTextures(1, &t.texture);
-        t = {};
+    Target make_target(int w, int h, native::gfx::Format format = native::gfx::Format::rgba16f) {
+        return {context.create_target({w, h, format}), w, h};
     }
 
     void release_targets() {
-        for (GLuint *fbo : {&sceneFbo, &multisampleFbo})
-            if (*fbo) gl.DeleteFramebuffers(1, fbo);
-        for (GLuint *texture : {&sceneColor, &sceneDepth})
-            if (*texture) gl.DeleteTextures(1, texture);
-        for (GLuint *buffer : {&multisampleColor, &multisampleDepth})
-            if (*buffer) gl.DeleteRenderbuffers(1, buffer);
-        sceneFbo = multisampleFbo = sceneColor = sceneDepth = multisampleColor = multisampleDepth = 0;
-        for (Target *t : {&exposed, &contact, &output, &bright})
-            destroy(*t);
-        for (int i = 0; i < bloom_levels; i++) {
-            destroy(bloomHorizontal[size_t(i)]);
-            destroy(bloomVertical[size_t(i)]);
+        context.destroy(scene);
+        context.destroy(multisample);
+        for (auto *t : {&exposed, &contact, &output, &bright})
+            context.destroy(t->resource);
+        for (size_t i = 0; i < size_t(bloom_levels); i++) {
+            context.destroy(bloomHorizontal[i].resource);
+            context.destroy(bloomVertical[i].resource);
         }
         width = height = 0;
     }
 
-    void make_scene_target(int w, int h) {
-        gl.GenTextures(1, &sceneColor);
-        gl.BindTexture(GL_TEXTURE_2D, sceneColor);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
-        gl.GenTextures(1, &sceneDepth);
-        gl.BindTexture(GL_TEXTURE_2D, sceneDepth);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        gl.TexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, w, h, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, nullptr);
-        gl.GenFramebuffers(1, &sceneFbo);
-        gl.BindFramebuffer(GL_FRAMEBUFFER, sceneFbo);
-        gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sceneColor, 0);
-        gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, sceneDepth, 0);
-        if (gl.CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-            throw std::runtime_error("Enhanced look scene target incomplete");
-    }
-
-    void make_multisample_target(int w, int h) {
-        gl.GenFramebuffers(1, &multisampleFbo);
-        gl.BindFramebuffer(GL_FRAMEBUFFER, multisampleFbo);
-        gl.GenRenderbuffers(1, &multisampleColor);
-        gl.BindRenderbuffer(GL_RENDERBUFFER, multisampleColor);
-        gl.RenderbufferStorageMultisample(GL_RENDERBUFFER, requestedSamples, GL_RGBA16F, w, h);
-        gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, multisampleColor);
-        gl.GenRenderbuffers(1, &multisampleDepth);
-        gl.BindRenderbuffer(GL_RENDERBUFFER, multisampleDepth);
-        gl.RenderbufferStorageMultisample(GL_RENDERBUFFER, requestedSamples, GL_DEPTH24_STENCIL8, w, h);
-        gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, multisampleDepth);
-        if (gl.CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-            throw std::runtime_error("Enhanced look multisample target incomplete");
-    }
-
     void ensure_targets(int w, int h) {
-        if (w == width && h == height && sceneFbo && currentSamples == requestedSamples) return;
+        using namespace native::gfx;
+        if (w == width && h == height && currentSamples == requestedSamples) return;
         release_targets();
-        make_scene_target(w, h);
-        if (requestedSamples) make_multisample_target(w, h);
-        currentSamples = requestedSamples;
-        exposed = half_float_target(w, h);
-        output = make_target(w, h, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
-        contact = make_target(std::max(1, w / 2), std::max(1, h / 2), GL_R8, GL_RED, GL_UNSIGNED_BYTE);
+        scene = context.create_target({w, h, Format::rgba16f, Format::depth24_stencil8});
+        if (requestedSamples)
+            multisample = context.create_target({w, h, Format::rgba16f, Format::depth24_stencil8, requestedSamples});
+        exposed = make_target(w, h);
+        output = make_target(w, h, Format::rgba8);
+        // The seam has no R8 target. RGBA8 preserves the quantized red channel used by the composite.
+        contact = make_target(std::max(1, w / 2), std::max(1, h / 2), Format::rgba8);
         int levelWidth = std::max(1, w / 2), levelHeight = std::max(1, h / 2);
-        bright = half_float_target(levelWidth, levelHeight);
-        for (int i = 0; i < bloom_levels; i++) {
-            bloomHorizontal[size_t(i)] = half_float_target(levelWidth, levelHeight);
-            bloomVertical[size_t(i)] = half_float_target(levelWidth, levelHeight);
+        bright = make_target(levelWidth, levelHeight);
+        for (size_t i = 0; i < size_t(bloom_levels); i++) {
+            bloomHorizontal[i] = make_target(levelWidth, levelHeight);
+            bloomVertical[i] = make_target(levelWidth, levelHeight);
             levelWidth = std::max(1, levelWidth / 2);
             levelHeight = std::max(1, levelHeight / 2);
         }
+        currentSamples = requestedSamples;
         width = w;
         height = h;
     }
 
-    GLint loc(GLuint program, const char *name) { return gl.GetUniformLocation(program, name); }
-
-    void bind_texture(GLuint program, const char *name, int unit, GLuint texture) {
-        gl.ActiveTexture(GL_TEXTURE0 + unit);
-        gl.BindTexture(GL_TEXTURE_2D, texture);
-        gl.Uniform1i(loc(program, name), unit);
+    void draw() {
+        context.pipeline(pipeline);
+        context.bind_geometry(geometry);
+        context.draw(native::gfx::Primitive::triangles, 0, 3);
+        for (unsigned unit = 1; unit < 8; ++unit)
+            context.bind_texture(unit, {});
+        context.bind_texture(0, {});
     }
 
-    void draw_into(const Target &target) {
-        gl.BindFramebuffer(GL_FRAMEBUFFER, target.fbo);
-        gl.Viewport(0, 0, target.width, target.height);
-        gl.BindVertexArray(emptyVao);
-        gl.DrawArrays(GL_TRIANGLES, 0, 3);
+    void bind_target(const Target &target) {
+        context.bind_target(target.resource);
+        context.viewport({0, 0, target.width, target.height});
     }
 
     void draw_contact(const LookFrame &frame) {
-        gl.UseProgram(contactProgram);
-        bind_texture(contactProgram, "depthTexture", 0, sceneDepth);
-        gl.Uniform2f(loc(contactProgram, "projectionScale"), frame.projection_scale[0], frame.projection_scale[1]);
-        gl.Uniform2f(loc(contactProgram, "nearFar"), native::camera_near_plane, native::camera_far_plane);
-        gl.Uniform2f(loc(contactProgram, "texel"), 1.f / width, 1.f / height);
-        draw_into(contact);
+        bind_target(contact);
+        context.bind_program(contactProgram);
+        const ContactConstants block{
+                frame.projection_scale,
+                {native::camera_near_plane, native::camera_far_plane},
+                {1.f / width, 1.f / height}
+        };
+        context.constants(contactConstants, &block);
+        context.bind_texture(0, scene.depth, depthSampler);
+        draw();
     }
 
-    // UnrealBloomPass: the bright parts at half size, each level blurred and halved again.
-    void draw_bloom(GLuint frameTexture) {
-        gl.UseProgram(brightProgram);
-        bind_texture(brightProgram, "frame", 0, frameTexture);
-        gl.Uniform2f(loc(brightProgram, "texel"), 1.f / width, 1.f / height);
-        gl.Uniform1f(loc(brightProgram, "threshold"), bloom_threshold);
-        draw_into(bright);
-        gl.UseProgram(blurProgram);
-        GLuint input = bright.texture;
+    void blur_into(native::gfx::Texture input, const Target &target, float x, float y, int radius) {
+        bind_target(target);
+        context.bind_program(blurProgram);
+        const BlurConstants block{{x, y}, radius};
+        context.constants(blurConstants, &block);
+        context.bind_texture(0, input, linearSampler);
+        draw();
+    }
+
+    void draw_bloom(native::gfx::Texture frameTexture) {
+        bind_target(bright);
+        context.bind_program(brightProgram);
+        const BrightConstants block{{1.f / width, 1.f / height}, bloom_threshold};
+        context.constants(brightConstants, &block);
+        context.bind_texture(0, frameTexture, linearSampler);
+        draw();
+        auto input = bright.resource.color;
         for (size_t i = 0; i < size_t(bloom_levels); i++) {
             const auto &horizontal = bloomHorizontal[i], &vertical = bloomVertical[i];
-            gl.Uniform1i(loc(blurProgram, "radius"), blur_radii[i]);
-            bind_texture(blurProgram, "source", 0, input);
-            gl.Uniform2f(loc(blurProgram, "direction"), 1.f / horizontal.width, 0);
-            draw_into(horizontal);
-            bind_texture(blurProgram, "source", 0, horizontal.texture);
-            gl.Uniform2f(loc(blurProgram, "direction"), 0, 1.f / vertical.height);
-            draw_into(vertical);
-            input = vertical.texture;
+            blur_into(input, horizontal, 1.f / horizontal.width, 0, blur_radii[i]);
+            blur_into(horizontal.resource.color, vertical, 0, 1.f / vertical.height, blur_radii[i]);
+            input = vertical.resource.color;
         }
     }
 
-    void bloom_uniforms(float strength) {
-        static constexpr const char *names[bloom_levels] = {"bloom0", "bloom1", "bloom2", "bloom3", "bloom4"};
+    void composite(native::gfx::Texture frameTexture, const LookFrame &frame, bool withContact, bool withBloom) {
+        context.bind_program(compositeProgram);
+        context.bind_texture(0, frameTexture, linearSampler);
+        context.bind_texture(1, scene.depth, depthSampler);
+        context.bind_texture(2, contact.resource.color, linearSampler);
+        CompositeConstants block{};
         std::array<float, bloom_levels> weights{};
         for (size_t i = 0; i < size_t(bloom_levels); i++) {
             const float factor = bloom_factors[i];
-            weights[i] = strength * (factor + (1.2f - factor - factor) * bloom_radius);
-            bind_texture(compositeProgram, names[i], 3 + int(i), bloomVertical[i].texture);
+            weights[i] = (withBloom ? frame.bloom_strength : 0) * (factor + (1.2f - factor - factor) * bloom_radius);
+            context.bind_texture(3 + unsigned(i), bloomVertical[i].resource.color, linearSampler);
         }
-        gl.Uniform4fv(loc(compositeProgram, "bloomWeights"), 1, weights.data());
-        gl.Uniform1f(loc(compositeProgram, "bloomWeight4"), weights[4]);
+        std::copy_n(weights.begin(), 4, block.bloomWeights.begin());
+        block.bloomWeight4 = weights[4];
+        block.hasContact = uint32_t(withContact);
+        block.hasBloom = uint32_t(withBloom);
+        block.contactStrength = frame.contact_strength;
+        block.contactTexel = {1.f / contact.width, 1.f / contact.height};
+        block.saturation = frame.saturation;
+        block.contrast = frame.contrast;
+        block.exposure = frame.exposure;
+        block.shoulder = frame.shoulder;
+        block.haze = frame.haze;
+        block.hazeDistance = frame.haze_distance;
+        block.nearFar = {native::camera_near_plane, native::camera_far_plane};
+        block.sunUv = frame.sun_uv;
+        block.sunColor = frame.sun_color;
+        block.shafts = frame.shafts;
+        context.constants(compositeConstants, &block);
+        draw();
     }
 
-    void composite(GLuint frameTexture, const LookFrame &frame, bool withContact, bool withBloom) {
-        const GLuint p = compositeProgram;
-        gl.UseProgram(p);
-        bind_texture(p, "frame", 0, frameTexture);
-        bind_texture(p, "depthTexture", 1, sceneDepth);
-        bind_texture(p, "contact", 2, contact.texture);
-        bloom_uniforms(withBloom ? frame.bloom_strength : 0);
-        gl.Uniform1i(loc(p, "hasContact"), withContact);
-        gl.Uniform1i(loc(p, "hasBloom"), withBloom);
-        gl.Uniform1f(loc(p, "contactStrength"), frame.contact_strength);
-        gl.Uniform2f(loc(p, "contactTexel"), 1.f / contact.width, 1.f / contact.height);
-        gl.Uniform1f(loc(p, "saturation"), frame.saturation);
-        gl.Uniform1f(loc(p, "contrast"), frame.contrast);
-        gl.Uniform1f(loc(p, "exposure"), frame.exposure);
-        gl.Uniform1f(loc(p, "shoulder"), frame.shoulder);
-        gl.Uniform1f(loc(p, "haze"), frame.haze);
-        gl.Uniform1f(loc(p, "hazeDistance"), frame.haze_distance);
-        gl.Uniform2f(loc(p, "nearFar"), native::camera_near_plane, native::camera_far_plane);
-        gl.Uniform2f(loc(p, "sunUv"), frame.sun_uv[0], frame.sun_uv[1]);
-        gl.Uniform3fv(loc(p, "sunColor"), 1, frame.sun_color.data());
-        gl.Uniform1f(loc(p, "shafts"), frame.shafts);
-        gl.BindVertexArray(emptyVao);
-        gl.DrawArrays(GL_TRIANGLES, 0, 3);
+    void resolve_multisample() {
+        if (!requestedSamples) return;
+        context.resolve_color(multisample, scene);
+        context.resolve_depth(multisample, scene);
     }
 
-    void resolve_multisample(GLbitfield buffers) {
-        if (!multisampleFbo) return;
-        gl.BindFramebuffer(GL_READ_FRAMEBUFFER, multisampleFbo);
-        gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, sceneFbo);
-        gl.BlitFramebuffer(0, 0, width, height, 0, 0, width, height, buffers, GL_NEAREST);
+    void create_programs() {
+        using namespace native::gfx;
+        using namespace native_look;
+        const char *vertex = native_hdr::hdr_vertex;
+        brightProgram = context.create_program({{"look-bright", ""}, vertex, bright_fragment.c_str()});
+        blurProgram = context.create_program({{"look-blur", ""}, vertex, blur_fragment.c_str()});
+        contactProgram = context.create_program({{"look-contact", ""}, vertex, contact_fragment.c_str()});
+        compositeProgram = context.create_program({{"look-composite", ""}, vertex, composite_fragment.c_str()});
+        fxaaProgram = context.create_program({{"look-fxaa", ""}, vertex, fxaa_fragment.c_str()});
+        static constexpr ConstantField brightFields[] = {
+                {"texel", offsetof(BrightConstants, texel), 8, ConstantType::float2},
+                {"threshold", offsetof(BrightConstants, threshold), 4, ConstantType::float1}
+        };
+        static constexpr ConstantField blurFields[] = {
+                {"direction", offsetof(BlurConstants, direction), 8, ConstantType::float2},
+                {"radius", offsetof(BlurConstants, radius), 4, ConstantType::int1}
+        };
+        static constexpr ConstantField contactFields[] = {
+                {"projectionScale", offsetof(ContactConstants, projectionScale), 8, ConstantType::float2},
+                {"nearFar", offsetof(ContactConstants, nearFar), 8, ConstantType::float2},
+                {"texel", offsetof(ContactConstants, texel), 8, ConstantType::float2}
+        };
+        brightConstants = context.create_constants(brightProgram, {brightFields, sizeof(BrightConstants)});
+        blurConstants = context.create_constants(blurProgram, {blurFields, sizeof(BlurConstants)});
+        contactConstants = context.create_constants(contactProgram, {contactFields, sizeof(ContactConstants)});
+        static constexpr ConstantField fxaaFields[] = {{"texel", 0, 8, ConstantType::float2}};
+        fxaaConstants = context.create_constants(fxaaProgram, {fxaaFields, 8});
+        create_composite_constants();
+        context.texture_unit(brightProgram, "frame", 0);
+        context.texture_unit(blurProgram, "source", 0);
+        context.texture_unit(contactProgram, "depthTexture", 0);
+        context.texture_unit(fxaaProgram, "frame", 0);
+        context.texture_unit(compositeProgram, "frame", 0);
+        context.texture_unit(compositeProgram, "depthTexture", 1);
+        context.texture_unit(compositeProgram, "contact", 2);
+        static constexpr const char *names[] = {"bloom0", "bloom1", "bloom2", "bloom3", "bloom4"};
+        for (unsigned i = 0; i < bloom_levels; i++)
+            context.texture_unit(compositeProgram, names[i], 3 + i);
+    }
+
+    void create_composite_constants() {
+        using namespace native::gfx;
+        static constexpr ConstantField fields[] = {
+                {"bloomWeights", offsetof(CompositeConstants, bloomWeights), 16, ConstantType::float4},
+                {"bloomWeight4", offsetof(CompositeConstants, bloomWeight4), 4, ConstantType::float1},
+                {"hasContact", offsetof(CompositeConstants, hasContact), 4, ConstantType::bool32},
+                {"hasBloom", offsetof(CompositeConstants, hasBloom), 4, ConstantType::bool32},
+                {"contactStrength", offsetof(CompositeConstants, contactStrength), 4, ConstantType::float1},
+                {"contactTexel", offsetof(CompositeConstants, contactTexel), 8, ConstantType::float2},
+                {"saturation", offsetof(CompositeConstants, saturation), 4, ConstantType::float1},
+                {"contrast", offsetof(CompositeConstants, contrast), 4, ConstantType::float1},
+                {"exposure", offsetof(CompositeConstants, exposure), 4, ConstantType::float1},
+                {"shoulder", offsetof(CompositeConstants, shoulder), 4, ConstantType::float1},
+                {"haze", offsetof(CompositeConstants, haze), 4, ConstantType::float1},
+                {"hazeDistance", offsetof(CompositeConstants, hazeDistance), 4, ConstantType::float1},
+                {"nearFar", offsetof(CompositeConstants, nearFar), 8, ConstantType::float2},
+                {"sunUv", offsetof(CompositeConstants, sunUv), 8, ConstantType::float2},
+                {"sunColor", offsetof(CompositeConstants, sunColor), 12, ConstantType::float3},
+                {"shafts", offsetof(CompositeConstants, shafts), 4, ConstantType::float1}
+        };
+        compositeConstants = context.create_constants(compositeProgram, {fields, sizeof(CompositeConstants)});
+    }
+
+    void release() {
+        release_targets();
+        for (auto *program : {&brightProgram, &blurProgram, &contactProgram, &compositeProgram, &fxaaProgram})
+            context.destroy(*program);
+        context.destroy(geometry);
+        context.destroy(linearSampler);
+        context.destroy(depthSampler);
+        context.destroy(pipeline);
     }
 
 public:
-    EnhancedLook(Gl &g, GLuint vao) : gl(g), emptyVao(vao) {
-        using namespace native_look;
-        const char *vertex = native_hdr::hdr_vertex;
-        brightProgram = link_program(gl, vertex, bright_fragment.c_str());
-        blurProgram = link_program(gl, vertex, blur_fragment.c_str());
-        contactProgram = link_program(gl, vertex, contact_fragment.c_str());
-        compositeProgram = link_program(gl, vertex, composite_fragment.c_str());
-        fxaaProgram = link_program(gl, vertex, fxaa_fragment.c_str());
+    EnhancedLook(native::gfx::Context &graphics, int maximum_samples)
+        : context(graphics)
+        , maximumSamples(maximum_samples) {
+        try {
+            create_programs();
+            geometry = context.create_geometry(0, {});
+            linearSampler = context.create_sampler({});
+            depthSampler = context.create_sampler({native::gfx::Filter::nearest, native::gfx::Filter::nearest});
+            pipeline = context.create_pipeline({{}, {false, false}, {}});
+        } catch (...) {
+            release();
+            throw;
+        }
     }
 
-    ~EnhancedLook() {
-        release_targets();
-        for (GLuint p : {brightProgram, blurProgram, contactProgram, compositeProgram, fxaaProgram})
-            if (p) gl.DeleteProgram(p);
-    }
+    // Temporary bridge for the legacy renderer's GL sample-limit query.
+    EnhancedLook(native::gfx::Context &graphics, Gl &gl) : EnhancedLook(graphics, native_post::maximum_samples(gl)) {}
+
+    ~EnhancedLook() { release(); }
 
     EnhancedLook(const EnhancedLook &) = delete;
     EnhancedLook &operator=(const EnhancedLook &) = delete;
 
-    void samples(int count) {
-        GLint maximum = 0;
-        gl.GetIntegerv(GL_MAX_SAMPLES, &maximum);
-        requestedSamples = std::clamp(count, 0, maximum);
-    }
+    void samples(int count) { requestedSamples = std::clamp(count, 0, maximumSamples); }
 
-    // Binds the half-float scene target (with depth) for the world's draws.
     void begin(int w, int h) {
         ensure_targets(w, h);
-        gl.BindFramebuffer(GL_FRAMEBUFFER, multisampleFbo ? multisampleFbo : sceneFbo);
-        gl.Viewport(0, 0, w, h);
+        context.bind_target(requestedSamples ? multisample : scene);
+        context.viewport({0, 0, w, h});
     }
 
-    // The water's refraction copies from the read framebuffer: the resolved scene so far.
-    void refraction_source() {
-        resolve_multisample(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        gl.BindFramebuffer(GL_READ_FRAMEBUFFER, sceneFbo);
+    native::gfx::TargetView refraction_source() {
+        resolve_multisample();
+        // Temporary bridge: renderer.hpp still copies refraction from the bound read target.
+        context.bind_target(scene);
+        return scene;
     }
 
-    // Post-processes the world into `targetFbo`. hdr: CS:S's exposure and bloom on maps with HDR lighting.
-    void finish(GLuint targetFbo, const LookFrame &frame, SourceHdr *hdr, double dt) {
-        resolve_multisample(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        gl.Disable(GL_DEPTH_TEST);
-        gl.Disable(GL_BLEND);
-        gl.Disable(GL_CULL_FACE);
-        gl.DepthMask(GL_FALSE);
-        GLuint frameTexture = sceneColor;
+    void finish(native::gfx::TargetView destination, const LookFrame &frame, SourceHdr *hdr, double dt) {
+        resolve_multisample();
+        auto frameTexture = scene.color;
         if (hdr) {
-            hdr->expose(sceneColor, exposed.fbo, width, height, dt);
-            frameTexture = exposed.texture;
+            hdr->expose(scene.color, exposed.resource, width, height, dt);
+            frameTexture = exposed.resource.color;
         }
         const bool withContact = frame.contact_strength > 0;
         const bool withBloom = !hdr && frame.bloom_strength > 0;
         if (withContact) draw_contact(frame);
         if (withBloom) draw_bloom(frameTexture);
-        gl.BindFramebuffer(GL_FRAMEBUFFER, frame.spatial_aa ? output.fbo : targetFbo);
-        gl.Viewport(0, 0, width, height);
+        context.bind_target(frame.spatial_aa ? output.resource : destination);
+        context.viewport({0, 0, width, height});
         composite(frameTexture, frame, withContact, withBloom);
         if (frame.spatial_aa) {
-            gl.BindFramebuffer(GL_FRAMEBUFFER, targetFbo);
-            gl.Viewport(0, 0, width, height);
-            gl.UseProgram(fxaaProgram);
-            bind_texture(fxaaProgram, "frame", 0, output.texture);
-            gl.Uniform2f(loc(fxaaProgram, "texel"), 1.f / width, 1.f / height);
-            gl.BindVertexArray(emptyVao);
-            gl.DrawArrays(GL_TRIANGLES, 0, 3);
+            context.bind_target(destination);
+            context.viewport({0, 0, width, height});
+            context.bind_program(fxaaProgram);
+            context.bind_texture(0, output.resource.color, linearSampler);
+            const std::array<float, 2> block{1.f / width, 1.f / height};
+            context.constants(fxaaConstants, block.data());
+            draw();
         }
-        gl.BindFramebuffer(GL_FRAMEBUFFER, targetFbo);
-        gl.Viewport(0, 0, width, height);
-        gl.ActiveTexture(GL_TEXTURE0);
-        gl.Enable(GL_DEPTH_TEST);
-        gl.DepthMask(GL_TRUE);
+        context.bind_target(destination);
+        context.viewport({0, 0, width, height});
+        context.depth_test(true);
+        context.depth_write(true);
+    }
+
+    // Temporary bridge for renderer.hpp's borrowed framebuffer argument.
+    void finish(uint32_t framebuffer, const LookFrame &frame, SourceHdr *hdr, double dt) {
+        finish(native_post::target(framebuffer, width, height), frame, hdr, dt);
     }
 };
