@@ -176,10 +176,10 @@ int main(int argc, char **argv) {
         preferences["graphicsPotato"] = false;
         native::Input aim;
         aim.set_angles(50, 0);
-        renderer.tool_message({{"type", "paint"}, {"action", "stamp"}}, spawn.player, aim);
-        renderer.tool_message({{"type", "measure"}, {"action", "point"}}, spawn.player, aim);
+        renderer.tool_message({{"type", "paint"}, {"action", "stamp"}}, spawn.player, aim, true);
+        renderer.tool_message({{"type", "measure"}, {"action", "point"}}, spawn.player, aim, true);
         aim.set_angles(40, 20);
-        renderer.tool_message({{"type", "measure"}, {"action", "point"}}, spawn.player, aim);
+        renderer.tool_message({{"type", "measure"}, {"action", "point"}}, spawn.player, aim, true);
         const auto tools = renderer.surface_tools_state();
         if (tools.at("paintMarks") != 1 || tools.at("measurePoints") != 2) {
             throw std::runtime_error("Surface picking/paint/measure fixture failed");
