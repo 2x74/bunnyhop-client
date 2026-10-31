@@ -1,3 +1,5 @@
+import os
+import subprocess
 import struct
 import tempfile
 from pathlib import Path
@@ -58,6 +60,39 @@ class ShaderPipelineTests(unittest.TestCase):
         self.assertTrue(all(v['detail'] for v in variants if v['material'] == 'gun'))
         self.assertEqual([v for v in variants if v['material'] == 'world_gun'],
                          [dict(material='world_gun', finish=0, detail=False, glove=False)])
+
+    def test_every_player_key_exists_in_manifest(self):
+        # Evaluate the runtime key function rather than duplicating its naming rules in Python.
+        source = (SOURCE / "player_material.hpp").read_text(encoding="utf-8")
+        variants = player_variants(range(28))
+        statements = []
+        expected = set()
+        for variant in variants:
+            material, finish, glove, detail = (variant[k] for k in ("material", "finish", "glove", "detail"))
+            expected.add(f"player-{material}-{finish}-g{int(glove)}-d{int(detail)}")
+            statements.append('std::cout << native_render::player_shader_key('
+                              f'{finish}, {str(glove).lower()}, {str(detail).lower()}, '
+                              f'native_render::PlayerMaterial::{material}) << "\\n";')
+        enum = "enum class PlayerMaterial { solid, ghost, gun, world_gun };"
+        cpp = ('#include <string>\n#include <iostream>\nnamespace native_render {\n' + enum
+               + function(source, "player_shader_key") + '}\nint main() {\n'
+               + '\n'.join(statements) + '\n}\n')
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            path = directory / "keys.cpp"
+            path.write_text(cpp, encoding="utf-8")
+            binary = directory / ("keys.exe" if os.name == "nt" else "keys")
+            if os.name == "nt":
+                command = ["cl", "/nologo", "/std:c++20", "/EHsc", str(path), f"/Fe:{binary}",
+                           f"/Fo:{directory / 'keys.obj'}"]
+            else:
+                command = [os.environ.get("CXX", "c++"), "-std=c++20", str(path), "-o", str(binary)]
+            subprocess.run(command, check=True, capture_output=True)
+            requested = subprocess.check_output([str(binary)], text=True).splitlines()
+        self.assertEqual(len(requested), 117)
+        self.assertEqual(set(requested), expected)
+        creation = calls((SOURCE / "native_viewmodel_gpu.hpp").read_text(encoding="utf-8"))[0]
+        self.assertEqual(creation[2:], ("key", ""))
 
     def test_stage_locations_are_linked_by_name(self):
         vertex = dict(outputs=[dict(name='uv', type='vec2', location=0), dict(name='normal', type='vec3', location=1)])

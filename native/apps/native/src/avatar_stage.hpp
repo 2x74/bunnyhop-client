@@ -75,8 +75,6 @@ class NativeAvatarStage {
         float elevation = 0;
     };
 
-    // Temporary bridge: NativeViewmodel and legacy caller-state restoration still use GL.
-    native::Gl &gl;
     gfx::Context &context;
     native::NativeViewmodel models;
     PoseLibrary library;
@@ -374,13 +372,15 @@ class NativeAvatarStage {
     }
 
 public:
-    NativeAvatarStage(gfx::Context &graphics, native::Gl &api, const std::filesystem::path &assets)
-        : gl(api)
-        , context(graphics)
-        , models(api, assets)
+    NativeAvatarStage(gfx::Context &graphics, const std::filesystem::path &assets)
+        : context(graphics)
+        , models(graphics, assets)
         , library(load_library(assets)) {
         clear_pipeline = context.create_pipeline({{}, {true, true}, {}});
     }
+
+    NativeAvatarStage(gfx::Context &graphics, native::Gl &, const std::filesystem::path &assets)
+        : NativeAvatarStage(graphics, assets) {}
 
     NativeAvatarStage(const NativeAvatarStage &) = delete;
     NativeAvatarStage &operator=(const NativeAvatarStage &) = delete;
@@ -423,10 +423,6 @@ public:
         const auto &pose = posed(request.spec);
         auto actor = dressed(request.spec);
         std::copy(pose.position.begin(), pose.position.end(), actor.frame.position);
-        // Temporary bridge: callers still enter with an implicit GL target/viewport. Restore even on failure.
-        GLint previous = 0, viewport[4];
-        gl.GetIntegerv(GL_FRAMEBUFFER_BINDING, &previous);
-        gl.GetIntegerv(GL_VIEWPORT, viewport);
 
         struct Restore {
             gfx::Context &context;
@@ -437,11 +433,7 @@ public:
                 context.bind_target(target);
                 context.viewport(viewport);
             }
-        } restore{
-                context,
-                context.borrow_target(unsigned(previous), {}),
-                {viewport[0], viewport[1], viewport[2], viewport[3]}
-        };
+        } restore{context, context.current_target(), context.current_viewport()};
 
         bind_target(px);
         const auto camera = frame(request, actor, pose);

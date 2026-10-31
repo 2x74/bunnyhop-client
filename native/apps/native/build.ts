@@ -50,7 +50,7 @@ const configure = [
 // SDL3_DIR is explicit so a cached or vcpkg SDL from an earlier configure can't win.
 if (sdl) configure.push(`-DCMAKE_PREFIX_PATH=${sdl}`, `-DSDL3_DIR=${sdlConfigDir(sdl)}`);
 run(configure);
-run(["cmake", "--build", "apps/native/build", "--parallel"]);
+run(["cmake", "--build", "apps/native/build", "--parallel", "4"]);
 // Local and packaged binaries must use the same identity schema and executable
 // hash convention; otherwise the runtime rejects every development manifest.
 const executable = join(root, "apps/native/build/bunnyhop-native" + (process.platform === "win32" ? ".exe" : ""));
