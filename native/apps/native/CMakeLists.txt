@@ -169,6 +169,9 @@ if(BUNNYHOP_BUILD_CLIENT)
         src/startup.cpp
         src/preferences.cpp
         src/replay_library.cpp
+        src/native_log.cpp
+        src/log_scrub.cpp
+        src/crash_note.cpp
         src/online.cpp
         src/sky_image.cpp
         src/sky_library.cpp
@@ -357,6 +360,11 @@ if(BUNNYHOP_BUILD_CLIENT)
         target_include_directories(bunnyhop-native-online-tests PRIVATE vendor)
         target_link_libraries(bunnyhop-native-online-tests PRIVATE bunnyhop_core_native CURL::libcurl)
         add_test(NAME native_online_boundaries COMMAND bunnyhop-native-online-tests)
+        add_executable(bunnyhop-native-log-tests src/native_log_tests.cpp src/native_log.cpp src/log_scrub.cpp src/crash_note.cpp)
+        target_include_directories(bunnyhop-native-log-tests PRIVATE vendor)
+        target_link_libraries(bunnyhop-native-log-tests PRIVATE Threads::Threads)
+        add_test(NAME native_log COMMAND bunnyhop-native-log-tests)
+        set_tests_properties(native_log PROPERTIES TIMEOUT 60)
         add_executable(bunnyhop-native-menu-state-tests src/menu_state_tests.cpp)
         target_include_directories(bunnyhop-native-menu-state-tests PRIVATE vendor)
         add_test(NAME native_menu_state COMMAND bunnyhop-native-menu-state-tests)

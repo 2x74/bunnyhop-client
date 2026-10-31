@@ -52,6 +52,8 @@
 #include "render_capabilities.hpp"
 #include "map_download.hpp"
 #include "map_preparation.hpp"
+#include "crash_note.hpp"
+#include "native_log.hpp"
 #include "ssj.hpp"
 #include "strafe_trainer.hpp"
 #include "audio.hpp"
@@ -198,6 +200,19 @@ int run(const native::Options &opt) {
     std::optional<data_location::Choice> data_choice;
     std::string data_notice, last_data_state;
     const auto startup_data = native::initialize_data_directory(cache);
+    const auto identity = native::load_release_identity(manifest_path, menu_path, assets);
+    const auto *gl_version = gl.GetString(GL_VERSION);
+    native::log::open(
+            cache,
+            native::log_session_header(
+                    identity,
+                    gpu_renderer + ", OpenGL " + (gl_version ? reinterpret_cast<const char *>(gl_version) : "unknown"),
+                    settings.physics,
+                    startup_data.settings,
+                    window.get(),
+                    cache
+            )
+    );
     native::MapAudio map_audio;
     native::Audio audio(assets, cache, !opt.hidden && !opt.frames);
     audio.set_map_mixer(&map_audio.mixer);
@@ -448,7 +463,6 @@ int run(const native::Options &opt) {
     std::string error;
     native::ReplayLibrary replay_library(cache);
     native::RunVault run_vault(cache / "run-vault");
-    const auto identity = native::load_release_identity(manifest_path, menu_path, assets);
     native::updates::Host updater(cache, default_root, identity, native::executable_path());
     recorder.diagnostics.set_client_version(identity.value("version", std::string("local")));
     recorder.diagnostics.set_device(gpu_renderer, SDL_GetPlatform());
@@ -4117,6 +4131,9 @@ int main(int argc, char **argv) {
     if (argc == 3 && std::string(argv[1]) == "--update-smoke")
         return native::updates::run_smoke(native::data_location::from_utf8(argv[2]));
 #endif
+    native::log::Session log_session;
+    native::log::install_crash_notes();
+    native::capture_sdl_log();
     bool interactive_errors = true;
     // Scripted checks must also exit on failure without a modal alert. Inspect
     // flags before parsing so malformed smoke invocations cannot wait for input.
@@ -4138,6 +4155,7 @@ int main(int argc, char **argv) {
         return code;
     } catch (const std::exception &error) {
         std::cerr << "Bunnyhop native: " << error.what() << '\n';
+        if (interactive_errors) native::open_log_in_default_folder();
         if (interactive_errors) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, native::app_name, error.what(), nullptr);
         return 1;
     }
