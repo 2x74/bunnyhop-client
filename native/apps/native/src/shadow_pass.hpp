@@ -8,7 +8,10 @@ class ShadowPass {
 
 public:
     ShadowPass(Gl &g, RenderResources &r, RenderUniforms &u, WorldPass &w)
-        : gl(g), resources(r), uniforms(u), world(w) {}
+        : gl(g)
+        , resources(r)
+        , uniforms(u)
+        , world(w) {}
 
     GLuint depthProgram = 0;
     // Sun shadows of the composer looks (sun_shadows.hpp), on their own texture unit.
@@ -23,7 +26,8 @@ public:
 
     // How strongly the profile's sun and sky light the map (web composer-pipeline.ts renderFrame's SunShadows).
     SunTerms sun_terms(
-            const native::GraphicsSettings &graphics, const native::SceneSun &frameSun,
+            const native::GraphicsSettings &graphics,
+            const native::SceneSun &frameSun,
             const native::VisualProfile &profile
     ) const {
         SunTerms terms;
@@ -47,9 +51,8 @@ public:
         if (material >= world.materials.size()) return Caster::none;
         const auto &m = world.materials[material];
         if (m.kind == 2 || m.kind == 3 || (m.flags & additive)) return Caster::none;
-        return (m.flags & (world.material_translucent | world.material_alpha_test)) || m.alpha < 1
-                       ? Caster::cutout
-                       : Caster::solid;
+        return (m.flags & (world.material_translucent | world.material_alpha_test)) || m.alpha < 1 ? Caster::cutout
+                                                                                                   : Caster::solid;
     }
 
     void cast_group(
@@ -71,8 +74,7 @@ public:
         if (!transform.visible) return;
         const auto matrix = native::model_matrix(transform);
         const auto bounds = world.groupBounds.find((uint64_t(prop) << 63) | first);
-        if (bounds != world.groupBounds.end()
-            && !native_render::in_light_box(bounds->second, matrix, lightVp, range))
+        if (bounds != world.groupBounds.end() && !native_render::in_light_box(bounds->second, matrix, lightVp, range))
             return;
         const GLuint shader = cutouts ? cutoutDepthProgram : depthProgram;
         if (cutouts) {
@@ -89,8 +91,12 @@ public:
 
     // World groups, props and players into the sun's depth map: solid surfaces, then cut-outs by their alpha.
     void draw_shadow_casters(
-            const native::Matrix &lightVp, float range, const float eye[3], double seconds,
-            NativeViewmodel *viewmodel, std::span<const native_render::Actor> roomActors
+            const native::Matrix &lightVp,
+            float range,
+            const float eye[3],
+            double seconds,
+            NativeViewmodel *viewmodel,
+            std::span<const native_render::Actor> roomActors
     ) {
         ++world.sceneNumber;
         for (const bool cutouts : {false, true}) {
@@ -136,9 +142,13 @@ public:
 
     // The sun's depth map around the camera and the world shader's sun terms for this frame.
     void prepare_sun_light(
-            const float eye[3], double seconds, const native::GraphicsSettings &graphics,
-            const native::SceneSun &frameSun, const native::VisualProfile &profile,
-            NativeViewmodel *viewmodel, std::span<const native_render::Actor> roomActors
+            const float eye[3],
+            double seconds,
+            const native::GraphicsSettings &graphics,
+            const native::SceneSun &frameSun,
+            const native::VisualProfile &profile,
+            NativeViewmodel *viewmodel,
+            std::span<const native_render::Actor> roomActors
     ) {
         static constexpr float shadow_bias = .0003f;
         const auto terms = sun_terms(graphics, frameSun, profile);

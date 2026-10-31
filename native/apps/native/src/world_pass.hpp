@@ -9,7 +9,11 @@ class WorldPass {
 
 public:
     WorldPass(Gl &g, BhContext *&c, RenderResources &r, RenderUniforms &u, RenderProfile &p)
-        : gl(g), core(c), resources(r), uniforms(u), profile(p) {}
+        : gl(g)
+        , core(c)
+        , resources(r)
+        , uniforms(u)
+        , profile(p) {}
 
     GLuint program = 0, lightmap = 0;
     RenderGeometry worldMesh, propMesh;
@@ -161,9 +165,7 @@ public:
         }
     } materialUniforms;
 
-    void bind_material(
-            uint32_t index, bool prop, const native::GraphicsSettings &graphics, const WaterPass &water
-    ) {
+    void bind_material(uint32_t index, bool prop, const native::GraphicsSettings &graphics, const WaterPass &water) {
         const BhMaterial fallback = {-1, 1, 0, 1, .5f, {1, 1, 1}};
         const auto &m = index < materials.size() ? materials[index] : fallback;
         if (graphics.potato) {
@@ -206,9 +208,9 @@ public:
             gl.Uniform1f(materialUniforms.waterFogEnd, std::max(1.f, e.fog_end));
         }
         gl.Uniform1i(materialUniforms.additive, (m.flags & 8) != 0);
-        const bool doubleSided = m.kind == 2
-                                         ? native_render::water_face_double_sided(water.waterBeneathFaces, e.above_water)
-                                         : (m.flags & 4) != 0;
+        const bool doubleSided =
+                m.kind == 2 ? native_render::water_face_double_sided(water.waterBeneathFaces, e.above_water)
+                            : (m.flags & 4) != 0;
         if (doubleSided)
             gl.Disable(GL_CULL_FACE);
         else
@@ -249,8 +251,14 @@ public:
     // reflection: the mirrored scene for the water reflection, without the water itself.
     template <class CaptureRefraction>
     void draw_scene(
-            const native::Matrix &vp, const float eye[3], bool sky, double time, bool reflection,
-            const View &view, WaterPass &water, CaptureRefraction capture_refraction
+            const native::Matrix &vp,
+            const float eye[3],
+            bool sky,
+            double time,
+            bool reflection,
+            const View &view,
+            WaterPass &water,
+            CaptureRefraction capture_refraction
     ) {
         const auto &skyInfo = view.skyInfo;
         auto phaseStart = profile.profile_now();
@@ -339,11 +347,10 @@ public:
         );
         if (profile.profiling) profile.frameProfile.survivors += draws.size();
         profile.profile_elapsed(profile.frameProfile.buildCull, phaseStart);
-        const bool visibleWater =
-                water.hasWaterMaterials
-                && std::any_of(draws.begin(), draws.end(), [&](const native_render::SceneDraw &d) {
-                    return d.material < materials.size() && materials[d.material].kind == 2;
-                });
+        const bool visibleWater = water.hasWaterMaterials
+                                  && std::any_of(draws.begin(), draws.end(), [&](const native_render::SceneDraw &d) {
+                                         return d.material < materials.size() && materials[d.material].kind == 2;
+                                     });
         for (int pass = 0; pass < 2; pass++) {
             const double sortBefore = profile.frameProfile.sort;
             phaseStart = profile.profile_now();

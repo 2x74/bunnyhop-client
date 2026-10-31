@@ -22,5 +22,4 @@ struct RenderProfile {
     void profile_elapsed(double &value, ProfileClock::time_point start) {
         if (profiling) value += std::chrono::duration<double, std::milli>(ProfileClock::now() - start).count();
     }
-
 };

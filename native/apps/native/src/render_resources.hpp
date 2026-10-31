@@ -183,5 +183,4 @@ public:
             }
         checker = upload({fallback, sizeof(fallback), 8, 8}, true, true);
     }
-
 };

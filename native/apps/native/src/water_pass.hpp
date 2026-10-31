@@ -28,7 +28,8 @@ public:
 
     // Upward-facing world water, per cell, for the capture distance and plane choice (water_capture.hpp).
     void load_water_cells(
-            const float *vertices, const uint32_t *indices,
+            const float *vertices,
+            const uint32_t *indices,
             std::span<const BhGroup> groups,
             std::span<const BhMaterial> materials,
             std::span<const BhMaterialExtra> extras
@@ -50,9 +51,8 @@ public:
         waterPlanner.load(builder.cells(), materials.size());
     }
 
-    void water_uniforms(
-            GLuint target, const float eye[3], const native::Matrix &vp, int viewportWidth, int viewportHeight
-    ) {
+    void
+    water_uniforms(GLuint target, const float eye[3], const native::Matrix &vp, int viewportWidth, int viewportHeight) {
         gl.Uniform3fv(uniforms.loc(target, "cameraPosition"), 1, eye);
         auto &order = waterOrder;
         auto &rects = waterRects;
@@ -137,7 +137,8 @@ public:
     }
 
     std::vector<native_render::WaterSurface> water_surfaces(
-            const float *verts, const uint32_t *indices,
+            const float *verts,
+            const uint32_t *indices,
             std::span<const BhGroup> groups,
             std::span<const BhMaterial> materials,
             std::span<const BhMaterialExtra> extras
@@ -219,9 +220,7 @@ public:
         upload_water_planes(std::move(planes));
     }
 
-    void plan_water(
-            const float eye[3], const native::Matrix &vp, bool capturesEnabled, bool reflectionsEnabled
-    ) {
+    void plan_water(const float eye[3], const native::Matrix &vp, bool capturesEnabled, bool reflectionsEnabled) {
         reflectionDrawn = false;
         if (!capturesEnabled) {
             waterPlanner.clear();
@@ -234,9 +233,15 @@ public:
 
     template <class DrawSky, class DrawWorld, class DrawActors>
     void draw_reflection(
-            const float eye[3], int width, int height,
-            int &viewportWidth, int &viewportHeight, float &clipHeight,
-            DrawSky drawSky, DrawWorld drawWorld, DrawActors drawActors
+            const float eye[3],
+            int width,
+            int height,
+            int &viewportWidth,
+            int &viewportHeight,
+            float &clipHeight,
+            DrawSky drawSky,
+            DrawWorld drawWorld,
+            DrawActors drawActors
     ) {
         if (!waterReflection) waterReflection = std::make_unique<WaterReflectionTarget>(gl);
         GLint drawTarget = 0, readTarget = 0;
@@ -262,5 +267,4 @@ public:
         gl.Viewport(0, 0, width, height);
         reflectionDrawn = true;
     }
-
 };

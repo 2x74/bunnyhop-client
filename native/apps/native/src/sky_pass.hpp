@@ -7,8 +7,7 @@ class SkyPass {
     RenderUniforms &uniforms;
 
 public:
-    SkyPass(Gl &g, BhContext *&c, RenderResources &r, RenderUniforms &u)
-        : gl(g), core(c), resources(r), uniforms(u) {}
+    SkyPass(Gl &g, BhContext *&c, RenderResources &r, RenderUniforms &u) : gl(g), core(c), resources(r), uniforms(u) {}
 
     RenderGeometry skyMesh;
     GLuint skyProgram = 0;
@@ -22,6 +21,7 @@ public:
     GLuint skyPanorama = 0;
     std::string skyPanoramaId;
     native::SkyPicture skyPanoramaInfo;
+
     struct View {
         const native::GraphicsSettings &graphics;
         double lastYaw, lastPitch;
@@ -99,8 +99,13 @@ public:
 
     // The 2D skybox, or the procedural sky, behind everything. mirrored: as the water reflection sees it.
     void draw_sky_backdrop(
-            const float eye[3], const native::Matrix &vp, float aspect, bool mirrored,
-            const View &view, WaterPass &water, std::span<const BhMaterial> materials
+            const float eye[3],
+            const native::Matrix &vp,
+            float aspect,
+            bool mirrored,
+            const View &view,
+            WaterPass &water,
+            std::span<const BhMaterial> materials
     ) {
         static constexpr const char *face_uniforms[6] = {"sky0", "sky1", "sky2", "sky3", "sky4", "sky5"};
         gl.Disable(GL_BLEND);
@@ -155,8 +160,13 @@ public:
     // The 3D skybox (sky_camera) around its origin. mirror_height: the water reflection's plane in world units.
     template <class Camera, class DrawScene>
     void draw_3d_sky(
-            const float eye[3], double seconds, const native::GraphicsSettings &graphics,
-            float &clipHeight, std::optional<float> mirror_height, Camera camera, DrawScene drawScene
+            const float eye[3],
+            double seconds,
+            const native::GraphicsSettings &graphics,
+            float &clipHeight,
+            std::optional<float> mirror_height,
+            Camera camera,
+            DrawScene drawScene
     ) {
         if (!hasSky || graphics.potato || skyInfo.scale <= 0) return;
         float skyEye[3];

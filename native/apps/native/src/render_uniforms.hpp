@@ -25,5 +25,4 @@ public:
         locations.emplace(name, value);
         return value;
     }
-
 };
