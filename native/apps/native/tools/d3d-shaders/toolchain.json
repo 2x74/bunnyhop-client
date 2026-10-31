@@ -1,0 +1,13 @@
+{
+  "glslang": {
+    "repository": "https://github.com/KhronosGroup/glslang.git",
+    "revision": "a57276bf558f5cf94d3a9854ebdf5a2236849a5a"
+  },
+  "spirv-cross": {
+    "repository": "https://github.com/KhronosGroup/SPIRV-Cross.git",
+    "revision": "7affe74d77f93a622bb5002789d5332d32e512ee"
+  },
+  "windowsSdk": "10.0.22621.0",
+  "bun": "1.4.3",
+  "d3dCompilerSha256": "ce013eb1639f8e2620a509e73b33029108f55a293e304e33e38b72fd65c531b8"
+}
