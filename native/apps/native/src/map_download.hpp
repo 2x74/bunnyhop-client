@@ -1,5 +1,6 @@
 #pragma once
 #include "map_jobs.hpp"
+#include "map_load_journal.hpp"
 #include "online.hpp"
 #include <chrono>
 #include <iostream>
@@ -56,9 +57,11 @@ struct MapDownload {
     bool loading_map(const std::string &id) const { return jobs.valid() && requested == id; }
 
     void cancel() {
+        const bool active = jobs.valid() || preparing;
         jobs.cancel();
         preparing = false;
         std::lock_guard lock(mutex);
+        if (active) journal.cancelled();
         loading.clear();
         progress = nullptr;
     }
@@ -73,14 +76,45 @@ struct MapDownload {
 
     // After settled(). A stalled worker is retired: it can't be stopped, but it no longer stands in the way of a retry.
     MapDownloadResult take() {
-        if (jobs.wait_for(std::chrono::seconds(0)) == std::future_status::ready) return jobs.get();
+        if (jobs.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            auto result = jobs.get();
+            std::lock_guard lock(mutex);
+            if (result.map) journal.files_ready();
+            return result;
+        }
         jobs.cancel();
         std::lock_guard lock(mutex);
+        journal.stalled(stall_limit);
         const bool queued = progress.is_object() && progress.value("stage", std::string()) == queued_stage;
         return {std::nullopt,
                 queued ? "Another download is still using the game data folder. Try again in a moment."
                        : "This map stopped loading: nothing happened for a while. Check your connection and "
                          "try again."};
+    }
+
+    void note_refused(const std::string &id, std::string_view reason) {
+        std::lock_guard lock(mutex);
+        journal.refused(id, reason);
+    }
+
+    void note_preparing() {
+        std::lock_guard lock(mutex);
+        journal.preparing();
+    }
+
+    void note_loaded() {
+        std::lock_guard lock(mutex);
+        journal.loaded();
+    }
+
+    void note_failed(const std::string &error) {
+        std::lock_guard lock(mutex);
+        journal.failed(error);
+    }
+
+    void note_left_map() {
+        std::lock_guard lock(mutex);
+        journal.left_map();
     }
 
     void message(const std::string &text, const std::atomic_bool &cancel) {
@@ -96,6 +130,7 @@ struct MapDownload {
         // Transfers report about once a second whether or not bytes moved, so only a change counts as progress.
         if (loading != value.message || last_received != value.received) last_progress = Clock::now();
         last_received = value.received;
+        journal.progress(value);
         loading = value.message;
         progress = {
                 {"map", id},
@@ -122,6 +157,7 @@ struct MapDownload {
         requested = id;
         {
             std::lock_guard lock(mutex);
+            journal.requested(id);
             loading = "Reading " + id;
             progress = {{"map", id}, {"stage", queued_stage}, {"message", loading}};
             last_progress = Clock::now();
@@ -150,6 +186,7 @@ private:
     // The stage before the worker has the cache to itself.
     static constexpr const char *queued_stage = "queue";
 
+    MapLoadJournal journal;
     Clock::time_point last_progress;
     uint64_t last_received = 0;
 };

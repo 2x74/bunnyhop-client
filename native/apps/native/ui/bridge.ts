@@ -60,6 +60,8 @@ export interface VideoExportState {
 }
 export type MenuMessage =
   | { type: "mapLoad"; action: "cancel" | "retry" }
+  /** A line for the game's log file (menu-log.ts). */
+  | { type: "menuLog"; text: string }
   | { type: "update"; action: "check" | "download" | "cancel" | "reveal" | "restart" | "status" }
   | { type: "update"; action: "automatic"; enabled: boolean }
   | {

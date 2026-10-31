@@ -88,11 +88,15 @@ import { practiceReason } from "../../web/src/practice";
 import { NativeGauntlet } from "./gauntlet-native";
 import { installNowPlaying } from "./music-now";
 import { leaveMapTeardown } from "./map-lifecycle";
+import { pickMap } from "./map-pick";
+import { installMenuErrorLog, logToHost } from "./menu-log";
 import { initCustomCss } from "./custom-css/custom-css";
 import { installHudTheme } from "./custom-css/hud-theme";
 
 import { installGamepadNavigation } from "./gamepad";
 import { maybeStartOnboarding, openOnboarding } from "./onboarding";
+
+installMenuErrorLog();
 
 type Screen =
   | "support"
@@ -223,24 +227,37 @@ function paintFinish(): void {
   );
 }
 function selectMap(id: string): void {
-  if (!/^[a-zA-Z0-9_.-]{1,128}$/.test(id)) return;
-  roomService.leave();
-  // Another map than the attempt's: the attempt stays open on the server (Resume on its page), this client lets it go.
-  if (gauntlet.id && id !== gauntlet.map) gauntlet.leave();
-  try {
-    localStorage.setItem(LAST_MAP, id);
-  } catch {
-    /* private storage: no Continue */
-  }
-  if (id === state.map) {
-    if (LEAVE_FOR_GAME.has(screen)) {
-      backStack = [];
-      screen = "home";
-    }
-    send({ type: "resume" });
-  }
-  // The host owns loading/error status and clears it when the download settles.
-  else send({ type: "selectMap", id, style: state.style, track: 0 });
+  pickMap(id, {
+    map: () => state.map,
+    leaving: [
+      () => roomService.leave(),
+      // Another map than the attempt's: the attempt stays open on the server (Resume on its page), this client lets it go.
+      () => {
+        if (gauntlet.id && id !== gauntlet.map) gauntlet.leave();
+      },
+      () => {
+        try {
+          localStorage.setItem(LAST_MAP, id);
+        } catch {
+          /* private storage: no Continue */
+        }
+      },
+    ],
+    resume: () => {
+      if (LEAVE_FOR_GAME.has(screen)) {
+        backStack = [];
+        screen = "home";
+      }
+      send({ type: "resume" });
+    },
+    // The host owns loading/error status and clears it when the download settles.
+    request: (map) => send({ type: "selectMap", id: map, style: state.style, track: 0 }),
+    refuse: (text) => {
+      notice(text);
+      logToHost(`map pick refused: ${text}`);
+    },
+    log: logToHost,
+  });
 }
 /**
  * Screens form a stack under home, as on the web (menu.ts push/pop): Back and Esc return to the screen a profile,
@@ -467,7 +484,8 @@ function render(): void {
       style: state.style,
       play: () => show("maps"),
       pick: (id) => {
-        if (!state.loading) selectMap(id);
+        if (state.loading) logToHost(`map pick ${id} ignored: another map is loading`);
+        else selectMap(id);
       },
       settings: () => show("settings"),
       loadout: () => show("loadout"),

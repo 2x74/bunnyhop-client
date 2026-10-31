@@ -108,3 +108,26 @@ test("a load that fails fast shows the failure every time, with a Retry the game
     await browser.close();
   }
 });
+
+test("an error nothing caught reaches the game's log, once", async () => {
+  const { browser, page } = await open();
+  try {
+    const logged = await page.evaluate(async () => {
+      const received = (window as unknown as { received: { type: string; text?: string }[] }).received;
+      received.length = 0;
+      for (const delay of [0, 0])
+        setTimeout(() => {
+          throw new Error("menu fixture failure");
+        }, delay);
+      void Promise.reject(new Error("menu fixture rejection"));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      return received.filter((message) => message.type === "menuLog").map((message) => message.text ?? "");
+    });
+    expect(logged.filter((text) => text.includes("menu fixture failure")).length).toBe(1);
+    expect(
+      logged.filter((text) => text.startsWith("unhandled rejection") && text.includes("menu fixture rejection")).length,
+    ).toBe(1);
+  } finally {
+    await browser.close();
+  }
+});

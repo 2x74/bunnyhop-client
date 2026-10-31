@@ -851,6 +851,7 @@ int run(const native::Options &opt) {
         show_menu(true);
         if (menu && menu_ready) menu->evaluate_js("window.bunnyhopNativeMenu?.onLeaveMap?.()");
         map_download.cancel();
+        map_download.note_left_map();
         map_preparation.cancel();
         cancel_prefetch();
         pending_replay.clear();
@@ -963,7 +964,10 @@ int run(const native::Options &opt) {
     };
     auto request_map = [&](const std::string &id) {
         if (!opt.runtime_smoke.empty()) throw std::runtime_error("Offline runtime smoke attempted a map download");
-        if (map_download.loading_map(id)) return;
+        if (map_download.loading_map(id)) {
+            map_download.note_refused(id, "it is already loading");
+            return;
+        }
         if (!native::valid_map_id(id)) throw std::runtime_error("Invalid map name");
         cancel_prefetch();
         error.clear();
@@ -2091,9 +2095,11 @@ int run(const native::Options &opt) {
                         continue;
                     }
                     if (video.preparing() && type != "videoExport" && type != "ready" && type != "update"
-                        && type != "audioCue" && type != "music" && type != "quit") {
+                        && type != "audioCue" && type != "music" && type != "quit" && type != "menuLog") {
                         if (type == "settings")
                             throw std::runtime_error("Wait for the auto-director's cameras before changing settings.");
+                        if (type == "selectMap")
+                            throw std::runtime_error("Wait for the auto-director's cameras before changing maps.");
                         continue;
                     }
                     const size_t limit = native::render_menu_message_limit(
@@ -2113,7 +2119,11 @@ int run(const native::Options &opt) {
                         menu_files.menu_ready();
                     } else if (type == "resume" && core && !download.valid())
                         show_menu(false);
-                    else if (type == "prefetchMap") {
+                    else if (type == "resume") {
+                        std::cerr << "Resume ignored: " << (core ? "a map is loading" : "no map is up") << '\n';
+                        // The menu thought a map was up. Tell it what is.
+                        menu_state.reset();
+                    } else if (type == "prefetchMap") {
                         if (message.at("map").is_null()) {
                             cancel_prefetch();
                             continue;
@@ -2395,6 +2405,8 @@ int run(const native::Options &opt) {
                     } else if (type == "restart" && core && !download.valid()) {
                         reset();
                         show_menu(false);
+                    } else if (type == "restart") {
+                        std::cerr << "Restart ignored: " << (core ? "a map is loading" : "no map is up") << '\n';
                     } else if (type == "selectMap") {
                         const auto style = message.value("style", selected_style);
                         if (!native::styles.contains(style)) throw std::runtime_error("Unknown style");
@@ -2765,6 +2777,8 @@ int run(const native::Options &opt) {
                     else if (type == "menuError") {
                         error = message.value("error", std::string("Menu failed"));
                         std::cerr << "Menu: " << error << '\n';
+                    } else if (type == "menuLog") {
+                        std::cerr << "Menu: " << message.value("text", std::string()) << '\n';
                     } else if (type == "worldRecord") {
                         if (message.value("generation", uint64_t(-1)) != heartbeat.generation
                             || message.value("map", std::string()) != map_id
@@ -2860,6 +2874,7 @@ int run(const native::Options &opt) {
         if (!map_preparing && map_download.settled(Clock::now())) {
             map_preparing = true;
             map_preparation.start(map_download.take(), settings, gl, assets);
+            if (map_preparation.download.map) map_download.note_preparing();
             nlohmann::json update;
             {
                 std::lock_guard lock(progress_mutex);
@@ -2894,7 +2909,7 @@ int run(const native::Options &opt) {
                 const auto failure = error;
                 if (core) reset();
                 error = failure;
-                std::cerr << "Map load " << last_requested_map << ": " << error << '\n';
+                map_download.note_failed(error);
                 toast(error);
                 if (!menu || opt.frames) throw std::runtime_error(error);
                 // Back on the home screen: restart the tour this download interrupted.
@@ -2904,7 +2919,8 @@ int run(const native::Options &opt) {
                     backdrop_cut = false;
                     backdrop_source.clear();
                 }
-            }
+            } else
+                map_download.note_loaded();
             {
                 std::lock_guard lock(progress_mutex);
                 loading.clear();
