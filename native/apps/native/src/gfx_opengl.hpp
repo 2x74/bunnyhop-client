@@ -9,6 +9,7 @@
 namespace native::gfx {
 class OpenGlContext {
     Gl &gl_;
+    TargetView target_;
 
     template <typename Function>
     static uintptr_t generate(Function function) {
@@ -30,6 +31,8 @@ class OpenGlContext {
 
     static PixelFormat pixel_format(Format format) {
         switch (format) {
+            case Format::r8:
+                return {GL_R8, GL_RED, GL_UNSIGNED_BYTE, 1};
             case Format::rgba8:
                 return {GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, 4};
             case Format::rgba16f:
@@ -93,6 +96,7 @@ class OpenGlContext {
     void blit(const TargetView &source, const TargetView &destination, GLbitfield mask) {
         gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, source.id);
         gl_.BindFramebuffer(GL_DRAW_FRAMEBUFFER, destination.id);
+        target_ = destination;
         gl_.BlitFramebuffer(
                 0,
                 0,
@@ -109,6 +113,29 @@ class OpenGlContext {
 
 public:
     explicit OpenGlContext(Gl &gl) : gl_(gl) {}
+
+    static Backend backend() { return Backend::opengl; }
+
+    int max_samples(Format color = Format::rgba8, Format depth = Format::depth24) const {
+        GLint result = 1, limit = 1;
+        gl_.GetIntegerv(GL_MAX_SAMPLES, &result);
+        if (color != Format::none) {
+            gl_.GetIntegerv(GL_MAX_COLOR_TEXTURE_SAMPLES, &limit);
+            result = std::min(result, limit);
+        }
+        if (depth != Format::none) {
+            gl_.GetIntegerv(GL_MAX_DEPTH_TEXTURE_SAMPLES, &limit);
+            result = std::min(result, limit);
+        }
+        return result;
+    }
+
+    TargetView current_target() const {
+        GLint framebuffer = 0;
+        gl_.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &framebuffer);
+        if (uintptr_t(framebuffer) == target_.id) return target_;
+        return {uintptr_t(framebuffer), {}};
+    }
 
     int max_texture_size() const {
         GLint result = 0;
@@ -331,10 +358,12 @@ public:
             destroy(result);
             throw;
         }
+        target_ = result;
         return result;
     }
 
     void destroy(RenderTarget &target) {
+        if (target_.id == target.id) target_ = {};
         if (target.id) release(gl_.DeleteFramebuffers, target.id);
         destroy(target.color);
         destroy(target.depth);
@@ -346,7 +375,10 @@ public:
     // Borrowed WGL interop targets stay owned by LowLatencyPresenter.
     static TargetView borrow_target(uintptr_t framebuffer, const TargetDesc &desc) { return {framebuffer, desc}; }
 
-    void bind_target(const TargetView &target) { gl_.BindFramebuffer(GL_FRAMEBUFFER, target.id); }
+    void bind_target(const TargetView &target) {
+        gl_.BindFramebuffer(GL_FRAMEBUFFER, target.id);
+        target_ = target;
+    }
 
     void viewport(Rect rect) { gl_.Viewport(rect.x, rect.y, rect.width, rect.height); }
 
@@ -479,7 +511,7 @@ public:
 
     bool pending(const Readback &readback) const { return readback.fence.id != 0; }
 
-    Wait poll(const Readback &readback) { return wait(readback.fence); }
+    Wait poll(const Readback &readback, bool flush = false) { return wait(readback.fence, 0, flush); }
 
     MappedPixels map(Readback &readback) {
         if (readback.mapped || poll(readback) != Wait::ready) throw std::runtime_error("Readback is not ready to map");

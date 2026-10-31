@@ -54,6 +54,8 @@ struct PixelFormat {
 
 PixelFormat pixel_format(Format format) {
     switch (format) {
+        case Format::r8:
+            return {DXGI_FORMAT_R8_UNORM, DXGI_FORMAT_R8_UNORM, DXGI_FORMAT_UNKNOWN, 1};
         case Format::rgba8:
             return {DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN, 4};
         case Format::rgba16f:
@@ -208,6 +210,7 @@ struct D3D11Context::Impl {
     };
 
     std::array<Unit, 32> units{};
+    TargetView target;
     ID3D11RenderTargetView *rtv = nullptr;
     ID3D11DepthStencilView *dsv = nullptr;
     ComPtr<ID3D11Resource> color_resource, depth_resource;
@@ -235,7 +238,8 @@ struct D3D11Context::Impl {
         uint32_t header_size;
         std::memcpy(&header_size, bytes, 4);
         if (header_size > size - 4) throw std::runtime_error("Invalid D3D11 shader archive index");
-        index = Json::parse(bytes + 4, bytes + 4 + header_size);
+        const auto *header = reinterpret_cast<const char *>(bytes + 4);
+        index = Json::parse(header, header + header_size);
         archive = {bytes + 4 + header_size, size - 4 - header_size};
     }
 
@@ -506,6 +510,7 @@ struct D3D11Context::Impl {
 
     void detach_outputs() {
         context->OMSetRenderTargets(0, nullptr, nullptr);
+        target = {};
         rtv = nullptr;
         dsv = nullptr;
         color_resource.Reset();
@@ -544,6 +549,27 @@ std::unique_ptr<D3D11Context> D3D11Context::warp() {
     result->impl_->owned_device = std::move(device);
     result->impl_->owned_context = std::move(context);
     return result;
+}
+
+int D3D11Context::max_samples(Format color, Format depth) const {
+    int maximum = 1;
+    for (unsigned samples = 2; samples <= D3D11_MAX_MULTISAMPLE_SAMPLE_COUNT; samples *= 2) {
+        bool supported = true;
+        for (const auto format : {color, depth}) {
+            if (format == Format::none) continue;
+            const auto mapping = pixel_format(format);
+            UINT quality = 0;
+            const auto view = mapping.depth == DXGI_FORMAT_UNKNOWN ? mapping.view : mapping.depth;
+            supported &=
+                    SUCCEEDED(impl_->device->CheckMultisampleQualityLevels(view, samples, &quality)) && quality > 0;
+        }
+        if (supported) maximum = int(samples);
+    }
+    return maximum;
+}
+
+TargetView D3D11Context::current_target() const {
+    return impl_->target;
 }
 
 int D3D11Context::max_texture_size() const {
@@ -871,6 +897,7 @@ void D3D11Context::bind_target(const TargetView &target) {
         impl_->context->OMSetRenderTargets(rtv ? 1 : 0, rtv ? &rtv : nullptr, dsv);
     impl_->rtv = rtv;
     impl_->dsv = dsv;
+    impl_->target = target;
 }
 
 void D3D11Context::viewport(Rect rect) {
@@ -1164,8 +1191,8 @@ bool D3D11Context::pending(const Readback &readback) const {
     return readback.fence.id != 0;
 }
 
-Wait D3D11Context::poll(const Readback &readback) {
-    return wait(readback.fence);
+Wait D3D11Context::poll(const Readback &readback, bool flush) {
+    return wait(readback.fence, 0, flush);
 }
 
 MappedPixels D3D11Context::map(Readback &readback) {
@@ -1242,6 +1269,14 @@ D3D11Context::D3D11Context(D3D11Device) {
 D3D11Context::~D3D11Context() = default;
 
 std::unique_ptr<D3D11Context> D3D11Context::warp() {
+    unavailable();
+}
+
+int D3D11Context::max_samples(Format, Format) const {
+    unavailable();
+}
+
+TargetView D3D11Context::current_target() const {
     unavailable();
 }
 
@@ -1429,7 +1464,7 @@ bool D3D11Context::pending(const Readback &) const {
     unavailable();
 }
 
-Wait D3D11Context::poll(const Readback &) {
+Wait D3D11Context::poll(const Readback &, bool) {
     unavailable();
 }
 

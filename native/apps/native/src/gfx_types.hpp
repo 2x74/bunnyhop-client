@@ -24,7 +24,7 @@ enum class RowOrigin { bottom, top };
 struct Rect {
     int x = 0, y = 0, width = 0, height = 0;
 };
-enum class Format { none, rgba8, rgba16f, rgba32f, r32f, depth24, depth32f, depth24_stencil8 };
+enum class Format { none, r8, rgba8, rgba16f, rgba32f, r32f, depth24, depth32f, depth24_stencil8 };
 enum class TextureKind { image, cube };
 enum class Filter { nearest, linear };
 enum class Address { clamp, repeat, mirror, border };

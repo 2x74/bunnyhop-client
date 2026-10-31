@@ -18,6 +18,8 @@ public:
     D3D11Context(const D3D11Context &) = delete;
     D3D11Context &operator=(const D3D11Context &) = delete;
     static std::unique_ptr<D3D11Context> warp();
+    int max_samples(Format color = Format::rgba8, Format depth = Format::depth24) const;
+    TargetView current_target() const;
     int max_texture_size() const;
     void check_error(const char *message);
     Program create_program(const ProgramDesc &source);
@@ -65,7 +67,7 @@ public:
     static size_t readback_bytes(const Readback &readback);
     void enqueue_readback(const TargetView &source, Readback &readback, int x = 0, int y = 0);
     bool pending(const Readback &readback) const;
-    Wait poll(const Readback &readback);
+    Wait poll(const Readback &readback, bool flush = false);
     MappedPixels map(Readback &readback);
     void unmap(Readback &readback);
     void collect(Readback &readback, std::span<std::byte> destination, RowOrigin origin, uint64_t timeout_ns);

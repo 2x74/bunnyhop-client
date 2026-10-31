@@ -291,6 +291,20 @@ void video(Context &context, int supersample, int samples) {
 }
 
 void run(Context &context) {
+    require(context.max_samples() >= 4, "Graphics backend does not support four samples");
+    auto scalar = context.create_target({width, height, Format::r8});
+    context.bind_target(scalar);
+    require(context.current_target().id == scalar.id, "Current graphics target differs");
+    context.clear_color({.5f, 0, 0, 1});
+    auto readback = context.create_readback(width, height, Format::r8);
+    context.enqueue_readback(scalar, readback);
+    require(context.poll(readback, true) != Wait::failed, "Flushed readback poll failed");
+    std::vector<std::byte> bytes(Context::readback_bytes(readback));
+    context.collect(readback, bytes, RowOrigin::bottom, timeout_ns);
+    require(std::all_of(bytes.begin(), bytes.end(), [](std::byte value) { return value == std::byte(128); }),
+            "R8 render target changed");
+    context.destroy(readback);
+    context.destroy(scalar);
     targets(context);
     draws(context);
     cubes(context);
@@ -347,6 +361,10 @@ int main(int argc, char **argv) {
     native::Gl gl;
     try {
         gl.load();
+        int major = 0, minor = 0;
+        SDL_GL_GetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, &major);
+        SDL_GL_GetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, &minor);
+        if (major < 3 || (major == 3 && minor < 3)) return 77;
     } catch (const std::exception &error) {
         // CI runners without a GPU only offer OpenGL 1.1, which can't run the renderer at all.
         std::cerr << error.what() << '\n';

@@ -249,7 +249,7 @@ class EnhancedLook {
         exposed = make_target(w, h);
         output = make_target(w, h, Format::rgba8);
         // The seam has no R8 target. RGBA8 preserves the quantized red channel used by the composite.
-        contact = make_target(std::max(1, w / 2), std::max(1, h / 2), Format::rgba8);
+        contact = make_target(std::max(1, w / 2), std::max(1, h / 2), Format::r8);
         int levelWidth = std::max(1, w / 2), levelHeight = std::max(1, h / 2);
         bright = make_target(levelWidth, levelHeight);
         for (size_t i = 0; i < size_t(bloom_levels); i++) {

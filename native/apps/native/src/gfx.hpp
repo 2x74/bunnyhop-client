@@ -33,6 +33,16 @@ public:
 
     static size_t readback_bytes(const Readback &readback) { return OpenGlContext::readback_bytes(readback); }
 
+    int max_samples(Format color = Format::rgba8, Format depth = Format::depth24) const {
+        if (backend_ == Backend::opengl) return opengl_->max_samples(color, depth);
+        return d3d11_->max_samples(color, depth);
+    }
+
+    TargetView current_target() const {
+        if (backend_ == Backend::opengl) return opengl_->current_target();
+        return d3d11_->current_target();
+    }
+
     int max_texture_size() const {
         if (backend_ == Backend::opengl) return opengl_->max_texture_size();
         return d3d11_->max_texture_size();
@@ -253,9 +263,9 @@ public:
         return d3d11_->pending(readback);
     }
 
-    Wait poll(const Readback &readback) {
-        if (backend_ == Backend::opengl) return opengl_->poll(readback);
-        return d3d11_->poll(readback);
+    Wait poll(const Readback &readback, bool flush = false) {
+        if (backend_ == Backend::opengl) return opengl_->poll(readback, flush);
+        return d3d11_->poll(readback, flush);
     }
 
     MappedPixels map(Readback &readback) {
