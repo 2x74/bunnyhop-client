@@ -3,13 +3,7 @@ function Run([string]$Command, [string[]]$Arguments) {
     & $Command @Arguments
     if ($LASTEXITCODE -ne 0) { throw "$Command failed ($LASTEXITCODE)" }
 }
-$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-$vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-if (!$vs) { throw 'MSVC x64 tools unavailable.' }
-$devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
-& $env:COMSPEC /d /s /c "`"$devcmd`" -no_logo -arch=x64 -host_arch=x64 >nul && set" | ForEach-Object {
-    if ($_ -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process') }
-}
+. "$PSScriptRoot/msvc-environment.ps1"
 $vcpkg = Join-Path (Get-Location) 'target/native-deps/vcpkg'
 if (!(Test-Path (Join-Path $vcpkg '.git'))) {
     Run 'git' @('clone', '--filter=blob:none', '--no-checkout', 'https://github.com/microsoft/vcpkg.git', $vcpkg)

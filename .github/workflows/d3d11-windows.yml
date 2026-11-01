@@ -56,6 +56,7 @@ jobs:
         run: ./apps/native/tools/build-measure-windows.ps1
       - name: Build whole-game render fixtures
         run: |
+          . ./apps/native/tools/msvc-environment.ps1
           cmake --build apps/native/build --parallel 4 --target bunnyhop-native-effects-render-smoke bunnyhop-native-display-modes-smoke bunnyhop-native-video-frames-smoke bunnyhop-native-reflection-render-smoke bunnyhop-native-avatar-smoke bunnyhop-native-loadout-preview-smoke
           if ($LASTEXITCODE -ne 0) { throw 'Whole-game smoke build failed' }
       - name: Run settings tests and the WARP seam controls
