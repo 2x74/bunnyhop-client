@@ -1,368 +1,64 @@
 # Native rendering seam
 
+`gfx.hpp` aliases the OpenGL context on macOS/Linux and dispatches between OpenGL and D3D11 on Windows.
+OpenGL is the default. The Windows renderer choice and startup recovery live in `renderer_launch.hpp`.
+`ClientGraphics` creates the backend before HUD, model or map resources.
+
+## Ownership and coordinates
+
+Calls execute immediately on one render thread. Resource handles own their objects until `destroy`;
+`TargetView` borrows attachments. Destroy resources before their context. The presenter owns the D3D11 device,
+immediate context, scene target and swapchain. Reborrow its scene target after resize and reset cached state
+when the presenter uses the immediate context.
+
+Keep GL projection matrices, column-major bytes and bottom-row-first intermediate targets. Shader translation
+fixes clip depth and flips vertex Y; the presenter supplies one final vertical flip. The D3D rasterizer maps
+winding consistently for reflections and mirrored hands. Use `gfx::no_clip_height` outside water reflections.
+See [the shader contract](shaders.md#translation-and-binding-contract).
+
+Color resolve averages samples. D3D11 depth resolve reads sample zero in a shader writing `SV_Depth`.
+Readback slots cannot be overwritten while pending; collection honors row pitch and the requested row origin.
+Constants and texture bindings resolve names at creation, with no JSON or string search during draws.
+
 ## Pixel baseline
 
-`apps/native/tools/render-goldens.py` captures hidden SDL windows and compares every RGB byte of every PPM.
-Missing images, changed dimensions and a single changed channel fail. There is no tolerance or ignored region.
-The suite fixes visual time, camera, frame count and settings. It covers Plain, Source, Enhanced and Cinematic,
-MSAA on/off, procedural sky, dynamic sun shadows, refracted water, viewmodels, players, ghost trails, paint,
-aspect ratios, HUD and asynchronous video frames with supersampling and accumulation.
-
-Build from `native/` at the desired commit, checking each build's exit code:
+Run from `native/`, using the same frozen assets, maps and GPU for both captures:
 
 ```sh
-bun install --frozen-lockfile
-bun apps/native/build.ts
-cmake --build apps/native/build --parallel 4 --target bunnyhop-native-effects-render-smoke \
-  bunnyhop-native-display-modes-smoke bunnyhop-native-video-frames-smoke
-python3 apps/native/tools/render-goldens.py suite \
+cmake --build apps/native/build --parallel 2 --target bunnyhop-native-render-smoke \
+  bunnyhop-native-effects-render-smoke bunnyhop-native-display-modes-smoke bunnyhop-native-video-frames-smoke
+python3 apps/native/tools/render-goldens.py suite --assets /path/to/frozen-assets \
   --world-map /path/to/bhop_eazy.bsp --water-map /path/to/bhop_lol_aero.bsp \
   --water-eye 175 1135 200 --water-pitch 75 --out target/seam-suite.json
 python3 apps/native/tools/render-goldens.py capture --revision "$(git rev-parse HEAD)" \
-  --suite target/seam-suite.json --out target/seam-reference
+  --suite target/seam-suite.json --out target/seam-current
+```
+
+The 41-image suite covers looks, MSAA, sky, shadows, water, actors, trails, paint, HUD, aspect ratios and video
+accumulation. Comparison requires identical input hashes and exact RGB bytes; any changed channel fails.
+Keep captures under ignored `target/` or outside Git.
+
+To rebuild the original GL renderer without changing HEAD:
+
+```sh
+python3 apps/native/tools/build-golden-reference.py --commit b7843b4 --out target/seam-original-build
+```
+
+`b7843b4` adds capture harnesses to the pre-seam renderer without changing its rendering code. In a copy of
+`seam-suite.json`, replace the four smoke executable paths with those in `seam-original-build` and add its
+`build.json` as `sourceBuild`. Capture it with the same current HEAD, inputs and arguments, then compare:
+
+```sh
 python3 apps/native/tools/render-goldens.py capture --revision "$(git rev-parse HEAD)" \
-  --suite target/seam-suite.json --out target/seam-repeat
-python3 apps/native/tools/render-goldens.py compare target/seam-reference target/seam-repeat
+  --suite target/seam-original-suite.json --out target/seam-original
+python3 apps/native/tools/render-goldens.py compare target/seam-original target/seam-current
 ```
 
-To regenerate a historical baseline, check out that commit and rebuild before capturing; `--revision` rejects
-a different HEAD. Use this baseline-tools commit to regenerate the original renderer: its only changes to existing
-C++ are test harness calls and CMake registration. Each capture records revision, working diff, executable hashes,
-input/asset hashes, commands and OS in `manifest.json`. Keep the maps, suite and captures under ignored `target/`,
-or archive them together outside Git. Compare only on the same GPU/driver and with identical input hashes.
-The local evidence is in `native/target/d3d11-seam/`.
+The separate reflection smoke exercises actual planar actor targets, composed water and mirrored weapons.
+Aero has clockwise upward water triangles, so that smoke uses a front-facing quad for composition.
 
-The base revision is `098e4d082efc338bc75adfdf6aae9d9c2522f6ba`. Qualification uses macOS 27.0.1,
-Apple M5 Pro, hidden OpenGL contexts. The original optional effects smoke needed its missing `can_paint=true`
-argument restored before it compiled. Water coverage uses Aero's actual water surface, with the smoke's
-`--require-water` assertion enabled. Aztec's first attempted camera did not capture refraction and was rejected.
-The driver emits an existing unloadable depth-sampler warning on some paths; captures still require `GL_NO_ERROR`.
+## Windows proof
 
-Three independent captures produced 41 images each, all byte-identical (zero changed pixels).
-A real render with brightness changed from 1 to 1.01 failed comparison: 912,097 changed pixels,
-maximum channel delta 4. A one-channel, one-unit comparator control also failed. No nondeterminism was observed
-in these fixtures; other drivers and uncaptured paths need their own repeatability qualification.
-
-PNG files produced by the effects harness are supplementary; comparison uses the uncompressed PPM pixels.
-No portable cross-driver golden or Windows rendering result is established by this baseline.
-
-### Frozen inputs and historical sources
-
-Rebuilding assets revealed existing nondeterminism in `export-viewmodels.ts`: two exports had identical metadata
-but 2,437,279 different bytes in the inflated model/pose blob. The initial 41 images still matched after rebuilding,
-but this does not qualify every baked clip. Keep a frozen copy of `target/native-assets` for comparisons;
-do not rebuild resources between the before/after captures. The comparator rejects differing input hashes.
-`suite --assets /path/to/frozen-assets` copies those files into each capture's isolated working directory.
-
-For an existing configured Ninja build on macOS/Linux, regenerate the original renderer without changing HEAD:
-
-```sh
-python3 apps/native/tools/build-golden-reference.py --commit b7843b4 \
-  --out target/seam-original-build
-```
-
-This compiles the archived historical smoke sources with the current configured compiler/linker flags, reusing
-the unchanged Rust bridge and text library. It records the source archive, bridge and executable hashes.
-In a copy of the suite JSON, replace each command's executable with the matching executable in that directory;
-keep the same inputs, assets and arguments. Record its `build.json` as the suite's `sourceBuild` field.
-The capture's HEAD/diff describe the harness checkout; `sourceBuild.revision` describes historical binaries.
-The first baseline commit's renderer is identical to `098e4d0`; only its effects smoke call signature was repaired.
-
-### Reflected actors and mirrored hands
-
-Build `bunnyhop-native-reflection-render-smoke` and run it with the Aero BSP, frozen assets directory and an
-output directory. Its twelve PPMs cover an off-screen actor in the actual planar reflection target, that
-reflection composed through the unchanged world water shader, actor-off controls, and right/mirrored knife and
-gun viewmodels. The actor must change reflection and water-composite pixels while leaving the direct view unchanged.
-
-Aero's upward water triangles are clockwise. The existing main view treats them as backfaces, so the fixture
-uses an explicitly front-facing water quad to exercise composition without changing the frozen map images.
-The quad samples the renderer's actual reflection texture; it does not replace the actor or water shaders.
-
-## Interface and ownership
-
-`gfx.hpp` aliases `OpenGlContext` on macOS/Linux and uses an inlined, non-virtual dispatcher on Windows.
-Each forwarding call branches once on the stored backend. OpenGL remains the default; an explicitly requested
-D3D11 context can be injected before resource creation, with an OpenGL fallback when no D3D11 context is supplied.
-`BUNNYHOP_GFX_DISPATCH` enables the dispatcher with an unavailable second backend on non-Windows benchmark builds.
-`gfx_types.hpp` contains API-independent descriptions and native-value handles with explicit bool/equality.
-`gfx_opengl.hpp` and `gfx_d3d11.cpp` implement operations; `gfx_gl_api.hpp` owns the GL loader/compiler.
-`gfx_window.hpp` centralizes backend availability and SDL flags. The client defaults to OpenGL; Windows can opt into D3D11 with `--renderer d3d11` or persisted `renderer`.
-Changes to the preference take effect on restart.
-
-All calls execute immediately on one render/context thread, in call order. There are no recorded command lists,
-barriers, queue ownership or per-draw virtual calls. `Context` borrows the GL table; resources must be destroyed
-before that table's SDL context. Resource handles are explicit owners released with `destroy`; copying a handle
-does not create another owner. `TargetView` borrows attachments and cannot be destroyed through the seam.
-
-| Operation | OpenGL implementation | D3D11 mapping |
-| --- | --- | --- |
-| `create_pipeline`, `pipeline` | Immutable descriptor, inline state application | Precreate blend/depth/raster objects, bind on immediate context |
-| `create_constants`, `constants` | Resolve names once, then typed `glUniform` calls | Reflection-backed CPU block, map/write cbuffer and bind stage/slot |
-| Texture/cube/sampler | Typed texture descriptors, six cube faces, sampler objects | Texture2D/SRV and sampler state |
-| Target/view, viewport, clear | FBO with color/depth textures | RTV/DSV and viewport |
-| `resolve_color` | Color-only blit | `ResolveSubresource` |
-| `resolve_depth` | Separate nearest depth blit | Shader over a multisampled depth SRV; never `ResolveSubresource` |
-| `copy_color` | Framebuffer rectangle to existing texture | `CopySubresourceRegion`, or shader when a format conversion is necessary |
-| Geometry/stream/index/instance draw | VAO, streaming VBO, index buffer, instance divisor | Input layout, vertex/index buffers, `Draw*Instanced` |
-| Signal/wait/readback/map | Fence plus reusable PBO; poll never blocks | Event query plus staging texture; `GetData` poll and mapped row pitch |
-
-Pipeline creation allocates only at resource setup. The GL backend applies state each time because unmigrated
-code still changes GL directly: a private state cache would become stale. A D3D11 pipeline owns immutable native
-objects. The small depth/blend setters used to restore legacy pass state must select precreated variants or a
-cheap state cache there. Polygon offset uses GL slope and depth-format units; D3D11 converts those units when
-creating its raster state. The seam currently covers the client's additive blend equation and float vertex inputs;
-new vertex formats or independent stencil/blend modes should be added when a migrated caller needs them.
-
-`ProgramDesc` identifies a program and permutation with `ProgramKey`, plus an OpenGL source fallback.
-The D3D11 backend must look up ahead-of-time DXBC/reflection by that key, including the manifest's aliases;
-it never runs FXC while rendering. Fixed migrated keys are `hud`, `presentation` and `video`, with empty permutation.
-The shader inventory has 135 cache entries / 105 distinct pairs; player keys include material, finish, glove and
-detail flags as defined by its manifest.
-
-Constant blocks are named through `ConstantField` entries. `ConstantLayout` describes caller bytes and selected
-shader stage(s); fields include name, source offset, size, type, count and array/matrix stride.
-`ReflectedConstants` holds each stage's independent destination layout and reflected cbuffer slot. At creation,
-match names to every selected stage and precompute source/destination copies. A name in both stages can have
-different offsets; do not assume a shared physical block. Allocate stage staging bytes once, scatter writes into
-those offsets, then map/write the D3D cbuffers. Optimized-out/absent names are no-ops in either stage.
-`bool32` consumes a uint32 value and uploads 0/1, never C++ bool bytes. Matrix bytes stay column-major with a
-16-byte column stride: generated HLSL's row-major declarations and reversed `mul` already account for them.
-Padded vec3 arrays use reflected 16-byte strides. Import the authoritative JSON schema described in
-[shaders.md](shaders.md#translation-and-binding-contract); do not infer destination layout from C++ packing.
-
-`texture_unit(program, name, unit)` names a logical GL-compatible unit, not an HLSL register. Precompute the
-per-program fanout to `ReflectedTexture` stage-local texture/sampler slots. `bind_texture(unit, ...)` binds the
-same resources to every surviving reflected pair for that unit; unit 9 can feed `uFinEnv`, `uCosEnv` and
-`uPlayerEnv` simultaneously. An optimized-out sampler can have slot -1 while its texture SRV survives.
-`boneMatrices` uses a 2D RGBA32F texture/SRV (three texels per bone), not constant-buffer matrices.
-Sampler descriptions preserve filtering, mip LOD clamps, compare function, border color and addressing.
-No JSON, string lookup, allocation or virtual dispatch occurs in constants, pipeline binding, stream upload or draw.
-GL array constants use one upload per field; packed arrays are direct and padded arrays use reusable packing storage.
-D3D11 scatters packed caller arrays into each reflected stage's array stride.
-
-Readback slots are created once, enqueued once, then polled or collected. A pending slot cannot be overwritten.
-Mapped pointers live until `unmap`; collection copies tightly packed rows to caller-owned memory, honoring the
-mapped row pitch and requested `RowOrigin`. Timeouts/failures remain errors rather than silently reusing old pixels.
-Standalone fences cover frame pacing without requiring a readback. Scalar float/depth formats cover exposure and
-depth consumers as well as RGBA video. Callers own ring size and scheduling.
-
-Resolve and copy calls mutate current bindings; the next pass binds its target/program/resources explicitly.
-Color and depth resolve are separate even when both attachments originate in the same target. The existing GL
-depth blit selects an implementation-dependent sample and does not average depth. D3D11 resolves depth with a fullscreen `Texture2DMS.Load(position, 0)` pass writing `SV_Depth`.
-The WARP check writes a larger value to sample zero than to every other sample, rejecting minimum and averaged depth.
-See Microsoft's [resolve API](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-resolvesubresource)
-and [resource usage rules](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/ne-d3d11-d3d11_usage).
-
-## Coordinates and presentation
-
-The seam preserves the existing camera math: column-major matrices, clip depth `-w..+w`, depth-test values `0..1`,
-and logical render-target rectangles/texture UVs with Y increasing from the bottom. Uploaded images and cube faces
-retain their existing GL orientation; cube face order is +X, -X, +Y, -Y, +Z, -Z. Readback declares its row origin.
-
-The shader pipeline already applies `--fixup-clipspace` (`z = (z + w) * .5`) and `--flip-vert-y`.
-Keep GL projection matrices and depth reconstruction unchanged; do not apply either conversion a second time.
-Intermediate targets retain GL's numeric row order, including `SV_Position`, derivatives, texture UVs, framebuffer
-copies and integer texel fetches. Present performs exactly one vertical flip to the top-left swapchain; the
-existing DXGI blit already does this. Direct swapchain rendering must honor the same policy, not bypass it.
-The vertex flip changes winding, so the D3D raster state swaps the GL CCW/CW interpretation consistently,
-including planar reflections, mirrored viewmodels and two-sided `SV_IsFrontFace` shader branches.
-
-World/depth shaders always emit `SV_ClipDistance0`; D3D11 has no enable bit for it. Supply
-`gfx::no_clip_height` (-1e30) outside planar reflections and the actual water plane inside them.
-No camera caller changes its math. Nonconstant cube face orientation needs a Windows test; current native
-reflection cubes are black on all six faces. The authoritative semantics are in
-[the shader contract](shaders.md#semantic-requirements-for-the-backend).
-
-`window_target` and `borrow_target` provide non-owning views. The presenter owns the device, immediate context,
-scene color/depth target and flip-discard swapchain. `ClientGraphics` injects the borrowed D3D11 context before
-HUD/model/renderer resource creation, reborrows the scene target after resize, prepares its refraction copy,
-and resets backend state after the presenter uses the immediate context. Presentation performs one Y flip.
-Native D3D11 creates neither an SDL GL context nor WGL interop resources. OpenGL remains the default everywhere.
-
-Native D3D11 always uses DXGI. Low latency Off disables Reflex/Anti-Lag; On and Boost retain the existing marker
-order. VSync and the FPS limiter still apply. Its swapchain omits the frame-latency waitable flag because D3D11
-exclusive fullscreen cannot use that flag; the game's GPU queue fence and FPS limiter still pace frames.
-The window controller owns SDL display mode/scaling and asks the presenter to enter/leave DXGI exclusive mode.
-The existing menu/focus policy and ten-second display trial apply to both renderers. Native borderless fits the
-display exactly; the existing OpenGL extra-row workaround is unchanged.
-
-Startup failures unwind renderer resources, recreate the window with OpenGL and show a toast. A marker written
-before render initialization catches a previous startup crash; first successful presentation queues its removal
-on a worker. Recovery-file failures also choose OpenGL. Device removal during play logs the HRESULT and exits
-with a player-visible error. Hidden WARP proof runs fail instead of substituting OpenGL pixels.
-WebView2 retains its child HWND, bounds and focus logic; native D3D11 windows clip child windows. Backdrops,
-avatars and loadout previews use the seam. The separate video worker creates its own OpenGL surface regardless
-of the game's persisted renderer setting.
-
-See [the whole-game proof](../../apps/native/tools/d3d11-game/README.md) for CI inputs, image metrics and evidence.
-Real displays must check actual present mode, tearing/VRR, Reflex/Anti-Lag, exclusive/scaling transitions,
-trial reverts, and WebView2 focus/composition. WARP cannot measure hardware FPS.
-
-## Migrated callers
-
-`video_frames.hpp` uses the seam for targets, shaders, named constants, samplers, geometry, accumulation draws,
-readback rings and fences. Its public dimensions and bottom-row-first video contract are unchanged.
-`native_presentation.hpp` uses it for streaming effect/paint geometry, constants, pipeline state and draws.
-`hud.hpp` borrows the context for atlas/raster textures, named constants, a UI pipeline and one streamed
-vertex buffer per flush. Texture-owner addresses identify batches without inspecting backend handles; numeric
-text keeps its warmed digit cache. `hud_area.hpp` uses seam viewports; `hud_text.hpp` has no graphics calls.
-`frame_pacing.hpp` uses standalone fences with the existing 100 ms bounded wait, which maps to D3D11 event
-queries. Avatar readback is enqueued once and polled on later frames, with a five-second failure deadline;
-a separate submission fence supplies the flush option absent from `poll(Readback)`.
-`target_png` takes an explicit target and collects seam readback while retaining the original PNG filtering.
-`native_viewmodel_gpu.hpp` owns the viewmodel/player meshes, programs, constants, samplers and raster pipelines;
-`native_viewmodel.hpp` retains animation and pose evaluation. Mesh setup interleaves the original 23 floats and
-three glow-normal floats once; draw calls use mesh addresses resolved at setup or cosmetic cache refresh.
-Animated bones update a preallocated 3×258 RGBA32F texture; floor weapons use a
-separate immutable 3×1 identity texture. Constants resolve once per permutation, with bool32 glow flags and
-16-byte palette/glove array strides. All three environment names map to logical unit 9. Aura instance draws
-start at zero, and mirrored hands select clockwise raster variants. Scene winding is explicit: the reflection
-caller scopes clockwise winding around actor draws, and actor/floor draw-state resets copy that winding.
-Sampler releases and a back-cull restore remain for standalone OpenGL callers; scene passes bind explicit state.
-`NativeViewmodel(gfx::Context&, path, cpu_only)` borrows the rendering context; its `Gl&` overload owns an
-OpenGL adapter. Scene draws select `Compare::less_equal`; standalone preview callers can explicitly pass
-`Compare::less` through the draw setup. Both comparisons use pipelines created at resource setup.
-`loadout_preview.hpp`, `avatar_stage.hpp` and `avatar_service.hpp` borrow the same context, with no raw graphics
-calls. They restore the caller's explicit target/viewport and read back through the seam. Legacy constructor
-overloads preserve existing standalone callers. `native_map_effects.hpp` has no graphics API dependency.
-Player `ProgramKey` names include every manifest alias, with an empty permutation string. The extractor evaluates
-the runtime key function for every reachable material/finish/glove/detail combination and rejects missing names.
-D3D11 creation reads precompiled programs without loading or compiling the OpenGL fallback sources.
-Presentation, video, HUD, avatar services and Renderer borrow `gfx::Context` directly. Renderer passes that
-context to NativeViewmodel. Its `Gl&` convenience constructor owns an adapter for existing OpenGL startup.
-Shared water values use reflected constants; the native shader handle bridge has been removed. Refraction
-consumes an explicit `TargetView`, resolving multisampled inputs before copies. The framebuffer-borrowing
-postprocess finish overloads and `post_gl_bridge.hpp` are gone.
-
-The shader integration merge is `5d0b612`. The extractor recognizes the two keyed program descriptors and verifies
-their fixed keys against the manifest; extraction still produces 135 entries / 105 distinct pairs, with nine
-pipeline tests passing. Its FXAA loop rewrite was compared with and without the edit on the frozen suite:
-all 41 images are exactly identical, including Enhanced/Cinematic with MSAA on and off. The seam build also
-matches the original pre-seam renderer for all 41 images with identical input hashes.
-
-`native_gfx` checks real offscreen color/depth MSAA resolve, framebuffer copy, reflected constant arrays,
-instanced geometry and both readback row orders. The video golden exercises ring wraparound, supersampling and
-three-sample accumulation. Windows/MSVC and Linux builds have not run locally.
-
-## Performance and qualification
-
-`render_benchmark.cpp` accepts `presentationDraws` (default zero). The 128-draw case adds repeated streaming
-presentation draws to the same world scene, so a world-only result cannot hide overhead in the migrated draw
-path. `compare-render-performance.py --native-pair` alternates before/after order and preserves every frame
-sample and spec. It reports paired mean deltas with 95% Student intervals rather than an arbitrary tolerance.
-
-The pre-seam benchmark is from `51e322b`, which includes this benchmark option but no rendering seam.
-To regenerate it with the configured native toolchain and unchanged bridge:
-
-```sh
-python3 apps/native/tools/build-golden-reference.py --commit 51e322b \
-  --target render-benchmark --out target/seam-performance-original
-python3 apps/native/tools/compare-render-performance.py --native-pair \
-  --baseline target/seam-performance-original/bunnyhop-native-render-benchmark \
-  --candidate apps/native/build/bunnyhop-native-render-benchmark \
-  --spec target/d3d11-seam/perf/world.json --spec target/d3d11-seam/perf/draws.json \
-  --output target/seam-performance --runs 7
-```
-
-Local inputs: bhop_eazy, fixed spawn camera, 160x90, Source look, MSAA off, effects/floor weapons on,
-500 warmup + 5,000 measured frames per run, seven alternating pairs. `sync=batch` includes final GPU completion;
-it measures scene throughput without presentation, input, HUD or network. Apple M5 Pro, macOS 27.0.1,
-OpenGL 4.1 Metal 91.7. No build or CTest ran concurrently with the measured batches.
-
-| Workload | Before mean (us/frame) | After mean (us/frame) | Paired delta, 95% interval (us) |
-| --- | ---: | ---: | ---: |
-| World, GPU-completed batch | 493.493 | 492.980 | -0.512 [-12.366, +11.342] |
-| World + 128 presentation draws, GPU-completed batch | 672.298 | 665.354 | -6.944 [-12.800, -1.087] |
-
-No regression was detected. The draw-heavy workload is faster, with uniform lookup removed from its hot path.
-The world interval includes zero; it does not establish a world-render speedup. The bound is local measurement
-uncertainty, not a guarantee for 3,000+ FPS Windows hardware. Draw calls add no heap allocation or virtual dispatch.
-An identical-binary control also showed run-to-run variation; raw results remain in
-[`target/d3d11-seam/perf/qualification/comparison.json`](../../target/d3d11-seam/perf/qualification/comparison.json).
-The fixed specs and preserved baseline binary live beside it under ignored `target/`.
-
-The final full build returned zero before CTest. 98/98 selected CTests passed (100 registered);
-`native_menu_focus` and `native_window_sdl` were excluded to avoid desktop/window-mode interaction.
-The new GPU smoke ran, rather than skipping. Nine shader pipeline tests passed and all 135 keys / 105 pairs
-extracted after the seam change. The Windows DXBC compilation from the shader work was not rerun locally;
-neither Windows/MSVC nor Linux client builds, real presentation/latency tests, or the full menu UI suite ran.
-
-### D3D11 backend qualification
-
-The [backend proof](../../apps/native/tools/d3d11-backend/README.md) documents the resource APIs, caller handoff,
-shader embedding and comparison limits. The Windows build embeds deduplicated DXBC and reflection as an executable
-resource; every manifest alias is addressable and the executable hash covers the archive. The presenter remains
-the only owner of the real device, swapchain, resize, Present and latency markers.
-
-[Windows WARP qualification](https://github.com/2x74/bunnyhop-client/actions/runs/41226181036) passed MSVC,
-the debug-layer hazard checks and 16 image comparisons against Apple OpenGL. Maximum RGB channel error was 1.
-The same run passes the real SourceHdr/EnhancedLook tests, packed/padded array upload checks, borrowed RTV/DSV
-metadata and RGBA8-to-RGBA16F refraction conversion. The GL test skips on the runner's OpenGL 1.1 path;
-all four non-GL-context tests execute. The shader archive contains 11,250,406 deduplicated DXBC/reflection bytes.
-The frozen 41-image Mac suite also remains byte-identical with the forced dispatcher and R8 contact target.
-These results cover offscreen seam operations, video, presentation and postprocessing; real world rendering and
-swapchain presentation require the later caller integration and hardware qualification.
-
-The forced-dispatch benchmark against `9b46cf7` used seven alternating pairs with the frozen 160x90 Source specs,
-500 warmup and 5,000 measured frames per run. The isolated dispatcher binary is `0a6604e`, before merging other
-callers. A second comparison uses the initial caller merge at `161c7d5`, before the later scene-pass migration. No local build/test ran during either measurement;
-process checks found no compiler load at the boundaries of the isolated comparison. A first attempt overlapped
-compilation and was interrupted and excluded. Results are GPU-completed batch microseconds per frame:
-
-| Workload | Seam baseline | Dispatcher | Paired delta, 95% interval |
-| --- | ---: | ---: | ---: |
-| World | 490.984 | 477.883 | -13.101 [-30.053, +3.852] |
-| World + 128 presentation draws | 710.149 | 713.950 | +3.801 [-7.938, +15.540] |
-| Merged callers, world | 498.400 | 493.519 | -4.881 [-17.610, +7.847] |
-| Merged callers, world + 128 draws | 698.697 | 702.180 | +3.483 [-7.888, +14.853] |
-
-The intervals include zero; no regression was detected. These Mac offscreen results do not measure Windows
-hardware or a 330-microsecond presented frame. Raw frame samples/specs are preserved under
-`target/d3d11-backend/performance-quiet` and `performance-final`. The full Mac build passed before CTest;
-100 selected tests passed, with menu-focus/window-mode tests excluded. Ten shader pipeline tests and 51 release
-evidence tests passed; the pinned release workflow is unchanged.
-
-## Scene migration boundaries
-
-The core scene headers contain no direct graphics API calls or temporary native-handle bridges.
-Programs use stable manifest keys, and reflected constant bindings resolve names only at setup.
-
-| Files | Ownership and shared boundary |
-| --- | --- |
-| `renderer.hpp` | Frame order, actor/viewmodel coordination, postprocess selection, explicit frame targets/readback and teardown |
-| `world_pass.hpp` | World/prop preparation, culling/sorting, material constants, explicit texture/geometry/pipeline submission |
-| `sky_pass.hpp` | Panorama textures, sky geometry/backdrop, camera/fog metadata and shared solid-depth submission |
-| `shadow_pass.hpp` | Sun terms, solid/cutout depth programs and caster submission using world bounds/transform caches |
-| `presentation_pass.hpp` | Zone/shot/paint/measurement/trail/route assembly and reflected water values for NativePresentation |
-| `water_pass.hpp` | Volume/cell planning, reflected water constants, resolved refraction copies and reflection submission |
-| `render_resources.hpp` | Shared/fallback textures, immutable geometry uploads, mip/sampling policy and resource teardown |
-| `render_uniforms.hpp` | Shared reflected depth-program view/model constants, including the no-clip sentinel |
-| `ghost_route.hpp` | Route geometry, constants, pipeline state and line/marker draws |
-| `sun_shadows.hpp`, `water_reflection.hpp` | Owned seam targets, samplers and explicit target/viewport restoration |
-
-The headers are included inside `native` after their common dependencies. Constructors borrow named services,
-never the whole Renderer. Map-reading services borrow the simulation-context pointer by reference so
-`set_simulation_context` updates every consumer.
-
-Preserve these boundaries when integrating the Windows frame path:
-
-- Shadow and sky depth share the solid-depth program. Shadow submission advances the world's scene number and
-  uses its transform cache, meshes, bounds and material textures. Preserve invalidation order across shadow,
-  3D sky, reflection and main-world draws. Supply `no_clip_height` outside planar reflections.
-- Water values use reflected blocks in world, sky and presentation. World material constants consume the
-  planner's ready flags, refraction state and beneath-face policy. Refraction copies resolve MSAA first and bind
-  inputs explicitly afterward. A sampled texture must not also be the current render attachment.
-- Sky panorama/yaw and world map-sun metadata feed lighting and postprocessing. Lightmap refresh runs at frame
-  start; its texture and HDR metadata belong to the world pass. Material constant variants avoid inactive arrays
-  and retain scalar updates for the world's many batches.
-- Shared textures and anisotropy changes live in `render_resources.hpp`. Water planes and pass programs retain
-  explicit teardown order. Reflection restores target/viewport and scopes clockwise actor winding through
-  NativeViewmodel's precreated raster pipelines, without allocating during draws.
-- Startup must inject the presenter's existing D3D device/context and borrowed swapchain target before resource
-  creation. The presenter keeps resize, Present and latency markers. Bind its valid color/depth target and reset
-  seam state caches after direct presenter operations; do not create a second device or swapchain.
-
-The coordinate and presentation policy is fixed by the shader contract above. Keep OpenGL as the Windows default
-until target hardware measurements justify changing it. No physics, replay, shared Rust code, WASM pin or release
-workflow changes are needed for this migration.
+[Whole-game fixtures](../../apps/native/tools/d3d11-game/README.md) use the production backend under WARP.
+Compare their output with the archived GL inputs; keep the archive intact. WARP checks rendering semantics.
+Use a real GPU and display to check Reflex, presentation, exclusive modes, scaling and WebView2 composition.

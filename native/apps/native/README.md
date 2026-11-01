@@ -286,6 +286,13 @@ the repository's and the vendored Source-related notices. The JSON header is nlo
 
 ![Combined native Loadout preview](../../../docs/images/native-loadout-combined.png)
 
-On Windows, `--renderer d3d11` opts into the D3D11 renderer. OpenGL remains the default. The persisted
-`renderer` setting accepts `opengl` or `d3d11` and takes effect after restart; there is no menu control yet.
-D3D11 startup failures and a previous startup crash recover to OpenGL with a notice.
+Windows offers a one-time renderer choice before the game starts, with OpenGL selected. Settings → Display →
+Renderer offers OpenGL and Direct3D 11; changes take effect after restart. Linux and macOS use OpenGL.
+`--renderer opengl` or `--renderer d3d11` overrides the setting for one launch. Video export uses its own OpenGL
+process with either gameplay renderer.
+
+If Direct3D 11 cannot initialize, the game shows the reason and starts with OpenGL. Two interrupted D3D11
+startups also select OpenGL, keeping the saved setting. `--renderer d3d11` retries it. Three successfully
+presented frames clear the startup guard. Device loss saves the unfinished replay locally and restarts the
+session on OpenGL; completed replays stay in the vault. Renderer diagnostics accompany GPU information and
+leave replay bytes and release identity unchanged.
