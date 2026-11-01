@@ -17,9 +17,15 @@ inline constexpr double trainer_turn_deadzone_degrees = .001;
 inline constexpr unsigned trainer_landing_min_ticks = 5;
 inline constexpr unsigned trainer_ok_span = 3;
 inline constexpr unsigned trainer_max_smoothing = 50;
+// Where the Bar look's green and amber end, in on-pace zones from 100%, and the average below which its track is empty.
+inline constexpr unsigned trainer_bar_good_span = 3;
+inline constexpr unsigned trainer_bar_ok_span = 6;
+inline constexpr double trainer_bar_empty = 1e-6;
+inline constexpr double trainer_bar_fill_steps = 1000;
 
 enum class StrafeHint { less_deadtime, strafe_more, strafe_less, direction, unsupported };
 enum class TrainerCue { ready, keys, direction, slow, good, fast, unsupported };
+enum class TrainerBarBand { perfect, good, ok, low, high };
 
 inline const char *strafe_hint_text(StrafeHint hint) {
     switch (hint) {
@@ -43,6 +49,12 @@ struct StrafeReading {
     TrainerCue cue = TrainerCue::ready;
     int side = 0;
     bool has_pace = true;
+    // The Bar look's own average, where a tick with nothing to judge counts as 0. Empty when it is 0 and in previews,
+    // where the Bar shows the pace and side above.
+    std::optional<double> bar;
+    int bar_side = 0;
+    // The average pace of the last finished jump, the number under the Bar.
+    std::optional<double> last_jump;
 };
 
 struct TrainerSample {
@@ -68,15 +80,51 @@ inline double trainer_position(double pace, int side, bool follow) {
     return follow && side < 0 ? 1 - position : position;
 }
 
-inline HudLabel<32> trainer_text(const StrafeReading &reading) {
+inline HudLabel<32> trainer_pace_text(std::optional<double> percent) {
     HudLabel<32> text;
-    if (!reading.has_pace)
+    if (!percent)
         text.assign("—");
     else {
-        const int pace = int(std::floor(reading.percent + .5));
+        const int pace = int(std::floor(*percent + .5));
         text.format("%d%s%%", pace, pace >= trainer_pace_max ? "+" : "");
     }
     return text;
+}
+
+inline HudLabel<32> trainer_text(const StrafeReading &reading) {
+    return trainer_pace_text(reading.has_pace ? std::optional{reading.percent} : std::nullopt);
+}
+
+// The share of the Bar's track filled: 100% pace reaches the centre tick. Written so NaN is an empty track.
+inline double trainer_bar_fill(double value) {
+    return value > 0 ? std::min(1., value / trainer_pace_max) : 0;
+}
+
+inline TrainerBarBand trainer_bar_band(double value, double width) {
+    const double off = std::abs(value - trainer_target_pace);
+    if (off <= width) return TrainerBarBand::perfect;
+    if (off <= width * trainer_bar_good_span) return TrainerBarBand::good;
+    if (off <= width * trainer_bar_ok_span) return TrainerBarBand::ok;
+    return value >= trainer_target_pace ? TrainerBarBand::high : TrainerBarBand::low;
+}
+
+// What the Bar look draws for a reading. Turning right (D) fills from the left, turning left (A) from the right.
+struct TrainerBarView {
+    double fill = 0;
+    bool from_left = true;
+    std::optional<TrainerBarBand> band;
+};
+
+inline TrainerBarView trainer_bar_view(const StrafeReading &reading, double width) {
+    const std::optional<double> value = reading.bar        ? reading.bar
+                                        : reading.has_pace ? std::optional{reading.percent}
+                                                           : std::nullopt;
+    TrainerBarView view;
+    view.from_left = (reading.bar ? reading.bar_side : reading.side) >= 0;
+    if (!value) return view;
+    view.fill = std::floor(trainer_bar_fill(*value) * trainer_bar_fill_steps + .5) / trainer_bar_fill_steps;
+    view.band = trainer_bar_band(*value, width);
+    return view;
 }
 
 // One observation per simulated tick, using the post-tick speed and grounded state.
@@ -90,17 +138,52 @@ class StrafeTrainer {
     double air_sum_ = 0;
     unsigned air_ticks_ = 0;
     std::optional<double> landed_;
+    std::optional<double> last_jump_;
     unsigned smoothing_ = 8;
+    // Room for one past the longest window: a tick goes in before the oldest comes out, as on the website.
+    std::array<double, trainer_max_smoothing + 1> bar_window_{};
+    unsigned bar_size_ = 0;
+    double bar_sum_ = 0;
+    int bar_side_ = 0;
+    unsigned ground_ticks_ = 0;
 
     void clear() {
         size_ = 0;
         sum_ = 0;
     }
 
+    void clear_bar() {
+        bar_size_ = 0;
+        bar_sum_ = 0;
+        bar_side_ = 0;
+    }
+
+    // The window's empty part counts as 0, so the fill grows out of its edge after a strafe switch.
+    double push_bar(double raw) {
+        bar_window_[bar_size_++] = raw;
+        bar_sum_ += raw;
+        while (bar_size_ > smoothing_) {
+            bar_sum_ -= bar_window_[0];
+            std::move(bar_window_.begin() + 1, bar_window_.begin() + bar_size_, bar_window_.begin());
+            --bar_size_;
+        }
+        return bar_sum_ / smoothing_;
+    }
+
+    void publish_bar(double bar) {
+        reading.last_jump = last_jump_;
+        if (bar <= trainer_bar_empty) return;
+        reading.bar = bar;
+        reading.bar_side = bar_side_;
+    }
+
     void idle(TrainerCue cue, std::optional<StrafeHint> hint = {}) {
         clear();
         side_ = 0;
-        reading = {0, hint, cue, 0, false};
+        // The one ground tick of a hop holds the Bar: only staying down or a tick off the keys lowers it.
+        const double bar = ground_ticks_ == 1 ? bar_sum_ / smoothing_ : push_bar(0);
+        reading = {0, hint, cue, 0, false, {}, 0, {}};
+        publish_bar(bar);
     }
 
     void average(double raw, int side) {
@@ -124,14 +207,17 @@ class StrafeTrainer {
         const std::optional<StrafeHint> hint =
                 good ? std::nullopt
                      : std::optional{pace < trainer_target_pace ? StrafeHint::strafe_more : StrafeHint::strafe_less};
-        reading = {pace, hint, cue, side, true};
+        reading = {pace, hint, cue, side, true, {}, 0, {}};
+        if (side != bar_side_) clear_bar();
+        bar_side_ = side;
+        publish_bar(push_bar(raw));
     }
 
 public:
     static constexpr unsigned max_smoothing = trainer_max_smoothing;
     static constexpr uint32_t left_bit = ssj_in_moveleft, right_bit = ssj_in_moveright;
     double zone = 10;
-    StrafeReading reading{0, {}, TrainerCue::ready, 0, false};
+    StrafeReading reading{0, {}, TrainerCue::ready, 0, false, {}, 0, {}};
 
     unsigned smoothing() const { return smoothing_; }
 
@@ -156,17 +242,24 @@ public:
         const bool continuous = tick_ + 1 == sample.tick;
         yaw_ = command.yaw;
         tick_ = sample.tick;
+        ground_ticks_ = sample.grounded ? ground_ticks_ + 1 : 0;
         if (!std::isfinite(sample.speed) || !std::isfinite(sample.dt) || !std::isfinite(sample.max_speed)
             || !std::isfinite(sample.air_accelerate) || !std::isfinite(command.yaw) || !std::isfinite(command.side)
             || sample.dt <= 0 || sample.interrupted || !continuous || !std::isfinite(previous_yaw)) {
             air_sum_ = 0;
             air_ticks_ = 0;
+            clear_bar();
             return idle(TrainerCue::ready);
         }
-        if (sample.style != "autohop" && sample.style != "legit" && sample.style != "scroll" && sample.style != "hsw")
+        if (sample.style != "autohop" && sample.style != "legit" && sample.style != "scroll" && sample.style != "hsw") {
+            clear_bar();
             return idle(TrainerCue::unsupported, StrafeHint::unsupported);
+        }
         if (sample.grounded || sample.on_ladder || sample.jumped) {
-            if (!sample.on_ladder && air_ticks_ >= trainer_landing_min_ticks) landed_ = air_sum_ / air_ticks_;
+            if (!sample.on_ladder && air_ticks_ >= trainer_landing_min_ticks) {
+                landed_ = air_sum_ / air_ticks_;
+                last_jump_ = landed_;
+            }
             air_sum_ = 0;
             air_ticks_ = 0;
         }

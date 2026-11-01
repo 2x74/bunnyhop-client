@@ -693,6 +693,14 @@ if(BUILD_TESTING)
     target_include_directories(bunnyhop-native-timed-input-parity-tests PRIVATE include vendor src)
     add_test(NAME native_timed_input_parity COMMAND bunnyhop-native-timed-input-parity-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/src/timed_input_vectors.json")
+    # Golden vectors from the web's strafe trainer; regenerate with native/tools/strafe-trainer-bar/generate-vectors.ts.
+    add_executable(bunnyhop-native-strafe-trainer-bar-tests src/strafe_trainer_bar_tests.cpp)
+    target_include_directories(bunnyhop-native-strafe-trainer-bar-tests PRIVATE include vendor src)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(bunnyhop-native-strafe-trainer-bar-tests PRIVATE -ffp-contract=off)
+    endif()
+    add_test(NAME native_strafe_trainer_bar COMMAND bunnyhop-native-strafe-trainer-bar-tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/strafe_trainer_bar_vectors.json")
     # Golden vectors from the web's WRelease; regenerate with native/tools/w-release/generate-vectors.ts.
     add_executable(bunnyhop-native-w-release-parity-tests src/w_release_parity_tests.cpp)
     target_include_directories(bunnyhop-native-w-release-parity-tests PRIVATE include vendor src)

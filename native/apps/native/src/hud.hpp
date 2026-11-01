@@ -1455,7 +1455,8 @@ private:
     std::array<float, 2> element_size(std::string_view id) const {
         id = native::canonical_hud_id(id);
         if (id == "keys") return {keys_row_width(), keys_row_height};
-        if (id == "strafeTrainer") return {native::TrainerLayout::width, native::trainer_height(prefs_.trainer)};
+        if (id == "strafeTrainer")
+            return {native::trainer_width(prefs_.trainer), native::trainer_height(prefs_.trainer)};
         return native::hud_element_size(id);
     }
 

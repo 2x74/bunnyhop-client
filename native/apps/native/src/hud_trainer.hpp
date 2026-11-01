@@ -4,7 +4,8 @@
 namespace native {
 // The strafe trainer drawn the way the website's is (hud/strafe-trainer.css): a rail from 0% to 200% pace with 100%
 // in the middle, the pace under it and the cue beside the pace. Classic shows the on-pace band in the trainer's
-// colour; detailed and minimal colour the whole rail by zone. Sizes are HUD units.
+// colour; detailed and minimal colour the whole rail by zone. Bar is a dark track filled from the edge opposite the
+// turn, with the last jump's average under it. Sizes are HUD units.
 struct TrainerLayout {
     static constexpr float width = 240;
     static constexpr float classic_rail = 3;
@@ -25,22 +26,40 @@ struct TrainerLayout {
     static constexpr float bad_zone_alpha = .7f;
     static constexpr float detailed_alpha = .85f;
     static constexpr float shadow_alpha = .45f;
+    static constexpr float bar_width = 247.5f;
+    static constexpr float bar_track = 13.2f;
+    static constexpr float bar_gap = 6;
+    static constexpr uint32_t bar_track_top_rgb = 0x364043;
+    static constexpr uint32_t bar_track_bottom_rgb = 0x1b2527;
+    static constexpr float bar_track_alpha = 235.f / 255;
+    static constexpr float bar_shadow_alpha = .6f;
+    static constexpr float bar_tick_alpha = 170.f / 255;
 };
 
+inline float trainer_width(const TrainerAppearance &look) {
+    return look.style == "bar" ? TrainerLayout::bar_width : TrainerLayout::width;
+}
+
 inline float trainer_rail_height(const TrainerAppearance &look) {
+    if (look.style == "bar") return TrainerLayout::bar_track * look.height;
     return (look.style == "detailed" ? TrainerLayout::detailed_rail : TrainerLayout::classic_rail) * look.height;
 }
 
 // Space above the rail for the marker: it reaches past the rail, and minimal's arrow sits over it.
 inline float trainer_rail_top(const TrainerAppearance &look) {
+    if (look.style == "bar") return TrainerLayout::bar_gap;
     if (look.style == "minimal") return TrainerLayout::minimal_marker_room;
     return look.style == "detailed" ? TrainerLayout::detailed_marker_reach : TrainerLayout::classic_marker_reach;
 }
 
+inline float trainer_reading_gap(const TrainerAppearance &look) {
+    if (look.style == "bar") return TrainerLayout::bar_gap;
+    return look.style == "detailed" ? TrainerLayout::detailed_gap : TrainerLayout::classic_gap;
+}
+
 inline float trainer_height(const TrainerAppearance &look) {
-    const float gap = look.style == "detailed" ? TrainerLayout::detailed_gap : TrainerLayout::classic_gap;
     const float reading = TrainerLayout::pace_size * TrainerLayout::text_height_per_size;
-    return trainer_rail_top(look) + trainer_rail_height(look) + gap + reading;
+    return trainer_rail_top(look) + trainer_rail_height(look) + trainer_reading_gap(look) + reading;
 }
 
 inline NameColor with_alpha(NameColor color, float alpha) {
@@ -145,6 +164,64 @@ void draw_trainer_marker(Hud &hud, float x, float top, const TrainerAppearance &
     hud.overlay_rect(x - 1, top - reach, 2, rail + 2 * reach, ink);
 }
 
+inline NameColor trainer_bar_color(TrainerBarBand band, const TrainerAppearance &look, const SemanticPalette &palette) {
+    switch (band) {
+        case TrainerBarBand::perfect:
+            return palette.trainer[3];
+        case TrainerBarBand::good:
+            return palette.trainer[0];
+        case TrainerBarBand::ok:
+            return palette.trainer[1];
+        case TrainerBarBand::high:
+            return palette.trainer[2];
+        case TrainerBarBand::low:
+            break;
+    }
+    return look.color;
+}
+
+// The track, one row at a time: its ends are round, it has a vertical gradient, and the fill is clipped to the same
+// ends. The centre tick goes over the fill.
+template <class Hud>
+void draw_trainer_bar(
+        Hud &hud,
+        float x,
+        float top,
+        const TrainerBarView &view,
+        const TrainerAppearance &look,
+        const SemanticPalette &palette,
+        float alpha
+) {
+    const float width = TrainerLayout::bar_width;
+    const float height = trainer_rail_height(look);
+    const float left = x - width / 2;
+    const float radius = height / 2;
+    const NameColor shadow = {0, 0, 0, TrainerLayout::bar_shadow_alpha * alpha};
+    draw_rounded_rect(hud, left, top + 1, width, height, shadow, true, true);
+    const auto top_color = semantic_rgb(TrainerLayout::bar_track_top_rgb);
+    const auto bottom_color = semantic_rgb(TrainerLayout::bar_track_bottom_rgb);
+    const float fill_width = float(view.fill) * width;
+    const float fill_left = view.from_left ? left : left + width - fill_width;
+    const NameColor fill_color =
+            view.band ? with_alpha(trainer_bar_color(*view.band, look, palette), alpha) : NameColor{};
+    const int rows = std::max(1, int(std::ceil(height)));
+    for (int row = 0; row < rows; ++row) {
+        const float row_height = std::min(1.f, height - float(row));
+        const float row_top = top + float(row);
+        const float from_middle = std::abs(float(row) + row_height / 2 - radius);
+        const float inset = radius - std::sqrt(std::max(0.f, radius * radius - from_middle * from_middle));
+        const float along = (float(row) + row_height / 2) / height;
+        NameColor track = {0, 0, 0, TrainerLayout::bar_track_alpha * alpha};
+        for (int channel = 0; channel < 3; ++channel)
+            track[size_t(channel)] = top_color[size_t(channel)] * (1 - along) + bottom_color[size_t(channel)] * along;
+        hud.overlay_rect(left + inset, row_top, width - 2 * inset, row_height, track);
+        const float from = std::max(fill_left, left + inset);
+        const float to = std::min(fill_left + fill_width, left + width - inset);
+        if (view.band && to > from) hud.overlay_rect(from, row_top, to - from, row_height, fill_color);
+    }
+    hud.overlay_rect(x - .5f, top, 1, height, {0, 0, 0, TrainerLayout::bar_tick_alpha * alpha});
+}
+
 // (x, y) is the trainer's top centre.
 template <class Hud>
 void draw_trainer(
@@ -161,15 +238,20 @@ void draw_trainer(
     const float alpha = dimmed ? TrainerLayout::dimmed_alpha : 1;
     const NameColor ink = with_alpha(look.color, alpha);
     const float top = y + trainer_rail_top(look);
-    draw_trainer_rail(hud, x, top, look, palette, ink, alpha);
-    if (reading.has_pace) {
+    const bool bar = look.style == "bar";
+    if (bar)
+        draw_trainer_bar(hud, x, top, trainer_bar_view(reading, look.zone), look, palette, alpha);
+    else
+        draw_trainer_rail(hud, x, top, look, palette, ink, alpha);
+    if (!bar && reading.has_pace) {
         const float position = float(trainer_position(pace, reading.side, look.follow) - .5);
         draw_trainer_marker(hud, x + position * TrainerLayout::width, top, look, ink, alpha);
     }
-    const float gap = look.style == "detailed" ? TrainerLayout::detailed_gap : TrainerLayout::classic_gap;
-    const float reading_top = top + trainer_rail_height(look) + gap;
-    if (look.show_pace)
-        hud.overlay_text(x, reading_top, trainer_text(reading).view(), TrainerLayout::pace_size, ink, true);
+    const float reading_top = top + trainer_rail_height(look) + trainer_reading_gap(look);
+    if (look.show_pace) {
+        const auto text = bar ? trainer_pace_text(reading.last_jump) : trainer_text(reading);
+        hud.overlay_text(x, reading_top, text.view(), TrainerLayout::pace_size, ink, true);
+    }
     const bool unsupported = reading.hint == StrafeHint::unsupported;
     if ((hints || unsupported) && reading.hint)
         hud.overlay_text(

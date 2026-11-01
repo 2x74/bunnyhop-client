@@ -1,6 +1,6 @@
 #include "low_latency.hpp"
-#include "anti_lag_windows.hpp"
 #include "window_frame.hpp"
+#include "anti_lag_windows.hpp"
 #include <windows.h>
 #include <d3d11.h>
 #include <d3dcompiler.h>

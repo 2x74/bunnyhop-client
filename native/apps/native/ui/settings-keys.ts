@@ -64,7 +64,7 @@ export const REQUESTED_KEYS: readonly RequestedKey[] = [
   hud("hud.keys.rows.wasd", boolean),
   hud("hud.keys.rows.actions", boolean),
   hud("hud.keys.rows.mouse", boolean),
-  hud("hud.strafeTrainer.style", choice("classic", "detailed", "minimal")),
+  hud("hud.strafeTrainer.style", choice("classic", "detailed", "minimal", "bar")),
   hud("hud.strafeTrainer.follow", boolean),
   hud("hud.strafeTrainer.zone", number(2, 30, true)),
   hud("hud.strafeTrainer.height", number(0.5, 3)),

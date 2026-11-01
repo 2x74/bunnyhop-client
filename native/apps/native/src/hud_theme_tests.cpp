@@ -768,6 +768,16 @@ void test_movement_widgets_and_restart() {
         }
         assert(trainer.rects >= 4 && trainer.has("105%") && trainer.has("turn more"));
     }
+    options.trainer.style = "bar";
+    DrawProbe bar_trainer;
+    {
+        NoAllocations no_allocations;
+        native::draw_trainer(
+                bar_trainer, 500, 200, {105, native::StrafeHint::strafe_more}, options.trainer, true, options.palette
+        );
+    }
+    assert(bar_trainer.rects >= 4 && bar_trainer.has("—") && bar_trainer.has("turn more"));
+    options.trainer.style = "classic";
     native::FirstJumpTracker first;
     run.jumps = 1;
     run.in_start = 1;
