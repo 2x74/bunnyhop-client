@@ -415,8 +415,9 @@ if(BUNNYHOP_BUILD_CLIENT)
         BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
     if(WIN32)
         target_sources(bunnyhop-native-gameplay-benchmark PRIVATE
-            src/low_latency_windows.cpp src/anti_lag_windows.cpp src/play_priority_windows.cpp)
-        target_link_libraries(bunnyhop-native-gameplay-benchmark PRIVATE d3d11 dxgi winmm avrt)
+            src/low_latency_windows.cpp src/anti_lag_windows.cpp src/play_priority_windows.cpp
+            src/window_frame_windows.cpp)
+        target_link_libraries(bunnyhop-native-gameplay-benchmark PRIVATE d3d11 dxgi winmm avrt dwmapi)
     endif()
     if(APPLE)
         add_executable(bunnyhop-native-load-benchmark EXCLUDE_FROM_ALL src/load_benchmark.cpp)
