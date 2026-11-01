@@ -24,6 +24,8 @@ test("the Windows manifest is well-formed and asks for current controls and Wind
   expect(manifest).toContain('publicKeyToken="6595b64144ccf1df"');
   expect(manifest).toContain('<supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>');
   expect(manifest).toContain('level="asInvoker"');
+  expect(manifest).toContain(">true/pm</dpiAware>");
+  expect(manifest).toContain(">PerMonitorV2,PerMonitor</dpiAwareness>");
 });
 
 test("the game target embeds it", () => {
