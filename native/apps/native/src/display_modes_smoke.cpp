@@ -1,3 +1,4 @@
+#include "smoke_graphics.hpp"
 // Offline pictures of each display shape and fit with the HUD and crosshair, for checking layouts by eye. Each
 // case renders into its own framebuffer at the size the game window would have; nothing changes the real display
 // mode, and nothing enters a simulation recording or a server.
@@ -31,35 +32,24 @@ constexpr Case cases[] = {
 };
 
 class Target {
+    native::gfx::Context &graphics_;
+    native::gfx::TargetView prior_;
+    native::gfx::RenderTarget target_;
+
 public:
-    Target(native::Gl &gl, int width, int height) : gl_(gl) {
-        gl_.GenFramebuffers(1, &framebuffer_);
-        gl_.GenRenderbuffers(1, &color_);
-        gl_.GenRenderbuffers(1, &depth_);
-        gl_.BindRenderbuffer(GL_RENDERBUFFER, color_);
-        gl_.RenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, width, height);
-        gl_.BindRenderbuffer(GL_RENDERBUFFER, depth_);
-        gl_.RenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
-        gl_.BindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
-        gl_.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, color_);
-        gl_.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, depth_);
-        if (gl_.CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-            throw std::runtime_error("Smoke framebuffer incomplete");
+    Target(native::gfx::Context &graphics, int width, int height)
+        : graphics_(graphics)
+        , prior_(graphics.current_target())
+        , target_(graphics.create_target(
+                  {width, height, native::gfx::Format::rgba8, native::gfx::Format::depth24_stencil8}
+          )) {
+        graphics_.bind_target(target_);
     }
 
     ~Target() {
-        gl_.BindFramebuffer(GL_FRAMEBUFFER, 0);
-        gl_.DeleteRenderbuffers(1, &depth_);
-        gl_.DeleteRenderbuffers(1, &color_);
-        gl_.DeleteFramebuffers(1, &framebuffer_);
+        graphics_.bind_target(prior_);
+        graphics_.destroy(target_);
     }
-
-    Target(const Target &) = delete;
-    Target &operator=(const Target &) = delete;
-
-private:
-    native::Gl &gl_;
-    GLuint framebuffer_ = 0, color_ = 0, depth_ = 0;
 };
 
 void draw_hud(native::NativeHud &hud, const BhSnapshot &spawn, int width, int height) {
@@ -73,7 +63,7 @@ void draw_hud(native::NativeHud &hud, const BhSnapshot &spawn, int width, int he
 }
 
 void render_case(
-        native::Gl &gl,
+        native::gfx::Context &gl,
         native::Renderer &renderer,
         native::NativeHud &hud,
         const BhSnapshot &spawn,
@@ -95,7 +85,7 @@ void render_case(
         native::HudViewport viewport(gl, area, shot.width, shot.height);
         draw_hud(hud, spawn, area.width, area.height);
     }
-    if (gl.GetError() != GL_NO_ERROR) throw std::runtime_error(std::string("GL error in ") + shot.name);
+    gl.check_error("Display fixture");
     renderer.screenshot((output / (std::string(shot.name) + ".ppm")).string(), shot.width, shot.height);
 }
 
@@ -105,17 +95,8 @@ int main(int argc, char **argv) {
     try {
         if (argc != 5) throw std::runtime_error("usage: display-modes-smoke MAP CONTENT_ROOT ASSETS OUTPUT_DIRECTORY");
         if (!SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(SDL_GetError());
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-        auto *window = SDL_CreateWindow("Display mode fixtures", 640, 360, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
-        if (!window) throw std::runtime_error(SDL_GetError());
-        const auto context = SDL_GL_CreateContext(window);
-        if (!context) throw std::runtime_error(SDL_GetError());
-        SDL_GL_MakeCurrent(window, context);
-        native::Gl gl;
-        gl.load();
+        native::SmokeGraphics surface(640, 360);
+        auto &graphics = surface.context();
         std::unique_ptr<BhContext, decltype(&bh_destroy)> core(bh_create(), &bh_destroy);
         if (!core || !bh_load_map(core.get(), argv[1], argv[2]))
             throw std::runtime_error(core ? bh_last_error(core.get()) : "No core");
@@ -124,16 +105,15 @@ int main(int argc, char **argv) {
         const std::filesystem::path output(argv[4]);
         std::filesystem::create_directories(output);
         {
-            native::Renderer renderer(gl, core.get());
+            const auto renderer_storage = std::make_unique<native::Renderer>(graphics, core.get());
+            auto &renderer = *renderer_storage;
             renderer.set_viewmodel_visible(false);
-            native::NativeHud hud(gl, argv[3]);
+            auto &hud_graphics = graphics;
+            native::NativeHud hud(hud_graphics, argv[3]);
             hud.preferences(native::default_settings());
             for (const auto &shot : cases)
-                render_case(gl, renderer, hud, spawn, shot, output);
+                render_case(graphics, renderer, hud, spawn, shot, output);
         }
-        SDL_GL_DestroyContext(context);
-        SDL_DestroyWindow(window);
-        SDL_Quit();
         std::cout << std::size(cases) << " display fixtures; GL_NO_ERROR\n";
         return 0;
     } catch (const std::exception &error) {

@@ -30,7 +30,7 @@ struct ReplayRange {
             throw std::runtime_error("Invalid replay timer bounds.");
         }
         range.to = range.total;
-        if (!full) {
+        if (!full && end > start) {
             const auto before = uint64_t(std::llround(prelude_seconds / range.tick_interval));
             const auto after = uint64_t(std::llround(outro_seconds / range.tick_interval));
             range.from = uint32_t(start - std::min(uint64_t(start), before));

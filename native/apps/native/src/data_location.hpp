@@ -139,7 +139,7 @@ inline void write(const fs::path &default_root, const Location &l) {
     }
 }
 
-// Top-level entries a move carries over (everything but the pointer file).
+// Routing and renderer recovery stay on this computer when the data folder moves.
 inline std::vector<fs::path> entries(const fs::path &root, const fs::path &default_root) {
     std::vector<fs::path> out;
     std::error_code ec;
@@ -147,7 +147,10 @@ inline std::vector<fs::path> entries(const fs::path &root, const fs::path &defau
     const bool is_default = same(root, default_root);
     for (const auto &e : fs::directory_iterator(root, ec)) {
         const auto name = e.path().filename();
-        if (is_default && (name == pointer_name || name == std::string(pointer_name) + ".tmp")) continue;
+        if (is_default
+            && (name == pointer_name || name == std::string(pointer_name) + ".tmp" || name == "renderer-choice-v1.done"
+                || name == "renderer-choice-v1.done.tmp" || name == "d3d11-startup.pending"))
+            continue;
         out.push_back(e.path());
     }
     return out;
@@ -219,6 +222,7 @@ inline Choice choose(const fs::path &picked, const fs::path &active, const fs::p
     auto has_files = [&](const fs::path &p) {
         std::error_code e;
         if (!fs::is_directory(p, e)) return false;
+        if (is_default && same(p, default_root)) return !entries(p, default_root).empty();
         for (const auto &x : fs::directory_iterator(p, e)) {
             if (is_default && same(p, default_root) && (x.path().filename() == pointer_name)) continue;
             return true;

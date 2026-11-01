@@ -142,8 +142,7 @@ export function fullscreenGroup(ui: Ui): HTMLElement {
   const group = ui.group("Fullscreen", monitor, size, rate, scaling);
   const paint = (): void => {
     paintRows(monitor, size, rate, scaling);
-    // No heading over nothing: a host with one monitor and no modes to pick has no rows here.
-    group.hidden = [monitor, size, rate, scaling].every((row) => row.hidden);
+    group.hidden = !group.querySelector(".set-row:not([hidden])");
   };
   followHost(group, ui, paint);
   const onState = (): void => {

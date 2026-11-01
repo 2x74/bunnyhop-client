@@ -204,7 +204,9 @@ void ReplayLibrary::scan(Update &update) {
             const auto ms = info.contains("timeMs") ? info.at("timeMs").get<int64_t>() : legacy_replay_ms(info);
             Json listed = {
                     {"id", id},
-                    {"name", info.value("player", std::string("Local run"))},
+                    {"name",
+                     id.ends_with(".interrupted.bhr") ? "Unfinished replay"
+                                                      : info.value("player", std::string("Local run"))},
                     {"map", info.at("map")},
                     {"style", info.value("style", std::string("autohop"))},
                     {"track", info.value("track", 0)},

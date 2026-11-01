@@ -97,6 +97,18 @@ void RunRecorder::write(BhContext *core) {
     require(bh_record_write_bhr(core, path.c_str()), core, "Writing native replay");
 }
 
+std::string RunRecorder::preserve_interrupted(BhContext *core) {
+    if (!core || ended || path.empty()) return {};
+    auto recovered = data_location::from_utf8(path);
+    recovered.replace_extension(".interrupted.bhr");
+    path = data_location::utf8(recovered);
+    require(bh_record_recovery_bhr(core, path.c_str()), core, "Saving interrupted replay");
+    require(bh_record_end(core), core, "Ending interrupted recording");
+    ended = true;
+    input.stop();
+    return " The unfinished replay was saved locally.";
+}
+
 nlohmann::json RunRecorder::finish_event(
         uint32_t track,
         double seconds,

@@ -86,12 +86,13 @@ int main(int argc, char **argv) {
 
         native::Gl gl;
         gl.load();
+        native::gfx::Context graphics(gl);
         int width = 0, height = 0;
         SDL_GetWindowSizeInPixels(window.get(), &width, &height);
         std::atomic_int loads{0}, cancelled{0};
         std::atomic_bool cancelling_started{false};
         native::MenuBackdrop backdrop(
-                gl, BUNNYHOP_NATIVE_ASSET_ROOT, [&](const std::string &id, const std::atomic_bool &cancel) {
+                graphics, BUNNYHOP_NATIVE_ASSET_ROOT, [&](const std::string &id, const std::atomic_bool &cancel) {
                     ++loads;
                     if (id == "cancelled") {
                         cancelling_started = true;
@@ -211,13 +212,14 @@ int main(int argc, char **argv) {
         }
         frame(0, true);
         gl.PixelStorei(GL_PACK_ALIGNMENT, 8);
-        const auto png = backbuffer_png(gl, width, height);
+        const auto png = native::target_png(graphics, graphics.current_target(), width, height);
         int alignment = 0;
         gl.GetIntegerv(GL_PACK_ALIGNMENT, &alignment);
         if (alignment != 8) throw std::runtime_error("capture leaked pixel-pack state");
         if (png.size() < 1000 || 22 + (png.size() + 2) / 3 * 4 > 2000000)
             throw std::runtime_error("unexpected capture size");
-        if (!backbuffer_png(gl, 0, 0).empty()) throw std::runtime_error("empty drawable was captured");
+        if (!native::target_png(graphics, graphics.current_target(), 0, 0).empty())
+            throw std::runtime_error("empty drawable was captured");
         backdrop.draw(0, 0, 0, false);
         if (gl.GetError() != GL_NO_ERROR) throw std::runtime_error("backdrop caused a GL error");
         std::ofstream out(output, std::ios::binary);

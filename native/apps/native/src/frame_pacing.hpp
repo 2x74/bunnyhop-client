@@ -1,4 +1,5 @@
 #pragma once
+#include "gfx_types.hpp"
 #include <cstdint>
 #include <utility>
 
@@ -10,39 +11,40 @@ namespace native {
 // from input one or more frames older than the newest. After swapping frame N the pacer waits for the fence placed
 // after frame N-1's swap, then fences N, before the loop pumps input and builds N+1. The wait is capped so a stuck
 // driver costs a frame, not the game.
-template <class Gl>
+template <class Context>
 class FramePacer {
 public:
-    using Sync = decltype(std::declval<Gl &>().FenceSync(0u, 0u));
+    using Sync = decltype(std::declval<Context &>().signal());
 
-    static constexpr uint32_t kSyncGpuCommandsComplete = 0x9117;
-    static constexpr uint32_t kSyncFlushCommandsBit = 0x1;
     static constexpr uint64_t kMaxWaitNs = 100'000'000;
 
-    // Call right after SDL_GL_SwapWindow.
-    void after_swap(Gl &gl, bool enabled) {
+    // Call right after the presenter swaps.
+    void after_swap(Context &context, bool enabled) {
         if (!enabled) {
-            release(gl);
+            release(context);
             return;
         }
-        if (previous_) {
-            gl.ClientWaitSync(previous_, kSyncFlushCommandsBit, kMaxWaitNs);
-            gl.DeleteSync(previous_);
+        if (pending_) {
+            context.wait(previous_, kMaxWaitNs, true);
+            context.destroy(previous_);
         }
-        previous_ = gl.FenceSync(kSyncGpuCommandsComplete, 0u);
+        previous_ = context.signal();
+        pending_ = true;
     }
 
-    // Before the GL context goes away, or when pacing is turned off.
-    void release(Gl &gl) {
-        if (previous_) {
-            gl.DeleteSync(previous_);
+    // Before the graphics context goes away, or when pacing is turned off.
+    void release(Context &context) {
+        if (pending_) {
+            context.destroy(previous_);
         }
-        previous_ = nullptr;
+        previous_ = {};
+        pending_ = false;
     }
 
 private:
     // The fence after the last swapped frame.
-    Sync previous_ = nullptr;
+    Sync previous_{};
+    bool pending_ = false;
 };
 
 }  // namespace native

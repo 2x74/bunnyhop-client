@@ -1,6 +1,7 @@
 #include "startup.hpp"
 #include "app_identity.hpp"
 #include "app_icon.hpp"
+#include "gfx_window.hpp"
 #include "native_log.hpp"
 #include "window_frame.hpp"
 #include "../packaging/executable_identity.hpp"
@@ -34,19 +35,17 @@ void GlContextDeleter::operator()(SDL_GLContext context) const {
     SDL_GL_DestroyContext(context);
 }
 
-WindowAndGl create_window_and_gl(const Options &opt) {
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
-    SDL_WindowFlags flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+WindowAndGl create_window_and_gl(const Options &opt, gfx::Backend backend) {
+    gfx::configure_window(backend);
+    SDL_WindowFlags flags = gfx::window_flags(backend) | SDL_WINDOW_RESIZABLE;
+    // Golden captures use physical pixels and private settings across Retina and standard-density displays.
+    if (opt.render_fixture.empty()) flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
     if (opt.hidden) flags |= SDL_WINDOW_HIDDEN;
     WindowPtr window(SDL_CreateWindow(native::app_name, 1280, 720, flags), &SDL_DestroyWindow);
     if (!window) throw std::runtime_error(std::string("Creating SDL window failed: ") + SDL_GetError());
     if (!native::set_app_icon(window.get())) std::cerr << "Could not set native app icon: " << SDL_GetError() << '\n';
+    sync_window_frame(window.get());
+    if (backend != gfx::Backend::opengl) return {std::move(window), ContextPtr{}};
     ContextPtr context(SDL_GL_CreateContext(window.get()));
     if (!context) throw std::runtime_error(std::string("Creating OpenGL 3.3 core context failed: ") + SDL_GetError());
     if (!SDL_GL_MakeCurrent(window.get(), context.get())) throw std::runtime_error(SDL_GetError());
@@ -83,10 +82,52 @@ void open_log_in_default_folder() {
     SDL_free(pref_path);
 }
 
-DataPaths resolve_data_folder(const Options &opt, SDL_Window *window, DataMoveProgress &display) {
+namespace {
+struct DataMoveResult {
+    std::string error;
+    std::exception_ptr display_error;
+};
+
+DataMoveResult move_with_display(
+        const std::filesystem::path &from,
+        const std::filesystem::path &to,
+        const std::filesystem::path &default_root,
+        DataMoveProgress &display
+) {
+    data_location::Progress progress;
+    DataMoveResult result;
+    std::atomic<bool> finished = false;
+    std::thread worker([&] {
+        try {
+            result.error = data_location::move(from, to, default_root, progress);
+        } catch (const std::exception &error) {
+            result.error = error.what();
+        }
+        finished = true;
+    });
+    while (!finished) {
+        SDL_Event ignored;
+        while (SDL_PollEvent(&ignored)) {
+        }
+        if (!result.display_error) {
+            try {
+                display.draw(to, double(progress.total.load()), double(progress.done.load()));
+            } catch (...) {
+                result.display_error = std::current_exception();
+            }
+        }
+        SDL_Delay(33);
+    }
+    worker.join();
+    return result;
+}
+}  // namespace
+
+DataPaths resolve_data_folder(const Options &opt, SDL_Window *, DataMoveProgress &display) {
     char *pref_path = SDL_GetPrefPath("bunnyhop.lol", "Bunnyhop Native");
     if (!pref_path) throw std::runtime_error("Cannot find the native client data directory");
-    const std::string isolated = !opt.runtime_smoke.empty()        ? opt.runtime_smoke
+    const std::string isolated = !opt.render_fixture.empty()       ? opt.render_fixture
+                                 : !opt.runtime_smoke.empty()      ? opt.runtime_smoke
                                  : !opt.presentation_smoke.empty() ? opt.presentation_smoke
                                  : !opt.video_smoke.empty()        ? opt.video_smoke
                                                                    : opt.menu_smoke;
@@ -108,27 +149,8 @@ DataPaths resolve_data_folder(const Options &opt, SDL_Window *window, DataMovePr
                                   + " isn't available. The move will run once it is.";
         else {
             const auto from = location.active, to = *location.pending;
-            data_location::Progress progress;
-            std::string error;
-            std::atomic<bool> finished = false;
-            std::thread worker([&] {
-                try {
-                    error = data_location::move(from, to, default_root, progress);
-                } catch (const std::exception &e) {
-                    error = e.what();
-                }
-                finished = true;
-            });
-            while (!finished) {
-                // Quit is ignored: stopping halfway would leave data split across folders.
-                SDL_Event ignored;
-                while (SDL_PollEvent(&ignored)) {
-                }
-                display.draw(to, double(progress.total.load()), double(progress.done.load()));
-                SDL_GL_SwapWindow(window);
-                SDL_Delay(33);
-            }
-            worker.join();
+            const auto moved = move_with_display(from, to, default_root, display);
+            const auto &error = moved.error;
             if (error.empty()) {
                 location = {to, std::nullopt};
                 data_startup_notice = "Game data moved to " + data_location::utf8(to);
@@ -142,6 +164,7 @@ DataPaths resolve_data_folder(const Options &opt, SDL_Window *window, DataMovePr
                 std::cerr << "Data folder: " << e.what() << '\n';
             }
             std::cerr << "Data folder: " << data_startup_notice << '\n';
+            if (moved.display_error) std::rethrow_exception(moved.display_error);
         }
     }
     if (!data_location::same(location.active, default_root) && !folder_available(location.active)) {

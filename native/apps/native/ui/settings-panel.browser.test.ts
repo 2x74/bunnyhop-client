@@ -446,3 +446,62 @@ test("Bar is a Style choice, and hides the rows it ignores", async () => {
     await close();
   }
 }, 30_000);
+
+test("Fullscreen hides an empty group and shows modes when the display catalog arrives", async () => {
+  const app = await open();
+  try {
+    await openSettings(app.page, "display");
+    const group = app.page.locator('.set-group[data-group="Fullscreen"]');
+    expect(await group.isVisible()).toBe(false);
+    const desktop = { width: 1920, height: 1080, refreshHz: 144 };
+    await host(app.page, {
+      displays: {
+        displays: [{ name: "Display 1", index: 0, primary: true, window: true, desktop, modes: [desktop] }],
+        exclusive: null,
+      },
+    });
+    await poll(() => group.isVisible(), true);
+    expect(await row(app.page, "display", "Resolution").isVisible()).toBe(true);
+    expect(await row(app.page, "display", "Renderer").count()).toBe(0);
+    const reviewPath = process.env.BUNNYHOP_DISPLAY_REVIEW;
+    if (reviewPath) await app.page.screenshot({ path: reviewPath, fullPage: true });
+    await host(app.page, { displays: { displays: [], exclusive: null } });
+    await poll(() => group.isVisible(), false);
+    expect(app.errors).toEqual([]);
+  } finally {
+    await app.close();
+  }
+});
+
+test("Windows renderer selection is saved for restart and hidden without the capability", async () => {
+  const app = await open();
+  try {
+    await host(app.page, { capabilities: ["renderer"], settings: { ...HOST_SETTINGS, renderer: "opengl" } });
+    await openSettings(app.page, "display");
+    const renderer = row(app.page, "display", "Renderer");
+    expect(await renderer.isVisible()).toBe(true);
+    expect(await renderer.textContent()).toContain("Takes effect after restarting the game");
+    expect(await renderer.textContent()).toContain("OpenGL: default for everyday play.");
+    expect(await renderer.textContent()).toContain("Direct3D 11: experimental alternative for Windows.");
+    expect(await app.page.locator('.set-group[data-group="Fullscreen"]').isVisible()).toBe(false);
+    const reviewPath = process.env.BUNNYHOP_RENDERER_REVIEW;
+    if (reviewPath) await app.page.screenshot({ path: reviewPath, fullPage: true });
+    const before = await count(app.page);
+    await renderer.getByRole("radio", { name: "Direct3D 11", exact: true }).click();
+    expect(await patchesSince(app.page, before)).toEqual([{ renderer: "d3d11" }]);
+    await host(app.page, {
+      client: { renderer: "d3d11" },
+      lowLatency: { dxgi: true, reflex: false, antiLag: false, active: "DXGI" },
+      settings: { ...HOST_SETTINGS, renderer: "d3d11" },
+    });
+    await app.page.waitForTimeout(300);
+    const latency = row(app.page, "display", "Low latency mode");
+    expect(await latency.textContent()).toContain("unavailable on this device");
+    expect(await latency.getByRole("radio", { name: "On", exact: true }).isDisabled()).toBe(true);
+    await host(app.page, { capabilities: [], settings: { ...HOST_SETTINGS, renderer: "d3d11" } });
+    await app.page.waitForTimeout(300);
+    expect(await row(app.page, "display", "Renderer").count()).toBe(0);
+  } finally {
+    await app.close();
+  }
+});

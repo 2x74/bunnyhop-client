@@ -16,6 +16,32 @@ if(WIN32)
     add_compile_definitions(NOMINMAX)
 endif()
 option(BUNNYHOP_BUILD_CLIENT "Build the SDL3/OpenGL desktop client" ON)
+option(BUNNYHOP_GFX_DISPATCH "Benchmark runtime graphics dispatch on non-Windows hosts" OFF)
+if(WIN32 OR BUNNYHOP_GFX_DISPATCH)
+    add_library(bunnyhop_gfx_d3d11 STATIC src/gfx_d3d11.cpp)
+    target_compile_features(bunnyhop_gfx_d3d11 PUBLIC cxx_std_20)
+    if(WIN32)
+        enable_language(RC)
+        find_package(Python3 REQUIRED COMPONENTS Interpreter)
+        file(GLOB GFX_SHADER_INPUTS CONFIGURE_DEPENDS src/*.hpp
+            tools/d3d-shaders/*.py tools/d3d-shaders/*.hlsl tools/d3d-shaders/*.ts
+            tools/d3d-shaders/*.cpp tools/d3d-shaders/*.json)
+        file(GLOB_RECURSE GFX_PLAYER_SHADER_INPUTS CONFIGURE_DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/../web/src/player/*.ts"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../web/src/viewmodel/*.ts")
+        set(GFX_SHADER_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/d3d11")
+        add_custom_command(OUTPUT "${GFX_SHADER_OUTPUT}/d3d11-shaders.rc" "${GFX_SHADER_OUTPUT}/d3d11-shaders.bin"
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/d3d-shaders/package.py"
+                --build --output "${GFX_SHADER_OUTPUT}"
+            DEPENDS ${GFX_SHADER_INPUTS} ${GFX_PLAYER_SHADER_INPUTS} src/gfx_smoke.cpp
+                src/export-player-materials.ts ../web/src/loadout.ts ../../bun.lock
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.." VERBATIM)
+        target_sources(bunnyhop_gfx_d3d11 INTERFACE "${GFX_SHADER_OUTPUT}/d3d11-shaders.rc")
+        target_link_libraries(bunnyhop_gfx_d3d11 PUBLIC d3d11)
+    else()
+        add_compile_definitions(BUNNYHOP_GFX_DISPATCH)
+    endif()
+endif()
 option(BUNNYHOP_TEST_GTK "Run GTK lifecycle tests under Xvfb and D-Bus" OFF)
 # Lets the updater use a loopback HTTP server and a trust file from the environment, for the end-to-end update test.
 # package.ts refuses to make a release package from a binary built this way.
@@ -129,10 +155,39 @@ endif()
 if(BUNNYHOP_BUILD_CLIENT)
     find_package(SDL3 3.4 CONFIG REQUIRED)
     find_package(OpenGL REQUIRED)
+    if(WIN32 OR BUNNYHOP_GFX_DISPATCH)
+        target_link_libraries(OpenGL::GL INTERFACE bunnyhop_gfx_d3d11)
+    endif()
     find_package(CURL REQUIRED)
     find_package(ZLIB REQUIRED)
     find_package(Threads REQUIRED)
     if(BUILD_TESTING)
+        add_executable(bunnyhop-native-gfx-resource-owners-tests src/gfx_resource_owners_tests.cpp)
+        target_compile_options(bunnyhop-native-gfx-resource-owners-tests PRIVATE
+            $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+        add_test(NAME native_gfx_resource_owners COMMAND bunnyhop-native-gfx-resource-owners-tests)
+        add_executable(bunnyhop-native-renderer-startup-tests src/renderer_startup_tests.cpp)
+        target_include_directories(bunnyhop-native-renderer-startup-tests PRIVATE src vendor)
+        target_compile_definitions(bunnyhop-native-renderer-startup-tests PRIVATE BUNNYHOP_MENU_HTML="")
+        target_compile_options(bunnyhop-native-renderer-startup-tests PRIVATE
+            $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+        target_link_libraries(bunnyhop-native-renderer-startup-tests PRIVATE SDL3::SDL3)
+        if(WIN32)
+            target_sources(bunnyhop-native-renderer-startup-tests PRIVATE
+                src/renderer_prompt_windows.cpp packaging/windows/bunnyhop-native.manifest)
+            target_link_libraries(bunnyhop-native-renderer-startup-tests PRIVATE comctl32)
+            add_executable(bunnyhop-native-renderer-prompt-smoke
+                src/renderer_prompt_smoke_windows.cpp src/renderer_prompt_windows.cpp
+                packaging/windows/bunnyhop-native.manifest)
+            target_compile_definitions(bunnyhop-native-renderer-prompt-smoke PRIVATE _WIN32_WINNT=0x0A00)
+            target_compile_options(bunnyhop-native-renderer-prompt-smoke PRIVATE
+                $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+            target_link_libraries(bunnyhop-native-renderer-prompt-smoke PRIVATE comctl32 gdi32)
+            add_test(NAME native_renderer_prompt COMMAND bunnyhop-native-renderer-prompt-smoke
+                "${BUNNYHOP_ROOT}/target/d3d11-prompt")
+            set_tests_properties(native_renderer_prompt PROPERTIES RUN_SERIAL TRUE TIMEOUT 30)
+        endif()
+        add_test(NAME native_renderer_startup COMMAND bunnyhop-native-renderer-startup-tests)
         add_executable(bunnyhop-native-keyboard-event-tests src/keyboard_event_tests.cpp)
         target_include_directories(bunnyhop-native-keyboard-event-tests PRIVATE include vendor src)
         target_link_libraries(bunnyhop-native-keyboard-event-tests PRIVATE SDL3::SDL3)
@@ -145,6 +200,21 @@ if(BUNNYHOP_BUILD_CLIENT)
             bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
         add_test(NAME native_paint_render COMMAND bunnyhop-native-paint-render-smoke)
         set_tests_properties(native_paint_render PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30)
+        add_executable(bunnyhop-native-gfx-constants-tests src/gfx_constants_tests.cpp)
+        target_link_libraries(bunnyhop-native-gfx-constants-tests PRIVATE SDL3::SDL3 OpenGL::GL)
+        target_compile_options(bunnyhop-native-gfx-constants-tests PRIVATE
+            $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+        add_test(NAME native_gfx_constants COMMAND bunnyhop-native-gfx-constants-tests)
+        add_executable(bunnyhop-native-gfx-smoke src/gfx_smoke.cpp)
+        target_include_directories(bunnyhop-native-gfx-smoke PRIVATE src include vendor)
+        target_link_libraries(bunnyhop-native-gfx-smoke PRIVATE SDL3::SDL3 OpenGL::GL)
+        add_test(NAME native_gfx COMMAND bunnyhop-native-gfx-smoke)
+        set_tests_properties(native_gfx PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30)
+        add_executable(bunnyhop-native-post-processing-smoke src/post_processing_smoke.cpp)
+        target_include_directories(bunnyhop-native-post-processing-smoke PRIVATE include src vendor)
+        target_link_libraries(bunnyhop-native-post-processing-smoke PRIVATE SDL3::SDL3 OpenGL::GL)
+        add_test(NAME native_post_processing COMMAND bunnyhop-native-post-processing-smoke)
+        set_tests_properties(native_post_processing PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30)
     endif()
     add_executable(bunnyhop-native
         src/client.cpp
@@ -282,6 +352,7 @@ if(BUNNYHOP_BUILD_CLIENT)
         target_sources(bunnyhop-native PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated/app.rc"
             src/display_scaling_windows.cpp src/low_latency_windows.cpp src/anti_lag_windows.cpp
             src/play_priority_windows.cpp src/window_frame_windows.cpp src/console_windows.cpp
+            src/renderer_prompt_windows.cpp
             packaging/windows/bunnyhop-native.manifest)
         # A windowed program, so no terminal opens with the game (console_host.hpp brings one back when it's wanted).
         # main() stays the entry point rather than WinMain.
@@ -306,7 +377,7 @@ if(BUNNYHOP_BUILD_CLIENT)
         if(BUNNYHOP_ANTI_LAG_COMPILES)
             set_source_files_properties(src/anti_lag_windows.cpp PROPERTIES COMPILE_DEFINITIONS BUNNYHOP_ANTI_LAG)
         endif()
-        target_link_libraries(bunnyhop-native PRIVATE d3d11 dxgi winmm avrt dwmapi)
+        target_link_libraries(bunnyhop-native PRIVATE d3d11 dxgi winmm avrt dwmapi comctl32)
         include(packaging/WebView2.cmake)
         bunnyhop_windows_menu(bunnyhop-native)
     elseif(UNIX)
@@ -398,6 +469,15 @@ if(BUNNYHOP_BUILD_CLIENT)
     target_compile_definitions(bunnyhop-native-menu-backdrop-smoke PRIVATE
         BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
     add_executable(bunnyhop-native-render-smoke src/render_smoke.cpp src/sky_image.cpp)
+    add_executable(bunnyhop-native-reflection-render-smoke EXCLUDE_FROM_ALL src/reflection_render_smoke.cpp)
+    target_include_directories(bunnyhop-native-reflection-render-smoke PRIVATE vendor)
+    target_link_libraries(bunnyhop-native-reflection-render-smoke PRIVATE
+        bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
+    target_compile_definitions(bunnyhop-native-reflection-render-smoke PRIVATE
+        BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(bunnyhop-native-reflection-render-smoke PRIVATE -ffp-contract=off)
+    endif()
     # Avatar pictures through the menu's render service, into files: `ASSETS JOBS.json OUTPUT_DIR`.
     add_executable(bunnyhop-native-avatar-smoke EXCLUDE_FROM_ALL
         src/avatar_smoke.cpp src/avatar_picture.cpp src/webp_lossless.cpp)
@@ -407,6 +487,12 @@ if(BUNNYHOP_BUILD_CLIENT)
     target_include_directories(bunnyhop-native-floor-pose-smoke PRIVATE vendor)
     target_link_libraries(bunnyhop-native-floor-pose-smoke PRIVATE bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
     target_compile_definitions(bunnyhop-native-floor-pose-smoke PRIVATE BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
+    add_executable(bunnyhop-native-shader-benchmark src/shader_benchmark.cpp)
+    target_include_directories(bunnyhop-native-shader-benchmark PRIVATE include vendor src)
+    if(APPLE)
+        target_compile_definitions(bunnyhop-native-shader-benchmark PRIVATE GL_SILENCE_DEPRECATION)
+    endif()
+    target_link_libraries(bunnyhop-native-shader-benchmark PRIVATE SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
     add_executable(bunnyhop-native-gameplay-benchmark src/gameplay_benchmark.cpp src/run_session.cpp)
     target_include_directories(bunnyhop-native-gameplay-benchmark PRIVATE vendor)
     target_link_libraries(bunnyhop-native-gameplay-benchmark PRIVATE
@@ -414,9 +500,15 @@ if(BUNNYHOP_BUILD_CLIENT)
     target_compile_definitions(bunnyhop-native-gameplay-benchmark PRIVATE
         BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
     if(WIN32)
+        target_sources(bunnyhop-native-shader-benchmark PRIVATE
+            src/low_latency_windows.cpp src/anti_lag_windows.cpp src/window_frame_windows.cpp)
+        target_include_directories(bunnyhop-native-shader-benchmark PRIVATE vendor)
+        target_link_libraries(bunnyhop-native-shader-benchmark PRIVATE d3d11 dxgi dwmapi)
+        include(tools/measure-presenter.cmake)
+        target_include_directories(bunnyhop-native-gameplay-benchmark PRIVATE src)
         target_sources(bunnyhop-native-gameplay-benchmark PRIVATE
-            src/low_latency_windows.cpp src/anti_lag_windows.cpp src/play_priority_windows.cpp
-            src/window_frame_windows.cpp)
+            "${CMAKE_CURRENT_BINARY_DIR}/generated/measure_presenter_windows.cpp"
+            src/anti_lag_windows.cpp src/play_priority_windows.cpp src/window_frame_windows.cpp)
         target_link_libraries(bunnyhop-native-gameplay-benchmark PRIVATE d3d11 dxgi winmm avrt dwmapi)
     endif()
     if(APPLE)
@@ -429,6 +521,10 @@ if(BUNNYHOP_BUILD_CLIENT)
         target_compile_options(bunnyhop-native-load-benchmark PRIVATE -ffp-contract=off -Wno-deprecated-declarations)
     endif()
     add_executable(bunnyhop-native-render-benchmark src/render_benchmark.cpp src/sky_image.cpp)
+    add_executable(bunnyhop-native-video-frames-smoke EXCLUDE_FROM_ALL src/video_frames_smoke.cpp)
+    target_include_directories(bunnyhop-native-video-frames-smoke PRIVATE vendor)
+    target_link_libraries(bunnyhop-native-video-frames-smoke PRIVATE
+        bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
     target_include_directories(bunnyhop-native-render-benchmark PRIVATE vendor)
     target_link_libraries(bunnyhop-native-render-benchmark PRIVATE bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
     target_compile_definitions(bunnyhop-native-render-benchmark PRIVATE BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
