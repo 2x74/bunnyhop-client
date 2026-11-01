@@ -211,7 +211,7 @@ int main(int argc, char **argv) {
         f.ssj_was_in_start = true;
         f.ssj_was_noclip = true;
         f.strafe_ground_ticks = 99;
-        f.strafe_reading = native::StrafeReading{100, native::StrafeHint::less_deadtime};
+        f.strafe_reading = native::StrafeReading{.percent = 100, .hint = native::StrafeHint::less_deadtime};
         f.strafe_trainer.feed({450, 0, 90, 0}, {});
         f.reset(false, false, true);
         assert(f.ssj.jump == 0 && f.ssj_line.empty() && !f.ssj_gain && !f.strafe_reading);

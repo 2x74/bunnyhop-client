@@ -98,6 +98,7 @@ public:
         std::string map, style, outfit, loadout;
         Json settings;
         std::filesystem::path assets, cache;
+        BhSettings physics{};
     };
 
     VideoCapture(
@@ -145,9 +146,12 @@ private:
     BhSnapshot previous_{}, next_{};
     BhCmd prior_command_{}, next_command_{};
     BhRunState run_{};
+    MovementFeedback feedback_;
 
     double sample_tick(double frame_tick, int sample) const;
     void step_simulation();
+    void feed_trainer();
+    std::optional<StrafeReading> trainer_reading() const;
     void advance_to(double tick);
     BhSnapshot interpolated(double tick, double &mix);
     void place_actor(const BhSnapshot &state);

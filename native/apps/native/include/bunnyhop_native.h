@@ -81,6 +81,15 @@ typedef struct BhJumpObservation {
 
 int bh_jump_observation(BhContext *ctx, BhJumpObservation *out);
 
+/* Additive, display-only telemetry from the last simulated tick, live or replay: the speed AirAccelerate gained and the
+ * best it could have gained. NaN when the core has nothing to judge (ground, collisions, boosters, teleports, external
+ * velocity changes). Never serialized and never read by movement, replays or the timer. */
+typedef struct BhAirSpeedGain {
+    float delta, best;
+} BhAirSpeedGain;
+
+int bh_air_speed_gain(BhContext *ctx, BhAirSpeedGain *out);
+
 /* kind: 0=start, 1=end, 2=stage, 3=checkpoint. Coordinates are canonical f32. */
 typedef struct BhZone {
     uint32_t kind, track, index;

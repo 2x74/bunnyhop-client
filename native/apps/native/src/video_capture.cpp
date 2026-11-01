@@ -9,6 +9,7 @@ constexpr float default_fov_degrees = 90;
 constexpr float default_hud_percent = 100;
 constexpr uint32_t teleported_event = 1;
 constexpr uint32_t attacked_event = 32;
+constexpr uint32_t noclip_movement_mode = 1;
 constexpr unsigned crouched_flag = 1, grounded_flag = 2;
 
 void checked(bool result, const char *message) {
@@ -88,7 +89,29 @@ void VideoCapture::step_simulation() {
     renderer_.simulation_tick();
     hud_.tick(next_.player);
     hud_.command_tick(next_command_, next_.player.tick);
+    feed_trainer();
     bh_run_state(core_, &run_);
+}
+
+void VideoCapture::feed_trainer() {
+    const SsjCmd command{next_command_.forward, next_command_.side, next_command_.yaw, next_command_.buttons};
+    feed_strafe_trainer(
+            feedback_,
+            hud_.preferences(),
+            next_.player,
+            command,
+            scene_.physics,
+            scene_.style,
+            options_.tick_interval,
+            next_.movement_mode == noclip_movement_mode,
+            air_speed_gain(core_)
+    );
+}
+
+// Bar only: exports have never shown the other looks, and a saved setting shouldn't start changing those videos.
+std::optional<StrafeReading> VideoCapture::trainer_reading() const {
+    if (!options_.hud || hud_.preferences().trainer.style != "bar") return std::nullopt;
+    return feedback_.strafe_reading;
 }
 
 void VideoCapture::advance_to(double tick) {
@@ -181,7 +204,7 @@ void VideoCapture::draw_overlays(const BhSnapshot &state) {
             held,
             "",
             std::nullopt,
-            std::nullopt,
+            trainer_reading(),
             false,
             nullptr,
             scene_.settings.value("hudScale", default_hud_percent)
