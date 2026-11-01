@@ -53,6 +53,7 @@ jobs:
           bun run menu
           if ($LASTEXITCODE -ne 0) { throw 'Menu build failed' }
       - name: Build the actual client and tester bundle with MSVC
+        id: client
         run: ./apps/native/tools/build-measure-windows.ps1
       - name: Build whole-game render fixtures
         run: |
@@ -103,6 +104,8 @@ jobs:
           ./apps/native/build/bunnyhop-native-gameplay-benchmark.exe target/warp-tester-spec.json
           if ($LASTEXITCODE -ne 0) { throw 'WARP tester correctness smoke failed' }
       - name: Package the client for hardware checks
+        id: hardware
+        if: always() && steps.client.outcome == 'success'
         run: |
           . ./apps/native/tools/msvc-environment.ps1
           $sdl = "$pwd/target/native-deps/sdl/install"
@@ -138,12 +141,14 @@ jobs:
             native/target/d3d-shaders/output/report.json
           if-no-files-found: warn
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.client.outcome == 'success'
         with:
           name: renderer-measure-windows
           path: native/target/renderer-measure-windows
           if-no-files-found: error
           retention-days: 30
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.hardware.outcome == 'success'
         with:
           name: d3d11-hardware-client
           path: |
