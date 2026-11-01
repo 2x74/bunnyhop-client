@@ -8,6 +8,9 @@ use bunnyhop_core::game::{EVENT_JUMPED, EVENT_RESPAWNED, EVENT_TELEPORTED};
 
 /// Timer rules 2's slow-start escape (website timer.ts START_SLOW_SPEED): this slow on the ground always arms.
 const START_SLOW_SPEED: f64 = 50.0;
+/// Timer rules 3 (website timer.ts START_IMPULSE_MARGIN): this far over the prespeed cap came from the map, not the
+/// player, whose one tick of movement adds far less. A start-zone booster keeps its speed.
+const START_IMPULSE_MARGIN: f64 = 32.0;
 use serde_json::{Value, json};
 
 #[repr(C)]
@@ -54,7 +57,7 @@ impl Default for BhRunOptions {
         Self {
             prespeed_cap: 290.0,
             cap_enabled: 1,
-            rules: 2,
+            rules: 3,
             block_prehops: 0,
             strafe_keys: 0,
         }
@@ -248,6 +251,9 @@ impl Timer {
         let [vx, vy, _] = s.velocity.map(f64::from);
         let speed = (vx * vx + vy * vy).sqrt();
         let cap = f64::from(self.options.prespeed_cap);
+        if self.options.rules >= 3 && speed > cap + START_IMPULSE_MARGIN {
+            return None;
+        }
         if speed > cap {
             let f = cap / speed;
             Some([(vx * f) as f32, (vy * f) as f32, s.velocity[2]])
@@ -579,6 +585,30 @@ mod tests {
             touch_position: [f32::NAN; 3],
             ..BhState::default()
         }
+    }
+    #[test]
+    fn rules3_prespeed_cap_leaves_a_booster_alone() {
+        let timer_with = |rules| {
+            Timer::new(
+                vec![zone(0, 0, 0, 0.0)],
+                BhRunOptions {
+                    rules,
+                    ..BhRunOptions::default()
+                },
+                0.01,
+            )
+        };
+        let moving = |speed: f32| BhState {
+            velocity: [speed, 0.0, 10.0],
+            ..state(1, 0.0, false)
+        };
+        let cap = BhRunOptions::default().prespeed_cap;
+        let boost = cap + 33.0;
+        assert_eq!(timer_with(2).cap(moving(boost)), Some([cap, 0.0, 10.0]));
+        assert_eq!(timer_with(3).cap(moving(boost)), None);
+        // Up to the margin it's the player's own speed, capped as under rules 2.
+        assert_eq!(timer_with(3).cap(moving(cap + 32.0)), Some([cap, 0.0, 10.0]));
+        assert_eq!(timer_with(3).cap(moving(cap)), None);
     }
     #[test]
     fn rules2_pending_takeoff_rearm_and_touch_pass_finish() {

@@ -268,7 +268,7 @@ for (const { map, spawn } of cases.filter((c) => !values.only || c.map === value
     settings,
     style: "segmented",
     prespeedCap: 290,
-    timerRules: 2,
+    timerRules: 3,
     startTick: timer.startTick,
     endTick: timer.endTick,
     track: 0,

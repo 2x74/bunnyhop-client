@@ -1145,7 +1145,7 @@ pub unsafe extern "C" fn bh_run_configure(
     unsafe {
         call(ctx, |c| {
             let options = input(options)?;
-            if ![1, 2].contains(&options.rules)
+            if ![1, 2, 3].contains(&options.rules)
                 || options.strafe_keys > 2
                 || !options.prespeed_cap.is_finite()
                 || options.prespeed_cap < 0.0

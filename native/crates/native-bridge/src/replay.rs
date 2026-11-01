@@ -317,7 +317,7 @@ impl Decoded {
             return Err("replay checkpoint limit exceeded".into());
         }
         settings.checked()?;
-        if !styles::IDS.contains(&style.as_str()) || ![1, 2].contains(&rules) {
+        if !styles::IDS.contains(&style.as_str()) || ![1, 2, 3].contains(&rules) {
             return Err("unsupported replay style/timer rules".into());
         }
         // Every command needs at least one byte per varint column (v10 has four and

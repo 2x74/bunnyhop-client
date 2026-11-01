@@ -36,7 +36,7 @@ pub unsafe extern "C" fn bh_practice_from_replay(
             let expected_settings = styles::settings(expected_style)?;
             if info["map"].as_str() != Some(m.map_name.as_str())
                 || playback.data.style != expected_style
-                || playback.data.options.rules != 2
+                || playback.data.options.rules < 2
                 || recording::settings_json(playback.data.settings)
                     != recording::settings_json(expected_settings)
             {
