@@ -139,7 +139,8 @@ const char *bh_models_json(BhContext *ctx, size_t *byte_count);
  * verification.
  */
 int bh_record_begin(
-        BhContext *ctx, const char *path, const char *style, const char *player, uint32_t checkpoint_interval);
+        BhContext *ctx, const char *path, const char *style, const char *player, uint32_t checkpoint_interval
+);
 int bh_record_end(BhContext *ctx);
 /* Optional presentation trailers: events at the current recording state tick, capped at 20000 each.
  * kind is stored as u8. Inspect kinds: start1,next2,held3,released4. No simulation/verification effect.
@@ -200,13 +201,15 @@ int bh_timing_observe(BhContext *ctx, uint32_t enabled);
 /* Query with capacity=0, then copy segments. Count/status required; status:
  * absent=0, supported=1, unsupported=2. Unsupported paths must use chord fallback.
  * Version must be 2, segment_size sizeof(BhTimingSegmentV2). Short buffers fail. */
-int bh_timing_path_v2(BhContext *ctx,
-                      uint32_t path_version,
-                      size_t segment_size,
-                      BhTimingSegmentV2 *segments,
-                      size_t capacity,
-                      size_t *count,
-                      uint32_t *status);
+int bh_timing_path_v2(
+        BhContext *ctx,
+        uint32_t path_version,
+        size_t segment_size,
+        BhTimingSegmentV2 *segments,
+        size_t capacity,
+        size_t *count,
+        uint32_t *status
+);
 BhContext *bh_create(void);
 void bh_destroy(BhContext *ctx);
 /* Error string is context-owned, valid until another mutating call. */
