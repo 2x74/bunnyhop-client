@@ -29,7 +29,44 @@ void rejects(F fn) {
     assert(rejected);
 }
 
+// A footprint just over the zone's edge means the zone, unless tools got the player there.
+void test_start_point_snap() {
+    BhZone zone{};
+    zone.kind = 0;
+    zone.track = 0;
+    constexpr float zone_half_width = 100, zone_top = 200, zone_bottom = -10;
+    zone.mins[0] = -zone_half_width;
+    zone.mins[1] = -zone_half_width;
+    zone.mins[2] = zone_bottom;
+    zone.maxs[0] = zone_half_width;
+    zone.maxs[1] = zone_half_width;
+    zone.maxs[2] = zone_top;
+    const std::vector<BhZone> zones = {zone};
+    BhState player{};
+    player.position[0] = zone_half_width - 5;
+    player.position[1] = 40;
+    auto plan = native::plan_start_point(player, zones, 0, false);
+    assert(!plan.practice && plan.message == "Start point saved, just inside the zone");
+    assert(plan.state.position[0] == zone_half_width - 17 && plan.state.position[1] == 40);
+    assert(native::start_point_in_zone(plan.state, zones, 0));
+    plan = native::plan_start_point(player, zones, 0, true);
+    assert(plan.practice && plan.state.position[0] == player.position[0]);
+    player.position[0] = zone_half_width + 40;
+    plan = native::plan_start_point(player, zones, 0, false);
+    assert(plan.practice && plan.message.starts_with("Spawn saved. It's outside"));
+    player.position[0] = 0;
+    plan = native::plan_start_point(player, zones, 0, false);
+    assert(!plan.practice && plan.message == "Start point saved" && plan.state.position[0] == 0);
+    // Too narrow to hold the hull with the inset: nothing to move into.
+    BhZone narrow = zone;
+    narrow.mins[0] = -16;
+    narrow.maxs[0] = 16;
+    player.position[0] = 5;
+    assert(!native::snap_into_start_zone(player.position, {narrow}, 0));
+}
+
 int main() {
+    test_start_point_snap();
     const auto defaults = native::default_settings();
     // Old persisted objects merge with new defaults without wiping user binds.
     const auto migrated =

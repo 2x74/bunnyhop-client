@@ -724,10 +724,11 @@ int run(const native::Options &opt) {
         reset_feedback(false, true);
         reset_input_timing();
         // (toast() is declared after reset; set its state directly.)
+        // Every attempt from a spawn that can't count says so for its whole length.
         if (restart.practice)
-            hud.toasts.push(
-                    "Custom practice spawn. !clearstart restores ranked restarts.", double(SDL_GetTicksNS()) / 1e9, 4
-            );
+            score_notice = native::practice_spawn_notice;
+        else if (score_notice == native::practice_spawn_notice)
+            score_notice.clear();
     };
     auto practice_reason = [&]() {
         return native::practice_unavailable(
@@ -1349,8 +1350,13 @@ int run(const native::Options &opt) {
                 if (action == "setStart" || action == "clearStart") {
                     if (!core) return;
                     if (action == "clearStart") {
-                        start_points.clear(map_id, active_track);
-                        toast("Start point cleared");
+                        const bool had = start_points.clear(map_id, active_track);
+                        // Standing on a practice spawn this attempt can't count anyway: back to the real start now.
+                        const bool back = had && practice.active && practice.tool == "spawn";
+                        if (back) reset();
+                        toast(back  ? "Start point cleared. You're back at the real one."
+                              : had ? "Start point cleared"
+                                    : "No start point to clear");
                     } else {
                         if (tutorial_runner.lesson && tutorial_runner.lesson->is_active()) {
                             toast("Start points are unavailable in tutorial lessons");
@@ -1361,18 +1367,10 @@ int run(const native::Options &opt) {
                             toast(problem);
                             return;
                         }
-                        const bool practice_spawn =
-                                practice.active || !native::start_point_in_zone(curr, zones, active_track);
-                        start_points.save(map_id, active_track, curr, input.yaw(), input.pitch, practice_spawn);
-                        toast(practice.active
-                                      ? "Spawn saved. Restarts stay practice because this attempt used practice. "
-                                        "!clearstart undoes it."
-                              : native::start_point_in_zone(curr, zones, active_track)
-                                      ? "Start point saved"
-                                      : "Start point saved outside the start zone: runs from it are practice, and the "
-                                        "timer "
-                                        "starts only from the start zone",
-                              native::start_point_in_zone(curr, zones, active_track) ? 3000u : 5000u);
+                        constexpr unsigned start_point_toast_ms = 3000, practice_spawn_toast_ms = 8000;
+                        const auto save = native::plan_start_point(curr, zones, active_track, practice.active);
+                        start_points.save(map_id, active_track, save.state, input.yaw(), input.pitch, save.practice);
+                        toast(save.message, save.practice ? practice_spawn_toast_ms : start_point_toast_ms);
                     }
                     json_writer.write(cache / "start-points.json", start_points.points);
                     return;
