@@ -3229,7 +3229,15 @@ int run(const native::Options &opt) {
                 else
                     bh_style_settings(style.c_str(), &trainer_settings);
                 native::feed_strafe_trainer(
-                        feedback, hud.preferences(), curr, ssj_cmd, trainer_settings, style, step_dt, info.noclip
+                        feedback,
+                        hud.preferences(),
+                        curr,
+                        ssj_cmd,
+                        trainer_settings,
+                        style,
+                        step_dt,
+                        info.noclip,
+                        native::air_speed_gain(core.get())
                 );
                 if (info.teleported) {
                     feedback.ssj.reset();

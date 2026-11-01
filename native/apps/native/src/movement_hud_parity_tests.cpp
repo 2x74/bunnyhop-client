@@ -151,6 +151,7 @@ void check_palettes(const Json &data) {
         check(palette.trainer[0] == color(trainer.at("good")), "trainer good colour");
         check(palette.trainer[1] == color(trainer.at("ok")), "trainer near colour");
         check(palette.trainer[2] == color(trainer.at("bad")), "trainer off colour");
+        check(palette.trainer[3] == color(trainer.at("perfect")), "trainer best gain colour");
         native::SsjFields fields;
         check(native::ssj_gain_color(80, fields, palette) == color(item.at("gain")), "SSJ gain colour");
         check(!native::ssj_gain_color(79.99f, fields, palette), "SSJ gain threshold");
@@ -228,7 +229,7 @@ BhState check_trainer_tick(
     BhState trainer_state = post;
     trainer_state.events = (flags.jumped ? 2u : 0u) | (flags.teleported ? 1u : 0u);
     native::feed_strafe_trainer(
-            feedback, prefs, trainer_state, cmd, physics, style, sample.at("dt"), sample.at("interrupted")
+            feedback, prefs, trainer_state, cmd, physics, style, sample.at("dt"), sample.at("interrupted"), {NAN, NAN}
     );
     check_trainer(feedback.strafe_trainer.reading, tick, feedback.strafe_trainer, where);
     return trainer_state;

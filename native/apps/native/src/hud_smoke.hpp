@@ -161,7 +161,9 @@ draw_hud_layout_fixture(NativeHud &hud, Chat &chat, int width, int height, const
     const std::string_view jump_stats =
             fixture.running ? "Jump 6 | 1045 u/s (+87)\nGain 87.5%  Sync 94%  6 str  Eff 91%" : std::string_view();
     const auto strafe =
-            fixture.running ? std::optional<StrafeReading>(StrafeReading{108, StrafeHint::strafe_less}) : std::nullopt;
+            fixture.running
+                    ? std::optional<StrafeReading>(StrafeReading{.percent = 108, .hint = StrafeHint::strafe_less})
+                    : std::nullopt;
     hud.draw(
             width,
             height,
@@ -269,6 +271,45 @@ inline void hud_layout_smoke(NativeHud &hud) {
     hud.preferences(default_settings());
     hud.reset_history();
     hud.extras.ghost_speed.show(std::nullopt);
+}
+
+// The Bar look in each of its colours: a column per colour-blind palette, a row per gain.
+inline void draw_trainer_bar_colors(NativeHud &hud, int width, int height) {
+    struct Row {
+        double gain;
+        double pace;
+    };
+
+    constexpr std::array rows = {
+            Row{1, 100},    // blue
+            Row{.95, 110},  // green
+            Row{.5, 150},   // orange
+            Row{0, 60},     // white
+            Row{-1, 190},   // red
+    };
+    constexpr std::array modes = {"off", "redGreen", "blueYellow"};
+    constexpr float column_width = 300, row_height = 60;
+    hud.overlay_begin(width, height);
+    float x = column_width / 2;
+    for (const char *mode : modes) {
+        auto look = TrainerAppearance{};
+        look.style = "bar";
+        const auto palette = semantic_palette(mode);
+        float y = 100;
+        int side = 1;
+        for (const auto &row : rows) {
+            StrafeReading reading;
+            reading.percent = row.pace;
+            reading.side = side;
+            reading.gain = row.gain;
+            reading.last_jump = row.pace;
+            draw_trainer(hud, x, y, reading, look, true, palette);
+            side = -side;
+            y += row_height;
+        }
+        x += column_width;
+    }
+    hud.overlay_end(width, height);
 }
 
 // Uses the existing presentation-smoke context. Fixtures never connect to a room or submit a run.
@@ -433,11 +474,22 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
     for (std::string_view preset : {"beginner", "standard", "strict"}) {
         const auto settings = patch_settings(default_settings(), trainer_preset(preset));
         const auto preferences = HudPreferences::from(settings);
-        draw_trainer(hud, 600, top, {108, StrafeHint::strafe_more}, preferences.trainer, true, preferences.palette);
+        draw_trainer(
+                hud,
+                600,
+                top,
+                {.percent = 108, .hint = StrafeHint::strafe_more},
+                preferences.trainer,
+                true,
+                preferences.palette
+        );
         top += 110;
     }
     hud.overlay_end(width, height);
     save("hud-toasts-trainers");
+    clear();
+    draw_trainer_bar_colors(hud, width, height);
+    save("hud-trainer-bar-colors");
     NativeTriggerMenu trigger_menu;
     trigger_menu.toggle();
     clear();

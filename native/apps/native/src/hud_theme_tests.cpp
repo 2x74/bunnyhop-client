@@ -763,7 +763,13 @@ void test_movement_widgets_and_restart() {
         {
             NoAllocations no_allocations;
             native::draw_trainer(
-                    trainer, 500, 200, {105, native::StrafeHint::strafe_more}, options.trainer, true, options.palette
+                    trainer,
+                    500,
+                    200,
+                    {.percent = 105, .hint = native::StrafeHint::strafe_more},
+                    options.trainer,
+                    true,
+                    options.palette
             );
         }
         assert(trainer.rects >= 4 && trainer.has("105%") && trainer.has("turn more"));
@@ -772,9 +778,7 @@ void test_movement_widgets_and_restart() {
     DrawProbe bar_trainer;
     {
         NoAllocations no_allocations;
-        native::draw_trainer(
-                bar_trainer, 500, 200, {105, native::StrafeHint::strafe_more}, options.trainer, true, options.palette
-        );
+        native::draw_trainer(bar_trainer, 500, 200, {.percent = 80, .gain = 1}, options.trainer, true, options.palette);
     }
     assert(bar_trainer.rects >= 4 && bar_trainer.has("—") && bar_trainer.has("turn more"));
     options.trainer.style = "classic";

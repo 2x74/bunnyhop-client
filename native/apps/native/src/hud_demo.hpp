@@ -70,6 +70,8 @@ inline void draw_hud_demo(
     weapon.clip = 12;
     weapon.clip_size = 36;
     const native::Practice practice;
+    // A preview has no real tick behind it, and without a gain the Bar stays white.
+    constexpr double demo_trainer_gain = .9936;
     demo.jhud.configure(hud.preferences().jhud);
     hud.swap_demo(demo);
     hud.draw(
@@ -88,7 +90,7 @@ inline void draw_hud_demo(
             weapon,
             "Jump 6 | 645 u/s (+87)\nGain 87.5%  Sync 94%  6 str",
             87.5f,
-            StrafeReading{.percent = 108, .hint = StrafeHint::strafe_less, .last_jump = 100},
+            StrafeReading{.percent = 108, .hint = StrafeHint::strafe_less, .last_jump = 100, .gain = demo_trainer_gain},
             true,
             nullptr,
             percent,

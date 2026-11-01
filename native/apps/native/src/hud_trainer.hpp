@@ -5,7 +5,7 @@ namespace native {
 // The strafe trainer drawn the way the website's is (hud/strafe-trainer.css): a rail from 0% to 200% pace with 100%
 // in the middle, the pace under it and the cue beside the pace. Classic shows the on-pace band in the trainer's
 // colour; detailed and minimal colour the whole rail by zone. Bar is a dark track filled from the edge opposite the
-// turn, with the last jump's average under it. Sizes are HUD units.
+// turn and coloured by this tick's real gain, with the last jump's average under it. Sizes are HUD units.
 struct TrainerLayout {
     static constexpr float width = 240;
     static constexpr float classic_rail = 3;
@@ -34,6 +34,7 @@ struct TrainerLayout {
     static constexpr float bar_track_alpha = 235.f / 255;
     static constexpr float bar_shadow_alpha = .6f;
     static constexpr float bar_tick_alpha = 170.f / 255;
+    static constexpr uint32_t bar_neutral_rgb = 0xffffff;
 };
 
 inline float trainer_width(const TrainerAppearance &look) {
@@ -164,7 +165,8 @@ void draw_trainer_marker(Hud &hud, float x, float top, const TrainerAppearance &
     hud.overlay_rect(x - 1, top - reach, 2, rail + 2 * reach, ink);
 }
 
-inline NameColor trainer_bar_color(TrainerBarBand band, const TrainerAppearance &look, const SemanticPalette &palette) {
+// The trainer's own colour is for the number and hints. The fill's white stays white under any of them.
+inline NameColor trainer_bar_color(TrainerBarBand band, const SemanticPalette &palette) {
     switch (band) {
         case TrainerBarBand::perfect:
             return palette.trainer[3];
@@ -177,7 +179,7 @@ inline NameColor trainer_bar_color(TrainerBarBand band, const TrainerAppearance 
         case TrainerBarBand::low:
             break;
     }
-    return look.color;
+    return semantic_rgb(TrainerLayout::bar_neutral_rgb);
 }
 
 // The track, one row at a time: its ends are round, it has a vertical gradient, and the fill is clipped to the same
@@ -202,8 +204,7 @@ void draw_trainer_bar(
     const auto bottom_color = semantic_rgb(TrainerLayout::bar_track_bottom_rgb);
     const float fill_width = float(view.fill) * width;
     const float fill_left = view.from_left ? left : left + width - fill_width;
-    const NameColor fill_color =
-            view.band ? with_alpha(trainer_bar_color(*view.band, look, palette), alpha) : NameColor{};
+    const NameColor fill_color = view.band ? with_alpha(trainer_bar_color(*view.band, palette), alpha) : NameColor{};
     const int rows = std::max(1, int(std::ceil(height)));
     for (int row = 0; row < rows; ++row) {
         const float row_height = std::min(1.f, height - float(row));
@@ -222,7 +223,70 @@ void draw_trainer_bar(
     hud.overlay_rect(x - .5f, top, 1, height, {0, 0, 0, TrainerLayout::bar_tick_alpha * alpha});
 }
 
+// The number under the trainer, formatted again only when the digits it shows change: the Bar's fill changes nearly
+// every tick and its number only once per jump.
+class TrainerNumberText {
+    std::optional<int> shown_;
+    bool formatted_ = false;
+    HudLabel<32> text_;
+
+public:
+    std::string_view view(std::optional<double> percent) {
+        const std::optional<int> shown = percent ? std::optional{int(std::floor(*percent + .5))} : std::optional<int>{};
+        if (!formatted_ || shown != shown_) {
+            text_ = trainer_pace_text(percent);
+            shown_ = shown;
+            formatted_ = true;
+        }
+        return text_.view();
+    }
+};
+
 // (x, y) is the trainer's top centre.
+template <class Hud>
+void draw_trainer(
+        Hud &hud,
+        float x,
+        float y,
+        const StrafeReading &reading,
+        const TrainerAppearance &look,
+        bool hints,
+        const SemanticPalette &palette,
+        TrainerNumberText &number
+) {
+    const double pace = std::floor(reading.percent + .5);
+    const bool dimmed = look.dim_below > 0 && (!reading.has_pace || pace < look.dim_below);
+    const float alpha = dimmed ? TrainerLayout::dimmed_alpha : 1;
+    const NameColor ink = with_alpha(look.color, alpha);
+    const float top = y + trainer_rail_top(look);
+    const bool bar = look.style == "bar";
+    if (bar)
+        draw_trainer_bar(hud, x, top, trainer_bar_view(reading), look, palette, alpha);
+    else
+        draw_trainer_rail(hud, x, top, look, palette, ink, alpha);
+    if (!bar && reading.has_pace) {
+        const float position = float(trainer_position(pace, reading.side, look.follow) - .5);
+        draw_trainer_marker(hud, x + position * TrainerLayout::width, top, look, ink, alpha);
+    }
+    const float reading_top = top + trainer_rail_height(look) + trainer_reading_gap(look);
+    if (look.show_pace) {
+        const std::optional<double> shown = bar                ? reading.last_jump
+                                            : reading.has_pace ? std::optional{reading.percent}
+                                                               : std::nullopt;
+        hud.overlay_text(x, reading_top, number.view(shown), TrainerLayout::pace_size, ink, true);
+    }
+    const auto hint = bar ? trainer_bar_hint(reading) : reading.hint;
+    const bool unsupported = hint == StrafeHint::unsupported;
+    if ((hints || unsupported) && hint)
+        hud.overlay_text(
+                x + TrainerLayout::cue_left,
+                reading_top + 2,
+                strafe_hint_text(*hint),
+                TrainerLayout::cue_size,
+                with_alpha(ink, TrainerLayout::cue_alpha)
+        );
+}
+
 template <class Hud>
 void draw_trainer(
         Hud &hud,
@@ -233,33 +297,7 @@ void draw_trainer(
         bool hints,
         const SemanticPalette &palette
 ) {
-    const double pace = std::floor(reading.percent + .5);
-    const bool dimmed = look.dim_below > 0 && (!reading.has_pace || pace < look.dim_below);
-    const float alpha = dimmed ? TrainerLayout::dimmed_alpha : 1;
-    const NameColor ink = with_alpha(look.color, alpha);
-    const float top = y + trainer_rail_top(look);
-    const bool bar = look.style == "bar";
-    if (bar)
-        draw_trainer_bar(hud, x, top, trainer_bar_view(reading, look.zone), look, palette, alpha);
-    else
-        draw_trainer_rail(hud, x, top, look, palette, ink, alpha);
-    if (!bar && reading.has_pace) {
-        const float position = float(trainer_position(pace, reading.side, look.follow) - .5);
-        draw_trainer_marker(hud, x + position * TrainerLayout::width, top, look, ink, alpha);
-    }
-    const float reading_top = top + trainer_rail_height(look) + trainer_reading_gap(look);
-    if (look.show_pace) {
-        const auto text = bar ? trainer_pace_text(reading.last_jump) : trainer_text(reading);
-        hud.overlay_text(x, reading_top, text.view(), TrainerLayout::pace_size, ink, true);
-    }
-    const bool unsupported = reading.hint == StrafeHint::unsupported;
-    if ((hints || unsupported) && reading.hint)
-        hud.overlay_text(
-                x + TrainerLayout::cue_left,
-                reading_top + 2,
-                strafe_hint_text(*reading.hint),
-                TrainerLayout::cue_size,
-                with_alpha(ink, TrainerLayout::cue_alpha)
-        );
+    TrainerNumberText number;
+    draw_trainer(hud, x, y, reading, look, hints, palette, number);
 }
 }  // namespace native
