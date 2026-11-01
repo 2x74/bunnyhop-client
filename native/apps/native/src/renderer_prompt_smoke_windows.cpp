@@ -65,6 +65,7 @@ void answer(const std::filesystem::path &path, bool d3d11) {
 
 int main(int argc, char **argv) {
     assert(argc == 2);
+    assert(AreDpiAwarenessContextsEqual(GetThreadDpiAwarenessContext(), DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2));
     const auto root = std::filesystem::path(argv[1]);
     std::filesystem::create_directories(root);
     for (const bool d3d11 : {false, true}) {

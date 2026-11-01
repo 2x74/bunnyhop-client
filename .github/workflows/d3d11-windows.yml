@@ -56,6 +56,7 @@ jobs:
         run: ./apps/native/tools/build-measure-windows.ps1
       - name: Build whole-game render fixtures
         run: |
+          . ./apps/native/tools/msvc-environment.ps1
           cmake --build apps/native/build --parallel 4 --target bunnyhop-native-effects-render-smoke bunnyhop-native-display-modes-smoke bunnyhop-native-video-frames-smoke bunnyhop-native-reflection-render-smoke bunnyhop-native-avatar-smoke bunnyhop-native-loadout-preview-smoke
           if ($LASTEXITCODE -ne 0) { throw 'Whole-game smoke build failed' }
       - name: Run settings tests and the WARP seam controls
@@ -63,11 +64,10 @@ jobs:
           $sdlBin = "$pwd/target/native-deps/sdl/install/bin"
           $vcpkgBin = "$pwd/target/native-deps/vcpkg/installed/x64-windows/bin"
           $env:PATH = "$sdlBin;$vcpkgBin;$env:PATH"
-          $tests = 'native_(preferences|renderer_startup|gfx_resource_owners|graphics_settings|client_boundaries|window_modes|display_modes)'
+          $tests = 'native_(preferences|renderer_startup|renderer_prompt|gfx_resource_owners|' +
+            'graphics_settings|client_boundaries|window_modes|display_modes)'
           ctest --test-dir apps/native/build --output-on-failure -R $tests
           if ($LASTEXITCODE -ne 0) { throw 'Settings/display checks failed' }
-          ./apps/native/build/bunnyhop-native-renderer-prompt-smoke.exe target/d3d11-prompt
-          if ($LASTEXITCODE -ne 0) { throw 'Renderer choice dialog failed' }
           ./apps/native/build/bunnyhop-native-gfx-smoke.exe target/d3d11-controls --warp
           if ($LASTEXITCODE -ne 0) { throw 'WARP seam controls failed' }
           ./apps/native/build/bunnyhop-native-post-processing-smoke.exe --warp
@@ -102,6 +102,20 @@ jobs:
           $spec | ConvertTo-Json | Set-Content target/warp-tester-spec.json
           ./apps/native/build/bunnyhop-native-gameplay-benchmark.exe target/warp-tester-spec.json
           if ($LASTEXITCODE -ne 0) { throw 'WARP tester correctness smoke failed' }
+      - name: Package the client for hardware checks
+        run: |
+          . ./apps/native/tools/msvc-environment.ps1
+          $sdl = "$pwd/target/native-deps/sdl/install"
+          $vcpkg = "$pwd/target/native-deps/vcpkg/installed/x64-windows"
+          $licenses = (& bun apps/native/packaging/sdl.ts --print licenses).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'SDL license lookup failed' }
+          bun apps/native/package.ts --skip-build --version 0.6.5 --out target/d3d11-hardware `
+            --dependencies "$sdl/bin" --dependencies "$vcpkg/bin" `
+            --licenses $licenses --licenses "$vcpkg/share"
+          if ($LASTEXITCODE -ne 0) { throw 'Hardware client packaging failed' }
+          bun apps/native/packaging/release-check.ts `
+            --package target/d3d11-hardware/bunnyhop-native-0.6.5-win32-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Hardware client package check failed' }
       - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         if: always() && steps.dependencies.outputs.cache-hit != 'true'
         with:
@@ -127,5 +141,13 @@ jobs:
         with:
           name: renderer-measure-windows
           path: native/target/renderer-measure-windows
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: d3d11-hardware-client
+          path: |
+            native/target/d3d11-hardware/*.zip
+            native/target/d3d11-hardware/*.json
           if-no-files-found: error
           retention-days: 30

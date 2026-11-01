@@ -178,9 +178,13 @@ if(BUNNYHOP_BUILD_CLIENT)
             add_executable(bunnyhop-native-renderer-prompt-smoke
                 src/renderer_prompt_smoke_windows.cpp src/renderer_prompt_windows.cpp
                 packaging/windows/bunnyhop-native.manifest)
+            target_compile_definitions(bunnyhop-native-renderer-prompt-smoke PRIVATE _WIN32_WINNT=0x0A00)
             target_compile_options(bunnyhop-native-renderer-prompt-smoke PRIVATE
                 $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
             target_link_libraries(bunnyhop-native-renderer-prompt-smoke PRIVATE comctl32 gdi32)
+            add_test(NAME native_renderer_prompt COMMAND bunnyhop-native-renderer-prompt-smoke
+                "${BUNNYHOP_ROOT}/target/d3d11-prompt")
+            set_tests_properties(native_renderer_prompt PROPERTIES RUN_SERIAL TRUE TIMEOUT 30)
         endif()
         add_test(NAME native_renderer_startup COMMAND bunnyhop-native-renderer-startup-tests)
         add_executable(bunnyhop-native-keyboard-event-tests src/keyboard_event_tests.cpp)

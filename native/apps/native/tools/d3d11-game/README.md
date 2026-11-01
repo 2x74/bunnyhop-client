@@ -29,3 +29,10 @@ Aero's existing backface water behavior is preserved; the reflection fixture's f
 WARP qualifies image paths and startup, not GPU speed or display behavior. Real Windows displays must check
 tearing/VRR, actual flip/independent presentation, Reflex/Anti-Lag, exclusive mode changes and ten-second reverts,
 4:3 stretching/bars, WebView2 child-window composition, resizing, focus and alt-tab.
+
+
+The workflow uploads `d3d11-hardware-client`, an unsigned Windows package of the same client executable used by
+its hidden render fixture. Extract it fully and run `bunnyhop-native.exe` on a real GPU. OpenGL is the default;
+`--renderer d3d11` overrides it for a launch. The separate `renderer-measure-windows` artifact contains the tester.
+The dialog smoke checks the process DPI policy before opening the one-time choice and saves both choices under
+`target/d3d11-prompt`. It runs through CTest without creating a graphics context.
