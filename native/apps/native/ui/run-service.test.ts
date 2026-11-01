@@ -346,7 +346,7 @@ describe("native run service, mocked network only", () => {
       expect(preflights).toBe(0);
       expect(f.uploads).toHaveLength(0);
       expect(f.statuses.at(-1)?.status).toBe("kept");
-      expect(f.statuses.at(-1)?.message).toContain("manifest is missing or stale");
+      expect(f.statuses.at(-1)?.message).toContain("Unpack the download into an empty folder");
     }
   });
   test("ambiguous native allowlist and malformed bytes fail closed", () => {
@@ -905,6 +905,14 @@ describe("a build the server may not list", () => {
     expect(f.statuses.at(-1)?.status).toBe("kept");
     expect(f.statuses.at(-1)?.message).toContain("superseded");
   });
+});
+
+test("a run with a bad map name isn't blamed on the install", async () => {
+  const f = fixture();
+  await reset(f.service);
+  await f.service.receive({ ...finish(1), map: "bad map" });
+  expect(f.uploads).toHaveLength(0);
+  expect(f.statuses.at(-1)?.message).toContain("can't be uploaded");
 });
 
 test("native style pickers and chat style commands offer Segmented", () => {

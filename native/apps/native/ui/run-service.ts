@@ -151,6 +151,8 @@ const NOT_ADMITTED = "This game version isn't accepted for ranked runs right now
 const UPLOADS_LATER = "Update from Settings, or leave the game open and the run uploads once it's accepted.";
 const CHECK_FAILED = "Could not check whether this game version is accepted.";
 const CHECKS_AGAIN = "Leave the game open and the run uploads once that works.";
+const STALE_FILES =
+  "This copy's files don't match its release, so runs can't be ranked. Unpack the download into an empty folder.";
 const notAdmittedRefusal = (error: unknown): boolean =>
   (error as { code?: unknown } | null)?.code === "client_build_not_allowed";
 const serverMessage = (error: unknown): string | null => {
@@ -181,6 +183,15 @@ function bounded<T>(promise: Promise<T>, ms: number): Promise<T> {
     );
   });
 }
+/** Without one, the host couldn't match this copy's files to its manifest (startup.cpp load_release_identity). */
+function hasReleaseIdentity(value: Record<string, unknown>): boolean {
+  return (
+    typeof value.build === "string" &&
+    /^bunnyhop-native\/[0-9a-f]{12,64}$/.test(value.build) &&
+    typeof value.wasm === "string" &&
+    /^bunnyhop-web\/[0-9a-f]{12}$/.test(value.wasm)
+  );
+}
 function validIdentity(value: Record<string, unknown>): value is Record<string, unknown> & Identity {
   return (
     typeof value.map === "string" &&
@@ -188,10 +199,7 @@ function validIdentity(value: Record<string, unknown>): value is Record<string, 
     Number.isSafeInteger(value.track) &&
     Number(value.track) >= 0 &&
     isStyleId(value.style) &&
-    typeof value.build === "string" &&
-    /^bunnyhop-native\/[0-9a-f]{12,64}$/.test(value.build) &&
-    typeof value.wasm === "string" &&
-    /^bunnyhop-web\/[0-9a-f]{12}$/.test(value.wasm)
+    hasReleaseIdentity(value)
   );
 }
 export function nativeBuildAllowed(
@@ -344,7 +352,7 @@ export class NativeRunService {
     if (!validIdentity(event)) {
       if (event.type === "finish") {
         session.finished = true;
-        this.kept(session, "Build release manifest is missing or stale.");
+        this.kept(session, hasReleaseIdentity(event) ? "This run's details can't be uploaded." : STALE_FILES);
       }
       return;
     }
