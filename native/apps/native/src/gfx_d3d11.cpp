@@ -100,10 +100,12 @@ struct TextureData {
     ComPtr<ID3D11ShaderResourceView> srv;
     ComPtr<ID3D11RenderTargetView> rtv;
     ComPtr<ID3D11DepthStencilView> dsv;
+    bool cube = false;
 };
 
 struct SamplerData {
     ComPtr<ID3D11SamplerState> state;
+    bool comparison = false;
 };
 
 struct TargetData {
@@ -136,6 +138,9 @@ struct Uniform {
 struct TextureSlots {
     unsigned stage;
     int texture = -1, sampler = -1;
+    // What the shader declares. OpenGL doesn't mind a unit holding something else while the shader skips it, D3D11
+    // does.
+    bool comparison = false, cube = false;
 };
 
 struct ConstantCopy {
@@ -160,6 +165,8 @@ struct ProgramData {
     std::unordered_map<std::string, std::vector<Uniform>> uniforms;
     std::unordered_map<std::string, std::vector<TextureSlots>> textures;
     std::array<std::vector<TextureSlots>, 32> units;
+    // Slots no unit feeds yet. They still need a state their declaration accepts.
+    std::vector<TextureSlots> unassigned;
     std::vector<std::unique_ptr<ConstantsData>> constants;
 };
 
@@ -212,6 +219,7 @@ struct D3D11Context::Impl {
     std::array<std::array<ID3D11Buffer *, 14>, 2> bound_buffers{};
     std::array<std::array<ID3D11ShaderResourceView *, 128>, 2> bound_srvs{};
     std::array<std::array<ID3D11SamplerState *, 16>, 2> bound_samplers{};
+    ComPtr<ID3D11SamplerState> idle_comparison_sampler;
 
     struct Unit {
         TextureData *texture = nullptr;
@@ -337,6 +345,9 @@ struct D3D11Context::Impl {
         }
         for (const auto &texture : reflection.value("textures", Json::array())) {
             TextureSlots slots{stage};
+            const std::string declared = texture.at("type");
+            slots.comparison = declared.find("Shadow") != std::string::npos;
+            slots.cube = declared.find("Cube") != std::string::npos;
             for (const auto &resource : dxbc.at("resources")) {
                 if (resource.at("name") == texture.at("name")) slots.texture = resource.at("slot");
                 if (!texture.at("samplerName").is_null() && resource.at("name") == texture.at("samplerName"))
@@ -350,6 +361,7 @@ struct D3D11Context::Impl {
     void reflect(ProgramData &result) {
         reflect_stage(result, result.reflection.at("vert"), 0);
         reflect_stage(result, result.reflection.at("frag"), 1);
+        find_unassigned(result);
     }
 
     void input_layout(GeometryData &vertex_data, ProgramData &shader_data) {
@@ -431,10 +443,54 @@ struct D3D11Context::Impl {
             && (texture->texture.Get() == color_resource.Get() || texture->texture.Get() == depth_resource.Get()))
             view = nullptr;
         for (const auto &slots : program->units[unit]) {
-            if (slots.texture >= 0) srv(slots.stage, unsigned(slots.texture), view);
-            if (slots.sampler >= 0)
-                sampler(slots.stage, unsigned(slots.sampler), binding.sampler ? binding.sampler->state.Get() : nullptr);
+            if (slots.texture >= 0) {
+                const bool fits = texture && texture->cube == slots.cube;
+                srv(slots.stage, unsigned(slots.texture), fits ? view : nullptr);
+            }
+            if (slots.sampler >= 0) {
+                const bool fits = binding.sampler && binding.sampler->comparison == slots.comparison;
+                sampler(slots.stage,
+                        unsigned(slots.sampler),
+                        fits ? binding.sampler->state.Get() : idle_sampler(slots));
+            }
         }
+    }
+
+    // A slot the shader declares but skips this draw, like the sun shadow map with shadows off. A comparison slot still
+    // needs a comparison sampler, which the default state isn't.
+    ID3D11SamplerState *idle_sampler(const TextureSlots &slots) {
+        if (!slots.comparison) return nullptr;
+        if (!idle_comparison_sampler) {
+            D3D11_SAMPLER_DESC desc{};
+            desc.Filter = D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+            desc.AddressU = desc.AddressV = desc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+            desc.ComparisonFunc = D3D11_COMPARISON_LESS_EQUAL;
+            desc.MaxAnisotropy = 1;
+            checked(device->CreateSamplerState(&desc, &idle_comparison_sampler), "Cannot create D3D11 idle sampler");
+        }
+        return idle_comparison_sampler.Get();
+    }
+
+    void bind_unassigned() {
+        for (const auto &slots : program->unassigned) {
+            if (slots.texture >= 0) srv(slots.stage, unsigned(slots.texture), nullptr);
+            if (slots.sampler >= 0) sampler(slots.stage, unsigned(slots.sampler), idle_sampler(slots));
+        }
+    }
+
+    static void find_unassigned(ProgramData &value) {
+        value.unassigned.clear();
+        const auto fed = [&](const TextureSlots &slots) {
+            for (const auto &bindings : value.units)
+                for (const auto &binding : bindings)
+                    if (binding.stage == slots.stage && binding.texture == slots.texture
+                        && binding.sampler == slots.sampler)
+                        return true;
+            return false;
+        };
+        for (const auto &[name, declared] : value.textures)
+            for (const auto &slots : declared)
+                if (!fed(slots)) value.unassigned.push_back(slots);
     }
 
     void upload_constants() {
@@ -679,6 +735,7 @@ void D3D11Context::bind_program(Program program) {
     if (!value) return;
     for (unsigned unit = 0; unit < impl_->units.size(); ++unit)
         impl_->textures(unit);
+    impl_->bind_unassigned();
     impl_->bind_geometry();
 }
 
@@ -751,6 +808,7 @@ void D3D11Context::texture_unit(Program program, const char *name, unsigned unit
                        && binding.sampler == slots.sampler;
             });
     value->units[unit].insert(value->units[unit].end(), found->second.begin(), found->second.end());
+    Impl::find_unassigned(*value);
     if (impl_->program == value) impl_->textures(unit);
 }
 
@@ -810,6 +868,7 @@ Texture D3D11Context::create_texture(const TextureDesc &desc, std::span<const vo
     texture.MiscFlags = desc.kind == TextureKind::cube ? D3D11_RESOURCE_MISC_TEXTURECUBE : 0;
     if (desc.levels > 1 && format.depth == DXGI_FORMAT_UNKNOWN) texture.MiscFlags |= D3D11_RESOURCE_MISC_GENERATE_MIPS;
     auto result = std::make_unique<TextureData>();
+    result->cube = desc.kind == TextureKind::cube;
     checked(impl_->device->CreateTexture2D(&texture, nullptr, &result->texture), "Cannot create D3D11 texture");
     if (!faces.empty()) {
         if (format.depth != DXGI_FORMAT_UNKNOWN) throw std::runtime_error("Upload depth through a render target");
@@ -912,6 +971,7 @@ Sampler D3D11Context::create_sampler(const SamplerDesc &desc) {
     sampler.MaxLOD = desc.mipmapped ? desc.max_lod : 0;
     std::copy(desc.border_color.begin(), desc.border_color.end(), sampler.BorderColor);
     auto result = std::make_unique<SamplerData>();
+    result->comparison = desc.compare;
     checked(impl_->device->CreateSamplerState(&sampler, &result->state), "Cannot create D3D11 sampler");
     return {impl_->allocations.keep(std::move(result))};
 }
