@@ -66,6 +66,8 @@ jobs:
           $tests = 'native_(preferences|renderer_startup|gfx_resource_owners|graphics_settings|client_boundaries|window_modes|display_modes)'
           ctest --test-dir apps/native/build --output-on-failure -R $tests
           if ($LASTEXITCODE -ne 0) { throw 'Settings/display checks failed' }
+          ./apps/native/build/bunnyhop-native-renderer-prompt-smoke.exe target/d3d11-prompt
+          if ($LASTEXITCODE -ne 0) { throw 'Renderer choice dialog failed' }
           ./apps/native/build/bunnyhop-native-gfx-smoke.exe target/d3d11-controls --warp
           if ($LASTEXITCODE -ne 0) { throw 'WARP seam controls failed' }
           ./apps/native/build/bunnyhop-native-post-processing-smoke.exe --warp
@@ -117,6 +119,7 @@ jobs:
             native/target/d3d11-fixtures/goldens
             native/target/d3d11-fixtures/suite.json
             native/target/d3d11-controls
+            native/target/d3d11-prompt
             native/apps/native/build/Testing
             native/target/d3d-shaders/output/report.json
           if-no-files-found: warn
