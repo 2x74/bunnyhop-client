@@ -1653,7 +1653,7 @@ fn air_speed_gain_reports_the_core_observation_and_its_fences() {
             assert_eq!(bh_step(c, &BhCmd::default(), &mut state), 1);
         }
         assert_eq!(state.grounded, 1);
-        assert_eq!(bh_set_velocity(c, 500.0, 0.0, 0.0), 1);
+        assert_eq!(bh_set_velocity(c, 225.0, 0.0, 0.0), 1);
         assert_eq!(bh_step(c, &BhCmd { buttons: game::IN_JUMP, ..perpendicular_w }, &mut state), 1);
         let mut run = BhRunState::default();
         assert_eq!(bh_run_state(c, &mut run), 1);
@@ -1710,7 +1710,7 @@ fn clean_jump_observation_real_flat_jump_wall_and_mutation_fences() {
         assert_eq!(bh_run_configure(c, &BhRunOptions { prespeed_cap:200.0, ..BhRunOptions::default() }, zones.as_ptr(), zones.len()), 1);
         for _ in 0..50 {assert_eq!(bh_step(c, &BhCmd::default(), &mut state), 1);}
         assert_eq!(state.grounded, 1);
-        assert_eq!(bh_set_velocity(c, 500.0, 0.0, 0.0), 1);
+        assert_eq!(bh_set_velocity(c, 225.0, 0.0, 0.0), 1);
         assert_eq!(bh_step(c, &BhCmd {buttons:2, ..BhCmd::default()}, &mut state), 1);
         let mut run = BhRunState::default();assert_eq!(bh_run_state(c, &mut run), 1);
         assert_ne!(run.update_flags & 8, 0, "exercise a real timer prespeed clamp");
