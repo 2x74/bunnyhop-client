@@ -112,6 +112,13 @@ function rendererGroup(ui: Ui): HTMLElement | null {
       ],
       {
         hint: "Takes effect after restarting the game",
+        readout: h(
+          "small.set-hint",
+          null,
+          "OpenGL: default for everyday play.",
+          h("br"),
+          "Direct3D 11: experimental alternative for Windows.",
+        ),
         desc: "OpenGL is the default. Video export uses OpenGL with either renderer.",
         keywords: "renderer opengl direct3d d3d11 dx11 restart",
       },

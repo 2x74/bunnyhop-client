@@ -15,7 +15,9 @@ RendererChoice ask_renderer() {
     dialog.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_SIZE_TO_CONTENT;
     dialog.pszWindowTitle = L"Bunnyhop Native";
     dialog.pszMainInstruction = L"Choose a renderer";
-    dialog.pszContent = L"You can change this later in Settings > Display.";
+    dialog.pszContent = L"OpenGL: default for everyday play.\n"
+                        L"Direct3D 11: experimental alternative for Windows.\n\n"
+                        L"You can change this later in Settings > Display.";
     dialog.cRadioButtons = UINT(std::size(choices));
     dialog.pRadioButtons = choices;
     dialog.nDefaultRadioButton = opengl_button;
