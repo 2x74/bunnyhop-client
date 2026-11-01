@@ -137,6 +137,35 @@ describe("native run service, mocked network only", () => {
       expect(offered).toBe(offers);
     }
   });
+  for (const code of ["guest_limit", "rate_limited", "client_build_not_allowed"]) {
+    test(`a ${code} refusal keeps the run and uploads it when the server takes it`, async () => {
+      const f = fixture();
+      const answers: Awaited<ReturnType<RunApi["submitRun"]>>[] = [
+        { id: "", status: "rejected", reason: "not now", code },
+        { id: "later", status: "verified" },
+      ];
+      let sends = 0;
+      f.api.submitRun = async () => answers[sends++];
+      const service = new NativeRunService({
+        api: f.api,
+        version: async () => allowed,
+        origin: () => "https://bunnyhop.lol",
+        send: (status) => f.statuses.push(status),
+        sleep: async () => undefined,
+        admissionRetries: 2,
+        admissionRetryMs: 1,
+      });
+      await reset(service);
+      const first = service.receive(beat(1, 0));
+      f.requests[0].resolve({ sid: "session", token: "t0" });
+      await first;
+      await service.receive(finish(1));
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(sends).toBe(2);
+      expect(f.statuses.some((status) => status.status === "rejected")).toBe(false);
+      expect(f.statuses.at(-1)?.status).toBe("verified");
+    });
+  }
   test("the DPI entered in Settings goes with the host's sensitivity", async () => {
     const f = fixture(undefined, () => 1600);
     const mice: unknown[] = [];

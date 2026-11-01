@@ -193,8 +193,7 @@ public:
                 {"ageMax", number(age_ms_.maximum)}
         };
         auto result = nlohmann::json{
-                {"selfCheck", "error"},
-                {"problems", {"Native client self-check is unavailable"}},
+                {"selfCheck", "na"},
                 {"client", client_json()},
                 {"fps", number(std::min(fps, fps_limit))},
                 {"input", std::move(input)},

@@ -17,10 +17,10 @@ constexpr uint64_t millisecond_ns = 1'000'000;
 // Port of apps/api/src/diagnostics.ts at bunnyhop 59fd424: only the fields emitted by the host. Equality
 // after sanitizing catches silent field drops as well as a rejected body, without making network requests.
 Json sanitize(const Json &body) {
-    const std::set<std::string> self_checks = {"ok", "mismatch", "error"};
+    const std::set<std::string> self_checks = {"ok", "mismatch", "error", "na"};
     assert(body.at("selfCheck").is_string() && self_checks.contains(body.at("selfCheck")));
     Json result = {{"selfCheck", body.at("selfCheck")}};
-    for (const auto &problem : body.at("problems")) {
+    for (const auto &problem : body.value("problems", Json::array())) {
         assert(problem.is_string() && !problem.get<std::string>().empty());
         if (result["problems"].size() < 3) result["problems"].push_back(problem.get<std::string>().substr(0, 160));
     }

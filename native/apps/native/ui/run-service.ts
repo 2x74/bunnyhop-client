@@ -133,7 +133,7 @@ interface Upload {
   mouse: RunMouse | null;
 }
 type Admission = "admitted" | "not admitted" | "unknown";
-type Delivery = "done" | "not admitted";
+type Delivery = "done" | "not admitted" | "not yet";
 
 const MAX_BEATS = 7500,
   MAX_REPLAY_BYTES = 8 << 20;
@@ -151,10 +151,16 @@ const NOT_ADMITTED = "This game version isn't accepted for ranked runs right now
 const UPLOADS_LATER = "Update from Settings, or leave the game open and the run uploads once it's accepted.";
 const CHECK_FAILED = "Could not check whether this game version is accepted.";
 const CHECKS_AGAIN = "Leave the game open and the run uploads once that works.";
+const NOT_YET = "The server can't take this run yet.";
+const SENDS_AGAIN = "Leave the game open and the run uploads once it can.";
 const STALE_FILES =
   "This copy's files don't match its release, so runs can't be ranked. Unpack the download into an empty folder.";
-const notAdmittedRefusal = (error: unknown): boolean =>
-  (error as { code?: unknown } | null)?.code === "client_build_not_allowed";
+/** Refusals that only mean "not yet" (web uploads.ts holds): the run waits, with nothing used up. */
+const WAITING_REFUSALS = new Set(["guest_limit", "rate_limited"]);
+const refusalWait = (code: unknown): Exclude<Delivery, "done"> | null => {
+  if (code === "client_build_not_allowed") return "not admitted";
+  return typeof code === "string" && WAITING_REFUSALS.has(code) ? "not yet" : null;
+};
 const serverMessage = (error: unknown): string | null => {
   const message = (error as { message?: unknown } | null)?.message;
   return typeof message === "string" && message ? message : null;
@@ -502,8 +508,8 @@ export class NativeRunService {
       this.waitForAdmission(session, upload, admission);
       return;
     }
-    if ((await this.deliver(session, upload, context ?? {})) === "not admitted")
-      this.waitForAdmission(session, upload, "not admitted");
+    const delivery = await this.deliver(session, upload, context ?? {});
+    if (delivery !== "done") this.waitForAdmission(session, upload, delivery);
   }
   private async admission(event: Identity): Promise<Admission> {
     try {
@@ -515,14 +521,15 @@ export class NativeRunService {
   }
   // The replay stays in the local archive whatever happens here. This only keeps its upload (with the heartbeats the
   // archive doesn't have) in memory, so it can go up without the player doing anything.
-  private waitForAdmission(session: Session, upload: Upload, admission: Admission): void {
-    const reason = admission === "unknown" ? CHECK_FAILED : NOT_ADMITTED;
+  private waitForAdmission(session: Session, upload: Upload, admission: Admission | "not yet"): void {
+    const reason = admission === "unknown" ? CHECK_FAILED : admission === "not yet" ? NOT_YET : NOT_ADMITTED;
     if (this.waitingForAdmission.size >= MAX_WAITING_RUNS) {
       this.kept(session, reason);
       return;
     }
     this.waitingForAdmission.add(session);
-    this.kept(session, `${reason} ${admission === "unknown" ? CHECKS_AGAIN : UPLOADS_LATER}`);
+    const next = admission === "unknown" ? CHECKS_AGAIN : admission === "not yet" ? SENDS_AGAIN : UPLOADS_LATER;
+    this.kept(session, `${reason} ${next}`);
     void this.retryAdmission(session, upload);
   }
   private async retryAdmission(session: Session, upload: Upload): Promise<void> {
@@ -534,7 +541,7 @@ export class NativeRunService {
         if (session.accountBlocked) return;
         if ((await this.admission(event)) !== "admitted") continue;
         // The room, race or gauntlet it was played for has moved on: it goes up as a plain run.
-        if ((await this.deliver(session, upload, {}, true)) === "not admitted") continue;
+        if ((await this.deliver(session, upload, {}, true)) !== "done") continue;
         if (!session.accountBlocked) this.dependencies.savedRunUploaded?.(event.map);
         return;
       }
@@ -554,7 +561,7 @@ export class NativeRunService {
       gaps,
     });
     const result = await this.submit(session, upload, context, tokens, gaps, retrying);
-    if (result === "not admitted" || result === null) return result ?? "done";
+    if (result === "not admitted" || result === "not yet" || result === null) return result ?? "done";
     if (!this.active(session)) return "done";
     this.attachDiagnostics(result.id, upload.diagnostics);
     this.verdict(session, result);
@@ -571,7 +578,7 @@ export class NativeRunService {
     tokens: string[],
     gaps: number,
     retrying: boolean,
-  ): Promise<Submission | "not admitted" | null> {
+  ): Promise<Submission | Exclude<Delivery, "done"> | null> {
     for (let tries = 0; ; tries++) {
       // No await may separate the last ownership check from submitRun (accountDispatch fences the fetch itself).
       while (this.dependencies.account) {
@@ -580,7 +587,7 @@ export class NativeRunService {
         if (revision === this.accountRevision) break;
       }
       try {
-        return await bounded(
+        const result = await bounded(
           this.dependencies.api.submitRun(upload.bytes, {
             beats: tokens,
             ...(upload.mouse ? { mouse: upload.mouse } : {}),
@@ -589,9 +596,13 @@ export class NativeRunService {
           }),
           20_000,
         );
+        // The website's API answers a refusal with a result that has no run id, not by throwing.
+        const wait = result.id ? null : refusalWait(result.code);
+        return wait ?? result;
       } catch (error) {
         if (session.accountBlocked || !this.active(session)) return null;
-        if (notAdmittedRefusal(error)) return "not admitted";
+        const wait = refusalWait((error as { code?: unknown } | null)?.code);
+        if (wait) return wait;
         const refused = definiteRefusal(error);
         if (retrying && !refused) return "not admitted";
         const attempt = context.gauntlet;
