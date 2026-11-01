@@ -102,7 +102,6 @@ public:
     };
 
     VideoCapture(
-            Gl &gl,
             BhContext *core,
             Renderer &renderer,
             NativeHud &hud,

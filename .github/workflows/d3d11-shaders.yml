@@ -1,0 +1,42 @@
+name: D3D11 shader qualification
+on:
+  push:
+    branches: [ci/d3d11-shaders]
+permissions:
+  contents: read
+jobs:
+  shaders:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+      - name: Prepare MSVC and pinned Windows SDK
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installation = & $vswhere -latest -property installationPath
+          Import-Module "$installation\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          $sdk = (Get-Content native/apps/native/tools/d3d-shaders/toolchain.json | ConvertFrom-Json).windowsSdk
+          Enter-VsDevShell -VsInstallPath $installation -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64 -winsdk=$sdk"
+          foreach ($name in 'PATH', 'INCLUDE', 'LIB', 'LIBPATH', 'WindowsSdkDir', 'WindowsSDKVersion', 'VCToolsInstallDir') {
+            "$name=$([Environment]::GetEnvironmentVariable($name))" >> $env:GITHUB_ENV
+          }
+      - name: Install locked exporter dependencies
+        working-directory: native
+        run: bun install --frozen-lockfile
+      - name: Test shader extraction and binding checks
+        run: python -m unittest discover -s native/apps/native/tools/d3d-shaders -p "test_*.py" -v
+      - name: Compile every program to Shader Model 5 DXBC
+        run: python native/apps/native/tools/d3d-shaders/run.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: d3d11-shaders
+          path: |
+            native/target/d3d-shaders/output/report.json
+            native/target/d3d-shaders/output/manifest.json
+            native/target/d3d-shaders/output/*.json
+            native/target/d3d-shaders/output/programs

@@ -358,7 +358,8 @@ void run_job(const Spec &spec, const Job &job, Gl &gl, const VideoAvailability &
     configure_renderer(*renderer, spec.settings, options);
     renderer->set_zones(loaded.map.zones);
     renderer->set_cosmetics(loaded.outfit, loaded.loadout);
-    NativeHud hud(gl, spec.assets);
+    native::gfx::Context hud_graphics(gl);
+    NativeHud hud(hud_graphics, spec.assets);
     hud.preferences(export_hud_settings(spec.settings, options));
     const uint32_t total = loaded.session.range.total;
     const auto camera = prepare_camera(loaded.map.core.get(), options, total);
@@ -367,7 +368,6 @@ void run_job(const Spec &spec, const Job &job, Gl &gl, const VideoAvailability &
     const auto timeline = VideoTimeline::make(options, total);
     encoder.start(options, output, timeline.frames, available.encoder, choice);
     VideoCapture capture(
-            gl,
             loaded.map.core.get(),
             *renderer,
             hud,
@@ -426,6 +426,7 @@ int run_jobs(const Spec &spec, Control &control) {
     int failures = 0;
     {
         Surface surface;
+        std::cerr << "Video export renderer: OpenGL (independent of the gameplay renderer)\n";
         Gl gl;
         gl.load();
         const auto available = encoders_for(spec);

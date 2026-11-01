@@ -349,6 +349,7 @@ export interface NativeSettings {
   minimizeOnFocusLoss: boolean;
   fullscreenMode: FullscreenMode;
   fullscreenScaling: FullscreenScaling;
+  renderer: "opengl" | "d3d11";
   lowLatencyMode: LowLatencyMode;
   reflexFlash: boolean;
   capturePbScreenshots: boolean;
@@ -578,6 +579,7 @@ export interface MusicState {
 }
 
 export interface NativeClientInfo {
+  renderer?: "opengl" | "d3d11";
   version: string;
   build: string;
   gpu: string;
@@ -760,6 +762,7 @@ function defaultSettings(): NativeSettings {
     minimizeOnFocusLoss: false,
     fullscreenMode: { display: "", displayIndex: -1, width: 0, height: 0, refreshHz: 0 },
     fullscreenScaling: "stretch",
+    renderer: "opengl",
     lowLatencyMode: "off",
     reflexFlash: false,
     showPlayerGlow: web.showPlayerGlow,
@@ -1005,6 +1008,7 @@ export function settingsPatch(value: unknown): Partial<NativeSettings> {
   if (fullscreenMode) out.fullscreenMode = fullscreenMode;
   if (FULLSCREEN_SCALINGS.includes(input.fullscreenScaling as FullscreenScaling))
     out.fullscreenScaling = input.fullscreenScaling;
+  if (input.renderer === "opengl" || input.renderer === "d3d11") out.renderer = input.renderer;
   if (LOW_LATENCY_MODES.includes(input.lowLatencyMode as LowLatencyMode)) out.lowLatencyMode = input.lowLatencyMode;
   for (const [key, min, max] of [
     ["ghostOpacity", 0, 1],
@@ -1264,6 +1268,7 @@ export function applyState(value: unknown): boolean {
     state.client = {
       version: typeof client.version === "string" ? client.version.slice(0, 40) : "",
       build: typeof client.build === "string" ? client.build.slice(0, 80) : "",
+      ...(client.renderer === "opengl" || client.renderer === "d3d11" ? { renderer: client.renderer } : {}),
       gpu: typeof client.gpu === "string" ? client.gpu.slice(0, 200) : "",
       viewport:
         Array.isArray(viewport) && viewport.length === 2 && viewport.every(size) ? [viewport[0], viewport[1]] : [0, 0],

@@ -1,6 +1,9 @@
 #include "preferences.hpp"
 #include "options.hpp"
 #include "startup.hpp"
+#include "client_graphics.hpp"
+#include "renderer_launch.hpp"
+#include "renderer_recovery.hpp"
 #include "startup_display.hpp"
 #include "bunnyhop_native.h"
 #include "native_input.hpp"
@@ -154,7 +157,7 @@ static void data_folder_picked(void *userdata, const char *const *files, int) {
         picker->result = files[0];
 }
 
-int run(const native::Options &opt) {
+int run(const native::Options &opt, native::RendererLaunch &launch) {
     if (bh_abi_version() != 1) throw std::runtime_error("Unsupported native core ABI version");
     if (!bh_v29_check_abi(BH_V29_ABI_VERSION, sizeof(BhRecordOptionsV29), sizeof(BhTimingSegmentV2))) {
         throw std::runtime_error("Unsupported native v29 ABI layout");
@@ -167,32 +170,30 @@ int run(const native::Options &opt) {
     native::Input input;
     input.set_sensitivity(opt.sensitivity);
     native::SdlSession sdl;
-    auto window_and_gl = native::create_window_and_gl(opt);
+    auto window_and_gl = native::create_window_and_gl(opt, launch.backend);
     auto &window = window_and_gl.window;
-    native::Gl gl;
-    gl.load();
-    native::FramePacer<native::Gl> frame_pacer;
-    // Feedback context (the menu's "Attach game info"): the GPU the game draws with, not the menu web view's.
-    const std::string gpu_renderer = [&] {
-        const auto *name = gl.GetString(GL_RENDERER);
-        return name ? std::string(reinterpret_cast<const char *>(name)) : std::string();
-    }();
+    native::ClientGraphics device(window.get(), launch.backend, opt.d3d11_warp);
+    auto &graphics = device.context();
+    auto &low_latency = device.presenter();
+    native::FramePacer<native::gfx::Context> frame_pacer;
+    const std::string gpu_renderer = device.adapter();
+    std::cerr << "Active renderer: " << device.name() << " (" << gpu_renderer << ")\n";
     const auto assets = native::resource("native-assets", BUNNYHOP_NATIVE_ASSET_ROOT);
     const auto menu_path = opt.menu_html == BUNNYHOP_MENU_HTML ? native::resource("menu.html", opt.menu_html)
                                                                : native::data_location::from_utf8(opt.menu_html);
     const auto manifest_path = native::resource("native-manifest.json", BUNNYHOP_NATIVE_MANIFEST);
-    native::NativeHud hud(gl, assets);
+    native::NativeHud hud(graphics, assets);
     native::HudLayoutEditor hud_editor;
     native::HudDemoState hud_demo;
     std::vector<std::string> hud_editor_bind;
     native::MenuGamepad menu_gamepad;
     std::unique_ptr<NativeLoadoutPreview> loadout_preview;
     std::optional<nlohmann::json> preview_request;
-    native::avatar::AvatarService avatar_service(gl, assets);
+    native::avatar::AvatarService avatar_service(graphics, assets);
     native::NativeHud::Layout hud_layout;
     // Resolved before the audio device so the custom sound/ and bgm/ folders
     // are known at the point the packs are first applied.
-    native::DataMoveDisplay display(window.get(), gl, hud);
+    native::DataMoveDisplay display(window.get(), device, hud);
     auto data_paths = native::resolve_data_folder(opt, window.get(), display);
     namespace data_location = native::data_location;
     const auto &default_root = data_paths.default_root;
@@ -204,16 +205,10 @@ int run(const native::Options &opt) {
     std::string data_notice, last_data_state;
     const auto startup_data = native::initialize_data_directory(cache);
     const auto identity = native::load_release_identity(manifest_path, menu_path, assets);
-    const auto *gl_version = gl.GetString(GL_VERSION);
     native::log::open(
             cache,
             native::log_session_header(
-                    identity,
-                    gpu_renderer + ", OpenGL " + (gl_version ? reinterpret_cast<const char *>(gl_version) : "unknown"),
-                    settings.physics,
-                    startup_data.settings,
-                    window.get(),
-                    cache
+                    identity, device.description(), settings.physics, startup_data.settings, window.get(), cache
             )
     );
     native::MapAudio map_audio;
@@ -240,7 +235,7 @@ int run(const native::Options &opt) {
     std::unique_ptr<native::MenuBackdrop> backdrop;
     if (menu)
         backdrop = std::make_unique<native::MenuBackdrop>(
-                gl, assets, [&lock_cache, cache](const std::string &id, const std::atomic_bool &cancel) {
+                graphics, assets, [&lock_cache, cache](const std::string &id, const std::atomic_bool &cancel) {
                     const auto lock = lock_cache(cancel);
                     native::DownloadLimits limits;
                     limits.bsp = 32 * 1024 * 1024;
@@ -275,7 +270,7 @@ int run(const native::Options &opt) {
             std::cerr << "Settings: " << e.what() << '\n';
         }
     }
-    native::WindowController window_controller(window.get());
+    native::WindowController window_controller(window.get(), &low_latency);
     const bool persist_window = !opt.hidden && !opt.frames && opt.menu_smoke.empty() && opt.runtime_smoke.empty();
     // Keep the display defaults this launch chose (display_defaults.hpp), so the next launch reads the same ones.
     if (first_settings && persist_window) {
@@ -305,7 +300,6 @@ int run(const native::Options &opt) {
     display_catalog.refresh(window.get());
     native::DisplayModeTryout display_tryout;
     // Windows: DXGI presentation with Reflex or Anti-Lag 2, and process settings held only while playing.
-    native::LowLatencyPresenter low_latency;
     native::LowLatencyControl low_latency_control;
     const auto low_latency_support = low_latency.support(window.get());
     native::PlayPriority play_priority;
@@ -420,7 +414,7 @@ int run(const native::Options &opt) {
         hud.preferences(preferences);
         audio.preferences(preferences);
         map_audio.preferences(preferences.at("mapVolume").get<float>(), preferences.at("muteMap").get<bool>());
-        SDL_GL_SetSwapInterval(opt.frames ? 0 : prefs.vsync ? 1 : 0);
+        device.swap_interval(!opt.frames && prefs.vsync);
         audio.gain(preferences.at("muted").get<bool>() ? 0 : preferences.at("volume").get<float>());
         audio.set_sfx_pack(preferences.at("sfxPack").get<std::string>() == "custom");
         audio.set_music_pack(preferences.at("musicPack").get<std::string>() == "custom");
@@ -469,7 +463,7 @@ int run(const native::Options &opt) {
     native::RunVault run_vault(cache / "run-vault");
     native::updates::Host updater(cache, default_root, identity, native::executable_path());
     recorder.diagnostics.set_client_version(identity.value("version", std::string("local")));
-    recorder.diagnostics.set_device(gpu_renderer, SDL_GetPlatform());
+    recorder.diagnostics.set_device(std::string(device.name()) + ": " + gpu_renderer, SDL_GetPlatform());
     // Jump stats (!ssj). Display only — it reads the same pre-state, command and
     // events the simulation already produced and never feeds anything back.
     native::MovementFeedback feedback;
@@ -742,6 +736,7 @@ int run(const native::Options &opt) {
     auto toast = [&](const std::string &text, unsigned ms = 3000) {
         hud.toasts.push(text, double(SDL_GetTicksNS()) / 1e9, double(ms) / 1000);
     };
+    if (!launch.notice.empty()) toast(launch.notice, 10000);
     native::PendingMenuScript menu_script;
     auto practice_use = [&](const std::string &tool) {
         if (const auto notice = practice.activate(core.get(), tool)) toast(*notice, 5000);
@@ -932,8 +927,9 @@ int run(const native::Options &opt) {
         audio.set_classic_loader([content, cache]() {
             if (!content.empty()) native::download_classic_sounds(data_location::from_utf8(content), cache);
         });
-        auto next_renderer = map_preparation.renderer ? std::move(map_preparation.renderer)
-                                                      : std::make_unique<native::Renderer>(gl, next.core.get(), assets);
+        auto next_renderer = map_preparation.renderer
+                                     ? std::move(map_preparation.renderer)
+                                     : std::make_unique<native::Renderer>(graphics, next.core.get(), assets);
         next_renderer->set_map_identity(id, detail.is_object() ? detail.value("sha256", std::string()) : std::string());
         game.install(std::move(next.core), std::move(next_renderer), practice, audio);
         map_audio.start(core.get(), data_location::from_utf8(path), data_location::from_utf8(content));
@@ -1581,7 +1577,7 @@ int run(const native::Options &opt) {
                         core,
                         renderer,
                         menu,
-                        gl,
+                        graphics,
                         hud,
                         window.get(),
                         input,
@@ -1637,12 +1633,13 @@ int run(const native::Options &opt) {
     room_bridge.bind_presence(opt, menu.get(), menu_ready, show_menu);
     auto &discord = room_bridge.discord;
     const bool discord_allowed = room_bridge.discord_allowed;
-    if (!opt.room_smoke.empty()) return native::run_room_smoke(opt, window.get(), gl, game, hud);
+    if (!opt.room_smoke.empty()) return native::run_room_smoke(opt, window.get(), graphics, game, hud);
     if (!opt.presentation_smoke.empty()) {
-        return native::run_presentation_smoke(opt, window.get(), gl, game, hud);
+        return native::run_presentation_smoke(opt, window.get(), graphics, game, hud);
     }
     native::VideoSmoke video_smoke({opt, game, viewer, curr, prev, camera_controls, preferences});
     video_smoke.begin();
+    native::RendererRecovery renderer_recovery(device, game, recorder, launch);
     while (running) {
         const auto frame_started = Clock::now();
         frame_diagnostics.start_frame(SDL_GetTicksNS(), prefs.mouse_diagnostics);
@@ -2880,7 +2877,7 @@ int run(const native::Options &opt) {
         download.poll();
         if (!map_preparing && map_download.settled(Clock::now())) {
             map_preparing = true;
-            map_preparation.start(map_download.take(), settings, gl, assets);
+            map_preparation.start(map_download.take(), settings, graphics, assets);
             if (map_preparation.download.map) map_download.note_preparing();
             nlohmann::json update;
             {
@@ -2891,7 +2888,7 @@ int run(const native::Options &opt) {
                 update = {{"loading", loading}, {"loadProgress", load_progress}, {"error", ""}};
             }
             if (menu && menu_ready) menu->evaluate_js(menu_state.publish_now(update));
-        } else if (map_preparing && map_preparation.poll(gl, assets)) {
+        } else if (map_preparing && map_preparation.poll(graphics, assets)) {
             map_preparing = false;
             try {
                 auto &result = map_preparation.download;
@@ -2972,7 +2969,8 @@ int run(const native::Options &opt) {
                 std::string png;
                 try {
                     if (menu->visible()) {
-                        if (!loadout_preview) loadout_preview = std::make_unique<NativeLoadoutPreview>(gl, assets);
+                        if (!loadout_preview)
+                            loadout_preview = std::make_unique<NativeLoadoutPreview>(graphics, assets);
                         png = loadout_preview->render(job, double(SDL_GetTicksNS()) / 1e9);
                     }
                 } catch (const std::exception &e) {
@@ -3433,7 +3431,7 @@ int run(const native::Options &opt) {
         }
         int width = 0, height = 0;
         SDL_GetWindowSizeInPixels(window.get(), &width, &height);
-        low_latency.render_start(width, height);
+        device.begin();
         if (renderer && !video.preparing()) {
             const float blend = (opt.frames || !simulation_active) ? 1.0f : float(input_scheduler.seconds() / step_dt);
             float eye[3];
@@ -3712,7 +3710,7 @@ int run(const native::Options &opt) {
                     height,
                     SDL_GetWindowPixelDensity(window.get())
             );
-            native::HudViewport hud_viewport(gl, area, width, height);
+            native::HudViewport hud_viewport(graphics, area, width, height);
             native::HudFrame{
                     core.get(),
                     hud,
@@ -3762,7 +3760,9 @@ int run(const native::Options &opt) {
             recorder.pending_capture.reset();
             if (renderer && pending.second == map_id && width > 0 && height > 0) {
                 try {
-                    replay_library.attach(pending.first, backbuffer_png(gl, width, height));
+                    replay_library.attach(
+                            pending.first, native::target_png(graphics, graphics.current_target(), width, height)
+                    );
                 } catch (const std::exception &e) {
                     std::cerr << "Local PB screenshot: " << e.what() << '\n';
                     score_notice = "Replay saved; optional screenshot could not be saved";
@@ -3782,9 +3782,9 @@ int run(const native::Options &opt) {
             backdrop_drawn = backdrop->draw(width, height, backdrop_dt, backdrop_still);
         }
         if (!renderer && !backdrop_drawn) {
-            gl.Viewport(0, 0, width, height);
-            gl.ClearColor(.03f, .04f, .06f, 1);
-            gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            graphics.viewport({0, 0, width, height});
+            graphics.clear_color({.03f, .04f, .06f, 1});
+            graphics.clear_depth();
         }
         // Tell the menu what it is drawn over: the home tour (once per map,
         // then fade cuts), or the paused gameplay map. "native" waits for the
@@ -3797,7 +3797,7 @@ int run(const native::Options &opt) {
                            + nlohmann::json(id).dump() + ")";
                 };
                 auto png_source = [&] {
-                    backdrop_png = backbuffer_png(gl, width, height);
+                    backdrop_png = native::target_png(graphics, graphics.current_target(), width, height);
                     return "data:image/png;base64," + native::base64(backdrop_png);
                 };
                 if (renderer && gameplay_backdrop_due && menu->visible()) {
@@ -3850,15 +3850,11 @@ int run(const native::Options &opt) {
             renderer->screenshot(opt.screenshot, width, height);
         }
         display_tryout.draw(hud, width, height, SDL_GetTicksNS());
-        const GLenum gl_error = gl.GetError();
-        if (gl_error != GL_NO_ERROR) throw std::runtime_error("OpenGL error " + std::to_string(gl_error));
         frame_diagnostics.mark(native::FrameDiagnostics::kRender, SDL_GetTicksNS());
-        if (low_latency.active())
-            low_latency.present(prefs.vsync);
-        else if (!SDL_GL_SwapWindow(window.get()))
-            throw std::runtime_error(std::string("Swapping framebuffer failed: ") + SDL_GetError());
+        device.present(!opt.frames && prefs.vsync);
+        if (device.presented()) launch.presented();
         frame_diagnostics.mark(native::FrameDiagnostics::kSwap, SDL_GetTicksNS());
-        frame_pacer.after_swap(gl, prefs.limit_queued_frames && !opt.frames);
+        frame_pacer.after_swap(graphics, prefs.limit_queued_frames && !opt.frames);
         frame_diagnostics.mark(native::FrameDiagnostics::kGpuWait, SDL_GetTicksNS());
         sky_library.frame(menu && menu->visible());
         if (renderer) renderer->use_sky(sky_library.current_id(), sky_library.current());
@@ -3899,13 +3895,14 @@ int run(const native::Options &opt) {
                         {"version", identity.value("version", std::string("local"))},
                         {"build", identity.value("build", std::string("bunnyhop-native/local"))},
                         {"gpu", gpu_renderer},
+                        {"renderer", device.name()},
                         {"viewport", {window_w, window_h}},
                         {"dpr", std::round(SDL_GetWindowPixelDensity(window.get()) * 100) / 100}
                 };
                 state = {
                         {"capabilities", native::native_capabilities()},
                         {"engine", "native"},
-                        {"renderer", "opengl"},
+                        {"renderer", device.name()},
                         {"client", client_info},
                         {"map", map_id},
                         {"loading", progress},
@@ -4032,6 +4029,7 @@ int run(const native::Options &opt) {
                 };
                 auto diagnostics_state = mouse_state;
                 const auto &stamps = input_timeline.stamps();
+                diagnostics_state["renderer"] = device.name();
                 diagnostics_state.update(native::diagnostics_json(frame_diagnostics, stamps, input_timeline.timed()));
                 const std::string diagnostics_event =
                         "new CustomEvent('bunnyhop:mouse-diagnostics',{detail:" + diagnostics_state.dump() + "})";
@@ -4153,7 +4151,7 @@ int run(const native::Options &opt) {
     if (!opt.frames && opt.runtime_smoke.empty()) {
         run_history.persist(json_writer, cache, activity, double(SDL_GetTicksNS()) / run_second_ns, true);
     }
-    frame_pacer.release(gl);
+    frame_pacer.release(graphics);
     if (core) bh_record_end(core.get());
     capture(false);
     std::cout << "Rendered " << frame << " frames; simulation tick " << curr.tick << "; position " << curr.position[0]
@@ -4187,7 +4185,22 @@ int main(int argc, char **argv) {
             native::print_help(std::cout);
             return 0;
         }
-        const int code = run(opt);
+        native::RendererLaunch launch(opt);
+        launch.show_notice(opt);
+        int code = 0;
+        try {
+            code = run(opt, launch);
+        } catch (const std::exception &error) {
+            if (launch.backend != native::gfx::Backend::d3d11 || (launch.ready && !launch.device_lost)
+                || opt.d3d11_warp)
+                throw;
+            launch.fallback(
+                    std::string("Direct3D 11 stopped: ") + error.what() + launch.recovery
+                    + " Using OpenGL for this launch."
+            );
+            launch.show_notice(opt);
+            code = run(opt, launch);
+        }
         if (relaunch_requested && !native::relaunch(native::executable_path()))
             std::cerr << "Bunnyhop native: could not restart; start the game again to move your data\n";
         if (update_plan && !native::updates::start_helper(native::executable_path(), *update_plan))

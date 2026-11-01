@@ -116,7 +116,7 @@ private:
 };
 
 struct RoomSmokeFrame {
-    Gl &gl;
+    gfx::Context &gl;
     GameSession &game;
     NativeHud &hud;
     RoomReplay &replay;
@@ -165,7 +165,7 @@ void draw_room_frame(RoomSmokeFrame &frame, const RoomShot &shot, double at, BhS
 
 }  // namespace
 
-int run_room_smoke(const Options &opt, SDL_Window *window, Gl &gl, GameSession &game, NativeHud &hud) {
+int run_room_smoke(const Options &opt, SDL_Window *window, gfx::Context &gl, GameSession &game, NativeHud &hud) {
     if (!game.renderer || !game.core) throw std::runtime_error("Room smoke requires a local map");
     bh_record_end(game.core.get());
     const std::filesystem::path directory = opt.room_smoke;
@@ -182,7 +182,7 @@ int run_room_smoke(const Options &opt, SDL_Window *window, Gl &gl, GameSession &
             replay.advance(at);
             draw_room_frame(frame, shot, at, snapshot);
         }
-        const auto png = backbuffer_png(gl, frame.width, frame.height, 64u * 1024u * 1024u);
+        const auto png = target_png(gl, gl.current_target(), frame.width, frame.height, 64u * 1024u * 1024u);
         if (png.empty()) throw std::runtime_error("Room smoke: empty screenshot");
         const auto path = directory / (shot.name + ".png");
         std::ofstream file(path, std::ios::binary);

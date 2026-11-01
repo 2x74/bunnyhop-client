@@ -31,6 +31,8 @@ pub use replay::{
     bh_ghost_load, bh_replay_events, bh_replay_header, bh_replay_info, bh_replay_load,
     bh_replay_seek, bh_replay_step, bh_replay_stop,
 };
+mod replay_recovery;
+pub use replay_recovery::bh_record_recovery_bhr;
 mod recording;
 pub use recording::{bh_record_cosmetic, bh_record_inspect, bh_record_loadout};
 mod practice;

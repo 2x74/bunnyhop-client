@@ -19,7 +19,6 @@ void checked(bool result, const char *message) {
 }  // namespace
 
 VideoCapture::VideoCapture(
-        Gl &gl,
         BhContext *core,
         Renderer &renderer,
         NativeHud &hud,
@@ -37,7 +36,7 @@ VideoCapture::VideoCapture(
     , timeline_(VideoTimeline::make(options, ticks))
     , camera_(prepared)
     , scene_(std::move(scene))
-    , targets_(gl, options.width, options.height, options.supersample, options.samples) {
+    , targets_(renderer.graphics_context(), options.width, options.height, options.supersample, options.samples) {
     if (options.has_audio())
         audio_ =
                 std::make_unique<ReplayAudioTrack>(scene_.assets, scene_.cache, scene_.settings, scene_.style, options);

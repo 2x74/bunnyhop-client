@@ -152,6 +152,14 @@ void recorded_run() {
     recorder.write(core.get());
     const std::string replay_bytes = read_file(recorder.path);
     assert(!replay_bytes.empty());
+    unsigned backend_index = 0;
+    for (const auto *renderer : {"opengl: test GPU", "d3d11: test GPU"}) {
+        recorder.diagnostics.set_device(renderer, "Windows");
+        recorder.path = (root / "replays" / ("backend-" + std::to_string(backend_index++) + ".bhr")).string();
+        recorder.write(core.get());
+        assert(read_file(recorder.path) == replay_bytes);
+        assert(recorder.diagnostics.fingerprint_json()["renderer"] == renderer);
+    }
     const auto event = recorder.finish_event(
             run.track, run.seconds, replay_bytes, {{"attempt", 3}, {"seconds", 12}}, {{"sensitivity", 1.73}}
     );

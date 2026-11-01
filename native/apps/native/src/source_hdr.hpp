@@ -14,9 +14,11 @@
 //   darkening. The mean is read back through a pixel-pack buffer and a fence a few times a second, never stalling.
 // With exposure 1 and no bloom the composite is exactly the straight render.
 //
-//   SourceHdr hdr(gl, emptyVao);
+//   SourceHdr hdr(context, maximumSamples);
 //   hdr.begin(w, h);  ...draw the world...  hdr.finish(target, w, h, dtSeconds);  ...draw viewmodel / HUD...
+#include "gfx.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <deque>
 #include <numeric>
@@ -57,97 +59,52 @@ void main(){color=vec4(vec3(dot(toGamma(exposed(vec2(.05,.075)+uv*vec2(.9,.85)))
 }  // namespace native_hdr
 
 class SourceHdr {
-    // Calibrated so bhop_shutdown's start (pad *230, yaw 90) sits at exposure 1, as in a CS:S render of that view.
     static constexpr float target = .37f, minExposure = .5f, maxExposure = 2, adaptRate = 1.2f, adaptDown = 3;
     static constexpr double measureEvery = .12;
     static constexpr int lumWidth = 32, lumHeight = 18;
-    static constexpr size_t goalHistory = 10;
+    static constexpr size_t goalHistory = 10, readbackSlots = 3;
 
-    struct Target {
-        GLuint fbo = 0, texture = 0;
+    struct SceneConstants {
+        float exposure;
+        std::array<float, 2> texel{};
+        uint32_t hasBloom = 0;
     };
 
-    Gl &gl;
-    GLuint emptyVao;
-    GLuint downsample = 0, blur = 0, composite = 0, luminance = 0;
-    GLuint sceneFbo = 0, sceneColor = 0, sceneDepth = 0;
-    GLuint multisampleFbo = 0, multisampleColor = 0, multisampleDepth = 0;
-    int requestedSamples = 0, currentSamples = -1;
-    Target quarter[2], lum;
-    int quarterWidth = 0, quarterHeight = 0;
-    GLuint pbo = 0;
-    GLsync fence = nullptr;
-    int width = 0, height = 0;
+    struct BlurConstants {
+        std::array<float, 2> stepSize;
+        float scale;
+    };
+
+    native::gfx::Context &context;
+    native::gfx::Program downsample, blur, composite, luminance;
+    native::gfx::ConstantBinding downsampleConstants, blurConstants, compositeConstants, luminanceConstants;
+    native::gfx::Geometry geometry;
+    native::gfx::Sampler sampler;
+    native::gfx::Pipeline pipeline;
+    native::gfx::RenderTarget scene, multisample, quarter[2], lum;
+    std::array<native::gfx::Readback, readbackSlots> readbacks{};
+    size_t readbackSlot = 0;
+    int maximumSamples, requestedSamples = 0, currentSamples = -1;
+    int quarterWidth = 0, quarterHeight = 0, width = 0, height = 0;
     float exposure = 1;
     std::deque<float> goals;
     double sinceMeasure = 0;
 
-    GLint loc(GLuint program, const char *name) { return gl.GetUniformLocation(program, name); }
-
-    Target make_target(int w, int h, GLenum format, GLenum type, GLint internal) {
-        Target t;
-        gl.GenTextures(1, &t.texture);
-        gl.BindTexture(GL_TEXTURE_2D, t.texture);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        gl.TexImage2D(GL_TEXTURE_2D, 0, internal, w, h, 0, format, type, nullptr);
-        gl.GenFramebuffers(1, &t.fbo);
-        gl.BindFramebuffer(GL_FRAMEBUFFER, t.fbo);
-        gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t.texture, 0);
-        if (gl.CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-            throw std::runtime_error("Native HDR target incomplete");
-        return t;
-    }
-
-    void destroy(Target &t) {
-        if (t.fbo) gl.DeleteFramebuffers(1, &t.fbo);
-        if (t.texture) gl.DeleteTextures(1, &t.texture);
-        t = {};
-    }
-
     void release_targets() {
-        if (sceneFbo) gl.DeleteFramebuffers(1, &sceneFbo);
-        if (sceneColor) gl.DeleteTextures(1, &sceneColor);
-        if (sceneDepth) gl.DeleteRenderbuffers(1, &sceneDepth);
-        if (multisampleFbo) gl.DeleteFramebuffers(1, &multisampleFbo);
-        if (multisampleColor) gl.DeleteRenderbuffers(1, &multisampleColor);
-        if (multisampleDepth) gl.DeleteRenderbuffers(1, &multisampleDepth);
-        multisampleFbo = multisampleColor = multisampleDepth = 0;
-        sceneFbo = sceneColor = sceneDepth = 0;
-        destroy(quarter[0]);
-        destroy(quarter[1]);
-        width = height = 0;
+        context.destroy(scene);
+        context.destroy(multisample);
+        for (auto &q : quarter)
+            context.destroy(q);
+        width = height = quarterWidth = quarterHeight = 0;
     }
 
     void ensure_targets(int w, int h) {
-        if (w == width && h == height && sceneFbo && currentSamples == requestedSamples) return;
+        using namespace native::gfx;
+        if (w == width && h == height && currentSamples == requestedSamples) return;
         release_targets();
-        Target scene = make_target(w, h, GL_RGBA, GL_HALF_FLOAT, GL_RGBA16F);
-        sceneFbo = scene.fbo;
-        sceneColor = scene.texture;
-        gl.GenRenderbuffers(1, &sceneDepth);
-        gl.BindRenderbuffer(GL_RENDERBUFFER, sceneDepth);
-        gl.RenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h);
-        gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, sceneDepth);
-        if (gl.CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-            throw std::runtime_error("Native HDR scene target incomplete");
-        if (requestedSamples) {
-            gl.GenFramebuffers(1, &multisampleFbo);
-            gl.BindFramebuffer(GL_FRAMEBUFFER, multisampleFbo);
-            gl.GenRenderbuffers(1, &multisampleColor);
-            gl.BindRenderbuffer(GL_RENDERBUFFER, multisampleColor);
-            gl.RenderbufferStorageMultisample(GL_RENDERBUFFER, requestedSamples, GL_RGBA16F, w, h);
-            gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, multisampleColor);
-            gl.GenRenderbuffers(1, &multisampleDepth);
-            gl.BindRenderbuffer(GL_RENDERBUFFER, multisampleDepth);
-            gl.RenderbufferStorageMultisample(GL_RENDERBUFFER, requestedSamples, GL_DEPTH24_STENCIL8, w, h);
-            gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, multisampleDepth);
-            if (gl.CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-                throw std::runtime_error("HDR multisample target incomplete");
-            }
-        }
+        scene = context.create_target({w, h, Format::rgba16f, Format::depth24_stencil8});
+        if (requestedSamples)
+            multisample = context.create_target({w, h, Format::rgba16f, Format::depth24_stencil8, requestedSamples});
         currentSamples = requestedSamples;
         width = w;
         height = h;
@@ -155,74 +112,71 @@ class SourceHdr {
 
     void ensure_bloom_targets(int w, int h) {
         const int qw = std::max(1, w / 4), qh = std::max(1, h / 4);
-        if (quarter[0].fbo && quarterWidth == qw && quarterHeight == qh) return;
-        destroy(quarter[0]);
-        destroy(quarter[1]);
-        for (auto &q : quarter)
-            q = make_target(qw, qh, GL_RGBA, GL_HALF_FLOAT, GL_RGBA16F);
+        if (quarterWidth == qw && quarterHeight == qh) return;
+        for (auto &q : quarter) {
+            context.destroy(q);
+            q = context.create_target({qw, qh, native::gfx::Format::rgba16f});
+        }
         quarterWidth = qw;
         quarterHeight = qh;
     }
 
-    void fullscreen(GLuint program) {
-        gl.UseProgram(program);
-        gl.BindVertexArray(emptyVao);
-        gl.DrawArrays(GL_TRIANGLES, 0, 3);
+    void fullscreen(native::gfx::Program program) {
+        context.pipeline(pipeline);
+        context.bind_program(program);
+        context.bind_geometry(geometry);
+        context.draw(native::gfx::Primitive::triangles, 0, 3);
+        context.bind_texture(1, {});
+        context.bind_texture(0, {});
     }
 
-    void blur_into(const Target &from, const Target &to, float sx, float sy, float scale) {
-        gl.BindFramebuffer(GL_FRAMEBUFFER, to.fbo);
-        gl.UseProgram(blur);
-        gl.ActiveTexture(GL_TEXTURE0);
-        gl.BindTexture(GL_TEXTURE_2D, from.texture);
-        gl.Uniform1i(loc(blur, "source"), 0);
-        gl.Uniform2f(loc(blur, "stepSize"), sx, sy);
-        gl.Uniform1f(loc(blur, "scale"), scale);
+    void blur_into(
+            const native::gfx::RenderTarget &from, const native::gfx::RenderTarget &to, float sx, float sy, float scale
+    ) {
+        context.bind_target(to);
+        context.viewport({0, 0, quarterWidth, quarterHeight});
+        context.bind_program(blur);
+        const BlurConstants block{{sx, sy}, scale};
+        context.constants(blurConstants, &block);
+        context.bind_texture(0, from.color, sampler);
         fullscreen(blur);
     }
 
-    void add_goal(const uint8_t *pixels) {
+    void add_goal(const std::array<uint8_t, lumWidth * lumHeight * 4> &pixels) {
         double sum = 0;
         for (int i = 0; i < lumWidth * lumHeight; i++)
-            sum += pixels[i * 4];
+            sum += pixels[size_t(i) * 4];
         const float mean = std::max(1e-4f, float(sum / (255. * lumWidth * lumHeight)));
         goals.push_back(std::clamp(target / mean, minExposure, maxExposure));
         if (goals.size() > goalHistory) goals.pop_front();
     }
 
-    // Measure now and then (asynchronously) and move the exposure toward the averaged goal.
-    void meter(GLuint scene, double dt) {
-        if (fence) {
-            const GLenum state = gl.ClientWaitSync(fence, 0, 0);
-            if (state == GL_ALREADY_SIGNALED || state == GL_CONDITION_SATISFIED) {
-                gl.DeleteSync(fence);
-                fence = nullptr;
-                gl.BindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
-                if (const auto *pixels = static_cast<const uint8_t *>(
-                            gl.MapBufferRange(GL_PIXEL_PACK_BUFFER, 0, lumWidth * lumHeight * 4, GL_MAP_READ_BIT)
-                    )) {
-                    add_goal(pixels);
-                    gl.UnmapBuffer(GL_PIXEL_PACK_BUFFER);
-                }
-                gl.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    void meter(native::gfx::Texture texture, double dt) {
+        using namespace native::gfx;
+        auto *readback = &readbacks[readbackSlot];
+        if (context.pending(*readback)) {
+            const auto state = context.poll(*readback);
+            if (state == Wait::failed) throw std::runtime_error("HDR exposure readback failed");
+            if (state == Wait::ready) {
+                std::array<uint8_t, lumWidth * lumHeight * 4> pixels{};
+                context.collect(*readback, std::as_writable_bytes(std::span(pixels)), RowOrigin::bottom, 0);
+                add_goal(pixels);
+                readbackSlot = (readbackSlot + 1) % readbackSlots;
+                readback = &readbacks[readbackSlot];
             }
         }
         sinceMeasure += dt;
-        if (!fence && sinceMeasure >= measureEvery) {
+        // Keep one measurement in flight, preserving the original exposure goal cadence as the ring wraps.
+        if (!context.pending(*readback) && sinceMeasure >= measureEvery) {
             sinceMeasure = 0;
-            gl.BindFramebuffer(GL_FRAMEBUFFER, lum.fbo);
-            gl.Viewport(0, 0, lumWidth, lumHeight);
-            gl.UseProgram(luminance);
-            gl.ActiveTexture(GL_TEXTURE0);
-            gl.BindTexture(GL_TEXTURE_2D, scene);
-            gl.Uniform1i(loc(luminance, "scene"), 0);
-            gl.Uniform1f(loc(luminance, "exposure"), exposure);
+            context.bind_target(lum);
+            context.viewport({0, 0, lumWidth, lumHeight});
+            context.bind_program(luminance);
+            const SceneConstants block{exposure};
+            context.constants(luminanceConstants, &block);
+            context.bind_texture(0, texture, sampler);
             fullscreen(luminance);
-            gl.BindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
-            gl.PixelStorei(GL_PACK_ALIGNMENT, 1);
-            gl.ReadPixels(0, 0, lumWidth, lumHeight, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-            gl.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-            fence = gl.FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+            context.enqueue_readback(lum, *readback);
         }
         if (goals.empty()) return;
         const float goal = std::accumulate(goals.begin(), goals.end(), 0.f) / goals.size(),
@@ -230,174 +184,168 @@ class SourceHdr {
         exposure *= std::exp2(stops * std::min(1.f, float(adaptRate * (stops < 0 ? adaptDown : 1) * dt)));
     }
 
+    void create() {
+        using namespace native::gfx;
+        using namespace native_hdr;
+        downsample = context.create_program({{"hdr-downsample", ""}, hdr_vertex, hdr_downsample.c_str()});
+        blur = context.create_program({{"hdr-blur", ""}, hdr_vertex, hdr_blur});
+        composite = context.create_program({{"hdr-composite", ""}, hdr_vertex, hdr_composite.c_str()});
+        luminance = context.create_program({{"hdr-luminance", ""}, hdr_vertex, hdr_luminance.c_str()});
+        static constexpr ConstantField sceneFields[] = {
+                {"exposure", offsetof(SceneConstants, exposure), 4, ConstantType::float1},
+                {"texel", offsetof(SceneConstants, texel), 8, ConstantType::float2},
+                {"hasBloom", offsetof(SceneConstants, hasBloom), 4, ConstantType::bool32}
+        };
+        static constexpr ConstantField blurFields[] = {
+                {"stepSize", offsetof(BlurConstants, stepSize), 8, ConstantType::float2},
+                {"scale", offsetof(BlurConstants, scale), 4, ConstantType::float1}
+        };
+        for (auto entry :
+             {std::pair{downsample, &downsampleConstants},
+              {composite, &compositeConstants},
+              {luminance, &luminanceConstants}}) {
+            *entry.second = context.create_constants(entry.first, {sceneFields, sizeof(SceneConstants)});
+            context.texture_unit(entry.first, "scene", 0);
+        }
+        blurConstants = context.create_constants(blur, {blurFields, sizeof(BlurConstants)});
+        context.texture_unit(blur, "source", 0);
+        context.texture_unit(composite, "bloom", 1);
+        geometry = context.create_geometry(0, {});
+        sampler = context.create_sampler({});
+        pipeline = context.create_pipeline({{}, {false, false}, {}});
+        lum = context.create_target({lumWidth, lumHeight, Format::rgba8});
+        for (auto &readback : readbacks)
+            readback = context.create_readback(lumWidth, lumHeight);
+    }
+
+    void release() {
+        for (auto &readback : readbacks)
+            context.destroy(readback);
+        release_targets();
+        context.destroy(lum);
+        for (auto *program : {&downsample, &blur, &composite, &luminance})
+            context.destroy(*program);
+        context.destroy(geometry);
+        context.destroy(sampler);
+        context.destroy(pipeline);
+    }
+
 public:
-    // CS:S's bloom on or off; exposure still adapts without it. bloomScale: env_tonemap_controller's SetBloomScale.
     bool bloom = true;
     float bloomScale = 1;
 
-    void samples(int count) {
-        GLint maximum = 0;
-        gl.GetIntegerv(GL_MAX_SAMPLES, &maximum);
-        requestedSamples = std::clamp(count, 0, maximum);
+    SourceHdr(native::gfx::Context &graphics, int maximum_samples, native::gfx::TargetView restore_target = {})
+        : context(graphics)
+        , maximumSamples(maximum_samples) {
+        try {
+            create();
+        } catch (...) {
+            release();
+            context.bind_target(restore_target);
+            throw;
+        }
+        context.bind_target(restore_target);
     }
 
-    SourceHdr(Gl &g, GLuint vao) : gl(g), emptyVao(vao) {
-        using namespace native_hdr;
-        // Created mid-frame: the frame's own target (DXGI's shared frame on Windows) stays bound afterwards.
-        GLint frameTarget = 0;
-        gl.GetIntegerv(GL_FRAMEBUFFER_BINDING, &frameTarget);
-        downsample = link_program(gl, hdr_vertex, hdr_downsample.c_str());
-        blur = link_program(gl, hdr_vertex, hdr_blur);
-        composite = link_program(gl, hdr_vertex, hdr_composite.c_str());
-        luminance = link_program(gl, hdr_vertex, hdr_luminance.c_str());
-        lum = make_target(lumWidth, lumHeight, GL_RGBA, GL_UNSIGNED_BYTE, GL_RGBA8);
-        gl.GenBuffers(1, &pbo);
-        gl.BindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
-        gl.BufferData(GL_PIXEL_PACK_BUFFER, lumWidth * lumHeight * 4, nullptr, GL_STREAM_READ);
-        gl.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-        gl.BindFramebuffer(GL_FRAMEBUFFER, GLuint(frameTarget));
-    }
+    explicit SourceHdr(native::gfx::Context &graphics)
+        : SourceHdr(
+                  graphics,
+                  graphics.max_samples(native::gfx::Format::rgba16f, native::gfx::Format::depth24_stencil8),
+                  graphics.current_target()
+          ) {}
 
-    ~SourceHdr() {
-        if (fence) gl.DeleteSync(fence);
-        release_targets();
-        destroy(lum);
-        if (pbo) gl.DeleteBuffers(1, &pbo);
-        for (GLuint p : {downsample, blur, composite, luminance})
-            if (p) gl.DeleteProgram(p);
-    }
+    ~SourceHdr() { release(); }
 
     SourceHdr(const SourceHdr &) = delete;
     SourceHdr &operator=(const SourceHdr &) = delete;
 
+    void samples(int count) { requestedSamples = std::clamp(count, 0, maximumSamples); }
+
     float current_exposure() const { return exposure; }
 
-    // A new map or a cut: start from exposure 1 like a level load does.
     void reset() {
         exposure = 1;
         goals.clear();
         sinceMeasure = 0;
     }
 
-    // Bind the half-float world target (sized to the frame) for the world's draws.
     void begin(int w, int h) {
         ensure_targets(w, h);
-        gl.BindFramebuffer(GL_FRAMEBUFFER, multisampleFbo ? multisampleFbo : sceneFbo);
-        gl.Viewport(0, 0, w, h);
+        context.bind_target(requestedSamples ? multisample : scene);
+        context.viewport({0, 0, w, h});
     }
 
-    void refraction_source(int w, int h) {
-        if (multisampleFbo) {
-            gl.BindFramebuffer(GL_READ_FRAMEBUFFER, multisampleFbo);
-            gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, sceneFbo);
-            gl.BlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+    native::gfx::TargetView refraction_source(int, int) {
+        if (requestedSamples) {
+            context.resolve_color(multisample, scene);
+            context.resolve_depth(multisample, scene);
         }
-        gl.BindFramebuffer(GL_READ_FRAMEBUFFER, sceneFbo);
+        return scene;
     }
 
-    // Bloom and expose the world into `targetFbo` (the frame's own framebuffer), then meter.
-    void finish(GLuint targetFbo, int w, int h, double dt) {
-        if (multisampleFbo) {
-            gl.BindFramebuffer(GL_READ_FRAMEBUFFER, multisampleFbo);
-            gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, sceneFbo);
-            gl.BlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-        }
-        expose(sceneColor, targetFbo, w, h, dt);
-        gl.Enable(GL_DEPTH_TEST);
-        gl.DepthMask(GL_TRUE);
+    void finish(native::gfx::TargetView destination, int w, int h, double dt) {
+        if (requestedSamples) context.resolve_color(multisample, scene);
+        expose(scene.color, destination, w, h, dt);
+        context.depth_test(true);
+        context.depth_write(true);
     }
 
-    // Bloom and expose `scene` (a gamma-encoded half-float frame of w x h) into `targetFbo`, then meter it. The
-    // Enhanced and Cinematic looks call this on their own scene target.
-    void expose(GLuint scene, GLuint targetFbo, int w, int h, double dt) {
-        gl.Disable(GL_DEPTH_TEST);
-        gl.Disable(GL_BLEND);
-        gl.Disable(GL_CULL_FACE);
-        gl.DepthMask(GL_FALSE);
+    void expose(native::gfx::Texture texture, native::gfx::TargetView destination, int w, int h, double dt) {
         const bool withBloom = bloom && bloomScale > 0;
         if (withBloom) {
             ensure_bloom_targets(w, h);
             const auto &a = quarter[0], &b = quarter[1];
-            gl.BindFramebuffer(GL_FRAMEBUFFER, a.fbo);
-            gl.Viewport(0, 0, quarterWidth, quarterHeight);
-            gl.UseProgram(downsample);
-            gl.ActiveTexture(GL_TEXTURE0);
-            gl.BindTexture(GL_TEXTURE_2D, scene);
-            gl.Uniform1i(loc(downsample, "scene"), 0);
-            gl.Uniform1f(loc(downsample, "exposure"), exposure);
-            gl.Uniform2f(loc(downsample, "texel"), 1.f / w, 1.f / h);
+            context.bind_target(a);
+            context.viewport({0, 0, quarterWidth, quarterHeight});
+            context.bind_program(downsample);
+            const SceneConstants block{exposure, {1.f / w, 1.f / h}};
+            context.constants(downsampleConstants, &block);
+            context.bind_texture(0, texture, sampler);
             fullscreen(downsample);
             blur_into(a, b, 1.f / quarterWidth, 0, 1);
             blur_into(b, a, 0, 1.f / quarterHeight, bloomScale);
         }
-        gl.BindFramebuffer(GL_FRAMEBUFFER, targetFbo);
-        gl.Viewport(0, 0, w, h);
-        gl.UseProgram(composite);
-        gl.ActiveTexture(GL_TEXTURE0);
-        gl.BindTexture(GL_TEXTURE_2D, scene);
-        gl.Uniform1i(loc(composite, "scene"), 0);
-        gl.Uniform1f(loc(composite, "exposure"), exposure);
-        gl.ActiveTexture(GL_TEXTURE1);
-        gl.BindTexture(GL_TEXTURE_2D, quarter[0].texture);
-        gl.Uniform1i(loc(composite, "bloom"), 1);
-        gl.Uniform1i(loc(composite, "hasBloom"), withBloom);
+        context.bind_target(destination);
+        context.viewport({0, 0, w, h});
+        context.bind_program(composite);
+        const SceneConstants block{exposure, {}, uint32_t(withBloom)};
+        context.constants(compositeConstants, &block);
+        context.bind_texture(0, texture, sampler);
+        context.bind_texture(1, quarter[0].color, sampler);
         fullscreen(composite);
-        meter(scene, std::clamp(dt, 0., .25));
-        gl.BindFramebuffer(GL_FRAMEBUFFER, targetFbo);
-        gl.Viewport(0, 0, w, h);
-        gl.ActiveTexture(GL_TEXTURE0);
+        meter(texture, std::clamp(dt, 0., .25));
+        context.bind_target(destination);
+        context.viewport({0, 0, w, h});
     }
 };
 
 // Reused scene target for MSAA, resolution/aspect scaling and display grading.
 class GraphicsTarget {
-    Gl &gl;
-    GLuint vao = 0, program = 0, framebuffer = 0, color = 0, depth = 0;
-    GLuint multisample_framebuffer = 0, multisample_color = 0, multisample_depth = 0;
-    int width = 0, height = 0, samples = -1;
-    GLint brightness_location = -1, gamma_location = -1, vibrance_location = -1;
-
-    void storage(GLuint renderbuffer, GLenum format, int count, int w, int h) {
-        gl.BindRenderbuffer(GL_RENDERBUFFER, renderbuffer);
-        if (count) {
-            gl.RenderbufferStorageMultisample(GL_RENDERBUFFER, count, format, w, h);
-        } else {
-            gl.RenderbufferStorage(GL_RENDERBUFFER, format, w, h);
-        }
-    }
-
-    void check_target() {
-        if (gl.CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-            throw std::runtime_error("Graphics target incomplete");
-        }
-    }
+    native::gfx::Context &context;
+    native::gfx::Program program;
+    native::gfx::Geometry geometry;
+    native::gfx::Pipeline pipeline;
+    native::gfx::ConstantBinding constants;
+    native::gfx::Sampler linearSampler, nearestSampler;
+    native::gfx::RenderTarget scene, multisample;
+    int maximumSamples, width = 0, height = 0, samples = -1;
 
     void resize(int w, int h, int count) {
-        if (width == w && height == h && samples == count) {
-            return;
-        }
-        gl.BindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-        gl.BindTexture(GL_TEXTURE_2D, color);
-        gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-        gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color, 0);
-        storage(depth, GL_DEPTH_COMPONENT24, 0, w, h);
-        gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depth);
-        check_target();
-        if (count) {
-            gl.BindFramebuffer(GL_FRAMEBUFFER, multisample_framebuffer);
-            storage(multisample_color, GL_RGBA8, count, w, h);
-            storage(multisample_depth, GL_DEPTH_COMPONENT24, count, w, h);
-            gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, multisample_color);
-            gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, multisample_depth);
-            check_target();
-        }
+        using namespace native::gfx;
+        if (width == w && height == h && samples == count) return;
+        context.destroy(scene);
+        context.destroy(multisample);
+        scene = context.create_target({w, h, Format::rgba8, Format::depth24});
+        if (count) multisample = context.create_target({w, h, Format::rgba8, Format::depth24, count});
         width = w;
         height = h;
         samples = count;
     }
 
 public:
-    GraphicsTarget(Gl &api, GLuint empty_vao) : gl(api), vao(empty_vao) {
+    GraphicsTarget(native::gfx::Context &graphics, int maximum_samples)
+        : context(graphics)
+        , maximumSamples(maximum_samples) {
         const char *fragment = R"(#version 330 core
 in vec2 uv;out vec4 color;uniform sampler2D scene;uniform float brightness,gamma,vibrance;
 void main(){
@@ -406,84 +354,70 @@ void main(){
  color=vec4(mix(vec3(luminance),source,vibrance),1);
 }
 )";
-        program = link_program(gl, native_hdr::hdr_vertex, fragment);
-        brightness_location = gl.GetUniformLocation(program, "brightness");
-        gamma_location = gl.GetUniformLocation(program, "gamma");
-        vibrance_location = gl.GetUniformLocation(program, "vibrance");
-        gl.UseProgram(program);
-        gl.Uniform1i(gl.GetUniformLocation(program, "scene"), 0);
-        gl.GenFramebuffers(1, &framebuffer);
-        gl.GenFramebuffers(1, &multisample_framebuffer);
-        gl.GenTextures(1, &color);
-        gl.BindTexture(GL_TEXTURE_2D, color);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        gl.GenRenderbuffers(1, &depth);
-        gl.GenRenderbuffers(1, &multisample_color);
-        gl.GenRenderbuffers(1, &multisample_depth);
+        using namespace native::gfx;
+        program = context.create_program({{"graphics-target", ""}, native_hdr::hdr_vertex, fragment});
+        static constexpr ConstantField fields[] = {
+                {"brightness", 0, 4, ConstantType::float1},
+                {"gamma", 4, 4, ConstantType::float1},
+                {"vibrance", 8, 4, ConstantType::float1}
+        };
+        constants = context.create_constants(program, {fields, 12});
+        context.texture_unit(program, "scene", 0);
+        geometry = context.create_geometry(0, {});
+        pipeline = context.create_pipeline({{}, {false, false}, {}});
+        linearSampler = context.create_sampler({});
+        nearestSampler = context.create_sampler({Filter::nearest, Filter::nearest});
     }
+
+    explicit GraphicsTarget(native::gfx::Context &graphics) : GraphicsTarget(graphics, graphics.max_samples()) {}
 
     ~GraphicsTarget() {
-        gl.DeleteRenderbuffers(1, &multisample_depth);
-        gl.DeleteRenderbuffers(1, &multisample_color);
-        gl.DeleteRenderbuffers(1, &depth);
-        gl.DeleteTextures(1, &color);
-        gl.DeleteFramebuffers(1, &multisample_framebuffer);
-        gl.DeleteFramebuffers(1, &framebuffer);
-        gl.DeleteProgram(program);
+        context.destroy(scene);
+        context.destroy(multisample);
+        context.destroy(program);
+        context.destroy(geometry);
+        context.destroy(pipeline);
+        context.destroy(linearSampler);
+        context.destroy(nearestSampler);
     }
+
+    GraphicsTarget(const GraphicsTarget &) = delete;
+    GraphicsTarget &operator=(const GraphicsTarget &) = delete;
 
     void begin(const native::GraphicsView &view, int requested_samples) {
-        GLint maximum_samples = 0;
-        gl.GetIntegerv(GL_MAX_SAMPLES, &maximum_samples);
-        resize(view.width, view.height, std::min(requested_samples, maximum_samples));
-        gl.BindFramebuffer(GL_FRAMEBUFFER, samples ? multisample_framebuffer : framebuffer);
+        resize(view.width, view.height, std::clamp(requested_samples, 0, maximumSamples));
+        context.bind_target(samples ? multisample : scene);
     }
 
-    void refraction_source() {
+    native::gfx::TargetView refraction_source() {
         if (samples) {
-            gl.BindFramebuffer(GL_READ_FRAMEBUFFER, multisample_framebuffer);
-            gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
-            gl.BlitFramebuffer(
-                    0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST
-            );
+            context.resolve_color(multisample, scene);
+            context.resolve_depth(multisample, scene);
         }
-        gl.BindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+        return scene;
     }
 
     void
-    finish(GLuint target,
+    finish(native::gfx::TargetView destination,
            int output_width,
            int output_height,
            const native::GraphicsView &view,
            const native::GraphicsSettings &settings) {
-        if (samples) {
-            gl.BindFramebuffer(GL_READ_FRAMEBUFFER, multisample_framebuffer);
-            gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
-            gl.BlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-        }
-        gl.BindFramebuffer(GL_FRAMEBUFFER, target);
-        gl.Viewport(0, 0, output_width, output_height);
-        gl.Disable(GL_DEPTH_TEST);
-        gl.Disable(GL_BLEND);
-        gl.Disable(GL_CULL_FACE);
-        gl.DepthMask(GL_FALSE);
-        gl.ClearColor(0, 0, 0, 1);
-        gl.Clear(GL_COLOR_BUFFER_BIT);
-        gl.Viewport(view.x, view.y, view.output_width, view.output_height);
-        gl.UseProgram(program);
-        gl.ActiveTexture(GL_TEXTURE0);
-        gl.BindTexture(GL_TEXTURE_2D, color);
-        const int filter = settings.pixelated ? GL_NEAREST : GL_LINEAR;
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-        gl.Uniform1f(brightness_location, settings.brightness);
-        gl.Uniform1f(gamma_location, settings.gamma);
-        gl.Uniform1f(vibrance_location, settings.vibrance);
-        gl.BindVertexArray(vao);
-        gl.DrawArrays(GL_TRIANGLES, 0, 3);
-        gl.Viewport(0, 0, output_width, output_height);
-        gl.DepthMask(GL_TRUE);
-        gl.Enable(GL_DEPTH_TEST);
+        if (samples) context.resolve_color(multisample, scene);
+        context.bind_target(destination);
+        context.viewport({0, 0, output_width, output_height});
+        context.pipeline(pipeline);
+        context.clear_color({0, 0, 0, 1});
+        context.viewport({view.x, view.y, view.output_width, view.output_height});
+        context.bind_program(program);
+        const std::array<float, 3> block{settings.brightness, settings.gamma, settings.vibrance};
+        context.constants(constants, block.data());
+        context.bind_texture(0, scene.color, settings.pixelated ? nearestSampler : linearSampler);
+        context.bind_geometry(geometry);
+        context.draw(native::gfx::Primitive::triangles, 0, 3);
+        context.bind_texture(0, {});
+        context.viewport({0, 0, output_width, output_height});
+        context.depth_write(true);
+        context.depth_test(true);
     }
 };

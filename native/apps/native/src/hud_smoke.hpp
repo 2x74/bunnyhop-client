@@ -314,10 +314,10 @@ inline void draw_trainer_bar_colors(NativeHud &hud, int width, int height) {
 
 // Uses the existing presentation-smoke context. Fixtures never connect to a room or submit a run.
 template <class Save>
-void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) {
+void hud_parity_smoke(gfx::Context &gl, NativeHud &hud, int width, int height, Save save) {
     const auto clear = [&]() {
-        gl.ClearColor(.035f, .04f, .06f, 1);
-        gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        gl.clear_color({.035f, .04f, .06f, 1});
+        gl.clear_depth();
     };
     HudScoreboard board;
     board.contract(
@@ -612,13 +612,13 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
     hud.reset_history();
 }
 
-inline void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, const std::filesystem::path &output) {
+inline void
+hud_parity_smoke(gfx::Context &gl, NativeHud &hud, int width, int height, const std::filesystem::path &output) {
     hud_parity_smoke(gl, hud, width, height, [&](std::string_view name) {
-        const auto bytes = backbuffer_png(gl, width, height);
+        const auto bytes = target_png(gl, gl.current_target(), width, height);
         std::ofstream file(output / (std::string(name) + ".png"), std::ios::binary);
         file.write(bytes.data(), bytes.size());
-        if (!file || bytes.empty() || gl.GetError() != GL_NO_ERROR)
-            throw std::runtime_error("HUD smoke screenshot failed");
+        if (!file || bytes.empty()) throw std::runtime_error("HUD smoke screenshot failed");
     });
 }
 }  // namespace native

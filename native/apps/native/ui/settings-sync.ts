@@ -21,6 +21,7 @@ const OPT_KEY = "bunnyhop:settings-sync";
 const SAVE_DELAY_MS = 4000;
 /** Native-only settings that belong to this computer, not the player. */
 const DEVICE_KEYS = [
+  "renderer",
   "windowMode",
   "alwaysOnTop",
   "rememberWindowBounds",
@@ -129,7 +130,10 @@ function applyRemote(doc: SettingsDoc): void {
   try {
     if (plan.changed.length) prefs.update((p) => Object.assign(p, plan.next));
     const native = doc.settings.native;
-    if (isObj(native)) sendNativeSettings(native as SettingsPatch);
+    if (isObj(native)) {
+      const patch = Object.fromEntries(Object.entries(native).filter(([key]) => !DEVICE_KEYS.includes(key)));
+      sendNativeSettings(patch as SettingsPatch);
+    }
   } finally {
     applying = false;
   }

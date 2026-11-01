@@ -5,6 +5,7 @@
 namespace native {
 Preferences Preferences::from_settings(const nlohmann::json &settings) {
     Preferences preferences;
+    preferences.renderer = renderer_choice(settings.value("renderer", std::string("opengl")));
     preferences.sensitivity = settings.at("sensitivity").get<double>();
     preferences.vertical_sensitivity = settings.at("verticalSensitivity").get<double>();
     preferences.separate_vertical = settings.at("separateVertical").get<bool>();

@@ -48,18 +48,18 @@ inline const char *strafe_hint_text(StrafeHint hint) {
 
 struct StrafeReading {
     double percent = 0;
-    std::optional<StrafeHint> hint;
+    std::optional<StrafeHint> hint = std::nullopt;
     TrainerCue cue = TrainerCue::ready;
     int side = 0;
     bool has_pace = true;
     // The Bar look's own average, where a tick with nothing to judge counts as 0. Empty when it is 0 and in previews,
     // where the Bar shows the pace and side above.
-    std::optional<double> bar;
+    std::optional<double> bar = std::nullopt;
     int bar_side = 0;
     // The average pace of the last finished jump, the number under the Bar.
-    std::optional<double> last_jump;
+    std::optional<double> last_jump = std::nullopt;
     // This tick's gain as a share of the best possible, the Bar's colour. Empty when it can't be judged.
-    std::optional<double> gain;
+    std::optional<double> gain = std::nullopt;
 };
 
 struct TrainerSample {

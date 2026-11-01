@@ -1,0 +1,165 @@
+import os
+import subprocess
+import struct
+import tempfile
+from pathlib import Path
+import unittest
+
+from extract import NAMES, SOURCE, calls, function, player_variants, shader_source
+from interfaces import check_dxbc, link_locations, match_hlsl, remap
+from reflection import check_interfaces, normalize, type_size
+
+
+class ShaderPipelineTests(unittest.TestCase):
+    def test_cpp_literals_do_not_create_shader_sites(self):
+        source = '''// link_program(gl, bad, bad);
+        const char *s = R"tag(link_program(gl, fake, fake); { })tag";
+        link_program(gl, std::string("v,") + R"(vert)", R"(frag)");'''
+        found = calls(source)
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0][1], ['std::string("v,") + R"(vert)"', 'R"(frag)"'])
+        self.assertIn('return "}";', function('inline std::string shader() { return "}"; }', 'shader'))
+
+    def test_every_creation_site_is_registered(self):
+        found = {}
+        for path in SOURCE.iterdir():
+            if shader_source(path):
+                count = len(calls(path.read_text(encoding="utf-8")))
+                if count:
+                    found[path.name] = count
+        self.assertEqual(found, {name: len(sites) for name, sites in NAMES.items()})
+        shader_creation = sum(
+            path.read_text(encoding="utf-8").count('gl.CreateShader(') for path in SOURCE.glob('*.hpp'))
+        self.assertEqual(shader_creation, 1)
+
+    def test_seam_program_descriptors_preserve_shader_sources(self):
+        source = '''Program create_program(const ProgramDesc &source) { return {}; }
+        void create_program() {}
+        context.create_program(
+            {{"presentation", ""}, vs, fs.c_str()}
+        );'''
+        self.assertEqual(calls(source)[0][1], ["vs", "fs.c_str()"])
+        self.assertEqual(calls(source)[0][2:], ("presentation", ""))
+        self.assertEqual(len(calls(source)), 1)
+        self.assertEqual(calls("link_program(gl_, source.vertex, source.fragment);"), [])
+        self.assertFalse(shader_source(Path("gfx_smoke.cpp")))
+        hud = calls((SOURCE / "hud.hpp").read_text(encoding="utf-8"))
+        self.assertEqual(len(hud), 1)
+        self.assertEqual(hud[0][2:], ("hud", ""))
+
+    def test_postprocessing_keys_match_the_manifest(self):
+        for filename in ("source_hdr.hpp", "enhanced_look.hpp"):
+            sites = calls((SOURCE / filename).read_text(encoding="utf-8"))
+            self.assertEqual([site[2:] for site in sites], [(key, "") for key in NAMES[filename]])
+
+    def test_reachable_player_cache_keys(self):
+        variants = player_variants(range(28))
+        self.assertEqual(len(variants), 117)
+        self.assertEqual(sum(v['material'] == 'solid' for v in variants), 112)
+        self.assertTrue(all(not v['finish'] for v in variants if v['material'] != 'solid'))
+        self.assertTrue(all(v['detail'] for v in variants if v['material'] == 'gun'))
+        self.assertEqual([v for v in variants if v['material'] == 'world_gun'],
+                         [dict(material='world_gun', finish=0, detail=False, glove=False)])
+
+    def test_every_player_key_exists_in_manifest(self):
+        # Evaluate the runtime key function rather than duplicating its naming rules in Python.
+        source = (SOURCE / "player_material.hpp").read_text(encoding="utf-8")
+        variants = player_variants(range(28))
+        statements = []
+        expected = set()
+        for variant in variants:
+            material, finish, glove, detail = (variant[k] for k in ("material", "finish", "glove", "detail"))
+            expected.add(f"player-{material}-{finish}-g{int(glove)}-d{int(detail)}")
+            statements.append('std::cout << native_render::player_shader_key('
+                              f'{finish}, {str(glove).lower()}, {str(detail).lower()}, '
+                              f'native_render::PlayerMaterial::{material}) << "\\n";')
+        enum = "enum class PlayerMaterial { solid, ghost, gun, world_gun };"
+        cpp = ('#include <string>\n#include <iostream>\nnamespace native_render {\n' + enum
+               + function(source, "player_shader_key") + '}\nint main() {\n'
+               + '\n'.join(statements) + '\n}\n')
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            path = directory / "keys.cpp"
+            path.write_text(cpp, encoding="utf-8")
+            binary = directory / ("keys.exe" if os.name == "nt" else "keys")
+            if os.name == "nt":
+                command = ["cl", "/nologo", "/std:c++20", "/EHsc", str(path), f"/Fe:{binary}",
+                           f"/Fo:{directory / 'keys.obj'}"]
+            else:
+                command = [os.environ.get("CXX", "c++"), "-std=c++20", str(path), "-o", str(binary)]
+            subprocess.run(command, check=True, capture_output=True)
+            requested = subprocess.check_output([str(binary)], text=True).splitlines()
+        self.assertEqual(len(requested), 117)
+        self.assertEqual(set(requested), expected)
+        creation = calls((SOURCE / "native_viewmodel_gpu.hpp").read_text(encoding="utf-8"))[0]
+        self.assertEqual(creation[2:], ("key", ""))
+
+    def test_stage_locations_are_linked_by_name(self):
+        vertex = dict(outputs=[dict(name='uv', type='vec2', location=0), dict(name='normal', type='vec3', location=1)])
+        fragment = dict(inputs=[dict(name='uv', type='vec2', location=1)])
+        with self.assertRaises(ValueError):
+            check_interfaces(vertex, fragment)
+        locations = link_locations(vertex, fragment)
+        self.assertEqual(locations, dict(normal=0, uv=1))
+        fragment['inputs'][0]['type'] = 'vec3'
+        with self.assertRaises(ValueError):
+            link_locations(vertex, fragment)
+
+    def test_spirv_remap_preserves_other_decorations(self):
+        words = [0x07230203, 0x10000, 0, 3, 0,
+                 (4 << 16) | 5, 1, *struct.unpack('<2I', b'uv\0\0\0\0\0\0'),
+                 (4 << 16) | 71, 1, 30, 7,
+                 (3 << 16) | 71, 1, 14]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'test.spv'
+            path.write_bytes(struct.pack(f'<{len(words)}I', *words))
+            remap(path, [dict(name='uv')], dict(uv=2))
+            actual = list(struct.unpack(f'<{len(words)}I', path.read_bytes()))
+        expected = list(words)
+        expected[12] = 2
+        self.assertEqual(actual, expected)
+
+    def test_ghost_subset_keeps_identical_hlsl_register_packing(self):
+        vertex = """struct SPIRV_Cross_Output {
+    float2 aura : TEXCOORD0;
+    float3 color : TEXCOORD1;
+    float4 gl_Position : SV_Position;
+};"""
+        fragment = """struct SPIRV_Cross_Input {
+    float3 color : TEXCOORD1;
+    float4 gl_FragCoord : SV_Position;
+    bool facing : SV_IsFrontFace;
+};"""
+        fixed = match_hlsl(vertex, fragment)
+        self.assertLess(fixed.index('aura :'), fixed.index('color :'))
+        self.assertLess(fixed.index('color :'), fixed.index('gl_FragCoord :'))
+        self.assertIn('bool facing : SV_IsFrontFace;', fixed)
+        field = dict(semantic='TEXCOORD', index=1, register=0, mask=7, componentType=3)
+        check_dxbc(dict(outputs=[field]), dict(inputs=[dict(field)]))
+        shifted = dict(field, register=1)
+        with self.assertRaises(ValueError):
+            check_dxbc(dict(outputs=[field]), dict(inputs=[shifted]))
+
+    def test_std140_arrays_and_structs(self):
+        self.assertEqual(type_size(dict(type='vec3', array=[8], array_stride=16), {}), 128)
+        self.assertEqual(type_size(dict(type='mat4', matrix_stride=16), {}), 64)
+        types = dict(S=dict(members=[dict(name='on', type='uint', offset=0),
+                                     dict(name='color', type='vec3', offset=16)]))
+        self.assertEqual(type_size(dict(type='S'), types), 28)
+
+    def test_dxbc_offsets_cannot_silently_drift(self):
+        spirv = dict(entryPoints=[dict(mode='vert')], types=dict(B=dict(members=[
+            dict(name='enabled', type='uint', offset=0)])),
+            ubos=[dict(name='NativeUniforms', type='B', binding=0, block_size=4)])
+        hlsl = 'uint _17_enabled : packoffset(c0);'
+        dxbc = dict(constantBuffers=[dict(name='NativeUniforms', size=16, uniforms=[
+            dict(hlslName='_17_enabled', offset=0, size=4)])], resources=[])
+        result = normalize(spirv, hlsl, dxbc)
+        self.assertEqual(result['dxbc']['constantBuffers'][0]['uniforms'][0]['name'], 'enabled')
+        dxbc['constantBuffers'][0]['uniforms'][0]['offset'] = 4
+        with self.assertRaises(ValueError):
+            normalize(spirv, hlsl, dxbc)
+
+
+if __name__ == '__main__':
+    unittest.main()

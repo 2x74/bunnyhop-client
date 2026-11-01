@@ -63,16 +63,24 @@ inline BackdropMap load_backdrop_map(const std::filesystem::path &bsp, const std
     return out;
 }
 
-// The current back buffer as a small PNG: box-filtered to fit 960x540, halved
-// again until its data URI fits `max_uri_bytes`. Read before SwapWindow.
-inline std::string backbuffer_png(native::Gl &gl, int width, int height, size_t max_uri_bytes = 2000000) {
+// A target as a small PNG: box-filtered to fit 960x540, halved until its data URI fits `max_uri_bytes`.
+inline std::string target_png(
+        gfx::Context &context, const gfx::TargetView &target, int width, int height, size_t max_uri_bytes = 2000000
+) {
     if (width <= 0 || height <= 0) return {};
-    std::vector<unsigned char> pixels(size_t(width) * height * 3);
-    int alignment = 4;
-    gl.GetIntegerv(GL_PACK_ALIGNMENT, &alignment);
-    gl.PixelStorei(GL_PACK_ALIGNMENT, 1);
-    gl.ReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
-    gl.PixelStorei(GL_PACK_ALIGNMENT, alignment);
+    auto readback = context.create_readback(width, height);
+
+    struct Release {
+        gfx::Context &context;
+        gfx::Readback &readback;
+
+        ~Release() { context.destroy(readback); }
+    } release{context, readback};
+
+    std::vector<unsigned char> pixels(size_t(width) * height * 4);
+    constexpr uint64_t readback_timeout_ns = 5'000'000'000;
+    context.enqueue_readback(target, readback);
+    context.collect(readback, std::as_writable_bytes(std::span(pixels)), gfx::RowOrigin::bottom, readback_timeout_ns);
     double scale = std::min({1.0, 960.0 / width, 540.0 / height});
     for (;;) {
         const int w = std::max(1, int(width * scale)), h = std::max(1, int(height * scale));
@@ -87,7 +95,7 @@ inline std::string backbuffer_png(native::Gl &gl, int width, int height, size_t 
                 for (int sy = y0; sy < y1 && sy < height; ++sy)
                     for (int sx = x0; sx < x1 && sx < width; ++sx, ++n)
                         for (int k = 0; k < 3; ++k)
-                            sum[k] += pixels[(size_t(sy) * width + sx) * 3 + k];
+                            sum[k] += pixels[(size_t(sy) * width + sx) * 4 + k];
                 for (int k = 0; k < 3; ++k)
                     rows[size_t(y) * (w * 3 + 1) + 1 + x * 3 + k] = (unsigned char)(n ? sum[k] / n : 0);
             }
@@ -131,8 +139,8 @@ public:
     // promptly once `cancel` is set and must not write the cache after that.
     using Loader = std::function<native::DownloadedMap(const std::string &map, const std::atomic_bool &cancel)>;
 
-    MenuBackdrop(native::Gl &api, std::filesystem::path asset_root, Loader loader)
-        : gl(api)
+    MenuBackdrop(gfx::Context &api, std::filesystem::path asset_root, Loader loader)
+        : graphics(api)
         , assets(std::move(asset_root))
         , load(std::move(loader)) {}
 
@@ -231,7 +239,7 @@ public:
         if (pending && may_build) {
             try {
                 auto loaded = std::make_unique<BackdropMap>(load_backdrop_map(pending->bsp, pending->content_root));
-                auto next = std::make_unique<native::Renderer>(gl, loaded->core.get(), assets);
+                auto next = std::make_unique<native::Renderer>(graphics, loaded->core.get(), assets);
                 next->set_viewmodel_visible(false);
                 next->set_fov(native::tour::renderer_fov());
                 director = std::make_unique<native::tour::Director>(loaded->shots);
@@ -374,7 +382,7 @@ private:
         std::future<native::DownloadedMap> result;
     };
 
-    native::Gl &gl;
+    gfx::Context &graphics;
     native::GraphicsSettings graphics_;
     nlohmann::json settings_ = nlohmann::json::object();
     std::filesystem::path assets;

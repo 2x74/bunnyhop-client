@@ -580,7 +580,15 @@ function dropUnreadableBinds(p: Prefs): void {
 }
 
 function receiveHost(): void {
-  const shape = JSON.stringify([state.settingsKeys, state.bindActions, state.capabilities]);
+  const shape = JSON.stringify([
+    state.settingsKeys,
+    state.bindActions,
+    state.capabilities,
+    state.client?.renderer,
+    state.lowLatency?.dxgi,
+    state.lowLatency?.reflex,
+    state.lowLatency?.antiLag,
+  ]);
   const changedShape = shape !== lastShape;
   if (state.settings === lastSettings && state.extraSettings === lastExtra && !changedShape) return;
   lastSettings = state.settings;

@@ -49,6 +49,7 @@ struct RunRecorder {
           const std::string &loadout);
     void resume_segment(BhContext *core);
     void write(BhContext *core);
+    std::string preserve_interrupted(BhContext *core);
     nlohmann::json finish_event(
             uint32_t track,
             double seconds,

@@ -1,0 +1,158 @@
+name: D3D11 whole-game WARP proof
+on:
+  push:
+    branches: [ci/d3d11-windows]
+permissions:
+  contents: read
+jobs:
+  game:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: native
+        shell: pwsh
+    steps:
+      - name: Preserve shader and menu source line endings
+        working-directory: .
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: 1.4.3
+      - run: rustup toolchain install 1.99.1 --profile minimal
+      - run: rustup override set 1.99.1
+      - run: bun install --frozen-lockfile
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        id: dependencies
+        with:
+          path: |
+            native/target/native-deps
+            native/target/d3d-shaders/toolchain
+            native/target/release
+          key: >-
+            d3d11-windows-pins-${{ hashFiles(
+            'native/apps/native/packaging/sdl.json',
+            'native/apps/native/tools/d3d-shaders/toolchain.json', 'native/Cargo.lock') }}
+      - name: Restore frozen inputs and locally captured OpenGL goldens
+        run: |
+          $archive = [System.IO.File]::Create("$pwd/target/d3d11-windows-fixtures.tar.gz")
+          try {
+            foreach ($part in (Get-ChildItem target/d3d11-windows-fixtures.part-* | Sort-Object Name)) {
+              $fixtureStream = [System.IO.File]::OpenRead($part.FullName)
+              try { $fixtureStream.CopyTo($archive) } finally { $fixtureStream.Dispose() }
+            }
+          } finally { $archive.Dispose() }
+          tar -xzf target/d3d11-windows-fixtures.tar.gz -C target
+          if ($LASTEXITCODE -ne 0) { throw 'Frozen fixtures are missing or damaged' }
+          tar -xzf target/d3d11-windows-goldens.tar.gz -C target/d3d11-fixtures
+          if ($LASTEXITCODE -ne 0) { throw 'Canonical full-resolution goldens failed' }
+          Copy-Item target/d3d11-fixtures/target/native-assets target/native-assets -Recurse
+          bun run wasm
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned verifier failed' }
+          bun run menu
+          if ($LASTEXITCODE -ne 0) { throw 'Menu build failed' }
+      - name: Build the actual client and tester bundle with MSVC
+        id: client
+        run: ./apps/native/tools/build-measure-windows.ps1
+      - name: Build whole-game render fixtures
+        run: |
+          . ./apps/native/tools/msvc-environment.ps1
+          cmake --build apps/native/build --parallel 4 --target bunnyhop-native-effects-render-smoke bunnyhop-native-display-modes-smoke bunnyhop-native-video-frames-smoke bunnyhop-native-reflection-render-smoke bunnyhop-native-avatar-smoke bunnyhop-native-loadout-preview-smoke
+          if ($LASTEXITCODE -ne 0) { throw 'Whole-game smoke build failed' }
+      - name: Run settings tests and the WARP seam controls
+        run: |
+          $sdlBin = "$pwd/target/native-deps/sdl/install/bin"
+          $vcpkgBin = "$pwd/target/native-deps/vcpkg/installed/x64-windows/bin"
+          $env:PATH = "$sdlBin;$vcpkgBin;$env:PATH"
+          $tests = 'native_(preferences|renderer_startup|renderer_prompt|gfx_resource_owners|' +
+            'graphics_settings|client_boundaries|window_modes|display_modes)'
+          ctest --test-dir apps/native/build --output-on-failure -R $tests
+          if ($LASTEXITCODE -ne 0) { throw 'Settings/display checks failed' }
+          ./apps/native/build/bunnyhop-native-gfx-smoke.exe target/d3d11-controls --warp
+          if ($LASTEXITCODE -ne 0) { throw 'WARP seam controls failed' }
+          ./apps/native/build/bunnyhop-native-post-processing-smoke.exe --warp
+          if ($LASTEXITCODE -ne 0) { throw 'WARP postprocess control failed' }
+      - name: Render every real game path under WARP
+        run: |
+          $sdlBin = "$pwd/target/native-deps/sdl/install/bin"
+          $vcpkgBin = "$pwd/target/native-deps/vcpkg/installed/x64-windows/bin"
+          $env:PATH = "$sdlBin;$vcpkgBin;$env:PATH"
+          python apps/native/tools/d3d11-game/capture.py target/d3d11-fixtures target/d3d11-game --renderer d3d11
+          if ($LASTEXITCODE -ne 0) { throw 'Whole-game WARP render failed' }
+      - name: Compare every image and produce RGB heatmaps
+        if: always()
+        run: |
+          python -m pip install Pillow==12.0.0 numpy==2.2.6
+          python apps/native/tools/d3d11-game/compare.py target/d3d11-fixtures/goldens target/d3d11-game
+          if ($LASTEXITCODE -ne 0) { throw 'Whole-game image comparison failed' }
+      - name: Validate the tester controller
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path apps/native/tools/measure-renderer.ps1), [ref]$null, [ref]$errors) | Out-Null
+          if ($errors.Count) { throw ($errors | Out-String) }
+          $sdlBin = "$pwd/target/native-deps/sdl/install/bin"
+          $vcpkgBin = "$pwd/target/native-deps/vcpkg/installed/x64-windows/bin"
+          $env:PATH = "$sdlBin;$vcpkgBin;$env:PATH"
+          ./apps/native/build/bunnyhop-native-shader-benchmark.exe target/native-assets `
+            target/d3d11-game/warp-programs.json --renderer d3d11 --d3d11-warp
+          if ($LASTEXITCODE -ne 0) { throw 'WARP precompiled program creation failed' }
+          $spec = @{ path = "$pwd/target/d3d11-fixtures/inputs/bhop_eazy.bsp";
+            out = "$pwd/target/d3d11-game/warp-tester.json"; renderer = 'd3d11'; warp = $true;
+            frames = 20; warmup = 2; width = 640; height = 360; vsync = $false; lowLatency = 'off' }
+          $spec | ConvertTo-Json | Set-Content target/warp-tester-spec.json
+          ./apps/native/build/bunnyhop-native-gameplay-benchmark.exe target/warp-tester-spec.json
+          if ($LASTEXITCODE -ne 0) { throw 'WARP tester correctness smoke failed' }
+      - name: Package the client for hardware checks
+        id: hardware
+        if: always() && steps.client.outcome == 'success'
+        run: |
+          . ./apps/native/tools/msvc-environment.ps1
+          $sdl = "$pwd/target/native-deps/sdl/install"
+          $vcpkg = "$pwd/target/native-deps/vcpkg/installed/x64-windows"
+          $licenses = (& bun apps/native/packaging/sdl.ts --print licenses).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'SDL license lookup failed' }
+          bun apps/native/package.ts --skip-build --version 0.6.5 --out target/d3d11-hardware `
+            --dependencies "$sdl/bin" --dependencies "$vcpkg/bin" `
+            --licenses $licenses --licenses "$vcpkg/share"
+          if ($LASTEXITCODE -ne 0) { throw 'Hardware client packaging failed' }
+          bun apps/native/packaging/release-check.ts `
+            --package target/d3d11-hardware/bunnyhop-native-0.6.5-win32-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Hardware client package check failed' }
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        if: always() && steps.dependencies.outputs.cache-hit != 'true'
+        with:
+          path: |
+            native/target/native-deps
+            native/target/d3d-shaders/toolchain
+            native/target/release
+          key: ${{ steps.dependencies.outputs.cache-primary-key }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: d3d11-whole-game-evidence
+          path: |
+            native/target/d3d11-game
+            native/target/d3d11-fixtures/goldens
+            native/target/d3d11-fixtures/suite.json
+            native/target/d3d11-controls
+            native/target/d3d11-prompt
+            native/apps/native/build/Testing
+            native/target/d3d-shaders/output/report.json
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.client.outcome == 'success'
+        with:
+          name: renderer-measure-windows
+          path: native/target/renderer-measure-windows
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.hardware.outcome == 'success'
+        with:
+          name: d3d11-hardware-client
+          path: |
+            native/target/d3d11-hardware/*.zip
+            native/target/d3d11-hardware/*.json
+          if-no-files-found: error
+          retention-days: 30

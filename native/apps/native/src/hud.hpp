@@ -1,4 +1,5 @@
 #pragma once
+#include "gfx.hpp"
 #include "renderer.hpp"
 #include <array>
 #include <cstdio>
@@ -22,20 +23,24 @@
 
 namespace native {
 class NativeHud {
-    Gl &gl;
-    GLuint program = 0, vao = 0, vbo = 0, atlas = 0;
-    GLuint glyph_atlas_ = 0;
+    gfx::Context &graphics_;
+    gfx::Program program;
+    gfx::Geometry geometry;
+    gfx::Pipeline pipeline;
+    gfx::ConstantBinding viewport_constants;
+    gfx::Sampler sampler;
+    gfx::Texture atlas, glyph_atlas_;
     std::vector<float> vertices;
 
     struct Batch {
-        GLuint texture;
+        const gfx::Texture *texture;
         size_t first, count;
     };
 
     std::vector<Batch> batches;
 
     struct Raster {
-        GLuint texture;
+        gfx::Texture texture;
         int width, height;
         int pixels;
         bool tabular;
@@ -85,7 +90,7 @@ class NativeHud {
 
     std::vector<ChatRow> chat_rows_;
     uint64_t chat_layout_hash_ = ~uint64_t(0);
-    GLuint current_texture = 0;
+    const gfx::Texture *current_texture = nullptr;
     size_t raster_bytes = 0;
     uint64_t raster_batch_ = 0;
     uint64_t rasterizations_ = 0;
@@ -93,7 +98,7 @@ class NativeHud {
     void begin_batch() {
         vertices.clear();
         batches.clear();
-        current_texture = atlas;
+        current_texture = &atlas;
         ++raster_batch_;
     }
 
@@ -103,7 +108,7 @@ class NativeHud {
         });
         if (stale == raster_cache.end() || stale->second.batch == raster_batch_) return false;
         raster_bytes -= size_t(stale->second.width) * stale->second.height * 4;
-        gl.DeleteTextures(1, &stale->second.texture);
+        graphics_.destroy(stale->second.texture);
         raster_cache.erase(stale);
         return true;
     }
@@ -131,7 +136,7 @@ class NativeHud {
         }
         raster_bytes += bitmap.rgba.size();
         Raster result{
-                0,
+                {},
                 bitmap.width,
                 bitmap.height,
                 pixels,
@@ -141,24 +146,8 @@ class NativeHud {
                 bitmap.origin_y,
                 bitmap.advance
         };
-        gl.GenTextures(1, &result.texture);
-        gl.BindTexture(GL_TEXTURE_2D, result.texture);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        gl.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
-        gl.TexImage2D(
-                GL_TEXTURE_2D,
-                0,
-                GL_RGBA8,
-                bitmap.width,
-                bitmap.height,
-                0,
-                GL_RGBA,
-                GL_UNSIGNED_BYTE,
-                bitmap.rgba.data()
-        );
+        const void *data = bitmap.rgba.data();
+        result.texture = graphics_.create_texture({bitmap.width, bitmap.height, gfx::Format::rgba8}, {&data, 1});
         return &raster_cache.emplace(key, result).first->second;
     }
 
@@ -204,9 +193,9 @@ class NativeHud {
         const float width = glyphs->width / ratio, height = glyphs->height / ratio;
         const float left = std::clamp(from, 0.f, width), right = std::clamp(until, 0.f, width);
         if (right <= left) return;
-        current_texture = glyphs->texture;
+        current_texture = &glyphs->texture;
         quad(x + left, y, right - left, height, left / width, 0, (right - left) / width, 1, color);
-        current_texture = atlas;
+        current_texture = &atlas;
     }
 
     float scale = 1;
@@ -407,10 +396,10 @@ class NativeHud {
             const float ratio = scale * element_scale;
             const float width = glyphs->width / ratio, height = glyphs->height / ratio;
             if (center) x -= width * .5f;
-            current_texture = glyphs->texture;
+            current_texture = &glyphs->texture;
             quad(x + 1, y + 1, width, height, 0, 0, 1, 1, text_shadow);
             quad(x, y, width, height, 0, 0, 1, 1, color);
-            current_texture = atlas;
+            current_texture = &atlas;
             return;
         }
         size_t points = 0;
@@ -468,28 +457,15 @@ class NativeHud {
                 }
             }
         }
-        gl.GenTextures(1, &glyph_atlas_);
-        gl.BindTexture(GL_TEXTURE_2D, glyph_atlas_);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        gl.TexImage2D(
-                GL_TEXTURE_2D,
-                0,
-                GL_RGBA8,
-                native::hud_glyph_width,
-                native::hud_glyph_height,
-                0,
-                GL_RGBA,
-                GL_UNSIGNED_BYTE,
-                pixels.data()
+        const void *data = pixels.data();
+        glyph_atlas_ = graphics_.create_texture(
+                {native::hud_glyph_width, native::hud_glyph_height, gfx::Format::rgba8}, {&data, 1}
         );
     }
 
     void glyph(float x, float y, unsigned index, float width, float height, Color color, bool colored = false) {
         if (!index) return;
-        current_texture = glyph_atlas_;
+        current_texture = &glyph_atlas_;
         const float u = float(index % native::hud_glyph_columns) / native::hud_glyph_columns;
         const float v = float(index / native::hud_glyph_columns) * native::hud_glyph_cell / native::hud_glyph_height;
         quad(x,
@@ -501,7 +477,7 @@ class NativeHud {
              1.f / native::hud_glyph_columns,
              float(native::hud_glyph_cell) / native::hud_glyph_height,
              color);
-        current_texture = atlas;
+        current_texture = &atlas;
     }
 
 public:
@@ -1216,36 +1192,31 @@ public:
         flush(width, height);
     }
 
-    NativeHud(Gl &g, const std::filesystem::path &assets) : gl(g) {
+    NativeHud(gfx::Context &graphics, const std::filesystem::path &assets) : graphics_(graphics) {
         std::ifstream f(assets / "hud.rgba", std::ios::binary);
         std::vector<uint8_t> data{std::istreambuf_iterator<char>(f), {}};
         if (data.size() != 640 * 312 * 4)
             throw std::runtime_error("Native HUD atlas is absent; build presentation assets");
-        program = link_program(
-                gl,
-                R"(#version 330 core
+        program = graphics_.create_program(
+                {{"hud", ""},
+                 R"(#version 330 core
 layout(location=0)in vec2 pos;layout(location=1)in vec2 coord;layout(location=2)in vec4 tint;
 uniform vec3 viewport;out vec2 uv;out vec4 ink;
 void main(){uv=coord;ink=tint;gl_Position=vec4(pos.x/viewport.x*2.-1.,1.-pos.y/viewport.y*2.,0,1);})",
-                R"(#version 330 core
+                 R"(#version 330 core
 in vec2 uv;in vec4 ink;uniform sampler2D font;out vec4 color;
 void main(){if(uv.y>2.){color=texture(font,vec2(uv.x,uv.y-3.))*ink;}
-else{color=vec4(ink.rgb,ink.a*(uv.x<-1.?1.:texture(font,uv).a));}})"
+else{color=vec4(ink.rgb,ink.a*(uv.x<-1.?1.:texture(font,uv).a));}})"}
         );
-        gl.GenVertexArrays(1, &vao);
-        gl.BindVertexArray(vao);
-        gl.GenBuffers(1, &vbo);
-        gl.BindBuffer(GL_ARRAY_BUFFER, vbo);
-        gl.EnableVertexAttribArray(0);
-        gl.VertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), nullptr);
-        gl.EnableVertexAttribArray(1);
-        gl.VertexAttribPointer(
-                1, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), reinterpret_cast<void *>(2 * sizeof(float))
-        );
-        gl.EnableVertexAttribArray(2);
-        gl.VertexAttribPointer(
-                2, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(float), reinterpret_cast<void *>(4 * sizeof(float))
-        );
+        static constexpr gfx::VertexAttribute attributes[] = {
+                {0, 2, 0}, {1, 2, 2 * sizeof(float)}, {2, 4, 4 * sizeof(float)}
+        };
+        geometry = graphics_.create_geometry(8 * sizeof(float), attributes);
+        pipeline = graphics_.create_pipeline({{true}, {false, false}, {}});
+        static constexpr gfx::ConstantField fields[] = {{"viewport", 0, 12, gfx::ConstantType::float3}};
+        viewport_constants = graphics_.create_constants(program, {fields, 16});
+        graphics_.texture_unit(program, "font", 0);
+        sampler = graphics_.create_sampler({});
         vertices.reserve(512 * 1024);
         batches.reserve(8192);
         caret_cache.reserve(512);
@@ -1254,23 +1225,19 @@ else{color=vec4(ink.rgb,ink.a*(uv.x<-1.?1.:texture(font,uv).a));}})"
         chat_input_carets_.reserve(1024);
         chat_input_identity_.reserve(512);
         prepare_glyph_atlas();
-        gl.GenTextures(1, &atlas);
-        gl.BindTexture(GL_TEXTURE_2D, atlas);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 640, 312, 0, GL_RGBA, GL_UNSIGNED_BYTE, data.data());
+        const void *pixels = data.data();
+        atlas = graphics_.create_texture({640, 312, gfx::Format::rgba8}, {&pixels, 1});
     }
 
     ~NativeHud() {
-        gl.DeleteTextures(1, &glyph_atlas_);
-        for (const auto &[key, raster] : raster_cache)
-            gl.DeleteTextures(1, &raster.texture);
-        gl.DeleteTextures(1, &atlas);
-        gl.DeleteBuffers(1, &vbo);
-        gl.DeleteVertexArrays(1, &vao);
-        gl.DeleteProgram(program);
+        graphics_.destroy(glyph_atlas_);
+        for (auto &[key, raster] : raster_cache)
+            graphics_.destroy(raster.texture);
+        graphics_.destroy(atlas);
+        graphics_.destroy(sampler);
+        graphics_.destroy(geometry);
+        graphics_.destroy(pipeline);
+        graphics_.destroy(program);
     }
 
     // Where each element goes: element id -> {x, y} in percent of the screen.
@@ -1887,26 +1854,19 @@ private:
     }
 
     void flush(int width, int height) {
-        gl.Disable(GL_DEPTH_TEST);
-        gl.DepthMask(GL_FALSE);
-        gl.Disable(GL_CULL_FACE);
-        gl.Enable(GL_BLEND);
-        gl.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        gl.UseProgram(program);
-        const float viewport[3] = {float(width), float(height), 0};
-        gl.Uniform3fv(gl.GetUniformLocation(program, "viewport"), 1, viewport);
-        gl.Uniform1i(gl.GetUniformLocation(program, "font"), 0);
-        gl.ActiveTexture(GL_TEXTURE0);
-        gl.BindTexture(GL_TEXTURE_2D, atlas);
-        gl.BindVertexArray(vao);
-        gl.BindBuffer(GL_ARRAY_BUFFER, vbo);
-        gl.BufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STREAM_DRAW);
+        graphics_.pipeline(pipeline);
+        graphics_.bind_program(program);
+        const std::array<float, 4> viewport = {float(width), float(height), 0, 0};
+        graphics_.constants(viewport_constants, viewport.data());
+        graphics_.bind_geometry(geometry);
+        graphics_.stream_vertices(geometry, std::as_bytes(std::span(vertices)));
         for (const auto &batch : batches) {
-            gl.BindTexture(GL_TEXTURE_2D, batch.texture);
-            gl.DrawArrays(GL_TRIANGLES, GLint(batch.first), GLsizei(batch.count));
+            graphics_.bind_texture(0, *batch.texture, sampler);
+            graphics_.draw(gfx::Primitive::triangles, int(batch.first), int(batch.count));
         }
-        gl.DepthMask(GL_TRUE);
-        gl.Enable(GL_DEPTH_TEST);
+        graphics_.unbind_sampler(0);
+        graphics_.depth_write(true);
+        graphics_.depth_test(true);
     }
 };
 }  // namespace native
