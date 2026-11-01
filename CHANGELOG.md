@@ -4,13 +4,31 @@
 
 Update from Settings → Updates: press Update, then Restart to update. Your settings, replays and maps are kept.
 
+**Ranked**
+- Physics v23 and timer rules 3, matching website v0.0.34. Your existing runs don't change.
+- bhop_handsuplol and bhop_nuclear: a booster at the edge of the start zone keeps its speed when you walk out.
+- bhop_trampislow: the short floor booster launches you as hard as it does on CS:S servers.
+- bhop_crutle5_css: the teleporter at the end of the first level works now.
+- bhop_benchmark: one block no longer sends you 20 minutes back.
+- kz_ maps: anti-hop blocks and other timed triggers now match CS:S timer servers. You can jump 0.05 s sooner, and blocks
+  that teleport you if you stay too long fire 0.05 s sooner.
+
 **Submitting**
 - Your version keeps submitting when the website updates, as long as the server still accepts it. Before, a website
   update could stop older versions uploading even though their runs were still welcome.
-- If the server doesn't accept your version, or the check can't reach it, your run waits while the game stays open and
-  uploads by itself once it can, for up to a day. The replay stays saved either way.
+- If the server can't take your run yet, your run waits while the game stays open and uploads by itself once it can, for
+  up to a day. That covers a version it doesn't accept, a shared network at its limit for new players, and more runs
+  than the last hour allows. The replay stays saved either way.
 - Refused uploads now show the server's reason. If your files don't match the release, usually from unpacking over an
   older version, the message tells you to unpack into an empty folder.
+
+**Strafe trainer**
+- The Bar look, as on the website, in Settings → HUD → Strafe trainer. Its colour is the speed you really gained that
+  tick: red for a loss, white for none, then orange, green and blue as you get closer to the best possible.
+
+**Start points**
+- A start point just over the zone's edge now moves into the zone and counts.
+- A spawn that won't count says so for the whole attempt, and !clearstart takes you straight back to the real start.
 
 **Windows**
 - The game no longer opens a terminal window. The log is in Settings → Game data, and `--console` opens a terminal
