@@ -9,6 +9,7 @@
 // server stays authoritative; a client-side mismatch is only flagged ("client desync" in the admin Runs view), which
 // separates "this browser disagrees with its own recording" from "the server disagrees with the client".
 
+import { untrustedInputEvents } from "./input-trust";
 import { api } from "./api";
 import { physicsContent } from "./core";
 import type { Input } from "./input";
@@ -107,6 +108,8 @@ export class RunWatch {
   private hiddenMs = 0;
   private hiddenAt: number | null = null;
   private blurs = 0;
+  /** input-trust.ts's count when the run started. */
+  private untrustedAt = 0;
   /** The run's polling rate (mouse-filter.ts), from the input's stats while the run is on. */
   private readonly poll = new RunPollRate();
   private pollSource: ((now: number, windowMs: number) => number) | null = null;
@@ -127,6 +130,7 @@ export class RunWatch {
 
   start(pollHz?: (now: number, windowMs: number) => number): void {
     this.running = true;
+    this.untrustedAt = untrustedInputEvents();
     this.poll.reset();
     this.pollSource = pollHz ?? null;
     this.startAt = performance.now();
@@ -147,7 +151,7 @@ export class RunWatch {
     }
   }
 
-  stop(): { fps: number; visibility: { hidden: number; hiddenMs: number; blurs: number }; clock?: { raf: number; perf: number; secs: number }; pollHz?: number } {
+  stop(): { fps: number; visibility: { hidden: number; hiddenMs: number; blurs: number }; clock?: { raf: number; perf: number; secs: number }; pollHz?: number; untrusted?: number } {
     const now = performance.now();
     this.running = false;
     const hiddenMs = this.hiddenMs + (this.hiddenAt !== null ? now - this.hiddenAt : 0);
@@ -156,7 +160,8 @@ export class RunWatch {
     const r2 = (x: number) => Math.round(x * 100) / 100;
     const clock = wall > 0 && this.rafFirst !== null ? { raf: r2((this.rafLast - this.rafFirst) / wall), perf: r2((now - this.startAt) / wall), secs: Math.round(wall / 100) / 10 } : undefined;
     const pollHz = this.poll.hz();
-    return { fps: secs > 0 ? Math.round((this.frames / secs) * 10) / 10 : 0, visibility: { hidden: this.hidden, hiddenMs: Math.round(hiddenMs), blurs: this.blurs }, ...(clock ? { clock } : {}), ...(pollHz ? { pollHz } : {}) };
+    const untrusted = untrustedInputEvents() - this.untrustedAt;
+    return { fps: secs > 0 ? Math.round((this.frames / secs) * 10) / 10 : 0, visibility: { hidden: this.hidden, hiddenMs: Math.round(hiddenMs), blurs: this.blurs }, ...(clock ? { clock } : {}), ...(pollHz ? { pollHz } : {}), ...(untrusted ? { untrusted } : {}) };
   }
 }
 
@@ -193,6 +198,7 @@ export async function reportRun(o: { check: Promise<SelfCheckResult>; upload: Pr
     input: inputSummary(o.input),
     visibility: o.watched.visibility,
     ...(o.watched.clock ? { clock: o.watched.clock } : {}),
+    ...(o.watched.untrusted ? { untrusted: o.watched.untrusted } : {}),
     ...(fp ? { fp: fp.components } : {}),
     ...(o.play ? { play: o.play } : {}),
   });

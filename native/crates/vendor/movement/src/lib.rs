@@ -1134,6 +1134,9 @@ pub struct StepResult {
     /// TryPlayerMove, after gravity, jump and air acceleration: RNGFix's `g_vPreCollisionVelocity` minus the base
     /// velocity. `None` when the tick moved on the ground (or swam, climbed, ...): RNGFix predicts only airborne moves.
     pub air_move_velocity: Option<[f32; 3]>,
+    /// bunnyhop HUD observation only: horizontal speed change across AirAccelerate and the best possible
+    /// change at this speed, wish speed, acceleration and surface friction. Never feeds movement.
+    pub air_speed_gain: Option<[f32; 2]>,
     /// bunnyhop patch: this tick's airborne move hit something (its first trace stopped short): RNGFix's
     /// "collision predicted this tick" (`g_iLastCollisionTick`).
     pub move_collided: bool,

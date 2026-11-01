@@ -31,6 +31,12 @@ function push(e: ClientError): void {
   if (errors.length > MAX_ERRORS) errors.shift();
 }
 
+/**
+ * Browser notes that aren't errors in the game: a ResizeObserver callback that changed layout just means the rest of
+ * the notifications wait a frame. Left out of the context a feedback report carries.
+ */
+export const benignError = (msg: string): boolean => /^ResizeObserver loop\b/.test(msg);
+
 /** Newest last. */
 export const recentErrors = (): ClientError[] => errors.slice();
 
@@ -40,6 +46,7 @@ function install(): void {
   installed = true;
   window.addEventListener("error", (e) => {
     // Runtime errors only (resource load failures don't bubble to window).
+    if (benignError(e.message)) return;
     push({ at: Date.now(), kind: "error", msg: e.message || describe(e.error), src: e.filename ? `${e.filename}:${e.lineno}:${e.colno}` : undefined, stack: e.error instanceof Error ? e.error.stack : undefined });
   });
   window.addEventListener("unhandledrejection", (e) => {

@@ -97,9 +97,10 @@ const VEL: [f32; 3] = [800.0, 0.0, -400.0];
 
 #[test]
 fn versions() {
-    assert_eq!(PHYSICS_LATEST, PHYSICS_V22);
+    assert!(PHYSICS_LATEST >= PHYSICS_V22);
     assert_eq!(physics_fixes(PHYSICS_V22), physics_fixes(PHYSICS_V21), "an explicit version gate, no new fix bits");
-    assert_eq!(physics_fixes(23), None);
+    assert_eq!(physics_fixes(PHYSICS_V22 + 1), physics_fixes(PHYSICS_V22));
+    assert_eq!(physics_fixes(PHYSICS_LATEST + 1), None);
 }
 
 /// Jump held on autohop is v21, tick by tick, on every phase, including the phases that are edge landings.

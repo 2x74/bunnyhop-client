@@ -424,3 +424,106 @@ pub(crate) fn parented_doors_v21(entities: &[Entity]) -> Option<&'static Parente
     let fingerprint = entity_fingerprint(entities);
     PARENTED_DOORS_V21.iter().find(|m| m.fingerprint == fingerprint)
 }
+
+/// Maps whose player-activated outputs run on EventQueueFix's clock from physics v23: no player clock lead
+/// (`Game::player_clock_lead`). A touch-fired "0.2 s" output lands 20 + 1 commands later, not 20 + 1 + 5.
+///
+/// Stock CS:S times outputs on the player's usercmd clock (60 ms ahead of the server), and the core, tools/parity and the
+/// bot in srcds all agree on that. But real timer servers run eventqueuefix: on the anti-hop blocks of these maps
+/// (`OnStartTouch gravity 40` at 0.2 s, `gravity 1` at 0.3 s) 11 recordings from Lodge, Yatta, Flappy, tommyhops and bhop.rip
+/// show the slam exactly 21 commands after the touch 332 times (KawaiiClan Climb, without the plugin, shows 24 to 30). The core
+/// had 26, so a player timing a block as on those servers jumped into the last 5 ticks of gravity 40: staff's "anti hop
+/// triggers are way too long" on every kz_ map. Every delayed output moves with it, also `targetname` windows, as on those
+/// servers: a block with an 0.09 s `targetname` gives 9 ticks to leave, not 14.
+///
+/// Two more maps, both reported as a broken booster and with no finisher yet. bhop_trampislow's `*280` names the player 0.01 s
+/// after they touch it, and the 46 u tall `*279` above it pushes only that name, at +150 u/s a tick: with the lead the player has
+/// nearly left it before the name lands (peak 952 u/s, the recording 1138). bhop_handsuplol's start booster lands 6 ticks after
+/// the touch instead of at once.
+pub(crate) struct EventClock {
+    pub map: &'static str,
+    pub fingerprint: u32,
+}
+
+macro_rules! event_clock {
+    ($($map:literal $fingerprint:literal,)*) => { &[$(EventClock { map: $map, fingerprint: $fingerprint },)*] };
+}
+
+pub(crate) const EVENT_CLOCK_V23: &[EventClock] = event_clock![
+    "bhop_handsuplol" 0x4a879cf8,
+    "bhop_trampislow" 0x5f6f6f69,
+    "kz_bhop_badg3s" 0x2ea8e001,
+    // Same entity lump as bhop_benchmark, so that map is on this clock too: the same course.
+    "kz_bhop_benchmark" 0x2093b2f4,
+    "kz_bhop_cartooncastle_b1" 0xf00e4cde,
+    "kz_bhop_delusional" 0x7bb19631,
+    "kz_bhop_deserted" 0x060c9847,
+    "kz_bhop_essence" 0x1945b858,
+    "kz_bhop_global" 0x46491236,
+    "kz_bhop_indiana" 0x07e6e0f5,
+    "kz_bhop_kairo" 0xbf8a1b29,
+    "kz_bhop_kantan" 0x332fb34d,
+    "kz_bhop_knothard" 0x396b532d,
+    "kz_bhop_learning" 0x5d96a09a,
+    "kz_bhop_liminal" 0x1b4bf86b,
+    "kz_bhop_lj" 0x331cffb3,
+    "kz_bhop_minimal" 0xd275d4d9,
+    "kz_bhop_nothing" 0x60c2e3e4,
+    "kz_bhop_peaceful" 0x4ebea1df,
+    "kz_bhop_proxy_null" 0xa9f690e6,
+    "kz_bhop_solitude" 0x01365e71,
+    "kz_bhop_strafe_comjump2_v2" 0xc4b8d28b,
+    "kz_bhop_yonkoma" 0x46708c81,
+];
+
+/// The map's entry in `EVENT_CLOCK_V23`, if `fingerprint` (`entity_fingerprint`) is one of those builds.
+pub(crate) fn event_clock_v23(fingerprint: u32) -> Option<&'static EventClock> {
+    EVENT_CLOCK_V23.iter().find(|m| m.fingerprint == fingerprint)
+}
+
+/// A trigger_teleport sent somewhere else from physics v23. Only reviewed mapper mistakes; the map is otherwise CS:S's.
+pub(crate) struct TeleportTargetEdit {
+    #[allow(dead_code)]
+    pub map: &'static str,
+    pub fingerprint: u32,
+    pub model: usize,
+    pub from: &'static str,
+    pub to: &'static str,
+    /// Why, for the reader.
+    #[allow(dead_code)]
+    pub reason: &'static str,
+}
+
+pub(crate) const TELEPORT_TARGET_EDITS_V23: &[TeleportTargetEdit] = &[TeleportTargetEdit {
+    map: "bhop_benchmark",
+    fingerprint: 0x2093b2f4,
+    model: 497,
+    from: "67",
+    to: "100",
+    reason: "the xhop block *497 at (656, 2160, 2752) sends a player who stays on it to destination 67, a stage 20 minutes back \
+             (1792, 12416, -152), where the map's other six teleports to 67 are. Every other teleport around it goes to 100, the \
+             start of this stage (1008, 2432, 2632). maeson lost 21 minutes to it on 2026-10-31 on their 72:04 run. The same in \
+             real CS:S, so the mapper's mistake, not ours. kz_bhop_benchmark has the same entity lump and the same trigger.",
+}];
+
+/// The destination of teleport `model` on this build under physics v23, if it has been edited.
+pub(crate) fn teleport_target_v23(entities_fingerprint: u32, model: usize, target: &str) -> Option<&'static str> {
+    TELEPORT_TARGET_EDITS_V23
+        .iter()
+        .find(|e| e.fingerprint == entities_fingerprint && e.model == model && e.from == target)
+        .map(|e| e.to)
+}
+
+/// v23: reviewed builds whose route needs `logic_case` PickRandom and `AddOutput target` on a trigger_teleport (with a
+/// `!activator` landmark, as these maps use it). bhop_crutle5_css's first level ends in a trigger_teleport with no
+/// target: touching it picks a case that gives it one (research/MAPS-FINISH-V34.md). Exact entity builds only.
+#[allow(dead_code)] // `map` documents the row, as in `ParentedDoors`.
+pub(crate) struct LogicCaseV23 {
+    pub map: &'static str,
+    pub fingerprint: u32,
+}
+pub(crate) const LOGIC_CASE_V23: &[LogicCaseV23] = &[LogicCaseV23 { map: "bhop_crutle5_css", fingerprint: 0xdfb87918 }];
+pub(crate) fn logic_case_v23(entities: &[crate::entities::Entity]) -> Option<&'static LogicCaseV23> {
+    let fingerprint = entity_fingerprint(entities);
+    LOGIC_CASE_V23.iter().find(|m| m.fingerprint == fingerprint)
+}

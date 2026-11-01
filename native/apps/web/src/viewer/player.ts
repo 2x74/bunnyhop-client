@@ -51,6 +51,9 @@ export interface RunData {
   side: Int16Array;
   /** Horizontal speed. */
   speed: Float32Array;
+  /** Exact clean core observations; NaN for unjudgeable ticks / older WASM. */
+  airSpeedGain: Float32Array;
+  airBestGain: Float32Array;
   status: Uint8Array;
   runTicks: Int32Array;
   /** A finished run's time in whole milliseconds (run-timing.ts, what the boards show), 0 while not finished. */
@@ -130,6 +133,8 @@ export class ReplayPlayer {
       forward: new Int16Array(n + 1),
       side: new Int16Array(n + 1),
       speed: new Float32Array(n + 1),
+      airSpeedGain: new Float32Array(n + 1).fill(NaN),
+      airBestGain: new Float32Array(n + 1).fill(NaN),
       status: new Uint8Array(n + 1),
       runTicks: new Int32Array(n + 1),
       finishMs: new Int32Array(n + 1),
@@ -160,6 +165,8 @@ export class ReplayPlayer {
       d.viewZ[t] = s.viewOffsetZ;
       const sp = Math.sqrt(s.velocity[0] * s.velocity[0] + s.velocity[1] * s.velocity[1]);
       d.speed[t] = sp;
+      d.airSpeedGain[t] = s.airSpeedGain ?? NaN;
+      d.airBestGain[t] = s.airBestGain ?? NaN;
       d.flags[t] =
         (s.crouched ? F_CROUCHED : 0) | (s.grounded ? F_GROUNDED : 0) | (events & EVENT_TELEPORTED ? F_TELEPORTED : 0) | (events & EVENT_JUMPED ? F_JUMPED : 0) | (events & EVENT_LANDED ? F_LANDED : 0) | (s.onLadder ? F_LADDER : 0);
       if (!timer) return;

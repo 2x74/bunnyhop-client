@@ -15,8 +15,9 @@
 // AAC / Opus into the same MP4 (viewer/audio-track.ts).
 //
 // Motion blur: N replay subframes per output frame spread over the shutter, averaged. In Enhanced / Cinematic the
-// pipeline's composer accumulates them (HDR, before tone mapping); in Source / Plain viewer/frame-blend.ts averages the
-// finished subframes. The in-eye weapon (viewer/arms.ts), HUD and cards are drawn once per frame on top: always sharp.
+// pipeline's composer accumulates them (HDR, before tone mapping, with graphics/gamma-blend.ts averaging the blended
+// surfaces it draws after the final pass); in Source / Plain viewer/frame-blend.ts averages the finished subframes.
+// The in-eye weapon (viewer/arms.ts), HUD and cards are drawn once per frame on top: always sharp.
 
 import * as THREE from "three";
 import { cinematicSampleSchedule, withCameraJitter } from "../graphics/cinematic-sampling";

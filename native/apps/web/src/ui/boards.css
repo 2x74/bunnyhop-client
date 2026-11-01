@@ -26,6 +26,28 @@
 .rb-s-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .rb-s-val { color: var(--dim); font-variant-numeric: tabular-nums; }
 .rb-sugg li.rb-s-none, .rb-sugg li.rb-s-more { display: block; color: var(--faint); font-size: var(--fs-xs); cursor: default; }
+/* Map boards: track, players and the search share the first row; the style list (it grew to nine) gets a row of its own
+   and shares it out evenly, so nothing wraps onto a second line next to a gap. Too narrow for that: an even grid. */
+.leaderboard .rb-controls { display: contents; }
+.leaderboard .rb-tools { order: 1; }
+.leaderboard .rb-styles { order: 2; flex: 1 0 100%; box-sizing: border-box; flex-wrap: nowrap; }
+.leaderboard .rb-styles button { flex: 1 1 auto; padding-inline: 0.5rem; }
+@container rb (max-width: 47.5rem) {
+  .leaderboard .rb-styles { display: grid; grid-template-columns: repeat(auto-fill, minmax(6.4rem, 1fr)); }
+}
+/* The rank board's tabs and search share a row while both fit; below that the tabs take the width, then the search does. */
+@container rb (max-width: 72rem) {
+  .ranks .rb-controls { flex: 1 0 100%; }
+  .ranks .rk-tabs { display: flex; flex-wrap: nowrap; flex: 1; box-sizing: border-box; }
+  .ranks .rk-tabs button { flex: 1 1 auto; padding-inline: 0.4rem; }
+  .ranks .rb-tools { flex: 1; margin-left: 0; }
+  .ranks .rb-search { width: 100%; }
+}
+@container rb (max-width: 52rem) {
+  .ranks .rk-tabs { display: grid; grid-template-columns: repeat(auto-fill, minmax(6.4rem, 1fr)); }
+}
+/* The rank board has no meta line: its empty row was a gap between the tabs and the table. */
+.ranks .rb-meta:empty { display: none; }
 .rb-jump { gap: 0.4rem; }
 .rb-jump-rank { color: var(--accent); font-variant-numeric: tabular-nums; }
 
@@ -98,6 +120,7 @@ tr.top3 td.rb-rank { color: #e3a26c; }
 .rb-you tr.rb-you-row td { border-top: 0; }
 tr.rb-you-note td { background: none; color: var(--faint); font-size: var(--fs-sm); padding-left: 0.7rem; }
 tr.rb-you-note b { color: var(--dim); font-weight: 650; }
+.rb-table.is-empty tr.rb-you-note td { text-align: center; }
 tr.rb-you-note .link-btn { padding: 0; font-size: inherit; color: var(--accent); }
 @media (prefers-reduced-motion: no-preference) {
   .rb-table tr.found td { animation: rb-found 1.6s var(--ease); }

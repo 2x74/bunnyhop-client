@@ -314,3 +314,35 @@ fn css_stamina_ground_slowdown_matches_70hz_reference() {
         assert!((tired.hspeed() - fresh.hspeed() * ratio).abs() < 0.001);
     }
 }
+
+#[test]
+fn trainer_observes_air_acceleration_not_turn_pace() {
+    for speed in [100.0f32, 400.0, 2000.0] {
+        for aa in [1.0, 10.0, 1000.0] {
+            let settings = Settings { air_accelerate: aa, ..Settings::css_bhop() };
+            let mut measured_best = f32::NEG_INFINITY;
+            let mut reported_best = 0.0;
+            let a = (aa * settings.tick_interval * settings.max_speed).min(30.0);
+            let optimum = ((30.0 - a) / speed).acos().to_degrees();
+            for angle in -1800..=1801 {
+                let yaw = if angle == 1801 { optimum } else { angle as f32 * 0.1 };
+                let mut sim = Sim::new(settings, [0.0, 0.0, 10000.0], [speed, 0.0, 0.0], false);
+                let r = sim.step(450.0, 0.0, yaw, false, false); // W only, not A/D
+                let [delta, best] = r.air_speed_gain.expect("air observation");
+                let actual = f64::from(r.state.velocity[0]).hypot(f64::from(r.state.velocity[1])) - f64::from(speed);
+                assert!((f64::from(delta) - actual).abs() < 0.0001);
+                measured_best = measured_best.max(delta);
+                reported_best = best;
+            }
+            // Angular sampling is discrete; the analytical optimum bounds it within f32 velocity roundoff.
+            assert!((measured_best - reported_best).abs() < 0.002, "{speed} {aa}: {measured_best} vs {reported_best}");
+        }
+    }
+    let settings = Settings::css_bhop();
+    let mut ground = Sim::new(settings, [0.0; 3], [400.0, 0.0, 0.0], true);
+    assert!(ground.step(450.0, 0.0, 0.0, false, false).air_speed_gain.is_none());
+    let mut no_key = Sim::new(settings, [0.0, 0.0, 1000.0], [400.0, 0.0, 0.0], false);
+    assert!(no_key.step(0.0, 0.0, 0.0, false, false).air_speed_gain.is_none());
+    let mut slow = Sim::new(settings, [0.0, 0.0, 1000.0], [99.0, 0.0, 0.0], false);
+    assert!(slow.step(0.0, 450.0, 0.0, false, false).air_speed_gain.is_none());
+}

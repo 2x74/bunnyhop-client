@@ -234,13 +234,12 @@ export function runLinkRows(runs: PlayerDetail["runs"], max = 6): HTMLElement[] 
 }
 
 /** Alts (same IP hash) and accounts linked through a device / fingerprint / network, with their states. */
-export function altRows(d: PlayerDetail): HTMLElement[] {
+export function altRows(d: PlayerDetail, linked: NonNullable<PlayerDetail["network"]>["linked"] = d.network?.linked ?? []): HTMLElement[] {
   const rows: HTMLElement[] = d.alts.map((a) => h("div", { class: "ctx-row" }, playerLink(a.id, a.name), h("span", { class: "faint" }, "same IP"), a.banned ? badge("banned", "bad") : null, a.shadowed ? badge("shadowed", "warn") : null));
-  for (const l of d.network?.linked ?? []) {
+  for (const l of linked) {
     if (d.alts.some((a) => a.id === l.id)) continue;
     rows.push(h("div", { class: "ctx-row" }, playerLink(l.id, l.name), h("span", { class: "faint" }, `same ${l.via === "fp" ? "fingerprint" : l.via === "net" ? "network" : "device"}`), l.banned ? badge("banned", "bad") : null, l.shadowed ? badge("shadowed", "warn") : null));
   }
-  if (!rows.length && d.altCount) rows.push(h("div", { class: "ctx-row faint" }, `${plural(d.altCount, "other account")} on the same IP. Admins see which.`));
   return rows;
 }
 

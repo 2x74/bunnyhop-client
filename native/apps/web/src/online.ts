@@ -18,8 +18,9 @@ import { decodeReplay, replayStyle, sha256Hex, type Replay } from "./replay";
 import { formatTime } from "./timer";
 import { trackName } from "./zones";
 import { toast } from "./notify";
-import { failureOf, failureText, KEEP_MS, LEGACY_UPLOAD_LIMIT, legacyCandidate, legacyScanKey, shouldRetry, TRACKING_SINCE_KEY, type StoredUpload } from "./uploads";
+import { failureOf, holdDelayMs, holds, LEGACY_UPLOAD_LIMIT, legacyCandidate, legacyScanKey, TRACKING_SINCE_KEY, type StoredUpload } from "./uploads";
 import { uploadStore } from "./upload-store";
+import { retryStored } from "./upload-retry";
 
 /**
  * Delay before each status poll. Most runs are verified 2-5 s after upload, so the first seconds poll often; long runs
@@ -46,7 +47,7 @@ export interface RunInfo {
  * Submits a finished run and reports progress until the server verifies or rejects it.
  * `onStatus` drives the end-of-run card; `notify` (toasts) is only used for slow verifications and retries.
  * With `run`, the replay (and its run-session tokens, `run.beats`) is stored on this device until the server has it, and
- * an upload that fails for its size, the network or a closed tab is retried once (uploads.ts).
+ * an upload that fails in a way a retry can fix is sent again (uploads.ts).
  */
 export async function submitAndTrack(
   bytes: Uint8Array,
@@ -78,6 +79,7 @@ export async function submitAndTrack(
   if (stored && failure) {
     await uploadStore.fail(stored, failure).catch(() => {});
     onStatus({ status: "unsent", failure });
+    if (holds(failure)) retryIn(holdDelayMs(holdRound), notify);
     return sub;
   }
   if (stored) await uploadStore.remove(stored).catch(() => {});
@@ -145,76 +147,65 @@ function noteTrackingStart(): number {
 }
 
 let retryTimer = 0;
-/** After a network failure: the one retry, 30 s later in this session (or on the next load if the tab goes first). */
-function retrySoon(notify: (msg: string, ms?: number) => void): void {
+/** A later look at the stored runs in this session, unless one is already coming. */
+function retryIn(ms: number, notify: (msg: string, ms?: number) => void): void {
   if (retryTimer) return;
   retryTimer = window.setTimeout(() => {
     retryTimer = 0;
     void retryStoredUploads(notify);
-  }, 30_000);
+  }, ms);
 }
+/** After a network failure: 30 s later in this session (or on the next load if the tab goes first). */
+const retrySoon = (notify: (msg: string, ms?: number) => void) => retryIn(30_000, notify);
+/** How many looks in a row this page has found its runs still waiting (uploads.ts holdDelayMs). */
+let holdRound = 0;
 
 const runLabel = (u: Pick<StoredUpload, "time" | "map" | "track">) => `${formatTime(u.time)} run on ${u.map}${u.track ? ` (${trackName(u.track)})` : ""}`;
 /** A retry that failed or was refused: an error Notice (red, its own sound), not the plain line the callers' toasts give. */
 const bad = (msg: string, ms = 8000) => toast(msg, { ms, tone: "bad" });
 let retrying = false;
+let heldToastShown = false;
 
 /**
- * Sends every stored run due its one retry (uploads.ts shouldRetry) for the signed-in account, and first, once per
- * account, queues pre-v0.0.10 PB replays over the old upload cap (the legacy path). Says what happened in a toast for
- * each: uploaded and verified, rejected, or failed again. Called on load (mountOnlinePanel) and 30 s after a network
- * failure. Never throws.
+ * Sends every stored run due a retry (upload-retry.ts) for the signed-in account, and first, once per account, queues
+ * pre-v0.0.10 PB replays over the old upload cap (the legacy path). Says what happened in toasts. Called on load
+ * (mountOnlinePanel) and on the timers here. Never throws.
  */
 export async function retryStoredUploads(notify: (msg: string, ms?: number) => void): Promise<void> {
   if (retrying || !api.available()) return;
   retrying = true;
+  let waiting = false;
   try {
-    const me = await api.me();
-    if (!me) return;
-    await queueLegacyPBs(me.id, me.name);
-    const now = Date.now();
-    const all = await uploadStore.all();
-    for (const u of all) if (u.retried && now - u.at > KEEP_MS) await uploadStore.remove(u.sha);
-    // A run gauntlet mode holds for its attempt is sent from there (resendGauntletRun), as often as it takes.
-    for (const u of all.filter((x) => shouldRetry(x, me.id, now) && !heldByGauntlet(x))) {
-      // Used before sending: a crash or a closed tab mid-retry doesn't earn another one.
-      await uploadStore.put({ ...u, retried: true });
-      let sub: Submission;
-      try {
-        // With the run-session tokens it was played with (uploads.ts StoredUpload.beats), checked like a first upload.
-        // Only for the account that recorded it: tokens are issued to one player, and another's would fail the check.
-        sub = await api.submitRun(u.bytes, { beats: u.account === me.id ? u.beats : undefined, mouse: u.mouse, gauntlet: u.account === me.id ? u.gauntlet : undefined });
-      } catch {
-        await uploadStore.put({ ...u, retried: true, state: "failed", failure: "network", at: Date.now() });
-        bad(`Your earlier ${runLabel(u)} still hasn't uploaded.`);
-        continue;
-      }
-      const failure = failureOf(sub);
-      if (failure) {
-        await uploadStore.put({ ...u, retried: true, state: "failed", failure, at: Date.now() });
-        bad(`Your earlier ${runLabel(u)} still hasn't uploaded: ${failureText(failure)}.`);
-        continue;
-      }
-      await uploadStore.remove(u.sha);
-      if (!sub.id) {
-        if (sub.status === "rejected") rejectPBForRun(u.map, u.style, u.track, u.time, u.account);
-        bad(`Your earlier ${runLabel(u)} wasn't accepted: ${sub.reason ?? "refused"}.`);
-        continue;
-      }
-      noteSubmittedRun(sub.id);
-      notify(`Your earlier ${runLabel(u)} is uploaded. Checking it now.`, 5000);
-      const v = await trackVerdict(sub, () => {}, notify);
-      if (v.status === "verified") notify(`Your earlier ${runLabel(u)} is on the board${v.rank ? ` at #${v.rank}` : ""}.`, 8000);
-      else if (v.status === "rejected") {
-        rejectPBForRun(u.map, u.style, u.track, u.time, u.account);
-        bad(`Your earlier ${runLabel(u)} wasn't accepted: ${v.reason ?? "rejected"}.`);
-      }
-      else if (v.status === "error") notify(`Your earlier ${runLabel(u)} is waiting for review.`, 8000);
-    }
+    const outcome = await retryStored({
+      me: () => api.me(),
+      meStale: () => api.meStale(),
+      store: uploadStore,
+      heldElsewhere: heldByGauntlet,
+      queueLegacy: (me) => queueLegacyPBs(me.id, me.name),
+      // With the run-session tokens it was played with (uploads.ts StoredUpload.beats), checked like a first upload.
+      // Only for the account that recorded it: tokens are issued to one player, and another's would fail the check.
+      send: (u, me) => api.submitRun(u.bytes, { beats: u.account === me.id ? u.beats : undefined, mouse: u.mouse, gauntlet: u.account === me.id ? u.gauntlet : undefined }),
+      verdict: (sub) => trackVerdict(sub, () => {}, notify),
+      accepted: noteSubmittedRun,
+      rejected: (u) => rejectPBForRun(u.map, u.style, u.track, u.time, u.account),
+      say: notify,
+      sayBad: (msg) => bad(msg),
+      label: runLabel,
+      now: () => Date.now(),
+    });
+    waiting = outcome.waiting;
+    if (outcome.delivered) holdRound = 0;
   } catch (e) {
     console.warn("stored upload retry failed", e);
   } finally {
     retrying = false;
+    if (waiting) {
+      if (!heldToastShown) {
+        heldToastShown = true;
+        notify("Finished runs are saved on this device. They upload by themselves once the server can take them.", 8000);
+      }
+      retryIn(holdDelayMs(holdRound++), notify);
+    }
   }
 }
 

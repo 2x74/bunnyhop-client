@@ -1,5 +1,5 @@
 import { appHref } from "../platform/navigation";
-import { SECOND_ACCOUNT_HELP } from "./account-copy";
+import { SEPARATE_ACCOUNT_NOTE } from "./account-copy";
 // Account panel (a modal sheet opened from the account chip, the pause menu or onboarding). Its top is your name plate:
 // the name as players see it (avatar, flag, colour, marks), edited in place (Enter or leaving the field saves it, with
 // the name field's live checks). Then sign-in methods (password, Discord, email) with link / unlink, the Discord avatar
@@ -85,7 +85,7 @@ async function render(d: HTMLDialogElement, body: HTMLElement, section: AccountS
 
   // --- your name plate: the in-game name tag (dot in your colourway, name, marks), the name editable in place
   const methodName = (p: string) => (p === "email" ? "email" : p === "wavedash" ? "Wavedash" : p === "password" ? "a password" : "Discord");
-  const status = !online ? "Offline: your name stays in this browser." : guest ? "Guest: your runs live in this browser." : `Signed in with ${methods.map((m) => methodName(m.provider)).join(" and ") || u.provider}`;
+  const status = !online ? "Offline: your name stays in this browser." : guest ? "Guest: your runs live in this browser." : `Signed in with ${methods.map((m) => methodName(m.provider)).join(" and ") || methodName(u.provider)}`;
   const left = view?.name;
   let current = u.name;
   const nf = nameField({
@@ -329,14 +329,13 @@ async function render(d: HTMLDialogElement, body: HTMLElement, section: AccountS
           "section.acct-sec",
           { id: "acct-save" },
           h("h3", null, guest ? "Save progress" : "Sign-in methods"),
-          guest ? h("p.acct-note", null, "Guest progress lives in this browser until you save it.") : null,
           pw?.row,
           pw?.box,
           wavedashRow,
           discordRow,
           avatarToggle,
           emailRow,
-          guest ? h("p.acct-note.dim", null, SECOND_ACCOUNT_HELP) : null,
+          guest ? h("p.acct-note.dim", null, SEPARATE_ACCOUNT_NOTE) : null,
           canSignIn ? signInBtn : null,
           canSignIn ? signInBox : null,
         )

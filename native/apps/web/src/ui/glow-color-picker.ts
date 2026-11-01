@@ -29,7 +29,7 @@ export function glowColorPicker(options: PickerOptions): HTMLDialogElement {
   const error = h("span.gc-error", { id: `${id}-error`, role: "status", "aria-live": "polite" });
   const chip = h("span.gc-chip", { "aria-hidden": "true" });
   const readout = h("span.gc-readout", { "aria-live": "polite" });
-  const apply = h("button.btn.primary", { type: "submit" }, "Apply color");
+  const apply = h("button.btn.primary", { type: "submit" }, "Apply colour");
   const draw = (writeHex = true) => {
     dialog.style.setProperty("--gc-color", selected);
     field.style.setProperty("--gc-hue", `hsl(${hsv.h} 100% 50%)`);
@@ -96,17 +96,17 @@ export function glowColorPicker(options: PickerOptions): HTMLDialogElement {
     close();
     options.apply(value);
   } },
-    h("p.dim.gc-intro", null, options.intro ?? "Choose a color for your outline and aura."),
+    h("p.dim.gc-intro", null, options.intro ?? "Choose a colour for your outline and aura."),
     field,
     h("p.dim.gc-field-help", { id: `${id}-field-help` }, "Arrow keys move the colour: left and right for saturation, up and down for brightness. Hold Shift for bigger steps."),
     h("label.gc-hue-label", null, h("span", null, "Hue"), hue),
     h("div.gc-color-row", null, h("div.gc-current", null, chip, readout),
-      h("label.gc-hex-label", { for: `${id}-hex` }, h("span", null, "Hex color"), hex)),
+      h("label.gc-hex-label", { for: `${id}-hex` }, h("span", null, "Hex colour"), hex)),
     h("small.dim", { id: `${id}-hex-help` }, "Type 3 or 6 hex digits. The # is optional."),
     error,
     h("div.gc-actions", null, h("button.btn", { type: "button", onclick: close }, "Cancel"), apply),
   );
-  dialog.append(h("header.acct-head", null, h("h2", { id: `${id}-title` }, options.title ?? "Glow color"), h("button.acct-close", { type: "button", "aria-label": "Close color picker", onclick: close }, "×")), form);
+  dialog.append(h("header.acct-head", null, h("h2", { id: `${id}-title` }, options.title ?? "Glow colour"), h("button.acct-close", { type: "button", "aria-label": "Close color picker", onclick: close }, "×")), form);
   dialog.addEventListener("keydown", event => event.stopPropagation());
   dismissOutside(dialog, close);
   dialog.addEventListener("close", () => { options.closed(); dialog.remove(); }, { once: true });

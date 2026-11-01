@@ -9,6 +9,7 @@
 // for the page's life; a run without one (old, not public, offline) shows nothing.
 
 import { api, type RunStats } from "../api";
+import { fmtPoints } from "../ranking";
 import { styleDef, styleLabel } from "../styles";
 import { trackName } from "../zones";
 import { h } from "./dom";
@@ -85,6 +86,7 @@ export function statsRows(s: RunStats): { run: [string, string][]; setup: [strin
   const t = Date.parse(s.date);
   if (Number.isFinite(t)) run.push(["Played", new Date(t).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })]);
   run.push(["Board", `${styleLabel(s.style)}${s.track ? ` · ${trackName(s.track)}` : ""}`]);
+  if (s.points !== undefined) run.push(["Points", fmtPoints(s.points)]);
   if (s.jumps != null) run.push(["Jumps", num(s.jumps)]);
   if (s.strafes != null) run.push(["Strafes", num(s.strafes)]);
   if (s.sync != null) run.push(["Sync", `${num(s.sync, 1)}%`]);

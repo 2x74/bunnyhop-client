@@ -25,7 +25,12 @@ export const PERMISSIONS = {
   overview: "moderator",
   "chat.read": "moderator",
   "players.read": "moderator",
-  /** The accounts behind a player's IP hash (moderators only get the "has alts" signal) and raw IP hashes. */
+  /**
+   * A player's other accounts: who shares their IP, device, fingerprint or network, by name, with the kind of link and
+   * each one's ban / shadow state. Not the hashes or identifiers behind a link (players.alts).
+   */
+  "players.linked": "moderator",
+  /** Raw IP hashes, device ids, fingerprint and network hashes, and email addresses of linked sign-ins. */
   "players.alts": "admin",
   /** Network / device / fingerprint bans (apps/api src/network.ts). */
   "players.network": "admin",
@@ -134,7 +139,8 @@ const LABELS: Record<Permission, string> = {
   overview: "see the overview",
   "chat.read": "read the chat log",
   "players.read": "look up players",
-  "players.alts": "see accounts that share an IP",
+  "players.linked": "see a player's other accounts",
+  "players.alts": "see IP hashes and device identifiers",
   "players.network": "ban networks or devices",
   "rooms.read": "see the live rooms",
   "lobbies.read": "see private lobbies",

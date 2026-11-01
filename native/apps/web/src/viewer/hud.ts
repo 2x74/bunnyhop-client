@@ -239,6 +239,8 @@ export class ViewerHud {
     this.graph.visible = p.hud.layout.graph.on;
     this.keys.configure(p.hud.keys);
     this.trainerView.configure(p.hud.strafeTrainer);
+    this.trainer.smoothing = p.hud.strafeTrainer.smoothing;
+    this.trainer.zone = p.hud.strafeTrainer.style === "bar" ? 10 : p.hud.strafeTrainer.zone;
     this.fed = -1;
     this.last = "";
   }
@@ -259,9 +261,11 @@ export class ViewerHud {
     }
     for (let k = this.fed + 1; k <= i; k++) {
       if (prefs.get().hud.layout.strafeTrainer.on) this.trainer.feed({ forward: d.forward[k], side: d.side[k], yaw: d.view[k * 2], pitch: d.view[k * 2 + 1], buttons: d.buttons[k] }, {
-        speed: d.speed[k], grounded: !!(d.flags[k] & F_GROUNDED), onLadder: !!(d.flags[k] & F_LADDER), tick: k,
+        airSpeedGain: d.airSpeedGain[k], airBestGain: d.airBestGain[k],
+        // d.speed is f32, but live computes the length in JS double. Use the cached velocity in both paths.
+        barSpeed: Math.sqrt(d.vel[k * 3] ** 2 + d.vel[k * 3 + 1] ** 2), speed: d.speed[k], grounded: !!(d.flags[k] & F_GROUNDED), onLadder: !!(d.flags[k] & F_LADDER), tick: k,
         dt: d.interval, maxSpeed: d.replay.header.settings.maxSpeed, airAccelerate: d.replay.header.settings.airAccelerate,
-        style: replayStyle(d.replay.header), interrupted: !!(d.flags[k] & (F_TELEPORTED | F_RESTARTED)),
+        style: replayStyle(d.replay.header), interrupted: !!(d.flags[k] & (F_TELEPORTED | F_RESTARTED)), jumped: (d.flags[k] & F_JUMPED) !== 0,
       });
       this.keys.feed(d.buttons[k], d.view[k * 2]);
       this.graph.push(d.speed[k]);
@@ -279,7 +283,7 @@ export class ViewerHud {
     const v = hudValues(d, t, delta, speedDiff);
     this.drawSsj(d, i);
     this.drawJhud(d, i);
-    this.trainerView.render(this.trainer.reading);
+    this.trainerView.render(this.trainer.reading, this.trainer.lastJump);
     this.keys.render();
     this.graph.render();
     const sp = String(Math.round(v.speed));

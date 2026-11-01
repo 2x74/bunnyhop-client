@@ -4,7 +4,7 @@
    line under the page. Design tokens: style.css.
    Shared controls (sliders, switches, swatches, segmented) are styled in style.css; refined here inside .settings. */
 
-.panel-settings { display: flex; flex-direction: column; width: min(82rem, 100%); height: min(50rem, 100%); padding-bottom: var(--sp-4); }
+.panel-settings { display: flex; flex-direction: column; width: min(82rem, 100%); height: calc(100vh - 7.5vh); }
 .panel-settings .screen-head { margin-bottom: var(--sp-3); }
 .settings { flex: 1; min-height: 0; display: grid; grid-template-columns: 12.5rem minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; gap: var(--sp-4) var(--sp-6); }
 .settings > .set-side { grid-row: 2 / 4; }
@@ -107,6 +107,8 @@ label.set-name { cursor: pointer; }
 .set-row:has(.xh-styles) .set-label { display: none; }
 .set-row:has(.xh-styles) .set-control { justify-content: stretch; }
 .check-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; }
+/* An odd last row takes the width: no hole beside it. */
+.check-grid > .set-row:last-child:nth-child(odd) { grid-column: 1 / -1; }
 .check-grid > .set-row:first-child { border-top-left-radius: var(--radius-sm); }
 .check-grid > .set-row:nth-child(2) { border-top-right-radius: var(--radius-sm); }
 .set-aside { padding: var(--sp-1) 0.2rem; }
@@ -149,7 +151,8 @@ label.set-name { cursor: pointer; }
 .settings.is-searching .set-adv-sum { display: none; }
 .settings.is-searching .set-adv > .set-cols { margin-top: 0; }
 .set-dym { padding: 0; font-weight: 650; color: var(--accent); }
-.set-aside .link-btn { display: inline-flex; align-items: center; gap: 0.3rem; padding-left: 0; color: var(--accent); }
+.set-aside .link-btn { display: inline-flex; align-items: center; gap: 0.3rem; padding-left: 0; color: var(--accent); text-decoration: none; }
+.set-aside .link-btn:hover { text-decoration: underline; text-underline-offset: 0.2em; }
 
 /* search marks + best match */
 .set-name mark { color: inherit; background: color-mix(in srgb, var(--accent) 26%, transparent); border-radius: 2px; box-shadow: inset 0 -2px 0 var(--accent); }
@@ -232,7 +235,7 @@ dialog.confirm-dialog { width: min(30rem, 94vw); }
 
 /* ---- narrow windows (below the 1024 px target): the rail becomes a row of pills */
 @media (max-width: 52rem) {
-  .panel-settings { height: calc(100vh - 1.5rem); }
+  .panel-settings { height: calc(100vh - 7.5vh); }
   .settings { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); }
   .set-top { flex-wrap: wrap; }
   .set-side { flex-direction: row; }

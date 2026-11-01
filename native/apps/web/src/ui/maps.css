@@ -83,7 +83,9 @@
 .mb-wr-mark { margin-right: 0.4rem; font-size: var(--fs-2xs); font-weight: 800; color: #ffd45e; }
 .mb-row.skeleton { height: 3.85rem; box-sizing: border-box; cursor: default; animation: mb-pulse 1.4s ease-in-out infinite; }
 @keyframes mb-pulse { 50% { opacity: 0.55; } }
-.mb-empty { margin: var(--sp-6) 0; text-align: center; color: var(--dim); }
+/* (After the list in the DOM, which is empty and still takes the height: pulled up to where the rows start.) */
+.mb-list:empty { flex: 0 0 0; }
+.mb-empty { flex: 1; margin: var(--sp-6) 0; text-align: center; color: var(--dim); }
 .mb-empty .link-btn { padding: 0; font-size: inherit; color: var(--text); }
 
 /* the tutorial's picture: the logo's hop arcs on a warm dark plate */

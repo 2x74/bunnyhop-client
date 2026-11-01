@@ -1,6 +1,6 @@
 // Gauntlets (research/GAUNTLETS.md; API: apps/api src/gauntlets.ts): menu screens.
 //   /gauntlets      the hub: this week's weekly (its maps, time left, top 3, Start), the permanent gauntlets and events
-//                   (record, your best), past weeks (dates, winner, finishers).
+//                   (fastest player, record, your best), past weeks (dates, winner, finishers).
 //   /g/<slug>       the maps in order with their tiers, Start (or Resume), then the board; a board row opens into its
 //                   per-map splits with the gap to the record's splits.
 //   /g/<slug>?attempt=<id>   your attempt's result: total, real time, splits; "waiting for verification" until the
@@ -185,8 +185,8 @@ function weeklyBlock(w: NonNullable<GauntletHub["weekly"]>, a: GauntletScreens):
   return h("div.gx-week", null, info, h("div.gx-week-top", null, top));
 }
 
-function listTable(list: GauntletListItem[], a: GauntletScreens): HTMLElement {
-  const row = (g: GauntletListItem) => {
+function listTable(list: GauntletHub["gauntlets"], a: GauntletScreens): HTMLElement {
+  const row = (g: GauntletHub["gauntlets"][number]) => {
     const when = g.kind === "event" || g.startsAt !== null || g.endsAt !== null ? windowText(g) : null;
     return linkRow(
       g.slug,
@@ -194,6 +194,7 @@ function listTable(list: GauntletListItem[], a: GauntletScreens): HTMLElement {
       h("td.gx-title", null, h("b", null, g.title), when ? h("span.rb-sub", null, when) : null),
       h("td.num", null, String(g.maps)),
       h("td.num.dim.rb-opt", null, g.finishers.toLocaleString("en-US")),
+      g.wrPlayer ? playerLink(g.wrPlayer) : h("td.faint", null, "—"),
       h("td.num", null, g.wrTime != null ? h("b", null, gauntletTime(g.wrTime)) : h("span.faint", null, "—")),
       h("td.num.gx-mine", null, g.me ? h("span", null, h("span.gx-rank", null, `#${g.me.rank}`), gauntletTime(g.me.time)) : h("span.faint", null, "—")),
       h("td.gx-go", null, chevron()),
@@ -202,7 +203,7 @@ function listTable(list: GauntletListItem[], a: GauntletScreens): HTMLElement {
   return h(
     "table.rb-table.gx-table.gx-list",
     { "aria-label": "Gauntlets" },
-    h("thead", null, h("tr", null, h("th", { scope: "col" }, "Gauntlet"), h("th.num", { scope: "col" }, "Maps"), h("th.num.rb-opt", { scope: "col" }, "Finishers"), h("th.num", { scope: "col" }, "Record"), h("th.num", { scope: "col" }, "Your best"), h("th.gx-go", { scope: "col" }, h("span.sr-only", null, "Open")))),
+    h("thead", null, h("tr", null, h("th", { scope: "col" }, "Gauntlet"), h("th.num", { scope: "col" }, "Maps"), h("th.num.rb-opt", { scope: "col" }, "Finishers"), h("th", { scope: "col" }, "Fastest"), h("th.num", { scope: "col" }, "Record"), h("th.num", { scope: "col" }, "Your best"), h("th.gx-go", { scope: "col" }, h("span.sr-only", null, "Open")))),
     h("tbody", null, ...list.map(row)),
   );
 }

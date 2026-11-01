@@ -35,8 +35,8 @@ export interface Palette {
   syncOk: string;
   /** --behind-soft: the end card's "behind" delta. */
   behindSoft: string;
-  /** --st-g / --st-o / --st-r: the strafe trainer's on-pace, near and off zones. */
-  trainer: { good: string; ok: string; bad: string };
+  /** --st-g / --st-o / --st-r: the strafe trainer's on-pace, near and off zones. --st-p: best positive gain in Bar; --st-g/--st-o are lower positive gain, --st-r loss, white neutral. */
+  trainer: { perfect: string; good: string; ok: string; bad: string };
   /** Zones in the world (zone-editor.ts); --zone-start is the start line under the timer. */
   zones: { start: string; end: string; bonusStart: string; bonusEnd: string; split: string };
   /** Trigger kinds at their default colour (triggers/). */
@@ -50,7 +50,7 @@ const OFF: Palette = {
   loss: "#ff5d5d",
   syncOk: "#ffd24d",
   behindSoft: "rgba(255, 110, 110, 0.72)",
-  trainer: { good: "#4fd08a", ok: "#f29a3a", bad: "#e0473f" },
+  trainer: { perfect: "#57c8ff", good: "#4fd08a", ok: "#f29a3a", bad: "#e0473f" },
   zones: { start: "#33dd66", end: "#ee3344", bonusStart: "#33bbdd", bonusEnd: "#dd66ee", split: "#ffaa33" },
   triggers: { ...DEFAULT_TRIGGER_PREFS.colors },
   lj: ["#ffffff", "#5eb6ff", "#4dff88", "#ff5d5d", "#ffc53d"],
@@ -63,14 +63,14 @@ export const PALETTES: Readonly<Record<ColorBlindMode, Palette>> = {
     loss: "#d55e00",
     syncOk: "#f0e442",
     behindSoft: "rgba(213, 94, 0, 0.85)",
-    trainer: { good: "#56b4e9", ok: "#f0e442", bad: "#d55e00" },
+    trainer: { perfect: "#1f8fe0", good: "#56b4e9", ok: "#f0e442", bad: "#d55e00" },
     zones: { start: "#7fb8ff", end: "#ee3344", bonusStart: "#1f5fff", bonusEnd: "#f0e442", split: "#ffffff" },
     triggers: { teleport: "#e8202a", push: "#7fb8ff", gravity: "#f0e442", other: "#ffffff", clip: "#8040ff", wall: "#6f7681" },
     lj: ["#ffffff", "#5eb6ff", "#8040ff", "#ff5d5d", "#f0e442"],
   },
   blueYellow: {
     ...OFF,
-    trainer: { ...OFF.trainer, ok: "#c879ff" },
+    trainer: { ...OFF.trainer, perfect: "#ff7eb6", ok: "#c879ff" },
     zones: { ...OFF.zones, bonusStart: "#1f5fff", split: "#ffffff" },
     triggers: { ...OFF.triggers, push: "#0072b2", other: "#e69f00", wall: "#e0e4ea" },
     lj: ["#ffffff", "#3d8bff", "#4dff88", "#ff5d5d", "#e69f00"],
@@ -93,6 +93,7 @@ export function paletteVars(p: Palette): Record<string, string> {
     "--loss": p.loss,
     "--sync-ok": p.syncOk,
     "--behind-soft": p.behindSoft,
+    "--st-p": p.trainer.perfect,
     "--st-g": p.trainer.good,
     "--st-o": p.trainer.ok,
     "--st-r": p.trainer.bad,

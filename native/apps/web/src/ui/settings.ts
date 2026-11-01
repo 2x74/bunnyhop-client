@@ -447,17 +447,17 @@ export { VIEWMODEL_POS, VIEWMODEL_REV };
 /** Prefs.mouseNames: mouse binds use Source's button names (binds.ts mouseCode; 0.0.12). */
 export const MOUSE_NAMES = 2;
 
-/** Strafe trainer looks: the original thin gauge, a thick bar with coloured zones, a thin zoned line with a marker. */
-export type TrainerStyle = "classic" | "detailed" | "minimal";
+/** Strafe trainer looks: the original thin gauge, a thick bar with coloured zones, a thin zoned line with a marker, a track filled from the edge opposite the turn. */
+export type TrainerStyle = "classic" | "detailed" | "minimal" | "bar";
 export interface TrainerPrefs {
   color: string;
   hints: boolean;
   style: TrainerStyle;
-  /** 100% in the middle and the marker moves the way you turn; off: 0% at the left end, 200% at the right. */
+  /** 100% in the middle and the marker moves the way you turn; off: 0% at the left end, 200% at the right. The Bar look always goes by the turn. */
   follow: boolean;
   /** Ticks averaged into the reading (1 = none). */
   smoothing: number;
-  /** ± % around 100 that counts as on pace (green); amber reaches three times as far. */
+  /** ± % around 100 that counts as on pace (green); amber reaches three times as far. The Bar look's bands: hud/strafe-trainer.ts barBand. */
   zone: number;
   /** Gauge thickness, a multiple of the style's own. */
   height: number;
@@ -475,12 +475,15 @@ const TRAINER_PRESETS: Record<TrainerPreset, Pick<TrainerPrefs, "style" | "follo
   standard: { style: "classic", follow: false, smoothing: 8, zone: 10, hints: false, showPace: true },
   strict: { style: "minimal", follow: true, smoothing: 3, zone: 5, hints: false, showPace: true },
 };
+/** The Bar look stays through a preset: its presets are about the tolerance and smoothing, which it uses like the others. */
 export function applyTrainerPreset(t: TrainerPrefs, preset: TrainerPreset): void {
-  Object.assign(t, TRAINER_PRESETS[preset]);
+  const style = t.style === "bar" ? t.style : TRAINER_PRESETS[preset].style;
+  Object.assign(t, TRAINER_PRESETS[preset], { style });
 }
-/** The preset `t` matches, if any. */
+/** The preset `t` matches, if any. The Bar look has no use for a preset's look or Follow the turn. */
 export function trainerPreset(t: TrainerPrefs): TrainerPreset | null {
-  return (Object.keys(TRAINER_PRESETS) as TrainerPreset[]).find((k) => Object.entries(TRAINER_PRESETS[k]).every(([f, v]) => t[f as keyof TrainerPrefs] === v)) ?? null;
+  const ignored = (f: string) => t.style === "bar" && (f === "style" || f === "follow");
+  return (Object.keys(TRAINER_PRESETS) as TrainerPreset[]).find((k) => Object.entries(TRAINER_PRESETS[k]).every(([f, v]) => ignored(f) || t[f as keyof TrainerPrefs] === v)) ?? null;
 }
 
 export const DEFAULT_PREFS: Prefs = {

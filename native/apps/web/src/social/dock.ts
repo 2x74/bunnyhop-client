@@ -533,6 +533,7 @@ function renderList(): void {
 }
 
 function show(v: View): void {
+  const opening = !view;
   view = v;
   setOpenConversation(v.k === "chat" ? v.id : null);
   if (v.k !== "chat") {
@@ -540,9 +541,13 @@ function show(v: View): void {
     offDm = null;
   }
   render();
+  // Keyboard players start inside the panel, not on the page behind it. (A chat focuses its own input.)
+  if (opening && v.k !== "chat") panel.focus({ preventScroll: true });
 }
 
 function close(): void {
+  // Focus was in the panel: it goes back to the button that opened it, not to the top of the page.
+  const back = panel.contains(document.activeElement) ? (view?.k === "bell" ? bellBtn : friendsBtn) : null;
   view = null;
   finderEl?.search.cancel();
   finderEl = null;
@@ -551,6 +556,7 @@ function close(): void {
   offDm?.();
   offDm = null;
   render();
+  back?.focus({ preventScroll: true });
 }
 
 /** Unread notes at the last paint: the badge pops once when it goes up. Friends likewise: the icon pops on a new one. */
@@ -604,16 +610,31 @@ function render(): void {
         );
   // The finder moves into the new panel as it is (see finder()); keep its focus.
   const focused = document.activeElement instanceof HTMLInputElement && document.activeElement.classList.contains("fd-search") ? document.activeElement : null;
+  const wasInside = panel.contains(document.activeElement);
   panel.hidden = false;
   panel.className = `fd-panel fd-${view.k}`;
   panel.replaceChildren(...(head ? [head] : []), ...(view.k === "friends" ? friendsBody() : view.k === "chat" ? chatBody(view.id) : bellBody()));
+  panel.setAttribute("aria-label", view.k === "bell" ? "Notifications" : view.k === "chat" ? "Conversation" : "Friends");
   if (focused?.isConnected) focused.focus({ preventScroll: true });
+  // A live update rebuilt the rows under the focus: stay in the panel.
+  else if (wasInside && !panel.contains(document.activeElement)) panel.focus({ preventScroll: true });
 }
 
 /** main.ts, once (after initSocial). */
 export function initDock(): void {
   if (root || !api.available()) return;
-  panel = h("div.fd-panel", { hidden: true, role: "dialog", "aria-label": "Friends" });
+  panel = h("div.fd-panel", { hidden: true, role: "dialog", "aria-label": "Friends", tabindex: "-1" });
+  // Tab goes round the panel rather than on to the page behind it.
+  panel.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab") return;
+    const stops = [...panel.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select, textarea, summary, [tabindex="0"]')].filter((el) => el.offsetParent);
+    if (!stops.length) return;
+    const at = document.activeElement;
+    const first = stops[0];
+    const last = stops[stops.length - 1];
+    if (e.shiftKey && (at === first || at === panel)) (e.preventDefault(), last.focus());
+    else if (!e.shiftKey && at === last) (e.preventDefault(), first.focus());
+  });
   bellBtn = h("button.fd-btn.fd-bell", { type: "button", onclick: () => (view?.k === "bell" ? close() : show({ k: "bell" })) }) as HTMLButtonElement;
   friendsBtn = h("button.fd-btn.fd-friends", { type: "button", onclick: () => (view && view.k !== "bell" ? close() : show({ k: "friends" })) }) as HTMLButtonElement;
   // Staff only: their shield, left of the bell, to the admin panel (staff-lens.ts; hidden for players).

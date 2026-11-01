@@ -135,10 +135,12 @@ export function rowDesc(el: Element): string {
 
 /** A titled block of rows inside a settings section. */
 export function group(title: string | null, ...children: (HTMLElement | null | false | undefined)[]): HTMLElement {
+  // A one-idea group whose first row already says the title (Hide UI, JHUD, Sky) doesn't say it twice. (Not the HUD picture: its row's label isn't shown.)
+  const first = children.find((c): c is HTMLElement => !!c);
   return h(
     "section.set-group",
     { "data-group": title ?? "" },
-    title ? h("h4.set-group-title", null, title) : null,
+    title ? h("h4.set-group-title", { hidden: (!first?.querySelector(".mn") && first?.querySelector(".set-label .set-name")?.textContent === title) || undefined }, title) : null,
     h("div.set-group-rows", null, ...children.filter((c): c is HTMLElement => !!c)),
   );
 }

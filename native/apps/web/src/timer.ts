@@ -76,11 +76,16 @@ export interface TimerOptions {
  *   first tick after the last such tick (walked out, jumped, or walked off a ledge inside the zone). Touching the zone
  *   in the air does nothing, so mid-air exits and ledge starts are impossible, and so is landing in the zone fast and
  *   jumping straight out again.
+ * - 3: rules 2, except that the prespeed cap leaves a map's booster alone. A start-zone booster (bhop_handsuplol's
+ *   OnStartTouch `basevelocity -520 0 0` starts at the zone's edge) lands on the tick that ends the armed state, and rules
+ *   2 cut it to the cap, so walking out lost the boost and fell short. bhoptimer never scales speed here: it just stops
+ *   restarting the timer.
  */
 export const TIMER_RULES_V1 = 1;
 export const TIMER_RULES_V2 = 2;
+export const TIMER_RULES_V3 = 3;
 /** The rules new runs are timed and recorded with. */
-export const TIMER_RULES = TIMER_RULES_V2;
+export const TIMER_RULES = TIMER_RULES_V3;
 export const isTimerRules = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= TIMER_RULES_V1 && (v as number) <= TIMER_RULES;
 /** Rules 2: seconds on the ground after landing before a moving player can start (bhoptimer `0.5 / GetTickInterval()`). */
 export const START_GROUND_SECONDS = 0.5;
@@ -88,6 +93,11 @@ export const START_GROUND_SECONDS = 0.5;
 export const START_SLOW_SPEED = 50;
 /** Rules 2: squared speed at or below which a grounded player counts as settled (bhoptimer `GetVectorLength(absvel, true) <= 1000.0`). */
 export const START_SETTLED_SPEED_SQ = 1000;
+/**
+ * Rules 3: horizontal speed above the prespeed cap by more than this came from the map, not the player. An armed player
+ * was within the cap the tick before, and one tick of movement adds far less (ground accelerate 13 u/s, air 30 u/s at most).
+ */
+export const START_IMPULSE_MARGIN = 32;
 
 export const DEFAULT_TIMER_OPTIONS: TimerOptions = { prespeedCap: 290, strafeKeys: "ad", rules: TIMER_RULES };
 
@@ -101,8 +111,8 @@ export const EVENT_RESPAWNED = 1 << 3;
  * - Rules 1: touching a start zone of track T puts the timer idle on track T (restarting any run in progress); leaving
  *   it starts a run on T (prespeed capped).
  * - Rules 2: only a valid start tick in it does that ("armed": on the ground, not on a ladder, within the prespeed
- *   cap, settled; see TIMER_RULES_V2). The first tick that isn't armed is the run's first tick (prespeed capped):
- *   walking out, jumping, or walking off a ledge inside the zone.
+ *   cap, settled; see TIMER_RULES_V2). The first tick that isn't armed is the run's first tick (prespeed capped; rules 3:
+ *   unless a booster caused it, see TIMER_RULES_V3): walking out, jumping, or walking off a ledge inside the zone.
  *   The run is announced (`started`) once the player is out of the zone, with that first tick as its start, so
  *   jumping around inside the zone doesn't start and restart runs; landing back in the zone re-arms instead.
  *   Touching the zone in the air changes nothing: a run in progress continues, an idle timer stays idle.
@@ -501,6 +511,7 @@ export class RunTimer {
     const vx = s.velocity[0];
     const vy = s.velocity[1];
     const speed = Math.sqrt(vx * vx + vy * vy);
+    if (this.rules >= TIMER_RULES_V3 && speed > cap + START_IMPULSE_MARGIN) return;
     if (speed > cap) {
       const f = cap / speed;
       out.clampVelocity = [Math.fround(vx * f), Math.fround(vy * f), s.velocity[2]];

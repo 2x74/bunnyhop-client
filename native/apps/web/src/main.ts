@@ -68,7 +68,7 @@ import { buildSurfaces } from "./audio/surfaces";
 import { registerAudioSettings } from "./audio/settings-section";
 import { TUTORIAL_MAP } from "./tutorial/data";
 import { fetchBytes, withTimeout } from "./content/fetch";
-import { bspUrl, indexSha } from "./content/map-url";
+import { bspUrl, indexSha, mapParam } from "./content/map-url";
 import { contentLoading, loadErrorActions } from "./content/load-screen";
 import { RestartGuard, type GuardedAction } from "./restart-guard";
 import { CONFIRM_MS, LeaveHold } from "./leave-confirm";
@@ -117,6 +117,13 @@ registerMeasure();
 // Before anything loads lazily: a tab older than the deploy reloads (or says so) instead of failing on a missing chunk.
 initChunkRecovery();
 const params = appLocation().searchParams;
+// A link with an empty ?map= names no map: the rest of the page reads it as absent (mapParam).
+if (params.has("map") && !mapParam(params)) {
+  params.delete("map");
+  const clean = appLocation();
+  clean.searchParams.delete("map");
+  history.replaceState(history.state, "", clean.pathname + clean.search + clean.hash);
+}
 
 // A software renderer (no GPU) seen for the first time: Lowest graphics before the context is made (gfx-auto.ts).
 const gfxAuto = autoTuneGraphics();
@@ -410,7 +417,7 @@ if (params.get("privacy") === "data") {
     history.replaceState(null, "", url.pathname + url.search + url.hash);
   });
 }
-const mapName = params.get("map") ?? replayMap ?? (await showHome());
+const mapName = params.get("map") || replayMap || (await showHome());
 // Run style: ?style=<id> (e.g. links from a leaderboard) else the last one picked (map browser / pause menu / F3).
 const styleParam = params.get("style");
 if (isStyleId(styleParam) && !gauntletStart) setSelectedStyle(styleParam);

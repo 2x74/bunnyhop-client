@@ -90,6 +90,8 @@ export interface MenuActions {
   /** Practice mode (practice-mode/controller.ts): the rail's Practice item. Null where it isn't available (rooms, the
    * tutorial). */
   practice?: { on: boolean; toggle: () => void } | null;
+  /** Asked at each draw: clears the start point and restarts, when this attempt is on one that doesn't count (session.ts onPracticeSpawn). */
+  clearStart?: () => (() => void) | null;
 }
 
 type Screen = "home" | "maps" | "settings" | "controls" | "pause" | "loading" | "profile" | "ranks" | "servers" | "support" | "stats" | "gauntlets" | "gauntlet";
@@ -749,6 +751,7 @@ function pauseScreen(): HTMLElement {
   const home = railItem("Main menu", goToMainMenu, { hint: keyLabel(homeKey[1] ?? homeKey[0]), icon: "leave" });
   home.classList.add("pause-home");
   const sep = () => h("div.rail-sep", { role: "separator" });
+  const clearStart = a?.clearStart?.() ?? null;
   const feedback = api.available() ? railItem("Feedback", () => openFeedback(), { icon: "pen" }) : null;
   const inbox = api.available() ? withInboxBadge(railItem("Inbox", () => openInbox(), { icon: "mail" })) : null;
   const rail = h(
@@ -757,6 +760,9 @@ function pauseScreen(): HTMLElement {
     railItem(S.started ? "Resume" : "Play", () => S.hooks?.resume(), { primary: true, hint: S.started ? "Esc" : undefined, icon: "play" }),
     S.started ? railItem("Restart", resumeAnd(() => S.hooks?.restart()), { hint: restartKey ? keyLabel(restartKey) : undefined, icon: "restart", sub: track ? trackName(track) : undefined }) : null,
     a && track && a.onTrack ? railItem("Main track", resumeAnd(() => a.onTrack!(0)), { hint: bindHint("restartMain"), icon: "home" }) : null,
+    clearStart && S.started
+      ? railItem("Clear start point", resumeAnd(clearStart), { hint: bindHint("clearStart"), icon: "restart", sub: "This one doesn't count" })
+      : null,
     a?.practice && S.started
       ? railItem(a.practice.on ? "Leave practice" : "Practice", resumeAnd(a.practice.toggle), {
           hint: bindHint("practice"),

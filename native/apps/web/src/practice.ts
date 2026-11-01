@@ -20,7 +20,7 @@ export interface PracticeFlags {
 
 export function practiceReason(f: PracticeFlags): string | null {
   if (f.mode) return "practice mode";
-  if (f.tool) return f.tool === "noclip" ? "practice run (noclip)" : f.tool === "spawn" ? "practice run (practice spawn)" : "practice run (checkpoint teleport)";
+  if (f.tool) return f.tool === "noclip" ? "practice run (noclip)" : f.tool === "spawn" ? "practice run (start point doesn't count)" : "practice run (checkpoint teleport)";
   if (f.debug) return "practice run (debug mode)";
   if (f.thirdPerson) return "practice run (third person)";
   if (f.scripted) return "practice run (scripted)";

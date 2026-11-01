@@ -23,6 +23,9 @@ import { caseProps, loadThread, timeline, type ThreadData } from "./thread";
 import { pinnedLine } from "./notes";
 import { markSeen } from "./seen";
 
+/** The daily sweep's rules (apps/api src/ac-player-rules.ts), for the Stop re-flags dialog. */
+const SWEEP_RULES = ["key-shape-repeat", "counted-yaw-missing", "missing-beats-repeat", "pooled-review", "gain-jump", "legit-jumps"];
+
 export interface Evidence {
   code: string;
   text: string;
@@ -66,6 +69,9 @@ interface RunDetail {
   baseline?: string | null;
   gainJump?: { score: number; listed: boolean; text: string } | null;
   legitJumps?: { z: number | null; listed: boolean; text: string } | null;
+  keyWindows?: { listed: boolean; text: string } | null;
+  ownHistory?: { listed: boolean; text: string } | null;
+  flatCurve?: { listed: boolean; text: string }[];
 }
 
 export interface FlagRun {
@@ -112,8 +118,6 @@ export interface FlagPlayer {
   shadow_source: string | null;
   alts: { id: string; name: string; created_at: number; banned: boolean; shadowed?: boolean }[];
   linked?: { id: string; name: string; via: "device" | "fp" | "net"; banned: boolean; shadowed: boolean }[];
-  linkedCount?: number;
-  altCount?: number;
   pooled?: { score: number; runs: number } | null;
 }
 
@@ -219,6 +223,9 @@ function numbers(x: RunDetail): HTMLElement {
       ["This run", x.baseline ?? null],
       ["Gain jump", x.gainJump ? h("span", { class: x.gainJump.listed ? "warn-text" : "" }, x.gainJump.text) : null],
       ["Legit jumps", x.legitJumps ? h("span", { class: x.legitJumps.listed ? "warn-text" : "" }, x.legitJumps.text) : null],
+      ["Key windows", x.keyWindows ? h("span", { class: x.keyWindows.listed ? "warn-text" : "" }, x.keyWindows.text) : null],
+      ["Own history", x.ownHistory ? h("span", { class: x.ownHistory.listed ? "warn-text" : "" }, x.ownHistory.text) : null],
+      ["Flat curve", x.flatCurve?.[0] ? x.flatCurve[0].text : null],
     ]),
     j?.rows.length
       ? h(
@@ -420,7 +427,7 @@ export const casesView: View = async (root, params) => {
             "div",
             { class: "ctx-grid" },
             listSection("Earlier flags", flagRows(earlier, 6), "None before this."),
-            listSection("Other accounts", [...altRows(d), ...(p.linkedCount && !d.alts.length ? [h("div", { class: "ctx-row faint" }, `${p.linkedCount} on the same device or network.`)] : [])], "None seen."),
+            listSection("Other accounts", altRows(d, p.linked), "None seen."),
             listSection("Bans", d.bans.map((b) => h("div", { class: "ctx-row" }, b.until && b.until < Date.now() ? badge("over") : badge("active", "bad"), h("span", { class: "ctx-msg" }, b.reason ?? "no reason"), h("span", { class: "faint ctx-when" }, ago(b.created_at)))), "Never banned."),
             listSection("Their other times here", board.slice(0, 6).map((r) => h("div", { class: "ctx-row" }, h("span", { class: "t-run" }, fmtTime(r.time)), r.pb ? badge("PB", "acc") : null, h("span", { class: "faint ctx-when" }, ago(r.created_at)))), run ? "No other verified run on this board." : ""),
             listSection("Chat", chatLines(d.chat, 10), "No chat."),
@@ -524,6 +531,21 @@ export const casesView: View = async (root, params) => {
         if (!openRuns(p.user_id).length) await resolve(p.user_id, "Approved", "ink");
       }
     },
+    ruleClear: async (p: FlagPlayer, run: FlagRun | null) => {
+      const codes = [...new Set([...(run?.evidence ?? []).filter((e) => !e.blatant).map((e) => e.code), ...runs.filter((r) => r.user_id === p.user_id && !r.review).flatMap((r) => r.evidence.filter((e) => !e.blatant).map((e) => e.code))])];
+      const v = await ask({
+        title: `Stop a rule re-flagging ${p.name}?`,
+        text: "For a player you've judged: new runs flagged only on this rule are stored closed with your note, and the daily sweep skips it. Blatant verdicts still act. The rule can be turned back on from the moderation log's Undo or the API.",
+        fields: [
+          { name: "rule", label: "Rule", kind: "select", options: [...codes.map((c): [string, string] => [c, c]), ...SWEEP_RULES.filter((c) => !codes.includes(c)).map((c): [string, string] => [c, `${c} (sweep)`]), ["*", "Every rule"]], value: codes[0] ?? "key-shape-repeat" },
+          { name: "note", label: "Why (the next reviewer reads it)", kind: "text", required: true },
+          { name: "days", label: "Days (empty: no expiry)", kind: "number" },
+        ],
+        confirm: "Stop re-flags",
+      });
+      if (!v) return;
+      await act("/admin/integrity", { action: "rule-clear", user: p.user_id, rule: v.rule, note: v.note, days: v.days || null }, "Rule cleared for this player");
+    },
     watch: (run: FlagRun | null) => {
       if (!run) return;
       void detail(run.run_id)
@@ -546,6 +568,7 @@ export const casesView: View = async (root, params) => {
       mayShadow(!!p.shadow_at, p.shadow_source) ? h("button", { type: "button", class: p.shadow_at ? "" : "danger", onclick: () => void actions.shadow(p) }, p.shadow_at ? "Lift shadowban" : "Shadowban", key("s")) : null,
       may("integrity.ban") && !(p.banned && !p.verified) ? h("button", { type: "button", class: "danger", onclick: () => void actions.ban(p) }, "Ban and invalidate", key("b")) : null,
       run && run.tier === "blatant" && run.status === "rejected" && run.reason === INHUMAN_REASON && run.review !== "approved" && may("integrity.approve") ? h("button", { type: "button", onclick: () => void actions.approve(p, run) }, "Approve…") : null,
+      may("integrity.ban") ? h("button", { type: "button", onclick: () => void actions.ruleClear(p, run) }, "Stop re-flags…") : null,
       h("span", { class: "spacer" }),
       run ? h("button", { type: "button", class: "ghost", onclick: () => actions.watch(run) }, glyph("play"), "Watch", key("w")) : null,
     );

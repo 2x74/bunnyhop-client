@@ -15,7 +15,7 @@ import { cleanLoadout, type CosmeticLoadout } from "./loadout";
 
 import type { NameColorId, NameEffect, PlayerMarks, ProfileLink, ProfileLinks } from "./creators";
 import { deviceHeaders } from "./device";
-import { resolveMe } from "./me-rules";
+import { GUEST_REFUSED_MS, resolveMe } from "./me-rules";
 import { WAVEDASH } from "./platform/env";
 import { wavedashCredentials, wavedashUserId } from "./platform/wavedash";
 import type { GiftTarget, GiftWallet, GiftPreview, GiftDelivery } from "./gifting";
@@ -208,6 +208,8 @@ export interface RunStats {
   perf: number | null;
   /** Replay views (since views began, one per network a day). */
   views: number;
+  /** What this record is worth now, before the player's total weighs their records. Left out when it has none yet. */
+  points?: number;
   client?: { kind: "native" | "desktop" | "browser"; label: string };
   version?: string;
   fps?: number;
@@ -324,7 +326,8 @@ export interface GauntletHub {
     mapList: { idx: number; map: string; title: string; tier: number | null }[];
     top: { rank: number; player: ApiPlayer; time: number }[];
   }) | null;
-  gauntlets: GauntletListItem[];
+  /** `wrPlayer`: who holds the record. Absent from a pre-0.0.34 server. */
+  gauntlets: (GauntletListItem & { wrPlayer?: ApiPlayer | null })[];
   past: (GauntletListItem & { winner: { player: ApiPlayer; time: number } | null })[];
 }
 
@@ -857,6 +860,7 @@ function rememberMe(u: User | null): void {
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+let guestRefusedUntil = 0;
 
 /**
  * One GET /me with a definite answer: the player, or null for "no session". Anything else throws (ApiUnavailable: no
@@ -945,8 +949,11 @@ export const api = {
         ask: askMe, transient: (e) => e instanceof ApiUnavailable,
         guest: () => {
           // A superseded lookup must never replace a newly signed-in session with a guest cookie.
-          if (meCache !== pending || wavedashPlayer()) throw new ApiUnavailable();
-          return json<User>("/auth/guest", post({}, true));
+          if (meCache !== pending || wavedashPlayer() || Date.now() < guestRefusedUntil) throw new ApiUnavailable();
+          return json<User>("/auth/guest", post({}, true)).catch((e: unknown) => {
+            if (e instanceof ApiError && e.status === 429) guestRefusedUntil = Date.now() + GUEST_REFUSED_MS;
+            throw e;
+          });
         }, known: lastKnownMe,
         forget: () => { if (meCache === pending) rememberMe(null); }, wait: sleep,
       })).then(
@@ -1205,7 +1212,8 @@ export const api = {
     }
     const res = await request(path, { ...init, device: true }, opts.dispatch);
     const body = (await res.json().catch(() => null)) as (Submission & { error?: string; message?: string }) | null;
-    if (!res.ok || !body) return { id: "", status: "rejected", reason: body?.message ?? `HTTP ${res.status}`, code: body?.error ?? "error" };
+    // A 429 without our JSON (the edge's own limit) is still "not yet", not a verdict on the run (uploads.ts holds).
+    if (!res.ok || !body) return { id: "", status: "rejected", reason: body?.message ?? `HTTP ${res.status}`, code: body?.error ?? (res.status === 429 ? "rate_limited" : "error") };
     meCache = null; // the server may have just issued a guest identity
     return body;
   },

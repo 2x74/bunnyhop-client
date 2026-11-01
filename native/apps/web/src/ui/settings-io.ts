@@ -175,7 +175,7 @@ const RULES: [string, Rule][] = [
   ["hud.keys.style", { oneOf: ["classic", "keycaps", "minimal"] }],
   ["hud.keys.opacity", { range: [0.1, 1] }],
   ["hud.strafeTrainer.color", color],
-  ["hud.strafeTrainer.style", { oneOf: ["classic", "detailed", "minimal"] }],
+  ["hud.strafeTrainer.style", { oneOf: ["classic", "detailed", "minimal", "bar"] }],
   ["hud.strafeTrainer.smoothing", { range: [1, 20], int: true }],
   ["hud.strafeTrainer.zone", { range: [2, 30] }],
   ["hud.strafeTrainer.height", { range: [0.5, 3] }],

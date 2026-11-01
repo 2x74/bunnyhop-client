@@ -7,6 +7,11 @@
 export const ME_RETRY_MS = [400, 1500] as const;
 /** A known account read back as "no session": asked once more after this before a guest is started. */
 export const ME_RECHECK_MS = 1200;
+/**
+ * After the network's new-player limit refused a guest (POST /auth/guest 429): don't ask for another for this long. Every
+ * screen asks me() and a refusal isn't cached, so a refused browser was asking every ~20 s.
+ */
+export const GUEST_REFUSED_MS = 110_000;
 
 export interface MeIO<U extends { provider: string }> {
   /** One GET /me: the player, null for "no session"; throws without a definite answer. */

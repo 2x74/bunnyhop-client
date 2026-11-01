@@ -109,6 +109,9 @@ const VPHYSICS_INSET: f32 = 0.5;
 const OUT_OF_WORLD: f32 = movement::MAX_COORDINATE - 80.0;
 /// Guard against output loops (A fires B fires A with zero delay).
 const MAX_EVENTS_PER_TICK: usize = 4096;
+/// Events into a tick at which `service_events` first looks for loops it can skip (then at every doubling): well above
+/// what a map does in an ordinary tick (the catalogue's busiest averages 30), so an ordinary tick never pays for the look.
+const EVENT_LOOP_CHECK_AFTER: usize = 32;
 
 /// Physics versions. Every replay is re-simulated with the version it was recorded with (replay header `physics`,
 /// apps/web/src/replay.ts), so a movement fix never changes an existing run. research/MOVEMENT_AUDIT.md
@@ -179,7 +182,7 @@ pub const PHYSICS_V16: u32 = 16;
 /// slope or a ledge no longer depends on where inside a tick the player meets it.
 pub const PHYSICS_V17: u32 = 17;
 /// The version new recordings use.
-pub const PHYSICS_LATEST: u32 = PHYSICS_V22;
+pub const PHYSICS_LATEST: u32 = PHYSICS_V23;
 /// v18: ladder surface properties, preserving historical replay behavior.
 pub const PHYSICS_V18: u32 = 18;
 /// v19: scoped map mechanics (template instances and explicit velocity scripts). No new movement fix bits.
@@ -199,6 +202,8 @@ pub const PHYSICS_V21: u32 = 21;
 /// exactly as on v21, without one they stay airborne, with no friction tick (`EVENT_EDGEBUG`). Autohop with jump held on the
 /// landing tick plays as v21. The landing tick itself (touches, thin triggers, timer) is a v21 landing. No new fix bits.
 pub const PHYSICS_V22: u32 = 22;
+/// v23: per-map changes only, see `game/map_fixes.rs`. Every map not listed there plays as on v22. No new fix bits.
+pub const PHYSICS_V23: u32 = 23;
 /// Diagnostic pseudo-versions (never valid in a replay, whose field is a u8): `PHYSICS_DIAG | fix bits` turns on only
 /// the listed fixes, to tell which fix changes a replay (tools: /tmp physics-v2 analysis). The fix bits are the low 31
 /// (`PHYSICS_DIAG_FIXES`); before v18 the base was 1 << 30 with 30 fix bits; before v17 the base was 1 << 26 with 26 fix bits, before v16 1 << 25 with 25, before v15
@@ -408,6 +413,16 @@ pub fn map_parented_doors_v21_for(entities: &[Entity]) -> Option<&'static str> {
     map_fixes::parented_doors_v21(entities).map(|m| m.map)
 }
 
+/// The map a parsed entity lump matches in `game/map_fixes.rs` `EVENT_CLOCK_V23` (tests, tools).
+pub fn map_event_clock_v23_for(entities: &[Entity]) -> Option<&'static str> {
+    map_fixes::event_clock_v23(map_fixes::entity_fingerprint(entities)).map(|m| m.map)
+}
+
+/// The fingerprints `EVENT_CLOCK_V23` pins, by map (tests: every entry matches its BSP).
+pub fn map_event_clock_v23_table() -> Vec<(&'static str, u32)> {
+    map_fixes::EVENT_CLOCK_V23.iter().map(|m| (m.map, m.fingerprint)).collect()
+}
+
 /// Every map in `game/map_fixes.rs` `PARENTED_DOORS_V21` (tests, tools).
 pub fn map_parented_doors_v21_table() -> Vec<&'static str> {
     map_fixes::PARENTED_DOORS_V21.iter().map(|m| m.map).collect()
@@ -448,7 +463,7 @@ pub fn physics_fixes(version: u32) -> Option<u32> {
         PHYSICS_V15 => Some(PHYSICS_FIX_V15),
         PHYSICS_V16 => Some(PHYSICS_FIX_V16),
         PHYSICS_V17 => Some(PHYSICS_FIX_V17),
-        PHYSICS_V18 | PHYSICS_V19 | PHYSICS_V20 | PHYSICS_V21 | PHYSICS_V22 => Some(PHYSICS_FIX_ALL),
+        PHYSICS_V18 | PHYSICS_V19 | PHYSICS_V20 | PHYSICS_V21 | PHYSICS_V22 | PHYSICS_V23 => Some(PHYSICS_FIX_ALL),
         v if v & !PHYSICS_DIAG_FIXES == PHYSICS_DIAG && v & PHYSICS_DIAG_FIXES & !PHYSICS_FIX_ALL == 0 => Some(v & PHYSICS_DIAG_FIXES),
         _ => None,
     }
@@ -1258,6 +1273,10 @@ pub struct TeleportInfo {
 }
 
 pub struct Game {
+    /// Tests: run every event of an idle door loop instead of skipping it (`skip_idle_door_loops`).
+    pub exact_event_loops: bool,
+    /// Diagnostics: how many events `skip_idle_door_loops` has accounted for. Not simulation state.
+    pub events_skipped: u64,
     /// Opt-in observational timing; excluded from physics snapshots.
     pub observe_timing: bool,
     /// Tools: run the v22 edge landing prediction on every landing, on any version, and report it in
@@ -1300,6 +1319,8 @@ pub struct Game {
     pub events: u32,
     /// Observational only: a clean, unmodified movement tick for local jump statistics. Never feeds physics.
     pub jumpstats_valid: bool,
+    /// Read-only clean AirAccelerate observation for the HUD: [actual speed delta, best delta].
+    pub air_speed_gain: Option<[f32; 2]>,
     /// V20 only: newly categorized ground followed by a jump in the same command. Timer observation;
     /// never inferred from post-jump speed (air acceleration / triggers may already have changed it).
     pub categorized_ground_jump: Option<movement::GroundJump>,
@@ -1398,6 +1419,12 @@ pub struct Game {
     /// Exact reviewed entity build matched by map_fixes::PARENTED_DOORS_V21: from physics v21 its parented doors follow
     /// their parents (`door_follows_parent`). Fixed at load.
     map_parented_doors: bool,
+    /// v23: this build's outputs run on EventQueueFix's clock (`map_fixes::EVENT_CLOCK_V23`).
+    map_event_clock: bool,
+    /// v23: the entity fingerprint, kept for `map_fixes::teleport_target_v23`.
+    map_fingerprint: u32,
+    /// Exact reviewed build in map_fixes::LOGIC_CASE_V23: from physics v23 its logic_case and target rewrites run.
+    map_logic_case: bool,
 }
 
 /// Physics v4 world state the entity list doesn't hold; saved with the game state, cleared on reset.
@@ -1494,6 +1521,9 @@ impl Game {
         let script_triggers = vscript::script_triggers(&entities);
         let map_mechanics = map_fixes::mechanics_v19(&entities);
         let map_parented_doors = map_fixes::parented_doors_v21(&entities).is_some();
+        let map_fingerprint = map_fixes::entity_fingerprint(&entities);
+        let map_event_clock = map_fixes::event_clock_v23(map_fingerprint).is_some();
+        let map_logic_case = map_fixes::logic_case_v23(&entities).is_some();
         let physics::MapPhysics { prop_sources, world, texinfo_surface, props, diagnostics, displacement_count } =
             physics::build_with_entities(bsp, content, &entities, prop_mesh)?;
         let models: &[Model] = match bsp.lump(playsrc_bsp::MODELS).map(|l| &l.records) {
@@ -1521,6 +1551,8 @@ impl Game {
             prop_mesh,
             entities,
             ents,
+            exact_event_loops: false,
+            events_skipped: 0,
             observe_timing: false,
             observe_edge_landings: false,
             edge_landing_observed: None,
@@ -1546,6 +1578,7 @@ impl Game {
             tick: 0,
             events: 0,
             jumpstats_valid: false,
+            air_speed_gain: None,
             categorized_ground_jump: None,
             teleport_angles: spawn.1,
             player_name: String::new(),
@@ -1596,6 +1629,9 @@ impl Game {
             script_triggers,
             map_mechanics,
             map_parented_doors,
+            map_event_clock,
+            map_fingerprint,
+            map_logic_case,
         };
         game.link_hierarchy();
         game.link_templates();
@@ -1672,6 +1708,7 @@ impl Game {
     pub fn reset(&mut self) {
         self.timing_path = None;
         self.jumpstats_valid = false;
+        self.air_speed_gain = None;
         self.categorized_ground_jump = None;
         self.restart_point = None;
         self.restart_names = None;
@@ -1756,6 +1793,7 @@ impl Game {
 
     /// Respawn the player at the spawn point (map entity state is kept, as on a Source respawn).
     pub fn respawn_player(&mut self) {
+        self.air_speed_gain = None;
         let (origin, angles) = match self.restart_point {
             Some((p, yaw)) => (p, [0.0, yaw, 0.0]),
             None => (self.spawn_origin, self.spawn_angles),
@@ -1977,6 +2015,7 @@ impl Game {
     pub fn step(&mut self, cmd: Cmd) -> Result<(), String> {
         self.timing_path = self.observe_timing.then(|| movement::accepted_path::AcceptedPath::unsupported("movement-not-executed"));
         self.jumpstats_valid = false;
+        self.air_speed_gain = None;
         self.categorized_ground_jump = None;
         let before_events = self.state;
         // RNGFix telehop: no fix right after another map teleport (`g_bMapTeleportedSequentialTicks`).
@@ -2124,6 +2163,9 @@ impl Game {
                 // CheckJumpButton adds 0.15 to the view's step smoothing even on a flat takeoff.
                 && result.climbed_step <= if result.jump_velocity != [0.0; 3] { 0.15 } else { 0.0 }
                 && result.contacts.iter().all(|c| c.normal[2] >= 0.99);
+            if !result.move_collided && result.prevented_collision.is_none() {
+                self.air_speed_gain = result.air_speed_gain;
+            }
             self.contacts.extend(result.contacts.iter().filter_map(|c| c.hit));
             self.last_move_origin = result.state.position;
             wall_hit = result.contacts.iter().any(|c| c.normal[2].abs() < 0.7);
@@ -2187,6 +2229,9 @@ impl Game {
             && self.state.velocity == after_movement.velocity && self.state.base_velocity == [0.0; 3]
             && self.gravity_scale == 1.0 && self.speed_scale == 1.0
             && self.state.ground.is_none_or(|g| g.support.is_none_or(|hit| hit_entity(hit).is_none()) && g.normal[2] >= 0.99 && g.jump_factor == 1.0);
+        if !self.jumpstats_valid || self.state.ground.is_some() || self.state.mode != movement::Mode::Walk {
+            self.air_speed_gain = None;
+        }
         self.tick += 1;
         Ok(())
     }
@@ -2378,6 +2423,9 @@ impl Game {
     /// Ticks the player's usercmd clock leads the server clock by.
     fn player_clock_lead(&self) -> u32 {
         self.rules.player_clock_lead.unwrap_or_else(|| {
+            if self.map_event_clock && (PHYSICS_V23..=PHYSICS_LATEST).contains(&self.settings.physics_version) {
+                return 0;
+            }
             // TIME_TO_TICKS(sv_clockcorrection_msecs 60 ms), minus the command being run.
             (((0.06 / self.settings.tick_interval) + 0.5) as u32).saturating_sub(1)
         })
@@ -2387,11 +2435,21 @@ impl Game {
     fn service_events(&mut self) {
         let now = self.server_time(i64::from(self.tick) - 1);
         self.io_time = now;
-        for _ in 0..MAX_EVENTS_PER_TICK {
+        let mut done = 0;
+        let mut next_check = EVENT_LOOP_CHECK_AFTER;
+        while done < MAX_EVENTS_PER_TICK {
             // Earliest due event; ties keep insertion order (CEventQueue semantics).
             if self.queue.peek().is_none_or(|e| e.fire_time > now) {
                 break;
             }
+            if done == next_check {
+                next_check *= 2;
+                if !self.exact_event_loops {
+                    done += self.skip_idle_door_loops(now, MAX_EVENTS_PER_TICK - done);
+                    continue;
+                }
+            }
+            done += 1;
             let event = self.queue.pop().expect("peeked");
             if self.settings.physics_fixes() & PHYSICS_FIX_WEAPONS != 0
                 && (event.input.eq_ignore_ascii_case("kill") || event.input.eq_ignore_ascii_case("killhierarchy"))
@@ -2417,6 +2475,115 @@ impl Game {
                 }
             }
         }
+    }
+
+    /// Fast-forwards zero-length doors that open and close each other in a zero-delay loop, returning how many events it
+    /// accounted for (a multiple of the loop's length, at most `budget`; 0 when the queue isn't exactly such a loop).
+    ///
+    /// bhop_overground_fix: `lip` larger than the door's travel leaves d1-d11 with no distance to move, and each has
+    /// `OnFullyOpen -> self,Close,,0` and `OnFullyClosed -> self,Open,,0`. Every Open or Close reaches its end at once
+    /// and queues the opposite input for the same instant, so the 11 doors use up all of MAX_EVENTS_PER_TICK on every
+    /// tick, each event scanning every entity for its target: 2.4 ms/tick where the catalogue's next worst map takes 0.15.
+    /// The cap is part of the simulation (recorded replays depend on which side each door ends a tick on), so the events
+    /// must still count; they just needn't run. With K doors in the loop, 2K events put every door and queued event back
+    /// as they were, with `seq` 2K further on, which only orders events relative to each other.
+    ///
+    /// Everything that could make those 2K events do anything else is checked below against the current state, not assumed
+    /// from the map: any doubt returns 0 and the events run normally.
+    fn skip_idle_door_loops(&mut self, now: f32, budget: usize) -> usize {
+        // Map scripts see inputs before the entity does (`script19_input`, `mechanics_input`). Touch, use and attack push
+        // a door's `start_tick` to the next tick; they're never set here, at the start of a step.
+        if self.mechanics_on() || self.in_touch || self.in_use || self.in_attack {
+            return 0;
+        }
+        let (tick, dt) = (self.tick, self.settings.tick_interval);
+        let mut due: Vec<(u64, usize)> = Vec::new();
+        for e in self.queue.iter() {
+            if e.fire_time > now {
+                continue;
+            }
+            // Queued by this tick's events (one from an earlier tick still has to take its turn first), by the door's
+            // own output: the copy each step queues has the same actors and time.
+            let (Actor::Entity(i), Actor::Player) = (e.caller, e.activator) else { return 0 };
+            if e.fire_time.to_bits() != now.to_bits() || !self.is_idle_door_step(i, e, tick, dt) {
+                return 0;
+            }
+            due.push((e.seq, i));
+        }
+        let doors = due.len();
+        let span = doors * 2;
+        if doors == 0 || budget < span {
+            return 0;
+        }
+        // Consecutive and the newest events: each pop's one new event lands exactly `doors` places later, door by door.
+        due.sort_unstable();
+        let first = self.seq.wrapping_sub(doors as u64 - 1);
+        if due.iter().enumerate().any(|(k, &(seq, _))| seq != first.wrapping_add(k as u64)) {
+            return 0;
+        }
+        // One event per door: a second would find the door already there and do nothing, shrinking the loop.
+        let mut movers: Vec<usize> = due.iter().map(|&(_, i)| i).collect();
+        movers.sort_unstable();
+        movers.dedup();
+        if movers.len() != doors {
+            return 0;
+        }
+        let skipped = budget / span * span;
+        self.events_skipped += skipped as u64;
+        self.seq += skipped as u64;
+        let mut events = Vec::with_capacity(doors);
+        for _ in 0..doors {
+            events.push(self.queue.pop().expect("due events are the earliest"));
+        }
+        for mut e in events {
+            e.seq += skipped as u64;
+            self.queue.push(e);
+        }
+        skipped
+    }
+
+    /// Whether queued event `e`, caller door `i`, is a step of an idle door loop: running it flips the door and queues
+    /// nothing but its opposite step, and running that puts the door back as it is now.
+    fn is_idle_door_step(&self, i: usize, e: &QueuedEvent, tick: u32, dt: f32) -> bool {
+        let ent = &self.ents[i];
+        let Data::Mover(m) = &ent.data else { return false };
+        if ent.removed || m.button || m.locked || m.start_tick != tick || m.distance.to_bits() != 0f32.to_bits() || m.offset.to_bits() != 0f32.to_bits() {
+            return false;
+        }
+        let opening = match m.phase {
+            MoverPhase::Closed => true,
+            // As `mover_reached_top` set it on this tick, so a Close then Open leaves it the same.
+            MoverPhase::Open { until_tick } => {
+                if until_tick != Self::mover_open_until(m, tick, dt) {
+                    return false;
+                }
+                false
+            }
+            _ => return false,
+        };
+        let (mut to_close, mut to_open) = (None, None);
+        for o in ent.outputs.iter().filter(|o| o.times != 0) {
+            match &*o.event {
+                // Would queue something more on every step.
+                "onopen" | "onclose" => return false,
+                "onfullyopen" if to_close.is_none() => to_close = Some(o),
+                "onfullyclosed" if to_open.is_none() => to_open = Some(o),
+                "onfullyopen" | "onfullyclosed" => return false,
+                _ => {}
+            }
+        }
+        let (Some(to_close), Some(to_open)) = (to_close, to_open) else { return false };
+        // Unlimited, for the same instant, and reaching only this door, whose current phase accepts it.
+        let loops = |o: &Output, input: &str| {
+            o.times < 0 && o.delay <= 0.0 && o.input.eq_ignore_ascii_case(input)
+                && self.resolve_targets(&o.target, Actor::Player, Actor::Entity(i)) == [Actor::Entity(i)]
+        };
+        if !loops(to_close, "close") || !loops(to_open, "open") {
+            return false;
+        }
+        // `e` is what that output queued, so the event in its place two steps on is the same.
+        let source = if opening { to_open } else { to_close };
+        e.target == source.target && e.input == source.input && e.param == source.param
     }
 
     fn resolve_targets(&self, target: &str, activator: Actor, caller: Actor) -> Vec<Actor> {
@@ -2549,6 +2716,7 @@ impl Game {
             return;
         }
         if self.mechanics_input(i, input, param, activator) { return; }
+        if self.logic_case_input(i, input, param, activator) { return; }
         // point_template / game_ui (v4).
         if self.settings.physics_fixes() & PHYSICS_FIX_GAME_ENTITIES != 0 {
             match (self.ents[i].class.as_str(), input) {
@@ -2899,14 +3067,19 @@ impl Game {
         }
     }
 
+    /// The tick a mover reaching its top on `tick` starts back, u32::MAX if it stays.
+    fn mover_open_until(m: &Mover, tick: u32, dt: f32) -> u32 {
+        let stays = m.wait < 0.0 || m.no_auto_return;
+        let wait_ticks = (m.wait.max(0.0) / dt).round() as u32;
+        if stays { u32::MAX } else { tick + wait_ticks }
+    }
+
     fn mover_reached_top(&mut self, i: usize) {
         let tick = self.tick;
         let dt = self.settings.tick_interval;
         let m = self.mover_mut(i);
         m.offset = m.distance;
-        let stays = m.wait < 0.0 || m.no_auto_return;
-        let wait_ticks = (m.wait.max(0.0) / dt).round() as u32;
-        m.phase = MoverPhase::Open { until_tick: if stays { u32::MAX } else { tick + wait_ticks } };
+        m.phase = MoverPhase::Open { until_tick: Self::mover_open_until(m, tick, dt) };
         let button = m.button;
         self.fire_output(i, if button { "onin" } else { "onfullyopen" }, Actor::Player);
     }
@@ -3492,7 +3665,16 @@ impl Game {
         else {
             return false;
         };
+        // v23 (LOGIC_CASE_V23 builds): a `!activator` landmark resolves to the player: no offset, velocity and angles kept.
+        let self_landmark = self.logic_case_on() && landmark.as_deref() == Some("!activator");
         let preserve_angles = spawnflags & 32 != 0;
+        // v23: a reviewed mapper mistake (`map_fixes::TELEPORT_TARGET_EDITS_V23`).
+        let edited = if (PHYSICS_V23..=PHYSICS_LATEST).contains(&self.settings.physics_version) {
+            self.ents[trigger].brush.as_ref().and_then(|b| map_fixes::teleport_target_v23(self.map_fingerprint, b.model, target))
+        } else {
+            None
+        };
+        let target = edited.unwrap_or(target.as_str());
         let Some(dest) = self.find_named(target) else { return false };
         if std::env::var_os("PARITY_DEBUG").is_some() {
             eprintln!("tick {} teleport via {trigger} ({}) to {target} at {:?} from {:?}", self.tick, self.ents[trigger].name, self.ents[dest].origin, self.state.position);
@@ -3501,6 +3683,7 @@ impl Game {
         let mut origin = self.ents[dest].origin;
         let mut angles = self.last_angles;
         match landmark {
+            None if self_landmark => {}
             Some(l) => {
                 for k in 0..3 {
                     origin[k] += self.state.position[k] - self.ents[l].origin[k];
@@ -3750,6 +3933,18 @@ impl Game {
         self.queue.len()
     }
 
+    /// Pending entity I/O events in firing order as (fire time bits, seq, "target.input(param)") (diagnostics, tests).
+    pub fn queue_order(&self) -> Vec<(u32, u64, String)> {
+        let mut events: Vec<&QueuedEvent> = self.queue.iter().collect();
+        events.sort_by_key(|e| std::cmp::Reverse(*e));
+        events.into_iter().map(|e| (e.fire_time.to_bits(), e.seq, format!("{}.{}({})", e.target, e.input, e.param))).collect()
+    }
+
+    /// I/O events queued since the map started: what each tick's `service_events` works through (tools: simcost).
+    pub fn events_fired(&self) -> u64 {
+        self.seq
+    }
+
     /// Collision files (`.phy`, or `.mdl` for bbox props) every prop needs, deduplicated and sorted:
     /// what the hosted content and the verifier's physics BSP must provide (tools/content/extract.ts).
     pub fn physics_files(&self) -> Vec<String> {
@@ -3956,6 +4151,7 @@ impl Game {
     /// Restores a `save_state` capture (taken on this map, with the same rules). Derived scratch state (solid list,
     /// broadphase, contacts) is rebuilt exactly as `step` would see it.
     pub fn restore_state(&mut self, s: &GameState) {
+        self.air_speed_gain = None;
         self.ents.clone_from(&s.ents);
         self.queue.clone_from(&s.queue);
         self.map_sounds.clone_from(&s.map_sounds);

@@ -208,7 +208,7 @@ function crosshairSection(): SettingsContent {
       [
         group(
           "Look",
-          color("Color", () => P().crosshair.color, (v) => c("color", v), { peek: true, desc: "Pick a preset or any colour.", keywords: "colour crosshair color" }),
+          color("Colour", () => P().crosshair.color, (v) => c("color", v), { peek: true, desc: "Pick a preset or any colour.", keywords: "colour crosshair color" }),
           range("Size", () => P().crosshair.size, (v) => c("size", v), { min: 1, max: 20, step: 1, unit: "px", peek: true, desc: "Arm length.", keywords: "length crosshair size bigger smaller" }),
           range("Thickness", () => P().crosshair.thickness, (v) => c("thickness", v), { min: 1, max: 6, step: 0.5, unit: "px", peek: true, desc: "Arm width.", keywords: "width thick thin" }),
           range("Gap", () => P().crosshair.gap, (v) => c("gap", v), { min: 0, max: 16, step: 1, unit: "px", peek: true, desc: "Space between the centre and the arms.", keywords: "spacing" }),
@@ -298,7 +298,7 @@ function hudSection(ctx: Ctx): SettingsContent {
     const side = Math.floor(t / 1.6) % 2 ? -1 : 1;
     const pace = reducedMotion() ? 108 : 100 + 38 * Math.sin(t * 2.3) + 22 * Math.sin(t * 0.7);
     const zone = trainerZone(pace, P().hud.strafeTrainer.zone);
-    trainerPrev.render({ cue: zone === "good" ? "good" : pace < 100 ? "slow" : "fast", pace, side });
+    trainerPrev.render({ cue: zone === "good" ? "good" : pace < 100 ? "slow" : "fast", pace, side, bar: pace, barSide: side, gain: 1 - (pace / 100 - 1) ** 2 }, pace);
     if (trainerBox.isConnected || now - t0 < 2000) requestAnimationFrame(swing);
   };
   requestAnimationFrame(swing);
@@ -345,6 +345,8 @@ function hudSection(ctx: Ctx): SettingsContent {
           presetRow,
           range("HUD scale", () => P().hud.scale, (v) => up((p) => (p.hud.scale = v)), { ...HUD_SCALE, scale: 100, unit: "%", desc: "The whole HUD, chat included. The gaps between elements grow with it.", keywords: "hud size scale bigger smaller ultrawide 21:9 1440p 4k resolution small text" }),
         ),
+        group("Jump stats", ...ssjRows(), toggle("Start Pre", () => P().hud.layout.startPre.on, (v) => up((p) => (p.hud.layout.startPre.on = v)), { desc: "Speed just before your first takeoff from the start zone. Stays until the next start or restart. Edit layout moves it.", keywords: "prestrafe start pre first jump speed" })),
+        ...movementRows(),
       ],
       [
         group(
@@ -375,24 +377,23 @@ function hudSection(ctx: Ctx): SettingsContent {
             ["standard", "Standard"],
             ["strict", "Strict"],
           ], { desc: "Beginner is wide and steady with hints. Strict is tight and quick. Colour, height, dimming and sound stay yours.", keywords: "strafetrainer strafe trainer preset new player beginner easy hard" }),
-          segmented<TrainerStyle>("Style", () => P().hud.strafeTrainer.style, (v) => tp((t) => (t.style = v)), [
+          segmented<TrainerStyle>("Style", () => P().hud.strafeTrainer.style, (v) => (tp((t) => (t.style = v)), ctx.refresh()), [
             ["classic", "Classic"],
             ["detailed", "Detailed"],
             ["minimal", "Minimal"],
-          ], { desc: "Classic is the original thin gauge. Detailed is a thick bar with coloured zones. Minimal is a thin zoned line with a marker.", keywords: "strafetrainer strafe trainer look style bar line" }),
-          check("Follow the turn", () => P().hud.strafeTrainer.follow, (v) => tp((t) => (t.follow = v)), { desc: "100% sits in the middle and turning faster moves the marker the way you turn. Off: 0% on the left, 200% on the right.", keywords: "strafetrainer strafe trainer centre center middle direction mirror left right" }),
-          range("Smoothing", () => P().hud.strafeTrainer.smoothing, (v) => tp((t) => (t.smoothing = v)), { min: 1, max: 20, step: 1, hint: "ticks", desc: "Averages the reading over this many ticks. 1 shows every tick as it is.", keywords: "strafetrainer strafe trainer smooth average jitter tickrate" }),
-          range("On-pace zone", () => P().hud.strafeTrainer.zone, (v) => tp((t) => (t.zone = v)), { min: 2, max: 30, step: 1, unit: "%", desc: "How close to 100% counts as on pace. Amber reaches three times as far.", keywords: "strafetrainer strafe trainer zone width green tolerance" }),
+            ["bar", "Bar"],
+          ], { desc: "Classic is the original thin gauge. Detailed is a thick bar with coloured zones. Minimal is a thin zoned line with a marker. Bar fills from the left when you turn right and from the right when you turn left: stopping short of the middle tick is too slow, passing it is too fast. Its colour is red for speed loss, white for no change, then orange, green and blue for better gain.", keywords: "strafetrainer strafe trainer look style bar line fill momentum synchronizer" }),
+          check("Follow the turn", () => P().hud.strafeTrainer.follow, (v) => tp((t) => (t.follow = v)), { when: () => P().hud.strafeTrainer.style !== "bar", desc: "100% sits in the middle and turning faster moves the marker the way you turn. Off: 0% on the left, 200% on the right.", keywords: "strafetrainer strafe trainer centre center middle direction mirror left right" }),
+          range("Smoothing", () => P().hud.strafeTrainer.smoothing, (v) => tp((t) => (t.smoothing = v)), { min: 1, max: 20, step: 1, hint: "ticks", desc: "Averages pace over this many ticks. Bar colour always shows this tick's gain. 1 shows each pace tick as it is.", keywords: "strafetrainer strafe trainer smooth average jitter tickrate" }),
+          range("On-pace zone", () => P().hud.strafeTrainer.zone, (v) => tp((t) => (t.zone = v)), { when: () => P().hud.strafeTrainer.style !== "bar", min: 2, max: 30, step: 1, unit: "%", desc: "How close to 100% counts as on pace. Amber reaches three times as far.", keywords: "strafetrainer strafe trainer zone width green tolerance" }),
           range("Height", () => P().hud.strafeTrainer.height, (v) => tp((t) => (t.height = v)), { min: 0.5, max: 3, step: 0.1, scale: 100, unit: "%", desc: "Thickness of the gauge. Edit layout changes the whole size.", keywords: "strafetrainer strafe trainer thick thickness bar size" }),
           range("Dim below", () => P().hud.strafeTrainer.dimBelow, (v) => tp((t) => (t.dimBelow = v)), { min: 0, max: 90, step: 5, unit: "%", desc: "The trainer fades while your pace is under this, and between strafes. 0 never fades it.", keywords: "strafetrainer strafe trainer dim fade threshold opacity" }),
-          color("Trainer color", () => P().hud.strafeTrainer.color, (v) => tp((t) => (t.color = v)), { desc: "Colour of the marker and percentage. Pick a preset or any colour.", keywords: "strafetrainer strafe trainer colour color" }),
-          check("Percentage", () => P().hud.strafeTrainer.showPace, (v) => tp((t) => (t.showPace = v)), { desc: "Show the pace number under the gauge.", keywords: "strafetrainer strafe trainer number percent text" }),
+          color("Trainer colour", () => P().hud.strafeTrainer.color, (v) => tp((t) => (t.color = v)), { desc: "Colour of the marker, percentage and hints. Bar fill uses fixed gain colours. Pick a preset or any colour.", keywords: "strafetrainer strafe trainer colour color" }),
+          check("Percentage", () => P().hud.strafeTrainer.showPace, (v) => tp((t) => (t.showPace = v)), { desc: "Show the pace number under the gauge. The Bar look shows your last jump's average instead of the live pace.", keywords: "strafetrainer strafe trainer number percent text" }),
           check("Turn hints", () => P().hud.strafeTrainer.hints, (v) => tp((t) => (t.hints = v)), { desc: "Show small turn more and ease turn hints beside the percentage.", keywords: "strafetrainer strafe trainer coaching feedback hints" }),
           check("Jump sound", () => P().hud.strafeTrainer.sound, (v) => tp((t) => (t.sound = v)), { desc: "A tick on every jump: high when that jump was on pace, low when it was far off.", keywords: "strafetrainer strafe trainer sound audio tick beep jump" }),
         ),
-        group("Jump stats", ...ssjRows(), toggle("Start Pre", () => P().hud.layout.startPre.on, (v) => up((p) => (p.hud.layout.startPre.on = v)), { desc: "Speed just before your first takeoff from the start zone. Stays until the next start or restart. Edit layout moves it.", keywords: "prestrafe start pre first jump speed" })),
         group("JHUD", ...jhudRows()),
-        ...movementRows(),
       ],
     ],
     advanced: [
@@ -1219,6 +1220,8 @@ export function settingsPanel(o: SettingsPanelOpts = {}): HTMLElement {
       content = [h("p.dim", null, "This section couldn't be shown.")];
     }
     d.body.replaceChildren(layout(content), ...(Array.isArray(content) ? [] : [advancedBlock(d.s.id, content.advanced ?? [])].filter((x): x is HTMLElement => !!x)));
+    // A section of one group doesn't say its name twice (Account > Account).
+    for (const t of d.body.querySelectorAll<HTMLElement>(":scope > .set-cols > .set-col:only-child > .set-group > .set-group-title, :scope > .set-cols > .set-group > .set-group-title")) t.hidden = t.textContent === d.s.label;
     index = null;
     if (query) applySearch(false);
     if (focusIdx >= 0) d.body.querySelectorAll<HTMLElement>(FOCUSABLE)[focusIdx]?.focus({ preventScroll: true });

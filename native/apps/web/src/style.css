@@ -6,7 +6,7 @@
   /* AIRTIME palette. Ink: neutral near-blacks in solid steps. Cream: the bunny's hoodie (text). Amber: its visor. */
   --ink-0: #0c0c0f; --ink-1: #141418; --ink-2: #1c1c22; --ink-3: #26262d; --ink-4: #33333c;
   --scrim: rgba(12, 12, 15, 0.78);
-  --cream: #efe9dd; --cream-2: #b8b1a4; --cream-3: #7f796e;
+  --cream: #efe9dd; --cream-2: #b8b1a4; --cream-3: #8b8579;
   --amber: #ffb43c; --amber-hi: #ffc867; --amber-deep: #e08a12; --amber-ink: #1d1306; --amber-wash: rgba(255, 180, 60, 0.12);
   --carrot: #ff7a1a; --wr: #ffd45e; --dot: #fff;
   /* the 64-unit measure grid (Hammer), drawn by .grid-bg; replaces blurred glass */
@@ -28,7 +28,7 @@
   --accent-ink: var(--amber-ink);
   --accent-soft: var(--amber-wash);
   /* Colours that mean something: palette.ts PALETTES.off holds the same values and swaps them on <html> for the
-     colour-blind settings (with --st-g / --st-o / --st-r in hud/strafe-trainer.css). */
+     colour-blind settings (with --st-p / --st-g / --st-o / --st-r in hud/strafe-trainer.css). */
   --gain: #4dff88;
   --loss: #ff5d5d;
   --sync-ok: #ffd24d;
@@ -160,6 +160,11 @@ body.bg-frozen #game { visibility: hidden; filter: none !important; transition: 
 #menu:has(> .panel) { justify-content: flex-start; align-items: flex-start; padding: 4.5vh 4.5vw 3vh; }
 /* Auto margins, not justify-content: a screen wider than the menu still starts at its left edge (and scrolls). */
 #menu > .panel { margin-inline: auto; }
+/* Every panel fills the height the same way, so the back arrow and the legal links sit in one place on every screen,
+   however short the content (a two-row server list, an error line). Support sizes itself to its fan of cards. */
+#menu > .panel:not(.panel-support) { display: flex; flex-direction: column; }
+:where(#menu > .panel):not(.panel-support) { min-height: calc(100vh - 7.5vh); }
+#menu > .panel:not(.panel-support) > .menu-legal { margin-top: auto; padding-top: var(--sp-3); }
 .screen-head { display: flex; align-items: center; gap: 0.7rem; margin: 0 0 var(--sp-5); min-height: 2.8rem; }
 .screen-back { flex: none; display: grid; place-items: center; width: 2.6rem; height: 2.6rem; margin-left: -0.55rem; padding: 0; border: 0; border-radius: var(--r-2); background: transparent; color: var(--cream-2); cursor: pointer; transition: color var(--t-step) var(--ease-glide), transform var(--t-step) var(--ease-glide); }
 .screen-back svg { width: 1.7rem; height: 1.7rem; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
@@ -362,6 +367,10 @@ select option { background: var(--panel-solid); color: var(--text); }
 .pp-help-group h3 { margin: 0 0 var(--sp-1); font-size: var(--fs-sm); font-weight: 700; color: var(--text); }
 .pp-help .keys-table td { padding-left: var(--sp-3); }
 .pp-help .keys-table td:last-child { width: 3.2rem; }
+/* The Shortcuts row's commands are the long ones: they wrap rather than pushing the key column out of the table. */
+.pp-help .keys-table { table-layout: fixed; }
+.pp-help .keys-table th { width: 46%; }
+.pp-help .keys-table .pp-help-cmd { width: auto; white-space: normal; overflow-wrap: anywhere; }
 .pp-help-cmd { font-family: var(--mono); font-size: var(--fs-sm); color: var(--dim); }
 .pp-help .pp-screen-foot { justify-content: space-between; font-size: var(--fs-sm); }
 /* server tab (in a room) */
@@ -376,11 +385,11 @@ select option { background: var(--panel-solid); color: var(--text); }
 .room-stats b { font-size: var(--fs-lg); }
 @media (max-width: 52rem) { .pause { grid-template-columns: 1fr; height: auto; } .card-grid { grid-template-columns: 1fr; } }
 .style-list { display: flex; flex-direction: column; gap: 0.3rem; }
-.style-row { display: grid; grid-template-columns: 3.4rem minmax(0, 1fr) auto; align-items: center; gap: var(--sp-4); padding: 0.55rem 1rem 0.55rem 0.6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--raise); color: var(--text); text-align: left; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast), box-shadow var(--t-fast); }
-.sr-short { display: grid; place-items: center; height: 2.3rem; border-radius: var(--radius-sm); background: var(--raise-2); font-weight: 850; font-size: var(--fs-md); letter-spacing: 0.02em; }
+.style-row { display: grid; grid-template-columns: 3.4rem minmax(0, 1fr) auto; align-items: center; gap: var(--sp-4); padding: 0.35rem 1rem 0.35rem 0.5rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--raise); color: var(--text); text-align: left; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast), box-shadow var(--t-fast); }
+.sr-short { display: grid; place-items: center; height: 2.1rem; border-radius: var(--radius-sm); background: var(--raise-2); font-weight: 850; font-size: var(--fs-md); letter-spacing: 0.02em; }
 .sr-text { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
 .sr-text b { font-size: var(--fs-md); }
-.sr-text small { font-size: var(--fs-xs); color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sr-text small { font-size: var(--fs-xs); color: var(--dim); }
 .sr-pb { display: flex; flex-direction: column; align-items: flex-end; font-variant-numeric: tabular-nums; }
 .sr-pb small { font-size: var(--fs-2xs); font-weight: 750; letter-spacing: 0.08em; color: var(--faint); }
 .sr-pb b { font-size: var(--fs-md); }
@@ -390,7 +399,7 @@ select option { background: var(--panel-solid); color: var(--text); }
 .style-row.on { border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: var(--accent-soft); }
 .style-row.on .sr-short { background: var(--accent); color: var(--accent-ink); }
 .style-row.on .sr-pb b:not(.dim) { color: var(--accent); }
-/* the assisted style (Auto-strafe) follows the classic five after a gap */
+/* the assisted style (Auto-strafe) follows the others after a gap */
 .style-list .style-row[data-style="autostrafe"] { margin-top: var(--sp-3); }
 .pp-style .style-locked { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.8rem 1rem; border-radius: var(--radius); background: var(--raise); border: 1px dashed var(--line-2); font-weight: 700; }
 .pp-style .style-locked small { font-weight: 450; font-size: var(--fs-sm); }

@@ -54,8 +54,17 @@ export class ComposerPipeline {
   private accumulating = false;
   beginCinematicFrame(count: number): void { this.sampleCount = count; this.sampleIndex = 0; this.accumulating = false; }
   beginCinematicSample(index: number): void { this.sampleIndex = index; }
-  endCinematicFrame(): void { if (this.accumulating) this.accumulation!.endFrame(); this.resetCinematicSampling(); }
-  resetCinematicSampling(): void { this.accumulation?.reset(); this.sampleCount = 0; this.accumulating = false; }
+  endCinematicFrame(): void {
+    if (this.accumulating) {
+      this.accumulation!.endFrame();
+      // The last sample's final pass left the blurred world on the canvas; the blended surfaces' average goes over it.
+      const target = this.renderer.getRenderTarget();
+      this.renderer.setRenderTarget(null);
+      try { this.gammaBlend?.resolveAccumulated(); } finally { this.renderer.setRenderTarget(target); }
+    }
+    this.resetCinematicSampling();
+  }
+  resetCinematicSampling(): void { this.accumulation?.reset(); this.gammaBlend?.resetAccumulated(); this.sampleCount = 0; this.accumulating = false; }
   getEffectiveEffects() { return { clouds:!!this.clouds?.getSampling().active, customSky:this.skyMode==='pack'&&!!this.skyRuntime?.getState().asset, ambienceShowcase: this.supported && presetConfig(this.options).postprocessing && this.getProfile().id === "ambience-showcase-v1", contactShading: !!this.contact && !!this.options.contactShading, atmosphere: !!this.grade && !!this.options.atmosphere, sunShafts: !!this.shafts, depthOfField: !!this.bokeh, bloom: !!this.bloom && this.bloom.strength > 0, localLights: !!this.local?.getStats().selected, dynamicGI: !!this.gi?.getStats().active, tracedGI:!!this.hybrid?.getStats().active, dynamicShadows: !!this.shadows?.getSampling().active, volumetric: !!this.scattering?.enabled, spatialAA: !!this.aa, materialResponse: this.materialEnabled }; }
   private materialEnabled = false;
   private local: LocalLights | null = null;
@@ -293,6 +302,7 @@ export class ComposerPipeline {
     this.blendPending = false;
     const depth = blend.capturedDepth;
     if (!depth) { blend.show(); return; }
+    if (this.accumulating) { blend.accumulate(camera, depth, this.getSourceExposure(), 1 / this.sampleCount); return; }
     // The last pass drew to the canvas.
     this.renderer.setRenderTarget(null);
     try { blend.draw(camera, depth, this.getSourceExposure()); } finally { this.renderer.setRenderTarget(target); }

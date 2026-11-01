@@ -38,7 +38,7 @@ import { openReplayViewer } from "./viewer/request";
 import { mapTier } from "./ui/maps";
 import { announce, announcerPolicy, runSounds, sfx } from "./audio";
 import { restartTarget, withRestartNames } from "./restart";
-import { checkStartPoint, clearPracticeSpawns, clearStartPoint, loadStartPoint, resolveStartPoint, savedMessage, saveStartPoint } from "./start-point";
+import { checkStartPoint, clearPracticeSpawns, clearStartPoint, loadStartPoint, resolveStartPoint, savedMessage, saveStartPoint, type StartPoint } from "./start-point";
 import { getHeldLoadout, getOutfit, knownOutfitUnlocks } from "./player/cosmetics";
 import { cosmetic } from "./progression";
 import { withTimeout } from "./content/fetch";
@@ -49,7 +49,7 @@ import { mapTime, type MapTimes } from "./map-time";
 import { holdReload, runEnded } from "./update";
 import { TUTORIAL_MAP } from "./tutorial/data";
 import { practiceReason } from "./practice";
-import { finishRoute, PracticeAttempt, practiceFlipLine, practiceStartLine, type PracticeUse } from "./practice-mode/attempt";
+import { finishRoute, PracticeAttempt, practiceFlipLine, practiceSpawnLine, practiceSpawnToast, practiceStartLine, type PracticeUse } from "./practice-mode/attempt";
 import { loadTimer, type TimerSnapshot } from "./practice-mode/checkpoints";
 import { SegmentLog, type SegmentMark } from "./practice-mode/segments";
 import { LiveSsj, ssjChat } from "./ssj";
@@ -400,7 +400,10 @@ export class RunSession {
     if (p) applyRestartPoint(core, p);
     this.onReset();
     // A practice spawn (outside the start zone, or reached with a practice tool): this attempt is practice from the first tick.
-    if (sp?.practice) this.prac.use("spawn");
+    if (sp?.practice) {
+      this.prac.use("spawn");
+      if (this.onPracticeSpawn) this.hud.toast(practiceSpawnToast(clearStartKey()), 6000, "start-point", "bad");
+    }
     this.ensurePBGhost();
     this.updateInfo(track);
     return sp ? { pitch: sp.pitch } : null;
@@ -434,19 +437,26 @@ export class RunSession {
     const say = (text: string, ms: number) => (reply ? reply(text) : this.hud.toast(text, ms, "start-point"));
     const { core, input, map } = this.o;
     const zones = this.zones?.zones ?? [];
-    const r = checkStartPoint(core.state(), { yaw: input.yaw, pitch: input.pitch }, zones, {
+    const check = (snap: boolean) => checkStartPoint(core.state(), { yaw: input.yaw, pitch: input.pitch }, zones, {
       track: this.timer.track,
       offZone: !!this.o.practiceSpawns && !this.debug,
       tool: this.prac.unwalked,
+      snap,
     });
-    if (!r.ok) return say(r.reason, 2500);
     // Try the restart there now (on a snapshot: play carries on untouched), so a spot the restart can't use is refused
     // here rather than dropped at the next restart. Rare: where the core's floor and the movement's disagree.
-    const point = r.point;
-    const usable = withRestoredState(core, () => resolveStartPoint(core, styleSettings(this.styleFor(r.track)), map, r.track, point, zones) !== null);
-    if (usable === false) return say("Can't restart on this exact spot. Try a step away.", 3000);
-    saveStartPoint(map, r.track, point);
-    say(savedMessage(r.track, r.practice), r.practice ? 5000 : 2000);
+    const usable = (track: number, point: StartPoint) => withRestoredState(core, () => resolveStartPoint(core, styleSettings(this.styleFor(track)), map, track, point, zones) !== null);
+    let r = check(true);
+    // Moved into the zone but the restart can't stand there (a wall, a drop): it's the spot as if it hadn't moved.
+    if (r.ok && r.snapped && usable(r.track, r.point) === false) r = check(false);
+    if (!r.ok) return say(r.reason, 2500);
+    if (usable(r.track, r.point) === false) return say("Can't restart on this exact spot. Try a step away.", 3000);
+    saveStartPoint(map, r.track, r.point);
+    const text = savedMessage(r.track, r.practice, !!r.snapped);
+    if (!r.practice) return say(text, 2000);
+    // Not one that counts: a warning on screen, also when chat asked (chat closes when the command is sent).
+    this.hud.toast(text, 8000, "start-point", "bad");
+    reply?.(text);
   }
 
   /** !practice off must stay off on later restarts and visits, including other tracks. */
@@ -458,9 +468,17 @@ export class RunSession {
   clearStartPoint(reply?: (text: string) => void): void {
     const track = this.timer.track;
     const had = clearStartPoint(this.o.map, track);
-    const text = had ? "Start point cleared" : "No start point to clear";
+    // Standing on a practice spawn this attempt can't count anyway: back to the real start straight away.
+    const back = had && this.onPracticeSpawn;
+    if (back) this.o.restart(track);
+    const text = back ? "Start point cleared. You're back at the real one." : had ? "Start point cleared" : "No start point to clear";
     if (reply) reply(text);
     else this.hud.toast(text, 2000, "start-point");
+  }
+
+  /** This attempt began on a practice spawn and that's all that makes it practice (practice mode says so itself). */
+  get onPracticeSpawn(): boolean {
+    return this.prac.tool === "spawn" && this.o.map !== TUTORIAL_MAP;
   }
 
   /** Where R / B put the player for `track` (restart.ts restartTarget: null = the map's own spawn). */
@@ -1077,7 +1095,7 @@ export class RunSession {
     // tutorial: its lessons are practice and its coach does the talking). Cheap when unchanged.
     const loads = this.segmentLoads;
     if (this.segmenting) this.hud.setPractice(`Segmented${loads ? ` · ${loads} load${loads === 1 ? "" : "s"}` : ""}`, true);
-    else this.hud.setPractice(this.unranked && this.o.map !== TUTORIAL_MAP ? (this.practiceNoclip ? "Practice · noclip" : "Practice") : null);
+    else this.hud.setPractice(this.unranked && this.o.map !== TUTORIAL_MAP ? (this.practiceNoclip ? "Practice · noclip" : "Practice") : null, false, this.onPracticeSpawn ? practiceSpawnLine(clearStartKey()) : null);
     const pb = getPB(this.o.map, this.styleFor(t.track), t.track);
     const splitTotal = t.splitTotal();
     const lastSplit = t.splits[t.splits.length - 1];
@@ -1184,6 +1202,7 @@ export class RunSession {
       onExportLast: this.lastRun ? () => this.exportLast() : null,
       onLoadReplay: (f) => void f.arrayBuffer().then((b) => openReplayViewer({ bytes: new Uint8Array(b), name: f.name.replace(/\.bhr$/, "") })),
       practice: this.practiceMenu?.() ?? null,
+      clearStart: () => (this.onPracticeSpawn ? () => this.clearStartPoint() : null),
     });
   }
 
@@ -1305,6 +1324,12 @@ export class RunSession {
 /** The restart bind's label ("R"), or null when it's unbound. */
 function restartKey(): string | null {
   const c = prefs.get().binds.restart[0];
+  return c ? keyLabel(c) : null;
+}
+
+/** The clear start point bind's label, or null when it's unbound (it is by default). */
+function clearStartKey(): string | null {
+  const c = prefs.get().binds.clearStart[0];
   return c ? keyLabel(c) : null;
 }
 

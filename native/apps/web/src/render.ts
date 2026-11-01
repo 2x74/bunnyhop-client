@@ -30,7 +30,7 @@ import {
   TextureFormat,
 } from "./core";
 import { prepareMapContent, type PrepareContentOptions } from "./content";
-import { markGammaBlend } from "./graphics/gamma-blend";
+import { markGammaBlend, outputsLinear } from "./graphics/gamma-blend";
 import { glassMaterial, setWaterVisualTime, updateWaterUniforms, waterSurfaceMaterial, waterVolumes, withWaterFog } from "./water";
 import { mapSmoke, brushBounds, materialName } from "./map-effects/smoke";
 import { spriteTrails } from "./sprite-trails";
@@ -510,7 +510,7 @@ function withSkyFog<M extends THREE.Material>(m: M, u: SkyFogUniforms): M {
     shader.vertexShader = shader.vertexShader
       .replace("#include <common>", "#include <common>\nvarying float vSkyFogDepth;")
       .replace("#include <project_vertex>", "#include <project_vertex>\n  vSkyFogDepth = - mvPosition.z;");
-    const outputLinear = renderer.getRenderTarget() !== null || renderer.outputColorSpace !== THREE.SRGBColorSpace;
+    const outputLinear = outputsLinear(renderer);
     const color = additive ? "vec3( 0.0 )" : outputLinear ? "sRGBTransferOETF(vec4(uSkyFogColor, 1.0)).rgb" : "uSkyFogColor";
     const source = outputLinear ? "sRGBTransferOETF(gl_FragColor).rgb" : "gl_FragColor.rgb";
     const mixed = `mix( ${source}, ${color}, clamp( min( uSkyFogRange.z, ( vSkyFogDepth - uSkyFogRange.x ) / max( uSkyFogRange.y - uSkyFogRange.x, 1e-3 ) ), 0.0, 1.0 ) )`;
