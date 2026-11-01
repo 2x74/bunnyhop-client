@@ -10,7 +10,7 @@ public:
 
     bool begin(BhContext *core, TurnSettings settings) {
         turns = settings;
-        options_ = {BH_V29_ABI_VERSION, sizeof(BhRecordOptionsV29), turns.yaw_speed, turns.angle_speed_key, 0, 0};
+        options_ = {BH_V29_ABI_VERSION, sizeof(BhRecordOptionsV29), turns.yaw_speed, turns.angle_speed_key, 0, 0, 0};
         active_ = bh_record_options_v29(core, &options_) != 0;
         return active_;
     }
@@ -36,6 +36,19 @@ public:
         options_.null_binds = 1;
         if (!bh_record_options_v29(core, &options_)) {
             options_.null_binds = 0;
+            return false;
+        }
+        return true;
+    }
+
+    // Like the website: on for any recorded command, whether or not a jump released W.
+    bool mark_w_release(BhContext *core) {
+        if (!active_ || options_.w_release) {
+            return true;
+        }
+        options_.w_release = 1;
+        if (!bh_record_options_v29(core, &options_)) {
+            options_.w_release = 0;
             return false;
         }
         return true;

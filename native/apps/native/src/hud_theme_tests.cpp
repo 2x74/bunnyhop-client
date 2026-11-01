@@ -106,6 +106,7 @@ bool rejects_setting(const native::Json &settings, const std::string &key, const
 void test_web_settings_schema() {
     const auto cases = native::Json::parse(R"schema([
         {"key":"nullBinds","rule":{"kind":"boolean"},"default":false},
+        {"key":"wRelease","rule":{"kind":"boolean"},"default":false},
         {"key":"autoRestartWhen","rule":{"kind":"choice","values":["off","pb","wr","ghost"]},"default":"off"},
         {"key":"autoRestartAction","rule":{"kind":"choice","values":["restart","sound"]},"default":"restart"},
         {"key":"hudPlace","rule":{"kind":"choice","values":["off","place","top"]},"default":"off"},

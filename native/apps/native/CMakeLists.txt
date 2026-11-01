@@ -684,6 +684,11 @@ if(BUILD_TESTING)
     target_include_directories(bunnyhop-native-timed-input-parity-tests PRIVATE include vendor src)
     add_test(NAME native_timed_input_parity COMMAND bunnyhop-native-timed-input-parity-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/src/timed_input_vectors.json")
+    # Golden vectors from the web's WRelease; regenerate with native/tools/w-release/generate-vectors.ts.
+    add_executable(bunnyhop-native-w-release-parity-tests src/w_release_parity_tests.cpp)
+    target_include_directories(bunnyhop-native-w-release-parity-tests PRIVATE include vendor src)
+    add_test(NAME native_w_release_parity COMMAND bunnyhop-native-w-release-parity-tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/w_release_vectors.json")
     # Turn-bind admission oracle for the optional server cross-check
     # (crates/native-bridge/tools/check-native-turn-admission.ts); built, not run by CTest.
     add_executable(bunnyhop-native-input-turn-oracle src/native_input_turn_oracle.cpp)

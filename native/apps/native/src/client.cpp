@@ -3114,7 +3114,18 @@ int run(const native::Options &opt) {
                     )) {
                     require(recorder.input.mark_null_binds(core.get()), core.get(), "Marking null binds recording");
                 }
-                cmd = input.command();
+                std::optional<native::WReleaseContext> w_release;
+                if (hud.preferences().w_release) {
+                    BhSettings style_settings{};
+                    bh_style_settings(active_style.c_str(), &style_settings);
+                    w_release = native::w_release_context(
+                            active_style, practice.active, practice.noclip, curr, style_settings.autohop != 0
+                    );
+                }
+                if (w_release) {
+                    require(recorder.input.mark_w_release(core.get()), core.get(), "Marking Release W recording");
+                }
+                cmd = input.command(w_release);
                 if (practice.noclip) {
                     BhSnapshot snapshot{};
                     require(bh_noclip_move(&practice.flight, &cmd, dt), core.get(), "Moving noclip");

@@ -52,6 +52,7 @@ const render = requestKey("render");
 
 export const REQUESTED_KEYS: readonly RequestedKey[] = [
   hud("nullBinds", boolean),
+  hud("wRelease", boolean),
   hud("autoRestart.when", choice("off", "pb", "wr", "ghost")),
   hud("autoRestart.action", choice("restart", "sound")),
   hud("hud.place", choice("off", "place", "top")),

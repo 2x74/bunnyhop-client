@@ -145,7 +145,7 @@ const ROWS: Record<string, Gate> = {
   // Bind rows: one per action, in whichever group the website puts it.
   ...Object.fromEntries(ACTIONS.map((action) => [`keys/*/${action.label}`, needs(`bind:${action.id}`)])),
   "keys/Movement/Null binds": needs("nullBinds"),
-  "keys/Movement/Release W on jump": excluded("Not in the desktop client yet."),
+  "keys/Movement/Release W on jump": needs("wRelease"),
   "hud/JHUD/JHUD": needs("hud:jhud"),
   "hud/JHUD/Sync": needs("hudJhudSync"),
   "hud/JHUD/JSS": needs("hudJhudJss"),

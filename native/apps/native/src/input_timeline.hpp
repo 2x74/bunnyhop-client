@@ -175,7 +175,10 @@ public:
     // A new attempt, seek or the end of spectating: the clock and pending input start again, physical holds carry
     // over.
     void restart(Input &input, const std::set<std::string> &held_codes) {
+        // The physical holds carry over, and so does what Release W on jump knows about them, as on the website.
+        const WRelease w_release = input.w_release;
         input.clear();
+        input.w_release = w_release;
         queue_.reset();
         held_scratch_.clear();
         for (const auto &code : held_codes) {

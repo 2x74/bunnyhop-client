@@ -71,7 +71,8 @@ struct Fixture {
         std::filesystem::remove_all(directory, error);
     }
 
-    std::filesystem::path record(const char *name, bool timed, bool contribute, bool null_binds = false) {
+    std::filesystem::path
+    record(const char *name, bool timed, bool contribute, bool null_binds = false, bool w_release = false) {
         BhRunOptions options{};
         bh_default_run_options(&options);
         check(bh_run_configure(core.get(), &options, zones.data(), zones.size()), core.get());
@@ -82,6 +83,9 @@ struct Fixture {
         check(recording.begin(core.get(), {300, 2.5}), core.get());
         if (null_binds) {
             check(recording.mark_null_binds(core.get()), core.get());
+        }
+        if (w_release) {
+            check(recording.mark_w_release(core.get()), core.get());
         }
         native::Input input;
         input.set_angles(0, 0);
@@ -128,7 +132,7 @@ struct Fixture {
         BhState state{};
         check(bh_step_look_v2(core.get(), &command, &*look, &state), core.get());
         if (tick == 1) {
-            BhRecordOptionsV29 changed{1, sizeof(BhRecordOptionsV29), 301, 2.5, 0, 0};
+            BhRecordOptionsV29 changed{1, sizeof(BhRecordOptionsV29), 301, 2.5, 0, 0, 0};
             assert(!bh_record_options_v29(core.get(), &changed));
         }
     }
@@ -186,6 +190,18 @@ void test_null_binds_recorded_in_header() {
     const auto nulls = fixture.record("nulls.bhr", true, true, true);
     assert(fixture.header(nulls).value("nullBinds", false));
     assert(decompress(nulls).at(6) & BH_FLAG_NULL_BINDS);
+}
+
+// The released commands record as usual: only the header flag says the setting was on.
+void test_w_release_recorded_in_header() {
+    Fixture fixture;
+    const auto plain = fixture.record("no-release.bhr", true, true);
+    assert(!fixture.header(plain).contains("wRelease"));
+    assert(!(decompress(plain).at(6) & BH_FLAG_W_RELEASE));
+    const auto released = fixture.record("release.bhr", true, true, false, true);
+    assert(fixture.header(released).value("wRelease", false));
+    assert(decompress(released).at(6) & BH_FLAG_W_RELEASE);
+    assert(native::default_settings().at("wRelease") == false);
 }
 
 void test_turn_settings_validation() {
@@ -550,6 +566,7 @@ int main() {
     test_replay_library_cache();
     test_recording_options_roundtrip();
     test_null_binds_recorded_in_header();
+    test_w_release_recorded_in_header();
     test_turn_settings_validation();
     test_practice_takeover();
     test_practice_rejection_replies();
