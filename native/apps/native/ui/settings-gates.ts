@@ -329,6 +329,7 @@ export const NATIVE_GATES: Readonly<Record<string, Gate>> = {
   "updates/Native client/Check automatically": menuOnly,
   "mouse/Native input/Mouse backend": needs("inputBackend"),
   "mouse/Mouse diagnostics/Last sample": needs("mouseDiagnostics"),
+  "display/Renderer/Renderer": needs("renderer"),
   "graphics/Native renderer/Water": needs("waterQuality"),
   "graphics/Native renderer/World effects": needs("effectsVisible"),
   "hud/More jump stats/Gain colours": needs("jumpStatsColors"),

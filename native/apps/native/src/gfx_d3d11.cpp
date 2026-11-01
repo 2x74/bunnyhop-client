@@ -628,6 +628,10 @@ int D3D11Context::max_texture_size() const {
     return D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION;
 }
 
+bool D3D11Context::device_lost() const {
+    return FAILED(impl_->device->GetDeviceRemovedReason());
+}
+
 void D3D11Context::check_error(const char *message) {
     checked(impl_->device->GetDeviceRemovedReason(), message);
     ComPtr<ID3D11InfoQueue> diagnostics;
@@ -889,7 +893,7 @@ Sampler D3D11Context::create_sampler(const SamplerDesc &desc) {
             desc.minification == Filter::linear ? D3D11_FILTER_TYPE_LINEAR : D3D11_FILTER_TYPE_POINT,
             desc.magnification == Filter::linear ? D3D11_FILTER_TYPE_LINEAR : D3D11_FILTER_TYPE_POINT,
             desc.mip_filter == Filter::linear ? D3D11_FILTER_TYPE_LINEAR : D3D11_FILTER_TYPE_POINT,
-            desc.compare ? D3D11_FILTER_REDUCTION_TYPE_COMPARISON : D3D11_FILTER_REDUCTION_TYPE_STANDARD
+            desc.compare
     );
     const auto addressing = [&](Address axis) {
         const auto address = axis == Address::inherit ? desc.address : axis;
@@ -1498,6 +1502,10 @@ TargetView D3D11Context::current_target() const {
 
 int D3D11Context::max_texture_size() const {
     unavailable();
+}
+
+bool D3D11Context::device_lost() const {
+    return false;
 }
 
 void D3D11Context::check_error(const char *) {

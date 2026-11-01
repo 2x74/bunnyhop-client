@@ -17,8 +17,7 @@ class ClientGraphics {
     std::unique_ptr<gfx::Context> context_;
 
     void check_presenter() const {
-        if (presenter_.failed())
-            throw std::runtime_error("D3D11 stopped: " + presenter_.error() + ". Restart the game with OpenGL.");
+        if (presenter_.failed()) throw std::runtime_error("Direct3D 11 stopped: " + presenter_.error());
     }
 
 public:
@@ -39,6 +38,14 @@ public:
 #endif
         gl_.load();
         context_ = std::make_unique<gfx::Context>(gl_);
+    }
+
+    bool failed() const {
+#ifdef _WIN32
+        return presenter_.failed() || (d3d11_ && d3d11_->device_lost());
+#else
+        return false;
+#endif
     }
 
     Gl &gl() { return gl_; }
@@ -77,6 +84,8 @@ public:
         context_->bind_target(target);
         context_->viewport({0, 0, width, height});
     }
+
+    bool presented() const { return !presenter_.native_mode() || presenter_.presented(); }
 
     void present(bool vsync) {
         context_->check_error("Rendering frame");

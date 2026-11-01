@@ -462,7 +462,7 @@ int run(const native::Options &opt, native::RendererLaunch &launch) {
     native::RunVault run_vault(cache / "run-vault");
     native::updates::Host updater(cache, default_root, identity, native::executable_path());
     recorder.diagnostics.set_client_version(identity.value("version", std::string("local")));
-    recorder.diagnostics.set_device(gpu_renderer, SDL_GetPlatform());
+    recorder.diagnostics.set_device(std::string(device.name()) + ": " + gpu_renderer, SDL_GetPlatform());
     // Jump stats (!ssj). Display only — it reads the same pre-state, command and
     // events the simulation already produced and never feeds anything back.
     native::MovementFeedback feedback;
@@ -3844,7 +3844,7 @@ int run(const native::Options &opt, native::RendererLaunch &launch) {
         display_tryout.draw(hud, width, height, SDL_GetTicksNS());
         frame_diagnostics.mark(native::FrameDiagnostics::kRender, SDL_GetTicksNS());
         device.present(!opt.frames && prefs.vsync);
-        if (!launch.ready) launch.complete();
+        if (device.presented()) launch.presented();
         frame_diagnostics.mark(native::FrameDiagnostics::kSwap, SDL_GetTicksNS());
         frame_pacer.after_swap(graphics, prefs.limit_queued_frames && !opt.frames);
         frame_diagnostics.mark(native::FrameDiagnostics::kGpuWait, SDL_GetTicksNS());
@@ -4178,12 +4178,19 @@ int main(int argc, char **argv) {
             return 0;
         }
         native::RendererLaunch launch(opt);
+        launch.show_notice(opt);
         int code = 0;
         try {
             code = run(opt, launch);
         } catch (const std::exception &error) {
-            if (launch.backend != native::gfx::Backend::d3d11 || launch.ready || opt.d3d11_warp) throw;
-            launch.fallback(std::string("D3D11 could not start: ") + error.what() + ". Using OpenGL.");
+            if (launch.backend != native::gfx::Backend::d3d11 || (launch.ready && !launch.device_lost)
+                || opt.d3d11_warp)
+                throw;
+            launch.fallback(
+                    std::string("Direct3D 11 stopped: ") + error.what() + launch.recovery
+                    + " Using OpenGL for this launch."
+            );
+            launch.show_notice(opt);
             code = run(opt, launch);
         }
         if (relaunch_requested && !native::relaunch(native::executable_path()))

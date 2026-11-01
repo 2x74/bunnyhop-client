@@ -131,6 +131,7 @@ Options options(int argc, char **argv) {
 void print_help(std::ostream &output) {
     output << "Usage: bunnyhop-native [--map MAP.bsp | --online-map NAME] [--content-root DIR] "
               "[--sensitivity 2] [--renderer opengl|d3d11]\n"
+              "  --renderer opengl|d3d11 (Windows only; overrides Settings for this launch; default: opengl)\n"
               "  [--menu-html PATH] [--no-menu] [--windowed] [--legacy-input] [--frames N] [--screenshot "
               "output.ppm] [--camera x,y,z,pitch,yaw] [--hidden]\n"
               "  [--render-fixture OUTPUT_DIR] (isolated settings and 1280x720 pixels with --map and --frames)\n"

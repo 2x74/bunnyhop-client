@@ -172,6 +172,16 @@ if(BUNNYHOP_BUILD_CLIENT)
         target_compile_options(bunnyhop-native-renderer-startup-tests PRIVATE
             $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
         target_link_libraries(bunnyhop-native-renderer-startup-tests PRIVATE SDL3::SDL3)
+        if(WIN32)
+            target_sources(bunnyhop-native-renderer-startup-tests PRIVATE src/renderer_prompt_windows.cpp)
+            target_link_libraries(bunnyhop-native-renderer-startup-tests PRIVATE comctl32)
+            add_executable(bunnyhop-native-renderer-prompt-smoke
+                src/renderer_prompt_smoke_windows.cpp src/renderer_prompt_windows.cpp
+                packaging/windows/bunnyhop-native.manifest)
+            target_compile_options(bunnyhop-native-renderer-prompt-smoke PRIVATE
+                $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+            target_link_libraries(bunnyhop-native-renderer-prompt-smoke PRIVATE comctl32 gdi32)
+        endif()
         add_test(NAME native_renderer_startup COMMAND bunnyhop-native-renderer-startup-tests)
         add_executable(bunnyhop-native-keyboard-event-tests src/keyboard_event_tests.cpp)
         target_include_directories(bunnyhop-native-keyboard-event-tests PRIVATE include vendor src)
@@ -337,6 +347,7 @@ if(BUNNYHOP_BUILD_CLIENT)
         target_sources(bunnyhop-native PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated/app.rc"
             src/display_scaling_windows.cpp src/low_latency_windows.cpp src/anti_lag_windows.cpp
             src/play_priority_windows.cpp src/window_frame_windows.cpp src/console_windows.cpp
+            src/renderer_prompt_windows.cpp
             packaging/windows/bunnyhop-native.manifest)
         # A windowed program, so no terminal opens with the game (console_host.hpp brings one back when it's wanted).
         # main() stays the entry point rather than WinMain.
@@ -361,7 +372,7 @@ if(BUNNYHOP_BUILD_CLIENT)
         if(BUNNYHOP_ANTI_LAG_COMPILES)
             set_source_files_properties(src/anti_lag_windows.cpp PROPERTIES COMPILE_DEFINITIONS BUNNYHOP_ANTI_LAG)
         endif()
-        target_link_libraries(bunnyhop-native PRIVATE d3d11 dxgi winmm avrt dwmapi)
+        target_link_libraries(bunnyhop-native PRIVATE d3d11 dxgi winmm avrt dwmapi comctl32)
         include(packaging/WebView2.cmake)
         bunnyhop_windows_menu(bunnyhop-native)
     elseif(UNIX)

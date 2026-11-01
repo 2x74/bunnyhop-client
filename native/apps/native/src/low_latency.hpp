@@ -54,6 +54,8 @@ public:
 
     bool native_mode() const { return native_; }
 
+    bool presented() const { return presented_; }
+
     bool failed() const { return native_ && failed_; }
 
     void *device() const;
@@ -89,6 +91,7 @@ private:
     LowLatencySupport support_;
     bool probed_ = false;
     bool native_ = false;
+    bool presented_ = false;
     bool failed_ = false;
     std::string error_;
     std::optional<std::string> failure_;

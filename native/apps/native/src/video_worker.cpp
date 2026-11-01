@@ -419,6 +419,7 @@ int run_jobs(const Spec &spec, Control &control) {
     int failures = 0;
     {
         Surface surface;
+        std::cerr << "Video export renderer: OpenGL (independent of the gameplay renderer)\n";
         Gl gl;
         gl.load();
         const auto available = encoders_for(spec);

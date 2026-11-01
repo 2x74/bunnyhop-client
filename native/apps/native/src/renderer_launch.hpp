@@ -1,47 +1,34 @@
 #pragma once
 #include "data_location.hpp"
+#include "display_defaults.hpp"
 #include "options.hpp"
 #include "renderer_choice.hpp"
+#include "renderer_guard.hpp"
+#include "renderer_prompt.hpp"
+#include "renderer_preference.hpp"
 #include "settings.hpp"
 #include <SDL3/SDL.h>
-#include <condition_variable>
-#include <fstream>
 #include <iostream>
-#include <mutex>
-#include <thread>
+#include <memory>
 
 namespace native {
-// A startup-only marker survives driver faults, including Windows fail-fast exits.
 class RendererLaunch {
-    std::filesystem::path marker_;
-    std::mutex mutex_;
-    std::condition_variable changed_;
-    bool finished_ = false;
-    std::thread cleanup_;
+    std::unique_ptr<RendererGuard> guard_;
+    unsigned frames_ = 0;
 
-    void clean_marker() {
-        std::unique_lock lock(mutex_);
-        changed_.wait(lock, [this] { return finished_; });
-        lock.unlock();
-        std::error_code error;
-        std::filesystem::remove(marker_, error);
-        if (error) std::cerr << "Renderer startup marker: " << error.message() << '\n';
-    }
-
-    std::filesystem::path preferences_root(std::filesystem::path root) {
-        if (root.empty()) {
-            char *path = SDL_GetPrefPath("bunnyhop.lol", "Bunnyhop Native");
-            if (!path) return {};
-            root = data_location::from_utf8(path);
-            SDL_free(path);
-        }
-        marker_ = root / "d3d11-startup.pending";
-        return data_location::read(root).active;
+    static std::filesystem::path preferences_root(std::filesystem::path root) {
+        if (!root.empty()) return root;
+        char *path = SDL_GetPrefPath("bunnyhop.lol", "Bunnyhop Native");
+        if (!path) throw std::runtime_error("Cannot find renderer preferences");
+        root = data_location::from_utf8(path);
+        SDL_free(path);
+        return root;
     }
 
 public:
     gfx::Backend backend = gfx::Backend::opengl;
-    std::string notice;
+    std::string notice, recovery;
+    bool device_lost = false;
     bool ready = false;
 
     explicit RendererLaunch(const Options &options, const std::filesystem::path &root_override = {}) {
@@ -51,55 +38,42 @@ public:
 #else
         try {
             const auto root = preferences_root(root_override);
+            auto active = data_location::read(root).active;
+            if (!std::filesystem::is_directory(active)) active = root;
             const bool scripted = options.frames || options.hidden;
-            const auto saved = scripted || root.empty() ? default_settings() : load_settings(root / "settings.json");
+            auto saved = scripted ? default_settings() : startup_settings(active);
+            if (!scripted && !options.renderer && root_override.empty())
+                choose_renderer_once(root, active / "settings.json", saved, ask_renderer);
             const auto choice = options.renderer.value_or(saved.value("renderer", std::string("opengl")));
             backend = renderer_backend(renderer_choice(choice));
             if (backend != gfx::Backend::d3d11 || scripted) return;
-            if (marker_.empty()) {
-                fallback("D3D11 startup recovery is unavailable. Using OpenGL.");
+            guard_ = std::make_unique<RendererGuard>(root);
+            if (guard_->blocked() && !options.renderer) {
+                fallback("Direct3D 11 did not start twice. Using OpenGL. Your renderer setting is unchanged.", false);
                 return;
             }
-            if (std::filesystem::exists(marker_)) {
-                fallback("D3D11 did not finish starting last time. Using OpenGL.");
-                return;
-            }
-            std::ofstream marker(marker_, std::ios::trunc);
-            marker << "D3D11 render initialization\n";
-            marker.close();
-            if (!marker) {
-                fallback("Could not save D3D11 startup recovery. Using OpenGL.");
-                return;
-            }
-            cleanup_ = std::thread([this] { clean_marker(); });
+            guard_->starting();
         } catch (const std::exception &error) {
-            fallback(std::string("Renderer preference could not be read: ") + error.what() + ". Using OpenGL.");
+            fallback(std::string(error.what()) + ". Using OpenGL.");
         }
 #endif
     }
 
-    ~RendererLaunch() {
-        complete();
-        if (cleanup_.joinable()) cleanup_.join();
+    void show_notice(const Options &options) const {
+        if (!notice.empty() && !options.hidden && !options.frames)
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Bunnyhop Native", notice.c_str(), nullptr);
     }
 
-    void complete() {
-        ready = true;
-        {
-            std::lock_guard lock(mutex_);
-            finished_ = true;
-        }
-        changed_.notify_one();
+    void presented() {
+        if (guard_) guard_->presented();
+        if (++frames_ >= 3) ready = true;
     }
 
-    void fallback(std::string reason) {
+    void fallback(std::string reason, bool clear_guard = true) {
         backend = gfx::Backend::opengl;
         notice = std::move(reason);
+        if (guard_ && clear_guard) guard_->clear();
         std::cerr << notice << '\n';
-        if (!cleanup_.joinable() && !marker_.empty()) {
-            std::error_code error;
-            std::filesystem::remove(marker_, error);
-        }
     }
 };
 }  // namespace native

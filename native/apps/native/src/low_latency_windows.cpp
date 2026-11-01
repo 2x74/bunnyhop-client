@@ -544,6 +544,10 @@ bool LowLatencyPresenter::configure(SDL_Window *window, LowLatencyMode mode, int
     impl_->use_anti_lag = enabled && !impl_->use_reflex && support_.anti_lag && anti_lag::initialize();
     impl_->anti_lag_fps = fps_limit > 0 ? unsigned(fps_limit) : 0;
     impl_->flash_indicator = flash_indicator;
+    if (native_ && enabled && !impl_->use_reflex && !impl_->use_anti_lag) {
+        error_ = "NVIDIA Reflex and AMD Anti-Lag 2 are unavailable on this device";
+        return false;
+    }
     return true;
 }
 
@@ -648,6 +652,7 @@ void LowLatencyPresenter::render_start(int width, int height) {
 }
 
 void LowLatencyPresenter::present(bool vsync) {
+    presented_ = false;
     if (!impl_ || (!impl_->native && !impl_->locked)) return;
     auto &state = *impl_;
     if (!state.native) {
@@ -661,6 +666,7 @@ void LowLatencyPresenter::present(bool vsync) {
     }
     const UINT flags = !vsync && state.tearing && !state.fullscreen ? DXGI_PRESENT_ALLOW_TEARING : 0;
     const HRESULT result = state.swapchain->Present(vsync ? 1 : 0, flags);
+    presented_ = result == S_OK;
     if (state.use_reflex) reflex().marker(state.device.Get(), state.frame_id, PRESENT_END);
     if (FAILED(result)) {
         std::string error = hresult_text("Present", result);
