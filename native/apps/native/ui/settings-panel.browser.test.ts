@@ -396,3 +396,53 @@ test("graphics: the composer looks and the Sky picker follow the host's sky libr
     await close();
   }
 }, 30_000);
+
+test("Bar is a Style choice, and hides the rows it ignores", async () => {
+  const { page, errors, close } = await open();
+  try {
+    const settings = {
+      ...HOST_SETTINGS,
+      hudLayoutWeb: CLASSIC,
+      strafeTrainer: true,
+      strafeTrainerSmoothing: 8,
+      strafeTrainerHints: false,
+      hudStrafeTrainerStyle: "classic",
+      hudStrafeTrainerFollow: false,
+      hudStrafeTrainerZone: 10,
+      hudStrafeTrainerHeight: 1,
+      hudStrafeTrainerDimBelow: 0,
+      hudStrafeTrainerColor: "#ffffff",
+      hudStrafeTrainerShowPace: true,
+      hudStrafeTrainerSound: false,
+    };
+    await host(page, { settings, capabilities: ["hud:strafeTrainer"] });
+    await openSettings(page, "hud");
+    await poll(() => row(page, "hud", "Follow the turn").isVisible(), true);
+    await poll(() => row(page, "hud", "On-pace zone").isVisible(), true);
+    let from = await count(page);
+    await row(page, "hud", "Style").getByRole("radio", { name: "Bar", exact: true }).click();
+    expect(await patchesSince(page, from)).toEqual([{ hudStrafeTrainerStyle: "bar" }]);
+    await host(page, { settings: { ...settings, hudStrafeTrainerStyle: "bar" } });
+    await poll(() => row(page, "hud", "Follow the turn").isVisible(), false);
+    await poll(() => row(page, "hud", "On-pace zone").isVisible(), false);
+    for (const label of [
+      "Smoothing",
+      "Height",
+      "Dim below",
+      "Trainer colour",
+      "Percentage",
+      "Turn hints",
+      "Jump sound",
+    ])
+      await poll(() => row(page, "hud", label).isVisible(), true);
+    // A preset keeps the look: Bar has no use for the one a preset would pick.
+    from = await count(page);
+    await row(page, "hud", "Preset").getByRole("radio", { name: "Strict", exact: true }).click();
+    const presetPatch = Object.assign({}, ...((await patchesSince(page, from)) as object[]));
+    expect(presetPatch.strafeTrainerSmoothing).toBe(3);
+    expect(presetPatch.hudStrafeTrainerStyle ?? "bar").toBe("bar");
+    expect(errors).toEqual([]);
+  } finally {
+    await close();
+  }
+}, 30_000);
