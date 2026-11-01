@@ -59,6 +59,9 @@ Settings → Mouse → Show input stats overlays delivered reports per second, p
 frame time per phase, and flags stalls over 50 ms. It also names the backend and reports motion timestamp jitter.
 These measure delivered motion, including SDL timestamp estimates, rather than the USB polling rate.
 
+Keys → Release W on jump works as on the website: a jump taken holding W lets go of forward until you land or press W
+again. It's off by default, not available in Legit Scroll, W-Only, Sideways or Half-Sideways, and marked in the replay.
+
 Mouse → Advanced → Native input selects Auto, SDL or experimental Raw. Auto keeps SDL. Raw reads relative HID
 counts with device timestamps on macOS (requires Input Monitoring) or evdev packets with monotonic kernel times on
 Linux (requires access to the mouse device nodes). Buttons and keys keep SDL. Windows keeps SDL's raw-input thread;
@@ -188,6 +191,11 @@ reads `cancel` on stdin:
 ```sh
 apps/native/build/bunnyhop-native --export-video /path/to/spec.json
 ```
+
+On Windows the game is a windowed program: no terminal opens with it, and the log is in `logs/` in the game data
+folder (Settings → Game data). From a terminal it still prints there, but the shell doesn't wait for it, so pipe it to
+wait or to send `cancel` (`bunnyhop-native.exe --export-video spec.json | Out-Host` in PowerShell). `--console` opens a
+console of its own for support.
 
 ```json
 {

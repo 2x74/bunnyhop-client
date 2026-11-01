@@ -12,9 +12,9 @@ inline constexpr std::string_view file_name = "bunnyhop-native.log";
 // logs/ in the game's data folder.
 std::filesystem::path folder(const std::filesystem::path &data);
 
-// One run of the game. From here on std::cerr also goes to the log, and lines wait in memory until open() names the
-// file. A small queue and one writer thread own the disk, so a line never waits on it and neither does the frame loop.
-// Logging can't throw, and a log file that won't open costs the log and nothing else.
+// One run of the game. From here on std::cout and std::cerr also go to the log, and lines wait in memory until open()
+// names the file. A small queue and one writer thread own the disk, so a line never waits on it and neither does the
+// frame loop. Logging can't throw, and a log file that won't open costs the log and nothing else.
 class Session {
 public:
     Session();

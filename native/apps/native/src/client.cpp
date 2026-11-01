@@ -87,6 +87,7 @@
 #include "display_catalog.hpp"
 #include "display_mode_tryout.hpp"
 #include "hud_area.hpp"
+#include "console_host.hpp"
 #include "low_latency.hpp"
 #include "play_priority.hpp"
 #include "menu_scripts.hpp"
@@ -3110,7 +3111,18 @@ int run(const native::Options &opt, native::RendererLaunch &launch) {
                     )) {
                     require(recorder.input.mark_null_binds(core.get()), core.get(), "Marking null binds recording");
                 }
-                cmd = input.command();
+                std::optional<native::WReleaseContext> w_release;
+                if (hud.preferences().w_release) {
+                    BhSettings style_settings{};
+                    bh_style_settings(active_style.c_str(), &style_settings);
+                    w_release = native::w_release_context(
+                            active_style, practice.active, practice.noclip, curr, style_settings.autohop != 0
+                    );
+                }
+                if (w_release) {
+                    require(recorder.input.mark_w_release(core.get()), core.get(), "Marking Release W recording");
+                }
+                cmd = input.command(w_release);
                 if (practice.noclip) {
                     BhSnapshot snapshot{};
                     require(bh_noclip_move(&practice.flight, &cmd, dt), core.get(), "Moving noclip");
@@ -4142,6 +4154,7 @@ int run(const native::Options &opt, native::RendererLaunch &launch) {
 }  // namespace
 
 int main(int argc, char **argv) {
+    native::console::connect(argc, argv);
     if (const auto plan = native::update_helper::plan_argument(argc, argv)) return native::update_helper::run(*plan);
     if (const auto spec = native::video_worker::argument(argc, argv)) return native::video_worker::run(*spec);
 #ifdef BUNNYHOP_UPDATE_TEST_HOOKS

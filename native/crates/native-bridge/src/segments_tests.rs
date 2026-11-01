@@ -239,13 +239,17 @@ fn segmented_finished_archive_is_frozen_while_new_checkpoints_keep_recording() {
         let changed = BhRecordOptionsV29 {
             timed_input: 1,
             null_binds: 1,
+            w_release: 1,
             ..BhRecordOptionsV29::default()
         };
         assert_eq!(bh_record_options_v29(ctx, &changed), 1);
         restore(ctx, checkpoint);
         let mut restored = BhRecordOptionsV29::default();
         assert_eq!(bh_record_options_read_v29(ctx, &mut restored), 1);
-        assert_eq!((restored.timed_input, restored.null_binds), (0, 0));
+        assert_eq!(
+            (restored.timed_input, restored.null_binds, restored.w_release),
+            (0, 0, 0)
+        );
         for _ in 0..1000 {
             assert_eq!(bh_step(ctx, &command, &mut state), 1);
             assert_eq!(bh_run_state(ctx, &mut run), 1);

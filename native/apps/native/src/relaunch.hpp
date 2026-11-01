@@ -28,16 +28,7 @@ inline bool relaunch(std::filesystem::path exe) {
     PROCESS_INFORMATION process{};
     const auto directory = exe.parent_path().wstring();
     if (!CreateProcessW(
-                exe.c_str(),
-                command.data(),
-                nullptr,
-                nullptr,
-                FALSE,
-                CREATE_NEW_CONSOLE,
-                nullptr,
-                directory.c_str(),
-                &startup,
-                &process
+                exe.c_str(), command.data(), nullptr, nullptr, FALSE, 0, nullptr, directory.c_str(), &startup, &process
         ))
         return false;
     CloseHandle(process.hThread);

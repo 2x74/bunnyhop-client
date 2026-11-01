@@ -216,7 +216,7 @@ describe("native run service, mocked network only", () => {
       native: [{ ...identity, build: "bunnyhop-native/ffffffffffff", until: Date.now() + 10000 }],
     },
     { wasm: identity.wasm, native: [{ ...identity, until: 0 }] },
-    { wasm: "bunnyhop-web/ffffffffffff", native: [{ ...identity, until: Date.now() + 10000 }] },
+    { wasm: identity.wasm, native: [{ ...identity, wasm: "bunnyhop-web/ffffffffffff", until: Date.now() + 10000 }] },
   ])("preflight rejects unmatched, expired or incompatible release without upload (%j)", async (policy) => {
     const f = fixture(async () => policy);
     await reset(f.service);
@@ -346,7 +346,7 @@ describe("native run service, mocked network only", () => {
       expect(preflights).toBe(0);
       expect(f.uploads).toHaveLength(0);
       expect(f.statuses.at(-1)?.status).toBe("kept");
-      expect(f.statuses.at(-1)?.message).toContain("manifest is missing or stale");
+      expect(f.statuses.at(-1)?.message).toContain("Unpack the download into an empty folder");
     }
   });
   test("ambiguous native allowlist and malformed bytes fail closed", () => {
@@ -711,6 +711,208 @@ test("Segmented still requires an admitted native build", async () => {
   await f.service.receive({ ...finish(1), style: "segmented" });
   expect(f.uploads).toHaveLength(0);
   expect(f.statuses.at(-1)?.status).toBe("kept");
+});
+
+describe("a build the server may not list", () => {
+  const newerWasm = "bunnyhop-web/ffffffffffff";
+  const unlisted: VersionPolicy = { wasm: newerWasm, native: [] };
+  const retained: VersionPolicy = {
+    wasm: newerWasm,
+    native: [
+      { build: "bunnyhop-native/ffffffffffff", wasm: newerWasm, until: Date.now() + 60_000 },
+      { build: identity.build, wasm: identity.wasm, until: Date.now() + 60_000 },
+    ],
+  };
+  function waitingFixture(answers: (VersionPolicy | Error)[]) {
+    const statuses: RunServiceStatus[] = [],
+      uploads: { bytes: Uint8Array; options: Parameters<RunApi["submitRun"]>[1] }[] = [],
+      wakes: (() => void)[] = [],
+      uploaded: string[] = [];
+    let answer = 0;
+    const api: RunApi = {
+      runBeat: async () => ({ sid: "s", token: "t0" }),
+      submitRun: async (bytes, options) => {
+        uploads.push({ bytes, options });
+        return { id: "run", status: "verified", rank: 2 };
+      },
+      submission: async () => ({ id: "run", status: "verified" }),
+    };
+    const service = new NativeRunService({
+      api,
+      version: async () => {
+        const next = answers[Math.min(answer++, answers.length - 1)];
+        if (next instanceof Error) throw next;
+        return next;
+      },
+      origin: () => "https://bunnyhop.lol",
+      send: (status) => statuses.push(status),
+      sleep: () => new Promise((resolve) => wakes.push(resolve)),
+      admissionRetries: 3,
+      savedRunUploaded: (map) => uploaded.push(map),
+      context: () => ({ room: "room-1", race: "race-1", gauntlet: "attempt-1" }),
+    });
+    const wake = async () => {
+      wakes.shift()!();
+      for (let turn = 0; turn < 50; turn++) await Promise.resolve();
+    };
+    return { service, api, statuses, uploads, uploaded, wake, pendingWakes: () => wakes.length };
+  }
+  async function finishWithBeat(service: NativeRunService, generation = 1) {
+    await reset(service, generation);
+    await service.receive(beat(generation, 0));
+    await service.receive(finish(generation));
+  }
+
+  test("an older build the server still lists uploads after the website's verifier moves on", async () => {
+    expect(nativeBuildAllowed(retained, identity, Date.now())).toBe(true);
+    const f = waitingFixture([retained]);
+    await finishWithBeat(f.service);
+    expect(f.uploads).toHaveLength(1);
+    expect(f.uploads[0].options.room).toBe("room-1");
+    expect(f.statuses.at(-1)?.status).toBe("verified");
+  });
+  test("an entry naming another verifier for this build doesn't count", () => {
+    const entry = { build: identity.build, wasm: "bunnyhop-web/ffffffffffff", until: Date.now() + 60_000 };
+    expect(nativeBuildAllowed({ wasm: identity.wasm, native: [entry] }, identity, Date.now())).toBe(false);
+  });
+  test("an unlisted build keeps the run and uploads it as a plain run once it is listed", async () => {
+    const f = waitingFixture([unlisted, unlisted, retained]);
+    await finishWithBeat(f.service);
+    expect(f.uploads).toHaveLength(0);
+    const kept = f.statuses.at(-1)!;
+    expect(kept.status).toBe("kept");
+    expect(kept.local).toBe(true);
+    expect(kept.message).toContain("isn't accepted");
+    expect(kept.message).toContain("local native archive");
+    await f.wake();
+    expect(f.uploads).toHaveLength(0);
+    await f.wake();
+    expect(f.uploads).toHaveLength(1);
+    expect(new TextDecoder().decode(f.uploads[0].bytes)).toBe("bhr-mock-transport-bytes");
+    expect(f.uploads[0].options.beats).toEqual(["t0"]);
+    expect(f.uploads[0].options.room).toBeUndefined();
+    expect(f.uploads[0].options.race).toBeUndefined();
+    expect(f.uploads[0].options.gauntlet).toBeUndefined();
+    expect(f.statuses.at(-1)).toMatchObject({ status: "verified", generation: 1, rank: 2 });
+    expect(f.uploaded).toEqual(["bhop_eazy"]);
+    expect(f.pendingWakes()).toBe(0);
+  });
+  test("a run keeps waiting through a later attempt and answers under its own generation", async () => {
+    const f = waitingFixture([unlisted, retained]);
+    await finishWithBeat(f.service, 1);
+    await reset(f.service, 2);
+    await f.wake();
+    expect(f.uploads).toHaveLength(1);
+    expect(f.statuses.at(-1)).toMatchObject({ status: "verified", generation: 1 });
+  });
+  test("the server refusing the build at upload waits the same way", async () => {
+    const f = waitingFixture([retained]);
+    let refusals = 1;
+    const accept = f.api.submitRun;
+    f.api.submitRun = async (bytes, options) => {
+      if (refusals-- > 0)
+        throw Object.assign(new Error("not accepted"), { status: 422, code: "client_build_not_allowed" });
+      return accept(bytes, options);
+    };
+    await finishWithBeat(f.service);
+    expect(f.statuses.at(-1)?.status).toBe("kept");
+    await f.wake();
+    expect(f.uploads).toHaveLength(1);
+    expect(f.uploads[0].options.gauntlet).toBeUndefined();
+  });
+  test("a failed compatibility check says so and tries again", async () => {
+    const f = waitingFixture([new Error("offline"), retained]);
+    await finishWithBeat(f.service);
+    expect(f.statuses.at(-1)?.message).toContain("Could not check");
+    await f.wake();
+    expect(f.uploads).toHaveLength(1);
+  });
+  test("a lost connection on the delayed upload keeps waiting", async () => {
+    const f = waitingFixture([unlisted, retained]);
+    const accept = f.api.submitRun;
+    let failures = 1;
+    f.api.submitRun = async (bytes, options) => {
+      if (failures-- > 0) throw new Error("offline");
+      return accept(bytes, options);
+    };
+    await finishWithBeat(f.service);
+    await f.wake();
+    expect(f.uploads).toHaveLength(0);
+    await f.wake();
+    expect(f.uploads).toHaveLength(1);
+  });
+  test("it stops after its retries and says so", async () => {
+    const f = waitingFixture([unlisted]);
+    await finishWithBeat(f.service);
+    await f.wake();
+    await f.wake();
+    await f.wake();
+    expect(f.uploads).toHaveLength(0);
+    expect(f.statuses.at(-1)?.message).toContain("Stopped trying");
+    expect(f.pendingWakes()).toBe(0);
+  });
+  test("waiting runs don't use the four upload slots, and only eight wait", async () => {
+    const f = waitingFixture([unlisted]);
+    for (let generation = 1; generation <= 9; generation++) await finishWithBeat(f.service, generation);
+    expect(f.pendingWakes()).toBe(8);
+    const last = f.statuses.at(-1)!;
+    expect(last).toMatchObject({ status: "kept", generation: 9 });
+    expect(last.message).not.toContain("leave the game open");
+  });
+  test("another account never receives a waiting run", async () => {
+    let account = "alice";
+    const statuses: RunServiceStatus[] = [],
+      uploads: Uint8Array[] = [],
+      wakes: (() => void)[] = [];
+    let policy = unlisted;
+    const service = new NativeRunService({
+      api: {
+        runBeat: async () => ({ sid: "s", token: "t" }),
+        submitRun: async (bytes) => {
+          uploads.push(bytes);
+          return { id: "run", status: "verified" };
+        },
+        submission: async () => ({ id: "run", status: "verified" }),
+      },
+      version: async () => policy,
+      origin: () => "https://bunnyhop.lol",
+      send: (status) => statuses.push(status),
+      sleep: () => new Promise((resolve) => wakes.push(resolve)),
+      account: async () => account,
+    });
+    await reset(service);
+    await service.receive(beat(1, 0));
+    await service.receive(finish(1));
+    account = "bob";
+    service.refreshAccount();
+    for (let turn = 0; turn < 50; turn++) await Promise.resolve();
+    expect(statuses.at(-1)?.message).toContain("Account changed");
+    policy = retained;
+    wakes.shift()!();
+    for (let turn = 0; turn < 50; turn++) await Promise.resolve();
+    expect(uploads).toHaveLength(0);
+  });
+  test("another refusal shows the server's reason instead of blaming the connection", async () => {
+    const f = fixture();
+    f.api.submitRun = async () => {
+      throw Object.assign(new Error("this map build has been superseded; reload the map"), {
+        status: 409,
+        code: "outdated_map_version",
+      });
+    };
+    await reset(f.service);
+    await f.service.receive(finish(1));
+    expect(f.statuses.at(-1)?.status).toBe("kept");
+    expect(f.statuses.at(-1)?.message).toContain("superseded");
+  });
+});
+
+test("a run with a bad map name isn't blamed on the install", async () => {
+  const f = fixture();
+  await reset(f.service);
+  await f.service.receive({ ...finish(1), map: "bad map" });
+  expect(f.uploads).toHaveLength(0);
+  expect(f.statuses.at(-1)?.message).toContain("can't be uploaded");
 });
 
 test("native style pickers and chat style commands offer Segmented", () => {

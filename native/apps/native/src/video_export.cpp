@@ -6,7 +6,9 @@
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
-#ifndef _WIN32
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <poll.h>
 #endif
 
@@ -84,6 +86,33 @@ uint64_t clip_frames(const VideoOptions &o) {
     return uint64_t(std::ceil((o.to - o.from) * o.tick_interval * o.fps - 1e-8));
 }
 
+// FFmpeg is a console program and the game a windowed one, so each run would open a console window. SDL only asks
+// Windows not to through its "background" property, which also makes SDL report every exit code as 0.
+void hide_console_window(SDL_PropertiesID props) {
+#ifdef _WIN32
+    SDL_SetBooleanProperty(props, SDL_PROP_PROCESS_CREATE_BACKGROUND_BOOLEAN, true);
+#else
+    (void)props;
+#endif
+}
+
+// The exit code of a process that SDL_WaitProcess or SDL_ReadProcess saw end, read past that 0. SDL holds the process
+// handle until SDL_DestroyProcess, so the id can't have gone to another process.
+int finished_exit_code(SDL_Process *process, int reported) {
+#ifdef _WIN32
+    const auto id = SDL_GetNumberProperty(SDL_GetProcessProperties(process), SDL_PROP_PROCESS_PID_NUMBER, 0);
+    const HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, DWORD(id));
+    if (!handle) return reported;
+    DWORD code = 0;
+    const bool read = GetExitCodeProcess(handle, &code);
+    CloseHandle(handle);
+    return read ? int(code) : reported;
+#else
+    (void)process;
+    return reported;
+#endif
+}
+
 std::vector<const char *> c_arguments(const std::vector<std::string> &arguments) {
     std::vector<const char *> result;
     for (const auto &argument : arguments)
@@ -97,6 +126,7 @@ SDL_Process *create_process(const std::vector<std::string> &arguments, bool inpu
     auto args = c_arguments(arguments);
     const auto props = SDL_CreateProperties();
     SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, const_cast<char **>(args.data()));
+    hide_console_window(props);
     SDL_SetNumberProperty(
             props, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER, input ? SDL_PROCESS_STDIO_APP : SDL_PROCESS_STDIO_NULL
     );
@@ -154,13 +184,19 @@ int wait_for_exit(SDL_Process *process, Clock::duration timeout) {
         }
         SDL_Delay(process_poll_delay_ms);
     }
-    return code;
+    return finished_exit_code(process, code);
 }
 
 std::string encoder_list(const std::string &program, bool &found) {
     const std::vector<std::string> arguments = {program, "-hide_banner", "-encoders"};
     auto args = c_arguments(arguments);
-    auto *child = SDL_CreateProcess(args.data(), true);
+    const auto props = SDL_CreateProperties();
+    SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, const_cast<char **>(args.data()));
+    hide_console_window(props);
+    SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER, SDL_PROCESS_STDIO_APP);
+    SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_APP);
+    auto *child = SDL_CreateProcessWithProperties(props);
+    SDL_DestroyProperties(props);
     if (!child) return {};
     found = true;
     if (auto *in = SDL_GetProcessInput(child)) SDL_CloseIO(in);
@@ -172,6 +208,7 @@ std::string encoder_list(const std::string &program, bool &found) {
         output.assign(static_cast<char *>(bytes), std::min(size, probe_output_limit));
         SDL_free(bytes);
     }
+    code = finished_exit_code(child, code);
     SDL_DestroyProcess(child);
     return code ? std::string() : output;
 }
@@ -473,6 +510,7 @@ void NativeVideoExport::wait_process() {
     }
     {
         std::lock_guard lock(process_mutex);
+        code = finished_exit_code(process, code);
         SDL_DestroyProcess(process);
         process = nullptr;
     }

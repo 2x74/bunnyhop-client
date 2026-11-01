@@ -86,7 +86,7 @@ test("identical host state and timer-only updates retain visible menu controls",
     expect(stable.time).toBe("01:01.234");
     expect(stable.afterNotice).toBe(stable.time);
     expect(stable.summary).toBe("12 jumps · 34 strafes · 98.3% sync");
-    expect(stable.notice).toContain("manifest is missing or stale");
+    expect(stable.notice).toContain("Unpack the download into an empty folder");
     expect(stable.webgl).toEqual({ contexts: 0, attempts: 0 });
     expect(stable.canvases).toBe(0);
     expect(errors).toEqual([]);

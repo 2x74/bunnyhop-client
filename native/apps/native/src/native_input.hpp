@@ -44,6 +44,58 @@ inline bool null_binds_allowed(std::string_view style, bool practice) {
     return style != "scroll" || practice;
 }
 
+// Release W on jump: where it works (web w-release.ts wReleaseAllowed). Not Legit Scroll, and not the styles that
+// strafe with W. Practice allows every style.
+inline bool w_release_allowed(std::string_view style) {
+    return style != "scroll" && style != "wonly" && style != "sideways" && style != "hsw";
+}
+
+// The player before this command runs, as the style filter reads it.
+struct WReleaseContext {
+    bool grounded = false;
+    bool on_ladder = false;
+    bool autohop = false;
+};
+
+// The next command's context, or nothing while the setting doesn't apply (web main.ts wReleasePolicy). W flies in
+// noclip, so never there.
+inline std::optional<WReleaseContext>
+w_release_context(std::string_view style, bool practice, bool noclip, const BhState &player, bool autohop) {
+    if (noclip || (!practice && !w_release_allowed(style))) return std::nullopt;
+    return WReleaseContext{player.grounded != 0, player.on_ladder != 0, autohop};
+}
+
+// A jump taken holding forward lets go of forward for the airtime, like the CS:S bind `+jump; -forward`. Mirrors web
+// w-release.ts WRelease, checked against vectors from it (w_release_parity_tests.cpp). The recorded commands are the
+// released ones, so a replay re-simulates like any other.
+class WRelease {
+    bool released_ = false;
+    bool last_forward_ = false;
+    bool last_jump_ = false;
+
+public:
+    bool active() const { return released_; }
+
+    uint32_t apply(uint32_t buttons, const WReleaseContext &context) {
+        const bool holds_forward = buttons & forward;
+        const bool holds_jump = buttons & jump;
+        if (holds_forward && !last_forward_) released_ = false;
+        if (context.on_ladder)
+            released_ = false;
+        else if (context.grounded)
+            released_ = holds_forward && holds_jump && (context.autohop || !last_jump_);
+        last_forward_ = holds_forward;
+        last_jump_ = holds_jump;
+        return released_ ? buttons & ~forward : buttons;
+    }
+
+    void reset() {
+        released_ = false;
+        last_forward_ = false;
+        last_jump_ = false;
+    }
+};
+
 class NullBindPresses {
     struct Press {
         uint64_t code = 0;
@@ -137,6 +189,7 @@ struct Input {
     uint32_t epoch = 0, kind = 1, frames = 0, motion_events = 0;
     uint32_t held = 0, pulse = 0;
     NullBindPresses null_presses;
+    WRelease w_release;
     std::optional<uint32_t> sampled_epoch;
 
     // Match replay.ts norm360's two remainders, including its double rounding.
@@ -309,6 +362,7 @@ struct Input {
         held = 0;
         pulse = 0;
         null_presses.clear();
+        w_release.reset();
         acc_x = 0;
         acc_y = 0;
         acc_events = 0;
@@ -321,9 +375,14 @@ struct Input {
         have_split = false;
     }
 
-    BhCmd command() {
-        const uint32_t bits = held | pulse;
+    // `release`: Release W on jump is active for this command (only the forward bit changes, and forwardmove follows).
+    BhCmd command(const std::optional<WReleaseContext> &release = std::nullopt) {
+        uint32_t bits = held | pulse;
         pulse = 0;
+        if (release)
+            bits = w_release.apply(bits, *release);
+        else
+            w_release.reset();
         return {450.0f * (int(bool(bits & forward)) - int(bool(bits & back))),
                 450.0f * (int(bool(bits & right)) - int(bool(bits & left))),
                 float(yaw()),
