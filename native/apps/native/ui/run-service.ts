@@ -77,7 +77,9 @@ export interface RunApi {
   runDiagnostics?(id: string, diagnostics: RunDiagnostics): Promise<void>;
 }
 export interface VersionPolicy {
+  /** The server's current verifier. Older builds can still be listed in `native`, so this decides nothing here. */
   wasm?: unknown;
+  /** Exactly what the server's upload check reads (apps/api native-builds.ts activeNativeBuilds). */
   native?: unknown;
 }
 export interface RunServiceDependencies {
@@ -105,6 +107,11 @@ export interface RunServiceDependencies {
   gauntletRetries?: number;
   /** Confirmed account only; stale/offline identity must return null. */
   account?: () => Promise<string | null>;
+  /** Between checks for a run waiting on the server to accept this build, and how many before it's given up. */
+  admissionRetryMs?: number;
+  admissionRetries?: number;
+  /** A run kept back at its finish has now been uploaded; the player may be on another map by then. */
+  savedRunUploaded?: (map: string) => void;
 }
 interface Session {
   generation: number;
@@ -120,12 +127,36 @@ interface Session {
   account: string | null | undefined;
   accountBlocked: boolean;
 }
+interface Upload {
+  bytes: Uint8Array;
+  diagnostics: RunDiagnostics | null;
+  mouse: RunMouse | null;
+}
+type Admission = "admitted" | "not admitted" | "unknown";
+type Delivery = "done" | "not admitted";
 
 const MAX_BEATS = 7500,
   MAX_REPLAY_BYTES = 8 << 20;
 /** The web's RETRY_MS, and its 10-minute grace period (state.ts GRACE_MS) in resends. */
 const GAUNTLET_RETRY_MS = 10_000,
   GAUNTLET_RETRIES = 60;
+/**
+ * A run waits in memory while the game stays open, in case the server starts accepting this build: every 5 minutes
+ * for a day. Eight replays at the 8 MiB limit is the most this holds.
+ */
+const ADMISSION_RETRY_MS = 5 * 60_000,
+  ADMISSION_RETRIES = 288,
+  MAX_WAITING_RUNS = 8;
+const NOT_ADMITTED = "This game version isn't accepted for ranked runs right now.";
+const UPLOADS_LATER = "Update from Settings, or leave the game open and the run uploads once it's accepted.";
+const CHECK_FAILED = "Could not check whether this game version is accepted.";
+const CHECKS_AGAIN = "Leave the game open and the run uploads once that works.";
+const notAdmittedRefusal = (error: unknown): boolean =>
+  (error as { code?: unknown } | null)?.code === "client_build_not_allowed";
+const serverMessage = (error: unknown): string | null => {
+  const message = (error as { message?: unknown } | null)?.message;
+  return typeof message === "string" && message ? message : null;
+};
 /** A refusal a resend can't change (a 4xx other than a timeout / rate limit): never retried. */
 const definiteRefusal = (error: unknown): boolean => {
   const status = (error as { status?: unknown } | null)?.status;
@@ -168,7 +199,7 @@ export function nativeBuildAllowed(
   event: Pick<Identity, "build" | "wasm">,
   now: number,
 ): boolean {
-  if (policy.wasm !== event.wasm || !Array.isArray(policy.native)) return false;
+  if (!Array.isArray(policy.native)) return false;
   const entries = policy.native.filter((value) => value && typeof value === "object" && value.build === event.build);
   if (entries.length !== 1) return false; // ambiguous identities fail closed
   const entry = entries[0];
@@ -199,6 +230,7 @@ export function replayBytes(base64: string): Uint8Array {
 export class NativeRunService {
   private current: Session | null = null;
   private readonly completed = new Set<Session>();
+  private readonly waitingForAdmission = new Set<Session>();
   private latestGeneration = -1;
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -224,7 +256,8 @@ export class NativeRunService {
       .then((id) => {
         if (revision !== this.accountRevision) return;
         this.accountId = id;
-        for (const session of new Set([...this.completed, ...(this.current ? [this.current] : [])])) {
+        const sessions = [...this.completed, ...this.waitingForAdmission, ...(this.current ? [this.current] : [])];
+        for (const session of new Set(sessions)) {
           if (session.account !== undefined && session.account !== id) {
             session.accountBlocked = true;
             this.kept(session, "Account changed during this attempt. Restart to submit under your current account.");
@@ -267,7 +300,7 @@ export class NativeRunService {
     };
   }
   private active(session: Session): boolean {
-    return this.current === session || this.completed.has(session);
+    return this.current === session || this.completed.has(session) || this.waitingForAdmission.has(session);
   }
   private status(
     session: Session,
@@ -453,18 +486,58 @@ export class NativeRunService {
       this.kept(session, "Ranked uploads require the live service.");
       return;
     }
+    const upload: Upload = { bytes, diagnostics, mouse };
     this.status(session, "checking", { message: "Checking native release compatibility…" });
-    try {
-      const version = await bounded(this.dependencies.version(), 10_000);
-      if (!this.active(session)) return;
-      if (!nativeBuildAllowed(version, event, this.now())) {
-        this.kept(session, "This native build is not enabled for ranked submissions.");
-        return;
-      }
-    } catch {
-      this.kept(session, "Could not check native release compatibility.");
+    const admission = await this.admission(event);
+    if (!this.active(session)) return;
+    if (admission !== "admitted") {
+      this.waitForAdmission(session, upload, admission);
       return;
     }
+    if ((await this.deliver(session, upload, context ?? {})) === "not admitted")
+      this.waitForAdmission(session, upload, "not admitted");
+  }
+  private async admission(event: Identity): Promise<Admission> {
+    try {
+      const version = await bounded(this.dependencies.version(), 10_000);
+      return nativeBuildAllowed(version, event, this.now()) ? "admitted" : "not admitted";
+    } catch {
+      return "unknown";
+    }
+  }
+  // The replay stays in the local archive whatever happens here. This only keeps its upload (with the heartbeats the
+  // archive doesn't have) in memory, so it can go up without the player doing anything.
+  private waitForAdmission(session: Session, upload: Upload, admission: Admission): void {
+    const reason = admission === "unknown" ? CHECK_FAILED : NOT_ADMITTED;
+    if (this.waitingForAdmission.size >= MAX_WAITING_RUNS) {
+      this.kept(session, reason);
+      return;
+    }
+    this.waitingForAdmission.add(session);
+    this.kept(session, `${reason} ${admission === "unknown" ? CHECKS_AGAIN : UPLOADS_LATER}`);
+    void this.retryAdmission(session, upload);
+  }
+  private async retryAdmission(session: Session, upload: Upload): Promise<void> {
+    const event = session.identity!;
+    const retries = this.dependencies.admissionRetries ?? ADMISSION_RETRIES;
+    try {
+      for (let tries = 0; tries < retries; tries++) {
+        await this.sleep(this.dependencies.admissionRetryMs ?? ADMISSION_RETRY_MS);
+        if (session.accountBlocked) return;
+        if ((await this.admission(event)) !== "admitted") continue;
+        // The room, race or gauntlet it was played for has moved on: it goes up as a plain run.
+        if ((await this.deliver(session, upload, {}, true)) === "not admitted") continue;
+        if (!session.accountBlocked) this.dependencies.savedRunUploaded?.(event.map);
+        return;
+      }
+      this.kept(session, "Stopped trying to upload this run.");
+    } catch {
+      this.kept(session, "This run could not be uploaded.");
+    } finally {
+      this.waitingForAdmission.delete(session);
+    }
+  }
+  private async deliver(session: Session, upload: Upload, context: RunContext, retrying = false): Promise<Delivery> {
     const tokens = session.tokens.filter((token): token is string => typeof token === "string");
     const gaps = session.sent - tokens.length;
     this.status(session, "uploading", {
@@ -472,40 +545,60 @@ export class NativeRunService {
       beats: tokens.length,
       gaps,
     });
-    if (this.dependencies.account) {
-      for (;;) {
+    const result = await this.submit(session, upload, context, tokens, gaps, retrying);
+    if (result === "not admitted" || result === null) return result ?? "done";
+    if (!this.active(session)) return "done";
+    this.attachDiagnostics(result.id, upload.diagnostics);
+    this.verdict(session, result);
+    await this.pollVerdict(session, result);
+    return "done";
+  }
+  // A gauntlet candidate is the attempt's split on this map until the server has it (web gauntlet/mode.ts): an upload
+  // that fails for the connection is sent again, the same bytes, beats and attempt, under the same account checks,
+  // every GAUNTLET_RETRY_MS while holdGauntlet says it's still wanted, for up to the attempt's grace period.
+  private async submit(
+    session: Session,
+    upload: Upload,
+    context: RunContext,
+    tokens: string[],
+    gaps: number,
+    retrying: boolean,
+  ): Promise<Submission | "not admitted" | null> {
+    for (let tries = 0; ; tries++) {
+      // No await may separate the last ownership check from submitRun (accountDispatch fences the fetch itself).
+      while (this.dependencies.account) {
         const revision = await this.ownsAccount(session);
-        if (revision === null) return;
+        if (revision === null) return null;
         if (revision === this.accountRevision) break;
       }
-    }
-    let result: Submission;
-    // A gauntlet candidate is the attempt's split on this map until the server has it (web gauntlet/mode.ts): an upload
-    // that fails for the connection is sent again, the same bytes, beats and attempt, under the same account checks,
-    // every GAUNTLET_RETRY_MS while holdGauntlet says it's still wanted, for up to the attempt's grace period.
-    for (let tries = 0; ; tries++) {
       try {
-        result = await bounded(
-          this.dependencies.api.submitRun(bytes, {
+        return await bounded(
+          this.dependencies.api.submitRun(upload.bytes, {
             beats: tokens,
-            ...(mouse ? { mouse } : {}),
+            ...(upload.mouse ? { mouse: upload.mouse } : {}),
             ...context,
             ...(this.dependencies.account ? { dispatch: this.accountDispatch(session, true) } : {}),
           }),
           20_000,
         );
-        break;
       } catch (error) {
-        if (session.accountBlocked || !this.active(session)) return;
-        const attempt = context?.gauntlet;
+        if (session.accountBlocked || !this.active(session)) return null;
+        if (notAdmittedRefusal(error)) return "not admitted";
+        const refused = definiteRefusal(error);
+        if (retrying && !refused) return "not admitted";
+        const attempt = context.gauntlet;
         const hold =
           !!attempt &&
-          !definiteRefusal(error) &&
+          !refused &&
           tries < (this.dependencies.gauntletRetries ?? GAUNTLET_RETRIES) &&
           !!this.dependencies.holdGauntlet?.(attempt, session.generation);
         if (!hold) {
-          this.kept(session, "The replay could not reach the server.");
-          return;
+          const answer = refused ? serverMessage(error) : null;
+          this.kept(
+            session,
+            answer ? `The server refused this run: ${answer}.` : "The replay could not reach the server.",
+          );
+          return null;
         }
         this.status(session, "uploading", {
           message: "No connection. This run counts once it uploads.",
@@ -514,23 +607,16 @@ export class NativeRunService {
           gaps,
         });
         await this.sleep(this.dependencies.gauntletRetryMs ?? GAUNTLET_RETRY_MS);
-        if (!this.active(session) || session.accountBlocked) return;
+        if (!this.active(session) || session.accountBlocked) return null;
         if (!this.dependencies.holdGauntlet?.(attempt, session.generation)) {
           this.kept(session, "The gauntlet moved on before this run could upload.");
-          return;
-        }
-        if (this.dependencies.account) {
-          for (;;) {
-            const revision = await this.ownsAccount(session);
-            if (revision === null) return;
-            if (revision === this.accountRevision) break;
-          }
+          return null;
         }
       }
     }
-    if (!this.active(session)) return;
-    this.attachDiagnostics(result.id, diagnostics);
-    this.verdict(session, result);
+  }
+  private async pollVerdict(session: Session, first: Submission): Promise<void> {
+    let result = first;
     const deadline = this.now() + this.pollLimit;
     while (this.active(session) && (result.status === "queued" || result.status === "verifying")) {
       let remaining = deadline - this.now();
