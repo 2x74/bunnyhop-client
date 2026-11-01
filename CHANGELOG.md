@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.6.5 — Native
+
+Update from Settings → Updates: press Update, then Restart to update. Your settings, replays and maps are kept.
+
+**Submitting**
+- Your version keeps submitting when the website updates, as long as the server still accepts it. Before, a website
+  update could stop older versions uploading even though their runs were still welcome.
+- If the server doesn't accept your version, or the check can't reach it, your run waits while the game stays open and
+  uploads by itself once it can, for up to a day. The replay stays saved either way.
+- Refused uploads now show the server's reason. If your files don't match the release, usually from unpacking over an
+  older version, the message tells you to unpack into an empty folder.
+
+**Windows**
+- The game no longer opens a terminal window. The log is in Settings → Game data, and `--console` opens a terminal
+  for support. Video export doesn't flash one either.
+- The game now asks Windows to draw its modern window frame instead of the Windows 7 style one. We haven't seen this on
+  a real PC yet, so tell us if the old frame is still there.
+
+**Movement**
+- Release W on jump, as on the website: a jump taken holding W lets go of forward until you land or press W again. It's
+  off until you turn it on, and doesn't apply to Legit Scroll, W-Only, Sideways or Half-Sideways.
+
 ## v0.6.4 — Native
 
 Update from Settings → Updates: press Update, then Restart to update. Your settings, replays and maps are kept.
