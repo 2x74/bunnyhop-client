@@ -43,6 +43,8 @@ dialog[open].acct-dialog { animation: acct-in 0.16s ease-out; }
 .acct-method { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 0.75rem; padding: 0.55rem 0.7rem; border-radius: var(--radius-sm); background: var(--raise); border: 1px solid var(--line); }
 .acct-minfo { display: flex; flex-direction: column; min-width: 0; }
 .acct-minfo small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-minfo.wrap small { white-space: normal; }
+.acct-avatar .acct-minfo small { white-space: normal; }
 .acct-icon { display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 0.5rem; background: var(--raise-2); }
 .acct-icon.discord { color: #fff; background: var(--discord); }
 .acct-icon.email { color: var(--accent); }
@@ -53,7 +55,6 @@ dialog[open].acct-dialog { animation: acct-in 0.16s ease-out; }
 /* Discord avatar opt-in, under the Discord row: switch, the picture it would use, what it does. */
 .acct-avatar { padding: 0.15rem 0.7rem; }
 .acct-avatar b { color: var(--text); font-weight: 600; }
-.acct-avatar .acct-minfo small { white-space: normal; }
 .acct-avatar .avatar { width: 1.75rem; height: 1.75rem; }
 .acct-avatar:has(input:disabled) { cursor: default; }
 /* The foot: replay the intro on the left, the held sign-out buttons on the right. */

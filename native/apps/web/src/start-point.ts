@@ -6,10 +6,15 @@
 // floor, the timer reset); only the position and view differ. The replay records the point like any restart point
 // and the verifier checks it like any other (restart.ts restartPointProblem, verifier.ts restartPointAllowed).
 //
-// Practice spawns: where practice works (solo) the same command saves a spot anywhere you stand still, and so does a
-// spot in the start zone after a noclip or checkpoint teleport. Restarts from one are practice attempts (session.ts
+// A spot just over the zone's edge (the footprint sticks out of it) is taken to mean the zone: the point moves the few
+// units needed to be inside (snapIntoStartZone) and is an ordinary start point. Nothing downstream knows: it's saved,
+// recorded and verified like one you walked to, and session.ts tries the restart there first (a wall or a drop in the
+// way and it's what it would have been without the move).
+//
+// Practice spawns: where practice works (solo) the same command saves a spot anywhere else you stand still, and so does
+// a spot in the start zone after a noclip or checkpoint teleport. Restarts from one are practice attempts (session.ts
 // resetCore): never submitted, and the verifier would refuse such a replay anyway. The timer works as ever, from the
-// start zone.
+// start zone. Every attempt on one says so for its whole length (hud.ts setPractice), with the way to clear it.
 
 import { applyRestartPoint, restartPoint, type Core, type PlayerState, type RestartPoint, type Settings } from "./core";
 import { restartPointProblem, withRestartNames } from "./restart";
@@ -68,11 +73,36 @@ const touchesStart = (pos: readonly number[], zones: readonly Zone[]) =>
       pos[2] <= z.maxs[2] && pos[2] + HULL_HEIGHT >= z.mins[2],
   );
 
-export type StartPointCheck = { ok: true; track: number; point: StartPoint; practice: PracticeSpawn | null } | { ok: false; reason: string };
+/** How far inside the edge a moved point lands: f32 rounding can't put the footprint back over it. */
+const SNAP_INSET = 1;
+
+/**
+ * Where a standing player whose footprint sticks out of a start zone's edge would be with all of it inside, moved as
+ * little as possible, and that zone (the closest; lowest track on a tie). Null when no zone's edge is under the
+ * footprint, or the zone is too narrow to hold it. At most 33 units per axis, less than the hull is wide, so nothing
+ * solid can lie between the two spots: a wall would be inside the second one, and the restart check refuses that.
+ */
+export function snapIntoStartZone(pos: readonly number[], zones: readonly Zone[]): { position: [number, number, number]; zone: Zone } | null {
+  const reach = HULL_HALF_WIDTH + SNAP_INSET;
+  let best: { position: [number, number, number]; zone: Zone; moved: number } | null = null;
+  for (const z of zones) {
+    if (!touchesStart(pos, [z])) continue;
+    if (z.maxs[0] - z.mins[0] < 2 * reach || z.maxs[1] - z.mins[1] < 2 * reach) continue;
+    const inside = (axis: 0 | 1) => (pos[axis] - HULL_HALF_WIDTH >= z.mins[axis] && pos[axis] + HULL_HALF_WIDTH <= z.maxs[axis] ? pos[axis] : Math.min(z.maxs[axis] - reach, Math.max(z.mins[axis] + reach, pos[axis])));
+    const position: [number, number, number] = [Math.fround(inside(0)), Math.fround(inside(1)), pos[2]];
+    if (!startZoneHolds(z, position)) continue;
+    const moved = Math.hypot(position[0] - pos[0], position[1] - pos[1]);
+    if (!best || moved < best.moved || (moved === best.moved && trackOf(z) < trackOf(best.zone))) best = { position, zone: z, moved };
+  }
+  return best && { position: best.position, zone: best.zone };
+}
+
+export type StartPointCheck = { ok: true; track: number; point: StartPoint; practice: PracticeSpawn | null; snapped?: true } | { ok: false; reason: string };
 
 /**
  * Whether the player can save a start point where they stand (and for which track), else the reason. Rules:
- * - the whole standing footprint inside a start zone, so the restart never begins straddling the zone's edge. Where
+ * - the whole standing footprint inside a start zone, so the restart never begins straddling the zone's edge. With
+ *   `o.snap` a footprint sticking out of the edge is moved in (the caller tries the restart there first). Where
  *   practice works (`o.offZone`) any other spot is a practice spawn instead, on the current track `o.track`;
  * - a spot reached with noclip or a checkpoint teleport (`o.tool`: this attempt used one) is a practice spawn too: those
  *   reach places a run can't walk to (the restart is checked again when it's used: resolveStartPoint);
@@ -86,13 +116,16 @@ export function checkStartPoint(
   s: Pick<PlayerState, "position" | "velocity" | "grounded" | "crouched" | "onLadder">,
   view: { yaw: number; pitch: number },
   zones: readonly Zone[],
-  o: { track: number; offZone: boolean; tool: boolean },
+  o: { track: number; offZone: boolean; tool: boolean; snap?: boolean },
 ): StartPointCheck {
   const zone = holdingStartZone(s.position, zones);
-  if (!zone && !o.offZone) return { ok: false, reason: touchesStart(s.position, zones) ? "Move further into the start zone" : "Stand inside the start zone" };
+  // Just over the edge (snapIntoStartZone), unless a tool got the attempt here: that stays a practice spawn, as in the zone.
+  const snap = !zone && o.snap && !o.tool ? snapIntoStartZone(s.position, zones) : null;
+  if (!zone && !snap && !o.offZone) return { ok: false, reason: touchesStart(s.position, zones) ? "Move further into the start zone" : "Stand inside the start zone" };
   if (!s.grounded || s.onLadder) return { ok: false, reason: "Stand on the ground" };
   if (s.crouched) return { ok: false, reason: "Stand up" };
   if (Math.hypot(s.velocity[0], s.velocity[1], s.velocity[2]) > STILL_SPEED) return { ok: false, reason: "Stand still" };
+  if (snap) return { ok: true, track: trackOf(snap.zone), point: { position: snap.position, yaw: normalizeYaw(view.yaw), pitch: clampPitch(view.pitch) }, practice: null, snapped: true };
   const practice: PracticeSpawn | null = !zone ? "outside" : o.tool ? "tool" : null;
   const point: StartPoint = { position: [s.position[0], s.position[1], s.position[2]], yaw: normalizeYaw(view.yaw), pitch: clampPitch(view.pitch), ...(practice ? { practice: true as const } : {}) };
   return { ok: true, track: zone ? trackOf(zone) : o.track, point, practice };
@@ -127,11 +160,11 @@ export function resolveStartPoint(core: Core, settings: Settings, map: string, t
 }
 
 /** What a successful save says. A practice spawn says why restarts from it are practice, and how to undo it. */
-export function savedMessage(track: number, practice: PracticeSpawn | null = null): string {
+export function savedMessage(track: number, practice: PracticeSpawn | null = null, snapped = false): string {
   const where = track > 0 ? ` for ${trackName(track)}` : "";
-  if (practice === "outside") return `Spawn saved${where}. It's outside the start zone, so restarts from it are practice. !clearstart undoes it.`;
-  if (practice === "tool") return `Spawn saved${where}. This run used noclip, a checkpoint or a practice spawn, so restarts from it are practice. !clearstart undoes it.`;
-  return `Start point saved${where}`;
+  if (practice === "outside") return `Spawn saved${where}. It's outside the start zone, so restarts from it are practice and won't count. !clearstart undoes it.`;
+  if (practice === "tool") return `Spawn saved${where}. This run used noclip, a checkpoint or a practice spawn, so restarts from it are practice and won't count. !clearstart undoes it.`;
+  return `Start point saved${where}${snapped ? ", just inside the zone" : ""}`;
 }
 
 export const normalizeYaw = (yaw: number) => {

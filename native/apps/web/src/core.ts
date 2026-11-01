@@ -106,6 +106,10 @@ export interface CategorizedGroundJump {
 }
 
 export interface PlayerState {
+  /** Clean AirAccelerate observation, before collisions/triggers: actual and best horizontal speed change.
+   * NaN when not judgeable or the WASM lacks the observation (Bar then stays neutral). Never used by physics. */
+  airSpeedGain?: number;
+  airBestGain?: number;
   categorizedGroundJump?: CategorizedGroundJump;
   position: [number, number, number];
   velocity: [number, number, number];
@@ -251,6 +255,7 @@ export const PROP_TRANSFORM_KEY = 1 << 20;
  * - v22: v21 + Momentum's edge rule (research/EDGEBUG-V22.md): a landing with no walkable ground under the next tick is taken
  *   back on that tick unless it jumps, so no friction tick (EVENT_EDGEBUG). Autohop with jump held on the landing tick plays
  *   as v21, and a jump on the next tick (held or a new scroll press) is exactly v21's.
+ * - v23: v22 + per-map changes only (map_fixes.rs). Every map not listed there plays as on v22.
  */
 export const PHYSICS_V1 = 1;
 /** Weapon commands and the USP silencer (research/WEAPONS.md). */
@@ -276,7 +281,7 @@ export const PHYSICS_V16 = 16;
 /** RNGFix parity: uphill / downhill inclines, edge bugs, trigger jumping and telehops as on RNGFix servers. */
 export const PHYSICS_V17 = 17;
 /** The physics version new runs are played and recorded with. */
-export const PHYSICS_VERSION = 22;
+export const PHYSICS_VERSION = 23;
 /** Climbable surface properties used by bhop_synthetic_fix. */
 export const PHYSICS_V18 = 18;
 /** Scoped entity makers and known velocity-script equivalents. */
@@ -287,6 +292,8 @@ export const PHYSICS_V20 = 20;
 export const PHYSICS_V21 = 21;
 /** Momentum's edge rule: without a jump, a landing with no ground under the next tick stays in the air, with no friction tick. */
 export const PHYSICS_V22 = 22;
+/** Per-map changes only (map_fixes.rs), shipped with timer rules 3. Replays retain their recorded physics and rules. */
+export const PHYSICS_V23 = 23;
 /** Versions this code knows (the wasm build must support them too, see Core.setSettings). */
 export const isPhysicsVersion = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= PHYSICS_V1 && (v as number) <= PHYSICS_VERSION;
 
@@ -756,6 +763,8 @@ export class Core {
         velocity: [s[27], s[28], s[29]] as [number, number, number], crouched: s[30] !== 0,
       } } : {}),
       ...(s[31] === 1 ? { edgeLanding: true } : {}),
+      airSpeedGain: len > 33 ? s[32] : NaN,
+      airBestGain: len > 33 ? s[33] : NaN,
     };
   }
 

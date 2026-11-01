@@ -1,7 +1,7 @@
 /* A light overlay: the world stays visible through the gauge. --st-h scales the rail's thickness; --st-good / --st-ok
    are the zone half-widths along it (strafe-trainer-view.ts). The zone colours are the page's (palette.ts swaps them on
    <html> for the colour-blind settings). */
-:root { --st-g: #4fd08a; --st-o: #f29a3a; --st-r: #e0473f; }
+:root { --st-p: #57c8ff; --st-g: #4fd08a; --st-o: #f29a3a; --st-r: #e0473f; }
 .st-trainer {
   width: 16em; max-width: calc(100vw - 2rem); color: var(--st-color, #ffffff); font-size: .85em; text-shadow: 0 1px 2px #000, 0 0 3px #0008;
   transition: opacity .2s;
@@ -11,6 +11,7 @@
 .st-band { position: absolute; left: calc(50% - var(--st-good, 5%)); width: calc(2 * var(--st-good, 5%)); inset-block: 0; background: color-mix(in srgb, currentColor 65%, transparent); }
 .st-target { position: absolute; left: 50%; top: -2px; bottom: -2px; border-left: 1px solid currentColor; }
 .st-marker { position: absolute; left: 50%; top: -4px; bottom: -4px; width: 2px; background: currentColor; transform: translateX(-50%); box-shadow: 0 1px 2px #000b; }
+.st-fill { display: none; }
 .st-reading { position: relative; text-align: center; line-height: 1.3; }
 .st-reading b { font-size: .9em; font-weight: 550; font-variant-numeric: tabular-nums; }
 .st-cue { position: absolute; left: calc(50% + 2.7em); top: .12em; font-size: .7em; color: color-mix(in srgb, currentColor 58%, transparent); white-space: nowrap; }
@@ -37,3 +38,22 @@
   top: auto; bottom: calc(100% + 2px); width: 0; height: 0; background: none; box-shadow: none;
   border: 5px solid transparent; border-top: 7px solid currentColor; border-bottom: 0; filter: drop-shadow(0 1px 1px #000b);
 }
+
+/* Bar: an almost solid dark track filled from the edge opposite the turn; the centre tick is 100%. data-edge and data-band
+   come from strafe-trainer-view.ts, and the fill's length is a scaleX so it never costs a layout. */
+.st-trainer[data-style="bar"] { width: 16.5em; }
+.st-trainer[data-style="bar"] .st-band, .st-trainer[data-style="bar"] .st-marker { display: none; }
+.st-trainer[data-style="bar"] .st-rail {
+  height: calc(.88em * var(--st-h, 1)); margin-block: .4em; border-radius: 999px; overflow: hidden;
+  background: linear-gradient(#364043eb, #1b2527eb); box-shadow: 0 1px 3px #0009;
+}
+.st-trainer[data-style="bar"] .st-target { z-index: 1; top: 0; bottom: 0; border-left: 1px solid #000a; }
+.st-trainer[data-style="bar"] .st-fill { display: block; position: absolute; inset: 0; transform: scaleX(0); transform-origin: left; background: currentColor; }
+.st-trainer[data-style="bar"][data-edge="right"] .st-fill { transform-origin: right; }
+.st-trainer[data-style="bar"][data-band="perfect"] .st-fill { background: var(--st-p); }
+.st-trainer[data-style="bar"][data-band="good"] .st-fill { background: var(--st-g); }
+.st-trainer[data-style="bar"][data-band="ok"] .st-fill { background: var(--st-o); }
+.st-trainer[data-style="bar"][data-band="high"] .st-fill { background: var(--st-r); }
+
+/* Neutral is always white, independent of the trainer text colour setting. */
+.st-trainer[data-style="bar"][data-band="low"] .st-fill { background: #ffffff; }

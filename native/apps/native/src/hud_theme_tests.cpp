@@ -106,6 +106,7 @@ bool rejects_setting(const native::Json &settings, const std::string &key, const
 void test_web_settings_schema() {
     const auto cases = native::Json::parse(R"schema([
         {"key":"nullBinds","rule":{"kind":"boolean"},"default":false},
+        {"key":"wRelease","rule":{"kind":"boolean"},"default":false},
         {"key":"autoRestartWhen","rule":{"kind":"choice","values":["off","pb","wr","ghost"]},"default":"off"},
         {"key":"autoRestartAction","rule":{"kind":"choice","values":["restart","sound"]},"default":"restart"},
         {"key":"hudPlace","rule":{"kind":"choice","values":["off","place","top"]},"default":"off"},
@@ -762,11 +763,25 @@ void test_movement_widgets_and_restart() {
         {
             NoAllocations no_allocations;
             native::draw_trainer(
-                    trainer, 500, 200, {105, native::StrafeHint::strafe_more}, options.trainer, true, options.palette
+                    trainer,
+                    500,
+                    200,
+                    {.percent = 105, .hint = native::StrafeHint::strafe_more},
+                    options.trainer,
+                    true,
+                    options.palette
             );
         }
         assert(trainer.rects >= 4 && trainer.has("105%") && trainer.has("turn more"));
     }
+    options.trainer.style = "bar";
+    DrawProbe bar_trainer;
+    {
+        NoAllocations no_allocations;
+        native::draw_trainer(bar_trainer, 500, 200, {.percent = 80, .gain = 1}, options.trainer, true, options.palette);
+    }
+    assert(bar_trainer.rects >= 4 && bar_trainer.has("—") && bar_trainer.has("turn more"));
+    options.trainer.style = "classic";
     native::FirstJumpTracker first;
     run.jumps = 1;
     run.in_start = 1;

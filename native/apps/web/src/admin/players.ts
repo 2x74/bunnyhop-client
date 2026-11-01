@@ -451,7 +451,8 @@ export const playerView: View = async (root, _params, [id]) => {
         return rows.length ? h("div", { class: "ctx-rows" }, rows) : emptyLine("None seen.");
       })()),
     ),
-    ...(d.network ? [networkCard(u.id, d.network)] : []),
+    // The hashes and ids behind the links, and banning them: admins. Moderators have the accounts in Other accounts.
+    ...(d.network && may("players.alts") ? [networkCard(u.id, d.network)] : []),
     h("section", { class: "card" }, h("h2", null, "Chat", h("a", { href: `#/chat?user=${encodeURIComponent(u.id)}`, class: "go-link" }, "All of it", glyph("arrow"))), table(["When", "Room", "Message", "", ""], d.chat.map((m) => chatRow(m, false)), "No chat.")),
     h(
       "div",

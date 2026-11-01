@@ -52,7 +52,7 @@ const ROWS: Record<string, Gate> = {
   "mouse/Mouse input/Show input stats": needs("mouseDiagnostics"),
 
   "crosshair/Style/Style": needs("crosshairStyle", "crosshair"),
-  "crosshair/Look/Color": needs("crosshairColor"),
+  "crosshair/Look/Colour": needs("crosshairColor"),
   "crosshair/Look/Size": needs("crosshairSize"),
   "crosshair/Look/Thickness": needs("crosshairThickness"),
   "crosshair/Look/Gap": needs("crosshairGap"),
@@ -94,7 +94,7 @@ const ROWS: Record<string, Gate> = {
   "hud/Strafe trainer/On-pace zone": needs("hudStrafeTrainerZone"),
   "hud/Strafe trainer/Height": needs("hudStrafeTrainerHeight"),
   "hud/Strafe trainer/Dim below": needs("hudStrafeTrainerDimBelow"),
-  "hud/Strafe trainer/Trainer color": needs("hudStrafeTrainerColor"),
+  "hud/Strafe trainer/Trainer colour": needs("hudStrafeTrainerColor"),
   "hud/Strafe trainer/Percentage": needs("hudStrafeTrainerShowPace"),
   "hud/Strafe trainer/Turn hints": needs("strafeTrainerHints"),
   "hud/Strafe trainer/Jump sound": needs("hudStrafeTrainerSound"),
@@ -145,7 +145,7 @@ const ROWS: Record<string, Gate> = {
   // Bind rows: one per action, in whichever group the website puts it.
   ...Object.fromEntries(ACTIONS.map((action) => [`keys/*/${action.label}`, needs(`bind:${action.id}`)])),
   "keys/Movement/Null binds": needs("nullBinds"),
-  "keys/Movement/Release W on jump": excluded("Not in the desktop client yet."),
+  "keys/Movement/Release W on jump": needs("wRelease"),
   "hud/JHUD/JHUD": needs("hud:jhud"),
   "hud/JHUD/Sync": needs("hudJhudSync"),
   "hud/JHUD/JSS": needs("hudJhudJss"),

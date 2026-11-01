@@ -77,6 +77,21 @@ export function practiceFlipLine(running: boolean, restartKey: string | null): s
   return running ? `This run is practice now. ${restartHow(restartKey)} to restart for a real run.` : `Practice until you restart. ${restartHow(restartKey)} for a real run.`;
 }
 
+const clearHow = (key: string | null) => (key ? `Press ${key}` : "Type !clearstart");
+
+/**
+ * The second line under the crosshair for a whole attempt on a practice spawn (start-point.ts). `clearKey`: the clear
+ * start point bind's label, if it has one.
+ */
+export function practiceSpawnLine(clearKey: string | null): string {
+  return `This start point doesn't count. ${clearHow(clearKey)} to go back to the real one.`;
+}
+
+/** The toast when a restart lands on a practice spawn. */
+export function practiceSpawnToast(clearKey: string | null): string {
+  return `Practice run: this start point doesn't count. ${clearHow(clearKey)} to go back to the real one.`;
+}
+
 /** The line when a practice attempt (a tool, not practice mode) comes back to a start zone. */
 export function practiceStartLine(restartKey: string | null): string {
   return `Still practice. ${restartHow(restartKey)} to restart for a real run.`;

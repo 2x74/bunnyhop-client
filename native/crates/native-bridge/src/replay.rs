@@ -317,7 +317,7 @@ impl Decoded {
             return Err("replay checkpoint limit exceeded".into());
         }
         settings.checked()?;
-        if !styles::IDS.contains(&style.as_str()) || ![1, 2].contains(&rules) {
+        if !styles::IDS.contains(&style.as_str()) || ![1, 2, 3].contains(&rules) {
             return Err("unsupported replay style/timer rules".into());
         }
         // Every command needs at least one byte per varint column (v10 has four and
@@ -503,6 +503,9 @@ impl Decoded {
         }
         if flags & crate::v29::FLAG_NULL_BINDS != 0 {
             metadata["nullBinds"] = true.into();
+        }
+        if flags & crate::v29::FLAG_W_RELEASE != 0 {
+            metadata["wRelease"] = true.into();
         }
         let info = CString::new(metadata.to_string()).map_err(|e| e.to_string())?;
         let options = BhRunOptions {

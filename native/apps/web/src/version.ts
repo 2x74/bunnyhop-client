@@ -45,7 +45,7 @@
    two words, and VERSION stays below 0.1.0 while STAGE is alpha.
    ============================================================ */
 
-export const VERSION = "0.0.33";
+export const VERSION = "0.0.34";
 
 /** Release stage, printed after the number ("v0.0.4 alpha"). */
 export const STAGE = "alpha";
@@ -67,8 +67,8 @@ export interface ChangelogEntry {
 
 /** Notes for the next release, unpublished until promoted into CHANGELOG. */
 export const UPCOMING: ChangelogEntry = {
-  version: "0.0.34",
-  date: "2026-10-30",
+  version: "0.0.35",
+  date: "2026-11-01",
   kind: "minor",
   title: "Next update",
   notes: [],
@@ -76,6 +76,33 @@ export const UPCOMING: ChangelogEntry = {
 
 /** Newest first. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.0.34",
+    date: "2026-11-01",
+    kind: "minor",
+    title: "Bar strafe trainer, map fixes and a tidier menu",
+    notes: [
+      "New strafe trainer look: Bar, in Settings → HUD → Strafe trainer. It fills from the left when you turn right and from the right when you turn left, and the middle tick is 100%. Red means you lost speed, white means no change, and orange through green to blue goes from your worst gain to your best. Thanks to throwtop for the idea.",
+      "A start point set just over the start zone's edge now moves inside the zone, so runs from it count. A start point further out warns you for the whole run and can be cleared from the pause menu or with !clearstart.",
+      "Finished runs that can't upload right away, like on a busy shared network, now stay saved and upload by themselves.",
+      "bhop_handsuplol and bhop_nuclear: a booster at the edge of the start zone keeps its speed when you walk out.",
+      "bhop_trampislow: the short floor booster launches you as hard as it does on CS:S servers.",
+      "bhop_crutle5_css: the teleporter at the end of the first level works now.",
+      "bhop_benchmark: one block no longer sends you 20 minutes back, and the end zone is confirmed.",
+      "bhop_overground_fix: long runs verify again.",
+      "kz_ maps: anti-hop blocks and other timed triggers now match CS:S timer servers. You can jump 0.05 s sooner, and blocks that teleport you if you stay too long fire 0.05 s sooner.",
+      "Your existing runs don't change. The native client gets these map changes and the Bar look in its next update.",
+      "Hovering a leaderboard run now shows how many points it's worth, and the gauntlets list shows who holds each record.",
+      "Motion blur exports in Enhanced and Cinematic now blur posters, glass and other see-through surfaces along with the rest of the map.",
+      "Style tabs on leaderboards and Ranks fit in one even row, and the Style & bonus tab fits all nine styles and the track picker on smaller screens.",
+      "Menu titles and footer links stay in the same place across the menus, faint text is easier to read, and the map line and PB are easier to read over bright skies.",
+      "Player glow has its own tab in Loadout. The HUD layout editor only shows switched-off elements when you pick them, and the friends and music controls no longer cover HUD elements there.",
+      "Fixed a stray second scrollbar on profiles, and times and places line up across a profile's lists. The Gauntlets page scrolls its own list.",
+      "Notices in the replay viewer no longer cover its buttons, the friends panel works properly with the keyboard, and in narrow windows the pause menu no longer runs under the friends and music controls.",
+      "The top-ranked player no longer shows as \"top 0%\".",
+      "Players who link Discord before joining the server now get their roles when they join.",
+    ],
+  },
   {
     version: "0.0.33",
     date: "2026-10-30",

@@ -12,7 +12,9 @@ constexpr SemanticColor semantic_rgb(uint32_t rgb, float alpha = 1) {
 
 struct SemanticPalette {
     SemanticColor gain, loss, sync;
-    std::array<SemanticColor, 3> trainer;
+    // On pace, near and off zones. In the Bar look: better gain, positive gain and loss, then the last is the best
+    // gain.
+    std::array<SemanticColor, 4> trainer;
     std::array<SemanticColor, 5> zones;
     // Native overlay order: clip, other, push, wall, teleport, gravity.
     std::array<SemanticColor, 6> triggers;
@@ -23,7 +25,7 @@ inline SemanticPalette semantic_palette(std::string_view mode) {
             semantic_rgb(0x4dff88),
             semantic_rgb(0xff5d5d),
             semantic_rgb(0xffd24d),
-            {semantic_rgb(0x4fd08a), semantic_rgb(0xf29a3a), semantic_rgb(0xe0473f)},
+            {semantic_rgb(0x4fd08a), semantic_rgb(0xf29a3a), semantic_rgb(0xe0473f), semantic_rgb(0x57c8ff)},
             {semantic_rgb(0x33dd66),
              semantic_rgb(0xee3344),
              semantic_rgb(0x33bbdd),
@@ -40,7 +42,7 @@ inline SemanticPalette semantic_palette(std::string_view mode) {
         p.gain = semantic_rgb(0x56b4e9);
         p.loss = semantic_rgb(0xd55e00);
         p.sync = semantic_rgb(0xf0e442);
-        p.trainer = {p.gain, p.sync, p.loss};
+        p.trainer = {p.gain, p.sync, p.loss, semantic_rgb(0x1f8fe0)};
         p.zones = {
                 semantic_rgb(0x7fb8ff),
                 semantic_rgb(0xee3344),
@@ -58,6 +60,7 @@ inline SemanticPalette semantic_palette(std::string_view mode) {
         };
     } else if (mode == "blueYellow") {
         p.trainer[1] = semantic_rgb(0xc879ff);
+        p.trainer[3] = semantic_rgb(0xff7eb6);
         p.zones[2] = semantic_rgb(0x1f5fff);
         p.zones[4] = semantic_rgb(0xffffff);
         p.triggers[1] = semantic_rgb(0xe69f00);

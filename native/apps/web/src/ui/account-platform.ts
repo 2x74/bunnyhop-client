@@ -33,7 +33,7 @@ function syncToggle(): HTMLElement {
       "label.acct-toggle",
       null,
       h("input.switch", { type: "checkbox", checked: settingsSyncOn(), onchange: (e: Event) => setSettingsSync((e.currentTarget as HTMLInputElement).checked) }),
-      h("span.acct-minfo", null, h("b", null, "Keep settings with my account"), h("small.dim", null, "Sensitivity, binds, HUD and graphics follow you to other browsers where this is on (the newest copy wins).")),
+      h("span.acct-minfo.wrap", null, h("b", null, "Keep settings with my account"), h("small.dim", null, "Sensitivity, binds, HUD and graphics follow you to other browsers where this is on (the newest copy wins).")),
     ),
   );
 }

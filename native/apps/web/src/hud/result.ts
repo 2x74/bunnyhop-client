@@ -229,10 +229,13 @@ export class ResultCard {
         this.unprovisional();
         break;
       case "unsent":
-        // Kept on this device (uploads.ts) and sent once more: after a moment for a lost connection, on the next visit
-        // otherwise (the size limit may have been raised by then).
+        // Kept on this device and sent again (uploads.ts): after a moment for a lost connection, once the server can take
+        // it for a limit, on the next visit otherwise (the size limit may have been raised by then).
         if (!this.sub.classList.contains("bad")) sfx("ui_error");
-        text = s.failure === "network" ? "Couldn't upload. Trying again soon." : "Couldn't upload. It goes up next time you play.";
+        text = s.failure === "network" ? "Couldn't upload. Trying again soon."
+          : s.failure === "guest_limit" ? "Saved on this device. Your network has too many new players right now, so it uploads once that clears. Signing in avoids this."
+          : s.failure === "rate_limited" ? "Saved on this device. It uploads by itself in a few minutes."
+          : "Couldn't upload. It goes up next time you play.";
         cls = "bad";
         this.unprovisional();
         break;

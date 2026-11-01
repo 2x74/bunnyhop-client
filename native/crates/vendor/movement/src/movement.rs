@@ -84,6 +84,7 @@ pub(super) fn step(
         point_queries: Vec::new(),
         mover_result,
         air_move_velocity: None,
+        air_speed_gain: None,
         move_collided: false,
         prevented_collision: None,
         edge_landing_kind: None,
@@ -1143,6 +1144,7 @@ fn full_walk(
             policy,
         );
     } else {
+        let before_air = result.state.velocity;
         let applied = air_accelerate(
             &mut result.state.velocity,
             wish.direction,
@@ -1152,6 +1154,20 @@ fn full_walk(
             tick,
             movement_surface_friction,
         );
+        // bunnyhop patch: observe the actual f32 velocity update, before collisions/base velocity/trigger effects. With
+        // cap C and acceleration budget A the optimum projection is C - min(A,C), giving d(v²)=a(2C-a).
+        // Use f64 lengths so f32 speed subtraction does not manufacture a loss on a no-op tick.
+        let speed = f64::from(before_air[0]).hypot(f64::from(before_air[1]));
+        let cap = wish.speed.min(policy.air_speed_cap);
+        let budget = configuration.air_acceleration * tick * wish.speed * movement_surface_friction;
+        let a = f64::from(budget.min(cap));
+        let square_gain = a * (2.0 * f64::from(cap) - a);
+        if speed >= 100.0 && square_gain > 0.0 {
+            let after = result.state.velocity;
+            let delta = f64::from(after[0]).hypot(f64::from(after[1])) - speed;
+            let best = square_gain / ((speed * speed + square_gain).sqrt() + speed);
+            result.air_speed_gain = Some([delta as f32, best as f32]);
+        }
         result.wish_velocity = add(result.wish_velocity, applied);
     }
 

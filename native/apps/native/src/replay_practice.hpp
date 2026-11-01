@@ -84,7 +84,7 @@ replay_practice_problem(const nlohmann::json &info, const std::string &map, cons
             {"gravity", settings.gravity},
             {"maxSpeed", settings.max_speed},
     };
-    bool same = info.value("timerRules", 1u) == 2 && saved.at("physics") == settings.physics
+    bool same = info.value("timerRules", 1u) >= 2 && saved.at("physics") == settings.physics
                 && saved.at("autohop") == bool(settings.autohop)
                 && saved.value("stamina", false) == bool(settings.stamina);
     for (const auto &[name, value] : numbers) {

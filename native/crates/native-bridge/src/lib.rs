@@ -177,6 +177,14 @@ pub struct BhJumpObservation {
     pub valid: u32,
     pub epoch: u32,
 }
+/// Display-only AirAccelerate observation of the last tick: speed gained and the best possible gain. NaN when the
+/// core could not judge it. Never fed back into movement, replays or the timer.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct BhAirSpeedGain {
+    pub delta: f32,
+    pub best: f32,
+}
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BhSnapshot {
@@ -964,6 +972,7 @@ pub unsafe extern "C" fn bh_set_velocity(ctx: *mut BhContext, x: f32, y: f32, z:
             let m = c.map()?;
             m.finish_record(false, "external_velocity_changed")?;
             m.game.state.velocity = [x, y, z];
+            m.game.air_speed_gain = None;
             Ok(())
         })
     }
@@ -1145,7 +1154,7 @@ pub unsafe extern "C" fn bh_run_configure(
     unsafe {
         call(ctx, |c| {
             let options = input(options)?;
-            if ![1, 2].contains(&options.rules)
+            if ![1, 2, 3].contains(&options.rules)
                 || options.strafe_keys > 2
                 || !options.prespeed_cap.is_finite()
                 || options.prespeed_cap < 0.0
@@ -1218,6 +1227,15 @@ pub unsafe extern "C" fn bh_run_state(ctx: *mut BhContext, out: *mut BhRunState)
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_jump_observation(ctx: *mut BhContext, out: *mut BhJumpObservation) -> c_int {
     unsafe { call(ctx, |c| output(out, c.map()?.jump_observation)) }
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_air_speed_gain(ctx: *mut BhContext, out: *mut BhAirSpeedGain) -> c_int {
+    unsafe {
+        call(ctx, |c| {
+            let [delta, best] = c.map()?.game.air_speed_gain.unwrap_or([f32::NAN; 2]);
+            output(out, BhAirSpeedGain { delta, best })
+        })
+    }
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_snapshot(ctx: *mut BhContext, out: *mut BhSnapshot) -> c_int {
@@ -1589,6 +1607,7 @@ impl Map {
     fn invalidate_jump_observation(&mut self) {
         self.jump_observation.valid = 0;
         self.jump_observation.epoch = self.jump_observation.epoch.wrapping_add(1);
+        self.game.air_speed_gain = None;
     }
     fn advance(&mut self, cmd: BhCmd, look: Option<BhLookSampleV2>) -> Result<BhState, String> {
         self.advance_canonical(cmd, look, true)
@@ -1641,6 +1660,9 @@ impl Map {
             if let Some(v) = t.update_observed(cmd, BhState::from(&self.game), Some(&self.game)) {
                 clamped = true;
                 self.game.state.velocity = v;
+                // The clamp replaced the speed this tick measured. A clamp before the step needs no fence: the step
+                // measures from the clamped speed.
+                self.game.air_speed_gain = None;
             }
         }
         self.jump_observation.post = BhState::from(&self.game);

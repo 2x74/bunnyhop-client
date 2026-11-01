@@ -901,6 +901,7 @@ const runService = new NativeRunService({
     gauntlet: gauntlet.tag(identity, generation, finishSummary?.seconds ?? null),
   }),
   holdGauntlet: (attempt, generation) => gauntlet.holds(attempt, generation),
+  savedRunUploaded: (map) => send({ type: "hudToast", text: `Your saved run on ${map} was uploaded.`, ms: 5000 }),
   version: () => api.version(),
   origin: () => location.origin,
   send: (message) => {

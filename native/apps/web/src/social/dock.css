@@ -35,6 +35,9 @@
   animation: fd-in 0.18s var(--ease);
 }
 .fd-panel[hidden] { display: none; }
+.fd-panel:focus { outline: none; }
+/* Narrow windows stack the pause menu and it scrolls: it stops above the dock's strip instead of running under it. */
+@media (max-width: 52rem) { #menu.screen-pause { bottom: 3.6rem; } }
 @keyframes fd-in { from { opacity: 0; transform: translateY(6px); } }
 @media (prefers-reduced-motion: reduce) { .fd-panel { animation: none; } }
 

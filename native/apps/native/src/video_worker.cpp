@@ -374,7 +374,14 @@ void run_job(const Spec &spec, const Job &job, Gl &gl, const VideoAvailability &
             encoder,
             options,
             total,
-            {job.map, loaded.session.style, loaded.outfit, loaded.loadout, spec.settings, spec.assets, spec.cache},
+            {job.map,
+             loaded.session.style,
+             loaded.outfit,
+             loaded.loadout,
+             spec.settings,
+             spec.assets,
+             spec.cache,
+             loaded.session.settings},
             camera
     );
     emit({{"event", "encoder"},

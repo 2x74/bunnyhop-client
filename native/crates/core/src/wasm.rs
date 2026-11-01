@@ -397,7 +397,8 @@ pub extern "C" fn step(forward: f32, side: f32, yaw: f32, pitch: f32, buttons: u
 ///  teleport it caused; NaN after a reset / respawn: `Game::touch_origin`), weapons held, active weapon
 ///  (WEAPON_* bits, physics v4: `Game::weapons`), clean movement tick for local jump stats,
 ///  v20 categorized ground jump: pre-jump position x/y/z, velocity x/y/z, crouched (NaN position if absent),
-///  v22 edge landing: the next command decides whether this landing stands (`State::edge_landing`)]
+///  v22 edge landing: the next command decides whether this landing stands (`State::edge_landing`),
+///  clean AirAccelerate speed change and best possible change (NaN when unjudgeable)]
 /// (movement mode: playsrc `Mode` as a number; 6 = ladder. Style key filters exempt ladders, like bhoptimer.)
 #[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
 pub extern "C" fn player_state() -> usize {
@@ -428,6 +429,7 @@ pub extern "C" fn player_state() -> usize {
                 c.scratch_f32.extend_from_slice(&[f32::NAN; 7]);
             }
             c.scratch_f32.push(s.edge_landing.is_some() as u32 as f32);
+            c.scratch_f32.extend_from_slice(&g.air_speed_gain.unwrap_or([f32::NAN; 2]));
         }
         c.scratch_f32.len()
     })
@@ -479,6 +481,7 @@ pub extern "C" fn set_velocity(x: f32, y: f32, z: f32) {
     with(|c| {
         if let Some(g) = c.game.as_mut() {
             g.state.velocity = [x, y, z];
+            g.air_speed_gain = None;
         }
     })
 }

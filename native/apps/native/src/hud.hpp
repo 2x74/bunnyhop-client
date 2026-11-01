@@ -535,6 +535,7 @@ private:
     native::HudLabel<512> ssj_chat_line_;
     bool ssj_pending_ = false;
     std::optional<native::SsjReport> ssj_last_;
+    native::TrainerNumberText trainer_number_;
 
 public:
     std::string_view ssj_line() const { return ssj_line_.view(); }
@@ -1455,7 +1456,8 @@ private:
     std::array<float, 2> element_size(std::string_view id) const {
         id = native::canonical_hud_id(id);
         if (id == "keys") return {keys_row_width(), keys_row_height};
-        if (id == "strafeTrainer") return {native::TrainerLayout::width, native::trainer_height(prefs_.trainer)};
+        if (id == "strafeTrainer")
+            return {native::trainer_width(prefs_.trainer), native::trainer_height(prefs_.trainer)};
         return native::hud_element_size(id);
     }
 
@@ -1703,7 +1705,7 @@ private:
         const float height = native::trainer_height(prefs_.trainer);
         const float bottom = frame_height_ - trainer_bottom_from_bottom;
         const auto [x, y] = place("strafeTrainer", frame_width_ / 2, bottom - height);
-        native::draw_trainer(*this, x, y, reading, prefs_.trainer, hints, palette_);
+        native::draw_trainer(*this, x, y, reading, prefs_.trainer, hints, palette_, trainer_number_);
     }
 
     void draw_splits() {

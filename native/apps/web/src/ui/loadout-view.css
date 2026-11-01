@@ -167,18 +167,13 @@ body.potato .lo-rim { display: none; }
 .lo-modelseg button:disabled { opacity: .45; cursor: default; }
 .lo-model-note { font-size: 11px; opacity: .6; }
 
-/* Personal supporter glow shares Support's editor; the disclosure keeps the stage usable on small screens. */
-.lo-glow-settings { flex: 0 0 auto; background: var(--raise); border-radius: var(--radius); }
-.lo-glow-settings > summary { cursor: pointer; padding: 0.65rem 0.9rem; font-weight: 600; }
-.lo-glow-settings > summary small { margin-left: 0.6rem; font-weight: 400; }
-/* Open: one row (wrapping when narrow): show, colour, intensity, aura. The summary is the heading. */
-.lo-glow-settings > .sp-glow { padding: 0.1rem 0.9rem 0.8rem; display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 2rem; }
-.lo-glow-settings .sp-glow-head .sp-h { display: none; }
-.lo-glow-settings .sp-glow-head .pf-status:empty { display: none; }
-.lo-glow-settings .sp-glow-strength { flex: 0 1 18rem; }
-.lo-glow-settings .sp-glow > small { flex-basis: 100%; }
-.lo-glow-settings .sp-glow { border: 0; }
-.lo:has(.lo-glow-settings[open]) .lo-body { min-height: 12rem; }
+/* The Player glow tab (loadout-view.ts): Support's editor where the category's grid goes. */
+.lo-grid[hidden], .lo-glow-pane[hidden] { display: none; }
+.lo.glow-tab .lo-model-row { display: none; }
+.lo-glow-pane { min-width: 0; min-height: 0; overflow: hidden auto; padding: var(--sp-2) 0.4rem var(--sp-2) 0; }
+.lo-glow-pane .sp-glow-head .pf-status:empty { display: none; }
+.lo-glow-pane .sp-glow-head .sp-h { display: none; }
+.lo-glow-pane .sp-glow-on { flex: 1; }
 
 /* A supporter item tried on: the way to get it (ui/loadout-view.ts). The caption ignores the pointer; the button doesn't. */
 .lo-cap .lo-cap-cta { align-self: flex-start; margin-top: 0.35rem; pointer-events: auto; }

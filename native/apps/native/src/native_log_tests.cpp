@@ -114,6 +114,7 @@ void check_session_file() {
         native::log::open(folder.path, {"Bunnyhop Native 0.6.4", "Data folder: " + folder.path.string()});
         std::cerr << "token=secret-value and " << "more" << '\n';
         std::cerr << "repeated\nrepeated\nrepeated\n";
+        std::cout << "standard output " << "line" << '\n';
         native::log::write("direct line");
         check(native::log::wait_until_written(written_limit), "the writer didn't catch up");
         const auto while_running = read_text(folder.log());
@@ -125,6 +126,7 @@ void check_session_file() {
     check(contains(text, "before open in two parts"), "a line from before open() was lost");
     check(!contains(text, "secret-value"), "a token reached the file through std::cerr");
     check(contains(text, "more"), "the rest of a scrubbed line was lost");
+    check(contains(text, "standard output line"), "std::cout didn't reach the file");
     check(contains(text, "(the line above came 2 more times)"), "repeats weren't folded");
     check(contains(text, "Session ended"), "a clean exit wasn't noted");
     // YYYY-MM-DDTHH:MM:SS.mmmZ at the start of every line.

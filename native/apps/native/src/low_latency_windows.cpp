@@ -1,4 +1,5 @@
 #include "low_latency.hpp"
+#include "window_frame.hpp"
 #include "anti_lag_windows.hpp"
 #include <windows.h>
 #include <d3d11.h>
@@ -492,6 +493,7 @@ bool LowLatencyPresenter::configure(SDL_Window *window, LowLatencyMode mode, int
     if (!impl_) {
         auto created = std::make_unique<Impl>();
         if (!created->create(window, error_)) return false;
+        sync_window_frame(window);
         impl_ = std::move(created);
     }
     const unsigned interval_us = fps_limit > 0 ? microseconds_per_second / unsigned(fps_limit) : 0;

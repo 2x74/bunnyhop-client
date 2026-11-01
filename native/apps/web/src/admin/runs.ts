@@ -34,7 +34,7 @@ interface RunRow {
 }
 
 interface RunDiagnostics {
-  selfCheck: "ok" | "mismatch" | "error";
+  selfCheck: "ok" | "mismatch" | "error" | "na";
   firstMismatchTick?: number;
   problems?: string[];
   checkMs?: number;
@@ -63,7 +63,7 @@ function browserName(ua = ""): string {
 function clientCell(d: RunDiagnostics | null | undefined, client: RunClient | undefined): HTMLElement {
   // The client the run was played on (native / desktop / browser) shows even when the run has no diagnostics (a native run).
   if (!d) return h("td", { class: "faint" }, clientTag(client) ?? "—");
-  const verdict = d.selfCheck === "mismatch" ? badge(d.firstMismatchTick !== undefined ? `desync at ${d.firstMismatchTick}` : "desync", "bad") : d.selfCheck === "error" ? badge("check failed", "warn") : badge("ok", "ok");
+  const verdict = d.selfCheck === "mismatch" ? badge(d.firstMismatchTick !== undefined ? `desync at ${d.firstMismatchTick}` : "desync", "bad") : d.selfCheck === "error" ? badge("check failed", "warn") : d.selfCheck === "na" ? badge("not checked") : badge("ok", "ok");
   const i = d.input ?? {};
   const v = d.visibility;
   const rows: [string, string | null][] = [
@@ -230,7 +230,7 @@ export const runsView: View = async (root, params) => {
     user: h("input", { type: "search", placeholder: "player id", value: params.get("user") ?? "" }),
     reason: h("input", { type: "search", placeholder: "words", value: params.get("reason") ?? "" }),
     id: h("input", { type: "search", placeholder: "run id", value: params.get("id") ?? "" }),
-    selfCheck: h("select", null, [["", "Any"], ["mismatch", "Desync"], ["ok", "Self-check ok"], ["error", "Self-check failed"], ["none", "No diagnostics"]].map(([v, l]) => h("option", { value: v, selected: (params.get("selfCheck") ?? "") === v }, l))),
+    selfCheck: h("select", null, [["", "Any"], ["mismatch", "Desync"], ["ok", "Self-check ok"], ["error", "Self-check failed"], ["na", "Not checked (native)"], ["none", "No diagnostics"]].map(([v, l]) => h("option", { value: v, selected: (params.get("selfCheck") ?? "") === v }, l))),
   };
   const manage = may("runs.manage");
   const selected = new Set<string>();
@@ -392,6 +392,17 @@ interface LegitJumpRow {
   user: { id: string; name: string; shadow_at: number | null; banned: number } | null;
 }
 
+type Who = { id: string; name: string; shadow_at: number | null; banned: number };
+interface PlayerWindows {
+  days: number;
+  players: number;
+  rows: number;
+  computedAt?: number;
+  keyWindows: { user_id: string; keyWindows: { text: string }; user: Who | null }[];
+  ownHistory: { user_id: string; ownHistory: { text: string; listed: boolean }; user: Who | null }[];
+  flatCurve: { user_id: string; flatCurve: { text: string }; user: Who | null }[];
+}
+
 const who = (id: string, u: { name: string; shadow_at: number | null; banned: number } | null) => h("td", null, playerLink(id, u?.name ?? id), u?.banned ? badge("banned", "bad") : null, u?.shadow_at ? badge("shadowed", "warn") : null);
 const signed = (v: number, d = 1) => `${v >= 0 ? "+" : ""}${v.toFixed(d)}`;
 const caseLink = (id: string) => h("a", { class: "btn small ghost", href: `#/suspicious?case=${encodeURIComponent(id)}` }, "Case");
@@ -445,6 +456,24 @@ export const signalsView: View = async (root) => {
             x.rows.map((r) => h("tr", null, h("td", { class: `num ${r.gainJump.listed ? "warn-text" : ""}` }, r.gainJump.score.toFixed(1)), who(r.user_id, r.user), h("td", { class: "num" }, `${r.gainJump.gainBefore.toFixed(3)} to ${r.gainJump.gainAfter.toFixed(3)}`), h("td", { class: "num" }, `${signed(r.gainJump.zBefore, 2)} to ${signed(r.gainJump.zAfter, 2)}`), h("td", { class: "num" }, `${r.gainJump.history} + ${r.gainJump.runs.length}`), h("td", { class: "acts" }, ...r.gainJump.runs.map((id) => h("a", { class: "btn small ghost", href: `#/suspicious?run=${encodeURIComponent(id)}` }, "Run")), caseLink(r.user_id)))),
             "Nobody has enough runs.",
           ),
+        );
+      },
+    ),
+    section(
+      "Key windows, own history, flat curve",
+      "Over the last 14 days, leaving out players already shadowed or banned. Key windows: BASH2's bars (lowest rolling 50-switch spread of key timing 0.4, 20 repeats in a row) over a player's runs. Own history: timed-input Normal runs against the player's own earlier timed-input runs on 3+ maps, with gain read per board. Flat curve: mouse speed piling up in one band, information only and never grounds for action: ordinary curves don't show, and it has never been tried with a real curve on real hardware.",
+      async (out, fresh) => {
+        const x = await api<PlayerWindows>("/admin/integrity/player-windows?days=14&limit=50");
+        computed(fresh, x.computedAt);
+        const lines = (rows: { user_id: string; user: Who | null; text: string; warn: boolean }[], none: string) => table(["Player", "", ""], rows.map((r) => h("tr", null, who(r.user_id, r.user), h("td", { class: `msg ${r.warn ? "warn-text" : ""}` }, r.text), h("td", null, caseLink(r.user_id)))), none);
+        fill(out,
+          h("p", { class: "faint" }, `${n(x.players)} players, ${n(x.rows)} runs analysed in ${x.days} days.`),
+          h("h3", null, "Key windows"),
+          lines(x.keyWindows.map((r) => ({ user_id: r.user_id, user: r.user, text: r.keyWindows.text, warn: true })), "Nobody at the bars."),
+          h("h3", null, "Own history"),
+          lines(x.ownHistory.map((r) => ({ user_id: r.user_id, user: r.user, text: r.ownHistory.text, warn: r.ownHistory.listed })), "Nobody has enough timed-input runs."),
+          h("h3", null, "Flat curve signal (information only)"),
+          lines(x.flatCurve.map((r) => ({ user_id: r.user_id, user: r.user, text: r.flatCurve.text, warn: false })), "No pool over its bar."),
         );
       },
     ),

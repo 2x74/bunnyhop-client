@@ -14,6 +14,7 @@ import { DEFAULT_BINDS, guardSideMouseButtons, isWeaponAction, mouseCode, type B
 import { cursorFree, endFreeCursorAsPause, setCursorFree } from "./free-cursor";
 import { MouseFilter, type MotionSample } from "./mouse-filter";
 import { IN_GIVE_SHIFT, IN_WEAPON_COMMAND_MASK } from "./weapon-rules";
+import { noteInputEvent } from "./input-trust";
 import { countedYaw, norm360, YAW_SET_RAW, YAW_SET_SENSITIVITY, YAW_SET_SPAWN, YAW_SET_TURN, YAW_WITH_TURN, type LookSample } from "./replay";
 import { DEFAULT_TURN_SPEED, IN_LEFT, IN_RIGHT, IN_TURN_FAST, turnDelta, type TurnSpeed } from "./turn-binds";
 import { resolveNullBinds } from "./null-binds";
@@ -387,9 +388,9 @@ export class Input {
     // 8000 a second) for a picture that is drawn once per frame anyway, except with the uncapped frame loop
     // (rawUpdates), whose frames between vsyncs need the motion pointermove only brings at the next vsync. Then raw
     // updates come first and win the latch (Firefox 140-147 send them with zero motion: those never latch).
-    document.addEventListener("pointermove", (e) => e.pointerType === "mouse" && this.motion(e, 1), { passive: true });
-    document.addEventListener("mousemove", (e) => this.motion(e, 2), { passive: true });
-    if (HAS_RAW_UPDATE) document.addEventListener("pointerrawupdate" as "pointermove", (e) => (this.sampler?.source === "pointerrawupdate" || this.useRaw) && e.pointerType === "mouse" && this.motion(e, 3), { passive: true });
+    document.addEventListener("pointermove", (e) => (noteInputEvent(e), e.pointerType === "mouse" && this.motion(e, 1)), { passive: true });
+    document.addEventListener("mousemove", (e) => (noteInputEvent(e), this.motion(e, 2)), { passive: true });
+    if (HAS_RAW_UPDATE) document.addEventListener("pointerrawupdate" as "pointermove", (e) => (noteInputEvent(e), (this.sampler?.source === "pointerrawupdate" || this.useRaw) && e.pointerType === "mouse" && this.motion(e, 3)), { passive: true });
     // Fullscreen in / out or a resize while locked can re-centre the hidden cursor (OS-accelerated locks): a jump. So
     // can the window coming back to the front with the lock kept. The view's size sizes the re-centre rule.
     const rearm = () => this.pointerLocked && this.filter.rearm(performance.now());
@@ -413,6 +414,7 @@ export class Input {
         // separate non-passive listener. Shift+wheel arrives as a horizontal scroll in Chromium / Firefox on Windows,
         // Linux and macOS (deltaY 0, deltaX set), which used to drop the jump for players crouching on Shift; a
         // horizontal delta only counts with Shift held, so trackpad / tilt-wheel sideways scrolls stay ignored.
+        noteInputEvent(e);
         if (!this.pointerLocked) return;
         const delta = e.deltaY !== 0 ? e.deltaY : e.shiftKey ? e.deltaX : 0;
         if (delta === 0) return;
@@ -428,14 +430,16 @@ export class Input {
     );
     guardSideMouseButtons(document, () => this.pointerLocked);
     document.addEventListener("mousedown", (e) => {
+      noteInputEvent(e);
       if (this.pointerLocked) this.press(mouseCode(e.button), false, e);
     });
-    document.addEventListener("mouseup", (e) => this.releaseCode(mouseCode(e.button), e));
+    document.addEventListener("mouseup", (e) => (noteInputEvent(e), this.releaseCode(mouseCode(e.button), e)));
     document.addEventListener("keydown", (e) => {
+      noteInputEvent(e);
       // Typing into a text field (the chat, with the game still playing) never moves the player or fires binds.
       if (this.locked && !isTextField(e.target)) this.press(e.code, e.repeat, e);
     });
-    document.addEventListener("keyup", (e) => this.releaseCode(e.code, e));
+    document.addEventListener("keyup", (e) => (noteInputEvent(e), this.releaseCode(e.code, e)));
   }
 
   /** Which event carries motion during this lock (diagnostics). */

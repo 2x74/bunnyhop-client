@@ -7,7 +7,7 @@ foreach ($relative in @('.github/workflows/native-release.yml', 'native/apps/nat
     $match = [regex]::Match($yaml, '(?m)^          \$package = Get-ChildItem[^\r\n]*\r?\n(?:          [^\r\n]*\r?\n)+')
     if (!$match.Success) { throw "Release-check block absent in $relative" }
     $block = $match.Value -replace '(?m)^          ', ''
-    $block = $block -replace '(?m)^& \(Join-Path[^\r\n]*--help', '$global:startupCalled = $true; $global:LASTEXITCODE = $global:startupExit'
+    $block = $block -replace '(?m)^& \(Join-Path[^\r\n]*--help[^\r\n]*', '$global:startupCalled = $true; $global:LASTEXITCODE = $global:startupExit'
     function Get-ChildItem { [PSCustomObject]@{ FullName = 'fixture-package' } }
     function bun { $global:LASTEXITCODE = $global:releaseExit }
     foreach ($case in @(@{release=42; startup=0; fail=$true; called=$false}, @{release=0; startup=19; fail=$true; called=$true}, @{release=0; startup=0; fail=$false; called=$true})) {

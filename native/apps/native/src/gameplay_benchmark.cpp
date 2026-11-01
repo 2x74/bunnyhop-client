@@ -381,7 +381,15 @@ private:
         hud_->configure_feedback(feedback_);
         if (const auto report = feedback_.ssj.tick(pre, command, info)) hud_->ssj_report(*report);
         native::feed_strafe_trainer(
-                feedback_, hud_->preferences(), snapshot_.player, command, settings_, "autohop", tick_seconds, false
+                feedback_,
+                hud_->preferences(),
+                snapshot_.player,
+                command,
+                settings_,
+                "autohop",
+                tick_seconds,
+                false,
+                native::air_speed_gain(core_.get())
         );
         BhJumpObservation jump{};
         const bool observed = bh_jump_observation(core_.get(), &jump);

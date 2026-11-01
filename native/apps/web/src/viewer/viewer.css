@@ -3,6 +3,9 @@
 body.viewer-open #hud, body.viewer-open #overlay { display: none !important; }
 /* Bottom-centre whispers (the music title) go above the controls instead of over them. */
 body.viewer-open #nt-whispers .nt-whisper:not(.at) { bottom: calc(var(--rv-panel-h, 0px) + 0.8rem); }
+/* Toasts too, or they sit on the replay's buttons; a whisper stays above a toast, as it does in game (notify.css). */
+body.viewer-open #nt-toasts { bottom: calc(var(--rv-panel-h, 0px) + 0.8rem); }
+body.viewer-open #nt-toasts:has(> .nt-toast) ~ #nt-whispers .nt-whisper:not(.at) { bottom: calc(var(--rv-panel-h, 0px) + 0.8rem + 3.3rem); }
 
 #rv { position: fixed; inset: 0; z-index: 40; pointer-events: none; font-family: var(--font); color: var(--text); }
 #rv > * { pointer-events: auto; }
@@ -22,7 +25,7 @@ body.viewer-open #nt-whispers .nt-whisper:not(.at) { bottom: calc(var(--rv-panel
 #rv .rv-title { display: flex; align-items: baseline; gap: 0.7rem; font-size: 1.35rem; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); }
 #rv .rv-title b { font-weight: 800; letter-spacing: -0.01em; }
 #rv .rv-time-big { font-variant-numeric: tabular-nums; font-weight: 800; font-stretch: 90%; color: #fff; }
-#rv .rv-sub { font-size: 0.8rem; color: var(--dim); }
+#rv .rv-sub { font-size: 0.8rem; color: var(--cream); text-shadow: 0 0 3px rgba(0, 0, 0, 0.85), 0 1px 2px rgba(0, 0, 0, 0.85); }
 #rv .rv-notice { margin-top: 0.3rem; max-width: 46rem; font-size: 0.76rem; color: var(--amber-hi); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
 #rv .rv-top-actions { display: flex; gap: 0.4rem; }
 
@@ -115,8 +118,12 @@ body.viewer-open #nt-whispers .nt-whisper:not(.at) { bottom: calc(var(--rv-panel
 #rv .rv-ex-body input[type="number"] { width: 8rem; margin-left: auto; }
 #rv .rv-ex-body input[type="text"] { width: 100%; }
 #rv .rv-ex-preview { align-self: center; max-width: 100%; object-fit: contain; }
-#rv .rv-ex-actions { position: sticky; bottom: 0; background: var(--panel-solid); padding-top: .4rem; }
+/* Pinned to the card's bottom edge, through its padding (the rows scrolling under it showed below it otherwise). */
+#rv .rv-ex-actions { position: sticky; bottom: -1.1rem; margin-bottom: -1.1rem; padding: .6rem 0 1.1rem; background: var(--panel-solid); }
 #rv .rv-ex-body .rv-field { grid-template-columns: 6.5rem minmax(0, 1fr); }
+/* A label stays on its row's first line when the choices wrap (Music has three lines). */
+#rv .rv-ex-body .rv-field { align-items: start; }
+#rv .rv-ex-body .rv-field > label { line-height: 2.2rem; }
 #rv .rv-ex-body .rv-seg { flex-wrap: wrap; min-width: 0; max-width: 100%; }
 #rv .rv-ex-body .rv-seg-btn { height: auto; min-height: 2rem; padding-block: .4rem; overflow-wrap: anywhere; }
 #rv .rv-ex-inputs { display: flex; flex-direction: column; gap: .35rem; min-width: 0; }

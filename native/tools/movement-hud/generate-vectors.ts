@@ -1,9 +1,11 @@
 // Runs the website's own trackers and views from a git revision, without loading the game or network code.
-// Usage: bun tools/movement-hud/generate-vectors.ts --web /path/to/bunnyhop [--ref origin/main]
+// Usage: bun tools/movement-hud/generate-vectors.ts --web /path/to/bunnyhop [--ref origin/main] [--wasm core.wasm]
+// --web . --vendored reads the vendored website. The Bar's real ticks run the pinned WASM (apps/native/ensure-wasm.ts).
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { parseArgs } from "node:util";
+import { barVectors, type BarCore, type BarWeb } from "./bar-vectors";
 
 const { values } = parseArgs({
   args: Bun.argv.slice(2),
@@ -12,6 +14,7 @@ const { values } = parseArgs({
     web: { type: "string" },
     ref: { type: "string", default: "origin/main" },
     out: { type: "string" },
+    wasm: { type: "string" },
   },
 });
 if (!values.web) throw new Error("Pass --web /path/to/bunnyhop");
@@ -40,6 +43,7 @@ function exportedFunction(text: string, name: string): string {
 for (const path of [
   "ssj/stats.ts",
   "ssj/view.ts",
+  "ssj/jhud.ts",
   "hud/jumps.ts",
   "hud/strafe-trainer.ts",
   "hud/strafe-trainer-view.ts",
@@ -430,6 +434,20 @@ const perfCases = ["autohop", "scroll", "legit"].flatMap((style) =>
     ),
   ),
 );
+const wasmPin = JSON.parse(readFileSync(resolve(import.meta.dir, "../../upstream-wasm.json"), "utf8")) as {
+  sha256: string;
+};
+const wasmPath = values.wasm ?? resolve(import.meta.dir, `../../target/upstream-wasm/${wasmPin.sha256}.wasm`);
+const wasmBytes = readFileSync(wasmPath);
+const webCore = await import(resolve(web, "apps/web/src/core.ts"));
+const barCore: BarCore = {
+  create: () => webCore.Core.create(wasmBytes),
+  setPosition: webCore.setPosition,
+  defaults: webCore.DEFAULT_SETTINGS,
+  jumped: 2,
+  interrupted: 1 | 8,
+};
+const barWeb = { ...trainer, StrafeTrainerView } as unknown as BarWeb;
 const reports: Report[] = [0, -0.01, 59.99, 60, 70, 79.99, 80, 89.99, 90, 99.96, 100, -12.5].map((gain) => ({
   jump: 6,
   speed: 1013,
@@ -450,6 +468,8 @@ writeFileSync(
     JSON.stringify({
       generator: "native/tools/movement-hud/generate-vectors.ts",
       web: { commit, hashes },
+      core: { sha256: createHash("sha256").update(wasmBytes).digest("hex") },
+      bar: await barVectors(barWeb, barCore),
       scenarios: ["autohop", "scroll", "legit", "hsw", "wonly"].flatMap((style) =>
         ["sixth", "every", "everySixth"].map((mode) => scenario(style, mode)),
       ),

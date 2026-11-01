@@ -207,6 +207,9 @@ export class Hud {
   /** "Practice" under the crosshair while this attempt won't count (layout element "practice"; setPractice). */
   private practiceText = text();
   private practiceLabel: string | null = null;
+  /** A second line under "Practice" (a run someone likely thinks counts: session.ts onPracticeSpawn). */
+  private practiceWarnText = text();
+  private practiceWarn: string | null = null;
   /** This attempt is practice: the timer (and a practice finish) is yellow. */
   private practiceOn = false;
   /** The start zone's green line under the timer; it wipes out as the run starts (ignite). */
@@ -356,7 +359,7 @@ export class Hud {
       ammo: this.ammoEl,
       strafeTrainer: this.trainerView.el,
       spectators: this.specEl,
-      practice: h("div.hud-practice", null, this.practiceText),
+      practice: h("div.hud-practice", null, this.practiceText, h("span.hud-practice-warn", null, this.practiceWarnText)),
     };
     const boxes: HTMLElement[] = [];
     for (const { id, label } of HUD_ELEMENTS) {
@@ -446,7 +449,7 @@ export class Hud {
     this.graph.visible = p.hud.layout.graph.on;
     this.trainerView.configure(p.hud.strafeTrainer);
     this.trainer.smoothing = p.hud.strafeTrainer.smoothing;
-    this.trainer.zone = p.hud.strafeTrainer.zone;
+    this.trainer.zone = p.hud.strafeTrainer.style === "bar" ? 10 : p.hud.strafeTrainer.zone;
     this.keys.configure(p.hud.keys);
     this.ghostKeys.configure({ ...p.hud.keys, pressed: GHOST_COLOR });
     renderCrosshair(this.xhair, p.crosshair);
@@ -596,11 +599,13 @@ export class Hud {
 
   /**
    * This attempt is practice ("Practice", "Practice · noclip"; session.ts, every frame): the line under the crosshair
-   * and the yellow timer. Null: a run that counts. Cheap when unchanged.
+   * and the yellow timer. Null: a run that counts. Cheap when unchanged. `warn`: a second line, for a run the player may
+   * well think counts; shown even with the Practice element turned off.
    */
-  setPractice(label: string | null, segmented = false): void {
-    if (label === this.practiceLabel && segmented === this.segmentLine) return;
+  setPractice(label: string | null, segmented = false, warn: string | null = null): void {
+    if (label === this.practiceLabel && segmented === this.segmentLine && warn === this.practiceWarn) return;
     this.practiceLabel = label;
+    this.practiceWarn = warn;
     // A Segmented run's line ("Segmented · 2 loads") sits in the same place but the run counts: no yellow timer.
     this.segmentLine = segmented;
     this.practiceOn = !!label && !segmented;
@@ -613,7 +618,9 @@ export class Hud {
   private drawPractice(): void {
     const label = this.practiceLabel ?? (this.editing ? "Practice" : null);
     this.practiceText.data = label ?? "";
+    this.practiceWarnText.data = this.practiceWarn ?? "";
     this.els.practice.classList.toggle("empty", !label);
+    this.els.practice.classList.toggle("warn", !!this.practiceWarn);
   }
 
   /** Debug hook opted in outside dev (session.ts): a small corner badge, runs are practice only. */
@@ -661,13 +668,14 @@ export class Hud {
     const v = state.velocity;
     const speed = Math.sqrt(v[0] * v[0] + v[1] * v[1]);
     if (trainer && this.p.hud.layout.strafeTrainer.on) this.trainer.feed(cmd, {
+      airSpeedGain: state.airSpeedGain, airBestGain: state.airBestGain,
       speed, grounded: state.grounded, onLadder: state.onLadder, tick: state.tick,
       dt: trainer.settings.tickInterval, maxSpeed: trainer.settings.maxSpeed, airAccelerate: trainer.settings.airAccelerate,
       style: trainer.style, interrupted: !!trainer.noclip || !!(events & (EVENT_TELEPORTED | EVENT_RESPAWNED)), jumped: (events & EVENT_JUMPED) !== 0,
     });
     else this.trainer.reset();
     const jump = this.trainer.takeLanding();
-    if (jump !== null && this.p.hud.strafeTrainer.sound) sfx("count_tick", 1.6, TRAINER_PITCH[trainerZone(jump, this.p.hud.strafeTrainer.zone)]);
+    if (jump !== null && this.p.hud.strafeTrainer.sound) sfx("count_tick", 1.6, TRAINER_PITCH[trainerZone(jump, this.trainer.zone)]);
     this.keys.feed(cmd.buttons, cmd.yaw);
     this.graph.push(speed);
     this.jumps.feed(cmd.side, cmd.yaw, speed, state.grounded, (events & EVENT_JUMPED) !== 0);
@@ -782,7 +790,8 @@ export class Hud {
     if (ghost !== s.ghost) this.els.ghostKeys.classList.toggle("empty", !(s.ghost = ghost));
     if (ghost) this.ghostKeys.render();
     this.graph.render();
-    this.trainerView.render(this.editing ? { cue: "good", pace: 100, side: 0 } : this.trainer.reading);
+    if (this.editing) this.trainerView.render({ cue: "good", pace: 100, side: 0, gain: 1 }, 100);
+    else this.trainerView.render(this.trainer.reading, this.trainer.lastJump);
     const sync = Math.round(this.editing ? 87 : this.jumps.sync);
     if (sync !== s.sync) {
       s.sync = sync;

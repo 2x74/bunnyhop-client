@@ -1,6 +1,7 @@
 #pragma once
 #include "display_modes.hpp"
 #include "display_scaling.hpp"
+#include "window_frame.hpp"
 #include "window_settings.hpp"
 #include <SDL3/SDL.h>
 #include <string>
@@ -208,6 +209,7 @@ public:
         const bool changed = old != requested || (requested == "fullscreen" && wantExclusive != exclusive_);
         bool ok = true;
         if (changed) ok = set_mode(requested, wantExclusive);
+        if (changed) sync_window_frame(window_);
         if (ok && changed && requested == "fullscreen") exclusive_ = wantExclusive;
         if (ok && changed) ok = SDL_SyncWindow(window_);
         if (ok) ok = SDL_SetWindowAlwaysOnTop(window_, settings.value("alwaysOnTop", false));
@@ -222,6 +224,7 @@ public:
             error_ = SDL_GetError();
             if (error_.empty()) error_ = "The window manager rejected this display mode";
             set_mode(old, oldExclusive);
+            sync_window_frame(window_);
             exclusive_ = oldExclusive;
             SDL_SetWindowAlwaysOnTop(window_, oldTop);
             normal_ = oldNormal;

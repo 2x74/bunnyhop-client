@@ -10,3 +10,8 @@ export function indexSha(entry: { sha256?: string } | null | undefined): string 
 export function bspUrl(name: string, sha: string | null): string {
   return sha ? `/api/bsp/${sha}.bsp` : `/${name}.bsp`;
 }
+
+/** The ?map= value, or null when there's none: "?map=" names no map (it would download "/.bsp"), so it's the home screen. */
+export function mapParam(params: URLSearchParams): string | null {
+  return params.get("map")?.trim() || null;
+}

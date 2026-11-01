@@ -3,6 +3,40 @@
 use super::*;
 
 impl Game {
+    /// v23 on an exact `map_fixes::LOGIC_CASE_V23` build.
+    pub(super) fn logic_case_on(&self) -> bool {
+        self.map_logic_case && (PHYSICS_V23..=PHYSICS_LATEST).contains(&self.settings.physics_version)
+    }
+
+    /// `CLogicCase::InputPickRandom` and `AddOutput target` on a trigger_teleport (v23, `LOGIC_CASE_V23` builds).
+    /// Source picks one wired case at random. Replays must re-simulate exactly, so here the pick is the tick modulo the
+    /// wired cases: which case a run gets still changes with when it arrives, and it can't be chosen by the player any
+    /// more than Source's can in practice.
+    pub(super) fn logic_case_input(&mut self, i: usize, input: &str, param: &str, activator: Actor) -> bool {
+        if !self.logic_case_on() {
+            return false;
+        }
+        if self.ents[i].class == "logic_case" && input == "pickrandom" {
+            let mut cases: Vec<String> = self.ents[i].outputs.iter().filter(|o| o.event.starts_with("oncase") && o.times != 0).map(|o| o.event.to_string()).collect();
+            cases.sort();
+            cases.dedup();
+            if !cases.is_empty() {
+                let pick = cases[self.tick as usize % cases.len()].clone();
+                self.fire_output(i, &pick, activator);
+            }
+            return true;
+        }
+        if input == "addoutput"
+            && let Data::Trigger(Trigger { kind: TriggerKind::Teleport { target, .. }, .. }) = &mut self.ents[i].data
+            && let Some((key, value)) = param.trim().split_once(char::is_whitespace)
+            && key.eq_ignore_ascii_case("target")
+        {
+            *target = value.trim().to_string();
+            return true;
+        }
+        false
+    }
+
     pub(super) fn mechanics_on(&self) -> bool {
         (PHYSICS_V19..=PHYSICS_LATEST).contains(&self.settings.physics_version) && self.map_mechanics.is_some()
     }

@@ -23,6 +23,11 @@ struct TrainerAppearance {
     float dim_below = 0;
 };
 
+// The Bar's cues and jump sound ignore the zone setting, which it hides.
+inline double trainer_zone(const TrainerAppearance &look) {
+    return look.style == "bar" ? trainer_bar_zone : double(look.zone);
+}
+
 inline Json trainer_preset(std::string_view preset) {
     const bool beginner = preset == "beginner";
     const bool strict = preset == "strict";
@@ -103,6 +108,7 @@ struct HudPreferences {
     bool trainer_sound = false;
     bool trainer_enabled = false;
     bool null_binds = false;
+    bool w_release = false;
     bool triggers_visible = false;
     bool clips_visible = false;
     std::string auto_restart_when;
@@ -173,6 +179,7 @@ struct HudPreferences {
         result.trainer_sound = settings.at("hudStrafeTrainerSound");
         result.trainer_enabled = strafe_trainer_enabled(settings);
         result.null_binds = settings.at("nullBinds");
+        result.w_release = settings.at("wRelease");
         result.triggers_visible = settings.at("triggersVisible");
         result.clips_visible = settings.at("clipsVisible");
         result.auto_restart_when = settings.at("autoRestartWhen");
@@ -185,7 +192,7 @@ struct HudPreferences {
 inline std::optional<double> trainer_jump_sound(const HudPreferences &prefs, std::optional<double> pace) {
     if (!prefs.trainer_enabled || !prefs.trainer_sound || !pace) return std::nullopt;
     constexpr std::array<double, 3> pitches = {.75, 1.1, 1.5};
-    return pitches[trainer_band(*pace, prefs.trainer.zone)];
+    return pitches[trainer_band(*pace, trainer_zone(prefs.trainer))];
 }
 
 // A run starts on its first unarmed tick but isn't announced until it leaves the zone, so bhopping in the start zone
@@ -231,6 +238,13 @@ inline HudLabel<64> perf_text(const BhRunState &run) {
     return result;
 }
 
+// NaN when the core has no reading: that is a neutral Bar, never a guess.
+inline BhAirSpeedGain air_speed_gain(BhContext *core) {
+    BhAirSpeedGain gain{NAN, NAN};
+    if (!bh_air_speed_gain(core, &gain)) return {NAN, NAN};
+    return gain;
+}
+
 inline void feed_strafe_trainer(
         MovementFeedback &feedback,
         const HudPreferences &prefs,
@@ -239,7 +253,8 @@ inline void feed_strafe_trainer(
         const BhSettings &settings,
         std::string_view style,
         double interval,
-        bool interrupted
+        bool interrupted,
+        BhAirSpeedGain gain
 ) {
     if (!prefs.trainer_enabled) {
         feedback.strafe_trainer.reset();
@@ -247,7 +262,7 @@ inline void feed_strafe_trainer(
         return;
     }
     feedback.strafe_trainer.set_smoothing(prefs.trainer_smoothing);
-    feedback.strafe_trainer.zone = prefs.trainer.zone;
+    feedback.strafe_trainer.zone = trainer_zone(prefs.trainer);
     feedback.strafe_trainer.feed(
             command,
             {std::hypot(double(state.velocity[0]), double(state.velocity[1])),
@@ -259,7 +274,9 @@ inline void feed_strafe_trainer(
              settings.air_accelerate,
              style,
              interrupted || bool(state.events & 9),
-             bool(state.events & jump)}
+             bool(state.events & jump),
+             gain.delta,
+             gain.best}
     );
     feedback.strafe_reading = feedback.strafe_trainer.reading;
 }

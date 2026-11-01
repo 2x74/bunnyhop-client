@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { MaterialDesc, WaterParams } from "./core";
-import { markGammaBlend } from "./graphics/gamma-blend";
+import { markGammaBlend, outputsLinear } from "./graphics/gamma-blend";
 
 // Water and glass visuals (render.ts).
 //
@@ -118,7 +118,7 @@ export function withWaterFog<M extends THREE.Material>(m: M, opts: { sky?: boole
     Object.assign(shader.uniforms, waterUniforms);
     // Built-in materials apply volume fog after their output transform. Keep authored
     // Source fog in its original sRGB working space even inside linear capture/composer targets.
-    const outputLinear = renderer.getRenderTarget() !== null || renderer.outputColorSpace !== THREE.SRGBColorSpace;
+    const outputLinear = outputsLinear(renderer);
     const fogColor = outputLinear ? "sRGBTransferOETF(gl_FragColor).rgb" : "gl_FragColor.rgb";
     const fogResult = `applyWaterFog(${fogColor}, ${at})`;
     const outputFog = outputLinear ? `sRGBTransferEOTF(vec4(${fogResult}, 1.0)).rgb` : fogResult;

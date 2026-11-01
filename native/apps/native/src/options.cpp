@@ -56,6 +56,8 @@ Options options(int argc, char **argv) {
             out.windowed = true;
         else if (arg == "--legacy-input")
             out.legacy_input = true;
+        else if (arg == "--console")
+            out.console = true;
         else if (arg == "--content-root")
             out.content_root = value();
         else if (arg == "--screenshot")
@@ -122,6 +124,7 @@ void print_help(std::ostream &output) {
               "  [--runtime-smoke OUTPUT_DIR --replay PATH] (offline lifecycle checks with --map; private "
               "data, no network)\n"
               "  [--room-smoke DIR] (with --map: replays DIR/room.jsonl, saves the frames in DIR/shots.json)\n"
+              "  [--console] (Windows: open a console for the game's log; the file in logs/ always has it)\n"
               "  [--tutorial jump|strafe|speed|final] [--tutorial-demo] (tutorial map only)\n"
               "  [--menu-smoke OUTPUT_PREFIX] (with --online-map; live API reads only, no scores)\n"
               "  [--menu-home-smoke OUTPUT_PREFIX] (home menu over the real map tour backdrop; no gameplay "

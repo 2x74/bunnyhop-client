@@ -45,6 +45,84 @@ inline bool start_point_in_zone(const BhState &s, const std::vector<BhZone> &zon
     return false;
 }
 
+// How far inside the edge a moved point lands: f32 rounding can't put the footprint back over it.
+constexpr float start_point_snap_inset = 1;
+constexpr float start_point_hull_half_width = 16;
+constexpr float start_point_hull_height = 62;
+constexpr const char *practice_spawn_notice = "This start point doesn't count. !clearstart to go back to the real one.";
+
+inline bool start_zone_touched(const BhZone &z, const float p[3], uint32_t track) {
+    return z.kind == 0 && z.track == track && p[0] + start_point_hull_half_width >= z.mins[0]
+           && p[0] - start_point_hull_half_width <= z.maxs[0] && p[1] + start_point_hull_half_width >= z.mins[1]
+           && p[1] - start_point_hull_half_width <= z.maxs[1] && p[2] <= z.maxs[2]
+           && p[2] + start_point_hull_height >= z.mins[2];
+}
+
+inline float snapped_axis(float position, float zone_min, float zone_max) {
+    const float reach = start_point_hull_half_width + start_point_snap_inset;
+    if (position - start_point_hull_half_width >= zone_min && position + start_point_hull_half_width <= zone_max)
+        return position;
+    return std::min(zone_max - reach, std::max(zone_min + reach, position));
+}
+
+// A standing footprint that sticks out of a start zone's edge means the zone: the point moves in as little as possible
+// (website start-point.ts snapIntoStartZone). At most 33 units per axis, less than the hull is wide, so nothing solid
+// can lie between the two spots, and a restart that can't stand there falls back to the map's spawn.
+inline std::optional<std::array<float, 3>>
+snap_into_start_zone(const float position[3], const std::vector<BhZone> &zones, uint32_t track) {
+    const float reach = start_point_hull_half_width + start_point_snap_inset;
+    std::optional<std::array<float, 3>> best;
+    double best_moved = 0;
+    for (const auto &z : zones) {
+        if (!start_zone_touched(z, position, track)) continue;
+        if (z.maxs[0] - z.mins[0] < 2 * reach || z.maxs[1] - z.mins[1] < 2 * reach) continue;
+        const std::array<float, 3> moved_to = {
+                snapped_axis(position[0], z.mins[0], z.maxs[0]),
+                snapped_axis(position[1], z.mins[1], z.maxs[1]),
+                position[2]
+        };
+        if (!start_zone_holds(z, moved_to.data(), track)) continue;
+        const double moved =
+                std::hypot(double(moved_to[0]) - double(position[0]), double(moved_to[1]) - double(position[1]));
+        if (best && moved >= best_moved) continue;
+        best = moved_to;
+        best_moved = moved;
+    }
+    return best;
+}
+
+// What "set start" does here: the spot to save, whether restarts from it are practice, and what to tell the player.
+struct StartPointSave {
+    BhState state{};
+    bool practice = false;
+    std::string message;
+};
+
+inline StartPointSave
+plan_start_point(const BhState &current, const std::vector<BhZone> &zones, uint32_t track, bool used_practice_tools) {
+    StartPointSave save;
+    save.state = current;
+    if (used_practice_tools) {
+        save.practice = true;
+        save.message = "Spawn saved. This run used noclip, a checkpoint or a practice spawn, so restarts from it are "
+                       "practice and won't count. !clearstart undoes it.";
+        return save;
+    }
+    if (start_point_in_zone(current, zones, track)) {
+        save.message = "Start point saved";
+        return save;
+    }
+    if (const auto snapped = snap_into_start_zone(current.position, zones, track)) {
+        std::copy(snapped->begin(), snapped->end(), save.state.position);
+        save.message = "Start point saved, just inside the zone";
+        return save;
+    }
+    save.practice = true;
+    save.message = "Spawn saved. It's outside the start zone, so restarts from it are practice and won't count. "
+                   "!clearstart undoes it.";
+    return save;
+}
+
 inline bool
 start_point_practice(const StartPoint &point, const BhState &state, const std::vector<BhZone> &zones, uint32_t track) {
     return point.practice || !start_point_in_zone(state, zones, track);

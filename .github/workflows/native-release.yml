@@ -132,7 +132,8 @@ jobs:
           $package = Get-ChildItem target/native-packages -Directory | Select-Object -First 1
           bun apps/native/packaging/release-check.ts --package $package.FullName
           if ($LASTEXITCODE -ne 0) { throw 'Package release-check failed' }
-          & (Join-Path $package.FullName 'bunnyhop-native.exe') --help
+          # A windowed program: PowerShell only waits for it and sets the exit code when its output is piped.
+          & (Join-Path $package.FullName 'bunnyhop-native.exe') --help | Out-Host
           if ($LASTEXITCODE -ne 0) { throw 'Packaged executable failed DLL/runtime startup' }
       - run: bun apps/native/packaging/checksums.ts --package-dir target/native-packages
       - name: Preserve exact movement parity inputs, outputs and report

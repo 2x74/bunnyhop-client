@@ -38,7 +38,7 @@ fn main() {
             })
             .collect();
         let options = BhRunOptions {
-            rules: 2,
+            rules: 3,
             ..BhRunOptions::default()
         };
         ok(

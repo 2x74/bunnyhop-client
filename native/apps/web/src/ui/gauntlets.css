@@ -1,6 +1,10 @@
 /* Gauntlet screens (ui/gauntlets.ts): the leaderboards' rows and cells (boards.css) on a plain page, no boxes. */
 
 .gx { --rb-row: 2.3rem; min-width: 0; }
+/* The title and legal links stay put and the list scrolls, as on the map and rank boards. */
+.panel-gauntlets, .panel-gauntlet { height: calc(100vh - 7.5vh); min-height: 24rem; }
+.panel-gauntlets .screen-head, .panel-gauntlet .screen-head { flex: none; }
+.panel-gauntlets > .gx, .panel-gauntlet > .gx { position: relative; flex: 1 1 0; min-height: 0; overflow: hidden auto; overscroll-behavior: contain; padding-right: 0.4rem; }
 .gx-page { display: grid; grid-template-columns: fit-content(32rem) minmax(0, 1fr); gap: var(--sp-6); align-items: start; }
 @media (max-width: 52rem) { .gx-page { grid-template-columns: minmax(0, 1fr); } }
 .gx-skel { height: 12rem; }

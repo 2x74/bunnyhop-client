@@ -14,6 +14,12 @@
 //   ... draw, post-process, final pass to the canvas
 //   if (drawn) blend.draw(camera, sceneDepth, exposure)
 //
+// A motion-blur export (Enhanced, Cinematic) runs the composer once per sample and overwrites the canvas each time, so
+// drawing onto the canvas would leave only the last sample's surfaces: sharp, in front of a blurred world. There each
+// sample draws them into a transparent layer instead (accumulate), the layers are averaged, and the average goes over
+// the finished frame once (resolveAccumulated). "Over" is closed under averaging premultiplied colour and coverage, so
+// this is the same integral as compositing every sample on its own frame.
+//
 // The canvas pass draws a scene of stand-ins: one per world mesh with blended materials, sharing its geometry (and so
 // the groups cull.ts picked for this view) and its transform, with only the blended materials. A handful of objects,
 // so it costs a few draws, not a second walk over the scene.
@@ -51,6 +57,15 @@ const DEPTH_COPY = `
   uniform sampler2D tDepth; varying vec2 vUv;
   void main() { gl_FragDepth = texture2D(tDepth, vUv).x; gl_FragColor = vec4(0.0); }`;
 
+/** Whether `renderer` writes linear colour now, not the canvas's encoding: see GammaBlend's layer (an XR-flagged target). */
+export function outputsLinear(renderer: THREE.WebGLRenderer): boolean {
+  const target = renderer.getRenderTarget() as (THREE.WebGLRenderTarget & { isXRRenderTarget?: boolean }) | null;
+  return (target !== null && target.isXRRenderTarget !== true) || renderer.outputColorSpace !== THREE.SRGBColorSpace;
+}
+
+const FULLSCREEN = "varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }";
+const SAMPLE = "uniform sampler2D map; uniform float weight; varying vec2 vUv; void main() { gl_FragColor = texture2D(map, vUv) * weight; }";
+
 /** Skips a stand-in's other groups. */
 const SKIP = new THREE.MeshBasicMaterial({ visible: false });
 
@@ -63,7 +78,7 @@ interface StandIn {
 export class GammaBlend {
   private readonly depthCopy = new FullScreenQuad(new THREE.ShaderMaterial({
     uniforms: { tDepth: { value: null as THREE.Texture | null } },
-    vertexShader: "varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }",
+    vertexShader: FULLSCREEN,
     fragmentShader: DEPTH_COPY,
     colorWrite: false,
     depthTest: true,
@@ -77,6 +92,36 @@ export class GammaBlend {
   private readonly proxies = new THREE.Scene();
   private readonly hidden = new Set<THREE.Material>();
   private depthTarget: THREE.WebGLRenderTarget | null = null;
+  /** One sample's blended surfaces on transparent black: sRGB-encoded, premultiplied, as they'd land on the canvas. */
+  private layer: THREE.WebGLRenderTarget | null = null;
+  /** The running sum of the layers. */
+  private layerSum: THREE.WebGLRenderTarget | null = null;
+  private accumulated = false;
+  private readonly layerQuad = new FullScreenQuad();
+  private readonly layerAdd = new THREE.ShaderMaterial({
+    uniforms: { map: { value: null as THREE.Texture | null }, weight: { value: 1 } },
+    vertexShader: FULLSCREEN,
+    fragmentShader: SAMPLE,
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.OneFactor,
+    blendDst: THREE.OneFactor,
+    blendEquation: THREE.AddEquation,
+    depthTest: false,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  private readonly layerOver = new THREE.ShaderMaterial({
+    uniforms: { map: { value: null as THREE.Texture | null }, weight: { value: 1 } },
+    vertexShader: FULLSCREEN,
+    fragmentShader: SAMPLE,
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.OneFactor,
+    blendDst: THREE.OneMinusSrcAlphaFactor,
+    blendEquation: THREE.AddEquation,
+    depthTest: false,
+    depthWrite: false,
+    toneMapped: false,
+  });
 
   constructor(private readonly renderer: THREE.WebGLRenderer) {
     this.proxies.matrixWorldAutoUpdate = false;
@@ -130,6 +175,101 @@ export class GammaBlend {
     if (!this.hidden.size) return;
     const blended = new Set(this.hidden);
     this.show();
+    this.drawBlended(blended, camera, depth, exposure);
+  }
+
+  /**
+   * Motion blur: like draw(), for one of the frame's samples, into the layer sum with `weight`. The canvas isn't touched
+   * until resolveAccumulated(). Leaves the render target as it found it.
+   */
+  accumulate(camera: THREE.Camera, depth: THREE.Texture, exposure: number, weight: number): void {
+    const r = this.renderer;
+    if (!this.hidden.size) return;
+    const blended = new Set(this.hidden);
+    this.show();
+    const image = depth.image as { width: number; height: number };
+    const { layer, sum } = this.layerTargets(image.width, image.height);
+    const target = r.getRenderTarget();
+    const clear = r.getClearColor(new THREE.Color());
+    const alpha = r.getClearAlpha();
+    const autoClear = r.autoClear;
+    // Additive surfaces add light and cover nothing: their blend leaves the layer's coverage alone. Only the blend state
+    // changes, so they keep their programs.
+    const additive: THREE.Material[] = [];
+    for (const m of blended) {
+      if (m.blending !== THREE.AdditiveBlending) continue;
+      additive.push(m);
+      m.blending = THREE.CustomBlending;
+      m.blendSrc = THREE.SrcAlphaFactor;
+      m.blendDst = THREE.OneFactor;
+      m.blendSrcAlpha = THREE.ZeroFactor;
+      m.blendDstAlpha = THREE.OneFactor;
+      m.blendEquation = THREE.AddEquation;
+    }
+    try {
+      r.setClearColor(0, 0);
+      if (!this.accumulated) {
+        r.setRenderTarget(sum);
+        r.clear(true, false, false);
+        this.accumulated = true;
+      }
+      r.setRenderTarget(layer);
+      r.clear(true, false, false);
+      this.drawBlended(blended, camera, depth, exposure);
+      r.autoClear = false;
+      r.setRenderTarget(sum);
+      this.layerAdd.uniforms.map.value = layer.texture;
+      this.layerAdd.uniforms.weight.value = weight;
+      this.layerQuad.material = this.layerAdd;
+      this.layerQuad.render(r);
+    } finally {
+      for (const m of additive) m.blending = THREE.AdditiveBlending;
+      r.setRenderTarget(target);
+      r.setClearColor(clear, alpha);
+      r.autoClear = autoClear;
+    }
+  }
+
+  /** Draws the frame's averaged layers over the bound target (the canvas, holding the blurred world). */
+  resolveAccumulated(): void {
+    if (!this.accumulated) return;
+    this.accumulated = false;
+    const r = this.renderer;
+    const autoClear = r.autoClear;
+    try {
+      r.autoClear = false;
+      this.layerOver.uniforms.map.value = this.layerSum!.texture;
+      this.layerQuad.material = this.layerOver;
+      this.layerQuad.render(r);
+    } finally {
+      r.autoClear = autoClear;
+    }
+  }
+
+  /** Drops a frame's layers without drawing them. */
+  resetAccumulated(): void {
+    this.accumulated = false;
+  }
+
+  private layerTargets(width: number, height: number): { layer: THREE.WebGLRenderTarget; sum: THREE.WebGLRenderTarget } {
+    if (!this.layer) {
+      this.layer = new THREE.WebGLRenderTarget(width, height, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+      // The materials must write what they write to the canvas (sRGB-encoded, tone mapped, the canvas's programs); three
+      // only does that for targets flagged XR. It also keeps the texture a plain RGBA8, so sampling it doesn't decode.
+      (this.layer as THREE.WebGLRenderTarget & { isXRRenderTarget: boolean }).isXRRenderTarget = true;
+      this.layer.texture.colorSpace = THREE.SRGBColorSpace;
+      this.layerSum = new THREE.WebGLRenderTarget(width, height, { type: THREE.HalfFloatType, depthBuffer: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+    } else if (this.layer.width !== width || this.layer.height !== height) {
+      this.layer.setSize(width, height);
+      this.layerSum!.setSize(width, height);
+      this.accumulated = false;
+    }
+    return { layer: this.layer, sum: this.layerSum! };
+  }
+
+  /** Draws `blended` onto the bound target over `depth`. */
+  private drawBlended(blended: ReadonlySet<THREE.Material>, camera: THREE.Camera, depth: THREE.Texture, exposure: number): void {
+    const r = this.renderer;
     const autoClear = r.autoClear;
     const scaled: [THREE.MeshBasicMaterial, number, number, number][] = [];
     try {
@@ -146,7 +286,7 @@ export class GammaBlend {
         proxy.frustumCulled = mesh.frustumCulled;
       }
       for (const m of blended) {
-        if (m.blending !== THREE.NormalBlending || exposure === 1) continue;
+        if (m.blending !== THREE.NormalBlending || exposure === 1) continue; // Additive (Custom in a layer): as is.
         if (m instanceof THREE.MeshBasicMaterial) {
           scaled.push([m, m.color.r, m.color.g, m.color.b]);
           m.color.multiplyScalar(exposure);
@@ -196,5 +336,12 @@ export class GammaBlend {
     this.world = null;
     this.depthCopy.material.dispose();
     this.depthCopy.dispose();
+    this.layer?.dispose();
+    this.layerSum?.dispose();
+    this.layer = this.layerSum = null;
+    this.accumulated = false;
+    this.layerAdd.dispose();
+    this.layerOver.dispose();
+    this.layerQuad.dispose();
   }
 }

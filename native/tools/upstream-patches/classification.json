@@ -7,7 +7,7 @@
   {
     "path": "crates/core/src/game.rs",
     "classification": "native patch",
-    "baseline": "8463f8a71dbbe844a9c816e0f21e7439c21aaaae"
+    "baseline": "b6ee99cb375e70f3f4583761c11fd1e46ef2e2c5"
   },
   {
     "path": "crates/core/src/game/kin.rs",
@@ -62,7 +62,7 @@
   {
     "path": "crates/core/src/wasm.rs",
     "classification": "native patch",
-    "baseline": "4a86be6a082b6838f0ab034f1ee837998f04d7e2"
+    "baseline": "bcd3fbdd700364ffa157cf154a66528390c7b665"
   },
   {
     "path": "crates/core/src/wasm_content.rs",
@@ -122,12 +122,12 @@
   {
     "path": "crates/vendor/movement/src/lib.rs",
     "classification": "older upstream; overwrite",
-    "baseline": "8a871fa4e852febf74f92f91ae240f0ccf8d43fc"
+    "baseline": "473d820bccc0afdbf6fefab96053ce70d19a0ee8"
   },
   {
     "path": "crates/vendor/movement/src/movement.rs",
     "classification": "native patch",
-    "baseline": "db4ec52ec07b04903a8731e50fd2750114e32a3d"
+    "baseline": "66bc5e904ef12f47ce4e0fe09dc3240352b0eecd"
   },
   {
     "path": "crates/vendor/thirdpartylegalnotices.txt",
@@ -137,7 +137,7 @@
   {
     "path": "apps/web/src/api.ts",
     "classification": "native patch",
-    "baseline": "9071196ad3e4b2899c786399c22c854be2ae41db"
+    "baseline": "3e1470ac85adc4da6b4a3877594745c6a05a65b7"
   },
   {
     "path": "apps/web/src/assets/audio/manifest.json",
@@ -152,7 +152,7 @@
   {
     "path": "apps/web/src/core.ts",
     "classification": "native patch",
-    "baseline": "074dd8f1e1bd831b0078e45ca2ebc09c82b11393"
+    "baseline": "b5a17ee2650ecc8d5a3cc1bbafac0756a1572111"
   },
   {
     "path": "apps/web/src/feedback/modal.ts",
@@ -162,7 +162,7 @@
   {
     "path": "apps/web/src/feedback/state.ts",
     "classification": "native patch",
-    "baseline": "2da6be3fd8581a3bdca8fbde930b767e86b85e1d"
+    "baseline": "e22326759b7b43d27f3aadb0ec36001b033f0cd1"
   },
   {
     "path": "apps/web/src/net/hud.ts",
@@ -182,7 +182,7 @@
   {
     "path": "apps/web/src/social/dock.ts",
     "classification": "native patch",
-    "baseline": "d9af2aec0f263957104b2c0c3f27bb2b3ec88223"
+    "baseline": "dd0a3f45dc3b0777f479dcf2fbcdc7bf1a425f39"
   },
   {
     "path": "apps/web/src/ui/account-name.ts",
@@ -212,7 +212,7 @@
   {
     "path": "apps/web/src/ui/player-glow-controls.ts",
     "classification": "native patch",
-    "baseline": "b07c51aa7bc59d5990ea37ad99ddbd0420c78f20"
+    "baseline": "5367589462da3bd605456e48263427085fba0f2c"
   },
   {
     "path": "apps/web/src/ui/profile-social.ts",
@@ -227,12 +227,12 @@
   {
     "path": "apps/web/src/ui/profile.ts",
     "classification": "native patch",
-    "baseline": "23f89c88e23428c785c56bd8bb3f044bf447bef7"
+    "baseline": "d25605250fda428dfab156e9871fcc3932f3cdc1"
   },
   {
     "path": "apps/web/src/ui/run-stats.ts",
     "classification": "native patch",
-    "baseline": "2675204ac019e2c4f416c602329a373c1ce2bc10"
+    "baseline": "c6e16caa5989beefa290def443993ae5fac13531"
   },
   {
     "path": "apps/web/src/ui/support.ts",

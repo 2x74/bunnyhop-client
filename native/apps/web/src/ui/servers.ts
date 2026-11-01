@@ -242,7 +242,7 @@ export function roomPanel(resume: () => void): HTMLElement | null {
         "div.room-stats",
         null,
         h("div", null, h("small", null, "Players"), h("b", null, `${s.players}`, h("span.dim", null, ` / ${s.max}`)), h("span.srv-bar", null, h("i", { style: `width:${fill}%` }))),
-        h("div", null, h("small", null, "Time left"), h("b", null, s.timeLeft)),
+        h("div", null, h("small", null, "Time left"), h("b", null, s.timeLeft.replace(/ left$/, ""))),
         h("div", null, h("small", null, "Rock the vote"), h("b", null, `${s.rtv.count}`, h("span.dim", null, ` / ${s.rtv.needed}`))),
       ),
     ),

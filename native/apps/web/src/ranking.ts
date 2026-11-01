@@ -137,7 +137,8 @@ export const rankGroupById = (id: string) => RANK_GROUPS.find((g) => g.id === id
 /** "top 4%" style wording used next to a rank title (Aimperion: one wording everywhere). */
 export function topPercent(rank: number, ranked: number): string {
   if (!rank || !ranked) return "";
-  const p = (rank / ranked) * 100;
+  // At least 0.1: rank 1 of thousands rounded down to "top 0%".
+  const p = Math.max(0.1, (rank / ranked) * 100);
   return `top ${p < 1 ? p.toFixed(1).replace(/\.0$/, "") : Math.max(1, Math.ceil(p))}%`;
 }
 

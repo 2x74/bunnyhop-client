@@ -63,11 +63,11 @@ export function playerGlowControls(o: { root: () => HTMLElement; preview: () => 
   };
   const glowEnabled = h("input.switch.sm", { type: "checkbox", role: "switch", onchange: () => changeGlow({ ...glow, enabled: glowEnabled.checked }), onfocus: previewGlow });
   const glowAura = h("input.switch.sm", { type: "checkbox", role: "switch", onchange: () => changeGlow({ ...glow, aura: glowAura.checked }), onfocus: previewGlow });
-  const glowColors = h("div.sp-colours", { role: "radiogroup", "aria-label": "Player glow color" },
+  const glowColors = h("div.sp-colours", { role: "radiogroup", "aria-label": "Player glow colour" },
     ...GLOW_COLORS.map(c => h("button.sp-swatch", { type: "button", role: "radio", "data-glow-color": c.id, "aria-label": c.name, title: c.name, style: `--sw:${c.hex}`, onfocus: previewGlow, onclick: () => changeGlow({ ...glow, color: c.id }) })),
   );
   const customDot = h("span.sp-glow-custom-dot", { "aria-hidden": "true" });
-  const glowCustom = h("button.btn.sp-glow-custom", { type: "button", "aria-haspopup": "dialog", "aria-label": "Choose custom glow color", onfocus: previewGlow, onclick: () => {
+  const glowCustom = h("button.btn.sp-glow-custom", { type: "button", "aria-haspopup": "dialog", "aria-label": "Choose custom glow colour", onfocus: previewGlow, onclick: () => {
     if (glowDialog) { glowDialog.focus(); return; }
     const generation = accountGeneration();
     glowDialog = glowColorPicker({
@@ -99,7 +99,7 @@ export function playerGlowControls(o: { root: () => HTMLElement; preview: () => 
     glowAura.checked = glow.aura;
     customDot.style.setProperty("--sw", glowColorHex(glow.color));
     glowCustom.classList.toggle("on", isHexGlowColor(glow.color));
-    glowCustom.title = isHexGlowColor(glow.color) ? `Custom color ${glow.color.toUpperCase()}` : "Choose a custom glow color";
+    glowCustom.title = isHexGlowColor(glow.color) ? `Custom colour ${glow.color.toUpperCase()}` : "Choose a custom glow colour";
     glowIntensity.value = String(glow.intensity);
     // The track's filled part (style.css input[type=range] reads --p, 0..1 along min..max).
     glowIntensity.style.setProperty("--p", String((glow.intensity - 0.25) / 0.75));

@@ -62,11 +62,9 @@ export function leaderboardPanel(map: string, style: string, opts: BoardOptions 
     opts.onRace ??
     ((e: LeaderboardEntry, t: number) => requestRace({ kind: "run", runId: e.runId, name: `#${e.rank} · ${e.player.name}`, track: t, time: e.time }));
 
-  const localPb = (): Node => {
+  const localPb = (): Node | null => {
     const pb = getPB(map, boardStyle(), track);
-    return pb
-      ? h("span", null, "Your local PB ", h("b", null, formatTime(pb.time)), ` · ${pb.jumps} jumps · ${pb.sync.toFixed(1)}% sync`)
-      : h("span", null, `No local ${label()} PB on this map yet`);
+    return pb ? h("span", null, "Your local PB ", h("b", null, formatTime(pb.time)), ` · ${pb.jumps} jumps · ${pb.sync.toFixed(1)}% sync`) : null;
   };
 
   const board = pagedBoard<LeaderboardEntry>({
@@ -115,7 +113,10 @@ export function leaderboardPanel(map: string, style: string, opts: BoardOptions 
       );
     },
     you: (p, onPage) => {
-      if (onPage && p?.me) return h("span", null, `You're `, h("b", null, `#${p.me.rank}`), ` on this page · `, localPb());
+      if (onPage && p?.me) {
+        const pb = localPb();
+        return h("span", null, `You're `, h("b", null, `#${p.me.rank}`), " on this page", pb ? " · " : null, pb);
+      }
       return localPb();
     },
     meta: (p) =>
@@ -139,9 +140,9 @@ export function leaderboardPanel(map: string, style: string, opts: BoardOptions 
     valueOf: (e) => formatTime(e.time),
   });
 
-  const seg = (aria: string, items: [string, string, string, boolean, () => void][]) =>
+  const seg = (aria: string, items: [string, string, string, boolean, () => void][], cls = "") =>
     h(
-      "div.seg",
+      `div.seg${cls}`,
       { role: "radiogroup", "aria-label": aria },
       ...items.map(([text, title, key, on, fn]) => h(`button${on ? ".on" : ""}`, { type: "button", role: "radio", "aria-checked": String(on), title, "data-key": key, onclick: fn }, text)),
     );
@@ -150,7 +151,7 @@ export function leaderboardPanel(map: string, style: string, opts: BoardOptions 
     const parts: HTMLElement[] = [];
     if (tracks.length > 1) parts.push(seg("Track", tracks.map((t) => [nameOf(t), t ? `${nameOf(t)} (Normal style only)` : "Main track", String(t), t === track, () => ((track = t), refresh())])));
     if (api.available()) parts.push(seg("Players", [["All", "Everyone", "all", !following, () => ((following = false), refresh())], ["Following", "Players you follow, and you", "following", following, () => ((following = true), refresh())]]));
-    if (track === 0) parts.push(seg("Style", STYLE_DEFS.map((d) => [d.name, d.rule, d.id, d.id === mainStyle, () => ((mainStyle = d.id), opts.onStyle?.(d.id), refresh())])));
+    if (track === 0) parts.push(seg("Style", STYLE_DEFS.map((d) => [d.name, d.rule, d.id, d.id === mainStyle, () => ((mainStyle = d.id), opts.onStyle?.(d.id), refresh())]), ".rb-styles"));
     else if (!opts.trackNames?.[track]) parts.push(h("span.rb-only", null, `${styleLabel(BONUS_STYLE)} only on bonus tracks`));
     // Keep keyboard focus on the switch that was just used (the buttons are rebuilt).
     const key = (document.activeElement as HTMLElement | null)?.closest(".rb-controls") ? (document.activeElement as HTMLElement).dataset.key : undefined;

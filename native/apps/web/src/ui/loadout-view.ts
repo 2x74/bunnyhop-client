@@ -169,6 +169,8 @@ const KIND: Record<LoadoutCategory, string> = { knife: "Knife", finish: "Finish"
 
 export interface LoadoutViewOpts {
   playerGlow?: () => import("../player/glow-config").PlayerGlow | null;
+  /** A "Player glow" tab beside the categories: this panel in place of the grid, your bunny on the stage. */
+  glow?: { panel: HTMLElement; onShown: (on: boolean) => void };
   /** Open on this category (else the last one used). */
   slot?: string | null;
   /** Only these items (the Support page: the supporter set). Categories with none are left out; no "No hat" tile. */
@@ -207,6 +209,8 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
   const cats = loadoutCategories((s) => listed(s).length).filter((s) => !o.only || listed(s).length > 0);
   let slot: LoadoutCategory = isLoadoutCategory(o.slot) && cats.includes(o.slot) ? o.slot : cats.includes(lastSlot) ? lastSlot : "knife";
   let preview: string | null = null;
+  /** On the Player glow tab (o.glow). The stage stays on the Colourway category meanwhile, for your whole bunny. */
+  let glowTab = false;
   /** A hair colour being tried in the custom picker (shown on the stage, not saved). */
   let hairDraft: string | null = null;
   /** A ponytail length being dragged (shown on the stage; saved when the slider is let go). */
@@ -294,6 +298,7 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
   const clearIndicators = h("button.link-btn.lo-clear", { type: "button", onclick: () => m.clearIndicators() }, "Mark all seen");
   clearIndicators.hidden = !!o.previewOnly;
   const grid = h("div.lo-grid", { role: "group" });
+  const glowPane = o.glow ? h("div.lo-glow-pane", { hidden: true }, o.glow.panel) : null;
   const bodySeg = h("div.seg.lo-modelseg", { role: "radiogroup", "aria-label": "Player model" });
   const bodyRow = h("div.lo-model-row", null, h("span.lo-model-label", null, "Player model"), bodySeg);
   function drawBody(): void {
@@ -439,7 +444,7 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     if (active) (swapSeg.draw(p), orderSeg.draw(p));
     poolHint.textContent = active ? "" : p.items.length ? "Add one more to swap between them" : "Swap between knives each map or restart";
   }
-  const root = h("section.lo", { "aria-label": "Loadout" }, h("div.lo-head", null, tabs, clearIndicators, status), bodyRow, hairRow, lengthRow, poolRow, h("div.lo-body", null, stageHost, grid));
+  const root = h("section.lo", { "aria-label": "Loadout" }, h("div.lo-head", null, tabs, clearIndicators, status), bodyRow, hairRow, lengthRow, poolRow, h("div.lo-body", null, stageHost, grid, glowPane));
 
   function drawTabs(): void {
     clearIndicators.disabled = !COSMETICS.some((c) => isLoadoutCategory(c.slot) && m.owns(c) && m.isNew(c.id));
@@ -454,22 +459,25 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
         const items = listed(s);
         const own = items.filter((c) => m.owns(c)).length;
         const count = m.userId && s !== "hat" && !o.previewOnly ? h("small", { title: `${own} of ${items.length} owned` }, `${own}/${items.length}`) : null;
+        const on = s === slot && !glowTab;
         return h(
-          `button.lo-tab${s === slot ? ".on" : ""}`,
-          { type: "button", role: "tab", "aria-selected": String(s === slot), tabindex: s === slot ? "0" : "-1", "data-slot": s, onclick: () => select(s) },
+          `button.lo-tab${on ? ".on" : ""}`,
+          { type: "button", role: "tab", "aria-selected": String(on), tabindex: on ? "0" : "-1", "data-slot": s, onclick: () => select(s) },
           NAME[s],
           count,
           fresh ? h("span.pf-new-dot", { role: "img", "aria-label": "new" }) : null,
         );
       }),
+      o.glow
+        ? h(`button.lo-tab${glowTab ? ".on" : ""}`, { type: "button", role: "tab", "aria-selected": String(glowTab), tabindex: glowTab ? "0" : "-1", "data-slot": "glow", onclick: () => selectGlow() }, "Player glow")
+        : "",
     );
   }
   tabs.addEventListener("keydown", (e) => {
-    const i = cats.indexOf(slot);
-    const j = e.key === "ArrowRight" ? i + 1 : e.key === "ArrowLeft" ? i - 1 : -9;
-    if (j === -9) return;
+    const j = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    if (!j) return;
     e.preventDefault();
-    select(cats[(j + cats.length) % cats.length], true);
+    stepTab(j, true);
   });
 
   let statusTimer = 0;
@@ -673,6 +681,18 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
   }
 
   function drawCaption(c: LoadoutChoice): void {
+    if (glowTab) {
+      capName.replaceChildren(h("span", null, "Player glow"));
+      capMeta.replaceChildren();
+      capHow.hidden = true;
+      capState.className = "lo-cap-state";
+      capState.replaceChildren();
+      capState.parentElement?.querySelector(".lo-cap-cta")?.remove();
+      stageHost.style.removeProperty("--rar");
+      stageHost.dataset.rar = "0";
+      stage?.tint(null, 0.35);
+      return;
+    }
     const hands = stageKind(slot) === "hands";
     const focus = cosmetic(preview !== null ? preview : c[slot]);
     if (hands) {
@@ -720,8 +740,18 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     }
   }
 
+  function showGlowTab(on: boolean): void {
+    if (on === glowTab) return;
+    glowTab = on;
+    root.classList.toggle("glow-tab", on);
+    grid.hidden = on;
+    if (glowPane) glowPane.hidden = !on;
+    o.glow?.onShown(on);
+  }
+
   function select(s: LoadoutCategory, focusTab = false): void {
-    if (s === slot) return;
+    if (s === slot && !glowTab) return;
+    showGlowTab(false);
     slot = lastSlot = s;
     preview = null;
     setView(viewFor(s));
@@ -729,6 +759,25 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     drawGrid();
     apply();
     if (focusTab) tabs.querySelector<HTMLElement>(".lo-tab.on")?.focus();
+  }
+
+  function selectGlow(focusTab = false): void {
+    if (glowTab) return;
+    showGlowTab(true);
+    slot = "outfit";
+    preview = null;
+    setView(viewFor(slot));
+    drawTabs();
+    apply();
+    if (focusTab) tabs.querySelector<HTMLElement>(".lo-tab.on")?.focus();
+  }
+
+  /** The next / previous tab, wrapping; the glow tab, when there is one, comes last. */
+  function stepTab(by: number, focusTab = false): void {
+    const n = cats.length + (o.glow ? 1 : 0);
+    const i = (((glowTab ? cats.length : cats.indexOf(slot)) + by) % n + n) % n;
+    if (i === cats.length) selectGlow(focusTab);
+    else select(cats[i], focusTab);
   }
 
   // Q / E (gamepad LB / RB): previous / next category; the inspect key inspects (held: keeps a spin going).
@@ -739,9 +788,9 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     const k = e.key.toLowerCase();
     if (k !== "q" && k !== "e") return;
     e.preventDefault();
-    const i = cats.indexOf(slot);
-    select(cats[(i + (k === "e" ? 1 : cats.length - 1)) % cats.length]);
-    (grid.querySelector<HTMLElement>(".lo-tile.on") ?? grid.querySelector<HTMLElement>(".lo-tile"))?.focus({ preventScroll: true });
+    stepTab(k === "e" ? 1 : -1);
+    if (glowTab) tabs.querySelector<HTMLElement>(".lo-tab.on")?.focus();
+    else (grid.querySelector<HTMLElement>(".lo-tile.on") ?? grid.querySelector<HTMLElement>(".lo-tile"))?.focus({ preventScroll: true });
   });
   const onKey = (e: KeyboardEvent) => {
     if (!root.isConnected) return removeKeys();
