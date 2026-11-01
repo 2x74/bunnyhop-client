@@ -105,7 +105,8 @@ int main(int argc, char **argv) {
         const std::filesystem::path output(argv[4]);
         std::filesystem::create_directories(output);
         {
-            native::Renderer renderer(graphics, core.get());
+            const auto renderer_storage = std::make_unique<native::Renderer>(graphics, core.get());
+            auto &renderer = *renderer_storage;
             renderer.set_viewmodel_visible(false);
             auto &hud_graphics = graphics;
             native::NativeHud hud(hud_graphics, argv[3]);

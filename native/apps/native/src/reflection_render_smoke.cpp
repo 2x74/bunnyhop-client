@@ -221,7 +221,8 @@ scene(Device &device,
       bool actor,
       bool reflected,
       const std::array<float, 3> &position) {
-    native::Renderer renderer(device.graphics, core, assets);
+    const auto renderer_storage = std::make_unique<native::Renderer>(device.graphics, core, assets);
+    auto &renderer = *renderer_storage;
     renderer.graphics_settings(
             {{"graphicsPreset", "source"}, {"graphicsAntialias", false}, {"graphicsWaterReflections", reflected}}
     );

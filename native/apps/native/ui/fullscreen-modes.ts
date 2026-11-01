@@ -140,7 +140,10 @@ export function fullscreenGroup(ui: Ui): HTMLElement {
     },
   );
   const group = ui.group("Fullscreen", monitor, size, rate, scaling);
-  const paint = (): void => paintRows(monitor, size, rate, scaling);
+  const paint = (): void => {
+    paintRows(monitor, size, rate, scaling);
+    group.hidden = !group.querySelector(".set-row:not([hidden])");
+  };
   followHost(group, ui, paint);
   const onState = (): void => {
     if (group.isConnected) paint();

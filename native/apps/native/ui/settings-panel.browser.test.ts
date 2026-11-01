@@ -397,6 +397,32 @@ test("graphics: the composer looks and the Sky picker follow the host's sky libr
   }
 }, 30_000);
 
+test("Fullscreen hides an empty group and shows modes when the display catalog arrives", async () => {
+  const app = await open();
+  try {
+    await openSettings(app.page, "display");
+    const group = app.page.locator('.set-group[data-group="Fullscreen"]');
+    expect(await group.isVisible()).toBe(false);
+    const desktop = { width: 1920, height: 1080, refreshHz: 144 };
+    await host(app.page, {
+      displays: {
+        displays: [{ name: "Display 1", index: 0, primary: true, window: true, desktop, modes: [desktop] }],
+        exclusive: null,
+      },
+    });
+    await poll(() => group.isVisible(), true);
+    expect(await row(app.page, "display", "Resolution").isVisible()).toBe(true);
+    expect(await row(app.page, "display", "Renderer").count()).toBe(0);
+    const reviewPath = process.env.BUNNYHOP_DISPLAY_REVIEW;
+    if (reviewPath) await app.page.screenshot({ path: reviewPath, fullPage: true });
+    await host(app.page, { displays: { displays: [], exclusive: null } });
+    await poll(() => group.isVisible(), false);
+    expect(app.errors).toEqual([]);
+  } finally {
+    await app.close();
+  }
+});
+
 test("Windows renderer selection is saved for restart and hidden without the capability", async () => {
   const app = await open();
   try {
@@ -405,6 +431,9 @@ test("Windows renderer selection is saved for restart and hidden without the cap
     const renderer = row(app.page, "display", "Renderer");
     expect(await renderer.isVisible()).toBe(true);
     expect(await renderer.textContent()).toContain("Takes effect after restarting the game");
+    expect(await renderer.textContent()).toContain("OpenGL: default for everyday play.");
+    expect(await renderer.textContent()).toContain("Direct3D 11: experimental alternative for Windows.");
+    expect(await app.page.locator('.set-group[data-group="Fullscreen"]').isVisible()).toBe(false);
     const reviewPath = process.env.BUNNYHOP_RENDERER_REVIEW;
     if (reviewPath) await app.page.screenshot({ path: reviewPath, fullPage: true });
     const before = await count(app.page);

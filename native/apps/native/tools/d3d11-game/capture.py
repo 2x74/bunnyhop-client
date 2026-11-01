@@ -38,20 +38,29 @@ def capture(fixtures, output, renderer):
                 command += ["--d3d11-warp"]
         log = output / (case["name"] + ".log")
         with log.open("w") as stream:
-            subprocess.run(
-                command,
-                cwd=fixtures,
-                env=environment,
-                stdout=stream,
-                stderr=subprocess.STDOUT,
-                check=True,
-                timeout=300,
-            )
-        records.append(dict(name=case["name"], command=command, binarySha256=sha256(Path(command[0]))))
-        print(case["name"], flush=True)
+            try:
+                result = subprocess.run(
+                    command,
+                    cwd=fixtures,
+                    env=environment,
+                    stdout=stream,
+                    stderr=subprocess.STDOUT,
+                    timeout=300,
+                )
+                exit_code = result.returncode
+            except subprocess.TimeoutExpired:
+                stream.write("\nRender fixture exceeded five minutes\n")
+                exit_code = None
+        records.append(
+            dict(name=case["name"], command=command, binarySha256=sha256(Path(command[0])), exitCode=exit_code)
+        )
+        print(case["name"], "passed" if exit_code == 0 else f"failed ({exit_code})", flush=True)
     (output / "capture.json").write_text(
         json.dumps(dict(renderer=renderer, cases=records, inputs=suite["inputs"]), indent=2) + "\n"
     )
+    failed = [record["name"] for record in records if record["exitCode"] != 0]
+    if failed:
+        raise RuntimeError("Render fixtures failed: " + ", ".join(failed))
 
 
 if __name__ == "__main__":
