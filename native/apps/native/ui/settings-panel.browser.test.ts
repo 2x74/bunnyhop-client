@@ -396,3 +396,33 @@ test("graphics: the composer looks and the Sky picker follow the host's sky libr
     await close();
   }
 }, 30_000);
+
+test("Windows renderer selection is saved for restart and hidden without the capability", async () => {
+  const app = await open();
+  try {
+    await host(app.page, { capabilities: ["renderer"], settings: { ...HOST_SETTINGS, renderer: "opengl" } });
+    await openSettings(app.page, "display");
+    const renderer = row(app.page, "display", "Renderer");
+    expect(await renderer.isVisible()).toBe(true);
+    expect(await renderer.textContent()).toContain("Takes effect after restarting the game");
+    const reviewPath = process.env.BUNNYHOP_RENDERER_REVIEW;
+    if (reviewPath) await app.page.screenshot({ path: reviewPath, fullPage: true });
+    const before = await count(app.page);
+    await renderer.getByRole("radio", { name: "Direct3D 11", exact: true }).click();
+    expect(await patchesSince(app.page, before)).toEqual([{ renderer: "d3d11" }]);
+    await host(app.page, {
+      client: { renderer: "d3d11" },
+      lowLatency: { dxgi: true, reflex: false, antiLag: false, active: "DXGI" },
+      settings: { ...HOST_SETTINGS, renderer: "d3d11" },
+    });
+    await app.page.waitForTimeout(300);
+    const latency = row(app.page, "display", "Low latency mode");
+    expect(await latency.textContent()).toContain("unavailable on this device");
+    expect(await latency.getByRole("radio", { name: "On", exact: true }).isDisabled()).toBe(true);
+    await host(app.page, { capabilities: [], settings: { ...HOST_SETTINGS, renderer: "d3d11" } });
+    await app.page.waitForTimeout(300);
+    expect(await row(app.page, "display", "Renderer").count()).toBe(0);
+  } finally {
+    await app.close();
+  }
+});

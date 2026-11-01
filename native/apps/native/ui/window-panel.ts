@@ -62,6 +62,8 @@ function windowGroup(ui: Ui): HTMLElement {
 }
 
 function lowLatencyText(): string {
+  if (state.client?.renderer === "d3d11")
+    return "Direct3D 11 always presents through DXGI. Low latency mode enables NVIDIA Reflex or AMD Anti-Lag 2.";
   const info = state.lowLatency;
   const card = info?.reflex ? "NVIDIA Reflex" : info?.antiLag ? "AMD Anti-Lag 2" : "a waitable swapchain";
   const using = info?.active ? ` In use: ${info.active === "DXGI" ? "DXGI" : info.active}.` : "";
@@ -72,7 +74,9 @@ function lowLatencyText(): string {
 }
 
 function lowLatencyRows(ui: Ui): HTMLElement[] {
-  const supported = (): boolean => state.lowLatency?.dxgi === true;
+  const nativeD3D = state.client?.renderer === "d3d11";
+  const available = !nativeD3D || state.lowLatency?.reflex === true || state.lowLatency?.antiLag === true;
+  const supported = (): boolean => state.lowLatency?.dxgi === true && available;
   const modes: [LowLatencyMode, string][] = [
     ["off", "Off"],
     ["on", "On"],
@@ -81,14 +85,38 @@ function lowLatencyRows(ui: Ui): HTMLElement[] {
   const mode = nativeChoice(ui, "Low latency mode", "lowLatencyMode", modes, {
     desc: lowLatencyText,
     keywords: "reflex nvidia anti-lag amd latency dxgi vrr gsync freesync boost",
-    when: supported,
+    hint: nativeD3D && !available ? "NVIDIA Reflex and AMD Anti-Lag 2 are unavailable on this device" : undefined,
+    when: () => nativeD3D || supported(),
   });
+  if (nativeD3D && !available)
+    for (const control of mode.querySelectorAll<HTMLButtonElement>("button")) control.disabled = true;
   const flash = nativeToggle(ui, "Reflex flash indicator", "reflexFlash", {
     desc: "Flashes on each left click for NVIDIA's Reflex Latency Analyzer.",
     keywords: "reflex latency analyzer flash ldat",
     when: () => supported() && state.lowLatency?.reflex === true && state.settings.lowLatencyMode !== "off",
   });
   return [mode, flash];
+}
+
+function rendererGroup(ui: Ui): HTMLElement | null {
+  if (!state.capabilities?.includes("renderer")) return null;
+  return ui.group(
+    "Renderer",
+    nativeChoice(
+      ui,
+      "Renderer",
+      "renderer",
+      [
+        ["opengl", "OpenGL"],
+        ["d3d11", "Direct3D 11"],
+      ],
+      {
+        hint: "Takes effect after restarting the game",
+        desc: "OpenGL is the default. Video export uses OpenGL with either renderer.",
+        keywords: "renderer opengl direct3d d3d11 dx11 restart",
+      },
+    ),
+  );
 }
 
 function framesGroup(ui: Ui): HTMLElement {
@@ -129,7 +157,11 @@ export function registerDisplaySection(): void {
     (ui) => ({
       columns: [
         [windowGroup(ui), fullscreenGroup(ui)],
-        [framesGroup(ui), replaysGroup(ui)],
+        [
+          ...[rendererGroup(ui)].filter((group): group is HTMLElement => group !== null),
+          framesGroup(ui),
+          replaysGroup(ui),
+        ],
       ],
     }),
     {

@@ -59,6 +59,8 @@ SDL at the native client's pinned revision and compiles the actual backend and s
   an unknown legacy framebuffer are unspecified; borrow it explicitly when dimensions are needed.
   D3D11 tracks both values. `RasterState::clip_distance` controls GL clip distance zero;
   D3D11 always uses the shader clip distance and requires `no_clip_height` outside reflections. `poll(readback, true)` requests a nonblocking flush before polling.
+- The context releases orphaned owned handles when startup unwinds, so a failed D3D11 asset load releases
+  its GPU memory before OpenGL recovery. Borrowed presenter targets stay owned by the presenter.
 - Handles support explicit `bool`, `==` and `!=`; callers must not interpret their native fields.
   `destroy(ConstantBinding&)` releases the binding layout. D3D11 stage buffers are shared by the
   program's layouts and released with that program. Destroy bindings before their program.

@@ -3,6 +3,7 @@
 #include "app_icon.hpp"
 #include "gfx_window.hpp"
 #include "native_log.hpp"
+#include "window_frame.hpp"
 #include "../packaging/executable_identity.hpp"
 #include "../packaging/assets_identity.hpp"
 #include "../packaging/release_identity.hpp"
@@ -43,11 +44,13 @@ WindowAndGl create_window_and_gl(const Options &opt, gfx::Backend backend) {
     WindowPtr window(SDL_CreateWindow(native::app_name, 1280, 720, flags), &SDL_DestroyWindow);
     if (!window) throw std::runtime_error(std::string("Creating SDL window failed: ") + SDL_GetError());
     if (!native::set_app_icon(window.get())) std::cerr << "Could not set native app icon: " << SDL_GetError() << '\n';
+    sync_window_frame(window.get());
     if (backend != gfx::Backend::opengl) return {std::move(window), ContextPtr{}};
     ContextPtr context(SDL_GL_CreateContext(window.get()));
     if (!context) throw std::runtime_error(std::string("Creating OpenGL 3.3 core context failed: ") + SDL_GetError());
     if (!SDL_GL_MakeCurrent(window.get(), context.get())) throw std::runtime_error(SDL_GetError());
     SDL_GL_SetSwapInterval(opt.frames ? 0 : 1);
+    sync_window_frame(window.get());
     return {std::move(window), std::move(context)};
 }
 
@@ -79,6 +82,47 @@ void open_log_in_default_folder() {
     SDL_free(pref_path);
 }
 
+namespace {
+struct DataMoveResult {
+    std::string error;
+    std::exception_ptr display_error;
+};
+
+DataMoveResult move_with_display(
+        const std::filesystem::path &from,
+        const std::filesystem::path &to,
+        const std::filesystem::path &default_root,
+        DataMoveProgress &display
+) {
+    data_location::Progress progress;
+    DataMoveResult result;
+    std::atomic<bool> finished = false;
+    std::thread worker([&] {
+        try {
+            result.error = data_location::move(from, to, default_root, progress);
+        } catch (const std::exception &error) {
+            result.error = error.what();
+        }
+        finished = true;
+    });
+    while (!finished) {
+        SDL_Event ignored;
+        while (SDL_PollEvent(&ignored)) {
+        }
+        if (!result.display_error) {
+            try {
+                display.draw(to, double(progress.total.load()), double(progress.done.load()));
+            } catch (...) {
+                result.display_error = std::current_exception();
+            }
+        }
+        SDL_Delay(33);
+    }
+    worker.join();
+    return result;
+}
+}  // namespace
+
 DataPaths resolve_data_folder(const Options &opt, SDL_Window *, DataMoveProgress &display) {
     char *pref_path = SDL_GetPrefPath("bunnyhop.lol", "Bunnyhop Native");
     if (!pref_path) throw std::runtime_error("Cannot find the native client data directory");
@@ -105,26 +149,8 @@ DataPaths resolve_data_folder(const Options &opt, SDL_Window *, DataMoveProgress
                                   + " isn't available. The move will run once it is.";
         else {
             const auto from = location.active, to = *location.pending;
-            data_location::Progress progress;
-            std::string error;
-            std::atomic<bool> finished = false;
-            std::thread worker([&] {
-                try {
-                    error = data_location::move(from, to, default_root, progress);
-                } catch (const std::exception &e) {
-                    error = e.what();
-                }
-                finished = true;
-            });
-            while (!finished) {
-                // Quit is ignored: stopping halfway would leave data split across folders.
-                SDL_Event ignored;
-                while (SDL_PollEvent(&ignored)) {
-                }
-                display.draw(to, double(progress.total.load()), double(progress.done.load()));
-                SDL_Delay(33);
-            }
-            worker.join();
+            const auto moved = move_with_display(from, to, default_root, display);
+            const auto &error = moved.error;
             if (error.empty()) {
                 location = {to, std::nullopt};
                 data_startup_notice = "Game data moved to " + data_location::utf8(to);
@@ -138,6 +164,7 @@ DataPaths resolve_data_folder(const Options &opt, SDL_Window *, DataMoveProgress
                 std::cerr << "Data folder: " << e.what() << '\n';
             }
             std::cerr << "Data folder: " << data_startup_notice << '\n';
+            if (moved.display_error) std::rethrow_exception(moved.display_error);
         }
     }
     if (!data_location::same(location.active, default_root) && !folder_available(location.active)) {

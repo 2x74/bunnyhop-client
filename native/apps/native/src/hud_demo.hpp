@@ -88,7 +88,7 @@ inline void draw_hud_demo(
             weapon,
             "Jump 6 | 645 u/s (+87)\nGain 87.5%  Sync 94%  6 str",
             87.5f,
-            StrafeReading{108, StrafeHint::strafe_less},
+            StrafeReading{.percent = 108, .hint = StrafeHint::strafe_less, .last_jump = 100},
             true,
             nullptr,
             percent,

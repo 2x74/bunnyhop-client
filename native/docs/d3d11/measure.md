@@ -1,138 +1,47 @@
-# Compare Windows presentation paths
+# Compare Windows renderers
 
-This tool runs a local map without a game account, network client or recorded player inputs. It compares the current
-OpenGL swap/interop and native D3D11 with Low latency Off, On and Boost, each uncapped and capped at 240 fps.
-VSync is off in all twelve cases. It also measures GL compile/link and precompiled D3D11 program creation by key.
-D3D11 always presents through DXGI; its mode setting controls Reflex and Anti-Lag only.
+The tester compares OpenGL and D3D11 with Low latency Off, On and Boost, uncapped and capped at 240 FPS.
+It uses a local BSP without an account, upload or replay recording. D3D11 always presents through DXGI;
+its Low latency setting controls Reflex and Anti-Lag.
 
-## For testers
+## Run
 
-1. Open [D3D11 whole-game runs](https://github.com/2x74/bunnyhop-client/actions/workflows/d3d11-windows.yml).
-   Pick the successful run on `ci/d3d11-windows` whose commit the developer gave you. Under **Artifacts**, download
-   **renderer-measure-windows**, then extract the ZIP fully. GitHub may require a login to download an artifact;
-   running the extracted tool needs no account or token. Artifacts expire after 30 days; a developer can share the ZIP.
-2. Have a local Source BSP map and its game content available. Use the same map/content for every comparison.
-   The tool does not download maps. Plug in the PC, use your normal monitor refresh rate and VRR setting, close busy
-   applications, and keep the test window focused. Use the primary monitor. Do not change driver settings between runs.
-3. Open **Windows PowerShell as administrator** (Start menu, search PowerShell, right-click, Run as administrator).
-   Administrator access lets bundled PresentMon read presentation events through ETW. Without it, frame and GPU
-   measurements still work, but actual presentation mode can be unknown. Navigate to the extracted folder with `cd`.
-4. Run this one command, replacing the two example paths:
+Download `renderer-measure-windows` from the successful whole-game workflow run supplied by the contributor.
+Extract it fully. Have a local BSP and matching Source content ready. Plug in the PC, use the primary display,
+close busy applications and leave driver, VRR and refresh settings unchanged between cases.
 
-   ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\measure-renderer.ps1 -Map 'D:\Maps\bhop_lol_aero.bsp' -ContentRoot 'D:\Games\Counter-Strike Source\cstrike'
-   ```
-
-   `ContentRoot` is the directory with the map's materials, models and game packs. Omit it for a self-contained map.
-   The tool uses your desktop's pixel resolution in borderless fullscreen. Leave it focused and unobscured; overlays,
-   notifications, other displays and the desktop compositor can affect the actual presentation path. Escape cancels.
-   Three repeats alternate forward/reverse case order; each case has 300 warmup frames and 3,000 measured frames.
-   Allow a few minutes. For a shorter check add `-Repeats 1 -Frames 1000`. Do not use a short check as the final comparison.
-5. Paste **renderer-measurement\summary.txt** into Discord yourself, and attach **measurement.json** if requested.
-   These contain GPU/driver/OS strings, a map SHA-256, camera coordinates and performance data. They omit local paths,
-   process IDs, timestamps identifying a session, account names and tokens. Temporary specs, stderr and raw ETW CSVs
-   are deleted. Nothing is uploaded by the tool. An unavailable mode is reported; it is never silently replaced by Off.
-
-If the shader step fails, check that the ZIP was fully extracted and that the PC supports OpenGL 3.3. OpenGL On/Boost also
-require WGL_NV_DX_interop2; native D3D11 needs no GL context or interop. Boost changes NVIDIA clock policy when Reflex supports it; on other GPUs it can behave
-like On. A hybrid-GPU laptop can fail interop if GL and D3D cannot use the same adapter. A failed capture produces an
-error instead of comparing incomplete data. Re-run after fixing the setup. Very large desktops above 4096 pixels on
-either axis need a lower desktop resolution for this benchmark.
-
-Native D3D11 reports delayed timestamp/disjoint GPU queries. Its shader probe requests all 135 manifest keys
-from embedded DXBC and measures lookup, reflection and program creation. It excludes input layouts, constant
-bindings, pipeline state and first draws. An unavailable D3D11 case has a failure reason and no timing samples.
-
-## What the report measures
-
-- Frame wall time: p50, p95, p99, p99.9, maximum, mean, derived average fps, every measured frame and the 20 worst
-  frame indices. Percentiles use sorted samples at `floor(N * percentile)` (clamped to the last sample).
-- CPU elapsed time per phase, including presenter pacing, input pump, simulation, feedback, diagnostics, heartbeat,
-  actor preparation, render start, world, HUD, swap, queue fencing and the fps limiter. Renderer subphases and work
-  counts are retained for the final frame. These are wall-clock CPU intervals, including waits, rather than CPU thread-cycle time.
-- OpenGL `GL_TIME_ELAPSED` queries around world and HUD submission, excluding interop lock/unlock and presentation.
-  A delayed ring reads completed queries without waiting in the measured loop. Unsupported/missed samples are null.
-- On/Boost: CPU time inside the interop lock and unlock calls, CPU time submitting the orientation-correcting D3D
-  triangle copy, D3D11 timestamp/disjoint queries around that copy, and CPU time inside `Present`. The current copy is
-  a shader blit, not `CopyResource`. These GPU intervals come from different API queues and must not be added as
-  though they formed one continuous end-to-end interval. Timestamp collection/Reflex polling adds some overhead.
-- On NVIDIA where available: `NvAPI_D3D_GetLatency` reports for completed frames, with simulation, render-submit,
-  present, driver, OS render-queue, GPU and GPU-active durations. Report frame IDs include warmup; subtract warmup
-  plus one to relate them to zero-based measured frame indices. Reports can lag the application, so the last frames
-  may be absent. These are reports for the interop D3D device; its GPU interval may omit GL work. A missing endpoint
-  yields null, never a fabricated zero. Unsupported APIs have a status/reason.
-- PresentMon 2.6.0 ETW `PresentMode` counts, filtered to the benchmark process and measured QPC interval. Hardware
-  Independent Flip and composed modes are observed labels, rather than conclusions drawn from a flip-discard flag.
-  If ETW is unavailable the mode is unknown. Counts cover the whole measured interval and can include transitions.
-- Player material shader compilation: vertex, fragment and link time for 124 lazy cache keys (solid finishes 0–27,
-  glove/detail combinations, ghost, gun and world gun). The probe uses `player_defines` and the same generated GLSL
-  selection as `NativeViewmodel::link_player_program`. Identical shader sources under different cache keys are
-  intentionally included. Each program is requested once at runtime and retained, as in the lazy cache. This isolated
-  probe excludes uniform lookup, first-draw specialization and all other map/texture loading hitches.
-
-The camera follows the same frame-indexed 16-unit circle with a 360-degree yaw sweep and 10-degree pitch sine in each
-case, starting at the map spawn. Warmup uses the initial pose. One canonical simulation tick runs per frame, giving
-matched simulation work across fps limits; this is a comparison workload rather than real-time play. Shader/actor
-animation clocks still use wall time. The report records the camera origin, resolution, frame count and settings.
-It uses the benchmark's default renderer settings; audio, menus, networking and real mouse input are absent.
-
-Driver shader caches remain intact. The first run can be slower, and repeated runs reveal cached compilation rather
-than a guaranteed clean-driver install. Do not call these cold-cache numbers. D3D11 HLSL compilation runs at
-build time; first-draw and pipeline/driver-cache costs need separate measurements.
-
-Software timers cannot measure end-to-end click-to-photon latency. They do not include mouse electronics, all input
-transport, display scanout or pixel response. In the normal game's Reflex flash-indicator mode, a click emits a
-flash marker that a compatible Reflex Analyzer monitor/mouse can observe. An LDAT or another optical sensor paired
-with a physical input trigger measures the actual input-to-light interval. Those hardware measurements add the
-missing display/input portion and should be taken separately during actual gameplay; this scripted camera tool does
-not generate physical clicks or claim an end-to-end latency number.
-
-## Build and run without Windows
-
-From `native/`:
-
-```sh
-bun install --frozen-lockfile
-bun apps/native/build.ts
-apps/native/build/bunnyhop-native-shader-benchmark target/native-assets target/player-shader-times.json
-```
-
-The shader tool works on Windows, Linux with a GL context, and macOS. On macOS it creates an offscreen CGL context;
-no SDL window or desktop automation is used. On a Linux machine without a display, provide an EGL/SDL offscreen
-video driver supported by that installation. Shader timings are local output, not a committed hardware baseline.
-The existing native/web `compare-render-performance.py` and plotting tool measure synchronized scene throughput with
-a different schema; use the PowerShell tool for this presentation comparison.
-
-## WARP CI and backend notes
-
-The whole-game `.github/workflows/d3d11-windows.yml` runs on `ci/d3d11-windows` and uploads
-`d3d11-whole-game-evidence` plus `renderer-measure-windows`. It uses frozen assets/maps and locally generated
-OpenGL reference images. Renderer startup recovery, every render fixture, the hidden client and the tester's
-precompiled-program and GPU-query paths run under WARP. WARP timing samples are correctness checks, not GPU speed.
-
-The older `d3d11-warp.yml` standalone experiment remains separate. Its probe needs only the Windows SDK and MSVC:
+Open an administrator PowerShell in the extracted folder, then run:
 
 ```powershell
-cmake -S native/apps/native/tools/d3d11-warp -B warp-build -A x64
-cmake --build warp-build --config Release
-.\warp-build\Release\d3d11-warp-probe.exe warp-evidence
+powershell -NoProfile -ExecutionPolicy Bypass -File .\measure-renderer.ps1 `
+  -Map 'D:\Maps\bhop_lol_aero.bsp' -ContentRoot 'D:\Games\Counter-Strike Source\cstrike'
 ```
 
-Check the build exit code before running the executable. **d3d11-warp-evidence** contains `report.json` and four PNGs:
-colour/cube/clip/MSAA, shader-resolved depth, a copied subregion and compute UAV output. Every pixel is checked by the
-program before success. It requests only WARP at feature level 11_0 and compiles SM5 shaders through
-`d3dcompiler_47.dll`. It exercises a 4x MSAA colour/depth target, colour resolve, `Texture2DMS` depth resolve writing
-`SV_Depth`, cube sampling, `SV_ClipDistance`, `CopySubresourceRegion`, staging readback, compute UAV writes and timestamp
-queries. Per-sample colour/depth values differ, so the checks distinguish colour averaging and minimum-depth resolve
-from copying sample zero. Stage wall times include shader compilation, readback and PNG writing; the timestamp interval includes
-queue idles between stages, so neither is a hardware GPU performance estimate. Failure is fatal for offscreen tests.
+Omit `ContentRoot` for a self-contained map. The tool uses the desktop resolution in borderless fullscreen.
+Three repeats alternate case order, with 300 warmup and 3,000 measured frames per case. Escape cancels.
+For setup checks only, add `-Repeats 1 -Frames 1000`. Desktops above 4096 pixels on either axis need lowering.
 
-The separate session probe creates an HWND and a real flip-discard swapchain and attempts `Present(0, 0)`. Its HRESULTs
-and occlusion status are reported; failure is nonfatal. Even a successful swapchain/Present does not prove scanout or
-independent flip on the hosted runner. WARP validates D3D11 API/shader/pixel semantics, not hardware performance,
-WGL interop, Reflex, Anti-Lag, tearing/VRR or real monitor latency. The whole-game fixture uses the production backend and skips the runner's OpenGL 1.1 implementation.
+Share `renderer-measurement/summary.txt` and `measurement.json` manually. They contain GPU, driver, OS,
+map digest, camera and performance data; the tool uploads nothing. Unavailable modes have a failure reason.
+OpenGL On/Boost require WGL interop on the same adapter. D3D11 needs no GL context. Boost requires Reflex.
 
-Only the gameplay benchmark compiles an instrumented copy of the existing presenter. `measure-presenter.cmake`
-inserts measurement hooks at checked source anchors and fails configuration if those anchors move. The normal client
-still compiles `low_latency_windows.cpp` directly. Keep those anchors in sync if presenter code changes. The tester selects its own renderer from the spec and leaves player preferences, gameplay rules, replays, verifier
-and release identity unchanged.
+## Interpretation
+
+The report includes frame percentiles and worst frames, CPU phase times, delayed GPU timestamp queries,
+Reflex reports when available, shader creation times and PresentMon presentation modes. Administrator access
+lets PresentMon use ETW; without it the actual presentation mode can be unknown. Warmup is excluded.
+
+CPU phase durations include waits. GL, interop and D3D intervals come from separate queues and cannot be added
+into an end-to-end latency measurement. Driver shader caches remain intact. The D3D shader probe measures
+lookup, reflection and program creation, excluding first draws and pipeline setup.
+
+The benchmark runs matched simulation work per rendered frame with a scripted camera. It does not measure a
+physical mouse, audio, menus or input-to-light latency. Use actual gameplay and optical hardware for that.
+WARP output establishes API and pixel behavior, not real GPU speed, Reflex, VRR or monitor latency.
+
+## Build
+
+`apps/native/tools/build-measure-windows.ps1` builds the client, tester and pinned dependencies in an x64 MSVC
+shell. The [whole-game workflow](../../../.github/workflows/d3d11-windows.yml) packages this tool and captures
+frozen fixtures. Instrumentation is compiled only into the gameplay benchmark; keep checked source anchors in
+`measure-presenter.cmake` synchronized when changing the presenter.

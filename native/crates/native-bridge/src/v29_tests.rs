@@ -109,12 +109,43 @@ fn null_binds_flag_matches_the_website_header() {
 }
 
 #[test]
+fn w_release_flag_matches_the_website_header() {
+    let plain = sample_recording(BhRecordOptionsV29::default())
+        .encode_raw()
+        .unwrap();
+    assert_eq!(u16::from_le_bytes(plain[6..8].try_into().unwrap()) & 32, 0);
+    let info: serde_json::Value =
+        serde_json::from_slice(replay::Decoded::parse(&plain).unwrap().info.as_bytes()).unwrap();
+    assert!(info.get("wRelease").is_none());
+    let raw = sample_recording(BhRecordOptionsV29 {
+        w_release: 1,
+        ..BhRecordOptionsV29::default()
+    })
+    .encode_raw()
+    .unwrap();
+    // replay.ts FLAG_W_RELEASE = 1 << 5
+    assert_eq!(u16::from_le_bytes(raw[6..8].try_into().unwrap()) & 32, 32);
+    let info: serde_json::Value =
+        serde_json::from_slice(replay::Decoded::parse(&raw).unwrap().info.as_bytes()).unwrap();
+    assert_eq!(info["wRelease"], true);
+    // Only the flag differs: the commands are recorded as they went out.
+    let mut flagged = raw;
+    flagged[6] &= !32;
+    assert_eq!(flagged, plain);
+    let invalid = BhRecordOptionsV29 {
+        w_release: 2,
+        ..BhRecordOptionsV29::default()
+    };
+    assert!(invalid.checked().is_err());
+}
+
+#[test]
 fn v29_layout_freezing_and_observation_preserve_simulation() {
-    assert_eq!(size_of::<BhRecordOptionsV29>(), 24);
+    assert_eq!(size_of::<BhRecordOptionsV29>(), 28);
     assert_eq!(size_of::<BhTimingSegmentV2>(), 72);
-    assert_eq!(bh_v29_check_abi(1, 24, 72), 1);
-    assert_eq!(bh_v29_check_abi(2, 24, 72), 0);
-    assert_eq!(bh_v29_check_abi(1, 20, 72), 0);
+    assert_eq!(bh_v29_check_abi(1, 28, 72), 1);
+    assert_eq!(bh_v29_check_abi(2, 28, 72), 0);
+    assert_eq!(bh_v29_check_abi(1, 24, 72), 0);
     let fixture = Fixture::new();
     let map = fixture.file("fixture.bsp", &bsp(&[]));
     unsafe {
@@ -152,7 +183,22 @@ fn v29_layout_freezing_and_observation_preserve_simulation() {
         options.null_binds = 1;
         assert_eq!(bh_record_options_v29(c, &options), 1);
         options.null_binds = 0;
+        options.w_release = 1;
         assert_eq!(bh_record_options_v29(c, &options), 1);
+        options.w_release = 0;
+        assert_eq!(bh_record_options_v29(c, &options), 1);
+        assert_eq!(
+            (*c).map
+                .as_ref()
+                .unwrap()
+                .recorder
+                .as_ref()
+                .unwrap()
+                .data
+                .options
+                .w_release,
+            1
+        );
         assert_eq!(
             (*c).map
                 .as_ref()

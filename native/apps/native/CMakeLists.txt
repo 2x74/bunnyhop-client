@@ -162,12 +162,26 @@ if(BUNNYHOP_BUILD_CLIENT)
     find_package(ZLIB REQUIRED)
     find_package(Threads REQUIRED)
     if(BUILD_TESTING)
+        add_executable(bunnyhop-native-gfx-resource-owners-tests src/gfx_resource_owners_tests.cpp)
+        target_compile_options(bunnyhop-native-gfx-resource-owners-tests PRIVATE
+            $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+        add_test(NAME native_gfx_resource_owners COMMAND bunnyhop-native-gfx-resource-owners-tests)
         add_executable(bunnyhop-native-renderer-startup-tests src/renderer_startup_tests.cpp)
         target_include_directories(bunnyhop-native-renderer-startup-tests PRIVATE src vendor)
         target_compile_definitions(bunnyhop-native-renderer-startup-tests PRIVATE BUNNYHOP_MENU_HTML="")
         target_compile_options(bunnyhop-native-renderer-startup-tests PRIVATE
             $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
         target_link_libraries(bunnyhop-native-renderer-startup-tests PRIVATE SDL3::SDL3)
+        if(WIN32)
+            target_sources(bunnyhop-native-renderer-startup-tests PRIVATE src/renderer_prompt_windows.cpp)
+            target_link_libraries(bunnyhop-native-renderer-startup-tests PRIVATE comctl32)
+            add_executable(bunnyhop-native-renderer-prompt-smoke
+                src/renderer_prompt_smoke_windows.cpp src/renderer_prompt_windows.cpp
+                packaging/windows/bunnyhop-native.manifest)
+            target_compile_options(bunnyhop-native-renderer-prompt-smoke PRIVATE
+                $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+            target_link_libraries(bunnyhop-native-renderer-prompt-smoke PRIVATE comctl32 gdi32)
+        endif()
         add_test(NAME native_renderer_startup COMMAND bunnyhop-native-renderer-startup-tests)
         add_executable(bunnyhop-native-keyboard-event-tests src/keyboard_event_tests.cpp)
         target_include_directories(bunnyhop-native-keyboard-event-tests PRIVATE include vendor src)
@@ -332,7 +346,15 @@ if(BUNNYHOP_BUILD_CLIENT)
         configure_file(packaging/windows/app.rc.in generated/app.rc @ONLY)
         target_sources(bunnyhop-native PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated/app.rc"
             src/display_scaling_windows.cpp src/low_latency_windows.cpp src/anti_lag_windows.cpp
-            src/play_priority_windows.cpp)
+            src/play_priority_windows.cpp src/window_frame_windows.cpp src/console_windows.cpp
+            src/renderer_prompt_windows.cpp
+            packaging/windows/bunnyhop-native.manifest)
+        # A windowed program, so no terminal opens with the game (console_host.hpp brings one back when it's wanted).
+        # main() stays the entry point rather than WinMain.
+        set_target_properties(bunnyhop-native PROPERTIES WIN32_EXECUTABLE TRUE)
+        if(MSVC)
+            target_link_options(bunnyhop-native PRIVATE /ENTRY:mainCRTStartup)
+        endif()
         # AMD's Anti-Lag 2 header relies on MSVC extensions (a pure virtual destructor with a body, static_cast from
         # void* to a function pointer). Build it only when this compiler takes it; otherwise there is no Anti-Lag 2.
         include(CheckCXXSourceCompiles)
@@ -350,7 +372,7 @@ if(BUNNYHOP_BUILD_CLIENT)
         if(BUNNYHOP_ANTI_LAG_COMPILES)
             set_source_files_properties(src/anti_lag_windows.cpp PROPERTIES COMPILE_DEFINITIONS BUNNYHOP_ANTI_LAG)
         endif()
-        target_link_libraries(bunnyhop-native PRIVATE d3d11 dxgi winmm avrt)
+        target_link_libraries(bunnyhop-native PRIVATE d3d11 dxgi winmm avrt dwmapi comctl32)
         include(packaging/WebView2.cmake)
         bunnyhop_windows_menu(bunnyhop-native)
     elseif(UNIX)
@@ -557,7 +579,9 @@ if(BUILD_TESTING)
         set_tests_properties(native_mouse_rate PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30)
         add_executable(bunnyhop-native-window-sdl-tests src/window_sdl_tests.cpp)
         if(WIN32)
-            target_sources(bunnyhop-native-window-sdl-tests PRIVATE src/display_scaling_windows.cpp)
+            target_sources(bunnyhop-native-window-sdl-tests PRIVATE
+                src/display_scaling_windows.cpp src/window_frame_windows.cpp)
+            target_link_libraries(bunnyhop-native-window-sdl-tests PRIVATE dwmapi)
         endif()
         target_include_directories(bunnyhop-native-window-sdl-tests PRIVATE vendor src)
         target_link_libraries(bunnyhop-native-window-sdl-tests PRIVATE SDL3::SDL3)
@@ -760,6 +784,19 @@ if(BUILD_TESTING)
     target_include_directories(bunnyhop-native-timed-input-parity-tests PRIVATE include vendor src)
     add_test(NAME native_timed_input_parity COMMAND bunnyhop-native-timed-input-parity-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/src/timed_input_vectors.json")
+    # Golden vectors from the web's strafe trainer; regenerate with native/tools/strafe-trainer-bar/generate-vectors.ts.
+    add_executable(bunnyhop-native-strafe-trainer-bar-tests src/strafe_trainer_bar_tests.cpp)
+    target_include_directories(bunnyhop-native-strafe-trainer-bar-tests PRIVATE include vendor src)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(bunnyhop-native-strafe-trainer-bar-tests PRIVATE -ffp-contract=off)
+    endif()
+    add_test(NAME native_strafe_trainer_bar COMMAND bunnyhop-native-strafe-trainer-bar-tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/strafe_trainer_bar_vectors.json")
+    # Golden vectors from the web's WRelease; regenerate with native/tools/w-release/generate-vectors.ts.
+    add_executable(bunnyhop-native-w-release-parity-tests src/w_release_parity_tests.cpp)
+    target_include_directories(bunnyhop-native-w-release-parity-tests PRIVATE include vendor src)
+    add_test(NAME native_w_release_parity COMMAND bunnyhop-native-w-release-parity-tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/w_release_vectors.json")
     # Turn-bind admission oracle for the optional server cross-check
     # (crates/native-bridge/tools/check-native-turn-admission.ts); built, not run by CTest.
     add_executable(bunnyhop-native-input-turn-oracle src/native_input_turn_oracle.cpp)

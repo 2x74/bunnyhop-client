@@ -33,6 +33,7 @@ test("the ranked line says whether the server lists the new build", () => {
   const now = 1_800_000_000_000;
   const listed = { wasm, native: [{ build, wasm, until: now + 1000 }] };
   expect(rankedState(listed, build, wasm, now)).toBe("allowed");
+  expect(rankedState({ wasm: "bunnyhop-web/ffffffffffff", native: listed.native }, build, wasm, now)).toBe("allowed");
   expect(rankedState({ wasm, native: [] }, build, wasm, now)).toBe("waiting");
   expect(rankedState({ wasm, native: [{ build, wasm, until: now - 1 }] }, build, wasm, now)).toBe("waiting");
   expect(rankedState(null, build, wasm, now)).toBe("unknown");

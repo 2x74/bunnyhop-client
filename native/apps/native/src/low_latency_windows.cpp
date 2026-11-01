@@ -1,4 +1,5 @@
 #include "low_latency.hpp"
+#include "window_frame.hpp"
 #include "anti_lag_windows.hpp"
 #include "gfx_d3d11.hpp"
 #include <windows.h>
@@ -490,8 +491,9 @@ struct LowLatencyPresenter::Impl {
 LowLatencyPresenter::LowLatencyPresenter() = default;
 
 void LowLatencyPresenter::fail(std::string reason) {
-    std::cerr << "Low latency mode: " << reason << '\n';
+    std::cerr << (native_ ? "D3D11: " : "Low latency mode: ") << reason << '\n';
     if (!native_) impl_.reset();
+    failed_ = true;
     error_ = reason;
     failure_ = std::move(reason);
 }
@@ -530,6 +532,7 @@ bool LowLatencyPresenter::configure(SDL_Window *window, LowLatencyMode mode, int
     if (!impl_) {
         auto created = std::make_unique<Impl>();
         if (!created->create(window, error_)) return false;
+        sync_window_frame(window);
         impl_ = std::move(created);
     }
     const unsigned interval_us = fps_limit > 0 ? microseconds_per_second / unsigned(fps_limit) : 0;
@@ -541,6 +544,10 @@ bool LowLatencyPresenter::configure(SDL_Window *window, LowLatencyMode mode, int
     impl_->use_anti_lag = enabled && !impl_->use_reflex && support_.anti_lag && anti_lag::initialize();
     impl_->anti_lag_fps = fps_limit > 0 ? unsigned(fps_limit) : 0;
     impl_->flash_indicator = flash_indicator;
+    if (native_ && enabled && !impl_->use_reflex && !impl_->use_anti_lag) {
+        error_ = "NVIDIA Reflex and AMD Anti-Lag 2 are unavailable on this device";
+        return false;
+    }
     return true;
 }
 
@@ -560,9 +567,13 @@ bool LowLatencyPresenter::initialize_native(SDL_Window *window, bool warp) {
 bool LowLatencyPresenter::exclusive(bool enabled) {
     if (!native_ || !impl_ || impl_->fullscreen == enabled) return true;
     const HRESULT result = impl_->swapchain->SetFullscreenState(enabled ? TRUE : FALSE, nullptr);
-    if (FAILED(result)) {
+    if (result != S_OK) {
         error_ = hresult_text("Changing DXGI fullscreen", result);
-        std::cerr << error_ << '\n';
+        SDL_SetError("%s", error_.c_str());
+        if (result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET)
+            fail(error_);
+        else
+            std::cerr << error_ << '\n';
         return false;
     }
     impl_->fullscreen = enabled;
@@ -641,6 +652,7 @@ void LowLatencyPresenter::render_start(int width, int height) {
 }
 
 void LowLatencyPresenter::present(bool vsync) {
+    presented_ = false;
     if (!impl_ || (!impl_->native && !impl_->locked)) return;
     auto &state = *impl_;
     if (!state.native) {
@@ -654,6 +666,7 @@ void LowLatencyPresenter::present(bool vsync) {
     }
     const UINT flags = !vsync && state.tearing && !state.fullscreen ? DXGI_PRESENT_ALLOW_TEARING : 0;
     const HRESULT result = state.swapchain->Present(vsync ? 1 : 0, flags);
+    presented_ = result == S_OK;
     if (state.use_reflex) reflex().marker(state.device.Get(), state.frame_id, PRESENT_END);
     if (FAILED(result)) {
         std::string error = hresult_text("Present", result);

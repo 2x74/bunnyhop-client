@@ -153,6 +153,8 @@ int bh_record_loadout(BhContext *ctx, const char *packed_loadout);
 int bh_record_identity(BhContext *ctx, const char *client_build);
 /* Writes a new gzip .bhr from retained native commands/checkpoints. Requires an ended, valid, finished run. */
 int bh_record_write_bhr(BhContext *ctx, const char *path);
+/* Saves an active recording locally in the existing BHR format, with no finish ticks. Does not end recording. */
+int bh_record_recovery_bhr(BhContext *ctx, const char *path);
 /* FNV-1a fold of canonical commands [from_index,to_index), as shared run-hash.ts. */
 int bh_record_fold(BhContext *ctx, uint32_t hash, size_t from_index, size_t to_index, uint32_t *out_hash);
 /* Last recording summary JSON; available after end/invalidation. */
@@ -170,6 +172,7 @@ uint32_t bh_abi_version(void);
 #define BH_TIMING_PATH_VERSION 2
 #define BH_FLAG_NULL_BINDS (1u << 3)
 #define BH_FLAG_TIMED_INPUT (1u << 4)
+#define BH_FLAG_W_RELEASE (1u << 5)
 #define BH_IN_TURN_FAST (1u << 6)
 
 typedef struct BhRecordOptionsV29 {
@@ -177,6 +180,7 @@ typedef struct BhRecordOptionsV29 {
     float yaw_speed, angle_speed_key; /* f32, inclusive 60..720 / 1..4 */
     uint32_t timed_input;             /* sticky after real timed input contributes, 0 or 1 */
     uint32_t null_binds;              /* sticky once null binds resolve a recorded command, 0 or 1 */
+    uint32_t w_release;               /* sticky once Release W on jump is on for a recorded command, 0 or 1 */
 } BhRecordOptionsV29;
 
 typedef struct BhTimingSegmentV2 {
@@ -187,7 +191,7 @@ typedef struct BhTimingSegmentV2 {
 
 int bh_v29_check_abi(uint32_t version, size_t record_size, size_t segment_size);
 /* Begin first. Default frozen pair 210/2; set custom rates before the first command.
- * Later calls may mark timed_input or null_binds; rates cannot change. New BHRs append BHTS. */
+ * Later calls may mark timed_input, null_binds or w_release; rates cannot change. New BHRs append BHTS. */
 int bh_record_options_v29(BhContext *ctx, const BhRecordOptionsV29 *options);
 /* After bh_replay_load/seek on the live context: preserve full world/timer/filter
  * state, leave playback, invalidate ranked recording. Current map/style/settings/

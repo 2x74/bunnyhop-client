@@ -96,8 +96,8 @@ public:
 #endif
     }
 
-    // Arguments are UTF-8. On Windows a tool runs without a console window; the game gets its own console, as
-    // relaunch.hpp starts it.
+    // Arguments are UTF-8. On Windows a tool runs without a console window. The game is offered its own console,
+    // which only matters when rolling back to a release from when it was a console program.
     static Child
     start(const fs::path &program,
           const std::vector<std::string> &arguments,

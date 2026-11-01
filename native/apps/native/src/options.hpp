@@ -17,6 +17,8 @@ struct Options {
          menu_home_smoke = false;
     // Comparator: the pre-0.5.2 per-frame proration and latest-polled keys instead of timestamped input.
     bool legacy_input = false;
+    // Windows only, read before parsing (console_host.hpp). Accepted everywhere so a support line works on any system.
+    bool console = false;
     std::string style = "autohop", replay, tutorial_lesson, runtime_smoke, video_smoke, presentation_smoke, room_smoke;
     bool tutorial_demo = false;
     // Render checks: a fixed eye (Source x, y, z) and pitch, yaw, with no HUD or viewmodel.

@@ -66,6 +66,8 @@ Options options(int argc, char **argv) {
             out.windowed = true;
         else if (arg == "--legacy-input")
             out.legacy_input = true;
+        else if (arg == "--console")
+            out.console = true;
         else if (arg == "--content-root")
             out.content_root = value();
         else if (arg == "--screenshot")
@@ -129,12 +131,14 @@ Options options(int argc, char **argv) {
 void print_help(std::ostream &output) {
     output << "Usage: bunnyhop-native [--map MAP.bsp | --online-map NAME] [--content-root DIR] "
               "[--sensitivity 2] [--renderer opengl|d3d11]\n"
+              "  --renderer opengl|d3d11 (Windows only; overrides Settings for this launch; default: opengl)\n"
               "  [--menu-html PATH] [--no-menu] [--windowed] [--legacy-input] [--frames N] [--screenshot "
               "output.ppm] [--camera x,y,z,pitch,yaw] [--hidden]\n"
               "  [--render-fixture OUTPUT_DIR] (isolated settings and 1280x720 pixels with --map and --frames)\n"
               "  [--runtime-smoke OUTPUT_DIR --replay PATH] (offline lifecycle checks with --map; private "
               "data, no network)\n"
               "  [--room-smoke DIR] (with --map: replays DIR/room.jsonl, saves the frames in DIR/shots.json)\n"
+              "  [--console] (Windows: open a console for the game's log; the file in logs/ always has it)\n"
               "  [--tutorial jump|strafe|speed|final] [--tutorial-demo] (tutorial map only)\n"
               "  [--menu-smoke OUTPUT_PREFIX] (with --online-map; live API reads only, no scores)\n"
               "  [--menu-home-smoke OUTPUT_PREFIX] (home menu over the real map tour backdrop; no gameplay "

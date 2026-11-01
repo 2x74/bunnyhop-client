@@ -18,6 +18,50 @@ std::string read(const std::filesystem::path &path) {
     return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
 }
 
+void interrupted_recording(const std::filesystem::path &root) {
+    const std::unique_ptr<BhContext, decltype(&bh_destroy)> core(bh_create(), bh_destroy);
+    assert(core
+           && bh_load_map(
+                   core.get(),
+                   native::data_location::utf8(root / "fixture.bsp").c_str(),
+                   native::data_location::utf8(root).c_str()
+           ));
+    BhRunOptions options{};
+    bh_default_run_options(&options);
+    const BhZone zones[] = {
+            {0, 0, 0, {-100, -100, -10000}, {100, 100, 1000}}, {1, 0, 0, {150, -100, -10000}, {1000, 100, 1000}}
+    };
+    assert(bh_run_configure(core.get(), &options, zones, 2));
+    native::RunRecorder recorder;
+    recorder.begin(core.get(), root, "interrupted", "bunnyhop-native/test", "autohop", "player", {}, "");
+    BhState state{};
+    BhCmd command{};
+    command.forward = 450;
+    for (unsigned tick = 0; tick < 8; ++tick)
+        assert(bh_step(core.get(), &command, &state));
+    const auto expected_path = native::data_location::utf8(root / "interrupted-direct.bhr");
+    const auto before = state;
+    size_t snapshot_size = 0;
+    const auto *snapshot = bh_snapshot_bytes(core.get(), &snapshot_size);
+    assert(snapshot);
+    const std::string snapshot_before(reinterpret_cast<const char *>(snapshot), snapshot_size);
+    assert(!bh_record_write_bhr(core.get(), expected_path.c_str()));
+    assert(bh_record_recovery_bhr(core.get(), expected_path.c_str()));
+    snapshot = bh_snapshot_bytes(core.get(), &snapshot_size);
+    assert(snapshot && std::string(reinterpret_cast<const char *>(snapshot), snapshot_size) == snapshot_before);
+    assert(!recorder.preserve_interrupted(core.get()).empty());
+    assert(recorder.ended && !recorder.input.active());
+    assert(read(native::data_location::from_utf8(recorder.path)) == read(root / "interrupted-direct.bhr"));
+    assert(recorder.preserve_interrupted(core.get()).empty());
+    const auto replay = native::ReplaySession::open(core.get(), native::data_location::from_utf8(recorder.path));
+    assert(replay.range.total == 8 && replay.range.to == 8);
+    assert(replay.info.at("endTick") == 0);
+    const auto restored = replay.seek(core.get(), 8);
+    assert(restored.snapshot.player.tick == before.tick);
+    for (unsigned axis = 0; axis < 3; ++axis)
+        assert(restored.snapshot.player.position[axis] == before.position[axis]);
+}
+
 void invalidation() {
     using Reset = native::RunHeartbeat::Reset;
     for (const auto reset : {Reset::range, Reset::start, Reset::generation}) {
@@ -208,5 +252,6 @@ int main() {
 
     std::filesystem::create_directories(root / "replays");
     recording(root);
+    interrupted_recording(root);
     segmented_load(root);
 }

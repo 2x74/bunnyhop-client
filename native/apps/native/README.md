@@ -59,6 +59,9 @@ Settings → Mouse → Show input stats overlays delivered reports per second, p
 frame time per phase, and flags stalls over 50 ms. It also names the backend and reports motion timestamp jitter.
 These measure delivered motion, including SDL timestamp estimates, rather than the USB polling rate.
 
+Keys → Release W on jump works as on the website: a jump taken holding W lets go of forward until you land or press W
+again. It's off by default, not available in Legit Scroll, W-Only, Sideways or Half-Sideways, and marked in the replay.
+
 Mouse → Advanced → Native input selects Auto, SDL or experimental Raw. Auto keeps SDL. Raw reads relative HID
 counts with device timestamps on macOS (requires Input Monitoring) or evdev packets with monotonic kernel times on
 Linux (requires access to the mouse device nodes). Buttons and keys keep SDL. Windows keeps SDL's raw-input thread;
@@ -189,6 +192,11 @@ reads `cancel` on stdin:
 apps/native/build/bunnyhop-native --export-video /path/to/spec.json
 ```
 
+On Windows the game is a windowed program: no terminal opens with it, and the log is in `logs/` in the game data
+folder (Settings → Game data). From a terminal it still prints there, but the shell doesn't wait for it, so pipe it to
+wait or to send `cancel` (`bunnyhop-native.exe --export-video spec.json | Out-Host` in PowerShell). `--console` opens a
+console of its own for support.
+
 ```json
 {
   "cache": "/path/to/data",
@@ -278,6 +286,13 @@ the repository's and the vendored Source-related notices. The JSON header is nlo
 
 ![Combined native Loadout preview](../../../docs/images/native-loadout-combined.png)
 
-On Windows, `--renderer d3d11` opts into the D3D11 renderer. OpenGL remains the default. The persisted
-`renderer` setting accepts `opengl` or `d3d11` and takes effect after restart; there is no menu control yet.
-D3D11 startup failures and a previous startup crash recover to OpenGL with a notice.
+Windows offers a one-time renderer choice before the game starts, with OpenGL selected. Settings → Display →
+Renderer offers OpenGL and Direct3D 11; changes take effect after restart. Linux and macOS use OpenGL.
+`--renderer opengl` or `--renderer d3d11` overrides the setting for one launch. Video export uses its own OpenGL
+process with either gameplay renderer.
+
+If Direct3D 11 cannot initialize, the game shows the reason and starts with OpenGL. Two interrupted D3D11
+startups also select OpenGL, keeping the saved setting. `--renderer d3d11` retries it. Three successfully
+presented frames clear the startup guard. Device loss saves the unfinished replay locally and restarts the
+session on OpenGL; completed replays stay in the vault. Renderer diagnostics accompany GPU information and
+leave replay bytes and release identity unchanged.

@@ -23,6 +23,7 @@ public:
     TargetView current_target() const;
     void reset_state();
     int max_texture_size() const;
+    bool device_lost() const;
     void check_error(const char *message);
     Program create_program(const ProgramDesc &source);
     void destroy(Program &program);

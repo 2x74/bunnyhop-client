@@ -1,4 +1,5 @@
 #include "gfx_d3d11.hpp"
+#include "gfx_resource_owners.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cstring>
@@ -234,6 +235,9 @@ struct D3D11Context::Impl {
     ComPtr<ID3D11ShaderResourceView> borrowed_color_srv;
     D3D11_TEXTURE2D_DESC borrowed_color_desc{};
     DXGI_FORMAT borrowed_color_view = DXGI_FORMAT_UNKNOWN;
+    ResourceOwners allocations;
+
+    ~Impl() { context->ClearState(); }
 
     Impl(D3D11Device borrowed)
         : device(static_cast<ID3D11Device *>(borrowed.device))
@@ -624,6 +628,10 @@ int D3D11Context::max_texture_size() const {
     return D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION;
 }
 
+bool D3D11Context::device_lost() const {
+    return FAILED(impl_->device->GetDeviceRemovedReason());
+}
+
 void D3D11Context::check_error(const char *message) {
     checked(impl_->device->GetDeviceRemovedReason(), message);
     ComPtr<ID3D11InfoQueue> diagnostics;
@@ -647,7 +655,7 @@ Program D3D11Context::create_program(const ProgramDesc &source) {
     for (auto *geometry : impl_->geometries)
         impl_->input_layout(*geometry, *result);
     impl_->programs.push_back(result.get());
-    return {handle(result.release())};
+    return {impl_->allocations.keep(std::move(result))};
 }
 
 void D3D11Context::destroy(Program &program) {
@@ -658,7 +666,7 @@ void D3D11Context::destroy(Program &program) {
     std::erase(impl_->programs, value);
     for (auto &stage : impl_->bound_buffers)
         stage.fill(nullptr);
-    release<ProgramData>(program.id);
+    impl_->allocations.release<ProgramData>(program.id);
     program = {};
 }
 
@@ -748,7 +756,7 @@ void D3D11Context::texture_unit(Program program, const char *name, unsigned unit
 
 Pipeline D3D11Context::create_pipeline(const PipelineState &state) {
     auto result = impl_->make_pipeline(state);
-    return {state, handle(result.release())};
+    return {state, impl_->allocations.keep(std::move(result))};
 }
 
 void D3D11Context::destroy(Pipeline &pipeline) {
@@ -756,7 +764,7 @@ void D3D11Context::destroy(Pipeline &pipeline) {
     impl_->bound_blend = nullptr;
     impl_->bound_depth = nullptr;
     impl_->bound_raster = nullptr;
-    release<PipelineData>(pipeline.id);
+    impl_->allocations.release<PipelineData>(pipeline.id);
     pipeline = {};
 }
 
@@ -841,7 +849,7 @@ Texture D3D11Context::create_texture(const TextureDesc &desc, std::span<const vo
         checked(impl_->device->CreateRenderTargetView(result->texture.Get(), &view, &result->rtv),
                 "Cannot create D3D11 color view");
     }
-    return {handle(result.release()), desc};
+    return {impl_->allocations.keep(std::move(result)), desc};
 }
 
 void D3D11Context::update_texture(Texture texture, Rect region, const void *pixels) {
@@ -873,7 +881,7 @@ void D3D11Context::destroy(Texture &texture) {
         for (auto &unit : impl_->units)
             if (unit.texture == value) unit.texture = nullptr;
     }
-    release<TextureData>(texture.id);
+    impl_->allocations.release<TextureData>(texture.id);
     texture = {};
 }
 
@@ -885,7 +893,7 @@ Sampler D3D11Context::create_sampler(const SamplerDesc &desc) {
             desc.minification == Filter::linear ? D3D11_FILTER_TYPE_LINEAR : D3D11_FILTER_TYPE_POINT,
             desc.magnification == Filter::linear ? D3D11_FILTER_TYPE_LINEAR : D3D11_FILTER_TYPE_POINT,
             desc.mip_filter == Filter::linear ? D3D11_FILTER_TYPE_LINEAR : D3D11_FILTER_TYPE_POINT,
-            desc.compare ? D3D11_FILTER_REDUCTION_TYPE_COMPARISON : D3D11_FILTER_REDUCTION_TYPE_STANDARD
+            desc.compare
     );
     const auto addressing = [&](Address axis) {
         const auto address = axis == Address::inherit ? desc.address : axis;
@@ -905,7 +913,7 @@ Sampler D3D11Context::create_sampler(const SamplerDesc &desc) {
     std::copy(desc.border_color.begin(), desc.border_color.end(), sampler.BorderColor);
     auto result = std::make_unique<SamplerData>();
     checked(impl_->device->CreateSamplerState(&sampler, &result->state), "Cannot create D3D11 sampler");
-    return {handle(result.release())};
+    return {impl_->allocations.keep(std::move(result))};
 }
 
 void D3D11Context::destroy(Sampler &sampler) {
@@ -917,7 +925,7 @@ void D3D11Context::destroy(Sampler &sampler) {
             for (unsigned slot = 0; slot < 16; ++slot)
                 if (impl_->bound_samplers[stage][slot] == value->state.Get()) impl_->sampler(stage, slot, nullptr);
     }
-    release<SamplerData>(sampler.id);
+    impl_->allocations.release<SamplerData>(sampler.id);
     sampler = {};
 }
 
@@ -956,7 +964,7 @@ RenderTarget D3D11Context::create_target(const TargetDesc &desc) {
             result.depth = create_texture({desc.width, desc.height, desc.depth, TextureKind::image, desc.samples});
         data->color = native<TextureData>(result.color.id);
         data->depth = native<TextureData>(result.depth.id);
-        result.id = handle(data.release());
+        result.id = impl_->allocations.keep(std::move(data));
     } catch (...) {
         destroy(result);
         throw;
@@ -967,7 +975,7 @@ RenderTarget D3D11Context::create_target(const TargetDesc &desc) {
 void D3D11Context::destroy(RenderTarget &target) {
     destroy(target.color);
     destroy(target.depth);
-    release<TargetData>(target.id);
+    impl_->allocations.release<TargetData>(target.id);
     target = {};
 }
 
@@ -1201,14 +1209,14 @@ Geometry D3D11Context::create_geometry(size_t stride, std::span<const VertexAttr
     for (auto *program : impl_->programs)
         impl_->input_layout(*result, *program);
     impl_->geometries.push_back(result.get());
-    return {handle(result.release())};
+    return {impl_->allocations.keep(std::move(result))};
 }
 
 void D3D11Context::destroy(Geometry &geometry) {
     auto *value = native<GeometryData>(geometry.array);
     if (impl_->geometry == value) impl_->geometry = nullptr;
     std::erase(impl_->geometries, value);
-    release<GeometryData>(geometry.array);
+    impl_->allocations.release<GeometryData>(geometry.array);
     geometry = {};
 }
 
@@ -1347,7 +1355,7 @@ Readback D3D11Context::create_readback(int width, int height, Format format) {
         checked(impl_->device->CreateTexture2D(&desc, nullptr, &result->depth24), "Cannot create depth readback");
     }
     Readback readback;
-    readback.buffer = handle(result.release());
+    readback.buffer = impl_->allocations.keep(std::move(result));
     readback.width = width;
     readback.height = height;
     readback.format = format;
@@ -1448,7 +1456,7 @@ void D3D11Context::collect(
 void D3D11Context::destroy(Readback &readback) {
     if (readback.mapped) unmap(readback);
     destroy(readback.fence);
-    release<ReadbackData>(readback.buffer);
+    impl_->allocations.release<ReadbackData>(readback.buffer);
     readback = {};
 }
 }  // namespace native::gfx
@@ -1494,6 +1502,10 @@ TargetView D3D11Context::current_target() const {
 
 int D3D11Context::max_texture_size() const {
     unavailable();
+}
+
+bool D3D11Context::device_lost() const {
+    return false;
 }
 
 void D3D11Context::check_error(const char *) {

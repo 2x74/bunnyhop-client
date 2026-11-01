@@ -45,6 +45,8 @@ static void check_moved(const fs::path &from, const fs::path &to, const fs::path
 static void move_case(const fs::path &base_from, const fs::path &base_to, const char *name) {
     const auto def = scratch(base_from, name);
     fill(def);
+    put(def / "renderer-choice-v1.done", "answered");
+    put(def / "d3d11-startup.pending", "1");
     dl::write(def, {def, std::nullopt});
     assert(!fs::exists(def / dl::pointer_name));  // default folder needs no file
     const auto dest_parent = scratch(base_to, name);
@@ -62,6 +64,9 @@ static void move_case(const fs::path &base_from, const fs::path &base_to, const 
     }
     assert(progress.done == progress.total && progress.total > 4000);
     check_moved(def, choice.target, def);
+    assert(get(def / "renderer-choice-v1.done") == "answered");
+    assert(get(def / "d3d11-startup.pending") == "1");
+    assert(!fs::exists(choice.target / "renderer-choice-v1.done"));
     dl::write(def, {choice.target, std::nullopt});
     loc = dl::read(def);
     assert(dl::same(loc.active, choice.target) && !loc.pending);

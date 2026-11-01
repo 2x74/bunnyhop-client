@@ -3,6 +3,7 @@
 #include "startup.hpp"
 #include "client_graphics.hpp"
 #include "renderer_launch.hpp"
+#include "renderer_recovery.hpp"
 #include "startup_display.hpp"
 #include "bunnyhop_native.h"
 #include "native_input.hpp"
@@ -87,6 +88,7 @@
 #include "display_catalog.hpp"
 #include "display_mode_tryout.hpp"
 #include "hud_area.hpp"
+#include "console_host.hpp"
 #include "low_latency.hpp"
 #include "play_priority.hpp"
 #include "menu_scripts.hpp"
@@ -175,6 +177,7 @@ int run(const native::Options &opt, native::RendererLaunch &launch) {
     auto &low_latency = device.presenter();
     native::FramePacer<native::gfx::Context> frame_pacer;
     const std::string gpu_renderer = device.adapter();
+    std::cerr << "Active renderer: " << device.name() << " (" << gpu_renderer << ")\n";
     const auto assets = native::resource("native-assets", BUNNYHOP_NATIVE_ASSET_ROOT);
     const auto menu_path = opt.menu_html == BUNNYHOP_MENU_HTML ? native::resource("menu.html", opt.menu_html)
                                                                : native::data_location::from_utf8(opt.menu_html);
@@ -460,7 +463,7 @@ int run(const native::Options &opt, native::RendererLaunch &launch) {
     native::RunVault run_vault(cache / "run-vault");
     native::updates::Host updater(cache, default_root, identity, native::executable_path());
     recorder.diagnostics.set_client_version(identity.value("version", std::string("local")));
-    recorder.diagnostics.set_device(gpu_renderer, SDL_GetPlatform());
+    recorder.diagnostics.set_device(std::string(device.name()) + ": " + gpu_renderer, SDL_GetPlatform());
     // Jump stats (!ssj). Display only — it reads the same pre-state, command and
     // events the simulation already produced and never feeds anything back.
     native::MovementFeedback feedback;
@@ -1638,6 +1641,7 @@ int run(const native::Options &opt, native::RendererLaunch &launch) {
     }
     native::VideoSmoke video_smoke({opt, game, viewer, curr, prev, camera_controls, preferences});
     video_smoke.begin();
+    native::RendererRecovery renderer_recovery(device, game, recorder, launch);
     while (running) {
         const auto frame_started = Clock::now();
         frame_diagnostics.start_frame(SDL_GetTicksNS(), prefs.mouse_diagnostics);
@@ -3109,7 +3113,18 @@ int run(const native::Options &opt, native::RendererLaunch &launch) {
                     )) {
                     require(recorder.input.mark_null_binds(core.get()), core.get(), "Marking null binds recording");
                 }
-                cmd = input.command();
+                std::optional<native::WReleaseContext> w_release;
+                if (hud.preferences().w_release) {
+                    BhSettings style_settings{};
+                    bh_style_settings(active_style.c_str(), &style_settings);
+                    w_release = native::w_release_context(
+                            active_style, practice.active, practice.noclip, curr, style_settings.autohop != 0
+                    );
+                }
+                if (w_release) {
+                    require(recorder.input.mark_w_release(core.get()), core.get(), "Marking Release W recording");
+                }
+                cmd = input.command(w_release);
                 if (practice.noclip) {
                     BhSnapshot snapshot{};
                     require(bh_noclip_move(&practice.flight, &cmd, dt), core.get(), "Moving noclip");
@@ -3831,7 +3846,7 @@ int run(const native::Options &opt, native::RendererLaunch &launch) {
         display_tryout.draw(hud, width, height, SDL_GetTicksNS());
         frame_diagnostics.mark(native::FrameDiagnostics::kRender, SDL_GetTicksNS());
         device.present(!opt.frames && prefs.vsync);
-        if (!launch.ready) launch.complete();
+        if (device.presented()) launch.presented();
         frame_diagnostics.mark(native::FrameDiagnostics::kSwap, SDL_GetTicksNS());
         frame_pacer.after_swap(graphics, prefs.limit_queued_frames && !opt.frames);
         frame_diagnostics.mark(native::FrameDiagnostics::kGpuWait, SDL_GetTicksNS());
@@ -4141,6 +4156,7 @@ int run(const native::Options &opt, native::RendererLaunch &launch) {
 }  // namespace
 
 int main(int argc, char **argv) {
+    native::console::connect(argc, argv);
     if (const auto plan = native::update_helper::plan_argument(argc, argv)) return native::update_helper::run(*plan);
     if (const auto spec = native::video_worker::argument(argc, argv)) return native::video_worker::run(*spec);
 #ifdef BUNNYHOP_UPDATE_TEST_HOOKS
@@ -4164,12 +4180,19 @@ int main(int argc, char **argv) {
             return 0;
         }
         native::RendererLaunch launch(opt);
+        launch.show_notice(opt);
         int code = 0;
         try {
             code = run(opt, launch);
         } catch (const std::exception &error) {
-            if (launch.backend != native::gfx::Backend::d3d11 || launch.ready || opt.d3d11_warp) throw;
-            launch.fallback(std::string("D3D11 could not start: ") + error.what() + ". Using OpenGL.");
+            if (launch.backend != native::gfx::Backend::d3d11 || (launch.ready && !launch.device_lost)
+                || opt.d3d11_warp)
+                throw;
+            launch.fallback(
+                    std::string("Direct3D 11 stopped: ") + error.what() + launch.recovery
+                    + " Using OpenGL for this launch."
+            );
+            launch.show_notice(opt);
             code = run(opt, launch);
         }
         if (relaunch_requested && !native::relaunch(native::executable_path()))
