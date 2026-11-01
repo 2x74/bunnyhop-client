@@ -153,6 +153,8 @@ int bh_record_loadout(BhContext *ctx, const char *packed_loadout);
 int bh_record_identity(BhContext *ctx, const char *client_build);
 /* Writes a new gzip .bhr from retained native commands/checkpoints. Requires an ended, valid, finished run. */
 int bh_record_write_bhr(BhContext *ctx, const char *path);
+/* Saves an active recording locally in the existing BHR format, with no finish ticks. Does not end recording. */
+int bh_record_recovery_bhr(BhContext *ctx, const char *path);
 /* FNV-1a fold of canonical commands [from_index,to_index), as shared run-hash.ts. */
 int bh_record_fold(BhContext *ctx, uint32_t hash, size_t from_index, size_t to_index, uint32_t *out_hash);
 /* Last recording summary JSON; available after end/invalidation. */

@@ -3,6 +3,7 @@
 #include "startup.hpp"
 #include "client_graphics.hpp"
 #include "renderer_launch.hpp"
+#include "renderer_recovery.hpp"
 #include "startup_display.hpp"
 #include "bunnyhop_native.h"
 #include "native_input.hpp"
@@ -1640,6 +1641,7 @@ int run(const native::Options &opt, native::RendererLaunch &launch) {
     }
     native::VideoSmoke video_smoke({opt, game, viewer, curr, prev, camera_controls, preferences});
     video_smoke.begin();
+    native::RendererRecovery renderer_recovery(device, game, recorder, launch);
     while (running) {
         const auto frame_started = Clock::now();
         frame_diagnostics.start_frame(SDL_GetTicksNS(), prefs.mouse_diagnostics);
