@@ -173,7 +173,8 @@ if(BUNNYHOP_BUILD_CLIENT)
             $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
         target_link_libraries(bunnyhop-native-renderer-startup-tests PRIVATE SDL3::SDL3)
         if(WIN32)
-            target_sources(bunnyhop-native-renderer-startup-tests PRIVATE src/renderer_prompt_windows.cpp)
+            target_sources(bunnyhop-native-renderer-startup-tests PRIVATE
+                src/renderer_prompt_windows.cpp packaging/windows/bunnyhop-native.manifest)
             target_link_libraries(bunnyhop-native-renderer-startup-tests PRIVATE comctl32)
             add_executable(bunnyhop-native-renderer-prompt-smoke
                 src/renderer_prompt_smoke_windows.cpp src/renderer_prompt_windows.cpp
