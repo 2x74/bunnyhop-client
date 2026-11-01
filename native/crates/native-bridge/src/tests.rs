@@ -732,11 +732,13 @@ fn no_evidence_recording_exports_frozen_bhr_and_all_versions_match_shared_encode
             let mut state = BhState::default();
             let mut run = BhRunState::default();
             let mut observations = Vec::new();
+            let mut gains = Vec::new();
             for _ in 0..40 {
                 assert_eq!(bh_step(c, &BhCmd::default(), &mut state), 1);
                 let mut observation = BhJumpObservation::default();
                 assert_eq!(bh_jump_observation(c, &mut observation), 1);
                 observations.push(observation);
+                gains.push(air_speed_gain(c));
             }
             assert_eq!(bh_record_cosmetic(c, 1), 1);
             assert_eq!(bh_record_inspect(c, 2), 1);
@@ -752,6 +754,7 @@ fn no_evidence_recording_exports_frozen_bhr_and_all_versions_match_shared_encode
                 let mut observation = BhJumpObservation::default();
                 assert_eq!(bh_jump_observation(c, &mut observation), 1);
                 observations.push(observation);
+                gains.push(air_speed_gain(c));
                 assert_eq!(bh_run_state(c, &mut run), 1);
                 if run.status == 2 {
                     break;
@@ -863,8 +866,9 @@ fn no_evidence_recording_exports_frozen_bhr_and_all_versions_match_shared_encode
             let mut observation = BhJumpObservation::default();
             assert_eq!(bh_jump_observation(c, &mut observation), 1);
             assert_eq!(observation.valid, 0);
-            for expected in &observations {
+            for (expected, gain) in observations.iter().zip(&gains) {
                 assert_eq!(crate::replay::bh_replay_step(c, &mut playback), 1);
+                assert_eq!(air_speed_gain(c), *gain, "{case}: the replay sees the gain live play saw");
                 assert_eq!(bh_jump_observation(c, &mut observation), 1);
                 state_equal(observation.pre, expected.pre);
                 state_equal(observation.post, expected.post);
@@ -1595,6 +1599,66 @@ fn native_glock_burst_and_usp_silencer_keep_authoritative_state() {
         for _ in 0..2 { step(0, &mut state); }
         assert_eq!(assets::bh_weapon_report(c, &mut report), 1);
         assert_eq!((report.active,report.silencer,report.silencer_ticks),(3,1,0));
+        bh_destroy(c);
+    }
+}
+
+/// Bits, so a NaN compares equal to a NaN and a live/replay difference of one ulp fails.
+unsafe fn air_speed_gain(c: *mut BhContext) -> [u32; 2] {
+    let mut gain = BhAirSpeedGain { delta: 0.0, best: 0.0 };
+    assert_eq!(unsafe { bh_air_speed_gain(c, &mut gain) }, 1);
+    [gain.delta.to_bits(), gain.best.to_bits()]
+}
+
+#[test]
+fn air_speed_gain_reports_the_core_observation_and_its_fences() {
+    const NOT_JUDGED: [u32; 2] = [f32::NAN.to_bits(); 2];
+    let fixture = Fixture::new();
+    let path = fixture.file("gain.bsp", &bsp(&[]));
+    unsafe {
+        let c = bh_create();
+        assert_eq!(bh_load_map(c, path.as_ptr(), ptr::null()), 1);
+        assert_eq!(air_speed_gain(c), NOT_JUDGED, "nothing simulated yet");
+        let mut state = BhState::default();
+        let perpendicular_w = BhCmd { forward: 450.0, yaw: 90.0, ..BhCmd::default() };
+        assert_eq!(bh_set_velocity(c, 400.0, 0.0, 0.0), 1);
+        assert_eq!(bh_step(c, &perpendicular_w, &mut state), 1);
+        let core = (*c).map.as_ref().unwrap().game.air_speed_gain.expect("a clean air tick");
+        assert_eq!(air_speed_gain(c), core.map(f32::to_bits));
+        assert!(core[0] > 0.0 && core[1] > 0.0 && (core[0] / core[1] - 1.0).abs() < 0.01, "{core:?}");
+
+        let bytes = (*c).map.as_ref().unwrap().game.snapshot_bytes();
+        assert_eq!(air_speed_gain(c), core.map(f32::to_bits));
+        assert_eq!(bytes, (*c).map.as_ref().unwrap().game.snapshot_bytes(), "reading it changes nothing");
+        assert_eq!(bh_set_velocity(c, 400.0, 0.0, 0.0), 1);
+        assert_eq!(air_speed_gain(c), NOT_JUDGED, "an external velocity change fences it");
+
+        assert_eq!(bh_step(c, &BhCmd::default(), &mut state), 1);
+        assert_eq!(air_speed_gain(c), NOT_JUDGED, "no keys, nothing to judge");
+        assert_eq!(bh_step(c, &perpendicular_w, &mut state), 1);
+        assert_ne!(air_speed_gain(c), NOT_JUDGED, "the next clean tick is judged");
+        assert_eq!(bh_reset(c), 1);
+        assert_eq!(air_speed_gain(c), NOT_JUDGED, "a reset fences it");
+
+        let zones = [
+            BhZone { kind: 0, mins: [-100000.0; 3], maxs: [100000.0; 3], ..BhZone::default() },
+            BhZone { kind: 1, mins: [200000.0; 3], maxs: [200100.0; 3], ..BhZone::default() },
+        ];
+        let ground = fixture.file("ground.bsp", &ground_bsp(&[]));
+        assert_eq!(bh_load_map(c, ground.as_ptr(), ptr::null()), 1);
+        let options = BhRunOptions { prespeed_cap: 200.0, ..BhRunOptions::default() };
+        assert_eq!(bh_run_configure(c, &options, zones.as_ptr(), zones.len()), 1);
+        assert_eq!(bh_reset(c), 1);
+        for _ in 0..200 {
+            assert_eq!(bh_step(c, &BhCmd::default(), &mut state), 1);
+        }
+        assert_eq!(state.grounded, 1);
+        assert_eq!(bh_set_velocity(c, 500.0, 0.0, 0.0), 1);
+        assert_eq!(bh_step(c, &BhCmd { buttons: game::IN_JUMP, ..perpendicular_w }, &mut state), 1);
+        let mut run = BhRunState::default();
+        assert_eq!(bh_run_state(c, &mut run), 1);
+        assert_ne!(run.update_flags & 8, 0, "exercise a real timer prespeed clamp");
+        assert_eq!(air_speed_gain(c), NOT_JUDGED, "the clamp replaced the speed the tick measured");
         bh_destroy(c);
     }
 }
