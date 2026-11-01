@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.6.6 — Native
+
+Update from Settings → Updates: press Update, then Restart to update. Your settings, replays and maps are kept.
+
+**Direct3D 11 on Windows (experimental)**
+- Windows can now draw the game with Direct3D 11 as well as OpenGL. OpenGL stays the default, and nothing changes unless
+  you pick Direct3D 11.
+- The game asks once when it starts, and you can change it later in Settings → Display. It takes effect after a restart.
+- It's experimental and hasn't had much play on real graphics cards yet, so expect rough edges and tell us what you see.
+- If Direct3D 11 fails to start or the game stops during startup, the next launch goes back to OpenGL by itself. Ranked
+  runs, replays and physics are the same on both.
+
 ## v0.6.5 — Native
 
 Update from Settings → Updates: press Update, then Restart to update. Your settings, replays and maps are kept.
