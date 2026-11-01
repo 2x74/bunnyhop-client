@@ -58,7 +58,8 @@ int main(int argc, char **argv) {
         }
         BhSnapshot spawn{};
         bh_snapshot(core.get(), &spawn);
-        native::Renderer renderer(graphics, core.get());
+        const auto renderer_storage = std::make_unique<native::Renderer>(graphics, core.get());
+        auto &renderer = *renderer_storage;
         renderer.set_viewmodel_visible(false);
         renderer.set_zones_visible(false);
         renderer.set_ghost_cosmetics("ghost-geode", "trail-geode");
