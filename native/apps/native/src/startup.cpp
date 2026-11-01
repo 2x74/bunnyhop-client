@@ -2,6 +2,7 @@
 #include "app_identity.hpp"
 #include "app_icon.hpp"
 #include "native_log.hpp"
+#include "window_frame.hpp"
 #include "../packaging/executable_identity.hpp"
 #include "../packaging/assets_identity.hpp"
 #include "../packaging/release_identity.hpp"
@@ -50,6 +51,7 @@ WindowAndGl create_window_and_gl(const Options &opt) {
     if (!context) throw std::runtime_error(std::string("Creating OpenGL 3.3 core context failed: ") + SDL_GetError());
     if (!SDL_GL_MakeCurrent(window.get(), context.get())) throw std::runtime_error(SDL_GetError());
     SDL_GL_SetSwapInterval(opt.frames ? 0 : 1);
+    sync_window_frame(window.get());
     return {std::move(window), std::move(context)};
 }
 

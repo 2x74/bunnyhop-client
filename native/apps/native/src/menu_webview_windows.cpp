@@ -5,6 +5,7 @@
 #endif
 #include "menu_webview.hpp"
 #include "menu_messages.hpp"
+#include "window_frame.hpp"
 #include <SDL3/SDL.h>
 #include <windows.h>
 #include <commctrl.h>
@@ -307,6 +308,7 @@ struct MenuWebView::Impl {
             failed = true;
             state->fail("WebView2 startup timed out");
         }
+        if (menu) sync_window_frame(sdl);
     }
 
     void configure() {

@@ -281,7 +281,8 @@ if(BUNNYHOP_BUILD_CLIENT)
         configure_file(packaging/windows/app.rc.in generated/app.rc @ONLY)
         target_sources(bunnyhop-native PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated/app.rc"
             src/display_scaling_windows.cpp src/low_latency_windows.cpp src/anti_lag_windows.cpp
-            src/play_priority_windows.cpp)
+            src/play_priority_windows.cpp src/window_frame_windows.cpp
+            packaging/windows/bunnyhop-native.manifest)
         # AMD's Anti-Lag 2 header relies on MSVC extensions (a pure virtual destructor with a body, static_cast from
         # void* to a function pointer). Build it only when this compiler takes it; otherwise there is no Anti-Lag 2.
         include(CheckCXXSourceCompiles)
@@ -299,7 +300,7 @@ if(BUNNYHOP_BUILD_CLIENT)
         if(BUNNYHOP_ANTI_LAG_COMPILES)
             set_source_files_properties(src/anti_lag_windows.cpp PROPERTIES COMPILE_DEFINITIONS BUNNYHOP_ANTI_LAG)
         endif()
-        target_link_libraries(bunnyhop-native PRIVATE d3d11 dxgi winmm avrt)
+        target_link_libraries(bunnyhop-native PRIVATE d3d11 dxgi winmm avrt dwmapi)
         include(packaging/WebView2.cmake)
         bunnyhop_windows_menu(bunnyhop-native)
     elseif(UNIX)
@@ -481,7 +482,9 @@ if(BUILD_TESTING)
         set_tests_properties(native_mouse_rate PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30)
         add_executable(bunnyhop-native-window-sdl-tests src/window_sdl_tests.cpp)
         if(WIN32)
-            target_sources(bunnyhop-native-window-sdl-tests PRIVATE src/display_scaling_windows.cpp)
+            target_sources(bunnyhop-native-window-sdl-tests PRIVATE
+                src/display_scaling_windows.cpp src/window_frame_windows.cpp)
+            target_link_libraries(bunnyhop-native-window-sdl-tests PRIVATE dwmapi)
         endif()
         target_include_directories(bunnyhop-native-window-sdl-tests PRIVATE vendor src)
         target_link_libraries(bunnyhop-native-window-sdl-tests PRIVATE SDL3::SDL3)
