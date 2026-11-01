@@ -381,16 +381,18 @@ private:
 
 std::array<std::atomic<char>, crash_context_bytes> crash_context{};
 
-// Sends whole lines to the log and everything on to the original stderr. A line is assembled per thread, because one
-// std::cerr statement is several writes and other threads write in between.
+// Sends whole lines to the log and everything on to the stream's original buffer. A line is assembled per thread,
+// because one statement is several writes and other threads write in between.
 class TeeBuffer : public std::streambuf {
 public:
+    explicit TeeBuffer(std::ostream &stream) : stream_(stream) {}
+
     void install() {
-        if (!original_.load()) original_.store(std::cerr.rdbuf(this));
+        if (!original_.load()) original_.store(stream_.rdbuf(this));
     }
 
     void remove() {
-        if (auto *original = original_.exchange(nullptr)) std::cerr.rdbuf(original);
+        if (auto *original = original_.exchange(nullptr)) stream_.rdbuf(original);
     }
 
 protected:
@@ -413,9 +415,10 @@ protected:
     }
 
 private:
-    static void collect(std::string_view text) noexcept {
+    void collect(std::string_view text) noexcept {
         try {
-            thread_local std::string partial;
+            thread_local std::array<std::string, 2> partials;
+            auto &partial = partials[&stream_ == &std::cerr ? 0 : 1];
             for (size_t newline = text.find('\n'); newline != text.npos; newline = text.find('\n')) {
                 partial += text.substr(0, newline);
                 Writer::instance().enqueue(partial);
@@ -427,11 +430,18 @@ private:
         }
     }
 
+    std::ostream &stream_;
     std::atomic<std::streambuf *> original_{nullptr};
 };
 
-TeeBuffer &tee() {
-    static TeeBuffer &buffer = *std::make_unique<TeeBuffer>().release();
+// Never destroyed, like the Writer: a worker the game couldn't stop may still print while the process exits.
+TeeBuffer &tee_errors() {
+    static TeeBuffer &buffer = *std::make_unique<TeeBuffer>(std::cerr).release();
+    return buffer;
+}
+
+TeeBuffer &tee_output() {
+    static TeeBuffer &buffer = *std::make_unique<TeeBuffer>(std::cout).release();
     return buffer;
 }
 
@@ -470,14 +480,16 @@ std::filesystem::path folder(const std::filesystem::path &data) {
 Session::Session() {
     try {
         Writer::instance().start();
-        tee().install();
+        tee_errors().install();
+        tee_output().install();
     } catch (...) {
     }
 }
 
 Session::~Session() {
     try {
-        tee().remove();
+        tee_output().remove();
+        tee_errors().remove();
         Writer::instance().stop();
     } catch (...) {
     }

@@ -192,6 +192,11 @@ reads `cancel` on stdin:
 apps/native/build/bunnyhop-native --export-video /path/to/spec.json
 ```
 
+On Windows the game is a windowed program: no terminal opens with it, and the log is in `logs/` in the game data
+folder (Settings → Game data). From a terminal it still prints there, but the shell doesn't wait for it, so pipe it to
+wait or to send `cancel` (`bunnyhop-native.exe --export-video spec.json | Out-Host` in PowerShell). `--console` opens a
+console of its own for support.
+
 ```json
 {
   "cache": "/path/to/data",

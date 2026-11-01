@@ -281,8 +281,14 @@ if(BUNNYHOP_BUILD_CLIENT)
         configure_file(packaging/windows/app.rc.in generated/app.rc @ONLY)
         target_sources(bunnyhop-native PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated/app.rc"
             src/display_scaling_windows.cpp src/low_latency_windows.cpp src/anti_lag_windows.cpp
-            src/play_priority_windows.cpp src/window_frame_windows.cpp
+            src/play_priority_windows.cpp src/window_frame_windows.cpp src/console_windows.cpp
             packaging/windows/bunnyhop-native.manifest)
+        # A windowed program, so no terminal opens with the game (console_host.hpp brings one back when it's wanted).
+        # main() stays the entry point rather than WinMain.
+        set_target_properties(bunnyhop-native PROPERTIES WIN32_EXECUTABLE TRUE)
+        if(MSVC)
+            target_link_options(bunnyhop-native PRIVATE /ENTRY:mainCRTStartup)
+        endif()
         # AMD's Anti-Lag 2 header relies on MSVC extensions (a pure virtual destructor with a body, static_cast from
         # void* to a function pointer). Build it only when this compiler takes it; otherwise there is no Anti-Lag 2.
         include(CheckCXXSourceCompiles)

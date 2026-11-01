@@ -85,6 +85,7 @@
 #include "display_catalog.hpp"
 #include "display_mode_tryout.hpp"
 #include "hud_area.hpp"
+#include "console_host.hpp"
 #include "low_latency.hpp"
 #include "play_priority.hpp"
 #include "menu_scripts.hpp"
@@ -4157,6 +4158,7 @@ int run(const native::Options &opt) {
 }  // namespace
 
 int main(int argc, char **argv) {
+    native::console::connect(argc, argv);
     if (const auto plan = native::update_helper::plan_argument(argc, argv)) return native::update_helper::run(*plan);
     if (const auto spec = native::video_worker::argument(argc, argv)) return native::video_worker::run(*spec);
 #ifdef BUNNYHOP_UPDATE_TEST_HOOKS
