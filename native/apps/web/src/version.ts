@@ -95,7 +95,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "Hovering a leaderboard run now shows how many points it's worth, and the gauntlets list shows who holds each record.",
       "Motion blur exports in Enhanced and Cinematic now blur posters, glass and other see-through surfaces along with the rest of the map.",
       "Style tabs on leaderboards and Ranks fit in one even row, and the Style & bonus tab fits all nine styles and the track picker on smaller screens.",
-      "Menu titles and footer links stay in the same place on every screen, faint text is easier to read, and the map line and PB are easier to read over bright skies.",
+      "Menu titles and footer links stay in the same place across the menus, faint text is easier to read, and the map line and PB are easier to read over bright skies.",
       "Player glow has its own tab in Loadout. The HUD layout editor only shows switched-off elements when you pick them, and the friends and music controls no longer cover HUD elements there.",
       "Fixed a stray second scrollbar on profiles, and times and places line up across a profile's lists. The Gauntlets page scrolls its own list.",
       "Notices in the replay viewer no longer cover its buttons, the friends panel works properly with the keyboard, and in narrow windows the pause menu no longer runs under the friends and music controls.",

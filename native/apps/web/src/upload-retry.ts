@@ -50,7 +50,10 @@ export async function retryStored(io: RetryIO): Promise<RetryOutcome> {
   let uploaded = 0;
   for (const stored of due) {
     const wasHeld = holds(effectiveFailure(stored, now));
-    const u = spendAttempt(stored, now);
+    const spent = spendAttempt(stored, now);
+    // The first real send decides whose run this is, before its answer: if the answer is lost the server may have it, and
+    // the server only dedupes per account, so nobody else can send it after that. What was recorded for the guest stays behind.
+    const u = spent.account === null ? { ...spent, account: me.id, beats: undefined, gauntlet: null } : spent;
     if (u !== stored) await io.store.put(u);
     let sub: Submission;
     try {
