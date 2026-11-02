@@ -620,7 +620,7 @@ function bindReset(action: Action, label: string, refresh: () => void): HTMLElem
 function keysSection(ctx: Ctx): SettingsContent {
   const bindRow = (a: Action) => {
     const label = ACTIONS.find((x) => x.id === a)!.label;
-    const r = row(label, h("div.bind-line", null, h("div.bind-pair", null, bindSlot(a, 0, ctx.refresh), bindSlot(a, 1, ctx.refresh)), bindReset(a, label, ctx.refresh)), {
+    const r = row(label, h("div.bind-line", null, h("div.bind-pair", null, bindSlot(a, 0, ctx.refresh), bindSlot(a, 1, ctx.refresh), bindSlot(a, 2, ctx.refresh)), bindReset(a, label, ctx.refresh)), {
       // (How to rebind is said once, in the section's header line, not on every row.)
       desc: () => (bindIsDefault(P().binds, a) ? "" : `Default: ${defaultKeys(a)}.`),
       keywords: `bind key rebind keybind ${BIND_KEYWORDS[a] ?? ""}`,
