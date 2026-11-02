@@ -163,9 +163,10 @@ impl Timer {
             f64::from(self.ticks()) * self.interval
         };
     }
-    /// Infinite (the style that sets `start_reentry_cap`) is built around noclip: flying into the start zone arms the
-    /// run and flying out of it starts the run, keeping whatever speed the flight carries. Every other style (and a
-    /// running or finished run) just coasts, as before.
+    /// Infinite (the style that sets `start_reentry_cap`) is built around noclip, but a flight never starts the run:
+    /// the timer would otherwise run while flying to the end of the map. Flying through the start keeps the speed
+    /// it built, capped, so leaving noclip and crossing the start normally begins a run with it. Every other style
+    /// (and a running or finished run) just coasts, as before.
     pub fn noclip_tick(&mut self, tick: u32, position: [f32; 3], velocity: [f32; 3]) -> Option<[f32; 3]> {
         if self.state.status != 0 || self.options.start_reentry_cap <= 0.0 {
             self.coast(tick);
@@ -187,12 +188,10 @@ impl Timer {
             self.armed = false;
             self.state.in_start = 0;
             self.was_in_start = false;
-            self.state.status = 1;
-            self.state.start_tick = tick;
-            self.state.update_flags |= 1;
-            self.clear_stats();
-            // The start-reentry cap also bounds a noclip start (horizontal only, vertical kept), so the start
-            // cannot be re-entered over and over to farm speed.
+            // Flying out of the start does not start the run, or a flight would carry the timer to the end of
+            // the map. The speed is kept instead: leave noclip and cross the start normally to begin a run with
+            // whatever the flight built, bounded by the same cap the re-entry guard uses (horizontal only,
+            // vertical kept) so the start cannot be re-entered over and over to farm speed.
             let [vx, vy, vz] = velocity.map(f64::from);
             let speed = (vx * vx + vy * vy).sqrt();
             let cap = f64::from(self.options.start_reentry_cap);
@@ -257,6 +256,12 @@ impl Timer {
             self.ground_since = -1;
         }
         self.was_on_ground = ground;
+        // Infinite (the style that sets start_reentry_cap) starts from the air or the ground at any speed: it is
+        // built around arriving fast, so neither the ground requirement nor the anti-prehop wait below applies.
+        // The re-entry guard is what bounds the speed it can start with.
+        if self.options.start_reentry_cap > 0.0 {
+            return true;
+        }
         if !ground {
             return false;
         }
@@ -647,7 +652,7 @@ mod tests {
         }
     }
     #[test]
-    fn infinite_noclip_through_the_start_starts_the_run_capped() {
+    fn infinite_noclip_through_the_start_never_starts_the_run() {
         let infinite = |cap| {
             Timer::new(
                 vec![zone(0, 0, 0, 0.0)],
@@ -661,17 +666,18 @@ mod tests {
         let mut t = infinite(3510.0);
         assert_eq!(t.noclip_tick(1, [5.0, 0.0, 0.0], [4000.0, 0.0, 7.0]), None);
         assert_eq!((t.state.status, t.state.in_start), (0, 1));
-        // Flying out of the zone starts the run, horizontal speed clamped to the cap, vertical kept.
+        // Flying out of the zone never starts the run, or the flight would carry the timer to the end of the
+        // map. The speed is kept for a later real start, clamped horizontally to the cap, vertical untouched.
         let clamp = t.noclip_tick(2, [50.0, 0.0, 0.0], [4000.0, 0.0, 7.0]);
-        assert_eq!((t.state.status, t.state.start_tick), (1, 2));
-        assert_eq!(t.state.update_flags & 1, 1);
+        assert_eq!(t.state.status, 0, "a flight must not start the run");
+        assert_eq!(t.state.update_flags & 1, 0);
         assert_eq!(clamp, Some([3510.0, 0.0, 7.0]));
-        // Under the cap nothing is clamped.
+        // Under the cap nothing is clamped, and still nothing starts.
         let mut t = infinite(3510.0);
         t.noclip_tick(1, [5.0, 0.0, 0.0], [3000.0, 0.0, 0.0]);
         assert_eq!(t.noclip_tick(2, [50.0, 0.0, 0.0], [3000.0, 0.0, 0.0]), None);
-        assert_eq!(t.state.status, 1);
-        // Any other style never arms or starts from a flight.
+        assert_eq!(t.state.status, 0);
+        // Any other style never arms from a flight at all.
         let mut t = infinite(0.0);
         t.noclip_tick(1, [5.0, 0.0, 0.0], [4000.0, 0.0, 0.0]);
         t.noclip_tick(2, [50.0, 0.0, 0.0], [4000.0, 0.0, 0.0]);
