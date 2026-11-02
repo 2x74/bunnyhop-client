@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.7.0 — Native
+
+### Added anti-piracy
+Don't even ask, look through the code if you want to find out what I mean...
+
+### Added Infinite
+Infinite (`!inf`) is a style I made [a while ago](https://github.com/2x74/infinite). Essentially, you jump in midair,
+and noclip through the start for prespeed.
+
+- Autohop on the ground. In the air, every jump press sends you up again and keeps your speed, as many times as you
+  want. Scroll is faster than space here, that's the point.
+- Noclip flies at 3500 instead of 1600, and it doesn't dump you into practice like it does in every other style.
+- Fly through the start to build speed, then drop out of noclip and cross it for real: the run starts with whatever
+  you built, from the air or the ground.
+- Capped at 3510 so you can't just loop the start over and over.
+- The timer won't start while you're still noclipped, so no, you can't fly to the end.
+
+### Three binds
+You can bind three keys to anything now instead of two.
+
 ## v0.6.5 — Native
 
 Update from Settings → Updates: press Update, then Restart to update. Your settings, replays and maps are kept.
