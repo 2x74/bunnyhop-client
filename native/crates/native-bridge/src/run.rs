@@ -51,6 +51,9 @@ pub struct BhRunOptions {
     pub rules: u32,
     pub block_prehops: u32,
     pub strafe_keys: u32,
+    /// Start-zone re-entry guard (website timer.ts startReentryCap): a running run entering the start zone above this
+    /// horizontal speed loses its velocity. 0 = off (every style but Infinite).
+    pub start_reentry_cap: f32,
 }
 impl Default for BhRunOptions {
     fn default() -> Self {
@@ -60,6 +63,7 @@ impl Default for BhRunOptions {
             rules: 3,
             block_prehops: 0,
             strafe_keys: 0,
+            start_reentry_cap: 0.0,
         }
     }
 }
@@ -159,6 +163,48 @@ impl Timer {
             f64::from(self.ticks()) * self.interval
         };
     }
+    /// Infinite (the style that sets `start_reentry_cap`) is built around noclip: flying into the start zone arms the
+    /// run and flying out of it starts the run, keeping whatever speed the flight carries. Every other style (and a
+    /// running or finished run) just coasts, as before.
+    pub fn noclip_tick(&mut self, tick: u32, position: [f32; 3], velocity: [f32; 3]) -> Option<[f32; 3]> {
+        if self.state.status != 0 || self.options.start_reentry_cap <= 0.0 {
+            self.coast(tick);
+            return None;
+        }
+        let mut clamp = None;
+        self.state.last_tick = tick;
+        self.state.update_flags = 0;
+        let start = self
+            .touching(position, false, 0, Some(self.state.track))
+            .or_else(|| self.touching(position, false, 0, None));
+        if let Some(zone) = start {
+            self.state.track = zone.track;
+            self.state.pending_start = 0;
+            self.state.in_start = 1;
+            self.was_in_start = true;
+            self.armed = true;
+        } else if self.armed {
+            self.armed = false;
+            self.state.in_start = 0;
+            self.was_in_start = false;
+            self.state.status = 1;
+            self.state.start_tick = tick;
+            self.state.update_flags |= 1;
+            self.clear_stats();
+            // The start-reentry cap also bounds a noclip start (horizontal only, vertical kept), so the start
+            // cannot be re-entered over and over to farm speed.
+            let [vx, vy, vz] = velocity.map(f64::from);
+            let speed = (vx * vx + vy * vy).sqrt();
+            let cap = f64::from(self.options.start_reentry_cap);
+            if speed > cap {
+                let f = cap / speed;
+                clamp = Some([(vx * f) as f32, (vy * f) as f32, vz as f32]);
+                self.state.update_flags |= 8;
+            }
+        }
+        self.state.seconds = f64::from(self.ticks()) * self.interval;
+        clamp
+    }
     fn touching(
         &self,
         pos: [f32; 3],
@@ -244,6 +290,16 @@ impl Timer {
         self.touching(jump.position, jump.crouched, 0, Some(self.state.track))
             .or_else(|| self.touching(jump.position, jump.crouched, 0, None))
     }
+    /// Shavit_OnEnterZone (website timer.ts guardStartReentry): a running run entering the start zone above the cap
+    /// loses its velocity. Horizontal speed only. Off unless the style sets `start_reentry_cap` (Infinite).
+    fn reentry_guard(&self, s: BhState) -> Option<[f32; 3]> {
+        let cap = f64::from(self.options.start_reentry_cap);
+        if cap <= 0.0 {
+            return None;
+        }
+        let [vx, vy, _] = s.velocity.map(f64::from);
+        ((vx * vx + vy * vy).sqrt() > cap).then_some([0.0, 0.0, 0.0])
+    }
     fn cap(&self, s: BhState) -> Option<[f32; 3]> {
         if self.options.cap_enabled == 0 {
             return None;
@@ -294,6 +350,7 @@ impl Timer {
             .touching(s.position, s.crouched != 0, 0, Some(self.state.track))
             .or_else(|| self.touching(s.position, s.crouched != 0, 0, None));
         let in_start = start.is_some();
+        let was_running = self.state.status == 1;
         let mut clamp = None;
         if self.options.rules == 1 {
             if let Some(start) = start.filter(|_| !pass_end) {
@@ -360,6 +417,9 @@ impl Timer {
                     self.state.update_flags |= 1;
                 }
             }
+        }
+        if clamp.is_none() && was_running && in_start && !self.was_in_start {
+            clamp = self.reentry_guard(s);
         }
         if clamp.is_some() {
             self.state.update_flags |= 8;
@@ -587,6 +647,37 @@ mod tests {
         }
     }
     #[test]
+    fn infinite_noclip_through_the_start_starts_the_run_capped() {
+        let infinite = |cap| {
+            Timer::new(
+                vec![zone(0, 0, 0, 0.0)],
+                BhRunOptions {
+                    start_reentry_cap: cap,
+                    ..BhRunOptions::default()
+                },
+                0.01,
+            )
+        };
+        let mut t = infinite(3510.0);
+        assert_eq!(t.noclip_tick(1, [5.0, 0.0, 0.0], [4000.0, 0.0, 7.0]), None);
+        assert_eq!((t.state.status, t.state.in_start), (0, 1));
+        // Flying out of the zone starts the run, horizontal speed clamped to the cap, vertical kept.
+        let clamp = t.noclip_tick(2, [50.0, 0.0, 0.0], [4000.0, 0.0, 7.0]);
+        assert_eq!((t.state.status, t.state.start_tick), (1, 2));
+        assert_eq!(t.state.update_flags & 1, 1);
+        assert_eq!(clamp, Some([3510.0, 0.0, 7.0]));
+        // Under the cap nothing is clamped.
+        let mut t = infinite(3510.0);
+        t.noclip_tick(1, [5.0, 0.0, 0.0], [3000.0, 0.0, 0.0]);
+        assert_eq!(t.noclip_tick(2, [50.0, 0.0, 0.0], [3000.0, 0.0, 0.0]), None);
+        assert_eq!(t.state.status, 1);
+        // Any other style never arms or starts from a flight.
+        let mut t = infinite(0.0);
+        t.noclip_tick(1, [5.0, 0.0, 0.0], [4000.0, 0.0, 0.0]);
+        t.noclip_tick(2, [50.0, 0.0, 0.0], [4000.0, 0.0, 0.0]);
+        assert_eq!(t.state.status, 0);
+    }
+    #[test]
     fn rules3_prespeed_cap_leaves_a_booster_alone() {
         let timer_with = |rules| {
             Timer::new(
@@ -609,6 +700,40 @@ mod tests {
         // Up to the margin it's the player's own speed, capped as under rules 2.
         assert_eq!(timer_with(3).cap(moving(cap + 32.0)), Some([cap, 0.0, 10.0]));
         assert_eq!(timer_with(3).cap(moving(cap)), None);
+    }
+    /// Infinite's start-zone re-entry guard (spec §5): a running run re-entering the start zone above 3510 u/s
+    /// (horizontal only) loses its velocity; every other style, and anything at or under the cap, keeps it.
+    #[test]
+    fn start_reentry_guard_zeroes_fast_reentry_only() {
+        let run = |cap: f32, speed: f32, vz: f32| {
+            let mut t = Timer::new(
+                vec![zone(0, 0, 0, 0.0), zone(1, 0, 0, 500.0)],
+                BhRunOptions {
+                    cap_enabled: 0,
+                    start_reentry_cap: cap,
+                    ..BhRunOptions::default()
+                },
+                0.01,
+            );
+            t.update(BhCmd::default(), state(1, 0.0, true));
+            t.update(BhCmd::default(), state(2, 0.0, true));
+            // Leave the zone: the run starts, then re-enter it.
+            t.update(BhCmd::default(), state(3, 100.0, true));
+            t.update(BhCmd::default(), state(4, 120.0, true));
+            assert_eq!(t.state.status, 1);
+            t.update(
+                BhCmd::default(),
+                BhState {
+                    velocity: [speed, 0.0, vz],
+                    ..state(5, 5.0, true)
+                },
+            )
+        };
+        assert_eq!(run(3510.0, 4000.0, 0.0), Some([0.0, 0.0, 0.0]));
+        assert_eq!(run(3510.0, 3510.0, 0.0), None);
+        assert_eq!(run(3510.0, 3000.0, 0.0), None);
+        assert_eq!(run(3510.0, 100.0, 9000.0), None, "vertical speed is ignored");
+        assert_eq!(run(0.0, 4000.0, 0.0), None, "off for every other style");
     }
     #[test]
     fn rules2_pending_takeoff_rearm_and_touch_pass_finish() {

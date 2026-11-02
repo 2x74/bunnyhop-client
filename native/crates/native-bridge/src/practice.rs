@@ -65,6 +65,24 @@ impl Checkpoint {
         self.game.approx_bytes()
     }
 }
+/// sv_maxspeed the noclip flight multiplies (CS:S `FullNoClipMove`).
+const NOCLIP_MAX_SPEED: f64 = 320.0;
+/// Duck slows the flight to a quarter, and sets the floor the friction bleeds toward.
+const NOCLIP_DUCK_FACTOR: f64 = 0.25;
+/// sv_noclipspeed everywhere but Infinite: 320 * 5 = 1600 u/s.
+pub const NOCLIP_SPEED: f64 = 5.0;
+/// Infinite flies at 3500 u/s. Not the plugin's 11.400651, which assumed a server at sv_maxspeed 307.
+pub const INFINITE_NOCLIP_SPEED: f64 = 3500.0 / NOCLIP_MAX_SPEED;
+
+/// sv_noclipspeed for a style id.
+pub fn noclip_speed(style: &str) -> f64 {
+    if style == "infinite" {
+        INFINITE_NOCLIP_SPEED
+    } else {
+        NOCLIP_SPEED
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BhNoclipState {
@@ -84,13 +102,19 @@ impl BhNoclipState {
             Err("nonfinite noclip state".into())
         }
     }
-    fn advance(&mut self, c: BhCmd, dt: f64) {
+    /// `noclip_speed` is sv_noclipspeed (`NOCLIP_SPEED` 5 everywhere but Infinite, which flies at 3500 u/s).
+    fn advance(&mut self, c: BhCmd, dt: f64, noclip_speed: f64) {
         let yr = f64::from(c.yaw) * std::f64::consts::PI / 180.0;
         let pr = f64::from(c.pitch) * std::f64::consts::PI / 180.0;
         let (sy, cy) = (yr.sin(), yr.cos());
         let (sp, cp) = (pr.sin(), pr.cos());
         let slow = c.buttons & 4 != 0;
-        let factor = if slow { 1.25 } else { 5.0 };
+        let top_speed = NOCLIP_MAX_SPEED * noclip_speed;
+        let factor = if slow {
+            noclip_speed * NOCLIP_DUCK_FACTOR
+        } else {
+            noclip_speed
+        };
         let (f, s) = (f64::from(c.forward) * factor, f64::from(c.side) * factor);
         let wish = [
             cp * cy * f + sy * s,
@@ -104,7 +128,11 @@ impl BhNoclipState {
         ];
         let len = wish[0].hypot(wish[1]).hypot(wish[2]);
         let dir = wish.map(|x| if len > 0.0 { x / len } else { 0.0 });
-        let wish_speed = len.min(if slow { 400.0 } else { 1600.0 });
+        let wish_speed = len.min(if slow {
+            top_speed * NOCLIP_DUCK_FACTOR
+        } else {
+            top_speed
+        });
         let current =
             self.velocity[0] * dir[0] + self.velocity[1] * dir[1] + self.velocity[2] * dir[2];
         let add = wish_speed - current;
@@ -121,7 +149,7 @@ impl BhNoclipState {
             self.velocity = [0.0; 3];
             return;
         }
-        let scale = (speed - speed.max(400.0) * 4.0 * dt).max(0.0) / speed;
+        let scale = (speed - speed.max(top_speed * NOCLIP_DUCK_FACTOR) * 4.0 * dt).max(0.0) / speed;
         for i in 0..3 {
             self.velocity[i] *= scale;
             self.position[i] = (self.position[i] + self.velocity[i] * dt).clamp(-16303.0, 16303.0);
@@ -133,16 +161,18 @@ pub unsafe extern "C" fn bh_noclip_move(
     state: *mut BhNoclipState,
     cmd: *const BhCmd,
     dt: f64,
+    style: *const c_char,
 ) -> c_int {
     catch_unwind(AssertUnwindSafe(|| unsafe {
         let mut s = input(state)?;
         let cmd = input(cmd)?;
+        let speed = noclip_speed(string(style)?);
         s.checked()?;
         finite(&[cmd.forward, cmd.side, cmd.yaw, cmd.pitch])?;
         if !dt.is_finite() || dt <= 0.0 || dt > 1.0 {
             return Err("noclip dt outside (0,1]".to_string());
         }
-        s.advance(cmd, dt);
+        s.advance(cmd, dt, speed);
         s.checked()?;
         output(state, s)
     }))
@@ -161,7 +191,10 @@ pub unsafe extern "C" fn bh_practice_enter(ctx: *mut BhContext, noclip: u32) -> 
             m.playback = None;
             if noclip != 0 {
                 if let Some(t) = &mut m.timer {
-                    t.reset(t.interval as f32);
+                    // Infinite keeps an idle or armed timer through noclip: flying out of the start zone starts it.
+                    if t.state.status == 1 || t.options.start_reentry_cap <= 0.0 {
+                        t.reset(t.interval as f32);
+                    }
                 }
             }
             Ok(())
@@ -171,12 +204,12 @@ pub unsafe extern "C" fn bh_practice_enter(ctx: *mut BhContext, noclip: u32) -> 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_practice_noclip_tick(
     ctx: *mut BhContext,
-    state: *const BhNoclipState,
+    state: *mut BhNoclipState,
     out: *mut BhSnapshot,
 ) -> c_int {
     unsafe {
         call(ctx, |c| {
-            let s = input(state)?;
+            let mut s = input(state)?;
             s.checked()?;
             let position = s.position.map(|v| v as f32);
             let velocity = s.velocity.map(|v| v as f32);
@@ -190,8 +223,10 @@ pub unsafe extern "C" fn bh_practice_noclip_tick(
             m.playback = None;
             m.game.practice_noclip_tick(position, velocity);
             if let Some(t) = &mut m.timer {
-                if t.state.status == 1 {
-                    t.coast(m.game.tick);
+                // A noclip start above the cap is clamped in the flight state, so the next tick carries the capped speed.
+                if let Some(v) = t.noclip_tick(m.game.tick, position, velocity) {
+                    s.velocity = v.map(f64::from);
+                    output(state, s)?;
                 }
             }
             m.transforms_dirty = true;

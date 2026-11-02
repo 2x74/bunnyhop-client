@@ -1661,11 +1661,11 @@ fn check_jump(
         return Ok(());
     }
     if result.state.ground.is_none() {
-        if !result.state.jump_latched
+        // A press the latch hasn't consumed yet: at most one airborne jump per press.
+        let fresh_press = !result.state.jump_latched
             && policy.allow_jump
-            && result.state.crouch.phase != CrouchPhase::Unducking
-            && let Some(impulse) = policy.air_dash_impulse
-        {
+            && result.state.crouch.phase != CrouchPhase::Unducking;
+        if fresh_press && let Some(impulse) = policy.air_dash_impulse {
             let forward = normalized([command.forward[0], command.forward[1], 0.0]);
             let right = normalized([command.right[0], command.right[1], 0.0]);
             let previous_z = result.state.velocity[2];
@@ -1674,6 +1674,12 @@ fn check_jump(
                 forward[1] * command.forward_move + right[1] * command.side_move,
                 impulse,
             ];
+            result.jump_velocity[2] += impulse - previous_z;
+            result.events.push(Event::Jumped);
+        } else if fresh_press && let Some(impulse) = policy.air_jump_impulse {
+            // Infinite style: re-set the rise and keep the horizontal speed the player built up.
+            let previous_z = result.state.velocity[2];
+            result.state.velocity[2] = impulse;
             result.jump_velocity[2] += impulse - previous_z;
             result.events.push(Event::Jumped);
         }
@@ -3362,6 +3368,9 @@ fn validate(
         || policy.air_speed_cap > configuration.maximum_velocity
         || policy.ground_detach_speed > configuration.maximum_velocity
         || policy.air_dash_impulse.is_some_and(|impulse| {
+            !impulse.is_finite() || impulse < 0.0 || impulse > configuration.maximum_velocity
+        })
+        || policy.air_jump_impulse.is_some_and(|impulse| {
             !impulse.is_finite() || impulse < 0.0 || impulse > configuration.maximum_velocity
         })
         || !(0.0..=1.0).contains(&policy.backward_speed_factor)

@@ -37,6 +37,7 @@ fn main() {
         autohop: u32::from(settings["autohop"].as_bool().unwrap()),
         physics: u(settings, "physics"),
         stamina: u32::from(settings["stamina"].as_bool().unwrap_or(false)),
+        air_jump: u32::from(settings["airJump"].as_bool().unwrap_or(false)),
     };
     let zones = spec["zones"]
         .as_array()
@@ -64,6 +65,7 @@ fn main() {
         cap_enabled: u32::from(!spec["prespeedCap"].is_null()),
         rules: u(&spec, "timerRules"),
         block_prehops: u32::from(spec["style"] == "scroll"),
+        start_reentry_cap: if spec["style"] == "infinite" { 3510.0 } else { 0.0 },
         strafe_keys: match spec["style"].as_str().unwrap() {
             "wonly" => 2,
             "sideways" => 1,
