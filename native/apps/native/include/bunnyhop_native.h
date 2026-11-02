@@ -19,7 +19,7 @@ typedef struct BhContext BhContext;
 
 typedef struct BhSettings {
     float tick_interval, air_accelerate, accelerate, friction, stop_speed, gravity, max_speed;
-    uint32_t autohop, physics, stamina;
+    uint32_t autohop, physics, stamina, air_jump;
 } BhSettings;
 
 typedef struct BhCmd {
@@ -99,6 +99,7 @@ typedef struct BhZone {
 typedef struct BhRunOptions {
     float prespeed_cap;
     uint32_t cap_enabled, rules, block_prehops, strafe_keys; /* keys: 0=AD, 1=WS, 2=W */
+    float start_reentry_cap; /* 0 = off; else a running run entering the start zone above this u/s loses its velocity */
 } BhRunOptions;
 
 typedef struct BhRunState {
@@ -422,8 +423,9 @@ typedef struct BhNoclipState {
 
 /* Immediately invalidate recording; noclip!=0 also stops an idle/finished timer. */
 int bh_practice_enter(BhContext *ctx, uint32_t noclip);
-int bh_noclip_move(BhNoclipState *state, const BhCmd *cmd, double dt);
-int bh_practice_noclip_tick(BhContext *ctx, const BhNoclipState *state, BhSnapshot *out);
+/* style selects sv_noclipspeed: Infinite flies at 3500 u/s, every other style at 1600. */
+int bh_noclip_move(BhNoclipState *state, const BhCmd *cmd, double dt, const char *style);
+int bh_practice_noclip_tick(BhContext *ctx, BhNoclipState *state, BhSnapshot *out);
 /* returns1 standing,2 crouched,0 stuck/error. */
 uint32_t bh_practice_noclip_exit(BhContext *ctx, const BhNoclipState *state, float yaw, float pitch, BhSnapshot *out);
 uint32_t bh_practice_save(BhContext *ctx, float yaw, float pitch);

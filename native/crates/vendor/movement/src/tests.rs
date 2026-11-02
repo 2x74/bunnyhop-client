@@ -184,6 +184,7 @@ fn tf2_policy() -> Policy {
         ground_detach_relative_to_support: false,
         jump_impulse: 289.0,
         air_dash_impulse: None,
+        air_jump_impulse: None,
         surface_friction: 1.0,
         surface_jump_factor: 1.0,
         standing_hull: Hull {

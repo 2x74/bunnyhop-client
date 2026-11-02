@@ -67,6 +67,7 @@ pub struct BhSettings {
     pub autohop: u32,
     pub physics: u32,
     pub stamina: u32,
+    pub air_jump: u32,
 }
 impl Default for BhSettings {
     fn default() -> Self {
@@ -82,6 +83,7 @@ impl Default for BhSettings {
             autohop: u32::from(s.autohop),
             physics: game::PHYSICS_LATEST,
             stamina: 0,
+            air_jump: 0,
         }
     }
 }
@@ -120,6 +122,7 @@ impl BhSettings {
             max_speed: self.max_speed,
             autohop: self.autohop != 0,
             stamina: self.stamina != 0,
+            air_jump: self.air_jump != 0,
             physics_version: self.physics,
         })
     }
@@ -1158,6 +1161,8 @@ pub unsafe extern "C" fn bh_run_configure(
                 || options.strafe_keys > 2
                 || !options.prespeed_cap.is_finite()
                 || options.prespeed_cap < 0.0
+                || !options.start_reentry_cap.is_finite()
+                || options.start_reentry_cap < 0.0
             {
                 return Err("invalid native timer options".into());
             }
@@ -1577,8 +1582,9 @@ pub unsafe extern "C" fn bh_style_set(ctx: *mut BhContext, style: *const c_char)
                 m.transforms_dirty = true;
                 if let Some(t) = &mut m.timer {
                     t.options.block_prehops = u32::from(id == "scroll");
-                    t.options.cap_enabled = u32::from(id != "scroll");
+                    t.options.cap_enabled = u32::from(styles::has_prespeed_cap(id));
                     t.options.prespeed_cap = 290.0;
+                    t.options.start_reentry_cap = styles::start_reentry_cap(id);
                     t.options.strafe_keys = styles::strafe_keys(id);
                     t.reset(settings.tick_interval);
                 }

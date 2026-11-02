@@ -22,7 +22,7 @@ import { keyLabel, prefs } from "./ui/settings";
 import { RunMouseSettings, mouseFromPrefs } from "./mouse-settings";
 import { DEFAULT_TURN_SPEED, turnSpeedOf } from "./turn-binds";
 import { decodeReplay, encodeReplay, ReplayRecorder, replayFileName, replayStyle, sha256Hex, type Replay } from "./replay";
-import { isSegmented, nextStyle, StyleFilter, strafeKeys, styleDef, styleForTrack, styleLabel, stylePrespeedCap, styleSettings, type StyleDef, type StyleId } from "./styles";
+import { isSegmented, nextStyle, StyleFilter, strafeKeys, styleDef, styleForTrack, styleLabel, stylePrespeedCap, styleSettings, styleStartReentryCap, type StyleDef, type StyleId } from "./styles";
 import { onStyleChange, setSelectedStyle } from "./ui/style-picker";
 import { afterStep, beforeStep, checkpointMatches, FRAME_STRIDE, frameFlags, makeTimer, quantize, simulate } from "./sim";
 import { EVENT_RESPAWNED, formatTime, RunTimer, type Split, type TickCmd } from "./timer";
@@ -371,7 +371,7 @@ export class RunSession {
     this.runDef = styleDef(style);
     this.settings = styleSettings(style);
     this.styleFilter = new StyleFilter(this.runDef, this.settings.physics);
-    this.timer.options = { ...this.timer.options, prespeedCap: stylePrespeedCap(style), blockPrehops: style === "scroll", strafeKeys: strafeKeys(this.runDef) };
+    this.timer.options = { ...this.timer.options, prespeedCap: stylePrespeedCap(style), blockPrehops: style === "scroll", strafeKeys: strafeKeys(this.runDef), startReentryCap: styleStartReentryCap(style) };
   }
 
   /** HUD map line: "map · W-Only · 100 tick", or "map · Bonus 1 · Normal" on a bonus track. */
