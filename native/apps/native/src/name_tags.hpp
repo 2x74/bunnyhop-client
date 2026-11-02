@@ -229,6 +229,10 @@ struct NameTagTrace {
         return (1 - fraction) * length < near_hit_units;
     }
 };
+// Aggregate deduction is C++20 and the Clang on older macOS runners does not implement it, so the call sites'
+// NameTagTrace{core, eye} needs the guide spelled out.
+template <class Core>
+NameTagTrace(Core *, const float *) -> NameTagTrace<Core>;
 
 // Tag visibility as the website fades it (player/tag.ts TagSight, net/players.ts): occlusion checked ten times a
 // second at the head and the chest and eased in and out, gone right next to the camera, and a distance fade.
