@@ -57,7 +57,7 @@ const IN_BACK = 1 << 4;
 const IN_MOVELEFT = 1 << 9;
 const IN_MOVERIGHT = 1 << 10;
 
-export type StyleId = "autohop" | "legit" | "wonly" | "sideways" | "hsw" | "autostrafe" | "scroll" | "lowgrav" | "segmented";
+export type StyleId = "autohop" | "legit" | "wonly" | "sideways" | "hsw" | "autostrafe" | "scroll" | "lowgrav" | "segmented" | "infinite";
 
 export interface StyleDef {
   /** Stable key: replay header, PB/ghost storage, leaderboard boards, API routes. */
@@ -94,12 +94,19 @@ export const STYLE_DEFS: readonly StyleDef[] = [
   { id: "hsw", name: "Half-Sideways", short: "HSW", brief: "Half-SW", autohop: true, block: { w: false, a: false, s: true, d: false }, hsw: true, rule: "Hold W plus A or D together in the air. S, pure W and pure A/D do nothing." },
   { id: "lowgrav", name: "Low Gravity", short: "LG", brief: "Low Gravity", autohop: true, block: NONE, hsw: false, rule: "Half gravity (400). Hold jump; every key works. Separate ranking; no overall points or progression." },
   { id: "segmented", name: "Segmented", short: "SEG", brief: "Segmented", autohop: true, block: NONE, hsw: false, segmented: true, rule: "Save checkpoints and load them mid-run: the timer and the replay go back to the checkpoint. Normal movement. Separate ranking; no overall points or progression." },
+  { id: "infinite", name: "Infinite", short: "INF", brief: "Infinite", autohop: true, block: NONE, hsw: false, rule: "Autohop on the ground. In the air every jump press rises again and keeps your speed, as many times as you like." },
   // Assisted styles stay last in the menu. WIRE_STYLES is independently append-only.
   { id: "autostrafe", name: "Auto-strafe", short: "AS", brief: "Auto-strafe", autohop: true, block: NONE, hsw: false, auto: true, rule: "Move the mouse in the air and the game presses A/D for you. Hold A, D or S to take over." },
 ];
 
-/** Legit Scroll uses shavit_misc_prespeed 2 (block prehops, no speed cap). EZ Scroll keeps its legacy cap. */
-export function stylePrespeedCap(id: string): number | null { return id === "scroll" ? null : 290; }
+/** Legit Scroll uses shavit_misc_prespeed 2 (block prehops, no speed cap). EZ Scroll keeps its legacy cap.
+ * Infinite has no cap either: flying through the start zone at speed is the style. */
+export function stylePrespeedCap(id: string): number | null { return id === "scroll" || id === "infinite" ? null : 290; }
+
+/** shavit Shavit_OnEnterZone: a started run that re-enters the start zone this fast loses its velocity, so the start
+ * cannot be looped to farm speed. Only Infinite needs it — it is the one style with no prespeed cap *and* free flight.
+ * 3510 sits just above its 3500 noclip ceiling, so flying cannot build speed past what the flight itself gives. */
+export function styleStartReentryCap(id: string): number | null { return id === "infinite" ? 3510 : null; }
 
 export const DEFAULT_STYLE: StyleId = "autohop";
 /** Bonus tracks are always run (and ranked) in Normal style, whatever style is selected for the main track. */
@@ -128,7 +135,7 @@ export function styleLabel(id: string): string {
 
 /** Canonical physics settings of a style (ranked runs must use exactly these). */
 export function styleSettings(id: StyleId): Settings {
-  return { ...DEFAULT_SETTINGS, autohop: BY_ID.get(id)?.autohop ?? true, ...(id === "lowgrav" ? { gravity: 400 } : {}), ...(id === "scroll" ? { maxSpeed: 250, airAccelerate: 100, stamina: true } : {}) };
+  return { ...DEFAULT_SETTINGS, autohop: BY_ID.get(id)?.autohop ?? true, ...(id === "lowgrav" ? { gravity: 400 } : {}), ...(id === "scroll" ? { maxSpeed: 250, airAccelerate: 100, stamina: true } : {}), ...(id === "infinite" ? { airJump: true } : {}) };
 }
 
 /** Next style in menu order (F3 quick switch). */

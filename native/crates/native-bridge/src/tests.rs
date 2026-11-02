@@ -170,7 +170,7 @@ fn c_layouts_are_stable() {
     assert_eq!(size_of::<BhAttackReport>(), 52);
     assert_eq!(size_of::<BhFloorWeapon>(), 36);
     assert_eq!(size_of::<BhNoclipState>(), 48);
-    assert_eq!(size_of::<BhSettings>(), 40);
+    assert_eq!(size_of::<BhSettings>(), 44);
     assert_eq!(size_of::<BhCmd>(), 20);
     assert_eq!(size_of::<BhState>(), 88);
     assert_eq!(size_of::<BhJumpObservation>(), 204);
@@ -583,7 +583,7 @@ fn snapshot_entities_sha_and_run_abi_layouts() {
     assert_eq!(size_of::<BhSnapshot>(), 132);
     assert_eq!(offset_of!(BhSnapshot, stamina_ms), 88);
     assert_eq!(size_of::<BhZone>(), 36);
-    assert_eq!(size_of::<BhRunOptions>(), 20);
+    assert_eq!(size_of::<BhRunOptions>(), 24);
     assert_eq!(size_of::<BhRunState>(), 112);
     let fixture = Fixture::new();
     let path = fixture.file("map.bsp", &bsp(&[]));
@@ -1187,11 +1187,11 @@ fn practice_checkpoints_restore_the_native_timer_style_and_world() {
             ),
             1
         );
-        let noclip = BhNoclipState {
+        let mut noclip = BhNoclipState {
             position: [1.0, 2.0, 100.0],
             velocity: [3.0, 4.0, 5.0],
         };
-        assert_eq!(bh_practice_noclip_tick(c, &noclip, &mut snapshot), 1);
+        assert_eq!(bh_practice_noclip_tick(c, &mut noclip, &mut snapshot), 1);
         assert_eq!(snapshot.player.tick, 1);
         assert_eq!(snapshot.player.position, [1.0, 2.0, 100.0]);
         let mut run = BhRunState::default();
@@ -1248,7 +1248,14 @@ fn practice_flight_matches_shared_noclip_vectors() {
                 buttons: r["buttons"].as_u64().unwrap() as u32,
             };
             assert_eq!(
-                unsafe { bh_noclip_move(&mut state, &cmd, c["dt"].as_f64().unwrap()) },
+                unsafe {
+                    bh_noclip_move(
+                        &mut state,
+                        &cmd,
+                        c["dt"].as_f64().unwrap(),
+                        c"autohop".as_ptr(),
+                    )
+                },
                 1
             );
             for (a, b) in state.position.iter().chain(&state.velocity).zip(
@@ -1437,13 +1444,13 @@ fn practice_save_is_harmless_and_noclip_stops_the_timer_without_recording() {
             t.state.strafes = 9;
         }
         assert_eq!(bh_practice_enter(c, 1), 1);
-        let flight = BhNoclipState {
+        let mut flight = BhNoclipState {
             position: [200.0, 0.0, 100.0],
             velocity: [1.0, 2.0, 3.0],
         };
         let mut snapshot = BhSnapshot::default();
         for _ in 0..25 {
-            assert_eq!(bh_practice_noclip_tick(c, &flight, &mut snapshot), 1);
+            assert_eq!(bh_practice_noclip_tick(c, &mut flight, &mut snapshot), 1);
         }
         let mut run = BhRunState::default();
         assert_eq!(bh_run_state(c, &mut run), 1);
@@ -1480,7 +1487,7 @@ fn practice_save_is_harmless_and_noclip_stops_the_timer_without_recording() {
         );
         assert_eq!(bh_practice_enter(c, 1), 1); // idle timer must not arm in flight
         for _ in 0..5 {
-            assert_eq!(bh_practice_noclip_tick(c, &flight, &mut snapshot), 1);
+            assert_eq!(bh_practice_noclip_tick(c, &mut flight, &mut snapshot), 1);
         }
         assert_eq!(bh_run_state(c, &mut run), 1);
         assert_eq!((run.status, run.in_start, run.seconds), (0, 0, 0.0));
@@ -1723,4 +1730,29 @@ fn clean_jump_observation_real_flat_jump_wall_and_mutation_fences() {
         for _ in 0..10 {assert_eq!(bh_step(c, &BhCmd::default(), &mut state), 1);assert_eq!(bh_jump_observation(c, &mut observation), 1);assert_eq!(observation.valid, 0);}
         bh_destroy(c);
     }
+}
+
+/// Infinite flies at 3500 u/s; every other style keeps the CS:S 1600 (`practice::noclip_speed`).
+#[test]
+fn noclip_top_speed_is_per_style() {
+    let top = |style: &std::ffi::CStr| {
+        let mut state = BhNoclipState::default();
+        let cmd = BhCmd { forward: 450.0, side: 0.0, yaw: 0.0, pitch: 0.0, buttons: 0 };
+        // Long enough for the flight to settle at its cap.
+        for _ in 0..2000 {
+            assert_eq!(unsafe { bh_noclip_move(&mut state, &cmd, 0.01, style.as_ptr()) }, 1);
+        }
+        state.velocity[0].hypot(state.velocity[1]).hypot(state.velocity[2])
+    };
+    // Friction settles the flight just under its cap, so compare the two against the caps' ratio.
+    let normal = top(c"autohop");
+    let infinite = top(c"infinite");
+    assert!(
+        (normal - 1536.0).abs() < 1.0,
+        "other styles must keep the CS:S flight: {normal}"
+    );
+    assert!(
+        (infinite / normal - 3500.0 / 1600.0).abs() < 0.01,
+        "Infinite's cap is 3500 where every other style is 1600: {infinite} vs {normal}"
+    );
 }

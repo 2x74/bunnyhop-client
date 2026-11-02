@@ -63,6 +63,9 @@ export interface TimerOptions {
   strafeKeys?: "ad" | "ws" | "w";
   /** Start-zone rules version (TIMER_RULES_*). Default TIMER_RULES (the current rules). */
   rules?: number;
+  /** shavit Shavit_OnEnterZone: a running run entering the start zone faster than this (horizontal u/s) loses its
+   * velocity, so the start cannot be looped to farm speed. null/undefined = off (every style but Infinite). */
+  startReentryCap?: number | null;
 }
 
 /**
@@ -332,6 +335,7 @@ export class RunTimer {
       touching(s.touchPosition, s.touchCrouched ?? s.crouched, this.zones, "end", this.track) !== null;
     const start = touching(s.position, s.crouched, this.zones, "start", this.track) ?? touching(s.position, s.crouched, this.zones, "start");
     const inStart = start !== null;
+    const wasRunning = this.status === "running";
 
     if (this.rules === TIMER_RULES_V1) {
       if (start && !passEnd) {
@@ -392,6 +396,7 @@ export class RunTimer {
         }
       }
     }
+    this.guardStartReentry(s, out, wasRunning, inStart);
     this.wasInStart = this.inStart = inStart;
 
     // Stats count from the run's first tick (rules 2: also while it is still inside the zone, e.g. the takeoff jump).
@@ -502,6 +507,16 @@ export class RunTimer {
     const cap = this.options.prespeedCap;
     if (cap !== null && speed > cap) return false;
     return speed <= START_SLOW_SPEED || this.groundSince < 0 || s.tick - this.groundSince >= Math.round(START_GROUND_SECONDS / this.tickInterval);
+  }
+
+  /** Start-zone re-entry guard: a run that was running and enters the start zone above the cap loses its velocity.
+   * Horizontal-only speed test (vz ignored), like the plugin. Off unless the style sets startReentryCap. */
+  private guardStartReentry(s: TickState, out: TimerUpdate, wasRunning: boolean, inStart: boolean): void {
+    const cap = this.options.startReentryCap;
+    if (cap == null || !wasRunning || !inStart || this.wasInStart || out.clampVelocity) return;
+    const vx = s.velocity[0];
+    const vy = s.velocity[1];
+    if (Math.sqrt(vx * vx + vy * vy) > cap) out.clampVelocity = [0, 0, 0];
   }
 
   /** Prespeed cap on the run's first tick: horizontal speed scaled down to the cap (vertical kept). */

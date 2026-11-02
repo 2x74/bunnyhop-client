@@ -125,8 +125,9 @@ public:
         row.spectator = spec != player.end() && !spec->is_null();
         row.afk = json_flag(player, "afk");
         if (meta.is_object()) {
-            constexpr std::array<std::string_view, 9> styles = {
-                    "autohop", "legit", "wonly", "sideways", "hsw", "autostrafe", "scroll", "lowgrav", "segmented"
+            constexpr std::array<std::string_view, 10> styles = {
+                    "autohop", "legit", "wonly", "sideways", "hsw", "autostrafe", "scroll", "lowgrav", "segmented",
+                    "infinite"
             };
             if (meta.contains("style") && meta["style"].is_number_unsigned()) {
                 const unsigned index = meta["style"].get<unsigned>();

@@ -308,6 +308,8 @@ export interface Settings {
   autohop: boolean;
   /** CS:S jump fatigue and grounded slowdown; absent in legacy recordings. */
   stamina?: boolean;
+  /** Infinite style: every fresh jump press in the air rises again, keeping the horizontal speed. */
+  airJump?: boolean;
   /** Physics version (PHYSICS_V1 .. PHYSICS_VERSION). */
   physics: number;
 }
@@ -374,6 +376,7 @@ interface Exports {
   mesh_vertex_floats(): number;
   set_settings(...args: number[]): void;
   set_stamina?: (enabled: number) => void;
+  set_air_jump?: (enabled: number) => void;
   /** Physics version (crates/core/src/wasm.rs): 1 = accepted, 0 = unknown to this build. Absent: a v1-only build. */
   set_physics_version?: (version: number) => number;
   reset(): void;
@@ -724,6 +727,8 @@ export class Core {
     this.x.set_settings(s.tickInterval, s.airAccelerate, s.accelerate, s.friction, s.stopSpeed, s.gravity, s.maxSpeed, s.autohop ? 1 : 0);
     if (this.x.set_stamina) this.x.set_stamina(s.stamina ? 1 : 0);
     else if (s.stamina) throw new Error("wasm build lacks CS:S stamina; rebuild the movement core");
+    if (this.x.set_air_jump) this.x.set_air_jump(s.airJump ? 1 : 0);
+    else if (s.airJump) throw new Error("wasm build lacks the Infinite midair jump; rebuild the movement core");
     const physics = s.physics ?? PHYSICS_V1;
     if (this.x.set_physics_version) {
       if (this.x.set_physics_version(physics) !== 1) throw new Error(`this wasm build can't simulate physics v${physics}`);

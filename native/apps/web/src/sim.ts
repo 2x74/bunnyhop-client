@@ -2,7 +2,7 @@
 
 import { applyRestartPoint, EVENT_JUMPED, EVENT_TELEPORTED, type Core, type PlayerState, type Settings } from "./core";
 import { replayPhysics, replayStyle, replayTimerRules, type Checkpoint, type Replay } from "./replay";
-import { StyleFilter, strafeKeys, styleDef, type StyleDef } from "./styles";
+import { StyleFilter, strafeKeys, styleDef, styleStartReentryCap, type StyleDef } from "./styles";
 import { RunTimer, TIMER_RULES, TIMER_RULES_V1, TIMER_RULES_V2, type TickCmd, type TimerUpdate } from "./timer";
 import type { Zone } from "./zones";
 import { pathSource, startObserving } from "./timing-trace";
@@ -29,7 +29,7 @@ export function quantize(forward: number, side: number, yaw: number, pitch: numb
  * start-zone rules (timer.ts TIMER_RULES_*): the current ones for live play, the replay's own on re-simulation.
  */
 export function makeTimer(zones: readonly Zone[], settings: Settings, prespeedCap: number | null, style: StyleDef | null = null, rules = TIMER_RULES): RunTimer {
-  return new RunTimer(zones, Math.fround(settings.tickInterval), { prespeedCap, blockPrehops: style?.id === "scroll", strafeKeys: strafeKeys(style), rules });
+  return new RunTimer(zones, Math.fround(settings.tickInterval), { prespeedCap, blockPrehops: style?.id === "scroll", strafeKeys: strafeKeys(style), rules, startReentryCap: style ? styleStartReentryCap(style.id) : null });
 }
 
 /** Apply start-zone prehop blocking before movement, shared by live play, recording and replay verification. */

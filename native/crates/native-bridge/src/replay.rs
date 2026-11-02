@@ -221,6 +221,8 @@ impl Decoded {
             max_speed: r.f32()?,
             autohop: u32::from(flags & 1 != 0),
             stamina: u32::from(version >= 9 && flags & 2 != 0),
+            // Set from the header's style below: the midair jump is a property of Infinite, not a recorded flag.
+            air_jump: 0,
             physics: 1,
         };
         let cap = r.f32()?;
@@ -278,6 +280,8 @@ impl Decoded {
             }
             r.varint()? as usize
         };
+        // Infinite's midair jump follows its style string, so replays recorded before it existed decode unchanged.
+        settings.air_jump = u32::from(style == "infinite");
         if zone_count > 16384 {
             return Err("replay zone limit exceeded".into());
         }
@@ -514,6 +518,7 @@ impl Decoded {
             rules,
             block_prehops: u32::from(style == "scroll"),
             strafe_keys: styles::strafe_keys(&style),
+            start_reentry_cap: styles::start_reentry_cap(&style),
         };
         Ok(Self {
             settings,

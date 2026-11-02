@@ -310,6 +310,7 @@ export const STYLE_COMMANDS: Record<StyleId, readonly string[]> = {
   // bhoptimer: "sr; seg; segment; segmented" (sr is also its !wr alias, so not here).
   segmented: ["seg", "segment", "segmented"],
   autostrafe: ["auto", "as", "autostrafe"],
+  infinite: ["inf", "infinite"],
 };
 
 /** The style a name means: an id, a name ("W-Only", "half sideways") or a style command ("hsw"). */
