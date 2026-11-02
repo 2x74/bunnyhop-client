@@ -26,6 +26,7 @@ import { formatTime } from "../../web/src/timer";
 import { isStyleId } from "../../web/src/styles";
 import { onStyleChange, setSelectedStyle } from "../../web/src/ui/style-picker";
 import { settingsPanel, focusSettingsSection } from "./settings-panel";
+import { watchForAntipiracy } from "./antipiracy";
 import {
   replayPanel,
   replayViewer,
@@ -1064,6 +1065,7 @@ document.addEventListener("keydown", (event) => {
   if (screen !== "home") back();
   else if (state.map && !state.loading) send({ type: "resume" });
 });
+watchForAntipiracy();
 window.addEventListener("bunnyhop:tutorial", () => show("tutorial"));
 window.addEventListener("bunnyhop:navigate", (event) => {
   let url: URL;

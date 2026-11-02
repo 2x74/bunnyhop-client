@@ -411,6 +411,10 @@ pub struct Policy {
     pub ground_detach_relative_to_support: bool,
     pub jump_impulse: f32,
     pub air_dash_impulse: Option<f32>,
+    /// Infinite style: a fresh jump press in the air sets vertical velocity to this and keeps the
+    /// horizontal speed, as often as the player re-presses. `air_dash_impulse` rebuilds the
+    /// horizontal velocity from the wish direction instead, which would throw that speed away.
+    pub air_jump_impulse: Option<f32>,
     pub surface_friction: f32,
     pub surface_jump_factor: f32,
     pub standing_hull: Hull,
@@ -480,6 +484,7 @@ impl Default for Policy {
             ground_detach_relative_to_support: true,
             jump_impulse: 268.328_16,
             air_dash_impulse: None,
+            air_jump_impulse: None,
             surface_friction: 1.0,
             surface_jump_factor: 1.0,
             standing_hull: Hull {

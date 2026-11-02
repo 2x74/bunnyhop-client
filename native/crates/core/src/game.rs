@@ -469,6 +469,11 @@ pub fn physics_fixes(version: u32) -> Option<u32> {
     }
 }
 
+/// Vertical speed an Infinite-style midair jump rises at, from the CS:S plugin the style comes from
+/// (2x74/infinite). It replaces the vertical velocity rather than adding to it, so a jump taken while
+/// falling fast is still worth the same.
+pub const AIR_JUMP_SPEED: f32 = 290.0;
+
 #[derive(Clone, Copy, Debug)]
 pub struct Settings {
     pub tick_interval: f32,
@@ -480,6 +485,9 @@ pub struct Settings {
     pub max_speed: f32,
     pub autohop: bool,
     pub stamina: bool,
+    /// Infinite style: every fresh jump press in the air rises again, keeping the horizontal speed
+    /// (`AIR_JUMP_SPEED`). No other style sets it, so replays recorded before it existed are unaffected.
+    pub air_jump: bool,
     /// Physics version (`PHYSICS_V1`, `PHYSICS_V2`, ...). Must be one `physics_fixes` knows (`Game::set_settings`
     /// callers check; unknown versions run as v1 here).
     pub physics_version: u32,
@@ -498,6 +506,7 @@ impl Settings {
             max_speed: 260.0,
             autohop: true,
             stamina: false,
+            air_jump: false,
             // v1 unless a caller selects a version: the web client always does (DEFAULT_SETTINGS.physics, replay
             // headers), so native tools and tests that don't keep the original behaviour.
             physics_version: PHYSICS_V1,
@@ -552,6 +561,7 @@ impl Settings {
             air_speed_cap: 30.0,
             bunnyhop_speed_cap: None,   // TF2 PreventBunnyJumping; CS:S has none
             jump_impulse: 301.993_38,   // sqrt(2 * 800 * 57)
+            air_jump_impulse: self.air_jump.then_some(AIR_JUMP_SPEED),
             ground_detach_speed: 140.0, // NON_JUMP_VELOCITY
             standing_hull,
             crouched_hull,
@@ -2129,7 +2139,13 @@ impl Game {
             self.update_broadphase();
             let scene = self.scene(self.tick as f32 * self.settings.tick_interval);
             let execute = if self.observe_timing { movement::step_observed } else { movement::step };
-            let result = match execute(&scene, self.state, input, config, self.policy) {
+            // Infinite's midair jump needs a real button edge, not the jump latch: with autohop the latch is
+            // rearmed every tick jump is held (v20+, above), which would turn a held jump into continuous flight.
+            let mut policy = self.policy;
+            if pressed & IN_JUMP == 0 {
+                policy.air_jump_impulse = None;
+            }
+            let result = match execute(&scene, self.state, input, config, policy) {
                 Ok(r) => r,
                 Err(e) => {
                     // Never wedge the client on a movement failure: keep the position, drop the

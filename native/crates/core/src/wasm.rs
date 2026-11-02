@@ -335,7 +335,7 @@ pub extern "C" fn set_settings(tick_interval: f32, air_accelerate: f32, accelera
         if let Some(g) = c.game.as_mut() {
             // The physics version is set separately (`set_physics_version`) and kept here.
             let physics_version = g.settings.physics_version;
-            g.set_settings(Settings { tick_interval, air_accelerate, accelerate, friction, stop_speed, gravity, max_speed, autohop: autohop != 0, stamina: false, physics_version });
+            g.set_settings(Settings { tick_interval, air_accelerate, accelerate, friction, stop_speed, gravity, max_speed, autohop: autohop != 0, stamina: false, air_jump: false, physics_version });
         }
     })
 }
@@ -346,6 +346,16 @@ pub extern "C" fn set_stamina(enabled: u32) {
     with(|c| {
         if let Some(g) = c.game.as_mut() {
             g.set_settings(Settings { stamina: enabled != 0, ..g.settings });
+        }
+    });
+}
+
+/// Enable the Infinite style's midair jump, independently of the legacy settings ABI.
+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+pub extern "C" fn set_air_jump(enabled: u32) {
+    with(|c| {
+        if let Some(g) = c.game.as_mut() {
+            g.set_settings(Settings { air_jump: enabled != 0, ..g.settings });
         }
     });
 }

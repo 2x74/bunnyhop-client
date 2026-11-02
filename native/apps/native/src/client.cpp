@@ -799,9 +799,17 @@ int run(const native::Options &opt) {
                     if (!practice.noclip) {
                         BhRunState before{};
                         bh_run_state(core.get(), &before);
-                        practice_use("noclip");
+                        // Infinite flies to the start rather than practising, so noclip there closes the
+                        // recording without marking the attempt practice: leaving the start zone records
+                        // a fresh run. A flight cannot be re-simulated from commands, so the recording
+                        // cannot simply continue across it.
+                        if (selected_style == "infinite") {
+                            run_event(practice.enter(core.get(), "noclip", recorder, heartbeat, score_notice));
+                        } else {
+                            practice_use("noclip");
+                            if (before.status == 1) toast("Noclip: timer stopped. Press R for a real run.", 3500);
+                        }
                         practice.noclip = true;
-                        if (before.status == 1) toast("Noclip: timer stopped. Press R for a real run.", 3500);
                         practice.begin_flight(curr);
                     } else {
                         const auto result = practice.exit_flight(core.get(), input, curr, prev);
@@ -3127,7 +3135,8 @@ int run(const native::Options &opt) {
                 cmd = input.command(w_release);
                 if (practice.noclip) {
                     BhSnapshot snapshot{};
-                    require(bh_noclip_move(&practice.flight, &cmd, dt), core.get(), "Moving noclip");
+                    require(bh_noclip_move(&practice.flight, &cmd, dt, selected_style.c_str()), core.get(),
+                            "Moving noclip");
                     require(bh_practice_noclip_tick(core.get(), &practice.flight, &snapshot),
                             core.get(),
                             "Stepping practice noclip");

@@ -1,6 +1,6 @@
 //! Exact command/style transform from apps/web/src/styles.ts and autostrafe.ts.
 use super::{BhCmd, BhSettings, BhState};
-pub const IDS: [&str; 9] = [
+pub const IDS: [&str; 10] = [
     "autohop",
     "legit",
     "scroll",
@@ -10,6 +10,7 @@ pub const IDS: [&str; 9] = [
     "lowgrav",
     "autostrafe",
     "segmented",
+    "infinite",
 ];
 const JUMP: u32 = 1 << 1;
 const FORWARD: u32 = 1 << 3;
@@ -31,7 +32,18 @@ pub fn settings(id: &str) -> Result<BhSettings, String> {
     if id == "lowgrav" {
         s.gravity = 400.0;
     }
+    if id == "infinite" {
+        s.air_jump = 1;
+    }
     Ok(s)
+}
+/// apps/web/src/styles.ts styleStartReentryCap: 3510 sits just above Infinite's 3500 noclip ceiling. 0 = off.
+pub fn start_reentry_cap(id: &str) -> f32 {
+    if id == "infinite" { 3510.0 } else { 0.0 }
+}
+/// apps/web/src/styles.ts stylePrespeedCap: Scroll and Infinite have no prespeed cap.
+pub fn has_prespeed_cap(id: &str) -> bool {
+    id != "scroll" && id != "infinite"
 }
 pub fn strafe_keys(id: &str) -> u32 {
     match id {

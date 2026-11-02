@@ -274,3 +274,29 @@ dialog.css-dialog { width:min(56rem,96vw); }
 
 /* The replay viewer (replay-viewer.ts) over the host's playback, or the map's still without one: unblurred. */
 body.viewer-open #native-backdrop > * { filter: none; }
+
+/* Typing ANTIPIRACY on the menu (antipiracy.ts). Plain panel, deliberately dated copy. */
+dialog.antipiracy { position:relative;width:min(34rem,92vw);text-align:center; }
+/* The notice itself fills the window, like the screens it is imitating. */
+dialog.antipiracy-screen {
+  position:fixed;inset:0;box-sizing:border-box;
+  width:100vw;max-width:100vw;height:100vh;max-height:100vh;margin:0;
+  display:flex;align-items:center;justify-content:center;
+  padding:2rem;border:0;border-radius:0;background:#000;color:var(--ink-0);text-align:center;
+}
+dialog.antipiracy-screen::backdrop { background:#000; }
+.antipiracy-body { display:flex;flex-direction:column;align-items:center;gap:2rem;max-width:46rem; }
+/* DKC3's screen: plain white capitals, centred, generously spaced. */
+.antipiracy-body p {
+  margin:0;color:#fff;font-size:clamp(1.3rem,2.2vw,2rem);font-weight:650;
+  line-height:1.6;letter-spacing:.04em;text-transform:uppercase;text-wrap:balance;
+}
+.antipiracy-body .wordmark { margin-bottom:1rem; }
+.antipiracy p { margin:.4rem 0;font-size:var(--fs-md); }
+.antipiracy-row { display:flex;justify-content:center;gap:.6rem;margin-top:.9rem; }
+.antipiracy-row button { min-width:5.5rem; }
+.antipiracy-close {
+  position:absolute;top:.35rem;right:.45rem;padding:0 .35rem;
+  background:none;border:0;color:var(--dim);font-size:var(--fs-lg);line-height:1;cursor:pointer;
+}
+.antipiracy-close:hover { color:var(--ink-0); }

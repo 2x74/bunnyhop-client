@@ -148,7 +148,7 @@ export const TIMER_RUNNING = 2;
 export const TIMER_FINISHED = 3;
 
 /** Wire order of styles (frozen: never reorder, only append). */
-export const WIRE_STYLES: readonly StyleId[] = ["autohop", "legit", "wonly", "sideways", "hsw", "autostrafe", "scroll", "lowgrav", "segmented"];
+export const WIRE_STYLES: readonly StyleId[] = ["autohop", "legit", "wonly", "sideways", "hsw", "autostrafe", "scroll", "lowgrav", "segmented", "infinite"];
 export const styleIndex = (s: string): number => Math.max(0, WIRE_STYLES.indexOf(s as StyleId));
 export const styleAt = (i: number): StyleId | null => WIRE_STYLES[i] ?? null;
 
