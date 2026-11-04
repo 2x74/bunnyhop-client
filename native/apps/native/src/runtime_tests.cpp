@@ -123,8 +123,8 @@ int main() {
     assert(p.number() == 1);
     p.step(8);
     assert(p.number() == 2);
-    assert(native::practice_unavailable(true, false, true, false, false) == "Practice is for solo play, not servers.");
-    assert(native::practice_unavailable(true, false, false, false, true) == "No practice during a gauntlet.");
+    assert(native::practice_unavailable(true, false, false, false).empty());
+    assert(native::practice_unavailable(true, false, false, true) == "No practice during a gauntlet.");
     p = native::Practice{};
     assert(!p.active && !p.mode && !p.menu_open && p.checkpoints.empty());  // new map/replay
     const auto prefs = native::default_settings();

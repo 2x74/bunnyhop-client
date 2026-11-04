@@ -72,10 +72,10 @@ struct Practice {
     size_t number() const { return checkpoints.empty() ? 0 : current + 1; }
 };
 
-inline std::string practice_unavailable(bool core, bool playback, bool room, bool tutorial, bool gauntlet) {
+// Rooms allow practice: the others see a practice tag, and a practice attempt is never submitted.
+inline std::string practice_unavailable(bool core, bool playback, bool tutorial, bool gauntlet) {
     if (!core) return "Load a map to use practice.";
     if (playback) return "Practice isn't available in the replay viewer.";
-    if (room) return "Practice is for solo play, not servers.";
     if (tutorial) return "Practice isn't available in the tutorial.";
     if (gauntlet) return "No practice during a gauntlet.";
     return {};

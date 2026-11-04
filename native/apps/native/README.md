@@ -106,9 +106,9 @@ build, WASM, physics and rules, unexpired) can upload ranked runs; any other bui
 Segmented has its own boards, PBs and ghosts, with Normal physics. C saves a checkpoint and X restores its full
 world, speed, view, timer and recording without making a clean attempt practice. Checkpoints also survive restarts
 and abandoned branches; the replay keeps the final path and its load markers. The HUD shows the load count.
-Noclip and other practice tools still make the attempt practice. Checkpoints are solo only. Up to 1000 are kept,
-fewer on very large maps; the oldest go first. Segmented sends no heartbeats and earns no overall points or
-progression; ranked uploads require an admitted native build.
+Noclip and other practice tools still make the attempt practice. Practice, checkpoints and Segmented work on
+servers too. Up to 1000 checkpoints are kept, fewer on very large maps; the oldest go first. Segmented sends no
+heartbeats and earns no overall points or progression; ranked uploads require an admitted native build.
 
 Turn binds use `cl_yawspeed` and the fast-turn multiplier and are recorded in the replay. In Legit Scroll they
 keep the attempt local outside practice. Recording stops at 180,000 commands (about 30 minutes), except in

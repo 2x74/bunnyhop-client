@@ -737,11 +737,7 @@ int run(const native::Options &opt) {
     };
     auto practice_reason = [&]() {
         return native::practice_unavailable(
-                bool(core),
-                viewer.active,
-                !room.id.empty(),
-                map_id == native::TutorialRunner::map_id,
-                !gauntlet_id.empty()
+                bool(core), viewer.active, map_id == native::TutorialRunner::map_id, !gauntlet_id.empty()
         );
     };
     auto toast = [&](const std::string &text, unsigned ms = 3000) {
@@ -999,12 +995,15 @@ int run(const native::Options &opt) {
         map_download.start(id, cache, lock_cache);
     };
     auto apply_room_event = [&](const nlohmann::json &message) {
+        const auto lifecycle = room.generation;
         const auto next = room.event(message);
         room.refresh_display(std::chrono::duration<double>(Clock::now().time_since_epoch()).count());
         room.refresh_spectators(hud.extras);
         if (!room.id.empty()) {
-            const bool tainted = practice.active || practice.noclip;
-            practice.clear(core.get());
+            // Joining a room ends solo practice. Practice started in the room carries on through its events.
+            const bool joined = room.generation != lifecycle;
+            const bool tainted = joined && (practice.active || practice.noclip);
+            if (joined) practice.clear(core.get());
             gauntlet_id.clear();
             gauntlet_map.clear();
             gauntlet_progress = nullptr;
@@ -2405,7 +2404,6 @@ int run(const native::Options &opt) {
                                     zones,
                                     selected_style,
                                     !gauntlet_id.empty(),
-                                    !room.id.empty(),
                                     tick,
                                     map_id
                             );
