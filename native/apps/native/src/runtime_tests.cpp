@@ -10,7 +10,6 @@
 #undef NDEBUG
 #endif
 #include <cassert>
-#include <bit>
 #include <thread>
 #include <mutex>
 #include <iostream>
@@ -124,7 +123,8 @@ void test_track_style_switch() {
     player.position[2] = -5;
     const auto change = Switch::due(bonus, player, zones, "infinite", "infinite", false, 90);
     assert(change && change->track == 1 && change->toast == "Bonus 1, Normal");
-    assert(change->at.position == (std::array<float, 3>{139, -300, 1}) && change->at.yaw == 90 && !change->at.practice);
+    assert(change->at && change->at->position == (std::array<float, 3>{139, -300, 1}) && change->at->yaw == 90);
+    assert(!change->at->practice);
     // Still flying through it, already in Normal, or out of the start: nothing.
     assert(!Switch::due(bonus, player, zones, "infinite", "infinite", true, 90));
     assert(!Switch::due(bonus, player, zones, "infinite", "autohop", false, 90));
@@ -139,43 +139,31 @@ void test_track_style_switch() {
     assert(back && back->track == 0 && back->toast == "Main track, Infinite");
 }
 
-// bhop_eazy (flight_tests.rs a_landing_that_leaves_a_bonus_start_starts_the_bonus_on_its_tick): the landing put the
-// player at the bonus start's edge and that tick's step left it, starting an Infinite bonus run. The pre-tick check
-// never sees the player in the start again; the landing check restarts at the landing spot, in Normal.
-void test_track_style_switch_after_landing() {
+// After a flight's landing tick (web flight-landing.ts landingBonusRestart): the timer armed in or running a bonus in
+// another style restarts that bonus at its own restart point. The timer states are the ones the bhop_eazy and
+// bhop_advi_wood_rg1 repros in flight_tests.rs pin.
+void test_landing_bonus_restart() {
     using Switch = native::TrackStyleSwitch;
-    const std::vector<BhZone> zones = {
-            {0, 1, 0, {100, -480, 0}, {140, -224, 300}},
-            {0, 0, 0, {540, -480, 0}, {580, -224, 300}},
+    const auto timer = [](uint32_t track, bool in_start, uint32_t status, uint32_t pending = 0) {
+        BhRunState t{};
+        t.track = track;
+        t.in_start = in_start;
+        t.status = status;
+        t.pending_start = pending;
+        return t;
     };
-    BhFlightState landed{};
-    landed.allowed = 1;
-    landed.landed = 1;
-    const float spot[3] = {std::bit_cast<float>(1118373599u), -352, 64.03125f};
-    std::copy(spot, spot + 3, landed.landing_position);
-    BhRunState started{};
-    started.status = 1;
-    started.track = 1;
-    BhState player{};
-    player.position[0] = 57.332886f;
-    assert(!Switch::due(started, player, zones, "infinite", "infinite", false, 180));
-    const auto change = Switch::after_landing(landed, started, zones, "infinite", "infinite", 180);
-    assert(change && change->track == 1 && change->toast == "Bonus 1, Normal");
-    assert(change->at.position == (std::array<float, 3>{101, -352, 64.03125f}) && change->at.yaw == 180);
-    // Still in the start after the landing: the pre-tick check takes it, as on the website.
-    BhRunState inside = started;
-    inside.in_start = 1;
-    assert(!Switch::after_landing(landed, inside, zones, "infinite", "infinite", 180));
-    BhFlightState walked = landed;
-    walked.landed = 0;
-    assert(!Switch::after_landing(walked, started, zones, "infinite", "infinite", 180));
-    assert(!Switch::after_landing(landed, started, zones, "infinite", "autohop", 180));
-    // A landing in the main start while in Infinite is the style that's running.
-    BhFlightState main = landed;
-    main.landing_position[0] = 560;
-    BhRunState main_run = started;
-    main_run.track = 0;
-    assert(!Switch::after_landing(main, main_run, zones, "infinite", "infinite", 180));
+    // Bonus 1 started on the landing tick (the edge repro and the overlap), armed in its start (the airborne one).
+    for (const auto &bonus : {timer(1, false, 1), timer(1, true, 0), timer(1, false, 0, 120)}) {
+        const auto change = Switch::landing_bonus(bonus, "infinite", "infinite");
+        assert(change && change->track == 1 && !change->at && change->toast == "Bonus 1, Normal");
+    }
+    const auto second = Switch::landing_bonus(timer(2, false, 1), "infinite", "infinite");
+    assert(second && second->track == 2 && second->toast == "Bonus 2, Normal");
+    assert(!Switch::landing_bonus(timer(0, true, 0), "infinite", "infinite"));   // the main start
+    assert(!Switch::landing_bonus(timer(0, false, 1), "infinite", "infinite"));  // a main run
+    assert(!Switch::landing_bonus(timer(1, false, 0), "infinite", "infinite"));  // idle outside every start
+    assert(!Switch::landing_bonus(timer(1, false, 2), "infinite", "infinite"));  // a finished bonus
+    assert(!Switch::landing_bonus(timer(1, true, 0), "autohop", "autohop"));     // already the bonus's style
 }
 
 int main() {
@@ -183,7 +171,7 @@ int main() {
     test_practice_mode();
     test_infinite_flight_stuck_notice();
     test_track_style_switch();
-    test_track_style_switch_after_landing();
+    test_landing_bonus_restart();
     native::Practice p;
     assert(p.key_allowed("save", true));
     assert(!p.key_allowed("tele", true));

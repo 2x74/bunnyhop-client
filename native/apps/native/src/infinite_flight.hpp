@@ -6,8 +6,10 @@
 
 namespace native {
 
-// Core step event: the player flew this tick (crates/core game/flight.rs EVENT_FLIGHT).
+// Core step events: the player flew this tick, or this tick ended a flight (crates/core game/flight.rs EVENT_FLIGHT,
+// EVENT_FLIGHT_LANDED).
 constexpr uint32_t event_flight = 1u << 9;
+constexpr uint32_t event_flight_landed = 1u << 10;
 
 // Infinite's noclip on physics v24+ (website session.ts flightOn): the bridge puts IN_FLIGHT in every command while the
 // key's flag is on, the core flies it and the recording keeps it, so the run after a flight counts. Nothing here is

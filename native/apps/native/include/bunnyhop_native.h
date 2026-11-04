@@ -445,9 +445,6 @@ typedef struct BhFlightState {
     uint32_t allowed; /* Infinite on physics v24+: the noclip key flies in the core */
     uint32_t on;      /* the flag */
     uint32_t flying;  /* the core is flying: the flag is on, or a landing found no free space yet */
-    uint32_t landed;  /* the last tick ended a flight (EVENT_FLIGHT_LANDED); the landing fields hold only then */
-    float landing_position[3]; /* where the landing put the player, before that tick's normal step */
-    uint32_t landing_crouched;
 } BhFlightState;
 
 /* Fails turning it on where the core can't fly (allowed == 0) or during replay playback. */

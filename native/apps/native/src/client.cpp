@@ -3249,10 +3249,9 @@ int run(const native::Options &opt) {
                     input.events(curr);
                     if (const auto notice = practice.infinite_flight.observe(core.get(), curr))
                         toast(std::string(*notice), 4000);
-                    if (can_switch)
-                        track_switch = native::TrackStyleSwitch::after_landing(
-                                core.get(), zones, selected_style, active_style, float(input.yaw())
-                        );
+                    if (can_switch && (curr.events & native::event_flight_landed))
+                        track_switch =
+                                native::TrackStyleSwitch::landing_bonus(core.get(), selected_style, active_style);
                 }
             }
             if (track_switch) {
