@@ -1,6 +1,8 @@
 // Room evidence: replays a recorded room session (the menu's host messages, one JSON object per line) into the room
 // state, chat and scoreboard over a loaded map, and saves the frames listed in the shot file. The recording comes from
 // a local server; nothing here opens a socket or submits anything.
+// A shot can also draw the spectator bar ("spectating": "eye", "chase" or "free", with "spectateMenu") and the run
+// HUD with freecam's line ("freecam").
 #include "client_smoke.hpp"
 #include "options.hpp"
 #include "game_session.hpp"
@@ -9,6 +11,8 @@
 #include "room_state.hpp"
 #include "native_chat.hpp"
 #include "menu_backdrop.hpp"
+#include "free_cameras.hpp"
+#include "settings.hpp"
 #include <SDL3/SDL.h>
 #include <filesystem>
 #include <fstream>
@@ -33,6 +37,9 @@ struct RoomShot {
     std::array<float, 3> eye{};
     float yaw = 0, pitch = 0;
     bool scoreboard = false, chat = false, tags = true;
+    // Watching the room's spectator target: "eye", "chase" or "free" draws the spectator bar for that camera.
+    std::string spectating;
+    bool spectate_menu = false, freecam = false;
 };
 
 std::vector<RecordedMessage> read_recording(const std::filesystem::path &path) {
@@ -63,6 +70,9 @@ std::vector<RoomShot> read_shots(const std::filesystem::path &path) {
         shot.scoreboard = item.value("scoreboard", false);
         shot.chat = item.value("chat", false);
         shot.tags = item.value("tags", true);
+        shot.spectating = item.value("spectating", std::string());
+        shot.spectate_menu = item.value("spectateMenu", false);
+        shot.freecam = item.value("freecam", false);
         shots.push_back(std::move(shot));
     }
     return shots;
@@ -115,6 +125,43 @@ private:
     }
 };
 
+const BindTable &default_binds() {
+    static const BindTable binds = [] {
+        BindTable table;
+        table.rebuild(default_settings().at("binds"));
+        return table;
+    }();
+    return binds;
+}
+
+// The spectator bar (and the N menu) as the client draws them while watching with the shot's camera.
+void draw_spectating(NativeHud &hud, int width, int height, const RoomShot &shot, RoomState &room, double at) {
+    Input input;
+    std::set<std::string> held;
+    InputTimeline timeline;
+    const FreeLookInput controls{timeline, input, held};
+    SpectatorView view;
+    if (shot.spectating == "chase") view.toggle_chase(controls);
+    if (shot.spectating == "free") view.toggle_free(controls);
+    const auto target = room.spectator_target.value_or(256);
+    const bool shown = room.spectated(at).has_value();
+    draw_spectator_bar(
+            hud, width, height, 100, {true, !shown, room.player_name(target), view.hint("KeyR", default_binds())}
+    );
+    if (!shot.spectate_menu) return;
+    SpectatePicker picker;
+    picker.show(room.display(), room.spectator_target);
+    picker.draw(hud, width, height, 100);
+}
+
+// The run HUD with freecam's line in the practice slot.
+void draw_freecam_hud(NativeHud &hud, int width, int height, const std::string &map, const BhSnapshot &snapshot) {
+    Freecam freecam;
+    hud.extras.freecam_line.assign(freecam.hud_line(""));
+    hud.draw(width, height, snapshot, BhRunState{}, BhCmd{}, map, "autohop", "", 0, true, false, false, {});
+    hud.extras.freecam_line.assign("");
+}
+
 struct RoomSmokeFrame {
     Gl &gl;
     GameSession &game;
@@ -161,6 +208,8 @@ void draw_room_frame(RoomSmokeFrame &frame, const RoomShot &shot, double at, BhS
     }
     if (shot.scoreboard)
         draw_scoreboard(frame.hud, frame.width, frame.height, 100, frame.replay.room.display(), at, epoch_ms);
+    if (shot.freecam) draw_freecam_hud(frame.hud, frame.width, frame.height, frame.game.map_id, snapshot);
+    if (!shot.spectating.empty()) draw_spectating(frame.hud, frame.width, frame.height, shot, frame.replay.room, at);
 }
 
 }  // namespace
