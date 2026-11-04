@@ -10,6 +10,7 @@
 #include "weapon_menu.hpp"
 #include "native_chat.hpp"
 #include "capabilities.hpp"
+#include <memory>
 #include <cassert>
 #include <set>
 #include <iostream>
@@ -514,7 +515,9 @@ void test_room_tag_detail() {
 
 // Rooms from web 0.0.36 relay every wire style and a practice tag (room_styles.hpp).
 void test_room_wire_styles() {
-    native::RoomState room;
+    // Heap-allocated: a room and a board are about 300 KB each, and Windows gives the main thread 1 MB of stack.
+    const auto room_owner = std::make_unique<native::RoomState>();
+    auto &room = *room_owner;
     room.event(
             {{"generation", 1},
              {"id", "easy"},
@@ -545,7 +548,8 @@ void test_room_wire_styles() {
     );
     room.tag_detail(2, 10, detail);
     assert(detail.view().starts_with("INF · 00:0"));
-    native::HudScoreboard board;
+    const auto board_owner = std::make_unique<native::HudScoreboard>();
+    auto &board = *board_owner;
     board.add({{"slot", 1}, {"name", "Back"}, {"style", "autohop"}}, {{"style", 10u}}, 0, 0);
     assert(board.rows[0].style == "backwards");
     board.add({{"slot", 2}, {"name", "Later"}, {"style", "zigzag"}}, {{"style", 11u}}, 0, 0);
