@@ -1,5 +1,5 @@
 import type { ScoreHead, ScoreRow } from "../../web/src/net/scoreboard";
-import { styleAt } from "../../web/src/net/protocol";
+import { roomStyleAt } from "./room-styles";
 import { staffBadgeOf } from "../../web/src/creators";
 import { formatTime } from "../../web/src/timer";
 import type { RoomView } from "./room-service";
@@ -31,7 +31,8 @@ export function roomScoreboard(
 ): { head: ScoreHead; rows: ScoreRow[] } {
   const rows: ScoreRow[] = view.players.map((p) => {
     const m = view.metas[String(p.slot)],
-      style = styleAt(m?.style ?? -1) ?? p.style;
+      style = roomStyleAt(m?.style ?? -1) ?? p.style;
+    const bests: Partial<Record<string, number>> = p.pb ?? {};
     const role = p.role !== undefined ? p.role : p.admin ? "admin" : null;
     let status = "—",
       statusKind: ScoreRow["statusKind"] = "idle";
@@ -69,7 +70,7 @@ export function roomScoreboard(
       style,
       status,
       statusKind,
-      pb: p.pb?.[style] ?? null,
+      pb: bests[style] ?? null,
       ping: p.slot === view.you ? (selfPing === undefined ? (m?.ping ?? null) : selfPing) : (m?.ping ?? null),
       host: !!view.room?.private && p.slot === view.room.host,
       country: p.country ?? null,

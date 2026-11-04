@@ -1,6 +1,7 @@
 #pragma once
 #include "bunnyhop_native.h"
 #include "hud_scoreboard.hpp"
+#include "room_styles.hpp"
 #include "render_shaders.hpp"
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -623,26 +624,27 @@ public:
     // What a player's tag shows after the name (net/players.ts): their time while running or finished, "start" in the
     // start zone, preceded by the style's short name unless it is Normal.
     void tag_detail(unsigned slot, double now, HudLabel<48> &out) const {
-        constexpr std::array<std::string_view, 10> short_styles = {
-                "NM", "EZ", "W", "SW", "HSW", "AS", "SCR", "LG", "SEG", "INF"
-        };
         constexpr unsigned timer_start = 1, timer_running = 2, timer_finished = 3;
         out.assign("");
         const auto found = peers.find(slot);
-        if (found == peers.end() || !found->second.wire.known) return;
+        if (found == peers.end()) return;
         const auto &peer = found->second;
         const auto &wire = peer.wire;
-        if (wire.style != 0 && wire.style < short_styles.size()) out.assign(short_styles[wire.style]);
+        if (!wire.known) return;
+        const auto *style = wire.known && wire.style != 0 ? wire_style_at(wire.style) : nullptr;
+        if (style) out.assign(style->short_name);
+        const auto detail = [&out](std::string_view text) {
+            if (!out.empty()) out.append(" · ");
+            out.append(text);
+        };
         if (wire.timer == timer_running || wire.timer == timer_finished) {
             const double running =
                     wire.timer == timer_running && peer.meta_at > 0 ? std::max(0., now - peer.meta_at) : 0;
             HudLabel<48> time;
             format_hud_time(time, wire.timer_ticks * .01 + running);
-            if (!out.empty()) out.append(" · ");
-            out.append(time.view());
+            detail(time.view());
         } else if (wire.timer == timer_start) {
-            if (!out.empty()) out.append(" · ");
-            out.append("start");
+            detail("start");
         }
     }
 

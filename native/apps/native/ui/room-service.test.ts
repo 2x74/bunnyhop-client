@@ -1,7 +1,8 @@
 import { test, expect } from "bun:test";
 import { NativeRoomService, validSnapshot, validRoomEvent, type RoomTransport } from "./room-service";
 import type { RoomHandlers } from "../../web/src/net/room";
-import type { ServerMsg, NetSample, Snapshot } from "../../web/src/net/protocol";
+import { decodeSnapshot, type ServerMsg, type NetSample, type Snapshot } from "../../web/src/net/protocol";
+import { ROOM_WIRE_STYLES } from "./room-styles";
 import type { MenuMessage } from "./bridge";
 const sample: NetSample = { tick: 1, x: 0, y: 0, z: 0, vx: 1, vy: 0, vz: 0, yaw: 0, pitch: 0, flags: 0 };
 const welcome = (id: string, map = "bhop_eazy"): ServerMsg => ({
@@ -337,6 +338,92 @@ test("kick cancels scheduled map work and rejects delayed native map acknowledgm
     expect(f.sent.filter((m) => m.type === "roomEvent" && m.event.t === "nativeMap")).toHaveLength(0);
     await f.service.join("test");
     expect(f.handlers).toHaveLength(2);
+  } finally {
+    f.service.leave();
+  }
+});
+/**
+ * A snapshot frame from web 0.0.36's room encoder (protocol.ts encodeSnapshot, the layout native decodes with its
+ * vendored decodeSnapshot): a Segmented player (wire style 8), an Infinite one (9) and a Backwards one (10).
+ */
+const SNAPSHOT_0036 =
+  "AgMA0klrAQIBCAACKADSBAAAkAEAAAABAAAgQQAAoEEAAIBCLAH0/wAAAEAAAAQBAACwQQAAoEEAAIBCLAH0/wAAAEAAAAIBAQkAAzcALhYAACADAAAAAQAA" +
+  "8EEAAKBBAACAQiwB9P8AAABAAAADAgEKAQJGAGMAAACwBAAAAAEAACBCAACgQQAAgEIsAfT/AAAAQAAABAEAACRCAACgQQAAgEIsAfT/AAAAQAAAAQIAAgI=";
+/** A 0.0.36 welcome for a socket that sent wire=11: every style in the roster, a practice tag, wide metas. */
+function welcome0036(): ServerMsg {
+  const players = ROOM_WIRE_STYLES.map((style, slot) => ({
+    slot,
+    id: `p${slot}`,
+    name: `Player ${slot}`,
+    style,
+    ...(style === "backwards" ? { practice: true } : {}),
+  }));
+  return {
+    ...(welcome("test") as Extract<ServerMsg, { t: "welcome" }>),
+    players: players as never,
+    metas: {
+      8: { style: 8, track: 0, timer: 2, timerTicks: 1234, ping: 40 },
+      9: { style: 9, track: 0, timer: 3, timerTicks: 5678, ping: 55 },
+      10: { style: 10, track: 1, timer: 2, timerTicks: 99, ping: 70 },
+    },
+  };
+}
+const race = (style: string) => ({
+  id: "r1",
+  state: "challenge",
+  map: "bhop_eazy",
+  style,
+  track: 0,
+  you: "b",
+  a: { name: "Web player", slot: 10, finish: null },
+  b: { name: "Player", slot: 0, finish: null },
+  expiresAt: Date.now() + 30000,
+  goAt: null,
+  endsAt: null,
+});
+test("web 0.0.36 snapshots with Segmented, Infinite and Backwards players pass and decode", async () => {
+  const snapshot = decodeSnapshot(Buffer.from(SNAPSHOT_0036, "base64"));
+  expect(snapshot).not.toBeNull();
+  expect(validSnapshot(snapshot!)).toBe(true);
+  expect(snapshot!.blocks.map((block) => block.meta?.style)).toEqual([8, 9, 10]);
+  expect(snapshot!.blocks.map((block) => block.samples.length)).toEqual([2, 1, 2]);
+  const f = fixture();
+  try {
+    await f.service.join("test");
+    f.handlers[0].message(welcome("test"));
+    f.handlers[0].snapshot(snapshot!, 0);
+    const sent = f.sent.filter((m) => m.type === "roomSnapshot") as unknown as { snapshot: Snapshot }[];
+    expect(sent).toHaveLength(1);
+    expect(sent[0].snapshot.blocks.map((block) => block.slot)).toEqual([1, 2, 3]);
+    expect(f.service.view.metas["3"]).toMatchObject({ style: 10, track: 1, timerTicks: 99 });
+    // A style past this build's (a newer room) still passes; it shows without a style tag.
+    const newer = {
+      ...snapshot!,
+      blocks: [{ ...snapshot!.blocks[0], meta: { ...snapshot!.blocks[0].meta!, style: 11 } }],
+    };
+    expect(validSnapshot(newer)).toBe(true);
+  } finally {
+    f.service.leave();
+  }
+});
+test("web 0.0.36 welcomes, joins, patches and races with every style pass", async () => {
+  const message = welcome0036();
+  expect(validRoomEvent(message)).toBe(true);
+  for (const style of ROOM_WIRE_STYLES) {
+    expect(validRoomEvent({ t: "join", player: { slot: 20, id: "x", name: "X", style } } as never)).toBe(true);
+    expect(validRoomEvent({ t: "player", slot: 20, patch: { style } } as never)).toBe(true);
+    expect(validRoomEvent({ t: "race", race: race(style) } as never)).toBe(true);
+  }
+  expect(validRoomEvent({ t: "player", slot: 10, patch: { practice: true } } as never)).toBe(true);
+  expect(validRoomEvent({ t: "join", player: { slot: 20, id: "x", name: "X", style: "zigzag" } } as never)).toBe(true);
+  const f = fixture();
+  try {
+    await f.service.join("test");
+    f.handlers[0].message(message);
+    expect(f.service.view.status).toBe("open");
+    expect(f.service.view.players).toHaveLength(ROOM_WIRE_STYLES.length);
+    expect(f.service.view.players[10]).toMatchObject({ style: "backwards", practice: true });
+    expect(f.service.view.metas["10"]).toMatchObject({ style: 10 });
   } finally {
     f.service.leave();
   }

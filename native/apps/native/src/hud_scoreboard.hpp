@@ -1,6 +1,7 @@
 #pragma once
 #include "hud_geometry.hpp"
 #include "name_tags.hpp"
+#include "room_styles.hpp"
 #include <algorithm>
 #include <array>
 #include <limits>
@@ -125,13 +126,8 @@ public:
         row.spectator = spec != player.end() && !spec->is_null();
         row.afk = json_flag(player, "afk");
         if (meta.is_object()) {
-            constexpr std::array<std::string_view, 10> styles = {
-                    "autohop", "legit", "wonly", "sideways", "hsw", "autostrafe", "scroll", "lowgrav", "segmented",
-                    "infinite"
-            };
             if (meta.contains("style") && meta["style"].is_number_unsigned()) {
-                const unsigned index = meta["style"].get<unsigned>();
-                if (index < styles.size()) row.style = styles[index];
+                if (const auto *style = wire_style_at(meta["style"].get<unsigned>())) row.style = style->id;
             }
             row.track = meta.value("track", 0u);
             row.timer = meta.value("timer", 0u);
@@ -232,20 +228,7 @@ struct ScoreLocal {
 
 // The website's style names (styles.ts STYLES), for the Style column.
 inline std::string_view score_style_label(std::string_view id) {
-    constexpr std::array<std::pair<std::string_view, std::string_view>, 9> labels = {
-            {{"autohop", "Normal"},
-             {"legit", "EZ Scroll"},
-             {"scroll", "Legit Scroll"},
-             {"wonly", "W-Only"},
-             {"sideways", "Sideways"},
-             {"hsw", "Half-Sideways"},
-             {"lowgrav", "Low Gravity"},
-             {"segmented", "Segmented"},
-             {"autostrafe", "Auto-strafe"}}
-    };
-    for (const auto &[key, label] : labels)
-        if (key == id) return label;
-    return id;
+    return wire_style_name(id);
 }
 
 // The longest prefix of `text` within `bytes` that ends on a UTF-8 code point boundary.

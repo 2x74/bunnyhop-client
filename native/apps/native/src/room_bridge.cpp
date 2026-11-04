@@ -2,7 +2,7 @@
 #include "options.hpp"
 #include "menu_webview.hpp"
 #include "tutorial_runner.hpp"
-#include <map>
+#include "room_styles.hpp"
 
 namespace native {
 namespace {
@@ -76,23 +76,11 @@ nlohmann::json RoomBridge::presence_activity(
         bool tutorial_practice,
         int64_t unix_now
 ) const {
-    static const std::map<std::string, std::string> style_names = {
-            {"autohop", "Normal"},
-            {"legit", "EZ Scroll"},
-            {"scroll", "Legit Scroll"},
-            {"wonly", "W-Only"},
-            {"sideways", "Sideways"},
-            {"hsw", "Half-Sideways"},
-            {"lowgrav", "Low Gravity"},
-            {"segmented", "Segmented"},
-            {"autostrafe", "Auto-strafe"}
-    };
     native::discord::Status status;
     status.kind = map_id.empty() ? "menu" : playback ? "replay" : (!captured || menu_visible) ? "paused" : "playing";
     status.mode = playback ? "replay" : !room.id.empty() ? "multiplayer" : tutorial_practice ? "practice" : "solo";
     status.map = map_id == native::TutorialRunner::map_id ? "the tutorial" : map_id;
-    const auto named = style_names.find(active_style);
-    status.style = named == style_names.end() ? active_style : named->second;
+    status.style = wire_style_name(active_style);
     status.started_at = presence_started;
     status.room = room.id;
     return native::discord::build_activity(status, discord_settings, hash_room, unix_now);

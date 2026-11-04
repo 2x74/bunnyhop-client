@@ -21,6 +21,7 @@ import {
 import { nativeChatDecoration } from "./chat-decoration";
 import { announceLine, roomChatLines, type RoomChatLine } from "./room-chat-lines";
 import { isStyleId } from "../../web/src/styles";
+import { roomStyleId } from "./room-styles";
 import type { RoomHandlers, RoomStatus } from "../../web/src/net/room";
 import type { MenuMessage } from "./bridge";
 export interface RoomTransport {
@@ -83,8 +84,9 @@ function sampleValid(sample: unknown): sample is NetSample {
 }
 const uint = (n: unknown, max = 0xffffffff): n is number =>
   Number.isSafeInteger(n) && Number(n) >= 0 && Number(n) <= max;
+// Any style byte: a style this build doesn't know shows without a style tag.
 const metaValid = (m: NetMeta): boolean =>
-  !!m && uint(m.style, 7) && uint(m.track, 64) && uint(m.timer, 3) && uint(m.timerTicks) && uint(m.ping, 65535);
+  !!m && uint(m.style, 255) && uint(m.track, 64) && uint(m.timer, 3) && uint(m.timerTicks) && uint(m.ping, 65535);
 /** A batch from the game: up to MAX_SAMPLES valid samples, ticks rising past the last batch's. */
 function poseSamplesValid(samples: unknown, lastTick: number): samples is NetSample[] {
   if (!Array.isArray(samples) || samples.length < 1 || samples.length > MAX_SAMPLES) return false;
@@ -126,7 +128,7 @@ const person = (p: RosterPlayer): boolean =>
   p.id.length <= 128 &&
   typeof p.name === "string" &&
   p.name.length <= 128 &&
-  isStyleId(p.style);
+  roomStyleId(p.style);
 const voteValid = (v: VoteView): boolean =>
   !!v &&
   uint(v.id) &&
@@ -152,7 +154,7 @@ const raceValid = (r: RaceView | null): boolean =>
     r.id.length <= 128 &&
     ["challenge", "countdown", "live", "settling", "over"].includes(r.state) &&
     validMap(r.map) &&
-    isStyleId(r.style) &&
+    roomStyleId(r.style) &&
     uint(r.track, 64) &&
     ["a", "b"].includes(r.you) &&
     !!r.a &&
@@ -224,7 +226,7 @@ export function validRoomEvent(message: ServerMsg): boolean {
           !!message.patch &&
           typeof message.patch === "object" &&
           (message.patch.name === undefined || typeof message.patch.name === "string") &&
-          (message.patch.style === undefined || isStyleId(message.patch.style))
+          (message.patch.style === undefined || roomStyleId(message.patch.style))
         );
       case "race":
         return raceValid(message.race);

@@ -28,8 +28,40 @@ J update(J r, double offset = 0) {
     return event({{"t", "race"}, {"race", r}, {"nativeClockOffsetMs", offset}});
 }
 
+// Races in every style rooms announce (room_styles.hpp). Ones this build plays apply their style; Backwards shows but
+// can only be declined, and a countdown that arrives anyway keeps your own style.
+void races_in_every_wire_style() {
+    for (const auto &style : native::wire_styles) {
+        native::RoomModes modes;
+        auto countdown = race();
+        countdown["style"] = style.id;
+        const auto action = modes.event(update(countdown), "bhop_eazy", false, 7000);
+        assert(action.restart);
+        assert(action.style == (style.playable ? std::string(style.id) : std::string()));
+        assert(modes.display().board.view() == style.name);
+    }
+    native::RoomModes challenged;
+    auto challenge = race("challenge");
+    challenge["style"] = "backwards";
+    challenge["you"] = "b";
+    challenged.event(update(challenge), "bhop_eazy", false, 7000);
+    assert(challenged.display().state == native::RaceDisplay::State::challenge);
+    assert(!challenged.display().playable);
+    assert(!challenged.challenge_key("Digit1", true, false));
+    assert(challenged.challenge_key("Digit2", true, false));
+    challenge["style"] = "infinite";
+    challenge["id"] = "r2";
+    challenged.event(update(challenge), "bhop_eazy", false, 7000);
+    assert(challenged.display().playable);
+    assert(challenged.challenge_key("Digit1", true, false));
+    auto unknown = race();
+    unknown["style"] = "zigzag";
+    assert(!native::RoomModes().event(update(unknown), "bhop_eazy", false, 7000).restart);
+}
+
 int main() {
     native::RoomModes modes;
+    races_in_every_wire_style();
     auto action = modes.event(update(race()), "bhop_eazy", true, 7000);
     assert(action.restart && action.stop_spectating && action.track == 0 && action.style == "sideways"
            && modes.frozen());

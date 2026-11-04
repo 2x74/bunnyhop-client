@@ -117,3 +117,10 @@ test("native scoreboard uses clock offset, frozen finished time and fallback rol
   v.change = null;
   expect(roomScoreboard(v, 0, 90001).head.timeLeft).toBe("last round");
 });
+test("room board shows a Backwards player from its wire style", () => {
+  const room = view();
+  room.players[1] = { ...room.players[1], style: "autohop", pb: { backwards: 30 } as never };
+  room.metas = { "2": { style: 10, track: 0, timer: 2, timerTicks: 500, ping: 30 } };
+  const rows = roomScoreboard(room, 0, 0).rows;
+  expect(rows.find((row) => row.slot === 2)).toMatchObject({ style: "backwards", pb: 30, status: "00:05.000" });
+});
