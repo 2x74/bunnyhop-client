@@ -45,6 +45,42 @@ struct TrackStyleSwitch {
         return float(std::min(double(zone_max) - zone_inset, std::max(double(zone_min) + zone_inset, value)));
     }
 
+    // The first start zone of `track` the player touches.
+    static const BhZone *
+    start_of(const std::vector<BhZone> &zones, uint32_t track, const float position[3], bool crouched) {
+        for (const auto &zone : zones)
+            if (zone.kind == 0 && zone.track == track && touches(zone, position, crouched)) return &zone;
+        return nullptr;
+    }
+
+    // The start zone the timer reads at `position`: of `track` first, else of the lowest track (run.rs touching).
+    static const BhZone *
+    start_at(const std::vector<BhZone> &zones, uint32_t track, const float position[3], bool crouched) {
+        if (const auto *zone = start_of(zones, track, position, crouched)) return zone;
+        const BhZone *lowest = nullptr;
+        for (const auto &zone : zones)
+            if (zone.kind == 0 && touches(zone, position, crouched) && (!lowest || zone.track < lowest->track))
+                lowest = &zone;
+        return lowest;
+    }
+
+    // The restart at `position` in `zone`, kept inside it.
+    static TrackStyleSwitch in_zone(const BhZone &zone, const float position[3], float yaw, std::string_view style) {
+        TrackStyleSwitch change;
+        change.track = zone.track;
+        change.at.position = {
+                inside(position[0], zone.mins[0], zone.maxs[0]),
+                inside(position[1], zone.mins[1], zone.maxs[1]),
+                std::max(zone.mins[2] + zone_inset, position[2]),
+        };
+        change.at.yaw = yaw;
+        change.toast = zone.track ? "Bonus " + std::to_string(zone.track) : "Main track";
+        change.toast += ", ";
+        change.toast += wire_style_name(style);
+        return change;
+    }
+
+    // Before a live tick, from the last tick's timer and player.
     static std::optional<TrackStyleSwitch>
     due(const BhRunState &timer,
         const BhState &player,
@@ -55,25 +91,32 @@ struct TrackStyleSwitch {
         float yaw) {
         const auto style = style_for_track(selected_style, timer.track);
         if (!timer.in_start || flying || style == active_style) return std::nullopt;
-        const auto zone = std::find_if(zones.begin(), zones.end(), [&](const BhZone &z) {
-            return z.kind == 0 && z.track == timer.track && touches(z, player.position, player.crouched != 0);
-        });
-        if (zone == zones.end()) return std::nullopt;
-        TrackStyleSwitch change;
-        change.track = timer.track;
-        change.at.position = {
-                inside(player.position[0], zone->mins[0], zone->maxs[0]),
-                inside(player.position[1], zone->mins[1], zone->maxs[1]),
-                std::max(zone->mins[2] + zone_inset, player.position[2]),
-        };
-        change.at.yaw = yaw;
-        change.toast = timer.track ? "Bonus " + std::to_string(timer.track) : "Main track";
-        change.toast += ", ";
-        change.toast += wire_style_name(style);
-        return change;
+        const auto *zone = start_of(zones, timer.track, player.position, player.crouched != 0);
+        if (!zone) return std::nullopt;
+        return in_zone(*zone, player.position, yaw, style);
     }
 
-    // Before a live tick: the switch the last tick's timer and player call for, if any.
+    // After a landing tick. A landing in another track's start that the same tick's step already carried out of the
+    // zone has no next tick in the start for `due` to see, and the timer may have started that track's run in this
+    // style: restart at the landing spot instead, dropping the tick. A landing that stays in the zone is left to
+    // `due`, as on the website.
+    static std::optional<TrackStyleSwitch> after_landing(
+            const BhFlightState &flight,
+            const BhRunState &timer,
+            const std::vector<BhZone> &zones,
+            std::string_view selected_style,
+            std::string_view active_style,
+            float yaw
+    ) {
+        if (!flight.landed || timer.in_start) return std::nullopt;
+        const bool crouched = flight.landing_crouched != 0;
+        const auto *zone = start_at(zones, timer.track, flight.landing_position, crouched);
+        if (!zone) return std::nullopt;
+        const auto style = style_for_track(selected_style, zone->track);
+        if (style == active_style) return std::nullopt;
+        return in_zone(*zone, flight.landing_position, yaw, style);
+    }
+
     static std::optional<TrackStyleSwitch>
     due(BhContext *core,
         const BhState &player,
@@ -85,6 +128,20 @@ struct TrackStyleSwitch {
         BhRunState timer{};
         if (!core || zones.empty() || !bh_run_state(core, &timer)) return std::nullopt;
         return due(timer, player, zones, selected_style, active_style, flying, yaw);
+    }
+
+    static std::optional<TrackStyleSwitch> after_landing(
+            BhContext *core,
+            const std::vector<BhZone> &zones,
+            std::string_view selected_style,
+            std::string_view active_style,
+            float yaw
+    ) {
+        BhRunState timer{};
+        BhFlightState flight{};
+        if (!core || zones.empty() || !bh_run_state(core, &timer) || !bh_flight_state(core, &flight))
+            return std::nullopt;
+        return after_landing(flight, timer, zones, selected_style, active_style, yaw);
     }
 };
 

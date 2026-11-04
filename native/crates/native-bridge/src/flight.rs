@@ -13,6 +13,11 @@ pub struct BhFlightState {
     pub on: u32,
     /// The core is flying: the flag is on, or the flag is off but the landing found no free space yet.
     pub flying: u32,
+    /// The last tick ended a flight (`EVENT_FLIGHT_LANDED`). Only on that tick: `Game::flight_landing`.
+    pub landed: u32,
+    /// Where the landing put the player before that tick's normal step moved them, and whether crouched.
+    pub landing_position: [f32; 3],
+    pub landing_crouched: u32,
 }
 
 impl Map {
@@ -52,12 +57,16 @@ pub unsafe extern "C" fn bh_flight_state(ctx: *mut BhContext, out: *mut BhFlight
     unsafe {
         call(ctx, |c| {
             let m = c.map()?;
+            let landing = m.game.flight_landing();
             output(
                 out,
                 BhFlightState {
                     allowed: u32::from(m.game.flight_allowed()),
                     on: u32::from(m.flight_on),
                     flying: u32::from(m.game.flying()),
+                    landed: u32::from(landing.is_some()),
+                    landing_position: landing.map_or([0.0; 3], |(position, _)| position),
+                    landing_crouched: u32::from(landing.is_some_and(|(_, crouched)| crouched)),
                 },
             )
         })

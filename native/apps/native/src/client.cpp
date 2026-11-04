@@ -3149,7 +3149,7 @@ int run(const native::Options &opt) {
             // tick's command (website session.ts command).
             const bool lesson = tutorial_runner.lesson && tutorial_runner.lesson->is_active();
             const bool can_switch = !viewer.active && !practice.noclip && !lesson;
-            const auto track_switch = can_switch ? native::TrackStyleSwitch::due(
+            auto track_switch = can_switch ? native::TrackStyleSwitch::due(
                                                      core.get(),
                                                      curr,
                                                      zones,
@@ -3249,6 +3249,10 @@ int run(const native::Options &opt) {
                     input.events(curr);
                     if (const auto notice = practice.infinite_flight.observe(core.get(), curr))
                         toast(std::string(*notice), 4000);
+                    if (can_switch)
+                        track_switch = native::TrackStyleSwitch::after_landing(
+                                core.get(), zones, selected_style, active_style, float(input.yaw())
+                        );
                 }
             }
             if (track_switch) {

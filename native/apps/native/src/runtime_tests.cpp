@@ -10,6 +10,7 @@
 #undef NDEBUG
 #endif
 #include <cassert>
+#include <bit>
 #include <thread>
 #include <mutex>
 #include <iostream>
@@ -138,11 +139,51 @@ void test_track_style_switch() {
     assert(back && back->track == 0 && back->toast == "Main track, Infinite");
 }
 
+// bhop_eazy (flight_tests.rs a_landing_that_leaves_a_bonus_start_starts_the_bonus_on_its_tick): the landing put the
+// player at the bonus start's edge and that tick's step left it, starting an Infinite bonus run. The pre-tick check
+// never sees the player in the start again; the landing check restarts at the landing spot, in Normal.
+void test_track_style_switch_after_landing() {
+    using Switch = native::TrackStyleSwitch;
+    const std::vector<BhZone> zones = {
+            {0, 1, 0, {100, -480, 0}, {140, -224, 300}},
+            {0, 0, 0, {540, -480, 0}, {580, -224, 300}},
+    };
+    BhFlightState landed{};
+    landed.allowed = 1;
+    landed.landed = 1;
+    const float spot[3] = {std::bit_cast<float>(1118373599u), -352, 64.03125f};
+    std::copy(spot, spot + 3, landed.landing_position);
+    BhRunState started{};
+    started.status = 1;
+    started.track = 1;
+    BhState player{};
+    player.position[0] = 57.332886f;
+    assert(!Switch::due(started, player, zones, "infinite", "infinite", false, 180));
+    const auto change = Switch::after_landing(landed, started, zones, "infinite", "infinite", 180);
+    assert(change && change->track == 1 && change->toast == "Bonus 1, Normal");
+    assert(change->at.position == (std::array<float, 3>{101, -352, 64.03125f}) && change->at.yaw == 180);
+    // Still in the start after the landing: the pre-tick check takes it, as on the website.
+    BhRunState inside = started;
+    inside.in_start = 1;
+    assert(!Switch::after_landing(landed, inside, zones, "infinite", "infinite", 180));
+    BhFlightState walked = landed;
+    walked.landed = 0;
+    assert(!Switch::after_landing(walked, started, zones, "infinite", "infinite", 180));
+    assert(!Switch::after_landing(landed, started, zones, "infinite", "autohop", 180));
+    // A landing in the main start while in Infinite is the style that's running.
+    BhFlightState main = landed;
+    main.landing_position[0] = 560;
+    BhRunState main_run = started;
+    main_run.track = 0;
+    assert(!Switch::after_landing(main, main_run, zones, "infinite", "infinite", 180));
+}
+
 int main() {
     test_resource_loading();
     test_practice_mode();
     test_infinite_flight_stuck_notice();
     test_track_style_switch();
+    test_track_style_switch_after_landing();
     native::Practice p;
     assert(p.key_allowed("save", true));
     assert(!p.key_allowed("tele", true));

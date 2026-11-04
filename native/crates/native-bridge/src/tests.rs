@@ -172,7 +172,8 @@ fn c_layouts_are_stable() {
     assert_eq!(size_of::<BhAttackReport>(), 52);
     assert_eq!(size_of::<BhFloorWeapon>(), 36);
     assert_eq!(size_of::<BhNoclipState>(), 48);
-    assert_eq!(size_of::<BhFlightState>(), 12);
+    assert_eq!(size_of::<BhFlightState>(), 32);
+    assert_eq!(offset_of!(BhFlightState, landing_position), 16);
     assert_eq!(size_of::<BhSettings>(), 44);
     assert_eq!(size_of::<BhCmd>(), 20);
     assert_eq!(size_of::<BhState>(), 88);
