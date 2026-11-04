@@ -2,6 +2,7 @@
 #include "bunnyhop_native.h"
 #include "input_timeline.hpp"
 #include "practice.hpp"
+#include "room_styles.hpp"
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <set>
@@ -41,23 +42,7 @@ inline nlohmann::json practice_from_replay_reply(bool ok, const std::string &rea
 }
 
 inline std::string replay_style_label(const std::string &style) {
-    constexpr std::pair<std::string_view, std::string_view> labels[] = {
-            {"autohop", "Normal"},
-            {"legit", "EZ Scroll"},
-            {"scroll", "Legit Scroll"},
-            {"wonly", "W-Only"},
-            {"sideways", "Sideways"},
-            {"hsw", "Half-Sideways"},
-            {"lowgrav", "Low Gravity"},
-            {"segmented", "Segmented"},
-            {"autostrafe", "Auto Strafe"},
-    };
-    for (const auto &[id, label] : labels) {
-        if (id == style) {
-            return std::string(label);
-        }
-    }
-    return style;
+    return std::string(wire_style_name(style));
 }
 
 inline std::string

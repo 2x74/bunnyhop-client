@@ -4,8 +4,8 @@ import { WIRE_STYLES } from "../../web/src/net/protocol";
 import { styleLabel } from "../../web/src/styles";
 
 /**
- * Styles the website plays that this build only shows. The vendored copy of the website predates Backwards (wire index
- * 10 since web 0.0.36); once a sync brings it in, the list below adds nothing.
+ * Styles newer than the vendored copy of the website. Backwards (wire index 10 since web 0.0.36) plays natively, but
+ * the vendored copy predates it; once a sync brings it in, the list below adds nothing.
  */
 const SHOWN_ONLY_STYLES: readonly { id: string; name: string }[] = [{ id: "backwards", name: "Backwards" }];
 

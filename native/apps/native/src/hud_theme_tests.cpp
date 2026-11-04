@@ -625,6 +625,20 @@ void test_tags_and_race_picker() {
     assert(picker.step == native::RacePicker::Step::style);
     assert(picker.key("Digit2", true, false));
     assert(picker.command.view() == "/race #3 legit 0");
+    // Ten styles (all but Segmented) take two pages: Backwards on the first, Infinite and Auto-strafe on the second.
+    const auto race_style = [&](const char *page_key, const char *pick) {
+        picker.open(board, zones);
+        picker.key("Digit1", true, false);
+        picker.key("Digit1", true, false);
+        if (page_key) picker.key(page_key, true, false);
+        picker.key(pick, true, false);
+        return std::string(picker.command.view());
+    };
+    assert(race_style(nullptr, "Digit7") == "/race #3 backwards 0");
+    assert(race_style("Digit9", "Digit1") == "/race #3 infinite 0");
+    assert(race_style("Digit9", "Digit2") == "/race #3 autostrafe 0");
+    assert(race_style("Digit9", "Digit3").empty());
+    assert(std::find(native::race_styles.begin(), native::race_styles.end(), "segmented") == native::race_styles.end());
 }
 
 void test_ghost_progress() {
