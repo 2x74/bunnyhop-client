@@ -33,6 +33,8 @@ public:
     void bind_presence(
             const Options &options, MenuWebView *menu, const bool &menu_ready, std::function<void(bool)> show_menu
     );
+    // Once a frame: tells the menu when this attempt turns into practice or back, so the room shows your practice tag.
+    void publish_practice(bool practicing);
     void update_presence(
             Clock::time_point now,
             const std::string &map_id,
@@ -64,6 +66,7 @@ private:
     MenuWebView *menu_ = nullptr;
     const bool *menu_ready_ = nullptr;
     std::function<void(bool)> show_menu_;
+    bool practice_sent_ = false;
 
     void join(const std::string &id);
     nlohmann::json presence_activity(

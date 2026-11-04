@@ -3059,6 +3059,7 @@ int run(const native::Options &opt) {
         else if (leave_result == native::LeaveHold::Result::tap)
             toast("Hold Main menu key to leave");
         const auto spectator = core && room.map == map_id ? room.spectator_target : std::optional<unsigned>();
+        room_bridge.publish_practice(practice.active || practice.noclip);
         room_bridge.update_presence(
                 now, map_id, active_style, viewer.active, captured, menu && menu->visible(), tutorial_practice()
         );

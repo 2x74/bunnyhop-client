@@ -979,6 +979,7 @@ window.bunnyhopNativeMenu = {
   onRoomCommand: (value) => {
     roomService.command(value);
   },
+  onRoomPractice: (value) => roomService.practice(value === true),
   // A friend pressed Join on your Discord activity. The host has already checked the secret.
   settle,
   onLeaveMap: teardownMap,
