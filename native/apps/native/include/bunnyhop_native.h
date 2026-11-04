@@ -438,6 +438,19 @@ int bh_practice_free(BhContext *ctx, uint32_t handle);
 /* Camera collision: clear fraction [0,1] across current world/props/brushes, ignores player clips. */
 int bh_trace_camera(BhContext *ctx, const float start[3], const float end[3], float radius, float *out_fraction);
 
+/* Infinite's noclip on physics v24+: the core flies every command carrying IN_FLIGHT (1 << 24), and the replay
+ * records it, so the run after a flight counts. While the flag is on, bh_step/bh_step_look* add the bit to every live
+ * command. Reset, restart point, style, settings, zones, checkpoint restore, replay load and map load turn it off. */
+typedef struct BhFlightState {
+    uint32_t allowed; /* Infinite on physics v24+: the noclip key flies in the core */
+    uint32_t on;      /* the flag */
+    uint32_t flying;  /* the core is flying: the flag is on, or a landing found no free space yet */
+} BhFlightState;
+
+/* Fails turning it on where the core can't fly (allowed == 0) or during replay playback. */
+int bh_flight_set(BhContext *ctx, uint32_t on);
+int bh_flight_state(BhContext *ctx, BhFlightState *out);
+
 #ifdef __cplusplus
 }
 #endif

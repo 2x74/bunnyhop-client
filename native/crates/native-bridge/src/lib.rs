@@ -34,6 +34,8 @@ pub use replay::{
 mod recording;
 pub use recording::{bh_record_cosmetic, bh_record_inspect, bh_record_loadout};
 mod practice;
+mod flight;
+pub use flight::{BhFlightState, bh_flight_set, bh_flight_state};
 mod segments;
 pub use segments::{bh_segment_loads, bh_record_options_read_v29};
 pub use practice::bh_segment_restore;
@@ -312,6 +314,8 @@ struct Map {
     ghosts: Vec<Option<replay::Ghost>>,
     checkpoints: Vec<Option<practice::Checkpoint>>,
     segments: segments::History,
+    /// Infinite's noclip key is on (flight.rs).
+    flight_on: bool,
 }
 impl Map {
     fn load_cancellable(
@@ -617,6 +621,7 @@ impl Map {
             ghosts: Vec::new(),
             checkpoints: Vec::new(),
             segments: segments::History::default(),
+            flight_on: false,
         })
     }
     fn transform(&mut self, model: u32) -> Result<BhTransform, String> {
@@ -922,6 +927,7 @@ pub unsafe extern "C" fn bh_set_settings(
             if let Some(m) = &mut c.map {
                 m.finish_record(false, "settings_changed")?;
                 m.playback = None;
+                m.end_flight();
                 if let Some(t) = &mut m.timer {
                     t.reset(settings.tick_interval);
                 }
@@ -940,6 +946,7 @@ pub unsafe extern "C" fn bh_reset(ctx: *mut BhContext) -> c_int {
             let m = c.map()?;
             m.finish_record(false, "reset")?;
             m.playback = None;
+            m.end_flight();
             m.transforms_dirty = true;
             m.game.reset();
             m.filter.reset(m.game.settings.physics_version);
@@ -964,6 +971,7 @@ pub unsafe extern "C" fn bh_set_position(
             let m = c.map()?;
             m.transforms_dirty = true;
             m.finish_record(false, "position_changed")?;
+            m.end_flight();
             m.game.set_position([x, y, z], yaw);
             Ok(())
         })
@@ -1191,6 +1199,7 @@ pub unsafe extern "C" fn bh_run_configure(
             }
             let m = c.map()?;
             m.finish_record(false, "zones_changed")?;
+            m.end_flight();
             // A rules 4 map blocks prehops in every style, whatever the caller's defaults say.
             if run::blocks_prehops(&m.filter.id, &m.map_name, options.rules) {
                 options.block_prehops = 1;
@@ -1211,6 +1220,7 @@ pub unsafe extern "C" fn bh_run_clear(ctx: *mut BhContext) -> c_int {
         call(ctx, |c| {
             let m = c.map()?;
             m.finish_record(false, "zones_cleared")?;
+            m.end_flight();
             m.timer = None;
             Ok(())
         })
@@ -1582,6 +1592,7 @@ pub unsafe extern "C" fn bh_style_set(ctx: *mut BhContext, style: *const c_char)
             if let Some(m) = &mut c.map {
                 m.finish_record(false, "style_changed")?;
                 m.playback = None;
+                m.end_flight();
                 m.filter = styles::Filter::new(id, settings.physics);
                 m.game.set_settings(settings.checked()?);
                 m.game.reset();
@@ -1622,7 +1633,7 @@ impl Map {
         self.game.air_speed_gain = None;
     }
     fn advance(&mut self, cmd: BhCmd, look: Option<BhLookSampleV2>) -> Result<BhState, String> {
-        self.advance_canonical(cmd, look, true)
+        self.advance_canonical(self.with_flight(cmd), look, true)
     }
     fn advance_canonical(
         &mut self,

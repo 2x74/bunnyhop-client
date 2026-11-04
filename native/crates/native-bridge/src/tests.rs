@@ -13,6 +13,8 @@ mod segmented;
 
 #[path = "map_audio_tests.rs"]
 mod map_audio;
+#[path = "flight_tests.rs"]
+mod flight;
 
 struct Fixture(PathBuf);
 impl Fixture {
@@ -170,6 +172,7 @@ fn c_layouts_are_stable() {
     assert_eq!(size_of::<BhAttackReport>(), 52);
     assert_eq!(size_of::<BhFloorWeapon>(), 36);
     assert_eq!(size_of::<BhNoclipState>(), 48);
+    assert_eq!(size_of::<BhFlightState>(), 12);
     assert_eq!(size_of::<BhSettings>(), 44);
     assert_eq!(size_of::<BhCmd>(), 20);
     assert_eq!(size_of::<BhState>(), 88);

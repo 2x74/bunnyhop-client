@@ -44,6 +44,7 @@ pub unsafe extern "C" fn bh_practice_from_replay(
             }
             invalidate_recording(m, "practice_from_replay")?;
             m.playback = None;
+            m.end_flight();
             m.invalidate_jump_observation();
             Ok(())
         })
@@ -363,6 +364,7 @@ unsafe fn restore(
                 None
             };
             m.playback = None;
+            m.end_flight();
             let s = m.checkpoints[handle as usize - 1].as_ref().unwrap();
             m.game.restore_state(&s.game);
             m.filter = s.filter.clone();

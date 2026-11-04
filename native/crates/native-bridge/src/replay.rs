@@ -612,6 +612,7 @@ pub unsafe extern "C" fn bh_replay_load(ctx: *mut BhContext, path: *const c_char
                 return Err("replay BSP digest mismatch".into());
             }
             m.finish_record(false, "replay_loaded")?;
+            m.end_flight();
             m.prepare_replay(&d)?;
             m.playback = Some(Playback {
                 data: d,
