@@ -3418,6 +3418,7 @@ int run(const native::Options &opt) {
                 break;
             }
         }
+        room_bridge.send_poses(menu.get(), menu_ready, map_id);
         hud.publish_movement_chat(chat, epoch_ms() / 1000.);
         frame_diagnostics.mark(native::FrameDiagnostics::kSimulation, SDL_GetTicksNS());
         frame_diagnostics.input(input_timeline.queue());

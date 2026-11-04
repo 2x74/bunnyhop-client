@@ -1,10 +1,14 @@
 #pragma once
 #include "bunnyhop_native.h"
-#include <nlohmann/json.hpp>
+#include "hud_text.hpp"
 #include <algorithm>
 #include <array>
+#include <charconv>
+#include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <span>
+#include <string>
 #include <string_view>
 
 namespace native {
@@ -86,37 +90,143 @@ inline RoomPoseMeta room_pose_meta(const BhRunState &run, uint32_t current_tick,
     return meta;
 }
 
-// The message ui/room-service.ts pose() accepts: one batch, sent to the room as it arrives.
-inline nlohmann::json room_pose_message(
-        uint64_t generation,
-        std::string_view room_id,
-        std::string_view map,
-        std::span<const RoomPoseSample> samples,
-        const RoomPoseMeta &meta
-) {
-    auto list = nlohmann::json::array();
-    for (const auto &sample : samples) {
-        list.push_back(
-                {{"tick", sample.tick},
-                 {"x", sample.position[0]},
-                 {"y", sample.position[1]},
-                 {"z", sample.position[2]},
-                 {"vx", sample.velocity[0]},
-                 {"vy", sample.velocity[1]},
-                 {"vz", sample.velocity[2]},
-                 {"yaw", sample.yaw},
-                 {"pitch", sample.pitch},
-                 {"flags", sample.flags}}
-        );
+// Batches due during one frame's ticks, kept until the frame is done simulating. A hitch that catches up more
+// than max_batches batches in one frame drops the oldest: the room only shows the newest pose anyway.
+class RoomPoseOutbox {
+public:
+    static constexpr size_t max_batches = 8;
+
+    struct Batch {
+        uint64_t generation = 0;
+        std::array<RoomPoseSample, RoomPoseBatcher::max_samples> samples{};
+        size_t count = 0;
+        RoomPoseMeta meta;
+        HudLabel<48> style;
+
+        std::span<const RoomPoseSample> taken() const { return {samples.data(), count}; }
+    };
+
+    void add(uint64_t generation, std::span<const RoomPoseSample> samples, const RoomPoseMeta &meta) {
+        if (count_ == max_batches) {
+            std::shift_left(batches_.begin(), batches_.end(), 1);
+            --count_;
+        }
+        auto &batch = batches_[count_++];
+        batch.generation = generation;
+        batch.count = std::min(samples.size(), batch.samples.size());
+        std::copy_n(samples.begin(), batch.count, batch.samples.begin());
+        batch.meta = meta;
+        batch.style.assign(meta.style);
+        batch.meta.style = {};
     }
-    return {{"generation", generation},
-            {"id", room_id},
-            {"map", map},
-            {"samples", std::move(list)},
-            {"meta",
-             {{"style", meta.style}, {"track", meta.track}, {"timer", meta.timer}, {"timerTicks", meta.timer_ticks}}},
-            {"weapon", meta.weapon},
-            {"silenced", meta.silenced}};
-}
+
+    std::span<const Batch> batches() const { return {batches_.data(), count_}; }
+
+    void clear() { count_ = 0; }
+
+private:
+    std::array<Batch, max_batches> batches_{};
+    size_t count_ = 0;
+};
+
+// The script that hands one batch to ui/room-service.ts pose(). It is written into one buffer that is kept between
+// batches, so sending a batch allocates nothing once the buffer has grown to fit.
+class RoomPoseScript {
+public:
+    RoomPoseScript() { text_.reserve(reserved_bytes); }
+
+    const std::string &
+    write(uint64_t generation, std::string_view room_id, std::string_view map, const RoomPoseOutbox::Batch &batch) {
+        text_.clear();
+        text_ += "window.bunnyhopNativeMenu?.onRoomPose?.({\"generation\":";
+        add_unsigned(generation);
+        text_ += ",\"id\":";
+        add_string(room_id);
+        text_ += ",\"map\":";
+        add_string(map);
+        text_ += ",\"samples\":[";
+        for (size_t i = 0; i < batch.count; ++i) {
+            if (i) text_ += ',';
+            add_sample(batch.samples[i]);
+        }
+        text_ += "],\"meta\":{\"style\":";
+        add_string(batch.style.view());
+        text_ += ",\"track\":";
+        add_unsigned(batch.meta.track);
+        text_ += ",\"timer\":";
+        add_unsigned(batch.meta.timer);
+        text_ += ",\"timerTicks\":";
+        add_unsigned(batch.meta.timer_ticks);
+        text_ += "},\"weapon\":";
+        add_unsigned(batch.meta.weapon);
+        text_ += ",\"silenced\":";
+        text_ += batch.meta.silenced ? "true" : "false";
+        text_ += "})";
+        return text_;
+    }
+
+private:
+    // Eight samples of ten fields at their longest, with room for the ids and the meta.
+    static constexpr size_t reserved_bytes = 4096;
+    std::string text_;
+
+    void add_sample(const RoomPoseSample &sample) {
+        text_ += "{\"tick\":";
+        add_unsigned(sample.tick);
+        constexpr std::array<const char *, 3> position_keys = {",\"x\":", ",\"y\":", ",\"z\":"};
+        constexpr std::array<const char *, 3> velocity_keys = {",\"vx\":", ",\"vy\":", ",\"vz\":"};
+        for (size_t axis = 0; axis < 3; ++axis) {
+            text_ += position_keys[axis];
+            add_number(sample.position[axis]);
+        }
+        for (size_t axis = 0; axis < 3; ++axis) {
+            text_ += velocity_keys[axis];
+            add_number(sample.velocity[axis]);
+        }
+        text_ += ",\"yaw\":";
+        add_number(sample.yaw);
+        text_ += ",\"pitch\":";
+        add_number(sample.pitch);
+        text_ += ",\"flags\":";
+        add_unsigned(sample.flags);
+        text_ += '}';
+    }
+
+    void add_unsigned(uint64_t value) {
+        std::array<char, 24> digits{};
+        const auto end = std::to_chars(digits.data(), digits.data() + digits.size(), value).ptr;
+        text_.append(digits.data(), end);
+    }
+
+    // As JSON has it: the float's exact value (17 digits round-trip a double), and null for NaN or infinity.
+    void add_number(float value) {
+        if (!std::isfinite(value)) {
+            text_ += "null";
+            return;
+        }
+        std::array<char, 32> digits{};
+        const int length = std::snprintf(digits.data(), digits.size(), "%.17g", double(value));
+        text_.append(digits.data(), size_t(length));
+    }
+
+    void add_string(std::string_view value) {
+        constexpr char hex[] = "0123456789abcdef";
+        text_ += '"';
+        for (const char character : value) {
+            const auto byte = static_cast<unsigned char>(character);
+            if (character == '"' || character == '\\') {
+                text_ += '\\';
+                text_ += character;
+            } else if (byte < 0x20) {
+                text_ += "\\u00";
+                text_ += hex[byte >> 4];
+                text_ += hex[byte & 15];
+            } else {
+                text_ += character;
+            }
+        }
+        text_ += '"';
+    }
+};
 
 }  // namespace native
