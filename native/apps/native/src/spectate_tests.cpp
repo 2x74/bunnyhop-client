@@ -41,7 +41,7 @@ void test_space_and_f_cycle_the_camera() {
     controls.held = {"KeyW"};
     view.cycle(controls.free_look);
     assert(view.free() && controls.timeline.diverted() && controls.held.empty());
-    // Free look: Space is jump, so it flies (rises); F still goes back in-eye.
+    // Free look, as on the website (net/mp.ts): Space is jump, so it flies (rises); F still goes back in-eye.
     assert(!view.changes_camera("Space", binds) && view.changes_camera("KeyF", binds));
     view.cycle(controls.free_look);
     assert(view.mode() == Mode::eye && !controls.timeline.diverted());
@@ -77,6 +77,26 @@ void test_hint_names_the_way_out() {
     binds.rebuild(settings);
     assert(view.hint("KeyR", binds) == "Free look. !freecam goes back in-eye, R stops watching.");
     assert(!view.changes_camera("KeyF", binds));
+}
+
+// As on the website (net/mp.ts): with F bound to movement too, F and Space both fly in free look, and !freecam or the
+// freecam bind is the way back in-eye. The restart key still stops watching.
+void test_free_look_always_has_a_way_back() {
+    auto settings = native::default_settings().at("binds");
+    settings["forward"] = {"KeyW", "KeyF"};
+    Controls controls;
+    controls.timeline.rebuild_binds(settings);
+    const auto &binds = controls.timeline.binds();
+    native::FreeCameras cameras;
+    cameras.follow(std::nullopt, 3, {true, false, false}, controls.free_look);
+    assert(cameras.spectator.changes_camera("KeyF", binds) && cameras.spectator.changes_camera("Space", binds));
+    cameras.spectator.cycle(controls.free_look);
+    cameras.spectator.cycle(controls.free_look);
+    assert(cameras.spectator.free());
+    assert(!cameras.spectator.changes_camera("KeyF", binds) && !cameras.spectator.changes_camera("Space", binds));
+    assert(cameras.spectator.hint("KeyR", binds) == "Free look. !freecam goes back in-eye, R stops watching.");
+    assert(cameras.toggle(true, {true, false, false}, controls.free_look).empty());
+    assert(cameras.spectator.mode() == Mode::eye && !controls.timeline.diverted());
 }
 
 // Free look starts where the In-eye or Chase view last was, not where the frame first put the camera.
@@ -287,6 +307,7 @@ int main() {
     test_space_and_f_cycle_the_camera();
     test_switching_players_keeps_the_camera();
     test_hint_names_the_way_out();
+    test_free_look_always_has_a_way_back();
     test_free_look_starts_from_the_last_view();
     test_watching_ends_freecam();
     test_every_way_out_of_watching_gives_the_input_back();
