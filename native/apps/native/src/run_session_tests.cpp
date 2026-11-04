@@ -1,4 +1,5 @@
 #include "run_session.hpp"
+#include "practice_controller.hpp"
 #include "ghost_slots.hpp"
 #include "replay_player.hpp"
 #include "data_location.hpp"
@@ -191,6 +192,34 @@ void segmented_load(const std::filesystem::path &root) {
     assert(info.at("totalTicks") == run.total_commands);
 }
 
+// Saving past the cap drops the oldest, as on the web: the rest keep their places and the new one is current.
+void checkpoint_cap(const std::filesystem::path &root) {
+    const auto map = root / "checkpoints.bsp";
+    const auto bytes = native::test::make_bsp();
+    std::ofstream(map, std::ios::binary).write(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+    const std::unique_ptr<BhContext, decltype(&bh_destroy)> core(bh_create(), bh_destroy);
+    assert(core && bh_load_map(core.get(), native::data_location::utf8(map).c_str(), nullptr));
+    assert(bh_reset(core.get()));
+    native::PracticeController practice;
+    const native::Input input;
+    const BhCmd idle{};
+    BhState state{};
+    constexpr size_t extra_saves = 2;
+    for (size_t save = 0; save < native::max_checkpoints + extra_saves; ++save) {
+        assert(bh_step(core.get(), &idle, &state));
+        practice.save(core.get(), input, "autohop", "autohop", 0);
+    }
+    assert(practice.checkpoints.size() == native::max_checkpoints);
+    assert(practice.number() == native::max_checkpoints);
+    for (const size_t kept : {size_t(0), native::max_checkpoints - 1}) {
+        practice.current = kept;
+        practice.restore(core.get());
+        assert(bh_state(core.get(), &state));
+        assert(state.tick == kept + extra_saves + 1);
+    }
+    practice.clear(core.get());
+}
+
 int main() {
     invalidation();
     const auto root =
@@ -209,4 +238,5 @@ int main() {
     std::filesystem::create_directories(root / "replays");
     recording(root);
     segmented_load(root);
+    checkpoint_cap(root);
 }

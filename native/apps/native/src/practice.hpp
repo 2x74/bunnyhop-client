@@ -6,6 +6,10 @@
 #include <vector>
 
 namespace native {
+// The bridge keeps at most this many checkpoints (practice.rs MAX_CHECKPOINTS, as on the web). Saving past it, or
+// past its byte budget, drops the oldest.
+constexpr size_t max_checkpoints = 1000;
+
 // The bridge owns snapshots, replay paths and timer rules for practice and Segmented.
 struct Practice {
     struct Checkpoint {
@@ -92,7 +96,9 @@ void draw_checkpoint_menu(Hud &hud, float /*width*/, float height, const Practic
     hud.overlay_rect(x - 10, y - 8, 320, 220, {.03f, .03f, .05f, .8f});
     hud.overlay_text(x, y, practice.segmented ? "Segmented checkpoints" : "Checkpoints", 19, cream);
     HudLabel<96> label;
-    label.format("1. Save checkpoint (%zu/100)", std::min(size_t(100), practice.checkpoints.size() + 1));
+    label.format(
+            "1. Save checkpoint (%zu/%zu)", std::min(max_checkpoints, practice.checkpoints.size() + 1), max_checkpoints
+    );
     hud.overlay_text(x, y + 34, label.view(), 14, cream);
     label.format("2. Teleport to checkpoint (%zu)", std::max(size_t(1), practice.number()));
     hud.overlay_text(x, y + 56, label.view(), 14, practice.checkpoints.empty() ? dim : cream);
