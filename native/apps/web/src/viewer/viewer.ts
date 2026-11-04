@@ -50,7 +50,8 @@ import { afterPaint, h } from "../ui/dom";
 import { hideUiKey, isHideUiKey, setUiHidden } from "../ui/hide-ui";
 import { prefs } from "../ui/settings";
 import { trackName } from "../zones";
-import { CameraRig, CAM_MODES, directShots, type CamMode, type TraceFn } from "./cameras";
+import { CameraRig, CAM_MODES, directShots, freeSpeedStep, type CamMode, type TraceFn } from "./cameras";
+import { freeIntentFromCodes } from "../freecam";
 import type { CardInfo } from "./canvas-hud";
 import { openExportDialog, type ExportCam, type ExportSource } from "./export";
 import { runUrl, shareButton } from "../ui/share";
@@ -264,7 +265,7 @@ export class ReplayViewer implements ExportSource {
     this.compareBtn = btn("Compare", "Overlay a second replay as a ghost (C)", () => this.toggleCompareMenu(), ".rv-chip");
     this.practiceBtn = btn("Practice from here", "Take over from this moment, in practice (P)", () => this.practiceFromHere(), ".rv-chip");
     this.practiceBtn.hidden = !host.practiceFrom;
-    this.freeHint = h("div.rv-freehint", { hidden: true }, "Click to fly · WASD move · mouse look · Shift fast · Space/Ctrl up/down · Esc release");
+    this.freeHint = h("div.rv-freehint", { hidden: true }, "Click to fly with your movement keys. Shift is faster, Alt slower, the wheel sets the speed. Esc lets go.");
     const speeds = h(
       "div.rv-seg",
       { role: "group", "aria-label": "Playback speed" },
@@ -1336,6 +1337,8 @@ export class ReplayViewer implements ExportSource {
 
   private bindInput(): void {
     const stage = this.stage;
+    // Free roam flies on your own movement binds, as freecam does.
+    this.rig.free.intentOf = (keys) => freeIntentFromCodes(keys, prefs.get().binds);
     stage.addEventListener("mousedown", (e) => {
       if (this.rig.mode === "free") {
         if (document.pointerLockElement !== stage) void stage.requestPointerLock();
@@ -1347,7 +1350,12 @@ export class ReplayViewer implements ExportSource {
     addEventListener("mouseup", () => (this.dragging = false));
     addEventListener("mousemove", (e) => {
       if (!this.active) return;
-      if (document.pointerLockElement === stage) this.rig.free.look(e.movementX, e.movementY);
+      if (document.pointerLockElement === stage) {
+        // Free roam turns like the game: your sensitivity, vertical sensitivity and invert (freecam.ts).
+        const p = prefs.get();
+        const pitchSens = p.verticalSensitivityEnabled ? p.verticalSensitivity : p.sensitivity;
+        this.rig.free.lookDeg(e.movementX * p.sensitivity * 0.022, e.movementY * pitchSens * (p.invertY ? -0.022 : 0.022));
+      }
       else if (this.dragging && this.rig.mode !== "eye") {
         if (this.rig.mode !== "chase") this.setCam("chase");
         this.rig.chase.orbit(e.movementX, e.movementY);
@@ -1357,6 +1365,7 @@ export class ReplayViewer implements ExportSource {
       "wheel",
       (e) => {
         if (this.rig.mode === "chase") this.rig.chase.zoomBy(Math.exp(e.deltaY * 0.001));
+        else if (this.rig.mode === "free" && document.pointerLockElement === stage && e.deltaY) this.rig.free.speed = freeSpeedStep(this.rig.free.speed, e.deltaY < 0 ? 1 : -1);
         e.preventDefault();
       },
       { passive: false },

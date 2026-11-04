@@ -25,7 +25,7 @@ import { decodeReplay, encodeReplay, ReplayRecorder, replayFileName, replayStyle
 import { isSegmented, nextStyle, StyleFilter, strafeKeys, styleDef, styleForTrack, styleLabel, stylePrespeedCap, styleSettings, styleStartReentryCap, type StyleDef, type StyleId } from "./styles";
 import { onStyleChange, setSelectedStyle } from "./ui/style-picker";
 import { afterStep, beforeStep, checkpointMatches, FRAME_STRIDE, frameFlags, makeTimer, quantize, simulate } from "./sim";
-import { EVENT_RESPAWNED, formatTime, RunTimer, type Split, type TickCmd } from "./timer";
+import { blocksPrehops, EVENT_RESPAWNED, formatTime, RunTimer, type Split, type TickCmd } from "./timer";
 import { ZoneEditor, ZoneView } from "./zone-editor";
 import { zoneWarningToast } from "./zone-warning";
 import { loadZones, nextTrack, parseZoneSet, touching, trackName, tracksOf, zonesEqual, type ZoneSet, zoneSetToJson } from "./zones";
@@ -42,7 +42,7 @@ import { checkStartPoint, clearPracticeSpawns, clearStartPoint, loadStartPoint, 
 import { getHeldLoadout, getOutfit, knownOutfitUnlocks } from "./player/cosmetics";
 import { cosmetic } from "./progression";
 import { withTimeout } from "./content/fetch";
-import { reportRun, RunWatch, SelfCheck, type RunPlay } from "./selfcheck";
+import { pitchPlay, reportRun, RunWatch, SelfCheck, type RunPlay } from "./selfcheck";
 import { RunClock } from "./run-clock";
 import { AttemptCounter, type AttemptClaim } from "./attempts";
 import { mapTime, type MapTimes } from "./map-time";
@@ -54,6 +54,7 @@ import { loadTimer, type TimerSnapshot } from "./practice-mode/checkpoints";
 import { SegmentLog, type SegmentMark } from "./practice-mode/segments";
 import { LiveSsj, ssjChat } from "./ssj";
 import { LiveMovementStats } from "./movement-stats";
+import { neutralCommand } from "./freecam";
 
 export interface SessionInit {
   core: Core;
@@ -175,6 +176,12 @@ export class RunSession {
   modeLock: string | null = null;
   /** Set from the actual multiplayer controller, independent of URL parameters. */
   multiplayer = false;
+  /**
+   * Freecam is on (main.ts, freecam.ts): the HUD line under the crosshair ("Freecam · 500 u/s · !freecam to go back"),
+   * and command() feeds the sim only neutral commands. The attempt's ranked state is untouched: a freecam stretch is a
+   * player letting go of everything.
+   */
+  freecam: string | null = null;
   private clientResult = 0;
   /**
    * The debug hook (window.__bunnyhop: scripted commands, zone overrides) was opted into outside the dev server: every
@@ -202,7 +209,7 @@ export class RunSession {
     this.runDef = styleDef(o.style);
     this.settings = styleSettings(o.style);
     this.styleFilter = new StyleFilter(this.runDef, this.settings.physics);
-    this.timer = makeTimer([], this.settings, stylePrespeedCap(o.style), this.runDef);
+    this.timer = makeTimer([], this.settings, stylePrespeedCap(o.style), this.runDef, undefined, o.map);
     o.scene.add(this.view.root);
   }
 
@@ -344,7 +351,12 @@ export class RunSession {
       if (this.script.length) {
         c = this.script.shift()!;
         this.scripted = true;
-      } else c = quantize(sample.forwardmove, sample.sidemove, sample.yaw, sample.pitch, sample.buttons);
+      } else {
+        // Freecam: whatever the caller built, the body gets no keys or buttons (freecam.ts R1; main.ts already sends
+        // the neutral command, this keeps any other path from feeding keys).
+        if (this.freecam !== null) sample = neutralCommand(sample);
+        c = quantize(sample.forwardmove, sample.sidemove, sample.yaw, sample.pitch, sample.buttons);
+      }
       c = this.styleFilter.apply(c, this.o.core.state());
       beforeStep(this.o.core, this.timer, c);
     }
@@ -371,7 +383,7 @@ export class RunSession {
     this.runDef = styleDef(style);
     this.settings = styleSettings(style);
     this.styleFilter = new StyleFilter(this.runDef, this.settings.physics);
-    this.timer.options = { ...this.timer.options, prespeedCap: stylePrespeedCap(style), blockPrehops: style === "scroll", strafeKeys: strafeKeys(this.runDef), startReentryCap: styleStartReentryCap(style) };
+    this.timer.options = { ...this.timer.options, prespeedCap: stylePrespeedCap(style), blockPrehops: blocksPrehops(style, this.o.map, this.timer.rules), strafeKeys: strafeKeys(this.runDef), startReentryCap: styleStartReentryCap(style) };
   }
 
   /** HUD map line: "map · W-Only · 100 tick", or "map · Bonus 1 · Normal" on a bonus track. */
@@ -577,7 +589,7 @@ export class RunSession {
       if (!atStart) this.practiceStartHint = "armed";
       else if (this.practiceStartHint === "armed") {
         this.practiceStartHint = "said";
-        this.hud.toast(practiceStartLine(restartKey()), 4000, "practice");
+        this.hud.toast(practiceStartLine(restartKey(), this.prac.tool), 4000, "practice");
       }
     }
     if (update.started) {
@@ -900,6 +912,7 @@ export class RunSession {
       ...(cap ? { frameCap: cap } : {}),
       ...(turned ? { turn: { yawSpeed: t.yawSpeed, angleSpeedKey: t.angleSpeedKey } } : {}),
       ...(pollHz ? { pollHz } : {}),
+      ...pitchPlay(this.o.input.settings),
     };
   }
 
@@ -965,17 +978,22 @@ export class RunSession {
   practiceUse(tool: PracticeUse): void {
     const flipped = this.prac.use(tool);
     this.clock.stop();
-    if (flipped && this.o.map !== TUTORIAL_MAP) this.hud.toast(practiceFlipLine(this.timer.status === "running", restartKey()), 5000, "practice");
+    if (flipped && this.o.map !== TUTORIAL_MAP) this.hud.toast(practiceFlipLine(this.timer.status === "running", restartKey(), tool), 5000, "practice");
   }
 
   /**
    * A noclip tick (the core ran practice_noclip_tick instead of step): the HUD and the live frames follow, nothing is
    * recorded, and a run in progress keeps its clock going without zones (timer.ts coast). The attempt is practice.
    */
-  afterNoclip(u: UserCmd, events: number): PlayerState {
+  afterNoclip(u: UserCmd, events: number, flight?: { position: number[]; velocity: number[] }): PlayerState {
     const cmd: TickCmd = { forward: u.forwardmove, side: u.sidemove, yaw: u.yaw, pitch: u.pitch, buttons: u.buttons };
     const state = this.o.core.state();
-    if (this.timer.status === "running") this.timer.coast(state.tick);
+    if (flight && this.timer.options.startReentryCap) {
+      // Infinite (native practice.rs bh_practice_noclip_tick): the timer arms in the start zone and never starts; flying
+      // out of it caps the flight's speed for the next tick.
+      const clamp = this.timer.noclipTick(state.tick, flight.position, flight.velocity);
+      if (clamp) flight.velocity.splice(0, 3, ...clamp);
+    } else if (this.timer.status === "running") this.timer.coast(state.tick);
     this.hud.tick(cmd, state, events, { settings: this.settings, style: this.runStyle, noclip: true });
     this.ssj.feed(cmd, state, events, { inStart: false, time: null, noclip: true });
     this.movementStats.reset(state);
@@ -1024,6 +1042,16 @@ export class RunSession {
     const n = this.recorder.length;
     if (this.segLog.length !== n || this.o.core.state().tick !== n) return null;
     return this.segLog.mark({ nullBinds: this.recorder.nullBinds, timedInput: this.recorder.timedInput, wRelease: this.recorder.wRelease, turnSpeed: this.recorder.turnSpeed });
+  }
+
+  /** About how much memory the Segmented paths of the kept checkpoints take (practice-mode/checkpoints.ts budget). */
+  get segmentBytes(): number {
+    return this.segLog.retainedBytes;
+  }
+
+  /** A checkpoint holding `m` is gone. */
+  segmentDrop(m: SegmentMark): void {
+    this.segLog.drop(m);
   }
 
   /** The checkpoint's Segmented path can still be rebuilt here (its history wasn't dropped). */
@@ -1094,8 +1122,10 @@ export class RunSession {
     // The Practice line under the crosshair and the yellow timer, whenever this attempt won't count (not on the
     // tutorial: its lessons are practice and its coach does the talking). Cheap when unchanged.
     const loads = this.segmentLoads;
-    if (this.segmenting) this.hud.setPractice(`Segmented${loads ? ` · ${loads} load${loads === 1 ? "" : "s"}` : ""}`, true);
-    else this.hud.setPractice(this.unranked && this.o.map !== TUTORIAL_MAP ? (this.practiceNoclip ? "Practice · noclip" : "Practice") : null, false, this.onPracticeSpawn ? practiceSpawnLine(clearStartKey()) : null);
+    // Freecam takes the line while it's on; a run that counts keeps a quiet line (no yellow timer).
+    if (this.freecam !== null) this.hud.setPractice(this.freecam, !(this.unranked && this.o.map !== TUTORIAL_MAP));
+    else if (this.segmenting) this.hud.setPractice(`Segmented${loads ? ` · ${loads} load${loads === 1 ? "" : "s"}` : ""}`, true);
+    else this.hud.setPractice(this.unranked && this.o.map !== TUTORIAL_MAP ? (this.prac.tool === "flight" ? (this.practiceNoclip ? "Noclip" : "Not saved · noclip used") : this.practiceNoclip ? "Practice · noclip" : "Practice") : null, false, this.onPracticeSpawn ? practiceSpawnLine(clearStartKey()) : null);
     const pb = getPB(this.o.map, this.styleFor(t.track), t.track);
     const splitTotal = t.splitTotal();
     const lastSplit = t.splits[t.splits.length - 1];

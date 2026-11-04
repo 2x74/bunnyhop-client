@@ -321,7 +321,7 @@ impl Decoded {
             return Err("replay checkpoint limit exceeded".into());
         }
         settings.checked()?;
-        if !styles::IDS.contains(&style.as_str()) || ![1, 2, 3].contains(&rules) {
+        if !styles::IDS.contains(&style.as_str()) || ![1, 2, 3, 4].contains(&rules) {
             return Err("unsupported replay style/timer rules".into());
         }
         // Every command needs at least one byte per varint column (v10 has four and
@@ -516,7 +516,7 @@ impl Decoded {
             prespeed_cap: cap.max(0.0),
             cap_enabled: u32::from(cap > 0.0),
             rules,
-            block_prehops: u32::from(style == "scroll"),
+            block_prehops: u32::from(crate::run::blocks_prehops(&style, &map, rules)),
             strafe_keys: styles::strafe_keys(&style),
             start_reentry_cap: styles::start_reentry_cap(&style),
         };

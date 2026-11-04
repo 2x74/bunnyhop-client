@@ -22,8 +22,9 @@
 .pause-foot .save-progress { justify-self: start; font-size: var(--fs-xs); padding: 0.3em 0.75em; }
 .pause-foot > .ver-btn { flex: none; justify-self: end; }
 /* The one quiet support link (ui/community.ts supportLink), on its own line under the account and the version. */
-.pause-foot > .pause-support { grid-column: 1 / -1; justify-self: start; padding: 0 0 var(--sp-1); font-size: var(--fs-xs); color: var(--faint); text-decoration: none; }
-.pause-foot > .pause-support:hover, .pause-foot > .pause-support:focus-visible { color: var(--dim); text-decoration: underline; text-underline-offset: 0.2em; }
+.pause-foot > .pause-links { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0 var(--sp-3); padding: 0 0 var(--sp-1); }
+.pause-links > .pause-support, .pause-links > .pause-discord { justify-self: start; font-size: var(--fs-xs); color: var(--faint); text-decoration: none; }
+.pause-links > .pause-support:hover, .pause-links > .pause-support:focus-visible, .pause-links > .pause-discord:hover, .pause-links > .pause-discord:focus-visible { color: var(--dim); text-decoration: underline; text-underline-offset: 0.2em; }
 
 dialog.chlog-dialog { width: min(38rem, 94vw); }
 dialog.chlog-dialog[open] { animation: vt-drop var(--t-air) var(--ease-land) both; }

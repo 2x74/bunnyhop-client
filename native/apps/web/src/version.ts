@@ -45,7 +45,7 @@
    two words, and VERSION stays below 0.1.0 while STAGE is alpha.
    ============================================================ */
 
-export const VERSION = "0.0.34";
+export const VERSION = "0.0.35";
 
 /** Release stage, printed after the number ("v0.0.4 alpha"). */
 export const STAGE = "alpha";
@@ -67,7 +67,7 @@ export interface ChangelogEntry {
 
 /** Notes for the next release, unpublished until promoted into CHANGELOG. */
 export const UPCOMING: ChangelogEntry = {
-  version: "0.0.35",
+  version: "0.0.36",
   date: "2026-11-01",
   kind: "minor",
   title: "Next update",
@@ -76,6 +76,19 @@ export const UPCOMING: ChangelogEntry = {
 
 /** Newest first. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.0.35",
+    date: "2026-11-02",
+    kind: "minor",
+    title: "New ranking points",
+    notes: [
+      "Points now count how many players you beat. A WR on a crowded map is worth far more than before: a WR on bhop_ambience went from 30 points to about 460, more than a typical T5 clear. Thanks to throwtop for the idea and the thread in general.",
+      "A WR pays 2× second place on boards with 30 or more players, and less on emptier boards. Being alone on a board pays for the clear only.",
+      "Hard clears are worth about what they were, and everyone's whole ranking was re-scored from their current records. Nobody's times or records changed.",
+      "Rank titles need more points now, since totals are bigger: Legend 3,500, Grandmaster 2,500, Master 1,750, Elite 1,000, Expert 500, Skilled 200, Hopper 70.",
+      "The full formula is in How points work on the Ranks page.",
+    ],
+  },
   {
     version: "0.0.34",
     date: "2026-11-01",

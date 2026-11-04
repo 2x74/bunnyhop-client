@@ -1,13 +1,16 @@
 // Practice rules: where practice works, what a practice chat command does, the third person rule. DOM-free
 // (apps/api/test/practice.test.ts). Manual turn controls live in turn-binds.ts.
 
-/** Practice tools: checkpoints and noclip. They work in any solo attempt; a teleport or noclip makes it practice. */
+/** Practice tools: checkpoints and noclip. They work in any attempt, also in rooms; a teleport or noclip makes it practice. */
 export const PRACTICE_TOOLS = ["noclip", "cpSave", "cpTeleport", "cpPrev", "cpNext"] as const;
 export type PracticeTool = (typeof PRACTICE_TOOLS)[number];
 export const isPracticeTool = (a: string): a is PracticeTool => (PRACTICE_TOOLS as readonly string[]).includes(a);
 
 export interface PracticeContext {
-  /** Playing in a multiplayer room (?server=). */
+  /**
+   * Playing in a multiplayer room (?server=). Practice works there too (0.0.36): the others see a "practice" tag on
+   * your name (room roster `practice`), and a practice attempt is never submitted, so the room never announces it.
+   */
   inRoom: boolean;
   /** On the tutorial map (it has its own lesson practice). */
   tutorial: boolean;
@@ -16,12 +19,10 @@ export interface PracticeContext {
 }
 
 /**
- * Why practice (practice mode, checkpoints, noclip) can't be used here, or null if it can. Rooms: everyone there sees
- * your player, and noclip or checkpoint teleports would look like a broken player to them; practice is for solo play.
- * The tutorial runs its own lessons (they're already practice).
+ * Why practice (practice mode, checkpoints, noclip) can't be used here, or null if it can. Rooms allow it since 0.0.36
+ * (players asked for checkpoints and Segmented on servers); the tutorial runs its own lessons (they're already practice).
  */
 export function practiceUnavailable(c: PracticeContext): string | null {
-  if (c.inRoom) return "Practice is for solo play, not servers.";
   if (c.tutorial) return "Practice isn't available in the tutorial.";
   if (c.gauntlet) return "No practice during a gauntlet.";
   return null;
@@ -40,8 +41,8 @@ export function thirdPersonBlocked(o: { turningOn: boolean; runStarted: boolean;
 export type PracticeChatCommand = "toggle" | "on" | "off" | "menu" | "noclip" | "save" | "tele" | "prev" | "next";
 
 /**
- * What a practice chat command does: say why it can't ("unavailable": rooms, the tutorial, a gauntlet), turn practice
- * mode on or off ("toggle": !practice), or use the tool ("do"). Like the keys, the tools work in any solo attempt: !cp
+ * What a practice chat command does: say why it can't ("unavailable": the tutorial, a gauntlet), turn practice
+ * mode on or off ("toggle": !practice), or use the tool ("do"). Like the keys, the tools work in any attempt: !cp
  * never touches the run, and !tele / !noclip turn the attempt into practice (attempt.ts), with one line saying so.
  */
 export function practiceCommandPlan(o: { cmd: PracticeChatCommand; unavailable: boolean }): "unavailable" | "toggle" | "do" {
@@ -56,8 +57,10 @@ export function practiceCommandPlan(o: { cmd: PracticeChatCommand; unavailable: 
  * menu is open; otherwise it says how ("hint"). Before the start, after a finish and on practice attempts keys act.
  * Typed commands (!tele, !noclip) always act: typing is deliberate.
  */
-export function practiceKeyGate(o: { tool: PracticeTool; timedRun: boolean; menuOpen: boolean; segmenting?: boolean }): "act" | "hint" {
+export function practiceKeyGate(o: { tool: PracticeTool; timedRun: boolean; menuOpen: boolean; segmenting?: boolean; flying?: boolean }): "act" | "hint" {
   if (o.tool === "cpSave" || !o.timedRun || o.menuOpen) return "act";
+  // Infinite (styles.ts StyleDef.airJump): noclip is part of the style, so its key acts as on the native client.
+  if (o.flying && o.tool === "noclip") return "act";
   // A clean Segmented run (styles.ts isSegmented): checkpoint loads are the style, and keep the run real. Noclip doesn't.
   if (o.segmenting && o.tool !== "noclip") return "act";
   return "hint";

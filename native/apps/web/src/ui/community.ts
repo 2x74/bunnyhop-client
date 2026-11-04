@@ -10,6 +10,7 @@ import { cleanInvite } from "../creators";
 import { openFeedback } from "../feedback/state";
 import type { AchievementDef } from "../progression";
 import { h } from "./dom";
+import { registerChatCommand } from "../chat-commands";
 
 export const DISCORD_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true" width="1.1em" height="1.1em"><path fill="currentColor" d="M20.3 4.4A19.6 19.6 0 0 0 15.4 3l-.6 1.3a18 18 0 0 0-5.6 0L8.6 3a19.5 19.5 0 0 0-4.9 1.5C.6 9.1-.3 13.6.1 18a19.7 19.7 0 0 0 6 3l1.3-2a12.7 12.7 0 0 1-2-1l.5-.4a14 14 0 0 0 12.2 0l.5.4-2 1 1.3 2a19.6 19.6 0 0 0 6-3c.5-5.1-.8-9.6-3.6-13.6ZM8 15.3c-1.2 0-2.2-1.1-2.2-2.4S6.8 10.5 8 10.5s2.2 1.1 2.2 2.4-1 2.4-2.2 2.4Zm8 0c-1.2 0-2.2-1.1-2.2-2.4s1-2.4 2.2-2.4 2.2 1.1 2.2 2.4-1 2.4-2.2 2.4Z"/></svg>`;
 
@@ -75,9 +76,12 @@ export function recruitNote(cls = "recruit-note", o: { beforeApply?: () => void 
   return p;
 }
 
-/** A "Join the Discord" link, hidden until the invite is known (and staying hidden without one). */
-export function discordLink(cls = "discord-link", label = "Join the Discord"): HTMLAnchorElement {
-  const a = h(`a.${cls}`, { hidden: true, target: "_blank", rel: "noopener", html: `${DISCORD_ICON}<span>${label}</span>` }) as HTMLAnchorElement;
+/**
+ * A "Join the Discord" link, hidden until the invite is known (and staying hidden without one). `icon: false`: the word
+ * alone, for a quiet text line (the pause menu footer).
+ */
+export function discordLink(cls = "discord-link", label = "Join the Discord", o: { icon?: boolean } = {}): HTMLAnchorElement {
+  const a = h(`a.${cls}`, { hidden: true, target: "_blank", rel: "noopener", html: o.icon === false ? `<span>${label}</span>` : `${DISCORD_ICON}<span>${label}</span>` }) as HTMLAnchorElement;
   void discordInvite().then((url) => {
     if (!url) return;
     a.href = url;
@@ -95,3 +99,14 @@ export function supportLink(cls = "support-link"): HTMLAnchorElement {
   return h(`a.${cls}`, { href: "/?support", onclick: go }, "Support bunnyhop.lol") as HTMLAnchorElement;
 }
 
+
+/** The invite as a chat line (players ask "is there a discord?" in rooms): !discord. */
+registerChatCommand({
+  name: "discord",
+  help: "our Discord",
+  about: "the invite to the bunnyhop.lol Discord server.",
+  group: "more",
+  where: "both",
+  run: (ctx) =>
+    void discordInvite().then((url) => ctx.reply(url ? `Our Discord: ${url.replace(new RegExp("^https?://"), "")}` : "No Discord invite right now.")),
+});

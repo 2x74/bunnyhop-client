@@ -9,6 +9,14 @@ import type { MenuSpec, NumberMenu } from "../net/hud";
 import { closeGunPicker, gunPickerOpen } from "../weapon-commands";
 import type { PracticeMenuView } from "./controller";
 
+/**
+ * A room's own numbered menu (a map vote, nominate, spectate: net/mp.ts) is up. In a room (0.0.36) it goes first: its
+ * digits pick there, and the checkpoint menu steps aside until it closes (net.css hides it meanwhile).
+ */
+function roomMenuOpen(mine: NumberMenu): boolean {
+  return [...document.querySelectorAll("#mp-menu:not([hidden])")].some((el) => el !== mine.el);
+}
+
 export function practiceMenuView(): PracticeMenuView {
   let menu: NumberMenu | null = null;
   /** Shown before the menu's module loaded: shown once it has (null: closed meanwhile). */
@@ -16,7 +24,7 @@ export function practiceMenuView(): PracticeMenuView {
   let loading = false;
   const onKey = (e: KeyboardEvent) => {
     if (!menu?.open || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (isTextField(e.target) || document.body.classList.contains("menu-open") || gunPickerOpen()) return;
+    if (isTextField(e.target) || document.body.classList.contains("menu-open") || gunPickerOpen() || roomMenuOpen(menu)) return;
     const d = /^(?:Digit|Numpad)(\d)$/.exec(e.code);
     if (!d) return;
     e.preventDefault();

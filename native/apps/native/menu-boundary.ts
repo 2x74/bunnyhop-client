@@ -98,7 +98,7 @@ function adaptSettingsPanel(source: string): string {
  * own (chat-service.ts: the host switches the HUD element or opens Settings), so the website's stay out of the menu.
  */
 function adaptJumpStats(source: string): string {
-  const ssj = /^registerChatCommand\(\{ name: "ssj",.*\}\);$/m;
+  const ssj = /^registerChatCommand\(\{\n  name: "ssj",\n[\s\S]*?^\}\);$/m;
   const jhud = /^registerChatCommand\(\{\n  name: "jhud",\n[\s\S]*?^\}\);$/m;
   if (!ssj.test(source) || !jhud.test(source)) {
     throw new Error("Native menu: web ssj/index.ts no longer registers !ssj and !jhud as expected");

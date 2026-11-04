@@ -26,21 +26,28 @@ let planeData = new Float32Array(4);
 const planeTexture = new THREE.DataTexture(planeData, 1, 1, THREE.RGBAFormat, THREE.FloatType);
 planeTexture.needsUpdate = true;
 
-/** Shared uniforms (the same objects are referenced by every material's program). */
+/**
+ * Shared uniforms (the same objects are referenced by every material's program). The arrays are flat Float32Arrays,
+ * not Vector3[]: three.js uploads a material's uniforms again at every material switch, and an array of vectors is
+ * copied into a scratch buffer element by element each time (on water maps with a few hundred draws, about a fifth of
+ * the main thread). A typed array goes to the GL call as it is.
+ */
 export const waterUniforms = {
   uWaterCount: { value: 0 },
-  uWaterMin: { value: Array.from({ length: WATER_MAX }, () => new THREE.Vector3()) },
-  uWaterMax: { value: Array.from({ length: WATER_MAX }, () => new THREE.Vector3()) },
-  /** rgb = fog colour (output/sRGB space, like the VMT value), a = unused. */
-  uWaterColor: { value: Array.from({ length: WATER_MAX }, () => new THREE.Vector4()) },
+  /** xyz per volume. */
+  uWaterMin: { value: new Float32Array(WATER_MAX * 3) },
+  uWaterMax: { value: new Float32Array(WATER_MAX * 3) },
+  /** rgba per volume: rgb = fog colour (output/sRGB space, like the VMT value), a = unused. */
+  uWaterColor: { value: new Float32Array(WATER_MAX * 4) },
   /** x = fog start, y = fog end. */
-  uWaterRange: { value: Array.from({ length: WATER_MAX }, () => new THREE.Vector2()) },
+  uWaterRange: { value: new Float32Array(WATER_MAX * 2) },
   /** Screen rectangle per volume (see FOG_DECL). */
-  uWaterRect: { value: Array.from({ length: WATER_MAX }, () => new THREE.Vector4()) },
+  uWaterRect: { value: new Float32Array(WATER_MAX * 4) },
   uWaterTime: { value: 0 },
   uWaterPlanes: { value: planeTexture },
   uWaterPlaneWidth: { value: 1 },
-  uWaterPlaneSpan: { value: Array.from({ length: WATER_MAX }, () => new THREE.Vector2()) },
+  /** First plane, plane count per volume. */
+  uWaterPlaneSpan: { value: new Float32Array(WATER_MAX * 2) },
 };
 
 const FOG_DECL = /* glsl */ `
@@ -449,7 +456,8 @@ export function updateWaterUniforms(volumes: Volume[], camera: THREE.Camera, vis
   let planeAt = 0;
   for (let i = 0; i < onScreen.length; i++) {
     const planes = volumes[onScreen[i]].planes;
-    waterUniforms.uWaterPlaneSpan.value[i].set(planeAt, planes.length);
+    waterUniforms.uWaterPlaneSpan.value[i * 2] = planeAt;
+    waterUniforms.uWaterPlaneSpan.value[i * 2 + 1] = planes.length;
     for (const p of planes) { p.toArray(planeData, planeAt * 4); planeAt++; }
   }
   planeTexture.needsUpdate = true;
@@ -457,11 +465,11 @@ export function updateWaterUniforms(volumes: Volume[], camera: THREE.Camera, vis
   for (let i = 0; i < onScreen.length; i++) {
     const k = onScreen[i];
     const v = volumes[k];
-    waterUniforms.uWaterMin.value[i].copy(v.min);
-    waterUniforms.uWaterMax.value[i].copy(v.max);
-    waterUniforms.uWaterColor.value[i].copy(v.color);
-    waterUniforms.uWaterRange.value[i].copy(v.range);
-    waterUniforms.uWaterRect.value[i].set(rects[k * 4], rects[k * 4 + 1], rects[k * 4 + 2], rects[k * 4 + 3]);
+    v.min.toArray(waterUniforms.uWaterMin.value, i * 3);
+    v.max.toArray(waterUniforms.uWaterMax.value, i * 3);
+    v.color.toArray(waterUniforms.uWaterColor.value, i * 4);
+    v.range.toArray(waterUniforms.uWaterRange.value, i * 2);
+    waterUniforms.uWaterRect.value.set(rects.subarray(k * 4, k * 4 + 4), i * 4);
   }
 }
 

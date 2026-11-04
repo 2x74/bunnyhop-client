@@ -14,6 +14,7 @@
 
 import { clampTier, MAX_TIER, TIERS, tierLabel, tierNum, type Tier } from "./tiers";
 import { earnsProgression, isStyleId, STYLE_DEFS } from "./styles";
+import { rankColorOf } from "./ranking";
 
 // ---------------------------------------------------------------------------------------------
 // XP
@@ -1354,7 +1355,13 @@ export function rankHint(u: { max: number; scope: "all" | "style" }): string {
  * colour of a wig hat (loadout.ts WIGS), and `hairLength` (a percent, HAIR_LENGTH), the ponytail's length, both kept
  * only for players who own a wig (absent = the default).
  */
-export type CosmeticChoice = Record<CosmeticSlot, string | null> & { hairColor?: string | null; hairLength?: number | null; knifePool?: KnifePool | null };
+export type CosmeticChoice = Record<CosmeticSlot, string | null> & {
+  hairColor?: string | null;
+  hairLength?: number | null;
+  knifePool?: KnifePool | null;
+  /** The overall Number One's title colour ("#rrggbb", ranking.ts shownRankColor). Set only while #1, kept after. */
+  rankColor?: string | null;
+};
 
 /**
  * Knife pool (v0.0.30, syl's ask): owned knives, each with its own finish, that the game swaps between on a map change
@@ -1455,6 +1462,9 @@ export function cleanCosmetics(raw: unknown, level: number, achievements: readon
   if (length !== null && length !== HAIR_LENGTH.default && ownsHair(level, achievements, ranks, staff)) out.hairLength = length;
   const pool = knifePoolOf(r.knifePool, (c) => isUnlocked(c, level, achievements, ranks, staff));
   if (pool) out.knifePool = pool;
+  // Kept while not #1 (it only shows on the Number One title), so it's back when the place is.
+  const rankColor = rankColorOf(r.rankColor);
+  if (rankColor) out.rankColor = rankColor;
   return out;
 }
 
@@ -1471,6 +1481,12 @@ export function cosmeticsProblem(raw: unknown, level: number, achievements: read
       if (v === null) continue;
       if (hairLengthOf(v) === null) return { slot, reason: `expected a whole number from ${HAIR_LENGTH.min} to ${HAIR_LENGTH.max}` };
       if (!ownsHair(level, achievements, ranks, staff)) return { slot, reason: `locked (${unlockHint(cosmetic(HAIR_HATS[0])!)})` };
+      continue;
+    }
+    if (slot === "rankColor") {
+      if (v === null) continue;
+      if (!rankColorOf(v)) return { slot, reason: "expected a colour like #ffd45e" };
+      if (ranks.all !== 1) return { slot, reason: "locked (hold overall #1)" };
       continue;
     }
     if (slot === "knifePool") {

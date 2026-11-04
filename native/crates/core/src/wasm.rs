@@ -351,7 +351,7 @@ pub extern "C" fn set_stamina(enabled: u32) {
 }
 
 /// Enable the Infinite style's midair jump, independently of the legacy settings ABI.
-#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+#[unsafe(no_mangle)]
 pub extern "C" fn set_air_jump(enabled: u32) {
     with(|c| {
         if let Some(g) = c.game.as_mut() {

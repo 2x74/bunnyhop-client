@@ -154,7 +154,7 @@ export function marksOf(
     nameColor: isNameColor(row.name_color) ? row.name_color : null,
     nameEffect: nameEffectOf(row.name_effect),
     nameColor2: isNameColor(row.name_color2) ? row.name_color2 : null,
-    ...(row.special_badges !== undefined ? { special: parseBadgeList(row.special_badges).filter(isSpecialBadge) } : {}),
+    ...(row.special_badges !== undefined ? { special: oneWeeklyPerMedal(parseBadgeList(row.special_badges).filter(isSpecialBadge)) } : {}),
   };
 }
 
@@ -317,7 +317,9 @@ export const CREATOR_GOLD_SVG: Record<CreatorKind, string> = {
 // them), and stored with the special badges (apps/api/src/gauntlets.ts awards them: a complete attempt, a closed week).
 // One plate, one colour, dark ink, like the staff shields and Clipper, so each reads at 14 px:
 //   gauntlet          a periwinkle disc with a finish flag: cleared any gauntlet (worn when picked)
-//   weekly-winner     a tangerine calendar page with a 1: won a weekly gauntlet
+//   weekly-winner     a gold calendar page engraved with how many weekly gauntlets the player won (v0.0.36: counted,
+//                     "weekly-winner-N" from 2 wins; the tangerine page with a 1 before). weekly-second / weekly-third
+//                     (-N): the silver and bronze pages for 2nd and 3rd places, worn when picked (owner, 11-03).
 //   gauntlet-classic  a gold octagon with 20 engraved, with the gold glint: cleared the 20-map Bunny Hop Map Gauntlet
 // The alternatives drawn for the owner (B / C of each) are in tools/gauntlets/mark-options.ts.
 export const GAUNTLET_PERIWINKLE = "#8e9cff";
@@ -332,6 +334,63 @@ export const GAUNTLET_SVG =
 export const WEEKLY_WINNER_SVG =
   `<rect x="2.5" y="4.2" width="19" height="17.6" rx="3.6" fill="${WEEKLY_TANGERINE}"/><path d="M7.4 2.4v4M16.6 2.4v4" stroke="${GAUNTLET_INK}" stroke-width="2.2" stroke-linecap="round"/>` +
   engraved("1", 19.4, 13, GAUNTLET_INK);
+/** Medal fills of the weekly podium marks: light, mid, dark (gold is the Creator gold). */
+const MEDALS = {
+  winner: { light: GOLD_LIGHT, mid: GOLD_MID, dark: GOLD_DARK, word: "gold" },
+  second: { light: "#f4f6fa", mid: "#c5ccd8", dark: "#8d96a6", word: "silver" },
+  third: { light: "#f6c896", mid: "#c9824a", dark: "#8f5328", word: "bronze" },
+} as const;
+export type WeeklyMedal = keyof typeof MEDALS;
+/** Counts engraved past this read as it ("99"). */
+export const WEEKLY_MARK_MAX = 99;
+/** The weekly podium mark for `n` (1..) places of a medal: "weekly-winner", "weekly-winner-3", "weekly-third-2". */
+export const weeklyMarkId = (medal: WeeklyMedal, n: number) => `weekly-${medal}${n > 1 ? `-${Math.min(WEEKLY_MARK_MAX, Math.floor(n))}` : ""}`;
+/** The medal and count of a weekly podium mark id, or null. */
+export function weeklyMarkOf(id: string): { medal: WeeklyMedal; n: number } | null {
+  const m = /^weekly-(winner|second|third)(?:-(\d{1,2}))?$/.exec(id);
+  if (!m) return null;
+  const n = m[2] === undefined ? 1 : Number(m[2]);
+  if (m[2] !== undefined && (n < 2 || n > WEEKLY_MARK_MAX)) return null;
+  return { medal: m[1] as WeeklyMedal, n };
+}
+const weeklySvg = (medal: WeeklyMedal, n: number) => {
+  const c = MEDALS[medal];
+  const id = `wk-${medal}-${n}`;
+  const digits = String(n);
+  return (
+    `<defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c.light}"/><stop offset=".55" stop-color="${c.mid}"/><stop offset="1" stop-color="${c.dark}"/></linearGradient></defs>` +
+    `<rect x="2.5" y="4.2" width="19" height="17.6" rx="3.6" fill="url(#${id})"/><path d="M7.4 2.4v4M16.6 2.4v4" stroke="${GAUNTLET_INK}" stroke-width="2.2" stroke-linecap="round"/>` +
+    engraved(digits, digits.length > 1 ? 18.4 : 19.4, digits.length > 1 ? 10.5 : 13, GAUNTLET_INK)
+  );
+};
+/** Every weekly podium mark, 1 to WEEKLY_MARK_MAX of each medal. Gold is shown by default; silver and bronze when picked. */
+const WEEKLY_MARKS = Object.fromEntries(
+  (Object.keys(MEDALS) as WeeklyMedal[]).flatMap((medal) =>
+    Array.from({ length: WEEKLY_MARK_MAX }, (_, i) => {
+      const n = i + 1;
+      return [weeklyMarkId(medal, n), { name: `Weekly gauntlet ${MEDALS[medal].word}${n > 1 ? ` ×${n}` : ""}`, svg: weeklySvg(medal, n), gold: medal === "winner", earned: true, quiet: medal !== "winner" }];
+    }),
+  ),
+);
+/**
+ * A list of special badges with one weekly podium mark per medal, the highest count (an account merge can bring two),
+ * in the list's order.
+ */
+export function oneWeeklyPerMedal(ids: string[]): string[] {
+  const best = new Map<WeeklyMedal, number>();
+  for (const id of ids) {
+    const w = weeklyMarkOf(id);
+    if (w && w.n > (best.get(w.medal) ?? 0)) best.set(w.medal, w.n);
+  }
+  return ids.filter((id) => {
+    const w = weeklyMarkOf(id);
+    if (!w) return true;
+    if (best.get(w.medal) !== w.n) return false;
+    best.set(w.medal, -1); // once
+    return true;
+  });
+}
+
 export const GAUNTLET_CLASSIC_SVG =
   `${goldFill("gc-oct")}<path d="M8.1 1.4h7.8l5.7 5.7v7.8l-5.7 5.7H8.1l-5.7-5.7V7.1z" fill="url(#gc-oct)"/>` +
   `<path d="M8.7 3h6.6l4.7 4.7v6.6L15.3 19H8.7L4 14.3V7.7z" fill="none" stroke="${GOLD_INK}" stroke-width=".8" opacity=".5"/>${engraved("20", 15.6, 10.5, GOLD_INK)}`;
@@ -364,7 +423,7 @@ export const SPECIAL_BADGES: Record<string, { name: string; svg: string; gold?: 
   contributor: { name: "Contributor", svg: CONTRIBUTOR_SVG },
   mapper: { name: "Mapper", svg: MAPPER_SVG },
   gauntlet: { name: "Gauntlet clear", svg: GAUNTLET_SVG, earned: true, quiet: true },
-  "weekly-winner": { name: "Weekly gauntlet winner", svg: WEEKLY_WINNER_SVG, earned: true },
+  ...WEEKLY_MARKS,
   "gauntlet-classic": { name: "Bunny Hop Map Gauntlet", svg: GAUNTLET_CLASSIC_SVG, gold: true, earned: true },
   ...Object.fromEntries(
     CREATOR_KINDS.map((k) => [`creator-gold-${k}`, { name: `Top ${({ youtube: "YouTube", twitch: "Twitch", tiktok: "TikTok", x: "X" } as const)[k]} creator`, svg: CREATOR_GOLD_SVG[k], gold: true }]),
@@ -527,10 +586,17 @@ export function equippedNameBadges(m: PlayerMarks): string[] {
             ? m.supporter
             : id === "gifter" || id.startsWith("gifter-")
               ? !!tier
-              : isSpecialBadge(id) && !!m.special?.includes(id);
+              : weeklyMarkOf(id)
+                ? !!heldWeekly(id)
+                : isSpecialBadge(id) && !!m.special?.includes(id);
+  // A picked weekly podium mark follows its medal's count (a pick of "weekly-winner" wears "weekly-winner-3").
+  const heldWeekly = (id: string) => {
+    const medal = weeklyMarkOf(id)?.medal;
+    return m.special?.find((x) => weeklyMarkOf(x)?.medal === medal) ?? null;
+  };
   const picked = m.nameBadges?.filter(owned);
   const selected = picked && (picked.length || !m.nameBadges!.length) ? picked : legacy;
-  const ids = [...new Set(selected.map((id) => (id === "gifter" || id.startsWith("gifter-") ? tier!.id : id)))];
+  const ids = [...new Set(selected.map((id) => (id === "gifter" || id.startsWith("gifter-") ? tier!.id : weeklyMarkOf(id) ? heldWeekly(id)! : id)))];
   // A moderator who picked Contributor wears it in the shield's place (wearsContributorForStaff).
   if (wearsContributorForStaff(m)) return ["contributor", ...ids.filter((id) => id !== "staff" && id !== "contributor").slice(0, 2)];
   return [...(m.staff ? ["staff"] : []), ...ids.filter((id) => id !== "staff").slice(0, m.staff ? 2 : 3)];

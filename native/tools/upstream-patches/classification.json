@@ -1,5 +1,140 @@
 [
   {
+    "path": "apps/web/src/api.ts",
+    "classification": "native patch",
+    "baseline": "da48d444668a15588ba996b4665f19c25fff3d99"
+  },
+  {
+    "path": "apps/web/src/assets/audio/manifest.json",
+    "classification": "native patch",
+    "baseline": "53a325cca211784e77094ff8bddee5038c0622b4"
+  },
+  {
+    "path": "apps/web/src/badge-glyphs.ts",
+    "classification": "whitespace only; overwrite",
+    "baseline": "d1e3add88baef889ce0363b1d3ed03f70f461810"
+  },
+  {
+    "path": "apps/web/src/core.ts",
+    "classification": "native patch",
+    "baseline": "998ab04bbfbd30b316d71a805d8332271ca34156"
+  },
+  {
+    "path": "apps/web/src/feedback/modal.ts",
+    "classification": "native patch",
+    "baseline": "adeb3ac31128dc5e09464ff9590a51b2f11a8f31"
+  },
+  {
+    "path": "apps/web/src/feedback/state.ts",
+    "classification": "native patch",
+    "baseline": "e22326759b7b43d27f3aadb0ec36001b033f0cd1"
+  },
+  {
+    "path": "apps/web/src/native-input.ts",
+    "classification": "native transport patch",
+    "baseline": "absent"
+  },
+  {
+    "path": "apps/web/src/native-runtime.ts",
+    "classification": "native transport patch",
+    "baseline": "absent"
+  },
+  {
+    "path": "apps/web/src/net/hud.ts",
+    "classification": "dropped 042dca41: menu builds use the chat-hud adapter; take upstream",
+    "baseline": "f16b4ed59d41ea114f80983d80740cd538778d1b"
+  },
+  {
+    "path": "apps/web/src/net/scoreboard.ts",
+    "classification": "native patch",
+    "baseline": "absent"
+  },
+  {
+    "path": "apps/web/src/player/model.d.ts",
+    "classification": "native patch",
+    "baseline": "absent"
+  },
+  {
+    "path": "apps/web/src/social/dock.ts",
+    "classification": "native patch",
+    "baseline": "dd0a3f45dc3b0777f479dcf2fbcdc7bf1a425f39"
+  },
+  {
+    "path": "apps/web/src/styles.ts",
+    "classification": "native patch",
+    "baseline": "82ed44749baca3e23a2081a0039c5919b4d2adf7"
+  },
+  {
+    "path": "apps/web/src/ui/account-name.ts",
+    "classification": "native patch",
+    "baseline": "4af9634eb4872b2a6c65cb990610c43784bb80c4"
+  },
+  {
+    "path": "apps/web/src/ui/account-state.ts",
+    "classification": "native patch",
+    "baseline": "af7b075decfbdd1f33c5b7e58ae6b707e839139b"
+  },
+  {
+    "path": "apps/web/src/ui/card-editor.ts",
+    "classification": "native patch",
+    "baseline": "dc17f65fbb9696b4a1bc38a79b9c281d04657b1e"
+  },
+  {
+    "path": "apps/web/src/ui/country-picker.ts",
+    "classification": "native patch",
+    "baseline": "44897ca6c68a6a277f8919c7240ff2f11b171dda"
+  },
+  {
+    "path": "apps/web/src/ui/gifting.ts",
+    "classification": "native patch",
+    "baseline": "c2de02745aace1788b2e9a1eb15fa209f5527fb5"
+  },
+  {
+    "path": "apps/web/src/ui/loadout-ui.ts",
+    "classification": "native patch",
+    "baseline": "2224a5dfa0d9f35a3445f5615dec091b94cd610d"
+  },
+  {
+    "path": "apps/web/src/ui/player-glow-controls.ts",
+    "classification": "native patch",
+    "baseline": "5367589462da3bd605456e48263427085fba0f2c"
+  },
+  {
+    "path": "apps/web/src/ui/profile-social.ts",
+    "classification": "whitespace only; overwrite",
+    "baseline": "e93891fc45838e1a4169c7029f5290c9860799c2"
+  },
+  {
+    "path": "apps/web/src/ui/profile-write.ts",
+    "classification": "native patch",
+    "baseline": "absent"
+  },
+  {
+    "path": "apps/web/src/ui/profile.ts",
+    "classification": "native patch",
+    "baseline": "d900d5ca0f7f45bb9913ad0f86296e0b891a0467"
+  },
+  {
+    "path": "apps/web/src/ui/run-stats.ts",
+    "classification": "native patch",
+    "baseline": "7ea2f024d336add089dab35509d20cab814e1cf3"
+  },
+  {
+    "path": "apps/web/src/ui/support.ts",
+    "classification": "native patch",
+    "baseline": "a4adae0af2c18ff39ebb6fbf1e678ab6cfd3502b"
+  },
+  {
+    "path": "apps/web/src/viewmodel/inspects/third.ts",
+    "classification": "native patch",
+    "baseline": "bab207fc7841609f8f470e29c01dc81c5347f930"
+  },
+  {
+    "path": "apps/web/src/wasm/.gitignore",
+    "classification": "native patch",
+    "baseline": "absent"
+  },
+  {
     "path": "crates/core/Cargo.toml",
     "classification": "native patch",
     "baseline": "01bc5f743f2ccd878f3d777dc791619c0dc61c79"
@@ -7,12 +142,12 @@
   {
     "path": "crates/core/src/game.rs",
     "classification": "native patch",
-    "baseline": "b6ee99cb375e70f3f4583761c11fd1e46ef2e2c5"
+    "baseline": "3b247dd55ba6790942e6324c1d812d5a51d7d970"
   },
   {
     "path": "crates/core/src/game/kin.rs",
     "classification": "native patch",
-    "baseline": "ed0c754b5db79128fe1c0773e3b6e6100666e2e7"
+    "baseline": "ab078bed52c44ce9e3f9c4a0c976b19ca7b5874f"
   },
   {
     "path": "crates/core/src/game/minigame.rs",
@@ -37,7 +172,7 @@
   {
     "path": "crates/core/src/game/weapons.rs",
     "classification": "native patch",
-    "baseline": "7813d13bbaafd18b8a8caa7df862ad3a9ff1334f"
+    "baseline": "8097ba024195731117ce947069ebe82af8d4ee9b"
   },
   {
     "path": "crates/core/src/lib.rs",
@@ -47,12 +182,12 @@
   {
     "path": "crates/core/src/lightmap.rs",
     "classification": "native patch",
-    "baseline": "2ec52cdd28d10fa5ab487ae5d51bf8fb5db44c5c"
+    "baseline": "ec615e58480a2ca3d8653d60e663918fa3f0aaca"
   },
   {
     "path": "crates/core/src/physics.rs",
     "classification": "native patch",
-    "baseline": "13f3767c8c6f25150cf583db3b35232ee4d40c21"
+    "baseline": "f9e6dd6a3b01fef7aeeed7f21a94e19573a0f57a"
   },
   {
     "path": "crates/core/src/props.rs",
@@ -62,7 +197,7 @@
   {
     "path": "crates/core/src/wasm.rs",
     "classification": "native patch",
-    "baseline": "bcd3fbdd700364ffa157cf154a66528390c7b665"
+    "baseline": "99fd945d47c52bc4fe4e3855b4bc2da845b30bcc"
   },
   {
     "path": "crates/core/src/wasm_content.rs",
@@ -78,6 +213,16 @@
     "path": "crates/core/tests/entities.rs",
     "classification": "upstream tests restored; native suite preserved separately",
     "baseline": "6397f64c9880bf3b0d5dc6aa8f1c6703329cc831"
+  },
+  {
+    "path": "crates/core/tests/native_entities.rs",
+    "classification": "native patch",
+    "baseline": null
+  },
+  {
+    "path": "crates/core/tests/native_render.rs",
+    "classification": "native patch",
+    "baseline": null
   },
   {
     "path": "crates/core/tests/physics_v16_cooks.rs",
@@ -122,161 +267,16 @@
   {
     "path": "crates/vendor/movement/src/lib.rs",
     "classification": "older upstream; overwrite",
-    "baseline": "473d820bccc0afdbf6fefab96053ce70d19a0ee8"
+    "baseline": "6acea9ecfaa52fc49c80ec31f017e1b8f412c86d"
   },
   {
     "path": "crates/vendor/movement/src/movement.rs",
     "classification": "native patch",
-    "baseline": "66bc5e904ef12f47ce4e0fe09dc3240352b0eecd"
+    "baseline": "0246d2c32c8c7d1c07fa26845c19130d8e5d7161"
   },
   {
     "path": "crates/vendor/thirdpartylegalnotices.txt",
     "classification": "native patch",
     "baseline": "absent"
-  },
-  {
-    "path": "apps/web/src/api.ts",
-    "classification": "native patch",
-    "baseline": "3e1470ac85adc4da6b4a3877594745c6a05a65b7"
-  },
-  {
-    "path": "apps/web/src/assets/audio/manifest.json",
-    "classification": "native patch",
-    "baseline": "53a325cca211784e77094ff8bddee5038c0622b4"
-  },
-  {
-    "path": "apps/web/src/badge-glyphs.ts",
-    "classification": "whitespace only; overwrite",
-    "baseline": "d1e3add88baef889ce0363b1d3ed03f70f461810"
-  },
-  {
-    "path": "apps/web/src/core.ts",
-    "classification": "native patch",
-    "baseline": "b5a17ee2650ecc8d5a3cc1bbafac0756a1572111"
-  },
-  {
-    "path": "apps/web/src/feedback/modal.ts",
-    "classification": "native patch",
-    "baseline": "adeb3ac31128dc5e09464ff9590a51b2f11a8f31"
-  },
-  {
-    "path": "apps/web/src/feedback/state.ts",
-    "classification": "native patch",
-    "baseline": "e22326759b7b43d27f3aadb0ec36001b033f0cd1"
-  },
-  {
-    "path": "apps/web/src/net/hud.ts",
-    "classification": "dropped 042dca41: menu builds use the chat-hud adapter; take upstream",
-    "baseline": "fff9e643b46d762cb654730b676423ae16f31f2a"
-  },
-  {
-    "path": "apps/web/src/net/scoreboard.ts",
-    "classification": "native patch",
-    "baseline": "absent"
-  },
-  {
-    "path": "apps/web/src/player/model.d.ts",
-    "classification": "native patch",
-    "baseline": "absent"
-  },
-  {
-    "path": "apps/web/src/social/dock.ts",
-    "classification": "native patch",
-    "baseline": "dd0a3f45dc3b0777f479dcf2fbcdc7bf1a425f39"
-  },
-  {
-    "path": "apps/web/src/ui/account-name.ts",
-    "classification": "native patch",
-    "baseline": "4af9634eb4872b2a6c65cb990610c43784bb80c4"
-  },
-  {
-    "path": "apps/web/src/ui/card-editor.ts",
-    "classification": "native patch",
-    "baseline": "0892240b6898dfa4a4f0a13264c4174e20e6bf84"
-  },
-  {
-    "path": "apps/web/src/ui/country-picker.ts",
-    "classification": "native patch",
-    "baseline": "44897ca6c68a6a277f8919c7240ff2f11b171dda"
-  },
-  {
-    "path": "apps/web/src/ui/gifting.ts",
-    "classification": "native patch",
-    "baseline": "c2de02745aace1788b2e9a1eb15fa209f5527fb5"
-  },
-  {
-    "path": "apps/web/src/ui/loadout-ui.ts",
-    "classification": "native patch",
-    "baseline": "2224a5dfa0d9f35a3445f5615dec091b94cd610d"
-  },
-  {
-    "path": "apps/web/src/ui/player-glow-controls.ts",
-    "classification": "native patch",
-    "baseline": "5367589462da3bd605456e48263427085fba0f2c"
-  },
-  {
-    "path": "apps/web/src/ui/profile-social.ts",
-    "classification": "whitespace only; overwrite",
-    "baseline": "e93891fc45838e1a4169c7029f5290c9860799c2"
-  },
-  {
-    "path": "apps/web/src/ui/profile-write.ts",
-    "classification": "native patch",
-    "baseline": "absent"
-  },
-  {
-    "path": "apps/web/src/ui/profile.ts",
-    "classification": "native patch",
-    "baseline": "d25605250fda428dfab156e9871fcc3932f3cdc1"
-  },
-  {
-    "path": "apps/web/src/ui/run-stats.ts",
-    "classification": "native patch",
-    "baseline": "c6e16caa5989beefa290def443993ae5fac13531"
-  },
-  {
-    "path": "apps/web/src/ui/support.ts",
-    "classification": "native patch",
-    "baseline": "a4adae0af2c18ff39ebb6fbf1e678ab6cfd3502b"
-  },
-  {
-    "path": "apps/web/src/viewmodel/inspects/third.ts",
-    "classification": "native patch",
-    "baseline": "bab207fc7841609f8f470e29c01dc81c5347f930"
-  },
-  {
-    "path": "apps/web/src/wasm/.gitignore",
-    "classification": "native patch",
-    "baseline": "absent"
-  },
-  {
-    "path": "apps/web/src/native-runtime.ts",
-    "classification": "native transport patch",
-    "baseline": "absent"
-  },
-  {
-    "path": "apps/web/src/native-input.ts",
-    "classification": "native transport patch",
-    "baseline": "absent"
-  },
-  {
-    "path": "apps/web/src/styles.ts",
-    "classification": "native patch",
-    "baseline": "f377b6e550171db5e6d041ef9b2ee313e3c355a6"
-  },
-  {
-    "path": "apps/web/src/ui/account-state.ts",
-    "classification": "native patch",
-    "baseline": "af7b075decfbdd1f33c5b7e58ae6b707e839139b"
-  },
-  {
-    "path": "crates/core/tests/native_entities.rs",
-    "classification": "native patch",
-    "baseline": null
-  },
-  {
-    "path": "crates/core/tests/native_render.rs",
-    "classification": "native patch",
-    "baseline": null
   }
 ]

@@ -27,6 +27,7 @@ import { goalText } from "./loadout-view";
 import { nameAttrs } from "./marks";
 import { autoBadges, earnedLine, lockInfo, profileRanks, progressText, newDot, ownedCosmetics, shortGoal, ownedIds, type LockInfo } from "./unlocks";
 import { pastGoal } from "./unlock-text";
+import { NUMBER_ONE, rankColorOf, rankGroupById } from "../ranking";
 
 export const MAX_BADGES = 3;
 
@@ -239,10 +240,32 @@ export interface CardEditorOpts {
   onSupporter?: (s: SupporterSettings) => void;
   /** A name look to show on the card while hovered, over the saved one (undefined: back to the saved one). */
   onNamePreview?: (look: NameLook | undefined) => void;
+  /** The Number One's title colour while it's picked (null: the title's own). */
+  onRankColor?: (hex: string | null) => void;
   done: () => void;
 }
 
 let lastPart: CardPart = "background";
+
+/**
+ * Edit card → Title, for the overall Number One only: the title's colour (CosmeticChoice.rankColor, ranking.ts
+ * shownRankColor). The card follows while picking; Default goes back to the title's own colour.
+ */
+function rankColorRow(p: Profile, lo: { choice: CosmeticChoice; apply(patch: Partial<CosmeticChoice>): void }, o: CardEditorOpts): HTMLElement | null {
+  if (p.rank.group.id !== NUMBER_ONE) return null;
+  const base = rankGroupById(NUMBER_ONE).color;
+  const cur = rankColorOf(lo.choice.rankColor) ?? base;
+  const input = h("input.ce-rank-color", { type: "color", value: cur, "aria-label": "Number One colour" }) as HTMLInputElement;
+  input.addEventListener("input", () => o.onRankColor?.(input.value));
+  input.addEventListener("change", () => {
+    o.onRankColor?.(input.value);
+    lo.apply({ rankColor: input.value.toLowerCase() === base ? null : input.value.toLowerCase() });
+  });
+  const reset = rankColorOf(lo.choice.rankColor)
+    ? h("button.link-btn", { type: "button", onclick: () => (o.onRankColor?.(null), lo.apply({ rankColor: null })) }, "Default")
+    : null;
+  return h("div.ce-booster.ce-rank-row", null, h("label.acct-toggle", { title: "Your Number One role on Discord uses it too" }, input, h("span", null, "Number One colour")), reset);
+}
 
 /** A picker item: look, name, one line. */
 function pickItem(look: HTMLElement | null, name: string, o: { id: string; on: boolean; isNew?: boolean; lock?: LockInfo | null; sub?: string | null; tag?: string | null; pick: () => void; preview?: () => void; item?: CosmeticDef | null }): HTMLElement {
@@ -421,10 +444,11 @@ export function cardEditor(p: Profile, lo: Loadout, news: NewTracker, o: CardEdi
       if (slot === "title") items.unshift(pickItem(null, p.rank.group.name, { id: "", on: lo.choice.title === null, sub: "Your rank", pick: () => lo.equip("title", null), preview: () => o.onPreview({ title: null }) }));
     }
     const grid = h(`div.ce-grid.ce-grid-${part}`, null, ...items);
+    const rankRow = part === "title" ? rankColorRow(p, lo, o) : null;
     grid.addEventListener("pointerleave", () => o.onPreview(null));
     grid.addEventListener("focusout", (e) => !grid.contains(e.relatedTarget as Node | null) && o.onPreview(null));
     arrowNav(grid, ".ce-item", { grid: true });
-    body.replaceChildren(...(part === "badges" && p.nameBadgeSettings ? [nameBadgeEditor(p, () => o.onPreview(null)), h("div.ce-showcase-heading", null, h("h4", null, "Profile showcase"), h("p.dim", null, "Shown on your profile card"))] : []), grid, part === "badges" && !p.nameBadgeSettings && boosterRow ? boosterRow : "", part === "badges" && !p.nameBadgeSettings && supporter ? supporter.badgeRow : "", part === "badges" && supporter ? supporter.boardRow : "");
+    body.replaceChildren(...(part === "badges" && p.nameBadgeSettings ? [nameBadgeEditor(p, () => o.onPreview(null)), h("div.ce-showcase-heading", null, h("h4", null, "Profile showcase"), h("p.dim", null, "Shown on your profile card"))] : []), rankRow ?? "", grid, part === "badges" && !p.nameBadgeSettings && boosterRow ? boosterRow : "", part === "badges" && !p.nameBadgeSettings && supporter ? supporter.badgeRow : "", part === "badges" && supporter ? supporter.boardRow : "");
     body.scrollTop = scroll;
     news.see(partIds(part));
   }

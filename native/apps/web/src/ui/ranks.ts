@@ -6,7 +6,7 @@
 
 import { appLocation } from "../platform/navigation";
 import { api, ApiUnavailable, type RankBoard, type RankEntry } from "../api";
-import { BONUS_TRACK_FACTOR, fmtPoints, isRankedStyle, PLACEMENT, RANK_GROUPS, RECORD_WEIGHTING, STYLE_WEIGHT, TIER_BASE, topPercent } from "../ranking";
+import { BONUS_TRACK_FACTOR, CLEAR_FLOOR, CLEAR_TIME, CLEAR_WEIGHT, fmtPoints, isRankedStyle, PLACEMENT_WEIGHT, PLAYERS_POWER, RANK_GROUPS, RECORD_WEIGHTING, STYLE_WEIGHT, TIER_BASE, topPercent, WR_FULL_PLAYERS } from "../ranking";
 import { tierLabel } from "../tiers";
 import { STYLE_DEFS, styleLabel } from "../styles";
 import { h } from "./dom";
@@ -59,12 +59,14 @@ function howItWorks(): void {
       h(
         "ul",
         null,
-        h("li", null, "Every verified personal best on a tiered map scores ", h("b", null, "base × (1 + WR time ÷ your time + placement)"), "."),
+        h("li", null, "Every verified personal best on a tiered map scores ", h("b", null, "clear + placement"), "."),
+        h("li", null, "Clear pays for finishing: ", h("b", null, `${CLEAR_WEIGHT} × base × (${CLEAR_FLOOR} + ${CLEAR_TIME} × (WR time ÷ your time)²)`), "."),
+        h("li", null, "Placement pays for the players you beat: ", h("b", null, `${PLACEMENT_WEIGHT} × √(base ÷ 10) × ((players ÷ place)^${PLAYERS_POWER} − 1) × (1 + 1 ÷ place)`), "."),
+        h("li", null, `A WR pays 2× second place from ${WR_FULL_PLAYERS} players up and less on smaller boards. Alone on a board you get the clear only.`),
         h("li", null, `Base by tier: ${tiers}. Bonus tracks: ×${BONUS_TRACK_FACTOR}. Maps without a tier (T?) give no points.`),
-        h("li", null, `Placement bonus: WR +${PLACEMENT[0]}, #2 +${PLACEMENT[1]}, #3 +${PLACEMENT[2]}, down to #10 +${PLACEMENT[9]}.`),
         h("li", null, `Overall rank weights styles: ${styles}. Each style also has its own board.${separate ? ` ${separate} is ranked on its own board only and doesn't count towards Overall.` : ""}`),
         h("li", null, `Your total adds your records best first, each worth ${RECORD_WEIGHTING}× the one before, so a strong set of records beats grinding easy maps.`),
-        h("li", null, "Points update the moment a run is verified, for everyone on that board, and again when a map's tier changes."),
+        h("li", null, "Points update within about 10 minutes of a verified run, or an hour on the biggest maps, for everyone on that board. Past the top 10, players and places round to small steps, so your points move when you cross a step."),
       ),
       h(
         "div.rk-how-groups",
@@ -74,7 +76,7 @@ function howItWorks(): void {
             "div",
             null,
             h("span.rb-group", { style: `--rank:${g.color}` }, g.name),
-            h("small", null, `${g.maxRank ? `top ${g.maxRank}` : g.top! < 1 ? `top ${Math.round(g.top! * 100)}%` : "everyone else"}${g.minPoints >= 1 ? ` · ${g.minPoints}+ pts` : ""}`),
+            h("small", null, `${g.maxRank === 1 ? "#1" : g.maxRank ? `top ${g.maxRank}` : g.top! < 1 ? `top ${Math.round(g.top! * 100)}%` : "everyone else"}${g.minPoints >= 1 ? ` · ${g.minPoints}+ pts` : ""}`),
           ),
         ),
       ),

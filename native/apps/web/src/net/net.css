@@ -74,6 +74,7 @@
 .sb-time.running { color: #fff; }
 .sb-time.finished { color: var(--gain); }
 .sb-time.idle { color: var(--faint); }
+.sb-time.practice { color: var(--practice); }
 .sb-pb { color: var(--accent); }
 .sb-ping { color: var(--dim); text-align: right; }
 .sb-table th:last-child { text-align: right; }
@@ -109,12 +110,15 @@
 /* The race result sits where the end-of-run result goes; that one steps down under it. */
 #hud.race-result #hud-endcard { top: 24vh; }
 /* Spectating: one line, "Watching hopper"; their speed and timer show in your HUD (hud.ts setSpectated). */
-#mp-specbar { left: 50%; bottom: 2.2rem; transform: translateX(-50%); font-size: calc(1rem * var(--hs, 1)); font-weight: 650; text-shadow: var(--shadow-text); white-space: nowrap; }
+#mp-specbar { left: 50%; bottom: 2.2rem; transform: translateX(-50%); text-align: center; font-size: calc(1rem * var(--hs, 1)); font-weight: 650; text-shadow: var(--shadow-text); white-space: nowrap; }
 #mp-specbar b { font-weight: 800; }
+#mp-specbar .spec-hint { font-size: 0.78em; font-weight: 500; opacity: 0.75; margin-top: 0.15rem; }
 /* Spectating: your own run's readouts would mislead; the speed and timer stay and show the watched player's. */
 body.mp-spectating #hud .hud-el:not([data-el="chat"]):not([data-el="map"]):not([data-el="fps"]):not([data-el="speed"]):not([data-el="timer"]):not([data-el="spectators"]) { visibility: hidden; }
 body.mp-spectating #hud-endcard { display: none; }
 body.menu-open #mp-menu, body.menu-open #mp-scoreboard, body.menu-open #mp-specbar, body.menu-open #mp-race, body.menu-open #mp-count { display: none; }
+/* A room menu (vote, nominate, spectate) over the !cp menu: the checkpoints step aside until it closes (menu-view.ts). */
+#hud:has(> #mp-menu:not(.cp-menu):not([hidden])) > #mp-menu.cp-menu { display: none; }
 
 /* ------------------------------------------------------------------ server browser (ui/servers.ts) */
 .servers { display: flex; flex-direction: column; gap: 0.8rem; }

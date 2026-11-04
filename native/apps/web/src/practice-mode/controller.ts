@@ -1,4 +1,4 @@
-// Practice (research/ROADMAP.md, v0.0.10; bhoptimer-style since 0.0.27): noclip and checkpoints, solo only. They work
+// Practice (research/ROADMAP.md, v0.0.10; bhoptimer-style since 0.0.27): noclip and checkpoints, solo and in rooms (0.0.36). They work
 // in any attempt. Saving a checkpoint never touches the run; a checkpoint teleport or noclip turns the attempt into
 // practice (attempt.ts): the timer keeps going in yellow, and it's never submitted, a PB or a ghost, no replay, no XP
 // or stats. A restart (R / B / M / a style switch) is a real run again.
@@ -24,13 +24,13 @@ import { setVelocity, SimRun } from "../sim";
 import type { Replay } from "../replay";
 import { formatTime } from "../timer";
 import type { MenuSpec } from "../net/hud";
-import { styleForTrack, type StyleFilter, type StyleId } from "../styles";
+import { styleDef, styleForTrack, type StyleFilter, type StyleId } from "../styles";
 import { keyLabel, prefs, type Action } from "../ui/settings";
 import { Checkpoints, MAX_CHECKPOINTS, saveTimer, type Checkpoint, type TimerSnapshot } from "./checkpoints";
 import type { SegmentMark } from "./segments";
 import { YAW_SET_TELEPORT } from "../replay";
 import { replayStartProblem } from "./replay-start";
-import { hasNoclip, noclipExit, noclipMove, noclipTick, type NoclipState } from "./noclip";
+import { hasNoclip, noclipExit, noclipMove, noclipSpeed, noclipTick, type NoclipState } from "./noclip";
 import { isPracticeTool, PRACTICE_KEY_HINT, practiceCommandPlan, practiceKeyGate, practiceUnavailable, type PracticeChatCommand, type PracticeContext, type PracticeTool } from "./rules";
 
 interface CheckpointData {
@@ -92,6 +92,12 @@ export class Practice {
       restore: (x) => restoreState(core, x),
       free: (x) => freeState(core, x),
       bytes: (x) => snapshotBytes(core, x),
+    }, undefined, {
+      // Segmented checkpoints hold their run's path (segments.ts): budgeted with the snapshots, let go with them.
+      extraBytes: () => h.session.segmentBytes,
+      onDrop: (d) => {
+        if (d.segment) h.session.segmentDrop(d.segment.mark);
+      },
     });
     // The pause menu item, only where practice mode works.
     if (!this.unavailable) {
@@ -206,7 +212,7 @@ export class Practice {
 
   /** Whether a bound tool key acts now (rules.ts practiceKeyGate); else one hint per run. */
   private keyActs(a: PracticeTool): boolean {
-    if (practiceKeyGate({ tool: a, timedRun: this.timedRun, menuOpen: this.menuOpen, segmenting: this.h.session.segmenting }) === "act") return true;
+    if (practiceKeyGate({ tool: a, timedRun: this.timedRun, menuOpen: this.menuOpen, segmenting: this.h.session.segmenting, flying: this.flying }) === "act") return true;
     const run = this.h.session.timer.startTick;
     if (this.keyHintRun !== run) {
       this.keyHintRun = run;
@@ -222,7 +228,7 @@ export class Practice {
   }
 
   // --- the !cp menu (bhoptimer's checkpoint menu, shavit-checkpoints OpenCPMenu): stays on screen while you play,
-  // re-drawn after every pick, until 0 or !cp again closes it. Solo only (practiceUnavailable).
+  // re-drawn after every pick, until 0 or !cp again closes it. Not in the tutorial or a gauntlet (practiceUnavailable).
 
   get menuOpen(): boolean {
     return !!this.h.menu?.open;
@@ -270,22 +276,37 @@ export class Practice {
     };
   }
 
+  /** Infinite (styles.ts StyleDef.airJump): noclip is part of the style, flies at 3500 and isn't practice mode. */
+  private get flying(): boolean {
+    return !!styleDef(this.h.session.runStyle)?.airJump;
+  }
+
   /** One noclip tick in place of command -> step -> afterStep. */
   noclipStep(sample: UserCmd): { state: PlayerState; events: number } {
     const n = this.noclip!;
-    noclipMove(n, { forwardmove: sample.forwardmove, sidemove: sample.sidemove, yaw: sample.yaw, pitch: sample.pitch, up: (sample.buttons & IN_JUMP) !== 0, slow: (sample.buttons & IN_DUCK) !== 0 }, this.h.session.settings.tickInterval);
+    const flight = this.flying;
+    noclipMove(n, { forwardmove: sample.forwardmove, sidemove: sample.sidemove, yaw: sample.yaw, pitch: sample.pitch, up: (sample.buttons & IN_JUMP) !== 0, slow: (sample.buttons & IN_DUCK) !== 0, speed: noclipSpeed(flight) }, this.h.session.settings.tickInterval);
     const events = noclipTick(this.h.core, n);
-    return { state: this.h.session.afterNoclip(sample, events), events };
+    return { state: this.h.session.afterNoclip(sample, events, flight ? n : undefined), events };
   }
 
   private toggleNoclip(): void {
     const core = this.h.core;
     const session = this.h.session;
     if (!this.noclip) {
-      // From here the attempt is practice. A run in progress keeps its clock (timer.ts coast); otherwise the timer
-      // goes idle, so flying out of a start zone doesn't start one.
-      session.practiceUse("noclip");
-      if (session.timer.status !== "running") session.timer.stop();
+      if (this.flying) {
+        // Infinite, as on the native client (practice.rs bh_practice_enter): a run in progress ends, an idle or armed
+        // timer is kept, and the flight never starts one (timer.ts noclipTick). Not practice mode, but a replay can't
+        // re-simulate the flight, so this attempt isn't saved (attempt.ts "flight").
+        const running = session.timer.status === "running";
+        session.practiceUse("flight");
+        if (running) session.timer.reset();
+      } else {
+        // From here the attempt is practice. A run in progress keeps its clock (timer.ts coast); otherwise the timer
+        // goes idle, so flying out of a start zone doesn't start one.
+        session.practiceUse("noclip");
+        if (session.timer.status !== "running") session.timer.stop();
+      }
       const s = core.state();
       this.noclip = { position: [...s.position], velocity: [...s.velocity] };
       session.practiceNoclip = true;

@@ -11,6 +11,7 @@ import { banDialog, kickDialog, quickMute } from "./dialogs";
 import { figEl } from "./pulse";
 import { outranks } from "../moderation/staff";
 import type { StaffRole } from "../progression";
+import { STYLE_DEFS } from "../styles";
 
 interface RoomPlayer {
   slot: number;
@@ -46,7 +47,7 @@ interface RoomView {
 
 type RoomRow = ServerRow & { view: RoomView | null; chat?: ChatRow[] };
 
-const STYLE_WORD: Record<string, string> = { autohop: "Normal", legit: "EZ Scroll", scroll: "Legit Scroll", wonly: "W-Only", sideways: "Sideways", hsw: "Half-Sideways", autostrafe: "Auto-strafe" };
+const STYLE_WORD: Record<string, string> = Object.fromEntries(STYLE_DEFS.map((d) => [d.id, d.name]));
 
 /** A chat line's flags as words. */
 export function chatFlags(m: ChatRow): HTMLElement[] {

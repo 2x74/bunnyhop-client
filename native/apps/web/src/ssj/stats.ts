@@ -31,6 +31,8 @@ export interface SsjPrefs {
   chat: boolean;
   mode: SsjMode;
   fields: SsjFields;
+  /** Chat only: report jumps with at least this gain % (BASH-style "only 80%+"); 0 reports every jump. The HUD shows all. */
+  minGain: number;
 }
 
 /** Off until the player turns it on (!ssj or Settings → HUD → Jump stats); the plugins' common fields on. */
@@ -38,7 +40,11 @@ export const DEFAULT_SSJ: SsjPrefs = {
   chat: false,
   mode: "sixth",
   fields: { speed: true, diff: true, gain: true, sync: true, strafes: true, eff: false, height: false, time: false },
+  minGain: 0,
 };
+
+/** Whether a report gets a chat line under the gain filter (SsjPrefs.minGain). A jump without a gain number never passes a filter. */
+export const ssjPassesGain = (gain: number | null, minGain: number): boolean => !(minGain > 0) || (gain !== null && gain >= minGain);
 
 /** Ground ticks after which the jump count starts over (the plugins' BHOP_FRAMES). */
 export const BHOP_FRAMES = 10;

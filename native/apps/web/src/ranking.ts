@@ -2,37 +2,87 @@
 // (apps/api/src/points.ts) and the client uses the same functions to explain points and draw rank titles.
 // Design notes and the research behind it: research/RANKS.md.
 //
-// Points per record (one verified PB on one board = map × track × style):
+// Points per record (one verified PB on one board = map × track × style), for N players on the board and your place:
 //
-//   record = base(tier) × trackFactor × (1 + quality + placement(rank))      "raw" (style-blind) points
-//   quality = wrTicks / yourTicks                                           0..1, 1 = you hold the WR
-//   placement = WR 1.0, #2 0.75, #3 0.6, #4–#10 0.5 → 0.2, else 0           top-10 bonus
-//   weighted = raw × styleWeight(style)                                     what the overall rank sums
+//   clear     = 3 × base(tier) × (0.4 + 0.6 × quality²)                   quality = wrTicks / yourTicks, 0..1
+//   placement = 40 × √(base / 10) × ((N / place)^0.2 − 1) × (1 + 1 / place)
+//   record    = (clear + placement) × trackFactor                         "raw" (style-blind) points
+//   WR        = (clear + placement) at place 2 and WR pace × (1 + min(1, ln N / ln 30)), × trackFactor
+//   alone     = clear at WR pace, × trackFactor
+//   weighted  = raw × styleWeight(style)                                  what the overall rank sums
 //
 //   total = Σ weighted[i] × 0.985^i over the player's records sorted best first (bhoptimer's osu!-style weighting,
 //   flatter than its 0.975)
 //
-// - base(tier) is triangular (T1 10, T2 30, T3 60, T4 100, T5 150, T6 210, T7+ 280): one T6 clear is worth 21 T1
-//   clears, so the overall rank can't be farmed on easy maps. Tiers above 7 clamp to T7+; maps with no tier are unranked
-//   (0 points).
-// - Bonus tracks give a quarter of the main track's base (they're short, and bonus boards are Normal only).
-// - The completion part (the "1 +") guarantees every verified finish counts; quality rewards closing the gap to the WR
-//   on every board, not just the top 10; placement is the SurfTimer-style top-10 bonus.
+// - base(tier) is triangular (T1 10, T2 30, T3 60, T4 100, T5 150, T6 210, T7+ 280). Tiers above 7 clamp to T7+; maps with
+//   no tier are unranked (0 points).
+// - Clear pays for finishing the map at all, with time on top. Placement only pays for players you actually beat, so last
+//   place on the most played map earns nothing for that map being popular.
+// - A WR pays 2× second place from 30 players up, and less below that, because a WR on an unplayed map is cheap.
+// - Past the top 10, N and place round down to steps (STEPS, 10 per decade, N capped at 10,000). A new finisher then
+//   changes points only for the few players who cross a step, instead of rewriting every row and every total on the board
+//   (research/RANKING-REVAMP.md: ~4× the D1 writes otherwise).
+// - Bonus tracks give a quarter (they're short, and bonus boards are Normal only).
 // - Overall points = the 0.985-weighted sum of weighted points over every record; style rankings = the same weighted
 //   sum of raw points over that style's records. The weighting (from shavit-rankings) means the 46th-best record counts
 //   half, so rank comes from a strong set of records rather than from finishing the most maps or re-running the same
 //   map in every style. (Until 2026-10-28 it was bhoptimer's 0.975: the 28th counted half and the 100th 0.08×, so a
 //   player past ~60 records got almost nothing for clearing more T1/T2 maps. research/RANKS.md "Weighting".)
-// - Everything is a pure function of (tier, track, style, ticks, wrTicks, rank), recomputed for a whole board when a
-//   run on it is verified, and for a whole map when its tier/version/pinned zones change.
+// - Everything is a pure function of (tier, track, style, ticks, wrTicks, rank, players), recomputed for a whole board when
+//   a run on it is verified, and for a whole map when its tier/version/pinned zones change.
 
 import { clampTier, type Tier } from "./tiers";
 
 export const TIER_BASE: Record<Tier, number> = { 1: 10, 2: 30, 3: 60, 4: 100, 5: 150, 6: 210, 7: 280 };
 export const BONUS_TRACK_FACTOR = 0.25;
 
-/** Placement bonus by board rank (index 0 = rank 1). Ties share a rank, so tied WRs both get 1.0. */
-export const PLACEMENT = [1.0, 0.75, 0.6, 0.5, 0.45, 0.4, 0.35, 0.3, 0.25, 0.2] as const;
+export const CLEAR_WEIGHT = 3;
+export const CLEAR_FLOOR = 0.4;
+export const CLEAR_TIME = 0.6;
+export const PLACEMENT_WEIGHT = 40;
+export const PLAYERS_POWER = 0.2;
+/** A WR pays 2× second place from this many players up. */
+export const WR_FULL_PLAYERS = 30;
+/** Places that are always exact, not rounded to a step. */
+export const TOP_PLACES = 10;
+export const MAX_COUNTED_PLAYERS = 10_000;
+
+// Short decimals on purpose: the SQL carries these as literals, and they must parse to the same doubles as here.
+const fixed = (x: number) => Number(x.toFixed(9));
+
+/** One step for player counts and places: from `from` up to the next step, x^PLAYERS_POWER etc. take these values. */
+export interface PointsStep {
+  from: number;
+  power: number;
+  inverse: number;
+  wrRamp: number;
+}
+
+/** 1..10 exact, then 10 steps per decade up to MAX_COUNTED_PLAYERS. */
+export const STEPS: readonly PointsStep[] = (() => {
+  const from = Array.from({ length: TOP_PLACES }, (_, i) => i + 1);
+  for (let k = 11; 10 ** (k / 10) <= MAX_COUNTED_PLAYERS + 0.5; k++) from.push(Math.ceil(10 ** (k / 10) - 1e-9));
+  return from.map((x) => ({
+    from: x,
+    power: fixed(x ** PLAYERS_POWER),
+    inverse: fixed(1 / x),
+    wrRamp: fixed(Math.min(1, Math.log(x) / Math.log(WR_FULL_PLAYERS))),
+  }));
+})();
+
+export function pointsStep(x: number): PointsStep {
+  let step = STEPS[0];
+  for (const s of STEPS) {
+    if (x < s.from) break;
+    step = s;
+  }
+  return step;
+}
+
+/** placement's weight per tier: PLACEMENT_WEIGHT × √(base / 10). */
+export const TIER_PLACEMENT: Record<Tier, number> = Object.fromEntries(
+  Object.entries(TIER_BASE).map(([t, b]) => [t, fixed(PLACEMENT_WEIGHT * Math.sqrt(b / 10))]),
+) as Record<Tier, number>;
 
 /**
  * Overall-rank weight per style. Normal counts most (bhoptimer instead gives the hard styles 1.2–1.5×; we don't, so the
@@ -40,12 +90,17 @@ export const PLACEMENT = [1.0, 0.75, 0.6, 0.5, 0.45, 0.4, 0.35, 0.3, 0.25, 0.2] 
  * "harder Normal" and keeps most; the key-restricted styles count 0.6. Every style also has its own ranking
  * (unweighted raw points), so style specialists get a board of their own.
  */
-export const STYLE_WEIGHT: Record<string, number> = { autohop: 1, legit: 0.8, scroll: 0.8, wonly: 0.6, sideways: 0.6, hsw: 0.6, autostrafe: 0, lowgrav: 0, segmented: 0 };
+export const STYLE_WEIGHT: Record<string, number> = { autohop: 1, legit: 0.8, scroll: 0.8, wonly: 0.6, sideways: 0.6, hsw: 0.6, autostrafe: 0, lowgrav: 0, segmented: 0, infinite: 0.2, backwards: 0.6 };
 // Auto-strafe (assisted: the game presses A/D from your mouse) is a separate scored mode: its own boards, WRs and
 // style ranking (raw points, like every style), but weight 0, so it adds nothing to the overall rank (bhoptimer's
 // convention for assisted/TAS styles: rankingmultiplier 0). Styles missing here (none today; stale ids) earn nothing.
 // Segmented likewise: bhoptimer's default shavit-styles.cfg gives it "rankingmultiplier" "0.0" (records and replays, no
 // points) because its checkpoint loads let a run be assembled from retried pieces (research/SEGMENTED.md).
+// Low Gravity changes the movement itself, so its times don't compare with the other styles: own boards and style
+// ranking, weight 0. Infinite (air jumps, no prespeed cap; v0.0.36) too, but the owner gave it a small multiplier, 0.2
+// (11-04): its records count a little towards the overall rank. It still earns no XP or clear achievements
+// (styles.ts separate): air jumps make hard maps easy.
+// Backwards (v0.0.36) is a key-restricted style like W-Only: plain movement, keys limited by the view, so 0.6.
 
 /** True if records in this style earn (style-ranking) points: the style has its own ranking. */
 export const isRankedStyle = (style: string): boolean => Object.hasOwn(STYLE_WEIGHT, style);
@@ -55,10 +110,6 @@ export const RECORD_WEIGHTING = 0.985;
 /** Records past this many add nothing (0.985^800 ≈ 6e-6); bounds the SQL weight table. */
 export const MAX_WEIGHTED_RECORDS = 800;
 
-export function placementBonus(rank: number): number {
-  return rank >= 1 && rank <= PLACEMENT.length ? PLACEMENT[rank - 1] : 0;
-}
-
 export interface RecordInput {
   tier: number | null;
   track: number;
@@ -66,14 +117,25 @@ export interface RecordInput {
   ticks: number;
   wrTicks: number;
   rank: number;
+  /** Players on the board. */
+  players: number;
 }
 
-/** Raw (style-blind) points of one record; 0 on unrated maps and for unknown styles. */
+/** Raw (style-blind) points of one record; 0 on unrated maps and for unknown styles. src/points.ts RAW_SQL mirrors this, operation for operation. */
 export function recordPointsRaw(r: RecordInput): number {
   const t = clampTier(r.tier);
   if (!t || r.ticks <= 0 || !isRankedStyle(r.style)) return 0;
-  const base = TIER_BASE[t] * (r.track > 0 ? BONUS_TRACK_FACTOR : 1);
-  return base * (1 + r.wrTicks / r.ticks + placementBonus(r.rank));
+  const track = r.track > 0 ? BONUS_TRACK_FACTOR : 1;
+  const clear = CLEAR_WEIGHT * TIER_BASE[t];
+  const n = pointsStep(r.players);
+  if (r.rank === 1) {
+    if (r.players <= 1) return clear * track;
+    const second = pointsStep(2);
+    return (clear + TIER_PLACEMENT[t] * Math.max(0, n.power / second.power - 1) * (1 + second.inverse)) * (1 + n.wrRamp) * track;
+  }
+  const q = r.wrTicks / r.ticks;
+  const place = pointsStep(r.rank);
+  return (clear * (CLEAR_FLOOR + CLEAR_TIME * (q * q)) + TIER_PLACEMENT[t] * Math.max(0, n.power / place.power - 1) * (1 + place.inverse)) * track;
 }
 
 /** Points the record adds to the overall rank (before the per-player RECORD_WEIGHTING). */
@@ -109,23 +171,29 @@ export interface RankGroup {
   minPoints: number;
 }
 
+/** The title of a board's #1 (v0.0.36, Throw's ask; owner: "a separate title for them"). Its holder may pick its colour. */
+export const NUMBER_ONE = "number-one";
+
 export const RANK_GROUPS: RankGroup[] = [
-  { id: "legend", name: "Legend", color: "#ffd45e", maxRank: 3, minPoints: 2000 },
-  { id: "grandmaster", name: "Grandmaster", color: "#ff5468", top: 0.01, minPoints: 1500 },
-  { id: "master", name: "Master", color: "#c477ff", top: 0.05, minPoints: 1000 },
-  { id: "elite", name: "Elite", color: "#4fa8ff", top: 0.1, minPoints: 600 },
-  { id: "expert", name: "Expert", color: "#3fd0c9", top: 0.2, minPoints: 300 },
-  { id: "skilled", name: "Skilled", color: "#5ee08a", top: 0.35, minPoints: 120 },
-  { id: "hopper", name: "Hopper", color: "#d6dceb", top: 0.6, minPoints: 40 },
+  { id: NUMBER_ONE, name: "Number One", color: "#ffffff", maxRank: 1, minPoints: 3500 },
+  { id: "legend", name: "Legend", color: "#ffd45e", maxRank: 3, minPoints: 3500 },
+  { id: "grandmaster", name: "Grandmaster", color: "#ff5468", top: 0.01, minPoints: 2500 },
+  { id: "master", name: "Master", color: "#c477ff", top: 0.05, minPoints: 1750 },
+  { id: "elite", name: "Elite", color: "#4fa8ff", top: 0.1, minPoints: 1000 },
+  { id: "expert", name: "Expert", color: "#3fd0c9", top: 0.2, minPoints: 500 },
+  { id: "skilled", name: "Skilled", color: "#5ee08a", top: 0.35, minPoints: 200 },
+  { id: "hopper", name: "Hopper", color: "#d6dceb", top: 0.6, minPoints: 70 },
   { id: "rookie", name: "Rookie", color: "#9aa3b5", top: 1, minPoints: 0.0001 },
 ];
 export const UNRANKED: RankGroup = { id: "unranked", name: "Unranked", color: "#6f7889", minPoints: 0 };
 
-/** Rank title for a player at `rank` (1-based) of `ranked` players with `points`. */
-export function rankGroup(points: number, rank: number | null, ranked: number): RankGroup {
+/** Rank title for a player at `rank` (1-based) of `ranked` players with `points`, on board `scope` ("all" = overall). */
+export function rankGroup(points: number, rank: number | null, ranked: number, scope = "all"): RankGroup {
   if (!rank || points <= 0 || ranked <= 0) return UNRANKED;
   const pct = rank / ranked;
   for (const g of RANK_GROUPS) {
+    // Number One is the overall #1's alone: a style board's #1 reads Legend.
+    if (g.id === NUMBER_ONE && scope !== "all") continue;
     if (points < g.minPoints) continue;
     if ((g.maxRank !== undefined && rank <= g.maxRank) || (g.top !== undefined && pct <= g.top)) return g;
   }
@@ -133,6 +201,17 @@ export function rankGroup(points: number, rank: number | null, ranked: number): 
 }
 
 export const rankGroupById = (id: string) => RANK_GROUPS.find((g) => g.id === id) ?? UNRANKED;
+
+/** A colour the Number One picked (CosmeticChoice.rankColor): "#rrggbb", or null. */
+export const rankColorOf = (v: unknown): string | null => (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : null);
+
+/**
+ * A rank title's colour as shown: the Number One's own pick (from their cosmetics' rankColor) on the overall board,
+ * else the group's. Other titles and style boards always keep the group's colour.
+ */
+export function shownRankColor(scope: string, group: { id: string; color: string }, rankColor: unknown): string {
+  return scope === "all" && group.id === NUMBER_ONE ? (rankColorOf(rankColor) ?? group.color) : group.color;
+}
 
 /** "top 4%" style wording used next to a rank title (Aimperion: one wording everywhere). */
 export function topPercent(rank: number, ranked: number): string {

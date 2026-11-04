@@ -6,8 +6,8 @@
 #include <string_view>
 #include <stdexcept>
 namespace native {
-inline constexpr int release_physics=23,release_rules=3;
-inline constexpr std::string_view release_wasm_sha256="e6427bff6f87c921c9dc5d15952917cb452b09021455f1b7dd24492539d8be07";
+inline constexpr int release_physics=24,release_rules=4;
+inline constexpr std::string_view release_wasm_sha256="8195f17536fe7338618c9f562034c9d2491b855158d0fbabeecbbe8bb0340496";
 inline std::string release_platform(){
 #if defined(__APPLE__)
     const std::string os="darwin";

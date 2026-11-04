@@ -165,7 +165,7 @@ export function playerCard(p: Profile, o: CardOverrides = {}): HTMLElement {
           null,
           // (No "Rank" label: the rank's name is the label.)
           h(
-            "b.pc-group",
+            `b.pc-group${rank.group.name.length >= 10 ? ".long" : ""}`,
             null,
             // Holding overall #1 / #2 / #3: the crown the bunny wears (progression.ts crownOf), on the card too.
             // The owner's hat wins over it, like on the bunny (player/bunny/hats.ts headwear).

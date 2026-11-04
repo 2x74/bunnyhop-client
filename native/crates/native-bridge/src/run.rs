@@ -8,6 +8,15 @@ use bunnyhop_core::game::{EVENT_JUMPED, EVENT_RESPAWNED, EVENT_TELEPORTED};
 
 /// Timer rules 2's slow-start escape (website timer.ts START_SLOW_SPEED): this slow on the ground always arms.
 const START_SLOW_SPEED: f64 = 50.0;
+/// Timer rules 4 (website timer.ts START_ZONE_NO_PREHOP_V4): maps whose start zones block prehops in every style.
+/// Part of the rules: adding a map here needs a new rules version, or that map's rules 4 runs would re-time.
+pub const START_ZONE_NO_PREHOP_V4: [&str; 1] = ["bhop_futile"];
+
+/// Whether start-zone prehops lose their speed for this style on this map under `rules` (website `blocksPrehops`).
+pub fn blocks_prehops(style: &str, map: &str, rules: u32) -> bool {
+    style == "scroll" || (rules >= 4 && START_ZONE_NO_PREHOP_V4.contains(&map))
+}
+
 /// Timer rules 3 (website timer.ts START_IMPULSE_MARGIN): this far over the prespeed cap came from the map, not the
 /// player, whose one tick of movement adds far less. A start-zone booster keeps its speed.
 const START_IMPULSE_MARGIN: f64 = 32.0;
@@ -60,7 +69,7 @@ impl Default for BhRunOptions {
         Self {
             prespeed_cap: 290.0,
             cap_enabled: 1,
-            rules: 3,
+            rules: 4,
             block_prehops: 0,
             strafe_keys: 0,
             start_reentry_cap: 0.0,
@@ -682,6 +691,16 @@ mod tests {
         t.noclip_tick(1, [5.0, 0.0, 0.0], [4000.0, 0.0, 0.0]);
         t.noclip_tick(2, [50.0, 0.0, 0.0], [4000.0, 0.0, 0.0]);
         assert_eq!(t.state.status, 0);
+    }
+    #[test]
+    fn rules4_blocks_prehops_on_listed_maps_in_every_style() {
+        assert!(blocks_prehops("scroll", "bhop_eazy", 1));
+        assert!(!blocks_prehops("autohop", "bhop_futile", 3));
+        for style in crate::styles::IDS {
+            assert!(blocks_prehops(style, "bhop_futile", 4), "{style}");
+        }
+        assert!(!blocks_prehops("autohop", "bhop_eazy", 4));
+        assert!(!blocks_prehops("autohop", "bhop_futile_v2", 4));
     }
     #[test]
     fn rules3_prespeed_cap_leaves_a_booster_alone() {

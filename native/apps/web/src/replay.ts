@@ -104,7 +104,8 @@
 // mouse motion and the manual-turn markers on scaled/accelerated mice; integer recordings retain v8/v9 encoding.
 
 import { PHYSICS_V1, PHYSICS_V7, type RestartPoint, type Settings } from "./core";
-import { TIMER_RULES_V1 } from "./timer";
+import { TIMER_RULES_V1, TIMER_RULES_V3 } from "./timer";
+import { styleDef } from "./styles";
 import { trackOf, trackSuffix, type Zone, type ZoneKind } from "./zones";
 import { packLoadout, unpackLoadout, type CosmeticLoadout } from "./loadout";
 import { foldRange } from "./run-hash";
@@ -166,16 +167,34 @@ export interface CountedYaw {
 /** The version a header is encoded as. */
 export const replayVersionFor = (h: Pick<ReplayHeader, "spawn" | "settings" | "timerRules" | "style">) =>
   h.settings.stamina || h.style === "lowgrav" ? REPLAY_VERSION_STAMINA : replayTimerRules(h) !== TIMER_RULES_V1 ? REPLAY_VERSION : replayPhysics(h) !== PHYSICS_V1 ? REPLAY_VERSION_PHYSICS : hasRestartNames(h) ? 5 : 4;
+/**
+ * First physics version and timer rules of Backwards runs (v0.0.36): the style is a StyleFilter rule on the current
+ * physics (no core change), so no Backwards replay on older physics or rules can exist and none is accepted.
+ */
+export const BACKWARDS_PHYSICS_FROM = 23;
+export const BACKWARDS_RULES_FROM = 3;
 /** Low Gravity started with v9 format, physics v10 and timer rules 2; older combinations never existed. */
 export const styleReplayAllowed = (h: ReplayHeader): boolean => styleReplayProblem(h) === null;
+/**
+ * First physics version of Infinite runs (native v0.7.0): the air jump is a style setting, already on physics v23 (no
+ * physics bump of its own), and its timer rules need rules 3. Web v0.0.36 records them at physics v24 / rules 4; native
+ * v0.7.0's stay v23 / rules 3. No older Infinite replay exists.
+ */
+export const INFINITE_PHYSICS_FROM = 23;
 /** First physics version of Segmented runs (v0.0.30): no older Segmented replay can exist. */
 export const SEGMENTED_PHYSICS_FROM = 19;
 /** Why the header's style can't come with its format / physics / timer rules (styleReplayAllowed), or null. */
 export function styleReplayProblem(h: ReplayHeader): string | null {
   const style = replayStyle(h);
+  if (style === "backwards" && !((h.version ?? 0) >= REPLAY_VERSION && replayPhysics(h) >= BACKWARDS_PHYSICS_FROM && replayTimerRules(h) >= BACKWARDS_RULES_FROM)) {
+    return `style backwards requires replay v${REPLAY_VERSION}, physics v${BACKWARDS_PHYSICS_FROM} and timer rules ${BACKWARDS_RULES_FROM} or later`;
+  }
   if (style === "lowgrav" && !((h.version ?? 0) >= 9 && replayPhysics(h) >= 10 && replayTimerRules(h) >= 2)) return "style lowgrav requires replay v9, physics v10 and timer rules 2 or later";
   if (style === "segmented" && !((h.version ?? 0) >= REPLAY_VERSION && replayPhysics(h) >= SEGMENTED_PHYSICS_FROM && replayTimerRules(h) >= 2)) {
     return `style segmented requires replay v${REPLAY_VERSION}, physics v${SEGMENTED_PHYSICS_FROM} and timer rules 2 or later`;
+  }
+  if (style === "infinite" && !((h.version ?? 0) >= REPLAY_VERSION && replayPhysics(h) >= INFINITE_PHYSICS_FROM && replayTimerRules(h) >= TIMER_RULES_V3)) {
+    return `style infinite requires replay v${REPLAY_VERSION}, physics v${INFINITE_PHYSICS_FROM} and timer rules ${TIMER_RULES_V3} or later`;
   }
   return null;
 }
@@ -298,6 +317,18 @@ export function styleName(settings: Settings): string {
 /** The run's style id: the header's style (v4) or, for older replays, the one implied by the autohop flag. */
 export function replayStyle(h: Pick<ReplayHeader, "style" | "settings">): string {
   return h.style ?? styleName(h.settings);
+}
+
+/**
+ * Whether the header's style jumps in the air (styles.ts StyleDef.airJump, Infinite). The format doesn't carry it: like
+ * the native client (native-bridge replay.rs), it comes from the style name, so headers stay byte-identical.
+ */
+export const replayAirJump = (h: Pick<ReplayHeader, "style" | "settings">): boolean => !!styleDef(replayStyle(h))?.airJump;
+
+/** The physics settings a header re-simulates with: the recorded ones plus the style's air jump (replayAirJump). */
+export function replaySettings(h: Pick<ReplayHeader, "style" | "settings">): Settings {
+  const airJump = replayAirJump(h);
+  return !!h.settings.airJump === airJump ? h.settings : { ...h.settings, airJump };
 }
 
 // ---------------------------------------------------------------------------
@@ -885,6 +916,7 @@ export function decodeRaw(buf: Uint8Array, opts: { commands?: boolean } = {}): R
   const inspect = readInspects(r);
   const turnSpeed = readTurnSpeed(r);
   const segments = readSegments(r);
+  if (styleDef(style)?.airJump) settings.airJump = true;
   return {
     header: {
       version,

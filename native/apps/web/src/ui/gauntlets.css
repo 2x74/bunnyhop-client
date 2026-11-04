@@ -91,7 +91,9 @@
 .pfg-table .gx-title-link { font-weight: 650; color: var(--cream); }
 .pfg-time { font-weight: 750; }
 .pfg-table .dim { color: var(--dim); }
-.pfg-wins { margin: 0.6rem 0 0; color: var(--cream-2); font-size: var(--fs-sm); }
+.pfg-wins { display: flex; align-items: center; gap: 0.4rem; margin: 0.6rem 0 0; color: var(--cream-2); font-size: var(--fs-sm); }
+.pfg-medal { display: inline-flex; width: 1.35rem; height: 1.35rem; }
+.pfg-medal svg { width: 100%; height: 100%; }
 
 /* Watch (gauntlet/watch.ts): a quiet text link. */
 .gx-watch { color: var(--accent-hi, var(--accent)); font-size: var(--fs-sm); font-weight: 650; text-decoration: none; }

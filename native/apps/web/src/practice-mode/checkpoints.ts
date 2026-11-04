@@ -14,15 +14,32 @@ export interface SnapshotStore {
   bytes(handle: number): number;
 }
 
-/** bhoptimer keeps up to 1000; 100 is plenty here, and the memory budget below usually decides first on big maps. */
-export const MAX_CHECKPOINTS = 100;
-/** Snapshots hold the map's whole entity state: maps with huge event queues make them large. */
+/**
+ * Up to 1000, like bhoptimer (0.0.36; 100 before). Measured on the e6427bff6f87 core (state_snapshot_bytes, and wasm
+ * memory growth over 4000 snapshots): about 96 KB each on bhop_eazy, 130 KB on bhop_moonlight, 176 KB on bhop_angkor,
+ * 262 KB on bhop_synthetic_fix and 1.75 MB on bhop_treason. The byte budget below decides first wherever a snapshot is
+ * over about 134 KB (treason keeps ~76), so the cap adds no worst case: at most the budget on top of the map, as before.
+ */
+export const MAX_CHECKPOINTS = 1000;
+/**
+ * Snapshots hold the map's whole entity state: maps with huge event queues make them large. Wasm memory never shrinks,
+ * so this is also the most a tab's memory grows for checkpoints. It covers the JS side the checkpoints keep too
+ * (CheckpointHooks.extraBytes: Segmented paths, segments.ts retainedBytes).
+ */
 export const CHECKPOINT_BUDGET_BYTES = 128 * 1024 * 1024;
 
 export interface Checkpoint<T> {
   handle: number;
   bytes: number;
   data: T;
+}
+
+/** What the checkpoints' data holds outside the snapshots. */
+export interface CheckpointHooks<T> {
+  /** Bytes the data of the kept checkpoints holds now, counted in the budget (read again after each drop). */
+  extraBytes?: () => number;
+  /** A checkpoint's data is let go (dropped as the oldest, cleared, or its snapshot failed). */
+  onDrop?: (data: T) => void;
 }
 
 export class Checkpoints<T> {
@@ -33,6 +50,7 @@ export class Checkpoints<T> {
   constructor(
     private store: SnapshotStore,
     private limits: { max: number; budget: number } = { max: MAX_CHECKPOINTS, budget: CHECKPOINT_BUDGET_BYTES },
+    private hooks: CheckpointHooks<T> = {},
   ) {}
 
   get count(): number {
@@ -46,19 +64,24 @@ export class Checkpoints<T> {
 
   /**
    * Saves a new checkpoint after the others and makes it the current one. The oldest go when there are more than
-   * `max` or they hold more than `budget` bytes (the new one always stays). Returns it, or null if the store couldn't
-   * snapshot.
+   * `max` or they hold more than `budget` bytes with their data's extraBytes (the new one always stays). Returns it,
+   * or null if the store couldn't snapshot.
    */
   save(data: T): Checkpoint<T> | null {
     const handle = this.store.save();
-    if (!handle) return null;
+    if (!handle) {
+      this.hooks.onDrop?.(data);
+      return null;
+    }
     const cp = { handle, bytes: this.store.bytes(handle), data };
     this.list.push(cp);
     let total = this.list.reduce((n, c) => n + c.bytes, 0);
-    while (this.list.length > 1 && (this.list.length > this.limits.max || total > this.limits.budget)) {
+    const extra = () => this.hooks.extraBytes?.() ?? 0;
+    while (this.list.length > 1 && (this.list.length > this.limits.max || total + extra() > this.limits.budget)) {
       const old = this.list.shift()!;
       total -= old.bytes;
       this.store.free(old.handle);
+      this.hooks.onDrop?.(old.data);
     }
     this.at = this.list.length - 1;
     return cp;
@@ -83,8 +106,12 @@ export class Checkpoints<T> {
 
   /** Frees every checkpoint. */
   clear(): void {
-    for (const c of this.list) this.store.free(c.handle);
+    const list = this.list;
     this.list = [];
+    for (const c of list) {
+      this.store.free(c.handle);
+      this.hooks.onDrop?.(c.data);
+    }
     this.at = -1;
   }
 }

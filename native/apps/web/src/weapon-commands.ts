@@ -14,7 +14,9 @@
 // the USP's silencer as it was.
 
 import { PHYSICS_V10, PHYSICS_V7, WEAPON_IDS, type WeaponReport } from "./core";
-import type { Input } from "./input";
+import { isTextField, type Input } from "./input";
+import { cursorFree } from "./free-cursor";
+import { prefs } from "./ui/settings";
 import type { RunSession } from "./session";
 import { KeptWeapons, rankedCommandWeapon, weaponByName } from "./weapon-rules";
 import type { MenuSpec, NumberMenu } from "./net/hud";
@@ -117,6 +119,15 @@ export function giveWeapon(which: string | number, say?: (text: string) => void)
 let menu: NumberMenu | null = null;
 let keysHooked = false;
 
+/**
+ * A CS:S-style numbered menu is on screen (net/hud.ts NumberMenu, #mp-menu: a room vote, !nominate, !spec, !cp, the
+ * guns menu). While one is, the digit keys are its own: main.ts fires no bind for them, so 7 in a map vote votes and
+ * doesn't also open the guns menu.
+ */
+export const numberMenuOpen = (): boolean => typeof document !== "undefined" && !!document.querySelector("#mp-menu:not([hidden])");
+/** A digit key (the numbered menus' keys). */
+export const isDigitCode = (code: string): boolean => /^(?:Digit|Numpad)\d$/.test(code);
+
 /** The guns menu is open (its digit keys pick). */
 export function gunPickerOpen(): boolean {
   return !!menu?.open;
@@ -126,7 +137,10 @@ export function closeGunPicker(): void {
   menu?.hide();
 }
 
-/** Opens the guns menu (CS:S-style numbered list; 1-9 pick, 0 closes). Toggles it shut when already open. */
+/**
+ * Opens the guns menu (CS:S-style numbered list; 1-9 pick). 0, Esc (the pause) or the guns key again close it. Toggles
+ * it shut when already open.
+ */
 export async function openGunPicker(say?: (text: string) => void): Promise<void> {
   if (!host) return;
   if (menu?.open) return menu.hide();
@@ -142,7 +156,14 @@ export async function openGunPicker(say?: (text: string) => void): Promise<void>
     window.addEventListener(
       "keydown",
       (e) => {
-        if (!menu?.open || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+        if (!menu?.open || e.repeat || e.ctrlKey || e.metaKey || e.altKey || isTextField(e.target)) return;
+        if (e.code === "Escape") return menu.hide(); // (the pause still opens)
+        // The guns key again closes it, as a CS:S menu key does, before its digit would pick the 7th gun.
+        if (prefs.get().binds.gunMenu?.includes(e.code)) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          return menu.hide();
+        }
         const d = /^(?:Digit|Numpad)(\d)$/.exec(e.code);
         if (!d) return;
         e.preventDefault();
@@ -151,6 +172,10 @@ export async function openGunPicker(say?: (text: string) => void): Promise<void>
       },
       true,
     );
+    // Leaving the game (Esc: the pause menu) closes it too; the chat freeing the cursor doesn't.
+    document.addEventListener("pointerlockchange", () => {
+      if (!document.pointerLockElement && !cursorFree()) menu?.hide();
+    });
   }
   const session = host.session;
   const any = anyGunAllowed(session);

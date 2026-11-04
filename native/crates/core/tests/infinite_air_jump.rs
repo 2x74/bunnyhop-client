@@ -103,3 +103,43 @@ fn press_edge_gate_stops_the_flight() {
     assert!(sim.state.velocity[2] < risen - 20.0, "the gate let a held jump fly: {:?}", sim.state.velocity);
     assert!(impulse.is_some(), "the style did set an impulse");
 }
+
+/// The real `Game::step` on a real map (the web/verifier path): with autohop, holding jump in the air rises once,
+/// every fresh press rises again, and without `air_jump` the same commands never rise in the air.
+#[test]
+fn game_step_gates_air_jumps_on_a_press_edge() {
+    use bunnyhop_core::game::{IN_JUMP, PHYSICS_V23};
+    use bunnyhop_core::{Cmd, Game};
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_eazy.bsp");
+    let bytes = std::fs::read(path).expect("bhop_eazy fixture");
+    let bsp = bunnyhop_core::parse_bsp(&bytes).unwrap();
+    let mut game = Game::load(&bsp).unwrap();
+    let held = Cmd { buttons: IN_JUMP, ..Cmd::default() };
+    let airborne = |game: &mut Game| {
+        game.reset();
+        // The clear airborne point low_gravity.rs uses; no horizontal motion, so no map trigger is touched.
+        game.state.position = [600.0, -352.0, 200.0];
+        game.state.velocity = [0.0; 3];
+        game.state.ground = None;
+    };
+    for air_jump in [true, false] {
+        game.set_settings(Settings { air_jump, physics_version: PHYSICS_V23, ..Settings::css_bhop() });
+        airborne(&mut game);
+        game.step(held).unwrap();
+        let first = game.state.velocity[2];
+        for _ in 0..5 {
+            game.step(held).unwrap();
+        }
+        let held_after = game.state.velocity[2];
+        game.step(Cmd::default()).unwrap();
+        game.step(held).unwrap();
+        let repressed = game.state.velocity[2];
+        if air_jump {
+            assert!(first > AIR_JUMP_SPEED - 20.0, "the first press must rise: {first}");
+            assert!(held_after < first - 20.0, "autohop + held jump must not fly: {first} -> {held_after}");
+            assert!(repressed > AIR_JUMP_SPEED - 20.0, "a fresh press must rise again: {repressed}");
+        } else {
+            assert!(first < 0.0 && held_after < first && repressed < held_after, "no air jumps off Infinite: {first} {held_after} {repressed}");
+        }
+    }
+}

@@ -1156,8 +1156,8 @@ pub unsafe extern "C" fn bh_run_configure(
 ) -> c_int {
     unsafe {
         call(ctx, |c| {
-            let options = input(options)?;
-            if ![1, 2, 3].contains(&options.rules)
+            let mut options = input(options)?;
+            if ![1, 2, 3, 4].contains(&options.rules)
                 || options.strafe_keys > 2
                 || !options.prespeed_cap.is_finite()
                 || options.prespeed_cap < 0.0
@@ -1189,6 +1189,10 @@ pub unsafe extern "C" fn bh_run_configure(
             }
             let m = c.map()?;
             m.finish_record(false, "zones_changed")?;
+            // A rules 4 map blocks prehops in every style, whatever the caller's defaults say.
+            if run::blocks_prehops(&m.filter.id, &m.map_name, options.rules) {
+                options.block_prehops = 1;
+            }
             m.timer = Some(run::Timer::new(
                 zones,
                 options,
@@ -1581,7 +1585,7 @@ pub unsafe extern "C" fn bh_style_set(ctx: *mut BhContext, style: *const c_char)
                 m.game.reset();
                 m.transforms_dirty = true;
                 if let Some(t) = &mut m.timer {
-                    t.options.block_prehops = u32::from(id == "scroll");
+                    t.options.block_prehops = u32::from(run::blocks_prehops(id, &m.map_name, t.options.rules));
                     t.options.cap_enabled = u32::from(styles::has_prespeed_cap(id));
                     t.options.prespeed_cap = 290.0;
                     t.options.start_reentry_cap = styles::start_reentry_cap(id);

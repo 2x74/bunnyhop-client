@@ -18,9 +18,15 @@ import { inspectField, SF_CROUCHED, SF_GROUNDED, SF_JUMPED, SF_SLASH, SF_STAB, S
 
 /** Least interpolation delay (a sender batching every 100 ms or faster). */
 export const INTERP_MS = 100;
-/** The batch interval assumed until a sender's has been measured, and the most it may count for. */
+/**
+ * The batch interval assumed until a sender's has been measured, and the most it may count for. Up to 1.2 s: native
+ * clients up to v0.7.0 send from their hidden menu page, whose timers the browser engine throttles to about once a
+ * second, so their batches come that far apart (each with only its last 8 samples). Rendering that far behind them plays
+ * the motion through instead of holding and jumping every second. A web sender's ticks stop while it is paused, so its
+ * spans stay at its cadence; a lost batch only nudges the average.
+ */
 const BATCH_START_MS = 100;
-const BATCH_MAX_MS = 400;
+const BATCH_MAX_MS = 1200;
 /** Extra delay allowed for measured jitter. */
 const MAX_JITTER_MS = 120;
 /** How far past the newest sample we extrapolate before holding. */

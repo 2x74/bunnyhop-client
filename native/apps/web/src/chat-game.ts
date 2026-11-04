@@ -12,9 +12,10 @@ import { formatTime } from "./timer";
 import { keyLabel, prefs, type Action } from "./ui/settings";
 import { trackName } from "./zones";
 
-export function chatGame(o: { map: string; session: RunSession; practice: Practice }): ChatGame {
+export function chatGame(o: { map: string; session: RunSession; practice: Practice; freecam?: () => void }): ChatGame {
   const { map, session, practice } = o;
   return {
+    freecam: o.freecam,
     key: (action) => {
       const code = prefs.get().binds[action as Action]?.[0];
       return code ? keyLabel(code) : null;

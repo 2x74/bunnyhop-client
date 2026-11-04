@@ -586,6 +586,8 @@ pub fn collision_file(model: &str, solidity: u8) -> String {
 /// - `prop_physics_multiplayer` (COLLISION_GROUP_PUSHAWAY) and debris never collide with the player.
 pub fn prop_sources(bsp: &Bsp, entities: &[crate::entities::Entity], diagnostics: &mut Vec<String>) -> Vec<PropSource> {
     let mut out = Vec::new();
+    // Builds in `PARENTED_PROPS_V24`: parented prop_dynamics get moving collision (used from physics v24 only).
+    let follow_parent = crate::game::map_parented_props_v24_for(entities).is_some();
     match playsrc_bsp::parse_static_props(bsp, playsrc_bsp::Limits::default()) {
         Ok(Some(props)) => {
             for (index, prop) in props.occurrences.iter().enumerate() {
@@ -633,6 +635,12 @@ pub fn prop_sources(bsp: &Bsp, entities: &[crate::entities::Entity], diagnostics
             continue;
         }
         if e.get("parentname").is_some_and(|p| !p.is_empty()) {
+            if follow_parent && class.starts_with("prop_dynamic") {
+                // Collision in model space, placed at the entity's transform as its parent moves (`Game::relink`).
+                let name = model.replace('\\', "/").to_ascii_lowercase();
+                out.push(PropSource { name, solidity, origin: e.origin(), angles: e.angles(), tag: ENTITY_PROP | index as u32, settle: false, pushaway: None, dynamic: true, scale: 1.0 });
+                continue;
+            }
             // Follows a (possibly moving) parent; prop hierarchies are not simulated.
             diagnostics.push(format!("{class} {model} parented to {}: not solid", e.get("parentname").unwrap_or("")));
             continue;

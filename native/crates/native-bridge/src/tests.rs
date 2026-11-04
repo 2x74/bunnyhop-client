@@ -1506,7 +1506,8 @@ fn native_guns_fire_consume_ammo_reload_and_obey_trigger_cadence() {
     let path = fixture.file("weapons.bsp", &bsp(&[]));
     unsafe {
         let c = bh_create();
-        let settings = BhSettings { gravity: 0.0, ..BhSettings::default() };
+        // Physics 23: from 24 every clip is infinite (v24_guns_keep_a_full_clip).
+        let settings = BhSettings { gravity: 0.0, physics: 23, ..BhSettings::default() };
         assert_eq!(bh_set_settings(c, &settings), 1);
         assert_eq!(bh_load_map(c, path.as_ptr(), ptr::null()), 1);
         for gun in GUNS {
@@ -1566,7 +1567,7 @@ fn native_glock_burst_and_usp_silencer_keep_authoritative_state() {
     let path = fixture.file("weapon-modes.bsp", &bsp(&[]));
     unsafe {
         let c = bh_create();
-        assert_eq!(bh_set_settings(c, &BhSettings { gravity: 0.0, ..BhSettings::default() }), 1);
+        assert_eq!(bh_set_settings(c, &BhSettings { gravity: 0.0, physics: 23, ..BhSettings::default() }), 1);
         assert_eq!(bh_load_map(c, path.as_ptr(), ptr::null()), 1);
         let mut state = BhState::default();
         let step = |buttons, state: &mut BhState| assert_eq!(bh_step(c, &BhCmd { buttons, ..BhCmd::default() }, state), 1);

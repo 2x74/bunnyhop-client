@@ -11,7 +11,7 @@
 // recorded and verified like one you walked to, and session.ts tries the restart there first (a wall or a drop in the
 // way and it's what it would have been without the move).
 //
-// Practice spawns: where practice works (solo) the same command saves a spot anywhere else you stand still, and so does
+// Practice spawns: where practice works, the same command saves a spot anywhere else you stand still, and so does
 // a spot in the start zone after a noclip or checkpoint teleport. Restarts from one are practice attempts (session.ts
 // resetCore): never submitted, and the verifier would refuse such a replay anyway. The timer works as ever, from the
 // start zone. Every attempt on one says so for its whole length (hud.ts setPractice), with the way to clear it.

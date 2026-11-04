@@ -31,8 +31,8 @@ export const GROUPS: readonly { id: HelpGroup; label: string; where?: ChatWhere 
   { id: "more", label: "More" },
 ];
 
-/** A group's label here: practice is solo only, so rooms say so. */
-export const groupLabel = (g: HelpGroup, where: ChatWhere): string => (g === "practice" && where === "room" ? "Practice (solo)" : GROUPS.find((x) => x.id === g)!.label);
+/** A group's label here (the same solo and in rooms: practice works on servers since 0.0.36). */
+export const groupLabel = (g: HelpGroup, _where: ChatWhere): string => GROUPS.find((x) => x.id === g)!.label;
 
 /** The commands listed in group `g` for `where` (registration order). Practice is listed in rooms too (it says solo). */
 export function groupCommands(all: readonly ChatCommand[], g: HelpGroup, where: ChatWhere): ChatCommand[] {
@@ -51,9 +51,11 @@ export function helpLines(all: readonly ChatCommand[], ctx: Ctx): { label?: stri
   const out: { label?: string; text: string }[] = [];
   for (const g of GROUPS) {
     if (g.where && g.where !== ctx.where) continue;
-    const items = groupCommands(all, g.id, ctx.where)
-      .filter((c) => !c.panelOnly)
-      .map((c) => item(c, ctx));
+    const cmds = groupCommands(all, g.id, ctx.where).filter((c) => !c.panelOnly);
+    // The style shortcuts (one per style, no help text) share one item, as on Esc → Help: the line stays short as styles are added.
+    const shortcuts = g.id === "style" ? cmds.filter((c) => !c.help) : [];
+    const items = cmds.filter((c) => !shortcuts.includes(c)).map((c) => item(c, ctx));
+    if (shortcuts.length) items.push(shortcuts.map((c) => item(c, ctx)).join(" "));
     // The last line also says where the rest is.
     if (g.id === "more") items.push("!help <topic>", "Esc → Help");
     if (items.length) out.push({ label: groupLabel(g.id, ctx.where), text: items.join(" · ") });
@@ -131,7 +133,7 @@ const TOPICS: readonly Topic[] = [
   {
     names: ["styles", "style", "modes", "mode"],
     lines: (c) => [
-      "!n Normal · !ez EZ Scroll · !scroll Legit Scroll · !w W-Only · !sw Sideways · !hsw Half-Sideways · !auto Auto-strafe",
+      "!n Normal · !ez EZ Scroll · !scroll Legit Scroll · !w W-Only · !sw Sideways · !hsw Half-Sideways · !bw Backwards · !auto Auto-strafe",
       `${k(c, "!style", "cycleStyle")} lists them${c.game?.key("cycleStyle") ? ` (${c.game.key("cycleStyle")} cycles)` : ""}. Switching restarts the run; each style has its own leaderboard.`,
     ],
   },

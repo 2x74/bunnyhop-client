@@ -425,6 +425,42 @@ pub(crate) fn parented_doors_v21(entities: &[Entity]) -> Option<&'static Parente
     PARENTED_DOORS_V21.iter().find(|m| m.fingerprint == fingerprint)
 }
 
+/// The same parented-door behaviour as `PARENTED_DOORS_V21`, from physics v24, on these reviewed builds.
+pub(crate) const PARENTED_DOORS_V24: &[ParentedDoors] = &[ParentedDoors {
+    map: "bhop_playboy_csgo",
+    fingerprint: 0x7b264d5d,
+    reason: "the spiral stair room: 25 bhop steps (func_door *430, *455..*478, touch opens, down 35 u/s) are parented to \
+             the column rot2 (func_rotating *395), which trigger *524 starts at 40 deg/s. The teleport *525 that fills \
+             the gaps between the steps is parented to rot2 too, and the core has always turned it with the column, but \
+             held the steps still, so the teleport swept over the steps and sent the player back to level212 (feedback \
+             2026-11-02, Throw: \"broken level, only triggers spin, not actual jumps\"). The steps are the map's only \
+             parented doors.",
+}];
+
+/// Builds whose solid prop_dynamic children of movers follow their parent in collision and drawing from physics v24.
+/// In Source a prop_dynamic is an ordinary hierarchy child with its own VPhysics shadow; the core has always left out
+/// parented props ("prop hierarchies are not simulated"). bhop_dtt_trainning2: every block is a crate, pylon or vending
+/// machine prop parented to a func_door that sinks when touched (36 of them); srcds lands a player dropped on one at z 66 on
+/// the crate (tools/parity `adds_dtt_drop`), the core let them fall through to the teleport below. Our WR was 56 s against
+/// 15-18 s on CS:S servers (feedback 2026-11-02, Kahova: tier report "really struggling with the mechanic of this map").
+pub(crate) const PARENTED_PROPS_V24: &[ParentedDoors] = &[ParentedDoors {
+    map: "bhop_dtt_trainning2",
+    fingerprint: 0x11396e39,
+    reason: "36 bhop blocks are props parented to sinking func_doors",
+}];
+
+/// The map's v24 parented-prop entry, if `entities` is one of the `PARENTED_PROPS_V24` builds.
+pub(crate) fn parented_props_v24(entities: &[Entity]) -> Option<&'static ParentedDoors> {
+    let fingerprint = entity_fingerprint(entities);
+    PARENTED_PROPS_V24.iter().find(|m| m.fingerprint == fingerprint)
+}
+
+/// The map's v24 parented-door entry, if `entities` is one of the `PARENTED_DOORS_V24` builds.
+pub(crate) fn parented_doors_v24(entities: &[Entity]) -> Option<&'static ParentedDoors> {
+    let fingerprint = entity_fingerprint(entities);
+    PARENTED_DOORS_V24.iter().find(|m| m.fingerprint == fingerprint)
+}
+
 /// Maps whose player-activated outputs run on EventQueueFix's clock from physics v23: no player clock lead
 /// (`Game::player_clock_lead`). A touch-fired "0.2 s" output lands 20 + 1 commands later, not 20 + 1 + 5.
 ///
@@ -476,6 +512,17 @@ pub(crate) const EVENT_CLOCK_V23: &[EventClock] = event_clock![
     "kz_bhop_yonkoma" 0x46708c81,
 ];
 
+/// The same clock as `EVENT_CLOCK_V23`, from physics v24, on these builds. bhop_4tele (added in v0.0.36): its pads rename the
+/// player `boosted` on touch (`*211`, `*213`, ...; `*319` with a 0.02 s basevelocity), and a trigger_push filtered on that name
+/// lifts them. Recordings from offstyles (eventqueuefix) show the lift from the next command; with the player clock lead it
+/// landed 5 commands late and the lift fell 80 u/s short.
+pub(crate) const EVENT_CLOCK_V24: &[EventClock] = event_clock!["bhop_4tele" 0x24e842ac,];
+
+/// The map's entry in `EVENT_CLOCK_V24`, if `fingerprint` (`entity_fingerprint`) is one of those builds.
+pub(crate) fn event_clock_v24(fingerprint: u32) -> Option<&'static EventClock> {
+    EVENT_CLOCK_V24.iter().find(|m| m.fingerprint == fingerprint)
+}
+
 /// The map's entry in `EVENT_CLOCK_V23`, if `fingerprint` (`entity_fingerprint`) is one of those builds.
 pub(crate) fn event_clock_v23(fingerprint: u32) -> Option<&'static EventClock> {
     EVENT_CLOCK_V23.iter().find(|m| m.fingerprint == fingerprint)
@@ -526,4 +573,90 @@ pub(crate) const LOGIC_CASE_V23: &[LogicCaseV23] = &[LogicCaseV23 { map: "bhop_c
 pub(crate) fn logic_case_v23(entities: &[crate::entities::Entity]) -> Option<&'static LogicCaseV23> {
     let fingerprint = entity_fingerprint(entities);
     LOGIC_CASE_V23.iter().find(|m| m.fingerprint == fingerprint)
+}
+
+/// Entity props CS:S deletes when the map spawns, which the core has always kept (physics v24 removes them at reset).
+/// Source `CBaseProp::Spawn` (props.cpp) removes a plain `prop_dynamic` whose model has a `prop_data` block in its MDL
+/// keyvalues ("has propdata which means that it be used on a prop_physics. DELETED.") unless the prop_data allows static,
+/// and a plain `prop_physics` whose model has none ("must be used on a prop_static. DELETED."). The core reads no MDL
+/// keyvalues (the verifier's physics content has only the collision models), so the deleted props are listed per build,
+/// from a scan of every catalogue BSP against the CS:S and HL2 VPKs and each map's pakfile (2026-11-03,
+/// /tmp/bh-0036/maps-work/stuck/propdata-scan.json). Matched by entity fingerprint, then class, model and origin exactly.
+pub(crate) struct DeletedProps {
+    #[allow(dead_code)]
+    pub map: &'static str,
+    pub fingerprint: u32,
+    /// (classname, model, origin) as in the entity lump.
+    pub props: &'static [(&'static str, &'static str, &'static str)],
+}
+
+pub(crate) const CS_DELETED_PROPS_V24: &[DeletedProps] = &[
+    // The three barrels stand on the route (-3296, 3320); real srcds traces straight through them to the floor and its
+    // entity list has none of these 7 (feedback 2026-10-29, NotZed: "is this map broken?"). The lights also fell to the
+    // floor in the core.
+    DeletedProps {
+        map: "bhop_hell",
+        fingerprint: 0x1c85d480,
+        props: &[
+            ("prop_dynamic", "models/props/cs_assault/barrelwarning.mdl", "-3232 3320 360"),
+            ("prop_dynamic", "models/props/cs_assault/barrelwarning.mdl", "-3296 3320 360"),
+            ("prop_dynamic", "models/props/cs_assault/barrelwarning.mdl", "-3360 3320 360"),
+            ("prop_dynamic", "models/props_canal/boat002b.mdl", "-1784 2606 198"),
+            ("prop_physics", "models/props/de_prodigy/lighthanging.mdl", "8360 4672 376"),
+            ("prop_physics", "models/props/de_prodigy/lighthanging.mdl", "8366 4556 376"),
+            ("prop_physics", "models/props/de_prodigy/lighthanging.mdl", "8362 4132 376"),
+        ],
+    },
+    DeletedProps {
+        map: "bhop_ecodus",
+        fingerprint: 0x54ba2443,
+        props: &[
+            ("prop_dynamic", "models/props/cs_office/plant01.mdl", "4775 -3485 143"),
+            ("prop_dynamic", "models/props/cs_office/plant01.mdl", "4775 -3301 143"),
+            ("prop_dynamic", "models/props/cs_office/offpaintinge.mdl", "4519 -3522.72 259"),
+        ],
+    },
+    DeletedProps {
+        map: "bhop_mirrorsedge_chpt1",
+        fingerprint: 0x53aec76a,
+        props: &[("prop_dynamic", "models/props_junk/cardboard_box001a.mdl", "3157 -382 -1652")],
+    },
+    DeletedProps {
+        map: "bhop_mist_4",
+        fingerprint: 0x8bf35dfa,
+        props: &[
+            ("prop_dynamic", "models/props/cs_office/file_cabinet1.mdl", "4036.5 -14779.5 4135.28"),
+            ("prop_dynamic", "models/props/cs_office/file_cabinet1.mdl", "4036.5 -14800.5 4135.28"),
+        ],
+    },
+    DeletedProps {
+        map: "bhop_sina_fix",
+        fingerprint: 0xd39597cb,
+        props: &[("prop_dynamic", "models/props_wasteland/kitchen_counter001d.mdl", "8344 14267 276")],
+    },
+    DeletedProps {
+        map: "kz_bhop_strafe_comjump2_v2",
+        fingerprint: 0xc4b8d28b,
+        props: &[("prop_dynamic", "models/props_c17/furniturebed001a.mdl", "1840 -208 -1293.56")],
+    },
+    DeletedProps {
+        map: "surf_prelude_fix",
+        fingerprint: 0x056e484c,
+        props: &[("prop_dynamic", "models/props_gameplay/can_crushed002.mdl", "12430 -13226 13114")],
+    },
+];
+
+/// Entity indices of the props CS:S deletes on this build (`CS_DELETED_PROPS_V24`); empty for every other map.
+pub(crate) fn cs_deleted_props_v24(entities: &[Entity], fingerprint: u32) -> Vec<usize> {
+    let Some(fix) = CS_DELETED_PROPS_V24.iter().find(|m| m.fingerprint == fingerprint) else { return Vec::new() };
+    let norm = |m: &str| m.replace('\\', "/").to_ascii_lowercase();
+    entities
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| {
+            let (Some(model), Some(origin)) = (e.get("model"), e.get("origin")) else { return false };
+            fix.props.iter().any(|(class, m, o)| e.classname().eq_ignore_ascii_case(class) && norm(model) == *m && origin == *o)
+        })
+        .map(|(i, _)| i)
+        .collect()
 }

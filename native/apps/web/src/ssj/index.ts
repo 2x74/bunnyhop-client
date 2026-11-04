@@ -18,7 +18,7 @@ import { h } from "../ui/dom";
 import { prefs, type Prefs } from "../ui/settings";
 import "../ui/settings.css";
 import { DEFAULT_JHUD, JHUD_BANDS, JhudTracker, type JhudBand, type JhudReport } from "./jhud";
-import { SSJ_FIELDS, SsjTracker, ssjItems, ssjText, type SsjField, type SsjMode, type SsjReport, type SsjState, StartPreTracker } from "./stats";
+import { SSJ_FIELDS, SsjTracker, ssjItems, ssjPassesGain, ssjText, type SsjField, type SsjMode, type SsjReport, type SsjState, StartPreTracker } from "./stats";
 import { ssjNodes } from "./view";
 import { dismissOutside } from "../ui/dismiss";
 
@@ -63,10 +63,13 @@ export class LiveSsj {
   }
 }
 
-/** The chat line for a report, if Chat is on: "Jump 6 · 1013 u/s (+87) · Gain 87.5% · Sync 92% · 5 strafes". */
+/**
+ * The chat line for a report, if Chat is on and the jump passes the gain filter: "Jump 6 · 1013 u/s (+87) · Gain 87.5% ·
+ * Sync 92% · 5 strafes".
+ */
 export function ssjChat(r: SsjReport): void {
   const p = P();
-  if (!p.chat) return;
+  if (!p.chat || !ssjPassesGain(r.gain, p.minGain)) return;
   postLocalLine(ssjText(r, p.fields), ssjNodes(ssjItems(r, p.fields), false));
 }
 
@@ -101,6 +104,11 @@ export function ssjRows(): HTMLElement[] {
     toggle("HUD", () => prefs.get().hud.layout.jumpStats.on, (v) => up((p) => (p.hud.layout.jumpStats.on = v)), {
       desc: "The same numbers on the HUD. Edit layout moves it.",
       keywords: "ssj jump stats hud element show hide",
+    }),
+    range("Only gain from", () => P().minGain, (v) => up((p) => (p.hud.ssj.minGain = Math.round(v))), {
+      min: 0, max: 100, step: 5, unit: "%",
+      desc: "Chat only shows jumps with at least this gain. 0 shows every jump. !ssj 80 sets it from chat.",
+      keywords: "ssj gain filter minimum threshold only good jumps bash 80 90 chat log",
     }),
     segmented<SsjMode>("Jumps", () => P().mode, (v) => up((p) => (p.hud.ssj.mode = v)), MODES, {
       desc: "The jump count starts over after standing still or a jump in a start zone. 6th jump and Every 6th add up the jumps since the last report.",
@@ -200,4 +208,24 @@ registerChatCommand({
     ctx.reply(`JHUD ${v}. !jhud for its settings; Edit layout moves it.`);
   },
 });
-registerChatCommand({ name: "ssj", help: "jump stats", about: "speed, gain and sync on your 6th jump, as a chat line (opens its settings).", group: "more", where: "both", run: () => openSsjPanel() });
+registerChatCommand({
+  name: "ssj",
+  args: "[on|off|%]",
+  help: "jump stats",
+  about: "speed, gain and sync on your 6th jump, as a chat line. !ssj opens its settings; !ssj on or off switches the line; !ssj 80 shows only jumps with 80% gain or more, !ssj 0 every jump.",
+  group: "more",
+  where: "both",
+  run: (ctx, arg) => {
+    const v = arg.trim().toLowerCase().replace(/%$/, "");
+    if (!v) return openSsjPanel();
+    if (v === "on" || v === "off") {
+      up((p) => (p.hud.ssj.chat = v === "on"));
+      return void ctx.reply(v === "on" ? "Jump stats on in chat." : "Jump stats off in chat.");
+    }
+    const n = Number(v);
+    if (!/^\d+(\.\d+)?$/.test(v) || !(n >= 0 && n <= 100)) return void ctx.reply("Usage: !ssj [on|off|gain %], e.g. !ssj 80");
+    const min = Math.round(n);
+    up((p) => ((p.hud.ssj.minGain = min), (p.hud.ssj.chat = true)));
+    ctx.reply(min > 0 ? `Jump stats in chat: only jumps with ${min}% gain or more.` : "Jump stats in chat: every jump.");
+  },
+});

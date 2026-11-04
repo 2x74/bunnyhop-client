@@ -1,7 +1,7 @@
 // One look at the runs kept on this device (uploads.ts holds the rules, online.ts the timers). DOM-free, with everything
 // it touches passed in, so apps/web/test/upload-retry.test.ts can play out a refused, waiting and finally accepted run.
 
-import { effectiveFailure, expired, failureOf, failureText, holds, shouldRetry, spendAttempt, type StoredUpload } from "./uploads";
+import { effectiveFailure, expired, failureOf, failureText, holds, outdatedRefusal, shouldRetry, spendAttempt, type StoredUpload } from "./uploads";
 import type { Submission, User } from "./api";
 
 /** More runs than this in one go get a single line, not their own toasts. */
@@ -81,7 +81,9 @@ export async function retryStored(io: RetryIO): Promise<RetryOutcome> {
     result.delivered = true;
     if (!sub.id) {
       if (sub.status === "rejected") io.rejected(u);
-      io.sayBad(`Your earlier ${io.label(u)} wasn't accepted: ${sub.reason ?? "refused"}.`);
+      // Recorded by an older build than the server takes now: nothing to fix, so no server wording.
+      if (outdatedRefusal(sub.code)) io.sayBad(`Your earlier ${io.label(u)} was played on an older version and can't be submitted.`);
+      else io.sayBad(`Your earlier ${io.label(u)} wasn't accepted: ${sub.reason ?? "refused"}.`);
       continue;
     }
     io.accepted(sub.id);

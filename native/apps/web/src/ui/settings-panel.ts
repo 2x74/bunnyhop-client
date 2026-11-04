@@ -26,7 +26,7 @@ import { cinematicSettings } from "../graphics/cinematic-preset";
 import { composerPreset } from "../graphics/presets";
 import { hybridStatusNode } from "../graphics/hybrid-status";
 import { importSkyFile, skyFileKind, skyGroup } from "../sky-packs/settings";
-import { DEFAULT_PREFS, gameView, horizontalFovAt, keyLabel, prefs, ACTIONS, bindIsDefault, resetBind, type Action, type CrosshairStyle, applyGraphicsPreset, graphicsPreset, applyTrainerPreset, trainerPreset, type TrainerPreset, type TrainerStyle, type AspectFit, type AspectRatio, type GraphicsPreset, type MenuBackground, type PlaceReadout, type Prefs } from "./settings";
+import { DEFAULT_PREFS, gameView, horizontalFovAt, keyLabel, prefs, ACTIONS, assignBindSlot, bindIsDefault, resetBind, type Action, type CrosshairStyle, applyGraphicsPreset, graphicsPreset, applyTrainerPreset, trainerPreset, type TrainerPreset, type TrainerStyle, type AspectFit, type AspectRatio, type GraphicsPreset, type MenuBackground, type PlaceReadout, type Prefs } from "./settings";
 import { arrowNav, h } from "./dom";
 import * as ui from "./controls";
 import { group, range, rowDesc, segmented, select, toggle, check, color, row, button, syncSwitches, SWATCHES } from "./controls";
@@ -456,6 +456,9 @@ function flash(b: HTMLElement, text: string): void {
 
 let capturing: (() => void) | null = null;
 
+/** Keys per action on this page: three, as in the desktop client (more from an imported file still work, unseen). */
+const BIND_SLOTS = [0, 1, 2] as const;
+
 function bindSlot(action: Action, slot: number, refresh: () => void): HTMLElement {
   const code = prefs.get().binds[action][slot];
   const label = ACTIONS.find((a) => a.id === action)!.label;
@@ -469,13 +472,7 @@ function bindSlot(action: Action, slot: number, refresh: () => void): HTMLElemen
       stop();
       // The key leaves any other action that had it: that action's slots shake so you see where it came from.
       const took = c ? (Object.keys(prefs.get().binds) as Action[]).filter((a) => a !== action && prefs.get().binds[a].includes(c)) : [];
-      prefs.update((p) => {
-        if (c) for (const a of Object.keys(p.binds) as Action[]) p.binds[a] = p.binds[a].filter((x) => x !== c);
-        const list = [...p.binds[action]];
-        if (c) list[slot] = c;
-        else list.splice(slot, 1);
-        p.binds[action] = list.filter(Boolean);
-      });
+      prefs.update((p) => assignBindSlot(p.binds, action, slot, c));
       refresh();
       if (c) landed(action, prefs.get().binds[action].indexOf(c), took);
     };
@@ -535,7 +532,7 @@ function ghostDot(kind: GhostKind, r: HTMLElement): HTMLElement {
 const BIND_GROUPS: [string, Action[]][] = [
   ["Movement", ["forward", "back", "left", "right", "jump", "duck", "turnLeft", "turnRight", "turnFast"]],
   ["Run", ["restart", "restartBonus", "restartMain", "setStart", "clearStart", "cycleStyle", "mainMenu", "chat"]],
-  ["Show / hide", ["keysOverlay", "hideUi", "viewmodel", "thirdPerson", "flashlight", "mute", "nextTrack"]],
+  ["Show / hide", ["keysOverlay", "hideUi", "viewmodel", "thirdPerson", "freecam", "flashlight", "mute", "nextTrack"]],
   ["Carrot", ["attack", "attack2", "inspect"]],
   ["Practice", ["practice", "noclip", "cpSave", "cpTeleport", "cpPrev", "cpNext"]],
   ["Tools", ["hudEditor", "measurePoint", "clearMeasure", "lastLj"]],
@@ -560,10 +557,11 @@ const BIND_KEYWORDS: Partial<Record<Action, string>> = {
   restartMain: "main track m",
   setStart: "set start point position setstart ss spawn restart angle",
   clearStart: "clear delete start point position clearstart deletestart delstart spawn restart",
-  cycleStyle: "style styles autohop scroll legit w-only sideways hsw f3",
+  cycleStyle: "style styles autohop scroll legit w-only sideways hsw backwards f3",
   hudEditor: "hud editor layout f2",
   chat: "chat say say_team messagemode talk type message commands y u",
   thirdPerson: "third person thirdperson camera t",
+  freecam: "freecam free cam freelook free look noclip camera fly scout spectate",
   attack: "slash attack mouse1 carrot knife",
   attack2: "stab attack2 mouse2 carrot knife",
   inspect: "inspect carrot knife f",
@@ -620,7 +618,7 @@ function bindReset(action: Action, label: string, refresh: () => void): HTMLElem
 function keysSection(ctx: Ctx): SettingsContent {
   const bindRow = (a: Action) => {
     const label = ACTIONS.find((x) => x.id === a)!.label;
-    const r = row(label, h("div.bind-line", null, h("div.bind-pair", null, bindSlot(a, 0, ctx.refresh), bindSlot(a, 1, ctx.refresh), bindSlot(a, 2, ctx.refresh)), bindReset(a, label, ctx.refresh)), {
+    const r = row(label, h("div.bind-line", null, h("div.bind-pair", null, ...BIND_SLOTS.map((i) => bindSlot(a, i, ctx.refresh))), bindReset(a, label, ctx.refresh)), {
       // (How to rebind is said once, in the section's header line, not on every row.)
       desc: () => (bindIsDefault(P().binds, a) ? "" : `Default: ${defaultKeys(a)}.`),
       keywords: `bind key rebind keybind ${BIND_KEYWORDS[a] ?? ""}`,
@@ -644,8 +642,10 @@ function keysSection(ctx: Ctx): SettingsContent {
             desc: "Jumping with W held lets go of forward until you land or press W again. Not in Legit Scroll, W-Only, Sideways or Half-Sideways.",
             keywords: "release w jump forward let go auto unpress -forward prestrafe hold w air strafe script wjump",
           }),
-          range("Turn speed", () => P().yawSpeed, (v) => up((p) => (p.yawSpeed = Math.round(v))), {
-            min: YAW_SPEED_RANGE[0], max: YAW_SPEED_RANGE[1], step: 5, unit: "°/s",
+          // The slider moves in 5s; the box takes exact values as CS:S cl_yawspeed and the desktop client do (118.889).
+          // Three decimals: the replay stores it as a float32 (turn-binds.ts turnSpeedOf).
+          range("Turn speed", () => P().yawSpeed, (v) => up((p) => (p.yawSpeed = Math.round(v * 1000) / 1000)), {
+            min: YAW_SPEED_RANGE[0], max: YAW_SPEED_RANGE[1], step: 5, inputStep: "any", unit: "°/s",
             desc: "How fast Turn left and Turn right turn the view. CS:S cl_yawspeed (default 210). A change applies from your next restart.",
             keywords: "cl_yawspeed turn speed yaw rate +left +right keyboard arrow",
           }),
@@ -722,6 +722,7 @@ function ghostSection(): SettingsContent {
           toggle("Ghost tags", () => P().ghost.tag, g("tag"), { hint: "Name, time and live +/-", keywords: "name tag label delta ghost" }),
           toggle("Player glow", () => P().showPlayerGlow, (v) => up((p) => (p.showPlayerGlow = v)), { desc: "Show supporters’ coloured outline and aura on players and replays.", keywords: "supporter glow outline aura players" }),
           toggle("First-person glow", () => P().firstPersonGlow, (v) => up((p) => (p.firstPersonGlow = v)), { desc: "Your own supporter glow on your hands and knife.", keywords: "supporter glow first person viewmodel hands knife" }),
+          toggle("Show other players", () => P().showPlayers, (v) => up((p) => (p.showPlayers = v)), { desc: "On a server. Off hides everyone else for you. !hide does the same.", keywords: "hide players others multiplayer room server practice invisible" }),
           toggle("Player tags", () => P().tags.players, (v) => up((p) => (p.tags.players = v)), { desc: "Name and run time above other players on a server.", keywords: "name names tag tags nametag label players multiplayer room server mp_playerid" }),
           toggle("Names through walls", () => P().tags.throughWalls, (v) => up((p) => (p.tags.throughWalls = v)), {
             hint: "Off: like CS:S",
@@ -1014,7 +1015,7 @@ const BUILTIN: Section[] = [
   { id: "crosshair", label: "Crosshair", blurb: "", order: 20, render: crosshairSection, reset: resetKeys("crosshair") },
   { id: "hud", label: "HUD", blurb: "", order: 30, render: hudSection, reset: resetKeys("hud", "showZones", "triggers") },
   { id: "keys", label: "Keys", blurb: "Click a slot, then press a key. Backspace clears.", order: 40, render: keysSection, reset: resetKeys("binds", "holdRestart", "autoRestart", "practice", "nullBinds", "wRelease", "yawSpeed", "angleSpeedKey") },
-  { id: "ghost", label: "Ghosts & players", blurb: "", order: 50, render: ghostSection, reset: resetKeys("showGhost", "ghost", "tags", "showPlayerGlow", "firstPersonGlow") },
+  { id: "ghost", label: "Ghosts & players", blurb: "", order: 50, render: ghostSection, reset: resetKeys("showGhost", "ghost", "tags", "showPlayerGlow", "showPlayers", "firstPersonGlow") },
   { id: "graphics", label: "Graphics", blurb: "", order: 60, render: graphicsSection, reset: () => void chooseGraphicsPreset("source").then(() => { resetKeys("graphics")(); up((p) => (p.models = clone(DEFAULT_PREFS.models))); }) },
   { id: "audio", label: "Audio", blurb: "", order: 70, render: audioSection, reset: resetKeys("volume") },
 ];

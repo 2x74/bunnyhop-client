@@ -39,6 +39,8 @@ export type Action =
   // Opens the chat (rooms: net/mp.ts; solo: solo-chat.ts). Y and U by default, like CS:S say / say_team.
   | "chat"
   | "thirdPerson"
+  // Freecam (freecam.ts): the camera flies, the body gets no input, the run keeps counting. Unbound by default.
+  | "freecam"
   | "attack"
   | "attack2"
   | "inspect"
@@ -247,6 +249,11 @@ export interface Prefs {
    */
   colorBlind: ColorBlindMode;
   showPlayerGlow: boolean;
+  /**
+   * Other players on a server are drawn (0.0.36 setting; !hide toggles it too). Off hides their models, tags, guns and
+   * shots, for you only (net/players.ts).
+   */
+  showPlayers: boolean;
   /** A supporter's own glow on their first-person hands and knife (0.0.21; the glow panel's "In first person"). */
   firstPersonGlow: boolean;
   /** Trigger and clip overlays (!showtriggers, !showclips, the !triggers menu; triggers/). Drawn only, never part of a run. */
@@ -404,6 +411,7 @@ export const ACTIONS: { id: Action; label: string }[] = [
   { id: "hudEditor", label: "Edit HUD layout" },
   { id: "chat", label: "Chat" },
   { id: "thirdPerson", label: "Third person (practice)" },
+  { id: "freecam", label: "Freecam" },
   { id: "attack", label: "Slash (carrot)" },
   { id: "attack2", label: "Stab (carrot)" },
   { id: "inspect", label: "Inspect carrot" },
@@ -534,6 +542,7 @@ export const DEFAULT_PREFS: Prefs = {
   colorBlind: "off",
   triggers: DEFAULT_TRIGGER_PREFS,
   showPlayerGlow: true,
+  showPlayers: true,
   firstPersonGlow: true,
   models: { player: "bunny", ghost: "same", team: "ct", ct: "ct_urban", t: "t_leet" },
   graphics: { preset: "source", waterReflections: true, bloom: true, mapProfiles: false, ambienceShowcase: false, lightingProfile: "map", skyMode: "map", skyPackId: null, skyRotation: 0, skyExposure: 0, lightingSource: "map", directContribution: 1, ambientContribution: 1, clouds: false, cloudQuality: "low", cloudCoverage: .45, cloudDensity: 1, contactShading: false, atmosphere: false, sunShafts: false, materialResponse: true, volumetric: false, spatialAA: true, localLights: false, localQuality: "medium", localBudget: 1, localStrength: .2, dynamicGI: false, tracedGI: false, giQuality: "low", giStrength: .25, giRange: 256, dynamicShadows: false, shadowQuality: "medium", shadowDistance: 1024, shadowStrength: .18, resolutionScale: 1, antialias: true, aspect: "native", aspectFit: "stretch", pixelated: false, anisotropy: 8, brightness: 1, gamma: 1, vibrance: 1, fullbright: false, menuBackground: "live", fullscreen: true, potato: false, flashlight: false, fpsLimit: 1000, uncapped: false, lowLatency: false, menuFps: 0 },
@@ -698,6 +707,21 @@ export function bindIsDefault(binds: Record<Action, string[]>, action: Action): 
  * Settings → Keys, a row's reset: `action` gets its default keys back. Like binding a key by hand, a default key leaves
  * any other action that had it. Returns those actions.
  */
+/**
+ * Settings -> Keys: put `code` in `action`'s slot `slot` (null clears that slot). The key leaves every other action, and
+ * this action's other slots keep their places: a copy of the key elsewhere in it is blanked, not spliced out, so
+ * writing slot 2 can't shift slot 3 into it.
+ */
+export function assignBindSlot(binds: Record<Action, string[]>, action: Action, slot: number, code: string | null): void {
+  if (code) for (const a of Object.keys(binds) as Action[]) if (a !== action) binds[a] = binds[a].filter((x) => x !== code);
+  const list: (string | undefined)[] = [...binds[action]];
+  if (code) {
+    for (let i = 0; i < list.length; i++) if (i !== slot && list[i] === code) list[i] = undefined;
+    list[slot] = code;
+  } else list.splice(slot, 1);
+  binds[action] = list.filter((x): x is string => !!x);
+}
+
 export function resetBind(binds: Record<Action, string[]>, action: Action): Action[] {
   const def = DEFAULT_BINDS[action] ?? [];
   const took: Action[] = [];

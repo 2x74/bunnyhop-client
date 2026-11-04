@@ -56,7 +56,8 @@ body.menu-open #hud .hud-el[data-el="jhud"] { visibility: hidden; }
 .hud-timer.practice { color: var(--practice); }
 /* "Practice" under the crosshair (hud.ts setPractice): a quiet word in the timer's yellow, no box. */
 .hud-practice { font-size: 0.9em; font-weight: 700; color: var(--practice); }
-.hud-practice.segmented { color: inherit; opacity: 0.8; }
+/* A line for a run that counts (Segmented, freecam): quiet, not yellow. (setPractice puts "segmented" on the element box.) */
+#hud .hud-el[data-el="practice"].segmented .hud-practice { color: inherit; opacity: 0.8; }
 /* A run someone likely thinks counts (a start point outside the zone): bigger, with the way out under it, and it stays
    even if the Practice element is turned off. */
 .hud-practice-warn { display: none; }

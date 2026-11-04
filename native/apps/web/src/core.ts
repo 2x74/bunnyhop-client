@@ -256,6 +256,9 @@ export const PROP_TRANSFORM_KEY = 1 << 20;
  *   back on that tick unless it jumps, so no friction tick (EVENT_EDGEBUG). Autohop with jump held on the landing tick plays
  *   as v21, and a jump on the next tick (held or a new scroll press) is exactly v21's.
  * - v23: v22 + per-map changes only (map_fixes.rs). Every map not listed there plays as on v22.
+ * - v24: v23 + Source's UTIL_StringToVector for the player's AddOutput basevelocity / origin (atof per token, missing
+ *   tokens 0; before, anything but 3 clean numbers was ignored), PARENTED_DOORS_V24 (bhop_playboy_csgo) and
+ *   CS_DELETED_PROPS_V24 (bhop_hell and 6 more maps).
  */
 export const PHYSICS_V1 = 1;
 /** Weapon commands and the USP silencer (research/WEAPONS.md). */
@@ -281,7 +284,7 @@ export const PHYSICS_V16 = 16;
 /** RNGFix parity: uphill / downhill inclines, edge bugs, trigger jumping and telehops as on RNGFix servers. */
 export const PHYSICS_V17 = 17;
 /** The physics version new runs are played and recorded with. */
-export const PHYSICS_VERSION = 23;
+export const PHYSICS_VERSION = 24;
 /** Climbable surface properties used by bhop_synthetic_fix. */
 export const PHYSICS_V18 = 18;
 /** Scoped entity makers and known velocity-script equivalents. */
@@ -294,6 +297,8 @@ export const PHYSICS_V21 = 21;
 export const PHYSICS_V22 = 22;
 /** Per-map changes only (map_fixes.rs), shipped with timer rules 3. Replays retain their recorded physics and rules. */
 export const PHYSICS_V23 = 23;
+/** Infinite clip on every map (no reloads); Source's keyvalue vector parse for the player's basevelocity / origin (bhop_weed_funhouse's boosters launch); bhop_playboy_csgo's spiral steps turn with their column; props CS:S deletes at spawn are gone (bhop_hell's barrels). Shipped with timer rules 4. */
+export const PHYSICS_V24 = 24;
 /** Versions this code knows (the wasm build must support them too, see Core.setSettings). */
 export const isPhysicsVersion = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= PHYSICS_V1 && (v as number) <= PHYSICS_VERSION;
 
@@ -308,7 +313,10 @@ export interface Settings {
   autohop: boolean;
   /** CS:S jump fatigue and grounded slowdown; absent in legacy recordings. */
   stamina?: boolean;
-  /** Infinite style: every fresh jump press in the air rises again, keeping the horizontal speed. */
+  /**
+   * Infinite style: every fresh jump press in the air rises again, keeping the horizontal speed (crates/core game.rs
+   * air_jump). Not in the replay format: decoded headers take it from the style (replay.ts replaySettings).
+   */
   airJump?: boolean;
   /** Physics version (PHYSICS_V1 .. PHYSICS_VERSION). */
   physics: number;
@@ -376,6 +384,7 @@ interface Exports {
   mesh_vertex_floats(): number;
   set_settings(...args: number[]): void;
   set_stamina?: (enabled: number) => void;
+  /** Infinite's midair jump (crates/core wasm.rs); absent before v0.0.36. */
   set_air_jump?: (enabled: number) => void;
   /** Physics version (crates/core/src/wasm.rs): 1 = accepted, 0 = unknown to this build. Absent: a v1-only build. */
   set_physics_version?: (version: number) => number;
@@ -727,8 +736,11 @@ export class Core {
     this.x.set_settings(s.tickInterval, s.airAccelerate, s.accelerate, s.friction, s.stopSpeed, s.gravity, s.maxSpeed, s.autohop ? 1 : 0);
     if (this.x.set_stamina) this.x.set_stamina(s.stamina ? 1 : 0);
     else if (s.stamina) throw new Error("wasm build lacks CS:S stamina; rebuild the movement core");
-    if (this.x.set_air_jump) this.x.set_air_jump(s.airJump ? 1 : 0);
-    else if (s.airJump) throw new Error("wasm build lacks the Infinite midair jump; rebuild the movement core");
+    // set_settings (the legacy ABI above) turns the air jump off, so only Infinite makes the extra call.
+    if (s.airJump) {
+      if (!this.x.set_air_jump) throw new Error("wasm build lacks the Infinite midair jump; rebuild the movement core");
+      this.x.set_air_jump(1);
+    }
     const physics = s.physics ?? PHYSICS_V1;
     if (this.x.set_physics_version) {
       if (this.x.set_physics_version(physics) !== 1) throw new Error(`this wasm build can't simulate physics v${physics}`);

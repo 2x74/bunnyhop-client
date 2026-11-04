@@ -21,17 +21,17 @@ import * as THREE from "three";
 import { EVENT_JUMPED, EVENT_TELEPORTED, traceRay, type Core, type PlayerState } from "../core";
 import type { Input, UserCmd } from "../input";
 import type { RunSession } from "../session";
-import { bindLabel, type Action } from "../ui/settings";
+import { bindLabel, prefs, type Action } from "../ui/settings";
 import { formatTime } from "../timer";
 import { IN_WEAPON_COMMAND_MASK } from "../weapon-rules";
 import { ATTACK_STAB } from "../viewmodel/events";
 import { styleLabel } from "../styles";
 import { tierLabel } from "../tiers";
 import { trackName } from "../zones";
-import { SpectatorCamera, type SpectatorMode, type SpectatorTarget } from "../viewer/cameras";
+import { FREE_SPEED, freeSpeedStep, SpectatorCamera, type SpectatorMode, type SpectatorTarget } from "../viewer/cameras";
 import { Banner, ChatBox, localLine, NumberMenu, Scoreboard, SpecBar, type ScoreRow } from "./hud";
 import { RemotePlayers, remoteTime, slotColor } from "./players";
-import { registerRoomActions, roomUrl, setRoomPresence } from "./presence";
+import { registerRoomActions, roomLineShown, roomUrl, setRoomPresence } from "./presence";
 import { copyLobbyInvite, lobbyInviteUrl } from "./lobby";
 import { allowLeave, resumePlay } from "../play-lock";
 import { spectateSlot } from "../social/spectate";
@@ -95,6 +95,8 @@ export interface MultiplayerInit {
 }
 
 const HIDE_KEY = "bunnyhop:mp-hide";
+/** Least time between two { t: "practice" } messages (the room's text budget is 2 a second). */
+const PRACTICE_SEND_MS = 600;
 const HOST_COMMANDS = "!map <map>, !mapvote, !extend, !kick <player>";
 
 export class Multiplayer {
@@ -142,6 +144,11 @@ export class Multiplayer {
   private spectating: number | null = null;
   private spec: SpectatorCamera | null = null;
   private specMode: SpectatorMode = "eye";
+  /** The last in-eye / chase spectator view: free look starts from it. */
+  private lastSpecView: { p: THREE.Vector3; q: THREE.Quaternion } | null = null;
+  /** Free look (spectator mode "free"): its base speed (the wheel steps it), and start it from the current view next frame. */
+  private freeSpeed = FREE_SPEED;
+  private freeStart = false;
   /** The player to watch once the welcome lists them (MultiplayerInit.spectate); first welcome only. */
   private specOnJoin: string | null;
   private uiAt = 0;
@@ -149,6 +156,9 @@ export class Multiplayer {
   private status: RoomStatus = "connecting";
   /** A knife pool swap waiting to be sent (sendHeldKnife after a pause, so restart spam sends one). */
   private knifeTimer = 0;
+  /** What the room was last told about practice ({ t: "practice" }; a new connection starts as not practising). */
+  private practiceSent = false;
+  private practiceAt = -Infinity;
 
   /**
    * The knife and finish you hold (the knife pool's pick) when the room shows another one for you: the room checks the
@@ -197,7 +207,10 @@ export class Multiplayer {
       changing: () => !!this.change || this.navigating,
     });
     this.players = new RemotePlayers(o.scene, () => this.you, (a, b) => traceRay(o.core, a, b, 0), o.impacts ?? null, o.renderer ?? null);
-    this.players.hidden = localStorage.getItem(HIDE_KEY) === "1";
+    // Show other players (Settings → Ghosts & players, !hide): a pref since 0.0.36; the old !hide key carries over once.
+    if (localStorage.getItem(HIDE_KEY) === "1") prefs.update((p) => (p.showPlayers = false));
+    localStorage.removeItem(HIDE_KEY);
+    prefs.watch((p) => (this.players.hidden = !p.showPlayers));
     this.chatCtx = { ...this.chatCtx, game: o.game ?? null };
     this.chat.onSend = (t) => this.onChat(t);
     this.chat.suggest = (t) => suggestChat(t, "room");
@@ -291,10 +304,24 @@ export class Multiplayer {
       this.conn.pushSample(smp);
     }
     if (this.netTick % SEND_TICKS === 0) {
+      this.syncPractice();
       const t = this.o.session.timer;
       const timer = t.status === "running" ? TIMER_RUNNING : t.status === "finished" ? TIMER_FINISHED : t.inStart ? TIMER_START : TIMER_IDLE;
       this.conn.flushSamples({ style: styleIndex(this.o.session.runStyle), track: t.track, timer, timerTicks: t.ticks() }, this.weapon, this.silenced);
     }
+  }
+
+  /**
+   * Tells the room when this attempt turns into practice or back (the others' "practice" tag, protocol.ts `practice`).
+   * At most every PRACTICE_SEND_MS, so restart spam on a practice spawn sends the latest state, not every flip.
+   */
+  private syncPractice(): void {
+    const on = this.o.session.practicing;
+    const now = performance.now();
+    if (on === this.practiceSent || this.status !== "open" || this.you < 0 || now - this.practiceAt < PRACTICE_SEND_MS) return;
+    this.practiceSent = on;
+    this.practiceAt = now;
+    this.conn.send({ t: "practice", on });
   }
 
   /** `poseBehind`: players behind the camera are posed too (RemotePlayers.frame). */
@@ -303,11 +330,25 @@ export class Multiplayer {
     let moved = false;
     if (this.spectating !== null) {
       const st = this.players.stateOf(this.spectating);
-      if (st) {
-        this.spec ??= new SpectatorCamera({ trace: (a, b, r) => traceRay(this.o.core, a, b, r), chase: { distance: 110, followRate: 10 } });
+      this.spec ??= new SpectatorCamera({ trace: (a, b, r) => traceRay(this.o.core, a, b, r), chase: { distance: 110, followRate: 10 } });
+      if (this.specMode === "free") {
+        // Free look: your movement keys and mouse fly the camera (the same controls as freecam), wherever the target is.
+        // It starts where the in-eye / chase view last was: by now this frame has put the camera on your own body.
+        if (this.freeStart) {
+          if (this.lastSpecView) camera.position.copy(this.lastSpecView.p), camera.quaternion.copy(this.lastSpecView.q);
+          this.spec.startFree(camera);
+        }
+        this.freeStart = false;
+        this.spec.free.move(this.o.input.freeIntent(), dt, this.freeSpeed);
+        this.spec.free.place(camera);
+        moved = true;
+      } else if (st) {
         if (st.snapped) this.spec.snap();
         const target: SpectatorTarget = { pos: st.pos, vel: st.vel, viewZ: st.crouched ? 46 : 64, yaw: st.yaw, pitch: st.pitch, crouched: st.crouched, grounded: st.grounded };
         this.spec.update(camera, target, dt, this.specMode);
+        this.lastSpecView ??= { p: new THREE.Vector3(), q: new THREE.Quaternion() };
+        this.lastSpecView.p.copy(camera.position);
+        this.lastSpecView.q.copy(camera.quaternion);
         moved = true;
       }
       this.players.inEye = this.specMode === "eye" ? this.spectating : null;
@@ -327,6 +368,30 @@ export class Multiplayer {
       this.refreshUi(now);
     }
     return moved;
+  }
+
+  /** !freecam or the freecam bind while spectating: free look, or back in-eye from it. */
+  freeLook(): void {
+    if (this.spectating === null) return;
+    this.setSpecMode(this.specMode === "free" ? "eye" : "free");
+  }
+
+  /** In-eye, chase or free. Free look takes the mouse and wheel (Input.lookSink); leaving it gives them back. */
+  private setSpecMode(mode: SpectatorMode): void {
+    const input = this.o.input;
+    if (mode === "free" && this.specMode !== "free") {
+      input.releaseAllUntilKeyup();
+      this.freeStart = true;
+      input.lookSink = (dYaw, dPitch) => this.spec?.free.lookDeg(dYaw, dPitch);
+      input.wheelSink = (steps) => (this.freeSpeed = freeSpeedStep(this.freeSpeed, steps));
+    } else if (mode !== "free" && this.specMode === "free") {
+      input.lookSink = null;
+      input.wheelSink = null;
+      input.releaseAllUntilKeyup();
+    }
+    this.specMode = mode;
+    this.spec?.snap();
+    this.refreshSpecBar();
   }
 
   onAction(a: Action): boolean {
@@ -418,6 +483,9 @@ export class Multiplayer {
         this.pool = m.pool;
         this.players.clear();
         for (const p of m.players) this.players.upsert(p);
+        // A new connection: the room knows nothing of practice yet (the next state batch says so if it is).
+        this.practiceSent = false;
+        this.practiceAt = -Infinity;
         const own = m.players.find(p => p.slot === this.you);
         if (own?.id === lastKnownMe()?.id) setPlayerGlow(own?.playerGlow ?? null);
         for (const [slot, meta] of Object.entries(m.metas)) this.players.setMeta(Number(slot), meta, now);
@@ -427,6 +495,7 @@ export class Multiplayer {
         this.lastSample = null;
         if (this.spectating !== null) {
           // A reconnect starts you as a player again (slots may have changed): drop the old spectate target.
+          this.setSpecMode("eye");
           this.spectating = null;
           document.body.classList.remove("mp-spectating");
           this.specBar.set(null);
@@ -620,9 +689,16 @@ export class Multiplayer {
           : a.kind === "top10"
             ? `${a.name} is now top 10 on ${where}: ${time}${style}${rank}`
             : `${a.name} beat their PB on ${where}: ${time}${style}${rank}`;
-    if (a.runId && (a.kind === "wr" || (a.slot === this.you && a.pb)))
-      announce(a.kind === "wr" ? "wr" : "pb", a.runId, a.slot !== this.you);
+    // The chat line first: nothing the announcer voice does (audio, settings) may cost it.
     this.chat.add({ kind: "announce", tone: a.kind, text });
+    if (a.runId) roomLineShown(a.runId); // (the submission poller's voice waits for it: presence.ts)
+    if (a.runId && (a.kind === "wr" || (a.slot === this.you && a.pb))) {
+      try {
+        announce(a.kind === "wr" ? "wr" : "pb", a.runId, a.slot !== this.you);
+      } catch (e) {
+        console.warn("announcer failed", e);
+      }
+    }
     // Records get a compact band across the top with a soft shine (someone else's record: quieter than your own
     // achievements); PBs / top 10s stay chat lines with a soft pop.
     if (a.kind === "wr" || a.kind === "sr")
@@ -648,8 +724,7 @@ export class Multiplayer {
       stopSpectating: () => this.stopSpectating(),
       spectate: (name) => this.spectateByName(name),
       hidePlayers: (toggle) => {
-        this.players.hidden = toggle ? !this.players.hidden : false;
-        localStorage.setItem(HIDE_KEY, this.players.hidden ? "1" : "0");
+        prefs.update((p) => (p.showPlayers = toggle ? !p.showPlayers : true));
         this.chat.add({ kind: "local", text: this.players.hidden ? "Other players hidden (!hide to show)." : "Other players visible." });
       },
       toggleScores: () => this.board.show(!this.board.open),
@@ -719,9 +794,11 @@ export class Multiplayer {
       return;
     }
     if (this.spectating !== null && (e.code === "Space" || e.code === "KeyF")) {
+      // In free look a movement key flies (Space rises); F, unless it's a movement key too, still changes the camera.
+      if (this.specMode === "free" && this.o.input.isMovementCode(e.code)) return;
+      // CS:S observer order: In-eye → Chase → Free (roaming) → In-eye.
       e.preventDefault();
-      this.specMode = this.specMode === "eye" ? "chase" : "eye";
-      this.spec?.snap();
+      this.setSpecMode(this.specMode === "eye" ? "chase" : this.specMode === "chase" ? "free" : "eye");
     }
   }
 
@@ -832,7 +909,8 @@ export class Multiplayer {
     const was = this.spectating;
     this.spectating = slot;
     document.body.classList.add("mp-spectating");
-    this.specMode = "eye";
+    // A new watch starts in-eye; switching players keeps the camera mode (CS:S does), free look included.
+    if (was === null) this.setSpecMode("eye");
     this.spec?.snap();
     this.conn.send({ t: "spec", target: slot });
     if (was === null) {
@@ -840,7 +918,7 @@ export class Multiplayer {
       this.o.restart(0);
       this.o.input.releaseAll();
     }
-    this.chat.add({ kind: "local", text: `Spectating ${this.name(slot)}. Mouse 1 and 2 switch players, Space changes the camera, R respawns you.` });
+    this.chat.add({ kind: "local", text: `Spectating ${this.name(slot)}. Mouse 1 and 2 switch players, Space changes the camera, ${this.stopKey()} stops watching.` });
   }
 
   private cycleSpectate(dir: number, forced = false): void {
@@ -856,6 +934,7 @@ export class Multiplayer {
 
   private stopSpectating(): void {
     if (this.spectating === null) return;
+    this.setSpecMode("eye");
     this.spectating = null;
     document.body.classList.remove("mp-spectating");
     this.players.inEye = null;
@@ -865,6 +944,23 @@ export class Multiplayer {
     this.specBar.set(null);
     this.o.session.hud.setSpectated(null);
     this.o.restart(0);
+    this.chat.add({ kind: "local", text: "Back in the run. N or !spec to watch again." });
+  }
+
+  /** How to stop watching: the restart key (R), else !r. */
+  private stopKey(): string {
+    return bindLabel("restart") ?? "!r";
+  }
+
+  /** The spectator bar: whom you watch, and one line on the camera and the way out. */
+  private refreshSpecBar(): void {
+    if (this.spectating === null) return this.specBar.set(null);
+    const p = this.players.players.get(this.spectating);
+    const st = p?.has ? p.state : null;
+    const out = `${this.stopKey()} stops watching.`;
+    const back = this.o.input.isMovementCode("KeyF") ? "!freecam" : "F";
+    const hint = this.specMode === "free" ? `Free look. ${back} goes back in-eye, ${out}` : `Space changes the camera, ${out}`;
+    this.specBar.set(p && st ? { name: p.info.name, color: slotColor(p.slot), hint } : { name: this.name(this.spectating), color: "#fff", waiting: true, hint });
   }
 
   // -------------------------------------------------------------------------------------------
@@ -895,12 +991,7 @@ export class Multiplayer {
     if (this.vote && this.menu.id.current === "vote") this.showVote();
     this.race.refresh();
     // Spectator bar.
-    if (this.spectating !== null) {
-      const p = this.players.players.get(this.spectating);
-      const st = p?.has ? p.state : null;
-      const rt = p ? remoteTime(p, now) : null;
-      this.specBar.set(p && st ? { name: p.info.name, color: slotColor(p.slot) } : { name: this.name(this.spectating), color: "#fff", waiting: true });
-    }
+    this.refreshSpecBar();
     // Spectator list (HUD element "spectators"): who watches you, or whom you watch.
     this.o.session.hud.setSpectators(this.status === "open" ? spectatorsOf(this.roster(), this.you, this.spectating) : []);
     if (this.board.open) this.renderBoard(now);
@@ -918,6 +1009,9 @@ export class Multiplayer {
         const target = you ? this.spectating : p.info.spec;
         status = `SPEC → ${target !== null ? this.name(target) : "?"}`;
         kind = "spec";
+      } else if (you ? sess.practicing : p.info.practice) {
+        // A practice attempt (practice mode, a checkpoint teleport, noclip): never a run, so no time.
+        (status = "practice"), (kind = "practice");
       } else if (you) {
         const t = sess.timer;
         if (t.status === "running") (status = formatTime(t.time())), (kind = "running");

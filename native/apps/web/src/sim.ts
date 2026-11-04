@@ -1,9 +1,9 @@
 // Shared deterministic run step + replay re-simulation (browser playback, ghosts and the headless verifier).
 
 import { applyRestartPoint, EVENT_JUMPED, EVENT_TELEPORTED, type Core, type PlayerState, type Settings } from "./core";
-import { replayPhysics, replayStyle, replayTimerRules, type Checkpoint, type Replay } from "./replay";
+import { replayPhysics, replaySettings, replayStyle, replayTimerRules, type Checkpoint, type Replay } from "./replay";
 import { StyleFilter, strafeKeys, styleDef, styleStartReentryCap, type StyleDef } from "./styles";
-import { RunTimer, TIMER_RULES, TIMER_RULES_V1, TIMER_RULES_V2, type TickCmd, type TimerUpdate } from "./timer";
+import { blocksPrehops, RunTimer, TIMER_RULES, TIMER_RULES_V1, TIMER_RULES_V2, type TickCmd, type TimerUpdate } from "./timer";
 import type { Zone } from "./zones";
 import { pathSource, startObserving } from "./timing-trace";
 
@@ -26,10 +26,11 @@ export function quantize(forward: number, side: number, yaw: number, pitch: numb
 
 /**
  * Timer created with the canonical (f32) tick interval so browser and verifier compute identical times. `rules`: the
- * start-zone rules (timer.ts TIMER_RULES_*): the current ones for live play, the replay's own on re-simulation.
+ * start-zone rules (timer.ts TIMER_RULES_*): the current ones for live play, the replay's own on re-simulation. `map`: the
+ * map's name (rules 4 block start-zone prehops on some maps, timer.ts START_ZONE_NO_PREHOP_V4).
  */
-export function makeTimer(zones: readonly Zone[], settings: Settings, prespeedCap: number | null, style: StyleDef | null = null, rules = TIMER_RULES): RunTimer {
-  return new RunTimer(zones, Math.fround(settings.tickInterval), { prespeedCap, blockPrehops: style?.id === "scroll", strafeKeys: strafeKeys(style), rules, startReentryCap: style ? styleStartReentryCap(style.id) : null });
+export function makeTimer(zones: readonly Zone[], settings: Settings, prespeedCap: number | null, style: StyleDef | null = null, rules = TIMER_RULES, map = ""): RunTimer {
+  return new RunTimer(zones, Math.fround(settings.tickInterval), { prespeedCap, blockPrehops: blocksPrehops(style?.id, map, rules), strafeKeys: strafeKeys(style), rules, startReentryCap: style ? styleStartReentryCap(style.id) : null });
 }
 
 /** Apply start-zone prehop blocking before movement, shared by live play, recording and replay verification. */
@@ -194,14 +195,14 @@ export class SimRun {
     private readonly opts: SimOptions = {},
   ) {
     const h = replay.header;
-    core.setSettings(h.settings);
+    core.setSettings(replaySettings(h));
     core.reset();
     // Start-zone restart point recorded at tick 0 (see core.setPosition / replay header v3).
     if (h.spawn) applyRestartPoint(core, h.spawn);
-    this.timer = makeTimer(zones, h.settings, h.prespeedCap, styleDef(replayStyle(h)), replayTimerRules(h));
+    this.timer = makeTimer(zones, h.settings, h.prespeedCap, styleDef(replayStyle(h)), replayTimerRules(h), h.map);
     this.timer.reset();
     if (replayTimerRules(h) === TIMER_RULES_V1) {
-      this.retimer = makeTimer(zones, h.settings, h.prespeedCap, styleDef(replayStyle(h)), TIMER_RULES_V2);
+      this.retimer = makeTimer(zones, h.settings, h.prespeedCap, styleDef(replayStyle(h)), TIMER_RULES_V2, h.map);
       this.retimer.reset();
     }
     const n = (this.n = Math.min(opts.untilTick ?? h.totalTicks, h.totalTicks));

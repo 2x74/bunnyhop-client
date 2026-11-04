@@ -6,7 +6,8 @@
 //
 // One card at a time, in the top layer (a manual popover, so it shows above the board's modal dialog), placed under
 // the row or above it, never off-screen. It never takes the pointer. Cards are fetched on first show and kept per run
-// for the page's life; a run without one (old, not public, offline) shows nothing.
+// for the page's life; a run without one (old, not public, offline) shows nothing. Rows may carry data-run-points (the
+// board read's points for the record), which replaces the card's slower number.
 
 import { api, type RunStats } from "../api";
 import { fmtPoints } from "../ranking";
@@ -79,6 +80,8 @@ export function playedFor(seconds: number): string {
 const num = (n: number, digits = 0) => n.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 /** Up to two decimals, without trailing zeros (sensitivity 1.2, 0.85). */
 const plain = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+/** A sensitivity: up to four decimals (1.234), without trailing zeros. */
+const sens = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 4 });
 
 /** The card's rows, [label, value], only for what the run recorded. */
 export function statsRows(s: RunStats): { run: [string, string][]; setup: [string, string][]; play: [string, string][] } {
@@ -101,6 +104,7 @@ export function statsRows(s: RunStats): { run: [string, string][]; setup: [strin
   const m = s.mouse ?? {};
   if (m.sensitivity !== undefined) setup.push(["Sensitivity", `${plain(m.sensitivity)}${m.dpi !== undefined ? ` · ${num(m.dpi)} DPI` : ""}`]);
   else if (m.dpi !== undefined) setup.push(["DPI", num(m.dpi)]);
+  if (m.vertical !== undefined || m.invertY) setup.push(["Vertical sens", `${m.vertical !== undefined ? sens(m.vertical) : m.sensitivity !== undefined ? sens(m.sensitivity) : "Same"}${m.invertY ? ", inverted" : ""}`]);
   if (m.sensitivity !== undefined && m.dpi !== undefined) setup.push(["eDPI", plain(Math.round(m.sensitivity * m.dpi * 100) / 100)]);
   if (m.pollHz !== undefined) setup.push(["Polling rate", pollText(m.pollHz)]);
   if (m.raw !== undefined) setup.push(["Raw input", m.raw ? "On" : "Off"]);
@@ -113,6 +117,30 @@ export function statsRows(s: RunStats): { run: [string, string][]; setup: [strin
   if (p.session !== undefined) play.push(["This session", `Attempt ${num(p.session)}${p.sessionSeconds ? ` · ${playedFor(p.sessionSeconds)} in` : ""}`]);
   return { run, setup, play };
 }
+
+/**
+ * The row's points from its board read (data-run-points, apps/api boards.ts withPoints): "" when the board says the
+ * record scores nothing, undefined when the row doesn't say (the card's own number stands then).
+ */
+function livePoints(row: HTMLElement): number | null | undefined {
+  const v = row.dataset.runPoints;
+  if (v === undefined) return undefined;
+  const n = Number(v);
+  return v !== "" && Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * The card with the board's points in place of its own. The card's number (record_points) waits for the next re-score
+ * and the card is cached for an hour, so right after a run it had none and a dethroned WR kept the WR's (Throw, 11-02).
+ */
+export function withLivePoints(s: RunStats, pts: number | null | undefined): RunStats {
+  if (pts === undefined) return s;
+  const { points: _old, ...rest } = s;
+  return pts === null ? rest : { ...rest, points: pts };
+}
+
+/** data-run-points for a board row (see livePoints): "" when the board read has no points for it. */
+export const runPointsAttr = (points: number | undefined): string => (points !== undefined && points > 0 ? String(points) : "");
 
 const list = (rows: [string, string][]) => h("dl.rs-list", null, ...rows.flatMap(([k, v]) => [h("dt", null, k), h("dd", null, v)]));
 
@@ -177,6 +205,7 @@ function show(row: HTMLElement, x: number): void {
   const id = row.dataset.run;
   if (!id || !row.isConnected) return;
   const title = row.dataset.runTitle ?? "";
+  const pts = livePoints(row);
   const my = ++seq;
   current = { row, x, seq: my };
   const el = cardEl();
@@ -192,7 +221,7 @@ function show(row: HTMLElement, x: number): void {
   void load(id).then((s) => {
     settled = true;
     if (current?.seq !== my) return;
-    if (s) draw(cardBody(title, s));
+    if (s) draw(cardBody(title, withLivePoints(s, pts)));
     else hideRunStats();
   });
   // A card not cached yet: a skeleton until it arrives (a cached one draws in the next microtask, no flash).

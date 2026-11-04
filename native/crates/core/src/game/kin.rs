@@ -801,11 +801,12 @@ impl Game {
 
     // -------------------------------------------------------------- transforms / hierarchy
 
-    /// v21, `map_fixes::PARENTED_DOORS_V21`: this func_door / func_button's brush follows its move parent. Everywhere
+    /// v21, `map_fixes::PARENTED_DOORS_V21` (v24: `PARENTED_DOORS_V24`): this func_door / func_button's brush follows its move parent. Everywhere
     /// else, and at every older version, its brush keeps base origin + travel and never turns.
     pub(super) fn door_follows_parent(&self, i: usize) -> bool {
-        self.map_parented_doors
-            && (PHYSICS_V21..=PHYSICS_LATEST).contains(&self.settings.physics_version)
+        let version = self.settings.physics_version;
+        ((self.map_parented_doors && (PHYSICS_V21..=PHYSICS_LATEST).contains(&version))
+            || (self.map_parented_doors_v24 && (PHYSICS_V24..=PHYSICS_LATEST).contains(&version)))
             && self.ents[i].door_brush
             && self.ents[i].parent.is_some()
     }
