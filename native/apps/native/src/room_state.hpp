@@ -169,6 +169,11 @@ public:
 
     const HudScoreboard &display() const { return display_; }
 
+    std::string_view player_name(unsigned slot) const {
+        const auto found = peers.find(slot);
+        return found == peers.end() ? std::string_view() : std::string_view(found->second.actor.name);
+    }
+
     VoteDisplay vote_display;
     HudLabel<128> changing_map;
     double changing_at = 0;

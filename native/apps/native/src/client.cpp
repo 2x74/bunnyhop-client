@@ -1259,14 +1259,17 @@ int run(const native::Options &opt) {
                     return;
                 }
                 if (action == "spectatorMode") {
-                    if (room.spectator_target) third_person = !third_person;
+                    if (free_cameras.picker.open())
+                        free_cameras.picker.close();
+                    else if (!room.id.empty() && !free_cameras.picker.show(room.display(), room.spectator_target))
+                        chat.push("Nobody to spectate yet.", "", "local", epoch_ms() / 1000.);
                     return;
                 }
                 if (action == "freecam") {
                     const bool lesson = tutorial_runner.lesson && tutorial_runner.lesson->is_active();
                     const native::FreecamPlace place{core != nullptr, lesson || tutorial_practice(), viewer.active};
                     const bool inspecting = held_action("inspect");
-                    const auto refusal = free_cameras.toggle(place, free_look_input);
+                    const auto refusal = free_cameras.toggle(room.spectator_target.has_value(), place, free_look_input);
                     if (!refusal.empty()) toast(std::string(refusal));
                     // An inspect held on the way in lets go there, as the other keys do.
                     if (free_cameras.freecam.active() && inspecting && core) {
@@ -1277,13 +1280,18 @@ int run(const native::Options &opt) {
                 }
                 // The body takes no input while freecam flies, so nothing that acts through it.
                 if (free_cameras.freecam.active() && native::freecam_blocks_action(action)) return;
+                if (room.spectator_target
+                    && (action == "restart" || action == "restartMain" || action == "restartBonus")) {
+                    if (menu && menu_ready) menu->evaluate_js(native::spectate_script(std::nullopt));
+                    return;
+                }
                 if (action == "thirdPerson") {
                     if (viewer.active) {
                         viewer.camera.set_mode(viewer.camera.mode == "eye" ? "chase" : "eye");
                         return;
                     }
                     if (room.spectator_target) {
-                        third_person = !third_person;
+                        free_cameras.spectator.toggle_chase(free_look_input);
                         return;
                     }
                     if (!core) return;
@@ -1520,6 +1528,11 @@ int run(const native::Options &opt) {
                             code, down, repeat, room_modes, race_picker, menu_script, menu.get(), menu_ready
                     ))
                     return;
+                if (const auto pick = free_cameras.picker.key(code, down, repeat); pick.handled) {
+                    if ((pick.watch || pick.stop) && menu && menu_ready)
+                        menu->evaluate_js(native::spectate_script(pick.watch));
+                    return;
+                }
                 if (!practice.menu_open && !room.vote.is_null() && down && !repeat && code.size() == 6
                     && code.starts_with("Digit")) {
                     const int pick = code.back() - '0';
@@ -1543,6 +1556,11 @@ int run(const native::Options &opt) {
                         practice_action(actions[pick - 1]);
                         return;
                     }
+                }
+                if (room.spectator_target && down && !repeat
+                    && free_cameras.spectator.changes_camera(code, input_timeline.binds())) {
+                    free_cameras.spectator.cycle(free_look_input);
+                    return;
                 }
                 if (!wheel) input.null_presses.edge(code, input_timeline.binds().of(code), down);
                 input_timeline.key(held_codes, code, down, wheel, stamp, SDL_GetTicksNS());
@@ -2062,7 +2080,7 @@ int run(const native::Options &opt) {
                             && (event.button.button == SDL_BUTTON_LEFT || event.button.button == SDL_BUTTON_RIGHT))
                             room_control({{"action", event.button.button == SDL_BUTTON_LEFT ? "next" : "previous"}});
                         else if (!custom && room.spectator_target && down && event.button.button == SDL_BUTTON_MIDDLE)
-                            third_person = !third_person;
+                            free_cameras.spectator.cycle(free_look_input);
                         else {
                             const auto code = native::mouse_code(event.button.button);
                             handle_code(code, down, false, false, event.button.timestamp);
@@ -2079,7 +2097,9 @@ int run(const native::Options &opt) {
                         viewer.camera.zoom_by(std::pow(1.12, -event.wheel.y));
                         break;
                     }
-                    if (captured && !chat.active && event.wheel.y != 0 && free_cameras.wheel(event.wheel.y)) break;
+                    if (captured && !chat.active && event.wheel.y != 0
+                        && free_cameras.wheel(event.wheel.y, room.spectator_target.has_value()))
+                        break;
                     if (captured && !chat.active && event.wheel.y != 0)
                         handle_code(event.wheel.y > 0 ? "MWheelUp" : "MWheelDown", true, false, true);
                     break;
@@ -2287,7 +2307,9 @@ int run(const native::Options &opt) {
                             race_picker.open(room.display(), zones);
                         else if (action == "freecam")
                             act("freecam");
-                        else if (action == "lastLj")
+                        else if (action == "spectateMenu") {
+                            if (!free_cameras.picker.open()) act("spectatorMode");
+                        } else if (action == "lastLj")
                             hud.repeat_long_jump(chat, epoch_ms() / 1000.);
                         else if (action == "jumpStats") {
                             show_menu(true);
@@ -3043,8 +3065,9 @@ int run(const native::Options &opt) {
                 now, map_id, active_style, viewer.active, captured, menu && menu->visible(), tutorial_practice()
         );
         if (spectator != observed_spectator) {
+            free_cameras.watching(observed_spectator.has_value(), spectator.has_value(), free_look_input);
+            native::announce_watching(chat, room, observed_spectator, spectator, input_timeline.binds(), epoch_ms());
             if (spectator) {
-                free_cameras.freecam.end(free_look_input);
                 bh_record_end(core.get());
                 recorder.clear(true);
                 run_event(heartbeat.invalidate(native::RunHeartbeat::Reset::start));
@@ -3553,7 +3576,6 @@ int run(const native::Options &opt) {
                     renderer->set_cosmetics(target->outfit, target->loadout);
                     renderer->set_player_glow(target->playerGlow);
                     renderer->set_viewmodel_weapon(target->frame.weapon);
-                    shown_notice = "Spectating " + target->name + " - Esc for Room controls";
                     actors.erase(
                             std::remove_if(
                                     actors.begin(), actors.end(), [&](const auto &a) { return a.id == target->id; }
@@ -3563,7 +3585,6 @@ int run(const native::Options &opt) {
                 } else {
                     renderer->set_spectated_actor(std::nullopt);
                     renderer->set_viewmodel_visible(false);
-                    shown_notice = "Waiting for spectator target";
                 }
             }
             bool external_camera = false;
@@ -3588,7 +3609,7 @@ int run(const native::Options &opt) {
                         frame_seconds
                 );
                 external_camera = viewer.camera.third_person();
-            } else if (third_person) {
+            } else if (spectator ? free_cameras.spectator.chase() : third_person) {
                 third_camera.sample(
                         core.get(),
                         state.player,
@@ -3601,10 +3622,11 @@ int run(const native::Options &opt) {
                 );
                 external_camera = true;
             }
-            // Freecam flies on from wherever the view above put the camera.
-            if (!viewer.active && !spectator && !opt.camera) {
+            // Freecam or spectator free look flies on from wherever the view above put the camera.
+            if (!viewer.active && !opt.camera) {
                 const auto keys = native::free_look_keys(input_timeline.binds(), held_codes);
-                external_camera |= free_cameras.place(eye, camera_input, keys, input, frame_seconds);
+                external_camera |=
+                        free_cameras.place(spectator.has_value(), eye, camera_input, keys, input, frame_seconds);
             }
             // The replay camera does this itself for its in-eye view; flying in noclip there is nothing to stay under.
             if (!viewer.active && !external_camera && (spectator || !practice.noclip))
@@ -3762,7 +3784,15 @@ int run(const native::Options &opt) {
                     gauntlet_good = delta < 0;
                 }
             }
-            free_cameras.hud(hud.extras, input_timeline.binds());
+            const auto spectator_bar = free_cameras.hud(
+                    hud.extras,
+                    spectator.has_value(),
+                    spectated_actor.has_value(),
+                    spectated_actor ? std::string_view(spectated_actor->name)
+                    : spectator     ? room.player_name(*spectator)
+                                    : std::string_view(),
+                    input_timeline.binds()
+            );
             // The crosshair is sized in CSS pixels, like the website's: the display's scale, not the HUD's.
             hud.set_display_scale(SDL_GetWindowDisplayScale(window.get()));
             const auto area = viewer.hud_area(
@@ -3811,7 +3841,9 @@ int run(const native::Options &opt) {
                     hud_demo,
                     SDL_GetWindowDisplayScale(window.get()),
                     hud_editor_bind.empty() ? std::string() : native::hud_key_label(hud_editor_bind.front()),
-                    free_cameras.flying()
+                    free_cameras.picker,
+                    spectator_bar,
+                    free_cameras.flying(spectator.has_value())
             }
                     .draw();
         }

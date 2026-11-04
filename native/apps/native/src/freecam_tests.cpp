@@ -256,12 +256,12 @@ public:
     void motion(double x, double y) { timeline.motion(input, now_ - 1, now_ - 1, x, y); }
 
     void wheel(double notches) {
-        if (!cameras.wheel(notches)) input.pulse |= native::jump;
+        if (!cameras.wheel(notches, false)) input.pulse |= native::jump;
     }
 
     void toggle_freecam() {
         const native::FreeLookInput controls{timeline, input, held};
-        assert(cameras.toggle({true, false, false}, controls).empty());
+        assert(cameras.toggle(false, {true, false, false}, controls).empty());
     }
 
     // One rendered frame at 100 fps: its events, its tick, then the camera.
@@ -312,7 +312,7 @@ private:
         const auto keys = native::free_look_keys(timeline.binds(), held);
         const float before[3] = {camera_eye[0], camera_eye[1], camera_eye[2]};
         const bool was_flying = cameras.freecam.view().started();
-        if (!cameras.place(eye, view, keys, input, tick_seconds)) return;
+        if (!cameras.place(false, eye, view, keys, input, tick_seconds)) return;
         if (was_flying) camera_travel += std::hypot(eye[0] - before[0], eye[1] - before[1], eye[2] - before[2]);
         std::copy(eye, eye + 3, camera_eye);
     }

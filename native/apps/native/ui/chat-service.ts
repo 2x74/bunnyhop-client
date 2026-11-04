@@ -37,7 +37,8 @@ export type ChatAction =
         | "jumpStats"
         | "showTriggers"
         | "showClips"
-        | "freecam";
+        | "freecam"
+        | "spectateMenu";
       track?: number;
       weapon?: string;
       weaponId?: number;
@@ -235,7 +236,7 @@ export class NativeChatService {
             },
             spectate: (query) => {
               if (!query) {
-                this.openRoom();
+                emit({ type: "chatAction", action: "spectateMenu" });
                 return;
               }
               const p = player(query);

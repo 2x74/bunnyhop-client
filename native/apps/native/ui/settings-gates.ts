@@ -341,7 +341,7 @@ export const NATIVE_GATES: Readonly<Record<string, Gate>> = {
   "keys/Desktop client/Scoreboard": needs("bind:scoreboard"),
   "keys/Desktop client/Next player (spectating)": needs("bind:spectatorNext"),
   "keys/Desktop client/Previous player (spectating)": needs("bind:spectatorPrevious"),
-  "keys/Desktop client/Spectator camera": needs("bind:spectatorMode"),
+  "keys/Desktop client/Spectate": needs("bind:spectatorMode"),
   "keys/Desktop client/Freecam": needs("bind:freecam"),
   "keys/Desktop client/Show triggers": needs("bind:showTriggers"),
   "keys/Desktop client/Show player clips": needs("bind:showClips"),
