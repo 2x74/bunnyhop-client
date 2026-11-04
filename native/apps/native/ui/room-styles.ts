@@ -28,3 +28,21 @@ export function roomStyleLabel(id: string): string {
 export function roomStyleId(value: unknown): value is string {
   return typeof value === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(value);
 }
+
+interface RoomSocketApi {
+  roomSocketUrl(id: string, version: number, style: string): string;
+}
+
+/**
+ * Room sockets say how many wire styles this build decodes (`wire=`, web api.ts roomSocketUrl since 0.0.36). Without
+ * it the room treats the client as legacy: no live timer or style for Segmented, Infinite and Backwards players, and
+ * Infinite and Backwards read as Normal. The vendored api.ts predates the parameter.
+ */
+export function announceRoomWireStyles(target: RoomSocketApi): void {
+  const vendored = target.roomSocketUrl.bind(target);
+  target.roomSocketUrl = (id, version, style) => {
+    const url = new URL(vendored(id, version, style));
+    url.searchParams.set("wire", String(ROOM_WIRE_STYLES.length));
+    return url.toString();
+  };
+}
