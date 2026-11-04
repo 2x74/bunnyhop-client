@@ -1,7 +1,13 @@
 import { protocolChatText, ChatSuggestionFence, cycleSpectator, resolveRaceCommand } from "./chat-input";
 import { dispatchNativeChat } from "./chat-routing";
 import { api } from "../../web/src/api";
-import { suggestChat, registerChatCommand, type ChatContext, type ReplyOpts } from "../../web/src/chat-commands";
+import {
+  findChatCommand,
+  suggestChat,
+  registerChatCommand,
+  type ChatContext,
+  type ReplyOpts,
+} from "../../web/src/chat-commands";
 import { registerSocialCommands } from "../../web/src/social/commands";
 import { weaponByName } from "../../web/src/weapon-rules";
 import { getPB } from "../../web/src/pb";
@@ -30,7 +36,8 @@ export type ChatAction =
         | "openRoom"
         | "jumpStats"
         | "showTriggers"
-        | "showClips";
+        | "showClips"
+        | "freecam";
       track?: number;
       weapon?: string;
       weaponId?: number;
@@ -53,6 +60,23 @@ export interface NativeChatLine {
 export type NativeChatMessage =
   ChatAction | NativeChatLine | { type: "chatSuggestions"; items: string[]; request: number; input: string };
 const emit = (value: NativeChatMessage) => send(value as unknown as Parameters<typeof send>[0]);
+
+/** !freecam, !fc, !freelook: the host flies the camera while the body gets no input (freecam.hpp). Left out once the
+ * website's own freecam command comes in with an upstream sync, which registers the same names. Returns the way to
+ * take it out again, or null when it wasn't added. */
+export function registerFreecamCommand(): (() => void) | null {
+  if (findChatCommand("freecam")) return null;
+  return registerChatCommand({
+    name: "freecam",
+    aliases: ["fc", "freelook"],
+    where: "both",
+    group: "practice",
+    key: "freecam",
+    help: "freecam",
+    about: "fly the camera away from your body. Your body gets no input and the timer keeps running. Again to go back.",
+    run: () => emit({ type: "chatAction", action: "freecam" }),
+  });
+}
 let registered = false;
 export class NativeChatService {
   private hidden = false;
@@ -95,6 +119,7 @@ export class NativeChatService {
             emit({ type: "chatAction", action: "weapon", weapon: arg.slice(0, 64), weaponId: weaponByName(arg) });
         },
       });
+      registerFreecamCommand();
       registerChatCommand({
         name: "ssj",
         where: "both",

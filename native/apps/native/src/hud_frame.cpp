@@ -75,7 +75,7 @@ void HudFrame::draw_status(const BhCmd &shown, const BhWeaponReport &weapon) con
             shown_notice,
             display_fps,
             prefs.hud && (!viewer.active || viewer.hud),
-            prefs.crosshair,
+            prefs.crosshair && !free_camera,
             viewer.active && !viewer.ui_shown,
             weapon,
             prefs.jump_stats ? hud.ssj_line() : std::string_view(),

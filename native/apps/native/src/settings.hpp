@@ -270,6 +270,8 @@ inline Json default_settings() {
               {"spectatorNext", Json::array()},
               {"spectatorPrevious", Json::array()},
               {"spectatorMode", {"KeyN"}},
+              // A toggle most players never use shouldn't take a key off anyone: !freecam always works.
+              {"freecam", Json::array()},
               {"setStart", {"Digit4"}},
               {"clearStart", Json::array()},
               {"nextWeapon", Json::array()},

@@ -92,6 +92,7 @@
 #include "menu_files.hpp"
 #include "sky_library.hpp"
 #include "menu_messages.hpp"
+#include "free_cameras.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
 #include <algorithm>
@@ -388,6 +389,8 @@ int run(const native::Options &opt) {
     native::SniperZoom scope;
     native::NativeWeaponMenu gun_menu;
     native::NativeTriggerMenu trigger_menu;
+    native::FreeCameras free_cameras;
+    const native::FreeLookInput free_look_input{input_timeline, input, held_codes};
     bool third_person = false, flashlight = false, hide_players = false, show_scores = false;
     try {
         const auto path = cache / "start-points.json";
@@ -668,6 +671,8 @@ int run(const native::Options &opt) {
         viewer.orbit_drag = false;
         if (!core) return;
         if (pending_action != "play") cancel_prefetch();
+        // R / B / M, a style switch, a map or watching someone: back in your eyes, keys released.
+        free_cameras.freecam.end(free_look_input);
         gun_menu.close();
         trigger_menu.close();
         bh_record_end(core.get());
@@ -1257,6 +1262,21 @@ int run(const native::Options &opt) {
                     if (room.spectator_target) third_person = !third_person;
                     return;
                 }
+                if (action == "freecam") {
+                    const bool lesson = tutorial_runner.lesson && tutorial_runner.lesson->is_active();
+                    const native::FreecamPlace place{core != nullptr, lesson || tutorial_practice(), viewer.active};
+                    const bool inspecting = held_action("inspect");
+                    const auto refusal = free_cameras.toggle(place, free_look_input);
+                    if (!refusal.empty()) toast(std::string(refusal));
+                    // An inspect held on the way in lets go there, as the other keys do.
+                    if (free_cameras.freecam.active() && inspecting && core) {
+                        bh_record_inspect(core.get(), 4);
+                        if (renderer) renderer->inspect_held(false);
+                    }
+                    return;
+                }
+                // The body takes no input while freecam flies, so nothing that acts through it.
+                if (free_cameras.freecam.active() && native::freecam_blocks_action(action)) return;
                 if (action == "thirdPerson") {
                     if (viewer.active) {
                         viewer.camera.set_mode(viewer.camera.mode == "eye" ? "chase" : "eye");
@@ -1474,6 +1494,7 @@ int run(const native::Options &opt) {
     auto handle_code = native::RecoverableAction(
             [&](const std::string &code, bool down, bool repeat = false, bool wheel = false, uint64_t stamp = 0) {
                 if (code.empty()) return;
+                if (input_timeline.released_until_keyup(code, down, repeat)) return;
                 if (down && !repeat)
                     for (const char *action : {"chat", "commandChat"})
                         for (const auto &key : input_timeline.binds().codes(action))
@@ -1537,7 +1558,7 @@ int run(const native::Options &opt) {
                     }
                     if (bit) {
                         if (bit == native::attack2 && matching && down && !repeat && core && !viewer.active
-                            && !room.spectator_target) {
+                            && !room.spectator_target && !free_cameras.freecam.active()) {
                             BhWeaponReport weapon{};
                             if (bh_weapon_report(core.get(), &weapon)) scope.secondary(weapon.active);
                         }
@@ -1550,12 +1571,21 @@ int run(const native::Options &opt) {
                 }
                 if (renderer)
                     native_render::surface_tool_key(
-                            *renderer, code, down, repeat, curr, input, !viewer.active && !room.spectator_target, toast
+                            *renderer,
+                            code,
+                            down,
+                            repeat,
+                            curr,
+                            input,
+                            !viewer.active && !room.spectator_target && !free_cameras.freecam.active(),
+                            toast
                     );
                 if (wheel) held_codes.erase(code);
-                const bool inspect = input_timeline.binds().held_action("inspect", held_codes);
+                // Freecam: F flies nothing, so no inspect reaches the view model or the replay's cosmetic trailer.
+                const bool flying = free_cameras.freecam.active();
+                const bool inspect = !flying && input_timeline.binds().held_action("inspect", held_codes);
                 if (renderer) renderer->inspect_held(inspect);
-                if (core && input_timeline.binds().is_bound("inspect", code))
+                if (core && !flying && input_timeline.binds().is_bound("inspect", code))
                     bh_record_inspect(core.get(), down ? 3 : 4);
             },
             toast
@@ -1919,7 +1949,8 @@ int run(const native::Options &opt) {
                     const bool trusted_stamp =
                             native_motion || input_timeline.stamps().source(native::EventStamps::kMotion).trusted;
                     const uint64_t motion_stamp = trusted_stamp ? event.motion.timestamp : received;
-                    if (captured && focused && !chat.active && !viewer.active && !room.spectator_target) {
+                    if (captured && focused && !chat.active && !viewer.active && !room.spectator_target
+                        && !input_timeline.diverted()) {
                         recorder.diagnostics.motion(motion_stamp, received, event.motion.xrel, event.motion.yrel);
                     }
                     if (mouse_diagnostics.active && captured && focused && !chat.active) {
@@ -2048,6 +2079,7 @@ int run(const native::Options &opt) {
                         viewer.camera.zoom_by(std::pow(1.12, -event.wheel.y));
                         break;
                     }
+                    if (captured && !chat.active && event.wheel.y != 0 && free_cameras.wheel(event.wheel.y)) break;
                     if (captured && !chat.active && event.wheel.y != 0)
                         handle_code(event.wheel.y > 0 ? "MWheelUp" : "MWheelDown", true, false, true);
                     break;
@@ -2253,6 +2285,8 @@ int run(const native::Options &opt) {
                             apply_preferences();
                         } else if (action == "raceMenu")
                             race_picker.open(room.display(), zones);
+                        else if (action == "freecam")
+                            act("freecam");
                         else if (action == "lastLj")
                             hud.repeat_long_jump(chat, epoch_ms() / 1000.);
                         else if (action == "jumpStats") {
@@ -3010,6 +3044,7 @@ int run(const native::Options &opt) {
         );
         if (spectator != observed_spectator) {
             if (spectator) {
+                free_cameras.freecam.end(free_look_input);
                 bh_record_end(core.get());
                 recorder.clear(true);
                 run_event(heartbeat.invalidate(native::RunHeartbeat::Reset::start));
@@ -3022,6 +3057,12 @@ int run(const native::Options &opt) {
             } else if (observed_spectator && core && !viewer.active)
                 reset();
             observed_spectator = spectator;
+        }
+        {
+            const bool lesson = tutorial_runner.lesson && tutorial_runner.lesson->is_active();
+            free_cameras.keep_available(
+                    {core != nullptr, lesson || tutorial_practice(), viewer.active}, free_look_input
+            );
         }
         if (const auto ready = restart_guard.frame(
                     epoch_ms(), held_action(restart_guard.action), !captured || chat.active || viewer.active
@@ -3111,7 +3152,8 @@ int run(const native::Options &opt) {
                             core.get(),
                             "Marking timed input recording");
                 }
-                if (!(input.pulse & native::give_mask)) {
+                const bool freecam_on = free_cameras.freecam.active();
+                if (!freecam_on && !(input.pulse & native::give_mask)) {
                     if (const auto give = kept_weapons.next()) {
                         input.pulse = (input.pulse & ~native::weapon_command_mask) | (give << native::give_shift);
                     }
@@ -3132,7 +3174,8 @@ int run(const native::Options &opt) {
                 if (w_release) {
                     require(recorder.input.mark_w_release(core.get()), core.get(), "Marking Release W recording");
                 }
-                cmd = input.command(w_release);
+                // R1: while freecam flies, the body gets the command of a player who let go of everything.
+                cmd = freecam_on ? native::neutral_command(input) : input.command(w_release);
                 if (practice.noclip) {
                     BhSnapshot snapshot{};
                     require(bh_noclip_move(&practice.flight, &cmd, dt, selected_style.c_str()), core.get(),
@@ -3558,6 +3601,11 @@ int run(const native::Options &opt) {
                 );
                 external_camera = true;
             }
+            // Freecam flies on from wherever the view above put the camera.
+            if (!viewer.active && !spectator && !opt.camera) {
+                const auto keys = native::free_look_keys(input_timeline.binds(), held_codes);
+                external_camera |= free_cameras.place(eye, camera_input, keys, input, frame_seconds);
+            }
             // The replay camera does this itself for its in-eye view; flying in noclip there is nothing to stay under.
             if (!viewer.active && !external_camera && (spectator || !practice.noclip))
                 eye[2] = native::clear_eye_z(core.get(), eye[0], eye[1], eye_hull_top, eye[2]);
@@ -3714,6 +3762,7 @@ int run(const native::Options &opt) {
                     gauntlet_good = delta < 0;
                 }
             }
+            free_cameras.hud(hud.extras, input_timeline.binds());
             // The crosshair is sized in CSS pixels, like the website's: the display's scale, not the HUD's.
             hud.set_display_scale(SDL_GetWindowDisplayScale(window.get()));
             const auto area = viewer.hud_area(
@@ -3761,7 +3810,8 @@ int run(const native::Options &opt) {
                     hud_editor,
                     hud_demo,
                     SDL_GetWindowDisplayScale(window.get()),
-                    hud_editor_bind.empty() ? std::string() : native::hud_key_label(hud_editor_bind.front())
+                    hud_editor_bind.empty() ? std::string() : native::hud_key_label(hud_editor_bind.front()),
+                    free_cameras.flying()
             }
                     .draw();
         }

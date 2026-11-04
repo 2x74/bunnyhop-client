@@ -135,6 +135,7 @@ export const NATIVE_BINDS: readonly [keyof typeof DEFAULT_BINDS, string][] = [
   ["spectatorNext", "Next player (spectating)"],
   ["spectatorPrevious", "Previous player (spectating)"],
   ["spectatorMode", "Spectator camera"],
+  ["freecam", "Freecam"],
   ["showTriggers", "Show triggers"],
   ["showClips", "Show player clips"],
 ];

@@ -56,6 +56,8 @@ struct HudFrame {
     HudDemoState &layout_demo;
     float display_scale;
     std::string layout_editor_key;
+    // Freecam: no crosshair, as nothing aims.
+    bool free_camera = false;
 
     void draw() const;
 

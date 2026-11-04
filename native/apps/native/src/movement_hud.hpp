@@ -552,6 +552,8 @@ struct HudExtras {
     HudLabel<64> place;
     std::array<HudLabel<128>, 12> spectators;
     size_t spectator_count = 0;
+    // Freecam's status line, quiet in the practice slot (the run still counts, so not practice's colours).
+    HudLabel<96> freecam_line;
     uint32_t ghost_buttons = 0;
     bool have_ghost = false;
     std::optional<double> personal_best;
@@ -770,7 +772,9 @@ void draw_movement_widgets(
         for (size_t i = 0; i < extras.spectator_count; ++i)
             hud.overlay_text(point[0], point[1] + 20 + float(i) * 18, extras.spectators[i].view(), 12, dim);
     }
-    if (!segmented.empty()) {
+    if (!extras.freecam_line.empty()) {
+        line("practice", extras.freecam_line.view(), width / 2, height / 2 + 28, true);
+    } else if (!segmented.empty()) {
         line("practice", segmented, width / 2, height / 2 + 28, true, cream);
     } else if (practice) {
         label.format("Practice | checkpoint %u", checkpoint);

@@ -263,6 +263,7 @@ export const NATIVE_BIND_ACTIONS = [
   "spectatorNext",
   "spectatorPrevious",
   "spectatorMode",
+  "freecam",
   "paint",
   "paintOnce",
   "clearPaint",
@@ -282,6 +283,8 @@ export const DEFAULT_BINDS: Record<NativeBindAction, readonly string[]> = {
   spectatorNext: [],
   spectatorPrevious: [],
   spectatorMode: ["KeyN"],
+  // A toggle most players never use shouldn't take a key off anyone: !freecam always works.
+  freecam: [],
 };
 /** A settings change: native keys, and website keys the host has added (settings-keys.ts). */
 export type SettingsPatch = Partial<NativeSettings> & Record<string, unknown>;
