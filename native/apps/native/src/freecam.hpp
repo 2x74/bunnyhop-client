@@ -37,12 +37,33 @@ inline std::string_view freecam_unavailable(const FreecamPlace &place) {
 }
 
 // Bound actions that would act through the body: they do nothing while the camera flies. Restarts and style switches
-// still work, and end it.
+// still work, and end it. The practice binds go through freecam_blocks_practice like every other way to ask.
 inline bool freecam_blocks_action(std::string_view action) {
-    static constexpr std::array<std::string_view, 21> blocked = {
-            "inspect",    "setStart", "clearStart", "thirdPerson", "practice",  "noclip",     "cpSave",
-            "cpTeleport", "cpPrev",   "cpNext",     "giveUsp",     "giveGlock", "gunMenu",    "slot1",
-            "slot2",      "slot3",    "lastWeapon", "drop",        "reload",    "nextWeapon", "prevWeapon"
+    static constexpr std::array<std::string_view, 15> blocked = {
+            "inspect",
+            "setStart",
+            "clearStart",
+            "thirdPerson",
+            "giveUsp",
+            "giveGlock",
+            "gunMenu",
+            "slot1",
+            "slot2",
+            "slot3",
+            "lastWeapon",
+            "drop",
+            "reload",
+            "nextWeapon",
+            "prevWeapon"
+    };
+    return std::find(blocked.begin(), blocked.end(), action) != blocked.end();
+}
+
+// Practice actions that move, stop or set the body (practice mode, checkpoints, noclip), whether a bind, a chat
+// command or the checkpoint menu asks. The menu itself and Keep velocity only change what's on screen or saved.
+inline bool freecam_blocks_practice(std::string_view action) {
+    static constexpr std::array<std::string_view, 8> blocked = {
+            "toggle", "on", "off", "save", "tele", "prev", "next", "noclip"
     };
     return std::find(blocked.begin(), blocked.end(), action) != blocked.end();
 }
@@ -88,6 +109,12 @@ public:
             line_.format("Freecam \xc2\xb7 %.0f u/s \xc2\xb7 %s to go back", speed, back.c_str());
         }
         return line_.view();
+    }
+
+    // The toast for a practice action asked while flying. |bound_code| is the freecam bind's first key, if any.
+    static std::string practice_refusal(std::string_view bound_code) {
+        const std::string back = bound_code.empty() ? std::string("!freecam") : hud_key_label(bound_code);
+        return "Your body takes no input in freecam. " + back + " to go back.";
     }
 
 private:

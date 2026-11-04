@@ -42,7 +42,8 @@ public:
             bool menu_visible,
             bool tutorial_practice
     );
-    // Once per simulated tick (not during replay playback): samples your movement and sends a batch when one is due.
+    // Once per simulated tick (not during replay playback): samples your movement and keeps a batch when one is due.
+    // It only copies into fixed buffers; send_poses() writes and sends the batches once the frame's ticks are done.
     void publish_tick(
             MenuWebView *menu,
             bool menu_ready,
@@ -54,9 +55,13 @@ public:
             const BhWeaponReport &weapon,
             const std::string &active_style
     );
+    // Once a frame, after its ticks: hands the batches that came due to the room.
+    void send_poses(MenuWebView *menu, bool menu_ready, const std::string &map_id);
 
 private:
     RoomPoseBatcher poses_;
+    RoomPoseOutbox pose_outbox_;
+    RoomPoseScript pose_script_;
     uint64_t pose_generation_ = 0;
     Clock::time_point presence_time{};
     std::string presence_map;

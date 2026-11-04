@@ -99,6 +99,7 @@ void RoomBridge::publish_tick(
 ) {
     if (room.generation != pose_generation_) {
         poses_.clear();
+        pose_outbox_.clear();
         pose_generation_ = room.generation;
     }
     const bool sending = menu && menu_ready && !spectator && !room.id.empty() && room.map == map_id;
@@ -116,9 +117,18 @@ void RoomBridge::publish_tick(
     auto meta = room_pose_meta(run_state, curr.tick, active_style);
     meta.weapon = weapon.active;
     meta.silenced = weapon.silencer != 0;
-    const auto message = room_pose_message(room.generation, room.id, map_id, poses_.samples(), meta);
-    menu->evaluate_js("window.bunnyhopNativeMenu?.onRoomPose?.(" + message.dump() + ")");
+    pose_outbox_.add(room.generation, poses_.samples(), meta);
     poses_.clear();
+}
+
+void RoomBridge::send_poses(MenuWebView *menu, bool menu_ready, const std::string &map_id) {
+    const bool sending = menu && menu_ready && !room.id.empty() && room.map == map_id;
+    for (const auto &batch : pose_outbox_.batches()) {
+        // A batch from before a room change belongs to a room you are no longer in.
+        if (sending && batch.generation == room.generation)
+            menu->evaluate_js(pose_script_.write(batch.generation, room.id, map_id, batch));
+    }
+    pose_outbox_.clear();
 }
 
 }  // namespace native

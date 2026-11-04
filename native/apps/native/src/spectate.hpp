@@ -47,7 +47,7 @@ public:
     void toggle_chase(const FreeLookInput &controls) { set(mode_ == Mode::chase ? Mode::eye : Mode::chase, controls); }
 
     // Whether a key changes the camera: Space or F. In free look a movement key flies instead (Space rises), and F
-    // still changes the camera unless it is a movement key too.
+    // still changes the camera unless it is a movement key too; then !freecam is the way back (web net/mp.ts).
     bool changes_camera(std::string_view code, const BindTable &binds) const {
         if (code != "Space" && code != "KeyF") return false;
         return mode_ != Mode::free || !binds.of(std::string(code));

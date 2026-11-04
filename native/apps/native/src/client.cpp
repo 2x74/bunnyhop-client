@@ -93,6 +93,7 @@
 #include "sky_library.hpp"
 #include "menu_messages.hpp"
 #include "free_cameras.hpp"
+#include "numbered_menus.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
 #include <algorithm>
@@ -478,6 +479,7 @@ int run(const native::Options &opt) {
     native::MovementFeedback feedback;
     native::TurnAdmission turn_admission;
     native::PracticeController practice;
+    native::NumberedMenus numbered_menus{gun_menu, trigger_menu, race_picker, free_cameras.picker, practice.menu_open};
     native::LeaveHold leave_hold;
     std::string gauntlet_id, gauntlet_map;
     nlohmann::json gauntlet_progress;
@@ -669,10 +671,10 @@ int run(const native::Options &opt) {
         viewer.controls = {};
         viewer.controls.pending.reset();
         viewer.orbit_drag = false;
+        // R / B / M, a style switch, a map or watching someone: back in your eyes, keys released.
+        free_cameras.stop(free_look_input);
         if (!core) return;
         if (pending_action != "play") cancel_prefetch();
-        // R / B / M, a style switch, a map or watching someone: back in your eyes, keys released.
-        free_cameras.freecam.end(free_look_input);
         gun_menu.close();
         trigger_menu.close();
         bh_record_end(core.get());
@@ -759,6 +761,11 @@ int run(const native::Options &opt) {
                     toast(unavailable);
                     return;
                 }
+                if (free_cameras.freecam.active() && native::freecam_blocks_practice(action)) {
+                    const auto &codes = input_timeline.binds().codes("freecam");
+                    toast(native::Freecam::practice_refusal(codes.empty() ? std::string_view() : codes.front()));
+                    return;
+                }
                 BhRunState timing{};
                 bh_run_state(core.get(), &timing);
                 practice.segment_status(bh_segment_loads(core.get()));
@@ -771,6 +778,7 @@ int run(const native::Options &opt) {
                 }
                 if (action == "menu") {
                     practice.menu_open = !practice.menu_open;
+                    numbered_menus.opened(native::NumberedMenus::Menu::checkpoints);
                     return;
                 }
                 if (action == "keepVelocity") {
@@ -918,6 +926,8 @@ int run(const native::Options &opt) {
         menu_state.reset();
         room.close();
         room_modes.close(room.generation);
+        numbered_menus.close_all();
+        free_cameras.stop(free_look_input);
         observed_spectator.reset();
     };
     auto apply_room_mode = [&](const native::RoomModeAction &action) {
@@ -1263,6 +1273,7 @@ int run(const native::Options &opt) {
                         free_cameras.picker.close();
                     else if (!room.id.empty() && !free_cameras.picker.show(room.display(), room.spectator_target))
                         chat.push("Nobody to spectate yet.", "", "local", epoch_ms() / 1000.);
+                    numbered_menus.opened(native::NumberedMenus::Menu::spectate);
                     return;
                 }
                 if (action == "freecam") {
@@ -1337,6 +1348,7 @@ int run(const native::Options &opt) {
                 }
                 if (action == "gunMenu") {
                     gun_menu.toggle();
+                    numbered_menus.opened(native::NumberedMenus::Menu::guns);
                     return;
                 }
                 if (action == "showTriggers" || action == "showClips") {
@@ -1510,6 +1522,7 @@ int run(const native::Options &opt) {
                                 open_chat(std::string(action) == "commandChat");
                                 return;
                             }
+                if (numbered_menus.closes_guns(code, down, repeat, input_timeline.binds())) return;
                 if (const auto action = trigger_menu.key(code, down, repeat)) {
                     if (!action->empty()) act(std::string(*action));
                     return;
@@ -1557,6 +1570,7 @@ int run(const native::Options &opt) {
                         return;
                     }
                 }
+                if (numbered_menus.owns(code, down, room.vote_display.count != 0)) return;
                 if (room.spectator_target && down && !repeat
                     && free_cameras.spectator.changes_camera(code, input_timeline.binds())) {
                     free_cameras.spectator.cycle(free_look_input);
@@ -1867,6 +1881,7 @@ int run(const native::Options &opt) {
                                     close_chat();
                                     if (native::race_menu_command(text)) {
                                         race_picker.open(room.display(), zones);
+                                        numbered_menus.opened(native::NumberedMenus::Menu::race);
                                         if (!race_picker.count) toast("No other players to race.");
                                     } else if (!text.empty() && menu && menu_ready)
                                         menu->evaluate_js(
@@ -1944,7 +1959,11 @@ int run(const native::Options &opt) {
                             viewer.controls.pending = viewer.session.range.clamp(target);
                             break;
                         }
-                        if (event.key.scancode == SDL_SCANCODE_ESCAPE) show_menu(!menu || !menu->visible());
+                        if (event.key.scancode == SDL_SCANCODE_ESCAPE) {
+                            // Esc pauses, and the guns menu doesn't wait behind the pause (web weapon-commands.ts).
+                            gun_menu.close();
+                            show_menu(!menu || !menu->visible());
+                        }
                     }
                     if (captured) {
                         const auto code = native::key_code(event.key.scancode);
@@ -2295,17 +2314,19 @@ int run(const native::Options &opt) {
                             }
                         } else if (action == "scores")
                             show_scores = !show_scores;
-                        else if (action == "triggerMenu")
+                        else if (action == "triggerMenu") {
                             trigger_menu.toggle();
-                        else if (action == "movementStat") {
+                            numbered_menus.opened(native::NumberedMenus::Menu::triggers);
+                        } else if (action == "movementStat") {
                             preferences = native::patch_settings(
                                     preferences, native::movement_stat_patch(preferences, message)
                             );
                             json_writer.write(cache / "settings.json", preferences);
                             apply_preferences();
-                        } else if (action == "raceMenu")
+                        } else if (action == "raceMenu") {
                             race_picker.open(room.display(), zones);
-                        else if (action == "freecam")
+                            numbered_menus.opened(native::NumberedMenus::Menu::race);
+                        } else if (action == "freecam")
                             act("freecam");
                         else if (action == "spectateMenu") {
                             if (!free_cameras.picker.open()) act("spectatorMode");
@@ -2343,9 +2364,10 @@ int run(const native::Options &opt) {
                                 reset();
                             } else if (action == "weapon") {
                                 const auto weapon = message.value("weapon", std::string());
-                                if (weapon == "menu" || weapon == "guns")
+                                if (weapon == "menu" || weapon == "guns") {
                                     gun_menu.show();
-                                else {
+                                    numbered_menus.opened(native::NumberedMenus::Menu::guns);
+                                } else {
                                     const unsigned id = message.value(
                                             "weaponId",
                                             weapon == "knife"   ? 1u
@@ -3064,8 +3086,12 @@ int run(const native::Options &opt) {
         room_bridge.update_presence(
                 now, map_id, active_style, viewer.active, captured, menu && menu->visible(), tutorial_practice()
         );
+        {
+            const bool lesson = tutorial_runner.lesson && tutorial_runner.lesson->is_active();
+            const native::FreecamPlace place{core != nullptr, lesson || tutorial_practice(), viewer.active};
+            free_cameras.follow(observed_spectator, spectator, place, free_look_input);
+        }
         if (spectator != observed_spectator) {
-            free_cameras.watching(observed_spectator.has_value(), spectator.has_value(), free_look_input);
             native::announce_watching(chat, room, observed_spectator, spectator, input_timeline.binds(), epoch_ms());
             if (spectator) {
                 bh_record_end(core.get());
@@ -3080,12 +3106,6 @@ int run(const native::Options &opt) {
             } else if (observed_spectator && core && !viewer.active)
                 reset();
             observed_spectator = spectator;
-        }
-        {
-            const bool lesson = tutorial_runner.lesson && tutorial_runner.lesson->is_active();
-            free_cameras.keep_available(
-                    {core != nullptr, lesson || tutorial_practice(), viewer.active}, free_look_input
-            );
         }
         if (const auto ready = restart_guard.frame(
                     epoch_ms(), held_action(restart_guard.action), !captured || chat.active || viewer.active
@@ -3398,6 +3418,7 @@ int run(const native::Options &opt) {
                 break;
             }
         }
+        room_bridge.send_poses(menu.get(), menu_ready, map_id);
         hud.publish_movement_chat(chat, epoch_ms() / 1000.);
         frame_diagnostics.mark(native::FrameDiagnostics::kSimulation, SDL_GetTicksNS());
         frame_diagnostics.input(input_timeline.queue());
