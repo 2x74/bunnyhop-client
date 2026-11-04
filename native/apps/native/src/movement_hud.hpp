@@ -97,6 +97,8 @@ struct HudPreferences {
     unsigned ssj_interval = 6;
     unsigned trainer_smoothing = 8;
     bool ssj_chat = false;
+    // Chat lines only for jumps with at least this gain (%); 0 is every jump. The HUD element shows every jump.
+    unsigned ssj_min_gain = 0;
     bool first_jump_chat = false;
     bool long_jump = false;
     bool long_jump_chat = true;
@@ -167,6 +169,7 @@ struct HudPreferences {
         result.ssj_interval = settings.at("jumpStatsInterval");
         result.trainer_smoothing = settings.at("strafeTrainerSmoothing");
         result.ssj_chat = settings.at("hudSsjChat");
+        result.ssj_min_gain = settings.at("hudSsjMinGain");
         result.jhud = read_jhud_prefs(settings);
         result.first_jump_chat = settings.at("hudMovementFjtChat");
         result.long_jump = settings.at("hudMovementLj");
@@ -544,6 +547,15 @@ inline Json movement_stat_patch(const Json &settings, const Json &message) {
     layout[id] = std::move(place);
     Json patch = {{"hudLayoutWeb", std::move(layout)}};
     if (stat == "lj") patch["hudMovementLj"] = on;
+    return patch;
+}
+
+// !ssj on / off / N (ui/chat-service.ts ssjCommand): the chat line, and with a number the least gain it shows.
+inline Json ssj_chat_patch(const Json &message) {
+    if (!message.contains("on") || !message["on"].is_boolean())
+        throw std::runtime_error("Jump stats chat must be on or off");
+    Json patch = {{"hudSsjChat", message["on"]}};
+    if (message.contains("minGain")) patch["hudSsjMinGain"] = message["minGain"];
     return patch;
 }
 

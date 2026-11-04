@@ -563,7 +563,7 @@ public:
         const auto labels = native::ssj_labels(report, prefs_.ssj_fields);
         ssj_line_ = labels.hud;
         ssj_chat_line_ = labels.chat;
-        ssj_pending_ = prefs_.ssj_chat;
+        ssj_pending_ = prefs_.ssj_chat && native::ssj_passes_gain(report.gain, prefs_.ssj_min_gain);
     }
 
     void publish_movement_chat(native::Chat &chat, double now) {

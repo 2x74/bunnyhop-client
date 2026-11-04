@@ -2291,6 +2291,10 @@ int run(const native::Options &opt) {
                             );
                             json_writer.write(cache / "settings.json", preferences);
                             apply_preferences();
+                        } else if (action == "ssjChat") {
+                            preferences = native::patch_settings(preferences, native::ssj_chat_patch(message));
+                            json_writer.write(cache / "settings.json", preferences);
+                            apply_preferences();
                         } else if (action == "raceMenu")
                             race_picker.open(room.display(), zones);
                         else if (action == "freecam")

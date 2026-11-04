@@ -49,7 +49,9 @@ export type ChatAction =
       type: "chatAction";
       action: "paint" | "clearPaint" | "paintOptions" | "measure" | "clearMeasure" | "lastLj" | "triggerMenu";
     }
-  | { type: "chatAction"; action: "movementStat"; stat: "offsets" | "fjt" | "lj" | "jhud"; on?: boolean };
+  | { type: "chatAction"; action: "movementStat"; stat: "offsets" | "fjt" | "lj" | "jhud"; on?: boolean }
+  /** The jump stats chat line on or off, and the least gain (0-100 %) a jump needs for a line. */
+  | { type: "chatAction"; action: "ssjChat"; on: boolean; minGain?: number };
 export interface NativeChatLine {
   type: "chatLine";
   text: string;
@@ -78,6 +80,34 @@ export function registerFreecamCommand(): (() => void) | null {
     run: () => emit({ type: "chatAction", action: "freecam" }),
   });
 }
+export type SsjCommand =
+  { open: true } | { action: Extract<ChatAction, { action: "ssjChat" }>; reply: string } | { error: string };
+
+/**
+ * `!ssj [on|off|gain %]`, as the website's (ssj/index.ts): alone it opens the jump stats settings, on / off switch the
+ * chat line, and a number turns the line on for jumps with at least that gain.
+ */
+export function ssjCommand(arg: string): SsjCommand {
+  const value = arg.trim().toLowerCase().replace(/%$/, "");
+  if (!value) return { open: true };
+  if (value === "on" || value === "off") {
+    const on = value === "on";
+    return {
+      action: { type: "chatAction", action: "ssjChat", on },
+      reply: on ? "Jump stats on in chat." : "Jump stats off in chat.",
+    };
+  }
+  const gain = Number(value);
+  if (!/^\d+(\.\d+)?$/.test(value) || !(gain >= 0 && gain <= 100))
+    return { error: "Usage: !ssj [on|off|gain %], e.g. !ssj 80" };
+  const minGain = Math.round(gain);
+  return {
+    action: { type: "chatAction", action: "ssjChat", on: true, minGain },
+    reply:
+      minGain > 0 ? `Jump stats in chat: only jumps with ${minGain}% gain or more.` : "Jump stats in chat: every jump.",
+  };
+}
+
 let registered = false;
 export class NativeChatService {
   private hidden = false;
@@ -123,10 +153,19 @@ export class NativeChatService {
       registerFreecamCommand();
       registerChatCommand({
         name: "ssj",
+        args: "[on|off|gain %]",
         where: "both",
         group: "more",
-        help: "toggle jump stats",
-        run: () => emit({ type: "chatAction", action: "jumpStats" }),
+        help: "jump stats",
+        about:
+          "speed, gain and sync on your 6th jump, as a chat line. !ssj opens its settings; !ssj on or off switches the line; !ssj 80 shows only jumps with 80% gain or more, !ssj 0 every jump.",
+        run: (ctx, arg) => {
+          const command = ssjCommand(arg);
+          if ("open" in command) return emit({ type: "chatAction", action: "jumpStats" });
+          if ("error" in command) return ctx.reply(command.error);
+          emit(command.action);
+          ctx.reply(command.reply);
+        },
       });
       registerChatCommand({
         name: "jhud",

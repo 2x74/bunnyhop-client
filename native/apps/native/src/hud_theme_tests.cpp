@@ -1005,6 +1005,32 @@ void test_jhud_chat_switch() {
     assert(settings.at("hudLayoutWeb").at("jhud").at("on") == false);
 }
 
+// !ssj 80: chat lines only for jumps with 80% gain or more, as the website's ssjPassesGain. !ssj 0 is every jump.
+void test_ssj_gain_filter() {
+    auto settings = native::default_settings();
+    assert(native::HudPreferences::from(settings).ssj_min_gain == 0);
+    settings = native::patch_settings(settings, native::ssj_chat_patch({{"on", true}, {"minGain", 80}}));
+    const auto prefs = native::HudPreferences::from(settings);
+    assert(prefs.ssj_chat && prefs.ssj_min_gain == 80);
+    settings = native::patch_settings(settings, native::ssj_chat_patch({{"on", false}}));
+    assert(!native::HudPreferences::from(settings).ssj_chat && settings.at("hudSsjMinGain") == 80);
+    for (const auto &bad :
+         {native::Json{{"on", true}, {"minGain", 101}},
+          native::Json{{"on", true}, {"minGain", 12.5}},
+          native::Json{{"minGain", 50}}}) {
+        bool refused = false;
+        try {
+            native::patch_settings(settings, native::ssj_chat_patch(bad));
+        } catch (const std::exception &) {
+            refused = true;
+        }
+        assert(refused);
+    }
+    assert(native::ssj_passes_gain(12.5f, 0) && native::ssj_passes_gain(std::nullopt, 0));
+    assert(native::ssj_passes_gain(80.f, 80) && !native::ssj_passes_gain(79.99f, 80));
+    assert(!native::ssj_passes_gain(std::nullopt, 80) && native::ssj_passes_gain(91.2f, 90));
+}
+
 void test_layout_codes() {
     const auto defaults = native::default_settings();
     assert(native::encode_hud_layout(defaults) == web_classic_code);
@@ -1070,6 +1096,7 @@ int main() {
     test_new_elements_in_old_layouts();
     test_presets_keep_personal_elements();
     test_jhud_chat_switch();
+    test_ssj_gain_filter();
     test_layouts_and_options();
     test_scoreboard_and_names();
     test_merged_menu_contracts();
