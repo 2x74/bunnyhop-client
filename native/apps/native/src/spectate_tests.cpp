@@ -83,7 +83,7 @@ void test_hint_names_the_way_out() {
 void test_free_look_starts_from_the_last_view() {
     Controls controls;
     native::FreeCameras cameras;
-    cameras.watching(false, true, controls.free_look);
+    cameras.follow(std::nullopt, 3, {true, false, false}, controls.free_look);
     float chase_eye[3] = {100, 200, 300};
     native::Input view;
     view.set_angles(10, 45);
@@ -103,16 +103,123 @@ void test_watching_ends_freecam() {
     native::FreeCameras cameras;
     assert(cameras.toggle(false, {true, false, false}, controls.free_look).empty());
     assert(cameras.freecam.active() && cameras.flying(false));
-    cameras.watching(false, true, controls.free_look);
+    cameras.follow(std::nullopt, 3, {true, false, false}, controls.free_look);
     assert(!cameras.freecam.active() && !controls.timeline.diverted() && cameras.spectator.mode() == Mode::eye);
     // !freecam while watching is free look.
     assert(cameras.toggle(true, {true, false, false}, controls.free_look).empty());
     assert(cameras.spectator.free() && !cameras.freecam.active());
-    cameras.watching(true, false, controls.free_look);
+    cameras.follow(3, std::nullopt, {true, false, false}, controls.free_look);
     assert(!controls.timeline.diverted());
     assert(cameras.toggle(false, {true, true, false}, controls.free_look)
            == "Freecam isn't available in the tutorial.");
     assert(!cameras.freecam.active());
+}
+
+// The client loop's side of the cameras: once a frame they follow whom you watch, and leaving the map or restarting
+// stops them (client.cpp leave_map, reset).
+struct ClientFrames {
+    Controls controls;
+    native::FreeCameras cameras;
+    std::optional<unsigned> observed;
+    native::FreecamPlace place{true, false, false};
+
+    void frame(std::optional<unsigned> watched) {
+        cameras.follow(observed, watched, place, controls.free_look);
+        observed = watched;
+    }
+
+    void leave_map() {
+        cameras.stop(controls.free_look);
+        observed.reset();
+        place.map_loaded = false;
+    }
+
+    void watch_in_free_look() {
+        frame(3);
+        cameras.spectator.cycle(controls.free_look);
+        cameras.spectator.cycle(controls.free_look);
+        assert(cameras.spectator.free() && controls.timeline.diverted());
+    }
+
+    // Back in your own body: W and the mouse reach the next tick.
+    void assert_input_is_yours() {
+        assert(!controls.timeline.diverted() && !cameras.flying(observed.has_value()));
+        assert(cameras.spectator.mode() == Mode::eye && !cameras.freecam.active());
+        auto &queue = controls.timeline.queue();
+        const size_t edges = queue.pending_edges();
+        const double motion = queue.pending_x;
+        controls.timeline.key(controls.held, "KeyW", true, false, 0, 0);
+        controls.timeline.motion(controls.input, 0, 0, 7, 0);
+        assert(queue.pending_edges() == edges + 1 && queue.pending_x == motion + 7);
+        controls.timeline.key(controls.held, "KeyW", false, false, 0, 0);
+    }
+};
+
+void test_every_way_out_of_watching_gives_the_input_back() {
+    // Leaving the room, a disconnect, R / B / M, the Esc menu's Stop and a map change all reach the client as nobody
+    // watched any more.
+    {
+        ClientFrames client;
+        client.watch_in_free_look();
+        client.frame(std::nullopt);
+        client.assert_input_is_yours();
+    }
+    // Leaving to the main menu forgets the watched player, so the next frame sees no change; then a solo map loads.
+    {
+        ClientFrames client;
+        client.watch_in_free_look();
+        client.leave_map();
+        client.frame(std::nullopt);
+        client.assert_input_is_yours();
+        client.place.map_loaded = true;
+        client.frame(std::nullopt);
+        client.assert_input_is_yours();
+    }
+    // Even with the watched player forgotten and no stop, the free look ends on the next frame.
+    {
+        ClientFrames client;
+        client.watch_in_free_look();
+        client.observed.reset();
+        client.frame(std::nullopt);
+        client.assert_input_is_yours();
+    }
+}
+
+void test_every_way_out_of_freecam_gives_the_input_back() {
+    const auto flying = [](ClientFrames &client) {
+        assert(client.cameras.toggle(false, client.place, client.controls.free_look).empty());
+        assert(client.cameras.freecam.active() && client.controls.timeline.diverted());
+    };
+    {
+        ClientFrames client;
+        flying(client);
+        client.leave_map();
+        client.frame(std::nullopt);
+        client.assert_input_is_yours();
+    }
+    // A restart (R / B / M, a style switch) stops the cameras as leaving does.
+    {
+        ClientFrames client;
+        flying(client);
+        client.cameras.stop(client.controls.free_look);
+        client.assert_input_is_yours();
+    }
+    // The map unloads, or a replay or tutorial lesson opens, without a stop.
+    for (const native::FreecamPlace place :
+         {native::FreecamPlace{false, false, false}, {true, true, false}, {true, false, true}}) {
+        ClientFrames client;
+        flying(client);
+        client.place = place;
+        client.frame(std::nullopt);
+        client.assert_input_is_yours();
+    }
+    // Starting to watch someone.
+    {
+        ClientFrames client;
+        flying(client);
+        client.frame(3);
+        assert(!client.cameras.freecam.active() && !client.controls.timeline.diverted());
+    }
 }
 
 native::HudScoreboard room_of(std::initializer_list<std::tuple<unsigned, const char *, bool, bool>> rows) {
@@ -182,6 +289,8 @@ int main() {
     test_hint_names_the_way_out();
     test_free_look_starts_from_the_last_view();
     test_watching_ends_freecam();
+    test_every_way_out_of_watching_gives_the_input_back();
+    test_every_way_out_of_freecam_gives_the_input_back();
     test_spectate_menu();
     test_chat_lines();
     std::puts("spectate passed");

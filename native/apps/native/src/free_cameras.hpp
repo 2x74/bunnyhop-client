@@ -34,19 +34,26 @@ struct FreeCameras {
         return refusal;
     }
 
-    // Once a frame: freecam goes off where it can't stay on (a replay opened, a tutorial lesson started).
-    void keep_available(const FreecamPlace &place, const FreeLookInput &controls) {
+    // Once a frame, with whom you watched last frame and whom you watch now. Starting to watch ends freecam and starts
+    // in-eye; switching players keeps the camera. A camera never outlives its reason, even when the change went unseen
+    // (leaving the map forgets the watched player before this runs), so its hold on the mouse and keys goes with it.
+    void
+    follow(std::optional<unsigned> watched_before,
+           std::optional<unsigned> watched_now,
+           const FreecamPlace &place,
+           const FreeLookInput &controls) {
+        if (watched_now && !watched_before) freecam.end(controls);
+        if (watched_now)
+            spectator.watch(!watched_before, controls);
+        else
+            spectator.stop(controls);
         if (freecam.active() && !freecam_unavailable(place).empty()) freecam.end(controls);
     }
 
-    // The watched player changed. Starting to watch ends freecam and starts in-eye; switching players keeps the camera.
-    void watching(bool was_watching, bool watching_now, const FreeLookInput &controls) {
-        if (!watching_now) {
-            spectator.stop(controls);
-            return;
-        }
-        if (!was_watching) freecam.end(controls);
-        spectator.watch(!was_watching, controls);
+    // Leaving the map or restarting: back in your eyes, keys released.
+    void stop(const FreeLookInput &controls) {
+        freecam.end(controls);
+        spectator.stop(controls);
     }
 
     // Whether a camera flies now (the mouse and keys are its).

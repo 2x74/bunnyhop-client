@@ -669,10 +669,10 @@ int run(const native::Options &opt) {
         viewer.controls = {};
         viewer.controls.pending.reset();
         viewer.orbit_drag = false;
+        // R / B / M, a style switch, a map or watching someone: back in your eyes, keys released.
+        free_cameras.stop(free_look_input);
         if (!core) return;
         if (pending_action != "play") cancel_prefetch();
-        // R / B / M, a style switch, a map or watching someone: back in your eyes, keys released.
-        free_cameras.freecam.end(free_look_input);
         gun_menu.close();
         trigger_menu.close();
         bh_record_end(core.get());
@@ -918,6 +918,7 @@ int run(const native::Options &opt) {
         menu_state.reset();
         room.close();
         room_modes.close(room.generation);
+        free_cameras.stop(free_look_input);
         observed_spectator.reset();
     };
     auto apply_room_mode = [&](const native::RoomModeAction &action) {
@@ -3064,8 +3065,12 @@ int run(const native::Options &opt) {
         room_bridge.update_presence(
                 now, map_id, active_style, viewer.active, captured, menu && menu->visible(), tutorial_practice()
         );
+        {
+            const bool lesson = tutorial_runner.lesson && tutorial_runner.lesson->is_active();
+            const native::FreecamPlace place{core != nullptr, lesson || tutorial_practice(), viewer.active};
+            free_cameras.follow(observed_spectator, spectator, place, free_look_input);
+        }
         if (spectator != observed_spectator) {
-            free_cameras.watching(observed_spectator.has_value(), spectator.has_value(), free_look_input);
             native::announce_watching(chat, room, observed_spectator, spectator, input_timeline.binds(), epoch_ms());
             if (spectator) {
                 bh_record_end(core.get());
@@ -3080,12 +3085,6 @@ int run(const native::Options &opt) {
             } else if (observed_spectator && core && !viewer.active)
                 reset();
             observed_spectator = spectator;
-        }
-        {
-            const bool lesson = tutorial_runner.lesson && tutorial_runner.lesson->is_active();
-            free_cameras.keep_available(
-                    {core != nullptr, lesson || tutorial_practice(), viewer.active}, free_look_input
-            );
         }
         if (const auto ready = restart_guard.frame(
                     epoch_ms(), held_action(restart_guard.action), !captured || chat.active || viewer.active
